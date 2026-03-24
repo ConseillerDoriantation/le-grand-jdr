@@ -2366,8 +2366,7 @@ async admin() {
       </div>
     </div>
   </div>`;
-}
-
+},
 
 // ─── INFORMATIONS ─────────────────────────────
 async informations() {
@@ -4487,8 +4486,7 @@ function openBestiaryModal(item) {
       <div class="form-group"><label>Vit.</label><input type="number" class="input-field" id="bs-vit" value="${item?.vitesse||3}"></div>
     </div>
     <div class="form-group"><label>Attaques (une par ligne: Nom|Dégâts|Effet)</label>
-      <textarea class="input-field" id="bs-attaques" rows="4" placeholder="Morsure|1d6+Fo|Poison&#10;Griffe|1d4|—">${(item?.attaques||[]).map(a=>`${a.nom}|${a.degats}|${a.effet}`).join('
-')}</textarea>
+      <textarea class="input-field" id="bs-attaques" rows="4" placeholder="Morsure|1d6+Fo|Poison&#10;Griffe|1d4|—">${(item?.attaques||[]).map(a=>`${a.nom}|${a.degats}|${a.effet}`).join('\n')}</textarea>
     </div>
     <div class="form-group"><label>Traits spéciaux</label><textarea class="input-field" id="bs-traits" rows="2">${item?.traits||''}</textarea></div>
     <div class="form-group"><label>Butins</label><input class="input-field" id="bs-butins" value="${item?.butins||''}"></div>
@@ -4498,8 +4496,7 @@ function openBestiaryModal(item) {
 
 async function saveBestiary(id) {
   const attaquesRaw = document.getElementById('bs-attaques')?.value||'';
-  const attaques = attaquesRaw.split('
-').filter(Boolean).map(line=>{
+  const attaques = attaquesRaw.split('\n').filter(Boolean).map(line=>{
     const [nom,degats,effet] = line.split('|');
     return {nom:nom?.trim()||'?', degats:degats?.trim()||'?', effet:effet?.trim()||''};
   });
