@@ -437,6 +437,19 @@ select.input-field, select.input-sm {
   margin:1.5rem 0;
 }
 
+/* Vital secondary (CA, Vit, Deck) */
+.vital-box-secondary { display:flex; flex-direction:column; justify-content:center; }
+.vital-secondary-row { display:flex; gap:0.5rem; justify-content:center; margin-bottom:0.2rem; }
+.vital-secondary-item { text-align:center; flex:1; }
+.vital-secondary-val {
+  font-size:1.1rem; font-weight:700; color:var(--gold);
+  line-height:1.2;
+}
+@media(max-width:640px) {
+  .vital-secondary-row { gap:0.3rem; }
+  .vital-secondary-val { font-size:0.95rem; }
+}
+
 /* SCROLLBAR */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-track { background:var(--bg-deep); }
@@ -1063,6 +1076,56 @@ select.input-field, select.input-sm { cursor:pointer; }
 /* DIVIDER */
 .divider { border:none; border-top:1px solid var(--border); margin:1.5rem 0; }
 
+/* Photo du personnage */
+.char-header-layout { display:flex; gap:1.2rem; align-items:flex-start; margin-bottom:1rem; }
+.char-vitals-col { flex:1; min-width:0; }
+.char-vitals { display:grid; grid-template-columns:repeat(4,1fr); gap:0.6rem; }
+.char-photo-wrap { position:relative; flex-shrink:0; width:120px; height:120px; }
+.char-photo {
+  width:120px; height:120px; border-radius:12px; overflow:hidden;
+  background:rgba(255,255,255,0.04); border:2px solid var(--border);
+  display:flex; align-items:center; justify-content:center; transition:border-color 0.2s;
+}
+.char-photo:hover { border-color:rgba(226,185,111,0.4); }
+.char-photo img { width:100%; height:100%; object-fit:cover; display:block; }
+.char-photo-placeholder {
+  display:flex; flex-direction:column; align-items:center;
+  justify-content:center; width:100%; height:100%;
+  color:var(--text-dim); gap:0.2rem; font-size:0.7rem;
+}
+.char-photo-delete {
+  position:absolute; top:-6px; right:-6px; width:20px; height:20px;
+  border-radius:50%; background:#c0392b; border:none; color:white;
+  font-size:0.65rem; cursor:pointer; display:flex; align-items:center;
+  justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,0.4); transition:all 0.15s;
+}
+.char-photo-delete:hover { background:#e74c3c; transform:scale(1.1); }
+.cropper-container {
+  position:relative; overflow:hidden; border-radius:8px; background:#111;
+  touch-action:none; user-select:none; width:100%; aspect-ratio:1/1; cursor:grab;
+}
+.cropper-container:active { cursor:grabbing; }
+.cropper-img { position:absolute; transform-origin:0 0; pointer-events:none; display:block; }
+.cropper-overlay { position:absolute; inset:0; pointer-events:none; border:2px solid rgba(226,185,111,0.7); border-radius:8px; }
+.cropper-controls { display:flex; align-items:center; gap:0.8rem; margin-top:0.8rem; padding:0.6rem; background:rgba(255,255,255,0.03); border-radius:8px; }
+.cropper-controls label { font-size:0.72rem; color:var(--text-muted); white-space:nowrap; }
+.cropper-controls input[type=range] { flex:1; accent-color:var(--gold); cursor:pointer; }
+@media(max-width:640px) {
+  .char-header-layout { flex-direction:column; align-items:center; }
+  .char-photo-wrap,.char-photo { width:90px; height:90px; }
+  .char-vitals { grid-template-columns:repeat(2,1fr); }
+}
+
+/* Vital secondary (CA, Vit, Deck) */
+.vital-box-secondary { display:flex; flex-direction:column; justify-content:center; }
+.vital-secondary-row { display:flex; gap:0.5rem; justify-content:center; margin-bottom:0.2rem; }
+.vital-secondary-item { text-align:center; flex:1; }
+.vital-secondary-val { font-size:1.1rem; font-weight:700; color:var(--gold); line-height:1.2; }
+@media(max-width:640px) {
+  .vital-secondary-row { gap:0.3rem; }
+  .vital-secondary-val { font-size:0.95rem; }
+}
+
 /* SCROLLBAR */
 ::-webkit-scrollbar { width:5px; height:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
@@ -1465,28 +1528,26 @@ select.input-field, select.input-sm { cursor:pointer; }
 
 /* Vitals bar */
 .char-vitals {
-  display:grid; grid-template-columns:repeat(4,1fr); gap:0.8rem;
-  margin-bottom:1rem; padding:1rem;
   background:rgba(255,255,255,0.02); border-radius:var(--radius);
-  border:1px solid var(--border);
+  border:1px solid var(--border); padding:0.8rem;
+  margin-bottom:0;
 }
 .vital-box { text-align:center; }
 .vital-controls {
   display:flex; align-items:center; justify-content:center; gap:0.5rem;
   margin:0.3rem 0;
 }
-.vital-val { font-size:1.6rem; font-weight:700; line-height:1; min-width:2.5rem; display:inline-block; }
+.vital-val { font-size:1.5rem; font-weight:700; line-height:1; min-width:2rem; display:inline-block; }
 .vital-btn {
-  width:28px; height:28px; border-radius:50%; border:1px solid var(--border);
+  width:26px; height:26px; border-radius:50%; border:1px solid var(--border);
   background:rgba(255,255,255,0.04); color:var(--text-muted);
-  cursor:pointer; font-size:1.1rem; line-height:1;
+  cursor:pointer; font-size:1rem; line-height:1;
   transition:all 0.15s; display:flex; align-items:center; justify-content:center;
 }
 .vital-btn.minus:hover { background:rgba(231,76,60,0.15); border-color:rgba(231,76,60,0.4); color:#e74c3c; }
 .vital-btn.plus:hover { background:rgba(46,204,113,0.15); border-color:rgba(46,204,113,0.4); color:#2ecc71; }
 @media(max-width:640px) {
-  .char-vitals { grid-template-columns:repeat(2,1fr); }
-  .vital-val { font-size:1.3rem; }
+  .vital-val { font-size:1.2rem; }
 }
 
 /* Textarea */
@@ -1583,6 +1644,9 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Ressources</div>
+        <div class="nav-item" onclick="navigate('informations');closeSidebar()"><span class="icon">📋</span> Informations</div>
+        <div class="nav-item" onclick="navigate('recettes');closeSidebar()"><span class="icon">🍳</span> Recettes</div>
+        <div class="nav-item" onclick="navigate('bestiaire');closeSidebar()"><span class="icon">🐉</span> Bestiaire</div>
         <div class="nav-item" onclick="navigate('tutorial');closeSidebar()"><span class="icon">📕</span> Tutoriel</div>
         <div class="nav-item admin-only" style="display:none" onclick="navigate('admin');closeSidebar()"><span class="icon">⚙️</span> Admin</div>
       </div>
@@ -1622,6 +1686,9 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
     <div class="more-menu-item" onclick="navigate('players');closeMoreMenu()"><span class="icon">⚔️</span>Joueurs</div>
     <div class="more-menu-item" onclick="navigate('achievements');closeMoreMenu()"><span class="icon">🏆</span>Hauts-Faits</div>
     <div class="more-menu-item" onclick="navigate('collection');closeMoreMenu()"><span class="icon">🃏</span>Collection</div>
+    <div class="more-menu-item" onclick="navigate('informations');closeMoreMenu()"><span class="icon">📋</span>Infos</div>
+    <div class="more-menu-item" onclick="navigate('recettes');closeMoreMenu()"><span class="icon">🍳</span>Recettes</div>
+    <div class="more-menu-item" onclick="navigate('bestiaire');closeMoreMenu()"><span class="icon">🐉</span>Bestiaire</div>
     <div class="more-menu-item" onclick="navigate('tutorial');closeMoreMenu()"><span class="icon">📕</span>Tutoriel</div>
     <div class="more-menu-item admin-only" style="display:none" onclick="navigate('admin');closeMoreMenu()"><span class="icon">⚙️</span>Admin</div>
   </div>
@@ -2301,6 +2368,160 @@ async admin() {
   </div>`;
 }
 
+
+// ─── INFORMATIONS ─────────────────────────────
+async informations() {
+  const doc = await getDocData('informations','main');
+  const content = document.getElementById('main-content');
+  // Default sections from game document
+  const defaultSections = [
+    { id:'stats', title:'📊 Statistiques & Races', content: getInfoStats() },
+    { id:'equipements', title:'⚔️ Équipements & Armures', content: getInfoEquipements() },
+    { id:'combat', title:'🎯 Règles de Combat', content: getInfoCombat() },
+    { id:'deck', title:'🃏 Deck & Runes', content: getInfoDeck() },
+    { id:'artisanat', title:'🔨 Artisanat', content: getInfoArtisanat() },
+    { id:'bastion', title:'🏰 Le Bastion', content: getInfoBastion() },
+    { id:'etats', title:'💊 États', content: getInfoEtats() },
+  ];
+  const sections = doc?.sections || defaultSections;
+  const activeSection = window._infoSection || sections[0]?.id;
+  window._infoSection = activeSection;
+
+  let html = `<div class="page-header">
+    <div class="page-title"><span class="page-title-accent">📋 Informations du JDR</span></div>
+    <div class="page-subtitle">Règles, mécaniques et lore du monde</div>
+  </div>
+  ${STATE.isAdmin?`<div class="admin-section">
+    <div class="admin-label">Admin — Modification du contenu</div>
+    <button class="btn btn-gold btn-sm" onclick="editInfoSection('${activeSection}')">✏️ Modifier cette section</button>
+  </div>`:''}
+  <div class="grid-2 tutorial-layout-grid" style="gap:1.5rem;align-items:start">
+    <div>
+      <div class="tutorial-nav" id="info-nav">
+        ${sections.map(s=>`<div class="tutorial-nav-item ${s.id===activeSection?'active':''}" onclick="showInfoSection('${s.id}',this)">${s.title}</div>`).join('')}
+      </div>
+    </div>
+    <div>
+      <div class="tutorial-content" id="info-content" style="white-space:pre-wrap">${sections.find(s=>s.id===activeSection)?.content||''}</div>
+    </div>
+  </div>`;
+  content.innerHTML = html;
+  window._infoSections = sections;
+},
+
+// ─── RECETTES ─────────────────────────────────
+async recettes() {
+  const doc = await getDocData('recettes','main');
+  const content = document.getElementById('main-content');
+  const recettes = doc?.recettes || [];
+  const potions = doc?.potions || [];
+
+  let html = `<div class="page-header">
+    <div class="page-title"><span class="page-title-accent">🍳 Recettes & Potions</span></div>
+    <div class="page-subtitle">Cuisine de groupe et alchimie</div>
+  </div>
+  ${STATE.isAdmin?`<div class="admin-section">
+    <div class="admin-label">Gestion Admin</div>
+    <div style="display:flex;gap:0.5rem">
+      <button class="btn btn-gold btn-sm" onclick="openRecetteModal('cuisine')">+ Recette cuisine</button>
+      <button class="btn btn-gold btn-sm" onclick="openRecetteModal('potion')">+ Potion</button>
+    </div>
+  </div>`:''}
+
+  <div style="background:rgba(226,185,111,0.05);border:1px solid rgba(226,185,111,0.15);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:0.85rem;color:var(--text-muted)">
+    <strong style="color:var(--gold)">🍳 Cuisine</strong> — Avant mission ou pendant un repos. Bénéficie à tout le groupe. Max 2 plats actifs simultanément.<br>
+    <strong style="color:var(--gold)">🧪 Potions</strong> — Préparées avant une mission. Effets individuels.
+  </div>
+
+  <div class="grid-2" style="gap:1.5rem">
+    <div>
+      <div class="card-header" style="margin-bottom:1rem">🍳 Cuisine (${recettes.length})</div>
+      ${recettes.length===0?`<div class="empty-state"><span class="icon">🍳</span><p>Aucune recette de cuisine.</p></div>`:
+        recettes.map(r=>`<div class="card" style="margin-bottom:0.8rem;padding:1rem">
+          <div style="display:flex;justify-content:space-between">
+            <div style="font-weight:700;font-size:0.92rem;color:var(--text)">${r.nom}</div>
+            ${STATE.isAdmin?`<div style="display:flex;gap:0.3rem"><button class="btn-icon" onclick="editRecette('${r.id}','cuisine')">✏️</button><button class="btn-icon" onclick="deleteRecette('${r.id}')">🗑️</button></div>`:''}
+          </div>
+          ${r.duree?`<div style="font-size:0.75rem;color:var(--text-dim);margin-top:0.2rem">⏱️ ${r.duree}</div>`:''}
+          ${r.ingredients?`<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${r.ingredients}</div>`:''}
+          <div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${r.effet||''}</div>
+        </div>`).join('')}
+    </div>
+    <div>
+      <div class="card-header" style="margin-bottom:1rem">🧪 Potions (${potions.length})</div>
+      ${potions.length===0?`<div class="empty-state"><span class="icon">🧪</span><p>Aucune potion.</p></div>`:
+        potions.map(p=>`<div class="card" style="margin-bottom:0.8rem;padding:1rem">
+          <div style="display:flex;justify-content:space-between">
+            <div>
+              <span style="font-weight:700;font-size:0.92rem;color:var(--text)">${p.nom}</span>
+              ${p.famille?`<span class="badge badge-blue" style="margin-left:0.4rem;font-size:0.65rem">${p.famille}</span>`:''}
+            </div>
+            ${STATE.isAdmin?`<div style="display:flex;gap:0.3rem"><button class="btn-icon" onclick="editRecette('${p.id}','potion')">✏️</button><button class="btn-icon" onclick="deleteRecette('${p.id}')">🗑️</button></div>`:''}
+          </div>
+          ${p.ingredients?`<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${p.ingredients}</div>`:''}
+          <div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${p.effet||''}</div>
+        </div>`).join('')}
+    </div>
+  </div>`;
+  content.innerHTML = html;
+},
+
+// ─── BESTIAIRE ────────────────────────────────
+async bestiaire() {
+  const items = await loadCollection('bestiaire');
+  const content = document.getElementById('main-content');
+  const cats = [...new Set(items.map(i=>i.categorie||'Créature'))].sort();
+
+  let html = `<div class="page-header">
+    <div class="page-title"><span class="page-title-accent">🐉 Bestiaire</span></div>
+    <div class="page-subtitle">Créatures et monstres du monde</div>
+  </div>
+  ${STATE.isAdmin?`<div class="admin-section">
+    <div class="admin-label">Gestion Admin</div>
+    <button class="btn btn-gold btn-sm" onclick="openBestiaryModal()">+ Ajouter une créature</button>
+  </div>`:''}`;
+
+  if (items.length===0) {
+    html += `<div class="empty-state"><div class="icon">🐉</div><p>Le bestiaire est vide.</p></div>`;
+  } else {
+    html += `<div class="tabs" id="best-cats" style="margin-bottom:1.5rem">
+      <button class="tab active" onclick="filterBestiary(null,this)">Toutes</button>
+      ${cats.map(c=>`<button class="tab" onclick="filterBestiary('${c}',this)">${c}</button>`).join('')}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:1rem" id="bestiary-list">`;
+    items.forEach(c => {
+      html += `<div class="card bestiary-card" data-cat="${c.categorie||'Créature'}" style="padding:1.2rem">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.8rem">
+          <div>
+            <div style="font-weight:700;font-size:1.05rem;color:var(--text)">${c.emoji||'🐉'} ${c.nom||'Créature'}</div>
+            ${c.categorie?`<span class="badge badge-gold" style="font-size:0.65rem;margin-top:0.2rem">${c.categorie}</span>`:''}
+          </div>
+          ${STATE.isAdmin?`<div style="display:flex;gap:0.3rem"><button class="btn-icon" onclick="editBestiary('${c.id}')">✏️</button><button class="btn-icon" onclick="deleteBestiary('${c.id}')">🗑️</button></div>`:''}
+        </div>
+        <div class="grid-4" style="gap:0.5rem;margin-bottom:0.8rem">
+          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">PV</div><div style="font-size:1rem;font-weight:700;color:#2ecc71">${c.pv||'?'}</div></div>
+          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">PM</div><div style="font-size:1rem;font-weight:700;color:var(--blue)">${c.pm||'?'}</div></div>
+          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">CA</div><div style="font-size:1rem;font-weight:700;color:var(--gold)">${c.ca||'?'}</div></div>
+          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">XP</div><div style="font-size:1rem;font-weight:700;color:var(--text-muted)">${c.xp||'?'}</div></div>
+        </div>
+        ${(c.attaques||[]).length>0?`<div style="margin-bottom:0.6rem">
+          <div style="font-size:0.7rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.3rem">⚔️ Attaques</div>
+          ${c.attaques.map(a=>`<div style="font-size:0.82rem;padding:0.2rem 0;border-bottom:1px solid rgba(255,255,255,0.04)">
+            <span style="color:var(--text);font-weight:600">${a.nom}</span>
+            <span style="color:var(--text-dim);margin:0 0.3rem">·</span>
+            <span style="color:var(--crimson-light)">${a.degats||'?'}</span>
+            ${a.effet?`<span style="color:var(--text-muted);font-style:italic"> — ${a.effet}</span>`:''}
+          </div>`).join('')}
+        </div>`:''}
+        ${c.traits?`<div style="font-size:0.82rem;color:var(--text-muted);font-style:italic">✨ ${c.traits}</div>`:''}
+        ${c.butins?`<div style="font-size:0.78rem;color:var(--gold);margin-top:0.4rem">💎 Butin : ${c.butins}</div>`:''}
+      </div>`;
+    });
+    html += '</div>';
+  }
+  content.innerHTML = html;
+},
+
 }; // end PAGES
 
 // ══════════════════════════════════════════════
@@ -2379,6 +2600,61 @@ function filterAdminChars(pseudo, el) {
   if (chars.length > 0) { STATE.activeChar=chars[0]; renderCharSheet(chars[0]); }
 }
 
+// ══════════════════════════════════════════════
+// COMPUTED STATS
+// ══════════════════════════════════════════════
+function getMod(c, key) {
+  const base = (c.stats||{})[key]||8;
+  const bonus = (c.statsBonus||{})[key]||0;
+  return Math.floor(((base+bonus)-10)/2);
+}
+
+function calcCA(c) {
+  // Base 8, torse: legere=10, inter=12, lourde=14, +mod Dex
+  const equip = c.equipement||{};
+  const torse = equip['Torse']?.typeArmure||'';
+  let caBase = 8;
+  if (torse==='Légère') caBase=10;
+  else if (torse==='Intermédiaire') caBase=12;
+  else if (torse==='Lourde') caBase=14;
+  const modDex = getMod(c,'dexterite');
+  // Also add any equipment CA bonuses
+  const caEquip = Object.values(equip).reduce((s,it)=>s+(it.ca||0),0);
+  return caBase + modDex + caEquip;
+}
+
+function calcVitesse(c) {
+  // 3 + mod Force
+  return 3 + getMod(c,'force');
+}
+
+function calcDeck(c) {
+  // Active sorts count / (3 + mod In bonus)
+  const sorts = c.deck_sorts||[];
+  const actifs = sorts.filter(s=>s.actif).length;
+  const modIn = getMod(c,'intelligence');
+  const niveau = c.niveau||1;
+  // Formula: 3 + floor(max(0,modIn) * (niveau-1)^0.75) + min(0,modIn)
+  const maxDeck = 3 + Math.min(0,modIn) + Math.floor(Math.max(0,modIn) * Math.pow(Math.max(0,niveau-1),0.75));
+  return actifs+'/'+maxDeck;
+}
+
+function calcPVMax(c) {
+  const pvBase = c.pvBase||10;
+  const modCo = getMod(c,'constitution');
+  const niveau = c.niveau||1;
+  if (modCo > 0) return pvBase + Math.floor(modCo*(niveau-1));
+  return pvBase + modCo*(niveau-1);
+}
+
+function calcPMMax(c) {
+  const pmBase = c.pmBase||10;
+  const modSa = getMod(c,'sagesse');
+  const niveau = c.niveau||1;
+  if (modSa > 0) return pmBase + Math.floor(modSa*(niveau-1));
+  return pmBase + modSa*(niveau-1);
+}
+
 function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
@@ -2390,14 +2666,29 @@ function renderCharSheet(c, keepTab) {
   const pmPct = pct(c.pmActuel??c.pmBase??10, c.pmBase??10);
   const xpPct = pct(c.exp??0, c.palier??100);
 
-  // Multi-titles display
   const titres = c.titres||[];
   const titreDisplay = titres.length>0
     ? titres.map(t=>`<span class="badge badge-gold" style="margin-left:0.3rem">${t}</span>`).join('')
     : c.titre ? `<span class="badge badge-gold" style="margin-left:0.3rem">${c.titre}</span>` : '';
 
-  // Remember current tab
   const currentTab = keepTab || window._currentCharTab || 'carac';
+
+  // Photo area
+  const photoHtml = `
+    <div class="char-photo-wrap" id="char-photo-wrap">
+      <div class="char-photo" id="char-photo" onclick="${canEdit?`openPhotoCropper('${c.id}')`:''}"
+           style="cursor:${canEdit?'pointer':'default'}">
+        ${c.photo
+          ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;
+               transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);
+               transform-origin:center center;">`
+          : `<div class="char-photo-placeholder">
+               ${canEdit?'<span style="font-size:1.5rem">📷</span><span style="font-size:0.7rem;margin-top:0.3rem">Photo</span>':'<span style="font-size:2rem;opacity:0.3">⚔️</span>'}
+             </div>`
+        }
+      </div>
+      ${canEdit&&c.photo?`<button class="char-photo-delete" onclick="deleteCharPhoto('${c.id}')" title="Supprimer la photo">✕</button>`:''}
+    </div>`;
 
   area.innerHTML = `
   <div class="card" style="margin-bottom:1rem">
@@ -2411,40 +2702,59 @@ function renderCharSheet(c, keepTab) {
         ${canEdit?`<button class="btn btn-danger btn-sm" onclick="deleteChar('${c.id}')">🗑️</button>`:''}
       </div>
     </div>
-    <!-- Vitals sticky bar -->
-    <div class="char-vitals" id="char-vitals">
-      <div class="vital-box">
-        <div class="stat-label">Niveau</div>
-        <div class="stat-value">${c.niveau||1}</div>
-        <div class="xp-bar-bg"><div class="xp-bar-fill" style="width:${xpPct}%"></div></div>
-        <div class="stat-sub">${c.exp||0}/${c.palier||100} XP</div>
-      </div>
-      <div class="vital-box">
-        <div class="stat-label">❤️ PV</div>
-        <div class="vital-controls">
-          ${canEdit?`<button class="vital-btn minus" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
-          <span class="vital-val" style="color:${hpPct<25?'var(--crimson-light)':hpPct<50?'#e67e22':'#2ecc71'}" id="pv-val">${c.pvActuel??c.pvBase??10}</span>
-          ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
+
+    <!-- Photo + Vitals -->
+    <div class="char-header-layout">
+      ${photoHtml}
+      <div class="char-vitals-col">
+        <div class="char-vitals" id="char-vitals">
+          <div class="vital-box">
+            <div class="stat-label">Niveau</div>
+            <div class="stat-value">${c.niveau||1}</div>
+            <div class="xp-bar-bg"><div class="xp-bar-fill" style="width:${xpPct}%"></div></div>
+            <div class="stat-sub">${c.exp||0} / ${c.palier||100} XP</div>
+          </div>
+          <div class="vital-box">
+            <div class="stat-label">❤️ PV</div>
+            <div class="vital-controls">
+              ${canEdit?`<button class="vital-btn minus" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
+              <span class="vital-val" style="color:${hpPct<25?'var(--crimson-light)':hpPct<50?'#e67e22':'#2ecc71'}" id="pv-val">${c.pvActuel??c.pvBase??10}</span>
+              ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
+            </div>
+            <div class="hp-bar-bg"><div class="hp-bar-fill ${hpPct>50?'high':hpPct>25?'mid':''}" style="width:${hpPct}%" id="pv-bar"></div></div>
+            <div class="stat-sub">max ${c.pvBase||10}</div>
+          </div>
+          <div class="vital-box">
+            <div class="stat-label">🔵 PM</div>
+            <div class="vital-controls">
+              ${canEdit?`<button class="vital-btn minus" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
+              <span class="vital-val" style="color:var(--blue)" id="pm-val">${c.pmActuel??c.pmBase??10}</span>
+              ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
+            </div>
+            <div class="pm-bar-bg"><div class="pm-bar-fill" style="width:${pmPct}%" id="pm-bar"></div></div>
+            <div class="stat-sub">max ${c.pmBase||10}</div>
+          </div>
+          <div class="vital-box vital-box-secondary">
+            <div class="vital-secondary-row">
+              <div class="vital-secondary-item">
+                <div class="stat-label">🛡️ CA</div>
+                <div class="vital-secondary-val">${calcCA(c)}</div>
+              </div>
+              <div class="vital-secondary-item">
+                <div class="stat-label">🏃 Vit.</div>
+                <div class="vital-secondary-val">${calcVitesse(c)}m</div>
+              </div>
+              <div class="vital-secondary-item">
+                <div class="stat-label">🃏 Deck</div>
+                <div class="vital-secondary-val">${calcDeck(c)}</div>
+              </div>
+            </div>
+            <div class="stat-sub" style="margin-top:0.3rem">💰 Or : ${c.or||0}</div>
+          </div>
         </div>
-        <div class="hp-bar-bg"><div class="hp-bar-fill ${hpPct>50?'high':hpPct>25?'mid':''}" style="width:${hpPct}%" id="pv-bar"></div></div>
-        <div class="stat-sub">max ${c.pvBase||10} · CA ${c.ca||7}</div>
-      </div>
-      <div class="vital-box">
-        <div class="stat-label">🔵 PM</div>
-        <div class="vital-controls">
-          ${canEdit?`<button class="vital-btn minus" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
-          <span class="vital-val" style="color:var(--blue)" id="pm-val">${c.pmActuel??c.pmBase??10}</span>
-          ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
-        </div>
-        <div class="pm-bar-bg"><div class="pm-bar-fill" style="width:${pmPct}%" id="pm-bar"></div></div>
-        <div class="stat-sub">max ${c.pmBase||10}</div>
-      </div>
-      <div class="vital-box">
-        <div class="stat-label">💰 Or</div>
-        <div class="stat-value" style="font-size:1.1rem">${c.or||0}</div>
-        <div class="stat-sub">Vit. ${c.vitesse||3}m · Deck ${c.deck||'0/2'}</div>
       </div>
     </div>
+
     <!-- Tabs -->
     <div class="tabs" id="char-tabs">
       <button class="tab ${currentTab==='carac'?'active':''}" onclick="showCharTab('carac',this)">Caractéristiques</button>
@@ -2461,7 +2771,6 @@ function renderCharSheet(c, keepTab) {
   window._canEditChar = canEdit;
   window._currentCharTab = currentTab;
 
-  // Render the correct tab without resetting
   const renders = {
     carac: ()=>renderCharCarac(c,canEdit),
     equip: ()=>renderCharEquip(c,canEdit),
@@ -2907,38 +3216,90 @@ async function createNewChar() {
   PAGES.characters();
 }
 
-// ── Edit Char Info ──
+// ── Edit Char Info — inline panel instead of modal ──
 function editCharInfo() {
   const c = STATE.activeChar; if(!c) return;
   const titres = c.titres||[];
-  openModal('✏️ Modifier le Personnage', `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="ei-nom" value="${c.nom||''}"></div>
+  window._editTitres = [...titres];
+
+  // Show inline edit panel in the tab content area
+  const area = document.getElementById('char-tab-content');
+  if (!area) return;
+  window._currentCharTab = 'edit';
+
+  const titresHtml = () => window._editTitres.map((t,i)=>
+    `<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.2rem 0.6rem;background:rgba(226,185,111,0.1);border:1px solid rgba(226,185,111,0.25);border-radius:20px;font-size:0.8rem;color:var(--gold)">${t}
+    <button onclick="removeTitre(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:0.7rem;padding:0;margin-left:0.2rem">✕</button></span>`
+  ).join('');
+
+  area.innerHTML = `
+  <div class="char-section" style="border-color:rgba(226,185,111,0.3)">
+    <div class="char-section-title" style="justify-content:space-between">
+      ✏️ Modifier le Personnage
+      <button class="btn btn-outline btn-sm" onclick="cancelEditChar()">✕ Annuler</button>
+    </div>
+
+    <div class="form-group"><label>Nom du personnage</label>
+      <input class="input-field" id="ei-nom" value="${c.nom||''}" placeholder="Nom...">
+    </div>
+
     <div class="form-group">
-      <label>Titres <span style="color:var(--text-dim);font-weight:400">(plusieurs possibles)</span></label>
-      <div id="titres-list" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.5rem">
-        ${titres.map((t,i)=>`<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.2rem 0.6rem;background:rgba(226,185,111,0.1);border:1px solid rgba(226,185,111,0.25);border-radius:20px;font-size:0.8rem;color:var(--gold)">${t}<button onclick="removeTitre(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:0.7rem;padding:0;margin-left:0.2rem">✕</button></span>`).join('')}
-      </div>
+      <label>Titres <span style="color:var(--text-dim);font-weight:400">(plusieurs)</span></label>
+      <div id="titres-list" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.5rem;min-height:1.5rem">${titresHtml()}</div>
       <div style="display:flex;gap:0.4rem">
-        <input class="input-field" id="ei-titre-new" placeholder="Ajouter un titre..." style="flex:1">
+        <input class="input-field" id="ei-titre-new" placeholder="Nouveau titre..." style="flex:1" onkeydown="if(event.key==='Enter')addTitre()">
         <button class="btn btn-outline btn-sm" onclick="addTitre()">+ Ajouter</button>
       </div>
     </div>
+
     <div class="grid-2" style="gap:1rem">
-      <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="ei-niveau" value="${c.niveau||1}"></div>
-      <div class="form-group"><label>Or</label><input type="number" class="input-field" id="ei-or" value="${c.or||0}"></div>
+      <div class="form-group"><label>Niveau</label>
+        <input type="number" class="input-field" id="ei-niveau" value="${c.niveau||1}" min="1" max="20">
+      </div>
+      <div class="form-group"><label>EXP actuelle</label>
+        <input type="number" class="input-field" id="ei-exp" value="${c.exp||0}" min="0">
+      </div>
+    </div>
+
+    <hr class="divider">
+    <div style="font-size:0.72rem;color:var(--gold);font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.8rem">
+      PV & PM de base <span style="color:var(--text-dim);font-weight:400;letter-spacing:0">(les formules s'appliquent avec le niveau)</span>
     </div>
     <div class="grid-2" style="gap:1rem">
-      <div class="form-group"><label>PV max</label><input type="number" class="input-field" id="ei-pv" value="${c.pvBase||10}"></div>
-      <div class="form-group"><label>PM max</label><input type="number" class="input-field" id="ei-pm" value="${c.pmBase||10}"></div>
+      <div class="form-group"><label>PV Base (niveau 1)</label>
+        <input type="number" class="input-field" id="ei-pv" value="${c.pvBase||10}" min="1">
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">PV max calculé : ${calcPVMax(c)}</div>
+      </div>
+      <div class="form-group"><label>PM Base (niveau 1)</label>
+        <input type="number" class="input-field" id="ei-pm" value="${c.pmBase||10}" min="1">
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.3rem">PM max calculé : ${calcPMMax(c)}</div>
+      </div>
     </div>
-    <div class="grid-3" style="gap:0.5rem">
-      <div class="form-group"><label>CA</label><input type="number" class="input-field" id="ei-ca" value="${c.ca||7}"></div>
-      <div class="form-group"><label>Vitesse</label><input type="number" class="input-field" id="ei-vit" value="${c.vitesse||3}"></div>
-      <div class="form-group"><label>EXP</label><input type="number" class="input-field" id="ei-exp" value="${c.exp||0}"></div>
+
+    <hr class="divider">
+    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.8rem">
+      📖 CA, Vitesse et Deck sont calculés automatiquement depuis les stats et l'équipement.
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCharInfo()">Enregistrer</button>
-  `);
-  window._editTitres = [...titres];
+    <div class="grid-3" style="gap:0.5rem;margin-bottom:1rem">
+      <div class="stat-box"><div class="stat-label">CA calculée</div><div class="stat-value" style="font-size:1.2rem">${calcCA(c)}</div><div class="stat-sub">Base torse + Mod Dex</div></div>
+      <div class="stat-box"><div class="stat-label">Vitesse calculée</div><div class="stat-value" style="font-size:1.2rem">${calcVitesse(c)}m</div><div class="stat-sub">3 + Mod Force</div></div>
+      <div class="stat-box"><div class="stat-label">Deck calculé</div><div class="stat-value" style="font-size:1.2rem">${calcDeck(c)}</div><div class="stat-sub">3 + f(Niv, Int)</div></div>
+    </div>
+
+    <div style="display:flex;gap:0.8rem">
+      <button class="btn btn-gold" style="flex:1" onclick="saveCharInfo()">💾 Enregistrer</button>
+      <button class="btn btn-outline" onclick="cancelEditChar()">Annuler</button>
+    </div>
+  </div>`;
+}
+
+function cancelEditChar() {
+  window._currentCharTab = 'carac';
+  const c = window._currentChar;
+  if (c) {
+    document.getElementById('char-tab-content').innerHTML = renderCharCarac(c, window._canEditChar);
+    document.querySelectorAll('#char-tabs .tab').forEach((t,i)=>t.classList.toggle('active',i===0));
+  }
 }
 
 function addTitre() {
@@ -2961,26 +3322,31 @@ function removeTitre(idx) {
 
 async function saveCharInfo() {
   const c = STATE.activeChar; if(!c) return;
-  const pv = parseInt(document.getElementById('ei-pv')?.value)||10;
-  const pm = parseInt(document.getElementById('ei-pm')?.value)||10;
+  const pvBase = parseInt(document.getElementById('ei-pv')?.value)||10;
+  const pmBase = parseInt(document.getElementById('ei-pm')?.value)||10;
+  const niveau = parseInt(document.getElementById('ei-niveau')?.value)||1;
+
+  // Temporarily update c to compute formulas
+  const tempC = {...c, pvBase, pmBase, niveau, stats: c.stats||{}, statsBonus: c.statsBonus||{}, equipement: c.equipement||{}};
+  const pvMax = calcPVMax(tempC);
+  const pmMax = calcPMMax(tempC);
+
   const updates = {
     nom: document.getElementById('ei-nom')?.value.trim()||c.nom,
     titres: window._editTitres||[],
-    niveau: parseInt(document.getElementById('ei-niveau')?.value)||1,
-    or: parseInt(document.getElementById('ei-or')?.value)||0,
-    pvBase: pv, pvActuel: Math.min(c.pvActuel||pv, pv),
-    pmBase: pm, pmActuel: Math.min(c.pmActuel||pm, pm),
-    ca: parseInt(document.getElementById('ei-ca')?.value)||7,
-    vitesse: parseInt(document.getElementById('ei-vit')?.value)||3,
+    niveau,
+    pvBase, pvActuel: Math.min(c.pvActuel??pvMax, pvMax),
+    pvMax,
+    pmBase, pmActuel: Math.min(c.pmActuel??pmMax, pmMax),
+    pmMax,
     exp: parseInt(document.getElementById('ei-exp')?.value)||0,
   };
   Object.assign(c, updates);
   await updateInCol('characters', c.id, updates);
-  // Update pill name
   const pills = document.querySelectorAll('#char-pills .char-pill');
   pills.forEach(p=>{ if(p.classList.contains('active')) p.textContent=updates.nom; });
-  closeModal(); showNotif('Personnage mis à jour !','success');
-  renderCharSheet(c, window._currentCharTab||'carac');
+  showNotif('Personnage mis à jour !','success');
+  renderCharSheet(c, 'carac');
 }
 
 // ── Edit Stats ──
@@ -3037,24 +3403,46 @@ function editSort(idx) {
 }
 
 function openSortModal(idx, s) {
-  const NOYAUX = ['Feu 🔥','Eau 💧','Terre 🪨','Vent 🌬️','Foudre ⚡','Ombre 🌑','Lumière ✨','Physique 💪','Arcane 🔮','* (Universel)'];
-  const RUNES = ['Puissance','Soin','Zone (AoE)','Rapide (AB)','Lent','Drain','Bouclier','Chaîne','Silence','Poison','Gel','Brûlure','Renverse','Téléport','Invocation','Invisibilité'];
+  const NOYAUX = ['Feu 🔥','Eau 💧','Terre 🪨','Vent 🌬️','Ombre 🌑','Lumière ✨','Physique 💪'];
+  // Full runes from game document
+  const RUNES = [
+    {nom:'Puissance',effet:'+ 1 dé de dégâts. Allonge de l\'arme.'},
+    {nom:'Protection',effet:'+2 CA (2 tr) OU +1 dé de soin.'},
+    {nom:'Amplification',effet:'Zone +3m.'},
+    {nom:'Enchantement',effet:'(AB) Ajoute l\'élément à équip. allié 2 tr.'},
+    {nom:'Affliction',effet:'Ajoute l\'élément + État à équip. ennemi 2 tr.'},
+    {nom:'Invocation',effet:'Invoque une créature liée. 10 PV, CA 10.'},
+    {nom:'Dispersion',effet:'Divise en plusieurs projectiles. +1 cible.'},
+    {nom:'Lacération',effet:'Réduit CA cible de 1 (-2 max, -4 élites).'},
+    {nom:'Chance',effet:'RC -1 (20→19). Dé critique aussi max.'},
+    {nom:'Durée',effet:'+2 tours de durée.'},
+    {nom:'Concentration',effet:'Garde actif hors tour. JS Sa DD11 si dégâts.'},
+    {nom:'Réaction',effet:'Lance le sort hors de son tour.'},
+  ];
   const runesSel = s.runes||[];
   openModal(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort / Compétence', `
     <div class="form-group"><label>Nom du sort</label><input class="input-field" id="s-nom" value="${s.nom||''}" placeholder="Boule de feu, Frappe élémentaire..."></div>
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Coût PM</label><input type="number" class="input-field" id="s-pm" value="${s.pm||4}" min="0"></div>
-      <div class="form-group"><label>Noyau élémentaire</label>
-        <select class="input-field" id="s-noyau">
+      <div class="form-group"><label>Noyau élémentaire <span style="color:var(--text-dim)">(2 PM)</span></label>
+        <select class="input-field" id="s-noyau" onchange="updateSortPM()">
           <option value="">— Choisir —</option>
           ${NOYAUX.map(n=>`<option value="${n}" ${s.noyau===n?'selected':''}>${n}</option>`).join('')}
         </select>
       </div>
+      <div class="form-group"><label>Coût PM <span style="color:var(--text-dim)">(auto-calculé)</span></label>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          <input type="number" class="input-field" id="s-pm" value="${s.pm||2}" min="0" readonly style="background:rgba(52,152,219,0.08);border-color:rgba(52,152,219,0.3);color:var(--blue);font-weight:700">
+          <span style="font-size:0.72rem;color:var(--text-dim)">= 2 × runes</span>
+        </div>
+      </div>
     </div>
     <div class="form-group">
-      <label>Runes d'effet <span style="color:var(--text-dim);font-weight:400">(plusieurs possibles)</span></label>
-      <div style="display:flex;flex-wrap:wrap;gap:0.4rem;padding:0.8rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px" id="runes-selector">
-        ${RUNES.map(r=>`<span class="rune-chip ${runesSel.includes(r)?'selected':''}" onclick="toggleRune(this,'${r}')" style="padding:0.3rem 0.7rem;border-radius:20px;cursor:pointer;font-size:0.75rem;border:1px solid ${runesSel.includes(r)?'rgba(52,152,219,0.5)':'var(--border)'};background:${runesSel.includes(r)?'rgba(52,152,219,0.15)':'rgba(255,255,255,0.03)'};color:${runesSel.includes(r)?'var(--blue)':'var(--text-muted)'};transition:all 0.15s">${r}</span>`).join('')}
+      <label>Runes d'effet <span style="color:var(--text-dim);font-weight:400">(+2 PM chacune)</span></label>
+      <div style="display:flex;flex-direction:column;gap:0.3rem;padding:0.6rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;max-height:220px;overflow-y:auto" id="runes-selector">
+        ${RUNES.map(r=>`<div onclick="toggleRune(this,'${r.nom}')" style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.6rem;border-radius:6px;cursor:pointer;border:1px solid ${runesSel.includes(r.nom)?'rgba(52,152,219,0.5)':'rgba(255,255,255,0.05)'};background:${runesSel.includes(r.nom)?'rgba(52,152,219,0.1)':'transparent'};transition:all 0.15s" class="rune-chip ${runesSel.includes(r.nom)?'selected':''}">
+          <span style="font-weight:${runesSel.includes(r.nom)?'600':'400'};color:${runesSel.includes(r.nom)?'var(--blue)':'var(--text-muted)'};font-size:0.82rem">${r.nom}</span>
+          <span style="font-size:0.72rem;color:var(--text-dim);font-style:italic;max-width:60%">${r.effet}</span>
+        </div>`).join('')}
       </div>
       <input type="hidden" id="s-runes" value="${runesSel.join(',')}">
     </div>
@@ -3073,23 +3461,41 @@ function toggleRune(el, rune) {
   let runes = input.value ? input.value.split(',').filter(Boolean) : [];
   if (runes.includes(rune)) {
     runes = runes.filter(r=>r!==rune);
-    el.style.background='rgba(255,255,255,0.03)'; el.style.borderColor='var(--border)'; el.style.color='var(--text-muted)'; el.classList.remove('selected');
+    el.style.background='transparent'; el.style.borderColor='rgba(255,255,255,0.05)'; el.classList.remove('selected');
+    el.querySelector('span:first-child').style.color='var(--text-muted)'; el.querySelector('span:first-child').style.fontWeight='400';
+    el.style.borderColor='rgba(255,255,255,0.05)';
   } else {
     runes.push(rune);
-    el.style.background='rgba(52,152,219,0.15)'; el.style.borderColor='rgba(52,152,219,0.5)'; el.style.color='var(--blue)'; el.classList.add('selected');
+    el.style.background='rgba(52,152,219,0.1)'; el.style.borderColor='rgba(52,152,219,0.5)'; el.classList.add('selected');
+    el.querySelector('span:first-child').style.color='var(--blue)'; el.querySelector('span:first-child').style.fontWeight='600';
   }
   input.value = runes.join(',');
+  updateSortPM();
+}
+
+function updateSortPM() {
+  const noyau = document.getElementById('s-noyau')?.value||'';
+  const runesRaw = document.getElementById('s-runes')?.value||'';
+  const runes = runesRaw ? runesRaw.split(',').filter(Boolean) : [];
+  const total = (noyau ? 1 : 0) + runes.length;
+  const pmEl = document.getElementById('s-pm');
+  if (pmEl) pmEl.value = total * 2 || 2;
 }
 
 async function saveSort(idx) {
   const c = STATE.activeChar; if(!c) return;
   const sorts = c.deck_sorts||[];
   const runesRaw = document.getElementById('s-runes')?.value||'';
+  const noyau = document.getElementById('s-noyau')?.value||'';
+  const runes = runesRaw ? runesRaw.split(',').filter(Boolean) : [];
+  // Auto PM: 2 per rune (noyau = 1 rune + effets)
+  const totalRunes = (noyau ? 1 : 0) + runes.length;
+  const autoPm = totalRunes * 2;
   const newSort = {
     nom: document.getElementById('s-nom')?.value||'Sort',
-    pm: parseInt(document.getElementById('s-pm')?.value)||4,
-    noyau: document.getElementById('s-noyau')?.value||'',
-    runes: runesRaw ? runesRaw.split(',').filter(Boolean) : [],
+    pm: autoPm || 2,
+    noyau,
+    runes,
     degats: document.getElementById('s-degats')?.value||'',
     soin: document.getElementById('s-soin')?.value||'',
     effet: document.getElementById('s-effet')?.value||'',
@@ -3098,7 +3504,7 @@ async function saveSort(idx) {
   if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
   c.deck_sorts=sorts;
   await updateInCol('characters',c.id,{deck_sorts:sorts});
-  closeModal(); showNotif('Sort enregistré !','success');
+  closeModal(); showNotif(`Sort enregistré ! Coût : ${newSort.pm} PM`,'success');
   renderCharSheet(c,'deck');
 }
 
@@ -3740,6 +4146,605 @@ function showNotif(msg, type='success') {
   el.className = `notif ${type} show`;
   clearTimeout(notifTimer);
   notifTimer = setTimeout(()=>el.classList.remove('show'),3000);
+}
+
+
+// ══════════════════════════════════════════════
+// INFORMATIONS HELPERS
+// ══════════════════════════════════════════════
+function showInfoSection(id, el) {
+  document.querySelectorAll('.tutorial-nav-item').forEach(i=>i.classList.remove('active'));
+  el?.classList.add('active');
+  window._infoSection = id;
+  const section = (window._infoSections||[]).find(s=>s.id===id);
+  const contentEl = document.getElementById('info-content');
+  if (contentEl && section) contentEl.textContent = section.content;
+}
+
+function editInfoSection(id) {
+  const section = (window._infoSections||[]).find(s=>s.id===id);
+  if (!section) return;
+  openModal(`✏️ ${section.title}`, `
+    <div class="form-group"><label>Contenu</label>
+      <textarea class="input-field" id="info-edit-content" rows="15" style="font-family:monospace;font-size:0.82rem">${section.content||''}</textarea>
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveInfoSection('${id}')">Enregistrer</button>
+  `);
+}
+
+async function saveInfoSection(id) {
+  const sections = window._infoSections||[];
+  const idx = sections.findIndex(s=>s.id===id);
+  if (idx<0) return;
+  sections[idx].content = document.getElementById('info-edit-content')?.value||'';
+  window._infoSections = sections;
+  await saveDoc('informations','main',{sections});
+  closeModal(); showNotif('Section mise à jour !','success');
+  PAGES.informations();
+}
+
+// Default informations content from game document
+function getInfoStats() {
+  return `RACES & BONUS ÉLÉMENTAIRES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Humain     : +1 Fo, +2 Dex / +2 Fo, +1 Dex
+  Elfe       : +2 Fo, +1 Dex (ou inverse)
+  Nain       : +1 Dex, +2 In / +2 Dex, +1 In
+  Demi-Anim. : +2 Fo, +1 Dex / autre
+  Créa. Mag. : +1 Fo, +2 In / autre
+  Gnome      : +2 Fo, +1 Dex / autre
+
+ÉLÉMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Feu    : +2 Fo, +1 Dex / +1 Fo, +2 Dex
+  Eau    : +1 Fo, +2 Dex / +2 Fo, +1 Dex
+  Vent   : +2 Fo, +1 Dex
+  Terre  : +1 Fo, +2 Dex
+  Lumière: +1 Fo, +2 In / +2 Fo, +1 In
+  Ombre  : +2 Fo, +1 Dex
+
+MODIFICATEURS MAXIMUM : +6 (22 points)
+
+STATS — FORMULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  PV max  = PV Base + Mod(Co) × (Niveau-1)
+  PM max  = PM Base + Mod(Sa) × (Niveau-1)
+  CA      = 8 (ou 10/12/14 selon armure torse) + Mod(Dex)
+  Vitesse = 3 + Mod(Fo) cases
+  Deck    = 3 + f(Intelligence, Niveau)
+
+LVL UP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  + : Ajouter +1 point de stats
+  + : Lancer 2d6 → augmenter PV ou PM (meilleure valeur)`;
+}
+
+function getInfoEquipements() {
+  return `EMPLACEMENTS D'ÉQUIPEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Tête         : Jusqu'à 2 points de stats
+  Torse        : Jusqu'à 4 pts. Fixe la CA de base.
+  Pieds        : Jusqu'à 3 points de stats
+  Bague        : Jusqu'à 2 pts + bonus plats
+  Amulette     : 1 pt sur 3 stats différentes + effets spéciaux
+  Objet Magique: Activable en combat
+
+ARMURES — CA DE BASE DU TORSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Légère       : CA 10 + Mod(Dex) | Set: -2 PM par sort
+  Intermédiaire: CA 12 + Mod(Dex) | Set: +2 au toucher
+  Lourde       : CA 14 + Mod(Dex) | Set: -2 dégâts subis (min 1)
+                 ⚠️ Lourde = impossible d'utiliser la magie
+
+ARMES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Main Libre / Gant : Attaque bonus après réussite
+  2 Armes 1M        : Attaque bonus avec 2ème arme après réussite
+  Baguette          : Magie possible, +4 aux dés (1d6→1d10). CaC seulement
+  Bouclier          : CA +2
+
+  1M Phy. CaC  : 1d6 — Attaque d'opportunité
+  2M Phy. CaC  : 1d10 — Attaque d'opportunité
+  2M Phy. Dist.: 1d10 — Portée 12m. Désavantage si ennemi au CaC
+  2M Mag. CaC  : 1d8 — Dégâts réduits de moitié si toucher échoue
+  2M Mag. Dist.: 1d6 — Portée 12m. Dégâts réduits si toucher échoue`;
+}
+
+function getInfoCombat() {
+  return `DÉROULEMENT D'UN TOUR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Chaque tour : 1 Action + 1 Action Bonus + 1 Réaction + Déplacement
+
+ATTAQUER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Toucher : 1d20 + Modificateur de l'arme
+  → Si score > CA cible : touche
+  → Si magie/compétence échoue : moitié des dégâts
+
+CRITIQUE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Joueur  : Dégâts maximum + 1 dé de l'arme (avec modificateur)
+  Ennemi  : +1 dé de dégâts (1d6 → 2d6)
+
+STAT DE TOUCHER PAR ARCHÉTYPE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Force (Fo)        : Arme lourde / poing (Épée, Masse, Hache, Lance)
+  Dextérité (Dex)   : Arme agile / précision (Rapière, Dague, Arc)
+  Intelligence (In) : Bâton / arme magique blanche
+  Sagesse (Sa)      : Grimoire / arme religieuse
+  Charisme (Ch)     : Chakram / instrument
+
+PERSONNAGE À TERRE (0 PV)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  JS contre la mort DD 11 au début de son tour.
+  3 réussites → stabilisé (reste à terre)
+  3 échecs → mort
+  Attaquer un inconscient monte son JS de 1.
+  Se relever : 1 PV, pas d'action, déplacement ×½`;
+}
+
+function getInfoDeck() {
+  return `LE DECK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Contient tous les sorts utilisables en combat/tension.
+  Hors combat : tous les sorts créés sont utilisables.
+  Sorts d'éléments différents avec le même effet = 1 seule place.
+
+CRÉER UN SORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Choisir un Noyau élémentaire (2 PM)
+     Feu 🔥 · Eau 💧 · Terre 🪨 · Vent 🌬️
+     Ombre 🌑 · Lumière ✨ · Physique 💪
+
+  2. Associer des Runes d'effet (2 PM chacune)
+
+  Coût total = 2 × (nombre de runes dont le noyau)
+  Magie à mains nues : +2 PM, pas d'effet de set
+
+RUNES DISPONIBLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Puissance    : +1 dé de dégâts. Allonge de l'arme.
+  Protection   : +2 CA (2 tr) OU +1 dé de soin.
+  Amplification: Zone +3m.
+  Enchantement : (AB) Élément sur équip. allié 2 tr.
+  Affliction   : Élément + État sur équip. ennemi 2 tr.
+  Invocation   : Créature liée. 10 PV, CA 10.
+  Dispersion   : Divise en projectiles. +1 cible.
+  Lacération   : CA cible -1 (-2 max, -4 élites/boss)
+  Chance       : RC -1 (20→19). Critique aussi max.
+  Durée        : +2 tours de durée.
+  Concentration: Sort actif hors tour. JS Sa DD11.
+  Réaction     : Lance le sort hors de son tour.
+
+INVOCATIONS — SERMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Apparition : Entité liée à un élément apparaît (RP)
+  Serment    : Rune élément + JS Charisme DD11
+  Invocation : Rune élément + Rune d'Invocation`;
+}
+
+function getInfoArtisanat() {
+  return `ARTISANAT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Nécessite : Outil/atelier + recette + jet d'artisanat (Fo/Dex/In)
+  Recette : Une fois connue, utilisable à volonté avec les matériaux.
+
+ATELIERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Alchimie (In)      : Alambic + plantes + pierre de feu → potion
+  Cuisine (In)       : Marmite + consommables + pierre de feu → plat
+  Forge (Fo)         : Forge → armes physiques + armures lourdes
+  Confection (Dex)   : Atelier → armes dist., armures lég./inter.
+  Orfèvrerie (In)    : Atelier d'orfèvre → armes magiques + bijoux
+
+MATÉRIAUX PAR TYPE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Légers    : Armures légères
+  Tannés    : Armures intermédiaires
+  Résistants: Armures lourdes / boucliers
+  Précieux  : Bijoux
+  Bestiaux  : Armes physiques / cuisine
+  Souples   : Armes à distance
+  Mystiques : Armes magiques
+
+APPRENDRE UNE RECETTE D'ÉQUIPEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Détruire l'objet + réussir un Jet d'Analyse (In) DD 11`;
+}
+
+function getInfoBastion() {
+  return `LE BASTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Génère de l'or à chaque session.
+  10% aux fondateurs, 90% réinvestis.
+  Chaque amélioration : Niveau Bastion +1, +100 or/session
+
+AMÉLIORATIONS DISPONIBLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Cuisine              : Cuisiner sans marmite ni pierre de feu
+  Atelier d'alchimie   : Potions sans alambic ni pierre de feu
+  Forge                : Crafter armes phy. + armures lourdes
+  Atelier de confection: Crafter armes dist. + armures lég./inter.
+  Atelier d'orfèvrerie : Crafter armes magiques + bijoux
+
+ÉVÉNEMENTS ALÉATOIRES (par cycle)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1 — Vol           : -20% revenus totaux
+  2 — Inspection    : Revenus normaux
+  3 — Calme         : Revenus normaux
+  4 — Clientèle rich: +10 or
+  5 — Rumeur fav.   : +20 or
+  6 — Succès comm.  : +30 or`;
+}
+
+function getInfoEtats() {
+  return `ÉTATS DE COMBAT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Invisible       : Pas vu sans magie. Avantage attaque suivante.
+  Endormie   (SA) : Ne peut agir/réagir. Réveil sur dégâts.
+  Cécité     (SA) : Rate tout jet nécessitant la vue. Désavantage attaque.
+  Charmé     (SA) : Ne peut attaquer le charmeur. Avantage social allié.
+  Effrayé    (SA) : Ne peut s'approcher. Désavantage si source visible.
+  Entravé    (Fo) : Déplacement ×½. Pas de bonus vitesse. Avantage ennemi.
+  Étourdi    (Co) : Ne peut agir/réagir. Avantage ennemi.
+  Pétrifié   (Co) : Ne peut agir/réagir. Résistance tous dégâts.
+                    Immunisé DoT. Rate auto JS Fo/Dex.
+  DoT        (Co) : 1d4 + In dégâts/tour pendant 2 tours.
+  Provoqué   (CH) : Oblige à n'attaquer que le lanceur.
+  Silence    (CH) : Plus de sorts ni de réaction. Désavantage magie.
+  Inconscient(Co) : 0 PV. JS contre mort DD11 chaque tour.
+                    Attaque → JS+1. Rate auto JS Fo/Dex.`;
+}
+
+// Informations edit actions
+async function openRecetteModal(type, existing) {
+  openModal(`${type==='cuisine'?'🍳 Recette Cuisine':'🧪 Potion'}`, `
+    <div class="form-group"><label>Nom</label><input class="input-field" id="rec-nom" value="${existing?.nom||''}"></div>
+    ${type==='cuisine'?`<div class="form-group"><label>Durée</label><input class="input-field" id="rec-duree" value="${existing?.duree||''}" placeholder="Avant mission..."></div>`:''}
+    ${type==='potion'?`<div class="form-group"><label>Famille</label><input class="input-field" id="rec-famille" value="${existing?.famille||''}" placeholder="Soin, Combat..."></div>`:''}
+    <div class="form-group"><label>Ingrédients</label><input class="input-field" id="rec-ingredients" value="${existing?.ingredients||''}" placeholder="Plante x2, Pierre de feu..."></div>
+    <div class="form-group"><label>Effet</label><textarea class="input-field" id="rec-effet" rows="3">${existing?.effet||''}</textarea></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveRecette('${type}','${existing?.id||''}')">Enregistrer</button>
+  `);
+}
+
+async function saveRecette(type, id) {
+  const doc = await getDocData('recettes','main') || {recettes:[],potions:[]};
+  const data = {
+    nom: document.getElementById('rec-nom')?.value||'?',
+    duree: document.getElementById('rec-duree')?.value||'',
+    famille: document.getElementById('rec-famille')?.value||'',
+    ingredients: document.getElementById('rec-ingredients')?.value||'',
+    effet: document.getElementById('rec-effet')?.value||'',
+    type,
+  };
+  if (type==='cuisine') {
+    if (id) { const i=doc.recettes.findIndex(r=>r.id===id); if(i>=0) doc.recettes[i]={...doc.recettes[i],...data}; }
+    else doc.recettes.push({...data, id: Date.now().toString()});
+  } else {
+    if (id) { const i=doc.potions.findIndex(r=>r.id===id); if(i>=0) doc.potions[i]={...doc.potions[i],...data}; }
+    else doc.potions.push({...data, id: Date.now().toString()});
+  }
+  await saveDoc('recettes','main',doc);
+  closeModal(); showNotif('Recette enregistrée !','success'); PAGES.recettes();
+}
+
+async function deleteRecette(id) {
+  if (!confirm('Supprimer ?')) return;
+  const doc = await getDocData('recettes','main') || {recettes:[],potions:[]};
+  doc.recettes = (doc.recettes||[]).filter(r=>r.id!==id);
+  doc.potions = (doc.potions||[]).filter(r=>r.id!==id);
+  await saveDoc('recettes','main',doc);
+  showNotif('Supprimé.','success'); PAGES.recettes();
+}
+
+function filterBestiary(cat, el) {
+  document.querySelectorAll('#best-cats .tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.bestiary-card').forEach(c=>{
+    c.style.display = !cat||c.dataset.cat===cat?'':'none';
+  });
+}
+
+function openBestiaryModal(item) {
+  openModal(item?'✏️ Modifier':'🐉 Nouvelle Créature', `
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group"><label>Nom</label><input class="input-field" id="bs-nom" value="${item?.nom||''}"></div>
+      <div class="form-group"><label>Emoji</label><input class="input-field" id="bs-emoji" value="${item?.emoji||'🐉'}"></div>
+    </div>
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group"><label>Catégorie</label><input class="input-field" id="bs-cat" value="${item?.categorie||''}" placeholder="Bête, Mort-vivant, Élémentaire..."></div>
+      <div class="form-group"><label>XP</label><input type="number" class="input-field" id="bs-xp" value="${item?.xp||0}"></div>
+    </div>
+    <div class="grid-4" style="gap:0.5rem">
+      <div class="form-group"><label>PV</label><input type="number" class="input-field" id="bs-pv" value="${item?.pv||10}"></div>
+      <div class="form-group"><label>PM</label><input type="number" class="input-field" id="bs-pm" value="${item?.pm||0}"></div>
+      <div class="form-group"><label>CA</label><input type="number" class="input-field" id="bs-ca" value="${item?.ca||10}"></div>
+      <div class="form-group"><label>Vit.</label><input type="number" class="input-field" id="bs-vit" value="${item?.vitesse||3}"></div>
+    </div>
+    <div class="form-group"><label>Attaques (une par ligne: Nom|Dégâts|Effet)</label>
+      <textarea class="input-field" id="bs-attaques" rows="4" placeholder="Morsure|1d6+Fo|Poison&#10;Griffe|1d4|—">${(item?.attaques||[]).map(a=>`${a.nom}|${a.degats}|${a.effet}`).join('
+')}</textarea>
+    </div>
+    <div class="form-group"><label>Traits spéciaux</label><textarea class="input-field" id="bs-traits" rows="2">${item?.traits||''}</textarea></div>
+    <div class="form-group"><label>Butins</label><input class="input-field" id="bs-butins" value="${item?.butins||''}"></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBestiary('${item?.id||''}')">Enregistrer</button>
+  `);
+}
+
+async function saveBestiary(id) {
+  const attaquesRaw = document.getElementById('bs-attaques')?.value||'';
+  const attaques = attaquesRaw.split('
+').filter(Boolean).map(line=>{
+    const [nom,degats,effet] = line.split('|');
+    return {nom:nom?.trim()||'?', degats:degats?.trim()||'?', effet:effet?.trim()||''};
+  });
+  const data = {
+    nom: document.getElementById('bs-nom')?.value||'?',
+    emoji: document.getElementById('bs-emoji')?.value||'🐉',
+    categorie: document.getElementById('bs-cat')?.value||'Créature',
+    xp: parseInt(document.getElementById('bs-xp')?.value)||0,
+    pv: parseInt(document.getElementById('bs-pv')?.value)||10,
+    pm: parseInt(document.getElementById('bs-pm')?.value)||0,
+    ca: parseInt(document.getElementById('bs-ca')?.value)||10,
+    vitesse: parseInt(document.getElementById('bs-vit')?.value)||3,
+    attaques,
+    traits: document.getElementById('bs-traits')?.value||'',
+    butins: document.getElementById('bs-butins')?.value||'',
+  };
+  if (id) await updateInCol('bestiaire',id,data);
+  else await addToCol('bestiaire',data);
+  closeModal(); showNotif('Créature enregistrée !','success'); PAGES.bestiaire();
+}
+
+async function editBestiary(id) {
+  const items = await loadCollection('bestiaire');
+  const item = items.find(x=>x.id===id);
+  if (item) openBestiaryModal(item);
+}
+async function deleteBestiary(id) {
+  if (!confirm('Supprimer cette créature ?')) return;
+  await deleteFromCol('bestiaire',id); showNotif('Supprimé.','success'); PAGES.bestiaire();
+}
+
+// ══════════════════════════════════════════════
+// PHOTO PERSONNAGE — UPLOAD & CROPPER
+// ══════════════════════════════════════════════
+function openPhotoCropper(charId) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    // Compress if > 500KB
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        // Resize to max 800px
+        const maxSize = 800;
+        let w = img.width, h = img.height;
+        if (w > maxSize || h > maxSize) {
+          if (w > h) { h = Math.round(h * maxSize/w); w = maxSize; }
+          else { w = Math.round(w * maxSize/h); h = maxSize; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        showCropperModal(dataUrl, charId, w, h);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+function showCropperModal(dataUrl, charId, imgW, imgH) {
+  // State
+  let scale = 1, offsetX = 0, offsetY = 0;
+  let isDragging = false, startX = 0, startY = 0, startOX = 0, startOY = 0;
+  let containerSize = 0;
+
+  openModal('📷 Cadrer la photo', `
+    <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.8rem">
+      Glisse pour repositionner · Molette ou curseur pour zoomer
+    </div>
+    <div class="cropper-container" id="cropper-box">
+      <img class="cropper-img" id="cropper-img" src="${dataUrl}">
+      <div class="cropper-overlay"></div>
+    </div>
+    <div class="cropper-controls">
+      <label>🔍 Zoom</label>
+      <input type="range" id="crop-zoom" min="0.5" max="4" step="0.01" value="1">
+      <span id="crop-zoom-val" style="font-size:0.75rem;color:var(--gold);min-width:2.5rem;text-align:right">×1.0</span>
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-top:1rem">
+      <button class="btn btn-gold" style="flex:1" onclick="saveCroppedPhoto('${charId}')">✅ Enregistrer</button>
+      <button class="btn btn-outline" onclick="closeModal()">Annuler</button>
+    </div>
+  `);
+
+  // Init after modal is shown
+  requestAnimationFrame(() => {
+    const box = document.getElementById('cropper-box');
+    const img = document.getElementById('cropper-img');
+    const zoomSlider = document.getElementById('crop-zoom');
+    const zoomVal = document.getElementById('crop-zoom-val');
+    if (!box || !img) return;
+
+    containerSize = box.offsetWidth;
+
+    // Initial scale to fill the container
+    const fillScale = Math.max(containerSize/imgW, containerSize/imgH);
+    scale = fillScale;
+    offsetX = (containerSize - imgW*scale) / 2;
+    offsetY = (containerSize - imgH*scale) / 2;
+    zoomSlider.min = fillScale * 0.5;
+    zoomSlider.max = fillScale * 5;
+    zoomSlider.step = fillScale * 0.01;
+    zoomSlider.value = scale;
+
+    function applyTransform() {
+      // Clamp so image always covers the box
+      const minX = containerSize - imgW * scale;
+      const minY = containerSize - imgH * scale;
+      offsetX = Math.min(0, Math.max(minX, offsetX));
+      offsetY = Math.min(0, Math.max(minY, offsetY));
+      img.style.width = (imgW * scale) + 'px';
+      img.style.height = (imgH * scale) + 'px';
+      img.style.left = offsetX + 'px';
+      img.style.top = offsetY + 'px';
+      zoomVal.textContent = '×' + scale.toFixed(1);
+    }
+
+    applyTransform();
+
+    // Zoom slider
+    zoomSlider.addEventListener('input', () => {
+      const newScale = parseFloat(zoomSlider.value);
+      const cx = containerSize/2, cy = containerSize/2;
+      offsetX = cx - (cx - offsetX) * (newScale/scale);
+      offsetY = cy - (cy - offsetY) * (newScale/scale);
+      scale = newScale;
+      applyTransform();
+    });
+
+    // Mouse drag
+    box.addEventListener('mousedown', e => {
+      isDragging = true; startX = e.clientX; startY = e.clientY;
+      startOX = offsetX; startOY = offsetY; e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      offsetX = startOX + (e.clientX - startX);
+      offsetY = startOY + (e.clientY - startY);
+      applyTransform();
+    });
+    document.addEventListener('mouseup', () => { isDragging = false; });
+
+    // Touch drag
+    box.addEventListener('touchstart', e => {
+      if (e.touches.length===1) {
+        isDragging = true;
+        startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+        startOX = offsetX; startOY = offsetY;
+      } else if (e.touches.length===2) {
+        isDragging = false;
+        window._pinchDist = Math.hypot(
+          e.touches[0].clientX-e.touches[1].clientX,
+          e.touches[0].clientY-e.touches[1].clientY
+        );
+        window._pinchScale = scale;
+      }
+      e.preventDefault();
+    }, {passive:false});
+    box.addEventListener('touchmove', e => {
+      if (e.touches.length===1 && isDragging) {
+        offsetX = startOX + (e.touches[0].clientX - startX);
+        offsetY = startOY + (e.touches[0].clientY - startY);
+        applyTransform();
+      } else if (e.touches.length===2) {
+        const dist = Math.hypot(
+          e.touches[0].clientX-e.touches[1].clientX,
+          e.touches[0].clientY-e.touches[1].clientY
+        );
+        const newScale = window._pinchScale * (dist / window._pinchDist);
+        const cx = containerSize/2, cy = containerSize/2;
+        offsetX = cx - (cx - offsetX) * (newScale/scale);
+        offsetY = cy - (cy - offsetY) * (newScale/scale);
+        scale = Math.max(parseFloat(zoomSlider.min), Math.min(parseFloat(zoomSlider.max), newScale));
+        zoomSlider.value = scale;
+        applyTransform();
+      }
+      e.preventDefault();
+    }, {passive:false});
+    box.addEventListener('touchend', () => { isDragging = false; });
+
+    // Scroll to zoom
+    box.addEventListener('wheel', e => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.92 : 1.08;
+      const rect = box.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const newScale = Math.max(parseFloat(zoomSlider.min), Math.min(parseFloat(zoomSlider.max), scale*delta));
+      offsetX = mx - (mx - offsetX) * (newScale/scale);
+      offsetY = my - (my - offsetY) * (newScale/scale);
+      scale = newScale;
+      zoomSlider.value = scale;
+      applyTransform();
+    }, {passive:false});
+
+    // Store for save
+    window._cropperState = { dataUrl, imgW, imgH, getScale:()=>scale, getOX:()=>offsetX, getOY:()=>offsetY, getContainerSize:()=>containerSize };
+  });
+}
+
+async function saveCroppedPhoto(charId) {
+  const state = window._cropperState;
+  if (!state) return;
+
+  // Render cropped result to canvas
+  const size = state.getContainerSize();
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  img.onload = async () => {
+    ctx.drawImage(img, state.getOX(), state.getOY(), state.imgW*state.getScale(), state.imgH*state.getScale());
+    const finalData = canvas.toDataURL('image/jpeg', 0.88);
+
+    // Check size — Firestore limit ~1MB per field
+    if (finalData.length > 900000) {
+      showNotif('Image trop grande. Essaie un fichier plus petit.', 'error');
+      return;
+    }
+
+    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    if (!c) return;
+    c.photo = finalData;
+    await updateInCol('characters', charId, {photo: finalData});
+    closeModal();
+    showNotif('Photo enregistrée !', 'success');
+    renderCharSheet(c, window._currentCharTab||'carac');
+  };
+  img.src = state.dataUrl;
+}
+
+async function deleteCharPhoto(charId) {
+  if (!confirm('Supprimer la photo ?')) return;
+  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+  if (!c) return;
+  delete c.photo;
+  await updateInCol('characters', charId, {photo: null});
+  showNotif('Photo supprimée.', 'success');
+  renderCharSheet(c, window._currentCharTab||'carac');
 }
 
 // Keyboard close modal
