@@ -1069,11 +1069,166 @@ select.input-field, select.input-sm { cursor:pointer; }
 ::-webkit-scrollbar-thumb { background:rgba(226,185,111,0.15); border-radius:3px; }
 ::-webkit-scrollbar-thumb:hover { background:rgba(226,185,111,0.3); }
 
-/* RESPONSIVE */
-@media(max-width:768px) {
-  .sidebar { display:none; }
-  .grid-2,.grid-3,.grid-4 { grid-template-columns:1fr; }
-  .main-content { padding:1.2rem; }
+/* ═══ RESPONSIVE SYSTEM ═══ */
+
+/* ── Tablet sidebar toggle button (header) ── */
+.btn-menu {
+  display:none; background:none; border:none; cursor:pointer;
+  color:var(--text-muted); padding:0.4rem; border-radius:6px;
+  font-size:1.2rem; transition:color 0.2s; line-height:1;
+}
+.btn-menu:hover { color:var(--gold); }
+
+/* ── Sidebar overlay (mobile/tablet) ── */
+.sidebar-overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.6); backdrop-filter:blur(4px);
+  z-index:199;
+}
+.sidebar-overlay.show { display:block; }
+
+/* ── Bottom navigation (mobile only) ── */
+.bottom-nav {
+  display:none; position:fixed; bottom:0; left:0; right:0;
+  height:60px; background:var(--bg-glass);
+  backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);
+  z-index:150; padding:0 0.5rem;
+  align-items:stretch;
+}
+.bottom-nav-item {
+  flex:1; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:2px; cursor:pointer;
+  color:var(--text-muted); font-size:0.58rem; font-weight:600;
+  letter-spacing:0.04em; text-transform:uppercase;
+  border-radius:8px; transition:all 0.2s; padding:0.3rem 0.2rem;
+  border:none; background:none;
+}
+.bottom-nav-item .bn-icon { font-size:1.2rem; line-height:1; }
+.bottom-nav-item.active { color:var(--gold); }
+.bottom-nav-item:hover { color:var(--text); background:rgba(255,255,255,0.04); }
+
+/* ── More menu (mobile) ── */
+.more-menu {
+  display:none; position:fixed; bottom:60px; left:0; right:0;
+  background:var(--bg-panel); border-top:1px solid var(--border);
+  z-index:149; padding:1rem;
+  grid-template-columns:repeat(3,1fr); gap:0.6rem;
+}
+.more-menu.show { display:grid; }
+.more-menu-item {
+  display:flex; flex-direction:column; align-items:center; gap:0.3rem;
+  padding:0.8rem 0.4rem; cursor:pointer;
+  color:var(--text-muted); font-size:0.7rem; font-weight:500;
+  border-radius:10px; transition:all 0.2s; text-align:center;
+  background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);
+}
+.more-menu-item .icon { font-size:1.4rem; }
+.more-menu-item.active { color:var(--gold); background:rgba(226,185,111,0.08); border-color:rgba(226,185,111,0.2); }
+.more-menu-item:hover { color:var(--text); background:rgba(255,255,255,0.06); }
+
+/* ══ TABLET (768px – 1100px) ══ */
+@media(max-width:1100px) {
+  :root { --sidebar-width: 220px; }
+
+  .btn-menu { display:flex; align-items:center; justify-content:center; }
+
+  .sidebar {
+    position:fixed; top:58px; left:0; bottom:0;
+    z-index:200; transform:translateX(-100%);
+    transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow:4px 0 24px rgba(0,0,0,0.4);
+  }
+  .sidebar.open { transform:translateX(0); }
+  .sidebar-overlay { display:none; }
+  .sidebar-overlay.show { display:block; }
+
+  .main-content { padding:1.5rem; }
+  .grid-3 { grid-template-columns:1fr 1fr; }
+  .grid-4 { grid-template-columns:1fr 1fr; }
+  .char-grid { grid-template-columns:repeat(3,1fr); }
+}
+
+/* ══ MOBILE (< 640px) ══ */
+@media(max-width:640px) {
+  .btn-menu { display:none; }
+  .sidebar { display:none !important; }
+  .sidebar-overlay { display:none !important; }
+
+  /* Header compact */
+  .app-header { padding:0 1rem; height:52px; }
+  .header-logo { font-size:0.9rem; letter-spacing:0.1em; }
+  .header-logo span { font-size:1.1rem; }
+  #header-username { display:none; }
+  .btn-logout { font-size:0; padding:0.4rem 0.6rem; }
+  .btn-logout::before { content:'↩'; font-size:1rem; }
+  .admin-badge { font-size:0.6rem; padding:0.2rem 0.5rem; }
+
+  /* Layout */
+  .app-layout { min-height:calc(100vh - 52px); }
+  .main-content {
+    padding:1rem; padding-bottom:70px;
+  }
+
+  /* Bottom nav visible */
+  .bottom-nav { display:flex; }
+
+  /* Grids */
+  .grid-2 { grid-template-columns:1fr; }
+  .grid-3 { grid-template-columns:1fr; }
+  .grid-4 { grid-template-columns:1fr 1fr; }
+  .char-grid { grid-template-columns:repeat(3,1fr); }
+
+  /* Dashboard hero */
+  .dashboard-hero { padding:1.3rem; }
+  .dashboard-hero h1 { font-size:1.2rem; }
+
+  /* Page title */
+  .page-title { font-size:1.2rem; }
+
+  /* Cards */
+  .card { padding:1.1rem; }
+
+  /* Shop/NPC/Player grids */
+  .shop-grid { grid-template-columns:1fr; }
+  .npc-grid { grid-template-columns:1fr; }
+  .players-grid { grid-template-columns:repeat(2,1fr); }
+  .achievement-grid { grid-template-columns:1fr; }
+  .collection-grid { grid-template-columns:repeat(3,1fr); }
+
+  /* Tabs scrollable */
+  .tabs { gap:0; }
+  .tab { padding:0.5rem 0.75rem; font-size:0.72rem; }
+
+  /* Stat boxes */
+  .stat-value { font-size:1.3rem; }
+
+  /* Char sheet */
+  .sort-row {
+    grid-template-columns:30px 1fr 50px auto;
+    grid-template-rows:auto auto;
+  }
+  .sort-row > *:nth-child(4),
+  .sort-row > *:nth-child(5) { display:none; }
+
+  /* Modal full screen */
+  .modal {
+    width:100%; max-width:100%; margin:0;
+    border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+    max-height:92vh; position:fixed; bottom:0; left:0; right:0;
+  }
+  .modal-overlay { align-items:flex-end; }
+  .modal-overlay.show .modal { transform:translateY(0) scale(1); }
+
+  /* Tables scroll */
+  .data-table { font-size:0.78rem; }
+  .data-table th, .data-table td { padding:0.5rem 0.5rem; }
+
+  /* Notif */
+  .notif { bottom:70px; right:1rem; left:1rem; text-align:center; }
+
+  /* Tutorial layout */
+  .tutorial-layout-grid { grid-template-columns:1fr !important; }
 }
 
 /* ═══ PAGE-SPECIFIC ═══ */
@@ -1308,6 +1463,32 @@ select.input-field, select.input-sm { cursor:pointer; }
 .xp-bar-bg { background:rgba(52,152,219,0.15); border-radius:4px; height:4px; overflow:hidden; margin-top:5px; }
 .xp-bar-fill { height:100%; background:linear-gradient(90deg,#2980b9,#3498db); border-radius:4px; transition:width 0.5s ease; }
 
+/* Vitals bar */
+.char-vitals {
+  display:grid; grid-template-columns:repeat(4,1fr); gap:0.8rem;
+  margin-bottom:1rem; padding:1rem;
+  background:rgba(255,255,255,0.02); border-radius:var(--radius);
+  border:1px solid var(--border);
+}
+.vital-box { text-align:center; }
+.vital-controls {
+  display:flex; align-items:center; justify-content:center; gap:0.5rem;
+  margin:0.3rem 0;
+}
+.vital-val { font-size:1.6rem; font-weight:700; line-height:1; min-width:2.5rem; display:inline-block; }
+.vital-btn {
+  width:28px; height:28px; border-radius:50%; border:1px solid var(--border);
+  background:rgba(255,255,255,0.04); color:var(--text-muted);
+  cursor:pointer; font-size:1.1rem; line-height:1;
+  transition:all 0.15s; display:flex; align-items:center; justify-content:center;
+}
+.vital-btn.minus:hover { background:rgba(231,76,60,0.15); border-color:rgba(231,76,60,0.4); color:#e74c3c; }
+.vital-btn.plus:hover { background:rgba(46,204,113,0.15); border-color:rgba(46,204,113,0.4); color:#2ecc71; }
+@media(max-width:640px) {
+  .char-vitals { grid-template-columns:repeat(2,1fr); }
+  .vital-val { font-size:1.3rem; }
+}
+
 /* Textarea */
 textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line-height:1.6; }
 </style>
@@ -1361,8 +1542,11 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 <div id="app">
   <!-- Header -->
   <header class="app-header">
-    <div class="header-logo">
-      <span>⚔️</span> Le Grand JDR
+    <div style="display:flex;align-items:center;gap:0.8rem">
+      <button class="btn-menu" onclick="toggleSidebar()" id="btn-menu">☰</button>
+      <div class="header-logo">
+        <span>⚔️</span> Le Grand JDR
+      </div>
     </div>
     <div class="header-user">
       <span id="header-username"></span>
@@ -1371,33 +1555,36 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
     </div>
   </header>
 
+  <!-- Sidebar overlay -->
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
   <div class="app-layout">
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
       <div class="nav-section">
         <div class="nav-section-title">Principal</div>
-        <div class="nav-item active" onclick="navigate('dashboard')"><span class="icon">🏠</span> Accueil</div>
-        <div class="nav-item" onclick="navigate('characters')"><span class="icon">📜</span> Mon Personnage</div>
-        <div class="nav-item" onclick="navigate('shop')"><span class="icon">🛒</span> Boutique</div>
+        <div class="nav-item active" onclick="navigate('dashboard');closeSidebar()"><span class="icon">🏠</span> Accueil</div>
+        <div class="nav-item" onclick="navigate('characters');closeSidebar()"><span class="icon">📜</span> Mon Personnage</div>
+        <div class="nav-item" onclick="navigate('shop');closeSidebar()"><span class="icon">🛒</span> Boutique</div>
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Le Monde</div>
-        <div class="nav-item" onclick="navigate('world')"><span class="icon">📖</span> Le Monde</div>
-        <div class="nav-item" onclick="navigate('map')"><span class="icon">🗺️</span> Carte</div>
-        <div class="nav-item" onclick="navigate('npcs')"><span class="icon">👥</span> PNJ</div>
-        <div class="nav-item" onclick="navigate('bastion')"><span class="icon">🏰</span> Bastion</div>
-        <div class="nav-item" onclick="navigate('story')"><span class="icon">📚</span> La Trame</div>
+        <div class="nav-item" onclick="navigate('world');closeSidebar()"><span class="icon">📖</span> Le Monde</div>
+        <div class="nav-item" onclick="navigate('map');closeSidebar()"><span class="icon">🗺️</span> Carte</div>
+        <div class="nav-item" onclick="navigate('npcs');closeSidebar()"><span class="icon">👥</span> PNJ</div>
+        <div class="nav-item" onclick="navigate('bastion');closeSidebar()"><span class="icon">🏰</span> Bastion</div>
+        <div class="nav-item" onclick="navigate('story');closeSidebar()"><span class="icon">📚</span> La Trame</div>
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Joueurs</div>
-        <div class="nav-item" onclick="navigate('players')"><span class="icon">⚔️</span> Présentation</div>
-        <div class="nav-item" onclick="navigate('achievements')"><span class="icon">🏆</span> Hauts-Faits</div>
-        <div class="nav-item" onclick="navigate('collection')"><span class="icon">🃏</span> Collection</div>
+        <div class="nav-item" onclick="navigate('players');closeSidebar()"><span class="icon">⚔️</span> Présentation</div>
+        <div class="nav-item" onclick="navigate('achievements');closeSidebar()"><span class="icon">🏆</span> Hauts-Faits</div>
+        <div class="nav-item" onclick="navigate('collection');closeSidebar()"><span class="icon">🃏</span> Collection</div>
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Ressources</div>
-        <div class="nav-item" onclick="navigate('tutorial')"><span class="icon">📕</span> Tutoriel</div>
-        <div class="nav-item admin-only" style="display:none" onclick="navigate('admin')"><span class="icon">⚙️</span> Admin</div>
+        <div class="nav-item" onclick="navigate('tutorial');closeSidebar()"><span class="icon">📕</span> Tutoriel</div>
+        <div class="nav-item admin-only" style="display:none" onclick="navigate('admin');closeSidebar()"><span class="icon">⚙️</span> Admin</div>
       </div>
     </nav>
 
@@ -1405,6 +1592,38 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
     <main class="main-content" id="main-content">
       <div class="loading"><div class="spinner"></div> Chargement...</div>
     </main>
+  </div>
+
+  <!-- Bottom Navigation (mobile) -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="bottom-nav-item active" onclick="navigate('dashboard')" data-page="dashboard">
+      <span class="bn-icon">🏠</span><span>Accueil</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigate('characters')" data-page="characters">
+      <span class="bn-icon">📜</span><span>Perso</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigate('shop')" data-page="shop">
+      <span class="bn-icon">🛒</span><span>Boutique</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigate('story')" data-page="story">
+      <span class="bn-icon">📚</span><span>Trame</span>
+    </button>
+    <button class="bottom-nav-item" onclick="toggleMoreMenu()">
+      <span class="bn-icon">⋯</span><span>Plus</span>
+    </button>
+  </nav>
+
+  <!-- More menu (mobile) -->
+  <div class="more-menu" id="more-menu">
+    <div class="more-menu-item" onclick="navigate('world');closeMoreMenu()"><span class="icon">📖</span>Le Monde</div>
+    <div class="more-menu-item" onclick="navigate('map');closeMoreMenu()"><span class="icon">🗺️</span>Carte</div>
+    <div class="more-menu-item" onclick="navigate('npcs');closeMoreMenu()"><span class="icon">👥</span>PNJ</div>
+    <div class="more-menu-item" onclick="navigate('bastion');closeMoreMenu()"><span class="icon">🏰</span>Bastion</div>
+    <div class="more-menu-item" onclick="navigate('players');closeMoreMenu()"><span class="icon">⚔️</span>Joueurs</div>
+    <div class="more-menu-item" onclick="navigate('achievements');closeMoreMenu()"><span class="icon">🏆</span>Hauts-Faits</div>
+    <div class="more-menu-item" onclick="navigate('collection');closeMoreMenu()"><span class="icon">🃏</span>Collection</div>
+    <div class="more-menu-item" onclick="navigate('tutorial');closeMoreMenu()"><span class="icon">📕</span>Tutoriel</div>
+    <div class="more-menu-item admin-only" style="display:none" onclick="navigate('admin');closeMoreMenu()"><span class="icon">⚙️</span>Admin</div>
   </div>
 </div>
 
@@ -1526,17 +1745,57 @@ function showApp() {
   if (STATE.isAdmin) {
     document.getElementById('admin-badge').style.display = 'inline';
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'flex');
+    // more-menu admin items use div, not flex
+    document.querySelectorAll('.more-menu .admin-only').forEach(el => el.style.display = 'flex');
   }
 }
+
+// ══════════════════════════════════════════════
+// SIDEBAR & MOBILE NAV
+// ══════════════════════════════════════════════
+function toggleSidebar() {
+  const s = document.getElementById('sidebar');
+  const o = document.getElementById('sidebar-overlay');
+  const open = s.classList.toggle('open');
+  o.classList.toggle('show', open);
+}
+function closeSidebar() {
+  document.getElementById('sidebar')?.classList.remove('open');
+  document.getElementById('sidebar-overlay')?.classList.remove('show');
+}
+function toggleMoreMenu() {
+  const m = document.getElementById('more-menu');
+  m.classList.toggle('show');
+}
+function closeMoreMenu() {
+  document.getElementById('more-menu')?.classList.remove('show');
+}
+// Close more-menu on outside tap
+document.addEventListener('click', e => {
+  const menu = document.getElementById('more-menu');
+  if (menu?.classList.contains('show') && !menu.contains(e.target) && !e.target.closest('.bottom-nav-item')) {
+    menu.classList.remove('show');
+  }
+});
 
 // ══════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════
 function navigate(page) {
   STATE.currentPage = page;
+  // Sync sidebar
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.getAttribute('onclick')?.includes(`'${page}'`));
   });
+  // Sync bottom nav
+  document.querySelectorAll('.bottom-nav-item[data-page]').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+  // Sync more menu
+  document.querySelectorAll('.more-menu-item').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('onclick')?.includes(`'${page}'`));
+  });
+  closeMoreMenu();
   const content = document.getElementById('main-content');
   content.innerHTML = '<div class="loading"><div class="spinner"></div> Chargement...</div>';
   PAGES[page]?.();
@@ -1592,11 +1851,10 @@ async characters() {
   const content = document.getElementById('main-content');
 
   let html = `<div class="page-header">
-    <div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</div>
+    <div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div>
     <div class="page-subtitle">Gérez vos fiches de personnage</div>
   </div>`;
 
-  // Admin: show all players selector
   if (STATE.isAdmin && chars.length > 0) {
     const byUser = {};
     chars.forEach(c => { if(!byUser[c.ownerPseudo]) byUser[c.ownerPseudo]=[]; byUser[c.ownerPseudo].push(c); });
@@ -1607,15 +1865,16 @@ async characters() {
     </div></div>`;
   }
 
-  html += `<div style="display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap">
-    <button class="btn btn-gold" onclick="openNewCharModal()">+ Nouveau Personnage</button>
+  html += `<div style="display:flex;gap:0.8rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-gold" onclick="createNewChar()">+ Nouveau Personnage</button>
+    <span style="font-size:0.78rem;color:var(--text-dim)">Le personnage est créé instantanément — modifie ensuite ses infos sur la fiche.</span>
   </div>`;
 
   if (chars.length === 0) {
     html += `<div class="empty-state"><div class="icon">📜</div><p>Aucun personnage. Crée ton premier héros !</p></div>`;
   } else {
     html += `<div class="char-select-bar" id="char-pills">
-      ${chars.map((c,i)=>`<div class="char-pill ${i===0?'active':''}" onclick="selectChar('${c.id}',this)">${c.nom||'Sans nom'}</div>`).join('')}
+      ${chars.map((c,i)=>`<div class="char-pill ${i===0?'active':''}" onclick="selectChar('${c.id}',this)">${c.nom||'Nouveau personnage'}</div>`).join('')}
     </div>
     <div id="char-sheet-area"></div>`;
   }
@@ -1991,7 +2250,7 @@ async tutorial() {
     <div class="admin-label">Gestion Admin</div>
     <button class="btn btn-gold btn-sm" onclick="editTutorial()">✏️ Modifier le tutoriel</button>
   </div>`:''}
-  <div class="grid-2" style="gap:1.5rem;align-items:start">
+  <div class="grid-2 tutorial-layout-grid" style="gap:1.5rem;align-items:start">
     <div>
       <div class="tutorial-nav" id="tut-nav">
         ${sections.map((s,i)=>`<div class="tutorial-nav-item ${i===0?'active':''}" onclick="showTutSection(${i},this)">${s.title}</div>`).join('')}
@@ -2107,7 +2366,7 @@ function selectChar(id, el) {
   document.querySelectorAll('#char-pills .char-pill').forEach(p=>p.classList.remove('active'));
   el.classList.add('active');
   const c = STATE.characters.find(x=>x.id===id);
-  if (c) { STATE.activeChar=c; renderCharSheet(c); }
+  if (c) { STATE.activeChar=c; renderCharSheet(c, window._currentCharTab||'carac'); }
 }
 
 function filterAdminChars(pseudo, el) {
@@ -2120,7 +2379,7 @@ function filterAdminChars(pseudo, el) {
   if (chars.length > 0) { STATE.activeChar=chars[0]; renderCharSheet(chars[0]); }
 }
 
-function renderCharSheet(c) {
+function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
   const canEdit = STATE.isAdmin || c.uid === STATE.user.uid;
@@ -2131,78 +2390,100 @@ function renderCharSheet(c) {
   const pmPct = pct(c.pmActuel??c.pmBase??10, c.pmBase??10);
   const xpPct = pct(c.exp??0, c.palier??100);
 
+  // Multi-titles display
+  const titres = c.titres||[];
+  const titreDisplay = titres.length>0
+    ? titres.map(t=>`<span class="badge badge-gold" style="margin-left:0.3rem">${t}</span>`).join('')
+    : c.titre ? `<span class="badge badge-gold" style="margin-left:0.3rem">${c.titre}</span>` : '';
+
+  // Remember current tab
+  const currentTab = keepTab || window._currentCharTab || 'carac';
+
   area.innerHTML = `
   <div class="card" style="margin-bottom:1rem">
     <div class="card-header">
-      <span>⚔️ ${c.nom||'Sans nom'} ${c.titre?`<span style="font-size:0.75rem;color:var(--text-muted);font-weight:400">— ${c.titre}</span>`:''}</span>
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:0.4rem">
+        <span style="font-weight:700">⚔️ ${c.nom||'Nouveau personnage'}</span>
+        ${titreDisplay}
+      </div>
       <div style="display:flex;gap:0.5rem">
         ${canEdit?`<button class="btn btn-gold btn-sm" onclick="editCharInfo()">✏️ Modifier</button>`:''}
-        ${STATE.isAdmin&&c.uid!==STATE.user.uid?`<button class="btn btn-outline btn-sm" onclick="adminEditChar()">🔧 Admin</button>`:''}
         ${canEdit?`<button class="btn btn-danger btn-sm" onclick="deleteChar('${c.id}')">🗑️</button>`:''}
       </div>
     </div>
-    <!-- Vitals -->
-    <div class="grid-4" style="margin-bottom:1rem">
-      <div class="stat-box">
+    <!-- Vitals sticky bar -->
+    <div class="char-vitals" id="char-vitals">
+      <div class="vital-box">
         <div class="stat-label">Niveau</div>
         <div class="stat-value">${c.niveau||1}</div>
-        <div class="xp-bar-bg" style="margin-top:4px"><div class="xp-bar-fill" style="width:${xpPct}%"></div></div>
-        <div class="stat-sub">${c.exp||0} / ${c.palier||100} XP</div>
+        <div class="xp-bar-bg"><div class="xp-bar-fill" style="width:${xpPct}%"></div></div>
+        <div class="stat-sub">${c.exp||0}/${c.palier||100} XP</div>
       </div>
-      <div class="stat-box">
-        <div class="stat-label">PV ❤️</div>
-        <div style="display:flex;align-items:center;gap:0.4rem;justify-content:center">
-          ${canEdit?`<button class="btn-icon" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
-          <span class="stat-value" style="color:${hpPct<25?'var(--crimson-light)':hpPct<50?'orange':'#6dbf85'}">${c.pvActuel??c.pvBase??10}</span>
-          ${canEdit?`<button class="btn-icon" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
+      <div class="vital-box">
+        <div class="stat-label">❤️ PV</div>
+        <div class="vital-controls">
+          ${canEdit?`<button class="vital-btn minus" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
+          <span class="vital-val" style="color:${hpPct<25?'var(--crimson-light)':hpPct<50?'#e67e22':'#2ecc71'}" id="pv-val">${c.pvActuel??c.pvBase??10}</span>
+          ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
         </div>
-        <div class="hp-bar-bg" style="margin-top:4px"><div class="hp-bar-fill ${hpPct>50?'high':hpPct>25?'mid':''}" style="width:${hpPct}%"></div></div>
-        <div class="stat-sub">${c.pvBase||10} max (CA:${c.ca||7})</div>
+        <div class="hp-bar-bg"><div class="hp-bar-fill ${hpPct>50?'high':hpPct>25?'mid':''}" style="width:${hpPct}%" id="pv-bar"></div></div>
+        <div class="stat-sub">max ${c.pvBase||10} · CA ${c.ca||7}</div>
       </div>
-      <div class="stat-box">
-        <div class="stat-label">PM 🔵</div>
-        <div style="display:flex;align-items:center;gap:0.4rem;justify-content:center">
-          ${canEdit?`<button class="btn-icon" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
-          <span class="stat-value" style="color:var(--blue)">${c.pmActuel??c.pmBase??10}</span>
-          ${canEdit?`<button class="btn-icon" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
+      <div class="vital-box">
+        <div class="stat-label">🔵 PM</div>
+        <div class="vital-controls">
+          ${canEdit?`<button class="vital-btn minus" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
+          <span class="vital-val" style="color:var(--blue)" id="pm-val">${c.pmActuel??c.pmBase??10}</span>
+          ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
         </div>
-        <div class="pm-bar-bg" style="margin-top:4px"><div class="pm-bar-fill" style="width:${pmPct}%"></div></div>
-        <div class="stat-sub">${c.pmBase||10} max</div>
+        <div class="pm-bar-bg"><div class="pm-bar-fill" style="width:${pmPct}%" id="pm-bar"></div></div>
+        <div class="stat-sub">max ${c.pmBase||10}</div>
       </div>
-      <div class="stat-box">
-        <div class="stat-label">Or / Vitesse</div>
-        <div class="stat-value" style="font-size:1.1rem">💰${c.or||0}</div>
-        <div class="stat-sub">Vit. ${c.vitesse||3}m | Deck ${c.deck||'0/2'}</div>
+      <div class="vital-box">
+        <div class="stat-label">💰 Or</div>
+        <div class="stat-value" style="font-size:1.1rem">${c.or||0}</div>
+        <div class="stat-sub">Vit. ${c.vitesse||3}m · Deck ${c.deck||'0/2'}</div>
       </div>
     </div>
     <!-- Tabs -->
     <div class="tabs" id="char-tabs">
-      <button class="tab active" onclick="showCharTab('carac',this)">Caractéristiques</button>
-      <button class="tab" onclick="showCharTab('combat',this)">Combat</button>
-      <button class="tab" onclick="showCharTab('deck',this)">Deck Sorts</button>
-      <button class="tab" onclick="showCharTab('equip',this)">Équipement</button>
-      <button class="tab" onclick="showCharTab('inventaire',this)">Inventaire</button>
-      <button class="tab" onclick="showCharTab('quetes',this)">Quêtes</button>
-      <button class="tab" onclick="showCharTab('notes',this)">Notes</button>
+      <button class="tab ${currentTab==='carac'?'active':''}" onclick="showCharTab('carac',this)">Caractéristiques</button>
+      <button class="tab ${currentTab==='equip'?'active':''}" onclick="showCharTab('equip',this)">Équipement & Combat</button>
+      <button class="tab ${currentTab==='deck'?'active':''}" onclick="showCharTab('deck',this)">Sorts & Runes</button>
+      <button class="tab ${currentTab==='inventaire'?'active':''}" onclick="showCharTab('inventaire',this)">Inventaire</button>
+      <button class="tab ${currentTab==='quetes'?'active':''}" onclick="showCharTab('quetes',this)">Quêtes</button>
+      <button class="tab ${currentTab==='notes'?'active':''}" onclick="showCharTab('notes',this)">Notes</button>
     </div>
-    <div id="char-tab-content">${renderCharCarac(c, canEdit)}</div>
+    <div id="char-tab-content"></div>
   </div>`;
 
   window._currentChar = c;
   window._canEditChar = canEdit;
+  window._currentCharTab = currentTab;
+
+  // Render the correct tab without resetting
+  const renders = {
+    carac: ()=>renderCharCarac(c,canEdit),
+    equip: ()=>renderCharEquip(c,canEdit),
+    deck: ()=>renderCharDeck(c,canEdit),
+    inventaire: ()=>renderCharInventaire(c,canEdit),
+    quetes: ()=>renderCharQuetes(c,canEdit),
+    notes: ()=>renderCharNotes(c,canEdit),
+  };
+  document.getElementById('char-tab-content').innerHTML = renders[currentTab]?.() || '';
 }
 
 function showCharTab(tab, el) {
   document.querySelectorAll('#char-tabs .tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
+  window._currentCharTab = tab;
   const c = window._currentChar;
   const canEdit = window._canEditChar;
   const area = document.getElementById('char-tab-content');
   const renders = {
     carac: ()=>renderCharCarac(c,canEdit),
-    combat: ()=>renderCharCombat(c,canEdit),
-    deck: ()=>renderCharDeck(c,canEdit),
     equip: ()=>renderCharEquip(c,canEdit),
+    deck: ()=>renderCharDeck(c,canEdit),
     inventaire: ()=>renderCharInventaire(c,canEdit),
     quetes: ()=>renderCharQuetes(c,canEdit),
     notes: ()=>renderCharNotes(c,canEdit),
@@ -2297,70 +2578,149 @@ function renderCharCombat(c, canEdit) {
 
 function renderCharDeck(c, canEdit) {
   const sorts = c.deck_sorts || [];
+  const NOYAUX = ['Feu 🔥','Eau 💧','Terre 🪨','Vent 🌬️','Foudre ⚡','Ombre 🌑','Lumière ✨','Physique 💪','Arcane 🔮'];
+  const RUNES = ['Puissance','Soin','Zone','Rapide','Lent','Drain','Bouclier','Chaîne','Silence','Poison','Gel','Brûlure','Renverse','Téléport','Invocation'];
+
   let html = `<div class="char-section">
-    <div class="char-section-title">🃏 Deck de Sorts / Compétences
-      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addSort()">+ Ajouter</button>`:''}
+    <div class="char-section-title">✨ Sorts & Compétences
+      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addSort()">+ Créer un Sort</button>`:''}
     </div>
-    <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.8rem;font-style:italic">✨ Magie à mains nues : +2 PM, pas d'effet de set.</div>`;
-  if (sorts.length===0) {
-    html += `<div style="color:var(--text-dim);font-style:italic">Aucun sort dans le deck.</div>`;
-  } else {
-    html += `<div style="margin-bottom:0.3rem;display:grid;grid-template-columns:30px 1fr 55px 80px 1fr auto;gap:0.4rem;padding:0.3rem;background:var(--bg-panel);border-radius:4px">
-      <span style="font-family:'Cinzel',serif;font-size:0.65rem;color:var(--text-muted)">Actif</span>
-      <span style="font-family:'Cinzel',serif;font-size:0.65rem;color:var(--text-muted)">Nom</span>
-      <span style="font-family:'Cinzel',serif;font-size:0.65rem;color:var(--text-muted)">PM</span>
-      <span style="font-family:'Cinzel',serif;font-size:0.65rem;color:var(--text-muted)">Noyau</span>
-      <span style="font-family:'Cinzel',serif;font-size:0.65rem;color:var(--text-muted)">Effet</span>
-      <span></span>
+    <div style="background:rgba(226,185,111,0.05);border:1px solid rgba(226,185,111,0.15);border-radius:8px;padding:0.8rem;margin-bottom:1rem;font-size:0.8rem;color:var(--text-muted)">
+      <strong style="color:var(--gold)">Système de sorts maison</strong> — Chaque sort combine un <em>Noyau élémentaire</em> et une ou plusieurs <em>Runes d'effet</em>. Les dégâts sont basés sur l'arme équipée. Le soin de base commence à 1d4 sauf indication contraire.
     </div>`;
+
+  if (sorts.length===0) {
+    html += `<div class="empty-state" style="padding:2rem"><span class="icon">🔮</span><p>Aucun sort. Commence par choisir un noyau élémentaire !</p></div>`;
+  } else {
     sorts.forEach((s,i) => {
-      html += `<div class="sort-row">
-        <div class="toggle ${s.actif?'on':''}" onclick="${canEdit?`toggleSort(${i})`:''}"></div>
-        <span style="font-size:0.88rem;color:var(--text)">${s.nom||'?'}</span>
-        <span class="badge badge-blue" style="font-size:0.7rem">${s.pm||0} PM</span>
-        <span style="font-size:0.78rem;color:var(--text-muted)">${s.noyau||''}</span>
-        <span style="font-size:0.82rem;color:var(--text-muted);font-style:italic">${s.effet||''} ${s.des?'| '+s.des:''}</span>
-        ${canEdit?`<div style="display:flex;gap:0.2rem">
-          <button class="btn-icon" onclick="editSort(${i})">✏️</button>
-          <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
-        </div>`:'<span></span>'}
+      const runesHtml = (s.runes||[]).map(r=>`<span class="badge badge-blue" style="font-size:0.65rem">${r}</span>`).join(' ');
+      html += `<div style="background:rgba(255,255,255,0.03);border:1px solid ${s.actif?'rgba(226,185,111,0.3)':'var(--border)'};border-radius:8px;padding:1rem;margin-bottom:0.6rem;transition:all 0.2s">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.5rem">
+          <div style="display:flex;align-items:center;gap:0.6rem">
+            <div class="toggle ${s.actif?'on':''}" onclick="${canEdit?`toggleSort(${i})`:''}" style="flex-shrink:0"></div>
+            <div>
+              <div style="font-weight:700;font-size:0.92rem;color:var(--text)">${s.nom||'Sort sans nom'}</div>
+              <div style="display:flex;gap:0.4rem;margin-top:0.2rem;flex-wrap:wrap;align-items:center">
+                ${s.noyau?`<span class="badge badge-gold" style="font-size:0.65rem">${s.noyau}</span>`:''}
+                ${runesHtml}
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:0.3rem;align-items:center">
+            <span class="badge badge-blue">${s.pm||0} PM</span>
+            ${canEdit?`<button class="btn-icon" onclick="editSort(${i})">✏️</button><button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>`:''}
+          </div>
+        </div>
+        ${s.effet?`<div style="font-size:0.82rem;color:var(--text-muted);padding-left:2.4rem;font-style:italic">${s.effet}</div>`:''}
+        ${s.degats?`<div style="font-size:0.82rem;color:var(--crimson-light);padding-left:2.4rem">⚔️ ${s.degats} (basé sur arme)</div>`:''}
+        ${s.soin?`<div style="font-size:0.82rem;color:#2ecc71;padding-left:2.4rem">💚 Soin : ${s.soin}</div>`:''}
       </div>`;
     });
   }
+  html += `<div style="margin-top:0.8rem;font-size:0.75rem;color:var(--text-dim);font-style:italic">✨ Magie à mains nues : +2 PM, pas d'effet de set.</div>`;
   html += '</div>';
   return html;
 }
 
 function renderCharEquip(c, canEdit) {
-  const slots = ['Tête','Torse','Bottes','Amulette','Anneau','Objet magique','Main principale','Main secondaire'];
   const equip = c.equipement || {};
+  const armorSlots = ['Tête','Torse','Bottes','Amulette','Anneau','Objet magique'];
+  const weaponSlots = ['Main principale','Main secondaire'];
+  const mod = v=>{ const m=Math.floor((v-10)/2); return m>=0?'+'+m:String(m); };
+  const stats = c.stats||{}; const bonus = c.statsBonus||{};
+  const fo = (stats.force||10)+(bonus.force||0);
+  const dex = (stats.dexterite||8)+(bonus.dexterite||0);
+
   let html = `<div class="char-section">
-    <div class="char-section-title">🛡️ Équipement Porté</div>
-    <table class="data-table"><thead><tr>
-      <th>Emplacement</th><th>Nom</th><th>Trait</th><th>Fo</th><th>Dex</th><th>In</th><th>Sa</th><th>Co</th><th>Ch</th><th>CA</th>
-      ${canEdit?'<th></th>':''}
-    </tr></thead><tbody>`;
-  slots.forEach(slot => {
+    <div class="char-section-title">⚔️ Armes & Combat</div>`;
+
+  // Weapons
+  weaponSlots.forEach(slot => {
     const item = equip[slot]||{};
-    html += `<tr>
-      <td style="font-family:'Cinzel',serif;font-size:0.75rem;color:var(--text-muted)">${slot}</td>
-      <td style="font-size:0.85rem">${item.nom||'—'}</td>
-      <td style="font-size:0.78rem;color:var(--text-muted);font-style:italic">${item.trait||''}</td>
-      ${['fo','dex','in','sa','co','ch'].map(s=>`<td style="text-align:center;font-size:0.82rem;color:${item[s]>0?'var(--gold)':item[s]<0?'var(--crimson-light)':'var(--text-dim)'}">${item[s]?item[s]>0?'+'+item[s]:item[s]:'—'}</td>`).join('')}
-      <td style="text-align:center;font-size:0.82rem;color:var(--gold)">${item.ca?'+'+item.ca:'—'}</td>
-      ${canEdit?`<td><button class="btn-icon" onclick="editEquipSlot('${slot}')">✏️</button></td>`:''}
-    </tr>`;
+    const statKey = item.statAttaque||'force';
+    const statVal = statKey==='dexterite'?dex:fo;
+    const modVal = mod(statVal);
+    html += `<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:0.8rem">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.6rem">
+        <div>
+          <div style="font-size:0.62rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em;font-weight:700;margin-bottom:0.2rem">${slot}</div>
+          <div style="font-weight:700;font-size:0.95rem;color:var(--text)">${item.nom||'— Vide —'}</div>
+          ${item.trait?`<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.1rem">${item.trait}</div>`:''}
+        </div>
+        ${canEdit?`<button class="btn btn-outline btn-sm" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
+      </div>
+      ${item.nom?`<div style="display:flex;gap:1rem;flex-wrap:wrap">
+        <div style="text-align:center">
+          <div style="font-size:0.62rem;color:var(--text-dim);text-transform:uppercase;margin-bottom:0.2rem">Toucher</div>
+          <div style="color:var(--gold);font-weight:700">1d20 ${modVal}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:0.62rem;color:var(--text-dim);text-transform:uppercase;margin-bottom:0.2rem">Dégâts</div>
+          <div style="color:var(--crimson-light);font-weight:700">${item.degats||'—'} ${modVal}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:0.62rem;color:var(--text-dim);text-transform:uppercase;margin-bottom:0.2rem">Type</div>
+          <div style="font-size:0.82rem;color:var(--text-muted)">${item.typeArme||'—'}</div>
+        </div>
+        ${item.portee?`<div style="text-align:center">
+          <div style="font-size:0.62rem;color:var(--text-dim);text-transform:uppercase;margin-bottom:0.2rem">Portée</div>
+          <div style="font-size:0.82rem;color:var(--text-muted)">${item.portee}</div>
+        </div>`:''}
+        ${item.particularite?`<div style="flex:1;min-width:150px">
+          <div style="font-size:0.62rem;color:var(--text-dim);text-transform:uppercase;margin-bottom:0.2rem">Particularité</div>
+          <div style="font-size:0.8rem;color:var(--text-muted);font-style:italic">${item.particularite}</div>
+        </div>`:''}
+      </div>`:'<div style="font-size:0.82rem;color:var(--text-dim);font-style:italic">Aucune arme équipée</div>'}
+    </div>`;
   });
-  // Totals
+
+  html += `<div style="font-size:0.78rem;color:var(--text-dim);font-style:italic;margin-bottom:1rem">🎲 Critique : Maximum des dés + relance les dés de dégâts.</div>`;
+  html += `</div>`;
+
+  // Actions rapides
+  html += `<div class="char-section">
+    <div class="char-section-title">📋 Actions de Combat</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.4rem">
+      ${[
+        ['⚡','Action','Frappe / Sort / Compétence'],
+        ['🏃','Action','Courir (×2 vitesse)'],
+        ['🛡️','Action','Se désengager'],
+        ['👁️','Action','Se cacher'],
+        ['🤝','Action','Aider (retire état allié CaC)'],
+        ['🔄','Action','Changer d\'arme'],
+      ].map(([icon,type,desc])=>`<div style="display:flex;gap:0.5rem;padding:0.4rem;background:rgba(255,255,255,0.02);border-radius:6px">
+        <span style="font-size:1rem">${icon}</span>
+        <div><span style="font-size:0.68rem;color:var(--text-dim);text-transform:uppercase;font-weight:700">${type}</span>
+        <div style="font-size:0.8rem;color:var(--text-muted)">${desc}</div></div>
+      </div>`).join('')}
+    </div>
+    <div style="margin-top:0.6rem;font-size:0.75rem;color:var(--text-dim);font-style:italic">1 Action + 1 Action Bonus + 1 Réaction + Déplacement / tour</div>
+  </div>`;
+
+  // Armor
+  html += `<div class="char-section">
+    <div class="char-section-title">🛡️ Armures & Accessoires</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.6rem">`;
+  armorSlots.forEach(slot => {
+    const item = equip[slot]||{};
+    const hasBonus = ['fo','dex','in','sa','co','ch','ca'].some(k=>item[k]);
+    html += `<div style="background:rgba(255,255,255,0.02);border:1px solid ${item.nom?'rgba(226,185,111,0.2)':'var(--border)'};border-radius:8px;padding:0.8rem">
+      <div style="font-size:0.6rem;color:var(--text-dim);text-transform:uppercase;font-weight:700;margin-bottom:0.3rem">${slot}</div>
+      <div style="font-weight:600;font-size:0.85rem;color:${item.nom?'var(--text)':'var(--text-dim)'}">${item.nom||'—'}</div>
+      ${item.trait?`<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.1rem;font-style:italic">${item.trait}</div>`:''}
+      ${hasBonus?`<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:0.4rem">
+        ${['fo','dex','in','sa','co','ch'].filter(k=>item[k]).map(k=>`<span class="badge badge-gold" style="font-size:0.6rem">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}
+        ${item.ca?`<span class="badge badge-blue" style="font-size:0.6rem">CA +${item.ca}</span>`:''}
+      </div>`:''}
+      ${canEdit?`<button class="btn-icon" style="margin-top:0.4rem;font-size:0.75rem" onclick="editEquipSlot('${slot}')">✏️ Équiper</button>`:''}
+    </div>`;
+  });
+
   const totals = {fo:0,dex:0,in:0,sa:0,co:0,ch:0,ca:0};
-  Object.values(equip).forEach(item=>{['fo','dex','in','sa','co','ch','ca'].forEach(s=>{totals[s]+=(item[s]||0);})});
-  html += `<tr style="background:var(--bg-panel)">
-    <td colspan="2" style="font-family:'Cinzel',serif;font-size:0.7rem;color:var(--text-muted)">TOTAL BONUS</td>
-    ${['fo','dex','in','sa','co','ch'].map(s=>`<td style="text-align:center;font-size:0.82rem;color:var(--gold)">${totals[s]?totals[s]>0?'+'+totals[s]:totals[s]:'0'}</td>`).join('')}
-    <td style="text-align:center;font-size:0.82rem;color:var(--gold)">${totals.ca?'+'+totals.ca:'0'}</td>
-    ${canEdit?'<td></td>':''}
-  </tr>`;
-  html += '</tbody></table></div>';
+  Object.values(equip).forEach(item=>{['fo','dex','in','sa','co','ch','ca'].forEach(s=>{totals[s]+=(item[s]||0);});});
+  const totalStr = Object.entries(totals).filter(([,v])=>v!==0).map(([k,v])=>`${k.toUpperCase()} ${v>0?'+'+v:v}`).join(' · ');
+  if (totalStr) html += `<div style="margin-top:0.6rem;padding:0.5rem;background:rgba(226,185,111,0.06);border-radius:6px;font-size:0.78rem;color:var(--gold)">Bonus total : ${totalStr}</div>`;
+  html += `</div></div>`;
   return html;
 }
 
@@ -2444,7 +2804,20 @@ async function adjustStat(stat, delta, charId) {
   const newVal = Math.max(0,Math.min(maxVal,cur+delta));
   c[stat] = newVal;
   await updateInCol('characters',c.id,{[stat]:newVal});
-  renderCharSheet(c);
+
+  // Update only the vital display — do NOT re-render the whole sheet
+  const pct = Math.max(0,Math.min(100,Math.round(newVal/maxVal*100)));
+  if (stat==='pvActuel') {
+    const valEl = document.getElementById('pv-val');
+    const barEl = document.getElementById('pv-bar');
+    if (valEl) { valEl.textContent=newVal; valEl.style.color=pct<25?'var(--crimson-light)':pct<50?'#e67e22':'#2ecc71'; }
+    if (barEl) { barEl.style.width=pct+'%'; barEl.className='hp-bar-fill '+(pct>50?'high':pct>25?'mid':''); }
+  } else {
+    const valEl = document.getElementById('pm-val');
+    const barEl = document.getElementById('pm-bar');
+    if (valEl) valEl.textContent=newVal;
+    if (barEl) barEl.style.width=pct+'%';
+  }
 }
 
 async function saveNotes() {
@@ -2454,6 +2827,7 @@ async function saveNotes() {
   c.notes = notes;
   await updateInCol('characters',c.id,{notes});
   showNotif('Notes sauvegardées !','success');
+  // notes don't need re-render
 }
 
 async function toggleSort(idx) {
@@ -2462,35 +2836,35 @@ async function toggleSort(idx) {
   sorts[idx].actif = !sorts[idx].actif;
   c.deck_sorts = sorts;
   await updateInCol('characters',c.id,{deck_sorts:sorts});
-  showCharTab('deck',document.querySelector('#char-tabs .tab:nth-child(3)'));
+  renderCharSheet(c, 'deck');
 }
 
 async function toggleQuete(idx) {
   const c = STATE.activeChar; if(!c) return;
   c.quetes[idx].valide = !c.quetes[idx].valide;
   await updateInCol('characters',c.id,{quetes:c.quetes});
-  showCharTab('quetes',document.querySelector('#char-tabs .tab:nth-child(6)'));
+  renderCharSheet(c,'quetes');
 }
 
 async function deleteQuete(idx) {
   const c = STATE.activeChar; if(!c) return;
   c.quetes.splice(idx,1);
   await updateInCol('characters',c.id,{quetes:c.quetes});
-  showCharTab('quetes',document.querySelector('#char-tabs .tab:nth-child(6)'));
+  renderCharSheet(c,'quetes');
 }
 
 async function deleteSort(idx) {
   const c = STATE.activeChar; if(!c) return;
   c.deck_sorts.splice(idx,1);
   await updateInCol('characters',c.id,{deck_sorts:c.deck_sorts});
-  showCharTab('deck',document.querySelector('#char-tabs .tab:nth-child(3)'));
+  renderCharSheet(c, 'deck');
 }
 
 async function deleteInvItem(idx) {
   const c = STATE.activeChar; if(!c) return;
   c.inventaire.splice(idx,1);
   await updateInCol('characters',c.id,{inventaire:c.inventaire});
-  showCharTab('inventaire',document.querySelector('#char-tabs .tab:nth-child(5)'));
+  renderCharSheet(c, 'inventaire');
 }
 
 async function deleteChar(id) {
@@ -2513,66 +2887,42 @@ function closeModal(e) {
     document.getElementById('modal-overlay').classList.remove('show');
 }
 
-// ── New Character ──
-function openNewCharModal() {
-  openModal('✨ Nouveau Personnage', `
-    <div class="form-group"><label>Nom du personnage</label><input class="input-field" id="nc-nom" placeholder="Aragorn le Rôdeur..."></div>
-    <div class="form-group"><label>Titre</label><input class="input-field" id="nc-titre" placeholder="Titre ou surnom"></div>
-    <div class="grid-2" style="gap:1rem">
-      <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="nc-niveau" value="1" min="1"></div>
-      <div class="form-group"><label>Or</label><input type="number" class="input-field" id="nc-or" value="0" min="0"></div>
-    </div>
-    <div class="grid-2" style="gap:1rem">
-      <div class="form-group"><label>PV de base</label><input type="number" class="input-field" id="nc-pv" value="10" min="1"></div>
-      <div class="form-group"><label>PM de base</label><input type="number" class="input-field" id="nc-pm" value="10" min="1"></div>
-    </div>
-    <div class="grid-3" style="gap:0.5rem">
-      <div class="form-group"><label>CA</label><input type="number" class="input-field" id="nc-ca" value="7" min="0"></div>
-      <div class="form-group"><label>Vitesse</label><input type="number" class="input-field" id="nc-vit" value="3" min="1"></div>
-      <div class="form-group"><label>EXP</label><input type="number" class="input-field" id="nc-exp" value="0" min="0"></div>
-    </div>
-    <hr class="divider">
-    <div style="font-family:'Cinzel',serif;font-size:0.75rem;color:var(--gold);margin-bottom:0.8rem">CARACTÉRISTIQUES DE BASE</div>
-    <div class="grid-3" style="gap:0.5rem">
-      ${['Force','Dextérité','Intelligence','Sagesse','Constitution','Charisme'].map((s,i)=>`<div class="form-group"><label>${s}</label><input type="number" class="input-field" id="nc-stat-${i}" value="${i===0||i===5?10:8}" min="1" max="20"></div>`).join('')}
-    </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveNewChar()">Créer le Personnage</button>
-  `);
-}
-
-async function saveNewChar() {
-  const keys = ['force','dexterite','intelligence','sagesse','constitution','charisme'];
-  const stats = {};
-  keys.forEach((k,i)=>{ stats[k]=parseInt(document.getElementById(`nc-stat-${i}`)?.value)||8; });
-  const pv = parseInt(document.getElementById('nc-pv')?.value)||10;
-  const pm = parseInt(document.getElementById('nc-pm')?.value)||10;
+// ── Instant New Character (no modal) ──
+async function createNewChar() {
   const data = {
     uid: STATE.user.uid,
     ownerPseudo: STATE.profile?.pseudo||'?',
-    nom: document.getElementById('nc-nom')?.value.trim()||'Sans nom',
-    titre: document.getElementById('nc-titre')?.value.trim()||'',
-    niveau: parseInt(document.getElementById('nc-niveau')?.value)||1,
-    or: parseInt(document.getElementById('nc-or')?.value)||0,
-    pvBase: pv, pvActuel: pv,
-    pmBase: pm, pmActuel: pm,
-    ca: parseInt(document.getElementById('nc-ca')?.value)||7,
-    vitesse: parseInt(document.getElementById('nc-vit')?.value)||3,
-    exp: parseInt(document.getElementById('nc-exp')?.value)||0,
-    palier: 100, stats, statsBonus:{},
+    nom: 'Nouveau personnage',
+    titre: '', titres: [],
+    niveau: 1, or: 0,
+    pvBase: 10, pvActuel: 10,
+    pmBase: 10, pmActuel: 10,
+    ca: 7, vitesse: 3, exp: 0, palier: 100,
+    stats: {force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10},
+    statsBonus: {},
     equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
   };
-  await addToCol('characters', data);
-  closeModal();
-  showNotif('Personnage créé !','success');
+  const id = await addToCol('characters', data);
+  showNotif('Personnage créé ! Modifie ses infos ci-dessous.','success');
   PAGES.characters();
 }
 
 // ── Edit Char Info ──
 function editCharInfo() {
   const c = STATE.activeChar; if(!c) return;
+  const titres = c.titres||[];
   openModal('✏️ Modifier le Personnage', `
     <div class="form-group"><label>Nom</label><input class="input-field" id="ei-nom" value="${c.nom||''}"></div>
-    <div class="form-group"><label>Titre</label><input class="input-field" id="ei-titre" value="${c.titre||''}"></div>
+    <div class="form-group">
+      <label>Titres <span style="color:var(--text-dim);font-weight:400">(plusieurs possibles)</span></label>
+      <div id="titres-list" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.5rem">
+        ${titres.map((t,i)=>`<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.2rem 0.6rem;background:rgba(226,185,111,0.1);border:1px solid rgba(226,185,111,0.25);border-radius:20px;font-size:0.8rem;color:var(--gold)">${t}<button onclick="removeTitre(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:0.7rem;padding:0;margin-left:0.2rem">✕</button></span>`).join('')}
+      </div>
+      <div style="display:flex;gap:0.4rem">
+        <input class="input-field" id="ei-titre-new" placeholder="Ajouter un titre..." style="flex:1">
+        <button class="btn btn-outline btn-sm" onclick="addTitre()">+ Ajouter</button>
+      </div>
+    </div>
     <div class="grid-2" style="gap:1rem">
       <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="ei-niveau" value="${c.niveau||1}"></div>
       <div class="form-group"><label>Or</label><input type="number" class="input-field" id="ei-or" value="${c.or||0}"></div>
@@ -2588,6 +2938,25 @@ function editCharInfo() {
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCharInfo()">Enregistrer</button>
   `);
+  window._editTitres = [...titres];
+}
+
+function addTitre() {
+  const input = document.getElementById('ei-titre-new');
+  const val = input?.value.trim();
+  if (!val) return;
+  window._editTitres = window._editTitres||[];
+  window._editTitres.push(val);
+  input.value='';
+  const list = document.getElementById('titres-list');
+  if (list) list.innerHTML = window._editTitres.map((t,i)=>`<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.2rem 0.6rem;background:rgba(226,185,111,0.1);border:1px solid rgba(226,185,111,0.25);border-radius:20px;font-size:0.8rem;color:var(--gold)">${t}<button onclick="removeTitre(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:0.7rem;padding:0;margin-left:0.2rem">✕</button></span>`).join('');
+}
+
+function removeTitre(idx) {
+  window._editTitres = window._editTitres||[];
+  window._editTitres.splice(idx,1);
+  const list = document.getElementById('titres-list');
+  if (list) list.innerHTML = window._editTitres.map((t,i)=>`<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.2rem 0.6rem;background:rgba(226,185,111,0.1);border:1px solid rgba(226,185,111,0.25);border-radius:20px;font-size:0.8rem;color:var(--gold)">${t}<button onclick="removeTitre(${i})" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:0.7rem;padding:0;margin-left:0.2rem">✕</button></span>`).join('');
 }
 
 async function saveCharInfo() {
@@ -2596,7 +2965,7 @@ async function saveCharInfo() {
   const pm = parseInt(document.getElementById('ei-pm')?.value)||10;
   const updates = {
     nom: document.getElementById('ei-nom')?.value.trim()||c.nom,
-    titre: document.getElementById('ei-titre')?.value.trim()||'',
+    titres: window._editTitres||[],
     niveau: parseInt(document.getElementById('ei-niveau')?.value)||1,
     or: parseInt(document.getElementById('ei-or')?.value)||0,
     pvBase: pv, pvActuel: Math.min(c.pvActuel||pv, pv),
@@ -2607,8 +2976,11 @@ async function saveCharInfo() {
   };
   Object.assign(c, updates);
   await updateInCol('characters', c.id, updates);
+  // Update pill name
+  const pills = document.querySelectorAll('#char-pills .char-pill');
+  pills.forEach(p=>{ if(p.classList.contains('active')) p.textContent=updates.nom; });
   closeModal(); showNotif('Personnage mis à jour !','success');
-  renderCharSheet(c);
+  renderCharSheet(c, window._currentCharTab||'carac');
 }
 
 // ── Edit Stats ──
@@ -2632,30 +3004,9 @@ async function saveCharStats() {
   c.stats = stats;
   await updateInCol('characters',c.id,{stats});
   closeModal(); showNotif('Stats mises à jour !','success');
-  renderCharSheet(c);
+  renderCharSheet(c, window._currentCharTab||'carac');
 }
 
-// ── Edit Combat ──
-function editCharCombat() {
-  const c = STATE.activeChar; if(!c) return;
-  openModal('⚔️ Modifier les Armes', `
-    <div style="font-family:'Cinzel',serif;font-size:0.75rem;color:var(--gold);margin-bottom:0.8rem">ARME PRINCIPALE</div>
-    <div class="form-group"><label>Nom</label><input class="input-field" id="cb-a1nom" value="${c.arme1nom||'Main principale'}"></div>
-    <div class="grid-2" style="gap:0.5rem">
-      <div class="form-group"><label>Dégâts (dés)</label><input class="input-field" id="cb-a1degats" value="${c.arme1degats||'1D10'}" placeholder="ex: 1D10"></div>
-      <div class="form-group"><label>Type</label><input class="input-field" id="cb-a1type" value="${c.arme1type||'Arme 1M CaC'}"></div>
-    </div>
-    <hr class="divider">
-    <div style="font-family:'Cinzel',serif;font-size:0.75rem;color:var(--gold);margin-bottom:0.8rem">ARME SECONDAIRE (optionnel)</div>
-    <div class="form-group"><label>Nom</label><input class="input-field" id="cb-a2nom" value="${c.arme2nom||''}"></div>
-    <div class="grid-3" style="gap:0.5rem">
-      <div class="form-group"><label>Toucher</label><input class="input-field" id="cb-a2toucher" value="${c.arme2toucher||''}"></div>
-      <div class="form-group"><label>Dégâts</label><input class="input-field" id="cb-a2degats" value="${c.arme2degats||''}"></div>
-      <div class="form-group"><label>Type</label><input class="input-field" id="cb-a2type" value="${c.arme2type||''}"></div>
-    </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCharCombat()">Enregistrer</button>
-  `);
-}
 
 async function saveCharCombat() {
   const c = STATE.activeChar; if(!c) return;
@@ -2671,50 +3022,76 @@ async function saveCharCombat() {
   Object.assign(c,updates);
   await updateInCol('characters',c.id,updates);
   closeModal(); showNotif('Armes mises à jour !','success');
-  renderCharSheet(c);
+  renderCharSheet(c, window._currentCharTab||'equip');
 }
 
-// ── Add Sort ──
 function addSort() {
   const c = STATE.activeChar; if(!c) return;
-  openModal('🃏 Ajouter un Sort', `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="s-nom" placeholder="Boule de feu..."></div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Coût PM</label><input type="number" class="input-field" id="s-pm" value="4" min="0"></div>
-      <div class="form-group"><label>Noyau</label><input class="input-field" id="s-noyau" placeholder="Force, *, Charisme..."></div>
-    </div>
-    <div class="form-group"><label>École</label><input class="input-field" id="s-ecole" placeholder="Puissance, Enchant., Guérison..."></div>
-    <div class="form-group"><label>Dés de dégâts</label><input class="input-field" id="s-des" placeholder="2D10 + Fo"></div>
-    <div class="form-group"><label>Effet</label><input class="input-field" id="s-effet" placeholder="à 1 cible, AoE 3x3..."></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveSort(-1)">Ajouter</button>
-  `);
+  openSortModal(-1, {});
 }
 
 function editSort(idx) {
   const c = STATE.activeChar; if(!c) return;
   const s = (c.deck_sorts||[])[idx];
-  openModal('✏️ Modifier un Sort', `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="s-nom" value="${s.nom||''}"></div>
+  openSortModal(idx, s);
+}
+
+function openSortModal(idx, s) {
+  const NOYAUX = ['Feu 🔥','Eau 💧','Terre 🪨','Vent 🌬️','Foudre ⚡','Ombre 🌑','Lumière ✨','Physique 💪','Arcane 🔮','* (Universel)'];
+  const RUNES = ['Puissance','Soin','Zone (AoE)','Rapide (AB)','Lent','Drain','Bouclier','Chaîne','Silence','Poison','Gel','Brûlure','Renverse','Téléport','Invocation','Invisibilité'];
+  const runesSel = s.runes||[];
+  openModal(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort / Compétence', `
+    <div class="form-group"><label>Nom du sort</label><input class="input-field" id="s-nom" value="${s.nom||''}" placeholder="Boule de feu, Frappe élémentaire..."></div>
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Coût PM</label><input type="number" class="input-field" id="s-pm" value="${s.pm||4}"></div>
-      <div class="form-group"><label>Noyau</label><input class="input-field" id="s-noyau" value="${s.noyau||''}"></div>
+      <div class="form-group"><label>Coût PM</label><input type="number" class="input-field" id="s-pm" value="${s.pm||4}" min="0"></div>
+      <div class="form-group"><label>Noyau élémentaire</label>
+        <select class="input-field" id="s-noyau">
+          <option value="">— Choisir —</option>
+          ${NOYAUX.map(n=>`<option value="${n}" ${s.noyau===n?'selected':''}>${n}</option>`).join('')}
+        </select>
+      </div>
     </div>
-    <div class="form-group"><label>École</label><input class="input-field" id="s-ecole" value="${s.ecole||''}"></div>
-    <div class="form-group"><label>Dés de dégâts</label><input class="input-field" id="s-des" value="${s.des||''}"></div>
-    <div class="form-group"><label>Effet</label><input class="input-field" id="s-effet" value="${s.effet||''}"></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveSort(${idx})">Enregistrer</button>
+    <div class="form-group">
+      <label>Runes d'effet <span style="color:var(--text-dim);font-weight:400">(plusieurs possibles)</span></label>
+      <div style="display:flex;flex-wrap:wrap;gap:0.4rem;padding:0.8rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px" id="runes-selector">
+        ${RUNES.map(r=>`<span class="rune-chip ${runesSel.includes(r)?'selected':''}" onclick="toggleRune(this,'${r}')" style="padding:0.3rem 0.7rem;border-radius:20px;cursor:pointer;font-size:0.75rem;border:1px solid ${runesSel.includes(r)?'rgba(52,152,219,0.5)':'var(--border)'};background:${runesSel.includes(r)?'rgba(52,152,219,0.15)':'rgba(255,255,255,0.03)'};color:${runesSel.includes(r)?'var(--blue)':'var(--text-muted)'};transition:all 0.15s">${r}</span>`).join('')}
+      </div>
+      <input type="hidden" id="s-runes" value="${runesSel.join(',')}">
+    </div>
+    <hr class="divider">
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group"><label>Dégâts <span style="color:var(--text-dim);font-weight:400">(basé sur arme)</span></label><input class="input-field" id="s-degats" value="${s.degats||''}" placeholder="= arme, +1D4..."></div>
+      <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(base 1d4)</span></label><input class="input-field" id="s-soin" value="${s.soin||''}" placeholder="1d4, 2d6+Sa..."></div>
+    </div>
+    <div class="form-group"><label>Description / Effet</label><textarea class="input-field" id="s-effet" rows="3" placeholder="Décris l'effet du sort...">${s.effet||''}</textarea></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="saveSort(${idx})">Enregistrer</button>
   `);
+}
+
+function toggleRune(el, rune) {
+  const input = document.getElementById('s-runes');
+  let runes = input.value ? input.value.split(',').filter(Boolean) : [];
+  if (runes.includes(rune)) {
+    runes = runes.filter(r=>r!==rune);
+    el.style.background='rgba(255,255,255,0.03)'; el.style.borderColor='var(--border)'; el.style.color='var(--text-muted)'; el.classList.remove('selected');
+  } else {
+    runes.push(rune);
+    el.style.background='rgba(52,152,219,0.15)'; el.style.borderColor='rgba(52,152,219,0.5)'; el.style.color='var(--blue)'; el.classList.add('selected');
+  }
+  input.value = runes.join(',');
 }
 
 async function saveSort(idx) {
   const c = STATE.activeChar; if(!c) return;
   const sorts = c.deck_sorts||[];
+  const runesRaw = document.getElementById('s-runes')?.value||'';
   const newSort = {
-    nom: document.getElementById('s-nom')?.value||'?',
+    nom: document.getElementById('s-nom')?.value||'Sort',
     pm: parseInt(document.getElementById('s-pm')?.value)||4,
     noyau: document.getElementById('s-noyau')?.value||'',
-    ecole: document.getElementById('s-ecole')?.value||'',
-    des: document.getElementById('s-des')?.value||'',
+    runes: runesRaw ? runesRaw.split(',').filter(Boolean) : [],
+    degats: document.getElementById('s-degats')?.value||'',
+    soin: document.getElementById('s-soin')?.value||'',
     effet: document.getElementById('s-effet')?.value||'',
     actif: idx>=0 ? sorts[idx].actif : false,
   };
@@ -2722,53 +3099,85 @@ async function saveSort(idx) {
   c.deck_sorts=sorts;
   await updateInCol('characters',c.id,{deck_sorts:sorts});
   closeModal(); showNotif('Sort enregistré !','success');
-  showCharTab('deck',document.querySelector('#char-tabs .tab:nth-child(3)'));
+  renderCharSheet(c,'deck');
 }
 
 // ── Equip Slot ──
 function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const item = (c.equipement||{})[slot]||{};
-  openModal(`🛡️ ${slot}`, `
-    <div class="form-group"><label>Nom de l'équipement</label><input class="input-field" id="eq-nom" value="${item.nom||''}" placeholder="Heaume de Fer..."></div>
-    <div class="form-group"><label>Trait</label><input class="input-field" id="eq-trait" value="${item.trait||''}" placeholder="Lourd, Magique..."></div>
-    <div style="font-family:'Cinzel',serif;font-size:0.72rem;color:var(--gold);margin-bottom:0.5rem">BONUS DE STATISTIQUES</div>
+  const isWeapon = slot.startsWith('Main');
+  openModal(`${isWeapon?'⚔️':'🛡️'} ${slot}`, `
+    <div class="form-group"><label>Nom</label><input class="input-field" id="eq-nom" value="${item.nom||''}" placeholder="${isWeapon?'Épée longue, Arc court...':'Heaume de Fer...'}"></div>
+    <div class="form-group"><label>Trait</label><input class="input-field" id="eq-trait" value="${item.trait||''}" placeholder="${isWeapon?'Lourd, Polyvalent, Finesse...':'Lourd, Magique...'}"></div>
+    ${isWeapon?`
+    <hr class="divider">
+    <div style="font-size:0.72rem;color:var(--gold);font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.8rem">Stats de Combat</div>
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group"><label>Dégâts (dés)</label><input class="input-field" id="eq-degats" value="${item.degats||'1D10'}" placeholder="1D10, 2D6..."></div>
+      <div class="form-group"><label>Stat d'attaque</label>
+        <select class="input-field" id="eq-stat-attaque">
+          <option value="force" ${(item.statAttaque||'force')==='force'?'selected':''}>Force</option>
+          <option value="dexterite" ${item.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
+          <option value="intelligence" ${item.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group"><label>Type d'arme</label><input class="input-field" id="eq-type-arme" value="${item.typeArme||''}" placeholder="CaC 1M, Dist., Magique..."></div>
+      <div class="form-group"><label>Portée</label><input class="input-field" id="eq-portee" value="${item.portee||''}" placeholder="CaC, 18m..."></div>
+    </div>
+    <div class="form-group"><label>Particularité</label><input class="input-field" id="eq-particularite" value="${item.particularite||''}" placeholder="(Réaction) Attaque d'opportunité..."></div>
+    `:`
+    <hr class="divider">
+    <div style="font-size:0.72rem;color:var(--gold);font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.8rem">Bonus de Statistiques</div>
     <div class="grid-4" style="gap:0.5rem">
       ${[['fo','Force'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha'],['ca','CA']].map(([k,l])=>`
         <div class="form-group"><label>${l}</label><input type="number" class="input-field" id="eq-${k}" value="${item[k]||0}"></div>`).join('')}
+    </div>`}
+    <div style="display:flex;gap:0.5rem;margin-top:1rem">
+      <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Enregistrer</button>
+      <button class="btn btn-danger" onclick="clearEquipSlot('${slot}')">Retirer</button>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveEquipSlot('${slot}')">Enregistrer</button>
-    <button class="btn btn-danger" style="width:100%;margin-top:0.5rem" onclick="clearEquipSlot('${slot}')">Retirer l'équipement</button>
   `);
 }
 
 async function saveEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equip = c.equipement||{};
-  equip[slot] = {
-    nom: document.getElementById('eq-nom')?.value||'',
-    trait: document.getElementById('eq-trait')?.value||'',
-    fo: parseInt(document.getElementById('eq-fo')?.value)||0,
-    dex: parseInt(document.getElementById('eq-dex')?.value)||0,
-    in: parseInt(document.getElementById('eq-in')?.value)||0,
-    sa: parseInt(document.getElementById('eq-sa')?.value)||0,
-    co: parseInt(document.getElementById('eq-co')?.value)||0,
-    ch: parseInt(document.getElementById('eq-ch')?.value)||0,
-    ca: parseInt(document.getElementById('eq-ca')?.value)||0,
-  };
-  c.equipement=equip;
-  // Recalculate stat bonuses from equip
+  const isWeapon = slot.startsWith('Main');
+  if (isWeapon) {
+    equip[slot] = {
+      nom: document.getElementById('eq-nom')?.value||'',
+      trait: document.getElementById('eq-trait')?.value||'',
+      degats: document.getElementById('eq-degats')?.value||'1D10',
+      statAttaque: document.getElementById('eq-stat-attaque')?.value||'force',
+      typeArme: document.getElementById('eq-type-arme')?.value||'',
+      portee: document.getElementById('eq-portee')?.value||'',
+      particularite: document.getElementById('eq-particularite')?.value||'',
+    };
+  } else {
+    equip[slot] = {
+      nom: document.getElementById('eq-nom')?.value||'',
+      trait: document.getElementById('eq-trait')?.value||'',
+      fo: parseInt(document.getElementById('eq-fo')?.value)||0,
+      dex: parseInt(document.getElementById('eq-dex')?.value)||0,
+      in: parseInt(document.getElementById('eq-in')?.value)||0,
+      sa: parseInt(document.getElementById('eq-sa')?.value)||0,
+      co: parseInt(document.getElementById('eq-co')?.value)||0,
+      ch: parseInt(document.getElementById('eq-ch')?.value)||0,
+      ca: parseInt(document.getElementById('eq-ca')?.value)||0,
+    };
+  }
+  c.equipement = equip;
   const bonus={fo:0,dex:0,in:0,sa:0,co:0,ch:0};
-  Object.values(equip).forEach(it=>{
-    bonus.fo+=(it.fo||0); bonus.dex+=(it.dex||0); bonus.in+=(it.in||0);
-    bonus.sa+=(it.sa||0); bonus.co+=(it.co||0); bonus.ch+=(it.ch||0);
-  });
-  c.statsBonus = {force:bonus.fo,dexterite:bonus.dex,intelligence:bonus.in,sagesse:bonus.sa,constitution:bonus.co,charisme:bonus.ch};
-  const caBonus = Object.values(equip).reduce((sum,it)=>sum+(it.ca||0),0);
-  c.ca = 7+caBonus;
+  Object.values(equip).forEach(it=>{ bonus.fo+=(it.fo||0);bonus.dex+=(it.dex||0);bonus.in+=(it.in||0);bonus.sa+=(it.sa||0);bonus.co+=(it.co||0);bonus.ch+=(it.ch||0); });
+  c.statsBonus={force:bonus.fo,dexterite:bonus.dex,intelligence:bonus.in,sagesse:bonus.sa,constitution:bonus.co,charisme:bonus.ch};
+  const caBonus=Object.values(equip).reduce((sum,it)=>sum+(it.ca||0),0);
+  c.ca=7+caBonus;
   await updateInCol('characters',c.id,{equipement:equip,statsBonus:c.statsBonus,ca:c.ca});
   closeModal(); showNotif('Équipement mis à jour !','success');
-  renderCharSheet(c);
+  renderCharSheet(c,'equip');
 }
 
 async function clearEquipSlot(slot) {
@@ -2786,7 +3195,7 @@ async function clearEquipSlot(slot) {
   c.ca=7+caBonus;
   await updateInCol('characters',c.id,{equipement:equip,statsBonus:c.statsBonus,ca:c.ca});
   closeModal(); showNotif('Emplacement libéré.','success');
-  renderCharSheet(c);
+  renderCharSheet(c, 'equip');
 }
 
 // ── Add Inventory ──
@@ -2829,7 +3238,7 @@ async function saveInvItem(idx) {
   c.inventaire=inv;
   await updateInCol('characters',c.id,{inventaire:inv});
   closeModal(); showNotif('Inventaire mis à jour !','success');
-  showCharTab('inventaire',document.querySelector('#char-tabs .tab:nth-child(5)'));
+  renderCharSheet(c, 'inventaire');
 }
 
 // ── Add Quete ──
@@ -2854,7 +3263,7 @@ async function saveQuete() {
   c.quetes=quetes;
   await updateInCol('characters',c.id,{quetes});
   closeModal(); showNotif('Quête ajoutée !','success');
-  showCharTab('quetes',document.querySelector('#char-tabs .tab:nth-child(6)'));
+  renderCharSheet(c,'quetes');
 }
 
 // ══════════════════════════════════════════════
