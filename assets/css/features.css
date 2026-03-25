@@ -729,7 +729,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 ════════════════════════════════════════════════ */
 .cs-top {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 400px 1fr;
   gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -741,10 +741,10 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-identity-panel {
   background: var(--bg-card);
   border-right: 1px solid var(--border);
-  padding: 1.2rem;
+  padding: 1.1rem 1.2rem;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 0.75rem;
 }
 
 /* Photo + nom */
@@ -784,7 +784,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 }
 .cs-name {
   font-family: 'Outfit', sans-serif;
-  font-size: 1.15rem; font-weight: 800;
+  font-size: 1.25rem; font-weight: 800;
   letter-spacing: -0.02em; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 160px;
@@ -847,8 +847,8 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-vital-block {
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
 }
 .cs-vital-label {
   font-size: 0.6rem; font-weight: 700;
@@ -891,12 +891,14 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   gap: 0.4rem;
 }
 .cs-stat-chip {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.04);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.4rem 0.3rem;
+  border-radius: 10px;
+  padding: 0.45rem 0.35rem;
   text-align: center;
+  transition: background 0.15s;
 }
+.cs-stat-chip:hover { background: rgba(255,255,255,0.07); }
 .cs-chip-label {
   font-size: 0.58rem; color: var(--text-dim);
   font-weight: 700; letter-spacing: 0.08em;
@@ -904,7 +906,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   margin-bottom: 0.2rem;
 }
 .cs-chip-val {
-  font-size: 1rem; font-weight: 800;
+  font-size: 1.05rem; font-weight: 800;
   color: var(--text); font-family: 'Outfit', sans-serif;
   line-height: 1;
 }
@@ -912,10 +914,10 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 /* ── BLOC DROIT : Caractéristiques ──────────────── */
 .cs-carac-panel {
   background: var(--bg-card2, var(--bg-card));
-  padding: 1.2rem;
+  padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 0.6rem;
 }
 .cs-carac-panel-title {
   font-size: 0.65rem; font-weight: 700;
@@ -938,24 +940,29 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 0.7rem 0.4rem;
+  padding: 0.65rem 0.3rem 0.55rem;
   text-align: center;
-  transition: all 0.18s;
+  transition: border-color 0.18s, background 0.18s;
+  position: relative;
 }
-.cs-carac-card:hover { border-color: rgba(79,140,255,0.22); }
+.cs-carac-card:hover { 
+  border-color: rgba(79,140,255,0.30);
+  background: rgba(79,140,255,0.04);
+}
+.cs-carac-card.cs-editable { cursor: pointer; }
 .cs-carac-abbr {
   font-size: 0.6rem; color: var(--text-dim);
   letter-spacing: 0.1em; text-transform: uppercase;
   font-weight: 700; margin-bottom: 0.25rem;
 }
 .cs-carac-val {
-  font-size: 1.45rem; font-weight: 800;
+  font-size: 1.3rem; font-weight: 800;
   color: var(--text); line-height: 1;
   font-family: 'Outfit', sans-serif;
 }
 .cs-carac-mod {
-  font-size: 0.88rem; font-weight: 700;
-  margin-top: 0.2rem; line-height: 1;
+  font-size: 0.82rem; font-weight: 700;
+  margin-top: 0.15rem; line-height: 1;
 }
 .cs-carac-mod.pos { color: var(--green); }
 .cs-carac-mod.neg { color: var(--crimson-light); }
@@ -976,9 +983,11 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-base-chip {
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
-  border-radius: 8px; padding: 0.4rem 0.3rem;
+  border-radius: 10px; padding: 0.5rem 0.35rem;
   text-align: center;
+  transition: background 0.15s;
 }
+.cs-base-chip:hover { background: rgba(255,255,255,0.06); }
 .cs-base-chip-label {
   font-size: 0.55rem; color: var(--text-dim);
   text-transform: uppercase; letter-spacing: 0.1em;
@@ -1063,6 +1072,9 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 }
 .cs-inline-input:focus { box-shadow: 0 0 0 2px rgba(79,140,255,0.25); }
 .cs-inline-num { width: 60px; text-align: center; }
+.cs-inline-num::-webkit-inner-spin-button,
+.cs-inline-num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cs-inline-num { -moz-appearance: textfield; }
 
 /* ── Combat ─────────────────────────────────────── */
 .cs-weapon-row {
