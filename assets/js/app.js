@@ -1,55 +1,116 @@
-// ══════════════════════════════════════════════
-// APP.JS — Point d'entrée unique
-// Remplace les 15+ balises <script defer> dans
-// index.html par un seul <script type="module">
-// ══════════════════════════════════════════════
+// assets/js/app.js
+// Point d'entrée robuste : le coeur de l'app démarre même si une feature casse.
 
-// ── 1. Bootstrap Firebase + auth listener ──────
+// ──────────────────────────────────────────────
+// 1) Imports coeur obligatoires
+// ──────────────────────────────────────────────
 import './core/init.js';
 
-// ── 2. Auth UI ─────────────────────────────────
-import { switchAuthTab, doLogin, doRegister, doLogout } from './core/auth.js';
+import {
+  switchAuthTab,
+  doLogin,
+  doRegister,
+  doLogout,
+  showAuth,
+  showApp,
+  initAuth
+} from './core/auth.js';
 
-// ── 3. Navigation + délégation d'événements ────
-import { navigate, initEventDelegation } from './core/navigation.js';
-
-// ── 4. Shared ──────────────────────────────────
-import { openModal, closeModal, closeModalDirect } from './shared/modal.js';
-import { showNotif }                               from './shared/notifications.js';
-
-// ── 5. Features ────────────────────────────────
-import './features/characters.js';
-import './features/shop.js';
-import './features/npcs.js';
-import './features/story.js';
-import './features/bastion.js';
-import './features/world.js';
-import './features/achievements.js';
-import './features/collection.js';
-import './features/players.js';
-import './features/tutorial.js';
-import './features/informations.js';
-import './features/recettes.js';
-import './features/bestiary.js';
-import './features/photo-cropper.js';
-
-// ── 6. Exposition temporaire sur window ────────
-// A supprimer progressivement au fur et a mesure
-// que les onclick inline sont migres vers data-action
-Object.assign(window, {
-  switchAuthTab, doLogin, doRegister, doLogout,
+import {
   navigate,
-  openModal, closeModal, closeModalDirect,
-  showNotif,
+  initEventDelegation
+} from './core/navigation.js';
+
+import {
+  openModal,
+  closeModal,
+  closeModalDirect
+} from './shared/modal.js';
+
+import {
+  showNotif
+} from './shared/notifications.js';
+
+// ──────────────────────────────────────────────
+// 2) Exposition globale temporaire
+// Permet de rester compatible avec les anciens onclick
+// ──────────────────────────────────────────────
+Object.assign(window, {
+  switchAuthTab,
+  doLogin,
+  doRegister,
+  doLogout,
+  showAuth,
+  showApp,
+  navigate,
+  openModal,
+  closeModal,
+  closeModalDirect,
+  showNotif
 });
 
-// ── 7. Delegation d'evenements ─────────────────
-initEventDelegation();
+// ──────────────────────────────────────────────
+// 3) Initialisation coeur
+// ──────────────────────────────────────────────
+try {
+  initAuth();
+} catch (error) {
+  console.error('[app] initAuth failed:', error);
+}
 
-// ── 8. Overlay modal (clic exterieur) ──────────
-document.getElementById('modal-overlay')
-  ?.addEventListener('click', (e) => {
-    if (e.target === document.getElementById('modal-overlay')) {
-      closeModalDirect();
+try {
+  initEventDelegation();
+} catch (error) {
+  console.error('[app] initEventDelegation failed:', error);
+}
+
+// Overlay modal : clic extérieur
+try {
+  const overlay = document.getElementById('modal-overlay');
+  if (overlay) {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeModalDirect();
+      }
+    });
+  }
+} catch (error) {
+  console.error('[app] modal overlay binding failed:', error);
+}
+
+// ──────────────────────────────────────────────
+// 4) Chargement des features en mode tolérant
+// Une feature cassée ne bloque plus le login
+// ──────────────────────────────────────────────
+const featureModules = [
+  './features/characters.js',
+  './features/shop.js',
+  './features/npcs.js',
+  './features/story.js',
+  './features/bastion.js',
+  './features/world.js',
+  './features/achievements.js',
+  './features/collection.js',
+  './features/players.js',
+  './features/tutorial.js',
+  './features/informations.js',
+  './features/recettes.js',
+  './features/bestiary.js',
+  './features/photo-cropper.js'
+];
+
+async function loadFeaturesSafely() {
+  const results = await Promise.allSettled(
+    featureModules.map((path) => import(path))
+  );
+
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.error(`[app] feature failed: ${featureModules[index]}`, result.reason);
     }
   });
+}
+
+loadFeaturesSafely().catch((error) => {
+  console.error('[app] feature loader failed:', error);
+});
