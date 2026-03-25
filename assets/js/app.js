@@ -86,7 +86,6 @@ const featureModules = [
   './features/characters.js',
   './features/shop.js',
   './features/npcs.js',
-  './features/story.js',
   './features/bastion.js',
   './features/world.js',
   './features/achievements.js',
