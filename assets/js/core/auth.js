@@ -12,8 +12,10 @@ import {
   signOut,
 } from '../config/firebase.js';
 
-import { STATE, setProfile } from './state.js';
-export { showApp, showAuth } from './layout.js';
+import { setProfile } from './state.js';
+import { showApp, showAuth } from './layout.js';
+
+export { showApp, showAuth };
 
 function clearAuthError() {
   const errorBox = document.getElementById('auth-error');
@@ -59,22 +61,31 @@ function setButtonLoading(button, isLoading, loadingText) {
 }
 
 function getLoginButton() {
-  return document.querySelector('[data-action="login"]') || document.querySelector('#tab-login .btn-primary');
+  return document.querySelector('[data-action="login"]');
 }
 
 function getRegisterButton() {
-  return document.querySelector('[data-action="register"]') || document.querySelector('#tab-register .btn-primary');
+  return document.querySelector('[data-action="register"]');
+}
+
+function getLoginTabButton() {
+  return document.querySelector('[data-action="auth-tab-login"]');
+}
+
+function getRegisterTabButton() {
+  return document.querySelector('[data-action="auth-tab-register"]');
 }
 
 export function switchAuthTab(tab) {
   const isLogin = tab === 'login';
 
-  document.querySelectorAll('.auth-tab').forEach((el, index) => {
-    el.classList.toggle('active', isLogin ? index === 0 : index === 1);
-  });
-
+  const loginTab = getLoginTabButton();
+  const registerTab = getRegisterTabButton();
   const loginPanel = document.getElementById('tab-login');
   const registerPanel = document.getElementById('tab-register');
+
+  if (loginTab) loginTab.classList.toggle('active', isLogin);
+  if (registerTab) registerTab.classList.toggle('active', !isLogin);
 
   if (loginPanel) loginPanel.style.display = isLogin ? 'block' : 'none';
   if (registerPanel) registerPanel.style.display = isLogin ? 'none' : 'block';
@@ -143,7 +154,10 @@ export async function doRegister() {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     await saveProfile(credential.user, pseudo);
     clearAuthError();
-    window.showNotif?.('Compte créé avec succès.', 'success');
+
+    if (typeof window.showNotif === 'function') {
+      window.showNotif('Compte créé avec succès.', 'success');
+    }
   } catch (error) {
     console.error('[auth] doRegister error:', error);
     setAuthError(getAuthError(error));
@@ -169,51 +183,59 @@ function handleAuthKeydown(event) {
 
   const registerVisible = document.getElementById('tab-register')?.style.display !== 'none';
 
-  if (registerVisible) doRegister();
-  else doLogin();
+  if (registerVisible) {
+    doRegister();
+  } else {
+    doLogin();
+  }
 }
 
 export function bindAuthUI() {
   if (window.__authUiBound) return;
   window.__authUiBound = true;
 
-  document.addEventListener('keydown', handleAuthKeydown);
+  const loginBtn = getLoginButton();
+  const registerBtn = getRegisterButton();
+  const loginTab = getLoginTabButton();
+  const registerTab = getRegisterTabButton();
+  const logoutBtn = document.querySelector('[data-action="logout"]');
 
-  document.addEventListener('click', (event) => {
-    const target = event.target.closest('[data-action]');
-    if (!target) return;
-
-    const action = target.dataset.action;
-
-    if (action === 'login') {
-      event.preventDefault();
+  if (loginBtn) {
+    loginBtn.addEventListener('click', (e) => {
+      e.preventDefault();
       doLogin();
-      return;
-    }
+    });
+  }
 
-    if (action === 'register') {
-      event.preventDefault();
+  if (registerBtn) {
+    registerBtn.addEventListener('click', (e) => {
+      e.preventDefault();
       doRegister();
-      return;
-    }
+    });
+  }
 
-    if (action === 'logout') {
-      event.preventDefault();
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', (e) => {
+      e.preventDefault();
       doLogout();
-      return;
-    }
+    });
+  }
 
-    if (action === 'auth-tab-login') {
-      event.preventDefault();
+  if (loginTab) {
+    loginTab.addEventListener('click', (e) => {
+      e.preventDefault();
       switchAuthTab('login');
-      return;
-    }
+    });
+  }
 
-    if (action === 'auth-tab-register') {
-      event.preventDefault();
+  if (registerTab) {
+    registerTab.addEventListener('click', (e) => {
+      e.preventDefault();
       switchAuthTab('register');
-    }
-  });
+    });
+  }
+
+  document.addEventListener('keydown', handleAuthKeydown);
 }
 
 export function initAuth() {
@@ -225,4 +247,10 @@ export function initAuth() {
     doRegister,
     doLogout,
   });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAuth, { once: true });
+} else {
+  initAuth();
 }
