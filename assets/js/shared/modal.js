@@ -11,11 +11,13 @@ export function openModal(title, bodyHtml) {
   overlay?.classList.add('show');
 }
 
+// Ferme seulement si clic sur l'overlay lui-même (pas sur la modal)
 export function closeModal(e) {
   if (e && e.target !== document.getElementById('modal-overlay')) return;
-  document.getElementById('modal-overlay')?.classList.remove('show');
+  closeModalDirect();
 }
 
+// Ferme toujours — utilisée par le bouton ✕ et Escape
 export function closeModalDirect() {
   document.getElementById('modal-overlay')?.classList.remove('show');
 }
