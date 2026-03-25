@@ -4,8 +4,7 @@
 // ══════════════════════════════════════════════
 
 import { STATE, setPage } from './state.js';
-import { PAGES }           from '../features/pages.js';
-
+import PAGES from '../features/pages.js';
 // ── Naviguer vers une page ─────────────────────
 export function navigate(page) {
   if (!PAGES[page]) return console.warn(`[nav] page inconnue : ${page}`);
