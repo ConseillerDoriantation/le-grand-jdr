@@ -31,6 +31,12 @@ import {
   showNotif
 } from './shared/notifications.js';
 
+<script type="module">
+  import { initAuth } from './assets/js/core/auth.js';
+  initAuth();
+</script>
+<script type="module" src="./assets/js/app.js"></script>
+
 // ──────────────────────────────────────────────
 // 2) Exposition globale temporaire
 // Permet de rester compatible avec les anciens onclick
