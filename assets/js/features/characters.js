@@ -83,66 +83,103 @@ function renderCharSheet(c, keepTab) {
   const xpPct = pct(c.exp||0, c.palier||100);
   const deckActifs = (c.deck_sorts||[]).filter(s=>s.actif).length;
   const deckMax = calcDeckMax(c);
-
-  const titres = c.titres||[];
-  const titreHtml = titres.map(t=>`<span class="badge badge-gold">${t}</span>`).join('');
-
-  // HP color
   const pvColor = pvPct < 25 ? 'var(--crimson-light)' : pvPct < 50 ? '#f59e0b' : 'var(--green)';
 
+  const titres = c.titres||[];
+  const titreHtml = titres.map(t=>`<span class="badge badge-gold" style="font-size:0.65rem">${t}</span>`).join('');
+
+  // Stats inline
+  const STATS = [
+    {key:'force',abbr:'Fo'},
+    {key:'dexterite',abbr:'Dex'},
+    {key:'constitution',abbr:'Co'},
+    {key:'intelligence',abbr:'Int'},
+    {key:'sagesse',abbr:'Sag'},
+    {key:'charisme',abbr:'Cha'},
+  ];
+  const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
+  const sb = c.statsBonus||{};
+
+  const caracHtml = STATS.map(st => {
+    const base = s[st.key]||8;
+    const bonus = sb[st.key]||0;
+    const total = base + bonus;
+    const m = getMod(c, st.key);
+    const mStr = m >= 0 ? '+'+m : String(m);
+    const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
+    return `<div class="cs-carac-card">
+      <div class="cs-carac-abbr">${st.abbr}</div>
+      <div class="cs-carac-val ${canEdit?'cs-editable':''}"
+           ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Cliquer pour modifier"`:''}
+      >${total}</div>
+      <div class="cs-carac-mod ${mClass}">${mStr}</div>
+      <div class="cs-carac-base">${bonus?'Base '+base+' +'+bonus:''}</div>
+    </div>`;
+  }).join('');
+
   area.innerHTML = `
-  <div class="cs-shell">
+<div class="cs-shell">
 
-    <!-- ── HERO BAR ───────────────────────── -->
-    <div class="cs-hero">
-      <!-- Photo -->
-      <div class="cs-photo-wrap" id="char-photo-wrap">
-        <div class="cs-photo" id="char-photo"
-             onclick="${canEdit?`openPhotoCropper('${c.id}')`:''}"
-             style="cursor:${canEdit?'pointer':'default'}">
-          ${c.photo
-            ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;
-                 transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);
-                 transform-origin:center center;">`
-            : `<div class="cs-photo-placeholder">
-                 ${canEdit?'<span style="font-size:1.8rem">📷</span>':'<span style="font-size:2rem;opacity:0.3">⚔️</span>'}
-               </div>`}
-        </div>
-        ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="deleteCharPhoto('${c.id}')" title="Supprimer">✕</button>`:''}
-      </div>
+  <!-- ═══ LIGNE HAUTE : 2 blocs côte à côte ═══ -->
+  <div class="cs-top">
 
-      <!-- Identity -->
-      <div class="cs-identity">
-        <div class="cs-name-row">
-          ${canEdit
-            ? `<span class="cs-name cs-editable" onclick="inlineEditText('${c.id}','nom',this)" title="Cliquer pour modifier">${c.nom||'Nouveau personnage'}</span>`
-            : `<span class="cs-name">${c.nom||'Nouveau personnage'}</span>`}
-          ${canEdit?`<button class="cs-delete-btn" onclick="deleteChar('${c.id}')" title="Supprimer le personnage">🗑️</button>`:''}
-        </div>
-        <div class="cs-titres">${titreHtml}
-          ${canEdit?`<button class="cs-add-titre" onclick="manageTitres('${c.id}')" title="Gérer les titres">＋ titre</button>`:''}
-        </div>
-        <div class="cs-level-row">
-          <span class="cs-level-badge">${canEdit
-            ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Cliquer pour modifier">Niv. ${c.niveau||1}</span>`
-            : `Niv. ${c.niveau||1}`}</span>
-          <div class="cs-xp-wrap">
-            <div class="cs-xp-bar"><div class="cs-xp-fill" style="width:${xpPct}%"></div></div>
-            <span class="cs-xp-label">
-              ${canEdit
-                ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','exp',this,0,99999)" title="Cliquer pour modifier">${c.exp||0}</span>`
-                : (c.exp||0)} / ${c.palier||100} XP
-            </span>
+    <!-- BLOC GAUCHE : Identité & Vitaux -->
+    <div class="cs-identity-panel">
+
+      <!-- Photo + Nom -->
+      <div class="cs-id-header">
+        <div class="cs-photo-wrap" id="char-photo-wrap">
+          <div class="cs-photo" id="char-photo"
+               onclick="${canEdit?`openPhotoCropper('${c.id}')`:''}"
+               style="cursor:${canEdit?'pointer':'default'}">
+            ${c.photo
+              ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;
+                   transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);
+                   transform-origin:center center;">`
+              : `<div class="cs-photo-placeholder">
+                   ${canEdit?'<span style="font-size:1.5rem">📷</span>':'<span style="font-size:1.8rem;opacity:0.3">⚔️</span>'}
+                 </div>`}
           </div>
-          ${canEdit?`<span class="cs-or cs-editable-num" onclick="inlineEditNum('${c.id}','or',this,0,999999)" title="Cliquer pour modifier">💰 ${c.or||0} or</span>`
-                   :`<span class="cs-or">💰 ${c.or||0} or</span>`}
+          ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="deleteCharPhoto('${c.id}')" title="Supprimer">✕</button>`:''}
+        </div>
+        <div class="cs-id-info">
+          <div class="cs-name-row">
+            ${canEdit
+              ? `<span class="cs-name cs-editable" onclick="inlineEditText('${c.id}','nom',this)" title="Cliquer pour modifier">${c.nom||'Nouveau personnage'}</span>`
+              : `<span class="cs-name">${c.nom||'Nouveau personnage'}</span>`}
+            ${canEdit?`<button class="cs-delete-btn" onclick="deleteChar('${c.id}')" title="Supprimer le personnage">🗑️</button>`:''}
+          </div>
+          <div class="cs-titres">
+            ${titreHtml}
+            ${canEdit?`<button class="cs-add-titre" onclick="manageTitres('${c.id}')">＋ titre</button>`:''}
+          </div>
         </div>
       </div>
 
-      <!-- Vitals -->
-      <div class="cs-vitals">
+      <!-- Niveau + XP + Or -->
+      <div class="cs-meta-row">
+        <span class="cs-level-badge">
+          ${canEdit
+            ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv. ${c.niveau||1}</span>`
+            : `Niv. ${c.niveau||1}`}
+        </span>
+        <div class="cs-xp-wrap">
+          <div class="cs-xp-bar"><div class="cs-xp-fill" style="width:${xpPct}%"></div></div>
+          <span class="cs-xp-label">
+            ${canEdit
+              ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','exp',this,0,99999)" title="Modifier">${c.exp||0}</span>`
+              : (c.exp||0)} / ${c.palier||100} XP
+          </span>
+        </div>
+        ${canEdit
+          ? `<span class="cs-or cs-editable-num" onclick="inlineEditNum('${c.id}','or',this,0,999999)" title="Modifier">💰 ${c.or||0}</span>`
+          : `<span class="cs-or">💰 ${c.or||0}</span>`}
+      </div>
 
-        <!-- PV -->
+      <div class="cs-divider"></div>
+
+      <!-- PV / PM -->
+      <div class="cs-vitals-row">
         <div class="cs-vital-block">
           <div class="cs-vital-label">❤️ PV</div>
           <div class="cs-vital-controls">
@@ -153,8 +190,6 @@ function renderCharSheet(c, keepTab) {
           <div class="cs-bar-bg cs-bar-hp"><div class="cs-bar-fill cs-bar-hp-fill ${pvPct>50?'high':pvPct>25?'mid':''}" id="pv-bar" style="width:${pvPct}%"></div></div>
           <div class="cs-vital-sub">max <span id="pv-max">${pvMax}</span></div>
         </div>
-
-        <!-- PM -->
         <div class="cs-vital-block">
           <div class="cs-vital-label">🔵 PM</div>
           <div class="cs-vital-controls">
@@ -165,38 +200,79 @@ function renderCharSheet(c, keepTab) {
           <div class="cs-bar-bg cs-bar-pm"><div class="cs-bar-fill cs-bar-pm-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
           <div class="cs-vital-sub">max <span id="pm-max">${pmMax}</span></div>
         </div>
-
-        <!-- Stats secondaires -->
-        <div class="cs-secondary-stats">
-          <div class="cs-stat-chip">
-            <span class="cs-chip-label">🛡️ CA</span>
-            <span class="cs-chip-val">${calcCA(c)}</span>
-          </div>
-          <div class="cs-stat-chip">
-            <span class="cs-chip-label">🏃 Vit</span>
-            <span class="cs-chip-val">${calcVitesse(c)}m</span>
-          </div>
-          <div class="cs-stat-chip">
-            <span class="cs-chip-label">🃏 Deck</span>
-            <span class="cs-chip-val">${deckActifs}/${deckMax}</span>
-          </div>
-        </div>
-
       </div>
-    </div><!-- /cs-hero -->
 
-    <!-- ── ONGLETS ─────────────────────────── -->
-    <div class="cs-tabs" id="char-tabs">
-      ${['carac','combat','sorts','inventaire','quetes','notes'].map((tab,i)=>{
-        const labels = ['Caractéristiques','Combat','Sorts & Runes','Inventaire','Quêtes','Notes'];
-        return `<button class="cs-tab ${currentTab===tab?'active':''}" onclick="showCharTab('${tab}',this)">${labels[i]}</button>`;
-      }).join('')}
-    </div>
+      <!-- CA / Vit / Deck -->
+      <div class="cs-secondary-row">
+        <div class="cs-stat-chip">
+          <span class="cs-chip-label">🛡️ CA</span>
+          <span class="cs-chip-val">${calcCA(c)}</span>
+        </div>
+        <div class="cs-stat-chip">
+          <span class="cs-chip-label">🏃 Vit</span>
+          <span class="cs-chip-val">${calcVitesse(c)}m</span>
+        </div>
+        <div class="cs-stat-chip">
+          <span class="cs-chip-label">🃏 Deck</span>
+          <span class="cs-chip-val">${deckActifs}/${deckMax}</span>
+        </div>
+      </div>
 
-    <!-- ── CONTENU ─────────────────────────── -->
-    <div id="char-tab-content" class="cs-tab-body"></div>
+    </div><!-- /cs-identity-panel -->
 
-  </div>`;
+    <!-- BLOC DROIT : Caractéristiques -->
+    <div class="cs-carac-panel">
+      <div class="cs-carac-panel-title">
+        Caractéristiques
+        ${canEdit?'<span class="cs-hint">cliquer sur une valeur pour modifier</span>':''}
+      </div>
+
+      <!-- Grille 3×2 des stats -->
+      <div class="cs-carac-grid">
+        ${caracHtml}
+      </div>
+
+      <!-- PV base / PM base / Palier -->
+      <div class="cs-base-row">
+        <div class="cs-base-chip">
+          <span class="cs-base-chip-label">PV base</span>
+          <div class="cs-base-chip-val ${canEdit?'cs-editable-num':''}"
+               ${canEdit?`onclick="inlineEditNum('${c.id}','pvBase',this,1,999)" title="Modifier"`:''}
+          >${c.pvBase||10}</div>
+          <div class="cs-base-chip-sub">→ max ${pvMax}</div>
+        </div>
+        <div class="cs-base-chip">
+          <span class="cs-base-chip-label">PM base</span>
+          <div class="cs-base-chip-val ${canEdit?'cs-editable-num':''}"
+               ${canEdit?`onclick="inlineEditNum('${c.id}','pmBase',this,1,999)" title="Modifier"`:''}
+          >${c.pmBase||10}</div>
+          <div class="cs-base-chip-sub">→ max ${pmMax}</div>
+        </div>
+        <div class="cs-base-chip">
+          <span class="cs-base-chip-label">Palier XP</span>
+          <div class="cs-base-chip-val ${canEdit?'cs-editable-num':''}"
+               ${canEdit?`onclick="inlineEditNum('${c.id}','palier',this,1,99999)" title="Modifier"`:''}
+          >${c.palier||100}</div>
+          <div class="cs-base-chip-sub">${c.exp||0} acquis</div>
+        </div>
+      </div>
+
+    </div><!-- /cs-carac-panel -->
+
+  </div><!-- /cs-top -->
+
+  <!-- ═══ ONGLETS ═══ -->
+  <div class="cs-tabs" id="char-tabs">
+    ${['combat','sorts','inventaire','quetes','notes'].map((tab,i)=>{
+      const labels = ['Combat','Sorts & Runes','Inventaire','Quêtes','Notes'];
+      return `<button class="cs-tab ${currentTab===tab?'active':''}" onclick="showCharTab('${tab}',this)">${labels[i]}</button>`;
+    }).join('')}
+  </div>
+
+  <!-- ═══ CONTENU ONGLET ═══ -->
+  <div id="char-tab-content" class="cs-tab-body"></div>
+
+</div>`;
 
   _renderTab(currentTab, c, canEdit);
 }
@@ -205,7 +281,6 @@ function _renderTab(tab, c, canEdit) {
   const area = document.getElementById('char-tab-content');
   if (!area) return;
   const renders = {
-    carac:      ()=>renderCharCarac(c,canEdit),
     combat:     ()=>renderCharEquip(c,canEdit),
     sorts:      ()=>renderCharDeck(c,canEdit),
     inventaire: ()=>renderCharInventaire(c,canEdit),
