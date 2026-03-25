@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="./assets/css/main.css">
 </head>
 <body>
+
 <!-- AUTH SCREEN -->
 <div id="auth-screen">
   <div class="auth-box">
@@ -23,29 +24,14 @@
       <button class="auth-tab" onclick="switchAuthTab('register')">Créer un compte</button>
     </div>
     <div id="tab-login">
-      <div class="form-group">
-        <label>Email</label>
-        <input type="email" id="login-email" placeholder="votre@email.com">
-      </div>
-      <div class="form-group">
-        <label>Mot de passe</label>
-        <input type="password" id="login-password" placeholder="••••••••">
-      </div>
+      <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="votre@email.com"></div>
+      <div class="form-group"><label>Mot de passe</label><input type="password" id="login-password" placeholder="••••••••"></div>
       <button class="btn-primary" onclick="doLogin()">Entrer dans le Monde</button>
     </div>
     <div id="tab-register" style="display:none">
-      <div class="form-group">
-        <label>Pseudo</label>
-        <input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier">
-      </div>
-      <div class="form-group">
-        <label>Email</label>
-        <input type="email" id="reg-email" placeholder="votre@email.com">
-      </div>
-      <div class="form-group">
-        <label>Mot de passe</label>
-        <input type="password" id="reg-password" placeholder="••••••••">
-      </div>
+      <div class="form-group"><label>Pseudo</label><input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier"></div>
+      <div class="form-group"><label>Email</label><input type="email" id="reg-email" placeholder="votre@email.com"></div>
+      <div class="form-group"><label>Mot de passe</label><input type="password" id="reg-password" placeholder="••••••••"></div>
       <button class="btn-primary" onclick="doRegister()">Rejoindre l'Aventure</button>
     </div>
     <div class="auth-error" id="auth-error"></div>
@@ -54,13 +40,11 @@
 
 <!-- MAIN APP -->
 <div id="app">
-  <!-- Header -->
+
   <header class="app-header">
     <div style="display:flex;align-items:center;gap:0.8rem">
-      <button class="btn-menu" onclick="toggleSidebar()" id="btn-menu">☰</button>
-      <div class="header-logo">
-        <span>⚔️</span> Le Grand JDR
-      </div>
+      <button id="btn-menu" class="btn-menu" aria-label="Menu">☰</button>
+      <div class="header-logo"><span>⚔️</span> Le Grand JDR</div>
     </div>
     <div class="header-user">
       <span id="header-username"></span>
@@ -69,121 +53,93 @@
     </div>
   </header>
 
-  <!-- Sidebar overlay -->
-  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
   <div class="app-layout">
-    <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
       <div class="nav-section">
         <div class="nav-section-title">Principal</div>
-        <div class="nav-item active" onclick="navigate('dashboard');closeSidebar()"><span class="icon">🏠</span> Accueil</div>
-        <div class="nav-item" onclick="navigate('characters');closeSidebar()"><span class="icon">📜</span> Mon Personnage</div>
-        <div class="nav-item" onclick="navigate('shop');closeSidebar()"><span class="icon">🛒</span> Boutique</div>
+        <div class="nav-item active" data-navigate="dashboard"><span class="icon">🏠</span> Accueil</div>
+        <div class="nav-item" data-navigate="characters"><span class="icon">📜</span> Mon Personnage</div>
+        <div class="nav-item" data-navigate="shop"><span class="icon">🛍️</span> Boutique</div>
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Le Monde</div>
-        <div class="nav-item" onclick="navigate('world');closeSidebar()"><span class="icon">📖</span> Le Monde</div>
-        <div class="nav-item" onclick="navigate('map');closeSidebar()"><span class="icon">🗺️</span> Carte</div>
-        <div class="nav-item" onclick="navigate('npcs');closeSidebar()"><span class="icon">👥</span> PNJ</div>
-        <div class="nav-item" onclick="navigate('bastion');closeSidebar()"><span class="icon">🏰</span> Bastion</div>
-        <div class="nav-item" onclick="navigate('story');closeSidebar()"><span class="icon">📚</span> La Trame</div>
+        <div class="nav-item" data-navigate="world"><span class="icon">📖</span> Le Monde</div>
+        <div class="nav-item" data-navigate="map"><span class="icon">🗺️</span> Carte</div>
+        <div class="nav-item" data-navigate="npcs"><span class="icon">👥</span> PNJ</div>
+        <div class="nav-item" data-navigate="bastion"><span class="icon">🏰</span> Bastion</div>
+        <div class="nav-item" data-navigate="story"><span class="icon">📚</span> La Trame</div>
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Joueurs</div>
-        <div class="nav-item" onclick="navigate('players');closeSidebar()"><span class="icon">⚔️</span> Présentation</div>
-        <div class="nav-item" onclick="navigate('achievements');closeSidebar()"><span class="icon">🏆</span> Hauts-Faits</div>
-        <div class="nav-item" onclick="navigate('collection');closeSidebar()"><span class="icon">🃏</span> Collection</div>
+        <div class="nav-item" data-navigate="players"><span class="icon">⚔️</span> Présentation</div>
+        <div class="nav-item" data-navigate="achievements"><span class="icon">🏆</span> Hauts-Faits</div>
+        <div class="nav-item" data-navigate="collection"><span class="icon">🃏</span> Collection</div>
       </div>
       <div class="nav-section">
         <div class="nav-section-title">Ressources</div>
-        <div class="nav-item" onclick="navigate('informations');closeSidebar()"><span class="icon">📋</span> Informations</div>
-        <div class="nav-item" onclick="navigate('recettes');closeSidebar()"><span class="icon">🍳</span> Recettes</div>
-        <div class="nav-item" onclick="navigate('bestiaire');closeSidebar()"><span class="icon">🐉</span> Bestiaire</div>
-        <div class="nav-item" onclick="navigate('tutorial');closeSidebar()"><span class="icon">📕</span> Tutoriel</div>
-        <div class="nav-item admin-only" style="display:none" onclick="navigate('admin');closeSidebar()"><span class="icon">⚙️</span> Admin</div>
+        <div class="nav-item" data-navigate="informations"><span class="icon">📋</span> Informations</div>
+        <div class="nav-item" data-navigate="recettes"><span class="icon">🍳</span> Recettes</div>
+        <div class="nav-item" data-navigate="bestiaire"><span class="icon">🐉</span> Bestiaire</div>
+        <div class="nav-item" data-navigate="tutorial"><span class="icon">📕</span> Tutoriel</div>
+        <div class="nav-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span> Admin</div>
       </div>
     </nav>
-
-    <!-- Content -->
     <main class="main-content" id="main-content">
-      <div class="loading"><div class="spinner"></div> Chargement...</div>
+      <div class="loading"><div class="spinner"></div> Chargement…</div>
     </main>
   </div>
 
-  <!-- Bottom Navigation (mobile) -->
   <nav class="bottom-nav" id="bottom-nav">
-    <button class="bottom-nav-item active" onclick="navigate('dashboard')" data-page="dashboard">
+    <button class="bottom-nav-item active" data-navigate="dashboard" data-page="dashboard">
       <span class="bn-icon">🏠</span><span>Accueil</span>
     </button>
-    <button class="bottom-nav-item" onclick="navigate('characters')" data-page="characters">
+    <button class="bottom-nav-item" data-navigate="characters" data-page="characters">
       <span class="bn-icon">📜</span><span>Perso</span>
     </button>
-    <button class="bottom-nav-item" onclick="navigate('shop')" data-page="shop">
-      <span class="bn-icon">🛒</span><span>Boutique</span>
+    <button class="bottom-nav-item" data-navigate="shop" data-page="shop">
+      <span class="bn-icon">🛍️</span><span>Boutique</span>
     </button>
-    <button class="bottom-nav-item" onclick="navigate('story')" data-page="story">
+    <button class="bottom-nav-item" data-navigate="story" data-page="story">
       <span class="bn-icon">📚</span><span>Trame</span>
     </button>
-    <button class="bottom-nav-item" onclick="toggleMoreMenu()">
+    <button class="bottom-nav-item" data-toggle-more>
       <span class="bn-icon">⋯</span><span>Plus</span>
     </button>
   </nav>
 
-  <!-- More menu (mobile) -->
   <div class="more-menu" id="more-menu">
-    <div class="more-menu-item" onclick="navigate('world');closeMoreMenu()"><span class="icon">📖</span>Le Monde</div>
-    <div class="more-menu-item" onclick="navigate('map');closeMoreMenu()"><span class="icon">🗺️</span>Carte</div>
-    <div class="more-menu-item" onclick="navigate('npcs');closeMoreMenu()"><span class="icon">👥</span>PNJ</div>
-    <div class="more-menu-item" onclick="navigate('bastion');closeMoreMenu()"><span class="icon">🏰</span>Bastion</div>
-    <div class="more-menu-item" onclick="navigate('players');closeMoreMenu()"><span class="icon">⚔️</span>Joueurs</div>
-    <div class="more-menu-item" onclick="navigate('achievements');closeMoreMenu()"><span class="icon">🏆</span>Hauts-Faits</div>
-    <div class="more-menu-item" onclick="navigate('collection');closeMoreMenu()"><span class="icon">🃏</span>Collection</div>
-    <div class="more-menu-item" onclick="navigate('informations');closeMoreMenu()"><span class="icon">📋</span>Infos</div>
-    <div class="more-menu-item" onclick="navigate('recettes');closeMoreMenu()"><span class="icon">🍳</span>Recettes</div>
-    <div class="more-menu-item" onclick="navigate('bestiaire');closeMoreMenu()"><span class="icon">🐉</span>Bestiaire</div>
-    <div class="more-menu-item" onclick="navigate('tutorial');closeMoreMenu()"><span class="icon">📕</span>Tutoriel</div>
-    <div class="more-menu-item admin-only" style="display:none" onclick="navigate('admin');closeMoreMenu()"><span class="icon">⚙️</span>Admin</div>
+    <div class="more-menu-item" data-navigate="world"><span class="icon">📖</span>Le Monde</div>
+    <div class="more-menu-item" data-navigate="map"><span class="icon">🗺️</span>Carte</div>
+    <div class="more-menu-item" data-navigate="npcs"><span class="icon">👥</span>PNJ</div>
+    <div class="more-menu-item" data-navigate="bastion"><span class="icon">🏰</span>Bastion</div>
+    <div class="more-menu-item" data-navigate="players"><span class="icon">⚔️</span>Joueurs</div>
+    <div class="more-menu-item" data-navigate="achievements"><span class="icon">🏆</span>Hauts-Faits</div>
+    <div class="more-menu-item" data-navigate="collection"><span class="icon">🃏</span>Collection</div>
+    <div class="more-menu-item" data-navigate="informations"><span class="icon">📋</span>Infos</div>
+    <div class="more-menu-item" data-navigate="recettes"><span class="icon">🍳</span>Recettes</div>
+    <div class="more-menu-item" data-navigate="bestiaire"><span class="icon">🐉</span>Bestiaire</div>
+    <div class="more-menu-item" data-navigate="tutorial"><span class="icon">📕</span>Tutoriel</div>
+    <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span>Admin</div>
   </div>
+
 </div>
 
-<!-- NOTIFICATION -->
 <div class="notif" id="notif"></div>
 
-<!-- MODAL -->
-<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+<div class="modal-overlay" id="modal-overlay">
   <div class="modal" id="modal-box">
     <div class="modal-title" id="modal-title">
       <span></span>
-      <button class="btn-icon" onclick="closeModal()">✕</button>
+      <button class="btn-icon" onclick="closeModalDirect()">✕</button>
     </div>
     <div id="modal-body"></div>
   </div>
 </div>
 
-  <script type="module" src="./assets/js/config/firebase.js"></script>
-  <script defer src="./assets/js/core/state.js"></script>
-  <script defer src="./assets/js/core/init.js"></script>
-  <script defer src="./assets/js/core/auth.js"></script>
-  <script defer src="./assets/js/core/layout.js"></script>
-  <script defer src="./assets/js/core/navigation.js"></script>
-  <script defer src="./assets/js/data/firestore.js"></script>
-  <script defer src="./assets/js/shared/modal.js"></script>
-  <script defer src="./assets/js/shared/notifications.js"></script>
-  <script defer src="./assets/js/features/pages.js"></script>
-  <script defer src="./assets/js/features/characters.js"></script>
-  <script defer src="./assets/js/features/shop.js"></script>
-  <script defer src="./assets/js/features/npcs.js"></script>
-  <script defer src="./assets/js/features/story.js"></script>
-  <script defer src="./assets/js/features/bastion.js"></script>
-  <script defer src="./assets/js/features/world.js"></script>
-  <script defer src="./assets/js/features/achievements.js"></script>
-  <script defer src="./assets/js/features/collection.js"></script>
-  <script defer src="./assets/js/features/players.js"></script>
-  <script defer src="./assets/js/features/tutorial.js"></script>
-  <script defer src="./assets/js/features/informations.js"></script>
-  <script defer src="./assets/js/features/recettes.js"></script>
-  <script defer src="./assets/js/features/bestiary.js"></script>
-  <script defer src="./assets/js/features/photo-cropper.js"></script>
+<!-- Point d'entree unique — remplace les 15 balises script defer -->
+<script type="module" src="./assets/js/app.js"></script>
+
 </body>
 </html>
