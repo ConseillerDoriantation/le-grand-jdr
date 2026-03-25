@@ -46,6 +46,14 @@ function calcPMMax(c) {
   const baseBonus = modSa === -1 ? -1 : 0; // -1 PM base si mod Sa = -1
   return (c.pmBase||10) + baseBonus + progression;
 }
+
+function calcOr(c) {
+  const compte = c.compte||{recettes:[],depenses:[]};
+  const totalR = (compte.recettes||[]).reduce((s,r)=>s+(parseFloat(r.montant)||0),0);
+  const totalD = (compte.depenses||[]).reduce((s,d)=>s+(parseFloat(d.montant)||0),0);
+  return Math.round((totalR - totalD) * 100) / 100;
+}
+
 function pct(cur,max) { return max>0 ? Math.max(0,Math.min(100,Math.round(cur/max*100))) : 0; }
 
 // ══════════════════════════════════════════════
@@ -178,9 +186,7 @@ function renderCharSheet(c, keepTab) {
               : (c.exp||0)} / ${c.palier||100} XP
           </span>
         </div>
-        ${canEdit
-          ? `<span class="cs-or cs-editable-num" onclick="inlineEditNum('${c.id}','or',this,0,999999)" title="Modifier">💰 ${c.or||0}</span>`
-          : `<span class="cs-or">💰 ${c.or||0}</span>`}
+        <span class="cs-or" title="Solde du Livret de Compte">💰 ${calcOr(c)} or</span>
       </div>
 
       <div class="cs-divider"></div>
@@ -868,6 +874,12 @@ function renderCharCompte(c, canEdit) {
   </div>`;
 }
 
+
+function refreshOrDisplay(c) {
+  const el = document.querySelector('.cs-or');
+  if (el) el.textContent = '💰 ' + calcOr(c) + ' or';
+}
+
 function addCompteRow(type) {
   const c = STATE.activeChar; if(!c) return;
   const compte = c.compte||{recettes:[],depenses:[]};
@@ -876,6 +888,7 @@ function addCompteRow(type) {
   c.compte = compte;
   updateInCol('characters', c.id, {compte}).then(()=>{
     _renderTab('compte', c, window._canEditChar);
+    refreshOrDisplay(c);
   });
 }
 
@@ -884,6 +897,7 @@ async function deleteCompteRow(type, idx) {
   (c.compte||{})[type]?.splice(idx,1);
   await updateInCol('characters', c.id, {compte: c.compte});
   _renderTab('compte', c, window._canEditChar);
+  refreshOrDisplay(c);
 }
 
 function inlineEditCompteField(type, idx, field, el) {
@@ -902,6 +916,7 @@ function inlineEditCompteField(type, idx, field, el) {
     c.compte[type][idx][field] = val;
     await updateInCol('characters', c.id, {compte: c.compte});
     _renderTab('compte', c, window._canEditChar);
+    refreshOrDisplay(c);
   };
   input.addEventListener('blur', save);
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape') input.replaceWith(el); });
@@ -1320,6 +1335,7 @@ function deleteCharPhoto(id) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   selectChar, filterAdminChars,
+  calcOr, refreshOrDisplay,
   renderCharCompte,
   addCompteRow, deleteCompteRow, inlineEditCompteField,
   addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
