@@ -13,9 +13,7 @@ import {
 } from '../config/firebase.js';
 
 import { setProfile } from './state.js';
-import { showApp, showAuth } from './layout.js';
-
-export { showApp, showAuth };
+export { showApp, showAuth } from './layout.js';
 
 function clearAuthError() {
   const errorBox = document.getElementById('auth-error');
@@ -154,10 +152,7 @@ export async function doRegister() {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     await saveProfile(credential.user, pseudo);
     clearAuthError();
-
-    if (typeof window.showNotif === 'function') {
-      window.showNotif('Compte créé avec succès.', 'success');
-    }
+    window.showNotif?.('Compte créé avec succès.', 'success');
   } catch (error) {
     console.error('[auth] doRegister error:', error);
     setAuthError(getAuthError(error));
@@ -181,13 +176,11 @@ function handleAuthKeydown(event) {
   const authScreen = document.getElementById('auth-screen');
   if (!authScreen || authScreen.style.display === 'none') return;
 
-  const registerVisible = document.getElementById('tab-register')?.style.display !== 'none';
+  const registerVisible =
+    document.getElementById('tab-register')?.style.display !== 'none';
 
-  if (registerVisible) {
-    doRegister();
-  } else {
-    doLogin();
-  }
+  if (registerVisible) doRegister();
+  else doLogin();
 }
 
 export function bindAuthUI() {
