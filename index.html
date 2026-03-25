@@ -20,8 +20,8 @@
     </div>
 
     <div class="auth-tabs">
-      <button class="auth-tab active" type="button" data-action="auth-tab-login">Connexion</button>
-      <button class="auth-tab" type="button" data-action="auth-tab-register">Créer un compte</button>
+      <button class="auth-tab active" type="button" data-action="auth-tab-login" onclick="switchAuthTab('login')">Connexion</button>
+      <button class="auth-tab" type="button" data-action="auth-tab-register" onclick="switchAuthTab('register')">Créer un compte</button>
     </div>
 
     <div id="tab-login">
@@ -33,7 +33,7 @@
         <label>Mot de passe</label>
         <input type="password" id="login-password" placeholder="••••••••">
       </div>
-      <button type="button" class="btn-primary" data-action="login">Entrer dans le Monde</button>
+      <button type="button" class="btn-primary" data-action="login" onclick="doLogin()">Entrer dans le Monde</button>
     </div>
 
     <div id="tab-register" style="display:none">
@@ -49,7 +49,7 @@
         <label>Mot de passe</label>
         <input type="password" id="reg-password" placeholder="••••••••">
       </div>
-      <button type="button" class="btn-primary" data-action="register">Rejoindre l'Aventure</button>
+      <button type="button" class="btn-primary" data-action="register" onclick="doRegister()">Rejoindre l'Aventure</button>
     </div>
 
     <div class="auth-error" id="auth-error"></div>
@@ -66,7 +66,7 @@
     <div class="header-user">
       <span id="header-username"></span>
       <span class="admin-badge" id="admin-badge" style="display:none">Maître de Jeu</span>
-      <button class="btn-logout" type="button" data-action="logout">Déconnexion</button>
+      <button class="btn-logout" type="button" data-action="logout" onclick="doLogout()">Déconnexion</button>
     </div>
   </header>
 
