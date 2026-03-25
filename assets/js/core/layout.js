@@ -5,13 +5,14 @@
 import { STATE } from './state.js';
 
 export function showApp() {
-  document.getElementById('auth-screen')?.style.setProperty('display', 'none');
-  document.getElementById('app')?.style.setProperty('display', 'block');
-
+  const authScreen = document.getElementById('auth-screen');
+  const app = document.getElementById('app');
   const usernameEl = document.getElementById('header-username');
-  if (usernameEl) usernameEl.textContent = STATE.profile?.pseudo ?? STATE.user?.email ?? '';
-
   const adminBadge = document.getElementById('admin-badge');
+
+  if (authScreen) authScreen.style.display = 'none';
+  if (app) app.style.display = 'block';
+  if (usernameEl) usernameEl.textContent = STATE.profile?.pseudo || STATE.user?.email || '';
   if (adminBadge) adminBadge.style.display = STATE.isAdmin ? 'inline' : 'none';
 
   document.querySelectorAll('.admin-only').forEach((el) => {
@@ -20,6 +21,8 @@ export function showApp() {
 }
 
 export function showAuth() {
-  document.getElementById('auth-screen')?.style.setProperty('display', 'flex');
-  document.getElementById('app')?.style.setProperty('display', 'none');
+  const authScreen = document.getElementById('auth-screen');
+  const app = document.getElementById('app');
+  if (authScreen) authScreen.style.display = 'flex';
+  if (app) app.style.display = 'none';
 }

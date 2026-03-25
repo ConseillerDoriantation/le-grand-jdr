@@ -1,37 +1,60 @@
 // ══════════════════════════════════════════════
-// INIT — Bootstrap Firebase + listener d'auth
+// INIT — Bootstrap Firebase + auth state listener
 // ══════════════════════════════════════════════
 
 import {
   auth, db, ADMIN_EMAIL,
   onAuthStateChanged,
   doc, setDoc, getDoc,
+  collection, getDocs,
+  addDoc, updateDoc, deleteDoc,
+  query, where, orderBy,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
 } from '../config/firebase.js';
 
 import {
-  STATE,
-  setFirebase,
-  setUser,
-  setProfile,
-  setAdmin,
+  STATE, setFirebase,
+  setUser, setProfile, setAdmin,
 } from './state.js';
 
 import { showApp, showAuth } from './layout.js';
 import { navigate } from './navigation.js';
 
 setFirebase(auth, db, {
-  doc,
-  setDoc,
-  getDoc,
+  doc, setDoc, getDoc,
+  collection, getDocs,
+  addDoc, updateDoc, deleteDoc,
+  query, where, orderBy,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
   ADMIN_EMAIL,
 });
 
-let authListenerBound = false;
+window.STATE = STATE;
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    setUser(null);
+    setProfile(null);
+    setAdmin(false);
+    showAuth();
+    return;
+  }
+
+  setUser(user);
+  setAdmin(user.email === ADMIN_EMAIL);
+  await loadProfile(user);
+  showApp();
+  navigate('dashboard');
+});
 
 async function loadProfile(user) {
   const ref = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
-
   if (snap.exists()) {
     setProfile(snap.data());
     return;
@@ -40,37 +63,9 @@ async function loadProfile(user) {
   const profile = {
     uid: user.uid,
     email: user.email,
-    pseudo: user.email ? user.email.split('@')[0] : 'Aventurier',
+    pseudo: user.email?.split('@')[0] || 'Aventurier',
     createdAt: new Date().toISOString(),
   };
-
   await setDoc(ref, profile, { merge: true });
   setProfile(profile);
 }
-
-export function initAppAuthListener() {
-  if (authListenerBound) return;
-  authListenerBound = true;
-
-  onAuthStateChanged(auth, async (user) => {
-    try {
-      if (user) {
-        setUser(user);
-        setAdmin(user.email === ADMIN_EMAIL);
-        await loadProfile(user);
-        showApp();
-        navigate(STATE.currentPage || 'dashboard');
-      } else {
-        setUser(null);
-        setProfile(null);
-        setAdmin(false);
-        showAuth();
-      }
-    } catch (error) {
-      console.error('[init] auth bootstrap failed:', error);
-      showAuth();
-    }
-  });
-}
-
-initAppAuthListener();

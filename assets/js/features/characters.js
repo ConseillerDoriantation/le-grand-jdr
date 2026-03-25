@@ -1,7 +1,8 @@
 import { STATE } from '../core/state.js';
-import { addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import PAGES from './pages.js';
 
 // CHARACTER SHEET
 // ══════════════════════════════════════════════
@@ -1085,38 +1086,54 @@ async function saveQuete() {
 
 // ══════════════════════════════════════════════
 
+
 Object.assign(window, {
   selectChar,
   filterAdminChars,
+  getMod,
+  calcCA,
+  calcVitesse,
+  calcDeck,
+  calcPVMax,
+  calcPMMax,
   renderCharSheet,
   showCharTab,
-  createNewChar,
+  renderCharCarac,
+  renderCharCombat,
+  renderCharDeck,
+  renderCharEquip,
+  renderCharInventaire,
+  renderCharQuetes,
+  renderCharNotes,
+  adjustStat,
+  saveNotes,
+  toggleSort,
+  toggleQuete,
+  deleteQuete,
+  deleteSort,
+  deleteInvItem,
   deleteChar,
+  createNewChar,
   editCharInfo,
+  cancelEditChar,
+  addTitre,
+  removeTitre,
   saveCharInfo,
   editCharStats,
   saveCharStats,
-  adjustStat,
+  saveCharCombat,
+  addSort,
+  editSort,
+  openSortModal,
+  toggleRune,
+  updateSortPM,
+  saveSort,
   editEquipSlot,
   saveEquipSlot,
   clearEquipSlot,
-  toggleRune,
-  addSort,
-  editSort,
-  saveSort,
-  deleteSort,
   addInvItem,
   editInvItem,
   saveInvItem,
-  deleteInvItem,
   addQuete,
-  saveQuete,
-  toggleQuete,
-  deleteQuete,
-  saveNotes,
-  addTitre,
-  removeTitre,
-  cancelEditChar,
+  saveQuete
 });
-
-export { renderCharSheet, selectChar, filterAdminChars };

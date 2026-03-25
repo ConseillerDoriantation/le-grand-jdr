@@ -1,72 +1,74 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import PAGES from './pages.js';
 
-export function openPlayerPresentModal(p) {
-  openModal(p ? '✏️ Modifier le Joueur' : '⚔️ Présenter un Joueur', `
-    <div class="form-group"><label>Nom du personnage</label><input class="input-field" id="pp-nom" value="${p?.nom || ''}"></div>
+function openPlayerPresentModal(player = null) {
+  openModal(player ? '✏️ Modifier le joueur' : '⚔️ Présenter un joueur', `
+    <div class="form-group"><label>Nom du personnage</label><input class="input-field" id="pp-nom" value="${player?.nom || ''}"></div>
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Classe</label><input class="input-field" id="pp-classe" value="${p?.classe || ''}" placeholder="Guerrier, Mage..."></div>
-      <div class="form-group"><label>Race</label><input class="input-field" id="pp-race" value="${p?.race || ''}" placeholder="Humain, Elfe..."></div>
+      <div class="form-group"><label>Classe</label><input class="input-field" id="pp-classe" value="${player?.classe || ''}"></div>
+      <div class="form-group"><label>Race</label><input class="input-field" id="pp-race" value="${player?.race || ''}"></div>
     </div>
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="pp-niveau" value="${p?.niveau || 1}"></div>
-      <div class="form-group"><label>Emoji / Avatar</label><input class="input-field" id="pp-emoji" value="${p?.emoji || '⚔️'}"></div>
+      <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="pp-niveau" value="${player?.niveau || 1}"></div>
+      <div class="form-group"><label>Emoji</label><input class="input-field" id="pp-emoji" value="${player?.emoji || '⚔️'}"></div>
     </div>
-    <div class="form-group"><label>Joueur (pseudo)</label><input class="input-field" id="pp-joueur" value="${p?.joueur || ''}"></div>
-    <div class="form-group"><label>Présentation / Histoire</label><textarea class="input-field" id="pp-bio" rows="5">${p?.bio || ''}</textarea></div>
-    <div class="form-group"><label>URL Image</label><input class="input-field" id="pp-img" value="${p?.imageUrl || ''}" placeholder="https://..."></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="savePlayerPresent('${p?.id || ''}')">Enregistrer</button>
+    <div class="form-group"><label>Joueur</label><input class="input-field" id="pp-joueur" value="${player?.joueur || ''}"></div>
+    <div class="form-group"><label>Présentation</label><textarea class="input-field" id="pp-bio" rows="5">${player?.bio || ''}</textarea></div>
+    <div class="form-group"><label>URL image</label><input class="input-field" id="pp-img" value="${player?.imageUrl || ''}"></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="savePlayerPresent('${player?.id || ''}')">Enregistrer</button>
   `);
 }
 
-export async function savePlayerPresent(id) {
+async function savePlayerPresent(id = '') {
   const data = {
-    nom: document.getElementById('pp-nom')?.value || '?',
-    classe: document.getElementById('pp-classe')?.value || '',
-    race: document.getElementById('pp-race')?.value || '',
+    nom: document.getElementById('pp-nom')?.value?.trim() || 'Personnage',
+    classe: document.getElementById('pp-classe')?.value?.trim() || '',
+    race: document.getElementById('pp-race')?.value?.trim() || '',
     niveau: parseInt(document.getElementById('pp-niveau')?.value, 10) || 1,
-    emoji: document.getElementById('pp-emoji')?.value || '⚔️',
-    joueur: document.getElementById('pp-joueur')?.value || '',
+    emoji: document.getElementById('pp-emoji')?.value?.trim() || '⚔️',
+    joueur: document.getElementById('pp-joueur')?.value?.trim() || '',
     bio: document.getElementById('pp-bio')?.value || '',
-    imageUrl: document.getElementById('pp-img')?.value || '',
+    imageUrl: document.getElementById('pp-img')?.value?.trim() || '',
   };
   if (id) await updateInCol('players', id, data);
   else await addToCol('players', data);
   closeModal();
-  showNotif('Joueur enregistré !', 'success');
-  window.navigate?.('players');
+  showNotif('Présentation enregistrée.', 'success');
+  await PAGES.players();
 }
 
-export function viewPlayerDetail(id) {
+function viewPlayerDetail(id) {
   loadCollection('players').then((items) => {
-    const p = items.find((x) => x.id === id);
-    if (!p) return;
-    openModal(`⚔️ ${p.nom}`, `
-      ${p.imageUrl ? `<div style="text-align:center;margin-bottom:1rem"><img src="${p.imageUrl}" style="max-width:200px;border-radius:50%;border:3px solid var(--gold)"></div>` : `<div style="text-align:center;font-size:4rem;margin-bottom:1rem">${p.emoji || '⚔️'}</div>`}
-      <div style="text-align:center">
-        <div style="font-family:'Cinzel',serif;font-size:1.3rem;color:var(--gold);margin-bottom:0.3rem">${p.nom}</div>
-        <div style="color:var(--text-muted);font-style:italic;margin-bottom:0.5rem">${p.classe || ''} ${p.race ? `— ${p.race}` : ''}</div>
-        <span class="badge badge-gold">Niveau ${p.niveau || 1}</span>
-        ${p.joueur ? `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--text-dim)">Joué par ${p.joueur}</div>` : ''}
+    const player = items.find((entry) => entry.id === id);
+    if (!player) return;
+    openModal(`⚔️ ${player.nom || 'Joueur'}`, `
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:1rem;align-items:start">
+        <div style="text-align:center">${player.imageUrl ? `<img src="${player.imageUrl}" style="width:140px;height:140px;object-fit:cover;border-radius:12px;border:1px solid var(--border)">` : `<div style="font-size:4rem">${player.emoji || '⚔️'}</div>`}</div>
+        <div>
+          <div style="font-family:'Cinzel',serif;font-size:1.1rem;color:var(--gold)">${player.nom || 'Joueur'}</div>
+          <div style="margin-top:0.35rem;color:var(--text-muted)">${player.classe || ''}${player.race ? ` — ${player.race}` : ''}</div>
+          <div style="margin-top:0.35rem"><span class="badge badge-gold">Niv. ${player.niveau || 1}</span></div>
+          <div style="margin-top:0.35rem;color:var(--text-muted)">Joueur : ${player.joueur || '-'}</div>
+          <div style="margin-top:1rem;line-height:1.6">${player.bio || ''}</div>
+        </div>
       </div>
-      <hr class="divider">
-      <div style="font-size:0.9rem;line-height:1.7;color:var(--text-muted);font-style:italic;white-space:pre-wrap">${p.bio || ''}</div>
     `);
   });
 }
 
-export async function editPlayerPresent(id) {
+async function editPlayerPresent(id) {
   const items = await loadCollection('players');
-  const p = items.find((x) => x.id === id);
-  if (p) openPlayerPresentModal(p);
+  const player = items.find((entry) => entry.id === id);
+  if (player) openPlayerPresentModal(player);
 }
 
-export async function deletePlayerPresent(id) {
-  if (!confirm('Supprimer ce joueur ?')) return;
+async function deletePlayerPresent(id) {
+  if (!confirm('Supprimer cette présentation ?')) return;
   await deleteFromCol('players', id);
-  showNotif('Supprimé.', 'success');
-  window.navigate?.('players');
+  showNotif('Présentation supprimée.', 'success');
+  await PAGES.players();
 }
 
 Object.assign(window, { openPlayerPresentModal, savePlayerPresent, viewPlayerDetail, editPlayerPresent, deletePlayerPresent });

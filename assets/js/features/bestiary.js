@@ -1,79 +1,78 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import PAGES from './pages.js';
 
-export function filterBestiary(cat, el) {
-  document.querySelectorAll('#best-cats .tab').forEach((t) => t.classList.remove('active'));
-  el.classList.add('active');
-  document.querySelectorAll('.bestiary-card').forEach((c) => {
-    c.style.display = !cat || c.dataset.cat === cat ? '' : 'none';
+function parseAttacks(raw) {
+  return raw.split('
+').map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [nom, degats, effet] = line.split('|').map((part) => part?.trim() || '');
+    return { nom: nom || 'Attaque', degats: degats || '?', effet: effet || '' };
   });
 }
 
-export function openBestiaryModal(item) {
-  openModal(item ? '✏️ Modifier' : '🐉 Nouvelle Créature', `
+function openBestiaryModal(creature = null) {
+  openModal(creature ? '✏️ Modifier la créature' : '🐉 Nouvelle créature', `
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Nom</label><input class="input-field" id="bs-nom" value="${item?.nom || ''}"></div>
-      <div class="form-group"><label>Emoji</label><input class="input-field" id="bs-emoji" value="${item?.emoji || '🐉'}"></div>
+      <div class="form-group"><label>Nom</label><input class="input-field" id="best-nom" value="${creature?.nom || ''}"></div>
+      <div class="form-group"><label>Catégorie</label><input class="input-field" id="best-cat" value="${creature?.categorie || ''}"></div>
     </div>
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Catégorie</label><input class="input-field" id="bs-cat" value="${item?.categorie || ''}" placeholder="Bête, Mort-vivant, Élémentaire..."></div>
-      <div class="form-group"><label>XP</label><input type="number" class="input-field" id="bs-xp" value="${item?.xp || 0}"></div>
+      <div class="form-group"><label>Emoji</label><input class="input-field" id="best-emoji" value="${creature?.emoji || '🐉'}"></div>
+      <div class="form-group"><label>Traits</label><input class="input-field" id="best-traits" value="${creature?.traits || ''}"></div>
     </div>
-    <div class="grid-4" style="gap:0.5rem">
-      <div class="form-group"><label>PV</label><input type="number" class="input-field" id="bs-pv" value="${item?.pv || 10}"></div>
-      <div class="form-group"><label>PM</label><input type="number" class="input-field" id="bs-pm" value="${item?.pm || 0}"></div>
-      <div class="form-group"><label>CA</label><input type="number" class="input-field" id="bs-ca" value="${item?.ca || 10}"></div>
-      <div class="form-group"><label>Vit.</label><input type="number" class="input-field" id="bs-vit" value="${item?.vitesse || 3}"></div>
+    <div class="grid-4" style="gap:0.8rem">
+      <div class="form-group"><label>PV</label><input type="number" class="input-field" id="best-pv" value="${creature?.pv || 10}"></div>
+      <div class="form-group"><label>PM</label><input type="number" class="input-field" id="best-pm" value="${creature?.pm || 0}"></div>
+      <div class="form-group"><label>CA</label><input type="number" class="input-field" id="best-ca" value="${creature?.ca || 10}"></div>
+      <div class="form-group"><label>XP</label><input type="number" class="input-field" id="best-xp" value="${creature?.xp || 0}"></div>
     </div>
-    <div class="form-group"><label>Attaques (une par ligne: Nom|Dégâts|Effet)</label>
-      <textarea class="input-field" id="bs-attaques" rows="4">${(item?.attaques || []).map((a) => `${a.nom}|${a.degats}|${a.effet}`).join('
-')}</textarea>
-    </div>
-    <div class="form-group"><label>Traits spéciaux</label><textarea class="input-field" id="bs-traits" rows="2">${item?.traits || ''}</textarea></div>
-    <div class="form-group"><label>Butins</label><input class="input-field" id="bs-butins" value="${item?.butins || ''}"></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBestiary('${item?.id || ''}')">Enregistrer</button>
+    <div class="form-group"><label>Attaques (une par ligne : nom | dégâts | effet)</label><textarea class="input-field" id="best-attaques" rows="5">${(creature?.attaques || []).map((a) => `${a.nom || ''} | ${a.degats || ''} | ${a.effet || ''}`).join('
+')}</textarea></div>
+    <div class="form-group"><label>Butins</label><input class="input-field" id="best-butins" value="${creature?.butins || ''}"></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBestiary('${creature?.id || ''}')">Enregistrer</button>
   `);
 }
 
-export async function saveBestiary(id) {
-  const attaquesRaw = document.getElementById('bs-attaques')?.value || '';
-  const attaques = attaquesRaw.split('
-').filter(Boolean).map((line) => {
-    const [nom, degats, effet] = line.split('|');
-    return { nom: nom?.trim() || '?', degats: degats?.trim() || '?', effet: effet?.trim() || '' };
-  });
+async function saveBestiary(id = '') {
   const data = {
-    nom: document.getElementById('bs-nom')?.value || '?',
-    emoji: document.getElementById('bs-emoji')?.value || '🐉',
-    categorie: document.getElementById('bs-cat')?.value || 'Créature',
-    xp: parseInt(document.getElementById('bs-xp')?.value, 10) || 0,
-    pv: parseInt(document.getElementById('bs-pv')?.value, 10) || 10,
-    pm: parseInt(document.getElementById('bs-pm')?.value, 10) || 0,
-    ca: parseInt(document.getElementById('bs-ca')?.value, 10) || 10,
-    vitesse: parseInt(document.getElementById('bs-vit')?.value, 10) || 3,
-    attaques,
-    traits: document.getElementById('bs-traits')?.value || '',
-    butins: document.getElementById('bs-butins')?.value || '',
+    nom: document.getElementById('best-nom')?.value?.trim() || 'Créature',
+    categorie: document.getElementById('best-cat')?.value?.trim() || 'Créature',
+    emoji: document.getElementById('best-emoji')?.value?.trim() || '🐉',
+    traits: document.getElementById('best-traits')?.value?.trim() || '',
+    pv: parseInt(document.getElementById('best-pv')?.value, 10) || 10,
+    pm: parseInt(document.getElementById('best-pm')?.value, 10) || 0,
+    ca: parseInt(document.getElementById('best-ca')?.value, 10) || 10,
+    xp: parseInt(document.getElementById('best-xp')?.value, 10) || 0,
+    attaques: parseAttacks(document.getElementById('best-attaques')?.value || ''),
+    butins: document.getElementById('best-butins')?.value?.trim() || '',
   };
   if (id) await updateInCol('bestiaire', id, data);
   else await addToCol('bestiaire', data);
   closeModal();
-  showNotif('Créature enregistrée !', 'success');
-  window.navigate?.('bestiaire');
+  showNotif('Créature enregistrée.', 'success');
+  await PAGES.bestiaire();
 }
 
-export async function editBestiary(id) {
+async function editBestiary(id) {
   const items = await loadCollection('bestiaire');
-  const item = items.find((x) => x.id === id);
-  if (item) openBestiaryModal(item);
+  const creature = items.find((entry) => entry.id === id);
+  if (creature) openBestiaryModal(creature);
 }
 
-export async function deleteBestiary(id) {
+async function deleteBestiary(id) {
   if (!confirm('Supprimer cette créature ?')) return;
   await deleteFromCol('bestiaire', id);
   showNotif('Créature supprimée.', 'success');
-  window.navigate?.('bestiaire');
+  await PAGES.bestiaire();
 }
 
-Object.assign(window, { filterBestiary, openBestiaryModal, saveBestiary, editBestiary, deleteBestiary });
+function filterBestiary(category, el) {
+  document.querySelectorAll('#best-cats .tab').forEach((tab) => tab.classList.remove('active'));
+  el?.classList.add('active');
+  document.querySelectorAll('#bestiary-list .bestiary-card').forEach((card) => {
+    card.style.display = !category || card.dataset.cat === category ? '' : 'none';
+  });
+}
+
+Object.assign(window, { openBestiaryModal, saveBestiary, editBestiary, deleteBestiary, filterBestiary });

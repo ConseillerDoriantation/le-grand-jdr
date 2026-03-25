@@ -1,95 +1,98 @@
 import { saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import PAGES from './pages.js';
 
-export function showInfoSection(id, el) {
-  document.querySelectorAll('.tutorial-nav-item').forEach((i) => i.classList.remove('active'));
+function showInfoSection(id, el) {
+  document.querySelectorAll('#info-nav .tutorial-nav-item').forEach((item) => item.classList.remove('active'));
   el?.classList.add('active');
   window._infoSection = id;
-  const section = (window._infoSections || []).find((s) => s.id === id);
+  const section = (window._infoSections || []).find((entry) => entry.id === id);
   const contentEl = document.getElementById('info-content');
-  if (contentEl && section) contentEl.textContent = section.content;
+  if (contentEl && section) contentEl.textContent = section.content || '';
 }
 
-export function editInfoSection(id) {
-  const section = (window._infoSections || []).find((s) => s.id === id);
+function editInfoSection(id) {
+  const section = (window._infoSections || []).find((entry) => entry.id === id);
   if (!section) return;
   openModal(`✏️ ${section.title}`, `
     <div class="form-group"><label>Contenu</label>
-      <textarea class="input-field" id="info-edit-content" rows="15" style="font-family:monospace;font-size:0.82rem">${section.content || ''}</textarea>
+      <textarea class="input-field" id="info-edit-content" rows="16" style="font-family:monospace;font-size:0.82rem">${section.content || ''}</textarea>
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveInfoSection('${id}')">Enregistrer</button>
   `);
 }
 
-export async function saveInfoSection(id) {
-  const sections = window._infoSections || [];
-  const idx = sections.findIndex((s) => s.id === id);
-  if (idx < 0) return;
-  sections[idx].content = document.getElementById('info-edit-content')?.value || '';
+async function saveInfoSection(id) {
+  const sections = [...(window._infoSections || [])];
+  const index = sections.findIndex((entry) => entry.id === id);
+  if (index < 0) return;
+  sections[index] = { ...sections[index], content: document.getElementById('info-edit-content')?.value || '' };
   window._infoSections = sections;
   await saveDoc('informations', 'main', { sections });
   closeModal();
-  showNotif('Section mise à jour !', 'success');
-  window.navigate?.('informations');
+  showNotif('Section mise à jour.', 'success');
+  await PAGES.informations();
 }
 
-export function getInfoStats() { return `RACES & BONUS ÉLÉMENTAIRES
+function getInfoStats() {
+  return `RACES ET STATISTIQUES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Humain     : +1 Fo, +2 Dex / +2 Fo, +1 Dex
-  Elfe       : +2 Fo, +1 Dex (ou inverse)
-  Nain       : +1 Dex, +2 In / +2 Dex, +1 In
-  Demi-Anim. : +2 Fo, +1 Dex / autre
-  Créa. Mag. : +1 Fo, +2 In / autre
-  Gnome      : +2 Fo, +1 Dex / autre
+Chaque race confère des bonus. Les statistiques principales influencent directement les jets, les PV, les PM et le deck.`;
+}
 
-ÉLÉMENTS
+function getInfoEquipements() {
+  return `ÉQUIPEMENTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Feu    : +2 Fo, +1 Dex / +1 Fo, +2 Dex
-  Eau    : +1 Fo, +2 Dex / +2 Fo, +1 Dex
-  Vent   : +2 Fo, +1 Dex
-  Terre  : +1 Fo, +2 Dex
-  Lumière: +1 Fo, +2 In / +2 Fo, +1 In
-  Ombre  : +2 Fo, +1 Dex
+Le torse détermine la CA de base. Les armes et accessoires ajoutent des effets, bonus plats ou capacités spéciales.`;
+}
 
-MODIFICATEURS MAXIMUM : +6 (22 points)`; }
-export function getInfoEquipements() { return `EMPLACEMENTS D'ÉQUIPEMENT
+function getInfoCombat() {
+  return `COMBAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Tête         : Jusqu'à 2 points de stats
-  Torse        : Jusqu'à 4 pts. Fixe la CA de base.
-  Pieds        : Jusqu'à 3 points de stats
-  Bague        : Jusqu'à 2 pts + bonus plats
-  Amulette     : 1 pt sur 3 stats différentes + effets spéciaux
-  Objet Magique: Activable en combat`; }
-export function getInfoCombat() { return `DÉROULEMENT D'UN TOUR
+Chaque tour : 1 action, 1 action bonus éventuelle, 1 réaction et du déplacement. Un jet d20 sert à toucher.`;
+}
+
+function getInfoDeck() {
+  return `DECK ET RUNES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Chaque tour : 1 Action + 1 Action Bonus + 1 Réaction + Déplacement
+Les sorts actifs occupent des places de deck. Les runes modifient un noyau élémentaire pour produire des effets.`;
+}
 
-ATTAQUER
+function getInfoArtisanat() {
+  return `ARTISANAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Toucher : 1d20 + Modificateur de l'arme
-  → Si score > CA cible : touche`; }
-export function getInfoDeck() { return `LE DECK
+Forge, cuisine, alchimie et confection nécessitent des matériaux, une recette et un atelier adapté.`;
+}
+
+function getInfoBastion() {
+  return `BASTION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Contient tous les sorts utilisables en combat ou tension.
-Hors combat : tous les sorts créés sont utilisables.`; }
-export function getInfoArtisanat() { return `ARTISANAT
+Le bastion évolue avec le groupe. Ses salles et son journal racontent la progression collective.`;
+}
+
+function getInfoEtats() {
+  return `ÉTATS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Nécessite : Outil/atelier + recette + jet d'artisanat (Fo/Dex/In).`; }
-export function getInfoBastion() { return `LE BASTION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Brûlure, gel, poison, étourdissement et autres altérations doivent être appliqués et suivis par le MJ.`;
+}
 
-Génère de l'or à chaque session. Les améliorations renforcent le groupe.`; }
-export function getInfoEtats() { return `ÉTATS DE COMBAT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Invisible · Endormi · Cécité · Charmé · Effrayé · Entravé · Étourdi · Pétrifié · DoT · Provoqué · Silence · Inconscient`; }
-
-Object.assign(window, { showInfoSection, editInfoSection, saveInfoSection });
+Object.assign(window, {
+  showInfoSection,
+  editInfoSection,
+  saveInfoSection,
+  getInfoStats,
+  getInfoEquipements,
+  getInfoCombat,
+  getInfoDeck,
+  getInfoArtisanat,
+  getInfoBastion,
+  getInfoEtats,
+});

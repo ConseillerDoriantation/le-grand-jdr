@@ -1,80 +1,78 @@
 import { getDocData, saveDoc } from '../data/firestore.js';
-import { STATE } from '../core/state.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import PAGES from './pages.js';
 
-export function getDefaultBastion() {
+function getDefaultBastion() {
   return {
-    nom: 'Le Bastion',
+    nom: 'Bastion sans nom',
     niveau: 1,
     tresor: 0,
     defense: 0,
-    description: 'Votre forteresse, gagnée de haute lutte.',
-    salles: [
-      { nom: 'Grande Salle', niveau: 1, effet: 'Lieu de rassemblement' },
-      { nom: 'Forge', niveau: 0, effet: '+1 Dégâts sur craft' },
-      { nom: 'Infirmerie', niveau: 0, effet: 'Soins entre missions' },
-      { nom: 'Tour de Guet', niveau: 0, effet: '+2 Défense' },
-      { nom: 'Bibliothèque', niveau: 0, effet: '+1 XP par session' },
-    ],
+    description: 'Votre bastion attend sa première description.',
+    salles: [],
     journal: [],
   };
 }
 
-export function editBastion() {
-  const d = STATE._bastionData || getDefaultBastion();
-  openModal('🏰 Modifier le Bastion', `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="b-nom" value="${d.nom || ''}"></div>
-    <div class="grid-3" style="gap:0.8rem">
-      <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="b-niv" value="${d.niveau || 1}" min="1"></div>
-      <div class="form-group"><label>Trésor (Or)</label><input type="number" class="input-field" id="b-tresor" value="${d.tresor || 0}" min="0"></div>
-      <div class="form-group"><label>Défense</label><input type="number" class="input-field" id="b-def" value="${d.defense || 0}" min="0"></div>
+async function editBastion() {
+  const current = (await getDocData('bastion', 'main')) || getDefaultBastion();
+  openModal('🏰 Modifier le bastion', `
+    <div class="form-group"><label>Nom</label><input class="input-field" id="bastion-nom" value="${current.nom || ''}"></div>
+    <div class="grid-3" style="gap:0.75rem">
+      <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="bastion-niveau" value="${current.niveau || 1}"></div>
+      <div class="form-group"><label>Trésor</label><input type="number" class="input-field" id="bastion-tresor" value="${current.tresor || 0}"></div>
+      <div class="form-group"><label>Défense</label><input type="number" class="input-field" id="bastion-defense" value="${current.defense || 0}"></div>
     </div>
-    <div class="form-group"><label>Description</label><textarea class="input-field" id="b-desc" rows="3">${d.description || ''}</textarea></div>
-    <hr class="divider">
-    <div style="font-family:'Cinzel',serif;font-size:0.72rem;color:var(--gold);margin-bottom:0.8rem">SALLES (niveau 0-3)</div>
-    ${(d.salles || []).map((s, i) => `<div class="grid-3" style="gap:0.5rem;margin-bottom:0.5rem">
-      <input class="input-sm" id="b-snom-${i}" value="${s.nom || ''}" placeholder="Nom de la salle">
-      <input type="number" class="input-sm" id="b-sniv-${i}" value="${s.niveau || 0}" min="0" max="3" placeholder="Niv">
-      <input class="input-sm" id="b-seff-${i}" value="${s.effet || ''}" placeholder="Effet">
-    </div>`).join('')}
+    <div class="form-group"><label>Description</label><textarea class="input-field" id="bastion-description" rows="5">${current.description || ''}</textarea></div>
+    <div class="form-group"><label>Salles (une par ligne : nom | niveau | effet)</label><textarea class="input-field" id="bastion-salles" rows="6">${(current.salles || []).map((s) => `${s.nom || ''} | ${s.niveau || 1} | ${s.effet || ''}`).join('
+')}</textarea></div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBastion()">Enregistrer</button>
   `);
 }
 
-export async function saveBastion() {
-  const d = STATE._bastionData || getDefaultBastion();
-  const salles = (d.salles || []).map((_, i) => ({
-    nom: document.getElementById(`b-snom-${i}`)?.value || '',
-    niveau: parseInt(document.getElementById(`b-sniv-${i}`)?.value, 10) || 0,
-    effet: document.getElementById(`b-seff-${i}`)?.value || '',
-  }));
-  const data = {
-    nom: document.getElementById('b-nom')?.value || 'Le Bastion',
-    niveau: parseInt(document.getElementById('b-niv')?.value, 10) || 1,
-    tresor: parseInt(document.getElementById('b-tresor')?.value, 10) || 0,
-    defense: parseInt(document.getElementById('b-def')?.value, 10) || 0,
-    description: document.getElementById('b-desc')?.value || '',
+async function saveBastion() {
+  const sallesRaw = document.getElementById('bastion-salles')?.value || '';
+  const salles = sallesRaw.split('
+').map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [nom, niveau, effet] = line.split('|').map((part) => part?.trim() || '');
+    return { nom: nom || 'Salle', niveau: parseInt(niveau, 10) || 1, effet: effet || '' };
+  });
+
+  const current = (await getDocData('bastion', 'main')) || getDefaultBastion();
+  await saveDoc('bastion', 'main', {
+    nom: document.getElementById('bastion-nom')?.value?.trim() || 'Bastion sans nom',
+    niveau: parseInt(document.getElementById('bastion-niveau')?.value, 10) || 1,
+    tresor: parseInt(document.getElementById('bastion-tresor')?.value, 10) || 0,
+    defense: parseInt(document.getElementById('bastion-defense')?.value, 10) || 0,
+    description: document.getElementById('bastion-description')?.value || '',
     salles,
-    journal: d.journal || [],
-  };
-  await saveDoc('bastion', 'main', data);
-  STATE._bastionData = data;
+    journal: current.journal || [],
+  });
   closeModal();
-  showNotif('Bastion mis à jour !', 'success');
-  window.navigate?.('bastion');
+  showNotif('Bastion mis à jour.', 'success');
+  await PAGES.bastion();
 }
 
-export async function addBastionLog() {
-  const bastionDoc = await getDocData('bastion', 'main') || getDefaultBastion();
-  const texte = prompt('Nouvelle entrée du journal :');
-  if (!texte) return;
-  bastionDoc.journal = bastionDoc.journal || [];
-  bastionDoc.journal.unshift({ date: new Date().toLocaleDateString('fr'), texte });
-  await saveDoc('bastion', 'main', bastionDoc);
-  STATE._bastionData = bastionDoc;
-  showNotif('Journal mis à jour !', 'success');
-  window.navigate?.('bastion');
+function addBastionLog() {
+  openModal('📝 Ajouter une entrée au journal', `
+    <div class="form-group"><label>Date</label><input class="input-field" id="bastion-log-date" value="${new Date().toLocaleDateString('fr-FR')}"></div>
+    <div class="form-group"><label>Texte</label><textarea class="input-field" id="bastion-log-text" rows="5"></textarea></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBastionLog()">Ajouter</button>
+  `);
 }
 
-Object.assign(window, { editBastion, saveBastion, addBastionLog });
+async function saveBastionLog() {
+  const current = (await getDocData('bastion', 'main')) || getDefaultBastion();
+  const journal = current.journal || [];
+  journal.unshift({
+    date: document.getElementById('bastion-log-date')?.value?.trim() || new Date().toLocaleDateString('fr-FR'),
+    texte: document.getElementById('bastion-log-text')?.value?.trim() || '',
+  });
+  await saveDoc('bastion', 'main', { ...current, journal });
+  closeModal();
+  showNotif('Entrée ajoutée.', 'success');
+  await PAGES.bastion();
+}
+
+Object.assign(window, { getDefaultBastion, editBastion, saveBastion, addBastionLog, saveBastionLog });

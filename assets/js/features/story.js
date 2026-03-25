@@ -1,9 +1,10 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import PAGES from './pages.js';
 
-export function openStoryModal(item) {
-  openModal(item ? '✏️ Modifier' : '📚 Nouvel Événement / Mission', `
+function openStoryModal(item = null) {
+  openModal(item ? '✏️ Modifier un élément' : '📚 Nouvel événement / mission', `
     <div class="form-group"><label>Type</label>
       <select class="input-field" id="st-type">
         <option value="event" ${item?.type === 'event' ? 'selected' : ''}>Événement</option>
@@ -12,9 +13,9 @@ export function openStoryModal(item) {
       </select>
     </div>
     <div class="form-group"><label>Titre</label><input class="input-field" id="st-titre" value="${item?.titre || ''}"></div>
-    <div class="form-group"><label>Date / Session</label><input class="input-field" id="st-date" value="${item?.date || ''}" placeholder="Session 1, Jour 3..."></div>
-    <div class="form-group"><label>Acte</label><input class="input-field" id="st-acte" value="${item?.acte || ''}" placeholder="Acte I : Les Débuts"></div>
-    <div class="form-group"><label>Description</label><textarea class="input-field" id="st-desc" rows="4">${item?.description || ''}</textarea></div>
+    <div class="form-group"><label>Date / session</label><input class="input-field" id="st-date" value="${item?.date || ''}"></div>
+    <div class="form-group"><label>Acte</label><input class="input-field" id="st-acte" value="${item?.acte || ''}"></div>
+    <div class="form-group"><label>Description</label><textarea class="input-field" id="st-desc" rows="5">${item?.description || ''}</textarea></div>
     <div id="st-mission-extra" style="${item?.type === 'mission' ? '' : 'display:none'}">
       <div class="form-group"><label>Statut</label>
         <select class="input-field" id="st-statut">
@@ -26,44 +27,41 @@ export function openStoryModal(item) {
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveStory('${item?.id || ''}')">Enregistrer</button>
   `);
 
-  const typeSelect = document.getElementById('st-type');
-  if (typeSelect) {
-    typeSelect.addEventListener('change', (e) => {
-      const extra = document.getElementById('st-mission-extra');
-      if (extra) extra.style.display = e.target.value === 'mission' ? '' : 'none';
-    });
-  }
+  const typeEl = document.getElementById('st-type');
+  const missionBox = document.getElementById('st-mission-extra');
+  typeEl?.addEventListener('change', (e) => {
+    if (missionBox) missionBox.style.display = e.target.value === 'mission' ? '' : 'none';
+  });
 }
 
-export async function saveStory(id) {
-  const type = document.getElementById('st-type')?.value || 'event';
+async function saveStory(id = '') {
   const data = {
-    type,
-    date: document.getElementById('st-date')?.value || '',
-    acte: document.getElementById('st-acte')?.value || '',
-    titre: document.getElementById('st-titre')?.value || '?',
+    type: document.getElementById('st-type')?.value || 'event',
+    titre: document.getElementById('st-titre')?.value?.trim() || 'Événement',
+    date: document.getElementById('st-date')?.value?.trim() || '',
+    acte: document.getElementById('st-acte')?.value?.trim() || '',
     description: document.getElementById('st-desc')?.value || '',
     statut: document.getElementById('st-statut')?.value || 'En cours',
-    recompense: document.getElementById('st-recompense')?.value || '',
+    recompense: document.getElementById('st-recompense')?.value?.trim() || '',
   };
   if (id) await updateInCol('story', id, data);
   else await addToCol('story', data);
   closeModal();
-  showNotif('Événement enregistré !', 'success');
-  window.navigate?.('story');
+  showNotif('Trame enregistrée.', 'success');
+  await PAGES.story();
 }
 
-export async function editStory(id) {
+async function editStory(id) {
   const items = await loadCollection('story');
-  const item = items.find((i) => i.id === id);
+  const item = items.find((entry) => entry.id === id);
   if (item) openStoryModal(item);
 }
 
-export async function deleteStory(id) {
+async function deleteStory(id) {
   if (!confirm('Supprimer cet élément ?')) return;
   await deleteFromCol('story', id);
-  showNotif('Supprimé.', 'success');
-  window.navigate?.('story');
+  showNotif('Élément supprimé.', 'success');
+  await PAGES.story();
 }
 
 Object.assign(window, { openStoryModal, saveStory, editStory, deleteStory });
