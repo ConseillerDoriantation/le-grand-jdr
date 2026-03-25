@@ -1,7 +1,3 @@
-// ══════════════════════════════════════════════
-// INIT — Bootstrap Firebase + auth state listener
-// ══════════════════════════════════════════════
-
 import {
   auth,
   db,
@@ -21,7 +17,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-} from '../config/firebase.js';
+} from "../config/firebase.js";
 
 import {
   STATE,
@@ -29,10 +25,10 @@ import {
   setUser,
   setProfile,
   setAdmin,
-} from './state.js';
+} from "./state.js";
 
-import { showApp, showAuth } from './layout.js';
-import { navigate } from './navigation.js';
+import { showApp, showAuth } from "./layout.js";
+import { navigate } from "./navigation.js";
 
 setFirebase(auth, db, {
   doc,
@@ -70,35 +66,31 @@ onAuthStateChanged(auth, async (user) => {
   try {
     await loadProfile(user);
   } catch (error) {
-    console.error('[init] loadProfile failed:', error);
+    console.error("[init] loadProfile failed:", error);
     setProfile({
       uid: user.uid,
       email: user.email,
-      pseudo: user.email?.split('@')[0] || 'Aventurier',
+      pseudo: (user.email && user.email.split("@")[0]) || "Aventurier",
     });
   }
 
   showApp();
 
   try {
-    await navigate('dashboard');
+    await navigate("dashboard");
   } catch (error) {
-    console.error('[init] navigate(dashboard) failed:', error);
-    const content = document.getElementById('main-content');
+    console.error("[init] navigate(dashboard) failed:", error);
+    const content = document.getElementById("main-content");
 
     if (content) {
-      content.innerHTML = `
-        <div class="card">
-          <div class="card-header">Bienvenue</div>
-          <p>Connexion réussie, mais le tableau de bord n'a pas pu être affiché.</p>
-        </div>
-      `;
+      content.innerHTML =
+        '<div class="card"><div class="card-header">Bienvenue</div><p>Connexion reussie, mais le tableau de bord na pas pu etre affiche.</p></div>';
     }
   }
 });
 
 async function loadProfile(user) {
-  const ref = doc(db, 'users', user.uid);
+  const ref = doc(db, "users", user.uid);
   const snap = await getDoc(ref);
 
   if (snap.exists()) {
@@ -109,14 +101,14 @@ async function loadProfile(user) {
   const profile = {
     uid: user.uid,
     email: user.email,
-    pseudo: user.email?.split('@')[0] || 'Aventurier',
+    pseudo: (user.email && user.email.split("@")[0]) || "Aventurier",
     createdAt: new Date().toISOString(),
   };
 
   try {
     await setDoc(ref, profile, { merge: true });
   } catch (error) {
-    console.error('[init] setDoc profile failed:', error);
+    console.error("[init] setDoc profile failed:", error);
   }
 
   setProfile(profile);
