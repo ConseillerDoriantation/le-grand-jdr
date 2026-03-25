@@ -47,14 +47,13 @@
   background: linear-gradient(135deg, var(--gold-light), var(--gold), var(--gold-dark));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.08em;
 }
 
 .auth-subtitle {
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   margin-top: 0.4rem;
-  letter-spacing: 0.05em;
 }
 
 .auth-box {
@@ -85,7 +84,6 @@
 
 .auth-tabs {
   display: flex;
-  gap: 0;
   margin-bottom: 2rem;
   background: rgba(255, 255, 255, 0.03);
   border-radius: 8px;
@@ -94,7 +92,7 @@
 
 .auth-tab {
   flex: 1;
-  padding: 0.55rem;
+  padding: 0.65rem;
   background: none;
   border: none;
   color: var(--text-muted);
@@ -104,13 +102,11 @@
   cursor: pointer;
   transition: all 0.25s;
   border-radius: 6px;
-  letter-spacing: 0.02em;
 }
 
 .auth-tab.active {
   background: rgba(226, 185, 111, 0.1);
   color: var(--gold);
-  box-shadow: 0 1px 0 rgba(226, 185, 111, 0.2);
 }
 
 .form-group {
@@ -148,7 +144,7 @@
 
 .btn-primary {
   width: 100%;
-  padding: 0.85rem;
+  padding: 0.9rem;
   background: linear-gradient(135deg, #a07830, #e2b96f, #c49840);
   border: none;
   border-radius: 8px;
@@ -156,7 +152,7 @@
   font-family: 'Outfit', sans-serif;
   font-weight: 700;
   font-size: 0.85rem;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   cursor: pointer;
   transition: all 0.25s;
   text-transform: uppercase;
