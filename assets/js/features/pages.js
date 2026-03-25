@@ -22,201 +22,247 @@ async dashboard() {
   const pseudo = STATE.profile?.pseudo || 'Aventurier';
   const charCount = await countUserChars();
   const roleLabel = STATE.isAdmin ? 'Maître de Jeu' : 'Joueur';
-  const accessLabel = STATE.isAdmin ? 'Administration active' : 'Compte joueur';
-  const primaryLabel = charCount > 0 ? 'Ouvrir mes personnages' : 'Créer mon premier personnage';
+  const accessLabel = STATE.isAdmin ? 'Console MJ' : 'Interface joueur';
+  const readiness = Math.min(100, 58 + charCount * 7 + (STATE.isAdmin ? 8 : 0));
+  const primaryLabel = charCount > 0 ? 'Ouvrir mes personnages' : 'Créer un personnage';
 
   const content = document.getElementById('main-content');
   content.innerHTML = `
-    <div class="dashboard-shell">
-      <section class="dashboard-hero">
-        <div class="dashboard-hero__content">
-          <div class="dashboard-badge">Hub de campagne</div>
-          <h1>${pseudo}, tout ton univers de jeu en un écran.</h1>
+    <div class="dashboard-os">
+      <section class="dashboard-masthead">
+        <div class="dashboard-masthead__main">
+          <div class="dashboard-kicker-row">
+            <span class="dashboard-kicker">Campaign OS</span>
+            <span class="dashboard-live"><i></i> Session active</span>
+          </div>
+
+          <h1>${pseudo}, bienvenue dans ton centre de contrôle.</h1>
           <p>
-            Une interface recentrée sur l’essentiel : tes fiches, les sections du monde,
-            les outils de campagne et les modules de gestion, sans effet “site vitrine”.
+            Nouvelle direction visuelle : une interface pensée comme une vraie application,
+            plus modulaire, plus dense, plus lisible, et moins proche d’un simple site vitrine.
           </p>
-          <div class="dashboard-hero__actions">
-            <button class="dashboard-cta dashboard-cta--primary" onclick="navigate('characters')">${primaryLabel}</button>
-            <button class="dashboard-cta dashboard-cta--secondary" onclick="navigate('world')">Explorer le monde</button>
+
+          <div class="dashboard-pillbar">
+            <span class="dashboard-pill">Mode ${roleLabel}</span>
+            <span class="dashboard-pill">${charCount} personnage${charCount > 1 ? 's' : ''}</span>
+            <span class="dashboard-pill">Navigation recentrée</span>
+          </div>
+
+          <div class="dashboard-primary-actions">
+            <button class="dashboard-btn dashboard-btn--primary" type="button" onclick="navigate('characters')">${primaryLabel}</button>
+            <button class="dashboard-btn dashboard-btn--ghost" type="button" onclick="navigate('story')">Reprendre la campagne</button>
           </div>
         </div>
 
-        <aside class="dashboard-hero__aside">
-          <div class="dashboard-profile-card">
-            <div class="dashboard-profile-card__top">
-              <div class="dashboard-profile-avatar">${pseudo.charAt(0).toUpperCase()}</div>
-              <div>
-                <div class="dashboard-profile-label">Compte connecté</div>
-                <div class="dashboard-profile-name">${pseudo}</div>
-              </div>
+        <aside class="dashboard-masthead__side">
+          <div class="dashboard-identity">
+            <div class="dashboard-avatar">${pseudo.charAt(0).toUpperCase()}</div>
+            <div>
+              <span class="dashboard-identity__label">Espace connecté</span>
+              <strong>${pseudo}</strong>
+              <small>${accessLabel}</small>
             </div>
+          </div>
 
-            <div class="dashboard-profile-grid">
-              <div>
-                <span>Rôle</span>
-                <strong>${roleLabel}</strong>
-              </div>
-              <div>
-                <span>Statut</span>
-                <strong class="is-online">En ligne</strong>
-              </div>
-              <div>
-                <span>Personnages</span>
-                <strong>${charCount}</strong>
-              </div>
-              <div>
-                <span>Accès</span>
-                <strong>${accessLabel}</strong>
-              </div>
+          <div class="dashboard-signal-grid">
+            <div>
+              <span>Rôle</span>
+              <strong>${roleLabel}</strong>
             </div>
+            <div>
+              <span>Statut</span>
+              <strong>En ligne</strong>
+            </div>
+            <div>
+              <span>Personnages</span>
+              <strong>${charCount}</strong>
+            </div>
+            <div>
+              <span>Lecture</span>
+              <strong>Hub actif</strong>
+            </div>
+          </div>
+
+          <div class="dashboard-meter">
+            <div class="dashboard-meter__head">
+              <span>Préparation de session</span>
+              <strong>${readiness}%</strong>
+            </div>
+            <div class="dashboard-meter__track"><span style="width:${readiness}%"></span></div>
           </div>
         </aside>
       </section>
 
-      <section class="dashboard-kpis">
-        <article class="dashboard-stat">
-          <span class="dashboard-stat__label">Personnages</span>
-          <span class="dashboard-stat__value">${charCount}</span>
-          <span class="dashboard-stat__hint">Accès direct aux fiches, statistiques et progression.</span>
+      <section class="dashboard-strip">
+        <article class="dashboard-strip-card dashboard-strip-card--violet">
+          <span>Personnages</span>
+          <strong>${charCount}</strong>
+          <small>Accès rapide aux fiches, stats et progression.</small>
         </article>
-
-        <article class="dashboard-stat">
-          <span class="dashboard-stat__label">Session</span>
-          <span class="dashboard-stat__value is-online">En ligne</span>
-          <span class="dashboard-stat__hint">Interface active, navigation disponible en continu.</span>
+        <article class="dashboard-strip-card dashboard-strip-card--cyan">
+          <span>Exploration</span>
+          <strong>4 hubs</strong>
+          <small>Monde, carte, PNJ et tutoriel regroupés.</small>
         </article>
-
-        <article class="dashboard-stat">
-          <span class="dashboard-stat__label">Rôle</span>
-          <span class="dashboard-stat__value is-role">${roleLabel}</span>
-          <span class="dashboard-stat__hint">${STATE.isAdmin ? 'Accès à la gestion du contenu et des joueurs.' : 'Accès aux modules utiles pour la partie.'}</span>
+        <article class="dashboard-strip-card dashboard-strip-card--green">
+          <span>Mode</span>
+          <strong>${roleLabel}</strong>
+          <small>Affichage recentré selon ton niveau d’accès.</small>
+        </article>
+        <article class="dashboard-strip-card dashboard-strip-card--rose">
+          <span>État</span>
+          <strong>Prêt</strong>
+          <small>Session ouverte, navigation et modules disponibles.</small>
         </article>
       </section>
 
-      <section class="dashboard-grid">
-        <article class="card dashboard-panel">
-          <div class="dashboard-panel__header">
-            <div>
-              <span class="dashboard-panel__eyebrow">Priorité</span>
-              <h2>Continuer la partie</h2>
-              <p>Les modules les plus utilisés pour reprendre rapidement une session.</p>
-            </div>
-            <button class="dashboard-panel__link" onclick="navigate('story')">Voir la trame</button>
-          </div>
-
-          <div class="dashboard-action-grid">
-            <button class="dashboard-action-card" type="button" onclick="navigate('characters')">
-              <span class="dashboard-action-card__tag">PJ</span>
-              <span class="dashboard-action-card__title">Fiches de personnage</span>
-              <span class="dashboard-action-card__copy">Créer, modifier et suivre les fiches avec un accès immédiat.</span>
-              <span class="dashboard-action-card__footer">Ouvrir le module →</span>
-            </button>
-
-            <button class="dashboard-action-card" type="button" onclick="navigate('story')">
-              <span class="dashboard-action-card__tag">TRAME</span>
-              <span class="dashboard-action-card__title">Suivi de campagne</span>
-              <span class="dashboard-action-card__copy">Retrouver l’intrigue, les événements et la progression de la partie.</span>
-              <span class="dashboard-action-card__footer">Consulter l’histoire →</span>
-            </button>
-
-            <button class="dashboard-action-card" type="button" onclick="navigate('bastion')">
-              <span class="dashboard-action-card__tag">BASE</span>
-              <span class="dashboard-action-card__title">Gestion du Bastion</span>
-              <span class="dashboard-action-card__copy">Centraliser le bastion, ses ressources et ses évolutions.</span>
-              <span class="dashboard-action-card__footer">Gérer le bastion →</span>
-            </button>
-
-            <button class="dashboard-action-card" type="button" onclick="navigate('shop')">
-              <span class="dashboard-action-card__tag">SHOP</span>
-              <span class="dashboard-action-card__title">Boutique</span>
-              <span class="dashboard-action-card__copy">Accéder rapidement aux équipements, objets et consommables.</span>
-              <span class="dashboard-action-card__footer">Voir la boutique →</span>
-            </button>
-          </div>
-        </article>
-
-        <div class="dashboard-panel--stack">
-          <article class="card dashboard-panel">
-            <div class="dashboard-panel__header">
+      <section class="dashboard-layout">
+        <div class="dashboard-layout__main">
+          <article class="card dashboard-surface">
+            <div class="dashboard-section-head">
               <div>
-                <span class="dashboard-panel__eyebrow">Univers</span>
-                <h2>Le monde</h2>
-                <p>Les ressources de lecture et d’exploration utilisées pendant la partie.</p>
+                <span class="dashboard-eyebrow">Action</span>
+                <h2>Continuer la campagne</h2>
+                <p>Les modules les plus utilisés sont regroupés en cartes larges, avec une hiérarchie plus proche d’un produit moderne.</p>
               </div>
             </div>
 
-            <div class="dashboard-list">
-              <button class="dashboard-list-link" type="button" onclick="navigate('world')">
-                <span class="dashboard-list-link__icon">LORE</span>
-                <span class="dashboard-list-link__body">
-                  <strong>Informations générales</strong>
-                  <span>Contexte, histoire, repères narratifs et règles du monde.</span>
-                </span>
-                <span class="dashboard-list-link__arrow">→</span>
+            <div class="dashboard-module-grid">
+              <button class="dashboard-module" type="button" onclick="navigate('characters')">
+                <span class="dashboard-module__tag">PJ</span>
+                <strong>Fiches de personnage</strong>
+                <p>Créer, modifier et consulter les fiches depuis un point d’entrée unique.</p>
+                <span>Ouvrir le module →</span>
               </button>
 
-              <button class="dashboard-list-link" type="button" onclick="navigate('map')">
-                <span class="dashboard-list-link__icon">MAP</span>
-                <span class="dashboard-list-link__body">
-                  <strong>Carte de la région</strong>
-                  <span>Zones importantes, déplacements et repères visuels.</span>
-                </span>
-                <span class="dashboard-list-link__arrow">→</span>
+              <button class="dashboard-module" type="button" onclick="navigate('story')">
+                <span class="dashboard-module__tag">TRAME</span>
+                <strong>Suivi de campagne</strong>
+                <p>Retrouver l’intrigue, les étapes clés et l’état d’avancement de la partie.</p>
+                <span>Voir l’avancement →</span>
               </button>
 
-              <button class="dashboard-list-link" type="button" onclick="navigate('npcs')">
-                <span class="dashboard-list-link__icon">PNJ</span>
-                <span class="dashboard-list-link__body">
-                  <strong>PNJ rencontrés</strong>
-                  <span>Retrouver les personnages, rôles et relations établies.</span>
-                </span>
-                <span class="dashboard-list-link__arrow">→</span>
+              <button class="dashboard-module" type="button" onclick="navigate('bastion')">
+                <span class="dashboard-module__tag">BASE</span>
+                <strong>Gestion du Bastion</strong>
+                <p>Centraliser les ressources, l’évolution et les éléments persistants du groupe.</p>
+                <span>Gérer le bastion →</span>
               </button>
 
-              <button class="dashboard-list-link" type="button" onclick="navigate('tutorial')">
-                <span class="dashboard-list-link__icon">AIDE</span>
-                <span class="dashboard-list-link__body">
-                  <strong>Tutoriel de jeu</strong>
-                  <span>Règles, onboarding et procédures utiles à la table.</span>
-                </span>
-                <span class="dashboard-list-link__arrow">→</span>
+              <button class="dashboard-module" type="button" onclick="navigate('shop')">
+                <span class="dashboard-module__tag">SHOP</span>
+                <strong>Boutique</strong>
+                <p>Accéder aux objets, équipements et achats sans passer par une liste brute.</p>
+                <span>Parcourir la boutique →</span>
               </button>
             </div>
           </article>
 
-          <article class="card dashboard-panel">
-            <div class="dashboard-panel__header">
+          <article class="card dashboard-surface">
+            <div class="dashboard-section-head">
               <div>
-                <span class="dashboard-panel__eyebrow">Outils</span>
-                <h2>Accès ciblés</h2>
-                <p>Des points d’entrée rapides pour éviter les écrans purement décoratifs.</p>
+                <span class="dashboard-eyebrow">Exploration</span>
+                <h2>Le monde à portée de clic</h2>
+                <p>Les ressources de consultation ne sont plus présentées comme de simples boutons, mais comme un panneau de navigation secondaire.</p>
               </div>
             </div>
 
-            <div class="dashboard-mini-grid">
-              <div class="dashboard-mini-card">
-                <span class="dashboard-mini-card__title">Navigation recentrée</span>
-                <div class="dashboard-mini-card__copy">Le tableau de bord devient un hub d’action, pas une simple page d’accueil.</div>
-              </div>
+            <div class="dashboard-link-list">
+              <button class="dashboard-link" type="button" onclick="navigate('world')">
+                <span class="dashboard-link__icon">Lore</span>
+                <span class="dashboard-link__body">
+                  <strong>Informations générales</strong>
+                  <span>Contexte, histoire du monde, repères narratifs et bases de jeu.</span>
+                </span>
+                <span class="dashboard-link__arrow">→</span>
+              </button>
 
-              <div class="dashboard-mini-card">
-                <span class="dashboard-mini-card__title">Hiérarchie visuelle renforcée</span>
-                <div class="dashboard-mini-card__copy">Cartes, priorités et blocs de lecture mieux séparés pour une vraie sensation d’application.</div>
-              </div>
+              <button class="dashboard-link" type="button" onclick="navigate('map')">
+                <span class="dashboard-link__icon">Map</span>
+                <span class="dashboard-link__body">
+                  <strong>Carte de la région</strong>
+                  <span>Vue géographique, zones importantes et orientation rapide.</span>
+                </span>
+                <span class="dashboard-link__arrow">→</span>
+              </button>
 
-              ${STATE.isAdmin ? `
-              <div class="dashboard-mini-card">
-                <span class="dashboard-mini-card__title">Gestion admin</span>
-                <div class="dashboard-mini-card__copy">Accès direct à la gestion des joueurs, du contenu et des modules éditoriaux.</div>
-                <button class="dashboard-mini-card__cta" type="button" onclick="navigate('admin')">Ouvrir l’administration →</button>
+              <button class="dashboard-link" type="button" onclick="navigate('npcs')">
+                <span class="dashboard-link__icon">PNJ</span>
+                <span class="dashboard-link__body">
+                  <strong>PNJ rencontrés</strong>
+                  <span>Relations, rôles et personnages déjà croisés pendant la campagne.</span>
+                </span>
+                <span class="dashboard-link__arrow">→</span>
+              </button>
+
+              <button class="dashboard-link" type="button" onclick="navigate('tutorial')">
+                <span class="dashboard-link__icon">Aide</span>
+                <span class="dashboard-link__body">
+                  <strong>Tutoriel de jeu</strong>
+                  <span>Onboarding, règles et procédures de consultation rapide.</span>
+                </span>
+                <span class="dashboard-link__arrow">→</span>
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <div class="dashboard-layout__side">
+          <article class="card dashboard-surface">
+            <div class="dashboard-section-head">
+              <div>
+                <span class="dashboard-eyebrow">Focus</span>
+                <h2>Principes de navigation</h2>
               </div>
-              ` : `
-              <div class="dashboard-mini-card">
-                <span class="dashboard-mini-card__title">Accès joueur</span>
-                <div class="dashboard-mini-card__copy">Tu retrouves ici les sections vraiment utiles à la consultation et à la progression.</div>
+            </div>
+
+            <div class="dashboard-note-list">
+              <div class="dashboard-note">
+                <span class="dashboard-note__dot dashboard-note__dot--violet"></span>
+                <div>
+                  <strong>Hiérarchie plus forte</strong>
+                  <p>Le premier écran sert maintenant de hub d’action, avec des blocs prioritaires vraiment identifiables.</p>
+                </div>
               </div>
-              `}
+              <div class="dashboard-note">
+                <span class="dashboard-note__dot dashboard-note__dot--cyan"></span>
+                <div>
+                  <strong>Palette entièrement revue</strong>
+                  <p>Le noir-or a été abandonné au profit d’un thème graphite, violet et cyan plus contemporain.</p>
+                </div>
+              </div>
+              <div class="dashboard-note">
+                <span class="dashboard-note__dot dashboard-note__dot--green"></span>
+                <div>
+                  <strong>Lecture plus produit</strong>
+                  <p>Cartes, signaux et surfaces sont espacés comme une app, pas comme une page de contenu.</p>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card dashboard-surface">
+            <div class="dashboard-section-head">
+              <div>
+                <span class="dashboard-eyebrow">Accès</span>
+                <h2>${STATE.isAdmin ? 'Console MJ' : 'Mode joueur'}</h2>
+              </div>
+            </div>
+
+            <div class="dashboard-pulse">
+              <div class="dashboard-pulse-card">
+                <strong>${STATE.isAdmin ? 'Pilotage de la campagne' : 'Interface recentrée joueur'}</strong>
+                <p>${STATE.isAdmin
+                  ? 'Tu peux superviser les joueurs, les contenus et les modules depuis une interface qui ressemble davantage à une console de gestion.'
+                  : 'Tu retrouves directement les éléments utiles à la partie, sans écran d’accueil décoratif.'}</p>
+
+                <div class="dashboard-pulse-actions">
+                  ${STATE.isAdmin
+                    ? `<button type="button" onclick="navigate('admin')">Ouvrir l’administration</button>`
+                    : `<button type="button" onclick="navigate('characters')">Voir mes fiches</button>`}
+                  <button type="button" onclick="navigate('world')">Explorer le monde</button>
+                </div>
+              </div>
             </div>
           </article>
         </div>
