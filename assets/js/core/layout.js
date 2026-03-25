@@ -1,27 +1,23 @@
 // ══════════════════════════════════════════════
-// SIDEBAR & MOBILE NAV
+// LAYOUT — Affichage app / auth
 // ══════════════════════════════════════════════
-function toggleSidebar() {
-  const s = document.getElementById('sidebar');
-  const o = document.getElementById('sidebar-overlay');
-  const open = s.classList.toggle('open');
-  o.classList.toggle('show', open);
-}
-function closeSidebar() {
-  document.getElementById('sidebar')?.classList.remove('open');
-  document.getElementById('sidebar-overlay')?.classList.remove('show');
-}
-function toggleMoreMenu() {
-  const m = document.getElementById('more-menu');
-  m.classList.toggle('show');
-}
-function closeMoreMenu() {
-  document.getElementById('more-menu')?.classList.remove('show');
-}
-// Close more-menu on outside tap
-document.addEventListener('click', e => {
-  const menu = document.getElementById('more-menu');
-  if (menu?.classList.contains('show') && !menu.contains(e.target) && !e.target.closest('.bottom-nav-item')) {
-    menu.classList.remove('show');
+
+import { STATE } from './state.js';
+
+export function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display         = 'block';
+
+  const usernameEl = document.getElementById('header-username');
+  if (usernameEl) usernameEl.textContent = STATE.profile?.pseudo ?? STATE.user?.email ?? '';
+
+  if (STATE.isAdmin) {
+    document.getElementById('admin-badge')?.style.setProperty('display', 'inline');
+    document.querySelectorAll('.admin-only').forEach(el => (el.style.display = 'flex'));
   }
-});
+}
+
+export function showAuth() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app').style.display         = 'none';
+}
