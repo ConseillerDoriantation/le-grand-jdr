@@ -1,13 +1,21 @@
-// MODALS
 // ══════════════════════════════════════════════
-function openModal(title, bodyHtml) {
-  document.getElementById('modal-title').querySelector('span').textContent = title;
-  document.getElementById('modal-body').innerHTML = bodyHtml;
-  document.getElementById('modal-overlay').classList.add('show');
-}
-function closeModal(e) {
-  if (!e || e.target===document.getElementById('modal-overlay') || e.target.textContent==='✕')
-    document.getElementById('modal-overlay').classList.remove('show');
+// MODAL — Composant partagé
+// ══════════════════════════════════════════════
+
+export function openModal(title, bodyHtml) {
+  const titleEl = document.querySelector('#modal-title span');
+  const bodyEl  = document.getElementById('modal-body');
+  const overlay = document.getElementById('modal-overlay');
+  if (titleEl) titleEl.textContent = title;
+  if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
+  overlay?.classList.add('show');
 }
 
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+export function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal-overlay')) return;
+  document.getElementById('modal-overlay')?.classList.remove('show');
+}
+
+export function closeModalDirect() {
+  document.getElementById('modal-overlay')?.classList.remove('show');
+}
