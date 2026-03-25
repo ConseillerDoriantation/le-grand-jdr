@@ -237,48 +237,8 @@ async characters() {
 
 // ─── SHOP ─────────────────────────────────────
 async shop() {
-  const items = await loadCollection('shop');
-  const content = document.getElementById('main-content');
-  const cats = [...new Set(items.map(i=>i.categorie||'Divers'))].sort();
-
-  let html = `<div class="page-header">
-    <div class="page-title"><span class="page-title-accent">🛒 Boutique</div>
-    <div class="page-subtitle">Équipements, consommables et merveilles</div>
-  </div>`;
-
-  if (STATE.isAdmin) {
-    html += `<div class="admin-section">
-      <div class="admin-label">Gestion Admin</div>
-      <button class="btn btn-gold btn-sm" onclick="openShopItemModal()">+ Ajouter un article</button>
-    </div>`;
-  }
-
-  if (items.length === 0) {
-    html += `<div class="empty-state"><div class="icon">🛒</div><p>La boutique est vide pour l'instant.</p></div>`;
-  } else {
-    const catFilter = `<div class="tabs" style="margin-bottom:1.5rem" id="shop-cats">
-      <button class="tab active" onclick="filterShop(null,this)">Tout</button>
-      ${cats.map(c=>`<button class="tab" onclick="filterShop('${c}',this)">${c}</button>`).join('')}
-    </div>`;
-    html += catFilter;
-    html += `<div class="shop-grid" id="shop-grid">`;
-    items.forEach(item => {
-      html += `<div class="shop-item" data-cat="${item.categorie||'Divers'}">
-        <div class="shop-category">${item.categorie||'Divers'}</div>
-        <div class="shop-item-name">${item.nom||'?'}</div>
-        <div class="shop-item-desc">${item.description||''}</div>
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div class="shop-item-price">💰 ${item.prix||'?'} Or</div>
-          ${STATE.isAdmin?`<div style="display:flex;gap:0.3rem">
-            <button class="btn-icon" onclick="editShopItem('${item.id}')">✏️</button>
-            <button class="btn-icon" onclick="deleteShopItem('${item.id}')">🗑️</button>
-          </div>`:''}
-        </div>
-      </div>`;
-    });
-    html += '</div>';
-  }
-  content.innerHTML = html;
+  // Délégation à shop.js qui gère l'état et le rendu complet
+  await window.renderShop?.();
 },
 
 // ─── WORLD ────────────────────────────────────
