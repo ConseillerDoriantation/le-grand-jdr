@@ -169,7 +169,6 @@ select.input-field, select.input-sm { cursor:pointer; }
 }
 .btn-gold:hover {
   box-shadow:0 4px 20px rgba(226,185,111,0.35);
-  transform:translateY(-1px);
 }
 .btn-outline {
   background:rgba(255,255,255,0.04);
