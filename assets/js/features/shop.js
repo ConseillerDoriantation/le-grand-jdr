@@ -1,3 +1,7 @@
+import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { openModal, closeModal } from '../shared/modal.js';
+import { showNotif } from '../shared/notifications.js';
+
 // SHOP ACTIONS
 // ══════════════════════════════════════════════
 function openShopItemModal(item) {
@@ -42,3 +46,5 @@ function filterShop(cat, el) {
     item.style.display = !cat||item.dataset.cat===cat ? '' : 'none';
   });
 }
+
+Object.assign(window, {openShopItemModal, saveShopItem, editShopItem, deleteShopItem, filterShop});

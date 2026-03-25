@@ -1,3 +1,7 @@
+import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { openModal, closeModal } from '../shared/modal.js';
+import { showNotif } from '../shared/notifications.js';
+
 // ══════════════════════════════════════════════
 // NPC ACTIONS
 // ══════════════════════════════════════════════
@@ -47,3 +51,6 @@ function filterNpcs(disp, el) {
     c.style.display = !disp||c.dataset.disp===disp ? '' : 'none';
   });
 }
+
+Object.assign(window, {openNpcModal, saveNpc, editNpc, deleteNpc, filterNpcs});
+export { filterNpcs };

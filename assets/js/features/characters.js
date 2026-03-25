@@ -1,3 +1,8 @@
+import { STATE } from '../core/state.js';
+import { addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { openModal, closeModal } from '../shared/modal.js';
+import { showNotif } from '../shared/notifications.js';
+
 // CHARACTER SHEET
 // ══════════════════════════════════════════════
 function selectChar(id, el) {
@@ -1079,3 +1084,39 @@ async function saveQuete() {
 }
 
 // ══════════════════════════════════════════════
+
+Object.assign(window, {
+  selectChar,
+  filterAdminChars,
+  renderCharSheet,
+  showCharTab,
+  createNewChar,
+  deleteChar,
+  editCharInfo,
+  saveCharInfo,
+  editCharStats,
+  saveCharStats,
+  adjustStat,
+  editEquipSlot,
+  saveEquipSlot,
+  clearEquipSlot,
+  toggleRune,
+  addSort,
+  editSort,
+  saveSort,
+  deleteSort,
+  addInvItem,
+  editInvItem,
+  saveInvItem,
+  deleteInvItem,
+  addQuete,
+  saveQuete,
+  toggleQuete,
+  deleteQuete,
+  saveNotes,
+  addTitre,
+  removeTitre,
+  cancelEditChar,
+});
+
+export { renderCharSheet, selectChar, filterAdminChars };
