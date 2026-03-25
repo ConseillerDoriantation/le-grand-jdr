@@ -102,6 +102,25 @@ body::after {
   letter-spacing:0.08em;
   text-transform:uppercase;
 }
+.header-admin-link {
+  background: linear-gradient(180deg, rgba(79,140,255,0.22), rgba(79,140,255,0.14));
+  border:1px solid rgba(79,140,255,0.30);
+  color:var(--text);
+  padding:0.58rem 0.92rem;
+  border-radius:14px;
+  cursor:pointer;
+  font-size:0.78rem;
+  font-family:'Inter',sans-serif;
+  font-weight:700;
+  letter-spacing:0.02em;
+  box-shadow:0 12px 26px rgba(79,140,255,0.14);
+  transition:all 0.2s ease;
+}
+.header-admin-link:hover {
+  background: linear-gradient(180deg, rgba(79,140,255,0.28), rgba(79,140,255,0.18));
+  border-color:rgba(79,140,255,0.42);
+  transform:translateY(-1px);
+}
 .btn-logout {
   background: rgba(255,255,255,0.04);
   border:1px solid rgba(255,255,255,0.09);

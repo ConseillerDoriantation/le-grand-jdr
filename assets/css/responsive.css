@@ -150,6 +150,10 @@
     border-radius:10px;
   }
   #header-username { display:none; }
+  .header-admin-link {
+    padding:0.48rem 0.7rem;
+    font-size:0.72rem;
+  }
   .btn-logout {
     font-size:0;
     padding:0.48rem 0.62rem;
