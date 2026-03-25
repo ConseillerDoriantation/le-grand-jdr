@@ -1,5 +1,11 @@
+/* ═══════════════════════════════════════════════════
+   TOKENS — Variables CSS
+   Mode nuit  : :root            (défaut)
+   Mode jour  : [data-theme="light"]
+═══════════════════════════════════════════════════ */
+
 :root {
-  /* Accent system */
+  /* Accent */
   --gold:        #4f8cff;
   --gold-light:  #dbe8ff;
   --gold-dark:   #2f63e6;
@@ -8,7 +14,7 @@
   --crimson:       #ff6f91;
   --crimson-light: #ff8ca7;
 
-  /* Background system */
+  /* Backgrounds */
   --bg-deep:    #0b1118;
   --bg-dark:    #10161f;
   --bg-card:    rgba(20, 27, 36, 0.88);
@@ -45,4 +51,72 @@
   --sidebar-width:  286px;
   --content-max:    1680px;
   --header-height:  64px;
+}
+
+/* ── Mode jour ──────────────────────────────────
+   Toutes les variables surchargées ici.
+   Seul le sélecteur change — les noms restent
+   identiques pour ne rien casser dans le CSS.
+─────────────────────────────────────────────── */
+[data-theme="light"] {
+  /* Accent — bleu plus sombre pour contraste sur blanc */
+  --gold:        #2563eb;
+  --gold-light:  #93c5fd;
+  --gold-dark:   #1d4ed8;
+  --gold-glow:   rgba(37, 99, 235, 0.12);
+
+  --crimson:       #e11d48;
+  --crimson-light: #fb7185;
+
+  /* Backgrounds — blanc cassé, cartes légèrement grisées */
+  --bg-deep:    #f0f2f5;
+  --bg-dark:    #f7f8fa;
+  --bg-card:    rgba(255, 255, 255, 0.95);
+  --bg-card2:   rgba(248, 249, 252, 0.98);
+  --bg-panel:   rgba(255, 255, 255, 0.90);
+  --bg-glass:   rgba(255, 255, 255, 0.82);
+  --bg-elevated:#ffffff;
+
+  /* Borders — grises subtiles */
+  --border:         rgba(0, 0, 0, 0.08);
+  --border-strong:  rgba(0, 0, 0, 0.14);
+  --border-bright:  rgba(37, 99, 235, 0.30);
+  --border-accent:  rgba(59, 130, 246, 0.22);
+
+  /* Text — noir doux */
+  --text:       #111827;
+  --text-soft:  #1f2937;
+  --text-muted: #6b7280;
+  --text-dim:   #9ca3af;
+
+  /* Shadows — plus légères sur fond clair */
+  --shadow:      rgba(0, 0, 0, 0.10);
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-soft: 0 12px 40px rgba(0, 0, 0, 0.10);
+  --shadow-glow: 0 1px 0 rgba(0,0,0,0.04), 0 4px 16px rgba(0, 0, 0, 0.08);
+
+  --green:     #059669;
+  --green-dim: rgba(5, 150, 105, 0.12);
+  --blue:      #2563eb;
+  --blue-dim:  rgba(37, 99, 235, 0.12);
+}
+
+/* ── Transition douce entre les deux modes ─────
+   Appliquée sur les éléments qui changent de couleur.
+   Exclut les transitions sur le texte pour éviter
+   les flashs de lecture.
+─────────────────────────────────────────────── */
+body,
+.app-header,
+.sidebar,
+.card,
+.stat-box,
+.modal,
+.auth-box,
+.main-content,
+#auth-screen {
+  transition:
+    background-color 0.25s ease,
+    border-color     0.25s ease,
+    box-shadow       0.25s ease;
 }

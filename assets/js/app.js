@@ -21,7 +21,8 @@ import {
   closeModalDirect,
 } from './shared/modal.js';
 
-import { showNotif } from './shared/notifications.js';
+import { showNotif }                from './shared/notifications.js';
+import { initTheme, toggleTheme }   from './shared/theme.js';
 
 Object.assign(window, {
   switchAuthTab,
@@ -33,7 +34,15 @@ Object.assign(window, {
   closeModal,
   closeModalDirect,
   showNotif,
+  toggleTheme,
 });
+
+// ── Thème : appliquer avant tout rendu ─────────
+try {
+  initTheme();
+} catch (error) {
+  console.error('[app] initTheme failed:', error);
+}
 
 try {
   initAuth();
@@ -51,13 +60,19 @@ try {
   const overlay = document.getElementById('modal-overlay');
   if (overlay) {
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        closeModalDirect();
-      }
+      if (e.target === overlay) closeModalDirect();
     });
   }
 } catch (error) {
   console.error('[app] modal overlay binding failed:', error);
+}
+
+// ── Bouton thème ───────────────────────────────
+try {
+  document.getElementById('btn-theme')
+    ?.addEventListener('click', toggleTheme);
+} catch (error) {
+  console.error('[app] theme button binding failed:', error);
 }
 
 const featureModules = [
@@ -81,7 +96,6 @@ async function loadFeaturesSafely() {
   const results = await Promise.allSettled(
     featureModules.map((path) => import(path))
   );
-
   results.forEach((result, index) => {
     if (result.status === 'rejected') {
       console.error(`[app] feature failed: ${featureModules[index]}`, result.reason);
