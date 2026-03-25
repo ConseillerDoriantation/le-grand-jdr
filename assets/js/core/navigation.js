@@ -51,6 +51,9 @@ export function initEventDelegation() {
       closeSidebar(); closeMoreMenu(); return;
     }
     if (e.target.closest('[data-toggle-more]')) { toggleMoreMenu(); return; }
+    if (e.target.closest('[data-action="close-modal"]')) {
+      import('../shared/modal.js').then(m => m.closeModalDirect()); return;
+    }
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') import('../shared/modal.js').then(m => m.closeModalDirect());
