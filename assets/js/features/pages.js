@@ -199,40 +199,61 @@ async characters() {
   STATE.characters = chars;
   const content = document.getElementById('main-content');
 
-  let html = `<div class="page-header">
-    <div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div>
-    <div class="page-subtitle">Gérez vos fiches de personnage</div>
+  let html = `<div class="page-header page-header--characters">
+    <div>
+      <div class="page-title"><span class="page-title-accent">Personnages</span></div>
+      <div class="page-subtitle">Une fiche structurée, éditable directement champ par champ.</div>
+    </div>
+    <div class="characters-header-actions">
+      <button class="char-primary-btn" type="button" onclick="createNewChar()">+ Nouveau personnage</button>
+    </div>
   </div>`;
 
   if (STATE.isAdmin && chars.length > 0) {
     const byUser = {};
-    chars.forEach(c => { if(!byUser[c.ownerPseudo]) byUser[c.ownerPseudo]=[]; byUser[c.ownerPseudo].push(c); });
-    html += `<div class="admin-section"><div class="admin-label">Vue Admin — Tous les joueurs</div>
-    <div class="char-select-bar" id="admin-player-filter">
-      <div class="char-pill active" onclick="filterAdminChars(null,this)">Tous</div>
-      ${Object.keys(byUser).map(p=>`<div class="char-pill" onclick="filterAdminChars('${p}',this)">${p}</div>`).join('')}
-    </div></div>`;
-  }
+    chars.forEach((c) => {
+      if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = [];
+      byUser[c.ownerPseudo].push(c);
+    });
 
-  html += `<div style="display:flex;gap:0.8rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center">
-    <button class="btn btn-gold" onclick="createNewChar()">+ Nouveau Personnage</button>
-    <span style="font-size:0.78rem;color:var(--text-dim)">Le personnage est créé instantanément — modifie ensuite ses infos sur la fiche.</span>
-  </div>`;
+    html += `<div class="admin-section characters-admin-filter">
+      <div class="admin-label">Filtrer par joueur</div>
+      <div class="char-filter-row" id="admin-player-filter">
+        <button class="char-filter-pill active" type="button" onclick="filterAdminChars(null,this)">Tous</button>
+        ${Object.keys(byUser).map((pseudo) => `<button class="char-filter-pill" type="button" onclick="filterAdminChars('${pseudo}',this)">${pseudo}</button>`).join('')}
+      </div>
+    </div>`;
+  }
 
   if (chars.length === 0) {
-    html += `<div class="empty-state"><div class="icon">📜</div><p>Aucun personnage. Crée ton premier héros !</p></div>`;
-  } else {
-    html += `<div class="char-select-bar" id="char-pills">
-      ${chars.map((c,i)=>`<div class="char-pill ${i===0?'active':''}" onclick="selectChar('${c.id}',this)">${c.nom||'Nouveau personnage'}</div>`).join('')}
-    </div>
-    <div id="char-sheet-area"></div>`;
+    html += `<div class="empty-state"><div class="icon">PJ</div><p>Aucun personnage. Crée ton premier personnage.</p></div>`;
+    content.innerHTML = html;
+    return;
   }
 
+  html += `<div class="characters-page">
+    <aside class="characters-rail">
+      <div class="characters-rail__head">
+        <span class="characters-rail__eyebrow">Liste</span>
+        <h3>${STATE.isAdmin ? 'Tous les personnages' : 'Mes personnages'}</h3>
+        <p>Sélectionne une fiche pour l’ouvrir.</p>
+      </div>
+      <div class="characters-rail__list" id="char-pills">
+        ${chars.map((c, i) => `<button class="char-rail-card ${i===0?'active':''}" type="button" data-char-id="${c.id}" onclick="selectChar('${c.id}',this)">
+          <span class="char-rail-card__title">${c.nom || 'Nouveau personnage'}</span>
+          <span class="char-rail-card__meta">Niv. ${c.niveau || 1}${STATE.isAdmin ? ` · ${c.ownerPseudo || '—'}` : ''}</span>
+        </button>`).join('')}
+      </div>
+    </aside>
+
+    <section class="characters-stage">
+      <div id="char-sheet-area"></div>
+    </section>
+  </div>`;
+
   content.innerHTML = html;
-  if (chars.length > 0) {
-    STATE.activeChar = chars[0];
-    renderCharSheet(chars[0]);
-  }
+  STATE.activeChar = chars[0];
+  renderCharSheet(chars[0], window._currentCharTab || 'carac');
 },
 
 // ─── SHOP ─────────────────────────────────────
