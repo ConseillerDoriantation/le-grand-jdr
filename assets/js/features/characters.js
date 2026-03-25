@@ -176,22 +176,40 @@ function renderCharSheet(c, keepTab) {
         </div>
       </div>
 
-      <!-- Niveau + XP + Or -->
+      <!-- Niveau + Or -->
       <div class="cs-meta-row">
         <span class="cs-level-badge">
           ${canEdit
             ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv. ${c.niveau||1}</span>`
             : `Niv. ${c.niveau||1}`}
         </span>
-        <div class="cs-xp-wrap">
-          <div class="cs-xp-bar"><div class="cs-xp-fill" style="width:${xpPct}%"></div></div>
-          <span class="cs-xp-label">
-            ${canEdit
-              ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','exp',this,0,99999)" title="Cliquer pour modifier">${c.exp||0}</span>`
-              : (c.exp||0)} / ${calcPalier(c.niveau||1)} XP
-          </span>
-        </div>
         <span class="cs-or" title="Solde du Livret de Compte">💰 ${calcOr(c)} or</span>
+      </div>
+
+      <!-- Bloc XP explicite -->
+      <div class="cs-xp-block">
+        <div class="cs-xp-header">
+          <span class="cs-xp-title">✨ Expérience</span>
+          <span class="cs-xp-palier">Palier : ${calcPalier(c.niveau||1)} XP</span>
+        </div>
+        <div class="cs-xp-bar-wrap">
+          <div class="cs-xp-bar" id="xp-bar-bg">
+            <div class="cs-xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div>
+          </div>
+          <span class="cs-xp-pct" id="xp-pct">${xpPct}%</span>
+        </div>
+        ${canEdit
+          ? `<div class="cs-xp-input-row">
+               <label class="cs-xp-input-label">XP actuel</label>
+               <input type="number" class="cs-xp-input cs-inline-num"
+                      id="xp-direct-input"
+                      value="${c.exp||0}" min="0"
+                      max="${calcPalier(c.niveau||1)}"
+                      onchange="saveXpDirect('${c.id}',this)"
+                      oninput="previewXpBar(this,${calcPalier(c.niveau||1)})">
+             </div>`
+          : `<div class="cs-xp-readonly">${c.exp||0} / ${calcPalier(c.niveau||1)} XP</div>`
+        }
       </div>
 
       <div class="cs-divider"></div>
@@ -583,6 +601,7 @@ function renderCharDeck(c, canEdit) {
     </div>
     <div class="cs-sort-info">
       <strong>Système maison</strong> — Noyau + Runes. Coût PM = 2 × nombre de runes.
+      <br><span style="color:var(--text-dim);font-size:0.72rem">✨ Magie à mains nues : +2 PM, pas d'effet de set.</span>
     </div>`;
 
   if (sorts.length===0) {
@@ -621,7 +640,7 @@ function renderCharDeck(c, canEdit) {
       </div>`;
     });
   }
-  html += `<div class="cs-sort-footer">✨ Magie à mains nues : +2 PM, pas d'effet de set.</div>`;
+
   html += `</div>`;
   return html;
 }
@@ -638,25 +657,51 @@ function sortDragStart(e, idx) {
 function sortDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  e.currentTarget.classList.add('cs-sort-drag-over');
+  // Retirer tous les indicateurs existants
+  document.querySelectorAll('.cs-sort-card').forEach(el => {
+    el.classList.remove('cs-drop-before', 'cs-drop-after');
+  });
+  // Détecter si on est dans la moitié haute ou basse de la carte
+  const rect = e.currentTarget.getBoundingClientRect();
+  const mid  = rect.top + rect.height / 2;
+  if (e.clientY < mid) {
+    e.currentTarget.classList.add('cs-drop-before');
+  } else {
+    e.currentTarget.classList.add('cs-drop-after');
+  }
 }
 function sortDragEnd(e) {
   e.currentTarget.style.opacity = '';
-  document.querySelectorAll('.cs-sort-drag-over').forEach(el => el.classList.remove('cs-sort-drag-over'));
+  document.querySelectorAll('.cs-sort-card').forEach(el => {
+    el.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
+  });
 }
 async function sortDrop(e, toIdx) {
   e.preventDefault();
-  e.currentTarget.classList.remove('cs-sort-drag-over');
+  const card = e.currentTarget;
+  // Déterminer si on insère avant ou après
+  const rect = card.getBoundingClientRect();
+  const insertAfter = e.clientY >= rect.top + rect.height / 2;
+  const actualIdx = insertAfter ? toIdx + 1 : toIdx;
+
+  card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
+  document.querySelectorAll('.cs-sort-card').forEach(el =>
+    el.classList.remove('cs-drop-before', 'cs-drop-after'));
+
   const fromIdx = _dragSortIdx;
-  if (fromIdx === null || fromIdx === toIdx) return;
+  _dragSortIdx = null;
+  if (fromIdx === null) return;
+
   const c = STATE.activeChar; if (!c) return;
-  const sorts = c.deck_sorts||[];
+  const sorts = [...(c.deck_sorts||[])];
+  if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return; // pas de déplacement
+
   const [moved] = sorts.splice(fromIdx, 1);
-  sorts.splice(toIdx, 0, moved);
+  const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
+  sorts.splice(insertAt, 0, moved);
   c.deck_sorts = sorts;
   await updateInCol('characters', c.id, {deck_sorts: sorts});
   renderCharSheet(c, 'sorts');
-  _dragSortIdx = null;
 }
 
 // ══════════════════════════════════════════════
@@ -765,6 +810,28 @@ function renderCharNotes(c, canEdit) {
   }
   html += `</div>`;
   return html;
+}
+
+
+function previewXpBar(input, palier) {
+  const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
+  const p = palier > 0 ? Math.round(val/palier*100) : 0;
+  const bar = document.getElementById('xp-bar-fill');
+  const pct = document.getElementById('xp-pct');
+  if (bar) bar.style.width = p + '%';
+  if (pct) pct.textContent = p + '%';
+}
+
+async function saveXpDirect(charId, input) {
+  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+  if (!c) return;
+  const palier = calcPalier(c.niveau||1);
+  const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
+  c.exp = val;
+  input.value = val;
+  previewXpBar(input, palier);
+  await updateInCol('characters', charId, {exp: val});
+  showNotif('XP mis à jour !', 'success');
 }
 
 function toggleNote(idx) {
@@ -1390,6 +1457,7 @@ Object.assign(window, {
   calcOr, refreshOrDisplay, calcPalier,
   selectNoyau,
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
+  previewXpBar, saveXpDirect,
   renderCharCompte,
   addCompteRow, deleteCompteRow, inlineEditCompteField,
   addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
