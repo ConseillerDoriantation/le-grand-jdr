@@ -15,7 +15,7 @@ async function doLogin() {
   try {
     await FS.signInWithEmailAndPassword(AUTH, email, pwd);
   } catch(e) {
-    setAuthError(getAuthError(e.code));
+    setAuthError(getAuthError(e));
   }
 }
 
@@ -29,7 +29,7 @@ async function doRegister() {
     const cred = await FS.createUserWithEmailAndPassword(AUTH, email, pwd);
     await FS.setDoc(FS.doc(DB,'users',cred.user.uid), { uid:cred.user.uid, email, pseudo, createdAt: new Date().toISOString() });
   } catch(e) {
-    setAuthError(getAuthError(e.code));
+    setAuthError(getAuthError(e));
   }
 }
 
@@ -38,9 +38,11 @@ async function doLogout() {
 }
 
 function setAuthError(msg) { document.getElementById('auth-error').textContent = msg; }
-function getAuthError(code) {
+function getAuthError(error) {
+  const code = error?.code;
+  const message = error?.message;
   const map = { 'auth/invalid-email':'Email invalide.','auth/user-not-found':'Compte introuvable.','auth/wrong-password':'Mot de passe incorrect.','auth/email-already-in-use':'Email déjà utilisé.','auth/weak-password':'Mot de passe trop faible.','auth/invalid-credential':'Email ou mot de passe incorrect.' };
-  return map[code] || 'Erreur: ' + code;
+  return map[code] || message || 'Erreur inconnue pendant l’authentification.';
 }
 
 function showAuth() {

@@ -1,8 +1,10 @@
 // ══════════════════════════════════════════════
 // INIT FIREBASE
 // ══════════════════════════════════════════════
-window.addEventListener('firebase-ready', () => {
+function initFirebaseBindings() {
   const jdr = window._jdr;
+  if (!jdr || AUTH) return;
+
   AUTH = jdr.auth;
   DB = jdr.db;
   FS = jdr;
@@ -15,10 +17,19 @@ window.addEventListener('firebase-ready', () => {
       showApp();
       navigate('dashboard');
     } else {
+      STATE.user = null;
+      STATE.profile = null;
+      STATE.isAdmin = false;
       showAuth();
     }
   });
-});
+}
+
+if (window._jdr) {
+  initFirebaseBindings();
+} else {
+  window.addEventListener('firebase-ready', initFirebaseBindings, { once: true });
+}
 
 async function loadProfile(user) {
   const ref = FS.doc(DB, 'users', user.uid);
