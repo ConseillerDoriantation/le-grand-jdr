@@ -17,7 +17,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Texture overlay */
+/* Texture overlay — masquée en mode jour */
 body::before {
   content: '';
   position: fixed;
@@ -26,6 +26,10 @@ body::before {
   pointer-events: none;
   z-index: 0;
   opacity: 0.4;
+  transition: opacity 0.25s;
+}
+[data-theme="light"] body::before {
+  opacity: 0;
 }
 
 body > * {
