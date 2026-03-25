@@ -68,7 +68,7 @@ function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
   const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
-  const currentTab = keepTab || window._currentCharTab || 'carac';
+  const currentTab = keepTab || window._currentCharTab || 'combat';
 
   window._currentChar = c;
   window._canEditChar = canEdit;
@@ -336,6 +336,7 @@ function inlineEditNum(charId, field, el, min=0, max=99999) {
   input.value = cur;
   input.min = min; input.max = max;
   input.className = 'cs-inline-input cs-inline-num';
+  input.style.cssText += ';-moz-appearance:textfield;';
 
   const save = async () => {
     const val = Math.max(min, Math.min(max, parseInt(input.value)||0));
@@ -364,7 +365,7 @@ function inlineEditStat(charId, statKey, el) {
   input.value = cur;
   input.min = 1; input.max = 30;
   input.className = 'cs-inline-input cs-inline-num';
-  input.style.cssText = 'width:52px;font-size:1.35rem;font-weight:700;text-align:center;';
+  input.style.cssText = 'width:52px;font-size:1.3rem;font-weight:700;text-align:center;-moz-appearance:textfield;';
 
   const save = async () => {
     const val = Math.max(1, Math.min(30, parseInt(input.value)||cur));
