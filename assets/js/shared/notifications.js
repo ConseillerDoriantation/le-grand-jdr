@@ -1,11 +1,14 @@
 // ══════════════════════════════════════════════
-// NOTIFICATION
+// NOTIFICATIONS — Toast système
 // ══════════════════════════════════════════════
-let notifTimer;
-function showNotif(msg, type='success') {
+
+let _timer = null;
+
+export function showNotif(msg, type = 'success') {
   const el = document.getElementById('notif');
+  if (!el) return;
   el.textContent = msg;
-  el.className = `notif ${type} show`;
-  clearTimeout(notifTimer);
-  notifTimer = setTimeout(()=>el.classList.remove('show'),3000);
+  el.className   = `notif ${type} show`;
+  clearTimeout(_timer);
+  _timer = setTimeout(() => el.classList.remove('show'), 3000);
 }
