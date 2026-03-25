@@ -10,7 +10,8 @@ import PAGES from './pages.js';
 function getMod(c, key) {
   const base = (c.stats||{})[key]||8;
   const bonus = (c.statsBonus||{})[key]||0;
-  return Math.floor(((base+bonus)-10)/2);
+  const total = Math.min(22, base+bonus); // modificateur plafonné à +6 (score max 22)
+  return Math.floor((total-10)/2);
 }
 function modStr(v) { return v >= 0 ? '+'+v : String(v); }
 function calcCA(c) {
@@ -32,12 +33,18 @@ function calcDeckMax(c) {
 function calcPVMax(c) {
   const modCo = getMod(c,'constitution');
   const niv = c.niveau||1;
-  return (c.pvBase||10) + (modCo > 0 ? Math.floor(modCo*(niv-1)) : modCo*(niv-1));
+  // Si modCo = -1 au niv 1, le personnage a pvBase - 1
+  const progression = modCo > 0 ? Math.floor(modCo*(niv-1)) : modCo*(niv-1);
+  const baseBonus = modCo === -1 ? -1 : 0; // -1 PV base si mod Co = -1
+  return (c.pvBase||10) + baseBonus + progression;
 }
 function calcPMMax(c) {
   const modSa = getMod(c,'sagesse');
   const niv = c.niveau||1;
-  return (c.pmBase||10) + (modSa > 0 ? Math.floor(modSa*(niv-1)) : modSa*(niv-1));
+  // Si modSa = -1 au niv 1, le personnage a pmBase - 1
+  const progression = modSa > 0 ? Math.floor(modSa*(niv-1)) : modSa*(niv-1);
+  const baseBonus = modSa === -1 ? -1 : 0; // -1 PM base si mod Sa = -1
+  return (c.pmBase||10) + baseBonus + progression;
 }
 function pct(cur,max) { return max>0 ? Math.max(0,Math.min(100,Math.round(cur/max*100))) : 0; }
 
@@ -263,8 +270,8 @@ function renderCharSheet(c, keepTab) {
 
   <!-- ═══ ONGLETS ═══ -->
   <div class="cs-tabs" id="char-tabs">
-    ${['combat','sorts','inventaire','quetes','notes'].map((tab,i)=>{
-      const labels = ['Combat','Sorts & Runes','Inventaire','Quêtes','Notes'];
+    ${['combat','sorts','inventaire','quetes','compte','notes'].map((tab,i)=>{
+      const labels = ['Combat','Sorts & Runes','Inventaire','Quêtes','Compte','Notes'];
       return `<button class="cs-tab ${currentTab===tab?'active':''}" onclick="showCharTab('${tab}',this)">${labels[i]}</button>`;
     }).join('')}
   </div>
@@ -285,6 +292,7 @@ function _renderTab(tab, c, canEdit) {
     sorts:      ()=>renderCharDeck(c,canEdit),
     inventaire: ()=>renderCharInventaire(c,canEdit),
     quetes:     ()=>renderCharQuetes(c,canEdit),
+    compte:     ()=>renderCharCompte(c,canEdit),
     notes:      ()=>renderCharNotes(c,canEdit),
   };
   area.innerHTML = renders[tab]?.() || '';
@@ -672,14 +680,233 @@ function renderCharQuetes(c, canEdit) {
 // TAB : NOTES
 // ══════════════════════════════════════════════
 function renderCharNotes(c, canEdit) {
+  const notes = c.notesList||[];
+  let html = `<div class="cs-section">
+    <div class="cs-section-title">📝 Notes
+      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addNote()">+ Nouvelle note</button>`:''}
+    </div>`;
+
+  if (notes.length===0) {
+    html += `<div class="cs-empty">Aucune note. Crée ta première note avec le bouton ci-dessus.</div>`;
+  } else {
+    notes.forEach((note, i) => {
+      const isOpen = window._openNote === i;
+      html += `<div class="cs-note-card">
+        <div class="cs-note-header" onclick="toggleNote(${i})">
+          <div class="cs-note-meta">
+            <span class="cs-note-icon">📄</span>
+            <span class="cs-note-title">${note.titre||'Note sans titre'}</span>
+            ${note.date?`<span class="cs-note-date">${note.date}</span>`:''}
+          </div>
+          <div style="display:flex;gap:0.4rem;align-items:center">
+            ${canEdit?`<button class="btn-icon" onclick="event.stopPropagation();editNoteTitle(${i})" title="Renommer">✏️</button>
+                       <button class="btn-icon" onclick="event.stopPropagation();deleteNote(${i})" title="Supprimer">🗑️</button>`:''}
+            <span class="cs-note-chevron">${isOpen?'▲':'▼'}</span>
+          </div>
+        </div>
+        ${isOpen?`<div class="cs-note-body">
+          ${canEdit
+            ? `<textarea class="input-field cs-note-textarea" id="note-area-${i}" rows="10"
+                         placeholder="Contenu de la note...">${note.contenu||''}</textarea>
+               <button class="btn btn-gold btn-sm" style="margin-top:0.6rem" onclick="saveNote(${i})">💾 Enregistrer</button>`
+            : `<div class="cs-note-content">${(note.contenu||'Aucun contenu.').replace(/\n/g,'<br>')}</div>`
+          }
+        </div>`:''}
+      </div>`;
+    });
+  }
+  html += `</div>`;
+  return html;
+}
+
+function toggleNote(idx) {
+  window._openNote = window._openNote === idx ? null : idx;
+  _renderTab('notes', window._currentChar, window._canEditChar);
+}
+
+function addNote() {
+  const c = STATE.activeChar; if(!c) return;
+  const notes = c.notesList||[];
+  const now = new Date().toLocaleDateString('fr-FR');
+  notes.push({ titre: 'Nouvelle note', contenu: '', date: now });
+  c.notesList = notes;
+  window._openNote = notes.length - 1;
+  updateInCol('characters', c.id, {notesList: notes}).then(()=>{
+    _renderTab('notes', c, window._canEditChar);
+  });
+}
+
+function editNoteTitle(idx) {
+  const c = STATE.activeChar; if(!c) return;
+  const note = (c.notesList||[])[idx];
+  if (!note) return;
+  const cur = note.titre||'Sans titre';
+  const val = prompt('Titre de la note :', cur);
+  if (val === null) return;
+  note.titre = val.trim()||cur;
+  c.notesList[idx] = note;
+  updateInCol('characters', c.id, {notesList: c.notesList}).then(()=>{
+    _renderTab('notes', c, window._canEditChar);
+    showNotif('Titre mis à jour !','success');
+  });
+}
+
+async function saveNote(idx) {
+  const c = STATE.activeChar; if(!c) return;
+  const ta = document.getElementById(`note-area-${idx}`);
+  if (!ta) return;
+  c.notesList[idx].contenu = ta.value;
+  await updateInCol('characters', c.id, {notesList: c.notesList});
+  showNotif('Note enregistrée !','success');
+}
+
+async function deleteNote(idx) {
+  const c = STATE.activeChar; if(!c) return;
+  if (!confirm('Supprimer cette note ?')) return;
+  c.notesList.splice(idx, 1);
+  if (window._openNote >= c.notesList.length) window._openNote = null;
+  await updateInCol('characters', c.id, {notesList: c.notesList});
+  _renderTab('notes', c, window._canEditChar);
+  showNotif('Note supprimée.','success');
+}
+
+
+// ══════════════════════════════════════════════
+// TAB : LIVRET DE COMPTE
+// ══════════════════════════════════════════════
+function renderCharCompte(c, canEdit) {
+  const compte = c.compte||{recettes:[], depenses:[]};
+  const recettes = compte.recettes||[];
+  const depenses = compte.depenses||[];
+
+  const totalR = recettes.reduce((s,r)=>s+(parseFloat(r.montant)||0),0);
+  const totalD = depenses.reduce((s,d)=>s+(parseFloat(d.montant)||0),0);
+  const solde = totalR - totalD;
+
+  const renderRows = (list, type, canEdit) => {
+    if (list.length===0) return `<tr><td colspan="4" class="cs-compte-empty">Aucune entrée.</td></tr>`;
+    return list.map((row,i)=>`
+      <tr class="cs-compte-row">
+        <td>${canEdit
+          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'date',this)">${row.date||'—'}</span>`
+          : (row.date||'—')}</td>
+        <td>${canEdit
+          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'libelle',this)">${row.libelle||'—'}</span>`
+          : (row.libelle||'—')}</td>
+        <td class="${type==='recettes'?'cs-montant-pos':'cs-montant-neg'}">${canEdit
+          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'montant',this)">${row.montant||0}</span>`
+          : (row.montant||0)} or</td>
+        ${canEdit?`<td><button class="btn-icon" onclick="deleteCompteRow('${type}',${i})">🗑️</button></td>`:''  }
+      </tr>`).join('');
+  };
+
   return `<div class="cs-section">
-    <div class="cs-section-title">📝 Notes de Session</div>
-    ${canEdit
-      ? `<textarea class="input-field" id="char-notes-area" rows="12" placeholder="Tes notes personnelles...">${c.notes||''}</textarea>
-         <button class="btn btn-gold btn-sm" style="margin-top:0.8rem" onclick="saveNotes()">💾 Enregistrer</button>`
-      : `<div style="font-size:0.88rem;line-height:1.8;white-space:pre-wrap;color:var(--text-muted)">${c.notes||'Aucune note.'}</div>`
-    }
+    <div class="cs-section-title">💰 Livret de Compte</div>
+
+    <!-- Solde global -->
+    <div class="cs-solde-bar">
+      <div class="cs-solde-item">
+        <span class="cs-solde-label">Recettes</span>
+        <span class="cs-solde-val pos">+${totalR} or</span>
+      </div>
+      <div class="cs-solde-sep">−</div>
+      <div class="cs-solde-item">
+        <span class="cs-solde-label">Dépenses</span>
+        <span class="cs-solde-val neg">−${totalD} or</span>
+      </div>
+      <div class="cs-solde-sep">=</div>
+      <div class="cs-solde-item cs-solde-main">
+        <span class="cs-solde-label">SOLDE</span>
+        <span class="cs-solde-val ${solde>=0?'pos':'neg'}">${solde>=0?'+':''}${solde} or</span>
+      </div>
+    </div>
+
+    <!-- Double tableau -->
+    <div class="cs-compte-grid">
+
+      <!-- Recettes -->
+      <div class="cs-compte-col">
+        <div class="cs-compte-col-header">
+          <span class="cs-compte-col-title pos">📈 Recettes</span>
+          ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addCompteRow('recettes')">+ Ajouter</button>`:''}
+        </div>
+        <table class="cs-compte-table">
+          <thead><tr>
+            <th>Date / Mission</th><th>Libellé</th><th>Montant</th>
+            ${canEdit?'<th></th>':''}
+          </tr></thead>
+          <tbody>${renderRows(recettes,'recettes',canEdit)}</tbody>
+          <tfoot><tr>
+            <td colspan="${canEdit?3:2}" style="text-align:right;font-size:0.72rem;color:var(--text-muted);font-weight:700;padding-top:0.5rem">Total</td>
+            <td class="cs-montant-pos" style="font-weight:800;padding-top:0.5rem">+${totalR} or</td>
+            ${canEdit?'<td></td>':''}
+          </tr></tfoot>
+        </table>
+      </div>
+
+      <!-- Dépenses -->
+      <div class="cs-compte-col">
+        <div class="cs-compte-col-header">
+          <span class="cs-compte-col-title neg">📉 Dépenses</span>
+          ${canEdit?`<button class="btn btn-danger btn-sm" style="font-size:0.72rem" onclick="addCompteRow('depenses')">+ Ajouter</button>`:''}
+        </div>
+        <table class="cs-compte-table">
+          <thead><tr>
+            <th>Date / Mission</th><th>Libellé</th><th>Montant</th>
+            ${canEdit?'<th></th>':''}
+          </tr></thead>
+          <tbody>${renderRows(depenses,'depenses',canEdit)}</tbody>
+          <tfoot><tr>
+            <td colspan="${canEdit?3:2}" style="text-align:right;font-size:0.72rem;color:var(--text-muted);font-weight:700;padding-top:0.5rem">Total</td>
+            <td class="cs-montant-neg" style="font-weight:800;padding-top:0.5rem">−${totalD} or</td>
+            ${canEdit?'<td></td>':''}
+          </tr></tfoot>
+        </table>
+      </div>
+
+    </div>
   </div>`;
+}
+
+function addCompteRow(type) {
+  const c = STATE.activeChar; if(!c) return;
+  const compte = c.compte||{recettes:[],depenses:[]};
+  compte[type] = compte[type]||[];
+  compte[type].push({ date: new Date().toLocaleDateString('fr-FR'), libelle: '', montant: 0 });
+  c.compte = compte;
+  updateInCol('characters', c.id, {compte}).then(()=>{
+    _renderTab('compte', c, window._canEditChar);
+  });
+}
+
+async function deleteCompteRow(type, idx) {
+  const c = STATE.activeChar; if(!c) return;
+  (c.compte||{})[type]?.splice(idx,1);
+  await updateInCol('characters', c.id, {compte: c.compte});
+  _renderTab('compte', c, window._canEditChar);
+}
+
+function inlineEditCompteField(type, idx, field, el) {
+  const c = STATE.activeChar; if(!c) return;
+  const cur = el.textContent.replace(/ or$/,'').trim();
+  const isNum = field === 'montant';
+  const input = document.createElement('input');
+  input.type = isNum ? 'number' : 'text';
+  input.value = cur;
+  input.className = 'cs-inline-input' + (isNum ? ' cs-inline-num' : '');
+  input.style.cssText = 'width:' + (isNum ? '70px' : '120px') + ';font-size:inherit;';
+
+  const save = async () => {
+    const val = isNum ? (parseFloat(input.value)||0) : (input.value.trim()||cur);
+    c.compte = c.compte||{recettes:[],depenses:[]};
+    c.compte[type][idx][field] = val;
+    await updateInCol('characters', c.id, {compte: c.compte});
+    _renderTab('compte', c, window._canEditChar);
+  };
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape') input.replaceWith(el); });
+  el.replaceWith(input);
+  input.focus(); input.select();
 }
 
 // ══════════════════════════════════════════════
@@ -1093,6 +1320,9 @@ function deleteCharPhoto(id) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   selectChar, filterAdminChars,
+  renderCharCompte,
+  addCompteRow, deleteCompteRow, inlineEditCompteField,
+  addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   renderCharSheet, showCharTab,
   renderCharCarac, renderCharEquip, renderCharDeck,
