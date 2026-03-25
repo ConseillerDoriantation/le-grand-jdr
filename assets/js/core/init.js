@@ -67,9 +67,7 @@ onAuthStateChanged(auth, async (user) => {
     console.error('[init] navigate(dashboard) failed:', error);
     const content = document.getElementById('main-content');
     if (content) {
-      content.innerHTML = '<div class="card"><div class="card-header">Bienvenue</div><p>Connexion réussie, mais le tableau de bord n'a pas pu être affiché.</p></div>';
-    }
-  }
+      content.innerHTML = `<div class="card"><div class="card-header">Bienvenue</div><p>Connexion réussie, mais le tableau de bord n'a pas pu être affiché.</p></div>`;  }
 });
 
 async function loadProfile(user) {
