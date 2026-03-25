@@ -47,9 +47,29 @@ onAuthStateChanged(auth, async (user) => {
 
   setUser(user);
   setAdmin(user.email === ADMIN_EMAIL);
-  await loadProfile(user);
+
+  try {
+    await loadProfile(user);
+  } catch (error) {
+    console.error('[init] loadProfile failed:', error);
+    setProfile({
+      uid: user.uid,
+      email: user.email,
+      pseudo: user.email?.split('@')[0] || 'Aventurier',
+    });
+  }
+
   showApp();
-  navigate('dashboard');
+
+  try {
+    await navigate('dashboard');
+  } catch (error) {
+    console.error('[init] navigate(dashboard) failed:', error);
+    const content = document.getElementById('main-content');
+    if (content) {
+      content.innerHTML = '<div class="card"><div class="card-header">Bienvenue</div><p>Connexion réussie, mais le tableau de bord n'a pas pu être affiché.</p></div>';
+    }
+  }
 });
 
 async function loadProfile(user) {
@@ -66,6 +86,10 @@ async function loadProfile(user) {
     pseudo: user.email?.split('@')[0] || 'Aventurier',
     createdAt: new Date().toISOString(),
   };
-  await setDoc(ref, profile, { merge: true });
+  try {
+    await setDoc(ref, profile, { merge: true });
+  } catch (error) {
+    console.error('[init] setDoc profile failed:', error);
+  }
   setProfile(profile);
 }

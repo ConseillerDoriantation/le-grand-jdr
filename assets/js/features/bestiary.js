@@ -4,11 +4,15 @@ import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 
 function parseAttacks(raw) {
-  return raw.split('
-').map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [nom, degats, effet] = line.split('|').map((part) => part?.trim() || '');
-    return { nom: nom || 'Attaque', degats: degats || '?', effet: effet || '' };
-  });
+  return raw
+    .split('
+')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [nom, degats, effet] = line.split('|').map((part) => part?.trim() || '');
+      return { nom: nom || 'Attaque', degats: degats || '?', effet: effet || '' };
+    });
 }
 
 function openBestiaryModal(creature = null) {
@@ -27,8 +31,7 @@ function openBestiaryModal(creature = null) {
       <div class="form-group"><label>CA</label><input type="number" class="input-field" id="best-ca" value="${creature?.ca || 10}"></div>
       <div class="form-group"><label>XP</label><input type="number" class="input-field" id="best-xp" value="${creature?.xp || 0}"></div>
     </div>
-    <div class="form-group"><label>Attaques (une par ligne : nom | dégâts | effet)</label><textarea class="input-field" id="best-attaques" rows="5">${(creature?.attaques || []).map((a) => `${a.nom || ''} | ${a.degats || ''} | ${a.effet || ''}`).join('
-')}</textarea></div>
+    <div class="form-group"><label>Attaques (une par ligne : nom | dégâts | effet)</label><textarea class="input-field" id="best-attaques" rows="5">${(creature?.attaques || []).map((a) => `${a.nom || ''} | ${a.degats || ''} | ${a.effet || ''}`).join('\n')}</textarea></div>
     <div class="form-group"><label>Butins</label><input class="input-field" id="best-butins" value="${creature?.butins || ''}"></div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBestiary('${creature?.id || ''}')">Enregistrer</button>
   `);

@@ -173,6 +173,12 @@ export function bindAuthUI() {
     if (action === 'auth-tab-login') { event.preventDefault(); switchAuthTab('login'); return; }
     if (action === 'auth-tab-register') { event.preventDefault(); switchAuthTab('register'); }
   });
+
+  document.querySelector('[data-action="login"]')?.addEventListener('click', doLogin);
+  document.querySelector('[data-action="register"]')?.addEventListener('click', doRegister);
+  document.querySelector('[data-action="logout"]')?.addEventListener('click', doLogout);
+  document.querySelector('[data-action="auth-tab-login"]')?.addEventListener('click', () => switchAuthTab('login'));
+  document.querySelector('[data-action="auth-tab-register"]')?.addEventListener('click', () => switchAuthTab('register'));
 }
 
 export function initAuth() {

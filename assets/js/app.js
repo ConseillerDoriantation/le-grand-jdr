@@ -78,6 +78,20 @@ try {
   console.error('[app] modal overlay binding failed:', error);
 }
 
+
+// Fermeture modale via bouton data-action
+try {
+  document.addEventListener('click', (e) => {
+    const target = e.target.closest('[data-action="close-modal"]');
+    if (target) {
+      e.preventDefault();
+      closeModalDirect();
+    }
+  });
+} catch (error) {
+  console.error('[app] modal close binding failed:', error);
+}
+
 // ──────────────────────────────────────────────
 // 4) Chargement des features en mode tolérant
 // Une feature cassée ne bloque plus le login

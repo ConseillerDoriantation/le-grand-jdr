@@ -25,19 +25,22 @@ async function editBastion() {
       <div class="form-group"><label>Défense</label><input type="number" class="input-field" id="bastion-defense" value="${current.defense || 0}"></div>
     </div>
     <div class="form-group"><label>Description</label><textarea class="input-field" id="bastion-description" rows="5">${current.description || ''}</textarea></div>
-    <div class="form-group"><label>Salles (une par ligne : nom | niveau | effet)</label><textarea class="input-field" id="bastion-salles" rows="6">${(current.salles || []).map((s) => `${s.nom || ''} | ${s.niveau || 1} | ${s.effet || ''}`).join('
-')}</textarea></div>
+    <div class="form-group"><label>Salles (une par ligne : nom | niveau | effet)</label><textarea class="input-field" id="bastion-salles" rows="6">${(current.salles || []).map((s) => `${s.nom || ''} | ${s.niveau || 1} | ${s.effet || ''}`).join('\n')}</textarea></div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBastion()">Enregistrer</button>
   `);
 }
 
 async function saveBastion() {
   const sallesRaw = document.getElementById('bastion-salles')?.value || '';
-  const salles = sallesRaw.split('
-').map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [nom, niveau, effet] = line.split('|').map((part) => part?.trim() || '');
-    return { nom: nom || 'Salle', niveau: parseInt(niveau, 10) || 1, effet: effet || '' };
-  });
+  const salles = sallesRaw
+    .split('
+')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [nom, niveau, effet] = line.split('|').map((part) => part?.trim() || '');
+      return { nom: nom || 'Salle', niveau: parseInt(niveau, 10) || 1, effet: effet || '' };
+    });
 
   const current = (await getDocData('bastion', 'main')) || getDefaultBastion();
   await saveDoc('bastion', 'main', {
