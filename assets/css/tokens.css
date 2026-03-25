@@ -1,4 +1,9 @@
 :root {
+  --radius-lg: 16px;
+  --sidebar-width: 240px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --sidebar-width: 240px;
   --gold: #e2b96f;
   --gold-light: #f0d090;
   --gold-dark: #a07830;
