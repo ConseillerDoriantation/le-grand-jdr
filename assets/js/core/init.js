@@ -1,43 +1,63 @@
 // ══════════════════════════════════════════════
-// INIT FIREBASE
+// INIT — Point d'entrée de l'application
+// Remplace le pattern window._jdr + 'firebase-ready'
 // ══════════════════════════════════════════════
-function initFirebaseBindings() {
-  const jdr = window._jdr;
-  if (!jdr || AUTH) return;
 
-  AUTH = jdr.auth;
-  DB = jdr.db;
-  FS = jdr;
+import {
+  auth, db, ADMIN_EMAIL,
+  onAuthStateChanged,
+  doc, setDoc, getDoc,
+  collection, getDocs,
+  addDoc, updateDoc, deleteDoc,
+  query, where, orderBy,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+} from '../config/firebase.js';
 
-  FS.onAuthStateChanged(AUTH, async user => {
-    if (user) {
-      STATE.user = user;
-      STATE.isAdmin = user.email === FS.ADMIN_EMAIL;
-      await loadProfile(user);
-      showApp();
-      navigate('dashboard');
-    } else {
-      STATE.user = null;
-      STATE.profile = null;
-      STATE.isAdmin = false;
-      showAuth();
-    }
-  });
-}
+import {
+  STATE, setFirebase,
+  setUser, setProfile, setAdmin,
+} from './state.js';
 
-if (window._jdr) {
-  initFirebaseBindings();
-} else {
-  window.addEventListener('firebase-ready', initFirebaseBindings, { once: true });
-}
+import { showApp, showAuth } from './layout.js';
+import { navigate }          from './navigation.js';
 
-async function loadProfile(user) {
-  const ref = FS.doc(DB, 'users', user.uid);
-  const snap = await FS.getDoc(ref);
-  if (snap.exists()) {
-    STATE.profile = snap.data();
+// ── Injection Firebase dans le state ───────────
+setFirebase(auth, db, {
+  doc, setDoc, getDoc,
+  collection, getDocs,
+  addDoc, updateDoc, deleteDoc,
+  query, where, orderBy,
+  ADMIN_EMAIL,
+});
+
+// ── Bootstrap auth ─────────────────────────────
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    setUser(user);
+    setAdmin(user.email === ADMIN_EMAIL);
+    await _loadProfile(user);
+    showApp();
+    navigate('dashboard');
   } else {
-    STATE.profile = { uid: user.uid, email: user.email, pseudo: user.email.split('@')[0], createdAt: new Date().toISOString() };
-    await FS.setDoc(ref, STATE.profile);
+    showAuth();
+  }
+});
+
+// ── Chargement du profil utilisateur ───────────
+async function _loadProfile(user) {
+  const ref  = doc(db, 'users', user.uid);
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    setProfile(snap.data());
+  } else {
+    const profile = {
+      uid: user.uid, email: user.email,
+      pseudo: user.email.split('@')[0],
+      createdAt: new Date().toISOString(),
+    };
+    await setDoc(ref, profile);
+    setProfile(profile);
   }
 }
