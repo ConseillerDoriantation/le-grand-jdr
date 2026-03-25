@@ -729,7 +729,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 ════════════════════════════════════════════════ */
 .cs-top {
   display: grid;
-  grid-template-columns: 400px 1fr;
+  grid-template-columns: 380px 1fr;
   gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -754,7 +754,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   align-items: flex-start;
 }
 .cs-photo {
-  width: 72px; height: 72px;
+  width: 84px; height: 84px;
   border-radius: 14px;
   overflow: hidden;
   background: rgba(255,255,255,0.04);
@@ -784,7 +784,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 }
 .cs-name {
   font-family: 'Outfit', sans-serif;
-  font-size: 1.25rem; font-weight: 800;
+  font-size: 1.35rem; font-weight: 800;
   letter-spacing: -0.02em; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 160px;
@@ -826,6 +826,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   border: 1px solid var(--border);
   border-radius: 999px; padding: 0.15rem 0.55rem;
   white-space: nowrap;
+  cursor: default;
 }
 .cs-xp-wrap {
   flex: 1; min-width: 80px;
@@ -859,8 +860,8 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   display: flex; align-items: center; gap: 0.35rem;
 }
 .cs-vital-val {
-  font-size: 1.5rem; font-weight: 800;
-  min-width: 2rem; text-align: center; line-height: 1;
+  font-size: 1.65rem; font-weight: 800;
+  min-width: 2.2rem; text-align: center; line-height: 1;
   font-family: 'Outfit', sans-serif;
 }
 .cs-vbtn {
@@ -906,7 +907,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   margin-bottom: 0.2rem;
 }
 .cs-chip-val {
-  font-size: 1.05rem; font-weight: 800;
+  font-size: 1.15rem; font-weight: 800;
   color: var(--text); font-family: 'Outfit', sans-serif;
   line-height: 1;
 }
@@ -956,13 +957,14 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   font-weight: 700; margin-bottom: 0.25rem;
 }
 .cs-carac-val {
-  font-size: 1.3rem; font-weight: 800;
+  font-size: 1.5rem; font-weight: 800;
   color: var(--text); line-height: 1;
   font-family: 'Outfit', sans-serif;
 }
 .cs-carac-mod {
-  font-size: 0.82rem; font-weight: 700;
-  margin-top: 0.15rem; line-height: 1;
+  font-size: 0.9rem; font-weight: 800;
+  margin-top: 0.18rem; line-height: 1;
+  letter-spacing: -0.01em;
 }
 .cs-carac-mod.pos { color: var(--green); }
 .cs-carac-mod.neg { color: var(--crimson-light); }
@@ -994,7 +996,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   font-weight: 700; display: block; margin-bottom: 0.2rem;
 }
 .cs-base-chip-val {
-  font-size: 1rem; font-weight: 800;
+  font-size: 1.15rem; font-weight: 800;
   color: var(--gold); font-family: 'Outfit', sans-serif;
 }
 .cs-base-chip-sub { font-size: 0.58rem; color: var(--text-dim); margin-top: 0.1rem; }
