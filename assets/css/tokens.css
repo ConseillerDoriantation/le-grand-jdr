@@ -1,38 +1,38 @@
 :root {
-  /* Palette — plus sobre, plus premium */
-  --gold:         #c9a96e;
-  --gold-light:   #e8c98a;
-  --gold-dark:    #8a6d3a;
-  --gold-glow:    rgba(201,169,110,0.12);
+  /* Or — plus chaud, moins saturé */
+  --gold:        #c8a45a;
+  --gold-light:  #dfc080;
+  --gold-dark:   #8c6830;
+  --gold-glow:   rgba(200,164,90,0.1);
 
-  --crimson:      #a83228;
-  --crimson-light:#d44535;
+  --crimson:       #9b2d22;
+  --crimson-light: #c0392b;
 
-  /* Fonds — noirs plus vrais, moins bleutés */
-  --bg-deep:   #0a0a0a;
+  /* Fonds — noirs neutres, sans teinte bleue */
+  --bg-deep:   #0d0d0d;
   --bg-dark:   #111111;
-  --bg-card:   #181818;
+  --bg-card:   #171717;
   --bg-card2:  #141414;
   --bg-panel:  #141414;
-  --bg-glass:  rgba(18,18,18,0.92);
+  --bg-glass:  rgba(15,15,15,0.94);
 
-  /* Bordures — très subtiles */
-  --border:        rgba(255,255,255,0.07);
-  --border-bright: rgba(201,169,110,0.35);
+  /* Bordures — plus visibles, structurantes */
+  --border:        rgba(255,255,255,0.09);
+  --border-bright: rgba(200,164,90,0.4);
 
-  /* Texte — blanc cassé plus lisible */
-  --text:       #ede8df;
-  --text-muted: #7a7268;
-  --text-dim:   #3d3a35;
+  /* Texte */
+  --text:       #eae4d8;
+  --text-muted: #6e6860;
+  --text-dim:   #3a3730;
 
   --shadow: rgba(0,0,0,0.9);
 
   --green:     #27ae60;
-  --green-dim: rgba(39,174,96,0.12);
-  --blue:      #2980b9;
-  --blue-dim:  rgba(41,128,185,0.12);
+  --green-dim: rgba(39,174,96,0.1);
+  --blue:      #2471a3;
+  --blue-dim:  rgba(36,113,163,0.12);
 
-  --radius:    8px;
-  --radius-lg: 14px;
-  --sidebar-width: 220px;
+  --radius:    6px;
+  --radius-lg: 10px;
+  --sidebar-width: 224px;
 }
