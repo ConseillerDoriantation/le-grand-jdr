@@ -32,7 +32,11 @@
   --blue:      #2471a3;
   --blue-dim:  rgba(36,113,163,0.12);
 
-  --radius:    6px;
-  --radius-lg: 10px;
-  --sidebar-width: 224px;
+  --radius:    14px;
+  --radius-lg: 22px;
+  --sidebar-width: 264px;
+  --content-max: 1480px;
+
+  --shadow-card: 0 12px 30px rgba(0, 0, 0, 0.22);
+  --shadow-soft: 0 22px 60px rgba(0, 0, 0, 0.34);
 }
