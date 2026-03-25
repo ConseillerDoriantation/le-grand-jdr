@@ -1,48 +1,48 @@
 :root {
-  /* Accent system — new direction */
-  --gold:        #7c5cff;
-  --gold-light:  #b9a8ff;
-  --gold-dark:   #4f35c9;
-  --gold-glow:   rgba(124,92,255,0.18);
+  /* Accent system */
+  --gold:        #4f8cff;
+  --gold-light:  #dbe8ff;
+  --gold-dark:   #2f63e6;
+  --gold-glow:   rgba(79, 140, 255, 0.18);
 
-  --crimson:       #ff6b7a;
-  --crimson-light: #ff8a96;
+  --crimson:       #ff6f91;
+  --crimson-light: #ff8ca7;
 
   /* Background system */
-  --bg-deep:    #060912;
-  --bg-dark:    #0a1020;
-  --bg-card:    rgba(15, 24, 43, 0.78);
-  --bg-card2:   rgba(20, 31, 56, 0.88);
-  --bg-panel:   rgba(10, 17, 31, 0.86);
-  --bg-glass:   rgba(10, 16, 30, 0.68);
-  --bg-elevated:#16213b;
+  --bg-deep:    #0b1118;
+  --bg-dark:    #10161f;
+  --bg-card:    rgba(20, 27, 36, 0.88);
+  --bg-card2:   rgba(25, 33, 46, 0.94);
+  --bg-panel:   rgba(16, 22, 31, 0.92);
+  --bg-glass:   rgba(17, 23, 33, 0.76);
+  --bg-elevated:#1b2432;
 
   /* Borders */
   --border:         rgba(255,255,255,0.08);
   --border-strong:  rgba(255,255,255,0.14);
-  --border-bright:  rgba(124,92,255,0.36);
-  --border-accent:  rgba(34,211,238,0.24);
+  --border-bright:  rgba(79,140,255,0.28);
+  --border-accent:  rgba(96,165,250,0.24);
 
   /* Text */
-  --text:       #eef4ff;
-  --text-soft:  #dce6fb;
-  --text-muted: #93a4c2;
-  --text-dim:   #61728f;
+  --text:       #f5f7fb;
+  --text-soft:  #e8eef7;
+  --text-muted: #98a6b8;
+  --text-dim:   #6e7c8f;
 
   /* Shadows */
-  --shadow:      rgba(3, 8, 21, 0.94);
-  --shadow-card: 0 18px 46px rgba(3, 8, 21, 0.30);
-  --shadow-soft: 0 28px 80px rgba(3, 8, 21, 0.46);
-  --shadow-glow: 0 0 0 1px rgba(255,255,255,0.03), 0 20px 50px rgba(3, 8, 21, 0.34);
+  --shadow:      rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 18px 40px rgba(3, 8, 16, 0.26);
+  --shadow-soft: 0 28px 70px rgba(3, 8, 16, 0.38);
+  --shadow-glow: 0 1px 0 rgba(255,255,255,0.03), 0 14px 34px rgba(3, 8, 16, 0.28);
 
-  --green:     #35d399;
-  --green-dim: rgba(53,211,153,0.16);
-  --blue:      #22d3ee;
-  --blue-dim:  rgba(34,211,238,0.16);
+  --green:     #22c38e;
+  --green-dim: rgba(34,195,142,0.16);
+  --blue:      #6aa7ff;
+  --blue-dim:  rgba(106,167,255,0.16);
 
-  --radius:         20px;
-  --radius-lg:      30px;
-  --sidebar-width:  292px;
-  --content-max:    1720px;
+  --radius:         18px;
+  --radius-lg:      26px;
+  --sidebar-width:  286px;
+  --content-max:    1680px;
   --header-height:  64px;
 }

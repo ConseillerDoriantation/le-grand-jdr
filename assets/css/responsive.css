@@ -12,7 +12,7 @@
   transition:all 0.2s ease;
   line-height:1;
 }
-.btn-menu:hover { color:var(--text); background:rgba(124,92,255,0.10); }
+.btn-menu:hover { color:var(--text); background:rgba(79,140,255,0.10); }
 
 .sidebar-overlay {
   display:none;
@@ -62,7 +62,7 @@
 .bottom-nav-item .bn-icon { font-size:1.05rem; line-height:1; }
 .bottom-nav-item.active {
   color:white;
-  background:linear-gradient(135deg, rgba(124,92,255,0.18), rgba(34,211,238,0.14));
+  background:linear-gradient(180deg, rgba(110,165,255,0.22), rgba(79,140,255,0.14));
 }
 .bottom-nav-item:hover { color:var(--text); }
 
@@ -101,7 +101,7 @@
 .more-menu-item .icon { font-size:1.2rem; }
 .more-menu-item.active {
   color:white;
-  background:linear-gradient(135deg, rgba(124,92,255,0.18), rgba(34,211,238,0.14));
+  background:linear-gradient(180deg, rgba(110,165,255,0.22), rgba(79,140,255,0.14));
   border-color:rgba(255,255,255,0.08);
 }
 .more-menu-item:hover { color:var(--text); }
@@ -169,6 +169,7 @@
   .bottom-nav { display:flex; }
 
   .grid-2, .grid-3 { grid-template-columns:1fr; }
+  .dashboard-panel-grid, .dashboard-button-grid { grid-template-columns:1fr; }
   .grid-4 { grid-template-columns:1fr 1fr; }
   .char-grid { grid-template-columns:repeat(3,1fr); }
 
