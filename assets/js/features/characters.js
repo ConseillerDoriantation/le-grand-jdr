@@ -54,6 +54,11 @@ function calcOr(c) {
   return Math.round((totalR - totalD) * 100) / 100;
 }
 
+
+function calcPalier(niveau) {
+  return 100 * niveau * niveau; // 100, 400, 900, 1600...
+}
+
 function pct(cur,max) { return max>0 ? Math.max(0,Math.min(100,Math.round(cur/max*100))) : 0; }
 
 // ══════════════════════════════════════════════
@@ -95,7 +100,7 @@ function renderCharSheet(c, keepTab) {
   const pmCur = c.pmActuel ?? pmMax;
   const pvPct = pct(pvCur, pvMax);
   const pmPct = pct(pmCur, pmMax);
-  const xpPct = pct(c.exp||0, c.palier||100);
+  const xpPct = pct(c.exp||0, calcPalier(c.niveau||1));
   const deckActifs = (c.deck_sorts||[]).filter(s=>s.actif).length;
   const deckMax = calcDeckMax(c);
   const pvColor = pvPct < 25 ? 'var(--crimson-light)' : pvPct < 50 ? '#f59e0b' : 'var(--green)';
@@ -182,8 +187,8 @@ function renderCharSheet(c, keepTab) {
           <div class="cs-xp-bar"><div class="cs-xp-fill" style="width:${xpPct}%"></div></div>
           <span class="cs-xp-label">
             ${canEdit
-              ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','exp',this,0,99999)" title="Modifier">${c.exp||0}</span>`
-              : (c.exp||0)} / ${c.palier||100} XP
+              ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','exp',this,0,99999)" title="Cliquer pour modifier">${c.exp||0}</span>`
+              : (c.exp||0)} / ${calcPalier(c.niveau||1)} XP
           </span>
         </div>
         <span class="cs-or" title="Solde du Livret de Compte">💰 ${calcOr(c)} or</span>
@@ -263,10 +268,8 @@ function renderCharSheet(c, keepTab) {
         </div>
         <div class="cs-base-chip">
           <span class="cs-base-chip-label">Palier XP</span>
-          <div class="cs-base-chip-val ${canEdit?'cs-editable-num':''}"
-               ${canEdit?`onclick="inlineEditNum('${c.id}','palier',this,1,99999)" title="Modifier"`:''}
-          >${c.palier||100}</div>
-          <div class="cs-base-chip-sub">${c.exp||0} acquis</div>
+          <div class="cs-base-chip-val">${calcPalier(c.niveau||1)}</div>
+          <div class="cs-base-chip-sub">100 × niv²</div>
         </div>
       </div>
 
@@ -586,7 +589,13 @@ function renderCharDeck(c, canEdit) {
     html += `<div class="cs-empty">🔮 Aucun sort — commence par choisir un noyau élémentaire</div>`;
   } else {
     sorts.forEach((s,i) => {
-      html += `<div class="cs-sort-card ${s.actif?'active':''}">
+      html += `<div class="cs-sort-card ${s.actif?'active':''}"
+        draggable="true"
+        data-sort-idx="${i}"
+        ondragstart="sortDragStart(event,${i})"
+        ondragover="sortDragOver(event)"
+        ondrop="sortDrop(event,${i})"
+        ondragend="sortDragEnd(event)">
         <div class="cs-sort-header">
           <div class="cs-sort-toggle-wrap">
             <div class="toggle ${s.actif?'on':''}" onclick="${canEdit?`toggleSort(${i})`:''}" title="${s.actif?'Désactiver':'Activer'}"></div>
@@ -615,6 +624,39 @@ function renderCharDeck(c, canEdit) {
   html += `<div class="cs-sort-footer">✨ Magie à mains nues : +2 PM, pas d'effet de set.</div>`;
   html += `</div>`;
   return html;
+}
+
+
+// ── Drag and Drop sorts ──────────────────────
+let _dragSortIdx = null;
+
+function sortDragStart(e, idx) {
+  _dragSortIdx = idx;
+  e.currentTarget.style.opacity = '0.4';
+  e.dataTransfer.effectAllowed = 'move';
+}
+function sortDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('cs-sort-drag-over');
+}
+function sortDragEnd(e) {
+  e.currentTarget.style.opacity = '';
+  document.querySelectorAll('.cs-sort-drag-over').forEach(el => el.classList.remove('cs-sort-drag-over'));
+}
+async function sortDrop(e, toIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('cs-sort-drag-over');
+  const fromIdx = _dragSortIdx;
+  if (fromIdx === null || fromIdx === toIdx) return;
+  const c = STATE.activeChar; if (!c) return;
+  const sorts = c.deck_sorts||[];
+  const [moved] = sorts.splice(fromIdx, 1);
+  sorts.splice(toIdx, 0, moved);
+  c.deck_sorts = sorts;
+  await updateInCol('characters', c.id, {deck_sorts: sorts});
+  renderCharSheet(c, 'sorts');
+  _dragSortIdx = null;
 }
 
 // ══════════════════════════════════════════════
@@ -1008,7 +1050,7 @@ async function createNewChar() {
     nom:'Nouveau personnage', titre:'', titres:[],
     niveau:1, or:0,
     pvBase:10, pvActuel:10, pmBase:10, pmActuel:10,
-    exp:0, palier:100,
+    exp:0,
     stats:{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10},
     statsBonus:{},
     equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
@@ -1091,16 +1133,18 @@ function openSortModal(idx, s) {
   const runesSel = s?.runes||[];
   openModal(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort', `
     <div class="form-group"><label>Nom</label><input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu..."></div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Noyau (2 PM)</label>
-        <select class="input-field" id="s-noyau" onchange="updateSortPM()">
-          <option value="">— Choisir —</option>
-          ${NOYAUX.map(n=>`<option value="${n}" ${s?.noyau===n?'selected':''}>${n}</option>`).join('')}
-        </select>
+    <div class="form-group">
+      <label>Noyau élémentaire <span style="color:var(--text-dim);font-weight:400">(2 PM)</span></label>
+      <div class="cs-noyau-grid" id="noyau-grid">
+        ${NOYAUX.map(n => `<div class="cs-noyau-btn ${s?.noyau===n?'selected':''}"
+             onclick="selectNoyau(this,'${n.replace(/'/,"\\'")}')">${n}</div>`).join('')}
       </div>
-      <div class="form-group"><label>PM (auto)</label>
-        <input type="number" class="input-field" id="s-pm" value="${s?.pm||2}" readonly style="opacity:0.7">
-      </div>
+      <input type="hidden" id="s-noyau" value="${s?.noyau||''}">
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:0.8rem">
+      <label style="flex-shrink:0">Coût PM (auto)</label>
+      <input type="number" class="input-field" id="s-pm" value="${s?.pm||2}" readonly
+             style="width:70px;opacity:0.8;font-weight:700;color:var(--blue)">
     </div>
     <div class="form-group">
       <label>Runes (+2 PM chacune)</label>
@@ -1119,6 +1163,14 @@ function openSortModal(idx, s) {
     <div class="form-group"><label>Description</label><textarea class="input-field" id="s-effet" rows="3">${s?.effet||''}</textarea></div>
     <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="saveSort(${idx})">Enregistrer</button>
   `);
+}
+
+
+function selectNoyau(el, noyau) {
+  document.querySelectorAll('.cs-noyau-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  const input = document.getElementById('s-noyau');
+  if (input) { input.value = noyau; updateSortPM(); }
 }
 
 function toggleRune(el, rune) {
@@ -1335,7 +1387,9 @@ function deleteCharPhoto(id) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   selectChar, filterAdminChars,
-  calcOr, refreshOrDisplay,
+  calcOr, refreshOrDisplay, calcPalier,
+  selectNoyau,
+  sortDragStart, sortDragOver, sortDragEnd, sortDrop,
   renderCharCompte,
   addCompteRow, deleteCompteRow, inlineEditCompteField,
   addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
