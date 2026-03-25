@@ -1,7 +1,6 @@
 // assets/js/app.js
 
-import './core/init.js';
-
+import './core/init.boot.js';
 import {
   initAuth,
   switchAuthTab,
