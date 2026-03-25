@@ -1,57 +1,92 @@
 // ══════════════════════════════════════════════
-// FIRESTORE HELPERS
+// FIRESTORE — Couche d'accès aux données
+// Tous les appels DB passent ici.
 // ══════════════════════════════════════════════
-async function loadCollection(col) {
+
+import {
+  db,
+  doc, setDoc, getDoc,
+  collection, getDocs,
+  addDoc, updateDoc, deleteDoc,
+  query, where, orderBy,
+} from '../config/firebase.js';
+
+// ── Collections ────────────────────────────────
+export async function loadCollection(col) {
   try {
-    const snap = await FS.getDocs(FS.collection(DB, col));
-    return snap.docs.map(d=>({id:d.id,...d.data()}));
-  } catch { return []; }
-}
-async function loadCollectionOrdered(col, field) {
-  try {
-    const snap = await FS.getDocs(FS.query(FS.collection(DB, col), FS.orderBy(field)));
-    return snap.docs.map(d=>({id:d.id,...d.data()}));
-  } catch { return loadCollection(col); }
-}
-async function getDocData(col, id) {
-  try {
-    const snap = await FS.getDoc(FS.doc(DB, col, id));
-    return snap.exists() ? snap.data() : null;
-  } catch { return null; }
-}
-async function saveDoc(col, id, data) {
-  await FS.setDoc(FS.doc(DB, col, id), data, {merge:true});
-}
-async function addToCol(col, data) {
-  const ref = await FS.addDoc(FS.collection(DB, col), {...data, createdAt: new Date().toISOString()});
-  return ref.id;
-}
-async function updateInCol(col, id, data) {
-  await FS.updateDoc(FS.doc(DB, col, id), data);
-}
-async function deleteFromCol(col, id) {
-  await FS.deleteDoc(FS.doc(DB, col, id));
-}
-async function countUserChars() {
-  try {
-    const uid = STATE.isAdmin ? null : STATE.user.uid;
-    if (uid) {
-      const snap = await FS.getDocs(FS.query(FS.collection(DB,'characters'),FS.where('uid','==',uid)));
-      return snap.size;
-    } else {
-      const snap = await FS.getDocs(FS.collection(DB,'characters'));
-      return snap.size;
-    }
-  } catch { return 0; }
-}
-async function loadChars(uid) {
-  try {
-    let q;
-    if (uid) q = FS.query(FS.collection(DB,'characters'),FS.where('uid','==',uid));
-    else q = FS.collection(DB,'characters');
-    const snap = await FS.getDocs(q);
-    return snap.docs.map(d=>({id:d.id,...d.data()}));
-  } catch { return []; }
+    const snap = await getDocs(collection(db, col));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error(`[firestore] loadCollection(${col})`, e);
+    return [];
+  }
 }
 
-// ══════════════════════════════════════════════
+export async function loadCollectionOrdered(col, field) {
+  try {
+    const snap = await getDocs(query(collection(db, col), orderBy(field)));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch {
+    return loadCollection(col);
+  }
+}
+
+export async function loadCollectionWhere(col, field, op, value) {
+  try {
+    const snap = await getDocs(query(collection(db, col), where(field, op, value)));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error('[firestore] loadCollectionWhere', e);
+    return [];
+  }
+}
+
+// ── Documents ──────────────────────────────────
+export async function getDocData(col, id) {
+  try {
+    const snap = await getDoc(doc(db, col, id));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.error(`[firestore] getDocData(${col}/${id})`, e);
+    return null;
+  }
+}
+
+export async function saveDoc(col, id, data) {
+  await setDoc(doc(db, col, id), data, { merge: true });
+}
+
+export async function addToCol(col, data) {
+  const ref = await addDoc(collection(db, col), {
+    ...data,
+    createdAt: new Date().toISOString(),
+  });
+  return ref.id;
+}
+
+export async function updateInCol(col, id, data) {
+  await updateDoc(doc(db, col, id), data);
+}
+
+export async function deleteFromCol(col, id) {
+  await deleteDoc(doc(db, col, id));
+}
+
+// ── Spécifique personnages ─────────────────────
+export async function loadChars(uid = null) {
+  try {
+    const q = uid
+      ? query(collection(db, 'characters'), where('uid', '==', uid))
+      : collection(db, 'characters');
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error('[firestore] loadChars', e);
+    return [];
+  }
+}
+
+export async function countUserChars(uid = null) {
+  const chars = await loadChars(uid);
+  return chars.length;
+}
