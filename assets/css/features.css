@@ -710,3 +710,390 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   border-color: var(--gold);
   box-shadow: 0 0 0 8px rgba(124,92,255,0.08);
 }
+
+/* ══════════════════════════════════════════════════
+   CHARACTER SHEET — cs-* (refonte complète)
+══════════════════════════════════════════════════ */
+
+/* ── Enveloppe ──────────────────────────────────── */
+.cs-shell { display:flex; flex-direction:column; gap:0; }
+
+/* ── HERO — barre supérieure ────────────────────── */
+.cs-hero {
+  display:grid;
+  grid-template-columns: 100px 1fr auto;
+  gap:1.2rem;
+  align-items:start;
+  background: var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+  padding:1.2rem 1.4rem;
+  border-bottom:none;
+}
+
+/* Photo */
+.cs-photo-wrap { position:relative; flex-shrink:0; }
+.cs-photo {
+  width:90px; height:90px;
+  border-radius:16px;
+  overflow:hidden;
+  background:rgba(255,255,255,0.04);
+  border:2px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  transition:border-color 0.2s;
+}
+.cs-photo:hover { border-color:var(--border-bright); }
+.cs-photo-placeholder { display:flex; flex-direction:column; align-items:center; gap:0.2rem; }
+.cs-photo-del {
+  position:absolute; top:-6px; right:-6px;
+  width:20px; height:20px; border-radius:50%;
+  background:var(--crimson); border:none; color:#fff;
+  font-size:0.6rem; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+}
+
+/* Identity */
+.cs-identity { display:flex; flex-direction:column; gap:0.4rem; min-width:0; }
+.cs-name-row { display:flex; align-items:center; gap:0.6rem; }
+.cs-name {
+  font-family:'Outfit',sans-serif;
+  font-size:1.45rem; font-weight:800;
+  letter-spacing:-0.03em;
+  color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.cs-delete-btn {
+  background:none; border:none; cursor:pointer;
+  color:var(--text-dim); font-size:0.85rem; padding:0.1rem 0.3rem;
+  border-radius:4px; transition:all 0.15s; line-height:1; flex-shrink:0;
+}
+.cs-delete-btn:hover { color:var(--crimson-light); background:rgba(220,38,38,0.08); }
+.cs-titres { display:flex; flex-wrap:wrap; gap:0.3rem; align-items:center; min-height:1.4rem; }
+.cs-add-titre {
+  background:none; border:1px dashed var(--border);
+  color:var(--text-dim); font-size:0.7rem;
+  padding:0.15rem 0.5rem; border-radius:20px;
+  cursor:pointer; transition:all 0.15s;
+}
+.cs-add-titre:hover { border-color:var(--gold); color:var(--gold); }
+
+.cs-level-row {
+  display:flex; align-items:center; gap:0.8rem;
+  flex-wrap:wrap;
+}
+.cs-level-badge {
+  background:rgba(255,255,255,0.07);
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:0.2rem 0.7rem;
+  font-size:0.78rem; font-weight:700;
+  color:var(--text-soft); white-space:nowrap;
+}
+.cs-xp-wrap { display:flex; flex-direction:column; gap:0.2rem; flex:1; max-width:160px; }
+.cs-xp-bar { height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; }
+.cs-xp-fill { height:100%; background:var(--gold); border-radius:2px; transition:width 0.4s; }
+.cs-xp-label { font-size:0.68rem; color:var(--text-dim); }
+.cs-or {
+  font-size:0.78rem; color:var(--text-muted);
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  border-radius:999px; padding:0.2rem 0.6rem;
+  white-space:nowrap;
+}
+
+/* Vitals */
+.cs-vitals {
+  display:flex; gap:1rem; align-items:start;
+}
+.cs-vital-block { display:flex; flex-direction:column; align-items:center; gap:0.25rem; min-width:72px; }
+.cs-vital-label { font-size:0.62rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.1em; }
+.cs-vital-controls { display:flex; align-items:center; gap:0.4rem; }
+.cs-vital-val { font-size:1.6rem; font-weight:800; min-width:2.4rem; text-align:center; line-height:1; font-family:'Outfit',sans-serif; }
+.cs-vbtn {
+  width:24px; height:24px; border-radius:50%;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,0.04);
+  color:var(--text-muted); cursor:pointer;
+  font-size:1rem; line-height:1;
+  display:flex; align-items:center; justify-content:center;
+  transition:all 0.15s;
+}
+.cs-vbtn:hover { background:rgba(220,38,38,0.12); border-color:rgba(220,38,38,0.3); color:#f87171; }
+.cs-vbtn-plus:hover { background:rgba(34,197,94,0.12); border-color:rgba(34,197,94,0.3); color:#4ade80; }
+.cs-vital-sub { font-size:0.65rem; color:var(--text-dim); }
+
+.cs-bar-bg { width:100%; height:5px; border-radius:3px; overflow:hidden; }
+.cs-bar-hp { background:rgba(220,38,38,0.18); }
+.cs-bar-pm { background:rgba(59,130,246,0.18); }
+.cs-bar-fill { height:100%; border-radius:3px; transition:width 0.35s ease; }
+.cs-bar-hp-fill { background:var(--crimson-light); }
+.cs-bar-hp-fill.high { background:var(--green); }
+.cs-bar-hp-fill.mid { background:#f59e0b; }
+.cs-bar-pm-fill { background:var(--blue); }
+
+.cs-secondary-stats {
+  display:flex; flex-direction:column; gap:0.4rem;
+  justify-content:center;
+}
+.cs-stat-chip {
+  display:flex; align-items:center; gap:0.4rem;
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  border-radius:8px; padding:0.3rem 0.6rem;
+  white-space:nowrap;
+}
+.cs-chip-label { font-size:0.62rem; color:var(--text-dim); font-weight:700; letter-spacing:0.08em; }
+.cs-chip-val { font-size:0.9rem; font-weight:800; color:var(--text); font-family:'Outfit',sans-serif; }
+
+/* ── Onglets ────────────────────────────────────── */
+.cs-tabs {
+  display:flex; gap:0;
+  background:var(--bg-card);
+  border-left:1px solid var(--border);
+  border-right:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  padding:0 1.4rem;
+  overflow-x:auto;
+}
+.cs-tab {
+  padding:0.7rem 1rem;
+  background:none; border:none; border-bottom:2px solid transparent;
+  color:var(--text-muted); font-size:0.8rem; font-weight:600;
+  cursor:pointer; white-space:nowrap;
+  transition:all 0.18s; margin-bottom:-1px;
+  font-family:'Inter',sans-serif;
+}
+.cs-tab:hover { color:var(--text); }
+.cs-tab.active { color:var(--gold); border-bottom-color:var(--gold); }
+
+/* ── Corps ──────────────────────────────────────── */
+.cs-tab-body {
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-top:none;
+  border-radius:0 0 var(--radius-lg) var(--radius-lg);
+  padding:1.2rem 1.4rem;
+}
+.cs-section {
+  margin-bottom:1.4rem;
+  padding-bottom:1.4rem;
+  border-bottom:1px solid var(--border);
+}
+.cs-section:last-child { margin-bottom:0; padding-bottom:0; border-bottom:none; }
+.cs-section-title {
+  display:flex; align-items:center; justify-content:space-between;
+  font-size:0.72rem; font-weight:700; color:var(--text-muted);
+  letter-spacing:0.12em; text-transform:uppercase;
+  margin-bottom:0.9rem;
+}
+.cs-hint { font-size:0.65rem; color:var(--text-dim); letter-spacing:0; text-transform:none; font-weight:400; font-style:italic; }
+.cs-empty { color:var(--text-dim); font-style:italic; font-size:0.85rem; padding:1.5rem 0; text-align:center; }
+
+/* ── Inline edit ────────────────────────────────── */
+.cs-editable {
+  cursor:pointer; border-radius:4px;
+  transition:background 0.15s;
+  padding:0 2px;
+}
+.cs-editable:hover { background:rgba(255,255,255,0.07); }
+.cs-editable-num {
+  cursor:pointer; border-radius:4px;
+  transition:background 0.15s;
+}
+.cs-editable-num:hover { text-decoration:underline dotted; }
+.cs-inline-input {
+  background:var(--bg-elevated, rgba(255,255,255,0.08));
+  border:1px solid var(--border-bright);
+  border-radius:6px; color:var(--text);
+  padding:0.15rem 0.4rem;
+  font-family:inherit;
+  outline:none;
+}
+.cs-inline-input:focus { box-shadow:0 0 0 2px rgba(79,140,255,0.25); }
+.cs-inline-num { width:72px; text-align:center; }
+
+/* ── Caractéristiques ───────────────────────────── */
+.cs-carac-grid {
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:0.5rem;
+}
+.cs-carac-card {
+  background:rgba(255,255,255,0.03);
+  border:1px solid var(--border);
+  border-radius:12px; padding:0.75rem 0.5rem;
+  text-align:center; transition:all 0.18s;
+}
+.cs-carac-card:hover { border-color:rgba(79,140,255,0.22); }
+.cs-carac-abbr { font-size:0.58rem; color:var(--text-dim); letter-spacing:0.12em; text-transform:uppercase; font-weight:700; margin-bottom:0.3rem; }
+.cs-carac-val { font-size:1.4rem; font-weight:800; color:var(--text); line-height:1; font-family:'Outfit',sans-serif; }
+.cs-carac-mod { font-size:0.9rem; font-weight:700; margin-top:0.2rem; }
+.cs-carac-mod.pos { color:var(--green); }
+.cs-carac-mod.neg { color:var(--crimson-light); }
+.cs-carac-bonus { font-size:0.6rem; color:var(--text-dim); margin-top:0.15rem; }
+
+/* Base grid */
+.cs-base-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:0.8rem; }
+.cs-base-card {
+  background:rgba(255,255,255,0.03);
+  border:1px solid var(--border); border-radius:12px;
+  padding:0.8rem; text-align:center;
+}
+.cs-base-label { font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:0.3rem; }
+.cs-base-val { font-size:1.6rem; font-weight:800; color:var(--gold); font-family:'Outfit',sans-serif; }
+.cs-base-formula { font-size:0.72rem; color:var(--text); font-weight:600; margin-top:0.25rem; }
+.cs-base-sub { font-size:0.62rem; color:var(--text-dim); margin-top:0.15rem; }
+
+/* ── Combat ────────────────────────────────────── */
+.cs-weapon-row {
+  display:grid;
+  grid-template-columns:110px 1fr auto;
+  gap:0.8rem; align-items:start;
+  background:rgba(255,255,255,0.02);
+  border:1px solid var(--border);
+  border-radius:12px; padding:0.9rem;
+  margin-bottom:0.6rem;
+}
+.cs-weapon-slot-label { font-size:0.62rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; font-weight:700; padding-top:0.2rem; }
+.cs-weapon-name { font-weight:700; font-size:0.95rem; color:var(--text); margin-bottom:0.3rem; }
+.cs-weapon-trait { font-size:0.75rem; color:var(--text-muted); margin-bottom:0.4rem; font-style:italic; }
+.cs-weapon-empty { font-size:0.82rem; color:var(--text-dim); font-style:italic; }
+.cs-weapon-stats { display:flex; flex-wrap:wrap; gap:0.8rem; }
+.cs-ws { display:flex; flex-direction:column; gap:0.1rem; }
+.cs-ws-wide { min-width:150px; }
+.cs-ws-label { font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; font-weight:700; }
+.cs-ws-val { font-size:0.85rem; font-weight:700; }
+.cs-ws-val.gold { color:var(--gold); }
+.cs-ws-val.red { color:var(--crimson-light); }
+.cs-ws-val.muted { color:var(--text-muted); font-style:italic; font-weight:400; }
+.cs-equip-btn { background:rgba(255,255,255,0.06); border:1px solid var(--border); border-radius:8px; padding:0.4rem 0.5rem; cursor:pointer; color:var(--text-muted); font-size:0.85rem; transition:all 0.15s; }
+.cs-equip-btn:hover { border-color:var(--gold); color:var(--gold); }
+.cs-combat-info { font-size:0.75rem; color:var(--text-dim); font-style:italic; margin-top:0.3rem; }
+
+.cs-actions-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:0.4rem; }
+.cs-action-chip { display:flex; gap:0.6rem; padding:0.5rem 0.7rem; background:rgba(255,255,255,0.025); border-radius:10px; }
+.cs-action-icon { font-size:1rem; flex-shrink:0; }
+.cs-action-type { font-size:0.62rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; font-weight:700; }
+.cs-action-desc { font-size:0.8rem; color:var(--text-muted); }
+.cs-action-footer { margin-top:0.6rem; font-size:0.72rem; color:var(--text-dim); font-style:italic; }
+
+.cs-armor-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:0.5rem; }
+.cs-armor-card {
+  background:rgba(255,255,255,0.02);
+  border:1px solid var(--border);
+  border-radius:10px; padding:0.7rem; transition:border-color 0.18s;
+}
+.cs-armor-card.equipped { border-color:rgba(226,185,111,0.25); }
+.cs-armor-slot { font-size:0.58rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:0.25rem; }
+.cs-armor-name { font-size:0.85rem; font-weight:600; color:var(--text); }
+.cs-armor-trait { font-size:0.7rem; color:var(--text-muted); font-style:italic; margin-top:0.1rem; }
+.cs-armor-bonuses { display:flex; flex-wrap:wrap; gap:2px; margin-top:0.4rem; }
+.cs-equip-btn-sm { background:none; border:none; cursor:pointer; color:var(--text-dim); font-size:0.8rem; padding:0.2rem; margin-top:0.3rem; transition:color 0.15s; }
+.cs-equip-btn-sm:hover { color:var(--gold); }
+.cs-bonus-total { grid-column:1/-1; padding:0.5rem 0.7rem; background:rgba(226,185,111,0.06); border-radius:8px; font-size:0.78rem; color:var(--gold); margin-top:0.4rem; }
+
+/* ── Sorts ──────────────────────────────────────── */
+.cs-sort-info { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:0.6rem 0.8rem; font-size:0.78rem; color:var(--text-muted); margin-bottom:0.8rem; }
+.cs-sort-card { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:12px; padding:0.9rem; margin-bottom:0.5rem; transition:border-color 0.18s; }
+.cs-sort-card.active { border-color:rgba(79,140,255,0.35); }
+.cs-sort-header { display:flex; justify-content:space-between; align-items:start; }
+.cs-sort-toggle-wrap { display:flex; gap:0.7rem; align-items:start; }
+.cs-sort-name { font-weight:700; font-size:0.9rem; color:var(--text); margin-bottom:0.3rem; }
+.cs-sort-badges { display:flex; flex-wrap:wrap; gap:0.3rem; }
+.cs-sort-right { display:flex; gap:0.4rem; align-items:center; flex-shrink:0; }
+.cs-sort-body { margin-top:0.6rem; padding-top:0.5rem; border-top:1px solid var(--border); }
+.cs-sort-effet { font-size:0.82rem; color:var(--text-muted); font-style:italic; }
+.cs-sort-degats { font-size:0.82rem; color:var(--crimson-light); margin-top:0.2rem; }
+.cs-sort-soin { font-size:0.82rem; color:var(--green); margin-top:0.2rem; }
+.cs-sort-footer { font-size:0.72rem; color:var(--text-dim); font-style:italic; margin-top:0.6rem; }
+
+/* Rune chips dans modal */
+.cs-rune-chip {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:0.35rem 0.5rem; border-radius:6px; cursor:pointer;
+  border:1px solid rgba(255,255,255,0.05);
+  transition:all 0.15s; background:transparent;
+}
+.cs-rune-chip:hover { background:rgba(255,255,255,0.04); }
+.cs-rune-chip.selected { background:rgba(59,130,246,0.10); border-color:rgba(59,130,246,0.4); }
+.cs-rune-name { font-size:0.8rem; font-weight:500; color:var(--text-muted); }
+.cs-rune-chip.selected .cs-rune-name { color:var(--blue); font-weight:700; }
+.cs-rune-effet { font-size:0.68rem; color:var(--text-dim); font-style:italic; }
+
+/* ── Inventaire ────────────────────────────────── */
+.cs-inv-list { display:flex; flex-direction:column; gap:0.4rem; }
+.cs-inv-row {
+  display:flex; justify-content:space-between; align-items:center;
+  gap:0.8rem; padding:0.6rem 0.8rem;
+  background:rgba(255,255,255,0.025);
+  border:1px solid var(--border); border-radius:10px;
+}
+.cs-inv-main { flex:1; min-width:0; }
+.cs-inv-name { font-size:0.88rem; font-weight:600; color:var(--text); }
+.cs-inv-desc { font-size:0.75rem; color:var(--text-muted); font-style:italic; margin-top:0.1rem; }
+.cs-inv-meta { display:flex; gap:0.4rem; align-items:center; flex-shrink:0; }
+.cs-inv-qte { font-size:0.8rem; color:var(--text-dim); font-weight:600; }
+
+/* ── Quêtes ────────────────────────────────────── */
+.cs-quest-row {
+  display:flex; justify-content:space-between; align-items:center;
+  gap:0.8rem; padding:0.7rem 0;
+  border-bottom:1px solid var(--border);
+}
+.cs-quest-row:last-child { border-bottom:none; }
+.cs-quest-name { font-size:0.9rem; font-weight:600; color:var(--text); }
+.cs-quest-meta { font-size:0.75rem; color:var(--text-muted); margin-top:0.15rem; }
+.cs-quest-right { display:flex; gap:0.4rem; align-items:center; flex-shrink:0; }
+
+/* Titres chips modal */
+.cs-titre-chip {
+  display:inline-flex; align-items:center; gap:0.3rem;
+  padding:0.2rem 0.6rem; background:rgba(226,185,111,0.1);
+  border:1px solid rgba(226,185,111,0.25); border-radius:20px;
+  font-size:0.8rem; color:var(--gold);
+}
+.cs-titre-chip button { background:none; border:none; cursor:pointer; color:var(--text-dim); font-size:0.7rem; padding:0; line-height:1; }
+
+/* ── Responsive ────────────────────────────────── */
+@media(max-width:860px) {
+  .cs-hero { grid-template-columns:72px 1fr; }
+  .cs-vitals { grid-column:1/-1; flex-wrap:wrap; gap:0.8rem; }
+  .cs-carac-grid { grid-template-columns:repeat(3,1fr); }
+  .cs-base-grid { grid-template-columns:1fr 1fr; }
+}
+@media(max-width:600px) {
+  .cs-hero { grid-template-columns:1fr; }
+  .cs-photo-wrap { display:none; }
+  .cs-carac-grid { grid-template-columns:repeat(3,1fr); }
+  .cs-base-grid { grid-template-columns:1fr; }
+  .cs-weapon-row { grid-template-columns:1fr auto; }
+  .cs-weapon-slot-label { display:none; }
+}
+
+/* ── Mode jour ─────────────────────────────────── */
+[data-theme="light"] .cs-hero { background:#ffffff; border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-tab-body { background:#ffffff; border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-tabs { background:#ffffff; border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-carac-card { background:#f7f8fa; border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-carac-card:hover { background:#eef1f9; border-color:rgba(37,99,235,0.22); }
+[data-theme="light"] .cs-base-card { background:#f7f8fa; border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-weapon-row { background:rgba(0,0,0,0.02); border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-armor-card { background:rgba(0,0,0,0.02); border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-armor-card.equipped { border-color:rgba(37,99,235,0.22); }
+[data-theme="light"] .cs-sort-card { background:rgba(0,0,0,0.02); border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-sort-card.active { border-color:rgba(37,99,235,0.30); }
+[data-theme="light"] .cs-inv-row { background:rgba(0,0,0,0.025); border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-action-chip { background:rgba(0,0,0,0.03); }
+[data-theme="light"] .cs-stat-chip { background:rgba(0,0,0,0.04); border-color:rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-photo { background:#f0f2f6; border-color:rgba(0,0,0,0.10); }
+[data-theme="light"] .cs-level-badge { background:rgba(0,0,0,0.05); border-color:rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-or { background:rgba(0,0,0,0.04); border-color:rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-xp-bar { background:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-vbtn { background:rgba(0,0,0,0.05); border-color:rgba(0,0,0,0.10); }
+[data-theme="light"] .cs-editable:hover { background:rgba(0,0,0,0.05); }
+[data-theme="light"] .cs-inline-input { background:#ffffff; border-color:rgba(37,99,235,0.40); }
+[data-theme="light"] .cs-tab.active { color:var(--gold); border-bottom-color:var(--gold); }
+[data-theme="light"] .cs-rune-chip { border-color:rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-rune-chip:hover { background:rgba(0,0,0,0.04); }
+[data-theme="light"] .cs-rune-chip.selected { background:rgba(37,99,235,0.08); border-color:rgba(37,99,235,0.35); }
+[data-theme="light"] .cs-sort-info { background:rgba(0,0,0,0.03); border-color:rgba(0,0,0,0.08); }
