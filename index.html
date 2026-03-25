@@ -11,7 +11,6 @@
 </head>
 <body>
 
-<!-- AUTH SCREEN -->
 <div id="auth-screen">
   <div class="auth-box">
     <div class="auth-emblem">
@@ -19,37 +18,55 @@
       <div class="auth-title">Le Grand JDR</div>
       <div class="auth-subtitle">Portail des Aventuriers</div>
     </div>
+
     <div class="auth-tabs">
-      <button class="auth-tab active" onclick="switchAuthTab('login')">Connexion</button>
-      <button class="auth-tab" onclick="switchAuthTab('register')">Créer un compte</button>
+      <button class="auth-tab active" type="button" data-action="auth-tab-login">Connexion</button>
+      <button class="auth-tab" type="button" data-action="auth-tab-register">Créer un compte</button>
     </div>
+
     <div id="tab-login">
-      <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="votre@email.com"></div>
-      <div class="form-group"><label>Mot de passe</label><input type="password" id="login-password" placeholder="••••••••"></div>
-      <button type="button" data-action="login">Entrer dans le Monde</button>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="votre@email.com">
+      </div>
+      <div class="form-group">
+        <label>Mot de passe</label>
+        <input type="password" id="login-password" placeholder="••••••••">
+      </div>
+      <button type="button" class="btn-primary" data-action="login">Entrer dans le Monde</button>
     </div>
+
     <div id="tab-register" style="display:none">
-      <div class="form-group"><label>Pseudo</label><input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier"></div>
-      <div class="form-group"><label>Email</label><input type="email" id="reg-email" placeholder="votre@email.com"></div>
-      <div class="form-group"><label>Mot de passe</label><input type="password" id="reg-password" placeholder="••••••••"></div>
-      <button class="btn-primary" onclick="doRegister()">Rejoindre l'Aventure</button>
+      <div class="form-group">
+        <label>Pseudo</label>
+        <input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="reg-email" placeholder="votre@email.com">
+      </div>
+      <div class="form-group">
+        <label>Mot de passe</label>
+        <input type="password" id="reg-password" placeholder="••••••••">
+      </div>
+      <button type="button" class="btn-primary" data-action="register">Rejoindre l'Aventure</button>
     </div>
+
     <div class="auth-error" id="auth-error"></div>
   </div>
 </div>
 
-<!-- MAIN APP -->
 <div id="app">
-
   <header class="app-header">
     <div style="display:flex;align-items:center;gap:0.8rem">
-      <button id="btn-menu" class="btn-menu" aria-label="Menu">☰</button>
+      <button id="btn-menu" class="btn-menu" aria-label="Menu" type="button">☰</button>
       <div class="header-logo"><span>⚔️</span> Le Grand JDR</div>
     </div>
+
     <div class="header-user">
       <span id="header-username"></span>
       <span class="admin-badge" id="admin-badge" style="display:none">Maître de Jeu</span>
-      <button class="btn-logout" onclick="doLogout()">Déconnexion</button>
+      <button class="btn-logout" type="button" data-action="logout">Déconnexion</button>
     </div>
   </header>
 
@@ -63,6 +80,7 @@
         <div class="nav-item" data-navigate="characters"><span class="icon">📜</span> Mon Personnage</div>
         <div class="nav-item" data-navigate="shop"><span class="icon">🛍️</span> Boutique</div>
       </div>
+
       <div class="nav-section">
         <div class="nav-section-title">Le Monde</div>
         <div class="nav-item" data-navigate="world"><span class="icon">📖</span> Le Monde</div>
@@ -71,12 +89,14 @@
         <div class="nav-item" data-navigate="bastion"><span class="icon">🏰</span> Bastion</div>
         <div class="nav-item" data-navigate="story"><span class="icon">📚</span> La Trame</div>
       </div>
+
       <div class="nav-section">
         <div class="nav-section-title">Joueurs</div>
         <div class="nav-item" data-navigate="players"><span class="icon">⚔️</span> Présentation</div>
         <div class="nav-item" data-navigate="achievements"><span class="icon">🏆</span> Hauts-Faits</div>
         <div class="nav-item" data-navigate="collection"><span class="icon">🃏</span> Collection</div>
       </div>
+
       <div class="nav-section">
         <div class="nav-section-title">Ressources</div>
         <div class="nav-item" data-navigate="informations"><span class="icon">📋</span> Informations</div>
@@ -86,25 +106,26 @@
         <div class="nav-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span> Admin</div>
       </div>
     </nav>
+
     <main class="main-content" id="main-content">
       <div class="loading"><div class="spinner"></div> Chargement…</div>
     </main>
   </div>
 
   <nav class="bottom-nav" id="bottom-nav">
-    <button class="bottom-nav-item active" data-navigate="dashboard" data-page="dashboard">
+    <button class="bottom-nav-item active" type="button" data-navigate="dashboard" data-page="dashboard">
       <span class="bn-icon">🏠</span><span>Accueil</span>
     </button>
-    <button class="bottom-nav-item" data-navigate="characters" data-page="characters">
+    <button class="bottom-nav-item" type="button" data-navigate="characters" data-page="characters">
       <span class="bn-icon">📜</span><span>Perso</span>
     </button>
-    <button class="bottom-nav-item" data-navigate="shop" data-page="shop">
+    <button class="bottom-nav-item" type="button" data-navigate="shop" data-page="shop">
       <span class="bn-icon">🛍️</span><span>Boutique</span>
     </button>
-    <button class="bottom-nav-item" data-navigate="story" data-page="story">
+    <button class="bottom-nav-item" type="button" data-navigate="story" data-page="story">
       <span class="bn-icon">📚</span><span>Trame</span>
     </button>
-    <button class="bottom-nav-item" data-toggle-more>
+    <button class="bottom-nav-item" type="button" data-toggle-more>
       <span class="bn-icon">⋯</span><span>Plus</span>
     </button>
   </nav>
@@ -123,7 +144,6 @@
     <div class="more-menu-item" data-navigate="tutorial"><span class="icon">📕</span>Tutoriel</div>
     <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span>Admin</div>
   </div>
-
 </div>
 
 <div class="notif" id="notif"></div>
@@ -132,13 +152,12 @@
   <div class="modal" id="modal-box">
     <div class="modal-title" id="modal-title">
       <span></span>
-      <button class="btn-icon" onclick="closeModalDirect()">✕</button>
+      <button class="btn-icon" type="button" data-action="close-modal">✕</button>
     </div>
     <div id="modal-body"></div>
   </div>
 </div>
 
-<!-- Point d'entree unique — remplace les 15 balises script defer -->
 <script type="module" src="./assets/js/app.js"></script>
 
 </body>
