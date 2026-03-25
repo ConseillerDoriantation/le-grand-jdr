@@ -160,39 +160,146 @@
   .tutorial-layout-grid { grid-template-columns:1fr !important; }
 }
 
-/* === DASHBOARD REFRESH RESPONSIVE === */
 
-@media (max-width: 1100px) {
-  .page-frame {
-    max-width:none;
+/* ═══ 2026 APP REFRESH RESPONSIVE ═══ */
+
+@media(max-width:1280px) {
+  .dashboard-hero {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .dashboard-main {
-    grid-template-columns:1fr;
+  .dashboard-grid {
+    grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 640px) {
-  .dashboard-hero {
-    grid-template-columns:1fr;
-    padding:1.25rem;
+@media(max-width:1100px) {
+  :root {
+    --sidebar-width: 244px;
   }
 
-  .dashboard-hero__aside {
-    justify-items:start;
+  .app-header {
+    min-height: 62px;
+    height: 62px;
+  }
+
+  .sidebar {
+    top: 62px;
+    height: calc(100vh - 62px);
+  }
+
+  .main-content {
+    padding: 1.5rem;
+  }
+
+  .page-header {
+    padding: 1.3rem 1.35rem;
+  }
+
+  .dashboard-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-action-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media(max-width:640px) {
+  .app-header {
+    min-height: 56px;
+    height: 56px;
+    padding: 0 0.9rem;
+  }
+
+  .main-content {
+    padding: 1rem 1rem 76px;
+  }
+
+  .main-content > * {
+    width: 100%;
+  }
+
+  .page-header {
+    padding: 1.15rem 1rem;
+    border-radius: 20px;
+  }
+
+  .page-title {
+    font-size: 1.2rem;
+  }
+
+  .card {
+    padding: 1rem;
+    border-radius: 20px;
+  }
+
+  .dashboard-hero {
+    gap: 1rem;
+    padding: 1rem;
+    border-radius: 24px;
+  }
+
+  .dashboard-badge {
+    margin-bottom: 0.8rem;
   }
 
   .dashboard-hero h1 {
-    font-size:1.45rem;
+    max-width: none;
+    font-size: 1.55rem;
   }
 
-  .quick-btn {
-    grid-template-columns:40px minmax(0, 1fr) auto;
-    padding:0.9rem;
+  .dashboard-hero p {
+    font-size: 0.88rem;
   }
 
-  .qicon {
-    width:40px;
-    height:40px;
+  .dashboard-hero__actions {
+    flex-direction: column;
+  }
+
+  .dashboard-cta {
+    width: 100%;
+  }
+
+  .dashboard-profile-card {
+    padding: 0.95rem;
+  }
+
+  .dashboard-profile-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dashboard-panel {
+    padding: 1rem;
+  }
+
+  .dashboard-panel__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dashboard-list-link {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    padding: 0.82rem;
+  }
+
+  .dashboard-list-link__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .dashboard-mini-card,
+  .shop-item,
+  .npc-card,
+  .world-content,
+  .tutorial-content,
+  .char-section,
+  .map-container {
+    border-radius: 18px;
+  }
+
+  .map-container {
+    min-height: 360px;
   }
 }

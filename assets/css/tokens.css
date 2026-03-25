@@ -1,42 +1,48 @@
 :root {
-  /* Or — plus chaud, moins saturé */
-  --gold:        #c8a45a;
-  --gold-light:  #dfc080;
-  --gold-dark:   #8c6830;
-  --gold-glow:   rgba(200,164,90,0.1);
+  /* Accent principal */
+  --gold:        #c9a45f;
+  --gold-light:  #f0d8a3;
+  --gold-dark:   #8a6630;
+  --gold-glow:   rgba(201,164,95,0.18);
 
   --crimson:       #9b2d22;
-  --crimson-light: #c0392b;
+  --crimson-light: #d54b3f;
 
-  /* Fonds — noirs neutres, sans teinte bleue */
-  --bg-deep:   #0d0d0d;
-  --bg-dark:   #111111;
-  --bg-card:   #171717;
-  --bg-card2:  #141414;
-  --bg-panel:  #141414;
-  --bg-glass:  rgba(15,15,15,0.94);
+  /* Fonds */
+  --bg-deep:    #07080b;
+  --bg-dark:    #0b0d12;
+  --bg-card:    #11141b;
+  --bg-card2:   #161a23;
+  --bg-panel:   #0e1118;
+  --bg-glass:   rgba(10,12,17,0.78);
+  --bg-elevated:#1a1f2a;
 
-  /* Bordures — plus visibles, structurantes */
-  --border:        rgba(255,255,255,0.09);
-  --border-bright: rgba(200,164,90,0.4);
+  /* Bordures */
+  --border:         rgba(255,255,255,0.08);
+  --border-strong:  rgba(255,255,255,0.13);
+  --border-bright:  rgba(201,164,95,0.38);
+  --border-accent:  rgba(201,164,95,0.24);
 
   /* Texte */
-  --text:       #eae4d8;
-  --text-muted: #6e6860;
-  --text-dim:   #3a3730;
+  --text:       #f3eee6;
+  --text-soft:  #ddd6ca;
+  --text-muted: #a49d92;
+  --text-dim:   #6a665e;
 
-  --shadow: rgba(0,0,0,0.9);
+  /* Ombres */
+  --shadow:      rgba(0,0,0,0.92);
+  --shadow-card: 0 16px 40px rgba(0,0,0,0.26);
+  --shadow-soft: 0 28px 70px rgba(0,0,0,0.42);
+  --shadow-glow: 0 0 0 1px rgba(201,164,95,0.06), 0 18px 50px rgba(0,0,0,0.36);
 
-  --green:     #27ae60;
-  --green-dim: rgba(39,174,96,0.1);
-  --blue:      #2471a3;
-  --blue-dim:  rgba(36,113,163,0.12);
+  --green:     #30c97a;
+  --green-dim: rgba(48,201,122,0.14);
+  --blue:      #4b8dff;
+  --blue-dim:  rgba(75,141,255,0.14);
 
-  --radius:    14px;
-  --radius-lg: 22px;
-  --sidebar-width: 264px;
-  --content-max: 1480px;
-
-  --shadow-card: 0 12px 30px rgba(0, 0, 0, 0.22);
-  --shadow-soft: 0 22px 60px rgba(0, 0, 0, 0.34);
+  --radius:         16px;
+  --radius-lg:      26px;
+  --sidebar-width:  272px;
+  --content-max:    1540px;
+  --header-height:  68px;
 }
