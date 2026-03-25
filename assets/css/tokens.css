@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════
-   TOKENS — Variables CSS
-   Mode nuit  : :root            (défaut)
+   TOKENS — Système de design
+   Mode nuit  : :root  (défaut)
    Mode jour  : [data-theme="light"]
 ═══════════════════════════════════════════════════ */
 
@@ -22,6 +22,12 @@
   --bg-panel:   rgba(16, 22, 31, 0.92);
   --bg-glass:   rgba(17, 23, 33, 0.76);
   --bg-elevated:#1b2432;
+
+  /* Surfaces génériques utilisées dans features.css */
+  --surface-1:  rgba(255,255,255,0.05);
+  --surface-2:  rgba(255,255,255,0.04);
+  --surface-3:  rgba(255,255,255,0.03);
+  --surface-4:  rgba(255,255,255,0.02);
 
   /* Borders */
   --border:         rgba(255,255,255,0.08);
@@ -53,70 +59,411 @@
   --header-height:  64px;
 }
 
-/* ── Mode jour ──────────────────────────────────
-   Toutes les variables surchargées ici.
-   Seul le sélecteur change — les noms restent
-   identiques pour ne rien casser dans le CSS.
-─────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════
+   MODE JOUR — surcharge complète
+   Palette : gris clairs propres, bleu moins agressif,
+   contrastes AAA sur tous les textes.
+══════════════════════════════════════════════════ */
 [data-theme="light"] {
-  /* Accent — bleu plus sombre pour contraste sur blanc */
-  --gold:        #2563eb;
-  --gold-light:  #93c5fd;
-  --gold-dark:   #1d4ed8;
-  --gold-glow:   rgba(37, 99, 235, 0.12);
 
-  --crimson:       #e11d48;
-  --crimson-light: #fb7185;
+  /* Accent — bleu soutenu lisible sur blanc */
+  --gold:        #1d5bd4;
+  --gold-light:  #4f8cff;
+  --gold-dark:   #1244a8;
+  --gold-glow:   rgba(29, 91, 212, 0.10);
 
-  /* Backgrounds — blanc cassé, cartes légèrement grisées */
-  --bg-deep:    #f0f2f5;
-  --bg-dark:    #f7f8fa;
-  --bg-card:    rgba(255, 255, 255, 0.95);
-  --bg-card2:   rgba(248, 249, 252, 0.98);
-  --bg-panel:   rgba(255, 255, 255, 0.90);
-  --bg-glass:   rgba(255, 255, 255, 0.82);
+  --crimson:       #c4183c;
+  --crimson-light: #e63357;
+
+  /* Backgrounds — gris chauds neutres */
+  --bg-deep:    #f2f4f7;
+  --bg-dark:    #f8f9fb;
+  --bg-card:    #ffffff;
+  --bg-card2:   #f9fafb;
+  --bg-panel:   #ffffff;
+  --bg-glass:   rgba(255,255,255,0.94);
   --bg-elevated:#ffffff;
 
-  /* Borders — grises subtiles */
-  --border:         rgba(0, 0, 0, 0.08);
-  --border-strong:  rgba(0, 0, 0, 0.14);
-  --border-bright:  rgba(37, 99, 235, 0.30);
-  --border-accent:  rgba(59, 130, 246, 0.22);
+  /* Surfaces — blanches légèrement teintées */
+  --surface-1:  rgba(0,0,0,0.03);
+  --surface-2:  rgba(0,0,0,0.025);
+  --surface-3:  rgba(0,0,0,0.02);
+  --surface-4:  rgba(0,0,0,0.015);
 
-  /* Text — noir doux */
-  --text:       #111827;
-  --text-soft:  #1f2937;
-  --text-muted: #6b7280;
-  --text-dim:   #9ca3af;
+  /* Borders — grises fines */
+  --border:         rgba(0,0,0,0.09);
+  --border-strong:  rgba(0,0,0,0.15);
+  --border-bright:  rgba(29,91,212,0.30);
+  --border-accent:  rgba(29,91,212,0.20);
 
-  /* Shadows — plus légères sur fond clair */
-  --shadow:      rgba(0, 0, 0, 0.10);
-  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --shadow-soft: 0 12px 40px rgba(0, 0, 0, 0.10);
-  --shadow-glow: 0 1px 0 rgba(0,0,0,0.04), 0 4px 16px rgba(0, 0, 0, 0.08);
+  /* Text — hiérarchie claire */
+  --text:       #0f172a;
+  --text-soft:  #1e293b;
+  --text-muted: #64748b;
+  --text-dim:   #94a3b8;
+
+  /* Shadows — légères, chaudes */
+  --shadow:      rgba(15,23,42,0.08);
+  --shadow-card: 0 2px 12px rgba(15,23,42,0.08), 0 0 0 1px rgba(0,0,0,0.05);
+  --shadow-soft: 0 8px 32px rgba(15,23,42,0.12);
+  --shadow-glow: 0 1px 0 rgba(255,255,255,0.8), 0 2px 8px rgba(15,23,42,0.08);
 
   --green:     #059669;
-  --green-dim: rgba(5, 150, 105, 0.12);
-  --blue:      #2563eb;
-  --blue-dim:  rgba(37, 99, 235, 0.12);
+  --green-dim: rgba(5,150,105,0.12);
+  --blue:      #1d5bd4;
+  --blue-dim:  rgba(29,91,212,0.10);
 }
 
-/* ── Transition douce entre les deux modes ─────
-   Appliquée sur les éléments qui changent de couleur.
-   Exclut les transitions sur le texte pour éviter
-   les flashs de lecture.
-─────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════
+   SURCHARGES MODE JOUR — éléments hardcodés
+   features.css, layout.css, auth.css utilisent des
+   rgba(255,255,255,…) qui ne basculent pas seuls.
+   On les cible ici pour ne pas toucher aux fichiers.
+══════════════════════════════════════════════════ */
+
+/* ── Dashboard cards & hero ────────────────────── */
+[data-theme="light"] .dashboard-hero__main,
+[data-theme="light"] .dashboard-hero__meta {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.07);
+}
+[data-theme="light"] .dashboard-kicker {
+  background: rgba(29,91,212,0.08);
+  border-color: rgba(29,91,212,0.15);
+  color: var(--text-soft);
+}
+[data-theme="light"] .dashboard-status {
+  color: #065f46;
+  background: rgba(5,150,105,0.08);
+  border-color: rgba(5,150,105,0.15);
+}
+[data-theme="light"] .dashboard-cta--secondary {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.10);
+  color: var(--text);
+}
+[data-theme="light"] .dashboard-app-button {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .dashboard-app-button:hover {
+  background: #f8f9fb;
+  border-color: rgba(29,91,212,0.20);
+}
+[data-theme="light"] .dashboard-app-button__icon {
+  background: rgba(29,91,212,0.10);
+  border-color: rgba(29,91,212,0.18);
+  box-shadow: none;
+}
+[data-theme="light"] .dashboard-app-button__action {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.08);
+  color: var(--text);
+}
+[data-theme="light"] .dashboard-list-button {
+  background: #ffffff;
+  border-color: rgba(29,91,212,0.12);
+  box-shadow: var(--shadow-card);
+}
+[data-theme="light"] .dashboard-list-button:hover {
+  background: #f5f8ff;
+  border-color: rgba(29,91,212,0.25);
+  box-shadow: var(--shadow-soft);
+}
+[data-theme="light"] .dashboard-list-button__icon {
+  background: rgba(29,91,212,0.08);
+  border-color: rgba(29,91,212,0.15);
+}
+[data-theme="light"] .dashboard-meta-card {
+  background: #f8f9fb;
+  border-color: rgba(0,0,0,0.07);
+}
+[data-theme="light"] .dashboard-summary-row {
+  background: #f8f9fb;
+  border-color: rgba(0,0,0,0.07);
+}
+[data-theme="light"] .dashboard-summary-badge {
+  background: rgba(29,91,212,0.08);
+  border-color: rgba(29,91,212,0.15);
+}
+[data-theme="light"] .dashboard-inline-actions button {
+  background: #f2f4f7;
+  border-color: rgba(0,0,0,0.09);
+  color: var(--text);
+}
+[data-theme="light"] .dashboard-inline-actions button:hover {
+  background: #e8ecf2;
+}
+
+/* ── Features génériques ───────────────────────── */
+[data-theme="light"] .char-section,
+[data-theme="light"] .shop-item,
+[data-theme="light"] .achievement-card,
+[data-theme="light"] .collection-card,
+[data-theme="light"] .player-card,
+[data-theme="light"] .npc-card,
+[data-theme="light"] .world-content,
+[data-theme="light"] .map-container,
+[data-theme="light"] .tutorial-content,
+[data-theme="light"] .admin-section {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.08);
+  box-shadow: var(--shadow-card);
+}
+[data-theme="light"] .carac-box {
+  background: #f8f9fb;
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .carac-box:hover {
+  background: #f0f4ff;
+  border-color: rgba(29,91,212,0.25);
+}
+[data-theme="light"] .sort-row:hover {
+  background: rgba(0,0,0,0.03);
+}
+[data-theme="light"] .vital-box {
+  background: #f8f9fb;
+}
+[data-theme="light"] .vital-btn {
+  background: #f2f4f7;
+  border-color: rgba(0,0,0,0.10);
+  color: var(--text-muted);
+}
+[data-theme="light"] .char-pill {
+  background: #f2f4f7;
+  border-color: rgba(0,0,0,0.09);
+  color: var(--text-muted);
+}
+[data-theme="light"] .char-pill:hover {
+  background: #e8ecf2;
+  border-color: rgba(0,0,0,0.14);
+  color: var(--text);
+}
+[data-theme="light"] .char-pill.active {
+  background: rgba(29,91,212,0.10);
+  border-color: rgba(29,91,212,0.25);
+  color: var(--gold);
+}
+[data-theme="light"] .tutorial-nav-item {
+  background: #f8f9fb;
+  border-color: transparent;
+}
+[data-theme="light"] .tutorial-nav-item:hover {
+  background: #f0f4ff;
+  color: var(--text);
+}
+[data-theme="light"] .tutorial-nav-item.active {
+  background: rgba(29,91,212,0.10);
+  border-color: rgba(29,91,212,0.20);
+  color: var(--gold);
+}
+[data-theme="light"] .bastion-room {
+  border-bottom-color: rgba(0,0,0,0.06);
+}
+[data-theme="light"] .room-level span {
+  background: rgba(0,0,0,0.06);
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .admin-section {
+  background: rgba(29,91,212,0.05);
+  border-color: rgba(29,91,212,0.15);
+}
+[data-theme="light"] .admin-label {
+  color: rgba(29,91,212,0.8);
+}
+
+/* ── Header & sidebar ──────────────────────────── */
+[data-theme="light"] .app-header {
+  background: rgba(255,255,255,0.96);
+  border-bottom-color: rgba(0,0,0,0.08);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06);
+}
+[data-theme="light"] .sidebar {
+  background: #f8f9fb;
+  border-right-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .nav-item.active {
+  background: rgba(29,91,212,0.08);
+  color: var(--gold);
+}
+[data-theme="light"] .nav-item:hover {
+  background: rgba(0,0,0,0.04);
+}
+[data-theme="light"] .btn-logout {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.09);
+  color: var(--text-muted);
+}
+[data-theme="light"] .btn-logout:hover {
+  border-color: rgba(196,24,60,0.40);
+  color: var(--crimson);
+  background: rgba(196,24,60,0.04);
+}
+
+/* ── Cards génériques layout.css ──────────────── */
+[data-theme="light"] .card {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .card:hover {
+  border-color: rgba(29,91,212,0.20);
+}
+[data-theme="light"] .stat-box {
+  background: #f8f9fb;
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .stat-box:hover {
+  background: #f0f4ff;
+  border-color: rgba(29,91,212,0.20);
+}
+
+/* ── Inputs ────────────────────────────────────── */
+[data-theme="light"] .input-field,
+[data-theme="light"] .input-sm {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.12);
+  color: var(--text);
+}
+[data-theme="light"] .input-field:focus,
+[data-theme="light"] .input-sm:focus {
+  border-color: rgba(29,91,212,0.45);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(29,91,212,0.10);
+}
+
+/* ── Boutons ───────────────────────────────────── */
+[data-theme="light"] .btn-outline {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.12);
+  color: var(--text-muted);
+}
+[data-theme="light"] .btn-outline:hover {
+  background: #f5f8ff;
+  border-color: rgba(29,91,212,0.30);
+  color: var(--text);
+}
+[data-theme="light"] .btn-gold {
+  background: linear-gradient(135deg, #1244a8, #1d5bd4);
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(29,91,212,0.25);
+}
+[data-theme="light"] .btn-gold:hover {
+  box-shadow: 0 4px 20px rgba(29,91,212,0.35);
+}
+[data-theme="light"] .dashboard-cta--primary {
+  background: linear-gradient(180deg, #2d6ae0, #1d5bd4);
+  color: #ffffff;
+}
+
+/* ── Modal ─────────────────────────────────────── */
+[data-theme="light"] .modal {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.10);
+}
+[data-theme="light"] .modal-overlay {
+  background: rgba(15,23,42,0.50);
+}
+
+/* ── Tabs ──────────────────────────────────────── */
+[data-theme="light"] .tab {
+  color: var(--text-muted);
+}
+[data-theme="light"] .tab:hover {
+  color: var(--text);
+}
+[data-theme="light"] .tab.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+/* ── Auth screen ───────────────────────────────── */
+[data-theme="light"] #auth-screen {
+  background: #f2f4f7;
+}
+[data-theme="light"] #auth-screen::before {
+  background: radial-gradient(
+    ellipse 100% 80% at 50% 0%,
+    rgba(29,91,212,0.06) 0%,
+    transparent 70%
+  );
+}
+[data-theme="light"] .auth-box {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.10);
+  box-shadow: 0 8px 40px rgba(15,23,42,0.12);
+}
+[data-theme="light"] .auth-box::before {
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+[data-theme="light"] .auth-tab {
+  color: var(--text-muted);
+}
+[data-theme="light"] .auth-tab.active {
+  background: rgba(29,91,212,0.08);
+  color: var(--gold);
+}
+[data-theme="light"] .auth-tabs {
+  background: rgba(0,0,0,0.04);
+}
+[data-theme="light"] .form-group input {
+  background: #f8f9fb;
+  border-color: rgba(0,0,0,0.12);
+  color: var(--text);
+}
+[data-theme="light"] .form-group input:focus {
+  border-color: rgba(29,91,212,0.45);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(29,91,212,0.10);
+}
+[data-theme="light"] .btn-primary {
+  background: linear-gradient(135deg, #1244a8, #1d5bd4, #1650c8);
+}
+
+/* ── Notifications ─────────────────────────────── */
+[data-theme="light"] .notif.success {
+  background: rgba(5,150,105,0.10);
+  border-color: rgba(5,150,105,0.25);
+  color: #065f46;
+}
+[data-theme="light"] .notif.error {
+  background: rgba(196,24,60,0.08);
+  border-color: rgba(196,24,60,0.20);
+  color: var(--crimson);
+}
+
+/* ── Scrollbar ─────────────────────────────────── */
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.12);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.20);
+}
+
+/* ── Timeline ──────────────────────────────────── */
+[data-theme="light"] .timeline::before {
+  background: linear-gradient(180deg, rgba(29,91,212,0.6), rgba(29,91,212,0));
+}
+[data-theme="light"] .timeline-dot {
+  background: #f2f4f7;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 8px rgba(29,91,212,0.06);
+}
+
+/* ── Transitions douces sur les éléments clés ─── */
 body,
-.app-header,
-.sidebar,
-.card,
-.stat-box,
-.modal,
-.auth-box,
-.main-content,
-#auth-screen {
+.app-header, .sidebar, .card, .stat-box,
+.modal, .auth-box, .main-content, #auth-screen,
+.dashboard-hero__main, .dashboard-hero__meta,
+.dashboard-app-button, .dashboard-list-button,
+.dashboard-meta-card, .dashboard-summary-row,
+.char-section, .carac-box, .shop-item,
+.achievement-card, .player-card, .npc-card,
+.char-pill, .input-field, .input-sm,
+.tutorial-content, .tutorial-nav-item,
+.btn-outline, .btn-gold, .btn-logout {
   transition:
-    background-color 0.25s ease,
-    border-color     0.25s ease,
-    box-shadow       0.25s ease;
+    background-color 0.22s ease,
+    border-color     0.22s ease,
+    color            0.22s ease,
+    box-shadow       0.22s ease;
 }
