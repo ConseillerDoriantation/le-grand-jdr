@@ -1214,3 +1214,183 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 [data-theme="light"] .cs-rune-chip { border-color: rgba(0,0,0,0.08); }
 [data-theme="light"] .cs-rune-chip.selected { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.35); }
 [data-theme="light"] .cs-divider { background: rgba(0,0,0,0.07); }
+
+/* ══════════════════════════════════════════════════
+   LIVRET DE COMPTE
+══════════════════════════════════════════════════ */
+
+/* Solde bar */
+.cs-solde-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.9rem 1.2rem;
+  margin-bottom: 1.2rem;
+  flex-wrap: wrap;
+}
+.cs-solde-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+.cs-solde-item.cs-solde-main {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 1rem;
+}
+.cs-solde-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.cs-solde-val {
+  font-size: 1.1rem;
+  font-weight: 800;
+  font-family: 'Outfit', sans-serif;
+}
+.cs-solde-val.pos { color: var(--green); }
+.cs-solde-val.neg { color: var(--crimson-light); }
+.cs-solde-sep {
+  font-size: 1.2rem;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+/* Double tableau */
+.cs-compte-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.cs-compte-col {}
+.cs-compte-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.cs-compte-col-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.cs-compte-col-title.pos { color: var(--green); }
+.cs-compte-col-title.neg { color: var(--crimson-light); }
+
+.cs-compte-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.cs-compte-table th {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.cs-compte-table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text-soft);
+  vertical-align: middle;
+}
+.cs-compte-row:hover td { background: rgba(255,255,255,0.02); }
+.cs-compte-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 1rem;
+}
+.cs-montant-pos { color: var(--green); font-weight: 700; }
+.cs-montant-neg { color: var(--crimson-light); font-weight: 700; }
+
+@media(max-width: 700px) {
+  .cs-compte-grid { grid-template-columns: 1fr; }
+}
+
+/* Mode jour */
+[data-theme="light"] .cs-solde-bar { background: #f7f8fa; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-solde-item.cs-solde-main { background: #fff; border-color: rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-compte-table td { border-bottom-color: rgba(0,0,0,0.05); }
+[data-theme="light"] .cs-compte-row:hover td { background: rgba(0,0,0,0.02); }
+
+/* ══════════════════════════════════════════════════
+   NOTES MULTIPLES
+══════════════════════════════════════════════════ */
+.cs-note-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+  transition: border-color 0.18s;
+}
+.cs-note-card:hover { border-color: rgba(79,140,255,0.22); }
+.cs-note-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  background: rgba(255,255,255,0.03);
+  transition: background 0.15s;
+  user-select: none;
+}
+.cs-note-header:hover { background: rgba(255,255,255,0.05); }
+.cs-note-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.cs-note-icon { font-size: 0.95rem; }
+.cs-note-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.cs-note-date {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.45rem;
+}
+.cs-note-chevron {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+.cs-note-body {
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.cs-note-textarea {
+  font-size: 0.88rem;
+  line-height: 1.7;
+  resize: vertical;
+  min-height: 120px;
+}
+.cs-note-content {
+  font-size: 0.85rem;
+  line-height: 1.8;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+/* Mode jour */
+[data-theme="light"] .cs-note-header { background: #f7f8fa; }
+[data-theme="light"] .cs-note-header:hover { background: #eef1f9; }
+[data-theme="light"] .cs-note-card { border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-note-date { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-note-body { border-top-color: rgba(0,0,0,0.07); }
