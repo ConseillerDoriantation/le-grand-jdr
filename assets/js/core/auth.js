@@ -46,12 +46,14 @@ export function getAuthError(error) {
 
 function setButtonLoading(button, isLoading, loadingText) {
   if (!button) return;
+
   if (isLoading) {
     button.dataset.originalText = button.textContent;
     button.disabled = true;
     button.textContent = loadingText;
     return;
   }
+
   button.disabled = false;
   button.textContent = button.dataset.originalText || button.textContent;
 }
@@ -66,13 +68,17 @@ function getRegisterButton() {
 
 export function switchAuthTab(tab) {
   const isLogin = tab === 'login';
+
   document.querySelectorAll('.auth-tab').forEach((el, index) => {
     el.classList.toggle('active', isLogin ? index === 0 : index === 1);
   });
+
   const loginPanel = document.getElementById('tab-login');
   const registerPanel = document.getElementById('tab-register');
+
   if (loginPanel) loginPanel.style.display = isLogin ? 'block' : 'none';
   if (registerPanel) registerPanel.style.display = isLogin ? 'none' : 'block';
+
   clearAuthError();
 }
 
@@ -83,12 +89,14 @@ async function saveProfile(user, pseudo) {
     pseudo: pseudo || user.email?.split('@')[0] || 'Aventurier',
     createdAt: new Date().toISOString(),
   };
+
   await setDoc(doc(db, 'users', user.uid), profile, { merge: true });
   setProfile(profile);
 }
 
 export async function doLogin() {
   clearAuthError();
+
   const email = document.getElementById('login-email')?.value?.trim() || '';
   const password = document.getElementById('login-password')?.value || '';
 
@@ -98,12 +106,13 @@ export async function doLogin() {
   }
 
   const button = getLoginButton();
+
   try {
     setButtonLoading(button, true, 'Connexion...');
     await signInWithEmailAndPassword(auth, email, password);
     clearAuthError();
   } catch (error) {
-    console.error('doLogin error:', error);
+    console.error('[auth] doLogin error:', error);
     setAuthError(getAuthError(error));
   } finally {
     setButtonLoading(button, false);
@@ -112,6 +121,7 @@ export async function doLogin() {
 
 export async function doRegister() {
   clearAuthError();
+
   const pseudo = document.getElementById('reg-pseudo')?.value?.trim() || '';
   const email = document.getElementById('reg-email')?.value?.trim() || '';
   const password = document.getElementById('reg-password')?.value || '';
@@ -120,12 +130,14 @@ export async function doRegister() {
     setAuthError('Remplis tous les champs.');
     return;
   }
+
   if (password.length < 6) {
     setAuthError('Mot de passe trop court (6 caractères minimum).');
     return;
   }
 
   const button = getRegisterButton();
+
   try {
     setButtonLoading(button, true, 'Création...');
     const credential = await createUserWithEmailAndPassword(auth, email, password);
@@ -133,7 +145,7 @@ export async function doRegister() {
     clearAuthError();
     window.showNotif?.('Compte créé avec succès.', 'success');
   } catch (error) {
-    console.error('doRegister error:', error);
+    console.error('[auth] doRegister error:', error);
     setAuthError(getAuthError(error));
   } finally {
     setButtonLoading(button, false);
@@ -144,16 +156,19 @@ export async function doLogout() {
   try {
     await signOut(auth);
   } catch (error) {
-    console.error('doLogout error:', error);
+    console.error('[auth] doLogout error:', error);
     setAuthError(getAuthError(error));
   }
 }
 
 function handleAuthKeydown(event) {
   if (event.key !== 'Enter') return;
+
   const authScreen = document.getElementById('auth-screen');
   if (!authScreen || authScreen.style.display === 'none') return;
+
   const registerVisible = document.getElementById('tab-register')?.style.display !== 'none';
+
   if (registerVisible) doRegister();
   else doLogin();
 }
@@ -163,26 +178,47 @@ export function bindAuthUI() {
   window.__authUiBound = true;
 
   document.addEventListener('keydown', handleAuthKeydown);
+
   document.addEventListener('click', (event) => {
     const target = event.target.closest('[data-action]');
     if (!target) return;
-    const action = target.dataset.action;
-    if (action === 'login') { event.preventDefault(); doLogin(); return; }
-    if (action === 'register') { event.preventDefault(); doRegister(); return; }
-    if (action === 'logout') { event.preventDefault(); doLogout(); return; }
-    if (action === 'auth-tab-login') { event.preventDefault(); switchAuthTab('login'); return; }
-    if (action === 'auth-tab-register') { event.preventDefault(); switchAuthTab('register'); }
-  });
 
-  document.querySelector('[data-action="login"]')?.addEventListener('click', doLogin);
-  document.querySelector('[data-action="register"]')?.addEventListener('click', doRegister);
-  document.querySelector('[data-action="logout"]')?.addEventListener('click', doLogout);
-  document.querySelector('[data-action="auth-tab-login"]')?.addEventListener('click', () => switchAuthTab('login'));
-  document.querySelector('[data-action="auth-tab-register"]')?.addEventListener('click', () => switchAuthTab('register'));
+    const action = target.dataset.action;
+
+    if (action === 'login') {
+      event.preventDefault();
+      doLogin();
+      return;
+    }
+
+    if (action === 'register') {
+      event.preventDefault();
+      doRegister();
+      return;
+    }
+
+    if (action === 'logout') {
+      event.preventDefault();
+      doLogout();
+      return;
+    }
+
+    if (action === 'auth-tab-login') {
+      event.preventDefault();
+      switchAuthTab('login');
+      return;
+    }
+
+    if (action === 'auth-tab-register') {
+      event.preventDefault();
+      switchAuthTab('register');
+    }
+  });
 }
 
 export function initAuth() {
   bindAuthUI();
+
   Object.assign(window, {
     switchAuthTab,
     doLogin,
