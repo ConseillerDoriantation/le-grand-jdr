@@ -16,6 +16,31 @@ const getInfoArtisanat = () => window.getInfoArtisanat?.() || 'Contenu à venir.
 const getInfoBastion = () => window.getInfoBastion?.() || 'Contenu à venir.';
 const getInfoEtats = () => window.getInfoEtats?.() || 'Contenu à venir.';
 
+const syncHeaderAdminButton = () => {
+  const host = document.querySelector('.header-user');
+  if (!host) return;
+
+  let btn = document.getElementById('header-admin-link');
+
+  if (!STATE.isAdmin) {
+    btn?.remove();
+    return;
+  }
+
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'header-admin-link';
+    btn.type = 'button';
+    btn.className = 'header-admin-link';
+    btn.textContent = 'Console MJ';
+    btn.addEventListener('click', () => window.navigate?.('admin'));
+    const logoutBtn = host.querySelector('.btn-logout');
+    if (logoutBtn) host.insertBefore(btn, logoutBtn);
+    else host.appendChild(btn);
+  }
+};
+
+
 const PAGES = {
 // ─── DASHBOARD ────────────────────────────────
 async dashboard() {
@@ -24,6 +49,8 @@ async dashboard() {
   const roleLabel = STATE.isAdmin ? 'Maître de Jeu' : 'Joueur';
   const accessLabel = STATE.isAdmin ? 'Pilotage MJ' : 'Espace joueur';
   const primaryLabel = charCount > 0 ? 'Ouvrir mes personnages' : 'Créer un personnage';
+
+  syncHeaderAdminButton();
 
   const content = document.getElementById('main-content');
   content.innerHTML = `
@@ -114,12 +141,12 @@ async dashboard() {
       </section>
 
       <section class="dashboard-panel-grid">
-        <article class="card dashboard-panel">
+        <article class="card dashboard-panel dashboard-panel--full">
           <div class="dashboard-section-head">
             <div>
               <span class="dashboard-eyebrow">Monde</span>
               <h2>Ressources de consultation</h2>
-              <p>Accès directs aux pages d’information et d’exploration.</p>
+              <p>Accès directs aux pages d’information et d’exploration utiles aux joueurs.</p>
             </div>
           </div>
 
@@ -159,49 +186,6 @@ async dashboard() {
               </span>
               <span class="dashboard-list-button__arrow">→</span>
             </button>
-          </div>
-        </article>
-
-        <article class="card dashboard-panel">
-          <div class="dashboard-section-head">
-            <div>
-              <span class="dashboard-eyebrow">Synthèse</span>
-              <h2>Vue rapide</h2>
-              <p>État du compte et accès de session.</p>
-            </div>
-          </div>
-
-          <div class="dashboard-summary">
-            <div class="dashboard-summary-row">
-              <div>
-                <span>Compte</span>
-                <strong>${pseudo}</strong>
-              </div>
-              <div class="dashboard-summary-badge">Actif</div>
-            </div>
-
-            <div class="dashboard-summary-row">
-              <div>
-                <span>Profil</span>
-                <strong>${roleLabel}</strong>
-              </div>
-              <div class="dashboard-summary-badge">${charCount} PJ</div>
-            </div>
-
-            <div class="dashboard-summary-row">
-              <div>
-                <span>Navigation</span>
-                <strong>${STATE.isAdmin ? 'Console de gestion' : 'Flux joueur'}</strong>
-              </div>
-              <div class="dashboard-summary-badge">Prête</div>
-            </div>
-          </div>
-
-          <div class="dashboard-inline-actions">
-            ${STATE.isAdmin
-              ? `<button type="button" onclick="navigate('admin')">Administration</button>`
-              : `<button type="button" onclick="navigate('characters')">Mes fiches</button>`}
-            <button type="button" onclick="navigate('world')">Le monde</button>
           </div>
         </article>
       </section>
