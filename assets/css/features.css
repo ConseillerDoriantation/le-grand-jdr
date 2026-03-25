@@ -1490,3 +1490,152 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 [data-theme="light"] .cs-sort-card.cs-sort-drag-over {
   background: rgba(37,99,235,0.06) !important;
 }
+
+/* ══════════════════════════════════════════════════
+   BLOC XP EXPLICITE
+══════════════════════════════════════════════════ */
+.cs-xp-block {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.cs-xp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cs-xp-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.cs-xp-palier {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+}
+.cs-xp-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.cs-xp-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cs-xp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold-dark), var(--gold));
+  border-radius: 3px;
+  transition: width 0.35s ease;
+}
+.cs-xp-pct {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  min-width: 2.5rem;
+  text-align: right;
+}
+/* Input XP visible et clair */
+.cs-xp-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.1rem;
+}
+.cs-xp-input-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cs-xp-input {
+  width: 90px;
+  padding: 0.3rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-bright);
+  background: rgba(79,140,255,0.06);
+  color: var(--gold);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+  font-family: 'Outfit', sans-serif;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  -moz-appearance: textfield;
+}
+.cs-xp-input::-webkit-inner-spin-button,
+.cs-xp-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.cs-xp-input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(79,140,255,0.15);
+}
+.cs-xp-readonly {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Mode jour */
+[data-theme="light"] .cs-xp-block { background: #f7f8fa; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-xp-bar { background: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-xp-input { background: rgba(37,99,235,0.06); border-color: rgba(37,99,235,0.30); color: var(--gold); }
+[data-theme="light"] .cs-xp-input:focus { box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+
+/* ══════════════════════════════════════════════════
+   DRAG & DROP SORTS — indicateur de position précis
+══════════════════════════════════════════════════ */
+
+/* Ligne bleue AVANT la carte */
+.cs-sort-card.cs-drop-before {
+  border-top: 2px solid var(--gold) !important;
+  margin-top: -1px;
+}
+.cs-sort-card.cs-drop-before::before {
+  content: '';
+  display: block;
+  position: absolute;
+  top: -6px;
+  left: 0; right: 0;
+  height: 3px;
+  background: var(--gold);
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(79,140,255,0.5);
+}
+
+/* Ligne bleue APRÈS la carte */
+.cs-sort-card.cs-drop-after {
+  border-bottom: 2px solid var(--gold) !important;
+  margin-bottom: -1px;
+}
+.cs-sort-card.cs-drop-after::after {
+  content: '';
+  display: block;
+  position: absolute;
+  bottom: -6px;
+  left: 0; right: 0;
+  height: 3px;
+  background: var(--gold);
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(79,140,255,0.5);
+}
+
+/* Supprimer l'ancien indicateur de fond générique */
+.cs-sort-card.cs-sort-drag-over {
+  background: rgba(79,140,255,0.04) !important;
+}
+
+/* Mode jour */
+[data-theme="light"] .cs-sort-card.cs-drop-before,
+[data-theme="light"] .cs-sort-card.cs-drop-after {
+  border-color: var(--gold) !important;
+}
