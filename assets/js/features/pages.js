@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════
 // PAGES
 // ══════════════════════════════════════════════
-export const PAGES = {
+const PAGES = {
 // ─── DASHBOARD ────────────────────────────────
 async dashboard() {
   const pseudo = STATE.profile?.pseudo || 'Aventurier';
@@ -651,3 +651,6 @@ async bestiaire() {
 },
 
 }; // end PAGES
+
+export { PAGES };
+export default PAGES;
