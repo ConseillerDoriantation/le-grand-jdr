@@ -1,8 +1,7 @@
 // ══════════════════════════════════════════════
 // PAGES
 // ══════════════════════════════════════════════
-const PAGES = {
-
+export const PAGES = {
 // ─── DASHBOARD ────────────────────────────────
 async dashboard() {
   const pseudo = STATE.profile?.pseudo || 'Aventurier';
