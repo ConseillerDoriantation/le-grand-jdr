@@ -2569,3 +2569,179 @@ input[type=number].input-field::-webkit-outer-spin-button {
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   }
 }
+
+/* ══════════════════════════════════════════════════
+   SORTS — format accordéon compact
+══════════════════════════════════════════════════ */
+.cs-sort-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.cs-sort-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+  position: relative;
+  cursor: grab;
+}
+.cs-sort-row:active { cursor: grabbing; }
+.cs-sort-row.actif { border-color: rgba(79,140,255,0.30); }
+.cs-sort-row.cs-drop-before { border-top: 2px solid var(--gold) !important; }
+.cs-sort-row.cs-drop-after  { border-bottom: 2px solid var(--gold) !important; }
+
+.cs-sort-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.7rem;
+  background: rgba(255,255,255,0.03);
+  transition: background 0.15s;
+  min-height: 42px;
+}
+.cs-sort-row-main:hover { background: rgba(255,255,255,0.05); }
+
+.cs-sort-row-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-sort-row-badges {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.cs-sort-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.cs-sort-badge.gold {
+  background: rgba(226,185,111,0.12);
+  border: 1px solid rgba(226,185,111,0.25);
+  color: var(--gold);
+}
+.cs-sort-badge.blue {
+  background: rgba(59,130,246,0.10);
+  border: 1px solid rgba(59,130,246,0.25);
+  color: var(--blue);
+}
+.cs-sort-badge.muted {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.cs-sort-row-pm {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--blue);
+  background: rgba(59,130,246,0.10);
+  border: 1px solid rgba(59,130,246,0.20);
+  border-radius: 20px;
+  padding: 0.1rem 0.45rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cs-sort-row-chevron {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
+}
+.cs-sort-row-actions {
+  display: flex;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+/* Détail déroulé */
+.cs-sort-row-detail {
+  padding: 0.5rem 0.7rem 0.6rem;
+  border-top: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.cs-sort-dl {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.79rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.cs-sort-dl-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  min-width: 50px;
+  flex-shrink: 0;
+  padding-top: 0.1rem;
+}
+
+/* Mode jour */
+[data-theme="light"] .cs-sort-row { border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-sort-row.actif { border-color: rgba(37,99,235,0.28); }
+[data-theme="light"] .cs-sort-row-main { background: #f7f8fa; }
+[data-theme="light"] .cs-sort-row-main:hover { background: #eef1f9; }
+[data-theme="light"] .cs-sort-row-detail { background: rgba(0,0,0,0.02); border-top-color: rgba(0,0,0,0.07); }
+
+/* ══════════════════════════════════════════════════
+   ÉQUIPEMENT — sélecteur inventaire
+══════════════════════════════════════════════════ */
+.cs-equip-empty-inv {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.7rem 0.9rem;
+  background: rgba(255,107,107,0.06);
+  border: 1px solid rgba(255,107,107,0.18);
+  border-radius: 10px;
+  margin-bottom: 0.8rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.cs-equip-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+}
+.cs-equip-divider::before,
+.cs-equip-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.cs-equip-inv-preview {
+  margin-top: 0.4rem;
+}
+.cs-equip-inv-item {
+  padding: 0.5rem 0.7rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+[data-theme="light"] .cs-equip-inv-item { background: #f7f8fa; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-equip-empty-inv { background: rgba(220,38,38,0.05); border-color: rgba(220,38,38,0.15); }
