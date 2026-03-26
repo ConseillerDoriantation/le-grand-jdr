@@ -2877,3 +2877,85 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .cs-rune-counter:hover { background: rgba(0,0,0,0.03); }
 [data-theme="light"] .cs-rune-btn { background: #f0f2f6; border-color: rgba(0,0,0,0.10); }
 [data-theme="light"] .cs-sort-pm-display { background: rgba(37,99,235,0.06); border-color: rgba(37,99,235,0.18); }
+
+/* ══════════════════════════════════════════════════
+   BOUTIQUE — Nouveaux éléments v18
+══════════════════════════════════════════════════ */
+
+/* Input file upload simple */
+.sh-upload-simple {
+  display: flex;
+  align-items: center;
+}
+.sh-upload-simple input[type=file] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  background: rgba(255,255,255,0.03);
+  width: 100%;
+  cursor: pointer;
+}
+.sh-upload-simple input[type=file]:hover { border-color: var(--gold); }
+[data-theme="light"] .sh-upload-simple input[type=file] { background: #f7f8fa; }
+
+/* DnD catégories */
+.sh-cat-draggable { cursor: grab; }
+.sh-cat-draggable:active { cursor: grabbing; }
+.sh-cat-drop-target {
+  outline: 2px solid var(--gold) !important;
+  outline-offset: 2px;
+  transform: scale(1.02);
+}
+
+/* Barre de recherche */
+.sh-search-wrap { flex: 1; max-width: 340px; }
+.sh-search-input {
+  width: 100%;
+  padding: 0.5rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  font-size: 0.83rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.sh-search-input:focus { border-color: var(--gold); }
+[data-theme="light"] .sh-search-input { background: #ffffff; border-color: rgba(0,0,0,0.12); }
+
+/* Or du personnage dans le sélecteur */
+.sh-char-or {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--gold);
+  background: rgba(226,185,111,0.10);
+  border: 1px solid rgba(226,185,111,0.25);
+  border-radius: 20px;
+  padding: 0.2rem 0.7rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+[data-theme="light"] .sh-char-or {
+  background: rgba(29,91,212,0.07);
+  border-color: rgba(29,91,212,0.20);
+  color: var(--gold);
+}
+
+/* Description cachée — tooltip natif + texte tronqué */
+.sh-item-desc-tooltip {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: help;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sh-item-desc-tooltip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
