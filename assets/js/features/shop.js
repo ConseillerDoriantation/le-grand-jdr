@@ -14,24 +14,24 @@ const TEMPLATES = {
     label: '⚔️ Arme',
     fields: [
       { id:'format',    label:'Format',    type:'text',   placeholder:'Épée 1M, Lance 2M, Arc...' },
-      { id:'rarete',    label:'Rareté',    type:'select', options:['Commun','Peu commun','Rare','Très rare','Légendaire'] },
+      { id:'rarete',    label:'Rareté',    type:'rarete' },
       { id:'degats',    label:'Dégâts',    type:'text',   placeholder:'1D10, 2D6...' },
       { id:'toucher',   label:'Toucher',   type:'text',   placeholder:'+Fo, +Dex...' },
       { id:'stats',     label:'Stats',     type:'text',   placeholder:'+2 Fo, +1 Dex...' },
       { id:'trait',     label:'Trait',     type:'text',   placeholder:'Lourd, Finesse, Polyvalent...' },
       { id:'prix',      label:'Prix 🪙',   type:'number', placeholder:'0' },
-      { id:'dispo',     label:'Dispo',     type:'select', options:['En stock','Sur commande','Épuisé','Unique'] },
+      { id:'dispo',     label:'Dispo',     type:'dispo' },
     ],
   },
   armure: {
     label: '🛡️ Armure',
     fields: [
-      { id:'rarete',    label:'Rareté',    type:'select', options:['Commun','Peu commun','Rare','Très rare','Légendaire'] },
+      { id:'rarete',    label:'Rareté',    type:'rarete' },
       { id:'ca',        label:'CA',        type:'text',   placeholder:'10, 12, 14...' },
       { id:'stats',     label:'Stats',     type:'text',   placeholder:'+2 Co, +1 Fo...' },
       { id:'trait',     label:'Trait',     type:'text',   placeholder:'Lourd, Magique...' },
       { id:'prix',      label:'Prix 🪙',   type:'number', placeholder:'0' },
-      { id:'dispo',     label:'Dispo',     type:'select', options:['En stock','Sur commande','Épuisé','Unique'] },
+      { id:'dispo',     label:'Dispo',     type:'dispo' },
     ],
   },
   classique: {
@@ -41,7 +41,7 @@ const TEMPLATES = {
       { id:'effet',     label:'Effet',     type:'textarea',placeholder:'(Action) Rend 10 PV...' },
       { id:'description',label:'Description',type:'textarea',placeholder:'Détails...' },
       { id:'prix',      label:'Prix 🪙',   type:'number', placeholder:'0' },
-      { id:'dispo',     label:'Dispo',     type:'select', options:['En stock','Sur commande','Épuisé','Unique'] },
+      { id:'dispo',     label:'Dispo',     type:'dispo' },
     ],
   },
   libre: {
@@ -50,7 +50,7 @@ const TEMPLATES = {
       { id:'type',      label:'Type',      type:'text',   placeholder:'Type...' },
       { id:'description',label:'Description',type:'textarea',placeholder:'...' },
       { id:'prix',      label:'Prix 🪙',   type:'number', placeholder:'0' },
-      { id:'dispo',     label:'Dispo',     type:'select', options:['En stock','Sur commande','Épuisé','Unique'] },
+      { id:'dispo',     label:'Dispo',     type:'dispo' },
     ],
   },
 };
@@ -113,6 +113,21 @@ function _rareteColor(r) {
   const map = { 'Commun':'#9ca3af','Peu commun':'#4ade80','Rare':'#60a5fa','Très rare':'#c084fc','Légendaire':'#fbbf24' };
   return map[r] || 'var(--text-dim)';
 }
+function _rareteStars(val) {
+  const n = parseInt(val)||0;
+  if (n <= 0) return '';
+  const colors = ['','#9ca3af','#4ade80','#60a5fa','#c084fc'];
+  const labels = ['','Commun','Peu commun','Rare','Très rare'];
+  const stars = '★'.repeat(n) + '☆'.repeat(4-n);
+  const color = colors[n]||'var(--text-dim)';
+  return `<span class="sh-rarete-stars" style="color:${color}" title="${labels[n]||''}">${stars}</span>`;
+}
+function _dispoDisplay(val) {
+  const n = parseInt(val);
+  if (val === '' || val === null || val === undefined) return '';
+  if (n === 0 || val === '0') return `<span style="color:var(--crimson-light);font-weight:700">Épuisé</span>`;
+  return `<span style="color:var(--green);font-weight:700">${n} dispo.</span>`;
+}
 function _dispoColor(d) {
   return d==='En stock' ? 'var(--green)' : d==='Épuisé' ? 'var(--crimson-light)' : 'var(--gold)';
 }
@@ -139,6 +154,22 @@ async function renderShop() {
         <button class="btn btn-outline btn-sm" onclick="openItemModal()">＋ Article</button>
       </div>
     </div>`;
+  }
+
+  // Sélecteur personnage actif (pour tous les utilisateurs)
+  if (STATE.characters && STATE.characters.length > 0) {
+    const chars = STATE.isAdmin
+      ? STATE.characters
+      : STATE.characters.filter(c => c.uid === STATE.user?.uid);
+    const activeId = window._shopCharId || chars[0]?.id || '';
+    html += `<div class="sh-char-selector">
+      <span class="sh-char-selector-label">🧙 Acheter en tant que</span>
+      <select class="input-field sh-modal-select sh-char-select" id="sh-char-sel"
+              onchange="shopSetChar(this.value)">
+        ${chars.map(c=>`<option value="${c.id}" ${activeId===c.id?'selected':''}>${c.nom||'?'}</option>`).join('')}
+      </select>
+    </div>`;
+    if (!window._shopCharId) window._shopCharId = activeId;
   }
 
   html += _renderBreadcrumb();
@@ -305,8 +336,8 @@ function _renderItemCard(item, tplKey) {
     infoHtml = `
       <div class="sh-item-tags">
         ${item.format?`<span class="sh-tag">${item.format}</span>`:''}
-        ${item.rarete?`<span class="sh-tag sh-tag-rarete" style="color:${_rareteColor(item.rarete)}">${item.rarete}</span>`:''}
-        ${item.dispo?`<span class="sh-tag" style="color:${_dispoColor(item.dispo)}">${item.dispo}</span>`:''}
+        ${item.rarete?_rareteStars(item.rarete):''}
+        ${item.dispo!==undefined&&item.dispo!==''?_dispoDisplay(item.dispo):''}
       </div>
       ${item.degats||item.toucher?`<div class="sh-item-combat">
         ${item.degats?`<span class="sh-combat-chip"><span class="sh-cc-label">Dégâts</span><span class="sh-cc-val red">${item.degats}</span></span>`:''}
@@ -317,9 +348,9 @@ function _renderItemCard(item, tplKey) {
   } else if (tplKey === 'armure') {
     infoHtml = `
       <div class="sh-item-tags">
-        ${item.rarete?`<span class="sh-tag sh-tag-rarete" style="color:${_rareteColor(item.rarete)}">${item.rarete}</span>`:''}
+        ${item.rarete?_rareteStars(item.rarete):''}
         ${item.ca?`<span class="sh-tag">🛡️ CA ${item.ca}</span>`:''}
-        ${item.dispo?`<span class="sh-tag" style="color:${_dispoColor(item.dispo)}">${item.dispo}</span>`:''}
+        ${item.dispo!==undefined&&item.dispo!==''?_dispoDisplay(item.dispo):''}
       </div>
       ${item.stats?`<div class="sh-item-stats">${item.stats}</div>`:''}
       ${item.trait?`<div class="sh-item-trait"><em>${item.trait}</em></div>`:''}`;
@@ -328,7 +359,7 @@ function _renderItemCard(item, tplKey) {
       ${item.type?`<div class="sh-item-type">${item.type}</div>`:''}
       ${item.effet?`<div class="sh-item-effet">${item.effet}</div>`:''}
       ${item.description?`<div class="sh-item-desc">${item.description}</div>`:''}
-      ${item.dispo?`<div class="sh-item-tags"><span class="sh-tag" style="color:${_dispoColor(item.dispo)}">${item.dispo}</span></div>`:''}`;
+      ${item.dispo!==undefined&&item.dispo!==''?`<div class="sh-item-tags">${_dispoDisplay(item.dispo)}</div>`:''}`;
   }
 
   return `<div class="sh-item-card">
@@ -342,12 +373,91 @@ function _renderItemCard(item, tplKey) {
         <div class="sh-item-prix-achat">💰 ${prix} or</div>
         <div class="sh-item-prix-vente" title="Prix de revente (60%)">🔄 ${prixVente} or</div>
       </div>
+      ${!STATE.isAdmin && window._shopCharId && (item.dispo === undefined || parseInt(item.dispo) !== 0)
+        ? `<button class="btn sh-buy-btn" onclick="buyItem('${item.id}')">🛒 Acheter</button>`
+        : STATE.isAdmin ? ''
+        : `<button class="btn sh-buy-btn" disabled style="opacity:0.4;cursor:not-allowed">Épuisé</button>`}
     </div>
     ${STATE.isAdmin?`<div class="sh-item-actions">
       <button class="btn-icon" onclick="openItemModal('${item.id}')">✏️</button>
       <button class="btn-icon" onclick="deleteShopItem('${item.id}')">🗑️</button>
     </div>`:''}
   </div>`;
+}
+
+
+// ══════════════════════════════════════════════
+// ACHAT
+// ══════════════════════════════════════════════
+function shopSetChar(charId) {
+  window._shopCharId = charId;
+}
+
+async function buyItem(itemId) {
+  const charId = window._shopCharId;
+  if (!charId) { showNotif('Sélectionne un personnage d\'abord.','error'); return; }
+
+  const item = _items.find(i => i.id === itemId);
+  if (!item) return;
+
+  // Vérifier stock
+  const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+  if (dispo !== null && dispo <= 0) { showNotif('Article épuisé.','error'); return; }
+
+  const prix = parseFloat(item.prix)||0;
+
+  // Charger le personnage depuis STATE
+  const c = STATE.characters?.find(x => x.id === charId);
+  if (!c) { showNotif('Personnage introuvable.','error'); return; }
+
+  // Vérifier l'or (solde du livret de compte)
+  const { loadCollection, updateInCol } = await import('../data/firestore.js');
+  const compte   = c.compte||{recettes:[],depenses:[]};
+  const totalR   = (compte.recettes||[]).reduce((s,r)=>s+(parseFloat(r.montant)||0),0);
+  const totalD   = (compte.depenses||[]).reduce((s,d)=>s+(parseFloat(d.montant)||0),0);
+  const solde    = totalR - totalD;
+
+  if (solde < prix) {
+    showNotif(`Pas assez d'or. Solde : ${solde} or, prix : ${prix} or.`,'error');
+    return;
+  }
+
+  if (!confirm(`Acheter "${item.nom}" pour ${prix} or ?`)) return;
+
+  // 1. Décrémenter le stock
+  const updates = {};
+  if (dispo !== null) {
+    updates.dispo = Math.max(0, dispo - 1);
+    await updateInCol('shop', itemId, updates);
+    item.dispo = updates.dispo;
+  }
+
+  // 2. Ajouter dans l'inventaire du personnage
+  const inv = c.inventaire||[];
+  inv.push({
+    nom:         item.nom,
+    type:        item.format || item.type || _getTemplate(item.categorieId)?.label || 'Boutique',
+    qte:         '1',
+    description: [item.trait, item.effet, item.description].filter(Boolean).join(' — '),
+    source:      'boutique',
+    itemId:      item.id,
+    prixAchat:   prix,
+    prixVente:   Math.round(prix * 0.6),
+  });
+
+  // 3. Débiter l'or via le livret de compte
+  const depenses = compte.depenses||[];
+  depenses.push({
+    date:    new Date().toLocaleDateString('fr-FR'),
+    libelle: `Achat : ${item.nom}`,
+    montant: prix,
+  });
+  c.inventaire = inv;
+  c.compte     = { ...compte, depenses };
+  await updateInCol('characters', charId, { inventaire: inv, compte: c.compte });
+
+  showNotif(`✅ "${item.nom}" acheté pour ${prix} or !`, 'success');
+  renderShop();
 }
 
 // ══════════════════════════════════════════════
@@ -434,9 +544,13 @@ async function saveCat(catId) {
 async function deleteCat(catId) {
   const n = _items.filter(i => i.categorieId === catId).length;
   if (!confirm(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?')) return;
+  // Supprimer tous les articles de cette catégorie
+  const { deleteFromCol: _del } = await import('../data/firestore.js');
+  const toDelete = _items.filter(i => i.categorieId === catId);
+  await Promise.all(toDelete.map(i => deleteFromCol('shop', i.id)));
   await deleteFromCol('shopCategories', catId);
   if (_activeCat === catId) { _view='home'; _activeCat=null; }
-  showNotif('Catégorie supprimée.','success');
+  showNotif(`Catégorie et ${toDelete.length} article(s) supprimés.`, 'success');
   renderShop();
 }
 
@@ -587,12 +701,30 @@ function _buildFieldsHtml(tpl, item) {
           </span>
         </div>
       </div>`;
+    } else if (f.type === 'rarete') {
+      const cur = parseInt(val)||0;
+      html += `<div class="form-group">
+        <label>${f.label}</label>
+        <div class="sh-rarete-picker" id="si-rarete-wrap">
+          ${[1,2,3,4].map(n=>`<button type="button" class="sh-rarete-star-btn ${cur>=n?'active':''}"
+            data-val="${n}" onclick="pickRarete(${n})"
+            style="${cur>=n?'color:#c084fc':'color:var(--text-dim)'}">★</button>`).join('')}
+          <input type="hidden" id="si-rarete" value="${val}">
+          <span class="sh-rarete-label" id="si-rarete-lbl">${_rareteLabel(val)}</span>
+        </div>
+      </div>`;
+    } else if (f.type === 'dispo') {
+      html += `<div class="form-group">
+        <label>${f.label} <span style="color:var(--text-dim);font-weight:400;font-size:0.7rem">(0 = Épuisé)</span></label>
+        <input type="number" class="input-field" id="si-dispo" value="${val===''?'':parseInt(val)}"
+               min="0" placeholder="Ex: 3" style="max-width:100px">
+      </div>`;
     } else if (f.type === 'select') {
       html += `<div class="form-group">
         <label>${f.label}</label>
         <select class="input-field sh-modal-select" id="si-${f.id}">
           <option value="">— Choisir —</option>
-          ${f.options.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+          ${(f.options||[]).map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
         </select>
       </div>`;
     } else if (f.type === 'textarea') {
@@ -614,6 +746,22 @@ function _buildFieldsHtml(tpl, item) {
 function _bindPrixListener() {
   const input = document.getElementById('si-prix');
   if (input) input.addEventListener('input', () => updatePrixVente(input.value));
+}
+
+
+const _RARETE_LABELS = ['','★ Commun','★★ Peu commun','★★★ Rare','★★★★ Très rare'];
+function _rareteLabel(val) { return _RARETE_LABELS[parseInt(val)||0]||''; }
+
+function pickRarete(n) {
+  const hidden = document.getElementById('si-rarete');
+  const lbl    = document.getElementById('si-rarete-lbl');
+  if (hidden) hidden.value = n;
+  if (lbl)    lbl.textContent = _RARETE_LABELS[n]||'';
+  document.querySelectorAll('.sh-rarete-star-btn').forEach(btn => {
+    const v = parseInt(btn.dataset.val);
+    btn.classList.toggle('active', v <= n);
+    btn.style.color = v <= n ? '#c084fc' : 'var(--text-dim)';
+  });
 }
 
 function updatePrixVente(val) {
@@ -713,7 +861,8 @@ Object.assign(window, {
   openCatModal, saveCat, deleteCat,
   openSubCatModal, saveSubCat, deleteSubCat,
   openItemModal, refreshItemFields, refreshSubCatSelect,
-  previewUpload, updatePrixVente,
+  previewUpload, updatePrixVente, pickRarete,
+  shopSetChar, buyItem,
   saveShopItem, deleteShopItem,
   openShopItemModal, editShopItem, filterShop,
 });

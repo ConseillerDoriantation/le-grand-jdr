@@ -711,7 +711,7 @@ function renderCharInventaire(c, canEdit) {
   const inv = c.inventaire||[];
   let html = `<div class="cs-section">
     <div class="cs-section-title">🎒 Inventaire
-      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addInvItem()">+ Ajouter</button>`:''}
+      <span class="cs-hint">Les objets s'ajoutent depuis la Boutique</span>
     </div>`;
 
   if (inv.length===0) {
@@ -719,6 +719,7 @@ function renderCharInventaire(c, canEdit) {
   } else {
     html += `<div class="cs-inv-list">`;
     inv.forEach((item,i) => {
+      const pv = item.prixVente || (item.prixAchat ? Math.round(item.prixAchat * 0.6) : 0);
       html += `<div class="cs-inv-row">
         <div class="cs-inv-main">
           <div class="cs-inv-name">${item.nom||'?'}</div>
@@ -727,8 +728,8 @@ function renderCharInventaire(c, canEdit) {
         <div class="cs-inv-meta">
           ${item.type?`<span class="badge badge-gold" style="font-size:0.68rem">${item.type}</span>`:''}
           <span class="cs-inv-qte">×${item.qte||1}</span>
-          ${canEdit?`<button class="btn-icon" onclick="editInvItem(${i})">✏️</button>
-                     <button class="btn-icon" onclick="deleteInvItem(${i})">🗑️</button>`:''}
+          ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn" onclick="sellInvItem(${i},'${c.id}',${pv})" title="Vendre (${pv} or)">🔄 ${pv} or</button>`:''}
+          ${canEdit?`<button class="btn-icon" onclick="deleteInvItem(${i})">🗑️</button>`:''}
         </div>
       </div>`;
     });
@@ -1031,6 +1032,46 @@ function inlineEditCompteField(type, idx, field, el) {
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape') input.replaceWith(el); });
   el.replaceWith(input);
   input.focus(); input.select();
+}
+
+
+async function sellInvItem(idx, charId, prixVente) {
+  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+  if (!c) return;
+  const item = (c.inventaire||[])[idx];
+  if (!item) return;
+  if (!confirm(`Vendre "${item.nom}" pour ${prixVente} or ?`)) return;
+
+  // 1. Retirer de l'inventaire
+  c.inventaire.splice(idx, 1);
+
+  // 2. Ajouter au livret de compte (recettes)
+  const compte   = c.compte||{recettes:[],depenses:[]};
+  const recettes = compte.recettes||[];
+  recettes.push({
+    date:    new Date().toLocaleDateString('fr-FR'),
+    libelle: `Vente : ${item.nom}`,
+    montant: prixVente,
+  });
+  c.compte = { ...compte, recettes };
+
+  // 3. Remettre le stock en boutique (si l'article existe encore)
+  if (item.itemId) {
+    const { updateInCol: _upd, loadCollection: _load } = await import('./firestore.js').catch(()=>({}));
+    // Approche simple : incrémenter le dispo dans Firestore
+    try {
+      const shopItems = await import('../data/firestore.js').then(m => m.loadCollection('shop'));
+      const shopItem  = shopItems.find(s => s.id === item.itemId);
+      if (shopItem && shopItem.dispo !== undefined && shopItem.dispo !== '') {
+        const newDispo = parseInt(shopItem.dispo) + 1;
+        await import('../data/firestore.js').then(m => m.updateInCol('shop', item.itemId, {dispo: newDispo}));
+      }
+    } catch(e) { /* article supprimé de la boutique, on ignore */ }
+  }
+
+  await updateInCol('characters', charId, { inventaire: c.inventaire, compte: c.compte });
+  showNotif(`Vendu ! +${prixVente} or ajouté au livret de compte.`, 'success');
+  renderCharSheet(c, 'inventaire');
 }
 
 // ══════════════════════════════════════════════
@@ -1454,6 +1495,7 @@ function deleteCharPhoto(id) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   selectChar, filterAdminChars,
+  sellInvItem,
   calcOr, refreshOrDisplay, calcPalier,
   selectNoyau,
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
