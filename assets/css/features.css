@@ -729,7 +729,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 ════════════════════════════════════════════════ */
 .cs-top {
   display: grid;
-  grid-template-columns: 420px 1fr;
+  grid-template-columns: 480px 1fr;
   gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -919,16 +919,17 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 /* ── BLOC DROIT : Caractéristiques ──────────────── */
 .cs-carac-panel {
   background: var(--bg-card2, var(--bg-card));
-  padding: 1rem;
+  padding: 0.9rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 .cs-carac-panel-title {
-  font-size: 0.65rem; font-weight: 700;
+  font-size: 0.6rem; font-weight: 700;
   color: var(--text-muted); letter-spacing: 0.12em;
   text-transform: uppercase;
   display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.1rem;
 }
 .cs-hint {
   font-size: 0.6rem; color: var(--text-dim);
@@ -938,14 +939,14 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-carac-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex: 1;
 }
 .cs-carac-card {
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.65rem 0.3rem 0.55rem;
+  border-radius: 10px;
+  padding: 0.5rem 0.3rem 0.45rem;
   text-align: center;
   transition: border-color 0.18s, background 0.18s;
   position: relative;
@@ -956,19 +957,18 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 }
 .cs-carac-card.cs-editable { cursor: pointer; }
 .cs-carac-abbr {
-  font-size: 0.6rem; color: var(--text-dim);
+  font-size: 0.55rem; color: var(--text-dim);
   letter-spacing: 0.1em; text-transform: uppercase;
-  font-weight: 700; margin-bottom: 0.25rem;
+  font-weight: 700; margin-bottom: 0.2rem;
 }
 .cs-carac-val {
-  font-size: 1.5rem; font-weight: 800;
+  font-size: 1.25rem; font-weight: 800;
   color: var(--text); line-height: 1;
   font-family: 'Outfit', sans-serif;
 }
 .cs-carac-mod {
-  font-size: 0.9rem; font-weight: 800;
-  margin-top: 0.18rem; line-height: 1;
-  letter-spacing: -0.01em;
+  font-size: 0.82rem; font-weight: 800;
+  margin-top: 0.15rem; line-height: 1;
 }
 .cs-carac-mod.pos { color: var(--green); }
 .cs-carac-mod.neg { color: var(--crimson-light); }
@@ -982,28 +982,28 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-base-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  gap: 0.4rem;
-  padding-top: 0.5rem;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
   border-top: 1px solid var(--border);
 }
 .cs-base-chip {
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
-  border-radius: 10px; padding: 0.5rem 0.35rem;
+  border-radius: 8px; padding: 0.4rem 0.25rem;
   text-align: center;
   transition: background 0.15s;
 }
 .cs-base-chip:hover { background: rgba(255,255,255,0.06); }
 .cs-base-chip-label {
-  font-size: 0.55rem; color: var(--text-dim);
-  text-transform: uppercase; letter-spacing: 0.1em;
-  font-weight: 700; display: block; margin-bottom: 0.2rem;
+  font-size: 0.52rem; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  font-weight: 700; display: block; margin-bottom: 0.15rem;
 }
 .cs-base-chip-val {
-  font-size: 1.15rem; font-weight: 800;
+  font-size: 1rem; font-weight: 800;
   color: var(--gold); font-family: 'Outfit', sans-serif;
 }
-.cs-base-chip-sub { font-size: 0.58rem; color: var(--text-dim); margin-top: 0.1rem; }
+.cs-base-chip-sub { font-size: 0.55rem; color: var(--text-dim); margin-top: 0.08rem; }
 
 /* ════════════════════════════════════════════════
    BLOC INFÉRIEUR : Onglets
@@ -2326,4 +2326,44 @@ select.input-field option {
   background: rgba(5,150,105,0.08);
   border-color: rgba(5,150,105,0.22);
   color: #065f46;
+}
+
+/* Supprimer flèches sur tous les inputs number dans les modals et formulaires */
+.modal input[type=number],
+.sh-fields-grid input[type=number],
+input[type=number].input-field,
+input[type=number].cs-xp-input {
+  -moz-appearance: textfield;
+}
+.modal input[type=number]::-webkit-inner-spin-button,
+.modal input[type=number]::-webkit-outer-spin-button,
+.sh-fields-grid input[type=number]::-webkit-inner-spin-button,
+.sh-fields-grid input[type=number]::-webkit-outer-spin-button,
+input[type=number].input-field::-webkit-inner-spin-button,
+input[type=number].input-field::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Dispo infinie — layout checkbox + input */
+.sh-dispo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.sh-dispo-infini-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.sh-dispo-infini-label input[type=checkbox] {
+  accent-color: var(--gold);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
 }
