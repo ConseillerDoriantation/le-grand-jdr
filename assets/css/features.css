@@ -2211,3 +2211,119 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   cursor: help;
 }
 [data-theme="light"] .sh-item-prix-row { border-top-color: rgba(0,0,0,0.07); }
+
+/* ══════════════════════════════════════════════════
+   BOUTIQUE — Nouveaux v12
+══════════════════════════════════════════════════ */
+
+/* Sélecteur de personnage */
+.sh-char-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.9rem;
+  background: rgba(79,140,255,0.06);
+  border: 1px solid rgba(79,140,255,0.18);
+  border-radius: 12px;
+  margin-bottom: 1.2rem;
+  flex-wrap: wrap;
+}
+.sh-char-selector-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.sh-char-select {
+  max-width: 240px;
+  font-size: 0.82rem !important;
+}
+[data-theme="light"] .sh-char-selector {
+  background: rgba(37,99,235,0.05);
+  border-color: rgba(37,99,235,0.16);
+}
+
+/* Bouton Acheter */
+.sh-buy-btn {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.5rem;
+  background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.sh-buy-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+[data-theme="light"] .sh-buy-btn { background: linear-gradient(135deg,#1d4ed8,#2563eb); }
+
+/* Picker rareté ★ */
+.sh-rarete-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.sh-rarete-star-btn {
+  font-size: 1.4rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: transform 0.1s;
+}
+.sh-rarete-star-btn:hover { transform: scale(1.2); }
+.sh-rarete-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-left: 0.4rem;
+  font-style: italic;
+}
+.sh-rarete-stars {
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+}
+
+/* Fix sélecteur type boutique dans modal */
+select.input-field,
+.input-field[type="text"],
+.input-field {
+  color: var(--text) !important;
+}
+select.input-field option {
+  background: var(--bg-elevated, #1b2432);
+  color: var(--text);
+}
+[data-theme="light"] select.input-field option {
+  background: #ffffff;
+  color: #111827;
+}
+
+/* Bouton vente dans inventaire */
+.cs-sell-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  background: rgba(34,197,94,0.10);
+  border: 1px solid rgba(34,197,94,0.25);
+  border-radius: 20px;
+  color: var(--green);
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.cs-sell-btn:hover {
+  background: rgba(34,197,94,0.18);
+  border-color: rgba(34,197,94,0.40);
+}
+[data-theme="light"] .cs-sell-btn {
+  background: rgba(5,150,105,0.08);
+  border-color: rgba(5,150,105,0.22);
+  color: #065f46;
+}
