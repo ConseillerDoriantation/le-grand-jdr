@@ -709,64 +709,6 @@ async recettes() {
 
 // ─── BESTIAIRE ────────────────────────────────
 async bestiaire() {
-  const items = await loadCollection('bestiaire');
-  const content = document.getElementById('main-content');
-  const cats = [...new Set(items.map(i=>i.categorie||'Créature'))].sort();
-
-  let html = `<div class="page-header">
-    <div class="page-title"><span class="page-title-accent">🐉 Bestiaire</span></div>
-    <div class="page-subtitle">Créatures et monstres du monde</div>
-  </div>
-  ${STATE.isAdmin?`<div class="admin-section">
-    <div class="admin-label">Gestion Admin</div>
-    <button class="btn btn-gold btn-sm" onclick="openBestiaryModal()">+ Ajouter une créature</button>
-  </div>`:''}`;
-
-  if (items.length===0) {
-    html += `<div class="empty-state"><div class="icon">🐉</div><p>Le bestiaire est vide.</p></div>`;
-  } else {
-    html += `<div class="tabs" id="best-cats" style="margin-bottom:1.5rem">
-      <button class="tab active" onclick="filterBestiary(null,this)">Toutes</button>
-      ${cats.map(c=>`<button class="tab" onclick="filterBestiary('${c}',this)">${c}</button>`).join('')}
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1rem" id="bestiary-list">`;
-    items.forEach(c => {
-      html += `<div class="card bestiary-card" data-cat="${c.categorie||'Créature'}" style="padding:1.2rem">
-        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.8rem">
-          <div>
-            <div style="font-weight:700;font-size:1.05rem;color:var(--text)">${c.emoji||'🐉'} ${c.nom||'Créature'}</div>
-            ${c.categorie?`<span class="badge badge-gold" style="font-size:0.65rem;margin-top:0.2rem">${c.categorie}</span>`:''}
-          </div>
-          ${STATE.isAdmin?`<div style="display:flex;gap:0.3rem"><button class="btn-icon" onclick="editBestiary('${c.id}')">✏️</button><button class="btn-icon" onclick="deleteBestiary('${c.id}')">🗑️</button></div>`:''}
-        </div>
-        <div class="grid-4" style="gap:0.5rem;margin-bottom:0.8rem">
-          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">PV</div><div style="font-size:1rem;font-weight:700;color:#2ecc71">${c.pv||'?'}</div></div>
-          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">PM</div><div style="font-size:1rem;font-weight:700;color:var(--blue)">${c.pm||'?'}</div></div>
-          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">CA</div><div style="font-size:1rem;font-weight:700;color:var(--gold)">${c.ca||'?'}</div></div>
-          <div class="stat-box" style="padding:0.5rem"><div class="stat-label">XP</div><div style="font-size:1rem;font-weight:700;color:var(--text-muted)">${c.xp||'?'}</div></div>
-        </div>
-        ${(c.attaques||[]).length>0?`<div style="margin-bottom:0.6rem">
-          <div style="font-size:0.7rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.3rem">⚔️ Attaques</div>
-          ${c.attaques.map(a=>`<div style="font-size:0.82rem;padding:0.2rem 0;border-bottom:1px solid rgba(255,255,255,0.04)">
-            <span style="color:var(--text);font-weight:600">${a.nom}</span>
-            <span style="color:var(--text-dim);margin:0 0.3rem">·</span>
-            <span style="color:var(--crimson-light)">${a.degats||'?'}</span>
-            ${a.effet?`<span style="color:var(--text-muted);font-style:italic"> — ${a.effet}</span>`:''}
-          </div>`).join('')}
-        </div>`:''}
-        ${c.traits?`<div style="font-size:0.82rem;color:var(--text-muted);font-style:italic">✨ ${c.traits}</div>`:''}
-        ${c.butins?`<div style="font-size:0.78rem;color:var(--gold);margin-top:0.4rem">💎 Butin : ${c.butins}</div>`:''}
-      </div>`;
-    });
-    html += '</div>';
-  }
-  content.innerHTML = html;
+  await window.renderBestiary?.();
 },
-
-}; // end PAGES
-
-export { PAGES };
-export default PAGES;  async bestiaire() {
-    await window.renderBestiary?.();
-  },
 
