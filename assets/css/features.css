@@ -2005,3 +2005,209 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   opacity: 1;
   pointer-events: auto;
 }
+
+/* ══════════════════════════════════════════════════
+   BOUTIQUE — Nouveaux composants
+══════════════════════════════════════════════════ */
+
+/* Selecteurs dans les modals */
+.sh-modal-selects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+  margin-bottom: 0.2rem;
+}
+.sh-modal-select {
+  background: var(--bg-elevated, var(--bg-card)) !important;
+  color: var(--text) !important;
+  border-color: var(--border-strong) !important;
+}
+.sh-modal-select option {
+  background: var(--bg-elevated, #1b2432);
+  color: var(--text);
+}
+[data-theme="light"] .sh-modal-select {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-color: rgba(0,0,0,0.18) !important;
+}
+[data-theme="light"] .sh-modal-select option {
+  background: #ffffff;
+  color: #111827;
+}
+
+/* Zone upload image */
+.sh-upload-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 80px;
+  border: 2px dashed var(--border-strong);
+  border-radius: 12px;
+  padding: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s;
+  background: rgba(255,255,255,0.02);
+  text-align: center;
+}
+.sh-upload-zone:hover {
+  border-color: var(--gold);
+  background: rgba(79,140,255,0.05);
+}
+.sh-upload-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+[data-theme="light"] .sh-upload-zone { background: #f7f8fa; border-color: rgba(0,0,0,0.15); }
+[data-theme="light"] .sh-upload-zone:hover { border-color: var(--gold); background: #f0f4ff; }
+
+/* Badge template sur card catégorie */
+.sh-cat-tpl-badge {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 20px;
+  background: rgba(0,0,0,0.6);
+  color: rgba(255,255,255,0.85);
+  backdrop-filter: blur(4px);
+  z-index: 1;
+}
+
+/* Champs dynamiques grille */
+.sh-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem 0.8rem;
+}
+.sh-field-full { grid-column: 1 / -1; }
+.sh-field-prix { grid-column: 1 / -1; }
+
+/* Prix achat + vente */
+.sh-prix-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.sh-prix-vente-display {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+}
+[data-theme="light"] .sh-prix-vente-display { background: #f3f4f7; border-color: rgba(0,0,0,0.09); }
+
+/* Aperçu des champs du template */
+.sh-tpl-preview { margin-top: 0.5rem; }
+.sh-tpl-fields  { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.sh-tpl-field-tag {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 20px;
+  background: rgba(79,140,255,0.10);
+  border: 1px solid rgba(79,140,255,0.20);
+  color: var(--blue);
+}
+[data-theme="light"] .sh-tpl-field-tag { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.18); }
+
+/* Cards articles — infos spécifiques par template */
+.sh-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.35rem 0;
+}
+.sh-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.sh-tag-rarete { background: rgba(255,255,255,0.04) !important; border: none !important; font-style: italic; }
+[data-theme="light"] .sh-tag { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.09); }
+
+.sh-item-combat {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0;
+}
+.sh-combat-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  min-width: 60px;
+}
+.sh-cc-label { font-size: 0.55rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; }
+.sh-cc-val   { font-size: 0.88rem; font-weight: 800; font-family: 'Outfit',sans-serif; margin-top: 0.1rem; }
+.sh-cc-val.red  { color: var(--crimson-light); }
+.sh-cc-val.gold { color: var(--gold); }
+[data-theme="light"] .sh-combat-chip { background: #f7f8fa; border-color: rgba(0,0,0,0.09); }
+
+.sh-item-stats {
+  font-size: 0.72rem;
+  color: var(--green);
+  margin: 0.2rem 0;
+  font-weight: 600;
+}
+.sh-item-trait {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin: 0.15rem 0;
+}
+.sh-item-type {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+.sh-item-effet {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0.2rem 0;
+}
+.sh-item-desc {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* Prix achat + vente sur la card */
+.sh-item-prix-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.sh-item-prix-achat {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--gold);
+  font-family: 'Outfit', sans-serif;
+}
+.sh-item-prix-vente {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: help;
+}
+[data-theme="light"] .sh-item-prix-row { border-top-color: rgba(0,0,0,0.07); }
