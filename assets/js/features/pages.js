@@ -766,4 +766,7 @@ async bestiaire() {
 }; // end PAGES
 
 export { PAGES };
-export default PAGES;
+export default PAGES;  async bestiaire() {
+    await window.renderBestiary?.();
+  },
+

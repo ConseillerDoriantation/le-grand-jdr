@@ -302,10 +302,12 @@ function _renderCatView() {
   }
   html += `</div>`;
 
-  const direct = _items.filter(i => i.categorieId === _activeCat && !i.sousCategorieId);
-  if (direct.length > 0) {
-    html += `<div class="sh-section-title" style="margin-top:1.5rem">Articles généraux</div>`;
-    html += _renderItemGrid(cat, direct);
+  // Afficher TOUS les articles de la catégorie sous les sous-cats (avec filtre)
+  const allItems = _items.filter(i => i.categorieId === _activeCat);
+  if (allItems.length > 0) {
+    html += `<div style="margin-top:1.5rem">`;
+    html += _renderItemsView();  // utilise _activeCat, inclut barre de filtre
+    html += `</div>`;
   }
   return html;
 }
@@ -794,9 +796,23 @@ function openSubCatModal(catId, scId) {
       <label>Nom</label>
       <input class="input-field" id="sc-nom" value="${sc?.nom||''}" placeholder="Épée, Bouclier, Lance...">
     </div>
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group">
+        <label>Emoji <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
+        <input class="input-field" id="sc-emoji" value="${sc?.emoji||''}" placeholder="⚔️ 🛡️" style="max-width:90px">
+      </div>
+    </div>
     <div class="form-group">
-      <label>Emoji <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-      <input class="input-field" id="sc-emoji" value="${sc?.emoji||''}" placeholder="⚔️ 🛡️" style="max-width:90px">
+      <label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
+      <div class="sh-upload-simple">
+        <input type="file" id="sc-img-file" accept="image/*"
+               onchange="previewUpload('sc-img-file','sc-img-preview','sc-img-b64')"
+               style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="hidden" id="sc-img-b64" value="${sc?.image||''}">
+      </div>
+      <div id="sc-img-preview">
+        ${sc?.image?`<img src="${sc.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}
+      </div>
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveSubCat('${catId}','${scId||''}')">
       ${sc?'Enregistrer':'Créer'}
@@ -808,15 +824,16 @@ function openSubCatModal(catId, scId) {
 async function saveSubCat(catId, scId) {
   const nom   = document.getElementById('sc-nom')?.value.trim();
   const emoji = document.getElementById('sc-emoji')?.value.trim();
+  const image = document.getElementById('sc-img-b64')?.value||'';
   if (!nom) { showNotif('Nom requis.','error'); return; }
   const cat     = _cats.find(c => c.id === catId);
   if (!cat) return;
   const sousCats = [...(cat.sousCats||[])];
   if (scId) {
     const idx = sousCats.findIndex(s => s.id === scId);
-    if (idx >= 0) sousCats[idx] = { ...sousCats[idx], nom, emoji };
+    if (idx >= 0) sousCats[idx] = { ...sousCats[idx], nom, emoji, image };
   } else {
-    sousCats.push({ id: 'sc_' + Date.now(), nom, emoji });
+    sousCats.push({ id: 'sc_' + Date.now(), nom, emoji, image });
   }
   await updateInCol('shopCategories', catId, { sousCats });
   closeModalDirect();
