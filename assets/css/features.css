@@ -3058,3 +3058,141 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .sh-filter-chip { background: #f3f4f7; border-color: rgba(0,0,0,0.09); }
 [data-theme="light"] .sh-filter-chip:hover { background: #eef1f9; border-color: rgba(37,99,235,0.25); }
 [data-theme="light"] .sh-filter-chip.active { background: rgba(37,99,235,0.10); border-color: rgba(37,99,235,0.35); }
+
+/* ══════════════════════════════════════════════════
+   BESTIAIRE — Design cards créatures
+══════════════════════════════════════════════════ */
+.best-search-bar {
+  margin-bottom: 1rem;
+}
+.best-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.best-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.best-card.discovered { border-color: rgba(79,140,255,0.20); }
+.best-card.undiscovered { opacity: 0.7; }
+.best-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 1rem;
+  background: var(--bg-card);
+  cursor: pointer;
+  gap: 0.8rem;
+  transition: background 0.15s;
+}
+.best-card-header:hover { background: rgba(255,255,255,0.04); }
+.best-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.best-card-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 140px;
+}
+.best-card-stats {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.best-stat {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.12rem 0.5rem;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.best-stat.xp { color: var(--gold); border-color: rgba(226,185,111,0.25); }
+.best-card-chevron { color: var(--text-dim); font-size: 0.65rem; flex-shrink: 0; }
+.best-unknown-hint { font-size: 0.72rem; color: var(--text-dim); font-style: italic; }
+
+/* Corps de la card */
+.best-card-body {
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card2, var(--bg-card));
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.best-locked { background: rgba(255,255,255,0.01); }
+.best-section { display: flex; flex-direction: column; gap: 0.4rem; }
+.best-section-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+/* Attaques */
+.best-attacks { display: flex; flex-direction: column; gap: 0.35rem; }
+.best-attack-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.best-atk-nom { font-size: 0.82rem; font-weight: 700; color: var(--text); }
+.best-atk-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.best-atk-badge.red { background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.22); color: #f87171; }
+.best-atk-effet { font-size: 0.72rem; color: var(--text-dim); font-style: italic; }
+/* Traits */
+.best-trait {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 0.3rem 0.6rem;
+  background: rgba(79,140,255,0.04);
+  border-left: 2px solid rgba(79,140,255,0.25);
+  border-radius: 0 6px 6px 0;
+  line-height: 1.45;
+}
+/* Butins */
+.best-butin-tag {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 20px;
+  background: rgba(226,185,111,0.08);
+  border: 1px solid rgba(226,185,111,0.22);
+  color: var(--gold);
+  font-weight: 600;
+}
+/* Notes */
+.best-notes-input { font-size: 0.82rem; resize: vertical; min-height: 60px; }
+.best-discover-row { display: flex; align-items: center; gap: 0.6rem; }
+
+/* Mode jour */
+[data-theme="light"] .best-card { border-color: rgba(0,0,0,0.09); }
+[data-theme="light"] .best-card-header { background: #ffffff; }
+[data-theme="light"] .best-card-header:hover { background: #f7f8fa; }
+[data-theme="light"] .best-card-body { background: #f7f8fa; }
+[data-theme="light"] .best-stat { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .best-attack-row { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .best-atk-badge { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.09); }
+[data-theme="light"] .best-trait { background: rgba(37,99,235,0.04); border-color: rgba(37,99,235,0.20); }
