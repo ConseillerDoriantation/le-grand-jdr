@@ -233,7 +233,7 @@ function _renderHome() {
       onclick="shopGoCat('${cat.id}')">
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
-        <div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>
+        ${!cat.image?`<div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>`:''}
         ${tpl?`<span class="sh-cat-tpl-badge">${tpl.label}</span>`:''}
       </div>
       <div class="sh-cat-body">
@@ -283,7 +283,7 @@ function _renderCatView() {
       ondrop="shopScDrop(event,'${sc.id}')"
       ondragend="shopScDragEnd(event)"`:''}>
       <div class="sh-subcat-click-area" onclick="shopGoSubCat('${sc.id}')">
-        <div class="sh-subcat-icon">${sc.emoji||'📂'}</div>
+        <div class="sh-subcat-icon">${sc.image?`<img src="${sc.image}" style="width:2rem;height:2rem;object-fit:cover;border-radius:6px">`:sc.emoji||'📂'}</div>
         <div class="sh-subcat-name">${sc.nom}</div>
         <div class="sh-subcat-count">${cnt} article${cnt!==1?'s':''}</div>
       </div>
@@ -329,14 +329,29 @@ function _renderItemsView() {
   const p     = Math.max(1, Math.min(_page, pages));
   const slice = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
 
-  let html = `<div class="sh-items-header">
+  // Collecter les raretés et types disponibles pour les filtres
+  const allRaretes = [...new Set(_items.filter(i=>i.categorieId===_activeCat&&i.rarete).map(i=>i.rarete))];
+  const RARETE_LABELS = {1:'★ Commun',2:'★★ Peu commun',3:'★★★ Rare',4:'★★★★ Très rare'};
+  const activeRarete = window._shopFilterRarete||'';
+  const activeDispo  = window._shopFilterDispo||'';
+
+  let html = `<div class="sh-filter-bar">
     <div class="sh-search-wrap">
       <input type="text" class="sh-search-input" id="sh-search"
-             placeholder="🔍 Rechercher un article..."
+             placeholder="🔍 Rechercher..."
              oninput="shopFilterSearch(this.value)"
              value="${window._shopSearch||''}">
     </div>
-    <div style="display:flex;gap:0.5rem;align-items:center">
+    <div class="sh-filter-chips">
+      ${allRaretes.length>0?allRaretes.sort().map(r=>`
+        <button class="sh-filter-chip ${activeRarete===r?'active':''}"
+                onclick="shopFilterBy('rarete','${r}')">${RARETE_LABELS[r]||('★'.repeat(r))}</button>`).join(''):''}
+      <button class="sh-filter-chip ${activeDispo==='dispo'?'active':''}"
+              onclick="shopFilterBy('dispo','dispo')">En stock</button>
+      ${activeRarete||activeDispo||window._shopSearch?`
+        <button class="sh-filter-chip sh-filter-reset" onclick="shopFilterReset()">✕ Effacer</button>`:''}
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0">
       <span class="sh-items-count">${total} article${total!==1?'s':''}</span>
       ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" onclick="shopGoCat('${_activeCat}')">📂 Sous-cat.</button>`:''}
       ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">＋ Article</button>`:''}
@@ -557,6 +572,24 @@ async function shopCatDrop(e, toCatId) {
 }
 
 
+
+function shopFilterBy(type, val) {
+  if (type === 'rarete') {
+    window._shopFilterRarete = window._shopFilterRarete === val ? '' : val;
+  } else if (type === 'dispo') {
+    window._shopFilterDispo  = window._shopFilterDispo  === val ? '' : val;
+  }
+  _page = 1;
+  renderShop();
+}
+function shopFilterReset() {
+  window._shopSearch       = '';
+  window._shopFilterRarete = '';
+  window._shopFilterDispo  = '';
+  _page = 1;
+  renderShop();
+}
+
 function shopFilterSearch(val) {
   window._shopSearch = val;
   _page = 1;
@@ -661,7 +694,7 @@ async function shopItemDrop(e, toItemId) {
 
 function shopGoHome()           { _view='home';   _activeCat=null; _activeSubCat=null; _page=1; renderShop(); }
 function shopGoCat(catId)       { _view='cat';    _activeCat=catId; _activeSubCat=null; _page=1; renderShop(); }
-function shopGoSubCat(subCatId) { _view='subcat'; _activeSubCat=subCatId; _page=1; renderShop(); }
+function shopGoSubCat(subCatId) { _view='subcat'; _activeSubCat=subCatId; _page=1; window._shopSearch=''; window._shopFilterRarete=''; window._shopFilterDispo=''; renderShop(); }
 function shopPage(p)            { _page=p; renderShop(); }
 
 // ══════════════════════════════════════════════
@@ -1109,5 +1142,5 @@ Object.assign(window, {
   shopCatDragStart, shopCatDragOver, shopCatDragEnd, shopCatDrop,
   shopScDragStart, shopScDragOver, shopScDragEnd, shopScDrop,
   shopItemDragStart, shopItemDragOver, shopItemDragEnd, shopItemDrop,
-  shopFilterSearch,
+  shopFilterSearch, shopFilterBy, shopFilterReset,
 });
