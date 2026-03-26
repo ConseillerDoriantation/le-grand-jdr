@@ -1671,7 +1671,7 @@ Object.assign(window, {
   createNewChar,
   inlineEditText, inlineEditNum, inlineEditStat,
   manageTitres, addTitre, removeTitre, saveTitres,
-  addSort, editSort, openSortModal, toggleRune, updateSortPM, saveSort,
+  addSort, editSort, openSortModal, runeIncrement, runeDecrement, updateSortPM, saveSort,
   editEquipSlot, saveEquipSlot, clearEquipSlot,
   previewEquipFromInv,
   addInvItem, editInvItem, saveInvItem,

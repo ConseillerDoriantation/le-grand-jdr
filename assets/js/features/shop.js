@@ -157,20 +157,31 @@ async function renderShop() {
     </div>`;
   }
 
-  // Sélecteur personnage actif (pour tous les utilisateurs)
+  // Sélecteur personnage actif + affichage de son or
   if (STATE.characters && STATE.characters.length > 0) {
     const chars = STATE.isAdmin
       ? STATE.characters
       : STATE.characters.filter(c => c.uid === STATE.user?.uid);
     const activeId = window._shopCharId || chars[0]?.id || '';
+    if (!window._shopCharId) window._shopCharId = activeId;
+    const activeChar = chars.find(c => c.id === activeId);
+    // Calculer l'or (solde du livret de compte)
+    const getOr = (c) => {
+      if (!c) return 0;
+      const compte = c.compte||{recettes:[],depenses:[]};
+      const r = (compte.recettes||[]).reduce((s,x)=>s+(parseFloat(x.montant)||0),0);
+      const d = (compte.depenses||[]).reduce((s,x)=>s+(parseFloat(x.montant)||0),0);
+      return Math.round((r - d) * 100) / 100;
+    };
+    const or = getOr(activeChar);
     html += `<div class="sh-char-selector">
       <span class="sh-char-selector-label">🧙 Acheter en tant que</span>
       <select class="input-field sh-modal-select sh-char-select" id="sh-char-sel"
               onchange="shopSetChar(this.value)">
         ${chars.map(c=>`<option value="${c.id}" ${activeId===c.id?'selected':''}>${c.nom||'?'}</option>`).join('')}
       </select>
+      <span class="sh-char-or" id="sh-char-or-display">💰 ${or} or</span>
     </div>`;
-    if (!window._shopCharId) window._shopCharId = activeId;
   }
 
   html += _renderBreadcrumb();
@@ -211,7 +222,14 @@ function _renderHome() {
     const count   = _items.filter(i => i.categorieId === cat.id).length;
     const subCats = cat.sousCats||[];
     const tpl     = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card" onclick="shopGoCat('${cat.id}')">
+    html += `<div class="sh-cat-card ${STATE.isAdmin?'sh-cat-draggable':''}"
+      draggable="${STATE.isAdmin?'true':'false'}"
+      data-cat-id="${cat.id}"
+      ondragstart="${STATE.isAdmin?`shopCatDragStart(event,'${cat.id}')`:''}"
+      ondragover="${STATE.isAdmin?'shopCatDragOver(event)':''}"
+      ondrop="${STATE.isAdmin?`shopCatDrop(event,'${cat.id}')`:''}"
+      ondragend="${STATE.isAdmin?'shopCatDragEnd(event)':''}"
+      onclick="shopGoCat('${cat.id}')">
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
         <div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>
@@ -304,9 +322,15 @@ function _renderItemsView() {
   const slice = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
 
   let html = `<div class="sh-items-header">
-    <span class="sh-items-count">${total} article${total!==1?'s':''}</span>
-    <div style="display:flex;gap:0.5rem">
-      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" onclick="shopGoCat('${_activeCat}')">📂 Sous-catégories</button>`:''}
+    <div class="sh-search-wrap">
+      <input type="text" class="sh-search-input" id="sh-search"
+             placeholder="🔍 Rechercher un article..."
+             oninput="shopFilterSearch(this.value)"
+             value="${window._shopSearch||''}">
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center">
+      <span class="sh-items-count">${total} article${total!==1?'s':''}</span>
+      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" onclick="shopGoCat('${_activeCat}')">📂 Sous-cat.</button>`:''}
       ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">＋ Article</button>`:''}
     </div>
   </div>`;
@@ -363,7 +387,7 @@ function _renderItemCard(item, tplKey) {
     infoHtml = `
       ${item.type?`<div class="sh-item-type">${item.type}</div>`:''}
       ${item.effet?`<div class="sh-item-effet">${item.effet}</div>`:''}
-      ${item.description?`<div class="sh-item-desc">${item.description}</div>`:''}
+      ${item.description?`<div class="sh-item-desc-tooltip" title="${item.description.replace(/"/g,'&quot;')}">ℹ️ <span>${item.description.length>60?item.description.slice(0,60)+'…':item.description}</span></div>`:''}
       ${item.dispo!==undefined&&item.dispo!==''?`<div class="sh-item-tags">${_dispoDisplay(item.dispo)}</div>`:''}`;
   }
 
@@ -397,6 +421,16 @@ function _renderItemCard(item, tplKey) {
 // ══════════════════════════════════════════════
 function shopSetChar(charId) {
   window._shopCharId = charId;
+  // Rafraîchir l'affichage de l'or
+  const c = STATE.characters?.find(x => x.id === charId);
+  if (c) {
+    const compte = c.compte||{recettes:[],depenses:[]};
+    const r = (compte.recettes||[]).reduce((s,x)=>s+(parseFloat(x.montant)||0),0);
+    const d = (compte.depenses||[]).reduce((s,x)=>s+(parseFloat(x.montant)||0),0);
+    const or = Math.round((r - d) * 100) / 100;
+    const el = document.getElementById('sh-char-or-display');
+    if (el) el.textContent = '💰 ' + or + ' or';
+  }
 }
 
 async function buyItem(itemId) {
@@ -469,6 +503,67 @@ async function buyItem(itemId) {
 // ══════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════
+// DRAG AND DROP CATÉGORIES (ordre)
+// ══════════════════════════════════════════════
+let _dragCatId = null;
+
+function shopCatDragStart(e, catId) {
+  _dragCatId = catId;
+  e.currentTarget.style.opacity = '0.5';
+  e.dataTransfer.effectAllowed = 'move';
+}
+function shopCatDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.sh-cat-card').forEach(c => c.classList.remove('sh-cat-drop-target'));
+  e.currentTarget.classList.add('sh-cat-drop-target');
+}
+function shopCatDragEnd(e) {
+  e.currentTarget.style.opacity = '';
+  document.querySelectorAll('.sh-cat-card').forEach(c => c.classList.remove('sh-cat-drop-target'));
+}
+async function shopCatDrop(e, toCatId) {
+  e.preventDefault();
+  document.querySelectorAll('.sh-cat-card').forEach(c => c.classList.remove('sh-cat-drop-target'));
+  const fromId = _dragCatId;
+  _dragCatId = null;
+  if (!fromId || fromId === toCatId) return;
+  // Réordonner
+  const fromIdx = _cats.findIndex(c => c.id === fromId);
+  const toIdx   = _cats.findIndex(c => c.id === toCatId);
+  if (fromIdx < 0 || toIdx < 0) return;
+  const [moved] = _cats.splice(fromIdx, 1);
+  _cats.splice(toIdx, 0, moved);
+  // Sauvegarder l'ordre en Firestore
+  await Promise.all(_cats.map((cat, i) => updateInCol('shopCategories', cat.id, {ordre: i})));
+  showNotif('Ordre mis à jour.', 'success');
+  renderShop();
+}
+
+
+function shopFilterSearch(val) {
+  window._shopSearch = val;
+  _page = 1;
+  // Re-render uniquement la zone contenu sans recharger Firestore
+  const content = document.getElementById('sh-content');
+  if (content) {
+    let items = _items.filter(i => i.categorieId === _activeCat);
+    if (_activeSubCat) items = items.filter(i => i.sousCategorieId === _activeSubCat);
+    const cat = _cats.find(c => c.id === _activeCat);
+    const search = val.toLowerCase().trim();
+    if (search) items = items.filter(item =>
+      (item.nom||'').toLowerCase().includes(search) ||
+      (item.description||'').toLowerCase().includes(search) ||
+      (item.type||'').toLowerCase().includes(search) ||
+      (item.proprietes||'').toLowerCase().includes(search)
+    );
+    const main = document.getElementById('shop-content');
+    if (main) main.innerHTML = _renderItemsView_content(items, cat);
+  }
+}
+
 function shopGoHome()           { _view='home';   _activeCat=null; _activeSubCat=null; _page=1; renderShop(); }
 function shopGoCat(catId)       { _view='cat';    _activeCat=catId; _activeSubCat=null; _page=1; renderShop(); }
 function shopGoSubCat(subCatId) { _view='subcat'; _activeSubCat=subCatId; _page=1; renderShop(); }
@@ -501,21 +596,21 @@ function openCatModal(catId) {
     </div>
     <div class="form-group">
       <label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-      <div class="sh-upload-zone" id="cat-img-zone">
-        ${cat?.image?`<img src="${cat.image}" style="max-height:80px;border-radius:8px;margin-bottom:0.4rem">`:
-          `<span style="font-size:1.4rem">🖼️</span>`}
-        <span class="sh-upload-label">Cliquer ou glisser une image</span>
-        <input type="file" id="cat-img-file" accept="image/*" style="display:none" onchange="previewUpload('cat-img-file','cat-img-preview','cat-img-b64')">
+      <div class="sh-upload-simple">
+        <input type="file" id="cat-img-file" accept="image/*"
+               onchange="previewUpload('cat-img-file','cat-img-preview','cat-img-b64')"
+               style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="hidden" id="cat-img-b64" value="${cat?.image||''}">
       </div>
-      <div id="cat-img-preview"></div>
-      <input type="hidden" id="cat-img-b64" value="${cat?.image||''}">
+      <div id="cat-img-preview">
+        ${cat?.image?`<img src="${cat.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}
+      </div>
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCat('${catId||''}')">
       ${cat?'Enregistrer':'Créer'}
     </button>
   `);
   setTimeout(() => {
-    document.getElementById('cat-img-zone')?.addEventListener('click', () => document.getElementById('cat-img-file')?.click());
     document.getElementById('cat-nom')?.focus();
     _updateTplPreview();
     document.getElementById('cat-template')?.addEventListener('change', _updateTplPreview);
@@ -662,16 +757,15 @@ function openItemModal(itemId) {
     <!-- Image upload -->
     <div class="form-group">
       <label>Image</label>
-      <div class="sh-upload-zone" id="si-img-zone">
-        ${item?.image
-          ? `<img src="${item.image}" style="max-height:80px;border-radius:8px;margin-bottom:0.4rem">`
-          : `<span style="font-size:1.4rem">🖼️</span>`}
-        <span class="sh-upload-label">Cliquer ou glisser une image</span>
-        <input type="file" id="si-img-file" accept="image/*" style="display:none"
-               onchange="previewUpload('si-img-file','si-img-preview','si-img-b64')">
+      <div class="sh-upload-simple">
+        <input type="file" id="si-img-file" accept="image/*"
+               onchange="previewUpload('si-img-file','si-img-preview','si-img-b64')"
+               style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="hidden" id="si-img-b64" value="${item?.image||''}">
       </div>
-      <div id="si-img-preview"></div>
-      <input type="hidden" id="si-img-b64" value="${item?.image||''}">
+      <div id="si-img-preview">
+        ${item?.image?`<img src="${item.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}
+      </div>
     </div>
 
     <!-- Champs dynamiques -->
@@ -683,9 +777,7 @@ function openItemModal(itemId) {
   `);
 
   setTimeout(() => {
-    document.getElementById('si-img-zone')?.addEventListener('click', () => document.getElementById('si-img-file')?.click());
     document.getElementById('si-nom')?.focus();
-    // Mise à jour du prix vente en temps réel
     _bindPrixListener();
   }, 60);
 }
@@ -903,4 +995,6 @@ Object.assign(window, {
   toggleDispoInfini,
   saveShopItem, deleteShopItem,
   openShopItemModal, editShopItem, filterShop,
+  shopCatDragStart, shopCatDragOver, shopCatDragEnd, shopCatDrop,
+  shopFilterSearch,
 });
