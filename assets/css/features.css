@@ -736,6 +736,10 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   border-bottom: none;
   overflow: hidden;
 }
+/* Version colonne unique — nouvelle structure */
+.cs-top.cs-top-single {
+  display: block;
+}
 
 /* ── BLOC GAUCHE : Identité & Vitaux ────────────── */
 .cs-identity-panel {
@@ -746,6 +750,9 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
+}
+.cs-identity-full {
+  border-right: none;
 }
 
 /* Photo + nom */
@@ -2367,3 +2374,163 @@ input[type=number].input-field::-webkit-outer-spin-button {
   height: 15px;
   cursor: pointer;
 }
+
+/* ══════════════════════════════════════════════════
+   CARACTÉRISTIQUES INLINE — compact dans l'identité
+══════════════════════════════════════════════════ */
+
+/* Zone inline dans le header */
+.cs-carac-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.cs-carac-inline-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Grille 6 chips sur une ligne */
+.cs-carac-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.35rem;
+}
+
+/* Chip individuelle : compact, sobre */
+.cs-carac-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.25rem 0.35rem;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: default;
+}
+.cs-carac-chip:has(.cs-editable) { cursor: pointer; }
+.cs-carac-chip:hover {
+  border-color: rgba(79,140,255,0.25);
+  background: rgba(79,140,255,0.04);
+}
+
+.cs-carac-chip-abbr {
+  font-size: 0.52rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+.cs-carac-chip-val {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  line-height: 1;
+}
+.cs-carac-chip-val.cs-editable {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 1px;
+  transition: background 0.12s;
+}
+.cs-carac-chip-val.cs-editable:hover { background: rgba(255,255,255,0.08); }
+.cs-carac-chip-mod {
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.cs-carac-chip-mod.pos { color: var(--green); }
+.cs-carac-chip-mod.neg { color: var(--crimson-light); }
+.cs-carac-chip-mod.zero { color: var(--text-dim); }
+
+/* Mode jour */
+[data-theme="light"] .cs-carac-chip { background: #f7f8fa; border-color: rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-carac-chip:hover { background: #eef1f9; border-color: rgba(37,99,235,0.22); }
+[data-theme="light"] .cs-carac-chip-val.cs-editable:hover { background: rgba(0,0,0,0.05); }
+
+/* ══════════════════════════════════════════════════
+   VITAUX : côte à côte sur la même ligne
+══════════════════════════════════════════════════ */
+.cs-vitals-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+/* Stats secondaires sur 3 colonnes */
+.cs-secondary-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+/* ══════════════════════════════════════════════════
+   ONGLET CARAC — vue détaillée
+   Quand l'utilisateur veut voir toutes les formules
+══════════════════════════════════════════════════ */
+.cs-carac-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.cs-carac-detail-row {
+  display: grid;
+  grid-template-columns: 130px 40px 70px 1fr 50px;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: background 0.15s;
+}
+.cs-carac-detail-row:hover { background: rgba(79,140,255,0.04); }
+.cs-carac-detail-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.cs-carac-detail-base {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-align: center;
+  font-weight: 600;
+}
+.cs-carac-detail-bonus {
+  font-size: 0.72rem;
+  color: var(--green);
+  font-weight: 600;
+  font-style: italic;
+}
+.cs-carac-detail-bonus--empty { opacity: 0; }
+.cs-carac-detail-total {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  text-align: center;
+}
+.cs-carac-detail-total.cs-editable { cursor: pointer; border-radius: 4px; padding: 0 3px; }
+.cs-carac-detail-total.cs-editable:hover { background: rgba(255,255,255,0.08); }
+.cs-carac-detail-mod {
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-align: right;
+}
+.cs-carac-detail-mod.pos { color: var(--green); }
+.cs-carac-detail-mod.neg { color: var(--crimson-light); }
+
+/* Mode jour onglet carac */
+[data-theme="light"] .cs-carac-detail-row { background: #f7f8fa; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-carac-detail-row:hover { background: #eef1f9; }
+[data-theme="light"] .cs-carac-detail-total.cs-editable:hover { background: rgba(0,0,0,0.05); }
