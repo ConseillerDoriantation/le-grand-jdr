@@ -110,7 +110,13 @@ function _renderHome() {
         <div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>
       </div>
       <div class="sh-cat-body">
-        <div class="sh-cat-name">${cat.nom}</div>
+        <div class="sh-cat-name-row">
+          <div class="sh-cat-name">${cat.nom}</div>
+          ${STATE.isAdmin?`<div class="sh-card-admin-inline" onclick="event.stopPropagation()">
+            <button class="btn-icon" onclick="openCatModal('${cat.id}')" title="Modifier">✏️</button>
+            <button class="btn-icon" onclick="deleteCat('${cat.id}')" title="Supprimer">🗑️</button>
+          </div>`:''}
+        </div>
         <div class="sh-cat-meta">
           ${subCats.length>0
             ? `${subCats.length} sous-catégorie${subCats.length>1?'s':''} · `
@@ -121,10 +127,6 @@ function _renderHome() {
           ${subCats.length>4?`<span class="sh-cat-subcat-tag sh-more">+${subCats.length-4}</span>`:''}
         </div>`:''}
       </div>
-      ${STATE.isAdmin?`<div class="sh-card-admin" onclick="event.stopPropagation()">
-        <button class="btn-icon" onclick="openCatModal('${cat.id}')" title="Modifier">✏️</button>
-        <button class="btn-icon" onclick="deleteCat('${cat.id}')" title="Supprimer">🗑️</button>
-      </div>`:''}
     </div>`;
   });
   html += `</div>`;
