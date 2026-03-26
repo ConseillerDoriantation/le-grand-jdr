@@ -77,6 +77,7 @@ async function loadShopData() {
     loadCollection('shop'),
   ]);
   _cats.sort((a,b) => (a.ordre||0) - (b.ordre||0));
+  _items.sort((a,b) => (a.ordre??999) - (b.ordre??999));
 }
 
 // ══════════════════════════════════════════════
@@ -275,10 +276,17 @@ function _renderCatView() {
 
   subCats.forEach(sc => {
     const cnt = _items.filter(i => i.categorieId === _activeCat && i.sousCategorieId === sc.id).length;
-    html += `<div class="sh-subcat-card" onclick="shopGoSubCat('${sc.id}')">
-      <div class="sh-subcat-icon">${sc.emoji||'📂'}</div>
-      <div class="sh-subcat-name">${sc.nom}</div>
-      <div class="sh-subcat-count">${cnt} article${cnt!==1?'s':''}</div>
+    html += `<div class="sh-subcat-card ${STATE.isAdmin?'sh-dnd-handle':''}"
+      ${STATE.isAdmin?`draggable="true"
+      ondragstart="shopScDragStart(event,'${sc.id}')"
+      ondragover="shopScDragOver(event)"
+      ondrop="shopScDrop(event,'${sc.id}')"
+      ondragend="shopScDragEnd(event)"`:''}>
+      <div class="sh-subcat-click-area" onclick="shopGoSubCat('${sc.id}')">
+        <div class="sh-subcat-icon">${sc.emoji||'📂'}</div>
+        <div class="sh-subcat-name">${sc.nom}</div>
+        <div class="sh-subcat-count">${cnt} article${cnt!==1?'s':''}</div>
+      </div>
       ${STATE.isAdmin?`<div class="sh-card-admin-subcat" onclick="event.stopPropagation()">
         <button class="btn-icon" onclick="openSubCatModal('${_activeCat}','${sc.id}')">✏️</button>
         <button class="btn-icon" onclick="deleteSubCat('${_activeCat}','${sc.id}')">🗑️</button>
@@ -350,12 +358,12 @@ function _renderItemsView() {
 // ── Rendu des cards articles selon template ───
 function _renderItemGrid(cat, items) {
   const tplKey = cat?.template || 'classique';
-  return `<div class="sh-item-grid">` +
-    items.map(item => _renderItemCard(item, tplKey)).join('') +
+  return `<div class="sh-item-grid" id="sh-items-grid">` +
+    items.map((item,i) => _renderItemCard(item, tplKey, i)).join('') +
   `</div>`;
 }
 
-function _renderItemCard(item, tplKey) {
+function _renderItemCard(item, tplKey, itemIdx) {
   const prix      = parseFloat(item.prix)||0;
   const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
 
@@ -391,7 +399,13 @@ function _renderItemCard(item, tplKey) {
       ${item.dispo!==undefined&&item.dispo!==''?`<div class="sh-item-tags">${_dispoDisplay(item.dispo)}</div>`:''}`;
   }
 
-  return `<div class="sh-item-card">
+  const idxAttr = itemIdx !== undefined ? itemIdx : '';
+  return `<div class="sh-item-card ${STATE.isAdmin?'sh-dnd-handle':''}"
+    ${STATE.isAdmin&&idxAttr!==''?`draggable="true"
+    ondragstart="shopItemDragStart(event,'${item.id}')"
+    ondragover="shopItemDragOver(event)"
+    ondrop="shopItemDrop(event,'${item.id}')"
+    ondragend="shopItemDragEnd(event)"`:''}>
     <div class="sh-item-img" style="${item.image?`background-image:url('${item.image}')`:_catGradient(item.nom||'')}">
       <div class="sh-item-img-overlay"></div>
     </div>
@@ -562,6 +576,87 @@ function shopFilterSearch(val) {
     const main = document.getElementById('shop-content');
     if (main) main.innerHTML = _renderItemsView_content(items, cat);
   }
+}
+
+
+// ── DnD Sous-catégories ──────────────────────
+let _dragScId = null;
+function shopScDragStart(e, scId) {
+  _dragScId = scId; e.currentTarget.style.opacity='0.5';
+  e.dataTransfer.effectAllowed='move';
+}
+function shopScDragOver(e) {
+  e.preventDefault(); e.dataTransfer.dropEffect='move';
+  document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
+  const rect=e.currentTarget.getBoundingClientRect();
+  e.clientY < rect.top+rect.height/2
+    ? e.currentTarget.classList.add('sh-dnd-before')
+    : e.currentTarget.classList.add('sh-dnd-after');
+}
+function shopScDragEnd(e) {
+  e.currentTarget.style.opacity='';
+  document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
+}
+async function shopScDrop(e, toScId) {
+  e.preventDefault();
+  document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
+  const fromId=_dragScId; _dragScId=null;
+  if (!fromId||fromId===toScId) return;
+  const cat=_cats.find(c=>c.id===_activeCat); if(!cat) return;
+  const scs=[...(cat.sousCats||[])];
+  const fromIdx=scs.findIndex(s=>s.id===fromId);
+  const toIdx  =scs.findIndex(s=>s.id===toScId);
+  if(fromIdx<0||toIdx<0) return;
+  const rect=e.currentTarget.getBoundingClientRect();
+  const insertAfter=e.clientY>=rect.top+rect.height/2;
+  const [moved]=scs.splice(fromIdx,1);
+  const insertAt=insertAfter?(toIdx>fromIdx?toIdx:toIdx+1):(toIdx>fromIdx?toIdx-1:toIdx);
+  scs.splice(Math.max(0,insertAt),0,moved);
+  cat.sousCats=scs;
+  await updateInCol('shopCategories',_activeCat,{sousCats:scs});
+  showNotif('Ordre mis à jour.','success');
+  renderShop();
+}
+
+// ── DnD Articles ─────────────────────────────
+let _dragItemId = null;
+function shopItemDragStart(e, itemId) {
+  _dragItemId=itemId; e.currentTarget.style.opacity='0.5';
+  e.dataTransfer.effectAllowed='move';
+}
+function shopItemDragOver(e) {
+  e.preventDefault(); e.dataTransfer.dropEffect='move';
+  document.querySelectorAll('.sh-item-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
+  const rect=e.currentTarget.getBoundingClientRect();
+  e.clientY < rect.top+rect.height/2
+    ? e.currentTarget.classList.add('sh-dnd-before')
+    : e.currentTarget.classList.add('sh-dnd-after');
+}
+function shopItemDragEnd(e) {
+  e.currentTarget.style.opacity='';
+  document.querySelectorAll('.sh-item-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
+}
+async function shopItemDrop(e, toItemId) {
+  e.preventDefault();
+  document.querySelectorAll('.sh-item-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
+  const fromId=_dragItemId; _dragItemId=null;
+  if(!fromId||fromId===toItemId) return;
+  let items=_items.filter(i=>i.categorieId===_activeCat);
+  if(_activeSubCat) items=items.filter(i=>i.sousCategorieId===_activeSubCat);
+  const fromIdx=items.findIndex(i=>i.id===fromId);
+  const toIdx  =items.findIndex(i=>i.id===toItemId);
+  if(fromIdx<0||toIdx<0) return;
+  const rect=e.currentTarget.getBoundingClientRect();
+  const insertAfter=e.clientY>=rect.top+rect.height/2;
+  const [moved]=items.splice(fromIdx,1);
+  const insertAt=insertAfter?(toIdx>fromIdx?toIdx:toIdx+1):(toIdx>fromIdx?toIdx-1:toIdx);
+  items.splice(Math.max(0,insertAt),0,moved);
+  // Sauvegarder l'ordre via le champ 'ordre' sur chaque item
+  await Promise.all(items.map((item,i)=>updateInCol('shop',item.id,{ordre:i})));
+  // Mettre à jour _items local
+  items.forEach((item,i)=>{ item.ordre=i; });
+  showNotif('Ordre mis à jour.','success');
+  renderShop();
 }
 
 function shopGoHome()           { _view='home';   _activeCat=null; _activeSubCat=null; _page=1; renderShop(); }
@@ -914,23 +1009,39 @@ function refreshItemFields(catId, scId) {
 // Alias pour compatibilité
 function refreshSubCatSelect(catId, scId) { refreshItemFields(catId, scId); }
 
-// ── Upload image → base64 ─────────────────────
+// ── Upload image → base64 compressé ──────────
+// Redimensionne à max 400px et compresse JPEG 0.72
+// pour rester sous la limite Firestore de 1MB
 function previewUpload(fileInputId, previewId, hiddenId) {
   const file = document.getElementById(fileInputId)?.files?.[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    const b64 = e.target.result;
-    const hidden  = document.getElementById(hiddenId);
-    if (hidden) hidden.value = b64;
-    const preview = document.getElementById(previewId);
-    if (preview) preview.innerHTML = `<img src="${b64}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
-    // Mettre à jour la zone upload
-    const zone = document.getElementById(fileInputId.replace('-file','-zone'));
-    if (zone) {
-      const lbl = zone.querySelector('.sh-upload-label');
-      if (lbl) lbl.textContent = file.name;
-    }
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 400;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else        { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const b64 = canvas.toDataURL('image/jpeg', 0.72);
+      const hidden  = document.getElementById(hiddenId);
+      if (hidden) hidden.value = b64;
+      const preview = document.getElementById(previewId);
+      if (preview) preview.innerHTML = `<img src="${b64}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
+      // Estimation taille
+      const kb = Math.round(b64.length * 3 / 4 / 1024);
+      if (kb > 700) {
+        showNotif(`⚠️ Image encore lourde (${kb}KB), essaie une image plus petite.`, 'error');
+      } else {
+        showNotif(`✅ Image prête (${kb}KB)`, 'success');
+      }
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -996,5 +1107,7 @@ Object.assign(window, {
   saveShopItem, deleteShopItem,
   openShopItemModal, editShopItem, filterShop,
   shopCatDragStart, shopCatDragOver, shopCatDragEnd, shopCatDrop,
+  shopScDragStart, shopScDragOver, shopScDragEnd, shopScDrop,
+  shopItemDragStart, shopItemDragOver, shopItemDragEnd, shopItemDrop,
   shopFilterSearch,
 });

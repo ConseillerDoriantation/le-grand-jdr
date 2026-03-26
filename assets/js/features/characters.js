@@ -689,13 +689,13 @@ function renderCharDeck(c, canEdit) {
               </div>
               <span class="cs-sort-row-pm">${s.pm||0} PM</span>
               <span class="cs-sort-row-chevron">${isOpen?'▲':'▼'}</span>
-              ${canEdit?`<span class="cs-sort-row-actions" onclick="event.stopPropagation()">
-                <button class="btn-icon" onclick="editSort(${i})">✏️</button>
-                <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
-              </span>`:''}
             </div>
             ${apercu?`<div class="cs-sort-row-apercu">${apercu}</div>`:''}
           </div>
+          ${canEdit?`<span class="cs-sort-row-actions" onclick="event.stopPropagation()">
+            <button class="btn-icon" onclick="editSort(${i})">✏️</button>
+            <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
+          </span>`:''}
         </div>
         ${isOpen?`<div class="cs-sort-row-detail">
           ${s.noyau?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Noyau</span>${s.noyau}</div>`:''}
