@@ -127,13 +127,12 @@ function renderCharSheet(c, keepTab) {
     const m = getMod(c, st.key);
     const mStr = m >= 0 ? '+'+m : String(m);
     const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    return `<div class="cs-carac-card">
-      <div class="cs-carac-abbr">${st.abbr}</div>
-      <div class="cs-carac-val ${canEdit?'cs-editable':''}"
-           ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Cliquer pour modifier"`:''}
-      >${total}</div>
-      <div class="cs-carac-mod ${mClass}">${mStr}</div>
-      <div class="cs-carac-base">${bonus?'Base '+base+' +'+bonus:''}</div>
+    return `<div class="cs-carac-chip">
+      <span class="cs-carac-chip-abbr">${st.abbr}</span>
+      <span class="cs-carac-chip-val ${canEdit?'cs-editable':''}"
+            ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier"`:''}
+      >${total}</span>
+      <span class="cs-carac-chip-mod ${mClass}">${mStr}</span>
     </div>`;
   }).join('');
 
@@ -141,10 +140,10 @@ function renderCharSheet(c, keepTab) {
 <div class="cs-shell">
 
   <!-- ═══ LIGNE HAUTE : 2 blocs côte à côte ═══ -->
-  <div class="cs-top">
+  <div class="cs-top cs-top-single">
 
-    <!-- BLOC GAUCHE : Identité & Vitaux -->
-    <div class="cs-identity-panel">
+    <!-- BLOC IDENTITÉ + VITAUX + CARAC -->
+    <div class="cs-identity-panel cs-identity-full">
 
       <!-- Photo + Nom -->
       <div class="cs-id-header">
@@ -254,21 +253,20 @@ function renderCharSheet(c, keepTab) {
         </div>
       </div>
 
-    </div><!-- /cs-identity-panel -->
-
-    <!-- BLOC DROIT : Caractéristiques -->
-    <div class="cs-carac-panel">
-      <div class="cs-carac-panel-title">
-        Caractéristiques
-        ${canEdit?'<span class="cs-hint">cliquer sur une valeur pour modifier</span>':''}
+      <!-- Carac compactes intégrées -->
+      <div class="cs-divider"></div>
+      <div class="cs-carac-inline">
+        <div class="cs-carac-inline-title">
+          Caractéristiques
+          ${canEdit?'<span class="cs-hint">cliquer pour modifier</span>':''}
+        </div>
+        <div class="cs-carac-inline-grid">
+          ${caracHtml}
+        </div>
       </div>
 
-      <!-- Grille 3×2 des stats -->
-      <div class="cs-carac-grid">
-        ${caracHtml}
-      </div>
-
-      <!-- PV base / PM base / Palier -->
+      <!-- PV/PM base compacts -->
+      <div class="cs-divider"></div>
       <div class="cs-base-row">
         <div class="cs-base-chip">
           <span class="cs-base-chip-label">PV base</span>
@@ -291,7 +289,7 @@ function renderCharSheet(c, keepTab) {
         </div>
       </div>
 
-    </div><!-- /cs-carac-panel -->
+    </div><!-- /cs-identity-panel (now full width) -->
 
   </div><!-- /cs-top -->
 
@@ -424,7 +422,7 @@ function inlineEditStat(charId, statKey, el) {
 // TAB : CARACTÉRISTIQUES
 // ══════════════════════════════════════════════
 function renderCharCarac(c, canEdit) {
-  const STATS = [
+  const STATS_TAB = [
     {key:'force',label:'Force',abbr:'Fo'},
     {key:'dexterite',label:'Dextérité',abbr:'Dex'},
     {key:'constitution',label:'Constitution',abbr:'Co'},
@@ -435,25 +433,27 @@ function renderCharCarac(c, canEdit) {
   const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
   const sb = c.statsBonus||{};
 
+  // Onglet Carac : version détaillée avec base + bonus équipement
   let html = `<div class="cs-section">
     <div class="cs-section-title">📊 Caractéristiques
-      ${canEdit?'<span class="cs-hint">cliquer sur une valeur pour modifier</span>':''}
+      ${canEdit?'<span class="cs-hint">cliquer sur la valeur pour modifier</span>':''}
     </div>
-    <div class="cs-carac-grid">`;
+    <div class="cs-carac-detail-grid">`;
 
-  STATS.forEach(st => {
+  STATS_TAB.forEach(st => {
     const base = s[st.key]||8;
     const bonus = sb[st.key]||0;
     const total = base + bonus;
     const m = getMod(c, st.key);
-    html += `<div class="cs-carac-card">
-      <div class="cs-carac-abbr">${st.abbr}</div>
-      <div class="cs-carac-val ${canEdit?'cs-editable':''}"
-           ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Cliquer pour modifier"`:''}>
+    html += `<div class="cs-carac-detail-row">
+      <span class="cs-carac-detail-label">${st.label}</span>
+      <span class="cs-carac-detail-base">${base}</span>
+      ${bonus?`<span class="cs-carac-detail-bonus">+${bonus} éq.</span>`:'<span class="cs-carac-detail-bonus cs-carac-detail-bonus--empty"></span>'}
+      <span class="cs-carac-detail-total ${canEdit?'cs-editable':''}"
+            ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier"`:''}>
         ${total}
-      </div>
-      <div class="cs-carac-mod ${m>=0?'pos':'neg'}">${modStr(m)}</div>
-      ${bonus?`<div class="cs-carac-bonus">Base ${base} +${bonus}</div>`:`<div class="cs-carac-bonus">${st.label}</div>`}
+      </span>
+      <span class="cs-carac-detail-mod ${m>=0?'pos':'neg'}">${modStr(m)}</span>
     </div>`;
   });
   html += `</div></div>`;
