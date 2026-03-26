@@ -591,118 +591,68 @@ function renderCharEquip(c, canEdit) {
 // ══════════════════════════════════════════════
 function renderCharDeck(c, canEdit) {
   const sorts = c.deck_sorts||[];
+  const openIdx = window._openSortIdx ?? null;
+
   let html = `<div class="cs-section">
     <div class="cs-section-title">✨ Sorts & Compétences
       ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addSort()">+ Nouveau sort</button>`:''}
     </div>
     <div class="cs-sort-info">
-      <strong>Système maison</strong> — Noyau + Runes. Coût PM = 2 × nombre de runes.
-      <br><span style="color:var(--text-dim);font-size:0.72rem">✨ Magie à mains nues : +2 PM, pas d'effet de set.</span>
+      <strong>Système maison</strong> — Noyau + Runes. PM = 2 × runes.
+      <span style="color:var(--text-dim);font-size:0.7rem;margin-left:0.5rem">✨ Mains nues : +2 PM, pas d'effet de set.</span>
     </div>`;
 
   if (sorts.length===0) {
-    html += `<div class="cs-empty">🔮 Aucun sort — commence par choisir un noyau élémentaire</div>`;
+    html += `<div class="cs-empty">🔮 Aucun sort créé</div>`;
   } else {
+    html += `<div class="cs-sort-list">`;
     sorts.forEach((s,i) => {
-      html += `<div class="cs-sort-card ${s.actif?'active':''}"
+      const isOpen = openIdx === i;
+      const hasDetails = !!(s.effet||s.degats||s.soin);
+      const runesAll = s.runes||[];
+      html += `<div class="cs-sort-row ${s.actif?'actif':''}"
         draggable="true"
         data-sort-idx="${i}"
         ondragstart="sortDragStart(event,${i})"
         ondragover="sortDragOver(event)"
         ondrop="sortDrop(event,${i})"
         ondragend="sortDragEnd(event)">
-        <div class="cs-sort-header">
-          <div class="cs-sort-toggle-wrap">
-            <div class="toggle ${s.actif?'on':''}" onclick="${canEdit?`toggleSort(${i})`:''}" title="${s.actif?'Désactiver':'Activer'}"></div>
-            <div>
-              <div class="cs-sort-name">${s.nom||'Sort sans nom'}</div>
-              <div class="cs-sort-badges">
-                ${s.noyau?`<span class="badge badge-gold" style="font-size:0.65rem">${s.noyau}</span>`:''}
-                ${(s.runes||[]).map(r=>`<span class="badge badge-blue" style="font-size:0.65rem">${r}</span>`).join('')}
-              </div>
-            </div>
+        <div class="cs-sort-row-main" onclick="${hasDetails?`toggleSortDetail(${i})`:''}" style="cursor:${hasDetails?'pointer':'default'}">
+          <div class="toggle ${s.actif?'on':''}" onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}" title="${s.actif?'Désactiver':'Activer'}"></div>
+          <span class="cs-sort-row-name">${s.nom||'Sans nom'}</span>
+          <div class="cs-sort-row-badges">
+            ${s.noyau?`<span class="cs-sort-badge gold">${s.noyau}</span>`:''}
+            ${runesAll.slice(0,2).map(r=>`<span class="cs-sort-badge blue">${r}</span>`).join('')}
+            ${runesAll.length>2?`<span class="cs-sort-badge muted">+${runesAll.length-2}</span>`:''}
           </div>
-          <div class="cs-sort-right">
-            <span class="badge badge-blue">${s.pm||0} PM</span>
-            ${canEdit?`<button class="btn-icon" onclick="editSort(${i})">✏️</button>
-                       <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>`:''}
-          </div>
+          <span class="cs-sort-row-pm">${s.pm||0} PM</span>
+          ${hasDetails?`<span class="cs-sort-row-chevron">${isOpen?'▲':'▼'}</span>`:'<span class="cs-sort-row-chevron"></span>'}
+          ${canEdit?`<span class="cs-sort-row-actions" onclick="event.stopPropagation()">
+            <button class="btn-icon" onclick="editSort(${i})">✏️</button>
+            <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
+          </span>`:''}
         </div>
-        ${s.effet||s.degats||s.soin?`<div class="cs-sort-body">
-          ${s.effet?`<div class="cs-sort-effet">${s.effet}</div>`:''}
-          ${s.degats?`<div class="cs-sort-degats">⚔️ ${s.degats}</div>`:''}
-          ${s.soin?`<div class="cs-sort-soin">💚 Soin : ${s.soin}</div>`:''}
+        ${isOpen&&hasDetails?`<div class="cs-sort-row-detail">
+          ${s.noyau?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Noyau</span>${s.noyau}</div>`:''}
+          ${runesAll.length?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes</span>${runesAll.join(', ')}</div>`:''}
+          ${s.effet?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Effet</span>${s.effet}</div>`:''}
+          ${s.degats?`<div class="cs-sort-dl" style="color:var(--crimson-light)"><span class="cs-sort-dl-label">Dégâts</span>⚔️ ${s.degats}</div>`:''}
+          ${s.soin?`<div class="cs-sort-dl" style="color:var(--green)"><span class="cs-sort-dl-label">Soin</span>💚 ${s.soin}</div>`:''}
         </div>`:''}
       </div>`;
     });
+    html += `</div>`;
   }
-
   html += `</div>`;
   return html;
 }
 
-
-// ── Drag and Drop sorts ──────────────────────
-let _dragSortIdx = null;
-
-function sortDragStart(e, idx) {
-  _dragSortIdx = idx;
-  e.currentTarget.style.opacity = '0.4';
-  e.dataTransfer.effectAllowed = 'move';
-}
-function sortDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  // Retirer tous les indicateurs existants
-  document.querySelectorAll('.cs-sort-card').forEach(el => {
-    el.classList.remove('cs-drop-before', 'cs-drop-after');
-  });
-  // Détecter si on est dans la moitié haute ou basse de la carte
-  const rect = e.currentTarget.getBoundingClientRect();
-  const mid  = rect.top + rect.height / 2;
-  if (e.clientY < mid) {
-    e.currentTarget.classList.add('cs-drop-before');
-  } else {
-    e.currentTarget.classList.add('cs-drop-after');
-  }
-}
-function sortDragEnd(e) {
-  e.currentTarget.style.opacity = '';
-  document.querySelectorAll('.cs-sort-card').forEach(el => {
-    el.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-  });
-}
-async function sortDrop(e, toIdx) {
-  e.preventDefault();
-  const card = e.currentTarget;
-  // Déterminer si on insère avant ou après
-  const rect = card.getBoundingClientRect();
-  const insertAfter = e.clientY >= rect.top + rect.height / 2;
-  const actualIdx = insertAfter ? toIdx + 1 : toIdx;
-
-  card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-  document.querySelectorAll('.cs-sort-card').forEach(el =>
-    el.classList.remove('cs-drop-before', 'cs-drop-after'));
-
-  const fromIdx = _dragSortIdx;
-  _dragSortIdx = null;
-  if (fromIdx === null) return;
-
-  const c = STATE.activeChar; if (!c) return;
-  const sorts = [...(c.deck_sorts||[])];
-  if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return; // pas de déplacement
-
-  const [moved] = sorts.splice(fromIdx, 1);
-  const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
-  sorts.splice(insertAt, 0, moved);
-  c.deck_sorts = sorts;
-  await updateInCol('characters', c.id, {deck_sorts: sorts});
-  renderCharSheet(c, 'sorts');
+function toggleSortDetail(idx) {
+  window._openSortIdx = window._openSortIdx === idx ? null : idx;
+  _renderTab('sorts', window._currentChar, window._canEditChar);
 }
 
-// ══════════════════════════════════════════════
-// TAB : INVENTAIRE
-// ══════════════════════════════════════════════
+
 function renderCharInventaire(c, canEdit) {
   const inv = c.inventaire||[];
   let html = `<div class="cs-section">
@@ -1315,41 +1265,129 @@ async function saveSort(idx) {
   renderCharSheet(c,'sorts');
 }
 
-// Équipement
+// Équipement — filtré depuis l'inventaire du personnage
 function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
-  const item = (c.equipement||{})[slot]||{};
+  const equipped = (c.equipement||{})[slot]||{};
   const isWeapon = slot.startsWith('Main');
-  openModal(`${isWeapon?'⚔️':'🛡️'} ${slot}`, `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="eq-nom" value="${item.nom||''}" placeholder="${isWeapon?'Épée longue...':'Heaume de fer...'}"></div>
-    <div class="form-group"><label>Trait</label><input class="input-field" id="eq-trait" value="${item.trait||''}" placeholder="Lourd, Polyvalent..."></div>
+
+  // Déterminer les types d'items compatibles selon le slot
+  const SLOT_TYPES = {
+    'Main principale':  ['⚔️ Arme', 'arme', 'Arme', 'weapon', 'arme 1m', 'arme 2m', 'Épée', 'epee', 'Lance', 'Hache', 'Arc', 'Baguette', 'Dague'],
+    'Main secondaire':  ['⚔️ Arme', 'arme', 'Arme', 'weapon', 'Bouclier', 'arme 1m', 'Dague', 'Baguette'],
+    'Tête':             ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Casque', 'Heaume', 'Chapeau', 'Cagoule'],
+    'Torse':            ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Cuirasse', 'Tunique', 'Robe'],
+    'Bottes':           ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Botte', 'Sandale'],
+    'Amulette':         ['Bijou', 'Accessoire', 'Amulette', 'Collier', 'Pendentif', '📦 Libre', 'libre'],
+    'Anneau':           ['Bijou', 'Accessoire', 'Anneau', 'Bague', '📦 Libre', 'libre'],
+    'Objet magique':    ['Accessoire', 'Objet magique', 'Relique', '📦 Libre', 'libre', 'Rare', 'Légendaire'],
+  };
+
+  const compatibleTypes = SLOT_TYPES[slot] || [];
+  const inv = c.inventaire||[];
+
+  // Filtrer les items de l'inventaire compatibles avec ce slot
+  const compatibles = inv.filter(item => {
+    if (!item.nom) return false;
+    if (compatibleTypes.length === 0) return true;
+    const t = (item.type||'').toLowerCase();
+    return compatibleTypes.some(ct => t.includes(ct.toLowerCase()) || ct.toLowerCase().includes(t));
+  });
+
+  // Options pour le select
+  const invOptions = compatibles.map((item, idx) =>
+    `<option value="inv:${idx}" ${equipped.nom===item.nom?'selected':''}>${item.nom}${item.type?' ('+item.type+')':''}</option>`
+  ).join('');
+
+  const hasCompat = compatibles.length > 0;
+
+  openModal(`${isWeapon?'⚔️':'🛡️'} Équiper — ${slot}`, `
+    ${hasCompat
+      ? `<div class="form-group">
+          <label>Choisir depuis l'inventaire</label>
+          <select class="input-field sh-modal-select" id="eq-inv-sel" onchange="previewEquipFromInv(this.value,${JSON.stringify(slot)})">
+            <option value="">— Sélectionner un objet —</option>
+            ${invOptions}
+          </select>
+          <div class="cs-equip-inv-preview" id="eq-inv-preview"></div>
+        </div>
+        <div class="cs-equip-divider">
+          <span>ou saisir manuellement</span>
+        </div>`
+      : `<div class="cs-equip-empty-inv">
+          <span>⚠️ Aucun objet compatible dans l'inventaire.</span>
+          <span style="font-size:0.72rem;color:var(--text-dim)">Achète des objets à la boutique ou saisis manuellement.</span>
+        </div>`
+    }
+    <div class="form-group"><label>Nom</label><input class="input-field" id="eq-nom" value="${equipped.nom||''}"></div>
+    <div class="form-group"><label>Trait</label><input class="input-field" id="eq-trait" value="${equipped.trait||''}"></div>
     ${isWeapon?`
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Dégâts</label><input class="input-field" id="eq-degats" value="${item.degats||'1D10'}"></div>
+      <div class="form-group"><label>Dégâts</label><input class="input-field" id="eq-degats" value="${equipped.degats||'1D10'}"></div>
       <div class="form-group"><label>Stat attaque</label>
-        <select class="input-field" id="eq-stat-attaque">
-          <option value="force" ${(item.statAttaque||'force')==='force'?'selected':''}>Force</option>
-          <option value="dexterite" ${item.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
-          <option value="intelligence" ${item.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
+        <select class="input-field sh-modal-select" id="eq-stat-attaque">
+          <option value="force" ${(equipped.statAttaque||'force')==='force'?'selected':''}>Force</option>
+          <option value="dexterite" ${equipped.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
+          <option value="intelligence" ${equipped.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
         </select>
       </div>
     </div>
     <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Type</label><input class="input-field" id="eq-type-arme" value="${item.typeArme||''}"></div>
-      <div class="form-group"><label>Portée</label><input class="input-field" id="eq-portee" value="${item.portee||''}"></div>
+      <div class="form-group"><label>Type</label><input class="input-field" id="eq-type-arme" value="${equipped.typeArme||''}"></div>
+      <div class="form-group"><label>Portée</label><input class="input-field" id="eq-portee" value="${equipped.portee||''}"></div>
     </div>
-    <div class="form-group"><label>Particularité</label><input class="input-field" id="eq-particularite" value="${item.particularite||''}"></div>
+    <div class="form-group"><label>Particularité</label><input class="input-field" id="eq-particularite" value="${equipped.particularite||''}"></div>
     `:`
     <div class="grid-4" style="gap:0.5rem">
       ${[['fo','Force'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha'],['ca','CA']].map(([k,l])=>`
-        <div class="form-group"><label>${l}</label><input type="number" class="input-field" id="eq-${k}" value="${item[k]||0}"></div>`).join('')}
+        <div class="form-group"><label>${l}</label><input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||0}"></div>`).join('')}
     </div>`}
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Enregistrer</button>
+      <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>
       <button class="btn btn-danger" onclick="clearEquipSlot('${slot}')">Retirer</button>
     </div>
   `);
+  // Stocker les compatibles pour previewEquipFromInv
+  window._equipCompatibles = compatibles;
 }
+
+// Pré-remplir les champs depuis l'item sélectionné dans l'inventaire
+function previewEquipFromInv(val, slot) {
+  if (!val || !val.startsWith('inv:')) return;
+  const idx = parseInt(val.split(':')[1]);
+  const item = (window._equipCompatibles||[])[idx];
+  if (!item) return;
+
+  // Remplir nom et trait depuis l'inventaire
+  const nomEl   = document.getElementById('eq-nom');
+  const traitEl = document.getElementById('eq-trait');
+  if (nomEl)   nomEl.value   = item.nom||'';
+  if (traitEl) traitEl.value = item.trait||item.type||'';
+
+  // Remplir les stats si l'item a des données de boutique
+  const isWeapon = slot.startsWith('Main');
+  if (isWeapon) {
+    if (item.degats && document.getElementById('eq-degats'))
+      document.getElementById('eq-degats').value = item.degats;
+  } else {
+    // Bonus stats depuis item boutique
+    ['fo','dex','in','sa','co','ch','ca'].forEach(k => {
+      const el = document.getElementById('eq-'+k);
+      if (el && item[k] !== undefined) el.value = item[k];
+    });
+  }
+
+  // Preview
+  const preview = document.getElementById('eq-inv-preview');
+  if (preview) {
+    preview.innerHTML = `<div class="cs-equip-inv-item">
+      <strong>${item.nom}</strong>
+      ${item.type?`<span class="badge badge-gold" style="font-size:0.65rem">${item.type}</span>`:''}
+      ${item.description?`<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem">${item.description}</div>`:''}
+    </div>`;
+  }
+}
+
 
 async function saveEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
@@ -1495,6 +1533,7 @@ Object.assign(window, {
   calcOr, refreshOrDisplay, calcPalier,
   selectNoyau,
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
+  toggleSortDetail,
   previewXpBar, saveXpDirect,
   renderCharCompte,
   addCompteRow, deleteCompteRow, inlineEditCompteField,
@@ -1510,6 +1549,7 @@ Object.assign(window, {
   manageTitres, addTitre, removeTitre, saveTitres,
   addSort, editSort, openSortModal, toggleRune, updateSortPM, saveSort,
   editEquipSlot, saveEquipSlot, clearEquipSlot,
+  previewEquipFromInv,
   addInvItem, editInvItem, saveInvItem,
   addQuete, saveQuete,
   deleteCharPhoto,

@@ -244,7 +244,8 @@ function _renderCatView() {
   const cat     = _cats.find(c => c.id === _activeCat);
   if (!cat) return '';
   const subCats = cat.sousCats||[];
-  if (subCats.length === 0) { _view = 'subcat'; return _renderItemsView(); }
+  // Si pas de sous-cats et pas admin → aller direct aux articles
+  if (subCats.length === 0 && !STATE.isAdmin) { _view = 'subcat'; return _renderItemsView(); }
 
   const total = _items.filter(i => i.categorieId === _activeCat).length;
   let html = `<div class="sh-subcat-grid">
@@ -304,7 +305,10 @@ function _renderItemsView() {
 
   let html = `<div class="sh-items-header">
     <span class="sh-items-count">${total} article${total!==1?'s':''}</span>
-    ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">＋ Article</button>`:''}
+    <div style="display:flex;gap:0.5rem">
+      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" onclick="shopGoCat('${_activeCat}')">📂 Sous-catégories</button>`:''}
+      ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">＋ Article</button>`:''}
+    </div>
   </div>`;
 
   html += _renderItemGrid(cat, slice);
