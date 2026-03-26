@@ -659,9 +659,15 @@ function renderCharDeck(c, canEdit) {
   } else {
     html += `<div class="cs-sort-list">`;
     sorts.forEach((s,i) => {
-      const isOpen = openIdx === i;
-      const hasDetails = !!(s.effet||s.degats||s.soin);
-      const runesAll = s.runes||[];
+      const isOpen    = openIdx === i;
+      const runesAll  = s.runes||[];
+      // Aperçu rapide : concaténer effet + dégâts + soin sur une ligne
+      const apercu = [
+        s.effet   ? s.effet   : null,
+        s.degats  ? `⚔️ ${s.degats}` : null,
+        s.soin    ? `💚 ${s.soin}`   : null,
+      ].filter(Boolean).join(' · ');
+
       html += `<div class="cs-sort-row ${s.actif?'actif':''}"
         draggable="true"
         data-sort-idx="${i}"
@@ -669,24 +675,31 @@ function renderCharDeck(c, canEdit) {
         ondragover="sortDragOver(event)"
         ondrop="sortDrop(event,${i})"
         ondragend="sortDragEnd(event)">
-        <div class="cs-sort-row-main" onclick="${hasDetails?`toggleSortDetail(${i})`:''}" style="cursor:${hasDetails?'pointer':'default'}">
-          <div class="toggle ${s.actif?'on':''}" onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}" title="${s.actif?'Désactiver':'Activer'}"></div>
-          <span class="cs-sort-row-name">${s.nom||'Sans nom'}</span>
-          <div class="cs-sort-row-badges">
-            ${s.noyau?`<span class="cs-sort-badge gold">${s.noyau}</span>`:''}
-            ${runesAll.slice(0,2).map(r=>`<span class="cs-sort-badge blue">${r}</span>`).join('')}
-            ${runesAll.length>2?`<span class="cs-sort-badge muted">+${runesAll.length-2}</span>`:''}
+        <div class="cs-sort-row-main" onclick="toggleSortDetail(${i})" style="cursor:pointer">
+          <div class="toggle ${s.actif?'on':''}"
+               onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}"
+               title="${s.actif?'Désactiver':'Activer'}"></div>
+          <div class="cs-sort-row-info">
+            <div class="cs-sort-row-top">
+              <span class="cs-sort-row-name">${s.nom||'Sans nom'}</span>
+              <div class="cs-sort-row-badges">
+                ${s.noyau?`<span class="cs-sort-badge gold">${s.noyau}</span>`:''}
+                ${runesAll.slice(0,3).map(r=>`<span class="cs-sort-badge blue">${r}</span>`).join('')}
+                ${runesAll.length>3?`<span class="cs-sort-badge muted">+${runesAll.length-3}</span>`:''}
+              </div>
+              <span class="cs-sort-row-pm">${s.pm||0} PM</span>
+              <span class="cs-sort-row-chevron">${isOpen?'▲':'▼'}</span>
+              ${canEdit?`<span class="cs-sort-row-actions" onclick="event.stopPropagation()">
+                <button class="btn-icon" onclick="editSort(${i})">✏️</button>
+                <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
+              </span>`:''}
+            </div>
+            ${apercu?`<div class="cs-sort-row-apercu">${apercu}</div>`:''}
           </div>
-          <span class="cs-sort-row-pm">${s.pm||0} PM</span>
-          ${hasDetails?`<span class="cs-sort-row-chevron">${isOpen?'▲':'▼'}</span>`:'<span class="cs-sort-row-chevron"></span>'}
-          ${canEdit?`<span class="cs-sort-row-actions" onclick="event.stopPropagation()">
-            <button class="btn-icon" onclick="editSort(${i})">✏️</button>
-            <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
-          </span>`:''}
         </div>
-        ${isOpen&&hasDetails?`<div class="cs-sort-row-detail">
+        ${isOpen?`<div class="cs-sort-row-detail">
           ${s.noyau?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Noyau</span>${s.noyau}</div>`:''}
-          ${runesAll.length?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes</span>${runesAll.join(', ')}</div>`:''}
+          ${runesAll.length?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes (${runesAll.length})</span>${runesAll.join(' · ')}</div>`:''}
           ${s.effet?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Effet</span>${s.effet}</div>`:''}
           ${s.degats?`<div class="cs-sort-dl" style="color:var(--crimson-light)"><span class="cs-sort-dl-label">Dégâts</span>⚔️ ${s.degats}</div>`:''}
           ${s.soin?`<div class="cs-sort-dl" style="color:var(--green)"><span class="cs-sort-dl-label">Soin</span>💚 ${s.soin}</div>`:''}
@@ -698,6 +711,7 @@ function renderCharDeck(c, canEdit) {
   html += `</div>`;
   return html;
 }
+
 
 function toggleSortDetail(idx) {
   window._openSortIdx = window._openSortIdx === idx ? null : idx;
@@ -1223,54 +1237,116 @@ function editSort(idx) { openSortModal(idx, (STATE.activeChar?.deck_sorts||[])[i
 function openSortModal(idx, s) {
   const NOYAUX = ['Feu 🔥','Eau 💧','Terre 🪨','Vent 🌬️','Ombre 🌑','Lumière ✨','Physique 💪'];
   const RUNES = [
-    {nom:'Puissance',effet:'+ 1 dé de dégâts'},
-    {nom:'Protection',effet:'+2 CA (2 tr) ou +1 dé soin'},
+    {nom:'Puissance',  effet:'+ 1 dé de dégâts'},
+    {nom:'Protection', effet:'+2 CA (2 tr) ou +1 dé soin'},
     {nom:'Amplification',effet:'Zone +3m'},
     {nom:'Enchantement',effet:'(AB) Élément sur équip. allié 2 tr'},
-    {nom:'Affliction',effet:'Élément + État sur équip. ennemi 2 tr'},
-    {nom:'Invocation',effet:'Créature liée. 10 PV, CA 10'},
-    {nom:'Dispersion',effet:'+1 cible'},
-    {nom:'Lacération',effet:'CA cible −1 (−2 max, −4 élites)'},
-    {nom:'Chance',effet:'RC 19–20. Critique aussi max'},
-    {nom:'Durée',effet:'+2 tours'},
+    {nom:'Affliction', effet:'Élément + État sur équip. ennemi 2 tr'},
+    {nom:'Invocation',  effet:'Créature liée. 10 PV, CA 10'},
+    {nom:'Dispersion',  effet:'+1 cible'},
+    {nom:'Lacération',  effet:'CA cible −1 (−2 max)'},
+    {nom:'Chance',      effet:'RC 19–20. Critique aussi max'},
+    {nom:'Durée',       effet:'+2 tours'},
     {nom:'Concentration',effet:'Actif hors tour. JS Sa DD11'},
-    {nom:'Réaction',effet:'Lance hors de son tour'},
+    {nom:'Réaction',    effet:'Lance hors de son tour'},
   ];
-  const runesSel = s?.runes||[];
+
+  // Compter les occurrences de chaque rune (tableau avec doublons)
+  const runesSrc = s?.runes||[];
+  const runeCounts = {}; // {nom: count}
+  runesSrc.forEach(r => { runeCounts[r] = (runeCounts[r]||0) + 1; });
+
+  // Stocker les counts dans un objet global modifiable
+  window._runeCountsEdit = {...runeCounts};
+
+  const noyauSel = s?.noyau||'';
+
+  const runesHtml = RUNES.map(r => {
+    const cnt = window._runeCountsEdit[r.nom]||0;
+    return `<div class="cs-rune-counter" id="rune-row-${r.nom.replace(/\s/g,'_')}">
+      <div class="cs-rune-counter-info">
+        <span class="cs-rune-counter-name ${cnt>0?'selected':''}" id="rune-name-${r.nom.replace(/\s/g,'_')}">${r.nom}</span>
+        <span class="cs-rune-counter-effet">${r.effet}</span>
+      </div>
+      <div class="cs-rune-counter-ctrl">
+        <button type="button" class="cs-rune-btn minus" onclick="runeDecrement('${r.nom}')" ${cnt===0?'disabled':''}>−</button>
+        <span class="cs-rune-count-val" id="rune-cnt-${r.nom.replace(/\s/g,'_')}">${cnt}</span>
+        <button type="button" class="cs-rune-btn plus" onclick="runeIncrement('${r.nom}')">+</button>
+      </div>
+    </div>`;
+  }).join('');
+
   openModal(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort', `
     <div class="form-group"><label>Nom</label><input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu..."></div>
+
     <div class="form-group">
       <label>Noyau élémentaire <span style="color:var(--text-dim);font-weight:400">(2 PM)</span></label>
       <div class="cs-noyau-grid" id="noyau-grid">
-        ${NOYAUX.map(n => `<div class="cs-noyau-btn ${s?.noyau===n?'selected':''}"
-             onclick="selectNoyau(this,'${n.replace(/'/,"\\'")}')">${n}</div>`).join('')}
+        ${NOYAUX.map(n => `<div class="cs-noyau-btn ${noyauSel===n?'selected':''}"
+             onclick="selectNoyau(this,'${n.replace(/'/g,"\\'")}')">${n}</div>`).join('')}
       </div>
-      <input type="hidden" id="s-noyau" value="${s?.noyau||''}">
+      <input type="hidden" id="s-noyau" value="${noyauSel}">
     </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:0.8rem">
-      <label style="flex-shrink:0">Coût PM (auto)</label>
-      <input type="number" class="input-field" id="s-pm" value="${s?.pm||2}" readonly
-             style="width:70px;opacity:0.8;font-weight:700;color:var(--blue)">
-    </div>
+
     <div class="form-group">
-      <label>Runes (+2 PM chacune)</label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.25rem;max-height:200px;overflow-y:auto;padding:0.4rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px">
-        ${RUNES.map(r=>`<div onclick="toggleRune(this,'${r.nom}')" class="cs-rune-chip ${runesSel.includes(r.nom)?'selected':''}">
-          <span class="cs-rune-name">${r.nom}</span>
-          <span class="cs-rune-effet">${r.effet}</span>
-        </div>`).join('')}
-      </div>
-      <input type="hidden" id="s-runes" value="${runesSel.join(',')}">
+      <label>Runes <span style="color:var(--text-dim);font-weight:400">(+2 PM chacune, cumulables)</span></label>
+      <div class="cs-rune-list">${runesHtml}</div>
     </div>
+
+    <div class="cs-sort-pm-display">
+      Coût total : <strong id="s-pm-display">0</strong> PM
+      <input type="hidden" id="s-pm" value="${s?.pm||2}">
+    </div>
+
     <div class="grid-2" style="gap:0.8rem">
       <div class="form-group"><label>Dégâts</label><input class="input-field" id="s-degats" value="${s?.degats||''}" placeholder="= arme, +1D4..."></div>
       <div class="form-group"><label>Soin</label><input class="input-field" id="s-soin" value="${s?.soin||''}" placeholder="1d4..."></div>
     </div>
-    <div class="form-group"><label>Description</label><textarea class="input-field" id="s-effet" rows="3">${s?.effet||''}</textarea></div>
+    <div class="form-group"><label>Description / Effet</label><textarea class="input-field" id="s-effet" rows="3">${s?.effet||''}</textarea></div>
     <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="saveSort(${idx})">Enregistrer</button>
   `);
+
+  // Initialiser le PM display
+  setTimeout(() => updateSortPM(), 50);
 }
 
+function runeIncrement(nom) {
+  window._runeCountsEdit = window._runeCountsEdit||{};
+  window._runeCountsEdit[nom] = (window._runeCountsEdit[nom]||0) + 1;
+  _updateRuneDisplay(nom);
+  updateSortPM();
+}
+
+function runeDecrement(nom) {
+  window._runeCountsEdit = window._runeCountsEdit||{};
+  if ((window._runeCountsEdit[nom]||0) <= 0) return;
+  window._runeCountsEdit[nom]--;
+  if (window._runeCountsEdit[nom] === 0) delete window._runeCountsEdit[nom];
+  _updateRuneDisplay(nom);
+  updateSortPM();
+}
+
+function _updateRuneDisplay(nom) {
+  const key = nom.replace(/\s/g,'_');
+  const cnt = window._runeCountsEdit[nom]||0;
+  const valEl  = document.getElementById(`rune-cnt-${key}`);
+  const nameEl = document.getElementById(`rune-name-${key}`);
+  const minBtn = document.querySelector(`#rune-row-${key} .cs-rune-btn.minus`);
+  if (valEl)   valEl.textContent = cnt;
+  if (nameEl)  nameEl.classList.toggle('selected', cnt > 0);
+  if (minBtn)  minBtn.disabled = cnt === 0;
+}
+
+function updateSortPM() {
+  const noyau = document.getElementById('s-noyau')?.value||'';
+  const total = (noyau ? 1 : 0) +
+    Object.values(window._runeCountsEdit||{}).reduce((s,v)=>s+v, 0);
+  const pm = total * 2 || 2;
+  const pmEl = document.getElementById('s-pm');
+  const dispEl = document.getElementById('s-pm-display');
+  if (pmEl)   pmEl.value = pm;
+  if (dispEl) dispEl.textContent = pm;
+}
 
 function selectNoyau(el, noyau) {
   document.querySelectorAll('.cs-noyau-btn').forEach(b => b.classList.remove('selected'));
@@ -1279,43 +1355,39 @@ function selectNoyau(el, noyau) {
   if (input) { input.value = noyau; updateSortPM(); }
 }
 
-function toggleRune(el, rune) {
-  const input = document.getElementById('s-runes');
-  let runes = input.value ? input.value.split(',').filter(Boolean) : [];
-  if (runes.includes(rune)) { runes=runes.filter(r=>r!==rune); el.classList.remove('selected'); }
-  else { runes.push(rune); el.classList.add('selected'); }
-  input.value = runes.join(',');
-  updateSortPM();
-}
-
-function updateSortPM() {
-  const noyau = document.getElementById('s-noyau')?.value||'';
-  const runes = (document.getElementById('s-runes')?.value||'').split(',').filter(Boolean);
-  const pmEl = document.getElementById('s-pm');
-  if (pmEl) pmEl.value = ((noyau?1:0)+runes.length)*2 || 2;
-}
 
 async function saveSort(idx) {
   const c = STATE.activeChar; if(!c) return;
   const sorts = c.deck_sorts||[];
   const noyau = document.getElementById('s-noyau')?.value||'';
-  const runes = (document.getElementById('s-runes')?.value||'').split(',').filter(Boolean);
+
+  // Reconstruire le tableau de runes avec doublons depuis _runeCountsEdit
+  const runes = [];
+  Object.entries(window._runeCountsEdit||{}).forEach(([nom, cnt]) => {
+    for (let i=0; i<cnt; i++) runes.push(nom);
+  });
+
+  const totalRunes = (noyau ? 1 : 0) + runes.length;
+  const autoPm     = totalRunes * 2 || 2;
+
   const newSort = {
-    nom: document.getElementById('s-nom')?.value||'Sort',
-    pm: ((noyau?1:0)+runes.length)*2||2,
-    noyau, runes,
+    nom:    document.getElementById('s-nom')?.value||'Sort',
+    pm:     autoPm,
+    noyau,
+    runes,
     degats: document.getElementById('s-degats')?.value||'',
-    soin: document.getElementById('s-soin')?.value||'',
-    effet: document.getElementById('s-effet')?.value||'',
-    actif: idx>=0 ? sorts[idx].actif : false,
+    soin:   document.getElementById('s-soin')?.value||'',
+    effet:  document.getElementById('s-effet')?.value||'',
+    actif:  idx>=0 ? sorts[idx].actif : false,
   };
   if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
   c.deck_sorts=sorts;
   await updateInCol('characters',c.id,{deck_sorts:sorts});
-  closeModal();
-  showNotif(`Sort enregistré — ${newSort.pm} PM`,'success');
+  closeModalDirect();
+  showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
   renderCharSheet(c,'sorts');
 }
+
 
 // Équipement — filtré depuis l'inventaire du personnage
 function editEquipSlot(slot) {
@@ -1583,7 +1655,7 @@ Object.assign(window, {
   selectChar, filterAdminChars,
   sellInvItem,
   calcOr, refreshOrDisplay, calcPalier,
-  selectNoyau,
+  selectNoyau, runeIncrement, runeDecrement,
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
   toggleSortDetail,
   previewXpBar, saveXpDirect,
