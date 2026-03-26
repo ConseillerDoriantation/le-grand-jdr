@@ -123,9 +123,10 @@ function _rareteStars(val) {
   return `<span class="sh-rarete-stars" style="color:${color}" title="${labels[n]||''}">${stars}</span>`;
 }
 function _dispoDisplay(val) {
-  const n = parseInt(val);
   if (val === '' || val === null || val === undefined) return '';
-  if (n === 0 || val === '0') return `<span style="color:var(--crimson-light);font-weight:700">Épuisé</span>`;
+  const n = parseInt(val);
+  if (isNaN(n) || n < 0) return `<span style="color:var(--green);font-weight:600">∞ Illimité</span>`;
+  if (n === 0) return `<span style="color:var(--crimson-light);font-weight:700">Épuisé</span>`;
   return `<span style="color:var(--green);font-weight:700">${n} dispo.</span>`;
 }
 function _dispoColor(d) {
@@ -373,10 +374,11 @@ function _renderItemCard(item, tplKey) {
         <div class="sh-item-prix-achat">💰 ${prix} or</div>
         <div class="sh-item-prix-vente" title="Prix de revente (60%)">🔄 ${prixVente} or</div>
       </div>
-      ${!STATE.isAdmin && window._shopCharId && (item.dispo === undefined || parseInt(item.dispo) !== 0)
-        ? `<button class="btn sh-buy-btn" onclick="buyItem('${item.id}')">🛒 Acheter</button>`
-        : STATE.isAdmin ? ''
-        : `<button class="btn sh-buy-btn" disabled style="opacity:0.4;cursor:not-allowed">Épuisé</button>`}
+      ${!STATE.isAdmin && window._shopCharId
+        ? (item.dispo === 0
+            ? `<button class="btn sh-buy-btn" disabled style="opacity:0.4;cursor:not-allowed">Épuisé</button>`
+            : `<button class="btn sh-buy-btn" onclick="buyItem('${item.id}')">🛒 Acheter</button>`)
+        : ''}
     </div>
     ${STATE.isAdmin?`<div class="sh-item-actions">
       <button class="btn-icon" onclick="openItemModal('${item.id}')">✏️</button>
@@ -402,7 +404,7 @@ async function buyItem(itemId) {
 
   // Vérifier stock
   const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
-  if (dispo !== null && dispo <= 0) { showNotif('Article épuisé.','error'); return; }
+  if (dispo !== null && dispo === 0) { showNotif('Article épuisé.','error'); return; }
 
   const prix = parseFloat(item.prix)||0;
 
@@ -424,9 +426,9 @@ async function buyItem(itemId) {
 
   if (!confirm(`Acheter "${item.nom}" pour ${prix} or ?`)) return;
 
-  // 1. Décrémenter le stock
+  // 1. Décrémenter le stock (sauf si infini = -1)
   const updates = {};
-  if (dispo !== null) {
+  if (dispo !== null && dispo >= 0) {
     updates.dispo = Math.max(0, dispo - 1);
     await updateInCol('shop', itemId, updates);
     item.dispo = updates.dispo;
@@ -714,10 +716,20 @@ function _buildFieldsHtml(tpl, item) {
         </div>
       </div>`;
     } else if (f.type === 'dispo') {
+      const isInfini = val !== undefined && val !== '' && parseInt(val) < 0;
+      const dispoVal = isInfini ? '' : (val===''?'':parseInt(val)||'');
       html += `<div class="form-group">
-        <label>${f.label} <span style="color:var(--text-dim);font-weight:400;font-size:0.7rem">(0 = Épuisé)</span></label>
-        <input type="number" class="input-field" id="si-dispo" value="${val===''?'':parseInt(val)}"
-               min="0" placeholder="Ex: 3" style="max-width:100px">
+        <label>${f.label}</label>
+        <div class="sh-dispo-wrap">
+          <input type="number" class="input-field" id="si-dispo" value="${dispoVal}"
+                 min="0" placeholder="Ex: 3" style="max-width:90px;${isInfini?'opacity:0.4;pointer-events:none;':''}"
+                 ${isInfini?'disabled':''}>
+          <label class="sh-dispo-infini-label">
+            <input type="checkbox" id="si-dispo-infini" ${isInfini?'checked':''}
+                   onchange="toggleDispoInfini(this)">
+            <span>∞ Illimité</span>
+          </label>
+        </div>
       </div>`;
     } else if (f.type === 'select') {
       html += `<div class="form-group">
@@ -762,6 +774,24 @@ function pickRarete(n) {
     btn.classList.toggle('active', v <= n);
     btn.style.color = v <= n ? '#c084fc' : 'var(--text-dim)';
   });
+}
+
+
+function toggleDispoInfini(cb) {
+  const input = document.getElementById('si-dispo');
+  if (!input) return;
+  if (cb.checked) {
+    input.value = '';
+    input.disabled = true;
+    input.style.opacity = '0.4';
+    input.style.pointerEvents = 'none';
+  } else {
+    input.disabled = false;
+    input.style.opacity = '';
+    input.style.pointerEvents = '';
+    input.value = '5';
+    input.focus();
+  }
 }
 
 function updatePrixVente(val) {
@@ -827,9 +857,12 @@ async function saveShopItem(itemId) {
 
   // Récupérer tous les champs du template
   tpl.fields.forEach(f => {
-    const el = document.getElementById(`si-${f.id}`);
-    if (el) {
-      data[f.id] = f.type==='number' ? (parseFloat(el.value)||0) : el.value.trim();
+    if (f.type === 'dispo') {
+      const infini = document.getElementById('si-dispo-infini')?.checked;
+      data[f.id] = infini ? -1 : (parseInt(document.getElementById('si-dispo')?.value)||0);
+    } else {
+      const el = document.getElementById(`si-${f.id}`);
+      if (el) data[f.id] = f.type==='number' ? (parseFloat(el.value)||0) : el.value.trim();
     }
   });
 
@@ -863,6 +896,7 @@ Object.assign(window, {
   openItemModal, refreshItemFields, refreshSubCatSelect,
   previewUpload, updatePrixVente, pickRarete,
   shopSetChar, buyItem,
+  toggleDispoInfini,
   saveShopItem, deleteShopItem,
   openShopItemModal, editShopItem, filterShop,
 });
