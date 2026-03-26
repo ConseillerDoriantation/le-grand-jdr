@@ -717,10 +717,11 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
    caractéristiques), puis grand bloc onglets en bas.
 ══════════════════════════════════════════════════ */
 
-/* ── Wrapper global ─────────────────────────────── */
+/* ── Wrapper global — grille 2 colonnes ─────────── */
 .cs-shell {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  align-items: stretch;
   gap: 0;
 }
 
