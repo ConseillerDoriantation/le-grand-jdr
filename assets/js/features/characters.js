@@ -127,12 +127,12 @@ function renderCharSheet(c, keepTab) {
     const m = getMod(c, st.key);
     const mStr = m >= 0 ? '+'+m : String(m);
     const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    return `<div class="cs-carac-chip">
-      <span class="cs-carac-chip-abbr">${st.abbr}</span>
-      <span class="cs-carac-chip-val ${canEdit?'cs-editable':''}"
-            ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier"`:''}
-      >${total}</span>
-      <span class="cs-carac-chip-mod ${mClass}">${mStr}</span>
+    return `<div class="cs-carac-card">
+      <div class="cs-carac-abbr">${st.abbr}</div>
+      <div class="cs-carac-val ${canEdit?'cs-editable':''}"
+           ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier"`:''}
+      >${total}</div>
+      <div class="cs-carac-mod ${mClass}">${mStr}</div>
     </div>`;
   }).join('');
 
@@ -140,10 +140,10 @@ function renderCharSheet(c, keepTab) {
 <div class="cs-shell">
 
   <!-- ═══ LIGNE HAUTE : 2 blocs côte à côte ═══ -->
-  <div class="cs-top cs-top-single">
+  <div class="cs-top">
 
     <!-- BLOC IDENTITÉ + VITAUX + CARAC -->
-    <div class="cs-identity-panel cs-identity-full">
+    <div class="cs-identity-panel">
 
       <!-- Photo + Nom -->
       <div class="cs-id-header">
@@ -253,20 +253,17 @@ function renderCharSheet(c, keepTab) {
         </div>
       </div>
 
-      <!-- Carac compactes intégrées -->
-      <div class="cs-divider"></div>
-      <div class="cs-carac-inline">
-        <div class="cs-carac-inline-title">
-          Caractéristiques
-          ${canEdit?'<span class="cs-hint">cliquer pour modifier</span>':''}
-        </div>
-        <div class="cs-carac-inline-grid">
-          ${caracHtml}
-        </div>
-      </div>
+    </div><!-- /cs-identity-panel -->
 
-      <!-- PV/PM base compacts -->
-      <div class="cs-divider"></div>
+    <!-- BLOC DROIT : Caractéristiques compactes -->
+    <div class="cs-carac-panel">
+      <div class="cs-carac-panel-title">
+        Caractéristiques
+        ${canEdit?'<span class="cs-hint">cliquer pour modifier</span>':''}
+      </div>
+      <div class="cs-carac-grid">
+        ${caracHtml}
+      </div>
       <div class="cs-base-row">
         <div class="cs-base-chip">
           <span class="cs-base-chip-label">PV base</span>
@@ -288,21 +285,20 @@ function renderCharSheet(c, keepTab) {
           <div class="cs-base-chip-sub">100 × niv²</div>
         </div>
       </div>
-
-    </div><!-- /cs-identity-panel (now full width) -->
+    </div><!-- /cs-carac-panel -->
 
   </div><!-- /cs-top -->
 
-  <!-- ═══ ONGLETS ═══ -->
-  <div class="cs-tabs" id="char-tabs">
-    ${['combat','sorts','inventaire','quetes','compte','notes'].map((tab,i)=>{
-      const labels = ['Combat','Sorts & Runes','Inventaire','Quêtes','Compte','Notes'];
-      return `<button class="cs-tab ${currentTab===tab?'active':''}" onclick="showCharTab('${tab}',this)">${labels[i]}</button>`;
-    }).join('')}
+  <!-- ═══ COLONNE DROITE : Onglets + Contenu ═══ -->
+  <div class="cs-right-col">
+    <div class="cs-tabs" id="char-tabs">
+      ${['combat','sorts','inventaire','quetes','compte','notes'].map((tab,i)=>{
+        const labels = ['Combat','Sorts & Runes','Inventaire','Quêtes','Compte','Notes'];
+        return `<button class="cs-tab ${currentTab===tab?'active':''}" onclick="showCharTab('${tab}',this)">${labels[i]}</button>`;
+      }).join('')}
+    </div>
+    <div id="char-tab-content" class="cs-tab-body"></div>
   </div>
-
-  <!-- ═══ CONTENU ONGLET ═══ -->
-  <div id="char-tab-content" class="cs-tab-body"></div>
 
 </div>`;
 
