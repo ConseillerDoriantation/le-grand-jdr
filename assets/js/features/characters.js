@@ -589,6 +589,58 @@ function renderCharEquip(c, canEdit) {
 // ══════════════════════════════════════════════
 // TAB : SORTS
 // ══════════════════════════════════════════════
+// ── Drag and Drop sorts ──────────────────────
+let _dragSortIdx = null;
+
+function sortDragStart(e, idx) {
+  _dragSortIdx = idx;
+  e.currentTarget.style.opacity = '0.4';
+  e.dataTransfer.effectAllowed = 'move';
+}
+function sortDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.cs-sort-row').forEach(el => {
+    el.classList.remove('cs-drop-before', 'cs-drop-after');
+  });
+  const rect = e.currentTarget.getBoundingClientRect();
+  const mid  = rect.top + rect.height / 2;
+  if (e.clientY < mid) {
+    e.currentTarget.classList.add('cs-drop-before');
+  } else {
+    e.currentTarget.classList.add('cs-drop-after');
+  }
+}
+function sortDragEnd(e) {
+  e.currentTarget.style.opacity = '';
+  document.querySelectorAll('.cs-sort-row').forEach(el => {
+    el.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
+  });
+}
+async function sortDrop(e, toIdx) {
+  e.preventDefault();
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const insertAfter = e.clientY >= rect.top + rect.height / 2;
+  const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
+  card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
+  document.querySelectorAll('.cs-sort-row').forEach(el =>
+    el.classList.remove('cs-drop-before', 'cs-drop-after'));
+  const fromIdx = _dragSortIdx;
+  _dragSortIdx = null;
+  if (fromIdx === null) return;
+  const c = STATE.activeChar; if (!c) return;
+  const sorts = [...(c.deck_sorts||[])];
+  if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return;
+  const [moved] = sorts.splice(fromIdx, 1);
+  const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
+  sorts.splice(insertAt, 0, moved);
+  c.deck_sorts = sorts;
+  await updateInCol('characters', c.id, {deck_sorts: sorts});
+  renderCharSheet(c, 'sorts');
+}
+
+
 function renderCharDeck(c, canEdit) {
   const sorts = c.deck_sorts||[];
   const openIdx = window._openSortIdx ?? null;
