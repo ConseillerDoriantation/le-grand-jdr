@@ -1018,27 +1018,128 @@ function toggleSortDetail(idx) {
 }
 
 
-function renderCharInventaire(c, canEdit) {
-  const invRaw = c.inventaire||[];
+function isEquipableInventoryItem(item = {}) {
+  const tpl = (item.template || '').toLowerCase();
+  const format = item.format || '';
+  const slotArmure = item.slotArmure || '';
+  const slotBijou = item.slotBijou || '';
+  const typeArmure = item.typeArmure || '';
+  const haystack = [
+    item.type,
+    item.categorie,
+    item.category,
+    item.sousCategorie,
+    item.subcategory,
+    item.nom,
+    item.description,
+  ].filter(Boolean).join(' ').toLowerCase();
 
-  // ── Regrouper les items identiques ──────────────────────────────────────
+  if (tpl === 'arme' || tpl === 'armure' || tpl === 'bijou') return true;
+  if (format || slotArmure || slotBijou || typeArmure) return true;
+  if (item.degats || item.ca || item.toucherStat || item.degatsStat) return true;
+
+  return ['arme','weapon','épée','epee','arc','dague','hache','lance','marteau','bouclier','armure','armor','casque','capuche','botte','gants','amulette','anneau','bijou','talisman']
+    .some(keyword => haystack.includes(keyword));
+}
+
+function renderCharInventaire(c, canEdit) {
+  const invRaw = c.inventaire || [];
+
   const grouped = [];
   invRaw.forEach((item, realIdx) => {
-    const key = (item.itemId||'') + '||' + (item.nom||'');
+    const key = (item.itemId || '') + '||' + (item.nom || '');
     const existing = grouped.find(g => g.key === key);
     if (existing) {
-      existing.qte += parseInt(item.qte)||1;
+      existing.qte += parseInt(item.qte) || 1;
       existing.indices.push(realIdx);
     } else {
-      grouped.push({ key, item:{...item}, qte:parseInt(item.qte)||1, indices:[realIdx] });
+      grouped.push({ key, item: { ...item }, qte: parseInt(item.qte) || 1, indices: [realIdx] });
     }
   });
 
+  const equipmentGroups = grouped.filter(g => isEquipableInventoryItem(g.item));
+  const otherGroups = grouped.filter(g => !isEquipableInventoryItem(g.item));
   const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
   const equippedMap = getEquippedInventoryIndexMap(c);
 
-  const RARETE_COLORS = ['','#9ca3af','#4ade80','#60a5fa','#c084fc'];
-  const RARETE_LABELS = ['','Commun','Peu commun','Rare','Très rare'];
+  const RARETE_COLORS = ['', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc'];
+  const RARETE_LABELS = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
+  const equipOpen = window._charInvEquipOpen !== false;
+
+  const totalQty = groups => groups.reduce((sum, g) => sum + (parseInt(g.qte) || 0), 0);
+
+  const renderInventoryCards = groups => groups.map(g => {
+    const item = g.item;
+    const pv = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat) || 0) * 0.6);
+    const pa = parseFloat(item.prixAchat) || 0;
+    const indicesB64 = btoa(JSON.stringify(g.indices));
+
+    const rareteN = parseInt(item.rarete) || 0;
+    const rareteC = RARETE_COLORS[rareteN] || 'var(--border)';
+    const rareteL = RARETE_LABELS[rareteN] || '';
+    const equippedSlots = [...new Set(g.indices.flatMap(idx => equippedMap.get(idx) || []))];
+    const isEquipped = equippedSlots.length > 0;
+    const equippedLabel = isEquipped
+      ? `Équipé${equippedSlots.length ? ` · ${equippedSlots.join(' · ')}` : ''}`
+      : '';
+
+    const chips = [];
+    const bonusText = formatItemBonusText(item);
+    if (item.format) chips.push({ label: 'Format', val: item.format, color: 'var(--text-muted)' });
+    if (item.slotArmure) chips.push({ label: 'Slot', val: item.slotArmure, color: 'var(--text-muted)' });
+    if (item.slotBijou) chips.push({ label: 'Slot', val: item.slotBijou, color: 'var(--text-muted)' });
+    if (item.typeArmure) chips.push({ label: 'Type', val: item.typeArmure, color: 'var(--text-muted)' });
+    if (item.degats) chips.push({ label: 'Dégâts', val: `${item.degats}${item.degatsStat ? ` + ${statShort(item.degatsStat)}` : ''}`, color: '#ff6b6b' });
+    if (item.toucherStat) chips.push({ label: 'Toucher', val: statShort(item.toucherStat), color: '#e8b84b' });
+    else if (item.toucher) chips.push({ label: 'Toucher', val: item.toucher, color: '#e8b84b' });
+    if (item.ca || item.ca === 0) chips.push({ label: 'CA', val: item.ca, color: '#4f8cff' });
+    if (bonusText) chips.push({ label: 'Stats', val: bonusText, color: '#4f8cff' });
+    if (item.trait) chips.push({ label: 'Trait', val: item.trait, color: '#b47fff' });
+    if (item.type && !item.degats && !(item.ca || item.ca === 0)) chips.push({ label: 'Type', val: item.type, color: 'var(--text-muted)' });
+    if (item.effet) chips.push({ label: 'Effet', val: item.effet, color: 'var(--text-muted)' });
+
+    return `<div class="inv-card" style="border-left:3px solid ${rareteC}">
+      <div class="inv-card-header">
+        <div>
+          <div class="inv-card-title">${item.nom || '?'}</div>
+          ${rareteL ? `<div class="inv-card-sub" style="color:${rareteC}">${'★'.repeat(rareteN) + '☆'.repeat(4 - rareteN)} ${rareteL}</div>` : ''}
+          ${isEquipped ? `<div class="inv-card-sub" style="margin-top:4px"><span class="inv-badge-equipped">✓ ${equippedLabel}</span></div>` : ''}
+        </div>
+        <span class="inv-card-qte">×${g.qte}</span>
+      </div>
+
+      ${chips.length ? `<div class="inv-card-stats">
+        ${chips.map(ch => `<div class="inv-stat-chip">
+          <span class="inv-stat-label">${ch.label}</span>
+          <span class="inv-stat-val" style="color:${ch.color}">${ch.val}</span>
+        </div>`).join('')}
+      </div>` : ''}
+
+      ${item.description ? `<div class="inv-card-desc">${item.description}</div>` : ''}
+
+      <div class="inv-card-footer">
+        <div class="inv-price-block">
+          ${pa ? `<span class="inv-price-buy" title="Prix d'achat">💰 ${pa} or</span>` : ''}
+          ${pa && pv ? `<span style="color:var(--border);font-size:.65rem">|</span>` : ''}
+          ${pv ? `<span class="inv-price-sell" title="Prix de revente">🔄 ${pv} or/u</span>` : ''}
+        </div>
+        ${canEdit ? `<div class="inv-actions">
+          ${item.source === 'boutique' ? `<button class="inv-btn inv-btn-sell"
+            onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${(item.nom || '').replace(/'/g, "\\'")}')">
+            🔄 Vendre
+          </button>` : ''}
+          ${otherChars.length ? `<button class="inv-btn inv-btn-send"
+            onclick="openSendInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
+            ↗ Envoyer
+          </button>` : ''}
+          <button class="inv-btn inv-btn-del"
+            onclick="openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
+            🗑
+          </button>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 
   let html = `
   <style>
@@ -1119,96 +1220,87 @@ function renderCharInventaire(c, canEdit) {
       padding:4px 8px;
     }
     .inv-btn-del:hover { background:rgba(255,107,107,.15);border-color:rgba(255,107,107,.5); }
+    .inv-group {
+      border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.015);
+      overflow:hidden;
+    }
+    .inv-group + .inv-group,
+    .inv-group + .inv-group-static,
+    .inv-group-static + .inv-group,
+    .inv-group-static + .inv-group-static { margin-top:.9rem; }
+    .inv-group > summary,
+    .inv-group-static-head {
+      list-style:none;display:flex;align-items:center;justify-content:space-between;gap:.75rem;
+      padding:.9rem 1rem;cursor:pointer;background:rgba(255,255,255,.02);
+      border-bottom:1px solid rgba(255,255,255,.04);
+    }
+    .inv-group > summary::-webkit-details-marker { display:none; }
+    .inv-group-title-wrap,
+    .inv-group-static-title-wrap { display:flex;align-items:center;gap:.55rem;min-width:0; }
+    .inv-group-title,
+    .inv-group-static-title { font-size:.88rem;font-weight:700;color:var(--text); }
+    .inv-group-meta,
+    .inv-group-static-meta { font-size:.74rem;color:var(--text-dim); }
+    .inv-group-count {
+      display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;
+      padding:0 .55rem;border-radius:999px;border:1px solid var(--border);
+      background:var(--bg-elevated);color:var(--text-muted);font-size:.74rem;font-weight:700;
+    }
+    .inv-group-chevron {
+      color:var(--text-dim);font-size:.82rem;transition:transform .15s ease;
+    }
+    .inv-group[open] .inv-group-chevron { transform:rotate(90deg); }
+    .inv-group-body,
+    .inv-group-static-body { padding:1rem;display:flex;flex-direction:column;gap:.6rem; }
   </style>
   <div class="cs-section">
     <div class="cs-section-title">🎒 Inventaire
-      <span class="cs-hint">${invRaw.length} objet${invRaw.length!==1?'s':''} · depuis la Boutique</span>
+      <span class="cs-hint">${invRaw.length} objet${invRaw.length !== 1 ? 's' : ''}</span>
     </div>`;
 
-  if (grouped.length===0) {
+  if (grouped.length === 0) {
     html += `<div class="cs-empty" style="padding:2rem;text-align:center">
       <div style="font-size:2rem;margin-bottom:.5rem;opacity:.3">🎒</div>
       <div style="font-size:.85rem;color:var(--text-dim)">Inventaire vide.</div>
       <div style="font-size:.75rem;color:var(--text-dim);margin-top:.3rem">Achetez des objets depuis la Boutique.</div>
     </div>`;
   } else {
-    html += `<div style="display:flex;flex-direction:column;gap:.6rem">`;
-    grouped.forEach(g => {
-      const item = g.item;
-      const pv   = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat)||0)*0.6);
-      const pa   = parseFloat(item.prixAchat) || 0;
-      const indicesB64 = btoa(JSON.stringify(g.indices));
-
-      const rareteN = parseInt(item.rarete)||0;
-      const rareteC = RARETE_COLORS[rareteN] || 'var(--border)';
-      const rareteL = RARETE_LABELS[rareteN] || '';
-      const equippedSlots = [...new Set(g.indices.flatMap(idx => equippedMap.get(idx) || []))];
-      const isEquipped = equippedSlots.length > 0;
-      const equippedLabel = isEquipped
-        ? `Équipé${equippedSlots.length ? ` · ${equippedSlots.join(' · ')}` : ''}`
-        : '';
-
-      // Construire les chips de stats dans l'ordre logique
-      const chips = [];
-      const bonusText = formatItemBonusText(item);
-      if (item.format)  chips.push({ label:'Format', val:item.format, color:'var(--text-muted)' });
-      if (item.slotArmure) chips.push({ label:'Slot', val:item.slotArmure, color:'var(--text-muted)' });
-      if (item.slotBijou) chips.push({ label:'Slot', val:item.slotBijou, color:'var(--text-muted)' });
-      if (item.typeArmure) chips.push({ label:'Type', val:item.typeArmure, color:'var(--text-muted)' });
-      if (item.degats)  chips.push({ label:'Dégâts',  val:`${item.degats}${item.degatsStat ? ` + ${statShort(item.degatsStat)}` : ''}`,  color:'#ff6b6b' });
-      if (item.toucherStat) chips.push({ label:'Toucher',  val:statShort(item.toucherStat), color:'#e8b84b' });
-      else if (item.toucher) chips.push({ label:'Toucher',  val:item.toucher, color:'#e8b84b' });
-      if (item.ca || item.ca === 0) chips.push({ label:'CA', val:item.ca, color:'#4f8cff' });
-      if (bonusText)   chips.push({ label:'Stats',    val:bonusText,   color:'#4f8cff' });
-      if (item.trait)   chips.push({ label:'Trait',    val:item.trait,   color:'#b47fff' });
-      if (item.type && !item.degats && !(item.ca || item.ca===0))
-                        chips.push({ label:'Type',     val:item.type,    color:'var(--text-muted)' });
-      if (item.effet)   chips.push({ label:'Effet',    val:item.effet,   color:'var(--text-muted)' });
-
-      html += `<div class="inv-card" style="border-left:3px solid ${rareteC}">
-        <div class="inv-card-header">
-          <div>
-            <div class="inv-card-title">${item.nom||'?'}</div>
-            ${rareteL?`<div class="inv-card-sub" style="color:${rareteC}">${'★'.repeat(rareteN)+'☆'.repeat(4-rareteN)} ${rareteL}</div>`:''}
-            ${isEquipped?`<div class="inv-card-sub" style="margin-top:4px"><span class="inv-badge-equipped">✓ ${equippedLabel}</span></div>`:''}
+    if (equipmentGroups.length) {
+      html += `<details class="inv-group" ${equipOpen ? 'open' : ''} ontoggle="window._charInvEquipOpen=this.open">
+        <summary>
+          <div class="inv-group-title-wrap">
+            <span>🛡️</span>
+            <div>
+              <div class="inv-group-title">Équipement</div>
+              <div class="inv-group-meta">Armes, armures, bijoux et accessoires équipables</div>
+            </div>
           </div>
-          <span class="inv-card-qte">×${g.qte}</span>
-        </div>
-
-        ${chips.length?`<div class="inv-card-stats">
-          ${chips.map(ch=>`<div class="inv-stat-chip">
-            <span class="inv-stat-label">${ch.label}</span>
-            <span class="inv-stat-val" style="color:${ch.color}">${ch.val}</span>
-          </div>`).join('')}
-        </div>`:''}
-
-        ${(!chips.length||true) && item.description?`<div class="inv-card-desc">${item.description}</div>`:''}
-
-        <div class="inv-card-footer">
-          <div class="inv-price-block">
-            ${pa?`<span class="inv-price-buy" title="Prix d'achat">💰 ${pa} or</span>`:''}
-            ${pa&&pv?`<span style="color:var(--border);font-size:.65rem">|</span>`:''}
-            ${pv?`<span class="inv-price-sell" title="Prix de revente">🔄 ${pv} or/u</span>`:''}
+          <div style="display:flex;align-items:center;gap:.55rem;flex-shrink:0">
+            <span class="inv-group-count">${totalQty(equipmentGroups)}</span>
+            <span class="inv-group-chevron">▶</span>
           </div>
-          ${canEdit?`<div class="inv-actions">
-            ${item.source==='boutique'?`<button class="inv-btn inv-btn-sell"
-              onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${(item.nom||'').replace(/'/g,"\\'")}')">
-              🔄 Vendre
-            </button>`:''}
-            ${otherChars.length?`<button class="inv-btn inv-btn-send"
-              onclick="openSendInvModal('${c.id}','${indicesB64}','${(item.nom||'').replace(/'/g,"\\'")}')">
-              ↗ Envoyer
-            </button>`:''}
-            <button class="inv-btn inv-btn-del"
-              onclick="openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom||'').replace(/'/g,"\\'")}')">
-              🗑
-            </button>
-          </div>`:''}
+        </summary>
+        <div class="inv-group-body">${renderInventoryCards(equipmentGroups)}</div>
+      </details>`;
+    }
+
+    if (otherGroups.length) {
+      html += `<div class="inv-group-static">
+        <div class="inv-group-static-head">
+          <div class="inv-group-static-title-wrap">
+            <span>🎒</span>
+            <div>
+              <div class="inv-group-static-title">Autres objets</div>
+              <div class="inv-group-static-meta">Consommables, ressources, quêtes et divers</div>
+            </div>
+          </div>
+          <span class="inv-group-count">${totalQty(otherGroups)}</span>
         </div>
+        <div class="inv-group-static-body">${renderInventoryCards(otherGroups)}</div>
       </div>`;
-    });
-    html += `</div>`;
+    }
   }
+
   html += `</div>`;
   return html;
 }
