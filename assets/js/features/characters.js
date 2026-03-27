@@ -620,7 +620,6 @@ function renderCharEquip(c, canEdit) {
   const dex = (s.dexterite||8)+(sb.dexterite||0);
 
   let html = '';
-  html += _renderInventaireBoutique(c);
 
   html += `<div class="cs-section">
     <div class="cs-section-title">⚔️ Armes
@@ -834,58 +833,170 @@ function toggleSortDetail(idx) {
 function renderCharInventaire(c, canEdit) {
   const invRaw = c.inventaire||[];
 
-  // ── Regrouper les items identiques (même nom + même itemId) ──────────────
+  // ── Regrouper les items identiques ──────────────────────────────────────
   const grouped = [];
   invRaw.forEach((item, realIdx) => {
     const key = (item.itemId||'') + '||' + (item.nom||'');
     const existing = grouped.find(g => g.key === key);
     if (existing) {
       existing.qte += parseInt(item.qte)||1;
-      existing.indices.push(realIdx); // indices réels dans c.inventaire
+      existing.indices.push(realIdx);
     } else {
-      grouped.push({ key, item: {...item}, qte: parseInt(item.qte)||1, indices: [realIdx] });
+      grouped.push({ key, item:{...item}, qte:parseInt(item.qte)||1, indices:[realIdx] });
     }
   });
 
   const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
 
-  let html = `<div class="cs-section">
+  const RARETE_COLORS = ['','#9ca3af','#4ade80','#60a5fa','#c084fc'];
+  const RARETE_LABELS = ['','Commun','Peu commun','Rare','Très rare'];
+
+  let html = `
+  <style>
+    .inv-card {
+      background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
+      overflow:hidden;transition:box-shadow .15s;
+    }
+    .inv-card:hover { box-shadow:0 4px 16px rgba(0,0,0,.35); }
+    .inv-card-header {
+      display:flex;align-items:flex-start;justify-content:space-between;
+      padding:.75rem 1rem .5rem;gap:.5rem;
+    }
+    .inv-card-title {
+      font-family:'Cinzel',serif;font-size:.9rem;font-weight:600;
+      color:var(--text);line-height:1.2;
+    }
+    .inv-card-sub {
+      font-size:.7rem;margin-top:2px;
+    }
+    .inv-card-qte {
+      font-family:'Cinzel',serif;font-size:.85rem;font-weight:700;
+      color:var(--text);background:var(--bg-elevated);border:1px solid var(--border);
+      border-radius:8px;padding:2px 10px;flex-shrink:0;white-space:nowrap;
+    }
+    .inv-card-stats {
+      display:flex;flex-wrap:wrap;gap:.3rem .6rem;
+      padding:0 1rem .6rem;
+    }
+    .inv-stat-chip {
+      display:flex;align-items:center;gap:.25rem;
+      background:var(--bg-elevated);border-radius:6px;
+      padding:2px 8px;font-size:.75rem;border:1px solid var(--border);
+    }
+    .inv-stat-label {
+      color:var(--text-dim);font-size:.65rem;text-transform:uppercase;letter-spacing:.5px;
+    }
+    .inv-stat-val { font-weight:600; }
+    .inv-card-desc {
+      padding:0 1rem .6rem;font-size:.78rem;color:var(--text-muted);
+      font-style:italic;line-height:1.5;
+    }
+    .inv-card-footer {
+      display:flex;align-items:center;justify-content:space-between;
+      padding:.5rem 1rem .65rem;border-top:1px solid var(--border);
+      background:rgba(0,0,0,.15);gap:.5rem;
+    }
+    .inv-price-block {
+      display:flex;align-items:center;gap:.5rem;font-size:.75rem;
+    }
+    .inv-price-buy { color:var(--text-dim); }
+    .inv-price-sell { color:var(--gold); }
+    .inv-actions {
+      display:flex;align-items:center;gap:.4rem;flex-shrink:0;
+    }
+    .inv-btn {
+      display:flex;align-items:center;gap:.3rem;
+      border-radius:8px;padding:4px 10px;cursor:pointer;
+      font-size:.73rem;font-weight:500;border:1px solid;
+      transition:all .15s;line-height:1;
+    }
+    .inv-btn-sell {
+      background:rgba(232,184,75,.08);border-color:rgba(232,184,75,.3);color:var(--gold);
+    }
+    .inv-btn-sell:hover { background:rgba(232,184,75,.18);border-color:rgba(232,184,75,.6); }
+    .inv-btn-send {
+      background:rgba(79,140,255,.08);border-color:rgba(79,140,255,.3);color:#4f8cff;
+    }
+    .inv-btn-send:hover { background:rgba(79,140,255,.18);border-color:rgba(79,140,255,.6); }
+    .inv-btn-del {
+      background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);color:#ff6b6b;
+      padding:4px 8px;
+    }
+    .inv-btn-del:hover { background:rgba(255,107,107,.15);border-color:rgba(255,107,107,.5); }
+  </style>
+  <div class="cs-section">
     <div class="cs-section-title">🎒 Inventaire
-      <span class="cs-hint">Les objets s'ajoutent depuis la Boutique</span>
+      <span class="cs-hint">${invRaw.length} objet${invRaw.length!==1?'s':''} · depuis la Boutique</span>
     </div>`;
 
   if (grouped.length===0) {
-    html += `<div class="cs-empty">Inventaire vide.</div>`;
+    html += `<div class="cs-empty" style="padding:2rem;text-align:center">
+      <div style="font-size:2rem;margin-bottom:.5rem;opacity:.3">🎒</div>
+      <div style="font-size:.85rem;color:var(--text-dim)">Inventaire vide.</div>
+      <div style="font-size:.75rem;color:var(--text-dim);margin-top:.3rem">Achetez des objets depuis la Boutique.</div>
+    </div>`;
   } else {
-    html += `<div class="cs-inv-list">`;
-    grouped.forEach((g) => {
+    html += `<div style="display:flex;flex-direction:column;gap:.6rem">`;
+    grouped.forEach(g => {
       const item = g.item;
-      const pv   = (item.prixVente||Math.round((item.prixAchat||0)*0.6));
-      const pvTot = pv * g.qte;
-      // Passer les indices sous forme JSON encodé pour la vente/envoi groupé
+      const pv   = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat)||0)*0.6);
+      const pa   = parseFloat(item.prixAchat) || 0;
       const indicesB64 = btoa(JSON.stringify(g.indices));
-      html += `<div class="cs-inv-row">
-        <div class="cs-inv-main">
-          <div class="cs-inv-name">${item.nom||'?'}</div>
-          ${item.degats||item.toucher||item.ca ? `<div class="cs-inv-stats">
-            ${item.degats  ? `<span class="cs-inv-chip" style="color:#ff6b6b">⚔️ ${item.degats}</span>` : ''}
-            ${item.toucher ? `<span class="cs-inv-chip" style="color:#e8b84b">🎯 ${item.toucher}</span>` : ''}
-            ${item.ca      ? `<span class="cs-inv-chip" style="color:#4f8cff">🛡️ CA ${item.ca}</span>` : ''}
-            ${item.stats   ? `<span class="cs-inv-chip" style="color:#4f8cff">${item.stats}</span>` : ''}
-            ${item.trait   ? `<span class="cs-inv-chip" style="color:#b47fff;font-style:italic">${item.trait}</span>` : ''}
-          </div>` : (item.description ? `<div class="cs-inv-desc">${item.description}</div>` : '')}
+
+      const rareteN = parseInt(item.rarete)||0;
+      const rareteC = RARETE_COLORS[rareteN] || 'var(--border)';
+      const rareteL = RARETE_LABELS[rareteN] || '';
+
+      // Construire les chips de stats dans l'ordre logique
+      const chips = [];
+      if (item.format)  chips.push({ label:'Format', val:item.format, color:'var(--text-muted)' });
+      if (item.degats)  chips.push({ label:'Dégâts',  val:item.degats,  color:'#ff6b6b' });
+      if (item.toucher) chips.push({ label:'Toucher',  val:item.toucher, color:'#e8b84b' });
+      if (item.ca)      chips.push({ label:'CA',       val:item.ca,      color:'#4f8cff' });
+      if (item.stats)   chips.push({ label:'Stats',    val:item.stats,   color:'#4f8cff' });
+      if (item.trait)   chips.push({ label:'Trait',    val:item.trait,   color:'#b47fff' });
+      if (item.type && !item.degats && !item.ca)
+                        chips.push({ label:'Type',     val:item.type,    color:'var(--text-muted)' });
+      if (item.effet)   chips.push({ label:'Effet',    val:item.effet,   color:'var(--text-muted)' });
+
+      html += `<div class="inv-card" style="border-left:3px solid ${rareteC}">
+        <div class="inv-card-header">
+          <div>
+            <div class="inv-card-title">${item.nom||'?'}</div>
+            ${rareteL?`<div class="inv-card-sub" style="color:${rareteC}">${'★'.repeat(rareteN)+'☆'.repeat(4-rareteN)} ${rareteL}</div>`:''}
+          </div>
+          <span class="inv-card-qte">×${g.qte}</span>
         </div>
-        <div class="cs-inv-meta">
-          ${item.type?`<span class="badge badge-gold" style="font-size:0.68rem">${item.type}</span>`:''}
-          <span class="cs-inv-qte">×${g.qte}</span>
-          ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn"
-            onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${item.nom||''}')"
-            title="Vendre (${pv} or/u)">🔄 ${pv} or</button>`:''}
-          ${canEdit&&otherChars.length?`<button class="cs-send-btn"
-            onclick="openSendInvModal('${c.id}','${indicesB64}','${item.nom||''}')"
-            title="Envoyer à un autre personnage">📤</button>`:''}
-          ${canEdit?`<button class="btn-icon"
-            onclick="openDeleteInvModal('${c.id}','${indicesB64}','${item.nom||''}')">🗑️</button>`:''}
+
+        ${chips.length?`<div class="inv-card-stats">
+          ${chips.map(ch=>`<div class="inv-stat-chip">
+            <span class="inv-stat-label">${ch.label}</span>
+            <span class="inv-stat-val" style="color:${ch.color}">${ch.val}</span>
+          </div>`).join('')}
+        </div>`:''}
+
+        ${(!chips.length||true) && item.description?`<div class="inv-card-desc">${item.description}</div>`:''}
+
+        <div class="inv-card-footer">
+          <div class="inv-price-block">
+            ${pa?`<span class="inv-price-buy" title="Prix d'achat">💰 ${pa} or</span>`:''}
+            ${pa&&pv?`<span style="color:var(--border);font-size:.65rem">|</span>`:''}
+            ${pv?`<span class="inv-price-sell" title="Prix de revente">🔄 ${pv} or/u</span>`:''}
+          </div>
+          ${canEdit?`<div class="inv-actions">
+            ${item.source==='boutique'?`<button class="inv-btn inv-btn-sell"
+              onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${(item.nom||'').replace(/'/g,"\\'")}')">
+              🔄 Vendre
+            </button>`:''}
+            ${otherChars.length?`<button class="inv-btn inv-btn-send"
+              onclick="openSendInvModal('${c.id}','${indicesB64}','${(item.nom||'').replace(/'/g,"\\'")}')">
+              ↗ Envoyer
+            </button>`:''}
+            <button class="inv-btn inv-btn-del"
+              onclick="openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom||'').replace(/'/g,"\\'")}')">
+              🗑
+            </button>
+          </div>`:''}
         </div>
       </div>`;
     });
