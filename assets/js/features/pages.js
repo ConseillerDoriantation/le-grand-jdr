@@ -494,28 +494,13 @@ const PAGES = {
 
   // ─── STORY ──────────────────────────────────────────────────────────────────
   async story() {
-    const items = await loadCollectionOrdered('story', 'date');
+    // Délégué à story.js qui override cette méthode au chargement
+    // Fallback minimal si story.js n'est pas encore chargé
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📚 La Trame</div><div class="page-subtitle">L'histoire de votre aventure</div></div>`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" onclick="openStoryModal()">+ Ajouter un événement</button></div>`;
-    if (items.length === 0) {
-      html += `<div class="empty-state"><div class="icon">📚</div><p>L'aventure n'a pas encore commencé...</p></div>`;
-    } else {
-      html += `<div class="grid-2" style="gap:2rem"><div>`;
-      const events   = items.filter(i => i.type !== 'mission');
-      const missions = items.filter(i => i.type === 'mission');
-      html += `<div class="card-header" style="margin-bottom:1rem">⚔️ Chronique</div><div class="timeline">`;
-      events.forEach(e => {
-        html += `<div class="timeline-item"><div class="timeline-dot" style="${e.type === 'combat' ? 'background:var(--crimson);border-color:var(--crimson-light)' : ''}"></div><div class="timeline-date">${e.date || ''} ${e.acte ? `— ${e.acte}` : ''}</div><div class="timeline-title">${e.titre || 'Événement'}</div><div class="timeline-desc">${e.description || ''}</div>${STATE.isAdmin ? `<div style="margin-top:0.4rem"><button class="btn-icon" onclick="editStory('${e.id}')">✏️</button><button class="btn-icon" onclick="deleteStory('${e.id}')">🗑️</button></div>` : ''}</div>`;
-      });
-      html += `</div></div><div><div class="card-header" style="margin-bottom:1rem">🎯 Missions</div>`;
-      missions.forEach(m => {
-        html += `<div class="card" style="margin-bottom:1rem;padding:1rem"><div style="display:flex;justify-content:space-between;align-items:start"><div><div style="font-family:'Cinzel',serif;font-size:0.9rem;color:var(--text);margin-bottom:0.3rem">${m.titre || 'Mission'}</div><div style="font-size:0.82rem;color:var(--text-muted);font-style:italic">${m.description || ''}</div></div><div style="display:flex;gap:0.4rem;align-items:center"><span class="badge badge-${m.statut === 'Terminée' ? 'green' : m.statut === 'En cours' ? 'gold' : 'blue'}">${m.statut || 'En cours'}</span>${STATE.isAdmin ? `<button class="btn-icon" onclick="editStory('${m.id}')">✏️</button><button class="btn-icon" onclick="deleteStory('${m.id}')">🗑️</button>` : ''}</div></div>${m.recompense ? `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--gold)">💰 Récompense: ${m.recompense}</div>` : ''}</div>`;
-      });
-      if (missions.length === 0) html += `<div style="color:var(--text-dim);font-style:italic;font-size:0.85rem">Aucune mission active.</div>`;
-      html += `</div></div>`;
-    }
-    content.innerHTML = html;
+    content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)">
+      <div style="font-size:2rem;margin-bottom:0.5rem">⏳</div>
+      <p>Chargement de la trame…</p>
+    </div>`;
   },
 
   // ─── PLAYERS ────────────────────────────────────────────────────────────────
