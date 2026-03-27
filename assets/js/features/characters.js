@@ -500,42 +500,50 @@ function renderCharCarac(c, canEdit) {
 }
 
 function _renderInventaireBoutique(char) {
-  const inv = (char.inventaire || []).filter(i => i.source === 'boutique');
-  if (!inv.length) return '';
+  const invRaw = (char.inventaire || []).map((item, i) => ({ item, i })).filter(({ item }) => item.source === 'boutique');
+  if (!invRaw.length) return '';
 
   const RARETE_LABELS = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
   const RARETE_COLORS = ['', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc'];
-
   const canEdit = window._canEditChar ?? STATE.isAdmin;
 
-  const cards = inv.map((item) => {
-    const realIdx = (char.inventaire || []).findIndex((x) =>
-      x.source === 'boutique' && x === item
-    );
+  // ── Regrouper par itemId + nom ──────────────────────────────────────────
+  const grouped = [];
+  invRaw.forEach(({ item, i }) => {
+    const key = (item.itemId||'') + '||' + (item.nom||'');
+    const existing = grouped.find(g => g.key === key);
+    if (existing) {
+      existing.qte += parseInt(item.qte)||1;
+      existing.indices.push(i);
+    } else {
+      grouped.push({ key, item: {...item}, qte: parseInt(item.qte)||1, indices: [i] });
+    }
+  });
 
-    const rareteN = parseInt(item.rarete) || 0;
-    const rareteC = RARETE_COLORS[rareteN] || '#555';
-    const rareteL = RARETE_LABELS[rareteN] || '';
+  const cards = grouped.map(g => {
+    const item = g.item;
+    const indicesB64 = btoa(JSON.stringify(g.indices));
+    const rareteN  = parseInt(item.rarete) || 0;
+    const rareteC  = RARETE_COLORS[rareteN] || '#555';
+    const rareteL  = RARETE_LABELS[rareteN] || '';
     const prixAchat = parseFloat(item.prixAchat) || 0;
     const prixVente = parseFloat(item.prixVente) || Math.round(prixAchat * 0.6);
 
     const infos = [];
-    if (item.format)      infos.push({ label: 'Format',   val: item.format });
-    if (item.degats)      infos.push({ label: '⚔️ Dégâts', val: item.degats,  color: '#ff6b6b' });
-    if (item.toucher)     infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
-    if (item.ca)          infos.push({ label: '🛡️ CA',      val: item.ca });
-    if (item.stats)       infos.push({ label: 'Stats',     val: item.stats,   color: '#4f8cff' });
-    if (item.trait)       infos.push({ label: 'Trait',     val: item.trait,   color: '#b47fff', italic: true });
-    if (item.type)        infos.push({ label: 'Type',      val: item.type });
-    if (item.effet)       infos.push({ label: 'Effet',     val: item.effet });
-    if (item.description) infos.push({ label: 'Desc.',     val: item.description, muted: true });
+    if (item.format)      infos.push({ label: 'Format',    val: item.format });
+    if (item.degats)      infos.push({ label: '⚔️ Dégâts',  val: item.degats,  color: '#ff6b6b' });
+    if (item.toucher)     infos.push({ label: 'Toucher',    val: item.toucher, color: '#e8b84b' });
+    if (item.ca)          infos.push({ label: '🛡️ CA',       val: item.ca });
+    if (item.stats)       infos.push({ label: 'Stats',      val: item.stats,   color: '#4f8cff' });
+    if (item.trait)       infos.push({ label: 'Trait',      val: item.trait,   color: '#b47fff', italic: true });
+    if (item.type)        infos.push({ label: 'Type',       val: item.type });
+    if (item.effet)       infos.push({ label: 'Effet',      val: item.effet });
+    if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
 
     return `
-    <div style="
-      background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
-      padding:.85rem 1rem;display:flex;flex-direction:column;gap:.5rem;
-      border-left:3px solid ${rareteC};
-    ">
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
+      padding:.85rem 1rem;display:flex;flex-direction:column;gap:.5rem;border-left:3px solid ${rareteC}">
+
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
         <div>
           <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600;line-height:1.2">
@@ -543,10 +551,8 @@ function _renderInventaireBoutique(char) {
           </div>
           ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${'★'.repeat(rareteN)+'☆'.repeat(4-rareteN)} ${rareteL}</div>` : ''}
         </div>
-        <div style="display:flex;align-items:center;gap:.4rem;flex-shrink:0">
-          <span style="font-size:.72rem;background:var(--bg-elevated);border:1px solid var(--border);
-            border-radius:999px;padding:2px 8px;color:var(--text-muted)">×${item.qte || 1}</span>
-        </div>
+        <span style="font-size:.72rem;background:var(--bg-elevated);border:1px solid var(--border);
+          border-radius:999px;padding:2px 8px;color:var(--text-muted);flex-shrink:0">×${g.qte}</span>
       </div>
 
       ${infos.length ? `
@@ -554,7 +560,7 @@ function _renderInventaireBoutique(char) {
         ${infos.map(info => `
           <div style="display:flex;align-items:baseline;gap:.3rem;font-size:.78rem">
             <span style="color:var(--text-dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px">${info.label}</span>
-            <span style="color:${info.color || 'var(--text-muted)'};${info.italic ? 'font-style:italic' : ''};font-weight:${info.color ? '600' : '400'}">${info.val}</span>
+            <span style="color:${info.color||'var(--text-muted)'};${info.italic?'font-style:italic':''};font-weight:${info.color?'600':'400'}">${info.val}</span>
           </div>`).join('')}
       </div>` : ''}
 
@@ -563,11 +569,11 @@ function _renderInventaireBoutique(char) {
         <div style="font-size:.72rem;color:var(--text-dim)">
           <span title="Prix d'achat">💰 ${prixAchat} or</span>
           <span style="margin:0 .3rem;opacity:.4">·</span>
-          <span title="Prix de revente" style="color:var(--gold)">🔄 ${prixVente} or</span>
+          <span title="Prix de revente" style="color:var(--gold)">🔄 ${prixVente} or/u</span>
         </div>
         ${canEdit ? `
         <div style="display:flex;gap:.4rem;align-items:center">
-          <button onclick="sellInvItem('${char.id}', ${realIdx})"
+          <button onclick="openSellInvModal('${char.id}','${indicesB64}',${prixVente},'${item.nom||''}')"
             style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
             color:var(--gold);transition:all .15s"
@@ -576,13 +582,13 @@ function _renderInventaireBoutique(char) {
             🔄 Vendre
           </button>
           ${(STATE.characters||[]).filter(x=>x.id!==char.id).length ? `
-          <button onclick="openSendInvModal('${char.id}', ${realIdx})"
+          <button onclick="openSendInvModal('${char.id}','${indicesB64}','${item.nom||''}')"
             style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
             color:#4f8cff;transition:all .15s"
             onmouseover="this.style.background='rgba(79,140,255,.15)'"
             onmouseout="this.style.background='rgba(79,140,255,.08)'"
-            title="Envoyer à un autre personnage">
+            title="Envoyer">
             📤 Envoyer
           </button>` : ''}
         </div>` : ''}
@@ -596,11 +602,9 @@ function _renderInventaireBoutique(char) {
       margin-bottom:.75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">
       🛒 Inventaire Boutique
       <span style="font-size:.65rem;background:var(--bg-elevated);border:1px solid var(--border);
-        border-radius:999px;padding:1px 7px;margin-left:.4rem;color:var(--text-dim)">${inv.length}</span>
+        border-radius:999px;padding:1px 7px;margin-left:.4rem;color:var(--text-dim)">${grouped.reduce((s,g)=>s+g.qte,0)}</span>
     </div>
-    <div style="display:flex;flex-direction:column;gap:.6rem">
-      ${cards}
-    </div>
+    <div style="display:flex;flex-direction:column;gap:.6rem">${cards}</div>
   </div>`;
 }
 
@@ -828,20 +832,38 @@ function toggleSortDetail(idx) {
 
 
 function renderCharInventaire(c, canEdit) {
-  const inv = c.inventaire||[];
+  const invRaw = c.inventaire||[];
+
+  // ── Regrouper les items identiques (même nom + même itemId) ──────────────
+  const grouped = [];
+  invRaw.forEach((item, realIdx) => {
+    const key = (item.itemId||'') + '||' + (item.nom||'');
+    const existing = grouped.find(g => g.key === key);
+    if (existing) {
+      existing.qte += parseInt(item.qte)||1;
+      existing.indices.push(realIdx); // indices réels dans c.inventaire
+    } else {
+      grouped.push({ key, item: {...item}, qte: parseInt(item.qte)||1, indices: [realIdx] });
+    }
+  });
+
+  const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
+
   let html = `<div class="cs-section">
     <div class="cs-section-title">🎒 Inventaire
       <span class="cs-hint">Les objets s'ajoutent depuis la Boutique</span>
     </div>`;
 
-  if (inv.length===0) {
+  if (grouped.length===0) {
     html += `<div class="cs-empty">Inventaire vide.</div>`;
   } else {
     html += `<div class="cs-inv-list">`;
-    inv.forEach((item,i) => {
-      const pv = item.prixVente || (item.prixAchat ? Math.round(item.prixAchat * 0.6) : 0);
-      // Autres personnages disponibles pour l'envoi (pas soi-même)
-      const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
+    grouped.forEach((g) => {
+      const item = g.item;
+      const pv   = (item.prixVente||Math.round((item.prixAchat||0)*0.6));
+      const pvTot = pv * g.qte;
+      // Passer les indices sous forme JSON encodé pour la vente/envoi groupé
+      const indicesB64 = btoa(JSON.stringify(g.indices));
       html += `<div class="cs-inv-row">
         <div class="cs-inv-main">
           <div class="cs-inv-name">${item.nom||'?'}</div>
@@ -855,10 +877,15 @@ function renderCharInventaire(c, canEdit) {
         </div>
         <div class="cs-inv-meta">
           ${item.type?`<span class="badge badge-gold" style="font-size:0.68rem">${item.type}</span>`:''}
-          <span class="cs-inv-qte">×${item.qte||1}</span>
-          ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn" onclick="sellInvItem('${c.id}',${i})" title="Vendre (${pv} or)">🔄 ${pv} or</button>`:''}
-          ${canEdit&&otherChars.length?`<button class="cs-send-btn" onclick="openSendInvModal('${c.id}',${i})" title="Envoyer à un autre personnage">📤</button>`:''}
-          ${canEdit?`<button class="btn-icon" onclick="deleteInvItem(${i})">🗑️</button>`:''}
+          <span class="cs-inv-qte">×${g.qte}</span>
+          ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn"
+            onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${item.nom||''}')"
+            title="Vendre (${pv} or/u)">🔄 ${pv} or</button>`:''}
+          ${canEdit&&otherChars.length?`<button class="cs-send-btn"
+            onclick="openSendInvModal('${c.id}','${indicesB64}','${item.nom||''}')"
+            title="Envoyer à un autre personnage">📤</button>`:''}
+          ${canEdit?`<button class="btn-icon"
+            onclick="openDeleteInvModal('${c.id}','${indicesB64}','${item.nom||''}')">🗑️</button>`:''}
         </div>
       </div>`;
     });
@@ -1164,102 +1191,208 @@ function inlineEditCompteField(type, idx, field, el) {
 }
 
 
-async function sellInvItem(charId, invIndex) {
+// ── Décoder les indices depuis base64 ─────────────────────────────────────────
+function _decodeIndices(b64) {
+  try { return JSON.parse(atob(b64)); } catch { return []; }
+}
+
+// ── Modal vente avec quantité ─────────────────────────────────────────────────
+function openSellInvModal(charId, indicesB64, prixVente, nom) {
+  const indices = _decodeIndices(indicesB64);
+  const maxQte  = indices.length;
+  if (maxQte === 0) return;
+  openModal(`🔄 Vendre — ${nom}`, `
+    <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
+      <strong style="color:var(--gold)">${prixVente} or</strong> par unité · ${maxQte} en stock
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
+      <label style="flex-shrink:0">Quantité</label>
+      <div style="display:flex;align-items:center;gap:.4rem">
+        <button type="button" onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event('input'))"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
+        <input type="number" id="sell-qty" min="1" max="${maxQte}" value="${maxQte}"
+          style="width:60px;text-align:center" class="input-field"
+          oninput="document.getElementById('sell-total').textContent=(Math.min(Math.max(1,parseInt(this.value)||1),${maxQte})*${prixVente})+' or'">
+        <button type="button" onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event('input'))"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
+      </div>
+      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="sell-total" style="color:var(--gold)">${maxQte*prixVente} or</strong></span>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem">
+      <button class="btn btn-gold" style="flex:1" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
+        🔄 Vendre
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>
+  `);
+}
+
+async function sellInvItemBulk(charId, indicesB64, prixVente) {
   const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
 
-  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const item = inv[invIndex];
+  const allIndices = _decodeIndices(indicesB64);
+  const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
+  const indicesToSell = allIndices.slice(0, qty); // vendre les N premiers
+
+  const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const item     = inv[indicesToSell[0]];
   if (!item) return;
+  const itemNom  = item.nom || 'objet';
+  const totalPrix = prixVente * qty;
 
-  const prixVente = parseFloat(item.prixVente) || 0;
-  const itemNom = item.nom || 'cet objet';
+  // Retirer les items vendus (du plus grand index au plus petit pour ne pas décaler)
+  const sorted = [...indicesToSell].sort((a,b)=>b-a);
+  sorted.forEach(idx => inv.splice(idx, 1));
 
-  if (!confirm(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
-
-  if (item.itemId && window.sellInvItemFromShop) {
-    await window.sellInvItemFromShop(charId, invIndex);
-    // Rafraîchir immédiatement après la vente via boutique
-    refreshOrDisplay(c);
-    renderCharSheet(c, window._currentCharTab || 'inventaire');
-    return;
-  }
-
-  const compte = c.compte || { recettes: [], depenses: [] };
-  const recettes = [...(compte.recettes || [])];
+  // Créditer l'or
+  const compte   = c.compte || { recettes:[], depenses:[] };
+  const recettes = [...(compte.recettes||[])];
   recettes.push({
-    date: new Date().toLocaleDateString('fr-FR'),
-    libelle: `Vente : ${itemNom}`,
-    montant: prixVente,
+    date:    new Date().toLocaleDateString('fr-FR'),
+    libelle: qty > 1 ? `Vente ×${qty} : ${itemNom}` : `Vente : ${itemNom}`,
+    montant: totalPrix,
   });
 
-  inv.splice(invIndex, 1);
+  // Réincrémenter le stock boutique si besoin
+  if (item.itemId && window.sellInvItemFromShop) {
+    // On réincrémente N fois dans la boutique
+    for (let i = 0; i < qty; i++) {
+      await window._restockShopItem?.(item.itemId);
+    }
+  }
 
   await updateInCol('characters', charId, {
     inventaire: inv,
     compte: { ...compte, recettes },
   });
-
   c.inventaire = inv;
-  c.compte = { ...compte, recettes };
+  c.compte     = { ...compte, recettes };
 
-  showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
-
+  closeModal();
+  showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !`, 'success');
   refreshOrDisplay(c);
+  renderCharSheet(c, window._currentCharTab || 'inventaire');
+}
+
+// Alias pour compatibilité avec l'ancien code
+async function sellInvItem(charId, invIndex) {
+  // Construire indicesB64 depuis un index unique
+  const b64 = btoa(JSON.stringify([invIndex]));
+  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const item = (c?.inventaire||[])[invIndex];
+  const pv = parseFloat(item?.prixVente) || Math.round((parseFloat(item?.prixAchat)||0)*0.6);
+  openSellInvModal(charId, b64, pv, item?.nom||'objet');
+}
+
+// ══════════════════════════════════════════════
+// SUPPRIMER avec quantité
+// ══════════════════════════════════════════════
+function openDeleteInvModal(charId, indicesB64, nom) {
+  const indices = _decodeIndices(indicesB64);
+  const maxQte  = indices.length;
+  openModal(`🗑️ Supprimer — ${nom}`, `
+    <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
+      ${maxQte} exemplaire${maxQte>1?'s':''} dans l'inventaire
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
+      <label style="flex-shrink:0">Quantité</label>
+      <div style="display:flex;align-items:center;gap:.4rem">
+        <button type="button" onclick="this.nextElementSibling.stepDown()"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">−</button>
+        <input type="number" id="del-qty" min="1" max="${maxQte}" value="${maxQte}" style="width:60px;text-align:center" class="input-field">
+        <button type="button" onclick="this.previousElementSibling.stepUp()"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">+</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem">
+      <button class="btn btn-outline btn-sm" style="flex:1;color:#ff6b6b;border-color:rgba(255,107,107,.35)"
+        onclick="deleteInvItemBulk('${charId}','${indicesB64}')">🗑️ Supprimer</button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>
+  `);
+}
+
+async function deleteInvItemBulk(charId, indicesB64) {
+  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  if (!c) return;
+  const allIndices = _decodeIndices(indicesB64);
+  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const sorted = allIndices.slice(0, qty).sort((a,b)=>b-a);
+  sorted.forEach(idx => inv.splice(idx, 1));
+  await updateInCol('characters', charId, { inventaire: inv });
+  c.inventaire = inv;
+  closeModal();
+  showNotif('Objet(s) supprimé(s).', 'success');
   renderCharSheet(c, window._currentCharTab || 'inventaire');
 }
 
 // ══════════════════════════════════════════════
 // ENVOYER UN OBJET À UN AUTRE PERSONNAGE
 // ══════════════════════════════════════════════
-function openSendInvModal(charId, invIndex) {
+function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
-  const item = (c.inventaire||[])[invIndex];
+
+  // Accepter soit un indicesB64 (nouveau) soit un index numérique (ancien)
+  let indices;
+  if (typeof indicesB64OrIndex === 'number') {
+    indices = [indicesB64OrIndex];
+  } else {
+    indices = _decodeIndices(indicesB64OrIndex);
+  }
+  if (!indices.length) return;
+
+  const item    = (c.inventaire||[])[indices[0]];
   if (!item) return;
+  const nom     = nomOrUnused || item.nom || 'Objet';
+  const maxQte  = indices.length;
+  const b64     = btoa(JSON.stringify(indices));
 
   const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
   if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
 
-  openModal(`📤 Envoyer — ${item.nom||'Objet'}`, `
-    <div style="margin-bottom:1rem">
-      <div style="font-family:'Cinzel',serif;font-size:.9rem;color:var(--text);margin-bottom:.25rem">${item.nom||'?'}</div>
-      ${item.degats||item.toucher||item.ca ? `<div style="font-size:.78rem;color:var(--text-dim);display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.25rem">
-        ${item.degats  ? `<span style="color:#ff6b6b">⚔️ ${item.degats}</span>` : ''}
-        ${item.toucher ? `<span style="color:#e8b84b">🎯 ${item.toucher}</span>` : ''}
-        ${item.ca      ? `<span style="color:#4f8cff">🛡️ CA ${item.ca}</span>` : ''}
-        ${item.stats   ? `<span style="color:#4f8cff">${item.stats}</span>` : ''}
-        ${item.trait   ? `<span style="color:#b47fff;font-style:italic">${item.trait}</span>` : ''}
-      </div>` : (item.description ? `<div style="font-size:.78rem;color:var(--text-dim)">${item.description}</div>` : '')}
+  openModal(`📤 Envoyer — ${nom}`, `
+    <div style="margin-bottom:.75rem;font-size:.85rem;color:var(--text-muted)">
+      ${maxQte} exemplaire${maxQte>1?'s':''} disponible${maxQte>1?'s':''}
     </div>
-
+    ${maxQte > 1 ? `
+    <div class="form-group" style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem">
+      <label style="flex-shrink:0">Quantité</label>
+      <div style="display:flex;align-items:center;gap:.4rem">
+        <button type="button" onclick="this.nextElementSibling.stepDown()"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">−</button>
+        <input type="number" id="send-qty" min="1" max="${maxQte}" value="1"
+          style="width:60px;text-align:center" class="input-field">
+        <button type="button" onclick="this.previousElementSibling.stepUp()"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">+</button>
+      </div>
+    </div>` : ''}
     <div class="form-group">
       <label>Envoyer à</label>
-      <div style="display:flex;flex-direction:column;gap:.4rem" id="send-char-list">
+      <div style="display:flex;flex-direction:column;gap:.4rem">
         ${otherChars.map(target => `
           <label style="display:flex;align-items:center;gap:.75rem;padding:.6rem .8rem;
-            border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);
-            cursor:pointer;transition:all .15s"
+            border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;transition:all .15s"
             onmouseover="this.style.borderColor='var(--gold)';this.style.background='rgba(232,184,75,.06)'"
             onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
-            <input type="radio" name="send-target" value="${target.id}"
-              style="accent-color:var(--gold)">
+            <input type="radio" name="send-target" value="${target.id}" style="accent-color:var(--gold)">
             <div>
               <div style="font-family:'Cinzel',serif;font-size:.82rem;color:var(--text)">${target.nom||'?'}</div>
-              ${target.ownerPseudo ? `<div style="font-size:.68rem;color:var(--text-dim)">${target.ownerPseudo}</div>` : ''}
+              ${target.ownerPseudo?`<div style="font-size:.68rem;color:var(--text-dim)">${target.ownerPseudo}</div>`:''}
             </div>
           </label>`).join('')}
       </div>
     </div>
-
-    <button class="btn btn-gold" style="width:100%;margin-top:.75rem"
-      onclick="sendInvItem('${charId}', ${invIndex})">
-      📤 Envoyer
-    </button>
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-gold" style="flex:1" onclick="sendInvItem('${charId}','${b64}')">📤 Envoyer</button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>
   `);
 }
 
-async function sendInvItem(fromCharId, invIndex) {
+async function sendInvItem(fromCharId, indicesB64) {
   const fromChar = STATE.characters?.find(x => x.id === fromCharId) || STATE.activeChar;
   if (!fromChar) return;
 
@@ -1269,32 +1402,35 @@ async function sendInvItem(fromCharId, invIndex) {
   const toChar = STATE.characters?.find(x => x.id === targetId);
   if (!toChar) { showNotif('Personnage introuvable.','error'); return; }
 
+  const allIndices = _decodeIndices(indicesB64);
+  const maxQte  = allIndices.length;
+  const qtyEl   = document.getElementById('send-qty');
+  const qty     = qtyEl ? Math.min(Math.max(1, parseInt(qtyEl.value)||1), maxQte) : 1;
+  const toSend  = allIndices.slice(0, qty);
+
   const fromInv = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
-  const item    = fromInv[invIndex];
-  if (!item) return;
+  const firstItem = fromInv[toSend[0]];
+  if (!firstItem) return;
 
-  if (!confirm(`Envoyer "${item.nom||'cet objet'}" à ${toChar.nom||'?'} ?`)) return;
+  // Objets à transférer
+  const itemsToTransfer = toSend.map(idx => ({...fromInv[idx]}));
 
-  // Retirer de l'inventaire source
-  fromInv.splice(invIndex, 1);
+  // Retirer de la source (du plus grand au plus petit)
+  [...toSend].sort((a,b)=>b-a).forEach(idx => fromInv.splice(idx, 1));
 
-  // Ajouter à l'inventaire cible
+  // Ajouter à la cible
   const toInv = Array.isArray(toChar.inventaire) ? [...toChar.inventaire] : [];
-  toInv.push({ ...item }); // copie complète de l'objet
+  itemsToTransfer.forEach(it => toInv.push(it));
 
-  // Sauvegarder les deux personnages
   await Promise.all([
     updateInCol('characters', fromCharId, { inventaire: fromInv }),
     updateInCol('characters', targetId,   { inventaire: toInv }),
   ]);
-
   fromChar.inventaire = fromInv;
   toChar.inventaire   = toInv;
 
   closeModal();
-  showNotif(`📤 "${item.nom||'Objet'}" envoyé à ${toChar.nom||'?'} !`, 'success');
-
-  // Rafraîchir la fiche du personnage actif
+  showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !`, 'success');
   renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
 }
 async function adjustStat(stat, delta, charId) {
@@ -1861,7 +1997,9 @@ function deleteCharPhoto(id) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   selectChar, filterAdminChars,
-  sellInvItem, openSendInvModal, sendInvItem,
+  sellInvItem, openSellInvModal, sellInvItemBulk,
+  openDeleteInvModal, deleteInvItemBulk,
+  openSendInvModal, sendInvItem,
   calcOr, refreshOrDisplay, calcPalier,
   selectNoyau, runeIncrement, runeDecrement,
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
