@@ -565,8 +565,6 @@ async function openStoryModal(item = null) {
           Glisser ou <span style="color:var(--gold)">cliquer pour choisir</span>
         </div>
       </div>
-      <input type="file" id="st-file" accept="image/*" style="display:none"
-        onchange="window._stFile(this.files[0])">
       <div id="st-crop-wrap" style="display:none;margin-top:.75rem">
         <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez — ratio 4:3 verrouillé</div>
         <canvas id="st-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
@@ -668,13 +666,39 @@ async function openStoryModal(item = null) {
     </button>
   `);
 
-  window._stFile = (file) => {
+  // ── Input file créé en JS (évite l'orphelin DOM via innerHTML) ────────────
+  const stFileInput = document.createElement('input');
+  stFileInput.type   = 'file';
+  stFileInput.id     = 'st-file';
+  stFileInput.accept = 'image/*';
+  stFileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0;pointer-events:none';
+  document.body.appendChild(stFileInput);
+
+  const handleStFile = (file) => {
     if(!file?.type.startsWith('image/')) return;
     if(file.size>5*1024*1024){ showNotif('Image trop lourde (max 5 Mo).','error'); return; }
     const r=new FileReader();
     r.onload=(e)=>_initStCrop(e.target.result);
     r.readAsDataURL(file);
   };
+
+  stFileInput.addEventListener('change', () => handleStFile(stFileInput.files[0]));
+  window._stFile = handleStFile;
+
+  // Rebind drop zone avec event listeners natifs
+  const stDropZone = document.getElementById('st-drop-zone');
+  if (stDropZone) {
+    stDropZone.onclick     = () => stFileInput.click();
+    stDropZone.ondragover  = (e) => { e.preventDefault(); stDropZone.style.borderColor = 'var(--gold)'; };
+    stDropZone.ondragleave = ()  => { stDropZone.style.borderColor = 'var(--border-strong)'; };
+    stDropZone.ondrop      = (e) => { e.preventDefault(); stDropZone.style.borderColor = 'var(--border-strong)'; handleStFile(e.dataTransfer.files[0]); };
+  }
+
+  // Nettoyer quand le modal se ferme
+  const stObs = new MutationObserver(() => {
+    if (!document.getElementById('st-drop-zone')) { stFileInput.remove(); stObs.disconnect(); }
+  });
+  stObs.observe(document.body, { childList: true, subtree: true });
 
   // Toggle visuel d'une card lien
   window._toggleLien = (id) => {
