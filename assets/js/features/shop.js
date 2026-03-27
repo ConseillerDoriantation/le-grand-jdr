@@ -416,7 +416,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
         <div class="sh-item-prix-achat">💰 ${prix} or</div>
         <div class="sh-item-prix-vente" title="Prix de revente (60%)">🔄 ${prixVente} or</div>
       </div>
-      ${hasChar ? (
+      ${!STATE.isAdmin && hasChar ? (
         epuise
           ? `<button class="btn sh-buy-btn" disabled style="opacity:0.4;cursor:not-allowed">Épuisé</button>`
           : `<button class="btn sh-buy-btn" onclick="buyItem('${item.id}')">🛒 Acheter</button>`
@@ -441,98 +441,134 @@ function shopSetChar(charId) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ACHAT — construit l'item inventaire structuré selon le template
+// ACHAT — modal avec sélection de quantité
 // ══════════════════════════════════════════════════════════════════════════════
 async function buyItem(itemId) {
   const charId = window._shopCharId;
-  if (!charId) { showNotif('Sélectionne un personnage d\'abord.', 'error'); return; }
-
+  if (!charId) { showNotif("Sélectionne un personnage d\'abord.", 'error'); return; }
   const item = _items.find(i => i.id === itemId);
   if (!item) return;
-
-  // Vérifier stock
-  const dispo = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
-  if (dispo !== null && dispo === 0) { showNotif('Article épuisé.', 'error'); return; }
-
-  const prix = parseFloat(item.prix) || 0;
-  const c    = STATE.characters?.find(x => x.id === charId);
+  const dispo    = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
+  const illimite = dispo === null || dispo < 0;
+  if (!illimite && dispo === 0) { showNotif('Article épuisé.', 'error'); return; }
+  const prix  = parseFloat(item.prix) || 0;
+  const c     = STATE.characters?.find(x => x.id === charId);
   if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
-
-  // Vérifier l'or
   const solde = _getOr(c);
-  if (solde < prix) {
-    showNotif(`Fonds insuffisants — Solde : ${solde} or / Prix : ${prix} or.`, 'error');
-    return;
+  const maxAffordable = prix > 0 ? Math.floor(solde / prix) : 99;
+  const maxStock      = illimite ? 99 : dispo;
+  const maxQte        = Math.min(maxAffordable, maxStock, 99);
+  if (maxQte < 1) { showNotif(`Fonds insuffisants — Solde : ${solde} or / Prix : ${prix} or.`, 'error'); return; }
+
+  openModal(`🛒 Acheter — ${item.nom}`, `
+    <div style="margin-bottom:.75rem">
+      <div style="font-family:\'Cinzel\',serif;font-size:.95rem;color:var(--text);margin-bottom:.2rem">${item.nom}</div>
+      <div style="font-size:.8rem;color:var(--text-dim)">
+        💰 ${prix} or/u · Solde : <strong style="color:var(--gold)">${solde} or</strong>
+        ${!illimite ? ` · Stock : ${dispo}` : ''}
+      </div>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
+      <label style="flex-shrink:0">Quantité</label>
+      <div style="display:flex;align-items:center;gap:.4rem">
+        <button type="button"
+          onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event(\'input\'))"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
+        <input type="number" id="buy-qty" min="1" max="${maxQte}" value="1"
+          style="width:60px;text-align:center" class="input-field"
+          oninput="
+            const v=Math.min(Math.max(1,parseInt(this.value)||1),${maxQte});
+            this.value=v;
+            document.getElementById(\'buy-total\').textContent=(v*${prix})+\' or\';
+            document.getElementById(\'buy-confirm\').textContent=\'🛒 Acheter ×\'+v+\' — \'+(v*${prix})+\' or\';
+          ">
+        <button type="button"
+          onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event(\'input\'))"
+          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
+      </div>
+      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="buy-total" style="color:var(--gold)">${prix} or</strong></span>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem">
+      <button id="buy-confirm" class="btn btn-gold" style="flex:1"
+        onclick="confirmBuyItem(\'${itemId}\')">
+        🛒 Acheter ×1 — ${prix} or
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
+    </div>
+  `);
+}
+
+async function confirmBuyItem(itemId) {
+  const charId   = window._shopCharId;
+  const item     = _items.find(i => i.id === itemId);
+  if (!item || !charId) return;
+  const qty      = Math.max(1, parseInt(document.getElementById('buy-qty')?.value)||1);
+  const dispo    = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
+  const illimite = dispo === null || dispo < 0;
+  const prix     = parseFloat(item.prix) || 0;
+  const c        = STATE.characters?.find(x => x.id === charId);
+  if (!c) return;
+  const solde    = _getOr(c);
+  const total    = prix * qty;
+  if (solde < total) { showNotif(`Fonds insuffisants — ${solde} or disponibles.`, 'error'); return; }
+  if (!illimite && dispo < qty) { showNotif(`Stock insuffisant — ${dispo} dispo.`, 'error'); return; }
+
+  if (!illimite) {
+    await updateInCol('shop', itemId, { dispo: dispo - qty });
+    item.dispo = dispo - qty;
   }
 
-  if (!confirm(`Acheter "${item.nom}" pour ${prix} or ?`)) return;
-
-  // 1. Décrémenter le stock (si limité)
-  if (dispo !== null && dispo > 0) {
-    await updateInCol('shop', itemId, { dispo: dispo - 1 });
-    item.dispo = dispo - 1;
-  }
-
-  // 2. Construire l'objet inventaire bien structuré
   const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
   const cat       = _cats.find(cc => cc.id === item.categorieId);
   const tplKey    = cat?.template || 'classique';
-
-  const invItem = {
-    // — Identité —
-    nom:         item.nom || '?',
-    source:      'boutique',
-    itemId:      item.id,
-    categorieId: item.categorieId || '',
-    template:    tplKey,
-    qte:         '1',
-    // — Prix —
-    prixAchat:   prix,
-    prixVente,
-    // — Champs selon template (tous copiés, les vides restent '') —
-    format:      item.format      || '',
-    rarete:      item.rarete      || '',
-    degats:      item.degats      || '',
-    toucher:     item.toucher     || '',
-    ca:          item.ca          || '',
-    stats:       item.stats       || '',
-    trait:       item.trait       || '',
-    type:        item.type        || '',
-    effet:       item.effet       || '',
-    description: item.description || '',
+  const invItem   = {
+    nom:item.nom||'?', source:'boutique', itemId:item.id,
+    categorieId:item.categorieId||'', template:tplKey, qte:'1',
+    prixAchat:prix, prixVente,
+    format:item.format||'', rarete:item.rarete||'',
+    degats:item.degats||'', toucher:item.toucher||'',
+    ca:item.ca||'', stats:item.stats||'',
+    trait:item.trait||'', type:item.type||'',
+    effet:item.effet||'', description:item.description||'',
   };
 
-  // 3. Ajouter à l'inventaire du personnage
-  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  inv.push(invItem);
+  const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  for (let i = 0; i < qty; i++) inv.push({...invItem});
 
-  // 4. Débiter l'or via le compte
-  const compte    = c.compte || { recettes:[], depenses:[] };
-  const depenses  = [...(compte.depenses||[])];
+  const compte   = c.compte || { recettes:[], depenses:[] };
+  const depenses = [...(compte.depenses||[])];
   depenses.push({
     date:    new Date().toLocaleDateString('fr-FR'),
-    libelle: `Achat : ${item.nom}`,
-    montant: prix,
+    libelle: qty > 1 ? `Achat ×${qty} : ${item.nom}` : `Achat : ${item.nom}`,
+    montant: total,
   });
 
-  // 5. Sauvegarder
   await updateInCol('characters', charId, {
     inventaire: inv,
-    compte:     { ...compte, depenses },
+    compte: { ...compte, depenses },
   });
-
-  // Mettre à jour STATE local
   c.inventaire = inv;
   c.compte     = { ...compte, depenses };
 
-  // Rafraîchir l'affichage de l'or
-  const newOr = _getOr(c);
-  const orEl  = document.getElementById('sh-char-or-display');
-  if (orEl) orEl.textContent = `💰 ${newOr} or`;
+  const orEl = document.getElementById('sh-char-or-display');
+  if (orEl) orEl.textContent = `💰 ${_getOr(c)} or`;
 
-  showNotif(`✅ "${item.nom}" acheté pour ${prix} or !`, 'success');
-  renderShop(); // Re-render pour mettre à jour le stock affiché
+  closeModalDirect();
+  showNotif(`✅ ×${qty} "${item.nom}" acheté${qty>1?'s':''} pour ${total} or !`, 'success');
+  renderShop();
 }
+
+// Exposer pour characters.js — réincrémenter 1 unité du stock boutique
+window._restockShopItem = async (itemId) => {
+  const shopItem = _items.find(i => i.id === itemId);
+  if (!shopItem) return;
+  const cur = shopItem.dispo !== undefined && shopItem.dispo !== '' ? parseInt(shopItem.dispo) : null;
+  if (cur !== null && cur >= 0) {
+    await updateInCol('shop', itemId, { dispo: cur + 1 });
+    shopItem.dispo = cur + 1;
+  }
+};
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // VENDRE un item de l'inventaire (appelé depuis characters.js)
@@ -960,7 +996,7 @@ Object.assign(window,{
   openSubCatModal, saveSubCat, deleteSubCat,
   openItemModal, refreshItemFields, refreshSubCatSelect,
   previewUpload, updatePrixVente, pickRarete,
-  shopSetChar, buyItem, sellInvItemFromShop,
+  shopSetChar, buyItem, confirmBuyItem, sellInvItemFromShop,
   toggleDispoInfini, saveShopItem, deleteShopItem,
   openShopItemModal, editShopItem, filterShop,
   shopCatDragStart, shopCatDragOver, shopCatDragEnd, shopCatDrop,
