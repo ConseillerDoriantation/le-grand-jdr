@@ -2,7 +2,7 @@
 // MAP.JS — Carte interactive
 // Markers cliquables · Zoom/pan · Fog of war · Interface admin
 // ══════════════════════════════════════════════════════════════════════════════
-import { getDocData, saveDoc, loadCollection, saveToCollection, deleteFromCollection } from '../data/firestore.js';
+import { getDocData, saveDoc, loadCollection, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -448,13 +448,13 @@ window.saveLieu = async function(id = null) {
 
   if (id) {
     // Mise à jour
-    await saveToCollection('map_lieux', { id, ...payload });
+    await saveDoc('map_lieux', id, payload);
     mapState.lieux = mapState.lieux.map(l => l.id === id ? { id, ...payload } : l);
     showNotif('Lieu mis à jour.', 'success');
   } else {
     // Nouveau
     const newId  = `lieu_${Date.now()}`;
-    await saveToCollection('map_lieux', { id: newId, ...payload });
+    await saveDoc('map_lieux', newId, payload);
     mapState.lieux.push({ id: newId, ...payload });
     showNotif(`${nom} ajouté à la carte.`, 'success');
   }
@@ -500,7 +500,7 @@ window.openEditLieuModalById = (id) => {
 
 window.deleteLieu = async (id) => {
   if (!confirm('Supprimer ce lieu de la carte ?')) return;
-  await deleteFromCollection('map_lieux', id);
+  await deleteFromCol('map_lieux', id);
   mapState.lieux = mapState.lieux.filter(l => l.id !== id);
   window.closeMapSidebar();
   renderMarkers();
