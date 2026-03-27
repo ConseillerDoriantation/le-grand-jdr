@@ -1321,13 +1321,13 @@ function openSellInvModal(charId, indicesB64, prixVente, nom) {
       <div style="display:flex;align-items:center;gap:.4rem">
         <button type="button" onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event('input'))"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
-        <input type="number" id="sell-qty" min="1" max="${maxQte}" value="${maxQte}"
+        <input type="number" id="sell-qty" min="1" max="${maxQte}" value="1"
           style="width:60px;text-align:center" class="input-field"
           oninput="document.getElementById('sell-total').textContent=(Math.min(Math.max(1,parseInt(this.value)||1),${maxQte})*${prixVente})+' or'">
         <button type="button" onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event('input'))"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
       </div>
-      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="sell-total" style="color:var(--gold)">${maxQte*prixVente} or</strong></span>
+      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="sell-total" style="color:var(--gold)">${prixVente} or</strong></span>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
@@ -1411,7 +1411,7 @@ function openDeleteInvModal(charId, indicesB64, nom) {
       <div style="display:flex;align-items:center;gap:.4rem">
         <button type="button" onclick="this.nextElementSibling.stepDown()"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">−</button>
-        <input type="number" id="del-qty" min="1" max="${maxQte}" value="${maxQte}" style="width:60px;text-align:center" class="input-field">
+        <input type="number" id="del-qty" min="1" max="${maxQte}" value="1" style="width:60px;text-align:center" class="input-field">
         <button type="button" onclick="this.previousElementSibling.stepUp()"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">+</button>
       </div>
