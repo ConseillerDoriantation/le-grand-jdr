@@ -5,7 +5,7 @@
 // ✓ Drag & drop précis pour réordonner, ordre persisté dans Firestore
 // ✓ Ordre partagé pour tous les utilisateurs
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, saveToCollection, deleteFromCollection, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -399,13 +399,13 @@ async function saveAchievement(id = '') {
   let docId = id;
   if (!id) {
     docId = `ach_${Date.now()}`;
-    await saveToCollection('achievements', { id: docId, ...payload });
+    await saveDoc('achievements', docId, payload);
     const order = await _loadOrder();
     order.push(docId);
     await _saveOrder(order);
     if (window._achItems) window._achItems.push({ id: docId, ...payload });
   } else {
-    await saveToCollection('achievements', { id: docId, ...payload });
+    await saveDoc('achievements', docId, payload);
     if (window._achItems) {
       window._achItems = window._achItems.map(a => a.id === id ? { id, ...payload } : a);
     }
@@ -426,7 +426,7 @@ async function editAchievement(id) {
 // ── SUPPRIMER ─────────────────────────────────────────────────────────────────
 async function deleteAchievement(id) {
   if (!confirm('Supprimer ce haut-fait définitivement ?')) return;
-  await deleteFromCollection('achievements', id);
+  await deleteFromCol('achievements', id);
   if (window._achItems) window._achItems = window._achItems.filter(a => a.id !== id);
   const order = (await _loadOrder()).filter(oid => oid !== id);
   await _saveOrder(order);
