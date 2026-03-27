@@ -41,6 +41,80 @@ function formatItemBonusText(item = {}) {
   return item?.stats || '';
 }
 
+function getEquippedInventoryIndexMap(c) {
+  const map = new Map();
+  Object.entries(c?.equipement || {}).forEach(([slot, item]) => {
+    const rawIdx = item?.sourceInvIndex;
+    const idx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
+    if (!Number.isInteger(idx) || idx < 0) return;
+    const slots = map.get(idx) || [];
+    slots.push(slot);
+    map.set(idx, slots);
+  });
+  return map;
+}
+
+function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
+  const removed = [...new Set((removedIndices || [])
+    .map(v => Number.isInteger(v) ? v : parseInt(v, 10))
+    .filter(v => Number.isInteger(v) && v >= 0))].sort((a, b) => a - b);
+
+  const currentEquip = c?.equipement || {};
+  if (!removed.length) {
+    return {
+      equipement: currentEquip,
+      statsBonus: c?.statsBonus || computeEquipStatsBonus(currentEquip),
+      changed: false,
+      removedSlots: [],
+    };
+  }
+
+  const removedSet = new Set(removed);
+  const countRemovedBefore = idx => {
+    let count = 0;
+    for (const removedIdx of removed) {
+      if (removedIdx < idx) count++;
+      else break;
+    }
+    return count;
+  };
+
+  const nextEquip = {};
+  const removedSlots = [];
+  let changed = false;
+
+  Object.entries(currentEquip).forEach(([slot, item]) => {
+    const rawIdx = item?.sourceInvIndex;
+    const srcIdx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
+
+    if (!Number.isInteger(srcIdx) || srcIdx < 0) {
+      nextEquip[slot] = item;
+      return;
+    }
+
+    if (removedSet.has(srcIdx)) {
+      changed = true;
+      removedSlots.push(slot);
+      return;
+    }
+
+    const nextIdx = srcIdx - countRemovedBefore(srcIdx);
+    if (nextIdx !== srcIdx) {
+      nextEquip[slot] = { ...item, sourceInvIndex: nextIdx };
+      changed = true;
+      return;
+    }
+
+    nextEquip[slot] = item;
+  });
+
+  const statsBonus = computeEquipStatsBonus(nextEquip);
+  const prevStats = c?.statsBonus || {};
+  if (JSON.stringify(prevStats) !== JSON.stringify(statsBonus)) changed = true;
+
+  return { equipement: nextEquip, statsBonus, changed, removedSlots };
+}
+
 function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
   const statKey = item.toucherStat || fallbackKey;
   if (item.toucherStat) return `1d20 ${modStr(getMod(c, statKey))}`;
@@ -961,6 +1035,7 @@ function renderCharInventaire(c, canEdit) {
   });
 
   const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
+  const equippedMap = getEquippedInventoryIndexMap(c);
 
   const RARETE_COLORS = ['','#9ca3af','#4ade80','#60a5fa','#c084fc'];
   const RARETE_LABELS = ['','Commun','Peu commun','Rare','Très rare'];
@@ -982,6 +1057,13 @@ function renderCharInventaire(c, canEdit) {
     }
     .inv-card-sub {
       font-size:.7rem;margin-top:2px;
+    }
+    .inv-badge-equipped {
+      display:inline-flex;align-items:center;gap:.3rem;
+      padding:2px 8px;border-radius:999px;
+      font-size:.68rem;font-weight:600;
+      color:#4ade80;background:rgba(74,222,128,.1);
+      border:1px solid rgba(74,222,128,.28);
     }
     .inv-card-qte {
       font-family:'Cinzel',serif;font-size:.85rem;font-weight:700;
@@ -1060,6 +1142,11 @@ function renderCharInventaire(c, canEdit) {
       const rareteN = parseInt(item.rarete)||0;
       const rareteC = RARETE_COLORS[rareteN] || 'var(--border)';
       const rareteL = RARETE_LABELS[rareteN] || '';
+      const equippedSlots = [...new Set(g.indices.flatMap(idx => equippedMap.get(idx) || []))];
+      const isEquipped = equippedSlots.length > 0;
+      const equippedLabel = isEquipped
+        ? `Équipé${equippedSlots.length ? ` · ${equippedSlots.join(' · ')}` : ''}`
+        : '';
 
       // Construire les chips de stats dans l'ordre logique
       const chips = [];
@@ -1083,6 +1170,7 @@ function renderCharInventaire(c, canEdit) {
           <div>
             <div class="inv-card-title">${item.nom||'?'}</div>
             ${rareteL?`<div class="inv-card-sub" style="color:${rareteC}">${'★'.repeat(rareteN)+'☆'.repeat(4-rareteN)} ${rareteL}</div>`:''}
+            ${isEquipped?`<div class="inv-card-sub" style="margin-top:4px"><span class="inv-badge-equipped">✓ ${equippedLabel}</span></div>`:''}
           </div>
           <span class="inv-card-qte">×${g.qte}</span>
         </div>
@@ -1463,7 +1551,10 @@ async function sellInvItemBulk(charId, indicesB64, prixVente) {
 
   const allIndices = _decodeIndices(indicesB64);
   const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
-  const indicesToSell = allIndices.slice(0, qty); // vendre les N premiers
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
+  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
+  const indicesToSell = [...unequippedIndices, ...equippedIndices].slice(0, qty);
 
   const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
   const item     = inv[indicesToSell[0]];
@@ -1492,15 +1583,29 @@ async function sellInvItemBulk(charId, indicesB64, prixVente) {
     }
   }
 
-  await updateInCol('characters', charId, {
+  const equipSync = syncEquipmentAfterInventoryMutation(c, indicesToSell);
+  const payload = {
     inventaire: inv,
     compte: { ...compte, recettes },
-  });
+  };
+  if (equipSync.changed) {
+    payload.equipement = equipSync.equipement;
+    payload.statsBonus = equipSync.statsBonus;
+  }
+
+  await updateInCol('characters', charId, payload);
   c.inventaire = inv;
   c.compte     = { ...compte, recettes };
+  if (equipSync.changed) {
+    c.equipement = equipSync.equipement;
+    c.statsBonus = equipSync.statsBonus;
+  }
 
   closeModal();
-  showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !`, 'success');
+  const unequipMsg = equipSync.removedSlots.length
+    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
+    : '';
+  showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !${unequipMsg}`, 'success');
   refreshOrDisplay(c);
   renderCharSheet(c, window._currentCharTab || 'inventaire');
 }
@@ -1549,12 +1654,26 @@ async function deleteInvItemBulk(charId, indicesB64) {
   const allIndices = _decodeIndices(indicesB64);
   const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
   const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const sorted = allIndices.slice(0, qty).sort((a,b)=>b-a);
+  const removedIndices = allIndices.slice(0, qty);
+  const sorted = [...removedIndices].sort((a,b)=>b-a);
   sorted.forEach(idx => inv.splice(idx, 1));
-  await updateInCol('characters', charId, { inventaire: inv });
+  const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
+  const payload = { inventaire: inv };
+  if (equipSync.changed) {
+    payload.equipement = equipSync.equipement;
+    payload.statsBonus = equipSync.statsBonus;
+  }
+  await updateInCol('characters', charId, payload);
   c.inventaire = inv;
+  if (equipSync.changed) {
+    c.equipement = equipSync.equipement;
+    c.statsBonus = equipSync.statsBonus;
+  }
   closeModal();
-  showNotif('Objet(s) supprimé(s).', 'success');
+  const deleteMsg = equipSync.removedSlots.length
+    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
+    : '';
+  showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
   renderCharSheet(c, window._currentCharTab || 'inventaire');
 }
 
@@ -1636,7 +1755,10 @@ async function sendInvItem(fromCharId, indicesB64) {
   const maxQte  = allIndices.length;
   const qtyEl   = document.getElementById('send-qty');
   const qty     = qtyEl ? Math.min(Math.max(1, parseInt(qtyEl.value)||1), maxQte) : 1;
-  const toSend  = allIndices.slice(0, qty);
+  const equippedMap = getEquippedInventoryIndexMap(fromChar);
+  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
+  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
+  const toSend  = [...unequippedIndices, ...equippedIndices].slice(0, qty);
 
   const fromInv = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
   const firstItem = fromInv[toSend[0]];
@@ -1652,15 +1774,29 @@ async function sendInvItem(fromCharId, indicesB64) {
   const toInv = Array.isArray(toChar.inventaire) ? [...toChar.inventaire] : [];
   itemsToTransfer.forEach(it => toInv.push(it));
 
+  const equipSync = syncEquipmentAfterInventoryMutation(fromChar, toSend);
+  const fromPayload = { inventaire: fromInv };
+  if (equipSync.changed) {
+    fromPayload.equipement = equipSync.equipement;
+    fromPayload.statsBonus = equipSync.statsBonus;
+  }
+
   await Promise.all([
-    updateInCol('characters', fromCharId, { inventaire: fromInv }),
+    updateInCol('characters', fromCharId, fromPayload),
     updateInCol('characters', targetId,   { inventaire: toInv }),
   ]);
   fromChar.inventaire = fromInv;
+  if (equipSync.changed) {
+    fromChar.equipement = equipSync.equipement;
+    fromChar.statsBonus = equipSync.statsBonus;
+  }
   toChar.inventaire   = toInv;
 
   closeModal();
-  showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !`, 'success');
+  const sendMsg = equipSync.removedSlots.length
+    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
+    : '';
+  showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !${sendMsg}`, 'success');
   renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
 }
 async function adjustStat(stat, delta, charId) {
