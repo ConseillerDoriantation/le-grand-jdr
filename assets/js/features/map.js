@@ -566,31 +566,216 @@ window.clearFog = async () => {
   showNotif('Brouillard supprimé.', 'success');
 };
 
-// ── Admin : paramètres carte ──────────────────────────────────────────────────
+// ── Admin : paramètres carte (avec upload + crop) ────────────────────────────
+let _mapCrop = {
+  img:null, cropX:0,cropY:0,cropW:0,cropH:0,
+  startX:0,startY:0, isDragging:false,isResizing:false,handle:null,
+  natW:0,natH:0,dispScale:1, base64:null,
+};
+const _mc = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+
 async function openMapSettingsModal() {
   const doc = await getDocData('world', 'map');
+  _mapCrop.base64 = null;
+
   openModal('⚙️ Paramètres de la carte', `
-    <div class="form-group">
-      <label>URL de l'image de la carte</label>
-      <input class="input-field" id="map-url-input" value="${doc?.imageUrl || ''}" placeholder="https://...">
-      <div style="font-size:0.75rem;color:var(--text-dim);margin-top:4px">Hébergez l'image sur Imgur, Cloudinary, ou un autre hébergeur public.</div>
-    </div>
     <div class="form-group">
       <label>Nom de la région</label>
       <input class="input-field" id="map-region-name" value="${doc?.regionName || ''}" placeholder="La Région des Brumes">
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="window.saveMapSettings()">Enregistrer</button>
+
+    <div class="form-group">
+      <label>Image de la carte</label>
+      <div id="map-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
+        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s"
+        onclick="document.getElementById('map-file').click()"
+        ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
+        ondragleave="this.style.borderColor='var(--border-strong)'"
+        ondrop="event.preventDefault();this.style.borderColor='var(--border-strong)';window._mapFile(event.dataTransfer.files[0])">
+        <div id="map-drop-preview">
+          ${doc?.imageUrl
+            ? `<img src="${doc.imageUrl}" style="max-height:80px;border-radius:8px;max-width:100%">`
+            : `<div style="font-size:2rem;margin-bottom:4px">🗺️</div>`}
+        </div>
+        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">
+          Glisser ou <span style="color:var(--gold)">cliquer pour choisir</span>
+        </div>
+        <div style="font-size:.7rem;color:var(--text-dim);margin-top:2px">JPG · PNG · WebP — recommandé : grande résolution</div>
+      </div>
+      <input type="file" id="map-file" accept="image/*" style="display:none"
+        onchange="window._mapFile(this.files[0])">
+
+      <!-- Crop zone -->
+      <div id="map-crop-wrap" style="display:none;margin-top:.75rem">
+        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">
+          Recadrez la carte — vous pouvez laisser la sélection sur toute l'image
+        </div>
+        <canvas id="map-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
+        <button type="button" class="btn btn-gold btn-sm" style="margin-top:.5rem;width:100%"
+          onclick="window._mapConfirmCrop()">✂️ Confirmer le recadrage</button>
+        <div id="map-crop-ok" style="display:none;font-size:.75rem;color:var(--green);text-align:center;margin-top:4px">✓ Image prête</div>
+      </div>
+    </div>
+
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="window.saveMapSettings()">
+      Enregistrer
+    </button>
   `);
+
+  // Handler fichier
+  window._mapFile = (file) => {
+    if (!file?.type.startsWith('image/')) return;
+    if (file.size > 20 * 1024 * 1024) { showNotif('Image trop lourde (max 20 Mo).', 'error'); return; }
+    const r = new FileReader();
+    r.onload = (e) => _initMapCrop(e.target.result);
+    r.readAsDataURL(file);
+  };
 }
 
+function _initMapCrop(dataUrl) {
+  const wrap   = document.getElementById('map-crop-wrap');
+  const canvas = document.getElementById('map-crop-canvas');
+  const prev   = document.getElementById('map-drop-preview');
+  if (!wrap || !canvas) return;
+  _mapCrop.base64 = null;
+  document.getElementById('map-crop-ok').style.display = 'none';
+  wrap.style.display = 'block';
+
+  const img = new Image();
+  img.onload = () => {
+    _mapCrop.img = img; _mapCrop.natW = img.naturalWidth; _mapCrop.natH = img.naturalHeight;
+    // Limiter l'affichage à 420px de large max
+    const maxW = Math.min(420, img.naturalWidth);
+    _mapCrop.dispScale = maxW / img.naturalWidth;
+    canvas.width  = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.style.width  = maxW + 'px';
+    canvas.style.height = Math.round(img.naturalHeight * _mapCrop.dispScale) + 'px';
+
+    // Sélection initiale = image entière (ratio libre pour la carte)
+    _mapCrop.cropX = 0; _mapCrop.cropY = 0;
+    _mapCrop.cropW = img.naturalWidth; _mapCrop.cropH = img.naturalHeight;
+
+    _drawMapCrop(); _bindMapCrop(canvas);
+    if (prev) prev.innerHTML = `<img src="${dataUrl}" style="max-height:60px;border-radius:6px;opacity:.6">
+      <div style="font-size:.7rem;color:var(--text-dim);margin-top:4px">Recadrez ci-dessous</div>`;
+  };
+  img.src = dataUrl;
+}
+
+function _mapHandles() {
+  const {cropX:x,cropY:y,cropW:w,cropH:h} = _mapCrop;
+  return [{id:'nw',x,y},{id:'n',x:x+w/2,y},{id:'ne',x:x+w,y},
+          {id:'w',x,y:y+h/2},{id:'e',x:x+w,y:y+h/2},
+          {id:'sw',x,y:y+h},{id:'s',x:x+w/2,y:y+h},{id:'se',x:x+w,y:y+h}];
+}
+function _mapHitH(nx,ny){
+  const tol=9/_mapCrop.dispScale;
+  return _mapHandles().find(h=>Math.abs(h.x-nx)<tol&&Math.abs(h.y-ny)<tol)||null;
+}
+function _drawMapCrop() {
+  const canvas=document.getElementById('map-crop-canvas'); if(!canvas||!_mapCrop.img) return;
+  const ctx=canvas.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_mapCrop;
+  ctx.clearRect(0,0,natW,natH); ctx.drawImage(img,0,0,natW,natH);
+  ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(0,0,natW,natH);
+  ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
+  ctx.strokeStyle='#4f8cff'; ctx.lineWidth=2; ctx.strokeRect(cropX,cropY,cropW,cropH);
+  // Tiers
+  ctx.strokeStyle='rgba(79,140,255,.25)'; ctx.lineWidth=1;
+  for(let i=1;i<=2;i++){
+    ctx.beginPath();ctx.moveTo(cropX+cropW*i/3,cropY);ctx.lineTo(cropX+cropW*i/3,cropY+cropH);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(cropX,cropY+cropH*i/3);ctx.lineTo(cropX+cropW,cropY+cropH*i/3);ctx.stroke();
+  }
+  // Poignées
+  ctx.fillStyle='#4f8cff'; ctx.strokeStyle='#0b1118'; ctx.lineWidth=1.5;
+  _mapHandles().forEach(h=>{ctx.fillRect(h.x-6,h.y-6,12,12);ctx.strokeRect(h.x-6,h.y-6,12,12);});
+  ctx.fillStyle='rgba(79,140,255,.9)'; ctx.font='12px monospace';
+  ctx.fillText(`${cropW} × ${cropH}`,cropX+6,cropY+18);
+}
+function _mapToN(canvas,cx,cy){
+  const r=canvas.getBoundingClientRect();
+  return{x:(cx-r.left)/_mapCrop.dispScale, y:(cy-r.top)/_mapCrop.dispScale};
+}
+function _bindMapCrop(canvas) {
+  const MIN=40;
+  const onStart=(cx,cy)=>{
+    const{x,y}=_mapToN(canvas,cx,cy), h=_mapHitH(x,y);
+    if(h){_mapCrop.isResizing=true;_mapCrop.handle=h.id;}
+    else{const{cropX,cropY,cropW,cropH}=_mapCrop;
+      if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH)
+        {_mapCrop.isDragging=true;_mapCrop.startX=x-cropX;_mapCrop.startY=y-cropY;}}
+  };
+  const onMove=(cx,cy)=>{
+    if(!_mapCrop.isDragging&&!_mapCrop.isResizing) return;
+    const{x,y}=_mapToN(canvas,cx,cy),{natW:W,natH:H}=_mapCrop;
+    if(_mapCrop.isDragging){
+      _mapCrop.cropX=Math.round(_mc(x-_mapCrop.startX,0,W-_mapCrop.cropW));
+      _mapCrop.cropY=Math.round(_mc(y-_mapCrop.startY,0,H-_mapCrop.cropH));
+      _drawMapCrop(); return;
+    }
+    // Redimensionnement libre (pas de ratio forcé pour la carte)
+    let{cropX,cropY,cropW,cropH,handle}=_mapCrop;
+    const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropH};
+    if(handle==='se'){cropW=_mc(x-a.x,MIN,W-a.x);cropH=_mc(y-a.y,MIN,H-a.y);}
+    else if(handle==='sw'){cropW=_mc(a.x2-x,MIN,a.x2);cropH=_mc(y-a.y,MIN,H-a.y);cropX=a.x2-cropW;}
+    else if(handle==='ne'){cropW=_mc(x-a.x,MIN,W-a.x);cropH=_mc(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}
+    else if(handle==='nw'){cropW=_mc(a.x2-x,MIN,a.x2);cropH=_mc(a.y2-y,MIN,a.y2);cropX=a.x2-cropW;cropY=a.y2-cropH;}
+    else if(handle==='e'){cropW=_mc(x-a.x,MIN,W-a.x);}
+    else if(handle==='w'){cropW=_mc(a.x2-x,MIN,a.x2);cropX=a.x2-cropW;}
+    else if(handle==='s'){cropH=_mc(y-a.y,MIN,H-a.y);}
+    else if(handle==='n'){cropH=_mc(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}
+    _mapCrop.cropX=Math.round(_mc(cropX,0,W-MIN));_mapCrop.cropY=Math.round(_mc(cropY,0,H-MIN));
+    _mapCrop.cropW=Math.round(_mc(cropW,MIN,W-_mapCrop.cropX));_mapCrop.cropH=Math.round(_mc(cropH,MIN,H-_mapCrop.cropY));
+    _drawMapCrop();
+  };
+  const onEnd=()=>{_mapCrop.isDragging=false;_mapCrop.isResizing=false;_mapCrop.handle=null;};
+  const CM={nw:'nw-resize',ne:'ne-resize',sw:'sw-resize',se:'se-resize',n:'n-resize',s:'s-resize',e:'e-resize',w:'w-resize'};
+  canvas.addEventListener('mousemove',e=>{
+    if(_mapCrop.isDragging||_mapCrop.isResizing) return;
+    const{x,y}=_mapToN(canvas,e.clientX,e.clientY),h=_mapHitH(x,y);
+    if(h){canvas.style.cursor=CM[h.id];return;}
+    const{cropX,cropY,cropW,cropH}=_mapCrop;
+    canvas.style.cursor=(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH)?'move':'crosshair';
+  });
+  canvas.addEventListener('mousedown',e=>{e.preventDefault();onStart(e.clientX,e.clientY);});
+  window.addEventListener('mousemove',e=>onMove(e.clientX,e.clientY));
+  window.addEventListener('mouseup',onEnd);
+  canvas.addEventListener('touchstart',e=>{e.preventDefault();onStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  canvas.addEventListener('touchmove',e=>{e.preventDefault();onMove(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  canvas.addEventListener('touchend',onEnd);
+}
+
+window._mapConfirmCrop = () => {
+  const{img,cropX,cropY,cropW,cropH}=_mapCrop; if(!img) return;
+  // Conserver la pleine résolution pour la carte (important pour le zoom/pan)
+  const out=document.createElement('canvas');
+  out.width=cropW; out.height=cropH;
+  out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
+  _mapCrop.base64=out.toDataURL('image/jpeg',.92);
+  document.getElementById('map-crop-ok').style.display='block';
+  document.getElementById('map-crop-wrap').style.display='none';
+  const p=document.getElementById('map-drop-preview');
+  if(p) p.innerHTML=`<img src="${_mapCrop.base64}" style="max-height:80px;border-radius:8px">`;
+};
+
 window.saveMapSettings = async () => {
-  const imageUrl   = document.getElementById('map-url-input')?.value?.trim()    || '';
   const regionName = document.getElementById('map-region-name')?.value?.trim() || '';
+
+  let imageUrl = '';
+  if (_mapCrop.base64) {
+    // Nouvelle image uploadée et recadrée
+    imageUrl = _mapCrop.base64;
+  } else {
+    // Conserver l'image existante
+    const existing = await getDocData('world', 'map');
+    imageUrl = existing?.imageUrl || '';
+  }
+
   await saveDoc('world', 'map', { imageUrl, regionName });
   mapState.imageUrl = imageUrl;
+  _mapCrop.base64 = null;
   closeModal();
   showNotif('Carte mise à jour.', 'success');
-  // Recharger la carte dans la page
   await window.navigate?.('map');
 };
 
