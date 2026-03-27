@@ -137,11 +137,58 @@ const PAGES = {
 
   // ─── MAP ────────────────────────────────────────────────────────────────────
   async map() {
-    const doc = await getDocData('world', 'map');
+    const doc     = await getDocData('world', 'map');
     const content = document.getElementById('main-content');
-    content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">🗺️ Carte de la Région</div><div class="page-subtitle">Explorer le monde</div></div>
-      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><div style="display:flex;gap:0.5rem;align-items:center"><input type="text" class="input-sm" id="map-url-input" placeholder="URL de l'image de la carte" value="${doc?.imageUrl || ''}" style="max-width:400px"><button class="btn btn-gold btn-sm" onclick="saveMapUrl()">Enregistrer</button></div></div>` : ''}
-      <div class="map-container">${doc?.imageUrl ? `<img src="${doc.imageUrl}" class="map-img" alt="Carte">` : `<div style="text-align:center;color:var(--text-muted)"><div style="font-size:4rem;margin-bottom:1rem">🗺️</div><p style="font-style:italic">La carte sera ajoutée par le Maître de Jeu.</p></div>`}</div>`;
+
+    // La page map prend toute la hauteur dispo — supprimer le padding habituel
+    const origPadding = content.style.padding;
+    const origHeight  = content.style.height;
+    content.style.padding = '0';
+    content.style.height  = 'calc(100vh - var(--header-height))';
+
+    content.innerHTML = `
+    <div style="display:flex;flex-direction:column;height:100%">
+      <!-- Barre titre -->
+      <div style="
+        display:flex;align-items:center;justify-content:space-between;
+        padding:0.6rem 1.2rem;
+        background:rgba(11,17,24,0.96);border-bottom:1px solid var(--border);
+        flex-shrink:0;gap:1rem;
+      ">
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <span style="font-family:'Cinzel',serif;font-size:0.9rem;color:var(--gold)">
+            🗺️ ${doc?.regionName || 'Carte de la Région'}
+          </span>
+          <span style="font-size:0.72rem;color:var(--text-dim)">Molette pour zoomer · Cliquer-glisser pour naviguer</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem" id="map-legend"></div>
+      </div>
+      <!-- Conteneur carte -->
+      <div id="map-container" style="flex:1;position:relative;overflow:hidden;min-height:0"></div>
+    </div>`;
+
+    // Import et init carte interactive
+    const { initMap, LIEU_TYPES } = await import('./map.js');
+    await initMap(document.getElementById('map-container'));
+
+    // Légende
+    const legend = document.getElementById('map-legend');
+    if (legend) {
+      legend.innerHTML = LIEU_TYPES.map(t => `
+        <span style="display:flex;align-items:center;gap:4px;font-size:0.72rem;color:var(--text-dim)">
+          <span style="width:8px;height:8px;border-radius:50%;background:${t.color};display:inline-block;flex-shrink:0"></span>
+          ${t.label}
+        </span>`).join('');
+    }
+
+    // Restaurer les styles au changement de page
+    const origNavigate = window.navigate;
+    window.navigate = function(...args) {
+      content.style.padding = origPadding;
+      content.style.height  = origHeight;
+      window.navigate = origNavigate;
+      return origNavigate?.(...args);
+    };
   },
 
   // ─── NPCs ───────────────────────────────────────────────────────────────────
@@ -491,19 +538,186 @@ const PAGES = {
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
   async achievements() {
-    const items = await loadCollection('achievements');
+    const items   = await loadCollection('achievements');
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">🏆 Hauts-Faits</div><div class="page-subtitle">Les exploits légendaires du groupe</div></div>`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin (seul l'admin peut gérer les hauts-faits)</div><button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter un Haut-Fait</button></div>`;
-    if (items.length === 0) {
-      html += `<div class="empty-state"><div class="icon">🏆</div><p>Aucun haut-fait accompli pour l'instant...</p></div>`;
+
+    // ── Config des catégories ──────────────────────────────────────────────
+    const CATS = [
+      { id: 'epique',   label: 'Épique',   emoji: '⚔️',  color: '#4f8cff', glow: 'rgba(79,140,255,0.18)',  desc: 'Les grandes victoires et exploits héroïques' },
+      { id: 'comique',  label: 'Comique',  emoji: '🎭',  color: '#e8b84b', glow: 'rgba(232,184,75,0.18)',  desc: 'Les moments mémorables et catastrophes créatives' },
+      { id: 'histoire', label: 'Histoire', emoji: '📖',  color: '#22c38e', glow: 'rgba(34,195,142,0.18)',  desc: 'Les tournants narratifs qui ont forgé la légende' },
+    ];
+
+    // ── Regrouper par catégorie ────────────────────────────────────────────
+    const byCat = {};
+    CATS.forEach(c => { byCat[c.id] = []; });
+    byCat['_autre'] = [];
+    items.forEach(a => {
+      const cat = a.categorie || '_autre';
+      if (!byCat[cat]) byCat[cat] = [];
+      byCat[cat].push(a);
+    });
+
+    const total = items.length;
+
+    // ── Onglet actif (persisté localement) ────────────────────────────────
+    const activeCat = window._achCat || CATS[0].id;
+    window._achCat  = activeCat;
+
+    // ── HTML ──────────────────────────────────────────────────────────────
+    let html = `
+
+    <!-- HERO HEADER -->
+    <div style="
+      background:linear-gradient(135deg,rgba(79,140,255,0.06) 0%,rgba(232,184,75,0.04) 50%,rgba(34,195,142,0.05) 100%);
+      border:1px solid var(--border);border-radius:var(--radius-lg);
+      padding:1.8rem 2rem 1.4rem;margin-bottom:1.5rem;
+      position:relative;overflow:hidden;
+    ">
+      <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;background:radial-gradient(circle,rgba(232,184,75,0.07) 0%,transparent 70%);pointer-events:none"></div>
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+        <div>
+          <div style="font-size:0.72rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:0.4rem">Livre des Légendes</div>
+          <h1 style="font-family:'Cinzel',serif;font-size:1.9rem;color:var(--gold);letter-spacing:2px;line-height:1;margin:0">Hauts-Faits</h1>
+          <p style="font-size:0.83rem;color:var(--text-muted);margin-top:0.5rem;margin-bottom:0">Les exploits de la compagnie, consignés pour l'éternité.</p>
+        </div>
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+          ${CATS.map(c => {
+            const n = byCat[c.id]?.length || 0;
+            return `<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:0.6rem 1rem;text-align:center;min-width:70px">
+              <div style="font-size:1.1rem">${c.emoji}</div>
+              <div style="font-family:'Cinzel',serif;font-size:1rem;color:${c.color};line-height:1.2">${n}</div>
+              <div style="font-size:0.65rem;color:var(--text-dim);margin-top:1px">${c.label}</div>
+            </div>`;
+          }).join('')}
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:0.6rem 1rem;text-align:center;min-width:70px">
+            <div style="font-size:1.1rem">🏆</div>
+            <div style="font-family:'Cinzel',serif;font-size:1rem;color:var(--gold);line-height:1.2">${total}</div>
+            <div style="font-size:0.65rem;color:var(--text-dim);margin-top:1px">Total</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN -->
+    ${STATE.isAdmin ? `
+    <div class="admin-section" style="margin-bottom:1.2rem">
+      <div class="admin-label">Admin — Hauts-Faits</div>
+      <button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter un Haut-Fait</button>
+    </div>` : ''}
+
+    <!-- ONGLETS CATÉGORIES -->
+    <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
+      ${CATS.map(c => {
+        const active = c.id === activeCat;
+        const n = byCat[c.id]?.length || 0;
+        return `<button
+          onclick="window._achCat='${c.id}';navigate('achievements')"
+          style="
+            display:flex;align-items:center;gap:0.5rem;
+            padding:0.5rem 1.1rem;border-radius:999px;
+            border:1px solid ${active ? c.color : 'var(--border)'};
+            background:${active ? `${c.glow}` : 'transparent'};
+            color:${active ? c.color : 'var(--text-muted)'};
+            font-family:'Cinzel',serif;font-size:0.82rem;
+            cursor:pointer;transition:all 0.15s;
+          "
+        >${c.emoji} ${c.label} <span style="
+          background:${active ? c.color : 'var(--bg-elevated)'};
+          color:${active ? '#0b1118' : 'var(--text-dim)'};
+          border-radius:999px;padding:1px 7px;font-size:0.7rem;font-family:sans-serif
+        ">${n}</span></button>`;
+      }).join('')}
+    </div>`;
+
+    // ── Contenu de la catégorie active ────────────────────────────────────
+    const cat     = CATS.find(c => c.id === activeCat) || CATS[0];
+    const catItems = byCat[activeCat] || [];
+
+    if (catItems.length === 0) {
+      html += `
+      <div style="text-align:center;padding:4rem 2rem;color:var(--text-dim)">
+        <div style="font-size:3rem;margin-bottom:1rem;opacity:0.4">${cat.emoji}</div>
+        <p style="font-style:italic;font-size:0.85rem">Aucun haut-fait ${cat.label.toLowerCase()} pour l'instant.</p>
+        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openAchievementModal()">+ Ajouter le premier</button>` : ''}
+      </div>`;
     } else {
-      html += `<div class="achievement-grid">`;
-      items.forEach(a => {
-        html += `<div class="achievement-card"><div class="achievement-img" style="background:var(--bg-panel)">${a.imageUrl ? `<img src="${a.imageUrl}" style="width:100%;height:100%;object-fit:cover">` : `<span style="font-size:3rem">${a.emoji || '🏆'}</span>`}</div><div class="achievement-body"><div class="achievement-title">${a.titre || 'Haut-Fait'}</div><div class="achievement-text">${a.description || ''}</div>${a.date ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-dim)">${a.date}</div>` : ''}${STATE.isAdmin ? `<div style="margin-top:0.8rem;display:flex;gap:0.3rem"><button class="btn btn-outline btn-sm" onclick="editAchievement('${a.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="deleteAchievement('${a.id}')">🗑️</button></div>` : ''}</div></div>`;
+      // Description de catégorie
+      html += `
+      <div style="font-size:0.8rem;color:var(--text-dim);font-style:italic;margin-bottom:1.2rem;padding-left:0.25rem">
+        ${cat.emoji} ${cat.desc} — ${catItems.length} haut-fait${catItems.length > 1 ? 's' : ''}
+      </div>
+
+      <!-- GRILLE CARDS -->
+      <div style="
+        display:grid;
+        grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+        gap:1rem;
+      ">`;
+
+      catItems.forEach(a => {
+        html += `
+        <div style="
+          background:var(--bg-card);
+          border:1px solid var(--border);
+          border-radius:var(--radius-lg);
+          overflow:hidden;
+          transition:border-color 0.2s,transform 0.2s;
+          cursor:default;
+          display:flex;flex-direction:column;
+        " onmouseenter="this.style.borderColor='${cat.color}';this.style.transform='translateY(-2px)'"
+           onmouseleave="this.style.borderColor='var(--border)';this.style.transform=''">
+
+          <!-- Image -->
+          <div style="
+            width:100%;aspect-ratio:4/3;
+            background:var(--bg-panel);
+            position:relative;overflow:hidden;flex-shrink:0;
+          ">
+            ${a.imageUrl
+              ? `<img src="${a.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy">`
+              : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:3rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">${a.emoji || cat.emoji}</div>`
+            }
+            <!-- Badge catégorie -->
+            <div style="
+              position:absolute;top:8px;left:8px;
+              background:rgba(11,17,24,0.82);
+              border:1px solid ${cat.color};
+              border-radius:999px;
+              padding:2px 8px;
+              font-size:0.65rem;color:${cat.color};
+              backdrop-filter:blur(4px);
+            ">${cat.emoji} ${cat.label}</div>
+            ${a.date ? `<div style="
+              position:absolute;bottom:8px;right:8px;
+              background:rgba(11,17,24,0.75);
+              border-radius:6px;padding:2px 7px;
+              font-size:0.65rem;color:var(--text-dim);
+            ">${a.date}</div>` : ''}
+          </div>
+
+          <!-- Corps -->
+          <div style="padding:0.85rem;flex:1;display:flex;flex-direction:column;gap:0.4rem">
+            <div style="
+              font-family:'Cinzel',serif;font-size:0.88rem;
+              color:var(--text);line-height:1.3;
+            ">${a.titre || 'Haut-Fait'}</div>
+            <div style="
+              font-size:0.78rem;color:var(--text-muted);
+              line-height:1.55;flex:1;font-style:italic;
+            ">${a.description || ''}</div>
+            ${STATE.isAdmin ? `
+            <div style="display:flex;gap:0.4rem;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
+              <button class="btn btn-outline btn-sm" style="flex:1;font-size:0.72rem" onclick="editAchievement('${a.id}')">✏️ Modifier</button>
+              <button class="btn-icon" style="color:#ff6b6b" onclick="deleteAchievement('${a.id}')">🗑️</button>
+            </div>` : ''}
+          </div>
+        </div>`;
       });
-      html += '</div>';
+
+      html += `</div>`;
     }
+
     content.innerHTML = html;
   },
 
