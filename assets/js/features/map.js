@@ -780,4 +780,8 @@ window.saveMapSettings = async () => {
 };
 
 // ── Export global ─────────────────────────────────────────────────────────────
-Object.assign(window, { initMap, LIEU_TYPES });
+Object.assign(window, {
+  initMap,
+  LIEU_TYPES,
+  openMapSettingsModal,
+});
