@@ -198,20 +198,20 @@ function renderStatBreakdownCard(c, st, canEdit, charId = c?.id) {
     : '';
 
   const baseStyle = canEdit
-    ? 'border:1px solid rgba(79,140,255,.28);background:rgba(79,140,255,.08);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(79,140,255,.10);'
-    : 'border:1px solid var(--border);background:var(--bg-card);';
+    ? 'border:1px solid rgba(79,140,255,.30);background:rgba(79,140,255,.10);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(79,140,255,.08);'
+    : 'border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);';
 
   return `
-    <div class="cs-carac-card" style="display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:.65rem;padding:.7rem .75rem;border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,var(--bg-elevated),rgba(255,255,255,.015));box-shadow:0 6px 18px rgba(0,0,0,.08)">
-      <div style="display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);font-size:.82rem;font-weight:900;color:var(--text)">${st.abbr}</div>
+    <div class="cs-carac-card" style="display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:.55rem;padding:.65rem .7rem;border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,var(--bg-elevated),rgba(255,255,255,.015));box-shadow:0 6px 18px rgba(0,0,0,.08)">
+      <div style="display:flex;align-items:center;justify-content:center;width:48px;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);font-size:.9rem;font-weight:900;color:var(--text)">${st.abbr}</div>
 
-      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;min-width:0">
+      <div style="display:flex;align-items:center;gap:.4rem;min-width:0">
         <span ${editAttrs}
-          style="display:flex;align-items:center;justify-content:center;min-height:44px;padding:.35rem .5rem;border-radius:12px;${baseStyle}font-size:1rem;font-weight:800;color:var(--text)">${base}</span>
-        <span style="display:flex;align-items:center;justify-content:center;min-height:44px;padding:.35rem .5rem;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);font-size:1.05rem;font-weight:900;color:var(--text)">${total}</span>
+          style="display:flex;align-items:center;justify-content:center;flex:0 0 50px;height:44px;border-radius:12px;${baseStyle}font-size:1rem;font-weight:800;color:var(--text)">${base}</span>
+        <span style="display:flex;align-items:center;justify-content:center;flex:0 0 50px;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);font-size:1rem;font-weight:900;color:var(--text)">${total}</span>
       </div>
 
-      <div class="cs-carac-mod ${modClass}" style="min-width:52px;text-align:center;padding:.5rem .55rem;border-radius:12px;font-size:.9rem;font-weight:900">${modStr(mod)}</div>
+      <div class="cs-carac-mod ${modClass}" style="flex:0 0 44px;min-width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;border-radius:12px;font-size:.88rem;font-weight:900">${modStr(mod)}</div>
     </div>`;
 }
 
@@ -400,10 +400,7 @@ function renderCharSheet(c, keepTab) {
 
     <!-- BLOC DROIT : Caractéristiques compactes -->
     <div class="cs-carac-panel">
-      <div class="cs-carac-panel-title">
-        Caractéristiques
-        ${canEdit?'<span class="cs-hint">base modifiable · total utilisé pour les calculs</span>':''}
-      </div>
+      <div class="cs-carac-panel-title">Caractéristiques</div>
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem">
         ${caracHtml}
       </div>
