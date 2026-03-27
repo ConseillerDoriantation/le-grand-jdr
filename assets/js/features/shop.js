@@ -10,15 +10,15 @@ const TEMPLATES = {
   arme: {
     label: '⚔️ Arme',
     fields: [
-      { id:'format',   label:'Format',   type:'select',
+      { id:'format',      label:'Format',   type:'select',
         options:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'] },
-      { id:'rarete',   label:'Rareté',   type:'rarete' },
-      { id:'degats',   label:'Dégâts',   type:'text',   placeholder:'1D10, 2D6...' },
-      { id:'toucher',  label:'Toucher',  type:'text',   placeholder:'+Fo, +Dex...' },
-      { id:'stats',    label:'Stats',    type:'text',   placeholder:'+2 Fo, +1 Dex...' },
-      { id:'trait',    label:'Trait',    type:'text',   placeholder:'Lourd, Finesse, Polyvalent...' },
-      { id:'prix',     label:'Prix 🪙',  type:'number', placeholder:'0' },
-      { id:'dispo',    label:'Dispo',    type:'dispo' },
+      { id:'rarete',      label:'Rareté',   type:'rarete' },
+      { id:'degats',      label:'Dégâts',   type:'damage_with_stat', placeholder:'1D10, 2D6...' },
+      { id:'toucherStat', label:'Toucher',  type:'stat_select', placeholder:'Stat utilisée pour le jet d attaque' },
+      { id:'statBonuses', label:'Bonus de stats', type:'stat_bonus_grid' },
+      { id:'trait',       label:'Trait',    type:'text',   placeholder:'Lourd, Finesse, Polyvalent...' },
+      { id:'prix',        label:'Prix 🪙',  type:'number', placeholder:'0' },
+      { id:'dispo',       label:'Dispo',    type:'dispo' },
     ],
   },
   armure: {
@@ -29,9 +29,21 @@ const TEMPLATES = {
       { id:'typeArmure',  label:'Type',        type:'select',
         options:['Légère','Intermédiaire','Lourde'] },
       { id:'rarete',      label:'Rareté',      type:'rarete' },
-      { id:'ca',          label:'CA bonus',    type:'text',   placeholder:'0, +1, +2...' },
-      { id:'stats',       label:'Stats',       type:'text',   placeholder:'+2 Co, +1 Fo...' },
+      { id:'ca',          label:'CA bonus',    type:'number', placeholder:'0' },
+      { id:'statBonuses', label:'Bonus de stats', type:'stat_bonus_grid' },
       { id:'trait',       label:'Trait',       type:'text',   placeholder:'Lourd, Magique...' },
+      { id:'prix',        label:'Prix 🪙',     type:'number', placeholder:'0' },
+      { id:'dispo',       label:'Dispo',       type:'dispo' },
+    ],
+  },
+  bijou: {
+    label: '💍 Bijou',
+    fields: [
+      { id:'slotBijou',   label:'Emplacement', type:'select',
+        options:['Amulette','Anneau','Objet magique'] },
+      { id:'rarete',      label:'Rareté',      type:'rarete' },
+      { id:'statBonuses', label:'Bonus de stats', type:'stat_bonus_grid' },
+      { id:'trait',       label:'Trait',       type:'text',   placeholder:'Protecteur, Mystique...' },
       { id:'prix',        label:'Prix 🪙',     type:'number', placeholder:'0' },
       { id:'dispo',       label:'Dispo',       type:'dispo' },
     ],
@@ -58,6 +70,88 @@ const TEMPLATES = {
 };
 
 const PRIX_VENTE_RATIO = 0.6; // 60%
+const ITEM_STATS = [
+  { key:'force',       short:'Fo',  store:'fo',  label:'Force' },
+  { key:'dexterite',   short:'Dex', store:'dex', label:'Dextérité' },
+  { key:'intelligence',short:'Int', store:'in',  label:'Intelligence' },
+  { key:'sagesse',     short:'Sag', store:'sa',  label:'Sagesse' },
+  { key:'constitution',short:'Con', store:'co',  label:'Constitution' },
+  { key:'charisme',    short:'Cha', store:'ch',  label:'Charisme' },
+];
+const ITEM_STAT_BY_STORE = Object.fromEntries(ITEM_STATS.map(s => [s.store, s]));
+const ITEM_STAT_BY_KEY = Object.fromEntries(ITEM_STATS.map(s => [s.key, s]));
+
+function _statShort(key) {
+  return ITEM_STAT_BY_KEY[key]?.short || '';
+}
+
+function _normalizeStatKey(val) {
+  const raw = String(val || '').trim().toLowerCase().replace(/^\+/, '');
+  if (!raw) return '';
+  const map = {
+    fo:'force', force:'force', str:'force',
+    dex:'dexterite', dextérité:'dexterite', dexterite:'dexterite', agilite:'dexterite', agilité:'dexterite',
+    int:'intelligence', intelligence:'intelligence', in:'intelligence',
+    sag:'sagesse', sagesse:'sagesse', sa:'sagesse', wis:'sagesse',
+    con:'constitution', constitution:'constitution', co:'constitution',
+    cha:'charisme', charisme:'charisme', ch:'charisme',
+  };
+  return map[raw] || '';
+}
+
+function _parseLegacyStats(item = {}) {
+  const out = { fo:0, dex:0, in:0, sa:0, co:0, ch:0 };
+  ['fo','dex','in','sa','co','ch'].forEach(k => {
+    const val = parseInt(item?.[k]);
+    if (!Number.isNaN(val)) out[k] = val;
+  });
+  const txt = String(item?.stats || '');
+  const aliases = {
+    fo:['fo','force'], dex:['dex','dextérité','dexterite'], in:['in','int','intelligence'],
+    sa:['sa','sag','sagesse'], co:['co','con','constitution'], ch:['ch','cha','charisme'],
+  };
+  Object.entries(aliases).forEach(([store, list]) => {
+    if (out[store]) return;
+    for (const token of list) {
+      const re = new RegExp(`(?:^|[^a-z])${token}\s*([+-]\d+)|([+-]\d+)\s*${token}(?:[^a-z]|$)`, 'i');
+      const m = txt.match(re);
+      const picked = m?.[1] || m?.[2];
+      if (picked) {
+        out[store] = parseInt(picked) || 0;
+        break;
+      }
+    }
+  });
+  return out;
+}
+
+function _formatStatBonuses(item = {}) {
+  const parsed = _parseLegacyStats(item);
+  return ITEM_STATS
+    .map(stat => ({ short: stat.short, val: parseInt(parsed[stat.store]) || 0 }))
+    .filter(x => x.val)
+    .map(x => `${x.short} ${x.val > 0 ? '+' : ''}${x.val}`);
+}
+
+function _legacyStatsTextFromData(data = {}) {
+  return _formatStatBonuses(data).join(' · ');
+}
+
+function _legacyToucherTextFromData(data = {}) {
+  const short = _statShort(data.toucherStat);
+  return short ? `+${short}` : '';
+}
+
+function _buildCombatMeta(item = {}) {
+  const parts = [];
+  if (item.degats) {
+    const stat = _statShort(item.degatsStat);
+    parts.push(`⚔️ ${item.degats}${stat ? ` + ${stat}` : ''}`);
+  }
+  if (item.toucherStat) parts.push(`🎯 ${_statShort(item.toucherStat)}`);
+  return parts;
+}
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ÉTAT
@@ -106,6 +200,7 @@ function _catEmoji(nom) {
   const n = (nom||'').toLowerCase();
   if (n.includes('arme'))                          return '⚔️';
   if (n.includes('armure') || n.includes('armor')) return '🛡️';
+  if (n.includes('bijou') || n.includes('anneau') || n.includes('amulette')) return '💍';
   if (n.includes('potion'))                        return '🧪';
   if (n.includes('magie') || n.includes('rune'))   return '✨';
   if (n.includes('épicerie') || n.includes('cuisine')) return '🍖';
@@ -377,6 +472,8 @@ function _renderItemCard(item, tplKey, itemIdx) {
 
   // ── Bloc infos selon template ──────────────────────────────────────────────
   let infoHtml = '';
+  const statBonuses = _formatStatBonuses(item);
+  const combatMeta = _buildCombatMeta(item);
   if (tplKey === 'arme') {
     infoHtml = `
       <div class="sh-item-tags">
@@ -384,11 +481,11 @@ function _renderItemCard(item, tplKey, itemIdx) {
         ${item.rarete  ? _rareteStars(item.rarete) : ''}
         ${dispo !== undefined && dispo !== '' ? _dispoDisplay(item.dispo) : ''}
       </div>
-      ${item.degats || item.toucher ? `<div class="sh-item-combat">
-        ${item.degats  ? `<span class="sh-combat-chip"><span class="sh-cc-label">Dégâts</span><span class="sh-cc-val red">${item.degats}</span></span>` : ''}
-        ${item.toucher ? `<span class="sh-combat-chip"><span class="sh-cc-label">Toucher</span><span class="sh-cc-val gold">${item.toucher}</span></span>` : ''}
+      ${combatMeta.length ? `<div class="sh-item-combat">
+        ${item.degats ? `<span class="sh-combat-chip"><span class="sh-cc-label">Dégâts</span><span class="sh-cc-val red">${item.degats}${item.degatsStat ? ` + ${_statShort(item.degatsStat)}` : ''}</span></span>` : ''}
+        ${item.toucherStat ? `<span class="sh-combat-chip"><span class="sh-cc-label">Toucher</span><span class="sh-cc-val gold">${_statShort(item.toucherStat)}</span></span>` : ''}
       </div>` : ''}
-      ${item.stats ? `<div class="sh-item-stats">${item.stats}</div>` : ''}
+      ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
       ${item.trait ? `<div class="sh-item-trait"><em>${item.trait}</em></div>` : ''}`;
   } else if (tplKey === 'armure') {
     infoHtml = `
@@ -396,10 +493,19 @@ function _renderItemCard(item, tplKey, itemIdx) {
         ${item.slotArmure  ? `<span class="sh-tag">${item.slotArmure}</span>` : ''}
         ${item.typeArmure  ? `<span class="sh-tag">${item.typeArmure}</span>` : ''}
         ${item.rarete ? _rareteStars(item.rarete) : ''}
-        ${item.ca     ? `<span class="sh-tag">🛡️ CA +${item.ca}</span>` : ''}
+        ${item.ca || item.ca === 0 ? `<span class="sh-tag">🛡️ CA +${parseInt(item.ca)||0}</span>` : ''}
         ${dispo !== undefined && dispo !== '' ? _dispoDisplay(item.dispo) : ''}
       </div>
-      ${item.stats ? `<div class="sh-item-stats">${item.stats}</div>` : ''}
+      ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
+      ${item.trait ? `<div class="sh-item-trait"><em>${item.trait}</em></div>` : ''}`;
+  } else if (tplKey === 'bijou') {
+    infoHtml = `
+      <div class="sh-item-tags">
+        ${item.slotBijou ? `<span class="sh-tag">${item.slotBijou}</span>` : ''}
+        ${item.rarete ? _rareteStars(item.rarete) : ''}
+        ${dispo !== undefined && dispo !== '' ? _dispoDisplay(item.dispo) : ''}
+      </div>
+      ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
       ${item.trait ? `<div class="sh-item-trait"><em>${item.trait}</em></div>` : ''}`;
   } else {
     infoHtml = `
@@ -533,12 +639,15 @@ async function confirmBuyItem(itemId) {
     categorieId:item.categorieId||'', template:tplKey, qte:'1',
     prixAchat:prix, prixVente,
     format:item.format||'', rarete:item.rarete||'',
-    degats:item.degats||'', toucher:item.toucher||'',
+    degats:item.degats||'', degatsStat:item.degatsStat||'',
+    toucher:item.toucher||'', toucherStat:item.toucherStat||'',
     ca:item.ca||'', stats:item.stats||'',
+    fo:parseInt(item.fo)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
+    sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
     trait:item.trait||'', type:item.type||'',
     effet:item.effet||'', description:item.description||'',
-    // Champs de slot pour armures
     slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
+    slotBijou:item.slotBijou||'',
   };
 
   const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
@@ -904,12 +1013,41 @@ function _buildFieldsHtml(tpl,item) {
           <option value="">— Choisir —</option>
           ${(f.options||[]).map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
         </select></div>`;
+    } else if(f.type==='damage_with_stat'){
+      const degatsStat = item?.degatsStat || item?.statAttaque || '';
+      html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
+        <div class="sh-modal-selects">
+          <input class="input-field" id="si-degats" value="${item?.degats||''}" placeholder="${f.placeholder||''}">
+          <select class="input-field sh-modal-select" id="si-degatsStat">
+            <option value="">Mod. dégâts</option>
+            ${ITEM_STATS.map(stat=>`<option value="${stat.key}" ${_normalizeStatKey(degatsStat)===stat.key?'selected':''}>${stat.label}</option>`).join('')}
+          </select>
+        </div></div>`;
+    } else if(f.type==='stat_select'){
+      const selected = _normalizeStatKey(item?.[f.id] || item?.toucher || item?.statAttaque || '');
+      html+=`<div class="form-group"><label>${f.label}</label>
+        <select class="input-field sh-modal-select" id="si-${f.id}">
+          <option value="">— Choisir —</option>
+          ${ITEM_STATS.map(stat=>`<option value="${stat.key}" ${selected===stat.key?'selected':''}>${stat.label}</option>`).join('')}
+        </select></div>`;
+    } else if(f.type==='stat_bonus_grid'){
+      const parsed = _parseLegacyStats(item||{});
+      html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
+        <div class="grid-3" style="gap:0.7rem">
+          ${ITEM_STATS.map(stat=>`<div class="form-group" style="margin:0">
+            <label style="font-size:0.78rem;color:var(--text-dim)">${stat.short}</label>
+            <input type="number" class="input-field" id="si-${stat.store}" value="${parsed[stat.store]||''}" placeholder="0">
+          </div>`).join('')}
+        </div>
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.35rem">Laisse vide ou 0 si l'objet ne donne pas de bonus.</div>
+      </div>`;
     } else if(f.type==='textarea'){
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
         <textarea class="input-field" id="si-${f.id}" rows="2">${val}</textarea></div>`;
     } else {
+      const inputType = f.type === 'number' ? 'number' : 'text';
       html+=`<div class="form-group"><label>${f.label}</label>
-        <input class="input-field" id="si-${f.id}" value="${val}" placeholder="${f.placeholder||''}"></div>`;
+        <input type="${inputType}" class="input-field" id="si-${f.id}" value="${val}" placeholder="${f.placeholder||''}"></div>`;
     }
   });
   html+=`</div>`;
@@ -978,11 +1116,36 @@ async function saveShopItem(itemId) {
   const tpl=TEMPLATES[tplKey]||TEMPLATES.classique;
   const nom=document.getElementById('si-nom')?.value.trim();
   if(!nom){showNotif('Nom requis.','error');return;}
+
   const data={ nom, categorieId:catId, sousCategorieId:document.getElementById('si-subcat')?.value||'', image:document.getElementById('si-img-b64')?.value||'' };
+
   tpl.fields.forEach(f=>{
-    if(f.type==='dispo'){ const infini=document.getElementById('si-dispo-infini')?.checked; data[f.id]=infini?-1:(parseInt(document.getElementById('si-dispo')?.value)||0); }
-    else { const el=document.getElementById(`si-${f.id}`); if(el) data[f.id]=f.type==='number'?(parseFloat(el.value)||0):el.value.trim(); }
+    if(f.type==='dispo'){
+      const infini=document.getElementById('si-dispo-infini')?.checked;
+      data[f.id]=infini?-1:(parseInt(document.getElementById('si-dispo')?.value)||0);
+    } else if (f.type === 'damage_with_stat') {
+      data.degats = document.getElementById('si-degats')?.value.trim() || '';
+      data.degatsStat = document.getElementById('si-degatsStat')?.value || '';
+    } else if (f.type === 'stat_select') {
+      data[f.id] = document.getElementById(`si-${f.id}`)?.value || '';
+    } else if (f.type === 'stat_bonus_grid') {
+      ITEM_STATS.forEach(stat => {
+        data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
+      });
+    } else {
+      const el=document.getElementById(`si-${f.id}`);
+      if(el) data[f.id]=f.type==='number'?(parseFloat(el.value)||0):el.value.trim();
+    }
   });
+
+  if (tplKey === 'arme') {
+    data.toucher = _legacyToucherTextFromData(data);
+    data.stats = _legacyStatsTextFromData(data);
+    data.statAttaque = data.degatsStat || data.toucherStat || '';
+  } else if (tplKey === 'armure' || tplKey === 'bijou') {
+    data.stats = _legacyStatsTextFromData(data);
+  }
+
   data.prixVente=Math.round((parseFloat(data.prix)||0)*PRIX_VENTE_RATIO);
   if(itemId) await updateInCol('shop',itemId,data);
   else await addToCol('shop',data);
