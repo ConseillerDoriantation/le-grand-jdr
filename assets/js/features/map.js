@@ -39,7 +39,9 @@ export async function initMap(containerEl) {
 
   mapState.imageUrl = doc?.imageUrl || '';
   mapState.lieux    = lieux || [];
-  mapState.fogZones = fogDoc?.zones || [];
+  // Migrer l'ancien format {x,y,r} vers le nouveau {pts:[...]}
+  const rawZones = fogDoc?.zones || [];
+  mapState.fogZones = rawZones.filter(z => Array.isArray(z.pts)); // ignorer l'ancien format circulaire
 
   renderMap(containerEl);
 }
@@ -275,44 +277,182 @@ function renderMarkers() {
   else img.addEventListener('load', doRender);
 }
 
-// ── Fog of war ────────────────────────────────────────────────────────────────
+// ── Fog of war — polygones précis ────────────────────────────────────────────
+let _fogDrawing = { active:false, current:[], mousePos:null };
+
 function renderFog() {
   const canvas = document.getElementById('map-fog');
   const img    = document.getElementById('map-img');
-  if (!canvas || !img || !mapState.fogZones.length) return;
+  if (!canvas || !img) return;
 
   const doFog = () => {
-    const w = img.naturalWidth  || img.offsetWidth;
-    const h = img.naturalHeight || img.offsetHeight;
-    canvas.width  = w;
-    canvas.height = h;
+    const W = img.naturalWidth || img.offsetWidth;
+    const H = img.naturalHeight || img.offsetHeight;
+    canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
+    const polys = mapState.fogZones || [];
 
-    // Fond sombre
-    ctx.fillStyle = 'rgba(8,12,20,0.88)';
-    ctx.fillRect(0, 0, w, h);
+    if (!polys.length) { ctx.clearRect(0,0,W,H); return; }
 
-    // Découper les zones révélées
+    ctx.fillStyle = 'rgba(8,12,20,0.90)';
+    ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'destination-out';
-    mapState.fogZones.forEach(zone => {
-      const cx = (zone.x / 100) * w;
-      const cy = (zone.y / 100) * h;
-      const r  = (zone.r / 100) * Math.max(w, h);
-      const grad = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r);
-      grad.addColorStop(0, 'rgba(0,0,0,1)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
+    polys.forEach(poly => {
+      if (!poly.pts?.length) return;
       ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      poly.pts.forEach((p, i) => {
+        const px = (p.x/100)*W, py = (p.y/100)*H;
+        i === 0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+      });
+      ctx.closePath();
       ctx.fill();
     });
-
     ctx.globalCompositeOperation = 'source-over';
+    _renderFogOverlay();
   };
 
   if (img.complete && img.naturalWidth) doFog();
   else img.addEventListener('load', doFog);
 }
+
+function _renderFogOverlay() {
+  let ol = document.getElementById('fog-draw-overlay');
+  const transform = document.getElementById('map-transform');
+  if (!transform) return;
+  if (!ol) {
+    ol = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    ol.id = 'fog-draw-overlay';
+    ol.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible';
+    transform.appendChild(ol);
+  }
+  const img = document.getElementById('map-img');
+  if (!img) return;
+  const W = img.naturalWidth||img.offsetWidth, H = img.naturalHeight||img.offsetHeight;
+  ol.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  let svg = '';
+
+  // Polygones sauvegardés (contour vert + croix admin)
+  (mapState.fogZones||[]).forEach((poly,pi) => {
+    if (!poly.pts?.length) return;
+    const d = poly.pts.map((p,i) => `${i===0?'M':'L'}${(p.x/100*W).toFixed(1)} ${(p.y/100*H).toFixed(1)}`).join(' ')+' Z';
+    svg += `<path d="${d}" fill="rgba(34,195,142,0.12)" stroke="rgba(34,195,142,0.65)" stroke-width="1.5"/>`;
+    if (STATE.isAdmin) {
+      const cx = poly.pts.reduce((s,p)=>s+p.x/100*W,0)/poly.pts.length;
+      const cy = poly.pts.reduce((s,p)=>s+p.y/100*H,0)/poly.pts.length;
+      svg += `<g style="pointer-events:all;cursor:pointer" onclick="window.removeFogPoly(${pi})">
+        <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="11" fill="rgba(200,40,40,0.85)" stroke="#fff" stroke-width="1.5"/>
+        <text x="${cx.toFixed(1)}" y="${(cy+4.5).toFixed(1)}" text-anchor="middle" font-size="12" fill="white" font-weight="bold">✕</text>
+      </g>`;
+    }
+  });
+
+  // Polygone en cours
+  const pts = _fogDrawing.current, mouse = _fogDrawing.mousePos;
+  if (_fogDrawing.active && pts.length) {
+    const all = mouse ? [...pts, mouse] : pts;
+    if (all.length >= 2) {
+      const d = all.map((p,i) => `${i===0?'M':'L'}${(p.x/100*W).toFixed(1)} ${(p.y/100*H).toFixed(1)}`).join(' ');
+      svg += `<path d="${d}" fill="rgba(232,184,75,0.10)" stroke="rgba(232,184,75,0.85)" stroke-width="1.5" stroke-dasharray="6 3"/>`;
+      if (mouse && pts.length >= 2) {
+        svg += `<line x1="${(mouse.x/100*W).toFixed(1)}" y1="${(mouse.y/100*H).toFixed(1)}" x2="${(pts[0].x/100*W).toFixed(1)}" y2="${(pts[0].y/100*H).toFixed(1)}" stroke="rgba(232,184,75,0.3)" stroke-width="1" stroke-dasharray="4 4"/>`;
+      }
+    }
+    pts.forEach((p,i) => {
+      svg += `<circle cx="${(p.x/100*W).toFixed(1)}" cy="${(p.y/100*H).toFixed(1)}" r="${i===0?7:4}" fill="${i===0?'rgba(232,184,75,0.9)':'rgba(255,255,255,0.85)'}" stroke="rgba(232,184,75,0.8)" stroke-width="1.5"/>`;
+    });
+    if (mouse) svg += `<circle cx="${(mouse.x/100*W).toFixed(1)}" cy="${(mouse.y/100*H).toFixed(1)}" r="3" fill="rgba(232,184,75,0.6)" stroke="none"/>`;
+  }
+  ol.innerHTML = svg;
+}
+
+// ── Mode dessin fog ───────────────────────────────────────────────────────────
+function startFogDrawMode() {
+  _fogDrawing.active = true; _fogDrawing.current = []; _fogDrawing.mousePos = null;
+  const root = document.getElementById('map-root');
+  const transform = document.getElementById('map-transform');
+  if (!root || !transform) return;
+  transform.style.cursor = 'crosshair';
+
+  const hint = document.getElementById('map-placing-hint');
+  if (hint) { hint.style.display='block'; hint.textContent='Clic : ajouter un point · Double-clic ou Entrée : fermer · Suppr : annuler dernier · Échap : quitter'; }
+
+  function pct(e) {
+    const r = transform.getBoundingClientRect();
+    return {
+      x: Math.min(100, Math.max(0, ((e.clientX-r.left)/mapState.scale/(r.width/mapState.scale))*100)),
+      y: Math.min(100, Math.max(0, ((e.clientY-r.top) /mapState.scale/(r.height/mapState.scale))*100)),
+    };
+  }
+
+  window._fogMM = (e) => { if (!_fogDrawing.active) return; _fogDrawing.mousePos = pct(e); _renderFogOverlay(); };
+  window._fogCL = (e) => {
+    if (!_fogDrawing.active) return;
+    e.stopPropagation();
+    _fogDrawing.current.push(pct(e));
+    _renderFogOverlay();
+  };
+  window._fogDC = (e) => {
+    if (!_fogDrawing.active) return;
+    e.stopPropagation(); e.preventDefault();
+    if (_fogDrawing.current.length > 0) _fogDrawing.current.pop(); // enlever le point du 2e clic
+    if (_fogDrawing.current.length >= 3) _fogCommit([..._fogDrawing.current]);
+    _fogDrawing.current = [];
+    _renderFogOverlay();
+  };
+  window._fogKD = (e) => {
+    if (e.key==='Escape') stopFogDrawMode();
+    else if ((e.key==='Backspace'||e.key==='Delete') && _fogDrawing.current.length>0) { _fogDrawing.current.pop(); _renderFogOverlay(); }
+    else if (e.key==='Enter' && _fogDrawing.current.length>=3) { _fogCommit([..._fogDrawing.current]); _fogDrawing.current=[]; _renderFogOverlay(); }
+  };
+
+  root.addEventListener('mousemove', window._fogMM);
+  root.addEventListener('click',    window._fogCL, { capture:true });
+  root.addEventListener('dblclick', window._fogDC, { capture:true });
+  window.addEventListener('keydown', window._fogKD);
+}
+
+function stopFogDrawMode() {
+  _fogDrawing.active=false; _fogDrawing.current=[]; _fogDrawing.mousePos=null;
+  const root = document.getElementById('map-root');
+  root?.removeEventListener('mousemove', window._fogMM);
+  root?.removeEventListener('click',    window._fogCL, { capture:true });
+  root?.removeEventListener('dblclick', window._fogDC, { capture:true });
+  window.removeEventListener('keydown', window._fogKD);
+  document.getElementById('map-transform').style.cursor = 'grab';
+  const hint = document.getElementById('map-placing-hint');
+  if (hint) hint.style.display = 'none';
+  const btn = document.getElementById('btn-fog-toggle');
+  if (btn) { btn.style.background=''; btn.style.borderColor=''; btn.style.color=''; btn.textContent='🌫️ Brouillard'; }
+  _renderFogOverlay();
+}
+
+async function _fogCommit(pts) {
+  if (!mapState.fogZones) mapState.fogZones = [];
+  mapState.fogZones.push({ pts });
+  await saveDoc('world','map_fog',{ zones: mapState.fogZones });
+  renderFog();
+  showNotif('Zone révélée ajoutée ✓','success');
+}
+
+window.removeFogPoly = async (i) => {
+  mapState.fogZones.splice(i, 1);
+  await saveDoc('world','map_fog',{ zones: mapState.fogZones });
+  renderFog();
+  showNotif('Zone supprimée.','success');
+};
+
+window.clearFog = async () => {
+  if (!confirm('Effacer toutes les zones révélées ?')) return;
+  mapState.fogZones = [];
+  await saveDoc('world','map_fog',{ zones:[] });
+  renderFog();
+  showNotif('Brouillard effacé.','success');
+};
+
+window.saveFog = async () => {
+  await saveDoc('world','map_fog',{ zones: mapState.fogZones||[] });
+  renderFog();
+};
 
 // ── Sidebar lieu ──────────────────────────────────────────────────────────────
 function openSidebar(lieu) {
@@ -387,7 +527,31 @@ function setupAdminControls() {
     document.getElementById('map-transform').style.cursor = mapState.placingMode ? 'crosshair' : 'grab';
   });
 
-  document.getElementById('btn-fog-toggle')?.addEventListener('click', openFogModal);
+  document.getElementById('btn-fog-toggle')?.addEventListener('click', () => {
+    if (_fogDrawing.active) {
+      stopFogDrawMode();
+    } else {
+      const btn = document.getElementById('btn-fog-toggle');
+      if (btn) {
+        btn.style.background  = 'rgba(79,140,255,0.15)';
+        btn.style.borderColor = 'var(--border-bright)';
+        btn.style.color       = 'var(--gold)';
+        btn.textContent       = '🌫️ Stop dessin';
+      }
+      // Bouton effacer tout (flottant en bas)
+      let clearBtn = document.getElementById('fog-clear-btn');
+      if (!clearBtn) {
+        clearBtn = document.createElement('button');
+        clearBtn.id = 'fog-clear-btn';
+        clearBtn.className = 'btn btn-outline btn-sm';
+        clearBtn.textContent = '🗑️ Effacer tout';
+        clearBtn.style.cssText = 'position:absolute;bottom:3.5rem;right:1rem;z-index:11;font-size:0.73rem;color:#ff6b6b;border-color:rgba(255,107,107,0.4)';
+        clearBtn.onclick = () => window.clearFog();
+        document.getElementById('map-root')?.appendChild(clearBtn);
+      }
+      startFogDrawMode();
+    }
+  });
   document.getElementById('btn-map-settings')?.addEventListener('click', openMapSettingsModal);
 }
 
@@ -508,63 +672,7 @@ window.deleteLieu = async (id) => {
 };
 
 // ── Admin : fog of war ────────────────────────────────────────────────────────
-function openFogModal() {
-  openModal('🌫️ Brouillard de guerre', `
-    <p style="font-size:0.83rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6">
-      Ajoutez des zones révélées en précisant leur centre (%) et leur rayon (% de la carte).
-      Les zones se superposent — plus le rayon est grand, plus la zone découverte est large.
-    </p>
-    <div id="fog-zones-list" style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1rem">
-      ${mapState.fogZones.map((z, i) => `
-        <div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.75rem">
-          <span style="font-size:0.8rem;color:var(--text-muted);flex:1">Zone ${i + 1} — X:${z.x}% Y:${z.y}% R:${z.r}%</span>
-          <button class="btn-icon" onclick="window.removeFogZone(${i})">🗑️</button>
-        </div>`).join('') || '<p style="font-size:0.8rem;color:var(--text-dim);font-style:italic;text-align:center">Aucune zone révélée — toute la carte est dans le brouillard.</p>'}
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.75rem">
-      <div class="form-group"><label>X centre (%)</label><input type="number" class="input-field" id="fog-x" value="50" min="0" max="100"></div>
-      <div class="form-group"><label>Y centre (%)</label><input type="number" class="input-field" id="fog-y" value="50" min="0" max="100"></div>
-      <div class="form-group"><label>Rayon (%)</label><input type="number" class="input-field" id="fog-r" value="20" min="1" max="100"></div>
-    </div>
-    <div style="display:flex;gap:0.5rem">
-      <button class="btn btn-outline" style="flex:1" onclick="window.addFogZone()">+ Ajouter zone</button>
-      <button class="btn btn-gold" style="flex:1" onclick="window.saveFog()">Enregistrer</button>
-    </div>
-    <div style="margin-top:0.75rem">
-      <button class="btn btn-outline" style="width:100%;color:#ff6b6b;border-color:rgba(255,107,107,0.3)" onclick="window.clearFog()">
-        Supprimer tout le brouillard
-      </button>
-    </div>
-  `);
-}
 
-window.addFogZone = () => {
-  const x = parseFloat(document.getElementById('fog-x')?.value) || 50;
-  const y = parseFloat(document.getElementById('fog-y')?.value) || 50;
-  const r = parseFloat(document.getElementById('fog-r')?.value) || 20;
-  mapState.fogZones.push({ x, y, r });
-  openFogModal();
-};
-
-window.removeFogZone = (i) => {
-  mapState.fogZones.splice(i, 1);
-  openFogModal();
-};
-
-window.saveFog = async () => {
-  await saveDoc('world', 'map_fog', { zones: mapState.fogZones });
-  closeModal();
-  renderFog();
-  showNotif('Brouillard mis à jour.', 'success');
-};
-
-window.clearFog = async () => {
-  mapState.fogZones = [];
-  await saveDoc('world', 'map_fog', { zones: [] });
-  closeModal();
-  renderFog();
-  showNotif('Brouillard supprimé.', 'success');
-};
 
 // ── Admin : paramètres carte (avec upload + crop) ────────────────────────────
 let _mapCrop = {
