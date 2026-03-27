@@ -33,7 +33,6 @@ service cloud.firestore {
     match /tutorial/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /recettes/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /world/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /world_missions/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /bastion/{id}      { allow read, write: if isLoggedIn(); }
 
     match /characters/{id} {
