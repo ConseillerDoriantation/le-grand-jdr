@@ -222,28 +222,4 @@
   }
 
   .tutorial-layout-grid { grid-template-columns:1fr !important; }
-  .world-hero,
-  .world-toolbar__grid {
-    grid-template-columns:1fr;
-  }
-  .world-toolbar__search {
-    grid-column:span 1;
-  }
-  .world-admin-bar,
-  .world-toolbar__top,
-  .world-mission-card__head,
-  .world-mission-card__footer {
-    flex-direction:column;
-    align-items:stretch;
-  }
-  .world-mission-card__badges {
-    justify-content:flex-start;
-  }
-  .world-mission-card__meta {
-    grid-template-columns:1fr;
-  }
-  .world-modal-grid,
-  .world-detail-modal__meta {
-    grid-template-columns:1fr !important;
-  }
 }
