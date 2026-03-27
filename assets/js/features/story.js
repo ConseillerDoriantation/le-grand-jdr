@@ -153,9 +153,12 @@ async function renderStory() {
 }
 
 // ── RENDU TIMELINE ────────────────────────────────────────────────────────────
+// L'ordre d'affichage est GLOBAL : deux missions d'axes différents avec le
+// même `ordre` apparaissent dans la même colonne (= même moment chronologique).
 function _renderTimeline(items) {
   const CARD_W=160, CARD_GAP=28, ROW_H=195, ROW_GAP=40, PAD_L=28;
 
+  // ── 1. Regrouper par axe (= une ligne par axe) ──
   const axeOrder=[], axeGroups={};
   items.forEach(item => {
     const key = item.axe||'__none__';
@@ -163,68 +166,80 @@ function _renderTimeline(items) {
     axeGroups[key].push(item);
   });
 
-  // Index id → position
+  // ── 2. Colonnes basées sur l'ordre global ──
+  // Collecter toutes les valeurs d'ordre distinctes, triées
+  const allOrdres = [...new Set(items.map(i => i.ordre||0))].sort((a,b)=>a-b);
+  // Mapper ordre → index de colonne
+  const ordreToCol = {};
+  allOrdres.forEach((o,i) => { ordreToCol[o] = i; });
+  const totalCols = allOrdres.length || 1;
+
+  // ── 3. Index id → position (cx/cy en coords naturelles) ──
   const posMap={};
   axeOrder.forEach((key,rowIdx) => {
-    axeGroups[key].forEach((item,colIdx) => {
+    axeGroups[key].forEach(item => {
+      const col = ordreToCol[item.ordre||0] ?? 0;
       posMap[item.id]={
-        row:rowIdx, col:colIdx,
-        cx: PAD_L+colIdx*(CARD_W+CARD_GAP)+CARD_W/2,
-        cy: ROW_GAP+rowIdx*(ROW_H+ROW_GAP)+ROW_H/2,
+        row: rowIdx, col,
+        cx: PAD_L + col*(CARD_W+CARD_GAP) + CARD_W/2,
+        cy: ROW_GAP + rowIdx*(ROW_H+ROW_GAP) + ROW_H/2,
       };
     });
   });
 
-  const maxItems = Math.max(...axeOrder.map(k=>axeGroups[k].length));
-  const totalW   = PAD_L+maxItems*(CARD_W+CARD_GAP)+PAD_L;
-  const totalH   = axeOrder.length*(ROW_H+ROW_GAP)+ROW_GAP;
+  const totalW = PAD_L + totalCols*(CARD_W+CARD_GAP) + PAD_L;
+  const totalH = axeOrder.length*(ROW_H+ROW_GAP) + ROW_GAP;
 
-  // SVG
-  let svgLines = '';
-  // Lignes horizontales par axe
+  // ── 4. SVG : lignes d'axe + flèches inter-missions ──
+  let svgLines='';
+  const defsHtml=[];
+
+  // Lignes horizontales par axe (connecte les points dans l'ordre des colonnes)
   axeOrder.forEach((key,rowIdx) => {
     const color=key==='__none__'?'#555':(_axeMap[key]||'#555');
     const group=axeGroups[key];
     const y=ROW_GAP+rowIdx*(ROW_H+ROW_GAP)+ROW_H/2;
-    if(group.length>1){
-      const x1=PAD_L+CARD_W/2, x2=PAD_L+(group.length-1)*(CARD_W+CARD_GAP)+CARD_W/2;
-      svgLines+=`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2" opacity=".35"/>`;
+
+    // Trier les items de cet axe par colonne pour tracer la ligne dans le bon sens
+    const sorted=[...group].sort((a,b)=>(ordreToCol[a.ordre||0]??0)-(ordreToCol[b.ordre||0]??0));
+    if(sorted.length>1){
+      for(let i=0;i<sorted.length-1;i++){
+        const x1=posMap[sorted[i].id].cx, x2=posMap[sorted[i+1].id].cx;
+        svgLines+=`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2" opacity=".35"/>`;
+      }
     }
-    group.forEach((_,i)=>{
-      const cx=PAD_L+i*(CARD_W+CARD_GAP)+CARD_W/2;
+    sorted.forEach(item=>{
+      const cx=posMap[item.id].cx;
       svgLines+=`<circle cx="${cx}" cy="${y}" r="4" fill="${color}" opacity=".7"/>`;
     });
   });
 
-  // Flèches inter-missions
-  const defsHtml=[];
+  // Flèches inter-missions (Bézier cubique entre axes différents)
   items.forEach(item => {
     if(!item.liens?.length) return;
     const from=posMap[item.id]; if(!from) return;
     item.liens.forEach(tid => {
       const to=posMap[tid]; if(!to) return;
-      const {cx:x1,cy:y1}=from, {cx:x2,cy:y2}=to;
+      const{cx:x1,cy:y1}=from,{cx:x2,cy:y2}=to;
       const markId=`arr-${item.id.slice(-4)}-${tid.slice(-4)}`;
       defsHtml.push(`<marker id="${markId}" viewBox="0 0 10 10" refX="8" refY="5"
         markerWidth="5" markerHeight="5" orient="auto-start-reverse">
         <path d="M2 1L8 5L2 9" fill="none" stroke="rgba(232,184,75,.8)"
           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </marker>`);
-      // Bézier cubique
-      const cp1x=x1+(x2-x1)*0.5, cp2x=x2-(x2-x1)*0.5;
+      const cp1x=x1+(x2-x1)*.5, cp2x=x2-(x2-x1)*.5;
       svgLines+=`<path d="M${x1} ${y1} C${cp1x} ${y1} ${cp2x} ${y2} ${x2} ${y2}"
         fill="none" stroke="rgba(232,184,75,.45)" stroke-width="1.5" stroke-dasharray="6 3"
         marker-end="url(#${markId})"/>`;
     });
   });
 
-  let html = `<svg style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none"
+  let html=`<svg style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none"
     width="${totalW}" height="${totalH}">
-    <defs>${defsHtml.join('')}</defs>
-    ${svgLines}
+    <defs>${defsHtml.join('')}</defs>${svgLines}
   </svg>`;
 
-  // Cards
+  // ── 5. Cards positionnées par colonne globale ──
   axeOrder.forEach((key,rowIdx) => {
     const color=key==='__none__'?'#555':(_axeMap[key]||'#555');
     const group=axeGroups[key];
@@ -236,8 +251,9 @@ function _renderTimeline(items) {
         font-size:.6rem;color:${color};opacity:.6;letter-spacing:1px;text-transform:uppercase;white-space:nowrap">${key}</div>`;
     }
 
-    group.forEach((item,colIdx) => {
-      const left=PAD_L+colIdx*(CARD_W+CARD_GAP);
+    group.forEach(item => {
+      const col = ordreToCol[item.ordre||0] ?? 0;
+      const left = PAD_L + col*(CARD_W+CARD_GAP);
       const st=stCfg(item);
       const hasLiens=item.liens?.length>0;
 
@@ -249,7 +265,8 @@ function _renderTimeline(items) {
           <div style="width:100%;height:88px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${item.imageUrl
               ?`<img src="${item.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" draggable="false">`
-              :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.8rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">${item.type==='combat'?'⚔️':item.type==='mission'?'🎯':'📖'}</div>`
+              :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.8rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">
+                 ${item.type==='mission'?'🎯':'📖'}</div>`
             }
             <div style="position:absolute;top:5px;right:5px;background:rgba(11,17,24,.85);
               border:1px solid ${st.border};border-radius:999px;padding:1px 6px;
@@ -296,10 +313,10 @@ async function openStoryDetail(id) {
       ?`<img src="${item.imageUrl}" style="width:100%;height:180px;object-fit:cover;display:block">`
       :`<div style="width:100%;height:130px;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));
           display:flex;align-items:center;justify-content:center;font-size:4rem">
-          ${item.type==='combat'?'⚔️':item.type==='mission'?'🎯':'📖'}</div>`}
+          ${item.type==='mission'?'🎯':'📖'}</div>`}
     <div style="position:absolute;top:12px;right:12px;background:rgba(11,17,24,.85);
       border:1px solid ${st.border};border-radius:999px;padding:3px 10px;font-size:.72rem;color:${st.color}">
-      ${item.type==='mission'?'Mission':item.type==='combat'?'Combat':'Événement'}
+      ${item.type==='mission'?'Mission':'Événement'}
     </div>
   </div>
   <div style="padding:1.2rem 0 0">
@@ -379,11 +396,9 @@ async function openStoryModal(item = null) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
       <div class="form-group">
         <label>Type</label>
-        <select class="input-field" id="st-type"
-          onchange="document.getElementById('st-mission-extra').style.display=this.value==='mission'?'block':'none'">
+        <select class="input-field" id="st-type">
           <option value="mission" ${(item?.type||'mission')==='mission'?'selected':''}>🎯 Mission</option>
           <option value="event"   ${item?.type==='event'  ?'selected':''}>📖 Événement</option>
-          <option value="combat"  ${item?.type==='combat' ?'selected':''}>⚔️ Combat</option>
         </select>
       </div>
       <div class="form-group">
@@ -455,7 +470,7 @@ async function openStoryModal(item = null) {
         }</textarea>
     </div>
 
-    <div id="st-mission-extra" style="${(item?.type||'mission')==='mission'?'':'display:none'}">
+    <div id="st-mission-extra" style="">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
         <div class="form-group">
           <label>Statut</label>
@@ -483,18 +498,46 @@ async function openStoryModal(item = null) {
 
     ${autresItems.length?`
     <div class="form-group">
-      <label>↝ Mène vers (missions débloquées après)</label>
-      <div style="max-height:130px;overflow-y:auto;background:var(--bg-elevated);
-        border:1px solid var(--border);border-radius:8px;padding:.5rem">
+      <label style="display:flex;align-items:center;gap:.5rem">
+        ↝ Mène vers
+        <span style="font-size:.72rem;color:var(--text-dim);font-weight:400">— missions débloquées après celle-ci</span>
+      </label>
+      <div id="st-liens-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:.5rem;margin-top:.4rem">
         ${autresItems.map(other => {
           const checked=(item?.liens||[]).includes(other.id);
-          return `<label style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;
-            cursor:pointer;font-size:.82rem;color:var(--text-muted)">
-            <input type="checkbox" id="lien-${other.id}" ${checked?'checked':''}
-              style="accent-color:var(--gold)">
-            ${other.titre||'Mission'}
-            ${other.axe?`<span style="font-size:.68rem;color:${_axeMap[other.axe]||'var(--text-dim)'}">· ${other.axe}</span>`:''}
-          </label>`;
+          const axeCol=other.axe?(_axeMap[other.axe]||'var(--text-dim)'):'var(--text-dim)';
+          const stOther=stCfg(other);
+          return `
+          <div id="lien-card-${other.id}"
+            onclick="window._toggleLien('${other.id}')"
+            style="position:relative;cursor:pointer;border-radius:10px;overflow:hidden;
+              border:2px solid ${checked?'var(--gold)':'var(--border)'};
+              background:${checked?'rgba(232,184,75,.08)':'var(--bg-elevated)'};
+              transition:all .15s;user-select:none;">
+            <div style="height:52px;background:var(--bg-panel);overflow:hidden;position:relative">
+              ${other.imageUrl
+                ?`<img src="${other.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block">`
+                :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.2rem">${other.type==='mission'?'🎯':'📖'}</div>`
+              }
+              <div id="lien-tick-${other.id}" style="
+                position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;
+                background:${checked?'var(--gold)':'rgba(11,17,24,.75)'};
+                border:1.5px solid ${checked?'var(--gold)':'rgba(255,255,255,.2)'};
+                display:flex;align-items:center;justify-content:center;
+                font-size:.65rem;color:#0b1118;font-weight:700;transition:all .15s;">
+                ${checked?'✓':''}
+              </div>
+              <div style="position:absolute;bottom:0;left:0;right:0;height:2px;background:${axeCol};opacity:.8"></div>
+            </div>
+            <div style="padding:.35rem .45rem">
+              <div style="font-family:'Cinzel',serif;font-size:.65rem;color:var(--text);
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3"
+                title="${other.titre||''}">${other.titre||'Mission'}</div>
+              ${other.axe?`<div style="font-size:.6rem;color:${axeCol};margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${other.axe}</div>`:''}
+              <div style="font-size:.58rem;color:${stOther.color};margin-top:1px">${stOther.icon} ${other.statut||'En attente'}</div>
+            </div>
+            <input type="checkbox" id="lien-${other.id}" ${checked?'checked':''} style="display:none">
+          </div>`;
         }).join('')}
       </div>
     </div>`:``}
@@ -516,6 +559,21 @@ async function openStoryModal(item = null) {
     const r=new FileReader();
     r.onload=(e)=>_initStCrop(e.target.result);
     r.readAsDataURL(file);
+  };
+
+  // Toggle visuel d'une card lien
+  window._toggleLien = (id) => {
+    const cb   = document.getElementById(`lien-${id}`);
+    const card = document.getElementById(`lien-card-${id}`);
+    const tick = document.getElementById(`lien-tick-${id}`);
+    if (!cb || !card || !tick) return;
+    cb.checked = !cb.checked;
+    const on = cb.checked;
+    card.style.borderColor = on ? 'var(--gold)' : 'var(--border)';
+    card.style.background  = on ? 'rgba(232,184,75,.08)' : 'var(--bg-elevated)';
+    tick.style.background  = on ? 'var(--gold)' : 'rgba(11,17,24,.75)';
+    tick.style.borderColor = on ? 'var(--gold)' : 'rgba(255,255,255,.2)';
+    tick.textContent       = on ? '✓' : '';
   };
 }
 
