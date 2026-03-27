@@ -10,7 +10,8 @@ const TEMPLATES = {
   arme: {
     label: '⚔️ Arme',
     fields: [
-      { id:'format',   label:'Format',   type:'text',   placeholder:'Épée 1M, Lance 2M, Arc...' },
+      { id:'format',   label:'Format',   type:'select',
+        options:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'] },
       { id:'rarete',   label:'Rareté',   type:'rarete' },
       { id:'degats',   label:'Dégâts',   type:'text',   placeholder:'1D10, 2D6...' },
       { id:'toucher',  label:'Toucher',  type:'text',   placeholder:'+Fo, +Dex...' },
@@ -23,12 +24,16 @@ const TEMPLATES = {
   armure: {
     label: '🛡️ Armure',
     fields: [
-      { id:'rarete',   label:'Rareté',   type:'rarete' },
-      { id:'ca',       label:'CA',       type:'text',   placeholder:'10, 12, 14...' },
-      { id:'stats',    label:'Stats',    type:'text',   placeholder:'+2 Co, +1 Fo...' },
-      { id:'trait',    label:'Trait',    type:'text',   placeholder:'Lourd, Magique...' },
-      { id:'prix',     label:'Prix 🪙',  type:'number', placeholder:'0' },
-      { id:'dispo',    label:'Dispo',    type:'dispo' },
+      { id:'slotArmure',  label:'Emplacement', type:'select',
+        options:['Tête','Torse','Pieds'] },
+      { id:'typeArmure',  label:'Type',        type:'select',
+        options:['Légère','Intermédiaire','Lourde'] },
+      { id:'rarete',      label:'Rareté',      type:'rarete' },
+      { id:'ca',          label:'CA bonus',    type:'text',   placeholder:'0, +1, +2...' },
+      { id:'stats',       label:'Stats',       type:'text',   placeholder:'+2 Co, +1 Fo...' },
+      { id:'trait',       label:'Trait',       type:'text',   placeholder:'Lourd, Magique...' },
+      { id:'prix',        label:'Prix 🪙',     type:'number', placeholder:'0' },
+      { id:'dispo',       label:'Dispo',       type:'dispo' },
     ],
   },
   classique: {
@@ -388,8 +393,10 @@ function _renderItemCard(item, tplKey, itemIdx) {
   } else if (tplKey === 'armure') {
     infoHtml = `
       <div class="sh-item-tags">
+        ${item.slotArmure  ? `<span class="sh-tag">${item.slotArmure}</span>` : ''}
+        ${item.typeArmure  ? `<span class="sh-tag">${item.typeArmure}</span>` : ''}
         ${item.rarete ? _rareteStars(item.rarete) : ''}
-        ${item.ca     ? `<span class="sh-tag">🛡️ CA ${item.ca}</span>` : ''}
+        ${item.ca     ? `<span class="sh-tag">🛡️ CA +${item.ca}</span>` : ''}
         ${dispo !== undefined && dispo !== '' ? _dispoDisplay(item.dispo) : ''}
       </div>
       ${item.stats ? `<div class="sh-item-stats">${item.stats}</div>` : ''}
@@ -416,7 +423,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
         <div class="sh-item-prix-achat">💰 ${prix} or</div>
         <div class="sh-item-prix-vente" title="Prix de revente (60%)">🔄 ${prixVente} or</div>
       </div>
-      ${hasChar ? (
+      ${!STATE.isAdmin && hasChar ? (
         epuise
           ? `<button class="btn sh-buy-btn" disabled style="opacity:0.4;cursor:not-allowed">Épuisé</button>`
           : `<button class="btn sh-buy-btn" onclick="buyItem('${item.id}')">🛒 Acheter</button>`
@@ -530,6 +537,8 @@ async function confirmBuyItem(itemId) {
     ca:item.ca||'', stats:item.stats||'',
     trait:item.trait||'', type:item.type||'',
     effet:item.effet||'', description:item.description||'',
+    // Champs de slot pour armures
+    slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
   };
 
   const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
