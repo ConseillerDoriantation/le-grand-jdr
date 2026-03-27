@@ -41,63 +41,6 @@ function formatItemBonusText(item = {}) {
   return item?.stats || '';
 }
 
-function normalizeArmorSetType(value = '') {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return '';
-  if (raw.startsWith('léger') || false) return 'leger';
-  if (raw.startsWith('leger')) return 'leger';
-  if (raw.startsWith('inter')) return 'inter';
-  if (raw.startsWith('lourd')) return 'lourd';
-  return '';
-}
-
-function getArmorSetInfo(c) {
-  const equip = c?.equipement || {};
-  const head = equip['Tête'];
-  const chest = equip['Torse'];
-  const boots = equip['Bottes'];
-  if (!head?.nom || !chest?.nom || !boots?.nom) return null;
-
-  const types = [head?.typeArmure, chest?.typeArmure, boots?.typeArmure].map(normalizeArmorSetType);
-  if (!types.every(Boolean)) return null;
-  if (!(types[0] === types[1] && types[1] === types[2])) return null;
-
-  const SETS = {
-    leger: {
-      key: 'leger',
-      title: 'Set léger actif',
-      effect: '-2 PM / Sorts',
-      accent: '#60a5fa',
-      border: 'rgba(96,165,250,.38)',
-      bg: 'linear-gradient(135deg, rgba(96,165,250,.18), rgba(96,165,250,.06))',
-      badge: 'rgba(96,165,250,.16)',
-      badgeText: '#93c5fd',
-    },
-    inter: {
-      key: 'inter',
-      title: 'Set intermédiaire actif',
-      effect: 'Toucher +2',
-      accent: '#4ade80',
-      border: 'rgba(74,222,128,.34)',
-      bg: 'linear-gradient(135deg, rgba(74,222,128,.16), rgba(74,222,128,.05))',
-      badge: 'rgba(74,222,128,.16)',
-      badgeText: '#86efac',
-    },
-    lourd: {
-      key: 'lourd',
-      title: 'Set lourd actif',
-      effect: 'Réduction de 2 dégâts',
-      accent: '#f87171',
-      border: 'rgba(248,113,113,.34)',
-      bg: 'linear-gradient(135deg, rgba(248,113,113,.16), rgba(248,113,113,.05))',
-      badge: 'rgba(248,113,113,.16)',
-      badgeText: '#fca5a5',
-    },
-  };
-
-  return SETS[types[0]] || null;
-}
-
 function getEquippedInventoryIndexMap(c) {
   const map = new Map();
   Object.entries(c?.equipement || {}).forEach(([slot, item]) => {
@@ -697,17 +640,10 @@ function renderCharCarac(c, canEdit) {
     </div>
   </div>`;
 
-  const armorSet = getArmorSetInfo(c);
-  if (armorSet) {
+  if (c.setBonusActif) {
     html += `<div class="cs-section">
       <div class="cs-section-title">✨ Bonus de Set</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;border:1px solid ${armorSet.border};background:${armorSet.bg};border-radius:14px;padding:.85rem 1rem">
-        <div>
-          <div style="font-weight:700;color:var(--text)">${armorSet.title}</div>
-          <div style="font-size:.78rem;color:var(--text-dim)">Tête · Torse · Bottes assortis</div>
-        </div>
-        <div style="font-size:.92rem;font-weight:800;color:${armorSet.accent}">${armorSet.effect}</div>
-      </div>
+      <div style="font-size:0.85rem;color:var(--text-muted);font-style:italic">${c.setBonusActif}</div>
     </div>`;
   }
   return html;
@@ -837,7 +773,6 @@ function renderCharEquip(c, canEdit) {
   const s = c.stats||{}; const sb = c.statsBonus||{};
   const fo = (s.force||10)+(sb.force||0);
   const dex = (s.dexterite||8)+(sb.dexterite||0);
-  const armorSet = getArmorSetInfo(c);
 
   let html = '';
 
@@ -905,30 +840,6 @@ function renderCharEquip(c, canEdit) {
   html += `<div class="cs-combat-info">
     🎲 Critique : Maximum des dés + relance les dés de dégâts.
   </div></div>`;
-
-
-  if (armorSet) {
-    html += `<div class="cs-section" style="padding:0;border:none;background:transparent;box-shadow:none">
-      <div style="border:1px solid ${armorSet.border};background:${armorSet.bg};border-radius:18px;padding:1rem 1.1rem;box-shadow:0 10px 28px rgba(0,0,0,.12)">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;margin-bottom:.55rem">
-          <div style="display:flex;align-items:center;gap:.7rem;min-width:0">
-            <div style="width:12px;height:12px;border-radius:999px;background:${armorSet.accent};box-shadow:0 0 0 4px ${armorSet.badge}"></div>
-            <div>
-              <div style="font-size:1rem;font-weight:800;color:var(--text);line-height:1.15">${armorSet.title}</div>
-              <div style="font-size:.78rem;color:var(--text-dim)">Tête · Torse · Bottes du même type</div>
-            </div>
-          </div>
-          <span style="display:inline-flex;align-items:center;justify-content:center;padding:.28rem .68rem;border-radius:999px;background:${armorSet.badge};border:1px solid ${armorSet.border};font-size:.72rem;font-weight:700;color:${armorSet.badgeText}">
-            3/3 pièces
-          </span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap">
-          <div style="font-size:.76rem;letter-spacing:.12em;text-transform:uppercase;color:${armorSet.badgeText};font-weight:700">Effet de set</div>
-          <div style="font-size:1rem;font-weight:800;color:${armorSet.accent}">${armorSet.effect}</div>
-        </div>
-      </div>
-    </div>`;
-  }
 
   // Actions
   html += `<div class="cs-section">
