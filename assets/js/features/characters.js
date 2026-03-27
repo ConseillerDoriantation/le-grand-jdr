@@ -499,6 +499,99 @@ function renderCharCarac(c, canEdit) {
   return html;
 }
 
+function _renderInventaireBoutique(char) {
+  const inv = (char.inventaire || []).filter(i => i.source === 'boutique');
+  if (!inv.length) return '';
+
+  const RARETE_LABELS = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
+  const RARETE_COLORS = ['', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc'];
+
+  const canEdit = window._canEditChar ?? STATE.isAdmin;
+
+  const cards = inv.map((item) => {
+    const realIdx = (char.inventaire || []).findIndex((x) =>
+      x.source === 'boutique' && x === item
+    );
+
+    const rareteN = parseInt(item.rarete) || 0;
+    const rareteC = RARETE_COLORS[rareteN] || '#555';
+    const rareteL = RARETE_LABELS[rareteN] || '';
+    const prixAchat = parseFloat(item.prixAchat) || 0;
+    const prixVente = parseFloat(item.prixVente) || Math.round(prixAchat * 0.6);
+
+    const infos = [];
+    if (item.format)      infos.push({ label: 'Format',   val: item.format });
+    if (item.degats)      infos.push({ label: '⚔️ Dégâts', val: item.degats,  color: '#ff6b6b' });
+    if (item.toucher)     infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
+    if (item.ca)          infos.push({ label: '🛡️ CA',      val: item.ca });
+    if (item.stats)       infos.push({ label: 'Stats',     val: item.stats,   color: '#4f8cff' });
+    if (item.trait)       infos.push({ label: 'Trait',     val: item.trait,   color: '#b47fff', italic: true });
+    if (item.type)        infos.push({ label: 'Type',      val: item.type });
+    if (item.effet)       infos.push({ label: 'Effet',     val: item.effet });
+    if (item.description) infos.push({ label: 'Desc.',     val: item.description, muted: true });
+
+    return `
+    <div style="
+      background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
+      padding:.85rem 1rem;display:flex;flex-direction:column;gap:.5rem;
+      border-left:3px solid ${rareteC};
+    ">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
+        <div>
+          <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600;line-height:1.2">
+            ${item.nom || '?'}
+          </div>
+          ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${'★'.repeat(rareteN)+'☆'.repeat(4-rareteN)} ${rareteL}</div>` : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:.4rem;flex-shrink:0">
+          <span style="font-size:.72rem;background:var(--bg-elevated);border:1px solid var(--border);
+            border-radius:999px;padding:2px 8px;color:var(--text-muted)">×${item.qte || 1}</span>
+        </div>
+      </div>
+
+      ${infos.length ? `
+      <div style="display:flex;flex-wrap:wrap;gap:.3rem .75rem">
+        ${infos.map(info => `
+          <div style="display:flex;align-items:baseline;gap:.3rem;font-size:.78rem">
+            <span style="color:var(--text-dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px">${info.label}</span>
+            <span style="color:${info.color || 'var(--text-muted)'};${info.italic ? 'font-style:italic' : ''};font-weight:${info.color ? '600' : '400'}">${info.val}</span>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.25rem;
+        padding-top:.5rem;border-top:1px solid var(--border)">
+        <div style="font-size:.72rem;color:var(--text-dim)">
+          <span title="Prix d'achat">💰 ${prixAchat} or</span>
+          <span style="margin:0 .3rem;opacity:.4">·</span>
+          <span title="Prix de revente" style="color:var(--gold)">🔄 ${prixVente} or</span>
+        </div>
+        ${canEdit ? `
+        <button onclick="sellInvItem('${char.id}', ${realIdx})"
+          style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
+          border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
+          color:var(--gold);transition:all .15s"
+          onmouseover="this.style.background='rgba(232,184,75,.15)'"
+          onmouseout="this.style.background='rgba(232,184,75,.08)'">
+          Vendre
+        </button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <div style="margin-bottom:1.5rem">
+    <div style="font-size:.72rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;
+      margin-bottom:.75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">
+      🛒 Inventaire Boutique
+      <span style="font-size:.65rem;background:var(--bg-elevated);border:1px solid var(--border);
+        border-radius:999px;padding:1px 7px;margin-left:.4rem;color:var(--text-dim)">${inv.length}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.6rem">
+      ${cards}
+    </div>
+  </div>`;
+}
+
 // ══════════════════════════════════════════════
 // TAB : COMBAT
 // ══════════════════════════════════════════════
@@ -510,7 +603,10 @@ function renderCharEquip(c, canEdit) {
   const fo = (s.force||10)+(sb.force||0);
   const dex = (s.dexterite||8)+(sb.dexterite||0);
 
-  let html = `<div class="cs-section">
+  let html = '';
+  html += _renderInventaireBoutique(c);
+
+  html += `<div class="cs-section">
     <div class="cs-section-title">⚔️ Armes
       ${canEdit?'<span class="cs-hint">cliquer sur ✏️ pour modifier</span>':''}
     </div>`;
@@ -740,7 +836,7 @@ function renderCharInventaire(c, canEdit) {
         <div class="cs-inv-meta">
           ${item.type?`<span class="badge badge-gold" style="font-size:0.68rem">${item.type}</span>`:''}
           <span class="cs-inv-qte">×${item.qte||1}</span>
-          ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn" onclick="sellInvItem(${i},'${c.id}',${pv})" title="Vendre (${pv} or)">🔄 ${pv} or</button>`:''}
+          ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn" onclick="sellInvItem('${c.id}',${i})" title="Vendre (${pv} or)">🔄 ${pv} or</button>`:''}
           ${canEdit?`<button class="btn-icon" onclick="deleteInvItem(${i})">🗑️</button>`:''}
         </div>
       </div>`;
@@ -1047,43 +1143,46 @@ function inlineEditCompteField(type, idx, field, el) {
 }
 
 
-async function sellInvItem(idx, charId, prixVente) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+async function sellInvItem(charId, invIndex) {
+  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
-  const item = (c.inventaire||[])[idx];
+
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const item = inv[invIndex];
   if (!item) return;
-  if (!confirm(`Vendre "${item.nom}" pour ${prixVente} or ?`)) return;
 
-  // 1. Retirer de l'inventaire
-  c.inventaire.splice(idx, 1);
+  const prixVente = parseFloat(item.prixVente) || 0;
+  const itemNom = item.nom || 'cet objet';
 
-  // 2. Ajouter au livret de compte (recettes)
-  const compte   = c.compte||{recettes:[],depenses:[]};
-  const recettes = compte.recettes||[];
-  recettes.push({
-    date:    new Date().toLocaleDateString('fr-FR'),
-    libelle: `Vente : ${item.nom}`,
-    montant: prixVente,
-  });
-  c.compte = { ...compte, recettes };
+  if (!confirm(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
 
-  // 3. Remettre le stock en boutique (si l'article existe encore)
-  if (item.itemId) {
-    const { updateInCol: _upd, loadCollection: _load } = await import('./firestore.js').catch(()=>({}));
-    // Approche simple : incrémenter le dispo dans Firestore
-    try {
-      const shopItems = await import('../data/firestore.js').then(m => m.loadCollection('shop'));
-      const shopItem  = shopItems.find(s => s.id === item.itemId);
-      if (shopItem && shopItem.dispo !== undefined && shopItem.dispo !== '') {
-        const newDispo = parseInt(shopItem.dispo) + 1;
-        await import('../data/firestore.js').then(m => m.updateInCol('shop', item.itemId, {dispo: newDispo}));
-      }
-    } catch(e) { /* article supprimé de la boutique, on ignore */ }
+  if (item.itemId && window.sellInvItemFromShop) {
+    await window.sellInvItemFromShop(charId, invIndex);
+    return;
   }
 
-  await updateInCol('characters', charId, { inventaire: c.inventaire, compte: c.compte });
-  showNotif(`Vendu ! +${prixVente} or ajouté au livret de compte.`, 'success');
-  renderCharSheet(c, 'inventaire');
+  const compte = c.compte || { recettes: [], depenses: [] };
+  const recettes = [...(compte.recettes || [])];
+  recettes.push({
+    date: new Date().toLocaleDateString('fr-FR'),
+    libelle: `Vente : ${itemNom}`,
+    montant: prixVente,
+  });
+
+  inv.splice(invIndex, 1);
+
+  await updateInCol('characters', charId, {
+    inventaire: inv,
+    compte: { ...compte, recettes },
+  });
+
+  c.inventaire = inv;
+  c.compte = { ...compte, recettes };
+
+  showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
+
+  refreshOrDisplay(c);
+  renderCharSheet(c, window._currentCharTab || 'combat');
 }
 
 // ══════════════════════════════════════════════
@@ -1665,6 +1764,7 @@ Object.assign(window, {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   renderCharSheet, showCharTab,
   renderCharCarac, renderCharEquip, renderCharDeck,
+  _renderInventaireBoutique,
   renderCharInventaire, renderCharQuetes, renderCharNotes,
   adjustStat, saveNotes,
   toggleSort, toggleQuete, deleteQuete, deleteSort, deleteInvItem, deleteChar,
