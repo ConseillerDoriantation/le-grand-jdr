@@ -596,18 +596,18 @@ async function openMapSettingsModal() {
         <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">
           Glisser ou <span style="color:var(--gold)">cliquer pour choisir</span>
         </div>
-        <div style="font-size:.7rem;color:var(--text-dim);margin-top:2px">JPG · PNG · WebP — recommandé : grande résolution</div>
+        <div style="font-size:.7rem;color:var(--text-dim);margin-top:2px">JPG · PNG · WebP — sera compressée automatiquement pour Firestore</div>
       </div>
 
       <!-- Crop zone -->
       <div id="map-crop-wrap" style="display:none;margin-top:.75rem">
         <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">
-          Recadrez la carte — ratio libre
+          Recadrez si nécessaire — ratio libre
         </div>
         <canvas id="map-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
         <button type="button" class="btn btn-gold btn-sm" style="margin-top:.5rem;width:100%"
-          onclick="window._mapConfirmCrop()">✂️ Confirmer le recadrage</button>
-        <div id="map-crop-ok" style="display:none;font-size:.75rem;color:var(--green);text-align:center;margin-top:4px">✓ Image prête</div>
+          onclick="window._mapConfirmCrop()">✂️ Confirmer et compresser</button>
+        <div id="map-crop-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
       </div>
     </div>
 
@@ -771,17 +771,55 @@ function _bindMapCrop(canvas) {
   canvas.addEventListener('touchend',onEnd);
 }
 
+// ── Compression pour Firestore (limite ~1 048 487 bytes par champ) ────────────
+// base64 = ~1.37× la taille binaire → on cible 700 KB base64 max
+function _compressMapForFirestore(img, sx, sy, sw, sh) {
+  const TARGET = 700_000;
+  const MAX_W  = 1800;
+
+  const scale = sw > MAX_W ? MAX_W / sw : 1;
+  const outW  = Math.round(sw * scale);
+  const outH  = Math.round(sh * scale);
+
+  const out = document.createElement('canvas');
+  out.width = outW; out.height = outH;
+  out.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+
+  // Essayer qualité décroissante
+  for (const q of [0.80, 0.70, 0.60, 0.50]) {
+    const b64 = out.toDataURL('image/jpeg', q);
+    if (b64.length <= TARGET) return b64;
+  }
+
+  // Réduire les dimensions si encore trop grand
+  const out2 = document.createElement('canvas');
+  out2.width  = Math.round(outW * 0.6);
+  out2.height = Math.round(outH * 0.6);
+  out2.getContext('2d').drawImage(out, 0, 0, out2.width, out2.height);
+  return out2.toDataURL('image/jpeg', 0.72);
+}
+
 window._mapConfirmCrop = () => {
-  const{img,cropX,cropY,cropW,cropH}=_mapCrop; if(!img) return;
-  // Conserver la pleine résolution pour la carte (important pour le zoom/pan)
-  const out=document.createElement('canvas');
-  out.width=cropW; out.height=cropH;
-  out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
-  _mapCrop.base64=out.toDataURL('image/jpeg',.92);
-  document.getElementById('map-crop-ok').style.display='block';
-  document.getElementById('map-crop-wrap').style.display='none';
-  const p=document.getElementById('map-drop-preview');
-  if(p) p.innerHTML=`<img src="${_mapCrop.base64}" style="max-height:80px;border-radius:8px">`;
+  const { img, cropX, cropY, cropW, cropH } = _mapCrop;
+  if (!img) return;
+
+  const statusEl = document.getElementById('map-crop-ok');
+  if (statusEl) {
+    statusEl.style.display  = 'block';
+    statusEl.textContent    = '⏳ Compression…';
+    statusEl.style.color    = 'var(--text-muted)';
+  }
+
+  setTimeout(() => {
+    _mapCrop.base64 = _compressMapForFirestore(img, cropX, cropY, cropW, cropH);
+    document.getElementById('map-crop-wrap').style.display = 'none';
+    if (statusEl) {
+      statusEl.textContent = `✓ Image prête (${Math.round(_mapCrop.base64.length / 1024)} KB)`;
+      statusEl.style.color = 'var(--green)';
+    }
+    const p = document.getElementById('map-drop-preview');
+    if (p) p.innerHTML = `<img src="${_mapCrop.base64}" style="max-height:80px;border-radius:8px">`;
+  }, 0);
 };
 
 window.saveMapSettings = async () => {
@@ -789,19 +827,23 @@ window.saveMapSettings = async () => {
 
   let imageUrl = '';
   if (_mapCrop.base64) {
-    // Nouvelle image uploadée et recadrée
     imageUrl = _mapCrop.base64;
   } else {
-    // Conserver l'image existante
     const existing = await getDocData('world', 'map');
     imageUrl = existing?.imageUrl || '';
+  }
+
+  // Vérification finale avant envoi Firestore
+  if (imageUrl.length > 900_000) {
+    showNotif('Image encore trop grande. Recadrez une zone plus petite.', 'error');
+    return;
   }
 
   await saveDoc('world', 'map', { imageUrl, regionName });
   mapState.imageUrl = imageUrl;
   _mapCrop.base64 = null;
   closeModal();
-  showNotif('Carte mise à jour.', 'success');
+  showNotif('Carte mise à jour !', 'success');
   await window.navigate?.('map');
 };
 
