@@ -11,7 +11,7 @@ const TEMPLATES = {
     label: '⚔️ Arme',
     fields: [
       { id:'format',   label:'Format',   type:'select',
-        options:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'] },
+        options:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'] },
       { id:'rarete',   label:'Rareté',   type:'rarete' },
       { id:'degats',   label:'Dégâts',   type:'text',   placeholder:'1D10, 2D6...' },
       { id:'toucher',  label:'Toucher',  type:'text',   placeholder:'+Fo, +Dex...' },
