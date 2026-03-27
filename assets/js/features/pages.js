@@ -103,7 +103,7 @@ const PAGES = {
     const chars = await loadChars(uid);
     STATE.characters = chars;
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Personnages'}</span></div><div class="page-subtitle">Gérez vos fiches de personnage</div></div>`;
+    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div><div class="page-subtitle">Gérez vos fiches de personnage</div></div>`;
     if (STATE.isAdmin && chars.length > 0) {
       const byUser = {};
       chars.forEach(c => { if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = []; byUser[c.ownerPseudo].push(c); });
@@ -538,43 +538,39 @@ const PAGES = {
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
   async achievements() {
-    const items   = await loadCollection('achievements');
+    // Utilise window._achItems si déjà chargé+ordonné par achievements.js
+    const items = window._achItems || await loadCollection('achievements');
     const content = document.getElementById('main-content');
 
-    // ── Config des catégories ──────────────────────────────────────────────
     const CATS = [
-      { id: 'epique',   label: 'Épique',   emoji: '⚔️',  color: '#4f8cff', glow: 'rgba(79,140,255,0.18)',  desc: 'Les grandes victoires et exploits héroïques' },
-      { id: 'comique',  label: 'Comique',  emoji: '🎭',  color: '#e8b84b', glow: 'rgba(232,184,75,0.18)',  desc: 'Les moments mémorables et catastrophes créatives' },
-      { id: 'histoire', label: 'Histoire', emoji: '📖',  color: '#22c38e', glow: 'rgba(34,195,142,0.18)',  desc: 'Les tournants narratifs qui ont forgé la légende' },
+      { id: 'epique',   label: 'Épique',   emoji: '⚔️',  color: '#4f8cff', glow: 'rgba(79,140,255,0.14)', desc: 'Les grandes victoires et exploits héroïques' },
+      { id: 'comique',  label: 'Comique',  emoji: '🎭',  color: '#e8b84b', glow: 'rgba(232,184,75,0.14)', desc: 'Les moments mémorables et catastrophes créatives' },
+      { id: 'histoire', label: 'Histoire', emoji: '📖',  color: '#22c38e', glow: 'rgba(34,195,142,0.14)', desc: 'Les tournants narratifs qui ont forgé la légende' },
     ];
 
-    // ── Regrouper par catégorie ────────────────────────────────────────────
     const byCat = {};
     CATS.forEach(c => { byCat[c.id] = []; });
-    byCat['_autre'] = [];
     items.forEach(a => {
-      const cat = a.categorie || '_autre';
-      if (!byCat[cat]) byCat[cat] = [];
-      byCat[cat].push(a);
+      const catId = a.categorie || 'epique';
+      if (byCat[catId]) byCat[catId].push(a);
     });
 
-    const total = items.length;
-
-    // ── Onglet actif (persisté localement) ────────────────────────────────
+    const total     = items.length;
     const activeCat = window._achCat || CATS[0].id;
     window._achCat  = activeCat;
+    const cat       = CATS.find(c => c.id === activeCat) || CATS[0];
+    const catItems  = byCat[activeCat] || [];
 
-    // ── HTML ──────────────────────────────────────────────────────────────
     let html = `
 
-    <!-- HERO HEADER -->
+    <!-- HERO -->
     <div style="
       background:linear-gradient(135deg,rgba(79,140,255,0.06) 0%,rgba(232,184,75,0.04) 50%,rgba(34,195,142,0.05) 100%);
       border:1px solid var(--border);border-radius:var(--radius-lg);
-      padding:1.8rem 2rem 1.4rem;margin-bottom:1.5rem;
-      position:relative;overflow:hidden;
+      padding:1.8rem 2rem 1.4rem;margin-bottom:1.5rem;position:relative;overflow:hidden;
     ">
-      <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;background:radial-gradient(circle,rgba(232,184,75,0.07) 0%,transparent 70%);pointer-events:none"></div>
+      <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;
+        background:radial-gradient(circle,rgba(232,184,75,0.07) 0%,transparent 70%);pointer-events:none"></div>
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap">
         <div>
           <div style="font-size:0.72rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:0.4rem">Livre des Légendes</div>
@@ -582,14 +578,12 @@ const PAGES = {
           <p style="font-size:0.83rem;color:var(--text-muted);margin-top:0.5rem;margin-bottom:0">Les exploits de la compagnie, consignés pour l'éternité.</p>
         </div>
         <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
-          ${CATS.map(c => {
-            const n = byCat[c.id]?.length || 0;
-            return `<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:0.6rem 1rem;text-align:center;min-width:70px">
+          ${CATS.map(c => `
+            <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:0.6rem 1rem;text-align:center;min-width:70px">
               <div style="font-size:1.1rem">${c.emoji}</div>
-              <div style="font-family:'Cinzel',serif;font-size:1rem;color:${c.color};line-height:1.2">${n}</div>
+              <div style="font-family:'Cinzel',serif;font-size:1rem;color:${c.color};line-height:1.2">${byCat[c.id]?.length || 0}</div>
               <div style="font-size:0.65rem;color:var(--text-dim);margin-top:1px">${c.label}</div>
-            </div>`;
-          }).join('')}
+            </div>`).join('')}
           <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:0.6rem 1rem;text-align:center;min-width:70px">
             <div style="font-size:1.1rem">🏆</div>
             <div style="font-family:'Cinzel',serif;font-size:1rem;color:var(--gold);line-height:1.2">${total}</div>
@@ -603,37 +597,34 @@ const PAGES = {
     ${STATE.isAdmin ? `
     <div class="admin-section" style="margin-bottom:1.2rem">
       <div class="admin-label">Admin — Hauts-Faits</div>
-      <button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter un Haut-Fait</button>
+      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+        <button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter un Haut-Fait</button>
+        <span style="font-size:0.75rem;color:var(--text-dim)">
+          ↔ Glisser-déposer les cards pour les réordonner
+        </span>
+      </div>
     </div>` : ''}
 
-    <!-- ONGLETS CATÉGORIES -->
+    <!-- ONGLETS -->
     <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
       ${CATS.map(c => {
         const active = c.id === activeCat;
-        const n = byCat[c.id]?.length || 0;
-        return `<button
-          onclick="window._achCat='${c.id}';navigate('achievements')"
-          style="
-            display:flex;align-items:center;gap:0.5rem;
-            padding:0.5rem 1.1rem;border-radius:999px;
-            border:1px solid ${active ? c.color : 'var(--border)'};
-            background:${active ? `${c.glow}` : 'transparent'};
-            color:${active ? c.color : 'var(--text-muted)'};
-            font-family:'Cinzel',serif;font-size:0.82rem;
-            cursor:pointer;transition:all 0.15s;
-          "
-        >${c.emoji} ${c.label} <span style="
-          background:${active ? c.color : 'var(--bg-elevated)'};
-          color:${active ? '#0b1118' : 'var(--text-dim)'};
-          border-radius:999px;padding:1px 7px;font-size:0.7rem;font-family:sans-serif
-        ">${n}</span></button>`;
+        const n      = byCat[c.id]?.length || 0;
+        return `<button onclick="window._achCat='${c.id}';navigate('achievements')" style="
+          display:flex;align-items:center;gap:0.5rem;padding:0.5rem 1.1rem;
+          border-radius:999px;cursor:pointer;transition:all 0.15s;font-family:'Cinzel',serif;font-size:0.82rem;
+          border:1px solid ${active ? c.color : 'var(--border)'};
+          background:${active ? c.glow : 'transparent'};
+          color:${active ? c.color : 'var(--text-muted)'};
+        ">${c.emoji} ${c.label}
+          <span style="border-radius:999px;padding:1px 7px;font-size:0.7rem;font-family:sans-serif;
+            background:${active ? c.color : 'var(--bg-elevated)'};
+            color:${active ? '#0b1118' : 'var(--text-dim)'};">${n}</span>
+        </button>`;
       }).join('')}
     </div>`;
 
-    // ── Contenu de la catégorie active ────────────────────────────────────
-    const cat     = CATS.find(c => c.id === activeCat) || CATS[0];
-    const catItems = byCat[activeCat] || [];
-
+    // ── Contenu catégorie active ──────────────────────────────────────────
     if (catItems.length === 0) {
       html += `
       <div style="text-align:center;padding:4rem 2rem;color:var(--text-dim)">
@@ -642,14 +633,13 @@ const PAGES = {
         ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openAchievementModal()">+ Ajouter le premier</button>` : ''}
       </div>`;
     } else {
-      // Description de catégorie
       html += `
       <div style="font-size:0.8rem;color:var(--text-dim);font-style:italic;margin-bottom:1.2rem;padding-left:0.25rem">
         ${cat.emoji} ${cat.desc} — ${catItems.length} haut-fait${catItems.length > 1 ? 's' : ''}
       </div>
 
-      <!-- GRILLE CARDS -->
-      <div style="
+      <!-- GRILLE — id requis pour le drag & drop -->
+      <div id="ach-grid-${cat.id}" style="
         display:grid;
         grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
         gap:1rem;
@@ -657,59 +647,60 @@ const PAGES = {
 
       catItems.forEach(a => {
         html += `
-        <div style="
-          background:var(--bg-card);
-          border:1px solid var(--border);
-          border-radius:var(--radius-lg);
-          overflow:hidden;
-          transition:border-color 0.2s,transform 0.2s;
-          cursor:default;
+        <div data-ach-id="${a.id}" style="
+          background:var(--bg-card);border:1px solid var(--border);
+          border-radius:var(--radius-lg);overflow:hidden;
           display:flex;flex-direction:column;
-        " onmouseenter="this.style.borderColor='${cat.color}';this.style.transform='translateY(-2px)'"
-           onmouseleave="this.style.borderColor='var(--border)';this.style.transform=''">
+          transition:border-color 0.15s,transform 0.15s,opacity 0.15s;
+          ${STATE.isAdmin ? 'cursor:grab;' : 'cursor:default;'}
+        "
+          onmouseenter="if(!this.getAttribute('draggable')||event.buttons===0){this.style.borderColor='${cat.color}';this.style.transform='translateY(-2px)'}"
+          onmouseleave="this.style.borderColor='var(--border)';this.style.transform=''">
 
-          <!-- Image -->
-          <div style="
-            width:100%;aspect-ratio:4/3;
-            background:var(--bg-panel);
-            position:relative;overflow:hidden;flex-shrink:0;
-          ">
+          <!-- Zone image — toujours présente, emoji si pas d'image -->
+          <div style="width:100%;aspect-ratio:4/3;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${a.imageUrl
-              ? `<img src="${a.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy">`
-              : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:3rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">${a.emoji || cat.emoji}</div>`
+              ? `<img src="${a.imageUrl}"
+                   style="width:100%;height:100%;object-fit:cover;display:block;pointer-events:none"
+                   loading="lazy" draggable="false">`
+              : `<div style="
+                   width:100%;height:100%;
+                   display:flex;align-items:center;justify-content:center;
+                   font-size:3.5rem;
+                   background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));
+                   pointer-events:none;
+                 ">${a.emoji || cat.emoji}</div>`
             }
             <!-- Badge catégorie -->
             <div style="
               position:absolute;top:8px;left:8px;
-              background:rgba(11,17,24,0.82);
-              border:1px solid ${cat.color};
-              border-radius:999px;
-              padding:2px 8px;
+              background:rgba(11,17,24,0.82);border:1px solid ${cat.color};
+              border-radius:999px;padding:2px 8px;
               font-size:0.65rem;color:${cat.color};
-              backdrop-filter:blur(4px);
+              backdrop-filter:blur(4px);pointer-events:none;
             ">${cat.emoji} ${cat.label}</div>
             ${a.date ? `<div style="
               position:absolute;bottom:8px;right:8px;
-              background:rgba(11,17,24,0.75);
-              border-radius:6px;padding:2px 7px;
-              font-size:0.65rem;color:var(--text-dim);
+              background:rgba(11,17,24,0.75);border-radius:6px;
+              padding:2px 7px;font-size:0.65rem;color:var(--text-dim);
+              pointer-events:none;
             ">${a.date}</div>` : ''}
           </div>
 
-          <!-- Corps -->
+          <!-- Corps texte -->
           <div style="padding:0.85rem;flex:1;display:flex;flex-direction:column;gap:0.4rem">
-            <div style="
-              font-family:'Cinzel',serif;font-size:0.88rem;
-              color:var(--text);line-height:1.3;
-            ">${a.titre || 'Haut-Fait'}</div>
-            <div style="
-              font-size:0.78rem;color:var(--text-muted);
-              line-height:1.55;flex:1;font-style:italic;
-            ">${a.description || ''}</div>
+            <div style="font-family:'Cinzel',serif;font-size:0.88rem;color:var(--text);line-height:1.3">
+              ${a.titre || 'Haut-Fait'}
+            </div>
+            <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.55;flex:1;font-style:italic">
+              ${a.description || ''}
+            </div>
             ${STATE.isAdmin ? `
             <div style="display:flex;gap:0.4rem;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
-              <button class="btn btn-outline btn-sm" style="flex:1;font-size:0.72rem" onclick="editAchievement('${a.id}')">✏️ Modifier</button>
-              <button class="btn-icon" style="color:#ff6b6b" onclick="deleteAchievement('${a.id}')">🗑️</button>
+              <button class="btn btn-outline btn-sm" style="flex:1;font-size:0.72rem"
+                onclick="event.stopPropagation();editAchievement('${a.id}')">✏️ Modifier</button>
+              <button class="btn-icon" style="color:#ff6b6b"
+                onclick="event.stopPropagation();deleteAchievement('${a.id}')">🗑️</button>
             </div>` : ''}
           </div>
         </div>`;
