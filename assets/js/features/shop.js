@@ -423,7 +423,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
         <div class="sh-item-prix-achat">💰 ${prix} or</div>
         <div class="sh-item-prix-vente" title="Prix de revente (60%)">🔄 ${prixVente} or</div>
       </div>
-      ${!STATE.isAdmin && hasChar ? (
+      ${hasChar ? (
         epuise
           ? `<button class="btn sh-buy-btn" disabled style="opacity:0.4;cursor:not-allowed">Épuisé</button>`
           : `<button class="btn sh-buy-btn" onclick="buyItem('${item.id}')">🛒 Acheter</button>`
