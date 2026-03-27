@@ -1882,6 +1882,104 @@ async function saveSort(idx) {
 }
 
 
+function computeEquipStatsBonus(equip = {}) {
+  const bonus = { force:0, dexterite:0, intelligence:0, sagesse:0, constitution:0, charisme:0 };
+  Object.values(equip || {}).forEach(it => {
+    bonus.force        += parseInt(it?.fo)  || 0;
+    bonus.dexterite    += parseInt(it?.dex) || 0;
+    bonus.intelligence += parseInt(it?.in)  || 0;
+    bonus.sagesse      += parseInt(it?.sa)  || 0;
+    bonus.constitution += parseInt(it?.co)  || 0;
+    bonus.charisme     += parseInt(it?.ch)  || 0;
+  });
+  return bonus;
+}
+
+function inferAttackStatFromItem(item = {}) {
+  if (item.statAttaque) return item.statAttaque;
+  const format = String(item.format || '');
+  if (format.includes('Mag.')) return 'intelligence';
+  if (format.includes('Dist.')) return 'dexterite';
+  return 'force';
+}
+
+function inferArmorSlotValue(slot, item = {}) {
+  if (item.slotArmure) return item.slotArmure;
+  if (slot === 'Bottes') return 'Pieds';
+  return slot;
+}
+
+function buildEquippedItemFromInventory(slot, item, invIndex) {
+  if (!item) return null;
+  const isWeapon = slot.startsWith('Main');
+
+  if (isWeapon) {
+    return {
+      nom: item.nom || '',
+      trait: item.trait || '',
+      degats: item.degats || '',
+      statAttaque: inferAttackStatFromItem(item),
+      typeArme: item.typeArme || item.type || '',
+      portee: item.portee || '',
+      particularite: item.particularite || item.effet || item.description || '',
+      format: item.format || '',
+      toucher: item.toucher || '',
+      stats: item.stats || '',
+      sourceInvIndex: invIndex,
+      itemId: item.itemId || '',
+    };
+  }
+
+  return {
+    nom: item.nom || '',
+    trait: item.trait || '',
+    fo: parseInt(item.fo) || 0,
+    dex: parseInt(item.dex) || 0,
+    in: parseInt(item.in) || 0,
+    sa: parseInt(item.sa) || 0,
+    co: parseInt(item.co) || 0,
+    ch: parseInt(item.ch) || 0,
+    ca: parseInt(item.ca) || 0,
+    typeArmure: item.typeArmure || '',
+    slotArmure: inferArmorSlotValue(slot, item),
+    sourceInvIndex: invIndex,
+    itemId: item.itemId || '',
+  };
+}
+
+async function equipSlotFromInv(val, slot) {
+  if (!val || !val.startsWith('inv:')) return;
+  const c = STATE.activeChar; if (!c) return;
+
+  const invIndex = parseInt(val.split(':')[1], 10);
+  if (Number.isNaN(invIndex)) return;
+
+  const item = (c.inventaire || [])[invIndex];
+  if (!item) return;
+
+  const equip = { ...(c.equipement || {}) };
+
+  Object.keys(equip).forEach(otherSlot => {
+    if (otherSlot !== slot && equip[otherSlot]?.sourceInvIndex === invIndex) {
+      delete equip[otherSlot];
+    }
+  });
+
+  const equippedItem = buildEquippedItemFromInventory(slot, item, invIndex);
+  if (!equippedItem) return;
+
+  equip[slot] = equippedItem;
+  const bonus = computeEquipStatsBonus(equip);
+
+  c.equipement = equip;
+  c.statsBonus = bonus;
+
+  await updateInCol('characters', c.id, { equipement: equip, statsBonus: bonus });
+  closeModal();
+  showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
+  renderCharSheet(c, 'combat');
+}
+
 // Équipement — filtré depuis l'inventaire du personnage
 function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
@@ -1914,49 +2012,60 @@ function editEquipSlot(slot) {
   };
 
   const inv = c.inventaire||[];
+  const equippedEntries = Object.entries(c.equipement || {});
+  const equippedInvIndex = Number.isInteger(equipped?.sourceInvIndex) ? equipped.sourceInvIndex : -1;
 
   // Filtrer les items compatibles avec ce slot
-  const compatibles = inv.filter(item => {
-    if (!item.nom) return false;
-    const tpl = item.template || '';
+  const compatibles = inv
+    .map((item, invIndex) => ({ item, invIndex }))
+    .filter(({ item, invIndex }) => {
+      if (!item?.nom) return false;
 
-    if (isWeapon) {
-      const formats = SLOT_ARME_FORMATS[slot] || TOUTES_ARMES;
-      if (tpl === 'arme' || item.format) {
-        // Item structuré : filtrer par format
-        return formats.includes(item.format);
-      }
-      // Item non structuré (ancien format) : accepter si le type ressemble à une arme
-      const t = (item.type||'').toLowerCase();
-      return ['arme','weapon','épée','lance','hache','arc','dague','baguette','baton'].some(k => t.includes(k));
-    }
+      const alreadyEquippedElsewhere = equippedEntries.some(([otherSlot, equippedItem]) =>
+        otherSlot !== slot && equippedItem?.sourceInvIndex === invIndex
+      );
+      if (alreadyEquippedElsewhere) return false;
 
-    // Slots d'armure structurés
-    const armureRule = SLOT_ARMURE[slot];
-    if (armureRule !== undefined) {
-      if (armureRule === null) {
-        // Slot accessoire : accepter items libres/classiques seulement
-        return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure);
-      }
-      if (tpl === 'armure' || item.slotArmure) {
-        // Item structuré : vérifier slotArmure
-        return item.slotArmure === armureRule.slot;
-      }
-      // Item non structuré : accepter si type ressemble à armure
-      const t = (item.type||'').toLowerCase();
-      return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
-    }
+      const tpl = item.template || '';
 
-    return false;
-  });
+      if (isWeapon) {
+        const formats = SLOT_ARME_FORMATS[slot] || TOUTES_ARMES;
+        if (tpl === 'arme' || item.format) {
+          // Item structuré : filtrer par format
+          return formats.includes(item.format);
+        }
+        // Item non structuré (ancien format) : accepter si le type ressemble à une arme
+        const t = (item.type||'').toLowerCase();
+        return ['arme','weapon','épée','lance','hache','arc','dague','baguette','baton'].some(k => t.includes(k));
+      }
+
+      // Slots d'armure structurés
+      const armureRule = SLOT_ARMURE[slot];
+      if (armureRule !== undefined) {
+        if (armureRule === null) {
+          // Slot accessoire : accepter items libres/classiques seulement
+          return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure);
+        }
+        if (tpl === 'armure' || item.slotArmure) {
+          // Item structuré : vérifier slotArmure
+          return item.slotArmure === armureRule.slot;
+        }
+        // Item non structuré : accepter si type ressemble à armure
+        const t = (item.type||'').toLowerCase();
+        return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
+      }
+
+      return false;
+    });
 
   // Options pour le select
-  const invOptions = compatibles.map((item, idx) => {
+  const invOptions = compatibles.map(({ item, invIndex }) => {
     // Label enrichi avec les infos structurées
     let label = item.nom;
     if (item.format) label += ` — ${item.format}`;
     else if (item.slotArmure && item.typeArmure) label += ` — ${item.typeArmure}`;
-    return `<option value="inv:${idx}" ${equipped.nom===item.nom?'selected':''}>${label}</option>`;
+    const isSelected = equippedInvIndex === invIndex || (equippedInvIndex < 0 && equipped.nom === item.nom);
+    return `<option value="inv:${invIndex}" ${isSelected?'selected':''}>${label}</option>`;
   }).join('');
 
   const hasCompat = compatibles.length > 0;
@@ -1964,15 +2073,14 @@ function editEquipSlot(slot) {
   openModal(`${isWeapon?'⚔️':'🛡️'} Équiper — ${slot}`, `
     ${hasCompat
       ? `<div class="form-group">
-          <label>Choisir depuis l'inventaire</label>
-          <select class="input-field sh-modal-select" id="eq-inv-sel" onchange="previewEquipFromInv(this.value,${JSON.stringify(slot)})">
+          <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
+          <select class="input-field sh-modal-select" id="eq-inv-sel" onchange="equipSlotFromInv(this.value,${JSON.stringify(slot)})">
             <option value="">— Sélectionner un objet —</option>
             ${invOptions}
           </select>
-          <div class="cs-equip-inv-preview" id="eq-inv-preview"></div>
         </div>
         <div class="cs-equip-divider">
-          <span>ou saisir manuellement</span>
+          <span>ou saisir / ajuster manuellement</span>
         </div>`
       : `<div class="cs-equip-empty-inv">
           <span>⚠️ Aucun objet compatible dans l'inventaire.</span>
@@ -2019,8 +2127,9 @@ function editEquipSlot(slot) {
 // Pré-remplir les champs depuis l'item sélectionné dans l'inventaire
 function previewEquipFromInv(val, slot) {
   if (!val || !val.startsWith('inv:')) return;
-  const idx  = parseInt(val.split(':')[1]);
-  const item = (window._equipCompatibles||[])[idx];
+  const idx  = parseInt(val.split(':')[1], 10);
+  const compat = (window._equipCompatibles||[]).find(entry => entry?.invIndex === idx) || (window._equipCompatibles||[])[idx];
+  const item = compat?.item || compat;
   if (!item) return;
 
   const nomEl   = document.getElementById('eq-nom');
@@ -2114,11 +2223,7 @@ async function saveEquipSlot(slot) {
     };
   }
   c.equipement = equip;
-  const bonus={force:0,dexterite:0,intelligence:0,sagesse:0,constitution:0,charisme:0};
-  Object.values(equip).forEach(it=>{
-    bonus.force+=(it.fo||0); bonus.dexterite+=(it.dex||0); bonus.intelligence+=(it.in||0);
-    bonus.sagesse+=(it.sa||0); bonus.constitution+=(it.co||0); bonus.charisme+=(it.ch||0);
-  });
+  const bonus = computeEquipStatsBonus(equip);
   c.statsBonus = bonus;
   await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
   closeModal();
@@ -2131,11 +2236,7 @@ async function clearEquipSlot(slot) {
   const equip = c.equipement||{};
   delete equip[slot];
   c.equipement = equip;
-  const bonus={force:0,dexterite:0,intelligence:0,sagesse:0,constitution:0,charisme:0};
-  Object.values(equip).forEach(it=>{
-    bonus.force+=(it.fo||0); bonus.dexterite+=(it.dex||0); bonus.intelligence+=(it.in||0);
-    bonus.sagesse+=(it.sa||0); bonus.constitution+=(it.co||0); bonus.charisme+=(it.ch||0);
-  });
+  const bonus = computeEquipStatsBonus(equip);
   c.statsBonus = bonus;
   await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
   closeModal();
@@ -2249,7 +2350,7 @@ Object.assign(window, {
   inlineEditText, inlineEditNum, inlineEditStat,
   manageTitres, addTitre, removeTitre, saveTitres,
   addSort, editSort, openSortModal, runeIncrement, runeDecrement, updateSortPM, saveSort,
-  editEquipSlot, saveEquipSlot, clearEquipSlot,
+  editEquipSlot, saveEquipSlot, clearEquipSlot, equipSlotFromInv,
   previewEquipFromInv,
   addInvItem, editInvItem, saveInvItem,
   addQuete, saveQuete,
