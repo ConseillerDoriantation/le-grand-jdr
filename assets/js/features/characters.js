@@ -14,177 +14,6 @@ function getMod(c, key) {
   return Math.floor((total-10)/2);
 }
 function modStr(v) { return v >= 0 ? '+'+v : String(v); }
-const ITEM_STAT_META = [
-  { full:'force', store:'fo', short:'Fo', label:'Force' },
-  { full:'dexterite', store:'dex', short:'Dex', label:'Dextérité' },
-  { full:'intelligence', store:'in', short:'Int', label:'Intelligence' },
-  { full:'sagesse', store:'sa', short:'Sag', label:'Sagesse' },
-  { full:'constitution', store:'co', short:'Con', label:'Constitution' },
-  { full:'charisme', store:'ch', short:'Cha', label:'Charisme' },
-];
-const ITEM_STAT_BY_FULL = Object.fromEntries(ITEM_STAT_META.map(s => [s.full, s]));
-const ITEM_STAT_BY_STORE = Object.fromEntries(ITEM_STAT_META.map(s => [s.store, s]));
-
-function statShort(key) {
-  return ITEM_STAT_BY_FULL[key]?.short || '';
-}
-
-function collectItemBonusEntries(item = {}) {
-  return ITEM_STAT_META
-    .map(stat => ({ ...stat, value: parseInt(item?.[stat.store]) || 0 }))
-    .filter(stat => stat.value);
-}
-
-function formatItemBonusText(item = {}) {
-  const entries = collectItemBonusEntries(item);
-  if (entries.length) return entries.map(stat => `${stat.short} ${stat.value > 0 ? '+' : ''}${stat.value}`).join(' · ');
-  return item?.stats || '';
-}
-
-function normalizeArmorSetType(value = '') {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return '';
-  if (raw.startsWith('léger') || false) return 'leger';
-  if (raw.startsWith('leger')) return 'leger';
-  if (raw.startsWith('inter')) return 'inter';
-  if (raw.startsWith('lourd')) return 'lourd';
-  return '';
-}
-
-function getArmorSetInfo(c) {
-  const equip = c?.equipement || {};
-  const head = equip['Tête'];
-  const chest = equip['Torse'];
-  const boots = equip['Bottes'];
-  if (!head?.nom || !chest?.nom || !boots?.nom) return null;
-
-  const types = [head?.typeArmure, chest?.typeArmure, boots?.typeArmure].map(normalizeArmorSetType);
-  if (!types.every(Boolean)) return null;
-  if (!(types[0] === types[1] && types[1] === types[2])) return null;
-
-  const SETS = {
-    leger: {
-      key: 'leger',
-      title: 'Set léger actif',
-      effect: '-2 PM / Sorts',
-      accent: '#60a5fa',
-      border: 'rgba(96,165,250,.38)',
-      bg: 'linear-gradient(135deg, rgba(96,165,250,.18), rgba(96,165,250,.06))',
-      badge: 'rgba(96,165,250,.16)',
-      badgeText: '#93c5fd',
-    },
-    inter: {
-      key: 'inter',
-      title: 'Set intermédiaire actif',
-      effect: 'Toucher +2',
-      accent: '#4ade80',
-      border: 'rgba(74,222,128,.34)',
-      bg: 'linear-gradient(135deg, rgba(74,222,128,.16), rgba(74,222,128,.05))',
-      badge: 'rgba(74,222,128,.16)',
-      badgeText: '#86efac',
-    },
-    lourd: {
-      key: 'lourd',
-      title: 'Set lourd actif',
-      effect: 'Réduction de 2 dégâts',
-      accent: '#f87171',
-      border: 'rgba(248,113,113,.34)',
-      bg: 'linear-gradient(135deg, rgba(248,113,113,.16), rgba(248,113,113,.05))',
-      badge: 'rgba(248,113,113,.16)',
-      badgeText: '#fca5a5',
-    },
-  };
-
-  return SETS[types[0]] || null;
-}
-
-function getEquippedInventoryIndexMap(c) {
-  const map = new Map();
-  Object.entries(c?.equipement || {}).forEach(([slot, item]) => {
-    const rawIdx = item?.sourceInvIndex;
-    const idx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
-    if (!Number.isInteger(idx) || idx < 0) return;
-    const slots = map.get(idx) || [];
-    slots.push(slot);
-    map.set(idx, slots);
-  });
-  return map;
-}
-
-function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
-  const removed = [...new Set((removedIndices || [])
-    .map(v => Number.isInteger(v) ? v : parseInt(v, 10))
-    .filter(v => Number.isInteger(v) && v >= 0))].sort((a, b) => a - b);
-
-  const currentEquip = c?.equipement || {};
-  if (!removed.length) {
-    return {
-      equipement: currentEquip,
-      statsBonus: c?.statsBonus || computeEquipStatsBonus(currentEquip),
-      changed: false,
-      removedSlots: [],
-    };
-  }
-
-  const removedSet = new Set(removed);
-  const countRemovedBefore = idx => {
-    let count = 0;
-    for (const removedIdx of removed) {
-      if (removedIdx < idx) count++;
-      else break;
-    }
-    return count;
-  };
-
-  const nextEquip = {};
-  const removedSlots = [];
-  let changed = false;
-
-  Object.entries(currentEquip).forEach(([slot, item]) => {
-    const rawIdx = item?.sourceInvIndex;
-    const srcIdx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
-
-    if (!Number.isInteger(srcIdx) || srcIdx < 0) {
-      nextEquip[slot] = item;
-      return;
-    }
-
-    if (removedSet.has(srcIdx)) {
-      changed = true;
-      removedSlots.push(slot);
-      return;
-    }
-
-    const nextIdx = srcIdx - countRemovedBefore(srcIdx);
-    if (nextIdx !== srcIdx) {
-      nextEquip[slot] = { ...item, sourceInvIndex: nextIdx };
-      changed = true;
-      return;
-    }
-
-    nextEquip[slot] = item;
-  });
-
-  const statsBonus = computeEquipStatsBonus(nextEquip);
-  const prevStats = c?.statsBonus || {};
-  if (JSON.stringify(prevStats) !== JSON.stringify(statsBonus)) changed = true;
-
-  return { equipement: nextEquip, statsBonus, changed, removedSlots };
-}
-
-function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
-  const statKey = item.toucherStat || fallbackKey;
-  if (item.toucherStat) return `1d20 ${modStr(getMod(c, statKey))}`;
-  if (item.toucher) return item.toucher;
-  return `1d20 ${modStr(getMod(c, fallbackKey))}`;
-}
-
-function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
-  if (!item.degats) return '—';
-  const statKey = item.degatsStat || fallbackKey;
-  return `${item.degats} ${modStr(getMod(c, statKey))}`;
-}
-
 function calcCA(c) {
   const equip = c.equipement||{};
   const torse = equip['Torse']?.typeArmure||'';
@@ -204,18 +33,18 @@ function calcDeckMax(c) {
 function calcPVMax(c) {
   const modCo = getMod(c,'constitution');
   const niv = c.niveau||1;
-  // Bonus positif : +modCo PV par niveau gagné (scalable)
-  // Malus négatif  : appliqué UNE SEULE FOIS (pas multiplié par niveau)
-  // Ex: modCo=-1, niv=10 → pvBase-1 (et non pvBase-10)
-  const progression = modCo > 0 ? Math.floor(modCo*(niv-1)) : modCo;
-  return Math.max(1, (c.pvBase||10) + progression);
+  // Si modCo = -1 au niv 1, le personnage a pvBase - 1
+  const progression = modCo > 0 ? Math.floor(modCo*(niv-1)) : modCo*(niv-1);
+  const baseBonus = modCo === -1 ? -1 : 0; // -1 PV base si mod Co = -1
+  return (c.pvBase||10) + baseBonus + progression;
 }
 function calcPMMax(c) {
   const modSa = getMod(c,'sagesse');
   const niv = c.niveau||1;
-  // Même logique : malus fixe une seule fois, bonus scalable par niveau
-  const progression = modSa > 0 ? Math.floor(modSa*(niv-1)) : modSa;
-  return Math.max(0, (c.pmBase||10) + progression);
+  // Si modSa = -1 au niv 1, le personnage a pmBase - 1
+  const progression = modSa > 0 ? Math.floor(modSa*(niv-1)) : modSa*(niv-1);
+  const baseBonus = modSa === -1 ? -1 : 0; // -1 PM base si mod Sa = -1
+  return (c.pmBase||10) + baseBonus + progression;
 }
 
 function calcOr(c) {
@@ -231,6 +60,62 @@ function calcPalier(niveau) {
 }
 
 function pct(cur,max) { return max>0 ? Math.max(0,Math.min(100,Math.round(cur/max*100))) : 0; }
+
+
+function _normalizeArmorSetType(value='') {
+  const raw = String(value || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!raw) return '';
+  if (raw.startsWith('leg')) return 'legere';
+  if (raw.startsWith('inter')) return 'intermediaire';
+  if (raw.startsWith('lourd')) return 'lourde';
+  return '';
+}
+
+function getArmorSetInfo(cOrEquip) {
+  const equip = cOrEquip?.equipement || cOrEquip || {};
+  const head  = equip['Tête'];
+  const torso = equip['Torse'];
+  const boots = equip['Bottes'];
+
+  if (!head?.nom || !torso?.nom || !boots?.nom) return null;
+
+  const headType  = _normalizeArmorSetType(head.typeArmure);
+  const torsoType = _normalizeArmorSetType(torso.typeArmure);
+  const bootsType = _normalizeArmorSetType(boots.typeArmure);
+
+  if (!headType || !torsoType || !bootsType) return null;
+  if (!(headType === torsoType && torsoType === bootsType)) return null;
+
+  const MAP = {
+    legere: {
+      label: 'Set léger actif',
+      effect: '-2 PM / Sorts',
+      color: '#60a5fa',
+      border: 'rgba(96,165,250,0.34)',
+      bg: 'rgba(96,165,250,0.12)',
+      glow: 'rgba(96,165,250,0.18)',
+    },
+    intermediaire: {
+      label: 'Set intermédiaire actif',
+      effect: 'Toucher +2',
+      color: '#4ade80',
+      border: 'rgba(74,222,128,0.34)',
+      bg: 'rgba(74,222,128,0.12)',
+      glow: 'rgba(74,222,128,0.18)',
+    },
+    lourde: {
+      label: 'Set lourd actif',
+      effect: 'Réduction de 2 dégâts',
+      color: '#f87171',
+      border: 'rgba(248,113,113,0.34)',
+      bg: 'rgba(248,113,113,0.12)',
+      glow: 'rgba(248,113,113,0.18)',
+    },
+  };
+
+  return MAP[headType] || null;
+}
 
 // ══════════════════════════════════════════════
 // SÉLECTION
@@ -298,18 +183,11 @@ function renderCharSheet(c, keepTab) {
     const m = getMod(c, st.key);
     const mStr = m >= 0 ? '+'+m : String(m);
     const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    const bonusStr = bonus >= 0 ? `+${bonus}` : String(bonus);
     return `<div class="cs-carac-card">
       <div class="cs-carac-abbr">${st.abbr}</div>
-      <div class="cs-carac-val">${total}</div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.68rem;line-height:1.2;color:var(--text-dim)">
-        <span>Base
-          <span class="${canEdit?'cs-editable':''}"
-                ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
-                style="font-weight:700;color:var(--text)">${base}</span>
-        </span>
-        <span>Équip. ${bonusStr}</span>
-      </div>
+      <div class="cs-carac-val ${canEdit?'cs-editable':''}"
+           ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier"`:''}
+      >${total}</div>
       <div class="cs-carac-mod ${mClass}">${mStr}</div>
     </div>`;
   }).join('');
@@ -566,8 +444,7 @@ function inlineEditNum(charId, field, el, min=0, max=99999) {
 
 // Inline stat edit — click on carac box value
 function inlineEditStat(charId, statKey, el) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
-  const cur = parseInt((c?.stats||{})[statKey]) || 8;
+  const cur = parseInt(el.textContent)||8;
   const input = document.createElement('input');
   input.type = 'number';
   input.value = cur;
@@ -608,61 +485,32 @@ function renderCharCarac(c, canEdit) {
   const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
   const sb = c.statsBonus||{};
 
+  // Onglet Carac : version détaillée avec base + bonus équipement
   let html = `<div class="cs-section">
     <div class="cs-section-title">📊 Caractéristiques
-      ${canEdit?'<span class="cs-hint">cliquer sur la valeur de base pour modifier</span>':''}
+      ${canEdit?'<span class="cs-hint">cliquer sur la valeur pour modifier</span>':''}
     </div>
-    <div style="display:grid;gap:.5rem">
-      <div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:0 .75rem;color:var(--text-dim);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">
-        <span>Stat</span>
-        <span style="text-align:center">Base</span>
-        <span style="text-align:center">Équip.</span>
-        <span style="text-align:center">Total</span>
-        <span style="text-align:center">Mod</span>
-      </div>`;
+    <div class="cs-carac-detail-grid">`;
 
   STATS_TAB.forEach(st => {
     const base = s[st.key]||8;
     const bonus = sb[st.key]||0;
     const total = base + bonus;
     const m = getMod(c, st.key);
-    const bonusStr = bonus > 0 ? `+${bonus}` : String(bonus);
-    const modClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    html += `<div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:14px;background:var(--bg-elevated)">
-      <div>
-        <div style="font-weight:700;color:var(--text)">${st.label}</div>
-        <div style="font-size:.72rem;color:var(--text-dim)">${st.abbr}</div>
-      </div>
-      <div style="text-align:center">
-        <span class="${canEdit?'cs-editable':''}"
-              ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
-              style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:700;color:var(--text)">
-          ${base}
-        </span>
-      </div>
-      <div style="text-align:center">
-        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:${bonus ? 'rgba(79,140,255,.10)' : 'var(--bg-card)'};font-weight:700;color:${bonus ? '#7fb0ff' : 'var(--text-dim)'}">
-          ${bonusStr}
-        </span>
-      </div>
-      <div style="text-align:center">
-        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:800;color:var(--text)">
-          ${total}
-        </span>
-      </div>
-      <div style="text-align:center">
-        <span class="cs-carac-detail-mod ${modClass}" style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px">
-          ${modStr(m)}
-        </span>
-      </div>
+    html += `<div class="cs-carac-detail-row">
+      <span class="cs-carac-detail-label">${st.label}</span>
+      <span class="cs-carac-detail-base">${base}</span>
+      ${bonus?`<span class="cs-carac-detail-bonus">+${bonus} éq.</span>`:'<span class="cs-carac-detail-bonus cs-carac-detail-bonus--empty"></span>'}
+      <span class="cs-carac-detail-total ${canEdit?'cs-editable':''}"
+            ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier"`:''}>
+        ${total}
+      </span>
+      <span class="cs-carac-detail-mod ${m>=0?'pos':'neg'}">${modStr(m)}</span>
     </div>`;
   });
-  html += `</div>
-    <div style="margin-top:.65rem;font-size:.76rem;color:var(--text-dim)">
-      Total = Base + bonus d'équipement. Le modificateur est calculé à partir du total.
-    </div>
-  </div>`;
+  html += `</div></div>`;
 
+  // PV/PM base editables
   html += `<div class="cs-section">
     <div class="cs-section-title">⚙️ Base PV & PM
       ${canEdit?'<span class="cs-hint">cliquer pour modifier — les max sont recalculés</span>':''}
@@ -697,134 +545,14 @@ function renderCharCarac(c, canEdit) {
     </div>
   </div>`;
 
-  const armorSet = getArmorSetInfo(c);
-  if (armorSet) {
+  // Set bonus
+  if (c.setBonusActif) {
     html += `<div class="cs-section">
       <div class="cs-section-title">✨ Bonus de Set</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;border:1px solid ${armorSet.border};background:${armorSet.bg};border-radius:14px;padding:.85rem 1rem">
-        <div>
-          <div style="font-weight:700;color:var(--text)">${armorSet.title}</div>
-          <div style="font-size:.78rem;color:var(--text-dim)">Tête · Torse · Bottes assortis</div>
-        </div>
-        <div style="font-size:.92rem;font-weight:800;color:${armorSet.accent}">${armorSet.effect}</div>
-      </div>
+      <div style="font-size:0.85rem;color:var(--text-muted);font-style:italic">${c.setBonusActif}</div>
     </div>`;
   }
   return html;
-}
-
-function _renderInventaireBoutique(char) {
-  const invRaw = (char.inventaire || []).map((item, i) => ({ item, i })).filter(({ item }) => item.source === 'boutique');
-  if (!invRaw.length) return '';
-
-  const RARETE_LABELS = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
-  const RARETE_COLORS = ['', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc'];
-  const canEdit = window._canEditChar ?? STATE.isAdmin;
-
-  // ── Regrouper par itemId + nom ──────────────────────────────────────────
-  const grouped = [];
-  invRaw.forEach(({ item, i }) => {
-    const key = (item.itemId||'') + '||' + (item.nom||'');
-    const existing = grouped.find(g => g.key === key);
-    if (existing) {
-      existing.qte += parseInt(item.qte)||1;
-      existing.indices.push(i);
-    } else {
-      grouped.push({ key, item: {...item}, qte: parseInt(item.qte)||1, indices: [i] });
-    }
-  });
-
-  const cards = grouped.map(g => {
-    const item = g.item;
-    const indicesB64 = btoa(JSON.stringify(g.indices));
-    const rareteN  = parseInt(item.rarete) || 0;
-    const rareteC  = RARETE_COLORS[rareteN] || '#555';
-    const rareteL  = RARETE_LABELS[rareteN] || '';
-    const prixAchat = parseFloat(item.prixAchat) || 0;
-    const prixVente = parseFloat(item.prixVente) || Math.round(prixAchat * 0.6);
-
-    const infos = [];
-    const bonusText = formatItemBonusText(item);
-    if (item.format)      infos.push({ label: 'Format',    val: item.format });
-    if (item.slotArmure)  infos.push({ label: 'Slot',      val: item.slotArmure });
-    if (item.slotBijou)   infos.push({ label: 'Slot',      val: item.slotBijou });
-    if (item.typeArmure)  infos.push({ label: 'Type',      val: item.typeArmure });
-    if (item.degats)      infos.push({ label: '⚔️ Dégâts',  val: `${item.degats}${item.degatsStat ? ` + ${statShort(item.degatsStat)}` : ''}`,  color: '#ff6b6b' });
-    if (item.toucherStat) infos.push({ label: 'Toucher',    val: statShort(item.toucherStat), color: '#e8b84b' });
-    else if (item.toucher) infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
-    if (item.ca || item.ca === 0) infos.push({ label: '🛡️ CA', val: item.ca });
-    if (bonusText)        infos.push({ label: 'Stats',      val: bonusText,   color: '#4f8cff' });
-    if (item.trait)       infos.push({ label: 'Trait',      val: item.trait,   color: '#b47fff', italic: true });
-    if (item.type)        infos.push({ label: 'Type',       val: item.type });
-    if (item.effet)       infos.push({ label: 'Effet',      val: item.effet });
-    if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
-
-    return `
-    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
-      padding:.85rem 1rem;display:flex;flex-direction:column;gap:.5rem;border-left:3px solid ${rareteC}">
-
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
-        <div>
-          <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600;line-height:1.2">
-            ${item.nom || '?'}
-          </div>
-          ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${'★'.repeat(rareteN)+'☆'.repeat(4-rareteN)} ${rareteL}</div>` : ''}
-        </div>
-        <span style="font-size:.72rem;background:var(--bg-elevated);border:1px solid var(--border);
-          border-radius:999px;padding:2px 8px;color:var(--text-muted);flex-shrink:0">×${g.qte}</span>
-      </div>
-
-      ${infos.length ? `
-      <div style="display:flex;flex-wrap:wrap;gap:.3rem .75rem">
-        ${infos.map(info => `
-          <div style="display:flex;align-items:baseline;gap:.3rem;font-size:.78rem">
-            <span style="color:var(--text-dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px">${info.label}</span>
-            <span style="color:${info.color||'var(--text-muted)'};${info.italic?'font-style:italic':''};font-weight:${info.color?'600':'400'}">${info.val}</span>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.25rem;
-        padding-top:.5rem;border-top:1px solid var(--border)">
-        <div style="font-size:.72rem;color:var(--text-dim)">
-          <span title="Prix d'achat">💰 ${prixAchat} or</span>
-          <span style="margin:0 .3rem;opacity:.4">·</span>
-          <span title="Prix de revente" style="color:var(--gold)">🔄 ${prixVente} or/u</span>
-        </div>
-        ${canEdit ? `
-        <div style="display:flex;gap:.4rem;align-items:center">
-          <button onclick="openSellInvModal('${char.id}','${indicesB64}',${prixVente},'${item.nom||''}')"
-            style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
-            border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
-            color:var(--gold);transition:all .15s"
-            onmouseover="this.style.background='rgba(232,184,75,.15)'"
-            onmouseout="this.style.background='rgba(232,184,75,.08)'">
-            🔄 Vendre
-          </button>
-          ${(STATE.characters||[]).filter(x=>x.id!==char.id).length ? `
-          <button onclick="openSendInvModal('${char.id}','${indicesB64}','${item.nom||''}')"
-            style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
-            border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
-            color:#4f8cff;transition:all .15s"
-            onmouseover="this.style.background='rgba(79,140,255,.15)'"
-            onmouseout="this.style.background='rgba(79,140,255,.08)'"
-            title="Envoyer">
-            📤 Envoyer
-          </button>` : ''}
-        </div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-
-  return `
-  <div style="margin-bottom:1.5rem">
-    <div style="font-size:.72rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;
-      margin-bottom:.75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">
-      🛒 Inventaire Boutique
-      <span style="font-size:.65rem;background:var(--bg-elevated);border:1px solid var(--border);
-        border-radius:999px;padding:1px 7px;margin-left:.4rem;color:var(--text-dim)">${grouped.reduce((s,g)=>s+g.qte,0)}</span>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:.6rem">${cards}</div>
-  </div>`;
 }
 
 // ══════════════════════════════════════════════
@@ -837,9 +565,39 @@ function renderCharEquip(c, canEdit) {
   const s = c.stats||{}; const sb = c.statsBonus||{};
   const fo = (s.force||10)+(sb.force||0);
   const dex = (s.dexterite||8)+(sb.dexterite||0);
-  const armorSet = getArmorSetInfo(c);
+  const setInfo = getArmorSetInfo(c);
 
   let html = '';
+
+  if (setInfo) {
+    html += `<div class="cs-section" style="margin-bottom:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;
+        padding:1rem 1.1rem;border-radius:16px;border:1px solid ${setInfo.border};
+        background:linear-gradient(135deg, ${setInfo.bg}, rgba(255,255,255,0.02));
+        box-shadow:0 10px 28px ${setInfo.glow};">
+        <div style="display:flex;align-items:flex-start;gap:.9rem;min-width:0">
+          <div style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+            border:1px solid ${setInfo.border};background:${setInfo.bg};color:${setInfo.color};
+            font-size:1rem;flex:0 0 auto">✦</div>
+          <div style="min-width:0">
+            <div style="font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:${setInfo.color};font-weight:800">
+              Effet de set
+            </div>
+            <div style="font-size:1rem;font-weight:800;color:var(--text);margin-top:.16rem">
+              ${setInfo.label}
+            </div>
+            <div style="font-size:.9rem;color:${setInfo.color};font-weight:700;margin-top:.18rem">
+              ${setInfo.effect}
+            </div>
+          </div>
+        </div>
+        <div style="flex:0 0 auto;text-align:right;font-size:.72rem;color:var(--text-dim);line-height:1.35">
+          <div>Tête · Torse · Bottes</div>
+          <div>du même type</div>
+        </div>
+      </div>
+    </div>`;
+  }
 
   html += `<div class="cs-section">
     <div class="cs-section-title">⚔️ Armes
@@ -847,56 +605,23 @@ function renderCharEquip(c, canEdit) {
     </div>`;
 
   weaponSlots.forEach(slot => {
-    const item    = equip[slot]||{};
-    const statKey = item.statAttaque==='dexterite' ? 'dexterite'
-                  : item.statAttaque==='intelligence' ? 'intelligence'
-                  : 'force';
-    const statVal = (s[statKey]||8)+(sb[statKey]||0);
-    const mod     = Math.floor((Math.min(22,statVal)-10)/2);
-    const modS    = modStr(mod);
-
-    const toucherDisplay = getToucherDisplay(c, item, statKey);
-    const degatsDisplay = getDegatsDisplay(c, item, statKey);
-    const bonusDisplay = formatItemBonusText(item);
-
-    // Badge format
-    const formatBadge = item.format
-      ? `<span style="font-size:.65rem;background:var(--bg-elevated);border:1px solid var(--border);
-           border-radius:6px;padding:1px 6px;color:var(--text-dim)">${item.format}</span>`
-      : '';
-
+    const item = equip[slot]||{};
+    const statVal = item.statAttaque==='dexterite'?dex:fo;
+    const m = modStr(Math.floor((statVal-10)/2));
     html += `<div class="cs-weapon-row">
       <div class="cs-weapon-slot-label">${slot}</div>
       <div class="cs-weapon-body">
-        ${item.nom ? `
-          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem">
-            <div class="cs-weapon-name">${item.nom}</div>
-            ${formatBadge}
-          </div>
-          ${item.trait?`<div class="cs-weapon-trait">${item.trait}</div>`:''}
-          <div class="cs-weapon-stats">
-            <span class="cs-ws">
-              <span class="cs-ws-label">Toucher</span>
-              <span class="cs-ws-val gold">${toucherDisplay}</span>
-            </span>
-            <span class="cs-ws">
-              <span class="cs-ws-label">Dégâts</span>
-              <span class="cs-ws-val red">${degatsDisplay}</span>
-            </span>
-            ${bonusDisplay?`<span class="cs-ws">
-              <span class="cs-ws-label">Bonus</span>
-              <span class="cs-ws-val" style="color:#4f8cff">${bonusDisplay}</span>
-            </span>`:''}
-            ${item.portee?`<span class="cs-ws">
-              <span class="cs-ws-label">Portée</span>
-              <span class="cs-ws-val">${item.portee}</span>
-            </span>`:''}
-            ${item.particularite?`<span class="cs-ws cs-ws-wide">
-              <span class="cs-ws-label">Particularité</span>
-              <span class="cs-ws-val muted">${item.particularite}</span>
-            </span>`:''}
-          </div>`
-        : `<div class="cs-weapon-empty">— Vide —</div>`}
+        ${item.nom
+          ? `<div class="cs-weapon-name">${item.nom}</div>
+             ${item.trait?`<div class="cs-weapon-trait">${item.trait}</div>`:''}
+             <div class="cs-weapon-stats">
+               <span class="cs-ws"><span class="cs-ws-label">Toucher</span><span class="cs-ws-val gold">1d20 ${m}</span></span>
+               <span class="cs-ws"><span class="cs-ws-label">Dégâts</span><span class="cs-ws-val red">${item.degats||'—'} ${m}</span></span>
+               <span class="cs-ws"><span class="cs-ws-label">Type</span><span class="cs-ws-val">${item.typeArme||'—'}</span></span>
+               ${item.portee?`<span class="cs-ws"><span class="cs-ws-label">Portée</span><span class="cs-ws-val">${item.portee}</span></span>`:''}
+               ${item.particularite?`<span class="cs-ws cs-ws-wide"><span class="cs-ws-label">Particularité</span><span class="cs-ws-val muted">${item.particularite}</span></span>`:''}
+             </div>`
+          : `<div class="cs-weapon-empty">— Vide —</div>`}
       </div>
       ${canEdit?`<button class="cs-equip-btn" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
     </div>`;
@@ -905,30 +630,6 @@ function renderCharEquip(c, canEdit) {
   html += `<div class="cs-combat-info">
     🎲 Critique : Maximum des dés + relance les dés de dégâts.
   </div></div>`;
-
-
-  if (armorSet) {
-    html += `<div class="cs-section" style="padding:0;border:none;background:transparent;box-shadow:none">
-      <div style="border:1px solid ${armorSet.border};background:${armorSet.bg};border-radius:18px;padding:1rem 1.1rem;box-shadow:0 10px 28px rgba(0,0,0,.12)">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;margin-bottom:.55rem">
-          <div style="display:flex;align-items:center;gap:.7rem;min-width:0">
-            <div style="width:12px;height:12px;border-radius:999px;background:${armorSet.accent};box-shadow:0 0 0 4px ${armorSet.badge}"></div>
-            <div>
-              <div style="font-size:1rem;font-weight:800;color:var(--text);line-height:1.15">${armorSet.title}</div>
-              <div style="font-size:.78rem;color:var(--text-dim)">Tête · Torse · Bottes du même type</div>
-            </div>
-          </div>
-          <span style="display:inline-flex;align-items:center;justify-content:center;padding:.28rem .68rem;border-radius:999px;background:${armorSet.badge};border:1px solid ${armorSet.border};font-size:.72rem;font-weight:700;color:${armorSet.badgeText}">
-            3/3 pièces
-          </span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap">
-          <div style="font-size:.76rem;letter-spacing:.12em;text-transform:uppercase;color:${armorSet.badgeText};font-weight:700">Effet de set</div>
-          <div style="font-size:1rem;font-weight:800;color:${armorSet.accent}">${armorSet.effect}</div>
-        </div>
-      </div>
-    </div>`;
-  }
 
   // Actions
   html += `<div class="cs-section">
@@ -960,6 +661,7 @@ function renderCharEquip(c, canEdit) {
     html += `<div class="cs-armor-card ${item.nom?'equipped':''}">
       <div class="cs-armor-slot">${slot}</div>
       <div class="cs-armor-name">${item.nom||'—'}</div>
+      ${item.typeArmure?`<div class="cs-armor-trait" style="color:var(--text-dim);font-size:.72rem">${item.typeArmure}</div>`:''}
       ${item.trait?`<div class="cs-armor-trait">${item.trait}</div>`:''}
       ${bonuses.length?`<div class="cs-armor-bonuses">${bonuses.map(k=>`<span class="badge badge-gold" style="font-size:0.6rem">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}</div>`:''}
       ${canEdit?`<button class="cs-equip-btn-sm" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
@@ -1107,289 +809,34 @@ function toggleSortDetail(idx) {
 }
 
 
-function isEquipableInventoryItem(item = {}) {
-  const tpl = (item.template || '').toLowerCase();
-  const format = item.format || '';
-  const slotArmure = item.slotArmure || '';
-  const slotBijou = item.slotBijou || '';
-  const typeArmure = item.typeArmure || '';
-  const haystack = [
-    item.type,
-    item.categorie,
-    item.category,
-    item.sousCategorie,
-    item.subcategory,
-    item.nom,
-    item.description,
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  if (tpl === 'arme' || tpl === 'armure' || tpl === 'bijou') return true;
-  if (format || slotArmure || slotBijou || typeArmure) return true;
-  if (item.degats || item.ca || item.toucherStat || item.degatsStat) return true;
-
-  return ['arme','weapon','épée','epee','arc','dague','hache','lance','marteau','bouclier','armure','armor','casque','capuche','botte','gants','amulette','anneau','bijou','talisman']
-    .some(keyword => haystack.includes(keyword));
-}
-
 function renderCharInventaire(c, canEdit) {
-  const invRaw = c.inventaire || [];
-
-  const grouped = [];
-  invRaw.forEach((item, realIdx) => {
-    const key = (item.itemId || '') + '||' + (item.nom || '');
-    const existing = grouped.find(g => g.key === key);
-    if (existing) {
-      existing.qte += parseInt(item.qte) || 1;
-      existing.indices.push(realIdx);
-    } else {
-      grouped.push({ key, item: { ...item }, qte: parseInt(item.qte) || 1, indices: [realIdx] });
-    }
-  });
-
-  const equipmentGroups = grouped.filter(g => isEquipableInventoryItem(g.item));
-  const otherGroups = grouped.filter(g => !isEquipableInventoryItem(g.item));
-  const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
-  const equippedMap = getEquippedInventoryIndexMap(c);
-
-  const RARETE_COLORS = ['', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc'];
-  const RARETE_LABELS = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
-  const equipOpen = window._charInvEquipOpen !== false;
-
-  const totalQty = groups => groups.reduce((sum, g) => sum + (parseInt(g.qte) || 0), 0);
-
-  const renderInventoryCards = groups => groups.map(g => {
-    const item = g.item;
-    const pv = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat) || 0) * 0.6);
-    const pa = parseFloat(item.prixAchat) || 0;
-    const indicesB64 = btoa(JSON.stringify(g.indices));
-
-    const rareteN = parseInt(item.rarete) || 0;
-    const rareteC = RARETE_COLORS[rareteN] || 'var(--border)';
-    const rareteL = RARETE_LABELS[rareteN] || '';
-    const equippedSlots = [...new Set(g.indices.flatMap(idx => equippedMap.get(idx) || []))];
-    const isEquipped = equippedSlots.length > 0;
-    const equippedLabel = isEquipped
-      ? `Équipé${equippedSlots.length ? ` · ${equippedSlots.join(' · ')}` : ''}`
-      : '';
-
-    const chips = [];
-    const bonusText = formatItemBonusText(item);
-    if (item.format) chips.push({ label: 'Format', val: item.format, color: 'var(--text-muted)' });
-    if (item.slotArmure) chips.push({ label: 'Slot', val: item.slotArmure, color: 'var(--text-muted)' });
-    if (item.slotBijou) chips.push({ label: 'Slot', val: item.slotBijou, color: 'var(--text-muted)' });
-    if (item.typeArmure) chips.push({ label: 'Type', val: item.typeArmure, color: 'var(--text-muted)' });
-    if (item.degats) chips.push({ label: 'Dégâts', val: `${item.degats}${item.degatsStat ? ` + ${statShort(item.degatsStat)}` : ''}`, color: '#ff6b6b' });
-    if (item.toucherStat) chips.push({ label: 'Toucher', val: statShort(item.toucherStat), color: '#e8b84b' });
-    else if (item.toucher) chips.push({ label: 'Toucher', val: item.toucher, color: '#e8b84b' });
-    if (item.ca || item.ca === 0) chips.push({ label: 'CA', val: item.ca, color: '#4f8cff' });
-    if (bonusText) chips.push({ label: 'Stats', val: bonusText, color: '#4f8cff' });
-    if (item.trait) chips.push({ label: 'Trait', val: item.trait, color: '#b47fff' });
-    if (item.type && !item.degats && !(item.ca || item.ca === 0)) chips.push({ label: 'Type', val: item.type, color: 'var(--text-muted)' });
-    if (item.effet) chips.push({ label: 'Effet', val: item.effet, color: 'var(--text-muted)' });
-
-    return `<div class="inv-card" style="border-left:3px solid ${rareteC}">
-      <div class="inv-card-header">
-        <div>
-          <div class="inv-card-title">${item.nom || '?'}</div>
-          ${rareteL ? `<div class="inv-card-sub" style="color:${rareteC}">${'★'.repeat(rareteN) + '☆'.repeat(4 - rareteN)} ${rareteL}</div>` : ''}
-          ${isEquipped ? `<div class="inv-card-sub" style="margin-top:4px"><span class="inv-badge-equipped">✓ ${equippedLabel}</span></div>` : ''}
-        </div>
-        <span class="inv-card-qte">×${g.qte}</span>
-      </div>
-
-      ${chips.length ? `<div class="inv-card-stats">
-        ${chips.map(ch => `<div class="inv-stat-chip">
-          <span class="inv-stat-label">${ch.label}</span>
-          <span class="inv-stat-val" style="color:${ch.color}">${ch.val}</span>
-        </div>`).join('')}
-      </div>` : ''}
-
-      ${item.description ? `<div class="inv-card-desc">${item.description}</div>` : ''}
-
-      <div class="inv-card-footer">
-        <div class="inv-price-block">
-          ${pa ? `<span class="inv-price-buy" title="Prix d'achat">💰 ${pa} or</span>` : ''}
-          ${pa && pv ? `<span style="color:var(--border);font-size:.65rem">|</span>` : ''}
-          ${pv ? `<span class="inv-price-sell" title="Prix de revente">🔄 ${pv} or/u</span>` : ''}
-        </div>
-        ${canEdit ? `<div class="inv-actions">
-          ${item.source === 'boutique' ? `<button class="inv-btn inv-btn-sell"
-            onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${(item.nom || '').replace(/'/g, "\\'")}')">
-            🔄 Vendre
-          </button>` : ''}
-          ${otherChars.length ? `<button class="inv-btn inv-btn-send"
-            onclick="openSendInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
-            ↗ Envoyer
-          </button>` : ''}
-          <button class="inv-btn inv-btn-del"
-            onclick="openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
-            🗑
-          </button>
-        </div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-
-  let html = `
-  <style>
-    .inv-card {
-      background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
-      overflow:hidden;transition:box-shadow .15s;
-    }
-    .inv-card:hover { box-shadow:0 4px 16px rgba(0,0,0,.35); }
-    .inv-card-header {
-      display:flex;align-items:flex-start;justify-content:space-between;
-      padding:.75rem 1rem .5rem;gap:.5rem;
-    }
-    .inv-card-title {
-      font-family:'Cinzel',serif;font-size:.9rem;font-weight:600;
-      color:var(--text);line-height:1.2;
-    }
-    .inv-card-sub {
-      font-size:.7rem;margin-top:2px;
-    }
-    .inv-badge-equipped {
-      display:inline-flex;align-items:center;gap:.3rem;
-      padding:2px 8px;border-radius:999px;
-      font-size:.68rem;font-weight:600;
-      color:#4ade80;background:rgba(74,222,128,.1);
-      border:1px solid rgba(74,222,128,.28);
-    }
-    .inv-card-qte {
-      font-family:'Cinzel',serif;font-size:.85rem;font-weight:700;
-      color:var(--text);background:var(--bg-elevated);border:1px solid var(--border);
-      border-radius:8px;padding:2px 10px;flex-shrink:0;white-space:nowrap;
-    }
-    .inv-card-stats {
-      display:flex;flex-wrap:wrap;gap:.3rem .6rem;
-      padding:0 1rem .6rem;
-    }
-    .inv-stat-chip {
-      display:flex;align-items:center;gap:.25rem;
-      background:var(--bg-elevated);border-radius:6px;
-      padding:2px 8px;font-size:.75rem;border:1px solid var(--border);
-    }
-    .inv-stat-label {
-      color:var(--text-dim);font-size:.65rem;text-transform:uppercase;letter-spacing:.5px;
-    }
-    .inv-stat-val { font-weight:600; }
-    .inv-card-desc {
-      padding:0 1rem .6rem;font-size:.78rem;color:var(--text-muted);
-      font-style:italic;line-height:1.5;
-    }
-    .inv-card-footer {
-      display:flex;align-items:center;justify-content:space-between;
-      padding:.5rem 1rem .65rem;border-top:1px solid var(--border);
-      background:rgba(0,0,0,.15);gap:.5rem;
-    }
-    .inv-price-block {
-      display:flex;align-items:center;gap:.5rem;font-size:.75rem;
-    }
-    .inv-price-buy { color:var(--text-dim); }
-    .inv-price-sell { color:var(--gold); }
-    .inv-actions {
-      display:flex;align-items:center;gap:.4rem;flex-shrink:0;
-    }
-    .inv-btn {
-      display:flex;align-items:center;gap:.3rem;
-      border-radius:8px;padding:4px 10px;cursor:pointer;
-      font-size:.73rem;font-weight:500;border:1px solid;
-      transition:all .15s;line-height:1;
-    }
-    .inv-btn-sell {
-      background:rgba(232,184,75,.08);border-color:rgba(232,184,75,.3);color:var(--gold);
-    }
-    .inv-btn-sell:hover { background:rgba(232,184,75,.18);border-color:rgba(232,184,75,.6); }
-    .inv-btn-send {
-      background:rgba(79,140,255,.08);border-color:rgba(79,140,255,.3);color:#4f8cff;
-    }
-    .inv-btn-send:hover { background:rgba(79,140,255,.18);border-color:rgba(79,140,255,.6); }
-    .inv-btn-del {
-      background:rgba(255,107,107,.06);border-color:rgba(255,107,107,.25);color:#ff6b6b;
-      padding:4px 8px;
-    }
-    .inv-btn-del:hover { background:rgba(255,107,107,.15);border-color:rgba(255,107,107,.5); }
-    .inv-group {
-      border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.015);
-      overflow:hidden;
-    }
-    .inv-group + .inv-group,
-    .inv-group + .inv-group-static,
-    .inv-group-static + .inv-group,
-    .inv-group-static + .inv-group-static { margin-top:.9rem; }
-    .inv-group > summary,
-    .inv-group-static-head {
-      list-style:none;display:flex;align-items:center;justify-content:space-between;gap:.75rem;
-      padding:.9rem 1rem;cursor:pointer;background:rgba(255,255,255,.02);
-      border-bottom:1px solid rgba(255,255,255,.04);
-    }
-    .inv-group > summary::-webkit-details-marker { display:none; }
-    .inv-group-title-wrap,
-    .inv-group-static-title-wrap { display:flex;align-items:center;gap:.55rem;min-width:0; }
-    .inv-group-title,
-    .inv-group-static-title { font-size:.88rem;font-weight:700;color:var(--text); }
-    .inv-group-meta,
-    .inv-group-static-meta { font-size:.74rem;color:var(--text-dim); }
-    .inv-group-count {
-      display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;
-      padding:0 .55rem;border-radius:999px;border:1px solid var(--border);
-      background:var(--bg-elevated);color:var(--text-muted);font-size:.74rem;font-weight:700;
-    }
-    .inv-group-chevron {
-      color:var(--text-dim);font-size:.82rem;transition:transform .15s ease;
-    }
-    .inv-group[open] .inv-group-chevron { transform:rotate(90deg); }
-    .inv-group-body,
-    .inv-group-static-body { padding:1rem;display:flex;flex-direction:column;gap:.6rem; }
-  </style>
-  <div class="cs-section">
+  const inv = c.inventaire||[];
+  let html = `<div class="cs-section">
     <div class="cs-section-title">🎒 Inventaire
-      <span class="cs-hint">${invRaw.length} objet${invRaw.length !== 1 ? 's' : ''}</span>
+      <span class="cs-hint">Les objets s'ajoutent depuis la Boutique</span>
     </div>`;
 
-  if (grouped.length === 0) {
-    html += `<div class="cs-empty" style="padding:2rem;text-align:center">
-      <div style="font-size:2rem;margin-bottom:.5rem;opacity:.3">🎒</div>
-      <div style="font-size:.85rem;color:var(--text-dim)">Inventaire vide.</div>
-      <div style="font-size:.75rem;color:var(--text-dim);margin-top:.3rem">Achetez des objets depuis la Boutique.</div>
-    </div>`;
+  if (inv.length===0) {
+    html += `<div class="cs-empty">Inventaire vide.</div>`;
   } else {
-    if (equipmentGroups.length) {
-      html += `<details class="inv-group" ${equipOpen ? 'open' : ''} ontoggle="window._charInvEquipOpen=this.open">
-        <summary>
-          <div class="inv-group-title-wrap">
-            <span>🛡️</span>
-            <div>
-              <div class="inv-group-title">Équipement</div>
-              <div class="inv-group-meta">Armes, armures, bijoux et accessoires équipables</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:.55rem;flex-shrink:0">
-            <span class="inv-group-count">${totalQty(equipmentGroups)}</span>
-            <span class="inv-group-chevron">▶</span>
-          </div>
-        </summary>
-        <div class="inv-group-body">${renderInventoryCards(equipmentGroups)}</div>
-      </details>`;
-    }
-
-    if (otherGroups.length) {
-      html += `<div class="inv-group-static">
-        <div class="inv-group-static-head">
-          <div class="inv-group-static-title-wrap">
-            <span>🎒</span>
-            <div>
-              <div class="inv-group-static-title">Autres objets</div>
-              <div class="inv-group-static-meta">Consommables, ressources, quêtes et divers</div>
-            </div>
-          </div>
-          <span class="inv-group-count">${totalQty(otherGroups)}</span>
+    html += `<div class="cs-inv-list">`;
+    inv.forEach((item,i) => {
+      const pv = item.prixVente || (item.prixAchat ? Math.round(item.prixAchat * 0.6) : 0);
+      html += `<div class="cs-inv-row">
+        <div class="cs-inv-main">
+          <div class="cs-inv-name">${item.nom||'?'}</div>
+          ${item.description?`<div class="cs-inv-desc">${item.description}</div>`:''}
         </div>
-        <div class="inv-group-static-body">${renderInventoryCards(otherGroups)}</div>
+        <div class="cs-inv-meta">
+          ${item.type?`<span class="badge badge-gold" style="font-size:0.68rem">${item.type}</span>`:''}
+          <span class="cs-inv-qte">×${item.qte||1}</span>
+          ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn" onclick="sellInvItem(${i},'${c.id}',${pv})" title="Vendre (${pv} or)">🔄 ${pv} or</button>`:''}
+          ${canEdit?`<button class="btn-icon" onclick="deleteInvItem(${i})">🗑️</button>`:''}
+        </div>
       </div>`;
-    }
+    });
+    html += `</div>`;
   }
-
   html += `</div>`;
   return html;
 }
@@ -1690,296 +1137,48 @@ function inlineEditCompteField(type, idx, field, el) {
 }
 
 
-// ── Décoder les indices depuis base64 ─────────────────────────────────────────
-function _decodeIndices(b64) {
-  try { return JSON.parse(atob(b64)); } catch { return []; }
-}
-
-// ── Modal vente avec quantité ─────────────────────────────────────────────────
-function openSellInvModal(charId, indicesB64, prixVente, nom) {
-  const indices = _decodeIndices(indicesB64);
-  const maxQte  = indices.length;
-  if (maxQte === 0) return;
-  openModal(`🔄 Vendre — ${nom}`, `
-    <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
-      <strong style="color:var(--gold)">${prixVente} or</strong> par unité · ${maxQte} en stock
-    </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
-      <label style="flex-shrink:0">Quantité</label>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <button type="button" onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event('input'))"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
-        <input type="number" id="sell-qty" min="1" max="${maxQte}" value="1"
-          style="width:60px;text-align:center" class="input-field"
-          oninput="document.getElementById('sell-total').textContent=(Math.min(Math.max(1,parseInt(this.value)||1),${maxQte})*${prixVente})+' or'">
-        <button type="button" onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event('input'))"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
-      </div>
-      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="sell-total" style="color:var(--gold)">${prixVente} or</strong></span>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:1rem">
-      <button class="btn btn-gold" style="flex:1" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
-        🔄 Vendre
-      </button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
-    </div>
-  `);
-}
-
-async function sellInvItemBulk(charId, indicesB64, prixVente) {
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+async function sellInvItem(idx, charId, prixVente) {
+  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
   if (!c) return;
-
-  const allIndices = _decodeIndices(indicesB64);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
-  const equippedMap = getEquippedInventoryIndexMap(c);
-  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
-  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
-  const indicesToSell = [...unequippedIndices, ...equippedIndices].slice(0, qty);
-
-  const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const item     = inv[indicesToSell[0]];
+  const item = (c.inventaire||[])[idx];
   if (!item) return;
-  const itemNom  = item.nom || 'objet';
-  const totalPrix = prixVente * qty;
+  if (!confirm(`Vendre "${item.nom}" pour ${prixVente} or ?`)) return;
 
-  // Retirer les items vendus (du plus grand index au plus petit pour ne pas décaler)
-  const sorted = [...indicesToSell].sort((a,b)=>b-a);
-  sorted.forEach(idx => inv.splice(idx, 1));
+  // 1. Retirer de l'inventaire
+  c.inventaire.splice(idx, 1);
 
-  // Créditer l'or
-  const compte   = c.compte || { recettes:[], depenses:[] };
-  const recettes = [...(compte.recettes||[])];
+  // 2. Ajouter au livret de compte (recettes)
+  const compte   = c.compte||{recettes:[],depenses:[]};
+  const recettes = compte.recettes||[];
   recettes.push({
     date:    new Date().toLocaleDateString('fr-FR'),
-    libelle: qty > 1 ? `Vente ×${qty} : ${itemNom}` : `Vente : ${itemNom}`,
-    montant: totalPrix,
+    libelle: `Vente : ${item.nom}`,
+    montant: prixVente,
   });
+  c.compte = { ...compte, recettes };
 
-  // Réincrémenter le stock boutique si besoin
-  if (item.itemId && window.sellInvItemFromShop) {
-    // On réincrémente N fois dans la boutique
-    for (let i = 0; i < qty; i++) {
-      await window._restockShopItem?.(item.itemId);
-    }
+  // 3. Remettre le stock en boutique (si l'article existe encore)
+  if (item.itemId) {
+    const { updateInCol: _upd, loadCollection: _load } = await import('./firestore.js').catch(()=>({}));
+    // Approche simple : incrémenter le dispo dans Firestore
+    try {
+      const shopItems = await import('../data/firestore.js').then(m => m.loadCollection('shop'));
+      const shopItem  = shopItems.find(s => s.id === item.itemId);
+      if (shopItem && shopItem.dispo !== undefined && shopItem.dispo !== '') {
+        const newDispo = parseInt(shopItem.dispo) + 1;
+        await import('../data/firestore.js').then(m => m.updateInCol('shop', item.itemId, {dispo: newDispo}));
+      }
+    } catch(e) { /* article supprimé de la boutique, on ignore */ }
   }
 
-  const equipSync = syncEquipmentAfterInventoryMutation(c, indicesToSell);
-  const payload = {
-    inventaire: inv,
-    compte: { ...compte, recettes },
-  };
-  if (equipSync.changed) {
-    payload.equipement = equipSync.equipement;
-    payload.statsBonus = equipSync.statsBonus;
-  }
-
-  await updateInCol('characters', charId, payload);
-  c.inventaire = inv;
-  c.compte     = { ...compte, recettes };
-  if (equipSync.changed) {
-    c.equipement = equipSync.equipement;
-    c.statsBonus = equipSync.statsBonus;
-  }
-
-  closeModal();
-  const unequipMsg = equipSync.removedSlots.length
-    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
-    : '';
-  showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !${unequipMsg}`, 'success');
-  refreshOrDisplay(c);
-  renderCharSheet(c, window._currentCharTab || 'inventaire');
-}
-
-// Alias pour compatibilité avec l'ancien code
-async function sellInvItem(charId, invIndex) {
-  // Construire indicesB64 depuis un index unique
-  const b64 = btoa(JSON.stringify([invIndex]));
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  const item = (c?.inventaire||[])[invIndex];
-  const pv = parseFloat(item?.prixVente) || Math.round((parseFloat(item?.prixAchat)||0)*0.6);
-  openSellInvModal(charId, b64, pv, item?.nom||'objet');
+  await updateInCol('characters', charId, { inventaire: c.inventaire, compte: c.compte });
+  showNotif(`Vendu ! +${prixVente} or ajouté au livret de compte.`, 'success');
+  renderCharSheet(c, 'inventaire');
 }
 
 // ══════════════════════════════════════════════
-// SUPPRIMER avec quantité
+// ACTIONS
 // ══════════════════════════════════════════════
-function openDeleteInvModal(charId, indicesB64, nom) {
-  const indices = _decodeIndices(indicesB64);
-  const maxQte  = indices.length;
-  openModal(`🗑️ Supprimer — ${nom}`, `
-    <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
-      ${maxQte} exemplaire${maxQte>1?'s':''} dans l'inventaire
-    </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
-      <label style="flex-shrink:0">Quantité</label>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <button type="button" onclick="this.nextElementSibling.stepDown()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">−</button>
-        <input type="number" id="del-qty" min="1" max="${maxQte}" value="1" style="width:60px;text-align:center" class="input-field">
-        <button type="button" onclick="this.previousElementSibling.stepUp()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">+</button>
-      </div>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:1rem">
-      <button class="btn btn-outline btn-sm" style="flex:1;color:#ff6b6b;border-color:rgba(255,107,107,.35)"
-        onclick="deleteInvItemBulk('${charId}','${indicesB64}')">🗑️ Supprimer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
-    </div>
-  `);
-}
-
-async function deleteInvItemBulk(charId, indicesB64) {
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) return;
-  const allIndices = _decodeIndices(indicesB64);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
-  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const removedIndices = allIndices.slice(0, qty);
-  const sorted = [...removedIndices].sort((a,b)=>b-a);
-  sorted.forEach(idx => inv.splice(idx, 1));
-  const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
-  const payload = { inventaire: inv };
-  if (equipSync.changed) {
-    payload.equipement = equipSync.equipement;
-    payload.statsBonus = equipSync.statsBonus;
-  }
-  await updateInCol('characters', charId, payload);
-  c.inventaire = inv;
-  if (equipSync.changed) {
-    c.equipement = equipSync.equipement;
-    c.statsBonus = equipSync.statsBonus;
-  }
-  closeModal();
-  const deleteMsg = equipSync.removedSlots.length
-    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
-    : '';
-  showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
-  renderCharSheet(c, window._currentCharTab || 'inventaire');
-}
-
-// ══════════════════════════════════════════════
-// ENVOYER UN OBJET À UN AUTRE PERSONNAGE
-// ══════════════════════════════════════════════
-function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) return;
-
-  // Accepter soit un indicesB64 (nouveau) soit un index numérique (ancien)
-  let indices;
-  if (typeof indicesB64OrIndex === 'number') {
-    indices = [indicesB64OrIndex];
-  } else {
-    indices = _decodeIndices(indicesB64OrIndex);
-  }
-  if (!indices.length) return;
-
-  const item    = (c.inventaire||[])[indices[0]];
-  if (!item) return;
-  const nom     = nomOrUnused || item.nom || 'Objet';
-  const maxQte  = indices.length;
-  const b64     = btoa(JSON.stringify(indices));
-
-  const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
-  if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
-
-  openModal(`📤 Envoyer — ${nom}`, `
-    <div style="margin-bottom:.75rem;font-size:.85rem;color:var(--text-muted)">
-      ${maxQte} exemplaire${maxQte>1?'s':''} disponible${maxQte>1?'s':''}
-    </div>
-    ${maxQte > 1 ? `
-    <div class="form-group" style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem">
-      <label style="flex-shrink:0">Quantité</label>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <button type="button" onclick="this.nextElementSibling.stepDown()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">−</button>
-        <input type="number" id="send-qty" min="1" max="${maxQte}" value="1"
-          style="width:60px;text-align:center" class="input-field">
-        <button type="button" onclick="this.previousElementSibling.stepUp()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">+</button>
-      </div>
-    </div>` : ''}
-    <div class="form-group">
-      <label>Envoyer à</label>
-      <div style="display:flex;flex-direction:column;gap:.4rem">
-        ${otherChars.map(target => `
-          <label style="display:flex;align-items:center;gap:.75rem;padding:.6rem .8rem;
-            border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;transition:all .15s"
-            onmouseover="this.style.borderColor='var(--gold)';this.style.background='rgba(232,184,75,.06)'"
-            onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
-            <input type="radio" name="send-target" value="${target.id}" style="accent-color:var(--gold)">
-            <div>
-              <div style="font-family:'Cinzel',serif;font-size:.82rem;color:var(--text)">${target.nom||'?'}</div>
-              ${target.ownerPseudo?`<div style="font-size:.68rem;color:var(--text-dim)">${target.ownerPseudo}</div>`:''}
-            </div>
-          </label>`).join('')}
-      </div>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="sendInvItem('${charId}','${b64}')">📤 Envoyer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
-    </div>
-  `);
-}
-
-async function sendInvItem(fromCharId, indicesB64) {
-  const fromChar = STATE.characters?.find(x => x.id === fromCharId) || STATE.activeChar;
-  if (!fromChar) return;
-
-  const targetId = document.querySelector('input[name="send-target"]:checked')?.value;
-  if (!targetId) { showNotif('Sélectionne un personnage cible.','error'); return; }
-
-  const toChar = STATE.characters?.find(x => x.id === targetId);
-  if (!toChar) { showNotif('Personnage introuvable.','error'); return; }
-
-  const allIndices = _decodeIndices(indicesB64);
-  const maxQte  = allIndices.length;
-  const qtyEl   = document.getElementById('send-qty');
-  const qty     = qtyEl ? Math.min(Math.max(1, parseInt(qtyEl.value)||1), maxQte) : 1;
-  const equippedMap = getEquippedInventoryIndexMap(fromChar);
-  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
-  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
-  const toSend  = [...unequippedIndices, ...equippedIndices].slice(0, qty);
-
-  const fromInv = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
-  const firstItem = fromInv[toSend[0]];
-  if (!firstItem) return;
-
-  // Objets à transférer
-  const itemsToTransfer = toSend.map(idx => ({...fromInv[idx]}));
-
-  // Retirer de la source (du plus grand au plus petit)
-  [...toSend].sort((a,b)=>b-a).forEach(idx => fromInv.splice(idx, 1));
-
-  // Ajouter à la cible
-  const toInv = Array.isArray(toChar.inventaire) ? [...toChar.inventaire] : [];
-  itemsToTransfer.forEach(it => toInv.push(it));
-
-  const equipSync = syncEquipmentAfterInventoryMutation(fromChar, toSend);
-  const fromPayload = { inventaire: fromInv };
-  if (equipSync.changed) {
-    fromPayload.equipement = equipSync.equipement;
-    fromPayload.statsBonus = equipSync.statsBonus;
-  }
-
-  await Promise.all([
-    updateInCol('characters', fromCharId, fromPayload),
-    updateInCol('characters', targetId,   { inventaire: toInv }),
-  ]);
-  fromChar.inventaire = fromInv;
-  if (equipSync.changed) {
-    fromChar.equipement = equipSync.equipement;
-    fromChar.statsBonus = equipSync.statsBonus;
-  }
-  toChar.inventaire   = toInv;
-
-  closeModal();
-  const sendMsg = equipSync.removedSlots.length
-    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
-    : '';
-  showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !${sendMsg}`, 'success');
-  renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
-}
 async function adjustStat(stat, delta, charId) {
   const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
   if (!c) return;
@@ -2280,219 +1479,54 @@ async function saveSort(idx) {
 }
 
 
-function computeEquipStatsBonus(equip = {}) {
-  const bonus = { force:0, dexterite:0, intelligence:0, sagesse:0, constitution:0, charisme:0 };
-  Object.values(equip || {}).forEach(it => {
-    bonus.force        += parseInt(it?.fo)  || 0;
-    bonus.dexterite    += parseInt(it?.dex) || 0;
-    bonus.intelligence += parseInt(it?.in)  || 0;
-    bonus.sagesse      += parseInt(it?.sa)  || 0;
-    bonus.constitution += parseInt(it?.co)  || 0;
-    bonus.charisme     += parseInt(it?.ch)  || 0;
-  });
-  return bonus;
-}
-
-function inferAttackStatFromItem(item = {}) {
-  if (item.toucherStat) return item.toucherStat;
-  if (item.statAttaque) return item.statAttaque;
-  const format = String(item.format || '');
-  if (format.includes('Mag.')) return 'intelligence';
-  if (format.includes('Dist.')) return 'dexterite';
-  return 'force';
-}
-
-function inferArmorSlotValue(slot, item = {}) {
-  if (item.slotArmure) return item.slotArmure;
-  if (slot === 'Bottes') return 'Pieds';
-  return slot;
-}
-
-function inferAccessorySlotValue(slot, item = {}) {
-  return item.slotBijou || slot;
-}
-
-function buildEquippedItemFromInventory(slot, item, invIndex) {
-  if (!item) return null;
-  const isWeapon = slot.startsWith('Main');
-
-  if (isWeapon) {
-    return {
-      nom: item.nom || '',
-      trait: item.trait || '',
-      degats: item.degats || '',
-      degatsStat: item.degatsStat || inferAttackStatFromItem(item),
-      toucherStat: item.toucherStat || inferAttackStatFromItem(item),
-      statAttaque: inferAttackStatFromItem(item),
-      typeArme: item.typeArme || item.type || '',
-      portee: item.portee || '',
-      particularite: item.particularite || item.effet || item.description || '',
-      format: item.format || '',
-      toucher: item.toucher || '',
-      stats: item.stats || '',
-      fo: parseInt(item.fo) || 0,
-      dex: parseInt(item.dex) || 0,
-      in: parseInt(item.in) || 0,
-      sa: parseInt(item.sa) || 0,
-      co: parseInt(item.co) || 0,
-      ch: parseInt(item.ch) || 0,
-      sourceInvIndex: invIndex,
-      itemId: item.itemId || '',
-    };
-  }
-
-  return {
-    nom: item.nom || '',
-    trait: item.trait || '',
-    fo: parseInt(item.fo) || 0,
-    dex: parseInt(item.dex) || 0,
-    in: parseInt(item.in) || 0,
-    sa: parseInt(item.sa) || 0,
-    co: parseInt(item.co) || 0,
-    ch: parseInt(item.ch) || 0,
-    ca: parseInt(item.ca) || 0,
-    typeArmure: item.typeArmure || '',
-    slotArmure: item.slotArmure ? inferArmorSlotValue(slot, item) : '',
-    slotBijou: item.slotBijou ? inferAccessorySlotValue(slot, item) : '',
-    sourceInvIndex: invIndex,
-    itemId: item.itemId || '',
-  };
-}
-
-async function equipSlotFromInv(val, slot) {
-  if (!val || !val.startsWith('inv:')) return;
-  const c = STATE.activeChar; if (!c) return;
-
-  const invIndex = parseInt(val.split(':')[1], 10);
-  if (Number.isNaN(invIndex)) return;
-
-  const item = (c.inventaire || [])[invIndex];
-  if (!item) return;
-
-  const equip = { ...(c.equipement || {}) };
-
-  Object.keys(equip).forEach(otherSlot => {
-    if (otherSlot !== slot && equip[otherSlot]?.sourceInvIndex === invIndex) {
-      delete equip[otherSlot];
-    }
-  });
-
-  const equippedItem = buildEquippedItemFromInventory(slot, item, invIndex);
-  if (!equippedItem) return;
-
-  equip[slot] = equippedItem;
-  const bonus = computeEquipStatsBonus(equip);
-
-  c.equipement = equip;
-  c.statsBonus = bonus;
-
-  await updateInCol('characters', c.id, { equipement: equip, statsBonus: bonus });
-  closeModal();
-  showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
-  renderCharSheet(c, 'combat');
-}
-
 // Équipement — filtré depuis l'inventaire du personnage
 function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equipped = (c.equipement||{})[slot]||{};
   const isWeapon = slot.startsWith('Main');
 
-  // ── Règles de compatibilité par slot ────────────────────────────────────
-  // On filtre d'abord par les champs structurés (format, slotArmure, typeArmure, template)
-  // puis on accepte les items sans champ structuré comme fallback (compatibilité anciens items)
-
-  const ARMES_1M_CAC    = ['Arme 1M CaC Phy.'];
-  const ARME_SECONDAIRE = ['Arme Secondaire (Bouclier, Torche...)'];
-  const TOUTES_ARMES    = ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'];
-
-  // Main principale : toutes les armes sauf secondaires pures
-  // Main secondaire : armes 1M + armes secondaires (bouclier, torche...)
-  const SLOT_ARME_FORMATS = {
-    'Main principale': ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'],
-    'Main secondaire': [...ARMES_1M_CAC, ...ARME_SECONDAIRE],
+  // Déterminer les types d'items compatibles selon le slot
+  const SLOT_TYPES = {
+    'Main principale':  ['⚔️ Arme', 'arme', 'Arme', 'weapon', 'arme 1m', 'arme 2m', 'Épée', 'epee', 'Lance', 'Hache', 'Arc', 'Baguette', 'Dague'],
+    'Main secondaire':  ['⚔️ Arme', 'arme', 'Arme', 'weapon', 'Bouclier', 'arme 1m', 'Dague', 'Baguette'],
+    'Tête':             ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Casque', 'Heaume', 'Chapeau', 'Cagoule'],
+    'Torse':            ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Cuirasse', 'Tunique', 'Robe'],
+    'Bottes':           ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Botte', 'Sandale'],
+    'Amulette':         ['Bijou', 'Accessoire', 'Amulette', 'Collier', 'Pendentif', '📦 Libre', 'libre'],
+    'Anneau':           ['Bijou', 'Accessoire', 'Anneau', 'Bague', '📦 Libre', 'libre'],
+    'Objet magique':    ['Accessoire', 'Objet magique', 'Relique', '📦 Libre', 'libre', 'Rare', 'Légendaire'],
   };
 
-  // Slots d'armure → [slotArmure compatible, typeArmure compatible ou null=tous]
-  const SLOT_ARMURE = {
-    'Tête':    { slot: 'Tête',  types: null },
-    'Torse':   { slot: 'Torse', types: null },
-    'Bottes':  { slot: 'Pieds', types: null },
-    'Amulette':    null, // pas d'armure, items libres
-    'Anneau':      null,
-    'Objet magique': null,
-  };
-
+  const compatibleTypes = SLOT_TYPES[slot] || [];
   const inv = c.inventaire||[];
-  const equippedEntries = Object.entries(c.equipement || {});
-  const equippedInvIndex = Number.isInteger(equipped?.sourceInvIndex) ? equipped.sourceInvIndex : -1;
 
-  // Filtrer les items compatibles avec ce slot
-  const compatibles = inv
-    .map((item, invIndex) => ({ item, invIndex }))
-    .filter(({ item, invIndex }) => {
-      if (!item?.nom) return false;
-
-      const alreadyEquippedElsewhere = equippedEntries.some(([otherSlot, equippedItem]) =>
-        otherSlot !== slot && equippedItem?.sourceInvIndex === invIndex
-      );
-      if (alreadyEquippedElsewhere) return false;
-
-      const tpl = item.template || '';
-
-      if (isWeapon) {
-        const formats = SLOT_ARME_FORMATS[slot] || TOUTES_ARMES;
-        if (tpl === 'arme' || item.format) {
-          // Item structuré : filtrer par format
-          return formats.includes(item.format);
-        }
-        // Item non structuré (ancien format) : accepter si le type ressemble à une arme
-        const t = (item.type||'').toLowerCase();
-        return ['arme','weapon','épée','lance','hache','arc','dague','baguette','baton'].some(k => t.includes(k));
-      }
-
-      // Slots d'armure structurés
-      const armureRule = SLOT_ARMURE[slot];
-      if (armureRule !== undefined) {
-        if (armureRule === null) {
-          if (tpl === 'bijou' || item.slotBijou) return item.slotBijou === slot;
-          return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure && !item.slotBijou);
-        }
-        if (tpl === 'armure' || item.slotArmure) {
-          // Item structuré : vérifier slotArmure
-          return item.slotArmure === armureRule.slot;
-        }
-        // Item non structuré : accepter si type ressemble à armure
-        const t = (item.type||'').toLowerCase();
-        return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
-      }
-
-      return false;
-    });
+  // Filtrer les items de l'inventaire compatibles avec ce slot
+  const compatibles = inv.filter(item => {
+    if (!item.nom) return false;
+    if (compatibleTypes.length === 0) return true;
+    const t = (item.type||'').toLowerCase();
+    return compatibleTypes.some(ct => t.includes(ct.toLowerCase()) || ct.toLowerCase().includes(t));
+  });
 
   // Options pour le select
-  const invOptions = compatibles.map(({ item, invIndex }) => {
-    // Label enrichi avec les infos structurées
-    let label = item.nom;
-    if (item.format) label += ` — ${item.format}`;
-    else if (item.slotArmure && item.typeArmure) label += ` — ${item.typeArmure}`;
-    const isSelected = equippedInvIndex === invIndex || (equippedInvIndex < 0 && equipped.nom === item.nom);
-    return `<option value="inv:${invIndex}" ${isSelected?'selected':''}>${label}</option>`;
-  }).join('');
+  const invOptions = compatibles.map((item, idx) =>
+    `<option value="inv:${idx}" ${equipped.nom===item.nom?'selected':''}>${item.nom}${item.type?' ('+item.type+')':''}</option>`
+  ).join('');
 
   const hasCompat = compatibles.length > 0;
 
   openModal(`${isWeapon?'⚔️':'🛡️'} Équiper — ${slot}`, `
     ${hasCompat
       ? `<div class="form-group">
-          <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
-          <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" onchange="equipSlotFromInv(this.value, this.dataset.equipSlot)">
+          <label>Choisir depuis l'inventaire</label>
+          <select class="input-field sh-modal-select" id="eq-inv-sel" onchange="previewEquipFromInv(this.value,'${slot}')">
             <option value="">— Sélectionner un objet —</option>
             ${invOptions}
           </select>
+          <div class="cs-equip-inv-preview" id="eq-inv-preview"></div>
         </div>
         <div class="cs-equip-divider">
-          <span>ou saisir / ajuster manuellement</span>
+          <span>ou saisir manuellement</span>
         </div>`
       : `<div class="cs-equip-empty-inv">
           <span>⚠️ Aucun objet compatible dans l'inventaire.</span>
@@ -2528,85 +1562,42 @@ function editEquipSlot(slot) {
     </div>
   `);
   // Stocker les compatibles pour previewEquipFromInv
-  window._equipCompatibles  = compatibles;
-  window._equipSelectedMeta = {
-    format: equipped.format || '',
-    toucher: equipped.toucher || '',
-    toucherStat: equipped.toucherStat || inferAttackStatFromItem(equipped),
-    degatsStat: equipped.degatsStat || equipped.statAttaque || '',
-    stats: equipped.stats || '',
-    fo: parseInt(equipped.fo) || 0,
-    dex: parseInt(equipped.dex) || 0,
-    in: parseInt(equipped.in) || 0,
-    sa: parseInt(equipped.sa) || 0,
-    co: parseInt(equipped.co) || 0,
-    ch: parseInt(equipped.ch) || 0,
-    typeArmure: equipped.typeArmure || '',
-    slotArmure: equipped.slotArmure || '',
-    slotBijou: equipped.slotBijou || '',
-  };
+  window._equipCompatibles = compatibles;
 }
 
 // Pré-remplir les champs depuis l'item sélectionné dans l'inventaire
 function previewEquipFromInv(val, slot) {
   if (!val || !val.startsWith('inv:')) return;
-  const idx  = parseInt(val.split(':')[1], 10);
-  const compat = (window._equipCompatibles||[]).find(entry => entry?.invIndex === idx) || (window._equipCompatibles||[])[idx];
-  const item = compat?.item || compat;
+  const idx = parseInt(val.split(':')[1]);
+  const item = (window._equipCompatibles||[])[idx];
   if (!item) return;
 
+  // Remplir nom et trait depuis l'inventaire
   const nomEl   = document.getElementById('eq-nom');
   const traitEl = document.getElementById('eq-trait');
   if (nomEl)   nomEl.value   = item.nom||'';
-  if (traitEl) traitEl.value = item.trait||'';
+  if (traitEl) traitEl.value = item.trait||item.type||'';
 
+  // Remplir les stats si l'item a des données de boutique
   const isWeapon = slot.startsWith('Main');
   if (isWeapon) {
     if (item.degats && document.getElementById('eq-degats'))
       document.getElementById('eq-degats').value = item.degats;
-    // Déduire stat d'attaque depuis le format
-    if (item.format) {
-      const statSel = document.getElementById('eq-stat-attaque');
-      if (statSel) {
-        if (item.format.includes('Mag.'))  statSel.value = 'intelligence';
-        else if (item.format.includes('Dist.')) statSel.value = 'dexterite';
-        else statSel.value = 'force';
-      }
-    }
-    // Stocker format, toucher, stats pour saveEquipSlot
-    window._equipSelFormat  = item.format  || '';
-    window._equipSelToucher = item.toucher || '';
-    window._equipSelStats   = item.stats   || '';
   } else {
-    // Stocker typeArmure pour saveEquipSlot
-    window._equipSelTypeArmure = item.typeArmure||'';
-    window._equipSelSlotArmure = item.slotArmure||'';
-    // Bonus stats depuis item boutique (valeurs numériques)
-    ['fo','dex','in','sa','co','ch'].forEach(k => {
+    // Bonus stats depuis item boutique
+    ['fo','dex','in','sa','co','ch','ca'].forEach(k => {
       const el = document.getElementById('eq-'+k);
       if (el && item[k] !== undefined) el.value = item[k];
     });
-    // CA bonus
-    const caEl = document.getElementById('eq-ca');
-    if (caEl && item.ca) caEl.value = parseInt(item.ca)||0;
   }
 
-  // Preview enrichi
+  // Preview
   const preview = document.getElementById('eq-inv-preview');
   if (preview) {
-    const tags = [
-      item.format && `<span class="badge badge-gold" style="font-size:.65rem">${item.format}</span>`,
-      item.slotArmure && `<span class="badge badge-gold" style="font-size:.65rem">${item.slotArmure}</span>`,
-      item.typeArmure && `<span class="badge badge-gold" style="font-size:.65rem">${item.typeArmure}</span>`,
-      item.degats && `<span style="font-size:.75rem;color:#ff6b6b">⚔️ ${item.degats}</span>`,
-      item.toucher && `<span style="font-size:.75rem;color:#e8b84b">🎯 ${item.toucher}</span>`,
-      item.ca && `<span style="font-size:.75rem;color:#4f8cff">🛡️ CA +${item.ca}</span>`,
-    ].filter(Boolean).join(' ');
-    preview.innerHTML = `<div class="cs-equip-inv-item" style="margin-top:.5rem;padding:.5rem .75rem;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border)">
-      <strong style="font-size:.85rem">${item.nom}</strong>
-      ${tags?`<div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.25rem">${tags}</div>`:''}
-      ${item.stats?`<div style="font-size:.72rem;color:#4f8cff;margin-top:.2rem">${item.stats}</div>`:''}
-      ${item.trait?`<div style="font-size:.72rem;color:#b47fff;font-style:italic;margin-top:.1rem">${item.trait}</div>`:''}
+    preview.innerHTML = `<div class="cs-equip-inv-item">
+      <strong>${item.nom}</strong>
+      ${item.type?`<span class="badge badge-gold" style="font-size:0.65rem">${item.type}</span>`:''}
+      ${item.description?`<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem">${item.description}</div>`:''}
     </div>`;
   }
 }
@@ -2615,27 +1606,15 @@ function previewEquipFromInv(val, slot) {
 async function saveEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equip = c.equipement||{};
-  const meta = window._equipSelectedMeta || {};
   if (slot.startsWith('Main')) {
     equip[slot] = {
-      nom:         document.getElementById('eq-nom')?.value||'',
-      trait:       document.getElementById('eq-trait')?.value||'',
-      degats:      document.getElementById('eq-degats')?.value||'',
-      degatsStat:  meta.degatsStat || document.getElementById('eq-stat-attaque')?.value || 'force',
-      toucherStat: meta.toucherStat || document.getElementById('eq-stat-attaque')?.value || 'force',
+      nom: document.getElementById('eq-nom')?.value||'',
+      trait: document.getElementById('eq-trait')?.value||'',
+      degats: document.getElementById('eq-degats')?.value||'1D10',
       statAttaque: document.getElementById('eq-stat-attaque')?.value||'force',
-      typeArme:    document.getElementById('eq-type-arme')?.value||'',
-      portee:      document.getElementById('eq-portee')?.value||'',
+      typeArme: document.getElementById('eq-type-arme')?.value||'',
+      portee: document.getElementById('eq-portee')?.value||'',
       particularite: document.getElementById('eq-particularite')?.value||'',
-      format:  meta.format || '',
-      toucher: meta.toucher || '',
-      stats:   meta.stats || '',
-      fo: parseInt(meta.fo) || 0,
-      dex: parseInt(meta.dex) || 0,
-      in: parseInt(meta.in) || 0,
-      sa: parseInt(meta.sa) || 0,
-      co: parseInt(meta.co) || 0,
-      ch: parseInt(meta.ch) || 0,
     };
   } else {
     equip[slot] = {
@@ -2648,15 +1627,22 @@ async function saveEquipSlot(slot) {
       co: parseInt(document.getElementById('eq-co')?.value)||0,
       ch: parseInt(document.getElementById('eq-ch')?.value)||0,
       ca: parseInt(document.getElementById('eq-ca')?.value)||0,
-      typeArmure: meta.typeArmure||'',
-      slotArmure: meta.slotArmure||'',
-      slotBijou: meta.slotBijou || (['Amulette','Anneau','Objet magique'].includes(slot) ? slot : ''),
     };
   }
   c.equipement = equip;
-  const bonus = computeEquipStatsBonus(equip);
+  const bonus={force:0,dexterite:0,intelligence:0,sagesse:0,constitution:0,charisme:0};
+  Object.values(equip).forEach(it=>{
+    bonus.force+=(it.fo||0); bonus.dexterite+=(it.dex||0); bonus.intelligence+=(it.in||0);
+    bonus.sagesse+=(it.sa||0); bonus.constitution+=(it.co||0); bonus.charisme+=(it.ch||0);
+  });
   c.statsBonus = bonus;
-  await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
+  const setInfo = getArmorSetInfo(c);
+  c.setBonusActif = setInfo ? `${setInfo.label} — ${setInfo.effect}` : '';
+  await updateInCol('characters', c.id, {
+    equipement:equip,
+    statsBonus:bonus,
+    setBonusActif:c.setBonusActif,
+  });
   closeModal();
   showNotif('Équipement mis à jour !','success');
   renderCharSheet(c,'combat');
@@ -2667,9 +1653,19 @@ async function clearEquipSlot(slot) {
   const equip = c.equipement||{};
   delete equip[slot];
   c.equipement = equip;
-  const bonus = computeEquipStatsBonus(equip);
+  const bonus={force:0,dexterite:0,intelligence:0,sagesse:0,constitution:0,charisme:0};
+  Object.values(equip).forEach(it=>{
+    bonus.force+=(it.fo||0); bonus.dexterite+=(it.dex||0); bonus.intelligence+=(it.in||0);
+    bonus.sagesse+=(it.sa||0); bonus.constitution+=(it.co||0); bonus.charisme+=(it.ch||0);
+  });
   c.statsBonus = bonus;
-  await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
+  const setInfo = getArmorSetInfo(c);
+  c.setBonusActif = setInfo ? `${setInfo.label} — ${setInfo.effect}` : '';
+  await updateInCol('characters', c.id, {
+    equipement:equip,
+    statsBonus:bonus,
+    setBonusActif:c.setBonusActif,
+  });
   closeModal();
   showNotif('Emplacement libéré.','success');
   renderCharSheet(c,'combat');
@@ -2759,9 +1755,7 @@ function deleteCharPhoto(id) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   selectChar, filterAdminChars,
-  sellInvItem, openSellInvModal, sellInvItemBulk,
-  openDeleteInvModal, deleteInvItemBulk,
-  openSendInvModal, sendInvItem,
+  sellInvItem,
   calcOr, refreshOrDisplay, calcPalier,
   selectNoyau, runeIncrement, runeDecrement,
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
@@ -2773,7 +1767,6 @@ Object.assign(window, {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   renderCharSheet, showCharTab,
   renderCharCarac, renderCharEquip, renderCharDeck,
-  _renderInventaireBoutique,
   renderCharInventaire, renderCharQuetes, renderCharNotes,
   adjustStat, saveNotes,
   toggleSort, toggleQuete, deleteQuete, deleteSort, deleteInvItem, deleteChar,
@@ -2781,7 +1774,7 @@ Object.assign(window, {
   inlineEditText, inlineEditNum, inlineEditStat,
   manageTitres, addTitre, removeTitre, saveTitres,
   addSort, editSort, openSortModal, runeIncrement, runeDecrement, updateSortPM, saveSort,
-  editEquipSlot, saveEquipSlot, clearEquipSlot, equipSlotFromInv,
+  editEquipSlot, saveEquipSlot, clearEquipSlot,
   previewEquipFromInv,
   addInvItem, editInvItem, saveInvItem,
   addQuete, saveQuete,
