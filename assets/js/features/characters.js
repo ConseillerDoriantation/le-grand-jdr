@@ -175,46 +175,6 @@ function calcPalier(niveau) {
 
 function pct(cur,max) { return max>0 ? Math.max(0,Math.min(100,Math.round(cur/max*100))) : 0; }
 
-
-function getStatDisplayData(c, statKey) {
-  const base = parseInt((c?.stats || {})[statKey]) || 8;
-  const bonus = parseInt((c?.statsBonus || {})[statKey]) || 0;
-  const total = base + bonus;
-  const mod = getMod(c, statKey);
-  return {
-    base,
-    bonus,
-    total,
-    mod,
-    bonusStr: bonus > 0 ? `+${bonus}` : String(bonus),
-    modClass: mod > 0 ? 'pos' : mod < 0 ? 'neg' : 'zero',
-  };
-}
-
-function renderStatBreakdownCard(c, st, canEdit, charId = c?.id) {
-  const { base, total, mod, modClass } = getStatDisplayData(c, st.key);
-  const editAttrs = canEdit
-    ? `class="cs-editable" onclick="inlineEditStat('${charId}','${st.key}',this)" title="Modifier la base"`
-    : '';
-
-  const baseStyle = canEdit
-    ? 'border:1px solid rgba(79,140,255,.30);background:rgba(79,140,255,.10);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(79,140,255,.08);'
-    : 'border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);';
-
-  return `
-    <div class="cs-carac-card" style="display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:.55rem;padding:.65rem .7rem;border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,var(--bg-elevated),rgba(255,255,255,.015));box-shadow:0 6px 18px rgba(0,0,0,.08)">
-      <div style="display:flex;align-items:center;justify-content:center;width:48px;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);font-size:.9rem;font-weight:900;color:var(--text)">${st.abbr}</div>
-
-      <div style="display:flex;align-items:center;gap:.4rem;min-width:0">
-        <span ${editAttrs}
-          style="display:flex;align-items:center;justify-content:center;flex:0 0 50px;height:44px;border-radius:12px;${baseStyle}font-size:1rem;font-weight:800;color:var(--text)">${base}</span>
-        <span style="display:flex;align-items:center;justify-content:center;flex:0 0 50px;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);font-size:1rem;font-weight:900;color:var(--text)">${total}</span>
-      </div>
-
-      <div class="cs-carac-mod ${modClass}" style="flex:0 0 44px;min-width:44px;height:44px;display:flex;align-items:center;justify-content:center;padding:0;border-radius:12px;font-size:.88rem;font-weight:900">${modStr(mod)}</div>
-    </div>`;
-}
-
 // ══════════════════════════════════════════════
 // SÉLECTION
 // ══════════════════════════════════════════════
@@ -274,10 +234,28 @@ function renderCharSheet(c, keepTab) {
   const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
   const sb = c.statsBonus||{};
 
-  const caracHtml = STATS.map(st => renderStatBreakdownCard(c, {
-    ...st,
-    label: ({force:'Force', dexterite:'Dextérité', constitution:'Constitution', intelligence:'Intelligence', sagesse:'Sagesse', charisme:'Charisme'})[st.key] || st.abbr
-  }, canEdit, c.id)).join('');
+  const caracHtml = STATS.map(st => {
+    const base = s[st.key]||8;
+    const bonus = sb[st.key]||0;
+    const total = base + bonus;
+    const m = getMod(c, st.key);
+    const mStr = m >= 0 ? '+'+m : String(m);
+    const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
+    const bonusStr = bonus >= 0 ? `+${bonus}` : String(bonus);
+    return `<div class="cs-carac-card">
+      <div class="cs-carac-abbr">${st.abbr}</div>
+      <div class="cs-carac-val">${total}</div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.68rem;line-height:1.2;color:var(--text-dim)">
+        <span>Base
+          <span class="${canEdit?'cs-editable':''}"
+                ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
+                style="font-weight:700;color:var(--text)">${base}</span>
+        </span>
+        <span>Équip. ${bonusStr}</span>
+      </div>
+      <div class="cs-carac-mod ${mClass}">${mStr}</div>
+    </div>`;
+  }).join('');
 
   area.innerHTML = `
 <div class="cs-shell">
@@ -400,8 +378,11 @@ function renderCharSheet(c, keepTab) {
 
     <!-- BLOC DROIT : Caractéristiques compactes -->
     <div class="cs-carac-panel">
-      <div class="cs-carac-panel-title">Caractéristiques</div>
-      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem">
+      <div class="cs-carac-panel-title">
+        Caractéristiques
+        ${canEdit?'<span class="cs-hint">cliquer pour modifier</span>':''}
+      </div>
+      <div class="cs-carac-grid">
         ${caracHtml}
       </div>
       <div class="cs-base-row">
@@ -571,13 +552,59 @@ function renderCharCarac(c, canEdit) {
   const sb = c.statsBonus||{};
 
   let html = `<div class="cs-section">
-    <div class="cs-section-title">📊 Caractéristiques</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem">`;
+    <div class="cs-section-title">📊 Caractéristiques
+      ${canEdit?'<span class="cs-hint">cliquer sur la valeur de base pour modifier</span>':''}
+    </div>
+    <div style="display:grid;gap:.5rem">
+      <div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:0 .75rem;color:var(--text-dim);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">
+        <span>Stat</span>
+        <span style="text-align:center">Base</span>
+        <span style="text-align:center">Équip.</span>
+        <span style="text-align:center">Total</span>
+        <span style="text-align:center">Mod</span>
+      </div>`;
 
   STATS_TAB.forEach(st => {
-    html += renderStatBreakdownCard(c, st, canEdit, c.id);
+    const base = s[st.key]||8;
+    const bonus = sb[st.key]||0;
+    const total = base + bonus;
+    const m = getMod(c, st.key);
+    const bonusStr = bonus > 0 ? `+${bonus}` : String(bonus);
+    const modClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
+    html += `<div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:14px;background:var(--bg-elevated)">
+      <div>
+        <div style="font-weight:700;color:var(--text)">${st.label}</div>
+        <div style="font-size:.72rem;color:var(--text-dim)">${st.abbr}</div>
+      </div>
+      <div style="text-align:center">
+        <span class="${canEdit?'cs-editable':''}"
+              ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
+              style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:700;color:var(--text)">
+          ${base}
+        </span>
+      </div>
+      <div style="text-align:center">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:${bonus ? 'rgba(79,140,255,.10)' : 'var(--bg-card)'};font-weight:700;color:${bonus ? '#7fb0ff' : 'var(--text-dim)'}">
+          ${bonusStr}
+        </span>
+      </div>
+      <div style="text-align:center">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:800;color:var(--text)">
+          ${total}
+        </span>
+      </div>
+      <div style="text-align:center">
+        <span class="cs-carac-detail-mod ${modClass}" style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px">
+          ${modStr(m)}
+        </span>
+      </div>
+    </div>`;
   });
-  html += `</div></div>`;
+  html += `</div>
+    <div style="margin-top:.65rem;font-size:.76rem;color:var(--text-dim)">
+      Total = Base + bonus d'équipement. Le modificateur est calculé à partir du total.
+    </div>
+  </div>`;
 
   html += `<div class="cs-section">
     <div class="cs-section-title">⚙️ Base PV & PM
