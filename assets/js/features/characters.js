@@ -192,43 +192,26 @@ function getStatDisplayData(c, statKey) {
 }
 
 function renderStatBreakdownCard(c, st, canEdit, charId = c?.id) {
-  const { base, bonus, total, mod, bonusStr, modClass } = getStatDisplayData(c, st.key);
+  const { base, total, mod, modClass } = getStatDisplayData(c, st.key);
   const editAttrs = canEdit
     ? `class="cs-editable" onclick="inlineEditStat('${charId}','${st.key}',this)" title="Modifier la base"`
     : '';
 
   const baseStyle = canEdit
-    ? 'border:1px solid rgba(79,140,255,.28);background:rgba(79,140,255,.08);cursor:pointer;'
+    ? 'border:1px solid rgba(79,140,255,.28);background:rgba(79,140,255,.08);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(79,140,255,.10);'
     : 'border:1px solid var(--border);background:var(--bg-card);';
 
   return `
-    <div class="cs-carac-card" style="display:flex;flex-direction:column;gap:.7rem;padding:.8rem;border:1px solid var(--border);border-radius:16px;background:linear-gradient(180deg,var(--bg-elevated),rgba(255,255,255,.018));box-shadow:0 8px 22px rgba(0,0,0,.10)">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
-        <div style="display:flex;align-items:center;gap:.6rem;min-width:0">
-          <span style="display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 .45rem;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);font-size:.72rem;font-weight:800;color:var(--text-dim)">${st.abbr}</span>
-          <div style="min-width:0">
-            <div style="font-size:.96rem;font-weight:700;color:var(--text);line-height:1.1">${st.label || st.key}</div>
-            <div style="font-size:.67rem;color:var(--text-dim);margin-top:.15rem">Mod calculé sur le total</div>
-          </div>
-        </div>
-        <div class="cs-carac-mod ${modClass}" style="min-width:44px;text-align:center;padding:.38rem .55rem;border-radius:11px;font-size:.9rem;font-weight:800">${modStr(mod)}</div>
+    <div class="cs-carac-card" style="display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:.65rem;padding:.7rem .75rem;border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,var(--bg-elevated),rgba(255,255,255,.015));box-shadow:0 6px 18px rgba(0,0,0,.08)">
+      <div style="display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);font-size:.82rem;font-weight:900;color:var(--text)">${st.abbr}</div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;min-width:0">
+        <span ${editAttrs}
+          style="display:flex;align-items:center;justify-content:center;min-height:44px;padding:.35rem .5rem;border-radius:12px;${baseStyle}font-size:1rem;font-weight:800;color:var(--text)">${base}</span>
+        <span style="display:flex;align-items:center;justify-content:center;min-height:44px;padding:.35rem .5rem;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);font-size:1.05rem;font-weight:900;color:var(--text)">${total}</span>
       </div>
 
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.55rem">
-        <div style="display:flex;flex-direction:column;gap:.28rem">
-          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">Base</span>
-          <span ${editAttrs}
-            style="display:flex;align-items:center;justify-content:center;min-height:44px;padding:.4rem .55rem;border-radius:12px;${baseStyle}font-size:1.05rem;font-weight:800;color:var(--text)">${base}</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:.28rem">
-          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">Équip.</span>
-          <span style="display:flex;align-items:center;justify-content:center;min-height:44px;padding:.4rem .55rem;border-radius:12px;border:1px solid ${bonus ? 'rgba(79,140,255,.25)' : 'var(--border)'};background:${bonus ? 'rgba(79,140,255,.10)' : 'var(--bg-card)'};font-size:1.05rem;font-weight:800;color:${bonus ? '#7fb0ff' : 'var(--text-dim)'}">${bonusStr}</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:.28rem">
-          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">Total</span>
-          <span style="display:flex;align-items:center;justify-content:center;min-height:44px;padding:.4rem .55rem;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);font-size:1.12rem;font-weight:900;color:var(--text)">${total}</span>
-        </div>
-      </div>
+      <div class="cs-carac-mod ${modClass}" style="min-width:52px;text-align:center;padding:.5rem .55rem;border-radius:12px;font-size:.9rem;font-weight:900">${modStr(mod)}</div>
     </div>`;
 }
 
@@ -591,19 +574,13 @@ function renderCharCarac(c, canEdit) {
   const sb = c.statsBonus||{};
 
   let html = `<div class="cs-section">
-    <div class="cs-section-title">📊 Caractéristiques
-      ${canEdit?'<span class="cs-hint">seule la base est modifiable</span>':''}
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem">`;
+    <div class="cs-section-title">📊 Caractéristiques</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem">`;
 
   STATS_TAB.forEach(st => {
     html += renderStatBreakdownCard(c, st, canEdit, c.id);
   });
-  html += `</div>
-    <div style="margin-top:.75rem;padding:.85rem 1rem;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.025);font-size:.76rem;color:var(--text-dim);line-height:1.55">
-      <strong style="color:var(--text)">Lecture :</strong> <strong>Base</strong> est la seule valeur modifiable. <strong>Équip.</strong> correspond aux bonus des objets portés. <strong>Total</strong> = Base + Équip., et le <strong>modificateur</strong> est calculé sur ce total.
-    </div>
-  </div>`;
+  html += `</div></div>`;
 
   html += `<div class="cs-section">
     <div class="cs-section-title">⚙️ Base PV & PM
