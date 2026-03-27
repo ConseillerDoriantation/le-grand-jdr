@@ -2074,7 +2074,7 @@ function editEquipSlot(slot) {
     ${hasCompat
       ? `<div class="form-group">
           <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
-          <select class="input-field sh-modal-select" id="eq-inv-sel" onchange="equipSlotFromInv(this.value,${JSON.stringify(slot)})">
+          <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" onchange="equipSlotFromInv(this.value, this.dataset.equipSlot)">
             <option value="">— Sélectionner un objet —</option>
             ${invOptions}
           </select>
