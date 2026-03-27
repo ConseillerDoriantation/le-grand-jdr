@@ -587,11 +587,7 @@ async function openMapSettingsModal() {
     <div class="form-group">
       <label>Image de la carte</label>
       <div id="map-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
-        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s"
-        onclick="document.getElementById('map-file').click()"
-        ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
-        ondragleave="this.style.borderColor='var(--border-strong)'"
-        ondrop="event.preventDefault();this.style.borderColor='var(--border-strong)';window._mapFile(event.dataTransfer.files[0])">
+        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s">
         <div id="map-drop-preview">
           ${doc?.imageUrl
             ? `<img src="${doc.imageUrl}" style="max-height:80px;border-radius:8px;max-width:100%">`
@@ -602,13 +598,11 @@ async function openMapSettingsModal() {
         </div>
         <div style="font-size:.7rem;color:var(--text-dim);margin-top:2px">JPG · PNG · WebP — recommandé : grande résolution</div>
       </div>
-      <input type="file" id="map-file" accept="image/*" style="display:none"
-        onchange="window._mapFile(this.files[0])">
 
       <!-- Crop zone -->
       <div id="map-crop-wrap" style="display:none;margin-top:.75rem">
         <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">
-          Recadrez la carte — vous pouvez laisser la sélection sur toute l'image
+          Recadrez la carte — ratio libre
         </div>
         <canvas id="map-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
         <button type="button" class="btn btn-gold btn-sm" style="margin-top:.5rem;width:100%"
@@ -622,14 +616,46 @@ async function openMapSettingsModal() {
     </button>
   `);
 
-  // Handler fichier
-  window._mapFile = (file) => {
+  // ── Créer l'input file EN JS après le rendu du modal ──────────────────────
+  // Raison : innerHTML ne connecte pas correctement les <input type="file">
+  // au DOM dans certains contextes, les rendant non-cliquables (offsetParent null).
+  const fileInput = document.createElement('input');
+  fileInput.type   = 'file';
+  fileInput.id     = 'map-file';
+  fileInput.accept = 'image/*';
+  fileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0;pointer-events:none';
+  document.body.appendChild(fileInput);
+
+  const handleFile = (file) => {
     if (!file?.type.startsWith('image/')) return;
     if (file.size > 20 * 1024 * 1024) { showNotif('Image trop lourde (max 20 Mo).', 'error'); return; }
     const r = new FileReader();
     r.onload = (e) => _initMapCrop(e.target.result);
     r.readAsDataURL(file);
   };
+
+  fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+  window._mapFile = handleFile;
+
+  // Clic sur la drop zone → déclenche l'input file natif
+  const dropZone = document.getElementById('map-drop-zone');
+  dropZone?.addEventListener('click', () => fileInput.click());
+  dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--gold)'; });
+  dropZone?.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border-strong)'; });
+  dropZone?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = 'var(--border-strong)';
+    handleFile(e.dataTransfer.files[0]);
+  });
+
+  // Nettoyer l'input quand le modal se ferme
+  const observer = new MutationObserver(() => {
+    if (!document.getElementById('map-drop-zone')) {
+      fileInput.remove();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 function _initMapCrop(dataUrl) {
