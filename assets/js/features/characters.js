@@ -175,6 +175,60 @@ function calcPalier(niveau) {
 
 function pct(cur,max) { return max>0 ? Math.max(0,Math.min(100,Math.round(cur/max*100))) : 0; }
 
+
+function getStatDisplayData(c, statKey) {
+  const base = parseInt((c?.stats || {})[statKey]) || 8;
+  const bonus = parseInt((c?.statsBonus || {})[statKey]) || 0;
+  const total = base + bonus;
+  const mod = getMod(c, statKey);
+  return {
+    base,
+    bonus,
+    total,
+    mod,
+    bonusStr: bonus > 0 ? `+${bonus}` : String(bonus),
+    modClass: mod > 0 ? 'pos' : mod < 0 ? 'neg' : 'zero',
+  };
+}
+
+function renderStatBreakdownCard(c, st, canEdit, charId = c?.id) {
+  const { base, bonus, total, mod, bonusStr, modClass } = getStatDisplayData(c, st.key);
+  const editAttrs = canEdit
+    ? `class="cs-editable" onclick="inlineEditStat('${charId}','${st.key}',this)" title="Modifier la base"`
+    : '';
+
+  return `
+    <div class="cs-carac-card" style="display:flex;flex-direction:column;gap:.8rem;padding:1rem;border:1px solid var(--border);border-radius:18px;background:linear-gradient(180deg,var(--bg-elevated),rgba(255,255,255,.02));box-shadow:0 10px 28px rgba(0,0,0,.12)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
+        <div>
+          <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">${st.abbr}</div>
+          <div style="font-size:1rem;font-weight:700;color:var(--text)">${st.label || st.key}</div>
+        </div>
+        <div class="cs-carac-mod ${modClass}" style="min-width:52px;text-align:center;padding:.45rem .7rem;border-radius:12px;font-weight:800">${modStr(mod)}</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr auto;align-items:end;gap:.75rem;padding:.85rem .9rem;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)">
+        <div style="display:flex;flex-direction:column;gap:.18rem">
+          <span style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">Total utilisé</span>
+          <span style="font-size:1.9rem;line-height:1;font-weight:800;color:var(--text)">${total}</span>
+        </div>
+        <div style="font-size:.74rem;color:var(--text-dim);text-align:right">Base + équipement</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem">
+        <div style="display:flex;flex-direction:column;gap:.35rem">
+          <span style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">Base</span>
+          <span ${editAttrs}
+            style="display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:.45rem .7rem;border-radius:12px;border:1px solid var(--border);background:var(--bg-card);font-weight:700;color:var(--text)">${base}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:.35rem">
+          <span style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">Équipement</span>
+          <span style="display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:.45rem .7rem;border-radius:12px;border:1px solid ${bonus ? 'rgba(79,140,255,.25)' : 'var(--border)'};background:${bonus ? 'rgba(79,140,255,.10)' : 'var(--bg-card)'};font-weight:700;color:${bonus ? '#7fb0ff' : 'var(--text-dim)'}">${bonusStr}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
 // ══════════════════════════════════════════════
 // SÉLECTION
 // ══════════════════════════════════════════════
@@ -234,28 +288,10 @@ function renderCharSheet(c, keepTab) {
   const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
   const sb = c.statsBonus||{};
 
-  const caracHtml = STATS.map(st => {
-    const base = s[st.key]||8;
-    const bonus = sb[st.key]||0;
-    const total = base + bonus;
-    const m = getMod(c, st.key);
-    const mStr = m >= 0 ? '+'+m : String(m);
-    const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    const bonusStr = bonus >= 0 ? `+${bonus}` : String(bonus);
-    return `<div class="cs-carac-card">
-      <div class="cs-carac-abbr">${st.abbr}</div>
-      <div class="cs-carac-val">${total}</div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.68rem;line-height:1.2;color:var(--text-dim)">
-        <span>Base
-          <span class="${canEdit?'cs-editable':''}"
-                ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
-                style="font-weight:700;color:var(--text)">${base}</span>
-        </span>
-        <span>Équip. ${bonusStr}</span>
-      </div>
-      <div class="cs-carac-mod ${mClass}">${mStr}</div>
-    </div>`;
-  }).join('');
+  const caracHtml = STATS.map(st => renderStatBreakdownCard(c, {
+    ...st,
+    label: ({force:'Force', dexterite:'Dextérité', constitution:'Constitution', intelligence:'Intelligence', sagesse:'Sagesse', charisme:'Charisme'})[st.key] || st.abbr
+  }, canEdit, c.id)).join('');
 
   area.innerHTML = `
 <div class="cs-shell">
@@ -380,9 +416,9 @@ function renderCharSheet(c, keepTab) {
     <div class="cs-carac-panel">
       <div class="cs-carac-panel-title">
         Caractéristiques
-        ${canEdit?'<span class="cs-hint">cliquer pour modifier</span>':''}
+        ${canEdit?'<span class="cs-hint">base modifiable · total utilisé pour les calculs</span>':''}
       </div>
-      <div class="cs-carac-grid">
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem">
         ${caracHtml}
       </div>
       <div class="cs-base-row">
@@ -553,56 +589,16 @@ function renderCharCarac(c, canEdit) {
 
   let html = `<div class="cs-section">
     <div class="cs-section-title">📊 Caractéristiques
-      ${canEdit?'<span class="cs-hint">cliquer sur la valeur de base pour modifier</span>':''}
+      ${canEdit?'<span class="cs-hint">seule la base est modifiable</span>':''}
     </div>
-    <div style="display:grid;gap:.5rem">
-      <div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:0 .75rem;color:var(--text-dim);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">
-        <span>Stat</span>
-        <span style="text-align:center">Base</span>
-        <span style="text-align:center">Équip.</span>
-        <span style="text-align:center">Total</span>
-        <span style="text-align:center">Mod</span>
-      </div>`;
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem">`;
 
   STATS_TAB.forEach(st => {
-    const base = s[st.key]||8;
-    const bonus = sb[st.key]||0;
-    const total = base + bonus;
-    const m = getMod(c, st.key);
-    const bonusStr = bonus > 0 ? `+${bonus}` : String(bonus);
-    const modClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    html += `<div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:14px;background:var(--bg-elevated)">
-      <div>
-        <div style="font-weight:700;color:var(--text)">${st.label}</div>
-        <div style="font-size:.72rem;color:var(--text-dim)">${st.abbr}</div>
-      </div>
-      <div style="text-align:center">
-        <span class="${canEdit?'cs-editable':''}"
-              ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
-              style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:700;color:var(--text)">
-          ${base}
-        </span>
-      </div>
-      <div style="text-align:center">
-        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:${bonus ? 'rgba(79,140,255,.10)' : 'var(--bg-card)'};font-weight:700;color:${bonus ? '#7fb0ff' : 'var(--text-dim)'}">
-          ${bonusStr}
-        </span>
-      </div>
-      <div style="text-align:center">
-        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:800;color:var(--text)">
-          ${total}
-        </span>
-      </div>
-      <div style="text-align:center">
-        <span class="cs-carac-detail-mod ${modClass}" style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px">
-          ${modStr(m)}
-        </span>
-      </div>
-    </div>`;
+    html += renderStatBreakdownCard(c, st, canEdit, c.id);
   });
   html += `</div>
-    <div style="margin-top:.65rem;font-size:.76rem;color:var(--text-dim)">
-      Total = Base + bonus d'équipement. Le modificateur est calculé à partir du total.
+    <div style="margin-top:.75rem;padding:.85rem 1rem;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.025);font-size:.76rem;color:var(--text-dim);line-height:1.55">
+      <strong style="color:var(--text)">Lecture :</strong> la valeur <strong>Total utilisé</strong> correspond à la base du personnage plus les bonus d'équipement. Le <strong>modificateur</strong> est calculé sur ce total. Clique uniquement sur <strong>Base</strong> pour modifier la caractéristique du personnage.
     </div>
   </div>`;
 
