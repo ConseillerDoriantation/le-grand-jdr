@@ -1,7 +1,8 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// STORY.JS — La Trame
-// Timeline horizontale par acte · Axes narratifs · Modal détail riche
-// Admin : CRUD complet avec image, participants, axe, réussite
+// STORY.JS — La Trame v2
+// ✓ Actes persistés en Firestore (visibles même vides)
+// ✓ Upload + recadrage d'image canvas 4:3 (identique aux hauts-faits)
+// ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
@@ -9,300 +10,270 @@ import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
-// ── Palette des axes narratifs ────────────────────────────────────────────────
+// ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
-  '#4f8cff', '#e8b84b', '#22c38e', '#ff6b6b',
-  '#b47fff', '#ff9f43', '#54a0ff', '#ff6b9d',
+  '#4f8cff','#e8b84b','#22c38e','#ff6b6b',
+  '#b47fff','#ff9f43','#54a0ff','#ff6b9d',
 ];
 
-// ── Couleurs de statut ────────────────────────────────────────────────────────
-const STATUT_CONFIG = {
-  'Terminée':   { color: '#22c38e', bg: 'rgba(34,195,142,0.12)',  border: 'rgba(34,195,142,0.30)',  icon: '✓' },
-  'En cours':   { color: '#4f8cff', bg: 'rgba(79,140,255,0.12)',  border: 'rgba(79,140,255,0.30)',  icon: '▶' },
-  'Échouée':    { color: '#ff6b6b', bg: 'rgba(255,107,107,0.12)', border: 'rgba(255,107,107,0.30)', icon: '✗' },
-  'En attente': { color: '#888',    bg: 'rgba(128,128,128,0.10)', border: 'rgba(128,128,128,0.25)', icon: '◷' },
+const STATUT_CFG = {
+  'Terminée':   { color:'#22c38e', border:'rgba(34,195,142,0.35)',  icon:'✓' },
+  'En cours':   { color:'#4f8cff', border:'rgba(79,140,255,0.35)',  icon:'▶' },
+  'Échouée':    { color:'#ff6b6b', border:'rgba(255,107,107,0.35)', icon:'✗' },
+  'En attente': { color:'#666',    border:'rgba(128,128,128,0.25)', icon:'◷' },
+};
+
+// ── État du cropper ───────────────────────────────────────────────────────────
+let _crop = {
+  img:null, cropX:0,cropY:0,cropW:0,cropH:0,
+  startX:0,startY:0, isDragging:false,isResizing:false,handle:null,
+  natW:0,natH:0,dispScale:1, base64:null,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function getStatut(item) {
-  return STATUT_CONFIG[item.statut] || STATUT_CONFIG['En attente'];
+function stCfg(item){ return STATUT_CFG[item.statut] || STATUT_CFG['En attente']; }
+const _clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+
+let _axeMap = {};
+function axeColor(axe){
+  if(!axe) return '#555';
+  if(!_axeMap[axe]){ _axeMap[axe] = AXE_COLORS[Object.keys(_axeMap).length % AXE_COLORS.length]; }
+  return _axeMap[axe];
 }
 
-function getAxeColor(axe, axeMap) {
-  if (!axe) return '#555';
-  if (!axeMap[axe]) {
-    const idx = Object.keys(axeMap).length % AXE_COLORS.length;
-    axeMap[axe] = AXE_COLORS[idx];
-  }
-  return axeMap[axe];
+// ── Gestion des actes (Firestore) ─────────────────────────────────────────────
+async function loadActes() {
+  const doc = await getDocData('story_meta','actes');
+  return Array.isArray(doc?.list) ? doc.list : [];
+}
+async function saveActes(list) {
+  await saveDoc('story_meta','actes',{ list });
 }
 
-// ── Rendu de la page ──────────────────────────────────────────────────────────
+// ── RENDU PRINCIPAL ───────────────────────────────────────────────────────────
 async function renderStory() {
   const content = document.getElementById('main-content');
-  const items   = await loadCollection('story');
+  _axeMap = {};
 
-  // Actes disponibles
-  const actesSet = new Set(items.map(i => i.acte || 'Acte I').filter(Boolean));
-  const actes    = [...actesSet].sort();
-  if (!actes.length) actes.push('Acte I');
+  const [items, savedActes] = await Promise.all([
+    loadCollection('story'),
+    loadActes(),
+  ]);
 
-  const activeActe = window._storyActe || actes[0];
+  // Fusionner actes Firestore + actes déduits des items
+  const fromItems = [...new Set(items.map(i => i.acte).filter(Boolean))];
+  const allActes  = [...new Set([...savedActes, ...fromItems])].sort();
+  if (!allActes.length) allActes.push('Acte I');
+
+  const activeActe = window._storyActe && allActes.includes(window._storyActe)
+    ? window._storyActe
+    : allActes[0];
   window._storyActe = activeActe;
 
-  // Items de l'acte actif
   const acteItems = items
     .filter(i => (i.acte || 'Acte I') === activeActe)
-    .sort((a, b) => (a.ordre || 0) - (b.ordre || 0) || (a.date || '').localeCompare(b.date || ''));
+    .sort((a,b) => (a.ordre||0)-(b.ordre||0) || (a.date||'').localeCompare(b.date||''));
 
-  // Construire la map des axes narratifs
-  const axeMap = {};
-  acteItems.forEach(i => { if (i.axe) getAxeColor(i.axe, axeMap); });
-  const axes = Object.keys(axeMap);
+  acteItems.forEach(i => { if(i.axe) axeColor(i.axe); });
+  const axes = Object.keys(_axeMap);
 
   content.innerHTML = `
   <style>
-    .story-node {
-      cursor: pointer;
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .story-node:hover {
-      transform: translateY(-3px);
-      z-index: 10;
-    }
-    .story-node:hover .story-node-inner {
-      box-shadow: 0 8px 28px rgba(0,0,0,0.4);
-    }
-    .story-node-inner {
-      transition: box-shadow 0.15s;
-    }
-    .axe-line {
-      position: absolute;
-      height: 2px;
-      pointer-events: none;
-      border-radius: 1px;
-    }
-    .story-timeline-scroll {
-      overflow-x: auto;
-      overflow-y: visible;
-      padding-bottom: 1.5rem;
-      scrollbar-width: thin;
-    }
-    .story-timeline-scroll::-webkit-scrollbar { height: 4px; }
-    .story-timeline-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+    .sn{cursor:pointer;transition:transform .15s;}
+    .sn:hover{transform:translateY(-3px);z-index:10;}
+    .sn:hover .sn-inner{box-shadow:0 8px 28px rgba(0,0,0,.45);}
+    .sn-inner{transition:box-shadow .15s;}
+    .stl-wrap{overflow-x:auto;overflow-y:visible;padding-bottom:1.5rem;}
+    .stl-wrap::-webkit-scrollbar{height:4px;}
+    .stl-wrap::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:2px;}
   </style>
 
-  <!-- ═══ HEADER ══════════════════════════════════════════════════ -->
-  <div style="
-    background:linear-gradient(135deg,rgba(79,140,255,0.05),rgba(232,184,75,0.04));
+  <div style="background:linear-gradient(135deg,rgba(79,140,255,.05),rgba(232,184,75,.04));
     border:1px solid var(--border);border-radius:var(--radius-lg);
     padding:1.4rem 1.8rem;margin-bottom:1.4rem;
-    display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;
-  ">
+    display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
     <div>
-      <div style="font-size:0.7rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:0.3rem">Chroniques de la Compagnie</div>
+      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:.3rem">Chroniques de la Compagnie</div>
       <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;color:var(--gold);letter-spacing:2px;line-height:1;margin:0">La Trame</h1>
     </div>
-    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
       ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openStoryModal()">+ Ajouter</button>` : ''}
-      <div style="display:flex;gap:0.4rem;font-size:0.75rem;color:var(--text-dim);flex-wrap:wrap">
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#22c38e;display:inline-block"></span>Terminée</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#4f8cff;display:inline-block"></span>En cours</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#ff6b6b;display:inline-block"></span>Échouée</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#555;display:inline-block"></span>En attente</span>
+      <div style="display:flex;gap:.5rem;font-size:.72rem;color:var(--text-dim);flex-wrap:wrap">
+        ${Object.entries(STATUT_CFG).map(([s,c]) =>
+          `<span style="display:flex;align-items:center;gap:4px">
+            <span style="width:7px;height:7px;border-radius:50%;background:${c.color};display:inline-block"></span>${s}
+          </span>`).join('')}
       </div>
     </div>
   </div>
 
-  <!-- ═══ SÉLECTEUR D'ACTES ═══════════════════════════════════════ -->
-  <div style="display:flex;gap:0.5rem;margin-bottom:1.6rem;flex-wrap:wrap">
-    ${actes.map((acte, i) => {
-      const active  = acte === activeActe;
-      const nItems  = items.filter(it => (it.acte || 'Acte I') === acte).length;
-      return `<button
-        onclick="window._storyActe='${acte}';navigate('story')"
-        style="
-          display:flex;align-items:center;gap:0.5rem;
-          padding:0.55rem 1.2rem;border-radius:999px;cursor:pointer;
-          font-family:'Cinzel',serif;font-size:0.82rem;
-          border:1px solid ${active ? 'var(--gold)' : 'var(--border)'};
-          background:${active ? 'rgba(232,184,75,0.1)' : 'transparent'};
-          color:${active ? 'var(--gold)' : 'var(--text-muted)'};
-          transition:all 0.15s;
-        ">
+  <div style="display:flex;gap:.5rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center">
+    ${allActes.map(acte => {
+      const active = acte === activeActe;
+      const n = items.filter(i => (i.acte||'Acte I') === acte).length;
+      return `<button onclick="window._storyActe='${acte}';navigate('story')" style="
+        display:flex;align-items:center;gap:.5rem;padding:.55rem 1.2rem;
+        border-radius:999px;cursor:pointer;font-family:'Cinzel',serif;font-size:.82rem;
+        border:1px solid ${active?'var(--gold)':'var(--border)'};
+        background:${active?'rgba(232,184,75,.1)':'transparent'};
+        color:${active?'var(--gold)':'var(--text-muted)'};transition:all .15s;">
         ${acte}
-        <span style="
-          font-size:0.68rem;border-radius:999px;padding:1px 6px;font-family:sans-serif;
-          background:${active ? 'var(--gold)' : 'var(--bg-elevated)'};
-          color:${active ? '#0b1118' : 'var(--text-dim)'};
-        ">${nItems}</span>
+        <span style="font-size:.68rem;border-radius:999px;padding:1px 6px;
+          background:${active?'var(--gold)':'var(--bg-elevated)'};
+          color:${active?'#0b1118':'var(--text-dim)'};">${n}</span>
       </button>`;
     }).join('')}
     ${STATE.isAdmin ? `
-    <button onclick="openNewActeModal()" style="
-      padding:0.55rem 1rem;border-radius:999px;cursor:pointer;
-      border:1px dashed var(--border);background:transparent;
-      color:var(--text-dim);font-size:0.8rem;transition:all 0.15s;
-    ">+ Acte</button>` : ''}
+    <button onclick="openNewActeModal()" style="padding:.5rem .9rem;border-radius:999px;cursor:pointer;
+      border:1px dashed var(--border);background:transparent;color:var(--text-dim);font-size:.8rem">+ Acte</button>` : ''}
   </div>
 
-  <!-- ═══ LÉGENDE DES AXES ══════════════════════════════════════════ -->
-  ${axes.length > 0 ? `
-  <div style="display:flex;gap:0.6rem;margin-bottom:1.2rem;flex-wrap:wrap;align-items:center">
-    <span style="font-size:0.72rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase">Axes :</span>
-    ${axes.map(axe => `
-      <span style="
-        display:flex;align-items:center;gap:5px;
-        font-size:0.75rem;color:var(--text-muted);
-        background:var(--bg-elevated);border:1px solid var(--border);
-        border-radius:999px;padding:3px 10px;
-      ">
-        <span style="width:8px;height:3px;border-radius:1px;background:${axeMap[axe]};display:inline-block;flex-shrink:0"></span>
-        ${axe}
+  ${axes.length ? `
+  <div style="display:flex;gap:.5rem;margin-bottom:1.2rem;flex-wrap:wrap;align-items:center">
+    <span style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase">Axes :</span>
+    ${axes.map(a => `
+      <span style="display:flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text-muted);
+        background:var(--bg-elevated);border:1px solid var(--border);border-radius:999px;padding:3px 10px">
+        <span style="width:10px;height:3px;border-radius:1px;background:${_axeMap[a]};display:inline-block"></span>${a}
       </span>`).join('')}
   </div>` : ''}
 
-  <!-- ═══ TIMELINE ═════════════════════════════════════════════════ -->
   ${acteItems.length === 0 ? `
     <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
-      <div style="font-size:3rem;margin-bottom:1rem;opacity:0.3">📜</div>
+      <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
       <p style="font-style:italic">Aucune mission pour ${activeActe}.</p>
-      ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openStoryModal()">+ Ajouter la première</button>` : ''}
-    </div>
-  ` : `
-    <div class="story-timeline-scroll">
-      <div id="story-timeline" style="position:relative;min-width:max-content;padding:1rem 1.5rem 2rem">
-        ${_renderTimeline(acteItems, axeMap)}
+      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openStoryModal()">+ Ajouter la première</button>`:''}
+    </div>` : `
+    <div class="stl-wrap">
+      <div id="story-tl" style="position:relative;min-width:max-content;padding:1rem 1.5rem 2.5rem">
+        ${_renderTimeline(acteItems)}
       </div>
-    </div>
-  `}
+    </div>`}
   `;
 }
 
-// ── Rendu timeline ────────────────────────────────────────────────────────────
-function _renderTimeline(items, axeMap) {
-  // Regrouper par axe
-  const axeGroups = {};
-  const noAxe     = [];
+// ── RENDU TIMELINE ────────────────────────────────────────────────────────────
+function _renderTimeline(items) {
+  const CARD_W=160, CARD_GAP=28, ROW_H=195, ROW_GAP=40, PAD_L=28;
 
+  const axeOrder=[], axeGroups={};
   items.forEach(item => {
-    if (item.axe) {
-      if (!axeGroups[item.axe]) axeGroups[item.axe] = [];
-      axeGroups[item.axe].push(item);
-    } else {
-      noAxe.push(item);
-    }
+    const key = item.axe||'__none__';
+    if(!axeGroups[key]){ axeGroups[key]=[]; axeOrder.push(key); }
+    axeGroups[key].push(item);
   });
 
-  // Toutes les lignes à afficher
-  const allAxes = [
-    ...(noAxe.length ? [{ axe: null, items: noAxe }] : []),
-    ...Object.entries(axeGroups).map(([axe, items]) => ({ axe, items })),
-  ];
-
-  const CARD_W    = 160;  // largeur d'une card
-  const CARD_GAP  = 24;   // gap entre cards
-  const ROW_H     = 200;  // hauteur d'une ligne
-  const ROW_GAP   = 32;   // gap entre lignes
-  const OFFSET_X  = 20;   // marge gauche
-
-  // Calculer la largeur totale basée sur l'axe le plus long
-  const maxItems  = Math.max(...allAxes.map(a => a.items.length));
-  const totalW    = OFFSET_X + maxItems * (CARD_W + CARD_GAP) + CARD_GAP;
-  const totalH    = allAxes.length * (ROW_H + ROW_GAP) + ROW_GAP;
-
-  let html = `<svg style="position:absolute;top:0;left:0;width:${totalW}px;height:${totalH}px;pointer-events:none;overflow:visible">`;
-
-  // Dessiner les lignes de connexion par axe
-  allAxes.forEach((group, rowIdx) => {
-    const y       = ROW_GAP + rowIdx * (ROW_H + ROW_GAP) + ROW_H / 2;
-    const color   = group.axe ? axeMap[group.axe] : '#444';
-    const xStart  = OFFSET_X + (CARD_W / 2);
-    const xEnd    = OFFSET_X + (group.items.length - 1) * (CARD_W + CARD_GAP) + CARD_W / 2;
-
-    if (group.items.length > 1) {
-      html += `<line x1="${xStart}" y1="${y}" x2="${xEnd}" y2="${y}"
-        stroke="${color}" stroke-width="2" stroke-dasharray="none" opacity="0.4"/>`;
-    }
-
-    // Points de connexion sur chaque nœud
-    group.items.forEach((_, colIdx) => {
-      const cx = OFFSET_X + colIdx * (CARD_W + CARD_GAP) + CARD_W / 2;
-      html += `<circle cx="${cx}" cy="${y}" r="4" fill="${color}" opacity="0.7"/>`;
+  // Index id → position
+  const posMap={};
+  axeOrder.forEach((key,rowIdx) => {
+    axeGroups[key].forEach((item,colIdx) => {
+      posMap[item.id]={
+        row:rowIdx, col:colIdx,
+        cx: PAD_L+colIdx*(CARD_W+CARD_GAP)+CARD_W/2,
+        cy: ROW_GAP+rowIdx*(ROW_H+ROW_GAP)+ROW_H/2,
+      };
     });
   });
 
-  html += `</svg>`;
+  const maxItems = Math.max(...axeOrder.map(k=>axeGroups[k].length));
+  const totalW   = PAD_L+maxItems*(CARD_W+CARD_GAP)+PAD_L;
+  const totalH   = axeOrder.length*(ROW_H+ROW_GAP)+ROW_GAP;
+
+  // SVG
+  let svgLines = '';
+  // Lignes horizontales par axe
+  axeOrder.forEach((key,rowIdx) => {
+    const color=key==='__none__'?'#555':(_axeMap[key]||'#555');
+    const group=axeGroups[key];
+    const y=ROW_GAP+rowIdx*(ROW_H+ROW_GAP)+ROW_H/2;
+    if(group.length>1){
+      const x1=PAD_L+CARD_W/2, x2=PAD_L+(group.length-1)*(CARD_W+CARD_GAP)+CARD_W/2;
+      svgLines+=`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2" opacity=".35"/>`;
+    }
+    group.forEach((_,i)=>{
+      const cx=PAD_L+i*(CARD_W+CARD_GAP)+CARD_W/2;
+      svgLines+=`<circle cx="${cx}" cy="${y}" r="4" fill="${color}" opacity=".7"/>`;
+    });
+  });
+
+  // Flèches inter-missions
+  const defsHtml=[];
+  items.forEach(item => {
+    if(!item.liens?.length) return;
+    const from=posMap[item.id]; if(!from) return;
+    item.liens.forEach(tid => {
+      const to=posMap[tid]; if(!to) return;
+      const {cx:x1,cy:y1}=from, {cx:x2,cy:y2}=to;
+      const markId=`arr-${item.id.slice(-4)}-${tid.slice(-4)}`;
+      defsHtml.push(`<marker id="${markId}" viewBox="0 0 10 10" refX="8" refY="5"
+        markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="rgba(232,184,75,.8)"
+          stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>`);
+      // Bézier cubique
+      const cp1x=x1+(x2-x1)*0.5, cp2x=x2-(x2-x1)*0.5;
+      svgLines+=`<path d="M${x1} ${y1} C${cp1x} ${y1} ${cp2x} ${y2} ${x2} ${y2}"
+        fill="none" stroke="rgba(232,184,75,.45)" stroke-width="1.5" stroke-dasharray="6 3"
+        marker-end="url(#${markId})"/>`;
+    });
+  });
+
+  let html = `<svg style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none"
+    width="${totalW}" height="${totalH}">
+    <defs>${defsHtml.join('')}</defs>
+    ${svgLines}
+  </svg>`;
 
   // Cards
-  allAxes.forEach((group, rowIdx) => {
-    const color = group.axe ? axeMap[group.axe] : '#555';
-    const top   = ROW_GAP + rowIdx * (ROW_H + ROW_GAP);
+  axeOrder.forEach((key,rowIdx) => {
+    const color=key==='__none__'?'#555':(_axeMap[key]||'#555');
+    const group=axeGroups[key];
+    const top=ROW_GAP+rowIdx*(ROW_H+ROW_GAP);
 
-    // Label de l'axe à gauche
-    if (group.axe) {
-      html += `<div style="
-        position:absolute;
-        left:0;top:${top + ROW_H / 2 - 10}px;
-        writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);
-        font-size:0.62rem;color:${color};
-        opacity:0.7;letter-spacing:1px;text-transform:uppercase;
-        white-space:nowrap;
-      ">${group.axe}</div>`;
+    if(key!=='__none__'){
+      html+=`<div style="position:absolute;left:0;top:${top+ROW_H/2-8}px;
+        writing-mode:vertical-rl;transform:rotate(180deg);
+        font-size:.6rem;color:${color};opacity:.6;letter-spacing:1px;text-transform:uppercase;white-space:nowrap">${key}</div>`;
     }
 
-    group.items.forEach((item, colIdx) => {
-      const left   = OFFSET_X + colIdx * (CARD_W + CARD_GAP);
-      const st     = getStatut(item);
+    group.forEach((item,colIdx) => {
+      const left=PAD_L+colIdx*(CARD_W+CARD_GAP);
+      const st=stCfg(item);
+      const hasLiens=item.liens?.length>0;
 
-      html += `
-      <div class="story-node" data-id="${item.id}"
-        style="position:absolute;left:${left}px;top:${top}px;width:${CARD_W}px;"
+      html+=`
+      <div class="sn" data-id="${item.id}"
+        style="position:absolute;left:${left}px;top:${top}px;width:${CARD_W}px"
         onclick="openStoryDetail('${item.id}')">
-        <div class="story-node-inner" style="
-          background:var(--bg-card);
-          border:1px solid ${st.border};
-          border-radius:12px;overflow:hidden;
-        ">
-          <!-- Image -->
-          <div style="width:100%;height:90px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
+        <div class="sn-inner" style="background:var(--bg-card);border:1px solid ${st.border};border-radius:12px;overflow:hidden">
+          <div style="width:100%;height:88px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${item.imageUrl
-              ? `<img src="${item.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" draggable="false">`
-              : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;
-                   font-size:1.8rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">
-                   ${item.type === 'combat' ? '⚔️' : item.type === 'mission' ? '🎯' : '📖'}
-                 </div>`
+              ?`<img src="${item.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" draggable="false">`
+              :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.8rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">${item.type==='combat'?'⚔️':item.type==='mission'?'🎯':'📖'}</div>`
             }
-            <!-- Statut badge -->
-            <div style="
-              position:absolute;top:5px;right:5px;
-              background:rgba(11,17,24,0.82);
-              border:1px solid ${st.border};
-              border-radius:999px;padding:1px 6px;
-              font-size:0.6rem;color:${st.color};
-            ">${st.icon} ${item.statut || 'En attente'}</div>
-            <!-- Axe color bar -->
-            <div style="position:absolute;bottom:0;left:0;right:0;height:2px;background:${color};opacity:0.8"></div>
+            <div style="position:absolute;top:5px;right:5px;background:rgba(11,17,24,.85);
+              border:1px solid ${st.border};border-radius:999px;padding:1px 6px;
+              font-size:.6rem;color:${st.color}">${st.icon} ${item.statut||'En attente'}</div>
+            ${hasLiens?`<div style="position:absolute;top:5px;left:5px;background:rgba(11,17,24,.85);
+              border:1px solid rgba(232,184,75,.4);border-radius:999px;padding:1px 6px;
+              font-size:.6rem;color:var(--gold)">↝ ${item.liens.length}</div>`:''}
+            <div style="position:absolute;bottom:0;left:0;right:0;height:2px;background:${color};opacity:.8"></div>
           </div>
-
-          <!-- Titre -->
-          <div style="padding:0.5rem 0.6rem">
-            <div style="font-family:'Cinzel',serif;font-size:0.72rem;color:var(--text);line-height:1.3;
-              white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${item.titre || ''}">
-              ${item.titre || 'Mission'}
+          <div style="padding:.5rem .6rem">
+            <div style="font-family:'Cinzel',serif;font-size:.71rem;color:var(--text);line-height:1.3;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${item.titre||''}">
+              ${item.titre||'Mission'}
             </div>
-            ${item.date ? `<div style="font-size:0.62rem;color:var(--text-dim);margin-top:2px">${item.date}</div>` : ''}
+            ${item.date?`<div style="font-size:.6rem;color:var(--text-dim);margin-top:2px">${item.date}</div>`:''}
           </div>
         </div>
-
-        <!-- Boutons admin sous la card -->
-        ${STATE.isAdmin ? `
+        ${STATE.isAdmin?`
         <div style="display:flex;gap:3px;margin-top:4px;justify-content:center">
-          <button class="btn-icon" style="font-size:0.7rem;padding:2px 6px"
+          <button class="btn-icon" style="font-size:.7rem;padding:2px 6px"
             onclick="event.stopPropagation();editStory('${item.id}')">✏️</button>
-          <button class="btn-icon" style="font-size:0.7rem;padding:2px 6px;color:#ff6b6b"
+          <button class="btn-icon" style="font-size:.7rem;padding:2px 6px;color:#ff6b6b"
             onclick="event.stopPropagation();deleteStory('${item.id}')">🗑️</button>
-        </div>` : ''}
+        </div>`:''}
       </div>`;
     });
   });
@@ -310,300 +281,440 @@ function _renderTimeline(items, axeMap) {
   return `<div style="position:relative;width:${totalW}px;height:${totalH}px">${html}</div>`;
 }
 
-// ── Modal détail mission ──────────────────────────────────────────────────────
+// ── MODAL DÉTAIL ──────────────────────────────────────────────────────────────
 async function openStoryDetail(id) {
-  const items  = await loadCollection('story');
-  const item   = items.find(i => i.id === id);
-  if (!item) return;
+  const items=await loadCollection('story');
+  const item=items.find(i=>i.id===id); if(!item) return;
+  const st=stCfg(item), reussite=parseInt(item.reussite)||0;
+  const participants=item.participants||[];
+  const barColor=reussite>=80?'#22c38e':reussite>=40?'#e8b84b':'#ff6b6b';
+  const liensItems=(item.liens||[]).map(lid=>items.find(i=>i.id===lid)).filter(Boolean);
 
-  const st      = getStatut(item);
-  const reussite = parseInt(item.reussite) || 0;
-  const participants = (item.participants || []);
-
-  // Couleur barre de réussite
-  const barColor = reussite >= 80 ? '#22c38e' : reussite >= 40 ? '#e8b84b' : '#ff6b6b';
-
-  openModal('', `
+  openModal('',`
   <div style="margin:-1.2rem -1.2rem 0;position:relative;overflow:hidden;border-radius:12px 12px 0 0">
     ${item.imageUrl
-      ? `<img src="${item.imageUrl}" style="width:100%;height:180px;object-fit:cover;display:block">`
-      : `<div style="width:100%;height:140px;
-           background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));
-           display:flex;align-items:center;justify-content:center;font-size:4rem">
-           ${item.type === 'combat' ? '⚔️' : item.type === 'mission' ? '🎯' : '📖'}
-         </div>`
-    }
-    <!-- Type badge -->
-    <div style="position:absolute;top:12px;right:12px;
-      background:rgba(11,17,24,0.85);border:1px solid ${st.border};
-      border-radius:999px;padding:3px 10px;font-size:0.72rem;color:${st.color}">
-      ${item.type === 'mission' ? 'Mission' : item.type === 'combat' ? 'Combat' : 'Événement'}
+      ?`<img src="${item.imageUrl}" style="width:100%;height:180px;object-fit:cover;display:block">`
+      :`<div style="width:100%;height:130px;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));
+          display:flex;align-items:center;justify-content:center;font-size:4rem">
+          ${item.type==='combat'?'⚔️':item.type==='mission'?'🎯':'📖'}</div>`}
+    <div style="position:absolute;top:12px;right:12px;background:rgba(11,17,24,.85);
+      border:1px solid ${st.border};border-radius:999px;padding:3px 10px;font-size:.72rem;color:${st.color}">
+      ${item.type==='mission'?'Mission':item.type==='combat'?'Combat':'Événement'}
     </div>
   </div>
-
   <div style="padding:1.2rem 0 0">
-    <!-- Titre + axe -->
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:0.25rem">
-      <h2 style="font-family:'Cinzel',serif;font-size:1.25rem;color:var(--text);margin:0;line-height:1.2">
-        ${item.titre || 'Mission'}
-      </h2>
-      ${item.axe ? `<span style="
-        font-size:0.7rem;color:var(--text-dim);background:var(--bg-elevated);
-        border:1px solid var(--border);border-radius:999px;
-        padding:3px 10px;flex-shrink:0;white-space:nowrap
-      ">${item.axe}</span>` : ''}
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;margin-bottom:.25rem">
+      <h2 style="font-family:'Cinzel',serif;font-size:1.2rem;color:var(--text);margin:0;line-height:1.2">${item.titre||'Mission'}</h2>
+      ${item.axe?`<span style="font-size:.7rem;color:${_axeMap[item.axe]||'var(--text-dim)'};
+        background:var(--bg-elevated);border:1px solid var(--border);border-radius:999px;
+        padding:3px 10px;flex-shrink:0;white-space:nowrap">${item.axe}</span>`:''}
     </div>
-
-    ${item.date ? `<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:0.75rem">
-      📅 ${item.date}${item.acte ? ` · ${item.acte}` : ''}
-    </div>` : ''}
-
-    ${item.lieu ? `<div style="font-size:0.83rem;color:var(--text-muted);margin-bottom:0.75rem">
-      <strong style="color:var(--text)">Lieu</strong> : ${item.lieu}
-    </div>` : ''}
-
-    ${item.description ? `<div style="
-      font-size:0.85rem;color:var(--text-muted);line-height:1.7;
-      margin-bottom:1rem;
-    ">${item.description.replace(/\n/g, '<br>')}</div>` : ''}
+    ${item.date?`<div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.6rem">📅 ${item.date}${item.acte?` · ${item.acte}`:''}</div>`:''}
+    ${item.lieu?`<div style="font-size:.83rem;color:var(--text-muted);margin-bottom:.7rem"><strong style="color:var(--text)">Lieu</strong> : ${item.lieu}</div>`:''}
+    ${item.description?`<div style="font-size:.85rem;color:var(--text-muted);line-height:1.7;margin-bottom:1rem">${item.description.replace(/\n/g,'<br>')}</div>`:''}
 
     <div style="border-top:1px solid var(--border);padding-top:1rem;display:flex;gap:1.5rem;flex-wrap:wrap">
-
-      <!-- Participants -->
-      ${participants.length > 0 ? `
-      <div style="flex:1;min-width:140px">
-        <div style="font-size:0.72rem;color:var(--text-dim);letter-spacing:1px;
-          text-transform:uppercase;margin-bottom:0.5rem">Participants</div>
+      ${participants.length?`
+      <div style="flex:1;min-width:130px">
+        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.5rem">Participants</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${participants.map(p => `
-            <div style="
-              width:36px;height:36px;border-radius:50%;
-              background:var(--bg-elevated);border:2px solid var(--border-bright);
-              display:flex;align-items:center;justify-content:center;
-              overflow:hidden;font-size:0.65rem;color:var(--text-dim);
-            ">
-              ${p.imageUrl
-                ? `<img src="${p.imageUrl}" style="width:100%;height:100%;object-fit:cover">`
-                : `<span style="font-size:1rem">${p.emoji || '⚔️'}</span>`
-              }
+          ${participants.map(p=>`
+            <div style="width:36px;height:36px;border-radius:50%;background:var(--bg-elevated);
+              border:2px solid var(--border-bright);display:flex;align-items:center;justify-content:center;overflow:hidden">
+              ${p.imageUrl?`<img src="${p.imageUrl}" style="width:100%;height:100%;object-fit:cover">`
+                :`<span style="font-size:1.1rem">${p.emoji||'⚔️'}</span>`}
             </div>`).join('')}
         </div>
-      </div>` : ''}
+      </div>`:''}
 
-      <!-- Réussite -->
-      ${item.type === 'mission' && reussite > 0 ? `
-      <div style="flex:1;min-width:160px">
-        <div style="font-size:0.72rem;color:var(--text-dim);letter-spacing:1px;
-          text-transform:uppercase;margin-bottom:0.5rem">Réussite</div>
-        <div style="background:var(--bg-elevated);border-radius:999px;height:10px;overflow:hidden;margin-bottom:0.4rem">
-          <div style="width:${reussite}%;height:100%;background:${barColor};border-radius:999px;
-            transition:width 0.6s ease"></div>
+      ${item.type==='mission'&&reussite>0?`
+      <div style="flex:1;min-width:150px">
+        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.5rem">Réussite</div>
+        <div style="background:var(--bg-elevated);border-radius:999px;height:10px;overflow:hidden;margin-bottom:.4rem">
+          <div style="width:${reussite}%;height:100%;background:${barColor};border-radius:999px"></div>
         </div>
-        <div style="font-family:'Cinzel',serif;font-size:0.9rem;color:${barColor}">${reussite} %</div>
-        ${item.notesReussite ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.4rem;line-height:1.5">
-          ${item.notesReussite.split('\n').map(l => `<div>• ${l}</div>`).join('')}
-        </div>` : ''}
-      </div>` : ''}
+        <div style="font-family:'Cinzel',serif;font-size:.9rem;color:${barColor}">${reussite} %</div>
+        ${item.notesReussite?`<div style="font-size:.75rem;color:var(--text-muted);margin-top:.4rem;line-height:1.5">
+          ${item.notesReussite.split('\n').map(l=>`<div>• ${l}</div>`).join('')}</div>`:''}
+      </div>`:''}
 
-      <!-- Récompense -->
-      ${item.recompense ? `
-      <div style="flex:1;min-width:120px">
-        <div style="font-size:0.72rem;color:var(--text-dim);letter-spacing:1px;
-          text-transform:uppercase;margin-bottom:0.5rem">Récompense</div>
-        <div style="font-size:0.83rem;color:var(--gold)">${item.recompense}</div>
-      </div>` : ''}
+      ${item.recompense?`
+      <div style="flex:1;min-width:110px">
+        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.5rem">Récompense</div>
+        <div style="font-size:.83rem;color:var(--gold)">${item.recompense}</div>
+      </div>`:''}
     </div>
 
-    ${STATE.isAdmin ? `
-    <div style="margin-top:1rem;display:flex;gap:0.5rem">
+    ${liensItems.length?`
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.6rem">↝ Mène vers</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+        ${liensItems.map(l=>`
+          <button onclick="closeModal();openStoryDetail('${l.id}')" style="
+            background:var(--bg-elevated);border:1px solid rgba(232,184,75,.3);
+            border-radius:8px;padding:.35rem .7rem;cursor:pointer;
+            font-family:'Cinzel',serif;font-size:.75rem;color:var(--gold);transition:all .15s">
+            ↝ ${l.titre||'Mission'}
+          </button>`).join('')}
+      </div>
+    </div>`:''}
+
+    ${STATE.isAdmin?`
+    <div style="margin-top:1rem;display:flex;gap:.5rem">
       <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModal();editStory('${item.id}')">✏️ Modifier</button>
-      <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,0.3)"
+      <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)"
         onclick="closeModal();deleteStory('${item.id}')">🗑️</button>
-    </div>` : ''}
-  </div>
-  `);
+    </div>`:''}
+  </div>`);
 }
 
-// ── Modal ajout/édition ───────────────────────────────────────────────────────
-function openStoryModal(item = null) {
-  // Récupérer les actes connus
+// ── MODAL AJOUT / ÉDITION ─────────────────────────────────────────────────────
+async function openStoryModal(item = null) {
+  _crop.base64 = null;
   const acteActif = window._storyActe || 'Acte I';
+  const allItems  = await loadCollection('story');
+  const autresItems = allItems.filter(i => i.id !== item?.id);
 
-  openModal(item ? `✏️ Modifier — ${item.titre || 'Mission'}` : '📜 Nouveau', `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+  openModal(item?`✏️ Modifier — ${item.titre||'Mission'}`:'📜 Nouvelle mission',`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
       <div class="form-group">
         <label>Type</label>
-        <select class="input-field" id="st-type" onchange="document.getElementById('st-mission-extra').style.display=this.value==='mission'?'block':'none'">
-          <option value="mission" ${item?.type === 'mission' ? 'selected' : ''}>🎯 Mission</option>
-          <option value="event"   ${item?.type === 'event'   ? 'selected' : ''}>📖 Événement</option>
-          <option value="combat"  ${item?.type === 'combat'  ? 'selected' : ''}>⚔️ Combat</option>
+        <select class="input-field" id="st-type"
+          onchange="document.getElementById('st-mission-extra').style.display=this.value==='mission'?'block':'none'">
+          <option value="mission" ${(item?.type||'mission')==='mission'?'selected':''}>🎯 Mission</option>
+          <option value="event"   ${item?.type==='event'  ?'selected':''}>📖 Événement</option>
+          <option value="combat"  ${item?.type==='combat' ?'selected':''}>⚔️ Combat</option>
         </select>
       </div>
       <div class="form-group">
         <label>Acte</label>
-        <input class="input-field" id="st-acte" value="${item?.acte || acteActif}" placeholder="Acte I">
+        <input class="input-field" id="st-acte" value="${item?.acte||acteActif}" placeholder="Acte I">
       </div>
     </div>
 
     <div class="form-group">
       <label>Titre</label>
-      <input class="input-field" id="st-titre" value="${item?.titre || ''}" placeholder="Sauver les poules !">
+      <input class="input-field" id="st-titre" value="${item?.titre||''}" placeholder="Sauver les poules !">
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
       <div class="form-group">
         <label>Axe narratif</label>
-        <input class="input-field" id="st-axe" value="${item?.axe || ''}" placeholder="ex: Escorte du professeur">
+        <input class="input-field" id="st-axe" value="${item?.axe||''}" placeholder="ex: Mystères de Granlac">
       </div>
       <div class="form-group">
         <label>Date / Session</label>
-        <input class="input-field" id="st-date" value="${item?.date || ''}" placeholder="Session 1">
+        <input class="input-field" id="st-date" value="${item?.date||''}" placeholder="Session 1">
       </div>
     </div>
 
     <div class="form-group">
       <label>Lieu</label>
-      <input class="input-field" id="st-lieu" value="${item?.lieu || ''}" placeholder="Forêt du Cap d'Espérance">
+      <input class="input-field" id="st-lieu" value="${item?.lieu||''}" placeholder="Forêt du Cap d'Espérance">
     </div>
 
     <div class="form-group">
       <label>Description</label>
-      <textarea class="input-field" id="st-desc" rows="4" placeholder="Narration de la mission...">${item?.description || ''}</textarea>
+      <textarea class="input-field" id="st-desc" rows="3">${item?.description||''}</textarea>
     </div>
 
     <div class="form-group">
-      <label>URL Image (bannière)</label>
-      <input class="input-field" id="st-image" value="${item?.imageUrl || ''}" placeholder="https://...">
+      <label>Image (bannière)</label>
+      <div id="st-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
+        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s"
+        onclick="document.getElementById('st-file').click()"
+        ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
+        ondragleave="this.style.borderColor='var(--border-strong)'"
+        ondrop="event.preventDefault();this.style.borderColor='var(--border-strong)';window._stFile(event.dataTransfer.files[0])">
+        <div id="st-drop-preview">
+          ${item?.imageUrl
+            ?`<img src="${item.imageUrl}" style="max-height:70px;border-radius:8px;max-width:100%">`
+            :`<div style="font-size:1.8rem;margin-bottom:4px">🖼️</div>`}
+        </div>
+        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">
+          Glisser ou <span style="color:var(--gold)">cliquer pour choisir</span>
+        </div>
+      </div>
+      <input type="file" id="st-file" accept="image/*" style="display:none"
+        onchange="window._stFile(this.files[0])">
+      <div id="st-crop-wrap" style="display:none;margin-top:.75rem">
+        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez — ratio 4:3 verrouillé</div>
+        <canvas id="st-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
+        <button type="button" class="btn btn-gold btn-sm" style="margin-top:.5rem;width:100%"
+          onclick="window._stConfirmCrop()">✂️ Confirmer le recadrage</button>
+        <div id="st-crop-ok" style="display:none;font-size:.75rem;color:var(--green);text-align:center;margin-top:4px">✓ Image recadrée</div>
+      </div>
     </div>
 
     <div class="form-group">
-      <label>Participants (URLs d'avatars, une par ligne — ou emoji:Nom)</label>
-      <textarea class="input-field" id="st-participants" rows="3" placeholder="https://url-avatar.jpg\n⚔️:Kael\n🧙:Mira">${
-        (item?.participants || []).map(p => p.imageUrl || (p.emoji ? `${p.emoji}:${p.nom || ''}` : '')).filter(Boolean).join('\n')
-      }</textarea>
+      <label>Participants (URL avatar ou emoji:Nom, un par ligne)</label>
+      <textarea class="input-field" id="st-participants" rows="2"
+        placeholder="https://avatar.jpg&#10;⚔️:Kael">${
+          (item?.participants||[]).map(p=>p.imageUrl||(p.emoji?`${p.emoji}:${p.nom||''}`:''))
+            .filter(Boolean).join('\n')
+        }</textarea>
     </div>
 
-    <!-- Extra mission -->
-    <div id="st-mission-extra" style="${(item?.type || 'mission') === 'mission' ? '' : 'display:none'}">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+    <div id="st-mission-extra" style="${(item?.type||'mission')==='mission'?'':'display:none'}">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
         <div class="form-group">
           <label>Statut</label>
           <select class="input-field" id="st-statut">
-            ${['En cours','Terminée','Échouée','En attente'].map(s =>
-              `<option ${s === (item?.statut || 'En cours') ? 'selected' : ''}>${s}</option>`
-            ).join('')}
+            ${['En cours','Terminée','Échouée','En attente'].map(s=>
+              `<option ${s===(item?.statut||'En cours')?'selected':''}>${s}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
           <label>Réussite (%)</label>
-          <input type="number" class="input-field" id="st-reussite" min="0" max="100"
-            value="${item?.reussite || ''}" placeholder="100">
+          <input type="number" class="input-field" id="st-reussite"
+            min="0" max="100" value="${item?.reussite||''}" placeholder="100">
         </div>
       </div>
       <div class="form-group">
         <label>Notes de réussite (une par ligne)</label>
-        <textarea class="input-field" id="st-notes-reussite" rows="3" placeholder="La mission a été réussie.\nTout a été exploré.">${item?.notesReussite || ''}</textarea>
+        <textarea class="input-field" id="st-notes-reussite" rows="2"
+          placeholder="La mission a été réussie.">${item?.notesReussite||''}</textarea>
       </div>
       <div class="form-group">
         <label>Récompense</label>
-        <input class="input-field" id="st-recompense" value="${item?.recompense || ''}" placeholder="500 or, Épée légendaire">
+        <input class="input-field" id="st-recompense" value="${item?.recompense||''}" placeholder="500 or">
       </div>
     </div>
 
+    ${autresItems.length?`
+    <div class="form-group">
+      <label>↝ Mène vers (missions débloquées après)</label>
+      <div style="max-height:130px;overflow-y:auto;background:var(--bg-elevated);
+        border:1px solid var(--border);border-radius:8px;padding:.5rem">
+        ${autresItems.map(other => {
+          const checked=(item?.liens||[]).includes(other.id);
+          return `<label style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;
+            cursor:pointer;font-size:.82rem;color:var(--text-muted)">
+            <input type="checkbox" id="lien-${other.id}" ${checked?'checked':''}
+              style="accent-color:var(--gold)">
+            ${other.titre||'Mission'}
+            ${other.axe?`<span style="font-size:.68rem;color:${_axeMap[other.axe]||'var(--text-dim)'}">· ${other.axe}</span>`:''}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`:``}
+
     <div class="form-group">
       <label>Ordre d'affichage</label>
-      <input type="number" class="input-field" id="st-ordre" value="${item?.ordre || 0}" placeholder="0">
+      <input type="number" class="input-field" id="st-ordre" value="${item?.ordre||0}">
     </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem"
-      onclick="saveStory('${item?.id || ''}')">
-      ${item ? 'Enregistrer' : 'Créer'}
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
+      onclick="saveStory('${item?.id||''}')">
+      ${item?'Enregistrer':'Créer'}
     </button>
   `);
+
+  window._stFile = (file) => {
+    if(!file?.type.startsWith('image/')) return;
+    if(file.size>5*1024*1024){ showNotif('Image trop lourde (max 5 Mo).','error'); return; }
+    const r=new FileReader();
+    r.onload=(e)=>_initStCrop(e.target.result);
+    r.readAsDataURL(file);
+  };
 }
 
-// ── Sauvegarder ───────────────────────────────────────────────────────────────
-async function saveStory(id = '') {
-  const titre = document.getElementById('st-titre')?.value?.trim();
-  if (!titre) { showNotif('Le titre est requis.', 'error'); return; }
+// ── CROPPER ───────────────────────────────────────────────────────────────────
+function _initStCrop(dataUrl) {
+  const wrap=document.getElementById('st-crop-wrap');
+  const canvas=document.getElementById('st-crop-canvas');
+  const prev=document.getElementById('st-drop-preview');
+  if(!wrap||!canvas) return;
+  _crop.base64=null;
+  document.getElementById('st-crop-ok').style.display='none';
+  wrap.style.display='block';
+  const img=new Image();
+  img.onload=()=>{
+    _crop.img=img; _crop.natW=img.naturalWidth; _crop.natH=img.naturalHeight;
+    const maxW=Math.min(400,img.naturalWidth);
+    _crop.dispScale=maxW/img.naturalWidth;
+    canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
+    canvas.style.width=maxW+'px';
+    canvas.style.height=Math.round(img.naturalHeight*_crop.dispScale)+'px';
+    const R=4/3; let w=img.naturalWidth*.8,h=w/R;
+    if(h>img.naturalHeight*.8){h=img.naturalHeight*.8;w=h*R;}
+    _crop.cropX=Math.round((img.naturalWidth-w)/2); _crop.cropY=Math.round((img.naturalHeight-h)/2);
+    _crop.cropW=Math.round(w); _crop.cropH=Math.round(h);
+    _drawStCrop(); _bindStCrop(canvas);
+    if(prev) prev.innerHTML=`<img src="${dataUrl}" style="max-height:50px;border-radius:6px;opacity:.6">
+      <div style="font-size:.7rem;color:var(--text-dim);margin-top:4px">Recadrez ci-dessous</div>`;
+  };
+  img.src=dataUrl;
+}
 
-  // Parser les participants
-  const participantsRaw = document.getElementById('st-participants')?.value || '';
-  const participants = participantsRaw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-    if (l.startsWith('http')) return { imageUrl: l, nom: '' };
-    const [emoji, nom] = l.split(':');
-    return { emoji: emoji?.trim() || '⚔️', nom: nom?.trim() || '' };
+function _stHandles(){const{cropX:x,cropY:y,cropW:w,cropH:h}=_crop;return[{id:'nw',x,y},{id:'n',x:x+w/2,y},{id:'ne',x:x+w,y},{id:'w',x,y:y+h/2},{id:'e',x:x+w,y:y+h/2},{id:'sw',x,y:y+h},{id:'s',x:x+w/2,y:y+h},{id:'se',x:x+w,y:y+h}];}
+function _stHitH(nx,ny){const tol=9/_crop.dispScale;return _stHandles().find(h=>Math.abs(h.x-nx)<tol&&Math.abs(h.y-ny)<tol)||null;}
+function _drawStCrop(){
+  const canvas=document.getElementById('st-crop-canvas');if(!canvas||!_crop.img)return;
+  const ctx=canvas.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_crop;
+  ctx.clearRect(0,0,natW,natH);ctx.drawImage(img,0,0,natW,natH);
+  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,0,natW,natH);
+  ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
+  ctx.strokeStyle='#e8b84b';ctx.lineWidth=2;ctx.strokeRect(cropX,cropY,cropW,cropH);
+  ctx.strokeStyle='rgba(232,184,75,.3)';ctx.lineWidth=1;
+  for(let i=1;i<=2;i++){
+    ctx.beginPath();ctx.moveTo(cropX+cropW*i/3,cropY);ctx.lineTo(cropX+cropW*i/3,cropY+cropH);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(cropX,cropY+cropH*i/3);ctx.lineTo(cropX+cropW,cropY+cropH*i/3);ctx.stroke();
+  }
+  ctx.fillStyle='#e8b84b';ctx.strokeStyle='#0b1118';ctx.lineWidth=1.5;
+  _stHandles().forEach(h=>{ctx.fillRect(h.x-6,h.y-6,12,12);ctx.strokeRect(h.x-6,h.y-6,12,12);});
+  ctx.fillStyle='rgba(232,184,75,.9)';ctx.font='12px monospace';
+  ctx.fillText(`${cropW} × ${cropH}`,cropX+6,cropY+18);
+}
+function _stToN(c,cx,cy){const r=c.getBoundingClientRect();return{x:(cx-r.left)/_crop.dispScale,y:(cy-r.top)/_crop.dispScale};}
+function _bindStCrop(canvas){
+  const R=4/3,MIN=40;
+  const onStart=(cx,cy)=>{
+    const{x,y}=_stToN(canvas,cx,cy),h=_stHitH(x,y);
+    if(h){_crop.isResizing=true;_crop.handle=h.id;}
+    else{const{cropX,cropY,cropW,cropH}=_crop;
+      if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH)
+        {_crop.isDragging=true;_crop.startX=x-cropX;_crop.startY=y-cropY;}}
+  };
+  const onMove=(cx,cy)=>{
+    if(!_crop.isDragging&&!_crop.isResizing)return;
+    const{x,y}=_stToN(canvas,cx,cy),{natW:W,natH:H}=_crop;
+    if(_crop.isDragging){
+      _crop.cropX=Math.round(_clamp(x-_crop.startX,0,W-_crop.cropW));
+      _crop.cropY=Math.round(_clamp(y-_crop.startY,0,H-_crop.cropH));
+      _drawStCrop();return;
+    }
+    let{cropX,cropY,cropW,cropH,handle}=_crop;
+    const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropH};
+    if(handle==='se'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);}
+    else if(handle==='sw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;}
+    else if(handle==='ne'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);cropY=a.y2-cropH;}
+    else if(handle==='nw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;cropY=a.y2-cropH;}
+    else if(handle==='e'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);}
+    else if(handle==='w'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;}
+    else if(handle==='s'){cropH=_clamp(y-a.y,MIN,H-a.y);cropW=Math.round(cropH*R);}
+    else if(handle==='n'){cropH=_clamp(a.y2-y,MIN,a.y2);cropW=Math.round(cropH*R);cropY=a.y2-cropH;}
+    _crop.cropX=Math.round(_clamp(cropX,0,W-MIN));_crop.cropY=Math.round(_clamp(cropY,0,H-MIN));
+    _crop.cropW=Math.round(_clamp(cropW,MIN,W-_crop.cropX));_crop.cropH=Math.round(_clamp(cropH,MIN,H-_crop.cropY));
+    _drawStCrop();
+  };
+  const onEnd=()=>{_crop.isDragging=false;_crop.isResizing=false;_crop.handle=null;};
+  const CM={nw:'nw-resize',ne:'ne-resize',sw:'sw-resize',se:'se-resize',n:'n-resize',s:'s-resize',e:'e-resize',w:'w-resize'};
+  canvas.addEventListener('mousemove',e=>{
+    if(_crop.isDragging||_crop.isResizing)return;
+    const{x,y}=_stToN(canvas,e.clientX,e.clientY),h=_stHitH(x,y);
+    if(h){canvas.style.cursor=CM[h.id];return;}
+    const{cropX,cropY,cropW,cropH}=_crop;
+    canvas.style.cursor=(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH)?'move':'crosshair';
+  });
+  canvas.addEventListener('mousedown',e=>{e.preventDefault();onStart(e.clientX,e.clientY);});
+  window.addEventListener('mousemove',e=>onMove(e.clientX,e.clientY));
+  window.addEventListener('mouseup',onEnd);
+  canvas.addEventListener('touchstart',e=>{e.preventDefault();onStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  canvas.addEventListener('touchmove',e=>{e.preventDefault();onMove(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  canvas.addEventListener('touchend',onEnd);
+}
+
+window._stConfirmCrop = () => {
+  const{img,cropX,cropY,cropW,cropH}=_crop;if(!img)return;
+  const OUT_W=Math.min(800,cropW),OUT_H=Math.round(OUT_W/(4/3));
+  const out=document.createElement('canvas');out.width=OUT_W;out.height=OUT_H;
+  out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,OUT_W,OUT_H);
+  _crop.base64=out.toDataURL('image/jpeg',.88);
+  document.getElementById('st-crop-ok').style.display='block';
+  document.getElementById('st-crop-wrap').style.display='none';
+  const p=document.getElementById('st-drop-preview');
+  if(p) p.innerHTML=`<img src="${_crop.base64}" style="max-height:70px;border-radius:8px">`;
+};
+
+// ── SAUVEGARDER ───────────────────────────────────────────────────────────────
+async function saveStory(id = '') {
+  const titre=document.getElementById('st-titre')?.value?.trim();
+  if(!titre){showNotif('Le titre est requis.','error');return;}
+
+  // Image : crop prioritaire, sinon existante en base
+  let imageUrl='';
+  if(_crop.base64){
+    imageUrl=_crop.base64;
+  } else if(id){
+    const existing=(await loadCollection('story')).find(i=>i.id===id);
+    imageUrl=existing?.imageUrl||'';
+  }
+
+  const participantsRaw=document.getElementById('st-participants')?.value||'';
+  const participants=participantsRaw.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
+    if(l.startsWith('http'))return{imageUrl:l,nom:''};
+    const[emoji,nom]=l.split(':');return{emoji:emoji?.trim()||'⚔️',nom:nom?.trim()||''};
   });
 
-  const data = {
-    type:          document.getElementById('st-type')?.value        || 'mission',
+  const allCb=document.querySelectorAll('[id^="lien-"]');
+  const liens=[...allCb].filter(cb=>cb.checked).map(cb=>cb.id.replace('lien-',''));
+
+  const data={
+    type:          document.getElementById('st-type')?.value       ||'mission',
     titre,
-    acte:          document.getElementById('st-acte')?.value?.trim()  || 'Acte I',
-    axe:           document.getElementById('st-axe')?.value?.trim()   || '',
-    date:          document.getElementById('st-date')?.value?.trim()  || '',
-    lieu:          document.getElementById('st-lieu')?.value?.trim()  || '',
-    description:   document.getElementById('st-desc')?.value          || '',
-    imageUrl:      document.getElementById('st-image')?.value?.trim() || '',
+    acte:          document.getElementById('st-acte')?.value?.trim() ||'Acte I',
+    axe:           document.getElementById('st-axe')?.value?.trim()  ||'',
+    date:          document.getElementById('st-date')?.value?.trim() ||'',
+    lieu:          document.getElementById('st-lieu')?.value?.trim() ||'',
+    description:   document.getElementById('st-desc')?.value         ||'',
+    imageUrl,
     participants,
-    statut:        document.getElementById('st-statut')?.value        || 'En cours',
-    reussite:      parseInt(document.getElementById('st-reussite')?.value) || 0,
-    notesReussite: document.getElementById('st-notes-reussite')?.value?.trim() || '',
-    recompense:    document.getElementById('st-recompense')?.value?.trim() || '',
-    ordre:         parseInt(document.getElementById('st-ordre')?.value) || 0,
+    statut:        document.getElementById('st-statut')?.value       ||'En cours',
+    reussite:      parseInt(document.getElementById('st-reussite')?.value)||0,
+    notesReussite: document.getElementById('st-notes-reussite')?.value?.trim()||'',
+    recompense:    document.getElementById('st-recompense')?.value?.trim()||'',
+    liens,
+    ordre:         parseInt(document.getElementById('st-ordre')?.value)||0,
   };
 
-  if (id) await updateInCol('story', id, data);
-  else    await addToCol('story', data);
+  // Persister l'acte si nouveau
+  const savedActes=await loadActes();
+  if(!savedActes.includes(data.acte)){ savedActes.push(data.acte); savedActes.sort(); await saveActes(savedActes); }
 
-  // Mettre à jour l'acte actif au nouvel acte si changé
-  window._storyActe = data.acte;
+  if(id) await updateInCol('story',id,data);
+  else   await addToCol('story',data);
 
+  window._storyActe=data.acte;
+  _crop.base64=null;
   closeModal();
-  showNotif(id ? 'Mission mise à jour.' : `"${titre}" ajoutée !`, 'success');
+  showNotif(id?'Mission mise à jour.':`"${titre}" ajoutée !`,'success');
   await PAGES.story();
 }
 
-// ── Éditer ────────────────────────────────────────────────────────────────────
-async function editStory(id) {
-  const items = await loadCollection('story');
-  const item  = items.find(i => i.id === id);
-  if (item) openStoryModal(item);
+// ── ÉDITER / SUPPRIMER ────────────────────────────────────────────────────────
+async function editStory(id){
+  const items=await loadCollection('story');
+  const item=items.find(i=>i.id===id);
+  if(item) openStoryModal(item);
 }
-
-// ── Supprimer ─────────────────────────────────────────────────────────────────
-async function deleteStory(id) {
-  if (!confirm('Supprimer cet élément de la trame ?')) return;
-  await deleteFromCol('story', id);
-  showNotif('Élément supprimé.', 'success');
+async function deleteStory(id){
+  if(!confirm('Supprimer cet élément de la trame ?'))return;
+  await deleteFromCol('story',id);
+  showNotif('Élément supprimé.','success');
   await PAGES.story();
 }
 
-// ── Nouvel acte ───────────────────────────────────────────────────────────────
-function openNewActeModal() {
-  openModal('+ Nouvel Acte', `
+// ── NOUVEL ACTE ───────────────────────────────────────────────────────────────
+function openNewActeModal(){
+  openModal('+ Nouvel Acte',`
     <div class="form-group">
       <label>Nom de l'acte</label>
-      <input class="input-field" id="new-acte-name" placeholder="Acte II" autofocus>
+      <input class="input-field" id="new-acte-name" placeholder="Acte II">
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="
-      const name = document.getElementById('new-acte-name')?.value?.trim();
-      if (!name) return;
-      window._storyActe = name;
-      closeModal();
-      navigate('story');
-    ">Créer l'acte</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
+      onclick="window._createNewActe()">Créer</button>
   `);
 }
+window._createNewActe = async () => {
+  const name=document.getElementById('new-acte-name')?.value?.trim();if(!name)return;
+  const list=await loadActes();
+  if(!list.includes(name)){list.push(name);list.sort();await saveActes(list);}
+  window._storyActe=name;
+  closeModal();
+  await PAGES.story();
+};
 
-// ── Override PAGES.story ──────────────────────────────────────────────────────
+// ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────
 PAGES.story = renderStory;
-
-// ── Exports globaux ───────────────────────────────────────────────────────────
-Object.assign(window, {
-  openStoryModal,
-  openStoryDetail,
-  openNewActeModal,
-  saveStory,
-  editStory,
-  deleteStory,
-});
+Object.assign(window,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
