@@ -153,144 +153,259 @@ async function renderStory() {
 }
 
 // ── RENDU TIMELINE ────────────────────────────────────────────────────────────
-// L'ordre d'affichage est GLOBAL : deux missions d'axes différents avec le
-// même `ordre` apparaissent dans la même colonne (= même moment chronologique).
+// • Ordre global : même valeur d'ordre = même colonne chronologique
+// • Split de ligne : si 2+ missions du même axe ont le même ordre,
+//   la ligne se divise en sous-lignes verticalement, puis se remerge.
 function _renderTimeline(items) {
-  const CARD_W=160, CARD_GAP=28, ROW_H=195, ROW_GAP=40, PAD_L=28;
+  const CARD_W  = 160;
+  const CARD_GAP = 28;
+  const CARD_H  = 140; // hauteur d'une card (image + texte)
+  const SUB_GAP =  20; // espace entre sous-lignes d'un même axe
+  const ROW_GAP =  44; // espace entre deux axes différents
+  const PAD_L   =  28;
 
-  // ── 1. Regrouper par axe (= une ligne par axe) ──
-  const axeOrder=[], axeGroups={};
+  // ── 1. Regrouper par axe ──────────────────────────────────────────────────
+  const axeOrder = [], axeGroups = {};
   items.forEach(item => {
-    const key = item.axe||'__none__';
-    if(!axeGroups[key]){ axeGroups[key]=[]; axeOrder.push(key); }
+    const key = item.axe || '__none__';
+    if (!axeGroups[key]) { axeGroups[key] = []; axeOrder.push(key); }
     axeGroups[key].push(item);
   });
 
-  // ── 2. Colonnes basées sur l'ordre global ──
-  // Collecter toutes les valeurs d'ordre distinctes, triées
-  const allOrdres = [...new Set(items.map(i => i.ordre||0))].sort((a,b)=>a-b);
-  // Mapper ordre → index de colonne
+  // ── 2. Colonnes globales (ordre → colIdx) ─────────────────────────────────
+  const allOrdres  = [...new Set(items.map(i => i.ordre || 0))].sort((a, b) => a - b);
   const ordreToCol = {};
-  allOrdres.forEach((o,i) => { ordreToCol[o] = i; });
-  const totalCols = allOrdres.length || 1;
+  allOrdres.forEach((o, i) => { ordreToCol[o] = i; });
+  const totalCols  = allOrdres.length || 1;
 
-  // ── 3. Index id → position (cx/cy en coords naturelles) ──
-  const posMap={};
-  axeOrder.forEach((key,rowIdx) => {
-    axeGroups[key].forEach(item => {
-      const col = ordreToCol[item.ordre||0] ?? 0;
-      posMap[item.id]={
-        row: rowIdx, col,
-        cx: PAD_L + col*(CARD_W+CARD_GAP) + CARD_W/2,
-        cy: ROW_GAP + rowIdx*(ROW_H+ROW_GAP) + ROW_H/2,
-      };
+  // ── 3. Calculer la géométrie de chaque axe ────────────────────────────────
+  // Pour chaque axe, trouver les "slots" : groupes d'items qui partagent le même ordre.
+  // Un slot avec N items crée N sous-lignes pendant cette colonne.
+  //
+  // Résultat par axe : { subRows: [{ item, subRow }], rowHeight, centerY (relatif au top de l'axe) }
+  const axeLayout = {}; // key → { slots, nSubRowsMax, rowH, centerY, items: [{item, subRow, col}] }
+
+  axeOrder.forEach(key => {
+    const group   = axeGroups[key];
+    // Grouper par colonne
+    const byCol   = {};
+    group.forEach(item => {
+      const col = ordreToCol[item.ordre || 0] ?? 0;
+      if (!byCol[col]) byCol[col] = [];
+      byCol[col].push(item);
+    });
+
+    // Nombre max de sous-lignes simultanées dans cet axe
+    const maxSubs = Math.max(...Object.values(byCol).map(a => a.length));
+
+    // Hauteur totale de la rangée pour cet axe
+    const rowH  = maxSubs * CARD_H + (maxSubs - 1) * SUB_GAP;
+    // Y central de la ligne principale (milieu de la rangée)
+    const centerY = rowH / 2;
+
+    // Assigner un sous-index à chaque item dans sa colonne
+    const layoutItems = [];
+    group.forEach(item => {
+      const col     = ordreToCol[item.ordre || 0] ?? 0;
+      const siblings = byCol[col];
+      const subRow  = siblings.indexOf(item); // 0..N-1
+      // Y de cette sous-ligne, centré autour du centre de l'axe
+      // Pour N sous-lignes : y0 = centerY - (N-1)/2 * (CARD_H+SUB_GAP)
+      const N    = siblings.length;
+      const subY = centerY - (N - 1) / 2 * (CARD_H + SUB_GAP) + subRow * (CARD_H + SUB_GAP);
+      layoutItems.push({ item, col, subRow, subY, N, siblings });
+    });
+
+    axeLayout[key] = { rowH, centerY, maxSubs, byCol, layoutItems };
+  });
+
+  // ── 4. Positions absolues (top de chaque axe) ─────────────────────────────
+  const axeTop = {}; // key → y absolu du top de la rangée
+  let curY = ROW_GAP;
+  axeOrder.forEach(key => {
+    axeTop[key] = curY;
+    curY += axeLayout[key].rowH + ROW_GAP;
+  });
+  const totalH = curY;
+  const totalW = PAD_L + totalCols * (CARD_W + CARD_GAP) + PAD_L;
+
+  // ── 5. posMap pour les flèches inter-axes ────────────────────────────────
+  const posMap = {};
+  axeOrder.forEach(key => {
+    const layout = axeLayout[key];
+    const top    = axeTop[key];
+    layout.layoutItems.forEach(({ item, col, subY }) => {
+      const cx = PAD_L + col * (CARD_W + CARD_GAP) + CARD_W / 2;
+      const cy = top + subY + CARD_H / 2;
+      posMap[item.id] = { cx, cy };
     });
   });
 
-  const totalW = PAD_L + totalCols*(CARD_W+CARD_GAP) + PAD_L;
-  const totalH = axeOrder.length*(ROW_H+ROW_GAP) + ROW_GAP;
+  // ── 6. SVG ────────────────────────────────────────────────────────────────
+  let svgLines = '';
+  const defsHtml = [];
 
-  // ── 4. SVG : lignes d'axe + flèches inter-missions ──
-  let svgLines='';
-  const defsHtml=[];
+  axeOrder.forEach(key => {
+    const color   = key === '__none__' ? '#555' : (_axeMap[key] || '#555');
+    const layout  = axeLayout[key];
+    const top     = axeTop[key];
+    const centerY = top + layout.centerY;
 
-  // Lignes horizontales par axe (connecte les points dans l'ordre des colonnes)
-  axeOrder.forEach((key,rowIdx) => {
-    const color=key==='__none__'?'#555':(_axeMap[key]||'#555');
-    const group=axeGroups[key];
-    const y=ROW_GAP+rowIdx*(ROW_H+ROW_GAP)+ROW_H/2;
+    // Trier les items par colonne
+    const sorted = [...layout.layoutItems].sort((a, b) => a.col - b.col);
+    if (sorted.length === 0) return;
 
-    // Trier les items de cet axe par colonne pour tracer la ligne dans le bon sens
-    const sorted=[...group].sort((a,b)=>(ordreToCol[a.ordre||0]??0)-(ordreToCol[b.ordre||0]??0));
-    if(sorted.length>1){
-      for(let i=0;i<sorted.length-1;i++){
-        const x1=posMap[sorted[i].id].cx, x2=posMap[sorted[i+1].id].cx;
-        svgLines+=`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2" opacity=".35"/>`;
+    // Construire les segments de la ligne principale + splits/merges
+    // On parcourt les colonnes dans l'ordre :
+    //   - Avant un split : ligne principale vers x de split
+    //   - Pendant un split : branches vers chaque sous-ligne, puis retour
+    //   - Après un merge : depuis x de merge vers la suite
+    const colsSorted = [...new Set(sorted.map(s => s.col))].sort((a, b) => a - b);
+
+    for (let ci = 0; ci < colsSorted.length; ci++) {
+      const col     = colsSorted[ci];
+      const colItems = sorted.filter(s => s.col === col);
+      const N       = colItems.length;
+      const cx      = PAD_L + col * (CARD_W + CARD_GAP) + CARD_W / 2;
+
+      if (N === 1) {
+        // Pas de split : point sur la ligne principale
+        const itemCy = top + colItems[0].subY + CARD_H / 2;
+        svgLines += `<circle cx="${cx}" cy="${itemCy}" r="4" fill="${color}" opacity=".75"/>`;
+
+        // Segment depuis la colonne précédente
+        if (ci > 0) {
+          const prevCol  = colsSorted[ci - 1];
+          const prevItems = sorted.filter(s => s.col === prevCol);
+          const prevCx   = PAD_L + prevCol * (CARD_W + CARD_GAP) + CARD_W / 2;
+          const prevN    = prevItems.length;
+
+          if (prevN === 1) {
+            // Ligne directe d'un point à l'autre
+            const prevCy = top + prevItems[0].subY + CARD_H / 2;
+            svgLines += `<line x1="${prevCx}" y1="${prevCy}" x2="${cx}" y2="${itemCy}"
+              stroke="${color}" stroke-width="2" opacity=".35"/>`;
+          } else {
+            // Merge : convergence de N branches vers ce point
+            prevItems.forEach(prev => {
+              const prevCy = top + prev.subY + CARD_H / 2;
+              // Courbe de Bézier douce pour le merge
+              const mpx = prevCx + (cx - prevCx) * 0.5;
+              svgLines += `<path d="M${prevCx} ${prevCy} C${mpx} ${prevCy} ${mpx} ${itemCy} ${cx} ${itemCy}"
+                fill="none" stroke="${color}" stroke-width="1.5" opacity=".35"/>`;
+            });
+          }
+        }
+      } else {
+        // Split : N branches depuis le point précédent
+        colItems.forEach(ci2 => {
+          const branchCy = top + ci2.subY + CARD_H / 2;
+          svgLines += `<circle cx="${cx}" cy="${branchCy}" r="4" fill="${color}" opacity=".75"/>`;
+
+          if (ci > 0) {
+            const prevCol   = colsSorted[ci - 1];
+            const prevItems = sorted.filter(s => s.col === prevCol);
+            const prevCx    = PAD_L + prevCol * (CARD_W + CARD_GAP) + CARD_W / 2;
+            const prevN     = prevItems.length;
+
+            if (prevN === 1) {
+              // Divergence depuis un seul point
+              const prevCy = top + prevItems[0].subY + CARD_H / 2;
+              const mpx    = prevCx + (cx - prevCx) * 0.5;
+              svgLines += `<path d="M${prevCx} ${prevCy} C${mpx} ${prevCy} ${mpx} ${branchCy} ${cx} ${branchCy}"
+                fill="none" stroke="${color}" stroke-width="1.5" opacity=".35"/>`;
+            } else {
+              // Split-à-split : chaque branche relie son homologue si possible, sinon la 1ère
+              const prevMatch = prevItems.find(p => p.subRow === ci2.subRow) || prevItems[0];
+              const prevCy    = top + prevMatch.subY + CARD_H / 2;
+              const mpx       = prevCx + (cx - prevCx) * 0.5;
+              svgLines += `<path d="M${prevCx} ${prevCy} C${mpx} ${prevCy} ${mpx} ${branchCy} ${cx} ${branchCy}"
+                fill="none" stroke="${color}" stroke-width="1.5" opacity=".35"/>`;
+            }
+          }
+        });
       }
     }
-    sorted.forEach(item=>{
-      const cx=posMap[item.id].cx;
-      svgLines+=`<circle cx="${cx}" cy="${y}" r="4" fill="${color}" opacity=".7"/>`;
-    });
   });
 
-  // Flèches inter-missions (Bézier cubique entre axes différents)
+  // Flèches inter-axes (Bézier cubique)
   items.forEach(item => {
-    if(!item.liens?.length) return;
-    const from=posMap[item.id]; if(!from) return;
+    if (!item.liens?.length) return;
+    const from = posMap[item.id]; if (!from) return;
     item.liens.forEach(tid => {
-      const to=posMap[tid]; if(!to) return;
-      const{cx:x1,cy:y1}=from,{cx:x2,cy:y2}=to;
-      const markId=`arr-${item.id.slice(-4)}-${tid.slice(-4)}`;
+      const to = posMap[tid]; if (!to) return;
+      const { cx: x1, cy: y1 } = from, { cx: x2, cy: y2 } = to;
+      const markId = `arr-${item.id.slice(-4)}-${tid.slice(-4)}`;
       defsHtml.push(`<marker id="${markId}" viewBox="0 0 10 10" refX="8" refY="5"
         markerWidth="5" markerHeight="5" orient="auto-start-reverse">
         <path d="M2 1L8 5L2 9" fill="none" stroke="rgba(232,184,75,.8)"
           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </marker>`);
-      const cp1x=x1+(x2-x1)*.5, cp2x=x2-(x2-x1)*.5;
-      svgLines+=`<path d="M${x1} ${y1} C${cp1x} ${y1} ${cp2x} ${y2} ${x2} ${y2}"
+      const cp1x = x1 + (x2 - x1) * .5, cp2x = x2 - (x2 - x1) * .5;
+      svgLines += `<path d="M${x1} ${y1} C${cp1x} ${y1} ${cp2x} ${y2} ${x2} ${y2}"
         fill="none" stroke="rgba(232,184,75,.45)" stroke-width="1.5" stroke-dasharray="6 3"
         marker-end="url(#${markId})"/>`;
     });
   });
 
-  let html=`<svg style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none"
+  let html = `<svg style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none"
     width="${totalW}" height="${totalH}">
     <defs>${defsHtml.join('')}</defs>${svgLines}
   </svg>`;
 
-  // ── 5. Cards positionnées par colonne globale ──
-  axeOrder.forEach((key,rowIdx) => {
-    const color=key==='__none__'?'#555':(_axeMap[key]||'#555');
-    const group=axeGroups[key];
-    const top=ROW_GAP+rowIdx*(ROW_H+ROW_GAP);
+  // ── 7. Cards ──────────────────────────────────────────────────────────────
+  axeOrder.forEach(key => {
+    const color  = key === '__none__' ? '#555' : (_axeMap[key] || '#555');
+    const layout = axeLayout[key];
+    const top    = axeTop[key];
 
-    if(key!=='__none__'){
-      html+=`<div style="position:absolute;left:0;top:${top+ROW_H/2-8}px;
+    if (key !== '__none__') {
+      const midY = top + layout.centerY;
+      html += `<div style="position:absolute;left:0;top:${midY - 8}px;
         writing-mode:vertical-rl;transform:rotate(180deg);
         font-size:.6rem;color:${color};opacity:.6;letter-spacing:1px;text-transform:uppercase;white-space:nowrap">${key}</div>`;
     }
 
-    group.forEach(item => {
-      const col = ordreToCol[item.ordre||0] ?? 0;
-      const left = PAD_L + col*(CARD_W+CARD_GAP);
-      const st=stCfg(item);
-      const hasLiens=item.liens?.length>0;
+    layout.layoutItems.forEach(({ item, col, subY }) => {
+      const left   = PAD_L + col * (CARD_W + CARD_GAP);
+      const cardTop = top + subY;
+      const st     = stCfg(item);
+      const hasLiens = item.liens?.length > 0;
 
-      html+=`
+      html += `
       <div class="sn" data-id="${item.id}"
-        style="position:absolute;left:${left}px;top:${top}px;width:${CARD_W}px"
+        style="position:absolute;left:${left}px;top:${cardTop}px;width:${CARD_W}px"
         onclick="openStoryDetail('${item.id}')">
         <div class="sn-inner" style="background:var(--bg-card);border:1px solid ${st.border};border-radius:12px;overflow:hidden">
           <div style="width:100%;height:88px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${item.imageUrl
-              ?`<img src="${item.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" draggable="false">`
-              :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.8rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">
-                 ${item.type==='mission'?'🎯':'📖'}</div>`
+              ? `<img src="${item.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" draggable="false">`
+              : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.8rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">
+                   ${item.type === 'mission' ? '🎯' : '📖'}</div>`
             }
             <div style="position:absolute;top:5px;right:5px;background:rgba(11,17,24,.85);
               border:1px solid ${st.border};border-radius:999px;padding:1px 6px;
-              font-size:.6rem;color:${st.color}">${st.icon} ${item.statut||'En attente'}</div>
-            ${hasLiens?`<div style="position:absolute;top:5px;left:5px;background:rgba(11,17,24,.85);
+              font-size:.6rem;color:${st.color}">${st.icon} ${item.statut || 'En attente'}</div>
+            ${hasLiens ? `<div style="position:absolute;top:5px;left:5px;background:rgba(11,17,24,.85);
               border:1px solid rgba(232,184,75,.4);border-radius:999px;padding:1px 6px;
-              font-size:.6rem;color:var(--gold)">↝ ${item.liens.length}</div>`:''}
+              font-size:.6rem;color:var(--gold)">↝ ${item.liens.length}</div>` : ''}
             <div style="position:absolute;bottom:0;left:0;right:0;height:2px;background:${color};opacity:.8"></div>
           </div>
           <div style="padding:.5rem .6rem">
             <div style="font-family:'Cinzel',serif;font-size:.71rem;color:var(--text);line-height:1.3;
-              white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${item.titre||''}">
-              ${item.titre||'Mission'}
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${item.titre || ''}">
+              ${item.titre || 'Mission'}
             </div>
-            ${item.date?`<div style="font-size:.6rem;color:var(--text-dim);margin-top:2px">${item.date}</div>`:''}
+            ${item.date ? `<div style="font-size:.6rem;color:var(--text-dim);margin-top:2px">${item.date}</div>` : ''}
           </div>
         </div>
-        ${STATE.isAdmin?`
+        ${STATE.isAdmin ? `
         <div style="display:flex;gap:3px;margin-top:4px;justify-content:center">
           <button class="btn-icon" style="font-size:.7rem;padding:2px 6px"
             onclick="event.stopPropagation();editStory('${item.id}')">✏️</button>
           <button class="btn-icon" style="font-size:.7rem;padding:2px 6px;color:#ff6b6b"
             onclick="event.stopPropagation();deleteStory('${item.id}')">🗑️</button>
-        </div>`:''}
+        </div>` : ''}
       </div>`;
     });
   });
