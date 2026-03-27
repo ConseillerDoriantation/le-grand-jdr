@@ -627,23 +627,61 @@ function renderCharEquip(c, canEdit) {
     </div>`;
 
   weaponSlots.forEach(slot => {
-    const item = equip[slot]||{};
-    const statVal = item.statAttaque==='dexterite'?dex:fo;
-    const m = modStr(Math.floor((statVal-10)/2));
+    const item    = equip[slot]||{};
+    const statKey = item.statAttaque==='dexterite' ? 'dexterite'
+                  : item.statAttaque==='intelligence' ? 'intelligence'
+                  : 'force';
+    const statVal = (s[statKey]||8)+(sb[statKey]||0);
+    const mod     = Math.floor((Math.min(22,statVal)-10)/2);
+    const modS    = modStr(mod);
+
+    // Toucher : préférer le toucher de l'item (ex: "+Fo+2") sinon calculé
+    const toucherDisplay = item.toucher
+      ? item.toucher
+      : `1d20 ${modS}`;
+    // Dégâts : dés + mod
+    const degatsDisplay = item.degats
+      ? `${item.degats} ${modS}`
+      : '—';
+
+    // Badge format
+    const formatBadge = item.format
+      ? `<span style="font-size:.65rem;background:var(--bg-elevated);border:1px solid var(--border);
+           border-radius:6px;padding:1px 6px;color:var(--text-dim)">${item.format}</span>`
+      : '';
+
     html += `<div class="cs-weapon-row">
       <div class="cs-weapon-slot-label">${slot}</div>
       <div class="cs-weapon-body">
-        ${item.nom
-          ? `<div class="cs-weapon-name">${item.nom}</div>
-             ${item.trait?`<div class="cs-weapon-trait">${item.trait}</div>`:''}
-             <div class="cs-weapon-stats">
-               <span class="cs-ws"><span class="cs-ws-label">Toucher</span><span class="cs-ws-val gold">1d20 ${m}</span></span>
-               <span class="cs-ws"><span class="cs-ws-label">Dégâts</span><span class="cs-ws-val red">${item.degats||'—'} ${m}</span></span>
-               <span class="cs-ws"><span class="cs-ws-label">Type</span><span class="cs-ws-val">${item.typeArme||'—'}</span></span>
-               ${item.portee?`<span class="cs-ws"><span class="cs-ws-label">Portée</span><span class="cs-ws-val">${item.portee}</span></span>`:''}
-               ${item.particularite?`<span class="cs-ws cs-ws-wide"><span class="cs-ws-label">Particularité</span><span class="cs-ws-val muted">${item.particularite}</span></span>`:''}
-             </div>`
-          : `<div class="cs-weapon-empty">— Vide —</div>`}
+        ${item.nom ? `
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem">
+            <div class="cs-weapon-name">${item.nom}</div>
+            ${formatBadge}
+          </div>
+          ${item.trait?`<div class="cs-weapon-trait">${item.trait}</div>`:''}
+          <div class="cs-weapon-stats">
+            <span class="cs-ws">
+              <span class="cs-ws-label">Toucher</span>
+              <span class="cs-ws-val gold">${toucherDisplay}</span>
+            </span>
+            <span class="cs-ws">
+              <span class="cs-ws-label">Dégâts</span>
+              <span class="cs-ws-val red">${degatsDisplay}</span>
+            </span>
+            ${item.stats?`<span class="cs-ws">
+              <span class="cs-ws-label">Bonus</span>
+              <span class="cs-ws-val" style="color:#4f8cff">${item.stats}</span>
+            </span>`:''}
+            ${item.portee?`<span class="cs-ws">
+              <span class="cs-ws-label">Portée</span>
+              <span class="cs-ws-val">${item.portee}</span>
+            </span>`:''}
+            ${item.particularite?`<span class="cs-ws cs-ws-wide">
+              <span class="cs-ws-label">Particularité</span>
+              <span class="cs-ws-val muted">${item.particularite}</span>
+            </span>`:''}
+          </div>`
+        : `<div class="cs-weapon-empty">— Vide —</div>`}
       </div>
       ${canEdit?`<button class="cs-equip-btn" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
     </div>`;
@@ -1854,16 +1892,15 @@ function editEquipSlot(slot) {
   // On filtre d'abord par les champs structurés (format, slotArmure, typeArmure, template)
   // puis on accepte les items sans champ structuré comme fallback (compatibilité anciens items)
 
-  const ARMES_1M_CAC  = ['Arme 1M CaC Phy.'];
-  const ARMES_2M      = ['Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'];
-  const TOUTES_ARMES  = ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'];
+  const ARMES_1M_CAC    = ['Arme 1M CaC Phy.'];
+  const ARME_SECONDAIRE = ['Arme Secondaire (Bouclier, Torche...)'];
+  const TOUTES_ARMES    = ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'];
 
-  // Définir quels formats d'arme vont dans quel slot
-  // Main principale : toutes les armes
-  // Main secondaire : armes 1M seulement (+ bouclier = pas de template arme)
+  // Main principale : toutes les armes sauf secondaires pures
+  // Main secondaire : armes 1M + armes secondaires (bouclier, torche...)
   const SLOT_ARME_FORMATS = {
-    'Main principale': TOUTES_ARMES,
-    'Main secondaire': ARMES_1M_CAC,
+    'Main principale': ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'],
+    'Main secondaire': [...ARMES_1M_CAC, ...ARME_SECONDAIRE],
   };
 
   // Slots d'armure → [slotArmure compatible, typeArmure compatible ou null=tous]
@@ -1971,7 +2008,12 @@ function editEquipSlot(slot) {
     </div>
   `);
   // Stocker les compatibles pour previewEquipFromInv
-  window._equipCompatibles = compatibles;
+  window._equipCompatibles  = compatibles;
+  window._equipSelFormat    = '';
+  window._equipSelToucher   = '';
+  window._equipSelStats     = '';
+  window._equipSelTypeArmure = '';
+  window._equipSelSlotArmure = '';
 }
 
 // Pré-remplir les champs depuis l'item sélectionné dans l'inventaire
@@ -1999,8 +2041,10 @@ function previewEquipFromInv(val, slot) {
         else statSel.value = 'force';
       }
     }
-    // Stocker le format pour saveEquipSlot
-    window._equipSelFormat = item.format||'';
+    // Stocker format, toucher, stats pour saveEquipSlot
+    window._equipSelFormat  = item.format  || '';
+    window._equipSelToucher = item.toucher || '';
+    window._equipSelStats   = item.stats   || '';
   } else {
     // Stocker typeArmure pour saveEquipSlot
     window._equipSelTypeArmure = item.typeArmure||'';
@@ -2041,13 +2085,17 @@ async function saveEquipSlot(slot) {
   const equip = c.equipement||{};
   if (slot.startsWith('Main')) {
     equip[slot] = {
-      nom: document.getElementById('eq-nom')?.value||'',
-      trait: document.getElementById('eq-trait')?.value||'',
-      degats: document.getElementById('eq-degats')?.value||'1D10',
+      nom:         document.getElementById('eq-nom')?.value||'',
+      trait:       document.getElementById('eq-trait')?.value||'',
+      degats:      document.getElementById('eq-degats')?.value||'',
       statAttaque: document.getElementById('eq-stat-attaque')?.value||'force',
-      typeArme: document.getElementById('eq-type-arme')?.value||'',
-      portee: document.getElementById('eq-portee')?.value||'',
+      typeArme:    document.getElementById('eq-type-arme')?.value||'',
+      portee:      document.getElementById('eq-portee')?.value||'',
       particularite: document.getElementById('eq-particularite')?.value||'',
+      // Données boutique préservées depuis previewEquipFromInv
+      format:  window._equipSelFormat  || '',
+      toucher: window._equipSelToucher || '',
+      stats:   window._equipSelStats   || '',
     };
   } else {
     equip[slot] = {
