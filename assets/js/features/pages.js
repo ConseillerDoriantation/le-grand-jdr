@@ -126,13 +126,21 @@ const PAGES = {
 
   // ─── WORLD ──────────────────────────────────────────────────────────────────
   async world() {
-    const doc = await getDocData('world', 'main');
+    const [doc, missions] = await Promise.all([
+      getDocData('world', 'main'),
+      loadCollectionOrdered('world_missions', 'order'),
+    ]);
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📖 Le Monde</div><div class="page-subtitle">Lore, histoire et informations générales</div></div>`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Édition Admin</div><button class="btn btn-gold btn-sm" onclick="editWorldContent()">✏️ Modifier le contenu</button></div>`;
-    const sections = doc?.sections || [{ title: 'Introduction', content: 'Les informations sur le monde seront ajoutées ici par le Maître de Jeu.' }];
-    sections.forEach(s => { html += `<div class="world-section"><div class="card-header" style="margin-bottom:0.8rem;padding:0.8rem;background:var(--bg-card2);border-radius:6px;border:1px solid var(--border)">${s.title}</div><div class="world-content">${s.content}</div></div>`; });
-    content.innerHTML = html;
+    if (window.renderWorldPage) {
+      content.innerHTML = window.renderWorldPage({
+        settingsDoc: doc,
+        missions,
+        isAdmin: STATE.isAdmin,
+      });
+      return;
+    }
+
+    content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📖 Monde</span></div><div class="page-subtitle">Chargement du tableau des missions…</div></div>`;
   },
 
   // ─── MAP ────────────────────────────────────────────────────────────────────
