@@ -33,18 +33,18 @@ function calcDeckMax(c) {
 function calcPVMax(c) {
   const modCo = getMod(c,'constitution');
   const niv = c.niveau||1;
-  // Si modCo = -1 au niv 1, le personnage a pvBase - 1
-  const progression = modCo > 0 ? Math.floor(modCo*(niv-1)) : modCo*(niv-1);
-  const baseBonus = modCo === -1 ? -1 : 0; // -1 PV base si mod Co = -1
-  return (c.pvBase||10) + baseBonus + progression;
+  // Bonus positif : +modCo PV par niveau gagné (scalable)
+  // Malus négatif  : appliqué UNE SEULE FOIS (pas multiplié par niveau)
+  // Ex: modCo=-1, niv=10 → pvBase-1 (et non pvBase-10)
+  const progression = modCo > 0 ? Math.floor(modCo*(niv-1)) : modCo;
+  return Math.max(1, (c.pvBase||10) + progression);
 }
 function calcPMMax(c) {
   const modSa = getMod(c,'sagesse');
   const niv = c.niveau||1;
-  // Si modSa = -1 au niv 1, le personnage a pmBase - 1
-  const progression = modSa > 0 ? Math.floor(modSa*(niv-1)) : modSa*(niv-1);
-  const baseBonus = modSa === -1 ? -1 : 0; // -1 PM base si mod Sa = -1
-  return (c.pmBase||10) + baseBonus + progression;
+  // Même logique : malus fixe une seule fois, bonus scalable par niveau
+  const progression = modSa > 0 ? Math.floor(modSa*(niv-1)) : modSa;
+  return Math.max(0, (c.pmBase||10) + progression);
 }
 
 function calcOr(c) {
@@ -566,14 +566,26 @@ function _renderInventaireBoutique(char) {
           <span title="Prix de revente" style="color:var(--gold)">🔄 ${prixVente} or</span>
         </div>
         ${canEdit ? `
-        <button onclick="sellInvItem('${char.id}', ${realIdx})"
-          style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
-          border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
-          color:var(--gold);transition:all .15s"
-          onmouseover="this.style.background='rgba(232,184,75,.15)'"
-          onmouseout="this.style.background='rgba(232,184,75,.08)'">
-          Vendre
-        </button>` : ''}
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <button onclick="sellInvItem('${char.id}', ${realIdx})"
+            style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
+            border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
+            color:var(--gold);transition:all .15s"
+            onmouseover="this.style.background='rgba(232,184,75,.15)'"
+            onmouseout="this.style.background='rgba(232,184,75,.08)'">
+            🔄 Vendre
+          </button>
+          ${(STATE.characters||[]).filter(x=>x.id!==char.id).length ? `
+          <button onclick="openSendInvModal('${char.id}', ${realIdx})"
+            style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
+            border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
+            color:#4f8cff;transition:all .15s"
+            onmouseover="this.style.background='rgba(79,140,255,.15)'"
+            onmouseout="this.style.background='rgba(79,140,255,.08)'"
+            title="Envoyer à un autre personnage">
+            📤 Envoyer
+          </button>` : ''}
+        </div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -828,15 +840,24 @@ function renderCharInventaire(c, canEdit) {
     html += `<div class="cs-inv-list">`;
     inv.forEach((item,i) => {
       const pv = item.prixVente || (item.prixAchat ? Math.round(item.prixAchat * 0.6) : 0);
+      // Autres personnages disponibles pour l'envoi (pas soi-même)
+      const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
       html += `<div class="cs-inv-row">
         <div class="cs-inv-main">
           <div class="cs-inv-name">${item.nom||'?'}</div>
-          ${item.description?`<div class="cs-inv-desc">${item.description}</div>`:''}
+          ${item.degats||item.toucher||item.ca ? `<div class="cs-inv-stats">
+            ${item.degats  ? `<span class="cs-inv-chip" style="color:#ff6b6b">⚔️ ${item.degats}</span>` : ''}
+            ${item.toucher ? `<span class="cs-inv-chip" style="color:#e8b84b">🎯 ${item.toucher}</span>` : ''}
+            ${item.ca      ? `<span class="cs-inv-chip" style="color:#4f8cff">🛡️ CA ${item.ca}</span>` : ''}
+            ${item.stats   ? `<span class="cs-inv-chip" style="color:#4f8cff">${item.stats}</span>` : ''}
+            ${item.trait   ? `<span class="cs-inv-chip" style="color:#b47fff;font-style:italic">${item.trait}</span>` : ''}
+          </div>` : (item.description ? `<div class="cs-inv-desc">${item.description}</div>` : '')}
         </div>
         <div class="cs-inv-meta">
           ${item.type?`<span class="badge badge-gold" style="font-size:0.68rem">${item.type}</span>`:''}
           <span class="cs-inv-qte">×${item.qte||1}</span>
           ${canEdit&&item.source==='boutique'?`<button class="cs-sell-btn" onclick="sellInvItem('${c.id}',${i})" title="Vendre (${pv} or)">🔄 ${pv} or</button>`:''}
+          ${canEdit&&otherChars.length?`<button class="cs-send-btn" onclick="openSendInvModal('${c.id}',${i})" title="Envoyer à un autre personnage">📤</button>`:''}
           ${canEdit?`<button class="btn-icon" onclick="deleteInvItem(${i})">🗑️</button>`:''}
         </div>
       </div>`;
@@ -1158,6 +1179,9 @@ async function sellInvItem(charId, invIndex) {
 
   if (item.itemId && window.sellInvItemFromShop) {
     await window.sellInvItemFromShop(charId, invIndex);
+    // Rafraîchir immédiatement après la vente via boutique
+    refreshOrDisplay(c);
+    renderCharSheet(c, window._currentCharTab || 'inventaire');
     return;
   }
 
@@ -1182,12 +1206,97 @@ async function sellInvItem(charId, invIndex) {
   showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
 
   refreshOrDisplay(c);
-  renderCharSheet(c, window._currentCharTab || 'combat');
+  renderCharSheet(c, window._currentCharTab || 'inventaire');
 }
 
 // ══════════════════════════════════════════════
-// ACTIONS
+// ENVOYER UN OBJET À UN AUTRE PERSONNAGE
 // ══════════════════════════════════════════════
+function openSendInvModal(charId, invIndex) {
+  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  if (!c) return;
+  const item = (c.inventaire||[])[invIndex];
+  if (!item) return;
+
+  const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
+  if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
+
+  openModal(`📤 Envoyer — ${item.nom||'Objet'}`, `
+    <div style="margin-bottom:1rem">
+      <div style="font-family:'Cinzel',serif;font-size:.9rem;color:var(--text);margin-bottom:.25rem">${item.nom||'?'}</div>
+      ${item.degats||item.toucher||item.ca ? `<div style="font-size:.78rem;color:var(--text-dim);display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.25rem">
+        ${item.degats  ? `<span style="color:#ff6b6b">⚔️ ${item.degats}</span>` : ''}
+        ${item.toucher ? `<span style="color:#e8b84b">🎯 ${item.toucher}</span>` : ''}
+        ${item.ca      ? `<span style="color:#4f8cff">🛡️ CA ${item.ca}</span>` : ''}
+        ${item.stats   ? `<span style="color:#4f8cff">${item.stats}</span>` : ''}
+        ${item.trait   ? `<span style="color:#b47fff;font-style:italic">${item.trait}</span>` : ''}
+      </div>` : (item.description ? `<div style="font-size:.78rem;color:var(--text-dim)">${item.description}</div>` : '')}
+    </div>
+
+    <div class="form-group">
+      <label>Envoyer à</label>
+      <div style="display:flex;flex-direction:column;gap:.4rem" id="send-char-list">
+        ${otherChars.map(target => `
+          <label style="display:flex;align-items:center;gap:.75rem;padding:.6rem .8rem;
+            border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);
+            cursor:pointer;transition:all .15s"
+            onmouseover="this.style.borderColor='var(--gold)';this.style.background='rgba(232,184,75,.06)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
+            <input type="radio" name="send-target" value="${target.id}"
+              style="accent-color:var(--gold)">
+            <div>
+              <div style="font-family:'Cinzel',serif;font-size:.82rem;color:var(--text)">${target.nom||'?'}</div>
+              ${target.ownerPseudo ? `<div style="font-size:.68rem;color:var(--text-dim)">${target.ownerPseudo}</div>` : ''}
+            </div>
+          </label>`).join('')}
+      </div>
+    </div>
+
+    <button class="btn btn-gold" style="width:100%;margin-top:.75rem"
+      onclick="sendInvItem('${charId}', ${invIndex})">
+      📤 Envoyer
+    </button>
+  `);
+}
+
+async function sendInvItem(fromCharId, invIndex) {
+  const fromChar = STATE.characters?.find(x => x.id === fromCharId) || STATE.activeChar;
+  if (!fromChar) return;
+
+  const targetId = document.querySelector('input[name="send-target"]:checked')?.value;
+  if (!targetId) { showNotif('Sélectionne un personnage cible.','error'); return; }
+
+  const toChar = STATE.characters?.find(x => x.id === targetId);
+  if (!toChar) { showNotif('Personnage introuvable.','error'); return; }
+
+  const fromInv = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
+  const item    = fromInv[invIndex];
+  if (!item) return;
+
+  if (!confirm(`Envoyer "${item.nom||'cet objet'}" à ${toChar.nom||'?'} ?`)) return;
+
+  // Retirer de l'inventaire source
+  fromInv.splice(invIndex, 1);
+
+  // Ajouter à l'inventaire cible
+  const toInv = Array.isArray(toChar.inventaire) ? [...toChar.inventaire] : [];
+  toInv.push({ ...item }); // copie complète de l'objet
+
+  // Sauvegarder les deux personnages
+  await Promise.all([
+    updateInCol('characters', fromCharId, { inventaire: fromInv }),
+    updateInCol('characters', targetId,   { inventaire: toInv }),
+  ]);
+
+  fromChar.inventaire = fromInv;
+  toChar.inventaire   = toInv;
+
+  closeModal();
+  showNotif(`📤 "${item.nom||'Objet'}" envoyé à ${toChar.nom||'?'} !`, 'success');
+
+  // Rafraîchir la fiche du personnage actif
+  renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
+}
 async function adjustStat(stat, delta, charId) {
   const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
   if (!c) return;
@@ -1752,7 +1861,7 @@ function deleteCharPhoto(id) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   selectChar, filterAdminChars,
-  sellInvItem,
+  sellInvItem, openSendInvModal, sendInvItem,
   calcOr, refreshOrDisplay, calcPalier,
   selectNoyau, runeIncrement, runeDecrement,
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
