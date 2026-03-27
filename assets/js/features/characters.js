@@ -1850,33 +1850,77 @@ function editEquipSlot(slot) {
   const equipped = (c.equipement||{})[slot]||{};
   const isWeapon = slot.startsWith('Main');
 
-  // Déterminer les types d'items compatibles selon le slot
-  const SLOT_TYPES = {
-    'Main principale':  ['⚔️ Arme', 'arme', 'Arme', 'weapon', 'arme 1m', 'arme 2m', 'Épée', 'epee', 'Lance', 'Hache', 'Arc', 'Baguette', 'Dague'],
-    'Main secondaire':  ['⚔️ Arme', 'arme', 'Arme', 'weapon', 'Bouclier', 'arme 1m', 'Dague', 'Baguette'],
-    'Tête':             ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Casque', 'Heaume', 'Chapeau', 'Cagoule'],
-    'Torse':            ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Cuirasse', 'Tunique', 'Robe'],
-    'Bottes':           ['🛡️ Armure', 'Armure', 'armure', 'armor', 'Botte', 'Sandale'],
-    'Amulette':         ['Bijou', 'Accessoire', 'Amulette', 'Collier', 'Pendentif', '📦 Libre', 'libre'],
-    'Anneau':           ['Bijou', 'Accessoire', 'Anneau', 'Bague', '📦 Libre', 'libre'],
-    'Objet magique':    ['Accessoire', 'Objet magique', 'Relique', '📦 Libre', 'libre', 'Rare', 'Légendaire'],
+  // ── Règles de compatibilité par slot ────────────────────────────────────
+  // On filtre d'abord par les champs structurés (format, slotArmure, typeArmure, template)
+  // puis on accepte les items sans champ structuré comme fallback (compatibilité anciens items)
+
+  const ARMES_1M_CAC  = ['Arme 1M CaC Phy.'];
+  const ARMES_2M      = ['Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'];
+  const TOUTES_ARMES  = ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'];
+
+  // Définir quels formats d'arme vont dans quel slot
+  // Main principale : toutes les armes
+  // Main secondaire : armes 1M seulement (+ bouclier = pas de template arme)
+  const SLOT_ARME_FORMATS = {
+    'Main principale': TOUTES_ARMES,
+    'Main secondaire': ARMES_1M_CAC,
   };
 
-  const compatibleTypes = SLOT_TYPES[slot] || [];
+  // Slots d'armure → [slotArmure compatible, typeArmure compatible ou null=tous]
+  const SLOT_ARMURE = {
+    'Tête':    { slot: 'Tête',  types: null },
+    'Torse':   { slot: 'Torse', types: null },
+    'Bottes':  { slot: 'Pieds', types: null },
+    'Amulette':    null, // pas d'armure, items libres
+    'Anneau':      null,
+    'Objet magique': null,
+  };
+
   const inv = c.inventaire||[];
 
-  // Filtrer les items de l'inventaire compatibles avec ce slot
+  // Filtrer les items compatibles avec ce slot
   const compatibles = inv.filter(item => {
     if (!item.nom) return false;
-    if (compatibleTypes.length === 0) return true;
-    const t = (item.type||'').toLowerCase();
-    return compatibleTypes.some(ct => t.includes(ct.toLowerCase()) || ct.toLowerCase().includes(t));
+    const tpl = item.template || '';
+
+    if (isWeapon) {
+      const formats = SLOT_ARME_FORMATS[slot] || TOUTES_ARMES;
+      if (tpl === 'arme' || item.format) {
+        // Item structuré : filtrer par format
+        return formats.includes(item.format);
+      }
+      // Item non structuré (ancien format) : accepter si le type ressemble à une arme
+      const t = (item.type||'').toLowerCase();
+      return ['arme','weapon','épée','lance','hache','arc','dague','baguette','baton'].some(k => t.includes(k));
+    }
+
+    // Slots d'armure structurés
+    const armureRule = SLOT_ARMURE[slot];
+    if (armureRule !== undefined) {
+      if (armureRule === null) {
+        // Slot accessoire : accepter items libres/classiques seulement
+        return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure);
+      }
+      if (tpl === 'armure' || item.slotArmure) {
+        // Item structuré : vérifier slotArmure
+        return item.slotArmure === armureRule.slot;
+      }
+      // Item non structuré : accepter si type ressemble à armure
+      const t = (item.type||'').toLowerCase();
+      return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
+    }
+
+    return false;
   });
 
   // Options pour le select
-  const invOptions = compatibles.map((item, idx) =>
-    `<option value="inv:${idx}" ${equipped.nom===item.nom?'selected':''}>${item.nom}${item.type?' ('+item.type+')':''}</option>`
-  ).join('');
+  const invOptions = compatibles.map((item, idx) => {
+    // Label enrichi avec les infos structurées
+    let label = item.nom;
+    if (item.format) label += ` — ${item.format}`;
+    else if (item.slotArmure && item.typeArmure) label += ` — ${item.typeArmure}`;
+    return `<option value="inv:${idx}" ${equipped.nom===item.nom?'selected':''}>${label}</option>`;
+  }).join('');
 
   const hasCompat = compatibles.length > 0;
 
@@ -1933,36 +1977,60 @@ function editEquipSlot(slot) {
 // Pré-remplir les champs depuis l'item sélectionné dans l'inventaire
 function previewEquipFromInv(val, slot) {
   if (!val || !val.startsWith('inv:')) return;
-  const idx = parseInt(val.split(':')[1]);
+  const idx  = parseInt(val.split(':')[1]);
   const item = (window._equipCompatibles||[])[idx];
   if (!item) return;
 
-  // Remplir nom et trait depuis l'inventaire
   const nomEl   = document.getElementById('eq-nom');
   const traitEl = document.getElementById('eq-trait');
   if (nomEl)   nomEl.value   = item.nom||'';
-  if (traitEl) traitEl.value = item.trait||item.type||'';
+  if (traitEl) traitEl.value = item.trait||'';
 
-  // Remplir les stats si l'item a des données de boutique
   const isWeapon = slot.startsWith('Main');
   if (isWeapon) {
     if (item.degats && document.getElementById('eq-degats'))
       document.getElementById('eq-degats').value = item.degats;
+    // Déduire stat d'attaque depuis le format
+    if (item.format) {
+      const statSel = document.getElementById('eq-stat-attaque');
+      if (statSel) {
+        if (item.format.includes('Mag.'))  statSel.value = 'intelligence';
+        else if (item.format.includes('Dist.')) statSel.value = 'dexterite';
+        else statSel.value = 'force';
+      }
+    }
+    // Stocker le format pour saveEquipSlot
+    window._equipSelFormat = item.format||'';
   } else {
-    // Bonus stats depuis item boutique
-    ['fo','dex','in','sa','co','ch','ca'].forEach(k => {
+    // Stocker typeArmure pour saveEquipSlot
+    window._equipSelTypeArmure = item.typeArmure||'';
+    window._equipSelSlotArmure = item.slotArmure||'';
+    // Bonus stats depuis item boutique (valeurs numériques)
+    ['fo','dex','in','sa','co','ch'].forEach(k => {
       const el = document.getElementById('eq-'+k);
       if (el && item[k] !== undefined) el.value = item[k];
     });
+    // CA bonus
+    const caEl = document.getElementById('eq-ca');
+    if (caEl && item.ca) caEl.value = parseInt(item.ca)||0;
   }
 
-  // Preview
+  // Preview enrichi
   const preview = document.getElementById('eq-inv-preview');
   if (preview) {
-    preview.innerHTML = `<div class="cs-equip-inv-item">
-      <strong>${item.nom}</strong>
-      ${item.type?`<span class="badge badge-gold" style="font-size:0.65rem">${item.type}</span>`:''}
-      ${item.description?`<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem">${item.description}</div>`:''}
+    const tags = [
+      item.format && `<span class="badge badge-gold" style="font-size:.65rem">${item.format}</span>`,
+      item.slotArmure && `<span class="badge badge-gold" style="font-size:.65rem">${item.slotArmure}</span>`,
+      item.typeArmure && `<span class="badge badge-gold" style="font-size:.65rem">${item.typeArmure}</span>`,
+      item.degats && `<span style="font-size:.75rem;color:#ff6b6b">⚔️ ${item.degats}</span>`,
+      item.toucher && `<span style="font-size:.75rem;color:#e8b84b">🎯 ${item.toucher}</span>`,
+      item.ca && `<span style="font-size:.75rem;color:#4f8cff">🛡️ CA +${item.ca}</span>`,
+    ].filter(Boolean).join(' ');
+    preview.innerHTML = `<div class="cs-equip-inv-item" style="margin-top:.5rem;padding:.5rem .75rem;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border)">
+      <strong style="font-size:.85rem">${item.nom}</strong>
+      ${tags?`<div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.25rem">${tags}</div>`:''}
+      ${item.stats?`<div style="font-size:.72rem;color:#4f8cff;margin-top:.2rem">${item.stats}</div>`:''}
+      ${item.trait?`<div style="font-size:.72rem;color:#b47fff;font-style:italic;margin-top:.1rem">${item.trait}</div>`:''}
     </div>`;
   }
 }
@@ -1992,6 +2060,9 @@ async function saveEquipSlot(slot) {
       co: parseInt(document.getElementById('eq-co')?.value)||0,
       ch: parseInt(document.getElementById('eq-ch')?.value)||0,
       ca: parseInt(document.getElementById('eq-ca')?.value)||0,
+      // Conserver les métadonnées armure pour calcul CA
+      typeArmure: window._equipSelTypeArmure||'',
+      slotArmure: window._equipSelSlotArmure||slot,
     };
   }
   c.equipement = equip;
