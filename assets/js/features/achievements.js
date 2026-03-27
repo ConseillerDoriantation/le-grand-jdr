@@ -84,8 +84,6 @@ function openAchievementModal(id = null) {
         </div>
         <div style="font-size:0.7rem;color:var(--text-dim);margin-top:2px">JPG · PNG · WebP — max 5 Mo</div>
       </div>
-      <input type="file" id="ach-file" accept="image/*" style="display:none"
-        onchange="window._achFile(this.files[0])">
 
       <!-- Zone crop (cachée initialement) -->
       <div id="ach-crop-wrap" style="display:none;margin-top:1rem">
@@ -139,14 +137,39 @@ function openAchievementModal(id = null) {
   };
   window._achSelectCat(ex?.categorie || 'epique');
 
-  // Handler fichier
-  window._achFile = (file) => {
+  // ── Input file créé en JS (évite l'orphelin DOM via innerHTML) ────────────
+  const achFileInput = document.createElement('input');
+  achFileInput.type   = 'file';
+  achFileInput.id     = 'ach-file';
+  achFileInput.accept = 'image/*';
+  achFileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0;pointer-events:none';
+  document.body.appendChild(achFileInput);
+
+  const handleAchFile = (file) => {
     if (!file?.type.startsWith('image/')) return;
     if (file.size > 5 * 1024 * 1024) { showNotif('Image trop lourde (max 5 Mo).', 'error'); return; }
     const r = new FileReader();
     r.onload = (e) => _initCrop(e.target.result);
     r.readAsDataURL(file);
   };
+
+  achFileInput.addEventListener('change', () => handleAchFile(achFileInput.files[0]));
+  window._achFile = handleAchFile;
+
+  // Rebind la drop zone avec addEventListener (pas onclick inline)
+  const achDropZone = document.getElementById('ach-drop-zone');
+  if (achDropZone) {
+    achDropZone.onclick     = () => achFileInput.click();
+    achDropZone.ondragover  = (e) => { e.preventDefault(); achDropZone.style.borderColor = 'var(--gold)'; };
+    achDropZone.ondragleave = ()  => { achDropZone.style.borderColor = 'var(--border-strong)'; };
+    achDropZone.ondrop      = (e) => { e.preventDefault(); achDropZone.style.borderColor = 'var(--border-strong)'; handleAchFile(e.dataTransfer.files[0]); };
+  }
+
+  // Nettoyer quand le modal se ferme
+  const achObs = new MutationObserver(() => {
+    if (!document.getElementById('ach-drop-zone')) { achFileInput.remove(); achObs.disconnect(); }
+  });
+  achObs.observe(document.body, { childList: true, subtree: true });
 }
 
 // ── CROPPER ───────────────────────────────────────────────────────────────────
