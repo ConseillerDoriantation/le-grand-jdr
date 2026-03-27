@@ -103,7 +103,7 @@ const PAGES = {
     const chars = await loadChars(uid);
     STATE.characters = chars;
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div><div class="page-subtitle">Gérez vos fiches de personnage</div></div>`;
+    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Personnages'}</span></div><div class="page-subtitle">Gérez vos fiches de personnage</div></div>`;
     if (STATE.isAdmin && chars.length > 0) {
       const byUser = {};
       chars.forEach(c => { if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = []; byUser[c.ownerPseudo].push(c); });
