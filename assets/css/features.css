@@ -3305,3 +3305,95 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .best-attack-row { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
 [data-theme="light"] .best-atk-badge { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.09); }
 [data-theme="light"] .best-trait { background: rgba(37,99,235,0.04); border-color: rgba(37,99,235,0.20); }
+
+/* ══════════════════════════════════════════════════
+   SET D'ARMURE — couleurs des tags et de la bulle
+══════════════════════════════════════════════════ */
+.cs-combat-status-row {
+  margin-top: 0.75rem;
+}
+
+.cs-armor-set-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 32px;
+  padding: 0.36rem 0.78rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.cs-armor-set-chip--light,
+.cs-set-mini-chip--light,
+.cs-armor-type--light {
+  background: rgba(79,140,255,0.12) !important;
+  border-color: rgba(79,140,255,0.34) !important;
+  color: #8bb3ff !important;
+}
+
+.cs-armor-set-chip--medium,
+.cs-set-mini-chip--medium,
+.cs-armor-type--medium {
+  background: rgba(34,197,94,0.12) !important;
+  border-color: rgba(34,197,94,0.34) !important;
+  color: #6ee7a8 !important;
+}
+
+.cs-armor-set-chip--heavy,
+.cs-set-mini-chip--heavy,
+.cs-armor-type--heavy {
+  background: rgba(239,68,68,0.12) !important;
+  border-color: rgba(239,68,68,0.34) !important;
+  color: #ff8a96 !important;
+}
+
+.cs-armor-set-chip--neutral,
+.cs-set-mini-chip--neutral,
+.cs-armor-type--neutral {
+  background: rgba(255,255,255,0.05) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+  color: var(--text-soft) !important;
+}
+
+[data-theme="light"] .cs-armor-set-chip {
+  background: rgba(0,0,0,0.03);
+  border-color: rgba(0,0,0,0.08);
+  color: var(--text-soft);
+}
+
+[data-theme="light"] .cs-armor-set-chip--light,
+[data-theme="light"] .cs-set-mini-chip--light,
+[data-theme="light"] .cs-armor-type--light {
+  background: rgba(37,99,235,0.08) !important;
+  border-color: rgba(37,99,235,0.22) !important;
+  color: #1d4ed8 !important;
+}
+
+[data-theme="light"] .cs-armor-set-chip--medium,
+[data-theme="light"] .cs-set-mini-chip--medium,
+[data-theme="light"] .cs-armor-type--medium {
+  background: rgba(5,150,105,0.09) !important;
+  border-color: rgba(5,150,105,0.22) !important;
+  color: #047857 !important;
+}
+
+[data-theme="light"] .cs-armor-set-chip--heavy,
+[data-theme="light"] .cs-set-mini-chip--heavy,
+[data-theme="light"] .cs-armor-type--heavy {
+  background: rgba(220,38,38,0.08) !important;
+  border-color: rgba(220,38,38,0.22) !important;
+  color: #b91c1c !important;
+}
+
+[data-theme="light"] .cs-armor-set-chip--neutral,
+[data-theme="light"] .cs-set-mini-chip--neutral,
+[data-theme="light"] .cs-armor-type--neutral {
+  background: rgba(0,0,0,0.03) !important;
+  border-color: rgba(0,0,0,0.08) !important;
+  color: var(--text-soft) !important;
+}
