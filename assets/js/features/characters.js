@@ -345,7 +345,9 @@ function renderCharSheet(c, keepTab) {
     const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
     const bonusStr = bonus >= 0 ? `+${bonus}` : String(bonus);
     const bonusTone = bonus > 0 ? 'is-pos' : bonus < 0 ? 'is-neg' : 'is-zero';
-    return `<div class="cs-carac-card" title="${st.label}">
+    return `<div class="cs-carac-card ${canEdit ? 'is-clickable' : ''}"
+             title="${canEdit ? `Modifier la base de ${st.label}` : st.label}"
+             ${canEdit ? `onclick="inlineEditStatFromCard(event,'${c.id}','${st.key}',this)"` : ''}>
       <div class="cs-carac-head">
         <div class="cs-carac-abbr">${st.abbr}</div>
         <div class="cs-carac-mod-badge ${mClass}">${mStr}</div>
@@ -355,8 +357,8 @@ function renderCharSheet(c, keepTab) {
       <div class="cs-carac-breakdown">
         <div class="cs-carac-breakdown-item">
           <span class="cs-carac-breakdown-label">Base</span>
-          <span class="cs-carac-breakdown-value ${canEdit?'cs-editable':''}"
-                ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}>${base}</span>
+          <span class="cs-carac-breakdown-value ${canEdit ? 'cs-editable js-stat-base' : ''}"
+                ${canEdit ? `title="Modifier la base"` : ''}>${base}</span>
         </div>
         <div class="cs-carac-breakdown-item">
           <span class="cs-carac-breakdown-label">Équip.</span>
@@ -614,6 +616,19 @@ function inlineEditNum(charId, field, el, min=0, max=99999) {
   el.replaceWith(input);
   input.focus();
   input.select();
+}
+
+// Inline stat edit — click anywhere on the carac card
+function inlineEditStatFromCard(event, charId, statKey, cardEl) {
+  if (!cardEl) return;
+
+  if (event?.target?.closest('input, button, textarea, select, a')) return;
+  if (cardEl.querySelector('input.cs-inline-input')) return;
+
+  const baseEl = cardEl.querySelector('.js-stat-base');
+  if (!baseEl) return;
+
+  inlineEditStat(charId, statKey, baseEl);
 }
 
 // Inline stat edit — click on carac box value
