@@ -115,11 +115,98 @@ function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
   return { equipement: nextEquip, statsBonus, changed, removedSlots };
 }
 
+function normalizeArmorType(type = '') {
+  const raw = String(type || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!raw) return '';
+  if (['leger', 'legere', 'light'].includes(raw)) return 'Légère';
+  if (['intermediaire', 'medium', 'mid'].includes(raw)) return 'Intermédiaire';
+  if (['lourd', 'lourde', 'heavy'].includes(raw)) return 'Lourde';
+  return String(type || '').trim();
+}
+
+function getArmorSetData(c = {}) {
+  const equip = c?.equipement || {};
+  const trackedSlots = ['Tête', 'Torse', 'Bottes'];
+  const slots = trackedSlots.map(slot => {
+    const item = equip?.[slot] || {};
+    return {
+      slot,
+      item,
+      type: normalizeArmorType(item?.typeArmure),
+      equipped: Boolean(item?.nom),
+    };
+  });
+
+  const equippedCount = slots.filter(entry => entry.equipped).length;
+  const typedSlots = slots.filter(entry => entry.type);
+  const counts = typedSlots.reduce((acc, entry) => {
+    acc[entry.type] = (acc[entry.type] || 0) + 1;
+    return acc;
+  }, {});
+
+  const fullType = ['Légère', 'Intermédiaire', 'Lourde']
+    .find(type => counts[type] === trackedSlots.length) || '';
+
+  const effectByType = {
+    'Légère': {
+      label: 'Légère',
+      shortLabel: 'Léger',
+      bonusText: '-2 PM / Sort',
+      detail: 'Réduction du coût des sorts de 2 PM.',
+      modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
+    },
+    'Intermédiaire': {
+      label: 'Intermédiaire',
+      shortLabel: 'Intermédiaire',
+      bonusText: 'Toucher +2',
+      detail: 'Bonus de +2 aux jets de toucher.',
+      modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
+    },
+    'Lourde': {
+      label: 'Lourde',
+      shortLabel: 'Lourd',
+      bonusText: 'Réduction de 2 dégâts subis',
+      detail: 'Réduction passive de 2 dégâts subis.',
+      modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
+    },
+  };
+
+  const activeEffect = fullType ? effectByType[fullType] : null;
+  const mixed = !fullType && Object.keys(counts).length > 1;
+  const dominantType = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
+  return {
+    trackedSlots,
+    slots,
+    counts,
+    equippedCount,
+    fullType,
+    dominantType,
+    mixed,
+    isComplete: equippedCount === trackedSlots.length,
+    isActive: Boolean(activeEffect),
+    activeEffect,
+    modifiers: activeEffect?.modifiers || { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 },
+  };
+}
+
+function applyFlatBonusToRollText(text = '', bonus = 0) {
+  const raw = String(text || '').trim();
+  if (!raw || !bonus) return raw;
+  const match = raw.match(/^(.*?)([+-]\s*\d+)\s*$/);
+  if (!match) return `${raw} ${modStr(bonus)}`;
+  const prefix = match[1].trimEnd();
+  const current = parseInt(match[2].replace(/\s+/g, ''), 10) || 0;
+  return `${prefix} ${modStr(current + bonus)}`;
+}
+
 function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
   const statKey = item.toucherStat || fallbackKey;
-  if (item.toucherStat) return `1d20 ${modStr(getMod(c, statKey))}`;
-  if (item.toucher) return item.toucher;
-  return `1d20 ${modStr(getMod(c, fallbackKey))}`;
+  const setBonus = getArmorSetData(c).modifiers.toucherBonus || 0;
+  if (item.toucherStat) return `1d20 ${modStr(getMod(c, statKey) + setBonus)}`;
+  if (item.toucher) return applyFlatBonusToRollText(item.toucher, setBonus);
+  return `1d20 ${modStr(getMod(c, fallbackKey) + setBonus)}`;
 }
 
 function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
@@ -770,6 +857,7 @@ function renderCharEquip(c, canEdit) {
   const equip = c.equipement||{};
   const weaponSlots = ['Main principale','Main secondaire'];
   const armorSlots = ['Tête','Torse','Bottes','Amulette','Anneau','Objet magique'];
+  const armorSet = getArmorSetData(c);
   const s = c.stats||{}; const sb = c.statsBonus||{};
   const fo = (s.force||10)+(sb.force||0);
   const dex = (s.dexterite||8)+(sb.dexterite||0);
@@ -841,6 +929,50 @@ function renderCharEquip(c, canEdit) {
     🎲 Critique : Maximum des dés + relance les dés de dégâts.
   </div></div>`;
 
+  const armorSetLabel = armorSet.isActive
+    ? armorSet.activeEffect?.shortLabel || armorSet.activeEffect?.label || armorSet.fullType
+    : armorSet.mixed
+      ? 'Mixte'
+      : armorSet.dominantType || 'Aucun';
+  const armorSetStatus = armorSet.isActive
+    ? 'Set complet actif'
+    : armorSet.isComplete
+      ? 'Set complet non harmonisé'
+      : `${armorSet.equippedCount}/3 pièces équipées`;
+  const armorSetHint = armorSet.isActive
+    ? armorSet.activeEffect?.detail || ''
+    : armorSet.isComplete
+      ? 'Le bonus de set s’active uniquement avec Tête + Torse + Bottes du même type.'
+      : 'Équipe Tête, Torse et Bottes du même type pour activer un bonus de set.';
+
+  html += `<div class="cs-section">
+    <div class="cs-section-title">🧩 Set d'armure</div>
+    <div class="cs-set-panel ${armorSet.isActive ? 'active' : ''}">
+      <div class="cs-set-head">
+        <div>
+          <div class="cs-set-status">${armorSetStatus}</div>
+          <div class="cs-set-name">${armorSetLabel}</div>
+        </div>
+        <div class="cs-set-bonus ${armorSet.isActive ? 'active' : ''}">${armorSet.isActive ? armorSet.activeEffect?.bonusText || 'Bonus actif' : 'Aucun bonus actif'}</div>
+      </div>
+      <div class="cs-set-slots">
+        ${armorSet.slots.map(entry => `
+          <div class="cs-set-slot ${entry.type ? 'filled' : ''}">
+            <div class="cs-set-slot-label">${entry.slot}</div>
+            <div class="cs-set-slot-type">${entry.type || 'Vide'}</div>
+            <div class="cs-set-slot-item">${entry.item?.nom || 'Non équipé'}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="cs-set-footer">
+        <span>${armorSetHint}</span>
+        ${armorSet.isActive && armorSet.modifiers.toucherBonus ? `<span class="cs-set-mini-chip">Toucher +${armorSet.modifiers.toucherBonus} appliqué aux armes</span>` : ''}
+        ${armorSet.isActive && armorSet.modifiers.spellPmDelta ? `<span class="cs-set-mini-chip">Coût des sorts ${armorSet.modifiers.spellPmDelta}</span>` : ''}
+        ${armorSet.isActive && armorSet.modifiers.damageReduction ? `<span class="cs-set-mini-chip">Réduction ${armorSet.modifiers.damageReduction} dégâts</span>` : ''}
+      </div>
+    </div>
+  </div>`;
+
   // Actions
   html += `<div class="cs-section">
     <div class="cs-section-title">📋 Actions</div>
@@ -868,9 +1000,11 @@ function renderCharEquip(c, canEdit) {
   armorSlots.forEach(slot => {
     const item = equip[slot]||{};
     const bonuses = ['fo','dex','in','sa','co','ch','ca'].filter(k=>item[k]);
+    const typeLabel = normalizeArmorType(item.typeArmure || '');
     html += `<div class="cs-armor-card ${item.nom?'equipped':''}">
       <div class="cs-armor-slot">${slot}</div>
       <div class="cs-armor-name">${item.nom||'—'}</div>
+      ${typeLabel ? `<div class="cs-armor-type">${typeLabel}</div>` : ''}
       ${item.trait?`<div class="cs-armor-trait">${item.trait}</div>`:''}
       ${bonuses.length?`<div class="cs-armor-bonuses">${bonuses.map(k=>`<span class="badge badge-gold" style="font-size:0.6rem">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}</div>`:''}
       ${canEdit?`<button class="cs-equip-btn-sm" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
