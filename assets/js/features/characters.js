@@ -183,6 +183,33 @@ function getArmorSetData(c = {}) {
   const fullType = ['Légère', 'Intermédiaire', 'Lourde']
     .find(type => counts[type] === trackedSlots.length) || '';
 
+      const effectByType = {
+    'Légère': {
+      label: 'Légère',
+      shortLabel: 'Léger',
+      bonusText: '-2 PM / Sort',
+      chipText: 'Léger : Coût des sorts -2 PM',
+      tone: 'light',
+      modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
+    },
+    'Intermédiaire': {
+      label: 'Intermédiaire',
+      shortLabel: 'Intermédiaire',
+      bonusText: 'Toucher +2',
+      chipText: 'Intermédiaire : Toucher +2',
+      tone: 'medium',
+      modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
+    },
+    'Lourde': {
+      label: 'Lourde',
+      shortLabel: 'Lourd',
+      bonusText: 'Réduction de 2 dégâts subis',
+      chipText: 'Lourd : Réduction 2 dégâts',
+      tone: 'heavy',
+      modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
+    },
+  };
+  
   const activeEffect = fullType ? getArmorTypeMeta(fullType) : null;
   const mixed = !fullType && Object.keys(counts).length > 1;
   const dominantType = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
