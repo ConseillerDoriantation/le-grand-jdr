@@ -326,12 +326,12 @@ function renderCharSheet(c, keepTab) {
 
   // Stats inline
   const STATS = [
-    {key:'force',abbr:'Fo'},
-    {key:'dexterite',abbr:'Dex'},
-    {key:'constitution',abbr:'Co'},
-    {key:'intelligence',abbr:'Int'},
-    {key:'sagesse',abbr:'Sag'},
-    {key:'charisme',abbr:'Cha'},
+    {key:'force',abbr:'Fo',label:'Force'},
+    {key:'dexterite',abbr:'Dex',label:'Dextérité'},
+    {key:'constitution',abbr:'Co',label:'Constitution'},
+    {key:'intelligence',abbr:'Int',label:'Intelligence'},
+    {key:'sagesse',abbr:'Sag',label:'Sagesse'},
+    {key:'charisme',abbr:'Cha',label:'Charisme'},
   ];
   const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
   const sb = c.statsBonus||{};
@@ -344,18 +344,25 @@ function renderCharSheet(c, keepTab) {
     const mStr = m >= 0 ? '+'+m : String(m);
     const mClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
     const bonusStr = bonus >= 0 ? `+${bonus}` : String(bonus);
-    return `<div class="cs-carac-card">
-      <div class="cs-carac-abbr">${st.abbr}</div>
-      <div class="cs-carac-val">${total}</div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.68rem;line-height:1.2;color:var(--text-dim)">
-        <span>Base
-          <span class="${canEdit?'cs-editable':''}"
-                ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
-                style="font-weight:700;color:var(--text)">${base}</span>
-        </span>
-        <span>Équip. ${bonusStr}</span>
+    const bonusTone = bonus > 0 ? 'is-pos' : bonus < 0 ? 'is-neg' : 'is-zero';
+    return `<div class="cs-carac-card" title="${st.label}">
+      <div class="cs-carac-head">
+        <div class="cs-carac-abbr">${st.abbr}</div>
+        <div class="cs-carac-mod-badge ${mClass}">${mStr}</div>
       </div>
-      <div class="cs-carac-mod ${mClass}">${mStr}</div>
+      <div class="cs-carac-total-label">Total</div>
+      <div class="cs-carac-val">${total}</div>
+      <div class="cs-carac-breakdown">
+        <div class="cs-carac-breakdown-item">
+          <span class="cs-carac-breakdown-label">Base</span>
+          <span class="cs-carac-breakdown-value ${canEdit?'cs-editable':''}"
+                ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}>${base}</span>
+        </div>
+        <div class="cs-carac-breakdown-item">
+          <span class="cs-carac-breakdown-label">Équip.</span>
+          <span class="cs-carac-breakdown-value ${bonusTone}">${bonusStr}</span>
+        </div>
+      </div>
     </div>`;
   }).join('');
 
