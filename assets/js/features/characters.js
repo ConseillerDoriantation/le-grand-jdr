@@ -153,21 +153,24 @@ function getArmorSetData(c = {}) {
       label: 'Légère',
       shortLabel: 'Léger',
       bonusText: '-2 PM / Sort',
-      detail: 'Réduction du coût des sorts de 2 PM.',
+      chipText: 'Léger : Coût des sorts -2 PM',
+      tone: 'light',
       modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
     },
     'Intermédiaire': {
       label: 'Intermédiaire',
       shortLabel: 'Intermédiaire',
       bonusText: 'Toucher +2',
-      detail: 'Bonus de +2 aux jets de toucher.',
+      chipText: 'Intermédiaire : Toucher +2',
+      tone: 'medium',
       modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
     },
     'Lourde': {
       label: 'Lourde',
       shortLabel: 'Lourd',
       bonusText: 'Réduction de 2 dégâts subis',
-      detail: 'Réduction passive de 2 dégâts subis.',
+      chipText: 'Lourd : Réduction 2 dégâts',
+      tone: 'heavy',
       modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
     },
   };
@@ -927,51 +930,17 @@ function renderCharEquip(c, canEdit) {
 
   html += `<div class="cs-combat-info">
     🎲 Critique : Maximum des dés + relance les dés de dégâts.
-  </div></div>`;
-
-  const armorSetLabel = armorSet.isActive
-    ? armorSet.activeEffect?.shortLabel || armorSet.activeEffect?.label || armorSet.fullType
-    : armorSet.mixed
-      ? 'Mixte'
-      : armorSet.dominantType || 'Aucun';
-  const armorSetStatus = armorSet.isActive
-    ? 'Set complet actif'
-    : armorSet.isComplete
-      ? 'Set complet non harmonisé'
-      : `${armorSet.equippedCount}/3 pièces équipées`;
-  const armorSetHint = armorSet.isActive
-    ? armorSet.activeEffect?.detail || ''
-    : armorSet.isComplete
-      ? 'Le bonus de set s’active uniquement avec Tête + Torse + Bottes du même type.'
-      : 'Équipe Tête, Torse et Bottes du même type pour activer un bonus de set.';
-
-  html += `<div class="cs-section">
-    <div class="cs-section-title">🧩 Set d'armure</div>
-    <div class="cs-set-panel ${armorSet.isActive ? 'active' : ''}">
-      <div class="cs-set-head">
-        <div>
-          <div class="cs-set-status">${armorSetStatus}</div>
-          <div class="cs-set-name">${armorSetLabel}</div>
-        </div>
-        <div class="cs-set-bonus ${armorSet.isActive ? 'active' : ''}">${armorSet.isActive ? armorSet.activeEffect?.bonusText || 'Bonus actif' : 'Aucun bonus actif'}</div>
-      </div>
-      <div class="cs-set-slots">
-        ${armorSet.slots.map(entry => `
-          <div class="cs-set-slot ${entry.type ? 'filled' : ''}">
-            <div class="cs-set-slot-label">${entry.slot}</div>
-            <div class="cs-set-slot-type">${entry.type || 'Vide'}</div>
-            <div class="cs-set-slot-item">${entry.item?.nom || 'Non équipé'}</div>
-          </div>
-        `).join('')}
-      </div>
-      <div class="cs-set-footer">
-        <span>${armorSetHint}</span>
-        ${armorSet.isActive && armorSet.modifiers.toucherBonus ? `<span class="cs-set-mini-chip">Toucher +${armorSet.modifiers.toucherBonus} appliqué aux armes</span>` : ''}
-        ${armorSet.isActive && armorSet.modifiers.spellPmDelta ? `<span class="cs-set-mini-chip">Coût des sorts ${armorSet.modifiers.spellPmDelta}</span>` : ''}
-        ${armorSet.isActive && armorSet.modifiers.damageReduction ? `<span class="cs-set-mini-chip">Réduction ${armorSet.modifiers.damageReduction} dégâts</span>` : ''}
-      </div>
-    </div>
   </div>`;
+
+  if (armorSet.isActive) {
+    html += `<div class="cs-combat-status-row">
+      <span class="cs-armor-set-chip cs-armor-set-chip--${armorSet.activeEffect?.tone || 'neutral'}">
+        ${armorSet.activeEffect?.chipText || armorSet.activeEffect?.bonusText || ''}
+      </span>
+    </div>`;
+  }
+
+  html += `</div>`;
 
   // Actions
   html += `<div class="cs-section">
