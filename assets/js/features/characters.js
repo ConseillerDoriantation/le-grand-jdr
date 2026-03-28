@@ -2827,7 +2827,7 @@ Object.assign(window, {
   adjustStat, saveNotes,
   toggleSort, toggleQuete, deleteQuete, deleteSort, deleteInvItem, deleteChar,
   createNewChar,
-  inlineEditText, inlineEditNum, inlineEditStat,
+  inlineEditText, inlineEditNum, inlineEditStatFromCard, inlineEditStat,
   manageTitres, addTitre, removeTitre, saveTitres,
   addSort, editSort, openSortModal, runeIncrement, runeDecrement, updateSortPM, saveSort,
   editEquipSlot, saveEquipSlot, clearEquipSlot, equipSlotFromInv,
