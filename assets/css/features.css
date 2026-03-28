@@ -1180,14 +1180,34 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-armor-name { font-size: 0.82rem; font-weight: 600; color: var(--text); }
 .cs-armor-type {
   display: inline-flex;
+  align-items: center;
   margin-top: 0.35rem;
   padding: 0.16rem 0.48rem;
   border-radius: 999px;
-  background: rgba(79,140,255,0.08);
-  border: 1px solid rgba(79,140,255,0.22);
-  color: #8bb3ff;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-soft);
   font-size: 0.62rem;
   font-weight: 700;
+  line-height: 1.1;
+}
+.cs-armor-card .cs-armor-type.cs-armor-type--light,
+.cs-armor-card .cs-armor-type[data-armor-tone="light"] {
+  color: var(--blue);
+  background: rgba(106,167,255,0.12);
+  border-color: rgba(106,167,255,0.3);
+}
+.cs-armor-card .cs-armor-type.cs-armor-type--medium,
+.cs-armor-card .cs-armor-type[data-armor-tone="medium"] {
+  color: var(--green);
+  background: rgba(34,195,142,0.12);
+  border-color: rgba(34,195,142,0.3);
+}
+.cs-armor-card .cs-armor-type.cs-armor-type--heavy,
+.cs-armor-card .cs-armor-type[data-armor-tone="heavy"] {
+  color: var(--crimson-light);
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.3);
 }
 .cs-armor-trait { font-size: 0.68rem; color: var(--text-muted); font-style: italic; margin-top: 0.25rem; }
 .cs-armor-bonuses { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 0.35rem; }
@@ -1279,6 +1299,29 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 [data-theme="light"] .cs-inline-input { background: #ffffff; border-color: rgba(37,99,235,0.40); }
 [data-theme="light"] .cs-weapon-row { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
 [data-theme="light"] .cs-armor-card { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-armor-type {
+  background: rgba(0,0,0,0.03);
+  border-color: rgba(0,0,0,0.08);
+  color: var(--text-soft);
+}
+[data-theme="light"] .cs-armor-card .cs-armor-type.cs-armor-type--light,
+[data-theme="light"] .cs-armor-card .cs-armor-type[data-armor-tone="light"] {
+  background: rgba(37,99,235,0.10);
+  border-color: rgba(37,99,235,0.24);
+  color: #1d4ed8;
+}
+[data-theme="light"] .cs-armor-card .cs-armor-type.cs-armor-type--medium,
+[data-theme="light"] .cs-armor-card .cs-armor-type[data-armor-tone="medium"] {
+  background: rgba(22,163,74,0.10);
+  border-color: rgba(22,163,74,0.22);
+  color: #15803d;
+}
+[data-theme="light"] .cs-armor-card .cs-armor-type.cs-armor-type--heavy,
+[data-theme="light"] .cs-armor-card .cs-armor-type[data-armor-tone="heavy"] {
+  background: rgba(220,38,38,0.10);
+  border-color: rgba(220,38,38,0.22);
+  color: #b91c1c;
+}
 [data-theme="light"] .cs-sort-card { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
 [data-theme="light"] .cs-sort-card.active { border-color: rgba(37,99,235,0.30); }
 [data-theme="light"] .cs-inv-row { background: rgba(0,0,0,0.025); border-color: rgba(0,0,0,0.08); }
