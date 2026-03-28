@@ -117,7 +117,7 @@ function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
 
 function normalizeArmorType(type = '') {
   const raw = String(type || '').trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    .normalize('NFD').replace(/[̀-ͯ]/g, '');
   if (!raw) return '';
   if (['leger', 'legere', 'light'].includes(raw)) return 'Légère';
   if (['intermediaire', 'medium', 'mid'].includes(raw)) return 'Intermédiaire';
@@ -125,65 +125,9 @@ function normalizeArmorType(type = '') {
   return String(type || '').trim();
 }
 
-
-function getArmorTypeMeta(type = '') {
-  const label = normalizeArmorType(type);
-  if (label === 'Légère') {
-    return {
-      label,
-      tone: 'light',
-      setChipText: 'Léger : Coût des sorts -2 PM',
-      modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
-    };
-  }
-  if (label === 'Intermédiaire') {
-    return {
-      label,
-      tone: 'medium',
-      setChipText: 'Intermédiaire : Toucher +2',
-      modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
-    };
-  }
-  if (label === 'Lourde') {
-    return {
-      label,
-      tone: 'heavy',
-      setChipText: 'Lourd : Réduction 2 dégâts',
-      modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
-    };
-  }
-  return {
-    label,
-    tone: 'neutral',
-    setChipText: '',
-    modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 },
-  };
-}
-
-function getArmorSetData(c = {}) {
-  const equip = c?.equipement || {};
-  const trackedSlots = ['Tête', 'Torse', 'Bottes'];
-  const slots = trackedSlots.map(slot => {
-    const item = equip?.[slot] || {};
-    return {
-      slot,
-      item,
-      type: normalizeArmorType(item?.typeArmure),
-      equipped: Boolean(item?.nom),
-    };
-  });
-
-  const equippedCount = slots.filter(entry => entry.equipped).length;
-  const typedSlots = slots.filter(entry => entry.type);
-  const counts = typedSlots.reduce((acc, entry) => {
-    acc[entry.type] = (acc[entry.type] || 0) + 1;
-    return acc;
-  }, {});
-
-  const fullType = ['Légère', 'Intermédiaire', 'Lourde']
-    .find(type => counts[type] === trackedSlots.length) || '';
-
-      const effectByType = {
+function getArmorSetEffectMeta(type = '') {
+  const normalizedType = normalizeArmorType(type);
+  const effectByType = {
     'Légère': {
       label: 'Légère',
       shortLabel: 'Léger',
@@ -209,8 +153,38 @@ function getArmorSetData(c = {}) {
       modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
     },
   };
-  
-  const activeEffect = fullType ? getArmorTypeMeta(fullType) : null;
+  return effectByType[normalizedType] || null;
+}
+
+function getArmorSetChipText(setData = {}) {
+  if (!setData?.isActive) return '';
+  return setData.activeEffect?.chipText || getArmorSetEffectMeta(setData.fullType)?.chipText || '';
+}
+
+function getArmorSetData(c = {}) {
+  const equip = c?.equipement || {};
+  const trackedSlots = ['Tête', 'Torse', 'Bottes'];
+  const slots = trackedSlots.map(slot => {
+    const item = equip?.[slot] || {};
+    return {
+      slot,
+      item,
+      type: normalizeArmorType(item?.typeArmure),
+      equipped: Boolean(item?.nom),
+    };
+  });
+
+  const equippedCount = slots.filter(entry => entry.equipped).length;
+  const typedSlots = slots.filter(entry => entry.type);
+  const counts = typedSlots.reduce((acc, entry) => {
+    acc[entry.type] = (acc[entry.type] || 0) + 1;
+    return acc;
+  }, {});
+
+  const fullType = ['Légère', 'Intermédiaire', 'Lourde']
+    .find(type => counts[type] === trackedSlots.length) || '';
+
+  const activeEffect = getArmorSetEffectMeta(fullType);
   const mixed = !fullType && Object.keys(counts).length > 1;
   const dominantType = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 
@@ -896,6 +870,7 @@ function renderCharEquip(c, canEdit) {
   const weaponSlots = ['Main principale','Main secondaire'];
   const armorSlots = ['Tête','Torse','Bottes','Amulette','Anneau','Objet magique'];
   const armorSet = getArmorSetData(c);
+  const armorSetChipText = getArmorSetChipText(armorSet);
   const s = c.stats||{}; const sb = c.statsBonus||{};
   const fo = (s.force||10)+(sb.force||0);
   const dex = (s.dexterite||8)+(sb.dexterite||0);
@@ -967,10 +942,10 @@ function renderCharEquip(c, canEdit) {
     🎲 Critique : Maximum des dés + relance les dés de dégâts.
   </div>`;
 
-  if (armorSet.isActive) {
+  if (armorSet.isActive && armorSetChipText) {
     html += `<div class="cs-combat-status-row">
-      <span class="cs-armor-set-chip cs-armor-set-chip--${armorSet.activeEffect?.tone || 'neutral'}">
-        ${armorSet.activeEffect?.chipText || armorSet.activeEffect?.bonusText || ''}
+      <span class="cs-armor-set-chip cs-armor-set-chip--${armorSet.activeEffect?.tone || 'neutral'}" title="${armorSetChipText}">
+        <span class="cs-armor-set-chip-text">${armorSetChipText}</span>
       </span>
     </div>`;
   }
@@ -1004,11 +979,11 @@ function renderCharEquip(c, canEdit) {
   armorSlots.forEach(slot => {
     const item = equip[slot]||{};
     const bonuses = ['fo','dex','in','sa','co','ch','ca'].filter(k=>item[k]);
-    const armorTypeMeta = getArmorTypeMeta(item.typeArmure || '');
+    const typeLabel = normalizeArmorType(item.typeArmure || '');
     html += `<div class="cs-armor-card ${item.nom?'equipped':''}">
       <div class="cs-armor-slot">${slot}</div>
       <div class="cs-armor-name">${item.nom||'—'}</div>
-      ${armorTypeMeta.label ? `<div class="cs-armor-type cs-armor-type--${armorTypeMeta.tone}" data-armor-tone="${armorTypeMeta.tone}">${armorTypeMeta.label}</div>` : ''}
+      ${typeLabel ? `<div class="cs-armor-type">${typeLabel}</div>` : ''}
       ${item.trait?`<div class="cs-armor-trait">${item.trait}</div>`:''}
       ${bonuses.length?`<div class="cs-armor-bonuses">${bonuses.map(k=>`<span class="badge badge-gold" style="font-size:0.6rem">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}</div>`:''}
       ${canEdit?`<button class="cs-equip-btn-sm" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
