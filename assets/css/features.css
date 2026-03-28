@@ -1126,99 +1126,41 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-equip-btn:hover { border-color: var(--gold); color: var(--gold); }
 .cs-combat-info { font-size: 0.72rem; color: var(--text-dim); font-style: italic; margin-top: 0.2rem; }
 
-.cs-set-panel {
-  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 0.95rem;
-}
-.cs-set-panel.active {
-  border-color: rgba(226,185,111,0.38);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.14);
-}
-.cs-set-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.9rem;
-  margin-bottom: 0.8rem;
-}
-.cs-set-status {
-  font-size: 0.62rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
-  margin-bottom: 0.22rem;
-}
-.cs-set-name {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--text);
-}
-.cs-set-bonus {
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.34rem 0.7rem;
-}
-.cs-set-bonus.active {
-  color: var(--gold);
-  border-color: rgba(226,185,111,0.32);
-  background: rgba(226,185,111,0.08);
-}
-.cs-set-slots {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.55rem;
-}
-.cs-set-slot {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.7rem;
-}
-.cs-set-slot.filled {
-  border-color: rgba(255,255,255,0.1);
-}
-.cs-set-slot-label {
-  font-size: 0.56rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 700;
-  margin-bottom: 0.28rem;
-}
-.cs-set-slot-type {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--text);
-}
-.cs-set-slot-item {
-  margin-top: 0.18rem;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-.cs-set-footer {
+.cs-combat-status-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem 0.55rem;
-  align-items: center;
-  margin-top: 0.8rem;
-  font-size: 0.75rem;
-  color: var(--text-muted);
+  gap: 0.5rem;
+  margin-top: 0.7rem;
 }
-.cs-set-mini-chip {
-  background: rgba(79,140,255,0.08);
-  border: 1px solid rgba(79,140,255,0.25);
-  color: #8bb3ff;
+.cs-armor-set-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 32px;
+  padding: 0.38rem 0.78rem;
   border-radius: 999px;
-  padding: 0.22rem 0.55rem;
-  font-size: 0.68rem;
-  font-weight: 600;
+  border: 1px solid var(--border);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+.cs-armor-set-chip--light {
+  color: var(--blue);
+  background: rgba(106,167,255,0.12);
+  border-color: rgba(106,167,255,0.3);
+}
+.cs-armor-set-chip--medium {
+  color: var(--green);
+  background: rgba(34,195,142,0.12);
+  border-color: rgba(34,195,142,0.3);
+}
+.cs-armor-set-chip--heavy {
+  color: var(--crimson-light);
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.3);
 }
 
 .cs-actions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.4rem; }
@@ -1305,9 +1247,12 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   .cs-carac-grid { grid-template-columns: repeat(3, 1fr); }
   .cs-weapon-row { grid-template-columns: 1fr auto; }
   .cs-weapon-slot-label { display: none; }
-  .cs-set-head { flex-direction: column; }
-  .cs-set-bonus { align-self: flex-start; }
-  .cs-set-slots { grid-template-columns: 1fr; }
+  .cs-armor-set-chip {
+    width: 100%;
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
+  }
   .cs-base-row { grid-template-columns: 1fr 1fr; }
 }
 
