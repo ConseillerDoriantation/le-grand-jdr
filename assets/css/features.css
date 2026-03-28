@@ -1126,6 +1126,101 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-equip-btn:hover { border-color: var(--gold); color: var(--gold); }
 .cs-combat-info { font-size: 0.72rem; color: var(--text-dim); font-style: italic; margin-top: 0.2rem; }
 
+.cs-set-panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.95rem;
+}
+.cs-set-panel.active {
+  border-color: rgba(226,185,111,0.38);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.14);
+}
+.cs-set-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.cs-set-status {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  margin-bottom: 0.22rem;
+}
+.cs-set-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.cs-set-bonus {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.34rem 0.7rem;
+}
+.cs-set-bonus.active {
+  color: var(--gold);
+  border-color: rgba(226,185,111,0.32);
+  background: rgba(226,185,111,0.08);
+}
+.cs-set-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.cs-set-slot {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.7rem;
+}
+.cs-set-slot.filled {
+  border-color: rgba(255,255,255,0.1);
+}
+.cs-set-slot-label {
+  font-size: 0.56rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  margin-bottom: 0.28rem;
+}
+.cs-set-slot-type {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.cs-set-slot-item {
+  margin-top: 0.18rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.cs-set-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.55rem;
+  align-items: center;
+  margin-top: 0.8rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.cs-set-mini-chip {
+  background: rgba(79,140,255,0.08);
+  border: 1px solid rgba(79,140,255,0.25);
+  color: #8bb3ff;
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
 .cs-actions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.4rem; }
 .cs-action-chip { display: flex; gap: 0.6rem; padding: 0.5rem 0.7rem; background: rgba(255,255,255,0.025); border-radius: 10px; }
 .cs-action-icon { font-size: 1rem; flex-shrink: 0; }
@@ -1141,7 +1236,18 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .cs-armor-card.equipped { border-color: rgba(226,185,111,0.25); }
 .cs-armor-slot { font-size: 0.56rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; margin-bottom: 0.2rem; }
 .cs-armor-name { font-size: 0.82rem; font-weight: 600; color: var(--text); }
-.cs-armor-trait { font-size: 0.68rem; color: var(--text-muted); font-style: italic; margin-top: 0.1rem; }
+.cs-armor-type {
+  display: inline-flex;
+  margin-top: 0.35rem;
+  padding: 0.16rem 0.48rem;
+  border-radius: 999px;
+  background: rgba(79,140,255,0.08);
+  border: 1px solid rgba(79,140,255,0.22);
+  color: #8bb3ff;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+.cs-armor-trait { font-size: 0.68rem; color: var(--text-muted); font-style: italic; margin-top: 0.25rem; }
 .cs-armor-bonuses { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 0.35rem; }
 .cs-equip-btn-sm { background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: 0.78rem; padding: 0.15rem; margin-top: 0.25rem; transition: color 0.15s; }
 .cs-equip-btn-sm:hover { color: var(--gold); }
@@ -1199,6 +1305,9 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   .cs-carac-grid { grid-template-columns: repeat(3, 1fr); }
   .cs-weapon-row { grid-template-columns: 1fr auto; }
   .cs-weapon-slot-label { display: none; }
+  .cs-set-head { flex-direction: column; }
+  .cs-set-bonus { align-self: flex-start; }
+  .cs-set-slots { grid-template-columns: 1fr; }
   .cs-base-row { grid-template-columns: 1fr 1fr; }
 }
 
