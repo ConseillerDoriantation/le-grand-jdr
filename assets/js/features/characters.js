@@ -125,6 +125,41 @@ function normalizeArmorType(type = '') {
   return String(type || '').trim();
 }
 
+
+function getArmorTypeMeta(type = '') {
+  const label = normalizeArmorType(type);
+  if (label === 'Légère') {
+    return {
+      label,
+      tone: 'light',
+      setChipText: 'Léger : Coût des sorts -2 PM',
+      modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
+    };
+  }
+  if (label === 'Intermédiaire') {
+    return {
+      label,
+      tone: 'medium',
+      setChipText: 'Intermédiaire : Toucher +2',
+      modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
+    };
+  }
+  if (label === 'Lourde') {
+    return {
+      label,
+      tone: 'heavy',
+      setChipText: 'Lourd : Réduction 2 dégâts',
+      modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
+    };
+  }
+  return {
+    label,
+    tone: 'neutral',
+    setChipText: '',
+    modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 },
+  };
+}
+
 function getArmorSetData(c = {}) {
   const equip = c?.equipement || {};
   const trackedSlots = ['Tête', 'Torse', 'Bottes'];
@@ -148,34 +183,7 @@ function getArmorSetData(c = {}) {
   const fullType = ['Légère', 'Intermédiaire', 'Lourde']
     .find(type => counts[type] === trackedSlots.length) || '';
 
-  const effectByType = {
-    'Légère': {
-      label: 'Légère',
-      shortLabel: 'Léger',
-      bonusText: '-2 PM / Sort',
-      chipText: 'Léger : Coût des sorts -2 PM',
-      tone: 'light',
-      modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
-    },
-    'Intermédiaire': {
-      label: 'Intermédiaire',
-      shortLabel: 'Intermédiaire',
-      bonusText: 'Toucher +2',
-      chipText: 'Intermédiaire : Toucher +2',
-      tone: 'medium',
-      modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
-    },
-    'Lourde': {
-      label: 'Lourde',
-      shortLabel: 'Lourd',
-      bonusText: 'Réduction de 2 dégâts subis',
-      chipText: 'Lourd : Réduction 2 dégâts',
-      tone: 'heavy',
-      modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
-    },
-  };
-
-  const activeEffect = fullType ? effectByType[fullType] : null;
+  const activeEffect = fullType ? getArmorTypeMeta(fullType) : null;
   const mixed = !fullType && Object.keys(counts).length > 1;
   const dominantType = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 
@@ -969,11 +977,11 @@ function renderCharEquip(c, canEdit) {
   armorSlots.forEach(slot => {
     const item = equip[slot]||{};
     const bonuses = ['fo','dex','in','sa','co','ch','ca'].filter(k=>item[k]);
-    const typeLabel = normalizeArmorType(item.typeArmure || '');
+    const armorTypeMeta = getArmorTypeMeta(item.typeArmure || '');
     html += `<div class="cs-armor-card ${item.nom?'equipped':''}">
       <div class="cs-armor-slot">${slot}</div>
       <div class="cs-armor-name">${item.nom||'—'}</div>
-      ${typeLabel ? `<div class="cs-armor-type">${typeLabel}</div>` : ''}
+      ${armorTypeMeta.label ? `<div class="cs-armor-type cs-armor-type--${armorTypeMeta.tone}" data-armor-tone="${armorTypeMeta.tone}">${armorTypeMeta.label}</div>` : ''}
       ${item.trait?`<div class="cs-armor-trait">${item.trait}</div>`:''}
       ${bonuses.length?`<div class="cs-armor-bonuses">${bonuses.map(k=>`<span class="badge badge-gold" style="font-size:0.6rem">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}</div>`:''}
       ${canEdit?`<button class="cs-equip-btn-sm" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
