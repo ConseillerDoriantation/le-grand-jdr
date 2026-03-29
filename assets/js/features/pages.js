@@ -505,6 +505,11 @@ const PAGES = {
 
   // ─── PLAYERS ────────────────────────────────────────────────────────────────
   async players() {
+    if (typeof window.renderPlayersPage === 'function') {
+      await window.renderPlayersPage();
+      return;
+    }
+
     const items = await loadCollection('players');
     const content = document.getElementById('main-content');
     let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">⚔️ Présentation des Joueurs</div><div class="page-subtitle">Les héros de cette aventure</div></div>`;
