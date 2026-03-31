@@ -82,8 +82,9 @@ const featureModules = [
   './features/players.js',
   './features/tutorial.js',
   './features/informations.js',
-  './features/recettes.js',
+  './features/recipes.js',    // remplace recettes.js
   './features/bestiary.js',
+  './features/account.js',    // nouveau
   './features/photo-cropper.js',
 ];
 
