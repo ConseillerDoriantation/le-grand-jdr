@@ -2097,10 +2097,17 @@ async function deleteInvItem(idx) {
 }
 
 async function deleteChar(id) {
-  if (!confirm('Supprimer ce personnage ?')) return;
-  await deleteFromCol('characters',id);
-  showNotif('Personnage supprimé.','success');
-  PAGES.characters();
+  // Délègue à account.js qui gère la vente des items boutique avant suppression
+  if (window.deleteCharWithRefund) {
+    const done = await window.deleteCharWithRefund(id);
+    if (done) PAGES.characters();
+  } else {
+    // Fallback si account.js pas encore chargé
+    if (!confirm('Supprimer ce personnage ?')) return;
+    await deleteFromCol('characters', id);
+    showNotif('Personnage supprimé.', 'success');
+    PAGES.characters();
+  }
 }
 
 async function createNewChar() {
