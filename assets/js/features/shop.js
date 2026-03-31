@@ -158,11 +158,14 @@ function _buildCombatMeta(item = {}) {
 // ══════════════════════════════════════════════════════════════════════════════
 let _cats  = [];
 let _items = [];
-let _view  = 'home';
-let _activeCat    = null;
-let _activeSubCat = null;
+let _view  = 'home';   // 'home' | 'items'
+let _activeCat = null;
 let _page = 1;
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 20;
+
+// Filtres actifs (multi-sélection)
+let _filterSearch = '';
+let _filterTags   = new Set(); // valeurs de tags actifs
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CHARGEMENT
@@ -286,9 +289,8 @@ async function renderShop() {
   }
 
   html += _renderBreadcrumb();
-  if      (_view === 'home')   html += _renderHome();
-  else if (_view === 'cat')    html += _renderCatView();
-  else if (_view === 'subcat') html += _renderItemsView();
+  if (_view === 'home')  html += _renderHome();
+  else if (_view === 'items') html += _renderItemsView();
   html += `</div>`;
   content.innerHTML = html;
 }
@@ -297,17 +299,22 @@ async function renderShop() {
 function _renderBreadcrumb() {
   if (_view === 'home') return '';
   const cat = _cats.find(c => c.id === _activeCat);
-  const sc  = cat && _activeSubCat ? (cat.sousCats||[]).find(s => s.id === _activeSubCat) : null;
-  let crumbs = [`<button class="sh-crumb sh-crumb-link" onclick="shopGoHome()">🛒 Boutique</button>`];
-  if (cat) {
-    if (_view === 'cat')
-      crumbs.push(`<span class="sh-crumb-sep">›</span><span class="sh-crumb sh-crumb-active">${cat.nom}</span>`);
-    else
-      crumbs.push(`<span class="sh-crumb-sep">›</span><button class="sh-crumb sh-crumb-link" onclick="shopGoCat('${cat.id}')">${cat.nom}</button>`);
-  }
-  if (sc)
-    crumbs.push(`<span class="sh-crumb-sep">›</span><span class="sh-crumb sh-crumb-active">${sc.nom}</span>`);
-  return `<nav class="sh-breadcrumb">${crumbs.join('')}</nav>`;
+  return `
+  <nav class="sh-breadcrumb" style="display:flex;align-items:center;gap:.4rem;margin-bottom:1rem;
+    padding:.55rem .8rem;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border)">
+    <button class="sh-crumb sh-crumb-link" onclick="shopGoHome()"
+      style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;color:var(--text-dim);
+      background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:6px;transition:color .15s"
+      onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">
+      🛒 Boutique
+    </button>
+    <span style="color:var(--border-strong);font-size:.9rem">›</span>
+    <span class="sh-crumb sh-crumb-active"
+      style="font-size:.82rem;color:var(--text);font-weight:600">${cat?.nom||'Catégorie'}</span>
+    <span style="margin-left:auto;font-size:.72rem;color:var(--text-dim)">
+      ${_items.filter(i=>i.categorieId===_activeCat).length} articles
+    </span>
+  </nav>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -321,9 +328,8 @@ function _renderHome() {
   }
   let html = `<div class="sh-cat-grid">`;
   _cats.forEach(cat => {
-    const count   = _items.filter(i => i.categorieId === cat.id).length;
-    const subCats = cat.sousCats||[];
-    const tpl     = TEMPLATES[cat.template||'classique'];
+    const count = _items.filter(i => i.categorieId === cat.id).length;
+    const tpl   = TEMPLATES[cat.template||'classique'];
     html += `<div class="sh-cat-card ${STATE.isAdmin?'sh-cat-draggable':''}"
       draggable="${STATE.isAdmin?'true':'false'}" data-cat-id="${cat.id}"
       ondragstart="${STATE.isAdmin?`shopCatDragStart(event,'${cat.id}')`:''}"
@@ -344,11 +350,7 @@ function _renderHome() {
             <button class="btn-icon" onclick="deleteCat('${cat.id}')">🗑️</button>
           </div>`:''}
         </div>
-        <div class="sh-cat-meta">${subCats.length>0?`${subCats.length} sous-cat. · `:''}${count} article${count!==1?'s':''}</div>
-        ${subCats.length>0?`<div class="sh-cat-subcats">
-          ${subCats.slice(0,4).map(sc=>`<span class="sh-cat-subcat-tag">${sc.nom}</span>`).join('')}
-          ${subCats.length>4?`<span class="sh-cat-subcat-tag">+${subCats.length-4}</span>`:''}
-        </div>`:''}
+        <div class="sh-cat-meta">${count} article${count!==1?'s':''}</div>
       </div>
     </div>`;
   });
@@ -357,100 +359,145 @@ function _renderHome() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// VUE CATÉGORIE
-// ══════════════════════════════════════════════════════════════════════════════
-function _renderCatView() {
-  const cat     = _cats.find(c => c.id === _activeCat);
-  if (!cat) return '';
-  const subCats = cat.sousCats||[];
-  if (subCats.length === 0 && !STATE.isAdmin) { _view='subcat'; return _renderItemsView(); }
-  const total   = _items.filter(i => i.categorieId === _activeCat).length;
-  let html = `<div class="sh-subcat-grid">
-    <div class="sh-subcat-card sh-subcat-all" onclick="shopGoSubCat(null)">
-      <div class="sh-subcat-icon">📦</div>
-      <div class="sh-subcat-name">Tout afficher</div>
-      <div class="sh-subcat-count">${total} article${total!==1?'s':''}</div>
-    </div>`;
-  subCats.forEach(sc => {
-    const cnt = _items.filter(i => i.categorieId===_activeCat && i.sousCategorieId===sc.id).length;
-    html += `<div class="sh-subcat-card ${STATE.isAdmin?'sh-dnd-handle':''}"
-      ${STATE.isAdmin?`draggable="true" ondragstart="shopScDragStart(event,'${sc.id}')" ondragover="shopScDragOver(event)" ondrop="shopScDrop(event,'${sc.id}')" ondragend="shopScDragEnd(event)"`:''}> 
-      <div class="sh-subcat-click-area" onclick="shopGoSubCat('${sc.id}')">
-        <div class="sh-subcat-icon">${sc.image?`<img src="${sc.image}" style="width:2rem;height:2rem;object-fit:cover;border-radius:6px">`:sc.emoji||'📂'}</div>
-        <div class="sh-subcat-name">${sc.nom}</div>
-        <div class="sh-subcat-count">${cnt} article${cnt!==1?'s':''}</div>
-      </div>
-      ${STATE.isAdmin?`<div class="sh-card-admin-subcat" onclick="event.stopPropagation()">
-        <button class="btn-icon" onclick="openSubCatModal('${_activeCat}','${sc.id}')">✏️</button>
-        <button class="btn-icon" onclick="deleteSubCat('${_activeCat}','${sc.id}')">🗑️</button>
-      </div>`:''}
-    </div>`;
-  });
-  if (STATE.isAdmin) {
-    html += `<div class="sh-subcat-card sh-subcat-add" onclick="openSubCatModal('${_activeCat}')">
-      <div class="sh-subcat-icon">＋</div>
-      <div class="sh-subcat-name">Nouvelle sous-cat.</div>
-    </div>`;
-  }
-  html += `</div>`;
-  const allItems = _items.filter(i => i.categorieId === _activeCat);
-  if (allItems.length > 0) html += `<div style="margin-top:1.5rem">${_renderItemsView()}</div>`;
-  return html;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// VUE ARTICLES
+// VUE ARTICLES — filtres dynamiques multi-tags + recherche temps réel
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderItemsView() {
+  const cat = _cats.find(c => c.id === _activeCat);
+  if (!cat) return '';
+
+  // Appliquer filtres
   let items = _items.filter(i => i.categorieId === _activeCat);
-  if (_activeSubCat) items = items.filter(i => i.sousCategorieId === _activeSubCat);
-  const cat   = _cats.find(c => c.id === _activeCat);
-  if (items.length === 0) {
-    return `<div class="empty-state"><div class="icon">📦</div>
-      <p>Aucun article ici.</p>
-      ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:0.8rem" onclick="openItemModal()">＋ Ajouter</button>`:''}</div>`;
+  const search = (_filterSearch||'').toLowerCase().trim();
+  if (search) items = items.filter(i =>
+    (i.nom||'').toLowerCase().includes(search) ||
+    (i.type||'').toLowerCase().includes(search) ||
+    (i.description||'').toLowerCase().includes(search) ||
+    (i.trait||'').toLowerCase().includes(search) ||
+    (i.effet||'').toLowerCase().includes(search)
+  );
+  if (_filterTags.size > 0) {
+    items = items.filter(i => {
+      const tags = _getItemTags(i);
+      return [..._filterTags].every(t => tags.has(t));
+    });
   }
+
   const total = items.length;
   const pages = Math.ceil(total / PAGE_SIZE);
   const p     = Math.max(1, Math.min(_page, pages));
   const slice = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
-  const allRaretes  = [...new Set(_items.filter(i=>i.categorieId===_activeCat&&i.rarete).map(i=>i.rarete))];
-  const RARETE_LABELS = {1:'★ Commun',2:'★★ Peu commun',3:'★★★ Rare',4:'★★★★ Très rare'};
-  const activeRarete = window._shopFilterRarete||'';
-  const activeDispo  = window._shopFilterDispo||'';
+  const allItems  = _items.filter(i => i.categorieId === _activeCat);
+  const tagGroups = _buildTagGroups(allItems);
+  const hasFilters = search || _filterTags.size > 0;
 
-  let html = `<div class="sh-filter-bar">
-    <div class="sh-search-wrap">
-      <input type="text" class="sh-search-input" id="sh-search" placeholder="🔍 Rechercher..."
-        oninput="shopFilterSearch(this.value)" value="${window._shopSearch||''}">
+  let html = `
+  <div style="display:flex;flex-direction:column;gap:.75rem;margin-bottom:1rem">
+    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px;position:relative">
+        <input type="text" id="sh-search" class="input-field"
+          placeholder="🔍 Rechercher dans cette catégorie..."
+          value="${_filterSearch||''}"
+          oninput="shopFilterSearch(this.value)"
+          style="width:100%;padding-right:2.2rem">
+        ${_filterSearch ? `<button onclick="shopFilterSearch('')"
+          style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem"
+          title="Effacer">✕</button>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0">
+        <span style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
+        ${hasFilters ? `<button onclick="shopFilterReset()"
+          style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
+          border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b">✕ Tout effacer</button>` : ''}
+        ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">+ Article</button>`:''}
+      </div>
     </div>
-    <div class="sh-filter-chips">
-      ${allRaretes.length>0?allRaretes.sort().map(r=>`
-        <button class="sh-filter-chip ${activeRarete===r?'active':''}" onclick="shopFilterBy('rarete','${r}')">
-          ${RARETE_LABELS[r]||('★'.repeat(r))}
-        </button>`).join(''):''}
-      <button class="sh-filter-chip ${activeDispo==='dispo'?'active':''}" onclick="shopFilterBy('dispo','dispo')">En stock</button>
-      ${activeRarete||activeDispo||window._shopSearch?`
-        <button class="sh-filter-chip sh-filter-reset" onclick="shopFilterReset()">✕ Effacer</button>`:''
-      }
-    </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0">
-      <span class="sh-items-count">${total} article${total!==1?'s':''}</span>
-      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" onclick="shopGoCat('${_activeCat}')">📂 Sous-cat.</button>`:''}
-      ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">＋ Article</button>`:''}
-    </div>
+    ${tagGroups.length > 0 ? `
+    <div style="display:flex;flex-direction:column;gap:.4rem">
+      ${tagGroups.map(group => `
+      <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+        <span style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;flex-shrink:0;min-width:70px">${group.label}</span>
+        ${group.tags.map(tag => {
+          const active = _filterTags.has(tag.value);
+          return `<button onclick="shopToggleTag('${tag.value.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')"
+            style="font-size:.72rem;border-radius:999px;padding:3px 10px;cursor:pointer;
+            border:1px solid ${active ? tag.color : 'var(--border)'};
+            background:${active ? tag.color+'22' : 'var(--bg-elevated)'};
+            color:${active ? tag.color : 'var(--text-dim)'};
+            transition:all .15s;font-weight:${active?'600':'400'}">${tag.label}</button>`;
+        }).join('')}
+      </div>`).join('')}
+    </div>` : ''}
   </div>`;
 
-  html += _renderItemGrid(cat, slice);
+  if (slice.length === 0) {
+    html += `<div class="empty-state"><div class="icon">📦</div>
+      <p>${hasFilters ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
+      ${!hasFilters&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>`:''}</div>`;
+  } else {
+    html += _renderItemGrid(cat, slice);
+  }
 
   if (pages > 1) {
     html += `<div class="sh-pagination">`;
-    if (p>1)   html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
-    for (let i=1;i<=pages;i++) html += `<button class="sh-page-btn ${i===p?'active':''}" onclick="shopPage(${i})">${i}</button>`;
-    if (p<pages) html += `<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
+    if (p>1) html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
+    const start=Math.max(1,p-2), end=Math.min(pages,p+2);
+    if(start>1) html+=`<button class="sh-page-btn" onclick="shopPage(1)">1</button>${start>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    for(let i=start;i<=end;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" onclick="shopPage(${i})">${i}</button>`;
+    if(end<pages) html+=`${end<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" onclick="shopPage(${pages})">${pages}</button>`;
+    if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
     html += `</div>`;
   }
   return html;
+}
+
+function _getItemTags(item) {
+  const tags = new Set();
+  if (item.format)     tags.add(item.format);
+  if (item.slotArmure) tags.add(item.slotArmure);
+  if (item.typeArmure) tags.add(item.typeArmure);
+  if (item.slotBijou)  tags.add(item.slotBijou);
+  if (item.type)       tags.add(item.type);
+  if (item.rarete) {
+    const labels = {1:'Commun',2:'Peu commun',3:'Rare',4:'Très rare'};
+    const l = labels[parseInt(item.rarete)];
+    if (l) tags.add(l);
+  }
+  const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+  if (dispo !== null && dispo > 0) tags.add('En stock');
+  if (dispo === null || dispo < 0) tags.add('Illimité');
+  return tags;
+}
+
+function _buildTagGroups(items) {
+  const RARETE_COLORS = {'Commun':'#9ca3af','Peu commun':'#4ade80','Rare':'#60a5fa','Très rare':'#c084fc'};
+  const RARETE_LABELS = {1:'Commun',2:'Peu commun',3:'Rare',4:'Très rare'};
+  const groups = [];
+  const add = (label, vals, colorFn) => {
+    if (vals.length) groups.push({ label, tags: vals.map(v => ({ value:v, label:v, color: colorFn(v) })) });
+  };
+  const formats = [...new Set(items.filter(i=>i.format).map(i=>i.format))].sort();
+  if (formats.length) groups.push({ label:'Format', tags: formats.map(v=>({value:v,label:v,color:'#e8b84b'})) });
+  const slotA = [...new Set(items.filter(i=>i.slotArmure).map(i=>i.slotArmure))].sort();
+  if (slotA.length) groups.push({ label:'Emplacement', tags: slotA.map(v=>({value:v,label:v,color:'#4f8cff'})) });
+  const typeA = [...new Set(items.filter(i=>i.typeArmure).map(i=>i.typeArmure))].sort();
+  if (typeA.length) groups.push({ label:'Type armure', tags: typeA.map(v=>({value:v,label:v,color:'#4f8cff'})) });
+  const bijou = [...new Set(items.filter(i=>i.slotBijou).map(i=>i.slotBijou))].sort();
+  if (bijou.length) groups.push({ label:'Bijou', tags: bijou.map(v=>({value:v,label:v,color:'#c084fc'})) });
+  const typeL = [...new Set(items.filter(i=>i.type&&!i.format&&!i.slotArmure&&!i.slotBijou).map(i=>i.type))].sort();
+  if (typeL.length) groups.push({ label:'Type', tags: typeL.map(v=>({value:v,label:v,color:'var(--text-muted)'})) });
+  const raretes = [...new Set(items.filter(i=>i.rarete).map(i=>parseInt(i.rarete)).filter(Boolean))].sort();
+  if (raretes.length) groups.push({ label:'Rareté', tags: raretes.map(r=>({
+    value: RARETE_LABELS[r]||String(r),
+    label: '★'.repeat(r)+' '+(RARETE_LABELS[r]||''),
+    color: RARETE_COLORS[RARETE_LABELS[r]]||'#9ca3af',
+  })) });
+  const hasStock = items.some(i=>{ const d=i.dispo!=null&&i.dispo!==''?parseInt(i.dispo):null; return d===null||d>0; });
+  if (hasStock) groups.push({ label:'Dispo', tags:[
+    {value:'En stock',label:'En stock',color:'#22c38e'},
+    {value:'Illimité',label:'∞ Illimité',color:'#22c38e'},
+  ] });
+  return groups;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -747,21 +794,50 @@ window.sellInvItemFromShop = sellInvItemFromShop;
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
-function shopGoHome()          { _view='home';   _activeCat=null; _activeSubCat=null; _page=1; renderShop(); }
-function shopGoCat(catId)      { _view='cat';    _activeCat=catId; _activeSubCat=null; _page=1; renderShop(); }
-function shopGoSubCat(subCatId){ _view='subcat'; _activeSubCat=subCatId; _page=1; window._shopSearch=''; window._shopFilterRarete=''; window._shopFilterDispo=''; renderShop(); }
-function shopPage(p)           { _page=p; renderShop(); }
+function shopGoHome()     { _view='home';  _activeCat=null; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
+function shopGoCat(catId) { _view='items'; _activeCat=catId; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
+function shopPage(p)      { _page=p; renderShop(); }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// FILTRES
-// ══════════════════════════════════════════════════════════════════════════════
-function shopFilterBy(type, val) {
-  if (type==='rarete') window._shopFilterRarete = window._shopFilterRarete===val?'':val;
-  else if (type==='dispo') window._shopFilterDispo = window._shopFilterDispo===val?'':val;
-  _page=1; renderShop();
+// ── Fonctions de filtre ───────────────────────────────────────────────────────
+function shopFilterSearch(val) {
+  _filterSearch = val;
+  _page = 1;
+  // Mise à jour temps réel — juste re-render la zone items sans rechargement Firestore
+  const area = document.getElementById('sh-items-area');
+  if (area && _view === 'items') {
+    area.innerHTML = _renderItemsView();
+  } else {
+    renderShop();
+  }
 }
-function shopFilterReset() { window._shopSearch=''; window._shopFilterRarete=''; window._shopFilterDispo=''; _page=1; renderShop(); }
-function shopFilterSearch(val) { window._shopSearch=val; _page=1; renderShop(); }
+
+function shopToggleTag(val) {
+  if (_filterTags.has(val)) _filterTags.delete(val);
+  else _filterTags.add(val);
+  _page = 1;
+  if (_view === 'items') {
+    const content = document.getElementById('main-content');
+    if (content) {
+      // Re-render juste la partie items
+      const area = content.querySelector('.sh-items-zone');
+      if (area) { area.innerHTML = _renderItemsView(); return; }
+    }
+  }
+  renderShop();
+}
+
+function shopFilterReset() {
+  _filterSearch = ''; _filterTags.clear(); _page = 1;
+  renderShop();
+}
+
+// Compat anciens appels
+function shopGoSubCat()   { /* no-op, sous-catégories supprimées */ }
+function shopFilterBy()   { /* no-op, remplacé par shopToggleTag  */ }
+function shopFilterSearch_old() {}
+window._shopSearch = '';
+window._shopFilterRarete = '';
+window._shopFilterDispo  = '';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DRAG & DROP — Catégories
@@ -1149,7 +1225,79 @@ async function saveShopItem(itemId) {
   data.prixVente=Math.round((parseFloat(data.prix)||0)*PRIX_VENTE_RATIO);
   if(itemId) await updateInCol('shop',itemId,data);
   else await addToCol('shop',data);
+
+  // ── Synchroniser inventaires et équipements des personnages ─────────────
+  if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
+
   closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
+}
+
+/**
+ * Après modification d'un article boutique :
+ * - Met à jour les copies dans les inventaires des personnages (source:'boutique', itemId = itemId)
+ * - Met à jour les slots d'équipement qui référencent cet itemId
+ */
+async function _syncCharactersAfterItemUpdate(itemId, newData) {
+  const chars = STATE.characters || [];
+  if (!chars.length) return;
+
+  const SYNC_FIELDS = [
+    'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
+    'fo','dex','in','sa','co','ch','trait','type','effet','description',
+    'slotArmure','typeArmure','slotBijou','prixVente',
+  ];
+
+  const updates = [];
+
+  chars.forEach(c => {
+    let changed = false;
+    const inv   = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    const equip = { ...(c.equipement||{}) };
+
+    // Mettre à jour les items dans l'inventaire
+    inv.forEach((item, i) => {
+      if (item.source === 'boutique' && item.itemId === itemId) {
+        SYNC_FIELDS.forEach(f => {
+          if (newData[f] !== undefined) inv[i] = { ...inv[i], [f]: newData[f] };
+        });
+        // Mettre à jour prixAchat si le prix change
+        if (newData.prix !== undefined) inv[i].prixAchat = parseFloat(newData.prix)||0;
+        changed = true;
+      }
+    });
+
+    // Mettre à jour les slots d'équipement qui ont sourceInvIndex ou itemId
+    Object.entries(equip).forEach(([slot, equipped]) => {
+      if (equipped?.itemId === itemId) {
+        const syncEquip = {};
+        SYNC_FIELDS.forEach(f => { if (newData[f] !== undefined) syncEquip[f] = newData[f]; });
+        if (newData.nom !== undefined) syncEquip.nom = newData.nom;
+        equip[slot] = { ...equipped, ...syncEquip };
+        changed = true;
+      }
+      // Fallback : sync via sourceInvIndex
+      else if (equipped?.sourceInvIndex !== undefined) {
+        const invItem = inv[equipped.sourceInvIndex];
+        if (invItem?.itemId === itemId) {
+          const syncEquip = {};
+          SYNC_FIELDS.forEach(f => { if (newData[f] !== undefined) syncEquip[f] = newData[f]; });
+          equip[slot] = { ...equipped, ...syncEquip };
+          changed = true;
+        }
+      }
+    });
+
+    if (changed) {
+      c.inventaire = inv;
+      c.equipement = equip;
+      updates.push(updateInCol('characters', c.id, { inventaire: inv, equipement: equip }));
+    }
+  });
+
+  if (updates.length > 0) {
+    await Promise.all(updates);
+    showNotif(`🔄 ${updates.length} personnage${updates.length>1?'s':''} mis à jour.`, 'success');
+  }
 }
 
 async function deleteShopItem(itemId) {
@@ -1174,5 +1322,5 @@ Object.assign(window,{
   shopCatDragStart, shopCatDragOver, shopCatDragEnd, shopCatDrop,
   shopScDragStart, shopScDragOver, shopScDragEnd, shopScDrop,
   shopItemDragStart, shopItemDragOver, shopItemDragEnd, shopItemDrop,
-  shopFilterSearch, shopFilterBy, shopFilterReset,
+  shopFilterSearch, shopFilterBy, shopFilterReset, shopToggleTag,
 });
