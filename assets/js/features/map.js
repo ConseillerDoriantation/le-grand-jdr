@@ -69,15 +69,13 @@ function renderMap(containerEl) {
         <canvas id="map-fog" style="position:absolute;top:0;left:0;pointer-events:none;opacity:0.82"></canvas>
       </div>
 
-      <!-- Contrôles zoom -->
-      <div style="position:absolute;bottom:1rem;right:1rem;display:flex;flex-direction:column;gap:6px;z-index:10">
+      <!-- Contrôles zoom -->\n      <div style="position:absolute;bottom:1rem;right:1rem;display:flex;flex-direction:column;gap:6px;z-index:10">
         <button class="btn btn-outline" id="map-zoom-in"  style="width:36px;height:36px;padding:0;font-size:1.1rem;display:flex;align-items:center;justify-content:center">+</button>
         <button class="btn btn-outline" id="map-zoom-out" style="width:36px;height:36px;padding:0;font-size:1.1rem;display:flex;align-items:center;justify-content:center">−</button>
         <button class="btn btn-outline" id="map-reset"    style="width:36px;height:36px;padding:0;font-size:0.75rem;display:flex;align-items:center;justify-content:center" title="Réinitialiser la vue">⌂</button>
       </div>
 
-      <!-- Barre admin -->
-      ${STATE.isAdmin ? `
+      <!-- Barre admin -->\n      ${STATE.isAdmin ? `
       <div id="map-admin-bar" style="
         position:absolute;top:1rem;left:50%;transform:translateX(-50%);
         background:rgba(11,17,24,0.92);border:1px solid var(--border-strong);
@@ -89,7 +87,7 @@ function renderMap(containerEl) {
           📍 Placer un lieu
         </button>
         <button class="btn btn-outline btn-sm" id="btn-fog-toggle" style="border-radius:999px;font-size:0.75rem">
-          🌫️ Brouillard
+          🌫️ Dessiner le fog
         </button>
         <button class="btn btn-outline btn-sm" id="btn-map-settings" style="border-radius:999px;font-size:0.75rem">
           ⚙️ Paramètres
@@ -99,9 +97,18 @@ function renderMap(containerEl) {
         display:none;position:absolute;bottom:4rem;left:50%;transform:translateX(-50%);
         background:rgba(79,140,255,0.15);border:1px solid var(--border-bright);
         border-radius:999px;padding:0.4rem 1rem;font-size:0.8rem;color:var(--gold);
-        z-index:10;pointer-events:none;
+        z-index:10;pointer-events:none;white-space:nowrap;
       ">Cliquez sur la carte pour placer le lieu</div>
-      ` : ''}
+      ` : `
+      <!-- Indicateur fog joueur -->
+      ${(mapState.fogZones||[]).length === 0 ? `
+      <div style="position:absolute;top:1rem;left:50%;transform:translateX(-50%);
+        background:rgba(8,12,20,0.88);border:1px solid rgba(255,255,255,0.08);
+        border-radius:999px;padding:.35rem .9rem;font-size:.75rem;color:var(--text-dim);
+        z-index:10;pointer-events:none">
+        🌫️ Le Maître de Jeu n'a pas encore révélé la carte
+      </div>` : ''}
+      `}
 
       <!-- Sidebar lieu -->
       <div id="map-sidebar" style="
@@ -290,25 +297,61 @@ function renderFog() {
     const H = img.naturalHeight || img.offsetHeight;
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
     const polys = mapState.fogZones || [];
 
-    if (!polys.length) { ctx.clearRect(0,0,W,H); return; }
+    if (STATE.isAdmin) {
+      // ── ADMIN : fog léger juste pour visualiser les zones ─────────────────
+      // Pas de fog opaque — on voit tout, les zones sont juste colorées en vert
+      // (le SVG overlay s'en charge via _renderFogOverlay)
+      _renderFogOverlay();
+      return;
+    }
 
-    ctx.fillStyle = 'rgba(8,12,20,0.90)';
+    // ── JOUEUR : fog opaque sur TOUTE la carte ────────────────────────────────
+    // Les zones dessinées par le MJ = zones RÉVÉLÉES (trous dans le fog)
+    if (polys.length === 0) {
+      // Aucune zone révélée : fog total
+      ctx.fillStyle = 'rgba(8,12,20,0.96)';
+      ctx.fillRect(0, 0, W, H);
+      return;
+    }
+
+    // Fog complet
+    ctx.fillStyle = 'rgba(8,12,20,0.96)';
     ctx.fillRect(0, 0, W, H);
+
+    // Percer les zones révélées
     ctx.globalCompositeOperation = 'destination-out';
     polys.forEach(poly => {
       if (!poly.pts?.length) return;
       ctx.beginPath();
       poly.pts.forEach((p, i) => {
-        const px = (p.x/100)*W, py = (p.y/100)*H;
-        i === 0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+        const px = (p.x / 100) * W;
+        const py = (p.y / 100) * H;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
       });
       ctx.closePath();
       ctx.fill();
     });
     ctx.globalCompositeOperation = 'source-over';
-    _renderFogOverlay();
+
+    // Bordure douce sur les bords des trous
+    ctx.globalCompositeOperation = 'source-over';
+    polys.forEach(poly => {
+      if (!poly.pts?.length) return;
+      ctx.beginPath();
+      poly.pts.forEach((p, i) => {
+        const px = (p.x / 100) * W;
+        const py = (p.y / 100) * H;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.strokeStyle = 'rgba(34,195,142,0.25)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    });
   };
 
   if (img.complete && img.naturalWidth) doFog();
@@ -422,9 +465,52 @@ function stopFogDrawMode() {
   const hint = document.getElementById('map-placing-hint');
   if (hint) hint.style.display = 'none';
   const btn = document.getElementById('btn-fog-toggle');
-  if (btn) { btn.style.background=''; btn.style.borderColor=''; btn.style.color=''; btn.textContent='🌫️ Brouillard'; }
+  if (btn) { btn.style.background=''; btn.style.borderColor=''; btn.style.color=''; btn.textContent='🌫️ Dessiner le fog'; }
+  document.getElementById('fog-control-bar')?.remove();
   _renderFogOverlay();
 }
+
+// Aperçu joueur : simule le fog tel que vu par un joueur
+let _fogPreviewActive = false;
+window._toggleFogPreview = () => {
+  _fogPreviewActive = !_fogPreviewActive;
+  const btn = document.getElementById('btn-fog-preview');
+  if (btn) {
+    btn.style.background  = _fogPreviewActive ? 'rgba(34,195,142,.2)' : '';
+    btn.style.borderColor = _fogPreviewActive ? 'rgba(34,195,142,.5)' : '';
+    btn.style.color       = _fogPreviewActive ? '#22c38e' : '';
+    btn.textContent       = _fogPreviewActive ? '👁️ Mode MJ' : '👁️ Aperçu joueur';
+  }
+  const canvas = document.getElementById('map-fog');
+  const img    = document.getElementById('map-img');
+  if (!canvas || !img) return;
+  const W = img.naturalWidth || img.offsetWidth;
+  const H = img.naturalHeight || img.offsetHeight;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  if (_fogPreviewActive) {
+    // Simuler le fog joueur
+    const polys = mapState.fogZones || [];
+    ctx.fillStyle = 'rgba(8,12,20,0.96)';
+    ctx.fillRect(0, 0, W, H);
+    if (polys.length) {
+      ctx.globalCompositeOperation = 'destination-out';
+      polys.forEach(poly => {
+        if (!poly.pts?.length) return;
+        ctx.beginPath();
+        poly.pts.forEach((p, i) => {
+          i === 0 ? ctx.moveTo((p.x/100)*W, (p.y/100)*H) : ctx.lineTo((p.x/100)*W, (p.y/100)*H);
+        });
+        ctx.closePath(); ctx.fill();
+      });
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  } else {
+    _renderFogOverlay();
+  }
+};
 
 async function _fogCommit(pts) {
   if (!mapState.fogZones) mapState.fogZones = [];
@@ -538,17 +624,21 @@ function setupAdminControls() {
         btn.style.color       = 'var(--gold)';
         btn.textContent       = '🌫️ Stop dessin';
       }
-      // Bouton effacer tout (flottant en bas)
-      let clearBtn = document.getElementById('fog-clear-btn');
-      if (!clearBtn) {
-        clearBtn = document.createElement('button');
-        clearBtn.id = 'fog-clear-btn';
-        clearBtn.className = 'btn btn-outline btn-sm';
-        clearBtn.textContent = '🗑️ Effacer tout';
-        clearBtn.style.cssText = 'position:absolute;bottom:3.5rem;right:1rem;z-index:11;font-size:0.73rem;color:#ff6b6b;border-color:rgba(255,107,107,0.4)';
-        clearBtn.onclick = () => window.clearFog();
-        document.getElementById('map-root')?.appendChild(clearBtn);
+      // Boutons de contrôle fog
+      let fogBar = document.getElementById('fog-control-bar');
+      if (!fogBar) {
+        fogBar = document.createElement('div');
+        fogBar.id = 'fog-control-bar';
+        fogBar.style.cssText = 'position:absolute;bottom:4.5rem;left:50%;transform:translateX(-50%);z-index:11;display:flex;gap:.4rem;';
+        fogBar.innerHTML = `
+          <button class="btn btn-outline btn-sm" onclick="window.clearFog()"
+            style="font-size:.73rem;color:#ff6b6b;border-color:rgba(255,107,107,0.4)">🗑️ Effacer tout le fog</button>
+          <button class="btn btn-outline btn-sm" id="btn-fog-preview"
+            style="font-size:.73rem" onclick="window._toggleFogPreview()">👁️ Aperçu joueur</button>
+        `;
+        document.getElementById('map-root')?.appendChild(fogBar);
       }
+      fogBar.style.display = 'flex';
       startFogDrawMode();
     }
   });
@@ -565,30 +655,44 @@ function openPlaceLieuModal(x, y) {
   document.getElementById('map-transform').style.cursor = 'grab';
 
   openModal('📍 Nouveau lieu', `
-    <div class="form-group"><label>Nom du lieu</label><input class="input-field" id="lieu-nom" placeholder="ex: Cap d'Espérance"></div>
+    <div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.75rem;
+      background:rgba(79,140,255,.06);border:1px solid rgba(79,140,255,.2);
+      border-radius:8px;padding:.5rem .75rem">
+      📍 Position fixée par le clic — X: ${x.toFixed(1)}% · Y: ${y.toFixed(1)}%
+    </div>
+    <input type="hidden" id="lieu-x" value="${x}">
+    <input type="hidden" id="lieu-y" value="${y}">
+    <div class="form-group"><label>Nom du lieu</label><input class="input-field" id="lieu-nom" placeholder="ex: Cap d'Espérance" autofocus></div>
     <div class="form-group">
       <label>Type</label>
       <select class="input-field" id="lieu-type">
         ${LIEU_TYPES.map(t => `<option value="${t.id}">${t.emoji} ${t.label}</option>`).join('')}
       </select>
     </div>
-    <div class="form-group"><label>Description (visible par les joueurs)</label><textarea class="input-field" id="lieu-desc" rows="4" placeholder="Un port animé sur la côte..."></textarea></div>
-    <div class="form-group"><label>PNJ présents (un par ligne)</label><textarea class="input-field" id="lieu-pnj" rows="3"></textarea></div>
-    <div class="form-group"><label>Tags (séparés par des virgules)</label><input class="input-field" id="lieu-tags" placeholder="commerce, port, quest"></div>
-    <div class="form-group"><label>Notes MJ (privées)</label><textarea class="input-field" id="lieu-notes" rows="3"></textarea></div>
-    <div class="form-group"><label>URL image (optionnel)</label><input class="input-field" id="lieu-image" placeholder="https://..."></div>
-    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">
-      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;color:var(--text-muted)">
-        <input type="checkbox" id="lieu-hidden">
-        Masqué aux joueurs (fog of war)
-      </label>
+    <div class="form-group"><label>Description <span style="color:var(--text-dim);font-weight:400">(visible joueurs)</span></label>
+      <textarea class="input-field" id="lieu-desc" rows="3" placeholder="Un port animé sur la côte..."></textarea>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-      <div class="form-group"><label>Position X (%)</label><input type="number" class="input-field" id="lieu-x" value="${x}" step="0.1"></div>
-      <div class="form-group"><label>Position Y (%)</label><input type="number" class="input-field" id="lieu-y" value="${y}" step="0.1"></div>
+    <div class="form-group"><label>PNJ présents <span style="color:var(--text-dim);font-weight:400">(un par ligne)</span></label>
+      <textarea class="input-field" id="lieu-pnj" rows="2"></textarea>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="window.saveLieu()">Créer le lieu</button>
+    <div class="form-group"><label>Tags <span style="color:var(--text-dim);font-weight:400">(séparés par des virgules)</span></label>
+      <input class="input-field" id="lieu-tags" placeholder="commerce, port, quête">
+    </div>
+    <div class="form-group"><label>Notes MJ <span style="color:var(--text-dim);font-weight:400">(privées)</span></label>
+      <textarea class="input-field" id="lieu-notes" rows="2"></textarea>
+    </div>
+    <div class="form-group"><label>URL image <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
+      <input class="input-field" id="lieu-image" placeholder="https://...">
+    </div>
+    <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer;
+      font-size:.84rem;color:var(--text-muted);margin-bottom:1rem;
+      padding:.6rem .75rem;background:rgba(255,107,107,.06);border:1px solid rgba(255,107,107,.18);border-radius:8px">
+      <input type="checkbox" id="lieu-hidden" style="accent-color:#ff6b6b">
+      <span>🙈 Masqué aux joueurs <span style="color:var(--text-dim);font-size:.75rem">(le lieu existe mais n'est pas visible)</span></span>
+    </label>
+    <button class="btn btn-gold" style="width:100%" onclick="window.saveLieu()">Créer le lieu</button>
   `);
+  setTimeout(() => document.getElementById('lieu-nom')?.focus(), 60);
 }
 
 window.saveLieu = async function(id = null) {
@@ -638,22 +742,37 @@ function openEditLieuModal(lieu) {
         ${LIEU_TYPES.map(t => `<option value="${t.id}" ${t.id === lieu.type ? 'selected' : ''}>${t.emoji} ${t.label}</option>`).join('')}
       </select>
     </div>
-    <div class="form-group"><label>Description</label><textarea class="input-field" id="lieu-desc" rows="4">${lieu.description || ''}</textarea></div>
-    <div class="form-group"><label>PNJ présents (un par ligne)</label><textarea class="input-field" id="lieu-pnj" rows="3">${(lieu.pnj || []).join('\n')}</textarea></div>
-    <div class="form-group"><label>Tags (séparés par des virgules)</label><input class="input-field" id="lieu-tags" value="${(lieu.tags || []).join(', ')}"></div>
-    <div class="form-group"><label>Notes MJ (privées)</label><textarea class="input-field" id="lieu-notes" rows="3">${lieu.notes || ''}</textarea></div>
-    <div class="form-group"><label>URL image</label><input class="input-field" id="lieu-image" value="${lieu.image || ''}"></div>
-    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">
-      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;color:var(--text-muted)">
-        <input type="checkbox" id="lieu-hidden" ${lieu.hidden ? 'checked' : ''}>
-        Masqué aux joueurs
-      </label>
+    <div class="form-group"><label>Description <span style="color:var(--text-dim);font-weight:400">(visible joueurs)</span></label>
+      <textarea class="input-field" id="lieu-desc" rows="3">${lieu.description || ''}</textarea>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-      <div class="form-group"><label>Position X (%)</label><input type="number" class="input-field" id="lieu-x" value="${lieu.x}" step="0.1"></div>
-      <div class="form-group"><label>Position Y (%)</label><input type="number" class="input-field" id="lieu-y" value="${lieu.y}" step="0.1"></div>
+    <div class="form-group"><label>PNJ présents <span style="color:var(--text-dim);font-weight:400">(un par ligne)</span></label>
+      <textarea class="input-field" id="lieu-pnj" rows="2">${(lieu.pnj || []).join('\n')}</textarea>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="window.saveLieu('${lieu.id}')">Enregistrer</button>
+    <div class="form-group"><label>Tags <span style="color:var(--text-dim);font-weight:400">(séparés par des virgules)</span></label>
+      <input class="input-field" id="lieu-tags" value="${(lieu.tags || []).join(', ')}">
+    </div>
+    <div class="form-group"><label>Notes MJ <span style="color:var(--text-dim);font-weight:400">(privées)</span></label>
+      <textarea class="input-field" id="lieu-notes" rows="2">${lieu.notes || ''}</textarea>
+    </div>
+    <div class="form-group"><label>URL image</label>
+      <input class="input-field" id="lieu-image" value="${lieu.image || ''}">
+    </div>
+    <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer;
+      font-size:.84rem;color:var(--text-muted);margin-bottom:.75rem;
+      padding:.6rem .75rem;background:rgba(255,107,107,.06);border:1px solid rgba(255,107,107,.18);border-radius:8px">
+      <input type="checkbox" id="lieu-hidden" ${lieu.hidden ? 'checked' : ''} style="accent-color:#ff6b6b">
+      <span>🙈 Masqué aux joueurs <span style="color:var(--text-dim);font-size:.75rem">(le lieu existe mais n'est pas visible)</span></span>
+    </label>
+    <div class="form-group">
+      <label>Position <span style="color:var(--text-dim);font-weight:400">(% sur la carte)</span></label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+        <div><label style="font-size:.72rem;color:var(--text-dim)">X</label>
+          <input type="number" class="input-field" id="lieu-x" value="${lieu.x}" step="0.1" min="0" max="100"></div>
+        <div><label style="font-size:.72rem;color:var(--text-dim)">Y</label>
+          <input type="number" class="input-field" id="lieu-y" value="${lieu.y}" step="0.1" min="0" max="100"></div>
+      </div>
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="window.saveLieu('${lieu.id}')">Enregistrer</button>
   `);
 }
 
