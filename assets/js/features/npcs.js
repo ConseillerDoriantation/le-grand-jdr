@@ -593,8 +593,32 @@ function openNpcModal(id = null) {
         placeholder="Apparence, personnalité, secrets…">${_esc(npc?.description||'')}</textarea>
     </div>
     <div class="form-group" style="margin-top:.75rem">
-      <label>URL image <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
-      <input class="input-field" id="npc-image" value="${_esc(npc?.imageUrl||'')}" placeholder="https://…">
+      <label>Portrait <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
+      <div id="npc-img-drop" style="border:2px dashed var(--border-strong);border-radius:10px;
+        padding:.85rem;text-align:center;cursor:pointer;background:var(--bg-elevated);
+        transition:border-color .15s">
+        <div id="npc-img-preview">
+          ${npc?.imageUrl
+            ? `<img src="${npc.imageUrl}" style="max-height:70px;border-radius:50%;
+                aspect-ratio:1;object-fit:cover;border:2px solid var(--border-bright)">`
+            : `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
+               <div style="font-size:.75rem;color:var(--text-muted)">
+                 <span style="color:var(--gold)">Cliquer</span> ou glisser une image</div>`}
+        </div>
+      </div>
+      <div id="npc-crop-wrap" style="display:none;margin-top:.6rem">
+        <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.35rem">
+          Recadrez — ratio 1:1 (portrait carré)</div>
+        <canvas id="npc-crop-canvas" style="display:block;width:100%;border-radius:8px;
+          cursor:crosshair;touch-action:none"></canvas>
+        <button type="button" class="btn btn-gold btn-sm" style="width:100%;margin-top:.4rem"
+          onclick="window._npcConfirmCrop()">✂️ Confirmer</button>
+        <div id="npc-crop-ok" style="display:none;font-size:.72rem;
+          text-align:center;margin-top:3px;color:var(--green)"></div>
+      </div>
+      ${npc?.imageUrl ? `<button type="button" onclick="window._npcClearImg()"
+        style="margin-top:.3rem;font-size:.72rem;background:none;border:none;
+        cursor:pointer;color:#ff6b6b">✕ Retirer l'image</button>` : ''}
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1"
@@ -602,16 +626,150 @@ function openNpcModal(id = null) {
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
+
+  // ── Setup upload+crop portrait ────────────────────────────────────────────
+  let _npcCropBase64 = null;
+  let _npcImgCleared = false;
+
+  const npcFileInput = document.createElement('input');
+  npcFileInput.type = 'file'; npcFileInput.accept = 'image/*';
+  npcFileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0';
+  document.body.appendChild(npcFileInput);
+
+  const handleNpcFile = (file) => {
+    if (!file?.type.startsWith('image/')) return;
+    const r = new FileReader();
+    r.onload = (e) => _initNpcCrop(e.target.result);
+    r.readAsDataURL(file);
+  };
+
+  npcFileInput.addEventListener('change', () => handleNpcFile(npcFileInput.files[0]));
+
+  const npcDrop = document.getElementById('npc-img-drop');
+  npcDrop?.addEventListener('click', () => npcFileInput.click());
+  npcDrop?.addEventListener('dragover', e => { e.preventDefault(); npcDrop.style.borderColor='var(--gold)'; });
+  npcDrop?.addEventListener('dragleave', () => { npcDrop.style.borderColor='var(--border-strong)'; });
+  npcDrop?.addEventListener('drop', e => { e.preventDefault(); npcDrop.style.borderColor='var(--border-strong)'; handleNpcFile(e.dataTransfer.files[0]); });
+
+  const npcObs = new MutationObserver(() => {
+    if (!document.getElementById('npc-img-drop')) { npcFileInput.remove(); npcObs.disconnect(); }
+  });
+  npcObs.observe(document.body, { childList:true, subtree:true });
+
+  // Crop 1:1
+  let _npcCrop = { img:null, cropX:0,cropY:0,cropW:0,cropH:0, startX:0,startY:0,
+    isDragging:false,isResizing:false,handle:null, natW:0,natH:0,dispScale:1 };
+  const _nc = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+
+  function _initNpcCrop(dataUrl) {
+    const wrap = document.getElementById('npc-crop-wrap');
+    const canvas = document.getElementById('npc-crop-canvas');
+    if (!wrap||!canvas) return;
+    wrap.style.display='block';
+    document.getElementById('npc-crop-ok').style.display='none';
+    const img = new Image();
+    img.onload = () => {
+      _npcCrop.img=img; _npcCrop.natW=img.naturalWidth; _npcCrop.natH=img.naturalHeight;
+      const maxW=Math.min(400,img.naturalWidth);
+      _npcCrop.dispScale=maxW/img.naturalWidth;
+      canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
+      canvas.style.width=maxW+'px'; canvas.style.height=Math.round(img.naturalHeight*_npcCrop.dispScale)+'px';
+      const sq=Math.min(img.naturalWidth,img.naturalHeight);
+      _npcCrop.cropX=Math.round((img.naturalWidth-sq)/2);
+      _npcCrop.cropY=Math.round((img.naturalHeight-sq)/2);
+      _npcCrop.cropW=sq; _npcCrop.cropH=sq;
+      _drawNpcCrop(); _bindNpcCrop(canvas);
+      const prev=document.getElementById('npc-img-preview');
+      if(prev) prev.innerHTML=`<img src="${dataUrl}" style="max-height:50px;border-radius:50%;opacity:.6">
+        <div style="font-size:.68rem;color:var(--text-dim);margin-top:3px">Recadrez ci-dessous</div>`;
+    };
+    img.src=dataUrl;
+  }
+
+  function _npcHandles(){const{cropX:x,cropY:y,cropW:w,cropH:h}=_npcCrop;return[{id:'nw',x,y},{id:'ne',x:x+w,y},{id:'sw',x,y:y+h},{id:'se',x:x+w,y:y+h}];}
+  function _npcHitH(nx,ny){const tol=9/_npcCrop.dispScale;return _npcHandles().find(h=>Math.abs(h.x-nx)<tol&&Math.abs(h.y-ny)<tol)||null;}
+  function _drawNpcCrop(){
+    const canvas=document.getElementById('npc-crop-canvas'); if(!canvas||!_npcCrop.img)return;
+    const ctx=canvas.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_npcCrop;
+    ctx.clearRect(0,0,natW,natH); ctx.drawImage(img,0,0,natW,natH);
+    ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(0,0,natW,natH);
+    ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
+    // Cercle de découpe
+    ctx.save(); ctx.beginPath(); ctx.arc(cropX+cropW/2,cropY+cropH/2,cropW/2,0,Math.PI*2);
+    ctx.strokeStyle='var(--gold)'; ctx.lineWidth=2; ctx.stroke(); ctx.restore();
+    ctx.fillStyle='var(--gold)'; ctx.strokeStyle='#0b1118'; ctx.lineWidth=1.5;
+    _npcHandles().forEach(h=>{ctx.fillRect(h.x-5,h.y-5,10,10);ctx.strokeRect(h.x-5,h.y-5,10,10);});
+  }
+  function _npcToN(c,cx,cy){const r=c.getBoundingClientRect();return{x:(cx-r.left)/_npcCrop.dispScale,y:(cy-r.top)/_npcCrop.dispScale};}
+  function _bindNpcCrop(canvas){
+    const MIN=40;
+    const onStart=(cx,cy)=>{const{x,y}=_npcToN(canvas,cx,cy),h=_npcHitH(x,y);
+      if(h){_npcCrop.isResizing=true;_npcCrop.handle=h.id;}
+      else{const{cropX,cropY,cropW,cropH}=_npcCrop;
+        if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH){_npcCrop.isDragging=true;_npcCrop.startX=x-cropX;_npcCrop.startY=y-cropY;}}};
+    const onMove=(cx,cy)=>{if(!_npcCrop.isDragging&&!_npcCrop.isResizing)return;
+      const{x,y}=_npcToN(canvas,cx,cy),{natW:W,natH:H}=_npcCrop;
+      if(_npcCrop.isDragging){_npcCrop.cropX=Math.round(_nc(x-_npcCrop.startX,0,W-_npcCrop.cropW));_npcCrop.cropY=Math.round(_nc(y-_npcCrop.startY,0,H-_npcCrop.cropH));_drawNpcCrop();return;}
+      let{cropX,cropY,cropW,handle}=_npcCrop;const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropW};
+      const newW=handle==='se'||handle==='ne'?_nc(x-a.x,MIN,Math.min(W-a.x,H-a.y)):_nc(a.x2-x,MIN,Math.min(a.x2,a.y2));
+      if(handle==='sw'||handle==='nw')_npcCrop.cropX=Math.round(a.x2-newW);
+      if(handle==='nw'||handle==='ne')_npcCrop.cropY=Math.round(a.y2-newW);
+      _npcCrop.cropW=Math.round(newW);_npcCrop.cropH=Math.round(newW);_drawNpcCrop();};
+    const onEnd=()=>{_npcCrop.isDragging=false;_npcCrop.isResizing=false;_npcCrop.handle=null;};
+    canvas.addEventListener('mousedown',e=>{e.preventDefault();onStart(e.clientX,e.clientY);});
+    window.addEventListener('mousemove',e=>onMove(e.clientX,e.clientY));
+    window.addEventListener('mouseup',onEnd);
+    canvas.addEventListener('touchstart',e=>{e.preventDefault();onStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+    canvas.addEventListener('touchmove',e=>{e.preventDefault();onMove(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+    canvas.addEventListener('touchend',onEnd);
+  }
+
+  window._npcConfirmCrop = () => {
+    const {img,cropX,cropY,cropW,cropH}=_npcCrop; if(!img)return;
+    const sz=Math.min(400,cropW);
+    const out=document.createElement('canvas'); out.width=sz; out.height=sz;
+    out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,sz,sz);
+    _npcCropBase64=out.toDataURL('image/jpeg',.88);
+    document.getElementById('npc-crop-wrap').style.display='none';
+    const ok=document.getElementById('npc-crop-ok');
+    if(ok){ok.style.display='block';ok.textContent=`✓ Portrait prêt (${Math.round(_npcCropBase64.length/1024)} KB)`;}
+    const prev=document.getElementById('npc-img-preview');
+    if(prev) prev.innerHTML=`<img src="${_npcCropBase64}" style="max-height:70px;border-radius:50%;aspect-ratio:1;object-fit:cover;border:2px solid var(--gold)">`;
+    // Stocker dans une variable accessible par saveNpc
+    window._pendingNpcImg = _npcCropBase64;
+  };
+
+  window._npcClearImg = () => {
+    window._pendingNpcImg = '';
+    window._npcImgCleared = true;
+    const prev=document.getElementById('npc-img-preview');
+    if(prev) prev.innerHTML=`<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
+      <div style="font-size:.75rem;color:var(--text-muted)"><span style="color:var(--gold)">Cliquer</span> ou glisser</div>`;
+    document.getElementById('npc-crop-wrap').style.display='none';
+  };
+
+  window._pendingNpcImg = null;
+  window._npcImgCleared = false;
 }
 
 async function saveNpc(id) {
+  // Résoudre l'image : nouveau crop > existante > effacée
+  let imageUrl = '';
+  if (window._pendingNpcImg !== null && window._pendingNpcImg !== undefined) {
+    imageUrl = window._pendingNpcImg;
+  } else if (id && !window._npcImgCleared) {
+    imageUrl = _npcs.find(n => n.id === id)?.imageUrl || '';
+  }
+  window._pendingNpcImg = null;
+  window._npcImgCleared = false;
+
   const data = {
     nom:         document.getElementById('npc-nom')?.value?.trim()   || '?',
     role:        document.getElementById('npc-role')?.value?.trim()   || '',
     disposition: document.getElementById('npc-disp')?.value          || 'Neutre',
     lieu:        document.getElementById('npc-lieu')?.value?.trim()   || '',
     description: document.getElementById('npc-desc')?.value?.trim()  || '',
-    imageUrl:    document.getElementById('npc-image')?.value?.trim()  || '',
+    imageUrl,
   };
 
   if (id) {
