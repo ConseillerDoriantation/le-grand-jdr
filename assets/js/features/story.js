@@ -448,14 +448,26 @@ async function openStoryDetail(id) {
     <div style="border-top:1px solid var(--border);padding-top:1rem;display:flex;gap:1.5rem;flex-wrap:wrap">
       ${participants.length?`
       <div style="flex:1;min-width:130px">
-        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.5rem">Participants</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${participants.map(p=>`
-            <div style="width:36px;height:36px;border-radius:50%;background:var(--bg-elevated);
-              border:2px solid var(--border-bright);display:flex;align-items:center;justify-content:center;overflow:hidden">
-              ${p.imageUrl?`<img src="${p.imageUrl}" style="width:100%;height:100%;object-fit:cover">`
-                :`<span style="font-size:1.1rem">${p.emoji||'⚔️'}</span>`}
-            </div>`).join('')}
+        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.6rem">Participants</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          ${participants.map(p=>{
+            const col = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'][(p.nom||'').charCodeAt(0)%6||0];
+            const photoPos = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
+            return `<div title="${p.nom||''}" style="display:flex;flex-direction:column;align-items:center;gap:4px">
+              <div style="width:42px;height:42px;border-radius:50%;overflow:hidden;
+                border:2px solid ${col};background:${col}18;
+                display:flex;align-items:center;justify-content:center">
+                ${p.photo
+                  ? `<img src="${p.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+                  : p.imageUrl
+                    ? `<img src="${p.imageUrl}" style="width:100%;height:100%;object-fit:cover">`
+                    : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:${col}">${(p.nom||p.emoji||'?')[0]?.toUpperCase()}</span>`}
+              </div>
+              <span style="font-size:.6rem;color:var(--text-dim);max-width:44px;
+                text-align:center;overflow:hidden;text-overflow:ellipsis;
+                white-space:nowrap">${p.nom||''}</span>
+            </div>`;
+          }).join('')}
         </div>
       </div>`:''}
 
@@ -575,12 +587,49 @@ async function openStoryModal(item = null) {
     </div>
 
     <div class="form-group">
-      <label>Participants (URL avatar ou emoji:Nom, un par ligne)</label>
-      <textarea class="input-field" id="st-participants" rows="2"
-        placeholder="https://avatar.jpg&#10;⚔️:Kael">${
-          (item?.participants||[]).map(p=>p.imageUrl||(p.emoji?`${p.emoji}:${p.nom||''}`:''))
-            .filter(Boolean).join('\n')
-        }</textarea>
+      <label>Participants</label>
+      <div id="st-participants-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:.5rem;margin-top:.3rem">
+        ${(() => {
+          const chars = STATE.characters || [];
+          if (!chars.length) return `<div style="font-size:.78rem;color:var(--text-dim);
+            font-style:italic;grid-column:1/-1">Aucun personnage disponible.</div>`;
+          const selected = new Set((item?.participants||[]).map(p=>p.id).filter(Boolean));
+          return chars.map(c => {
+            const isOn = selected.has(c.id);
+            const col  = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'][c.nom?.charCodeAt(0)%6||0];
+            const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+            return `<div onclick="window._toggleStParticipant('${c.id}')"
+              id="st-part-${c.id}"
+              data-part-id="${c.id}"
+              data-part-nom="${(c.nom||'?').replace(/"/g,'&quot;')}"
+              data-part-photo="${c.photo||''}"
+              data-part-photox="${c.photoX||0}"
+              data-part-photoy="${c.photoY||0}"
+              data-part-photozoom="${c.photoZoom||1}"
+              style="display:flex;flex-direction:column;align-items:center;gap:.3rem;
+              padding:.5rem .3rem;border-radius:10px;cursor:pointer;transition:all .15s;
+              border:2px solid ${isOn?col:'var(--border)'};
+              background:${isOn?col+'18':'var(--bg-elevated)'}">
+              <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;
+                border:2px solid ${isOn?col:'rgba(255,255,255,.1)'};
+                background:${col}18;display:flex;align-items:center;justify-content:center;
+                flex-shrink:0">
+                ${c.photo
+                  ? `<img src="${c.photo}" style="width:100%;height:100%;
+                      object-fit:cover;object-position:${photoPos}">`
+                  : `<span style="font-family:'Cinzel',serif;font-weight:700;
+                      font-size:.95rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
+              </div>
+              <span style="font-size:.65rem;text-align:center;
+                color:${isOn?col:'var(--text-dim)'};font-weight:${isOn?'700':'400'};
+                line-height:1.2;max-width:72px;overflow:hidden;
+                text-overflow:ellipsis;white-space:nowrap">${c.nom||'?'}</span>
+              ${isOn?`<div style="width:8px;height:8px;border-radius:50%;
+                background:${col};flex-shrink:0"></div>`:''}
+            </div>`;
+          }).join('');
+        })()}
+      </div>
     </div>
 
     <div id="st-mission-extra" style="">
@@ -665,6 +714,34 @@ async function openStoryModal(item = null) {
       ${item?'Enregistrer':'Créer'}
     </button>
   `);
+
+  // Toggle participant dans la grille
+  window._toggleStParticipant = (charId) => {
+    const el  = document.getElementById(`st-part-${charId}`);
+    if (!el) return;
+    const col = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'][
+      (el.dataset.partNom||'').charCodeAt(0) % 6];
+    const isOn = el.dataset.selected === '1';
+    el.dataset.selected = isOn ? '0' : '1';
+    el.style.borderColor  = !isOn ? col : 'var(--border)';
+    el.style.background   = !isOn ? col+'18' : 'var(--bg-elevated)';
+    // Mettre à jour le point indicateur et la couleur du nom
+    const nameEl = el.querySelector('span');
+    const dotEl  = el.querySelector('[style*="border-radius:50%;background"]');
+    if (nameEl) { nameEl.style.color = !isOn ? col : 'var(--text-dim)'; nameEl.style.fontWeight = !isOn ? '700' : '400'; }
+    if (!isOn && !dotEl) {
+      const dot = document.createElement('div');
+      dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0`;
+      el.appendChild(dot);
+    } else if (isOn && dotEl) dotEl.remove();
+  };
+
+  // Initialiser data-selected depuis les participants existants
+  (item?.participants||[]).forEach(p => {
+    if (!p.id) return;
+    const el = document.getElementById(`st-part-${p.id}`);
+    if (el) el.dataset.selected = '1';
+  });
 
   // ── Input file créé en JS (évite l'orphelin DOM via innerHTML) ────────────
   const stFileInput = document.createElement('input');
@@ -838,11 +915,17 @@ async function saveStory(id = '') {
     imageUrl=existing?.imageUrl||'';
   }
 
-  const participantsRaw=document.getElementById('st-participants')?.value||'';
-  const participants=participantsRaw.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
-    if(l.startsWith('http'))return{imageUrl:l,nom:''};
-    const[emoji,nom]=l.split(':');return{emoji:emoji?.trim()||'⚔️',nom:nom?.trim()||''};
-  });
+  // Participants depuis la grille de sélection
+  const participants = [...document.querySelectorAll('[id^="st-part-"]')]
+    .filter(el => el.dataset.selected === '1')
+    .map(el => ({
+      id:        el.dataset.partId       || '',
+      nom:       el.dataset.partNom      || '',
+      photo:     el.dataset.partPhoto    || '',
+      photoX:    parseFloat(el.dataset.partPhotox)    || 0,
+      photoY:    parseFloat(el.dataset.partPhotoy)    || 0,
+      photoZoom: parseFloat(el.dataset.partPhotozoom) || 1,
+    }));
 
   const allCb=document.querySelectorAll('[id^="lien-"]');
   const liens=[...allCb].filter(cb=>cb.checked).map(cb=>cb.id.replace('lien-',''));
