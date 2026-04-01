@@ -1517,7 +1517,7 @@ function renderCharDeck(c, canEdit) {
 function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c) {
   const isOpen   = openIdx === i;
   const runesAll = s.runes || [];
-  const typeSrt  = _getSortType(s);   // 'degats' | 'soin' | 'utilitaire'
+  const typeSrt  = _getSortType(s);
 
   const nbPuiss  = runesAll.filter(r => r === 'Puissance').length;
   const nbProt   = runesAll.filter(r => r === 'Protection').length;
@@ -1526,26 +1526,28 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c) {
   const chainBonus = totalPP > 1 ? `+${(totalPP-1)*2}` : '';
   const nbCibles = _calcSortCibles(s);
 
-  // Calculer selon le type
   const degCalc  = typeSrt === 'degats' ? _calcSortDegats(s, c) : null;
   const soinCalc = typeSrt === 'soin'   ? _calcSortSoin(s)      : null;
 
-  // Aperçu condensé
-  const apercuParts = [s.effet || null];
-  if (typeSrt === 'degats')    apercuParts.push(`⚔️ ${degCalc}`);
-  if (typeSrt === 'soin')      apercuParts.push(`💚 ${soinCalc}`);
-  if (nbCibles > 1)            apercuParts.push(`🎯 ×${nbCibles}`);
-  const apercu = apercuParts.filter(Boolean).join(' · ');
+  // Modificateur de stat de l'arme principale
+  const equip    = c?.equipement || {};
+  const mainP    = equip['Main principale'];
+  const statKey  = mainP?.statAttaque || mainP?.toucherStat || mainP?.degatsStat || 'force';
+  const statVal  = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
+  const mod      = Math.floor((Math.min(22, statVal) - 10) / 2);
+  const modStr   = mod >= 0 ? `+${mod}` : `${mod}`;
+  const statShortLabel = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
 
-  // Couleur selon type
+  // Ligne de stats clés (compacte, sous le nom)
+  const statLine = [];
+  if (typeSrt === 'degats' && degCalc)  statLine.push(`⚔️ ${degCalc} ${modStr} ${statShortLabel}`);
+  if (typeSrt === 'soin'   && soinCalc) statLine.push(`💚 ${soinCalc}`);
+  if (nbCibles > 1)                     statLine.push(`🎯 ×${nbCibles}`);
+  if (s.effet)                          statLine.push(s.effet.length > 40 ? s.effet.slice(0,40)+'…' : s.effet);
+
+  // Couleur type
   const typeColor = typeSrt === 'degats' ? '#ff6b6b' : typeSrt === 'soin' ? '#22c38e' : '#b47fff';
-  const typeEmoji = typeSrt === 'degats' ? '⚔️' : typeSrt === 'soin' ? '💚' : '✨';
-
-  // Badges chaînage/dispersion
-  const specialBadges = [
-    chainBonus ? `<span class="cs-sort-badge gold" title="Chaînage PP">${chainBonus}</span>` : '',
-    nbCibles > 1 ? `<span class="cs-sort-badge blue">×${nbCibles}🎯</span>` : '',
-  ].filter(Boolean).join('');
+  const typeLabel = typeSrt === 'degats' ? '⚔️ Offensif' : typeSrt === 'soin' ? '💚 Soin' : '✨ Utilitaire';
 
   return `<div class="cs-sort-row ${s.actif?'actif':''}"
     draggable="true" data-sort-idx="${i}"
@@ -1557,40 +1559,54 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c) {
       <div class="toggle ${s.actif?'on':''}"
            onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}"
            title="${s.actif?'Désactiver':'Activer'}"></div>
-      <div class="cs-sort-row-info">
-        <div class="cs-sort-row-top">
-          <span class="cs-sort-row-name">${s.nom||'Sans nom'}</span>
-          <span style="font-size:.65rem;padding:1px 5px;border-radius:4px;
-            background:${typeColor}18;color:${typeColor};border:1px solid ${typeColor}33">${typeEmoji}</span>
-          <div class="cs-sort-row-badges">
-            ${s.noyau ? `<span class="cs-sort-badge gold">${s.noyau}</span>` : ''}
-            ${runesAll.slice(0,3).map(r=>`<span class="cs-sort-badge blue">${r}</span>`).join('')}
-            ${runesAll.length>3 ? `<span class="cs-sort-badge muted">+${runesAll.length-3}</span>` : ''}
-            ${specialBadges}
-          </div>
-          <span class="cs-sort-row-pm">${s.pm||0} PM</span>
-          <span class="cs-sort-row-chevron">${isOpen?'▲':'▼'}</span>
+
+      <div class="cs-sort-row-info" style="flex:1;min-width:0">
+        <!-- Ligne 1 : nom (grand) + PM + chevron -->
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <span style="font-family:'Cinzel',serif;font-size:.95rem;font-weight:700;
+            color:var(--text);flex:1;min-width:0;white-space:nowrap;
+            overflow:hidden;text-overflow:ellipsis">${s.nom||'Sans nom'}</span>
+          <span style="font-size:.7rem;padding:1px 7px;border-radius:999px;flex-shrink:0;
+            background:${typeColor}18;color:${typeColor};border:1px solid ${typeColor}33;
+            white-space:nowrap">${typeLabel}</span>
+          <span class="cs-sort-row-pm" style="flex-shrink:0">${s.pm||0} PM</span>
+          <span class="cs-sort-row-chevron" style="flex-shrink:0">${isOpen?'▲':'▼'}</span>
         </div>
-        ${apercu ? `<div class="cs-sort-row-apercu">${apercu}</div>` : ''}
+        <!-- Ligne 2 : stats clés + noyau/runes -->
+        <div style="display:flex;align-items:center;gap:.5rem;margin-top:.25rem;flex-wrap:wrap">
+          ${statLine.length ? `<span style="font-size:.78rem;color:${typeColor};font-weight:600">${statLine[0]}</span>` : ''}
+          ${statLine.slice(1).map(t=>`<span style="font-size:.75rem;color:var(--text-dim)">${t}</span>`).join('')}
+          <div style="display:flex;gap:.25rem;margin-left:auto;flex-shrink:0">
+            ${s.noyau ? `<span class="cs-sort-badge gold">${s.noyau.split(' ')[0]}</span>` : ''}
+            ${totalPP > 0 ? `<span class="cs-sort-badge gold">${chainBonus||`+${totalPP}🎲`}</span>` : ''}
+            ${nbCibles > 1 ? `<span class="cs-sort-badge blue">×${nbCibles}🎯</span>` : ''}
+            ${runesAll.filter(r=>r!=='Puissance'&&r!=='Protection'&&r!=='Dispersion').slice(0,2).map(r=>`<span class="cs-sort-badge blue" style="font-size:.6rem">${r.slice(0,4)}</span>`).join('')}
+          </div>
+        </div>
       </div>
-      ${canEdit ? `<span class="cs-sort-row-actions" onclick="event.stopPropagation()">
+
+      ${canEdit ? `<span class="cs-sort-row-actions" onclick="event.stopPropagation()"
+        style="display:flex;gap:.15rem;flex-shrink:0;margin-left:.25rem">
         <button class="btn-icon" onclick="editSort(${i})">✏️</button>
         <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
       </span>` : ''}
     </div>
+
     ${isOpen ? `<div class="cs-sort-row-detail">
       ${s.noyau ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Noyau</span>${s.noyau}</div>` : ''}
-      ${runesAll.length ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes</span>${runesAll.join(' · ')}</div>` : ''}
+      ${runesAll.length ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes (${runesAll.length})</span>${runesAll.join(' · ')}</div>` : ''}
       ${s.effet ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Effet</span>${s.effet}</div>` : ''}
       ${typeSrt === 'degats' ? `<div class="cs-sort-dl" style="color:#ff6b6b">
         <span class="cs-sort-dl-label">Dégâts</span>
-        ⚔️ ${degCalc}
-        <span style="font-size:.68rem;color:var(--text-dim);margin-left:.3rem">(= ${armeDeg}${totalPP>0?`, +${totalPP} dé PP${chainBonus?`, chaîn. ${chainBonus}`:''}`:''} )</span>
+        ⚔️ <strong>${degCalc} ${modStr} ${statShortLabel}</strong>
+        <span style="font-size:.68rem;color:var(--text-dim);margin-left:.4rem">
+          (base ${armeDeg}${totalPP>0?` +${totalPP} dé PP`:''}${chainBonus?` chaîn. ${chainBonus}`:''}  ·  mod ${statShortLabel} ${modStr})
+        </span>
       </div>` : ''}
       ${typeSrt === 'soin' ? `<div class="cs-sort-dl" style="color:#22c38e">
         <span class="cs-sort-dl-label">Soin</span>
-        💚 ${soinCalc}
-        <span style="font-size:.68rem;color:var(--text-dim);margin-left:.3rem">(1d4 base${nbProt>0?` +${nbProt}d4 Protect.`:''})</span>
+        💚 <strong>${soinCalc}</strong>
+        <span style="font-size:.68rem;color:var(--text-dim);margin-left:.4rem">(1d4 base${nbProt>0?` +${nbProt}d4 Protect.`:''})</span>
       </div>` : ''}
       ${nbCibles > 1 ? `<div class="cs-sort-dl" style="color:#4f8cff">
         <span class="cs-sort-dl-label">Cibles</span>
@@ -2490,54 +2506,74 @@ function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
   if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
 
-  // Générer les cartes personnage avec portrait circulaire
+  const rareteN  = parseInt(item.rarete) || 0;
+  const RARETE_C = ['','#9ca3af','#4ade80','#60a5fa','#c084fc'];
+  const itemColor = RARETE_C[rareteN] || 'var(--border)';
+
+  // Carte de l'objet envoyé
+  const itemPreview = `
+    <div style="display:flex;align-items:center;gap:.75rem;padding:.65rem .85rem;
+      background:var(--bg-elevated);border-radius:10px;border-left:3px solid ${itemColor};
+      border:1px solid var(--border);margin-bottom:.85rem">
+      <div style="flex:1;min-width:0">
+        <div style="font-family:'Cinzel',serif;font-size:.88rem;font-weight:700;color:var(--text)">${nom}</div>
+        <div style="font-size:.72rem;color:var(--text-dim);margin-top:2px">
+          ${item.format||item.slotArmure||item.type||''}${maxQte>1?` · ${maxQte} disponible${maxQte>1?'s':''}`:' · 1 exemplaire'}
+        </div>
+      </div>
+      ${maxQte > 1 ? `
+      <div style="display:flex;align-items:center;gap:.3rem;flex-shrink:0">
+        <button type="button" id="send-dec"
+          style="width:26px;height:26px;border-radius:6px;border:1px solid var(--border);
+          background:var(--bg-card);cursor:pointer;font-size:1rem;color:var(--text);
+          display:flex;align-items:center;justify-content:center;line-height:1"
+          onclick="const i=document.getElementById('send-qty');i.value=Math.max(1,parseInt(i.value||1)-1)">−</button>
+        <input type="number" id="send-qty" min="1" max="${maxQte}" value="1"
+          style="width:44px;text-align:center;font-size:.85rem;font-weight:700;
+          background:var(--bg-card);border:1px solid var(--border);border-radius:6px;
+          color:var(--text);padding:3px 0">
+        <button type="button" id="send-inc"
+          style="width:26px;height:26px;border-radius:6px;border:1px solid var(--border);
+          background:var(--bg-card);cursor:pointer;font-size:1rem;color:var(--text);
+          display:flex;align-items:center;justify-content:center;line-height:1"
+          onclick="const i=document.getElementById('send-qty');i.value=Math.min(${maxQte},parseInt(i.value||1)+1)">+</button>
+      </div>` : ''}
+    </div>`;
+
+  // Grille de personnages — plus compact
   const targetCards = otherChars.map(target => {
-    const initiale = (target.nom||'?')[0].toUpperCase();
-    const colors   = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-    const couleur  = colors[(target.nom||'').charCodeAt(0) % colors.length];
-    const photoObjPos = `${50+(target.photoX||0)*50}% ${50+(target.photoY||0)*50}%`;
-    const portraitHtml = target.photo
-      ? `<img src="${target.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoObjPos}">`
-      : `<span style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:${couleur}">${initiale}</span>`;
-    return `<label style="display:flex;align-items:center;gap:.85rem;padding:.65rem .9rem;
-      border-radius:12px;border:2px solid var(--border);background:var(--bg-elevated);
-      cursor:pointer;transition:all .15s"
-      onmouseover="this.style.borderColor='var(--gold)';this.style.background='rgba(232,184,75,.06)'"
+    const initiale  = (target.nom||'?')[0].toUpperCase();
+    const colors    = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+    const couleur   = colors[(target.nom||'').charCodeAt(0) % colors.length];
+    const photoPos  = `${50+(target.photoX||0)*50}% ${50+(target.photoY||0)*50}%`;
+    return `<label style="display:flex;align-items:center;gap:.6rem;padding:.5rem .7rem;
+      border-radius:10px;border:2px solid var(--border);background:var(--bg-elevated);
+      cursor:pointer;transition:all .12s"
+      onmouseover="this.style.borderColor='${couleur}';this.style.background='${couleur}0f'"
       onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
-      <input type="radio" name="send-target" value="${target.id}" style="accent-color:var(--gold);flex-shrink:0">
-      <div style="width:44px;height:44px;border-radius:50%;flex-shrink:0;overflow:hidden;
+      <input type="radio" name="send-target" value="${target.id}"
+        style="accent-color:${couleur};flex-shrink:0;width:14px;height:14px">
+      <div style="width:36px;height:36px;border-radius:50%;flex-shrink:0;overflow:hidden;
         border:2px solid ${couleur};background:${couleur}18;
         display:flex;align-items:center;justify-content:center">
-        ${portraitHtml}
+        ${target.photo
+          ? `<img src="${target.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+          : `<span style="font-family:'Cinzel',serif;font-size:.95rem;font-weight:700;color:${couleur}">${initiale}</span>`}
       </div>
-      <div style="min-width:0;flex:1">
-        <div style="font-family:'Cinzel',serif;font-size:.88rem;font-weight:600;color:var(--text)">${target.nom||'?'}</div>
-        ${target.ownerPseudo?`<div style="font-size:.7rem;color:var(--text-dim);margin-top:1px">${target.ownerPseudo}</div>`:''}
-        ${target.titre?`<div style="font-size:.68rem;font-style:italic;color:${couleur};margin-top:1px">${target.titre}</div>`:''}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.84rem;font-weight:600;color:var(--text);
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${target.nom||'?'}</div>
+        ${target.ownerPseudo ? `<div style="font-size:.68rem;color:var(--text-dim)">${target.ownerPseudo}</div>` : ''}
       </div>
     </label>`;
   }).join('');
 
-  openModal(`📤 Envoyer — ${nom}`, `
-    <div style="margin-bottom:.75rem;font-size:.85rem;color:var(--text-muted)">
-      ${maxQte} exemplaire${maxQte>1?'s':''} disponible${maxQte>1?'s':''}
-    </div>
-    ${maxQte > 1 ? `
-    <div class="form-group" style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem">
-      <label style="flex-shrink:0">Quantité</label>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <button type="button" onclick="this.nextElementSibling.stepDown()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">−</button>
-        <input type="number" id="send-qty" min="1" max="${maxQte}" value="1"
-          style="width:60px;text-align:center" class="input-field">
-        <button type="button" onclick="this.previousElementSibling.stepUp()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">+</button>
-      </div>
-    </div>` : ''}
-    <div class="form-group">
-      <label style="display:block;margin-bottom:.5rem">Envoyer à</label>
-      <div style="display:flex;flex-direction:column;gap:.5rem">${targetCards}</div>
-    </div>
+  openModal(`📤 Envoyer`, `
+    ${itemPreview}
+    <div style="font-size:.72rem;color:var(--text-dim);font-weight:600;
+      text-transform:uppercase;letter-spacing:.8px;margin-bottom:.4rem">Destinataire</div>
+    <div style="display:flex;flex-direction:column;gap:.35rem;
+      max-height:260px;overflow-y:auto">${targetCards}</div>
     <div style="display:flex;gap:.5rem;margin-top:.85rem">
       <button class="btn btn-gold" style="flex:1" onclick="sendInvItem('${charId}','${b64}')">📤 Envoyer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
