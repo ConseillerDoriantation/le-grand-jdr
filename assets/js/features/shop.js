@@ -10,15 +10,16 @@ const TEMPLATES = {
   arme: {
     label: '⚔️ Arme',
     fields: [
-      { id:'format',      label:'Format',   type:'select',
+      { id:'format',    label:'Format',     type:'select',
         options:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'] },
-      { id:'rarete',      label:'Rareté',   type:'rarete' },
-      { id:'degats',      label:'Dégâts',   type:'damage_with_stat', placeholder:'1D10, 2D6...' },
-      { id:'toucherStat', label:'Toucher',  type:'stat_select', placeholder:'Stat utilisée pour le jet d attaque' },
+      { id:'sousType',  label:'Type d\'arme', type:'text', placeholder:'Épée, Lance, Dague, Arc, Bâton...' },
+      { id:'rarete',    label:'Rareté',     type:'rarete' },
+      { id:'degats',    label:'Dégâts',     type:'damage_with_stat', placeholder:'1D10, 2D6...' },
+      { id:'toucherStat', label:'Toucher',  type:'stat_select' },
       { id:'statBonuses', label:'Bonus de stats', type:'stat_bonus_grid' },
-      { id:'trait',       label:'Trait',    type:'text',   placeholder:'Lourd, Finesse, Polyvalent...' },
-      { id:'prix',        label:'Prix 🪙',  type:'number', placeholder:'0' },
-      { id:'dispo',       label:'Dispo',    type:'dispo' },
+      { id:'trait',     label:'Trait',      type:'text',   placeholder:'Lourd, Finesse, Polyvalent...' },
+      { id:'prix',      label:'Prix 🪙',    type:'number', placeholder:'0' },
+      { id:'dispo',     label:'Dispo',      type:'dispo' },
     ],
   },
   armure: {
@@ -375,10 +376,27 @@ function _renderItemsView() {
     (i.trait||'').toLowerCase().includes(search) ||
     (i.effet||'').toLowerCase().includes(search)
   );
+  // ── Logique tags : OU au sein d'un groupe, ET entre groupes différents ──────
+  // Ex: rareté "Commun" OU "Rare" ET emplacement "Tête" → items qui sont (Commun OU Rare) ET Tête
   if (_filterTags.size > 0) {
+    // Reconstituer les groupes actifs
+    const allItems0 = _items.filter(i => i.categorieId === _activeCat);
+    const tagGroups0 = _buildTagGroups(allItems0);
+    // Map groupLabel → Set de valeurs actives dans ce groupe
+    const activeByGroup = new Map();
+    for (const group of tagGroups0) {
+      const activeInGroup = group.tags.filter(t => _filterTags.has(t.value)).map(t => t.value);
+      if (activeInGroup.length > 0) activeByGroup.set(group.label, new Set(activeInGroup));
+    }
     items = items.filter(i => {
-      const tags = _getItemTags(i);
-      return [..._filterTags].every(t => tags.has(t));
+      const iTags = _getItemTags(i);
+      // L'item doit satisfaire TOUS les groupes actifs (ET entre groupes)
+      for (const [, groupVals] of activeByGroup) {
+        // Mais au sein d'un groupe c'est OU : suffit qu'un tag du groupe matche
+        const matchesGroup = [...groupVals].some(v => iTags.has(v));
+        if (!matchesGroup) return false;
+      }
+      return true;
     });
   }
 
@@ -395,20 +413,21 @@ function _renderItemsView() {
     <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
       <div style="flex:1;min-width:200px;position:relative">
         <input type="text" id="sh-search" class="input-field"
-          placeholder="🔍 Rechercher dans cette catégorie..."
+          placeholder="🔍 Rechercher..."
           value="${_filterSearch||''}"
           oninput="shopFilterSearch(this.value)"
+          autocomplete="off"
           style="width:100%;padding-right:2.2rem">
         ${_filterSearch ? `<button onclick="shopFilterSearch('')"
           style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
-          background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem"
-          title="Effacer">✕</button>` : ''}
+          background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
       </div>
       <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0">
-        <span style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
-        ${hasFilters ? `<button onclick="shopFilterReset()"
+        <span id="sh-count" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
+        <button id="sh-clear-btn" onclick="shopFilterReset()"
           style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
-          border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b">✕ Tout effacer</button>` : ''}
+          border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b;
+          display:${hasFilters?'':'none'}">✕ Tout effacer</button>
         ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">+ Article</button>`:''}
       </div>
     </div>
@@ -419,7 +438,11 @@ function _renderItemsView() {
         <span style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;flex-shrink:0;min-width:70px">${group.label}</span>
         ${group.tags.map(tag => {
           const active = _filterTags.has(tag.value);
-          return `<button onclick="shopToggleTag('${tag.value.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')"
+          const sv = tag.value.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+          return `<button
+            data-tag-value="${tag.value.replace(/"/g,'&quot;')}"
+            data-tag-color="${tag.color}"
+            onclick="shopToggleTag('${sv}')"
             style="font-size:.72rem;border-radius:999px;padding:3px 10px;cursor:pointer;
             border:1px solid ${active ? tag.color : 'var(--border)'};
             background:${active ? tag.color+'22' : 'var(--bg-elevated)'};
@@ -428,7 +451,8 @@ function _renderItemsView() {
         }).join('')}
       </div>`).join('')}
     </div>` : ''}
-  </div>`;
+  </div>
+  <div id="sh-items-results">`; 
 
   if (slice.length === 0) {
     html += `<div class="empty-state"><div class="icon">📦</div>
@@ -448,12 +472,14 @@ function _renderItemsView() {
     if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
     html += `</div>`;
   }
+  html += `</div>`; // ferme #sh-items-results
   return html;
 }
 
 function _getItemTags(item) {
   const tags = new Set();
   if (item.format)     tags.add(item.format);
+  if (item.sousType)   tags.add(item.sousType);   // type d'arme libre (Épée, Lance...)
   if (item.slotArmure) tags.add(item.slotArmure);
   if (item.typeArmure) tags.add(item.typeArmure);
   if (item.slotBijou)  tags.add(item.slotBijou);
@@ -478,6 +504,8 @@ function _buildTagGroups(items) {
   };
   const formats = [...new Set(items.filter(i=>i.format).map(i=>i.format))].sort();
   if (formats.length) groups.push({ label:'Format', tags: formats.map(v=>({value:v,label:v,color:'#e8b84b'})) });
+  const sousTypes = [...new Set(items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
+  if (sousTypes.length) groups.push({ label:'Type arme', tags: sousTypes.map(v=>({value:v,label:v,color:'#e8b84b'})) });
   const slotA = [...new Set(items.filter(i=>i.slotArmure).map(i=>i.slotArmure))].sort();
   if (slotA.length) groups.push({ label:'Emplacement', tags: slotA.map(v=>({value:v,label:v,color:'#4f8cff'})) });
   const typeA = [...new Set(items.filter(i=>i.typeArmure).map(i=>i.typeArmure))].sort();
@@ -802,39 +830,111 @@ function shopPage(p)      { _page=p; renderShop(); }
 function shopFilterSearch(val) {
   _filterSearch = val;
   _page = 1;
-  // Mise à jour temps réel — juste re-render la zone items sans rechargement Firestore
-  const area = document.getElementById('sh-items-area');
-  if (area && _view === 'items') {
-    area.innerHTML = _renderItemsView();
-  } else {
-    renderShop();
-  }
+  if (_view === 'items') _updateItemsOnly();
+  else renderShop();
 }
 
 function shopToggleTag(val) {
   if (_filterTags.has(val)) _filterTags.delete(val);
   else _filterTags.add(val);
   _page = 1;
-  if (_view === 'items') {
-    const content = document.getElementById('main-content');
-    if (content) {
-      // Re-render juste la partie items
-      const area = content.querySelector('.sh-items-zone');
-      if (area) { area.innerHTML = _renderItemsView(); return; }
-    }
-  }
-  renderShop();
+  if (_view === 'items') _updateItemsOnly();
+  else renderShop();
 }
 
 function shopFilterReset() {
   _filterSearch = ''; _filterTags.clear(); _page = 1;
-  renderShop();
+  const inp = document.getElementById('sh-search');
+  if (inp) inp.value = '';
+  if (_view === 'items') _updateItemsOnly();
+  else renderShop();
 }
 
-// Compat anciens appels
-function shopGoSubCat()   { /* no-op, sous-catégories supprimées */ }
-function shopFilterBy()   { /* no-op, remplacé par shopToggleTag  */ }
-function shopFilterSearch_old() {}
+// ── Mise à jour partielle : grille + compteur + tags, sans toucher le champ texte ──
+function _updateItemsOnly() {
+  const cat = _cats.find(c => c.id === _activeCat);
+  if (!cat) { renderShop(); return; }
+
+  // ── Recalculer items filtrés ────────────────────────────────────────────
+  let items = _items.filter(i => i.categorieId === _activeCat);
+  const search = (_filterSearch||'').toLowerCase().trim();
+  if (search) items = items.filter(i =>
+    (i.nom||'').toLowerCase().includes(search) ||
+    (i.type||'').toLowerCase().includes(search) ||
+    (i.sousType||'').toLowerCase().includes(search) ||
+    (i.description||'').toLowerCase().includes(search) ||
+    (i.trait||'').toLowerCase().includes(search) ||
+    (i.effet||'').toLowerCase().includes(search)
+  );
+  if (_filterTags.size > 0) {
+    const tagGroups0 = _buildTagGroups(_items.filter(i => i.categorieId === _activeCat));
+    const activeByGroup = new Map();
+    for (const group of tagGroups0) {
+      const active = group.tags.filter(t => _filterTags.has(t.value)).map(t => t.value);
+      if (active.length > 0) activeByGroup.set(group.label, new Set(active));
+    }
+    items = items.filter(i => {
+      const iTags = _getItemTags(i);
+      for (const [, gVals] of activeByGroup) {
+        if (![...gVals].some(v => iTags.has(v))) return false;
+      }
+      return true;
+    });
+  }
+
+  const total  = items.length;
+  const pages  = Math.ceil(total / PAGE_SIZE);
+  const p      = Math.max(1, Math.min(_page, pages));
+  const slice  = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
+  const hasF   = search || _filterTags.size > 0;
+
+  // ── Mettre à jour le compteur ───────────────────────────────────────────
+  const counter = document.getElementById('sh-count');
+  if (counter) counter.textContent = `${total} article${total!==1?'s':''}`;
+
+  // ── Mettre à jour le bouton "Tout effacer" ──────────────────────────────
+  const clearBtn = document.getElementById('sh-clear-btn');
+  if (clearBtn) clearBtn.style.display = hasF ? '' : 'none';
+
+  // ── Mettre à jour l'état visuel des boutons tags (sans recréer le DOM) ──
+  document.querySelectorAll('[data-tag-value]').forEach(btn => {
+    const v     = btn.dataset.tagValue;
+    const color = btn.dataset.tagColor || 'var(--text-dim)';
+    const active = _filterTags.has(v);
+    btn.style.borderColor = active ? color : 'var(--border)';
+    btn.style.background  = active ? color+'22' : 'var(--bg-elevated)';
+    btn.style.color       = active ? color : 'var(--text-dim)';
+    btn.style.fontWeight  = active ? '600' : '400';
+  });
+
+  // ── Mettre à jour la grille + pagination ────────────────────────────────
+  const grid = document.getElementById('sh-items-results');
+  if (!grid) { renderShop(); return; }
+
+  let html = '';
+  if (slice.length === 0) {
+    html = `<div class="empty-state"><div class="icon">📦</div>
+      <p>${hasF ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
+      ${!hasF&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>`:''}</div>`;
+  } else {
+    html = _renderItemGrid(cat, slice);
+  }
+  if (pages > 1) {
+    html += `<div class="sh-pagination">`;
+    if (p>1) html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
+    const st=Math.max(1,p-2), en=Math.min(pages,p+2);
+    if(st>1) html+=`<button class="sh-page-btn" onclick="shopPage(1)">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" onclick="shopPage(${i})">${i}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" onclick="shopPage(${pages})">${pages}</button>`;
+    if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
+    html += `</div>`;
+  }
+  grid.innerHTML = html;
+}
+
+// Compat
+function shopGoSubCat() {}
+function shopFilterBy()  {}
 window._shopSearch = '';
 window._shopFilterRarete = '';
 window._shopFilterDispo  = '';
@@ -1015,25 +1115,16 @@ async function deleteSubCat(catId,scId) {
 function openItemModal(itemId) {
   const item       = itemId ? _items.find(i=>i.id===itemId) : null;
   const defCatId   = item?.categorieId || _activeCat || '';
-  const defScId    = item?.sousCategorieId || _activeSubCat || '';
   const cat        = _cats.find(c=>c.id===defCatId);
   const tplKey     = cat?.template || 'classique';
   const tpl        = TEMPLATES[tplKey] || TEMPLATES.classique;
   const catOptions = _cats.map(c=>`<option value="${c.id}" ${defCatId===c.id?'selected':''}>${c.nom} (${TEMPLATES[c.template||'classique']?.label||''})</option>`).join('');
-  const scOptions  = (cat?.sousCats||[]).map(sc=>`<option value="${sc.id}" ${defScId===sc.id?'selected':''}>${sc.nom}</option>`).join('');
   const fieldsHtml = _buildFieldsHtml(tpl, item);
   openModal(item?'✏️ Modifier l\'article':'🛒 Nouvel article',`
-    <div class="sh-modal-selects">
-      <div class="form-group"><label>Catégorie</label>
-        <select class="input-field sh-modal-select" id="si-cat" onchange="refreshItemFields(this.value,'')">
-          <option value="">— Aucune —</option>${catOptions}
-        </select>
-      </div>
-      <div class="form-group"><label>Sous-catégorie <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-        <select class="input-field sh-modal-select" id="si-subcat">
-          <option value="">— Aucune —</option>${scOptions}
-        </select>
-      </div>
+    <div class="form-group"><label>Catégorie</label>
+      <select class="input-field sh-modal-select" id="si-cat" onchange="refreshItemFields(this.value)">
+        <option value="">— Aucune —</option>${catOptions}
+      </select>
     </div>
     <div class="form-group"><label>Nom de l'article</label>
       <input class="input-field" id="si-nom" value="${item?.nom||''}" placeholder="Nom...">
@@ -1152,15 +1243,13 @@ function toggleDispoInfini(cb){
 }
 function updatePrixVente(val){ const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO); const el=document.getElementById('si-pv-val'); if(el) el.textContent=pv; }
 
-function refreshItemFields(catId,scId) {
+function refreshItemFields(catId) {
   const cat=_cats.find(c=>c.id===catId);
   const tpl=TEMPLATES[cat?.template||'classique']||TEMPLATES.classique;
-  const sel=document.getElementById('si-subcat');
-  if(sel){ sel.innerHTML=`<option value="">— Aucune —</option>`+(cat?.sousCats||[]).map(sc=>`<option value="${sc.id}" ${scId===sc.id?'selected':''}>${sc.nom}</option>`).join(''); }
   const dyn=document.getElementById('si-dynamic-fields');
   if(dyn){ dyn.innerHTML=_buildFieldsHtml(tpl,null); _bindPrixListener(); }
 }
-function refreshSubCatSelect(catId,scId){ refreshItemFields(catId,scId); }
+function refreshSubCatSelect(catId){ refreshItemFields(catId); }
 
 // ── Upload image ──────────────────────────────────────────────────────────────
 function previewUpload(fileInputId,previewId,hiddenId) {
@@ -1193,7 +1282,7 @@ async function saveShopItem(itemId) {
   const nom=document.getElementById('si-nom')?.value.trim();
   if(!nom){showNotif('Nom requis.','error');return;}
 
-  const data={ nom, categorieId:catId, sousCategorieId:document.getElementById('si-subcat')?.value||'', image:document.getElementById('si-img-b64')?.value||'' };
+  const data={ nom, categorieId:catId, image:document.getElementById('si-img-b64')?.value||'' };
 
   tpl.fields.forEach(f=>{
     if(f.type==='dispo'){
