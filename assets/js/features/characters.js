@@ -1,8 +1,255 @@
 import { STATE } from '../core/state.js';
-import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
+
+// ══════════════════════════════════════════════
+// STYLES DE COMBAT
+// Firestore : world/combat_styles → { styles:[{id,label,condPrincipale,condSecondaire,description,couleur}] }
+// ══════════════════════════════════════════════
+let _combatStyles = null; // cache en mémoire
+
+async function loadCombatStyles() {
+  if (_combatStyles) return _combatStyles;
+  try {
+    const doc = await getDocData('world', 'combat_styles');
+    _combatStyles = doc?.styles || _defaultCombatStyles();
+  } catch {
+    _combatStyles = _defaultCombatStyles();
+  }
+  return _combatStyles;
+}
+
+function _defaultCombatStyles() {
+  return [
+    {
+      id: 'main_libre',
+      label: '🤜 Main libre',
+      condPrincipale: ['Arme 1M CaC Phy.'],
+      condSecondaire: [''],
+      description: 'Main secondaire libre : Attaque d\'opportunité possible. Peut parer (+1 CA si en garde).',
+      couleur: '#4f8cff',
+    },
+    {
+      id: 'bouclier',
+      label: '🛡️ Bouclier',
+      condPrincipale: ['Arme 1M CaC Phy.'],
+      condSecondaire: ['Arme Secondaire (Bouclier, Torche...)'],
+      description: '+2 CA passive. Pas d\'attaque d\'opportunité avec la main secondaire.',
+      couleur: '#22c38e',
+    },
+    {
+      id: 'baguette',
+      label: '🪄 Baguette magique',
+      condPrincipale: ['Arme 1M CaC Phy.', 'Arme 2M CaC Mag.', 'Arme 2M Dist Mag.'],
+      condSecondaire: ['Arme Secondaire (Bouclier, Torche...)'],
+      description: 'Baguette en main secondaire : dégâts de l\'arme passent de 1d6 à 1d10. Accès à la magie.',
+      couleur: '#b47fff',
+    },
+    {
+      id: 'deux_mains',
+      label: '⚔️⚔️ Deux armes',
+      condPrincipale: ['Arme 1M CaC Phy.'],
+      condSecondaire: ['Arme 1M CaC Phy.'],
+      description: 'Attaque bonus avec l\'arme secondaire (dégâts seulement, pas de mod). Désavantage si armes lourdes.',
+      couleur: '#ff6b6b',
+    },
+    {
+      id: 'arme_2m',
+      label: '🗡️ Arme à 2 mains',
+      condPrincipale: ['Arme 2M CaC Phy.', 'Arme 2M Dist Phy.', 'Arme 2M CaC Mag.', 'Arme 2M Dist Mag.'],
+      condSecondaire: [''],
+      description: 'Arme à 2 mains : dégâts maximisés (relancer les 1 et 2). Pas de réaction d\'attaque.',
+      couleur: '#e8b84b',
+    },
+    {
+      id: 'mains_nues',
+      label: '🤛 Mains nues',
+      condPrincipale: [''],
+      condSecondaire: [''],
+      description: 'Aucune arme équipée. Dégâts 1d4 + Force. Attaque bonus possible chaque tour.',
+      couleur: '#9ca3af',
+    },
+  ];
+}
+
+/**
+ * Détecte le style de combat actif selon les armes équipées.
+ * Retourne le premier style dont les conditions correspondent, ou null.
+ */
+function detectCombatStyle(c, styles) {
+  const equip  = c?.equipement || {};
+  const mainP  = equip['Main principale'];
+  const mainS  = equip['Main secondaire'];
+  const fmtP   = mainP?.format || '';
+  const fmtS   = mainS?.format || '';
+
+  for (const style of styles) {
+    const condP = style.condPrincipale || [];
+    const condS = style.condSecondaire || [];
+    const matchP = condP.length === 0 || condP.includes(fmtP) || (condP.includes('') && !fmtP);
+    const matchS = condS.length === 0 || condS.includes(fmtS) || (condS.includes('') && !fmtS);
+    if (matchP && matchS) return style;
+  }
+  return null;
+}
+
+// Admin : ouvrir la gestion des styles de combat
+async function openCombatStylesAdmin() {
+  const styles = await loadCombatStyles();
+  _renderCombatStylesModal(styles);
+}
+
+function _renderCombatStylesModal(styles) {
+  const FORMATS = [
+    '', 'Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
+    'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
+  ];
+
+  openModal('⚔️ Styles de Combat', `
+    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
+      Les styles sont détectés automatiquement selon les armes équipées.
+      Le <strong>premier style</strong> dont les conditions correspondent est affiché.
+    </div>
+    <div id="cs-styles-list" style="display:flex;flex-direction:column;gap:.5rem">
+      ${styles.map((s, i) => `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;
+        padding:.7rem .85rem;border-left:3px solid ${s.couleur||'var(--border)'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+          <div style="font-weight:600;font-size:.85rem;color:var(--text)">${s.label||'Style '+i}</div>
+          <div style="display:flex;gap:.3rem">
+            <button class="btn-icon" style="font-size:.72rem" onclick="window._editCombatStyle(${i})">✏️</button>
+            <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" onclick="window._deleteCombatStyle(${i})">🗑️</button>
+          </div>
+        </div>
+        <div style="font-size:.72rem;color:var(--text-dim);margin-top:.2rem">
+          Principale : <strong>${(s.condPrincipale||[]).join(', ')||'(vide)'}</strong>
+          · Secondaire : <strong>${(s.condSecondaire||[]).join(', ')||'(vide)'}</strong>
+        </div>
+        <div style="font-size:.75rem;color:var(--text-muted);margin-top:.25rem;font-style:italic">${s.description||''}</div>
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:.85rem">
+      <button class="btn btn-gold" style="flex:1" onclick="window._addCombatStyle()">+ Nouveau style</button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+    </div>
+  `);
+}
+
+window._addCombatStyle = () => _openStyleEditor(-1, {
+  label:'', condPrincipale:[], condSecondaire:[], description:'', couleur:'#4f8cff'
+});
+window._editCombatStyle = (i) => _openStyleEditor(i, _combatStyles[i] || {});
+window._deleteCombatStyle = async (i) => {
+  if (!confirm('Supprimer ce style ?')) return;
+  _combatStyles.splice(i, 1);
+  await saveDoc('world', 'combat_styles', { styles: _combatStyles });
+  showNotif('Style supprimé.', 'success');
+  _renderCombatStylesModal(_combatStyles);
+};
+
+const FORMATS_OPT = [
+  { v:'', l:'(aucune arme)' },
+  { v:'Arme 1M CaC Phy.', l:'Arme 1M CaC Phy.' },
+  { v:'Arme 2M CaC Phy.', l:'Arme 2M CaC Phy.' },
+  { v:'Arme 2M Dist Phy.', l:'Arme 2M Dist Phy.' },
+  { v:'Arme 2M CaC Mag.', l:'Arme 2M CaC Mag.' },
+  { v:'Arme 2M Dist Mag.', l:'Arme 2M Dist Mag.' },
+  { v:'Arme Secondaire (Bouclier, Torche...)', l:'Arme Secondaire' },
+];
+
+function _openStyleEditor(idx, s) {
+  openModal(idx >= 0 ? '✏️ Modifier le style' : '+ Nouveau style', `
+    <div class="form-group">
+      <label>Nom du style</label>
+      <input class="input-field" id="cs-style-label" value="${s.label||''}" placeholder="🛡️ Bouclier">
+    </div>
+    <div class="form-group">
+      <label>Format main principale <span style="color:var(--text-dim);font-weight:400">(plusieurs = OU)</span></label>
+      <div id="cs-cond-p" style="display:flex;flex-direction:column;gap:.3rem">
+        ${(s.condPrincipale?.length ? s.condPrincipale : ['']).map((v,fi) => `
+        <div style="display:flex;gap:.3rem">
+          <select class="input-field cs-cond-p-sel" style="flex:1">
+            ${FORMATS_OPT.map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
+          </select>
+          <button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
+        </div>`).join('')}
+      </div>
+      <button type="button" onclick="window._csAddCond('cs-cond-p','cs-cond-p-sel')"
+        style="font-size:.72rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
+        border-radius:6px;padding:2px 10px;cursor:pointer;color:#4f8cff;margin-top:.3rem">+ Condition</button>
+    </div>
+    <div class="form-group">
+      <label>Format main secondaire <span style="color:var(--text-dim);font-weight:400">(plusieurs = OU)</span></label>
+      <div id="cs-cond-s" style="display:flex;flex-direction:column;gap:.3rem">
+        ${(s.condSecondaire?.length ? s.condSecondaire : ['']).map((v,fi) => `
+        <div style="display:flex;gap:.3rem">
+          <select class="input-field cs-cond-s-sel" style="flex:1">
+            ${FORMATS_OPT.map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
+          </select>
+          <button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
+        </div>`).join('')}
+      </div>
+      <button type="button" onclick="window._csAddCond('cs-cond-s','cs-cond-s-sel')"
+        style="font-size:.72rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
+        border-radius:6px;padding:2px 10px;cursor:pointer;color:#4f8cff;margin-top:.3rem">+ Condition</button>
+    </div>
+    <div class="form-group">
+      <label>Description / Effets</label>
+      <textarea class="input-field" id="cs-style-desc" rows="3" placeholder="Décris les bonus, malus, règles spéciales...">${s.description||''}</textarea>
+    </div>
+    <div class="form-group">
+      <label>Couleur</label>
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <input type="color" id="cs-style-color" value="${s.couleur||'#4f8cff'}"
+          style="width:44px;height:36px;border-radius:8px;border:1px solid var(--border);cursor:pointer;padding:2px">
+        <span style="font-size:.78rem;color:var(--text-dim)">Couleur de l'encart style</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-gold" style="flex:1" onclick="window._saveCombatStyle(${idx})">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" onclick="window._backToStylesList()">← Retour</button>
+    </div>
+  `);
+}
+
+window._csAddCond = (containerId, selClass) => {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;gap:.3rem';
+  div.innerHTML = `
+    <select class="input-field ${selClass}" style="flex:1">
+      ${FORMATS_OPT.map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}
+    </select>
+    <button type="button" onclick="this.parentElement.remove()"
+      style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>`;
+  container.appendChild(div);
+};
+
+window._saveCombatStyle = async (idx) => {
+  const label = document.getElementById('cs-style-label')?.value?.trim();
+  if (!label) { showNotif('Nom requis.', 'error'); return; }
+  const condP = [...document.querySelectorAll('.cs-cond-p-sel')].map(s=>s.value);
+  const condS = [...document.querySelectorAll('.cs-cond-s-sel')].map(s=>s.value);
+  const style = {
+    id: idx >= 0 ? (_combatStyles[idx]?.id || `style_${Date.now()}`) : `style_${Date.now()}`,
+    label,
+    condPrincipale: condP,
+    condSecondaire: condS,
+    description: document.getElementById('cs-style-desc')?.value?.trim() || '',
+    couleur: document.getElementById('cs-style-color')?.value || '#4f8cff',
+  };
+  if (!_combatStyles) _combatStyles = [];
+  if (idx >= 0) _combatStyles[idx] = style;
+  else _combatStyles.push(style);
+  await saveDoc('world', 'combat_styles', { styles: _combatStyles });
+  showNotif('Style enregistré !', 'success');
+  _renderCombatStylesModal(_combatStyles);
+};
+
+window._backToStylesList = () => _renderCombatStylesModal(_combatStyles || []);
 
 // ══════════════════════════════════════════════
 // COMPUTED STATS
@@ -975,6 +1222,35 @@ function renderCharEquip(c, canEdit) {
     </div>`;
   }
 
+  // ── Style de combat actif ─────────────────────────────────────────────────
+  // Chargement async : on insère un placeholder, puis on remplace quand prêt
+  const styleId = `cs-combat-style-${c.id||'x'}`;
+  html += `<div id="${styleId}" style="margin-top:.6rem"></div>`;
+  // Charger et afficher le style après le rendu
+  setTimeout(async () => {
+    const el = document.getElementById(styleId);
+    if (!el) return;
+    const styles = await loadCombatStyles();
+    const style  = detectCombatStyle(c, styles);
+    if (!style) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = `
+      <div style="background:${style.couleur}11;border:1px solid ${style.couleur}44;
+        border-left:3px solid ${style.couleur};border-radius:10px;
+        padding:.65rem .9rem;display:flex;flex-direction:column;gap:.25rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
+          <span style="font-weight:700;font-size:.84rem;color:${style.couleur}">${style.label}</span>
+          <span style="font-size:.65rem;color:var(--text-dim);letter-spacing:.5px;text-transform:uppercase">Style de combat</span>
+        </div>
+        <div style="font-size:.78rem;color:var(--text-muted);line-height:1.55">${style.description}</div>
+      </div>
+      ${STATE.isAdmin ? `<button onclick="openCombatStylesAdmin()" class="btn btn-outline btn-sm"
+        style="margin-top:.35rem;font-size:.7rem;width:100%">⚙️ Gérer les styles</button>` : ''}
+    `;
+  }, 0);
+
   html += `</div>`;
 
   // Actions
@@ -1078,8 +1354,92 @@ async function sortDrop(e, toIdx) {
 }
 
 
+// ── Helpers calcul sorts ────────────────────────────────────────────────────────
+/**
+ * Calcule les dégâts effectifs d'un sort selon les runes.
+ * Règles :
+ *  - degats = "= arme" → prendre les dégâts de l'arme principale
+ *  - Puissance/Protection : chaque rune ajoute 1 dé (ex: 2d6 → 3d6)
+ *  - Chaînage Puissance+Protection : 2 runes → +2, 3 → +4, 4 → +6... (+2 par rune après la 1ère)
+ */
+function _calcSortDegats(s, c) {
+  const equip    = c?.equipement || {};
+  const mainP    = equip['Main principale'];
+  const armeDeg  = mainP?.degats || '1d6';
+
+  // Dégâts de base
+  let baseDeg = s.degats || '';
+  if (!baseDeg || baseDeg.toLowerCase().trim() === '= arme' || baseDeg === '') {
+    baseDeg = armeDeg;
+  }
+
+  // Compter Puissance + Protection pour le chaînage
+  const runes = s.runes || [];
+  const nbPuissance  = runes.filter(r => r === 'Puissance').length;
+  const nbProtection = runes.filter(r => r === 'Protection').length;
+  const totalRunes   = nbPuissance + nbProtection;
+
+  // +1 dé par rune Puissance ou Protection (ajout d'un dé)
+  // Chaînage : 2 runes → bonus +2, 3 → +4, 4 → +6
+  let degFinal = baseDeg;
+  const bonusDes = nbPuissance + nbProtection; // +1 dé par rune
+  const bonusVal = totalRunes > 1 ? (totalRunes - 1) * 2 : 0; // chaînage
+
+  if (bonusDes > 0 || bonusVal > 0) {
+    // Essayer d'ajouter les dés si le format est XdY
+    const match = baseDeg.match(/^(\d+)(d\d+)(.*)$/i);
+    if (match) {
+      const newCount = parseInt(match[1]) + bonusDes;
+      degFinal = `${newCount}${match[2]}${match[3]}`;
+      if (bonusVal > 0) degFinal += ` +${bonusVal}`;
+    } else {
+      degFinal = baseDeg;
+      if (bonusDes > 0) degFinal += ` +${bonusDes}d6`;
+      if (bonusVal > 0) degFinal += ` +${bonusVal}`;
+    }
+  }
+
+  return degFinal;
+}
+
+/**
+ * Calcule les soins effectifs d'un sort.
+ * Base : 1d4 (si soin vide ou "= base"). Avec rune Protection : +1d4 par rune.
+ */
+function _calcSortSoin(s) {
+  const runes      = s.runes || [];
+  const nbProt     = runes.filter(r => r === 'Protection').length;
+  const baseSoin   = s.soin || '';
+
+  if (!baseSoin || baseSoin.toLowerCase() === '= base') {
+    // 1d4 de base + 1d4 par rune Protection
+    const total = 1 + nbProt;
+    return `${total}d4`;
+  }
+
+  // Sinon : ajouter des dés
+  if (nbProt > 0) {
+    const match = baseSoin.match(/^(\d+)(d\d+)(.*)$/i);
+    if (match) return `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
+    return `${baseSoin} +${nbProt}d4`;
+  }
+  return baseSoin;
+}
+
+/**
+ * Calcule le nombre de cibles d'un sort.
+ * Dispersion : +1 cible par rune.
+ */
+function _calcSortCibles(s) {
+  const nbDisp = (s.runes||[]).filter(r => r === 'Dispersion').length;
+  return 1 + nbDisp;
+}
+
 function renderCharDeck(c, canEdit) {
-  const sorts = c.deck_sorts||[];
+  const sorts  = c.deck_sorts||[];
+  const equip  = c?.equipement || {};
+  const mainP  = equip['Main principale'];
+  const armeDeg = mainP?.degats || '1d6';
   const openIdx = window._openSortIdx ?? null;
 
   let html = `<div class="cs-section">
@@ -1087,8 +1447,10 @@ function renderCharDeck(c, canEdit) {
       ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addSort()">+ Nouveau sort</button>`:''}
     </div>
     <div class="cs-sort-info">
-      <strong>Système maison</strong> — Noyau + Runes. PM = 2 × runes.
-      <span style="color:var(--text-dim);font-size:0.7rem;margin-left:0.5rem">✨ Mains nues : +2 PM, pas d'effet de set.</span>
+      <strong>Système maison</strong> — Noyau + Runes. PM = 2 × (noyau + runes).
+      <span style="color:var(--text-dim);font-size:0.7rem;margin-left:0.5rem">
+        Dégâts sort = arme principale (${armeDeg}). Soin base = 1d4.
+      </span>
     </div>`;
 
   if (sorts.length===0) {
@@ -1096,14 +1458,36 @@ function renderCharDeck(c, canEdit) {
   } else {
     html += `<div class="cs-sort-list">`;
     sorts.forEach((s,i) => {
-      const isOpen    = openIdx === i;
-      const runesAll  = s.runes||[];
-      // Aperçu rapide : concaténer effet + dégâts + soin sur une ligne
+      const isOpen   = openIdx === i;
+      const runesAll = s.runes||[];
+
+      // Calculs automatiques
+      const nbPuiss  = runesAll.filter(r=>r==='Puissance').length;
+      const nbProt   = runesAll.filter(r=>r==='Protection').length;
+      const nbDisp   = runesAll.filter(r=>r==='Dispersion').length;
+      const totalPP  = nbPuiss + nbProt;
+      const chainBonus = totalPP > 1 ? `+${(totalPP-1)*2}` : '';
+
+      const degCalc   = _calcSortDegats(s, c);
+      const soinCalc  = _calcSortSoin(s);
+      const nbCibles  = _calcSortCibles(s);
+
+      const hasSoin   = s.soin || nbProt > 0;
+      const hasDeg    = s.degats || s.noyau;
+
+      // Aperçu condensé
       const apercu = [
-        s.effet   ? s.effet   : null,
-        s.degats  ? `⚔️ ${s.degats}` : null,
-        s.soin    ? `💚 ${s.soin}`   : null,
+        s.effet   ? s.effet : null,
+        hasDeg    ? `⚔️ ${degCalc}` : null,
+        hasSoin   ? `💚 ${soinCalc}` : null,
+        nbCibles > 1 ? `🎯 ×${nbCibles} cibles` : null,
       ].filter(Boolean).join(' · ');
+
+      // Badges runes spéciales
+      const specialBadges = [
+        chainBonus ? `<span class="cs-sort-badge gold" title="Chaînage puissance/protection">${chainBonus}</span>` : '',
+        nbCibles>1 ? `<span class="cs-sort-badge blue" title="Dispersion">×${nbCibles}🎯</span>` : '',
+      ].filter(Boolean).join('');
 
       html += `<div class="cs-sort-row ${s.actif?'actif':''}"
         draggable="true"
@@ -1123,6 +1507,7 @@ function renderCharDeck(c, canEdit) {
                 ${s.noyau?`<span class="cs-sort-badge gold">${s.noyau}</span>`:''}
                 ${runesAll.slice(0,3).map(r=>`<span class="cs-sort-badge blue">${r}</span>`).join('')}
                 ${runesAll.length>3?`<span class="cs-sort-badge muted">+${runesAll.length-3}</span>`:''}
+                ${specialBadges}
               </div>
               <span class="cs-sort-row-pm">${s.pm||0} PM</span>
               <span class="cs-sort-row-chevron">${isOpen?'▲':'▼'}</span>
@@ -1138,8 +1523,21 @@ function renderCharDeck(c, canEdit) {
           ${s.noyau?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Noyau</span>${s.noyau}</div>`:''}
           ${runesAll.length?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes (${runesAll.length})</span>${runesAll.join(' · ')}</div>`:''}
           ${s.effet?`<div class="cs-sort-dl"><span class="cs-sort-dl-label">Effet</span>${s.effet}</div>`:''}
-          ${s.degats?`<div class="cs-sort-dl" style="color:var(--crimson-light)"><span class="cs-sort-dl-label">Dégâts</span>⚔️ ${s.degats}</div>`:''}
-          ${s.soin?`<div class="cs-sort-dl" style="color:var(--green)"><span class="cs-sort-dl-label">Soin</span>💚 ${s.soin}</div>`:''}
+          ${hasDeg?`<div class="cs-sort-dl" style="color:var(--crimson-light)">
+            <span class="cs-sort-dl-label">Dégâts</span>
+            ⚔️ ${degCalc}
+            ${s.degats && s.degats.toLowerCase() !== '= arme' ? '' : `<span style="font-size:.68rem;color:var(--text-dim);margin-left:.3rem">(= ${armeDeg})</span>`}
+            ${nbPuiss>0||nbProt>0?`<span style="font-size:.68rem;color:#e8b84b;margin-left:.3rem">+${totalPP} dé${totalPP>1?'s':''} rune${chainBonus?`, chaînage ${chainBonus}`:''}</span>`:''}
+          </div>`:''}
+          ${hasSoin?`<div class="cs-sort-dl" style="color:var(--green)">
+            <span class="cs-sort-dl-label">Soin</span>
+            💚 ${soinCalc}
+            ${nbProt>0?`<span style="font-size:.68rem;color:#22c38e;margin-left:.3rem">(base 1d4 +${nbProt}d4 Protection)</span>`:'<span style="font-size:.68rem;color:var(--text-dim);margin-left:.3rem">(base 1d4)</span>'}
+          </div>`:''}
+          ${nbCibles>1?`<div class="cs-sort-dl" style="color:#4f8cff">
+            <span class="cs-sort-dl-label">Cibles</span>
+            🎯 ${nbCibles} cibles <span style="font-size:.68rem;color:var(--text-dim)">(Dispersion ×${nbDisp})</span>
+          </div>`:''}
         </div>`:''}
       </div>`;
     });
@@ -1266,10 +1664,14 @@ function renderCharInventaire(c, canEdit) {
             onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${(item.nom || '').replace(/'/g, "\\'")}')">
             🔄 Vendre
           </button>` : ''}
-          ${otherChars.length ? `<button class="inv-btn inv-btn-send"
+        </div>` : ''}
+        ${otherChars.length ? `<div class="inv-actions" style="${canEdit?'margin-left:.25rem':''}">
+          <button class="inv-btn inv-btn-send"
             onclick="openSendInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
             ↗ Envoyer
-          </button>` : ''}
+          </button>
+        </div>` : ''}
+        ${canEdit ? `<div class="inv-actions" style="margin-left:.25rem">
           <button class="inv-btn inv-btn-del"
             onclick="openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
             🗑
@@ -1749,7 +2151,25 @@ function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const indices = _decodeIndices(indicesB64);
   const maxQte  = indices.length;
   if (maxQte === 0) return;
+
+  // Vérifier si des exemplaires sont équipés
+  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const equippedMap = c ? getEquippedInventoryIndexMap(c) : new Map();
+  const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
+  const hasEquipped = equippedSlots.length > 0;
+
   openModal(`🔄 Vendre — ${nom}`, `
+    ${hasEquipped ? `
+    <div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);
+      border-radius:10px;padding:.65rem .9rem;margin-bottom:.85rem;
+      display:flex;align-items:flex-start;gap:.5rem;font-size:.82rem">
+      <span style="font-size:1rem;flex-shrink:0">⚠️</span>
+      <div>
+        <strong style="color:#ff6b6b;display:block;margin-bottom:.2rem">Objet actuellement équipé !</strong>
+        <span style="color:var(--text-muted)">Slot${equippedSlots.length>1?'s':''} : ${equippedSlots.join(', ')}.
+        Il sera automatiquement déséquipé si tu le vends.</span>
+      </div>
+    </div>` : ''}
     <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
       <strong style="color:var(--gold)">${prixVente} or</strong> par unité · ${maxQte} en stock
     </div>
@@ -1768,7 +2188,7 @@ function openSellInvModal(charId, indicesB64, prixVente, nom) {
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
-        🔄 Vendre
+        🔄 Vendre${hasEquipped?' (déséquiper et vendre)':''}
       </button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
@@ -1932,6 +2352,34 @@ function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
   if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
 
+  // Générer les cartes personnage avec portrait circulaire
+  const targetCards = otherChars.map(target => {
+    const initiale = (target.nom||'?')[0].toUpperCase();
+    const colors   = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+    const couleur  = colors[(target.nom||'').charCodeAt(0) % colors.length];
+    const photoObjPos = `${50+(target.photoX||0)*50}% ${50+(target.photoY||0)*50}%`;
+    const portraitHtml = target.photo
+      ? `<img src="${target.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoObjPos}">`
+      : `<span style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:${couleur}">${initiale}</span>`;
+    return `<label style="display:flex;align-items:center;gap:.85rem;padding:.65rem .9rem;
+      border-radius:12px;border:2px solid var(--border);background:var(--bg-elevated);
+      cursor:pointer;transition:all .15s"
+      onmouseover="this.style.borderColor='var(--gold)';this.style.background='rgba(232,184,75,.06)'"
+      onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
+      <input type="radio" name="send-target" value="${target.id}" style="accent-color:var(--gold);flex-shrink:0">
+      <div style="width:44px;height:44px;border-radius:50%;flex-shrink:0;overflow:hidden;
+        border:2px solid ${couleur};background:${couleur}18;
+        display:flex;align-items:center;justify-content:center">
+        ${portraitHtml}
+      </div>
+      <div style="min-width:0;flex:1">
+        <div style="font-family:'Cinzel',serif;font-size:.88rem;font-weight:600;color:var(--text)">${target.nom||'?'}</div>
+        ${target.ownerPseudo?`<div style="font-size:.7rem;color:var(--text-dim);margin-top:1px">${target.ownerPseudo}</div>`:''}
+        ${target.titre?`<div style="font-size:.68rem;font-style:italic;color:${couleur};margin-top:1px">${target.titre}</div>`:''}
+      </div>
+    </label>`;
+  }).join('');
+
   openModal(`📤 Envoyer — ${nom}`, `
     <div style="margin-bottom:.75rem;font-size:.85rem;color:var(--text-muted)">
       ${maxQte} exemplaire${maxQte>1?'s':''} disponible${maxQte>1?'s':''}
@@ -1949,22 +2397,10 @@ function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
       </div>
     </div>` : ''}
     <div class="form-group">
-      <label>Envoyer à</label>
-      <div style="display:flex;flex-direction:column;gap:.4rem">
-        ${otherChars.map(target => `
-          <label style="display:flex;align-items:center;gap:.75rem;padding:.6rem .8rem;
-            border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;transition:all .15s"
-            onmouseover="this.style.borderColor='var(--gold)';this.style.background='rgba(232,184,75,.06)'"
-            onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
-            <input type="radio" name="send-target" value="${target.id}" style="accent-color:var(--gold)">
-            <div>
-              <div style="font-family:'Cinzel',serif;font-size:.82rem;color:var(--text)">${target.nom||'?'}</div>
-              ${target.ownerPseudo?`<div style="font-size:.68rem;color:var(--text-dim)">${target.ownerPseudo}</div>`:''}
-            </div>
-          </label>`).join('')}
-      </div>
+      <label style="display:block;margin-bottom:.5rem">Envoyer à</label>
+      <div style="display:flex;flex-direction:column;gap:.5rem">${targetCards}</div>
     </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+    <div style="display:flex;gap:.5rem;margin-top:.85rem">
       <button class="btn btn-gold" style="flex:1" onclick="sendInvItem('${charId}','${b64}')">📤 Envoyer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
@@ -2097,17 +2533,10 @@ async function deleteInvItem(idx) {
 }
 
 async function deleteChar(id) {
-  // Délègue à account.js qui gère la vente des items boutique avant suppression
-  if (window.deleteCharWithRefund) {
-    const done = await window.deleteCharWithRefund(id);
-    if (done) PAGES.characters();
-  } else {
-    // Fallback si account.js pas encore chargé
-    if (!confirm('Supprimer ce personnage ?')) return;
-    await deleteFromCol('characters', id);
-    showNotif('Personnage supprimé.', 'success');
-    PAGES.characters();
-  }
+  if (!confirm('Supprimer ce personnage ?')) return;
+  await deleteFromCol('characters',id);
+  showNotif('Personnage supprimé.','success');
+  PAGES.characters();
 }
 
 async function createNewChar() {
@@ -2842,4 +3271,5 @@ Object.assign(window, {
   addInvItem, editInvItem, saveInvItem,
   addQuete, saveQuete,
   deleteCharPhoto,
+  openCombatStylesAdmin,
 });
