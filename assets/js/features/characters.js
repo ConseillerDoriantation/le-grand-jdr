@@ -507,7 +507,14 @@ function calcCA(c) {
   else if (torse==='Intermédiaire') caBase=12;
   else if (torse==='Lourde') caBase=14;
   const caEquip = Object.values(equip).reduce((s,it)=>s+(it.ca||0),0);
-  return caBase + getMod(c,'dexterite') + caEquip;
+
+  // +2 CA si bouclier en main secondaire
+  const mainS = equip['Main secondaire'];
+  const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
+  const hasBouclier = stypeS.includes('bouclier') || stypeS.includes('shield');
+  const bouclierBonus = hasBouclier ? 2 : 0;
+
+  return caBase + getMod(c,'dexterite') + caEquip + bouclierBonus;
 }
 function calcVitesse(c) { return 3 + getMod(c,'force'); }
 function calcDeckMax(c) {
@@ -1236,28 +1243,67 @@ function renderCharEquip(c, canEdit) {
     🎲 Critique : Maximum des dés + relance les dés de dégâts.
   </div>`;
 
-  if (armorSet.isActive && armorSetChipText) {
-    html += `<div class="cs-combat-status-row">
-      <span class="cs-armor-set-chip cs-armor-set-chip--${armorSet.activeEffect?.tone || 'neutral'}" title="${armorSetChipText}">
-        <span>${armorSetChipText}</span>
-      </span>
+  // ── Effets actifs du set d'armure ─────────────────────────────────────────
+  if (armorSet.isActive) {
+    const mod   = armorSet.modifiers;
+    const tone  = armorSet.activeEffect?.tone || 'neutral';
+    const TONE_COLORS = { light:'#22c38e', medium:'#4f8cff', heavy:'#e8b84b', neutral:'var(--text-dim)' };
+    const col   = TONE_COLORS[tone] || 'var(--text-dim)';
+
+    // Effets actifs (ceux qui ont une valeur non nulle)
+    const effects = [];
+    if (mod.spellPmDelta < 0)   effects.push({ icon:'🧙', text:`Sorts −${Math.abs(mod.spellPmDelta)} PM`, desc:'Coût réduit' });
+    if (mod.toucherBonus > 0)   effects.push({ icon:'🎯', text:`Toucher +${mod.toucherBonus}`, desc:'Sur tous les jets de toucher' });
+    if (mod.damageReduction > 0)effects.push({ icon:'🛡️', text:`Réduction ${mod.damageReduction}`, desc:'Dégâts reçus réduits' });
+
+    // Bouclier (calculé séparément car pas dans le set)
+    const mainS   = (c?.equipement||{})['Main secondaire'];
+    const stypeS  = (mainS?.sousType || mainS?.nom || '').toLowerCase();
+    if (stypeS.includes('bouclier') || stypeS.includes('shield')) {
+      effects.push({ icon:'🛡️', text:'CA +2', desc:'Bonus bouclier' });
+    }
+
+    html += `<div style="background:${col}0c;border:1px solid ${col}33;border-radius:10px;
+      padding:.65rem .85rem;margin-top:.5rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
+        <span style="font-size:.78rem;font-weight:700;color:${col}">${armorSetChipText}</span>
+        <span style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Set complet</span>
+      </div>
+      ${effects.length ? `
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+        ${effects.map(e => `
+        <div style="display:flex;align-items:center;gap:.35rem;padding:.25rem .6rem;
+          background:${col}12;border-radius:6px;border:1px solid ${col}28">
+          <span style="font-size:.85rem">${e.icon}</span>
+          <span style="font-size:.78rem;font-weight:700;color:${col}">${e.text}</span>
+          <span style="font-size:.67rem;color:var(--text-dim)">${e.desc}</span>
+        </div>`).join('')}
+      </div>` : ''}
     </div>`;
+  } else {
+    // Pas de set complet — afficher ce qui est équipé partiellement
+    const mainS  = (c?.equipement||{})['Main secondaire'];
+    const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
+    if (stypeS.includes('bouclier') || stypeS.includes('shield')) {
+      html += `<div style="display:inline-flex;align-items:center;gap:.4rem;margin-top:.4rem;
+        padding:.25rem .65rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.25);
+        border-radius:6px;font-size:.75rem">
+        <span>🛡️</span>
+        <span style="color:#4f8cff;font-weight:700">CA +2</span>
+        <span style="color:var(--text-dim)">Bouclier</span>
+      </div>`;
+    }
   }
 
   // ── Style de combat actif ─────────────────────────────────────────────────
-  // Chargement async : on insère un placeholder, puis on remplace quand prêt
   const styleId = `cs-combat-style-${c.id||'x'}`;
   html += `<div id="${styleId}" style="margin-top:.6rem"></div>`;
-  // Charger et afficher le style après le rendu
   setTimeout(async () => {
     const el = document.getElementById(styleId);
     if (!el) return;
     const styles = await loadCombatStyles();
     const style  = detectCombatStyle(c, styles);
-    if (!style) {
-      el.innerHTML = '';
-      return;
-    }
+    if (!style) { el.innerHTML = ''; return; }
     el.innerHTML = `
       <div style="background:${style.couleur}11;border:1px solid ${style.couleur}44;
         border-left:3px solid ${style.couleur};border-radius:10px;
@@ -1455,18 +1501,20 @@ function _calcSortCibles(s) {
 
 function renderCharDeck(c, canEdit) {
   const allSorts = c.deck_sorts || [];
-  const cats     = c.sort_cats  || [];           // catégories custom [{id,nom,couleur}]
+  const cats     = c.sort_cats  || [];
   const equip    = c?.equipement || {};
   const mainP    = equip['Main principale'];
   const armeDeg  = mainP?.degats || '1d6';
   const openIdx  = window._openSortIdx ?? null;
-  const openCat  = window._openSortCat ?? null;  // catégorie ouverte en édition
 
-  // Grouper par catégorie (sorts sans catégorie → groupe "Sans catégorie")
+  // Bonus/malus du set d'armure sur les sorts
+  const armorSet   = getArmorSetData(c);
+  const pmDelta    = armorSet.modifiers?.spellPmDelta || 0;   // ex: -2 pour Léger
+  const setLabel   = armorSet.isActive ? armorSet.activeEffect?.label || '' : '';
+
+  // Grouper par catégorie
   const DEFAULT_CAT = { id: '__none', nom: 'Sans catégorie', couleur: '#4f8cff' };
   const allCats = cats.length ? [...cats, DEFAULT_CAT] : [DEFAULT_CAT];
-
-  // Index global → index dans allSorts
   const sortsByCat = {};
   allCats.forEach(cat => { sortsByCat[cat.id] = []; });
   allSorts.forEach((s, globalIdx) => {
@@ -1486,14 +1534,28 @@ function renderCharDeck(c, canEdit) {
       Dégâts sorts = arme principale <em>(${armeDeg})</em>. Soin base = 1d4.
     </div>`;
 
+  // Indicateur set léger (PM réduits)
+  if (pmDelta !== 0) {
+    const isBonus = pmDelta > 0;
+    const col = isBonus ? '#22c38e' : '#22c38e'; // toujours vert (c'est un avantage)
+    html += `<div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .75rem;
+      background:rgba(34,195,142,.06);border:1px solid rgba(34,195,142,.25);
+      border-radius:8px;margin-bottom:.5rem;font-size:.78rem">
+      <span style="font-size:.9rem">🧙</span>
+      <span style="color:#22c38e;font-weight:600">Set Léger</span>
+      <span style="color:var(--text-muted)">→ coût des sorts</span>
+      <span style="color:#22c38e;font-weight:700;background:rgba(34,195,142,.12);
+        border-radius:6px;padding:1px 7px">${pmDelta > 0 ? '+' : ''}${pmDelta} PM</span>
+      <span style="color:var(--text-dim);font-size:.7rem">(appliqué automatiquement)</span>
+    </div>`;
+  }
+
   if (allSorts.length === 0) {
     html += `<div class="cs-empty">🔮 Aucun sort créé</div>`;
   } else {
     allCats.forEach(cat => {
       const entries = sortsByCat[cat.id] || [];
       if (!entries.length) return;
-
-      // En-tête catégorie si plusieurs catégories
       if (cats.length > 0) {
         html += `<div style="display:flex;align-items:center;gap:.5rem;margin:.75rem 0 .35rem;
           padding:.3rem .5rem;border-left:3px solid ${cat.couleur};background:${cat.couleur}0f;border-radius:0 6px 6px 0">
@@ -1501,10 +1563,9 @@ function renderCharDeck(c, canEdit) {
           <span style="font-size:.65rem;color:var(--text-dim)">${entries.length} sort${entries.length>1?'s':''}</span>
         </div>`;
       }
-
       html += `<div class="cs-sort-list" data-cat="${cat.id}">`;
       entries.forEach(({ s, globalIdx: i }) => {
-        html += _renderSortRow(s, i, openIdx, canEdit, armeDeg, c);
+        html += _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
       });
       html += `</div>`;
     });
@@ -1514,7 +1575,7 @@ function renderCharDeck(c, canEdit) {
   return html;
 }
 
-function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c) {
+function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isOpen   = openIdx === i;
   const runesAll = s.runes || [];
   const typeSrt  = _getSortType(s);
@@ -1569,7 +1630,11 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c) {
           <span style="font-size:.7rem;padding:1px 7px;border-radius:999px;flex-shrink:0;
             background:${typeColor}18;color:${typeColor};border:1px solid ${typeColor}33;
             white-space:nowrap">${typeLabel}</span>
-          <span class="cs-sort-row-pm" style="flex-shrink:0">${s.pm||0} PM</span>
+          <span class="cs-sort-row-pm" style="flex-shrink:0">${
+            pmDelta !== 0
+              ? `<span style="text-decoration:line-through;color:var(--text-dim);font-size:.7rem">${s.pm||0}</span> <span style="color:#22c38e;font-weight:700">${Math.max(0,(s.pm||0)+pmDelta)}</span> PM`
+              : `${s.pm||0} PM`
+          }</span>
           <span class="cs-sort-row-chevron" style="flex-shrink:0">${isOpen?'▲':'▼'}</span>
         </div>
         <!-- Ligne 2 : stats clés + noyau/runes -->
