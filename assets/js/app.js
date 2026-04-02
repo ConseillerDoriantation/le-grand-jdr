@@ -24,7 +24,11 @@ import {
 import { showNotif }              from './shared/notifications.js';
 import { initTheme, toggleTheme } from './shared/theme.js';
 
-// ── Exposition sur window ───────────────────────────────────────────────────
+import './features/uploadImage.js';
+
+// ── Exposition sur window EN PREMIER ───────────
+// toggleTheme doit être disponible avant le rendu
+// car index.html utilise onclick="toggleTheme()"
 Object.assign(window, {
   switchAuthTab,
   doLogin,
