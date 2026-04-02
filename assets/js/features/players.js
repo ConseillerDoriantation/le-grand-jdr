@@ -1,674 +1,716 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// PLAYERS.JS — Présentation des Personnages
+// Sommaire avec portraits + fiches narratives complètes
+// ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../core/state.js';
-import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 
-const PLAYER_STAGE_STORE = {
-  items: [],
-  activeId: '',
+// ── Crop image ────────────────────────────────────────────────────────────────
+let _ppCrop = {
+  img:null, cropX:0,cropY:0,cropW:0,cropH:0,
+  startX:0,startY:0,isDragging:false,isResizing:false,handle:null,
+  natW:0,natH:0,dispScale:1, base64:null,
+};
+const _ppc = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+
+// ── État ──────────────────────────────────────────────────────────────────────
+const STORE = {
+  items:         [],
+  activeId:      '',
   presentations: [],
-  characters: [],
+  characters:    [],
 };
 
-const PLAYER_STAT_META = [
-  { key: 'force', label: 'Force', short: 'FO' },
-  { key: 'dexterite', label: 'Dextérité', short: 'DEX' },
-  { key: 'intelligence', label: 'Intelligence', short: 'INT' },
-  { key: 'sagesse', label: 'Sagesse', short: 'SAG' },
-  { key: 'constitution', label: 'Constitution', short: 'CON' },
-  { key: 'charisme', label: 'Charisme', short: 'CHA' },
+const STAT_META = [
+  { key:'force',        label:'Force',        color:'#ff6b6b' },
+  { key:'dexterite',    label:'Dextérité',    color:'#f59e0b' },
+  { key:'constitution', label:'Constitution', color:'#22c38e' },
+  { key:'intelligence', label:'Intelligence', color:'#4f8cff' },
+  { key:'sagesse',      label:'Sagesse',      color:'#b47fff' },
+  { key:'charisme',     label:'Charisme',     color:'#ff9f43' },
 ];
 
-const escapeHtml = (value = '') => String(value)
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&#39;');
+// ── Helpers data ──────────────────────────────────────────────────────────────
+const _esc  = (v='') => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const _nl2br = (v='') => _esc(v).replace(/\n/g,'<br>');
+const _norm = (v='') => String(v||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const _trunc = (v='',n=280) => { const s=String(v||'').replace(/\s+/g,' ').trim(); return s.length<=n?s:s.slice(0,n).trimEnd()+'…'; };
 
-function nl2br(value = '') {
-  return escapeHtml(value).replace(/\n/g, '<br>');
-}
+function _getStat(c,k){ return Math.min(22,(c?.stats?.[k]||8)+(c?.statsBonus?.[k]||0)); }
+function _getMod(c,k){ return Math.floor((_getStat(c,k)-10)/2); }
+function _pvMax(c){ const m=_getMod(c,'constitution'),n=c?.niveau||1,p=m>0?Math.floor(m*(n-1)):m; return Math.max(1,(c?.pvBase||10)+p); }
+function _pmMax(c){ const m=_getMod(c,'sagesse'),n=c?.niveau||1,p=m>0?Math.floor(m*(n-1)):m; return Math.max(0,(c?.pmBase||10)+p); }
+function _ca(c){ const e=c?.equipement||{},t=e['Torse']?.typeArmure||''; let b=8; if(t==='Légère')b=10;else if(t==='Intermédiaire')b=12;else if(t==='Lourde')b=14; return b+_getMod(c,'dexterite')+Object.values(e).reduce((s,i)=>s+(i?.ca||0),0); }
+function _gold(c){ const co=c?.compte||{}; return Math.round(((co.recettes||[]).reduce((s,r)=>s+(parseFloat(r?.montant)||0),0)-((co.depenses||[]).reduce((s,r)=>s+(parseFloat(r?.montant)||0),0)))*100)/100; }
+function _initials(n=''){ const p=String(n).trim().split(/\s+/).filter(Boolean); return p.length?p.slice(0,2).map(w=>w[0]?.toUpperCase()||'').join(''):'?'; }
 
-function normalizeKey(value = '') {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
+function _buildRecord(char=null, pres=null) {
+  const level  = pres?.niveau   || char?.niveau   || 1;
+  const nom    = pres?.nom?.trim() || char?.nom    || 'Personnage';
+  const classe = pres?.classe?.trim() || '';
+  const race   = pres?.race?.trim()   || '';
+  const joueur = pres?.joueur?.trim() || char?.ownerPseudo || '';
+  const imageUrl = pres?.imageUrl || char?.photo || '';
+  const bio    = pres?.bio?.trim() || '';
+  const archive= pres?.archive?.trim() || '';  // Fragment d'archive narratif
+  const source = pres?.archiveSource?.trim() || '';
+  const chap   = pres?.chapitre?.trim() || '';  // "Chapitre I : Khaarys"
 
-function initialsFromName(name = '') {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return 'PJ';
-  return parts.slice(0, 2).map(part => part[0]?.toUpperCase() || '').join('');
-}
-
-function truncateText(value = '', max = 220) {
-  const raw = String(value || '').replace(/\s+/g, ' ').trim();
-  if (!raw) return '';
-  if (raw.length <= max) return raw;
-  return `${raw.slice(0, max).trimEnd()}…`;
-}
-
-function getCharacterStat(char = {}, key = '') {
-  const base = (char.stats || {})[key] || 8;
-  const bonus = (char.statsBonus || {})[key] || 0;
-  return Math.min(22, base + bonus);
-}
-
-function getCharacterMod(char = {}, key = '') {
-  return Math.floor((getCharacterStat(char, key) - 10) / 2);
-}
-
-function calcCharacterPVMax(char = {}) {
-  const mod = getCharacterMod(char, 'constitution');
-  const level = char.niveau || 1;
-  const progression = mod > 0 ? Math.floor(mod * (level - 1)) : mod;
-  return Math.max(1, (char.pvBase || 10) + progression);
-}
-
-function calcCharacterPMMax(char = {}) {
-  const mod = getCharacterMod(char, 'sagesse');
-  const level = char.niveau || 1;
-  const progression = mod > 0 ? Math.floor(mod * (level - 1)) : mod;
-  return Math.max(0, (char.pmBase || 10) + progression);
-}
-
-function calcCharacterCA(char = {}) {
-  const equip = char.equipement || {};
-  const torse = equip['Torse']?.typeArmure || '';
-  let base = 8;
-  if (torse === 'Légère') base = 10;
-  else if (torse === 'Intermédiaire') base = 12;
-  else if (torse === 'Lourde') base = 14;
-  const caEquip = Object.values(equip).reduce((sum, item) => sum + (item?.ca || 0), 0);
-  return base + getCharacterMod(char, 'dexterite') + caEquip;
-}
-
-function calcCharacterVitesse(char = {}) {
-  return 3 + getCharacterMod(char, 'force');
-}
-
-function calcCharacterDeckMax(char = {}) {
-  const mod = getCharacterMod(char, 'intelligence');
-  const level = char.niveau || 1;
-  return 3 + Math.min(0, mod) + Math.floor(Math.max(0, mod) * Math.pow(Math.max(0, level - 1), 0.75));
-}
-
-function calcCharacterGold(char = {}) {
-  const compte = char.compte || { recettes: [], depenses: [] };
-  const recettes = (compte.recettes || []).reduce((sum, row) => sum + (parseFloat(row?.montant) || 0), 0);
-  const depenses = (compte.depenses || []).reduce((sum, row) => sum + (parseFloat(row?.montant) || 0), 0);
-  return Math.round((recettes - depenses) * 100) / 100;
-}
-
-function getCharacterEquipmentList(char = {}) {
-  return Object.entries(char.equipement || {})
-    .filter(([, item]) => item?.nom)
-    .map(([slot, item]) => ({ slot, nom: item.nom, detail: item.typeArmure || item.type || item.particularite || '' }));
-}
-
-function getCharacterNotesPreview(char = {}) {
-  const lastNote = (char.notesList || []).slice().reverse().find(note => note?.contenu?.trim());
-  return truncateText(lastNote?.contenu || char.notes || '', 260);
-}
-
-function buildPlayerRecord(character = null, presentation = null) {
-  const level = presentation?.niveau || character?.niveau || 1;
-  const titles = character?.titres || [];
-  const equipment = getCharacterEquipmentList(character);
-  const imageUrl = presentation?.imageUrl || character?.photo || '';
-  const bio = presentation?.bio?.trim() || getCharacterNotesPreview(character) || 'Aucune présentation narrative n\'est encore renseignée pour ce personnage.';
-  const playerName = presentation?.joueur?.trim() || character?.ownerPseudo || '';
-  const classe = presentation?.classe?.trim() || '';
-  const race = presentation?.race?.trim() || '';
-  const subtitle = [classe, race].filter(Boolean).join(' · ');
-  const statRows = PLAYER_STAT_META.map(stat => ({
-    ...stat,
-    value: character ? getCharacterStat(character, stat.key) : null,
-  })).filter(row => row.value !== null);
-
-  const hasCharacterSheet = Boolean(character);
-  const hasPresentation = Boolean(presentation);
+  const stats = char ? STAT_META.map(m=>({ ...m, value: _getStat(char,m.key) })) : [];
 
   return {
-    id: presentation?.id || `char:${character?.id || Math.random().toString(36).slice(2)}`,
-    presentationId: presentation?.id || '',
-    charId: presentation?.charId || character?.id || '',
-    nom: presentation?.nom?.trim() || character?.nom || 'Personnage',
-    classe,
-    race,
-    subtitle,
-    niveau: level,
-    joueur: playerName,
-    bio,
-    imageUrl,
-    emoji: presentation?.emoji?.trim() || '',
-    initials: initialsFromName(presentation?.nom || character?.nom || 'PJ'),
-    titles,
-    stats: statRows,
-    hasCharacterSheet,
-    hasPresentation,
-    sourceLabel: hasCharacterSheet && hasPresentation
-      ? 'Fiche liée'
-      : hasCharacterSheet
-        ? 'Depuis la base'
-        : 'Présentation',
-    pvActuel: character?.pvActuel ?? null,
-    pvMax: hasCharacterSheet ? calcCharacterPVMax(character) : null,
-    pmActuel: character?.pmActuel ?? null,
-    pmMax: hasCharacterSheet ? calcCharacterPMMax(character) : null,
-    ca: hasCharacterSheet ? calcCharacterCA(character) : null,
-    vitesse: hasCharacterSheet ? calcCharacterVitesse(character) : null,
-    deckActif: character?.deck_sorts?.length ?? null,
-    deckMax: hasCharacterSheet ? calcCharacterDeckMax(character) : null,
-    xp: character?.exp ?? null,
-    gold: hasCharacterSheet ? calcCharacterGold(character) : null,
-    quests: character?.quetes?.length ?? 0,
-    spells: character?.deck_sorts?.length ?? 0,
-    inventoryCount: character?.inventaire?.length ?? 0,
-    equipment,
-    photoZoom: character?.photoZoom || 1,
-    photoX: character?.photoX || 0,
-    photoY: character?.photoY || 0,
-    notePreview: getCharacterNotesPreview(character),
-    character,
+    id:             pres?.id || `c:${char?.id||Math.random().toString(36).slice(2)}`,
+    presentationId: pres?.id || '',
+    charId:         pres?.charId || char?.id || '',
+    nom, classe, race, joueur, imageUrl, bio, archive, source, chap, level,
+    subtitle:       [classe,race].filter(Boolean).join(' · '),
+    titles:         char?.titres || [],
+    emoji:          pres?.emoji?.trim() || '',
+    initials:       _initials(nom),
+    stats,
+    hasFiche:       Boolean(char),
+    pvActuel:       char?.pvActuel ?? null,
+    pvMax:          char ? _pvMax(char) : null,
+    pmActuel:       char?.pmActuel ?? null,
+    pmMax:          char ? _pmMax(char) : null,
+    ca:             char ? _ca(char) : null,
+    gold:           char ? _gold(char) : null,
+    deckActif:      char?.deck_sorts?.length ?? null,
+    deckMax:        char ? (3+Math.min(0,_getMod(char,'intelligence'))+Math.floor(Math.max(0,_getMod(char,'intelligence'))*Math.pow(Math.max(0,(char?.niveau||1)-1),.75))) : null,
+    quests:         char?.quetes?.length ?? 0,
+    inventoryCount: char?.inventaire?.length ?? 0,
+    photoZoom:      char?.photoZoom || 1,
+    photoX:         char?.photoX   || 0,
+    photoY:         char?.photoY   || 0,
+    char,
   };
 }
 
-function buildPlayerDataset(presentations = [], characters = []) {
-  const usedPresentationIds = new Set();
-  const presentationsByCharId = new Map();
-  const presentationsByName = new Map();
+function _buildDataset(presentations=[], characters=[]) {
+  const usedPresIds = new Set();
+  const byCharId    = new Map(presentations.filter(p=>p?.charId).map(p=>[p.charId,p]));
+  const byName      = new Map();
+  presentations.forEach(p=>{ const k=_norm(p?.nom); if(!k)return; const b=byName.get(k)||[]; b.push(p); byName.set(k,b); });
 
-  presentations.forEach(entry => {
-    if (entry?.charId) presentationsByCharId.set(entry.charId, entry);
-    const key = normalizeKey(entry?.nom);
-    if (!key) return;
-    const bucket = presentationsByName.get(key) || [];
-    bucket.push(entry);
-    presentationsByName.set(key, bucket);
+  const items = characters.map(c=>{
+    let p = byCharId.get(c.id)||null;
+    if(!p){ const m=byName.get(_norm(c.nom))||[]; p=m.find(x=>!usedPresIds.has(x.id))||null; }
+    if(p?.id) usedPresIds.add(p.id);
+    return _buildRecord(c,p);
   });
-
-  const items = characters.map(char => {
-    let linkedPresentation = presentationsByCharId.get(char.id) || null;
-    if (!linkedPresentation) {
-      const nameMatches = presentationsByName.get(normalizeKey(char.nom)) || [];
-      linkedPresentation = nameMatches.find(entry => !usedPresentationIds.has(entry.id)) || null;
-    }
-    if (linkedPresentation?.id) usedPresentationIds.add(linkedPresentation.id);
-    return buildPlayerRecord(char, linkedPresentation);
-  });
-
-  presentations
-    .filter(entry => !usedPresentationIds.has(entry.id))
-    .forEach(entry => items.push(buildPlayerRecord(null, entry)));
-
-  return items.sort((a, b) => {
-    if ((b.niveau || 0) !== (a.niveau || 0)) return (b.niveau || 0) - (a.niveau || 0);
-    return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
-  });
+  presentations.filter(p=>!usedPresIds.has(p.id)).forEach(p=>items.push(_buildRecord(null,p)));
+  return items.sort((a,b)=>(b.level||0)-(a.level||0)||a.nom.localeCompare(b.nom,'fr',{sensitivity:'base'}));
 }
 
-function summarizePlayers(items = []) {
-  const total = items.length;
-  const linkedCount = items.filter(item => item.hasCharacterSheet).length;
-  const enrichedCount = items.filter(item => item.hasPresentation).length;
-  const withPortraitCount = items.filter(item => item.imageUrl).length;
-  const averageLevel = total ? (items.reduce((sum, item) => sum + (item.niveau || 0), 0) / total) : 0;
-  return {
-    total,
-    linkedCount,
-    enrichedCount,
-    withPortraitCount,
-    averageLevel: averageLevel ? averageLevel.toFixed(1).replace('.0', '') : '0',
-  };
-}
-
-function getActivePlayerRecord() {
-  return PLAYER_STAGE_STORE.items.find(item => item.id === PLAYER_STAGE_STORE.activeId) || PLAYER_STAGE_STORE.items[0] || null;
-}
-
-function getPlayerMediaMarkup(item, variant = 'cover') {
-  const source = item?.imageUrl || '';
-  if (source) {
-    const transformStyle = item?.character?.photo && source === item.character.photo
-      ? ` style="transform:scale(${item.photoZoom || 1}) translate(${item.photoX || 0}px, ${item.photoY || 0}px);transform-origin:center center;"`
-      : '';
-    return `<img src="${escapeHtml(source)}" alt="${escapeHtml(item.nom)}" class="players-showcase-media players-showcase-media--${variant}"${transformStyle}>`;
+// ── Portrait inline ───────────────────────────────────────────────────────────
+function _portrait(item, size=52, radius='50%') {
+  const colors = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const col    = colors[item.nom.charCodeAt(0)%colors.length];
+  const pos    = `${50+(item.photoX||0)*50}% ${50+(item.photoY||0)*50}%`;
+  if (item.imageUrl) {
+    return `<div style="width:${size}px;height:${size}px;border-radius:${radius};overflow:hidden;flex-shrink:0">
+      <img src="${_esc(item.imageUrl)}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">
+    </div>`;
   }
-  if (item?.emoji) {
-    return `<span class="players-showcase-fallback players-showcase-fallback--emoji">${escapeHtml(item.emoji)}</span>`;
-  }
-  return `<span class="players-showcase-fallback">${escapeHtml(item?.initials || 'PJ')}</span>`;
+  return `<div style="width:${size}px;height:${size}px;border-radius:${radius};overflow:hidden;flex-shrink:0;
+    background:${col}18;border:2px solid ${col};
+    display:flex;align-items:center;justify-content:center">
+    <span style="font-family:'Cinzel',serif;font-weight:700;font-size:${Math.round(size*.35)}px;
+      color:${col}">${item.initials}</span>
+  </div>`;
 }
 
-function renderRosterCard(item, active = false) {
-  const subline = [item.subtitle, `Niv. ${item.niveau || 1}`].filter(Boolean).join(' · ');
-  return `
-    <button type="button" class="players-showcase-roster-card${active ? ' is-active' : ''}" data-player-id="${escapeHtml(item.id)}" onclick='selectPlayerShowcase(${JSON.stringify(item.id)})'>
-      <span class="players-showcase-roster-card__avatar">${getPlayerMediaMarkup(item, 'thumb')}</span>
-      <span class="players-showcase-roster-card__body">
-        <span class="players-showcase-roster-card__top">
-          <strong>${escapeHtml(item.nom)}</strong>
-          <em>${escapeHtml(item.sourceLabel)}</em>
-        </span>
-        <span class="players-showcase-roster-card__sub">${escapeHtml(subline || 'Profil de campagne')}</span>
-        <span class="players-showcase-roster-card__meta">
-          ${item.joueur ? `<span>${escapeHtml(item.joueur)}</span>` : '<span>Compagnie</span>'}
-          <span>${item.hasCharacterSheet ? 'Fiche active' : 'Présentation seule'}</span>
-        </span>
-      </span>
+// ══════════════════════════════════════════════════════════════════════════════
+// SOMMAIRE
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderSommaire(items) {
+  const colors = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+
+  const cards = items.map((item, idx) => {
+    const col   = colors[item.nom.charCodeAt(0)%colors.length];
+    const pos   = `${50+(item.photoX||0)*50}% ${50+(item.photoY||0)*50}%`;
+    const chap  = item.chap || `Chapitre ${_toRoman(idx+1)} : ${item.nom}`;
+    const locked = !item.bio && !item.imageUrl;
+
+    return `<button onclick="window._ppOpenFiche('${_esc(item.id)}')"
+      style="display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;
+      background:var(--bg-elevated);border:1px solid ${locked?'var(--border)':col+'44'};
+      border-radius:12px;cursor:pointer;transition:all .18s;text-align:left;
+      opacity:${locked?.55:1}"
+      onmouseover="this.style.background='${col}10';this.style.borderColor='${col}';this.style.transform='translateX(3px)'"
+      onmouseout="this.style.background='var(--bg-elevated)';this.style.borderColor='${locked?'var(--border)':col+'44'}';this.style.transform=''">
+
+      <!-- Portrait circulaire -->
+      <div style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;
+        background:${col}18;border:2px solid ${locked?'rgba(255,255,255,.1)':col};
+        display:flex;align-items:center;justify-content:center">
+        ${item.imageUrl
+          ? `<img src="${_esc(item.imageUrl)}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
+          : locked
+            ? `<span style="font-size:1.1rem;opacity:.4">🔒</span>`
+            : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:${col}">${item.initials}</span>`}
+      </div>
+
+      <div style="flex:1;min-width:0">
+        <div style="font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;
+          color:${locked?'var(--text-dim)':'var(--text)'};
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(chap)}</div>
+        ${item.subtitle ? `<div style="font-size:.65rem;color:${col};margin-top:1px">${_esc(item.subtitle)}</div>` : ''}
+      </div>
     </button>`;
-}
+  });
 
-function renderStatsPanel(item) {
-  if (!item?.stats?.length) {
-    return `
-      <article class="players-showcase-panel players-showcase-panel--empty">
-        <span class="players-showcase-panel__label">Statistiques</span>
-        <p>Les statistiques détaillées apparaissent automatiquement dès qu'une fiche personnage est liée à cette présentation.</p>
-      </article>`;
-  }
+  // Répartir en 3 colonnes
+  const col1 = cards.filter((_,i)=>i%3===0);
+  const col2 = cards.filter((_,i)=>i%3===1);
+  const col3 = cards.filter((_,i)=>i%3===2);
 
   return `
-    <article class="players-showcase-panel">
-      <span class="players-showcase-panel__label">Statistiques</span>
-      <div class="players-showcase-stat-list">
-        ${item.stats.map(stat => {
-          const pct = Math.max(10, Math.min(100, Math.round((stat.value / 22) * 100)));
-          return `
-            <div class="players-showcase-stat-row">
-              <div class="players-showcase-stat-row__head">
-                <span>${escapeHtml(stat.label)}</span>
-                <strong>${stat.value}</strong>
-              </div>
-              <div class="players-showcase-stat-row__bar"><i style="width:${pct}%"></i></div>
-            </div>`;
-        }).join('')}
-      </div>
-    </article>`;
+  <div style="text-align:center;margin-bottom:1.5rem">
+    <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;font-weight:900;
+      color:var(--gold);letter-spacing:3px;margin:0">Sommaire</h1>
+    <div style="width:60px;height:2px;background:var(--gold);
+      margin:.5rem auto;border-radius:1px;opacity:.6"></div>
+    <div style="font-size:.8rem;color:var(--text-dim)">${items.length} personnages</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-bottom:2rem">
+    <div style="display:flex;flex-direction:column;gap:.4rem">${col1.join('')}</div>
+    <div style="display:flex;flex-direction:column;gap:.4rem">${col2.join('')}</div>
+    <div style="display:flex;flex-direction:column;gap:.4rem">${col3.join('')}</div>
+  </div>`;
 }
 
-function renderEquipmentPanel(item) {
-  const equipment = item?.equipment || [];
-  if (!equipment.length) {
-    return `
-      <article class="players-showcase-panel players-showcase-panel--empty">
-        <span class="players-showcase-panel__label">Équipement</span>
-        <p>Aucun équipement majeur n'est encore remonté depuis la fiche.</p>
-      </article>`;
-  }
+// ══════════════════════════════════════════════════════════════════════════════
+// FICHE NARRATIVE INDIVIDUELLE
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderFiche(item, items) {
+  const colors = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const col    = colors[item.nom.charCodeAt(0)%colors.length];
+  const idx    = items.findIndex(i=>i.id===item.id);
+  const prev   = items[idx-1]||null;
+  const next   = items[idx+1]||null;
 
-  return `
-    <article class="players-showcase-panel">
-      <span class="players-showcase-panel__label">Équipement</span>
-      <div class="players-showcase-list">
-        ${equipment.slice(0, 6).map(entry => `
-          <div class="players-showcase-list__item">
-            <div>
-              <strong>${escapeHtml(entry.slot)}</strong>
-              <span>${escapeHtml(entry.nom)}</span>
-            </div>
-            ${entry.detail ? `<em>${escapeHtml(entry.detail)}</em>` : '<em>—</em>'}
-          </div>`).join('')}
-      </div>
-    </article>`;
-}
+  // Barres de stats — colorées individuellement comme sur le screenshot
+  const statBars = item.stats.length ? `
+  <div style="margin-top:1.2rem">
+    <div style="font-family:'Cinzel',serif;font-size:.75rem;font-weight:700;
+      letter-spacing:2px;color:var(--gold);text-align:center;margin-bottom:.75rem;
+      text-transform:uppercase">Statistiques</div>
+    <div style="display:flex;flex-direction:column;gap:.45rem">
+      ${item.stats.map(st => {
+        const pct = Math.max(8,Math.round((st.value/22)*100));
+        return `<div style="display:flex;align-items:center;gap:.5rem">
+          <span style="font-size:.65rem;color:var(--text-dim);width:70px;
+            text-align:right;flex-shrink:0">${st.label}</span>
+          <div style="flex:1;height:10px;background:rgba(255,255,255,.06);
+            border-radius:999px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${st.color};
+              border-radius:999px;transition:width .6s ease"></div>
+          </div>
+          <span style="font-size:.72rem;font-weight:700;color:${st.color};
+            width:22px;text-align:right;flex-shrink:0">${st.value}</span>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>` : '';
 
-function renderDataPanel(item) {
-  const rows = [
-    { label: 'Joueur', value: item.joueur || '—' },
-    { label: 'Niveau', value: `Niv. ${item.niveau || 1}` },
-    { label: 'Titres', value: item.titles?.length ? item.titles.join(' · ') : 'Aucun titre' },
-    { label: 'Quêtes', value: item.quests ? String(item.quests) : '0' },
-    { label: 'Inventaire', value: item.inventoryCount ? `${item.inventoryCount} objets` : 'Aucun objet' },
-  ];
-
-  return `
-    <article class="players-showcase-panel">
-      <span class="players-showcase-panel__label">Repères</span>
-      <div class="players-showcase-data-list">
-        ${rows.map(row => `
-          <div class="players-showcase-data-list__row">
-            <span>${escapeHtml(row.label)}</span>
-            <strong>${escapeHtml(row.value)}</strong>
-          </div>`).join('')}
-      </div>
-    </article>`;
-}
-
-function renderProgressPanel(item) {
-  const chips = [
-    item.pvMax !== null ? `<div class="players-showcase-chip"><span>PV</span><strong>${item.pvActuel ?? item.pvMax} / ${item.pvMax}</strong></div>` : '',
-    item.pmMax !== null ? `<div class="players-showcase-chip"><span>PM</span><strong>${item.pmActuel ?? item.pmMax} / ${item.pmMax}</strong></div>` : '',
-    item.ca !== null ? `<div class="players-showcase-chip"><span>CA</span><strong>${item.ca}</strong></div>` : '',
-    item.vitesse !== null ? `<div class="players-showcase-chip"><span>Vitesse</span><strong>${item.vitesse} m</strong></div>` : '',
-    item.deckMax !== null ? `<div class="players-showcase-chip"><span>Deck</span><strong>${item.deckActif ?? 0} / ${item.deckMax}</strong></div>` : '',
-    item.gold !== null ? `<div class="players-showcase-chip"><span>Or</span><strong>${item.gold}</strong></div>` : '',
+  // Chips vitaux PV/PM/CA
+  const vitaux = [
+    item.pvMax!==null ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.25);border-radius:8px"><div style="font-size:.6rem;color:#ff6b6b;font-weight:700;text-transform:uppercase;letter-spacing:.5px">PV</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#ff6b6b">${item.pvActuel??item.pvMax}/${item.pvMax}</div></div>` : '',
+    item.pmMax!==null ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(79,140,255,.1);border:1px solid rgba(79,140,255,.25);border-radius:8px"><div style="font-size:.6rem;color:#4f8cff;font-weight:700;text-transform:uppercase;letter-spacing:.5px">PM</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#4f8cff">${item.pmActuel??item.pmMax}/${item.pmMax}</div></div>` : '',
+    item.ca!==null    ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(34,195,142,.1);border:1px solid rgba(34,195,142,.25);border-radius:8px"><div style="font-size:.6rem;color:#22c38e;font-weight:700;text-transform:uppercase;letter-spacing:.5px">CA</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#22c38e">${item.ca}</div></div>` : '',
+    item.gold!==null  ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.25);border-radius:8px"><div style="font-size:.6rem;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Or</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:var(--gold)">${item.gold}</div></div>` : '',
   ].filter(Boolean);
 
-  return `
-    <article class="players-showcase-panel${chips.length ? '' : ' players-showcase-panel--empty'}">
-      <span class="players-showcase-panel__label">Ressources</span>
-      ${chips.length
-        ? `<div class="players-showcase-chip-grid">${chips.join('')}</div>`
-        : '<p>Les ressources de jeu apparaissent automatiquement lorsque la fiche personnage est complète.</p>'}
-    </article>`;
-}
-
-function renderStageActions(item) {
-  const adminActions = STATE.isAdmin
-    ? `
-      <div class="players-showcase-actions">
-        <button class="btn btn-outline btn-sm" type="button" onclick='openLinkedPlayerPresent(${JSON.stringify(item.charId || '')}, ${JSON.stringify(item.presentationId || '')})'>
-          ${item.presentationId ? 'Modifier la présentation' : 'Créer une présentation'}
-        </button>
-        ${item.presentationId ? `<button class="btn btn-danger btn-sm" type="button" onclick='deletePlayerPresent(${JSON.stringify(item.presentationId)})'>Supprimer</button>` : ''}
-      </div>`
-    : '';
-
-  const sheetAction = item.charId
-    ? `<button class="btn btn-gold btn-sm" type="button" onclick='openCharacterSheetFromShowcase(${JSON.stringify(item.charId)})'>Ouvrir la fiche complète</button>`
-    : '';
-
-  if (!sheetAction && !adminActions) return '';
+  const chap = item.chap || `Chapitre ${_toRoman(idx+1)} : ${item.nom}`;
 
   return `
-    <div class="players-showcase-stage__footer">
-      <div class="players-showcase-actions">
-        ${sheetAction}
+  <!-- Breadcrumb + navigation -->
+  <div style="display:flex;align-items:center;justify-content:space-between;
+    margin-bottom:1.2rem;flex-wrap:wrap;gap:.5rem">
+    <button onclick="window._ppBack()"
+      style="display:flex;align-items:center;gap:.4rem;background:none;border:none;
+      cursor:pointer;color:var(--text-dim);font-size:.8rem;transition:color .15s"
+      onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">
+      ← Sommaire
+    </button>
+    <div style="display:flex;gap:.4rem">
+      ${prev?`<button onclick="window._ppOpenFiche('${_esc(prev.id)}')"
+        style="font-size:.72rem;padding:4px 10px;border-radius:8px;cursor:pointer;
+        border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);
+        transition:all .12s"
+        onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">‹ ${_esc(prev.nom)}</button>`:''}
+      ${next?`<button onclick="window._ppOpenFiche('${_esc(next.id)}')"
+        style="font-size:.72rem;padding:4px 10px;border-radius:8px;cursor:pointer;
+        border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);
+        transition:all .12s"
+        onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">›  ${_esc(next.nom)}</button>`:''}
+    </div>
+  </div>
+
+  <!-- Carte principale -->
+  <div style="background:var(--bg-card);border:1px solid var(--border);
+    border-radius:var(--radius-lg);overflow:hidden;
+    display:grid;grid-template-columns:320px 1fr">
+
+    <!-- Colonne gauche : illustration -->
+    <div style="position:relative;background:linear-gradient(180deg,${col}12,var(--bg-panel));
+      min-height:500px;overflow:hidden;display:flex;align-items:flex-end">
+
+      ${item.imageUrl
+        ? `<img src="${_esc(item.imageUrl)}" style="position:absolute;top:0;left:0;
+            width:100%;height:100%;object-fit:cover;
+            object-position:${50+(item.photoX||0)*50}% ${50+(item.photoY||0)*50}%">
+           <!-- Fondu bas -->
+           <div style="position:absolute;bottom:0;left:0;right:0;height:40%;
+             background:linear-gradient(to top,var(--bg-card),transparent)"></div>
+           <!-- Fondu droite -->
+           <div style="position:absolute;inset:0;background:linear-gradient(to right,
+             transparent 65%,var(--bg-card))"></div>`
+        : `<div style="position:absolute;inset:0;display:flex;align-items:center;
+             justify-content:center;font-family:'Cinzel',serif;font-size:5rem;
+             font-weight:900;color:${col}22">${item.initials}</div>`}
+
+      <!-- Bloc nom en overlay bas -->
+      <div style="position:relative;z-index:2;padding:1.2rem;width:100%">
+        <div style="font-size:.68rem;font-weight:700;letter-spacing:2px;
+          text-transform:uppercase;color:${col};margin-bottom:.3rem">${_esc(chap)}</div>
+        <h2 style="font-family:'Cinzel',serif;font-size:1.6rem;font-weight:900;
+          color:var(--text);letter-spacing:2px;margin:0 0 .2rem;
+          text-shadow:0 2px 8px rgba(0,0,0,.5)">${_esc(item.nom)}</h2>
+        <div style="font-size:.78rem;color:${col};font-style:italic">${_esc(item.subtitle||'')}</div>
+        ${item.joueur ? `<div style="font-size:.68rem;color:var(--text-dim);margin-top:.2rem">Joué par ${_esc(item.joueur)}</div>` : ''}
+        ${vitaux.length ? `<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.65rem">${vitaux.join('')}</div>` : ''}
       </div>
-      ${adminActions}
-    </div>`;
-}
-
-function renderStage(item) {
-  if (!item) {
-    return '<div class="players-showcase-empty">Aucun personnage disponible.</div>';
-  }
-
-  const subtitle = [item.subtitle, `Niv. ${item.niveau || 1}`].filter(Boolean).join(' · ');
-  const tags = [
-    item.joueur ? `<span class="players-showcase-tag">${escapeHtml(item.joueur)}</span>` : '',
-    ...((item.titles || []).slice(0, 4).map(title => `<span class="players-showcase-tag">${escapeHtml(title)}</span>`)),
-  ].filter(Boolean).join('');
-
-  return `
-    <div class="players-showcase-stage-shell">
-      <div class="players-showcase-stage__hero">
-        <div class="players-showcase-stage__media">
-          <div class="players-showcase-stage__glow"></div>
-          <div class="players-showcase-stage__frame">${getPlayerMediaMarkup(item, 'cover')}</div>
-          <div class="players-showcase-stage__source">${escapeHtml(item.sourceLabel)}</div>
-        </div>
-        <div class="players-showcase-stage__body">
-          <span class="players-showcase-stage__eyebrow">Compagnie active</span>
-          <h2>${escapeHtml(item.nom)}</h2>
-          <p class="players-showcase-stage__subtitle">${escapeHtml(subtitle || 'Profil de personnage')}</p>
-          ${tags ? `<div class="players-showcase-stage__tags">${tags}</div>` : ''}
-          <div class="players-showcase-stage__bio">${nl2br(item.bio)}</div>
-          ${renderStageActions(item)}
-        </div>
-      </div>
-      <div class="players-showcase-stage__grid">
-        ${renderDataPanel(item)}
-        ${renderProgressPanel(item)}
-        ${renderStatsPanel(item)}
-        ${renderEquipmentPanel(item)}
-      </div>
-    </div>`;
-}
-
-function renderPlayersShowcase(items = []) {
-  const summary = summarizePlayers(items);
-  const active = getActivePlayerRecord() || items[0] || null;
-
-  return `
-    <div class="page-header">
-      <div class="page-title"><span class="page-title-accent">⚔️ Présentation des Joueurs</span></div>
-      <div class="page-subtitle">Une galerie connectée aux fiches existantes de la campagne</div>
     </div>
 
-    <section class="players-showcase-page">
-      <div class="players-showcase-hero">
-        <div class="players-showcase-hero__copy">
-          <span class="players-showcase-hero__kicker">Compagnie</span>
-          <h1>Les personnages de la campagne</h1>
-          <p>Cette page fusionne les présentations éditoriales et les fiches existantes de la base afin d'afficher un roster plus riche, plus lisible et directement relié aux données du jeu.</p>
-        </div>
-        <div class="players-showcase-hero__stats">
-          <div class="players-showcase-hero-card"><span>Personnages</span><strong>${summary.total}</strong><small>visibles sur le site</small></div>
-          <div class="players-showcase-hero-card"><span>Fiches liées</span><strong>${summary.linkedCount}</strong><small>alimentées depuis la base</small></div>
-          <div class="players-showcase-hero-card"><span>Présentations enrichies</span><strong>${summary.enrichedCount}</strong><small>texte ou image dédiée</small></div>
-          <div class="players-showcase-hero-card"><span>Niveau moyen</span><strong>${summary.averageLevel}</strong><small>moyenne du roster</small></div>
-        </div>
+    <!-- Colonne droite : contenu narratif -->
+    <div style="padding:1.8rem;display:flex;flex-direction:column;gap:1.2rem">
+
+      <!-- Niveau + titres -->
+      <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <span style="font-family:'Cinzel',serif;font-size:.75rem;font-weight:700;
+          padding:3px 10px;border-radius:999px;
+          background:${col}18;border:1px solid ${col}44;color:${col}">
+          Niveau ${item.level||1}
+        </span>
+        ${item.titles.slice(0,4).map(t=>`<span style="font-size:.7rem;padding:2px 8px;
+          border-radius:999px;background:rgba(232,184,75,.08);
+          border:1px solid rgba(232,184,75,.2);color:var(--gold)">${_esc(t)}</span>`).join('')}
+        ${STATE.isAdmin ? `
+        <button onclick="openLinkedPlayerPresent('${_esc(item.charId)}','${_esc(item.presentationId)}')"
+          style="margin-left:auto;font-size:.68rem;padding:2px 8px;border-radius:6px;
+          border:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.08);
+          color:#4f8cff;cursor:pointer">✏️ Modifier</button>` : ''}
       </div>
 
-      ${STATE.isAdmin ? `
-        <div class="admin-section" style="margin-bottom:1.2rem">
-          <div class="admin-label">Gestion Admin</div>
-          <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center">
-            <button class="btn btn-gold btn-sm" type="button" onclick="openPlayerPresentModal()">+ Ajouter une présentation</button>
-            <span style="font-size:0.78rem;color:var(--text-dim)">Les personnages existants sont remontés automatiquement depuis la collection <code>characters</code>.</span>
-          </div>
-        </div>` : ''}
+      <!-- Bio -->
+      ${item.bio ? `
+      <div>
+        <div style="font-size:.7rem;color:var(--text-dim);font-weight:700;
+          text-transform:uppercase;letter-spacing:1.5px;margin-bottom:.5rem">Présentation</div>
+        <div style="font-size:.88rem;color:var(--text-muted);line-height:1.85">
+          ${_nl2br(item.bio)}</div>
+      </div>` : ''}
 
-      <div class="players-showcase-layout">
-        <aside class="players-showcase-roster">
-          <div class="players-showcase-roster__header">
-            <div>
-              <span class="players-showcase-roster__eyebrow">Roster</span>
-              <h2>Compagnie active</h2>
-            </div>
-            <span class="players-showcase-roster__count">${items.length}</span>
-          </div>
-          <div class="players-showcase-roster__list">
-            ${items.map(item => renderRosterCard(item, active?.id === item.id)).join('')}
-          </div>
-        </aside>
-        <section class="players-showcase-stage" id="players-showcase-stage">
-          ${renderStage(active)}
-        </section>
-      </div>
-    </section>`;
+      <!-- Fragment d'archive -->
+      ${item.archive ? `
+      <div style="background:rgba(232,184,75,.04);border:1px solid rgba(232,184,75,.15);
+        border-left:3px solid var(--gold);border-radius:0 10px 10px 0;
+        padding:.85rem 1rem">
+        <div style="font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;
+          color:var(--gold);letter-spacing:2px;text-transform:uppercase;
+          margin-bottom:.5rem">✦ Fragment d'Archive</div>
+        <div style="font-size:.82rem;color:var(--text-muted);line-height:1.8;
+          font-style:italic">${_nl2br(item.archive)}</div>
+        ${item.source ? `<div style="font-size:.68rem;color:var(--text-dim);
+          margin-top:.4rem;text-align:right">— ${_esc(item.source)}</div>` : ''}
+      </div>` : ''}
+
+      <!-- Stats visuelles -->
+      ${statBars}
+
+      <!-- Actions -->
+      ${item.charId ? `
+      <div style="margin-top:auto;padding-top:.75rem;border-top:1px solid var(--border)">
+        <button onclick="openCharacterSheetFromShowcase('${_esc(item.charId)}')"
+          class="btn btn-gold btn-sm" style="font-size:.75rem">
+          📜 Ouvrir la fiche complète
+        </button>
+      </div>` : ''}
+    </div>
+
+  </div>`;
 }
 
-async function loadPlayerShowcaseItems() {
+// ══════════════════════════════════════════════════════════════════════════════
+// PAGE PRINCIPALE
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderPlayersPage() {
+  const content = document.getElementById('main-content');
+
   const [presentations, characters] = await Promise.all([
     loadCollection('players'),
     loadCollection('characters'),
   ]);
+  STORE.presentations = presentations;
+  STORE.characters    = characters;
+  STORE.items         = _buildDataset(presentations, characters);
+  if (!STORE.activeId) STORE.activeId = '';
 
-  PLAYER_STAGE_STORE.presentations = presentations;
-  PLAYER_STAGE_STORE.characters = characters;
-  PLAYER_STAGE_STORE.items = buildPlayerDataset(presentations, characters);
-  if (!PLAYER_STAGE_STORE.items.some(item => item.id === PLAYER_STAGE_STORE.activeId)) {
-    PLAYER_STAGE_STORE.activeId = PLAYER_STAGE_STORE.items[0]?.id || '';
-  }
-  return PLAYER_STAGE_STORE.items;
-}
-
-async function renderPlayersPage() {
-  const items = await loadPlayerShowcaseItems();
-  const content = document.getElementById('main-content');
-
-  if (!items.length) {
+  if (!STORE.items.length) {
     content.innerHTML = `
       <div class="page-header">
-        <div class="page-title"><span class="page-title-accent">⚔️ Présentation des Joueurs</span></div>
-        <div class="page-subtitle">Les héros de cette aventure</div>
+        <div class="page-title"><span class="page-title-accent">⚔️ Personnages</span></div>
       </div>
-      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" onclick="openPlayerPresentModal()">+ Ajouter une présentation</button></div>` : ''}
-      <div class="empty-state"><div class="icon">⚔️</div><p>Aucun personnage ou présentation n'est encore disponible.</p></div>`;
+      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Admin</div>
+        <button class="btn btn-gold btn-sm" onclick="openPlayerPresentModal()">+ Ajouter</button></div>` : ''}
+      <div class="empty-state"><div class="icon">⚔️</div><p>Aucun personnage disponible.</p></div>`;
     return;
   }
 
-  content.innerHTML = renderPlayersShowcase(items);
+  _renderView(content);
 }
 
-function selectPlayerShowcase(id) {
-  PLAYER_STAGE_STORE.activeId = id;
-  const active = getActivePlayerRecord();
-  document.querySelectorAll('.players-showcase-roster-card').forEach(card => card.classList.remove('is-active'));
-  const selected = Array.from(document.querySelectorAll('.players-showcase-roster-card'))
-    .find(card => card.dataset.playerId === id);
-  selected?.classList.add('is-active');
-  const stage = document.getElementById('players-showcase-stage');
-  if (stage) stage.innerHTML = renderStage(active);
+function _renderView(content) {
+  const items = STORE.items;
+  const activeItem = STORE.activeId ? items.find(i=>i.id===STORE.activeId) : null;
+
+  content.innerHTML = `
+  <div style="max-width:1000px;margin:0 auto">
+    ${STATE.isAdmin ? `
+    <div class="admin-section" style="margin-bottom:1rem">
+      <div class="admin-label">Admin</div>
+      <button class="btn btn-gold btn-sm" onclick="openPlayerPresentModal()">+ Ajouter une présentation</button>
+    </div>` : ''}
+
+    <div id="pp-view-area">
+      ${activeItem ? _renderFiche(activeItem, items) : _renderSommaire(items)}
+    </div>
+  </div>`;
 }
 
-async function openPlayerPresentModal(player = null) {
-  const characters = PLAYER_STAGE_STORE.characters.length
-    ? PLAYER_STAGE_STORE.characters
-    : await loadCollection('characters');
+window._ppOpenFiche = (id) => {
+  STORE.activeId = id;
+  const el = document.getElementById('pp-view-area');
+  if (el) el.innerHTML = _renderFiche(STORE.items.find(i=>i.id===id), STORE.items);
+  window.scrollTo(0,0);
+};
 
-  window.__playerPresentCharacters = characters;
+window._ppBack = () => {
+  STORE.activeId = '';
+  const el = document.getElementById('pp-view-area');
+  if (el) el.innerHTML = _renderSommaire(STORE.items);
+};
 
-  const currentCharId = player?.charId || '';
-  const characterOptions = [`<option value="">— Aucun lien —</option>`]
-    .concat(characters.map(char => `<option value="${escapeHtml(char.id)}" ${char.id === currentCharId ? 'selected' : ''}>${escapeHtml(char.nom || 'Personnage')}</option>`))
-    .join('');
+// ── Numéros romains ───────────────────────────────────────────────────────────
+function _toRoman(n) {
+  const v=[1000,900,500,400,100,90,50,40,10,9,5,4,1];
+  const s=['M','CM','D','CD','C','XC','L','XL','X','IX','V','IV','I'];
+  let r='';
+  for(let i=0;i<v.length;i++) while(n>=v[i]){r+=s[i];n-=v[i];}
+  return r;
+}
 
-  openModal(player ? '✏️ Modifier la présentation' : '⚔️ Ajouter une présentation', `
+// ══════════════════════════════════════════════════════════════════════════════
+// MODAL ADMIN — CRÉATION / ÉDITION (avec upload+crop)
+// ══════════════════════════════════════════════════════════════════════════════
+async function openPlayerPresentModal(player=null) {
+  const characters = STORE.characters.length ? STORE.characters : await loadCollection('characters');
+  window.__ppChars = characters;
+  const curCharId = player?.charId||'';
+
+  openModal(player?`✏️ Modifier — ${player.nom||'PJ'}`:'⚔️ Nouveau personnage', `
     <div class="form-group">
-      <label>Fiche personnage liée</label>
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0.65rem;align-items:end">
-        <select class="input-field" id="pp-char-id">${characterOptions}</select>
+      <label>Fiche liée</label>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:.5rem">
+        <select class="input-field" id="pp-char-id">
+          <option value="">— Aucun lien —</option>
+          ${characters.map(c=>`<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}</option>`).join('')}
+        </select>
         <button class="btn btn-outline btn-sm" type="button" onclick="prefillPlayerPresentFromLinkedChar(true)">Préremplir</button>
       </div>
     </div>
-    <div class="form-group"><label>Nom du personnage</label><input class="input-field" id="pp-nom" value="${escapeHtml(player?.nom || '')}"></div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Classe</label><input class="input-field" id="pp-classe" value="${escapeHtml(player?.classe || '')}"></div>
-      <div class="form-group"><label>Race</label><input class="input-field" id="pp-race" value="${escapeHtml(player?.race || '')}"></div>
+
+    <div class="grid-2" style="gap:.75rem">
+      <div class="form-group" style="margin:0">
+        <label>Nom</label>
+        <input class="input-field" id="pp-nom" value="${_esc(player?.nom||'')}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Chapitre <span style="color:var(--text-dim);font-weight:400">(ex: Chapitre I : Khaarys)</span></label>
+        <input class="input-field" id="pp-chap" value="${_esc(player?.chapitre||'')}" placeholder="Chapitre I : Nom">
+      </div>
     </div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Niveau</label><input type="number" class="input-field" id="pp-niveau" value="${escapeHtml(player?.niveau || 1)}"></div>
-      <div class="form-group"><label>Emoji</label><input class="input-field" id="pp-emoji" value="${escapeHtml(player?.emoji || '⚔️')}"></div>
+
+    <div class="grid-2" style="gap:.75rem;margin-top:.75rem">
+      <div class="form-group" style="margin:0">
+        <label>Classe</label>
+        <input class="input-field" id="pp-classe" value="${_esc(player?.classe||'')}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Race</label>
+        <input class="input-field" id="pp-race" value="${_esc(player?.race||'')}">
+      </div>
     </div>
-    <div class="form-group"><label>Joueur</label><input class="input-field" id="pp-joueur" value="${escapeHtml(player?.joueur || '')}"></div>
-    <div class="form-group"><label>Présentation</label><textarea class="input-field" id="pp-bio" rows="6">${escapeHtml(player?.bio || '')}</textarea></div>
-    <div class="form-group"><label>URL image</label><input class="input-field" id="pp-img" value="${escapeHtml(player?.imageUrl || '')}"></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick='savePlayerPresent(${JSON.stringify(player?.id || '')})'>Enregistrer</button>
+
+    <div class="grid-2" style="gap:.75rem;margin-top:.75rem">
+      <div class="form-group" style="margin:0">
+        <label>Niveau</label>
+        <input type="number" class="input-field" id="pp-niveau" value="${player?.niveau||1}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Joueur</label>
+        <input class="input-field" id="pp-joueur" value="${_esc(player?.joueur||'')}">
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-top:.75rem">
+      <label>Présentation narrative</label>
+      <textarea class="input-field" id="pp-bio" rows="4">${_esc(player?.bio||'')}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Fragment d'Archive <span style="color:var(--text-dim);font-weight:400">(citation narrative)</span></label>
+      <textarea class="input-field" id="pp-archive" rows="3">${_esc(player?.archive||'')}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Source du fragment</label>
+      <input class="input-field" id="pp-source" value="${_esc(player?.archiveSource||'')}" placeholder="— Recueil des voix de Granlac,">
+    </div>
+
+    <!-- Upload + crop illustration -->
+    <div class="form-group">
+      <label>Illustration</label>
+      <div id="pp-img-drop" style="border:2px dashed var(--border-strong);border-radius:10px;
+        padding:.85rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
+        <div id="pp-img-preview">
+          ${player?.imageUrl
+            ? `<img src="${_esc(player.imageUrl)}" style="max-height:80px;border-radius:8px;max-width:100%">`
+            : `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
+               <div style="font-size:.75rem;color:var(--text-muted)">
+                 <span style="color:var(--gold)">Cliquer</span> ou glisser une image</div>`}
+        </div>
+      </div>
+      <div id="pp-crop-wrap" style="display:none;margin-top:.6rem">
+        <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.35rem">Recadrez l'illustration</div>
+        <canvas id="pp-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
+        <button type="button" class="btn btn-gold btn-sm" style="width:100%;margin-top:.4rem"
+          onclick="window._ppConfirmCrop()">✂️ Confirmer</button>
+        <div id="pp-crop-ok" style="display:none;font-size:.72rem;text-align:center;margin-top:3px;color:var(--green)"></div>
+      </div>
+      ${player?.imageUrl ? `<button type="button" onclick="window._ppClearImg()"
+        style="font-size:.72rem;background:none;border:none;cursor:pointer;color:#ff6b6b;margin-top:.3rem">
+        ✕ Retirer l'image</button>` : ''}
+    </div>
+
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-gold" style="flex:1" onclick="savePlayerPresent('${_esc(player?.id||'')}')">Enregistrer</button>
+      ${player?.id ? `<button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)"
+        onclick="deletePlayerPresent('${_esc(player.id)}')">🗑️</button>` : ''}
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>
   `);
-}
 
-function prefillPlayerPresentFromLinkedChar(force = false) {
-  const charId = document.getElementById('pp-char-id')?.value || '';
-  const characters = window.__playerPresentCharacters || [];
-  const char = characters.find(entry => entry.id === charId);
-  if (!char) return;
+  // Setup crop
+  window._ppImgBase64 = null;
+  window._ppImgCleared = false;
 
-  const setIfNeeded = (id, value) => {
-    const field = document.getElementById(id);
-    if (!field) return;
-    if (!force && String(field.value || '').trim()) return;
-    field.value = value;
+  const fi = document.createElement('input');
+  fi.type='file'; fi.accept='image/*';
+  fi.style.cssText='position:absolute;opacity:0;width:0;height:0';
+  document.body.appendChild(fi);
+
+  const handleFile = (file) => {
+    if(!file?.type.startsWith('image/')) return;
+    const r=new FileReader();
+    r.onload=(e)=>_initPpCrop(e.target.result);
+    r.readAsDataURL(file);
   };
+  fi.addEventListener('change',()=>handleFile(fi.files[0]));
+  const drop = document.getElementById('pp-img-drop');
+  drop?.addEventListener('click',()=>fi.click());
+  drop?.addEventListener('dragover',e=>{e.preventDefault();drop.style.borderColor='var(--gold)';});
+  drop?.addEventListener('dragleave',()=>{drop.style.borderColor='var(--border-strong)';});
+  drop?.addEventListener('drop',e=>{e.preventDefault();drop.style.borderColor='var(--border-strong)';handleFile(e.dataTransfer.files[0]);});
 
-  setIfNeeded('pp-nom', char.nom || '');
-  setIfNeeded('pp-niveau', char.niveau || 1);
-  setIfNeeded('pp-joueur', char.ownerPseudo || '');
-  setIfNeeded('pp-img', char.photo || '');
+  const obs=new MutationObserver(()=>{if(!document.getElementById('pp-img-drop')){fi.remove();obs.disconnect();}});
+  obs.observe(document.body,{childList:true,subtree:true});
+
+  window._ppClearImg = () => {
+    window._ppImgBase64=''; window._ppImgCleared=true;
+    const prev=document.getElementById('pp-img-preview');
+    if(prev) prev.innerHTML=`<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
+      <div style="font-size:.75rem;color:var(--text-muted)"><span style="color:var(--gold)">Cliquer</span> ou glisser</div>`;
+    document.getElementById('pp-crop-wrap').style.display='none';
+  };
 }
 
-async function savePlayerPresent(id = '') {
+function _initPpCrop(dataUrl) {
+  const wrap=document.getElementById('pp-crop-wrap');
+  const canvas=document.getElementById('pp-crop-canvas');
+  if(!wrap||!canvas) return;
+  wrap.style.display='block';
+  document.getElementById('pp-crop-ok').style.display='none';
+  const img=new Image();
+  img.onload=()=>{
+    _ppCrop.img=img;_ppCrop.natW=img.naturalWidth;_ppCrop.natH=img.naturalHeight;
+    const maxW=Math.min(440,img.naturalWidth);
+    _ppCrop.dispScale=maxW/img.naturalWidth;
+    canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+    canvas.style.width=maxW+'px';canvas.style.height=Math.round(img.naturalHeight*_ppCrop.dispScale)+'px';
+    // Ratio portrait 3:4 par défaut
+    const w=Math.round(Math.min(img.naturalWidth,img.naturalHeight*0.75));
+    const h=Math.round(w*4/3);
+    _ppCrop.cropX=Math.round((img.naturalWidth-w)/2);
+    _ppCrop.cropY=Math.round((img.naturalHeight-h)/2);
+    _ppCrop.cropW=w;_ppCrop.cropH=Math.min(h,img.naturalHeight);
+    _drawPpCrop();_bindPpCrop(canvas);
+    const prev=document.getElementById('pp-img-preview');
+    if(prev) prev.innerHTML=`<img src="${dataUrl}" style="max-height:50px;border-radius:6px;opacity:.6">
+      <div style="font-size:.68rem;color:var(--text-dim);margin-top:3px">Recadrez ci-dessous</div>`;
+  };
+  img.src=dataUrl;
+}
+function _ppHandles(){const{cropX:x,cropY:y,cropW:w,cropH:h}=_ppCrop;return[{id:'nw',x,y},{id:'n',x:x+w/2,y},{id:'ne',x:x+w,y},{id:'w',x,y:y+h/2},{id:'e',x:x+w,y:y+h/2},{id:'sw',x,y:y+h},{id:'s',x:x+w/2,y:y+h},{id:'se',x:x+w,y:y+h}];}
+function _ppHitH(nx,ny){const t=9/_ppCrop.dispScale;return _ppHandles().find(h=>Math.abs(h.x-nx)<t&&Math.abs(h.y-ny)<t)||null;}
+function _drawPpCrop(){
+  const c=document.getElementById('pp-crop-canvas');if(!c||!_ppCrop.img)return;
+  const ctx=c.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_ppCrop;
+  ctx.clearRect(0,0,natW,natH);ctx.drawImage(img,0,0,natW,natH);
+  ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,0,natW,natH);
+  ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
+  ctx.strokeStyle='var(--gold)';ctx.lineWidth=2;ctx.strokeRect(cropX,cropY,cropW,cropH);
+  ctx.fillStyle='var(--gold)';ctx.strokeStyle='#0b1118';ctx.lineWidth=1.5;
+  _ppHandles().forEach(h=>{ctx.fillRect(h.x-5,h.y-5,10,10);ctx.strokeRect(h.x-5,h.y-5,10,10);});
+}
+function _ppToN(c,cx,cy){const r=c.getBoundingClientRect();return{x:(cx-r.left)/_ppCrop.dispScale,y:(cy-r.top)/_ppCrop.dispScale};}
+function _bindPpCrop(canvas){
+  const MIN=40;
+  const onStart=(cx,cy)=>{const{x,y}=_ppToN(canvas,cx,cy),h=_ppHitH(x,y);if(h){_ppCrop.isResizing=true;_ppCrop.handle=h.id;}else{const{cropX,cropY,cropW,cropH}=_ppCrop;if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH){_ppCrop.isDragging=true;_ppCrop.startX=x-cropX;_ppCrop.startY=y-cropY;}}};
+  const onMove=(cx,cy)=>{if(!_ppCrop.isDragging&&!_ppCrop.isResizing)return;const{x,y}=_ppToN(canvas,cx,cy),{natW:W,natH:H}=_ppCrop;if(_ppCrop.isDragging){_ppCrop.cropX=Math.round(_ppc(x-_ppCrop.startX,0,W-_ppCrop.cropW));_ppCrop.cropY=Math.round(_ppc(y-_ppCrop.startY,0,H-_ppCrop.cropH));_drawPpCrop();return;}let{cropX,cropY,cropW,cropH,handle}=_ppCrop;const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropH};if(handle==='se'){cropW=_ppc(x-a.x,MIN,W-a.x);cropH=_ppc(y-a.y,MIN,H-a.y);}else if(handle==='sw'){cropW=_ppc(a.x2-x,MIN,a.x2);cropH=_ppc(y-a.y,MIN,H-a.y);cropX=a.x2-cropW;}else if(handle==='ne'){cropW=_ppc(x-a.x,MIN,W-a.x);cropH=_ppc(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}else if(handle==='nw'){cropW=_ppc(a.x2-x,MIN,a.x2);cropH=_ppc(a.y2-y,MIN,a.y2);cropX=a.x2-cropW;cropY=a.y2-cropH;}else if(handle==='e'){cropW=_ppc(x-a.x,MIN,W-a.x);}else if(handle==='w'){cropW=_ppc(a.x2-x,MIN,a.x2);cropX=a.x2-cropW;}else if(handle==='s'){cropH=_ppc(y-a.y,MIN,H-a.y);}else if(handle==='n'){cropH=_ppc(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}_ppCrop.cropX=Math.round(_ppc(cropX,0,W-MIN));_ppCrop.cropY=Math.round(_ppc(cropY,0,H-MIN));_ppCrop.cropW=Math.round(_ppc(cropW,MIN,W-_ppCrop.cropX));_ppCrop.cropH=Math.round(_ppc(cropH,MIN,H-_ppCrop.cropY));_drawPpCrop();};
+  const onEnd=()=>{_ppCrop.isDragging=false;_ppCrop.isResizing=false;_ppCrop.handle=null;};
+  canvas.addEventListener('mousedown',e=>{e.preventDefault();onStart(e.clientX,e.clientY);});
+  window.addEventListener('mousemove',e=>onMove(e.clientX,e.clientY));
+  window.addEventListener('mouseup',onEnd);
+  canvas.addEventListener('touchstart',e=>{e.preventDefault();onStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  canvas.addEventListener('touchmove',e=>{e.preventDefault();onMove(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  canvas.addEventListener('touchend',onEnd);
+}
+window._ppConfirmCrop = () => {
+  const{img,cropX,cropY,cropW,cropH}=_ppCrop;if(!img)return;
+  const TARGET=700_000;
+  const scale=cropW>1400?1400/cropW:1;
+  const out=document.createElement('canvas');out.width=Math.round(cropW*scale);out.height=Math.round(cropH*scale);
+  out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,out.width,out.height);
+  let b64;
+  for(const q of[.85,.75,.65,.55]){b64=out.toDataURL('image/jpeg',q);if(b64.length<=TARGET)break;}
+  window._ppImgBase64=b64;
+  document.getElementById('pp-crop-wrap').style.display='none';
+  const ok=document.getElementById('pp-crop-ok');
+  if(ok){ok.style.display='block';ok.textContent=`✓ Image prête (${Math.round(b64.length/1024)} KB)`;}
+  const prev=document.getElementById('pp-img-preview');
+  if(prev) prev.innerHTML=`<img src="${b64}" style="max-height:80px;border-radius:8px">`;
+};
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+async function savePlayerPresent(id='') {
+  // Image : crop > existante > effacée
+  let imageUrl='';
+  if(window._ppImgBase64!=null&&window._ppImgBase64!==undefined){
+    imageUrl=window._ppImgBase64;
+  } else if(id && !window._ppImgCleared){
+    const existing=STORE.presentations.find(p=>p.id===id);
+    imageUrl=existing?.imageUrl||'';
+  }
+  window._ppImgBase64=null; window._ppImgCleared=false;
+
   const data = {
-    charId: document.getElementById('pp-char-id')?.value || '',
-    nom: document.getElementById('pp-nom')?.value?.trim() || 'Personnage',
-    classe: document.getElementById('pp-classe')?.value?.trim() || '',
-    race: document.getElementById('pp-race')?.value?.trim() || '',
-    niveau: parseInt(document.getElementById('pp-niveau')?.value, 10) || 1,
-    emoji: document.getElementById('pp-emoji')?.value?.trim() || '⚔️',
-    joueur: document.getElementById('pp-joueur')?.value?.trim() || '',
-    bio: document.getElementById('pp-bio')?.value || '',
-    imageUrl: document.getElementById('pp-img')?.value?.trim() || '',
+    charId:        document.getElementById('pp-char-id')?.value        || '',
+    nom:           document.getElementById('pp-nom')?.value?.trim()    || 'Personnage',
+    chapitre:      document.getElementById('pp-chap')?.value?.trim()   || '',
+    classe:        document.getElementById('pp-classe')?.value?.trim() || '',
+    race:          document.getElementById('pp-race')?.value?.trim()   || '',
+    niveau:        parseInt(document.getElementById('pp-niveau')?.value,10)||1,
+    joueur:        document.getElementById('pp-joueur')?.value?.trim() || '',
+    bio:           document.getElementById('pp-bio')?.value            || '',
+    archive:       document.getElementById('pp-archive')?.value        || '',
+    archiveSource: document.getElementById('pp-source')?.value?.trim() || '',
+    emoji:         '',
+    imageUrl,
   };
 
-  if (id) await updateInCol('players', id, data);
-  else await addToCol('players', data);
+  if(id) await updateInCol('players',id,data);
+  else   await addToCol('players',data);
 
   closeModal();
-  showNotif('Présentation enregistrée.', 'success');
+  showNotif('Présentation enregistrée !','success');
   await PAGES.players();
 }
 
-async function ensurePlayerDataset() {
-  if (!PLAYER_STAGE_STORE.items.length) await loadPlayerShowcaseItems();
-}
-
-async function viewPlayerDetail(id) {
-  await ensurePlayerDataset();
-  const item = PLAYER_STAGE_STORE.items.find(entry => entry.id === id || entry.presentationId === id || entry.charId === id);
-  if (!item) return;
-
-  openModal(`⚔️ ${item.nom}`, `
-    <div class="players-showcase-modal">
-      ${renderStage(item)}
-    </div>
-  `);
-}
-
-async function editPlayerPresent(id) {
-  const items = await loadCollection('players');
-  const player = items.find(entry => entry.id === id);
-  if (player) openPlayerPresentModal(player);
-}
-
-function openLinkedPlayerPresent(charId = '', presentationId = '') {
-  if (presentationId) {
-    editPlayerPresent(presentationId);
-    return;
-  }
-  const item = PLAYER_STAGE_STORE.items.find(entry => entry.charId === charId);
-  if (item) {
-    openPlayerPresentModal({
-      charId: item.charId,
-      nom: item.nom,
-      classe: item.classe,
-      race: item.race,
-      niveau: item.niveau,
-      joueur: item.joueur,
-      bio: item.hasPresentation ? item.bio : '',
-      imageUrl: item.imageUrl,
-      emoji: item.emoji || '⚔️',
-    });
-    return;
-  }
-  openPlayerPresentModal({ charId });
+function prefillPlayerPresentFromLinkedChar(force=false) {
+  const charId=document.getElementById('pp-char-id')?.value||'';
+  const char=(window.__ppChars||[]).find(c=>c.id===charId);
+  if(!char) return;
+  const set=(id,v)=>{const f=document.getElementById(id);if(!f)return;if(!force&&String(f.value||'').trim())return;f.value=v;};
+  set('pp-nom',char.nom||'');
+  set('pp-niveau',char.niveau||1);
+  set('pp-joueur',char.ownerPseudo||'');
 }
 
 async function deletePlayerPresent(id) {
-  if (!confirm('Supprimer cette présentation ?')) return;
-  await deleteFromCol('players', id);
-  showNotif('Présentation supprimée.', 'success');
+  if(!confirm('Supprimer cette présentation ?')) return;
+  await deleteFromCol('players',id);
+  showNotif('Supprimée.','success');
+  STORE.activeId='';
   await PAGES.players();
 }
 
-async function openCharacterSheetFromShowcase(charId) {
-  if (!charId) return;
-  await window.navigate?.('characters');
-  setTimeout(() => {
-    const pill = Array.from(document.querySelectorAll('#char-pills .char-pill'))
-      .find(entry => entry.getAttribute('onclick')?.includes(`'${charId}'`));
-    if (pill) {
-      pill.click();
-      return;
-    }
-    const character = window.STATE?.characters?.find(entry => entry.id === charId);
-    if (character && window.renderCharSheet) {
-      window.STATE.activeChar = character;
-      window.renderCharSheet(character);
-    }
-  }, 50);
+async function editPlayerPresent(id) {
+  const items=await loadCollection('players');
+  const p=items.find(e=>e.id===id);
+  if(p) openPlayerPresentModal(p);
 }
+
+function openLinkedPlayerPresent(charId='', presentationId='') {
+  if(presentationId){ editPlayerPresent(presentationId); return; }
+  const item=STORE.items.find(e=>e.charId===charId);
+  openPlayerPresentModal(item?{
+    charId:item.charId,nom:item.nom,classe:item.classe,race:item.race,
+    niveau:item.niveau,joueur:item.joueur,
+    bio:item.bio||'',archive:item.archive||'',archiveSource:item.source||'',
+    chapitre:item.chap||'',imageUrl:item.imageUrl,
+  }:{charId});
+}
+
+async function viewPlayerDetail(id) {
+  window._ppOpenFiche?.(id);
+}
+
+async function openCharacterSheetFromShowcase(charId) {
+  if(!charId) return;
+  await window.navigate?.('characters');
+  setTimeout(()=>{
+    const pill=Array.from(document.querySelectorAll('#char-pills .char-pill'))
+      .find(e=>e.getAttribute('onclick')?.includes(`'${charId}'`));
+    if(pill){pill.click();return;}
+    const c=window.STATE?.characters?.find(e=>e.id===charId);
+    if(c&&window.renderCharSheet){window.STATE.activeChar=c;window.renderCharSheet(c);}
+  },50);
+}
+
+// ── Override ──────────────────────────────────────────────────────────────────
+PAGES.players = renderPlayersPage;
 
 Object.assign(window, {
   renderPlayersPage,
-  selectPlayerShowcase,
   openPlayerPresentModal,
   prefillPlayerPresentFromLinkedChar,
   savePlayerPresent,
