@@ -431,275 +431,301 @@ const PAGES = {
     const doc  = await getDocData('bastion', 'main');
     const data = doc || getDefaultBastion();
 
-    // Helpers exposés par bastion.js via window
-    const AMELIORATIONS  = window.BASTION_AMELIORATIONS || [];
-    const EVENTS         = window.BASTION_EVENTS || [];
-    const calcRevenu     = window.calculerRevenuBastion;
+    const AMELIORATIONS = window.BASTION_AMELIORATIONS || [];
+    const EVENTS        = window.BASTION_EVENTS || [];
+    const calcRevenu    = window.calculerRevenuBastion;
 
     const { brut, fondateurs: partFondateurs, reinvesti, base, nbAmelios, evt } =
-      calcRevenu
-        ? calcRevenu(data)
-        : { brut: 100, fondateurs: 10, reinvesti: 90, base: 100, nbAmelios: 0, evt: { id: 'calme', nom: 'Calme', emoji: '☁️', description: '', badgeClass: 'badge-blue', badgeText: '±0', couleur: 'neutral', modificateur: 1, bonus: 0 } };
+      calcRevenu ? calcRevenu(data)
+        : { brut:100, fondateurs:10, reinvesti:90, base:100, nbAmelios:0, evt:{ id:'calme', nom:'Calme', emoji:'☁️', description:'', badgeClass:'badge-blue', badgeText:'±0', couleur:'neutral', modificateur:1, bonus:0 } };
 
     const amelios          = data.ameliorations || {};
     const niveau           = 1 + Object.values(amelios).filter(Boolean).length;
-    const fondateursList   = data.fondateurs || [];
+    const fondateursList   = (data.fondateurs||[]).map(f => typeof f==='object'&&f!==null ? f : { charId:null, nom:String(f) });
     const partParFondateur = fondateursList.length > 0 ? Math.round(partFondateurs / fondateursList.length) : 0;
     const historique       = data.historique || [];
+    const inventaire       = data.inventaire || [];
+    const missions         = data.missions || [];
+    const missionsActives  = missions.filter(m => m.statut === 'active');
 
-    // Couleur du bandeau événement
     const evtColors = {
-      vol:        { bg: 'rgba(201,50,50,0.08)',    border: 'rgba(201,50,50,0.28)',    val: '#ff6b6b' },
-      inspection: { bg: 'rgba(255,255,255,0.03)',  border: 'var(--border)',            val: 'var(--text-muted)' },
-      calme:      { bg: 'rgba(255,255,255,0.03)',  border: 'var(--border)',            val: 'var(--text-muted)' },
-      riche:      { bg: 'rgba(79,140,255,0.07)',   border: 'rgba(79,140,255,0.22)',   val: 'var(--gold)' },
-      rumeur:     { bg: 'rgba(34,195,142,0.07)',   border: 'rgba(34,195,142,0.22)',  val: '#22c38e' },
-      succes:     { bg: 'rgba(34,195,142,0.11)',   border: 'rgba(34,195,142,0.32)',  val: '#22c38e' },
+      vol:        { bg:'rgba(201,50,50,0.08)',   border:'rgba(201,50,50,0.28)',   val:'#ff6b6b' },
+      inspection: { bg:'rgba(255,255,255,0.03)', border:'var(--border)',           val:'var(--text-muted)' },
+      calme:      { bg:'rgba(255,255,255,0.03)', border:'var(--border)',           val:'var(--text-muted)' },
+      riche:      { bg:'rgba(79,140,255,0.07)',  border:'rgba(79,140,255,0.22)',  val:'var(--gold)' },
+      rumeur:     { bg:'rgba(34,195,142,0.07)',  border:'rgba(34,195,142,0.22)', val:'#22c38e' },
+      succes:     { bg:'rgba(34,195,142,0.11)',  border:'rgba(34,195,142,0.32)', val:'#22c38e' },
     };
     const ec = evtColors[evt?.id] || evtColors.calme;
 
-    // Sparkline SVG inline
+    // Sparkline SVG — courbe des revenus
     function sparkline(hist) {
-      if (!hist.length) return `<p style="font-size:0.78rem;color:var(--text-dim);font-style:italic;text-align:center;padding:0.5rem 0">Aucune donnée pour l'instant.</p>`;
-      const vals = hist.map(h => h.brut || 0);
+      const cycles = hist.filter(h => !h.type || h.type !== 'investissement');
+      if (!cycles.length) return `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;text-align:center;padding:.5rem 0">Aucune donnée pour l'instant.</p>`;
+      const vals = cycles.map(h => h.brut || 0);
+      const invs = hist.filter(h => h.type === 'investissement').map(h => ({ session: h.session, montant: h.montant||0 }));
       const max  = Math.max(...vals, 1);
-      const W = 100, H = 40;
-      const pts = vals.map((v, i) => {
-        const x = (i / Math.max(vals.length - 1, 1)) * W;
-        const y = H - (v / max) * (H - 4);
+      const W = 280, H = 60;
+      const pts = vals.map((v,i) => {
+        const x = vals.length < 2 ? W/2 : (i/(vals.length-1))*W;
+        const y = H - (v/max)*(H-8);
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       }).join(' ');
-      const lx = ((vals.length - 1) / Math.max(vals.length - 1, 1)) * W;
-      const ly = H - (vals[vals.length - 1] / max) * (H - 4);
-      return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:52px" preserveAspectRatio="none">
-        <polyline points="${pts}" fill="none" stroke="var(--gold)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.75"/>
-        <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.5" fill="var(--gold)"/>
+      const lx = vals.length < 2 ? W/2 : W;
+      const ly = H - (vals[vals.length-1]/max)*(H-8);
+      // Points d'investissement
+      const invPts = invs.map(inv => {
+        const idx = cycles.findIndex((_,i) => i === inv.session - 1);
+        if (idx < 0) return '';
+        const x = cycles.length < 2 ? W/2 : (idx/(cycles.length-1))*W;
+        return `<circle cx="${x.toFixed(1)}" cy="${H}" r="3" fill="rgba(79,140,255,.7)" title="+${inv.montant} or investis"/>`;
+      }).join('');
+      return `<svg viewBox="0 0 ${W} ${H+10}" style="width:100%;height:70px" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="spk-g" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--gold)" stop-opacity=".25"/>
+            <stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <polygon points="${pts} ${lx.toFixed(1)},${H} 0,${H}" fill="url(#spk-g)"/>
+        <polyline points="${pts}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3" fill="var(--gold)"/>
+        ${invPts}
       </svg>`;
     }
+
+    const uid     = STATE.user?.uid;
+    const isPlayer = !STATE.isAdmin && !!uid;
 
     const content = document.getElementById('main-content');
     content.innerHTML = `
 
     <!-- ═══ HEADER ══════════════════════════════════════════ -->
-    <div style="
-      background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent);
-      border:1px solid var(--border);border-radius:var(--radius-lg);
-      padding:1.4rem 1.6rem;margin-bottom:1.4rem;
-      display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;
-    ">
+    <div style="background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.4rem 1.6rem;margin-bottom:1.4rem;display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap">
       <div>
-        <h1 style="font-family:'Cinzel',serif;font-size:1.7rem;color:var(--gold);letter-spacing:2px;line-height:1;margin-bottom:0.4rem">
-          ${data.nom || 'Le Bastion'}
-        </h1>
-        <p style="font-size:0.82rem;color:var(--text-dim);margin:0">
-          ${data.activite ? `<span style="margin-right:1.2rem">⚙️ ${data.activite}</span>` : ''}
-          ${data.pnj     ? `<span>👤 ${data.pnj}</span>` : ''}
-          ${!data.activite && !data.pnj ? '<span style="font-style:italic">Forteresse de la compagnie</span>' : ''}
+        <h1 style="font-family:'Cinzel',serif;font-size:1.7rem;color:var(--gold);letter-spacing:2px;line-height:1;margin-bottom:.4rem">${data.nom||'Le Bastion'}</h1>
+        <p style="font-size:.82rem;color:var(--text-dim);margin:0">
+          ${data.activite?`<span style="margin-right:1.2rem">⚙️ ${data.activite}</span>`:''}
+          ${data.pnj?`<span>👤 ${data.pnj}</span>`:''}
+          ${!data.activite&&!data.pnj?'<span style="font-style:italic">Forteresse de la compagnie</span>':''}
         </p>
       </div>
-      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
-        <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:0.5rem 1rem;text-align:center">
+      <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+        <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:.5rem 1rem;text-align:center">
           <div style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--gold);line-height:1">${niveau}</div>
-          <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;margin-top:1px">Niveau</div>
+          <div style="font-size:.65rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;margin-top:1px">Niveau</div>
         </div>
-        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:0.5rem 1rem;text-align:center">
-          <div style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--text);line-height:1">${data.tresor || 0}</div>
-          <div style="font-size:0.65rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;margin-top:1px">Or</div>
+        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:.5rem 1rem;text-align:center">
+          <div style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--text);line-height:1">${data.tresor||0}</div>
+          <div style="font-size:.65rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;margin-top:1px">Or</div>
         </div>
-        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="editBastion()">✏️ Modifier</button>` : ''}
+        <div style="display:flex;flex-direction:column;gap:.35rem">
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="editBastion()">✏️ Modifier</button>` : ''}
+          ${isPlayer ? `<button class="btn btn-outline btn-sm" onclick="investirOrBastion()">💰 Investir</button>` : ''}
+          <button class="btn btn-outline btn-sm" onclick="ouvrirInventaireBastion()">📦 Inventaire (${inventaire.length})</button>
+          <button class="btn btn-outline btn-sm" onclick="ouvrirMissionsBastion()">⚔️ Missions (${missionsActives.length})</button>
+        </div>
       </div>
     </div>
 
-    <!-- ═══ GRILLE 2 COLONNES ═══════════════════════════════ -->
+    <!-- ═══ GRILLE 2 COLONNES ════════════════════════════════ -->
     <div style="display:grid;grid-template-columns:1fr 290px;gap:1.2rem;align-items:start">
 
-    <!-- ── COLONNE PRINCIPALE ──────────────────────────────── -->
+    <!-- ── COLONNE PRINCIPALE ────────────────────────────────── -->
     <div style="display:flex;flex-direction:column;gap:1.2rem;min-width:0">
 
-      <!-- REVENUS ──────────────────────────────────────────── -->
+      <!-- REVENUS -->
       <div class="card">
-        <div class="card-header">
-          💰 Génération d'or
-          <span style="font-size:0.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">par session · +100 or / amélioration</span>
+        <div class="card-header">💰 Génération d'or
+          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">par cycle · +100 or / amélioration</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1rem">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem">
           <div class="stat-box" style="text-align:center">
             <div class="stat-label">Revenu brut</div>
             <div class="stat-value" style="color:var(--gold);font-size:1.7rem">${brut}</div>
-            <div style="font-size:0.68rem;color:var(--text-dim)">or</div>
+            <div style="font-size:.68rem;color:var(--text-dim)">or</div>
           </div>
           <div class="stat-box" style="text-align:center">
             <div class="stat-label">Fondateurs (10%)</div>
             <div class="stat-value" style="color:var(--text-muted);font-size:1.7rem">${partFondateurs}</div>
-            <div style="font-size:0.68rem;color:var(--text-dim)">or distribués</div>
+            <div style="font-size:.68rem;color:var(--text-dim)">${partParFondateur > 0 ? `${partParFondateur} or chacun` : 'or distribués'}</div>
           </div>
           <div class="stat-box" style="text-align:center;border-color:var(--border-accent)">
             <div class="stat-label">Réinvesti (90%)</div>
             <div class="stat-value" style="color:var(--green);font-size:1.7rem">${reinvesti}</div>
-            <div style="font-size:0.68rem;color:var(--text-dim)">or → trésor</div>
+            <div style="font-size:.68rem;color:var(--text-dim)">or → trésor</div>
           </div>
         </div>
-        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:0.7rem 1rem;display:flex;flex-wrap:wrap;gap:0.5rem 1.5rem;font-size:0.8rem;color:var(--text-muted)">
+        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:.7rem 1rem;display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;font-size:.8rem;color:var(--text-muted)">
           <span>Base <strong style="color:var(--text)">100</strong></span>
-          <span>+ ${nbAmelios} amélios <strong style="color:var(--text)">${nbAmelios * 100}</strong></span>
-          <span>= Sous-total <strong style="color:var(--gold)">${base} or</strong></span>
-          ${evt?.id === 'vol'     ? `<span>× Événement <strong style="color:#ff6b6b">×0.8</strong></span>` : ''}
-          ${evt?.bonus > 0       ? `<span>+ Événement <strong style="color:var(--green)">+${evt.bonus}</strong></span>` : ''}
+          <span>+${nbAmelios} amélios <strong style="color:var(--text)">${nbAmelios*100}</strong></span>
+          <span>= <strong style="color:var(--gold)">${base} or</strong></span>
+          ${evt?.id==='vol'  ? `<span>× Événement <strong style="color:#ff6b6b">×0.8</strong></span>` : ''}
+          ${evt?.bonus > 0   ? `<span>+ Événement <strong style="color:var(--green)">+${evt.bonus}</strong></span>` : ''}
         </div>
       </div>
 
-      <!-- ÉVÉNEMENT DU CYCLE ────────────────────────────────── -->
+      <!-- ÉVÉNEMENT -->
       <div class="card">
         <div class="card-header">🎲 Événement du cycle</div>
-
-        <!-- Bandeau événement actif -->
-        <div style="background:${ec.bg};border:1px solid ${ec.border};border-radius:12px;padding:0.9rem 1.1rem;display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
-          <span style="font-size:1.8rem;flex-shrink:0">${evt?.emoji || '☁️'}</span>
+        <div style="background:${ec.bg};border:1px solid ${ec.border};border-radius:12px;padding:.9rem 1.1rem;display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+          <span style="font-size:1.8rem;flex-shrink:0">${evt?.emoji||'☁️'}</span>
           <div style="flex:1;min-width:0">
-            <div style="font-family:'Cinzel',serif;font-size:0.9rem;color:var(--text);margin-bottom:2px">${evt?.nom || 'Calme'}</div>
-            <div style="font-size:0.8rem;color:var(--text-muted)">${evt?.description || ''}</div>
+            <div style="font-family:'Cinzel',serif;font-size:.9rem;color:var(--text);margin-bottom:2px">${evt?.nom||'Calme'}</div>
+            <div style="font-size:.8rem;color:var(--text-muted)">${evt?.description||''}</div>
           </div>
-          <span class="badge ${evt?.badgeClass || 'badge-blue'}" style="flex-shrink:0">${evt?.badgeText || '±0'}</span>
+          <span class="badge ${evt?.badgeClass||'badge-blue'}" style="flex-shrink:0">${evt?.badgeText||'±0'}</span>
         </div>
-
-        <!-- Table des 6 possibilités -->
         <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:1rem">
-          <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
-            <thead>
-              <tr style="border-bottom:1px solid var(--border)">
-                <th style="padding:0.4rem 0.7rem;color:var(--text-dim);font-weight:400;text-align:center;width:36px">D6</th>
-                <th style="padding:0.4rem 0.7rem;color:var(--text-dim);font-weight:400;text-align:left">Événement</th>
-                <th style="padding:0.4rem 0.7rem;color:var(--text-dim);font-weight:400;text-align:right">Effet</th>
-              </tr>
-            </thead>
+          <table style="width:100%;border-collapse:collapse;font-size:.8rem">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="padding:.4rem .7rem;color:var(--text-dim);font-weight:400;text-align:center;width:36px">D6</th>
+              <th style="padding:.4rem .7rem;color:var(--text-dim);font-weight:400;text-align:left">Événement</th>
+              <th style="padding:.4rem .7rem;color:var(--text-dim);font-weight:400;text-align:right">Effet</th>
+            </tr></thead>
             <tbody>
-              ${EVENTS.map((e, i) => `
-              <tr style="border-bottom:${i < EVENTS.length - 1 ? '1px solid var(--border)' : 'none'};${e.id === evt?.id ? 'background:rgba(79,140,255,0.05)' : ''}">
-                <td style="padding:0.45rem 0.7rem;color:var(--text-dim);font-family:'Cinzel',serif;text-align:center">${i + 1}</td>
-                <td style="padding:0.45rem 0.7rem">
-                  ${e.emoji}&nbsp;<span style="color:${e.id === evt?.id ? 'var(--gold)' : 'var(--text)'}">${e.nom}</span>
-                  ${e.id === evt?.id ? '<span style="font-size:0.68rem;color:var(--gold);margin-left:0.4rem">← actuel</span>' : ''}
-                </td>
-                <td style="padding:0.45rem 0.7rem;text-align:right;color:${e.couleur === 'green' ? 'var(--green)' : e.couleur === 'gold' ? 'var(--gold)' : e.couleur === 'crimson' ? '#ff6b6b' : 'var(--text-muted)'}">${e.effet}</td>
+              ${EVENTS.map((e,i) => `<tr style="border-bottom:${i<EVENTS.length-1?'1px solid var(--border)':'none'};${e.id===evt?.id?'background:rgba(79,140,255,0.05)':''}">
+                <td style="padding:.45rem .7rem;color:var(--text-dim);font-family:'Cinzel',serif;text-align:center">${i+1}</td>
+                <td style="padding:.45rem .7rem">${e.emoji}&nbsp;<span style="color:${e.id===evt?.id?'var(--gold)':'var(--text)'}">${e.nom}</span>${e.id===evt?.id?'<span style="font-size:.68rem;color:var(--gold);margin-left:.4rem">← actuel</span>':''}</td>
+                <td style="padding:.45rem .7rem;text-align:right;color:${e.couleur==='green'?'var(--green)':e.couleur==='gold'?'var(--gold)':e.couleur==='crimson'?'#ff6b6b':'var(--text-muted)'}">${e.effet}</td>
               </tr>`).join('')}
             </tbody>
           </table>
         </div>
-
         ${STATE.isAdmin
           ? `<button class="btn btn-gold" style="width:100%" onclick="tirerEvenement()">🎲 Tirer l'événement du cycle</button>`
-          : `<p style="font-size:0.78rem;color:var(--text-dim);text-align:center;font-style:italic;margin:0">L'événement est tiré par le MJ en début de cycle.</p>`}
+          : `<p style="font-size:.78rem;color:var(--text-dim);text-align:center;font-style:italic;margin:0">L'événement est tiré par le MJ en début de cycle.</p>`}
       </div>
 
-      <!-- AMÉLIORATIONS ─────────────────────────────────────── -->
+      <!-- AMÉLIORATIONS -->
       <div class="card">
-        <div class="card-header">
-          🏗️ Améliorations permanentes
-          <span style="font-size:0.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+1 niveau · +100 or/session chacune</span>
+        <div class="card-header">🏗️ Améliorations permanentes
+          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+1 niveau · +100 or/cycle chacune</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.85rem">
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.85rem">
           ${AMELIORATIONS.map(a => {
             const debloquee = !!amelios[a.id];
-            const canBuy    = STATE.isAdmin && !debloquee && (data.tresor || 0) >= a.cout;
-            return `
-            <div style="
-              background:${debloquee ? 'rgba(34,195,142,0.05)' : 'var(--bg-elevated)'};
-              border:1px solid ${debloquee ? 'rgba(34,195,142,0.22)' : 'var(--border)'};
-              border-radius:12px;padding:1rem;display:flex;flex-direction:column;gap:0.5rem;
-            ">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem">
-                <div style="display:flex;align-items:center;gap:0.45rem">
+            const canBuy    = STATE.isAdmin && !debloquee && (data.tresor||0) >= a.cout;
+            return `<div style="background:${debloquee?'rgba(34,195,142,0.05)':'var(--bg-elevated)'};border:1px solid ${debloquee?'rgba(34,195,142,0.22)':'var(--border)'};border-radius:12px;padding:1rem;display:flex;flex-direction:column;gap:.5rem">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
+                <div style="display:flex;align-items:center;gap:.45rem">
                   <span style="font-size:1.1rem">${a.emoji}</span>
-                  <span style="font-family:'Cinzel',serif;font-size:0.82rem;color:${debloquee ? '#22c38e' : 'var(--text)'};line-height:1.3">${a.nom}</span>
+                  <span style="font-family:'Cinzel',serif;font-size:.82rem;color:${debloquee?'#22c38e':'var(--text)'};line-height:1.3">${a.nom}</span>
                 </div>
                 ${debloquee
-                  ? `<span style="font-size:0.7rem;background:rgba(34,195,142,0.12);color:#22c38e;border:1px solid rgba(34,195,142,0.22);border-radius:6px;padding:1px 7px;flex-shrink:0">Active</span>`
-                  : `<span style="font-family:'Cinzel',serif;font-size:0.78rem;color:var(--gold);flex-shrink:0">${a.cout} or</span>`}
+                  ? `<span style="font-size:.7rem;background:rgba(34,195,142,0.12);color:#22c38e;border:1px solid rgba(34,195,142,0.22);border-radius:6px;padding:1px 7px;flex-shrink:0">Active</span>`
+                  : `<span style="font-family:'Cinzel',serif;font-size:.78rem;color:var(--gold);flex-shrink:0">${a.cout} or</span>`}
               </div>
-              <p style="font-size:0.76rem;color:var(--text-muted);line-height:1.5;margin:0">${a.description}</p>
-              ${!debloquee && STATE.isAdmin ? `
-                <button class="btn btn-outline btn-sm" style="margin-top:2px;font-size:0.73rem"
-                  onclick="${canBuy ? `debloquerAmelioration('${a.id}')` : ''}"
-                  ${!canBuy ? 'disabled style="opacity:0.38;cursor:not-allowed"' : ''}>
-                  Investir ${a.cout} or
-                </button>` : ''}
+              <p style="font-size:.76rem;color:var(--text-muted);line-height:1.5;margin:0">${a.description}</p>
+              ${!debloquee&&STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:2px;font-size:.73rem"
+                onclick="${canBuy?`debloquerAmelioration('${a.id}')`:''}"
+                ${!canBuy?'disabled style="opacity:.38;cursor:not-allowed"':''}>Investir ${a.cout} or</button>` : ''}
               ${debloquee ? `<div style="height:2px;background:rgba(34,195,142,0.25);border-radius:1px;margin-top:auto"></div>` : ''}
             </div>`;
           }).join('')}
         </div>
       </div>
 
-      <!-- HISTORIQUE ────────────────────────────────────────── -->
+      <!-- HISTORIQUE -->
       ${historique.length > 0 ? `
       <div class="card">
-        <div class="card-header">📈 Historique des revenus</div>
-        <div style="margin-bottom:0.75rem">${sparkline(historique)}</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.5rem">
-          ${historique.slice(-6).reverse().map(h => `
-            <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:0.55rem 0.7rem">
-              <div style="font-size:0.68rem;color:var(--text-dim);margin-bottom:2px">Session ${h.session || '?'}</div>
-              <div style="font-family:'Cinzel',serif;font-size:0.95rem;color:var(--gold)">${h.brut || 0} or</div>
-              <div style="font-size:0.7rem;color:var(--text-muted)">${h.evenement || '—'}</div>
-            </div>`).join('')}
+        <div class="card-header">📈 Historique des cycles</div>
+        <div style="margin-bottom:.75rem">${sparkline(historique)}</div>
+        <div style="display:flex;flex-direction:column;gap:.4rem">
+          ${[...historique].reverse().slice(0,8).map(h => {
+            const isInvest = h.type === 'investissement';
+            return `<div style="display:flex;align-items:center;gap:.75rem;padding:.55rem .75rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
+              <div style="font-size:1.2rem;flex-shrink:0">${isInvest?'💰':'🎲'}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:.8rem;color:var(--text);font-weight:600">
+                  ${isInvest
+                    ? `Investissement — ${h.investisseur?.nom||'?'}${h.message?' : <em style="color:var(--text-dim);font-weight:400">"${h.message}"</em>':''}`
+                    : `Session ${h.session} — ${h.evenement||'—'}`}
+                </div>
+                <div style="font-size:.72rem;color:var(--text-dim)">
+                  ${isInvest
+                    ? `<span style="color:var(--gold)">+${h.montant} or</span> versés au trésor`
+                    : `<span style="color:var(--gold)">+${h.brut} or brut</span> · trésor +${h.reinvesti} · fondateurs +${h.partFondateurs}`}
+                  ${h.date?` · ${h.date}`:''}
+                </div>
+              </div>
+              ${STATE.isAdmin&&h.id ? `<button class="btn-icon" style="color:#ff6b6b;flex-shrink:0" onclick="supprimerHistorique('${h.id}')" title="Supprimer et annuler">🗑️</button>` : ''}
+            </div>`;
+          }).join('')}
+          ${historique.length > 8 ? `<p style="font-size:.72rem;color:var(--text-dim);text-align:center;margin:.25rem 0">${historique.length-8} entrée(s) plus anciennes</p>` : ''}
         </div>
       </div>` : ''}
 
     </div><!-- /colonne principale -->
 
-    <!-- ── SIDEBAR ──────────────────────────────────────────── -->
+    <!-- ── SIDEBAR ────────────────────────────────────────────── -->
     <div style="display:flex;flex-direction:column;gap:1rem;min-width:0">
 
       <!-- Description -->
-      ${data.description ? `
-      <div class="card" style="padding:1rem">
-        <p style="font-size:0.82rem;color:var(--text-muted);font-style:italic;line-height:1.7;margin:0">${data.description}</p>
-      </div>` : ''}
+      ${data.description ? `<div class="card" style="padding:1rem"><p style="font-size:.82rem;color:var(--text-muted);font-style:italic;line-height:1.7;margin:0">${data.description}</p></div>` : ''}
 
       <!-- Fondateurs -->
       <div class="card" style="padding:1rem">
-        <div class="card-header" style="font-size:0.8rem;margin-bottom:0.8rem">
+        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
           👑 Fondateurs
-          <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400;margin-left:auto">10% du brut</span>
+          <span style="font-size:.7rem;color:var(--text-dim);font-weight:400;margin-left:auto">10% du brut</span>
         </div>
         ${fondateursList.length === 0
-          ? `<p style="font-size:0.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucun fondateur enregistré.</p>`
+          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucun fondateur enregistré.</p>`
           : fondateursList.map(f => `
-              <div style="display:flex;justify-content:space-between;padding:0.45rem 0;border-bottom:1px solid var(--border);font-size:0.83rem">
-                <span style="color:var(--text)">${f}</span>
-                <span style="font-family:'Cinzel',serif;color:var(--gold);font-size:0.8rem">${partParFondateur} or</span>
-              </div>`).join('') +
-            `<div style="display:flex;justify-content:space-between;padding-top:0.5rem;font-size:0.75rem;color:var(--text-dim)">
-               <span>Total</span><span>${partFondateurs} or</span>
-             </div>`
-        }
+            <div style="display:flex;justify-content:space-between;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.83rem">
+              <span style="color:var(--text)">${f.nom||'?'}</span>
+              <span style="font-family:'Cinzel',serif;color:var(--gold);font-size:.8rem">${partParFondateur} or</span>
+            </div>`).join('') +
+          `<div style="display:flex;justify-content:space-between;padding-top:.5rem;font-size:.75rem;color:var(--text-dim)"><span>Total</span><span>${partFondateurs} or</span></div>`}
       </div>
 
-      <!-- Missions spéciales -->
+      <!-- Inventaire résumé -->
       <div class="card" style="padding:1rem">
-        <div class="card-header" style="font-size:0.8rem;margin-bottom:0.8rem">⚔️ Missions spéciales</div>
-        <p style="font-size:0.78rem;color:var(--text-dim);font-style:italic;line-height:1.55;margin-bottom:0.75rem">
-          Missions spécifiques au Bastion permettant de débloquer des avantages temporaires ou permanents.
-        </p>
-        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:0.6rem 0.75rem;font-size:0.78rem;color:var(--text-dim);text-align:center;font-style:italic">
-          Aucune mission active
+        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
+          📦 Inventaire du Bastion
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" onclick="ouvrirInventaireBastion()">Voir tout</button>
         </div>
+        ${inventaire.length === 0
+          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Inventaire vide.</p>`
+          : inventaire.slice(0,4).map(item => `
+            <div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.8rem">
+              <span style="flex:1;color:var(--text)">${item.nom||'?'}${item.quantite>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}</span>
+              <span style="font-size:.68rem;color:var(--text-dim)">${item.deposePar||''}</span>
+            </div>`).join('') +
+          (inventaire.length > 4 ? `<p style="font-size:.72rem;color:var(--text-dim);margin:.5rem 0 0;text-align:center">+${inventaire.length-4} objet(s)</p>` : '')}
+      </div>
+
+      <!-- Missions actives résumé -->
+      <div class="card" style="padding:1rem">
+        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
+          ⚔️ Missions spéciales
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" onclick="ouvrirMissionsBastion()">Gérer</button>` : ''}
+        </div>
+        ${missionsActives.length === 0
+          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucune mission active.</p>`
+          : missionsActives.map(m => `
+            <div style="padding:.5rem 0;border-bottom:1px solid var(--border)">
+              <div style="font-size:.82rem;font-weight:600;color:var(--text)">${m.titre||'?'}</div>
+              ${m.recompense?`<div style="font-size:.72rem;color:var(--gold)">🎁 ${m.recompense}</div>`:''}
+            </div>`).join('')}
+        ${!STATE.isAdmin && missions.length > 0 ? `<button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem;font-size:.75rem" onclick="ouvrirMissionsBastion()">Voir toutes les missions</button>` : ''}
       </div>
 
       <!-- Journal -->
       <div class="card" style="padding:1rem">
-        <div class="card-header" style="font-size:0.8rem;margin-bottom:0.8rem">
+        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
           📖 Journal
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:0.7rem" onclick="addBastionLog()">+ Entrée</button>` : ''}
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" onclick="addBastionLog()">+ Entrée</button>` : ''}
         </div>
-        ${(data.journal || []).length === 0
-          ? `<p style="font-size:0.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucune entrée pour l'instant.</p>`
-          : (data.journal || []).slice(0, 5).map(j => `
-              <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
-                <div style="font-size:0.68rem;color:var(--text-dim);margin-bottom:2px">${j.date || ''}</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.5">${j.texte || ''}</div>
-              </div>`).join('')
-        }
-        ${(data.journal || []).length > 5 ? `<p style="font-size:0.72rem;color:var(--text-dim);margin-top:0.5rem;text-align:center">${(data.journal || []).length - 5} entrée(s) plus anciennes</p>` : ''}
+        ${(data.journal||[]).length === 0
+          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucune entrée.</p>`
+          : (data.journal||[]).slice(0,4).map(j => `
+            <div style="padding:.5rem 0;border-bottom:1px solid var(--border)">
+              <div style="font-size:.68rem;color:var(--text-dim);margin-bottom:2px">${j.date||''}</div>
+              <div style="font-size:.8rem;color:var(--text-muted);line-height:1.5">${j.texte||''}</div>
+            </div>`).join('')}
+        ${(data.journal||[]).length > 4 ? `<p style="font-size:.72rem;color:var(--text-dim);margin:.5rem 0 0;text-align:center">${(data.journal||[]).length-4} entrée(s) plus anciennes</p>` : ''}
       </div>
 
     </div><!-- /sidebar -->
