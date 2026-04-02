@@ -37,64 +37,279 @@ const PAGES = {
 
   // ─── DASHBOARD ──────────────────────────────────────────────────────────────
   async dashboard() {
-    const pseudo      = STATE.profile?.pseudo || 'Aventurier';
-    const charCount   = await countUserChars();
-    const roleLabel   = STATE.isAdmin ? 'Maître de Jeu' : 'Joueur';
-    const accessLabel = STATE.isAdmin ? 'Pilotage MJ' : 'Espace joueur';
-    const primaryLabel = charCount > 0 ? 'Ouvrir mes personnages' : 'Créer un personnage';
     syncHeaderAdminButton();
     const content = document.getElementById('main-content');
-    content.innerHTML = `
-      <div class="dashboard-workspace">
-        <section class="dashboard-hero">
-          <div class="dashboard-hero__main">
-            <div class="dashboard-label-row">
-              <span class="dashboard-kicker">Workspace</span>
-              <span class="dashboard-status"><i></i> En ligne</span>
+
+    // Afficher le squelette de chargement immédiatement
+    content.innerHTML = `<div id="dash-root" style="display:flex;flex-direction:column;gap:1rem;max-width:900px;margin:0 auto">
+      <div style="height:160px;background:var(--bg-card);border-radius:var(--radius-lg);
+        border:1px solid var(--border);animation:pulse 1.5s ease infinite"></div>
+      <div style="height:120px;background:var(--bg-card);border-radius:var(--radius-lg);
+        border:1px solid var(--border);animation:pulse 1.5s ease infinite .15s"></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem">
+        ${[0,1,2,3].map(i=>`<div style="height:80px;background:var(--bg-card);border-radius:16px;
+          border:1px solid var(--border);animation:pulse 1.5s ease infinite ${i*.1}s"></div>`).join('')}
+      </div>
+    </div>
+    <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}</style>`;
+
+    // Charger les données en parallèle
+    const uid   = STATE.isAdmin ? null : STATE.user.uid;
+    const [chars, storyItems] = await Promise.all([
+      loadChars(uid).catch(() => []),
+      loadCollection('story').catch(() => []),
+    ]);
+    STATE.characters = chars;
+
+    const pseudo   = STATE.profile?.pseudo || 'Aventurier';
+    const myChar   = chars[0] || null;   // premier personnage
+    const pvMax    = myChar ? (window.calcPVMax?.(myChar) || myChar.pvBase || 10) : 10;
+    const pmMax    = myChar ? (window.calcPMMax?.(myChar) || myChar.pmBase || 10) : 10;
+    const pvCur    = myChar ? (myChar.pvActuel ?? pvMax) : 0;
+    const pmCur    = myChar ? (myChar.pmActuel ?? pmMax) : 0;
+    const pvPct    = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
+    const pmPct    = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
+    const pvColor  = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
+    const ca       = myChar ? (window.calcCA?.(myChar) || 10) : '—';
+    const or       = myChar ? (window.calcOr?.(myChar) || 0) : 0;
+
+    // Mission active la plus récente
+    const mission  = storyItems
+      .filter(i => i.type === 'mission' && i.statut === 'En cours')
+      .sort((a,b) => (b.ordre||0) - (a.ordre||0))[0] || null;
+
+    const STATUT_CFG = {
+      'Terminée':   { color:'#22c38e', bg:'rgba(34,195,142,.12)',  icon:'✓' },
+      'En cours':   { color:'#4f8cff', bg:'rgba(79,140,255,.12)',  icon:'▶' },
+      'Échouée':    { color:'#ff6b6b', bg:'rgba(255,107,107,.12)', icon:'✗' },
+      'En attente': { color:'#888',    bg:'rgba(128,128,128,.10)', icon:'◷' },
+    };
+
+    // Personnage sélecteur (si plusieurs)
+    const charSelector = chars.length > 1
+      ? `<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">
+          ${chars.map((c, i) => `
+          <button onclick="window._dashSelectChar(${i})" id="dash-char-pill-${i}"
+            style="font-size:.72rem;padding:3px 10px;border-radius:999px;cursor:pointer;
+            border:1px solid ${i===0?'var(--gold)':'var(--border)'};
+            background:${i===0?'rgba(232,184,75,.1)':'var(--bg-elevated)'};
+            color:${i===0?'var(--gold)':'var(--text-dim)'};transition:all .12s">
+            ${c.nom||'?'}
+          </button>`).join('')}
+        </div>`
+      : '';
+
+    // Portrait
+    const photoPos = myChar
+      ? `${50+(myChar.photoX||0)*50}% ${50+(myChar.photoY||0)*50}%`
+      : 'center';
+    const charPortrait = myChar?.photo
+      ? `<img src="${myChar.photo}" style="width:100%;height:100%;object-fit:cover;
+          object-position:${photoPos}">`
+      : `<span style="font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;
+          color:var(--gold)">${(myChar?.nom||'?')[0].toUpperCase()}</span>`;
+
+    const dash = document.getElementById('dash-root');
+    if (!dash) return;
+    dash.innerHTML = `
+
+    <!-- ═══ ZONE 1 : MON PERSONNAGE ══════════════════════════════════ -->
+    <div style="background:var(--bg-card);border:1px solid var(--border);
+      border-radius:var(--radius-lg);overflow:hidden;
+      cursor:pointer;transition:border-color .15s"
+      onclick="navigate('characters')"
+      onmouseover="this.style.borderColor='rgba(232,184,75,.3)'"
+      onmouseout="this.style.borderColor='var(--border)'">
+
+      ${myChar ? `
+      <div style="display:flex;align-items:stretch;min-height:140px">
+
+        <!-- Portrait -->
+        <div style="width:110px;flex-shrink:0;overflow:hidden;position:relative;
+          background:rgba(232,184,75,.06);">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+            ${charPortrait}
+          </div>
+          <!-- Gradient fondu -->
+          <div style="position:absolute;inset:0;background:linear-gradient(to right,
+            transparent 60%,var(--bg-card))"></div>
+        </div>
+
+        <!-- Infos -->
+        <div style="flex:1;padding:1rem 1.2rem;display:flex;flex-direction:column;justify-content:space-between">
+          <div>
+            <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap">
+              <span style="font-family:'Cinzel',serif;font-size:1.15rem;font-weight:700;
+                color:var(--text)">${myChar.nom||'Mon personnage'}</span>
+              <span style="font-size:.72rem;color:var(--text-dim);
+                background:var(--bg-elevated);border:1px solid var(--border);
+                border-radius:6px;padding:1px 7px">Niv. ${myChar.niveau||1}</span>
+              <span style="font-size:.72rem;color:var(--gold)">💰 ${or} or</span>
             </div>
-            <h1 class="dashboard-heading">Tableau de campagne</h1>
-            <p class="dashboard-copy">Un point d'entrée plus direct, avec une hiérarchie de produit et des boutons explicites pour accéder aux modules utiles.</p>
-            <div class="dashboard-cta-row">
-              <button class="dashboard-cta dashboard-cta--primary" type="button" onclick="navigate('characters')">${primaryLabel}</button>
-              <button class="dashboard-cta dashboard-cta--secondary" type="button" onclick="navigate('story')">Ouvrir la trame</button>
+            ${myChar.titre ? `<div style="font-size:.75rem;color:var(--text-dim);
+              font-style:italic;margin-top:2px">${myChar.titre}</div>` : ''}
+          </div>
+
+          <!-- PV / PM / CA -->
+          <div style="display:flex;flex-direction:column;gap:.45rem">
+            <div style="display:flex;align-items:center;gap:.6rem">
+              <span style="font-size:.68rem;color:var(--text-dim);width:22px;
+                font-weight:700;text-align:right">❤️</span>
+              <div style="flex:1;height:7px;background:rgba(255,255,255,.06);
+                border-radius:999px;overflow:hidden">
+                <div style="width:${pvPct}%;height:100%;background:${pvColor};
+                  border-radius:999px;transition:width .4s"></div>
+              </div>
+              <span style="font-size:.75rem;font-weight:700;color:${pvColor};
+                min-width:44px;text-align:right">${pvCur}/${pvMax}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:.6rem">
+              <span style="font-size:.68rem;color:var(--text-dim);width:22px;
+                font-weight:700;text-align:right">🔵</span>
+              <div style="flex:1;height:7px;background:rgba(255,255,255,.06);
+                border-radius:999px;overflow:hidden">
+                <div style="width:${pmPct}%;height:100%;
+                  background:linear-gradient(90deg,#22c7ea,#4adbf7);
+                  border-radius:999px;transition:width .4s"></div>
+              </div>
+              <span style="font-size:.75rem;font-weight:700;color:#4adbf7;
+                min-width:44px;text-align:right">${pmCur}/${pmMax}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:.5rem;margin-top:.1rem">
+              <span style="font-size:.72rem;color:var(--text-dim)">🛡️ CA <strong
+                style="color:var(--text)">${ca}</strong></span>
             </div>
           </div>
-          <aside class="dashboard-hero__meta">
-            <div class="dashboard-meta-card"><span>Compte</span><strong>${pseudo}</strong><small>${accessLabel}</small></div>
-            <div class="dashboard-meta-card"><span>Rôle</span><strong>${roleLabel}</strong><small>Droits de navigation actifs</small></div>
-            <div class="dashboard-meta-card"><span>Personnages</span><strong>${charCount}</strong><small>Fiche${charCount > 1 ? 's' : ''} disponible${charCount > 1 ? 's' : ''}</small></div>
-          </aside>
-        </section>
-        <section class="dashboard-button-grid">
-          <button class="dashboard-app-button" type="button" onclick="navigate('characters')">
-            <div class="dashboard-app-button__top"><span class="dashboard-app-button__icon">PJ</span><div class="dashboard-app-button__label"><strong>Personnages</strong><small>Créer, modifier et consulter les fiches de personnage.</small></div></div>
-            <div class="dashboard-app-button__action">Entrer dans le module <em>→</em></div>
-          </button>
-          <button class="dashboard-app-button" type="button" onclick="navigate('story')">
-            <div class="dashboard-app-button__top"><span class="dashboard-app-button__icon">TR</span><div class="dashboard-app-button__label"><strong>Trame</strong><small>Suivre l'avancement de la campagne et les éléments narratifs.</small></div></div>
-            <div class="dashboard-app-button__action">Voir la campagne <em>→</em></div>
-          </button>
-          <button class="dashboard-app-button" type="button" onclick="navigate('bastion')">
-            <div class="dashboard-app-button__top"><span class="dashboard-app-button__icon">BS</span><div class="dashboard-app-button__label"><strong>Bastion</strong><small>Centraliser la base, ses ressources et sa progression.</small></div></div>
-            <div class="dashboard-app-button__action">Gérer le bastion <em>→</em></div>
-          </button>
-          <button class="dashboard-app-button" type="button" onclick="navigate('shop')">
-            <div class="dashboard-app-button__top"><span class="dashboard-app-button__icon">EQ</span><div class="dashboard-app-button__label"><strong>Boutique</strong><small>Accéder aux objets, équipements et achats du groupe.</small></div></div>
-            <div class="dashboard-app-button__action">Parcourir la boutique <em>→</em></div>
-          </button>
-        </section>
-        <section class="dashboard-panel-grid">
-          <article class="card dashboard-panel dashboard-panel--full">
-            <div class="dashboard-section-head"><div><span class="dashboard-eyebrow">Monde</span><h2>Ressources de consultation</h2><p>Accès directs aux pages d'information et d'exploration utiles aux joueurs.</p></div></div>
-            <div class="dashboard-list">
-              <button class="dashboard-list-button" type="button" onclick="navigate('world')"><span class="dashboard-list-button__icon">Lore</span><span class="dashboard-list-button__body"><strong>Informations générales</strong><span>Contexte du monde, histoire et points de repère.</span></span><span class="dashboard-list-button__arrow">→</span></button>
-              <button class="dashboard-list-button" type="button" onclick="navigate('map')"><span class="dashboard-list-button__icon">Map</span><span class="dashboard-list-button__body"><strong>Carte de la région</strong><span>Vue géographique, lieux importants et orientation.</span></span><span class="dashboard-list-button__arrow">→</span></button>
-              <button class="dashboard-list-button" type="button" onclick="navigate('npcs')"><span class="dashboard-list-button__icon">PNJ</span><span class="dashboard-list-button__body"><strong>PNJ rencontrés</strong><span>Retrouver les personnages déjà croisés pendant la campagne.</span></span><span class="dashboard-list-button__arrow">→</span></button>
-              <button class="dashboard-list-button" type="button" onclick="navigate('tutorial')"><span class="dashboard-list-button__icon">Aide</span><span class="dashboard-list-button__body"><strong>Tutoriel</strong><span>Règles, fonctionnement et prise en main du jeu.</span></span><span class="dashboard-list-button__arrow">→</span></button>
+
+          ${charSelector}
+        </div>
+
+        <!-- Flèche -->
+        <div style="display:flex;align-items:center;padding:.75rem;color:var(--text-dim);
+          font-size:.9rem">→</div>
+      </div>
+
+      ` : `
+      <!-- Pas encore de personnage -->
+      <div style="padding:1.5rem;display:flex;align-items:center;gap:1rem">
+        <div style="width:52px;height:52px;border-radius:50%;background:rgba(232,184,75,.08);
+          border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;
+          justify-content:center;font-size:1.3rem;flex-shrink:0">⚔️</div>
+        <div style="flex:1">
+          <div style="font-family:'Cinzel',serif;font-size:.95rem;color:var(--text)">
+            Créer mon personnage</div>
+          <div style="font-size:.78rem;color:var(--text-dim);margin-top:2px">
+            Bienvenue ${pseudo} ! Commence par créer ta fiche de héros.</div>
+        </div>
+        <span style="color:var(--gold);font-size:.9rem">→</span>
+      </div>
+      `}
+    </div>
+
+    <!-- ═══ ZONE 2 : MISSION ACTIVE ══════════════════════════════════ -->
+    ${mission ? `
+    <div style="background:var(--bg-card);border:1px solid var(--border);
+      border-radius:var(--radius-lg);overflow:hidden;cursor:pointer;transition:border-color .15s"
+      onclick="navigate('story')"
+      onmouseover="this.style.borderColor='rgba(79,140,255,.3)'"
+      onmouseout="this.style.borderColor='var(--border)'">
+      <div style="display:flex;align-items:stretch">
+
+        ${mission.imageUrl ? `
+        <div style="width:90px;flex-shrink:0;overflow:hidden">
+          <img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block">
+        </div>` : `
+        <div style="width:6px;flex-shrink:0;background:${(STATUT_CFG['En cours']||{}).color||'#4f8cff'}"></div>`}
+
+        <div style="flex:1;padding:.9rem 1.1rem;display:flex;flex-direction:column;
+          justify-content:space-between;gap:.4rem">
+          <div>
+            <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
+              <span style="font-size:.65rem;font-weight:700;letter-spacing:1px;
+                text-transform:uppercase;color:#4f8cff">Mission active</span>
+              ${mission.acte ? `<span style="font-size:.65rem;color:var(--text-dim)">
+                · ${mission.acte}</span>` : ''}
             </div>
-          </article>
-        </section>
-      </div>`;
+            <div style="font-family:'Cinzel',serif;font-size:.95rem;font-weight:700;
+              color:var(--text);line-height:1.3">${mission.titre||'Mission'}</div>
+            ${mission.lieu ? `<div style="font-size:.72rem;color:var(--text-dim);
+              margin-top:2px">📍 ${mission.lieu}</div>` : ''}
+          </div>
+          ${mission.description ? `
+          <div style="font-size:.78rem;color:var(--text-muted);line-height:1.55;
+            display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+            overflow:hidden">${mission.description}</div>` : ''}
+        </div>
+
+        <div style="display:flex;align-items:center;padding:.75rem;
+          color:var(--text-dim);font-size:.9rem">→</div>
+      </div>
+    </div>` : `
+    <div style="background:var(--bg-card);border:1px solid var(--border);
+      border-radius:var(--radius-lg);padding:.9rem 1.1rem;cursor:pointer;
+      transition:border-color .15s;display:flex;align-items:center;gap:.85rem"
+      onclick="navigate('story')"
+      onmouseover="this.style.borderColor='rgba(79,140,255,.25)'"
+      onmouseout="this.style.borderColor='var(--border)'">
+      <span style="font-size:1.4rem;opacity:.4">📚</span>
+      <div style="flex:1">
+        <div style="font-size:.85rem;font-weight:600;color:var(--text)">Voir la Trame</div>
+        <div style="font-size:.75rem;color:var(--text-dim)">Aucune mission active pour l'instant</div>
+      </div>
+      <span style="color:var(--text-dim)">→</span>
+    </div>`}
+
+    <!-- ═══ ZONE 3 : RACCOURCIS RAPIDES ══════════════════════════════ -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem">
+      ${[
+        { page:'shop',    icon:'🛍️', label:'Boutique'  },
+        { page:'map',     icon:'🗺️', label:'Carte'     },
+        { page:'npcs',    icon:'👥', label:'PNJ'        },
+        { page:'bastion', icon:'🏰', label:'Bastion'   },
+      ].map(r => `
+      <button onclick="navigate('${r.page}')"
+        style="background:var(--bg-card);border:1px solid var(--border);
+        border-radius:14px;padding:.85rem .5rem;cursor:pointer;transition:all .15s;
+        display:flex;flex-direction:column;align-items:center;gap:.4rem;
+        font-family:inherit"
+        onmouseover="this.style.background='rgba(255,255,255,.05)';this.style.borderColor='rgba(255,255,255,.12)';this.style.transform='translateY(-2px)'"
+        onmouseout="this.style.background='var(--bg-card)';this.style.borderColor='var(--border)';this.style.transform=''">
+        <span style="font-size:1.3rem">${r.icon}</span>
+        <span style="font-size:.72rem;font-weight:600;color:var(--text-muted)">${r.label}</span>
+      </button>`).join('')}
+    </div>
+
+    ${STATE.isAdmin ? `
+    <!-- ═══ ZONE MJ ADMIN ════════════════════════════════════════════ -->
+    <div style="background:rgba(79,140,255,.04);border:1px solid rgba(79,140,255,.15);
+      border-radius:var(--radius-lg);padding:.85rem 1.1rem">
+      <div style="font-size:.65rem;font-weight:700;letter-spacing:1.5px;
+        text-transform:uppercase;color:#4f8cff;margin-bottom:.6rem">Console MJ</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        ${[
+          { page:'story',   label:'📚 Trame' },
+          { page:'shop',    label:'🛍️ Boutique' },
+          { page:'npcs',    label:'👥 PNJ' },
+          { page:'bestiaire',label:'🐉 Bestiaire' },
+          { page:'map',     label:'🗺️ Carte' },
+          { page:'admin',   label:'⚙️ Admin' },
+        ].map(b => `<button onclick="navigate('${b.page}')"
+          style="font-size:.75rem;padding:4px 12px;border-radius:8px;cursor:pointer;
+          border:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.08);
+          color:#7fb0ff;transition:all .12s"
+          onmouseover="this.style.background='rgba(79,140,255,.16)'"
+          onmouseout="this.style.background='rgba(79,140,255,.08)'">${b.label}</button>`).join('')}
+      </div>
+    </div>` : ''}
+    `;
+
+    // Sélecteur de personnage au clic
+    window._dashSelectChar = (idx) => {
+      STATE.activeChar = chars[idx];
+      // Rerender le dashboard avec le nouveau personnage sélectionné
+      chars.unshift(chars.splice(idx, 1)[0]);
+      PAGES.dashboard();
+    };
   },
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
