@@ -21,12 +21,10 @@ import {
   closeModalDirect,
 } from './shared/modal.js';
 
-import { showNotif }               from './shared/notifications.js';
-import { initTheme, toggleTheme }  from './shared/theme.js';
+import { showNotif }              from './shared/notifications.js';
+import { initTheme, toggleTheme } from './shared/theme.js';
 
-// ── Exposition sur window EN PREMIER ───────────
-// toggleTheme doit être disponible avant le rendu
-// car index.html utilise onclick="toggleTheme()"
+// ── Exposition sur window ───────────────────────────────────────────────────
 Object.assign(window, {
   switchAuthTab,
   doLogin,
@@ -40,36 +38,37 @@ Object.assign(window, {
   toggleTheme,
 });
 
-// ── Thème : appliquer avant tout rendu ─────────
+// ── Thème ────────────────────────────────────────────────────────────────────
 try {
   initTheme();
-} catch (error) {
-  console.error('[app] initTheme failed:', error);
+} catch (err) {
+  console.error('[app] initTheme:', err);
 }
 
+// ── Auth ─────────────────────────────────────────────────────────────────────
 try {
   initAuth();
-} catch (error) {
-  console.error('[app] initAuth failed:', error);
+} catch (err) {
+  console.error('[app] initAuth:', err);
 }
 
+// ── Délégation d'événements ──────────────────────────────────────────────────
 try {
   initEventDelegation();
-} catch (error) {
-  console.error('[app] initEventDelegation failed:', error);
+} catch (err) {
+  console.error('[app] initEventDelegation:', err);
 }
 
+// ── Modal overlay clic externe ───────────────────────────────────────────────
 try {
-  const overlay = document.getElementById('modal-overlay');
-  if (overlay) {
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) closeModalDirect();
-    });
-  }
-} catch (error) {
-  console.error('[app] modal overlay binding failed:', error);
+  document.getElementById('modal-overlay')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeModalDirect();
+  });
+} catch (err) {
+  console.error('[app] modal overlay:', err);
 }
 
+// ── Chargement des modules features ─────────────────────────────────────────
 const featureModules = [
   './features/characters.js',
   './features/shop.js',
@@ -82,10 +81,10 @@ const featureModules = [
   './features/players.js',
   './features/tutorial.js',
   './features/informations.js',
-  './features/recipes.js',    // remplace recettes.js
+  './features/recipes.js',
   './features/bestiary.js',
-  './features/account.js',    // nouveau
   './features/photo-cropper.js',
+  './features/account.js',
 ];
 
 async function loadFeaturesSafely() {
@@ -99,6 +98,6 @@ async function loadFeaturesSafely() {
   });
 }
 
-loadFeaturesSafely().catch((error) => {
-  console.error('[app] feature loader failed:', error);
+loadFeaturesSafely().catch((err) => {
+  console.error('[app] loadFeaturesSafely:', err);
 });
