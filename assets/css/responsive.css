@@ -1,8 +1,5 @@
 /* ═══ RESPONSIVE SYSTEM ═══ */
 
-/* btn-menu caché sur desktop */
-.btn-menu { display:none; }
-
 .sidebar-overlay {
   display:none;
   position:fixed;
@@ -146,7 +143,6 @@
   .bottom-nav { display:flex; }
 
   .grid-2, .grid-3 { grid-template-columns:1fr; }
-  .dashboard-panel-grid, .dashboard-button-grid { grid-template-columns:1fr; }
   .grid-4 { grid-template-columns:1fr 1fr; }
   .char-grid { grid-template-columns:repeat(3,1fr); }
 
