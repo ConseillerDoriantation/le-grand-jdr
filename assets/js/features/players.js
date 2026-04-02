@@ -61,6 +61,9 @@ function _buildRecord(char=null, pres=null) {
 
   const stats = char ? STAT_META.map(m=>({ ...m, value: _getStat(char,m.key) })) : [];
 
+  // Confidentialité — true par défaut, false si explicitement désactivé
+  const show = (key, def=true) => pres?.[key] !== undefined ? Boolean(pres[key]) : def;
+
   return {
     id:             pres?.id || `c:${char?.id||Math.random().toString(36).slice(2)}`,
     presentationId: pres?.id || '',
@@ -72,6 +75,13 @@ function _buildRecord(char=null, pres=null) {
     initials:       _initials(nom),
     stats,
     hasFiche:       Boolean(char),
+    visible:        show('visible', true),       // afficher dans le sommaire
+    ordre:          pres?.ordre ?? 999,          // ordre d'affichage
+    afficherPV:     show('afficherPV', true),
+    afficherPM:     show('afficherPM', true),
+    afficherCA:     show('afficherCA', true),
+    afficherOr:     show('afficherOr', false),   // Or masqué par défaut
+    afficherStats:  show('afficherStats', true),
     pvActuel:       char?.pvActuel ?? null,
     pvMax:          char ? _pvMax(char) : null,
     pmActuel:       char?.pmActuel ?? null,
@@ -102,7 +112,9 @@ function _buildDataset(presentations=[], characters=[]) {
     return _buildRecord(c,p);
   });
   presentations.filter(p=>!usedPresIds.has(p.id)).forEach(p=>items.push(_buildRecord(null,p)));
-  return items.sort((a,b)=>(b.level||0)-(a.level||0)||a.nom.localeCompare(b.nom,'fr',{sensitivity:'base'}));
+  return items
+    .filter(item => STATE.isAdmin || item.visible !== false)
+    .sort((a,b) => (a.ordre??999)-(b.ordre??999) || a.nom.localeCompare(b.nom,'fr',{sensitivity:'base'}));
 }
 
 // ── Portrait inline ───────────────────────────────────────────────────────────
@@ -194,8 +206,8 @@ function _renderFiche(item, items) {
   const prev   = items[idx-1]||null;
   const next   = items[idx+1]||null;
 
-  // Barres de stats — colorées individuellement comme sur le screenshot
-  const statBars = item.stats.length ? `
+  // Barres de stats — uniquement si autorisé
+  const statBars = item.stats.length && item.afficherStats ? `
   <div style="margin-top:1.2rem">
     <div style="font-family:'Cinzel',serif;font-size:.75rem;font-weight:700;
       letter-spacing:2px;color:var(--gold);text-align:center;margin-bottom:.75rem;
@@ -218,12 +230,12 @@ function _renderFiche(item, items) {
     </div>
   </div>` : '';
 
-  // Chips vitaux PV/PM/CA
+  // Chips vitaux — filtrés selon les permissions
   const vitaux = [
-    item.pvMax!==null ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.25);border-radius:8px"><div style="font-size:.6rem;color:#ff6b6b;font-weight:700;text-transform:uppercase;letter-spacing:.5px">PV</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#ff6b6b">${item.pvActuel??item.pvMax}/${item.pvMax}</div></div>` : '',
-    item.pmMax!==null ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(79,140,255,.1);border:1px solid rgba(79,140,255,.25);border-radius:8px"><div style="font-size:.6rem;color:#4f8cff;font-weight:700;text-transform:uppercase;letter-spacing:.5px">PM</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#4f8cff">${item.pmActuel??item.pmMax}/${item.pmMax}</div></div>` : '',
-    item.ca!==null    ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(34,195,142,.1);border:1px solid rgba(34,195,142,.25);border-radius:8px"><div style="font-size:.6rem;color:#22c38e;font-weight:700;text-transform:uppercase;letter-spacing:.5px">CA</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#22c38e">${item.ca}</div></div>` : '',
-    item.gold!==null  ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.25);border-radius:8px"><div style="font-size:.6rem;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Or</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:var(--gold)">${item.gold}</div></div>` : '',
+    item.afficherPV && item.pvMax!==null ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.25);border-radius:8px"><div style="font-size:.6rem;color:#ff6b6b;font-weight:700;text-transform:uppercase;letter-spacing:.5px">PV</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#ff6b6b">${item.pvActuel??item.pvMax}/${item.pvMax}</div></div>` : '',
+    item.afficherPM && item.pmMax!==null ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(79,140,255,.1);border:1px solid rgba(79,140,255,.25);border-radius:8px"><div style="font-size:.6rem;color:#4f8cff;font-weight:700;text-transform:uppercase;letter-spacing:.5px">PM</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#4f8cff">${item.pmActuel??item.pmMax}/${item.pmMax}</div></div>` : '',
+    item.afficherCA && item.ca!==null    ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(34,195,142,.1);border:1px solid rgba(34,195,142,.25);border-radius:8px"><div style="font-size:.6rem;color:#22c38e;font-weight:700;text-transform:uppercase;letter-spacing:.5px">CA</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:#22c38e">${item.ca}</div></div>` : '',
+    item.afficherOr  && item.gold!==null ? `<div style="text-align:center;padding:.5rem .75rem;background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.25);border-radius:8px"><div style="font-size:.6rem;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Or</div><div style="font-family:'Cinzel',serif;font-size:1rem;font-weight:800;color:var(--gold)">${item.gold}</div></div>` : '',
   ].filter(Boolean);
 
   const chap = item.chap || `Chapitre ${_toRoman(idx+1)} : ${item.nom}`;
@@ -259,23 +271,31 @@ function _renderFiche(item, items) {
     border-radius:var(--radius-lg);overflow:hidden;
     display:grid;grid-template-columns:320px 1fr">
 
-    <!-- Colonne gauche : illustration -->
+    <!-- Colonne gauche : illustration entière -->
     <div style="position:relative;background:linear-gradient(180deg,${col}12,var(--bg-panel));
       min-height:500px;overflow:hidden;display:flex;align-items:flex-end">
 
       ${item.imageUrl
-        ? `<img src="${_esc(item.imageUrl)}" style="position:absolute;top:0;left:0;
-            width:100%;height:100%;object-fit:cover;
-            object-position:${50+(item.photoX||0)*50}% ${50+(item.photoY||0)*50}%">
-           <!-- Fondu bas -->
-           <div style="position:absolute;bottom:0;left:0;right:0;height:40%;
+        ? `<!-- Image entière — contain pour ne pas couper le personnage -->
+           <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+             <img src="${_esc(item.imageUrl)}" style="width:100%;height:100%;
+               object-fit:contain;display:block">
+           </div>
+           <!-- Fondu bas vers la carte -->
+           <div style="position:absolute;bottom:0;left:0;right:0;height:35%;
              background:linear-gradient(to top,var(--bg-card),transparent)"></div>
-           <!-- Fondu droite -->
+           <!-- Fondu droite subtil -->
            <div style="position:absolute;inset:0;background:linear-gradient(to right,
-             transparent 65%,var(--bg-card))"></div>`
+             transparent 70%,var(--bg-card) 100%)"></div>`
         : `<div style="position:absolute;inset:0;display:flex;align-items:center;
              justify-content:center;font-family:'Cinzel',serif;font-size:5rem;
              font-weight:900;color:${col}22">${item.initials}</div>`}
+
+      <!-- Badge masqué (admin seulement) -->
+      ${STATE.isAdmin && !item.visible ? `
+      <div style="position:absolute;top:10px;left:10px;z-index:10;
+        background:rgba(255,107,107,.85);border-radius:6px;padding:2px 8px;
+        font-size:.65rem;font-weight:700;color:#fff">🔒 Masqué</div>` : ''}
 
       <!-- Bloc nom en overlay bas -->
       <div style="position:relative;z-index:2;padding:1.2rem;width:100%">
@@ -471,13 +491,50 @@ async function openPlayerPresentModal(player=null) {
       </div>
     </div>
 
+    <div class="grid-2" style="gap:.75rem;margin-top:.75rem">
+      <div class="form-group" style="margin:0">
+        <label>Ordre d'affichage <span style="color:var(--text-dim);font-weight:400">(1 = premier)</span></label>
+        <input type="number" class="input-field" id="pp-ordre" value="${player?.ordre??''}" placeholder="Automatique" min="1">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="margin-bottom:.5rem">Visibilité</label>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.85rem;color:var(--text-muted)">
+          <input type="checkbox" id="pp-visible" ${player?.visible!==false?'checked':''} style="accent-color:var(--gold)">
+          Visible dans le sommaire
+        </label>
+      </div>
+    </div>
+
+    <!-- Confidentialité des infos de jeu -->
+    <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);
+      border-radius:10px;padding:.85rem 1rem;margin-top:.75rem">
+      <div style="font-size:.7rem;font-weight:700;color:var(--text-dim);
+        letter-spacing:1.5px;text-transform:uppercase;margin-bottom:.65rem">
+        🔒 Informations visibles par les joueurs
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem">
+        ${[
+          {id:'pp-show-pv',   label:'Points de Vie (PV)', key:'afficherPV',    def:true },
+          {id:'pp-show-pm',   label:'Points de Magie (PM)',key:'afficherPM',   def:true },
+          {id:'pp-show-ca',   label:'Classe d\'Armure (CA)',key:'afficherCA',  def:true },
+          {id:'pp-show-or',   label:'Or',                  key:'afficherOr',   def:false},
+          {id:'pp-show-stats',label:'Statistiques',         key:'afficherStats',def:true },
+        ].map(f => {
+          const checked = player?.[f.key]!==undefined ? player[f.key] : f.def;
+          return `<label style="display:flex;align-items:center;gap:.45rem;cursor:pointer;
+            font-size:.8rem;color:var(--text-muted);padding:.2rem 0">
+            <input type="checkbox" id="${f.id}" ${checked?'checked':''}
+              style="accent-color:var(--gold)">
+            ${f.label}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>
+
     <div class="form-group" style="margin-top:.75rem">
       <label>Présentation narrative</label>
       <textarea class="input-field" id="pp-bio" rows="4">${_esc(player?.bio||'')}</textarea>
     </div>
-
-    <div class="form-group">
-      <label>Fragment d'Archive <span style="color:var(--text-dim);font-weight:400">(citation narrative)</span></label>
       <textarea class="input-field" id="pp-archive" rows="3">${_esc(player?.archive||'')}</textarea>
     </div>
 
@@ -645,6 +702,15 @@ async function savePlayerPresent(id='') {
     archiveSource: document.getElementById('pp-source')?.value?.trim() || '',
     emoji:         '',
     imageUrl,
+    // Ordre + visibilité
+    ordre:         parseInt(document.getElementById('pp-ordre')?.value,10) || 999,
+    visible:       document.getElementById('pp-visible')?.checked ?? true,
+    // Confidentialité
+    afficherPV:    document.getElementById('pp-show-pv')?.checked    ?? true,
+    afficherPM:    document.getElementById('pp-show-pm')?.checked    ?? true,
+    afficherCA:    document.getElementById('pp-show-ca')?.checked    ?? true,
+    afficherOr:    document.getElementById('pp-show-or')?.checked    ?? false,
+    afficherStats: document.getElementById('pp-show-stats')?.checked ?? true,
   };
 
   if(id) await updateInCol('players',id,data);
