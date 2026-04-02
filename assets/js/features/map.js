@@ -66,7 +66,7 @@ function renderMap(containerEl) {
         <svg id="map-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible"></svg>
 
         <!-- Fog of war canvas -->
-        <canvas id="map-fog" style="position:absolute;top:0;left:0;pointer-events:none;opacity:0.82"></canvas>
+        <canvas id="map-fog" style="position:absolute;top:0;left:0;pointer-events:none;opacity:1"></canvas>
       </div>
 
       <!-- Contrôles zoom -->\n      <div style="position:absolute;bottom:1rem;right:1rem;display:flex;flex-direction:column;gap:6px;z-index:10">
@@ -204,9 +204,13 @@ function setupZoomPan() {
   // Clic sur la carte (placer marker en mode admin)
   root.addEventListener('click', (e) => {
     if (!mapState.placingMode || !STATE.isAdmin) return;
-    const rect = document.getElementById('map-transform').getBoundingClientRect();
-    const x    = ((e.clientX - rect.left) / mapState.scale / rect.width  * 100);
-    const y    = ((e.clientY - rect.top)  / mapState.scale / rect.height * 100);
+    const img  = document.getElementById('map-img');
+    if (!img) return;
+    const rect = img.getBoundingClientRect(); // rect de l'image affichée (tient compte du zoom/pan)
+    const x    = ((e.clientX - rect.left) / rect.width)  * 100;
+    const y    = ((e.clientY - rect.top)  / rect.height) * 100;
+    // Vérifier que le clic est bien sur l'image
+    if (x < 0 || x > 100 || y < 0 || y > 100) return;
     openPlaceLieuModal(Math.round(x * 10) / 10, Math.round(y * 10) / 10);
   });
 
