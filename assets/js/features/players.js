@@ -43,7 +43,19 @@ function _getStat(c,k){ return Math.min(22,(c?.stats?.[k]||8)+(c?.statsBonus?.[k
 function _getMod(c,k){ return Math.floor((_getStat(c,k)-10)/2); }
 function _pvMax(c){ const m=_getMod(c,'constitution'),n=c?.niveau||1,p=m>0?Math.floor(m*(n-1)):m; return Math.max(1,(c?.pvBase||10)+p); }
 function _pmMax(c){ const m=_getMod(c,'sagesse'),n=c?.niveau||1,p=m>0?Math.floor(m*(n-1)):m; return Math.max(0,(c?.pmBase||10)+p); }
-function _ca(c){ const e=c?.equipement||{},t=e['Torse']?.typeArmure||''; let b=8; if(t==='Légère')b=10;else if(t==='Intermédiaire')b=12;else if(t==='Lourde')b=14; return b+_getMod(c,'dexterite')+Object.values(e).reduce((s,i)=>s+(i?.ca||0),0); }
+function _ca(c){
+  const e=c?.equipement||{},t=e['Torse']?.typeArmure||'';
+  let b=8;
+  if(t==='Légère')b=10;
+  else if(t==='Intermédiaire')b=12;
+  else if(t==='Lourde')b=14;
+  const caEquip=Object.values(e).reduce((s,i)=>s+(i?.ca||0),0);
+  // +2 CA si bouclier en main secondaire (même logique que calcCA dans characters.js)
+  const mainS=e['Main secondaire'];
+  const stypeS=(mainS?.sousType||mainS?.nom||'').toLowerCase();
+  const bouclierBonus=(stypeS.includes('bouclier')||stypeS.includes('shield'))?2:0;
+  return b+_getMod(c,'dexterite')+caEquip+bouclierBonus;
+}
 function _gold(c){ const co=c?.compte||{}; return Math.round(((co.recettes||[]).reduce((s,r)=>s+(parseFloat(r?.montant)||0),0)-((co.depenses||[]).reduce((s,r)=>s+(parseFloat(r?.montant)||0),0)))*100)/100; }
 function _initials(n=''){ const p=String(n).trim().split(/\s+/).filter(Boolean); return p.length?p.slice(0,2).map(w=>w[0]?.toUpperCase()||'').join(''):'?'; }
 
@@ -53,7 +65,8 @@ function _buildRecord(char=null, pres=null) {
   const classe = pres?.classe?.trim() || '';
   const race   = pres?.race?.trim()   || '';
   const joueur = pres?.joueur?.trim() || char?.ownerPseudo || '';
-  const imageUrl = pres?.imageUrl || char?.photo || '';
+  const imageUrl     = pres?.imageUrl || char?.photo || '';  // illustration narrative (fiche)
+  const portraitUrl  = char?.photo || pres?.imageUrl || '';  // portrait fiche (sommaire)
   const bio    = pres?.bio?.trim() || '';
   const archive= pres?.archive?.trim() || '';  // Fragment d'archive narratif
   const source = pres?.archiveSource?.trim() || '';
@@ -68,7 +81,7 @@ function _buildRecord(char=null, pres=null) {
     id:             pres?.id || `c:${char?.id||Math.random().toString(36).slice(2)}`,
     presentationId: pres?.id || '',
     charId:         pres?.charId || char?.id || '',
-    nom, classe, race, joueur, imageUrl, bio, archive, source, chap, level,
+    nom, classe, race, joueur, imageUrl, portraitUrl, bio, archive, source, chap, level,
     subtitle:       [classe,race].filter(Boolean).join(' · '),
     titles:         char?.titres || [],
     emoji:          pres?.emoji?.trim() || '',
@@ -145,7 +158,7 @@ function _renderSommaire(items) {
     const col   = colors[item.nom.charCodeAt(0)%colors.length];
     const pos   = `${50+(item.photoX||0)*50}% ${50+(item.photoY||0)*50}%`;
     const chap  = item.chap || `Chapitre ${_toRoman(idx+1)} : ${item.nom}`;
-    const locked = !item.bio && !item.imageUrl;
+    const locked = !item.bio && !item.portraitUrl && !item.imageUrl;
 
     return `<button onclick="window._ppOpenFiche('${_esc(item.id)}')"
       style="display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;
@@ -155,12 +168,12 @@ function _renderSommaire(items) {
       onmouseover="this.style.background='${col}10';this.style.borderColor='${col}';this.style.transform='translateX(3px)'"
       onmouseout="this.style.background='var(--bg-elevated)';this.style.borderColor='${locked?'var(--border)':col+'44'}';this.style.transform=''">
 
-      <!-- Portrait circulaire -->
+      <!-- Portrait circulaire — toujours le portrait de la fiche de personnage -->
       <div style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;
         background:${col}18;border:2px solid ${locked?'rgba(255,255,255,.1)':col};
         display:flex;align-items:center;justify-content:center">
-        ${item.imageUrl
-          ? `<img src="${_esc(item.imageUrl)}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
+        ${item.portraitUrl
+          ? `<img src="${_esc(item.portraitUrl)}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
           : locked
             ? `<span style="font-size:1.1rem;opacity:.4">🔒</span>`
             : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:${col}">${item.initials}</span>`}
