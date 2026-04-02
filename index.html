@@ -1,24 +1,29 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Le Grand JDR</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
+
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <!-- Thème : appliqué immédiatement pour éviter le flash blanc/noir -->
+
+  <!-- Thème appliqué avant le rendu pour éviter le flash -->
   <script>
-    (function() {
+    (function () {
       var t = localStorage.getItem('jdr-theme') || 'dark';
       document.documentElement.setAttribute('data-theme', t);
     })();
   </script>
+
   <link rel="stylesheet" href="./assets/css/main.css">
 </head>
 <body>
 
+<!-- ═══ ÉCRAN D'AUTHENTIFICATION ════════════════════════════════════════════ -->
 <div id="auth-screen">
   <div class="auth-box">
     <div class="auth-emblem">
@@ -29,17 +34,17 @@
 
     <div class="auth-tabs">
       <button class="auth-tab active" type="button" data-action="auth-tab-login">Connexion</button>
-      <button class="auth-tab" type="button" data-action="auth-tab-register">Créer un compte</button>
+      <button class="auth-tab"        type="button" data-action="auth-tab-register">Créer un compte</button>
     </div>
 
     <div id="tab-login">
       <div class="form-group">
         <label>Email</label>
-        <input type="email" id="login-email" placeholder="votre@email.com">
+        <input type="email" id="login-email" placeholder="votre@email.com" autocomplete="email">
       </div>
       <div class="form-group">
         <label>Mot de passe</label>
-        <input type="password" id="login-password" placeholder="••••••••">
+        <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
       </div>
       <button type="button" class="btn-primary" data-action="login">Entrer dans le Monde</button>
     </div>
@@ -47,135 +52,164 @@
     <div id="tab-register" style="display:none">
       <div class="form-group">
         <label>Pseudo</label>
-        <input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier">
+        <input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier" autocomplete="username">
       </div>
       <div class="form-group">
         <label>Email</label>
-        <input type="email" id="reg-email" placeholder="votre@email.com">
+        <input type="email" id="reg-email" placeholder="votre@email.com" autocomplete="email">
       </div>
       <div class="form-group">
         <label>Mot de passe</label>
-        <input type="password" id="reg-password" placeholder="••••••••">
+        <input type="password" id="reg-password" placeholder="••••••••" autocomplete="new-password">
       </div>
       <button type="button" class="btn-primary" data-action="register">Rejoindre l'Aventure</button>
     </div>
 
-    <div class="auth-error" id="auth-error"></div>
+    <div class="auth-error" id="auth-error" role="alert"></div>
   </div>
 </div>
 
+<!-- ═══ APPLICATION ══════════════════════════════════════════════════════════ -->
 <div id="app">
+
+  <!-- Header -->
   <header class="app-header">
-    <div style="display:flex;align-items:center;gap:.75rem">
-      <div class="header-logo"><span>⚔️</span> Le Grand JDR</div>
+    <div class="header-logo">
+      <span aria-hidden="true">⚔️</span>
+      Le Grand JDR
     </div>
     <div class="header-user">
-      <span id="header-username"></span>
-      <span class="admin-badge" id="admin-badge" style="display:none">MJ</span>
-      <button id="btn-theme" class="btn-theme" type="button" onclick="toggleTheme()" aria-label="Thème" title="Changer de thème">☀️</button>
+      <span id="header-username" aria-label="Pseudo connecté"></span>
+      <span class="admin-badge" id="admin-badge" style="display:none" aria-label="Rôle Maître de Jeu">MJ</span>
+      <button class="btn-theme" type="button" onclick="toggleTheme()" aria-label="Changer de thème">☀️</button>
       <button class="btn-logout" type="button" data-action="logout">Déconnexion</button>
     </div>
   </header>
 
-  <div class="sidebar-overlay" id="sidebar-overlay"></div>
-
   <div class="app-layout">
-    <nav class="sidebar" id="sidebar">
 
-      <!-- Logo mobile uniquement -->
-      <div class="sidebar-brand">⚔️</div>
+    <!-- Sidebar navigation -->
+    <nav class="sidebar" id="sidebar" aria-label="Navigation principale">
 
-      <!-- Nav principale -->
       <div class="sidebar-nav-group">
         <a class="nav-item active" data-navigate="dashboard" title="Accueil">
-          <span class="nav-icon">🏠</span><span class="nav-label">Accueil</span>
+          <span class="nav-icon" aria-hidden="true">🏠</span>
+          <span class="nav-label">Accueil</span>
         </a>
         <a class="nav-item" data-navigate="characters" title="Personnages">
-          <span class="nav-icon">📜</span><span class="nav-label">Personnages</span>
+          <span class="nav-icon" aria-hidden="true">📜</span>
+          <span class="nav-label">Personnages</span>
         </a>
         <a class="nav-item" data-navigate="shop" title="Boutique">
-          <span class="nav-icon">🛍️</span><span class="nav-label">Boutique</span>
+          <span class="nav-icon" aria-hidden="true">🛍️</span>
+          <span class="nav-label">Boutique</span>
         </a>
         <a class="nav-item" data-navigate="story" title="Trame">
-          <span class="nav-icon">📚</span><span class="nav-label">Trame</span>
+          <span class="nav-icon" aria-hidden="true">📚</span>
+          <span class="nav-label">Trame</span>
         </a>
       </div>
 
-      <div class="sidebar-sep"></div>
+      <div class="sidebar-sep" role="separator"></div>
 
       <div class="sidebar-nav-group">
         <a class="nav-item" data-navigate="map" title="Carte">
-          <span class="nav-icon">🗺️</span><span class="nav-label">Carte</span>
+          <span class="nav-icon" aria-hidden="true">🗺️</span>
+          <span class="nav-label">Carte</span>
         </a>
         <a class="nav-item" data-navigate="npcs" title="PNJ">
-          <span class="nav-icon">👥</span><span class="nav-label">PNJ</span>
+          <span class="nav-icon" aria-hidden="true">👥</span>
+          <span class="nav-label">PNJ</span>
         </a>
         <a class="nav-item" data-navigate="world" title="Le Monde">
-          <span class="nav-icon">📖</span><span class="nav-label">Monde</span>
+          <span class="nav-icon" aria-hidden="true">📖</span>
+          <span class="nav-label">Monde</span>
         </a>
         <a class="nav-item" data-navigate="bastion" title="Bastion">
-          <span class="nav-icon">🏰</span><span class="nav-label">Bastion</span>
+          <span class="nav-icon" aria-hidden="true">🏰</span>
+          <span class="nav-label">Bastion</span>
         </a>
       </div>
 
-      <div class="sidebar-sep"></div>
+      <div class="sidebar-sep" role="separator"></div>
 
       <div class="sidebar-nav-group">
         <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
-          <span class="nav-icon">🏆</span><span class="nav-label">Hauts-Faits</span>
+          <span class="nav-icon" aria-hidden="true">🏆</span>
+          <span class="nav-label">Hauts-Faits</span>
         </a>
-        <a class="nav-item" data-navigate="players" title="Joueurs">
-          <span class="nav-icon">⚔️</span><span class="nav-label">Joueurs</span>
+        <a class="nav-item" data-navigate="players" title="Présentation des joueurs">
+          <span class="nav-icon" aria-hidden="true">⚔️</span>
+          <span class="nav-label">Joueurs</span>
         </a>
         <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
-          <span class="nav-icon">🐉</span><span class="nav-label">Bestiaire</span>
+          <span class="nav-icon" aria-hidden="true">🐉</span>
+          <span class="nav-label">Bestiaire</span>
         </a>
         <a class="nav-item" data-navigate="recettes" title="Recettes">
-          <span class="nav-icon">🍳</span><span class="nav-label">Recettes</span>
+          <span class="nav-icon" aria-hidden="true">🍳</span>
+          <span class="nav-label">Recettes</span>
         </a>
-        <a class="nav-item" data-navigate="informations" title="Infos">
-          <span class="nav-icon">📋</span><span class="nav-label">Infos</span>
+        <a class="nav-item" data-navigate="informations" title="Informations">
+          <span class="nav-icon" aria-hidden="true">📋</span>
+          <span class="nav-label">Infos</span>
         </a>
         <a class="nav-item" data-navigate="collection" title="Collection">
-          <span class="nav-icon">🃏</span><span class="nav-label">Collection</span>
+          <span class="nav-icon" aria-hidden="true">🃏</span>
+          <span class="nav-label">Collection</span>
         </a>
       </div>
 
-      <div class="sidebar-sep"></div>
+      <div class="sidebar-sep" role="separator"></div>
 
-      <!-- Admin uniquement -->
       <div class="sidebar-nav-group">
+        <!-- Lien compte -->
+        <a class="nav-item" data-navigate="account" title="Mon compte">
+          <span class="nav-icon" aria-hidden="true">👤</span>
+          <span class="nav-label">Mon compte</span>
+        </a>
+        <!-- Admin uniquement — affiché par layout.js -->
         <a class="nav-item admin-only" data-navigate="admin" title="Console MJ" style="display:none">
-          <span class="nav-icon">⚙️</span><span class="nav-label">Console MJ</span>
+          <span class="nav-icon" aria-hidden="true">⚙️</span>
+          <span class="nav-label">Console MJ</span>
         </a>
       </div>
 
     </nav>
 
-    <main class="main-content" id="main-content">
+    <!-- Contenu principal -->
+    <main class="main-content" id="main-content" role="main">
       <div class="loading"><div class="spinner"></div> Chargement…</div>
     </main>
+
   </div>
 
-  <nav class="bottom-nav" id="bottom-nav">
+  <!-- Bottom nav mobile -->
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Navigation mobile">
     <button class="bottom-nav-item active" type="button" data-navigate="dashboard" data-page="dashboard">
-      <span class="bn-icon">🏠</span><span>Accueil</span>
+      <span class="bn-icon" aria-hidden="true">🏠</span>
+      <span>Accueil</span>
     </button>
     <button class="bottom-nav-item" type="button" data-navigate="characters" data-page="characters">
-      <span class="bn-icon">📜</span><span>Perso</span>
+      <span class="bn-icon" aria-hidden="true">📜</span>
+      <span>Perso</span>
     </button>
     <button class="bottom-nav-item" type="button" data-navigate="story" data-page="story">
-      <span class="bn-icon">📚</span><span>Trame</span>
+      <span class="bn-icon" aria-hidden="true">📚</span>
+      <span>Trame</span>
     </button>
     <button class="bottom-nav-item" type="button" data-navigate="shop" data-page="shop">
-      <span class="bn-icon">🛍️</span><span>Boutique</span>
+      <span class="bn-icon" aria-hidden="true">🛍️</span>
+      <span>Boutique</span>
     </button>
-    <button class="bottom-nav-item" type="button" data-toggle-more>
-      <span class="bn-icon">⋯</span><span>Plus</span>
+    <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
+      <span class="bn-icon" aria-hidden="true">⋯</span>
+      <span>Plus</span>
     </button>
   </nav>
 
-  <div class="more-menu" id="more-menu">
+  <!-- More-menu mobile -->
+  <div class="more-menu" id="more-menu" role="dialog" aria-label="Navigation étendue">
     <div class="more-menu-item" data-navigate="map"><span class="icon">🗺️</span>Carte</div>
     <div class="more-menu-item" data-navigate="npcs"><span class="icon">👥</span>PNJ</div>
     <div class="more-menu-item" data-navigate="world"><span class="icon">📖</span>Monde</div>
@@ -186,21 +220,28 @@
     <div class="more-menu-item" data-navigate="recettes"><span class="icon">🍳</span>Recettes</div>
     <div class="more-menu-item" data-navigate="informations"><span class="icon">📋</span>Infos</div>
     <div class="more-menu-item" data-navigate="collection"><span class="icon">🃏</span>Collection</div>
+    <div class="more-menu-item" data-navigate="account"><span class="icon">👤</span>Compte</div>
     <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span>Console MJ</div>
   </div>
+
 </div>
 
-<div class="notif" id="notif"></div>
+<!-- ═══ COMPOSANTS GLOBAUX ═══════════════════════════════════════════════════ -->
 
-<div class="modal-overlay" id="modal-overlay">
+<!-- Notification toast -->
+<div class="notif" id="notif" role="status" aria-live="polite"></div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title-text">
   <div class="modal" id="modal-box">
     <div class="modal-title" id="modal-title">
-      <span></span>
-      <button class="btn-icon" type="button" data-action="close-modal">✕</button>
+      <span id="modal-title-text"></span>
+      <button class="btn-icon" type="button" data-action="close-modal" aria-label="Fermer">✕</button>
     </div>
     <div id="modal-body"></div>
   </div>
 </div>
 
-<script type="module" src="./assets/js/app.js?v=20260325b"></script></body>
+<script type="module" src="./assets/js/app.js"></script>
+</body>
 </html>
