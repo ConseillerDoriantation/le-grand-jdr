@@ -600,7 +600,7 @@ function renderCharSheet(c, keepTab) {
   const titres = c.titres||[];
   const titreHtml = titres.map(t=>`<span class="badge badge-gold" style="font-size:0.65rem">${t}</span>`).join('');
 
-  // Stats inline
+  // Stats inline — compactes pour la zone haute
   const STATS = [
     {key:'force',abbr:'Fo',label:'Force'},
     {key:'dexterite',abbr:'Dex',label:'Dextérité'},
@@ -644,14 +644,46 @@ function renderCharSheet(c, keepTab) {
     </div>`;
   }).join('');
 
+  // Switch rapide entre personnages du même joueur (ou tous pour admin)
+  const allChars = STATE.characters || [];
+  const switchableChars = STATE.isAdmin
+    ? allChars
+    : allChars.filter(x => x.uid === STATE.user?.uid);
+  const charSwitcher = switchableChars.length > 1
+    ? `<div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.5rem">
+        ${switchableChars.map(ch => `
+        <button onclick="selectChar('${ch.id}',document.querySelector('[data-charid=\\'${ch.id}\\']') || document.querySelector('.char-pill'))"
+          style="font-size:.68rem;padding:2px 9px;border-radius:999px;cursor:pointer;
+          border:1px solid ${ch.id===c.id?'var(--gold)':'var(--border)'};
+          background:${ch.id===c.id?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
+          color:${ch.id===c.id?'var(--gold)':'var(--text-dim)'};
+          font-weight:${ch.id===c.id?'700':'400'};transition:all .12s"
+          ${ch.id===c.id?'disabled':''}>
+          ${ch.nom||'?'}
+        </button>`).join('')}
+      </div>`
+    : '';
+
+  // Onglets — 5 onglets (Carac fusionné dans Combat, secondaires regroupés)
+  const TABS = [
+    { id:'combat',     label:'⚔️ Combat'     },
+    { id:'sorts',      label:'✨ Sorts'       },
+    { id:'inventaire', label:'🎒 Inventaire'  },
+    { id:'quetes',     label:'📜 Quêtes'      },
+    { id:'plus',       label:'···'            },
+  ];
+  // Onglets "plus" = compte + notes (dans un sous-menu)
+  const isSecondaryTab = ['compte','notes'].includes(currentTab);
+
   area.innerHTML = `
 <div class="cs-shell">
 
-  <!-- ═══ LIGNE HAUTE : 2 blocs côte à côte ═══ -->
+  <!-- ═══ LIGNE HAUTE : panneau gauche + caractéristiques ═══ -->
   <div class="cs-top">
 
-    <!-- BLOC IDENTITÉ + VITAUX + CARAC -->
     <div class="cs-identity-panel">
+
+      ${charSwitcher}
 
       <!-- Photo + Nom -->
       <div class="cs-id-header">
@@ -683,52 +715,39 @@ function renderCharSheet(c, keepTab) {
         </div>
       </div>
 
-      <!-- Niveau + Or -->
-      <div class="cs-meta-row">
+      <!-- Niveau + Or + XP compact sur une ligne -->
+      <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
         <span class="cs-level-badge">
           ${canEdit
             ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv. ${c.niveau||1}</span>`
             : `Niv. ${c.niveau||1}`}
         </span>
         <span class="cs-or" title="Solde du Livret de Compte">💰 ${calcOr(c)} or</span>
-      </div>
-
-      <!-- Bloc XP explicite -->
-      <div class="cs-xp-block">
-        <div class="cs-xp-header">
-          <span class="cs-xp-title">✨ Expérience</span>
-          <span class="cs-xp-palier">Palier : ${calcPalier(c.niveau||1)} XP</span>
-        </div>
-        <div class="cs-xp-bar-wrap">
-          <div class="cs-xp-bar" id="xp-bar-bg">
-            <div class="cs-xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div>
+        <!-- XP compact : barre fine + % -->
+        <div style="display:flex;align-items:center;gap:.35rem;flex:1;min-width:80px" title="XP : ${c.exp||0} / ${calcPalier(c.niveau||1)}">
+          <div style="flex:1;height:4px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden">
+            <div id="xp-bar-fill" style="width:${xpPct}%;height:100%;background:var(--gold);border-radius:2px;transition:width .4s"></div>
           </div>
-          <span class="cs-xp-pct" id="xp-pct">${xpPct}%</span>
+          <span id="xp-pct" style="font-size:.6rem;color:var(--text-dim);white-space:nowrap">${xpPct}%</span>
+          ${canEdit ? `<input type="number" class="cs-xp-input cs-inline-num"
+            id="xp-direct-input" value="${c.exp||0}" min="0" max="${calcPalier(c.niveau||1)}"
+            onchange="saveXpDirect('${c.id}',this)" oninput="previewXpBar(this,${calcPalier(c.niveau||1)})"
+            style="width:50px;font-size:.65rem;padding:1px 4px;text-align:center;
+            background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:5px;
+            color:var(--text-dim)" title="XP actuel">` : ''}
         </div>
-        ${canEdit
-          ? `<div class="cs-xp-input-row">
-               <label class="cs-xp-input-label">XP actuel</label>
-               <input type="number" class="cs-xp-input cs-inline-num"
-                      id="xp-direct-input"
-                      value="${c.exp||0}" min="0"
-                      max="${calcPalier(c.niveau||1)}"
-                      onchange="saveXpDirect('${c.id}',this)"
-                      oninput="previewXpBar(this,${calcPalier(c.niveau||1)})">
-             </div>`
-          : `<div class="cs-xp-readonly">${c.exp||0} / ${calcPalier(c.niveau||1)} XP</div>`
-        }
       </div>
 
       <div class="cs-divider"></div>
 
-      <!-- PV / PM -->
+      <!-- PV / PM — boutons plus grands pour le live -->
       <div class="cs-vitals-row">
         <div class="cs-vital-block">
           <div class="cs-vital-label">❤️ PV</div>
           <div class="cs-vital-controls">
-            ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
+            ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pvActuel',-1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">−</button>`:''}
             <span class="cs-vital-val" id="pv-val" style="color:${pvColor}">${pvCur}</span>
-            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
+            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pvActuel',1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">+</button>`:''}
           </div>
           <div class="cs-bar-bg cs-bar-hp"><div class="cs-bar-fill cs-bar-hp-fill ${pvPct>50?'high':pvPct>25?'mid':''}" id="pv-bar" style="width:${pvPct}%"></div></div>
           <div class="cs-vital-sub">max <span id="pv-max">${pvMax}</span></div>
@@ -736,9 +755,9 @@ function renderCharSheet(c, keepTab) {
         <div class="cs-vital-block">
           <div class="cs-vital-label">🔵 PM</div>
           <div class="cs-vital-controls">
-            ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
+            ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pmActuel',-1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">−</button>`:''}
             <span class="cs-vital-val" id="pm-val" style="color:var(--blue)">${pmCur}</span>
-            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
+            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pmActuel',1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">+</button>`:''}
           </div>
           <div class="cs-bar-bg cs-bar-pm"><div class="cs-bar-fill cs-bar-pm-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
           <div class="cs-vital-sub">max <span id="pm-max">${pmMax}</span></div>
@@ -797,20 +816,46 @@ function renderCharSheet(c, keepTab) {
 
   </div><!-- /cs-top -->
 
-  <!-- ═══ COLONNE DROITE : Onglets + Contenu ═══ -->
+  <!-- ═══ ONGLETS + CONTENU ═══ -->
   <div class="cs-right-col">
     <div class="cs-tabs" id="char-tabs">
-      ${['combat','sorts','inventaire','quetes','compte','notes'].map((tab,i)=>{
-        const labels = ['Combat','Sorts & Runes','Inventaire','Quêtes','Compte','Notes'];
-        return `<button class="cs-tab ${currentTab===tab?'active':''}" onclick="showCharTab('${tab}',this)">${labels[i]}</button>`;
+      ${TABS.map(tab => {
+        // Onglet "···" est actif si on est sur un onglet secondaire
+        const isActive = tab.id === 'plus'
+          ? isSecondaryTab
+          : currentTab === tab.id;
+        return `<button class="cs-tab ${isActive?'active':''}"
+          onclick="${tab.id === 'plus' ? `window._toggleSecondaryTabs(this)` : `showCharTab('${tab.id}',this)`}"
+          data-tab="${tab.id}">${tab.label}</button>`;
       }).join('')}
     </div>
+
+    <!-- Sous-menu onglets secondaires (compte + notes) -->
+    <div id="cs-secondary-tabs" style="display:${isSecondaryTab?'flex':'none'};
+      gap:.35rem;padding:.4rem 0 .1rem;border-bottom:1px solid var(--border);margin-bottom:.15rem">
+      ${['compte','notes'].map(tab => `
+      <button class="cs-tab ${currentTab===tab?'active':''}" style="font-size:.72rem;min-height:30px;padding:.3rem .65rem"
+        onclick="showCharTab('${tab}',this)">
+        ${tab==='compte'?'💰 Compte':'📝 Notes'}
+      </button>`).join('')}
+    </div>
+
     <div id="char-tab-content" class="cs-tab-body"></div>
   </div>
 
 </div>`;
 
   _renderTab(currentTab, c, canEdit);
+
+  // Toggle sous-menu secondaire
+  window._toggleSecondaryTabs = (btn) => {
+    const panel = document.getElementById('cs-secondary-tabs');
+    const isVisible = panel.style.display !== 'none';
+    panel.style.display = isVisible ? 'none' : 'flex';
+    if (!isVisible && !['compte','notes'].includes(window._currentCharTab)) {
+      showCharTab('compte', document.querySelector('#cs-secondary-tabs .cs-tab'));
+    }
+  };
 }
 
 function _renderTab(tab, c, canEdit) {
@@ -818,6 +863,7 @@ function _renderTab(tab, c, canEdit) {
   if (!area) return;
   const renders = {
     combat:     ()=>renderCharEquip(c,canEdit),
+    carac:      ()=>renderCharEquip(c,canEdit),  // alias — carac fusionné dans combat
     sorts:      ()=>renderCharDeck(c,canEdit),
     inventaire: ()=>renderCharInventaire(c,canEdit),
     quetes:     ()=>renderCharQuetes(c,canEdit),
@@ -828,9 +874,19 @@ function _renderTab(tab, c, canEdit) {
 }
 
 function showCharTab(tab, el) {
-  document.querySelectorAll('#char-tabs .cs-tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
+  // Gérer les onglets secondaires (compte/notes) — activer le ··· comme actif
+  const isSecondary = ['compte','notes'].includes(tab);
+  document.querySelectorAll('#char-tabs .cs-tab').forEach(t => {
+    t.classList.remove('active');
+    if (isSecondary && t.dataset.tab === 'plus') t.classList.add('active');
+  });
+  if (!isSecondary && el) el.classList.add('active');
+
   window._currentCharTab = tab;
+  // Afficher le sous-menu secondaire si nécessaire
+  const secondary = document.getElementById('cs-secondary-tabs');
+  if (secondary) secondary.style.display = isSecondary ? 'flex' : 'none';
+
   _renderTab(tab, window._currentChar, window._canEditChar);
 }
 
