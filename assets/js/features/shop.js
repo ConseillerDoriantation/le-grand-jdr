@@ -10,62 +10,63 @@ const TEMPLATES = {
   arme: {
     label: '⚔️ Arme',
     fields: [
-      { id:'format',    label:'Format',     type:'select',
+      { id:'format',      label:'Format',        type:'select',
         options:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'] },
-      { id:'sousType',  label:'Type d\'arme', type:'text', placeholder:'Épée, Lance, Dague, Arc, Bâton...' },
-      { id:'rarete',    label:'Rareté',     type:'rarete' },
-      { id:'degats',    label:'Dégâts',     type:'damage_with_stat', placeholder:'1D10, 2D6...' },
-      { id:'toucherStat', label:'Toucher',  type:'stat_select' },
-      { id:'statBonuses', label:'Bonus de stats', type:'stat_bonus_grid' },
-      { id:'trait',     label:'Trait',      type:'text',   placeholder:'Lourd, Finesse, Polyvalent...' },
-      { id:'prix',      label:'Prix 🪙',    type:'number', placeholder:'0' },
-      { id:'dispo',     label:'Dispo',      type:'dispo' },
+      { id:'sousType',    label:'Type d\'arme',  type:'text',   placeholder:'Épée, Lance, Dague, Arc, Bâton...' },
+      { id:'rarete',      label:'Rareté',        type:'rarete' },
+      { id:'degats',      label:'Dégâts',        type:'damage_with_stat', placeholder:'1D10, 2D6...' },
+      { id:'toucherStat', label:'Toucher',       type:'stat_select' },
+      { id:'portee',      label:'Portée',        type:'text',   placeholder:'Contact, 1m50, 9m / 27m...' },
+      { id:'statBonuses', label:'Bonus de stats',type:'stat_bonus_grid' },
+      { id:'traits',      label:'Traits',        type:'trait_list', placeholder:'Ajouter un trait...' },
+      { id:'prix',        label:'Prix 🪙',       type:'number', placeholder:'0' },
+      { id:'dispo',       label:'Dispo',         type:'dispo' },
     ],
   },
   armure: {
     label: '🛡️ Armure',
     fields: [
-      { id:'slotArmure',  label:'Emplacement', type:'select',
+      { id:'slotArmure',  label:'Emplacement',   type:'select',
         options:['Tête','Torse','Pieds'] },
-      { id:'typeArmure',  label:'Type',        type:'select',
+      { id:'typeArmure',  label:'Type',          type:'select',
         options:['Légère','Intermédiaire','Lourde'] },
-      { id:'rarete',      label:'Rareté',      type:'rarete' },
-      { id:'ca',          label:'CA bonus',    type:'number', placeholder:'0' },
-      { id:'statBonuses', label:'Bonus de stats', type:'stat_bonus_grid' },
-      { id:'trait',       label:'Trait',       type:'text',   placeholder:'Lourd, Magique...' },
-      { id:'prix',        label:'Prix 🪙',     type:'number', placeholder:'0' },
-      { id:'dispo',       label:'Dispo',       type:'dispo' },
+      { id:'rarete',      label:'Rareté',        type:'rarete' },
+      { id:'ca',          label:'CA bonus',      type:'number', placeholder:'0' },
+      { id:'statBonuses', label:'Bonus de stats',type:'stat_bonus_grid' },
+      { id:'traits',      label:'Traits',        type:'trait_list', placeholder:'Ajouter un trait...' },
+      { id:'prix',        label:'Prix 🪙',       type:'number', placeholder:'0' },
+      { id:'dispo',       label:'Dispo',         type:'dispo' },
     ],
   },
   bijou: {
     label: '💍 Bijou',
     fields: [
-      { id:'slotBijou',   label:'Emplacement', type:'select',
+      { id:'slotBijou',   label:'Emplacement',   type:'select',
         options:['Amulette','Anneau','Objet magique'] },
-      { id:'rarete',      label:'Rareté',      type:'rarete' },
-      { id:'statBonuses', label:'Bonus de stats', type:'stat_bonus_grid' },
-      { id:'trait',       label:'Trait',       type:'text',   placeholder:'Protecteur, Mystique...' },
-      { id:'prix',        label:'Prix 🪙',     type:'number', placeholder:'0' },
-      { id:'dispo',       label:'Dispo',       type:'dispo' },
+      { id:'rarete',      label:'Rareté',        type:'rarete' },
+      { id:'statBonuses', label:'Bonus de stats',type:'stat_bonus_grid' },
+      { id:'traits',      label:'Traits',        type:'trait_list', placeholder:'Ajouter un trait...' },
+      { id:'prix',        label:'Prix 🪙',       type:'number', placeholder:'0' },
+      { id:'dispo',       label:'Dispo',         type:'dispo' },
     ],
   },
   classique: {
     label: '🧪 Classique',
     fields: [
-      { id:'type',        label:'Type',        type:'text',     placeholder:'Consommable, Matériau, Accessoire...' },
-      { id:'effet',       label:'Effet',       type:'textarea', placeholder:'(Action) Rend 10 PV...' },
-      { id:'description', label:'Description', type:'textarea', placeholder:'Détails...' },
-      { id:'prix',        label:'Prix 🪙',     type:'number',   placeholder:'0' },
-      { id:'dispo',       label:'Dispo',       type:'dispo' },
+      { id:'type',        label:'Type',          type:'text',     placeholder:'Consommable, Matériau, Accessoire...' },
+      { id:'effet',       label:'Effet',         type:'textarea', placeholder:'(Action) Rend 10 PV...' },
+      { id:'description', label:'Description',   type:'textarea', placeholder:'Détails...' },
+      { id:'prix',        label:'Prix 🪙',       type:'number',   placeholder:'0' },
+      { id:'dispo',       label:'Dispo',         type:'dispo' },
     ],
   },
   libre: {
     label: '📦 Libre',
     fields: [
-      { id:'type',        label:'Type',        type:'text',     placeholder:'Type...' },
-      { id:'description', label:'Description', type:'textarea', placeholder:'...' },
-      { id:'prix',        label:'Prix 🪙',     type:'number',   placeholder:'0' },
-      { id:'dispo',       label:'Dispo',       type:'dispo' },
+      { id:'type',        label:'Type',          type:'text',     placeholder:'Type...' },
+      { id:'description', label:'Description',   type:'textarea', placeholder:'...' },
+      { id:'prix',        label:'Prix 🪙',       type:'number',   placeholder:'0' },
+      { id:'dispo',       label:'Dispo',         type:'dispo' },
     ],
   },
 };
@@ -258,6 +259,23 @@ async function renderShop() {
   if (!content) return;
 
   let html = `<div class="sh-page">
+  <style>
+    .sh-item-traits { display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.3rem; }
+    .sh-trait-pill { display:inline-flex;align-items:center;padding:1px 7px;font-size:.66rem;
+      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+      border-radius:999px;color:var(--text-dim);font-style:italic; }
+    .sh-tag-fmt { background:rgba(79,140,255,.1);border-color:rgba(79,140,255,.2);color:#7fb0ff; }
+    .sh-tag-ca  { background:rgba(34,195,142,.1);border-color:rgba(34,195,142,.2);color:#22c38e; }
+    .sh-item-epuise { opacity:.6; }
+    .sh-epuise-badge { position:absolute;top:8px;left:8px;background:rgba(255,107,107,.85);
+      color:#fff;font-size:.62rem;font-weight:700;padding:2px 8px;border-radius:6px;letter-spacing:.5px; }
+    .sh-item-footer { display:flex;align-items:center;justify-content:space-between;
+      gap:.4rem;margin-top:auto;padding-top:.4rem;border-top:1px solid var(--border); }
+    .sh-item-card { cursor:pointer; }
+    [data-theme="light"] .sh-trait-pill { background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.09);color:var(--text-dim); }
+    [data-theme="light"] .sh-tag-fmt { background:rgba(37,99,235,.08);border-color:rgba(37,99,235,.18);color:#2563eb; }
+    [data-theme="light"] .sh-tag-ca  { background:rgba(5,150,105,.08);border-color:rgba(5,150,105,.18);color:#059669; }
+  </style>
   <div class="page-header">
     <div class="page-title"><span class="page-title-accent">🛒</span> Boutique</div>
     <div class="page-subtitle">Équipements, consommables et merveilles</div>
@@ -545,6 +563,10 @@ function _renderItemCard(item, tplKey, itemIdx) {
   const epuise    = dispo !== null && dispo === 0;
   const illimite  = dispo === null || dispo < 0;
 
+  // Normaliser traits : array ou string legacy
+  const traitsArr = Array.isArray(item.traits) ? item.traits
+    : (item.trait ? item.trait.split(',').map(t=>t.trim()).filter(Boolean) : []);
+
   // ── Bloc infos selon template ──────────────────────────────────────────────
   let infoHtml = '';
   const statBonuses = _formatStatBonuses(item);
@@ -552,70 +574,147 @@ function _renderItemCard(item, tplKey, itemIdx) {
   if (tplKey === 'arme') {
     infoHtml = `
       <div class="sh-item-tags">
-        ${item.format  ? `<span class="sh-tag">${item.format}</span>` : ''}
+        ${item.format  ? `<span class="sh-tag sh-tag-fmt">${item.format.replace('Arme ','').replace(' Phy.','').replace(' Mag.',' ✨')}</span>` : ''}
+        ${item.sousType ? `<span class="sh-tag">${item.sousType}</span>` : ''}
         ${item.rarete  ? _rareteStars(item.rarete) : ''}
-        ${dispo !== undefined && dispo !== '' ? _dispoDisplay(item.dispo) : ''}
+        ${dispo !== null ? _dispoDisplay(item.dispo) : ''}
       </div>
-      ${combatMeta.length ? `<div class="sh-item-combat">
-        ${item.degats ? `<span class="sh-combat-chip"><span class="sh-cc-label">Dégâts</span><span class="sh-cc-val red">${item.degats}${item.degatsStat ? ` + ${_statShort(item.degatsStat)}` : ''}</span></span>` : ''}
-        ${item.toucherStat ? `<span class="sh-combat-chip"><span class="sh-cc-label">Toucher</span><span class="sh-cc-val gold">${_statShort(item.toucherStat)}</span></span>` : ''}
-      </div>` : ''}
+      <div class="sh-item-combat">
+        ${item.degats      ? `<span class="sh-combat-chip"><span class="sh-cc-label">⚔️</span><span class="sh-cc-val red">${item.degats}${item.degatsStat?`+${_statShort(item.degatsStat)}`:''}</span></span>` : ''}
+        ${item.toucherStat ? `<span class="sh-combat-chip"><span class="sh-cc-label">🎯</span><span class="sh-cc-val gold">${_statShort(item.toucherStat)}</span></span>` : ''}
+        ${item.portee      ? `<span class="sh-combat-chip"><span class="sh-cc-label">📏</span><span class="sh-cc-val">${item.portee}</span></span>` : ''}
+      </div>
       ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
-      ${item.trait ? `<div class="sh-item-trait"><em>${item.trait}</em></div>` : ''}`;
+      ${traitsArr.length ? `<div class="sh-item-traits">${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}</div>` : ''}`;
   } else if (tplKey === 'armure') {
     infoHtml = `
       <div class="sh-item-tags">
         ${item.slotArmure  ? `<span class="sh-tag">${item.slotArmure}</span>` : ''}
-        ${item.typeArmure  ? `<span class="sh-tag">${item.typeArmure}</span>` : ''}
+        ${item.typeArmure  ? `<span class="sh-tag sh-tag-fmt">${item.typeArmure}</span>` : ''}
         ${item.rarete ? _rareteStars(item.rarete) : ''}
-        ${item.ca || item.ca === 0 ? `<span class="sh-tag">🛡️ CA +${parseInt(item.ca)||0}</span>` : ''}
-        ${dispo !== undefined && dispo !== '' ? _dispoDisplay(item.dispo) : ''}
+        ${(item.ca||0) > 0 ? `<span class="sh-tag sh-tag-ca">🛡️ +${parseInt(item.ca)||0} CA</span>` : ''}
+        ${dispo !== null ? _dispoDisplay(item.dispo) : ''}
       </div>
       ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
-      ${item.trait ? `<div class="sh-item-trait"><em>${item.trait}</em></div>` : ''}`;
+      ${traitsArr.length ? `<div class="sh-item-traits">${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}</div>` : ''}`;
   } else if (tplKey === 'bijou') {
     infoHtml = `
       <div class="sh-item-tags">
         ${item.slotBijou ? `<span class="sh-tag">${item.slotBijou}</span>` : ''}
         ${item.rarete ? _rareteStars(item.rarete) : ''}
-        ${dispo !== undefined && dispo !== '' ? _dispoDisplay(item.dispo) : ''}
+        ${dispo !== null ? _dispoDisplay(item.dispo) : ''}
       </div>
       ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
-      ${item.trait ? `<div class="sh-item-trait"><em>${item.trait}</em></div>` : ''}`;
+      ${traitsArr.length ? `<div class="sh-item-traits">${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}</div>` : ''}`;
   } else {
     infoHtml = `
       ${item.type   ? `<div class="sh-item-type">${item.type}</div>` : ''}
       ${item.effet  ? `<div class="sh-item-effet">${item.effet}</div>` : ''}
-      ${item.description ? `<div class="sh-item-desc-tooltip" title="${item.description.replace(/"/g,'&quot;')}">ℹ️ <span>${item.description.length>60?item.description.slice(0,60)+'…':item.description}</span></div>` : ''}
-      ${dispo !== undefined && dispo !== '' ? `<div class="sh-item-tags">${_dispoDisplay(item.dispo)}</div>` : ''}`;
+      ${item.description ? `<div class="sh-item-desc-tooltip" title="${item.description.replace(/"/g,'&quot;')}">ℹ️ ${item.description.length>60?item.description.slice(0,60)+'…':item.description}</div>` : ''}
+      ${dispo !== null ? `<div class="sh-item-tags">${_dispoDisplay(item.dispo)}</div>` : ''}`;
   }
 
   const hasChar = !!window._shopCharId;
 
-  return `<div class="sh-item-card ${STATE.isAdmin?'sh-dnd-handle':''}"
+  return `<div class="sh-item-card ${epuise?'sh-item-epuise':''} ${STATE.isAdmin?'sh-dnd-handle':''}"
     ${STATE.isAdmin&&itemIdx!==''?`draggable="true" ondragstart="shopItemDragStart(event,'${item.id}')" ondragover="shopItemDragOver(event)" ondrop="shopItemDrop(event,'${item.id}')" ondragend="shopItemDragEnd(event)"`:''}>
     <div class="sh-item-img" style="${item.image?`background-image:url('${item.image}')`:_catGradient(item.nom||'')}">
       <div class="sh-item-img-overlay"></div>
+      ${epuise ? `<div class="sh-epuise-badge">Épuisé</div>` : ''}
     </div>
-    <div class="sh-item-body">
+    <div class="sh-item-body" onclick="openShopItemDetail('${item.id}')">
       <div class="sh-item-name">${item.nom||'?'}</div>
       ${infoHtml}
-      <div class="sh-item-prix-row">
-        <div class="sh-item-prix-achat">💰 ${prix} or</div>
-        <div class="sh-item-prix-vente" title="Prix de revente (60%)">🔄 ${prixVente} or</div>
+      <div class="sh-item-footer">
+        <div class="sh-item-prix-row">
+          <span class="sh-item-prix-achat">💰 ${prix} or</span>
+          <span class="sh-item-prix-vente" title="Revente (60%)">↩ ${prixVente}</span>
+        </div>
+        ${hasChar ? (
+          epuise
+            ? `<button class="btn sh-buy-btn" disabled style="opacity:.4;cursor:not-allowed">Épuisé</button>`
+            : `<button class="btn sh-buy-btn" onclick="event.stopPropagation();buyItem('${item.id}')">🛒 Acheter</button>`
+        ) : ''}
       </div>
-      ${hasChar ? (
-        epuise
-          ? `<button class="btn sh-buy-btn" disabled style="opacity:0.4;cursor:not-allowed">Épuisé</button>`
-          : `<button class="btn sh-buy-btn" onclick="buyItem('${item.id}')">🛒 Acheter</button>`
-      ) : ''}
     </div>
-    ${STATE.isAdmin?`<div class="sh-item-actions">
+    ${STATE.isAdmin?`<div class="sh-item-actions" onclick="event.stopPropagation()">
       <button class="btn-icon" onclick="openItemModal('${item.id}')">✏️</button>
       <button class="btn-icon" onclick="deleteShopItem('${item.id}')">🗑️</button>
     </div>`:''}
   </div>`;
 }
+
+function openShopItemDetail(itemId) {
+  const item = _items.find(i => i.id === itemId);
+  if (!item) return;
+  const cat    = _cats.find(c => c.id === item.categorieId);
+  const tplKey = cat?.template || 'classique';
+  const prix   = parseFloat(item.prix) || 0;
+  const prixV  = Math.round(prix * PRIX_VENTE_RATIO);
+  const dispo  = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+  const epuise = dispo !== null && dispo === 0;
+  const traitsArr = Array.isArray(item.traits) ? item.traits
+    : (item.trait ? item.trait.split(',').map(t=>t.trim()).filter(Boolean) : []);
+  const statBonuses = _formatStatBonuses(item);
+  const hasChar = !!window._shopCharId;
+
+  const rows = [];
+  if (item.format)      rows.push(['Format', item.format]);
+  if (item.sousType)    rows.push(['Type', item.sousType]);
+  if (item.degats)      rows.push(['Dégâts', `${item.degats}${item.degatsStat?' + '+_statShort(item.degatsStat):''}`]);
+  if (item.toucherStat) rows.push(['Toucher', _statShort(item.toucherStat)]);
+  if (item.portee)      rows.push(['Portée', item.portee]);
+  if (item.slotArmure)  rows.push(['Emplacement', item.slotArmure]);
+  if (item.typeArmure)  rows.push(['Type armure', item.typeArmure]);
+  if (item.ca > 0)      rows.push(['CA bonus', `+${item.ca}`]);
+  if (item.slotBijou)   rows.push(['Emplacement', item.slotBijou]);
+  if (item.type)        rows.push(['Type', item.type]);
+  if (item.effet)       rows.push(['Effet', item.effet]);
+  if (statBonuses.length) rows.push(['Bonus stats', statBonuses.join(', ')]);
+
+  openModal(_esc(item.nom), `
+    ${item.image ? `<div style="margin:-1.5rem -1.5rem .75rem;"><img src="${item.image}" style="width:100%;height:180px;object-fit:cover;border-radius:22px 22px 0 0;display:block"></div>` : ''}
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
+      <div>
+        <div style="font-family:'Cinzel',serif;font-size:1.15rem;font-weight:700;color:var(--text)">${_esc(item.nom)}</div>
+        <div style="font-size:.75rem;color:var(--text-dim)">${cat?.nom||''} ${item.rarete?'· '+_rareteStars(item.rarete):''}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:var(--gold)">💰 ${prix} or</div>
+        <div style="font-size:.7rem;color:var(--text-dim)">Revente : ${prixV} or</div>
+      </div>
+    </div>
+
+    ${rows.length ? `<div style="background:var(--bg-elevated);border-radius:10px;overflow:hidden;margin-bottom:.75rem">
+      ${rows.map(([l,v],i)=>`<div style="display:flex;justify-content:space-between;padding:.45rem .75rem;${i?'border-top:1px solid var(--border)':''}">
+        <span style="font-size:.78rem;color:var(--text-dim)">${l}</span>
+        <span style="font-size:.78rem;color:var(--text);font-weight:600">${v}</span>
+      </div>`).join('')}
+    </div>` : ''}
+
+    ${traitsArr.length ? `<div style="margin-bottom:.75rem">
+      <div style="font-size:.68rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem">Traits</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.35rem">
+        ${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${item.description ? `<div style="font-size:.82rem;color:var(--text-muted);line-height:1.7;margin-bottom:.75rem;padding:.6rem .75rem;background:rgba(255,255,255,.02);border-radius:8px;border-left:2px solid var(--border-strong)">${item.description}</div>` : ''}
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;padding-top:.5rem;border-top:1px solid var(--border)">
+      <div style="font-size:.75rem;color:${dispo===null?'var(--text-dim)':dispo===0?'#ff6b6b':'#22c38e'}">
+        ${dispo===null?'∞ Stock illimité':dispo===0?'Épuisé':`${dispo} en stock`}
+      </div>
+      <div style="display:flex;gap:.5rem">
+        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="closeModalDirect();openItemModal('${item.id}')">✏️ Modifier</button>` : ''}
+        ${hasChar && !epuise ? `<button class="btn btn-gold btn-sm" onclick="closeModalDirect();buyItem('${item.id}')">🛒 Acheter</button>` : ''}
+        ${epuise ? `<span style="font-size:.78rem;color:#ff6b6b;padding:.4rem .75rem;background:rgba(255,107,107,.1);border-radius:8px">Épuisé</span>` : ''}
+      </div>
+    </div>
+  `);
+}
+
+function _esc(s=''){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SÉLECTEUR PERSONNAGE
@@ -1211,6 +1310,32 @@ function _buildFieldsHtml(tpl,item) {
     } else if(f.type==='textarea'){
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
         <textarea class="input-field" id="si-${f.id}" rows="2">${val}</textarea></div>`;
+    } else if(f.type==='trait_list'){
+      // traits est un array, ou une string legacy (ancien champ 'trait')
+      const traitsArr = Array.isArray(item?.traits) ? item.traits
+        : (item?.trait ? [item.trait] : []);
+      const traitsJson = JSON.stringify(traitsArr).replace(/"/g,'&quot;');
+      html+=`<div class="form-group sh-field-full">
+        <label>${f.label}</label>
+        <input type="hidden" id="si-traits-data" value="${traitsJson}">
+        <div id="si-traits-list" style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.4rem">
+          ${traitsArr.map((t,i)=>`
+          <div style="display:flex;gap:.4rem;align-items:center" data-trait-idx="${i}">
+            <input class="input-field" style="flex:1;font-size:.83rem" value="${t.replace(/"/g,'&quot;')}"
+              oninput="window._shopTraitUpdate(${i},this.value)" placeholder="Trait...">
+            <button type="button" onclick="window._shopTraitRemove(${i})"
+              style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:2px 6px">✕</button>
+          </div>`).join('')}
+        </div>
+        <button type="button" onclick="window._shopTraitAdd()"
+          style="font-size:.75rem;padding:4px 12px;border-radius:8px;cursor:pointer;
+          border:1px dashed var(--border);background:transparent;color:var(--text-dim);
+          transition:all .12s;width:100%"
+          onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">
+          + Ajouter un trait
+        </button>
+      </div>`;
     } else {
       const inputType = f.type === 'number' ? 'number' : 'text';
       html+=`<div class="form-group"><label>${f.label}</label>
@@ -1225,6 +1350,40 @@ function _bindPrixListener() {
   const input=document.getElementById('si-prix');
   if(input) input.addEventListener('input',()=>updatePrixVente(input.value));
 }
+
+// ── Gestion dynamique des traits (trait_list) ─────────────────────────────────
+function _shopTraitsGet() {
+  const hidden = document.getElementById('si-traits-data');
+  try { return JSON.parse(hidden?.value || '[]'); } catch { return []; }
+}
+function _shopTraitsSet(arr) {
+  const hidden = document.getElementById('si-traits-data');
+  if (hidden) hidden.value = JSON.stringify(arr);
+}
+function _shopTraitsRender(arr) {
+  const list = document.getElementById('si-traits-list');
+  if (!list) return;
+  list.innerHTML = arr.map((t,i)=>`
+    <div style="display:flex;gap:.4rem;align-items:center" data-trait-idx="${i}">
+      <input class="input-field" style="flex:1;font-size:.83rem" value="${t.replace(/"/g,'&quot;')}"
+        oninput="window._shopTraitUpdate(${i},this.value)" placeholder="Trait...">
+      <button type="button" onclick="window._shopTraitRemove(${i})"
+        style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:2px 6px">✕</button>
+    </div>`).join('');
+}
+window._shopTraitAdd = () => {
+  const arr = _shopTraitsGet(); arr.push(''); _shopTraitsSet(arr); _shopTraitsRender(arr);
+  // Focus le dernier input
+  const list = document.getElementById('si-traits-list');
+  const inputs = list?.querySelectorAll('input');
+  inputs?.[inputs.length-1]?.focus();
+};
+window._shopTraitUpdate = (i, val) => {
+  const arr = _shopTraitsGet(); arr[i] = val; _shopTraitsSet(arr);
+};
+window._shopTraitRemove = (i) => {
+  const arr = _shopTraitsGet(); arr.splice(i,1); _shopTraitsSet(arr); _shopTraitsRender(arr);
+};
 
 const _RARETE_LABELS=['','★ Commun','★★ Peu commun','★★★ Rare','★★★★ Très rare'];
 function _rareteLabel(val){ return _RARETE_LABELS[parseInt(val)||0]||''; }
@@ -1297,6 +1456,15 @@ async function saveShopItem(itemId) {
       ITEM_STATS.forEach(stat => {
         data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
       });
+    } else if (f.type === 'trait_list') {
+      // Lire depuis le champ caché + mettre à jour les inputs
+      const inputs = document.querySelectorAll('#si-traits-list input');
+      const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
+      data.traits = arr;
+      data.trait  = arr.join(', '); // rétrocompatibilité
+    } else if (f.type === 'textarea') {
+      const el = document.getElementById(`si-${f.id}`);
+      if (el) data[f.id] = el.value;
     } else {
       const el=document.getElementById(`si-${f.id}`);
       if(el) data[f.id]=f.type==='number'?(parseFloat(el.value)||0):el.value.trim();
@@ -1332,7 +1500,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 
   const SYNC_FIELDS = [
     'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
-    'fo','dex','in','sa','co','ch','trait','type','effet','description',
+    'fo','dex','in','sa','co','ch','trait','traits','portee','type','effet','description',
     'slotArmure','typeArmure','slotBijou','prixVente',
   ];
 
@@ -1407,7 +1575,7 @@ Object.assign(window,{
   previewUpload, updatePrixVente, pickRarete,
   shopSetChar, buyItem, confirmBuyItem, sellInvItemFromShop,
   toggleDispoInfini, saveShopItem, deleteShopItem,
-  openShopItemModal, editShopItem, filterShop,
+  openShopItemModal, openShopItemDetail, editShopItem, filterShop,
   shopCatDragStart, shopCatDragOver, shopCatDragEnd, shopCatDrop,
   shopScDragStart, shopScDragOver, shopScDragEnd, shopScDrop,
   shopItemDragStart, shopItemDragOver, shopItemDragEnd, shopItemDrop,
