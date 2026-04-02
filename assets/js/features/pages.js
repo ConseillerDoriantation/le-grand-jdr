@@ -4,6 +4,9 @@
 import { STATE, FS } from '../core/state.js';
 import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData } from '../data/firestore.js';
 
+// TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
+import { renderCollectionPage } from '../features/collection.js';
+
 const renderCharSheet   = (...args) => window.renderCharSheet?.(...args);
 const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorations: {}, evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
 const getDefaultTutorial = () => window.getDefaultTutorial?.() || [{ title: 'Introduction', content: 'Le tutoriel sera ajouté ici.' }];
@@ -945,20 +948,7 @@ const PAGES = {
 
   // ─── COLLECTION ─────────────────────────────────────────────────────────────
   async collection() {
-    const items = await loadCollection('collection');
-    const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">🃏 Collection</div><div class="page-subtitle">Cartes à collectionner</div></div>`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" onclick="openCollectionModal()">+ Ajouter une carte</button></div>`;
-    if (items.length === 0) {
-      html += `<div class="empty-state"><div class="icon">🃏</div><p>La collection est vide.</p></div>`;
-    } else {
-      html += `<div class="collection-grid">`;
-      items.forEach(c => {
-        html += `<div class="coll-card" onclick="viewCard('${c.id}')"><div class="coll-img">${c.imageUrl ? `<img src="${c.imageUrl}" style="width:100%;height:100%;object-fit:cover">` : `<span>${c.emoji || '🃏'}</span>`}</div><div class="coll-name">${c.nom || 'Carte'}</div>${STATE.isAdmin ? `<div style="padding:0 0.5rem 0.5rem;display:flex;gap:0.3rem;justify-content:center"><button class="btn-icon" onclick="event.stopPropagation();editCard('${c.id}')">✏️</button><button class="btn-icon" onclick="event.stopPropagation();deleteCard('${c.id}')">🗑️</button></div>` : ''}</div>`;
-      });
-      html += '</div>';
-    }
-    content.innerHTML = html;
+    await renderCollectionPage();
   },
 
   // ─── TUTORIAL ───────────────────────────────────────────────────────────────

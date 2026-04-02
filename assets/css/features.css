@@ -460,19 +460,50 @@
 .achievement-text { font-size:0.82rem; color:var(--text-muted); line-height:1.5; }
 
 /* Collection */
-.collection-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:1rem; }
-.coll-card {
-  background:rgba(255,255,255,0.03); border:1px solid var(--border);
-  border-radius:var(--radius); overflow:hidden; text-align:center;
-  transition:all 0.22s; cursor:pointer;
+.collection-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap: 32px; }
+.coll-card { perspective: 600px; cursor: pointer; background: transparent; overflow: hidden; width:100%; aspect-ratio:3/4; position:relative; }
+.coll-card-inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 0.5s ease; }
+.coll-card.flipped .coll-card-inner { transform: rotateY(180deg); }
+.coll-card-front,
+.coll-card-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: var(--radius);
+  overflow: hidden;
 }
-.coll-card:hover { border-color:rgba(124,92,255,0.35); transform:translateY(-3px) scale(1.02); box-shadow:0 8px 24px rgba(0,0,0,0.4); }
+.coll-card-front { transform: rotateY(0deg); z-index: 2; }
+.coll-card-back { transform: rotateY(180deg); z-index: 1; }
+.coll-card:hover { transform:translateY(-3px) scale(1.02) }
 .coll-img {
-  width:100%; aspect-ratio:3/4; object-fit:cover;
-  background:rgba(255,255,255,0.02); display:flex; align-items:center;
-  justify-content:center; font-size:3rem;
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:3rem;
+}
+.coll-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .coll-name { padding:0.6rem 0.4rem; font-size:0.72rem; color:var(--text-muted); font-weight:500; }
+.coll-card-wrapper { position: relative; }
+.coll-admin-btns {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  z-index: 100;
+}
+.coll-admin-btns button { pointer-events: auto; background-color: #111827; transition: background-color 0.2s ease; }
+.coll-admin-btns button:hover { background-color: #1b2432; }
 
 /* Players */
 .players-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:1.2rem; }
