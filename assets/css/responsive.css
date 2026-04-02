@@ -163,8 +163,9 @@
 
   /* Layout principal */
   .app-layout {
-    padding: 12px 10px 88px; /* bottom = hauteur bottom-nav + marge */
+    padding: 12px 10px 88px;
     gap: 0;
+    min-height: auto; /* supprimer le min-height qui crée le vide */
   }
 
   /* Sidebar cachée, bottom nav visible */
@@ -270,11 +271,36 @@
   .sort-row > *:nth-child(4),
   .sort-row > *:nth-child(5) { display: none; }
 
-  /* Header app */
+  /* Header mobile — compact */
   .app-header {
     margin: 10px auto 0;
     width: calc(100% - 20px);
     max-width: calc(100vw - 20px);
+    padding: 0 .75rem;
+    height: 52px;
+  }
+
+  /* Masquer sur mobile : pseudo texte, badge MJ texte, btn thème */
+  #header-username  { display: none; }
+  .admin-badge      { display: none !important; }
+  .btn-theme        { display: none; }
+  .header-admin-link { display: none; }
+
+  /* Logo plus compact */
+  .header-logo {
+    font-size: .82rem;
+    gap: .5rem;
+  }
+  .header-logo span {
+    width: 28px;
+    height: 28px;
+    font-size: .85rem;
+  }
+
+  /* Bouton déconnexion : texte masqué, juste icône */
+  .btn-logout {
+    padding: .4rem .6rem;
+    font-size: .75rem;
   }
 }
 
