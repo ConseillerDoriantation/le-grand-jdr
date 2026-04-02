@@ -66,16 +66,13 @@
 
 <div id="app">
   <header class="app-header">
-    <div style="display:flex;align-items:center;gap:0.8rem">
-      <button id="btn-menu" class="btn-menu" aria-label="Menu" type="button">☰</button>
+    <div style="display:flex;align-items:center;gap:.75rem">
       <div class="header-logo"><span>⚔️</span> Le Grand JDR</div>
     </div>
-
     <div class="header-user">
       <span id="header-username"></span>
-      <span class="admin-badge" id="admin-badge" style="display:none">Maître de Jeu</span>
-      <button id="btn-theme" class="btn-theme" type="button" onclick="toggleTheme()" aria-label="Passer en mode jour" title="Mode jour">☀️</button>
-      <button class="btn-account" type="button" onclick="navigate('account')" title="Mon compte" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:.82rem;padding:4px 8px;border-radius:6px;transition:color .15s" onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-muted)'">⚙️ Compte</button>
+      <span class="admin-badge" id="admin-badge" style="display:none">MJ</span>
+      <button id="btn-theme" class="btn-theme" type="button" onclick="toggleTheme()" aria-label="Thème" title="Changer de thème">☀️</button>
       <button class="btn-logout" type="button" data-action="logout">Déconnexion</button>
     </div>
   </header>
@@ -84,36 +81,75 @@
 
   <div class="app-layout">
     <nav class="sidebar" id="sidebar">
-      <div class="nav-section">
-        <div class="nav-section-title">Principal</div>
-        <div class="nav-item active" data-navigate="dashboard"><span class="icon">🏠</span> Accueil</div>
-        <div class="nav-item" data-navigate="characters"><span class="icon">📜</span> Personnages</div>
-        <div class="nav-item" data-navigate="shop"><span class="icon">🛍️</span> Boutique</div>
+
+      <!-- Logo mobile uniquement -->
+      <div class="sidebar-brand">⚔️</div>
+
+      <!-- Nav principale -->
+      <div class="sidebar-nav-group">
+        <a class="nav-item active" data-navigate="dashboard" title="Accueil">
+          <span class="nav-icon">🏠</span><span class="nav-label">Accueil</span>
+        </a>
+        <a class="nav-item" data-navigate="characters" title="Personnages">
+          <span class="nav-icon">📜</span><span class="nav-label">Personnages</span>
+        </a>
+        <a class="nav-item" data-navigate="shop" title="Boutique">
+          <span class="nav-icon">🛍️</span><span class="nav-label">Boutique</span>
+        </a>
+        <a class="nav-item" data-navigate="story" title="Trame">
+          <span class="nav-icon">📚</span><span class="nav-label">Trame</span>
+        </a>
       </div>
 
-      <div class="nav-section">
-        <div class="nav-section-title">Le Monde</div>
-        <div class="nav-item" data-navigate="world"><span class="icon">📖</span> Monde</div>
-        <div class="nav-item" data-navigate="map"><span class="icon">🗺️</span> Carte</div>
-        <div class="nav-item" data-navigate="npcs"><span class="icon">👥</span> PNJ</div>
-        <div class="nav-item" data-navigate="bastion"><span class="icon">🏰</span> Bastion</div>
-        <div class="nav-item" data-navigate="story"><span class="icon">📚</span> Trame</div>
+      <div class="sidebar-sep"></div>
+
+      <div class="sidebar-nav-group">
+        <a class="nav-item" data-navigate="map" title="Carte">
+          <span class="nav-icon">🗺️</span><span class="nav-label">Carte</span>
+        </a>
+        <a class="nav-item" data-navigate="npcs" title="PNJ">
+          <span class="nav-icon">👥</span><span class="nav-label">PNJ</span>
+        </a>
+        <a class="nav-item" data-navigate="world" title="Le Monde">
+          <span class="nav-icon">📖</span><span class="nav-label">Monde</span>
+        </a>
+        <a class="nav-item" data-navigate="bastion" title="Bastion">
+          <span class="nav-icon">🏰</span><span class="nav-label">Bastion</span>
+        </a>
       </div>
 
-      <div class="nav-section">
-        <div class="nav-section-title">Joueurs</div>
-        <div class="nav-item" data-navigate="players"><span class="icon">⚔️</span> Présentation</div>
-        <div class="nav-item" data-navigate="achievements"><span class="icon">🏆</span> Hauts-Faits</div>
-        <div class="nav-item" data-navigate="collection"><span class="icon">🃏</span> Collection</div>
+      <div class="sidebar-sep"></div>
+
+      <div class="sidebar-nav-group">
+        <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
+          <span class="nav-icon">🏆</span><span class="nav-label">Hauts-Faits</span>
+        </a>
+        <a class="nav-item" data-navigate="players" title="Joueurs">
+          <span class="nav-icon">⚔️</span><span class="nav-label">Joueurs</span>
+        </a>
+        <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
+          <span class="nav-icon">🐉</span><span class="nav-label">Bestiaire</span>
+        </a>
+        <a class="nav-item" data-navigate="recettes" title="Recettes">
+          <span class="nav-icon">🍳</span><span class="nav-label">Recettes</span>
+        </a>
+        <a class="nav-item" data-navigate="informations" title="Infos">
+          <span class="nav-icon">📋</span><span class="nav-label">Infos</span>
+        </a>
+        <a class="nav-item" data-navigate="collection" title="Collection">
+          <span class="nav-icon">🃏</span><span class="nav-label">Collection</span>
+        </a>
       </div>
 
-      <div class="nav-section">
-        <div class="nav-section-title">Ressources</div>
-        <div class="nav-item" data-navigate="informations"><span class="icon">📋</span> Informations</div>
-        <div class="nav-item" data-navigate="recettes"><span class="icon">🍳</span> Recettes</div>
-        <div class="nav-item" data-navigate="bestiaire"><span class="icon">🐉</span> Bestiaire</div>
-        <div class="nav-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span> Admin</div>
+      <div class="sidebar-sep"></div>
+
+      <!-- Admin uniquement -->
+      <div class="sidebar-nav-group">
+        <a class="nav-item admin-only" data-navigate="admin" title="Console MJ" style="display:none">
+          <span class="nav-icon">⚙️</span><span class="nav-label">Console MJ</span>
+        </a>
       </div>
+
     </nav>
 
     <main class="main-content" id="main-content">
@@ -128,11 +164,11 @@
     <button class="bottom-nav-item" type="button" data-navigate="characters" data-page="characters">
       <span class="bn-icon">📜</span><span>Perso</span>
     </button>
-    <button class="bottom-nav-item" type="button" data-navigate="shop" data-page="shop">
-      <span class="bn-icon">🛍️</span><span>Boutique</span>
-    </button>
     <button class="bottom-nav-item" type="button" data-navigate="story" data-page="story">
       <span class="bn-icon">📚</span><span>Trame</span>
+    </button>
+    <button class="bottom-nav-item" type="button" data-navigate="shop" data-page="shop">
+      <span class="bn-icon">🛍️</span><span>Boutique</span>
     </button>
     <button class="bottom-nav-item" type="button" data-toggle-more>
       <span class="bn-icon">⋯</span><span>Plus</span>
@@ -140,17 +176,17 @@
   </nav>
 
   <div class="more-menu" id="more-menu">
-    <div class="more-menu-item" data-navigate="world"><span class="icon">📖</span>Le Monde</div>
     <div class="more-menu-item" data-navigate="map"><span class="icon">🗺️</span>Carte</div>
     <div class="more-menu-item" data-navigate="npcs"><span class="icon">👥</span>PNJ</div>
+    <div class="more-menu-item" data-navigate="world"><span class="icon">📖</span>Monde</div>
     <div class="more-menu-item" data-navigate="bastion"><span class="icon">🏰</span>Bastion</div>
-    <div class="more-menu-item" data-navigate="players"><span class="icon">⚔️</span>Joueurs</div>
     <div class="more-menu-item" data-navigate="achievements"><span class="icon">🏆</span>Hauts-Faits</div>
-    <div class="more-menu-item" data-navigate="collection"><span class="icon">🃏</span>Collection</div>
-    <div class="more-menu-item" data-navigate="informations"><span class="icon">📋</span>Infos</div>
-    <div class="more-menu-item" data-navigate="recettes"><span class="icon">🍳</span>Recettes</div>
+    <div class="more-menu-item" data-navigate="players"><span class="icon">⚔️</span>Joueurs</div>
     <div class="more-menu-item" data-navigate="bestiaire"><span class="icon">🐉</span>Bestiaire</div>
-    <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span>Admin</div>
+    <div class="more-menu-item" data-navigate="recettes"><span class="icon">🍳</span>Recettes</div>
+    <div class="more-menu-item" data-navigate="informations"><span class="icon">📋</span>Infos</div>
+    <div class="more-menu-item" data-navigate="collection"><span class="icon">🃏</span>Collection</div>
+    <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span>Console MJ</div>
   </div>
 </div>
 
