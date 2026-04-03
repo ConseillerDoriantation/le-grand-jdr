@@ -451,9 +451,9 @@ const PAGES = {
       return [...statiq, ...custom];
     }
 
-    const { brut, fondateurs: partFondateurs, reinvesti, base, nbAmelios, evt } =
+    const { brut, fondateurs: partFondateurs, base, nbAmelios, evt } =
       calcRevenu ? calcRevenu(data)
-        : { brut:100, fondateurs:10, reinvesti:90, base:100, nbAmelios:0, evt:{ id:'calme', nom:'Calme', emoji:'☁️', description:'', badgeClass:'badge-blue', badgeText:'±0', couleur:'neutral', modificateur:1, bonus:0 } };
+        : { brut:100, fondateurs:10, base:100, nbAmelios:0, evt:{ id:'calme', nom:'Calme', emoji:'☁️', description:'', badgeClass:'badge-blue', badgeText:'±0', couleur:'neutral', modificateur:1, bonus:0 } };
 
     const amelios          = data.ameliorations || {};
     const niveau           = 1 + Object.values(amelios).filter(Boolean).length;
@@ -552,32 +552,37 @@ const PAGES = {
 
       <!-- REVENUS -->
       <div class="card">
-        <div class="card-header">💰 Génération d'or
-          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">par cycle · +100 or / amélioration</span>
+        <div class="card-header">💰 Cycle de revenus
+          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+100 or de base · +100 or / amélioration</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem">
-          <div class="stat-box" style="text-align:center">
-            <div class="stat-label">Revenu brut</div>
-            <div class="stat-value" style="color:var(--gold);font-size:1.7rem">${brut}</div>
-            <div style="font-size:.68rem;color:var(--text-dim)">or</div>
+
+        <!-- 2 stats principales -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.85rem">
+          <div class="stat-box" style="text-align:center;border-color:rgba(232,184,75,.2)">
+            <div class="stat-label">Revenu du cycle</div>
+            <div class="stat-value" style="color:var(--gold);font-size:2rem;line-height:1.1">${brut}</div>
+            <div style="font-size:.68rem;color:var(--text-dim);margin-top:2px">or généré</div>
           </div>
-          <div class="stat-box" style="text-align:center">
-            <div class="stat-label">Fondateurs (10%)</div>
-            <div class="stat-value" style="color:var(--text-muted);font-size:1.7rem">${partFondateurs}</div>
-            <div style="font-size:.68rem;color:var(--text-dim)">${partParFondateur > 0 ? `${partParFondateur} or chacun` : 'or distribués'}</div>
-          </div>
-          <div class="stat-box" style="text-align:center;border-color:var(--border-accent)">
-            <div class="stat-label">Réinvesti (90%)</div>
-            <div class="stat-value" style="color:var(--green);font-size:1.7rem">${reinvesti}</div>
-            <div style="font-size:.68rem;color:var(--text-dim)">or → trésor</div>
+          <div class="stat-box" style="text-align:center;border-color:rgba(232,184,75,.12)">
+            <div class="stat-label">👑 Fondateurs (10%)</div>
+            <div class="stat-value" style="color:var(--gold);font-size:2rem;line-height:1.1">${partFondateurs}</div>
+            <div style="font-size:.68rem;color:var(--text-dim);margin-top:2px">
+              ${partParFondateur > 0 && fondateursList.length > 1
+                ? `${partParFondateur} or / personne`
+                : fondateursList.length === 1 ? 'or pour le fondateur' : 'aucun fondateur'}</div>
           </div>
         </div>
-        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:.7rem 1rem;display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;font-size:.8rem;color:var(--text-muted)">
+
+        <!-- Formule de calcul -->
+        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:.65rem 1rem;display:flex;flex-wrap:wrap;gap:.4rem .8rem;font-size:.78rem;color:var(--text-muted);align-items:center">
           <span>Base <strong style="color:var(--text)">100</strong></span>
-          <span>+${nbAmelios} amélios <strong style="color:var(--text)">${nbAmelios*100}</strong></span>
-          <span>= <strong style="color:var(--gold)">${base} or</strong></span>
-          ${evt?.id==='vol'  ? `<span>× Événement <strong style="color:#ff6b6b">×0.8</strong></span>` : ''}
-          ${evt?.bonus > 0   ? `<span>+ Événement <strong style="color:var(--green)">+${evt.bonus}</strong></span>` : ''}
+          <span style="color:var(--border-strong)">+</span>
+          <span>${nbAmelios} amélio${nbAmelios !== 1 ? 's' : ''} <strong style="color:var(--text)">×100</strong></span>
+          <span style="color:var(--border-strong)">=</span>
+          <span>Sous-total <strong style="color:var(--gold)">${base} or</strong></span>
+          ${evt?.id === 'vol'  ? `<span style="color:var(--border-strong)">×</span><span style="color:#ff6b6b">Malus −20%</span>` : ''}
+          ${(evt?.bonus||0) > 0 ? `<span style="color:var(--border-strong)">+</span><span style="color:var(--green)">Bonus +${evt.bonus}</span>` : ''}
+          ${evt?.id !== 'calme' ? `<span style="color:var(--border-strong)">=</span><span style="color:var(--gold);font-weight:600">${brut} or</span>` : ''}
         </div>
       </div>
 
@@ -657,30 +662,37 @@ const PAGES = {
       <!-- HISTORIQUE -->
       ${historique.length > 0 ? `
       <div class="card">
-        <div class="card-header">📈 Historique des cycles</div>
+        <div class="card-header">📈 Historique des cycles
+          <span style="font-size:.7rem;color:var(--text-dim);font-weight:400;margin-left:auto">${historique.length} entrée${historique.length>1?'s':''}</span>
+        </div>
         <div style="margin-bottom:.75rem">${sparkline(historique)}</div>
-        <div style="display:flex;flex-direction:column;gap:.4rem">
-          ${[...historique].reverse().slice(0,8).map(h => {
+        <div style="display:flex;flex-direction:column;gap:.35rem">
+          ${[...historique].reverse().slice(0,10).map(h => {
             const isInvest = h.type === 'investissement';
-            return `<div style="display:flex;align-items:center;gap:.75rem;padding:.55rem .75rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
-              <div style="font-size:1.2rem;flex-shrink:0">${isInvest?'💰':'🎲'}</div>
+            const evtInfo  = isInvest ? null : EVENTS.find(e => e.id === h.evtId);
+            const evtColor = evtInfo?.couleur==='crimson'?'#ff6b6b':evtInfo?.couleur==='gold'?'var(--gold)':evtInfo?.couleur==='green'?'var(--green)':'var(--text-muted)';
+            return `<div style="display:flex;align-items:center;gap:.65rem;padding:.5rem .65rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:9px">
+              <span style="font-size:1rem;flex-shrink:0">${isInvest?'💰':evtInfo?.emoji||'🎲'}</span>
               <div style="flex:1;min-width:0">
-                <div style="font-size:.8rem;color:var(--text);font-weight:600">
+                <div style="font-size:.81rem;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                   ${isInvest
-                    ? `Investissement — ${h.investisseur?.nom||'?'}${h.message?' : <em style="color:var(--text-dim);font-weight:400">"${h.message}"</em>':''}`
-                    : `Session ${h.session} — ${h.evenement||'—'}`}
+                    ? `${h.investisseur?.nom||'?'}${h.message?' <span style="color:var(--text-dim);font-weight:400;font-style:italic">— ${h.message}</span>':''}`
+                    : `Cycle ${h.session} <span style="color:${evtColor};font-weight:400;font-size:.75rem">· ${h.evenement||'—'}</span>`}
                 </div>
-                <div style="font-size:.72rem;color:var(--text-dim)">
+                <div style="font-size:.7rem;color:var(--text-dim);display:flex;gap:.5rem;align-items:center;margin-top:1px">
                   ${isInvest
-                    ? `<span style="color:var(--gold)">+${h.montant} or</span> versés au trésor`
-                    : `<span style="color:var(--gold)">+${h.brut} or brut</span> · trésor +${h.reinvesti} · fondateurs +${h.partFondateurs}`}
-                  ${h.date?` · ${h.date}`:''}
+                    ? `<span style="color:var(--gold);font-weight:600">+${h.montant} or</span> <span>versés au trésor</span>`
+                    : `<span style="color:var(--gold);font-weight:600">${h.brut} or</span>
+                       <span>→ fondateurs</span>
+                       <span style="color:var(--gold)">${h.partFondateurs} or</span>
+                       ${h.distributions?.length>0?`<span style="color:var(--text-dim)">(${h.distributions.map(d=>d.nom).join(', ')})</span>`:''}`}
+                  <span style="margin-left:auto;color:var(--text-dim)">${h.date||''}</span>
                 </div>
               </div>
-              ${STATE.isAdmin&&h.id ? `<button class="btn-icon" style="color:#ff6b6b;flex-shrink:0" onclick="supprimerHistorique('${h.id}')" title="Supprimer et annuler">🗑️</button>` : ''}
+              ${STATE.isAdmin&&h.id ? `<button class="btn-icon" style="color:#ff6b6b;flex-shrink:0;font-size:.85rem" onclick="supprimerHistorique('${h.id}')" title="Supprimer ce cycle">🗑️</button>` : ''}
             </div>`;
           }).join('')}
-          ${historique.length > 8 ? `<p style="font-size:.72rem;color:var(--text-dim);text-align:center;margin:.25rem 0">${historique.length-8} entrée(s) plus anciennes</p>` : ''}
+          ${historique.length > 10 ? `<p style="font-size:.72rem;color:var(--text-dim);text-align:center;margin:.2rem 0">${historique.length-10} cycle(s) plus anciens</p>` : ''}
         </div>
       </div>` : ''}
 
