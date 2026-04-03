@@ -898,6 +898,7 @@ const PAGES = {
       }).join('')}
     </div>`;
 
+
     // ── Contenu catégorie active ──────────────────────────────────────────
     if (catItems.length === 0) {
       html += `
