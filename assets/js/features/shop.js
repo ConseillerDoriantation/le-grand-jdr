@@ -179,6 +179,8 @@ async function loadShopData() {
   ]);
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort((a,b) => (a.ordre??999)-(b.ordre??999));
+  // Exposer les sousTypes distincts pour que characters.js puisse les lire
+  window._shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -822,6 +824,9 @@ async function confirmBuyItem(itemId) {
     effet:item.effet||'', description:item.description||'',
     slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
     slotBijou:item.slotBijou||'',
+    sousType:item.sousType||'',
+    portee:item.portee||'',
+    traits:Array.isArray(item.traits)?[...item.traits]:[],
   };
 
   const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
@@ -1120,7 +1125,7 @@ function openCatModal(catId) {
     </div>
     <div class="form-group"><label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
       <div class="sh-upload-simple">
-        <input type="file" id="cat-img-file" accept="image/*" onchange="previewUploadJpeg('cat-img-file','cat-img-preview','cat-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="file" id="cat-img-file" accept="image/*" onchange="previewUpload('cat-img-file','cat-img-preview','cat-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
         <input type="hidden" id="cat-img-b64" value="${cat?.image||''}">
       </div>
       <div id="cat-img-preview">${cat?.image?`<img src="${cat.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
@@ -1175,7 +1180,7 @@ function openSubCatModal(catId,scId) {
     </div>
     <div class="form-group"><label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
       <div class="sh-upload-simple">
-        <input type="file" id="sc-img-file" accept="image/*" onchange="previewUploadJpeg('sc-img-file','sc-img-preview','sc-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="file" id="sc-img-file" accept="image/*" onchange="previewUpload('sc-img-file','sc-img-preview','sc-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
         <input type="hidden" id="sc-img-b64" value="${sc?.image||''}">
       </div>
       <div id="sc-img-preview">${sc?.image?`<img src="${sc.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
@@ -1230,7 +1235,7 @@ function openItemModal(itemId) {
     </div>
     <div class="form-group"><label>Image</label>
       <div class="sh-upload-simple">
-        <input type="file" id="si-img-file" accept="image/*" onchange="previewUploadJpeg('si-img-file','si-img-preview','si-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="file" id="si-img-file" accept="image/*" onchange="previewUpload('si-img-file','si-img-preview','si-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
         <input type="hidden" id="si-img-b64" value="${item?.image||''}">
       </div>
       <div id="si-img-preview">${item?.image?`<img src="${item.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
@@ -1410,6 +1415,29 @@ function refreshItemFields(catId) {
 }
 function refreshSubCatSelect(catId){ refreshItemFields(catId); }
 
+// ── Upload image ──────────────────────────────────────────────────────────────
+function previewUpload(fileInputId,previewId,hiddenId) {
+  const file=document.getElementById(fileInputId)?.files?.[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=400; let w=img.width,h=img.height;
+      if(w>MAX||h>MAX){ if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;} }
+      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const b64=canvas.toDataURL('image/jpeg',0.72);
+      const hidden=document.getElementById(hiddenId); if(hidden) hidden.value=b64;
+      const preview=document.getElementById(previewId); if(preview) preview.innerHTML=`<img src="${b64}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
+      const kb=Math.round(b64.length*3/4/1024);
+      if(kb>700) showNotif(`⚠️ Image encore lourde (${kb}KB).`,'error');
+      else showNotif(`✅ Image prête (${kb}KB)`,'success');
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 async function saveShopItem(itemId) {
   const catId=document.getElementById('si-cat')?.value||'';
   const cat=_cats.find(c=>c.id===catId);
@@ -1478,7 +1506,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
   const SYNC_FIELDS = [
     'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
     'fo','dex','in','sa','co','ch','trait','traits','portee','type','effet','description',
-    'slotArmure','typeArmure','slotBijou','prixVente',
+    'slotArmure','typeArmure','slotBijou','prixVente','sousType',
   ];
 
   const updates = [];
@@ -1549,7 +1577,7 @@ Object.assign(window,{
   openCatModal, saveCat, deleteCat,
   openSubCatModal, saveSubCat, deleteSubCat,
   openItemModal, refreshItemFields, refreshSubCatSelect,
-  updatePrixVente, pickRarete,
+  previewUpload, updatePrixVente, pickRarete,
   shopSetChar, buyItem, confirmBuyItem, sellInvItemFromShop,
   toggleDispoInfini, saveShopItem, deleteShopItem,
   openShopItemModal, openShopItemDetail, editShopItem, filterShop,
