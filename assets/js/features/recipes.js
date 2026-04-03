@@ -292,10 +292,10 @@ function openRecipeModal(type, id = '') {
         <label>Nom</label>
         <input class="input-field" id="rec-nom" value="${r?.nom||''}" placeholder="Nom de la recette...">
       </div>
-      ${rType === 'potion' ? `
+      ${(rType === 'potion' || rType === 'cuisine') ? `
       <div class="form-group">
         <label>Famille</label>
-        <input class="input-field" id="rec-famille" value="${r?.famille||''}" placeholder="Soin, Élixir, Alchimie...">
+        <input class="input-field" id="rec-famille" value="${r?.famille||''}" placeholder="${rType === 'cuisine' ? 'Soupe, Rôti, Pâtisserie...' : 'Soin, Élixir, Alchimie...'}">
       </div>` : ''}
       ${!isCraft ? `
       <div class="form-group">
