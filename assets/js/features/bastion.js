@@ -50,21 +50,18 @@ export const BASTION_EVENTS = [
 // ══════════════════════════════════════════════════════════════════════════════
 
 export function calculerRevenuBastion(data) {
-  // Compte les améliorations ENTIÈREMENT financées (statut=true OU fonds réunis)
   const amelios   = data.ameliorations || {};
   const custom    = data.ameliorationsCustom || [];
-  // Améliorations statiques débloquées
   const nbStatiq  = Object.values(amelios).filter(Boolean).length;
-  // Améliorations custom débloquées (fonds == cout)
   const nbCustom  = custom.filter(a => (a.fondsActuels||0) >= (a.cout||0) && (a.cout||0) > 0).length;
   const nbAmelios = nbStatiq + nbCustom;
   const base      = 100 + nbAmelios * 100;
   const evtId     = data.evenementCourant || 'calme';
   const evt       = BASTION_EVENTS.find(e => e.id === evtId) || BASTION_EVENTS[2];
   const brut      = Math.round(base * evt.modificateur) + (evt.bonus || 0);
-  const fondateurs= Math.round(brut * 0.1);
-  const reinvesti = brut - fondateurs;
-  return { brut, fondateurs, reinvesti, base, nbAmelios, evt };
+  // 10% aux fondateurs, 90% disparaissent (ne vont pas au trésor)
+  const fondateurs = Math.round(brut * 0.1);
+  return { brut, fondateurs, base, nbAmelios, evt };
 }
 
 export function getDefaultBastion() {
@@ -103,17 +100,26 @@ async function _setCharOr(char, newOr) {
 
 // Fusionner les améliorations statiques avec les données sauvegardées
 function _getAllAmeliorations(data) {
-  const amelios = data.ameliorations || {};
-  // Statiques avec leur état
-  const statiques = BASTION_AMELIORATIONS_DEFAULT.map(a => ({
-    ...a, type:'statique',
-    fondsActuels: amelios[a.id] ? a.cout : (data.ameliorationsFonds?.[a.id] || 0),
-    debloquee: !!amelios[a.id],
-  }));
-  // Custom
+  const amelios  = data.ameliorations || {};
+  const config   = data.ameliorationsConfig || {}; // overrides MJ (coût, nom, desc...)
+  const statiques = BASTION_AMELIORATIONS_DEFAULT.map(a => {
+    const ov   = config[a.id] || {};
+    const cout = ov.cout ?? a.cout;
+    return {
+      ...a,
+      nom:         ov.nom         || a.nom,
+      emoji:       ov.emoji       || a.emoji,
+      description: ov.description || a.description,
+      detail:      ov.detail      || a.detail,
+      cout,
+      type:        'statique',
+      fondsActuels: amelios[a.id] ? cout : (data.ameliorationsFonds?.[a.id] || 0),
+      debloquee:   !!amelios[a.id],
+    };
+  });
   const custom = (data.ameliorationsCustom || []).map(a => ({
     ...a, type:'custom',
-    debloquee: (a.fondsActuels||0) >= (a.cout||1),
+    debloquee: (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0,
   }));
   return [...statiques, ...custom];
 }
@@ -199,7 +205,7 @@ async function gererAmeliorations() {
     </div>
     <div style="display:flex;flex-direction:column;gap:.5rem;max-height:60vh;overflow-y:auto">
       ${toutes.map(a => {
-        const pct  = a.cout > 0 ? Math.min(100, Math.round((a.fondsActuels||0)/a.cout*100)) : 100;
+        const pct      = a.cout > 0 ? Math.min(100, Math.round((a.fondsActuels||0)/a.cout*100)) : 100;
         const pctColor = pct>=100?'#22c38e':pct>50?'var(--gold)':'#4f8cff';
         return `
         <div style="padding:.7rem .85rem;background:var(--bg-elevated);border:1px solid ${a.debloquee?'rgba(34,195,142,.3)':'var(--border)'};border-radius:12px">
@@ -209,10 +215,10 @@ async function gererAmeliorations() {
               <span style="font-family:'Cinzel',serif;font-size:.85rem;color:${a.debloquee?'#22c38e':'var(--text)'}">${a.nom}</span>
               ${a.type==='custom'?`<span style="font-size:.6rem;background:rgba(79,140,255,.12);color:#7fb0ff;border:1px solid rgba(79,140,255,.2);border-radius:4px;padding:1px 5px">Custom</span>`:''}
             </div>
-            <div style="display:flex;gap:.3rem;flex-shrink:0">
-              ${a.type==='custom'?`<button class="btn-icon" style="font-size:.8rem" onclick="modifierAmeliorationCustom('${a.id}')">✏️</button>
-              <button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerAmeliorationCustom('${a.id}')">🗑️</button>`:''}
-              ${!a.debloquee?`<button class="btn-icon" style="font-size:.75rem;color:var(--gold)" onclick="debloquerManuellement('${a.id}','${a.type}')" title="Débloquer manuellement">✅</button>`:''}
+            <div style="display:flex;gap:.3rem;flex-shrink:0;align-items:center">
+              <button class="btn-icon" style="font-size:.8rem" onclick="modifierAmelioration('${a.id}','${a.type||'statique'}')" title="Modifier le coût et les infos">✏️</button>
+              ${a.type==='custom'?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerAmeliorationCustom('${a.id}')">🗑️</button>`:''}
+              ${!a.debloquee?`<button class="btn-icon" style="font-size:.75rem;color:var(--gold)" onclick="debloquerManuellement('${a.id}','${a.type||'statique'}')" title="Débloquer manuellement">✅</button>`:''}
             </div>
           </div>
           ${a.description?`<p style="font-size:.74rem;color:var(--text-muted);margin:0 0 .4rem">${a.description}</p>`:''}
@@ -227,6 +233,61 @@ async function gererAmeliorations() {
       }).join('')}
     </div>
   `);
+}
+
+// Modifier une amélioration (statique ou custom)
+async function modifierAmelioration(id, type) {
+  const current = (await getDocData('bastion','main')) || getDefaultBastion();
+  let a;
+  if (type === 'statique') {
+    const base   = BASTION_AMELIORATIONS_DEFAULT.find(x => x.id === id);
+    if (!base) return;
+    const config = (current.ameliorationsConfig||{})[id] || {};
+    a = { ...base, cout: config.cout ?? base.cout, description: config.description || base.description };
+  } else {
+    a = (current.ameliorationsCustom||[]).find(x => x.id === id);
+    if (!a) return;
+  }
+  openModal(`✏️ Modifier — ${a.nom}`, `
+    <div class="form-group"><label>Nom</label>
+      <input class="input-field" id="ma-nom" value="${a.nom||''}"></div>
+    <div class="form-group"><label>Emoji</label>
+      <input class="input-field" id="ma-emoji" value="${a.emoji||'🔧'}" style="max-width:80px"></div>
+    <div class="form-group">
+      <label>Coût total (or) <span style="font-size:.7rem;color:var(--text-dim)">— montant à atteindre pour débloquer</span></label>
+      <input type="number" class="input-field" id="ma-cout" value="${a.cout||500}" min="1">
+    </div>
+    <div class="form-group"><label>Description courte</label>
+      <input class="input-field" id="ma-desc" value="${a.description||''}"></div>
+    <div class="form-group"><label>Détail complet</label>
+      <textarea class="input-field" id="ma-detail" rows="3">${a.detail||''}</textarea></div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
+      onclick="confirmerModifAmelioration('${id}','${type}')">Enregistrer</button>
+  `);
+}
+
+async function confirmerModifAmelioration(id, type) {
+  const nom  = document.getElementById('ma-nom')?.value?.trim();
+  if (!nom) { showNotif('Nom requis.','error'); return; }
+  const cout = parseInt(document.getElementById('ma-cout')?.value)||500;
+  const desc = document.getElementById('ma-desc')?.value?.trim()||'';
+  const detail = document.getElementById('ma-detail')?.value?.trim()||'';
+  const emoji = document.getElementById('ma-emoji')?.value?.trim()||'🔧';
+  const current = (await getDocData('bastion','main')) || getDefaultBastion();
+
+  if (type === 'statique') {
+    // Stocker l'override dans ameliorationsConfig
+    const config = { ...(current.ameliorationsConfig||{}), [id]: { nom, cout, description: desc, detail, emoji } };
+    // Si le coût change et que des fonds ont déjà été investis, les conserver
+    await saveDoc('bastion','main', { ...current, ameliorationsConfig: config });
+  } else {
+    const customs = (current.ameliorationsCustom||[]).map(a =>
+      a.id === id ? { ...a, nom, cout, description: desc, detail, emoji } : a);
+    await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
+  }
+  closeModalDirect();
+  showNotif('Amélioration mise à jour.','success');
+  await PAGES.bastion();
 }
 
 // Créer une amélioration custom
@@ -434,9 +495,11 @@ async function tirerEvenement() {
   const idx     = Math.floor(Math.random() * BASTION_EVENTS.length);
   const evt     = BASTION_EVENTS[idx];
   const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const { brut, fondateurs: partFondateurs, reinvesti } = calculerRevenuBastion({ ...current, evenementCourant: evt.id });
+  const { brut, fondateurs: partFondateurs } = calculerRevenuBastion({ ...current, evenementCourant: evt.id });
   const fondateursList   = _normFondateurs(current.fondateurs||[]);
-  const partParFondateur = fondateursList.length > 0 ? Math.round(partFondateurs/fondateursList.length) : 0;
+  const partParFondateur = fondateursList.length > 0 ? Math.round(partFondateurs / fondateursList.length) : 0;
+
+  // Distribuer les 10% aux fondateurs
   const distributions = [];
   if (partParFondateur > 0) {
     for (const f of fondateursList) {
@@ -447,16 +510,24 @@ async function tirerEvenement() {
       distributions.push({ charId: f.charId, nom: f.nom, montant: partParFondateur });
     }
   }
+
   const historique = current.historique || [];
   historique.push({
-    id: `h_${Date.now()}`, session: historique.length+1,
-    date: new Date().toLocaleDateString('fr-FR'),
-    brut, reinvesti, partFondateurs, partParFondateur,
-    evenement: evt.nom, evtId: evt.id, distributions,
+    id:              `h_${Date.now()}`,
+    session:         historique.length + 1,
+    date:            new Date().toLocaleDateString('fr-FR'),
+    brut, partFondateurs, partParFondateur,
+    evenement:       evt.nom, evtId: evt.id,
+    distributions,
   });
-  await saveDoc('bastion','main', { ...current, evenementCourant:evt.id, tresor:(current.tresor||0)+reinvesti, historique });
-  const distText = distributions.length>0 ? ` — ${distributions.map(d=>`${d.nom} +${d.montant} or`).join(', ')}` : '';
-  showNotif(`${evt.emoji} ${evt.nom} — +${reinvesti} or au trésor${distText}`,'success');
+
+  // Le trésor n'est PAS modifié — les 90% ne vont nulle part
+  await saveDoc('bastion','main', { ...current, evenementCourant: evt.id, historique });
+
+  const distText = distributions.length > 0
+    ? ` — Fondateurs : ${distributions.map(d => `${d.nom} +${d.montant} or`).join(', ')}`
+    : ' — Aucun fondateur';
+  showNotif(`${evt.emoji} ${evt.nom} — ${brut} or brut, ${partFondateurs} or distribués${distText}`, 'success');
   await PAGES.bastion();
 }
 
@@ -504,28 +575,35 @@ async function confirmerInvestissement() {
 }
 
 async function supprimerHistorique(entryId) {
-  if (!confirm('Supprimer cette entrée ? Les effets financiers seront annulés.')) return;
-  const current  = (await getDocData('bastion','main')) || getDefaultBastion();
+  if (!confirm('Supprimer ce cycle ? L\'or distribué aux fondateurs sera récupéré.')) return;
+  const current    = (await getDocData('bastion','main')) || getDefaultBastion();
   const historique = current.historique || [];
-  const entry    = historique.find(h => h.id === entryId);
+  const entry      = historique.find(h => h.id === entryId);
   if (!entry) { showNotif('Entrée introuvable.','error'); return; }
-  let tresor = current.tresor || 0;
+
   const chars = STATE.characters || [];
+
   if (entry.type === 'investissement') {
-    tresor -= entry.montant;
-    const char = chars.find(c => c.id === entry.investisseur?.charId);
+    // Rembourser le joueur et retirer du trésor
+    const tresor = (current.tresor || 0) - entry.montant;
+    const char   = chars.find(c => c.id === entry.investisseur?.charId);
     if (char) await _setCharOr(char, _getCharOr(char) + entry.montant);
+    const newHist = historique.filter(h => h.id !== entryId);
+    newHist.filter(h=>h.session).forEach((h,i)=>{ h.session = i+1; });
+    await saveDoc('bastion','main', { ...current, tresor: Math.max(0, tresor), historique: newHist });
   } else {
-    tresor -= (entry.reinvesti||0);
+    // Cycle normal : reprendre uniquement les 10% distribués aux fondateurs
+    // Le trésor n'a pas été modifié lors du cycle, donc on ne le touche pas
     for (const d of (entry.distributions||[])) {
       const char = chars.find(c => c.id === d.charId);
       if (char) await _setCharOr(char, Math.max(0, _getCharOr(char) - d.montant));
     }
+    const newHist = historique.filter(h => h.id !== entryId);
+    newHist.filter(h=>h.session).forEach((h,i)=>{ h.session = i+1; });
+    await saveDoc('bastion','main', { ...current, historique: newHist });
   }
-  const newHist = historique.filter(h => h.id !== entryId);
-  newHist.filter(h=>h.session).forEach((h,i)=>{ h.session = i+1; });
-  await saveDoc('bastion','main', { ...current, tresor:Math.max(0,tresor), historique:newHist });
-  showNotif('Entrée supprimée et effets annulés.','success');
+
+  showNotif('Cycle supprimé et distributions annulées.','success');
   await PAGES.bastion();
 }
 
@@ -954,7 +1032,9 @@ Object.assign(window, {
   BASTION_AMELIORATIONS: BASTION_AMELIORATIONS_DEFAULT,
   BASTION_EVENTS, calculerRevenuBastion, getDefaultBastion,
   editBastion, saveBastionInfos,
-  gererAmeliorations, creerAmeliorationCustom, modifierAmeliorationCustom,
+  gererAmeliorations,
+  modifierAmelioration, confirmerModifAmelioration,
+  creerAmeliorationCustom, modifierAmeliorationCustom,
   sauvegarderAmeliorationCustom, supprimerAmeliorationCustom, debloquerManuellement,
   investirAmelioration, confirmerInvestissementAmelioration,
   debloquerAmelioration, confirmDebloquer,
