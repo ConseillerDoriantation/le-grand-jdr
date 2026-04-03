@@ -313,17 +313,17 @@ function renderFog() {
       return;
     }
 
-    // ── JOUEUR : fog opaque sur TOUTE la carte ────────────────────────────────
+    // ── JOUEUR : fog noir total sur TOUTE la carte ───────────────────────────
     // Les zones dessinées par le MJ = zones RÉVÉLÉES (trous dans le fog)
     if (polys.length === 0) {
-      // Aucune zone révélée : fog total
-      ctx.fillStyle = 'rgba(8,12,20,0.96)';
+      // Aucune zone révélée : noir absolu
+      ctx.fillStyle = 'rgb(0,0,0)';
       ctx.fillRect(0, 0, W, H);
       return;
     }
 
-    // Fog complet
-    ctx.fillStyle = 'rgba(8,12,20,0.96)';
+    // Noir absolu sur toute la carte
+    ctx.fillStyle = 'rgb(0,0,0)';
     ctx.fillRect(0, 0, W, H);
 
     // Percer les zones révélées
