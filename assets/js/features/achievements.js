@@ -543,6 +543,48 @@ function setupAchievementsDnd(catId) {
   });
 }
 
+// ── LIGHTBOX IMAGE ────────────────────────────────────────────────────────────
+function _achOpenImage(url) {
+  // Overlay plein écran avec l'image agrandie, clic ou Escape pour fermer
+  const existing = document.getElementById('ach-lightbox');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ach-lightbox';
+  overlay.style.cssText = [
+    'position:fixed;inset:0;z-index:9999',
+    'background:rgba(0,0,0,0.92)',
+    'display:flex;align-items:center;justify-content:center',
+    'cursor:zoom-out',
+    'animation:achLbFade .18s ease',
+  ].join(';');
+
+  overlay.innerHTML = `
+    <style>
+      @keyframes achLbFade { from { opacity:0 } to { opacity:1 } }
+      @keyframes achLbScale { from { transform:scale(.92) } to { transform:scale(1) } }
+    </style>
+    <img src="${url}"
+      style="max-width:92vw;max-height:90vh;object-fit:contain;border-radius:12px;
+             box-shadow:0 24px 80px rgba(0,0,0,.8);
+             animation:achLbScale .18s ease;pointer-events:none;display:block">
+    <button style="position:absolute;top:20px;right:24px;background:rgba(255,255,255,.1);
+      border:1px solid rgba(255,255,255,.2);border-radius:999px;
+      color:#fff;font-size:1.2rem;width:40px;height:40px;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      transition:background .15s">✕</button>
+  `;
+
+  const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
+  overlay.addEventListener('click', close);
+  overlay.querySelector('button').addEventListener('click', close);
+
+  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
+
+  document.body.appendChild(overlay);
+}
+
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
 PAGES.achievements = async function() {
@@ -563,4 +605,5 @@ Object.assign(window, {
   editAchievement,
   deleteAchievement,
   setupAchievementsDnd,
+  _achOpenImage,
 });
