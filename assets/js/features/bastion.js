@@ -165,6 +165,9 @@ async function editBastion() {
     <div class="form-group"><label>Description</label>
       <textarea class="input-field" id="b-description" rows="3">${current.description||''}</textarea></div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBastionInfos()">Enregistrer</button>
+    <hr style="border:none;border-top:1px solid var(--border);margin:1rem 0">
+    <button class="btn btn-outline" style="width:100%;color:#ff6b6b;border-color:rgba(255,107,107,.3);font-size:.8rem"
+      onclick="resetBastion()">🗑️ Remettre le Bastion à zéro</button>
   `);
 }
 
@@ -929,8 +932,16 @@ async function confirmerDepotOrBastion() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MISSIONS SPÉCIALES
+// RESET COMPLET DU BASTION
 // ══════════════════════════════════════════════════════════════════════════════
+
+async function resetBastion() {
+  if (!confirm('⚠️ Remettre le Bastion à zéro ?\n\nToutes les données seront effacées : historique, inventaire, améliorations, missions, journal, fondateurs.\n\nCette action est irréversible.')) return;
+  await saveDoc('bastion', 'main', getDefaultBastion());
+  closeModalDirect();
+  showNotif('Bastion remis à zéro.', 'success');
+  await PAGES.bastion();
+}
 
 async function ouvrirMissionsBastion() {
   const current  = (await getDocData('bastion','main')) || getDefaultBastion();
@@ -1031,7 +1042,7 @@ async function saveBastionLog() {
 Object.assign(window, {
   BASTION_AMELIORATIONS: BASTION_AMELIORATIONS_DEFAULT,
   BASTION_EVENTS, calculerRevenuBastion, getDefaultBastion,
-  editBastion, saveBastionInfos,
+  editBastion, saveBastionInfos, resetBastion,
   gererAmeliorations,
   modifierAmelioration, confirmerModifAmelioration,
   creerAmeliorationCustom, modifierAmeliorationCustom,
