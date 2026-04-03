@@ -509,13 +509,14 @@ function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
 // Retourne le bonus de maîtrise d'un item pour un personnage
 function _getMaitriseBonus(c, item = {}) {
   if (!c?.maitrises?.length) return 0;
-  // Le type d'arme est dans item.typeArme (champ manuel) ou item.sousType (boutique)
-  const typeArme = (item.typeArme || item.sousType || '').toLowerCase().trim();
+  // Priorité : sousType (copié depuis la boutique) puis typeArme (saisi manuellement)
+  const typeArme = (item.sousType || item.typeArme || '').toLowerCase().trim();
   if (!typeArme) return 0;
   let best = 0;
   for (const m of c.maitrises) {
     const mType = (m.typeArme || '').toLowerCase().trim();
-    if (mType && typeArme.includes(mType)) {
+    if (!mType) continue;
+    if (typeArme === mType || typeArme.includes(mType) || mType.includes(typeArme)) {
       best = Math.max(best, parseInt(m.niveau) || 0);
     }
   }
@@ -1171,6 +1172,8 @@ function _renderInventaireBoutique(char) {
     if (item.ca || item.ca === 0) infos.push({ label: '🛡️ CA', val: item.ca });
     if (bonusText)        infos.push({ label: 'Stats',      val: bonusText,   color: '#4f8cff' });
     if (item.trait)       infos.push({ label: 'Trait',      val: item.trait,   color: '#b47fff', italic: true });
+    (item.traits||[]).filter(t => t && t !== item.trait).forEach(t =>
+      infos.push({ label: 'Trait', val: t, color: '#b47fff', italic: true }));
     if (item.type)        infos.push({ label: 'Type',       val: item.type });
     if (item.effet)       infos.push({ label: 'Effet',      val: item.effet });
     if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
@@ -1291,6 +1294,7 @@ function renderCharEquip(c, canEdit) {
             ${formatBadge}
           </div>
           ${item.trait?`<div class="cs-weapon-trait">${item.trait}</div>`:''}
+          ${(item.traits||[]).length > 0 ? item.traits.filter(t => t && t !== item.trait).map(t => `<div class="cs-weapon-trait">${t}</div>`).join('') : ''}
           <div class="cs-weapon-stats">
             <span class="cs-ws">
               <span class="cs-ws-label">Toucher</span>
@@ -1927,6 +1931,9 @@ function renderCharInventaire(c, canEdit) {
     if (item.ca != null && item.ca !== '') chips.push({ label: 'CA', val: `+${parseInt(item.ca)||0}`, color: '#4f8cff' });
     if (bonusText) chips.push({ label: 'Stats', val: bonusText, color: '#4f8cff' });
     if (item.trait) chips.push({ label: 'Trait', val: item.trait, color: '#b47fff' });
+    // Traits supplémentaires du tableau traits[] (en évitant le doublon avec trait)
+    const extraTraits = (item.traits||[]).filter(t => t && t !== item.trait);
+    extraTraits.forEach(t => chips.push({ label: 'Trait', val: t, color: '#b47fff' }));
     // Type libre uniquement si pas déjà couvert
     if (item.type && !item.degats && !item.slotArmure && !item.slotBijou && !item.format)
       chips.push({ label: 'Type', val: item.type, color: 'var(--text-muted)' });
@@ -3320,7 +3327,8 @@ function editEquipSlot(slot) {
       if (isWeapon) {
         const formats = SLOT_ARME_FORMATS[slot] || TOUTES_ARMES;
         if (tpl === 'arme' || item.format) {
-          // Item structuré : filtrer par format
+          // Item structuré : si format vide mais template='arme', accepter dans tous les slots arme
+          if (!item.format && tpl === 'arme') return true;
           return formats.includes(item.format);
         }
         // Item non structuré (ancien format) : accepter si le type ressemble à une arme
@@ -3700,14 +3708,40 @@ function renderCharMaitrises(c, canEdit) {
   return html;
 }
 
+// Construit le sélecteur de type d'arme (sousTypes de la boutique + valeur courante)
+function _maitriseSousTypeSelect(current = '') {
+  const shopTypes = window._shopSousTypes || [];
+  // Fusionner avec les maitrises existantes du perso pour ne rien perdre
+  const existing = (STATE.activeChar?.maitrises||[]).map(m=>m.typeArme).filter(Boolean);
+  const all = [...new Set([...shopTypes, ...existing])].sort();
+
+  if (all.length === 0) {
+    // Boutique pas encore visitée — input texte fallback
+    return `<input class="input-field" id="mait-type" value="${current}" placeholder="Arc, Épée, Lance...">
+      <div style="font-size:.7rem;color:var(--text-dim);margin-top:.3rem">
+        💡 Visitez la boutique une fois pour charger la liste des types disponibles.
+      </div>`;
+  }
+
+  const options = all.map(t =>
+    `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`
+  ).join('');
+
+  return `<select class="input-field" id="mait-type">
+    ${current && !all.includes(current) ? `<option value="${current}" selected>${current}</option>` : ''}
+    <option value="" ${!current ? 'selected' : ''} disabled>— Choisir un type —</option>
+    ${options}
+  </select>`;
+}
+
 async function addMaitrise() {
   const c = STATE.activeChar; if (!c) return;
   openModal('⚔️ Nouvelle maîtrise', `
     <div class="form-group"><label>Type d'arme</label>
-      <input class="input-field" id="mait-type" placeholder="Épée, Lance, Bâton, Arc, Dague...">
+      ${_maitriseSousTypeSelect('')}
     </div>
     <div class="form-group">
-      <label>Niveau de maîtrise <span style="color:var(--text-dim);font-weight:400">(1 = +1 aux dégâts, 2 = +2...)</span></label>
+      <label>Niveau <span style="color:var(--text-dim);font-weight:400">(+1 aux dégâts par niveau)</span></label>
       <input type="number" class="input-field" id="mait-niveau" value="1" min="0" max="5">
     </div>
     <div class="form-group"><label>Note (optionnel)</label>
@@ -3722,10 +3756,10 @@ async function editMaitrise(idx) {
   const m = (c.maitrises || [])[idx]; if (!m) return;
   openModal('✏️ Modifier la maîtrise', `
     <div class="form-group"><label>Type d'arme</label>
-      <input class="input-field" id="mait-type" value="${m.typeArme||''}">
+      ${_maitriseSousTypeSelect(m.typeArme||'')}
     </div>
     <div class="form-group">
-      <label>Niveau de maîtrise</label>
+      <label>Niveau</label>
       <input type="number" class="input-field" id="mait-niveau" value="${m.niveau||1}" min="0" max="5">
     </div>
     <div class="form-group"><label>Note (optionnel)</label>
