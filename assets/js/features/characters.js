@@ -496,7 +496,30 @@ function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
 function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
   if (!item.degats) return '—';
   const statKey = item.degatsStat || fallbackKey;
-  return `${item.degats} ${modStr(getMod(c, statKey))}`;
+  const statMod = getMod(c, statKey);
+  // Bonus de maîtrise : chercher dans c.maitrises le type qui correspond
+  const maitrisesBonus = _getMaitriseBonus(c, item);
+  const totalMod = statMod + maitrisesBonus;
+  const maitriseTag = maitrisesBonus > 0
+    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
+    : '';
+  return `${item.degats} ${modStr(totalMod)}${maitriseTag}`;
+}
+
+// Retourne le bonus de maîtrise d'un item pour un personnage
+function _getMaitriseBonus(c, item = {}) {
+  if (!c?.maitrises?.length) return 0;
+  // Le type d'arme est dans item.typeArme (champ manuel) ou item.sousType (boutique)
+  const typeArme = (item.typeArme || item.sousType || '').toLowerCase().trim();
+  if (!typeArme) return 0;
+  let best = 0;
+  for (const m of c.maitrises) {
+    const mType = (m.typeArme || '').toLowerCase().trim();
+    if (mType && typeArme.includes(mType)) {
+      best = Math.max(best, parseInt(m.niveau) || 0);
+    }
+  }
+  return best;
 }
 
 function calcCA(c) {
@@ -672,8 +695,8 @@ function renderCharSheet(c, keepTab) {
     { id:'quetes',     label:'📜 Quêtes'      },
     { id:'plus',       label:'···'            },
   ];
-  // Onglets "plus" = compte + notes (dans un sous-menu)
-  const isSecondaryTab = ['compte','notes'].includes(currentTab);
+  // Onglets "plus" = compte + notes + maitrises (dans un sous-menu)
+  const isSecondaryTab = ['compte','notes','maitrises'].includes(currentTab);
 
   area.innerHTML = `
 <div class="cs-shell">
@@ -830,13 +853,13 @@ function renderCharSheet(c, keepTab) {
       }).join('')}
     </div>
 
-    <!-- Sous-menu onglets secondaires (compte + notes) -->
+    <!-- Sous-menu onglets secondaires (compte + notes + maitrises) -->
     <div id="cs-secondary-tabs" style="display:${isSecondaryTab?'flex':'none'};
       gap:.35rem;padding:.4rem 0 .1rem;border-bottom:1px solid var(--border);margin-bottom:.15rem">
-      ${['compte','notes'].map(tab => `
+      ${['compte','notes','maitrises'].map(tab => `
       <button class="cs-tab ${currentTab===tab?'active':''}" style="font-size:.72rem;min-height:30px;padding:.3rem .65rem"
         onclick="showCharTab('${tab}',this)">
-        ${tab==='compte'?'💰 Compte':'📝 Notes'}
+        ${tab==='compte'?'💰 Compte':tab==='notes'?'📝 Notes':'⚔️ Maîtrises'}
       </button>`).join('')}
     </div>
 
@@ -852,7 +875,7 @@ function renderCharSheet(c, keepTab) {
     const panel = document.getElementById('cs-secondary-tabs');
     const isVisible = panel.style.display !== 'none';
     panel.style.display = isVisible ? 'none' : 'flex';
-    if (!isVisible && !['compte','notes'].includes(window._currentCharTab)) {
+    if (!isVisible && !['compte','notes','maitrises'].includes(window._currentCharTab)) {
       showCharTab('compte', document.querySelector('#cs-secondary-tabs .cs-tab'));
     }
   };
@@ -863,19 +886,20 @@ function _renderTab(tab, c, canEdit) {
   if (!area) return;
   const renders = {
     combat:     ()=>renderCharEquip(c,canEdit),
-    carac:      ()=>renderCharEquip(c,canEdit),  // alias — carac fusionné dans combat
+    carac:      ()=>renderCharEquip(c,canEdit),
     sorts:      ()=>renderCharDeck(c,canEdit),
     inventaire: ()=>renderCharInventaire(c,canEdit),
     quetes:     ()=>renderCharQuetes(c,canEdit),
     compte:     ()=>renderCharCompte(c,canEdit),
     notes:      ()=>renderCharNotes(c,canEdit),
+    maitrises:  ()=>renderCharMaitrises(c,canEdit),
   };
   area.innerHTML = renders[tab]?.() || '';
 }
 
 function showCharTab(tab, el) {
   // Gérer les onglets secondaires (compte/notes) — activer le ··· comme actif
-  const isSecondary = ['compte','notes'].includes(tab);
+  const isSecondary = ['compte','notes','maitrises'].includes(tab);
   document.querySelectorAll('#char-tabs .cs-tab').forEach(t => {
     t.classList.remove('active');
     if (isSecondary && t.dataset.tab === 'plus') t.classList.add('active');
@@ -3373,7 +3397,7 @@ function editEquipSlot(slot) {
     `:`
     <div class="grid-4" style="gap:0.5rem">
       ${[['fo','Force'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha'],['ca','CA']].map(([k,l])=>`
-        <div class="form-group"><label>${l}</label><input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||0}"></div>`).join('')}
+        <div class="form-group"><label>${l}</label><input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||''}"></div>`).join('')}
     </div>`}
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>
@@ -3608,6 +3632,137 @@ function deleteCharPhoto(id) {
 }
 
 // ══════════════════════════════════════════════
+// MAÎTRISES D'ARMES
+// ══════════════════════════════════════════════
+function renderCharMaitrises(c, canEdit) {
+  const maitrises = c.maitrises || [];
+
+  let html = `
+  <div style="padding:.75rem .25rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
+      <div>
+        <div style="font-family:'Cinzel',serif;font-size:.95rem;color:var(--text)">Maîtrises d'armes</div>
+        <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">
+          Chaque niveau de maîtrise ajoute +1 aux dégâts des armes du type correspondant.
+        </div>
+      </div>
+      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addMaitrise()">+ Ajouter</button>` : ''}
+    </div>`;
+
+  if (maitrises.length === 0) {
+    html += `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic;font-size:.83rem">
+      ${canEdit ? 'Aucune maîtrise — clique sur "+ Ajouter" pour en créer une.' : 'Aucune maîtrise enregistrée.'}
+    </div>`;
+  } else {
+    html += `<div style="display:flex;flex-direction:column;gap:.5rem">`;
+    maitrises.forEach((m, i) => {
+      const niveau = parseInt(m.niveau) || 0;
+      // Barre de progression : niveau max = 5
+      const MAX = 5;
+      const pct = Math.min(100, Math.round(niveau / MAX * 100));
+      html += `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:.7rem .85rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem">
+          <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600">
+            ⚔️ ${m.typeArme||'?'}
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem">
+            <span style="font-size:.75rem;color:var(--gold);font-weight:700;background:rgba(232,184,75,.1);
+              border:1px solid rgba(232,184,75,.25);border-radius:6px;padding:2px 8px">
+              Maîtrise ${niveau > 0 ? '+'+niveau : '0'}
+            </span>
+            ${canEdit ? `
+            <button class="btn-icon" style="font-size:.8rem" onclick="editMaitrise(${i})">✏️</button>
+            <button class="btn-icon" style="font-size:.8rem;color:#ff6b6b" onclick="deleteMaitrise(${i})">🗑️</button>
+            ` : ''}
+          </div>
+        </div>
+        <!-- Barre de maîtrise -->
+        <div style="display:flex;align-items:center;gap:.6rem">
+          <div style="flex:1;background:var(--bg-card);border-radius:999px;height:6px;overflow:hidden;border:1px solid var(--border)">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),#e8b84b);border-radius:999px;transition:width .4s"></div>
+          </div>
+          <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">Niv. ${niveau}/${MAX}</span>
+        </div>
+        ${m.note ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:.3rem;font-style:italic">${m.note}</div>` : ''}
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `
+    <div style="margin-top:1rem;padding:.6rem .75rem;background:rgba(232,184,75,.05);
+      border:1px solid rgba(232,184,75,.15);border-radius:8px;font-size:.75rem;color:var(--text-dim)">
+      💡 Le bonus s'applique automatiquement si le type d'arme équipée correspond (ex: "Épée" correspond à une arme de type "Épée").
+    </div>
+  </div>`;
+
+  return html;
+}
+
+async function addMaitrise() {
+  const c = STATE.activeChar; if (!c) return;
+  openModal('⚔️ Nouvelle maîtrise', `
+    <div class="form-group"><label>Type d'arme</label>
+      <input class="input-field" id="mait-type" placeholder="Épée, Lance, Bâton, Arc, Dague...">
+    </div>
+    <div class="form-group">
+      <label>Niveau de maîtrise <span style="color:var(--text-dim);font-weight:400">(1 = +1 aux dégâts, 2 = +2...)</span></label>
+      <input type="number" class="input-field" id="mait-niveau" value="1" min="0" max="5">
+    </div>
+    <div class="form-group"><label>Note (optionnel)</label>
+      <input class="input-field" id="mait-note" placeholder="Obtenu lors de la mission X...">
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveMaitrise(-1)">Ajouter</button>
+  `);
+}
+
+async function editMaitrise(idx) {
+  const c = STATE.activeChar; if (!c) return;
+  const m = (c.maitrises || [])[idx]; if (!m) return;
+  openModal('✏️ Modifier la maîtrise', `
+    <div class="form-group"><label>Type d'arme</label>
+      <input class="input-field" id="mait-type" value="${m.typeArme||''}">
+    </div>
+    <div class="form-group">
+      <label>Niveau de maîtrise</label>
+      <input type="number" class="input-field" id="mait-niveau" value="${m.niveau||1}" min="0" max="5">
+    </div>
+    <div class="form-group"><label>Note (optionnel)</label>
+      <input class="input-field" id="mait-note" value="${m.note||''}">
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveMaitrise(${idx})">Enregistrer</button>
+  `);
+}
+
+async function saveMaitrise(idx) {
+  const typeArme = document.getElementById('mait-type')?.value?.trim();
+  if (!typeArme) { showNotif('Le type d\'arme est requis.', 'error'); return; }
+  const niveau = parseInt(document.getElementById('mait-niveau')?.value) || 0;
+  const note   = document.getElementById('mait-note')?.value?.trim() || '';
+  const c = STATE.activeChar; if (!c) return;
+  const maitrises = [...(c.maitrises || [])];
+  const entry = { typeArme, niveau, note };
+  if (idx < 0) maitrises.push(entry);
+  else maitrises[idx] = entry;
+  c.maitrises = maitrises;
+  await updateInCol('characters', c.id, { maitrises });
+  closeModal();
+  showNotif(idx < 0 ? `Maîtrise "${typeArme}" ajoutée !` : 'Maîtrise mise à jour.', 'success');
+  renderCharSheet(c, 'maitrises');
+}
+
+async function deleteMaitrise(idx) {
+  const c = STATE.activeChar; if (!c) return;
+  const m = (c.maitrises || [])[idx];
+  if (!confirm(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
+  c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
+  await updateInCol('characters', c.id, { maitrises: c.maitrises });
+  showNotif('Maîtrise supprimée.', 'success');
+  renderCharSheet(c, 'maitrises');
+}
+
+// ══════════════════════════════════════════════
 // EXPORT
 // ══════════════════════════════════════════════
 Object.assign(window, {
@@ -3634,6 +3789,8 @@ Object.assign(window, {
   inlineEditText, inlineEditNum, inlineEditStatFromCard, inlineEditStat,
   manageTitres, addTitre, removeTitre, saveTitres,
   addSort, editSort, openSortModal, runeIncrement, runeDecrement, updateSortPM, saveSort,
+  renderCharMaitrises,
+  addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   editEquipSlot, saveEquipSlot, clearEquipSlot, equipSlotFromInv,
   previewEquipFromInv,
   addInvItem, editInvItem, saveInvItem,
