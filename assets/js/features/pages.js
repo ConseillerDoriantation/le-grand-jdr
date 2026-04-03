@@ -933,7 +933,8 @@ const PAGES = {
           onmouseleave="this.style.borderColor='var(--border)';this.style.transform=''">
 
           <!-- Zone image — toujours présente, emoji si pas d'image -->
-          <div style="width:100%;aspect-ratio:4/3;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
+          <div style="width:100%;aspect-ratio:4/3;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0;${a.imageUrl ? 'cursor:zoom-in;' : ''}"
+            ${a.imageUrl ? `onclick="event.stopPropagation();window._achOpenImage('${a.imageUrl.replace(/'/g, "\\'")}')"` : ''}>
             ${a.imageUrl
               ? `<img src="${a.imageUrl}"
                    style="width:100%;height:100%;object-fit:cover;display:block;pointer-events:none"
