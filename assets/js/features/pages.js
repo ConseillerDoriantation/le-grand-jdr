@@ -4,9 +4,6 @@
 import { STATE, FS } from '../core/state.js';
 import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData } from '../data/firestore.js';
 
-// TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
-import { renderCollectionPage } from '../features/collection.js';
-
 const renderCharSheet   = (...args) => window.renderCharSheet?.(...args);
 const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorations: {}, evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
 const getDefaultTutorial = () => window.getDefaultTutorial?.() || [{ title: 'Introduction', content: 'Le tutoriel sera ajouté ici.' }];
@@ -438,6 +435,22 @@ const PAGES = {
     const EVENTS        = window.BASTION_EVENTS || [];
     const calcRevenu    = window.calculerRevenuBastion;
 
+    // Fusionne améliorations statiques + custom avec leur état de financement
+    function _getAllAmeliorations(d) {
+      const ams    = d.ameliorations || {};
+      const fonds  = d.ameliorationsFonds || {};
+      const statiq = AMELIORATIONS.map(a => ({
+        ...a, type:'statique',
+        fondsActuels: ams[a.id] ? a.cout : (fonds[a.id] || 0),
+        debloquee: !!ams[a.id],
+      }));
+      const custom = (d.ameliorationsCustom||[]).map(a => ({
+        ...a, type:'custom',
+        debloquee: (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0,
+      }));
+      return [...statiq, ...custom];
+    }
+
     const { brut, fondateurs: partFondateurs, reinvesti, base, nbAmelios, evt } =
       calcRevenu ? calcRevenu(data)
         : { brut:100, fondateurs:10, reinvesti:90, base:100, nbAmelios:0, evt:{ id:'calme', nom:'Calme', emoji:'☁️', description:'', badgeClass:'badge-blue', badgeText:'±0', couleur:'neutral', modificateur:1, bonus:0 } };
@@ -603,27 +616,39 @@ const PAGES = {
       <!-- AMÉLIORATIONS -->
       <div class="card">
         <div class="card-header">🏗️ Améliorations permanentes
-          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+1 niveau · +100 or/cycle chacune</span>
+          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+1 niveau · +100 or/cycle</span>
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:.5rem;font-size:.7rem" onclick="gererAmeliorations()">⚙️ Gérer</button>` : ''}
         </div>
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.85rem">
-          ${AMELIORATIONS.map(a => {
-            const debloquee = !!amelios[a.id];
-            const canBuy    = STATE.isAdmin && !debloquee && (data.tresor||0) >= a.cout;
-            return `<div style="background:${debloquee?'rgba(34,195,142,0.05)':'var(--bg-elevated)'};border:1px solid ${debloquee?'rgba(34,195,142,0.22)':'var(--border)'};border-radius:12px;padding:1rem;display:flex;flex-direction:column;gap:.5rem">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
-                <div style="display:flex;align-items:center;gap:.45rem">
-                  <span style="font-size:1.1rem">${a.emoji}</span>
-                  <span style="font-family:'Cinzel',serif;font-size:.82rem;color:${debloquee?'#22c38e':'var(--text)'};line-height:1.3">${a.nom}</span>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem">
+          ${_getAllAmeliorations(data).map(a => {
+            const pct      = a.cout > 0 ? Math.min(100, Math.round((a.fondsActuels||0) / a.cout * 100)) : 100;
+            const pctColor = pct >= 100 ? '#22c38e' : pct > 50 ? 'var(--gold)' : '#4f8cff';
+            return `<div style="background:${a.debloquee?'rgba(34,195,142,0.05)':'var(--bg-elevated)'};border:1px solid ${a.debloquee?'rgba(34,195,142,0.22)':'var(--border)'};border-radius:12px;padding:.85rem;display:flex;flex-direction:column;gap:.4rem">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.4rem">
+                <div style="display:flex;align-items:center;gap:.4rem">
+                  <span style="font-size:1rem">${a.emoji||'🔧'}</span>
+                  <span style="font-family:'Cinzel',serif;font-size:.8rem;color:${a.debloquee?'#22c38e':'var(--text)'};line-height:1.25">${a.nom}</span>
+                  ${a.type==='custom'?'<span style="font-size:.58rem;background:rgba(79,140,255,.12);color:#7fb0ff;border:1px solid rgba(79,140,255,.2);border-radius:4px;padding:1px 4px">Custom</span>':''}
                 </div>
-                ${debloquee
-                  ? `<span style="font-size:.7rem;background:rgba(34,195,142,0.12);color:#22c38e;border:1px solid rgba(34,195,142,0.22);border-radius:6px;padding:1px 7px;flex-shrink:0">Active</span>`
-                  : `<span style="font-family:'Cinzel',serif;font-size:.78rem;color:var(--gold);flex-shrink:0">${a.cout} or</span>`}
+                ${a.debloquee
+                  ? `<span style="font-size:.68rem;background:rgba(34,195,142,0.12);color:#22c38e;border:1px solid rgba(34,195,142,.22);border-radius:6px;padding:1px 6px;flex-shrink:0">✓ Active</span>`
+                  : `<span style="font-family:'Cinzel',serif;font-size:.75rem;color:var(--gold);flex-shrink:0">${a.cout} or</span>`}
               </div>
-              <p style="font-size:.76rem;color:var(--text-muted);line-height:1.5;margin:0">${a.description}</p>
-              ${!debloquee&&STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:2px;font-size:.73rem"
-                onclick="${canBuy?`debloquerAmelioration('${a.id}')`:''}"
-                ${!canBuy?'disabled style="opacity:.38;cursor:not-allowed"':''}>Investir ${a.cout} or</button>` : ''}
-              ${debloquee ? `<div style="height:2px;background:rgba(34,195,142,0.25);border-radius:1px;margin-top:auto"></div>` : ''}
+              <p style="font-size:.73rem;color:var(--text-muted);line-height:1.45;margin:0">${a.description||''}</p>
+              ${!a.debloquee && a.cout > 0 ? `
+              <div style="margin-top:.1rem">
+                <div style="display:flex;justify-content:space-between;font-size:.67rem;color:var(--text-dim);margin-bottom:.2rem">
+                  <span>Financement</span>
+                  <span style="color:${pctColor};font-weight:600">${a.fondsActuels||0}/${a.cout} or (${pct}%)</span>
+                </div>
+                <div style="background:var(--bg-card);border-radius:999px;height:6px;overflow:hidden;border:1px solid var(--border)">
+                  <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:999px;transition:width .4s"></div>
+                </div>
+              </div>
+              <button class="btn btn-outline btn-sm" style="font-size:.72rem;margin-top:.1rem"
+                onclick="investirAmelioration('${a.id}','${a.type||'statique'}')">
+                💰 Contribuer
+              </button>` : a.debloquee ? `<div style="height:2px;background:rgba(34,195,142,.25);border-radius:1px;margin-top:auto"></div>` : ''}
             </div>`;
           }).join('')}
         </div>
@@ -948,7 +973,20 @@ const PAGES = {
 
   // ─── COLLECTION ─────────────────────────────────────────────────────────────
   async collection() {
-    await renderCollectionPage();
+    const items = await loadCollection('collection');
+    const content = document.getElementById('main-content');
+    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">🃏 Collection</div><div class="page-subtitle">Cartes à collectionner</div></div>`;
+    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" onclick="openCollectionModal()">+ Ajouter une carte</button></div>`;
+    if (items.length === 0) {
+      html += `<div class="empty-state"><div class="icon">🃏</div><p>La collection est vide.</p></div>`;
+    } else {
+      html += `<div class="collection-grid">`;
+      items.forEach(c => {
+        html += `<div class="coll-card" onclick="viewCard('${c.id}')"><div class="coll-img">${c.imageUrl ? `<img src="${c.imageUrl}" style="width:100%;height:100%;object-fit:cover">` : `<span>${c.emoji || '🃏'}</span>`}</div><div class="coll-name">${c.nom || 'Carte'}</div>${STATE.isAdmin ? `<div style="padding:0 0.5rem 0.5rem;display:flex;gap:0.3rem;justify-content:center"><button class="btn-icon" onclick="event.stopPropagation();editCard('${c.id}')">✏️</button><button class="btn-icon" onclick="event.stopPropagation();deleteCard('${c.id}')">🗑️</button></div>` : ''}</div>`;
+      });
+      html += '</div>';
+    }
+    content.innerHTML = html;
   },
 
   // ─── TUTORIAL ───────────────────────────────────────────────────────────────
