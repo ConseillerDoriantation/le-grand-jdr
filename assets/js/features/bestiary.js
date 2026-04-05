@@ -757,9 +757,7 @@ window._bstSetDeduction = (id, key, val) => {
   if (val === '' || val === null || val === undefined) {
     delete _tracker[id].deductions[key];
   } else {
-    _tracker[id].deductions[key] = key === 'attaquesObservees' || key === 'traitsObserves'
-      ? val
-      : parseInt(val) || 0;
+    _tracker[id].deductions[key] = val;
   }
   _saveTracker();
 };
