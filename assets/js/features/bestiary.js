@@ -309,11 +309,10 @@ function _renderPanel(c) {
   // ── VUE ADMIN ─────────────────────────────────────────────────────────────
   if (STATE.isAdmin) {
     const statDefs = [
-      ['PV',    c.pvMax||'—'],
-      ['PM',    c.pmMax||'—'],
-      ['CA',    c.ca||'—'],
-      ['Vit.',  c.vitesse ? `${c.vitesse}m` : '—'],
-      ['Init.', c.initiative||'—'],
+      ['PV',    c.pvMax||'—'], ['PM',  c.pmMax||'—'],  ['CA',    c.ca||'—'],
+      ['FOR',   c.force||'—'], ['DEX', c.dexterite||'—'], ['CON', c.constitution||'—'],
+      ['INT',   c.intelligence||'—'], ['SAG', c.sagesse||'—'], ['CHA', c.charisme||'—'],
+      ['Vit.',  c.vitesse ? `${c.vitesse}m` : '—'], ['Init.', c.initiative||'—'],
     ];
     return `
     <div class="bst-panel" style="position:sticky;top:1rem">
@@ -321,7 +320,7 @@ function _renderPanel(c) {
       <div style="position:absolute;top:10px;left:10px;background:rgba(79,140,255,.85);border-radius:6px;padding:2px 8px;font-size:.62rem;font-weight:700;color:#fff;letter-spacing:1px">MJ</div>
       <div class="bst-section">
         <div class="bst-section-title">📈 Statistiques</div>
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem">
           ${statDefs.map(([l,v]) => `
             <div class="bst-stat">
               <div class="bst-stat-val">${v}</div>
@@ -347,16 +346,75 @@ function _renderPanel(c) {
   }
 
   // ── VUE JOUEUR ────────────────────────────────────────────────────────────
-  // Miroir de la vue MJ : mêmes attaques/traits/butins/description
-  // Mais sans PV max affiché (compteur libre), sans stats de base
+  // Lignes vides à deviner : autant de lignes que le MJ a créées,
+  // mais sans aucune valeur — les joueurs remplissent eux-mêmes.
+  const ded = (track.deductions || {});
+
+  const attaquesJoueurHtml = attaques.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">⚔️ Attaques <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">${attaques.length} observée${attaques.length>1?'s':''}</span></div>
+      ${attaques.map((_, i) => `
+        <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:var(--bg-elevated);border-radius:8px;border-left:2px solid rgba(255,107,107,.35)">
+          <input class="input-field" style="font-size:.8rem;font-weight:600;padding:3px 6px;margin-bottom:.25rem;width:100%"
+            placeholder="Nom de l'attaque..."
+            value="${(ded['att_nom_'+i]||'')}"
+            onchange="window._bstSetDeduction('${c.id}','att_nom_${i}',this.value)">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.3rem">
+            <input class="input-field" style="font-size:.72rem;padding:2px 5px"
+              placeholder="🎯 Toucher"
+              value="${(ded['att_toucher_'+i]||'')}"
+              onchange="window._bstSetDeduction('${c.id}','att_toucher_${i}',this.value)">
+            <input class="input-field" style="font-size:.72rem;padding:2px 5px"
+              placeholder="⚔️ Dégâts"
+              value="${(ded['att_degats_'+i]||'')}"
+              onchange="window._bstSetDeduction('${c.id}','att_degats_${i}',this.value)">
+            <input class="input-field" style="font-size:.72rem;padding:2px 5px"
+              placeholder="📏 Portée"
+              value="${(ded['att_portee_'+i]||'')}"
+              onchange="window._bstSetDeduction('${c.id}','att_portee_${i}',this.value)">
+          </div>
+        </div>`).join('')}
+    </div>` : '';
+
+  const traitsJoueurHtml = traits.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">✨ Traits & Capacités <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">${traits.length} trait${traits.length>1?'s':''}</span></div>
+      ${traits.map((_, i) => `
+        <div style="margin-bottom:.4rem;padding:.4rem .6rem;border-left:2px solid rgba(180,127,255,.35);background:var(--bg-elevated);border-radius:0 8px 8px 0">
+          <input class="input-field" style="font-size:.8rem;font-weight:600;padding:3px 6px;margin-bottom:.2rem;width:100%"
+            placeholder="Nom du trait..."
+            value="${(ded['tr_nom_'+i]||'')}"
+            onchange="window._bstSetDeduction('${c.id}','tr_nom_${i}',this.value)">
+          <input class="input-field" style="font-size:.74rem;padding:2px 6px;width:100%"
+            placeholder="Description..."
+            value="${(ded['tr_desc_'+i]||'')}"
+            onchange="window._bstSetDeduction('${c.id}','tr_desc_${i}',this.value)">
+        </div>`).join('')}
+    </div>` : '';
+
+  const butinsJoueurHtml = butins.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">💰 Butins <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">${butins.length} objet${butins.length>1?'s':''}</span></div>
+      ${butins.map((_, i) => `
+        <div class="bst-row" style="gap:.4rem">
+          <input class="input-field" style="flex:1;font-size:.78rem;padding:3px 6px"
+            placeholder="Objet..."
+            value="${(ded['bu_nom_'+i]||'')}"
+            onchange="window._bstSetDeduction('${c.id}','bu_nom_${i}',this.value)">
+          <input class="input-field" style="width:80px;font-size:.78rem;padding:3px 6px"
+            placeholder="Quantité"
+            value="${(ded['bu_qte_'+i]||'')}"
+            onchange="window._bstSetDeduction('${c.id}','bu_qte_${i}',this.value)">
+        </div>`).join('')}
+    </div>` : '';
+
   return `
   <div class="bst-panel" style="position:sticky;top:1rem">
     ${headerHtml}
     ${suiviHtml(false)}
-    ${descHtml}
-    ${attaquesHtml}
-    ${traitsHtml}
-    ${butinsHtml}
+    ${attaquesJoueurHtml}
+    ${traitsJoueurHtml}
+    ${butinsJoueurHtml}
   </div>`;
 }
 // ══════════════════════════════════════════════════════════════════════════════
@@ -422,6 +480,8 @@ async function openBeastModal(id = null) {
       <label>Statistiques</label>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem">
         ${[['pvMax','❤️ PV Max'],['pmMax','💙 PM Max'],['ca','🛡️ CA'],
+           ['force','FOR'],['dexterite','DEX'],['constitution','CON'],
+           ['intelligence','INT'],['sagesse','SAG'],['charisme','CHA'],
            ['vitesse','Vitesse (m)'],['initiative','Initiative']].map(([k,l]) => `
           <div>
             <label style="font-size:.68rem;color:var(--text-dim)">${l}</label>
@@ -613,6 +673,12 @@ async function saveBeast(id = '') {
     pvMax:          parseInt(document.getElementById('bst-pvMax')?.value)||0,
     pmMax:          parseInt(document.getElementById('bst-pmMax')?.value)||0,
     ca:             parseInt(document.getElementById('bst-ca')?.value)||0,
+    force:          parseInt(document.getElementById('bst-force')?.value)||0,
+    dexterite:      parseInt(document.getElementById('bst-dexterite')?.value)||0,
+    constitution:   parseInt(document.getElementById('bst-constitution')?.value)||0,
+    intelligence:   parseInt(document.getElementById('bst-intelligence')?.value)||0,
+    sagesse:        parseInt(document.getElementById('bst-sagesse')?.value)||0,
+    charisme:       parseInt(document.getElementById('bst-charisme')?.value)||0,
     vitesse:        parseInt(document.getElementById('bst-vitesse')?.value)||0,
     initiative:     parseInt(document.getElementById('bst-initiative')?.value)||0,
     // Tableaux dynamiques
