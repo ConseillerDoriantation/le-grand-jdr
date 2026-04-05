@@ -1556,7 +1556,7 @@ function _getSortTypes(s) {
 function _getSortAction(s) {
   const runes = s.runes || [];
   const hasReaction    = runes.includes('Réaction');
-  const hasEnch        = runes.includes('Enchantement') || runes.includes('Affliction');
+  const hasEnch        = runes.includes('Enchantement'); // Affliction = Action normale
   const hasConc        = runes.includes('Concentration');
 
   const autoAction = hasReaction ? 'reaction' : hasEnch ? 'action_bonus' : 'action';
@@ -1629,7 +1629,12 @@ function _calcSortSoin(s) {
   return base;
 }
 
-/** CA bonus défensif (rune Protection sur sort défensif non-soin) */
+/** Mode de la rune Protection : 'soin' | 'ca' — stocké dans s.protectionMode */
+function _getSortProtectionMode(s) {
+  return s?.protectionMode || 'ca'; // défaut CA si non précisé
+}
+
+/** CA bonus défensif (rune Protection mode CA) */
 function _calcSortCA(s) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
@@ -1716,19 +1721,19 @@ function _buildSortResume(s, c) {
     lines.push({ icon:'⚔️', label:`${deg} ${modStr} ${statLbl}`, detail:'Dégâts' });
   }
 
-  // Soin (si défensif + types inclut soin, ou typeSoin legacy)
+  // Protection : Soin ou CA selon protectionMode
   const hasDefensif = types.includes('defensif');
-  const hasProt = runes.filter(r => r === 'Protection').length > 0;
-  if (hasDefensif && hasProt) {
-    if (s.typeSoin || s.soin || !types.includes('offensif')) {
-      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:'Soin' });
-    } else {
-      // Sort défensif sans soin → CA
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  if (nbProt > 0) {
+    const mode = _getSortProtectionMode(s);
+    if (mode === 'soin') {
       const ca = _calcSortCA(s);
-      lines.push({ icon:'🛡️', label:`CA +${ca.total} (${ca.tours} tours)`, detail:`Base +2${ca.nbProt > 1 ? ` + chaînage +${ca.nbProt - 1}` : ''}` });
+      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
+    } else {
+      const ca = _calcSortCA(s);
+      lines.push({ icon:'🛡️', label:`CA +${ca.total} (${ca.tours} tours)`, detail:`Base +2${ca.nbProt > 1 ? ` · chaîné +${ca.nbProt - 1}` : ''}` });
     }
-  } else if (hasDefensif && !hasProt) {
-    // Défensif sans Protection → buff générique
+  } else if (hasDefensif) {
     lines.push({ icon:'🛡️', label:'Effet défensif', detail:'Décris l\'effet ci-dessous' });
   }
 
@@ -1887,32 +1892,48 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         background:#60a5fa18;color:#60a5fa;border:1px solid #60a5fa33;white-space:nowrap">🧠 Conc.</span>`
     : '';
 
-  // Ligne résumé compacte (première info clé)
-  const firstColor = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';
-  let firstStat = '';
-  if (types.includes('offensif')) {
-    const equip  = c?.equipement || {};
-    const mainP  = equip['Main principale'];
-    const statKey = mainP?.statAttaque || mainP?.toucherStat || 'force';
-    const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
-    const mod     = Math.floor((Math.min(22, statVal) - 10) / 2);
-    const modStr  = mod >= 0 ? `+${mod}` : `${mod}`;
-    const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
-    firstStat = `⚔️ ${_calcSortDegats(s, c)} ${modStr} ${statLbl}`;
-  } else if (types.includes('defensif')) {
-    const hasProt = runesAll.filter(r => r === 'Protection').length > 0;
-    if (hasProt) {
-      const isHeal = s.typeSoin || s.soin || !types.includes('offensif');
-      firstStat = isHeal ? `💚 ${_calcSortSoin(s)}` : `🛡️ CA +${_calcSortCA(s).total}`;
-    }
-  }
-  if (nbCibles > 1 && !firstStat) firstStat = `🎯 ×${nbCibles}`;
+  // ── Calcul des stats clés toujours visibles ──
+  const equip   = c?.equipement || {};
+  const mainP   = equip['Main principale'];
+  const statKey = mainP?.statAttaque || mainP?.toucherStat || 'force';
+  const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
+  const mod     = Math.floor((Math.min(22, statVal) - 10) / 2);
+  const modStr  = mod >= 0 ? `+${mod}` : `${mod}`;
+  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
 
-  // Badges runes compacts
   const nbPuiss  = runesAll.filter(r => r === 'Puissance').length;
   const nbProt   = runesAll.filter(r => r === 'Protection').length;
   const totalPP  = nbPuiss + nbProt;
   const chainBonus = totalPP > 1 ? `+${(totalPP-1)*2}` : '';
+
+  // Ligne stats : tous les effets clés sur une ligne
+  const statsChips = [];
+  if (types.includes('offensif')) {
+    statsChips.push({ icon:'⚔️', val:`${_calcSortDegats(s, c)} ${modStr} ${statLbl}`, color:'#ff6b6b' });
+  }
+  if (nbProt > 0) {
+    const mode = _getSortProtectionMode(s);
+    if (mode === 'soin') {
+      statsChips.push({ icon:'💚', val:_calcSortSoin(s), color:'#22c38e' });
+    } else {
+      const ca = _calcSortCA(s);
+      statsChips.push({ icon:'🛡️', val:`CA +${ca.total} (${ca.tours}t)`, color:'#22c38e' });
+    }
+  }
+  if (nbCibles > 1) {
+    statsChips.push({ icon:'🎯', val:`×${nbCibles} cibles`, color:'#4f8cff' });
+  }
+  const zone = _calcSortZone(s);
+  if (zone) statsChips.push({ icon:'📐', val:`+${zone}m`, color:'#b47fff' });
+  const duree = _calcSortDuree(s);
+  if (duree) statsChips.push({ icon:'⏱️', val:`+${duree}t`, color:'#9ca3af' });
+
+  const statsLine = statsChips.map(c =>
+    `<span style="font-size:.76rem;font-weight:600;color:${c.color};white-space:nowrap">${c.icon} ${c.val}</span>`
+  ).join('<span style="color:var(--text-dim);font-size:.7rem;margin:0 1px">·</span>');
+
+  // Description tronquée toujours visible
+  const descShort = s.effet ? (s.effet.length > 60 ? s.effet.slice(0, 58) + '…' : s.effet) : '';
 
   return `<div class="cs-sort-row ${s.actif?'actif':''}"
     draggable="true" data-sort-idx="${i}"
@@ -1938,21 +1959,24 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
           }</span>
           <span class="cs-sort-row-chevron" style="flex-shrink:0">${isOpen?'▲':'▼'}</span>
         </div>
-        <!-- Ligne 2 : types + action -->
+        <!-- Ligne 2 : types + action + concentration -->
         <div style="display:flex;align-items:center;gap:.3rem;margin-top:.2rem;flex-wrap:wrap">
           ${typeBadges}
           ${actionBadge}
           ${concBadge}
-        </div>
-        <!-- Ligne 3 : stat clé + badges runes -->
-        ${firstStat || runesAll.length ? `<div style="display:flex;align-items:center;gap:.4rem;margin-top:.2rem;flex-wrap:wrap">
-          ${firstStat ? `<span style="font-size:.78rem;color:${firstColor};font-weight:600">${firstStat}</span>` : ''}
-          ${nbCibles > 1 && firstStat ? `<span style="font-size:.75rem;color:var(--text-dim)">🎯 ×${nbCibles}</span>` : ''}
           <div style="display:flex;gap:.2rem;margin-left:auto;flex-shrink:0">
             ${s.noyau ? `<span class="cs-sort-badge gold">${s.noyau.split(' ')[0]}</span>` : ''}
             ${totalPP > 0 ? `<span class="cs-sort-badge gold">${chainBonus||`+${totalPP}🎲`}</span>` : ''}
-            ${nbCibles > 1 ? `<span class="cs-sort-badge blue">×${nbCibles}🎯</span>` : ''}
           </div>
+        </div>
+        <!-- Ligne 3 : stats clés toujours visibles -->
+        ${statsLine ? `<div style="display:flex;align-items:center;gap:.3rem;margin-top:.25rem;flex-wrap:wrap">
+          ${statsLine}
+        </div>` : ''}
+        <!-- Ligne 4 : description courte toujours visible -->
+        ${descShort ? `<div style="margin-top:.2rem;font-size:.74rem;color:var(--text-dim);
+          font-style:italic;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          ${descShort}
         </div>` : ''}
       </div>
 
@@ -3262,12 +3286,18 @@ function openSortModal(idx, s) {
     <div class="form-group">
       <label>Action <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— Auto = déduit des runes</span></label>
       <div style="display:flex;gap:.3rem" id="s-action-btns">${actionBtnsHtml}</div>
-      <div style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem">
-        <input type="checkbox" id="s-conc" ${concChecked}
-          onchange="window._sortConcEdit = this.checked ? true : null; window._updateSortActionDisplay()">
-        <label for="s-conc" style="font-size:.78rem;color:var(--text-dim);margin:0;cursor:pointer">
-          🧠 Concentration <span style="font-size:.7rem">(JS Sagesse DD 11 · jusqu'à 10 tours)</span>
-        </label>
+    </div>
+
+    <!-- Concentration : checkbox claire -->
+    <div style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;
+      border-radius:8px;border:2px solid ${(s?.concentrationOverride===true || (!s?.concentrationOverride && (s?.runes||[]).includes('Concentration'))) ? '#60a5fa' : 'var(--border)'};
+      background:${(s?.concentrationOverride===true || (!s?.concentrationOverride && (s?.runes||[]).includes('Concentration'))) ? '#60a5fa10' : 'var(--bg-elevated)'};
+      cursor:pointer;transition:all .15s;margin-bottom:.5rem" id="s-conc-row"
+      onclick="window._toggleConc()">
+      <input type="checkbox" id="s-conc" ${concChecked} style="pointer-events:none;accent-color:#60a5fa;width:15px;height:15px">
+      <div style="flex:1">
+        <span style="font-size:.82rem;font-weight:600;color:var(--text)">🧠 Concentration</span>
+        <span style="font-size:.72rem;color:var(--text-dim);margin-left:.4rem">JS Sagesse DD 11 si dégâts · jusqu'à 10 tours max</span>
       </div>
     </div>
 
@@ -3298,10 +3328,33 @@ function openSortModal(idx, s) {
         <input class="input-field" id="s-degats" value="${s?.degats||''}" placeholder="= arme automatiquement">
       </div>
     </div>
-    <!-- Soin (si défensif) -->
-    <div id="s-soin-section" style="${typesInit.includes('defensif')?'':'display:none'}">
-      <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(vide = 1d4 base)</span></label>
-        <input class="input-field" id="s-soin" value="${s?.soin||''}" placeholder="= 1d4 automatiquement">
+
+    <!-- Protection : Soin ou CA (visible si rune Protection présente) -->
+    <div id="s-prot-section" style="${(s?.runes||[]).includes('Protection') ? '' : 'display:none'}">
+      <div class="form-group">
+        <label>Rune Protection — effet <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">que fait-elle ?</span></label>
+        <div style="display:flex;gap:.4rem">
+          ${[
+            { v:'ca',   label:'🛡️ Augmente la CA',  color:'#22c38e', detail:'+2 CA · 2 tours' },
+            { v:'soin', label:'💚 Soigne',            color:'#4f8cff', detail:'+1d4 par rune'   },
+          ].map(opt => {
+            const sel = (s?.protectionMode || 'ca') === opt.v;
+            return `<button type="button" id="s-prot-${opt.v}" onclick="window._selectProtMode('${opt.v}')"
+              style="flex:1;padding:.5rem .4rem;border-radius:8px;cursor:pointer;transition:all .15s;
+              border:2px solid ${sel?opt.color:'var(--border)'};
+              background:${sel?opt.color+'18':'var(--bg-elevated)'};text-align:center">
+              <div style="font-size:.8rem;font-weight:700;color:${sel?opt.color:'var(--text-dim)'}">${opt.label}</div>
+              <div style="font-size:.68rem;color:var(--text-dim);margin-top:.1rem">${opt.detail}</div>
+            </button>`;
+          }).join('')}
+        </div>
+        <input type="hidden" id="s-prot-mode" value="${s?.protectionMode||'ca'}">
+      </div>
+      <!-- Soin custom (visible si mode soin) -->
+      <div id="s-soin-section" style="${(s?.protectionMode||'ca')==='soin'?'':'display:none'}">
+        <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(vide = 1d4 base)</span></label>
+          <input class="input-field" id="s-soin" value="${s?.soin||''}" placeholder="= 1d4 automatiquement">
+        </div>
       </div>
     </div>
 
@@ -3314,6 +3367,7 @@ function openSortModal(idx, s) {
   setTimeout(() => {
     updateSortPM();
     window._updateSortActionDisplay();
+
   }, 50);
 }
 
@@ -3370,6 +3424,35 @@ window._updateSortActionDisplay = () => {
   });
 };
 
+window._toggleConc = () => {
+  const cb  = document.getElementById('s-conc');
+  const row = document.getElementById('s-conc-row');
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  window._sortConcEdit = cb.checked ? true : null;
+  if (row) {
+    row.style.borderColor  = cb.checked ? '#60a5fa' : 'var(--border)';
+    row.style.background   = cb.checked ? '#60a5fa10' : 'var(--bg-elevated)';
+  }
+};
+
+window._selectProtMode = (mode) => {
+  const hidden = document.getElementById('s-prot-mode');
+  const soinSec = document.getElementById('s-soin-section');
+  if (hidden) hidden.value = mode;
+  if (soinSec) soinSec.style.display = mode === 'soin' ? '' : 'none';
+  ['ca','soin'].forEach(v => {
+    const btn = document.getElementById(`s-prot-${v}`);
+    if (!btn) return;
+    const colors = { ca:'#22c38e', soin:'#4f8cff' };
+    const col = colors[v];
+    const active = v === mode;
+    btn.style.borderColor = active ? col : 'var(--border)';
+    btn.style.background  = active ? col+'18' : 'var(--bg-elevated)';
+    btn.querySelector('div').style.color = active ? col : 'var(--text-dim)';
+  });
+};
+
 function runeIncrement(nom) {
   window._runeCountsEdit = window._runeCountsEdit||{};
   window._runeCountsEdit[nom] = (window._runeCountsEdit[nom]||0) + 1;
@@ -3395,6 +3478,11 @@ function _updateRuneDisplay(nom) {
   if (valEl)   valEl.textContent = cnt;
   if (nameEl)  nameEl.classList.toggle('selected', cnt > 0);
   if (minBtn)  minBtn.disabled = cnt === 0;
+  // Afficher/masquer la section Protection si rune Protection modifiée
+  if (nom === 'Protection') {
+    const protSec = document.getElementById('s-prot-section');
+    if (protSec) protSec.style.display = cnt > 0 ? '' : 'none';
+  }
 }
 
 function updateSortPM() {
@@ -3449,8 +3537,9 @@ async function saveSort(idx) {
     degats:   document.getElementById('s-degats')?.value||'',
     soin:     document.getElementById('s-soin')?.value||'',
     effet:    document.getElementById('s-effet')?.value||'',
-    // Legacy compat : typeSoin si defensif sans offensif
-    typeSoin: types.includes('defensif') && !types.includes('offensif'),
+    protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
+    // Legacy compat : typeSoin si defensif sans offensif + mode soin
+    typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
     catId:    document.getElementById('s-catid')?.value || '',
     actif:    idx>=0 ? sorts[idx].actif : false,
     actionOverride,
