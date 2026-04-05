@@ -1537,23 +1537,39 @@ async function sortDrop(e, toIdx) {
 // ── Helpers calcul sorts ─────────────────────────────────────────────────────
 
 /**
- * TYPE d'un sort : 'degats' | 'soin' | 'utilitaire'
- * Règle :
- *   - typeSoin = true → soin
- *   - noyau renseigné et pas typeSoin → dégâts
- *   - sinon → utilitaire
+ * TYPES d'un sort : tableau ['offensif','defensif','utilitaire']
+ * Stocké explicitement dans s.types[]
+ * Fallback legacy : typeSoin → defensif, noyau → offensif, sinon utilitaire
  */
-function _getSortType(s) {
-  if (s.typeSoin) return 'soin';
-  if (s.noyau)   return 'degats';
-  return 'utilitaire';
+function _getSortTypes(s) {
+  if (Array.isArray(s.types) && s.types.length) return s.types;
+  // Legacy
+  if (s.typeSoin) return ['defensif'];
+  if (s.noyau)   return ['offensif'];
+  return ['utilitaire'];
+}
+
+/** Type d'action : 'action' | 'action_bonus' | 'reaction'
+ *  + concentration : boolean
+ *  Règles auto depuis runes, overridables manuellement via s.actionOverride / s.concentrationOverride
+ */
+function _getSortAction(s) {
+  const runes = s.runes || [];
+  const hasReaction    = runes.includes('Réaction');
+  const hasEnch        = runes.includes('Enchantement') || runes.includes('Affliction');
+  const hasConc        = runes.includes('Concentration');
+
+  const autoAction = hasReaction ? 'reaction' : hasEnch ? 'action_bonus' : 'action';
+  const action        = s.actionOverride || autoAction;
+  const concentration = s.concentrationOverride != null ? s.concentrationOverride : hasConc;
+  return { action, concentration };
 }
 
 /**
  * Dégâts effectifs d'un sort offensif.
- * - Base = dégâts de l'arme principale si degats vide ou "= arme"
+ * - Base = dégâts de l'arme principale si degats vide
  * - Chaque rune Puissance : +1 dé
- * - Chaînage Puissance+Protection : 2 runes → +2, 3 → +4, etc.
+ * - Chaînage PP : totalPP > 1 → +(totalPP-1)*2 bonus fixe
  */
 function _calcSortDegats(s, c) {
   const equip   = c?.equipement || {};
@@ -1567,7 +1583,6 @@ function _calcSortDegats(s, c) {
   const nbPuiss = runes.filter(r => r === 'Puissance').length;
   const nbProt  = runes.filter(r => r === 'Protection').length;
   const totalPP = nbPuiss + nbProt;
-  // Chaînage : 2 runes PP → +2, 3 → +4...
   const bonusVal = totalPP > 1 ? (totalPP - 1) * 2 : 0;
 
   if (totalPP === 0 && bonusVal === 0) return base;
@@ -1578,7 +1593,6 @@ function _calcSortDegats(s, c) {
     if (bonusVal > 0) result += ` +${bonusVal}`;
     return result;
   }
-  // Format non-standard : ajouter en texte
   let result = base;
   if (totalPP > 0) result += ` +${totalPP}d6`;
   if (bonusVal > 0) result += ` +${bonusVal}`;
@@ -1586,29 +1600,180 @@ function _calcSortDegats(s, c) {
 }
 
 /**
- * Soin effectif d'un sort de soin.
- * - Base 1d4 si soin vide ou "= base"
- * - Chaque rune Protection : +1d4
+ * Soin effectif.
+ * - Base 1d4 + Protection chaîné : +1d4 par rune, +2 soin fixe par paire (chaînage)
  */
 function _calcSortSoin(s) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
+  // Chaînage Protection : bonus soin fixe = (nbProt-1) si nbProt > 1
+  const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base   = (s.soin || '').trim();
 
-  if (!base || base.toLowerCase() === '= base') {
-    return `${1 + nbProt}d4`;
-  }
+  const buildResult = (diceCount) => {
+    let r = `${diceCount}d4`;
+    if (chainSoin > 0) r += ` +${chainSoin * 2}`;
+    return r;
+  };
+
+  if (!base || base.toLowerCase() === '= base') return buildResult(1 + nbProt);
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
-    if (match) return `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
-    return `${base} +${nbProt}d4`;
+    if (match) {
+      let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
+      if (chainSoin > 0) r += ` +${chainSoin * 2}`;
+      return r;
+    }
+    return `${base} +${nbProt}d4${chainSoin > 0 ? ` +${chainSoin * 2}` : ''}`;
   }
   return base;
 }
 
-/** Nombre de cibles (Dispersion : +1 par rune) */
+/** CA bonus défensif (rune Protection sur sort défensif non-soin) */
+function _calcSortCA(s) {
+  const runes  = s.runes || [];
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  // Chaînage : +1 CA par rune après la première
+  const chainCA = nbProt > 1 ? nbProt - 1 : 0;
+  return { base: 2, total: 2 + chainCA, tours: 2, nbProt };
+}
+
+/**
+ * Nombre de cibles — DISPERSION avec chaînage corrigé :
+ * N runes Dispersion → (N+1) cibles + (N-1) bonus chaînage = 2N cibles
+ * Ex: 1 rune → 2 cibles, 2 runes → 4 cibles, 3 runes → 6 cibles
+ */
 function _calcSortCibles(s) {
-  return 1 + (s.runes||[]).filter(r => r === 'Dispersion').length;
+  const n = (s.runes||[]).filter(r => r === 'Dispersion').length;
+  if (n === 0) return 1;
+  return n + 1 + (n - 1); // = 2N
+}
+
+/** Durée en tours (Durée : +2 tours par rune, chaînage : +1 supplémentaire par rune après la 1ère) */
+function _calcSortDuree(s) {
+  const runes = s.runes || [];
+  const nbDur = runes.filter(r => r === 'Durée').length;
+  if (nbDur === 0) return null;
+  // 1 rune → +2, 2 runes → +2+3=+5, 3 runes → +2+3+4...
+  let total = 0;
+  for (let i = 0; i < nbDur; i++) total += 2 + i;
+  return total;
+}
+
+/** Zone d'amplification (Amplification : +3m, chaînage : +2m par rune après la 1ère) */
+function _calcSortZone(s) {
+  const runes = s.runes || [];
+  const nbAmp = runes.filter(r => r === 'Amplification').length;
+  if (nbAmp === 0) return null;
+  // 1 rune → +3m, 2 runes → +3+2=+5m total (zone 4×4), etc.
+  let total = 3;
+  for (let i = 1; i < nbAmp; i++) total += 2;
+  return total;
+}
+
+/** Lacération : réduction CA cible */
+function _calcLaceration(s) {
+  const nb = (s.runes||[]).filter(r => r === 'Lacération').length;
+  if (!nb) return null;
+  // Chaînage : -1 CA par rune
+  return { reduction: nb, max: 2, maxElite: 4 };
+}
+
+/** Chance : réduction RC */
+function _calcChance(s) {
+  const nb = (s.runes||[]).filter(r => r === 'Chance').length;
+  if (!nb) return null;
+  // RC de base 20, chaînage -1 par rune → RC = 20 - nb
+  return { rc: 20 - nb };
+}
+
+/**
+ * Génère le résumé textuel complet des effets d'un sort
+ * sous forme de tableau de lignes {icon, label, detail}
+ */
+function _buildSortResume(s, c) {
+  const lines = [];
+  const runes  = s.runes || [];
+  const types  = _getSortTypes(s);
+  const { action, concentration } = _getSortAction(s);
+
+  // Action
+  const actionLabels = { action:'⚡ Action', action_bonus:'✴️ Action Bonus', reaction:'🔄 Réaction' };
+  let actionStr = actionLabels[action] || '⚡ Action';
+  if (concentration) actionStr += ' + 🧠 Concentration';
+  lines.push({ icon: '', label: actionStr, detail: concentration ? 'JS Sagesse DD 11 si dégâts reçus · jusqu\'à 10 tours' : '' });
+
+  // Dégâts (si offensif)
+  if (types.includes('offensif')) {
+    const equip  = c?.equipement || {};
+    const mainP  = equip['Main principale'];
+    const statKey = mainP?.statAttaque || mainP?.toucherStat || 'force';
+    const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
+    const mod     = Math.floor((Math.min(22, statVal) - 10) / 2);
+    const modStr  = mod >= 0 ? `+${mod}` : `${mod}`;
+    const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
+    const deg = _calcSortDegats(s, c);
+    lines.push({ icon:'⚔️', label:`${deg} ${modStr} ${statLbl}`, detail:'Dégâts' });
+  }
+
+  // Soin (si défensif + types inclut soin, ou typeSoin legacy)
+  const hasDefensif = types.includes('defensif');
+  const hasProt = runes.filter(r => r === 'Protection').length > 0;
+  if (hasDefensif && hasProt) {
+    if (s.typeSoin || s.soin || !types.includes('offensif')) {
+      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:'Soin' });
+    } else {
+      // Sort défensif sans soin → CA
+      const ca = _calcSortCA(s);
+      lines.push({ icon:'🛡️', label:`CA +${ca.total} (${ca.tours} tours)`, detail:`Base +2${ca.nbProt > 1 ? ` + chaînage +${ca.nbProt - 1}` : ''}` });
+    }
+  } else if (hasDefensif && !hasProt) {
+    // Défensif sans Protection → buff générique
+    lines.push({ icon:'🛡️', label:'Effet défensif', detail:'Décris l\'effet ci-dessous' });
+  }
+
+  // Cibles
+  const nbCibles = _calcSortCibles(s);
+  const nbDisp = runes.filter(r => r === 'Dispersion').length;
+  if (nbCibles > 1) {
+    lines.push({ icon:'🎯', label:`${nbCibles} cibles`, detail: nbDisp > 1 ? `${nbDisp} runes Dispersion (chaîné : ×2)` : '1 rune Dispersion' });
+  }
+
+  // Zone (Amplification)
+  const zone = _calcSortZone(s);
+  if (zone) {
+    const nbAmp = runes.filter(r => r === 'Amplification').length;
+    lines.push({ icon:'📐', label:`Zone +${zone}m`, detail: nbAmp > 1 ? `${nbAmp} runes (chaîné : +2m/rune supp.)` : '1 rune Amplification' });
+  }
+
+  // Durée
+  const duree = _calcSortDuree(s);
+  if (duree) {
+    const nbDur = runes.filter(r => r === 'Durée').length;
+    lines.push({ icon:'⏱️', label:`+${duree} tours`, detail: nbDur > 1 ? `Chaîné : +${nbDur} tours supp.` : 'Durée de l\'effet' });
+  }
+
+  // Lacération
+  const lac = _calcLaceration(s);
+  if (lac) lines.push({ icon:'🩸', label:`CA cible −${lac.reduction}`, detail:`Max −${lac.max} (−${lac.maxElite} Élites/Boss)` });
+
+  // Chance
+  const chc = _calcChance(s);
+  if (chc) lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:'Critique aussi max · chaîné : RC−1/rune' });
+
+  // Enchantement / Affliction
+  if (runes.includes('Enchantement')) lines.push({ icon:'✨', label:'Enchantement allié', detail:'Applique l\'élément sur équipement allié · 2 tours · Action Bonus' });
+  if (runes.includes('Affliction'))   lines.push({ icon:'💀', label:'Affliction ennemi', detail:'Applique l\'élément + état sur équipement ennemi · 2 tours · Action Bonus' });
+
+  // Invocation
+  if (runes.includes('Invocation')) lines.push({ icon:'🐾', label:'Invocation', detail:'Créature liée · 10 PV · CA 10' });
+
+  // Concentration (rappel JS si pas déjà mentionné)
+  if (concentration && action !== 'action') {
+    lines.push({ icon:'🧠', label:'Concentration', detail:'JS Sagesse DD 11 si dégâts reçus · jusqu\'à 10 tours' });
+  }
+
+  return lines;
 }
 
 function renderCharDeck(c, canEdit) {
@@ -1690,37 +1855,64 @@ function renderCharDeck(c, canEdit) {
 function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isOpen   = openIdx === i;
   const runesAll = s.runes || [];
-  const typeSrt  = _getSortType(s);
-
-  const nbPuiss  = runesAll.filter(r => r === 'Puissance').length;
-  const nbProt   = runesAll.filter(r => r === 'Protection').length;
-  const nbDisp   = runesAll.filter(r => r === 'Dispersion').length;
-  const totalPP  = nbPuiss + nbProt;
-  const chainBonus = totalPP > 1 ? `+${(totalPP-1)*2}` : '';
+  const types    = _getSortTypes(s);
+  const { action, concentration } = _getSortAction(s);
   const nbCibles = _calcSortCibles(s);
 
-  const degCalc  = typeSrt === 'degats' ? _calcSortDegats(s, c) : null;
-  const soinCalc = typeSrt === 'soin'   ? _calcSortSoin(s)      : null;
+  // Badges de type (multi)
+  const TYPE_CFG = {
+    offensif:   { label:'⚔️ Offensif',   color:'#ff6b6b' },
+    defensif:   { label:'🛡️ Défensif',   color:'#22c38e' },
+    utilitaire: { label:'✨ Utilitaire', color:'#b47fff' },
+  };
+  const typeBadges = types.map(t => {
+    const cfg = TYPE_CFG[t] || { label: t, color:'#aaa' };
+    return `<span style="font-size:.66rem;padding:1px 6px;border-radius:999px;flex-shrink:0;
+      background:${cfg.color}18;color:${cfg.color};border:1px solid ${cfg.color}33;
+      white-space:nowrap">${cfg.label}</span>`;
+  }).join('');
 
-  // Modificateur de stat de l'arme principale
-  const equip    = c?.equipement || {};
-  const mainP    = equip['Main principale'];
-  const statKey  = mainP?.statAttaque || mainP?.toucherStat || mainP?.degatsStat || 'force';
-  const statVal  = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
-  const mod      = Math.floor((Math.min(22, statVal) - 10) / 2);
-  const modStr   = mod >= 0 ? `+${mod}` : `${mod}`;
-  const statShortLabel = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
+  // Badge action
+  const ACTION_CFG = {
+    action:       { label:'⚡ Action',        color:'#e8b84b' },
+    action_bonus: { label:'✴️ Action Bonus',  color:'#f97316' },
+    reaction:     { label:'🔄 Réaction',      color:'#a78bfa' },
+  };
+  const acfg = ACTION_CFG[action] || ACTION_CFG.action;
+  const actionBadge = `<span style="font-size:.66rem;padding:1px 6px;border-radius:999px;flex-shrink:0;
+    background:${acfg.color}18;color:${acfg.color};border:1px solid ${acfg.color}33;
+    white-space:nowrap">${acfg.label}</span>`;
+  const concBadge = concentration
+    ? `<span style="font-size:.66rem;padding:1px 6px;border-radius:999px;flex-shrink:0;
+        background:#60a5fa18;color:#60a5fa;border:1px solid #60a5fa33;white-space:nowrap">🧠 Conc.</span>`
+    : '';
 
-  // Ligne de stats clés (compacte, sous le nom)
-  const statLine = [];
-  if (typeSrt === 'degats' && degCalc)  statLine.push(`⚔️ ${degCalc} ${modStr} ${statShortLabel}`);
-  if (typeSrt === 'soin'   && soinCalc) statLine.push(`💚 ${soinCalc}`);
-  if (nbCibles > 1)                     statLine.push(`🎯 ×${nbCibles}`);
-  if (s.effet)                          statLine.push(s.effet.length > 40 ? s.effet.slice(0,40)+'…' : s.effet);
+  // Ligne résumé compacte (première info clé)
+  const firstColor = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';
+  let firstStat = '';
+  if (types.includes('offensif')) {
+    const equip  = c?.equipement || {};
+    const mainP  = equip['Main principale'];
+    const statKey = mainP?.statAttaque || mainP?.toucherStat || 'force';
+    const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
+    const mod     = Math.floor((Math.min(22, statVal) - 10) / 2);
+    const modStr  = mod >= 0 ? `+${mod}` : `${mod}`;
+    const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
+    firstStat = `⚔️ ${_calcSortDegats(s, c)} ${modStr} ${statLbl}`;
+  } else if (types.includes('defensif')) {
+    const hasProt = runesAll.filter(r => r === 'Protection').length > 0;
+    if (hasProt) {
+      const isHeal = s.typeSoin || s.soin || !types.includes('offensif');
+      firstStat = isHeal ? `💚 ${_calcSortSoin(s)}` : `🛡️ CA +${_calcSortCA(s).total}`;
+    }
+  }
+  if (nbCibles > 1 && !firstStat) firstStat = `🎯 ×${nbCibles}`;
 
-  // Couleur type
-  const typeColor = typeSrt === 'degats' ? '#ff6b6b' : typeSrt === 'soin' ? '#22c38e' : '#b47fff';
-  const typeLabel = typeSrt === 'degats' ? '⚔️ Offensif' : typeSrt === 'soin' ? '💚 Soin' : '✨ Utilitaire';
+  // Badges runes compacts
+  const nbPuiss  = runesAll.filter(r => r === 'Puissance').length;
+  const nbProt   = runesAll.filter(r => r === 'Protection').length;
+  const totalPP  = nbPuiss + nbProt;
+  const chainBonus = totalPP > 1 ? `+${(totalPP-1)*2}` : '';
 
   return `<div class="cs-sort-row ${s.actif?'actif':''}"
     draggable="true" data-sort-idx="${i}"
@@ -1734,32 +1926,34 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
            title="${s.actif?'Désactiver':'Activer'}"></div>
 
       <div class="cs-sort-row-info" style="flex:1;min-width:0">
-        <!-- Ligne 1 : nom (grand) + PM + chevron -->
-        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-          <span style="font-family:'Cinzel',serif;font-size:.95rem;font-weight:700;
+        <!-- Ligne 1 : nom + PM + chevron -->
+        <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+          <span style="font-family:'Cinzel',serif;font-size:.93rem;font-weight:700;
             color:var(--text);flex:1;min-width:0;white-space:nowrap;
             overflow:hidden;text-overflow:ellipsis">${s.nom||'Sans nom'}</span>
-          <span style="font-size:.7rem;padding:1px 7px;border-radius:999px;flex-shrink:0;
-            background:${typeColor}18;color:${typeColor};border:1px solid ${typeColor}33;
-            white-space:nowrap">${typeLabel}</span>
           <span class="cs-sort-row-pm" style="flex-shrink:0">${
             pmDelta !== 0
-              ? `<span style="text-decoration:line-through;color:var(--text-dim);font-size:.7rem">${s.pm||0}</span> <span style="color:#22c38e;font-weight:700">${Math.max(0,(s.pm||0)+pmDelta)}</span> PM`
+              ? `<span style="text-decoration:line-through;color:var(--text-dim);font-size:.68rem">${s.pm||0}</span> <span style="color:#22c38e;font-weight:700">${Math.max(0,(s.pm||0)+pmDelta)}</span> PM`
               : `${s.pm||0} PM`
           }</span>
           <span class="cs-sort-row-chevron" style="flex-shrink:0">${isOpen?'▲':'▼'}</span>
         </div>
-        <!-- Ligne 2 : stats clés + noyau/runes -->
-        <div style="display:flex;align-items:center;gap:.5rem;margin-top:.25rem;flex-wrap:wrap">
-          ${statLine.length ? `<span style="font-size:.78rem;color:${typeColor};font-weight:600">${statLine[0]}</span>` : ''}
-          ${statLine.slice(1).map(t=>`<span style="font-size:.75rem;color:var(--text-dim)">${t}</span>`).join('')}
-          <div style="display:flex;gap:.25rem;margin-left:auto;flex-shrink:0">
+        <!-- Ligne 2 : types + action -->
+        <div style="display:flex;align-items:center;gap:.3rem;margin-top:.2rem;flex-wrap:wrap">
+          ${typeBadges}
+          ${actionBadge}
+          ${concBadge}
+        </div>
+        <!-- Ligne 3 : stat clé + badges runes -->
+        ${firstStat || runesAll.length ? `<div style="display:flex;align-items:center;gap:.4rem;margin-top:.2rem;flex-wrap:wrap">
+          ${firstStat ? `<span style="font-size:.78rem;color:${firstColor};font-weight:600">${firstStat}</span>` : ''}
+          ${nbCibles > 1 && firstStat ? `<span style="font-size:.75rem;color:var(--text-dim)">🎯 ×${nbCibles}</span>` : ''}
+          <div style="display:flex;gap:.2rem;margin-left:auto;flex-shrink:0">
             ${s.noyau ? `<span class="cs-sort-badge gold">${s.noyau.split(' ')[0]}</span>` : ''}
             ${totalPP > 0 ? `<span class="cs-sort-badge gold">${chainBonus||`+${totalPP}🎲`}</span>` : ''}
             ${nbCibles > 1 ? `<span class="cs-sort-badge blue">×${nbCibles}🎯</span>` : ''}
-            ${runesAll.filter(r=>r!=='Puissance'&&r!=='Protection'&&r!=='Dispersion').slice(0,2).map(r=>`<span class="cs-sort-badge blue" style="font-size:.6rem">${r.slice(0,4)}</span>`).join('')}
           </div>
-        </div>
+        </div>` : ''}
       </div>
 
       ${canEdit ? `<span class="cs-sort-row-actions" onclick="event.stopPropagation()"
@@ -1772,23 +1966,19 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     ${isOpen ? `<div class="cs-sort-row-detail">
       ${s.noyau ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Noyau</span>${s.noyau}</div>` : ''}
       ${runesAll.length ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes (${runesAll.length})</span>${runesAll.join(' · ')}</div>` : ''}
-      ${s.effet ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Effet</span>${s.effet}</div>` : ''}
-      ${typeSrt === 'degats' ? `<div class="cs-sort-dl" style="color:#ff6b6b">
-        <span class="cs-sort-dl-label">Dégâts</span>
-        ⚔️ <strong>${degCalc} ${modStr} ${statShortLabel}</strong>
-        <span style="font-size:.68rem;color:var(--text-dim);margin-left:.4rem">
-          (base ${armeDeg}${totalPP>0?` +${totalPP} dé PP`:''}${chainBonus?` chaîn. ${chainBonus}`:''}  ·  mod ${statShortLabel} ${modStr})
-        </span>
-      </div>` : ''}
-      ${typeSrt === 'soin' ? `<div class="cs-sort-dl" style="color:#22c38e">
-        <span class="cs-sort-dl-label">Soin</span>
-        💚 <strong>${soinCalc}</strong>
-        <span style="font-size:.68rem;color:var(--text-dim);margin-left:.4rem">(1d4 base${nbProt>0?` +${nbProt}d4 Protect.`:''})</span>
-      </div>` : ''}
-      ${nbCibles > 1 ? `<div class="cs-sort-dl" style="color:#4f8cff">
-        <span class="cs-sort-dl-label">Cibles</span>
-        🎯 ${nbCibles} cibles <span style="font-size:.68rem;color:var(--text-dim)">(×${nbDisp} Dispersion)</span>
-      </div>` : ''}
+
+      <!-- Résumé des effets -->
+      <div style="margin:.5rem 0;border-top:1px solid var(--border);padding-top:.5rem">
+        <div style="font-size:.7rem;font-weight:700;color:var(--text-dim);letter-spacing:.5px;text-transform:uppercase;margin-bottom:.35rem">📋 Effets calculés</div>
+        ${_buildSortResume(s, c).map(line => `
+        <div style="display:flex;align-items:baseline;gap:.4rem;padding:.18rem 0;font-size:.8rem">
+          <span style="min-width:1.2rem;text-align:center">${line.icon}</span>
+          <span style="font-weight:600;color:var(--text)">${line.label}</span>
+          ${line.detail ? `<span style="color:var(--text-dim);font-size:.72rem">${line.detail}</span>` : ''}
+        </div>`).join('')}
+      </div>
+
+      ${s.effet ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Description</span>${s.effet}</div>` : ''}
     </div>` : ''}
   </div>`;
 }
@@ -2964,44 +3154,88 @@ function editSort(idx) { openSortModal(idx, (STATE.activeChar?.deck_sorts||[])[i
 function openSortModal(idx, s) {
   const NOYAUX = ['Feu 🔥','Eau 💧','Terre 🪨','Vent 🌬️','Ombre 🌑','Lumière ✨','Physique 💪'];
   const RUNES = [
-    {nom:'Puissance',  effet:'+ 1 dé de dégâts'},
-    {nom:'Protection', effet:'+2 CA (2 tr) ou +1 dé soin'},
-    {nom:'Amplification',effet:'Zone +3m'},
-    {nom:'Enchantement',effet:'(AB) Élément sur équip. allié 2 tr'},
-    {nom:'Affliction', effet:'Élément + État sur équip. ennemi 2 tr'},
-    {nom:'Invocation',  effet:'Créature liée. 10 PV, CA 10'},
-    {nom:'Dispersion',  effet:'+1 cible'},
-    {nom:'Lacération',  effet:'CA cible −1 (−2 max)'},
-    {nom:'Chance',      effet:'RC 19–20. Critique aussi max'},
-    {nom:'Durée',       effet:'+2 tours'},
-    {nom:'Concentration',effet:'Actif hors tour. JS Sa DD11'},
-    {nom:'Réaction',    effet:'Lance hors de son tour'},
+    {nom:'Puissance',     effet:'+ 1 dé de dégâts · chaîné : +2 fixe/paire'},
+    {nom:'Protection',    effet:'+1d4 soin ou +2 CA (2 tr) · chaîné : soin+2 & CA+1'},
+    {nom:'Amplification', effet:'Zone +3m · chaîné : +2m/rune supp.'},
+    {nom:'Enchantement',  effet:'Élément sur équip. allié 2 tr → Action Bonus'},
+    {nom:'Affliction',    effet:'Élément + état sur équip. ennemi 2 tr → Action Bonus'},
+    {nom:'Invocation',    effet:'Créature liée · 10 PV, CA 10'},
+    {nom:'Dispersion',    effet:'+1 cible · chaîné : ×2 (2 runes = 4 cibles)'},
+    {nom:'Lacération',    effet:'CA cible −1 · chaîné : −1/rune (max −2, Élites −4)'},
+    {nom:'Chance',        effet:'RC 19–20, critique max · chaîné : RC−1/rune'},
+    {nom:'Durée',         effet:'+2 tours · chaîné : +1 supp./rune'},
+    {nom:'Concentration', effet:'Actif jusqu\'à 10 tours · JS Sa DD11 si dégâts'},
+    {nom:'Réaction',      effet:'Lance hors de son tour → Réaction'},
   ];
 
-  // Compter les occurrences de chaque rune (tableau avec doublons)
   const runesSrc = s?.runes||[];
-  const runeCounts = {}; // {nom: count}
+  const runeCounts = {};
   runesSrc.forEach(r => { runeCounts[r] = (runeCounts[r]||0) + 1; });
-
-  // Stocker les counts dans un objet global modifiable
   window._runeCountsEdit = {...runeCounts};
 
-  const noyauSel = s?.noyau||'';
+  const noyauSel  = s?.noyau||'';
+  // Types existants (multi)
+  const typesInit = Array.isArray(s?.types) && s.types.length ? s.types
+    : (s?.typeSoin ? ['defensif'] : (s?.noyau ? ['offensif'] : ['utilitaire']));
+
+  window._sortTypesEdit = new Set(typesInit);
+
+  // Action override
+  const { action: autoAction } = _getSortAction(s || {});
+  window._sortActionEdit        = s?.actionOverride || null;  // null = auto
+  window._sortConcEdit          = s?.concentrationOverride ?? null; // null = auto
 
   const runesHtml = RUNES.map(r => {
     const cnt = window._runeCountsEdit[r.nom]||0;
-    return `<div class="cs-rune-counter" id="rune-row-${r.nom.replace(/\s/g,'_')}">
+    const key = r.nom.replace(/\s/g,'_');
+    return `<div class="cs-rune-counter" id="rune-row-${key}">
       <div class="cs-rune-counter-info">
-        <span class="cs-rune-counter-name ${cnt>0?'selected':''}" id="rune-name-${r.nom.replace(/\s/g,'_')}">${r.nom}</span>
+        <span class="cs-rune-counter-name ${cnt>0?'selected':''}" id="rune-name-${key}">${r.nom}</span>
         <span class="cs-rune-counter-effet">${r.effet}</span>
       </div>
       <div class="cs-rune-counter-ctrl">
         <button type="button" class="cs-rune-btn minus" onclick="runeDecrement('${r.nom}')" ${cnt===0?'disabled':''}>−</button>
-        <span class="cs-rune-count-val" id="rune-cnt-${r.nom.replace(/\s/g,'_')}">${cnt}</span>
+        <span class="cs-rune-count-val" id="rune-cnt-${key}">${cnt}</span>
         <button type="button" class="cs-rune-btn plus" onclick="runeIncrement('${r.nom}')">+</button>
       </div>
     </div>`;
   }).join('');
+
+  const TYPE_CFG = [
+    { v:'offensif',   label:'⚔️ Offensif',   color:'#ff6b6b' },
+    { v:'defensif',   label:'🛡️ Défensif',   color:'#22c38e' },
+    { v:'utilitaire', label:'✨ Utilitaire', color:'#b47fff' },
+  ];
+  const typeBtnsHtml = TYPE_CFG.map(t => {
+    const isSel = typesInit.includes(t.v);
+    return `<button type="button" id="s-type-${t.v}" data-type="${t.v}"
+      onclick="window._toggleSortType('${t.v}')"
+      style="flex:1;padding:.4rem .3rem;border-radius:8px;font-size:.75rem;cursor:pointer;
+      border:2px solid ${isSel?t.color:'var(--border)'};
+      background:${isSel?t.color+'20':'var(--bg-elevated)'};
+      color:${isSel?t.color:'var(--text-dim)'};
+      font-weight:${isSel?'700':'400'};transition:all .15s">${t.label}</button>`;
+  }).join('');
+
+  const ACTION_CFG = [
+    { v:null,           label:'Auto',            color:'#9ca3af' },
+    { v:'action',       label:'⚡ Action',        color:'#e8b84b' },
+    { v:'action_bonus', label:'✴️ Action Bonus',  color:'#f97316' },
+    { v:'reaction',     label:'🔄 Réaction',      color:'#a78bfa' },
+  ];
+  const actionBtnsHtml = ACTION_CFG.map(a => {
+    const isSel = (window._sortActionEdit === a.v);
+    return `<button type="button" id="s-action-${a.v??'auto'}" data-action="${a.v??'auto'}"
+      onclick="window._selectSortAction(${a.v===null?'null':`'${a.v}'`})"
+      style="flex:1;padding:.35rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;
+      border:2px solid ${isSel?a.color:'var(--border)'};
+      background:${isSel?a.color+'20':'var(--bg-elevated)'};
+      color:${isSel?a.color:'var(--text-dim)'};
+      font-weight:${isSel?'700':'400'};transition:all .15s">${a.label}</button>`;
+  }).join('');
+
+  const concInit = s?.concentrationOverride ?? null;
+  const concChecked = concInit === true ? 'checked' : '';
 
   openModal(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort', `
     <div class="grid-2" style="gap:.6rem;margin-bottom:.5rem">
@@ -3018,31 +3252,26 @@ function openSortModal(idx, s) {
       </div>
     </div>
 
-    <!-- Type de sort -->
+    <!-- Types (multi-sélection) -->
     <div class="form-group">
-      <label>Type</label>
-      <div style="display:flex;gap:.4rem" id="s-type-btns">
-        ${[
-          {v:'offensif', label:'⚔️ Offensif', color:'#ff6b6b'},
-          {v:'soin',     label:'💚 Soin',      color:'#22c38e'},
-          {v:'utilitaire',label:'✨ Utilitaire',color:'#b47fff'},
-        ].map(t => {
-          // déterminer sélection par défaut
-          const isSel = s?.typeSoin ? t.v==='soin' : (s?.noyau ? t.v==='offensif' : (!s?.typeSoin&&!s?.noyau ? t.v==='utilitaire' : false));
-          return `<button type="button" id="s-type-${t.v}"
-            data-type="${t.v}"
-            onclick="window._selectSortType('${t.v}')"
-            style="flex:1;padding:.45rem;border-radius:8px;font-size:.78rem;cursor:pointer;
-            border:2px solid ${isSel?t.color:'var(--border)'};
-            background:${isSel?t.color+'20':'var(--bg-elevated)'};
-            color:${isSel?t.color:'var(--text-dim)'};
-            font-weight:${isSel?'700':'400'};transition:all .15s">${t.label}</button>`;
-        }).join('')}
-      </div>
-      <input type="hidden" id="s-typesoin" value="${s?.typeSoin?'1':''}">
-      <input type="hidden" id="s-typeutil" value="${s?.noyau?'':'1'}">
+      <label>Type(s) <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— plusieurs possibles</span></label>
+      <div style="display:flex;gap:.4rem">${typeBtnsHtml}</div>
     </div>
 
+    <!-- Type d'action -->
+    <div class="form-group">
+      <label>Action <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— Auto = déduit des runes</span></label>
+      <div style="display:flex;gap:.3rem" id="s-action-btns">${actionBtnsHtml}</div>
+      <div style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem">
+        <input type="checkbox" id="s-conc" ${concChecked}
+          onchange="window._sortConcEdit = this.checked ? true : null; window._updateSortActionDisplay()">
+        <label for="s-conc" style="font-size:.78rem;color:var(--text-dim);margin:0;cursor:pointer">
+          🧠 Concentration <span style="font-size:.7rem">(JS Sagesse DD 11 · jusqu'à 10 tours)</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Noyau -->
     <div class="form-group">
       <label>Noyau élémentaire <span style="color:var(--text-dim);font-weight:400">(2 PM)</span></label>
       <div class="cs-noyau-grid" id="noyau-grid">
@@ -3052,6 +3281,7 @@ function openSortModal(idx, s) {
       <input type="hidden" id="s-noyau" value="${noyauSel}">
     </div>
 
+    <!-- Runes -->
     <div class="form-group">
       <label>Runes <span style="color:var(--text-dim);font-weight:400">(+2 PM chacune, cumulables)</span></label>
       <div class="cs-rune-list">${runesHtml}</div>
@@ -3062,50 +3292,82 @@ function openSortModal(idx, s) {
       <input type="hidden" id="s-pm" value="${s?.pm||2}">
     </div>
 
-    <!-- Champs selon le type -->
-    <div id="s-degats-section" style="${s?.typeSoin?'display:none':''}">
-      <div class="form-group"><label>Dégâts <span style="color:var(--text-dim);font-weight:400">(laisser vide = dégâts de l'arme)</span></label>
+    <!-- Dégâts (si offensif) -->
+    <div id="s-degats-section" style="${typesInit.includes('offensif')?'':'display:none'}">
+      <div class="form-group"><label>Dégâts <span style="color:var(--text-dim);font-weight:400">(vide = dégâts de l'arme)</span></label>
         <input class="input-field" id="s-degats" value="${s?.degats||''}" placeholder="= arme automatiquement">
       </div>
     </div>
-    <div id="s-soin-section" style="${s?.typeSoin?'':'display:none'}">
-      <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(laisser vide = 1d4 base)</span></label>
+    <!-- Soin (si défensif) -->
+    <div id="s-soin-section" style="${typesInit.includes('defensif')?'':'display:none'}">
+      <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(vide = 1d4 base)</span></label>
         <input class="input-field" id="s-soin" value="${s?.soin||''}" placeholder="= 1d4 automatiquement">
       </div>
     </div>
 
-    <div class="form-group"><label>Description / Effet</label>
+    <div class="form-group"><label>Description / Effet libre</label>
       <textarea class="input-field" id="s-effet" rows="2">${s?.effet||''}</textarea>
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="saveSort(${idx})">Enregistrer</button>
   `);
 
-  // Initialiser le PM display + type par défaut
   setTimeout(() => {
     updateSortPM();
-    const typeInit = s?.typeSoin ? 'soin' : (s?.noyau ? 'offensif' : 'utilitaire');
-    window._selectSortType(typeInit, true);
+    window._updateSortActionDisplay();
   }, 50);
 }
 
-window._selectSortType = (type, silent = false) => {
-  const COLORS = { offensif:'#ff6b6b', soin:'#22c38e', utilitaire:'#b47fff' };
-  ['offensif','soin','utilitaire'].forEach(t => {
+window._toggleSortType = (type) => {
+  const TYPE_CFG = {
+    offensif:   '#ff6b6b',
+    defensif:   '#22c38e',
+    utilitaire: '#b47fff',
+  };
+  if (window._sortTypesEdit.has(type)) {
+    if (window._sortTypesEdit.size === 1) return; // garder au moins 1
+    window._sortTypesEdit.delete(type);
+  } else {
+    window._sortTypesEdit.add(type);
+  }
+  // Mettre à jour visuellement
+  Object.entries(TYPE_CFG).forEach(([t, color]) => {
     const btn = document.getElementById(`s-type-${t}`);
     if (!btn) return;
-    const col = COLORS[t];
-    const active = t === type;
-    btn.style.borderColor  = active ? col : 'var(--border)';
-    btn.style.background   = active ? col+'20' : 'var(--bg-elevated)';
-    btn.style.color        = active ? col : 'var(--text-dim)';
+    const active = window._sortTypesEdit.has(t);
+    btn.style.borderColor  = active ? color : 'var(--border)';
+    btn.style.background   = active ? color+'20' : 'var(--bg-elevated)';
+    btn.style.color        = active ? color : 'var(--text-dim)';
     btn.style.fontWeight   = active ? '700' : '400';
   });
-  const soinSec = document.getElementById('s-soin-section');
-  const degSec  = document.getElementById('s-degats-section');
-  const tsEl    = document.getElementById('s-typesoin');
-  if (soinSec) soinSec.style.display = type === 'soin' ? '' : 'none';
-  if (degSec)  degSec.style.display  = type === 'offensif' ? '' : 'none';
-  if (tsEl)    tsEl.value = type === 'soin' ? '1' : '';
+  // Afficher/masquer sections
+  const dSec = document.getElementById('s-degats-section');
+  const sSec = document.getElementById('s-soin-section');
+  if (dSec) dSec.style.display = window._sortTypesEdit.has('offensif') ? '' : 'none';
+  if (sSec) sSec.style.display = window._sortTypesEdit.has('defensif') ? '' : 'none';
+};
+
+window._selectSortAction = (val) => {
+  window._sortActionEdit = val === 'auto' ? null : val;
+  window._updateSortActionDisplay();
+};
+
+window._updateSortActionDisplay = () => {
+  const ACTION_CFG = {
+    null:         { label:'Auto',            color:'#9ca3af' },
+    action:       { label:'⚡ Action',        color:'#e8b84b' },
+    action_bonus: { label:'✴️ Action Bonus',  color:'#f97316' },
+    reaction:     { label:'🔄 Réaction',      color:'#a78bfa' },
+  };
+  const cur = window._sortActionEdit;
+  Object.entries(ACTION_CFG).forEach(([v, cfg]) => {
+    const btn = document.getElementById(`s-action-${v === 'null' ? 'auto' : v}`);
+    if (!btn) return;
+    const active = (cur === null && v === 'null') || cur === v;
+    btn.style.borderColor  = active ? cfg.color : 'var(--border)';
+    btn.style.background   = active ? cfg.color+'20' : 'var(--bg-elevated)';
+    btn.style.color        = active ? cfg.color : 'var(--text-dim)';
+    btn.style.fontWeight   = active ? '700' : '400';
+  });
 };
 
 function runeIncrement(nom) {
@@ -3159,7 +3421,7 @@ async function saveSort(idx) {
   const sorts = c.deck_sorts||[];
   const noyau = document.getElementById('s-noyau')?.value||'';
 
-  // Reconstruire le tableau de runes avec doublons depuis _runeCountsEdit
+  // Runes depuis _runeCountsEdit
   const runes = [];
   Object.entries(window._runeCountsEdit||{}).forEach(([nom, cnt]) => {
     for (let i=0; i<cnt; i++) runes.push(nom);
@@ -3168,17 +3430,31 @@ async function saveSort(idx) {
   const totalRunes = (noyau ? 1 : 0) + runes.length;
   const autoPm     = totalRunes * 2 || 2;
 
+  // Types (multi)
+  const types = [...(window._sortTypesEdit || new Set(['utilitaire']))];
+
+  // Action override (null = auto)
+  const actionOverride = window._sortActionEdit || null;
+
+  // Concentration override
+  const concEl = document.getElementById('s-conc');
+  const concentrationOverride = window._sortConcEdit;
+
   const newSort = {
     nom:      document.getElementById('s-nom')?.value||'Sort',
     pm:       autoPm,
     noyau,
     runes,
+    types,
     degats:   document.getElementById('s-degats')?.value||'',
     soin:     document.getElementById('s-soin')?.value||'',
     effet:    document.getElementById('s-effet')?.value||'',
-    typeSoin: document.getElementById('s-typesoin')?.value === '1',
+    // Legacy compat : typeSoin si defensif sans offensif
+    typeSoin: types.includes('defensif') && !types.includes('offensif'),
     catId:    document.getElementById('s-catid')?.value || '',
     actif:    idx>=0 ? sorts[idx].actif : false,
+    actionOverride,
+    concentrationOverride,
   };
   if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
   c.deck_sorts=sorts;
