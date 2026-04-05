@@ -516,15 +516,39 @@ function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
 // Retourne le bonus de maîtrise d'un item pour un personnage
 function _getMaitriseBonus(c, item = {}) {
   if (!c?.maitrises?.length) return 0;
-  // Priorité : sousType (copié depuis la boutique) puis typeArme (saisi manuellement)
-  const typeArme = (item.sousType || item.typeArme || '').toLowerCase().trim();
-  if (!typeArme) return 0;
+
+  // Construire la liste des types à tester par priorité :
+  // 1. sousType du slot équipé (copié depuis boutique lors de l'équipement)
+  // 2. typeArme du slot (saisi manuellement)
+  // 3. sousType de l'item inventaire source (si le slot a un sourceInvIndex)
+  // 4. typeArme de l'item inventaire source
+  const candidates = new Set();
+
+  const addIfNonEmpty = v => { if (v && v.trim()) candidates.add(v.toLowerCase().trim()); };
+
+  addIfNonEmpty(item.sousType);
+  addIfNonEmpty(item.typeArme);
+
+  // Chercher dans l'inventaire via sourceInvIndex si le slot n'a pas de sousType
+  if (!item.sousType && Number.isInteger(item.sourceInvIndex)) {
+    const invItem = (c.inventaire || [])[item.sourceInvIndex];
+    if (invItem) {
+      addIfNonEmpty(invItem.sousType);
+      addIfNonEmpty(invItem.typeArme);
+    }
+  }
+
+  if (!candidates.size) return 0;
+
   let best = 0;
   for (const m of c.maitrises) {
     const mType = (m.typeArme || '').toLowerCase().trim();
     if (!mType) continue;
-    if (typeArme === mType || typeArme.includes(mType) || mType.includes(typeArme)) {
-      best = Math.max(best, parseInt(m.niveau) || 0);
+    for (const cand of candidates) {
+      if (cand === mType || cand.includes(mType) || mType.includes(cand)) {
+        best = Math.max(best, parseInt(m.niveau) || 0);
+        break;
+      }
     }
   }
   return best;
