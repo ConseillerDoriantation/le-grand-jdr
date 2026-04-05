@@ -158,10 +158,12 @@ function _render() {
 function _renderCard(c) {
   const isActive  = c.id === _activeId;
   const track     = _tracker[c.id] || {};
-  const pvMax     = parseInt(c.pvMax) || 0;
-  const pvActuel  = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
-  const pvPct     = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel/pvMax*100))) : 0;
-  const pvColor   = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#e8b84b' : '#ff6b6b';
+
+  // Admin uniquement : barre de PV avec max connu
+  const pvMax    = STATE.isAdmin ? (parseInt(c.pvMax) || 0) : 0;
+  const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
+  const pvPct    = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel/pvMax*100))) : 0;
+  const pvColor  = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#e8b84b' : '#ff6b6b';
 
   return `<div class="bst-card ${isActive?'active':''}" onclick="window._bstOpen('${c.id}')">
     ${c.imageUrl
@@ -173,7 +175,7 @@ function _renderCard(c) {
       <div class="bst-card-meta">
         ${c.type?`${c.type}`:''}${c.type&&c.environnement?' · ':''}${c.environnement||''}
       </div>
-      ${pvMax > 0 ? `
+      ${STATE.isAdmin && pvMax > 0 ? `
       <div style="margin-top:.5rem">
         <div class="bst-track-bar">
           <div class="bst-track-fill" style="width:${pvPct}%;background:${pvColor}"></div>
@@ -193,126 +195,17 @@ function _renderCard(c) {
 function _renderPanel(c) {
   if (!c) return '';
   const track    = _tracker[c.id] || {};
-  const ded      = track.deductions || {}; // deductions du joueur
   const pvMax    = parseInt(c.pvMax) || 0;
   const pmMax    = parseInt(c.pmMax) || 0;
-  const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
-  const pmActuel = track.pmActuel !== undefined ? parseInt(track.pmActuel) : pmMax;
-  const pvPct    = pvMax > 0 ? Math.max(0,Math.min(100,Math.round(pvActuel/pvMax*100))) : 0;
-  const pmPct    = pmMax > 0 ? Math.max(0,Math.min(100,Math.round(pmActuel/pmMax*100))) : 0;
-  const pvColor  = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#e8b84b' : '#ff6b6b';
+  const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : 0;
+  const pmActuel = track.pmActuel !== undefined ? parseInt(track.pmActuel) : 0;
 
   const attaques = Array.isArray(c.attaques) ? c.attaques : [];
   const traits   = Array.isArray(c.traits)   ? c.traits   : [];
   const butins   = Array.isArray(c.butins)   ? c.butins   : [];
 
-  // ── VUE ADMIN ─────────────────────────────────────────────────────────────
-  if (STATE.isAdmin) {
-    const statDefs = [
-      ['PV',  c.pvMax||'—'], ['PM',  c.pmMax||'—'], ['CA',  c.ca||'—'],
-      ['FOR', c.force||'—'], ['DEX', c.dexterite||'—'], ['CON', c.constitution||'—'],
-      ['INT', c.intelligence||'—'], ['SAG', c.sagesse||'—'], ['CHA', c.charisme||'—'],
-    ];
-
-    return `
-    <div class="bst-panel" style="position:sticky;top:1rem">
-      <!-- Image -->
-      <div style="position:relative">
-        ${c.imageUrl
-          ? `<img class="bst-panel-img" src="${c.imageUrl}" alt="${c.nom||''}">`
-          : `<div style="height:200px;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));display:flex;align-items:center;justify-content:center;font-size:5rem">${c.emoji||'🐲'}</div>`
-        }
-        <button onclick="window._bstClose()" style="position:absolute;top:10px;right:10px;background:rgba(11,17,24,.8);border:1px solid var(--border);border-radius:999px;color:var(--text-muted);padding:3px 8px;cursor:pointer;font-size:.8rem">✕</button>
-        <div style="position:absolute;bottom:10px;left:12px">
-          <div style="font-family:'Cinzel',serif;font-size:1.2rem;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.8);font-weight:700">${c.nom||'?'}</div>
-          ${c.type||c.environnement ? `<div style="font-size:.72rem;color:rgba(255,255,255,.75)">${[c.type,c.environnement].filter(Boolean).join(' · ')}</div>` : ''}
-        </div>
-        <!-- Badge MJ -->
-        <div style="position:absolute;top:10px;left:10px;background:rgba(79,140,255,.85);border-radius:6px;padding:2px 8px;font-size:.62rem;font-weight:700;color:#fff;letter-spacing:1px">MJ</div>
-      </div>
-
-      <!-- Stats MJ complètes -->
-      <div class="bst-section">
-        <div class="bst-section-title">📈 Statistiques</div>
-        <div class="bst-stat-grid">
-          ${statDefs.map(([l,v]) => `
-            <div class="bst-stat">
-              <div class="bst-stat-val">${v}</div>
-              <div class="bst-stat-lbl">${l}</div>
-            </div>`).join('')}
-        </div>
-        ${c.vitesse||c.initiative||c.niveau ? `
-        <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
-          ${c.niveau    ? `<span class="bst-tag">Niv. ${c.niveau}</span>` : ''}
-          ${c.vitesse   ? `<span class="bst-tag">🏃 ${c.vitesse}m</span>` : ''}
-          ${c.initiative? `<span class="bst-tag">⚡ Init. ${c.initiative}</span>` : ''}
-          ${c.dangerositeXp ? `<span class="bst-tag">⭐ ${c.dangerositeXp} XP</span>` : ''}
-        </div>` : ''}
-      </div>
-
-      <!-- Description -->
-      ${c.description ? `
-      <div class="bst-section">
-        <div class="bst-section-title">📖 Description</div>
-        <div style="font-size:.82rem;color:var(--text-muted);line-height:1.7">${c.description.replace(/\n/g,'<br>')}</div>
-      </div>` : ''}
-
-      <!-- Attaques -->
-      ${attaques.length ? `
-      <div class="bst-section">
-        <div class="bst-section-title">⚔️ Attaques</div>
-        ${attaques.map(a => `
-          <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:var(--bg-elevated);border-radius:8px;border-left:2px solid #ff6b6b">
-            <div style="font-size:.82rem;font-weight:600;color:var(--text)">${a.nom||'Attaque'}</div>
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.2rem">
-              ${a.toucher ? `<span style="font-size:.72rem;color:#e8b84b">🎯 ${a.toucher}</span>` : ''}
-              ${a.degats  ? `<span style="font-size:.72rem;color:#ff6b6b">⚔️ ${a.degats}</span>` : ''}
-              ${a.portee  ? `<span style="font-size:.72rem;color:var(--text-dim)">📏 ${a.portee}</span>` : ''}
-            </div>
-            ${a.description ? `<div style="font-size:.75rem;color:var(--text-dim);margin-top:.2rem;font-style:italic">${a.description}</div>` : ''}
-          </div>`).join('')}
-      </div>` : ''}
-
-      <!-- Traits -->
-      ${traits.length ? `
-      <div class="bst-section">
-        <div class="bst-section-title">✨ Traits & Capacités</div>
-        ${traits.map(t => `
-          <div style="margin-bottom:.4rem;padding:.4rem .6rem;border-left:2px solid #b47fff;background:var(--bg-elevated);border-radius:0 8px 8px 0">
-            <div style="font-size:.8rem;font-weight:600;color:var(--text)">${t.nom||''}</div>
-            ${t.description ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:.1rem">${t.description}</div>` : ''}
-          </div>`).join('')}
-      </div>` : ''}
-
-      <!-- Butins -->
-      ${butins.length ? `
-      <div class="bst-section">
-        <div class="bst-section-title">💰 Butins</div>
-        ${butins.map(b => `
-          <div class="bst-row">
-            <span class="bst-row-label">${b.nom||'Objet'}</span>
-            <span class="bst-row-val">${b.quantite||''}${b.chance?` — ${b.chance}`:''}</span>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <!-- Actions admin -->
-      <div class="bst-section" style="display:flex;gap:.5rem">
-        <button class="btn btn-outline btn-sm" style="flex:1" onclick="openBeastModal('${c.id}')">✏️ Modifier</button>
-        <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)" onclick="deleteBeast('${c.id}')">🗑️</button>
-      </div>
-    </div>`;
-  }
-
-  // ── VUE JOUEUR ────────────────────────────────────────────────────────────
-  // Les données réelles (pvMax, stats, attaques, etc.) sont MASQUÉES
-  // Le joueur entre ses propres déductions
-
-  const DEDUCTION_STATS = ['PV max','PM max','CA','Force','Dextérité','Constitution','Intelligence','Sagesse','Charisme'];
-  const DEDUCTION_KEYS  = ['pvMax','pmMax','ca','force','dexterite','constitution','intelligence','sagesse','charisme'];
-
-  return `
-  <div class="bst-panel" style="position:sticky;top:1rem">
-    <!-- Image + nom -->
+  // ── Blocs partagés MJ + Joueur ───────────────────────────────────────────
+  const headerHtml = `
     <div style="position:relative">
       ${c.imageUrl
         ? `<img class="bst-panel-img" src="${c.imageUrl}" alt="${c.nom||''}">`
@@ -323,42 +216,85 @@ function _renderPanel(c) {
         <div style="font-family:'Cinzel',serif;font-size:1.2rem;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.8);font-weight:700">${c.nom||'?'}</div>
         ${c.type||c.environnement ? `<div style="font-size:.72rem;color:rgba(255,255,255,.75)">${[c.type,c.environnement].filter(Boolean).join(' · ')}</div>` : ''}
       </div>
-    </div>
+    </div>`;
 
-    <!-- Suivi combat (PV/PM) -->
+  const attaquesHtml = attaques.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">⚔️ Attaques</div>
+      ${attaques.map(a => `
+        <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:var(--bg-elevated);border-radius:8px;border-left:2px solid #ff6b6b">
+          <div style="font-size:.82rem;font-weight:600;color:var(--text)">${a.nom||'Attaque'}</div>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.2rem">
+            ${a.toucher ? `<span style="font-size:.72rem;color:#e8b84b">🎯 ${a.toucher}</span>` : ''}
+            ${a.degats  ? `<span style="font-size:.72rem;color:#ff6b6b">⚔️ ${a.degats}</span>` : ''}
+            ${a.portee  ? `<span style="font-size:.72rem;color:var(--text-dim)">📏 ${a.portee}</span>` : ''}
+          </div>
+          ${a.description ? `<div style="font-size:.75rem;color:var(--text-dim);margin-top:.2rem;font-style:italic">${a.description}</div>` : ''}
+        </div>`).join('')}
+    </div>` : '';
+
+  const traitsHtml = traits.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">✨ Traits & Capacités</div>
+      ${traits.map(t => `
+        <div style="margin-bottom:.4rem;padding:.4rem .6rem;border-left:2px solid #b47fff;background:var(--bg-elevated);border-radius:0 8px 8px 0">
+          <div style="font-size:.8rem;font-weight:600;color:var(--text)">${t.nom||''}</div>
+          ${t.description ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:.1rem">${t.description}</div>` : ''}
+        </div>`).join('')}
+    </div>` : '';
+
+  const butinsHtml = butins.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">💰 Butins</div>
+      ${butins.map(b => `
+        <div class="bst-row">
+          <span class="bst-row-label">${b.nom||'Objet'}</span>
+          <span class="bst-row-val">${b.quantite||''}${b.chance?` — ${b.chance}`:''}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  const descHtml = c.description ? `
+    <div class="bst-section">
+      <div class="bst-section-title">📖 Description</div>
+      <div style="font-size:.82rem;color:var(--text-muted);line-height:1.7">${c.description.replace(/\n/g,'<br>')}</div>
+    </div>` : '';
+
+  // ── Suivi combat (commun, adapté selon vue) ──────────────────────────────
+  const suiviHtml = (showBars) => `
     <div class="bst-section">
       <div class="bst-section-title">📊 Suivi en combat</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-        <!-- PV -->
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem">
             <span style="font-size:.72rem;color:var(--text-dim)">❤️ PV</span>
             <div style="display:flex;align-items:center;gap:.3rem">
               <button onclick="window._bstAdjust('${c.id}','pv',-1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">−</button>
-              <input type="number" class="bst-input-sm" id="bst-pv-${c.id}"
-                value="${pvActuel}" min="0"
+              <input type="number" class="bst-input-sm" id="bst-pv-${c.id}" value="${pvActuel}" min="0"
                 onchange="window._bstSetStat('${c.id}','pvActuel',this.value)">
               <button onclick="window._bstAdjust('${c.id}','pv',1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">+</button>
             </div>
           </div>
-          <div class="bst-track-bar"><div class="bst-track-fill" id="bst-pvbar-${c.id}" style="width:${pvPct}%;background:${pvColor}"></div></div>
+          ${showBars ? `
+          <div class="bst-track-bar"><div class="bst-track-fill" id="bst-pvbar-${c.id}" style="width:${pvMax>0?Math.round(pvActuel/pvMax*100):0}%;background:${pvMax>0&&pvActuel/pvMax>0.5?'#22c38e':pvMax>0&&pvActuel/pvMax>0.25?'#e8b84b':'#ff6b6b'}"></div></div>
+          <div style="font-size:.62rem;color:var(--text-dim)">${pvActuel}/${pvMax} PV</div>` :
+          `<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">PV estimés</div>`}
         </div>
-        <!-- PM -->
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem">
             <span style="font-size:.72rem;color:var(--text-dim)">💙 PM</span>
             <div style="display:flex;align-items:center;gap:.3rem">
               <button onclick="window._bstAdjust('${c.id}','pm',-1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">−</button>
-              <input type="number" class="bst-input-sm" id="bst-pm-${c.id}"
-                value="${pmActuel}" min="0"
+              <input type="number" class="bst-input-sm" id="bst-pm-${c.id}" value="${pmActuel}" min="0"
                 onchange="window._bstSetStat('${c.id}','pmActuel',this.value)">
               <button onclick="window._bstAdjust('${c.id}','pm',1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">+</button>
             </div>
           </div>
-          <div class="bst-track-bar"><div class="bst-track-fill" id="bst-pmbar-${c.id}" style="width:${pmPct}%;background:#4f8cff"></div></div>
+          ${showBars ? `
+          <div class="bst-track-bar"><div class="bst-track-fill" id="bst-pmbar-${c.id}" style="width:${pmMax>0?Math.round(pmActuel/pmMax*100):0}%;background:#4f8cff"></div></div>
+          <div style="font-size:.62rem;color:var(--text-dim)">${pmActuel}/${pmMax} PM</div>` :
+          `<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">PM estimés</div>`}
         </div>
       </div>
-      <!-- Notes combat -->
       <div style="margin-top:.6rem">
         <textarea id="bst-notes-${c.id}" placeholder="Notes de combat..." rows="2"
           class="input-field" style="font-size:.78rem;resize:none"
@@ -368,51 +304,61 @@ function _renderPanel(c) {
         style="font-size:.7rem;color:var(--text-dim);background:none;border:none;cursor:pointer;margin-top:.25rem;text-decoration:underline">
         Réinitialiser
       </button>
-    </div>
+    </div>`;
 
-    <!-- Mes déductions (données que le joueur devine) -->
-    <div class="bst-section">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem">
-        <div class="bst-section-title" style="margin-bottom:0">🔍 Mes déductions</div>
-        <span style="font-size:.65rem;color:var(--text-dim);font-style:italic">Visible seulement par toi</span>
+  // ── VUE ADMIN ─────────────────────────────────────────────────────────────
+  if (STATE.isAdmin) {
+    const statDefs = [
+      ['PV',    c.pvMax||'—'],
+      ['PM',    c.pmMax||'—'],
+      ['CA',    c.ca||'—'],
+      ['Vit.',  c.vitesse ? `${c.vitesse}m` : '—'],
+      ['Init.', c.initiative||'—'],
+    ];
+    return `
+    <div class="bst-panel" style="position:sticky;top:1rem">
+      ${headerHtml}
+      <div style="position:absolute;top:10px;left:10px;background:rgba(79,140,255,.85);border-radius:6px;padding:2px 8px;font-size:.62rem;font-weight:700;color:#fff;letter-spacing:1px">MJ</div>
+      <div class="bst-section">
+        <div class="bst-section-title">📈 Statistiques</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem">
+          ${statDefs.map(([l,v]) => `
+            <div class="bst-stat">
+              <div class="bst-stat-val">${v}</div>
+              <div class="bst-stat-lbl">${l}</div>
+            </div>`).join('')}
+        </div>
+        ${c.niveau||c.dangerositeXp ? `
+        <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
+          ${c.niveau        ? `<span class="bst-tag">Niv. ${c.niveau}</span>` : ''}
+          ${c.dangerositeXp ? `<span class="bst-tag">⭐ ${c.dangerositeXp} XP</span>` : ''}
+        </div>` : ''}
       </div>
-      <div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.6rem;padding:.4rem .6rem;
-        background:rgba(79,140,255,.06);border:1px solid rgba(79,140,255,.15);border-radius:8px">
-        💡 Remplis ce que tu penses avoir observé. Seul toi peux le voir.
+      ${suiviHtml(true)}
+      ${descHtml}
+      ${attaquesHtml}
+      ${traitsHtml}
+      ${butinsHtml}
+      <div class="bst-section" style="display:flex;gap:.5rem">
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="openBeastModal('${c.id}')">✏️ Modifier</button>
+        <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)" onclick="deleteBeast('${c.id}')">🗑️</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem">
-        ${DEDUCTION_KEYS.map((k,i) => `
-          <div style="background:var(--bg-elevated);border-radius:8px;padding:.4rem .35rem;text-align:center;
-            border:1px solid ${ded[k]!==undefined?'rgba(232,184,75,.25)':'var(--border)'}">
-            <input type="number" placeholder="?" style="width:100%;background:none;border:none;
-              text-align:center;font-family:'Cinzel',serif;font-size:.88rem;font-weight:700;
-              color:${ded[k]!==undefined?'var(--gold)':'var(--text-dim)'};outline:none;padding:0"
-              value="${ded[k]!==undefined?ded[k]:''}"
-              onchange="window._bstSetDeduction('${c.id}','${k}',this.value)"
-              title="${DEDUCTION_STATS[i]}">
-            <div style="font-size:.58rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-top:2px">${DEDUCTION_STATS[i]}</div>
-          </div>`).join('')}
-      </div>
-      <!-- Attaques observées -->
-      <div style="margin-top:.6rem">
-        <div style="font-size:.68rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:.3rem">Attaques observées</div>
-        <textarea placeholder="Ex: Griffe — toucher +5, 2d6+3 dégâts tranchants..." rows="3"
-          class="input-field" style="font-size:.75rem;resize:none"
-          onchange="window._bstSetDeduction('${c.id}','attaquesObservees',this.value)"
-          >${ded.attaquesObservees||''}</textarea>
-      </div>
-      <!-- Traits observés -->
-      <div style="margin-top:.5rem">
-        <div style="font-size:.68rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:.3rem">Traits & résistances</div>
-        <textarea placeholder="Ex: Résiste au feu, immunité poison..." rows="2"
-          class="input-field" style="font-size:.75rem;resize:none"
-          onchange="window._bstSetDeduction('${c.id}','traitsObserves',this.value)"
-          >${ded.traitsObserves||''}</textarea>
-      </div>
-    </div>
+    </div>`;
+  }
+
+  // ── VUE JOUEUR ────────────────────────────────────────────────────────────
+  // Miroir de la vue MJ : mêmes attaques/traits/butins/description
+  // Mais sans PV max affiché (compteur libre), sans stats de base
+  return `
+  <div class="bst-panel" style="position:sticky;top:1rem">
+    ${headerHtml}
+    ${suiviHtml(false)}
+    ${descHtml}
+    ${attaquesHtml}
+    ${traitsHtml}
+    ${butinsHtml}
   </div>`;
 }
-
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL ADMIN — Créer / Modifier une créature
 // ══════════════════════════════════════════════════════════════════════════════
@@ -476,8 +422,6 @@ async function openBeastModal(id = null) {
       <label>Statistiques</label>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem">
         ${[['pvMax','❤️ PV Max'],['pmMax','💙 PM Max'],['ca','🛡️ CA'],
-           ['force','FOR'],['dexterite','DEX'],['constitution','CON'],
-           ['intelligence','INT'],['sagesse','SAG'],['charisme','CHA'],
            ['vitesse','Vitesse (m)'],['initiative','Initiative']].map(([k,l]) => `
           <div>
             <label style="font-size:.68rem;color:var(--text-dim)">${l}</label>
@@ -669,12 +613,6 @@ async function saveBeast(id = '') {
     pvMax:          parseInt(document.getElementById('bst-pvMax')?.value)||0,
     pmMax:          parseInt(document.getElementById('bst-pmMax')?.value)||0,
     ca:             parseInt(document.getElementById('bst-ca')?.value)||0,
-    force:          parseInt(document.getElementById('bst-force')?.value)||0,
-    dexterite:      parseInt(document.getElementById('bst-dexterite')?.value)||0,
-    constitution:   parseInt(document.getElementById('bst-constitution')?.value)||0,
-    intelligence:   parseInt(document.getElementById('bst-intelligence')?.value)||0,
-    sagesse:        parseInt(document.getElementById('bst-sagesse')?.value)||0,
-    charisme:       parseInt(document.getElementById('bst-charisme')?.value)||0,
     vitesse:        parseInt(document.getElementById('bst-vitesse')?.value)||0,
     initiative:     parseInt(document.getElementById('bst-initiative')?.value)||0,
     // Tableaux dynamiques
