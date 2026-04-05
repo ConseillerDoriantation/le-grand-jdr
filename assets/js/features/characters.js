@@ -1551,17 +1551,15 @@ function _getSortTypes(s) {
 
 /** Type d'action : 'action' | 'action_bonus' | 'reaction'
  *  + concentration : boolean
- *  Règles auto depuis runes, overridables manuellement via s.actionOverride / s.concentrationOverride
+ *  Réaction et Concentration = 100% déterminées par les runes.
+ *  Action Bonus = rune Enchantement. Override manuel possible pour Action/Action Bonus uniquement.
  */
 function _getSortAction(s) {
   const runes = s.runes || [];
-  const hasReaction    = runes.includes('Réaction');
-  const hasEnch        = runes.includes('Enchantement'); // Affliction = Action normale
-  const hasConc        = runes.includes('Concentration');
-
-  const autoAction = hasReaction ? 'reaction' : hasEnch ? 'action_bonus' : 'action';
-  const action        = s.actionOverride || autoAction;
-  const concentration = s.concentrationOverride != null ? s.concentrationOverride : hasConc;
+  const action        = runes.includes('Réaction')     ? 'reaction'
+                      : runes.includes('Enchantement') ? 'action_bonus'
+                      : s.actionOverride               || 'action';
+  const concentration = runes.includes('Concentration');
   return { action, concentration };
 }
 
@@ -1602,29 +1600,31 @@ function _calcSortDegats(s, c) {
 /**
  * Soin effectif.
  * - Base 1d4 + Protection chaîné : +1d4 par rune, +2 soin fixe par paire (chaînage)
+ * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
  */
 function _calcSortSoin(s) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
-  // Chaînage Protection : bonus soin fixe = (nbProt-1) si nbProt > 1
   const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base   = (s.soin || '').trim();
 
-  const buildResult = (diceCount) => {
+  const buildDefault = (diceCount) => {
     let r = `${diceCount}d4`;
     if (chainSoin > 0) r += ` +${chainSoin * 2}`;
     return r;
   };
 
-  if (!base || base.toLowerCase() === '= base') return buildResult(1 + nbProt);
+  if (!base || base.toLowerCase() === '= base') return buildDefault(1 + nbProt);
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
+      // Format XdY reconnu → on ajoute les dés Protection + chaînage
       let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
       if (chainSoin > 0) r += ` +${chainSoin * 2}`;
       return r;
     }
-    return `${base} +${nbProt}d4${chainSoin > 0 ? ` +${chainSoin * 2}` : ''}`;
+    // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
+    return base;
   }
   return base;
 }
@@ -3204,10 +3204,8 @@ function openSortModal(idx, s) {
 
   window._sortTypesEdit = new Set(typesInit);
 
-  // Action override
-  const { action: autoAction } = _getSortAction(s || {});
-  window._sortActionEdit        = s?.actionOverride || null;  // null = auto
-  window._sortConcEdit          = s?.concentrationOverride ?? null; // null = auto
+  // Action override (Auto / Action / Action Bonus uniquement — Réaction = rune)
+  window._sortActionEdit = s?.actionOverride || null;  // null = auto
 
   const runesHtml = RUNES.map(r => {
     const cnt = window._runeCountsEdit[r.nom]||0;
@@ -3245,7 +3243,6 @@ function openSortModal(idx, s) {
     { v:null,           label:'Auto',            color:'#9ca3af' },
     { v:'action',       label:'⚡ Action',        color:'#e8b84b' },
     { v:'action_bonus', label:'✴️ Action Bonus',  color:'#f97316' },
-    { v:'reaction',     label:'🔄 Réaction',      color:'#a78bfa' },
   ];
   const actionBtnsHtml = ACTION_CFG.map(a => {
     const isSel = (window._sortActionEdit === a.v);
@@ -3257,9 +3254,6 @@ function openSortModal(idx, s) {
       color:${isSel?a.color:'var(--text-dim)'};
       font-weight:${isSel?'700':'400'};transition:all .15s">${a.label}</button>`;
   }).join('');
-
-  const concInit = s?.concentrationOverride ?? null;
-  const concChecked = concInit === true ? 'checked' : '';
 
   openModal(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort', `
     <div class="grid-2" style="gap:.6rem;margin-bottom:.5rem">
@@ -3284,21 +3278,8 @@ function openSortModal(idx, s) {
 
     <!-- Type d'action -->
     <div class="form-group">
-      <label>Action <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— Auto = déduit des runes</span></label>
+      <label>Action <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— Auto = déduit des runes · Réaction/Concentration = rune</span></label>
       <div style="display:flex;gap:.3rem" id="s-action-btns">${actionBtnsHtml}</div>
-    </div>
-
-    <!-- Concentration : checkbox claire -->
-    <div style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;
-      border-radius:8px;border:2px solid ${(s?.concentrationOverride===true || (!s?.concentrationOverride && (s?.runes||[]).includes('Concentration'))) ? '#60a5fa' : 'var(--border)'};
-      background:${(s?.concentrationOverride===true || (!s?.concentrationOverride && (s?.runes||[]).includes('Concentration'))) ? '#60a5fa10' : 'var(--bg-elevated)'};
-      cursor:pointer;transition:all .15s;margin-bottom:.5rem" id="s-conc-row"
-      onclick="window._toggleConc()">
-      <input type="checkbox" id="s-conc" ${concChecked} style="pointer-events:none;accent-color:#60a5fa;width:15px;height:15px">
-      <div style="flex:1">
-        <span style="font-size:.82rem;font-weight:600;color:var(--text)">🧠 Concentration</span>
-        <span style="font-size:.72rem;color:var(--text-dim);margin-left:.4rem">JS Sagesse DD 11 si dégâts · jusqu'à 10 tours max</span>
-      </div>
     </div>
 
     <!-- Noyau -->
@@ -3424,18 +3405,6 @@ window._updateSortActionDisplay = () => {
   });
 };
 
-window._toggleConc = () => {
-  const cb  = document.getElementById('s-conc');
-  const row = document.getElementById('s-conc-row');
-  if (!cb) return;
-  cb.checked = !cb.checked;
-  window._sortConcEdit = cb.checked ? true : null;
-  if (row) {
-    row.style.borderColor  = cb.checked ? '#60a5fa' : 'var(--border)';
-    row.style.background   = cb.checked ? '#60a5fa10' : 'var(--bg-elevated)';
-  }
-};
-
 window._selectProtMode = (mode) => {
   const hidden = document.getElementById('s-prot-mode');
   const soinSec = document.getElementById('s-soin-section');
@@ -3524,10 +3493,6 @@ async function saveSort(idx) {
   // Action override (null = auto)
   const actionOverride = window._sortActionEdit || null;
 
-  // Concentration override
-  const concEl = document.getElementById('s-conc');
-  const concentrationOverride = window._sortConcEdit;
-
   const newSort = {
     nom:      document.getElementById('s-nom')?.value||'Sort',
     pm:       autoPm,
@@ -3543,7 +3508,6 @@ async function saveSort(idx) {
     catId:    document.getElementById('s-catid')?.value || '',
     actif:    idx>=0 ? sorts[idx].actif : false,
     actionOverride,
-    concentrationOverride,
   };
   if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
   c.deck_sorts=sorts;
