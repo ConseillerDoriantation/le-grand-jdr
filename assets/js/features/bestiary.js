@@ -21,6 +21,7 @@ const _clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
 let _creatures  = [];
 let _tracker    = {}; // { [creatureId]: { pvActuel, pmActuel, notes, deductions:{pv,pm,ca,for,...} } }
 let _searchVal  = '';
+let _filterType = ''; // filtre par type de créature
 let _activeId   = null; // créature ouverte dans le panneau
 let _bestiaireId = 'main'; // id du bestiaire actif (admin peut switcher)
 
@@ -57,11 +58,19 @@ async function renderBestiary() {
 function _render() {
   const content = document.getElementById('main-content');
   const search  = (_searchVal||'').toLowerCase().trim();
-  const filtered = _creatures.filter(c =>
-    !search || (c.nom||'').toLowerCase().includes(search) ||
-    (c.type||'').toLowerCase().includes(search) ||
-    (c.environnement||'').toLowerCase().includes(search)
-  );
+  const fType   = (_filterType||'').toLowerCase().trim();
+
+  // Collecter tous les types distincts pour les boutons de filtre
+  const allTypes = [...new Set(_creatures.map(c => c.type||'').filter(Boolean))].sort();
+
+  const filtered = _creatures.filter(c => {
+    const matchSearch = !search ||
+      (c.nom||'').toLowerCase().includes(search) ||
+      (c.type||'').toLowerCase().includes(search) ||
+      (c.environnement||'').toLowerCase().includes(search);
+    const matchType = !fType || (c.type||'').toLowerCase() === fType;
+    return matchSearch && matchType;
+  });
 
   content.innerHTML = `
   <style>
@@ -127,10 +136,31 @@ function _render() {
       <input id="bst-search" type="text" placeholder="🔍 Rechercher..."
         class="input-field" style="max-width:220px;font-size:.83rem"
         value="${_searchVal}"
-        oninput="window._bstSearch(this.value)">
+        oninput="window._bstSearchInput(this.value)">
       ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openBeastModal()">+ Créature</button>` : ''}
     </div>
   </div>
+
+  <!-- Filtres par type -->
+  ${allTypes.length > 1 ? `
+  <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:1rem">
+    <button onclick="window._bstSetType('')"
+      style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
+      border:1px solid ${!_filterType?'var(--gold)':'var(--border)'};
+      background:${!_filterType?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
+      color:${!_filterType?'var(--gold)':'var(--text-dim)'};font-weight:${!_filterType?'700':'400'}">
+      Tous
+    </button>
+    ${allTypes.map(t => `
+    <button onclick="window._bstSetType('${t.replace(/'/g,"\\'")}')"
+      style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
+      border:1px solid ${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--border)'};
+      background:${(_filterType||'').toLowerCase()===t.toLowerCase()?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
+      color:${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--text-dim)'};
+      font-weight:${(_filterType||'').toLowerCase()===t.toLowerCase()?'700':'400'}">
+      ${t}
+    </button>`).join('')}
+  </div>` : ''}
 
   ${filtered.length === 0 ? `
     <div style="text-align:center;padding:4rem;color:var(--text-dim)">
@@ -308,11 +338,20 @@ function _renderPanel(c) {
 
   // ── VUE ADMIN ─────────────────────────────────────────────────────────────
   if (STATE.isAdmin) {
-    const statDefs = [
-      ['PV',    c.pvMax||'—'], ['PM',  c.pmMax||'—'],  ['CA',    c.ca||'—'],
-      ['FOR',   c.force||'—'], ['DEX', c.dexterite||'—'], ['CON', c.constitution||'—'],
-      ['INT',   c.intelligence||'—'], ['SAG', c.sagesse||'—'], ['CHA', c.charisme||'—'],
-      ['Vit.',  c.vitesse ? `${c.vitesse}m` : '—'], ['Init.', c.initiative||'—'],
+    // Calcul modificateur D&D : floor((stat - 10) / 2)
+    const mod = (val) => {
+      const n = parseInt(val);
+      if (!val || isNaN(n)) return null;
+      const m = Math.floor((n - 10) / 2);
+      return m >= 0 ? `+${m}` : `${m}`;
+    };
+    const statCaracs = [
+      ['FOR', c.force], ['DEX', c.dexterite], ['CON', c.constitution],
+      ['INT', c.intelligence], ['SAG', c.sagesse], ['CHA', c.charisme],
+    ];
+    const statBase = [
+      ['PV', c.pvMax||'—'], ['PM', c.pmMax||'—'], ['CA', c.ca||'—'],
+      ['Vit.', c.vitesse ? `${c.vitesse}m` : '—'], ['Init.', c.initiative||'—'],
     ];
     return `
     <div class="bst-panel" style="position:sticky;top:1rem">
@@ -320,12 +359,24 @@ function _renderPanel(c) {
       <div style="position:absolute;top:10px;left:10px;background:rgba(79,140,255,.85);border-radius:6px;padding:2px 8px;font-size:.62rem;font-weight:700;color:#fff;letter-spacing:1px">MJ</div>
       <div class="bst-section">
         <div class="bst-section-title">📈 Statistiques</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem">
-          ${statDefs.map(([l,v]) => `
+        <!-- Stats de base : PV / PM / CA / Vit / Init -->
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem;margin-bottom:.5rem">
+          ${statBase.map(([l,v]) => `
             <div class="bst-stat">
               <div class="bst-stat-val">${v}</div>
               <div class="bst-stat-lbl">${l}</div>
             </div>`).join('')}
+        </div>
+        <!-- Caractéristiques avec modificateur -->
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.4rem">
+          ${statCaracs.map(([l,v]) => {
+            const m = mod(v);
+            return `<div class="bst-stat">
+              <div class="bst-stat-val" style="font-size:.82rem">${v||'—'}</div>
+              ${m ? `<div style="font-size:.68rem;color:${parseInt(m)>=0?'#22c38e':'#ff6b6b'};font-weight:600">${m}</div>` : ''}
+              <div class="bst-stat-lbl">${l}</div>
+            </div>`;
+          }).join('')}
         </div>
         ${c.niveau||c.dangerositeXp ? `
         <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
@@ -727,13 +778,34 @@ async function _saveTracker() {
 
 window._bstOpen = (id) => { _activeId = _activeId === id ? null : id; _render(); };
 window._bstClose = () => { _activeId = null; _render(); };
-window._bstSearch = (val) => { _searchVal = val; _render(); };
+// Recherche : met à jour la valeur et filtre la grille SANS rerender complet
+window._bstSearchInput = (val) => {
+  _searchVal = val;
+  // Filtrer en live sans reconstruire toute la page
+  const search = val.toLowerCase().trim();
+  const fType  = (_filterType||'').toLowerCase().trim();
+  document.querySelectorAll('.bst-card').forEach(card => {
+    const id = card.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+    const c  = _creatures.find(x => x.id === id);
+    if (!c) return;
+    const matchSearch = !search ||
+      (c.nom||'').toLowerCase().includes(search) ||
+      (c.type||'').toLowerCase().includes(search) ||
+      (c.environnement||'').toLowerCase().includes(search);
+    const matchType = !fType || (c.type||'').toLowerCase() === fType;
+    card.style.display = (matchSearch && matchType) ? '' : 'none';
+  });
+};
+
+window._bstSearch = (val) => { _searchVal = val; _render(); }; // legacy
+window._bstSetType = (type) => { _filterType = type; _render(); };
 
 // Switch de bestiaire (admin uniquement)
 window._bstSwitchBestiaire = async (id) => {
   _bestiaireId = id;
   _activeId    = null;
   _searchVal   = '';
+  _filterType  = '';
   await renderBestiary();
 };
 
