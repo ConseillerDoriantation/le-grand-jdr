@@ -1634,13 +1634,9 @@ function _getSortProtectionMode(s) {
   return s?.protectionMode || 'ca'; // défaut CA si non précisé
 }
 
-/** CA bonus défensif (rune Protection mode CA) */
-function _calcSortCA(s) {
-  const runes  = s.runes || [];
-  const nbProt = runes.filter(r => r === 'Protection').length;
-  // Chaînage : +1 CA par rune après la première
-  const chainCA = nbProt > 1 ? nbProt - 1 : 0;
-  return { base: 2, total: 2 + chainCA, tours: 2, nbProt };
+/** Valeur CA libre (rune Protection mode CA) — saisie directement par le joueur */
+function _getSortCA(s) {
+  return (s?.ca || '').trim() || 'CA +2 (2 tours)';
 }
 
 /**
@@ -1727,11 +1723,9 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      const ca = _calcSortCA(s);
       lines.push({ icon:'💚', label:_calcSortSoin(s), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
     } else {
-      const ca = _calcSortCA(s);
-      lines.push({ icon:'🛡️', label:`CA +${ca.total} (${ca.tours} tours)`, detail:`Base +2${ca.nbProt > 1 ? ` · chaîné +${ca.nbProt - 1}` : ''}` });
+      lines.push({ icon:'🛡️', label:_getSortCA(s), detail:'' });
     }
   } else if (hasDefensif) {
     lines.push({ icon:'🛡️', label:'Effet défensif', detail:'Décris l\'effet ci-dessous' });
@@ -1916,8 +1910,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     if (mode === 'soin') {
       statsChips.push({ icon:'💚', val:_calcSortSoin(s), color:'#22c38e' });
     } else {
-      const ca = _calcSortCA(s);
-      statsChips.push({ icon:'🛡️', val:`CA +${ca.total} (${ca.tours}t)`, color:'#22c38e' });
+      statsChips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
   }
   if (nbCibles > 1) {
@@ -3331,9 +3324,15 @@ function openSortModal(idx, s) {
         </div>
         <input type="hidden" id="s-prot-mode" value="${s?.protectionMode||'ca'}">
       </div>
+      <!-- CA custom (visible si mode CA) -->
+      <div id="s-ca-section" style="${(s?.protectionMode||'ca')==='ca'?'':'display:none'}">
+        <div class="form-group"><label>Effet CA <span style="color:var(--text-dim);font-weight:400">(libre — ex: CA +2 (2 tours))</span></label>
+          <input class="input-field" id="s-ca" value="${s?.ca||''}" placeholder="CA +2 (2 tours)">
+        </div>
+      </div>
       <!-- Soin custom (visible si mode soin) -->
       <div id="s-soin-section" style="${(s?.protectionMode||'ca')==='soin'?'':'display:none'}">
-        <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(vide = 1d4 base)</span></label>
+        <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(vide = 1d4 base · XdY = calcul auto)</span></label>
           <input class="input-field" id="s-soin" value="${s?.soin||''}" placeholder="= 1d4 automatiquement">
         </div>
       </div>
@@ -3406,9 +3405,11 @@ window._updateSortActionDisplay = () => {
 };
 
 window._selectProtMode = (mode) => {
-  const hidden = document.getElementById('s-prot-mode');
+  const hidden  = document.getElementById('s-prot-mode');
+  const caSec   = document.getElementById('s-ca-section');
   const soinSec = document.getElementById('s-soin-section');
-  if (hidden) hidden.value = mode;
+  if (hidden)  hidden.value = mode;
+  if (caSec)   caSec.style.display   = mode === 'ca'   ? '' : 'none';
   if (soinSec) soinSec.style.display = mode === 'soin' ? '' : 'none';
   ['ca','soin'].forEach(v => {
     const btn = document.getElementById(`s-prot-${v}`);
@@ -3501,6 +3502,7 @@ async function saveSort(idx) {
     types,
     degats:   document.getElementById('s-degats')?.value||'',
     soin:     document.getElementById('s-soin')?.value||'',
+    ca:       document.getElementById('s-ca')?.value||'',
     effet:    document.getElementById('s-effet')?.value||'',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
     // Legacy compat : typeSoin si defensif sans offensif + mode soin
