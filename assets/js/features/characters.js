@@ -276,6 +276,13 @@ window._backToStylesList = () => _renderCombatStylesModal(_combatStyles || []);
 // ══════════════════════════════════════════════
 // COMPUTED STATS
 // ══════════════════════════════════════════════
+// Retourne la liste des traits d'un item — priorité à traits[] (array), fallback sur trait (string legacy)
+function _getTraits(item = {}) {
+  if (Array.isArray(item.traits) && item.traits.length > 0) return item.traits.filter(Boolean);
+  if (item.trait) return [item.trait];
+  return [];
+}
+
 function getMod(c, key) {
   const base = (c.stats||{})[key]||8;
   const bonus = (c.statsBonus||{})[key]||0;
@@ -1171,9 +1178,7 @@ function _renderInventaireBoutique(char) {
     else if (item.toucher) infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
     if (item.ca || item.ca === 0) infos.push({ label: '🛡️ CA', val: item.ca });
     if (bonusText)        infos.push({ label: 'Stats',      val: bonusText,   color: '#4f8cff' });
-    if (item.trait)       infos.push({ label: 'Trait',      val: item.trait,   color: '#b47fff', italic: true });
-    (item.traits||[]).filter(t => t && t !== item.trait).forEach(t =>
-      infos.push({ label: 'Trait', val: t, color: '#b47fff', italic: true }));
+    _getTraits(item).forEach(t => infos.push({ label: 'Trait', val: t, color: '#b47fff', italic: true }));
     if (item.type)        infos.push({ label: 'Type',       val: item.type });
     if (item.effet)       infos.push({ label: 'Effet',      val: item.effet });
     if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
@@ -1293,8 +1298,7 @@ function renderCharEquip(c, canEdit) {
             <div class="cs-weapon-name">${item.nom}</div>
             ${formatBadge}
           </div>
-          ${item.trait?`<div class="cs-weapon-trait">${item.trait}</div>`:''}
-          ${(item.traits||[]).length > 0 ? item.traits.filter(t => t && t !== item.trait).map(t => `<div class="cs-weapon-trait">${t}</div>`).join('') : ''}
+          ${_getTraits(item).map(t => `<div class="cs-weapon-trait">${t}</div>`).join('')}
           <div class="cs-weapon-stats">
             <span class="cs-ws">
               <span class="cs-ws-label">Toucher</span>
@@ -1437,7 +1441,7 @@ function renderCharEquip(c, canEdit) {
       <div class="cs-armor-slot">${slot}</div>
       <div class="cs-armor-name">${item.nom||'—'}</div>
       ${armorTypeMeta.label ? `<div class="cs-armor-type cs-armor-type--${armorTypeMeta.tone}" data-armor-tone="${armorTypeMeta.tone}">${armorTypeMeta.label}</div>` : ''}
-      ${item.trait?`<div class="cs-armor-trait">${item.trait}</div>`:''}
+      ${_getTraits(item).map(t => `<div class="cs-armor-trait">${t}</div>`).join('')}
       ${bonuses.length?`<div class="cs-armor-bonuses">${bonuses.map(k=>`<span class="badge badge-gold" style="font-size:0.6rem">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}</div>`:''}
       ${canEdit?`<button class="cs-equip-btn-sm" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
     </div>`;
@@ -1930,10 +1934,7 @@ function renderCharInventaire(c, canEdit) {
     else if (item.toucher)     chips.push({ label: 'Toucher', val: item.toucher,                 color: '#e8b84b' });
     if (item.ca != null && item.ca !== '') chips.push({ label: 'CA', val: `+${parseInt(item.ca)||0}`, color: '#4f8cff' });
     if (bonusText) chips.push({ label: 'Stats', val: bonusText, color: '#4f8cff' });
-    if (item.trait) chips.push({ label: 'Trait', val: item.trait, color: '#b47fff' });
-    // Traits supplémentaires du tableau traits[] (en évitant le doublon avec trait)
-    const extraTraits = (item.traits||[]).filter(t => t && t !== item.trait);
-    extraTraits.forEach(t => chips.push({ label: 'Trait', val: t, color: '#b47fff' }));
+    _getTraits(item).forEach(t => chips.push({ label: 'Trait', val: t, color: '#b47fff' }));
     // Type libre uniquement si pas déjà couvert
     if (item.type && !item.degats && !item.slotArmure && !item.slotBijou && !item.format)
       chips.push({ label: 'Type', val: item.type, color: 'var(--text-muted)' });
@@ -3203,7 +3204,8 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
   if (isWeapon) {
     return {
       nom: item.nom || '',
-      trait: item.trait || '',
+      traits: Array.isArray(item.traits) ? [...item.traits] : [],
+      sousType: item.sousType || '',
       degats: item.degats || '',
       degatsStat: item.degatsStat || inferAttackStatFromItem(item),
       toucherStat: item.toucherStat || inferAttackStatFromItem(item),
@@ -3227,7 +3229,7 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
 
   return {
     nom: item.nom || '',
-    trait: item.trait || '',
+    traits: Array.isArray(item.traits) ? [...item.traits] : [],
     fo: parseInt(item.fo) || 0,
     dex: parseInt(item.dex) || 0,
     in: parseInt(item.in) || 0,
@@ -3385,7 +3387,6 @@ function editEquipSlot(slot) {
         </div>`
     }
     <div class="form-group"><label>Nom</label><input class="input-field" id="eq-nom" value="${equipped.nom||''}"></div>
-    <div class="form-group"><label>Trait</label><input class="input-field" id="eq-trait" value="${equipped.trait||''}"></div>
     ${isWeapon?`
     <div class="grid-2" style="gap:0.8rem">
       <div class="form-group"><label>Dégâts</label><input class="input-field" id="eq-degats" value="${equipped.degats||'1D10'}"></div>
@@ -3429,6 +3430,8 @@ function editEquipSlot(slot) {
     typeArmure: equipped.typeArmure || '',
     slotArmure: equipped.slotArmure || '',
     slotBijou: equipped.slotBijou || '',
+    traits: Array.isArray(equipped.traits) ? [...equipped.traits] : [],
+    sousType: equipped.sousType || '',
   };
 }
 
@@ -3440,10 +3443,8 @@ function previewEquipFromInv(val, slot) {
   const item = compat?.item || compat;
   if (!item) return;
 
-  const nomEl   = document.getElementById('eq-nom');
-  const traitEl = document.getElementById('eq-trait');
-  if (nomEl)   nomEl.value   = item.nom||'';
-  if (traitEl) traitEl.value = item.trait||'';
+  const nomEl = document.getElementById('eq-nom');
+  if (nomEl) nomEl.value = item.nom||'';
 
   const isWeapon = slot.startsWith('Main');
   if (isWeapon) {
@@ -3458,14 +3459,29 @@ function previewEquipFromInv(val, slot) {
         else statSel.value = 'force';
       }
     }
-    // Stocker format, toucher, stats pour saveEquipSlot
+    // Stocker format, toucher, stats, traits, sousType pour saveEquipSlot
     window._equipSelFormat  = item.format  || '';
     window._equipSelToucher = item.toucher || '';
     window._equipSelStats   = item.stats   || '';
+    // Mettre à jour meta avec les infos de l'item sélectionné
+    if (window._equipSelectedMeta) {
+      window._equipSelectedMeta.format     = item.format  || '';
+      window._equipSelectedMeta.toucher    = item.toucher || '';
+      window._equipSelectedMeta.stats      = item.stats   || '';
+      window._equipSelectedMeta.traits     = Array.isArray(item.traits) ? [...item.traits] : [];
+      window._equipSelectedMeta.sousType   = item.sousType || '';
+      window._equipSelectedMeta.degatsStat = item.degatsStat || item.statAttaque || 'force';
+      window._equipSelectedMeta.toucherStat= item.toucherStat || item.statAttaque || 'force';
+    }
   } else {
     // Stocker typeArmure pour saveEquipSlot
     window._equipSelTypeArmure = item.typeArmure||'';
     window._equipSelSlotArmure = item.slotArmure||'';
+    if (window._equipSelectedMeta) {
+      window._equipSelectedMeta.typeArmure = item.typeArmure || '';
+      window._equipSelectedMeta.slotArmure = item.slotArmure || '';
+      window._equipSelectedMeta.traits     = Array.isArray(item.traits) ? [...item.traits] : [];
+    }
     // Bonus stats depuis item boutique (valeurs numériques)
     ['fo','dex','in','sa','co','ch'].forEach(k => {
       const el = document.getElementById('eq-'+k);
@@ -3491,7 +3507,7 @@ function previewEquipFromInv(val, slot) {
       <strong style="font-size:.85rem">${item.nom}</strong>
       ${tags?`<div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.25rem">${tags}</div>`:''}
       ${item.stats?`<div style="font-size:.72rem;color:#4f8cff;margin-top:.2rem">${item.stats}</div>`:''}
-      ${item.trait?`<div style="font-size:.72rem;color:#b47fff;font-style:italic;margin-top:.1rem">${item.trait}</div>`:''}
+      ${_getTraits(item).map(t=>`<div style="font-size:.72rem;color:#b47fff;font-style:italic;margin-top:.1rem">${t}</div>`).join('')}
     </div>`;
   }
 }
@@ -3504,7 +3520,6 @@ async function saveEquipSlot(slot) {
   if (slot.startsWith('Main')) {
     equip[slot] = {
       nom:         document.getElementById('eq-nom')?.value||'',
-      trait:       document.getElementById('eq-trait')?.value||'',
       degats:      document.getElementById('eq-degats')?.value||'',
       degatsStat:  meta.degatsStat || document.getElementById('eq-stat-attaque')?.value || 'force',
       toucherStat: meta.toucherStat || document.getElementById('eq-stat-attaque')?.value || 'force',
@@ -3515,6 +3530,8 @@ async function saveEquipSlot(slot) {
       format:  meta.format || '',
       toucher: meta.toucher || '',
       stats:   meta.stats || '',
+      traits:  meta.traits || [],
+      sousType: meta.sousType || '',
       fo: parseInt(meta.fo) || 0,
       dex: parseInt(meta.dex) || 0,
       in: parseInt(meta.in) || 0,
@@ -3525,7 +3542,6 @@ async function saveEquipSlot(slot) {
   } else {
     equip[slot] = {
       nom: document.getElementById('eq-nom')?.value||'',
-      trait: document.getElementById('eq-trait')?.value||'',
       fo: parseInt(document.getElementById('eq-fo')?.value)||0,
       dex: parseInt(document.getElementById('eq-dex')?.value)||0,
       in: parseInt(document.getElementById('eq-in')?.value)||0,
@@ -3533,6 +3549,7 @@ async function saveEquipSlot(slot) {
       co: parseInt(document.getElementById('eq-co')?.value)||0,
       ch: parseInt(document.getElementById('eq-ch')?.value)||0,
       ca: parseInt(document.getElementById('eq-ca')?.value)||0,
+      traits:  meta.traits || [],
       typeArmure: meta.typeArmure||'',
       slotArmure: meta.slotArmure||'',
       slotBijou: meta.slotBijou || (['Amulette','Anneau','Objet magique'].includes(slot) ? slot : ''),
