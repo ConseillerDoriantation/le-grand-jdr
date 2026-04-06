@@ -3,7 +3,7 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveD
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
-import { RARETE_NAMES, _rareteColor } from '../shared/rarete.js';
+import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 
 // ══════════════════════════════════════════════
 // STYLES DE COMBAT

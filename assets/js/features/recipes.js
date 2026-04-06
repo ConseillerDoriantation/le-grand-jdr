@@ -11,7 +11,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
-import { _rareteTag, buildRaretePicker } from '../shared/rarete.js';
+import { _rareteTag, buildRaretePicker } from '../shared/rarity.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
 let _all        = [];

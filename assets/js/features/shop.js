@@ -2,7 +2,7 @@ import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModalDirect } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarete.js';
+import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
