@@ -376,7 +376,6 @@ function _renderItemsView() {
     (i.nom||'').toLowerCase().includes(search) ||
     (i.type||'').toLowerCase().includes(search) ||
     (i.description||'').toLowerCase().includes(search) ||
-    (i.trait||'').toLowerCase().includes(search) ||
     (i.effet||'').toLowerCase().includes(search)
   );
   // ── Logique tags : OU au sein d'un groupe, ET entre groupes différents ──────
@@ -801,7 +800,6 @@ async function confirmBuyItem(itemId) {
     ca:item.ca||'', stats:item.stats||'',
     fo:parseInt(item.fo)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
     sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
-    trait:item.trait||'', type:item.type||'',
     effet:item.effet||'', description:item.description||'',
     slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
     slotBijou:item.slotBijou||'',
@@ -948,7 +946,6 @@ function _updateItemsOnly() {
     (i.type||'').toLowerCase().includes(search) ||
     (i.sousType||'').toLowerCase().includes(search) ||
     (i.description||'').toLowerCase().includes(search) ||
-    (i.trait||'').toLowerCase().includes(search) ||
     (i.effet||'').toLowerCase().includes(search)
   );
   if (_filterTags.size > 0) {
@@ -1438,7 +1435,6 @@ async function saveShopItem(itemId) {
       const inputs = document.querySelectorAll('#si-traits-list input');
       const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
       data.traits = arr;
-      data.trait  = arr.join(', '); // rétrocompatibilité
     } else if (f.type === 'textarea') {
       const el = document.getElementById(`si-${f.id}`);
       if (el) data[f.id] = el.value;
@@ -1490,7 +1486,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 
   const SYNC_FIELDS = [
     'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
-    'fo','dex','in','sa','co','ch','trait','traits','portee','type','effet','description',
+    'fo','dex','in','sa','co','ch','traits','portee','type','effet','description',
     'slotArmure','typeArmure','slotBijou','prixVente','sousType',
   ];
 
