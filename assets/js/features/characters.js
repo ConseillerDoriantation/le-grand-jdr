@@ -1299,8 +1299,6 @@ function renderCharEquip(c, canEdit) {
     const item    = equip[slot]||{};
     const statKey = item.statAttaque==='dexterite' ? 'dexterite'
                   : item.statAttaque==='intelligence' ? 'intelligence'
-                  : item.statAttaque==='Sagesse' ? 'sagesse'
-
                   : 'force';
     const statVal = (s[statKey]||8)+(sb[statKey]||0);
     const mod     = Math.floor((Math.min(22,statVal)-10)/2);
