@@ -11,7 +11,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
-import { _rareteTag, buildRaretePicker } from '../shared/rarity.js';
+import { _rareteTag } from '../shared/rarity.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
 let _all        = [];
@@ -26,6 +26,10 @@ const TABS = [
   { id:'arme',    emoji:'⚔️', label:'Armes' },
   { id:'armure',  emoji:'🛡️', label:'Armures' },
   { id:'bijou',   emoji:'💍', label:'Bijoux' },
+];
+const CREATE_RECIPES = [
+  TABS[0],
+  TABS[1],
 ];
 
 const MATERIALS = {
@@ -67,6 +71,17 @@ function _findRaw(id) {
 function _isShopItem(id) { return _shopItems.some(i => i.id === id); }
 
 // ── Conversion item boutique → recette ───────────────────────────────────────
+function _shopItemAtelierReq(item, type) {
+  const fmt = item.format || '';
+  if (type === 'bijou')                   return "Atelier d'orfèvre";
+  if (fmt.includes('Mag'))                return "Atelier d'orfèvre";
+  if (fmt.includes('Dist'))               return 'Atelier de confection';
+  if (item.slotArmure) {
+    return item.typeArmure === 'Lourde' ? 'Forge' : 'Atelier de confection';
+  }
+  return 'Forge';
+}
+
 function _shopItemIngredients(item) {
   const quantity = Math.max(1, Math.round((parseFloat(item.prix) || 0) / 10));
   const itemFormat = item.format || '';
@@ -87,7 +102,7 @@ function _shopToRecipe(item) {
   const itemFormat  = item.format || '';
   const type = (itemFormat.startsWith('Arme') || item.degats) ? 'arme'
              : item.slotArmure ? 'armure'
-             : item.slotBijou  ? 'bijou'
+             : (item.slotBijou && item.slotBijou !== 'Objet magique') ? 'bijou'
              : null;
   if (!type) return null;
 
@@ -109,7 +124,7 @@ function _shopToRecipe(item) {
     degats:      item.degats ? `${item.degats}${item.degatsStat ? ' +' + item.degatsStat : ''}` : '',
     caBonus:     parseInt(item.ca) || 0,
     typeArmure:  item.typeArmure || '',
-    atelierReq:  meta.atelierReq  ?? (type === 'bijou' ? "Atelier d'orfèvre" : 'Forge'),
+    atelierReq:  meta.atelierReq  ?? _shopItemAtelierReq(item, type),
     tempsCraft:  meta.tempsCraft  ?? '',
     ingredients: meta.ingredients !== undefined ? meta.ingredients : autoIngrs,
     acces:       item.acces || [],
@@ -158,15 +173,15 @@ function _render() {
 
   content.innerHTML = `
   <style>
-    .rec-card { background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:box-shadow .15s; }
+    .rec-card { background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:box-shadow .15s;display:flex;flex-direction:column; }
     .rec-card:hover { box-shadow:0 4px 16px rgba(0,0,0,.3); }
     .rec-card-header { padding:.8rem 1rem .5rem;display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem; }
     .rec-card-name { font-family:'Cinzel',serif;font-size:.92rem;font-weight:700;color:var(--text); }
-    .rec-card-body { padding:0 1rem .8rem;font-size:.82rem;color:var(--text-muted);line-height:1.6; }
+    .rec-card-body { padding:0 1rem .8rem;font-size:.82rem;color:var(--text-muted);line-height:1.6;flex:1; }
     .rec-tag { display:inline-flex;align-items:center;gap:.2rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:.68rem;color:var(--text-dim); }
-    .rec-ingr-list { margin:.4rem 0;display:flex;flex-direction:column;gap:.15rem; }
-    .rec-ingr-row { display:flex;align-items:baseline;gap:.4rem;font-size:.78rem;color:var(--text-muted); }
-    .rec-ingr-qty { color:var(--gold);font-weight:600;font-size:.72rem;min-width:40px; }
+    .rec-ingr-list { margin:.6rem 0 .4rem;display:flex;flex-direction:column;gap:.15rem; }
+    .rec-ingr-row { display:flex;align-items:baseline;gap:.4rem;font-size:.82rem;color:var(--text);font-weight:500; }
+    .rec-ingr-qty { color:var(--gold);font-weight:700;font-size:.78rem;min-width:40px; }
     .rec-divider { height:1px;background:var(--border);margin:.5rem 0; }
     .rec-effet { font-style:italic;color:var(--text-muted);font-size:.82rem;line-height:1.6; }
     .rec-footer { padding:.5rem 1rem .65rem;border-top:1px solid var(--border);background:rgba(0,0,0,.12);display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap; }
@@ -198,7 +213,7 @@ function _render() {
     </div>
     ${_isAdmin() ? `
     <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-      ${TABS.map(t => `<button class="btn btn-outline btn-sm" onclick="openRecipeModal('${t.id}')">${t.emoji} + ${t.label}</button>`).join('')}
+      ${CREATE_RECIPES.map(t => `<button class="btn btn-outline btn-sm" onclick="openRecipeModal('${t.id}')">${t.emoji} + ${t.label}</button>`).join('')}
     </div>` : ''}
   </div>
 
@@ -264,11 +279,12 @@ function _renderCard(r, accent) {
        </div>`
     : (r.ingredients_texte ? `<div style="font-size:.78rem;color:var(--text-muted);margin:.25rem 0">🌿 ${r.ingredients_texte}</div>` : '');
 
-  const statsHtml = isCraftType ? `
+  const atelierReq = r.atelierReq || { cuisine: 'Marmite', potion: 'Alambic' }[r.type] || '';
+  const statsHtml = (isCraftType || atelierReq) ? `
     <div class="rec-stat-row">
-      ${r.rarete     ? _rareteTag(r.rarete, 'rec-stat') : ''}
-      ${r.tempsCraft ? `<span class="rec-stat">⏱️ ${r.tempsCraft}</span>` : ''}
-      ${r.atelierReq ? `<span class="rec-stat">🔧 ${r.atelierReq}</span>` : ''}
+      ${isCraftType && r.rarete     ? _rareteTag(r.rarete, 'rec-stat') : ''}
+      ${isCraftType && r.tempsCraft ? `<span class="rec-stat">⏱️ ${r.tempsCraft}</span>` : ''}
+      ${atelierReq                  ? `<span class="rec-stat">${atelierReq}</span>` : ''}
     </div>` : '';
 
   const autresJoueurs = joueurs.filter(j => j.uid !== uid && !accesUids.includes(j.uid));
@@ -389,36 +405,14 @@ function openRecipeModal(type, id = '') {
     : [{ nom:'', quantite:'' }, { nom:'', quantite:'' }];
 
   const isCraft = ['arme','armure','bijou'].includes(rType);
+  if (isCraft && !id) return;
 
   // Champs spécifiques au type de craft
-  let craftFields = '';
-  if (rType === 'arme') {
-    craftFields = `
-    <div class="form-group"><label>Type d'arme</label>
-      <input class="input-field" id="rec-typeObjet" value="${r?.typeObjet||''}" placeholder="Épée, Dague, Arc, Bâton..."></div>
-    <div class="form-group"><label>Rareté</label>${buildRaretePicker('rec', r?.rarete||'')}</div>
+  const craftFields = isCraft ? `
     <div class="form-group"><label>Atelier requis</label>
-      <input class="input-field" id="rec-atelierReq" value="${r?.atelierReq||''}" placeholder="Forge, Atelier de confection..."></div>`;
-  } else if (rType === 'armure') {
-    craftFields = `
-    <div class="form-group"><label>Type d'armure</label>
-      <input class="input-field" id="rec-typeObjet" value="${r?.typeObjet||''}" placeholder="Légère, Intermédiaire, Lourde..."></div>
-    <div class="form-group"><label>Bonus CA</label>
-      <input type="number" class="input-field" id="rec-caBonus" value="${r?.caBonus||''}" placeholder="0"></div>
-    <div class="form-group"><label>Emplacement</label>
-      <input class="input-field" id="rec-atelierReq" value="${r?.atelierReq||''}" placeholder="Forge, Atelier de confection..."></div>
+      <input class="input-field" id="rec-atelierReq" value="${r?.atelierReq||''}" placeholder="${rType === 'bijou' ? "Atelier d'orfèvre..." : 'Forge, Atelier de confection...'}"></div>
     <div class="form-group"><label>Temps de craft</label>
-      <input class="input-field" id="rec-tempsCraft" value="${r?.tempsCraft||''}" placeholder="1 journée, 3 heures..."></div>`;
-  } else if (rType === 'bijou') {
-    craftFields = `
-    <div class="form-group"><label>Type de bijou</label>
-      <input class="input-field" id="rec-typeObjet" value="${r?.typeObjet||''}" placeholder="Amulette, Anneau, Objet magique..."></div>
-    <div class="form-group"><label>Rareté</label>${buildRaretePicker('rec', r?.rarete||'')}</div>
-    <div class="form-group"><label>Atelier requis</label>
-      <input class="input-field" id="rec-atelierReq" value="${r?.atelierReq||''}" placeholder="Atelier d'orfèvre..."></div>
-    <div class="form-group"><label>Temps de craft</label>
-      <input class="input-field" id="rec-tempsCraft" value="${r?.tempsCraft||''}" placeholder="1 journée, 3 heures..."></div>`;
-  }
+      <input class="input-field" id="rec-tempsCraft" value="${r?.tempsCraft||''}" placeholder="1 journée, 3 heures..."></div>` : '';
 
   openModal(`${tab.emoji} ${r ? 'Modifier' : 'Nouvelle'} recette — ${tab.label}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
@@ -522,10 +516,6 @@ async function saveRecipe(id, fallbackType) {
     description: document.getElementById('rec-desc')?.value?.trim()     || '',
     ingredients: _readIngrs(),
     acces:       existing?.acces || [],
-    // Champs craft
-    typeObjet:   document.getElementById('rec-typeObjet')?.value?.trim() || '',
-    caBonus:     parseInt(document.getElementById('rec-caBonus')?.value) || 0,
-    rarete:      parseInt(document.getElementById('rec-rarete')?.value)  || 0,
     atelierReq:  document.getElementById('rec-atelierReq')?.value?.trim()|| '',
     tempsCraft:  document.getElementById('rec-tempsCraft')?.value?.trim()|| '',
   };
