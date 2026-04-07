@@ -3757,6 +3757,9 @@ function editEquipSlot(slot) {
           <option value="force"        ${(equipped.statAttaque||'force')==='force'?'selected':''}>Force</option>
           <option value="dexterite"    ${equipped.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
           <option value="intelligence" ${equipped.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
+          <option value="constitution" ${equipped.statAttaque==='constitution'?'selected':''}>Constitution</option>
+          <option value="sagesse" ${equipped.statAttaque==='sagesse'?'selected':''}>Sagesse</option>
+          <option value="charisme" ${equipped.statAttaque==='charisme'?'selected':''}>Charisme</option>
         </select>
       </div>
     </div>
