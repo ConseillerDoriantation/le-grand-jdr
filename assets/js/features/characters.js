@@ -3639,14 +3639,6 @@ async function editEquipSlot(slot) {
   const equipped = (c.equipement||{})[slot]||{};
   const isWeapon = slot.startsWith('Main');
 
-  // Charger sousTypes depuis Firestore si pas encore en cache
-  if (isWeapon && (!window._shopSousTypes || window._shopSousTypes.length === 0)) {
-    try {
-      const items = await loadCollection('shop');
-      window._shopSousTypes = [...new Set(items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
-    } catch(e) { window._shopSousTypes = []; }
-  }
-
   // ── Règles de compatibilité par slot ────────────────────────────────────
   // On filtre d'abord par les champs structurés (format, slotArmure, typeArmure, template)
   // puis on accepte les items sans champ structuré comme fallback (compatibilité anciens items)
@@ -3777,7 +3769,7 @@ async function editEquipSlot(slot) {
         <input class="input-field" id="eq-portee" value="${equipped.portee||''}" placeholder="ex: Contact / 18m">
       </div>
       <div class="form-group"><label>Type d'arme</label>
-        ${_equipTypeArmeSelect(equipped.typeArme||equipped.sousType||'')}
+        ${_equipTypeArmeSelect(equipped.typeArme||'')}
       </div>
     </div>
     <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
@@ -4187,46 +4179,39 @@ function renderCharMaitrises(c, canEdit) {
   return html;
 }
 
-// Sélecteur de type d'arme pour le modal équipement
-// Combine les formats de base (toujours présents) + sousTypes boutique + valeur courante
+// Sélecteur de type d'arme pour le modal équipement — uniquement les 6 formats de base
 function _equipTypeArmeSelect(current = '') {
-  // Formats de base, toujours disponibles
-  const BASE_FORMATS = [
-    'Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
-    'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
+  const FORMATS = [
+    'Arme 1M CaC Phy.',
+    'Arme 2M CaC Phy.',
+    'Arme 2M Dist Phy.',
+    'Arme 2M CaC Mag.',
+    'Arme 2M Dist Mag.',
+    'Arme Secondaire (Bouclier, Torche...)',
   ];
-  // SousTypes boutique (types d'armes spécifiques : Épée, Arc, Dague...)
-  const shopTypes = window._shopSousTypes || [];
-  // Fusionner : formats de base + sousTypes boutique + valeur courante si absente
-  const all = [...new Set([...BASE_FORMATS, ...shopTypes, ...(current ? [current] : [])])];
+  // Ajouter la valeur courante si elle n'est pas dans la liste (rétrocompat)
+  if (current && !FORMATS.includes(current)) FORMATS.push(current);
 
   const options = [`<option value="">— Aucun —</option>`,
-    ...all.map(t => `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`)
+    ...FORMATS.map(t => `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`)
   ].join('');
 
   return `<select class="input-field sh-modal-select" id="eq-type-arme">${options}</select>`;
 }
 
-// Met à jour Toucher/Dégâts dans la fiche en temps réel quand on change la stat d'attaque
-// Utilise getToucherDisplay/getDegatsDisplay exposés dans window
+// Met à jour Toucher/Dégâts dans la fiche EN TEMPS RÉEL quand on change la stat d'attaque
+// getToucherDisplay et getDegatsDisplay sont exposés dans window via Object.assign
 window._updateWeaponStatLive = (slot, statKey) => {
   const c = STATE.activeChar; if (!c) return;
-  const equip = c.equipement || {};
-  const item = equip[slot]; if (!item) return;
+  const item = (c.equipement || {})[slot]; if (!item) return;
 
-  // Créer un item temporaire avec la nouvelle stat pour le calcul
-  const tempItem = {
-    ...item,
-    statAttaque:  statKey,
-    toucherStat:  statKey,
-    degatsStat:   statKey,
-  };
+  // Item temporaire avec la nouvelle stat pour le calcul
+  const tempItem = { ...item, statAttaque: statKey, toucherStat: statKey, degatsStat: statKey };
 
-  // Recalculer via les fonctions exposées dans window
-  const newToucher = window.getToucherDisplay ? window.getToucherDisplay(c, tempItem, statKey) : '—';
-  const newDegats  = window.getDegatsDisplay  ? window.getDegatsDisplay(c, tempItem, statKey)  : '—';
+  const newToucher = window.getToucherDisplay(c, tempItem, statKey);
+  const newDegats  = window.getDegatsDisplay(c, tempItem, statKey);
 
-  // Mettre à jour uniquement les éléments de ce slot dans la fiche
+  // Mettre à jour uniquement les .cs-ws-val du bon slot dans la fiche ouverte
   document.querySelectorAll('.cs-weapon-row').forEach(row => {
     const lbl = row.querySelector('.cs-weapon-slot-label');
     if (!lbl || lbl.textContent.trim() !== slot) return;
@@ -4360,7 +4345,6 @@ Object.assign(window, {
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   editEquipSlot, saveEquipSlot, clearEquipSlot, equipSlotFromInv,
   previewEquipFromInv,
-  getToucherDisplay, getDegatsDisplay,
   getToucherDisplay, getDegatsDisplay,
   addInvItem, editInvItem, saveInvItem,
   addQuete, saveQuete,
