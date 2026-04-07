@@ -3697,8 +3697,8 @@ function editEquipSlot(slot) {
       const armureRule = SLOT_ARMURE[slot];
       if (armureRule !== undefined) {
         if (armureRule === null) {
-          // Bijoux : uniquement les items explicitement taggés pour ce slot exact
-          return item.slotBijou === slot;
+          if (tpl === 'bijou' || item.slotBijou) return item.slotBijou === slot;
+          return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure && !item.slotBijou);
         }
         if (tpl === 'armure' || item.slotArmure) {
           // Item structuré : vérifier slotArmure
@@ -3803,9 +3803,17 @@ function editEquipSlot(slot) {
           <option value="">— Aucun —</option>
           ${['Légère','Intermédiaire','Lourde'].map(t=>`<option value="${t}" ${(equipped.typeArmure||'')=== t?'selected':''}>${t}</option>`).join('')}
         </select>
+        <div style="font-size:.7rem;color:var(--text-dim);margin-top:.3rem">
+          CA de base : Aucune = 8 · Légère = 10 · Intermédiaire = 12 · Lourde = 14 <span style="color:var(--text-dim)">(+ mod Dex automatique)</span>
+        </div>
       </div>
-      <div class="form-group"><label>CA apportée</label>
-        <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="0">
+      <div class="form-group"><label>Bonus de CA magique
+        <span style="font-weight:400;font-size:.7rem;color:#e8b84b"> — enchantement uniquement</span>
+      </label>
+        <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="0 (laisser vide si standard)">
+        <div style="font-size:.68rem;color:#ff6b6b;margin-top:.3rem">
+          ⚠️ Ne remplis que si l'armure a un bonus magique exceptionnel (+1, +2...). La CA de base vient du type d'armure ci-contre.
+        </div>
       </div>
     </div>
     <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
