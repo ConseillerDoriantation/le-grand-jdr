@@ -3,6 +3,7 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveD
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
+import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 
 // ══════════════════════════════════════════════
 // STYLES DE COMBAT
@@ -1165,8 +1166,6 @@ function _renderInventaireBoutique(char) {
   const invRaw = (char.inventaire || []).map((item, i) => ({ item, i })).filter(({ item }) => item.source === 'boutique');
   if (!invRaw.length) return '';
 
-  const RARETE_LABELS = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
-  const RARETE_COLORS = ['', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc'];
   const canEdit = window._canEditChar ?? STATE.isAdmin;
 
   // ── Regrouper par itemId + nom ──────────────────────────────────────────
@@ -1186,8 +1185,8 @@ function _renderInventaireBoutique(char) {
     const item = g.item;
     const indicesB64 = btoa(JSON.stringify(g.indices));
     const rareteN  = parseInt(item.rarete) || 0;
-    const rareteC  = RARETE_COLORS[rareteN] || '#555';
-    const rareteL  = RARETE_LABELS[rareteN] || '';
+    const rareteL  = RARETE_NAMES[rareteN] || '';
+    const rareteC  = _rareteColor(rareteL) || '#555';
     const prixAchat = parseFloat(item.prixAchat) || 0;
     const prixVente = parseFloat(item.prixVente) || Math.round(prixAchat * 0.6);
 
@@ -2128,8 +2127,6 @@ function renderCharInventaire(c, canEdit) {
   const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
   const equippedMap = getEquippedInventoryIndexMap(c);
 
-  const RARETE_COLORS = ['', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc'];
-  const RARETE_LABELS = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
   const equipOpen = window._charInvEquipOpen !== false;
 
   const totalQty = groups => groups.reduce((sum, g) => sum + (parseInt(g.qte) || 0), 0);
@@ -2141,8 +2138,8 @@ function renderCharInventaire(c, canEdit) {
     const indicesB64 = btoa(JSON.stringify(g.indices));
 
     const rareteN = parseInt(item.rarete) || 0;
-    const rareteC = RARETE_COLORS[rareteN] || 'var(--border)';
-    const rareteL = RARETE_LABELS[rareteN] || '';
+    const rareteL = RARETE_NAMES[rareteN] || '';
+    const rareteC = _rareteColor(rareteL) || 'var(--border)';
     const equippedSlots = [...new Set(g.indices.flatMap(idx => equippedMap.get(idx) || []))];
     const isEquipped = equippedSlots.length > 0;
     const equippedLabel = isEquipped
@@ -2895,9 +2892,8 @@ function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
   if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
 
-  const rareteN  = parseInt(item.rarete) || 0;
-  const RARETE_C = ['','#9ca3af','#4ade80','#60a5fa','#c084fc'];
-  const itemColor = RARETE_C[rareteN] || 'var(--border)';
+  const rareteN   = parseInt(item.rarete) || 0;
+  const itemColor = _rareteColor(RARETE_NAMES[rareteN]) || 'var(--border)';
 
   // Carte de l'objet envoyé
   const itemPreview = `

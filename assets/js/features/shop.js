@@ -2,6 +2,7 @@ import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModalDirect } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
@@ -215,24 +216,6 @@ function _catEmoji(nom) {
   return '📦';
 }
 
-function _rareteColor(r) {
-  const map = {
-    'Commun':'#9ca3af','Peu commun':'#4ade80','Rare':'#60a5fa',
-    'Très rare':'#c084fc','Légendaire':'#fbbf24',
-  };
-  return map[r] || 'var(--text-dim)';
-}
-
-function _rareteStars(val) {
-  const n = parseInt(val)||0;
-  if (n <= 0) return '';
-  const colors = ['','#9ca3af','#4ade80','#60a5fa','#c084fc'];
-  const labels = ['','Commun','Peu commun','Rare','Très rare'];
-  const stars = '★'.repeat(n) + '☆'.repeat(4-n);
-  const color = colors[n]||'var(--text-dim)';
-  return `<span class="sh-rarete-stars" style="color:${color}" title="${labels[n]||''}">${stars}</span>`;
-}
-
 function _dispoDisplay(val) {
   if (val === '' || val === null || val === undefined) return '';
   const n = parseInt(val);
@@ -393,7 +376,6 @@ function _renderItemsView() {
     (i.nom||'').toLowerCase().includes(search) ||
     (i.type||'').toLowerCase().includes(search) ||
     (i.description||'').toLowerCase().includes(search) ||
-    (i.trait||'').toLowerCase().includes(search) ||
     (i.effet||'').toLowerCase().includes(search)
   );
   // ── Logique tags : OU au sein d'un groupe, ET entre groupes différents ──────
@@ -516,8 +498,6 @@ function _getItemTags(item) {
 }
 
 function _buildTagGroups(items) {
-  const RARETE_COLORS = {'Commun':'#9ca3af','Peu commun':'#4ade80','Rare':'#60a5fa','Très rare':'#c084fc'};
-  const RARETE_LABELS = {1:'Commun',2:'Peu commun',3:'Rare',4:'Très rare'};
   const groups = [];
   const add = (label, vals, colorFn) => {
     if (vals.length) groups.push({ label, tags: vals.map(v => ({ value:v, label:v, color: colorFn(v) })) });
@@ -536,9 +516,9 @@ function _buildTagGroups(items) {
   if (typeL.length) groups.push({ label:'Type', tags: typeL.map(v=>({value:v,label:v,color:'var(--text-muted)'})) });
   const raretes = [...new Set(items.filter(i=>i.rarete).map(i=>parseInt(i.rarete)).filter(Boolean))].sort();
   if (raretes.length) groups.push({ label:'Rareté', tags: raretes.map(r=>({
-    value: RARETE_LABELS[r]||String(r),
-    label: '★'.repeat(r)+' '+(RARETE_LABELS[r]||''),
-    color: RARETE_COLORS[RARETE_LABELS[r]]||'#9ca3af',
+    value: RARETE_NAMES[r]||String(r),
+    label: '★'.repeat(r)+' '+(RARETE_NAMES[r]||''),
+    color: _rareteColor(RARETE_NAMES[r]),
   })) });
   const hasStock = items.some(i=>{ const d=i.dispo!=null&&i.dispo!==''?parseInt(i.dispo):null; return d===null||d>0; });
   if (hasStock) groups.push({ label:'Dispo', tags:[
@@ -820,7 +800,6 @@ async function confirmBuyItem(itemId) {
     ca:item.ca||'', stats:item.stats||'',
     fo:parseInt(item.fo)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
     sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
-    trait:item.trait||'', type:item.type||'',
     effet:item.effet||'', description:item.description||'',
     slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
     slotBijou:item.slotBijou||'',
@@ -967,7 +946,6 @@ function _updateItemsOnly() {
     (i.type||'').toLowerCase().includes(search) ||
     (i.sousType||'').toLowerCase().includes(search) ||
     (i.description||'').toLowerCase().includes(search) ||
-    (i.trait||'').toLowerCase().includes(search) ||
     (i.effet||'').toLowerCase().includes(search)
   );
   if (_filterTags.size > 0) {
@@ -1224,6 +1202,7 @@ function openItemModal(itemId) {
   const tpl        = TEMPLATES[tplKey] || TEMPLATES.classique;
   const catOptions = _cats.map(c=>`<option value="${c.id}" ${defCatId===c.id?'selected':''}>${c.nom} (${TEMPLATES[c.template||'classique']?.label||''})</option>`).join('');
   const fieldsHtml = _buildFieldsHtml(tpl, item);
+  const recipeCheckboxChecked = item ? !(item?.recipeMeta?.hidden) : ['arme','armure','bijou'].includes(tplKey);
   openModal(item?'✏️ Modifier l\'article':'🛒 Nouvel article',`
     <div class="form-group"><label>Catégorie</label>
       <select class="input-field sh-modal-select" id="si-cat" onchange="refreshItemFields(this.value)">
@@ -1241,6 +1220,10 @@ function openItemModal(itemId) {
       <div id="si-img-preview">${item?.image?`<img src="${item.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
     </div>
     <div id="si-dynamic-fields">${fieldsHtml}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.75rem;border-radius:8px;border:1px solid var(--border);">
+      <span style="font-size:.90rem;color:var(--text-dim);white-space:nowrap;">Activer la recette pour cet item</span>
+      <input type="checkbox" id="si-has-recipe" ${recipeCheckboxChecked ? 'checked' : ''} style="margin:0;flex-shrink:0;cursor:pointer;">
+    </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1.2rem" onclick="saveShopItem('${itemId||''}')">
       ${item?'Enregistrer':'Ajouter à la boutique'}
     </button>`);
@@ -1260,13 +1243,7 @@ function _buildFieldsHtml(tpl,item) {
           <span class="sh-prix-vente-display" id="si-prix-vente">🔄 <strong id="si-pv-val">${pv}</strong> or <span style="color:var(--text-dim);font-size:0.7rem">(60%)</span></span>
         </div></div>`;
     } else if(f.type==='rarete'){
-      const cur=parseInt(val)||0;
-      html+=`<div class="form-group"><label>${f.label}</label>
-        <div class="sh-rarete-picker" id="si-rarete-wrap">
-          ${[1,2,3,4].map(n=>`<button type="button" class="sh-rarete-star-btn ${cur>=n?'active':''}" data-val="${n}" onclick="pickRarete(${n})" style="${cur>=n?'color:#c084fc':'color:var(--text-dim)'}">★</button>`).join('')}
-          <input type="hidden" id="si-rarete" value="${val}">
-          <span class="sh-rarete-label" id="si-rarete-lbl">${_rareteLabel(val)}</span>
-        </div></div>`;
+      html+=`<div class="form-group"><label>${f.label}</label>${buildRaretePicker('si', val)}</div>`;
     } else if(f.type==='dispo'){
       const isInfini=val!==undefined&&val!==''&&parseInt(val)<0;
       const dispoVal=isInfini?'':(val===''?'':parseInt(val)||'');
@@ -1341,7 +1318,7 @@ function _buildFieldsHtml(tpl,item) {
           + Ajouter un trait
         </button>
       </div>`;
-    } else {
+      } else {
       const inputType = f.type === 'number' ? 'number' : 'text';
       html+=`<div class="form-group"><label>${f.label}</label>
         <input type="${inputType}" class="input-field" id="si-${f.id}" value="${val}" placeholder="${f.placeholder||''}"></div>`;
@@ -1390,16 +1367,7 @@ window._shopTraitRemove = (i) => {
   const arr = _shopTraitsGet(); arr.splice(i,1); _shopTraitsSet(arr); _shopTraitsRender(arr);
 };
 
-const _RARETE_LABELS=['','★ Commun','★★ Peu commun','★★★ Rare','★★★★ Très rare'];
-function _rareteLabel(val){ return _RARETE_LABELS[parseInt(val)||0]||''; }
-function pickRarete(n){
-  const h=document.getElementById('si-rarete'), l=document.getElementById('si-rarete-lbl');
-  if(h) h.value=n; if(l) l.textContent=_RARETE_LABELS[n]||'';
-  document.querySelectorAll('.sh-rarete-star-btn').forEach(btn=>{
-    const v=parseInt(btn.dataset.val);
-    btn.classList.toggle('active',v<=n); btn.style.color=v<=n?'#c084fc':'var(--text-dim)';
-  });
-}
+
 function toggleDispoInfini(cb){
   const input=document.getElementById('si-dispo'); if(!input) return;
   if(cb.checked){ input.value=''; input.disabled=true; input.style.opacity='0.4'; input.style.pointerEvents='none'; }
@@ -1439,6 +1407,7 @@ function previewUpload(fileInputId,previewId,hiddenId) {
 }
 
 async function saveShopItem(itemId) {
+  const item = itemId ? _items.find(i=>i.id===itemId) : null;
   const catId=document.getElementById('si-cat')?.value||'';
   const cat=_cats.find(c=>c.id===catId);
   const tplKey=cat?.template||'classique';
@@ -1466,7 +1435,6 @@ async function saveShopItem(itemId) {
       const inputs = document.querySelectorAll('#si-traits-list input');
       const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
       data.traits = arr;
-      data.trait  = arr.join(', '); // rétrocompatibilité
     } else if (f.type === 'textarea') {
       const el = document.getElementById(`si-${f.id}`);
       if (el) data[f.id] = el.value;
@@ -1485,6 +1453,19 @@ async function saveShopItem(itemId) {
   }
 
   data.prixVente=Math.round((parseFloat(data.prix)||0)*PRIX_VENTE_RATIO);
+
+  // Handle recipe checkbox
+  const hasRecipe = document.getElementById('si-has-recipe')?.checked;
+  if (hasRecipe) {
+    if (item?.recipeMeta) {
+      const recipeMeta = { ...item.recipeMeta };
+      delete recipeMeta.hidden;
+      data.recipeMeta = recipeMeta;
+    }
+  } else {
+    data.recipeMeta = { hidden: true };
+  }
+
   if(itemId) await updateInCol('shop',itemId,data);
   else await addToCol('shop',data);
 
@@ -1505,7 +1486,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 
   const SYNC_FIELDS = [
     'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
-    'fo','dex','in','sa','co','ch','trait','traits','portee','type','effet','description',
+    'fo','dex','in','sa','co','ch','traits','portee','type','effet','description',
     'slotArmure','typeArmure','slotBijou','prixVente','sousType',
   ];
 
