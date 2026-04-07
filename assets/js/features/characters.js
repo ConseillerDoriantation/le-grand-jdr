@@ -3634,10 +3634,18 @@ async function equipSlotFromInv(val, slot) {
 }
 
 // Équipement — filtré depuis l'inventaire du personnage
-function editEquipSlot(slot) {
+async function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equipped = (c.equipement||{})[slot]||{};
   const isWeapon = slot.startsWith('Main');
+
+  // Charger les sousTypes depuis la boutique si pas encore en cache
+  if (isWeapon && (!window._shopSousTypes || window._shopSousTypes.length === 0)) {
+    try {
+      const items = await loadCollection('shop');
+      window._shopSousTypes = [...new Set(items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
+    } catch(e) { window._shopSousTypes = []; }
+  }
 
   // ── Règles de compatibilité par slot ────────────────────────────────────
   // On filtre d'abord par les champs structurés (format, slotArmure, typeArmure, template)
@@ -3697,10 +3705,8 @@ function editEquipSlot(slot) {
       const armureRule = SLOT_ARMURE[slot];
       if (armureRule !== undefined) {
         if (armureRule === null) {
-          // Bijoux : uniquement les items dont slotBijou correspond exactement à ce slot
           if (tpl === 'bijou' || item.slotBijou) return item.slotBijou === slot;
-          // Pas de fallback "items libres" pour les bijoux — on n'accepte que ce qui est tagué
-          return false;
+          return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure && !item.slotBijou);
         }
         if (tpl === 'armure' || item.slotArmure) {
           // Item structuré : vérifier slotArmure
@@ -3752,40 +3758,34 @@ function editEquipSlot(slot) {
     <!-- ── Arme ── -->
     <div class="grid-2" style="gap:0.8rem">
       <div class="form-group"><label>Dégâts</label>
-        <input class="input-field" id="eq-degats" value="${equipped.degats||'1d6'}" placeholder="ex: 1d8"
-          oninput="window._previewWeaponLive()">
+        <input class="input-field" id="eq-degats" value="${equipped.degats||'1d6'}" placeholder="ex: 1d8">
       </div>
       <div class="form-group"><label>Stat d'attaque</label>
         <select class="input-field sh-modal-select" id="eq-stat-attaque"
-          onchange="window._previewWeaponLive()">
+          onchange="window._updateWeaponStatLive('${slot}',this.value)">
           <option value="force"        ${(equipped.statAttaque||'force')==='force'?'selected':''}>Force</option>
           <option value="dexterite"    ${equipped.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
           <option value="intelligence" ${equipped.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
           <option value="constitution" ${equipped.statAttaque==='constitution'?'selected':''}>Constitution</option>
-          <option value="sagesse"      ${equipped.statAttaque==='sagesse'?'selected':''}>Sagesse</option>
-          <option value="charisme"     ${equipped.statAttaque==='charisme'?'selected':''}>Charisme</option>
+          <option value="sagesse" ${equipped.statAttaque==='sagesse'?'selected':''}>Sagesse</option>
+          <option value="charisme" ${equipped.statAttaque==='charisme'?'selected':''}>Charisme</option>
         </select>
       </div>
     </div>
     <div class="grid-2" style="gap:0.8rem">
       <div class="form-group"><label>Portée</label>
-        <input class="input-field" id="eq-portee" value="${equipped.portee||''}" placeholder="ex: Contact / 18m"
-          oninput="window._previewWeaponLive()">
+        <input class="input-field" id="eq-portee" value="${equipped.portee||''}" placeholder="ex: Contact / 18m">
       </div>
       <div class="form-group"><label>Type d'arme</label>
-        ${_equipSousTypeSelect(equipped.typeArme||'')}
+        ${_equipSousTypeSelect(equipped.typeArme||equipped.sousType||'')}
       </div>
     </div>
     <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
-      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Polyvalente, Légère..."
-        oninput="window._previewWeaponLive()">
+      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Polyvalente, Légère...">
     </div>
     <div class="form-group"><label>Particularité</label>
-      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 magique, Argent..."
-        oninput="window._previewWeaponLive()">
+      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 magique, Argent...">
     </div>
-    <!-- Aperçu temps réel -->
-    <div id="eq-weapon-preview" style="margin-top:.25rem"></div>
     `
     : isBijou ? `
     <!-- ── Bijou ── -->
@@ -3858,8 +3858,6 @@ function editEquipSlot(slot) {
     traits: Array.isArray(equipped.traits) ? [...equipped.traits] : [],
     sousType: equipped.sousType || '',
   };
-  // Déclencher l'aperçu temps réel immédiatement si c'est une arme
-  if (isWeapon) setTimeout(() => window._previewWeaponLive(), 50);
 }
 
 // Pré-remplir les champs depuis l'item sélectionné dans l'inventaire
@@ -4190,73 +4188,55 @@ function renderCharMaitrises(c, canEdit) {
 }
 
 // Construit le sélecteur de type d'arme (sousTypes de la boutique + valeur courante)
-// Sélecteur de type d'arme pour le modal équipement (id=eq-type-arme)
+// Sélecteur type d'arme pour le modal équipement (id fixe : eq-type-arme)
+// Les sousTypes viennent de window._shopSousTypes chargé depuis Firestore dans editEquipSlot
 function _equipSousTypeSelect(current = '') {
-  const shopTypes = window._shopSousTypes || [];
-  const existing  = (STATE.activeChar?.maitrises||[]).map(m=>m.typeArme).filter(Boolean);
-  const all = [...new Set([...shopTypes, ...existing, ...(current ? [current] : [])])].sort();
+  const all = [...(window._shopSousTypes || [])];
+  // Ajouter la valeur courante si elle n'est pas dans la liste
+  if (current && !all.includes(current)) all.push(current);
+  all.sort();
 
   if (all.length === 0) {
-    return `<input class="input-field" id="eq-type-arme" value="${current}"
-      placeholder="ex: Épée, Arc..."
-      oninput="window._previewWeaponLive()">
-      <div style="font-size:.68rem;color:var(--text-dim);margin-top:.2rem">
-        💡 Visitez la boutique pour charger la liste des types.
-      </div>`;
+    // Ne devrait pas arriver (chargé avant l'appel) mais fallback propre
+    return `<input class="input-field" id="eq-type-arme" value="${current}" placeholder="ex: Épée, Arc...">`;
   }
 
-  const options = [
-    `<option value="">— Aucun —</option>`,
-    ...all.map(t => `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`),
+  const options = [`<option value="">— Aucun —</option>`,
+    ...all.map(t => `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`)
   ].join('');
 
-  return `<select class="input-field" id="eq-type-arme"
-    onchange="window._previewWeaponLive()">${options}</select>`;
+  return `<select class="input-field sh-modal-select" id="eq-type-arme">${options}</select>`;
 }
 
-// Aperçu temps réel de l'arme dans le modal (Toucher / Dégâts / Portée / Type)
-window._previewWeaponLive = () => {
+// Met à jour les valeurs Toucher / Dégâts affichées dans la fiche en temps réel
+// quand on change la stat d'attaque dans le modal, sans rerender complet
+window._updateWeaponStatLive = (slot, statKey) => {
   const c = STATE.activeChar; if (!c) return;
-  const preview = document.getElementById('eq-weapon-preview');
-  if (!preview) return;
+  const item = (c.equipement||{})[slot]; if (!item) return;
 
-  const statKey  = document.getElementById('eq-stat-attaque')?.value || 'force';
+  // Recalcul avec la nouvelle stat sélectionnée
+  const tempItem = { ...item, statAttaque: statKey };
   const s  = c.stats||{};
   const sb = c.statsBonus||{};
   const statVal = (s[statKey]||8) + (sb[statKey]||0);
   const mod = Math.floor((Math.min(22, statVal) - 10) / 2);
-  const modS = mod >= 0 ? `+${mod}` : `${mod}`;
-  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int',
-                    constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey;
 
-  const degats   = document.getElementById('eq-degats')?.value || '—';
-  const portee   = document.getElementById('eq-portee')?.value || '';
-  const typeArme = document.getElementById('eq-type-arme')?.value || '';
-  const traits   = (document.getElementById('eq-traits')?.value || '')
-    .split(',').map(t => t.trim()).filter(Boolean);
-  const partic   = document.getElementById('eq-particularite')?.value || '';
+  const newToucher = getToucherDisplay(c, tempItem, statKey);
+  const newDegats  = getDegatsDisplay(c, tempItem, statKey);
 
-  // Calcul du toucher (même logique que getToucherDisplay)
-  const profBonus  = Math.ceil((c.niveau||1) / 4) + 1;
-  const toucherVal = mod + profBonus;
-  const toucherS   = toucherVal >= 0 ? `+${toucherVal}` : `${toucherVal}`;
-
-  preview.innerHTML = `
-    <div style="background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border);
-      padding:.5rem .7rem;font-size:.78rem">
-      <div style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;
-        letter-spacing:.8px;margin-bottom:.4rem">Aperçu</div>
-      <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:${traits.length||partic?'.3rem':'0'}">
-        <span><span style="color:var(--text-dim);font-size:.7rem">Toucher </span>
-          <strong style="color:#e8b84b">${toucherS} ${statLbl}</strong></span>
-        <span><span style="color:var(--text-dim);font-size:.7rem">Dégâts </span>
-          <strong style="color:#ff6b6b">${degats} ${modS} ${statLbl}</strong></span>
-        ${portee   ? `<span><span style="color:var(--text-dim);font-size:.7rem">Portée </span><span>${portee}</span></span>` : ''}
-        ${typeArme ? `<span><span style="color:var(--text-dim);font-size:.7rem">Type </span><span style="color:#e8b84b">${typeArme}</span></span>` : ''}
-      </div>
-      ${traits.map(t => `<div style="font-size:.72rem;color:#b47fff;font-style:italic">• ${t}</div>`).join('')}
-      ${partic ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:.15rem">✦ ${partic}</div>` : ''}
-    </div>`;
+  // Trouver les éléments dans la fiche (cs-ws-val) correspondant à cet slot
+  // La fiche affiche les armes dans des .cs-weapon-row dont le label contient le slot
+  const rows = document.querySelectorAll('.cs-weapon-row');
+  rows.forEach(row => {
+    const label = row.querySelector('.cs-weapon-slot-label');
+    if (!label || label.textContent.trim() !== slot) return;
+    const vals = row.querySelectorAll('.cs-ws-val');
+    vals.forEach(el => {
+      const lbl = el.previousElementSibling?.textContent?.toLowerCase() || '';
+      if (lbl.includes('toucher')) el.textContent = newToucher;
+      if (lbl.includes('dégâts') || lbl.includes('degats')) el.textContent = newDegats;
+    });
+  });
 };
 
 function _maitriseSousTypeSelect(current = '') {
