@@ -27,8 +27,8 @@ const STORE = {
 const STAT_META = [
   { key:'force',        label:'Force',        color:'#ff6b6b' },
   { key:'dexterite',    label:'Dextérité',    color:'#22c38e' },
-  { key:'constitution', label:'Constitution', color:'#f59e0b' },
   { key:'intelligence', label:'Intelligence', color:'#4f8cff' },
+  { key:'constitution', label:'Constitution', color:'#f59e0b' },
   { key:'sagesse',      label:'Sagesse',      color:'#b47fff' },
   { key:'charisme',     label:'Charisme',     color:'#fd6c9e' },
 ];
