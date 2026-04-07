@@ -26,11 +26,11 @@ const STORE = {
 
 const STAT_META = [
   { key:'force',        label:'Force',        color:'#ff6b6b' },
-  { key:'dexterite',    label:'Dextérité',    color:'#f59e0b' },
-  { key:'constitution', label:'Constitution', color:'#22c38e' },
+  { key:'dexterite',    label:'Dextérité',    color:'#22c38e' },
+  { key:'constitution', label:'Constitution', color:'#f59e0b' },
   { key:'intelligence', label:'Intelligence', color:'#4f8cff' },
   { key:'sagesse',      label:'Sagesse',      color:'#b47fff' },
-  { key:'charisme',     label:'Charisme',     color:'#ff9f43' },
+  { key:'charisme',     label:'Charisme',     color:'#fd6c9e' },
 ];
 
 // ── Helpers data ──────────────────────────────────────────────────────────────
