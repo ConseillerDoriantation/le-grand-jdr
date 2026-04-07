@@ -1583,49 +1583,63 @@ function _calcSortDegats(s, c) {
   const totalPP = nbPuiss + nbProt;
   const bonusVal = totalPP > 1 ? (totalPP - 1) * 2 : 0;
 
-  if (totalPP === 0 && bonusVal === 0) return base;
+  // Bonus de maîtrise de l'arme principale
+  const maitrisesBonus = mainP ? _getMaitriseBonus(c, mainP) : 0;
+  const maitriseTag = maitrisesBonus > 0
+    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
+    : '';
+
+  if (totalPP === 0 && bonusVal === 0) return `${base}${maitriseTag}`;
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
     let result = `${parseInt(match[1]) + totalPP}${match[2]}${match[3]}`;
     if (bonusVal > 0) result += ` +${bonusVal}`;
-    return result;
+    return `${result}${maitriseTag}`;
   }
   let result = base;
   if (totalPP > 0) result += ` +${totalPP}d6`;
   if (bonusVal > 0) result += ` +${bonusVal}`;
-  return result;
+  return `${result}${maitriseTag}`;
 }
 
 /**
  * Soin effectif.
  * - Base 1d4 + Protection chaîné : +1d4 par rune, +2 soin fixe par paire (chaînage)
- * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
+ * - Format texte libre → affiché tel quel, rien ajouté
+ * - Bonus maîtrise de l'arme principale appliqué si format XdY reconnu
  */
-function _calcSortSoin(s) {
+function _calcSortSoin(s, c) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base   = (s.soin || '').trim();
 
+  // Bonus maîtrise de l'arme principale
+  const mainP = c?.equipement?.['Main principale'];
+  const maitrisesBonus = (mainP && c) ? _getMaitriseBonus(c, mainP) : 0;
+  const maitriseTag = maitrisesBonus > 0
+    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
+    : '';
+
   const buildDefault = (diceCount) => {
     let r = `${diceCount}d4`;
     if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-    return r;
+    return `${r}${maitriseTag}`;
   };
 
   if (!base || base.toLowerCase() === '= base') return buildDefault(1 + nbProt);
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
-      // Format XdY reconnu → on ajoute les dés Protection + chaînage
       let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
       if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return r;
+      return `${r}${maitriseTag}`;
     }
-    // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
-    return base;
+    return base; // texte libre
   }
+  // Pas de rune Protection mais base XdY → ajouter maîtrise
+  if (maitrisesBonus > 0 && base.match(/^(\d+)(d\d+)(.*)$/i)) return `${base}${maitriseTag}`;
   return base;
 }
 
@@ -1723,7 +1737,7 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
+      lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
     } else {
       lines.push({ icon:'🛡️', label:_getSortCA(s), detail:'' });
     }
@@ -1908,7 +1922,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      statsChips.push({ icon:'💚', val:_calcSortSoin(s), color:'#22c38e' });
+      statsChips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e' });
     } else {
       statsChips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
@@ -3803,17 +3817,9 @@ function editEquipSlot(slot) {
           <option value="">— Aucun —</option>
           ${['Légère','Intermédiaire','Lourde'].map(t=>`<option value="${t}" ${(equipped.typeArmure||'')=== t?'selected':''}>${t}</option>`).join('')}
         </select>
-        <div style="font-size:.7rem;color:var(--text-dim);margin-top:.3rem">
-          CA de base : Aucune = 8 · Légère = 10 · Intermédiaire = 12 · Lourde = 14 <span style="color:var(--text-dim)">(+ mod Dex automatique)</span>
-        </div>
       </div>
-      <div class="form-group"><label>Bonus de CA magique
-        <span style="font-weight:400;font-size:.7rem;color:#e8b84b"> — enchantement uniquement</span>
-      </label>
-        <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="0 (laisser vide si standard)">
-        <div style="font-size:.68rem;color:#ff6b6b;margin-top:.3rem">
-          ⚠️ Ne remplis que si l'armure a un bonus magique exceptionnel (+1, +2...). La CA de base vient du type d'armure ci-contre.
-        </div>
+      <div class="form-group"><label>CA apportée</label>
+        <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="0">
       </div>
     </div>
     <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
