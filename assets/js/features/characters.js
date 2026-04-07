@@ -4179,7 +4179,7 @@ function renderCharMaitrises(c, canEdit) {
   return html;
 }
 
-// Sélecteur de type d'arme pour le modal équipement — uniquement les 6 formats de base
+// Sélecteur type d'arme — uniquement les 6 formats de base de l'app
 function _equipTypeArmeSelect(current = '') {
   const FORMATS = [
     'Arme 1M CaC Phy.',
@@ -4189,41 +4189,25 @@ function _equipTypeArmeSelect(current = '') {
     'Arme 2M Dist Mag.',
     'Arme Secondaire (Bouclier, Torche...)',
   ];
-  // Ajouter la valeur courante si elle n'est pas dans la liste (rétrocompat)
   if (current && !FORMATS.includes(current)) FORMATS.push(current);
-
-  const options = [`<option value="">— Aucun —</option>`,
+  const opts = ['<option value="">— Aucun —</option>',
     ...FORMATS.map(t => `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`)
   ].join('');
-
-  return `<select class="input-field sh-modal-select" id="eq-type-arme">${options}</select>`;
+  return `<select class="input-field sh-modal-select" id="eq-type-arme">${opts}</select>`;
 }
 
-// Met à jour Toucher/Dégâts dans la fiche EN TEMPS RÉEL quand on change la stat d'attaque
-// getToucherDisplay et getDegatsDisplay sont exposés dans window via Object.assign
+// Met à jour la fiche arme EN TEMPS RÉEL quand on change la stat d'attaque dans le modal.
+// Stratégie : mettre à jour STATE.activeChar en mémoire + appeler renderCharSheet
+// (validé en live : renderCharSheet relit c.equipement et redessine correctement)
 window._updateWeaponStatLive = (slot, statKey) => {
   const c = STATE.activeChar; if (!c) return;
   const item = (c.equipement || {})[slot]; if (!item) return;
-
-  // Item temporaire avec la nouvelle stat pour le calcul
-  const tempItem = { ...item, statAttaque: statKey, toucherStat: statKey, degatsStat: statKey };
-
-  const newToucher = window.getToucherDisplay(c, tempItem, statKey);
-  const newDegats  = window.getDegatsDisplay(c, tempItem, statKey);
-
-  // Mettre à jour uniquement les .cs-ws-val du bon slot dans la fiche ouverte
-  document.querySelectorAll('.cs-weapon-row').forEach(row => {
-    const lbl = row.querySelector('.cs-weapon-slot-label');
-    if (!lbl || lbl.textContent.trim() !== slot) return;
-    row.querySelectorAll('.cs-ws').forEach(ws => {
-      const labelEl = ws.querySelector('.cs-ws-label');
-      const valEl   = ws.querySelector('.cs-ws-val');
-      if (!labelEl || !valEl) return;
-      const t = labelEl.textContent.toLowerCase();
-      if (t.includes('toucher')) valEl.innerHTML = newToucher;
-      if (t.includes('dégât') || t.includes('degat')) valEl.innerHTML = newDegats;
-    });
-  });
+  // Mettre à jour les trois champs de stat en mémoire
+  item.statAttaque  = statKey;
+  item.toucherStat  = statKey;
+  item.degatsStat   = statKey;
+  // Rerender la section combat — relit directement c.equipement
+  window.renderCharSheet(c, 'combat');
 };
 
 // Construit le sélecteur de type d'arme (sousTypes de la boutique + valeur courante)
