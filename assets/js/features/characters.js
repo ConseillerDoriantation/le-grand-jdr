@@ -3697,8 +3697,8 @@ function editEquipSlot(slot) {
       const armureRule = SLOT_ARMURE[slot];
       if (armureRule !== undefined) {
         if (armureRule === null) {
-          if (tpl === 'bijou' || item.slotBijou) return item.slotBijou === slot;
-          return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure && !item.slotBijou);
+          // Bijoux : uniquement les items explicitement taggés pour ce slot exact
+          return item.slotBijou === slot;
         }
         if (tpl === 'armure' || item.slotArmure) {
           // Item structuré : vérifier slotArmure
@@ -3729,18 +3729,103 @@ function editEquipSlot(slot) {
   openModal(`${isWeapon?'⚔️':isBijou?'💍':'🛡️'} Équiper — ${slot}`, `
     ${hasCompat
       ? `<div class="form-group">
-          <label>Choisir depuis l'inventaire</label>
+          <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
           <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" onchange="equipSlotFromInv(this.value, this.dataset.equipSlot)">
             <option value="">— Sélectionner un objet —</option>
             ${invOptions}
           </select>
+        </div>
+        <div class="cs-equip-divider">
+          <span>ou saisir / ajuster manuellement</span>
         </div>`
       : `<div class="cs-equip-empty-inv">
           <span>⚠️ Aucun objet compatible dans l'inventaire.</span>
-          <span style="font-size:0.72rem;color:var(--text-dim)">Achète des objets à la boutique pour pouvoir équiper ce slot.</span>
+          <span style="font-size:0.72rem;color:var(--text-dim)">Achète des objets à la boutique ou saisis manuellement.</span>
         </div>`
     }
+
+    <div class="form-group"><label>Nom</label><input class="input-field" id="eq-nom" value="${equipped.nom||''}"></div>
+
+    ${isWeapon ? `
+    <!-- ── Arme ── -->
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group"><label>Dégâts</label>
+        <input class="input-field" id="eq-degats" value="${equipped.degats||'1d6'}" placeholder="ex: 1d8">
+      </div>
+      <div class="form-group"><label>Stat d'attaque</label>
+        <select class="input-field sh-modal-select" id="eq-stat-attaque">
+          <option value="force"        ${(equipped.statAttaque||'force')==='force'?'selected':''}>Force</option>
+          <option value="dexterite"    ${equipped.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
+          <option value="intelligence" ${equipped.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
+          <option value="constitution" ${equipped.statAttaque==='constitution'?'selected':''}>Constitution</option>
+          <option value="sagesse" ${equipped.statAttaque==='sagesse'?'selected':''}>Sagesse</option>
+          <option value="charisme" ${equipped.statAttaque==='charisme'?'selected':''}>Charisme</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2" style="gap:0.8rem">
+      <div class="form-group"><label>Portée</label>
+        <input class="input-field" id="eq-portee" value="${equipped.portee||''}" placeholder="ex: Contact / 18m">
+      </div>
+      <div class="form-group"><label>Type d'arme</label>
+        <input class="input-field" id="eq-type-arme" value="${equipped.typeArme||''}" placeholder="ex: Épée, Arc...">
+      </div>
+    </div>
+    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
+      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Polyvalente, Légère...">
+    </div>
+    <div class="form-group"><label>Particularité</label>
+      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 magique, Argent...">
+    </div>
+    `
+    : isBijou ? `
+    <!-- ── Bijou ── -->
+    <div class="form-group"><label>Description / effet</label>
+      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 à tous les jets de sauvegarde">
+    </div>
+    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
+      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance feu, Vision nocturne...">
+    </div>
+    <div class="form-group"><label>Bonus de statistiques</label>
+      <div class="grid-4" style="gap:.5rem">
+        ${[['fo','For'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha'],['ca','CA']].map(([k,l])=>`
+          <div class="form-group" style="margin:0"><label style="font-size:.68rem">${l}</label>
+            <input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||''}" placeholder="0">
+          </div>`).join('')}
+      </div>
+    </div>
+    `
+    : `
+    <!-- ── Armure ── -->
+    <div class="grid-2" style="gap:.8rem">
+      <div class="form-group"><label>Type d'armure</label>
+        <select class="input-field sh-modal-select" id="eq-type-armure">
+          <option value="">— Aucun —</option>
+          ${['Légère','Intermédiaire','Lourde'].map(t=>`<option value="${t}" ${(equipped.typeArmure||'')=== t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>CA apportée</label>
+        <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="0">
+      </div>
+    </div>
+    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
+      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance, Discrétion désavantage...">
+    </div>
+    <div class="form-group"><label>Bonus de statistiques</label>
+      <div class="grid-4" style="gap:.5rem">
+        ${[['fo','For'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha']].map(([k,l])=>`
+          <div class="form-group" style="margin:0"><label style="font-size:.68rem">${l}</label>
+            <input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||''}" placeholder="0">
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="form-group"><label>Particularité</label>
+      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: Résistance aux dégâts de feu...">
+    </div>
+    `}
+
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
+      <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>
       <button class="btn btn-danger" onclick="clearEquipSlot('${slot}')">Retirer</button>
     </div>
   `);
