@@ -98,6 +98,24 @@ async function loadProfile(user) {
     return;
   }
 
+  // Aucun document pour cet UID — chercher si un doc avec le même email existe déjà
+  // (évite les doublons quand quelqu'un crée deux comptes Auth avec le même email)
+  try {
+    const q = query(collection(db, "users"), where("email", "==", user.email));
+    const existing = await getDocs(q);
+    if (!existing.empty) {
+      // Un profil existe déjà pour cet email — le réutiliser et le migrer vers ce nouvel UID
+      const existingData = existing.docs[0].data();
+      const profile = { ...existingData, uid: user.uid };
+      await setDoc(ref, profile, { merge: true });
+      setProfile(profile);
+      return;
+    }
+  } catch (error) {
+    console.error("[init] email duplicate check failed:", error);
+  }
+
+  // Vraiment nouveau joueur — créer le profil
   const profile = {
     uid: user.uid,
     email: user.email,
