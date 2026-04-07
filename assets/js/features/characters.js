@@ -3634,7 +3634,7 @@ async function equipSlotFromInv(val, slot) {
 }
 
 // Équipement — filtré depuis l'inventaire du personnage
-async function editEquipSlot(slot) {
+function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equipped = (c.equipement||{})[slot]||{};
   const isWeapon = slot.startsWith('Main');
@@ -3729,104 +3729,18 @@ async function editEquipSlot(slot) {
   openModal(`${isWeapon?'⚔️':isBijou?'💍':'🛡️'} Équiper — ${slot}`, `
     ${hasCompat
       ? `<div class="form-group">
-          <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
+          <label>Choisir depuis l'inventaire</label>
           <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" onchange="equipSlotFromInv(this.value, this.dataset.equipSlot)">
             <option value="">— Sélectionner un objet —</option>
             ${invOptions}
           </select>
-        </div>
-        <div class="cs-equip-divider">
-          <span>ou saisir / ajuster manuellement</span>
         </div>`
       : `<div class="cs-equip-empty-inv">
           <span>⚠️ Aucun objet compatible dans l'inventaire.</span>
-          <span style="font-size:0.72rem;color:var(--text-dim)">Achète des objets à la boutique ou saisis manuellement.</span>
+          <span style="font-size:0.72rem;color:var(--text-dim)">Achète des objets à la boutique pour pouvoir équiper ce slot.</span>
         </div>`
     }
-
-    <div class="form-group"><label>Nom</label><input class="input-field" id="eq-nom" value="${equipped.nom||''}"></div>
-
-    ${isWeapon ? `
-    <!-- ── Arme ── -->
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Dégâts</label>
-        <input class="input-field" id="eq-degats" value="${equipped.degats||'1d6'}" placeholder="ex: 1d8">
-      </div>
-      <div class="form-group"><label>Stat d'attaque</label>
-        <select class="input-field sh-modal-select" id="eq-stat-attaque"
-          onchange="window._updateWeaponStatLive('${slot}', this.value)">
-          <option value="force"        ${(equipped.statAttaque||'force')==='force'?'selected':''}>Force</option>
-          <option value="dexterite"    ${equipped.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
-          <option value="intelligence" ${equipped.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
-          <option value="constitution" ${equipped.statAttaque==='constitution'?'selected':''}>Constitution</option>
-          <option value="sagesse" ${equipped.statAttaque==='sagesse'?'selected':''}>Sagesse</option>
-          <option value="charisme" ${equipped.statAttaque==='charisme'?'selected':''}>Charisme</option>
-        </select>
-      </div>
-    </div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Portée</label>
-        <input class="input-field" id="eq-portee" value="${equipped.portee||''}" placeholder="ex: Contact / 18m">
-      </div>
-      <div class="form-group"><label>Type d'arme</label>
-        ${_equipTypeArmeSelect(equipped.typeArme||'')}
-      </div>
-    </div>
-    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
-      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Polyvalente, Légère...">
-    </div>
-    <div class="form-group"><label>Particularité</label>
-      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 magique, Argent...">
-    </div>
-    `
-    : isBijou ? `
-    <!-- ── Bijou ── -->
-    <div class="form-group"><label>Description / effet</label>
-      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 à tous les jets de sauvegarde">
-    </div>
-    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
-      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance feu, Vision nocturne...">
-    </div>
-    <div class="form-group"><label>Bonus de statistiques</label>
-      <div class="grid-4" style="gap:.5rem">
-        ${[['fo','For'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha'],['ca','CA']].map(([k,l])=>`
-          <div class="form-group" style="margin:0"><label style="font-size:.68rem">${l}</label>
-            <input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||''}" placeholder="0">
-          </div>`).join('')}
-      </div>
-    </div>
-    `
-    : `
-    <!-- ── Armure ── -->
-    <div class="grid-2" style="gap:.8rem">
-      <div class="form-group"><label>Type d'armure</label>
-        <select class="input-field sh-modal-select" id="eq-type-armure">
-          <option value="">— Aucun —</option>
-          ${['Légère','Intermédiaire','Lourde'].map(t=>`<option value="${t}" ${(equipped.typeArmure||'')=== t?'selected':''}>${t}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group"><label>CA apportée</label>
-        <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="0">
-      </div>
-    </div>
-    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
-      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance, Discrétion désavantage...">
-    </div>
-    <div class="form-group"><label>Bonus de statistiques</label>
-      <div class="grid-4" style="gap:.5rem">
-        ${[['fo','For'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha']].map(([k,l])=>`
-          <div class="form-group" style="margin:0"><label style="font-size:.68rem">${l}</label>
-            <input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||''}" placeholder="0">
-          </div>`).join('')}
-      </div>
-    </div>
-    <div class="form-group"><label>Particularité</label>
-      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: Résistance aux dégâts de feu...">
-    </div>
-    `}
-
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>
       <button class="btn btn-danger" onclick="clearEquipSlot('${slot}')">Retirer</button>
     </div>
   `);
@@ -4179,37 +4093,6 @@ function renderCharMaitrises(c, canEdit) {
   return html;
 }
 
-// Sélecteur type d'arme — uniquement les 6 formats de base de l'app
-function _equipTypeArmeSelect(current = '') {
-  const FORMATS = [
-    'Arme 1M CaC Phy.',
-    'Arme 2M CaC Phy.',
-    'Arme 2M Dist Phy.',
-    'Arme 2M CaC Mag.',
-    'Arme 2M Dist Mag.',
-    'Arme Secondaire (Bouclier, Torche...)',
-  ];
-  if (current && !FORMATS.includes(current)) FORMATS.push(current);
-  const opts = ['<option value="">— Aucun —</option>',
-    ...FORMATS.map(t => `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`)
-  ].join('');
-  return `<select class="input-field sh-modal-select" id="eq-type-arme">${opts}</select>`;
-}
-
-// Met à jour la fiche arme EN TEMPS RÉEL quand on change la stat d'attaque dans le modal.
-// Stratégie : mettre à jour STATE.activeChar en mémoire + appeler renderCharSheet
-// (validé en live : renderCharSheet relit c.equipement et redessine correctement)
-window._updateWeaponStatLive = (slot, statKey) => {
-  const c = STATE.activeChar; if (!c) return;
-  const item = (c.equipement || {})[slot]; if (!item) return;
-  // Mettre à jour les trois champs de stat en mémoire
-  item.statAttaque  = statKey;
-  item.toucherStat  = statKey;
-  item.degatsStat   = statKey;
-  // Rerender la section combat — relit directement c.equipement
-  window.renderCharSheet(c, 'combat');
-};
-
 // Construit le sélecteur de type d'arme (sousTypes de la boutique + valeur courante)
 function _maitriseSousTypeSelect(current = '') {
   const shopTypes = window._shopSousTypes || [];
@@ -4329,7 +4212,6 @@ Object.assign(window, {
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   editEquipSlot, saveEquipSlot, clearEquipSlot, equipSlotFromInv,
   previewEquipFromInv,
-  getToucherDisplay, getDegatsDisplay,
   addInvItem, editInvItem, saveInvItem,
   addQuete, saveQuete,
   deleteCharPhoto,
