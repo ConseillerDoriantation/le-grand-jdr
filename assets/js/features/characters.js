@@ -1583,63 +1583,49 @@ function _calcSortDegats(s, c) {
   const totalPP = nbPuiss + nbProt;
   const bonusVal = totalPP > 1 ? (totalPP - 1) * 2 : 0;
 
-  // Bonus de maîtrise de l'arme principale
-  const maitrisesBonus = mainP ? _getMaitriseBonus(c, mainP) : 0;
-  const maitriseTag = maitrisesBonus > 0
-    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
-    : '';
-
-  if (totalPP === 0 && bonusVal === 0) return `${base}${maitriseTag}`;
+  if (totalPP === 0 && bonusVal === 0) return base;
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
     let result = `${parseInt(match[1]) + totalPP}${match[2]}${match[3]}`;
     if (bonusVal > 0) result += ` +${bonusVal}`;
-    return `${result}${maitriseTag}`;
+    return result;
   }
   let result = base;
   if (totalPP > 0) result += ` +${totalPP}d6`;
   if (bonusVal > 0) result += ` +${bonusVal}`;
-  return `${result}${maitriseTag}`;
+  return result;
 }
 
 /**
  * Soin effectif.
  * - Base 1d4 + Protection chaîné : +1d4 par rune, +2 soin fixe par paire (chaînage)
- * - Format texte libre → affiché tel quel, rien ajouté
- * - Bonus maîtrise de l'arme principale appliqué si format XdY reconnu
+ * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
  */
-function _calcSortSoin(s, c) {
+function _calcSortSoin(s) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base   = (s.soin || '').trim();
 
-  // Bonus maîtrise de l'arme principale
-  const mainP = c?.equipement?.['Main principale'];
-  const maitrisesBonus = (mainP && c) ? _getMaitriseBonus(c, mainP) : 0;
-  const maitriseTag = maitrisesBonus > 0
-    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
-    : '';
-
   const buildDefault = (diceCount) => {
     let r = `${diceCount}d4`;
     if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-    return `${r}${maitriseTag}`;
+    return r;
   };
 
   if (!base || base.toLowerCase() === '= base') return buildDefault(1 + nbProt);
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
+      // Format XdY reconnu → on ajoute les dés Protection + chaînage
       let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
       if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return `${r}${maitriseTag}`;
+      return r;
     }
-    return base; // texte libre
+    // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
+    return base;
   }
-  // Pas de rune Protection mais base XdY → ajouter maîtrise
-  if (maitrisesBonus > 0 && base.match(/^(\d+)(d\d+)(.*)$/i)) return `${base}${maitriseTag}`;
   return base;
 }
 
@@ -1654,14 +1640,16 @@ function _getSortCA(s) {
 }
 
 /**
- * Nombre de cibles — DISPERSION avec chaînage corrigé :
- * N runes Dispersion → (N+1) cibles + (N-1) bonus chaînage = 2N cibles
+ * Nombre de cibles — règle Dispersion :
+ * 0 rune  → 1 cible
+ * N runes → 1 (base) + N (runes) + (N-1) (chaînage) = 2N cibles
  * Ex: 1 rune → 2 cibles, 2 runes → 4 cibles, 3 runes → 6 cibles
+ * Les cibles doivent toutes être DIFFÉRENTES.
  */
 function _calcSortCibles(s) {
   const n = (s.runes||[]).filter(r => r === 'Dispersion').length;
   if (n === 0) return 1;
-  return n + 1 + (n - 1); // = 2N
+  return 1 + n + (n - 1); // 1 base + N runes + (N-1) chaînage = 2N
 }
 
 /** Durée en tours (Durée : +2 tours par rune, chaînage : +1 supplémentaire par rune après la 1ère) */
@@ -1737,7 +1725,7 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
+      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
     } else {
       lines.push({ icon:'🛡️', label:_getSortCA(s), detail:'' });
     }
@@ -1749,7 +1737,10 @@ function _buildSortResume(s, c) {
   const nbCibles = _calcSortCibles(s);
   const nbDisp = runes.filter(r => r === 'Dispersion').length;
   if (nbCibles > 1) {
-    lines.push({ icon:'🎯', label:`${nbCibles} cibles`, detail: nbDisp > 1 ? `${nbDisp} runes Dispersion (chaîné : ×2)` : '1 rune Dispersion' });
+    const dispDetail = nbDisp === 1
+      ? '1 rune Dispersion · cibles différentes uniquement'
+      : `${nbDisp} runes Dispersion · chaînage +${nbDisp - 1} · cibles différentes uniquement`;
+    lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
   }
 
   // Zone (Amplification)
@@ -1922,13 +1913,13 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      statsChips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e' });
+      statsChips.push({ icon:'💚', val:_calcSortSoin(s), color:'#22c38e' });
     } else {
       statsChips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
   }
   if (nbCibles > 1) {
-    statsChips.push({ icon:'🎯', val:`×${nbCibles} cibles`, color:'#4f8cff' });
+    statsChips.push({ icon:'🎯', val:`×${nbCibles} cibles diff.`, color:'#4f8cff' });
   }
   const zone = _calcSortZone(s);
   if (zone) statsChips.push({ icon:'📐', val:`+${zone}m`, color:'#b47fff' });
@@ -3191,7 +3182,7 @@ function openSortModal(idx, s) {
     {nom:'Enchantement',  effet:'Élément sur équip. allié 2 tr → Action Bonus'},
     {nom:'Affliction',    effet:'Élément + état sur équip. ennemi 2 tr → Action Bonus'},
     {nom:'Invocation',    effet:'Créature liée · 10 PV, CA 10'},
-    {nom:'Dispersion',    effet:'+1 cible · chaîné : ×2 (2 runes = 4 cibles)'},
+    {nom:'Dispersion',    effet:'1 rune = 2 cibles · 2 runes = 4 cibles · N runes = 2N cibles (chaîné) · cibles différentes uniquement'},
     {nom:'Lacération',    effet:'CA cible −1 · chaîné : −1/rune (max −2, Élites −4)'},
     {nom:'Chance',        effet:'RC 19–20, critique max · chaîné : RC−1/rune'},
     {nom:'Durée',         effet:'+2 tours · chaîné : +1 supp./rune'},
