@@ -17,8 +17,9 @@
 //   const b64 = await confirmCrop('my-canvas');
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── État partagé du cropper canvas ───────────────────────────────────────────
-const _state = {
+// ── État partagé du cropper canvas ─────────────────────────────────────────────
+// Exporté comme _crop pour compatibilité avec le code existant des features
+export const _crop = {
   img: null, cropX: 0, cropY: 0, cropW: 0, cropH: 0,
   startX: 0, startY: 0,
   isDragging: false, isResizing: false, handle: null,
@@ -27,7 +28,7 @@ const _state = {
   canvasId: null,   // id du canvas actif
 };
 
-const _clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+export const _clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 // ── HTML : zone de drop/upload ────────────────────────────────────────────────
 
@@ -131,7 +132,7 @@ export function bindImageDropZone({
   obs.observe(document.body, { childList: true, subtree: true });
 
   // Stocker le callback pour confirmCanvasCrop
-  _state._onCropReady = onCropReady;
+  _crop._onCropReady = onCropReady;
 
   return { handleFile };
 }
@@ -148,21 +149,21 @@ function _initCanvasCrop(dataUrl, { canvasWrapId, canvasId, previewId, ratio, ma
   if (okEl) okEl.style.display = 'none';
 
   // Reset state
-  _state.base64   = null;
-  _state.canvasId = canvasId;
+  _crop.base64   = null;
+  _crop.canvasId = canvasId;
 
   const img = new Image();
   img.onload = () => {
-    _state.img  = img;
-    _state.natW = img.naturalWidth;
-    _state.natH = img.naturalHeight;
+    _crop.img  = img;
+    _crop.natW = img.naturalWidth;
+    _crop.natH = img.naturalHeight;
 
     const maxW = Math.min(maxDisplayW, img.naturalWidth);
-    _state.dispScale = maxW / img.naturalWidth;
+    _crop.dispScale = maxW / img.naturalWidth;
     canvas.width  = img.naturalWidth;
     canvas.height = img.naturalHeight;
     canvas.style.width  = maxW + 'px';
-    canvas.style.height = Math.round(img.naturalHeight * _state.dispScale) + 'px';
+    canvas.style.height = Math.round(img.naturalHeight * _crop.dispScale) + 'px';
 
     // Sélection initiale selon le ratio demandé
     if (ratio) {
@@ -170,18 +171,18 @@ function _initCanvasCrop(dataUrl, { canvasWrapId, canvasId, previewId, ratio, ma
       let w = img.naturalWidth * 0.85;
       let h = w / r;
       if (h > img.naturalHeight * 0.85) { h = img.naturalHeight * 0.85; w = h * r; }
-      _state.cropX = Math.round((img.naturalWidth  - w) / 2);
-      _state.cropY = Math.round((img.naturalHeight - h) / 2);
-      _state.cropW = Math.round(w);
-      _state.cropH = Math.round(h);
+      _crop.cropX = Math.round((img.naturalWidth  - w) / 2);
+      _crop.cropY = Math.round((img.naturalHeight - h) / 2);
+      _crop.cropW = Math.round(w);
+      _crop.cropH = Math.round(h);
     } else {
       // Défaut : portrait 3:4
       const w = Math.round(Math.min(img.naturalWidth, img.naturalHeight * 0.75));
       const h = Math.round(w * 4 / 3);
-      _state.cropX = Math.round((img.naturalWidth  - w) / 2);
-      _state.cropY = Math.round((img.naturalHeight - h) / 2);
-      _state.cropW = w;
-      _state.cropH = Math.min(h, img.naturalHeight);
+      _crop.cropX = Math.round((img.naturalWidth  - w) / 2);
+      _crop.cropY = Math.round((img.naturalHeight - h) / 2);
+      _crop.cropW = w;
+      _crop.cropH = Math.min(h, img.naturalHeight);
     }
 
     _drawCanvasCrop();
@@ -205,18 +206,18 @@ function _getHandles() {
 }
 
 function _hitHandle(nx, ny) {
-  const tol = 9 / _state.dispScale;
+  const tol = 9 / _crop.dispScale;
   return _getHandles().find(h => Math.abs(h.x - nx) < tol && Math.abs(h.y - ny) < tol) || null;
 }
 
 function _toNative(canvas, cx, cy) {
   const r = canvas.getBoundingClientRect();
-  return { x: (cx - r.left) / _state.dispScale, y: (cy - r.top) / _state.dispScale };
+  return { x: (cx - r.left) / _crop.dispScale, y: (cy - r.top) / _crop.dispScale };
 }
 
 function _drawCanvasCrop() {
-  const canvas = document.getElementById(_state.canvasId);
-  if (!canvas || !_state.img) return;
+  const canvas = document.getElementById(_crop.canvasId);
+  if (!canvas || !_crop.img) return;
   const ctx = canvas.getContext('2d');
   const { img, natW, natH, cropX, cropY, cropW, cropH } = _state;
 
@@ -260,26 +261,26 @@ function _bindCanvasCropEvents(canvas) {
     const { x, y } = _toNative(canvas, cx, cy);
     const h = _hitHandle(x, y);
     if (h) {
-      _state.isResizing = true;
-      _state.handle     = h.id;
+      _crop.isResizing = true;
+      _crop.handle     = h.id;
     } else {
       const { cropX, cropY, cropW, cropH } = _state;
       if (x >= cropX && x <= cropX + cropW && y >= cropY && y <= cropY + cropH) {
-        _state.isDragging = true;
-        _state.startX = x - cropX;
-        _state.startY = y - cropY;
+        _crop.isDragging = true;
+        _crop.startX = x - cropX;
+        _crop.startY = y - cropY;
       }
     }
   };
 
   const onMove = (cx, cy) => {
-    if (!_state.isDragging && !_state.isResizing) return;
+    if (!_crop.isDragging && !_crop.isResizing) return;
     const { x, y } = _toNative(canvas, cx, cy);
     const { natW: W, natH: H } = _state;
 
-    if (_state.isDragging) {
-      _state.cropX = Math.round(_clamp(x - _state.startX, 0, W - _state.cropW));
-      _state.cropY = Math.round(_clamp(y - _state.startY, 0, H - _state.cropH));
+    if (_crop.isDragging) {
+      _crop.cropX = Math.round(_clamp(x - _crop.startX, 0, W - _crop.cropW));
+      _crop.cropY = Math.round(_clamp(y - _crop.startY, 0, H - _crop.cropH));
       _drawCanvasCrop();
       return;
     }
@@ -296,17 +297,17 @@ function _bindCanvasCropEvents(canvas) {
     else if (handle === 's')  { cropH = _clamp(y - a.y,  MIN, H - a.y); }
     else if (handle === 'n')  { cropH = _clamp(a.y2 - y, MIN, a.y2);     cropY = a.y2 - cropH; }
 
-    _state.cropX = Math.round(_clamp(cropX, 0, W - MIN));
-    _state.cropY = Math.round(_clamp(cropY, 0, H - MIN));
-    _state.cropW = Math.round(_clamp(cropW, MIN, W - _state.cropX));
-    _state.cropH = Math.round(_clamp(cropH, MIN, H - _state.cropY));
+    _crop.cropX = Math.round(_clamp(cropX, 0, W - MIN));
+    _crop.cropY = Math.round(_clamp(cropY, 0, H - MIN));
+    _crop.cropW = Math.round(_clamp(cropW, MIN, W - _crop.cropX));
+    _crop.cropH = Math.round(_clamp(cropH, MIN, H - _crop.cropY));
     _drawCanvasCrop();
   };
 
   const onEnd = () => {
-    _state.isDragging = false;
-    _state.isResizing = false;
-    _state.handle     = null;
+    _crop.isDragging = false;
+    _crop.isResizing = false;
+    _crop.handle     = null;
   };
 
   canvas.addEventListener('mousedown',  e => { e.preventDefault(); onStart(e.clientX, e.clientY); });
@@ -344,7 +345,7 @@ export function confirmCanvasCrop(canvasId, okElId = null, targetBytes = 700_000
     if (b64.length <= targetBytes) break;
   }
 
-  _state.base64 = b64;
+  _crop.base64 = b64;
 
   if (statusEl) {
     statusEl.textContent = `✓ Image prête (${Math.round(b64.length / 1024)} KB)`;
@@ -354,7 +355,7 @@ export function confirmCanvasCrop(canvasId, okElId = null, targetBytes = 700_000
   const wrap = document.getElementById(canvasId)?.parentElement;
   if (wrap) wrap.style.display = 'none';
 
-  if (_state._onCropReady) _state._onCropReady(b64);
+  if (_crop._onCropReady) _crop._onCropReady(b64);
   return b64;
 }
 
@@ -362,14 +363,14 @@ export function confirmCanvasCrop(canvasId, okElId = null, targetBytes = 700_000
  * Retourne le base64 du dernier crop confirmé (ou null si aucun).
  */
 export function getCroppedBase64() {
-  return _state.base64 || null;
+  return _crop.base64 || null;
 }
 
 /**
  * Réinitialise l'état du cropper.
  */
 export function resetCrop() {
-  Object.assign(_state, {
+  Object.assign(_crop, {
     img: null, cropX: 0, cropY: 0, cropW: 0, cropH: 0,
     startX: 0, startY: 0, isDragging: false, isResizing: false, handle: null,
     natW: 0, natH: 0, dispScale: 1, base64: null, canvasId: null,
