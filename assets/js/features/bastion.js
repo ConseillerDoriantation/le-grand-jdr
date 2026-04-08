@@ -723,11 +723,20 @@ async function ajouterDepuisInventaire() {
   const invBast = current.inventaire || [];
   if (invBast.length >= limite) { showNotif(`Inventaire plein (${limite} objets max).`,'error'); return; }
 
-  // Construire la liste des objets non-équipés avec leur index original
-  const equips = new Set(Object.values(chars[0].equipement||{}).filter(Boolean).map(e=>e.id||e.nom));
-  const invItems = (chars[0].inventaire||[])
-    .map((i, idx) => ({ ...i, _origIndex: idx }))
-    .filter(i => !equips.has(i.id) && !equips.has(i.nom));
+  // Toujours lire depuis Firestore pour être sûr d'avoir l'inventaire à jour
+  const char = chars[0];
+  const charData = await getDocData('characters', char.id);
+  const invFrais = Array.isArray(charData?.inventaire) ? charData.inventaire : (char.inventaire || []);
+  // Mettre à jour la mémoire
+  char.inventaire = invFrais;
+
+  const equips = new Set(Object.values(char.equipement||{}).filter(Boolean).map(e=>e.id||e.nom));
+  // Stocker les items disponibles dans window pour y accéder à la confirmation
+  window._depotCharId = char.id;
+  window._depotInvFrais = invFrais; // référence à l'inventaire Firestore
+  window._depotItems = invFrais
+    .map((item, idx) => ({ item, idx }))
+    .filter(({ item }) => !equips.has(item.id) && !equips.has(item.nom));
 
   openModal('📤 Déposer depuis mon inventaire', `
     <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:.75rem">Sélectionne les objets à déposer au Bastion.</p>
@@ -737,23 +746,18 @@ async function ajouterDepuisInventaire() {
         ${chars.map(c=>`<option value="${c.id}">${c.nom||'?'}</option>`).join('')}
       </select></div>`:''}
     <div id="dep-inv-list" style="display:flex;flex-direction:column;gap:.35rem;max-height:50vh;overflow-y:auto">
-      ${_renderDepotList(invItems)}
+      ${_renderDepotList(window._depotItems)}
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:.75rem" onclick="confirmerDepotDepuisInventaire()">Déposer les objets cochés</button>
   `);
 }
 
-function _renderDepotList(items) {
-  if (!items.length) return `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun objet disponible.</div>`;
-  // On passe l'index original dans l'inventaire (avant filtrage équipement)
-  // pour pouvoir retirer par position et non par id (qui peut être absent)
-  return items.map((item)=>`
+function _renderDepotList(entries) {
+  if (!entries.length) return `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun objet disponible.</div>`;
+  return entries.map(({ item, idx }) => `
     <label style="display:flex;align-items:center;gap:.65rem;padding:.4rem .5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;cursor:pointer">
       <input type="checkbox"
-        data-item-index="${item._origIndex}"
-        data-item-nom="${(item.nom||'?').replace(/"/g,'')}"
-        data-item-qte="${item.quantite||1}"
-        data-item-desc="${(item.description||'').replace(/"/g,'')}"
+        data-inv-idx="${idx}"
         style="width:15px;height:15px;accent-color:var(--gold)">
       <span style="font-size:.83rem;color:var(--text)">${item.nom||'?'}</span>
       ${item.quantite>1?`<span style="font-size:.7rem;color:var(--gold)">×${item.quantite}</span>`:''}
@@ -761,32 +765,37 @@ function _renderDepotList(items) {
     </label>`).join('');
 }
 
-window._bastionRefreshDepot = () => {
+window._bastionRefreshDepot = async () => {
   const selId = document.getElementById('dep-char-sel')?.value;
   const char  = (STATE.characters||[]).find(c=>c.id===selId);
   if (!char) return;
-  const equips  = new Set(Object.values(char.equipement||{}).filter(Boolean).map(e=>e.id||e.nom));
-  const items   = (char.inventaire||[])
-    .map((i, idx) => ({ ...i, _origIndex: idx }))
-    .filter(i=>!equips.has(i.id)&&!equips.has(i.nom));
-  const listEl  = document.getElementById('dep-inv-list');
-  if (listEl) listEl.innerHTML = _renderDepotList(items);
+  // Relire depuis Firestore à chaque changement de perso
+  const charData = await getDocData('characters', char.id);
+  const invFrais = Array.isArray(charData?.inventaire) ? charData.inventaire : (char.inventaire || []);
+  char.inventaire = invFrais;
+  const equips = new Set(Object.values(char.equipement||{}).filter(Boolean).map(e=>e.id||e.nom));
+  window._depotCharId = char.id;
+  window._depotInvFrais = invFrais;
+  window._depotItems = invFrais
+    .map((item, idx) => ({ item, idx }))
+    .filter(({ item }) => !equips.has(item.id) && !equips.has(item.nom));
+  const listEl = document.getElementById('dep-inv-list');
+  if (listEl) listEl.innerHTML = _renderDepotList(window._depotItems);
 };
 
 async function confirmerDepotDepuisInventaire() {
   const checked = [...document.querySelectorAll('#dep-inv-list input[type="checkbox"]:checked')];
   if (!checked.length) { showNotif('Aucun objet sélectionné.','error'); return; }
 
-  const selId  = document.getElementById('dep-char-sel')?.value;
-  const uid    = STATE.user?.uid;
-  const chars  = STATE.isAdmin ? (STATE.characters||[]) : (STATE.characters||[]).filter(c=>c.uid===uid);
-  const char   = selId ? chars.find(c=>c.id===selId)||chars[0] : chars[0];
+  // Récupérer les indexes dans l'inventaire Firestore (stockés au moment de l'ouverture du modal)
+  const invFrais = window._depotInvFrais || [];
+  const charId   = window._depotCharId;
+  const uid      = STATE.user?.uid;
+  const chars    = STATE.isAdmin ? (STATE.characters||[]) : (STATE.characters||[]).filter(c=>c.uid===uid);
+  const char     = chars.find(c=>c.id===charId) || chars[0];
   if (!char) return;
 
-  // Relire l'inventaire du perso depuis Firestore pour être sûr d'avoir la version à jour
-  const charData = await getDocData('characters', char.id);
-  const invCharActuel = Array.isArray(charData?.inventaire) ? charData.inventaire : (char.inventaire || []);
-
+  // Vérifier capacité bastion
   const current = (await getDocData('bastion','main')) || getDefaultBastion();
   const limite  = current.invLimite || 20;
   const invBast = [...(current.inventaire||[])];
@@ -796,24 +805,24 @@ async function confirmerDepotDepuisInventaire() {
     showNotif(`Capacité insuffisante (${limite - invBast.length} places restantes).`,'error'); return;
   }
 
-  // Identifier les items à retirer par index (plus fiable que id qui peut être undefined)
+  // Récupérer les vrais indexes dans invFrais depuis data-inv-idx
   const indexesARetirer = new Set(
-    checked.map(cb => parseInt(cb.dataset.itemIndex)).filter(n => !isNaN(n))
+    checked.map(cb => parseInt(cb.dataset.invIdx)).filter(n => !isNaN(n))
   );
 
   const now = new Date().toLocaleDateString('fr-FR');
   let counter = 0;
   for (const cb of checked) {
-    const nom = cb.dataset.itemNom;
-    const qte = parseInt(cb.dataset.itemQte)||1;
-    const desc= cb.dataset.itemDesc||'';
+    const idx  = parseInt(cb.dataset.invIdx);
+    const item = invFrais[idx];
+    if (!item) continue;
     const uniqueId = `bi_${Date.now()}_${++counter}_${Math.random().toString(36).slice(2,6)}`;
-    invBast.push({ id: uniqueId, nom, quantite:qte, description:desc, deposePar:char.nom||'?', date:now });
-    invHisto.push({ id:`bih_${Date.now()}_${counter}`, action:'depot', nom, quantite:qte, par:char.nom||'?', date:now });
+    invBast.push({ id: uniqueId, nom: item.nom||'?', quantite: item.quantite||1, description: item.description||'', deposePar: char.nom||'?', date: now });
+    invHisto.push({ id:`bih_${Date.now()}_${counter}`, action:'depot', nom: item.nom||'?', quantite: item.quantite||1, par: char.nom||'?', date: now });
   }
 
-  // Retirer de l'inventaire du perso par index
-  const newCharInv = invCharActuel.filter((_, idx) => !indexesARetirer.has(idx));
+  // Retirer exactement les items aux bons indexes depuis invFrais
+  const newCharInv = invFrais.filter((_, idx) => !indexesARetirer.has(idx));
   await updateInCol('characters', char.id, { inventaire: newCharInv });
   char.inventaire = newCharInv;
 
