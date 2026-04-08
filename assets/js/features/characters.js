@@ -3698,8 +3698,8 @@ function editEquipSlot(slot) {
       const armureRule = SLOT_ARMURE[slot];
       if (armureRule !== undefined) {
         if (armureRule === null) {
-          if (tpl === 'bijou' || item.slotBijou) return item.slotBijou === slot;
-          return tpl === 'libre' || tpl === 'classique' || (!tpl && !item.format && !item.slotArmure && !item.slotBijou);
+          // Bijoux : uniquement les items explicitement taggés pour ce slot exact
+          return item.slotBijou === slot;
         }
         if (tpl === 'armure' || item.slotArmure) {
           // Item structuré : vérifier slotArmure
