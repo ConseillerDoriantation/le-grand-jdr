@@ -1611,15 +1611,19 @@ function _buildSortResume(s, c) {
 
   // Dégâts (si offensif)
   if (types.includes('offensif')) {
-    const equip  = c?.equipement || {};
-    const mainP  = equip['Main principale'];
+    const equip   = c?.equipement || {};
+    const mainP   = equip['Main principale'];
     const statKey = mainP?.statAttaque || mainP?.toucherStat || 'force';
     const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
-    const mod     = Math.floor((Math.min(22, statVal) - 10) / 2);
-    const modStr  = mod >= 0 ? `+${mod}` : `${mod}`;
-    const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
-    const deg = _calcSortDegats(s, c);
-    lines.push({ icon:'⚔️', label:`${deg} ${modStr} ${statLbl}`, detail:'Dégâts' });
+    const modAtk  = Math.floor((Math.min(22, statVal) - 10) / 2);
+    const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
+    const maitrise = _getMaitriseBonus(c, mainP || {});
+    const deg      = _calcSortDegats(s, c);
+    // Label détaillé : dés + stat + maîtrise si présente
+    const modAtkStr = modAtk >= 0 ? `+${modAtk}` : `${modAtk}`;
+    const maitriseStr = maitrise !== 0 ? ` + Maî(${maitrise > 0 ? '+'+maitrise : maitrise})` : '';
+    const detail = `Dégâts · ${statLbl}(${modAtkStr})${maitriseStr}`;
+    lines.push({ icon:'⚔️', label:deg, detail });
   }
 
   // Protection : Soin ou CA selon protectionMode
@@ -1628,7 +1632,11 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
+      const mainPsoin  = (c?.equipement||{})['Main principale'];
+      const maitrSoin  = _getMaitriseBonus(c, mainPsoin || {});
+      const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
+      const chainStr   = nbProt > 1 ? ` +${(nbProt-1)*2}` : '';
+      lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · +${nbProt}d4 Prot${chainStr}${maitrSoinStr}` });
     } else {
       lines.push({ icon:'🛡️', label:_getSortCA(s), detail:'' });
     }
@@ -1810,13 +1818,25 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
 
   // Ligne stats : tous les effets clés sur une ligne
   const statsChips = [];
+  const maitriseSort = _getMaitriseBonus(c, mainP || {});
   if (types.includes('offensif')) {
-    statsChips.push({ icon:'⚔️', val:`${_calcSortDegats(s, c)} ${modStr} ${statLbl}`, color:'#ff6b6b' });
+    const degBase = _calcSortDegats(s, c);
+    // Chip dés
+    statsChips.push({ icon:'⚔️', val:degBase, color:'#ff6b6b' });
+    // Chip stat attaque
+    statsChips.push({ icon:'', val:`${modStr} ${statLbl}`, color:'#e8b84b' });
+    // Chip maîtrise si non nul
+    if (maitriseSort !== 0) {
+      statsChips.push({ icon:'🎯', val:`Maî ${maitriseSort > 0 ? '+'+maitriseSort : maitriseSort}`, color:'#b47fff' });
+    }
   }
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
       statsChips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e' });
+      if (maitriseSort !== 0) {
+        statsChips.push({ icon:'', val:`Maî ${maitriseSort > 0 ? '+'+maitriseSort : maitriseSort}`, color:'#22c38e' });
+      }
     } else {
       statsChips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
@@ -3656,12 +3676,20 @@ function editEquipSlot(slot) {
     `
     : `
     <!-- ── Armure ── -->
-    <div class="form-group"><label>Type d'armure</label>
+    <div class="form-group">
+      <label>Type d'armure
+        ${slot==='Torse' ? `<span style="font-size:.68rem;font-weight:400;color:var(--text-dim)">
+          · Légère +2 CA · Intermédiaire +4 CA · Lourde +6 CA</span>` : ''}
+      </label>
       <select class="input-field sh-modal-select" id="eq-type-armure">
         <option value="">— Aucun —</option>
           ${['Légère','Intermédiaire','Lourde'].map(t=>`<option value="${t}" ${(equipped.typeArmure||'')=== t?'selected':''}>${t}</option>`).join('')}
       </select>
-      </div>
+    </div>
+    <div class="form-group">
+      <label>CA apportée <span style="font-size:.68rem;font-weight:400;color:var(--text-dim)">· uniquement pour armures à bonus spécifique · laisser vide en général</span></label>
+      <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="vide">
+    </div>
     <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
       <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance, Discrétion désavantage...">
     </div>
@@ -3840,7 +3868,7 @@ async function saveEquipSlot(slot) {
     equip[slot] = {
       nom:           document.getElementById('eq-nom')?.value||'',
       typeArmure:    document.getElementById('eq-type-armure')?.value || meta.typeArmure||'',
-      ca: 0, // CA supprimée — calculée depuis typeArmure uniquement
+      ca:            parseInt(document.getElementById('eq-ca')?.value)||0,
       traits:        readTraits(),
       particularite: document.getElementById('eq-particularite')?.value||'',
       fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
