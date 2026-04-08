@@ -71,6 +71,7 @@ export function getDefaultBastion() {
     nom:'Le Bastion', niveau:1, tresor:0, defense:0,
     description:'Votre bastion attend sa première description.',
     ameliorations:{}, ameliorationsCustom:[],
+    ameliorationsFonds:{}, ameliorationsConfig:{},
     evenementCourant:'calme',
     fondateurs:[], historique:[],
     activite:'', pnj:'', salles:[], journal:[],
@@ -1070,7 +1071,22 @@ async function confirmerDepotOrBastion() { window._confirmerOrBastion('deposer',
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function resetBastion() {
-  if (!confirm('⚠️ Remettre le Bastion à zéro ?\n\nToutes les données seront effacées : historique, inventaire, améliorations, missions, journal, fondateurs.\n\nCette action est irréversible.')) return;
+  const current = (await getDocData('bastion','main')) || getDefaultBastion();
+  const fonds   = current.ameliorationsFonds || {};
+  const tresor  = current.tresor || 0;
+  const totalInvesti = Object.values(fonds).reduce((s,v) => s + (parseInt(v)||0), 0) + tresor;
+
+  const msg = [
+    '⚠️ Remettre le Bastion à zéro ?',
+    '',
+    'Seront effacés : historique, inventaire, améliorations, missions, journal, fondateurs.',
+    totalInvesti > 0 ? `L'or de la cagnotte (${tresor} or) sera perdu.` : '',
+    Object.keys(fonds).length > 0 ? `Les fonds investis dans les améliorations (${totalInvesti} or au total) seront perdus.` : '',
+    '',
+    'Cette action est irréversible.',
+  ].filter(Boolean).join('\n');
+
+  if (!confirm(msg)) return;
   await saveDoc('bastion', 'main', getDefaultBastion());
   closeModalDirect();
   showNotif('Bastion remis à zéro.', 'success');
