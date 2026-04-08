@@ -868,7 +868,7 @@ async function recupererObjetBastion(itemId) {
     await _setCharOr(char, _getCharOr(char) + item.quantite);
   } else {
     const invChar = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
-    const qteRecupere = item.quantite || 1;
+    const qteRecupere = parseInt(item.quantite || item.qte || 1) || 1;
     // Chercher un item stackable identique (même itemId ou même nom+template si pas d'itemId)
     const canStack = item.itemId || (item.nom && item.template);
     const existing = canStack ? invChar.find(i =>
@@ -876,9 +876,11 @@ async function recupererObjetBastion(itemId) {
       (!item.itemId && i.nom === item.nom && i.template === item.template && i.template !== 'arme' && i.template !== 'armure' && i.template !== 'bijou')
     ) : null;
     if (existing) {
-      // Stacker sur l'item existant
-      existing.quantite = (existing.quantite || existing.qte || 1) + qteRecupere;
-      existing.qte = existing.quantite;
+      // Stacker — forcer parseInt pour éviter la concaténation de strings
+      const baseQte = parseInt(existing.quantite || existing.qte || 1) || 1;
+      const newQte  = baseQte + qteRecupere;
+      existing.quantite = newQte;
+      existing.qte      = newQte;
     } else {
       // Restituer l'item complet tel qu'il était (sans les champs bastion)
       const { deposePar, date, ...itemOriginal } = item;
