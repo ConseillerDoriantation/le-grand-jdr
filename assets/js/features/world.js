@@ -196,7 +196,7 @@ function _renderSection(s) {
     <div style="padding:1.2rem 1.6rem 1.6rem">
       ${s.contenu
         ? `<div style="font-size:.88rem;color:var(--text-muted);line-height:1.85;
-            white-space:pre-wrap">${_escapeHtml(s.contenu)}</div>`
+            white-space:pre-wrap">${_esc(s.contenu)}</div>`
         : `<div style="color:var(--text-dim);font-style:italic;font-size:.85rem">
             Aucun contenu. ${STATE.isAdmin ? '<span style="color:var(--gold)">Cliquez sur Modifier pour ajouter du texte.</span>' : ''}</div>`}
     </div>
@@ -531,7 +531,7 @@ window._wiConfirmCrop = () => {
 };
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
-// _esc, _escapeHtml → importés depuis shared/html.js
+// _esc → importé depuis shared/html.js (_escapeHtml supprimé)
 
 // ── Override PAGES.world ──────────────────────────────────────────────────────
 PAGES.world = renderWorld;
