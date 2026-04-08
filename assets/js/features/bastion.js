@@ -626,7 +626,17 @@ async function supprimerHistorique(entryId) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function ouvrirInventaireBastion() {
-  const current  = (await getDocData('bastion','main')) || getDefaultBastion();
+  let current  = (await getDocData('bastion','main')) || getDefaultBastion();
+  // Migration : si des items 'or' traînent dans l'inventaire, les fusionner dans tresor
+  const orItems = (current.inventaire||[]).filter(i=>i.type==='or');
+  if (orItems.length > 0) {
+    const orTotal = orItems.reduce((s,i)=>(s+(parseInt(i.quantite)||0)),0);
+    current = { ...current,
+      tresor: (current.tresor||0) + orTotal,
+      inventaire: (current.inventaire||[]).filter(i=>i.type!=='or')
+    };
+    await saveDoc('bastion','main', { tresor: current.tresor, inventaire: current.inventaire });
+  }
   const inv      = current.inventaire || [];
   const invHisto = current.invHistorique || [];
   const limite   = current.invLimite || 20;
@@ -659,32 +669,77 @@ async function ouvrirInventaireBastion() {
     </div>
 
     <!-- Panneau Stock -->
-    <div id="inv-panel-stock" style="display:flex;flex-direction:column;gap:.4rem">
-      <div style="display:flex;justify-content:flex-end;gap:.4rem;margin-bottom:.35rem">
-        ${hasChar||isAdmin ? `<button class="btn btn-gold btn-sm" onclick="ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>` : ''}
-        ${isAdmin ? `<button class="btn btn-outline btn-sm" onclick="deposerOrBastion()">💰 Or</button>` : (hasChar ? `<button class="btn btn-outline btn-sm" onclick="deposerOrBastion()">💰 Déposer de l'or</button>` : '')}
+    <div id="inv-panel-stock" style="display:flex;flex-direction:column;gap:.5rem">
+
+      <!-- ── Cagnotte Or commune ── -->
+      <div style="background:linear-gradient(135deg,rgba(232,184,75,.08),rgba(232,184,75,.03));
+        border:1px solid rgba(232,184,75,.25);border-radius:12px;padding:.75rem 1rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
+          <div style="display:flex;align-items:center;gap:.6rem">
+            <span style="font-size:1.4rem">💰</span>
+            <div>
+              <div style="font-size:.68rem;font-weight:700;color:rgba(232,184,75,.7);
+                text-transform:uppercase;letter-spacing:1px">Cagnotte du Bastion</div>
+              <div style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:900;
+                color:var(--gold);line-height:1">${current.tresor||0}
+                <span style="font-size:.8rem;font-weight:400"> or</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:.4rem;flex-shrink:0">
+            ${hasChar ? `
+            <button onclick="window._bastionOrAction('piocher')"
+              style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
+                background:rgba(34,195,142,.1);border:1px solid rgba(34,195,142,.3);
+                color:#22c38e;font-weight:600;transition:all .12s"
+              onmouseover="this.style.background='rgba(34,195,142,.2)'"
+              onmouseout="this.style.background='rgba(34,195,142,.1)'">
+              ↑ Piocher
+            </button>
+            <button onclick="window._bastionOrAction('deposer')"
+              style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
+                background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.3);
+                color:var(--gold);font-weight:600;transition:all .12s"
+              onmouseover="this.style.background='rgba(232,184,75,.2)'"
+              onmouseout="this.style.background='rgba(232,184,75,.1)'">
+              ↓ Déposer
+            </button>` : ''}
+            ${isAdmin && !hasChar ? `
+            <button onclick="window._bastionOrAction('deposer')"
+              style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
+                background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.3);
+                color:var(--gold);font-weight:600">
+              ✏️ Ajuster
+            </button>` : ''}
+          </div>
+        </div>
       </div>
-      <div style="max-height:45vh;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem">
-        ${inv.length===0
-          ? `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic">Inventaire vide.</div>`
-          : inv.map(item => {
-              const isOr = item.type === 'or';
-              return `<div style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
-                background:var(--bg-elevated);border:1px solid ${isOr?'rgba(232,184,75,.2)':'var(--border)'};border-radius:10px">
-                <span style="font-size:1.1rem">${isOr?'💰':'📦'}</span>
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:.85rem;font-weight:600;color:var(--text)">${item.nom||'?'}
-                    ${item.quantite>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}
-                  </div>
-                  ${item.description?`<div style="font-size:.72rem;color:var(--text-dim)">${item.description}</div>`:''}
-                  <div style="font-size:.64rem;color:var(--text-dim)">Par ${item.deposePar||'?'} · ${item.date||''}</div>
+
+      <!-- ── Bouton dépôt inventaire ── -->
+      ${hasChar||isAdmin ? `<div style="display:flex;justify-content:flex-end">
+        <button class="btn btn-gold btn-sm" onclick="ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>
+      </div>` : ''}
+
+      <!-- ── Liste objets (sans les items or) ── -->
+      <div style="max-height:40vh;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem">
+        ${inv.filter(i=>i.type!=='or').length===0
+          ? `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun objet en stock.</div>`
+          : inv.filter(i=>i.type!=='or').map(item => `
+            <div style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
+              background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
+              <span style="font-size:1.1rem">📦</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:.85rem;font-weight:600;color:var(--text)">${item.nom||'?'}
+                  ${(item.quantite||0)>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}
                 </div>
-                <div style="display:flex;gap:.25rem;flex-shrink:0">
-                  ${hasChar?`<button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="recupererObjetBastion('${item.id}')">↩ Récup.</button>`:''}
-                  ${isAdmin?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerObjetBastion('${item.id}')">🗑️</button>`:''}
-                </div>
-              </div>`;
-            }).join('')}
+                ${item.description?`<div style="font-size:.72rem;color:var(--text-dim)">${item.description}</div>`:''}
+                <div style="font-size:.64rem;color:var(--text-dim)">Par ${item.deposePar||'?'} · ${item.date||''}</div>
+              </div>
+              <div style="display:flex;gap:.25rem;flex-shrink:0">
+                ${hasChar?`<button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="recupererObjetBastion('${item.id}')">↩ Récup.</button>`:''}
+                ${isAdmin?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerObjetBastion('${item.id}')">🗑️</button>`:''}
+              </div>
+            </div>`).join('')}
       </div>
     </div>
 
@@ -905,58 +960,115 @@ async function supprimerObjetBastion(itemId) {
 }
 
 // Déposer de l'or dans l'inventaire
-async function deposerOrBastion() {
+// Action or depuis la cagnotte (déposer ou piocher)
+window._bastionOrAction = async (action) => {
   const uid     = STATE.user?.uid;
   const chars   = (STATE.characters||[]).filter(c=>c.uid===uid);
-  const hasChar = chars.length>0;
+  const hasChar = chars.length > 0;
   const char    = hasChar ? chars[0] : null;
-  const orDispo = hasChar ? _getCharOr(char) : null;
-  openModal('💰 Déposer de l\'or au Bastion', `
-    ${hasChar?`
-    <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:.7rem 1rem;margin-bottom:.75rem;display:flex;justify-content:space-between">
-      <span style="color:var(--text-muted);font-size:.83rem">Or de ${char.nom||'?'}</span>
-      <span style="font-family:'Cinzel',serif;color:var(--gold)">${orDispo} or</span>
-    </div>`:''}
-    <div class="form-group"><label>Montant</label>
-      <input type="number" class="input-field" id="or-bastion-montant" min="1" ${hasChar?`max="${orDispo}"`:''}  placeholder="0"></div>
-    <div class="form-group"><label>Déposé par</label>
-      <input class="input-field" id="or-bastion-par" value="${char?char.nom||'?':STATE.profile?.pseudo||'MJ'}"
-        ${hasChar?'readonly':''}></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="confirmerDepotOrBastion()">Déposer</button>
+  const orChar  = char ? _getCharOr(char) : 0;
+  const current = (await getDocData('bastion','main')) || getDefaultBastion();
+  const tresor  = current.tresor || 0;
+
+  const isDeposer = action === 'deposer';
+  const maxVal    = isDeposer ? orChar : tresor;
+  const titre     = isDeposer ? '↓ Déposer dans la cagnotte' : '↑ Piocher dans la cagnotte';
+  const couleur   = isDeposer ? 'var(--gold)' : '#22c38e';
+
+  openModal(titre, `
+    <!-- Ligne : or perso ↔ cagnotte -->
+    <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:.75rem;
+      padding:.85rem 1rem;background:var(--bg-elevated);border-radius:12px;margin-bottom:.85rem">
+      <div style="text-align:center">
+        <div style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;margin-bottom:.2rem">
+          ${char ? char.nom||'?' : 'MJ'}
+        </div>
+        <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:800;color:var(--gold)">
+          ${char ? orChar : '∞'} <span style="font-size:.7rem;font-weight:400">or</span>
+        </div>
+      </div>
+      <div style="font-size:1.4rem;opacity:.4">${isDeposer ? '→' : '←'}</div>
+      <div style="text-align:center">
+        <div style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;margin-bottom:.2rem">Cagnotte</div>
+        <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:800;color:var(--gold)">
+          ${tresor} <span style="font-size:.7rem;font-weight:400">or</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Montant avec curseur rapide -->
+    <div class="form-group">
+      <label style="color:${couleur}">Montant</label>
+      <div style="display:flex;align-items:center;gap:.4rem">
+        <button type="button" onclick="const i=document.getElementById('or-montant');i.value=Math.max(1,parseInt(i.value||1)-10)"
+          style="width:32px;height:36px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;color:var(--text)">−10</button>
+        <button type="button" onclick="const i=document.getElementById('or-montant');i.value=Math.max(1,parseInt(i.value||1)-1)"
+          style="width:28px;height:36px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;color:var(--text)">−</button>
+        <input type="number" id="or-montant" value="${Math.min(10,maxVal)}" min="1" max="${maxVal}"
+          class="input-field" style="text-align:center;flex:1;font-size:1.1rem;font-weight:700;color:${couleur}">
+        <button type="button" onclick="const i=document.getElementById('or-montant');i.value=Math.min(${maxVal},parseInt(i.value||1)+1)"
+          style="width:28px;height:36px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;color:var(--text)">+</button>
+        <button type="button" onclick="const i=document.getElementById('or-montant');i.value=Math.min(${maxVal},parseInt(i.value||1)+10)"
+          style="width:32px;height:36px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;color:var(--text)">+10</button>
+      </div>
+      ${maxVal > 0 ? `<div style="display:flex;gap:.3rem;margin-top:.4rem;flex-wrap:wrap">
+        ${[25,50,100].filter(v=>v<=maxVal).map(v=>`
+          <button type="button" onclick="document.getElementById('or-montant').value=${v}"
+            style="font-size:.7rem;padding:2px 8px;border-radius:6px;border:1px solid var(--border);
+              background:var(--bg-elevated);cursor:pointer;color:var(--text-muted)">${v}</button>`).join('')}
+        <button type="button" onclick="document.getElementById('or-montant').value=${maxVal}"
+          style="font-size:.7rem;padding:2px 8px;border-radius:6px;border:1px solid ${couleur}33;
+            background:${couleur}10;cursor:pointer;color:${couleur}">Tout (${maxVal})</button>
+      </div>` : `<div style="font-size:.75rem;color:#ff6b6b;margin-top:.3rem">
+        ${isDeposer ? 'Aucun or disponible sur le personnage.' : 'La cagnotte est vide.'}
+      </div>`}
+    </div>
+
+    <button class="btn btn-gold" style="width:100%;margin-top:.25rem;background:${couleur}22;border-color:${couleur}55;color:${couleur}"
+      onclick="window._confirmerOrBastion('${action}','${char?.id||''}')">
+      ${isDeposer ? '↓ Déposer' : '↑ Piocher'}
+    </button>
   `);
-}
+};
 
-async function confirmerDepotOrBastion() {
-  const montant = parseInt(document.getElementById('or-bastion-montant')?.value)||0;
-  const par     = document.getElementById('or-bastion-par')?.value?.trim()||'?';
-  if (montant < 1) { showNotif('Montant invalide.','error'); return; }
+window._confirmerOrBastion = async (action, charId) => {
+  const montant = parseInt(document.getElementById('or-montant')?.value) || 0;
+  if (montant < 1) { showNotif('Montant invalide.', 'error'); return; }
 
+  const isDeposer = action === 'deposer';
   const uid   = STATE.user?.uid;
   const chars = (STATE.characters||[]).filter(c=>c.uid===uid);
-  const char  = chars[0]||null;
-  if (char && _getCharOr(char) < montant) { showNotif('Fonds insuffisants.','error'); return; }
-  if (char) await _setCharOr(char, _getCharOr(char) - montant);
+  const char  = charId ? chars.find(c=>c.id===charId)||chars[0] : chars[0];
+  const now   = new Date().toLocaleDateString('fr-FR');
 
-  const current  = (await getDocData('bastion','main')) || getDefaultBastion();
-  const limite   = current.invLimite || 20;
-  const inv      = current.inventaire || [];
-  // Fusionner avec un éventuel coffre d'or existant ou créer une entrée
-  const existing = inv.find(i=>i.type==='or');
-  let newInv;
-  if (existing) {
-    newInv = inv.map(i=>i.type==='or' ? { ...i, quantite:(i.quantite||0)+montant, deposePar:par, date:new Date().toLocaleDateString('fr-FR') } : i);
+  const current = (await getDocData('bastion','main')) || getDefaultBastion();
+  const tresor  = current.tresor || 0;
+
+  if (isDeposer) {
+    // Vérifier que le perso a assez
+    if (char && _getCharOr(char) < montant) { showNotif('Fonds insuffisants.', 'error'); return; }
+    if (char) await _setCharOr(char, _getCharOr(char) - montant);
+    const invHisto = [...(current.invHistorique||[])];
+    invHisto.push({ id:`bih_${Date.now()}`, action:'depot', nom:'Or', quantite:montant, par:char?.nom||STATE.profile?.pseudo||'MJ', date:now });
+    await saveDoc('bastion','main', { ...current, tresor: tresor + montant, invHistorique: invHisto });
+    closeModalDirect();
+    showNotif(`${montant} or déposé dans la cagnotte.`, 'success');
   } else {
-    if (inv.length >= limite) { showNotif(`Inventaire plein.`,'error'); return; }
-    newInv = [...inv, { id:`or_${Date.now()}`, type:'or', nom:`Or (${montant})`, quantite:montant, description:'', deposePar:par, date:new Date().toLocaleDateString('fr-FR') }];
+    // Piocher
+    if (tresor < montant) { showNotif('Cagnotte insuffisante.', 'error'); return; }
+    if (char) await _setCharOr(char, _getCharOr(char) + montant);
+    const invHisto = [...(current.invHistorique||[])];
+    invHisto.push({ id:`bih_${Date.now()}`, action:'retrait', nom:'Or', quantite:montant, par:char?.nom||STATE.profile?.pseudo||'MJ', date:now });
+    await saveDoc('bastion','main', { ...current, tresor: tresor - montant, invHistorique: invHisto });
+    closeModalDirect();
+    showNotif(`${montant} or pioché dans la cagnotte.`, 'success');
   }
-  const invHisto = [...(current.invHistorique||[])];
-  invHisto.push({ id:`bih_${Date.now()}`, action:'depot', nom:`Or`, quantite:montant, par, date:new Date().toLocaleDateString('fr-FR') });
-
-  await saveDoc('bastion','main', { ...current, inventaire:newInv, invHistorique:invHisto });
-  closeModalDirect();
-  showNotif(`${montant} or déposé dans l'inventaire du Bastion.`,'success');
   await ouvrirInventaireBastion();
-}
+};
+
+// Rétrocompat — gardé pour ne pas casser l'ancien flow si appelé ailleurs
+async function deposerOrBastion() { window._bastionOrAction('deposer'); }
+async function confirmerDepotOrBastion() { window._confirmerOrBastion('deposer', ''); }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RESET COMPLET DU BASTION
