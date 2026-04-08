@@ -85,38 +85,28 @@ function _normFondateurs(arr) {
   return (arr||[]).map(f => typeof f==='object'&&f!==null ? f : { charId:null, nom:String(f) });
 }
 function _getCharOr(char) {
-  // Priorité : compte.or direct, sinon char.or, sinon calculer depuis recettes/dépenses
-  if (char?.compte?.or !== undefined && char.compte.or !== null) return parseInt(char.compte.or) || 0;
-  if (char?.or !== undefined && char.or !== null) return parseInt(char.or) || 0;
-  // Calcul depuis le livre de compte (recettes - dépenses)
-  const recettes = (char?.compte?.recettes || []).reduce((s, r) => s + (parseFloat(r?.montant) || 0), 0);
-  const depenses = (char?.compte?.depenses || []).reduce((s, r) => s + (parseFloat(r?.montant) || 0), 0);
-  return Math.max(0, Math.round(recettes - depenses));
+  // Même logique que calcOr dans characters.js
+  const compte = char?.compte || { recettes:[], depenses:[] };
+  const totalR = (compte.recettes||[]).reduce((s,r) => s + (parseFloat(r?.montant)||0), 0);
+  const totalD = (compte.depenses||[]).reduce((s,d) => s + (parseFloat(d?.montant)||0), 0);
+  const fromCompte = Math.round((totalR - totalD) * 100) / 100;
+  if (totalR > 0 || totalD > 0) return Math.max(0, fromCompte);
+  // Fallback : champ or direct (ancien format)
+  return Math.max(0, parseInt(char?.or) || 0);
 }
 async function _setCharOr(char, newOr) {
-  const safe = Math.max(0, Math.round(newOr));
+  const safe  = Math.max(0, Math.round(newOr * 100) / 100);
   const delta = safe - _getCharOr(char);
-  if (char.compte !== undefined) {
-    // Utiliser le système recettes/dépenses si c'est le mode du perso
-    const hasLivre = Array.isArray(char.compte?.recettes) || Array.isArray(char.compte?.depenses);
-    if (hasLivre) {
-      const now = new Date().toLocaleDateString('fr-FR');
-      const compte = { ...(char.compte || {}) };
-      if (delta > 0) {
-        compte.recettes = [...(compte.recettes || []), { date: now, libelle: 'Bastion', montant: delta }];
-      } else if (delta < 0) {
-        compte.depenses = [...(compte.depenses || []), { date: now, libelle: 'Bastion', montant: Math.abs(delta) }];
-      }
-      char.compte = compte;
-      await updateInCol('characters', char.id, { compte });
-    } else {
-      char.compte = { ...(char.compte || {}), or: safe };
-      await updateInCol('characters', char.id, { compte: char.compte });
-    }
+  if (delta === 0) return;
+  const now = new Date().toLocaleDateString('fr-FR');
+  const compte = { recettes:[], depenses:[], ...(char.compte || {}) };
+  if (delta > 0) {
+    compte.recettes = [...compte.recettes, { date: now, libelle: 'Or récupéré du Bastion', montant: delta }];
   } else {
-    char.or = safe;
-    await updateInCol('characters', char.id, { or: safe });
+    compte.depenses = [...compte.depenses, { date: now, libelle: 'Or déposé au Bastion', montant: Math.abs(delta) }];
   }
+  char.compte = compte;
+  await updateInCol('characters', char.id, { compte });
 }
 
 // Fusionner les améliorations statiques avec les données sauvegardées
@@ -876,15 +866,15 @@ async function recupererObjetBastion(itemId) {
       (!item.itemId && i.nom === item.nom && i.template === item.template && i.template !== 'arme' && i.template !== 'armure' && i.template !== 'bijou')
     ) : null;
     if (existing) {
-      // Stacker — forcer parseInt pour éviter la concaténation de strings
+      // Stacker — incrémenter uniquement la quantité, sans toucher aux autres champs
       const baseQte = parseInt(existing.quantite || existing.qte || 1) || 1;
       const newQte  = baseQte + qteRecupere;
       existing.quantite = newQte;
-      existing.qte      = newQte;
+      existing.qte      = String(newQte); // conserver le type string comme les items boutique
     } else {
-      // Restituer l'item complet tel qu'il était (sans les champs bastion)
-      const { deposePar, date, ...itemOriginal } = item;
-      invChar.push({ ...itemOriginal, quantite: qteRecupere, qte: qteRecupere });
+      // Restituer l'item complet tel qu'il était (retirer uniquement les champs propres au bastion)
+      const { id: _id, deposePar: _dep, date: _date, ...itemOriginal } = item;
+      invChar.push({ ...itemOriginal, quantite: qteRecupere, qte: String(qteRecupere) });
     }
     await updateInCol('characters', char.id, { inventaire:invChar });
     char.inventaire = invChar;
