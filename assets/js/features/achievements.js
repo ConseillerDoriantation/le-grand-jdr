@@ -8,6 +8,8 @@
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import { _esc } from '../shared/html.js';
+import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
@@ -18,14 +20,7 @@ const CATS = [
   { id: 'histoire', label: '📖 Histoire', color: '#22c38e', glow: 'rgba(34,195,142,0.14)'  },
 ];
 
-// État du cropper actif
-let _crop = {
-  img: null, cropX: 0, cropY: 0, cropW: 0, cropH: 0,
-  startX: 0, startY: 0,
-  isDragging: false, isResizing: false, handle: null,
-  natW: 0, natH: 0, dispScale: 1,
-  base64: null,
-};
+// _crop → géré par shared/image-upload.js
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 function openAchievementModal(id = null) {
