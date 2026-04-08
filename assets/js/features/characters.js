@@ -2686,14 +2686,54 @@ function _decodeIndices(b64) {
   try { return JSON.parse(atob(b64)); } catch { return []; }
 }
 
+// Calcule la quantité totale disponible dans un groupe d'indices
+// (tient compte des items avec qte > 1)
+function _calcMaxQte(inv, indices) {
+  return indices.reduce((sum, idx) => {
+    const item = inv[idx];
+    return sum + (parseInt(item?.qte || item?.quantite) || 1);
+  }, 0);
+}
+
+// Consomme qty unités depuis les indices du groupe
+// Décrémente qte sur les items stackés, supprime les items épuisés
+// Retourne le nouveau tableau d'inventaire
+function _consumeFromGroup(inv, indices, qty) {
+  let remaining = qty;
+  const result = [...inv];
+  // Traiter du plus grand index au plus petit pour éviter les décalages
+  const sorted = [...indices].sort((a, b) => b - a);
+  // D'abord les non-stackés (qte=1) pour préserver les stackés intacts si possible
+  const byQte = sorted.sort((a, b) => (parseInt(result[a]?.qte)||1) - (parseInt(result[b]?.qte)||1));
+  const toRemove = [];
+  for (const idx of byQte) {
+    if (remaining <= 0) break;
+    const item = result[idx];
+    const itemQte = parseInt(item?.qte || item?.quantite) || 1;
+    if (itemQte <= remaining) {
+      // Supprimer cet item entièrement
+      toRemove.push(idx);
+      remaining -= itemQte;
+    } else {
+      // Décrémenter la qte
+      result[idx] = { ...item, qte: String(itemQte - remaining), quantite: itemQte - remaining };
+      remaining = 0;
+    }
+  }
+  // Supprimer du plus grand index au plus petit
+  toRemove.sort((a, b) => b - a).forEach(idx => result.splice(idx, 1));
+  return result;
+}
+
+
 // ── Modal vente avec quantité ─────────────────────────────────────────────────
 function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const indices = _decodeIndices(indicesB64);
-  const maxQte  = indices.length;
-  if (maxQte === 0) return;
-
-  // Vérifier si des exemplaires sont équipés
+  if (!indices.length) return;
   const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const inv0 = c?.inventaire || [];
+  const maxQte = _calcMaxQte(inv0, indices);
+  if (maxQte === 0) return;
   const equippedMap = c ? getEquippedInventoryIndexMap(c) : new Map();
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
   const hasEquipped = equippedSlots.length > 0;
@@ -2740,21 +2780,20 @@ async function sellInvItemBulk(charId, indicesB64, prixVente) {
   if (!c) return;
 
   const allIndices = _decodeIndices(indicesB64);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
-  const equippedMap = getEquippedInventoryIndexMap(c);
-  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
-  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
-  const indicesToSell = [...unequippedIndices, ...equippedIndices].slice(0, qty);
+  const invCur = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const maxQteTotal = _calcMaxQte(invCur, allIndices);
+  const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), maxQteTotal);
 
-  const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const item     = inv[indicesToSell[0]];
+  const item = invCur[allIndices[0]];
   if (!item) return;
   const itemNom  = item.nom || 'objet';
   const totalPrix = prixVente * qty;
 
-  // Retirer les items vendus (du plus grand index au plus petit pour ne pas décaler)
-  const sorted = [...indicesToSell].sort((a,b)=>b-a);
-  sorted.forEach(idx => inv.splice(idx, 1));
+  // Détecter les items équipés parmi les indices (pour déséquiper si nécessaire)
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const indicesToSell = allIndices.slice(0, qty); // pour syncEquipment
+  // Consommer qty unités en décrémentant les qte / supprimant les items épuisés
+  const inv = _consumeFromGroup(invCur, allIndices, qty);
 
   // Créditer l'or
   const compte   = c.compte || { recettes:[], depenses:[] };
@@ -2815,7 +2854,8 @@ async function sellInvItem(charId, invIndex) {
 // ══════════════════════════════════════════════
 function openDeleteInvModal(charId, indicesB64, nom) {
   const indices = _decodeIndices(indicesB64);
-  const maxQte  = indices.length;
+  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const maxQte  = _calcMaxQte(c?.inventaire || [], indices);
   openModal(`🗑️ Supprimer — ${nom}`, `
     <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
       ${maxQte} exemplaire${maxQte>1?'s':''} dans l'inventaire
@@ -2842,11 +2882,11 @@ async function deleteInvItemBulk(charId, indicesB64) {
   const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
   const allIndices = _decodeIndices(indicesB64);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
-  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const invCurD = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const maxQteD = _calcMaxQte(invCurD, allIndices);
+  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), maxQteD);
+  const inv = _consumeFromGroup(invCurD, allIndices, qty);
   const removedIndices = allIndices.slice(0, qty);
-  const sorted = [...removedIndices].sort((a,b)=>b-a);
-  sorted.forEach(idx => inv.splice(idx, 1));
   const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
   const payload = { inventaire: inv };
   if (equipSync.changed) {
@@ -2886,7 +2926,7 @@ function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const item    = (c.inventaire||[])[indices[0]];
   if (!item) return;
   const nom     = nomOrUnused || item.nom || 'Objet';
-  const maxQte  = indices.length;
+  const maxQte  = _calcMaxQte(c.inventaire || [], indices);
   const b64     = btoa(JSON.stringify(indices));
 
   const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
@@ -2977,27 +3017,35 @@ async function sendInvItem(fromCharId, indicesB64) {
   if (!toChar) { showNotif('Personnage introuvable.','error'); return; }
 
   const allIndices = _decodeIndices(indicesB64);
-  const maxQte  = allIndices.length;
+  const fromInvCur = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
+  const maxQte  = _calcMaxQte(fromInvCur, allIndices);
   const qtyEl   = document.getElementById('send-qty');
   const qty     = qtyEl ? Math.min(Math.max(1, parseInt(qtyEl.value)||1), maxQte) : 1;
-  const equippedMap = getEquippedInventoryIndexMap(fromChar);
-  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
-  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
-  const toSend  = [...unequippedIndices, ...equippedIndices].slice(0, qty);
 
-  const fromInv = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
-  const firstItem = fromInv[toSend[0]];
+  const firstItem = fromInvCur[allIndices[0]];
   if (!firstItem) return;
 
-  // Objets à transférer
-  const itemsToTransfer = toSend.map(idx => ({...fromInv[idx]}));
+  // Construire les items à transférer (qty unités, en splitant les stackés si besoin)
+  const itemsToTransfer = [];
+  let toTransfer = qty;
+  for (const idx of allIndices) {
+    if (toTransfer <= 0) break;
+    const it = fromInvCur[idx];
+    const itQte = parseInt(it?.qte || it?.quantite) || 1;
+    const take = Math.min(itQte, toTransfer);
+    itemsToTransfer.push({ ...it, qte: String(take), quantite: take });
+    toTransfer -= take;
+  }
 
-  // Retirer de la source (du plus grand au plus petit)
-  [...toSend].sort((a,b)=>b-a).forEach(idx => fromInv.splice(idx, 1));
+  // Retirer de la source avec décrémentation correcte des qte
+  const fromInv = _consumeFromGroup(fromInvCur, allIndices, qty);
 
   // Ajouter à la cible
   const toInv = Array.isArray(toChar.inventaire) ? [...toChar.inventaire] : [];
   itemsToTransfer.forEach(it => toInv.push(it));
+  
+  const equippedMap = getEquippedInventoryIndexMap(fromChar);
+  const toSend = allIndices.slice(0, qty); // pour syncEquipment
 
   const equipSync = syncEquipmentAfterInventoryMutation(fromChar, toSend);
   const fromPayload = { inventaire: fromInv };
