@@ -3,6 +3,8 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/fi
 import { openModal, closeModalDirect } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
+import { _esc, _norm } from '../shared/html.js';
+import { calcOr } from '../shared/char-stats.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
@@ -696,7 +698,7 @@ function openShopItemDetail(itemId) {
   `);
 }
 
-function _esc(s=''){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// _esc → importé depuis shared/html.js
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SÉLECTEUR PERSONNAGE
