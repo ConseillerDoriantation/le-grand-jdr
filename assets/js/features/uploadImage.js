@@ -1,6 +1,17 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// UPLOAD-IMAGE.JS — Re-export de compatibilité
-// Les fonctions previewUploadPng et previewUploadJpeg sont désormais dans
-// shared/image-upload.js. Ce fichier maintient la compatibilité avec l'existant.
+// UPLOAD-IMAGE.JS — Compatibilité window
+// Importe depuis shared/image-upload.js et expose dans window pour les
+// onchange HTML inline (ex: onchange="previewUploadPng(...)")
 // ══════════════════════════════════════════════════════════════════════════════
-export { uploadPng as previewUploadPng, uploadJpeg as previewUploadJpeg } from '../shared/image-upload.js';
+import { uploadPng, uploadJpeg } from '../shared/image-upload.js';
+
+// Wrappers window-friendly (prennent des IDs de champs, pas des File objects)
+window.previewUploadPng = (fileInputId, previewId, hiddenId) => {
+  const file = document.getElementById(fileInputId)?.files?.[0];
+  if (file) uploadPng(file, { previewId, hiddenId });
+};
+
+window.previewUploadJpeg = (fileInputId, previewId, hiddenId) => {
+  const file = document.getElementById(fileInputId)?.files?.[0];
+  if (file) uploadJpeg(file, { previewId, hiddenId });
+};
