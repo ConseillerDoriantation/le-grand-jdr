@@ -12,6 +12,8 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
+import { _esc, _nl2br } from '../shared/html.js';
+import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Config affinité ───────────────────────────────────────────────────────────
 const AFFINITE = [
@@ -1031,9 +1033,7 @@ function filterNpcs(disp, el) {
   _refreshList();
 }
 
-function _esc(str) {
-  return String(str||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+// _esc → importé depuis shared/html.js
 
 // ── Override PAGES.npcs ───────────────────────────────────────────────────────
 PAGES.npcs = renderNpcs;
