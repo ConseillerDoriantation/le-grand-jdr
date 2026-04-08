@@ -23,6 +23,8 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif }             from '../shared/notifications.js';
 import { STATE, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
+import { _esc, _norm }           from '../shared/html.js';
+import { calcOr }                from '../shared/char-stats.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // HELPERS
