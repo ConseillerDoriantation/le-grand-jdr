@@ -9,7 +9,7 @@ import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/fire
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
-import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
+import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
