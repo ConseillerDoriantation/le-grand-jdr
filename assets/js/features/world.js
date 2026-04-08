@@ -8,6 +8,8 @@
 import { getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import { _esc, _nl2br, _norm } from '../shared/html.js';
+import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
@@ -23,12 +25,7 @@ const ICONES = [
 ];
 
 // ── Crop image (même pattern que story.js / bestiary.js) ─────────────────────
-let _crop = {
-  img:null, cropX:0,cropY:0,cropW:0,cropH:0,
-  startX:0,startY:0, isDragging:false,isResizing:false,handle:null,
-  natW:0,natH:0,dispScale:1, base64:null,
-};
-const _clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+// _crop, _clamp → gérés par shared/image-upload.js
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
@@ -534,12 +531,7 @@ window._wiConfirmCrop = () => {
 };
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
-function _escapeHtml(str) {
-  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-function _esc(str) {
-  return String(str||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+// _esc, _escapeHtml → importés depuis shared/html.js
 
 // ── Override PAGES.world ──────────────────────────────────────────────────────
 PAGES.world = renderWorld;
