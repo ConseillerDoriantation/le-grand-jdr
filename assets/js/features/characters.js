@@ -1827,7 +1827,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     statsChips.push({ icon:'', val:`${modStr} ${statLbl}`, color:'#e8b84b' });
     // Chip maîtrise si non nul
     if (maitriseSort !== 0) {
-      statsChips.push({ icon:'🎯', val:`Maî ${maitriseSort > 0 ? '+'+maitriseSort : maitriseSort}`, color:'#b47fff' });
+      statsChips.push({ icon:'✦', val:`Maî ${maitriseSort > 0 ? '+'+maitriseSort : maitriseSort}`, color:'#b47fff' });
     }
   }
   if (nbProt > 0) {
