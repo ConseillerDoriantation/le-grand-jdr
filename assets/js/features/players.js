@@ -35,13 +35,13 @@ const STORE = {
 // _norm → importé depuis shared/html.js
 // _trunc → importé depuis shared/html.js
 
-// _getStat → importé depuis shared/
-// _getMod → importé depuis shared/
-// _pvMax → importé depuis shared/
-// _pmMax → importé depuis shared/
-// _ca → importé depuis shared/char-stats.js (comme calcCA)
-// _gold → importé depuis shared/char-stats.js (comme calcOr)
-// _initials → importé depuis shared/html.js
+// Wrappers courts pour compatibilité avec le code de ce fichier
+const _getStat = (c, k) => Math.min(22, (c?.stats?.[k] || 8) + (c?.statsBonus?.[k] || 0));
+const _getMod  = (c, k) => Math.floor((_getStat(c, k) - 10) / 2);
+const _pvMax   = (c) => calcPVMax(c);
+const _pmMax   = (c) => calcPMMax(c);
+const _ca      = (c) => calcCA(c);
+const _gold    = (c) => calcOr(c);
 
 function _buildRecord(char=null, pres=null) {
   const level  = pres?.niveau   || char?.niveau   || 1;
