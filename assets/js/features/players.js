@@ -37,11 +37,11 @@ const STORE = {
 
 // Wrappers courts pour compatibilité avec le code de ce fichier
 const _getStat = (c, k) => Math.min(22, (c?.stats?.[k] || 8) + (c?.statsBonus?.[k] || 0));
-const _getMod  = (c, k) => Math.floor((_getStat(c, k) - 10) / 2);
-const _pvMax   = (c) => calcPVMax(c);
-const _pmMax   = (c) => calcPMMax(c);
-const _ca      = (c) => calcCA(c);
-const _gold    = (c) => calcOr(c);
+// _getMod → importé depuis shared/char-stats.js (getMod as _getMod)
+// _pvMax → importé depuis shared/char-stats.js (calcPVMax as _pvMax)
+// _pmMax → importé depuis shared/char-stats.js (calcPMMax as _pmMax)
+// _ca → importé depuis shared/char-stats.js (calcCA as _ca)
+// _gold → importé depuis shared/char-stats.js (calcOr as _gold)
 
 function _buildRecord(char=null, pres=null) {
   const level  = pres?.niveau   || char?.niveau   || 1;
