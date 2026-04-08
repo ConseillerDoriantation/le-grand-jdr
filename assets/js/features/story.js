@@ -8,6 +8,8 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveD
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
+import { _esc, _nl2br } from '../shared/html.js';
+import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 import PAGES from './pages.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
@@ -23,16 +25,11 @@ const STATUT_CFG = {
   'En attente': { color:'#666',    border:'rgba(128,128,128,0.25)', icon:'◷' },
 };
 
-// ── État du cropper ───────────────────────────────────────────────────────────
-let _crop = {
-  img:null, cropX:0,cropY:0,cropW:0,cropH:0,
-  startX:0,startY:0, isDragging:false,isResizing:false,handle:null,
-  natW:0,natH:0,dispScale:1, base64:null,
-};
+// _crop → géré par shared/image-upload.js
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function stCfg(item){ return STATUT_CFG[item.statut] || STATUT_CFG['En attente']; }
-const _clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+// _clamp → utilisé dans shared/image-upload.js
 
 let _axeMap = {};
 function axeColor(axe){
