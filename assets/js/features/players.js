@@ -7,6 +7,9 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveD
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
+import { _esc, _nl2br, _norm, _trunc, _toRoman, _initials } from '../shared/html.js';
+import { getMod as _getMod, calcCA as _ca, calcPVMax as _pvMax, calcPMMax as _pmMax, calcOr as _gold, STAT_META } from '../shared/char-stats.js';
+import { imageDropZoneHTML, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Crop image ────────────────────────────────────────────────────────────────
 let _ppCrop = {
@@ -24,40 +27,21 @@ const STORE = {
   characters:    [],
 };
 
-const STAT_META = [
-  { key:'force',        label:'Force',        color:'#ff6b6b' },
-  { key:'dexterite',    label:'Dextérité',    color:'#22c38e' },
-  { key:'intelligence', label:'Intelligence', color:'#4f8cff' },
-  { key:'constitution', label:'Constitution', color:'#f59e0b' },
-  { key:'sagesse',      label:'Sagesse',      color:'#b47fff' },
-  { key:'charisme',     label:'Charisme',     color:'#fd6c9e' },
-];
+// STAT_META → importé depuis shared/char-stats.js
 
 // ── Helpers data ──────────────────────────────────────────────────────────────
-const _esc  = (v='') => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-const _nl2br = (v='') => _esc(v).replace(/\n/g,'<br>');
-const _norm = (v='') => String(v||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-const _trunc = (v='',n=280) => { const s=String(v||'').replace(/\s+/g,' ').trim(); return s.length<=n?s:s.slice(0,n).trimEnd()+'…'; };
+// _esc → importé depuis shared/html.js
+// _nl2br → importé depuis shared/html.js
+// _norm → importé depuis shared/html.js
+// _trunc → importé depuis shared/html.js
 
-function _getStat(c,k){ return Math.min(22,(c?.stats?.[k]||8)+(c?.statsBonus?.[k]||0)); }
-function _getMod(c,k){ return Math.floor((_getStat(c,k)-10)/2); }
-function _pvMax(c){ const m=_getMod(c,'constitution'),n=c?.niveau||1,p=m>0?Math.floor(m*(n-1)):m; return Math.max(1,(c?.pvBase||10)+p); }
-function _pmMax(c){ const m=_getMod(c,'sagesse'),n=c?.niveau||1,p=m>0?Math.floor(m*(n-1)):m; return Math.max(0,(c?.pmBase||10)+p); }
-function _ca(c){
-  const e=c?.equipement||{},t=e['Torse']?.typeArmure||'';
-  let b=8;
-  if(t==='Légère')b=10;
-  else if(t==='Intermédiaire')b=12;
-  else if(t==='Lourde')b=14;
-  const caEquip=Object.values(e).reduce((s,i)=>s+(i?.ca||0),0);
-  // +2 CA si bouclier en main secondaire (même logique que calcCA dans characters.js)
-  const mainS=e['Main secondaire'];
-  const stypeS=(mainS?.sousType||mainS?.nom||'').toLowerCase();
-  const bouclierBonus=(stypeS.includes('bouclier')||stypeS.includes('shield'))?2:0;
-  return b+_getMod(c,'dexterite')+caEquip+bouclierBonus;
-}
-function _gold(c){ const co=c?.compte||{}; return Math.round(((co.recettes||[]).reduce((s,r)=>s+(parseFloat(r?.montant)||0),0)-((co.depenses||[]).reduce((s,r)=>s+(parseFloat(r?.montant)||0),0)))*100)/100; }
-function _initials(n=''){ const p=String(n).trim().split(/\s+/).filter(Boolean); return p.length?p.slice(0,2).map(w=>w[0]?.toUpperCase()||'').join(''):'?'; }
+// _getStat → importé depuis shared/
+// _getMod → importé depuis shared/
+// _pvMax → importé depuis shared/
+// _pmMax → importé depuis shared/
+// _ca → importé depuis shared/char-stats.js (comme calcCA)
+// _gold → importé depuis shared/char-stats.js (comme calcOr)
+// _initials → importé depuis shared/html.js
 
 function _buildRecord(char=null, pres=null) {
   const level  = pres?.niveau   || char?.niveau   || 1;
@@ -443,14 +427,7 @@ window._ppBack = () => {
   if (el) el.innerHTML = _renderSommaire(STORE.items);
 };
 
-// ── Numéros romains ───────────────────────────────────────────────────────────
-function _toRoman(n) {
-  const v=[1000,900,500,400,100,90,50,40,10,9,5,4,1];
-  const s=['M','CM','D','CD','C','XC','L','XL','X','IX','V','IV','I'];
-  let r='';
-  for(let i=0;i<v.length;i++) while(n>=v[i]){r+=s[i];n-=v[i];}
-  return r;
-}
+// _toRoman → importé depuis shared/html.js
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL ADMIN — CRÉATION / ÉDITION (avec upload+crop)
