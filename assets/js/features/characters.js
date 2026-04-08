@@ -3676,7 +3676,7 @@ function editEquipSlot(slot) {
     <div class="form-group"><label>Particularité</label>
       <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: Résistance aux dégâts de feu...">
     </div>
-    `}
+    `):''}
 
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>
