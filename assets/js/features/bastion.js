@@ -836,7 +836,11 @@ async function confirmerDepotDepuisInventaire() {
   // Retirer exactement les items aux bons indexes depuis invFrais
   const newCharInv = invFrais.filter((_, idx) => !indexesARetirer.has(idx));
   await updateInCol('characters', char.id, { inventaire: newCharInv });
+  // Synchroniser la mémoire complètement
   char.inventaire = newCharInv;
+  const stateChar = (STATE.characters||[]).find(c => c.id === char.id);
+  if (stateChar) stateChar.inventaire = newCharInv;
+  if (STATE.activeChar?.id === char.id) STATE.activeChar.inventaire = newCharInv;
 
   await saveDoc('bastion','main', { ...current, inventaire:invBast, invHistorique:invHisto });
   closeModalDirect();
@@ -877,7 +881,11 @@ async function recupererObjetBastion(itemId) {
       invChar.push({ ...itemOriginal, quantite: qteRecupere, qte: String(qteRecupere) });
     }
     await updateInCol('characters', char.id, { inventaire:invChar });
+    // Synchroniser la mémoire complètement : l'objet dans STATE.characters ET STATE.activeChar
     char.inventaire = invChar;
+    const stateChar = (STATE.characters||[]).find(c => c.id === char.id);
+    if (stateChar) stateChar.inventaire = invChar;
+    if (STATE.activeChar?.id === char.id) STATE.activeChar.inventaire = invChar;
   }
 
   const invHisto = [...(current.invHistorique||[])];
