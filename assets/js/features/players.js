@@ -282,24 +282,25 @@ function _renderFiche(item, items) {
   <!-- Carte principale -->
   <div style="background:var(--bg-card);border:1px solid var(--border);
     border-radius:var(--radius-lg);overflow:hidden;
-    display:grid;grid-template-columns:320px 1fr">
+    display:grid;grid-template-columns:320px 1fr;align-items:stretch">
 
     <!-- Colonne gauche : illustration entière -->
-    <div style="position:relative;background:linear-gradient(180deg,${col}12,var(--bg-panel));
-      min-height:500px;overflow:hidden;display:flex;align-items:flex-end">
+    <div style="position:relative;background:linear-gradient(180deg,${col}18,${col}08 40%,#0b1118 100%);
+      overflow:hidden;display:flex;align-items:flex-end">
 
       ${item.imageUrl
-        ? `<!-- Image entière — contain pour ne pas couper le personnage -->
-           <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
-             <img src="${_esc(item.imageUrl)}" style="width:100%;height:100%;
-               object-fit:contain;display:block">
-           </div>
-           <!-- Fondu bas vers la carte -->
-           <div style="position:absolute;bottom:0;left:0;right:0;height:35%;
-             background:linear-gradient(to top,var(--bg-card),transparent)"></div>
-           <!-- Fondu droite subtil -->
+        ? `<!-- Image en background-size:cover — pas de fond blanc, couvre toute la colonne -->
+           <div style="position:absolute;inset:0;
+             background-image:url('${_esc(item.imageUrl)}');
+             background-size:cover;
+             background-position:center top;
+             background-repeat:no-repeat"></div>
+           <!-- Fondu bas -->
+           <div style="position:absolute;bottom:0;left:0;right:0;height:55%;
+             background:linear-gradient(to top,#0b1118 10%,rgba(11,17,24,.7) 60%,transparent 100%)"></div>
+           <!-- Fondu droite -->
            <div style="position:absolute;inset:0;background:linear-gradient(to right,
-             transparent 70%,var(--bg-card) 100%)"></div>`
+             transparent 60%,var(--bg-card) 100%)"></div>`
         : `<div style="position:absolute;inset:0;display:flex;align-items:center;
              justify-content:center;font-family:'Cinzel',serif;font-size:5rem;
              font-weight:900;color:${col}22">${item.initials}</div>`}
