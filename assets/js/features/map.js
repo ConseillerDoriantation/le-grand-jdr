@@ -6,6 +6,8 @@ import { getDocData, saveDoc, loadCollection, deleteFromCol } from '../data/fire
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
+import { _esc } from '../shared/html.js';
+import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Types de lieux ────────────────────────────────────────────────────────────
 export const LIEU_TYPES = [
