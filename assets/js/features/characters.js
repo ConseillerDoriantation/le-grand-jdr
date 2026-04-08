@@ -958,8 +958,12 @@ function inlineEditText(charId, field, el) {
   input.className = 'cs-inline-input';
   input.style.cssText = 'width:100%;font-size:inherit;font-weight:inherit;font-family:inherit;color:inherit;';
 
+  // Limite de 25 caractères pour le nom du personnage
+  if (field === 'nom') input.maxLength = 25;
+
   const save = async () => {
-    const val = input.value.trim() || cur;
+    let val = input.value.trim() || cur;
+    if (field === 'nom' && val.length > 25) { val = val.slice(0, 25); }
     const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
     if (!c || val === cur) { el.textContent = cur; input.replaceWith(el); return; }
     c[field] = val;
@@ -1582,49 +1586,63 @@ function _calcSortDegats(s, c) {
   const totalPP = nbPuiss + nbProt;
   const bonusVal = totalPP > 1 ? (totalPP - 1) * 2 : 0;
 
-  if (totalPP === 0 && bonusVal === 0) return base;
+  // Bonus de maîtrise de l'arme principale
+  const maitrisesBonus = mainP ? _getMaitriseBonus(c, mainP) : 0;
+  const maitriseTag = maitrisesBonus > 0
+    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
+    : '';
+
+  if (totalPP === 0 && bonusVal === 0) return `${base}${maitriseTag}`;
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
     let result = `${parseInt(match[1]) + totalPP}${match[2]}${match[3]}`;
     if (bonusVal > 0) result += ` +${bonusVal}`;
-    return result;
+    return `${result}${maitriseTag}`;
   }
   let result = base;
   if (totalPP > 0) result += ` +${totalPP}d6`;
   if (bonusVal > 0) result += ` +${bonusVal}`;
-  return result;
+  return `${result}${maitriseTag}`;
 }
 
 /**
  * Soin effectif.
  * - Base 1d4 + Protection chaîné : +1d4 par rune, +2 soin fixe par paire (chaînage)
- * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
+ * - Format texte libre → affiché tel quel, rien ajouté
+ * - Bonus maîtrise de l'arme principale appliqué si format XdY reconnu
  */
-function _calcSortSoin(s) {
+function _calcSortSoin(s, c) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base   = (s.soin || '').trim();
 
+  // Bonus maîtrise de l'arme principale
+  const mainP = c?.equipement?.['Main principale'];
+  const maitrisesBonus = (mainP && c) ? _getMaitriseBonus(c, mainP) : 0;
+  const maitriseTag = maitrisesBonus > 0
+    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
+    : '';
+
   const buildDefault = (diceCount) => {
     let r = `${diceCount}d4`;
     if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-    return r;
+    return `${r}${maitriseTag}`;
   };
 
   if (!base || base.toLowerCase() === '= base') return buildDefault(1 + nbProt);
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
-      // Format XdY reconnu → on ajoute les dés Protection + chaînage
       let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
       if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return r;
+      return `${r}${maitriseTag}`;
     }
-    // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
-    return base;
+    return base; // texte libre
   }
+  // Pas de rune Protection mais base XdY → ajouter maîtrise
+  if (maitrisesBonus > 0 && base.match(/^(\d+)(d\d+)(.*)$/i)) return `${base}${maitriseTag}`;
   return base;
 }
 
@@ -1724,7 +1742,7 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
+      lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
     } else {
       lines.push({ icon:'🛡️', label:_getSortCA(s), detail:'' });
     }
@@ -1912,7 +1930,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      statsChips.push({ icon:'💚', val:_calcSortSoin(s), color:'#22c38e' });
+      statsChips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e' });
     } else {
       statsChips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
@@ -2686,54 +2704,14 @@ function _decodeIndices(b64) {
   try { return JSON.parse(atob(b64)); } catch { return []; }
 }
 
-// Calcule la quantité totale disponible dans un groupe d'indices
-// (tient compte des items avec qte > 1)
-function _calcMaxQte(inv, indices) {
-  return indices.reduce((sum, idx) => {
-    const item = inv[idx];
-    return sum + (parseInt(item?.qte || item?.quantite) || 1);
-  }, 0);
-}
-
-// Consomme qty unités depuis les indices du groupe
-// Décrémente qte sur les items stackés, supprime les items épuisés
-// Retourne le nouveau tableau d'inventaire
-function _consumeFromGroup(inv, indices, qty) {
-  let remaining = qty;
-  const result = [...inv];
-  // Traiter du plus grand index au plus petit pour éviter les décalages
-  const sorted = [...indices].sort((a, b) => b - a);
-  // D'abord les non-stackés (qte=1) pour préserver les stackés intacts si possible
-  const byQte = sorted.sort((a, b) => (parseInt(result[a]?.qte)||1) - (parseInt(result[b]?.qte)||1));
-  const toRemove = [];
-  for (const idx of byQte) {
-    if (remaining <= 0) break;
-    const item = result[idx];
-    const itemQte = parseInt(item?.qte || item?.quantite) || 1;
-    if (itemQte <= remaining) {
-      // Supprimer cet item entièrement
-      toRemove.push(idx);
-      remaining -= itemQte;
-    } else {
-      // Décrémenter la qte
-      result[idx] = { ...item, qte: String(itemQte - remaining), quantite: itemQte - remaining };
-      remaining = 0;
-    }
-  }
-  // Supprimer du plus grand index au plus petit
-  toRemove.sort((a, b) => b - a).forEach(idx => result.splice(idx, 1));
-  return result;
-}
-
-
 // ── Modal vente avec quantité ─────────────────────────────────────────────────
 function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const indices = _decodeIndices(indicesB64);
-  if (!indices.length) return;
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  const inv0 = c?.inventaire || [];
-  const maxQte = _calcMaxQte(inv0, indices);
+  const maxQte  = indices.length;
   if (maxQte === 0) return;
+
+  // Vérifier si des exemplaires sont équipés
+  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   const equippedMap = c ? getEquippedInventoryIndexMap(c) : new Map();
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
   const hasEquipped = equippedSlots.length > 0;
@@ -2780,20 +2758,21 @@ async function sellInvItemBulk(charId, indicesB64, prixVente) {
   if (!c) return;
 
   const allIndices = _decodeIndices(indicesB64);
-  const invCur = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const maxQteTotal = _calcMaxQte(invCur, allIndices);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), maxQteTotal);
+  const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
+  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
+  const indicesToSell = [...unequippedIndices, ...equippedIndices].slice(0, qty);
 
-  const item = invCur[allIndices[0]];
+  const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const item     = inv[indicesToSell[0]];
   if (!item) return;
   const itemNom  = item.nom || 'objet';
   const totalPrix = prixVente * qty;
 
-  // Détecter les items équipés parmi les indices (pour déséquiper si nécessaire)
-  const equippedMap = getEquippedInventoryIndexMap(c);
-  const indicesToSell = allIndices.slice(0, qty); // pour syncEquipment
-  // Consommer qty unités en décrémentant les qte / supprimant les items épuisés
-  const inv = _consumeFromGroup(invCur, allIndices, qty);
+  // Retirer les items vendus (du plus grand index au plus petit pour ne pas décaler)
+  const sorted = [...indicesToSell].sort((a,b)=>b-a);
+  sorted.forEach(idx => inv.splice(idx, 1));
 
   // Créditer l'or
   const compte   = c.compte || { recettes:[], depenses:[] };
@@ -2854,8 +2833,7 @@ async function sellInvItem(charId, invIndex) {
 // ══════════════════════════════════════════════
 function openDeleteInvModal(charId, indicesB64, nom) {
   const indices = _decodeIndices(indicesB64);
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  const maxQte  = _calcMaxQte(c?.inventaire || [], indices);
+  const maxQte  = indices.length;
   openModal(`🗑️ Supprimer — ${nom}`, `
     <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
       ${maxQte} exemplaire${maxQte>1?'s':''} dans l'inventaire
@@ -2882,11 +2860,11 @@ async function deleteInvItemBulk(charId, indicesB64) {
   const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
   const allIndices = _decodeIndices(indicesB64);
-  const invCurD = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const maxQteD = _calcMaxQte(invCurD, allIndices);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), maxQteD);
-  const inv = _consumeFromGroup(invCurD, allIndices, qty);
+  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
   const removedIndices = allIndices.slice(0, qty);
+  const sorted = [...removedIndices].sort((a,b)=>b-a);
+  sorted.forEach(idx => inv.splice(idx, 1));
   const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
   const payload = { inventaire: inv };
   if (equipSync.changed) {
@@ -2926,7 +2904,7 @@ function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const item    = (c.inventaire||[])[indices[0]];
   if (!item) return;
   const nom     = nomOrUnused || item.nom || 'Objet';
-  const maxQte  = _calcMaxQte(c.inventaire || [], indices);
+  const maxQte  = indices.length;
   const b64     = btoa(JSON.stringify(indices));
 
   const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
@@ -3017,35 +2995,27 @@ async function sendInvItem(fromCharId, indicesB64) {
   if (!toChar) { showNotif('Personnage introuvable.','error'); return; }
 
   const allIndices = _decodeIndices(indicesB64);
-  const fromInvCur = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
-  const maxQte  = _calcMaxQte(fromInvCur, allIndices);
+  const maxQte  = allIndices.length;
   const qtyEl   = document.getElementById('send-qty');
   const qty     = qtyEl ? Math.min(Math.max(1, parseInt(qtyEl.value)||1), maxQte) : 1;
+  const equippedMap = getEquippedInventoryIndexMap(fromChar);
+  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
+  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
+  const toSend  = [...unequippedIndices, ...equippedIndices].slice(0, qty);
 
-  const firstItem = fromInvCur[allIndices[0]];
+  const fromInv = Array.isArray(fromChar.inventaire) ? [...fromChar.inventaire] : [];
+  const firstItem = fromInv[toSend[0]];
   if (!firstItem) return;
 
-  // Construire les items à transférer (qty unités, en splitant les stackés si besoin)
-  const itemsToTransfer = [];
-  let toTransfer = qty;
-  for (const idx of allIndices) {
-    if (toTransfer <= 0) break;
-    const it = fromInvCur[idx];
-    const itQte = parseInt(it?.qte || it?.quantite) || 1;
-    const take = Math.min(itQte, toTransfer);
-    itemsToTransfer.push({ ...it, qte: String(take), quantite: take });
-    toTransfer -= take;
-  }
+  // Objets à transférer
+  const itemsToTransfer = toSend.map(idx => ({...fromInv[idx]}));
 
-  // Retirer de la source avec décrémentation correcte des qte
-  const fromInv = _consumeFromGroup(fromInvCur, allIndices, qty);
+  // Retirer de la source (du plus grand au plus petit)
+  [...toSend].sort((a,b)=>b-a).forEach(idx => fromInv.splice(idx, 1));
 
   // Ajouter à la cible
   const toInv = Array.isArray(toChar.inventaire) ? [...toChar.inventaire] : [];
   itemsToTransfer.forEach(it => toInv.push(it));
-  
-  const equippedMap = getEquippedInventoryIndexMap(fromChar);
-  const toSend = allIndices.slice(0, qty); // pour syncEquipment
 
   const equipSync = syncEquipmentAfterInventoryMutation(fromChar, toSend);
   const fromPayload = { inventaire: fromInv };
@@ -3154,7 +3124,7 @@ async function createNewChar() {
     niveau:1, or:0,
     pvBase:10, pvActuel:10, pmBase:10, pmActuel:10,
     exp:0,
-    stats:{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10},
+    stats:{force:8,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:8},
     statsBonus:{},
     equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
   };
@@ -4080,16 +4050,83 @@ async function clearEquipSlot(slot) {
 }
 
 // Inventaire
-function addInvItem() {
-  openModal('🎒 Ajouter un objet', `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="inv-nom" placeholder="Potion de soin..."></div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Type</label><input class="input-field" id="inv-type" placeholder="Consommable..."></div>
-      <div class="form-group"><label>Quantité</label><input class="input-field" id="inv-qte" value="1"></div>
+async function addInvItem() {
+  const c = STATE.activeChar; if (!c) return;
+  // Charger les items de la boutique
+  let shopItems = window._shopItemsCache;
+  if (!shopItems) {
+    try {
+      const { loadCollection } = await import('../data/firestore.js');
+      shopItems = await loadCollection('shop');
+      window._shopItemsCache = shopItems;
+    } catch(e) { shopItems = []; }
+  }
+  // Filtrer les items disponibles (pas déjà épuisés)
+  const available = (shopItems || []).filter(i => i.nom && (i.stock === undefined || i.stock === null || i.stock > 0));
+
+  // Grouper par catégorie pour le select
+  const byCateg = {};
+  available.forEach(item => {
+    const cat = item.categorie || item.category || 'Autres';
+    if (!byCateg[cat]) byCateg[cat] = [];
+    byCateg[cat].push(item);
+  });
+
+  const options = Object.entries(byCateg).map(([cat, items]) =>
+    `<optgroup label="${cat}">` +
+    items.map(i => `<option value="${i.id}">${i.nom}${i.rarete ? ' (' + ['★','★★','★★★','★★★★'][parseInt(i.rarete)-1] + ')' : ''}</option>`).join('') +
+    `</optgroup>`
+  ).join('');
+
+  openModal('🎒 Ajouter un objet depuis la boutique', `
+    <div class="form-group">
+      <label>Objet</label>
+      <select class="input-field sh-modal-select" id="inv-shop-sel" onchange="window._previewAddInvItem(this.value)">
+        <option value="">— Sélectionner un objet —</option>
+        ${options}
+      </select>
     </div>
-    <div class="form-group"><label>Description</label><textarea class="input-field" id="inv-desc" rows="3" placeholder="(Action) Rend 10 PV..."></textarea></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveInvItem(-1)">Ajouter</button>
+    <div id="inv-item-preview" style="display:none;background:var(--bg-elevated);border:1px solid var(--border);
+      border-radius:10px;padding:.75rem 1rem;margin-top:.25rem;font-size:.82rem;color:var(--text-muted)"></div>
+    <div class="form-group" style="margin-top:.75rem">
+      <label>Quantité</label>
+      <input type="number" class="input-field" id="inv-add-qte" value="1" min="1" style="width:80px">
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.75rem" onclick="saveInvItemFromShop()">Ajouter à l'inventaire</button>
   `);
+
+  // Preview de l'item sélectionné
+  window._addInvShopItems = available;
+  window._previewAddInvItem = (id) => {
+    const item = available.find(i => i.id === id);
+    const el = document.getElementById('inv-item-preview');
+    if (!el) return;
+    if (!item) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    const infos = [
+      item.description ? `<em>${item.description}</em>` : '',
+      item.effet ? `<strong>Effet :</strong> ${item.effet}` : '',
+      item.prixAchat ? `💰 ${item.prixAchat} or` : '',
+    ].filter(Boolean).join(' · ');
+    el.innerHTML = `<strong>${item.nom}</strong>${infos ? '<br><span style="font-size:.75rem">' + infos + '</span>' : ''}`;
+  };
+}
+
+async function saveInvItemFromShop() {
+  const c = STATE.activeChar; if (!c) return;
+  const selId = document.getElementById('inv-shop-sel')?.value;
+  if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
+  const item = (window._addInvShopItems || []).find(i => i.id === selId);
+  if (!item) { showNotif('Objet introuvable.', 'error'); return; }
+  const qte = Math.max(1, parseInt(document.getElementById('inv-add-qte')?.value) || 1);
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  // Ajouter l'item complet avec sa structure boutique (source, itemId, etc.)
+  inv.push({ ...item, qte: String(qte), quantite: qte, source: 'boutique', itemId: item.id });
+  c.inventaire = inv;
+  await updateInCol('characters', c.id, { inventaire: inv });
+  closeModal();
+  showNotif(`${item.nom} ajouté à l'inventaire !`, 'success');
+  renderCharSheet(c, 'inventaire');
 }
 
 function editInvItem(idx) {
@@ -4346,7 +4383,7 @@ Object.assign(window, {
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   editEquipSlot, saveEquipSlot, clearEquipSlot, equipSlotFromInv,
   previewEquipFromInv,
-  addInvItem, editInvItem, saveInvItem,
+  addInvItem, editInvItem, saveInvItem, saveInvItemFromShop,
   addQuete, saveQuete,
   deleteCharPhoto,
   openCombatStylesAdmin,
