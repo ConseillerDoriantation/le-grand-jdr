@@ -1472,17 +1472,22 @@ function _calcSortDegats(s, c) {
   const totalPP = nbPuiss + nbProt;
   const bonusVal = totalPP > 1 ? (totalPP - 1) * 2 : 0;
 
-  if (totalPP === 0 && bonusVal === 0) return base;
+  // Bonus de maîtrise de l'arme principale
+  const maitrise = _getMaitriseBonus(c, mainP || {});
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
     let result = `${parseInt(match[1]) + totalPP}${match[2]}${match[3]}`;
-    if (bonusVal > 0) result += ` +${bonusVal}`;
+    const totalBonus = bonusVal + maitrise;
+    if (totalBonus > 0) result += ` +${totalBonus}`;
+    else if (totalBonus < 0) result += ` ${totalBonus}`;
     return result;
   }
   let result = base;
   if (totalPP > 0) result += ` +${totalPP}d6`;
-  if (bonusVal > 0) result += ` +${bonusVal}`;
+  const totalBonus = bonusVal + maitrise;
+  if (totalBonus > 0) result += ` +${totalBonus}`;
+  else if (totalBonus < 0) result += ` ${totalBonus}`;
   return result;
 }
 
@@ -1491,7 +1496,7 @@ function _calcSortDegats(s, c) {
  * - Base 1d4 + Protection chaîné : +1d4 par rune, +2 soin fixe par paire (chaînage)
  * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
  */
-function _calcSortSoin(s) {
+function _calcSortSoin(s, c) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
@@ -1503,18 +1508,27 @@ function _calcSortSoin(s) {
     return r;
   };
 
-  if (!base || base.toLowerCase() === '= base') return buildDefault(1 + nbProt);
+  // Bonus de maîtrise de l'arme principale (s'applique aussi aux soins)
+  const mainP   = (c?.equipement || {})['Main principale'];
+  const maitrise = _getMaitriseBonus(c, mainP || {});
+  const maitriseStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
+
+  if (!base || base.toLowerCase() === '= base') {
+    let r = buildDefault(1 + nbProt);
+    return r + maitriseStr;
+  }
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
-      // Format XdY reconnu → on ajoute les dés Protection + chaînage
+      // Format XdY reconnu → on ajoute les dés Protection + chaînage + maîtrise
       let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
       if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return r;
+      return r + maitriseStr;
     }
     // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
     return base;
   }
+  if (maitriseStr) return base + maitriseStr;
   return base;
 }
 
@@ -1614,7 +1628,7 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
+      lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
     } else {
       lines.push({ icon:'🛡️', label:_getSortCA(s), detail:'' });
     }
@@ -1802,7 +1816,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      statsChips.push({ icon:'💚', val:_calcSortSoin(s), color:'#22c38e' });
+      statsChips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e' });
     } else {
       statsChips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
@@ -3616,50 +3630,14 @@ function editEquipSlot(slot) {
             ${invOptions}
           </select>
         </div>
-        <div class="cs-equip-divider">
-          <span>ou saisir / ajuster manuellement</span>
-        </div>`
+        `
       : `<div class="cs-equip-empty-inv">
           <span>⚠️ Aucun objet compatible dans l'inventaire.</span>
-          <span style="font-size:0.72rem;color:var(--text-dim)">Achète des objets à la boutique ou saisis manuellement.</span>
+          <span style="font-size:0.72rem;color:var(--text-dim)">Achète des objets à la boutique pour les équiper ici.</span>
         </div>`
     }
 
-    <div class="form-group"><label>Nom</label><input class="input-field" id="eq-nom" value="${equipped.nom||''}"></div>
-
-    ${isWeapon ? `
-    <!-- ── Arme ── -->
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Dégâts</label>
-        <input class="input-field" id="eq-degats" value="${equipped.degats||'1d6'}" placeholder="ex: 1d8">
-      </div>
-      <div class="form-group"><label>Stat d'attaque</label>
-        <select class="input-field sh-modal-select" id="eq-stat-attaque">
-          <option value="force"        ${(equipped.statAttaque||'force')==='force'?'selected':''}>Force</option>
-          <option value="dexterite"    ${equipped.statAttaque==='dexterite'?'selected':''}>Dextérité</option>
-          <option value="intelligence" ${equipped.statAttaque==='intelligence'?'selected':''}>Intelligence</option>
-          <option value="constitution" ${equipped.statAttaque==='constitution'?'selected':''}>Constitution</option>
-          <option value="sagesse" ${equipped.statAttaque==='sagesse'?'selected':''}>Sagesse</option>
-          <option value="charisme" ${equipped.statAttaque==='charisme'?'selected':''}>Charisme</option>
-        </select>
-      </div>
-    </div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Portée</label>
-        <input class="input-field" id="eq-portee" value="${equipped.portee||''}" placeholder="ex: Contact / 18m">
-      </div>
-      <div class="form-group"><label>Type d'arme</label>
-        <input class="input-field" id="eq-type-arme" value="${equipped.typeArme||''}" placeholder="ex: Épée, Arc...">
-      </div>
-    </div>
-    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
-      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Polyvalente, Légère...">
-    </div>
-    <div class="form-group"><label>Particularité</label>
-      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 magique, Argent...">
-    </div>
-    `
-    : isBijou ? `
+    ${!isWeapon ? (isBijou ? `
     <!-- ── Bijou ── -->
     <div class="form-group"><label>Description / effet</label>
       <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 à tous les jets de sauvegarde">
@@ -3678,17 +3656,12 @@ function editEquipSlot(slot) {
     `
     : `
     <!-- ── Armure ── -->
-    <div class="grid-2" style="gap:.8rem">
-      <div class="form-group"><label>Type d'armure</label>
-        <select class="input-field sh-modal-select" id="eq-type-armure">
-          <option value="">— Aucun —</option>
+    <div class="form-group"><label>Type d'armure</label>
+      <select class="input-field sh-modal-select" id="eq-type-armure">
+        <option value="">— Aucun —</option>
           ${['Légère','Intermédiaire','Lourde'].map(t=>`<option value="${t}" ${(equipped.typeArmure||'')=== t?'selected':''}>${t}</option>`).join('')}
-        </select>
+      </select>
       </div>
-      <div class="form-group"><label>CA apportée</label>
-        <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="0">
-      </div>
-    </div>
     <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
       <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance, Discrétion désavantage...">
     </div>
@@ -3740,41 +3713,29 @@ function previewEquipFromInv(val, slot) {
   const item = compat?.item || compat;
   if (!item) return;
 
-  const nomEl = document.getElementById('eq-nom');
-  if (nomEl) nomEl.value = item.nom||'';
-
   const isWeapon = slot.startsWith('Main');
   if (isWeapon) {
-    if (item.degats && document.getElementById('eq-degats'))
-      document.getElementById('eq-degats').value = item.degats;
-    // Déduire stat d'attaque depuis le format
-    if (item.format) {
-      const statSel = document.getElementById('eq-stat-attaque');
-      if (statSel) {
-        if (item.format.includes('Mag.'))  statSel.value = 'intelligence';
-        else if (item.format.includes('Dist.')) statSel.value = 'dexterite';
-        else statSel.value = 'force';
-      }
-    }
-    // Traits → champ texte
-    const traitsEl = document.getElementById('eq-traits');
-    if (traitsEl) {
-      const t = Array.isArray(item.traits) ? item.traits : (item.trait ? [item.trait] : []);
-      traitsEl.value = t.join(', ');
-    }
-    // Stocker format, toucher, stats, traits, sousType pour saveEquipSlot
-    window._equipSelFormat  = item.format  || '';
-    window._equipSelToucher = item.toucher || '';
-    window._equipSelStats   = item.stats   || '';
-    // Mettre à jour meta avec les infos de l'item sélectionné
+    // Déduire stat d'attaque depuis le format de l'item
+    const inferredStat = item.statAttaque || item.toucherStat ||
+      (item.format?.includes('Mag.')  ? 'intelligence' :
+       item.format?.includes('Dist.') ? 'dexterite'    : 'force');
+
+    // Tout peupler dans meta — saveEquipSlot lit exclusivement depuis meta pour les armes
     if (window._equipSelectedMeta) {
-      window._equipSelectedMeta.format     = item.format  || '';
-      window._equipSelectedMeta.toucher    = item.toucher || '';
-      window._equipSelectedMeta.stats      = item.stats   || '';
-      window._equipSelectedMeta.traits     = Array.isArray(item.traits) ? [...item.traits] : [];
-      window._equipSelectedMeta.sousType   = item.sousType || '';
-      window._equipSelectedMeta.degatsStat = item.degatsStat || item.statAttaque || 'force';
-      window._equipSelectedMeta.toucherStat= item.toucherStat || item.statAttaque || 'force';
+      window._equipSelectedMeta.nom           = item.nom           || '';
+      window._equipSelectedMeta.degats        = item.degats        || '';
+      window._equipSelectedMeta.statAttaque   = inferredStat;
+      window._equipSelectedMeta.toucherStat   = item.toucherStat   || inferredStat;
+      window._equipSelectedMeta.degatsStat    = item.degatsStat    || inferredStat;
+      window._equipSelectedMeta.typeArme      = item.typeArme      || item.sousType || '';
+      window._equipSelectedMeta.portee        = item.portee        || '';
+      window._equipSelectedMeta.particularite = item.particularite || item.effet || '';
+      window._equipSelectedMeta.format        = item.format        || '';
+      window._equipSelectedMeta.toucher       = item.toucher       || '';
+      window._equipSelectedMeta.stats         = item.stats         || '';
+      window._equipSelectedMeta.traits        = Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []);
+      window._equipSelectedMeta.sousType      = item.sousType      || '';
+      window._equipSelectedMeta.sourceInvIndex = Number.isInteger(compat?.invIndex) ? compat.invIndex : -1;
     }
   } else {
     // Stocker typeArmure pour saveEquipSlot
@@ -3838,20 +3799,22 @@ async function saveEquipSlot(slot) {
   };
 
   if (slot.startsWith('Main')) {
+    // Les armes viennent toujours de l'inventaire — toutes les données depuis meta
     equip[slot] = {
-      nom:           document.getElementById('eq-nom')?.value||'',
-      degats:        document.getElementById('eq-degats')?.value||'',
-      degatsStat:    meta.degatsStat || document.getElementById('eq-stat-attaque')?.value || 'force',
-      toucherStat:   meta.toucherStat || document.getElementById('eq-stat-attaque')?.value || 'force',
-      statAttaque:   document.getElementById('eq-stat-attaque')?.value||'force',
-      typeArme:      document.getElementById('eq-type-arme')?.value||'',
-      portee:        document.getElementById('eq-portee')?.value||'',
-      particularite: document.getElementById('eq-particularite')?.value||'',
-      traits:        readTraits(),
-      format:        meta.format || '',
-      toucher:       meta.toucher || '',
-      stats:         meta.stats || '',
-      sousType:      meta.sousType || '',
+      nom:           meta.nom           || '',
+      degats:        meta.degats        || '',
+      degatsStat:    meta.degatsStat    || meta.statAttaque || 'force',
+      toucherStat:   meta.toucherStat   || meta.statAttaque || 'force',
+      statAttaque:   meta.statAttaque   || 'force',
+      typeArme:      meta.typeArme      || meta.sousType || '',
+      portee:        meta.portee        || '',
+      particularite: meta.particularite || '',
+      traits:        Array.isArray(meta.traits) ? [...meta.traits] : [],
+      format:        meta.format        || '',
+      toucher:       meta.toucher       || '',
+      stats:         meta.stats         || '',
+      sousType:      meta.sousType      || '',
+      sourceInvIndex: Number.isInteger(meta.sourceInvIndex) ? meta.sourceInvIndex : -1,
       fo: parseInt(meta.fo)||0, dex: parseInt(meta.dex)||0,
       in: parseInt(meta.in)||0, sa: parseInt(meta.sa)||0,
       co: parseInt(meta.co)||0, ch: parseInt(meta.ch)||0,
@@ -3877,7 +3840,7 @@ async function saveEquipSlot(slot) {
     equip[slot] = {
       nom:           document.getElementById('eq-nom')?.value||'',
       typeArmure:    document.getElementById('eq-type-armure')?.value || meta.typeArmure||'',
-      ca:            parseInt(document.getElementById('eq-ca')?.value)||0,
+      ca: 0, // CA supprimée — calculée depuis typeArmure uniquement
       traits:        readTraits(),
       particularite: document.getElementById('eq-particularite')?.value||'',
       fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
