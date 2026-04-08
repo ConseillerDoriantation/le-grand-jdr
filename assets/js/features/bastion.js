@@ -650,8 +650,7 @@ async function ouvrirInventaireBastion() {
     <!-- Panneau Stock -->
     <div id="inv-panel-stock" style="display:flex;flex-direction:column;gap:.4rem">
       <div style="display:flex;justify-content:flex-end;gap:.4rem;margin-bottom:.35rem">
-        ${hasChar||isAdmin ? `<button class="btn btn-gold btn-sm" onclick="ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>
-        <button class="btn btn-outline btn-sm" onclick="ajouterObjetBastion()">+ Manuel</button>` : ''}
+        ${hasChar||isAdmin ? `<button class="btn btn-gold btn-sm" onclick="ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>` : ''}
         ${isAdmin ? `<button class="btn btn-outline btn-sm" onclick="deposerOrBastion()">💰 Or</button>` : (hasChar ? `<button class="btn btn-outline btn-sm" onclick="deposerOrBastion()">💰 Déposer de l'or</button>` : '')}
       </div>
       <div style="max-height:45vh;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem">
@@ -804,41 +803,6 @@ async function confirmerDepotDepuisInventaire() {
   await saveDoc('bastion','main', { ...current, inventaire:invBast, invHistorique:invHisto });
   closeModalDirect();
   showNotif(`${checked.length} objet${checked.length>1?'s':''} déposé${checked.length>1?'s':''} au Bastion.`,'success');
-  await ouvrirInventaireBastion();
-}
-
-async function ajouterObjetBastion() {
-  const uid      = STATE.user?.uid;
-  const eligible = STATE.isAdmin ? (STATE.characters||[]) : (STATE.characters||[]).filter(c=>c.uid===uid);
-  openModal('📦 Déposer un objet (manuel)', `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="bav-nom" placeholder="Épée de guerre..."></div>
-    <div class="form-group"><label>Quantité</label><input type="number" class="input-field" id="bav-qte" value="1" min="1"></div>
-    <div class="form-group"><label>Description (optionnel)</label><input class="input-field" id="bav-desc"></div>
-    <div class="form-group"><label>Déposé par</label>
-      ${eligible.length>0
-        ? `<select class="input-field" id="bav-perso">${eligible.map(c=>`<option value="${c.nom||'?'}">${c.nom||'?'}</option>`).join('')}</select>`
-        : `<input class="input-field" id="bav-perso" value="${STATE.profile?.pseudo||'Inconnu'}" readonly>`}
-    </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="confirmerDepotBastion()">Déposer</button>
-  `);
-}
-
-async function confirmerDepotBastion() {
-  const nom = document.getElementById('bav-nom')?.value?.trim();
-  if (!nom) { showNotif('Nom requis.','error'); return; }
-  const current  = (await getDocData('bastion','main')) || getDefaultBastion();
-  const limite   = current.invLimite || 20;
-  const inv      = current.inventaire || [];
-  if (inv.length >= limite) { showNotif(`Inventaire plein (${limite} objets max).`,'error'); return; }
-  const perso    = document.getElementById('bav-perso')?.value||'?';
-  const now      = new Date().toLocaleDateString('fr-FR');
-  const newItem  = { id:`bi_${Date.now()}`, nom, quantite:parseInt(document.getElementById('bav-qte')?.value)||1, description:document.getElementById('bav-desc')?.value?.trim()||'', deposePar:perso, date:now };
-  inv.push(newItem);
-  const invHisto = [...(current.invHistorique||[])];
-  invHisto.push({ id:`bih_${Date.now()}`, action:'depot', nom, quantite:newItem.quantite, par:perso, date:now });
-  await saveDoc('bastion','main', { ...current, inventaire:inv, invHistorique:invHisto });
-  closeModalDirect();
-  showNotif(`${nom} déposé au Bastion.`,'success');
   await ouvrirInventaireBastion();
 }
 
@@ -1050,8 +1014,8 @@ Object.assign(window, {
   investirAmelioration, confirmerInvestissementAmelioration,
   debloquerAmelioration, confirmDebloquer,
   tirerEvenement, investirOrBastion, confirmerInvestissement, supprimerHistorique,
-  ouvrirInventaireBastion, ajouterDepuisInventaire, ajouterObjetBastion,
-  confirmerDepotBastion, confirmerDepotDepuisInventaire,
+  ouvrirInventaireBastion, ajouterDepuisInventaire,
+  confirmerDepotDepuisInventaire,
   recupererObjetBastion, supprimerObjetBastion,
   deposerOrBastion, confirmerDepotOrBastion,
   ouvrirMissionsBastion, creerMissionBastion, sauvegarderMissionBastion,
