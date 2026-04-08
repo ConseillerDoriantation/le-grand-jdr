@@ -958,12 +958,8 @@ function inlineEditText(charId, field, el) {
   input.className = 'cs-inline-input';
   input.style.cssText = 'width:100%;font-size:inherit;font-weight:inherit;font-family:inherit;color:inherit;';
 
-  // Limite de 25 caractères pour le nom du personnage
-  if (field === 'nom') input.maxLength = 25;
-
   const save = async () => {
-    let val = input.value.trim() || cur;
-    if (field === 'nom' && val.length > 25) { val = val.slice(0, 25); }
+    const val = input.value.trim() || cur;
     const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
     if (!c || val === cur) { el.textContent = cur; input.replaceWith(el); return; }
     c[field] = val;
@@ -1586,63 +1582,49 @@ function _calcSortDegats(s, c) {
   const totalPP = nbPuiss + nbProt;
   const bonusVal = totalPP > 1 ? (totalPP - 1) * 2 : 0;
 
-  // Bonus de maîtrise de l'arme principale
-  const maitrisesBonus = mainP ? _getMaitriseBonus(c, mainP) : 0;
-  const maitriseTag = maitrisesBonus > 0
-    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
-    : '';
-
-  if (totalPP === 0 && bonusVal === 0) return `${base}${maitriseTag}`;
+  if (totalPP === 0 && bonusVal === 0) return base;
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
     let result = `${parseInt(match[1]) + totalPP}${match[2]}${match[3]}`;
     if (bonusVal > 0) result += ` +${bonusVal}`;
-    return `${result}${maitriseTag}`;
+    return result;
   }
   let result = base;
   if (totalPP > 0) result += ` +${totalPP}d6`;
   if (bonusVal > 0) result += ` +${bonusVal}`;
-  return `${result}${maitriseTag}`;
+  return result;
 }
 
 /**
  * Soin effectif.
  * - Base 1d4 + Protection chaîné : +1d4 par rune, +2 soin fixe par paire (chaînage)
- * - Format texte libre → affiché tel quel, rien ajouté
- * - Bonus maîtrise de l'arme principale appliqué si format XdY reconnu
+ * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
  */
-function _calcSortSoin(s, c) {
+function _calcSortSoin(s) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base   = (s.soin || '').trim();
 
-  // Bonus maîtrise de l'arme principale
-  const mainP = c?.equipement?.['Main principale'];
-  const maitrisesBonus = (mainP && c) ? _getMaitriseBonus(c, mainP) : 0;
-  const maitriseTag = maitrisesBonus > 0
-    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
-    : '';
-
   const buildDefault = (diceCount) => {
     let r = `${diceCount}d4`;
     if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-    return `${r}${maitriseTag}`;
+    return r;
   };
 
   if (!base || base.toLowerCase() === '= base') return buildDefault(1 + nbProt);
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
+      // Format XdY reconnu → on ajoute les dés Protection + chaînage
       let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}`;
       if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return `${r}${maitriseTag}`;
+      return r;
     }
-    return base; // texte libre
+    // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
+    return base;
   }
-  // Pas de rune Protection mais base XdY → ajouter maîtrise
-  if (maitrisesBonus > 0 && base.match(/^(\d+)(d\d+)(.*)$/i)) return `${base}${maitriseTag}`;
   return base;
 }
 
@@ -1742,7 +1724,7 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
+      lines.push({ icon:'💚', label:_calcSortSoin(s), detail:`Soin · chaîné : +${nbProt}d4${nbProt > 1 ? ` +${(nbProt-1)*2}` : ''}` });
     } else {
       lines.push({ icon:'🛡️', label:_getSortCA(s), detail:'' });
     }
@@ -1930,7 +1912,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      statsChips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e' });
+      statsChips.push({ icon:'💚', val:_calcSortSoin(s), color:'#22c38e' });
     } else {
       statsChips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
@@ -3124,7 +3106,7 @@ async function createNewChar() {
     niveau:1, or:0,
     pvBase:10, pvActuel:10, pmBase:10, pmActuel:10,
     exp:0,
-    stats:{force:8,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:8},
+    stats:{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10},
     statsBonus:{},
     equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
   };
@@ -4052,7 +4034,8 @@ async function clearEquipSlot(slot) {
 // Inventaire
 async function addInvItem() {
   const c = STATE.activeChar; if (!c) return;
-  // Charger les items de la boutique
+
+  // Charger les items boutique (cache session)
   let shopItems = window._shopItemsCache;
   if (!shopItems) {
     try {
@@ -4061,73 +4044,180 @@ async function addInvItem() {
       window._shopItemsCache = shopItems;
     } catch(e) { shopItems = []; }
   }
-  // Filtrer les items disponibles (pas déjà épuisés)
-  const available = (shopItems || []).filter(i => i.nom && (i.stock === undefined || i.stock === null || i.stock > 0));
+  const available = (shopItems || []).filter(i => i.nom);
 
-  // Grouper par catégorie pour le select
-  const byCateg = {};
-  available.forEach(item => {
-    const cat = item.categorie || item.category || 'Autres';
-    if (!byCateg[cat]) byCateg[cat] = [];
-    byCateg[cat].push(item);
-  });
+  // Catégorie dérivée de la structure de l'item
+  const _itemCat = (item) => {
+    if (item.sousType) return item.sousType;
+    if (item.slotBijou) return item.slotBijou;
+    if (item.slotArmure) return 'Armure';
+    if (item.type) return item.type;
+    return 'Autres';
+  };
 
-  const options = Object.entries(byCateg).map(([cat, items]) =>
-    `<optgroup label="${cat}">` +
-    items.map(i => `<option value="${i.id}">${i.nom}${i.rarete ? ' (' + ['★','★★','★★★','★★★★'][parseInt(i.rarete)-1] + ')' : ''}</option>`).join('') +
-    `</optgroup>`
-  ).join('');
+  const catOrder = [];
+  available.forEach(i => { const cat = _itemCat(i); if (!catOrder.includes(cat)) catOrder.push(cat); });
+  catOrder.sort((a, b) => a.localeCompare(b, 'fr'));
 
-  openModal('🎒 Ajouter un objet depuis la boutique', `
-    <div class="form-group">
-      <label>Objet</label>
-      <select class="input-field sh-modal-select" id="inv-shop-sel" onchange="window._previewAddInvItem(this.value)">
-        <option value="">— Sélectionner un objet —</option>
-        ${options}
-      </select>
+  window._addInvShopItems = available;
+  window._addInvItemCat   = _itemCat;
+  window._addInvSelId     = null;
+
+  const RARETE     = ['','★','★★','★★★','★★★★'];
+  const RARETE_COL = ['','#9ca3af','#4f8cff','#b47fff','#e8b84b'];
+
+  const renderGrid = (filter = '', cat = '') => {
+    const q = filter.toLowerCase().trim();
+    const filtered = available.filter(item => {
+      if (cat && _itemCat(item) !== cat) return false;
+      if (q && !item.nom.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    if (!filtered.length) return `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun objet trouvé.</div>`;
+    return filtered.map(item => {
+      const r  = parseInt(item.rarete) || 0;
+      const rc = RARETE_COL[r] || 'var(--border)';
+      const rs = RARETE[r] || '';
+      const desc = item.description || item.effet || '';
+      return `<button onclick="window._addInvSelectItem('${item.id}')" id="loot-card-${item.id}"
+        style="display:flex;flex-direction:column;gap:2px;text-align:left;
+          padding:.5rem .65rem;border-radius:8px;border:1px solid var(--border);
+          background:var(--bg-elevated);cursor:pointer;transition:all .12s;width:100%"
+        onmouseover="if(window._addInvSelId!=='${item.id}'){this.style.background='${rc}12';this.style.borderColor='${rc}'}"
+        onmouseout="if(window._addInvSelId!=='${item.id}'){this.style.background='var(--bg-elevated)';this.style.borderColor='var(--border)'}">
+        <div style="display:flex;align-items:center;gap:.4rem">
+          ${rs ? `<span style="color:${rc};font-size:.72rem;flex-shrink:0">${rs}</span>` : ''}
+          <span style="font-size:.82rem;font-weight:600;color:var(--text);line-height:1.2">${item.nom}</span>
+        </div>
+        ${desc ? `<span style="font-size:.68rem;color:var(--text-dim);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${desc.slice(0,70)}${desc.length>70?'…':''}</span>` : ''}
+      </button>`;
+    }).join('');
+  };
+
+  const catPills = ['', ...catOrder].map(cat => `
+    <button id="loot-pill-${(cat||'all').replace(/[^a-zA-Z0-9]/g,'_')}" onclick="window._addInvFilterCat('${cat}')"
+      style="font-size:.7rem;padding:3px 10px;border-radius:999px;cursor:pointer;white-space:nowrap;flex-shrink:0;
+        border:1px solid ${cat === '' ? 'var(--gold)' : 'var(--border)'};
+        background:${cat === '' ? 'rgba(232,184,75,.12)' : 'var(--bg-elevated)'};
+        color:${cat === '' ? 'var(--gold)' : 'var(--text-muted)'};transition:all .12s">
+      ${cat || 'Tout'}
+    </button>`).join('');
+
+  openModal('🎒 Butin — Ajouter un objet', `
+    <input class="input-field" id="loot-search" placeholder="🔍 Rechercher…"
+      oninput="window._addInvFilter()" style="margin-bottom:.55rem">
+
+    <div style="display:flex;gap:.3rem;flex-wrap:nowrap;overflow-x:auto;padding-bottom:.4rem;
+      margin-bottom:.55rem;scrollbar-width:none;-webkit-overflow-scrolling:touch">
+      ${catPills}
     </div>
-    <div id="inv-item-preview" style="display:none;background:var(--bg-elevated);border:1px solid var(--border);
-      border-radius:10px;padding:.75rem 1rem;margin-top:.25rem;font-size:.82rem;color:var(--text-muted)"></div>
-    <div class="form-group" style="margin-top:.75rem">
-      <label>Quantité</label>
-      <input type="number" class="input-field" id="inv-add-qte" value="1" min="1" style="width:80px">
+
+    <div id="loot-grid" style="display:flex;flex-direction:column;gap:.28rem;
+      max-height:38vh;overflow-y:auto;padding-right:2px;margin-bottom:.6rem">
+      ${renderGrid()}
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.75rem" onclick="saveInvItemFromShop()">Ajouter à l'inventaire</button>
+
+    <div id="loot-selected" style="display:none;background:var(--bg-elevated);
+      border:1px solid var(--gold);border-radius:10px;padding:.6rem .85rem;margin-bottom:.6rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
+        <div style="min-width:0">
+          <div id="loot-sel-nom" style="font-weight:700;font-size:.88rem;color:var(--text)"></div>
+          <div id="loot-sel-desc" style="font-size:.7rem;color:var(--text-dim);margin-top:1px;
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.3rem;flex-shrink:0">
+          <button onclick="const i=document.getElementById('loot-qte');i.value=Math.max(1,parseInt(i.value||1)-1)"
+            style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);
+            background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">−</button>
+          <input type="number" id="loot-qte" value="1" min="1"
+            style="width:48px;text-align:center;font-size:.9rem;font-weight:700;
+              background:var(--bg-card);border:1px solid var(--border);border-radius:6px;
+              color:var(--text);padding:4px 0">
+          <button onclick="const i=document.getElementById('loot-qte');i.value=parseInt(i.value||1)+1"
+            style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);
+            background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">+</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-gold" style="width:100%" onclick="saveInvItemFromShop()">
+      ✓ Ajouter au butin
+    </button>
   `);
 
-  // Preview de l'item sélectionné
-  window._addInvShopItems = available;
-  window._previewAddInvItem = (id) => {
-    const item = available.find(i => i.id === id);
-    const el = document.getElementById('inv-item-preview');
-    if (!el) return;
-    if (!item) { el.style.display = 'none'; return; }
-    el.style.display = 'block';
-    const infos = [
-      item.description ? `<em>${item.description}</em>` : '',
-      item.effet ? `<strong>Effet :</strong> ${item.effet}` : '',
-      item.prixAchat ? `💰 ${item.prixAchat} or` : '',
-    ].filter(Boolean).join(' · ');
-    el.innerHTML = `<strong>${item.nom}</strong>${infos ? '<br><span style="font-size:.75rem">' + infos + '</span>' : ''}`;
+  // Handlers globaux
+  let _currentCat = '';
+
+  window._addInvFilter = () => {
+    const q = document.getElementById('loot-search')?.value || '';
+    const grid = document.getElementById('loot-grid');
+    if (grid) grid.innerHTML = renderGrid(q, _currentCat);
+    if (window._addInvSelId) {
+      const card = document.getElementById(`loot-card-${window._addInvSelId}`);
+      const selItem = available.find(i => i.id === window._addInvSelId);
+      if (card && selItem) {
+        const rc = RARETE_COL[parseInt(selItem.rarete)||0] || 'var(--gold)';
+        card.style.background = `${rc}20`; card.style.borderColor = rc;
+      }
+    }
+  };
+
+  window._addInvFilterCat = (cat) => {
+    _currentCat = cat;
+    catOrder.concat(['']).forEach(c => {
+      const key = (c||'all').replace(/[^a-zA-Z0-9]/g,'_');
+      const pill = document.getElementById(`loot-pill-${key}`);
+      if (!pill) return;
+      const active = c === cat;
+      pill.style.borderColor = active ? 'var(--gold)' : 'var(--border)';
+      pill.style.background  = active ? 'rgba(232,184,75,.12)' : 'var(--bg-elevated)';
+      pill.style.color       = active ? 'var(--gold)' : 'var(--text-muted)';
+    });
+    window._addInvFilter();
+  };
+
+  window._addInvSelectItem = (id) => {
+    const selItem = available.find(i => i.id === id);
+    if (!selItem) return;
+    if (window._addInvSelId && window._addInvSelId !== id) {
+      const old = document.getElementById(`loot-card-${window._addInvSelId}`);
+      if (old) { old.style.background = 'var(--bg-elevated)'; old.style.borderColor = 'var(--border)'; }
+    }
+    window._addInvSelId = id;
+    const r = parseInt(selItem.rarete) || 0;
+    const rc = RARETE_COL[r] || 'var(--gold)';
+    const card = document.getElementById(`loot-card-${id}`);
+    if (card) { card.style.background = `${rc}20`; card.style.borderColor = rc; }
+    const panel = document.getElementById('loot-selected');
+    if (panel) panel.style.display = 'block';
+    const nomEl = document.getElementById('loot-sel-nom');
+    if (nomEl) nomEl.innerHTML = `${selItem.nom}${selItem.rarete ? ` <span style="color:${rc};font-size:.72rem">${RARETE[r]}</span>` : ''}`;
+    const descEl = document.getElementById('loot-sel-desc');
+    if (descEl) descEl.textContent = selItem.description || selItem.effet || '';
   };
 }
 
 async function saveInvItemFromShop() {
   const c = STATE.activeChar; if (!c) return;
-  const selId = document.getElementById('inv-shop-sel')?.value;
+  const selId = window._addInvSelId;
   if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
   const item = (window._addInvShopItems || []).find(i => i.id === selId);
   if (!item) { showNotif('Objet introuvable.', 'error'); return; }
-  const qte = Math.max(1, parseInt(document.getElementById('inv-add-qte')?.value) || 1);
+  const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
   const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  // Ajouter l'item complet avec sa structure boutique (source, itemId, etc.)
   inv.push({ ...item, qte: String(qte), quantite: qte, source: 'boutique', itemId: item.id });
   c.inventaire = inv;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
+  const stChar = (STATE.characters||[]).find(x => x.id === c.id);
+  if (stChar) stChar.inventaire = inv;
   await updateInCol('characters', c.id, { inventaire: inv });
+  window._addInvSelId = null;
   closeModal();
-  showNotif(`${item.nom} ajouté à l'inventaire !`, 'success');
+  showNotif(`${item.nom} ×${qte} ajouté au butin !`, 'success');
   renderCharSheet(c, 'inventaire');
 }
+
+
 
 function editInvItem(idx) {
   const c = STATE.activeChar; if(!c) return;
