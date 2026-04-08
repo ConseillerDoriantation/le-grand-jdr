@@ -2336,6 +2336,7 @@ function renderCharInventaire(c, canEdit) {
   <div class="cs-section">
     <div class="cs-section-title">🎒 Inventaire
       <span class="cs-hint">${invRaw.length} objet${invRaw.length !== 1 ? 's' : ''}</span>
+      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addInvItem()" style="margin-left:auto">🎁 Butin</button>` : ''}
     </div>`;
 
   if (grouped.length === 0) {
@@ -4034,8 +4035,6 @@ async function clearEquipSlot(slot) {
 // Inventaire
 async function addInvItem() {
   const c = STATE.activeChar; if (!c) return;
-
-  // Charger les items boutique (cache session)
   let shopItems = window._shopItemsCache;
   if (!shopItems) {
     try {
@@ -4045,8 +4044,6 @@ async function addInvItem() {
     } catch(e) { shopItems = []; }
   }
   const available = (shopItems || []).filter(i => i.nom);
-
-  // Catégorie dérivée de la structure de l'item
   const _itemCat = (item) => {
     if (item.sousType) return item.sousType;
     if (item.slotBijou) return item.slotBijou;
@@ -4054,18 +4051,13 @@ async function addInvItem() {
     if (item.type) return item.type;
     return 'Autres';
   };
-
   const catOrder = [];
   available.forEach(i => { const cat = _itemCat(i); if (!catOrder.includes(cat)) catOrder.push(cat); });
   catOrder.sort((a, b) => a.localeCompare(b, 'fr'));
-
   window._addInvShopItems = available;
-  window._addInvItemCat   = _itemCat;
-  window._addInvSelId     = null;
-
+  window._addInvSelId = null;
   const RARETE     = ['','★','★★','★★★','★★★★'];
   const RARETE_COL = ['','#9ca3af','#4f8cff','#b47fff','#e8b84b'];
-
   const renderGrid = (filter = '', cat = '') => {
     const q = filter.toLowerCase().trim();
     const filtered = available.filter(item => {
@@ -4089,11 +4081,10 @@ async function addInvItem() {
           ${rs ? `<span style="color:${rc};font-size:.72rem;flex-shrink:0">${rs}</span>` : ''}
           <span style="font-size:.82rem;font-weight:600;color:var(--text);line-height:1.2">${item.nom}</span>
         </div>
-        ${desc ? `<span style="font-size:.68rem;color:var(--text-dim);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${desc.slice(0,70)}${desc.length>70?'…':''}</span>` : ''}
+        ${desc ? `<span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${desc.slice(0,70)}${desc.length>70?'…':''}</span>` : ''}
       </button>`;
     }).join('');
   };
-
   const catPills = ['', ...catOrder].map(cat => `
     <button id="loot-pill-${(cat||'all').replace(/[^a-zA-Z0-9]/g,'_')}" onclick="window._addInvFilterCat('${cat}')"
       style="font-size:.7rem;padding:3px 10px;border-radius:999px;cursor:pointer;white-space:nowrap;flex-shrink:0;
@@ -4102,52 +4093,37 @@ async function addInvItem() {
         color:${cat === '' ? 'var(--gold)' : 'var(--text-muted)'};transition:all .12s">
       ${cat || 'Tout'}
     </button>`).join('');
-
-  openModal('🎒 Butin — Ajouter un objet', `
-    <input class="input-field" id="loot-search" placeholder="🔍 Rechercher…"
+  openModal('🎁 Butin — Ajouter un objet', `
+    <input class="input-field" id="loot-search" placeholder="🔍 Rechercher un objet…"
       oninput="window._addInvFilter()" style="margin-bottom:.55rem">
-
     <div style="display:flex;gap:.3rem;flex-wrap:nowrap;overflow-x:auto;padding-bottom:.4rem;
       margin-bottom:.55rem;scrollbar-width:none;-webkit-overflow-scrolling:touch">
       ${catPills}
     </div>
-
     <div id="loot-grid" style="display:flex;flex-direction:column;gap:.28rem;
       max-height:38vh;overflow-y:auto;padding-right:2px;margin-bottom:.6rem">
       ${renderGrid()}
     </div>
-
     <div id="loot-selected" style="display:none;background:var(--bg-elevated);
       border:1px solid var(--gold);border-radius:10px;padding:.6rem .85rem;margin-bottom:.6rem">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
         <div style="min-width:0">
           <div id="loot-sel-nom" style="font-weight:700;font-size:.88rem;color:var(--text)"></div>
-          <div id="loot-sel-desc" style="font-size:.7rem;color:var(--text-dim);margin-top:1px;
-            white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+          <div id="loot-sel-desc" style="font-size:.7rem;color:var(--text-dim);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
         </div>
         <div style="display:flex;align-items:center;gap:.3rem;flex-shrink:0">
           <button onclick="const i=document.getElementById('loot-qte');i.value=Math.max(1,parseInt(i.value||1)-1)"
-            style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);
-            background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">−</button>
+            style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">−</button>
           <input type="number" id="loot-qte" value="1" min="1"
-            style="width:48px;text-align:center;font-size:.9rem;font-weight:700;
-              background:var(--bg-card);border:1px solid var(--border);border-radius:6px;
-              color:var(--text);padding:4px 0">
+            style="width:48px;text-align:center;font-size:.9rem;font-weight:700;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 0">
           <button onclick="const i=document.getElementById('loot-qte');i.value=parseInt(i.value||1)+1"
-            style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);
-            background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">+</button>
+            style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">+</button>
         </div>
       </div>
     </div>
-
-    <button class="btn btn-gold" style="width:100%" onclick="saveInvItemFromShop()">
-      ✓ Ajouter au butin
-    </button>
+    <button class="btn btn-gold" style="width:100%" onclick="saveInvItemFromShop()">✓ Ajouter au butin</button>
   `);
-
-  // Handlers globaux
   let _currentCat = '';
-
   window._addInvFilter = () => {
     const q = document.getElementById('loot-search')?.value || '';
     const grid = document.getElementById('loot-grid');
@@ -4155,13 +4131,9 @@ async function addInvItem() {
     if (window._addInvSelId) {
       const card = document.getElementById(`loot-card-${window._addInvSelId}`);
       const selItem = available.find(i => i.id === window._addInvSelId);
-      if (card && selItem) {
-        const rc = RARETE_COL[parseInt(selItem.rarete)||0] || 'var(--gold)';
-        card.style.background = `${rc}20`; card.style.borderColor = rc;
-      }
+      if (card && selItem) { const rc = RARETE_COL[parseInt(selItem.rarete)||0]||'var(--gold)'; card.style.background=`${rc}20`;card.style.borderColor=rc; }
     }
   };
-
   window._addInvFilterCat = (cat) => {
     _currentCat = cat;
     catOrder.concat(['']).forEach(c => {
@@ -4175,49 +4147,46 @@ async function addInvItem() {
     });
     window._addInvFilter();
   };
-
   window._addInvSelectItem = (id) => {
     const selItem = available.find(i => i.id === id);
     if (!selItem) return;
     if (window._addInvSelId && window._addInvSelId !== id) {
       const old = document.getElementById(`loot-card-${window._addInvSelId}`);
-      if (old) { old.style.background = 'var(--bg-elevated)'; old.style.borderColor = 'var(--border)'; }
+      if (old) { old.style.background='var(--bg-elevated)';old.style.borderColor='var(--border)'; }
     }
     window._addInvSelId = id;
-    const r = parseInt(selItem.rarete) || 0;
-    const rc = RARETE_COL[r] || 'var(--gold)';
+    const r = parseInt(selItem.rarete)||0;
+    const rc = RARETE_COL[r]||'var(--gold)';
     const card = document.getElementById(`loot-card-${id}`);
-    if (card) { card.style.background = `${rc}20`; card.style.borderColor = rc; }
+    if (card) { card.style.background=`${rc}20`;card.style.borderColor=rc; }
     const panel = document.getElementById('loot-selected');
-    if (panel) panel.style.display = 'block';
+    if (panel) panel.style.display='block';
     const nomEl = document.getElementById('loot-sel-nom');
-    if (nomEl) nomEl.innerHTML = `${selItem.nom}${selItem.rarete ? ` <span style="color:${rc};font-size:.72rem">${RARETE[r]}</span>` : ''}`;
+    if (nomEl) nomEl.innerHTML=`${selItem.nom}${selItem.rarete?` <span style="color:${rc};font-size:.72rem">${RARETE[r]}</span>`:''}`;
     const descEl = document.getElementById('loot-sel-desc');
-    if (descEl) descEl.textContent = selItem.description || selItem.effet || '';
+    if (descEl) descEl.textContent=selItem.description||selItem.effet||'';
   };
 }
 
 async function saveInvItemFromShop() {
   const c = STATE.activeChar; if (!c) return;
   const selId = window._addInvSelId;
-  if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
-  const item = (window._addInvShopItems || []).find(i => i.id === selId);
-  if (!item) { showNotif('Objet introuvable.', 'error'); return; }
-  const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
+  if (!selId) { showNotif('Sélectionne un objet.','error'); return; }
+  const item = (window._addInvShopItems||[]).find(i=>i.id===selId);
+  if (!item) { showNotif('Objet introuvable.','error'); return; }
+  const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value)||1);
   const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
   inv.push({ ...item, qte: String(qte), quantite: qte, source: 'boutique', itemId: item.id });
   c.inventaire = inv;
   if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
-  const stChar = (STATE.characters||[]).find(x => x.id === c.id);
+  const stChar = (STATE.characters||[]).find(x=>x.id===c.id);
   if (stChar) stChar.inventaire = inv;
   await updateInCol('characters', c.id, { inventaire: inv });
   window._addInvSelId = null;
   closeModal();
-  showNotif(`${item.nom} ×${qte} ajouté au butin !`, 'success');
-  renderCharSheet(c, 'inventaire');
+  showNotif(`${item.nom} ×${qte} ajouté au butin !`,'success');
+  renderCharSheet(c,'inventaire');
 }
-
-
 
 function editInvItem(idx) {
   const c = STATE.activeChar; if(!c) return;
