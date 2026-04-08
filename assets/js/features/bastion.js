@@ -85,13 +85,34 @@ function _normFondateurs(arr) {
   return (arr||[]).map(f => typeof f==='object'&&f!==null ? f : { charId:null, nom:String(f) });
 }
 function _getCharOr(char) {
-  return parseInt(char?.compte?.or ?? char?.or ?? 0) || 0;
+  // Priorité : compte.or direct, sinon char.or, sinon calculer depuis recettes/dépenses
+  if (char?.compte?.or !== undefined && char.compte.or !== null) return parseInt(char.compte.or) || 0;
+  if (char?.or !== undefined && char.or !== null) return parseInt(char.or) || 0;
+  // Calcul depuis le livre de compte (recettes - dépenses)
+  const recettes = (char?.compte?.recettes || []).reduce((s, r) => s + (parseFloat(r?.montant) || 0), 0);
+  const depenses = (char?.compte?.depenses || []).reduce((s, r) => s + (parseFloat(r?.montant) || 0), 0);
+  return Math.max(0, Math.round(recettes - depenses));
 }
 async function _setCharOr(char, newOr) {
   const safe = Math.max(0, Math.round(newOr));
+  const delta = safe - _getCharOr(char);
   if (char.compte !== undefined) {
-    char.compte = { ...(char.compte||{}), or: safe };
-    await updateInCol('characters', char.id, { compte: char.compte });
+    // Utiliser le système recettes/dépenses si c'est le mode du perso
+    const hasLivre = Array.isArray(char.compte?.recettes) || Array.isArray(char.compte?.depenses);
+    if (hasLivre) {
+      const now = new Date().toLocaleDateString('fr-FR');
+      const compte = { ...(char.compte || {}) };
+      if (delta > 0) {
+        compte.recettes = [...(compte.recettes || []), { date: now, libelle: 'Bastion', montant: delta }];
+      } else if (delta < 0) {
+        compte.depenses = [...(compte.depenses || []), { date: now, libelle: 'Bastion', montant: Math.abs(delta) }];
+      }
+      char.compte = compte;
+      await updateInCol('characters', char.id, { compte });
+    } else {
+      char.compte = { ...(char.compte || {}), or: safe };
+      await updateInCol('characters', char.id, { compte: char.compte });
+    }
   } else {
     char.or = safe;
     await updateInCol('characters', char.id, { or: safe });
@@ -817,7 +838,8 @@ async function confirmerDepotDepuisInventaire() {
     const item = invFrais[idx];
     if (!item) continue;
     const uniqueId = `bi_${Date.now()}_${++counter}_${Math.random().toString(36).slice(2,6)}`;
-    invBast.push({ id: uniqueId, nom: item.nom||'?', quantite: item.quantite||1, description: item.description||'', deposePar: char.nom||'?', date: now });
+    // Sauvegarder l'item COMPLET pour pouvoir le restituer fidèlement
+    invBast.push({ ...item, id: uniqueId, quantite: item.quantite||item.qte||1, deposePar: char.nom||'?', date: now });
     invHisto.push({ id:`bih_${Date.now()}_${counter}`, action:'depot', nom: item.nom||'?', quantite: item.quantite||1, par: char.nom||'?', date: now });
   }
 
@@ -846,7 +868,22 @@ async function recupererObjetBastion(itemId) {
     await _setCharOr(char, _getCharOr(char) + item.quantite);
   } else {
     const invChar = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
-    invChar.push({ id:`rec_${Date.now()}`, nom:item.nom, quantite:item.quantite, description:item.description||'', source:'bastion' });
+    const qteRecupere = item.quantite || 1;
+    // Chercher un item stackable identique (même itemId ou même nom+template si pas d'itemId)
+    const canStack = item.itemId || (item.nom && item.template);
+    const existing = canStack ? invChar.find(i =>
+      (item.itemId && i.itemId === item.itemId) ||
+      (!item.itemId && i.nom === item.nom && i.template === item.template && i.template !== 'arme' && i.template !== 'armure' && i.template !== 'bijou')
+    ) : null;
+    if (existing) {
+      // Stacker sur l'item existant
+      existing.quantite = (existing.quantite || existing.qte || 1) + qteRecupere;
+      existing.qte = existing.quantite;
+    } else {
+      // Restituer l'item complet tel qu'il était (sans les champs bastion)
+      const { deposePar, date, ...itemOriginal } = item;
+      invChar.push({ ...itemOriginal, quantite: qteRecupere, qte: qteRecupere });
+    }
     await updateInCol('characters', char.id, { inventaire:invChar });
     char.inventaire = invChar;
   }
