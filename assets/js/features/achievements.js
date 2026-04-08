@@ -276,7 +276,7 @@ function _toNative(canvas, clientX, clientY) {
   return { x: (clientX - r.left) / _crop.dispScale, y: (clientY - r.top) / _crop.dispScale };
 }
 
-const _clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// _clamp → importé depuis shared/image-upload.js
 
 function _bindCropEvents(canvas) {
   const R   = 4 / 3;
