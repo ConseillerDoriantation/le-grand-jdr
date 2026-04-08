@@ -3,6 +3,8 @@ import { openModal, closeModal, closeModalDirect } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
+import { _esc } from '../shared/html.js';
+import { calcOr, getMod } from '../shared/char-stats.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AMÉLIORATIONS STATIQUES (préchargées par défaut)
@@ -84,16 +86,9 @@ export function getDefaultBastion() {
 function _normFondateurs(arr) {
   return (arr||[]).map(f => typeof f==='object'&&f!==null ? f : { charId:null, nom:String(f) });
 }
-function _getCharOr(char) {
-  // Même logique que calcOr dans characters.js
-  const compte = char?.compte || { recettes:[], depenses:[] };
-  const totalR = (compte.recettes||[]).reduce((s,r) => s + (parseFloat(r?.montant)||0), 0);
-  const totalD = (compte.depenses||[]).reduce((s,d) => s + (parseFloat(d?.montant)||0), 0);
-  const fromCompte = Math.round((totalR - totalD) * 100) / 100;
-  if (totalR > 0 || totalD > 0) return Math.max(0, fromCompte);
-  // Fallback : champ or direct (ancien format)
-  return Math.max(0, parseInt(char?.or) || 0);
-}
+// _getCharOr → délègue à calcOr depuis shared/char-stats.js
+const _getCharOr = (char) => calcOr(char);
+// _setCharOr — écrit dans compte.recettes/dépenses (logique alignée sur shop.js)
 async function _setCharOr(char, newOr) {
   const safe  = Math.max(0, Math.round(newOr * 100) / 100);
   const delta = safe - _getCharOr(char);
