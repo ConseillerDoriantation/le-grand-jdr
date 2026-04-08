@@ -3515,6 +3515,7 @@ async function equipSlotFromInv(val, slot) {
 }
 
 // Équipement — filtré depuis l'inventaire du personnage
+// Équipement — filtré depuis l'inventaire du personnage
 function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equipped = (c.equipement||{})[slot]||{};
