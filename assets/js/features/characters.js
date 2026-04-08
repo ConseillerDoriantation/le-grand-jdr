@@ -4,6 +4,13 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
+import { _esc, _nl2br, _norm, modStr } from '../shared/html.js';
+import {
+  getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct,
+  getMaitriseBonus as _getMaitriseBonus,
+  ITEM_STAT_META, ITEM_STAT_BY_FULL, ITEM_STAT_BY_STORE,
+  statShort, collectItemBonusEntries, formatItemBonusText, computeEquipStatsBonus,
+} from '../shared/char-stats.js';
 
 // ══════════════════════════════════════════════
 // STYLES DE COMBAT
@@ -284,39 +291,12 @@ function _getTraits(item = {}) {
   return [];
 }
 
-function getMod(c, key) {
-  const base = (c.stats||{})[key]||8;
-  const bonus = (c.statsBonus||{})[key]||0;
-  const total = Math.min(22, base+bonus); // modificateur plafonné à +6 (score max 22)
-  return Math.floor((total-10)/2);
-}
-function modStr(v) { return v >= 0 ? '+'+v : String(v); }
-const ITEM_STAT_META = [
-  { full:'force', store:'fo', short:'Fo', label:'Force' },
-  { full:'dexterite', store:'dex', short:'Dex', label:'Dextérité' },
-  { full:'intelligence', store:'in', short:'Int', label:'Intelligence' },
-  { full:'sagesse', store:'sa', short:'Sag', label:'Sagesse' },
-  { full:'constitution', store:'co', short:'Con', label:'Constitution' },
-  { full:'charisme', store:'ch', short:'Cha', label:'Charisme' },
-];
-const ITEM_STAT_BY_FULL = Object.fromEntries(ITEM_STAT_META.map(s => [s.full, s]));
-const ITEM_STAT_BY_STORE = Object.fromEntries(ITEM_STAT_META.map(s => [s.store, s]));
+// getMod, modStr → importés depuis shared/char-stats.js et shared/html.js
+// ITEM_STAT_META, ITEM_STAT_BY_FULL, ITEM_STAT_BY_STORE, statShort → importés depuis shared/char-stats.js
 
-function statShort(key) {
-  return ITEM_STAT_BY_FULL[key]?.short || '';
-}
+// collectItemBonusEntries → importé depuis shared/char-stats.js
 
-function collectItemBonusEntries(item = {}) {
-  return ITEM_STAT_META
-    .map(stat => ({ ...stat, value: parseInt(item?.[stat.store]) || 0 }))
-    .filter(stat => stat.value);
-}
-
-function formatItemBonusText(item = {}) {
-  const entries = collectItemBonusEntries(item);
-  if (entries.length) return entries.map(stat => `${stat.short} ${stat.value > 0 ? '+' : ''}${stat.value}`).join(' · ');
-  return item?.stats || '';
-}
+// formatItemBonusText → importé depuis shared/char-stats.js
 
 function getEquippedInventoryIndexMap(c) {
   const map = new Map();
@@ -515,99 +495,9 @@ function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
 }
 
 // Retourne le bonus de maîtrise d'un item pour un personnage
-function _getMaitriseBonus(c, item = {}) {
-  if (!c?.maitrises?.length) return 0;
 
-  // Construire la liste des types à tester par priorité :
-  // 1. sousType du slot équipé (copié depuis boutique lors de l'équipement)
-  // 2. typeArme du slot (saisi manuellement)
-  // 3. sousType de l'item inventaire source (si le slot a un sourceInvIndex)
-  // 4. typeArme de l'item inventaire source
-  const candidates = new Set();
-
-  const addIfNonEmpty = v => { if (v && v.trim()) candidates.add(v.toLowerCase().trim()); };
-
-  addIfNonEmpty(item.sousType);
-  addIfNonEmpty(item.typeArme);
-
-  // Chercher dans l'inventaire via sourceInvIndex si le slot n'a pas de sousType
-  if (!item.sousType && Number.isInteger(item.sourceInvIndex)) {
-    const invItem = (c.inventaire || [])[item.sourceInvIndex];
-    if (invItem) {
-      addIfNonEmpty(invItem.sousType);
-      addIfNonEmpty(invItem.typeArme);
-    }
-  }
-
-  if (!candidates.size) return 0;
-
-  let best = 0;
-  for (const m of c.maitrises) {
-    const mType = (m.typeArme || '').toLowerCase().trim();
-    if (!mType) continue;
-    for (const cand of candidates) {
-      if (cand === mType || cand.includes(mType) || mType.includes(cand)) {
-        best = Math.max(best, parseInt(m.niveau) || 0);
-        break;
-      }
-    }
-  }
-  return best;
-}
-
-function calcCA(c) {
-  const equip = c.equipement||{};
-  const torse = equip['Torse']?.typeArmure||'';
-  let caBase = 8;
-  if (torse==='Légère') caBase=10;
-  else if (torse==='Intermédiaire') caBase=12;
-  else if (torse==='Lourde') caBase=14;
-  const caEquip = Object.values(equip).reduce((s,it)=>s+(it.ca||0),0);
-
-  // +2 CA si bouclier en main secondaire
-  const mainS = equip['Main secondaire'];
-  const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
-  const hasBouclier = stypeS.includes('bouclier') || stypeS.includes('shield');
-  const bouclierBonus = hasBouclier ? 2 : 0;
-
-  return caBase + getMod(c,'dexterite') + caEquip + bouclierBonus;
-}
-function calcVitesse(c) { return 3 + getMod(c,'force'); }
-function calcDeckMax(c) {
-  const modIn = getMod(c,'intelligence');
-  const niveau = c.niveau||1;
-  return 3 + Math.min(0,modIn) + Math.floor(Math.max(0,modIn) * Math.pow(Math.max(0,niveau-1),0.75));
-}
-function calcPVMax(c) {
-  const modCo = getMod(c,'constitution');
-  const niv = c.niveau||1;
-  // Bonus positif : +modCo PV par niveau gagné (scalable)
-  // Malus négatif  : appliqué UNE SEULE FOIS (pas multiplié par niveau)
-  // Ex: modCo=-1, niv=10 → pvBase-1 (et non pvBase-10)
-  const progression = modCo > 0 ? Math.floor(modCo*(niv-1)) : modCo;
-  return Math.max(1, (c.pvBase||10) + progression);
-}
-function calcPMMax(c) {
-  const modSa = getMod(c,'sagesse');
-  const niv = c.niveau||1;
-  // Même logique : malus fixe une seule fois, bonus scalable par niveau
-  const progression = modSa > 0 ? Math.floor(modSa*(niv-1)) : modSa;
-  return Math.max(0, (c.pmBase||10) + progression);
-}
-
-function calcOr(c) {
-  const compte = c.compte||{recettes:[],depenses:[]};
-  const totalR = (compte.recettes||[]).reduce((s,r)=>s+(parseFloat(r.montant)||0),0);
-  const totalD = (compte.depenses||[]).reduce((s,d)=>s+(parseFloat(d.montant)||0),0);
-  return Math.round((totalR - totalD) * 100) / 100;
-}
-
-
-function calcPalier(niveau) {
-  return 100 * niveau * niveau; // 100, 400, 900, 1600...
-}
-
-function pct(cur,max) { return max>0 ? Math.max(0,Math.min(100,Math.round(cur/max*100))) : 0; }
+// _getMaitriseBonus → importé depuis shared/char-stats.js (comme getMaitriseBonus)
+// calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct → importés depuis shared/char-stats.js
 
 // ══════════════════════════════════════════════
 // SÉLECTION
@@ -3522,18 +3412,7 @@ async function saveSort(idx) {
 }
 
 
-function computeEquipStatsBonus(equip = {}) {
-  const bonus = { force:0, dexterite:0, intelligence:0, sagesse:0, constitution:0, charisme:0 };
-  Object.values(equip || {}).forEach(it => {
-    bonus.force        += parseInt(it?.fo)  || 0;
-    bonus.dexterite    += parseInt(it?.dex) || 0;
-    bonus.intelligence += parseInt(it?.in)  || 0;
-    bonus.sagesse      += parseInt(it?.sa)  || 0;
-    bonus.constitution += parseInt(it?.co)  || 0;
-    bonus.charisme     += parseInt(it?.ch)  || 0;
-  });
-  return bonus;
-}
+// computeEquipStatsBonus → importé depuis shared/char-stats.js
 
 function inferAttackStatFromItem(item = {}) {
   if (item.toucherStat) return item.toucherStat;
