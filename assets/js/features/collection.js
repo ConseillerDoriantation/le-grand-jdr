@@ -1,6 +1,7 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import { _esc } from '../shared/html.js';
 
 let _cards = [];
 let _templateUrl = '';
