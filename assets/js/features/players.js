@@ -670,46 +670,51 @@ window._ppConfirmCrop = () => {
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 async function savePlayerPresent(id='') {
-  // Image : crop > existante > effacée
-  let imageUrl='';
-  if(window._ppImgBase64!=null&&window._ppImgBase64!==undefined){
-    imageUrl=window._ppImgBase64;
-  } else if(id && !window._ppImgCleared){
-    const existing=STORE.presentations.find(p=>p.id===id);
-    imageUrl=existing?.imageUrl||'';
+  try {
+    // Image : crop > existante > effacée
+    let imageUrl='';
+    if(window._ppImgBase64!=null&&window._ppImgBase64!==undefined){
+      imageUrl=window._ppImgBase64;
+    } else if(id && !window._ppImgCleared){
+      const existing=STORE.presentations.find(p=>p.id===id);
+      imageUrl=existing?.imageUrl||'';
+    }
+    window._ppImgBase64=null; window._ppImgCleared=false;
+
+    const data = {
+      charId:        document.getElementById('pp-char-id')?.value        || '',
+      nom:           document.getElementById('pp-nom')?.value?.trim()    || 'Personnage',
+      chapitre:      document.getElementById('pp-chap')?.value?.trim()   || '',
+      classe:        document.getElementById('pp-classe')?.value?.trim() || '',
+      race:          document.getElementById('pp-race')?.value?.trim()   || '',
+      niveau:        parseInt(document.getElementById('pp-niveau')?.value,10)||1,
+      joueur:        document.getElementById('pp-joueur')?.value?.trim() || '',
+      bio:           document.getElementById('pp-bio')?.value            || '',
+      archive:       document.getElementById('pp-archive')?.value        || '',
+      archiveSource: document.getElementById('pp-source')?.value?.trim() || '',
+      emoji:         '',
+      imageUrl,
+      // Ordre + visibilité
+      ordre:         parseInt(document.getElementById('pp-ordre')?.value,10) || 999,
+      visible:       document.getElementById('pp-visible')?.checked ?? true,
+      // Confidentialité
+      afficherPV:    document.getElementById('pp-show-pv')?.checked    ?? true,
+      afficherPM:    document.getElementById('pp-show-pm')?.checked    ?? true,
+      afficherCA:    document.getElementById('pp-show-ca')?.checked    ?? true,
+      afficherOr:    document.getElementById('pp-show-or')?.checked    ?? false,
+      afficherStats: document.getElementById('pp-show-stats')?.checked ?? true,
+    };
+
+    if(id) await updateInCol('players',id,data);
+    else   await addToCol('players',data);
+
+    closeModal();
+    showNotif('Présentation enregistrée !','success');
+    await PAGES.players();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-  window._ppImgBase64=null; window._ppImgCleared=false;
-
-  const data = {
-    charId:        document.getElementById('pp-char-id')?.value        || '',
-    nom:           document.getElementById('pp-nom')?.value?.trim()    || 'Personnage',
-    chapitre:      document.getElementById('pp-chap')?.value?.trim()   || '',
-    classe:        document.getElementById('pp-classe')?.value?.trim() || '',
-    race:          document.getElementById('pp-race')?.value?.trim()   || '',
-    niveau:        parseInt(document.getElementById('pp-niveau')?.value,10)||1,
-    joueur:        document.getElementById('pp-joueur')?.value?.trim() || '',
-    bio:           document.getElementById('pp-bio')?.value            || '',
-    archive:       document.getElementById('pp-archive')?.value        || '',
-    archiveSource: document.getElementById('pp-source')?.value?.trim() || '',
-    emoji:         '',
-    imageUrl,
-    // Ordre + visibilité
-    ordre:         parseInt(document.getElementById('pp-ordre')?.value,10) || 999,
-    visible:       document.getElementById('pp-visible')?.checked ?? true,
-    // Confidentialité
-    afficherPV:    document.getElementById('pp-show-pv')?.checked    ?? true,
-    afficherPM:    document.getElementById('pp-show-pm')?.checked    ?? true,
-    afficherCA:    document.getElementById('pp-show-ca')?.checked    ?? true,
-    afficherOr:    document.getElementById('pp-show-or')?.checked    ?? false,
-    afficherStats: document.getElementById('pp-show-stats')?.checked ?? true,
-  };
-
-  if(id) await updateInCol('players',id,data);
-  else   await addToCol('players',data);
-
-  closeModal();
-  showNotif('Présentation enregistrée !','success');
-  await PAGES.players();
 }
 
 function prefillPlayerPresentFromLinkedChar(force=false) {
@@ -723,11 +728,16 @@ function prefillPlayerPresentFromLinkedChar(force=false) {
 }
 
 async function deletePlayerPresent(id) {
-  if (!await confirmModal('Supprimer cette présentation ?')) return;
-  await deleteFromCol('players',id);
-  showNotif('Supprimée.','success');
-  STORE.activeId='';
-  await PAGES.players();
+  try {
+    if (!await confirmModal('Supprimer cette présentation ?')) return;
+    await deleteFromCol('players',id);
+    showNotif('Supprimée.','success');
+    STORE.activeId='';
+    await PAGES.players();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function editPlayerPresent(id) {
