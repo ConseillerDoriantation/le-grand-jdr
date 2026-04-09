@@ -127,8 +127,13 @@ function detectCombatStyle(c, styles) {
 
 // Admin : ouvrir la gestion des styles de combat
 async function openCombatStylesAdmin() {
-  const styles = await loadCombatStyles();
-  _renderCombatStylesModal(styles);
+  try {
+    const styles = await loadCombatStyles();
+    _renderCombatStylesModal(styles);
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 function _renderCombatStylesModal(styles) {
@@ -1400,26 +1405,31 @@ function sortDragEnd(e) {
   });
 }
 async function sortDrop(e, toIdx) {
-  e.preventDefault();
-  const card = e.currentTarget;
-  const rect = card.getBoundingClientRect();
-  const insertAfter = e.clientY >= rect.top + rect.height / 2;
-  const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
-  card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-  document.querySelectorAll('.cs-sort-row').forEach(el =>
-    el.classList.remove('cs-drop-before', 'cs-drop-after'));
-  const fromIdx = _dragSortIdx;
-  _dragSortIdx = null;
-  if (fromIdx === null) return;
-  const c = STATE.activeChar; if (!c) return;
-  const sorts = [...(c.deck_sorts||[])];
-  if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return;
-  const [moved] = sorts.splice(fromIdx, 1);
-  const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
-  sorts.splice(insertAt, 0, moved);
-  c.deck_sorts = sorts;
-  await updateInCol('characters', c.id, {deck_sorts: sorts});
-  renderCharSheet(c, 'sorts');
+  try {
+    e.preventDefault();
+    const card = e.currentTarget;
+    const rect = card.getBoundingClientRect();
+    const insertAfter = e.clientY >= rect.top + rect.height / 2;
+    const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
+    card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
+    document.querySelectorAll('.cs-sort-row').forEach(el =>
+      el.classList.remove('cs-drop-before', 'cs-drop-after'));
+    const fromIdx = _dragSortIdx;
+    _dragSortIdx = null;
+    if (fromIdx === null) return;
+    const c = STATE.activeChar; if (!c) return;
+    const sorts = [...(c.deck_sorts||[])];
+    if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return;
+    const [moved] = sorts.splice(fromIdx, 1);
+    const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
+    sorts.splice(insertAt, 0, moved);
+    c.deck_sorts = sorts;
+    await updateInCol('characters', c.id, {deck_sorts: sorts});
+    renderCharSheet(c, 'sorts');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 
@@ -2395,15 +2405,20 @@ function previewXpBar(input, palier) {
 }
 
 async function saveXpDirect(charId, input) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
-  if (!c) return;
-  const palier = calcPalier(c.niveau||1);
-  const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
-  c.exp = val;
-  input.value = val;
-  previewXpBar(input, palier);
-  await updateInCol('characters', charId, {exp: val});
-  showNotif('XP mis à jour !', 'success');
+  try {
+    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    if (!c) return;
+    const palier = calcPalier(c.niveau||1);
+    const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
+    c.exp = val;
+    input.value = val;
+    previewXpBar(input, palier);
+    await updateInCol('characters', charId, {exp: val});
+    showNotif('XP mis à jour !', 'success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 function toggleNote(idx) {
@@ -2439,22 +2454,32 @@ function editNoteTitle(idx) {
 }
 
 async function saveNote(idx) {
-  const c = STATE.activeChar; if(!c) return;
-  const ta = document.getElementById(`note-area-${idx}`);
-  if (!ta) return;
-  c.notesList[idx].contenu = ta.value;
-  await updateInCol('characters', c.id, {notesList: c.notesList});
-  showNotif('Note enregistrée !','success');
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const ta = document.getElementById(`note-area-${idx}`);
+    if (!ta) return;
+    c.notesList[idx].contenu = ta.value;
+    await updateInCol('characters', c.id, {notesList: c.notesList});
+    showNotif('Note enregistrée !','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteNote(idx) {
-  const c = STATE.activeChar; if(!c) return;
-  if (!await confirmModal('Supprimer cette note ?')) return;
-  c.notesList.splice(idx, 1);
-  if (window._openNote >= c.notesList.length) window._openNote = null;
-  await updateInCol('characters', c.id, {notesList: c.notesList});
-  _renderTab('notes', c, window._canEditChar);
-  showNotif('Note supprimée.','success');
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    if (!await confirmModal('Supprimer cette note ?')) return;
+    c.notesList.splice(idx, 1);
+    if (window._openNote >= c.notesList.length) window._openNote = null;
+    await updateInCol('characters', c.id, {notesList: c.notesList});
+    _renderTab('notes', c, window._canEditChar);
+    showNotif('Note supprimée.','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 
@@ -2574,11 +2599,16 @@ function addCompteRow(type) {
 }
 
 async function deleteCompteRow(type, idx) {
-  const c = STATE.activeChar; if(!c) return;
-  (c.compte||{})[type]?.splice(idx,1);
-  await updateInCol('characters', c.id, {compte: c.compte});
-  _renderTab('compte', c, window._canEditChar);
-  refreshOrDisplay(c);
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    (c.compte||{})[type]?.splice(idx,1);
+    await updateInCol('characters', c.id, {compte: c.compte});
+    _renderTab('compte', c, window._canEditChar);
+    refreshOrDisplay(c);
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 function inlineEditCompteField(type, idx, field, el) {
@@ -2661,68 +2691,73 @@ function openSellInvModal(charId, indicesB64, prixVente, nom) {
 }
 
 async function sellInvItemBulk(charId, indicesB64, prixVente) {
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) return;
+  try {
+    const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+    if (!c) return;
 
-  const allIndices = _decodeIndices(indicesB64);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
-  const equippedMap = getEquippedInventoryIndexMap(c);
-  const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
-  const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
-  const indicesToSell = [...unequippedIndices, ...equippedIndices].slice(0, qty);
+    const allIndices = _decodeIndices(indicesB64);
+    const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
+    const equippedMap = getEquippedInventoryIndexMap(c);
+    const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
+    const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
+    const indicesToSell = [...unequippedIndices, ...equippedIndices].slice(0, qty);
 
-  const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const item     = inv[indicesToSell[0]];
-  if (!item) return;
-  const itemNom  = item.nom || 'objet';
-  const totalPrix = prixVente * qty;
+    const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    const item     = inv[indicesToSell[0]];
+    if (!item) return;
+    const itemNom  = item.nom || 'objet';
+    const totalPrix = prixVente * qty;
 
-  // Retirer les items vendus (du plus grand index au plus petit pour ne pas décaler)
-  const sorted = [...indicesToSell].sort((a,b)=>b-a);
-  sorted.forEach(idx => inv.splice(idx, 1));
+    // Retirer les items vendus (du plus grand index au plus petit pour ne pas décaler)
+    const sorted = [...indicesToSell].sort((a,b)=>b-a);
+    sorted.forEach(idx => inv.splice(idx, 1));
 
-  // Créditer l'or
-  const compte   = c.compte || { recettes:[], depenses:[] };
-  const recettes = [...(compte.recettes||[])];
-  recettes.push({
-    date:    new Date().toLocaleDateString('fr-FR'),
-    libelle: qty > 1 ? `Vente ×${qty} : ${itemNom}` : `Vente : ${itemNom}`,
-    montant: totalPrix,
-  });
+    // Créditer l'or
+    const compte   = c.compte || { recettes:[], depenses:[] };
+    const recettes = [...(compte.recettes||[])];
+    recettes.push({
+      date:    new Date().toLocaleDateString('fr-FR'),
+      libelle: qty > 1 ? `Vente ×${qty} : ${itemNom}` : `Vente : ${itemNom}`,
+      montant: totalPrix,
+    });
 
-  // Réincrémenter le stock boutique si besoin
-  if (item.itemId && window.sellInvItemFromShop) {
-    // On réincrémente N fois dans la boutique
-    for (let i = 0; i < qty; i++) {
-      await window._restockShopItem?.(item.itemId);
+    // Réincrémenter le stock boutique si besoin
+    if (item.itemId && window.sellInvItemFromShop) {
+      // On réincrémente N fois dans la boutique
+      for (let i = 0; i < qty; i++) {
+        await window._restockShopItem?.(item.itemId);
+      }
     }
-  }
 
-  const equipSync = syncEquipmentAfterInventoryMutation(c, indicesToSell);
-  const payload = {
-    inventaire: inv,
-    compte: { ...compte, recettes },
-  };
-  if (equipSync.changed) {
-    payload.equipement = equipSync.equipement;
-    payload.statsBonus = equipSync.statsBonus;
-  }
+    const equipSync = syncEquipmentAfterInventoryMutation(c, indicesToSell);
+    const payload = {
+      inventaire: inv,
+      compte: { ...compte, recettes },
+    };
+    if (equipSync.changed) {
+      payload.equipement = equipSync.equipement;
+      payload.statsBonus = equipSync.statsBonus;
+    }
 
-  await updateInCol('characters', charId, payload);
-  c.inventaire = inv;
-  c.compte     = { ...compte, recettes };
-  if (equipSync.changed) {
-    c.equipement = equipSync.equipement;
-    c.statsBonus = equipSync.statsBonus;
-  }
+    await updateInCol('characters', charId, payload);
+    c.inventaire = inv;
+    c.compte     = { ...compte, recettes };
+    if (equipSync.changed) {
+      c.equipement = equipSync.equipement;
+      c.statsBonus = equipSync.statsBonus;
+    }
 
-  closeModal();
-  const unequipMsg = equipSync.removedSlots.length
-    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
-    : '';
-  showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !${unequipMsg}`, 'success');
-  refreshOrDisplay(c);
-  renderCharSheet(c, window._currentCharTab || 'inventaire');
+    closeModal();
+    const unequipMsg = equipSync.removedSlots.length
+      ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
+      : '';
+    showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !${unequipMsg}`, 'success');
+    refreshOrDisplay(c);
+    renderCharSheet(c, window._currentCharTab || 'inventaire');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Alias pour compatibilité avec l'ancien code
@@ -2764,32 +2799,37 @@ function openDeleteInvModal(charId, indicesB64, nom) {
 }
 
 async function deleteInvItemBulk(charId, indicesB64) {
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) return;
-  const allIndices = _decodeIndices(indicesB64);
-  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
-  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const removedIndices = allIndices.slice(0, qty);
-  const sorted = [...removedIndices].sort((a,b)=>b-a);
-  sorted.forEach(idx => inv.splice(idx, 1));
-  const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
-  const payload = { inventaire: inv };
-  if (equipSync.changed) {
-    payload.equipement = equipSync.equipement;
-    payload.statsBonus = equipSync.statsBonus;
+  try {
+    const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+    if (!c) return;
+    const allIndices = _decodeIndices(indicesB64);
+    const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
+    const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    const removedIndices = allIndices.slice(0, qty);
+    const sorted = [...removedIndices].sort((a,b)=>b-a);
+    sorted.forEach(idx => inv.splice(idx, 1));
+    const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
+    const payload = { inventaire: inv };
+    if (equipSync.changed) {
+      payload.equipement = equipSync.equipement;
+      payload.statsBonus = equipSync.statsBonus;
+    }
+    await updateInCol('characters', charId, payload);
+    c.inventaire = inv;
+    if (equipSync.changed) {
+      c.equipement = equipSync.equipement;
+      c.statsBonus = equipSync.statsBonus;
+    }
+    closeModal();
+    const deleteMsg = equipSync.removedSlots.length
+      ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
+      : '';
+    showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
+    renderCharSheet(c, window._currentCharTab || 'inventaire');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-  await updateInCol('characters', charId, payload);
-  c.inventaire = inv;
-  if (equipSync.changed) {
-    c.equipement = equipSync.equipement;
-    c.statsBonus = equipSync.statsBonus;
-  }
-  closeModal();
-  const deleteMsg = equipSync.removedSlots.length
-    ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
-    : '';
-  showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
-  renderCharSheet(c, window._currentCharTab || 'inventaire');
 }
 
 // ══════════════════════════════════════════════
@@ -2950,94 +2990,139 @@ async function sendInvItem(fromCharId, indicesB64) {
   renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
 }
 async function adjustStat(stat, delta, charId) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
-  if (!c) return;
-  const base = stat==='pvActuel'?'pvBase':'pmBase';
-  const maxVal = stat==='pvActuel' ? calcPVMax(c) : calcPMMax(c);
-  const cur = c[stat]??maxVal;
-  const newVal = Math.max(0, Math.min(maxVal, cur+delta));
-  c[stat] = newVal;
-  await updateInCol('characters', c.id, {[stat]: newVal});
+  try {
+    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    if (!c) return;
+    const base = stat==='pvActuel'?'pvBase':'pmBase';
+    const maxVal = stat==='pvActuel' ? calcPVMax(c) : calcPMMax(c);
+    const cur = c[stat]??maxVal;
+    const newVal = Math.max(0, Math.min(maxVal, cur+delta));
+    c[stat] = newVal;
+    await updateInCol('characters', c.id, {[stat]: newVal});
 
-  const p = pct(newVal, maxVal);
-  if (stat==='pvActuel') {
-    const valEl=document.getElementById('pv-val'), barEl=document.getElementById('pv-bar');
-    if(valEl){valEl.textContent=newVal;valEl.style.color=p<25?'var(--crimson-light)':p<50?'#f59e0b':'var(--green)';}
-    if(barEl){barEl.style.width=p+'%';barEl.className='cs-bar-fill cs-bar-hp-fill '+(p>50?'high':p>25?'mid':'');}
-  } else {
-    const valEl=document.getElementById('pm-val'), barEl=document.getElementById('pm-bar');
-    if(valEl) valEl.textContent=newVal;
-    if(barEl) barEl.style.width=p+'%';
+    const p = pct(newVal, maxVal);
+    if (stat==='pvActuel') {
+      const valEl=document.getElementById('pv-val'), barEl=document.getElementById('pv-bar');
+      if(valEl){valEl.textContent=newVal;valEl.style.color=p<25?'var(--crimson-light)':p<50?'#f59e0b':'var(--green)';}
+      if(barEl){barEl.style.width=p+'%';barEl.className='cs-bar-fill cs-bar-hp-fill '+(p>50?'high':p>25?'mid':'');}
+    } else {
+      const valEl=document.getElementById('pm-val'), barEl=document.getElementById('pm-bar');
+      if(valEl) valEl.textContent=newVal;
+      if(barEl) barEl.style.width=p+'%';
+    }
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
 }
 
 async function saveNotes() {
-  const c = STATE.activeChar; if(!c) return;
-  const notes = document.getElementById('char-notes-area')?.value||'';
-  c.notes = notes;
-  await updateInCol('characters', c.id, {notes});
-  showNotif('Notes sauvegardées !','success');
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const notes = document.getElementById('char-notes-area')?.value||'';
+    c.notes = notes;
+    await updateInCol('characters', c.id, {notes});
+    showNotif('Notes sauvegardées !','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function toggleSort(idx) {
-  const c=STATE.activeChar; if(!c) return;
-  const sorts=c.deck_sorts||[];
-  sorts[idx].actif=!sorts[idx].actif;
-  c.deck_sorts=sorts;
-  await updateInCol('characters',c.id,{deck_sorts:sorts});
-  renderCharSheet(c,'sorts');
+  try {
+    const c=STATE.activeChar; if(!c) return;
+    const sorts=c.deck_sorts||[];
+    sorts[idx].actif=!sorts[idx].actif;
+    c.deck_sorts=sorts;
+    await updateInCol('characters',c.id,{deck_sorts:sorts});
+    renderCharSheet(c,'sorts');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function toggleQuete(idx) {
-  const c=STATE.activeChar; if(!c) return;
-  c.quetes[idx].valide=!c.quetes[idx].valide;
-  await updateInCol('characters',c.id,{quetes:c.quetes});
-  renderCharSheet(c,'quetes');
+  try {
+    const c=STATE.activeChar; if(!c) return;
+    c.quetes[idx].valide=!c.quetes[idx].valide;
+    await updateInCol('characters',c.id,{quetes:c.quetes});
+    renderCharSheet(c,'quetes');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteQuete(idx) {
-  const c=STATE.activeChar; if(!c) return;
-  c.quetes.splice(idx,1);
-  await updateInCol('characters',c.id,{quetes:c.quetes});
-  renderCharSheet(c,'quetes');
+  try {
+    const c=STATE.activeChar; if(!c) return;
+    c.quetes.splice(idx,1);
+    await updateInCol('characters',c.id,{quetes:c.quetes});
+    renderCharSheet(c,'quetes');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteSort(idx) {
-  const c=STATE.activeChar; if(!c) return;
-  c.deck_sorts.splice(idx,1);
-  await updateInCol('characters',c.id,{deck_sorts:c.deck_sorts});
-  renderCharSheet(c,'sorts');
+  try {
+    const c=STATE.activeChar; if(!c) return;
+    c.deck_sorts.splice(idx,1);
+    await updateInCol('characters',c.id,{deck_sorts:c.deck_sorts});
+    renderCharSheet(c,'sorts');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteInvItem(idx) {
-  const c=STATE.activeChar; if(!c) return;
-  c.inventaire.splice(idx,1);
-  await updateInCol('characters',c.id,{inventaire:c.inventaire});
-  renderCharSheet(c,'inventaire');
+  try {
+    const c=STATE.activeChar; if(!c) return;
+    c.inventaire.splice(idx,1);
+    await updateInCol('characters',c.id,{inventaire:c.inventaire});
+    renderCharSheet(c,'inventaire');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteChar(id) {
-  if (!await confirmModal('Supprimer ce personnage ?')) return;
-  await deleteFromCol('characters',id);
-  showNotif('Personnage supprimé.','success');
-  PAGES.characters();
+  try {
+    if (!await confirmModal('Supprimer ce personnage ?')) return;
+    await deleteFromCol('characters',id);
+    showNotif('Personnage supprimé.','success');
+    PAGES.characters();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function createNewChar() {
-  const data = {
-    uid: STATE.user.uid,
-    ownerPseudo: STATE.profile?.pseudo||'?',
-    nom:'Nouveau personnage', titre:'', titres:[],
-    niveau:1, or:0,
-    pvBase:10, pvActuel:10, pmBase:10, pmActuel:10,
-    exp:0,
-    stats:{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10},
-    statsBonus:{},
-    equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
-  };
-  await addToCol('characters', data);
-  showNotif('Personnage créé !','success');
-  PAGES.characters();
+  try {
+    const data = {
+      uid: STATE.user.uid,
+      ownerPseudo: STATE.profile?.pseudo||'?',
+      nom:'Nouveau personnage', titre:'', titres:[],
+      niveau:1, or:0,
+      pvBase:10, pvActuel:10, pmBase:10, pmActuel:10,
+      exp:0,
+      stats:{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10},
+      statsBonus:{},
+      equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
+    };
+    await addToCol('characters', data);
+    showNotif('Personnage créé !','success');
+    PAGES.characters();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Gestion des titres via modal compact
@@ -3081,13 +3166,18 @@ function _refreshTitresList() {
 }
 
 async function saveTitres(charId) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
-  if (!c) return;
-  c.titres = window._editTitres||[];
-  await updateInCol('characters', charId, {titres: c.titres});
-  closeModal();
-  renderCharSheet(c, window._currentCharTab);
-  showNotif('Titres mis à jour !','success');
+  try {
+    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    if (!c) return;
+    c.titres = window._editTitres||[];
+    await updateInCol('characters', charId, {titres: c.titres});
+    closeModal();
+    renderCharSheet(c, window._currentCharTab);
+    showNotif('Titres mis à jour !','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Sorts
@@ -3401,48 +3491,53 @@ function selectNoyau(el, noyau) {
 
 
 async function saveSort(idx) {
-  const c = STATE.activeChar; if(!c) return;
-  const sorts = c.deck_sorts||[];
-  const noyau = document.getElementById('s-noyau')?.value||'';
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const sorts = c.deck_sorts||[];
+    const noyau = document.getElementById('s-noyau')?.value||'';
 
-  // Runes depuis _runeCountsEdit
-  const runes = [];
-  Object.entries(window._runeCountsEdit||{}).forEach(([nom, cnt]) => {
-    for (let i=0; i<cnt; i++) runes.push(nom);
-  });
+    // Runes depuis _runeCountsEdit
+    const runes = [];
+    Object.entries(window._runeCountsEdit||{}).forEach(([nom, cnt]) => {
+      for (let i=0; i<cnt; i++) runes.push(nom);
+    });
 
-  const totalRunes = (noyau ? 1 : 0) + runes.length;
-  const autoPm     = totalRunes * 2 || 2;
+    const totalRunes = (noyau ? 1 : 0) + runes.length;
+    const autoPm     = totalRunes * 2 || 2;
 
-  // Types (multi)
-  const types = [...(window._sortTypesEdit || new Set(['utilitaire']))];
+    // Types (multi)
+    const types = [...(window._sortTypesEdit || new Set(['utilitaire']))];
 
-  // Action override (null = auto)
-  const actionOverride = window._sortActionEdit || null;
+    // Action override (null = auto)
+    const actionOverride = window._sortActionEdit || null;
 
-  const newSort = {
-    nom:      document.getElementById('s-nom')?.value||'Sort',
-    pm:       autoPm,
-    noyau,
-    runes,
-    types,
-    degats:   document.getElementById('s-degats')?.value||'',
-    soin:     document.getElementById('s-soin')?.value||'',
-    ca:       document.getElementById('s-ca')?.value||'',
-    effet:    document.getElementById('s-effet')?.value||'',
-    protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
-    // Legacy compat : typeSoin si defensif sans offensif + mode soin
-    typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
-    catId:    document.getElementById('s-catid')?.value || '',
-    actif:    idx>=0 ? sorts[idx].actif : false,
-    actionOverride,
-  };
-  if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
-  c.deck_sorts=sorts;
-  await updateInCol('characters',c.id,{deck_sorts:sorts});
-  closeModalDirect();
-  showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
-  renderCharSheet(c,'sorts');
+    const newSort = {
+      nom:      document.getElementById('s-nom')?.value||'Sort',
+      pm:       autoPm,
+      noyau,
+      runes,
+      types,
+      degats:   document.getElementById('s-degats')?.value||'',
+      soin:     document.getElementById('s-soin')?.value||'',
+      ca:       document.getElementById('s-ca')?.value||'',
+      effet:    document.getElementById('s-effet')?.value||'',
+      protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
+      // Legacy compat : typeSoin si defensif sans offensif + mode soin
+      typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
+      catId:    document.getElementById('s-catid')?.value || '',
+      actif:    idx>=0 ? sorts[idx].actif : false,
+      actionOverride,
+    };
+    if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
+    c.deck_sorts=sorts;
+    await updateInCol('characters',c.id,{deck_sorts:sorts});
+    closeModalDirect();
+    showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
+    renderCharSheet(c,'sorts');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 
@@ -3516,36 +3611,41 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
 }
 
 async function equipSlotFromInv(val, slot) {
-  if (!val || !val.startsWith('inv:')) return;
-  const c = STATE.activeChar; if (!c) return;
+  try {
+    if (!val || !val.startsWith('inv:')) return;
+    const c = STATE.activeChar; if (!c) return;
 
-  const invIndex = parseInt(val.split(':')[1], 10);
-  if (Number.isNaN(invIndex)) return;
+    const invIndex = parseInt(val.split(':')[1], 10);
+    if (Number.isNaN(invIndex)) return;
 
-  const item = (c.inventaire || [])[invIndex];
-  if (!item) return;
+    const item = (c.inventaire || [])[invIndex];
+    if (!item) return;
 
-  const equip = { ...(c.equipement || {}) };
+    const equip = { ...(c.equipement || {}) };
 
-  Object.keys(equip).forEach(otherSlot => {
-    if (otherSlot !== slot && equip[otherSlot]?.sourceInvIndex === invIndex) {
-      delete equip[otherSlot];
-    }
-  });
+    Object.keys(equip).forEach(otherSlot => {
+      if (otherSlot !== slot && equip[otherSlot]?.sourceInvIndex === invIndex) {
+        delete equip[otherSlot];
+      }
+    });
 
-  const equippedItem = buildEquippedItemFromInventory(slot, item, invIndex);
-  if (!equippedItem) return;
+    const equippedItem = buildEquippedItemFromInventory(slot, item, invIndex);
+    if (!equippedItem) return;
 
-  equip[slot] = equippedItem;
-  const bonus = computeEquipStatsBonus(equip);
+    equip[slot] = equippedItem;
+    const bonus = computeEquipStatsBonus(equip);
 
-  c.equipement = equip;
-  c.statsBonus = bonus;
+    c.equipement = equip;
+    c.statsBonus = bonus;
 
-  await updateInCol('characters', c.id, { equipement: equip, statsBonus: bonus });
-  closeModal();
-  showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
-  renderCharSheet(c, 'combat');
+    await updateInCol('characters', c.id, { equipement: equip, statsBonus: bonus });
+    closeModal();
+    showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
+    renderCharSheet(c, 'combat');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Équipement — filtré depuis l'inventaire du personnage
@@ -3815,91 +3915,101 @@ function previewEquipFromInv(val, slot) {
 
 
 async function saveEquipSlot(slot) {
-  const c = STATE.activeChar; if(!c) return;
-  const equip = c.equipement||{};
-  const meta = window._equipSelectedMeta || {};
-  const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const equip = c.equipement||{};
+    const meta = window._equipSelectedMeta || {};
+    const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
 
-  // Traits depuis champ texte (séparés par virgules)
-  const readTraits = () => {
-    const raw = document.getElementById('eq-traits')?.value || '';
-    return raw.split(',').map(t => t.trim()).filter(Boolean);
-  };
+    // Traits depuis champ texte (séparés par virgules)
+    const readTraits = () => {
+      const raw = document.getElementById('eq-traits')?.value || '';
+      return raw.split(',').map(t => t.trim()).filter(Boolean);
+    };
 
-  if (slot.startsWith('Main')) {
-    // Les armes viennent toujours de l'inventaire — toutes les données depuis meta
-    equip[slot] = {
-      nom:           meta.nom           || '',
-      degats:        meta.degats        || '',
-      degatsStat:    meta.degatsStat    || meta.statAttaque || 'force',
-      toucherStat:   meta.toucherStat   || meta.statAttaque || 'force',
-      statAttaque:   meta.statAttaque   || 'force',
-      typeArme:      meta.typeArme      || meta.sousType || '',
-      portee:        meta.portee        || '',
-      particularite: meta.particularite || '',
-      traits:        Array.isArray(meta.traits) ? [...meta.traits] : [],
-      format:        meta.format        || '',
-      toucher:       meta.toucher       || '',
-      stats:         meta.stats         || '',
-      sousType:      meta.sousType      || '',
-      sourceInvIndex: Number.isInteger(meta.sourceInvIndex) ? meta.sourceInvIndex : -1,
-      fo: parseInt(meta.fo)||0, dex: parseInt(meta.dex)||0,
-      in: parseInt(meta.in)||0, sa: parseInt(meta.sa)||0,
-      co: parseInt(meta.co)||0, ch: parseInt(meta.ch)||0,
-    };
-  } else if (isBijou) {
-    equip[slot] = {
-      nom:           document.getElementById('eq-nom')?.value||'',
-      particularite: document.getElementById('eq-particularite')?.value||'',
-      traits:        readTraits(),
-      fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
-      dex: parseInt(document.getElementById('eq-dex')?.value)||0,
-      in:  parseInt(document.getElementById('eq-in')?.value)||0,
-      sa:  parseInt(document.getElementById('eq-sa')?.value)||0,
-      co:  parseInt(document.getElementById('eq-co')?.value)||0,
-      ch:  parseInt(document.getElementById('eq-ch')?.value)||0,
-      ca:  parseInt(document.getElementById('eq-ca')?.value)||0,
-      slotBijou:  slot,
-      typeArmure: meta.typeArmure||'',
-      slotArmure: meta.slotArmure||'',
-    };
-  } else {
-    // Armure : Tête / Torse / Bottes
-    equip[slot] = {
-      nom:           document.getElementById('eq-nom')?.value||'',
-      typeArmure:    document.getElementById('eq-type-armure')?.value || meta.typeArmure||'',
-      ca:            parseInt(document.getElementById('eq-ca')?.value)||0,
-      traits:        readTraits(),
-      particularite: document.getElementById('eq-particularite')?.value||'',
-      fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
-      dex: parseInt(document.getElementById('eq-dex')?.value)||0,
-      in:  parseInt(document.getElementById('eq-in')?.value)||0,
-      sa:  parseInt(document.getElementById('eq-sa')?.value)||0,
-      co:  parseInt(document.getElementById('eq-co')?.value)||0,
-      ch:  parseInt(document.getElementById('eq-ch')?.value)||0,
-      slotArmure: meta.slotArmure||'',
-    };
+    if (slot.startsWith('Main')) {
+      // Les armes viennent toujours de l'inventaire — toutes les données depuis meta
+      equip[slot] = {
+        nom:           meta.nom           || '',
+        degats:        meta.degats        || '',
+        degatsStat:    meta.degatsStat    || meta.statAttaque || 'force',
+        toucherStat:   meta.toucherStat   || meta.statAttaque || 'force',
+        statAttaque:   meta.statAttaque   || 'force',
+        typeArme:      meta.typeArme      || meta.sousType || '',
+        portee:        meta.portee        || '',
+        particularite: meta.particularite || '',
+        traits:        Array.isArray(meta.traits) ? [...meta.traits] : [],
+        format:        meta.format        || '',
+        toucher:       meta.toucher       || '',
+        stats:         meta.stats         || '',
+        sousType:      meta.sousType      || '',
+        sourceInvIndex: Number.isInteger(meta.sourceInvIndex) ? meta.sourceInvIndex : -1,
+        fo: parseInt(meta.fo)||0, dex: parseInt(meta.dex)||0,
+        in: parseInt(meta.in)||0, sa: parseInt(meta.sa)||0,
+        co: parseInt(meta.co)||0, ch: parseInt(meta.ch)||0,
+      };
+    } else if (isBijou) {
+      equip[slot] = {
+        nom:           document.getElementById('eq-nom')?.value||'',
+        particularite: document.getElementById('eq-particularite')?.value||'',
+        traits:        readTraits(),
+        fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
+        dex: parseInt(document.getElementById('eq-dex')?.value)||0,
+        in:  parseInt(document.getElementById('eq-in')?.value)||0,
+        sa:  parseInt(document.getElementById('eq-sa')?.value)||0,
+        co:  parseInt(document.getElementById('eq-co')?.value)||0,
+        ch:  parseInt(document.getElementById('eq-ch')?.value)||0,
+        ca:  parseInt(document.getElementById('eq-ca')?.value)||0,
+        slotBijou:  slot,
+        typeArmure: meta.typeArmure||'',
+        slotArmure: meta.slotArmure||'',
+      };
+    } else {
+      // Armure : Tête / Torse / Bottes
+      equip[slot] = {
+        nom:           document.getElementById('eq-nom')?.value||'',
+        typeArmure:    document.getElementById('eq-type-armure')?.value || meta.typeArmure||'',
+        ca:            parseInt(document.getElementById('eq-ca')?.value)||0,
+        traits:        readTraits(),
+        particularite: document.getElementById('eq-particularite')?.value||'',
+        fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
+        dex: parseInt(document.getElementById('eq-dex')?.value)||0,
+        in:  parseInt(document.getElementById('eq-in')?.value)||0,
+        sa:  parseInt(document.getElementById('eq-sa')?.value)||0,
+        co:  parseInt(document.getElementById('eq-co')?.value)||0,
+        ch:  parseInt(document.getElementById('eq-ch')?.value)||0,
+        slotArmure: meta.slotArmure||'',
+      };
+    }
+    c.equipement = equip;
+    const bonus = computeEquipStatsBonus(equip);
+    c.statsBonus = bonus;
+    await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
+    closeModal();
+    showNotif('Équipement mis à jour !','success');
+    renderCharSheet(c,'combat');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-  c.equipement = equip;
-  const bonus = computeEquipStatsBonus(equip);
-  c.statsBonus = bonus;
-  await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
-  closeModal();
-  showNotif('Équipement mis à jour !','success');
-  renderCharSheet(c,'combat');
 }
 
 async function clearEquipSlot(slot) {
-  const c = STATE.activeChar; if(!c) return;
-  const equip = c.equipement||{};
-  delete equip[slot];
-  c.equipement = equip;
-  const bonus = computeEquipStatsBonus(equip);
-  c.statsBonus = bonus;
-  await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
-  closeModal();
-  showNotif('Emplacement libéré.','success');
-  renderCharSheet(c,'combat');
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const equip = c.equipement||{};
+    delete equip[slot];
+    c.equipement = equip;
+    const bonus = computeEquipStatsBonus(equip);
+    c.statsBonus = bonus;
+    await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
+    closeModal();
+    showNotif('Emplacement libéré.','success');
+    renderCharSheet(c,'combat');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Inventaire
@@ -4039,23 +4149,28 @@ async function addInvItem() {
 }
 
 async function saveInvItemFromShop() {
-  const c = STATE.activeChar; if (!c) return;
-  const selId = window._addInvSelId;
-  if (!selId) { showNotif('Sélectionne un objet.','error'); return; }
-  const item = (window._addInvShopItems||[]).find(i=>i.id===selId);
-  if (!item) { showNotif('Objet introuvable.','error'); return; }
-  const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value)||1);
-  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  inv.push({ ...item, qte: String(qte), quantite: qte, source: 'boutique', itemId: item.id });
-  c.inventaire = inv;
-  if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
-  const stChar = (STATE.characters||[]).find(x=>x.id===c.id);
-  if (stChar) stChar.inventaire = inv;
-  await updateInCol('characters', c.id, { inventaire: inv });
-  window._addInvSelId = null;
-  closeModal();
-  showNotif(`${item.nom} ×${qte} ajouté au butin !`,'success');
-  renderCharSheet(c,'inventaire');
+  try {
+    const c = STATE.activeChar; if (!c) return;
+    const selId = window._addInvSelId;
+    if (!selId) { showNotif('Sélectionne un objet.','error'); return; }
+    const item = (window._addInvShopItems||[]).find(i=>i.id===selId);
+    if (!item) { showNotif('Objet introuvable.','error'); return; }
+    const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value)||1);
+    const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    inv.push({ ...item, qte: String(qte), quantite: qte, source: 'boutique', itemId: item.id });
+    c.inventaire = inv;
+    if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
+    const stChar = (STATE.characters||[]).find(x=>x.id===c.id);
+    if (stChar) stChar.inventaire = inv;
+    await updateInCol('characters', c.id, { inventaire: inv });
+    window._addInvSelId = null;
+    closeModal();
+    showNotif(`${item.nom} ×${qte} ajouté au butin !`,'success');
+    renderCharSheet(c,'inventaire');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 function editInvItem(idx) {
@@ -4073,20 +4188,25 @@ function editInvItem(idx) {
 }
 
 async function saveInvItem(idx) {
-  const c = STATE.activeChar; if(!c) return;
-  const inv = c.inventaire||[];
-  const newItem = {
-    nom: document.getElementById('inv-nom')?.value||'?',
-    type: document.getElementById('inv-type')?.value||'',
-    qte: document.getElementById('inv-qte')?.value||'1',
-    description: document.getElementById('inv-desc')?.value||'',
-  };
-  if (idx>=0) inv[idx]=newItem; else inv.push(newItem);
-  c.inventaire=inv;
-  await updateInCol('characters',c.id,{inventaire:inv});
-  closeModal();
-  showNotif('Inventaire mis à jour !','success');
-  renderCharSheet(c,'inventaire');
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const inv = c.inventaire||[];
+    const newItem = {
+      nom: document.getElementById('inv-nom')?.value||'?',
+      type: document.getElementById('inv-type')?.value||'',
+      qte: document.getElementById('inv-qte')?.value||'1',
+      description: document.getElementById('inv-desc')?.value||'',
+    };
+    if (idx>=0) inv[idx]=newItem; else inv.push(newItem);
+    c.inventaire=inv;
+    await updateInCol('characters',c.id,{inventaire:inv});
+    closeModal();
+    showNotif('Inventaire mis à jour !','success');
+    renderCharSheet(c,'inventaire');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Quêtes
@@ -4100,19 +4220,24 @@ function addQuete() {
 }
 
 async function saveQuete() {
-  const c = STATE.activeChar; if(!c) return;
-  const quetes = c.quetes||[];
-  quetes.push({
-    nom: document.getElementById('q-nom')?.value||'?',
-    type: document.getElementById('q-type')?.value||'',
-    description: document.getElementById('q-desc')?.value||'',
-    valide: false,
-  });
-  c.quetes=quetes;
-  await updateInCol('characters',c.id,{quetes});
-  closeModal();
-  showNotif('Quête ajoutée !','success');
-  renderCharSheet(c,'quetes');
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const quetes = c.quetes||[];
+    quetes.push({
+      nom: document.getElementById('q-nom')?.value||'?',
+      type: document.getElementById('q-type')?.value||'',
+      description: document.getElementById('q-desc')?.value||'',
+      valide: false,
+    });
+    c.quetes=quetes;
+    await updateInCol('characters',c.id,{quetes});
+    closeModal();
+    showNotif('Quête ajoutée !','success');
+    renderCharSheet(c,'quetes');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Photo
@@ -4255,30 +4380,40 @@ async function editMaitrise(idx) {
 }
 
 async function saveMaitrise(idx) {
-  const typeArme = document.getElementById('mait-type')?.value?.trim();
-  if (!typeArme) { showNotif('Le type d\'arme est requis.', 'error'); return; }
-  const niveau = parseInt(document.getElementById('mait-niveau')?.value) || 0;
-  const note   = document.getElementById('mait-note')?.value?.trim() || '';
-  const c = STATE.activeChar; if (!c) return;
-  const maitrises = [...(c.maitrises || [])];
-  const entry = { typeArme, niveau, note };
-  if (idx < 0) maitrises.push(entry);
-  else maitrises[idx] = entry;
-  c.maitrises = maitrises;
-  await updateInCol('characters', c.id, { maitrises });
-  closeModal();
-  showNotif(idx < 0 ? `Maîtrise "${typeArme}" ajoutée !` : 'Maîtrise mise à jour.', 'success');
-  renderCharSheet(c, 'maitrises');
+  try {
+    const typeArme = document.getElementById('mait-type')?.value?.trim();
+    if (!typeArme) { showNotif('Le type d\'arme est requis.', 'error'); return; }
+    const niveau = parseInt(document.getElementById('mait-niveau')?.value) || 0;
+    const note   = document.getElementById('mait-note')?.value?.trim() || '';
+    const c = STATE.activeChar; if (!c) return;
+    const maitrises = [...(c.maitrises || [])];
+    const entry = { typeArme, niveau, note };
+    if (idx < 0) maitrises.push(entry);
+    else maitrises[idx] = entry;
+    c.maitrises = maitrises;
+    await updateInCol('characters', c.id, { maitrises });
+    closeModal();
+    showNotif(idx < 0 ? `Maîtrise "${typeArme}" ajoutée !` : 'Maîtrise mise à jour.', 'success');
+    renderCharSheet(c, 'maitrises');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteMaitrise(idx) {
-  const c = STATE.activeChar; if (!c) return;
-  const m = (c.maitrises || [])[idx];
-  if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
-  c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
-  await updateInCol('characters', c.id, { maitrises: c.maitrises });
-  showNotif('Maîtrise supprimée.', 'success');
-  renderCharSheet(c, 'maitrises');
+  try {
+    const c = STATE.activeChar; if (!c) return;
+    const m = (c.maitrises || [])[idx];
+    if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
+    c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
+    await updateInCol('characters', c.id, { maitrises: c.maitrises });
+    showNotif('Maîtrise supprimée.', 'success');
+    renderCharSheet(c, 'maitrises');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════
