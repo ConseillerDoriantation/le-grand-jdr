@@ -42,7 +42,12 @@ async function _load() {
 }
 
 async function _save() {
-  await saveDoc('world', 'main', { sections: _sections });
+  try {
+    await saveDoc('world', 'main', { sections: _sections });
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ── Rendu principal ───────────────────────────────────────────────────────────
