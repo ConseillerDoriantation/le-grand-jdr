@@ -5,6 +5,9 @@
 //   supprime tous les personnages, puis supprime le compte Firebase
 // ══════════════════════════════════════════════════════════════════════════════
 import {
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
   auth, db, doc, setDoc, getDoc, updateDoc,
   signInWithEmailAndPassword,
   signOut,
@@ -249,7 +252,7 @@ function openEditPseudo() {
         placeholder="Ton pseudo d'aventurier...">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="JDRApp.savePseudo()">Enregistrer</button>
+      <button class="btn btn-gold" style="flex:1" onclick="savePseudo()">Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
@@ -303,7 +306,7 @@ function openEditEmail() {
       <input class="input-field" id="acc-reauth-pw-email" type="password" placeholder="••••••••">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="JDRApp.saveEmail()">Enregistrer</button>
+      <button class="btn btn-gold" style="flex:1" onclick="saveEmail()">Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
@@ -349,7 +352,7 @@ function openEditPassword() {
       <input class="input-field" id="acc-new-pw2" type="password" placeholder="••••••••">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="JDRApp.savePassword()">Enregistrer</button>
+      <button class="btn btn-gold" style="flex:1" onclick="savePassword()">Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
@@ -405,7 +408,7 @@ function openDeleteAccount() {
         border-radius:10px;padding:.65rem;cursor:pointer;color:#ff6b6b;font-size:.85rem;font-weight:600;
         transition:all .15s" onmouseover="this.style.background='rgba(255,107,107,.2)'"
         onmouseout="this.style.background='rgba(255,107,107,.1)'"
-        onclick="JDRApp.confirmDeleteAccount()">
+        onclick="confirmDeleteAccount()">
         🗑️ Supprimer définitivement
       </button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
@@ -424,7 +427,7 @@ async function confirmDeleteAccount() {
   if (!user) return;
 
   // Désactiver le bouton pendant l'opération
-  const btn = document.querySelector('[onclick="JDRApp.confirmDeleteAccount()"]');
+  const btn = document.querySelector('[onclick="confirmDeleteAccount()"]');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Suppression en cours...'; }
 
   try {
@@ -497,9 +500,6 @@ async function deleteCharWithRefund(charId) {
 // OVERRIDE PAGES + EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
 PAGES.account = renderAccount;
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 Object.assign(window.JDRApp, {
   renderAccount,
