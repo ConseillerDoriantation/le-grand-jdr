@@ -912,6 +912,9 @@ async function sellInvItemFromShop(charId, invIndex) {
 }
 
 // Exposer pour characters.js
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 window.JDRApp.sellInvItemFromShop = sellInvItemFromShop;
 
 // ══════════════════════════════════════════════════════════════════════════════
