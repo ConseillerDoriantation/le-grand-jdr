@@ -79,6 +79,7 @@ function _buildRecord(char=null, pres=null) {
     afficherCA:     show('afficherCA', true),
     afficherOr:     show('afficherOr', false),   // Or masqué par défaut
     afficherStats:  show('afficherStats', true),
+    afficherNiveau: show('afficherNiveau', true),
     pvActuel:       char?.pvActuel ?? null,
     pvMax:          char ? _pvMax(char) : null,
     pmActuel:       char?.pmActuel ?? null,
@@ -313,11 +314,11 @@ function _renderFiche(item, items) {
 
       <!-- Niveau + titres -->
       <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-        <span style="font-family:'Cinzel',serif;font-size:.75rem;font-weight:700;
+        ${item.afficherNiveau ? `<span style="font-family:'Cinzel',serif;font-size:.75rem;font-weight:700;
           padding:3px 10px;border-radius:999px;
           background:${col}18;border:1px solid ${col}44;color:${col}">
           Niveau ${item.level||1}
-        </span>
+        </span>` : ''}
         ${item.titles.slice(0,4).map(t=>`<span style="font-size:.7rem;padding:2px 8px;
           border-radius:999px;background:rgba(232,184,75,.08);
           border:1px solid rgba(232,184,75,.2);color:var(--gold)">${_esc(t)}</span>`).join('')}
@@ -510,6 +511,7 @@ async function openPlayerPresentModal(player=null) {
           {id:'pp-show-ca',   label:'Classe d\'Armure (CA)',key:'afficherCA',  def:true },
           {id:'pp-show-or',   label:'Or',                  key:'afficherOr',   def:false},
           {id:'pp-show-stats',label:'Statistiques',         key:'afficherStats',def:true },
+          {id: 'pp-show-lvl', label:'Niveau',              key:'afficherNiveau', def:true}
         ].map(f => {
           const checked = player?.[f.key]!==undefined ? player[f.key] : f.def;
           return `<label style="display:flex;align-items:center;gap:.45rem;cursor:pointer;
@@ -703,6 +705,7 @@ async function savePlayerPresent(id='') {
       afficherCA:    document.getElementById('pp-show-ca')?.checked    ?? true,
       afficherOr:    document.getElementById('pp-show-or')?.checked    ?? false,
       afficherStats: document.getElementById('pp-show-stats')?.checked ?? true,
+      afficherNiveau: document.getElementById('pp-show-lvl')?.checked ?? true
     };
 
     if(id) await updateInCol('players',id,data);
