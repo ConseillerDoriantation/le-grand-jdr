@@ -214,7 +214,7 @@ function _render() {
     </div>
     ${_isAdmin() ? `
     <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-      ${CREATE_RECIPES.map(t => `<button class="btn btn-outline btn-sm" onclick="openRecipeModal('${t.id}')">${t.emoji} + ${t.label}</button>`).join('')}
+      ${CREATE_RECIPES.map(t => `<button class="btn btn-outline btn-sm" onclick="JDRApp.openRecipeModal('${t.id}')">${t.emoji} + ${t.label}</button>`).join('')}
     </div>` : ''}
   </div>
 
@@ -232,7 +232,7 @@ function _render() {
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap">
     <div class="rec-tabs" style="flex-shrink:0">
       ${TABS.map(t => `
-        <button class="rec-tab ${_tab===t.id?'active':''}" onclick="recSetTab('${t.id}')">
+        <button class="rec-tab ${_tab===t.id?'active':''}" onclick="JDRApp.recSetTab('${t.id}')">
           <span>${t.emoji}</span><span>${t.label}</span>
           <span style="font-size:.65rem;opacity:.7">(${counts[t.id]})</span>
         </button>`).join('')}
@@ -293,7 +293,7 @@ function _renderCard(r, accent) {
 
   return `<div class="rec-card${isCraftType ? ' rec-card-clickable' : ''}"
     style="border-left:3px solid ${accent}"
-    ${isCraftType ? `onclick="openItemDetailModal('${r.id}')"` : ''}>
+    ${isCraftType ? `onclick="JDRApp.openItemDetailModal('${r.id}')"` : ''}>
     <div class="rec-card-header">
       <div>
         <div class="rec-card-name">${r.nom||'?'}</div>
@@ -323,8 +323,8 @@ function _renderCard(r, accent) {
         ${TABS.find(t=>t.id===r.type)?.emoji||''} ${TABS.find(t=>t.id===r.type)?.label||r.type}
       </div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-        ${isAdmin ? `<button class="rec-btn rec-btn-acces" onclick="openAccesModal('${r.id}')">👥 Accès</button>` : ''}
-        ${canSend ? `<button class="rec-btn rec-btn-send" onclick="openSendRecipeModal('${r.id}')">↗ Transmettre</button>` : ''}
+        ${isAdmin ? `<button class="rec-btn rec-btn-acces" onclick="JDRApp.openAccesModal('${r.id}')">👥 Accès</button>` : ''}
+        ${canSend ? `<button class="rec-btn rec-btn-send" onclick="JDRApp.openSendRecipeModal('${r.id}')">↗ Transmettre</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -333,7 +333,7 @@ function _renderCard(r, accent) {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL DÉTAIL ITEM (arme / armure / bijou)
 // ══════════════════════════════════════════════════════════════════════════════
-window.openItemDetailModal = function(id) {
+window.JDRApp.openItemDetailModal = function(id) {
   const r = _visible().find(x => x.id === id);
   if (!r) return;
   const tab = TABS.find(t => t.id === r.type) || TABS[0];
@@ -462,7 +462,7 @@ function openRecipeModal(type, id = '') {
       >${r?.description||''}</textarea>
     </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" onclick="saveRecipe('${id}','${rType}')">
+    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" onclick="JDRApp.saveRecipe('${id}','${rType}')">
       ${r ? 'Enregistrer' : 'Créer la recette'}
     </button>
   `);
@@ -605,7 +605,7 @@ function openShopRecipeModal(id) {
         placeholder="Contexte, notes...">${r.description||''}</textarea>
     </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" onclick="saveShopRecipe('${id}')">
+    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" onclick="JDRApp.saveShopRecipe('${id}')">
       Enregistrer
     </button>
   `);
@@ -697,7 +697,7 @@ function openAccesModal(id) {
         </label>`).join('')}
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveAcces('${id}')">✓ Enregistrer</button>
+      <button class="btn btn-gold" style="flex:1" onclick="JDRApp.saveAcces('${id}')">✓ Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
@@ -752,7 +752,7 @@ function openSendRecipeModal(id) {
         </label>`).join('')}
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" onclick="sendRecipe('${id}')">↗ Transmettre définitivement</button>
+      <button class="btn btn-gold" style="flex:1" onclick="JDRApp.sendRecipe('${id}')">↗ Transmettre définitivement</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
@@ -790,15 +790,15 @@ async function sendRecipe(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
-window.recSetTab = (t) => { _tab = t; _filterTxt = ''; _render(); };
-window.recSearch = (v) => { _filterTxt = v; _render(); };
+window.JDRApp.recSetTab = (t) => { _tab = t; _filterTxt = ''; _render(); };
+window.JDRApp.recSearch = (v) => { _filterTxt = v; _render(); };
 
 // ══════════════════════════════════════════════════════════════════════════════
 // OVERRIDE + EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
 PAGES.recettes = renderRecipes;
 
-Object.assign(window, {
+Object.assign(window.JDRApp, {
   renderRecipes,
   openRecipeModal,
   saveRecipe,
