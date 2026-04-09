@@ -464,7 +464,7 @@ async function deleteCharWithRefund(charId) {
     ? `Supprimer "${c.nom||'ce personnage'}" ?\n\n${nbItems} objet${nbItems>1?'s':''} de boutique ${nbItems>1?'seront remis':'sera remis'} en stock.`
     : `Supprimer "${c.nom||'ce personnage'}" ?`;
 
-  if (!confirm(confirmMsg)) return false;
+  if (!await confirmModal(confirmMsg)) return false;
 
   // Vendre/restituer les items boutique
   if (nbItems > 0) {
