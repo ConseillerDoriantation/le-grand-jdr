@@ -4419,6 +4419,9 @@ async function deleteMaitrise(idx) {
 // ══════════════════════════════════════════════
 // EXPORT
 // ══════════════════════════════════════════════
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 Object.assign(window.JDRApp, {
   selectChar, filterAdminChars,
   sellInvItem, openSellInvModal, sellInvItemBulk,
