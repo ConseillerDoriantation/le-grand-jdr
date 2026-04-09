@@ -609,7 +609,7 @@ PAGES.achievements = async function() {
 };
 
 // ── EXPORTS ───────────────────────────────────────────────────────────────────
-Object.assign(window, {
+Object.assign(window.JDRApp, {
   openAchievementModal,
   saveAchievement,
   editAchievement,
