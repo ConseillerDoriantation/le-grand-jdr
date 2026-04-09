@@ -1,5 +1,5 @@
 import { STATE } from '../core/state.js';
-import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollectionWhere, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
@@ -874,6 +874,12 @@ function inlineEditText(charId, field, el) {
   input.select();
 }
 
+async function _syncPlayerNiveau(charId, niveau) {
+  const matches = await loadCollectionWhere('players', 'charId', '==', charId);
+  if (!matches.length) return;
+  await updateInCol('players', matches[0].id, { niveau });
+}
+
 function inlineEditNum(charId, field, el, min=0, max=99999) {
   const cur = el.textContent.replace(/[^\d-]/g,'').trim();
   const input = document.createElement('input');
@@ -889,6 +895,7 @@ function inlineEditNum(charId, field, el, min=0, max=99999) {
     if (!c) { input.replaceWith(el); return; }
     c[field] = val;
     await updateInCol('characters', charId, {[field]: val});
+    if (field === 'niveau') await _syncPlayerNiveau(charId, val);
     el.textContent = field==='niveau' ? `Niv. ${val}` : field==='or' ? `💰 ${val} or` : val;
     input.replaceWith(el);
     // Recompute if niveau changed (affects pvMax, pmMax, deck)
