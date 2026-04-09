@@ -1284,6 +1284,9 @@ async function saveBastionLog() {
 // EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 Object.assign(window.JDRApp, {
   BASTION_AMELIORATIONS: BASTION_AMELIORATIONS_DEFAULT,
   BASTION_EVENTS, calculerRevenuBastion, getDefaultBastion,
