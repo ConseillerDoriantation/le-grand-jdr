@@ -443,7 +443,7 @@ async function editAchievement(id) {
 
 // ── SUPPRIMER ─────────────────────────────────────────────────────────────────
 async function deleteAchievement(id) {
-  if (!confirm('Supprimer ce haut-fait définitivement ?')) return;
+  if (!await confirmModal('Supprimer ce haut-fait définitivement ?')) return;
   await deleteFromCol('achievements', id);
   if (window._achItems) window._achItems = window._achItems.filter(a => a.id !== id);
   const order = (await _loadOrder()).filter(oid => oid !== id);
