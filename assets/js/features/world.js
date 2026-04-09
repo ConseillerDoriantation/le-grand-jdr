@@ -86,7 +86,7 @@ async function renderWorld() {
             </div>
           </div>
           ${STATE.isAdmin ? `
-          <button onclick="openWorldSectionModal()"
+          <button onclick="JDRApp.openWorldSectionModal()"
             style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(232,184,75,.3);
             background:rgba(232,184,75,.08);color:var(--gold);cursor:pointer;font-size:1rem;
             display:flex;align-items:center;justify-content:center;transition:all .15s"
@@ -105,7 +105,7 @@ async function renderWorld() {
       <!-- Actions admin en bas de la sidebar -->
       ${STATE.isAdmin ? `
       <div style="margin-top:.6rem;display:flex;flex-direction:column;gap:.35rem">
-        <button onclick="openWorldSectionModal()"
+        <button onclick="JDRApp.openWorldSectionModal()"
           class="btn btn-gold btn-sm" style="width:100%;font-size:.75rem">
           + Ajouter une section
         </button>
@@ -130,7 +130,7 @@ function _renderNavItem(s, i) {
   return `<div
     data-nav-id="${s.id}" data-nav-idx="${i}"
     ${STATE.isAdmin ? 'draggable="true"' : ''}
-    onclick="selectWorldSection('${s.id}')"
+    onclick="JDRApp.selectWorldSection('${s.id}')"
     style="display:flex;align-items:center;gap:.55rem;padding:.55rem 1rem;
       cursor:pointer;transition:all .12s;position:relative;
       background:${isActive ? 'rgba(232,184,75,.07)' : 'transparent'};
@@ -185,9 +185,9 @@ function _renderSection(s) {
         </div>
         ${STATE.isAdmin ? `
         <div style="display:flex;gap:.4rem;flex-shrink:0">
-          <button onclick="openWorldSectionModal('${s.id}')"
+          <button onclick="JDRApp.openWorldSectionModal('${s.id}')"
             class="btn btn-outline btn-sm" style="font-size:.72rem">✏️ Modifier</button>
-          <button onclick="deleteWorldSection('${s.id}')"
+          <button onclick="JDRApp.deleteWorldSection('${s.id}')"
             class="btn btn-outline btn-sm" style="font-size:.72rem;color:#ff6b6b;
             border-color:rgba(255,107,107,.3)">🗑️</button>
         </div>` : ''}
@@ -215,13 +215,13 @@ function _renderEmpty() {
     <p style="color:var(--text-dim);font-style:italic;font-size:.85rem">
       ${STATE.isAdmin ? 'Aucune section. Ajoutez du lore depuis le bouton +.' : 'Aucun contenu disponible pour l\'instant.'}
     </p>
-    ${STATE.isAdmin ? `<button onclick="openWorldSectionModal()" class="btn btn-gold btn-sm" style="margin-top:1rem">
+    ${STATE.isAdmin ? `<button onclick="JDRApp.openWorldSectionModal()" class="btn btn-gold btn-sm" style="margin-top:1rem">
       + Créer la première section</button>` : ''}
   </div>`;
 }
 
 // ── Sélection section ─────────────────────────────────────────────────────────
-window.selectWorldSection = (id) => {
+window.JDRApp.selectWorldSection = (id) => {
   _activeId = id;
   // Mettre à jour la nav
   document.querySelectorAll('[data-nav-id]').forEach(el => {
@@ -289,7 +289,7 @@ function _bindNavDrag() {
 }
 
 // ── Modal création / édition section ─────────────────────────────────────────
-window.openWorldSectionModal = (id = null) => {
+window.JDRApp.openWorldSectionModal = (id = null) => {
   const s = id ? _sections.find(sec => sec.id === id) : null;
 
   const iconGrid = ICONES.map(ic => `
@@ -411,7 +411,7 @@ window._wiClearImg = () => {
   window._wiImgCleared = true;
 };
 
-window.saveWorldSection = async () => {
+window.JDRApp.saveWorldSection = async () => {
   const titre = document.getElementById('wi-titre')?.value?.trim();
   if (!titre) { showNotif('Un titre est requis.', 'error'); return; }
 
@@ -445,7 +445,7 @@ window.saveWorldSection = async () => {
   renderWorld();
 };
 
-window.deleteWorldSection = async (id) => {
+window.JDRApp.deleteWorldSection = async (id) => {
   if (!await confirmModal('Supprimer cette section définitivement ?')) return;
   _sections = _sections.filter(s => s.id !== id);
   if (_activeId === id) _activeId = _sections[0]?.id || null;
@@ -541,7 +541,7 @@ window._wiConfirmCrop = () => {
 // ── Override PAGES.world ──────────────────────────────────────────────────────
 PAGES.world = renderWorld;
 
-Object.assign(window, {
+Object.assign(window.JDRApp, {
   renderWorld,
   openWorldSectionModal,
   saveWorldSection,
