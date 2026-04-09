@@ -52,7 +52,4 @@ async function saveTutorial() {
   }
 }
 
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
-Object.assign(window.JDRApp, { getDefaultTutorial, showTutSection, editTutorial, saveTutorial });
+Object.assign(window, { getDefaultTutorial, showTutSection, editTutorial, saveTutorial });
