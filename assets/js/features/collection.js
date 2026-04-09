@@ -4,6 +4,9 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 let _cards = [];
 let _templateUrl = '';
 
@@ -74,7 +77,7 @@ export async function renderCollectionPage() {
       html += `
         <div class="coll-card-wrapper">
           
-          <div class="coll-card ${isUnlocked ? 'unlocked' : 'locked'}" onclick="JDRApp.viewCard('${c.id}')">
+          <div class="coll-card ${isUnlocked ? 'unlocked' : 'locked'}" onclick="viewCard('${c.id}')">
             <div class="coll-card-inner">
               <div class="coll-card-front">
                 <div class="coll-img">${frontHtml}</div>
@@ -123,7 +126,7 @@ function openTemplateModal() {
       </div>
       <div id="tpl-img-preview">${_templateUrl ? `<img src="${_templateUrl}" style="max-height:120px;margin-top:0.4rem;display:block">` : ''}</div>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="JDRApp.saveTemplate()">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveTemplate()">Enregistrer</button>
   `);
 
   // setter après rendu, hors du string HTML
@@ -158,7 +161,7 @@ function openCollectionModal(card = null) {
       </div>
       <div id="sc-img-preview">${card?.imageUrl ? `<img src="${card.imageUrl}" style="max-height:80px;margin-top:0.4rem;display:block">` : ''}</div>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="JDRApp.saveCard('${card?.id || ''}')">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCard('${card?.id || ''}')">Enregistrer</button>
   `);
 }
 
@@ -203,9 +206,6 @@ async function deleteCard(id) {
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
 }
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 Object.assign(window.JDRApp, {
   openCollectionModal, saveCard, viewCard, editCard, deleteCard, toggleUnlock,
