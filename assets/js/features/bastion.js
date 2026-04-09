@@ -348,7 +348,7 @@ async function sauvegarderAmeliorationCustom(id) {
 }
 
 async function supprimerAmeliorationCustom(id) {
-  if (!confirm('Supprimer cette amélioration ? Les fonds investis seront perdus.')) return;
+  if (!await confirmModal('Supprimer cette amélioration ? Les fonds investis seront perdus.')) return;
   const current = (await getDocData('bastion','main')) || getDefaultBastion();
   await saveDoc('bastion','main', { ...current, ameliorationsCustom: (current.ameliorationsCustom||[]).filter(a=>a.id!==id) });
   closeModalDirect();
@@ -358,7 +358,7 @@ async function supprimerAmeliorationCustom(id) {
 
 // Débloquer manuellement (MJ) sans retirer du trésor
 async function debloquerManuellement(id, type) {
-  if (!confirm('Débloquer manuellement cette amélioration ?')) return;
+  if (!await confirmModal('Débloquer manuellement cette amélioration ?')) return;
   const current = (await getDocData('bastion','main')) || getDefaultBastion();
   if (type === 'statique') {
     const amelios = { ...(current.ameliorations||{}), [id]:true };
@@ -585,7 +585,7 @@ async function confirmerInvestissement() {
 }
 
 async function supprimerHistorique(entryId) {
-  if (!confirm('Supprimer ce cycle ? L\'or distribué aux fondateurs sera récupéré.')) return;
+  if (!await confirmModal('Supprimer ce cycle ? L\'or distribué aux fondateurs sera récupéré.')) return;
   const current    = (await getDocData('bastion','main')) || getDefaultBastion();
   const historique = current.historique || [];
   const entry      = historique.find(h => h.id === entryId);
@@ -948,7 +948,7 @@ async function recupererObjetBastion(itemId) {
 }
 
 async function supprimerObjetBastion(itemId) {
-  if (!confirm("Supprimer cet objet ?")) return;
+  if (!await confirmModal("Supprimer cet objet ?")) return;
   const current = (await getDocData('bastion','main')) || getDefaultBastion();
   await saveDoc('bastion','main', { ...current, inventaire:(current.inventaire||[]).filter(i=>i.id!==itemId) });
   showNotif('Objet supprimé.','success');
@@ -1086,7 +1086,7 @@ async function resetBastion() {
     'Cette action est irréversible.',
   ].filter(Boolean).join('\n');
 
-  if (!confirm(msg)) return;
+  if (!await confirmModal(msg)) return;
   await saveDoc('bastion', 'main', getDefaultBastion());
   closeModalDirect();
   showNotif('Bastion remis à zéro.', 'success');
@@ -1155,7 +1155,7 @@ async function changerStatutMission(id, statut) {
 }
 
 async function supprimerMissionBastion(id) {
-  if (!confirm('Supprimer cette mission ?')) return;
+  if (!await confirmModal('Supprimer cette mission ?')) return;
   const current = (await getDocData('bastion','main')) || getDefaultBastion();
   await saveDoc('bastion','main', { ...current, missions:(current.missions||[]).filter(m=>m.id!==id) });
   closeModalDirect();
