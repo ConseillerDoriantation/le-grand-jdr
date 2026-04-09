@@ -322,7 +322,7 @@ function _renderFiche(item, items) {
           border-radius:999px;background:rgba(232,184,75,.08);
           border:1px solid rgba(232,184,75,.2);color:var(--gold)">${_esc(t)}</span>`).join('')}
         ${STATE.isAdmin ? `
-        <button onclick="openLinkedPlayerPresent('${_esc(item.charId)}','${_esc(item.presentationId)}')"
+        <button onclick="JDRApp.openLinkedPlayerPresent('${_esc(item.charId)}','${_esc(item.presentationId)}')"
           style="margin-left:auto;font-size:.68rem;padding:2px 8px;border-radius:6px;
           border:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.08);
           color:#4f8cff;cursor:pointer">✏️ Modifier</button>` : ''}
@@ -357,7 +357,7 @@ function _renderFiche(item, items) {
       <!-- Actions -->
       ${item.charId ? `
       <div style="margin-top:auto;padding-top:.75rem;border-top:1px solid var(--border)">
-        <button onclick="openCharacterSheetFromShowcase('${_esc(item.charId)}')"
+        <button onclick="JDRApp.openCharacterSheetFromShowcase('${_esc(item.charId)}')"
           class="btn btn-gold btn-sm" style="font-size:.75rem">
           📜 Ouvrir la fiche complète
         </button>
@@ -388,7 +388,7 @@ async function renderPlayersPage() {
         <div class="page-title"><span class="page-title-accent">⚔️ Personnages</span></div>
       </div>
       ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Admin</div>
-        <button class="btn btn-gold btn-sm" onclick="openPlayerPresentModal()">+ Ajouter</button></div>` : ''}
+        <button class="btn btn-gold btn-sm" onclick="JDRApp.openPlayerPresentModal()">+ Ajouter</button></div>` : ''}
       <div class="empty-state"><div class="icon">⚔️</div><p>Aucun personnage disponible.</p></div>`;
     return;
   }
@@ -405,7 +405,7 @@ function _renderView(content) {
     ${STATE.isAdmin ? `
     <div class="admin-section" style="margin-bottom:1rem">
       <div class="admin-label">Admin</div>
-      <button class="btn btn-gold btn-sm" onclick="openPlayerPresentModal()">+ Ajouter une présentation</button>
+      <button class="btn btn-gold btn-sm" onclick="JDRApp.openPlayerPresentModal()">+ Ajouter une présentation</button>
     </div>` : ''}
 
     <div id="pp-view-area">
@@ -445,7 +445,7 @@ async function openPlayerPresentModal(player=null) {
           <option value="">— Aucun lien —</option>
           ${characters.map(c=>`<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}</option>`).join('')}
         </select>
-        <button class="btn btn-outline btn-sm" type="button" onclick="prefillPlayerPresentFromLinkedChar(true)">Préremplir</button>
+        <button class="btn btn-outline btn-sm" type="button" onclick="JDRApp.prefillPlayerPresentFromLinkedChar(true)">Préremplir</button>
       </div>
     </div>
 
@@ -560,9 +560,9 @@ async function openPlayerPresentModal(player=null) {
     </div>
 
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="savePlayerPresent('${_esc(player?.id||'')}')">Enregistrer</button>
+      <button class="btn btn-gold" style="flex:1" onclick="JDRApp.savePlayerPresent('${_esc(player?.id||'')}')">Enregistrer</button>
       ${player?.id ? `<button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)"
-        onclick="deletePlayerPresent('${_esc(player.id)}')">🗑️</button>` : ''}
+        onclick="JDRApp.deletePlayerPresent('${_esc(player.id)}')">🗑️</button>` : ''}
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
@@ -776,7 +776,7 @@ async function openCharacterSheetFromShowcase(charId) {
 // ── Override ──────────────────────────────────────────────────────────────────
 PAGES.players = renderPlayersPage;
 
-Object.assign(window, {
+Object.assign(window.JDRApp, {
   renderPlayersPage,
   openPlayerPresentModal,
   prefillPlayerPresentFromLinkedChar,
