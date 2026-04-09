@@ -503,39 +503,44 @@ function _readIngrs() {
 // SAUVEGARDER / SUPPRIMER
 // ══════════════════════════════════════════════════════════════════════════════
 async function saveRecipe(id, fallbackType) {
-  const nom = document.getElementById('rec-nom')?.value?.trim();
-  if (!nom) { showNotif('Le nom est requis.', 'error'); return; }
+  try {
+    const nom = document.getElementById('rec-nom')?.value?.trim();
+    if (!nom) { showNotif('Le nom est requis.', 'error'); return; }
 
-  const existing = id ? _all.find(r => r.id === id) : null;
-  const type     = existing?.type || fallbackType || 'cuisine';
+    const existing = id ? _all.find(r => r.id === id) : null;
+    const type     = existing?.type || fallbackType || 'cuisine';
 
-  const data = {
-    type, nom,
-    famille:     document.getElementById('rec-famille')?.value?.trim()   || '',
-    duree:       document.getElementById('rec-duree')?.value?.trim()     || '',
-    effet:       document.getElementById('rec-effet')?.value?.trim()     || '',
-    description: document.getElementById('rec-desc')?.value?.trim()     || '',
-    ingredients: _readIngrs(),
-    acces:       existing?.acces || [],
-    atelierReq:  document.getElementById('rec-atelierReq')?.value?.trim()|| '',
-    tempsCraft:  document.getElementById('rec-tempsCraft')?.value?.trim()|| '',
-  };
+    const data = {
+      type, nom,
+      famille:     document.getElementById('rec-famille')?.value?.trim()   || '',
+      duree:       document.getElementById('rec-duree')?.value?.trim()     || '',
+      effet:       document.getElementById('rec-effet')?.value?.trim()     || '',
+      description: document.getElementById('rec-desc')?.value?.trim()     || '',
+      ingredients: _readIngrs(),
+      acces:       existing?.acces || [],
+      atelierReq:  document.getElementById('rec-atelierReq')?.value?.trim()|| '',
+      tempsCraft:  document.getElementById('rec-tempsCraft')?.value?.trim()|| '',
+    };
 
-  if (id) {
-    await updateInCol('recipes', id, data);
-    const idx = _all.findIndex(r => r.id === id);
-    if (idx >= 0) _all[idx] = { ...data, id };
-  } else {
-    const newId = await addToCol('recipes', data);
-    if (typeof newId === 'string') _all.push({ ...data, id: newId });
-    else _all = await loadCollection('recipes');
-    _all.sort((a, b) => (a.nom||'').localeCompare(b.nom||''));
+    if (id) {
+      await updateInCol('recipes', id, data);
+      const idx = _all.findIndex(r => r.id === id);
+      if (idx >= 0) _all[idx] = { ...data, id };
+    } else {
+      const newId = await addToCol('recipes', data);
+      if (typeof newId === 'string') _all.push({ ...data, id: newId });
+      else _all = await loadCollection('recipes');
+      _all.sort((a, b) => (a.nom||'').localeCompare(b.nom||''));
+    }
+
+    closeModal();
+    showNotif(id ? `"${nom}" mis à jour !` : `"${nom}" créé !`, 'success');
+    _tab = data.type;
+    _render();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  closeModal();
-  showNotif(id ? `"${nom}" mis à jour !` : `"${nom}" créé !`, 'success');
-  _tab = data.type;
-  _render();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -607,46 +612,61 @@ function openShopRecipeModal(id) {
 }
 
 async function saveShopRecipe(id) {
-  const recipeMeta = {
-    atelierReq:  document.getElementById('srec-atelierReq')?.value?.trim() || '',
-    tempsCraft:  document.getElementById('srec-tempsCraft')?.value?.trim() || '',
-    ingredients: _readIngrs(),
-    effet:       document.getElementById('srec-effet')?.value?.trim()      || '',
-    description: document.getElementById('srec-desc')?.value?.trim()       || '',
-  };
+  try {
+    const recipeMeta = {
+      atelierReq:  document.getElementById('srec-atelierReq')?.value?.trim() || '',
+      tempsCraft:  document.getElementById('srec-tempsCraft')?.value?.trim() || '',
+      ingredients: _readIngrs(),
+      effet:       document.getElementById('srec-effet')?.value?.trim()      || '',
+      description: document.getElementById('srec-desc')?.value?.trim()       || '',
+    };
 
-  await updateInCol('shop', id, { recipeMeta });
-  const idx = _shopItems.findIndex(i => i.id === id);
-  if (idx >= 0) _shopItems[idx].recipeMeta = recipeMeta;
+    await updateInCol('shop', id, { recipeMeta });
+    const idx = _shopItems.findIndex(i => i.id === id);
+    if (idx >= 0) _shopItems[idx].recipeMeta = recipeMeta;
 
-  closeModal();
-  showNotif('Recette mise à jour !', 'success');
-  _render();
+    closeModal();
+    showNotif('Recette mise à jour !', 'success');
+    _render();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteShopRecipe(id) {
-  const item = _shopItems.find(i => i.id === id);
-  if (!await confirmModal(`Retirer "${item?.nom||'cet objet'}" des recettes ? L'objet restera dans la boutique.`)) return;
+  try {
+    const item = _shopItems.find(i => i.id === id);
+    if (!await confirmModal(`Retirer "${item?.nom||'cet objet'}" des recettes ? L'objet restera dans la boutique.`)) return;
 
-  const recipeMeta = { ...(item?.recipeMeta || {}), hidden: true };
-  await updateInCol('shop', id, { recipeMeta, acces: [] });
-  const idx = _shopItems.findIndex(i => i.id === id);
-  if (idx >= 0) {
-    _shopItems[idx].recipeMeta = recipeMeta;
-    _shopItems[idx].acces = [];
+    const recipeMeta = { ...(item?.recipeMeta || {}), hidden: true };
+    await updateInCol('shop', id, { recipeMeta, acces: [] });
+    const idx = _shopItems.findIndex(i => i.id === id);
+    if (idx >= 0) {
+      _shopItems[idx].recipeMeta = recipeMeta;
+      _shopItems[idx].acces = [];
+    }
+
+    showNotif('Recette retirée.', 'success');
+    _render();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  showNotif('Recette retirée.', 'success');
-  _render();
 }
 
 async function deleteRecipe(id) {
-  const r = _all.find(x => x.id === id);
-  if (!await confirmModal(`Supprimer "${r?.nom||'cette recette'}" ?`)) return;
-  await deleteFromCol('recipes', id);
-  _all = _all.filter(x => x.id !== id);
-  showNotif('Recette supprimée.', 'success');
-  _render();
+  try {
+    const r = _all.find(x => x.id === id);
+    if (!await confirmModal(`Supprimer "${r?.nom||'cette recette'}" ?`)) return;
+    await deleteFromCol('recipes', id);
+    _all = _all.filter(x => x.id !== id);
+    showNotif('Recette supprimée.', 'success');
+    _render();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -684,16 +704,21 @@ function openAccesModal(id) {
 }
 
 async function saveAcces(id) {
-  const checks    = [...document.querySelectorAll('#acces-list input[type="checkbox"]')];
-  const newAcces  = checks.filter(c => c.checked).map(c => c.value);
-  const isShop    = _isShopItem(id);
-  await updateInCol(isShop ? 'shop' : 'recipes', id, { acces: newAcces });
-  const list      = isShop ? _shopItems : _all;
-  const idx       = list.findIndex(x => x.id === id);
-  if (idx >= 0) list[idx].acces = newAcces;
-  closeModal();
-  showNotif(`Accès mis à jour — ${newAcces.length} joueur${newAcces.length>1?'s':''}.`, 'success');
-  _render();
+  try {
+    const checks    = [...document.querySelectorAll('#acces-list input[type="checkbox"]')];
+    const newAcces  = checks.filter(c => c.checked).map(c => c.value);
+    const isShop    = _isShopItem(id);
+    await updateInCol(isShop ? 'shop' : 'recipes', id, { acces: newAcces });
+    const list      = isShop ? _shopItems : _all;
+    const idx       = list.findIndex(x => x.id === id);
+    if (idx >= 0) list[idx].acces = newAcces;
+    closeModal();
+    showNotif(`Accès mis à jour — ${newAcces.length} joueur${newAcces.length>1?'s':''}.`, 'success');
+    _render();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -734,27 +759,32 @@ function openSendRecipeModal(id) {
 }
 
 async function sendRecipe(id) {
-  const targetUid = document.querySelector('input[name="send-rec-target"]:checked')?.value;
-  if (!targetUid) { showNotif('Sélectionne un joueur.', 'error'); return; }
+  try {
+    const targetUid = document.querySelector('input[name="send-rec-target"]:checked')?.value;
+    if (!targetUid) { showNotif('Sélectionne un joueur.', 'error'); return; }
 
-  const r = _findRaw(id);
-  if (!r) return;
+    const r = _findRaw(id);
+    if (!r) return;
 
-  const uid = _myUid();
+    const uid = _myUid();
 
-  // Retirer l'envoyeur, ajouter le destinataire
-  const newAcces = [...new Set([
-    ...(r.acces || []).filter(u => u !== uid),
-    targetUid,
-  ])];
+    // Retirer l'envoyeur, ajouter le destinataire
+    const newAcces = [...new Set([
+      ...(r.acces || []).filter(u => u !== uid),
+      targetUid,
+    ])];
 
-  await updateInCol(_isShopItem(id) ? 'shop' : 'recipes', id, { acces: newAcces });
-  r.acces = newAcces;
+    await updateInCol(_isShopItem(id) ? 'shop' : 'recipes', id, { acces: newAcces });
+    r.acces = newAcces;
 
-  const targetName = _getJoueurs().find(j => j.uid === targetUid)?.pseudo || 'ce joueur';
-  closeModal();
-  showNotif(`"${r.nom}" transmise à ${targetName}. Tu n'y as plus accès.`, 'success');
-  _render();
+    const targetName = _getJoueurs().find(j => j.uid === targetUid)?.pseudo || 'ce joueur';
+    closeModal();
+    showNotif(`"${r.nom}" transmise à ${targetName}. Tu n'y as plus accès.`, 'success');
+    _render();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
