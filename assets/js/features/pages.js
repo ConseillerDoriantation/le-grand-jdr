@@ -3,7 +3,6 @@
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
 import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData } from '../data/firestore.js';
-import { getMod, calcCA, calcPVMax, calcPMMax, calcOr } from '../shared/char-stats.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -67,15 +66,15 @@ const PAGES = {
 
     const pseudo   = STATE.profile?.pseudo || 'Aventurier';
     const myChar   = chars[0] || null;   // premier personnage
-    const pvMax    = myChar ? calcPVMax(myChar) : 10;
-    const pmMax    = myChar ? calcPMMax(myChar) : 10;
+    const pvMax    = myChar ? (window.calcPVMax?.(myChar) || myChar.pvBase || 10) : 10;
+    const pmMax    = myChar ? (window.calcPMMax?.(myChar) || myChar.pmBase || 10) : 10;
     const pvCur    = myChar ? (myChar.pvActuel ?? pvMax) : 0;
     const pmCur    = myChar ? (myChar.pmActuel ?? pmMax) : 0;
     const pvPct    = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
     const pmPct    = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
     const pvColor  = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-    const ca       = myChar ? calcCA(myChar) : '—';
-    const or       = myChar ? calcOr(myChar) : 0;
+    const ca       = myChar ? (window.calcCA?.(myChar) || 10) : '—';
+    const or       = myChar ? (window.calcOr?.(myChar) || 0) : 0;
 
     // Mission active la plus récente
     const mission  = storyItems
@@ -437,8 +436,7 @@ const PAGES = {
 
     const AMELIORATIONS = window.BASTION_AMELIORATIONS || [];
     const EVENTS        = window.BASTION_EVENTS || [];
-    // calculerRevenuBastion est disponible via le module bastion déjà chargé en lazy
-    const { calculerRevenuBastion: calcRevenu } = await import('../features/bastion.js').catch(() => ({}));
+    const calcRevenu    = window.calculerRevenuBastion;
 
     // Fusionne améliorations statiques + custom avec leur état de financement
     function _getAllAmeliorations(d) {
@@ -791,8 +789,8 @@ const PAGES = {
 
   // ─── PLAYERS ────────────────────────────────────────────────────────────────
   async players() {
-    if (typeof PAGES.players === 'function') {
-      await PAGES.players();
+    if (typeof window.renderPlayersPage === 'function') {
+      await window.renderPlayersPage();
       return;
     }
 
@@ -1092,8 +1090,7 @@ const PAGES = {
 
   // ─── BESTIAIRE ──────────────────────────────────────────────────────────────
   async bestiaire() {
-    // renderBestiary est enregistré dans PAGES.bestiaire par bestiary.js au chargement lazy
-    await PAGES.bestiaire?.();
+    await window.renderBestiary?.();
   },
 };
 
