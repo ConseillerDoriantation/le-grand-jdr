@@ -91,18 +91,23 @@ function _normFondateurs(arr) {
 const _getCharOr = (char) => calcOr(char);
 // _setCharOr — écrit dans compte.recettes/dépenses (logique alignée sur shop.js)
 async function _setCharOr(char, newOr) {
-  const safe  = Math.max(0, Math.round(newOr * 100) / 100);
-  const delta = safe - _getCharOr(char);
-  if (delta === 0) return;
-  const now = new Date().toLocaleDateString('fr-FR');
-  const compte = { recettes:[], depenses:[], ...(char.compte || {}) };
-  if (delta > 0) {
-    compte.recettes = [...compte.recettes, { date: now, libelle: 'Or récupéré du Bastion', montant: delta }];
-  } else {
-    compte.depenses = [...compte.depenses, { date: now, libelle: 'Or déposé au Bastion', montant: Math.abs(delta) }];
+  try {
+    const safe  = Math.max(0, Math.round(newOr * 100) / 100);
+    const delta = safe - _getCharOr(char);
+    if (delta === 0) return;
+    const now = new Date().toLocaleDateString('fr-FR');
+    const compte = { recettes:[], depenses:[], ...(char.compte || {}) };
+    if (delta > 0) {
+      compte.recettes = [...compte.recettes, { date: now, libelle: 'Or récupéré du Bastion', montant: delta }];
+    } else {
+      compte.depenses = [...compte.depenses, { date: now, libelle: 'Or déposé au Bastion', montant: Math.abs(delta) }];
+    }
+    char.compte = compte;
+    await updateInCol('characters', char.id, { compte });
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-  char.compte = compte;
-  await updateInCol('characters', char.id, { compte });
 }
 
 // Fusionner les améliorations statiques avec les données sauvegardées
@@ -179,25 +184,30 @@ async function editBastion() {
 }
 
 async function saveBastionInfos() {
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const chars   = STATE.characters || [];
-  const fondateurs = chars
-    .filter(c => document.getElementById(`fond-${c.id}`)?.checked)
-    .map(c => ({ charId: c.id, nom: c.nom||'?' }));
-  await saveDoc('bastion','main', {
-    ...current,
-    nom:         document.getElementById('b-nom')?.value?.trim()||'Le Bastion',
-    tresor:      parseInt(document.getElementById('b-tresor')?.value,10)||0,
-    defense:     parseInt(document.getElementById('b-defense')?.value,10)||0,
-    activite:    document.getElementById('b-activite')?.value?.trim()||'',
-    pnj:         document.getElementById('b-pnj')?.value?.trim()||'',
-    invLimite:   parseInt(document.getElementById('b-invlimite')?.value,10)||20,
-    fondateurs,
-    description: document.getElementById('b-description')?.value||'',
-  });
-  closeModalDirect();
-  showNotif('Bastion mis à jour.','success');
-  await PAGES.bastion();
+  try {
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const chars   = STATE.characters || [];
+    const fondateurs = chars
+      .filter(c => document.getElementById(`fond-${c.id}`)?.checked)
+      .map(c => ({ charId: c.id, nom: c.nom||'?' }));
+    await saveDoc('bastion','main', {
+      ...current,
+      nom:         document.getElementById('b-nom')?.value?.trim()||'Le Bastion',
+      tresor:      parseInt(document.getElementById('b-tresor')?.value,10)||0,
+      defense:     parseInt(document.getElementById('b-defense')?.value,10)||0,
+      activite:    document.getElementById('b-activite')?.value?.trim()||'',
+      pnj:         document.getElementById('b-pnj')?.value?.trim()||'',
+      invLimite:   parseInt(document.getElementById('b-invlimite')?.value,10)||20,
+      fondateurs,
+      description: document.getElementById('b-description')?.value||'',
+    });
+    closeModalDirect();
+    showNotif('Bastion mis à jour.','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -277,27 +287,32 @@ async function modifierAmelioration(id, type) {
 }
 
 async function confirmerModifAmelioration(id, type) {
-  const nom  = document.getElementById('ma-nom')?.value?.trim();
-  if (!nom) { showNotif('Nom requis.','error'); return; }
-  const cout = parseInt(document.getElementById('ma-cout')?.value)||500;
-  const desc = document.getElementById('ma-desc')?.value?.trim()||'';
-  const detail = document.getElementById('ma-detail')?.value?.trim()||'';
-  const emoji = document.getElementById('ma-emoji')?.value?.trim()||'🔧';
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
+  try {
+    const nom  = document.getElementById('ma-nom')?.value?.trim();
+    if (!nom) { showNotif('Nom requis.','error'); return; }
+    const cout = parseInt(document.getElementById('ma-cout')?.value)||500;
+    const desc = document.getElementById('ma-desc')?.value?.trim()||'';
+    const detail = document.getElementById('ma-detail')?.value?.trim()||'';
+    const emoji = document.getElementById('ma-emoji')?.value?.trim()||'🔧';
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
 
-  if (type === 'statique') {
-    // Stocker l'override dans ameliorationsConfig
-    const config = { ...(current.ameliorationsConfig||{}), [id]: { nom, cout, description: desc, detail, emoji } };
-    // Si le coût change et que des fonds ont déjà été investis, les conserver
-    await saveDoc('bastion','main', { ...current, ameliorationsConfig: config });
-  } else {
-    const customs = (current.ameliorationsCustom||[]).map(a =>
-      a.id === id ? { ...a, nom, cout, description: desc, detail, emoji } : a);
-    await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
+    if (type === 'statique') {
+      // Stocker l'override dans ameliorationsConfig
+      const config = { ...(current.ameliorationsConfig||{}), [id]: { nom, cout, description: desc, detail, emoji } };
+      // Si le coût change et que des fonds ont déjà été investis, les conserver
+      await saveDoc('bastion','main', { ...current, ameliorationsConfig: config });
+    } else {
+      const customs = (current.ameliorationsCustom||[]).map(a =>
+        a.id === id ? { ...a, nom, cout, description: desc, detail, emoji } : a);
+      await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
+    }
+    closeModalDirect();
+    showNotif('Amélioration mise à jour.','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-  closeModalDirect();
-  showNotif('Amélioration mise à jour.','success');
-  await PAGES.bastion();
 }
 
 // Créer une amélioration custom
@@ -327,50 +342,65 @@ async function modifierAmeliorationCustom(id) {
 }
 
 async function sauvegarderAmeliorationCustom(id) {
-  const nom = document.getElementById('ca-nom')?.value?.trim();
-  if (!nom) { showNotif('Nom requis.','error'); return; }
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const customs = current.ameliorationsCustom || [];
-  const data = {
-    id:          id || `ca_${Date.now()}`,
-    nom,
-    emoji:       document.getElementById('ca-emoji')?.value?.trim()||'🔧',
-    cout:        parseInt(document.getElementById('ca-cout')?.value)||500,
-    description: document.getElementById('ca-desc')?.value?.trim()||'',
-    detail:      document.getElementById('ca-detail')?.value?.trim()||'',
-    fondsActuels: id ? (customs.find(x=>x.id===id)?.fondsActuels||0) : 0,
-  };
-  const newCustoms = id ? customs.map(x=>x.id===id?data:x) : [...customs, data];
-  await saveDoc('bastion','main', { ...current, ameliorationsCustom: newCustoms });
-  closeModalDirect();
-  showNotif(id?'Amélioration mise à jour.':'Amélioration créée !','success');
-  await PAGES.bastion();
+  try {
+    const nom = document.getElementById('ca-nom')?.value?.trim();
+    if (!nom) { showNotif('Nom requis.','error'); return; }
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const customs = current.ameliorationsCustom || [];
+    const data = {
+      id:          id || `ca_${Date.now()}`,
+      nom,
+      emoji:       document.getElementById('ca-emoji')?.value?.trim()||'🔧',
+      cout:        parseInt(document.getElementById('ca-cout')?.value)||500,
+      description: document.getElementById('ca-desc')?.value?.trim()||'',
+      detail:      document.getElementById('ca-detail')?.value?.trim()||'',
+      fondsActuels: id ? (customs.find(x=>x.id===id)?.fondsActuels||0) : 0,
+    };
+    const newCustoms = id ? customs.map(x=>x.id===id?data:x) : [...customs, data];
+    await saveDoc('bastion','main', { ...current, ameliorationsCustom: newCustoms });
+    closeModalDirect();
+    showNotif(id?'Amélioration mise à jour.':'Amélioration créée !','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function supprimerAmeliorationCustom(id) {
-  if (!await confirmModal('Supprimer cette amélioration ? Les fonds investis seront perdus.')) return;
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  await saveDoc('bastion','main', { ...current, ameliorationsCustom: (current.ameliorationsCustom||[]).filter(a=>a.id!==id) });
-  closeModalDirect();
-  showNotif('Amélioration supprimée.','success');
-  await PAGES.bastion();
+  try {
+    if (!await confirmModal('Supprimer cette amélioration ? Les fonds investis seront perdus.')) return;
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    await saveDoc('bastion','main', { ...current, ameliorationsCustom: (current.ameliorationsCustom||[]).filter(a=>a.id!==id) });
+    closeModalDirect();
+    showNotif('Amélioration supprimée.','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Débloquer manuellement (MJ) sans retirer du trésor
 async function debloquerManuellement(id, type) {
-  if (!await confirmModal('Débloquer manuellement cette amélioration ?')) return;
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  if (type === 'statique') {
-    const amelios = { ...(current.ameliorations||{}), [id]:true };
-    const nb = Object.values(amelios).filter(Boolean).length + (current.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length;
-    await saveDoc('bastion','main', { ...current, ameliorations:amelios, niveau:1+nb });
-  } else {
-    const customs = (current.ameliorationsCustom||[]).map(a => a.id===id ? { ...a, fondsActuels: a.cout||0 } : a);
-    await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
+  try {
+    if (!await confirmModal('Débloquer manuellement cette amélioration ?')) return;
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    if (type === 'statique') {
+      const amelios = { ...(current.ameliorations||{}), [id]:true };
+      const nb = Object.values(amelios).filter(Boolean).length + (current.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length;
+      await saveDoc('bastion','main', { ...current, ameliorations:amelios, niveau:1+nb });
+    } else {
+      const customs = (current.ameliorationsCustom||[]).map(a => a.id===id ? { ...a, fondsActuels: a.cout||0 } : a);
+      await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
+    }
+    closeModalDirect();
+    showNotif('Amélioration débloquée.','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-  closeModalDirect();
-  showNotif('Amélioration débloquée.','success');
-  await PAGES.bastion();
 }
 
 // Investir dans une amélioration spécifique (joueur ou trésor)
@@ -424,60 +454,65 @@ async function investirAmelioration(amelioId, amelioType) {
 }
 
 async function confirmerInvestissementAmelioration(amelioId, amelioType) {
-  const montant = parseInt(document.getElementById('inv-amelio-montant')?.value)||0;
-  const source  = document.getElementById('inv-amelio-source')?.value||'tresor';
-  if (montant < 1) { showNotif('Montant invalide.','error'); return; }
+  try {
+    const montant = parseInt(document.getElementById('inv-amelio-montant')?.value)||0;
+    const source  = document.getElementById('inv-amelio-source')?.value||'tresor';
+    if (montant < 1) { showNotif('Montant invalide.','error'); return; }
 
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const toutes  = _getAllAmeliorations(current);
-  const amelio  = toutes.find(a => a.id === amelioId);
-  if (!amelio) return;
-  const manquant = Math.max(0,(amelio.cout||0)-(amelio.fondsActuels||0));
-  const invest   = Math.min(montant, manquant);
-  if (invest < 1) { showNotif('Amélioration déjà financée.','success'); closeModalDirect(); return; }
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const toutes  = _getAllAmeliorations(current);
+    const amelio  = toutes.find(a => a.id === amelioId);
+    if (!amelio) return;
+    const manquant = Math.max(0,(amelio.cout||0)-(amelio.fondsActuels||0));
+    const invest   = Math.min(montant, manquant);
+    if (invest < 1) { showNotif('Amélioration déjà financée.','success'); closeModalDirect(); return; }
 
-  let nomSource = 'Trésor';
-  if (source === 'perso') {
-    const chars = (STATE.characters||[]).filter(c => c.uid === STATE.user?.uid);
-    if (!chars.length) { showNotif('Personnage introuvable.','error'); return; }
-    const char = chars[0];
-    if (_getCharOr(char) < invest) { showNotif('Fonds insuffisants.','error'); return; }
-    await _setCharOr(char, _getCharOr(char) - invest);
-    nomSource = char.nom||'?';
-  } else {
-    if ((current.tresor||0) < invest) { showNotif('Trésor insuffisant.','error'); return; }
-    await saveDoc('bastion','main', { ...current, tresor: (current.tresor||0) - invest });
-  }
-
-  // Recharger après modif trésor éventuelle
-  const fresh = (await getDocData('bastion','main')) || getDefaultBastion();
-  const nouveauxFonds = (amelio.fondsActuels||0) + invest;
-  const estDebloque   = nouveauxFonds >= (amelio.cout||1);
-
-  let toSave = { ...fresh };
-  if (amelioType === 'statique') {
-    const fonds = { ...(fresh.ameliorationsFonds||{}), [amelioId]: nouveauxFonds };
-    toSave.ameliorationsFonds = fonds;
-    if (estDebloque) {
-      toSave.ameliorations = { ...(fresh.ameliorations||{}), [amelioId]:true };
-      const nb = Object.values(toSave.ameliorations).filter(Boolean).length +
-                 (fresh.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length;
-      toSave.niveau = 1 + nb;
+    let nomSource = 'Trésor';
+    if (source === 'perso') {
+      const chars = (STATE.characters||[]).filter(c => c.uid === STATE.user?.uid);
+      if (!chars.length) { showNotif('Personnage introuvable.','error'); return; }
+      const char = chars[0];
+      if (_getCharOr(char) < invest) { showNotif('Fonds insuffisants.','error'); return; }
+      await _setCharOr(char, _getCharOr(char) - invest);
+      nomSource = char.nom||'?';
+    } else {
+      if ((current.tresor||0) < invest) { showNotif('Trésor insuffisant.','error'); return; }
+      await saveDoc('bastion','main', { ...current, tresor: (current.tresor||0) - invest });
     }
-  } else {
-    toSave.ameliorationsCustom = (fresh.ameliorationsCustom||[]).map(a =>
-      a.id === amelioId ? { ...a, fondsActuels: nouveauxFonds } : a);
-  }
 
-  await saveDoc('bastion','main', toSave);
-  closeModalDirect();
-  showNotif(
-    estDebloque
-      ? `🎉 ${amelio.nom} débloquée grâce à l'investissement de ${nomSource} !`
-      : `+${invest} or investi par ${nomSource} — ${nouveauxFonds}/${amelio.cout} or`,
-    'success'
-  );
-  await PAGES.bastion();
+    // Recharger après modif trésor éventuelle
+    const fresh = (await getDocData('bastion','main')) || getDefaultBastion();
+    const nouveauxFonds = (amelio.fondsActuels||0) + invest;
+    const estDebloque   = nouveauxFonds >= (amelio.cout||1);
+
+    let toSave = { ...fresh };
+    if (amelioType === 'statique') {
+      const fonds = { ...(fresh.ameliorationsFonds||{}), [amelioId]: nouveauxFonds };
+      toSave.ameliorationsFonds = fonds;
+      if (estDebloque) {
+        toSave.ameliorations = { ...(fresh.ameliorations||{}), [amelioId]:true };
+        const nb = Object.values(toSave.ameliorations).filter(Boolean).length +
+                   (fresh.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length;
+        toSave.niveau = 1 + nb;
+      }
+    } else {
+      toSave.ameliorationsCustom = (fresh.ameliorationsCustom||[]).map(a =>
+        a.id === amelioId ? { ...a, fondsActuels: nouveauxFonds } : a);
+    }
+
+    await saveDoc('bastion','main', toSave);
+    closeModalDirect();
+    showNotif(
+      estDebloque
+        ? `🎉 ${amelio.nom} débloquée grâce à l'investissement de ${nomSource} !`
+        : `+${invest} or investi par ${nomSource} — ${nouveauxFonds}/${amelio.cout} or`,
+      'success'
+    );
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Rétrocompat — débloquer depuis le trésor directement (ancien flow)
@@ -502,43 +537,48 @@ async function confirmDebloquer(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function tirerEvenement() {
-  const idx     = Math.floor(Math.random() * BASTION_EVENTS.length);
-  const evt     = BASTION_EVENTS[idx];
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const { brut, fondateurs: partFondateurs } = calculerRevenuBastion({ ...current, evenementCourant: evt.id });
-  const fondateursList   = _normFondateurs(current.fondateurs||[]);
-  const partParFondateur = fondateursList.length > 0 ? Math.round(partFondateurs / fondateursList.length) : 0;
+  try {
+    const idx     = Math.floor(Math.random() * BASTION_EVENTS.length);
+    const evt     = BASTION_EVENTS[idx];
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const { brut, fondateurs: partFondateurs } = calculerRevenuBastion({ ...current, evenementCourant: evt.id });
+    const fondateursList   = _normFondateurs(current.fondateurs||[]);
+    const partParFondateur = fondateursList.length > 0 ? Math.round(partFondateurs / fondateursList.length) : 0;
 
-  // Distribuer les 10% aux fondateurs
-  const distributions = [];
-  if (partParFondateur > 0) {
-    for (const f of fondateursList) {
-      if (!f.charId) continue;
-      const char = (STATE.characters||[]).find(c => c.id === f.charId);
-      if (!char) continue;
-      await _setCharOr(char, _getCharOr(char) + partParFondateur);
-      distributions.push({ charId: f.charId, nom: f.nom, montant: partParFondateur });
+    // Distribuer les 10% aux fondateurs
+    const distributions = [];
+    if (partParFondateur > 0) {
+      for (const f of fondateursList) {
+        if (!f.charId) continue;
+        const char = (STATE.characters||[]).find(c => c.id === f.charId);
+        if (!char) continue;
+        await _setCharOr(char, _getCharOr(char) + partParFondateur);
+        distributions.push({ charId: f.charId, nom: f.nom, montant: partParFondateur });
+      }
     }
+
+    const historique = current.historique || [];
+    historique.push({
+      id:              `h_${Date.now()}`,
+      session:         historique.length + 1,
+      date:            new Date().toLocaleDateString('fr-FR'),
+      brut, partFondateurs, partParFondateur,
+      evenement:       evt.nom, evtId: evt.id,
+      distributions,
+    });
+
+    // Le trésor n'est PAS modifié — les 90% ne vont nulle part
+    await saveDoc('bastion','main', { ...current, evenementCourant: evt.id, historique });
+
+    const distText = distributions.length > 0
+      ? ` — Fondateurs : ${distributions.map(d => `${d.nom} +${d.montant} or`).join(', ')}`
+      : ' — Aucun fondateur';
+    showNotif(`${evt.emoji} ${evt.nom} — ${brut} or brut, ${partFondateurs} or distribués${distText}`, 'success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  const historique = current.historique || [];
-  historique.push({
-    id:              `h_${Date.now()}`,
-    session:         historique.length + 1,
-    date:            new Date().toLocaleDateString('fr-FR'),
-    brut, partFondateurs, partParFondateur,
-    evenement:       evt.nom, evtId: evt.id,
-    distributions,
-  });
-
-  // Le trésor n'est PAS modifié — les 90% ne vont nulle part
-  await saveDoc('bastion','main', { ...current, evenementCourant: evt.id, historique });
-
-  const distText = distributions.length > 0
-    ? ` — Fondateurs : ${distributions.map(d => `${d.nom} +${d.montant} or`).join(', ')}`
-    : ' — Aucun fondateur';
-  showNotif(`${evt.emoji} ${evt.nom} — ${brut} or brut, ${partFondateurs} or distribués${distText}`, 'success');
-  await PAGES.bastion();
 }
 
 async function investirOrBastion() {
@@ -560,61 +600,71 @@ async function investirOrBastion() {
 }
 
 async function confirmerInvestissement() {
-  const montant = parseInt(document.getElementById('invest-montant')?.value)||0;
-  const msg     = document.getElementById('invest-msg')?.value?.trim()||'';
-  if (montant < 1) { showNotif('Montant invalide.','error'); return; }
-  const chars = (STATE.characters||[]).filter(c => c.uid === STATE.user?.uid);
-  const char  = chars[0];
-  if (!char) return;
-  if (_getCharOr(char) < montant) { showNotif('Fonds insuffisants.','error'); return; }
-  await _setCharOr(char, _getCharOr(char) - montant);
-  const current  = (await getDocData('bastion','main')) || getDefaultBastion();
-  const historique = current.historique || [];
-  historique.push({
-    id:`inv_${Date.now()}`, session:historique.length+1,
-    date:new Date().toLocaleDateString('fr-FR'),
-    type:'investissement',
-    investisseur:{ charId:char.id, nom:char.nom||'?' },
-    montant, message:msg,
-    brut:0, reinvesti:0, partFondateurs:0, distributions:[],
-  });
-  await saveDoc('bastion','main', { ...current, tresor:(current.tresor||0)+montant, historique });
-  closeModalDirect();
-  showNotif(`+${montant} or investis dans le Bastion !`,'success');
-  await PAGES.bastion();
+  try {
+    const montant = parseInt(document.getElementById('invest-montant')?.value)||0;
+    const msg     = document.getElementById('invest-msg')?.value?.trim()||'';
+    if (montant < 1) { showNotif('Montant invalide.','error'); return; }
+    const chars = (STATE.characters||[]).filter(c => c.uid === STATE.user?.uid);
+    const char  = chars[0];
+    if (!char) return;
+    if (_getCharOr(char) < montant) { showNotif('Fonds insuffisants.','error'); return; }
+    await _setCharOr(char, _getCharOr(char) - montant);
+    const current  = (await getDocData('bastion','main')) || getDefaultBastion();
+    const historique = current.historique || [];
+    historique.push({
+      id:`inv_${Date.now()}`, session:historique.length+1,
+      date:new Date().toLocaleDateString('fr-FR'),
+      type:'investissement',
+      investisseur:{ charId:char.id, nom:char.nom||'?' },
+      montant, message:msg,
+      brut:0, reinvesti:0, partFondateurs:0, distributions:[],
+    });
+    await saveDoc('bastion','main', { ...current, tresor:(current.tresor||0)+montant, historique });
+    closeModalDirect();
+    showNotif(`+${montant} or investis dans le Bastion !`,'success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function supprimerHistorique(entryId) {
-  if (!await confirmModal('Supprimer ce cycle ? L\'or distribué aux fondateurs sera récupéré.')) return;
-  const current    = (await getDocData('bastion','main')) || getDefaultBastion();
-  const historique = current.historique || [];
-  const entry      = historique.find(h => h.id === entryId);
-  if (!entry) { showNotif('Entrée introuvable.','error'); return; }
+  try {
+    if (!await confirmModal('Supprimer ce cycle ? L\'or distribué aux fondateurs sera récupéré.')) return;
+    const current    = (await getDocData('bastion','main')) || getDefaultBastion();
+    const historique = current.historique || [];
+    const entry      = historique.find(h => h.id === entryId);
+    if (!entry) { showNotif('Entrée introuvable.','error'); return; }
 
-  const chars = STATE.characters || [];
+    const chars = STATE.characters || [];
 
-  if (entry.type === 'investissement') {
-    // Rembourser le joueur et retirer du trésor
-    const tresor = (current.tresor || 0) - entry.montant;
-    const char   = chars.find(c => c.id === entry.investisseur?.charId);
-    if (char) await _setCharOr(char, _getCharOr(char) + entry.montant);
-    const newHist = historique.filter(h => h.id !== entryId);
-    newHist.filter(h=>h.session).forEach((h,i)=>{ h.session = i+1; });
-    await saveDoc('bastion','main', { ...current, tresor: Math.max(0, tresor), historique: newHist });
-  } else {
-    // Cycle normal : reprendre uniquement les 10% distribués aux fondateurs
-    // Le trésor n'a pas été modifié lors du cycle, donc on ne le touche pas
-    for (const d of (entry.distributions||[])) {
-      const char = chars.find(c => c.id === d.charId);
-      if (char) await _setCharOr(char, Math.max(0, _getCharOr(char) - d.montant));
+    if (entry.type === 'investissement') {
+      // Rembourser le joueur et retirer du trésor
+      const tresor = (current.tresor || 0) - entry.montant;
+      const char   = chars.find(c => c.id === entry.investisseur?.charId);
+      if (char) await _setCharOr(char, _getCharOr(char) + entry.montant);
+      const newHist = historique.filter(h => h.id !== entryId);
+      newHist.filter(h=>h.session).forEach((h,i)=>{ h.session = i+1; });
+      await saveDoc('bastion','main', { ...current, tresor: Math.max(0, tresor), historique: newHist });
+    } else {
+      // Cycle normal : reprendre uniquement les 10% distribués aux fondateurs
+      // Le trésor n'a pas été modifié lors du cycle, donc on ne le touche pas
+      for (const d of (entry.distributions||[])) {
+        const char = chars.find(c => c.id === d.charId);
+        if (char) await _setCharOr(char, Math.max(0, _getCharOr(char) - d.montant));
+      }
+      const newHist = historique.filter(h => h.id !== entryId);
+      newHist.filter(h=>h.session).forEach((h,i)=>{ h.session = i+1; });
+      await saveDoc('bastion','main', { ...current, historique: newHist });
     }
-    const newHist = historique.filter(h => h.id !== entryId);
-    newHist.filter(h=>h.session).forEach((h,i)=>{ h.session = i+1; });
-    await saveDoc('bastion','main', { ...current, historique: newHist });
-  }
 
-  showNotif('Cycle supprimé et distributions annulées.','success');
-  await PAGES.bastion();
+    showNotif('Cycle supprimé et distributions annulées.','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -622,140 +672,145 @@ async function supprimerHistorique(entryId) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function ouvrirInventaireBastion() {
-  let current  = (await getDocData('bastion','main')) || getDefaultBastion();
-  // Migration : si des items 'or' traînent dans l'inventaire, les fusionner dans tresor
-  const orItems = (current.inventaire||[]).filter(i=>i.type==='or');
-  if (orItems.length > 0) {
-    const orTotal = orItems.reduce((s,i)=>(s+(parseInt(i.quantite)||0)),0);
-    current = { ...current,
-      tresor: (current.tresor||0) + orTotal,
-      inventaire: (current.inventaire||[]).filter(i=>i.type!=='or')
-    };
-    await saveDoc('bastion','main', { tresor: current.tresor, inventaire: current.inventaire });
-  }
-  const inv      = current.inventaire || [];
-  const invHisto = current.invHistorique || [];
-  const limite   = current.invLimite || 20;
-  const isAdmin  = STATE.isAdmin;
-  const uid      = STATE.user?.uid;
-  const hasChar  = (STATE.characters||[]).some(c => c.uid === uid);
-  const pct      = Math.min(100, Math.round(inv.length/limite*100));
-  const pctColor = pct>=90?'#ff6b6b':pct>=70?'#e8b84b':'#22c38e';
+  try {
+    let current  = (await getDocData('bastion','main')) || getDefaultBastion();
+    // Migration : si des items 'or' traînent dans l'inventaire, les fusionner dans tresor
+    const orItems = (current.inventaire||[]).filter(i=>i.type==='or');
+    if (orItems.length > 0) {
+      const orTotal = orItems.reduce((s,i)=>(s+(parseInt(i.quantite)||0)),0);
+      current = { ...current,
+        tresor: (current.tresor||0) + orTotal,
+        inventaire: (current.inventaire||[]).filter(i=>i.type!=='or')
+      };
+      await saveDoc('bastion','main', { tresor: current.tresor, inventaire: current.inventaire });
+    }
+    const inv      = current.inventaire || [];
+    const invHisto = current.invHistorique || [];
+    const limite   = current.invLimite || 20;
+    const isAdmin  = STATE.isAdmin;
+    const uid      = STATE.user?.uid;
+    const hasChar  = (STATE.characters||[]).some(c => c.uid === uid);
+    const pct      = Math.min(100, Math.round(inv.length/limite*100));
+    const pctColor = pct>=90?'#ff6b6b':pct>=70?'#e8b84b':'#22c38e';
 
-  // Onglets : Stock / Historique
-  openModal('📦 Inventaire du Bastion', `
-    <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
-      <button id="inv-tab-stock" onclick="window._bastionInvTab('stock')"
-        style="flex:1;padding:.4rem .75rem;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;
-        background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:var(--gold)">📦 Stock</button>
-      <button id="inv-tab-histo" onclick="window._bastionInvTab('histo')"
-        style="flex:1;padding:.4rem .75rem;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;
-        background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted)">📜 Historique</button>
-    </div>
-
-    <!-- Jauge capacité -->
-    <div style="margin-bottom:.75rem">
-      <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--text-dim);margin-bottom:.25rem">
-        <span>Capacité</span>
-        <span style="color:${pctColor};font-weight:600">${inv.length} / ${limite} emplacements</span>
+    // Onglets : Stock / Historique
+    openModal('📦 Inventaire du Bastion', `
+      <div style="display:flex;gap:.5rem;margin-bottom:.75rem">
+        <button id="inv-tab-stock" onclick="window._bastionInvTab('stock')"
+          style="flex:1;padding:.4rem .75rem;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;
+          background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:var(--gold)">📦 Stock</button>
+        <button id="inv-tab-histo" onclick="window._bastionInvTab('histo')"
+          style="flex:1;padding:.4rem .75rem;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;
+          background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted)">📜 Historique</button>
       </div>
-      <div style="background:var(--bg-elevated);border-radius:999px;height:7px;overflow:hidden;border:1px solid var(--border)">
-        <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:999px;transition:width .3s"></div>
-      </div>
-    </div>
 
-    <!-- Panneau Stock -->
-    <div id="inv-panel-stock" style="display:flex;flex-direction:column;gap:.5rem">
-
-      <!-- ── Cagnotte Or commune ── -->
-      <div style="background:linear-gradient(135deg,rgba(232,184,75,.08),rgba(232,184,75,.03));
-        border:1px solid rgba(232,184,75,.25);border-radius:12px;padding:.75rem 1rem">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
-          <div style="display:flex;align-items:center;gap:.6rem">
-            <span style="font-size:1.4rem">💰</span>
-            <div>
-              <div style="font-size:.68rem;font-weight:700;color:rgba(232,184,75,.7);
-                text-transform:uppercase;letter-spacing:1px">Cagnotte du Bastion</div>
-              <div style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:900;
-                color:var(--gold);line-height:1">${current.tresor||0}
-                <span style="font-size:.8rem;font-weight:400"> or</span>
-              </div>
-            </div>
-          </div>
-          <div style="display:flex;gap:.4rem;flex-shrink:0">
-            ${hasChar ? `
-            <button onclick="window._bastionOrAction('piocher')"
-              style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
-                background:rgba(34,195,142,.1);border:1px solid rgba(34,195,142,.3);
-                color:#22c38e;font-weight:600;transition:all .12s"
-              onmouseover="this.style.background='rgba(34,195,142,.2)'"
-              onmouseout="this.style.background='rgba(34,195,142,.1)'">
-              ↑ Piocher
-            </button>
-            <button onclick="window._bastionOrAction('deposer')"
-              style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
-                background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.3);
-                color:var(--gold);font-weight:600;transition:all .12s"
-              onmouseover="this.style.background='rgba(232,184,75,.2)'"
-              onmouseout="this.style.background='rgba(232,184,75,.1)'">
-              ↓ Déposer
-            </button>` : ''}
-            ${isAdmin && !hasChar ? `
-            <button onclick="window._bastionOrAction('deposer')"
-              style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
-                background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.3);
-                color:var(--gold);font-weight:600">
-              ✏️ Ajuster
-            </button>` : ''}
-          </div>
+      <!-- Jauge capacité -->
+      <div style="margin-bottom:.75rem">
+        <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--text-dim);margin-bottom:.25rem">
+          <span>Capacité</span>
+          <span style="color:${pctColor};font-weight:600">${inv.length} / ${limite} emplacements</span>
+        </div>
+        <div style="background:var(--bg-elevated);border-radius:999px;height:7px;overflow:hidden;border:1px solid var(--border)">
+          <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:999px;transition:width .3s"></div>
         </div>
       </div>
 
-      <!-- ── Bouton dépôt inventaire ── -->
-      ${hasChar||isAdmin ? `<div style="display:flex;justify-content:flex-end">
-        <button class="btn btn-gold btn-sm" onclick="ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>
-      </div>` : ''}
+      <!-- Panneau Stock -->
+      <div id="inv-panel-stock" style="display:flex;flex-direction:column;gap:.5rem">
 
-      <!-- ── Liste objets (sans les items or) ── -->
-      <div style="max-height:40vh;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem">
-        ${inv.filter(i=>i.type!=='or').length===0
-          ? `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun objet en stock.</div>`
-          : inv.filter(i=>i.type!=='or').map(item => `
-            <div style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
-              background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
-              <span style="font-size:1.1rem">📦</span>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:.85rem;font-weight:600;color:var(--text)">${item.nom||'?'}
-                  ${(item.quantite||0)>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}
+        <!-- ── Cagnotte Or commune ── -->
+        <div style="background:linear-gradient(135deg,rgba(232,184,75,.08),rgba(232,184,75,.03));
+          border:1px solid rgba(232,184,75,.25);border-radius:12px;padding:.75rem 1rem">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
+            <div style="display:flex;align-items:center;gap:.6rem">
+              <span style="font-size:1.4rem">💰</span>
+              <div>
+                <div style="font-size:.68rem;font-weight:700;color:rgba(232,184,75,.7);
+                  text-transform:uppercase;letter-spacing:1px">Cagnotte du Bastion</div>
+                <div style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:900;
+                  color:var(--gold);line-height:1">${current.tresor||0}
+                  <span style="font-size:.8rem;font-weight:400"> or</span>
                 </div>
-                ${item.description?`<div style="font-size:.72rem;color:var(--text-dim)">${item.description}</div>`:''}
-                <div style="font-size:.64rem;color:var(--text-dim)">Par ${item.deposePar||'?'} · ${item.date||''}</div>
               </div>
-              <div style="display:flex;gap:.25rem;flex-shrink:0">
-                ${hasChar?`<button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="recupererObjetBastion('${item.id}')">↩ Récup.</button>`:''}
-                ${isAdmin?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerObjetBastion('${item.id}')">🗑️</button>`:''}
-              </div>
-            </div>`).join('')}
-      </div>
-    </div>
+            </div>
+            <div style="display:flex;gap:.4rem;flex-shrink:0">
+              ${hasChar ? `
+              <button onclick="window._bastionOrAction('piocher')"
+                style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
+                  background:rgba(34,195,142,.1);border:1px solid rgba(34,195,142,.3);
+                  color:#22c38e;font-weight:600;transition:all .12s"
+                onmouseover="this.style.background='rgba(34,195,142,.2)'"
+                onmouseout="this.style.background='rgba(34,195,142,.1)'">
+                ↑ Piocher
+              </button>
+              <button onclick="window._bastionOrAction('deposer')"
+                style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
+                  background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.3);
+                  color:var(--gold);font-weight:600;transition:all .12s"
+                onmouseover="this.style.background='rgba(232,184,75,.2)'"
+                onmouseout="this.style.background='rgba(232,184,75,.1)'">
+                ↓ Déposer
+              </button>` : ''}
+              ${isAdmin && !hasChar ? `
+              <button onclick="window._bastionOrAction('deposer')"
+                style="font-size:.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;
+                  background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.3);
+                  color:var(--gold);font-weight:600">
+                ✏️ Ajuster
+              </button>` : ''}
+            </div>
+          </div>
+        </div>
 
-    <!-- Panneau Historique -->
-    <div id="inv-panel-histo" style="display:none;max-height:52vh;overflow-y:auto">
-      ${invHisto.length===0
-        ? `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic">Aucun échange enregistré.</div>`
-        : [...invHisto].reverse().map(h => {
-            const isDepot = h.action === 'depot';
-            return `<div style="display:flex;align-items:center;gap:.65rem;padding:.5rem .65rem;
-              border-bottom:1px solid var(--border);font-size:.8rem">
-              <span style="font-size:1rem;flex-shrink:0">${isDepot?'⬇️':'⬆️'}</span>
-              <div style="flex:1;min-width:0">
-                <div style="color:var(--text);font-weight:500">${h.nom||'?'}${h.quantite>1?` ×${h.quantite}`:''}</div>
-                <div style="font-size:.68rem;color:var(--text-dim)">${isDepot?'Déposé':'Récupéré'} par <strong>${h.par||'?'}</strong> · ${h.date||''}</div>
-              </div>
-            </div>`;
-          }).join('')}
-    </div>
-  `);
+        <!-- ── Bouton dépôt inventaire ── -->
+        ${hasChar||isAdmin ? `<div style="display:flex;justify-content:flex-end">
+          <button class="btn btn-gold btn-sm" onclick="ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>
+        </div>` : ''}
+
+        <!-- ── Liste objets (sans les items or) ── -->
+        <div style="max-height:40vh;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem">
+          ${inv.filter(i=>i.type!=='or').length===0
+            ? `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun objet en stock.</div>`
+            : inv.filter(i=>i.type!=='or').map(item => `
+              <div style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
+                background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
+                <span style="font-size:1.1rem">📦</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:.85rem;font-weight:600;color:var(--text)">${item.nom||'?'}
+                    ${(item.quantite||0)>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}
+                  </div>
+                  ${item.description?`<div style="font-size:.72rem;color:var(--text-dim)">${item.description}</div>`:''}
+                  <div style="font-size:.64rem;color:var(--text-dim)">Par ${item.deposePar||'?'} · ${item.date||''}</div>
+                </div>
+                <div style="display:flex;gap:.25rem;flex-shrink:0">
+                  ${hasChar?`<button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="recupererObjetBastion('${item.id}')">↩ Récup.</button>`:''}
+                  ${isAdmin?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerObjetBastion('${item.id}')">🗑️</button>`:''}
+                </div>
+              </div>`).join('')}
+        </div>
+      </div>
+
+      <!-- Panneau Historique -->
+      <div id="inv-panel-histo" style="display:none;max-height:52vh;overflow-y:auto">
+        ${invHisto.length===0
+          ? `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic">Aucun échange enregistré.</div>`
+          : [...invHisto].reverse().map(h => {
+              const isDepot = h.action === 'depot';
+              return `<div style="display:flex;align-items:center;gap:.65rem;padding:.5rem .65rem;
+                border-bottom:1px solid var(--border);font-size:.8rem">
+                <span style="font-size:1rem;flex-shrink:0">${isDepot?'⬇️':'⬆️'}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="color:var(--text);font-weight:500">${h.nom||'?'}${h.quantite>1?` ×${h.quantite}`:''}</div>
+                  <div style="font-size:.68rem;color:var(--text-dim)">${isDepot?'Déposé':'Récupéré'} par <strong>${h.par||'?'}</strong> · ${h.date||''}</div>
+                </div>
+              </div>`;
+            }).join('')}
+      </div>
+    `);
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Switch onglet inventaire
@@ -846,113 +901,128 @@ window._bastionRefreshDepot = async () => {
 };
 
 async function confirmerDepotDepuisInventaire() {
-  const checked = [...document.querySelectorAll('#dep-inv-list input[type="checkbox"]:checked')];
-  if (!checked.length) { showNotif('Aucun objet sélectionné.','error'); return; }
+  try {
+    const checked = [...document.querySelectorAll('#dep-inv-list input[type="checkbox"]:checked')];
+    if (!checked.length) { showNotif('Aucun objet sélectionné.','error'); return; }
 
-  // Récupérer les indexes dans l'inventaire Firestore (stockés au moment de l'ouverture du modal)
-  const invFrais = window._depotInvFrais || [];
-  const charId   = window._depotCharId;
-  const uid      = STATE.user?.uid;
-  const chars    = STATE.isAdmin ? (STATE.characters||[]) : (STATE.characters||[]).filter(c=>c.uid===uid);
-  const char     = chars.find(c=>c.id===charId) || chars[0];
-  if (!char) return;
+    // Récupérer les indexes dans l'inventaire Firestore (stockés au moment de l'ouverture du modal)
+    const invFrais = window._depotInvFrais || [];
+    const charId   = window._depotCharId;
+    const uid      = STATE.user?.uid;
+    const chars    = STATE.isAdmin ? (STATE.characters||[]) : (STATE.characters||[]).filter(c=>c.uid===uid);
+    const char     = chars.find(c=>c.id===charId) || chars[0];
+    if (!char) return;
 
-  // Vérifier capacité bastion
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const limite  = current.invLimite || 20;
-  const invBast = [...(current.inventaire||[])];
-  const invHisto = [...(current.invHistorique||[])];
+    // Vérifier capacité bastion
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const limite  = current.invLimite || 20;
+    const invBast = [...(current.inventaire||[])];
+    const invHisto = [...(current.invHistorique||[])];
 
-  if (invBast.length + checked.length > limite) {
-    showNotif(`Capacité insuffisante (${limite - invBast.length} places restantes).`,'error'); return;
+    if (invBast.length + checked.length > limite) {
+      showNotif(`Capacité insuffisante (${limite - invBast.length} places restantes).`,'error'); return;
+    }
+
+    // Récupérer les vrais indexes dans invFrais depuis data-inv-idx
+    const indexesARetirer = new Set(
+      checked.map(cb => parseInt(cb.dataset.invIdx)).filter(n => !isNaN(n))
+    );
+
+    const now = new Date().toLocaleDateString('fr-FR');
+    let counter = 0;
+    for (const cb of checked) {
+      const idx  = parseInt(cb.dataset.invIdx);
+      const item = invFrais[idx];
+      if (!item) continue;
+      const uniqueId = `bi_${Date.now()}_${++counter}_${Math.random().toString(36).slice(2,6)}`;
+      // Sauvegarder l'item COMPLET pour pouvoir le restituer fidèlement
+      invBast.push({ ...item, id: uniqueId, quantite: item.quantite||item.qte||1, deposePar: char.nom||'?', date: now });
+      invHisto.push({ id:`bih_${Date.now()}_${counter}`, action:'depot', nom: item.nom||'?', quantite: item.quantite||1, par: char.nom||'?', date: now });
+    }
+
+    // Retirer exactement les items aux bons indexes depuis invFrais
+    const newCharInv = invFrais.filter((_, idx) => !indexesARetirer.has(idx));
+    await updateInCol('characters', char.id, { inventaire: newCharInv });
+    // Synchroniser la mémoire complètement
+    char.inventaire = newCharInv;
+    const stateChar = (STATE.characters||[]).find(c => c.id === char.id);
+    if (stateChar) stateChar.inventaire = newCharInv;
+    if (STATE.activeChar?.id === char.id) STATE.activeChar.inventaire = newCharInv;
+
+    await saveDoc('bastion','main', { ...current, inventaire:invBast, invHistorique:invHisto });
+    closeModalDirect();
+    showNotif(`${checked.length} objet${checked.length>1?'s':''} déposé${checked.length>1?'s':''} au Bastion.`,'success');
+    await ouvrirInventaireBastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  // Récupérer les vrais indexes dans invFrais depuis data-inv-idx
-  const indexesARetirer = new Set(
-    checked.map(cb => parseInt(cb.dataset.invIdx)).filter(n => !isNaN(n))
-  );
-
-  const now = new Date().toLocaleDateString('fr-FR');
-  let counter = 0;
-  for (const cb of checked) {
-    const idx  = parseInt(cb.dataset.invIdx);
-    const item = invFrais[idx];
-    if (!item) continue;
-    const uniqueId = `bi_${Date.now()}_${++counter}_${Math.random().toString(36).slice(2,6)}`;
-    // Sauvegarder l'item COMPLET pour pouvoir le restituer fidèlement
-    invBast.push({ ...item, id: uniqueId, quantite: item.quantite||item.qte||1, deposePar: char.nom||'?', date: now });
-    invHisto.push({ id:`bih_${Date.now()}_${counter}`, action:'depot', nom: item.nom||'?', quantite: item.quantite||1, par: char.nom||'?', date: now });
-  }
-
-  // Retirer exactement les items aux bons indexes depuis invFrais
-  const newCharInv = invFrais.filter((_, idx) => !indexesARetirer.has(idx));
-  await updateInCol('characters', char.id, { inventaire: newCharInv });
-  // Synchroniser la mémoire complètement
-  char.inventaire = newCharInv;
-  const stateChar = (STATE.characters||[]).find(c => c.id === char.id);
-  if (stateChar) stateChar.inventaire = newCharInv;
-  if (STATE.activeChar?.id === char.id) STATE.activeChar.inventaire = newCharInv;
-
-  await saveDoc('bastion','main', { ...current, inventaire:invBast, invHistorique:invHisto });
-  closeModalDirect();
-  showNotif(`${checked.length} objet${checked.length>1?'s':''} déposé${checked.length>1?'s':''} au Bastion.`,'success');
-  await ouvrirInventaireBastion();
 }
 
 async function recupererObjetBastion(itemId) {
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const inv     = current.inventaire || [];
-  const item    = inv.find(i=>i.id===itemId);
-  if (!item) return;
-  const chars = (STATE.characters||[]).filter(c=>c.uid===STATE.user?.uid);
-  if (!chars.length) { showNotif('Aucun personnage trouvé.','error'); return; }
-  const char = chars[0];
+  try {
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const inv     = current.inventaire || [];
+    const item    = inv.find(i=>i.id===itemId);
+    if (!item) return;
+    const chars = (STATE.characters||[]).filter(c=>c.uid===STATE.user?.uid);
+    if (!chars.length) { showNotif('Aucun personnage trouvé.','error'); return; }
+    const char = chars[0];
 
-  if (item.type === 'or') {
-    // Récupérer de l'or
-    await _setCharOr(char, _getCharOr(char) + item.quantite);
-  } else {
-    const invChar = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
-    const qteRecupere = parseInt(item.quantite || item.qte || 1) || 1;
-    // Chercher un item stackable identique (même itemId ou même nom+template si pas d'itemId)
-    const canStack = item.itemId || (item.nom && item.template);
-    const existing = canStack ? invChar.find(i =>
-      (item.itemId && i.itemId === item.itemId) ||
-      (!item.itemId && i.nom === item.nom && i.template === item.template && i.template !== 'arme' && i.template !== 'armure' && i.template !== 'bijou')
-    ) : null;
-    if (existing) {
-      // Stacker — incrémenter uniquement la quantité, sans toucher aux autres champs
-      const baseQte = parseInt(existing.quantite || existing.qte || 1) || 1;
-      const newQte  = baseQte + qteRecupere;
-      existing.quantite = newQte;
-      existing.qte      = String(newQte); // conserver le type string comme les items boutique
+    if (item.type === 'or') {
+      // Récupérer de l'or
+      await _setCharOr(char, _getCharOr(char) + item.quantite);
     } else {
-      // Restituer l'item complet tel qu'il était (retirer uniquement les champs propres au bastion)
-      const { id: _id, deposePar: _dep, date: _date, ...itemOriginal } = item;
-      invChar.push({ ...itemOriginal, quantite: qteRecupere, qte: String(qteRecupere) });
+      const invChar = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
+      const qteRecupere = parseInt(item.quantite || item.qte || 1) || 1;
+      // Chercher un item stackable identique (même itemId ou même nom+template si pas d'itemId)
+      const canStack = item.itemId || (item.nom && item.template);
+      const existing = canStack ? invChar.find(i =>
+        (item.itemId && i.itemId === item.itemId) ||
+        (!item.itemId && i.nom === item.nom && i.template === item.template && i.template !== 'arme' && i.template !== 'armure' && i.template !== 'bijou')
+      ) : null;
+      if (existing) {
+        // Stacker — incrémenter uniquement la quantité, sans toucher aux autres champs
+        const baseQte = parseInt(existing.quantite || existing.qte || 1) || 1;
+        const newQte  = baseQte + qteRecupere;
+        existing.quantite = newQte;
+        existing.qte      = String(newQte); // conserver le type string comme les items boutique
+      } else {
+        // Restituer l'item complet tel qu'il était (retirer uniquement les champs propres au bastion)
+        const { id: _id, deposePar: _dep, date: _date, ...itemOriginal } = item;
+        invChar.push({ ...itemOriginal, quantite: qteRecupere, qte: String(qteRecupere) });
+      }
+      await updateInCol('characters', char.id, { inventaire:invChar });
+      // Synchroniser la mémoire complètement : l'objet dans STATE.characters ET STATE.activeChar
+      char.inventaire = invChar;
+      const stateChar = (STATE.characters||[]).find(c => c.id === char.id);
+      if (stateChar) stateChar.inventaire = invChar;
+      if (STATE.activeChar?.id === char.id) STATE.activeChar.inventaire = invChar;
     }
-    await updateInCol('characters', char.id, { inventaire:invChar });
-    // Synchroniser la mémoire complètement : l'objet dans STATE.characters ET STATE.activeChar
-    char.inventaire = invChar;
-    const stateChar = (STATE.characters||[]).find(c => c.id === char.id);
-    if (stateChar) stateChar.inventaire = invChar;
-    if (STATE.activeChar?.id === char.id) STATE.activeChar.inventaire = invChar;
+
+    const invHisto = [...(current.invHistorique||[])];
+    invHisto.push({ id:`bih_${Date.now()}`, action:'retrait', nom:item.nom, quantite:item.quantite, par:char.nom||'?', date:new Date().toLocaleDateString('fr-FR') });
+
+    await saveDoc('bastion','main', { ...current, inventaire:inv.filter(i=>i.id!==itemId), invHistorique:invHisto });
+    showNotif(`${item.nom} récupéré !`,'success');
+    await ouvrirInventaireBastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  const invHisto = [...(current.invHistorique||[])];
-  invHisto.push({ id:`bih_${Date.now()}`, action:'retrait', nom:item.nom, quantite:item.quantite, par:char.nom||'?', date:new Date().toLocaleDateString('fr-FR') });
-
-  await saveDoc('bastion','main', { ...current, inventaire:inv.filter(i=>i.id!==itemId), invHistorique:invHisto });
-  showNotif(`${item.nom} récupéré !`,'success');
-  await ouvrirInventaireBastion();
 }
 
 async function supprimerObjetBastion(itemId) {
-  if (!await confirmModal("Supprimer cet objet ?")) return;
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  await saveDoc('bastion','main', { ...current, inventaire:(current.inventaire||[]).filter(i=>i.id!==itemId) });
-  showNotif('Objet supprimé.','success');
-  await ouvrirInventaireBastion();
+  try {
+    if (!await confirmModal("Supprimer cet objet ?")) return;
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    await saveDoc('bastion','main', { ...current, inventaire:(current.inventaire||[]).filter(i=>i.id!==itemId) });
+    showNotif('Objet supprimé.','success');
+    await ouvrirInventaireBastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // Déposer de l'or dans l'inventaire
@@ -1071,26 +1141,31 @@ async function confirmerDepotOrBastion() { window._confirmerOrBastion('deposer',
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function resetBastion() {
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const fonds   = current.ameliorationsFonds || {};
-  const tresor  = current.tresor || 0;
-  const totalInvesti = Object.values(fonds).reduce((s,v) => s + (parseInt(v)||0), 0) + tresor;
+  try {
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const fonds   = current.ameliorationsFonds || {};
+    const tresor  = current.tresor || 0;
+    const totalInvesti = Object.values(fonds).reduce((s,v) => s + (parseInt(v)||0), 0) + tresor;
 
-  const msg = [
-    '⚠️ Remettre le Bastion à zéro ?',
-    '',
-    'Seront effacés : historique, inventaire, améliorations, missions, journal, fondateurs.',
-    totalInvesti > 0 ? `L'or de la cagnotte (${tresor} or) sera perdu.` : '',
-    Object.keys(fonds).length > 0 ? `Les fonds investis dans les améliorations (${totalInvesti} or au total) seront perdus.` : '',
-    '',
-    'Cette action est irréversible.',
-  ].filter(Boolean).join('\n');
+    const msg = [
+      '⚠️ Remettre le Bastion à zéro ?',
+      '',
+      'Seront effacés : historique, inventaire, améliorations, missions, journal, fondateurs.',
+      totalInvesti > 0 ? `L'or de la cagnotte (${tresor} or) sera perdu.` : '',
+      Object.keys(fonds).length > 0 ? `Les fonds investis dans les améliorations (${totalInvesti} or au total) seront perdus.` : '',
+      '',
+      'Cette action est irréversible.',
+    ].filter(Boolean).join('\n');
 
-  if (!await confirmModal(msg)) return;
-  await saveDoc('bastion', 'main', getDefaultBastion());
-  closeModalDirect();
-  showNotif('Bastion remis à zéro.', 'success');
-  await PAGES.bastion();
+    if (!await confirmModal(msg)) return;
+    await saveDoc('bastion', 'main', getDefaultBastion());
+    closeModalDirect();
+    showNotif('Bastion remis à zéro.', 'success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function ouvrirMissionsBastion() {
@@ -1135,32 +1210,47 @@ async function creerMissionBastion() {
 }
 
 async function sauvegarderMissionBastion() {
-  const titre = document.getElementById('miss-titre')?.value?.trim();
-  if (!titre) { showNotif('Titre requis.','error'); return; }
-  const current  = (await getDocData('bastion','main')) || getDefaultBastion();
-  const missions = current.missions || [];
-  missions.push({ id:`ms_${Date.now()}`, titre, description:document.getElementById('miss-desc')?.value?.trim()||'', recompense:document.getElementById('miss-recomp')?.value?.trim()||'', statut:'active', date:new Date().toLocaleDateString('fr-FR') });
-  await saveDoc('bastion','main', { ...current, missions });
-  closeModalDirect();
-  showNotif('Mission créée !','success');
-  await PAGES.bastion();
+  try {
+    const titre = document.getElementById('miss-titre')?.value?.trim();
+    if (!titre) { showNotif('Titre requis.','error'); return; }
+    const current  = (await getDocData('bastion','main')) || getDefaultBastion();
+    const missions = current.missions || [];
+    missions.push({ id:`ms_${Date.now()}`, titre, description:document.getElementById('miss-desc')?.value?.trim()||'', recompense:document.getElementById('miss-recomp')?.value?.trim()||'', statut:'active', date:new Date().toLocaleDateString('fr-FR') });
+    await saveDoc('bastion','main', { ...current, missions });
+    closeModalDirect();
+    showNotif('Mission créée !','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function changerStatutMission(id, statut) {
-  const current  = (await getDocData('bastion','main')) || getDefaultBastion();
-  await saveDoc('bastion','main', { ...current, missions:(current.missions||[]).map(m=>m.id===id?{...m,statut}:m) });
-  closeModalDirect();
-  showNotif(`Mission "${statut}".`,'success');
-  await PAGES.bastion();
+  try {
+    const current  = (await getDocData('bastion','main')) || getDefaultBastion();
+    await saveDoc('bastion','main', { ...current, missions:(current.missions||[]).map(m=>m.id===id?{...m,statut}:m) });
+    closeModalDirect();
+    showNotif(`Mission "${statut}".`,'success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function supprimerMissionBastion(id) {
-  if (!await confirmModal('Supprimer cette mission ?')) return;
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  await saveDoc('bastion','main', { ...current, missions:(current.missions||[]).filter(m=>m.id!==id) });
-  closeModalDirect();
-  showNotif('Mission supprimée.','success');
-  await PAGES.bastion();
+  try {
+    if (!await confirmModal('Supprimer cette mission ?')) return;
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    await saveDoc('bastion','main', { ...current, missions:(current.missions||[]).filter(m=>m.id!==id) });
+    closeModalDirect();
+    showNotif('Mission supprimée.','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1176,13 +1266,18 @@ function addBastionLog() {
 }
 
 async function saveBastionLog() {
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const journal = current.journal || [];
-  journal.unshift({ id:`j_${Date.now()}`, date:document.getElementById('bastion-log-date')?.value?.trim()||new Date().toLocaleDateString('fr-FR'), texte:document.getElementById('bastion-log-text')?.value?.trim()||'' });
-  await saveDoc('bastion','main', { ...current, journal });
-  closeModalDirect();
-  showNotif('Entrée ajoutée.','success');
-  await PAGES.bastion();
+  try {
+    const current = (await getDocData('bastion','main')) || getDefaultBastion();
+    const journal = current.journal || [];
+    journal.unshift({ id:`j_${Date.now()}`, date:document.getElementById('bastion-log-date')?.value?.trim()||new Date().toLocaleDateString('fr-FR'), texte:document.getElementById('bastion-log-text')?.value?.trim()||'' });
+    await saveDoc('bastion','main', { ...current, journal });
+    closeModalDirect();
+    showNotif('Entrée ajoutée.','success');
+    await PAGES.bastion();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
