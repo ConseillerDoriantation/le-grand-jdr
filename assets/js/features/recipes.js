@@ -333,6 +333,9 @@ function _renderCard(r, accent) {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL DÉTAIL ITEM (arme / armure / bijou)
 // ══════════════════════════════════════════════════════════════════════════════
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 window.JDRApp.openItemDetailModal = function(id) {
   const r = _visible().find(x => x.id === id);
   if (!r) return;
