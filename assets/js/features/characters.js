@@ -6,6 +6,9 @@ import PAGES from './pages.js';
 import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { _esc, _nl2br, _norm, modStr } from '../shared/html.js';
 import {
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct,
   getMaitriseBonus as _getMaitriseBonus,
   ITEM_STAT_META, ITEM_STAT_BY_FULL, ITEM_STAT_BY_STORE,
@@ -650,7 +653,7 @@ function renderCharSheet(c, keepTab) {
                    ${canEdit?'<span style="font-size:1.5rem">📷</span>':'<span style="font-size:1.8rem;opacity:0.3">⚔️</span>'}
                  </div>`}
           </div>
-          ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="deleteCharPhoto('${c.id}')" title="Supprimer">✕</button>`:''}
+          ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="JDRApp.deleteCharPhoto('${c.id}')" title="Supprimer">✕</button>`:''}
         </div>
         <div class="cs-id-info">
           <div class="cs-name-row">
@@ -682,7 +685,7 @@ function renderCharSheet(c, keepTab) {
           <span id="xp-pct" style="font-size:.6rem;color:var(--text-dim);white-space:nowrap">${xpPct}%</span>
           ${canEdit ? `<input type="number" class="cs-xp-input cs-inline-num"
             id="xp-direct-input" value="${c.exp||0}" min="0" max="${calcPalier(c.niveau||1)}"
-            onchange="saveXpDirect('${c.id}',this)" oninput="JDRApp.previewXpBar(this,${calcPalier(c.niveau||1)})"
+            onchange="saveXpDirect('${c.id}',this)" oninput="previewXpBar(this,${calcPalier(c.niveau||1)})"
             style="width:50px;font-size:.65rem;padding:1px 4px;text-align:center;
             background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:5px;
             color:var(--text-dim)" title="XP actuel">` : ''}
@@ -4419,9 +4422,6 @@ async function deleteMaitrise(idx) {
 // ══════════════════════════════════════════════
 // EXPORT
 // ══════════════════════════════════════════════
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 Object.assign(window.JDRApp, {
   selectChar, filterAdminChars,
   sellInvItem, openSellInvModal, sellInvItemBulk,
