@@ -177,7 +177,7 @@ function editCard(id) {
 }
 
 async function deleteCard(id) {
-  if (!confirm('Supprimer cette carte ?')) return;
+  if (!await confirmModal('Supprimer cette carte ?')) return;
   await deleteFromCol('collection', id);
   showNotif('Carte supprimée.', 'success');
   await renderCollectionPage();
