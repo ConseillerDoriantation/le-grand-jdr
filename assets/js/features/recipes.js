@@ -626,7 +626,7 @@ async function saveShopRecipe(id) {
 
 async function deleteShopRecipe(id) {
   const item = _shopItems.find(i => i.id === id);
-  if (!confirm(`Retirer "${item?.nom||'cet objet'}" des recettes ? L'objet restera dans la boutique.`)) return;
+  if (!await confirmModal(`Retirer "${item?.nom||'cet objet'}" des recettes ? L'objet restera dans la boutique.`)) return;
 
   const recipeMeta = { ...(item?.recipeMeta || {}), hidden: true };
   await updateInCol('shop', id, { recipeMeta, acces: [] });
@@ -642,7 +642,7 @@ async function deleteShopRecipe(id) {
 
 async function deleteRecipe(id) {
   const r = _all.find(x => x.id === id);
-  if (!confirm(`Supprimer "${r?.nom||'cette recette'}" ?`)) return;
+  if (!await confirmModal(`Supprimer "${r?.nom||'cette recette'}" ?`)) return;
   await deleteFromCol('recipes', id);
   _all = _all.filter(x => x.id !== id);
   showNotif('Recette supprimée.', 'success');
