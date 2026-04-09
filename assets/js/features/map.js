@@ -531,14 +531,14 @@ async function _fogCommit(pts) {
   }
 }
 
-window.removeFogPoly = async (i) => {
+window.JDRApp.removeFogPoly = async (i) => {
   mapState.fogZones.splice(i, 1);
   await saveDoc('world','map_fog',{ zones: mapState.fogZones });
   renderFog();
   showNotif('Zone supprimée.','success');
 };
 
-window.clearFog = async () => {
+window.JDRApp.clearFog = async () => {
   if (!await confirmModal('Effacer toutes les zones révélées ?')) return;
   mapState.fogZones = [];
   await saveDoc('world','map_fog',{ zones:[] });
@@ -546,7 +546,7 @@ window.clearFog = async () => {
   showNotif('Brouillard effacé.','success');
 };
 
-window.saveFog = async () => {
+window.JDRApp.saveFog = async () => {
   await saveDoc('world','map_fog',{ zones: mapState.fogZones||[] });
   renderFog();
 };
@@ -605,7 +605,7 @@ function openSidebar(lieu) {
   sidebar.style.transform = 'translateX(0)';
 }
 
-window.closeMapSidebar = () => {
+window.JDRApp.closeMapSidebar = () => {
   const sidebar = document.getElementById('map-sidebar');
   if (sidebar) sidebar.style.transform = 'translateX(100%)';
   mapState.selectedLieu = null;
@@ -706,7 +706,7 @@ function openPlaceLieuModal(x, y) {
   setTimeout(() => document.getElementById('lieu-nom')?.focus(), 60);
 }
 
-window.saveLieu = async function(id = null) {
+window.JDRApp.saveLieu = async function(id = null) {
   const nom   = document.getElementById('lieu-nom')?.value?.trim();
   if (!nom) { showNotif('Le nom est requis.', 'error'); return; }
 
@@ -787,12 +787,12 @@ function openEditLieuModal(lieu) {
   `);
 }
 
-window.openEditLieuModalById = (id) => {
+window.JDRApp.openEditLieuModalById = (id) => {
   const lieu = mapState.lieux.find(l => l.id === id);
   if (lieu) openEditLieuModal(lieu);
 };
 
-window.deleteLieu = async (id) => {
+window.JDRApp.deleteLieu = async (id) => {
   if (!await confirmModal('Supprimer ce lieu de la carte ?')) return;
   await deleteFromCol('map_lieux', id);
   mapState.lieux = mapState.lieux.filter(l => l.id !== id);
@@ -1060,7 +1060,7 @@ window._mapConfirmCrop = () => {
   }, 0);
 };
 
-window.saveMapSettings = async () => {
+window.JDRApp.saveMapSettings = async () => {
   const regionName = document.getElementById('map-region-name')?.value?.trim() || '';
 
   let imageUrl = '';
@@ -1086,7 +1086,7 @@ window.saveMapSettings = async () => {
 };
 
 // ── Export global ─────────────────────────────────────────────────────────────
-Object.assign(window, {
+Object.assign(window.JDRApp, {
   initMap,
   LIEU_TYPES,
   openMapSettingsModal,
