@@ -77,8 +77,6 @@ try {
 }
 
 // ── Namespace global pour les fonctions des features ────────────────────────
-// Toutes les fonctions exposées par les features utilisent window.JDRApp.*
-// au lieu de window.* directement, pour éviter la pollution de l'espace global.
 window.JDRApp = {};
 
 // ── Les features sont chargées en lazy via navigation.js ─────────────────────
