@@ -31,15 +31,13 @@ const _loaded = new Set();
 
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
-  if (!PAGES[page]) {
-    console.warn(`[nav] page inconnue : ${page}`);
-    return;
-  }
   setPage(page);
   _syncNav(page);
   _renderLoading();
 
-  // Charger la feature si elle a un module associé (une seule fois)
+  // Charger la feature en lazy si nécessaire (une seule fois)
+  // On le fait AVANT de vérifier PAGES[page] car certaines features
+  // s'y enregistrent elles-mêmes au chargement (ex: account.js, world.js)
   if (FEATURE_MAP[page] && !_loaded.has(page)) {
     try {
       await FEATURE_MAP[page]();
@@ -49,6 +47,13 @@ export async function navigate(page) {
       _renderPageError(page, err);
       return;
     }
+  }
+
+  // Vérifier après chargement
+  if (!PAGES[page]) {
+    console.warn(`[nav] page inconnue : ${page}`);
+    _renderPageError(page, new Error(`Page "${page}" introuvable`));
+    return;
   }
 
   // Rendre la page
