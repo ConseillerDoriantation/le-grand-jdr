@@ -172,7 +172,7 @@ window._addCombatStyle = () => _openStyleEditor(-1, {
 });
 window._editCombatStyle = (i) => _openStyleEditor(i, _combatStyles[i] || {});
 window._deleteCombatStyle = async (i) => {
-  if (!confirm('Supprimer ce style ?')) return;
+  if (!await confirmModal('Supprimer ce style ?')) return;
   _combatStyles.splice(i, 1);
   await saveDoc('world', 'combat_styles', { styles: _combatStyles });
   showNotif('Style supprimé.', 'success');
@@ -2449,7 +2449,7 @@ async function saveNote(idx) {
 
 async function deleteNote(idx) {
   const c = STATE.activeChar; if(!c) return;
-  if (!confirm('Supprimer cette note ?')) return;
+  if (!await confirmModal('Supprimer cette note ?')) return;
   c.notesList.splice(idx, 1);
   if (window._openNote >= c.notesList.length) window._openNote = null;
   await updateInCol('characters', c.id, {notesList: c.notesList});
@@ -3017,7 +3017,7 @@ async function deleteInvItem(idx) {
 }
 
 async function deleteChar(id) {
-  if (!confirm('Supprimer ce personnage ?')) return;
+  if (!await confirmModal('Supprimer ce personnage ?')) return;
   await deleteFromCol('characters',id);
   showNotif('Personnage supprimé.','success');
   PAGES.characters();
@@ -4274,7 +4274,7 @@ async function saveMaitrise(idx) {
 async function deleteMaitrise(idx) {
   const c = STATE.activeChar; if (!c) return;
   const m = (c.maitrises || [])[idx];
-  if (!confirm(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
+  if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
   c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
   await updateInCol('characters', c.id, { maitrises: c.maitrises });
   showNotif('Maîtrise supprimée.', 'success');
