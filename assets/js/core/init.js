@@ -49,7 +49,7 @@ setFirebase(auth, db, {
   ADMIN_EMAIL,
 });
 
-window.STATE = STATE;
+// STATE est importé directement via ES modules — pas besoin de l'exposer sur window.
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
