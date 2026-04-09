@@ -14,9 +14,6 @@ import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, 
 // _crop, _clamp → gérés par shared/image-upload.js
 
 // ── État local ────────────────────────────────────────────────────────────────
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 let _creatures  = [];
 let _tracker    = {}; // { [creatureId]: { pvActuel, pmActuel, notes, deductions:{pv,pm,ca,for,...} } }
 let _searchVal  = '';
@@ -136,7 +133,7 @@ function _render() {
         class="input-field" style="max-width:220px;font-size:.83rem"
         value="${_searchVal}"
         oninput="window._bstSearchInput(this.value)">
-      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="JDRApp.openBeastModal()">+ Créature</button>` : ''}
+      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openBeastModal()">+ Créature</button>` : ''}
     </div>
   </div>
 
@@ -165,7 +162,7 @@ function _render() {
     <div style="text-align:center;padding:4rem;color:var(--text-dim)">
       <div style="font-size:3rem;margin-bottom:.75rem;opacity:.3">🐉</div>
       <p style="font-style:italic">${_creatures.length === 0 ? 'Aucune créature dans le bestiaire.' : 'Aucun résultat.'}</p>
-      ${STATE.isAdmin && _creatures.length === 0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="JDRApp.openBeastModal()">+ Ajouter la première créature</button>` : ''}
+      ${STATE.isAdmin && _creatures.length === 0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openBeastModal()">+ Ajouter la première créature</button>` : ''}
     </div>
   ` : `
   <!-- ═══ LAYOUT : grille + panneau ════════════════════════════════════════ -->
@@ -214,8 +211,8 @@ function _renderCard(c) {
     </div>
     ${STATE.isAdmin ? `
     <div style="display:flex;gap:3px;padding:.4rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
-      <button class="btn-icon" style="font-size:.7rem" onclick="event.stopPropagation();JDRApp.openBeastModal('${c.id}')">✏️</button>
-      <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="event.stopPropagation();JDRApp.deleteBeast('${c.id}')">🗑️</button>
+      <button class="btn-icon" style="font-size:.7rem" onclick="event.stopPropagation();openBeastModal('${c.id}')">✏️</button>
+      <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="event.stopPropagation();deleteBeast('${c.id}')">🗑️</button>
     </div>` : ''}
   </div>`;
 }
@@ -389,8 +386,8 @@ function _renderPanel(c) {
       ${traitsHtml}
       ${butinsHtml}
       <div class="bst-section" style="display:flex;gap:.5rem">
-        <button class="btn btn-outline btn-sm" style="flex:1" onclick="JDRApp.openBeastModal('${c.id}')">✏️ Modifier</button>
-        <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)" onclick="JDRApp.deleteBeast('${c.id}')">🗑️</button>
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="openBeastModal('${c.id}')">✏️ Modifier</button>
+        <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)" onclick="deleteBeast('${c.id}')">🗑️</button>
       </div>
     </div>`;
   }
@@ -585,7 +582,7 @@ async function openBeastModal(id = null) {
       </div>
     </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="JDRApp.saveBeast('${id||''}')">
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveBeast('${id||''}')">
       ${c ? 'Enregistrer' : 'Créer la créature'}
     </button>
   `);
@@ -970,7 +967,7 @@ window._bstConfirmCrop = () => {
 // ── Override PAGES.bestiaire + exports ───────────────────────────────────────
 PAGES.bestiaire = renderBestiary;
 
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   renderBestiary,
   openBeastModal,
   saveBeast,

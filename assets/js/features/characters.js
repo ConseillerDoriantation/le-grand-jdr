@@ -1,4 +1,4 @@
-import { STATE } from '../core/state.js'; 
+import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
@@ -6,9 +6,6 @@ import PAGES from './pages.js';
 import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { _esc, _nl2br, _norm, modStr } from '../shared/html.js';
 import {
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct,
   getMaitriseBonus as _getMaitriseBonus,
   ITEM_STAT_META, ITEM_STAT_BY_FULL, ITEM_STAT_BY_STORE,
@@ -523,7 +520,7 @@ function filterAdminChars(pseudo, el) {
   const pills = document.querySelector('#char-pills');
   if (!pills) return;
   const chars = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
-  pills.innerHTML = chars.map((c,i)=>`<div class="char-pill ${i===0?'active':''}" onclick="JDRApp.selectChar('${c.id}',this)">${c.nom||'Sans nom'}</div>`).join('');
+  pills.innerHTML = chars.map((c,i)=>`<div class="char-pill ${i===0?'active':''}" onclick="selectChar('${c.id}',this)">${c.nom||'Sans nom'}</div>`).join('');
   if (chars.length > 0) { STATE.activeChar=chars[0]; renderCharSheet(chars[0]); }
 }
 
@@ -606,7 +603,7 @@ function renderCharSheet(c, keepTab) {
   const charSwitcher = switchableChars.length > 1
     ? `<div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.5rem">
         ${switchableChars.map(ch => `
-        <button onclick="JDRApp.selectChar('${ch.id}',document.querySelector('[data-charid=\\'${ch.id}\\']') || document.querySelector('.char-pill'))"
+        <button onclick="selectChar('${ch.id}',document.querySelector('[data-charid=\\'${ch.id}\\']') || document.querySelector('.char-pill'))"
           style="font-size:.68rem;padding:2px 9px;border-radius:999px;cursor:pointer;
           border:1px solid ${ch.id===c.id?'var(--gold)':'var(--border)'};
           background:${ch.id===c.id?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
@@ -653,18 +650,18 @@ function renderCharSheet(c, keepTab) {
                    ${canEdit?'<span style="font-size:1.5rem">📷</span>':'<span style="font-size:1.8rem;opacity:0.3">⚔️</span>'}
                  </div>`}
           </div>
-          ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="JDRApp.deleteCharPhoto('${c.id}')" title="Supprimer">✕</button>`:''}
+          ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="deleteCharPhoto('${c.id}')" title="Supprimer">✕</button>`:''}
         </div>
         <div class="cs-id-info">
           <div class="cs-name-row">
             ${canEdit
-              ? `<span class="cs-name cs-editable" onclick="JDRApp.inlineEditText('${c.id}','nom',this)" title="Cliquer pour modifier">${c.nom||'Nouveau personnage'}</span>`
+              ? `<span class="cs-name cs-editable" onclick="inlineEditText('${c.id}','nom',this)" title="Cliquer pour modifier">${c.nom||'Nouveau personnage'}</span>`
               : `<span class="cs-name">${c.nom||'Nouveau personnage'}</span>`}
             ${canEdit?`<button class="cs-delete-btn" onclick="deleteChar('${c.id}')" title="Supprimer le personnage">🗑️</button>`:''}
           </div>
           <div class="cs-titres">
             ${titreHtml}
-            ${canEdit?`<button class="cs-add-titre" onclick="JDRApp.manageTitres('${c.id}')">＋ titre</button>`:''}
+            ${canEdit?`<button class="cs-add-titre" onclick="manageTitres('${c.id}')">＋ titre</button>`:''}
           </div>
         </div>
       </div>
@@ -699,9 +696,9 @@ function renderCharSheet(c, keepTab) {
         <div class="cs-vital-block">
           <div class="cs-vital-label">❤️ PV</div>
           <div class="cs-vital-controls">
-            ${canEdit?`<button class="cs-vbtn" onclick="JDRApp.adjustStat('pvActuel',-1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">−</button>`:''}
+            ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pvActuel',-1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">−</button>`:''}
             <span class="cs-vital-val" id="pv-val" style="color:${pvColor}">${pvCur}</span>
-            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="JDRApp.adjustStat('pvActuel',1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">+</button>`:''}
+            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pvActuel',1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">+</button>`:''}
           </div>
           <div class="cs-bar-bg cs-bar-hp"><div class="cs-bar-fill cs-bar-hp-fill ${pvPct>50?'high':pvPct>25?'mid':''}" id="pv-bar" style="width:${pvPct}%"></div></div>
           <div class="cs-vital-sub">max <span id="pv-max">${pvMax}</span></div>
@@ -709,9 +706,9 @@ function renderCharSheet(c, keepTab) {
         <div class="cs-vital-block">
           <div class="cs-vital-label">🔵 PM</div>
           <div class="cs-vital-controls">
-            ${canEdit?`<button class="cs-vbtn" onclick="JDRApp.adjustStat('pmActuel',-1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">−</button>`:''}
+            ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pmActuel',-1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">−</button>`:''}
             <span class="cs-vital-val" id="pm-val" style="color:var(--blue)">${pmCur}</span>
-            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="JDRApp.adjustStat('pmActuel',1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">+</button>`:''}
+            ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pmActuel',1,'${c.id}')" style="width:30px;height:30px;font-size:1.1rem">+</button>`:''}
           </div>
           <div class="cs-bar-bg cs-bar-pm"><div class="cs-bar-fill cs-bar-pm-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
           <div class="cs-vital-sub">max <span id="pm-max">${pmMax}</span></div>
@@ -1146,7 +1143,7 @@ function _renderInventaireBoutique(char) {
             🔄 Vendre
           </button>
           ${(STATE.characters||[]).filter(x=>x.id!==char.id).length ? `
-          <button onclick="JDRApp.openSendInvModal('${char.id}','${indicesB64}','${item.nom||''}')"
+          <button onclick="openSendInvModal('${char.id}','${indicesB64}','${item.nom||''}')"
             style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
             color:#4f8cff;transition:all .15s"
@@ -1244,7 +1241,7 @@ function renderCharEquip(c, canEdit) {
           </div>`
         : `<div class="cs-weapon-empty">— Vide —</div>`}
       </div>
-      ${canEdit?`<button class="cs-equip-btn" onclick="JDRApp.editEquipSlot('${slot}')">✏️</button>`:''}
+      ${canEdit?`<button class="cs-equip-btn" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
     </div>`;
   });
 
@@ -1323,7 +1320,7 @@ function renderCharEquip(c, canEdit) {
         </div>
         <div style="font-size:.78rem;color:var(--text-muted);line-height:1.55">${style.description}</div>
       </div>
-      ${STATE.isAdmin ? `<button onclick="JDRApp.openCombatStylesAdmin()" class="btn btn-outline btn-sm"
+      ${STATE.isAdmin ? `<button onclick="openCombatStylesAdmin()" class="btn btn-outline btn-sm"
         style="margin-top:.35rem;font-size:.7rem;width:100%">⚙️ Gérer les styles</button>` : ''}
     `;
   }, 0);
@@ -1364,7 +1361,7 @@ function renderCharEquip(c, canEdit) {
       ${armorTypeMeta.label ? `<div class="cs-armor-type cs-armor-type--${armorTypeMeta.tone}" data-armor-tone="${armorTypeMeta.tone}">${armorTypeMeta.label}</div>` : ''}
       ${_getTraits(item).map(t => `<div class="cs-armor-trait">${t}</div>`).join('')}
       ${bonuses.length?`<div class="cs-armor-bonuses">${bonuses.map(k=>`<span class="badge badge-gold" style="font-size:0.6rem">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}</div>`:''}
-      ${canEdit?`<button class="cs-equip-btn-sm" onclick="JDRApp.editEquipSlot('${slot}')">✏️</button>`:''}
+      ${canEdit?`<button class="cs-equip-btn-sm" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
     </div>`;
   });
 
@@ -1730,8 +1727,8 @@ function renderCharDeck(c, canEdit) {
   let html = `<div class="cs-section">
     <div class="cs-section-title">✨ Sorts & Compétences
       <div style="display:flex;gap:.4rem">
-        ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="JDRApp.addSort()">+ Sort</button>` : ''}
-        ${canEdit ? `<button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="JDRApp.openSortCatEditor()">📂 Catégories</button>` : ''}
+        ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addSort()">+ Sort</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="openSortCatEditor()">📂 Catégories</button>` : ''}
       </div>
     </div>
     <div class="cs-sort-info">
@@ -1875,7 +1872,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     ondragover="sortDragOver(event)"
     ondrop="sortDrop(event,${i})"
     ondragend="sortDragEnd(event)">
-    <div class="cs-sort-row-main" onclick="JDRApp.toggleSortDetail(${i})" style="cursor:pointer">
+    <div class="cs-sort-row-main" onclick="toggleSortDetail(${i})" style="cursor:pointer">
       <div class="toggle ${s.actif?'on':''}"
            onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}"
            title="${s.actif?'Désactiver':'Activer'}"></div>
@@ -2144,13 +2141,13 @@ function renderCharInventaire(c, canEdit) {
         </div>` : ''}
         ${otherChars.length ? `<div class="inv-actions" style="${canEdit?'margin-left:.25rem':''}">
           <button class="inv-btn inv-btn-send"
-            onclick="JDRApp.openSendInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
+            onclick="openSendInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
             ↗ Envoyer
           </button>
         </div>` : ''}
         ${canEdit ? `<div class="inv-actions" style="margin-left:.25rem">
           <button class="inv-btn inv-btn-del"
-            onclick="JDRApp.openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
+            onclick="openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
             🗑
           </button>
         </div>` : ''}
@@ -2273,7 +2270,7 @@ function renderCharInventaire(c, canEdit) {
   <div class="cs-section">
     <div class="cs-section-title">🎒 Inventaire
       <span class="cs-hint">${invRaw.length} objet${invRaw.length !== 1 ? 's' : ''}</span>
-      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="JDRApp.addInvItem()" style="margin-left:auto">🎁 Butin</button>` : ''}
+      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addInvItem()" style="margin-left:auto">🎁 Butin</button>` : ''}
     </div>`;
 
   if (grouped.length === 0) {
@@ -2330,7 +2327,7 @@ function renderCharQuetes(c, canEdit) {
   const quetes = c.quetes||[];
   let html = `<div class="cs-section">
     <div class="cs-section-title">📜 Journal de Quête
-      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="JDRApp.addQuete()">+ Ajouter</button>`:''}
+      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addQuete()">+ Ajouter</button>`:''}
     </div>`;
 
   if (quetes.length===0) {
@@ -2361,7 +2358,7 @@ function renderCharNotes(c, canEdit) {
   const notes = c.notesList||[];
   let html = `<div class="cs-section">
     <div class="cs-section-title">📝 Notes
-      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="JDRApp.addNote()">+ Nouvelle note</button>`:''}
+      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addNote()">+ Nouvelle note</button>`:''}
     </div>`;
 
   if (notes.length===0) {
@@ -2543,7 +2540,7 @@ function renderCharCompte(c, canEdit) {
       <div class="cs-compte-col">
         <div class="cs-compte-col-header">
           <span class="cs-compte-col-title pos">📈 Recettes</span>
-          ${canEdit?`<button class="btn btn-gold btn-sm" onclick="JDRApp.addCompteRow('recettes')">+ Ajouter</button>`:''}
+          ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addCompteRow('recettes')">+ Ajouter</button>`:''}
         </div>
         <table class="cs-compte-table">
           <thead><tr>
@@ -2563,7 +2560,7 @@ function renderCharCompte(c, canEdit) {
       <div class="cs-compte-col">
         <div class="cs-compte-col-header">
           <span class="cs-compte-col-title neg">📉 Dépenses</span>
-          ${canEdit?`<button class="btn btn-danger btn-sm" style="font-size:0.72rem" onclick="JDRApp.addCompteRow('depenses')">+ Ajouter</button>`:''}
+          ${canEdit?`<button class="btn btn-danger btn-sm" style="font-size:0.72rem" onclick="addCompteRow('depenses')">+ Ajouter</button>`:''}
         </div>
         <table class="cs-compte-table">
           <thead><tr>
@@ -3299,7 +3296,7 @@ function openSortModal(idx, s) {
       <label>Noyau élémentaire <span style="color:var(--text-dim);font-weight:400">(2 PM)</span></label>
       <div class="cs-noyau-grid" id="noyau-grid">
         ${NOYAUX.map(n => `<div class="cs-noyau-btn ${noyauSel===n?'selected':''}"
-             onclick="JDRApp.selectNoyau(this,'${n.replace(/'/g,"\\'")}')">${n}</div>`).join('')}
+             onclick="selectNoyau(this,'${n.replace(/'/g,"\\'")}')">${n}</div>`).join('')}
       </div>
       <input type="hidden" id="s-noyau" value="${noyauSel}">
     </div>
@@ -4267,7 +4264,7 @@ function renderCharMaitrises(c, canEdit) {
           Chaque niveau de maîtrise ajoute +1 aux dégâts des armes du type correspondant.
         </div>
       </div>
-      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="JDRApp.addMaitrise()">+ Ajouter</button>` : ''}
+      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addMaitrise()">+ Ajouter</button>` : ''}
     </div>`;
 
   if (maitrises.length === 0) {
@@ -4422,7 +4419,7 @@ async function deleteMaitrise(idx) {
 // ══════════════════════════════════════════════
 // EXPORT
 // ══════════════════════════════════════════════
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   selectChar, filterAdminChars,
   sellInvItem, openSellInvModal, sellInvItemBulk,
   openDeleteInvModal, deleteInvItemBulk,

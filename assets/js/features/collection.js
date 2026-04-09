@@ -1,11 +1,7 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
-import { STATE } from '../core/state.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 let _cards = [];
 let _templateUrl = '';
@@ -37,8 +33,8 @@ export async function renderCollectionPage() {
     html += `
       <div class="admin-section">
         <div class="admin-label">Gestion Admin</div>
-        <button class="btn btn-gold btn-sm" onclick="JDRApp.openCollectionModal()">+ Ajouter une carte</button>
-        <button class="btn btn-outline btn-sm" onclick="JDRApp.openTemplateModal()">🖼️ Template (Image recto)</button>
+        <button class="btn btn-gold btn-sm" onclick="openCollectionModal()">+ Ajouter une carte</button>
+        <button class="btn btn-outline btn-sm" onclick="openTemplateModal()">🖼️ Template (Image recto)</button>
       </div>`;
   }
 
@@ -207,7 +203,7 @@ async function deleteCard(id) {
   }
 }
 
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   openCollectionModal, saveCard, viewCard, editCard, deleteCard, toggleUnlock,
   openTemplateModal, saveTemplate,
 });

@@ -76,9 +76,6 @@ try {
   console.error('[app] modal overlay:', err);
 }
 
-// ── Namespace global pour les fonctions des features ────────────────────────
-window.JDRApp = {};
-
 // ── Les features sont chargées en lazy via navigation.js ─────────────────────
 // Chaque page charge son module uniquement à la première navigation.
 // Voir : core/navigation.js → loadFeature()

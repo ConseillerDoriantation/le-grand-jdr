@@ -16,9 +16,6 @@ import { _esc, _nl2br } from '../shared/html.js';
 import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Config affinité ───────────────────────────────────────────────────────────
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 const AFFINITE = [
   { niveau: 0, label: 'Hostile',  couleur: '#ff4757', bg: 'rgba(255,71,87,.12)',   border: 'rgba(255,71,87,.3)',   icon: '💢', desc: 'Cherche activement à nuire au groupe' },
   { niveau: 1, label: 'Méfiant',  couleur: '#ff9f43', bg: 'rgba(255,159,67,.1)',   border: 'rgba(255,159,67,.28)', icon: '👁️', desc: 'Prudent, peu coopératif' },
@@ -84,7 +81,7 @@ function _renderPage(content) {
               ${_npcs.length} personnage${_npcs.length>1?'s':''}</div>
           </div>
           ${STATE.isAdmin ? `
-          <button onclick="JDRApp.openNpcModal()"
+          <button onclick="openNpcModal()"
             style="width:30px;height:30px;border-radius:8px;border:1px solid rgba(232,184,75,.3);
             background:rgba(232,184,75,.08);color:var(--gold);cursor:pointer;font-size:1.1rem;
             display:flex;align-items:center;justify-content:center">+</button>` : ''}
@@ -252,13 +249,13 @@ function _renderFiche(n) {
           </div>
           ${STATE.isAdmin ? `
           <div style="display:flex;gap:.3rem;flex-shrink:0">
-            <button onclick="JDRApp.openNpcModal('${n.id}')"
+            <button onclick="openNpcModal('${n.id}')"
               style="background:rgba(255,255,255,.06);border:1px solid var(--border);
               border-radius:8px;padding:4px 10px;cursor:pointer;font-size:.72rem;
               color:var(--text-dim);transition:all .12s"
               onmouseover="this.style.background='rgba(255,255,255,.1)'"
               onmouseout="this.style.background='rgba(255,255,255,.06)'">✏️ Modifier</button>
-            <button onclick="JDRApp.deleteNpc('${n.id}')"
+            <button onclick="deleteNpc('${n.id}')"
               style="background:transparent;border:1px solid rgba(255,107,107,.25);
               border-radius:8px;padding:4px 8px;cursor:pointer;font-size:.75rem;color:#ff6b6b">🗑️</button>
           </div>` : ''}
@@ -279,7 +276,7 @@ function _renderFiche(n) {
           <div style="font-size:.72rem;font-weight:700;color:var(--text-dim);
             letter-spacing:1.5px;text-transform:uppercase">Affinité du groupe</div>
           ${STATE.isAdmin ? `
-          <button onclick="JDRApp.openAffiniteGroupeModal('${n.id}')"
+          <button onclick="openAffiniteGroupeModal('${n.id}')"
             style="font-size:.7rem;background:rgba(232,184,75,.08);
             border:1px solid rgba(232,184,75,.25);border-radius:6px;
             padding:2px 9px;cursor:pointer;color:var(--gold);transition:all .12s">
@@ -318,7 +315,7 @@ function _renderFiche(n) {
           <div style="font-size:.72rem;font-weight:700;color:var(--text-dim);
             letter-spacing:1.5px;text-transform:uppercase">Relations spéciales</div>
           ${STATE.isAdmin ? `
-          <button onclick="JDRApp.openAffinitePersoModal('${n.id}')"
+          <button onclick="openAffinitePersoModal('${n.id}')"
             style="font-size:.7rem;background:rgba(79,140,255,.08);
             border:1px solid rgba(79,140,255,.25);border-radius:6px;
             padding:2px 9px;cursor:pointer;color:#4f8cff">+ Ajouter</button>` : ''}
@@ -340,10 +337,10 @@ function _renderFiche(n) {
                   font-style:italic;margin-top:1px">${a.note}</div>` : ''}
               </div>
               <div style="display:flex;gap:.25rem;flex-shrink:0">
-                <button onclick="JDRApp.openAffinitePersoModal('${n.id}','${a.id}')"
+                <button onclick="openAffinitePersoModal('${n.id}','${a.id}')"
                   style="background:none;border:none;cursor:pointer;
                   color:var(--text-dim);font-size:.75rem;padding:1px 3px">✏️</button>
-                <button onclick="JDRApp.deleteAffinitePerso('${a.id}')"
+                <button onclick="deleteAffinitePerso('${a.id}')"
                   style="background:none;border:none;cursor:pointer;
                   color:#ff6b6b;font-size:.75rem;padding:1px 3px">🗑️</button>
               </div>
@@ -370,7 +367,7 @@ function _renderFiche(n) {
         display:flex;align-items:center;justify-content:space-between">
         <span style="font-size:.75rem;font-weight:700;color:var(--text-dim);
           letter-spacing:1.5px;text-transform:uppercase">Relations spéciales</span>
-        <button onclick="JDRApp.openAffinitePersoModal('${n.id}')"
+        <button onclick="openAffinitePersoModal('${n.id}')"
           style="font-size:.7rem;background:rgba(79,140,255,.08);
           border:1px solid rgba(79,140,255,.25);border-radius:6px;
           padding:2px 9px;cursor:pointer;color:#4f8cff">+ Ajouter</button>
@@ -441,7 +438,7 @@ function _renderAffinitePerso(n, persoList, myAffi) {
         <div style="font-size:.7rem;color:var(--text-dim);margin-top:2px">
           Exceptions notables — visible uniquement par le PJ concerné</div>
       </div>
-      <button onclick="JDRApp.openAffinitePersoModal('${n.id}')"
+      <button onclick="openAffinitePersoModal('${n.id}')"
         class="btn btn-outline btn-sm" style="font-size:.7rem">+ Ajouter</button>
     </div>
 
@@ -482,10 +479,10 @@ function _renderPersoChipAdmin(a, npcId) {
         overflow:hidden;text-overflow:ellipsis">${a.note}</div>` : ''}
     </div>
     <div style="display:flex;gap:.25rem;flex-shrink:0">
-      <button onclick="JDRApp.openAffinitePersoModal('${npcId}','${a.id}')"
+      <button onclick="openAffinitePersoModal('${npcId}','${a.id}')"
         style="background:none;border:none;cursor:pointer;color:var(--text-dim);
         font-size:.75rem;padding:2px 4px">✏️</button>
-      <button onclick="JDRApp.deleteAffinitePerso('${a.id}')"
+      <button onclick="deleteAffinitePerso('${a.id}')"
         style="background:none;border:none;cursor:pointer;color:#ff6b6b;
         font-size:.75rem;padding:2px 4px">🗑️</button>
     </div>
@@ -499,7 +496,7 @@ function _renderEmpty() {
     <p style="color:var(--text-dim);font-style:italic">
       ${STATE.isAdmin ? 'Aucun PNJ. Cliquez sur + pour en créer un.' : 'Aucun PNJ disponible.'}
     </p>
-    ${STATE.isAdmin ? `<button onclick="JDRApp.openNpcModal()"
+    ${STATE.isAdmin ? `<button onclick="openNpcModal()"
       class="btn btn-gold btn-sm" style="margin-top:1rem">+ Créer le premier PNJ</button>` : ''}
   </div>`;
 }
@@ -529,7 +526,7 @@ function _getFiltered() {
 }
 
 // ── Sélection PNJ ────────────────────────────────────────────────────────────
-window.JDRApp.selectNpc = (id) => {
+window.selectNpc = (id) => {
   _activeId = id;
   const n = _npcs.find(x => x.id === id);
   if (!n) return;
@@ -627,7 +624,7 @@ function openNpcModal(id = null) {
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1"
-        onclick="JDRApp.saveNpc('${npc?.id||''}')">Enregistrer</button>
+        onclick="saveNpc('${npc?.id||''}')">Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
@@ -823,7 +820,7 @@ async function deleteNpc(id) {
 }
 
 // ── Modal affinité groupe ─────────────────────────────────────────────────────
-window.JDRApp.openAffiniteGroupeModal = (npcId) => {
+window.openAffiniteGroupeModal = (npcId) => {
   const n = _npcs.find(x => x.id === npcId);
   if (!n) return;
   const cur = n.affinite?.niveau ?? 2;
@@ -907,7 +904,7 @@ window._selectAfgDelta = (v) => {
   });
 };
 
-window.JDRApp.saveAffiniteGroupe = async (npcId) => {
+window.saveAffiniteGroupe = async (npcId) => {
   const n = _npcs.find(x => x.id === npcId);
   if (!n) return;
   const niveau = parseInt(document.getElementById('afg-niveau')?.value) ?? 2;
@@ -933,7 +930,7 @@ window.JDRApp.saveAffiniteGroupe = async (npcId) => {
 };
 
 // ── Modal affinité individuelle ───────────────────────────────────────────────
-window.JDRApp.openAffinitePersoModal = (npcId, existingId = null) => {
+window.openAffinitePersoModal = (npcId, existingId = null) => {
   const n    = _npcs.find(x => x.id === npcId);
   if (!n) return;
   const existing = existingId ? _affiPerso.find(a => a.id === existingId) : null;
@@ -998,7 +995,7 @@ window._selectAfpNiveau = (n) => {
   });
 };
 
-window.JDRApp.saveAffinitePerso = async (npcId, existingId) => {
+window.saveAffinitePerso = async (npcId, existingId) => {
   const charSel = document.getElementById('afp-char')?.value;
   if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
   const [charId, charNom] = charSel.split('|');
@@ -1028,7 +1025,7 @@ window.JDRApp.saveAffinitePerso = async (npcId, existingId) => {
   }
 };
 
-window.JDRApp.deleteAffinitePerso = async (id) => {
+window.deleteAffinitePerso = async (id) => {
   if (!await confirmModal('Supprimer cette exception ?')) return;
   await deleteFromCol('npc_affinites', id);
   _affiPerso = _affiPerso.filter(a => a.id !== id);
@@ -1051,7 +1048,7 @@ function filterNpcs(disp, el) {
 // ── Override PAGES.npcs ───────────────────────────────────────────────────────
 PAGES.npcs = renderNpcs;
 
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   renderNpcs,
   openNpcModal,
   saveNpc,

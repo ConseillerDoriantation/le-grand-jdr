@@ -5,9 +5,6 @@
 //   supprime tous les personnages, puis supprime le compte Firebase
 // ══════════════════════════════════════════════════════════════════════════════
 import {
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
   auth, db, doc, setDoc, getDoc, updateDoc,
   signInWithEmailAndPassword,
   signOut,
@@ -184,7 +181,7 @@ async function renderAccount() {
             <div class="acc-label">Pseudo</div>
             <div class="acc-value">${profile.pseudo||'—'}</div>
           </div>
-          <button class="acc-edit-btn" onclick="JDRApp.openEditPseudo()">✏️ Modifier</button>
+          <button class="acc-edit-btn" onclick="openEditPseudo()">✏️ Modifier</button>
         </div>
       </div>
 
@@ -196,7 +193,7 @@ async function renderAccount() {
             <div class="acc-label">Adresse email</div>
             <div class="acc-value">${user.email}</div>
           </div>
-          <button class="acc-edit-btn" onclick="JDRApp.openEditEmail()">✏️ Modifier</button>
+          <button class="acc-edit-btn" onclick="openEditEmail()">✏️ Modifier</button>
         </div>
       </div>
 
@@ -208,7 +205,7 @@ async function renderAccount() {
             <div class="acc-label">Mot de passe</div>
             <div class="acc-value">••••••••</div>
           </div>
-          <button class="acc-edit-btn" onclick="JDRApp.openEditPassword()">✏️ Modifier</button>
+          <button class="acc-edit-btn" onclick="openEditPassword()">✏️ Modifier</button>
         </div>
       </div>
 
@@ -232,7 +229,7 @@ async function renderAccount() {
         ⚠️ ${nbChars} personnage${nbChars!==1?'s':''} seront supprimés.
         Leurs objets boutique seront remis en vente automatiquement.
       </div>` : ''}
-      <button class="acc-danger-btn" onclick="JDRApp.openDeleteAccount()">
+      <button class="acc-danger-btn" onclick="openDeleteAccount()">
         🗑️ Supprimer mon compte
       </button>
     </div>
@@ -501,7 +498,7 @@ async function deleteCharWithRefund(charId) {
 // ══════════════════════════════════════════════════════════════════════════════
 PAGES.account = renderAccount;
 
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   renderAccount,
   openEditPseudo,  savePseudo,
   openEditEmail,   saveEmail,

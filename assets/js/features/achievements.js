@@ -14,9 +14,6 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 const CATS = [
   { id: 'epique',   label: '⚔️ Épique',   color: '#4f8cff', glow: 'rgba(79,140,255,0.14)'  },
   { id: 'comique',  label: '🎭 Comique',  color: '#e8b84b', glow: 'rgba(232,184,75,0.14)'  },
@@ -612,7 +609,7 @@ PAGES.achievements = async function() {
 };
 
 // ── EXPORTS ───────────────────────────────────────────────────────────────────
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   openAchievementModal,
   saveAchievement,
   editAchievement,

@@ -3,9 +3,6 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 function showInfoSection(id, el) {
   document.querySelectorAll('#info-nav .tutorial-nav-item').forEach((item) => item.classList.remove('active'));
   el?.classList.add('active');
@@ -22,7 +19,7 @@ function editInfoSection(id) {
     <div class="form-group"><label>Contenu</label>
       <textarea class="input-field" id="info-edit-content" rows="16" style="font-family:monospace;font-size:0.82rem">${section.content || ''}</textarea>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="JDRApp.saveInfoSection('${id}')">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveInfoSection('${id}')">Enregistrer</button>
   `);
 }
 
@@ -92,7 +89,7 @@ function getInfoEtats() {
 Brûlure, gel, poison, étourdissement et autres altérations doivent être appliqués et suivis par le MJ.`;
 }
 
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   showInfoSection,
   editInfoSection,
   saveInfoSection,

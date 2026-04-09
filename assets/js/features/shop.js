@@ -9,9 +9,6 @@ import { calcOr } from '../shared/char-stats.js';
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
 // ══════════════════════════════════════════════════════════════════════════════
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 const TEMPLATES = {
   arme: {
     label: '⚔️ Arme',
@@ -275,8 +272,8 @@ async function renderShop() {
     html += `<div class="admin-section">
       <div class="admin-label">Gestion Admin</div>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-        <button class="btn btn-gold btn-sm" onclick="JDRApp.openCatModal()">📁 Nouvelle catégorie</button>
-        <button class="btn btn-outline btn-sm" onclick="JDRApp.openItemModal()">＋ Article</button>
+        <button class="btn btn-gold btn-sm" onclick="openCatModal()">📁 Nouvelle catégorie</button>
+        <button class="btn btn-outline btn-sm" onclick="openItemModal()">＋ Article</button>
       </div>
     </div>`;
   }
@@ -355,7 +352,7 @@ function _renderHome() {
         <div class="sh-cat-name-row">
           <div class="sh-cat-name">${cat.nom}</div>
           ${STATE.isAdmin?`<div class="sh-card-admin-inline" onclick="event.stopPropagation()">
-            <button class="btn-icon" onclick="JDRApp.openCatModal('${cat.id}')">✏️</button>
+            <button class="btn-icon" onclick="openCatModal('${cat.id}')">✏️</button>
             <button class="btn-icon" onclick="deleteCat('${cat.id}')">🗑️</button>
           </div>`:''}
         </div>
@@ -425,7 +422,7 @@ function _renderItemsView() {
           oninput="shopFilterSearch(this.value)"
           autocomplete="off"
           style="width:100%;padding-right:2.2rem">
-        ${_filterSearch ? `<button onclick="JDRApp.shopFilterSearch('')"
+        ${_filterSearch ? `<button onclick="shopFilterSearch('')"
           style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
           background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
       </div>
@@ -435,7 +432,7 @@ function _renderItemsView() {
           style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
           border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b;
           display:${hasFilters?'':'none'}">✕ Tout effacer</button>
-        ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="JDRApp.openItemModal()">+ Article</button>`:''}
+        ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">+ Article</button>`:''}
       </div>
     </div>
     ${tagGroups.length > 0 ? `
@@ -464,7 +461,7 @@ function _renderItemsView() {
   if (slice.length === 0) {
     html += `<div class="empty-state"><div class="icon">📦</div>
       <p>${hasFilters ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasFilters&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="JDRApp.openItemModal()">+ Ajouter</button>`:''}</div>`;
+      ${!hasFilters&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>`:''}</div>`;
   } else {
     html += _renderItemGrid(cat, slice);
   }
@@ -625,7 +622,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
       </div>
     </div>
     ${STATE.isAdmin?`<div class="sh-item-actions" onclick="event.stopPropagation()">
-      <button class="btn-icon" onclick="JDRApp.openItemModal('${item.id}')">✏️</button>
+      <button class="btn-icon" onclick="openItemModal('${item.id}')">✏️</button>
       <button class="btn-icon" onclick="deleteShopItem('${item.id}')">🗑️</button>
     </div>`:''}
   </div>`;
@@ -693,7 +690,7 @@ function openShopItemDetail(itemId) {
         ${dispo===null?'∞ Stock illimité':dispo===0?'Épuisé':`${dispo} en stock`}
       </div>
       <div style="display:flex;gap:.5rem">
-        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="closeModalDirect();JDRApp.openItemModal('${item.id}')">✏️ Modifier</button>` : ''}
+        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="closeModalDirect();openItemModal('${item.id}')">✏️ Modifier</button>` : ''}
         ${hasChar && !epuise ? `<button class="btn btn-gold btn-sm" onclick="closeModalDirect();buyItem('${item.id}')">🛒 Acheter</button>` : ''}
         ${epuise ? `<span style="font-size:.78rem;color:#ff6b6b;padding:.4rem .75rem;background:rgba(255,107,107,.1);border-radius:8px">Épuisé</span>` : ''}
       </div>
@@ -915,7 +912,7 @@ async function sellInvItemFromShop(charId, invIndex) {
 }
 
 // Exposer pour characters.js
-window.JDRApp.sellInvItemFromShop = sellInvItemFromShop;
+window.sellInvItemFromShop = sellInvItemFromShop;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
@@ -1012,7 +1009,7 @@ function _updateItemsOnly() {
   if (slice.length === 0) {
     html = `<div class="empty-state"><div class="icon">📦</div>
       <p>${hasF ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasF&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="JDRApp.openItemModal()">+ Ajouter</button>`:''}</div>`;
+      ${!hasF&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>`:''}</div>`;
   } else {
     html = _renderItemGrid(cat, slice);
   }
@@ -1603,7 +1600,7 @@ function openShopItemModal(item){ openItemModal(item?.id); }
 async function editShopItem(id){ openItemModal(id); }
 function filterShop(){}
 
-Object.assign(window.JDRApp,{
+Object.assign(window,{
   renderShop, shopGoHome, shopGoCat, shopGoSubCat, shopPage,
   openCatModal, saveCat, deleteCat,
   openSubCatModal, saveSubCat, deleteSubCat,

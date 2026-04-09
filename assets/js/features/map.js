@@ -10,9 +10,6 @@ import { _esc } from '../shared/html.js';
 import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Types de lieux ────────────────────────────────────────────────────────────
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 export const LIEU_TYPES = [
   { id: 'ville',    label: 'Ville',         emoji: '🏙️', color: '#4f8cff' },
   { id: 'village',  label: 'Village',       emoji: '🏘️', color: '#22c38e' },
@@ -534,14 +531,14 @@ async function _fogCommit(pts) {
   }
 }
 
-window.JDRApp.removeFogPoly = async (i) => {
+window.removeFogPoly = async (i) => {
   mapState.fogZones.splice(i, 1);
   await saveDoc('world','map_fog',{ zones: mapState.fogZones });
   renderFog();
   showNotif('Zone supprimée.','success');
 };
 
-window.JDRApp.clearFog = async () => {
+window.clearFog = async () => {
   if (!await confirmModal('Effacer toutes les zones révélées ?')) return;
   mapState.fogZones = [];
   await saveDoc('world','map_fog',{ zones:[] });
@@ -549,7 +546,7 @@ window.JDRApp.clearFog = async () => {
   showNotif('Brouillard effacé.','success');
 };
 
-window.JDRApp.saveFog = async () => {
+window.saveFog = async () => {
   await saveDoc('world','map_fog',{ zones: mapState.fogZones||[] });
   renderFog();
 };
@@ -608,7 +605,7 @@ function openSidebar(lieu) {
   sidebar.style.transform = 'translateX(0)';
 }
 
-window.JDRApp.closeMapSidebar = () => {
+window.closeMapSidebar = () => {
   const sidebar = document.getElementById('map-sidebar');
   if (sidebar) sidebar.style.transform = 'translateX(100%)';
   mapState.selectedLieu = null;
@@ -709,7 +706,7 @@ function openPlaceLieuModal(x, y) {
   setTimeout(() => document.getElementById('lieu-nom')?.focus(), 60);
 }
 
-window.JDRApp.saveLieu = async function(id = null) {
+window.saveLieu = async function(id = null) {
   const nom   = document.getElementById('lieu-nom')?.value?.trim();
   if (!nom) { showNotif('Le nom est requis.', 'error'); return; }
 
@@ -790,12 +787,12 @@ function openEditLieuModal(lieu) {
   `);
 }
 
-window.JDRApp.openEditLieuModalById = (id) => {
+window.openEditLieuModalById = (id) => {
   const lieu = mapState.lieux.find(l => l.id === id);
   if (lieu) openEditLieuModal(lieu);
 };
 
-window.JDRApp.deleteLieu = async (id) => {
+window.deleteLieu = async (id) => {
   if (!await confirmModal('Supprimer ce lieu de la carte ?')) return;
   await deleteFromCol('map_lieux', id);
   mapState.lieux = mapState.lieux.filter(l => l.id !== id);
@@ -1063,7 +1060,7 @@ window._mapConfirmCrop = () => {
   }, 0);
 };
 
-window.JDRApp.saveMapSettings = async () => {
+window.saveMapSettings = async () => {
   const regionName = document.getElementById('map-region-name')?.value?.trim() || '';
 
   let imageUrl = '';
@@ -1089,7 +1086,7 @@ window.JDRApp.saveMapSettings = async () => {
 };
 
 // ── Export global ─────────────────────────────────────────────────────────────
-Object.assign(window.JDRApp, {
+Object.assign(window, {
   initMap,
   LIEU_TYPES,
   openMapSettingsModal,
