@@ -1009,4 +1009,7 @@ window._createNewActe = async () => {
 
 // ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────
 PAGES.story = renderStory;
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 Object.assign(window.JDRApp,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
