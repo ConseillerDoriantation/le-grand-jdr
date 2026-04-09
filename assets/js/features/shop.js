@@ -770,70 +770,75 @@ async function buyItem(itemId) {
 }
 
 async function confirmBuyItem(itemId) {
-  const charId   = window._shopCharId;
-  const item     = _items.find(i => i.id === itemId);
-  if (!item || !charId) return;
-  const qty      = Math.max(1, parseInt(document.getElementById('buy-qty')?.value)||1);
-  const dispo    = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
-  const illimite = dispo === null || dispo < 0;
-  const prix     = parseFloat(item.prix) || 0;
-  const c        = STATE.characters?.find(x => x.id === charId);
-  if (!c) return;
-  const solde    = _getOr(c);
-  const total    = prix * qty;
-  if (solde < total) { showNotif(`Fonds insuffisants — ${solde} or disponibles.`, 'error'); return; }
-  if (!illimite && dispo < qty) { showNotif(`Stock insuffisant — ${dispo} dispo.`, 'error'); return; }
+  try {
+    const charId   = window._shopCharId;
+    const item     = _items.find(i => i.id === itemId);
+    if (!item || !charId) return;
+    const qty      = Math.max(1, parseInt(document.getElementById('buy-qty')?.value)||1);
+    const dispo    = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
+    const illimite = dispo === null || dispo < 0;
+    const prix     = parseFloat(item.prix) || 0;
+    const c        = STATE.characters?.find(x => x.id === charId);
+    if (!c) return;
+    const solde    = _getOr(c);
+    const total    = prix * qty;
+    if (solde < total) { showNotif(`Fonds insuffisants — ${solde} or disponibles.`, 'error'); return; }
+    if (!illimite && dispo < qty) { showNotif(`Stock insuffisant — ${dispo} dispo.`, 'error'); return; }
 
-  if (!illimite) {
-    await updateInCol('shop', itemId, { dispo: dispo - qty });
-    item.dispo = dispo - qty;
+    if (!illimite) {
+      await updateInCol('shop', itemId, { dispo: dispo - qty });
+      item.dispo = dispo - qty;
+    }
+
+    const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
+    const cat       = _cats.find(cc => cc.id === item.categorieId);
+    const tplKey    = cat?.template || 'classique';
+    const invItem   = {
+      nom:item.nom||'?', source:'boutique', itemId:item.id,
+      categorieId:item.categorieId||'', template:tplKey, qte:'1',
+      prixAchat:prix, prixVente,
+      format:item.format||'', rarete:item.rarete||'',
+      degats:item.degats||'', degatsStat:item.degatsStat||'',
+      toucher:item.toucher||'', toucherStat:item.toucherStat||'',
+      ca:item.ca||'', stats:item.stats||'',
+      fo:parseInt(item.fo)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
+      sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
+      effet:item.effet||'', description:item.description||'',
+      slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
+      slotBijou:item.slotBijou||'',
+      sousType:item.sousType||'',
+      portee:item.portee||'',
+      traits:Array.isArray(item.traits)?[...item.traits]:[],
+    };
+
+    const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    for (let i = 0; i < qty; i++) inv.push({...invItem});
+
+    const compte   = c.compte || { recettes:[], depenses:[] };
+    const depenses = [...(compte.depenses||[])];
+    depenses.push({
+      date:    new Date().toLocaleDateString('fr-FR'),
+      libelle: qty > 1 ? `Achat ×${qty} : ${item.nom}` : `Achat : ${item.nom}`,
+      montant: total,
+    });
+
+    await updateInCol('characters', charId, {
+      inventaire: inv,
+      compte: { ...compte, depenses },
+    });
+    c.inventaire = inv;
+    c.compte     = { ...compte, depenses };
+
+    const orEl = document.getElementById('sh-char-or-display');
+    if (orEl) orEl.textContent = `💰 ${_getOr(c)} or`;
+
+    closeModalDirect();
+    showNotif(`✅ ×${qty} "${item.nom}" acheté${qty>1?'s':''} pour ${total} or !`, 'success');
+    renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
-  const cat       = _cats.find(cc => cc.id === item.categorieId);
-  const tplKey    = cat?.template || 'classique';
-  const invItem   = {
-    nom:item.nom||'?', source:'boutique', itemId:item.id,
-    categorieId:item.categorieId||'', template:tplKey, qte:'1',
-    prixAchat:prix, prixVente,
-    format:item.format||'', rarete:item.rarete||'',
-    degats:item.degats||'', degatsStat:item.degatsStat||'',
-    toucher:item.toucher||'', toucherStat:item.toucherStat||'',
-    ca:item.ca||'', stats:item.stats||'',
-    fo:parseInt(item.fo)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
-    sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
-    effet:item.effet||'', description:item.description||'',
-    slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
-    slotBijou:item.slotBijou||'',
-    sousType:item.sousType||'',
-    portee:item.portee||'',
-    traits:Array.isArray(item.traits)?[...item.traits]:[],
-  };
-
-  const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  for (let i = 0; i < qty; i++) inv.push({...invItem});
-
-  const compte   = c.compte || { recettes:[], depenses:[] };
-  const depenses = [...(compte.depenses||[])];
-  depenses.push({
-    date:    new Date().toLocaleDateString('fr-FR'),
-    libelle: qty > 1 ? `Achat ×${qty} : ${item.nom}` : `Achat : ${item.nom}`,
-    montant: total,
-  });
-
-  await updateInCol('characters', charId, {
-    inventaire: inv,
-    compte: { ...compte, depenses },
-  });
-  c.inventaire = inv;
-  c.compte     = { ...compte, depenses };
-
-  const orEl = document.getElementById('sh-char-or-display');
-  if (orEl) orEl.textContent = `💰 ${_getOr(c)} or`;
-
-  closeModalDirect();
-  showNotif(`✅ ×${qty} "${item.nom}" acheté${qty>1?'s':''} pour ${total} or !`, 'success');
-  renderShop();
 }
 
 // Exposer pour characters.js — réincrémenter 1 unité du stock boutique
@@ -852,53 +857,58 @@ window._restockShopItem = async (itemId) => {
 // VENDRE un item de l'inventaire (appelé depuis characters.js)
 // ══════════════════════════════════════════════════════════════════════════════
 async function sellInvItemFromShop(charId, invIndex) {
-  const c = STATE.characters?.find(x => x.id === charId);
-  if (!c) return;
+  try {
+    const c = STATE.characters?.find(x => x.id === charId);
+    if (!c) return;
 
-  const inv  = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-  const item = inv[invIndex];
-  if (!item) return;
+    const inv  = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    const item = inv[invIndex];
+    if (!item) return;
 
-  const prixVente = parseFloat(item.prixVente) || 0;
-  const itemNom   = item.nom || 'cet objet';
+    const prixVente = parseFloat(item.prixVente) || 0;
+    const itemNom   = item.nom || 'cet objet';
 
-  if (!await confirmModal(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
+    if (!await confirmModal(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
 
-  // 1. Réincrémenter le stock dans la boutique (si l'article existe encore)
-  if (item.itemId) {
-    const shopItem = await import('../data/firestore.js').then(m => m.getDocData('shop', item.itemId)).catch(()=>null);
-    if (shopItem) {
-      const curDispo = shopItem.dispo !== undefined && shopItem.dispo !== '' ? parseInt(shopItem.dispo) : null;
-      if (curDispo !== null && curDispo >= 0) {
-        await updateInCol('shop', item.itemId, { dispo: curDispo + 1 });
-        // Mettre à jour _items local si la boutique est chargée
-        const si = _items.find(i => i.id === item.itemId);
-        if (si) si.dispo = curDispo + 1;
+    // 1. Réincrémenter le stock dans la boutique (si l'article existe encore)
+    if (item.itemId) {
+      const shopItem = await import('../data/firestore.js').then(m => m.getDocData('shop', item.itemId)).catch(()=>null);
+      if (shopItem) {
+        const curDispo = shopItem.dispo !== undefined && shopItem.dispo !== '' ? parseInt(shopItem.dispo) : null;
+        if (curDispo !== null && curDispo >= 0) {
+          await updateInCol('shop', item.itemId, { dispo: curDispo + 1 });
+          // Mettre à jour _items local si la boutique est chargée
+          const si = _items.find(i => i.id === item.itemId);
+          if (si) si.dispo = curDispo + 1;
+        }
       }
     }
+
+    // 2. Créditer l'or via le compte
+    const compte   = c.compte || { recettes:[], depenses:[] };
+    const recettes = [...(compte.recettes||[])];
+    recettes.push({
+      date:    new Date().toLocaleDateString('fr-FR'),
+      libelle: `Vente : ${itemNom}`,
+      montant: prixVente,
+    });
+
+    // 3. Retirer l'item de l'inventaire
+    inv.splice(invIndex, 1);
+
+    // 4. Sauvegarder
+    await updateInCol('characters', charId, {
+      inventaire: inv,
+      compte:     { ...compte, recettes },
+    });
+    c.inventaire = inv;
+    c.compte     = { ...compte, recettes };
+
+    showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  // 2. Créditer l'or via le compte
-  const compte   = c.compte || { recettes:[], depenses:[] };
-  const recettes = [...(compte.recettes||[])];
-  recettes.push({
-    date:    new Date().toLocaleDateString('fr-FR'),
-    libelle: `Vente : ${itemNom}`,
-    montant: prixVente,
-  });
-
-  // 3. Retirer l'item de l'inventaire
-  inv.splice(invIndex, 1);
-
-  // 4. Sauvegarder
-  await updateInCol('characters', charId, {
-    inventaire: inv,
-    compte:     { ...compte, recettes },
-  });
-  c.inventaire = inv;
-  c.compte     = { ...compte, recettes };
-
-  showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
 }
 
 // Exposer pour characters.js
@@ -1047,19 +1057,24 @@ function shopScDragStart(e,scId){ _dragScId=scId; e.currentTarget.style.opacity=
 function shopScDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after')); const rect=e.currentTarget.getBoundingClientRect(); e.clientY<rect.top+rect.height/2?e.currentTarget.classList.add('sh-dnd-before'):e.currentTarget.classList.add('sh-dnd-after'); }
 function shopScDragEnd(e){ e.currentTarget.style.opacity=''; document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after')); }
 async function shopScDrop(e,toScId){
-  e.preventDefault(); document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
-  const fromId=_dragScId; _dragScId=null;
-  if(!fromId||fromId===toScId) return;
-  const cat=_cats.find(c=>c.id===_activeCat); if(!cat) return;
-  const scs=[...(cat.sousCats||[])];
-  const fromIdx=scs.findIndex(s=>s.id===fromId), toIdx=scs.findIndex(s=>s.id===toScId);
-  if(fromIdx<0||toIdx<0) return;
-  const rect=e.currentTarget.getBoundingClientRect(), insertAfter=e.clientY>=rect.top+rect.height/2;
-  const [moved]=scs.splice(fromIdx,1);
-  const insertAt=insertAfter?(toIdx>fromIdx?toIdx:toIdx+1):(toIdx>fromIdx?toIdx-1:toIdx);
-  scs.splice(Math.max(0,insertAt),0,moved); cat.sousCats=scs;
-  await updateInCol('shopCategories',_activeCat,{sousCats:scs});
-  showNotif('Ordre mis à jour.','success'); renderShop();
+  try {
+    e.preventDefault(); document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
+    const fromId=_dragScId; _dragScId=null;
+    if(!fromId||fromId===toScId) return;
+    const cat=_cats.find(c=>c.id===_activeCat); if(!cat) return;
+    const scs=[...(cat.sousCats||[])];
+    const fromIdx=scs.findIndex(s=>s.id===fromId), toIdx=scs.findIndex(s=>s.id===toScId);
+    if(fromIdx<0||toIdx<0) return;
+    const rect=e.currentTarget.getBoundingClientRect(), insertAfter=e.clientY>=rect.top+rect.height/2;
+    const [moved]=scs.splice(fromIdx,1);
+    const insertAt=insertAfter?(toIdx>fromIdx?toIdx:toIdx+1):(toIdx>fromIdx?toIdx-1:toIdx);
+    scs.splice(Math.max(0,insertAt),0,moved); cat.sousCats=scs;
+    await updateInCol('shopCategories',_activeCat,{sousCats:scs});
+    showNotif('Ordre mis à jour.','success'); renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ── Drag & Drop Articles ──────────────────────────────────────────────────────
@@ -1125,22 +1140,32 @@ function _updateTplPreview() {
 }
 
 async function saveCat(catId) {
-  const nom=document.getElementById('cat-nom')?.value.trim();
-  if(!nom){showNotif('Nom requis.','error');return;}
-  const data={ nom, template:document.getElementById('cat-template')?.value||'classique', emoji:document.getElementById('cat-emoji')?.value.trim()||'', image:document.getElementById('cat-img-b64')?.value||'' };
-  if(catId) await updateInCol('shopCategories',catId,data);
-  else await addToCol('shopCategories',{...data,ordre:_cats.length,sousCats:[]});
-  closeModalDirect(); showNotif(catId?'Catégorie mise à jour.':'Catégorie créée !','success'); renderShop();
+  try {
+    const nom=document.getElementById('cat-nom')?.value.trim();
+    if(!nom){showNotif('Nom requis.','error');return;}
+    const data={ nom, template:document.getElementById('cat-template')?.value||'classique', emoji:document.getElementById('cat-emoji')?.value.trim()||'', image:document.getElementById('cat-img-b64')?.value||'' };
+    if(catId) await updateInCol('shopCategories',catId,data);
+    else await addToCol('shopCategories',{...data,ordre:_cats.length,sousCats:[]});
+    closeModalDirect(); showNotif(catId?'Catégorie mise à jour.':'Catégorie créée !','success'); renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteCat(catId) {
-  const n=_items.filter(i=>i.categorieId===catId).length;
-  if (!await confirmModal(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?')) return;
-  const toDelete=_items.filter(i=>i.categorieId===catId);
-  await Promise.all(toDelete.map(i=>deleteFromCol('shop',i.id)));
-  await deleteFromCol('shopCategories',catId);
-  if(_activeCat===catId){_view='home';_activeCat=null;}
-  showNotif(`Catégorie et ${toDelete.length} article(s) supprimés.`,'success'); renderShop();
+  try {
+    const n=_items.filter(i=>i.categorieId===catId).length;
+    if (!await confirmModal(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?')) return;
+    const toDelete=_items.filter(i=>i.categorieId===catId);
+    await Promise.all(toDelete.map(i=>deleteFromCol('shop',i.id)));
+    await deleteFromCol('shopCategories',catId);
+    if(_activeCat===catId){_view='home';_activeCat=null;}
+    showNotif(`Catégorie et ${toDelete.length} article(s) supprimés.`,'success'); renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1172,25 +1197,35 @@ function openSubCatModal(catId,scId) {
 }
 
 async function saveSubCat(catId,scId) {
-  const nom=document.getElementById('sc-nom')?.value.trim();
-  const emoji=document.getElementById('sc-emoji')?.value.trim();
-  const image=document.getElementById('sc-img-b64')?.value||'';
-  if(!nom){showNotif('Nom requis.','error');return;}
-  const cat=_cats.find(c=>c.id===catId); if(!cat) return;
-  const sousCats=[...(cat.sousCats||[])];
-  if(scId){ const idx=sousCats.findIndex(s=>s.id===scId); if(idx>=0) sousCats[idx]={...sousCats[idx],nom,emoji,image}; }
-  else sousCats.push({id:'sc_'+Date.now(),nom,emoji,image});
-  await updateInCol('shopCategories',catId,{sousCats});
-  closeModalDirect(); showNotif(scId?'Sous-catégorie mise à jour.':'Sous-catégorie créée !','success'); renderShop();
+  try {
+    const nom=document.getElementById('sc-nom')?.value.trim();
+    const emoji=document.getElementById('sc-emoji')?.value.trim();
+    const image=document.getElementById('sc-img-b64')?.value||'';
+    if(!nom){showNotif('Nom requis.','error');return;}
+    const cat=_cats.find(c=>c.id===catId); if(!cat) return;
+    const sousCats=[...(cat.sousCats||[])];
+    if(scId){ const idx=sousCats.findIndex(s=>s.id===scId); if(idx>=0) sousCats[idx]={...sousCats[idx],nom,emoji,image}; }
+    else sousCats.push({id:'sc_'+Date.now(),nom,emoji,image});
+    await updateInCol('shopCategories',catId,{sousCats});
+    closeModalDirect(); showNotif(scId?'Sous-catégorie mise à jour.':'Sous-catégorie créée !','success'); renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 async function deleteSubCat(catId,scId) {
-  if (!await confirmModal('Supprimer cette sous-catégorie ?')) return;
-  const cat=_cats.find(c=>c.id===catId); if(!cat) return;
-  const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
-  await updateInCol('shopCategories',catId,{sousCats});
-  if(_activeSubCat===scId){_view='cat';_activeSubCat=null;}
-  showNotif('Sous-catégorie supprimée.','success'); renderShop();
+  try {
+    if (!await confirmModal('Supprimer cette sous-catégorie ?')) return;
+    const cat=_cats.find(c=>c.id===catId); if(!cat) return;
+    const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
+    await updateInCol('shopCategories',catId,{sousCats});
+    if(_activeSubCat===scId){_view='cat';_activeSubCat=null;}
+    showNotif('Sous-catégorie supprimée.','success'); renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1409,72 +1444,77 @@ function previewUpload(fileInputId,previewId,hiddenId) {
 }
 
 async function saveShopItem(itemId) {
-  const item = itemId ? _items.find(i=>i.id===itemId) : null;
-  const catId=document.getElementById('si-cat')?.value||'';
-  const cat=_cats.find(c=>c.id===catId);
-  const tplKey=cat?.template||'classique';
-  const tpl=TEMPLATES[tplKey]||TEMPLATES.classique;
-  const nom=document.getElementById('si-nom')?.value.trim();
-  if(!nom){showNotif('Nom requis.','error');return;}
+  try {
+    const item = itemId ? _items.find(i=>i.id===itemId) : null;
+    const catId=document.getElementById('si-cat')?.value||'';
+    const cat=_cats.find(c=>c.id===catId);
+    const tplKey=cat?.template||'classique';
+    const tpl=TEMPLATES[tplKey]||TEMPLATES.classique;
+    const nom=document.getElementById('si-nom')?.value.trim();
+    if(!nom){showNotif('Nom requis.','error');return;}
 
-  const data={ nom, categorieId:catId, image:document.getElementById('si-img-b64')?.value||'' };
+    const data={ nom, categorieId:catId, image:document.getElementById('si-img-b64')?.value||'' };
 
-  tpl.fields.forEach(f=>{
-    if(f.type==='dispo'){
-      const infini=document.getElementById('si-dispo-infini')?.checked;
-      data[f.id]=infini?-1:(parseInt(document.getElementById('si-dispo')?.value)||0);
-    } else if (f.type === 'damage_with_stat') {
-      data.degats = document.getElementById('si-degats')?.value.trim() || '';
-      data.degatsStat = document.getElementById('si-degatsStat')?.value || '';
-    } else if (f.type === 'stat_select') {
-      data[f.id] = document.getElementById(`si-${f.id}`)?.value || '';
-    } else if (f.type === 'stat_bonus_grid') {
-      ITEM_STATS.forEach(stat => {
-        data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
-      });
-    } else if (f.type === 'trait_list') {
-      // Lire depuis le champ caché + mettre à jour les inputs
-      const inputs = document.querySelectorAll('#si-traits-list input');
-      const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
-      data.traits = arr;
-    } else if (f.type === 'textarea') {
-      const el = document.getElementById(`si-${f.id}`);
-      if (el) data[f.id] = el.value;
+    tpl.fields.forEach(f=>{
+      if(f.type==='dispo'){
+        const infini=document.getElementById('si-dispo-infini')?.checked;
+        data[f.id]=infini?-1:(parseInt(document.getElementById('si-dispo')?.value)||0);
+      } else if (f.type === 'damage_with_stat') {
+        data.degats = document.getElementById('si-degats')?.value.trim() || '';
+        data.degatsStat = document.getElementById('si-degatsStat')?.value || '';
+      } else if (f.type === 'stat_select') {
+        data[f.id] = document.getElementById(`si-${f.id}`)?.value || '';
+      } else if (f.type === 'stat_bonus_grid') {
+        ITEM_STATS.forEach(stat => {
+          data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
+        });
+      } else if (f.type === 'trait_list') {
+        // Lire depuis le champ caché + mettre à jour les inputs
+        const inputs = document.querySelectorAll('#si-traits-list input');
+        const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
+        data.traits = arr;
+      } else if (f.type === 'textarea') {
+        const el = document.getElementById(`si-${f.id}`);
+        if (el) data[f.id] = el.value;
+      } else {
+        const el=document.getElementById(`si-${f.id}`);
+        if(el) data[f.id]=f.type==='number'?(parseFloat(el.value)||0):el.value.trim();
+      }
+    });
+
+    if (tplKey === 'arme') {
+      data.toucher = _legacyToucherTextFromData(data);
+      data.stats = _legacyStatsTextFromData(data);
+      data.statAttaque = data.degatsStat || data.toucherStat || '';
+    } else if (tplKey === 'armure' || tplKey === 'bijou') {
+      data.stats = _legacyStatsTextFromData(data);
+    }
+
+    data.prixVente=Math.round((parseFloat(data.prix)||0)*PRIX_VENTE_RATIO);
+
+    // Handle recipe checkbox
+    const hasRecipe = document.getElementById('si-has-recipe')?.checked;
+    if (hasRecipe) {
+      if (item?.recipeMeta) {
+        const recipeMeta = { ...item.recipeMeta };
+        delete recipeMeta.hidden;
+        data.recipeMeta = recipeMeta;
+      }
     } else {
-      const el=document.getElementById(`si-${f.id}`);
-      if(el) data[f.id]=f.type==='number'?(parseFloat(el.value)||0):el.value.trim();
+      data.recipeMeta = { hidden: true };
     }
-  });
 
-  if (tplKey === 'arme') {
-    data.toucher = _legacyToucherTextFromData(data);
-    data.stats = _legacyStatsTextFromData(data);
-    data.statAttaque = data.degatsStat || data.toucherStat || '';
-  } else if (tplKey === 'armure' || tplKey === 'bijou') {
-    data.stats = _legacyStatsTextFromData(data);
+    if(itemId) await updateInCol('shop',itemId,data);
+    else await addToCol('shop',data);
+
+    // ── Synchroniser inventaires et équipements des personnages ─────────────
+    if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
+
+    closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  data.prixVente=Math.round((parseFloat(data.prix)||0)*PRIX_VENTE_RATIO);
-
-  // Handle recipe checkbox
-  const hasRecipe = document.getElementById('si-has-recipe')?.checked;
-  if (hasRecipe) {
-    if (item?.recipeMeta) {
-      const recipeMeta = { ...item.recipeMeta };
-      delete recipeMeta.hidden;
-      data.recipeMeta = recipeMeta;
-    }
-  } else {
-    data.recipeMeta = { hidden: true };
-  }
-
-  if(itemId) await updateInCol('shop',itemId,data);
-  else await addToCol('shop',data);
-
-  // ── Synchroniser inventaires et équipements des personnages ─────────────
-  if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
-
-  closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
 }
 
 /**
@@ -1546,9 +1586,14 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 }
 
 async function deleteShopItem(itemId) {
-  if (!await confirmModal('Supprimer cet article ?')) return;
-  await deleteFromCol('shop',itemId);
-  showNotif('Article supprimé.','success'); renderShop();
+  try {
+    if (!await confirmModal('Supprimer cet article ?')) return;
+    await deleteFromCol('shop',itemId);
+    showNotif('Article supprimé.','success'); renderShop();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 function openShopItemModal(item){ openItemModal(item?.id); }
