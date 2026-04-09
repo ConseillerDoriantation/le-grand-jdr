@@ -44,31 +44,36 @@ async function _reauth(password) {
  * - Retourne le total d'or récupéré
  */
 async function _liquidateInventory(inventaire = []) {
-  const shopItems = inventaire.filter(i => i.source === 'boutique' && i.itemId);
-  if (!shopItems.length) return 0;
+  try {
+    const shopItems = inventaire.filter(i => i.source === 'boutique' && i.itemId);
+    if (!shopItems.length) return 0;
 
-  // Charger les items boutique une seule fois
-  const shopDocs = await loadCollection('shop');
-  const shopMap  = {};
-  shopDocs.forEach(d => { shopMap[d.id] = d; });
+    // Charger les items boutique une seule fois
+    const shopDocs = await loadCollection('shop');
+    const shopMap  = {};
+    shopDocs.forEach(d => { shopMap[d.id] = d; });
 
-  let totalOr = 0;
+    let totalOr = 0;
 
-  await Promise.all(shopItems.map(async (item) => {
-    const pv = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat)||0) * 0.6);
-    totalOr += pv;
+    await Promise.all(shopItems.map(async (item) => {
+      const pv = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat)||0) * 0.6);
+      totalOr += pv;
 
-    // Réincrémenter le stock
-    const shopDoc = shopMap[item.itemId];
-    if (shopDoc) {
-      const cur = shopDoc.dispo !== undefined && shopDoc.dispo !== '' ? parseInt(shopDoc.dispo) : null;
-      if (cur !== null && cur >= 0) {
-        await updateInCol('shop', item.itemId, { dispo: cur + 1 });
+      // Réincrémenter le stock
+      const shopDoc = shopMap[item.itemId];
+      if (shopDoc) {
+        const cur = shopDoc.dispo !== undefined && shopDoc.dispo !== '' ? parseInt(shopDoc.dispo) : null;
+        if (cur !== null && cur >= 0) {
+          await updateInCol('shop', item.itemId, { dispo: cur + 1 });
+        }
       }
-    }
-  }));
+    }));
 
-  return totalOr;
+    return totalOr;
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 /**
@@ -76,18 +81,23 @@ async function _liquidateInventory(inventaire = []) {
  * Retourne le résumé { nbPersos, totalOr }
  */
 async function _purgeUserCharacters(uid) {
-  const chars = await loadChars(uid);
-  let totalOr = 0;
+  try {
+    const chars = await loadChars(uid);
+    let totalOr = 0;
 
-  await Promise.all(chars.map(async (c) => {
-    totalOr += await _liquidateInventory(c.inventaire || []);
-    await deleteFromCol('characters', c.id);
-  }));
+    await Promise.all(chars.map(async (c) => {
+      totalOr += await _liquidateInventory(c.inventaire || []);
+      await deleteFromCol('characters', c.id);
+    }));
 
-  // Mettre à jour STATE.characters
-  STATE.characters = (STATE.characters || []).filter(c => c.uid !== uid);
+    // Mettre à jour STATE.characters
+    STATE.characters = (STATE.characters || []).filter(c => c.uid !== uid);
 
-  return { nbPersos: chars.length, totalOr };
+    return { nbPersos: chars.length, totalOr };
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -453,29 +463,34 @@ async function confirmDeleteAccount() {
 // Vend les items boutique avant suppression
 // ══════════════════════════════════════════════════════════════════════════════
 async function deleteCharWithRefund(charId) {
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) return false;
+  try {
+    const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+    if (!c) return false;
 
-  const inv       = c.inventaire || [];
-  const boutique  = inv.filter(i => i.source === 'boutique' && i.itemId);
-  const nbItems   = boutique.length;
+    const inv       = c.inventaire || [];
+    const boutique  = inv.filter(i => i.source === 'boutique' && i.itemId);
+    const nbItems   = boutique.length;
 
-  const confirmMsg = nbItems > 0
-    ? `Supprimer "${c.nom||'ce personnage'}" ?\n\n${nbItems} objet${nbItems>1?'s':''} de boutique ${nbItems>1?'seront remis':'sera remis'} en stock.`
-    : `Supprimer "${c.nom||'ce personnage'}" ?`;
+    const confirmMsg = nbItems > 0
+      ? `Supprimer "${c.nom||'ce personnage'}" ?\n\n${nbItems} objet${nbItems>1?'s':''} de boutique ${nbItems>1?'seront remis':'sera remis'} en stock.`
+      : `Supprimer "${c.nom||'ce personnage'}" ?`;
 
-  if (!await confirmModal(confirmMsg)) return false;
+    if (!await confirmModal(confirmMsg)) return false;
 
-  // Vendre/restituer les items boutique
-  if (nbItems > 0) {
-    const totalOr = await _liquidateInventory(inv);
-    console.log(`[account] deleteChar "${c.nom}" : ${nbItems} items, ${totalOr} or restitués`);
+    // Vendre/restituer les items boutique
+    if (nbItems > 0) {
+      const totalOr = await _liquidateInventory(inv);
+      console.log(`[account] deleteChar "${c.nom}" : ${nbItems} items, ${totalOr} or restitués`);
+    }
+
+    await deleteFromCol('characters', charId);
+    STATE.characters = (STATE.characters||[]).filter(x => x.id !== charId);
+    showNotif(`Personnage "${c.nom||'?'}" supprimé.${nbItems>0?` (${nbItems} objet${nbItems>1?'s':''} remis en stock)`:''}`, 'success');
+    return true;
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  await deleteFromCol('characters', charId);
-  STATE.characters = (STATE.characters||[]).filter(x => x.id !== charId);
-  showNotif(`Personnage "${c.nom||'?'}" supprimé.${nbItems>0?` (${nbItems} objet${nbItems>1?'s':''} remis en stock)`:''}`, 'success');
-  return true;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
