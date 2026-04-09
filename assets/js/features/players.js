@@ -723,7 +723,7 @@ function prefillPlayerPresentFromLinkedChar(force=false) {
 }
 
 async function deletePlayerPresent(id) {
-  if(!confirm('Supprimer cette présentation ?')) return;
+  if (!await confirmModal('Supprimer cette présentation ?')) return;
   await deleteFromCol('players',id);
   showNotif('Supprimée.','success');
   STORE.activeId='';
