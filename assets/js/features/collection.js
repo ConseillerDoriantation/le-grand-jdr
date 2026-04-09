@@ -204,6 +204,9 @@ async function deleteCard(id) {
   }
 }
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 Object.assign(window.JDRApp, {
   openCollectionModal, saveCard, viewCard, editCard, deleteCard, toggleUnlock,
   openTemplateModal, saveTemplate,
