@@ -19,7 +19,7 @@ function editInfoSection(id) {
     <div class="form-group"><label>Contenu</label>
       <textarea class="input-field" id="info-edit-content" rows="16" style="font-family:monospace;font-size:0.82rem">${section.content || ''}</textarea>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveInfoSection('${id}')">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="JDRApp.saveInfoSection('${id}')">Enregistrer</button>
   `);
 }
 
@@ -89,7 +89,7 @@ function getInfoEtats() {
 Brûlure, gel, poison, étourdissement et autres altérations doivent être appliqués et suivis par le MJ.`;
 }
 
-Object.assign(window, {
+Object.assign(window.JDRApp, {
   showInfoSection,
   editInfoSection,
   saveInfoSection,
