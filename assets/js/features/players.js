@@ -12,6 +12,9 @@ import { getMod as _getMod, calcCA as _ca, calcPVMax as _pvMax, calcPMMax as _pm
 import { imageDropZoneHTML, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Crop image ────────────────────────────────────────────────────────────────
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 let _ppCrop = {
   img:null, cropX:0,cropY:0,cropW:0,cropH:0,
   startX:0,startY:0,isDragging:false,isResizing:false,handle:null,
@@ -775,9 +778,6 @@ async function openCharacterSheetFromShowcase(charId) {
 
 // ── Override ──────────────────────────────────────────────────────────────────
 PAGES.players = renderPlayersPage;
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 Object.assign(window.JDRApp, {
   renderPlayersPage,
