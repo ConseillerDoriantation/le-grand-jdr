@@ -221,6 +221,9 @@ function _renderEmpty() {
 }
 
 // ── Sélection section ─────────────────────────────────────────────────────────
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 window.JDRApp.selectWorldSection = (id) => {
   _activeId = id;
   // Mettre à jour la nav
