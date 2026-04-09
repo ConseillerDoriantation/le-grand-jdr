@@ -44,7 +44,12 @@ async function loadActes() {
   return Array.isArray(doc?.list) ? doc.list : [];
 }
 async function saveActes(list) {
-  await saveDoc('story_meta','actes',{ list });
+  try {
+    await saveDoc('story_meta','actes',{ list });
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ── RENDU PRINCIPAL ───────────────────────────────────────────────────────────
@@ -94,7 +99,7 @@ async function renderStory() {
       <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;color:var(--gold);letter-spacing:2px;line-height:1;margin:0">La Trame</h1>
     </div>
     <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
-      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openStoryModal()">+ Ajouter</button>` : ''}
+      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="JDRApp.openStoryModal()">+ Ajouter</button>` : ''}
       <div style="display:flex;gap:.5rem;font-size:.72rem;color:var(--text-dim);flex-wrap:wrap">
         ${Object.entries(STATUT_CFG).map(([s,c]) =>
           `<span style="display:flex;align-items:center;gap:4px">
@@ -121,7 +126,7 @@ async function renderStory() {
       </button>`;
     }).join('')}
     ${STATE.isAdmin ? `
-    <button onclick="openNewActeModal()" style="padding:.5rem .9rem;border-radius:999px;cursor:pointer;
+    <button onclick="JDRApp.openNewActeModal()" style="padding:.5rem .9rem;border-radius:999px;cursor:pointer;
       border:1px dashed var(--border);background:transparent;color:var(--text-dim);font-size:.8rem">+ Acte</button>` : ''}
   </div>
 
@@ -139,7 +144,7 @@ async function renderStory() {
     <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
       <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
       <p style="font-style:italic">Aucune mission pour ${activeActe}.</p>
-      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openStoryModal()">+ Ajouter la première</button>`:''}
+      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="JDRApp.openStoryModal()">+ Ajouter la première</button>`:''}
     </div>` : `
     <div class="stl-wrap">
       <div id="story-tl" style="position:relative;min-width:max-content;padding:1rem 1.5rem 2.5rem">
@@ -372,7 +377,7 @@ function _renderTimeline(items) {
       html += `
       <div class="sn" data-id="${item.id}"
         style="position:absolute;left:${left}px;top:${cardTop}px;width:${CARD_W}px"
-        onclick="openStoryDetail('${item.id}')">
+        onclick="JDRApp.openStoryDetail('${item.id}')">
         <div class="sn-inner" style="background:var(--bg-card);border:1px solid ${st.border};border-radius:12px;overflow:hidden">
           <div style="width:100%;height:88px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${item.imageUrl
@@ -707,7 +712,7 @@ async function openStoryModal(item = null) {
     </div>
 
     <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
-      onclick="saveStory('${item?.id||''}')">
+      onclick="JDRApp.saveStory('${item?.id||''}')">
       ${item?'Enregistrer':'Créer'}
     </button>
   `);
@@ -900,63 +905,68 @@ window._stConfirmCrop = () => {
 
 // ── SAUVEGARDER ───────────────────────────────────────────────────────────────
 async function saveStory(id = '') {
-  const titre=document.getElementById('st-titre')?.value?.trim();
-  if(!titre){showNotif('Le titre est requis.','error');return;}
+  try {
+    const titre=document.getElementById('st-titre')?.value?.trim();
+    if(!titre){showNotif('Le titre est requis.','error');return;}
 
-  // Image : crop prioritaire, sinon existante en base
-  let imageUrl='';
-  if(_crop.base64){
-    imageUrl=_crop.base64;
-  } else if(id){
-    const existing=(await loadCollection('story')).find(i=>i.id===id);
-    imageUrl=existing?.imageUrl||'';
+    // Image : crop prioritaire, sinon existante en base
+    let imageUrl='';
+    if(_crop.base64){
+      imageUrl=_crop.base64;
+    } else if(id){
+      const existing=(await loadCollection('story')).find(i=>i.id===id);
+      imageUrl=existing?.imageUrl||'';
+    }
+
+    // Participants depuis la grille de sélection
+    const participants = [...document.querySelectorAll('[id^="st-part-"]')]
+      .filter(el => el.dataset.selected === '1')
+      .map(el => ({
+        id:        el.dataset.partId       || '',
+        nom:       el.dataset.partNom      || '',
+        photo:     el.dataset.partPhoto    || '',
+        photoX:    parseFloat(el.dataset.partPhotox)    || 0,
+        photoY:    parseFloat(el.dataset.partPhotoy)    || 0,
+        photoZoom: parseFloat(el.dataset.partPhotozoom) || 1,
+      }));
+
+    const allCb=document.querySelectorAll('[id^="lien-"]');
+    const liens=[...allCb].filter(cb=>cb.checked).map(cb=>cb.id.replace('lien-',''));
+
+    const data={
+      type:          document.getElementById('st-type')?.value       ||'mission',
+      titre,
+      acte:          document.getElementById('st-acte')?.value?.trim() ||'Acte I',
+      axe:           document.getElementById('st-axe')?.value?.trim()  ||'',
+      date:          document.getElementById('st-date')?.value?.trim() ||'',
+      lieu:          document.getElementById('st-lieu')?.value?.trim() ||'',
+      description:   document.getElementById('st-desc')?.value         ||'',
+      imageUrl,
+      participants,
+      statut:        document.getElementById('st-statut')?.value       ||'En cours',
+      reussite:      parseInt(document.getElementById('st-reussite')?.value)||0,
+      notesReussite: document.getElementById('st-notes-reussite')?.value?.trim()||'',
+      recompense:    document.getElementById('st-recompense')?.value?.trim()||'',
+      liens,
+      ordre:         parseInt(document.getElementById('st-ordre')?.value)||0,
+    };
+
+    // Persister l'acte si nouveau
+    const savedActes=await loadActes();
+    if(!savedActes.includes(data.acte)){ savedActes.push(data.acte); savedActes.sort(); await saveActes(savedActes); }
+
+    if(id) await updateInCol('story',id,data);
+    else   await addToCol('story',data);
+
+    window._storyActe=data.acte;
+    _crop.base64=null;
+    closeModal();
+    showNotif(id?'Mission mise à jour.':`"${titre}" ajoutée !`,'success');
+    await PAGES.story();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  // Participants depuis la grille de sélection
-  const participants = [...document.querySelectorAll('[id^="st-part-"]')]
-    .filter(el => el.dataset.selected === '1')
-    .map(el => ({
-      id:        el.dataset.partId       || '',
-      nom:       el.dataset.partNom      || '',
-      photo:     el.dataset.partPhoto    || '',
-      photoX:    parseFloat(el.dataset.partPhotox)    || 0,
-      photoY:    parseFloat(el.dataset.partPhotoy)    || 0,
-      photoZoom: parseFloat(el.dataset.partPhotozoom) || 1,
-    }));
-
-  const allCb=document.querySelectorAll('[id^="lien-"]');
-  const liens=[...allCb].filter(cb=>cb.checked).map(cb=>cb.id.replace('lien-',''));
-
-  const data={
-    type:          document.getElementById('st-type')?.value       ||'mission',
-    titre,
-    acte:          document.getElementById('st-acte')?.value?.trim() ||'Acte I',
-    axe:           document.getElementById('st-axe')?.value?.trim()  ||'',
-    date:          document.getElementById('st-date')?.value?.trim() ||'',
-    lieu:          document.getElementById('st-lieu')?.value?.trim() ||'',
-    description:   document.getElementById('st-desc')?.value         ||'',
-    imageUrl,
-    participants,
-    statut:        document.getElementById('st-statut')?.value       ||'En cours',
-    reussite:      parseInt(document.getElementById('st-reussite')?.value)||0,
-    notesReussite: document.getElementById('st-notes-reussite')?.value?.trim()||'',
-    recompense:    document.getElementById('st-recompense')?.value?.trim()||'',
-    liens,
-    ordre:         parseInt(document.getElementById('st-ordre')?.value)||0,
-  };
-
-  // Persister l'acte si nouveau
-  const savedActes=await loadActes();
-  if(!savedActes.includes(data.acte)){ savedActes.push(data.acte); savedActes.sort(); await saveActes(savedActes); }
-
-  if(id) await updateInCol('story',id,data);
-  else   await addToCol('story',data);
-
-  window._storyActe=data.acte;
-  _crop.base64=null;
-  closeModal();
-  showNotif(id?'Mission mise à jour.':`"${titre}" ajoutée !`,'success');
-  await PAGES.story();
 }
 
 // ── ÉDITER / SUPPRIMER ────────────────────────────────────────────────────────
@@ -966,10 +976,15 @@ async function editStory(id){
   if(item) openStoryModal(item);
 }
 async function deleteStory(id){
-  if (!await confirmModal('Supprimer cet élément de la trame ?'))return;
-  await deleteFromCol('story',id);
-  showNotif('Élément supprimé.','success');
-  await PAGES.story();
+  try {
+    if (!await confirmModal('Supprimer cet élément de la trame ?'))return;
+    await deleteFromCol('story',id);
+    showNotif('Élément supprimé.','success');
+    await PAGES.story();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ── NOUVEL ACTE ───────────────────────────────────────────────────────────────
@@ -994,4 +1009,4 @@ window._createNewActe = async () => {
 
 // ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────
 PAGES.story = renderStory;
-Object.assign(window,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
+Object.assign(window.JDRApp,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
