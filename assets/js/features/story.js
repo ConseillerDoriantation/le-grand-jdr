@@ -99,7 +99,7 @@ async function renderStory() {
       <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;color:var(--gold);letter-spacing:2px;line-height:1;margin:0">La Trame</h1>
     </div>
     <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
-      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="JDRApp.openStoryModal()">+ Ajouter</button>` : ''}
+      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openStoryModal()">+ Ajouter</button>` : ''}
       <div style="display:flex;gap:.5rem;font-size:.72rem;color:var(--text-dim);flex-wrap:wrap">
         ${Object.entries(STATUT_CFG).map(([s,c]) =>
           `<span style="display:flex;align-items:center;gap:4px">
@@ -126,7 +126,7 @@ async function renderStory() {
       </button>`;
     }).join('')}
     ${STATE.isAdmin ? `
-    <button onclick="JDRApp.openNewActeModal()" style="padding:.5rem .9rem;border-radius:999px;cursor:pointer;
+    <button onclick="openNewActeModal()" style="padding:.5rem .9rem;border-radius:999px;cursor:pointer;
       border:1px dashed var(--border);background:transparent;color:var(--text-dim);font-size:.8rem">+ Acte</button>` : ''}
   </div>
 
@@ -144,7 +144,7 @@ async function renderStory() {
     <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
       <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
       <p style="font-style:italic">Aucune mission pour ${activeActe}.</p>
-      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="JDRApp.openStoryModal()">+ Ajouter la première</button>`:''}
+      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openStoryModal()">+ Ajouter la première</button>`:''}
     </div>` : `
     <div class="stl-wrap">
       <div id="story-tl" style="position:relative;min-width:max-content;padding:1rem 1.5rem 2.5rem">
@@ -377,7 +377,7 @@ function _renderTimeline(items) {
       html += `
       <div class="sn" data-id="${item.id}"
         style="position:absolute;left:${left}px;top:${cardTop}px;width:${CARD_W}px"
-        onclick="JDRApp.openStoryDetail('${item.id}')">
+        onclick="openStoryDetail('${item.id}')">
         <div class="sn-inner" style="background:var(--bg-card);border:1px solid ${st.border};border-radius:12px;overflow:hidden">
           <div style="width:100%;height:88px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${item.imageUrl
@@ -712,7 +712,7 @@ async function openStoryModal(item = null) {
     </div>
 
     <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
-      onclick="JDRApp.saveStory('${item?.id||''}')">
+      onclick="saveStory('${item?.id||''}')">
       ${item?'Enregistrer':'Créer'}
     </button>
   `);
@@ -1009,7 +1009,4 @@ window._createNewActe = async () => {
 
 // ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────
 PAGES.story = renderStory;
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
-Object.assign(window.JDRApp,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
+Object.assign(window,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
