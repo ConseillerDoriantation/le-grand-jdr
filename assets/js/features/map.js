@@ -10,6 +10,9 @@ import { _esc } from '../shared/html.js';
 import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Types de lieux ────────────────────────────────────────────────────────────
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 export const LIEU_TYPES = [
   { id: 'ville',    label: 'Ville',         emoji: '🏙️', color: '#4f8cff' },
   { id: 'village',  label: 'Village',       emoji: '🏘️', color: '#22c38e' },
@@ -530,9 +533,6 @@ async function _fogCommit(pts) {
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
 }
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 window.JDRApp.removeFogPoly = async (i) => {
   mapState.fogZones.splice(i, 1);
