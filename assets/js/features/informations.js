@@ -3,6 +3,9 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 function showInfoSection(id, el) {
   document.querySelectorAll('#info-nav .tutorial-nav-item').forEach((item) => item.classList.remove('active'));
   el?.classList.add('active');
@@ -88,9 +91,6 @@ function getInfoEtats() {
 
 Brûlure, gel, poison, étourdissement et autres altérations doivent être appliqués et suivis par le MJ.`;
 }
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 Object.assign(window.JDRApp, {
   showInfoSection,
