@@ -24,9 +24,13 @@ import {
 import { showNotif }              from './shared/notifications.js';
 import { initTheme, toggleTheme } from './shared/theme.js';
 
+// ── Modules chargés au boot (nécessaires immédiatement) ──────────────────────
+// uploadImage  : expose window.previewUploadPng/Jpeg (utilisé dans tout le HTML)
+// photo-cropper: expose window.openPhotoCropper (utilisé dès la fiche perso)
 import './features/uploadImage.js';
+import './features/photo-cropper.js';
 
-// ── Exposition sur window EN PREMIER ───────────
+// ── Exposition sur window EN PREMIER ─────────────────────────────────────────
 // toggleTheme doit être disponible avant le rendu
 // car index.html utilise onclick="toggleTheme()"
 Object.assign(window, {
@@ -72,36 +76,6 @@ try {
   console.error('[app] modal overlay:', err);
 }
 
-// ── Chargement des modules features ─────────────────────────────────────────
-const featureModules = [
-  './features/characters.js',
-  './features/shop.js',
-  './features/npcs.js',
-  './features/story.js',
-  './features/bastion.js',
-  './features/world.js',
-  './features/achievements.js',
-  './features/collection.js',
-  './features/players.js',
-  './features/tutorial.js',
-  './features/informations.js',
-  './features/recipes.js',
-  './features/bestiary.js',
-  './features/photo-cropper.js',
-  './features/account.js',
-];
-
-async function loadFeaturesSafely() {
-  const results = await Promise.allSettled(
-    featureModules.map((path) => import(path))
-  );
-  results.forEach((result, index) => {
-    if (result.status === 'rejected') {
-      console.error(`[app] feature failed: ${featureModules[index]}`, result.reason);
-    }
-  });
-}
-
-loadFeaturesSafely().catch((err) => {
-  console.error('[app] loadFeaturesSafely:', err);
-});
+// ── Les features sont chargées en lazy via navigation.js ─────────────────────
+// Chaque page charge son module uniquement à la première navigation.
+// Voir : core/navigation.js → loadFeature()
