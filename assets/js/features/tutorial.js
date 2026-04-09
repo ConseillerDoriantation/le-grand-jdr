@@ -52,4 +52,4 @@ async function saveTutorial() {
   }
 }
 
-Object.assign(window, { getDefaultTutorial, showTutSection, editTutorial, saveTutorial });
+Object.assign(window.JDRApp, { getDefaultTutorial, showTutSection, editTutorial, saveTutorial });
