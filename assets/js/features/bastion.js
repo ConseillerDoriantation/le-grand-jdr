@@ -11,6 +11,9 @@ import { calcOr, getMod } from '../shared/char-stats.js';
 // Les améliorations custom sont dans data.ameliorationsCustom[]
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 export const BASTION_AMELIORATIONS_DEFAULT = [
   { id:'cuisine',    nom:'Cuisine',              emoji:'🍳', cout:500,
     description:'Cuisiner avant mission sans marmite ni pierre de feu.',
@@ -176,10 +179,10 @@ async function editBastion() {
     </div>
     <div class="form-group"><label>Description</label>
       <textarea class="input-field" id="b-description" rows="3">${current.description||''}</textarea></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="JDRApp.saveBastionInfos()">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBastionInfos()">Enregistrer</button>
     <hr style="border:none;border-top:1px solid var(--border);margin:1rem 0">
     <button class="btn btn-outline" style="width:100%;color:#ff6b6b;border-color:rgba(255,107,107,.3);font-size:.8rem"
-      onclick="JDRApp.resetBastion()">🗑️ Remettre le Bastion à zéro</button>
+      onclick="resetBastion()">🗑️ Remettre le Bastion à zéro</button>
   `);
 }
 
@@ -237,8 +240,8 @@ async function gererAmeliorations() {
             </div>
             <div style="display:flex;gap:.3rem;flex-shrink:0;align-items:center">
               <button class="btn-icon" style="font-size:.8rem" onclick="JDRApp.modifierAmelioration('${a.id}','${a.type||'statique'}')" title="Modifier le coût et les infos">✏️</button>
-              ${a.type==='custom'?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="JDRApp.supprimerAmeliorationCustom('${a.id}')">🗑️</button>`:''}
-              ${!a.debloquee?`<button class="btn-icon" style="font-size:.75rem;color:var(--gold)" onclick="JDRApp.debloquerManuellement('${a.id}','${a.type||'statique'}')" title="Débloquer manuellement">✅</button>`:''}
+              ${a.type==='custom'?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerAmeliorationCustom('${a.id}')">🗑️</button>`:''}
+              ${!a.debloquee?`<button class="btn-icon" style="font-size:.75rem;color:var(--gold)" onclick="debloquerManuellement('${a.id}','${a.type||'statique'}')" title="Débloquer manuellement">✅</button>`:''}
             </div>
           </div>
           ${a.description?`<p style="font-size:.74rem;color:var(--text-muted);margin:0 0 .4rem">${a.description}</p>`:''}
@@ -282,7 +285,7 @@ async function modifierAmelioration(id, type) {
     <div class="form-group"><label>Détail complet</label>
       <textarea class="input-field" id="ma-detail" rows="3">${a.detail||''}</textarea></div>
     <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
-      onclick="JDRApp.confirmerModifAmelioration('${id}','${type}')">Enregistrer</button>
+      onclick="confirmerModifAmelioration('${id}','${type}')">Enregistrer</button>
   `);
 }
 
@@ -449,7 +452,7 @@ async function investirAmelioration(amelioId, amelioType) {
       </select>
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:.25rem"
-      onclick="JDRApp.confirmerInvestissementAmelioration('${amelioId}','${amelioType}')">Investir</button>
+      onclick="confirmerInvestissementAmelioration('${amelioId}','${amelioType}')">Investir</button>
   `);
 }
 
@@ -595,7 +598,7 @@ async function investirOrBastion() {
       <input type="number" class="input-field" id="invest-montant" min="1" max="${_getCharOr(char)}" placeholder="0"></div>
     <div class="form-group"><label>Message (optionnel)</label>
       <input class="input-field" id="invest-msg" placeholder="Pour la forge !"></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="JDRApp.confirmerInvestissement()">Investir</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="confirmerInvestissement()">Investir</button>
   `);
 }
 
@@ -764,7 +767,7 @@ async function ouvrirInventaireBastion() {
 
         <!-- ── Bouton dépôt inventaire ── -->
         ${hasChar||isAdmin ? `<div style="display:flex;justify-content:flex-end">
-          <button class="btn btn-gold btn-sm" onclick="JDRApp.ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>
+          <button class="btn btn-gold btn-sm" onclick="ajouterDepuisInventaire()">📤 Depuis mon inventaire</button>
         </div>` : ''}
 
         <!-- ── Liste objets (sans les items or) ── -->
@@ -784,7 +787,7 @@ async function ouvrirInventaireBastion() {
                 </div>
                 <div style="display:flex;gap:.25rem;flex-shrink:0">
                   ${hasChar?`<button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="JDRApp.recupererObjetBastion('${item.id}')">↩ Récup.</button>`:''}
-                  ${isAdmin?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="JDRApp.supprimerObjetBastion('${item.id}')">🗑️</button>`:''}
+                  ${isAdmin?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerObjetBastion('${item.id}')">🗑️</button>`:''}
                 </div>
               </div>`).join('')}
         </div>
@@ -1175,7 +1178,7 @@ async function ouvrirMissionsBastion() {
   openModal('⚔️ Missions spéciales du Bastion', `
     <div style="margin-bottom:.75rem;display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:.78rem;color:var(--text-dim)">${missions.length} mission${missions.length!==1?'s':''}</span>
-      ${isAdmin?`<button class="btn btn-gold btn-sm" onclick="JDRApp.creerMissionBastion()">+ Créer</button>`:''}
+      ${isAdmin?`<button class="btn btn-gold btn-sm" onclick="creerMissionBastion()">+ Créer</button>`:''}
     </div>
     <div style="display:flex;flex-direction:column;gap:.5rem;max-height:55vh;overflow-y:auto">
       ${missions.length===0
@@ -1193,7 +1196,7 @@ async function ouvrirMissionsBastion() {
               <button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="JDRApp.changerStatutMission('${m.id}','terminée')">✅ Terminée</button>
               <button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="JDRApp.changerStatutMission('${m.id}','échouée')">❌ Échouée</button>
               <button class="btn btn-outline btn-sm" style="font-size:.7rem" onclick="JDRApp.changerStatutMission('${m.id}','active')">🔄 Réactiver</button>
-              <button class="btn-icon" style="color:#ff6b6b;margin-left:auto" onclick="JDRApp.supprimerMissionBastion('${m.id}')">🗑️</button>
+              <button class="btn-icon" style="color:#ff6b6b;margin-left:auto" onclick="supprimerMissionBastion('${m.id}')">🗑️</button>
             </div>`:''}
           </div>`;}).join('')}
     </div>
@@ -1205,7 +1208,7 @@ async function creerMissionBastion() {
     <div class="form-group"><label>Titre</label><input class="input-field" id="miss-titre" placeholder="Défense du Bastion..."></div>
     <div class="form-group"><label>Description</label><textarea class="input-field" id="miss-desc" rows="3" placeholder="Objectifs, contexte..."></textarea></div>
     <div class="form-group"><label>Récompense</label><input class="input-field" id="miss-recomp" placeholder="300 or, amélioration gratuite..."></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="JDRApp.sauvegarderMissionBastion()">Créer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="sauvegarderMissionBastion()">Créer</button>
   `);
 }
 
@@ -1261,7 +1264,7 @@ function addBastionLog() {
   openModal('📝 Ajouter une entrée au journal', `
     <div class="form-group"><label>Date</label><input class="input-field" id="bastion-log-date" value="${new Date().toLocaleDateString('fr-FR')}"></div>
     <div class="form-group"><label>Texte</label><textarea class="input-field" id="bastion-log-text" rows="5"></textarea></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="JDRApp.saveBastionLog()">Ajouter</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveBastionLog()">Ajouter</button>
   `);
 }
 
@@ -1283,9 +1286,6 @@ async function saveBastionLog() {
 // ══════════════════════════════════════════════════════════════════════════════
 // EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 Object.assign(window.JDRApp, {
   BASTION_AMELIORATIONS: BASTION_AMELIORATIONS_DEFAULT,
