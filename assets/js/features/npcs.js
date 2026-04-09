@@ -526,6 +526,9 @@ function _getFiltered() {
 }
 
 // ── Sélection PNJ ────────────────────────────────────────────────────────────
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 window.JDRApp.selectNpc = (id) => {
   _activeId = id;
   const n = _npcs.find(x => x.id === id);
