@@ -24,15 +24,20 @@ function editInfoSection(id) {
 }
 
 async function saveInfoSection(id) {
-  const sections = [...(window._infoSections || [])];
-  const index = sections.findIndex((entry) => entry.id === id);
-  if (index < 0) return;
-  sections[index] = { ...sections[index], content: document.getElementById('info-edit-content')?.value || '' };
-  window._infoSections = sections;
-  await saveDoc('informations', 'main', { sections });
-  closeModal();
-  showNotif('Section mise à jour.', 'success');
-  await PAGES.informations();
+  try {
+    const sections = [...(window._infoSections || [])];
+    const index = sections.findIndex((entry) => entry.id === id);
+    if (index < 0) return;
+    sections[index] = { ...sections[index], content: document.getElementById('info-edit-content')?.value || '' };
+    window._infoSections = sections;
+    await saveDoc('informations', 'main', { sections });
+    closeModal();
+    showNotif('Section mise à jour.', 'success');
+    await PAGES.informations();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 function getInfoStats() {
