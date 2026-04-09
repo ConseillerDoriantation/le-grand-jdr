@@ -441,7 +441,7 @@ window.saveWorldSection = async () => {
 };
 
 window.deleteWorldSection = async (id) => {
-  if (!confirm('Supprimer cette section définitivement ?')) return;
+  if (!await confirmModal('Supprimer cette section définitivement ?')) return;
   _sections = _sections.filter(s => s.id !== id);
   if (_activeId === id) _activeId = _sections[0]?.id || null;
   await _save();
