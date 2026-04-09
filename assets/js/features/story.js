@@ -966,7 +966,7 @@ async function editStory(id){
   if(item) openStoryModal(item);
 }
 async function deleteStory(id){
-  if(!confirm('Supprimer cet élément de la trame ?'))return;
+  if (!await confirmModal('Supprimer cet élément de la trame ?'))return;
   await deleteFromCol('story',id);
   showNotif('Élément supprimé.','success');
   await PAGES.story();
