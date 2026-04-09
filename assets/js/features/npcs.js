@@ -796,7 +796,7 @@ async function saveNpc(id) {
 }
 
 async function deleteNpc(id) {
-  if (!confirm('Supprimer ce PNJ et toutes ses affinités ?')) return;
+  if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?')) return;
   await deleteFromCol('npcs', id);
   // Supprimer aussi les affinités individuelles liées
   const toDelete = _affiPerso.filter(a => a.npcId === id);
@@ -1016,7 +1016,7 @@ window.saveAffinitePerso = async (npcId, existingId) => {
 };
 
 window.deleteAffinitePerso = async (id) => {
-  if (!confirm('Supprimer cette exception ?')) return;
+  if (!await confirmModal('Supprimer cette exception ?')) return;
   await deleteFromCol('npc_affinites', id);
   _affiPerso = _affiPerso.filter(a => a.id !== id);
   showNotif('Exception supprimée.', 'success');
