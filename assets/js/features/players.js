@@ -776,6 +776,9 @@ async function openCharacterSheetFromShowcase(charId) {
 // ── Override ──────────────────────────────────────────────────────────────────
 PAGES.players = renderPlayersPage;
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 Object.assign(window.JDRApp, {
   renderPlayersPage,
   openPlayerPresentModal,
