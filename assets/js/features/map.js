@@ -531,6 +531,9 @@ async function _fogCommit(pts) {
   }
 }
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 window.JDRApp.removeFogPoly = async (i) => {
   mapState.fogZones.splice(i, 1);
   await saveDoc('world','map_fog',{ zones: mapState.fogZones });
