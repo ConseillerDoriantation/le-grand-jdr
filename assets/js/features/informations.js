@@ -89,6 +89,9 @@ function getInfoEtats() {
 Brûlure, gel, poison, étourdissement et autres altérations doivent être appliqués et suivis par le MJ.`;
 }
 
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 Object.assign(window.JDRApp, {
   showInfoSection,
   editInfoSection,
