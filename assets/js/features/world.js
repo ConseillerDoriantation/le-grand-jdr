@@ -14,6 +14,9 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
 // ── État local ────────────────────────────────────────────────────────────────
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 let _sections     = [];
 let _activeId     = null;
 let _dragIdx      = null;
@@ -145,10 +148,10 @@ function _renderNavItem(s, i) {
     ${isHidden ? `<span style="font-size:.6rem;color:#ff6b6b;flex-shrink:0">●</span>` : ''}
     ${STATE.isAdmin ? `
     <div class="world-nav-actions" style="display:none;gap:.2rem;flex-shrink:0">
-      <button onclick="event.stopPropagation();openWorldSectionModal('${s.id}')"
+      <button onclick="event.stopPropagation();JDRApp.openWorldSectionModal('${s.id}')"
         style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.78rem;
         padding:1px 3px" title="Modifier">✏️</button>
-      <button onclick="event.stopPropagation();deleteWorldSection('${s.id}')"
+      <button onclick="event.stopPropagation();JDRApp.deleteWorldSection('${s.id}')"
         style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.78rem;
         padding:1px 3px" title="Supprimer">🗑️</button>
     </div>` : ''}
@@ -221,9 +224,6 @@ function _renderEmpty() {
 }
 
 // ── Sélection section ─────────────────────────────────────────────────────────
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 window.JDRApp.selectWorldSection = (id) => {
   _activeId = id;
   // Mettre à jour la nav
