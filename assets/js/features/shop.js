@@ -862,7 +862,7 @@ async function sellInvItemFromShop(charId, invIndex) {
   const prixVente = parseFloat(item.prixVente) || 0;
   const itemNom   = item.nom || 'cet objet';
 
-  if (!confirm(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
+  if (!await confirmModal(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
 
   // 1. Réincrémenter le stock dans la boutique (si l'article existe encore)
   if (item.itemId) {
@@ -1135,7 +1135,7 @@ async function saveCat(catId) {
 
 async function deleteCat(catId) {
   const n=_items.filter(i=>i.categorieId===catId).length;
-  if(!confirm(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?')) return;
+  if (!await confirmModal(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?')) return;
   const toDelete=_items.filter(i=>i.categorieId===catId);
   await Promise.all(toDelete.map(i=>deleteFromCol('shop',i.id)));
   await deleteFromCol('shopCategories',catId);
@@ -1185,7 +1185,7 @@ async function saveSubCat(catId,scId) {
 }
 
 async function deleteSubCat(catId,scId) {
-  if(!confirm('Supprimer cette sous-catégorie ?')) return;
+  if (!await confirmModal('Supprimer cette sous-catégorie ?')) return;
   const cat=_cats.find(c=>c.id===catId); if(!cat) return;
   const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
   await updateInCol('shopCategories',catId,{sousCats});
@@ -1546,7 +1546,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 }
 
 async function deleteShopItem(itemId) {
-  if(!confirm('Supprimer cet article ?')) return;
+  if (!await confirmModal('Supprimer cet article ?')) return;
   await deleteFromCol('shop',itemId);
   showNotif('Article supprimé.','success'); renderShop();
 }
