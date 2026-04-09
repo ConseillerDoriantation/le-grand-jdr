@@ -1,4 +1,4 @@
-import { STATE } from '../core/state.js';
+import { STATE } from '../core/state.js'; 
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
