@@ -534,7 +534,7 @@ window.removeFogPoly = async (i) => {
 };
 
 window.clearFog = async () => {
-  if (!confirm('Effacer toutes les zones révélées ?')) return;
+  if (!await confirmModal('Effacer toutes les zones révélées ?')) return;
   mapState.fogZones = [];
   await saveDoc('world','map_fog',{ zones:[] });
   renderFog();
@@ -788,7 +788,7 @@ window.openEditLieuModalById = (id) => {
 };
 
 window.deleteLieu = async (id) => {
-  if (!confirm('Supprimer ce lieu de la carte ?')) return;
+  if (!await confirmModal('Supprimer ce lieu de la carte ?')) return;
   await deleteFromCol('map_lieux', id);
   mapState.lieux = mapState.lieux.filter(l => l.id !== id);
   window.closeMapSidebar();
