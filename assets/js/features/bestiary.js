@@ -14,6 +14,9 @@ import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, 
 // _crop, _clamp → gérés par shared/image-upload.js
 
 // ── État local ────────────────────────────────────────────────────────────────
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 let _creatures  = [];
 let _tracker    = {}; // { [creatureId]: { pvActuel, pmActuel, notes, deductions:{pv,pm,ca,for,...} } }
 let _searchVal  = '';
@@ -211,8 +214,8 @@ function _renderCard(c) {
     </div>
     ${STATE.isAdmin ? `
     <div style="display:flex;gap:3px;padding:.4rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
-      <button class="btn-icon" style="font-size:.7rem" onclick="event.stopPropagation();openBeastModal('${c.id}')">✏️</button>
-      <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="event.stopPropagation();deleteBeast('${c.id}')">🗑️</button>
+      <button class="btn-icon" style="font-size:.7rem" onclick="event.stopPropagation();JDRApp.openBeastModal('${c.id}')">✏️</button>
+      <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="event.stopPropagation();JDRApp.deleteBeast('${c.id}')">🗑️</button>
     </div>` : ''}
   </div>`;
 }
@@ -966,9 +969,6 @@ window._bstConfirmCrop = () => {
 
 // ── Override PAGES.bestiaire + exports ───────────────────────────────────────
 PAGES.bestiaire = renderBestiary;
-
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
 
 Object.assign(window.JDRApp, {
   renderBestiary,
