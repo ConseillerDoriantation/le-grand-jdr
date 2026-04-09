@@ -16,6 +16,9 @@ import { _esc, _nl2br } from '../shared/html.js';
 import { bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
 
 // ── Config affinité ───────────────────────────────────────────────────────────
+// Initialiser le namespace si app.js ne l'a pas encore fait
+window.JDRApp = window.JDRApp || {};
+
 const AFFINITE = [
   { niveau: 0, label: 'Hostile',  couleur: '#ff4757', bg: 'rgba(255,71,87,.12)',   border: 'rgba(255,71,87,.3)',   icon: '💢', desc: 'Cherche activement à nuire au groupe' },
   { niveau: 1, label: 'Méfiant',  couleur: '#ff9f43', bg: 'rgba(255,159,67,.1)',   border: 'rgba(255,159,67,.28)', icon: '👁️', desc: 'Prudent, peu coopératif' },
@@ -526,9 +529,6 @@ function _getFiltered() {
 }
 
 // ── Sélection PNJ ────────────────────────────────────────────────────────────
-// Initialiser le namespace si app.js ne l'a pas encore fait
-window.JDRApp = window.JDRApp || {};
-
 window.JDRApp.selectNpc = (id) => {
   _activeId = id;
   const n = _npcs.find(x => x.id === id);
