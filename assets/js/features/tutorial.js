@@ -31,20 +31,25 @@ async function editTutorial() {
 }
 
 async function saveTutorial() {
-  const raw = document.getElementById('tutorial-edit')?.value || '';
-  const sections = raw
-    .split(/\n\s*\n/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block) => {
-      const [title, ...rest] = block.split('|');
-      return { title: (title || 'Section').trim(), content: rest.join('|').trim() };
-    });
+  try {
+    const raw = document.getElementById('tutorial-edit')?.value || '';
+    const sections = raw
+      .split(/\n\s*\n/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block) => {
+        const [title, ...rest] = block.split('|');
+        return { title: (title || 'Section').trim(), content: rest.join('|').trim() };
+      });
 
-  await saveDoc('tutorial', 'main', { sections: sections.length ? sections : getDefaultTutorial() });
-  closeModal();
-  showNotif('Tutoriel mis à jour.', 'success');
-  await PAGES.tutorial();
+    await saveDoc('tutorial', 'main', { sections: sections.length ? sections : getDefaultTutorial() });
+    closeModal();
+    showNotif('Tutoriel mis à jour.', 'success');
+    await PAGES.tutorial();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 Object.assign(window, { getDefaultTutorial, showTutSection, editTutorial, saveTutorial });
