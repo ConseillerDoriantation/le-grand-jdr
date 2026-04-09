@@ -912,7 +912,7 @@ async function sellInvItemFromShop(charId, invIndex) {
 }
 
 // Exposer pour characters.js
-window.sellInvItemFromShop = sellInvItemFromShop;
+window.JDRApp.sellInvItemFromShop = sellInvItemFromShop;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
