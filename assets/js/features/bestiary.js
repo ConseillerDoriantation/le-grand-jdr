@@ -756,7 +756,7 @@ async function saveBeast(id = '') {
 async function deleteBeast(id) {
   const col = window._bstCurrentCol || 'bestiary';
   const c = _creatures.find(x=>x.id===id);
-  if (!confirm(`Supprimer "${c?.nom||'cette créature'}" ?`)) return;
+  if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`)) return;
   await deleteFromCol(col, id);
   _creatures = _creatures.filter(x=>x.id!==id);
   if (_activeId === id) _activeId = null;
