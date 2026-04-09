@@ -217,69 +217,79 @@ function _applyCSS() {
 // On dessine ça sur un canvas OUTPUT_SIZE×OUTPUT_SIZE.
 // ══════════════════════════════════════════════
 async function saveCroppedPhoto(charId) {
-  if (!_cs?.img || !_cs.scale) {
-    showNotif('Erreur : cropper non initialisé.', 'error');
-    return;
+  try {
+    if (!_cs?.img || !_cs.scale) {
+      showNotif('Erreur : cropper non initialisé.', 'error');
+      return;
+    }
+
+    const { ox, oy, scale, img, naturalW, naturalH } = _cs;
+
+    // Région source correspondant à la zone visible
+    const srcX = -ox / scale;
+    const srcY = -oy / scale;
+    const srcW =  VIEW_SIZE / scale;
+    const srcH =  VIEW_SIZE / scale;
+
+    // Clamper pour ne pas déborder de l'image source
+    const clampedSrcX = Math.max(0, srcX);
+    const clampedSrcY = Math.max(0, srcY);
+    const clampedSrcW = Math.min(srcW, naturalW - clampedSrcX);
+    const clampedSrcH = Math.min(srcH, naturalH - clampedSrcY);
+
+    // Position de destination sur le canvas (si l'image ne couvre pas tout)
+    const dstX = Math.max(0, (0  - srcX) * (OUTPUT_SIZE / srcW));
+    const dstY = Math.max(0, (0  - srcY) * (OUTPUT_SIZE / srcH));
+    const dstW = clampedSrcW * (OUTPUT_SIZE / srcW);
+    const dstH = clampedSrcH * (OUTPUT_SIZE / srcH);
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = OUTPUT_SIZE;
+    canvas.height = OUTPUT_SIZE;
+    const ctx = canvas.getContext('2d');
+
+    // Fond noir si l'image ne couvre pas tout le carré
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
+
+    ctx.drawImage(
+      img,
+      clampedSrcX, clampedSrcY, clampedSrcW, clampedSrcH,  // source
+      dstX,        dstY,        dstW,         dstH           // destination
+    );
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+
+    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
+
+    c.photo   = dataUrl;
+    c.photoZoom = 1; c.photoX = 0; c.photoY = 0; // legacy reset
+    await updateInCol('characters', charId, { photo: dataUrl, photoZoom: 1, photoX: 0, photoY: 0 });
+
+    _cs = null;
+    closeModal();
+    showNotif('Photo enregistrée !', 'success');
+    window.renderCharSheet?.(c, window._currentCharTab || 'combat');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  const { ox, oy, scale, img, naturalW, naturalH } = _cs;
-
-  // Région source correspondant à la zone visible
-  const srcX = -ox / scale;
-  const srcY = -oy / scale;
-  const srcW =  VIEW_SIZE / scale;
-  const srcH =  VIEW_SIZE / scale;
-
-  // Clamper pour ne pas déborder de l'image source
-  const clampedSrcX = Math.max(0, srcX);
-  const clampedSrcY = Math.max(0, srcY);
-  const clampedSrcW = Math.min(srcW, naturalW - clampedSrcX);
-  const clampedSrcH = Math.min(srcH, naturalH - clampedSrcY);
-
-  // Position de destination sur le canvas (si l'image ne couvre pas tout)
-  const dstX = Math.max(0, (0  - srcX) * (OUTPUT_SIZE / srcW));
-  const dstY = Math.max(0, (0  - srcY) * (OUTPUT_SIZE / srcH));
-  const dstW = clampedSrcW * (OUTPUT_SIZE / srcW);
-  const dstH = clampedSrcH * (OUTPUT_SIZE / srcH);
-
-  const canvas = document.createElement('canvas');
-  canvas.width  = OUTPUT_SIZE;
-  canvas.height = OUTPUT_SIZE;
-  const ctx = canvas.getContext('2d');
-
-  // Fond noir si l'image ne couvre pas tout le carré
-  ctx.fillStyle = '#111827';
-  ctx.fillRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
-
-  ctx.drawImage(
-    img,
-    clampedSrcX, clampedSrcY, clampedSrcW, clampedSrcH,  // source
-    dstX,        dstY,        dstW,         dstH           // destination
-  );
-
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
-
-  c.photo   = dataUrl;
-  c.photoZoom = 1; c.photoX = 0; c.photoY = 0; // legacy reset
-  await updateInCol('characters', charId, { photo: dataUrl, photoZoom: 1, photoX: 0, photoY: 0 });
-
-  _cs = null;
-  closeModal();
-  showNotif('Photo enregistrée !', 'success');
-  window.renderCharSheet?.(c, window._currentCharTab || 'combat');
 }
 
 async function deleteCharPhoto(charId) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) return;
-  c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
-  await updateInCol('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });
-  _cs = null;
-  showNotif('Photo supprimée.', 'success');
-  window.renderCharSheet?.(c, window._currentCharTab || 'combat');
+  try {
+    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    if (!c) return;
+    c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
+    await updateInCol('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });
+    _cs = null;
+    showNotif('Photo supprimée.', 'success');
+    window.renderCharSheet?.(c, window._currentCharTab || 'combat');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 Object.assign(window, { openPhotoCropper, saveCroppedPhoto, deleteCharPhoto });
