@@ -6,7 +6,7 @@ import { STATE, setPage } from './state.js';
 import PAGES from '../features/pages.js';
 
 // ── Naviguer vers une page ─────────────────────
-export function navigate(page) {
+export async function navigate(page) {
   if (!PAGES[page]) {
     console.warn(`[nav] page inconnue : ${page}`);
     return;
@@ -14,7 +14,12 @@ export function navigate(page) {
   setPage(page);
   _syncNav(page);
   _renderLoading();
-  PAGES[page]();
+  try {
+    await PAGES[page]();
+  } catch (err) {
+    console.error(`[nav] page "${page}" a planté :`, err);
+    _renderPageError(page, err);
+  }
 }
 
 // ── More-menu mobile ───────────────────────────
@@ -94,4 +99,36 @@ function _renderLoading() {
     content.innerHTML =
       '<div class="loading"><div class="spinner"></div> Chargement…</div>';
   }
+}
+
+function _renderPageError(page, err) {
+  const content = document.getElementById('main-content');
+  if (!content) return;
+  const isOffline   = !navigator.onLine;
+  const isPerm      = err?.code === 'permission-denied';
+  const icon        = isOffline ? '📡' : isPerm ? '🔒' : '⚠️';
+  const title       = isOffline ? 'Connexion perdue'
+                    : isPerm    ? 'Accès refusé'
+                    :             'Erreur de chargement';
+  const detail      = isOffline ? 'Vérifie ta connexion internet et réessaie.'
+                    : isPerm    ? 'Tu n\'as pas accès à cette page.'
+                    :             'Une erreur inattendue s\'est produite.';
+  content.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+      min-height:40vh;gap:1rem;text-align:center;padding:2rem">
+      <div style="font-size:2.5rem">${icon}</div>
+      <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;
+        color:var(--text)">${title}</div>
+      <div style="font-size:.88rem;color:var(--text-muted);max-width:360px;line-height:1.6">
+        ${detail}
+      </div>
+      <button onclick="navigate('${page}')"
+        style="margin-top:.5rem;padding:.5rem 1.5rem;border-radius:10px;cursor:pointer;
+          font-size:.85rem;font-weight:600;border:1px solid var(--border-strong);
+          background:var(--bg-elevated);color:var(--text-muted);transition:background .12s"
+        onmouseover="this.style.background='var(--bg-card2)'"
+        onmouseout="this.style.background='var(--bg-elevated)'">
+        🔄 Réessayer
+      </button>
+    </div>`;
 }
