@@ -5,6 +5,30 @@
 import { STATE, setPage } from './state.js';
 import PAGES from '../features/pages.js';
 
+// ── Carte page → module feature chargé en lazy ────────────────────────────
+// Chaque module est importé une seule fois : le navigateur le met en cache
+// automatiquement, les navigations suivantes vers la même page sont instantanées.
+const FEATURE_MAP = {
+  characters:   () => import('../features/characters.js'),
+  shop:         () => import('../features/shop.js'),
+  npcs:         () => import('../features/npcs.js'),
+  story:        () => import('../features/story.js'),
+  bastion:      () => import('../features/bastion.js'),
+  world:        () => import('../features/world.js'),
+  achievements: () => import('../features/achievements.js'),
+  collection:   () => import('../features/collection.js'),
+  players:      () => import('../features/players.js'),
+  tutorial:     () => import('../features/tutorial.js'),
+  informations: () => import('../features/informations.js'),
+  recettes:     () => import('../features/recipes.js'),
+  bestiaire:    () => import('../features/bestiary.js'),
+  account:      () => import('../features/account.js'),
+  map:          () => import('../features/map.js'),
+};
+
+// Garde les modules déjà chargés pour ne pas re-importer
+const _loaded = new Set();
+
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
   if (!PAGES[page]) {
@@ -14,6 +38,20 @@ export async function navigate(page) {
   setPage(page);
   _syncNav(page);
   _renderLoading();
+
+  // Charger la feature si elle a un module associé (une seule fois)
+  if (FEATURE_MAP[page] && !_loaded.has(page)) {
+    try {
+      await FEATURE_MAP[page]();
+      _loaded.add(page);
+    } catch (err) {
+      console.error(`[nav] chargement feature "${page}" échoué :`, err);
+      _renderPageError(page, err);
+      return;
+    }
+  }
+
+  // Rendre la page
   try {
     await PAGES[page]();
   } catch (err) {
@@ -43,7 +81,7 @@ export function initEventDelegation() {
       closeMoreMenu();
     }
 
-    // Navigation via data-navigate (sidebar, bottom-nav, more-menu, boutons inline)
+    // Navigation via data-navigate
     const navEl = e.target.closest('[data-navigate]');
     if (navEl) {
       navigate(navEl.dataset.navigate);
@@ -65,11 +103,11 @@ export function initEventDelegation() {
 
     // Actions auth déléguées
     const action = e.target.closest('[data-action]')?.dataset.action;
-    if (action === 'logout')          { window.doLogout?.();                    return; }
-    if (action === 'login')           { e.preventDefault(); window.doLogin?.(); return; }
-    if (action === 'register')        { e.preventDefault(); window.doRegister?.(); return; }
-    if (action === 'auth-tab-login')  { window.switchAuthTab?.('login');        return; }
-    if (action === 'auth-tab-register') { window.switchAuthTab?.('register');   return; }
+    if (action === 'logout')            { window.doLogout?.();                       return; }
+    if (action === 'login')             { e.preventDefault(); window.doLogin?.();    return; }
+    if (action === 'register')          { e.preventDefault(); window.doRegister?.(); return; }
+    if (action === 'auth-tab-login')    { window.switchAuthTab?.('login');           return; }
+    if (action === 'auth-tab-register') { window.switchAuthTab?.('register');        return; }
   });
 
   document.addEventListener('keydown', (e) => {
@@ -104,15 +142,17 @@ function _renderLoading() {
 function _renderPageError(page, err) {
   const content = document.getElementById('main-content');
   if (!content) return;
-  const isOffline   = !navigator.onLine;
-  const isPerm      = err?.code === 'permission-denied';
-  const icon        = isOffline ? '📡' : isPerm ? '🔒' : '⚠️';
-  const title       = isOffline ? 'Connexion perdue'
-                    : isPerm    ? 'Accès refusé'
-                    :             'Erreur de chargement';
-  const detail      = isOffline ? 'Vérifie ta connexion internet et réessaie.'
-                    : isPerm    ? 'Tu n\'as pas accès à cette page.'
-                    :             'Une erreur inattendue s\'est produite.';
+  const isOffline = !navigator.onLine;
+  const isPerm    = err?.code === 'permission-denied';
+  const icon      = isOffline ? '📡' : isPerm ? '🔒' : '⚠️';
+  const title     = isOffline ? 'Connexion perdue'
+                  : isPerm    ? 'Accès refusé'
+                  :             'Erreur de chargement';
+  const detail    = isOffline
+                  ? 'Vérifie ta connexion internet et réessaie.'
+                  : isPerm
+                  ? "Tu n'as pas accès à cette page."
+                  : 'Une erreur inattendue s\'est produite.';
   content.innerHTML = `
     <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
       min-height:40vh;gap:1rem;text-align:center;padding:2rem">
