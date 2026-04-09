@@ -693,83 +693,98 @@ function _readRows(type) {
 // SAUVEGARDER / SUPPRIMER
 // ══════════════════════════════════════════════════════════════════════════════
 async function saveBeast(id = '') {
-  const nom = document.getElementById('bst-nom')?.value?.trim();
-  if (!nom) { showNotif('Le nom est requis.','error'); return; }
+  try {
+    const nom = document.getElementById('bst-nom')?.value?.trim();
+    if (!nom) { showNotif('Le nom est requis.','error'); return; }
 
-  // Image : crop prioritaire sinon existante
-  let imageUrl = '';
-  if (_crop.base64) {
-    imageUrl = _crop.base64;
-  } else if (id) {
-    imageUrl = _creatures.find(c=>c.id===id)?.imageUrl || '';
+    // Image : crop prioritaire sinon existante
+    let imageUrl = '';
+    if (_crop.base64) {
+      imageUrl = _crop.base64;
+    } else if (id) {
+      imageUrl = _creatures.find(c=>c.id===id)?.imageUrl || '';
+    }
+
+    // Vérifier taille Firestore
+    if (imageUrl.length > 900_000) { showNotif('Image trop grande, recadrez plus petit.','error'); return; }
+
+    const data = {
+      nom,
+      type:          document.getElementById('bst-type')?.value?.trim()    || '',
+      environnement: document.getElementById('bst-env')?.value?.trim()     || '',
+      niveau:        parseInt(document.getElementById('bst-niveau')?.value)||0,
+      dangerositeXp: parseInt(document.getElementById('bst-xp')?.value)||0,
+      emoji:         document.getElementById('bst-emoji')?.value?.trim()   || '🐲',
+      imageUrl,
+      description:   document.getElementById('bst-desc')?.value?.trim()   || '',
+      // Stats
+      pvMax:          parseInt(document.getElementById('bst-pvMax')?.value)||0,
+      pmMax:          parseInt(document.getElementById('bst-pmMax')?.value)||0,
+      ca:             parseInt(document.getElementById('bst-ca')?.value)||0,
+      force:          parseInt(document.getElementById('bst-force')?.value)||0,
+      dexterite:      parseInt(document.getElementById('bst-dexterite')?.value)||0,
+      constitution:   parseInt(document.getElementById('bst-constitution')?.value)||0,
+      intelligence:   parseInt(document.getElementById('bst-intelligence')?.value)||0,
+      sagesse:        parseInt(document.getElementById('bst-sagesse')?.value)||0,
+      charisme:       parseInt(document.getElementById('bst-charisme')?.value)||0,
+      vitesse:        parseInt(document.getElementById('bst-vitesse')?.value)||0,
+      initiative:     parseInt(document.getElementById('bst-initiative')?.value)||0,
+      // Tableaux dynamiques
+      attaques: _readRows('attaques'),
+      traits:   _readRows('traits'),
+      butins:   _readRows('butins'),
+    };
+
+    const col = window._bstCurrentCol || 'bestiary';
+
+    if (id) {
+      await updateInCol(col, id, data);
+      const idx = _creatures.findIndex(c=>c.id===id);
+      if (idx>=0) _creatures[idx] = { ...data, id };
+    } else {
+      const newId = await addToCol(col, data);
+      if (typeof newId === 'string') _creatures.push({ ...data, id: newId });
+      else _creatures = await loadCollection(col);
+      _creatures.sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
+    }
+
+    _crop.base64 = null;
+    closeModal();
+    showNotif(id ? `${nom} mis à jour !` : `${nom} ajouté au bestiaire !`, 'success');
+    _render();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-
-  // Vérifier taille Firestore
-  if (imageUrl.length > 900_000) { showNotif('Image trop grande, recadrez plus petit.','error'); return; }
-
-  const data = {
-    nom,
-    type:          document.getElementById('bst-type')?.value?.trim()    || '',
-    environnement: document.getElementById('bst-env')?.value?.trim()     || '',
-    niveau:        parseInt(document.getElementById('bst-niveau')?.value)||0,
-    dangerositeXp: parseInt(document.getElementById('bst-xp')?.value)||0,
-    emoji:         document.getElementById('bst-emoji')?.value?.trim()   || '🐲',
-    imageUrl,
-    description:   document.getElementById('bst-desc')?.value?.trim()   || '',
-    // Stats
-    pvMax:          parseInt(document.getElementById('bst-pvMax')?.value)||0,
-    pmMax:          parseInt(document.getElementById('bst-pmMax')?.value)||0,
-    ca:             parseInt(document.getElementById('bst-ca')?.value)||0,
-    force:          parseInt(document.getElementById('bst-force')?.value)||0,
-    dexterite:      parseInt(document.getElementById('bst-dexterite')?.value)||0,
-    constitution:   parseInt(document.getElementById('bst-constitution')?.value)||0,
-    intelligence:   parseInt(document.getElementById('bst-intelligence')?.value)||0,
-    sagesse:        parseInt(document.getElementById('bst-sagesse')?.value)||0,
-    charisme:       parseInt(document.getElementById('bst-charisme')?.value)||0,
-    vitesse:        parseInt(document.getElementById('bst-vitesse')?.value)||0,
-    initiative:     parseInt(document.getElementById('bst-initiative')?.value)||0,
-    // Tableaux dynamiques
-    attaques: _readRows('attaques'),
-    traits:   _readRows('traits'),
-    butins:   _readRows('butins'),
-  };
-
-  const col = window._bstCurrentCol || 'bestiary';
-
-  if (id) {
-    await updateInCol(col, id, data);
-    const idx = _creatures.findIndex(c=>c.id===id);
-    if (idx>=0) _creatures[idx] = { ...data, id };
-  } else {
-    const newId = await addToCol(col, data);
-    if (typeof newId === 'string') _creatures.push({ ...data, id: newId });
-    else _creatures = await loadCollection(col);
-    _creatures.sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
-  }
-
-  _crop.base64 = null;
-  closeModal();
-  showNotif(id ? `${nom} mis à jour !` : `${nom} ajouté au bestiaire !`, 'success');
-  _render();
 }
 
 async function deleteBeast(id) {
-  const col = window._bstCurrentCol || 'bestiary';
-  const c = _creatures.find(x=>x.id===id);
-  if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`)) return;
-  await deleteFromCol(col, id);
-  _creatures = _creatures.filter(x=>x.id!==id);
-  if (_activeId === id) _activeId = null;
-  _render();
-  showNotif('Créature supprimée.','success');
+  try {
+    const col = window._bstCurrentCol || 'bestiary';
+    const c = _creatures.find(x=>x.id===id);
+    if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`)) return;
+    await deleteFromCol(col, id);
+    _creatures = _creatures.filter(x=>x.id!==id);
+    if (_activeId === id) _activeId = null;
+    _render();
+    showNotif('Créature supprimée.','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SUIVI JOUEUR
 // ══════════════════════════════════════════════════════════════════════════════
 async function _saveTracker() {
-  const uid = STATE.user?.uid; if (!uid) return;
-  await saveDoc('bestiary_tracker', uid, { data: _tracker });
+  try {
+    const uid = STATE.user?.uid; if (!uid) return;
+    await saveDoc('bestiary_tracker', uid, { data: _tracker });
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 window._bstOpen = (id) => { _activeId = _activeId === id ? null : id; _render(); };
