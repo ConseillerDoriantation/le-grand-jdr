@@ -755,58 +755,68 @@ function openNpcModal(id = null) {
 }
 
 async function saveNpc(id) {
-  // Résoudre l'image : nouveau crop > existante > effacée
-  let imageUrl = '';
-  if (window._pendingNpcImg !== null && window._pendingNpcImg !== undefined) {
-    imageUrl = window._pendingNpcImg;
-  } else if (id && !window._npcImgCleared) {
-    imageUrl = _npcs.find(n => n.id === id)?.imageUrl || '';
-  }
-  window._pendingNpcImg = null;
-  window._npcImgCleared = false;
+  try {
+    // Résoudre l'image : nouveau crop > existante > effacée
+    let imageUrl = '';
+    if (window._pendingNpcImg !== null && window._pendingNpcImg !== undefined) {
+      imageUrl = window._pendingNpcImg;
+    } else if (id && !window._npcImgCleared) {
+      imageUrl = _npcs.find(n => n.id === id)?.imageUrl || '';
+    }
+    window._pendingNpcImg = null;
+    window._npcImgCleared = false;
 
-  const data = {
-    nom:         document.getElementById('npc-nom')?.value?.trim()   || '?',
-    role:        document.getElementById('npc-role')?.value?.trim()   || '',
-    disposition: document.getElementById('npc-disp')?.value          || 'Neutre',
-    lieu:        document.getElementById('npc-lieu')?.value?.trim()   || '',
-    description: document.getElementById('npc-desc')?.value?.trim()  || '',
-    imageUrl,
-  };
+    const data = {
+      nom:         document.getElementById('npc-nom')?.value?.trim()   || '?',
+      role:        document.getElementById('npc-role')?.value?.trim()   || '',
+      disposition: document.getElementById('npc-disp')?.value          || 'Neutre',
+      lieu:        document.getElementById('npc-lieu')?.value?.trim()   || '',
+      description: document.getElementById('npc-desc')?.value?.trim()  || '',
+      imageUrl,
+    };
 
-  if (id) {
-    await updateInCol('npcs', id, data);
-    const idx = _npcs.findIndex(n => n.id === id);
-    if (idx >= 0) _npcs[idx] = { ..._npcs[idx], ...data };
-    showNotif('PNJ mis à jour !', 'success');
-  } else {
-    const newId = await addToCol('npcs', data);
-    _npcs.push({ id: newId || `npc_${Date.now()}`, ...data });
-    _activeId = newId || _activeId;
-    showNotif('PNJ créé !', 'success');
-  }
-  closeModal();
-  // Refresh panel si c'est le PNJ actif
-  if (_activeId === id || !id) {
-    const n = _npcs.find(x => x.id === (id || _activeId));
-    const panel = document.getElementById('npc-detail-panel');
-    if (panel && n) panel.innerHTML = _renderFiche(n);
-    _refreshList();
+    if (id) {
+      await updateInCol('npcs', id, data);
+      const idx = _npcs.findIndex(n => n.id === id);
+      if (idx >= 0) _npcs[idx] = { ..._npcs[idx], ...data };
+      showNotif('PNJ mis à jour !', 'success');
+    } else {
+      const newId = await addToCol('npcs', data);
+      _npcs.push({ id: newId || `npc_${Date.now()}`, ...data });
+      _activeId = newId || _activeId;
+      showNotif('PNJ créé !', 'success');
+    }
+    closeModal();
+    // Refresh panel si c'est le PNJ actif
+    if (_activeId === id || !id) {
+      const n = _npcs.find(x => x.id === (id || _activeId));
+      const panel = document.getElementById('npc-detail-panel');
+      if (panel && n) panel.innerHTML = _renderFiche(n);
+      _refreshList();
+    }
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
 }
 
 async function deleteNpc(id) {
-  if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?')) return;
-  await deleteFromCol('npcs', id);
-  // Supprimer aussi les affinités individuelles liées
-  const toDelete = _affiPerso.filter(a => a.npcId === id);
-  await Promise.all(toDelete.map(a => deleteFromCol('npc_affinites', a.id)));
-  _npcs       = _npcs.filter(n => n.id !== id);
-  _affiPerso  = _affiPerso.filter(a => a.npcId !== id);
-  if (_activeId === id) _activeId = _npcs[0]?.id || null;
-  showNotif('PNJ supprimé.', 'success');
-  const content = document.getElementById('main-content');
-  _renderPage(content);
+  try {
+    if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?')) return;
+    await deleteFromCol('npcs', id);
+    // Supprimer aussi les affinités individuelles liées
+    const toDelete = _affiPerso.filter(a => a.npcId === id);
+    await Promise.all(toDelete.map(a => deleteFromCol('npc_affinites', a.id)));
+    _npcs       = _npcs.filter(n => n.id !== id);
+    _affiPerso  = _affiPerso.filter(a => a.npcId !== id);
+    if (_activeId === id) _activeId = _npcs[0]?.id || null;
+    showNotif('PNJ supprimé.', 'success');
+    const content = document.getElementById('main-content');
+    _renderPage(content);
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ── Modal affinité groupe ─────────────────────────────────────────────────────
