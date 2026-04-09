@@ -519,11 +519,16 @@ window._toggleFogPreview = () => {
 };
 
 async function _fogCommit(pts) {
-  if (!mapState.fogZones) mapState.fogZones = [];
-  mapState.fogZones.push({ pts });
-  await saveDoc('world','map_fog',{ zones: mapState.fogZones });
-  renderFog();
-  showNotif('Zone révélée ajoutée ✓','success');
+  try {
+    if (!mapState.fogZones) mapState.fogZones = [];
+    mapState.fogZones.push({ pts });
+    await saveDoc('world','map_fog',{ zones: mapState.fogZones });
+    renderFog();
+    showNotif('Zone révélée ajoutée ✓','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 window.removeFogPoly = async (i) => {
