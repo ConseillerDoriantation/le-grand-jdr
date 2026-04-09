@@ -394,45 +394,50 @@ window._achConfirmCrop = () => {
 
 // ── SAUVEGARDER ───────────────────────────────────────────────────────────────
 async function saveAchievement(id = '') {
-  const titre = document.getElementById('ach-titre')?.value?.trim();
-  if (!titre) { showNotif('Le titre est requis.', 'error'); return; }
+  try {
+    const titre = document.getElementById('ach-titre')?.value?.trim();
+    if (!titre) { showNotif('Le titre est requis.', 'error'); return; }
 
-  let imageUrl = '';
-  if (_crop.base64) {
-    imageUrl = _crop.base64;
-  } else {
-    const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
-    imageUrl  = ex?.imageUrl || '';
-  }
-
-  const payload = {
-    titre,
-    categorie:   document.getElementById('ach-categorie')?.value || 'epique',
-    description: document.getElementById('ach-desc')?.value?.trim()  || '',
-    imageUrl,
-    emoji:       document.getElementById('ach-emoji')?.value?.trim() || '🏆',
-    date:        document.getElementById('ach-date')?.value?.trim()  || '',
-  };
-
-  let docId = id;
-  if (!id) {
-    docId = `ach_${Date.now()}`;
-    await saveDoc('achievements', docId, payload);
-    const order = await _loadOrder();
-    order.push(docId);
-    await _saveOrder(order);
-    if (window._achItems) window._achItems.push({ id: docId, ...payload });
-  } else {
-    await saveDoc('achievements', docId, payload);
-    if (window._achItems) {
-      window._achItems = window._achItems.map(a => a.id === id ? { id, ...payload } : a);
+    let imageUrl = '';
+    if (_crop.base64) {
+      imageUrl = _crop.base64;
+    } else {
+      const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
+      imageUrl  = ex?.imageUrl || '';
     }
-  }
 
-  _crop.base64 = null;
-  closeModal();
-  showNotif(id ? 'Haut-Fait mis à jour.' : `"${titre}" ajouté !`, 'success');
-  await PAGES.achievements();
+    const payload = {
+      titre,
+      categorie:   document.getElementById('ach-categorie')?.value || 'epique',
+      description: document.getElementById('ach-desc')?.value?.trim()  || '',
+      imageUrl,
+      emoji:       document.getElementById('ach-emoji')?.value?.trim() || '🏆',
+      date:        document.getElementById('ach-date')?.value?.trim()  || '',
+    };
+
+    let docId = id;
+    if (!id) {
+      docId = `ach_${Date.now()}`;
+      await saveDoc('achievements', docId, payload);
+      const order = await _loadOrder();
+      order.push(docId);
+      await _saveOrder(order);
+      if (window._achItems) window._achItems.push({ id: docId, ...payload });
+    } else {
+      await saveDoc('achievements', docId, payload);
+      if (window._achItems) {
+        window._achItems = window._achItems.map(a => a.id === id ? { id, ...payload } : a);
+      }
+    }
+
+    _crop.base64 = null;
+    closeModal();
+    showNotif(id ? 'Haut-Fait mis à jour.' : `"${titre}" ajouté !`, 'success');
+    await PAGES.achievements();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ── ÉDITER ────────────────────────────────────────────────────────────────────
@@ -443,13 +448,18 @@ async function editAchievement(id) {
 
 // ── SUPPRIMER ─────────────────────────────────────────────────────────────────
 async function deleteAchievement(id) {
-  if (!await confirmModal('Supprimer ce haut-fait définitivement ?')) return;
-  await deleteFromCol('achievements', id);
-  if (window._achItems) window._achItems = window._achItems.filter(a => a.id !== id);
-  const order = (await _loadOrder()).filter(oid => oid !== id);
-  await _saveOrder(order);
-  showNotif('Haut-Fait supprimé.', 'success');
-  await PAGES.achievements();
+  try {
+    if (!await confirmModal('Supprimer ce haut-fait définitivement ?')) return;
+    await deleteFromCol('achievements', id);
+    if (window._achItems) window._achItems = window._achItems.filter(a => a.id !== id);
+    const order = (await _loadOrder()).filter(oid => oid !== id);
+    await _saveOrder(order);
+    showNotif('Haut-Fait supprimé.', 'success');
+    await PAGES.achievements();
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 
 // ── ORDRE ─────────────────────────────────────────────────────────────────────
@@ -458,7 +468,12 @@ async function _loadOrder() {
   return Array.isArray(doc?.order) ? doc.order : [];
 }
 async function _saveOrder(order) {
-  await saveDoc('achievements_meta', 'order', { order });
+  try {
+    await saveDoc('achievements_meta', 'order', { order });
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
 }
 function _applyOrder(items, order) {
   if (!order.length) return items;
