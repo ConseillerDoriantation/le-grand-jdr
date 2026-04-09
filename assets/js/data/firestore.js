@@ -11,13 +11,36 @@ import {
   query, where, orderBy,
 } from '../config/firebase.js';
 
+// ── Gestionnaire d'erreur centralisé ───────────
+// Affiche un toast si showNotif est disponible, sinon console.error uniquement.
+// code : code Firebase (ex: 'permission-denied', 'unavailable')
+// ctx  : contexte lisible (ex: 'loadCollection(shop)')
+function _handleFirestoreError(e, ctx) {
+  console.error(`[firestore] ${ctx}`, e);
+
+  const notify = window.showNotif;
+  if (!notify) return;
+
+  const code = e?.code || '';
+
+  if (code === 'permission-denied') {
+    notify(`Accès refusé — ${ctx}`, 'error');
+  } else if (code === 'unavailable' || code === 'deadline-exceeded') {
+    notify('Connexion perdue. Vérifie ta connexion internet.', 'error');
+  } else if (code === 'not-found') {
+    // Silencieux — document absent est souvent attendu
+  } else {
+    notify(`Erreur base de données (${ctx})`, 'error');
+  }
+}
+
 // ── Collections ────────────────────────────────
 export async function loadCollection(col) {
   try {
     const snap = await getDocs(collection(db, col));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
-    console.error(`[firestore] loadCollection(${col})`, e);
+    _handleFirestoreError(e, `loadCollection(${col})`);
     return [];
   }
 }
@@ -36,7 +59,7 @@ export async function loadCollectionWhere(col, field, op, value) {
     const snap = await getDocs(query(collection(db, col), where(field, op, value)));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
-    console.error('[firestore] loadCollectionWhere', e);
+    _handleFirestoreError(e, `loadCollectionWhere(${col})`);
     return [];
   }
 }
@@ -47,29 +70,49 @@ export async function getDocData(col, id) {
     const snap = await getDoc(doc(db, col, id));
     return snap.exists() ? snap.data() : null;
   } catch (e) {
-    console.error(`[firestore] getDocData(${col}/${id})`, e);
+    _handleFirestoreError(e, `getDocData(${col}/${id})`);
     return null;
   }
 }
 
 export async function saveDoc(col, id, data) {
-  await setDoc(doc(db, col, id), data, { merge: true });
+  try {
+    await setDoc(doc(db, col, id), data, { merge: true });
+  } catch (e) {
+    _handleFirestoreError(e, `saveDoc(${col}/${id})`);
+    throw e; // Remonter pour que l'appelant sache que ça a échoué
+  }
 }
 
 export async function addToCol(col, data) {
-  const ref = await addDoc(collection(db, col), {
-    ...data,
-    createdAt: new Date().toISOString(),
-  });
-  return ref.id;
+  try {
+    const ref = await addDoc(collection(db, col), {
+      ...data,
+      createdAt: new Date().toISOString(),
+    });
+    return ref.id;
+  } catch (e) {
+    _handleFirestoreError(e, `addToCol(${col})`);
+    throw e;
+  }
 }
 
 export async function updateInCol(col, id, data) {
-  await updateDoc(doc(db, col, id), data);
+  try {
+    await updateDoc(doc(db, col, id), data);
+  } catch (e) {
+    _handleFirestoreError(e, `updateInCol(${col}/${id})`);
+    throw e;
+  }
 }
 
 export async function deleteFromCol(col, id) {
-  await deleteDoc(doc(db, col, id));
+  try {
+    await deleteDoc(doc(db, col, id));
+  } catch (e) {
+    _handleFirestoreError(e, `deleteFromCol(${col}/${id})`);
+    throw e;
+  }
 }
 
 // ── Spécifique personnages ─────────────────────
@@ -81,7 +124,7 @@ export async function loadChars(uid = null) {
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
-    console.error('[firestore] loadChars', e);
+    _handleFirestoreError(e, 'loadChars');
     return [];
   }
 }
