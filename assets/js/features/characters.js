@@ -3100,9 +3100,16 @@ async function deleteInvItem(idx) {
 
 async function deleteChar(id) {
   try {
-    if (!await confirmModal('Supprimer ce personnage ?')) return;
-    await deleteFromCol('characters',id);
-    showNotif('Personnage supprimé.','success');
+    if (!await confirmModal('Supprimer ce personnage ? La présentation associée (page Personnages) sera également supprimée.')) return;
+    await deleteFromCol('characters', id);
+    // Suppression en cascade : présentation players liée (charId === id)
+    try {
+      const linked = await loadCollectionWhere('players', 'charId', '==', id);
+      await Promise.all(linked.map(p => deleteFromCol('players', p.id)));
+    } catch (e2) {
+      console.warn('[deleteChar] cascade players échouée :', e2);
+    }
+    showNotif('Personnage supprimé.', 'success');
     PAGES.characters();
   } catch (e) {
     console.error('[save]', e);

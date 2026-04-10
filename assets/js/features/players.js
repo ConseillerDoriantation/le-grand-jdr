@@ -173,11 +173,6 @@ function _renderSommaire(items) {
     </button>`;
   });
 
-  // Répartir en 3 colonnes
-  const col1 = cards.filter((_,i)=>i%3===0);
-  const col2 = cards.filter((_,i)=>i%3===1);
-  const col3 = cards.filter((_,i)=>i%3===2);
-
   return `
   <div style="text-align:center;margin-bottom:1.5rem">
     <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;font-weight:900;
@@ -187,10 +182,8 @@ function _renderSommaire(items) {
     <div style="font-size:.8rem;color:var(--text-dim)">${items.length} personnages</div>
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-bottom:2rem">
-    <div style="display:flex;flex-direction:column;gap:.4rem">${col1.join('')}</div>
-    <div style="display:flex;flex-direction:column;gap:.4rem">${col2.join('')}</div>
-    <div style="display:flex;flex-direction:column;gap:.4rem">${col3.join('')}</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:.5rem;margin-bottom:2rem">
+    ${cards.join('')}
   </div>`;
 }
 
@@ -241,36 +234,55 @@ function _renderFiche(item, items) {
   return `
   <!-- Breadcrumb + navigation -->
   <div style="display:flex;align-items:center;justify-content:space-between;
-    margin-bottom:1.2rem;flex-wrap:wrap;gap:.5rem">
+    margin-bottom:1.2rem;gap:.5rem">
     <button onclick="window._ppBack()"
       style="display:flex;align-items:center;gap:.4rem;background:none;border:none;
-      cursor:pointer;color:var(--text-dim);font-size:.8rem;transition:color .15s"
+      cursor:pointer;color:var(--text-dim);font-size:.8rem;transition:color .15s;flex-shrink:0"
       onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-dim)'">
       ← Sommaire
     </button>
-    <div style="display:flex;gap:.4rem">
+    <div style="display:flex;gap:.4rem;overflow:hidden">
       ${prev?`<button onclick="window._ppOpenFiche('${_esc(prev.id)}')"
         style="font-size:.72rem;padding:4px 10px;border-radius:8px;cursor:pointer;
         border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);
-        transition:all .12s"
+        transition:all .12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px"
         onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
         onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">‹ ${_esc(prev.nom)}</button>`:''}
       ${next?`<button onclick="window._ppOpenFiche('${_esc(next.id)}')"
         style="font-size:.72rem;padding:4px 10px;border-radius:8px;cursor:pointer;
         border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);
-        transition:all .12s"
+        transition:all .12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px"
         onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
-        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">›  ${_esc(next.nom)}</button>`:''}
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">› ${_esc(next.nom)}</button>`:''}
     </div>
   </div>
 
   <!-- Carte principale -->
+  <style>
+    .pp-fiche-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+    @media (min-width: 640px) {
+      .pp-fiche-grid { grid-template-columns: 280px 1fr; }
+    }
+    @media (min-width: 800px) {
+      .pp-fiche-grid { grid-template-columns: 320px 1fr; }
+    }
+    .pp-fiche-img-col {
+      position: relative;
+      min-height: 220px;
+    }
+    @media (min-width: 640px) {
+      .pp-fiche-img-col { min-height: 0; }
+    }
+  </style>
   <div style="background:var(--bg-card);border:1px solid var(--border);
-    border-radius:var(--radius-lg);overflow:hidden;
-    display:grid;grid-template-columns:320px 1fr;align-items:stretch">
+    border-radius:var(--radius-lg);overflow:hidden" class="pp-fiche-grid">
 
     <!-- Colonne gauche : illustration entière -->
-    <div style="position:relative;background:linear-gradient(180deg,${col}18,${col}08 40%,#0b1118 100%);
+    <div class="pp-fiche-img-col" style="position:relative;background:linear-gradient(180deg,${col}18,${col}08 40%,#0b1118 100%);
       overflow:hidden;display:flex;align-items:flex-end">
 
       ${item.imageUrl
