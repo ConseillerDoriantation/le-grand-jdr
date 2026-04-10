@@ -4097,82 +4097,124 @@ async function clearEquipSlot(slot) {
 // Inventaire
 async function addInvItem() {
   const c = STATE.activeChar; if (!c) return;
+
+  // Charge items + catégories boutique (avec cache)
+  const { loadCollection: _lc } = await import('../data/firestore.js');
   let shopItems = window._shopItemsCache;
-  if (!shopItems) {
-    try {
-      const { loadCollection } = await import('../data/firestore.js');
-      shopItems = await loadCollection('shop');
-      window._shopItemsCache = shopItems;
-    } catch(e) { shopItems = []; }
-  }
-  const available = (shopItems || []).filter(i => i.nom);
-  const _itemCat = (item) => {
-    if (item.sousType) return item.sousType;
-    if (item.slotBijou) return item.slotBijou;
-    if (item.slotArmure) return 'Armure';
-    if (item.type) return item.type;
-    return 'Autres';
+  let shopCats  = window._shopCatsCache;
+  try {
+    const toLoad = [];
+    if (!shopItems) toLoad.push(_lc('shop').then(r => { shopItems = r; window._shopItemsCache = r; }));
+    if (!shopCats)  toLoad.push(_lc('shopCategories').then(r => { shopCats = r; window._shopCatsCache = r; }));
+    if (toLoad.length) await Promise.all(toLoad);
+  } catch(e) { /* silent */ }
+  shopItems = (shopItems || []).filter(i => i.nom);
+  shopCats  = [...(shopCats || [])].sort((a,b) => (a.ordre||0)-(b.ordre||0));
+
+  window._lootItems  = shopItems;
+  window._lootSelId  = null;
+  window._lootCurCat = null; // null = tout, '__recent__' = récents, sinon catId
+
+  const RC = ['','#9ca3af','#4f8cff','#b47fff','#e8b84b'];
+
+  // ── Récents (localStorage) ────────────────────
+  const getRecents = () => { try { return JSON.parse(localStorage.getItem('jdr_loot_recent')||'[]'); } catch { return []; } };
+  window._lootSaveRecent = (id) => {
+    const r = getRecents().filter(x => x !== id);
+    r.unshift(id);
+    localStorage.setItem('jdr_loot_recent', JSON.stringify(r.slice(0, 8)));
   };
-  const catOrder = [];
-  available.forEach(i => { const cat = _itemCat(i); if (!catOrder.includes(cat)) catOrder.push(cat); });
-  catOrder.sort((a, b) => a.localeCompare(b, 'fr'));
-  window._addInvShopItems = available;
-  window._addInvSelId = null;
-  const RARETE     = ['','★','★★','★★★','★★★★'];
-  const RARETE_COL = ['','#9ca3af','#4f8cff','#b47fff','#e8b84b'];
-  const renderGrid = (filter = '', cat = '') => {
-    const q = filter.toLowerCase().trim();
-    const filtered = available.filter(item => {
-      if (cat && _itemCat(item) !== cat) return false;
-      if (q && !item.nom.toLowerCase().includes(q)) return false;
-      return true;
-    });
-    if (!filtered.length) return `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun objet trouvé.</div>`;
-    return filtered.map(item => {
-      const r  = parseInt(item.rarete) || 0;
-      const rc = RARETE_COL[r] || 'var(--border)';
-      const rs = RARETE[r] || '';
-      const desc = item.description || item.effet || '';
-      return `<button onclick="window._addInvSelectItem('${item.id}')" id="loot-card-${item.id}"
-        style="display:flex;flex-direction:column;gap:2px;text-align:left;
-          padding:.5rem .65rem;border-radius:8px;border:1px solid var(--border);
-          background:var(--bg-elevated);cursor:pointer;transition:all .12s;width:100%"
-        onmouseover="if(window._addInvSelId!=='${item.id}'){this.style.background='${rc}12';this.style.borderColor='${rc}'}"
-        onmouseout="if(window._addInvSelId!=='${item.id}'){this.style.background='var(--bg-elevated)';this.style.borderColor='var(--border)'}">
-        <div style="display:flex;align-items:center;gap:.4rem">
-          ${rs ? `<span style="color:${rc};font-size:.72rem;flex-shrink:0">${rs}</span>` : ''}
-          <span style="font-size:.82rem;font-weight:600;color:var(--text);line-height:1.2">${item.nom}</span>
+
+  // ── Rendu liste d'items ───────────────────────
+  // Règle : search non vide → global toutes catégories (ignore filtre cat)
+  //         search vide + cat → items de la cat
+  //         search vide + pas de cat → récents si dispo, sinon tout
+  const renderItems = (catId, search) => {
+    const q = (search || '').toLowerCase().trim();
+    let items;
+    if (q) {
+      // Recherche globale — ignore la catégorie active
+      items = shopItems.filter(i =>
+        i.nom.toLowerCase().includes(q) ||
+        (i.description || i.effet || '').toLowerCase().includes(q)
+      );
+    } else if (catId === '__recent__') {
+      items = getRecents().map(id => shopItems.find(i => i.id === id)).filter(Boolean);
+    } else if (catId) {
+      items = shopItems.filter(i => i.categorieId === catId);
+    } else {
+      // Pas de recherche, pas de catégorie → récents ou invite
+      const recentItems = getRecents().map(id => shopItems.find(i => i.id === id)).filter(Boolean);
+      if (recentItems.length) return _lootRenderSection('⏱️ Récents', recentItems, RC);
+      return `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic;font-size:.82rem">
+        Sélectionne une catégorie ou tape un nom pour rechercher
+      </div>`;
+    }
+    if (!items.length) return `<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun résultat.</div>`;
+    // En recherche globale, afficher le nom de catégorie en badge
+    return items.map(item => _lootItemCard(item, RC, q ? shopCats.find(c => c.id === item.categorieId)?.nom : null)).join('');
+  };
+
+  const _lootItemCard = (item, rc_arr, catLabel) => {
+    const r  = parseInt(item.rarete) || 0;
+    const rc = rc_arr[r] || 'var(--border)';
+    const sel = window._lootSelId === item.id;
+    const desc = item.description || item.effet || '';
+    return `<button onclick="window._lootSelect('${item.id}')" id="loot-card-${item.id}"
+      style="display:flex;flex-direction:column;gap:2px;text-align:left;padding:.5rem .65rem;
+        border-radius:8px;border:1px solid ${sel ? rc : 'var(--border)'};
+        background:${sel ? `${rc}20` : 'var(--bg-elevated)'};cursor:pointer;transition:all .12s;width:100%">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem">
+        <span style="font-size:.82rem;font-weight:600;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(item.nom)}</span>
+        <div style="display:flex;align-items:center;gap:.3rem;flex-shrink:0">
+          ${catLabel ? `<span style="font-size:.62rem;color:var(--text-dim);background:var(--bg-card);border:1px solid var(--border);border-radius:4px;padding:1px 5px;white-space:nowrap">${_esc(catLabel)}</span>` : ''}
+          ${r ? `<span style="color:${rc};font-size:.7rem">${'★'.repeat(r)}</span>` : ''}
         </div>
-        ${desc ? `<span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${desc.slice(0,70)}${desc.length>70?'…':''}</span>` : ''}
-      </button>`;
-    }).join('');
+      </div>
+      ${desc ? `<span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${desc.slice(0,70)}${desc.length>70?'…':''}</span>` : ''}
+    </button>`;
   };
-  const catPills = ['', ...catOrder].map(cat => `
-    <button id="loot-pill-${(cat||'all').replace(/[^a-zA-Z0-9]/g,'_')}" onclick="window._addInvFilterCat('${cat}')"
-      style="font-size:.7rem;padding:3px 10px;border-radius:999px;cursor:pointer;white-space:nowrap;flex-shrink:0;
-        border:1px solid ${cat === '' ? 'var(--gold)' : 'var(--border)'};
-        background:${cat === '' ? 'rgba(232,184,75,.12)' : 'var(--bg-elevated)'};
-        color:${cat === '' ? 'var(--gold)' : 'var(--text-muted)'};transition:all .12s">
-      ${cat || 'Tout'}
-    </button>`).join('');
+
+  const _lootRenderSection = (title, items, rc_arr) =>
+    `<div style="font-size:.68rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;padding:.2rem .1rem .35rem">${title}</div>` +
+    items.map(item => _lootItemCard(item, rc_arr, null)).join('');
+
+  window._lootRenderGrid = (catId, search) => {
+    const grid = document.getElementById('loot-grid');
+    if (grid) grid.innerHTML = renderItems(catId, search || '');
+  };
+
+  // ── Pills de catégories ───────────────────────
+  const hasRecents = getRecents().some(id => shopItems.find(i => i.id === id));
+  const pillStyle = (active) =>
+    `font-size:.72rem;padding:3px 11px;border-radius:999px;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all .12s;
+     border:1px solid ${active ? 'var(--gold)' : 'var(--border)'};
+     background:${active ? 'rgba(232,184,75,.14)' : 'var(--bg-elevated)'};
+     color:${active ? 'var(--gold)' : 'var(--text-muted)'}`;
+
+  const recentPill = hasRecents
+    ? `<button id="loot-pill-__recent__" onclick="window._lootSetCat('__recent__')" style="${pillStyle(false)}">⏱️ Récents</button>`
+    : '';
+  const catPills = shopCats
+    .filter(cat => shopItems.some(i => i.categorieId === cat.id))
+    .map(cat => `<button id="loot-pill-${cat.id}" onclick="window._lootSetCat('${cat.id}')" style="${pillStyle(false)}">${_esc(cat.nom)}</button>`)
+    .join('');
+
   openModal('🎁 Butin — Ajouter un objet', `
-    <input class="input-field" id="loot-search" placeholder="🔍 Rechercher un objet…"
-      oninput="window._addInvFilter()" style="margin-bottom:.55rem">
-    <div style="display:flex;gap:.3rem;flex-wrap:nowrap;overflow-x:auto;padding-bottom:.4rem;
-      margin-bottom:.55rem;scrollbar-width:none;-webkit-overflow-scrolling:touch">
-      ${catPills}
+    <input class="input-field" id="loot-search" placeholder="🔍 Rechercher dans tous les objets…"
+      oninput="window._lootFilter()" style="margin-bottom:.45rem">
+    <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:.45rem">
+      ${recentPill}${catPills}
     </div>
     <div id="loot-grid" style="display:flex;flex-direction:column;gap:.28rem;
-      max-height:38vh;overflow-y:auto;padding-right:2px;margin-bottom:.6rem">
-      ${renderGrid()}
+      max-height:38vh;overflow-y:auto;padding-right:2px;margin-bottom:.5rem">
+      ${renderItems(null, '')}
     </div>
-    <div id="loot-selected" style="display:none;background:var(--bg-elevated);
-      border:1px solid var(--gold);border-radius:10px;padding:.6rem .85rem;margin-bottom:.6rem">
+    <div id="loot-qty-panel" style="display:none;background:var(--bg-elevated);
+      border:1px solid var(--gold);border-radius:10px;padding:.55rem .85rem;margin-bottom:.5rem">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem">
-        <div style="min-width:0">
-          <div id="loot-sel-nom" style="font-weight:700;font-size:.88rem;color:var(--text)"></div>
-          <div id="loot-sel-desc" style="font-size:.7rem;color:var(--text-dim);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
-        </div>
+        <div id="loot-sel-nom" style="font-weight:700;font-size:.86rem;color:var(--text);
+          min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
         <div style="display:flex;align-items:center;gap:.3rem;flex-shrink:0">
           <button onclick="const i=document.getElementById('loot-qte');i.value=Math.max(1,parseInt(i.value||1)-1)"
             style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">−</button>
@@ -4183,72 +4225,96 @@ async function addInvItem() {
         </div>
       </div>
     </div>
-    <button class="btn btn-gold" style="width:100%" onclick="saveInvItemFromShop()">✓ Ajouter au butin</button>
+    <div style="display:flex;gap:.4rem">
+      <button class="btn btn-gold" style="flex:1" onclick="saveInvItemFromShop()">✓ Ajouter</button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+    </div>
   `);
-  let _currentCat = '';
-  window._addInvFilter = () => {
+  setTimeout(() => document.getElementById('loot-search')?.focus(), 60);
+
+  window._lootSetCat = (catId) => {
+    // Toggle : re-cliquer la même pill la désactive
+    const next = window._lootCurCat === catId ? null : catId;
+    window._lootCurCat = next;
+    window._lootSelId  = null;
+    // Mettre à jour le style de toutes les pills
+    if (hasRecents) _lootPillStyle('__recent__', next === '__recent__');
+    shopCats.forEach(cat => _lootPillStyle(cat.id, next === cat.id));
+    // Vider la recherche si on sélectionne une catégorie
+    const searchEl = document.getElementById('loot-search');
+    if (searchEl) searchEl.value = '';
+    const panel = document.getElementById('loot-qty-panel');
+    if (panel) panel.style.display = 'none';
+    window._lootRenderGrid(next, '');
+  };
+
+  window._lootFilter = () => {
     const q = document.getElementById('loot-search')?.value || '';
-    const grid = document.getElementById('loot-grid');
-    if (grid) grid.innerHTML = renderGrid(q, _currentCat);
-    if (window._addInvSelId) {
-      const card = document.getElementById(`loot-card-${window._addInvSelId}`);
-      const selItem = available.find(i => i.id === window._addInvSelId);
-      if (card && selItem) { const rc = RARETE_COL[parseInt(selItem.rarete)||0]||'var(--gold)'; card.style.background=`${rc}20`;card.style.borderColor=rc; }
+    // La recherche s'applique globalement, on désactive visuellement les pills
+    if (q) {
+      if (hasRecents) _lootPillStyle('__recent__', false);
+      shopCats.forEach(cat => _lootPillStyle(cat.id, false));
+    } else {
+      // Restaurer la pill active
+      if (hasRecents) _lootPillStyle('__recent__', window._lootCurCat === '__recent__');
+      shopCats.forEach(cat => _lootPillStyle(cat.id, window._lootCurCat === cat.id));
     }
+    window._lootRenderGrid(q ? null : window._lootCurCat, q);
   };
-  window._addInvFilterCat = (cat) => {
-    _currentCat = cat;
-    catOrder.concat(['']).forEach(c => {
-      const key = (c||'all').replace(/[^a-zA-Z0-9]/g,'_');
-      const pill = document.getElementById(`loot-pill-${key}`);
-      if (!pill) return;
-      const active = c === cat;
-      pill.style.borderColor = active ? 'var(--gold)' : 'var(--border)';
-      pill.style.background  = active ? 'rgba(232,184,75,.12)' : 'var(--bg-elevated)';
-      pill.style.color       = active ? 'var(--gold)' : 'var(--text-muted)';
-    });
-    window._addInvFilter();
-  };
-  window._addInvSelectItem = (id) => {
-    const selItem = available.find(i => i.id === id);
-    if (!selItem) return;
-    if (window._addInvSelId && window._addInvSelId !== id) {
-      const old = document.getElementById(`loot-card-${window._addInvSelId}`);
-      if (old) { old.style.background='var(--bg-elevated)';old.style.borderColor='var(--border)'; }
+
+  window._lootSelect = (id) => {
+    if (window._lootSelId && window._lootSelId !== id) {
+      const old = document.getElementById(`loot-card-${window._lootSelId}`);
+      if (old) { old.style.background = 'var(--bg-elevated)'; old.style.borderColor = 'var(--border)'; }
     }
-    window._addInvSelId = id;
-    const r = parseInt(selItem.rarete)||0;
-    const rc = RARETE_COL[r]||'var(--gold)';
+    window._lootSelId = id;
+    const item = shopItems.find(i => i.id === id);
+    if (!item) return;
+    const r  = parseInt(item.rarete) || 0;
+    const rc = RC[r] || 'var(--gold)';
     const card = document.getElementById(`loot-card-${id}`);
-    if (card) { card.style.background=`${rc}20`;card.style.borderColor=rc; }
-    const panel = document.getElementById('loot-selected');
-    if (panel) panel.style.display='block';
+    if (card) { card.style.background = `${rc}20`; card.style.borderColor = rc; }
+    const panel = document.getElementById('loot-qty-panel');
+    if (panel) panel.style.display = 'block';
     const nomEl = document.getElementById('loot-sel-nom');
-    if (nomEl) nomEl.innerHTML=`${selItem.nom}${selItem.rarete?` <span style="color:${rc};font-size:.72rem">${RARETE[r]}</span>`:''}`;
-    const descEl = document.getElementById('loot-sel-desc');
-    if (descEl) descEl.textContent=selItem.description||selItem.effet||'';
+    if (nomEl) nomEl.textContent = item.nom;
+    const qteEl = document.getElementById('loot-qte');
+    if (qteEl) { qteEl.value = '1'; qteEl.focus(); }
   };
+}
+
+function _lootPillStyle(id, active) {
+  const el = document.getElementById(`loot-pill-${id}`);
+  if (!el) return;
+  el.style.borderColor = active ? 'var(--gold)' : 'var(--border)';
+  el.style.background  = active ? 'rgba(232,184,75,.14)' : 'var(--bg-elevated)';
+  el.style.color       = active ? 'var(--gold)' : 'var(--text-muted)';
 }
 
 async function saveInvItemFromShop() {
   try {
     const c = STATE.activeChar; if (!c) return;
-    const selId = window._addInvSelId;
-    if (!selId) { showNotif('Sélectionne un objet.','error'); return; }
-    const item = (window._addInvShopItems||[]).find(i=>i.id===selId);
-    if (!item) { showNotif('Objet introuvable.','error'); return; }
-    const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value)||1);
+    const selId = window._lootSelId;
+    if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
+    const item = (window._lootItems || []).find(i => i.id === selId);
+    if (!item) { showNotif('Objet introuvable.', 'error'); return; }
+    const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     inv.push({ ...item, qte: String(qte), quantite: qte, source: 'boutique', itemId: item.id });
     c.inventaire = inv;
     if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
-    const stChar = (STATE.characters||[]).find(x=>x.id===c.id);
+    const stChar = (STATE.characters || []).find(x => x.id === c.id);
     if (stChar) stChar.inventaire = inv;
     await updateInCol('characters', c.id, { inventaire: inv });
-    window._addInvSelId = null;
-    closeModal();
-    showNotif(`${item.nom} ×${qte} ajouté au butin !`,'success');
-    renderCharSheet(c,'inventaire');
+    // Enregistrer dans les récents
+    if (window._lootSaveRecent) window._lootSaveRecent(item.id);
+    // Rester dans la catégorie — désélectionner et réinitialiser la quantité
+    window._lootSelId = null;
+    showNotif(`${item.nom} ×${qte} ajouté !`, 'success');
+    renderCharSheet(c, 'inventaire');
+    const panel = document.getElementById('loot-qty-panel');
+    if (panel) panel.style.display = 'none';
+    window._lootRenderGrid?.(window._lootCurCat, document.getElementById('loot-search')?.value || '');
   } catch (e) {
     console.error('[save]', e);
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
