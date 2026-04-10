@@ -44,8 +44,8 @@ const _getStat = (c, k) => Math.min(22, (c?.stats?.[k] || 8) + (c?.statsBonus?.[
 // _gold → importé depuis shared/char-stats.js (calcOr as _gold)
 
 function _buildRecord(char=null, pres=null) {
-  const level  = pres?.niveau   || char?.niveau   || 1;
-  const nom    = pres?.nom?.trim() || char?.nom    || 'Personnage';
+  const level = char?.niveau || 1;
+  const nom = char?.nom || "Personnage";
   const classe = pres?.classe?.trim() || '';
   const race   = pres?.race?.trim()   || '';
   const joueur = pres?.joueur?.trim() || char?.ownerPseudo || '';
@@ -464,10 +464,6 @@ async function openPlayerPresentModal(player=null) {
 
     <div class="grid-2" style="gap:.75rem">
       <div class="form-group" style="margin:0">
-        <label>Nom</label>
-        <input class="input-field" id="pp-nom" value="${_esc(player?.nom||'')}">
-      </div>
-      <div class="form-group" style="margin:0">
         <label>Chapitre <span style="color:var(--text-dim);font-weight:400">(ex: Chapitre I : Khaarys)</span></label>
         <input class="input-field" id="pp-chap" value="${_esc(player?.chapitre||'')}" placeholder="Chapitre I : Nom">
       </div>
@@ -481,17 +477,6 @@ async function openPlayerPresentModal(player=null) {
       <div class="form-group" style="margin:0">
         <label>Race</label>
         <input class="input-field" id="pp-race" value="${_esc(player?.race||'')}">
-      </div>
-    </div>
-
-    <div class="grid-2" style="gap:.75rem;margin-top:.75rem">
-      <div class="form-group" style="margin:0">
-        <label>Niveau</label>
-        <input type="number" class="input-field" id="pp-niveau" value="${player?.niveau||1}">
-      </div>
-      <div class="form-group" style="margin:0">
-        <label>Joueur</label>
-        <input class="input-field" id="pp-joueur" value="${_esc(player?.joueur||'')}">
       </div>
     </div>
 
@@ -697,11 +682,9 @@ async function savePlayerPresent(id='') {
 
     const data = {
       charId:        document.getElementById('pp-char-id')?.value        || '',
-      nom:           document.getElementById('pp-nom')?.value?.trim()    || 'Personnage',
       chapitre:      document.getElementById('pp-chap')?.value?.trim()   || '',
       classe:        document.getElementById('pp-classe')?.value?.trim() || '',
       race:          document.getElementById('pp-race')?.value?.trim()   || '',
-      niveau:        parseInt(document.getElementById('pp-niveau')?.value,10)||1,
       joueur:        document.getElementById('pp-joueur')?.value?.trim() || '',
       bio:           document.getElementById('pp-bio')?.value            || '',
       archive:       document.getElementById('pp-archive')?.value        || '',
@@ -737,8 +720,6 @@ function prefillPlayerPresentFromLinkedChar(force=false) {
   const char=(window.__ppChars||[]).find(c=>c.id===charId);
   if(!char) return;
   const set=(id,v)=>{const f=document.getElementById(id);if(!f)return;if(!force&&String(f.value||'').trim())return;f.value=v;};
-  set('pp-nom',char.nom||'');
-  set('pp-niveau',char.niveau||1);
   set('pp-joueur',char.ownerPseudo||'');
 }
 
