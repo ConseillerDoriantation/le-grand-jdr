@@ -369,12 +369,12 @@ function _renderFiche(item, items) {
 
       <!-- Actions -->
       ${item.charId ? `
-      <div style="margin-top:auto;padding-top:.75rem;border-top:1px solid var(--border)">
-        <button onclick="openCharacterSheetFromShowcase('${_esc(item.charId)}')"
-          class="btn btn-gold btn-sm" style="font-size:.75rem">
-          📜 Ouvrir la fiche complète
-        </button>
-      </div>` : ''}
+       <div style="margin-top:auto;padding-top:.75rem;border-top:1px solid var(--border)">
+        <! -- <button onclick="openCharacterSheetFromShowcase('${_esc(item.charId)}')" 
+         class="btn btn-gold btn-sm" style="font-size:.75rem">
+         <! -- 📜 Ouvrir la fiche complète -->
+        <! -- </button>
+      </div> ` : ''}
     </div>
 
   </div>`;
