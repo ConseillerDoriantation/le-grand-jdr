@@ -2,6 +2,7 @@ import { STATE } from '../core/state.js';
 import { loadCollectionWhere, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
+import { loadWeaponFormats, saveWeaponFormats } from '../shared/weapon-formats.js';
 import PAGES from './pages.js';
 import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { _esc, _nl2br, _norm, modStr } from '../shared/html.js';
@@ -17,15 +18,16 @@ import {
 // Firestore : world/combat_styles → { styles:[{id,label,condPrincipale,condSecondaire,description,couleur}] }
 // ══════════════════════════════════════════════
 let _combatStyles = null; // cache en mémoire
+let _weaponFormats = null; // cache en mémoire (partagé avec weapon-formats.js)
 
 async function loadCombatStyles() {
   if (_combatStyles) return _combatStyles;
-  try {
-    const doc = await getDocData('world', 'combat_styles');
-    _combatStyles = doc?.styles || _defaultCombatStyles();
-  } catch {
-    _combatStyles = _defaultCombatStyles();
-  }
+  const [stylesDoc, formats] = await Promise.all([
+    getDocData('world', 'combat_styles').catch(() => null),
+    loadWeaponFormats(),
+  ]);
+  _combatStyles = stylesDoc?.styles || _defaultCombatStyles();
+  _weaponFormats = formats;
   return _combatStyles;
 }
 
@@ -35,8 +37,8 @@ function _defaultCombatStyles() {
       id: 'baguette',
       label: '🪄 Baguette magique',
       condPrincipale: ['Arme 1M CaC Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.',''],
-      condSecondaire: ['Arme Secondaire (Bouclier, Torche...)'],
-      condSousTypeS:  ['Baguette','baguette'],       // sousType de la main secondaire
+      condSecondaire: ['Baguette'],
+      condSousTypeS:  [],
       description: 'Baguette en main secondaire : dégâts de l\'arme passent de 1d6 à 1d10. Accès à la magie.',
       couleur: '#b47fff',
     },
@@ -44,8 +46,8 @@ function _defaultCombatStyles() {
       id: 'bouclier',
       label: '🛡️ Bouclier',
       condPrincipale: ['Arme 1M CaC Phy.','Arme 2M CaC Phy.',''],
-      condSecondaire: ['Arme Secondaire (Bouclier, Torche...)'],
-      condSousTypeS:  ['Bouclier','bouclier'],
+      condSecondaire: ['Bouclier'],
+      condSousTypeS:  [],
       description: '+2 CA passive. Pas d\'attaque d\'opportunité avec la main secondaire.',
       couleur: '#22c38e',
     },
@@ -62,8 +64,8 @@ function _defaultCombatStyles() {
       id: 'main_libre',
       label: '🤜 Main libre',
       condPrincipale: ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 1M CaC Phy.'],
-      condSecondaire: ['Arme Secondaire (Bouclier, Torche...)',''],
-      condSousTypeS:  [],                            // n'importe quel secondaire non bouclier/baguette
+      condSecondaire: ['Main Libre',''],
+      condSousTypeS:  [],
       description: 'Main secondaire libre (torche, objet...). Attaque d\'opportunité possible. Peut parer (+1 CA si en garde).',
       couleur: '#4f8cff',
     },
@@ -137,10 +139,6 @@ async function openCombatStylesAdmin() {
 }
 
 function _renderCombatStylesModal(styles) {
-  const FORMATS = [
-    '', 'Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
-    'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
-  ];
 
   openModal('⚔️ Styles de Combat', `
     <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
@@ -184,15 +182,12 @@ window._deleteCombatStyle = async (i) => {
   _renderCombatStylesModal(_combatStyles);
 };
 
-const FORMATS_OPT = [
-  { v:'', l:'(aucune arme)' },
-  { v:'Arme 1M CaC Phy.', l:'Arme 1M CaC Phy.' },
-  { v:'Arme 2M CaC Phy.', l:'Arme 2M CaC Phy.' },
-  { v:'Arme 2M Dist Phy.', l:'Arme 2M Dist Phy.' },
-  { v:'Arme 2M CaC Mag.', l:'Arme 2M CaC Mag.' },
-  { v:'Arme 2M Dist Mag.', l:'Arme 2M Dist Mag.' },
-  { v:'Arme Secondaire (Bouclier, Torche...)', l:'Arme Secondaire' },
-];
+function _getFormatsOpt() {
+  return [
+    { v:'', l:'(aucune arme)' },
+    ...(_weaponFormats || []).map(f => ({ v: f.label, l: f.label })),
+  ];
+}
 
 function _openStyleEditor(idx, s) {
   openModal(idx >= 0 ? '✏️ Modifier le style' : '+ Nouveau style', `
@@ -206,7 +201,7 @@ function _openStyleEditor(idx, s) {
         ${(s.condPrincipale?.length ? s.condPrincipale : ['']).map((v,fi) => `
         <div style="display:flex;gap:.3rem">
           <select class="input-field cs-cond-p-sel" style="flex:1">
-            ${FORMATS_OPT.map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
+            ${_getFormatsOpt().map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
           </select>
           <button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
         </div>`).join('')}
@@ -221,7 +216,7 @@ function _openStyleEditor(idx, s) {
         ${(s.condSecondaire?.length ? s.condSecondaire : ['']).map((v,fi) => `
         <div style="display:flex;gap:.3rem">
           <select class="input-field cs-cond-s-sel" style="flex:1">
-            ${FORMATS_OPT.map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
+            ${_getFormatsOpt().map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
           </select>
           <button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
         </div>`).join('')}
@@ -256,7 +251,7 @@ window._csAddCond = (containerId, selClass) => {
   div.style.cssText = 'display:flex;gap:.3rem';
   div.innerHTML = `
     <select class="input-field ${selClass}" style="flex:1">
-      ${FORMATS_OPT.map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}
+      ${_getFormatsOpt().map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}
     </select>
     <button type="button" onclick="this.parentElement.remove()"
       style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>`;
@@ -285,6 +280,61 @@ window._saveCombatStyle = async (idx) => {
 };
 
 window._backToStylesList = () => _renderCombatStylesModal(_combatStyles || []);
+
+// ══════════════════════════════════════════════
+// FORMATS D'ARMES — Admin
+// ══════════════════════════════════════════════
+async function openWeaponFormatsAdmin() {
+  const formats = await loadWeaponFormats();
+  _weaponFormats = formats;
+  _renderWeaponFormatsModal(formats);
+}
+
+function _renderWeaponFormatsModal(formats) {
+  openModal('⚔️ Formats d\'armes', `
+    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
+      Ces formats apparaissent dans la boutique (champ Format) et dans les conditions des styles de combat.
+    </div>
+    <div id="wf-list" style="display:flex;flex-direction:column;gap:.35rem">
+      ${formats.map((f, i) => `
+      <div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
+        border:1px solid var(--border);border-radius:8px;padding:.45rem .7rem">
+        <span style="flex:1;font-size:.84rem;color:var(--text)">${_esc(f.label)}</span>
+        <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="window._deleteWeaponFormat(${i})">🗑️</button>
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:.4rem;margin-top:.75rem">
+      <input class="input-field" id="wf-new-label" placeholder="Nouveau format..." style="flex:1">
+      <button class="btn btn-gold btn-sm" onclick="window._addWeaponFormat()">+ Ajouter</button>
+    </div>
+    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem" onclick="closeModal()">Fermer</button>
+  `);
+  setTimeout(() => document.getElementById('wf-new-label')?.focus(), 60);
+}
+
+window._addWeaponFormat = async () => {
+  const label = document.getElementById('wf-new-label')?.value?.trim();
+  if (!label) { showNotif('Nom requis.', 'error'); return; }
+  const formats = _weaponFormats ? [..._weaponFormats] : [];
+  if (formats.some(f => f.label.toLowerCase() === label.toLowerCase())) {
+    showNotif('Ce format existe déjà.', 'error'); return;
+  }
+  formats.push({ id: `fmt_${Date.now()}`, label });
+  await saveWeaponFormats(formats);
+  _weaponFormats = formats;
+  showNotif('Format ajouté.', 'success');
+  _renderWeaponFormatsModal(formats);
+};
+
+window._deleteWeaponFormat = async (i) => {
+  if (!await confirmModal('Supprimer ce format ?')) return;
+  const formats = [...(_weaponFormats || [])];
+  formats.splice(i, 1);
+  await saveWeaponFormats(formats);
+  _weaponFormats = formats;
+  showNotif('Format supprimé.', 'success');
+  _renderWeaponFormatsModal(formats);
+};
 
 // ══════════════════════════════════════════════
 // COMPUTED STATS
@@ -1342,8 +1392,11 @@ function renderCharEquip(c, canEdit) {
         </div>
         <div style="font-size:.78rem;color:var(--text-muted);line-height:1.55">${style.description}</div>
       </div>
-      ${STATE.isAdmin ? `<button onclick="openCombatStylesAdmin()" class="btn btn-outline btn-sm"
-        style="margin-top:.35rem;font-size:.7rem;width:100%">⚙️ Gérer les styles</button>` : ''}
+      ${STATE.isAdmin ? `
+        <button onclick="openCombatStylesAdmin()" class="btn btn-outline btn-sm"
+          style="margin-top:.35rem;font-size:.7rem;width:100%">⚙️ Gérer les styles de combat</button>
+        <button onclick="openWeaponFormatsAdmin()" class="btn btn-outline btn-sm"
+          style="margin-top:.25rem;font-size:.7rem;width:100%">⚙️ Gérer les formats d'armes</button>` : ''}
     `;
   }, 0);
 
@@ -4480,5 +4533,6 @@ Object.assign(window, {
   addQuete, saveQuete,
   deleteCharPhoto,
   openCombatStylesAdmin,
+  openWeaponFormatsAdmin,
   openSortCatEditor,
 });

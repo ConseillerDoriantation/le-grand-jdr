@@ -5,6 +5,7 @@ import { showNotif } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
+import { loadWeaponFormats } from '../shared/weapon-formats.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
@@ -13,8 +14,7 @@ const TEMPLATES = {
   arme: {
     label: '⚔️ Arme',
     fields: [
-      { id:'format',      label:'Format',        type:'select',
-        options:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'] },
+      { id:'format',      label:'Format',        type:'format_select' },
       { id:'sousType',    label:'Type d\'arme',  type:'text',   placeholder:'Épée, Lance, Dague, Arc, Bâton...' },
       { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'degats',      label:'Dégâts',        type:'damage_with_stat', placeholder:'1D10, 2D6...' },
@@ -163,6 +163,7 @@ function _buildCombatMeta(item = {}) {
 // ══════════════════════════════════════════════════════════════════════════════
 let _cats  = [];
 let _items = [];
+let _weaponFormats = [];
 let _view  = 'home';   // 'home' | 'items'
 let _activeCat = null;
 let _page = 1;
@@ -176,9 +177,10 @@ let _filterTags   = new Set(); // valeurs de tags actifs
 // CHARGEMENT
 // ══════════════════════════════════════════════════════════════════════════════
 async function loadShopData() {
-  [_cats, _items] = await Promise.all([
+  [_cats, _items, _weaponFormats] = await Promise.all([
     loadCollection('shopCategories'),
     loadCollection('shop'),
+    loadWeaponFormats(),
   ]);
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort((a,b) => (a.ordre??999)-(b.ordre??999));
@@ -1297,6 +1299,12 @@ function _buildFieldsHtml(tpl,item) {
         <select class="input-field sh-modal-select" id="si-${f.id}">
           <option value="">— Choisir —</option>
           ${(f.options||[]).map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select></div>`;
+    } else if(f.type==='format_select'){
+      html+=`<div class="form-group"><label>${f.label}</label>
+        <select class="input-field sh-modal-select" id="si-${f.id}">
+          <option value="">— Choisir —</option>
+          ${_weaponFormats.map(o=>`<option value="${o.label}" ${val===o.label?'selected':''}>${o.label}</option>`).join('')}
         </select></div>`;
     } else if(f.type==='damage_with_stat'){
       const degatsStat = item?.degatsStat || item?.statAttaque || '';
