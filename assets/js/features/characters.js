@@ -488,15 +488,30 @@ function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
 
 function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
   if (!item.degats) return '—';
+
   const statKey = item.degatsStat || fallbackKey;
   const statMod = getMod(c, statKey);
-  // Bonus de maîtrise : chercher dans c.maitrises le type qui correspond
+
   const maitrisesBonus = _getMaitriseBonus(c, item);
   const totalMod = statMod + maitrisesBonus;
-  const maitriseTag = maitrisesBonus > 0
-    ? ` <span style="font-size:.65rem;color:#b47fff" title="Maîtrise +${maitrisesBonus}">✦+${maitrisesBonus}</span>`
+
+  // Simule plusieurs bonus (à adapter à ta logique réelle)
+  const bonuses = maitrisesBonus > 0 ? [statMod, maitrisesBonus] : [];
+
+  const bonusStack = bonuses.length
+    ? `<div style="display:flex;flex-direction:column;line-height:1;">
+        ${bonuses.map(b => `
+          <span style="font-size:.65rem;color:#b47fff">✦+${b}</span>
+        `).join('')}
+      </div>`
     : '';
-  return `${item.degats} ${modStr(totalMod)}${maitriseTag}`;
+
+  return `
+    <div style="display:flex;align-items:center;gap:.4rem">
+      <span>${item.degats} ${modStr(totalMod)}</span>
+      ${bonusStack}
+    </div>
+  `;
 }
 
 // Retourne le bonus de maîtrise d'un item pour un personnage
