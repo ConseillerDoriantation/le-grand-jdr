@@ -1111,11 +1111,15 @@ window.openAffiniteTypesManager = () => {
   window._aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   const ctx = window._currentAffinitePersoContext || {};
   pushModal('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml(), () => {
-    if (ctx.npcId) _refreshAffinitePersoModal(ctx.npcId, ctx.existingId);
-    else if (_quickAddOpen && _activeId) {
+    // Toujours rafraîchir la fiche principale (le contexte perso peut être périmé)
+    if (_activeId) {
       const n = _npcs.find(x => x.id === _activeId);
       const panel = document.getElementById('npc-detail-panel');
       if (panel && n) panel.innerHTML = _renderFiche(n);
+    }
+    // Rafraîchir aussi la modal perso si elle était ouverte au-dessus
+    if (ctx.npcId) {
+      _refreshAffinitePersoModal(ctx.npcId, ctx.existingId);
     }
   });
 };
