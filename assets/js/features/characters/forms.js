@@ -181,7 +181,7 @@ export async function createNewChar() {
       niveau:1, or:0,
       pvBase:10, pvActuel:10, pmBase:10, pmActuel:10,
       exp:0,
-      stats:{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10},
+      stats:{force:8,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:8},
       statsBonus:{},
       equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
     };
