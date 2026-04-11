@@ -25,6 +25,7 @@ const STORE = {
   activeId:      '',
   presentations: [],
   characters:    [],
+  achievements:  [],
 };
 
 // STAT_META → importé depuis shared/char-stats.js
@@ -367,6 +368,45 @@ function _renderFiche(item, items) {
       <!-- Stats visuelles -->
       ${statBars}
 
+      <!-- Hauts-Faits -->
+      ${(() => {
+        const cid = item.char?.id || item.charId;
+        if (!cid) return '';
+        const CATS_ACH = [
+          { id:'epique',   label:'Épique',   color:'#e8b84b', icon:'⚔️' },
+          { id:'comique',  label:'Comique',  color:'#22c38e', icon:'🎭' },
+          { id:'histoire', label:'Histoire', color:'#4f8cff', icon:'📖' },
+        ];
+        const charAchs = STORE.achievements.filter(a => (a.contributeurs||[]).includes(cid));
+        if (!charAchs.length) return '';
+        const total = charAchs.length;
+        const byCat = {};
+        CATS_ACH.forEach(c => { byCat[c.id] = charAchs.filter(a => a.categorie === c.id).length; });
+        return `<div>
+          <div style="font-size:.7rem;color:var(--text-dim);font-weight:700;
+            text-transform:uppercase;letter-spacing:1.5px;margin-bottom:.6rem">Hauts-Faits</div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            ${CATS_ACH.filter(c => byCat[c.id]).map(c => `
+              <div style="text-align:center;padding:.5rem .75rem;min-width:62px;
+                background:${c.color}10;border:1px solid ${c.color}30;border-radius:10px">
+                <div style="font-size:.9rem;margin-bottom:.2rem">${c.icon}</div>
+                <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:800;
+                  color:${c.color};line-height:1">${byCat[c.id]}</div>
+                <div style="font-size:.58rem;color:${c.color};font-weight:600;
+                  opacity:.8;margin-top:.15rem">${c.label}</div>
+              </div>`).join('')}
+            <div style="text-align:center;padding:.5rem .75rem;min-width:62px;
+              background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.25);border-radius:10px">
+              <div style="font-size:.9rem;margin-bottom:.2rem">🏆</div>
+              <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:800;
+                color:var(--gold);line-height:1">${total}</div>
+              <div style="font-size:.58rem;color:var(--gold);font-weight:600;
+                opacity:.8;margin-top:.15rem">Total</div>
+            </div>
+          </div>
+        </div>`;
+      })()}
+
       <!-- Actions -->
       ${item.charId ? `
        <div style="margin-top:auto;padding-top:.75rem;border-top:1px solid var(--border)">
@@ -386,12 +426,14 @@ function _renderFiche(item, items) {
 async function renderPlayersPage() {
   const content = document.getElementById('main-content');
 
-  const [presentations, characters] = await Promise.all([
+  const [presentations, characters, achievements] = await Promise.all([
     loadCollection('players'),
     loadCollection('characters'),
+    loadCollection('achievements'),
   ]);
   STORE.presentations = presentations;
   STORE.characters    = characters;
+  STORE.achievements  = achievements;
   STORE.items         = _buildDataset(presentations, characters);
   if (!STORE.activeId) STORE.activeId = '';
 
@@ -427,11 +469,13 @@ function _renderView(content) {
   </div>`;
 }
 
-window._ppOpenFiche = (id) => {
+window._ppOpenFiche = async (id) => {
   STORE.activeId = id;
+  // Recharger les hauts-faits pour avoir les données à jour
+  STORE.achievements = await loadCollection('achievements');
   const el = document.getElementById('pp-view-area');
   if (el) el.innerHTML = _renderFiche(STORE.items.find(i=>i.id===id), STORE.items);
-  window.scrollTo(0,0);
+  window.scrollTo(0, 0);
 };
 
 window._ppBack = () => {

@@ -111,6 +111,43 @@ function openAchievementModal(id = null) {
       </div>
     </div>
 
+    ${(() => {
+      const chars = STATE.characters || [];
+      if (!chars.length) return '';
+      const contrib = ex?.contributeurs || [];
+      const COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+      return `<div class="form-group">
+        <label>Personnages contributeurs <span style="font-size:.73rem;color:var(--text-dim);font-weight:400">(optionnel)</span></label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:.5rem;margin-top:.3rem">
+          ${chars.map(c => {
+            const isOn = contrib.includes(c.id);
+            const col  = COLS[c.nom?.charCodeAt(0)%6||0];
+            const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+            return `<div onclick="window._achToggleContrib('${c.id}')"
+              id="ach-contrib-${c.id}"
+              data-contrib-nom="${(c.nom||'?').replace(/"/g,'&quot;')}"
+              style="display:flex;flex-direction:column;align-items:center;gap:.3rem;
+                padding:.5rem .3rem;border-radius:10px;cursor:pointer;transition:all .15s;
+                border:2px solid ${isOn?col:'var(--border)'};
+                background:${isOn?col+'18':'var(--bg-elevated)'}">
+              <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;
+                border:2px solid ${isOn?col:'rgba(255,255,255,.1)'};
+                background:${col}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                ${c.photo
+                  ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+                  : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.95rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
+              </div>
+              <span style="font-size:.65rem;text-align:center;
+                color:${isOn?col:'var(--text-dim)'};font-weight:${isOn?'700':'400'};
+                line-height:1.2;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(c.nom||'?')}</span>
+              ${isOn?`<div class="ach-dot" style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></div>`:''}
+            </div>`;
+          }).join('')}
+        </div>
+        <input type="hidden" id="ach-contributeurs" value="${contrib.join(',')}">
+      </div>`;
+    })()}
+
     <button class="btn btn-gold" style="width:100%;margin-top:0.5rem"
       onclick="window.saveAchievement('${id || ''}')">
       ${id ? 'Enregistrer les modifications' : 'Créer le Haut-Fait'}
@@ -131,6 +168,37 @@ function openAchievementModal(id = null) {
     });
   };
   window._achSelectCat(ex?.categorie || 'epique');
+
+  window._achToggleContrib = (charId) => {
+    const hidden = document.getElementById('ach-contributeurs');
+    if (!hidden) return;
+    const current = hidden.value ? hidden.value.split(',') : [];
+    const idx     = current.indexOf(charId);
+    const next    = idx >= 0 ? current.filter(x => x !== charId) : [...current, charId];
+    hidden.value  = next.join(',');
+    const card    = document.getElementById(`ach-contrib-${charId}`);
+    if (!card) return;
+    const active  = next.includes(charId);
+    const COLS    = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+    const nom     = card.dataset.contribNom || '';
+    const col     = COLS[nom.charCodeAt(0) % 6];
+    card.style.borderColor = active ? col : 'var(--border)';
+    card.style.background  = active ? col + '18' : 'var(--bg-elevated)';
+    // Cercle portrait
+    const circle = card.querySelector('div');
+    if (circle) circle.style.borderColor = active ? col : 'rgba(255,255,255,.1)';
+    // Nom
+    const nameEl = card.querySelector('span');
+    if (nameEl) { nameEl.style.color = active ? col : 'var(--text-dim)'; nameEl.style.fontWeight = active ? '700' : '400'; }
+    // Point indicateur
+    const dotEl  = card.querySelector('.ach-dot');
+    if (active && !dotEl) {
+      const dot = document.createElement('div');
+      dot.className = 'ach-dot';
+      dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0`;
+      card.appendChild(dot);
+    } else if (!active && dotEl) dotEl.remove();
+  };
 
   // ── Input file créé en JS (évite l'orphelin DOM via innerHTML) ────────────
   const achFileInput = document.createElement('input');
@@ -406,13 +474,16 @@ async function saveAchievement(id = '') {
       imageUrl  = ex?.imageUrl || '';
     }
 
+    const contribRaw = document.getElementById('ach-contributeurs')?.value || '';
+    const contributeurs = contribRaw ? contribRaw.split(',').filter(Boolean) : [];
     const payload = {
       titre,
-      categorie:   document.getElementById('ach-categorie')?.value || 'epique',
-      description: document.getElementById('ach-desc')?.value?.trim()  || '',
+      categorie:    document.getElementById('ach-categorie')?.value || 'epique',
+      description:  document.getElementById('ach-desc')?.value?.trim()  || '',
       imageUrl,
-      emoji:       document.getElementById('ach-emoji')?.value?.trim() || '🏆',
-      date:        document.getElementById('ach-date')?.value?.trim()  || '',
+      emoji:        document.getElementById('ach-emoji')?.value?.trim() || '🏆',
+      date:         document.getElementById('ach-date')?.value?.trim()  || '',
+      contributeurs,
     };
 
     let docId = id;

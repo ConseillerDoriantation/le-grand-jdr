@@ -242,8 +242,12 @@ function _render() {
       style="max-width:240px;font-size:.82rem">
   </div>
 
-  <!-- LISTE -->
-  ${filtered.length === 0 ? `
+  <div id="rec-grid-wrap">${_gridHtml(filtered, tabInfo, visible, borderColor)}</div>
+  `;
+}
+
+function _gridHtml(filtered, tabInfo, visible, borderColor) {
+  if (filtered.length === 0) return `
     <div class="rec-empty">
       <div style="font-size:2.5rem;margin-bottom:.75rem;opacity:.25">${tabInfo.emoji}</div>
       <p style="font-style:italic">
@@ -251,13 +255,27 @@ function _render() {
           ? (_isAdmin() ? `Aucune recette de type "${tabInfo.label}" — créez-en une !` : `Aucune recette partagée avec vous dans cette catégorie.`)
           : 'Aucun résultat pour cette recherche.'}
       </p>
-    </div>
-  ` : `
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem">
+    </div>`;
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem">
     ${filtered.map(r => _renderCard(r, borderColor[r.type]||'#e8b84b')).join('')}
-  </div>
-  `}
-  `;
+  </div>`;
+}
+
+function _renderGrid() {
+  const wrap = document.getElementById('rec-grid-wrap');
+  if (!wrap) { _render(); return; }
+  const visible = _visible();
+  const tabInfo = TABS.find(t => t.id === _tab) || TABS[0];
+  const borderColor = { cuisine:'#e8b84b', potion:'#22c38e', arme:'#ff6b6b', armure:'#4f8cff', bijou:'#c084fc' };
+  const filtered = visible.filter(r => {
+    if (r.type !== _tab) return false;
+    if (!_filterTxt) return true;
+    const s = _filterTxt.toLowerCase();
+    return (r.nom||'').toLowerCase().includes(s)
+        || (r.description||'').toLowerCase().includes(s)
+        || (r.effet||'').toLowerCase().includes(s);
+  });
+  wrap.innerHTML = _gridHtml(filtered, tabInfo, visible, borderColor);
 }
 
 // ── Card recette ──────────────────────────────────────────────────────────────
@@ -791,7 +809,7 @@ async function sendRecipe(id) {
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
 window.recSetTab = (t) => { _tab = t; _filterTxt = ''; _render(); };
-window.recSearch = (v) => { _filterTxt = v; _render(); };
+window.recSearch = (v) => { _filterTxt = v; _renderGrid(); };
 
 // ══════════════════════════════════════════════════════════════════════════════
 // OVERRIDE + EXPORTS
