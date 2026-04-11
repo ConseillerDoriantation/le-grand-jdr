@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(wc -l \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai/assets/js/features\"/*.js)",
-      "Bash(node --check assets/js/features/characters.js)"
+      "Bash(node --check assets/js/features/characters.js)",
+      "Bash(node --check assets/js/features/recipes.js)",
+      "Bash(node --check assets/js/features/achievements.js)",
+      "Bash(node --check assets/js/features/pages.js)",
+      "Bash(node --check assets/js/features/shop.js)",
+      "Bash(node --check assets/js/features/story.js)",
+      "Bash(node --check assets/js/features/players.js)"
     ]
   }
 }
