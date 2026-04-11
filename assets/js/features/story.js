@@ -5,7 +5,7 @@
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { _esc, _nl2br } from '../shared/html.js';
@@ -31,7 +31,9 @@ const STATUT_CFG = {
 function stCfg(item){ return STATUT_CFG[item.statut] || STATUT_CFG['En attente']; }
 // _clamp → utilisé dans shared/image-upload.js
 
-let _axeMap = {};
+let _axeMap      = {};
+let _modalGroupes = [];   // groupes du modal ouvert (mission courante)
+let _modalStoryId = '';   // id de la mission en édition ('' = nouvelle)
 function axeColor(axe){
   if(!axe) return '#555';
   if(!_axeMap[axe]){ _axeMap[axe] = AXE_COLORS[Object.keys(_axeMap).length % AXE_COLORS.length]; }
@@ -50,6 +52,61 @@ async function saveActes(list) {
     console.error('[save]', e);
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
+}
+
+// ── Groupes de participants (per-mission) ─────────────────────────────────────
+async function _saveModalGroupes() {
+  if (!_modalStoryId) return; // nouvelle mission → sauvé avec le formulaire
+  try { await updateInCol('story', _modalStoryId, { groupes: _modalGroupes }); }
+  catch(e) { console.error('[saveGroupes]', e); showNotif('Erreur de sauvegarde.', 'error'); }
+}
+function _renderGroupPills(groups) {
+  if (!groups.length) return `<span style="font-size:.75rem;color:var(--text-dim);font-style:italic">Aucun groupe. Créez-en un ci-dessous.</span>`;
+  const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const chars  = STATE.characters || [];
+  return groups.map(g => {
+    const membres = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
+    return `<div style="display:inline-flex;flex-direction:column;gap:.3rem;
+      padding:.45rem .55rem;border-radius:10px;vertical-align:top;
+      border:1px solid var(--border-strong);background:var(--bg-elevated)">
+      <div style="display:flex;align-items:center;gap:.35rem">
+        <button type="button" onclick="window._stApplyGroup(${JSON.stringify(g.membres)})"
+          title="Appliquer ce groupe aux participants"
+          style="font-size:.75rem;color:var(--gold);font-family:'Cinzel',serif;
+            background:none;border:none;cursor:pointer;padding:0;line-height:1.2">
+          ${g.nom}</button>
+        <span onclick="window._stDeleteGroup('${g.id}')"
+          style="display:flex;align-items:center;justify-content:center;margin-left:.2rem;
+            width:15px;height:15px;border-radius:50%;background:rgba(255,107,107,.15);
+            color:#ff6b6b;font-size:.72rem;font-weight:700;cursor:pointer;flex-shrink:0">×</span>
+      </div>
+      ${membres.length ? `<div style="display:flex;gap:3px;flex-wrap:wrap">
+        ${membres.map(c => {
+          const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
+          const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+          return `<div title="${c.nom||''}" style="width:28px;height:28px;border-radius:50%;overflow:hidden;
+            border:2px solid ${col};background:${col}18;flex-shrink:0;
+            display:flex;align-items:center;justify-content:center">
+            ${c.photo
+              ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pp}">`
+              : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.62rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+function _refreshStGroupsRow(groups) {
+  const row = document.getElementById('st-groups-row');
+  if (!row) return;
+  row.innerHTML = _renderGroupPills(groups) + `
+    <button type="button" onclick="window._stSaveGroupDialog()"
+      style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
+        background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;
+        align-self:flex-start;margin-top:.1rem;transition:all .15s"
+      onmouseover="this.style.opacity='1';this.style.background='rgba(232,184,75,.06)'"
+      onmouseout="this.style.opacity='.8';this.style.background='transparent'">
+      + Nouveau groupe</button>`;
 }
 
 // ── RENDU PRINCIPAL ───────────────────────────────────────────────────────────
@@ -491,6 +548,39 @@ async function openStoryDetail(id) {
       </div>`:''}
     </div>
 
+    ${(item.groupes||[]).length?`
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.7rem">Groupes</div>
+      <div style="display:flex;flex-direction:column;gap:.75rem">
+        ${(item.groupes||[]).map(g => {
+          const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+          const chars = STATE.characters || [];
+          const membres = g.membres.map(id => chars.find(c => c.id === id)).filter(Boolean);
+          return `<div>
+            <div style="font-family:'Cinzel',serif;font-size:.72rem;color:var(--text-muted);
+              margin-bottom:.4rem;letter-spacing:.5px">${g.nom}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              ${membres.length ? membres.map(c => {
+                const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
+                const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+                return `<div title="${c.nom||''}" style="display:flex;flex-direction:column;align-items:center;gap:3px">
+                  <div style="width:40px;height:40px;border-radius:50%;overflow:hidden;
+                    border:2px solid ${col};background:${col}18;
+                    display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                    ${c.photo
+                      ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+                      : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.85rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
+                  </div>
+                  <span style="font-size:.58rem;color:var(--text-dim);max-width:42px;
+                    text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nom||''}</span>
+                </div>`;
+              }).join('') : `<span style="font-size:.73rem;color:var(--text-dim);font-style:italic">Aucun membre trouvé.</span>`}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`:''}
+
     ${liensItems.length?`
     <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
       <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.6rem">↝ Mène vers</div>
@@ -517,9 +607,11 @@ async function openStoryDetail(id) {
 // ── MODAL AJOUT / ÉDITION ─────────────────────────────────────────────────────
 async function openStoryModal(item = null) {
   _crop.base64 = null;
-  const acteActif = window._storyActe || 'Acte I';
-  const allItems  = await loadCollection('story');
+  const acteActif   = window._storyActe || 'Acte I';
+  const allItems    = await loadCollection('story');
   const autresItems = allItems.filter(i => i.id !== item?.id);
+  _modalGroupes = [...(item?.groupes || [])];
+  _modalStoryId = item?.id || '';
 
   openModal(item?`✏️ Modifier — ${item.titre||'Mission'}`:'📜 Nouvelle mission',`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
@@ -585,6 +677,56 @@ async function openStoryModal(item = null) {
         <button type="button" class="btn btn-gold btn-sm" style="margin-top:.5rem;width:100%"
           onclick="window._stConfirmCrop()">✂️ Confirmer le recadrage</button>
         <div id="st-crop-ok" style="display:none;font-size:.75rem;color:var(--green);text-align:center;margin-top:4px">✓ Image recadrée</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Groupes de participants <span style="font-size:.73rem;color:var(--text-dim);font-weight:400">(sélection rapide)</span></label>
+      <div id="st-groups-row" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;min-height:28px">
+        ${_renderGroupPills(_modalGroupes)}
+        <button type="button" onclick="window._stSaveGroupDialog()"
+          style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
+            background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;transition:all .15s"
+          onmouseover="this.style.opacity='1';this.style.background='rgba(232,184,75,.06)'"
+          onmouseout="this.style.opacity='.8';this.style.background='transparent'">
+          + Nouveau groupe</button>
+      </div>
+      <div id="st-save-group-form" style="display:none;margin-top:.5rem;padding:.7rem;
+        background:var(--bg-panel);border:1px solid var(--border);border-radius:10px">
+        <div style="font-size:.7rem;color:var(--text-dim);font-weight:600;
+          text-transform:uppercase;letter-spacing:.5px;margin-bottom:.45rem">Membres</div>
+        <div id="st-group-picker" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:.35rem;margin-bottom:.55rem">
+          ${(() => {
+            const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+            return (STATE.characters||[]).map(c => {
+              const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
+              const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+              return `<div onclick="window._stGroupPickToggle('${c.id}','${col}')"
+                id="st-gpick-${c.id}" data-gm-id="${c.id}" data-picked="0"
+                style="display:flex;flex-direction:column;align-items:center;gap:.25rem;
+                  padding:.35rem .2rem;border-radius:8px;cursor:pointer;transition:all .15s;
+                  border:2px solid var(--border);background:var(--bg-elevated)">
+                <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;
+                  border:2px solid rgba(255,255,255,.1);background:${col}18;flex-shrink:0;
+                  display:flex;align-items:center;justify-content:center">
+                  ${c.photo
+                    ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pp}">`
+                    : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.78rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
+                </div>
+                <span style="font-size:.58rem;text-align:center;color:var(--text-dim);
+                  max-width:66px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nom||'?'}</span>
+              </div>`;
+            }).join('') || '<span style="font-size:.75rem;color:var(--text-dim)">Aucun personnage.</span>';
+          })()}
+        </div>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <input id="st-save-group-name" class="input-field"
+            style="flex:1;padding:.3rem .65rem;font-size:.82rem" placeholder="Nom du groupe…" maxlength="40"
+            onkeydown="if(event.key==='Enter')window._stConfirmSaveGroup();if(event.key==='Escape')document.getElementById('st-save-group-form').style.display='none'">
+          <button type="button" class="btn btn-gold btn-sm" onclick="window._stConfirmSaveGroup()">OK</button>
+          <button type="button" class="btn btn-outline btn-sm"
+            onclick="document.getElementById('st-save-group-form').style.display='none'">✕</button>
+        </div>
       </div>
     </div>
 
@@ -736,6 +878,71 @@ async function openStoryModal(item = null) {
       dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0`;
       el.appendChild(dot);
     } else if (isOn && dotEl) dotEl.remove();
+  };
+
+  // ── Groupes ────────────────────────────────────────────────────────────────
+  window._stApplyGroup = (membres) => {
+    // Désélectionner tous les participants actifs
+    document.querySelectorAll('[id^="st-part-"]').forEach(el => {
+      if (el.dataset.selected === '1') window._toggleStParticipant(el.dataset.partId);
+    });
+    // Sélectionner les membres du groupe
+    membres.forEach(id => {
+      const el = document.getElementById(`st-part-${id}`);
+      if (el && el.dataset.selected !== '1') window._toggleStParticipant(id);
+    });
+  };
+
+  window._stGroupPickToggle = (charId, col) => {
+    const el = document.getElementById(`st-gpick-${charId}`);
+    if (!el) return;
+    const picked = el.dataset.picked !== '1';
+    el.dataset.picked = picked ? '1' : '0';
+    el.style.borderColor = picked ? col : 'var(--border)';
+    el.style.background  = picked ? col + '18' : 'var(--bg-elevated)';
+    const circle = el.querySelector('div');
+    if (circle) circle.style.borderColor = picked ? col : 'rgba(255,255,255,.1)';
+    const nameEl = el.querySelector('span');
+    if (nameEl) { nameEl.style.color = picked ? col : 'var(--text-dim)'; nameEl.style.fontWeight = picked ? '700' : '400'; }
+  };
+
+  window._stSaveGroupDialog = () => {
+    const form = document.getElementById('st-save-group-form');
+    if (!form) return;
+    // Réinitialiser la sélection du picker
+    document.querySelectorAll('#st-group-picker [data-picked="1"]').forEach(el => {
+      el.dataset.picked = '0';
+      el.style.borderColor = 'var(--border)';
+      el.style.background  = 'var(--bg-elevated)';
+      const circle = el.querySelector('div');
+      if (circle) circle.style.borderColor = 'rgba(255,255,255,.1)';
+      const nameEl = el.querySelector('span');
+      if (nameEl) { nameEl.style.color = 'var(--text-dim)'; nameEl.style.fontWeight = '400'; }
+    });
+    form.style.display = 'block';
+    const inp = document.getElementById('st-save-group-name');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+  };
+
+  window._stConfirmSaveGroup = async () => {
+    const nom = document.getElementById('st-save-group-name')?.value?.trim();
+    if (!nom) { showNotif('Donne un nom au groupe.', 'error'); return; }
+    const membres = [...document.querySelectorAll('#st-group-picker [data-picked="1"]')]
+      .map(el => el.dataset.gmId).filter(Boolean);
+    if (!membres.length) { showNotif('Sélectionne au moins un membre.', 'error'); return; }
+    _modalGroupes = [..._modalGroupes, { id: 'g' + Date.now(), nom, membres }];
+    await _saveModalGroupes();
+    _refreshStGroupsRow(_modalGroupes);
+    const form = document.getElementById('st-save-group-form');
+    if (form) form.style.display = 'none';
+    showNotif(`Groupe « ${nom} » sauvegardé.`, 'success');
+  };
+
+  window._stDeleteGroup = async (groupId) => {
+    if (!await confirmModal('Supprimer ce groupe de participants ?')) return;
+    _modalGroupes = _modalGroupes.filter(g => g.id !== groupId);
+    await _saveModalGroupes();
+    _refreshStGroupsRow(_modalGroupes);
   };
 
   // Initialiser data-selected depuis les participants existants
@@ -949,6 +1156,7 @@ async function saveStory(id = '') {
       recompense:    document.getElementById('st-recompense')?.value?.trim()||'',
       liens,
       ordre:         parseInt(document.getElementById('st-ordre')?.value)||0,
+      groupes:       _modalGroupes,
     };
 
     // Persister l'acte si nouveau

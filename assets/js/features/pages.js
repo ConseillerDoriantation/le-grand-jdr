@@ -3,6 +3,7 @@
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
 import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData } from '../data/firestore.js';
+import { _esc } from '../shared/html.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -971,6 +972,31 @@ const PAGES = {
             <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.55;flex:1;font-style:italic">
               ${a.description || ''}
             </div>
+            ${(() => {
+              const ids   = a.contributeurs || [];
+              if (!ids.length) return '';
+              const chars = STATE.characters || [];
+              const COLS  = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+              const contribs = ids.map(id => chars.find(c => c.id === id)).filter(Boolean);
+              if (!contribs.length) return '';
+              return `<div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
+                ${contribs.map(c => {
+                  const col      = COLS[c.nom?.charCodeAt(0)%6||0];
+                  const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+                  return `<div title="${_esc(c.nom||'?')}" style="display:flex;flex-direction:column;align-items:center;gap:2px">
+                    <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;
+                      border:2px solid ${col};background:${col}18;
+                      display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                      ${c.photo
+                        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+                        : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.8rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
+                    </div>
+                    <span style="font-size:.58rem;color:${col};font-weight:600;max-width:38px;
+                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center">${_esc(c.nom||'?')}</span>
+                  </div>`;
+                }).join('')}
+              </div>`;
+            })()}
             ${STATE.isAdmin ? `
             <div style="display:flex;gap:0.4rem;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
               <button class="btn btn-outline btn-sm" style="flex:1;font-size:0.72rem"

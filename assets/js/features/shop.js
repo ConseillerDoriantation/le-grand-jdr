@@ -276,6 +276,7 @@ async function renderShop() {
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
         <button class="btn btn-gold btn-sm" onclick="openCatModal()">📁 Nouvelle catégorie</button>
         <button class="btn btn-outline btn-sm" onclick="openItemModal()">＋ Article</button>
+        <button class="btn btn-outline btn-sm" onclick="window.openWeaponFormatsAdmin?.()">⚙️ Formats d'armes</button>
       </div>
     </div>`;
   }
