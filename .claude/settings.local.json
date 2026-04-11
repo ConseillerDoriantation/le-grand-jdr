@@ -8,7 +8,19 @@
       "Bash(node --check assets/js/features/pages.js)",
       "Bash(node --check assets/js/features/shop.js)",
       "Bash(node --check assets/js/features/story.js)",
-      "Bash(node --check assets/js/features/players.js)"
+      "Bash(node --check assets/js/features/players.js)",
+      "Bash(wc -l ./assets/js/**/*.js ./assets/js/*.js)",
+      "Bash(wc -l /c/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/**/*.js)",
+      "Bash(wc -l /c/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/css/*.css)",
+      "Bash(find . -type f -name \"*.js\" ! -path \"*/.git/*\" ! -path \"*/node_modules/*\" -exec wc -l {} +)",
+      "Bash(find . -type f -name \"*.css\" -exec wc -l {} +)",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\data.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\spells.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\combat.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\inventory.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\equipment.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\tabs.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\inline-edit.js\")"
     ]
   }
 }

@@ -1,0 +1,590 @@
+import { STATE } from '../../core/state.js';
+import { updateInCol } from '../../data/firestore.js';
+import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
+import { showNotif } from '../../shared/notifications.js';
+import { modStr } from '../../shared/html.js';
+import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
+
+// ══════════════════════════════════════════════
+// TAB : CARACTÉRISTIQUES
+// ══════════════════════════════════════════════
+export function renderCharCarac(c, canEdit) {
+  const STATS_TAB = [
+    {key:'force',label:'Force',abbr:'Fo'},
+    {key:'dexterite',label:'Dextérité',abbr:'Dex'},
+    {key:'constitution',label:'Constitution',abbr:'Co'},
+    {key:'intelligence',label:'Intelligence',abbr:'Int'},
+    {key:'sagesse',label:'Sagesse',abbr:'Sag'},
+    {key:'charisme',label:'Charisme',abbr:'Cha'},
+  ];
+  const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
+  const sb = c.statsBonus||{};
+
+  let html = `<div class="cs-section">
+    <div class="cs-section-title">📊 Caractéristiques
+      ${canEdit?'<span class="cs-hint">cliquer sur la valeur de base pour modifier</span>':''}
+    </div>
+    <div style="display:grid;gap:.5rem">
+      <div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:0 .75rem;color:var(--text-dim);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">
+        <span>Stat</span>
+        <span style="text-align:center">Base</span>
+        <span style="text-align:center">Équip.</span>
+        <span style="text-align:center">Total</span>
+        <span style="text-align:center">Mod</span>
+      </div>`;
+
+  STATS_TAB.forEach(st => {
+    const base = s[st.key]||8;
+    const bonus = sb[st.key]||0;
+    const total = base + bonus;
+    const m = getMod(c, st.key);
+    const bonusStr = bonus > 0 ? `+${bonus}` : String(bonus);
+    const modClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
+    html += `<div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:14px;background:var(--bg-elevated)">
+      <div>
+        <div style="font-weight:700;color:var(--text)">${st.label}</div>
+        <div style="font-size:.72rem;color:var(--text-dim)">${st.abbr}</div>
+      </div>
+      <div style="text-align:center">
+        <span class="${canEdit?'cs-editable':''}"
+              ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
+              style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:700;color:var(--text)">
+          ${base}
+        </span>
+      </div>
+      <div style="text-align:center">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:${bonus ? 'rgba(79,140,255,.10)' : 'var(--bg-card)'};font-weight:700;color:${bonus ? '#7fb0ff' : 'var(--text-dim)'}">
+          ${bonusStr}
+        </span>
+      </div>
+      <div style="text-align:center">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:800;color:var(--text)">
+          ${total}
+        </span>
+      </div>
+      <div style="text-align:center">
+        <span class="cs-carac-detail-mod ${modClass}" style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px">
+          ${modStr(m)}
+        </span>
+      </div>
+    </div>`;
+  });
+  html += `</div>
+    <div style="margin-top:.65rem;font-size:.76rem;color:var(--text-dim)">
+      Total = Base + bonus d'équipement. Le modificateur est calculé à partir du total.
+    </div>
+  </div>`;
+
+  html += `<div class="cs-section">
+    <div class="cs-section-title">⚙️ Base PV & PM
+      ${canEdit?'<span class="cs-hint">cliquer pour modifier — les max sont recalculés</span>':''}
+    </div>
+    <div class="cs-base-grid">
+      <div class="cs-base-card">
+        <div class="cs-base-label">PV Base (niv.1)</div>
+        <div class="cs-base-val ${canEdit?'cs-editable':''}"
+             ${canEdit?`onclick="inlineEditNum('${c.id}','pvBase',this,1,999)" title="Cliquer pour modifier"`:''}>
+          ${c.pvBase||10}
+        </div>
+        <div class="cs-base-formula">PV max actuel : ${calcPVMax(c)}</div>
+        <div class="cs-base-sub">PV max = Base + Mod(Co) × (Niv−1)</div>
+      </div>
+      <div class="cs-base-card">
+        <div class="cs-base-label">PM Base (niv.1)</div>
+        <div class="cs-base-val ${canEdit?'cs-editable':''}"
+             ${canEdit?`onclick="inlineEditNum('${c.id}','pmBase',this,1,999)" title="Cliquer pour modifier"`:''}>
+          ${c.pmBase||10}
+        </div>
+        <div class="cs-base-formula">PM max actuel : ${calcPMMax(c)}</div>
+        <div class="cs-base-sub">PM max = Base + Mod(Sa) × (Niv−1)</div>
+      </div>
+      <div class="cs-base-card">
+        <div class="cs-base-label">Palier XP suivant</div>
+        <div class="cs-base-val ${canEdit?'cs-editable':''}"
+             ${canEdit?`onclick="inlineEditNum('${c.id}','palier',this,1,99999)" title="Cliquer pour modifier"`:''}>
+          ${c.palier||100}
+        </div>
+        <div class="cs-base-sub">XP actuel : ${c.exp||0}</div>
+      </div>
+    </div>
+  </div>`;
+
+  if (c.setBonusActif) {
+    html += `<div class="cs-section">
+      <div class="cs-section-title">✨ Bonus de Set</div>
+      <div style="font-size:0.85rem;color:var(--text-muted);font-style:italic">${c.setBonusActif}</div>
+    </div>`;
+  }
+  return html;
+}
+
+// ══════════════════════════════════════════════
+// TAB : QUÊTES
+// ══════════════════════════════════════════════
+export function renderCharQuetes(c, canEdit) {
+  const quetes = c.quetes||[];
+  let html = `<div class="cs-section">
+    <div class="cs-section-title">📜 Journal de Quête
+      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addQuete()">+ Ajouter</button>`:''}
+    </div>`;
+
+  if (quetes.length===0) {
+    html += `<div class="cs-empty">Aucune quête.</div>`;
+  } else {
+    quetes.forEach((q,i) => {
+      html += `<div class="cs-quest-row">
+        <div class="cs-quest-info">
+          <div class="cs-quest-name">${q.nom||'?'}</div>
+          <div class="cs-quest-meta">${q.type||''} ${q.description?'— '+q.description:''}</div>
+        </div>
+        <div class="cs-quest-right">
+          <span class="badge badge-${q.valide?'green':'blue'}">${q.valide?'Validée':'En cours'}</span>
+          ${canEdit?`<button class="btn-icon" onclick="toggleQuete(${i})" title="${q.valide?'Rouvrir':'Valider'}">✔️</button>
+                     <button class="btn-icon" onclick="deleteQuete(${i})">🗑️</button>`:''}
+        </div>
+      </div>`;
+    });
+  }
+  html += `</div>`;
+  return html;
+}
+
+// ══════════════════════════════════════════════
+// TAB : NOTES
+// ══════════════════════════════════════════════
+export function renderCharNotes(c, canEdit) {
+  const notes = c.notesList||[];
+  let html = `<div class="cs-section">
+    <div class="cs-section-title">📝 Notes
+      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addNote()">+ Nouvelle note</button>`:''}
+    </div>`;
+
+  if (notes.length===0) {
+    html += `<div class="cs-empty">Aucune note. Crée ta première note avec le bouton ci-dessus.</div>`;
+  } else {
+    notes.forEach((note, i) => {
+      const isOpen = window._openNote === i;
+      html += `<div class="cs-note-card">
+        <div class="cs-note-header" onclick="toggleNote(${i})">
+          <div class="cs-note-meta">
+            <span class="cs-note-icon">📄</span>
+            <span class="cs-note-title">${note.titre||'Note sans titre'}</span>
+            ${note.date?`<span class="cs-note-date">${note.date}</span>`:''}
+          </div>
+          <div style="display:flex;gap:0.4rem;align-items:center">
+            ${canEdit?`<button class="btn-icon" onclick="event.stopPropagation();editNoteTitle(${i})" title="Renommer">✏️</button>
+                       <button class="btn-icon" onclick="event.stopPropagation();deleteNote(${i})" title="Supprimer">🗑️</button>`:''}
+            <span class="cs-note-chevron">${isOpen?'▲':'▼'}</span>
+          </div>
+        </div>
+        ${isOpen?`<div class="cs-note-body">
+          ${canEdit
+            ? `<textarea class="input-field cs-note-textarea" id="note-area-${i}" rows="10"
+                         placeholder="Contenu de la note...">${note.contenu||''}</textarea>
+               <button class="btn btn-gold btn-sm" style="margin-top:0.6rem" onclick="saveNote(${i})">💾 Enregistrer</button>`
+            : `<div class="cs-note-content">${(note.contenu||'Aucun contenu.').replace(/\n/g,'<br>')}</div>`
+          }
+        </div>`:''}
+      </div>`;
+    });
+  }
+  html += `</div>`;
+  return html;
+}
+
+// ── Fonctions de gestion des notes ───────────────────────────────────────────
+
+export function toggleNote(idx) {
+  window._openNote = window._openNote === idx ? null : idx;
+  window._renderTab('notes', window._currentChar, window._canEditChar);
+}
+
+export function addNote() {
+  const c = STATE.activeChar; if(!c) return;
+  const notes = c.notesList||[];
+  const now = new Date().toLocaleDateString('fr-FR');
+  notes.push({ titre: 'Nouvelle note', contenu: '', date: now });
+  c.notesList = notes;
+  window._openNote = notes.length - 1;
+  updateInCol('characters', c.id, {notesList: notes}).then(()=>{
+    window._renderTab('notes', c, window._canEditChar);
+  });
+}
+
+export function editNoteTitle(idx) {
+  const c = STATE.activeChar; if(!c) return;
+  const note = (c.notesList||[])[idx];
+  if (!note) return;
+  const cur = note.titre||'Sans titre';
+  const val = prompt('Titre de la note :', cur);
+  if (val === null) return;
+  note.titre = val.trim()||cur;
+  c.notesList[idx] = note;
+  updateInCol('characters', c.id, {notesList: c.notesList}).then(()=>{
+    window._renderTab('notes', c, window._canEditChar);
+    showNotif('Titre mis à jour !','success');
+  });
+}
+
+export async function saveNote(idx) {
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    const ta = document.getElementById(`note-area-${idx}`);
+    if (!ta) return;
+    c.notesList[idx].contenu = ta.value;
+    await updateInCol('characters', c.id, {notesList: c.notesList});
+    showNotif('Note enregistrée !','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
+}
+
+export async function deleteNote(idx) {
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    if (!await confirmModal('Supprimer cette note ?')) return;
+    c.notesList.splice(idx, 1);
+    if (window._openNote >= c.notesList.length) window._openNote = null;
+    await updateInCol('characters', c.id, {notesList: c.notesList});
+    window._renderTab('notes', c, window._canEditChar);
+    showNotif('Note supprimée.','success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
+}
+
+// ══════════════════════════════════════════════
+// TAB : LIVRET DE COMPTE
+// ══════════════════════════════════════════════
+export function renderCharCompte(c, canEdit) {
+  const compte = c.compte||{recettes:[], depenses:[]};
+  const recettes = compte.recettes||[];
+  const depenses = compte.depenses||[];
+
+  const totalR = recettes.reduce((s,r)=>s+(parseFloat(r.montant)||0),0);
+  const totalD = depenses.reduce((s,d)=>s+(parseFloat(d.montant)||0),0);
+  const solde = totalR - totalD;
+
+  const renderRows = (list, type, canEdit) => {
+    if (list.length===0) return `<tr><td colspan="4" class="cs-compte-empty">Aucune entrée.</td></tr>`;
+    return list.map((row,i)=>`
+      <tr class="cs-compte-row">
+        <td>${canEdit
+          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'date',this)">${row.date||'—'}</span>`
+          : (row.date||'—')}</td>
+        <td>${canEdit
+          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'libelle',this)">${row.libelle||'—'}</span>`
+          : (row.libelle||'—')}</td>
+        <td class="${type==='recettes'?'cs-montant-pos':'cs-montant-neg'}">${canEdit
+          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'montant',this)">${row.montant||0}</span>`
+          : (row.montant||0)} or</td>
+        ${canEdit?`<td><button class="btn-icon" onclick="deleteCompteRow('${type}',${i})">🗑️</button></td>`:''}
+      </tr>`).join('');
+  };
+
+  return `<div class="cs-section">
+    <div class="cs-section-title">💰 Livret de Compte</div>
+
+    <div class="cs-solde-bar">
+      <div class="cs-solde-item">
+        <span class="cs-solde-label">Recettes</span>
+        <span class="cs-solde-val pos">+${totalR} or</span>
+      </div>
+      <div class="cs-solde-sep">−</div>
+      <div class="cs-solde-item">
+        <span class="cs-solde-label">Dépenses</span>
+        <span class="cs-solde-val neg">−${totalD} or</span>
+      </div>
+      <div class="cs-solde-sep">=</div>
+      <div class="cs-solde-item cs-solde-main">
+        <span class="cs-solde-label">SOLDE</span>
+        <span class="cs-solde-val ${solde>=0?'pos':'neg'}">${solde>=0?'+':''}${solde} or</span>
+      </div>
+    </div>
+
+    <div class="cs-compte-grid">
+      <div class="cs-compte-col">
+        <div class="cs-compte-col-header">
+          <span class="cs-compte-col-title pos">📈 Recettes</span>
+          ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addCompteRow('recettes')">+ Ajouter</button>`:''}
+        </div>
+        <table class="cs-compte-table">
+          <thead><tr>
+            <th>Date / Mission</th><th>Libellé</th><th>Montant</th>
+            ${canEdit?'<th></th>':''}
+          </tr></thead>
+          <tbody>${renderRows(recettes,'recettes',canEdit)}</tbody>
+          <tfoot><tr>
+            <td colspan="${canEdit?3:2}" style="text-align:right;font-size:0.72rem;color:var(--text-muted);font-weight:700;padding-top:0.5rem">Total</td>
+            <td class="cs-montant-pos" style="font-weight:800;padding-top:0.5rem">+${totalR} or</td>
+            ${canEdit?'<td></td>':''}
+          </tr></tfoot>
+        </table>
+      </div>
+
+      <div class="cs-compte-col">
+        <div class="cs-compte-col-header">
+          <span class="cs-compte-col-title neg">📉 Dépenses</span>
+          ${canEdit?`<button class="btn btn-danger btn-sm" style="font-size:0.72rem" onclick="addCompteRow('depenses')">+ Ajouter</button>`:''}
+        </div>
+        <table class="cs-compte-table">
+          <thead><tr>
+            <th>Date / Mission</th><th>Libellé</th><th>Montant</th>
+            ${canEdit?'<th></th>':''}
+          </tr></thead>
+          <tbody>${renderRows(depenses,'depenses',canEdit)}</tbody>
+          <tfoot><tr>
+            <td colspan="${canEdit?3:2}" style="text-align:right;font-size:0.72rem;color:var(--text-muted);font-weight:700;padding-top:0.5rem">Total</td>
+            <td class="cs-montant-neg" style="font-weight:800;padding-top:0.5rem">−${totalD} or</td>
+            ${canEdit?'<td></td>':''}
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+  </div>`;
+}
+
+export function refreshOrDisplay(c) {
+  const el = document.querySelector('.cs-or');
+  if (el) el.textContent = '💰 ' + calcOr(c) + ' or';
+}
+
+export function addCompteRow(type) {
+  const c = STATE.activeChar; if(!c) return;
+  const compte = c.compte||{recettes:[],depenses:[]};
+  compte[type] = compte[type]||[];
+  compte[type].push({ date: new Date().toLocaleDateString('fr-FR'), libelle: '', montant: 0 });
+  c.compte = compte;
+  updateInCol('characters', c.id, {compte}).then(()=>{
+    window._renderTab('compte', c, window._canEditChar);
+    refreshOrDisplay(c);
+  });
+}
+
+export async function deleteCompteRow(type, idx) {
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    (c.compte||{})[type]?.splice(idx,1);
+    await updateInCol('characters', c.id, {compte: c.compte});
+    window._renderTab('compte', c, window._canEditChar);
+    refreshOrDisplay(c);
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
+}
+
+export function inlineEditCompteField(type, idx, field, el) {
+  const c = STATE.activeChar; if(!c) return;
+  const cur = el.textContent.replace(/ or$/,'').trim();
+  const isNum = field === 'montant';
+  const input = document.createElement('input');
+  input.type = isNum ? 'number' : 'text';
+  input.value = cur;
+  input.className = 'cs-inline-input' + (isNum ? ' cs-inline-num' : '');
+  input.style.cssText = 'width:' + (isNum ? '70px' : '120px') + ';font-size:inherit;';
+
+  const save = async () => {
+    const val = isNum ? (parseFloat(input.value)||0) : (input.value.trim()||cur);
+    c.compte = c.compte||{recettes:[],depenses:[]};
+    c.compte[type][idx][field] = val;
+    await updateInCol('characters', c.id, {compte: c.compte});
+    window._renderTab('compte', c, window._canEditChar);
+    refreshOrDisplay(c);
+  };
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape') input.replaceWith(el); });
+  el.replaceWith(input);
+  input.focus(); input.select();
+}
+
+// ══════════════════════════════════════════════
+// TAB : MAÎTRISES
+// ══════════════════════════════════════════════
+export function renderCharMaitrises(c, canEdit) {
+  const maitrises = c.maitrises || [];
+
+  let html = `
+  <div style="padding:.75rem .25rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
+      <div>
+        <div style="font-family:'Cinzel',serif;font-size:.95rem;color:var(--text)">Maîtrises d'armes</div>
+        <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">
+          Chaque niveau de maîtrise ajoute +1 aux dégâts des armes du type correspondant.
+        </div>
+      </div>
+      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addMaitrise()">+ Ajouter</button>` : ''}
+    </div>`;
+
+  if (maitrises.length === 0) {
+    html += `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic;font-size:.83rem">
+      ${canEdit ? 'Aucune maîtrise — clique sur "+ Ajouter" pour en créer une.' : 'Aucune maîtrise enregistrée.'}
+    </div>`;
+  } else {
+    html += `<div style="display:flex;flex-direction:column;gap:.5rem">`;
+    maitrises.forEach((m, i) => {
+      const niveau = parseInt(m.niveau) || 0;
+      const MAX = 5;
+      const pct = Math.min(100, Math.round(niveau / MAX * 100));
+      html += `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:.7rem .85rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem">
+          <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600">
+            ⚔️ ${m.typeArme||'?'}
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem">
+            <span style="font-size:.75rem;color:var(--gold);font-weight:700;background:rgba(232,184,75,.1);
+              border:1px solid rgba(232,184,75,.25);border-radius:6px;padding:2px 8px">
+              Maîtrise ${niveau > 0 ? '+'+niveau : '0'}
+            </span>
+            ${canEdit ? `
+            <button class="btn-icon" style="font-size:.8rem" onclick="editMaitrise(${i})">✏️</button>
+            <button class="btn-icon" style="font-size:.8rem;color:#ff6b6b" onclick="deleteMaitrise(${i})">🗑️</button>
+            ` : ''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.6rem">
+          <div style="flex:1;background:var(--bg-card);border-radius:999px;height:6px;overflow:hidden;border:1px solid var(--border)">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),#e8b84b);border-radius:999px;transition:width .4s"></div>
+          </div>
+          <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">Niv. ${niveau}/${MAX}</span>
+        </div>
+        ${m.note ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:.3rem;font-style:italic">${m.note}</div>` : ''}
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `
+    <div style="margin-top:1rem;padding:.6rem .75rem;background:rgba(232,184,75,.05);
+      border:1px solid rgba(232,184,75,.15);border-radius:8px;font-size:.75rem;color:var(--text-dim)">
+      💡 Le bonus s'applique automatiquement si le type d'arme équipée correspond (ex: "Épée" correspond à une arme de type "Épée").
+    </div>
+  </div>`;
+
+  return html;
+}
+
+function _maitriseSousTypeSelect(current = '') {
+  const shopTypes = window._shopSousTypes || [];
+  const existing = (STATE.activeChar?.maitrises||[]).map(m=>m.typeArme).filter(Boolean);
+  const all = [...new Set([...shopTypes, ...existing])].sort();
+
+  if (all.length === 0) {
+    return `<input class="input-field" id="mait-type" value="${current}" placeholder="Arc, Épée, Lance...">
+      <div style="font-size:.7rem;color:var(--text-dim);margin-top:.3rem">
+        💡 Visitez la boutique une fois pour charger la liste des types disponibles.
+      </div>`;
+  }
+
+  const options = all.map(t =>
+    `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`
+  ).join('');
+
+  return `<select class="input-field" id="mait-type">
+    ${current && !all.includes(current) ? `<option value="${current}" selected>${current}</option>` : ''}
+    <option value="" ${!current ? 'selected' : ''} disabled>— Choisir un type —</option>
+    ${options}
+  </select>`;
+}
+
+export function addMaitrise() {
+  const c = STATE.activeChar; if (!c) return;
+  openModal('⚔️ Nouvelle maîtrise', `
+    <div class="form-group"><label>Type d'arme</label>
+      ${_maitriseSousTypeSelect('')}
+    </div>
+    <div class="form-group">
+      <label>Niveau <span style="color:var(--text-dim);font-weight:400">(+1 aux dégâts par niveau)</span></label>
+      <input type="number" class="input-field" id="mait-niveau" value="1" min="0" max="5">
+    </div>
+    <div class="form-group"><label>Note (optionnel)</label>
+      <input class="input-field" id="mait-note" placeholder="Obtenu lors de la mission X...">
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveMaitrise(-1)">Ajouter</button>
+  `);
+}
+
+export function editMaitrise(idx) {
+  const c = STATE.activeChar; if (!c) return;
+  const m = (c.maitrises || [])[idx]; if (!m) return;
+  openModal('✏️ Modifier la maîtrise', `
+    <div class="form-group"><label>Type d'arme</label>
+      ${_maitriseSousTypeSelect(m.typeArme||'')}
+    </div>
+    <div class="form-group">
+      <label>Niveau</label>
+      <input type="number" class="input-field" id="mait-niveau" value="${m.niveau||1}" min="0" max="5">
+    </div>
+    <div class="form-group"><label>Note (optionnel)</label>
+      <input class="input-field" id="mait-note" value="${m.note||''}">
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveMaitrise(${idx})">Enregistrer</button>
+  `);
+}
+
+export async function saveMaitrise(idx) {
+  try {
+    const typeArme = document.getElementById('mait-type')?.value?.trim();
+    if (!typeArme) { showNotif('Le type d\'arme est requis.', 'error'); return; }
+    const niveau = parseInt(document.getElementById('mait-niveau')?.value) || 0;
+    const note   = document.getElementById('mait-note')?.value?.trim() || '';
+    const c = STATE.activeChar; if (!c) return;
+    const maitrises = [...(c.maitrises || [])];
+    const entry = { typeArme, niveau, note };
+    if (idx < 0) maitrises.push(entry);
+    else maitrises[idx] = entry;
+    c.maitrises = maitrises;
+    await updateInCol('characters', c.id, { maitrises });
+    closeModal();
+    showNotif(idx < 0 ? `Maîtrise "${typeArme}" ajoutée !` : 'Maîtrise mise à jour.', 'success');
+    window.renderCharSheet(c, 'maitrises');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
+}
+
+export async function deleteMaitrise(idx) {
+  try {
+    const c = STATE.activeChar; if (!c) return;
+    const m = (c.maitrises || [])[idx];
+    if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
+    c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
+    await updateInCol('characters', c.id, { maitrises: c.maitrises });
+    showNotif('Maîtrise supprimée.', 'success');
+    window.renderCharSheet(c, 'maitrises');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
+}
+
+// ── XP helpers (utilisés dans renderCharSheet header) ──────────────────────
+export function previewXpBar(input, palier) {
+  const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
+  const p = palier > 0 ? Math.round(val/palier*100) : 0;
+  const bar = document.getElementById('xp-bar-fill');
+  const pct = document.getElementById('xp-pct');
+  if (bar) bar.style.width = p + '%';
+  if (pct) pct.textContent = p + '%';
+}
+
+export async function saveXpDirect(charId, input) {
+  try {
+    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    if (!c) return;
+    const palier = calcPalier(c.niveau||1);
+    const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
+    c.exp = val;
+    input.value = val;
+    previewXpBar(input, palier);
+    await updateInCol('characters', charId, {exp: val});
+    showNotif('XP mis à jour !', 'success');
+  } catch (e) {
+    console.error('[save]', e);
+    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+  }
+}
