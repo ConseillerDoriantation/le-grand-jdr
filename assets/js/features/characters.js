@@ -2545,7 +2545,7 @@ async function saveNote(idx) {
 async function deleteNote(idx) {
   try {
     const c = STATE.activeChar; if(!c) return;
-    if (!await confirmModal('Supprimer cette note ?')) return;
+    if (!await confirmModal('Supprimer cette note ?', {title: 'Confirmation de suppression'})) return;
     c.notesList.splice(idx, 1);
     if (window._openNote >= c.notesList.length) window._openNote = null;
     await updateInCol('characters', c.id, {notesList: c.notesList});
@@ -3168,7 +3168,7 @@ async function deleteInvItem(idx) {
 
 async function deleteChar(id) {
   try {
-    if (!await confirmModal('Supprimer ce personnage ? La présentation associée (page Personnages) sera également supprimée.')) return;
+    if (!await confirmModal('Supprimer ce personnage ? La présentation associée (page Personnages) sera également supprimée.', {title: 'Confirmation de suppression'})) return;
     await deleteFromCol('characters', id);
     // Suppression en cascade : présentation players liée (charId === id)
     try {
@@ -4553,7 +4553,7 @@ async function deleteMaitrise(idx) {
   try {
     const c = STATE.activeChar; if (!c) return;
     const m = (c.maitrises || [])[idx];
-    if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
+    if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`, {title: 'Confirmation de suppression'})) return;
     c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
     await updateInCol('characters', c.id, { maitrises: c.maitrises });
     showNotif('Maîtrise supprimée.', 'success');

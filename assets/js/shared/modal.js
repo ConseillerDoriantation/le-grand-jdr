@@ -80,6 +80,7 @@ export function closeModalDirect() {
 //   icon          — emoji affiché devant le message (défaut : '⚠️')
 
 export function confirmModal(message, {
+  title = '',
   confirmLabel = 'Confirmer',
   cancelLabel  = 'Annuler',
   danger       = true,
@@ -124,7 +125,7 @@ export function confirmModal(message, {
     const overlay = document.getElementById('modal-overlay');
     const titleEl = document.querySelector('#modal-title span');
     const bodyEl  = document.getElementById('modal-body');
-    if (titleEl) titleEl.textContent = '';
+    if (titleEl) titleEl.textContent = title || '';
     if (bodyEl)  bodyEl.innerHTML = bodyHtml;
     overlay?.classList.add('show');
 
