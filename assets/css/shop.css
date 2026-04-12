@@ -1243,6 +1243,14 @@ input[type="number"].input-field::-webkit-outer-spin-button {
   flex-shrink: 0;
   font-size: 0.78rem !important;
   padding: 0.45rem 0.7rem !important;
+  background: #0f172a !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(96, 165, 250, 0.25) !important;
+}
+
+.sh-sort-select option {
+  background: #0f172a !important;
+  color: #ffffff !important;
 }
 
 .sh-item-card:focus-visible,
