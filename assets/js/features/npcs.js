@@ -11,7 +11,7 @@
 //     npc_affinites/npc_affinite_types → affinités spécifiques {id,label,emoji,couleur}
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
-import { openModal, closeModal, pushModal, popModal, updateModalContent } from '../shared/modal.js';
+import { openModal, closeModal, pushModal, updateModalContent } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
@@ -19,24 +19,30 @@ import { _esc } from '../shared/html.js';
 
 // ── Affinité groupe — 5 niveaux fixes ────────────────────────────────────────
 const AFFINITE = [
-  { niveau: 0, label: 'Hostile',  couleur: '#ff4757', bg: 'rgba(255,71,87,.12)',   border: 'rgba(255,71,87,.3)',   icon: '💢', desc: 'Cherche activement à nuire au groupe' },
+  { niveau: 0, label: "N'aime pas",  couleur: '#ff4757', bg: 'rgba(255,71,87,.12)',   border: 'rgba(255,71,87,.3)',   icon: '💢', desc: 'Cherche activement à nuire au groupe' },
   { niveau: 1, label: 'Méfiant',  couleur: '#ff9f43', bg: 'rgba(255,159,67,.1)',   border: 'rgba(255,159,67,.28)', icon: '👁️', desc: 'Prudent, peu coopératif' },
-  { niveau: 2, label: 'Neutre',   couleur: '#a0aec0', bg: 'rgba(160,174,192,.08)', border: 'rgba(160,174,192,.22)',icon: '😐', desc: 'Ni ami ni ennemi' },
-  { niveau: 3, label: 'Ami',      couleur: '#4f8cff', bg: 'rgba(79,140,255,.1)',   border: 'rgba(79,140,255,.28)', icon: '🤝', desc: 'Bienveillant, prêt à aider' },
+  { niveau: 2, label: 'Confiance',   couleur: '#a0aec0', bg: 'rgba(160,174,192,.08)', border: 'rgba(160,174,192,.22)',icon: '😐', desc: 'Ni ami ni ennemi' },
+  { niveau: 3, label: 'Aime bien',      couleur: '#4f8cff', bg: 'rgba(79,140,255,.1)',   border: 'rgba(79,140,255,.28)', icon: '🤝', desc: 'Bienveillant, prêt à aider' },
   { niveau: 4, label: 'Allié',    couleur: '#22c38e', bg: 'rgba(34,195,142,.1)',   border: 'rgba(34,195,142,.28)', icon: '⚔️', desc: 'Loyal, combattra aux côtés du groupe' },
 ];
 
 // ── Émojis et couleurs pour les affinités spécifiques ────────────────────────
 const EMOJI_PRESET = [
-  '🤝','💔','⚔️','🛡️','💎','🔥','👁️','💢',
-  '🌟','🏆','🎯','👑','💀','🗡️','🕊️','🤫',
-  '😈','🤗','💪','🌿','⚡','🔮','🎭','🦅',
-  '🐉','💐','🌊','🏰','🤺','🎪',
+  '🤝','❤️','🖤','💔','🫂',
+  '⚔️','🗡️','🛡️','☠️','🩸','👹',
+  '😈','👑','🏆','🎖️','🪖','⚖️',
+  '🔮','🧙','🧛','🧝','🧟','🪄','📜',
+  '👁️','🧠','🤫','🗝️','🎪',
+  '🌿','🌲','🌙','⛈️','❄️',
+  '🐉','🦅','🐺','🐍',
+  '🎭','🎲','📖','🧭','⛓️',
+  '💎','🔥','⚡'
 ];
 
-const TYPE_COLORS = [
-  '#4f8cff', '#22c38e', '#b47fff', '#e8b84b',
-  '#ff6b6b', '#ff9f43', '#ff6f91', '#0abde3',
+const TYPE_COLORS = ['#d63031','#e74c3c','#ff6b6b','#ff7675','#ff4757','#e84393','#fd79a8','#ff6f91','#ff9ff3',
+  '#e17055','#ff9f43','#ffb142','#e8b84b','#fdcb6e','#ffeaa7','#f6e58d','#6ab04c','#2ecc71','#22c38e','#00b894',
+  '#55efc4','#7bed9f','#00cec9','#0abde3','#81ecec','#48dbfb','#00a8ff','#4f8cff','#0984e3','#3742fa','#6c5ce7',
+  '#9c88ff','#a29bfe','#b47fff','#8e44ad','#636e72','#2d3436'
 ];
 
 const afx = (n) => AFFINITE[Math.max(0, Math.min(4, n ?? 2))];
@@ -48,7 +54,6 @@ let _affiPerso     = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, n
 let _affiniteTypes = [];   // [{id, label, emoji, couleur}]
 let _activeId      = null;
 let _filterSearch  = '';
-let _quickAddOpen  = false;
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
@@ -77,7 +82,6 @@ async function renderNpcs() {
 
   await _load();
   if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
-  _quickAddOpen = false;
   _renderPage(content);
 }
 
@@ -90,7 +94,7 @@ function _renderPage(content) {
     align-items:start;max-width:1200px;margin:0 auto">
 
     <!-- ═══ SIDEBAR ═════════════════════════════════════════════════════ -->
-    <div style="position:sticky;top:1rem;display:flex;flex-direction:column;gap:.6rem">
+    <div style="position:sticky;top:0;display:flex;flex-direction:column;gap:.6rem">
 
       <div style="background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-lg);padding:.9rem 1rem">
@@ -114,7 +118,7 @@ function _renderPage(content) {
 
       <div id="npc-list-items" style="background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-lg);overflow:hidden;
-        max-height:calc(100vh - 280px);overflow-y:auto">
+        max-height:calc(51vh);overflow-y:auto">
         ${filtered.length === 0
           ? `<div style="padding:1.5rem;text-align:center;color:var(--text-dim);
               font-size:.8rem;font-style:italic">Aucun PNJ trouvé</div>`
@@ -186,40 +190,42 @@ function _renderFicheHeader(n) {
     </div>` : ''}
 
     <!-- Identité -->
-    <div style="padding:1rem 1.2rem;display:flex;flex-direction:column;justify-content:center;gap:.4rem">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
-        <div>
-          <h2 style="font-family:'Cinzel',serif;font-size:1.2rem;color:var(--text);
-            margin:0 0 .18rem;letter-spacing:.5px;line-height:1.25">${_esc(n.nom || '?')}</h2>
-          ${n.role ? `<div style="font-size:.79rem;color:var(--text-muted);font-style:italic">${_esc(n.role)}</div>` : ''}
-        </div>
-        ${STATE.isAdmin ? `
-        <div style="display:flex;gap:.3rem;flex-shrink:0">
-          <button onclick="openNpcModal('${n.id}')"
-            style="background:rgba(255,255,255,.06);border:1px solid var(--border);
-            border-radius:8px;padding:3px 10px;cursor:pointer;font-size:.72rem;
-            color:var(--text-dim);transition:all .12s"
-            onmouseover="this.style.background='rgba(255,255,255,.1)'"
-            onmouseout="this.style.background='rgba(255,255,255,.06)'">✏️ Modifier</button>
-          <button onclick="deleteNpc('${n.id}')"
-            style="background:transparent;border:1px solid rgba(255,107,107,.25);
-            border-radius:8px;padding:3px 8px;cursor:pointer;font-size:.75rem;
-            color:#ff6b6b">🗑️</button>
-        </div>` : ''}
-      </div>
-
-      <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-        ${n.lieu ? `<span style="font-size:.69rem;color:var(--text-dim)">📍 ${_esc(n.lieu)}</span>` : ''}
-        <span style="font-size:.67rem;padding:2px 8px;border-radius:999px;
-          background:${af.bg};color:${af.couleur};border:1px solid ${af.border};font-weight:600">
-          ${af.icon} ${af.label}</span>
-      </div>
-
-      ${n.description ? `
-      <div style="font-size:.81rem;color:var(--text-muted);line-height:1.75;margin-top:.1rem;
-        padding:.55rem .65rem;background:rgba(255,255,255,.02);border-radius:7px;
-        border-left:2px solid ${af.couleur}44">${_esc(n.description)}</div>` : ''}
+<div style="padding:1rem 1.2rem;display:flex;flex-direction:column;justify-content:center;gap:.4rem">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
+    <div>
+      <h2 style="font-family:'Cinzel',serif;font-size:1.2rem;color:var(--text);
+        margin:0 0 .18rem;letter-spacing:.5px;line-height:1.25">${_esc(n.nom || '?')}</h2>
+      ${n.role ? `<div style="font-size:.79rem;color:var(--text-muted);font-style:italic">${_esc(n.role)}</div>` : ''}
     </div>
+    ${STATE.isAdmin ? `
+    <div style="display:flex;gap:.3rem;flex-shrink:0">
+      <button onclick="openNpcModal('${n.id}')"
+        style="background:rgba(255,255,255,.06);border:1px solid var(--border);
+        border-radius:8px;padding:3px 10px;cursor:pointer;font-size:.72rem;
+        color:var(--text-dim);transition:all .12s"
+        onmouseover="this.style.background='rgba(255,255,255,.1)'"
+        onmouseout="this.style.background='rgba(255,255,255,.06)'">✏️ Modifier</button>
+      <button onclick="deleteNpc('${n.id}')"
+        style="background:transparent;border:1px solid rgba(255,107,107,.25);
+        border-radius:8px;padding:3px 8px;cursor:pointer;font-size:.75rem;
+        color:#ff6b6b">🗑️</button>
+    </div>` : ''}
+  </div>
+
+  <div style="display:flex;flex-direction:column;align-items:flex-start;gap:.25rem">
+    <span style="font-size:.67rem;padding:2px 8px;border-radius:999px;
+      background:${af.bg};color:${af.couleur};border:1px solid ${af.border};font-weight:600">
+      ${af.icon} ${af.label}
+    </span>
+
+    ${n.lieu ? `<span style="font-size:.69rem;color:var(--text-dim)">📍 ${_esc(n.lieu)}</span>` : ''}
+  </div>
+
+  ${n.description ? `
+  <div style="font-size:.81rem;color:var(--text-muted);line-height:1.75;margin-top:.1rem;
+    padding:.55rem .65rem;background:rgba(255,255,255,.02);border-radius:7px;
+    border-left:2px solid ${af.couleur}44">${_esc(n.description)}</div>` : ''}
+</div>
   </div>`;
 }
 
@@ -292,6 +298,7 @@ function _renderAffiniteGroupe(n) {
 function _renderHistorique(n) {
   const histo = n.affinite?.historique || [];
   if (!histo.length) return '';
+
   return `
   <div style="background:var(--bg-elevated);border:1px solid var(--border);
     border-radius:12px;padding:.85rem 1rem">
@@ -301,21 +308,43 @@ function _renderHistorique(n) {
       <span style="font-size:.64rem;color:var(--text-dim)">
         ${histo.length} événement${histo.length > 1 ? 's' : ''}</span>
     </div>
+
     <div style="display:flex;flex-direction:column;gap:.3rem">
-      ${histo.slice(-5).reverse().map(h => {
+      ${histo.slice(-5).reverse().map((h, reversedIndex) => {
+        const realIndex = histo.length - 1 - reversedIndex;
         const d = h.delta || 0;
         const col = d > 0 ? '#22c38e' : d < 0 ? '#ff6b6b' : '#a0aec0';
         const bg  = d > 0 ? 'rgba(34,195,142,.1)' : d < 0 ? 'rgba(255,107,107,.1)' : 'rgba(255,255,255,.04)';
+
         return `<div style="display:flex;align-items:flex-start;gap:.5rem;
           padding:.35rem .55rem;background:${bg};border-radius:7px">
+          
           <span style="width:20px;height:20px;border-radius:50%;background:${col}20;
             border:1px solid ${col}44;display:flex;align-items:center;justify-content:center;
             font-size:.67rem;font-weight:800;color:${col};flex-shrink:0">
-            ${d > 0 ? '+' + d : d < 0 ? d : '~'}</span>
+            ${d > 0 ? '+' + d : d < 0 ? d : '~'}
+          </span>
+
           <span style="flex:1;font-size:.75rem;color:var(--text-muted);line-height:1.5">
-            ${_esc(h.texte || '')}</span>
+            ${_esc(h.texte || '')}
+          </span>
+
           ${h.date ? `<span style="font-size:.64rem;color:var(--text-dim);
             flex-shrink:0;white-space:nowrap">${h.date}</span>` : ''}
+
+          ${STATE.isAdmin ? `
+          <div style="display:flex;gap:.2rem;flex-shrink:0;margin-left:.2rem">
+            <button onclick="editHistoriqueEntry('${n.id}', ${realIndex})"
+              style="background:none;border:none;cursor:pointer;color:var(--text-dim);
+              font-size:.72rem;padding:2px 4px;border-radius:5px;transition:background .1s"
+              onmouseover="this.style.background='rgba(255,255,255,.08)'"
+              onmouseout="this.style.background='none'">✏️</button>
+            <button onclick="deleteHistoriqueEntry('${n.id}', ${realIndex})"
+              style="background:none;border:none;cursor:pointer;color:#ff6b6b;
+              font-size:.72rem;padding:2px 4px;border-radius:5px;transition:background .1s"
+              onmouseover="this.style.background='rgba(255,107,107,.1)'"
+              onmouseout="this.style.background='none'">🗑️</button>
+          </div>` : ''}
         </div>`;
       }).join('')}
     </div>
@@ -370,84 +399,6 @@ function _renderRelationChipPlayer(a) {
   </div>`;
 }
 
-// Quick add panel inline (admin)
-function _renderQuickAddPanel(npcId) {
-  if (!_quickAddOpen) {
-    return `
-    <button onclick="window.npcToggleQuickAdd('${npcId}')"
-      style="width:100%;padding:.5rem;background:rgba(79,140,255,.06);
-      border:1px dashed rgba(79,140,255,.3);border-radius:9px;cursor:pointer;
-      font-size:.74rem;color:var(--gold);transition:background .15s;text-align:center"
-      onmouseover="this.style.background='rgba(79,140,255,.12)'"
-      onmouseout="this.style.background='rgba(79,140,255,.06)'">+ Ajouter une affinité</button>`;
-  }
-
-  const chars    = STATE.characters || [];
-  const typeBtns = _affiniteTypes.map(t => {
-    const col = t.couleur || TYPE_COLORS[0];
-    return `<button type="button" id="qa-type-${t.id}" data-col="${col}"
-      onclick="window._qaSelectType('${t.id}')"
-      style="display:flex;align-items:center;gap:.3rem;padding:4px 10px;
-      border-radius:999px;cursor:pointer;font-size:.72rem;font-weight:500;
-      transition:all .12s;border:1px solid ${col}55;background:${col}11;color:${col}">
-      <span>${t.emoji || '✨'}</span><span>${_esc(t.label)}</span></button>`;
-  }).join('');
-
-  return `
-  <div style="background:var(--bg-elevated);border:1px solid rgba(79,140,255,.22);
-    border-radius:10px;padding:.7rem .8rem;animation:fadeIn .15s ease">
-
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.55rem">
-      <div style="font-size:.67rem;font-weight:700;color:var(--gold);
-        text-transform:uppercase;letter-spacing:1px">Nouvelle affinité</div>
-      <button onclick="window.npcToggleQuickAdd('${npcId}')"
-        style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>
-    </div>
-
-    <!-- Personnage -->
-    <div style="margin-bottom:.45rem">
-      <div style="font-size:.63rem;color:var(--text-dim);text-transform:uppercase;
-        letter-spacing:.8px;margin-bottom:.28rem">Personnage</div>
-      <select class="input-field" id="qa-char" style="font-size:.77rem;padding:.33rem .5rem">
-        <option value="">— Choisir —</option>
-        ${chars.map(c => `<option value="${c.id}|${_esc(c.nom || '?')}">
-          ${_esc(c.nom || '?')} (${_esc(c.ownerPseudo || '?')})</option>`).join('')}
-      </select>
-    </div>
-
-    <!-- Affinité spécifique -->
-    <div style="margin-bottom:.45rem">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.28rem">
-        <div style="font-size:.63rem;color:var(--text-dim);text-transform:uppercase;
-          letter-spacing:.8px">Affinité spécifique</div>
-        <button onclick="openAffiniteTypesManager()"
-          style="font-size:.63rem;background:none;border:none;cursor:pointer;color:var(--text-dim)">
-          ⚙️ Gérer</button>
-      </div>
-      ${_affiniteTypes.length
-        ? `<div style="display:flex;flex-wrap:wrap;gap:.3rem">${typeBtns}</div>
-           <input type="hidden" id="qa-type" value="">`
-        : `<div style="font-size:.71rem;color:var(--text-dim);font-style:italic">
-            Aucun type créé — <a onclick="openAffiniteTypesManager()"
-            style="color:var(--gold);cursor:pointer">en créer un</a></div>`}
-    </div>
-
-    <!-- Note -->
-    <div style="margin-bottom:.55rem">
-      <div style="font-size:.63rem;color:var(--text-dim);text-transform:uppercase;
-        letter-spacing:.8px;margin-bottom:.28rem">
-        Note <span style="text-transform:none;font-style:italic;letter-spacing:0">(optionnel)</span></div>
-      <textarea class="input-field" id="qa-note" rows="2"
-        placeholder="Ex: A rendu un service personnel…"
-        style="font-size:.77rem;padding:.33rem .5rem;resize:none"></textarea>
-    </div>
-
-    <button onclick="window.npcQuickAddSubmit('${npcId}')"
-      class="btn btn-gold" style="width:100%;font-size:.77rem;padding:.42rem">
-      Créer →</button>
-  </div>`;
-}
-
 // Panneau des relations (colonne droite)
 function _renderRelationsPanel(n) {
   const persoList = _affiPerso.filter(a => a.npcId === n.id);
@@ -457,19 +408,35 @@ function _renderRelationsPanel(n) {
   if (STATE.isAdmin) {
     return `
     <div style="background:var(--bg-card);border:1px solid var(--border);
-      border-radius:12px;padding:.85rem .9rem;display:flex;flex-direction:column;gap:.38rem">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.2rem">
+      border-radius:12px;padding:.85rem .9rem;display:flex;flex-direction:column;gap:.5rem;
+      max-height:400px">
+
+      <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="font-size:.67rem;font-weight:700;color:var(--text-dim);
           letter-spacing:1.5px;text-transform:uppercase">Affinités spécifiques</div>
         <button onclick="openAffiniteTypesManager()"
           style="font-size:.63rem;background:none;border:none;cursor:pointer;
           color:var(--text-dim);padding:2px 4px">⚙️ Types</button>
       </div>
-      ${persoList.length
-        ? persoList.map(a => _renderRelationChip(a, n.id)).join('')
-        : `<div style="font-size:.74rem;color:var(--text-dim);font-style:italic;
-            text-align:center;padding:.35rem 0">Aucune affinité spécifique</div>`}
-      <div style="margin-top:.15rem">${_renderQuickAddPanel(n.id)}</div>
+
+      <div style="display:flex;flex-direction:column;gap:.38rem;
+        overflow-y:auto;overflow-x:hidden;min-height:0;flex:1;padding-right:.2rem">
+        ${persoList.length
+          ? persoList.map(a => _renderRelationChip(a, n.id)).join('')
+          : `<div style="font-size:.74rem;color:var(--text-dim);font-style:italic;
+              text-align:center;padding:.35rem 0">Aucune affinité spécifique</div>`}
+      </div>
+
+      <div style="padding-top:.2rem;border-top:1px solid rgba(255,255,255,.05)">
+        <button onclick="openAffinitePersoModal('${n.id}')"
+          style="width:100%;padding:.55rem;background:rgba(79,140,255,.06);
+          border:1px dashed rgba(79,140,255,.3);border-radius:9px;cursor:pointer;
+          font-size:.74rem;color:var(--gold);transition:background .15s;text-align:center"
+          onmouseover="this.style.background='rgba(79,140,255,.12)'"
+          onmouseout="this.style.background='rgba(79,140,255,.06)'">
+          ➕ Ajouter une affinité
+        </button>
+      </div>
     </div>`;
   }
 
@@ -488,6 +455,9 @@ function _renderRelationsPanel(n) {
 
 // Fiche principale assemblée
 function _renderFiche(n) {
+  const relationsHtml = _renderRelationsPanel(n);
+  const hasRightPanel = !!relationsHtml;
+
   return `
   <div style="background:var(--bg-card);border:1px solid var(--border);
     border-radius:var(--radius-lg);overflow:hidden">
@@ -497,20 +467,22 @@ function _renderFiche(n) {
       ${_renderFicheHeader(n)}
     </div>
 
-    <!-- Corps 2 colonnes -->
-    <div style="display:grid;grid-template-columns:1fr 300px;align-items:start">
+    <!-- Corps -->
+    <div style="display:grid;grid-template-columns:${hasRightPanel ? '1fr 300px' : '1fr'};align-items:start">
 
-      <!-- Gauche : affinité groupe + historique -->
+      <!-- Gauche -->
       <div style="padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.75rem;
-        border-right:1px solid var(--border);min-width:0">
+        ${hasRightPanel ? 'border-right:1px solid var(--border);' : ''}
+        min-width:0">
         ${_renderAffiniteGroupe(n)}
         ${_renderHistorique(n)}
       </div>
 
-      <!-- Droite : affinités spécifiques -->
+      <!-- Droite -->
+      ${hasRightPanel ? `
       <div style="padding:1rem .9rem;min-width:0">
-        ${_renderRelationsPanel(n)}
-      </div>
+        ${relationsHtml}
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -541,16 +513,10 @@ function _getFiltered() {
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────
 window.selectNpc = (id) => {
-  _activeId = id; _quickAddOpen = false;
-  const n = _npcs.find(x => x.id === id);
-  if (!n) return;
-  document.querySelectorAll('[data-npc-id]').forEach(el => {
-    const a = el.dataset.npcId === id;
-    el.style.background = a ? 'rgba(79,140,255,.07)' : 'transparent';
-    el.style.borderLeft = `3px solid ${a ? 'var(--gold)' : 'transparent'}`;
-  });
-  const panel = document.getElementById('npc-detail-panel');
-  if (panel) panel.innerHTML = _renderFiche(n);
+  _activeId = id;
+
+  _refreshList();
+  _refreshActivePanel();
 };
 
 window._npcSearch = (val) => { _filterSearch = val; _refreshList(); };
@@ -575,49 +541,7 @@ window.npcAffiniteClick = async (npcId, niveau) => {
   if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
   showNotif(`Affinité → ${afx(niveau).label}`, 'success');
   _refreshList();
-  const panel = document.getElementById('npc-detail-panel');
-  if (panel && _activeId === npcId) panel.innerHTML = _renderFiche(_npcs[idx]);
-};
-
-// ── Interaction : quick add panel inline ─────────────────────────────────────
-window.npcToggleQuickAdd = (npcId) => {
-  _quickAddOpen = !_quickAddOpen;
-  const n = _npcs.find(x => x.id === npcId);
-  const panel = document.getElementById('npc-detail-panel');
-  if (panel && n) panel.innerHTML = _renderFiche(n);
-};
-
-window._qaSelectType = (typeId) => {
-  const inp = document.getElementById('qa-type');
-  if (inp) inp.value = typeId;
-  document.querySelectorAll('[id^="qa-type-"]').forEach(btn => {
-    const col = btn.dataset.col || TYPE_COLORS[0];
-    const sel = btn.id === `qa-type-${typeId}`;
-    btn.style.fontWeight  = sel ? '700' : '500';
-    btn.style.background  = sel ? col + '33' : col + '11';
-    btn.style.borderColor = sel ? col : col + '55';
-    btn.style.boxShadow   = sel ? `0 0 0 2px ${col}33` : 'none';
-  });
-};
-
-window.npcQuickAddSubmit = async (npcId) => {
-  const charSel = document.getElementById('qa-char')?.value;
-  if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
-  const typeId = document.getElementById('qa-type')?.value || '';
-  if (!typeId) { showNotif('Choisis une affinité spécifique.', 'error'); return; }
-
-  const [charId, charNom] = charSel.split('|');
-  const note  = document.getElementById('qa-note')?.value?.trim() || '';
-  const type  = _getAffiniteType(typeId);
-  const data  = { npcId, charId, charNom, typeId, typeLabel: type?.label || '', note };
-
-  const newId = await addToCol('npc_affinites', data);
-  _affiPerso.push({ id: newId || `afp_${Date.now()}`, ...data });
-  _quickAddOpen = false;
-  showNotif('Affinité créée !', 'success');
-  const n = _npcs.find(x => x.id === npcId);
-  const panel = document.getElementById('npc-detail-panel');
-  if (panel && n) panel.innerHTML = _renderFiche(n);
+  _refreshActivePanel();
 };
 
 // ── Modal création / édition PNJ ──────────────────────────────────────────────
@@ -863,9 +787,7 @@ async function saveNpc(id) {
     }
 
     closeModal();
-    const n = _npcs.find(x => x.id === (id || _activeId));
-    const panel = document.getElementById('npc-detail-panel');
-    if (panel && n && (_activeId === id || !id)) panel.innerHTML = _renderFiche(n);
+    _refreshActivePanel();
     _refreshList();
   } catch (e) {
     console.error('[saveNpc]', e);
@@ -990,8 +912,7 @@ window.saveAffiniteGroupe = async (npcId) => {
   if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
   closeModal();
   showNotif('Affinité mise à jour !', 'success');
-  const panel = document.getElementById('npc-detail-panel');
-  if (panel && _activeId === npcId) panel.innerHTML = _renderFiche(_npcs[idx]);
+  _refreshActivePanel();
   _refreshList();
 };
 
@@ -1052,7 +973,10 @@ function _getAffiniteTypesManagerHtml() {
 
     <!-- Liste existants -->
     ${_affiniteTypes.length ? `
-    <div style="display:flex;flex-direction:column;gap:.35rem">${typesList}</div>
+    <div style="display:flex;flex-direction:column;gap:.35rem;
+      max-height:200px;overflow-y:auto;overflow-x:hidden;padding-right:.25rem">
+      ${typesList}
+    </div>
     <div style="border-top:1px solid var(--border)"></div>` : typesList}
 
     <!-- Formulaire inline -->
@@ -1065,11 +989,12 @@ function _getAffiniteTypesManagerHtml() {
       <div style="margin-bottom:.55rem">
         <div style="font-size:.64rem;color:var(--text-dim);text-transform:uppercase;
           letter-spacing:.8px;margin-bottom:.3rem">Emoji</div>
-        <div id="aft-emoji-grid" style="display:flex;flex-wrap:wrap;gap:.25rem;
-          background:var(--bg-card);border:1px solid var(--border);
-          border-radius:10px;padding:.5rem">
-          ${_aftEmojiGrid(s.emoji)}
-        </div>
+          <div id="aft-emoji-grid" style="display:flex;flex-wrap:wrap;gap:.25rem;
+            background:var(--bg-card);border:1px solid var(--border);
+            border-radius:10px;padding:.5rem;
+            max-height:132px;overflow-y:auto;overflow-x:hidden">
+            ${_aftEmojiGrid(s.emoji)}
+          </div>
         <input type="hidden" id="aft-emoji-val" value="${s.emoji}">
       </div>
 
@@ -1106,6 +1031,138 @@ function _getAffiniteTypesManagerHtml() {
   </div>`;
 }
 
+window.deleteHistoriqueEntry = async (npcId, index) => {
+  const n = _npcs.find(x => x.id === npcId);
+  if (!n || !STATE.isAdmin) return;
+
+  if (!await confirmModal('Supprimer cet événement de l\'historique ?')) return;
+
+  const historique = [...(n.affinite?.historique || [])];
+  historique.splice(index, 1);
+
+  const affinite = {
+    ...(n.affinite || {}),
+    historique,
+  };
+
+  await updateInCol('npcs', npcId, { affinite });
+
+  const idx = _npcs.findIndex(x => x.id === npcId);
+  if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
+
+  showNotif('Événement supprimé.', 'success');
+
+  _refreshActivePanel();
+
+  _refreshList();
+};
+
+// Modifier / Supprimer les entrées des historiques des NPCS
+window.editHistoriqueEntry = (npcId, index) => {
+  const n = _npcs.find(x => x.id === npcId);
+  if (!n || !STATE.isAdmin) return;
+
+  const historique = n.affinite?.historique || [];
+  const entry = historique[index];
+  if (!entry) return;
+
+  openModal(`✏️ Modifier l'événement — ${_esc(n.nom)}`, `
+    <div class="form-group">
+      <label>Texte</label>
+      <textarea class="input-field" id="hist-edit-text" rows="3"
+        placeholder="Décris l’événement...">${_esc(entry.texte || '')}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Impact</label>
+      <div style="display:flex;gap:.35rem">
+        ${[-2, -1, 0, 1, 2].map(v => `
+          <button type="button" id="hist-edit-delta-${v}"
+            onclick="window._selectHistEditDelta(${v})"
+            style="width:36px;height:36px;border-radius:8px;cursor:pointer;font-size:.8rem;
+            font-weight:700;transition:all .12s;
+            border:${entry.delta === v ? '2px' : '1px'} solid ${
+              v < 0 ? 'rgba(255,107,107,.3)' :
+              v > 0 ? 'rgba(34,195,142,.3)' :
+              'var(--border)'
+            };
+            background:${entry.delta === v
+              ? (v < 0 ? 'rgba(255,107,107,.18)' : v > 0 ? 'rgba(34,195,142,.18)' : 'rgba(255,255,255,.1)')
+              : 'var(--bg-elevated)'};
+            color:${v < 0 ? '#ff6b6b' : v > 0 ? '#22c38e' : 'var(--text-dim)'}">
+            ${v > 0 ? '+' + v : v}
+          </button>
+        `).join('')}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-gold" style="flex:1"
+        onclick="window.saveHistoriqueEntry('${npcId}', ${index})">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>
+  `);
+
+  window._histEditDelta = entry.delta || 0;
+};
+
+window._selectHistEditDelta = (v) => {
+  window._histEditDelta = v;
+
+  [-2, -1, 0, 1, 2].forEach(d => {
+    const btn = document.getElementById(`hist-edit-delta-${d}`);
+    if (!btn) return;
+
+    const active = d === v;
+    btn.style.background = active
+      ? (d < 0
+          ? 'rgba(255,107,107,.18)'
+          : d > 0
+            ? 'rgba(34,195,142,.18)'
+            : 'rgba(255,255,255,.1)')
+      : 'var(--bg-elevated)';
+
+    btn.style.borderWidth = active ? '2px' : '1px';
+  });
+};
+
+window.saveHistoriqueEntry = async (npcId, index) => {
+  const n = _npcs.find(x => x.id === npcId);
+  if (!n || !STATE.isAdmin) return;
+
+  const texte = document.getElementById('hist-edit-text')?.value?.trim() || '';
+  if (!texte) {
+    showNotif('Le texte de l’événement est requis.', 'error');
+    return;
+  }
+
+  const historique = [...(n.affinite?.historique || [])];
+  if (!historique[index]) return;
+
+  historique[index] = {
+    ...historique[index],
+    texte,
+    delta: window._histEditDelta || 0,
+  };
+
+  const affinite = {
+    ...(n.affinite || {}),
+    historique,
+  };
+
+  await updateInCol('npcs', npcId, { affinite });
+
+  const idx = _npcs.findIndex(x => x.id === npcId);
+  if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
+
+  closeModal();
+  showNotif('Événement modifié.', 'success');
+  _refreshActivePanel();
+
+  _refreshList();
+};
+
+// Affinités spéciales
 window.openAffiniteTypesManager = () => {
   // Initialise le formulaire à l'état "ajout"
   window._aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
@@ -1113,9 +1170,7 @@ window.openAffiniteTypesManager = () => {
   pushModal('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml(), () => {
     // Toujours rafraîchir la fiche principale (le contexte perso peut être périmé)
     if (_activeId) {
-      const n = _npcs.find(x => x.id === _activeId);
-      const panel = document.getElementById('npc-detail-panel');
-      if (panel && n) panel.innerHTML = _renderFiche(n);
+      _refreshActivePanel();
     }
     // Rafraîchir aussi la modal perso si elle était ouverte au-dessus
     if (ctx.npcId) {
@@ -1224,7 +1279,7 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
       <span>${t.emoji || '✨'}</span><span>${_esc(t.label)}</span></button>`;
   }).join('');
 
-  const title = `${existing ? '✏️ Modifier' : '+ Ajouter'} une affinité — ${_esc(n.nom)}`;
+  const title = `${existing ? '✏️ Modifier' : '➕ Ajouter'} une affinité — ${_esc(n.nom)}`;
   const body  = `
     <input type="hidden" id="afp-type" value="${existingTypeId}">
 
@@ -1280,6 +1335,20 @@ window.openAffinitePersoModal = (npcId, existingId = null) => {
   window._selectedAfpTypeId = args.selectedTypeId;
 };
 
+function _refreshActivePanel() {
+  const panel = document.getElementById('npc-detail-panel');
+  if (!panel) return;
+
+  const filtered = _getFiltered();
+  const active = _npcs.find(x => x.id === _activeId) || filtered[0] || null;
+
+  if (!_npcs.find(x => x.id === _activeId)) {
+    _activeId = active?.id || null;
+  }
+
+  panel.innerHTML = active ? _renderFiche(active) : _renderEmpty();
+}
+
 window._selectAfpType = (typeId) => {
   window._selectedAfpTypeId = typeId;
   const inp = document.getElementById('afp-type');
@@ -1318,9 +1387,7 @@ window.saveAffinitePerso = async (npcId, existingId) => {
 
   closeModal();
   showNotif('Affinité enregistrée !', 'success');
-  const n = _npcs.find(x => x.id === npcId);
-  const panel = document.getElementById('npc-detail-panel');
-  if (panel && n && _activeId === npcId) panel.innerHTML = _renderFiche(n);
+  _refreshActivePanel();
 };
 
 window.deleteAffinitePerso = async (id) => {
@@ -1328,20 +1395,15 @@ window.deleteAffinitePerso = async (id) => {
   await deleteFromCol('npc_affinites', id);
   _affiPerso = _affiPerso.filter(a => a.id !== id);
   showNotif('Affinité supprimée.', 'success');
-  const n = _npcs.find(x => x.id === _activeId);
-  const panel = document.getElementById('npc-detail-panel');
-  if (panel && n) panel.innerHTML = _renderFiche(n);
+  _refreshActivePanel();
 };
-
-// ── Compatibilité ─────────────────────────────────────────────────────────────
-function filterNpcs(disp) { _filterDisp = disp; _refreshList(); }
 
 // ── Override PAGES.npcs ───────────────────────────────────────────────────────
 PAGES.npcs = renderNpcs;
 
 Object.assign(window, {
-  renderNpcs, openNpcModal, saveNpc, deleteNpc, filterNpcs,
+  renderNpcs, openNpcModal, saveNpc, deleteNpc,
   openAffiniteGroupeModal, openAffinitePersoModal,
   saveAffiniteGroupe, saveAffinitePerso, deleteAffinitePerso,
-  popModal,
+  editHistoriqueEntry, deleteHistoriqueEntry, saveHistoriqueEntry,
 });
