@@ -94,7 +94,7 @@ function _normalizeStatKey(val) {
   const raw = String(val || '').trim().toLowerCase().replace(/^\+/, '');
   if (!raw) return '';
   const map = {
-    fo:'force', force:'force', str:'force',
+    for:'force', force:'force', str:'force',
     dex:'dexterite', dextérité:'dexterite', dexterite:'dexterite', agilite:'dexterite', agilité:'dexterite',
     int:'intelligence', intelligence:'intelligence', in:'intelligence',
     sag:'sagesse', sagesse:'sagesse', sa:'sagesse', wis:'sagesse',
@@ -105,14 +105,14 @@ function _normalizeStatKey(val) {
 }
 
 function _parseLegacyStats(item = {}) {
-  const out = { fo:0, dex:0, in:0, sa:0, co:0, ch:0 };
-  ['fo','dex','in','sa','co','ch'].forEach(k => {
+  const out = { for:0, dex:0, in:0, sa:0, co:0, ch:0 };
+  ['for','dex','in','sa','co','ch'].forEach(k => {
     const val = parseInt(item?.[k]);
     if (!Number.isNaN(val)) out[k] = val;
   });
   const txt = String(item?.stats || '');
   const aliases = {
-    fo:['fo','force'], dex:['dex','dextérité','dexterite'], in:['in','int','intelligence'],
+    for:['for','force'], dex:['dex','dextérité','dexterite'], in:['in','int','intelligence'],
     sa:['sa','sag','sagesse'], co:['co','con','constitution'], ch:['ch','cha','charisme'],
   };
   Object.entries(aliases).forEach(([store, list]) => {
@@ -1114,7 +1114,7 @@ async function confirmBuyItem(itemId, directQty) {
       degats:item.degats||'', degatsStat:item.degatsStat||'',
       toucher:item.toucher||'', toucherStat:item.toucherStat||'',
       ca:item.ca||'', stats:item.stats||'',
-      fo:parseInt(item.fo)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
+      for:parseInt(item.for)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
       sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
       effet:item.effet||'', description:item.description||'',
       slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
@@ -1843,7 +1843,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 
   const SYNC_FIELDS = [
     'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
-    'fo','dex','in','sa','co','ch','traits','portee','type','effet','description',
+    'for','dex','in','sa','co','ch','traits','portee','type','effet','description',
     'slotArmure','typeArmure','slotBijou','prixVente','sousType',
   ];
 
