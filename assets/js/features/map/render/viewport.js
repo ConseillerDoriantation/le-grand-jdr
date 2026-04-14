@@ -72,7 +72,7 @@ export function applyTransform() {
 export function zoom(factor, centerClientX, centerClientY) {
   if (!rootEl) return;
   const prev = state.viewport.scale;
-  const next = Math.max(0.3, Math.min(5, prev * factor));
+  const next = Math.max(0.14, Math.min(5, prev * factor));
   if (next === prev) return;
 
   // Zoom centré sur le pointeur si fourni, sinon centre du root
