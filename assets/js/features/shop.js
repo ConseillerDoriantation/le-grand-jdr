@@ -76,7 +76,7 @@ const TEMPLATES = {
 
 const PRIX_VENTE_RATIO = 0.6; // 60%
 const ITEM_STATS = [
-  { key:'force',       short:'Fo',  store:'fo',  label:'Force' },
+  { key:'force',       short:'For', store:'for',  label:'Force' },
   { key:'dexterite',   short:'Dex', store:'dex', label:'Dextérité' },
   { key:'intelligence',short:'Int', store:'in',  label:'Intelligence' },
   { key:'sagesse',     short:'Sag', store:'sa',  label:'Sagesse' },
@@ -94,7 +94,7 @@ function _normalizeStatKey(val) {
   const raw = String(val || '').trim().toLowerCase().replace(/^\+/, '');
   if (!raw) return '';
   const map = {
-    fo:'force', force:'force', str:'force',
+    for:'force', force:'force', str:'force',
     dex:'dexterite', dextérité:'dexterite', dexterite:'dexterite', agilite:'dexterite', agilité:'dexterite',
     int:'intelligence', intelligence:'intelligence', in:'intelligence',
     sag:'sagesse', sagesse:'sagesse', sa:'sagesse', wis:'sagesse',
@@ -105,20 +105,20 @@ function _normalizeStatKey(val) {
 }
 
 function _parseLegacyStats(item = {}) {
-  const out = { fo:0, dex:0, in:0, sa:0, co:0, ch:0 };
-  ['fo','dex','in','sa','co','ch'].forEach(k => {
+  const out = { for:0, dex:0, in:0, sa:0, co:0, ch:0 };
+  ['for','dex','in','sa','co','ch'].forEach(k => {
     const val = parseInt(item?.[k]);
     if (!Number.isNaN(val)) out[k] = val;
   });
   const txt = String(item?.stats || '');
   const aliases = {
-    fo:['fo','force'], dex:['dex','dextérité','dexterite'], in:['in','int','intelligence'],
+    for:['for','force'], dex:['dex','dextérité','dexterite'], in:['in','int','intelligence'],
     sa:['sa','sag','sagesse'], co:['co','con','constitution'], ch:['ch','cha','charisme'],
   };
   Object.entries(aliases).forEach(([store, list]) => {
     if (out[store]) return;
     for (const token of list) {
-      const re = new RegExp(`(?:^|[^a-z])${token}\s*([+-]\d+)|([+-]\d+)\s*${token}(?:[^a-z]|$)`, 'i');
+      const re = new RegExp(`(?:^|[^a-z])${token}\\s*([+-]\\d+)|([+-]\\d+)\\s*${token}(?:[^a-z]|$)`, 'i');
       const m = txt.match(re);
       const picked = m?.[1] || m?.[2];
       if (picked) {
@@ -147,16 +147,6 @@ function _legacyToucherTextFromData(data = {}) {
   return short ? `+${short}` : '';
 }
 
-function _buildCombatMeta(item = {}) {
-  const parts = [];
-  if (item.degats) {
-    const stat = _statShort(item.degatsStat);
-    parts.push(`⚔️ ${item.degats}${stat ? ` + ${stat}` : ''}`);
-  }
-  if (item.toucherStat) parts.push(`🎯 ${_statShort(item.toucherStat)}`);
-  return parts;
-}
-
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ÉTAT
@@ -172,6 +162,7 @@ const PAGE_SIZE = 20;
 // Filtres actifs (multi-sélection)
 let _filterSearch = '';
 let _filterTags   = new Set(); // valeurs de tags actifs
+let _filterSort   = localStorage.getItem('shop_sort') || 'ordre'; // ordre | nom | prix_asc | prix_desc | rarete
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CHARGEMENT
@@ -184,7 +175,6 @@ async function loadShopData() {
   ]);
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort((a,b) => (a.ordre??999)-(b.ordre??999));
-  // Exposer les sousTypes distincts pour que characters.js puisse les lire
   window._shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
 }
 
@@ -229,6 +219,23 @@ function _dispoDisplay(val) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ANIMATION — count-up/down d'un nombre
+// ══════════════════════════════════════════════════════════════════════════════
+function _animateCount(el, from, to, duration = 400) {
+  if (!el) return;
+  const start = performance.now();
+  const delta = to - from;
+  function tick(now) {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = Math.round(from + delta * eased);
+    if (t < 1) requestAnimationFrame(tick);
+    else el.textContent = to;
+  }
+  requestAnimationFrame(tick);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // OR D'UN PERSONNAGE (solde du compte)
 // ══════════════════════════════════════════════════════════════════════════════
 function _getOr(c) {
@@ -247,83 +254,129 @@ async function renderShop() {
   const content = document.getElementById('main-content');
   if (!content) return;
 
-  let html = `<div class="sh-page">
-  <style>
-    .sh-item-traits { display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.3rem; }
-    .sh-trait-pill { display:inline-flex;align-items:center;padding:1px 7px;font-size:.66rem;
-      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
-      border-radius:999px;color:var(--text-dim);font-style:italic; }
-    .sh-tag-fmt { background:rgba(79,140,255,.1);border-color:rgba(79,140,255,.2);color:#7fb0ff; }
-    .sh-tag-ca  { background:rgba(34,195,142,.1);border-color:rgba(34,195,142,.2);color:#22c38e; }
-    .sh-item-epuise { opacity:.6; }
-    .sh-epuise-badge { position:absolute;top:8px;left:8px;background:rgba(255,107,107,.85);
-      color:#fff;font-size:.62rem;font-weight:700;padding:2px 8px;border-radius:6px;letter-spacing:.5px; }
-    .sh-item-footer { display:flex;align-items:center;justify-content:space-between;
-      gap:.4rem;margin-top:auto;padding-top:.4rem;border-top:1px solid var(--border); }
-    .sh-item-card { cursor:pointer; }
-    [data-theme="light"] .sh-trait-pill { background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.09);color:var(--text-dim); }
-    [data-theme="light"] .sh-tag-fmt { background:rgba(37,99,235,.08);border-color:rgba(37,99,235,.18);color:#2563eb; }
-    [data-theme="light"] .sh-tag-ca  { background:rgba(5,150,105,.08);border-color:rgba(5,150,105,.18);color:#059669; }
-  </style>
-  <div class="page-header">
-    <div class="page-title"><span class="page-title-accent">🛒</span> Boutique</div>
-    <div class="page-subtitle">Équipements, consommables et merveilles</div>
-  </div>`;
+  let html = `<div class="sh-page">`;
+
+  html += `
+    <div class="sh-topbar">
+      <div class="sh-topbar-title-wrap">
+        <div class="sh-topbar-title-row">
+          <span class="sh-topbar-icon">🛒</span>
+          <div>
+            <div class="sh-topbar-title">Boutique</div>
+            <div class="sh-topbar-subtitle">Équipements, consommables et merveilles</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sh-topbar-tools">`;
 
   if (STATE.isAdmin) {
-    html += `<div class="admin-section">
-      <div class="admin-label">Gestion Admin</div>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-        <button class="btn btn-gold btn-sm" onclick="openCatModal()">📁 Nouvelle catégorie</button>
-        <button class="btn btn-outline btn-sm" onclick="openItemModal()">＋ Article</button>
-        <button class="btn btn-outline btn-sm" onclick="window.openWeaponFormatsAdmin?.()">⚙️ Formats d'armes</button>
+    html += `
+      <div class="sh-topbar-admin">
+        <button class="btn btn-gold btn-sm" onclick="openCatModal()" title="Créer une catégorie">📁 Catégorie</button>
+        <button class="btn btn-outline btn-sm" onclick="openItemModal()" title="Créer un article">＋ Article</button>
+      </div>`;
+  }
+
+  html += `
       </div>
-    </div>`;
-  }
+    </div>
 
-  // Sélecteur personnage + or
-  if (STATE.characters && STATE.characters.length > 0) {
-    const chars    = STATE.isAdmin ? STATE.characters : STATE.characters.filter(c => c.uid === STATE.user?.uid);
-    const activeId = window._shopCharId || chars[0]?.id || '';
-    if (!window._shopCharId) window._shopCharId = activeId;
-    const activeChar = chars.find(c => c.id === activeId);
-    const or = _getOr(activeChar);
-    html += `<div class="sh-char-selector">
-      <span class="sh-char-selector-label">🧙 Acheter en tant que</span>
-      <select class="input-field sh-modal-select sh-char-select" id="sh-char-sel" onchange="shopSetChar(this.value)">
-        ${chars.map(c=>`<option value="${c.id}" ${activeId===c.id?'selected':''}>${c.nom||'?'}</option>`).join('')}
-      </select>
-      <span class="sh-char-or" id="sh-char-or-display">💰 ${or} or</span>
-    </div>`;
-  }
+    <div class="sh-layout">
+      <div class="sh-sidebar-col">
+        ${_renderSidebarTop()}
+        ${_renderSidebar()}
+      </div>
 
-  html += _renderBreadcrumb();
-  if (_view === 'home')  html += _renderHome();
-  else if (_view === 'items') html += _renderItemsView();
-  html += `</div>`;
+      <div class="sh-main">
+        ${_renderNoCharBanner()}
+        ${_view === 'home' ? _renderHome() : _renderItemsView()}
+      </div>
+    </div>
+  </div>`;
+
   content.innerHTML = html;
 }
 
-// ── Breadcrumb ────────────────────────────────────────────────────────────────
-function _renderBreadcrumb() {
-  if (_view === 'home') return '';
-  const cat = _cats.find(c => c.id === _activeCat);
+function _renderNoCharBanner() {
+  if (_getActiveShopChar()) return '';
+  const hasAnyChar = _getShopChars().length > 0;
+  const msg = hasAnyChar
+    ? 'Sélectionne un personnage pour pouvoir acheter.'
+    : 'Crée un personnage pour pouvoir acheter dans la boutique.';
+  return `<div class="sh-no-char-banner" role="status">
+    <span class="sh-no-char-banner-icon">🧙</span>
+    <span class="sh-no-char-banner-text">${msg}</span>
+  </div>`;
+}
+
+function _renderSidebarTop() {
+  const chars = _getShopChars();
+  if (!chars.length) return '';
+
+  const activeChar = _getActiveShopChar();
+  const activeId = activeChar?.id || '';
+  const or = _getOr(activeChar);
+
   return `
-  <nav class="sh-breadcrumb" style="display:flex;align-items:center;gap:.4rem;margin-bottom:1rem;
-    padding:.55rem .8rem;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border)">
-    <button class="sh-crumb sh-crumb-link" onclick="shopGoHome()"
-      style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;color:var(--text-dim);
-      background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:6px;transition:color .15s"
-      onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">
-      🛒 Boutique
-    </button>
-    <span style="color:var(--border-strong);font-size:.9rem">›</span>
-    <span class="sh-crumb sh-crumb-active"
-      style="font-size:.82rem;color:var(--text);font-weight:600">${cat?.nom||'Catégorie'}</span>
-    <span style="margin-left:auto;font-size:.72rem;color:var(--text-dim)">
-      ${_items.filter(i=>i.categorieId===_activeCat).length} articles
-    </span>
-  </nav>`;
+    <div class="sh-sidebar-top">
+      <span class="sh-sidebar-label">Personnage actif</span>
+      <select
+        class="input-field sh-modal-select sh-char-select"
+        id="sh-char-sel"
+        onchange="shopSetChar(this.value)"
+        aria-label="Personnage actif"
+      >
+        ${chars.map(c => `<option value="${c.id}" ${activeId===c.id?'selected':''}>${c.nom||'?'}</option>`).join('')}
+      </select>
+
+      <div class="sh-sidebar-or" id="sh-char-or-display" title="Solde du personnage sélectionné">
+        <span class="sh-sidebar-or-icon" aria-hidden="true">🪙</span>
+        <span class="sh-sidebar-or-value" id="sh-char-or-value">${or}</span>
+        <span class="sh-sidebar-or-unit">or</span>
+      </div>
+
+    </div>
+  `;
+}
+
+function _renderSidebar() {
+  const totalItems = _items.length;
+
+  return `
+    <aside class="sh-sidebar">
+      <div class="sh-sidebar-section">
+        <button class="sh-side-link ${_view === 'home' ? 'active' : ''}" onclick="shopGoHome()">
+          <span class="sh-side-link-icon">🏠</span>
+          <span class="sh-side-link-text">
+            <strong>Toutes les catégories</strong>
+            <small>${_cats.length} catégories • ${totalItems} articles</small>
+          </span>
+        </button>
+      </div>
+
+      <div class="sh-sidebar-section">
+        <div class="sh-sidebar-label">Catégories</div>
+        <div class="sh-side-list">
+          ${_cats.map(cat => {
+            const count = _items.filter(i => i.categorieId === cat.id).length;
+            const active = _view === 'items' && _activeCat === cat.id;
+            const tpl = TEMPLATES[cat.template || 'classique'];
+
+            return `
+              <button class="sh-side-link ${active ? 'active' : ''}" onclick="shopGoCat('${cat.id}')">
+                <span class="sh-side-link-icon">${cat.emoji || _catEmoji(cat.nom)}</span>
+                <span class="sh-side-link-text">
+                  <strong>${cat.nom}</strong>
+                  <small>${tpl?.label || 'Type'} • ${count} article${count > 1 ? 's' : ''}</small>
+                </span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    </aside>
+  `;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -336,15 +389,16 @@ function _renderHome() {
       ${STATE.isAdmin?'<p style="font-size:0.82rem;margin-top:0.5rem;color:var(--text-dim)">Crée une catégorie pour commencer.</p>':''}</div>`;
   }
   let html = `<div class="sh-cat-grid">`;
+  const edit = STATE.isAdmin;
   _cats.forEach(cat => {
     const count = _items.filter(i => i.categorieId === cat.id).length;
     const tpl   = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card ${STATE.isAdmin?'sh-cat-draggable':''}"
-      draggable="${STATE.isAdmin?'true':'false'}" data-cat-id="${cat.id}"
-      ondragstart="${STATE.isAdmin?`shopCatDragStart(event,'${cat.id}')`:''}"
-      ondragover="${STATE.isAdmin?'shopCatDragOver(event)':''}"
-      ondrop="${STATE.isAdmin?`shopCatDrop(event,'${cat.id}')`:''}"
-      ondragend="${STATE.isAdmin?'shopCatDragEnd(event)':''}"
+    html += `<div class="sh-cat-card ${edit?'sh-cat-draggable':''}"
+      draggable="${edit?'true':'false'}" data-cat-id="${cat.id}"
+      ondragstart="${edit?`shopCatDragStart(event,'${cat.id}')`:''}"
+      ondragover="${edit?'shopCatDragOver(event)':''}"
+      ondrop="${edit?`shopCatDrop(event,'${cat.id}')`:''}"
+      ondragend="${edit?'shopCatDragEnd(event)':''}"
       onclick="shopGoCat('${cat.id}')">
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
@@ -354,9 +408,9 @@ function _renderHome() {
       <div class="sh-cat-body">
         <div class="sh-cat-name-row">
           <div class="sh-cat-name">${cat.nom}</div>
-          ${STATE.isAdmin?`<div class="sh-card-admin-inline" onclick="event.stopPropagation()">
-            <button class="btn-icon" onclick="openCatModal('${cat.id}')">✏️</button>
-            <button class="btn-icon" onclick="deleteCat('${cat.id}')">🗑️</button>
+          ${edit?`<div class="sh-card-admin-inline" onclick="event.stopPropagation()">
+            <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" onclick="openCatModal('${cat.id}')">✏️</button>
+            <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" onclick="deleteCat('${cat.id}')">🗑️</button>
           </div>`:''}
         </div>
         <div class="sh-cat-meta">${count} article${count!==1?'s':''}</div>
@@ -373,8 +427,8 @@ function _renderHome() {
 function _renderItemsView() {
   const cat = _cats.find(c => c.id === _activeCat);
   if (!cat) return '';
+  const tplCat = TEMPLATES[cat.template || 'classique'];
 
-  // Appliquer filtres
   let items = _items.filter(i => i.categorieId === _activeCat);
   const search = (_filterSearch||'').toLowerCase().trim();
   if (search) items = items.filter(i =>
@@ -383,13 +437,10 @@ function _renderItemsView() {
     (i.description||'').toLowerCase().includes(search) ||
     (i.effet||'').toLowerCase().includes(search)
   );
-  // ── Logique tags : OU au sein d'un groupe, ET entre groupes différents ──────
-  // Ex: rareté "Commun" OU "Rare" ET emplacement "Tête" → items qui sont (Commun OU Rare) ET Tête
+
   if (_filterTags.size > 0) {
-    // Reconstituer les groupes actifs
     const allItems0 = _items.filter(i => i.categorieId === _activeCat);
     const tagGroups0 = _buildTagGroups(allItems0);
-    // Map groupLabel → Set de valeurs actives dans ce groupe
     const activeByGroup = new Map();
     for (const group of tagGroups0) {
       const activeInGroup = group.tags.filter(t => _filterTags.has(t.value)).map(t => t.value);
@@ -397,13 +448,23 @@ function _renderItemsView() {
     }
     items = items.filter(i => {
       const iTags = _getItemTags(i);
-      // L'item doit satisfaire TOUS les groupes actifs (ET entre groupes)
       for (const [, groupVals] of activeByGroup) {
-        // Mais au sein d'un groupe c'est OU : suffit qu'un tag du groupe matche
         const matchesGroup = [...groupVals].some(v => iTags.has(v));
         if (!matchesGroup) return false;
       }
       return true;
+    });
+  }
+
+  if (_filterSort && _filterSort !== 'ordre') {
+    items = [...items].sort((a, b) => {
+      switch (_filterSort) {
+        case 'nom':       return (a.nom||'').localeCompare(b.nom||'', 'fr', { sensitivity:'base' });
+        case 'prix_asc':  return (parseFloat(a.prix)||0) - (parseFloat(b.prix)||0);
+        case 'prix_desc': return (parseFloat(b.prix)||0) - (parseFloat(a.prix)||0);
+        case 'rarete':    return (parseInt(b.rarete)||0) - (parseInt(a.rarete)||0);
+        default: return 0;
+      }
     });
   }
 
@@ -415,7 +476,18 @@ function _renderItemsView() {
   const tagGroups = _buildTagGroups(allItems);
   const hasFilters = search || _filterTags.size > 0;
 
+  const totalCat = _items.filter(i => i.categorieId === _activeCat).length;
   let html = `
+  <div class="sh-main-head sh-main-head--category">
+    <div class="sh-main-head-body">
+      <div class="sh-main-head-icon">${cat.emoji || _catEmoji(cat.nom)}</div>
+      <div style="min-width:0;flex:1">
+        <div class="sh-main-kicker">${tplCat?.label || 'Catégorie'}</div>
+        <div class="sh-main-title">${_esc(cat.nom)}</div>
+        <div class="sh-main-meta">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}</div>
+      </div>
+    </div>
+  </div>
   <div style="display:flex;flex-direction:column;gap:.75rem;margin-bottom:1rem">
     <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
       <div style="flex:1;min-width:200px;position:relative">
@@ -429,13 +501,20 @@ function _renderItemsView() {
           style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
           background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
       </div>
+      <select class="input-field sh-sort-select" onchange="shopSetSort(this.value)" aria-label="Trier par" title="Trier les articles">
+        <option value="ordre"     ${_filterSort==='ordre'?'selected':''}>Ordre manuel</option>
+        <option value="nom"       ${_filterSort==='nom'?'selected':''}>Nom (A→Z)</option>
+        <option value="prix_asc"  ${_filterSort==='prix_asc'?'selected':''}>Prix ↑</option>
+        <option value="prix_desc" ${_filterSort==='prix_desc'?'selected':''}>Prix ↓</option>
+        <option value="rarete"    ${_filterSort==='rarete'?'selected':''}>Rareté</option>
+      </select>
       <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0">
         <span id="sh-count" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
         <button id="sh-clear-btn" onclick="shopFilterReset()"
           style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
           border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b;
           display:${hasFilters?'':'none'}">✕ Tout effacer</button>
-        ${STATE.isAdmin?`<button class="btn btn-gold btn-sm" onclick="openItemModal()">+ Article</button>`:''}
+        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openItemModal()">+ Article</button>` : ''}
       </div>
     </div>
     ${tagGroups.length > 0 ? `
@@ -459,12 +538,12 @@ function _renderItemsView() {
       </div>`).join('')}
     </div>` : ''}
   </div>
-  <div id="sh-items-results">`; 
+  <div id="sh-items-results">`;
 
   if (slice.length === 0) {
     html += `<div class="empty-state"><div class="icon">📦</div>
       <p>${hasFilters ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasFilters&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>`:''}</div>`;
+      ${!hasFilters && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>` : ''}</div>`;
   } else {
     html += _renderItemGrid(cat, slice);
   }
@@ -479,14 +558,14 @@ function _renderItemsView() {
     if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
     html += `</div>`;
   }
-  html += `</div>`; // ferme #sh-items-results
+  html += `</div>`;
   return html;
 }
 
 function _getItemTags(item) {
   const tags = new Set();
   if (item.format)     tags.add(item.format);
-  if (item.sousType)   tags.add(item.sousType);   // type d'arme libre (Épée, Lance...)
+  if (item.sousType)   tags.add(item.sousType);
   if (item.slotArmure) tags.add(item.slotArmure);
   if (item.typeArmure) tags.add(item.typeArmure);
   if (item.slotBijou)  tags.add(item.slotBijou);
@@ -504,33 +583,65 @@ function _getItemTags(item) {
 
 function _buildTagGroups(items) {
   const groups = [];
-  const add = (label, vals, colorFn) => {
-    if (vals.length) groups.push({ label, tags: vals.map(v => ({ value:v, label:v, color: colorFn(v) })) });
-  };
   const formats = [...new Set(items.filter(i=>i.format).map(i=>i.format))].sort();
   if (formats.length) groups.push({ label:'Format', tags: formats.map(v=>({value:v,label:v,color:'#e8b84b'})) });
+
   const sousTypes = [...new Set(items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
   if (sousTypes.length) groups.push({ label:'Type arme', tags: sousTypes.map(v=>({value:v,label:v,color:'#e8b84b'})) });
+
   const slotA = [...new Set(items.filter(i=>i.slotArmure).map(i=>i.slotArmure))].sort();
   if (slotA.length) groups.push({ label:'Emplacement', tags: slotA.map(v=>({value:v,label:v,color:'#4f8cff'})) });
+
   const typeA = [...new Set(items.filter(i=>i.typeArmure).map(i=>i.typeArmure))].sort();
   if (typeA.length) groups.push({ label:'Type armure', tags: typeA.map(v=>({value:v,label:v,color:'#4f8cff'})) });
+
   const bijou = [...new Set(items.filter(i=>i.slotBijou).map(i=>i.slotBijou))].sort();
   if (bijou.length) groups.push({ label:'Bijou', tags: bijou.map(v=>({value:v,label:v,color:'#c084fc'})) });
+
   const typeL = [...new Set(items.filter(i=>i.type&&!i.format&&!i.slotArmure&&!i.slotBijou).map(i=>i.type))].sort();
   if (typeL.length) groups.push({ label:'Type', tags: typeL.map(v=>({value:v,label:v,color:'var(--text-muted)'})) });
+
   const raretes = [...new Set(items.filter(i=>i.rarete).map(i=>parseInt(i.rarete)).filter(Boolean))].sort();
   if (raretes.length) groups.push({ label:'Rareté', tags: raretes.map(r=>({
     value: RARETE_NAMES[r]||String(r),
     label: '★'.repeat(r)+' '+(RARETE_NAMES[r]||''),
     color: _rareteColor(RARETE_NAMES[r]),
   })) });
-  const hasStock = items.some(i=>{ const d=i.dispo!=null&&i.dispo!==''?parseInt(i.dispo):null; return d===null||d>0; });
+
+  const hasStock = items.some(i => {
+    const d = i.dispo!=null && i.dispo!=='' ? parseInt(i.dispo) : null;
+    return d===null || d>0;
+  });
   if (hasStock) groups.push({ label:'Dispo', tags:[
     {value:'En stock',label:'En stock',color:'#22c38e'},
     {value:'Illimité',label:'∞ Illimité',color:'#22c38e'},
   ] });
+
   return groups;
+}
+
+function _getShopChars() {
+  const all = Array.isArray(STATE.characters) ? STATE.characters : [];
+  return STATE.isAdmin
+    ? all
+    : all.filter(c => c.uid === STATE.user?.uid);
+}
+
+function _getActiveShopChar() {
+  const chars = _getShopChars();
+  if (!chars.length) {
+    window._shopCharId = '';
+    return null;
+  }
+
+  let active = chars.find(c => c.id === window._shopCharId);
+
+  if (!active) {
+    active = chars[0];
+    window._shopCharId = active?.id || '';
+  }
+
+  return active || null;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -543,99 +654,257 @@ function _renderItemGrid(cat, items) {
     `</div>`;
 }
 
+function _statVisual(statKey) {
+  const key = _normalizeStatKey(statKey);
+
+  const map = {
+    force:        { color: '#ef4444', short: 'For'  },
+    dexterite:    { color: '#22c55e', short: 'Dex' },
+    intelligence: { color: '#60a5fa', short: 'Int' },
+    sagesse:      { color: '#a78bfa', short: 'Sag' },
+    constitution: { color: '#f59e0b', short: 'Con' },
+    charisme:     { color: '#ec4899', short: 'Cha' },
+  };
+
+  return map[key] || {
+    color: 'var(--text-dim)',
+    short: _statShort(statKey) || '?',
+  };
+}
+
+function _getStatBonusEntries(item = {}) {
+  const parsed = _parseLegacyStats(item);
+
+  return ITEM_STATS
+    .map(stat => {
+      const val = parseInt(parsed[stat.store]) || 0;
+      if (!val) return null;
+
+      const visual = _statVisual(stat.key);
+
+      return {
+        short: stat.short,
+        val,
+        color: visual.color,
+      };
+    })
+    .filter(Boolean);
+}
+
+function _getItemTraits(item) {
+  if (Array.isArray(item.traits)) return item.traits.filter(Boolean);
+  if (item.trait) return String(item.trait).split(',').map(t => t.trim()).filter(Boolean);
+  return [];
+}
+
+function _getItemTypeLabel(item, tplKey) {
+  if (tplKey === 'arme') return item.sousType || 'Arme';
+  if (tplKey === 'armure') {
+    const parts = [item.slotArmure, item.typeArmure].filter(Boolean);
+    return parts.join(' · ') || 'Armure';
+  }
+  if (tplKey === 'bijou') return item.slotBijou || 'Bijou';
+  return item.type || 'Objet';
+}
+
+function _getItemFormatLabel(item, tplKey, cat) {
+  if (tplKey === 'arme') return item.format || cat?.nom || 'Arme';
+  if (tplKey === 'armure') return cat?.nom || 'Armure';
+  if (tplKey === 'bijou') return cat?.nom || 'Bijou';
+  return cat?.nom || 'Objet';
+}
+
+function _getItemStockText(dispo) {
+  if (dispo === null || dispo < 0) return '∞ Illimité';
+  if (dispo === 0) return 'Épuisé';
+  return `${dispo} dispo`;
+}
+
+function _renderFactRow(label, value) {
+  if (!value) return '';
+  return `
+    <div class="sh-item-fact">
+      <span class="sh-item-fact-label">${_esc(label)}</span>
+      <span class="sh-item-fact-value">${_esc(value)}</span>
+    </div>
+  `;
+}
+
+function _renderFactRowColored(label, value, color) {
+  if (!value) return '';
+  return `
+    <div class="sh-item-fact">
+      <span class="sh-item-fact-label">${_esc(label)}</span>
+      <span class="sh-item-fact-value" style="color:${color}">${_esc(value)}</span>
+    </div>
+  `;
+}
+
 function _renderItemCard(item, tplKey, itemIdx) {
-  const prix      = parseFloat(item.prix)||0;
+  const prix = parseFloat(item.prix) || 0;
   const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
-  const dispo     = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
-  const epuise    = dispo !== null && dispo === 0;
-  const illimite  = dispo === null || dispo < 0;
+  const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+  const epuise = dispo !== null && dispo === 0;
 
-  // Normaliser traits : array ou string legacy
-  const traitsArr = Array.isArray(item.traits) ? item.traits
-    : (item.trait ? item.trait.split(',').map(t=>t.trim()).filter(Boolean) : []);
+  const cat = _cats.find(c => c.id === item.categorieId);
+  const edit = STATE.isAdmin;
 
-  // ── Bloc infos selon template ──────────────────────────────────────────────
-  let infoHtml = '';
-  const statBonuses = _formatStatBonuses(item);
-  const combatMeta = _buildCombatMeta(item);
+  const rareteNum = parseInt(item.rarete) || 0;
+  const rareteStarsHtml = rareteNum ? _rareteStars(rareteNum) : '';
+  const rareteName = rareteNum ? (RARETE_NAMES[rareteNum] || '') : '';
+  const rareteColor = rareteNum > 0 ? _rareteColor(RARETE_NAMES[rareteNum]) : '';
+
+  const activeChar = _getActiveShopChar();
+  const hasChar = !!activeChar;
+  const solde = _getOr(activeChar);
+  const tropCher = hasChar && prix > solde;
+  const manque = tropCher ? Math.ceil(prix - solde) : 0;
+
+  const statBonuses = _getStatBonusEntries(item);
+  const traits = _getItemTraits(item);
+  const traitsPreview = traits.slice(0, 2);
+  const hiddenTraitsCount = Math.max(0, traits.length - traitsPreview.length);
+
+  const typeLabel = _getItemTypeLabel(item, tplKey);
+  const formatLabel = _getItemFormatLabel(item, tplKey, cat);
+
+  const factRows = [];
+
   if (tplKey === 'arme') {
-    infoHtml = `
-      <div class="sh-item-tags">
-        ${item.format  ? `<span class="sh-tag sh-tag-fmt">${item.format.replace('Arme ','').replace(' Phy.','').replace(' Mag.',' ✨')}</span>` : ''}
-        ${item.sousType ? `<span class="sh-tag">${item.sousType}</span>` : ''}
-        ${item.rarete  ? _rareteStars(item.rarete) : ''}
-        ${dispo !== null ? _dispoDisplay(item.dispo) : ''}
-      </div>
-      <div class="sh-item-combat">
-        ${item.degats      ? `<span class="sh-combat-chip"><span class="sh-cc-label">⚔️</span><span class="sh-cc-val red">${item.degats}${item.degatsStat?`+${_statShort(item.degatsStat)}`:''}</span></span>` : ''}
-        ${item.toucherStat ? `<span class="sh-combat-chip"><span class="sh-cc-label">🎯</span><span class="sh-cc-val gold">${_statShort(item.toucherStat)}</span></span>` : ''}
-        ${item.portee      ? `<span class="sh-combat-chip"><span class="sh-cc-label">📏</span><span class="sh-cc-val">${item.portee}</span></span>` : ''}
-      </div>
-      ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
-      ${traitsArr.length ? `<div class="sh-item-traits">${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}</div>` : ''}`;
-  } else if (tplKey === 'armure') {
-    infoHtml = `
-      <div class="sh-item-tags">
-        ${item.slotArmure  ? `<span class="sh-tag">${item.slotArmure}</span>` : ''}
-        ${item.typeArmure  ? `<span class="sh-tag sh-tag-fmt">${item.typeArmure}</span>` : ''}
-        ${item.rarete ? _rareteStars(item.rarete) : ''}
-        ${(item.ca||0) > 0 ? `<span class="sh-tag sh-tag-ca">🛡️ +${parseInt(item.ca)||0} CA</span>` : ''}
-        ${dispo !== null ? _dispoDisplay(item.dispo) : ''}
-      </div>
-      ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
-      ${traitsArr.length ? `<div class="sh-item-traits">${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}</div>` : ''}`;
-  } else if (tplKey === 'bijou') {
-    infoHtml = `
-      <div class="sh-item-tags">
-        ${item.slotBijou ? `<span class="sh-tag">${item.slotBijou}</span>` : ''}
-        ${item.rarete ? _rareteStars(item.rarete) : ''}
-        ${dispo !== null ? _dispoDisplay(item.dispo) : ''}
-      </div>
-      ${statBonuses.length ? `<div class="sh-item-stats">${statBonuses.join(' · ')}</div>` : ''}
-      ${traitsArr.length ? `<div class="sh-item-traits">${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}</div>` : ''}`;
-  } else {
-    infoHtml = `
-      ${item.type   ? `<div class="sh-item-type">${item.type}</div>` : ''}
-      ${item.effet  ? `<div class="sh-item-effet">${item.effet}</div>` : ''}
-      ${item.description ? `<div class="sh-item-desc-tooltip" title="${item.description.replace(/"/g,'&quot;')}">ℹ️ ${item.description.length>60?item.description.slice(0,60)+'…':item.description}</div>` : ''}
-      ${dispo !== null ? `<div class="sh-item-tags">${_dispoDisplay(item.dispo)}</div>` : ''}`;
+    const degatsTxt = item.degats
+      ? `${item.degats}${item.degatsStat ? ` + ${_statShort(item.degatsStat)}` : ''}`
+      : '';
+    const toucherTxt = item.toucherStat ? _statShort(item.toucherStat) : '';
+    const toucherColor = item.toucherStat ? _statVisual(item.toucherStat).color : 'var(--text)';
+
+    factRows.push(_renderFactRow('Type', typeLabel));
+    factRows.push(_renderFactRow('Dégâts', degatsTxt));
+    factRows.push(_renderFactRowColored('Toucher', toucherTxt, toucherColor));
+    factRows.push(_renderFactRow('Portée', item.portee || ''));
   }
 
-  const hasChar = !!window._shopCharId;
+  if (tplKey === 'armure') {
+    factRows.push(_renderFactRow('Emplacement', item.slotArmure || ''));
+    factRows.push(_renderFactRow('Type', item.typeArmure || ''));
+    factRows.push(_renderFactRow('CA', item.ca ? `+${parseInt(item.ca) || 0}` : ''));
+  }
 
-  return `<div class="sh-item-card ${epuise?'sh-item-epuise':''} ${STATE.isAdmin?'sh-dnd-handle':''}"
-    ${STATE.isAdmin&&itemIdx!==''?`draggable="true" ondragstart="shopItemDragStart(event,'${item.id}')" ondragover="shopItemDragOver(event)" ondrop="shopItemDrop(event,'${item.id}')" ondragend="shopItemDragEnd(event)"`:''}>
-    <div class="sh-item-img" style="${item.image?`background-image:url('${item.image}')`:_catGradient(item.nom||'')}">
-      <div class="sh-item-img-overlay"></div>
-      ${epuise ? `<div class="sh-epuise-badge">Épuisé</div>` : ''}
-    </div>
-    <div class="sh-item-body" onclick="openShopItemDetail('${item.id}')">
-      <div class="sh-item-name">${item.nom||'?'}</div>
-      ${infoHtml}
-      <div class="sh-item-footer">
-        <div class="sh-item-prix-row">
-          <span class="sh-item-prix-achat">💰 ${prix} or</span>
-          <span class="sh-item-prix-vente" title="Revente (60%)">↩ ${prixVente}</span>
+  if (tplKey === 'bijou') {
+    factRows.push(_renderFactRow('Type', item.slotBijou || ''));
+  }
+
+  if (tplKey === 'classique' || tplKey === 'libre') {
+    factRows.push(_renderFactRow('Type', item.type || ''));
+    if (item.effet) factRows.push(_renderFactRow('Effet', item.effet));
+  }
+
+  let buyBtnHtml;
+  if (!hasChar) {
+    buyBtnHtml = `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Sélectionne un personnage">Choisir un personnage</button>`;
+  } else if (epuise) {
+    buyBtnHtml = `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Cet article est épuisé">Épuisé</button>`;
+  } else if (tropCher) {
+    buyBtnHtml = `<button class="btn sh-buy-btn sh-buy-btn--poor" disabled title="Il te manque ${manque} or">Pas assez d'or</button>`;
+  } else {
+    buyBtnHtml = `<button class="btn sh-buy-btn" onclick="event.stopPropagation();buyItem('${item.id}')">🛒 Acheter</button>`;
+  }
+
+  return `
+    <article class="sh-item-card sh-item-card--detailed ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-dnd-handle' : ''}"
+      ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}
+      ${edit && itemIdx !== '' ? `draggable="true" ondragstart="shopItemDragStart(event,'${item.id}')" ondragover="shopItemDragOver(event)" ondrop="shopItemDrop(event,'${item.id}')" ondragend="shopItemDragEnd(event)"` : ''}
+    >
+      <div class="sh-item-img" style="${item.image ? `background-image:url('${item.image}')` : _catGradient(item.nom || '')}">
+        <div class="sh-item-img-overlay"></div>
+
+        <div class="sh-item-overlay-top">
+          ${epuise ? `<span class="sh-epuise-badge">Épuisé</span>` : ''}
         </div>
-        ${hasChar ? (
-          epuise
-            ? `<button class="btn sh-buy-btn" disabled style="opacity:.4;cursor:not-allowed">Épuisé</button>`
-            : `<button class="btn sh-buy-btn" onclick="event.stopPropagation();buyItem('${item.id}')">🛒 Acheter</button>`
-        ) : ''}
+
+        ${rareteNum ? `
+          <span class="sh-item-rarete-badge sh-badge-image-bottom-right">
+            ${rareteStarsHtml}
+            <span class="sh-item-rarete-badge-label">${_esc(rareteName)}</span>
+          </span>
+        ` : ''}
+
+        <div class="sh-item-overlay-bottom">
+          <span class="sh-item-format-badge">${_esc(formatLabel)}</span>
+        </div>
       </div>
-    </div>
-    ${STATE.isAdmin?`<div class="sh-item-actions" onclick="event.stopPropagation()">
-      <button class="btn-icon" onclick="openItemModal('${item.id}')">✏️</button>
-      <button class="btn-icon" onclick="deleteShopItem('${item.id}')">🗑️</button>
-    </div>`:''}
-  </div>`;
+
+      <div class="sh-item-body" onclick="openShopItemDetail('${item.id}')">
+        <div class="sh-item-header">
+          <div class="sh-item-name">${_esc(item.nom || '?')}</div>
+        </div>
+
+        ${factRows.filter(Boolean).length ? `
+          <div class="sh-item-section">
+            <div class="sh-item-facts">
+              ${factRows.join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        ${statBonuses.length ? `
+          <div class="sh-item-section">
+            <div class="sh-item-section-title">Bonus</div>
+            <div class="sh-item-bonus-list">
+              ${statBonuses.map(stat => `
+                <span
+                  class="sh-item-bonus-chip"
+                  style="
+                    border-color:${stat.color}55;
+                    background:${stat.color}18;
+                    color:${stat.color};
+                  "
+                >
+                  ${_esc(`${stat.short} ${stat.val > 0 ? '+' : ''}${stat.val}`)}
+                </span>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        ${traitsPreview.length ? `
+          <div class="sh-item-section">
+            <div class="sh-item-section-title">Traits</div>
+            <ul class="sh-item-traits-list sh-item-traits-list--compact">
+              ${traitsPreview.map(t => `<li class="sh-item-trait-line">${_esc(t)}</li>`).join('')}
+            </ul>
+            ${hiddenTraitsCount ? `<div class="sh-item-traits-more">+${hiddenTraitsCount} autre${hiddenTraitsCount > 1 ? 's' : ''}</div>` : ''}
+          </div>
+        ` : ''}
+
+        <div class="sh-item-footer">
+          <div class="sh-item-pricing">
+            <div class="sh-item-price-main">💰 ${prix} or</div>
+            <div class="sh-item-price-sub">Revente ${prixVente} or</div>
+          </div>
+
+          <div class="sh-item-footer-meta">
+            <span class="sh-item-stock-line">Stock : ${_getItemStockText(dispo)}</span>
+            ${tropCher ? `<span class="sh-item-missing-line">Il manque ${manque} or</span>` : ''}
+          </div>
+
+          ${buyBtnHtml}
+        </div>
+      </div>
+
+      ${edit ? `
+        <div class="sh-item-actions" onclick="event.stopPropagation()">
+          <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" onclick="openItemModal('${item.id}')">✏️</button>
+          <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" onclick="deleteShopItem('${item.id}')">🗑️</button>
+        </div>
+      ` : ''}
+    </article>
+  `;
 }
 
 function openShopItemDetail(itemId) {
   const item = _items.find(i => i.id === itemId);
   if (!item) return;
   const cat    = _cats.find(c => c.id === item.categorieId);
-  const tplKey = cat?.template || 'classique';
   const prix   = parseFloat(item.prix) || 0;
   const prixV  = Math.round(prix * PRIX_VENTE_RATIO);
   const dispo  = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
@@ -643,7 +912,11 @@ function openShopItemDetail(itemId) {
   const traitsArr = Array.isArray(item.traits) ? item.traits
     : (item.trait ? item.trait.split(',').map(t=>t.trim()).filter(Boolean) : []);
   const statBonuses = _formatStatBonuses(item);
-  const hasChar = !!window._shopCharId;
+  const activeChar = _getActiveShopChar();
+  const hasChar = !!activeChar;
+  const solde = _getOr(activeChar);
+  const tropCher = hasChar && prix > solde;
+  const manque = tropCher ? Math.ceil(prix - solde) : 0;
 
   const rows = [];
   if (item.format)      rows.push(['Format', item.format]);
@@ -694,14 +967,42 @@ function openShopItemDetail(itemId) {
       </div>
       <div style="display:flex;gap:.5rem">
         ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="closeModalDirect();openItemModal('${item.id}')">✏️ Modifier</button>` : ''}
-        ${hasChar && !epuise ? `<button class="btn btn-gold btn-sm" onclick="closeModalDirect();buyItem('${item.id}')">🛒 Acheter</button>` : ''}
-        ${epuise ? `<span style="font-size:.78rem;color:#ff6b6b;padding:.4rem .75rem;background:rgba(255,107,107,.1);border-radius:8px">Épuisé</span>` : ''}
+        ${!hasChar ? `
+          <button
+            class="btn btn-outline btn-sm"
+            disabled
+            title="Sélectionne un personnage pour acheter"
+            style="opacity:.7;cursor:not-allowed"
+          >
+            Choisis un personnage
+          </button>
+        ` : epuise ? `
+          <button
+            class="btn btn-outline btn-sm"
+            disabled
+            title="Cet article est épuisé"
+            style="opacity:.7;cursor:not-allowed"
+          >
+            Épuisé
+          </button>
+        ` : tropCher ? `
+          <button
+            class="btn btn-danger btn-sm"
+            disabled
+            title="Il te manque ${manque} or"
+            style="opacity:1;cursor:not-allowed"
+          >
+            Pas assez d'or
+          </button>
+        ` : `
+          <button class="btn btn-gold btn-sm" onclick="closeModalDirect();buyItem('${item.id}')">
+            🛒 Acheter
+          </button>
+        `}
       </div>
     </div>
   `);
 }
-
-// _esc → importé depuis shared/html.js
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SÉLECTEUR PERSONNAGE
@@ -710,33 +1011,40 @@ function shopSetChar(charId) {
   window._shopCharId = charId;
   const c  = STATE.characters?.find(x => x.id === charId);
   const or = _getOr(c);
-  const el = document.getElementById('sh-char-or-display');
-  if (el) el.textContent = `💰 ${or} or`;
+  const valEl = document.getElementById('sh-char-or-value');
+  if (valEl) valEl.textContent = or;
+  renderShop();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ACHAT — modal avec sélection de quantité
 // ══════════════════════════════════════════════════════════════════════════════
 async function buyItem(itemId) {
-  const charId = window._shopCharId;
-  if (!charId) { showNotif("Sélectionne un personnage d\'abord.", 'error'); return; }
+  const c = _getActiveShopChar();
+  if (!c) { showNotif("Sélectionne un personnage d'abord.", 'error'); return; }
+
   const item = _items.find(i => i.id === itemId);
   if (!item) return;
+
   const dispo    = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
   const illimite = dispo === null || dispo < 0;
   if (!illimite && dispo === 0) { showNotif('Article épuisé.', 'error'); return; }
+
   const prix  = parseFloat(item.prix) || 0;
-  const c     = STATE.characters?.find(x => x.id === charId);
-  if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
   const solde = _getOr(c);
+
   const maxAffordable = prix > 0 ? Math.floor(solde / prix) : 99;
   const maxStock      = illimite ? 99 : dispo;
   const maxQte        = Math.min(maxAffordable, maxStock, 99);
   if (maxQte < 1) { showNotif(`Fonds insuffisants — Solde : ${solde} or / Prix : ${prix} or.`, 'error'); return; }
 
+  if (maxQte === 1) {
+    return confirmBuyItem(itemId, 1);
+  }
+
   openModal(`🛒 Acheter — ${item.nom}`, `
     <div style="margin-bottom:.75rem">
-      <div style="font-family:\'Cinzel\',serif;font-size:.95rem;color:var(--text);margin-bottom:.2rem">${item.nom}</div>
+      <div style="font-family:'Cinzel',serif;font-size:.95rem;color:var(--text);margin-bottom:.2rem">${item.nom}</div>
       <div style="font-size:.8rem;color:var(--text-dim)">
         💰 ${prix} or/u · Solde : <strong style="color:var(--gold)">${solde} or</strong>
         ${!illimite ? ` · Stock : ${dispo}` : ''}
@@ -746,25 +1054,25 @@ async function buyItem(itemId) {
       <label style="flex-shrink:0">Quantité</label>
       <div style="display:flex;align-items:center;gap:.4rem">
         <button type="button"
-          onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event(\'input\'))"
+          onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event('input'))"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
         <input type="number" id="buy-qty" min="1" max="${maxQte}" value="1"
           style="width:60px;text-align:center" class="input-field"
           oninput="
             const v=Math.min(Math.max(1,parseInt(this.value)||1),${maxQte});
             this.value=v;
-            document.getElementById(\'buy-total\').textContent=(v*${prix})+\' or\';
-            document.getElementById(\'buy-confirm\').textContent=\'🛒 Acheter ×\'+v+\' — \'+(v*${prix})+\' or\';
+            document.getElementById('buy-total').textContent=(v*${prix})+' or';
+            document.getElementById('buy-confirm').textContent='🛒 Acheter ×'+v+' — '+(v*${prix})+' or';
           ">
         <button type="button"
-          onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event(\'input\'))"
+          onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event('input'))"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
       </div>
       <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="buy-total" style="color:var(--gold)">${prix} or</strong></span>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button id="buy-confirm" class="btn btn-gold" style="flex:1"
-        onclick="confirmBuyItem(\'${itemId}\')">
+        onclick="confirmBuyItem('${itemId}')">
         🛒 Acheter ×1 — ${prix} or
       </button>
       <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
@@ -772,12 +1080,14 @@ async function buyItem(itemId) {
   `);
 }
 
-async function confirmBuyItem(itemId) {
+async function confirmBuyItem(itemId, directQty) {
   try {
     const charId   = window._shopCharId;
     const item     = _items.find(i => i.id === itemId);
     if (!item || !charId) return;
-    const qty      = Math.max(1, parseInt(document.getElementById('buy-qty')?.value)||1);
+    const qty      = directQty != null
+      ? Math.max(1, parseInt(directQty) || 1)
+      : Math.max(1, parseInt(document.getElementById('buy-qty')?.value)||1);
     const dispo    = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
     const illimite = dispo === null || dispo < 0;
     const prix     = parseFloat(item.prix) || 0;
@@ -804,7 +1114,7 @@ async function confirmBuyItem(itemId) {
       degats:item.degats||'', degatsStat:item.degatsStat||'',
       toucher:item.toucher||'', toucherStat:item.toucherStat||'',
       ca:item.ca||'', stats:item.stats||'',
-      fo:parseInt(item.fo)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
+      for:parseInt(item.for)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
       sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
       effet:item.effet||'', description:item.description||'',
       slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
@@ -832,19 +1142,27 @@ async function confirmBuyItem(itemId) {
     c.inventaire = inv;
     c.compte     = { ...compte, depenses };
 
-    const orEl = document.getElementById('sh-char-or-display');
-    if (orEl) orEl.textContent = `💰 ${_getOr(c)} or`;
-
-    closeModalDirect();
+    const newOr = _getOr(c);
+    if (directQty == null) closeModalDirect();
     showNotif(`✅ ×${qty} "${item.nom}" acheté${qty>1?'s':''} pour ${total} or !`, 'success');
     renderShop();
+
+    requestAnimationFrame(() => {
+      const valEl = document.getElementById('sh-char-or-value');
+      const pastille = document.getElementById('sh-char-or-display');
+      if (valEl) _animateCount(valEl, solde, newOr, 450);
+      if (pastille) {
+        pastille.classList.remove('sh-wallet-or--flash');
+        void pastille.offsetWidth;
+        pastille.classList.add('sh-wallet-or--flash');
+      }
+    });
   } catch (e) {
     console.error('[save]', e);
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
 }
 
-// Exposer pour characters.js — réincrémenter 1 unité du stock boutique
 window._restockShopItem = async (itemId) => {
   const shopItem = _items.find(i => i.id === itemId);
   if (!shopItem) return;
@@ -854,7 +1172,6 @@ window._restockShopItem = async (itemId) => {
     shopItem.dispo = cur + 1;
   }
 };
-
 
 // ══════════════════════════════════════════════════════════════════════════════
 // VENDRE un item de l'inventaire (appelé depuis characters.js)
@@ -873,21 +1190,18 @@ async function sellInvItemFromShop(charId, invIndex) {
 
     if (!await confirmModal(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
 
-    // 1. Réincrémenter le stock dans la boutique (si l'article existe encore)
     if (item.itemId) {
       const shopItem = await import('../data/firestore.js').then(m => m.getDocData('shop', item.itemId)).catch(()=>null);
       if (shopItem) {
         const curDispo = shopItem.dispo !== undefined && shopItem.dispo !== '' ? parseInt(shopItem.dispo) : null;
         if (curDispo !== null && curDispo >= 0) {
           await updateInCol('shop', item.itemId, { dispo: curDispo + 1 });
-          // Mettre à jour _items local si la boutique est chargée
           const si = _items.find(i => i.id === item.itemId);
           if (si) si.dispo = curDispo + 1;
         }
       }
     }
 
-    // 2. Créditer l'or via le compte
     const compte   = c.compte || { recettes:[], depenses:[] };
     const recettes = [...(compte.recettes||[])];
     recettes.push({
@@ -896,10 +1210,8 @@ async function sellInvItemFromShop(charId, invIndex) {
       montant: prixVente,
     });
 
-    // 3. Retirer l'item de l'inventaire
     inv.splice(invIndex, 1);
 
-    // 4. Sauvegarder
     await updateInCol('characters', charId, {
       inventaire: inv,
       compte:     { ...compte, recettes },
@@ -914,7 +1226,6 @@ async function sellInvItemFromShop(charId, invIndex) {
   }
 }
 
-// Exposer pour characters.js
 window.sellInvItemFromShop = sellInvItemFromShop;
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -923,6 +1234,11 @@ window.sellInvItemFromShop = sellInvItemFromShop;
 function shopGoHome()     { _view='home';  _activeCat=null; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
 function shopGoCat(catId) { _view='items'; _activeCat=catId; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
 function shopPage(p)      { _page=p; renderShop(); }
+function shopSetSort(val) {
+  _filterSort = val;
+  localStorage.setItem('shop_sort', val);
+  renderShop();
+}
 
 // ── Fonctions de filtre ───────────────────────────────────────────────────────
 function shopFilterSearch(val) {
@@ -941,7 +1257,9 @@ function shopToggleTag(val) {
 }
 
 function shopFilterReset() {
-  _filterSearch = ''; _filterTags.clear(); _page = 1;
+  _filterSearch = '';
+  _filterTags.clear();
+  _page = 1;
   const inp = document.getElementById('sh-search');
   if (inp) inp.value = '';
   if (_view === 'items') _updateItemsOnly();
@@ -953,7 +1271,6 @@ function _updateItemsOnly() {
   const cat = _cats.find(c => c.id === _activeCat);
   if (!cat) { renderShop(); return; }
 
-  // ── Recalculer items filtrés ────────────────────────────────────────────
   let items = _items.filter(i => i.categorieId === _activeCat);
   const search = (_filterSearch||'').toLowerCase().trim();
   if (search) items = items.filter(i =>
@@ -963,6 +1280,7 @@ function _updateItemsOnly() {
     (i.description||'').toLowerCase().includes(search) ||
     (i.effet||'').toLowerCase().includes(search)
   );
+
   if (_filterTags.size > 0) {
     const tagGroups0 = _buildTagGroups(_items.filter(i => i.categorieId === _activeCat));
     const activeByGroup = new Map();
@@ -985,15 +1303,12 @@ function _updateItemsOnly() {
   const slice  = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
   const hasF   = search || _filterTags.size > 0;
 
-  // ── Mettre à jour le compteur ───────────────────────────────────────────
   const counter = document.getElementById('sh-count');
   if (counter) counter.textContent = `${total} article${total!==1?'s':''}`;
 
-  // ── Mettre à jour le bouton "Tout effacer" ──────────────────────────────
   const clearBtn = document.getElementById('sh-clear-btn');
   if (clearBtn) clearBtn.style.display = hasF ? '' : 'none';
 
-  // ── Mettre à jour l'état visuel des boutons tags (sans recréer le DOM) ──
   document.querySelectorAll('[data-tag-value]').forEach(btn => {
     const v     = btn.dataset.tagValue;
     const color = btn.dataset.tagColor || 'var(--text-dim)';
@@ -1004,7 +1319,6 @@ function _updateItemsOnly() {
     btn.style.fontWeight  = active ? '600' : '400';
   });
 
-  // ── Mettre à jour la grille + pagination ────────────────────────────────
   const grid = document.getElementById('sh-items-results');
   if (!grid) { renderShop(); return; }
 
@@ -1012,10 +1326,11 @@ function _updateItemsOnly() {
   if (slice.length === 0) {
     html = `<div class="empty-state"><div class="icon">📦</div>
       <p>${hasF ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasF&&STATE.isAdmin?`<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>`:''}</div>`;
+      ${!hasF && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>` : ''}</div>`;
   } else {
     html = _renderItemGrid(cat, slice);
   }
+
   if (pages > 1) {
     html += `<div class="sh-pagination">`;
     if (p>1) html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
@@ -1090,7 +1405,6 @@ async function shopItemDrop(e,toItemId){
   const fromId=_dragItemId; _dragItemId=null;
   if(!fromId||fromId===toItemId) return;
   let items=_items.filter(i=>i.categorieId===_activeCat);
-  if(_activeSubCat) items=items.filter(i=>i.sousCategorieId===_activeSubCat);
   const fromIdx=items.findIndex(i=>i.id===fromId), toIdx=items.findIndex(i=>i.id===toItemId);
   if(fromIdx<0||toIdx<0) return;
   const rect=e.currentTarget.getBoundingClientRect(), insertAfter=e.clientY>=rect.top+rect.height/2;
@@ -1223,7 +1537,6 @@ async function deleteSubCat(catId,scId) {
     const cat=_cats.find(c=>c.id===catId); if(!cat) return;
     const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
     await updateInCol('shopCategories',catId,{sousCats});
-    if(_activeSubCat===scId){_view='cat';_activeSubCat=null;}
     showNotif('Sous-catégorie supprimée.','success'); renderShop();
   } catch (e) {
     console.error('[save]', e);
@@ -1339,9 +1652,7 @@ function _buildFieldsHtml(tpl,item) {
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
         <textarea class="input-field" id="si-${f.id}" rows="2">${val}</textarea></div>`;
     } else if(f.type==='trait_list'){
-      // traits est un array, ou une string legacy (ancien champ 'trait')
-      const traitsArr = Array.isArray(item?.traits) ? item.traits
-        : (item?.trait ? [item.trait] : []);
+      const traitsArr = Array.isArray(item?.traits) ? item.traits : (item?.trait ? [item.trait] : []);
       const traitsJson = JSON.stringify(traitsArr).replace(/"/g,'&quot;');
       html+=`<div class="form-group sh-field-full">
         <label>${f.label}</label>
@@ -1364,7 +1675,7 @@ function _buildFieldsHtml(tpl,item) {
           + Ajouter un trait
         </button>
       </div>`;
-      } else {
+    } else {
       const inputType = f.type === 'number' ? 'number' : 'text';
       html+=`<div class="form-group"><label>${f.label}</label>
         <input type="${inputType}" class="input-field" id="si-${f.id}" value="${val}" placeholder="${f.placeholder||''}"></div>`;
@@ -1401,7 +1712,6 @@ function _shopTraitsRender(arr) {
 }
 window._shopTraitAdd = () => {
   const arr = _shopTraitsGet(); arr.push(''); _shopTraitsSet(arr); _shopTraitsRender(arr);
-  // Focus le dernier input
   const list = document.getElementById('si-traits-list');
   const inputs = list?.querySelectorAll('input');
   inputs?.[inputs.length-1]?.focus();
@@ -1412,7 +1722,6 @@ window._shopTraitUpdate = (i, val) => {
 window._shopTraitRemove = (i) => {
   const arr = _shopTraitsGet(); arr.splice(i,1); _shopTraitsSet(arr); _shopTraitsRender(arr);
 };
-
 
 function toggleDispoInfini(cb){
   const input=document.getElementById('si-dispo'); if(!input) return;
@@ -1478,7 +1787,6 @@ async function saveShopItem(itemId) {
           data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
         });
       } else if (f.type === 'trait_list') {
-        // Lire depuis le champ caché + mettre à jour les inputs
         const inputs = document.querySelectorAll('#si-traits-list input');
         const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
         data.traits = arr;
@@ -1501,7 +1809,6 @@ async function saveShopItem(itemId) {
 
     data.prixVente=Math.round((parseFloat(data.prix)||0)*PRIX_VENTE_RATIO);
 
-    // Handle recipe checkbox
     const hasRecipe = document.getElementById('si-has-recipe')?.checked;
     if (hasRecipe) {
       if (item?.recipeMeta) {
@@ -1516,7 +1823,6 @@ async function saveShopItem(itemId) {
     if(itemId) await updateInCol('shop',itemId,data);
     else await addToCol('shop',data);
 
-    // ── Synchroniser inventaires et équipements des personnages ─────────────
     if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
 
     closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
@@ -1537,7 +1843,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 
   const SYNC_FIELDS = [
     'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
-    'fo','dex','in','sa','co','ch','traits','portee','type','effet','description',
+    'for','dex','in','sa','co','ch','traits','portee','type','effet','description',
     'slotArmure','typeArmure','slotBijou','prixVente','sousType',
   ];
 
@@ -1548,19 +1854,16 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
     const inv   = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     const equip = { ...(c.equipement||{}) };
 
-    // Mettre à jour les items dans l'inventaire
     inv.forEach((item, i) => {
       if (item.source === 'boutique' && item.itemId === itemId) {
         SYNC_FIELDS.forEach(f => {
           if (newData[f] !== undefined) inv[i] = { ...inv[i], [f]: newData[f] };
         });
-        // Mettre à jour prixAchat si le prix change
         if (newData.prix !== undefined) inv[i].prixAchat = parseFloat(newData.prix)||0;
         changed = true;
       }
     });
 
-    // Mettre à jour les slots d'équipement qui ont sourceInvIndex ou itemId
     Object.entries(equip).forEach(([slot, equipped]) => {
       if (equipped?.itemId === itemId) {
         const syncEquip = {};
@@ -1568,9 +1871,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
         if (newData.nom !== undefined) syncEquip.nom = newData.nom;
         equip[slot] = { ...equipped, ...syncEquip };
         changed = true;
-      }
-      // Fallback : sync via sourceInvIndex
-      else if (equipped?.sourceInvIndex !== undefined) {
+      } else if (equipped?.sourceInvIndex !== undefined) {
         const invItem = inv[equipped.sourceInvIndex];
         if (invItem?.itemId === itemId) {
           const syncEquip = {};
@@ -1622,4 +1923,5 @@ Object.assign(window,{
   shopScDragStart, shopScDragOver, shopScDragEnd, shopScDrop,
   shopItemDragStart, shopItemDragOver, shopItemDragEnd, shopItemDrop,
   shopFilterSearch, shopFilterBy, shopFilterReset, shopToggleTag,
+  shopSetSort,
 });

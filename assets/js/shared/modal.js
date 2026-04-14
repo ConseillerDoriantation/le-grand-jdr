@@ -2,13 +2,57 @@
 // MODAL — Composant partagé
 // ══════════════════════════════════════════════
 
+const _modalStack = [];
+
 export function openModal(title, bodyHtml) {
+  _modalStack.length = 0;
   const titleEl = document.querySelector('#modal-title span');
   const bodyEl  = document.getElementById('modal-body');
   const overlay = document.getElementById('modal-overlay');
   if (titleEl) titleEl.textContent = title;
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   overlay?.classList.add('show');
+}
+
+export function pushModal(title, bodyHtml, restore = null) {
+  const titleEl = document.querySelector('#modal-title span');
+  const bodyEl  = document.getElementById('modal-body');
+  const overlay = document.getElementById('modal-overlay');
+
+  if (titleEl && bodyEl && overlay?.classList.contains('show')) {
+    _modalStack.push({
+      title: titleEl.textContent || '',
+      body: bodyEl.innerHTML || '',
+      restore,
+    });
+  }
+
+  if (titleEl) titleEl.textContent = title;
+  if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
+  overlay?.classList.add('show');
+}
+
+export function popModal() {
+  if (_modalStack.length === 0) {
+    closeModalDirect();
+    return;
+  }
+
+  const previous = _modalStack.pop();
+  const titleEl = document.querySelector('#modal-title span');
+  const bodyEl  = document.getElementById('modal-body');
+  if (titleEl) titleEl.textContent = previous.title;
+  if (bodyEl)  bodyEl.innerHTML    = previous.body;
+  if (typeof previous.restore === 'function') {
+    previous.restore();
+  }
+}
+
+export function updateModalContent(title, bodyHtml) {
+  const titleEl = document.querySelector('#modal-title span');
+  const bodyEl  = document.getElementById('modal-body');
+  if (titleEl) titleEl.textContent = title;
+  if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
 }
 
 // Ferme seulement si clic sur l'overlay lui-même (pas sur la modal)
@@ -19,6 +63,9 @@ export function closeModal(e) {
 
 // Ferme toujours — utilisée par le bouton ✕ et Escape
 export function closeModalDirect() {
+  if (_modalStack.length > 0) {
+    return popModal();
+  }
   document.getElementById('modal-overlay')?.classList.remove('show');
 }
 
@@ -33,6 +80,7 @@ export function closeModalDirect() {
 //   icon          — emoji affiché devant le message (défaut : '⚠️')
 
 export function confirmModal(message, {
+  title = '',
   confirmLabel = 'Confirmer',
   cancelLabel  = 'Annuler',
   danger       = true,
@@ -50,16 +98,6 @@ export function confirmModal(message, {
         <div style="font-size:.92rem;color:var(--text-soft);line-height:1.55;
           max-width:320px">${message}</div>
         <div style="display:flex;gap:.6rem;margin-top:.25rem;width:100%">
-          <button id="cm-cancel"
-            style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;
-              font-size:.87rem;font-weight:600;
-              border:1px solid var(--border-strong);
-              background:var(--bg-elevated);color:var(--text-muted);
-              transition:background .12s"
-            onmouseover="this.style.background='var(--bg-card2)'"
-            onmouseout="this.style.background='var(--bg-elevated)'">
-            ${cancelLabel}
-          </button>
           <button id="cm-confirm"
             style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;
               font-size:.87rem;font-weight:700;
@@ -70,6 +108,16 @@ export function confirmModal(message, {
             onmouseout="this.style.background='${btnBg}'">
             ${confirmLabel}
           </button>
+          <button id="cm-cancel"
+            style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;
+              font-size:.87rem;font-weight:600;
+              border:1px solid var(--border-strong);
+              background:var(--bg-elevated);color:var(--text-muted);
+              transition:background .12s"
+            onmouseover="this.style.background='var(--bg-card2)'"
+            onmouseout="this.style.background='var(--bg-elevated)'">
+            ${cancelLabel}
+          </button>
         </div>
       </div>`;
 
@@ -77,7 +125,7 @@ export function confirmModal(message, {
     const overlay = document.getElementById('modal-overlay');
     const titleEl = document.querySelector('#modal-title span');
     const bodyEl  = document.getElementById('modal-body');
-    if (titleEl) titleEl.textContent = '';
+    if (titleEl) titleEl.textContent = title || '';
     if (bodyEl)  bodyEl.innerHTML = bodyHtml;
     overlay?.classList.add('show');
 
