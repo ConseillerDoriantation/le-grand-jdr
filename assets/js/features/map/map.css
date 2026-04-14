@@ -1,0 +1,441 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   Carte — styles dédiés au module features/map/
+   S'appuient sur les variables CSS existantes du thème (--bg-*, --gold, etc.).
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.map-layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/* ── Topbar ───────────────────────────────────────────────────────────────── */
+.map-topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .6rem .9rem;
+  background: rgba(11, 17, 24, 0.92);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  flex-wrap: wrap;
+}
+.map-topbar__title { flex-shrink: 0; }
+.map-topbar__region {
+  font-family: 'Cinzel', serif;
+  font-size: 1.05rem;
+  color: var(--gold);
+  letter-spacing: 1px;
+}
+.map-topbar__search { flex: 1 1 220px; min-width: 180px; }
+.map-topbar__search input {
+  width: 100%;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: .5rem .9rem;
+  color: var(--text-soft);
+  font-size: .85rem;
+}
+.map-topbar__search input:focus {
+  outline: none;
+  border-color: var(--border-bright);
+}
+.map-topbar__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  flex: 2 1 auto;
+}
+
+/* ── Workspace (carte + panneau) ──────────────────────────────────────────── */
+.map-workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.map-root {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #0b1118;
+}
+.map-transform {
+  position: absolute;
+  top: 0; left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  cursor: grab;
+  user-select: none;
+}
+.map-transform img {
+  display: block;
+  max-width: none;
+  pointer-events: none;
+}
+.map-placeholder {
+  width: 1200px; height: 800px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: .9rem;
+}
+#map-svg {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+#map-svg [data-place-id] { pointer-events: auto; }
+#map-fog {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none;
+}
+
+/* ── Contrôles & admin bar ────────────────────────────────────────────────── */
+.map-controls {
+  position: absolute;
+  bottom: 1rem; right: 1rem;
+  display: flex; flex-direction: column; gap: 6px;
+  z-index: 10;
+}
+.map-controls button {
+  width: 36px; height: 36px;
+  background: rgba(11, 17, 24, 0.92);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background .15s;
+}
+.map-controls button:hover { background: rgba(79, 140, 255, 0.15); }
+
+.map-admin-bar {
+  position: absolute;
+  top: 1rem; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: .4rem;
+  background: rgba(11, 17, 24, 0.92);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: .35rem .5rem;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+.map-admin-bar button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: .35rem .75rem;
+  font-size: .75rem;
+  cursor: pointer;
+  transition: all .12s;
+}
+.map-admin-bar button:hover {
+  background: rgba(79, 140, 255, 0.12);
+}
+.map-admin-bar button.is-active {
+  background: rgba(79, 140, 255, 0.22);
+  border-color: var(--border-bright);
+  color: var(--gold);
+}
+
+.map-mode-hint {
+  position: absolute;
+  bottom: 4.5rem; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(79, 140, 255, 0.15);
+  border: 1px solid var(--border-bright);
+  color: var(--gold);
+  border-radius: 999px;
+  padding: .4rem 1rem;
+  font-size: .78rem;
+  z-index: 11;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Sidepanel ────────────────────────────────────────────────────────────── */
+.map-sidepanel {
+  width: 340px;
+  max-width: 90vw;
+  background: rgba(11, 17, 24, 0.96);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  transition: width .2s;
+}
+@media (max-width: 720px) {
+  .map-workspace { flex-direction: column; }
+  .map-sidepanel { width: 100%; max-height: 42vh; border-left: none; border-top: 1px solid var(--border); }
+}
+
+.map-panel {
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+}
+.map-panel--empty { text-align: center; color: var(--text-muted); padding-top: 2rem; }
+.map-panel--empty h3 { font-family: 'Cinzel', serif; color: var(--gold); margin: 0 0 .3rem; }
+.map-panel__hint { margin-top: 1rem; font-style: italic; }
+
+.map-panel__header {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--border);
+}
+.map-panel__icon {
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent, var(--bg-card2));
+  border-radius: 10px;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+.map-panel__head-main { flex: 1; min-width: 0; }
+.map-panel__kicker {
+  font-size: .7rem; color: var(--text-dim);
+  letter-spacing: 1.5px; text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.map-panel__head-main h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 1.1rem;
+  color: var(--gold);
+  margin: 0;
+  line-height: 1.2;
+}
+.map-panel__chips { display: flex; gap: .3rem; margin-top: .3rem; }
+.map-panel__close {
+  background: none; border: none;
+  color: var(--text-dim);
+  font-size: 1.4rem; line-height: 1;
+  cursor: pointer; padding: 0;
+  align-self: flex-start;
+}
+.map-panel__close:hover { color: var(--text-soft); }
+
+.map-panel__image {
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.map-panel__summary {
+  font-size: .86rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+}
+.map-panel__desc {
+  font-size: .83rem;
+  color: var(--text-soft);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.map-panel__section {
+  border-top: 1px solid var(--border);
+  padding-top: .7rem;
+}
+.map-panel__section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: .5rem;
+}
+.map-panel__section h4 {
+  font-size: .72rem;
+  color: var(--text-dim);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin: 0;
+}
+.map-panel__notes {
+  background: rgba(226, 185, 111, 0.05);
+  border: 1px solid rgba(226, 185, 111, 0.15);
+  border-radius: 8px;
+  padding: .6rem .75rem;
+}
+
+.map-panel__crumbs {
+  margin-bottom: -.4rem;
+}
+.map-panel__crumbs a {
+  color: var(--text-dim);
+  font-size: .78rem;
+  text-decoration: none;
+}
+.map-panel__crumbs a:hover { color: var(--gold); }
+
+.map-panel__actions {
+  display: flex; gap: .4rem;
+  padding-top: .8rem;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.map-panel__tags {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+
+/* ── Organisations ────────────────────────────────────────────────────────── */
+.map-orgs {
+  list-style: none;
+  padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: .4rem;
+}
+.map-orgs__item {
+  padding: .55rem .65rem;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.map-orgs__item:hover {
+  border-color: var(--border-bright);
+  background: rgba(79, 140, 255, 0.06);
+}
+.map-orgs__item strong {
+  display: block;
+  font-size: .86rem;
+  color: var(--text-soft);
+  margin-bottom: 2px;
+}
+.map-orgs__item p {
+  margin: .25rem 0 0;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Meta list ────────────────────────────────────────────────────────────── */
+.map-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: .2rem .7rem;
+  margin: 0;
+  font-size: .82rem;
+}
+.map-meta dt { color: var(--text-dim); }
+.map-meta dd { color: var(--text-soft); margin: 0; }
+
+.map-plain {
+  list-style: none; padding: 0; margin: 0;
+  font-size: .82rem; color: var(--text-muted);
+}
+.map-plain li { padding: 2px 0; }
+
+/* ── Chips & petits composants ────────────────────────────────────────────── */
+.map-chip {
+  display: inline-block;
+  font-size: .68rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(79, 140, 255, 0.12);
+  color: var(--gold);
+  border: 1px solid rgba(79, 140, 255, 0.25);
+}
+.map-chip--danger {
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.3);
+}
+.map-chip--gold {
+  background: rgba(226, 185, 111, 0.1);
+  color: var(--gold);
+  border-color: rgba(226, 185, 111, 0.3);
+}
+.map-chip--outline {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.map-chip--filter {
+  cursor: pointer;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+  transition: all .12s;
+  font-size: .72rem;
+  padding: .3rem .7rem;
+}
+.map-chip--filter:hover { border-color: var(--border-bright); }
+.map-chip--filter.is-active {
+  background: color-mix(in srgb, var(--chip) 18%, transparent);
+  border-color: var(--chip);
+  color: var(--chip);
+}
+
+/* ── Petits boutons ───────────────────────────────────────────────────────── */
+.map-btn {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-soft);
+  padding: .45rem .75rem;
+  cursor: pointer;
+  font-size: .78rem;
+  transition: background .12s, border-color .12s;
+}
+.map-btn:hover {
+  background: rgba(79, 140, 255, 0.1);
+  border-color: var(--border-bright);
+}
+.map-btn--sm { padding: .35rem .6rem; font-size: .74rem; }
+.map-btn--danger {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.3);
+}
+.map-btn--danger:hover {
+  background: rgba(255, 107, 107, 0.08);
+}
+
+/* ── Helpers texte ────────────────────────────────────────────────────────── */
+.map-dim   { color: var(--text-dim); font-weight: 400; }
+.map-small { font-size: .74rem; }
+
+/* ── Formulaires ──────────────────────────────────────────────────────────── */
+.map-form .form-group { margin-bottom: .8rem; }
+.map-form__actions {
+  display: flex; justify-content: flex-end; gap: .5rem;
+  margin-top: 1rem;
+}
+
+/* Selects : forcer un fond solide + couleur d'option cohérente avec le thème.
+   Les <option> sont rendues par l'OS et n'héritent pas du fond semi-transparent
+   de .input-field, d'où les cas "blanc sur blanc" en dark mode. */
+.map-form select.input-field {
+  background-color: var(--bg-card2, #151c26);
+  color: var(--text, #e6e9ef);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 13px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 2.2rem;
+}
+.map-form select.input-field option {
+  background-color: var(--bg-card2, #151c26);
+  color: var(--text, #e6e9ef);
+}
+
+/* Mode clair : fond blanc + texte sombre pour rester lisible */
+[data-theme="light"] .map-form select.input-field,
+[data-theme="light"] .map-form select.input-field option {
+  background-color: #ffffff;
+  color: var(--text);
+}
