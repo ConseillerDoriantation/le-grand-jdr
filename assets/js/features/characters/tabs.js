@@ -179,10 +179,21 @@ export function renderCharNotes(c, canEdit) {
         </div>
         ${isOpen?`<div class="cs-note-body">
           ${canEdit
-            ? `<textarea class="input-field cs-note-textarea" id="note-area-${i}" rows="10"
-                         placeholder="Contenu de la note...">${note.contenu||''}</textarea>
+            ? `<div class="cs-rte-toolbar">
+                <button type="button" class="cs-rte-btn" onclick="document.execCommand('bold')" title="Gras"><b>G</b></button>
+                <button type="button" class="cs-rte-btn" onclick="document.execCommand('italic')" title="Italique"><i>I</i></button>
+                <button type="button" class="cs-rte-btn" onclick="document.execCommand('underline')" title="Souligné"><u>S</u></button>
+                <button type="button" class="cs-rte-btn" onclick="document.execCommand('strikeThrough')" title="Barré"><s>B</s></button>
+                <span class="cs-rte-sep"></span>
+                <button type="button" class="cs-rte-btn" onclick="document.execCommand('insertUnorderedList')" title="Liste à puces">•</button>
+                <button type="button" class="cs-rte-btn" onclick="document.execCommand('insertOrderedList')" title="Liste numérotée">1.</button>
+                <span class="cs-rte-sep"></span>
+                <button type="button" class="cs-rte-btn" onclick="document.execCommand('removeFormat')" title="Effacer la mise en forme" style="font-size:.7rem">✕fmt</button>
+               </div>
+               <div class="input-field cs-note-editor" id="note-area-${i}" contenteditable="true"
+                    data-placeholder="Contenu de la note...">${note.contenu||''}</div>
                <button class="btn btn-gold btn-sm" style="margin-top:0.6rem" onclick="saveNote(${i})">💾 Enregistrer</button>`
-            : `<div class="cs-note-content">${(note.contenu||'Aucun contenu.').replace(/\n/g,'<br>')}</div>`
+            : `<div class="cs-note-content">${note.contenu||'<em style=\'opacity:.5\'>Aucun contenu.</em>'}</div>`
           }
         </div>`:''}
       </div>`;
@@ -229,9 +240,9 @@ export function editNoteTitle(idx) {
 export async function saveNote(idx) {
   try {
     const c = STATE.activeChar; if(!c) return;
-    const ta = document.getElementById(`note-area-${idx}`);
-    if (!ta) return;
-    c.notesList[idx].contenu = ta.value;
+    const el = document.getElementById(`note-area-${idx}`);
+    if (!el) return;
+    c.notesList[idx].contenu = el.innerHTML;
     await updateInCol('characters', c.id, {notesList: c.notesList});
     showNotif('Note enregistrée !','success');
   } catch (e) {
