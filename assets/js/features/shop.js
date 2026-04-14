@@ -83,7 +83,6 @@ const ITEM_STATS = [
   { key:'constitution',short:'Con', store:'co',  label:'Constitution' },
   { key:'charisme',    short:'Cha', store:'ch',  label:'Charisme' },
 ];
-const ITEM_STAT_BY_STORE = Object.fromEntries(ITEM_STATS.map(s => [s.store, s]));
 const ITEM_STAT_BY_KEY = Object.fromEntries(ITEM_STATS.map(s => [s.key, s]));
 
 function _statShort(key) {
@@ -181,11 +180,6 @@ async function loadShopData() {
 // ══════════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
-function _getTemplate(catId) {
-  const cat = _cats.find(c => c.id === catId);
-  return TEMPLATES[cat?.template || 'classique'] || TEMPLATES.classique;
-}
-
 function _catGradient(nom) {
   const g = [
     'background:linear-gradient(135deg,#1a1f3a,#2d3561)',
@@ -210,14 +204,6 @@ function _catEmoji(nom) {
   return '📦';
 }
 
-function _dispoDisplay(val) {
-  if (val === '' || val === null || val === undefined) return '';
-  const n = parseInt(val);
-  if (isNaN(n) || n < 0) return `<span style="color:var(--green);font-weight:600">∞ Illimité</span>`;
-  if (n === 0) return `<span style="color:var(--crimson-light);font-weight:700">Épuisé</span>`;
-  return `<span style="color:var(--green);font-weight:700">${n} dispo.</span>`;
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ANIMATION — count-up/down d'un nombre
 // ══════════════════════════════════════════════════════════════════════════════
@@ -233,17 +219,6 @@ function _animateCount(el, from, to, duration = 400) {
     else el.textContent = to;
   }
   requestAnimationFrame(tick);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// OR D'UN PERSONNAGE (solde du compte)
-// ══════════════════════════════════════════════════════════════════════════════
-function _getOr(c) {
-  if (!c) return 0;
-  const compte = c.compte||{recettes:[],depenses:[]};
-  const r = (compte.recettes||[]).reduce((s,x)=>s+(parseFloat(x.montant)||0),0);
-  const d = (compte.depenses||[]).reduce((s,x)=>s+(parseFloat(x.montant)||0),0);
-  return Math.round((r - d) * 100) / 100;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -316,7 +291,7 @@ function _renderSidebarTop() {
 
   const activeChar = _getActiveShopChar();
   const activeId = activeChar?.id || '';
-  const or = _getOr(activeChar);
+  const or = calcOr(activeChar);
 
   return `
     <div class="sh-sidebar-top">
@@ -424,49 +399,75 @@ function _renderHome() {
 // ══════════════════════════════════════════════════════════════════════════════
 // VUE ARTICLES — filtres dynamiques multi-tags + recherche temps réel
 // ══════════════════════════════════════════════════════════════════════════════
+function _getFilteredItems(catId) {
+  let items = _items.filter(i => i.categorieId === catId);
+
+  // 🔎 Recherche
+  const search = (_filterSearch || '').toLowerCase().trim();
+  if (search) {
+    items = items.filter(i =>
+      (i.nom || '').toLowerCase().includes(search) ||
+      (i.type || '').toLowerCase().includes(search) ||
+      (i.sousType || '').toLowerCase().includes(search) ||
+      (i.description || '').toLowerCase().includes(search) ||
+      (i.effet || '').toLowerCase().includes(search)
+    );
+  }
+
+  // 🏷️ Tags
+  if (_filterTags.size > 0) {
+    const tagGroups = _buildTagGroups(_items.filter(i => i.categorieId === catId));
+    const activeByGroup = new Map();
+
+    for (const group of tagGroups) {
+      const active = group.tags
+        .filter(t => _filterTags.has(t.value))
+        .map(t => t.value);
+
+      if (active.length > 0) {
+        activeByGroup.set(group.key, new Set(active));
+      }
+    }
+
+    items = items.filter(i => {
+      const iTags = _getItemTags(i);
+
+      for (const [, groupVals] of activeByGroup) {
+        if (![...groupVals].some(v => iTags.has(v))) return false;
+      }
+
+      return true;
+    });
+  }
+
+  // 🔀 Tri
+  if (_filterSort && _filterSort !== 'ordre') {
+    items = [...items].sort((a, b) => {
+      switch (_filterSort) {
+        case 'nom':
+          return (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' });
+        case 'prix_asc':
+          return (parseFloat(a.prix)||0) - (parseFloat(b.prix)||0);
+        case 'prix_desc':
+          return (parseFloat(b.prix)||0) - (parseFloat(a.prix)||0);
+        case 'rarete':
+          return (parseInt(b.rarete)||0) - (parseInt(a.rarete)||0);
+        default:
+          return 0;
+      }
+    });
+  }
+
+  return items;
+}
+
 function _renderItemsView() {
   const cat = _cats.find(c => c.id === _activeCat);
   if (!cat) return '';
   const tplCat = TEMPLATES[cat.template || 'classique'];
 
-  let items = _items.filter(i => i.categorieId === _activeCat);
+  let items = _getFilteredItems(_activeCat);
   const search = (_filterSearch||'').toLowerCase().trim();
-  if (search) items = items.filter(i =>
-    (i.nom||'').toLowerCase().includes(search) ||
-    (i.type||'').toLowerCase().includes(search) ||
-    (i.description||'').toLowerCase().includes(search) ||
-    (i.effet||'').toLowerCase().includes(search)
-  );
-
-  if (_filterTags.size > 0) {
-    const allItems0 = _items.filter(i => i.categorieId === _activeCat);
-    const tagGroups0 = _buildTagGroups(allItems0);
-    const activeByGroup = new Map();
-    for (const group of tagGroups0) {
-      const activeInGroup = group.tags.filter(t => _filterTags.has(t.value)).map(t => t.value);
-      if (activeInGroup.length > 0) activeByGroup.set(group.label, new Set(activeInGroup));
-    }
-    items = items.filter(i => {
-      const iTags = _getItemTags(i);
-      for (const [, groupVals] of activeByGroup) {
-        const matchesGroup = [...groupVals].some(v => iTags.has(v));
-        if (!matchesGroup) return false;
-      }
-      return true;
-    });
-  }
-
-  if (_filterSort && _filterSort !== 'ordre') {
-    items = [...items].sort((a, b) => {
-      switch (_filterSort) {
-        case 'nom':       return (a.nom||'').localeCompare(b.nom||'', 'fr', { sensitivity:'base' });
-        case 'prix_asc':  return (parseFloat(a.prix)||0) - (parseFloat(b.prix)||0);
-        case 'prix_desc': return (parseFloat(b.prix)||0) - (parseFloat(a.prix)||0);
-        case 'rarete':    return (parseInt(b.rarete)||0) - (parseInt(a.rarete)||0);
-        default: return 0;
-      }
-    });
-  }
 
   const total = items.length;
   const pages = Math.ceil(total / PAGE_SIZE);
@@ -564,58 +565,67 @@ function _renderItemsView() {
 
 function _getItemTags(item) {
   const tags = new Set();
-  if (item.format)     tags.add(item.format);
-  if (item.sousType)   tags.add(item.sousType);
-  if (item.slotArmure) tags.add(item.slotArmure);
-  if (item.typeArmure) tags.add(item.typeArmure);
-  if (item.slotBijou)  tags.add(item.slotBijou);
-  if (item.type)       tags.add(item.type);
+
+  if (item.format)     tags.add(`format:${item.format}`);
+  if (item.sousType)   tags.add(`sousType:${item.sousType}`);
+  if (item.slotArmure) tags.add(`slotArmure:${item.slotArmure}`);
+  if (item.typeArmure) tags.add(`typeArmure:${item.typeArmure}`);
+  if (item.slotBijou)  tags.add(`slotBijou:${item.slotBijou}`);
+  if (item.type)       tags.add(`type:${item.type}`);
+
   if (item.rarete) {
     const labels = {1:'Commun',2:'Peu commun',3:'Rare',4:'Très rare'};
     const l = labels[parseInt(item.rarete)];
-    if (l) tags.add(l);
+    if (l) tags.add(`rarete:${l}`);
   }
+
   const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
-  if (dispo !== null && dispo > 0) tags.add('En stock');
-  if (dispo === null || dispo < 0) tags.add('Illimité');
+  if (dispo !== null && dispo > 0) tags.add('dispo:En stock');
+  if (dispo === null || dispo < 0) tags.add('dispo:Illimité');
+
   return tags;
 }
 
 function _buildTagGroups(items) {
-  const groups = [];
-  const formats = [...new Set(items.filter(i=>i.format).map(i=>i.format))].sort();
-  if (formats.length) groups.push({ label:'Format', tags: formats.map(v=>({value:v,label:v,color:'#e8b84b'})) });
+  const uniq = arr => [...new Set(arr)].sort();
+  const mk = (label, key, values, color) =>
+    values.length ? { label, key, tags: values.map(v => ({ value: `${key}:${v}`, label: v, color })) } : null;
 
-  const sousTypes = [...new Set(items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
-  if (sousTypes.length) groups.push({ label:'Type arme', tags: sousTypes.map(v=>({value:v,label:v,color:'#e8b84b'})) });
+  const groups = [
+    mk('Format',      'format',     uniq(items.filter(i => i.format).map(i => i.format)), '#e8b84b'),
+    mk('Type arme',   'sousType',   uniq(items.filter(i => i.sousType).map(i => i.sousType)), '#e8b84b'),
+    mk('Emplacement', 'slotArmure', uniq(items.filter(i => i.slotArmure).map(i => i.slotArmure)), '#4f8cff'),
+    mk('Type armure', 'typeArmure', uniq(items.filter(i => i.typeArmure).map(i => i.typeArmure)), '#4f8cff'),
+    mk('Bijou',       'slotBijou',  uniq(items.filter(i => i.slotBijou).map(i => i.slotBijou)), '#c084fc'),
+    mk('Type',        'type',       uniq(items.filter(i => i.type && !i.format && !i.slotArmure && !i.slotBijou).map(i => i.type)), 'var(--text-muted)'),
+  ].filter(Boolean);
 
-  const slotA = [...new Set(items.filter(i=>i.slotArmure).map(i=>i.slotArmure))].sort();
-  if (slotA.length) groups.push({ label:'Emplacement', tags: slotA.map(v=>({value:v,label:v,color:'#4f8cff'})) });
+  const raretes = uniq(items.map(i => parseInt(i.rarete)).filter(Boolean));
+  if (raretes.length) {
+    groups.push({
+      label: 'Rareté',
+      key: 'rarete',
+      tags: raretes.map(r => ({
+        value: `rarete:${RARETE_NAMES[r] || String(r)}`,
+        label: `${'★'.repeat(r)} ${RARETE_NAMES[r] || ''}`,
+        color: _rareteColor(RARETE_NAMES[r]),
+      })),
+    });
+  }
 
-  const typeA = [...new Set(items.filter(i=>i.typeArmure).map(i=>i.typeArmure))].sort();
-  if (typeA.length) groups.push({ label:'Type armure', tags: typeA.map(v=>({value:v,label:v,color:'#4f8cff'})) });
-
-  const bijou = [...new Set(items.filter(i=>i.slotBijou).map(i=>i.slotBijou))].sort();
-  if (bijou.length) groups.push({ label:'Bijou', tags: bijou.map(v=>({value:v,label:v,color:'#c084fc'})) });
-
-  const typeL = [...new Set(items.filter(i=>i.type&&!i.format&&!i.slotArmure&&!i.slotBijou).map(i=>i.type))].sort();
-  if (typeL.length) groups.push({ label:'Type', tags: typeL.map(v=>({value:v,label:v,color:'var(--text-muted)'})) });
-
-  const raretes = [...new Set(items.filter(i=>i.rarete).map(i=>parseInt(i.rarete)).filter(Boolean))].sort();
-  if (raretes.length) groups.push({ label:'Rareté', tags: raretes.map(r=>({
-    value: RARETE_NAMES[r]||String(r),
-    label: '★'.repeat(r)+' '+(RARETE_NAMES[r]||''),
-    color: _rareteColor(RARETE_NAMES[r]),
-  })) });
-
-  const hasStock = items.some(i => {
-    const d = i.dispo!=null && i.dispo!=='' ? parseInt(i.dispo) : null;
-    return d===null || d>0;
-  });
-  if (hasStock) groups.push({ label:'Dispo', tags:[
-    {value:'En stock',label:'En stock',color:'#22c38e'},
-    {value:'Illimité',label:'∞ Illimité',color:'#22c38e'},
-  ] });
+  if (items.some(i => {
+    const d = i.dispo != null && i.dispo !== '' ? parseInt(i.dispo) : null;
+    return d === null || d > 0;
+  })) {
+    groups.push({
+      label: 'Dispo',
+      key: 'dispo',
+      tags: [
+        { value: 'dispo:En stock', label: 'En stock', color: '#22c38e' },
+        { value: 'dispo:Illimité', label: '∞ Illimité', color: '#22c38e' },
+      ],
+    });
+  }
 
   return groups;
 }
@@ -756,7 +766,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
 
   const activeChar = _getActiveShopChar();
   const hasChar = !!activeChar;
-  const solde = _getOr(activeChar);
+  const solde = calcOr(activeChar);
   const tropCher = hasChar && prix > solde;
   const manque = tropCher ? Math.ceil(prix - solde) : 0;
 
@@ -914,7 +924,7 @@ function openShopItemDetail(itemId) {
   const statBonuses = _formatStatBonuses(item);
   const activeChar = _getActiveShopChar();
   const hasChar = !!activeChar;
-  const solde = _getOr(activeChar);
+  const solde = calcOr(activeChar);
   const tropCher = hasChar && prix > solde;
   const manque = tropCher ? Math.ceil(prix - solde) : 0;
 
@@ -1010,7 +1020,7 @@ function openShopItemDetail(itemId) {
 function shopSetChar(charId) {
   window._shopCharId = charId;
   const c  = STATE.characters?.find(x => x.id === charId);
-  const or = _getOr(c);
+  const or = calcOr(c);
   const valEl = document.getElementById('sh-char-or-value');
   if (valEl) valEl.textContent = or;
   renderShop();
@@ -1031,7 +1041,7 @@ async function buyItem(itemId) {
   if (!illimite && dispo === 0) { showNotif('Article épuisé.', 'error'); return; }
 
   const prix  = parseFloat(item.prix) || 0;
-  const solde = _getOr(c);
+  const solde = calcOr(c);
 
   const maxAffordable = prix > 0 ? Math.floor(solde / prix) : 99;
   const maxStock      = illimite ? 99 : dispo;
@@ -1093,7 +1103,7 @@ async function confirmBuyItem(itemId, directQty) {
     const prix     = parseFloat(item.prix) || 0;
     const c        = STATE.characters?.find(x => x.id === charId);
     if (!c) return;
-    const solde    = _getOr(c);
+    const solde    = calcOr(c);
     const total    = prix * qty;
     if (solde < total) { showNotif(`Fonds insuffisants — ${solde} or disponibles.`, 'error'); return; }
     if (!illimite && dispo < qty) { showNotif(`Stock insuffisant — ${dispo} dispo.`, 'error'); return; }
@@ -1142,7 +1152,7 @@ async function confirmBuyItem(itemId, directQty) {
     c.inventaire = inv;
     c.compte     = { ...compte, depenses };
 
-    const newOr = _getOr(c);
+    const newOr = calcOr(c);
     if (directQty == null) closeModalDirect();
     showNotif(`✅ ×${qty} "${item.nom}" acheté${qty>1?'s':''} pour ${total} or !`, 'success');
     renderShop();
@@ -1234,13 +1244,16 @@ window.sellInvItemFromShop = sellInvItemFromShop;
 function shopGoHome()     { _view='home';  _activeCat=null; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
 function shopGoCat(catId) { _view='items'; _activeCat=catId; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
 function shopPage(p)      { _page=p; renderShop(); }
+
+// ── Fonctions de filtre ───────────────────────────────────────────────────────
 function shopSetSort(val) {
   _filterSort = val;
   localStorage.setItem('shop_sort', val);
-  renderShop();
+  _page = 1;
+  if (_view === 'items') _updateItemsOnly();
+  else renderShop();
 }
 
-// ── Fonctions de filtre ───────────────────────────────────────────────────────
 function shopFilterSearch(val) {
   _filterSearch = val;
   _page = 1;
@@ -1271,31 +1284,8 @@ function _updateItemsOnly() {
   const cat = _cats.find(c => c.id === _activeCat);
   if (!cat) { renderShop(); return; }
 
-  let items = _items.filter(i => i.categorieId === _activeCat);
+  let items = _getFilteredItems(_activeCat);
   const search = (_filterSearch||'').toLowerCase().trim();
-  if (search) items = items.filter(i =>
-    (i.nom||'').toLowerCase().includes(search) ||
-    (i.type||'').toLowerCase().includes(search) ||
-    (i.sousType||'').toLowerCase().includes(search) ||
-    (i.description||'').toLowerCase().includes(search) ||
-    (i.effet||'').toLowerCase().includes(search)
-  );
-
-  if (_filterTags.size > 0) {
-    const tagGroups0 = _buildTagGroups(_items.filter(i => i.categorieId === _activeCat));
-    const activeByGroup = new Map();
-    for (const group of tagGroups0) {
-      const active = group.tags.filter(t => _filterTags.has(t.value)).map(t => t.value);
-      if (active.length > 0) activeByGroup.set(group.label, new Set(active));
-    }
-    items = items.filter(i => {
-      const iTags = _getItemTags(i);
-      for (const [, gVals] of activeByGroup) {
-        if (![...gVals].some(v => iTags.has(v))) return false;
-      }
-      return true;
-    });
-  }
 
   const total  = items.length;
   const pages  = Math.ceil(total / PAGE_SIZE);
