@@ -35,6 +35,12 @@ service cloud.firestore {
     match /world/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /bastion/{id}      { allow read, write: if isLoggedIn(); }
 
+    // Carte : lieux, organisations, types de lieux (+ legacy map_lieux)
+    match /places/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /organizations/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /place_types/{id}   { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /map_lieux/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+
     match /characters/{id} {
       allow read: if isLoggedIn();
       allow create: if isLoggedIn() && request.resource.data.uid == request.auth.uid;
