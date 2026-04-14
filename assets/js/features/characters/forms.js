@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere } from '../../data/firestore.js';
+import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
@@ -156,14 +156,69 @@ export async function deleteInvItem(idx) {
 // ══════════════════════════════════════════════
 export async function deleteChar(id) {
   try {
-    if (!await confirmModal('Supprimer ce personnage ? La présentation associée (page Personnages) sera également supprimée.')) return;
+    if (!await confirmModal('Supprimer ce personnage ? Toutes ses références (trame, hauts-faits, PNJ, bastion) seront également nettoyées.')) return;
     await deleteFromCol('characters', id);
+
+    // ── players ──────────────────────────────────────────────────────────────
     try {
       const linked = await loadCollectionWhere('players', 'charId', '==', id);
       await Promise.all(linked.map(p => deleteFromCol('players', p.id)));
-    } catch (e2) {
-      console.warn('[deleteChar] cascade players échouée :', e2);
-    }
+    } catch (e2) { console.warn('[deleteChar] cascade players :', e2); }
+
+    // ── story — retirer des groupes de missions ───────────────────────────────
+    try {
+      const stories = await loadCollection('story');
+      await Promise.all(stories.map(s => {
+        if (!s.groupes?.length) return;
+        const updated = s.groupes.map(g => ({
+          ...g,
+          membres: (g.membres || []).filter(mid => mid !== id),
+        }));
+        const changed = updated.some((g, i) => g.membres.length !== (s.groupes[i]?.membres||[]).length);
+        if (!changed) return;
+        return updateInCol('story', s.id, { groupes: updated });
+      }));
+    } catch (e2) { console.warn('[deleteChar] cascade story :', e2); }
+
+    // ── achievements — retirer des contributeurs ──────────────────────────────
+    try {
+      const achievements = await loadCollection('achievements');
+      await Promise.all(achievements.map(a => {
+        const contrib = a.contributeurs || [];
+        if (!contrib.includes(id)) return;
+        return updateInCol('achievements', a.id, { contributeurs: contrib.filter(x => x !== id) });
+      }));
+    } catch (e2) { console.warn('[deleteChar] cascade achievements :', e2); }
+
+    // ── npc_affinites — supprimer les affinités du personnage ─────────────────
+    try {
+      const affinites = await loadCollectionWhere('npc_affinites', 'charId', '==', id);
+      await Promise.all(affinites.map(a => deleteFromCol('npc_affinites', a.id)));
+    } catch (e2) { console.warn('[deleteChar] cascade npc_affinites :', e2); }
+
+    // ── bastion — retirer des fondateurs et distributions ────────────────────
+    try {
+      const bastions = await loadCollection('bastion');
+      await Promise.all(bastions.map(b => {
+        const updates = {};
+        if ((b.fondateurs || []).some(f => (f.charId || f) === id)) {
+          updates.fondateurs = (b.fondateurs || []).filter(f => (f.charId || f) !== id);
+        }
+        if ((b.historique || []).some(h =>
+          h.investisseur?.charId === id ||
+          (h.distributions || []).some(d => d.charId === id)
+        )) {
+          updates.historique = (b.historique || []).map(h => ({
+            ...h,
+            investisseur: h.investisseur?.charId === id ? null : h.investisseur,
+            distributions: (h.distributions || []).filter(d => d.charId !== id),
+          }));
+        }
+        if (!Object.keys(updates).length) return;
+        return updateInCol('bastion', b.id, updates);
+      }));
+    } catch (e2) { console.warn('[deleteChar] cascade bastion :', e2); }
+
     showNotif('Personnage supprimé.', 'success');
     PAGES.characters();
   } catch (e) {

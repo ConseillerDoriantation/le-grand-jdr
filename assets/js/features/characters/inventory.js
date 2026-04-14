@@ -964,7 +964,9 @@ export async function saveInvItemFromShop() {
     if (!item) { showNotif('Objet introuvable.', 'error'); return; }
     const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-    inv.push({ ...item, qte: String(qte), quantite: qte, source: 'boutique', itemId: item.id });
+    for (let i = 0; i < qte; i++) {
+      inv.push({ ...item, qte: '1', quantite: 1, source: 'boutique', itemId: item.id });
+    }
     c.inventaire = inv;
     if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
     const stChar = (STATE.characters || []).find(x => x.id === c.id);
