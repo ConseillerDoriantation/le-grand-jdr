@@ -1157,25 +1157,24 @@
 /* ══════════════════════════════════════════════════
    BOUTIQUE — Design complet
 ══════════════════════════════════════════════════ */
-
-.sh-page { display: flex; flex-direction: column; gap: 0; }
+.cs-layout .sh-page { display: flex; flex-direction: column; gap: 0; }
 
 /* ── Breadcrumb ─────────────────────────────────── */
-.sh-breadcrumb {
+.cs-layout .sh-breadcrumb {
   display: flex;
   align-items: center;
   gap: 0.3rem;
   margin-bottom: 1.4rem;
   flex-wrap: wrap;
 }
-.sh-crumb {
+.cs-layout .sh-crumb {
   font-size: 0.82rem;
   color: var(--text-muted);
   padding: 0;
   background: none;
   border: none;
 }
-.sh-crumb-link {
+.cs-layout .sh-crumb-link {
   cursor: pointer;
   color: var(--gold);
   text-decoration: underline;
@@ -1183,17 +1182,17 @@
   text-decoration-style: dotted;
   transition: color 0.15s;
 }
-.sh-crumb-link:hover { color: var(--text); }
-.sh-crumb-active { color: var(--text); font-weight: 600; }
-.sh-crumb-sep { color: var(--text-dim); }
+.cs-layout .sh-crumb-link:hover { color: var(--text); }
+.cs-layout .sh-crumb-active { color: var(--text); font-weight: 600; }
+.cs-layout .sh-crumb-sep { color: var(--text-dim); }
 
 /* ── Grille catégories ──────────────────────────── */
-.sh-cat-grid {
+.cs-layout .sh-cat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 1rem;
 }
-.sh-cat-card {
+.cs-layout .sh-cat-card {
   position: relative;
   border-radius: var(--radius-lg);
   overflow: hidden;
@@ -1202,14 +1201,14 @@
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s;
   background: var(--bg-card);
 }
-.sh-cat-card:hover {
+.cs-layout .sh-cat-card:hover {
   transform: translateY(-3px);
   box-shadow: var(--shadow-soft);
   border-color: rgba(79,140,255,0.3);
 }
 
 /* Image / dégradé en haut de la card */
-.sh-cat-img {
+.cs-layout .sh-cat-img {
   height: 130px;
   background-size: cover;
   background-position: center;
@@ -1218,12 +1217,12 @@
   align-items: center;
   justify-content: center;
 }
-.sh-cat-img-overlay {
+.cs-layout .sh-cat-img-overlay {
   position: absolute;
   inset: 0;
   background: linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.55));
 }
-.sh-cat-img-emoji {
+.cs-layout .sh-cat-img-emoji {
   font-size: 2.8rem;
   position: relative;
   z-index: 1;
@@ -1231,30 +1230,30 @@
 }
 
 /* Infos sous l'image */
-.sh-cat-body {
+.cs-layout .sh-cat-body {
   padding: 0.85rem 1rem 0.9rem;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
-.sh-cat-name {
+.cs-layout .sh-cat-name {
   font-family: 'Outfit', sans-serif;
   font-size: 1rem;
   font-weight: 700;
   color: var(--text);
   line-height: 1.2;
 }
-.sh-cat-meta {
+.cs-layout .sh-cat-meta {
   font-size: 0.72rem;
   color: var(--text-dim);
 }
-.sh-cat-subcats {
+.cs-layout .sh-cat-subcats {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
   margin-top: 0.2rem;
 }
-.sh-cat-subcat-tag {
+.cs-layout .sh-cat-subcat-tag {
   font-size: 0.65rem;
   padding: 0.1rem 0.45rem;
   border-radius: 20px;
@@ -1262,10 +1261,10 @@
   border: 1px solid var(--border);
   color: var(--text-dim);
 }
-.sh-more { color: var(--text-dim); }
+.cs-layout .sh-more { color: var(--text-dim); }
 
 /* Boutons admin sur les cards */
-.sh-card-admin {
+.cs-layout .sh-card-admin {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
@@ -1279,20 +1278,20 @@
   padding: 0.2rem;
   backdrop-filter: blur(4px);
 }
-.sh-cat-card:hover .sh-card-admin,
-.sh-subcat-card:hover .sh-card-admin,
-.sh-item-card:hover .sh-card-admin {
+.cs-layout .sh-cat-card:hover .sh-card-admin,
+.cs-layout .sh-subcat-card:hover .sh-card-admin,
+.cs-layout .sh-item-card:hover .sh-card-admin {
   opacity: 1;
   pointer-events: auto;
 }
 
 /* ── Grille sous-catégories ─────────────────────── */
-.sh-subcat-grid {
+.cs-layout .sh-subcat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 0.8rem;
 }
-.sh-subcat-card {
+.cs-layout .sh-subcat-card {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1307,45 +1306,45 @@
   text-align: center;
   transition: all 0.2s;
 }
-.sh-subcat-card:hover {
+.cs-layout .sh-subcat-card:hover {
   border-color: rgba(79,140,255,0.35);
   background: rgba(79,140,255,0.05);
   transform: translateY(-2px);
   box-shadow: var(--shadow-card);
 }
-.sh-subcat-all {
+.cs-layout .sh-subcat-all {
   border-style: dashed;
   border-color: var(--border-strong);
 }
-.sh-subcat-add {
+.cs-layout .sh-subcat-add {
   border-style: dashed;
   color: var(--text-dim);
   opacity: 0.7;
 }
-.sh-subcat-add:hover { opacity: 1; border-color: var(--gold); color: var(--gold); }
-.sh-subcat-icon { font-size: 2rem; }
-.sh-subcat-name {
+.cs-layout .sh-subcat-add:hover { opacity: 1; border-color: var(--gold); color: var(--gold); }
+.cs-layout .sh-subcat-icon { font-size: 2rem; }
+.cs-layout .sh-subcat-name {
   font-size: 0.85rem;
   font-weight: 700;
   color: var(--text);
 }
-.sh-subcat-count {
+.cs-layout .sh-subcat-count {
   font-size: 0.68rem;
   color: var(--text-dim);
 }
 
 /* ── Articles header + infos ────────────────────── */
-.sh-items-header {
+.cs-layout .sh-items-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 1rem;
 }
-.sh-items-count {
+.cs-layout .sh-items-count {
   font-size: 0.8rem;
   color: var(--text-muted);
 }
-.sh-section-title {
+.cs-layout .sh-section-title {
   font-size: 0.7rem;
   font-weight: 700;
   color: var(--text-muted);
@@ -1357,13 +1356,13 @@
 }
 
 /* ── Grille articles ────────────────────────────── */
-.sh-item-grid {
+.cs-layout .sh-item-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.9rem;
   margin-bottom: 1.2rem;
 }
-.sh-item-card {
+.cs-layout .sh-item-card {
   position: relative;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -1373,26 +1372,26 @@
   display: flex;
   flex-direction: column;
 }
-.sh-item-card:hover {
+.cs-layout .sh-item-card:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-soft);
   border-color: rgba(79,140,255,0.28);
 }
 
 /* Image article */
-.sh-item-img {
+.cs-layout .sh-item-img {
   height: 140px;
   background-size: cover;
   background-position: center;
   position: relative;
   flex-shrink: 0;
 }
-.sh-item-img-overlay {
+.cs-layout .sh-item-img-overlay {
   position: absolute;
   inset: 0;
   background: linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.7));
 }
-.sh-item-price-badge {
+.cs-layout .sh-item-price-badge {
   position: absolute;
   bottom: 0.5rem;
   right: 0.5rem;
@@ -1407,31 +1406,31 @@
 }
 
 /* Corps article */
-.sh-item-body {
+.cs-layout .sh-item-body {
   padding: 0.75rem 0.85rem 0.8rem;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
   flex: 1;
 }
-.sh-item-name {
+.cs-layout .sh-item-name {
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--text);
   line-height: 1.3;
 }
-.sh-item-props {
+.cs-layout .sh-item-props {
   font-size: 0.7rem;
   color: var(--text-dim);
   font-style: italic;
 }
-.sh-item-desc {
+.cs-layout .sh-item-desc {
   font-size: 0.78rem;
   color: var(--text-muted);
   line-height: 1.5;
   flex: 1;
 }
-.sh-item-actions {
+.cs-layout .sh-item-actions {
   display: flex;
   gap: 0.3rem;
   padding: 0.4rem 0.6rem;
@@ -1441,7 +1440,7 @@
 }
 
 /* ── Pagination ─────────────────────────────────── */
-.sh-pagination {
+.cs-layout .sh-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1449,7 +1448,7 @@
   flex-wrap: wrap;
   padding: 1rem 0;
 }
-.sh-page-btn {
+.cs-layout .sh-page-btn {
   min-width: 36px;
   height: 36px;
   padding: 0 0.7rem;
@@ -1462,38 +1461,38 @@
   cursor: pointer;
   transition: all 0.15s;
 }
-.sh-page-btn:hover { border-color: rgba(79,140,255,0.3); color: var(--text); background: rgba(79,140,255,0.06); }
-.sh-page-btn.active { background: rgba(79,140,255,0.15); border-color: var(--gold); color: var(--text); }
+.cs-layout .sh-page-btn:hover { border-color: rgba(79,140,255,0.3); color: var(--text); background: rgba(79,140,255,0.06); }
+.cs-layout .sh-page-btn.active { background: rgba(79,140,255,0.15); border-color: var(--gold); color: var(--text); }
 
 /* ── Responsive ─────────────────────────────────── */
 @media(max-width:600px) {
-  .sh-cat-grid { grid-template-columns: 1fr 1fr; }
-  .sh-subcat-grid { grid-template-columns: repeat(3,1fr); }
-  .sh-item-grid { grid-template-columns: 1fr 1fr; }
-  .sh-cat-img { height: 100px; }
+.cs-layout .sh-cat-grid { grid-template-columns: 1fr 1fr; }
+.cs-layout .sh-subcat-grid { grid-template-columns: repeat(3,1fr); }
+.cs-layout .sh-item-grid { grid-template-columns: 1fr 1fr; }
+.cs-layout .sh-cat-img { height: 100px; }
 }
 
 /* ── Mode jour ──────────────────────────────────── */
-[data-theme="light"] .sh-cat-card { background: #fff; border-color: rgba(0,0,0,0.08); }
-[data-theme="light"] .sh-cat-card:hover { border-color: rgba(37,99,235,0.25); }
-[data-theme="light"] .sh-cat-subcat-tag { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.08); }
-[data-theme="light"] .sh-subcat-card { background: #fff; border-color: rgba(0,0,0,0.08); }
-[data-theme="light"] .sh-subcat-card:hover { background: #f0f4ff; border-color: rgba(37,99,235,0.28); }
-[data-theme="light"] .sh-item-card { background: #fff; border-color: rgba(0,0,0,0.08); }
-[data-theme="light"] .sh-item-card:hover { border-color: rgba(37,99,235,0.25); }
-[data-theme="light"] .sh-item-actions { background: rgba(0,0,0,0.02); border-top-color: rgba(0,0,0,0.07); }
-[data-theme="light"] .sh-page-btn { background: #f0f2f6; border-color: rgba(0,0,0,0.09); }
-[data-theme="light"] .sh-page-btn:hover { background: #eef1f9; border-color: rgba(37,99,235,0.25); }
-[data-theme="light"] .sh-page-btn.active { background: rgba(37,99,235,0.10); border-color: rgba(37,99,235,0.35); }
+[data-theme="light"] .cs-layout .sh-cat-card { background: #fff; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-layout .sh-cat-card:hover { border-color: rgba(37,99,235,0.25); }
+[data-theme="light"] .cs-layout .sh-cat-subcat-tag { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-layout .sh-subcat-card { background: #fff; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-layout .sh-subcat-card:hover { background: #f0f4ff; border-color: rgba(37,99,235,0.28); }
+[data-theme="light"] .cs-layout .sh-item-card { background: #fff; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-layout .sh-item-card:hover { border-color: rgba(37,99,235,0.25); }
+[data-theme="light"] .cs-layout .sh-item-actions { background: rgba(0,0,0,0.02); border-top-color: rgba(0,0,0,0.07); }
+[data-theme="light"] .cs-layout .sh-page-btn { background: #f0f2f6; border-color: rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-layout .sh-page-btn:hover { background: #eef1f9; border-color: rgba(37,99,235,0.25); }
+[data-theme="light"] .cs-layout .sh-page-btn.active { background: rgba(37,99,235,0.10); border-color: rgba(37,99,235,0.35); }
 
 /* Boutons admin inline dans le corps de la card (pas dans l'image) */
-.sh-cat-name-row {
+.cs-layout .sh-cat-name-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
 }
-.sh-card-admin-inline {
+.cs-layout .sh-card-admin-inline {
   display: flex;
   gap: 0.15rem;
   opacity: 0;
@@ -1501,13 +1500,13 @@
   transition: opacity 0.15s;
   flex-shrink: 0;
 }
-.sh-cat-card:hover .sh-card-admin-inline {
+.cs-layout .sh-cat-card:hover .sh-card-admin-inline {
   opacity: 1;
   pointer-events: auto;
 }
 
 /* Boutons admin sous-catégorie — en bas de la card */
-.sh-card-admin-subcat {
+.cs-layout .sh-card-admin-subcat {
   display: flex;
   gap: 0.15rem;
   margin-top: 0.3rem;
@@ -1515,7 +1514,7 @@
   pointer-events: none;
   transition: opacity 0.15s;
 }
-.sh-subcat-card:hover .sh-card-admin-subcat {
+.cs-layout .sh-subcat-card:hover .sh-card-admin-subcat {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1525,33 +1524,33 @@
 ══════════════════════════════════════════════════ */
 
 /* Selecteurs dans les modals */
-.sh-modal-selects {
+.cs-layout .sh-modal-selects {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.8rem;
   margin-bottom: 0.2rem;
 }
-.sh-modal-select {
+.cs-layout .sh-modal-select {
   background: var(--bg-elevated, var(--bg-card)) !important;
   color: var(--text) !important;
   border-color: var(--border-strong) !important;
 }
-.sh-modal-select option {
+.cs-layout .sh-modal-select option {
   background: var(--bg-elevated, #1b2432);
   color: var(--text);
 }
-[data-theme="light"] .sh-modal-select {
+[data-theme="light"] .cs-layout .sh-modal-select {
   background: #ffffff !important;
   color: #111827 !important;
   border-color: rgba(0,0,0,0.18) !important;
 }
-[data-theme="light"] .sh-modal-select option {
+[data-theme="light"] .cs-layout .sh-modal-select option {
   background: #ffffff;
   color: #111827;
 }
 
 /* Zone upload image */
-.sh-upload-zone {
+.cs-layout .sh-upload-zone {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1566,19 +1565,19 @@
   background: rgba(255,255,255,0.02);
   text-align: center;
 }
-.sh-upload-zone:hover {
+.cs-layout .sh-upload-zone:hover {
   border-color: var(--gold);
   background: rgba(79,140,255,0.05);
 }
-.sh-upload-label {
+.cs-layout .sh-upload-label {
   font-size: 0.75rem;
   color: var(--text-dim);
 }
-[data-theme="light"] .sh-upload-zone { background: #f7f8fa; border-color: rgba(0,0,0,0.15); }
-[data-theme="light"] .sh-upload-zone:hover { border-color: var(--gold); background: #f0f4ff; }
+[data-theme="light"] .cs-layout .sh-upload-zone { background: #f7f8fa; border-color: rgba(0,0,0,0.15); }
+[data-theme="light"] .cs-layout .sh-upload-zone:hover { border-color: var(--gold); background: #f0f4ff; }
 
 /* Badge template sur card catégorie */
-.sh-cat-tpl-badge {
+.cs-layout .sh-cat-tpl-badge {
   position: absolute;
   bottom: 0.5rem;
   left: 0.5rem;
@@ -1593,22 +1592,22 @@
 }
 
 /* Champs dynamiques grille */
-.sh-fields-grid {
+.cs-layout .sh-fields-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.7rem 0.8rem;
 }
-.sh-field-full { grid-column: 1 / -1; }
-.sh-field-prix { grid-column: 1 / -1; }
+.cs-layout .sh-field-full { grid-column: 1 / -1; }
+.cs-layout .sh-field-prix { grid-column: 1 / -1; }
 
 /* Prix achat + vente */
-.sh-prix-wrap {
+.cs-layout .sh-prix-wrap {
   display: flex;
   align-items: center;
   gap: 0.8rem;
   flex-wrap: wrap;
 }
-.sh-prix-vente-display {
+.cs-layout .sh-prix-vente-display {
   font-size: 0.82rem;
   color: var(--text-muted);
   background: rgba(255,255,255,0.04);
@@ -1616,12 +1615,12 @@
   border-radius: 8px;
   padding: 0.35rem 0.7rem;
 }
-[data-theme="light"] .sh-prix-vente-display { background: #f3f4f7; border-color: rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-layout .sh-prix-vente-display { background: #f3f4f7; border-color: rgba(0,0,0,0.09); }
 
 /* Aperçu des champs du template */
-.sh-tpl-preview { margin-top: 0.5rem; }
-.sh-tpl-fields  { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-.sh-tpl-field-tag {
+.cs-layout .sh-tpl-preview { margin-top: 0.5rem; }
+.cs-layout .sh-tpl-fields  { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.cs-layout .sh-tpl-field-tag {
   font-size: 0.65rem;
   padding: 0.15rem 0.5rem;
   border-radius: 20px;
@@ -1629,16 +1628,16 @@
   border: 1px solid rgba(79,140,255,0.20);
   color: var(--blue);
 }
-[data-theme="light"] .sh-tpl-field-tag { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.18); }
+[data-theme="light"] .cs-layout .sh-tpl-field-tag { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.18); }
 
 /* Cards articles — infos spécifiques par template */
-.sh-item-tags {
+.cs-layout .sh-item-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
   margin: 0.35rem 0;
 }
-.sh-tag {
+.cs-layout .sh-tag {
   font-size: 0.68rem;
   font-weight: 600;
   padding: 0.15rem 0.5rem;
@@ -1647,16 +1646,15 @@
   border: 1px solid var(--border);
   color: var(--text-muted);
 }
-.sh-tag-rarete { background: rgba(255,255,255,0.04) !important; border: none !important; font-style: italic; }
-[data-theme="light"] .sh-tag { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.09); }
-
-.sh-item-combat {
+.cs-layout .sh-tag-rarete { background: rgba(255,255,255,0.04) !important; border: none !important; font-style: italic; }
+[data-theme="light"] .cs-layout .sh-tag { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.09); }
+.cs-layout .sh-item-combat {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
   margin: 0.3rem 0;
 }
-.sh-combat-chip {
+.cs-layout .sh-combat-chip {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1666,24 +1664,23 @@
   padding: 0.3rem 0.6rem;
   min-width: 60px;
 }
-.sh-cc-label { font-size: 0.55rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; }
-.sh-cc-val   { font-size: 0.88rem; font-weight: 800; font-family: 'Outfit',sans-serif; margin-top: 0.1rem; }
-.sh-cc-val.red  { color: var(--crimson-light); }
-.sh-cc-val.gold { color: var(--gold); }
-[data-theme="light"] .sh-combat-chip { background: #f7f8fa; border-color: rgba(0,0,0,0.09); }
-
-.sh-item-stats {
+.cs-layout .sh-cc-label { font-size: 0.55rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; }
+.cs-layout .sh-cc-val   { font-size: 0.88rem; font-weight: 800; font-family: 'Outfit',sans-serif; margin-top: 0.1rem; }
+.cs-layout .sh-cc-val.red  { color: var(--crimson-light); }
+.cs-layout .sh-cc-val.gold { color: var(--gold); }
+[data-theme="light"] .cs-layout .sh-combat-chip { background: #f7f8fa; border-color: rgba(0,0,0,0.09); }
+.cs-layout .sh-item-stats {
   font-size: 0.72rem;
   color: var(--green);
   margin: 0.2rem 0;
   font-weight: 600;
 }
-.sh-item-trait {
+.cs-layout .sh-item-trait {
   font-size: 0.72rem;
   color: var(--text-dim);
   margin: 0.15rem 0;
 }
-.sh-item-type {
+.cs-layout .sh-item-type {
   font-size: 0.7rem;
   color: var(--text-dim);
   text-transform: uppercase;
@@ -1691,13 +1688,13 @@
   font-weight: 700;
   margin-bottom: 0.25rem;
 }
-.sh-item-effet {
+.cs-layout .sh-item-effet {
   font-size: 0.8rem;
   color: var(--text-muted);
   line-height: 1.5;
   margin: 0.2rem 0;
 }
-.sh-item-desc {
+.cs-layout .sh-item-desc {
   font-size: 0.76rem;
   color: var(--text-dim);
   line-height: 1.5;
@@ -1705,7 +1702,7 @@
 }
 
 /* Prix achat + vente sur la card */
-.sh-item-prix-row {
+.cs-layout .sh-item-prix-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1713,25 +1710,25 @@
   padding-top: 0.5rem;
   border-top: 1px solid var(--border);
 }
-.sh-item-prix-achat {
+.cs-layout .sh-item-prix-achat {
   font-size: 0.88rem;
   font-weight: 800;
   color: var(--gold);
   font-family: 'Outfit', sans-serif;
 }
-.sh-item-prix-vente {
+.cs-layout .sh-item-prix-vente {
   font-size: 0.72rem;
   color: var(--text-dim);
   cursor: help;
 }
-[data-theme="light"] .sh-item-prix-row { border-top-color: rgba(0,0,0,0.07); }
+[data-theme="light"] .cs-layout .sh-item-prix-row { border-top-color: rgba(0,0,0,0.07); }
 
 /* ══════════════════════════════════════════════════
    BOUTIQUE — Nouveaux v12
 ══════════════════════════════════════════════════ */
 
 /* Sélecteur de personnage */
-.sh-char-selector {
+.cs-layout .sh-char-selector {
   display: flex;
   align-items: center;
   gap: 0.7rem;
@@ -1742,23 +1739,23 @@
   margin-bottom: 1.2rem;
   flex-wrap: wrap;
 }
-.sh-char-selector-label {
+.cs-layout .sh-char-selector-label {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-muted);
   white-space: nowrap;
 }
-.sh-char-select {
+.cs-layout .sh-char-select {
   max-width: 240px;
   font-size: 0.82rem !important;
 }
-[data-theme="light"] .sh-char-selector {
+[data-theme="light"] .cs-layout .sh-char-selector {
   background: rgba(37,99,235,0.05);
   border-color: rgba(37,99,235,0.16);
 }
 
 /* Bouton Acheter */
-.sh-buy-btn {
+.cs-layout .sh-buy-btn {
   width: 100%;
   margin-top: 0.4rem;
   padding: 0.5rem;
@@ -1771,16 +1768,16 @@
   cursor: pointer;
   transition: opacity 0.15s, transform 0.15s;
 }
-.sh-buy-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
-[data-theme="light"] .sh-buy-btn { background: linear-gradient(135deg,#1d4ed8,#2563eb); }
+.cs-layout .sh-buy-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+[data-theme="light"] .cs-layout .sh-buy-btn { background: linear-gradient(135deg,#1d4ed8,#2563eb); }
 
 /* Picker rareté ★ */
-.sh-rarete-picker {
+.cs-layout .sh-rarete-picker {
   display: flex;
   align-items: center;
   gap: 0.3rem;
 }
-.sh-rarete-star-btn {
+.cs-layout .sh-rarete-star-btn {
   font-size: 1.4rem;
   background: none;
   border: none;
@@ -1789,14 +1786,14 @@
   line-height: 1;
   transition: transform 0.1s;
 }
-.sh-rarete-star-btn:hover { transform: scale(1.2); }
-.sh-rarete-label {
+.cs-layout .sh-rarete-star-btn:hover { transform: scale(1.2); }
+.cs-layout .sh-rarete-label {
   font-size: 0.72rem;
   color: var(--text-dim);
   margin-left: 0.4rem;
   font-style: italic;
 }
-.sh-rarete-stars {
+.cs-layout .sh-rarete-stars {
   font-size: 0.9rem;
   letter-spacing: 0.05em;
 }
@@ -1844,15 +1841,15 @@ select.input-field option {
 
 /* Supprimer flèches sur tous les inputs number dans les modals et formulaires */
 .modal input[type=number],
-.sh-fields-grid input[type=number],
+.cs-layout .sh-fields-grid input[type=number],
 input[type=number].input-field,
 input[type=number].cs-xp-input {
   -moz-appearance: textfield;
 }
 .modal input[type=number]::-webkit-inner-spin-button,
 .modal input[type=number]::-webkit-outer-spin-button,
-.sh-fields-grid input[type=number]::-webkit-inner-spin-button,
-.sh-fields-grid input[type=number]::-webkit-outer-spin-button,
+.cs-layout .sh-fields-grid input[type=number]::-webkit-inner-spin-button,
+.cs-layout .sh-fields-grid input[type=number]::-webkit-outer-spin-button,
 input[type=number].input-field::-webkit-inner-spin-button,
 input[type=number].input-field::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -1860,13 +1857,13 @@ input[type=number].input-field::-webkit-outer-spin-button {
 }
 
 /* Dispo infinie — layout checkbox + input */
-.sh-dispo-wrap {
+.cs-layout .sh-dispo-wrap {
   display: flex;
   align-items: center;
   gap: 0.7rem;
   flex-wrap: wrap;
 }
-.sh-dispo-infini-label {
+.cs-layout .sh-dispo-infini-label {
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -1875,7 +1872,7 @@ input[type=number].input-field::-webkit-outer-spin-button {
   cursor: pointer;
   user-select: none;
 }
-.sh-dispo-infini-label input[type=checkbox] {
+.cs-layout .sh-dispo-infini-label input[type=checkbox] {
   accent-color: var(--gold);
   width: 15px;
   height: 15px;
@@ -2386,11 +2383,11 @@ input[type=number].input-field::-webkit-outer-spin-button {
 ══════════════════════════════════════════════════ */
 
 /* Input file upload simple */
-.sh-upload-simple {
+.cs-layout .sh-upload-simple {
   display: flex;
   align-items: center;
 }
-.sh-upload-simple input[type=file] {
+.cs-layout .sh-upload-simple input[type=file] {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.35rem 0.5rem;
@@ -2398,21 +2395,21 @@ input[type=number].input-field::-webkit-outer-spin-button {
   width: 100%;
   cursor: pointer;
 }
-.sh-upload-simple input[type=file]:hover { border-color: var(--gold); }
-[data-theme="light"] .sh-upload-simple input[type=file] { background: #f7f8fa; }
+.cs-layout .sh-upload-simple input[type=file]:hover { border-color: var(--gold); }
+[data-theme="light"] .cs-layout .sh-upload-simple input[type=file] { background: #f7f8fa; }
 
 /* DnD catégories */
-.sh-cat-draggable { cursor: grab; }
-.sh-cat-draggable:active { cursor: grabbing; }
-.sh-cat-drop-target {
+.cs-layout .sh-cat-draggable { cursor: grab; }
+.cs-layout .sh-cat-draggable:active { cursor: grabbing; }
+.cs-layout .sh-cat-drop-target {
   outline: 2px solid var(--gold) !important;
   outline-offset: 2px;
   transform: scale(1.02);
 }
 
 /* Barre de recherche */
-.sh-search-wrap { flex: 1; max-width: 340px; }
-.sh-search-input {
+.cs-layout .sh-search-wrap { flex: 1; max-width: 340px; }
+.cs-layout .sh-search-input {
   width: 100%;
   padding: 0.5rem 0.8rem;
   border-radius: 10px;
@@ -2423,11 +2420,11 @@ input[type=number].input-field::-webkit-outer-spin-button {
   outline: none;
   transition: border-color 0.15s;
 }
-.sh-search-input:focus { border-color: var(--gold); }
-[data-theme="light"] .sh-search-input { background: #ffffff; border-color: rgba(0,0,0,0.12); }
+.cs-layout .sh-search-input:focus { border-color: var(--gold); }
+[data-theme="light"] .cs-layout .sh-search-input { background: #ffffff; border-color: rgba(0,0,0,0.12); }
 
 /* Or du personnage dans le sélecteur */
-.sh-char-or {
+.cs-layout .sh-char-or {
   font-size: 0.82rem;
   font-weight: 700;
   color: var(--gold);
@@ -2438,14 +2435,14 @@ input[type=number].input-field::-webkit-outer-spin-button {
   white-space: nowrap;
   flex-shrink: 0;
 }
-[data-theme="light"] .sh-char-or {
+[data-theme="light"] .cs-layout .sh-char-or {
   background: rgba(29,91,212,0.07);
   border-color: rgba(29,91,212,0.20);
   color: var(--gold);
 }
 
 /* Description cachée — tooltip natif + texte tronqué */
-.sh-item-desc-tooltip {
+.cs-layout .sh-item-desc-tooltip {
   font-size: 0.72rem;
   color: var(--text-dim);
   cursor: help;
@@ -2457,7 +2454,7 @@ input[type=number].input-field::-webkit-outer-spin-button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sh-item-desc-tooltip span {
+.cs-layout .sh-item-desc-tooltip span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2466,34 +2463,34 @@ input[type=number].input-field::-webkit-outer-spin-button {
 /* ══════════════════════════════════════════════════
    DnD — Indicateurs précis (avant/après)
 ══════════════════════════════════════════════════ */
-.sh-dnd-handle { cursor: grab; }
-.sh-dnd-handle:active { cursor: grabbing; }
+.cs-layout .sh-dnd-handle { cursor: grab; }
+.cs-layout .sh-dnd-handle:active { cursor: grabbing; }
 
 /* Ligne bleue avant */
-.sh-dnd-before {
+.cs-layout .sh-dnd-before {
   box-shadow: 0 -3px 0 0 var(--gold) !important;
   position: relative;
 }
 /* Ligne bleue après */
-.sh-dnd-after {
+.cs-layout .sh-dnd-after {
   box-shadow: 0 3px 0 0 var(--gold) !important;
   position: relative;
 }
 /* Cards cats (grille) */
-.sh-cat-drop-target {
+.cs-layout .sh-cat-drop-target {
   outline: 2px solid var(--gold) !important;
   outline-offset: 2px;
   transform: scale(1.01);
 }
 /* Item en cours de drag */
-.sh-item-card[draggable=true]:active,
-.sh-subcat-card[draggable=true]:active,
-.sh-cat-card[draggable=true]:active {
+.cs-layout .sh-item-card[draggable=true]:active,
+.cs-layout .sh-subcat-card[draggable=true]:active,
+.cs-layout .sh-cat-card[draggable=true]:active {
   opacity: 0.5;
 }
 
 /* Zone cliquable sous-cat (pour séparation DnD/navigation) */
-.sh-subcat-click-area {
+.cs-layout .sh-subcat-click-area {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2506,7 +2503,7 @@ input[type=number].input-field::-webkit-outer-spin-button {
 /* ══════════════════════════════════════════════════
    BOUTIQUE — Barre de filtres articles
 ══════════════════════════════════════════════════ */
-.sh-filter-bar {
+.cs-layout .sh-filter-bar {
   display: flex;
   align-items: center;
   gap: 0.7rem;
@@ -2517,14 +2514,14 @@ input[type=number].input-field::-webkit-outer-spin-button {
   border: 1px solid var(--border);
   border-radius: 12px;
 }
-.sh-filter-chips {
+.cs-layout .sh-filter-chips {
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
   flex: 1;
   align-items: center;
 }
-.sh-filter-chip {
+.cs-layout .sh-filter-chip {
   padding: 0.22rem 0.65rem;
   border-radius: 20px;
   border: 1px solid var(--border);
@@ -2536,29 +2533,29 @@ input[type=number].input-field::-webkit-outer-spin-button {
   transition: all 0.15s;
   white-space: nowrap;
 }
-.sh-filter-chip:hover {
+.cs-layout .sh-filter-chip:hover {
   border-color: rgba(79,140,255,0.35);
   color: var(--text);
   background: rgba(79,140,255,0.06);
 }
-.sh-filter-chip.active {
+.cs-layout .sh-filter-chip.active {
   background: rgba(79,140,255,0.15);
   border-color: var(--gold);
   color: var(--text);
 }
-.sh-filter-reset {
+.cs-layout .sh-filter-reset {
   border-color: rgba(220,38,38,0.30);
   color: #f87171;
   background: rgba(220,38,38,0.06);
 }
-.sh-filter-reset:hover {
+.cs-layout .sh-filter-reset:hover {
   background: rgba(220,38,38,0.12);
   border-color: rgba(220,38,38,0.50);
 }
-[data-theme="light"] .sh-filter-bar { background: #ffffff; border-color: rgba(0,0,0,0.08); }
-[data-theme="light"] .sh-filter-chip { background: #f3f4f7; border-color: rgba(0,0,0,0.09); }
-[data-theme="light"] .sh-filter-chip:hover { background: #eef1f9; border-color: rgba(37,99,235,0.25); }
-[data-theme="light"] .sh-filter-chip.active { background: rgba(37,99,235,0.10); border-color: rgba(37,99,235,0.35); }
+[data-theme="light"] .cs-layout .sh-filter-bar { background: #ffffff; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .cs-layout .sh-filter-chip { background: #f3f4f7; border-color: rgba(0,0,0,0.09); }
+[data-theme="light"] .cs-layout .sh-filter-chip:hover { background: #eef1f9; border-color: rgba(37,99,235,0.25); }
+[data-theme="light"] .cs-layout .sh-filter-chip.active { background: rgba(37,99,235,0.10); border-color: rgba(37,99,235,0.35); }
 
 /* ══════════════════════════════════════════════════
    BESTIAIRE — Design cards créatures
