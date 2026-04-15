@@ -124,14 +124,11 @@ export function editEquipSlot(slot) {
   const equipped = (c.equipement||{})[slot]||{};
   const isWeapon = slot.startsWith('Main');
 
-  const ARMES_1M_CAC    = ['Arme 1M CaC Phy.'];
-  const ARME_SECONDAIRE = ['Arme Secondaire (Bouclier, Torche...)'];
-  const TOUTES_ARMES    = ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)'];
-
-  const SLOT_ARME_FORMATS = {
-    'Main principale': ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'],
-    'Main secondaire': [...ARMES_1M_CAC, ...ARME_SECONDAIRE],
-  };
+  // Tous les formats d'arme connus — un item ayant l'un de ces formats est une arme
+  const WEAPON_FORMATS = new Set([
+    'Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
+    'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
+  ]);
 
   const SLOT_ARMURE = {
     'Tête':    { slot: 'Tête',  types: null },
@@ -159,13 +156,16 @@ export function editEquipSlot(slot) {
       const tpl = item.template || '';
 
       if (isWeapon) {
-        const formats = SLOT_ARME_FORMATS[slot] || TOUTES_ARMES;
-        if (tpl === 'arme' || item.format) {
-          if (!item.format && tpl === 'arme') return true;
-          return formats.includes(item.format);
-        }
-        const t = (item.type||'').toLowerCase();
-        return ['arme','weapon','épée','lance','hache','arc','dague','baguette','baton'].some(k => t.includes(k));
+        // Pas de restriction par slot : toute arme est équipable dans Main principale ou secondaire
+        if (tpl === 'arme') return true;
+        if (item.format && WEAPON_FORMATS.has(item.format)) return true;
+        const combined = [item.type, item.sousType, item.nom, item.categorie]
+          .map(s => (s||'').toLowerCase()).join(' ');
+        return [
+          'arme','weapon','épée','lance','hache','arc','arbalète',
+          'dague','baguette','baton','bouclier','shield','torche',
+          'masse','marteau','fléau','rapière','cimeterre','sabre',
+        ].some(k => combined.includes(k));
       }
 
       const armureRule = SLOT_ARMURE[slot];

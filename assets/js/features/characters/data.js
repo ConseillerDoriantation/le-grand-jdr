@@ -513,38 +513,43 @@ export function applyFlatBonusToRollText(text = '', bonus = 0) {
   return `${prefix} ${modStr(current + bonus)}`;
 }
 
-export function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
-  const statKey = item.toucherStat || fallbackKey;
+const _STAT_LABELS = {
+  force:'Force', dexterite:'Dex', intelligence:'Int',
+  sagesse:'Sag', constitution:'Con', charisme:'Cha',
+};
+
+// Retourne les composants structurés du toucher (pour affichage avancé)
+export function getWeaponToucherParts(c, item = {}, fallbackKey = 'force') {
+  const statKey  = item.toucherStat || fallbackKey;
   const setBonus = getArmorSetData(c).modifiers.toucherBonus || 0;
-  if (item.toucherStat) return `1d20 ${modStr(getMod(c, statKey) + setBonus)}`;
-  if (item.toucher) return applyFlatBonusToRollText(item.toucher, setBonus);
-  return `1d20 ${modStr(getMod(c, fallbackKey) + setBonus)}`;
+  const statMod  = getMod(c, statKey);
+  const total    = statMod + setBonus;
+  if (item.toucher && !item.toucherStat) {
+    return { roll: applyFlatBonusToRollText(item.toucher, setBonus), statLabel: null, setBonus };
+  }
+  return { roll: `1d20 ${modStr(total)}`, statLabel: _STAT_LABELS[statKey] || statKey, statMod, setBonus };
+}
+
+// Retourne les composants structurés des dégâts (pour affichage avancé)
+export function getWeaponDegatsParts(c, item = {}, fallbackKey = 'force') {
+  if (!item.degats) return null;
+  const statKey      = item.degatsStat || fallbackKey;
+  const statMod      = getMod(c, statKey);
+  const maitriseBonus = _getMaitriseBonus(c, item);
+  return {
+    roll:           `${item.degats} ${modStr(statMod + maitriseBonus)}`,
+    statLabel:      _STAT_LABELS[statKey] || statKey,
+    statMod,
+    maitriseBonus,
+  };
+}
+
+// Compatibilité — conservées pour les autres appelants
+export function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
+  return getWeaponToucherParts(c, item, fallbackKey).roll;
 }
 
 export function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
-  if (!item.degats) return '—';
-
-  const statKey = item.degatsStat || fallbackKey;
-  const statMod = getMod(c, statKey);
-
-  const maitrisesBonus = _getMaitriseBonus(c, item);
-  const totalMod = statMod + maitrisesBonus;
-
-  // Simule plusieurs bonus (à adapter à ta logique réelle)
-  const bonuses = maitrisesBonus > 0 ? [statMod, maitrisesBonus] : [];
-
-  const bonusStack = bonuses.length
-    ? `<div style="display:flex;flex-direction:column;line-height:1;">
-        ${bonuses.map(b => `
-          <span style="font-size:.65rem;color:#b47fff">✦+${b}</span>
-        `).join('')}
-      </div>`
-    : '';
-
-  return `
-    <div style="display:flex;align-items:center;gap:.4rem">
-      <span>${item.degats} ${modStr(totalMod)}</span>
-      ${bonusStack}
-    </div>
-  `;
+  const p = getWeaponDegatsParts(c, item, fallbackKey);
+  return p ? p.roll : '—';
 }

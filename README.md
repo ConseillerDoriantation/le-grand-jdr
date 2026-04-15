@@ -67,7 +67,7 @@ Option simple : ouvrir `index.html` via un serveur statique.
 Exemples :
 
 ```bash
-python -m http.server 8000
+python -m http.server 8080
 ```
 
 Puis ouvrir `http://localhost:8000`.

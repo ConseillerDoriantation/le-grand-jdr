@@ -32,7 +32,14 @@
       "Bash(awk '/^\\\\.cs-/{if\\(p\\) print p; p=NR; next} /^[^[:space:].#@]|^$/{if\\(p&&NR>p\\) print NR-1} END{if\\(p\\) print NR}' /c/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/css/features.css)",
       "Bash(node --check assets/js/features/characters/inventory.js)",
       "Bash(node --check assets/js/features/characters/forms.js)",
-      "Bash(node --check assets/js/features/characters/tabs.js)"
+      "Bash(node --check assets/js/features/characters/tabs.js)",
+      "Bash(powershell.exe -c \"Get-Content 'C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters\\\\combat.js'\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters.js\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/combat.js\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/equipment.js\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/tabs.js\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claire/worktrees/zen-banzai/assets/js/features/characters/tabs.js\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/data.js\")"
     ]
   }
 }

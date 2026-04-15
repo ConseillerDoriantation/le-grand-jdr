@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { updateInCol } from '../../data/firestore.js';
+import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { modStr } from '../../shared/html.js';
@@ -414,98 +414,95 @@ export function inlineEditCompteField(type, idx, field, el) {
 // ══════════════════════════════════════════════
 // TAB : MAÎTRISES
 // ══════════════════════════════════════════════
+// Charge les sousTypes distincts depuis la collection shop (cachée 5 min)
+async function _loadWeaponSousTypes() {
+  try {
+    const items = await loadCollection('shop');
+    return [...new Set(
+      items.filter(i => i?.sousType).map(i => i.sousType)
+    )].sort((a, b) => a.localeCompare(b, 'fr'));
+  } catch {
+    return [];
+  }
+}
+
+// Couleur accent selon le niveau (0-5)
+function _maitNiveauColor(n) {
+  if (n >= 4) return { col:'#e8b84b', bg:'rgba(232,184,75,.12)', border:'rgba(232,184,75,.3)' };
+  if (n >= 2) return { col:'#4f8cff', bg:'rgba(79,140,255,.10)', border:'rgba(79,140,255,.25)' };
+  return { col:'var(--text-dim)', bg:'rgba(255,255,255,.04)', border:'var(--border)' };
+}
+
+// Pips de niveau (5 max)
+function _niveauPips(n, col) {
+  const max = 5;
+  return Array.from({length: max}, (_, i) =>
+    `<span class="cs-mait-pip${i < n ? ' on' : ''}" style="${i < n ? `background:${col};box-shadow:0 0 6px ${col}55` : ''}"></span>`
+  ).join('');
+}
+
 export function renderCharMaitrises(c, canEdit) {
   const maitrises = c.maitrises || [];
 
-  let html = `
-  <div style="padding:.75rem .25rem">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem">
-      <div>
-        <div style="font-family:'Cinzel',serif;font-size:.95rem;color:var(--text)">Maîtrises d'armes</div>
-        <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">
-          Chaque niveau de maîtrise ajoute +1 aux dégâts des armes du type correspondant.
-        </div>
-      </div>
+  let html = `<div class="cs-section cs-section--compact">
+    <div class="cs-section-hdr">
+      <span class="cs-section-title">⚔️ Maîtrises d'armes</span>
       ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addMaitrise()">+ Ajouter</button>` : ''}
     </div>`;
 
   if (maitrises.length === 0) {
-    html += `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic;font-size:.83rem">
-      ${canEdit ? 'Aucune maîtrise — clique sur "+ Ajouter" pour en créer une.' : 'Aucune maîtrise enregistrée.'}
-    </div>`;
+    html += `<div class="cs-mait-empty">${canEdit
+      ? '⚔️ Aucune maîtrise — clique sur <strong>+ Ajouter</strong> pour en déclarer une.'
+      : 'Aucune maîtrise enregistrée.'
+    }</div>`;
   } else {
-    html += `<div style="display:flex;flex-direction:column;gap:.5rem">`;
+    html += `<div class="cs-mait-grid">`;
     maitrises.forEach((m, i) => {
       const niveau = parseInt(m.niveau) || 0;
-      const MAX = 5;
-      const pct = Math.min(100, Math.round(niveau / MAX * 100));
-      html += `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:.7rem .85rem">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.4rem">
-          <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600">
-            ⚔️ ${m.typeArme||'?'}
+      const { col, bg, border } = _maitNiveauColor(niveau);
+      const bonus  = niveau > 0 ? `+${niveau} dégâts` : 'Initié';
+      html += `<div class="cs-mait-card" style="--mc:${col};--mb:${bg};--mbd:${border}">
+        <div class="cs-mait-card-body">
+          <div class="cs-mait-card-top">
+            <span class="cs-mait-card-name">${m.typeArme||'?'}</span>
+            <span class="cs-mait-card-bonus">${bonus}</span>
           </div>
-          <div style="display:flex;align-items:center;gap:.5rem">
-            <span style="font-size:.75rem;color:var(--gold);font-weight:700;background:rgba(232,184,75,.1);
-              border:1px solid rgba(232,184,75,.25);border-radius:6px;padding:2px 8px">
-              Maîtrise ${niveau > 0 ? '+'+niveau : '0'}
-            </span>
-            ${canEdit ? `
-            <button class="btn-icon" style="font-size:.8rem" onclick="editMaitrise(${i})">✏️</button>
-            <button class="btn-icon" style="font-size:.8rem;color:#ff6b6b" onclick="deleteMaitrise(${i})">🗑️</button>
-            ` : ''}
-          </div>
+          <div class="cs-mait-pips">${_niveauPips(niveau, col)}</div>
+          ${m.note ? `<div class="cs-mait-card-note">${m.note}</div>` : ''}
         </div>
-        <div style="display:flex;align-items:center;gap:.6rem">
-          <div style="flex:1;background:var(--bg-card);border-radius:999px;height:6px;overflow:hidden;border:1px solid var(--border)">
-            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),#e8b84b);border-radius:999px;transition:width .4s"></div>
-          </div>
-          <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">Niv. ${niveau}/${MAX}</span>
-        </div>
-        ${m.note ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:.3rem;font-style:italic">${m.note}</div>` : ''}
+        ${canEdit ? `<div class="cs-mait-card-actions">
+          <button class="btn-icon" onclick="editMaitrise(${i})" title="Modifier">✏️</button>
+          <button class="btn-icon cs-mait-del" onclick="deleteMaitrise(${i})" title="Supprimer">🗑️</button>
+        </div>` : ''}
       </div>`;
     });
     html += `</div>`;
   }
 
-  html += `
-    <div style="margin-top:1rem;padding:.6rem .75rem;background:rgba(232,184,75,.05);
-      border:1px solid rgba(232,184,75,.15);border-radius:8px;font-size:.75rem;color:var(--text-dim)">
-      💡 Le bonus s'applique automatiquement si le type d'arme équipée correspond (ex: "Épée" correspond à une arme de type "Épée").
-    </div>
-  </div>`;
-
+  html += `<p class="cs-rule-note">💡 Le bonus de dégâts s'applique si le type d'arme équipée correspond exactement.</p>`;
+  html += `</div>`;
   return html;
 }
 
-function _maitriseSousTypeSelect(current = '') {
-  const shopTypes = window._shopSousTypes || [];
-  const existing = (STATE.activeChar?.maitrises||[]).map(m=>m.typeArme).filter(Boolean);
-  const all = [...new Set([...shopTypes, ...existing])].sort();
-
-  if (all.length === 0) {
-    return `<input class="input-field" id="mait-type" value="${current}" placeholder="Arc, Épée, Lance...">
-      <div style="font-size:.7rem;color:var(--text-dim);margin-top:.3rem">
-        💡 Visitez la boutique une fois pour charger la liste des types disponibles.
-      </div>`;
+function _maitriseSousTypeSelect(current, sousTypes) {
+  if (!sousTypes.length) {
+    return `<div class="cs-mait-load-warn">⚠️ Aucun type d'arme trouvé dans la base de données.</div>`;
   }
-
-  const options = all.map(t =>
+  const options = sousTypes.map(t =>
     `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`
   ).join('');
-
   return `<select class="input-field" id="mait-type">
-    ${current && !all.includes(current) ? `<option value="${current}" selected>${current}</option>` : ''}
     <option value="" ${!current ? 'selected' : ''} disabled>— Choisir un type —</option>
     ${options}
   </select>`;
 }
 
-export function addMaitrise() {
+export async function addMaitrise() {
   const c = STATE.activeChar; if (!c) return;
+  const sousTypes = await _loadWeaponSousTypes();
   openModal('⚔️ Nouvelle maîtrise', `
     <div class="form-group"><label>Type d'arme</label>
-      ${_maitriseSousTypeSelect('')}
+      ${_maitriseSousTypeSelect('', sousTypes)}
     </div>
     <div class="form-group">
       <label>Niveau <span style="color:var(--text-dim);font-weight:400">(+1 aux dégâts par niveau)</span></label>
@@ -518,12 +515,13 @@ export function addMaitrise() {
   `);
 }
 
-export function editMaitrise(idx) {
+export async function editMaitrise(idx) {
   const c = STATE.activeChar; if (!c) return;
   const m = (c.maitrises || [])[idx]; if (!m) return;
+  const sousTypes = await _loadWeaponSousTypes();
   openModal('✏️ Modifier la maîtrise', `
     <div class="form-group"><label>Type d'arme</label>
-      ${_maitriseSousTypeSelect(m.typeArme||'')}
+      ${_maitriseSousTypeSelect(m.typeArme||'', sousTypes)}
     </div>
     <div class="form-group">
       <label>Niveau</label>
