@@ -1084,11 +1084,72 @@
   color: var(--text);
 }
 
-.sh-modal-selects {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
-  margin-bottom: 0.2rem;
+/* Champ Dégâts : dés + chips de modificateurs en ligne */
+.sh-dmg-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.sh-dmg-dice {
+  flex: 0 0 120px;
+}
+.sh-dmg-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.sh-dmg-sep {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.sh-dmg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.15rem 0.25rem 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  transition: border-color 0.12s;
+}
+.sh-dmg-chip:hover {
+  border-color: var(--gold);
+}
+.sh-dmg-chip select {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  padding: 0.1rem 0.15rem;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+}
+.sh-dmg-chip button {
+  background: none;
+  border: none;
+  color: #ff6b6b;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0 0.3rem;
+  line-height: 1;
+}
+.sh-dmg-add {
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.12s;
+}
+.sh-dmg-add:hover {
+  border-color: var(--gold);
+  color: var(--gold);
 }
 
 .sh-fields-grid {
@@ -1338,8 +1399,7 @@ input[type="number"].input-field::-webkit-outer-spin-button {
     height: 100px;
   }
 
-  .sh-fields-grid,
-  .sh-modal-selects {
+  .sh-fields-grid {
     grid-template-columns: 1fr;
   }
 }

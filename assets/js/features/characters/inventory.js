@@ -11,6 +11,13 @@ import {
   syncEquipmentAfterInventoryMutation,
 } from './data.js';
 
+function _itemDegatsStatsShorts(item) {
+  const arr = Array.isArray(item.degatsStats) && item.degatsStats.length
+    ? item.degatsStats
+    : (item.degatsStat ? [item.degatsStat] : []);
+  return arr.map(statShort).filter(Boolean);
+}
+
 // ══════════════════════════════════════════════
 // INVENTAIRE BOUTIQUE (section dans renderCharSheet)
 // ══════════════════════════════════════════════
@@ -48,7 +55,10 @@ export function _renderInventaireBoutique(char) {
     if (item.slotArmure)  infos.push({ label: 'Slot',      val: item.slotArmure });
     if (item.slotBijou)   infos.push({ label: 'Slot',      val: item.slotBijou });
     if (item.typeArmure)  infos.push({ label: 'Type',      val: item.typeArmure });
-    if (item.degats)      infos.push({ label: '⚔️ Dégâts',  val: `${item.degats}${item.degatsStat ? ` + ${statShort(item.degatsStat)}` : ''}`,  color: '#ff6b6b' });
+    if (item.degats) {
+      const shs = _itemDegatsStatsShorts(item);
+      infos.push({ label: '⚔️ Dégâts', val: `${item.degats}${shs.length ? ` + ${shs.join(' + ')}` : ''}`, color: '#ff6b6b' });
+    }
     if (item.toucherStat) infos.push({ label: 'Toucher',    val: statShort(item.toucherStat), color: '#e8b84b' });
     else if (item.toucher) infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
     if (item.ca || item.ca === 0) infos.push({ label: '🛡️ CA', val: item.ca });
@@ -150,8 +160,8 @@ function _invCategory(item) {
 function _invRowChips(item) {
   const chips = [];
   if (item.degats) {
-    const d = item.degatsStat ? `${item.degats}+${statShort(item.degatsStat)}` : item.degats;
-    chips.push({ val: d, color: '#ff6b6b' });
+    const shs = _itemDegatsStatsShorts(item);
+    chips.push({ val: shs.length ? `${item.degats}+${shs.join('+')}` : item.degats, color: '#ff6b6b' });
   }
   if (item.toucherStat || (item.toucher && !item.degats))
     chips.push({ val: item.toucherStat ? statShort(item.toucherStat) : item.toucher, color: '#e8b84b' });

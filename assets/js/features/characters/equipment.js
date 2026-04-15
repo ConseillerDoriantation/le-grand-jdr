@@ -38,6 +38,9 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
       sousType: item.sousType || '',
       degats: item.degats || '',
       degatsStat: item.degatsStat || inferAttackStatFromItem(item),
+      degatsStats: Array.isArray(item.degatsStats) && item.degatsStats.length
+        ? [...item.degatsStats]
+        : (item.degatsStat ? [item.degatsStat] : [inferAttackStatFromItem(item)]),
       toucherStat: item.toucherStat || inferAttackStatFromItem(item),
       statAttaque: inferAttackStatFromItem(item),
       typeArme: item.typeArme || item.type || '',
@@ -270,6 +273,9 @@ export function editEquipSlot(slot) {
     toucher: equipped.toucher || '',
     toucherStat: equipped.toucherStat || inferAttackStatFromItem(equipped),
     degatsStat: equipped.degatsStat || equipped.statAttaque || '',
+    degatsStats: Array.isArray(equipped.degatsStats) && equipped.degatsStats.length
+      ? [...equipped.degatsStats]
+      : (equipped.degatsStat ? [equipped.degatsStat] : []),
     stats: equipped.stats || '',
     fo: parseInt(equipped.fo) || 0,
     dex: parseInt(equipped.dex) || 0,
@@ -307,6 +313,9 @@ export function previewEquipFromInv(val, slot) {
       window._equipSelectedMeta.statAttaque   = inferredStat;
       window._equipSelectedMeta.toucherStat   = item.toucherStat   || inferredStat;
       window._equipSelectedMeta.degatsStat    = item.degatsStat    || inferredStat;
+      window._equipSelectedMeta.degatsStats   = Array.isArray(item.degatsStats) && item.degatsStats.length
+        ? [...item.degatsStats]
+        : (item.degatsStat ? [item.degatsStat] : [inferredStat]);
       window._equipSelectedMeta.typeArme      = item.typeArme      || item.sousType || '';
       window._equipSelectedMeta.portee        = item.portee        || '';
       window._equipSelectedMeta.particularite = item.particularite || item.effet || '';
@@ -379,6 +388,9 @@ export async function saveEquipSlot(slot) {
         nom:           meta.nom           || '',
         degats:        meta.degats        || '',
         degatsStat:    meta.degatsStat    || meta.statAttaque || 'force',
+        degatsStats:   Array.isArray(meta.degatsStats) && meta.degatsStats.length
+          ? [...meta.degatsStats]
+          : [meta.degatsStat || meta.statAttaque || 'force'],
         toucherStat:   meta.toucherStat   || meta.statAttaque || 'force',
         statAttaque:   meta.statAttaque   || 'force',
         typeArme:      meta.typeArme      || meta.sousType || '',

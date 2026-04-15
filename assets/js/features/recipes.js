@@ -122,7 +122,12 @@ function _shopToRecipe(item) {
     rarete:      item.rarete || 0,
     format:      itemFormat,
     typeObjet:   item.sousType || item.slotArmure || item.slotBijou || '',
-    degats:      item.degats ? `${item.degats}${item.degatsStat ? ' +' + item.degatsStat : ''}` : '',
+    degats:      item.degats ? (() => {
+      const arr = Array.isArray(item.degatsStats) && item.degatsStats.length
+        ? item.degatsStats
+        : (item.degatsStat ? [item.degatsStat] : []);
+      return `${item.degats}${arr.length ? ' +' + arr.join(' +') : ''}`;
+    })() : '',
     caBonus:     parseInt(item.ca) || 0,
     typeArmure:  item.typeArmure || '',
     atelierReq:  meta.atelierReq  ?? _shopItemAtelierReq(item, type),

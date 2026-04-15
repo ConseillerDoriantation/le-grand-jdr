@@ -141,6 +141,17 @@ function _legacyStatsTextFromData(data = {}) {
   return _formatStatBonuses(data).join(' · ');
 }
 
+function _getDegatsStats(item = {}) {
+  if (Array.isArray(item.degatsStats) && item.degatsStats.length) {
+    return item.degatsStats.map(_normalizeStatKey).filter(Boolean);
+  }
+  const single = _normalizeStatKey(item.degatsStat || item.statAttaque || '');
+  return single ? [single] : [];
+}
+function _formatDegatsStatsText(arr) {
+  return arr.map(_statShort).filter(Boolean).join(' + ');
+}
+
 function _legacyToucherTextFromData(data = {}) {
   const short = _statShort(data.toucherStat);
   return short ? `+${short}` : '';
@@ -781,8 +792,9 @@ function _renderItemCard(item, tplKey, itemIdx) {
   const factRows = [];
 
   if (tplKey === 'arme') {
+    const degatsStatsArr = _getDegatsStats(item);
     const degatsTxt = item.degats
-      ? `${item.degats}${item.degatsStat ? ` + ${_statShort(item.degatsStat)}` : ''}`
+      ? `${item.degats}${degatsStatsArr.length ? ` + ${_formatDegatsStatsText(degatsStatsArr)}` : ''}`
       : '';
     const toucherTxt = item.toucherStat ? _statShort(item.toucherStat) : '';
     const toucherColor = item.toucherStat ? _statVisual(item.toucherStat).color : 'var(--text)';
@@ -931,7 +943,10 @@ function openShopItemDetail(itemId) {
   const rows = [];
   if (item.format)      rows.push(['Format', item.format]);
   if (item.sousType)    rows.push(['Type', item.sousType]);
-  if (item.degats)      rows.push(['Dégâts', `${item.degats}${item.degatsStat?' + '+_statShort(item.degatsStat):''}`]);
+  if (item.degats) {
+    const arr = _getDegatsStats(item);
+    rows.push(['Dégâts', `${item.degats}${arr.length ? ' + ' + _formatDegatsStatsText(arr) : ''}`]);
+  }
   if (item.toucherStat) rows.push(['Toucher', _statShort(item.toucherStat)]);
   if (item.portee)      rows.push(['Portée', item.portee]);
   if (item.slotArmure)  rows.push(['Emplacement', item.slotArmure]);
@@ -1122,6 +1137,7 @@ async function confirmBuyItem(itemId, directQty) {
       prixAchat:prix, prixVente,
       format:item.format||'', rarete:item.rarete||'',
       degats:item.degats||'', degatsStat:item.degatsStat||'',
+      degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : (item.degatsStat ? [item.degatsStat] : []),
       toucher:item.toucher||'', toucherStat:item.toucherStat||'',
       ca:item.ca||'', stats:item.stats||'',
       for:parseInt(item.for)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
@@ -1198,7 +1214,7 @@ async function sellInvItemFromShop(charId, invIndex) {
     const prixVente = parseFloat(item.prixVente) || 0;
     const itemNom   = item.nom || 'cet objet';
 
-    if (!await confirmModal(`Vendre "${itemNom}" pour ${prixVente} or ?`)) return;
+    if (!await confirmModal(`Vendre "${itemNom}" pour ${prixVente} or ?`, { title: 'Confirmation de vente' })) return;
 
     if (item.itemId) {
       const shopItem = await import('../data/firestore.js').then(m => m.getDocData('shop', item.itemId)).catch(()=>null);
@@ -1463,7 +1479,7 @@ async function saveCat(catId) {
 async function deleteCat(catId) {
   try {
     const n=_items.filter(i=>i.categorieId===catId).length;
-    if (!await confirmModal(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?')) return;
+    if (!await confirmModal(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?', { title: 'Confirmation de suppression' })) return;
     const toDelete=_items.filter(i=>i.categorieId===catId);
     await Promise.all(toDelete.map(i=>deleteFromCol('shop',i.id)));
     await deleteFromCol('shopCategories',catId);
@@ -1523,7 +1539,7 @@ async function saveSubCat(catId,scId) {
 
 async function deleteSubCat(catId,scId) {
   try {
-    if (!await confirmModal('Supprimer cette sous-catégorie ?')) return;
+    if (!await confirmModal('Supprimer cette sous-catégorie ?', { title: 'Confirmation de suppression' })) return;
     const cat=_cats.find(c=>c.id===catId); if(!cat) return;
     const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
     await updateInCol('shopCategories',catId,{sousCats});
@@ -1611,15 +1627,19 @@ function _buildFieldsHtml(tpl,item) {
           ${_weaponFormats.map(o=>`<option value="${o.label}" ${val===o.label?'selected':''}>${o.label}</option>`).join('')}
         </select></div>`;
     } else if(f.type==='damage_with_stat'){
-      const degatsStat = item?.degatsStat || item?.statAttaque || '';
+      const statsArr = _getDegatsStats(item||{});
+      const statsJson = JSON.stringify(statsArr).replace(/"/g,'&quot;');
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
-        <div class="sh-modal-selects">
-          <input class="input-field" id="si-degats" value="${item?.degats||''}" placeholder="${f.placeholder||''}">
-          <select class="input-field sh-modal-select" id="si-degatsStat">
-            <option value="">Mod. dégâts</option>
-            ${ITEM_STATS.map(stat=>`<option value="${stat.key}" ${_normalizeStatKey(degatsStat)===stat.key?'selected':''}>${stat.label}</option>`).join('')}
-          </select>
-        </div></div>`;
+        <div class="sh-dmg-row">
+          <input class="input-field sh-dmg-dice" id="si-degats" value="${item?.degats||''}" placeholder="${f.placeholder||'1d6, 2d4...'}">
+          <input type="hidden" id="si-degats-stats-data" value="${statsJson}">
+          <div id="si-degats-stats-list" class="sh-dmg-chips">
+            ${statsArr.map((key,i)=>_renderDegatsStatChip(key,i)).join('')}
+          </div>
+          <button type="button" class="sh-dmg-add" onclick="window._shopDegatsStatAdd()">+ Mod</button>
+        </div>
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.4rem">Ex : 2d4 + Fo + Sa pour les Bandes du moine.</div>
+      </div>`;
     } else if(f.type==='stat_select'){
       const selected = _normalizeStatKey(item?.[f.id] || item?.toucher || item?.statAttaque || '');
       html+=`<div class="form-group"><label>${f.label}</label>
@@ -1713,6 +1733,41 @@ window._shopTraitRemove = (i) => {
   const arr = _shopTraitsGet(); arr.splice(i,1); _shopTraitsSet(arr); _shopTraitsRender(arr);
 };
 
+// ── Gestion dynamique des modificateurs de dégâts ─────────────────────────────
+function _renderDegatsStatChip(key, i) {
+  return `<span class="sh-dmg-sep">+</span><span class="sh-dmg-chip" data-dstat-idx="${i}">
+    <select onchange="window._shopDegatsStatUpdate(${i},this.value)">
+      ${ITEM_STATS.map(s=>`<option value="${s.key}" ${key===s.key?'selected':''}>${s.short}</option>`).join('')}
+    </select>
+    <button type="button" title="Retirer ce modificateur" onclick="window._shopDegatsStatRemove(${i})">✕</button>
+  </span>`;
+}
+function _shopDegatsStatsGet() {
+  const hidden = document.getElementById('si-degats-stats-data');
+  try { return JSON.parse(hidden?.value || '[]'); } catch { return []; }
+}
+function _shopDegatsStatsSet(arr) {
+  const hidden = document.getElementById('si-degats-stats-data');
+  if (hidden) hidden.value = JSON.stringify(arr);
+}
+function _shopDegatsStatsRender(arr) {
+  const list = document.getElementById('si-degats-stats-list');
+  if (!list) return;
+  list.innerHTML = arr.map((key,i)=>_renderDegatsStatChip(key,i)).join('');
+}
+window._shopDegatsStatAdd = () => {
+  const arr = _shopDegatsStatsGet();
+  arr.push(ITEM_STATS[0].key);
+  _shopDegatsStatsSet(arr);
+  _shopDegatsStatsRender(arr);
+};
+window._shopDegatsStatUpdate = (i, val) => {
+  const arr = _shopDegatsStatsGet(); arr[i] = val; _shopDegatsStatsSet(arr);
+};
+window._shopDegatsStatRemove = (i) => {
+  const arr = _shopDegatsStatsGet(); arr.splice(i,1); _shopDegatsStatsSet(arr); _shopDegatsStatsRender(arr);
+};
+
 function toggleDispoInfini(cb){
   const input=document.getElementById('si-dispo'); if(!input) return;
   if(cb.checked){ input.value=''; input.disabled=true; input.style.opacity='0.4'; input.style.pointerEvents='none'; }
@@ -1769,7 +1824,11 @@ async function saveShopItem(itemId) {
         data[f.id]=infini?-1:(parseInt(document.getElementById('si-dispo')?.value)||0);
       } else if (f.type === 'damage_with_stat') {
         data.degats = document.getElementById('si-degats')?.value.trim() || '';
-        data.degatsStat = document.getElementById('si-degatsStat')?.value || '';
+        let statsArr = [];
+        try { statsArr = JSON.parse(document.getElementById('si-degats-stats-data')?.value || '[]'); } catch {}
+        statsArr = statsArr.map(_normalizeStatKey).filter(Boolean);
+        data.degatsStats = statsArr;
+        data.degatsStat = statsArr[0] || '';
       } else if (f.type === 'stat_select') {
         data[f.id] = document.getElementById(`si-${f.id}`)?.value || '';
       } else if (f.type === 'stat_bonus_grid') {
@@ -1832,7 +1891,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
   if (!chars.length) return;
 
   const SYNC_FIELDS = [
-    'nom','format','rarete','degats','degatsStat','toucher','toucherStat','ca','stats',
+    'nom','format','rarete','degats','degatsStat','degatsStats','toucher','toucherStat','ca','stats',
     'for','dex','in','sa','co','ch','traits','portee','type','effet','description',
     'slotArmure','typeArmure','slotBijou','prixVente','sousType',
   ];
@@ -1887,7 +1946,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 
 async function deleteShopItem(itemId) {
   try {
-    if (!await confirmModal('Supprimer cet article ?')) return;
+    if (!await confirmModal('Supprimer cet article ?', { title: 'Confirmation de suppression' })) return;
     await deleteFromCol('shop',itemId);
     showNotif('Article supprimé.','success'); renderShop();
   } catch (e) {

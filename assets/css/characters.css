@@ -1524,12 +1524,6 @@
 ══════════════════════════════════════════════════ */
 
 /* Selecteurs dans les modals */
-.cs-layout .sh-modal-selects {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
-  margin-bottom: 0.2rem;
-}
 .cs-layout .sh-modal-select {
   background: var(--bg-elevated, var(--bg-card)) !important;
   color: var(--text) !important;

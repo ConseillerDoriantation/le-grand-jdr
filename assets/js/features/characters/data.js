@@ -533,12 +533,15 @@ export function getWeaponToucherParts(c, item = {}, fallbackKey = 'force') {
 // Retourne les composants structurés des dégâts (pour affichage avancé)
 export function getWeaponDegatsParts(c, item = {}, fallbackKey = 'force') {
   if (!item.degats) return null;
-  const statKey      = item.degatsStat || fallbackKey;
-  const statMod      = getMod(c, statKey);
+  const statsArr = Array.isArray(item.degatsStats) && item.degatsStats.length
+    ? item.degatsStats.filter(Boolean)
+    : [item.degatsStat || fallbackKey];
+  const statMod = statsArr.reduce((sum, key) => sum + getMod(c, key), 0);
   const maitriseBonus = _getMaitriseBonus(c, item);
+  const statLabel = statsArr.map(k => _STAT_LABELS[k] || k).join(' + ');
   return {
     roll:           `${item.degats} ${modStr(statMod + maitriseBonus)}`,
-    statLabel:      _STAT_LABELS[statKey] || statKey,
+    statLabel,
     statMod,
     maitriseBonus,
   };
