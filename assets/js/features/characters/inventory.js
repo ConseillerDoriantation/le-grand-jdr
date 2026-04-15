@@ -129,33 +129,53 @@ export function _renderInventaireBoutique(char) {
 // ══════════════════════════════════════════════
 // INVENTAIRE PRINCIPAL
 // ══════════════════════════════════════════════
-function isEquipableInventoryItem(item = {}) {
+
+// ── Catégorisation ────────────────────────────
+function _invCategory(item) {
   const tpl = (item.template || '').toLowerCase();
-  const format = item.format || '';
-  const slotArmure = item.slotArmure || '';
-  const slotBijou = item.slotBijou || '';
-  const typeArmure = item.typeArmure || '';
-  const haystack = [
-    item.type,
-    item.categorie,
-    item.category,
-    item.sousCategorie,
-    item.subcategory,
-    item.nom,
-    item.description,
-  ].filter(Boolean).join(' ').toLowerCase();
+  const hay = [item.type, item.categorie, item.nom, item.sousType, item.sousCategorie]
+    .filter(Boolean).join(' ').toLowerCase();
+  if (tpl === 'arme' || item.degats || item.toucherStat || item.toucher) return 'armes';
+  if (tpl === 'armure' || item.slotArmure || item.typeArmure || (item.ca != null && item.ca !== '')) return 'armures';
+  if (tpl === 'bijou' || item.slotBijou ||
+    ['anneau','amulette','bijou','talisman','pendentif','bague'].some(k => hay.includes(k)))
+    return 'bijoux';
+  if (['potion','consommable','parchemin','scroll','nourriture','herbe','ingrédient','ressource']
+    .some(k => hay.includes(k)))
+    return 'consommables';
+  return 'divers';
+}
 
-  if (tpl === 'arme' || tpl === 'armure' || tpl === 'bijou') return true;
-  if (format || slotArmure || slotBijou || typeArmure) return true;
-  if (item.degats || item.ca || item.toucherStat || item.degatsStat) return true;
-
-  return ['arme','weapon','épée','epee','arc','dague','hache','lance','marteau','bouclier','armure','armor','casque','capuche','botte','gants','amulette','anneau','bijou','talisman']
-    .some(keyword => haystack.includes(keyword));
+// ── Chips compactes pour une ligne (max 3) ────
+function _invRowChips(item) {
+  const chips = [];
+  if (item.degats) {
+    const d = item.degatsStat ? `${item.degats}+${statShort(item.degatsStat)}` : item.degats;
+    chips.push({ val: d, color: '#ff6b6b' });
+  }
+  if (item.toucherStat || (item.toucher && !item.degats))
+    chips.push({ val: item.toucherStat ? statShort(item.toucherStat) : item.toucher, color: '#e8b84b' });
+  if (item.ca != null && item.ca !== '')
+    chips.push({ val: `CA+${parseInt(item.ca)||0}`, color: '#4f8cff' });
+  if (item.slotArmure)       chips.push({ val: item.slotArmure, color: '#4f8cff' });
+  else if (item.slotBijou)   chips.push({ val: item.slotBijou,  color: '#c084fc' });
+  if (item.typeArmure)       chips.push({ val: item.typeArmure, color: '#22c38e' });
+  const bonus = formatItemBonusText(item);
+  if (bonus) chips.push({ val: bonus, color: '#4f8cff' });
+  if (chips.length < 2 && item.sousType) chips.push({ val: item.sousType, color: '#a0aec0' });
+  if (chips.length < 2 && item.format)   chips.push({ val: item.format,   color: '#a0aec0' });
+  if (chips.length === 0 && item.effet)
+    chips.push({ val: item.effet.length > 42 ? item.effet.slice(0,42)+'…' : item.effet, color: 'var(--text-muted)' });
+  if (chips.length === 0 && item.type)
+    chips.push({ val: item.type, color: 'var(--text-dim)' });
+  return chips.slice(0, 3);
 }
 
 export function renderCharInventaire(c, canEdit) {
   const invRaw = c.inventaire || [];
+  const q = (window._charInvSearch || '').toLowerCase().trim();
 
+  // ── Regrouper par itemId + nom ──
   const grouped = [];
   invRaw.forEach((item, realIdx) => {
     const key = (item.itemId || '') + '||' + (item.nom || '');
@@ -168,152 +188,118 @@ export function renderCharInventaire(c, canEdit) {
     }
   });
 
-  const equipmentGroups = grouped.filter(g => isEquipableInventoryItem(g.item));
-  const otherGroups = grouped.filter(g => !isEquipableInventoryItem(g.item));
   const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
   const equippedMap = getEquippedInventoryIndexMap(c);
 
-  const equipOpen = window._charInvEquipOpen !== false;
+  // ── 5 catégories ──
+  const CATS = [
+    { id: 'armes',        icon: '⚔️',  label: 'Armes',               items: [] },
+    { id: 'armures',      icon: '🛡️',  label: 'Armures',             items: [] },
+    { id: 'bijoux',       icon: '💍',  label: 'Bijoux & Accessoires', items: [] },
+    { id: 'consommables', icon: '🧪',  label: 'Consommables',         items: [] },
+    { id: 'divers',       icon: '📦',  label: 'Divers',               items: [] },
+  ];
+  grouped.forEach(g => {
+    const catId = _invCategory(g.item);
+    CATS.find(cat => cat.id === catId)?.items.push(g);
+  });
 
-  const totalQty = groups => groups.reduce((sum, g) => sum + (parseInt(g.qte) || 0), 0);
-
-  const renderInventoryCards = groups => groups.map(g => {
+  // ── Rendu d'une ligne compacte ──
+  const _renderRow = (g) => {
     const item = g.item;
-    const pv = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat) || 0) * 0.6);
-    const pa = parseFloat(item.prixAchat) || 0;
-    const indicesB64 = btoa(JSON.stringify(g.indices));
-
+    const nomLower = (item.nom || '').toLowerCase();
+    const hidden = q && !nomLower.includes(q);
     const rareteN = parseInt(item.rarete) || 0;
     const rareteL = RARETE_NAMES[rareteN] || '';
     const rareteC = _rareteColor(rareteL) || 'var(--border)';
-    const equippedSlots = [...new Set(g.indices.flatMap(idx => equippedMap.get(idx) || []))];
+    const pv = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat)||0)*0.6);
+    const indicesB64 = btoa(JSON.stringify(g.indices));
+    const equippedSlots = [...new Set(g.indices.flatMap(idx => equippedMap.get(idx)||[]))];
     const isEquipped = equippedSlots.length > 0;
-    const equippedLabel = isEquipped
-      ? `Équipé${equippedSlots.length ? ` · ${equippedSlots.join(' · ')}` : ''}`
-      : '';
+    const chips = _invRowChips(item);
+    const nomEsc = _esc(item.nom || '?');
+    const nomSafe = (item.nom || '').replace(/'/g, "\\'");
 
-    const chips = [];
-    const bonusText = formatItemBonusText(item);
-    if (item.format)     chips.push({ label: 'Format',   val: item.format,     color: '#e8b84b' });
-    if (item.sousType)   chips.push({ label: 'Type arme',val: item.sousType,   color: '#e8b84b' });
-    if (item.slotArmure) chips.push({ label: 'Slot',     val: item.slotArmure, color: '#4f8cff' });
-    if (item.typeArmure) chips.push({ label: 'Type',     val: item.typeArmure, color: '#4f8cff' });
-    if (item.slotBijou)  chips.push({ label: 'Bijou',    val: item.slotBijou,  color: '#c084fc' });
-    if (item.degats) {
-      const degStr = item.degatsStat
-        ? `${item.degats} + ${statShort(item.degatsStat)}`
-        : item.degats;
-      chips.push({ label: 'Dégâts', val: degStr, color: '#ff6b6b' });
-    }
-    if (item.toucherStat)      chips.push({ label: 'Toucher', val: statShort(item.toucherStat), color: '#e8b84b' });
-    else if (item.toucher)     chips.push({ label: 'Toucher', val: item.toucher,                 color: '#e8b84b' });
-    if (item.ca != null && item.ca !== '') chips.push({ label: 'CA', val: `+${parseInt(item.ca)||0}`, color: '#4f8cff' });
-    if (bonusText) chips.push({ label: 'Stats', val: bonusText, color: '#4f8cff' });
-    _getTraits(item).forEach(t => chips.push({ label: 'Trait', val: t, color: '#b47fff' }));
-    if (item.type && !item.degats && !item.slotArmure && !item.slotBijou && !item.format)
-      chips.push({ label: 'Type', val: item.type, color: 'var(--text-muted)' });
-    if (item.effet && !item.degats)
-      chips.push({ label: 'Effet', val: item.effet.length > 60 ? item.effet.slice(0,60)+'…' : item.effet, color: 'var(--text-muted)' });
-
-    return `<div class="inv-card" style="border-left:3px solid ${rareteC}">
-      <div class="inv-card-header">
-        <div>
-          <div class="inv-card-title">${item.nom || '?'}</div>
-          ${rareteL ? `<div class="inv-card-sub" style="color:${rareteC}">${'★'.repeat(rareteN) + '☆'.repeat(4 - rareteN)} ${rareteL}</div>` : ''}
-          ${isEquipped ? `<div class="inv-card-sub" style="margin-top:4px"><span class="inv-badge-equipped">✓ ${equippedLabel}</span></div>` : ''}
-        </div>
-        <span class="inv-card-qte">×${g.qte}</span>
+    return `<div class="inv-row${hidden ? ' inv-row--hidden' : ''}" data-nom="${_esc(nomLower)}" style="--rc:${rareteC}">
+      <div class="inv-row-body">
+        <span class="inv-row-nom">${nomEsc}</span>
+        ${isEquipped ? `<span class="inv-row-eq" title="${equippedSlots.join(', ')}">✓ Équipé</span>` : ''}
+        ${chips.length ? `<div class="inv-row-chips">${chips.map(ch => `<span class="inv-row-chip" style="color:${ch.color}">${_esc(ch.val)}</span>`).join('')}</div>` : ''}
       </div>
-
-      ${chips.length ? `<div class="inv-card-stats">
-        ${chips.map(ch => `<div class="inv-stat-chip">
-          <span class="inv-stat-label">${ch.label}</span>
-          <span class="inv-stat-val" style="color:${ch.color}">${ch.val}</span>
-        </div>`).join('')}
-      </div>` : ''}
-
-      ${item.description ? `<div class="inv-card-desc">${item.description}</div>` : ''}
-
-      <div class="inv-card-footer">
-        <div class="inv-price-block">
-          ${pa ? `<span class="inv-price-buy" title="Prix d'achat">💰 ${pa} or</span>` : ''}
-          ${pa && pv ? `<span style="color:var(--border);font-size:.65rem">|</span>` : ''}
-          ${pv ? `<span class="inv-price-sell" title="Prix de revente">🔄 ${pv} or/u</span>` : ''}
+      <div class="inv-row-aside">
+        ${g.qte > 1 ? `<span class="inv-row-qte">×${g.qte}</span>` : ''}
+        <div class="inv-row-btns">
+          ${canEdit && item.source === 'boutique' ? `<button class="inv-rbtn inv-rbtn--sell" title="Vendre" onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${nomSafe}')">🔄</button>` : ''}
+          ${otherChars.length ? `<button class="inv-rbtn inv-rbtn--send" title="Envoyer" onclick="openSendInvModal('${c.id}','${indicesB64}','${nomSafe}')">↗</button>` : ''}
+          ${canEdit ? `<button class="inv-rbtn inv-rbtn--del" title="Supprimer" onclick="openDeleteInvModal('${c.id}','${indicesB64}','${nomSafe}')">✕</button>` : ''}
         </div>
-        ${canEdit ? `<div class="inv-actions">
-          ${item.source === 'boutique' ? `<button class="inv-btn inv-btn-sell"
-            onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${(item.nom || '').replace(/'/g, "\\'")}')">
-            🔄 Vendre
-          </button>` : ''}
-        </div>` : ''}
-        ${otherChars.length ? `<div class="inv-actions" style="${canEdit?'margin-left:.25rem':''}">
-          <button class="inv-btn inv-btn-send"
-            onclick="openSendInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
-            ↗ Envoyer
-          </button>
-        </div>` : ''}
-        ${canEdit ? `<div class="inv-actions" style="margin-left:.25rem">
-          <button class="inv-btn inv-btn-del"
-            onclick="openDeleteInvModal('${c.id}','${indicesB64}','${(item.nom || '').replace(/'/g, "\\'")}')">
-            🗑
-          </button>
-        </div>` : ''}
       </div>
     </div>`;
-  }).join('');
+  };
 
-  let html = `
-  <div class="cs-section">
-    <div class="cs-section-title">🎒 Inventaire
-      <span class="cs-hint">${invRaw.length} objet${invRaw.length !== 1 ? 's' : ''}</span>
+  const totalItems = invRaw.length;
+
+  let html = `<div class="cs-section cs-section--compact">
+    <div class="cs-section-hdr">
+      <span class="cs-section-title">🎒 Inventaire</span>
+      <span class="cs-hint">${totalItems} objet${totalItems !== 1 ? 's' : ''}</span>
       ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addInvItem()" style="margin-left:auto">🎁 Butin</button>` : ''}
     </div>`;
 
   if (grouped.length === 0) {
-    html += `<div class="cs-empty" style="padding:2rem;text-align:center">
-      <div style="font-size:2rem;margin-bottom:.5rem;opacity:.3">🎒</div>
-      <div style="font-size:.85rem;color:var(--text-dim)">Inventaire vide.</div>
-      <div style="font-size:.75rem;color:var(--text-dim);margin-top:.3rem">Achetez des objets depuis la Boutique.</div>
+    html += `<div class="cs-empty-state">
+      <div class="cs-empty-icon">🎒</div>
+      <div class="cs-empty-msg">Inventaire vide.</div>
+      <div class="cs-empty-sub">Achetez des objets depuis la Boutique.</div>
     </div>`;
   } else {
-    if (equipmentGroups.length) {
-      html += `<details class="inv-group" ${equipOpen ? 'open' : ''} ontoggle="window._charInvEquipOpen=this.open">
-        <summary>
-          <div class="inv-group-title-wrap">
-            <span>🛡️</span>
-            <div>
-              <div class="inv-group-title">Équipement</div>
-              <div class="inv-group-meta">Armes, armures, bijoux et accessoires équipables</div>
-            </div>
+    // Barre de recherche
+    html += `<div class="inv-search-wrap">
+      <span class="inv-search-icon">🔍</span>
+      <input class="inv-search-input" type="text" placeholder="Rechercher un objet…"
+        value="${_esc(window._charInvSearch || '')}"
+        oninput="window._charInvSearch=this.value;filterInvRows(this.value)">
+      ${q ? `<button class="inv-search-clear" onclick="window._charInvSearch='';filterInvRows('');this.closest('.inv-search-wrap').querySelector('input').value=''">✕</button>` : ''}
+    </div>`;
+
+    // Groupes par catégorie
+    for (const cat of CATS) {
+      if (!cat.items.length) continue;
+      const allHidden = q && cat.items.every(g => !((g.item.nom || '').toLowerCase().includes(q)));
+      const openState = window[`_invCat_${cat.id}`] !== false;
+      html += `<details class="inv-cat${allHidden ? ' inv-cat--hidden' : ''}" id="inv-cat-${cat.id}"
+        ${openState ? 'open' : ''} ontoggle="window['_invCat_${cat.id}']=this.open">
+        <summary class="inv-cat-head">
+          <div class="inv-cat-title-row">
+            <span class="inv-cat-icon">${cat.icon}</span>
+            <span class="inv-cat-title">${cat.label}</span>
           </div>
-          <div style="display:flex;align-items:center;gap:.55rem;flex-shrink:0">
-            <span class="inv-group-count">${totalQty(equipmentGroups)}</span>
-            <span class="inv-group-chevron">▶</span>
+          <div class="inv-cat-right">
+            <span class="inv-cat-count">${cat.items.reduce((s, g) => s + (parseInt(g.qte) || 0), 0)}</span>
+            <span class="inv-cat-chev">▶</span>
           </div>
         </summary>
-        <div class="inv-group-body">${renderInventoryCards(equipmentGroups)}</div>
-      </details>`;
-    }
-
-    if (otherGroups.length) {
-      html += `<div class="inv-group-static">
-        <div class="inv-group-static-head">
-          <div class="inv-group-static-title-wrap">
-            <span>🎒</span>
-            <div>
-              <div class="inv-group-static-title">Autres objets</div>
-              <div class="inv-group-static-meta">Consommables, ressources, quêtes et divers</div>
-            </div>
-          </div>
-          <span class="inv-group-count">${totalQty(otherGroups)}</span>
+        <div class="inv-cat-body">
+          ${cat.items.map(_renderRow).join('')}
         </div>
-        <div class="inv-group-static-body">${renderInventoryCards(otherGroups)}</div>
-      </div>`;
+      </details>`;
     }
   }
 
   html += `</div>`;
   return html;
+}
+
+// ── Filtrage live par recherche ───────────────
+export function filterInvRows(val) {
+  const q = (val || '').toLowerCase().trim();
+  document.querySelectorAll('.inv-row').forEach(r => {
+    r.classList.toggle('inv-row--hidden', !!(q && !(r.dataset.nom || '').includes(q)));
+  });
+  document.querySelectorAll('.inv-cat').forEach(cat => {
+    const anyVisible = [...cat.querySelectorAll('.inv-row')].some(r => !r.classList.contains('inv-row--hidden'));
+    cat.classList.toggle('inv-cat--hidden', !anyVisible);
+  });
 }
 
 // ══════════════════════════════════════════════
