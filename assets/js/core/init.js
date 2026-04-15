@@ -25,72 +25,109 @@ import {
   setUser,
   setProfile,
   setAdmin,
+  setSuperAdmin,
+  setAdventures,
 } from "./state.js";
 
-import { showApp, showAuth } from "./layout.js";
+import { showApp, showAuth, showAdventurePicker } from "./layout.js";
 import { navigate } from "./navigation.js";
+import { loadUserAdventures, selectAdventure, runMigration } from "./adventure.js";
+
+// Exposer pickAdventure tôt (avant lazy-load de aventures.js)
+// pour que le picker HTML puisse l'appeler
+window.pickAdventure = async (adventureId) => {
+  const adv = STATE.adventures.find(a => a.id === adventureId);
+  if (!adv) return;
+  selectAdventure(adv);
+  // Importer hideAdventurePicker sans créer de dépendance circulaire
+  const { hideAdventurePicker } = await import('./layout.js');
+  hideAdventurePicker();
+  showApp();
+  await navigate('dashboard');
+};
+
+// openCreateAdventureModal est fourni par aventures.js (lazy).
+// Pour le cas "zéro aventure" où aventures.js n'est pas encore chargé,
+// on charge le module à la demande.
+window.openCreateAdventureModal = async () => {
+  if (!window._openCreateAdventureModalImpl) {
+    await import('../features/aventures.js');
+  }
+  window._openCreateAdventureModalImpl?.();
+};
 
 setFirebase(auth, db, {
-  doc,
-  setDoc,
-  getDoc,
-  collection,
-  getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  ADMIN_EMAIL,
+  doc, setDoc, getDoc,
+  collection, getDocs, addDoc, updateDoc, deleteDoc,
+  query, where, orderBy,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, onAuthStateChanged, ADMIN_EMAIL,
 });
 
 window.STATE = STATE;
 
+// ── Auth state ─────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     setUser(null);
     setProfile(null);
     setAdmin(false);
+    setSuperAdmin(false);
+    setAdventures([]);
     showAuth();
     return;
   }
 
   setUser(user);
-  setAdmin(user.email === ADMIN_EMAIL);
 
   try {
     await loadProfile(user);
   } catch (error) {
     console.error("[init] loadProfile failed:", error);
     setProfile({
-      uid: user.uid,
-      email: user.email,
-      pseudo: (user.email && user.email.split("@")[0]) || "Aventurier",
+      uid:    user.uid,
+      email:  user.email,
+      pseudo: user.email?.split('@')[0] || 'Aventurier',
     });
   }
 
+  // Super-admin = profile.isAdmin OU email legacy hardcodé (bootstrap)
+  const isSuperAdmin = STATE.profile?.isAdmin === true || user.email === ADMIN_EMAIL;
+  setSuperAdmin(isSuperAdmin);
+
   showApp();
 
+  // ── Charger les aventures accessibles ──────────
   try {
-    await navigate("dashboard");
-  } catch (error) {
-    console.error("[init] navigate(dashboard) failed:", error);
-    const content = document.getElementById("main-content");
+    const adventures = await loadUserAdventures(user.uid);
+    setAdventures(adventures);
 
-    if (content) {
-      content.innerHTML =
-        '<div class="card"><div class="card-header">Bienvenue</div><p>Connexion reussie, mais le tableau de bord na pas pu etre affiche.</p></div>';
+    if (adventures.length === 0) {
+      // Affiche le sélecteur vide :
+      // – super-admin → bouton "Récupérer mes données" + "Créer une aventure"
+      // – joueur      → message "En attente d'invitation"
+      showAdventurePicker([]);
+      return;
     }
+
+    if (adventures.length === 1) {
+      // Auto-sélection si une seule aventure
+      selectAdventure(adventures[0]);
+      await navigate('dashboard');
+      return;
+    }
+
+    // Plusieurs aventures → sélecteur
+    showAdventurePicker(adventures);
+  } catch (error) {
+    console.error("[init] loadUserAdventures failed:", error);
+    showAdventurePicker([]);
   }
 });
 
+// ── Charger le profil utilisateur ──────────────
 async function loadProfile(user) {
-  const ref = doc(db, "users", user.uid);
+  const ref  = doc(db, "users", user.uid);
   const snap = await getDoc(ref);
 
   if (snap.exists()) {
@@ -98,13 +135,11 @@ async function loadProfile(user) {
     return;
   }
 
-  // Aucun document pour cet UID — chercher si un doc avec le même email existe déjà
-  // (évite les doublons quand quelqu'un crée deux comptes Auth avec le même email)
+  // Chercher si un profil existe déjà pour cet email (doublon)
   try {
-    const q = query(collection(db, "users"), where("email", "==", user.email));
+    const q        = query(collection(db, "users"), where("email", "==", user.email));
     const existing = await getDocs(q);
     if (!existing.empty) {
-      // Un profil existe déjà pour cet email — le réutiliser et le migrer vers ce nouvel UID
       const existingData = existing.docs[0].data();
       const profile = { ...existingData, uid: user.uid };
       await setDoc(ref, profile, { merge: true });
@@ -115,11 +150,12 @@ async function loadProfile(user) {
     console.error("[init] email duplicate check failed:", error);
   }
 
-  // Vraiment nouveau joueur — créer le profil
+  // Nouveau joueur
   const profile = {
-    uid: user.uid,
-    email: user.email,
-    pseudo: (user.email && user.email.split("@")[0]) || "Aventurier",
+    uid:       user.uid,
+    email:     user.email,
+    pseudo:    user.email?.split('@')[0] || 'Aventurier',
+    isAdmin:   false,
     createdAt: new Date().toISOString(),
   };
 
@@ -131,3 +167,44 @@ async function loadProfile(user) {
 
   setProfile(profile);
 }
+
+// ── Migration depuis le picker ─────────────────
+// Appelé par le bouton "Récupérer mes données" sur l'écran sélecteur vide.
+// Aussi déclenché automatiquement si super-admin et zéro aventures.
+async function _runMigrationFromPicker(uid) {
+  const logEl  = document.getElementById('picker-migrate-log');
+  const btnEl  = document.querySelector('[onclick="window._runMigrationFromPicker?.()"]');
+
+  if (logEl) { logEl.style.display = 'block'; logEl.innerHTML = ''; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Migration en cours…'; }
+
+  const log = (msg) => {
+    console.info('[migration]', msg);
+    if (logEl) { logEl.innerHTML += `<div>${msg}</div>`; logEl.scrollTop = logEl.scrollHeight; }
+  };
+
+  try {
+    log('Démarrage de la migration…');
+    await runMigration(log);
+
+    log('Chargement de l\'aventure…');
+    const adventures = await loadUserAdventures(uid);
+    setAdventures(adventures);
+
+    if (adventures.length > 0) {
+      selectAdventure(adventures[0]);
+      showApp();
+      await navigate('dashboard');
+    } else {
+      log('⚠️ Migration terminée mais aventure introuvable — recharge la page.');
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🔄 Réessayer'; }
+    }
+  } catch (e) {
+    console.error('[init] Migration échouée :', e);
+    log(`❌ Erreur : ${e.message}`);
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🔄 Réessayer'; }
+  }
+}
+
+// Exposer pour le bouton HTML du picker
+window._runMigrationFromPicker = () => _runMigrationFromPicker(STATE.user?.uid);

@@ -24,6 +24,7 @@ const FEATURE_MAP = {
   bestiaire:    () => import('../features/bestiary.js'),
   account:      () => import('../features/account.js'),
   map:          () => import('../features/map.js'),
+  aventures:    () => import('../features/aventures.js'),
 };
 
 // Garde les modules déjà chargés pour ne pas re-importer

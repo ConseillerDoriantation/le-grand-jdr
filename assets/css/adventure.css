@@ -1,0 +1,288 @@
+/* ══════════════════════════════════════════════
+   ADVENTURE — Sélecteur & gestion des aventures
+══════════════════════════════════════════════ */
+
+/* ── Écran sélecteur (plein écran) ───────────── */
+#adventure-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.adv-picker-box {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.adv-picker-emblem {
+  text-align: center;
+}
+
+.adv-picker-emblem .sigil {
+  font-size: 2.2rem;
+}
+
+.adv-picker-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: .4rem;
+}
+
+.adv-picker-tagline {
+  font-size: .82rem;
+  color: var(--text-dim);
+  margin-top: .18rem;
+  letter-spacing: .04em;
+}
+
+.adv-picker-subtitle {
+  font-size: .88rem;
+  color: var(--text-muted);
+  text-align: center;
+  margin: 0 0 .75rem;
+}
+
+.adv-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.adv-picker-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: .75rem;
+}
+
+/* ── Cartes d'aventure (picker) ──────────────── */
+.adv-list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.adv-card {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: .9rem 1.1rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .12s;
+}
+.adv-card:hover {
+  background: var(--bg-card2);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.adv-card--archived { opacity: .55; }
+
+.adv-card-emoji {
+  font-size: 1.8rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.adv-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.adv-card-nom {
+  font-size: .96rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.adv-card-meta {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  margin-top: .2rem;
+  font-size: .76rem;
+  color: var(--text-dim);
+}
+.adv-card-desc {
+  font-size: .76rem;
+  color: var(--text-dim);
+  margin-top: .2rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.adv-card-arrow {
+  font-size: 1.3rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* ── Rôles ────────────────────────────────────── */
+.adv-role {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: .1rem .4rem;
+  border-radius: 5px;
+}
+.adv-role--mj     { background: rgba(79,140,255,.18); color: var(--gold); }
+.adv-role--joueur { background: rgba(255,255,255,.07); color: var(--text-muted); }
+
+.adv-members { font-size: .74rem; color: var(--text-dim); }
+.adv-archived { font-size: .7rem; color: var(--text-dim); font-style: italic; }
+
+/* ── Vide / attente ───────────────────────────── */
+.adv-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .7rem;
+  padding: 2.5rem 1rem;
+  text-align: center;
+}
+.adv-empty-icon  { font-size: 2.8rem; }
+.adv-empty-title { font-size: 1.05rem; font-weight: 600; color: var(--text); }
+.adv-empty-text  { font-size: .85rem; color: var(--text-muted); max-width: 340px; line-height: 1.55; }
+
+/* ── Badge aventure dans le header ───────────── */
+.header-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.adventure-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: .28rem .85rem;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adventure-badge:hover {
+  background: var(--bg-card2);
+  color: var(--text);
+}
+
+/* ── Emoji picker ─────────────────────────────── */
+.adv-emoji-btn.selected {
+  border-color: var(--gold) !important;
+  box-shadow: 0 0 0 2px var(--gold-glow);
+}
+
+/* ── Page de gestion ──────────────────────────── */
+.adv-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+  margin-top: .5rem;
+}
+
+.adv-manage-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: .9rem 1.1rem;
+  transition: border-color .15s;
+}
+.adv-manage-card--active {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px var(--gold-glow);
+}
+.adv-manage-card-hdr {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+.adv-manage-emoji { font-size: 1.6rem; flex-shrink: 0; }
+.adv-manage-info  { flex: 1; min-width: 0; }
+.adv-manage-nom   { font-size: .95rem; font-weight: 600; color: var(--text); }
+.adv-manage-meta  { font-size: .75rem; color: var(--text-dim); margin-top: .15rem; }
+.adv-manage-desc  { font-size: .8rem; color: var(--text-dim); margin-top: .5rem; line-height: 1.5; }
+.adv-manage-actions { display: flex; gap: .35rem; flex-shrink: 0; }
+
+.adv-badge-active {
+  font-size: .72rem;
+  color: var(--gold);
+  font-weight: 600;
+  padding: .22rem .6rem;
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+}
+
+/* ── Membres ──────────────────────────────────── */
+.adv-member-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.adv-member-row:last-child { border-bottom: none; }
+.adv-member-pseudo { flex: 1; font-size: .85rem; color: var(--text); }
+.adv-member-actions { display: flex; gap: .25rem; }
+
+/* ── Switcher d'aventure ──────────────────────── */
+.adv-switch-row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .6rem .75rem;
+  border-radius: 10px;
+  transition: background .12s;
+}
+.adv-switch-row:hover:not(.adv-switch-row--active) { background: var(--bg-elevated); }
+.adv-switch-row--active { background: var(--bg-elevated); opacity: .65; }
+
+/* ── Migration ────────────────────────────────── */
+.adv-migration-section {
+  margin-top: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.1rem 1.2rem;
+  background: var(--bg-elevated);
+}
+.adv-migration-hdr { margin-bottom: .5rem; }
+.adv-migration-title { font-weight: 600; color: var(--text); font-size: .92rem; }
+.adv-migration-text {
+  font-size: .82rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin-bottom: .75rem;
+}
+.adv-migration-log {
+  font-size: .75rem;
+  color: var(--text-dim);
+  background: var(--bg-deep);
+  border-radius: 8px;
+  padding: .6rem .8rem;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: .6rem;
+  line-height: 1.6;
+}
+
+/* ── Thème jour ───────────────────────────────── */
+[data-theme="light"] #adventure-screen { background: var(--bg-dark); }
+[data-theme="light"] .adv-card   { background: #fff; border-color: var(--border); }
+[data-theme="light"] .adv-card:hover { background: #f3f4f7; }
+[data-theme="light"] .adventure-badge { background: #f0f2f6; }

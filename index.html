@@ -69,6 +69,20 @@
   </div>
 </div>
 
+<!-- ═══ SÉLECTEUR D'AVENTURE ══════════════════════════════════════════════════ -->
+<div id="adventure-screen" style="display:none">
+  <div class="adv-picker-box">
+    <div class="adv-picker-emblem">
+      <span class="sigil">🗺️</span>
+      <div class="adv-picker-title">Le Grand JDR</div>
+      <div class="adv-picker-tagline">Choisissez votre aventure</div>
+    </div>
+    <div id="adventure-picker-body" class="adv-picker-body">
+      <div class="loading"><div class="spinner"></div> Chargement…</div>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ APPLICATION ══════════════════════════════════════════════════════════ -->
 <div id="app">
 
@@ -77,6 +91,10 @@
     <div class="header-logo">
       <span aria-hidden="true">⚔️</span>
       Le Grand JDR
+    </div>
+    <div class="header-center">
+      <button class="adventure-badge" id="adventure-badge" style="display:none" type="button"
+        aria-label="Aventure courante"></button>
     </div>
     <div class="header-user">
       <span id="header-username" aria-label="Pseudo connecté"></span>
@@ -168,6 +186,11 @@
           <span class="nav-icon" aria-hidden="true">👤</span>
           <span class="nav-label">Mon compte</span>
         </a>
+        <!-- Aventures — visible par tous (switcher) -->
+        <a class="nav-item" data-navigate="aventures" title="Aventures">
+          <span class="nav-icon" aria-hidden="true">🗺️</span>
+          <span class="nav-label">Aventures</span>
+        </a>
         <!-- Admin uniquement — affiché par layout.js -->
         <a class="nav-item admin-only" data-navigate="admin" title="Console MJ" style="display:none">
           <span class="nav-icon" aria-hidden="true">⚙️</span>
@@ -221,6 +244,7 @@
     <div class="more-menu-item" data-navigate="informations"><span class="icon">📋</span>Infos</div>
     <div class="more-menu-item" data-navigate="collection"><span class="icon">🃏</span>Collection</div>
     <div class="more-menu-item" data-navigate="account"><span class="icon">👤</span>Compte</div>
+    <div class="more-menu-item" data-navigate="aventures"><span class="icon">🗺️</span>Aventures</div>
     <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span>Console MJ</div>
   </div>
 

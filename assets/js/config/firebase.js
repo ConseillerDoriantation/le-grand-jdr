@@ -13,6 +13,7 @@ import { getFirestore,
          doc, setDoc, getDoc,
          collection, getDocs,
          addDoc, updateDoc, deleteDoc,
+         writeBatch,
          query, where, orderBy,
          serverTimestamp }         from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
@@ -42,6 +43,7 @@ export {
   doc, setDoc, getDoc,
   collection, getDocs,
   addDoc, updateDoc, deleteDoc,
+  writeBatch,
   query, where, orderBy,
   serverTimestamp,
 };
