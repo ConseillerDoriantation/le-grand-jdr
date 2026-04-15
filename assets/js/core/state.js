@@ -19,10 +19,14 @@ export function setFirebase(auth, db, fsHelpers) {
 export const STATE = {
   user:        null,
   profile:     null,
-  isAdmin:     false,
+  isAdmin:     false,      // vrai si admin de l'aventure courante OU admin global
+  isSuperAdmin:false,      // vrai si profile.isAdmin === true (peut créer des aventures)
   currentPage: 'dashboard',
   characters:  [],
   activeChar:  null,
+  // ── Aventures ───────────────────────────────
+  adventures:     [],      // liste des aventures accessibles
+  adventure:      null,    // aventure courante { id, nom, emoji, admins, players, ... }
   // Fiche de personnage — anciennement sur window.*
   currentCharTab:  'carac',
   currentChar:     null,
@@ -37,12 +41,15 @@ export const STATE = {
 };
 
 // ── Mutateurs typés ────────────────────────────
-export function setUser(user)       { STATE.user        = user; }
-export function setProfile(p)       { STATE.profile     = p;    }
-export function setAdmin(v)         { STATE.isAdmin     = v;    }
-export function setPage(p)          { STATE.currentPage = p;    }
-export function setCharacters(arr)  { STATE.characters  = arr;  }
-export function setActiveChar(c)    { STATE.activeChar  = c;    }
+export function setUser(user)         { STATE.user         = user; }
+export function setProfile(p)         { STATE.profile      = p;    }
+export function setAdmin(v)           { STATE.isAdmin      = v;    }
+export function setSuperAdmin(v)      { STATE.isSuperAdmin = v;    }
+export function setPage(p)            { STATE.currentPage  = p;    }
+export function setCharacters(arr)    { STATE.characters   = arr;  }
+export function setActiveChar(c)      { STATE.activeChar   = c;    }
+export function setAdventures(arr)    { STATE.adventures   = arr;  }
+export function setAdventure(adv)     { STATE.adventure    = adv;  }
 
 export function setCharSheetState({ tab, char, canEdit } = {}) {
   if (tab     !== undefined) STATE.currentCharTab = tab;
