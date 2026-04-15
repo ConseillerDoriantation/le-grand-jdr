@@ -3665,6 +3665,224 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-sort-detail-meta  { color: var(--text-dim); font-size: .7rem; }
 
 /* ══════════════════════════════════════════════
+   SORTS — NOUVEAU DESIGN CARTE
+══════════════════════════════════════════════ */
+
+/* Bord gauche coloré par type */
+.cs-sort-row {
+  border-left: 3px solid var(--sort-type-col, var(--border)) !important;
+}
+
+/* Corps de la carte */
+.cs-sort-card-inner {
+  padding: .55rem .75rem .45rem;
+  display: flex;
+  flex-direction: column;
+  gap: .32rem;
+  min-width: 0;
+}
+
+/* Ligne 1 : toggle · nom · PM · actions */
+.cs-sort-card-hdr {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+.cs-sort-card-nom {
+  flex: 1;
+  font-family: 'Cinzel', serif;
+  font-size: .87rem;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-sort-card-pm {
+  font-size: .77rem;
+  font-weight: 700;
+  color: #60a5fa;
+  background: rgba(96,165,250,.1);
+  border: 1px solid rgba(96,165,250,.25);
+  border-radius: 6px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cs-sort-card-acts {
+  display: flex;
+  gap: .15rem;
+  flex-shrink: 0;
+}
+
+/* Ligne 2 : chips stats */
+.cs-sort-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .22rem;
+}
+.cs-sort-sstat {
+  font-size: .71rem;
+  font-weight: 600;
+  color: var(--c, var(--text-muted));
+  background: color-mix(in srgb, var(--c, #888) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c, #888) 22%, transparent);
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.cs-sort-sstat--dim {
+  font-weight: 500;
+  opacity: .75;
+}
+
+/* Ligne 3 : description complète */
+.cs-sort-card-desc {
+  font-size: .79rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Bouton toggle détails */
+.cs-sort-card-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .67rem;
+  color: var(--text-dim);
+  padding: 0;
+  line-height: 1;
+  transition: color .1s;
+  margin-top: .05rem;
+}
+.cs-sort-card-toggle:hover { color: var(--text-muted); }
+
+/* ══════════════════════════════════════════════
+   SORTS — LIGNE COMPACTE (v2)
+══════════════════════════════════════════════ */
+
+/* Une seule ligne par sort, fermée par défaut */
+.cs-sort-compact {
+  display: flex;
+  align-items: center;
+  gap: .42rem;
+  padding: .32rem .6rem .32rem .75rem;
+  cursor: pointer;
+  min-width: 0;
+  transition: background .1s;
+}
+.cs-sort-row:hover .cs-sort-compact { background: rgba(255,255,255,.03); }
+
+/* Nom du sort */
+.cs-sort-compact-nom {
+  font-family: 'Cinzel', serif;
+  font-size: .83rem;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: 160px;
+}
+
+/* Zone de chips (flex, overflow caché sur petits écrans) */
+.cs-sort-compact-chips {
+  display: flex;
+  gap: .18rem;
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+/* Badge PM */
+.cs-sort-compact-pm {
+  font-size: .7rem;
+  font-weight: 700;
+  color: #60a5fa;
+  background: rgba(96,165,250,.09);
+  border: 1px solid rgba(96,165,250,.22);
+  border-radius: 5px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Boutons edit/del — visibles au hover seulement */
+.cs-sort-compact-acts {
+  display: flex;
+  gap: .12rem;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.cs-sort-row:hover .cs-sort-compact-acts { opacity: 1; }
+
+/* Chevron */
+.cs-sort-compact-chev {
+  font-size: .68rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  margin-left: .1rem;
+}
+
+/* Description toujours visible sous la ligne compacte */
+.cs-sort-desc-preview {
+  font-size: .73rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+  padding: .12rem .75rem .3rem 2.75rem; /* indent aligné avec le nom */
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  cursor: pointer;
+  opacity: .82;
+  transition: opacity .15s;
+}
+.cs-sort-desc-preview:hover { opacity: 1; }
+[data-theme="light"] .cs-sort-desc-preview { color: var(--text-muted); opacity: .75; }
+[data-theme="light"] .cs-sort-desc-preview:hover { opacity: 1; }
+
+/* Panneau déroulant (description + détails) */
+.cs-sort-expand {
+  padding: .45rem .75rem .55rem;
+  border-top: 1px solid var(--border);
+  background: rgba(255,255,255,.018);
+  display: flex;
+  flex-direction: column;
+  gap: .28rem;
+}
+.cs-sort-expand-desc {
+  font-size: .79rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cs-sort-expand-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .2rem .4rem;
+  font-size: .74rem;
+  color: var(--text-muted);
+  padding-top: .22rem;
+  border-top: 1px solid rgba(255,255,255,.05);
+}
+
+/* Thème jour */
+[data-theme="light"] .cs-sort-compact { background: #f7f8fa; }
+[data-theme="light"] .cs-sort-row:hover .cs-sort-compact { background: #eef1f9; }
+[data-theme="light"] .cs-sort-expand { background: rgba(0,0,0,.018); border-top-color: rgba(0,0,0,.07); }
+
+/* ══════════════════════════════════════════════
    INVENTAIRE CARDS
 ══════════════════════════════════════════════ */
 .inv-card {
@@ -3838,6 +4056,197 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .inv-group[open] .inv-group-chevron { transform: rotate(90deg); }
 .inv-group-body,
 .inv-group-static-body { padding: .65rem; display: flex; flex-direction: column; gap: .45rem; }
+
+/* ══════════════════════════════════════════════
+   INVENTAIRE — NOUVEAU DESIGN (lignes compactes)
+══════════════════════════════════════════════ */
+
+/* Barre de recherche */
+.inv-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .3rem .65rem;
+  margin-bottom: .5rem;
+}
+.inv-search-icon { font-size: .85rem; opacity: .45; flex-shrink: 0; }
+.inv-search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: .82rem;
+  color: var(--text);
+  min-width: 0;
+}
+.inv-search-input::placeholder { color: var(--text-dim); }
+.inv-search-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: .78rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.inv-search-clear:hover { color: var(--text); background: rgba(255,255,255,.08); }
+
+/* Catégorie collapsible */
+.inv-cat {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,.012);
+  overflow: hidden;
+}
+.inv-cat + .inv-cat { margin-top: .35rem; }
+.inv-cat--hidden { display: none !important; }
+.inv-cat-head {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .45rem .75rem;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255,255,255,.018);
+  transition: background .1s;
+}
+.inv-cat-head:hover { background: rgba(255,255,255,.03); }
+.inv-cat-head::-webkit-details-marker { display: none; }
+.inv-cat-title-row { display: flex; align-items: center; gap: .5rem; }
+.inv-cat-icon { font-size: .88rem; line-height: 1; }
+.inv-cat-title { font-size: .81rem; font-weight: 700; color: var(--text); }
+.inv-cat-right { display: flex; align-items: center; gap: .5rem; }
+.inv-cat-count {
+  font-size: .67rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  min-width: 24px;
+  text-align: center;
+}
+.inv-cat-chev {
+  font-size: .72rem;
+  color: var(--text-dim);
+  transition: transform .15s;
+}
+.inv-cat[open] .inv-cat-chev { transform: rotate(90deg); }
+.inv-cat-body {
+  padding: .4rem .5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+/* Ligne d'objet compacte */
+.inv-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .32rem .6rem .32rem .75rem;
+  border-left: 3px solid var(--rc, var(--border));
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0 7px 7px 0;
+  background: var(--bg-card);
+  transition: background .1s;
+  min-width: 0;
+}
+.inv-row:hover { background: var(--bg-elevated); }
+.inv-row--hidden { display: none !important; }
+
+.inv-row-body {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.inv-row-nom {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inv-row-eq {
+  font-size: .61rem;
+  font-weight: 700;
+  color: #4ade80;
+  background: rgba(74,222,128,.09);
+  border: 1px solid rgba(74,222,128,.22);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.inv-row-chips { display: flex; gap: .2rem; flex-wrap: wrap; }
+.inv-row-chip {
+  font-size: .7rem;
+  font-weight: 600;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.inv-row-aside {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  flex-shrink: 0;
+}
+.inv-row-qte {
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.inv-row-btns {
+  display: flex;
+  gap: .2rem;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.inv-row:hover .inv-row-btns { opacity: 1; }
+.inv-rbtn {
+  width: 25px; height: 25px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  border: 1px solid;
+  cursor: pointer;
+  font-size: .78rem;
+  transition: all .1s;
+  line-height: 1;
+  padding: 0;
+}
+.inv-rbtn--sell { background:rgba(232,184,75,.06);border-color:rgba(232,184,75,.25);color:var(--gold); }
+.inv-rbtn--sell:hover { background:rgba(232,184,75,.2);border-color:rgba(232,184,75,.5); }
+.inv-rbtn--send { background:rgba(79,140,255,.06);border-color:rgba(79,140,255,.25);color:#4f8cff; }
+.inv-rbtn--send:hover { background:rgba(79,140,255,.2);border-color:rgba(79,140,255,.5); }
+.inv-rbtn--del  { background:rgba(255,107,107,.05);border-color:rgba(255,107,107,.2);color:#ff6b6b; }
+.inv-rbtn--del:hover { background:rgba(255,107,107,.18);border-color:rgba(255,107,107,.5); }
+
+/* État vide */
+.cs-empty-state { text-align: center; padding: 2rem 1rem; }
+.cs-empty-icon { font-size: 2rem; opacity: .3; margin-bottom: .5rem; }
+.cs-empty-msg { font-size: .85rem; color: var(--text-dim); }
+.cs-empty-sub { font-size: .75rem; color: var(--text-dim); margin-top: .3rem; }
 
 /* ══════════════════════════════════════════════
    STATS BLOC 2×3

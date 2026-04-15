@@ -411,95 +411,90 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const types    = _getSortTypes(s);
   const { action, concentration } = _getSortAction(s);
   const nbCibles = _calcSortCibles(s);
+  const nbProt   = runesAll.filter(r => r === 'Protection').length;
 
-  const TYPE_CFG = {
-    offensif:   { label:'⚔️ Offensif',   color:'#ff6b6b' },
-    defensif:   { label:'🛡️ Défensif',   color:'#22c38e' },
-    utilitaire: { label:'✨ Utilitaire', color:'#b47fff' },
-  };
   const ACTION_CFG = {
-    action:       { label:'⚡ Action',       color:'#e8b84b' },
-    action_bonus: { label:'✴️ Action Bonus', color:'#f97316' },
-    reaction:     { label:'🔄 Réaction',     color:'#a78bfa' },
+    action:       { label:'⚡ Act.',   color:'#e8b84b' },
+    action_bonus: { label:'✴️ Bonus', color:'#f97316' },
+    reaction:     { label:'🔄 Réac.', color:'#a78bfa' },
   };
   const acfg = ACTION_CFG[action] || ACTION_CFG.action;
 
-  const typeBadges  = types.map(t => { const cfg = TYPE_CFG[t]||{label:t,color:'#aaa'}; return `<span class="cs-sbadge" style="--c:${cfg.color}">${cfg.label}</span>`; }).join('');
-  const actionBadge = `<span class="cs-sbadge" style="--c:${acfg.color}">${acfg.label}</span>`;
-  const concBadge   = concentration ? `<span class="cs-sbadge" style="--c:#60a5fa">🧠 Conc.</span>` : '';
+  // Modificateur de l'arme principale + maîtrise
+  const equip   = c?.equipement || {};
+  const mainP   = equip['Main principale'];
+  const statKey = mainP?.statAttaque || mainP?.toucherStat || 'force';
+  const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
+  const statMod = Math.floor((Math.min(22, statVal) - 10) / 2);
+  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
+  const statModS = statMod >= 0 ? `+${statMod}` : `${statMod}`;
+  const maitrise = _getMaitriseBonus(c, mainP || {});
 
-  // Stats clés
-  const equip    = c?.equipement || {};
-  const mainP    = equip['Main principale'];
-  const statKey  = mainP?.statAttaque || mainP?.toucherStat || 'force';
-  const statVal  = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
-  const mod      = Math.floor((Math.min(22, statVal) - 10) / 2);
-  const modS     = mod >= 0 ? `+${mod}` : `${mod}`;
-  const statLbl  = { force:'For', dexterite:'Dex', intelligence:'Int' }[statKey] || statKey.slice(0,3);
-  const nbPuiss  = runesAll.filter(r => r === 'Puissance').length;
-  const nbProt   = runesAll.filter(r => r === 'Protection').length;
-  const totalPP  = nbPuiss + nbProt;
-  const chainBonus = totalPP > 1 ? `+${(totalPP-1)*2}` : '';
-
+  // Chips clés pour la ligne compacte
   const chips = [];
-  const maitriseSort = _getMaitriseBonus(c, mainP || {});
   if (types.includes('offensif')) {
-    chips.push(`<span class="cs-sort-chip" style="--c:#ff6b6b">⚔️ ${_calcSortDegats(s, c)}</span>`);
-    chips.push(`<span class="cs-sort-chip" style="--c:#e8b84b">${modS} ${statLbl}</span>`);
-    if (maitriseSort !== 0) chips.push(`<span class="cs-sort-chip" style="--c:#b47fff">✦ Maî ${maitriseSort>0?'+'+maitriseSort:maitriseSort}</span>`);
+    const degBase = _calcSortDegats(s, c); // inclut chaînage + maîtrise
+    let val = degBase;
+    if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
+    chips.push({ icon:'⚔️', val, color:'#ff6b6b' });
   }
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      chips.push(`<span class="cs-sort-chip" style="--c:#22c38e">💚 ${_calcSortSoin(s, c)}</span>`);
-      if (maitriseSort !== 0) chips.push(`<span class="cs-sort-chip" style="--c:#22c38e">Maî ${maitriseSort>0?'+'+maitriseSort:maitriseSort}</span>`);
+      const soinBase = _calcSortSoin(s, c); // inclut maîtrise
+      chips.push({ icon:'💚', val: soinBase, color:'#22c38e' });
     } else {
-      chips.push(`<span class="cs-sort-chip" style="--c:#22c38e">🛡️ ${_getSortCA(s)}</span>`);
+      chips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
     }
   }
-  if (nbCibles > 1) chips.push(`<span class="cs-sort-chip" style="--c:#4f8cff">🎯 ×${nbCibles}</span>`);
-  const zone = _calcSortZone(s);  if (zone)  chips.push(`<span class="cs-sort-chip" style="--c:#b47fff">📐 +${zone}m</span>`);
-  const duree = _calcSortDuree(s); if (duree) chips.push(`<span class="cs-sort-chip" style="--c:#9ca3af">⏱️ +${duree}t</span>`);
+  if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff' });
+  const zone  = _calcSortZone(s);  if (zone)  chips.push({ icon:'📐', val:`+${zone}m`, color:'#b47fff' });
+  const duree = _calcSortDuree(s); if (duree) chips.push({ icon:'⏱️', val:`+${duree}t`, color:'#9ca3af' });
 
-  const descShort = s.effet ? (s.effet.length > 70 ? s.effet.slice(0, 68) + '…' : s.effet) : '';
-  const pmDisplay = pmDelta !== 0
-    ? `<span class="cs-sort-pm-old">${s.pm||0}</span> <span class="cs-sort-pm-new">${Math.max(0,(s.pm||0)+pmDelta)} PM</span>`
-    : `${s.pm||0} PM`;
+  const pmVal = pmDelta !== 0
+    ? `<span class="cs-sort-pm-old">${s.pm||0}</span><span class="cs-sort-pm-new">${Math.max(0,(s.pm||0)+pmDelta)}</span>`
+    : `${s.pm||0}`;
 
-  return `<div class="cs-sort-row ${s.actif?'actif':''}"
+  const typeCol = types.includes('offensif') ? '#ff6b6b'
+                : types.includes('defensif')  ? '#22c38e'
+                : '#b47fff';
+
+  return `<div class="cs-sort-row ${s.actif?'actif':''}" style="--sort-type-col:${typeCol}"
     draggable="true" data-sort-idx="${i}"
     ondragstart="sortDragStart(event,${i})"
     ondragover="sortDragOver(event)"
     ondrop="sortDrop(event,${i})"
     ondragend="sortDragEnd(event)">
-    <div class="cs-sort-row-main" onclick="toggleSortDetail(${i})" style="cursor:pointer">
+
+    <!-- Ligne unique compacte -->
+    <div class="cs-sort-compact" onclick="toggleSortDetail(${i})">
       <div class="toggle ${s.actif?'on':''}"
-           onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}"
-           title="${s.actif?'Désactiver':'Activer'}"></div>
-      <div class="cs-sort-row-info">
-        <div class="cs-sort-row-line1">
-          <span class="cs-sort-row-name">${s.nom||'Sans nom'}</span>
-          <span class="cs-sort-row-pm">${pmDisplay}</span>
-          <span class="cs-sort-row-chevron">${isOpen?'▲':'▼'}</span>
-        </div>
-        <div class="cs-sort-row-line2">
-          ${typeBadges}${actionBadge}${concBadge}
-          <div class="cs-sort-row-noyau">
-            ${s.noyau ? `<span class="cs-sort-badge gold">${s.noyau.split(' ')[0]}</span>` : ''}
-            ${totalPP > 0 ? `<span class="cs-sort-badge gold">${chainBonus||`+${totalPP}🎲`}</span>` : ''}
-          </div>
-        </div>
-        ${chips.length  ? `<div class="cs-sort-chips">${chips.join('')}</div>` : ''}
-        ${descShort     ? `<div class="cs-sort-desc-short">${descShort}</div>` : ''}
+        onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}"
+        title="${s.actif?'Désactiver':'Activer'}"></div>
+      <span class="cs-sort-compact-nom">${_esc(s.nom||'Sans nom')}</span>
+      <div class="cs-sort-compact-chips">
+        ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
+        <span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:${acfg.color}">${acfg.label}</span>
+        ${concentration ? `<span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:#60a5fa">🧠</span>` : ''}
       </div>
-      ${canEdit ? `<span class="cs-sort-row-actions" onclick="event.stopPropagation()">
+      <span class="cs-sort-compact-pm">${pmVal} PM</span>
+      ${canEdit ? `<div class="cs-sort-compact-acts" onclick="event.stopPropagation()">
         <button class="btn-icon" onclick="editSort(${i})">✏️</button>
         <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
-      </span>` : ''}
+      </div>` : ''}
+      <span class="cs-sort-compact-chev">${isOpen?'▲':'▼'}</span>
     </div>
-    ${isOpen ? `<div class="cs-sort-row-detail">
-      ${s.noyau   ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Noyau</span>${s.noyau}</div>` : ''}
-      ${runesAll.length ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Runes (${runesAll.length})</span>${runesAll.join(' · ')}</div>` : ''}
+
+    <!-- Description toujours visible (clamped 2 lignes) -->
+    ${s.effet ? `<div class="cs-sort-desc-preview" onclick="toggleSortDetail(${i})">${_esc(s.effet)}</div>` : ''}
+
+    <!-- Panneau déroulant : détails techniques complets -->
+    ${isOpen ? `<div class="cs-sort-expand">
+      ${s.effet ? `<div class="cs-sort-expand-desc">${_nl2br(_esc(s.effet))}</div>` : ''}
+      ${s.noyau || runesAll.length ? `<div class="cs-sort-expand-meta">
+        ${s.noyau ? `<span class="cs-sort-dl-label">Noyau</span><span>${_esc(s.noyau)}</span>` : ''}
+        ${runesAll.length ? `<span class="cs-sort-dl-label" style="margin-left:.65rem">Runes (${runesAll.length})</span><span>${runesAll.join(' · ')}</span>` : ''}
+      </div>` : ''}
       <div class="cs-sort-detail-effects">
         <div class="cs-sort-detail-effects-title">📋 Effets calculés</div>
         ${_buildSortResume(s, c).map(line => `
@@ -509,7 +504,6 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
             ${line.detail ? `<span class="cs-sort-detail-meta">${line.detail}</span>` : ''}
           </div>`).join('')}
       </div>
-      ${s.effet ? `<div class="cs-sort-dl"><span class="cs-sort-dl-label">Description</span>${s.effet}</div>` : ''}
     </div>` : ''}
   </div>`;
 }

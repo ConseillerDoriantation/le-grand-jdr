@@ -34,6 +34,7 @@ import {
   openSendInvModal, sendInvItem,
   addInvItem, _lootPillStyle, saveInvItemFromShop,
   editInvItem, saveInvItem,
+  filterInvRows,
 } from './characters/inventory.js';
 
 import {
@@ -435,6 +436,7 @@ Object.assign(window, {
   openSendInvModal, sendInvItem,
   addInvItem, _lootPillStyle, saveInvItemFromShop,
   editInvItem, saveInvItem,
+  filterInvRows,
 
   // Équipement
   editEquipSlot, saveEquipSlot, clearEquipSlot,
