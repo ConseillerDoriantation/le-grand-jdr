@@ -160,6 +160,13 @@ body::after {
   border-color: var(--border-strong);
 }
 
+.sidebar-theme-btn {
+  width: 28px;
+  height: 28px;
+  font-size: .85rem;
+  flex-shrink: 0;
+}
+
 /* LAYOUT */
 .app-layout {
   display:flex;

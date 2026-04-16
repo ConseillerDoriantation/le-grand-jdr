@@ -519,6 +519,25 @@
   border-color: var(--border-strong);
 }
 
+.hist-theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  font-size: .9rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  flex-shrink: 0;
+}
+.hist-theme-btn:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
 /* ── Bouton Scène dans la toolbar ──────────────────────────────────────────── */
 .hist-tool--scene {
   width: auto !important;

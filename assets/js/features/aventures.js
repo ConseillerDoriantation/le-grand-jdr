@@ -297,27 +297,6 @@ window._advPromote = async (advId, targetUid) => {
   } catch (e) { showNotif(e.message, 'error'); }
 };
 
-// ── Switcher d'aventure depuis le header ────────
-window.openAdventureSwitcher = () => {
-  const adventures = STATE.adventures;
-  if (adventures.length <= 1) return;
-
-  openModal('🗺️ Changer d\'aventure', `
-    <div style="display:flex;flex-direction:column;gap:.4rem">
-      ${adventures.map(a => {
-        const isCurrent = STATE.adventure?.id === a.id;
-        return `<div class="adv-switch-row ${isCurrent ? 'adv-switch-row--active' : ''}"
-          onclick="${isCurrent ? '' : `closeModal();window.pickAdventure('${a.id}')`}"
-          style="cursor:${isCurrent ? 'default' : 'pointer'}">
-          <span style="font-size:1.3rem">${a.emoji || '⚔️'}</span>
-          <span style="flex:1;font-size:.9rem;color:var(--text)">${_esc(a.nom)}</span>
-          ${isCurrent ? '<span style="font-size:.75rem;color:var(--gold)">● Actuelle</span>' : ''}
-        </div>`;
-      }).join('')}
-      <button class="btn btn-outline btn-sm" style="margin-top:.4rem" onclick="closeModal()">Fermer</button>
-    </div>
-  `);
-};
 
 
 // ── Enregistrement de la page ──────────────────
