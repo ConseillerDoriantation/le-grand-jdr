@@ -59,6 +59,8 @@ let _missionTitre = '';
 let _missionActe  = '';
 let _saveTimer    = null;
 let _saveStatus   = 'saved';
+let _allMissions  = [];      // toutes les missions de l'aventure
+let _sidebarOpen  = true;
 
 // Picker commun
 let _pickerActive = false;
@@ -94,14 +96,17 @@ async function renderHistoire() {
     return;
   }
 
-  const [histDoc, npcs, chars, places, items, orgs] = await Promise.all([
+  const [histDoc, npcs, chars, places, items, orgs, missions] = await Promise.all([
     getDocData('story_histories', _missionId).catch(() => null),
     loadCollection('npcs').catch(() => []),
     loadCollection('characters').catch(() => []),
     loadCollection('places').catch(() => []),
     loadCollection('shop').catch(() => []),
     loadCollection('organizations').catch(() => []),
+    loadCollection('story').catch(() => []),
   ]);
+
+  _allMissions = (missions || []).sort((a, b) => (a.ordre || 0) - (b.ordre || 0));
 
   const users = STATE.adventureMembers || [];
   _pickerData = {
@@ -170,15 +175,31 @@ async function renderHistoire() {
       <!-- Table des scènes -->
       <nav class="hist-toc" id="hist-toc" style="display:none"></nav>
 
-      <!-- Zone d'écriture -->
-      <div class="hist-editor-wrap">
-        <div
-          class="hist-editor"
-          id="hist-editor"
-          contenteditable="true"
-          spellcheck="true"
-          data-placeholder="Commencez à écrire l'histoire de cette mission…&#10;&#10;Tapez @ pour mentionner un PNJ, un lieu… · [ ou 🎲 Dé pour un jet de dé"
-        >${savedContent}</div>
+      <!-- Corps : sidebar + éditeur -->
+      <div class="hist-body">
+
+        <!-- Sidebar missions -->
+        <aside class="hist-sidebar${_sidebarOpen ? '' : ' hist-sidebar--closed'}" id="hist-sidebar">
+          <div class="hist-sidebar-inner">
+            ${_renderSidebarMissions()}
+          </div>
+          <button class="hist-sidebar-toggle" id="hist-sidebar-toggle"
+            onclick="window._toggleHistSidebar()" title="${_sidebarOpen ? 'Réduire' : 'Développer'}">
+            ${_sidebarOpen ? '◀' : '▶'}
+          </button>
+        </aside>
+
+        <!-- Zone d'écriture -->
+        <div class="hist-editor-wrap">
+          <div
+            class="hist-editor"
+            id="hist-editor"
+            contenteditable="true"
+            spellcheck="true"
+            data-placeholder="Commencez à écrire l'histoire de cette mission…&#10;&#10;Tapez @ pour mentionner un PNJ, un lieu… · [ ou 🎲 Dé pour un jet de dé"
+          >${savedContent}</div>
+        </div>
+
       </div>
 
       <!-- Barre de statut -->
@@ -632,6 +653,82 @@ function _updateToc() {
   toc.innerHTML = `<span class="hist-toc-label">Scènes :</span>${links}`;
   toc.style.display = 'flex';
 }
+
+// ── Sidebar missions ──────────────────────────────────────────────────────────
+function _renderSidebarMissions() {
+  if (!_allMissions.length) return `<div class="hist-sb-empty">Aucune mission</div>`;
+
+  // Grouper par acte dans l'ordre d'apparition
+  const acteOrder = [];
+  const byActe    = {};
+  for (const m of _allMissions) {
+    const acte = m.acte || 'Sans acte';
+    if (!byActe[acte]) { byActe[acte] = []; acteOrder.push(acte); }
+    byActe[acte].push(m);
+  }
+
+  return acteOrder.map(acte => {
+    const isCurrentActe = acte === (_missionActe || 'Sans acte');
+    const rows = byActe[acte].map(m => {
+      const isCurrent = m.id === _missionId;
+      return `<button class="hist-sb-item${isCurrent ? ' hist-sb-item--active' : ''}"
+        onclick="window._switchHistMission('${m.id}','${(m.titre||'').replace(/'/g,"\\'")}','${acte.replace(/'/g,"\\'")}')">
+        <span class="hist-sb-item-title">${m.titre || '(sans titre)'}</span>
+      </button>`;
+    }).join('');
+
+    return `<div class="hist-sb-group">
+      <div class="hist-sb-acte${isCurrentActe ? ' hist-sb-acte--active' : ''}">${acte}</div>
+      ${rows}
+    </div>`;
+  }).join('');
+}
+
+window._toggleHistSidebar = function () {
+  _sidebarOpen = !_sidebarOpen;
+  const sb  = document.getElementById('hist-sidebar');
+  const btn = document.getElementById('hist-sidebar-toggle');
+  if (!sb || !btn) return;
+  sb.classList.toggle('hist-sidebar--closed', !_sidebarOpen);
+  btn.textContent = _sidebarOpen ? '◀' : '▶';
+  btn.title       = _sidebarOpen ? 'Réduire' : 'Développer';
+};
+
+window._switchHistMission = async function (id, titre, acte) {
+  if (id === _missionId) return;
+  // Sauvegarder l'histoire courante avant de changer
+  clearTimeout(_saveTimer);
+  await _saveNow();
+
+  _missionId    = id;
+  _missionTitre = titre;
+  _missionActe  = acte;
+  window._histoireCtx = { id, titre, acte };
+
+  // Mettre à jour la topbar
+  const pill  = document.querySelector('.hist-acte-pill');
+  const titre_el = document.querySelector('.hist-titre');
+  if (pill)    pill.textContent   = acte;
+  if (titre_el) titre_el.textContent = titre;
+
+  // Charger et afficher le nouveau contenu
+  const editor = document.getElementById('hist-editor');
+  if (editor) editor.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:2rem;font-size:.9rem">Chargement…</div>';
+
+  const histDoc = await getDocData('story_histories', id).catch(() => null);
+  if (editor) {
+    editor.innerHTML = histDoc?.content || '';
+    editor.focus();
+  }
+
+  _setSaveStatus('saved');
+  _updateWordCount();
+  _updateToc();
+
+  // Mettre à jour la sidebar (surlignage)
+  const sbInner = document.querySelector('.hist-sidebar-inner');
+  if (sbInner) sbInner.innerHTML = _renderSidebarMissions();
+};
 
 // ── Gestion des compétences ───────────────────────────────────────────────────
 window._ouvrirGestionDes = function () {
