@@ -42,7 +42,13 @@
       "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/data.js\")",
       "Bash(awk '/const PAGES = {/,/^};/' /c/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/pages.js)",
       "Bash(grep -h \"loadCollection\\\\|addToCol\\\\|updateInCol\\\\|deleteFromCol\\\\|setInCol\" /c/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/*.js /c/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/**/*.js)",
-      "Bash(dir \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\" /B)"
+      "Bash(dir \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\" /B)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__read_page",
+      "mcp__Claude_in_Chrome__javascript_tool",
+      "Bash(node --input-type=module)",
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\histoire.js\")"
     ]
   }
 }

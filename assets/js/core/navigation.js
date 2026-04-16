@@ -25,6 +25,7 @@ const FEATURE_MAP = {
   account:      () => import('../features/account.js'),
   map:          () => import('../features/map.js'),
   aventures:    () => import('../features/aventures.js'),
+  histoire:     () => import('../features/histoire.js'),
 };
 
 // Garde les modules déjà chargés pour ne pas re-importer

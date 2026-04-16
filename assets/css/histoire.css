@@ -1,0 +1,865 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   HISTOIRE.CSS — Éditeur de mission intégré
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Shell principal ───────────────────────────────────────────────────────── */
+.hist-shell {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px); /* plein écran moins le header mobile */
+  max-height: calc(100vh - 56px);
+  background: var(--bg-base);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+@media (min-width: 769px) {
+  .hist-shell {
+    height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px);
+  }
+}
+
+/* ── Barre de navigation ───────────────────────────────────────────────────── */
+.hist-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .65rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.hist-back {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .3rem .65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: .8rem;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.hist-back:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+.hist-topbar-center {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  min-width: 0;
+  flex: 1;
+  justify-content: center;
+}
+
+.hist-acte-pill {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--gold);
+  background: rgba(232,184,75,.12);
+  border: 1px solid rgba(232,184,75,.25);
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hist-titre {
+  font-family: 'Cinzel', serif;
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hist-save-status {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .73rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hist-save-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.hist-save-dot--saved   { background: #22c38e; }
+.hist-save-dot--saving  { background: #f59e0b; animation: hist-pulse .8s ease infinite; }
+.hist-save-dot--unsaved { background: #ff6b6b; }
+
+@keyframes hist-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .35; }
+}
+
+/* ── Barre d'outils ────────────────────────────────────────────────────────── */
+.hist-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .45rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  overflow-x: auto;
+}
+.hist-toolbar::-webkit-scrollbar { display: none; }
+
+.hist-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.hist-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-strong);
+  margin: 0 .3rem;
+  flex-shrink: 0;
+}
+
+.hist-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: .82rem;
+  cursor: pointer;
+  transition: all .12s;
+}
+.hist-tool:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.hist-tool.active {
+  background: rgba(79,140,255,.15);
+  color: #4f8cff;
+}
+
+.hist-toolbar-tags {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.hist-tag-badge {
+  font-size: .68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid;
+  cursor: default;
+  white-space: nowrap;
+}
+
+/* ── Zone d'écriture ───────────────────────────────────────────────────────── */
+.hist-editor-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2.5rem 3rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.hist-editor-wrap::-webkit-scrollbar { width: 6px; }
+.hist-editor-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+.hist-editor {
+  max-width: 780px;
+  width: 100%;
+  margin: 0 auto;
+  min-height: 100%;
+  outline: none;
+  font-size: 1rem;
+  line-height: 1.8;
+  color: var(--text);
+  caret-color: var(--gold);
+}
+
+/* Placeholder */
+.hist-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-dim);
+  pointer-events: none;
+  white-space: pre-line;
+}
+
+/* Typographie de l'éditeur */
+.hist-editor h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--gold);
+  margin: 1.8rem 0 .6rem;
+  letter-spacing: .06em;
+  border-bottom: 1px solid rgba(232,184,75,.2);
+  padding-bottom: .3rem;
+}
+
+.hist-editor h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 1.4rem 0 .4rem;
+  letter-spacing: .04em;
+}
+
+.hist-editor p,
+.hist-editor div {
+  margin: 0 0 .8rem;
+}
+
+.hist-editor blockquote {
+  border-left: 3px solid var(--gold);
+  margin: 1rem 0;
+  padding: .5rem 1.2rem;
+  color: var(--text-muted);
+  font-style: italic;
+  background: rgba(232,184,75,.05);
+  border-radius: 0 8px 8px 0;
+}
+
+.hist-editor ul {
+  margin: .6rem 0 .6rem 1.5rem;
+  padding: 0;
+}
+
+.hist-editor ul li { margin-bottom: .3rem; }
+
+.hist-editor hr {
+  border: none;
+  border-top: 1px solid var(--border-strong);
+  margin: 1.8rem 0;
+}
+
+.hist-editor strong { color: var(--text); }
+
+/* Tags inline dans l'éditeur */
+.hist-editor .htag {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: .88em;
+  font-weight: 600;
+  margin: 0 2px;
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+  line-height: 1.5;
+}
+
+/* ── Barre de statut ───────────────────────────────────────────────────────── */
+.hist-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .35rem 1.2rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+  font-size: .72rem;
+  color: var(--text-dim);
+}
+
+.hist-tip {
+  color: var(--text-dim);
+  opacity: .6;
+}
+
+/* ── Picker @ mention ──────────────────────────────────────────────────────── */
+.hist-picker {
+  position: absolute;
+  z-index: 999;
+  width: 280px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.45);
+  pointer-events: auto;
+}
+
+.hist-picker::-webkit-scrollbar { width: 4px; }
+.hist-picker::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+.hist-picker-inner { padding: .4rem; }
+
+.hist-picker-group { margin-bottom: .3rem; }
+
+.hist-picker-group-label {
+  font-size: .63rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: .3rem .6rem .15rem;
+  opacity: .8;
+}
+
+.hist-picker-item {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .42rem .65rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: .85rem;
+  color: var(--text);
+  transition: background .1s;
+}
+.hist-picker-item:hover,
+.hist-picker-item.active {
+  background: var(--tag-bg, rgba(79,140,255,.12));
+  color: var(--tag-color, #4f8cff);
+}
+
+.hist-picker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hist-picker-empty {
+  padding: .8rem .65rem;
+  font-size: .82rem;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* ── Bouton Histoire sur les cartes de mission ─────────────────────────────── */
+.sn-histoire-btn {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(232,184,75,.3);
+  background: rgba(232,184,75,.07);
+  color: var(--gold);
+  font-size: .7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.sn-histoire-btn:hover {
+  background: rgba(232,184,75,.15);
+  border-color: rgba(232,184,75,.5);
+}
+
+/* ── Actions topbar ────────────────────────────────────────────────────────── */
+.hist-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-shrink: 0;
+}
+
+.hist-handout-btn-top {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .3rem .65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.hist-handout-btn-top:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+/* ── Bouton Scène dans la toolbar ──────────────────────────────────────────── */
+.hist-tool--scene {
+  width: auto !important;
+  padding: 0 8px !important;
+  font-size: .75rem !important;
+}
+
+/* ── Marqueur de scène ─────────────────────────────────────────────────────── */
+.hist-editor .hist-scene-marker {
+  display: block;
+  text-align: center;
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 1.8rem 0 .8rem;
+  padding: .45rem 1rem;
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  cursor: text;
+  outline: none;
+  min-height: 1.4em;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.hist-editor .hist-scene-marker:focus {
+  background: rgba(232,184,75,.06);
+  border-color: rgba(232,184,75,.35);
+  color: var(--gold);
+}
+.hist-editor .hist-scene-marker::before { content: '⛳\00a0'; }
+
+/* ── Table des scènes (TOC) ────────────────────────────────────────────────── */
+.hist-toc {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 5px 1.2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+  font-size: .75rem;
+  overflow-x: auto;
+}
+.hist-toc::-webkit-scrollbar { display: none; }
+
+.hist-toc-label {
+  color: var(--text-dim);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.hist-toc-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  transition: background .1s, color .1s, border-color .1s;
+}
+.hist-toc-link:hover {
+  background: var(--bg-card2);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* ── Indication [ dans la statusbar ───────────────────────────────────────── */
+.hist-tip kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  font-size: .68rem;
+  font-family: monospace;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
+/* ── Handout modal ─────────────────────────────────────────────────────────── */
+#hist-handout-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.hist-handout-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  opacity: 0;
+  transition: opacity .2s;
+}
+#hist-handout-modal.hist-handout-visible .hist-handout-backdrop { opacity: 1; }
+
+.hist-handout-panel {
+  position: relative;
+  z-index: 1;
+  width: min(700px, 100%);
+  max-height: 85vh;
+  background: var(--bg-card);
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,.5);
+  transform: translateY(12px);
+  opacity: 0;
+  transition: transform .2s ease, opacity .2s;
+}
+#hist-handout-modal.hist-handout-visible .hist-handout-panel {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.hist-handout-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.hist-handout-acte {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 3px;
+}
+.hist-handout-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.hist-handout-meta {
+  font-size: .72rem;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+.hist-handout-action {
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s, color .12s;
+}
+.hist-handout-action:hover { background: var(--bg-card2); color: var(--text); }
+.hist-handout-close { padding: 5px 10px; }
+
+.hist-handout-body {
+  padding: 24px 28px;
+  overflow-y: auto;
+  line-height: 1.8;
+  font-size: .95rem;
+  color: var(--text);
+  flex: 1;
+}
+.hist-handout-body::-webkit-scrollbar { width: 6px; }
+.hist-handout-body::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+.hist-handout-body h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--gold);
+  margin: 1.5rem 0 .5rem;
+  letter-spacing: .06em;
+  border-bottom: 1px solid rgba(232,184,75,.2);
+  padding-bottom: .3rem;
+}
+.hist-handout-body h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 1.2rem 0 .4rem;
+}
+.hist-handout-body blockquote {
+  border-left: 3px solid var(--gold);
+  margin: 1rem 0;
+  padding: .4rem 1rem;
+  color: var(--text-muted);
+  font-style: italic;
+  background: rgba(232,184,75,.05);
+  border-radius: 0 8px 8px 0;
+}
+
+.hist-handout-scene-title {
+  text-align: center;
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: .4rem 0;
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  margin: 1.5rem 0 .8rem;
+}
+.hist-handout-scene-title::before { content: '⛳\00a0'; }
+
+/* ── Bouton "Gérer" dans le picker ─────────────────────────────────────────── */
+.hist-picker-manage-btn {
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background .1s, color .1s;
+}
+.hist-picker-manage-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+/* ── Modal gestion des compétences ─────────────────────────────────────────── */
+#hist-des-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.hist-des-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  opacity: 0;
+  transition: opacity .2s;
+}
+#hist-des-modal.hist-des-visible .hist-des-backdrop { opacity: 1; }
+
+.hist-des-panel {
+  position: relative;
+  z-index: 1;
+  width: min(480px, 100%);
+  max-height: 80vh;
+  background: var(--bg-card);
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,.5);
+  transform: translateY(10px);
+  opacity: 0;
+  transition: transform .18s ease, opacity .18s;
+}
+#hist-des-modal.hist-des-visible .hist-des-panel { transform: translateY(0); opacity: 1; }
+
+.hist-des-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: .88rem;
+  font-weight: 700;
+  color: var(--text);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.hist-des-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s, color .12s;
+}
+.hist-des-btn:hover { background: var(--bg-card2); color: var(--text); }
+.hist-des-btn--close { padding: 4px 8px; }
+.hist-des-btn--add   { background: rgba(245,158,11,.12); color: #d97706; border-color: rgba(245,158,11,.3); }
+.hist-des-btn--add:hover { background: rgba(245,158,11,.2); }
+
+.hist-des-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 8px 0 0;
+}
+.hist-des-body::-webkit-scrollbar { width: 4px; }
+.hist-des-body::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+.hist-des-list { padding: 0 12px; }
+
+.hist-des-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  border-top: 2px solid transparent;
+  transition: background .1s, border-top-color .1s;
+}
+.hist-des-row:last-child { border-bottom: none; }
+.hist-des-row.hist-des-drag-over {
+  border-top-color: #f59e0b;
+  background: rgba(245,158,11,.06);
+}
+
+.hist-des-drag-handle {
+  color: var(--text-dim);
+  cursor: grab;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding-right: 2px;
+  user-select: none;
+  flex-shrink: 0;
+  opacity: .4;
+  transition: opacity .1s;
+}
+.hist-des-row:hover .hist-des-drag-handle { opacity: .8; }
+.hist-des-drag-handle:active { cursor: grabbing; }
+
+.hist-des-name {
+  flex: 1;
+  font-size: .85rem;
+  color: var(--text);
+  min-width: 0;
+}
+
+/* Boutons de sélection de stat */
+.hist-des-stats {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.hist-des-stat-btn {
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: .68rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 27px;
+  text-align: center;
+  transition: background .1s, color .1s, border-color .1s;
+  line-height: 1.4;
+}
+.hist-des-stat-btn:hover:not(.active) {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+/* .active : styles inline (couleur dynamique par carac) */
+
+/* Select "nouvelle stat" dans le formulaire d'ajout */
+.hist-des-new-stat-sel {
+  padding: 4px 6px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.hist-des-del {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: .8rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .1s, color .1s;
+  flex-shrink: 0;
+}
+.hist-des-del:hover { background: rgba(239,68,68,.15); color: #ef4444; }
+
+.hist-des-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.hist-des-input {
+  flex: 1;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: .83rem;
+  outline: none;
+  min-width: 0;
+}
+.hist-des-input:focus { border-color: #f59e0b88; }
+
+/* ── Responsive mobile ─────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hist-shell {
+    height: calc(100vh - 100px);
+    max-height: calc(100vh - 100px);
+    border-radius: 16px;
+  }
+
+  .hist-editor-wrap {
+    padding: 1.4rem 1.2rem;
+  }
+
+  .hist-toolbar-tags { display: none; }
+  .hist-titre { font-size: .82rem; }
+
+  .hist-picker { width: calc(100vw - 32px); }
+}

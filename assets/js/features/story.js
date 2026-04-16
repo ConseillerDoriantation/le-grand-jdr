@@ -459,7 +459,11 @@ function _renderTimeline(items) {
           </div>
         </div>
         ${STATE.isAdmin ? `
-        <div style="display:flex;gap:3px;margin-top:4px;justify-content:center">
+        <div style="display:flex;gap:3px;margin-top:4px;justify-content:center;flex-wrap:wrap">
+          <button class="sn-histoire-btn"
+            onclick="event.stopPropagation();window._ouvrirHistoire('${item.id}','${(item.titre||'').replace(/'/g,"\\'")}','${(item.acte||'').replace(/'/g,"\\'")}')">
+            ✍️ Histoire
+          </button>
           <button class="btn-icon" style="font-size:.7rem;padding:2px 6px"
             onclick="event.stopPropagation();editStory('${item.id}')">✏️</button>
           <button class="btn-icon" style="font-size:.7rem;padding:2px 6px;color:#ff6b6b"
@@ -1213,6 +1217,12 @@ window._createNewActe = async () => {
   window._storyActe=name;
   closeModal();
   await PAGES.story();
+};
+
+// ── OUVRIR L'ÉDITEUR D'HISTOIRE ───────────────────────────────────────────────
+window._ouvrirHistoire = function(id, titre, acte) {
+  window._histoireCtx = { id, titre, acte };
+  window.navigate('histoire');
 };
 
 // ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────
