@@ -46,6 +46,7 @@ const _CACHE_TTL = {
   shopCategories:     5 * 60_000,
   story:              5 * 60_000,
   story_meta:         5 * 60_000,
+  story_histories:    5 * 60_000,
   world:              5 * 60_000,
   players:            5 * 60_000,
   achievements:       5 * 60_000,
