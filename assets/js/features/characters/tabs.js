@@ -278,21 +278,40 @@ export function renderCharCompte(c, canEdit) {
   const totalD = depenses.reduce((s,d)=>s+(parseFloat(d.montant)||0),0);
   const solde = totalR - totalD;
 
+  const HIST_LIMIT = 5;
+
+  const renderRow = (row, i, type, canEdit, extraClass = '', extraStyle = '') => `
+    <tr class="cs-compte-row${extraClass ? ' ' + extraClass : ''}"${extraStyle ? ` style="${extraStyle}"` : ''}>
+      <td>${canEdit
+        ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'date',this)">${row.date||'—'}</span>`
+        : (row.date||'—')}</td>
+      <td>${canEdit
+        ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'libelle',this)">${row.libelle||'—'}</span>`
+        : (row.libelle||'—')}</td>
+      <td class="${type==='recettes'?'cs-montant-pos':'cs-montant-neg'}">${canEdit
+        ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'montant',this)">${row.montant||0}</span>`
+        : (row.montant||0)} or</td>
+      ${canEdit?`<td><button class="btn-icon" onclick="deleteCompteRow('${type}',${i})">🗑️</button></td>`:''}
+    </tr>`;
+
   const renderRows = (list, type, canEdit) => {
-    if (list.length===0) return `<tr><td colspan="4" class="cs-compte-empty">Aucune entrée.</td></tr>`;
-    return list.map((row,i)=>`
-      <tr class="cs-compte-row">
-        <td>${canEdit
-          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'date',this)">${row.date||'—'}</span>`
-          : (row.date||'—')}</td>
-        <td>${canEdit
-          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'libelle',this)">${row.libelle||'—'}</span>`
-          : (row.libelle||'—')}</td>
-        <td class="${type==='recettes'?'cs-montant-pos':'cs-montant-neg'}">${canEdit
-          ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'montant',this)">${row.montant||0}</span>`
-          : (row.montant||0)} or</td>
-        ${canEdit?`<td><button class="btn-icon" onclick="deleteCompteRow('${type}',${i})">🗑️</button></td>`:''}
-      </tr>`).join('');
+    if (list.length === 0) return `<tr><td colspan="4" class="cs-compte-empty">Aucune entrée.</td></tr>`;
+    if (list.length <= HIST_LIMIT) return list.map((r,i) => renderRow(r,i,type,canEdit)).join('');
+
+    const hidden = list.slice(0, list.length - HIST_LIMIT);
+    const visible = list.slice(-HIST_LIMIT);
+    const cols = canEdit ? 4 : 3;
+    return `
+      ${hidden.map((r,i) => renderRow(r, i, type, canEdit, `cs-hist-old-${type}`, 'display:none')).join('')}
+      <tr class="cs-hist-expand-row">
+        <td colspan="${cols}">
+          <button class="cs-hist-expand-btn" id="cs-hist-btn-${type}"
+            onclick="window._toggleCompteHist('${type}',${hidden.length})">
+            ↑ Voir les ${hidden.length} entrées précédentes
+          </button>
+        </td>
+      </tr>
+      ${visible.map((r,i) => renderRow(r, hidden.length + i, type, canEdit)).join('')}`;
   };
 
   return `<div class="cs-section">
@@ -580,6 +599,17 @@ export function previewXpBar(input, palier) {
   if (bar) bar.style.width = p + '%';
   if (pct) pct.textContent = p + '%';
 }
+
+window._toggleCompteHist = (type, count) => {
+  const rows = document.querySelectorAll(`.cs-hist-old-${type}`);
+  const btn  = document.getElementById(`cs-hist-btn-${type}`);
+  if (!rows.length || !btn) return;
+  const isOpen = rows[0].style.display !== 'none';
+  rows.forEach(r => { r.style.display = isOpen ? 'none' : ''; });
+  btn.textContent = isOpen
+    ? `↑ Voir les ${count} entrées précédentes`
+    : `↓ Masquer l'historique`;
+};
 
 export async function saveXpDirect(charId, input) {
   try {

@@ -836,6 +836,25 @@
 .cs-montant-pos { color: var(--green); font-weight: 700; }
 .cs-montant-neg { color: var(--crimson-light); font-weight: 700; }
 
+.cs-hist-expand-row td { padding: 0 !important; }
+.cs-hist-expand-btn {
+  display: block;
+  width: 100%;
+  padding: .35rem .5rem;
+  background: none;
+  border: none;
+  border-top: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: .75rem;
+  cursor: pointer;
+  text-align: center;
+  transition: color .15s, background .15s;
+}
+.cs-hist-expand-btn:hover {
+  color: var(--gold);
+  background: rgba(255,255,255,.03);
+}
+
 @media(max-width: 700px) {
   .cs-compte-grid { grid-template-columns: 1fr; }
 }

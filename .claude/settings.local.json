@@ -48,7 +48,8 @@
       "mcp__Claude_in_Chrome__read_page",
       "mcp__Claude_in_Chrome__javascript_tool",
       "Bash(node --input-type=module)",
-      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\histoire.js\")"
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\histoire.js\")",
+      "Bash(xargs grep:*)"
     ]
   }
 }
