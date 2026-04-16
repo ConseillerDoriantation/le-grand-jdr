@@ -35,11 +35,13 @@ import { loadUserAdventures, selectAdventure, runMigration } from "./adventure.j
 
 // Exposer pickAdventure tôt (avant lazy-load de aventures.js)
 // pour que le picker HTML puisse l'appeler
+const LAST_ADV_KEY = 'jdr-last-adventure';
+
 window.pickAdventure = async (adventureId) => {
   const adv = STATE.adventures.find(a => a.id === adventureId);
   if (!adv) return;
+  localStorage.setItem(LAST_ADV_KEY, adventureId);
   selectAdventure(adv);
-  // Importer hideAdventurePicker sans créer de dépendance circulaire
   const { hideAdventurePicker } = await import('./layout.js');
   hideAdventurePicker();
   showApp();
@@ -111,13 +113,21 @@ onAuthStateChanged(auth, async (user) => {
     }
 
     if (adventures.length === 1) {
-      // Auto-sélection si une seule aventure
       selectAdventure(adventures[0]);
       await navigate('dashboard');
       return;
     }
 
-    // Plusieurs aventures → sélecteur
+    // Plusieurs aventures → essayer de restaurer la dernière utilisée
+    const lastId  = localStorage.getItem(LAST_ADV_KEY);
+    const lastAdv = lastId && adventures.find(a => a.id === lastId);
+    if (lastAdv) {
+      selectAdventure(lastAdv);
+      await navigate('dashboard');
+      return;
+    }
+
+    // Pas de mémorisation → sélecteur
     showAdventurePicker(adventures);
   } catch (error) {
     console.error("[init] loadUserAdventures failed:", error);
