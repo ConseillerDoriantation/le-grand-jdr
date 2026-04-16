@@ -328,6 +328,7 @@ function _renderSidebarTop() {
 
 function _renderSidebar() {
   const totalItems = _items.length;
+  const orphaned   = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
 
   return `
     <aside class="sh-sidebar">
@@ -336,7 +337,7 @@ function _renderSidebar() {
           <span class="sh-side-link-icon">🏠</span>
           <span class="sh-side-link-text">
             <strong>Toutes les catégories</strong>
-            <small>${_cats.length} catégories • ${totalItems} articles</small>
+            <small>${_cats.length} catégorie${_cats.length!==1?'s':''} • ${totalItems} article${totalItems!==1?'s':''}</small>
           </span>
         </button>
       </div>
@@ -359,6 +360,16 @@ function _renderSidebar() {
               </button>
             `;
           }).join('')}
+          ${orphaned.length > 0 ? `
+            <button class="sh-side-link ${_view === 'items' && _activeCat === '__uncategorized__' ? 'active' : ''}"
+              onclick="shopGoCat('__uncategorized__')" style="opacity:.8">
+              <span class="sh-side-link-icon">📦</span>
+              <span class="sh-side-link-text">
+                <strong>Non classé</strong>
+                <small>${orphaned.length} article${orphaned.length > 1 ? 's' : ''} sans catégorie</small>
+              </span>
+            </button>
+          ` : ''}
         </div>
       </div>
     </aside>
@@ -369,7 +380,9 @@ function _renderSidebar() {
 // VUE HOME
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderHome() {
-  if (_cats.length === 0) {
+  const orphaned = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
+
+  if (_cats.length === 0 && orphaned.length === 0) {
     return `<div class="empty-state"><div class="icon">🛒</div>
       <p>La boutique est vide.</p>
       ${STATE.isAdmin?'<p style="font-size:0.82rem;margin-top:0.5rem;color:var(--text-dim)">Crée une catégorie pour commencer.</p>':''}</div>`;
@@ -403,6 +416,25 @@ function _renderHome() {
       </div>
     </div>`;
   });
+
+  // Carte virtuelle "Non classé" pour les articles sans catégorie valide
+  if (orphaned.length > 0) {
+    const n = orphaned.length;
+    html += `<div class="sh-cat-card" onclick="shopGoCat('__uncategorized__')" style="opacity:.85">
+      <div class="sh-cat-img" style="background:linear-gradient(135deg,#2a2a3e,#1a1a2a)">
+        <div class="sh-cat-img-overlay"></div>
+        <div class="sh-cat-img-emoji">📦</div>
+        <span class="sh-cat-tpl-badge" style="background:rgba(255,165,0,.25);color:#ffb347">Non classé</span>
+      </div>
+      <div class="sh-cat-body">
+        <div class="sh-cat-name-row">
+          <div class="sh-cat-name">Non classé</div>
+        </div>
+        <div class="sh-cat-meta">${n} article${n!==1?'s':''} sans catégorie</div>
+      </div>
+    </div>`;
+  }
+
   html += `</div>`;
   return html;
 }
@@ -410,8 +442,14 @@ function _renderHome() {
 // ══════════════════════════════════════════════════════════════════════════════
 // VUE ARTICLES — filtres dynamiques multi-tags + recherche temps réel
 // ══════════════════════════════════════════════════════════════════════════════
+function _getBaseItems(catId) {
+  return catId === '__uncategorized__'
+    ? _items.filter(i => !_cats.find(c => c.id === i.categorieId))
+    : _items.filter(i => i.categorieId === catId);
+}
+
 function _getFilteredItems(catId) {
-  let items = _items.filter(i => i.categorieId === catId);
+  let items = _getBaseItems(catId);
 
   // 🔎 Recherche
   const search = (_filterSearch || '').toLowerCase().trim();
@@ -427,7 +465,7 @@ function _getFilteredItems(catId) {
 
   // 🏷️ Tags
   if (_filterTags.size > 0) {
-    const tagGroups = _buildTagGroups(_items.filter(i => i.categorieId === catId));
+    const tagGroups = _buildTagGroups(_getBaseItems(catId));
     const activeByGroup = new Map();
 
     for (const group of tagGroups) {
@@ -473,7 +511,10 @@ function _getFilteredItems(catId) {
 }
 
 function _renderItemsView() {
-  const cat = _cats.find(c => c.id === _activeCat);
+  const isUncategorized = _activeCat === '__uncategorized__';
+  const cat = isUncategorized
+    ? { id: '__uncategorized__', nom: 'Non classé', emoji: '📦', template: 'classique' }
+    : _cats.find(c => c.id === _activeCat);
   if (!cat) return '';
   const tplCat = TEMPLATES[cat.template || 'classique'];
 
@@ -484,11 +525,11 @@ function _renderItemsView() {
   const pages = Math.ceil(total / PAGE_SIZE);
   const p     = Math.max(1, Math.min(_page, pages));
   const slice = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
-  const allItems  = _items.filter(i => i.categorieId === _activeCat);
+  const allItems  = _getBaseItems(_activeCat);
   const tagGroups = _buildTagGroups(allItems);
   const hasFilters = search || _filterTags.size > 0;
 
-  const totalCat = _items.filter(i => i.categorieId === _activeCat).length;
+  const totalCat = allItems.length;
   let html = `
   <div class="sh-main-head sh-main-head--category">
     <div class="sh-main-head-body">
@@ -1297,7 +1338,10 @@ function shopFilterReset() {
 
 // ── Mise à jour partielle : grille + compteur + tags, sans toucher le champ texte ──
 function _updateItemsOnly() {
-  const cat = _cats.find(c => c.id === _activeCat);
+  const isUncategorized = _activeCat === '__uncategorized__';
+  const cat = isUncategorized
+    ? { id: '__uncategorized__', nom: 'Non classé', template: 'classique' }
+    : _cats.find(c => c.id === _activeCat);
   if (!cat) { renderShop(); return; }
 
   let items = _getFilteredItems(_activeCat);
@@ -1410,7 +1454,9 @@ async function shopItemDrop(e,toItemId){
   e.preventDefault(); document.querySelectorAll('.sh-item-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
   const fromId=_dragItemId; _dragItemId=null;
   if(!fromId||fromId===toItemId) return;
-  let items=_items.filter(i=>i.categorieId===_activeCat);
+  let items = _activeCat === '__uncategorized__'
+    ? _items.filter(i => !_cats.find(c => c.id === i.categorieId))
+    : _items.filter(i=>i.categorieId===_activeCat);
   const fromIdx=items.findIndex(i=>i.id===fromId), toIdx=items.findIndex(i=>i.id===toItemId);
   if(fromIdx<0||toIdx<0) return;
   const rect=e.currentTarget.getBoundingClientRect(), insertAfter=e.clientY>=rect.top+rect.height/2;
