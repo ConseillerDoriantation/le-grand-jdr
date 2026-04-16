@@ -109,93 +109,121 @@
     <!-- Sidebar navigation -->
     <nav class="sidebar" id="sidebar" aria-label="Navigation principale">
 
-      <div class="sidebar-nav-group">
-        <a class="nav-item active" data-navigate="dashboard" title="Accueil">
-          <span class="nav-icon" aria-hidden="true">🏠</span>
-          <span class="nav-label">Accueil</span>
-        </a>
-        <a class="nav-item" data-navigate="characters" title="Personnages">
-          <span class="nav-icon" aria-hidden="true">📜</span>
-          <span class="nav-label">Personnages</span>
-        </a>
-        <a class="nav-item" data-navigate="shop" title="Boutique">
-          <span class="nav-icon" aria-hidden="true">🛍️</span>
-          <span class="nav-label">Boutique</span>
-        </a>
-        <a class="nav-item" data-navigate="story" title="Trame">
-          <span class="nav-icon" aria-hidden="true">📚</span>
-          <span class="nav-label">Trame</span>
-        </a>
+      <!-- Top : brand + aventure -->
+      <div class="sidebar-top">
+        <div class="sidebar-brand-row">
+          <div class="sidebar-brand-icon" aria-hidden="true">⚔️</div>
+          <span class="sidebar-brand-text">Le Grand JDR</span>
+        </div>
+        <div class="sidebar-adv-chip" id="sidebar-adv-chip" style="display:none" onclick="window.openAdventureSwitcher?.()" title="Aventure active">
+          <span class="sidebar-adv-emoji" id="sidebar-adv-emoji"></span>
+          <span class="sidebar-adv-text" id="sidebar-adv-name"></span>
+        </div>
       </div>
 
-      <div class="sidebar-sep" role="separator"></div>
+      <!-- Middle : nav scrollable -->
+      <div class="sidebar-scroll">
 
-      <div class="sidebar-nav-group">
-        <a class="nav-item" data-navigate="map" title="Carte">
-          <span class="nav-icon" aria-hidden="true">🗺️</span>
-          <span class="nav-label">Carte</span>
-        </a>
-        <a class="nav-item" data-navigate="npcs" title="PNJ">
-          <span class="nav-icon" aria-hidden="true">👥</span>
-          <span class="nav-label">PNJ</span>
-        </a>
-        <a class="nav-item" data-navigate="world" title="Le Monde">
-          <span class="nav-icon" aria-hidden="true">📖</span>
-          <span class="nav-label">Monde</span>
-        </a>
-        <a class="nav-item" data-navigate="bastion" title="Bastion">
-          <span class="nav-icon" aria-hidden="true">🏰</span>
-          <span class="nav-label">Bastion</span>
-        </a>
-      </div>
+        <div class="sidebar-sep" role="separator"></div>
 
-      <div class="sidebar-sep" role="separator"></div>
+        <div class="sidebar-section-label">Essentiel</div>
+        <div class="sidebar-nav-group">
+          <a class="nav-item active" data-navigate="dashboard" title="Accueil">
+            <span class="nav-icon" aria-hidden="true">🏠</span>
+            <span class="nav-label">Accueil</span>
+          </a>
+          <a class="nav-item" data-navigate="characters" title="Personnage">
+            <span class="nav-icon" aria-hidden="true">📜</span>
+            <span class="nav-label">Personnage</span>
+          </a>
+          <a class="nav-item" data-navigate="shop" title="Boutique">
+            <span class="nav-icon" aria-hidden="true">🛍️</span>
+            <span class="nav-label">Boutique</span>
+          </a>
+          <a class="nav-item" data-navigate="story" title="Trame">
+            <span class="nav-icon" aria-hidden="true">📚</span>
+            <span class="nav-label">Trame</span>
+          </a>
+        </div>
 
-      <div class="sidebar-nav-group">
-        <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
-          <span class="nav-icon" aria-hidden="true">🏆</span>
-          <span class="nav-label">Hauts-Faits</span>
-        </a>
-        <a class="nav-item" data-navigate="players" title="Présentation des joueurs">
-          <span class="nav-icon" aria-hidden="true">⚔️</span>
-          <span class="nav-label">Joueurs</span>
-        </a>
-        <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
-          <span class="nav-icon" aria-hidden="true">🐉</span>
-          <span class="nav-label">Bestiaire</span>
-        </a>
-        <a class="nav-item" data-navigate="recettes" title="Recettes">
-          <span class="nav-icon" aria-hidden="true">🍳</span>
-          <span class="nav-label">Recettes</span>
-        </a>
-        <a class="nav-item" data-navigate="informations" title="Informations">
-          <span class="nav-icon" aria-hidden="true">📋</span>
-          <span class="nav-label">Infos</span>
-        </a>
-        <a class="nav-item" data-navigate="collection" title="Collection">
-          <span class="nav-icon" aria-hidden="true">🃏</span>
-          <span class="nav-label">Collection</span>
-        </a>
-      </div>
+        <div class="sidebar-sep" role="separator"></div>
 
-      <div class="sidebar-sep" role="separator"></div>
+        <div class="sidebar-section-label">En Jeu</div>
+        <div class="sidebar-nav-group">
+          <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
+            <span class="nav-icon" aria-hidden="true">🐉</span>
+            <span class="nav-label">Bestiaire</span>
+          </a>
+          <a class="nav-item" data-navigate="recettes" title="Recettes">
+            <span class="nav-icon" aria-hidden="true">🍳</span>
+            <span class="nav-label">Recettes</span>
+          </a>
+          <a class="nav-item" data-navigate="bastion" title="Bastion">
+            <span class="nav-icon" aria-hidden="true">🏰</span>
+            <span class="nav-label">Bastion</span>
+          </a>
+          <a class="nav-item" data-navigate="informations" title="Informations">
+            <span class="nav-icon" aria-hidden="true">📋</span>
+            <span class="nav-label">Infos</span>
+          </a>
+        </div>
 
-      <div class="sidebar-nav-group">
-        <!-- Lien compte -->
-        <a class="nav-item" data-navigate="account" title="Mon compte">
-          <span class="nav-icon" aria-hidden="true">👤</span>
-          <span class="nav-label">Mon compte</span>
-        </a>
-        <!-- Aventures — visible par tous (switcher) -->
-        <a class="nav-item" data-navigate="aventures" title="Aventures">
-          <span class="nav-icon" aria-hidden="true">🗺️</span>
-          <span class="nav-label">Aventures</span>
-        </a>
-        <!-- Admin uniquement — affiché par layout.js -->
-        <a class="nav-item admin-only" data-navigate="admin" title="Console MJ" style="display:none">
-          <span class="nav-icon" aria-hidden="true">⚙️</span>
-          <span class="nav-label">Console MJ</span>
-        </a>
+        <div class="sidebar-sep" role="separator"></div>
+
+        <div class="sidebar-section-label">Univers</div>
+        <div class="sidebar-nav-group">
+          <a class="nav-item" data-navigate="map" title="Carte">
+            <span class="nav-icon" aria-hidden="true">🗺️</span>
+            <span class="nav-label">Carte</span>
+          </a>
+          <a class="nav-item" data-navigate="npcs" title="PNJ">
+            <span class="nav-icon" aria-hidden="true">👥</span>
+            <span class="nav-label">PNJ</span>
+          </a>
+          <a class="nav-item" data-navigate="world" title="Le Monde">
+            <span class="nav-icon" aria-hidden="true">📖</span>
+            <span class="nav-label">Monde</span>
+          </a>
+          <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
+            <span class="nav-icon" aria-hidden="true">🏆</span>
+            <span class="nav-label">Hauts-Faits</span>
+          </a>
+          <a class="nav-item" data-navigate="players" title="Joueurs">
+            <span class="nav-icon" aria-hidden="true">⚔️</span>
+            <span class="nav-label">Joueurs</span>
+          </a>
+          <a class="nav-item" data-navigate="collection" title="Collection">
+            <span class="nav-icon" aria-hidden="true">🃏</span>
+            <span class="nav-label">Collection</span>
+          </a>
+        </div>
+
+        <div class="sidebar-sep" role="separator"></div>
+
+        <div class="sidebar-nav-group">
+          <a class="nav-item" data-navigate="aventures" title="Aventures">
+            <span class="nav-icon" aria-hidden="true">🌐</span>
+            <span class="nav-label">Aventures</span>
+          </a>
+          <a class="nav-item admin-only" data-navigate="admin" title="Console MJ" style="display:none">
+            <span class="nav-icon" aria-hidden="true">⚙️</span>
+            <span class="nav-label">Console MJ</span>
+          </a>
+        </div>
+
+      </div><!-- /sidebar-scroll -->
+
+      <!-- Bottom : profil utilisateur -->
+      <div class="sidebar-bottom">
+        <div class="sidebar-sep" role="separator"></div>
+        <div class="sidebar-profile" id="sidebar-profile">
+          <div class="sidebar-profile-avatar" id="sidebar-avatar" data-navigate="account" title="Mon compte">?</div>
+          <div class="sidebar-profile-meta">
+            <span class="sidebar-profile-name" id="sidebar-pseudo">—</span>
+            <span class="sidebar-profile-role admin-only" id="sidebar-role" style="display:none">MJ</span>
+          </div>
+          <button class="sidebar-profile-logout" data-action="logout" title="Déconnexion">⏏</button>
+        </div>
       </div>
 
     </nav>
@@ -217,13 +245,13 @@
       <span class="bn-icon" aria-hidden="true">📜</span>
       <span>Perso</span>
     </button>
-    <button class="bottom-nav-item" type="button" data-navigate="story" data-page="story">
-      <span class="bn-icon" aria-hidden="true">📚</span>
-      <span>Trame</span>
-    </button>
     <button class="bottom-nav-item" type="button" data-navigate="shop" data-page="shop">
       <span class="bn-icon" aria-hidden="true">🛍️</span>
       <span>Boutique</span>
+    </button>
+    <button class="bottom-nav-item" type="button" data-navigate="bestiaire" data-page="bestiaire">
+      <span class="bn-icon" aria-hidden="true">🐉</span>
+      <span>Bestiaire</span>
     </button>
     <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
       <span class="bn-icon" aria-hidden="true">⋯</span>
@@ -233,18 +261,18 @@
 
   <!-- More-menu mobile -->
   <div class="more-menu" id="more-menu" role="dialog" aria-label="Navigation étendue">
+    <div class="more-menu-item" data-navigate="recettes"><span class="icon">🍳</span>Recettes</div>
+    <div class="more-menu-item" data-navigate="bastion"><span class="icon">🏰</span>Bastion</div>
+    <div class="more-menu-item" data-navigate="informations"><span class="icon">📋</span>Infos</div>
+    <div class="more-menu-item" data-navigate="story"><span class="icon">📚</span>Trame</div>
     <div class="more-menu-item" data-navigate="map"><span class="icon">🗺️</span>Carte</div>
     <div class="more-menu-item" data-navigate="npcs"><span class="icon">👥</span>PNJ</div>
     <div class="more-menu-item" data-navigate="world"><span class="icon">📖</span>Monde</div>
-    <div class="more-menu-item" data-navigate="bastion"><span class="icon">🏰</span>Bastion</div>
     <div class="more-menu-item" data-navigate="achievements"><span class="icon">🏆</span>Hauts-Faits</div>
     <div class="more-menu-item" data-navigate="players"><span class="icon">⚔️</span>Joueurs</div>
-    <div class="more-menu-item" data-navigate="bestiaire"><span class="icon">🐉</span>Bestiaire</div>
-    <div class="more-menu-item" data-navigate="recettes"><span class="icon">🍳</span>Recettes</div>
-    <div class="more-menu-item" data-navigate="informations"><span class="icon">📋</span>Infos</div>
     <div class="more-menu-item" data-navigate="collection"><span class="icon">🃏</span>Collection</div>
     <div class="more-menu-item" data-navigate="account"><span class="icon">👤</span>Compte</div>
-    <div class="more-menu-item" data-navigate="aventures"><span class="icon">🗺️</span>Aventures</div>
+    <div class="more-menu-item" data-navigate="aventures"><span class="icon">🌐</span>Aventures</div>
     <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><span class="icon">⚙️</span>Console MJ</div>
   </div>
 

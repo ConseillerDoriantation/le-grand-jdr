@@ -19,300 +19,397 @@ const getInfoArtisanat   = () => window.getInfoArtisanat?.()   || 'Contenu à ve
 const getInfoBastion     = () => window.getInfoBastion?.()     || 'Contenu à venir.';
 const getInfoEtats       = () => window.getInfoEtats?.()       || 'Contenu à venir.';
 
-const syncHeaderAdminButton = () => {
-  const host = document.querySelector('.header-user');
-  if (!host) return;
-  let btn = document.getElementById('header-admin-link');
-  if (!STATE.isAdmin) { btn?.remove(); return; }
-  if (!btn) {
-    btn = document.createElement('button');
-    btn.id = 'header-admin-link';
-    btn.type = 'button';
-    btn.className = 'header-admin-link';
-    btn.textContent = 'Console MJ';
-    btn.addEventListener('click', () => window.navigate?.('admin'));
-    const logoutBtn = host.querySelector('.btn-logout');
-    if (logoutBtn) host.insertBefore(btn, logoutBtn);
-    else host.appendChild(btn);
-  }
-};
-
 const PAGES = {
 
   // ─── DASHBOARD ──────────────────────────────────────────────────────────────
   async dashboard() {
-    syncHeaderAdminButton();
     const content = document.getElementById('main-content');
 
-    // Afficher le squelette de chargement immédiatement
-    content.innerHTML = `<div id="dash-root" style="display:flex;flex-direction:column;gap:1rem;max-width:900px;margin:0 auto">
-      <div style="height:160px;background:var(--bg-card);border-radius:var(--radius-lg);
-        border:1px solid var(--border);animation:pulse 1.5s ease infinite"></div>
-      <div style="height:120px;background:var(--bg-card);border-radius:var(--radius-lg);
-        border:1px solid var(--border);animation:pulse 1.5s ease infinite .15s"></div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem">
-        ${[0,1,2,3].map(i=>`<div style="height:80px;background:var(--bg-card);border-radius:16px;
-          border:1px solid var(--border);animation:pulse 1.5s ease infinite ${i*.1}s"></div>`).join('')}
+    // Squelette animé
+    content.innerHTML = `
+    <div class="dash-root" id="dash-root">
+      <div style="height:100px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite"></div>
+      <div style="height:80px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite .1s"></div>
+      <div class="dash-2col">
+        <div style="height:120px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite .15s"></div>
+        <div style="height:120px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite .2s"></div>
       </div>
     </div>
     <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}</style>`;
 
     // Charger les données en parallèle
-    const uid   = STATE.isAdmin ? null : STATE.user.uid;
-    const [chars, storyItems] = await Promise.all([
+    const uid = STATE.isAdmin ? null : STATE.user.uid;
+    const [chars, storyItems, bastionDoc, achievements] = await Promise.all([
       loadChars(uid).catch(() => []),
       loadCollection('story').catch(() => []),
+      getDocData('bastion', 'main').catch(() => null),
+      loadCollection('achievements').catch(() => []),
     ]);
     STATE.characters = chars;
 
-    const pseudo   = STATE.profile?.pseudo || 'Aventurier';
-    const myChar   = chars[0] || null;   // premier personnage
-    const pvMax    = myChar ? (window.calcPVMax?.(myChar) || myChar.pvBase || 10) : 10;
-    const pmMax    = myChar ? (window.calcPMMax?.(myChar) || myChar.pmBase || 10) : 10;
-    const pvCur    = myChar ? (myChar.pvActuel ?? pvMax) : 0;
-    const pmCur    = myChar ? (myChar.pmActuel ?? pmMax) : 0;
-    const pvPct    = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-    const pmPct    = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-    const pvColor  = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-    const ca       = myChar ? (window.calcCA?.(myChar) || 10) : '—';
-    const or       = myChar ? (window.calcOr?.(myChar) || 0) : 0;
+    const pseudo = STATE.profile?.pseudo || 'Aventurier';
 
-    // Mission active la plus récente
-    const mission  = storyItems
+    // Mission active
+    const mission = storyItems
       .filter(i => i.type === 'mission' && i.statut === 'En cours')
       .sort((a,b) => (b.ordre||0) - (a.ordre||0))[0] || null;
 
-    const STATUT_CFG = {
-      'Terminée':   { color:'#22c38e', bg:'rgba(34,195,142,.12)',  icon:'✓' },
-      'En cours':   { color:'#4f8cff', bg:'rgba(79,140,255,.12)',  icon:'▶' },
-      'Échouée':    { color:'#ff6b6b', bg:'rgba(255,107,107,.12)', icon:'✗' },
-      'En attente': { color:'#888',    bg:'rgba(128,128,128,.10)', icon:'◷' },
-    };
+    // Progression trame
+    const totalMissions = storyItems.filter(i => i.type === 'mission').length;
+    const doneMissions  = storyItems.filter(i => i.type === 'mission' && i.statut === 'Terminée').length;
 
-    // Personnage sélecteur (si plusieurs)
-    const charSelector = chars.length > 1
-      ? `<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">
-          ${chars.map((c, i) => `
-          <button onclick="window._dashSelectChar(${i})" id="dash-char-pill-${i}"
-            style="font-size:.72rem;padding:3px 10px;border-radius:999px;cursor:pointer;
-            border:1px solid ${i===0?'var(--gold)':'var(--border)'};
-            background:${i===0?'rgba(232,184,75,.1)':'var(--bg-elevated)'};
-            color:${i===0?'var(--gold)':'var(--text-dim)'};transition:all .12s">
-            ${c.nom||'?'}
-          </button>`).join('')}
-        </div>`
-      : '';
+    // Bastion
+    const bastionLevel  = bastionDoc ? 1 + Object.values(bastionDoc.ameliorations || {}).filter(Boolean).length : null;
+    const bastionNom    = bastionDoc?.nom || 'Le Bastion';
 
-    // Portrait
-    const photoPos = myChar
-      ? `${50+(myChar.photoX||0)*50}% ${50+(myChar.photoY||0)*50}%`
-      : 'center';
-    const charPortrait = myChar?.photo
-      ? `<img src="${myChar.photo}" style="width:100%;height:100%;object-fit:cover;
-          object-position:${photoPos}">`
-      : `<span style="font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;
-          color:var(--gold)">${(myChar?.nom||'?')[0].toUpperCase()}</span>`;
+    // ── Carte mini personnage ─────────────────────────────────────────
+    function _charMini(c) {
+      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
+      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvCur   = c.pvActuel ?? pvMax;
+      const pmCur   = c.pmActuel ?? pmMax;
+      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
+      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
+      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
+      const ca      = window.calcCA?.(c) || 10;
+      const or      = window.calcOr?.(c) || 0;
+      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+      const portrait = c.photo
+        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
+        : `<span style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
+      return `
+      <div class="dash-char-mini" onclick="window._goToChar('${c.id}')">
+        <div class="dash-char-mini-portrait">
+          ${portrait}
+          <div class="dash-char-mini-portrait-fade"></div>
+        </div>
+        <div class="dash-char-mini-body">
+          <div style="display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:.15rem">
+            <span style="font-family:'Cinzel',serif;font-size:.92rem;font-weight:700;color:var(--text)">${_esc(c.nom||'?')}</span>
+            <span class="dash-hero-badge">Niv.&nbsp;${c.niveau||1}</span>
+          </div>
+          ${c.classe ? `<div style="font-size:.7rem;color:var(--text-dim);margin-bottom:.35rem">${_esc(c.classe)}${c.race?` · ${_esc(c.race)}`:''}</div>` : ''}
+          <div style="display:flex;flex-direction:column;gap:.28rem">
+            <div class="dash-bar-row">
+              <span class="dash-bar-icon" style="font-size:.62rem">❤️</span>
+              <div class="dash-bar-track" style="height:7px"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
+              <span class="dash-bar-val" style="font-size:.68rem;min-width:36px;color:${pvColor}">${pvCur}/${pvMax}</span>
+            </div>
+            <div class="dash-bar-row">
+              <span class="dash-bar-icon" style="font-size:.62rem">🔵</span>
+              <div class="dash-bar-track" style="height:7px"><div class="dash-bar-fill" style="width:${pmPct}%;background:linear-gradient(90deg,#22c7ea,#4adbf7)"></div></div>
+              <span class="dash-bar-val" style="font-size:.68rem;min-width:36px;color:#4adbf7">${pmCur}/${pmMax}</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:.35rem;margin-top:.35rem">
+            <span class="dash-chip" style="font-size:.66rem;padding:1px 7px">🛡️ ${ca}</span>
+            <span class="dash-chip dash-chip--gold" style="font-size:.66rem;padding:1px 7px">💰 ${or}</span>
+          </div>
+        </div>
+        <div class="dash-hero-arrow" style="font-size:.85rem;align-self:center;padding:.5rem">→</div>
+      </div>`;
+    }
 
+    // ── Carte héros principale (1 seul perso joueur) ──────────────────
+    function _charFeatured(c) {
+      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
+      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvCur   = c.pvActuel ?? pvMax;
+      const pmCur   = c.pmActuel ?? pmMax;
+      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
+      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
+      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
+      const ca      = window.calcCA?.(c) || 10;
+      const or      = window.calcOr?.(c) || 0;
+      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+      const portrait = c.photo
+        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+        : `<span style="font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
+      return `
+      <div class="dash-hero" onclick="window._goToChar('${c.id}')">
+        <div class="dash-hero-glow"></div>
+        <div class="dash-hero-portrait">
+          <div class="dash-hero-portrait-inner">${portrait}</div>
+          <div class="dash-hero-portrait-fade"></div>
+        </div>
+        <div class="dash-hero-body">
+          <div>
+            <div class="dash-hero-name">${_esc(c.nom||'Mon personnage')}</div>
+            <div class="dash-hero-meta">
+              <span class="dash-hero-badge">Niv. ${c.niveau||1}</span>
+              ${c.classe ? `<span class="dash-hero-badge">${_esc(c.classe)}</span>` : ''}
+            </div>
+            ${c.titre ? `<div class="dash-hero-titre">${_esc(c.titre)}</div>` : ''}
+          </div>
+          <div>
+            <div class="dash-hero-bars">
+              <div class="dash-bar-row">
+                <span class="dash-bar-icon">❤️</span>
+                <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
+                <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
+              </div>
+              <div class="dash-bar-row">
+                <span class="dash-bar-icon">🔵</span>
+                <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pmPct}%;background:linear-gradient(90deg,#22c7ea,#4adbf7)"></div></div>
+                <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
+              </div>
+            </div>
+            <div class="dash-hero-chips">
+              <span class="dash-chip">🛡️ CA <strong>${ca}</strong></span>
+              <span class="dash-chip dash-chip--gold">💰 <strong>${or}</strong> or</span>
+            </div>
+          </div>
+        </div>
+        <div class="dash-hero-arrow">→</div>
+      </div>`;
+    }
+
+    // ── Carte admin ultra-compacte (ligne de tableau) ────────────────
+    function _charRow(c) {
+      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
+      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvCur   = c.pvActuel ?? pvMax;
+      const pmCur   = c.pmActuel ?? pmMax;
+      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
+      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
+      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
+      const ca      = window.calcCA?.(c) || 10;
+      const or      = window.calcOr?.(c) || 0;
+      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+      const avatar = c.photo
+        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
+        : `<span style="font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
+      // Couleur par joueur (hash sur le pseudo)
+      const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#22d3ee'];
+      const pcol  = PCOLS[(c.ownerPseudo||'?').split('').reduce((a,x)=>a+x.charCodeAt(0),0) % PCOLS.length];
+      return `
+      <div onclick="window._goToChar('${c.id}')" style="
+        display:flex;align-items:center;gap:.65rem;
+        background:var(--bg-card);border:1px solid var(--border);
+        border-left:3px solid ${pcol};
+        border-radius:var(--radius-lg);padding:.5rem .7rem;
+        cursor:pointer;transition:border-color .15s,transform .15s;overflow:hidden"
+        onmouseover="this.style.borderColor='${pcol}';this.style.transform='translateY(-1px)'"
+        onmouseout="this.style.borderColor='var(--border)';this.style.borderLeftColor='${pcol}';this.style.transform=''">
+
+        <!-- Avatar -->
+        <div style="width:36px;height:36px;border-radius:9px;overflow:hidden;flex-shrink:0;
+          background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+          display:flex;align-items:center;justify-content:center">
+          ${avatar}
+        </div>
+
+        <!-- Nom + classe -->
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:.35rem;flex-wrap:wrap">
+            <span style="font-family:'Cinzel',serif;font-size:.84rem;font-weight:700;
+              color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${_esc(c.nom||'?')}</span>
+            <span style="font-size:.63rem;color:var(--text-dim);background:var(--bg-elevated);
+              border:1px solid var(--border);border-radius:5px;padding:0 5px;flex-shrink:0">Niv.${c.niveau||1}</span>
+          </div>
+          <div style="font-size:.68rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">
+            ${c.classe||''}${c.race?` · ${c.race}`:''}
+          </div>
+        </div>
+
+        <!-- Barres PV/PM -->
+        <div style="display:flex;flex-direction:column;gap:.2rem;width:72px;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:.3rem">
+            <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden">
+              <div style="width:${pvPct}%;height:100%;background:${pvColor};border-radius:999px"></div>
+            </div>
+            <span style="font-size:.6rem;color:${pvColor};font-weight:700;min-width:26px;text-align:right">${pvCur}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:.3rem">
+            <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden">
+              <div style="width:${pmPct}%;height:100%;background:linear-gradient(90deg,#22c7ea,#4adbf7);border-radius:999px"></div>
+            </div>
+            <span style="font-size:.6rem;color:#4adbf7;font-weight:700;min-width:26px;text-align:right">${pmCur}</span>
+          </div>
+        </div>
+
+        <!-- CA + Or -->
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.18rem;flex-shrink:0">
+          <span style="font-size:.63rem;color:var(--text-dim);white-space:nowrap">🛡️ <strong style="color:var(--text)">${ca}</strong></span>
+          <span style="font-size:.63rem;color:#c8a73a;white-space:nowrap">💰 ${or}</span>
+        </div>
+
+        <!-- Joueur tag -->
+        <div style="font-size:.62rem;font-weight:700;color:${pcol};background:${pcol}18;
+          border:1px solid ${pcol}44;border-radius:6px;padding:2px 7px;
+          white-space:nowrap;flex-shrink:0;max-width:70px;overflow:hidden;text-overflow:ellipsis">
+          ${_esc(c.ownerPseudo||'?')}
+        </div>
+
+      </div>`;
+    }
+
+    // ── Section personnages ───────────────────────────────────────────
+    let charsHtml = '';
+    if (STATE.isAdmin) {
+      if (chars.length === 0) {
+        charsHtml = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.2rem;text-align:center;color:var(--text-dim);font-size:.85rem">
+          <div style="font-size:1.5rem;margin-bottom:.4rem;opacity:.35">📜</div>Aucun personnage dans cette aventure</div>`;
+      } else {
+        // Tri : par joueur d'abord, puis par niveau desc
+        const sorted = [...chars].sort((a,b) => {
+          const pa = a.ownerPseudo||'', pb = b.ownerPseudo||'';
+          return pa.localeCompare(pb) || (b.niveau||1) - (a.niveau||1);
+        });
+        charsHtml = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.45rem">
+          ${sorted.map(c => _charRow(c)).join('')}
+        </div>`;
+      }
+    } else {
+      if (chars.length === 0) {
+        charsHtml = `
+        <div class="dash-hero" onclick="navigate('characters')" style="cursor:pointer">
+          <div class="dash-hero-body" style="flex-direction:row;align-items:center;gap:1rem;padding:1.3rem 1.5rem">
+            <div style="width:48px;height:48px;border-radius:50%;background:rgba(232,184,75,.08);
+              border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;justify-content:center;
+              font-size:1.3rem;flex-shrink:0">⚔️</div>
+            <div style="flex:1">
+              <div class="dash-hero-name" style="font-size:.95rem">Créer mon personnage</div>
+              <div style="font-size:.78rem;color:var(--text-dim);margin-top:2px">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
+            </div>
+            <div class="dash-hero-arrow">→</div>
+          </div>
+        </div>`;
+      } else if (chars.length === 1) {
+        charsHtml = _charFeatured(chars[0]);
+      } else {
+        charsHtml = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.55rem">
+          ${chars.map(c => _charMini(c)).join('')}
+        </div>`;
+      }
+    }
+
+    // ── Render ────────────────────────────────────────────────────────
     const dash = document.getElementById('dash-root');
     if (!dash) return;
     dash.innerHTML = `
 
-    <!-- ═══ ZONE 1 : MON PERSONNAGE ══════════════════════════════════ -->
-    <div style="background:var(--bg-card);border:1px solid var(--border);
-      border-radius:var(--radius-lg);overflow:hidden;
-      cursor:pointer;transition:border-color .15s"
-      onclick="navigate('characters')"
-      onmouseover="this.style.borderColor='rgba(232,184,75,.3)'"
-      onmouseout="this.style.borderColor='var(--border)'">
+    <!-- Bandeau aventure -->
+    ${STATE.adventure ? `
+    <div class="dash-adv-banner" onclick="window.openAdventureSwitcher?.()" style="cursor:${(STATE.adventures?.length||0) > 1 ? 'pointer' : 'default'}">
+      <span style="font-size:1.1rem">${STATE.adventure.emoji || '⚔️'}</span>
+      <span class="dash-adv-name">${_esc(STATE.adventure.nom)}</span>
+      ${(STATE.adventures?.length||0) > 1 ? `<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>` : ''}
+      <span class="dash-adv-tag">Aventure active</span>
+    </div>` : ''}
 
-      ${myChar ? `
-      <div style="display:flex;align-items:stretch;min-height:140px">
+    <!-- Section personnages -->
+    ${charsHtml}
 
-        <!-- Portrait -->
-        <div style="width:110px;flex-shrink:0;overflow:hidden;position:relative;
-          background:rgba(232,184,75,.06);">
-          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
-            ${charPortrait}
+    <!-- Grille : mission + raccourcis -->
+    <div class="dash-2col">
+
+      ${mission ? `
+      <div class="dash-mission" onclick="navigate('story')">
+        <div style="display:flex;align-items:stretch;flex:1">
+          ${mission.imageUrl
+            ? `<div style="width:80px;flex-shrink:0;overflow:hidden"><img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`
+            : `<div class="dash-mission-accent" style="background:#4f8cff"></div>`}
+          <div class="dash-mission-body">
+            <div class="dash-mission-label">⚔️ Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
+            <div class="dash-mission-title">${_esc(mission.titre||'Mission')}</div>
+            ${mission.lieu ? `<div class="dash-mission-lieu">📍 ${_esc(mission.lieu)}</div>` : ''}
+            ${mission.description ? `<div class="dash-mission-desc">${_esc(mission.description)}</div>` : ''}
           </div>
-          <!-- Gradient fondu -->
-          <div style="position:absolute;inset:0;background:linear-gradient(to right,
-            transparent 60%,var(--bg-card))"></div>
+          <div class="dash-hero-arrow" style="align-self:center">→</div>
         </div>
-
-        <!-- Infos -->
-        <div style="flex:1;padding:1rem 1.2rem;display:flex;flex-direction:column;justify-content:space-between">
-          <div>
-            <div style="display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap">
-              <span style="font-family:'Cinzel',serif;font-size:1.15rem;font-weight:700;
-                color:var(--text)">${myChar.nom||'Mon personnage'}</span>
-              <span style="font-size:.72rem;color:var(--text-dim);
-                background:var(--bg-elevated);border:1px solid var(--border);
-                border-radius:6px;padding:1px 7px">Niv. ${myChar.niveau||1}</span>
-              <span style="font-size:.72rem;color:var(--gold)">💰 ${or} or</span>
-            </div>
-            ${myChar.titre ? `<div style="font-size:.75rem;color:var(--text-dim);
-              font-style:italic;margin-top:2px">${myChar.titre}</div>` : ''}
+      </div>` : `
+      <div class="dash-mission" onclick="navigate('story')">
+        <div class="dash-mission-empty">
+          <span style="font-size:1.8rem;opacity:.35">📚</span>
+          <div style="flex:1">
+            <div class="dash-mission-title" style="font-size:.9rem">Voir la Trame</div>
+            <div style="font-size:.75rem;color:var(--text-dim)">Aucune mission active</div>
           </div>
-
-          <!-- PV / PM / CA -->
-          <div style="display:flex;flex-direction:column;gap:.45rem">
-            <div style="display:flex;align-items:center;gap:.6rem">
-              <span style="font-size:.68rem;color:var(--text-dim);width:22px;
-                font-weight:700;text-align:right">❤️</span>
-              <div style="flex:1;height:7px;background:rgba(255,255,255,.06);
-                border-radius:999px;overflow:hidden">
-                <div style="width:${pvPct}%;height:100%;background:${pvColor};
-                  border-radius:999px;transition:width .4s"></div>
-              </div>
-              <span style="font-size:.75rem;font-weight:700;color:${pvColor};
-                min-width:44px;text-align:right">${pvCur}/${pvMax}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:.6rem">
-              <span style="font-size:.68rem;color:var(--text-dim);width:22px;
-                font-weight:700;text-align:right">🔵</span>
-              <div style="flex:1;height:7px;background:rgba(255,255,255,.06);
-                border-radius:999px;overflow:hidden">
-                <div style="width:${pmPct}%;height:100%;
-                  background:linear-gradient(90deg,#22c7ea,#4adbf7);
-                  border-radius:999px;transition:width .4s"></div>
-              </div>
-              <span style="font-size:.75rem;font-weight:700;color:#4adbf7;
-                min-width:44px;text-align:right">${pmCur}/${pmMax}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:.5rem;margin-top:.1rem">
-              <span style="font-size:.72rem;color:var(--text-dim)">🛡️ CA <strong
-                style="color:var(--text)">${ca}</strong></span>
-            </div>
-          </div>
-
-          ${charSelector}
+          <div class="dash-hero-arrow">→</div>
         </div>
+      </div>`}
 
-        <!-- Flèche -->
-        <div style="display:flex;align-items:center;padding:.75rem;color:var(--text-dim);
-          font-size:.9rem">→</div>
+      <div class="dash-ql-wrap">
+        <div class="dash-ql-title">En jeu</div>
+        <div class="dash-ql-grid">
+          ${[
+            { page:'bestiaire', icon:'🐉', label:'Bestiaire', cls:'dash-ql-btn--red'   },
+            { page:'recettes',  icon:'🍳', label:'Recettes',  cls:'dash-ql-btn--green' },
+            { page:'shop',      icon:'🛍️', label:'Boutique',  cls:'dash-ql-btn--gold'  },
+            { page:'bastion',   icon:'🏰', label:'Bastion',   cls:'dash-ql-btn--blue'  },
+          ].map(r => `
+          <button class="dash-ql-btn ${r.cls}" onclick="navigate('${r.page}')">
+            <span class="dash-ql-icon">${r.icon}</span>
+            <span class="dash-ql-label">${r.label}</span>
+          </button>`).join('')}
+        </div>
       </div>
 
-      ` : `
-      <!-- Pas encore de personnage -->
-      <div style="padding:1.5rem;display:flex;align-items:center;gap:1rem">
-        <div style="width:52px;height:52px;border-radius:50%;background:rgba(232,184,75,.08);
-          border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;
-          justify-content:center;font-size:1.3rem;flex-shrink:0">⚔️</div>
-        <div style="flex:1">
-          <div style="font-family:'Cinzel',serif;font-size:.95rem;color:var(--text)">
-            Créer mon personnage</div>
-          <div style="font-size:.78rem;color:var(--text-dim);margin-top:2px">
-            Bienvenue ${pseudo} ! Commence par créer ta fiche de héros.</div>
-        </div>
-        <span style="color:var(--gold);font-size:.9rem">→</span>
-      </div>
-      `}
     </div>
 
-    <!-- ═══ ZONE 2 : MISSION ACTIVE ══════════════════════════════════ -->
-    ${mission ? `
-    <div style="background:var(--bg-card);border:1px solid var(--border);
-      border-radius:var(--radius-lg);overflow:hidden;cursor:pointer;transition:border-color .15s"
-      onclick="navigate('story')"
-      onmouseover="this.style.borderColor='rgba(79,140,255,.3)'"
-      onmouseout="this.style.borderColor='var(--border)'">
-      <div style="display:flex;align-items:stretch">
+    <!-- Infos secondaires : bastion + progression -->
+    ${(bastionDoc || totalMissions > 0) ? `
+    <div class="dash-2col">
 
-        ${mission.imageUrl ? `
-        <div style="width:90px;flex-shrink:0;overflow:hidden">
-          <img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block">
-        </div>` : `
-        <div style="width:6px;flex-shrink:0;background:${(STATUT_CFG['En cours']||{}).color||'#4f8cff'}"></div>`}
-
-        <div style="flex:1;padding:.9rem 1.1rem;display:flex;flex-direction:column;
-          justify-content:space-between;gap:.4rem">
-          <div>
-            <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
-              <span style="font-size:.65rem;font-weight:700;letter-spacing:1px;
-                text-transform:uppercase;color:#4f8cff">Mission active</span>
-              ${mission.acte ? `<span style="font-size:.65rem;color:var(--text-dim)">
-                · ${mission.acte}</span>` : ''}
+      ${bastionDoc ? `
+      <div class="dash-mission" onclick="navigate('bastion')" style="cursor:pointer">
+        <div style="display:flex;align-items:stretch;flex:1">
+          <div class="dash-mission-accent" style="background:rgba(232,184,75,.5)"></div>
+          <div class="dash-mission-body">
+            <div class="dash-mission-label">🏰 Bastion</div>
+            <div class="dash-mission-title">${_esc(bastionNom)}</div>
+            <div style="display:flex;gap:.45rem;margin-top:.4rem;flex-wrap:wrap">
+              <span class="dash-chip">Niveau <strong>${bastionLevel}</strong></span>
+              <span class="dash-chip dash-chip--gold">💰 <strong>${bastionDoc.tresor||0}</strong> or</span>
             </div>
-            <div style="font-family:'Cinzel',serif;font-size:.95rem;font-weight:700;
-              color:var(--text);line-height:1.3">${mission.titre||'Mission'}</div>
-            ${mission.lieu ? `<div style="font-size:.72rem;color:var(--text-dim);
-              margin-top:2px">📍 ${mission.lieu}</div>` : ''}
           </div>
-          ${mission.description ? `
-          <div style="font-size:.78rem;color:var(--text-muted);line-height:1.55;
-            display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
-            overflow:hidden">${mission.description}</div>` : ''}
+          <div class="dash-hero-arrow" style="align-self:center">→</div>
         </div>
+      </div>` : ''}
 
-        <div style="display:flex;align-items:center;padding:.75rem;
-          color:var(--text-dim);font-size:.9rem">→</div>
-      </div>
-    </div>` : `
-    <div style="background:var(--bg-card);border:1px solid var(--border);
-      border-radius:var(--radius-lg);padding:.9rem 1.1rem;cursor:pointer;
-      transition:border-color .15s;display:flex;align-items:center;gap:.85rem"
-      onclick="navigate('story')"
-      onmouseover="this.style.borderColor='rgba(79,140,255,.25)'"
-      onmouseout="this.style.borderColor='var(--border)'">
-      <span style="font-size:1.4rem;opacity:.4">📚</span>
-      <div style="flex:1">
-        <div style="font-size:.85rem;font-weight:600;color:var(--text)">Voir la Trame</div>
-        <div style="font-size:.75rem;color:var(--text-dim)">Aucune mission active pour l'instant</div>
-      </div>
-      <span style="color:var(--text-dim)">→</span>
-    </div>`}
+      ${totalMissions > 0 ? `
+      <div class="dash-mission" onclick="navigate('story')" style="cursor:pointer">
+        <div style="display:flex;align-items:stretch;flex:1">
+          <div class="dash-mission-accent" style="background:rgba(34,195,142,.5)"></div>
+          <div class="dash-mission-body">
+            <div class="dash-mission-label">📖 Progression de l'aventure</div>
+            <div class="dash-mission-title" style="font-size:.92rem">${doneMissions} / ${totalMissions} mission${totalMissions>1?'s':''} terminée${doneMissions>1?'s':''}</div>
+            <div style="margin-top:.5rem">
+              <div style="background:rgba(255,255,255,.06);border-radius:999px;height:8px;overflow:hidden">
+                <div style="height:100%;width:${totalMissions > 0 ? Math.round(doneMissions/totalMissions*100) : 0}%;background:linear-gradient(90deg,#4f8cff,#22c38e);border-radius:999px;transition:width .5s"></div>
+              </div>
+            </div>
+            ${achievements.length > 0 ? `<div style="font-size:.71rem;color:var(--text-dim);margin-top:.35rem">🏆 ${achievements.length} haut${achievements.length>1?'s':''}-fait${achievements.length>1?'s':''} accompli${achievements.length>1?'s':''}</div>` : ''}
+          </div>
+          <div class="dash-hero-arrow" style="align-self:center">→</div>
+        </div>
+      </div>` : ''}
 
-    <!-- ═══ ZONE 3 : RACCOURCIS RAPIDES ══════════════════════════════ -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem">
-      ${[
-        { page:'shop',    icon:'🛍️', label:'Boutique'  },
-        { page:'map',     icon:'🗺️', label:'Carte'     },
-        { page:'npcs',    icon:'👥', label:'PNJ'        },
-        { page:'bastion', icon:'🏰', label:'Bastion'   },
-      ].map(r => `
-      <button onclick="navigate('${r.page}')"
-        style="background:var(--bg-card);border:1px solid var(--border);
-        border-radius:14px;padding:.85rem .5rem;cursor:pointer;transition:all .15s;
-        display:flex;flex-direction:column;align-items:center;gap:.4rem;
-        font-family:inherit"
-        onmouseover="this.style.background='rgba(255,255,255,.05)';this.style.borderColor='rgba(255,255,255,.12)';this.style.transform='translateY(-2px)'"
-        onmouseout="this.style.background='var(--bg-card)';this.style.borderColor='var(--border)';this.style.transform=''">
-        <span style="font-size:1.3rem">${r.icon}</span>
-        <span style="font-size:.72rem;font-weight:600;color:var(--text-muted)">${r.label}</span>
-      </button>`).join('')}
-    </div>
+    </div>` : ''}
 
     ${STATE.isAdmin ? `
-    <!-- ═══ ZONE MJ ADMIN ════════════════════════════════════════════ -->
-    <div style="background:rgba(79,140,255,.04);border:1px solid rgba(79,140,255,.15);
-      border-radius:var(--radius-lg);padding:.85rem 1.1rem">
-      <div style="font-size:.65rem;font-weight:700;letter-spacing:1.5px;
-        text-transform:uppercase;color:#4f8cff;margin-bottom:.6rem">Console MJ</div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+    <div class="dash-admin">
+      <div class="dash-admin-title">🎲 Console MJ</div>
+      <div class="dash-admin-links">
         ${[
-          { page:'story',   label:'📚 Trame' },
-          { page:'shop',    label:'🛍️ Boutique' },
-          { page:'npcs',    label:'👥 PNJ' },
-          { page:'bestiaire',label:'🐉 Bestiaire' },
-          { page:'map',     label:'🗺️ Carte' },
-          { page:'admin',   label:'⚙️ Admin' },
-        ].map(b => `<button onclick="navigate('${b.page}')"
-          style="font-size:.75rem;padding:4px 12px;border-radius:8px;cursor:pointer;
-          border:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.08);
-          color:#7fb0ff;transition:all .12s"
-          onmouseover="this.style.background='rgba(79,140,255,.16)'"
-          onmouseout="this.style.background='rgba(79,140,255,.08)'">${b.label}</button>`).join('')}
+          { page:'story',     label:'📚 Trame'     },
+          { page:'shop',      label:'🛍️ Boutique'  },
+          { page:'npcs',      label:'👥 PNJ'       },
+          { page:'bestiaire', label:'🐉 Bestiaire' },
+          { page:'map',       label:'🗺️ Carte'     },
+          { page:'admin',     label:'⚙️ Admin'     },
+        ].map(b => `<button class="dash-admin-btn" onclick="navigate('${b.page}')">${b.label}</button>`).join('')}
       </div>
     </div>` : ''}
     `;
 
-    // Sélecteur de personnage au clic
-    window._dashSelectChar = (idx) => {
-      STATE.activeChar = chars[idx];
-      // Rerender le dashboard avec le nouveau personnage sélectionné
-      chars.unshift(chars.splice(idx, 1)[0]);
-      PAGES.dashboard();
+    // Naviguer directement vers la fiche d'un personnage
+    window._goToChar = (id) => {
+      window._targetCharId = id;
+      navigate('characters');
     };
   },
 
@@ -335,7 +432,18 @@ const PAGES = {
       html += `<div class="char-select-bar" id="char-pills">${chars.map((c, i) => `<div class="char-pill ${i === 0 ? 'active' : ''}" onclick="selectChar('${c.id}',this)">${c.nom || 'Nouveau personnage'}</div>`).join('')}</div><div id="char-sheet-area"></div>`;
     }
     content.innerHTML = html;
-    if (chars.length > 0) { STATE.activeChar = chars[0]; renderCharSheet(chars[0]); }
+    if (chars.length > 0) {
+      // Si on vient du dashboard avec un personnage ciblé, le sélectionner directement
+      const targetId  = window._targetCharId;
+      window._targetCharId = null;
+      const charToShow = (targetId ? chars.find(c => c.id === targetId) : null) || chars[0];
+      STATE.activeChar = charToShow;
+      // Mettre à jour la pill active
+      document.querySelectorAll('#char-pills .char-pill').forEach(p => {
+        p.classList.toggle('active', p.getAttribute('onclick')?.includes(charToShow.id));
+      });
+      renderCharSheet(charToShow);
+    }
   },
 
   // ─── SHOP ───────────────────────────────────────────────────────────────────
