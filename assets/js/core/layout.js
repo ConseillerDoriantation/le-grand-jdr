@@ -8,19 +8,27 @@ export function showApp() {
   const authScreen  = document.getElementById('auth-screen');
   const advScreen   = document.getElementById('adventure-screen');
   const app         = document.getElementById('app');
-  const usernameEl  = document.getElementById('header-username');
-  const adminBadge  = document.getElementById('admin-badge');
 
   if (authScreen) authScreen.style.display = 'none';
   if (advScreen)  advScreen.style.display  = 'none';
   if (app)        app.style.display        = 'block';
 
+  // ── Header (mobile uniquement) ──────────────────
+  const usernameEl = document.getElementById('header-username');
+  const adminBadge = document.getElementById('admin-badge');
   if (usernameEl) usernameEl.textContent = STATE.profile?.pseudo || STATE.user?.email || '';
   if (adminBadge) adminBadge.style.display = STATE.isAdmin ? 'inline' : 'none';
 
-  // Mettre à jour le bandeau d'aventure dans le header
+  // ── Sidebar profile ─────────────────────────────
+  _updateSidebarProfile();
+
+  // ── Bandeau aventure (sidebar chip) ─────────────
   _updateAdventureBadge();
 
+  // ── Bottom nav mobile dynamique ─────────────────
+  _updateMobileBottomNav();
+
+  // ── Items admin-only ────────────────────────────
   document.querySelectorAll('.admin-only').forEach((el) => {
     el.style.display = STATE.isAdmin ? 'flex' : 'none';
   });
@@ -57,15 +65,85 @@ export function hideAdventurePicker() {
 
 // ── Badge aventure dans le header ──────────────
 function _updateAdventureBadge() {
+  // Header badge (mobile)
   const badge = document.getElementById('adventure-badge');
-  if (!badge) return;
-  if (STATE.adventure) {
-    badge.textContent = `${STATE.adventure.emoji || '⚔️'} ${STATE.adventure.nom}`;
-    badge.style.display = 'inline';
-    badge.onclick = () => window.openAdventureSwitcher?.();
-  } else {
-    badge.style.display = 'none';
+  if (badge) {
+    if (STATE.adventure) {
+      badge.textContent = `${STATE.adventure.emoji || '⚔️'} ${STATE.adventure.nom}`;
+      badge.style.display = 'inline';
+      badge.onclick = () => window.openAdventureSwitcher?.();
+    } else {
+      badge.style.display = 'none';
+    }
   }
+
+  // Sidebar chip (desktop)
+  const chip      = document.getElementById('sidebar-adv-chip');
+  const chipEmoji = document.getElementById('sidebar-adv-emoji');
+  const chipName  = document.getElementById('sidebar-adv-name');
+  if (chip) {
+    if (STATE.adventure) {
+      if (chipEmoji) chipEmoji.textContent = STATE.adventure.emoji || '⚔️';
+      if (chipName)  chipName.textContent  = STATE.adventure.nom || '';
+      chip.style.display = 'flex';
+    } else {
+      chip.style.display = 'none';
+    }
+  }
+}
+
+// ── Profil sidebar ──────────────────────────────
+function _updateSidebarProfile() {
+  const avatarEl = document.getElementById('sidebar-avatar');
+  const pseudoEl = document.getElementById('sidebar-pseudo');
+  const roleEl   = document.getElementById('sidebar-role');
+
+  const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
+
+  if (avatarEl) {
+    // Initial de l'utilisateur dans l'avatar
+    avatarEl.textContent = pseudo[0]?.toUpperCase() || '?';
+    // Rendre l'avatar cliquable → page compte
+    avatarEl.style.cursor = 'pointer';
+    avatarEl.onclick = () => window.navigate?.('account');
+  }
+  if (pseudoEl) pseudoEl.textContent = pseudo;
+  if (roleEl) {
+    roleEl.style.display = STATE.isAdmin ? 'block' : 'none';
+  }
+}
+
+// ── Bottom nav mobile dynamique ─────────────────
+function _updateMobileBottomNav() {
+  const nav = document.getElementById('bottom-nav');
+  if (!nav) return;
+
+  const playerItems = [
+    { page: 'dashboard',  icon: '🏠', label: 'Accueil'   },
+    { page: 'characters', icon: '📜', label: 'Perso'     },
+    { page: 'story',      icon: '📚', label: 'Trame'     },
+    { page: 'bestiaire',  icon: '🐉', label: 'Bestiaire' },
+  ];
+  const mjItems = [
+    { page: 'dashboard',  icon: '🏠', label: 'Accueil'  },
+    { page: 'story',      icon: '📚', label: 'Trame'    },
+    { page: 'bestiaire',  icon: '🐉', label: 'Bestiaire'},
+    { page: 'admin',      icon: '⚙️', label: 'Console'  },
+  ];
+
+  const items = STATE.isAdmin ? mjItems : playerItems;
+  const currentPage = document.querySelector('.nav-item.active')?.dataset?.navigate || 'dashboard';
+
+  nav.innerHTML = items.map(i => `
+    <button class="bottom-nav-item ${currentPage === i.page ? 'active' : ''}"
+      type="button" data-navigate="${i.page}" data-page="${i.page}">
+      <span class="bn-icon" aria-hidden="true">${i.icon}</span>
+      <span>${i.label}</span>
+    </button>`).join('') + `
+    <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
+      <span class="bn-icon" aria-hidden="true">⋯</span>
+      <span>Plus</span>
+    </button>`;
 }
 
 // ── Rendu de l'écran sélecteur ─────────────────

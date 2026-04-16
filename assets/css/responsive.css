@@ -18,57 +18,6 @@
 .sidebar-overlay.show { display: block; }
 
 /* ═══════════════════════════════════════════════════════════
-   TABLET  768px – 1024px
-   Sidebar iconique 60px, labels masqués, tooltip au hover
-═══════════════════════════════════════════════════════════ */
-@media (max-width: 1024px) {
-  .sidebar {
-    width: 60px;
-    min-width: 60px;
-    padding: .6rem .35rem;
-  }
-
-  .nav-label { display: none; }
-
-  .nav-item {
-    justify-content: center;
-    padding: .55rem;
-    gap: 0;
-  }
-
-  .nav-icon {
-    width: auto;
-    font-size: 1.15rem;
-  }
-
-  .sidebar-sep { margin: .35rem .15rem; }
-
-  /* Tooltip au hover via attr(title) */
-  .nav-item {
-    position: relative;
-    overflow: visible; /* nécessaire pour que le tooltip dépasse */
-  }
-  .nav-item:hover::after {
-    content: attr(title);
-    position: absolute;
-    left: calc(100% + 12px);
-    top: 50%;
-    transform: translateY(-50%);
-    background: var(--bg-card);
-    border: 1px solid rgba(255, 255, 255, .14);
-    border-radius: 8px;
-    padding: 5px 12px;
-    font-size: .75rem;
-    font-weight: 600;
-    color: var(--text);
-    white-space: nowrap;
-    z-index: 300;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
-    pointer-events: none;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════
    BOTTOM NAV  (définie globalement, affichée < 768px)
 ═══════════════════════════════════════════════════════════ */
 .bottom-nav {
