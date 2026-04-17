@@ -395,16 +395,16 @@ body::after {
 .sidebar-profile-logout {
   flex-shrink: 0;
   background: none;
-  border: none;
+  border: 1px solid var(--border);
   color: var(--text-dim);
   cursor: pointer;
-  font-size: .9rem;
-  padding: .3rem;
+  font-size: 1rem;
+  padding: .4rem .55rem;
   border-radius: 8px;
   line-height: 1;
-  transition: color .15s, background .15s;
+  transition: color .15s, background .15s, border-color .15s;
 }
-.sidebar-profile-logout:hover { color: #ff9aad; background: rgba(255,107,122,.1); }
+.sidebar-profile-logout:hover { color: #ff9aad; background: rgba(255,107,122,.1); border-color: rgba(255,107,122,.3); }
 
 /* Carte personnage compacte (dashboard) */
 .dash-char-mini {

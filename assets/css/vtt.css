@@ -1,0 +1,520 @@
+/* ═══════════════════════════════════════════════════════════════════
+   VTT — Table de Jeu Virtuelle
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Layout racine ──────────────────────────────────────────────── */
+.vtt-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* ── Toolbar ────────────────────────────────────────────────────── */
+.vtt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem .6rem;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  min-height: 42px;
+}
+
+.vtt-tool-group {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+}
+
+.vtt-tool-right {
+  margin-left: auto;
+}
+
+/* ── Boutons d'outil ────────────────────────────────────────────── */
+.vtt-tool {
+  padding: .3rem .65rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-dim);
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+  white-space: nowrap;
+}
+.vtt-tool:hover  { background: var(--bg-card2); color: var(--text); }
+.vtt-tool.active {
+  background: rgba(79, 140, 255, .15);
+  border-color: rgba(79, 140, 255, .5);
+  color: #4f8cff;
+}
+
+.vtt-btn-sm {
+  padding: .28rem .6rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-dim);
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+}
+.vtt-btn-sm:hover    { background: var(--bg-card2); color: var(--text); }
+.vtt-btn-danger      { border-color: rgba(239,68,68,.3); color: #ef4444; }
+.vtt-btn-danger:hover{ background: rgba(239,68,68,.1); }
+
+.vtt-upload-lbl {
+  /* label qui wrape un <input type="file"> */
+  cursor: pointer;
+}
+
+/* ── Onglets de page ────────────────────────────────────────────── */
+.vtt-page-tabs {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.vtt-page-tabs::-webkit-scrollbar { display: none; }
+
+.vtt-page-tab {
+  padding: .28rem .7rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: .78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  transition: background .1s, color .1s;
+}
+.vtt-page-tab:hover  { background: var(--bg-elevated); color: var(--text); }
+.vtt-page-tab.active {
+  background: rgba(79,140,255,.12);
+  border-color: rgba(79,140,255,.35);
+  color: #4f8cff;
+  font-weight: 700;
+}
+.vtt-page-add { color: var(--gold); font-size: 1rem; padding: .2rem .5rem; }
+
+.vtt-page-del {
+  font-size: .7rem;
+  opacity: .45;
+  padding: 0 .1rem;
+  transition: opacity .12s;
+}
+.vtt-page-del:hover { opacity: 1; color: #ef4444; }
+
+/* ── Badge combat ───────────────────────────────────────────────── */
+.vtt-combat-badge {
+  display: flex;
+  align-items: center;
+  padding: .25rem .65rem;
+  background: rgba(239, 68, 68, .12);
+  border: 1px solid rgba(239, 68, 68, .35);
+  border-radius: 7px;
+  color: #ef4444;
+  font-size: .75rem;
+  font-weight: 700;
+  animation: vtt-pulse 1.5s ease infinite;
+}
+
+/* ── Onglets de page — indicateurs ─────────────────────────────── */
+.vtt-page-default {
+  color: var(--gold);
+  font-size: .55rem;
+  vertical-align: middle;
+  margin-right: .15rem;
+}
+.vtt-page-players {
+  font-size: .65rem;
+  background: rgba(79,140,255,.15);
+  border-radius: 4px;
+  padding: 0 .25rem;
+  color: #4f8cff;
+  margin-left: .2rem;
+}
+
+/* Tab de la page actuellement vue par les joueurs */
+.vtt-page-tab.players-here {
+  background: rgba(34,195,142,.1);
+  border-color: rgba(34,195,142,.4);
+  color: #22c38e;
+  font-weight: 700;
+}
+.vtt-page-tab.players-here:hover {
+  background: rgba(34,195,142,.18);
+}
+.vtt-page-tab.players-here.active {
+  background: rgba(34,195,142,.18);
+  border-color: rgba(34,195,142,.6);
+}
+
+.vtt-page-players-badge {
+  font-size: .7rem;
+  margin-right: .2rem;
+}
+
+/* Petit compteur de tokens joueurs sur une page non-broadcast */
+.vtt-page-player-cnt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  background: rgba(79,140,255,.2);
+  border-radius: 7px;
+  font-size: .6rem;
+  font-weight: 700;
+  color: #4f8cff;
+  padding: 0 .2rem;
+  margin-left: .2rem;
+}
+@keyframes vtt-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .65; }
+}
+
+/* ── Corps ──────────────────────────────────────────────────────── */
+.vtt-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Canvas ─────────────────────────────────────────────────────── */
+.vtt-canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: default;
+  background: #12121f;
+}
+
+/* ── Inspecteur ─────────────────────────────────────────────────── */
+.vtt-inspector {
+  width: 210px;
+  flex-shrink: 0;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  font-size: .82rem;
+}
+
+.vtt-ins-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: .8rem;
+  line-height: 1.5;
+  padding: 1rem 0;
+}
+
+.vtt-ins-header {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding-bottom: .6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.vtt-ins-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid var(--border-strong);
+}
+.vtt-ins-avatar-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  opacity: .85;
+}
+
+.vtt-ins-name {
+  font-weight: 700;
+  color: var(--text);
+  font-size: .88rem;
+  line-height: 1.2;
+}
+.vtt-ins-type {
+  font-size: .72rem;
+  color: var(--text-dim);
+  margin-top: .1rem;
+}
+
+/* HP bar */
+.vtt-ins-hp-wrap {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.vtt-ins-hp-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.vtt-ins-hp-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width .3s, background .3s;
+}
+.vtt-ins-hp-label {
+  font-size: .7rem;
+  font-weight: 700;
+  min-width: 30px;
+  text-align: right;
+}
+
+/* Stats */
+.vtt-ins-stats {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.vtt-ins-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .2rem 0;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.vtt-ins-stat-label { color: var(--text-dim); font-size: .75rem; }
+.vtt-ins-stat-val   { color: var(--text); font-weight: 600; font-size: .8rem; }
+
+.vtt-ins-input {
+  width: 48px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: .8rem;
+  text-align: center;
+  padding: .1rem .2rem;
+}
+
+.vtt-ins-badge {
+  display: inline-block;
+  padding: .15rem .5rem;
+  background: rgba(34,195,142,.12);
+  border: 1px solid rgba(34,195,142,.3);
+  border-radius: 6px;
+  color: #22c38e;
+  font-size: .7rem;
+  font-weight: 600;
+  margin-top: .1rem;
+}
+.vtt-ins-badge-atk {
+  background: rgba(239,68,68,.12);
+  border-color: rgba(239,68,68,.3);
+  color: #ef4444;
+}
+
+.vtt-ins-section {
+  padding-top: .5rem;
+  border-top: 1px solid var(--border);
+}
+.vtt-ins-section-title {
+  font-size: .68rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: .3rem;
+}
+.vtt-ins-select {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: .78rem;
+  padding: .3rem .4rem;
+}
+
+.vtt-ins-actions {
+  display: flex;
+  gap: .4rem;
+  padding-top: .4rem;
+  border-top: 1px solid var(--border);
+}
+.vtt-ins-actions .vtt-btn-sm { flex: 1; justify-content: center; }
+
+/* ── Formulaire token ───────────────────────────────────────────── */
+.vtt-form { display: flex; flex-direction: column; gap: .6rem; }
+.vtt-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.vtt-check-label {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.vtt-check-label input { accent-color: var(--gold); }
+
+/* ── Légende bas de page ────────────────────────────────────────── */
+.vtt-hint {
+  padding: .2rem .75rem;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  font-size: .68rem;
+  color: var(--text-dim);
+  opacity: .7;
+  flex-shrink: 0;
+}
+
+/* ── Tray — panneau gauche tokens (MJ) ─────────────────────────── */
+.vtt-tray {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  font-size: .8rem;
+}
+
+.vtt-tray-header {
+  padding: .5rem .65rem .3rem;
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.vtt-tray-group { padding: .25rem 0; }
+.vtt-tray-group-title {
+  padding: .25rem .65rem .15rem;
+  font-size: .65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.vtt-tray-sep {
+  padding: .2rem .65rem .1rem;
+  font-size: .68rem;
+  color: var(--text-muted);
+  opacity: .7;
+}
+
+.vtt-tray-item {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .3rem .5rem;
+  cursor: pointer;
+  transition: background .1s;
+  border-radius: 5px;
+  margin: 0 .25rem .1rem;
+}
+.vtt-tray-item:hover { background: var(--bg-elevated); }
+.vtt-tray-item.active { background: rgba(79,140,255,.12); }
+
+.vtt-tray-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .7rem;
+}
+
+.vtt-tray-info {
+  flex: 1;
+  min-width: 0;
+}
+.vtt-tray-name {
+  font-size: .76rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vtt-tray-hp-bar {
+  height: 3px;
+  background: var(--bg-elevated);
+  border-radius: 2px;
+  margin-top: .2rem;
+  overflow: hidden;
+}
+
+.vtt-tray-btn {
+  padding: .15rem .35rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: .7rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .1s, color .1s;
+}
+.vtt-tray-btn:hover { background: var(--bg-card2); color: var(--text); }
+
+.vtt-tray-empty {
+  padding: 1rem .65rem;
+  color: var(--text-dim);
+  font-size: .75rem;
+  text-align: center;
+}
+
+/* ── Alias classes (JS ↔ CSS alignement) ───────────────────────── */
+.vtt-ins-hp-pct  { font-size: .7rem; font-weight: 700; min-width: 30px; text-align: right; }
+.vtt-ins-lbl     { color: var(--text-dim); font-size: .75rem; }
+.vtt-ins-val     { color: var(--text); font-weight: 600; font-size: .8rem; }
+.vtt-right       { margin-left: auto; }
+
+/* ── Mode jour ──────────────────────────────────────────────────── */
+[data-theme="light"] .vtt-canvas-wrap { background: #f0eff5; }
+[data-theme="light"] .vtt-inspector   { background: #fff; }
+[data-theme="light"] .vtt-toolbar     { background: #fff; }
+[data-theme="light"] .vtt-tray        { background: #fff; }
+
+/* ── Mobile ─────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .vtt-inspector { display: none; } /* masqué sur mobile, trop étroit */
+  .vtt-toolbar   { gap: .25rem; padding: .25rem .4rem; }
+  .vtt-hint      { display: none; }
+}

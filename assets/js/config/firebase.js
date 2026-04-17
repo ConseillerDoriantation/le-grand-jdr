@@ -15,6 +15,7 @@ import { getFirestore,
          addDoc, updateDoc, deleteDoc,
          writeBatch,
          query, where, orderBy,
+         onSnapshot,
          serverTimestamp }         from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -45,5 +46,6 @@ export {
   addDoc, updateDoc, deleteDoc,
   writeBatch,
   query, where, orderBy,
+  onSnapshot,
   serverTimestamp,
 };
