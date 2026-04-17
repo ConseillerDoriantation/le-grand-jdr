@@ -151,39 +151,47 @@
   margin-left: .2rem;
 }
 
-/* Tab de la page actuellement vue par les joueurs */
-.vtt-page-tab.players-here {
-  background: rgba(34,195,142,.1);
-  border-color: rgba(34,195,142,.4);
-  color: #22c38e;
-  font-weight: 700;
-}
-.vtt-page-tab.players-here:hover {
-  background: rgba(34,195,142,.18);
-}
-.vtt-page-tab.players-here.active {
-  background: rgba(34,195,142,.18);
-  border-color: rgba(34,195,142,.6);
+/* ── Badges d'état dans les onglets ─────────────────────────────── */
+.vtt-tab-badge {
+  font-size: .65rem;
+  margin-right: .15rem;
+  flex-shrink: 0;
 }
 
-.vtt-page-players-badge {
-  font-size: .7rem;
-  margin-right: .2rem;
+/* Page où sont les joueurs — fond vert */
+.vtt-page-tab.players-here {
+  background: rgba(34,195,142,.12);
+  border-color: rgba(34,195,142,.45);
+  color: #22c38e;
+  font-weight: 600;
 }
+.vtt-page-tab.players-here:hover { background: rgba(34,195,142,.2); }
+
+/* MJ ET joueurs sur la même page — fond bleu + barre verte gauche */
+.vtt-page-tab.mj-and-players {
+  background: rgba(79,140,255,.14);
+  border-color: rgba(79,140,255,.45);
+  border-left: 3px solid #22c38e;
+  color: #4f8cff;
+  font-weight: 700;
+}
+.vtt-page-tab.mj-and-players:hover { background: rgba(79,140,255,.22); }
+
+.vtt-tab-name { /* rien de spécial, juste un wrapper sémantique */ }
 
 /* Petit compteur de tokens joueurs sur une page non-broadcast */
 .vtt-page-player-cnt {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 14px;
+  min-width: 16px;
   height: 14px;
   background: rgba(79,140,255,.2);
   border-radius: 7px;
   font-size: .6rem;
   font-weight: 700;
   color: #4f8cff;
-  padding: 0 .2rem;
+  padding: 0 .25rem;
   margin-left: .2rem;
 }
 @keyframes vtt-pulse {
@@ -207,12 +215,21 @@
   background: #12121f;
 }
 
-/* ── Inspecteur ─────────────────────────────────────────────────── */
-.vtt-inspector {
-  width: 210px;
+/* ── Colonne droite (inspector + chat) ──────────────────────────── */
+.vtt-right-col {
+  width: 220px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-card);
   border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* ── Inspecteur ─────────────────────────────────────────────────── */
+.vtt-inspector {
+  flex: 1 1 0;
+  min-height: 100px;
   overflow-y: auto;
   padding: .75rem;
   display: flex;
@@ -396,9 +413,9 @@
   flex-shrink: 0;
 }
 
-/* ── Tray — panneau gauche tokens (MJ) ─────────────────────────── */
+/* ── Tray — panneau gauche (MJ) ─────────────────────────────────── */
 .vtt-tray {
-  width: 180px;
+  width: 200px;
   flex-shrink: 0;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
@@ -408,16 +425,95 @@
   font-size: .8rem;
 }
 
-.vtt-tray-header {
-  padding: .5rem .65rem .3rem;
-  font-size: .7rem;
+/* Sections Pages / Tokens */
+.vtt-tray-section {
+  display: flex;
+  flex-direction: column;
+}
+.vtt-tray-section + .vtt-tray-section {
+  border-top: 2px solid var(--border);
+}
+.vtt-tray-section-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .4rem .65rem .3rem;
+  font-size: .68rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .07em;
   color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.vtt-tray-add-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--gold);
+  font-size: .85rem;
+  line-height: 1;
+  padding: .05rem .3rem;
+  cursor: pointer;
+  transition: background .1s;
+}
+.vtt-tray-add-btn:hover { background: var(--bg-elevated); }
+
+/* Liste verticale des pages */
+.vtt-page-item {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .3rem .5rem;
+  cursor: pointer;
+  border-radius: 5px;
+  margin: 0 .25rem .1rem;
+  transition: background .1s;
+  border-left: 3px solid transparent;
+}
+.vtt-page-item:hover { background: var(--bg-elevated); }
+.vtt-page-item.mj {
+  border-left-color: #4f8cff;
+  background: rgba(79,140,255,.08);
+}
+.vtt-page-item.players {
+  border-left-color: #22c38e;
+  background: rgba(34,195,142,.08);
+}
+.vtt-page-item.mj-and-players {
+  border-left-color: #22c38e;
+  background: rgba(79,140,255,.1);
+  box-shadow: inset 3px 0 0 #4f8cff;
+}
+.vtt-page-item-badges { font-size: .65rem; flex-shrink: 0; min-width: 20px; }
+.vtt-page-item-name {
+  flex: 1;
+  font-size: .78rem;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vtt-page-item.mj .vtt-page-item-name,
+.vtt-page-item.mj-and-players .vtt-page-item-name { font-weight: 700; }
+.vtt-page-item-acts {
+  display: none;
+  gap: .15rem;
+  flex-shrink: 0;
+}
+.vtt-page-item:hover .vtt-page-item-acts { display: flex; }
+.vtt-page-item-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: .72rem;
+  cursor: pointer;
+  padding: .1rem .2rem;
+  border-radius: 3px;
+  transition: background .1s, color .1s;
+}
+.vtt-page-item-btn:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-page-item-del:hover { color: #ef4444; }
 
 .vtt-tray-group { padding: .25rem 0; }
 .vtt-tray-group-title {
@@ -500,21 +596,177 @@
   text-align: center;
 }
 
+/* ── Modal de sélection d'attaque ───────────────────────────────── */
+.vtt-attack-opts {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.vtt-attack-opt {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem .65rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background .1s, border-color .1s;
+  width: 100%;
+}
+.vtt-attack-opt:hover {
+  background: var(--bg-card2);
+  border-color: rgba(79,140,255,.4);
+}
+.vtt-attack-opt-icon { font-size: 1.2rem; flex-shrink: 0; }
+.vtt-attack-opt-body { flex: 1; min-width: 0; }
+.vtt-attack-opt-name {
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.vtt-attack-opt-meta {
+  font-size: .72rem;
+  color: var(--text-dim);
+  margin-top: .1rem;
+}
+
 /* ── Alias classes (JS ↔ CSS alignement) ───────────────────────── */
 .vtt-ins-hp-pct  { font-size: .7rem; font-weight: 700; min-width: 30px; text-align: right; }
 .vtt-ins-lbl     { color: var(--text-dim); font-size: .75rem; }
 .vtt-ins-val     { color: var(--text); font-weight: 600; font-size: .8rem; }
 .vtt-right       { margin-left: auto; }
 
+/* ── Menu contextuel clic-droit ─────────────────────────────────── */
+.vtt-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  padding: .25rem 0;
+  min-width: 210px;
+  font-size: .82rem;
+}
+.vtt-ctx-item {
+  padding: .42rem .85rem;
+  cursor: pointer;
+  color: var(--text);
+  transition: background .1s;
+  white-space: nowrap;
+}
+.vtt-ctx-item:hover { background: var(--bg-elevated); }
+.vtt-ctx-sep {
+  height: 1px;
+  background: var(--border);
+  margin: .2rem 0;
+}
+
+/* ── Chat & log de dés ──────────────────────────────────────────── */
+.vtt-chat {
+  flex: 0 0 210px;
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid var(--border);
+  background: var(--bg);
+  overflow: hidden;
+}
+.vtt-chat-hd {
+  padding: .28rem .6rem;
+  font-size: .63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.vtt-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: .3rem .4rem;
+  display: flex;
+  flex-direction: column;
+  gap: .18rem;
+  scrollbar-width: thin;
+}
+.vtt-chat-input-row {
+  display: flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .25rem .35rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.vtt-chat-input {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: .74rem;
+  padding: .22rem .38rem;
+  outline: none;
+  min-width: 0;
+}
+.vtt-chat-input:focus { border-color: rgba(79,140,255,.5); }
+.vtt-chat-send {
+  background: rgba(79,140,255,.14);
+  border: 1px solid rgba(79,140,255,.28);
+  border-radius: 6px;
+  color: #4f8cff;
+  font-size: .82rem;
+  padding: .18rem .4rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .1s;
+}
+.vtt-chat-send:hover { background: rgba(79,140,255,.28); }
+
+/* Entrées du log */
+.vtt-log-entry {
+  padding: .18rem .3rem;
+  border-radius: 5px;
+  font-size: .71rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.vtt-log-roll {
+  background: rgba(239,68,68,.07);
+  border: 1px solid rgba(239,68,68,.18);
+  color: var(--text);
+}
+.vtt-log-msg {
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+}
+.vtt-log-who {
+  font-weight: 700;
+  color: #4f8cff;
+  margin-right: .2rem;
+}
+.vtt-log-who.me { color: #22c38e; }
+.vtt-log-desc {
+  font-size: .65rem;
+  color: var(--text-dim);
+  display: block;
+  margin-top: .05rem;
+  opacity: .8;
+}
+
 /* ── Mode jour ──────────────────────────────────────────────────── */
 [data-theme="light"] .vtt-canvas-wrap { background: #f0eff5; }
 [data-theme="light"] .vtt-inspector   { background: #fff; }
+[data-theme="light"] .vtt-right-col   { background: #fff; }
+[data-theme="light"] .vtt-chat        { background: #f8f8fc; }
 [data-theme="light"] .vtt-toolbar     { background: #fff; }
 [data-theme="light"] .vtt-tray        { background: #fff; }
 
 /* ── Mobile ─────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .vtt-inspector { display: none; } /* masqué sur mobile, trop étroit */
+  .vtt-right-col { display: none; } /* masqué sur mobile, trop étroit */
   .vtt-toolbar   { gap: .25rem; padding: .25rem .4rem; }
   .vtt-hint      { display: none; }
 }

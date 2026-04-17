@@ -1,15 +1,6 @@
 # Regles Firestore - Le Grand JDR
 
-## Probleme actuel
-
-Les regles actuelles autorisent tout utilisateur connecte a tout faire.
-Un joueur peut modifier les donnees d'un autre, supprimer la boutique, etc.
-
----
-
-## Regles a deployer
-
-Firebase Console > Firestore > Regles > coller > Publier.
+Firebase Console > Firestore > Regles > coller ci-dessous > Publier.
 
 ```
 rules_version = '2';
@@ -22,24 +13,48 @@ service cloud.firestore {
     }
     function isLoggedIn() { return request.auth != null; }
 
-    match /shop/{id}         { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /achievements/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /collection/{id}   { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /story/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /npcs/{id}         { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /players/{id}      { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /bestiaire/{id}    { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /informations/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /tutorial/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /recettes/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /world/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /bastion/{id}      { allow read, write: if isLoggedIn(); }
+    function inAdventure(adventureId) {
+      return isLoggedIn() &&
+        get(/databases/$(database)/documents/adventures/$(adventureId))
+          .data.accessList.hasAny([request.auth.uid]);
+    }
 
-    // Carte : lieux, organisations, types de lieux (+ legacy map_lieux)
-    match /places/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /organizations/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /place_types/{id}   { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /map_lieux/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    function isAdvAdmin(adventureId) {
+      return isAdmin() ||
+        (isLoggedIn() &&
+          get(/databases/$(database)/documents/adventures/$(adventureId))
+            .data.admins.hasAny([request.auth.uid]));
+    }
+
+    match /shop/{id}              { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /shopCategories/{id}    { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /story/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /story_meta/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /places/{id}            { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /organizations/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /place_types/{id}       { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /map_lieux/{id}         { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /npcs/{id}              { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /npc_affinites/{id}     { allow read, write: if isLoggedIn(); }
+    match /settings/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /achievements/{id}      { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /achievements_meta/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /bestiary/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /bestiaire/{id}         { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /bestiary_meta/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /bestiary_tracker/{id}  { allow read, write: if isLoggedIn(); }
+    match /collection/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /collectionSettings/{id}{ allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /players/{id}           { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /world/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /informations/{id}      { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /tutorial/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /recettes/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /recipes/{id}           { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /combat_styles/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /order/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+    match /bastion/{id}           { allow read, write: if isLoggedIn(); }
+    match /story_histories/{id}   { allow read: if isLoggedIn(); allow write: if isAdmin(); }
 
     match /characters/{id} {
       allow read: if isLoggedIn();
@@ -53,6 +68,81 @@ service cloud.firestore {
       allow create: if isLoggedIn() && uid == request.auth.uid;
       allow update: if isLoggedIn() && (uid == request.auth.uid || isAdmin());
       allow delete: if isAdmin();
+    }
+
+    match /adventures/{adventureId} {
+      allow list:   if isLoggedIn();
+      allow get:    if isAdmin() ||
+                       (isLoggedIn() && resource.data.accessList.hasAny([request.auth.uid]));
+      allow create: if isAdmin();
+      allow update: if isAdvAdmin(adventureId);
+      allow delete: if isAdmin();
+
+      match /shop/{id}              { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /shopCategories/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /story/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /story_meta/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /places/{id}            { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /organizations/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /place_types/{id}       { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /map_lieux/{id}         { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /npcs/{id}              { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /npc_affinites/{id}     { allow read, write: if inAdventure(adventureId); }
+      match /settings/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /achievements/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /achievements_meta/{id} { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /bestiary/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /bestiary_meta/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /bestiary_tracker/{id}  { allow read, write: if inAdventure(adventureId); }
+      match /collection/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /collectionSettings/{id}{ allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /players/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /world/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /informations/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /tutorial/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /recettes/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /recipes/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /combat_styles/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /order/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /bastion/{id}           { allow read, write: if inAdventure(adventureId); }
+      match /story_histories/{id}   { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+
+      match /characters/{id} {
+        allow read: if inAdventure(adventureId);
+        allow create: if inAdventure(adventureId) &&
+          (request.resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
+        allow update, delete: if inAdventure(adventureId) &&
+          (resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
+      }
+
+      // ── VTT ──────────────────────────────────────────────────────
+      // Session (page active, état combat) : lecture tous, écriture MJ
+      match /vtt/{docId} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+      }
+
+      // Pages (cartes) : lecture tous, écriture MJ
+      match /vttPages/{id} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+      }
+
+      // Tokens : MJ écrit tout.
+      // Un joueur peut uniquement déplacer son propre token (col/row/movedThisTurn).
+      match /vttTokens/{id} {
+        allow read: if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+        allow update: if inAdventure(adventureId)
+          && request.auth.uid == resource.data.ownerId
+          && request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn']);
+      }
+
+      // Chat & log de dés : tous les membres de l'aventure peuvent lire et écrire
+      match /vttLog/{id} {
+        allow read, write: if inAdventure(adventureId);
+      }
     }
   }
 }

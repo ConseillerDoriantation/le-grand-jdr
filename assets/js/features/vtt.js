@@ -12,7 +12,7 @@ import {
   db, doc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
-import { getMod, calcVitesse, calcCA, calcPVMax } from '../shared/char-stats.js';
+import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import PAGES from './pages.js';
@@ -31,10 +31,17 @@ let _stage   = null, _layers = {}, _unsubs = [], _resizeObs = null;
 let _session = {}, _pages = {}, _tokens = {};
 let _characters = {};   // characterId → character doc
 let _npcs       = {};   // npcId → npc doc
+let _bestiary   = {};   // beastId → creature doc (bestiaire)
 let _activePage = null;
 let _tool       = 'select';
 let _selected   = null, _attackSrc = null, _moveHL = [], _lastDrag = 0;
+let _selectedMulti  = new Set();   // ids des tokens en multi-sélection
+let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
 let _autoSyncDone = false;   // empêche la double-création de tokens
+let _imgTr      = null;      // Transformer pour images BG (sous tokens)
+let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens)
+let _selImg     = null;      // id de l'image sélectionnée
+let _mapMode    = false;     // true = édition carte activée (images déplaçables)
 
 // ── Refs Firestore ──────────────────────────────────────────────────
 const _aid     = ()   => getCurrentAdventureId();
@@ -47,6 +54,9 @@ const _pgRef   = (id) => doc(db, `adventures/${_aid()}/vttPages/${id}`);
 const _tokRef  = (id) => doc(db, `adventures/${_aid()}/vttTokens/${id}`);
 const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
 const _npcRef  = (id) => doc(db, `adventures/${_aid()}/npcs/${id}`);
+const _bstCol  = ()   => collection(db, `adventures/${_aid()}/bestiary`);
+const _bstRef  = (id) => doc(db, `adventures/${_aid()}/bestiary/${id}`);
+const _logCol  = ()   => collection(db, `adventures/${_aid()}/vttLog`);
 
 // ═══════════════════════════════════════════════════════════════════
 // DONNÉES EFFECTIVES — fusion token + entité liée
@@ -57,7 +67,8 @@ function _live(t) {
   if (!t) return null;
   const c = t.characterId ? _characters[t.characterId] : null;
   const n = t.npcId       ? _npcs[t.npcId]             : null;
-  const e = c || n;
+  const b = t.beastId     ? _bestiary[t.beastId]       : null;
+  const e = c || n || b;
 
   if (!e) return {
     ...t,
@@ -67,24 +78,48 @@ function _live(t) {
     displayHpMax:    t.hpMax ?? 20,
     displayMovement: t.movement ?? 6,
     displayAttack:   t.attack   ?? 5,
+    displayAttackDice: t.attackDice || '1d6',
     displayDefense:  t.defense  ?? 0,
     displayRange:    t.range    ?? 1,
   };
 
-  const hpMax = c
-    ? (calcPVMax(c) || c.pvBase || 20)
-    : (e.hpMax || e.pvMax || e.pv || 20);
+  const hpMax = c ? (calcPVMax(c) || c.pvBase || 20)
+              : b ? (parseInt(b.pvMax) || 20)
+              : (e.hpMax || e.pvMax || e.pv || 20);
+
+  // Pour les créatures du bestiaire : HP suivi sur le TOKEN (pas sur la fiche template)
+  const hpCurrent = c ? (c.hp ?? hpMax)
+                  : n ? (n.hp ?? hpMax)
+                  : (t.hp ?? hpMax); // bestiaire + tokens custom
+
+  // Formule de dégâts : arme équipée > première attaque bestiary > override token > fallback
+  const weapon    = c?.equipement?.['Main principale'];
+  const weapStat  = (weapon?.degatsStats?.[0] || weapon?.degatsStat || 'force');
+  const weapMod   = c ? getMod(c, weapStat) : 0;
+  const weapDice  = weapon?.degats
+    ? (weapMod !== 0 ? `${weapon.degats}${weapMod>0?'+':''}${weapMod}` : weapon.degats)
+    : null;
+  const beastDice = b?.attaques?.[0]?.degats || null;
+  const atkDice   = t.attackDice || weapDice || beastDice
+    || (c ? `1d6${weapMod>=0?'+':''}${weapMod}` : null)
+    || (typeof t.attack==='string' ? t.attack : null)
+    || '1d6';
 
   return {
     ...t,
-    displayName:     e.nom    || t.name,
-    displayImage:    e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
-    displayHp:       e.hp  ?? t.hp  ?? hpMax,
-    displayHpMax:    hpMax,
-    displayMovement: t.movement ?? (c ? calcVitesse(c) : (e.vitesse || e.deplacement || 6)),
-    displayAttack:   t.attack   ?? (c ? 5 + getMod(c,'force')  : (e.bonusAttaque || e.attack || 5)),
-    displayDefense:  t.defense  ?? (c ? calcCA(c)              : (e.ca || e.defense || 0)),
-    displayRange:    t.range    ?? 1,
+    displayName:       e.nom    || t.name,
+    displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
+    displayHp:         e.hp  ?? t.hp  ?? hpMax,
+    displayHp:         hpCurrent,
+    displayHpMax:      hpMax,
+    displayPm:         c ? (c.pm ?? calcPMMax(c)) : null,
+    displayPmMax:      c ? calcPMMax(c) : null,
+    displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (parseInt(b.vitesse)||4) : (e.vitesse || e.deplacement || 6))),
+    displayAttack:     t.attack   ?? (c ? 5+getMod(c,'force') : (b ? (parseInt(b.attaques?.[0]?.toucher)||5) : (e.bonusAttaque||e.attack||5))),
+    displayAttackDice: atkDice,
+    displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (parseInt(b.ca)||10) : (e.ca||e.defense||0))),
+    displayRange:      t.range    ?? (b ? (parseInt(b.attaques?.[0]?.portee)||1) : (weapon?.portee ? parseInt(weapon.portee)||1 : 1)),
+    _beast:            b,   // référence directe pour _buildAttackOptions
   };
 }
 
@@ -99,22 +134,24 @@ async function _setHp(t, newHp) {
 // ═══════════════════════════════════════════════════════════════════
 // AUTO-SYNC TOKENS — crée les tokens manquants pour persos et PNJ
 // ═══════════════════════════════════════════════════════════════════
-let _charsReady = false, _npcsReady = false, _toksReady = false;
+let _charsReady = false, _npcsReady = false, _toksReady = false, _bstsReady = false;
 
 function _maybeSyncAutoTokens() {
   if (!STATE.isAdmin || _autoSyncDone) return;
-  if (!_charsReady || !_npcsReady || !_toksReady) return;
+  if (!_charsReady || !_npcsReady || !_toksReady || !_bstsReady) return;
   _autoSyncDone = true;
   _syncAutoTokens();
 }
 
 async function _syncAutoTokens() {
   // Index des entités déjà tokenisées
-  const byChar = new Set();
-  const byNpc  = new Set();
+  const byChar  = new Set();
+  const byNpc   = new Set();
+  const byBeast = new Set();
   for (const { data } of Object.values(_tokens)) {
     if (data.characterId) byChar.add(data.characterId);
     if (data.npcId)       byNpc.add(data.npcId);
+    if (data.beastId)     byBeast.add(data.beastId);
   }
 
   const toCreate = [];
@@ -122,13 +159,19 @@ async function _syncAutoTokens() {
   for (const c of Object.values(_characters)) {
     if (!byChar.has(c.id)) toCreate.push({
       name: c.nom || 'Personnage', type: 'player',
-      characterId: c.id, npcId: null, ownerId: c.uid || null,
+      characterId: c.id, npcId: null, beastId: null, ownerId: c.uid || null,
     });
   }
   for (const n of Object.values(_npcs)) {
     if (!byNpc.has(n.id)) toCreate.push({
       name: n.nom || 'PNJ', type: 'npc',
-      characterId: null, npcId: n.id, ownerId: null,
+      characterId: null, npcId: n.id, beastId: null, ownerId: null,
+    });
+  }
+  for (const b of Object.values(_bestiary)) {
+    if (!byBeast.has(b.id)) toCreate.push({
+      name: b.nom || 'Créature', type: 'enemy',
+      characterId: null, npcId: null, beastId: b.id, ownerId: null,
     });
   }
 
@@ -171,10 +214,13 @@ function _cleanup() {
   _unsubs.forEach(u => u?.());
   _unsubs = []; _stage?.destroy(); _stage = null; _layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
-  _tokens = {}; _pages = {}; _characters = {}; _npcs = {};
+  _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
   _moveHL = []; _autoSyncDone = false;
-  _charsReady = false; _npcsReady = false; _toksReady = false;
+  _selectedMulti.clear(); _multiDragOrigin = null;
+  _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
+  _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
+  _hideCtxMenu();
   document.removeEventListener('keydown', _keyHandler);
   const mc = document.getElementById('main-content');
   if (mc) mc.style.overflow = '';
@@ -186,10 +232,25 @@ function _cleanup() {
 function _initCanvas(container) {
   const K = window.Konva;
   _stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
+  // Ordre : bg → map (fond, sous tokens) → grid → token → mapFg (premier plan, au-dessus)
+  _layers.bg    = new K.Layer({ listening: false });
+  _layers.map   = new K.Layer({ listening: false }); // verrouillé par défaut
   _layers.grid  = new K.Layer({ listening: true });
-  _layers.map   = new K.Layer({ listening: false });
   _layers.token = new K.Layer();
-  _stage.add(_layers.grid, _layers.map, _layers.token);
+  _layers.mapFg = new K.Layer({ listening: false }); // 1er plan, verrouillé par défaut
+  _stage.add(_layers.bg, _layers.map, _layers.grid, _layers.token, _layers.mapFg);
+
+  // Transformers pour redimensionner les images (MJ uniquement)
+  if (STATE.isAdmin) {
+    const trCfg = {
+      rotateEnabled: false, keepRatio: false,
+      borderStroke: '#4f8cff', borderStrokeWidth: 2,
+      anchorStroke: '#4f8cff', anchorFill: '#fff',
+      anchorSize: 10, anchorCornerRadius: 3,
+    };
+    _imgTr   = new K.Transformer(trCfg); _layers.map.add(_imgTr);
+    _imgTrFg = new K.Transformer(trCfg); _layers.mapFg.add(_imgTrFg);
+  }
 
   _stage.on('wheel', e => {
     e.evt.preventDefault();
@@ -222,13 +283,15 @@ function _initCanvas(container) {
 function _drawGrid() {
   if (!_stage||!_activePage) return;
   const K = window.Konva;
+  _layers.bg.destroyChildren();
   _layers.grid.find('Line').forEach(n=>n.destroy());
-  _layers.grid.find('Rect.bg').forEach(n=>n.destroy());
   const { cols, rows } = _activePage;
   const W=cols*CELL, H=rows*CELL;
-  const bg = new K.Rect({ x:0,y:0,width:W,height:H,fill:'#12121f',listening:false,name:'bg' });
-  _layers.grid.add(bg); bg.moveToBottom();
-  const s = { stroke:'rgba(255,255,255,0.07)',strokeWidth:1,listening:false };
+  // Fond sur la couche bg (sous les images)
+  _layers.bg.add(new K.Rect({ x:0,y:0,width:W,height:H,fill:'#12121f',listening:false }));
+  _layers.bg.batchDraw();
+  // Lignes de grille sur la couche grid (au-dessus des images)
+  const s = { stroke:'rgba(255,255,255,0.22)',strokeWidth:1,listening:false };
   for (let c=0;c<=cols;c++) _layers.grid.add(new K.Line({ points:[c*CELL,0,c*CELL,H], ...s }));
   for (let r=0;r<=rows;r++) _layers.grid.add(new K.Line({ points:[0,r*CELL,W,r*CELL], ...s }));
   _layers.grid.batchDraw();
@@ -237,16 +300,88 @@ function _drawGrid() {
 function _renderMapImages() {
   if (!_activePage) return;
   const K = window.Konva;
-  _layers.map.destroyChildren();
+  // Nettoyer les images des deux couches (sans détruire les transformers)
+  _layers.map.find('Image').forEach(n=>n.destroy());
+  _layers.mapFg?.find('Image').forEach(n=>n.destroy());
+  if (_imgTr)   { _imgTr.nodes([]);   }
+  if (_imgTrFg) { _imgTrFg.nodes([]); }
+  _selImg = null;
+
   for (const img of (_activePage.backgroundImages??[])) {
+    const isFg   = img.layer === 'fg';
+    const tgtLyr = isFg ? _layers.mapFg : _layers.map;
+    const tr     = isFg ? _imgTrFg      : _imgTr;
+
     const el = new Image(); el.crossOrigin='anonymous';
     el.onload = () => {
-      const ki = new K.Image({ image:el,x:img.x*CELL,y:img.y*CELL,width:img.w*CELL,height:img.h*CELL });
+      if (!_activePage) return; // page changée entre temps
+      const ki = new K.Image({
+        image:el, x:img.x*CELL, y:img.y*CELL,
+        width:img.w*CELL, height:img.h*CELL,
+        name:`img-${img.id}`,
+      });
+
       if (STATE.isAdmin) {
-        ki.draggable(true);
-        ki.on('dragend', () => _patchImg(img.id,{x:Math.round(ki.x()/CELL),y:Math.round(ki.y()/CELL)}));
+        // Drag activé uniquement en mode édition carte
+        ki.draggable(_mapMode);
+        ki.on('dragmove', () => {
+          ki.x(Math.round(ki.x()/CELL)*CELL);
+          ki.y(Math.round(ki.y()/CELL)*CELL);
+        });
+        ki.on('dragend', () => {
+          _patchImg(img.id, { x:Math.round(ki.x()/CELL), y:Math.round(ki.y()/CELL) });
+        });
+
+        // Clic → sélectionner l'image (seulement en mode édition carte)
+        ki.on('click', e => {
+          if (!_mapMode) return;
+          e.cancelBubble = true;
+          _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+          _selected=null; _clearHL(); _renderInspector(null); _layers.token.batchDraw();
+          _selImg = img.id;
+          // Vider l'autre transformer
+          const otherTr = isFg ? _imgTr : _imgTrFg;
+          otherTr?.nodes([]);
+          if (tr?.getParent()) { tr.nodes([ki]); tr.moveToTop(); }
+          tgtLyr.batchDraw();
+        });
+
+        // Fin de redimensionnement → snap + sauvegarde
+        ki.on('transformend', () => {
+          const w=Math.max(1,Math.round(ki.width()*ki.scaleX()/CELL));
+          const h=Math.max(1,Math.round(ki.height()*ki.scaleY()/CELL));
+          const x=Math.round(ki.x()/CELL), y=Math.round(ki.y()/CELL);
+          ki.width(w*CELL); ki.height(h*CELL);
+          ki.scaleX(1); ki.scaleY(1);
+          ki.x(x*CELL); ki.y(y*CELL);
+          tgtLyr.batchDraw();
+          _patchImg(img.id, { x, y, w, h });
+        });
+
+        // Clic-droit → menu contextuel
+        ki.on('contextmenu', e => {
+          e.evt.preventDefault();
+          if (!_mapMode) return;
+          _showCtxMenu(e.evt.clientX, e.evt.clientY, [
+            {
+              label: isFg ? '⬇ Arrière-plan (sous les tokens)' : '⬆ Premier plan (au-dessus des tokens)',
+              fn: () => _patchImg(img.id, { layer: isFg ? 'bg' : 'fg' }),
+            },
+            '---',
+            {
+              label: '🗑 Supprimer cette image',
+              fn: () => {
+                const imgs=(_activePage.backgroundImages??[]).filter(i=>i.id!==img.id);
+                updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs}).catch(()=>{});
+              },
+            },
+          ]);
+        });
       }
-      _layers.map.add(ki); _layers.map.batchDraw();
+
+      tgtLyr.add(ki);
+      if (tr?.getParent()) tr.moveToTop();
+      tgtLyr.batchDraw();
     };
     el.src = img.url;
   }
@@ -272,9 +407,30 @@ function _buildShape(t) {
   g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9, stroke:'rgba(255,255,255,0.2)',strokeWidth:2 }));
   g.add(new K.Circle({ radius:r+7, stroke:'#fff',     strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
   g.add(new K.Circle({ radius:r+7, stroke:'#ef4444',  strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
-  g.add(new K.Rect({ x:-bW/2,y:r+5,width:bW,height:6,fill:'#1e1e2e',cornerRadius:3,name:'hp-bg' }));
-  g.add(new K.Rect({ x:-bW/2,y:r+5,width:bW*rat,height:6,fill:hpColor(rat),cornerRadius:3,name:'hp-fill' }));
-  g.add(new K.Text({ text:ld.displayName??t.name,x:-CELL/2,y:r+13,width:CELL,align:'center',fontSize:11,fill:'#ddd',fontFamily:'Inter,sans-serif',name:'lbl' }));
+  // ── Barre HP + valeur ────────────────────────────────────────────
+  g.add(new K.Rect({ x:-bW/2,y:r+4,width:bW,height:5,fill:'#1e1e2e',cornerRadius:2,name:'hp-bg' }));
+  g.add(new K.Rect({ x:-bW/2,y:r+4,width:bW*rat,height:5,fill:hpColor(rat),cornerRadius:2,name:'hp-fill' }));
+  g.add(new K.Text({ text:`${hp}/${hpm}`, x:bW/2+2,y:r+3, fontSize:8,
+    fill:'rgba(210,210,210,0.8)', fontFamily:'Inter,sans-serif', listening:false, name:'hp-val' }));
+  // ── Barre PM + valeur (joueurs seulement) ───────────────────────
+  const _pm0=ld.displayPm;
+  if (_pm0!=null) {
+    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1, pmW0=bW*0.78;
+    g.add(new K.Rect({ x:-pmW0/2,y:r+12,width:pmW0,height:4,fill:'#1e1e2e',cornerRadius:2,name:'pm-bg' }));
+    g.add(new K.Rect({ x:-pmW0/2,y:r+12,width:pmW0*pmRat0,height:4,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
+    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:pmW0/2+2,y:r+11, fontSize:8,
+      fill:'rgba(155,109,255,0.85)', fontFamily:'Inter,sans-serif', listening:false, name:'pm-val' }));
+  }
+  // ── CA (petite étiquette) ────────────────────────────────────────
+  const _caY0 = _pm0!=null ? r+19 : r+12;
+  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-CELL/2, y:_caY0,
+    width:CELL, align:'center', fontSize:9, fill:'rgba(190,190,190,0.6)',
+    fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl' }));
+  // ── Nom ──────────────────────────────────────────────────────────
+  const _nameY0 = _pm0!=null ? r+27 : r+20;
+  g.add(new K.Text({ text:ld.displayName??t.name, x:-CELL/2, y:_nameY0,
+    width:CELL, align:'center', fontSize:10, fill:'#ddd',
+    fontFamily:'Inter,sans-serif', name:'lbl' }));
 
   const imgSrc = ld.displayImage;
   if (imgSrc) {
@@ -290,12 +446,52 @@ function _buildShape(t) {
   const canDrag = STATE.isAdmin || t.ownerId===STATE.user?.uid;
   if (canDrag) {
     g.draggable(true);
-    g.on('dragmove', () => {
-      const c=Math.round((g.x()-CELL/2)/CELL), r=Math.round((g.y()-CELL/2)/CELL);
-      g.position({ x:c*CELL+CELL/2, y:r*CELL+CELL/2 });
+    // ─ Début du drag : mémoriser les positions du groupe ─
+    g.on('dragstart', () => {
+      if (_selectedMulti.has(t.id) && _selectedMulti.size>1) {
+        _multiDragOrigin={};
+        for (const id of _selectedMulti) {
+          const s=_tokens[id]?.shape;
+          if (s) _multiDragOrigin[id]={x:s.x(),y:s.y()};
+        }
+      } else { _multiDragOrigin=null; }
     });
+    // ─ Pendant le drag : snap + déplacer le groupe ─
+    g.on('dragmove', () => {
+      const sx=Math.round((g.x()-CELL/2)/CELL)*CELL+CELL/2;
+      const sy=Math.round((g.y()-CELL/2)/CELL)*CELL+CELL/2;
+      g.position({x:sx,y:sy});
+      if (_multiDragOrigin && _selectedMulti.has(t.id)) {
+        const dx=sx-_multiDragOrigin[t.id].x, dy=sy-_multiDragOrigin[t.id].y;
+        for (const [id,orig] of Object.entries(_multiDragOrigin)) {
+          if (id===t.id) continue;
+          const s=_tokens[id]?.shape; if (!s) continue;
+          s.position({
+            x:Math.round((orig.x+dx-CELL/2)/CELL)*CELL+CELL/2,
+            y:Math.round((orig.y+dy-CELL/2)/CELL)*CELL+CELL/2,
+          });
+        }
+        _layers.token.batchDraw();
+      }
+    });
+    // ─ Fin du drag : commit Firestore ─
     g.on('dragend', async () => {
       const pg=_activePage; if (!pg) return;
+      if (_multiDragOrigin && _selectedMulti.has(t.id) && _selectedMulti.size>1) {
+        // Batch : sauver tous les tokens du groupe
+        const batch=writeBatch(db);
+        for (const id of _selectedMulti) {
+          const s=_tokens[id]?.shape; if (!s) continue;
+          const nc=Math.max(0,Math.min(pg.cols-1,Math.round((s.x()-CELL/2)/CELL)));
+          const nr=Math.max(0,Math.min(pg.rows-1,Math.round((s.y()-CELL/2)/CELL)));
+          s.position({x:nc*CELL+CELL/2,y:nr*CELL+CELL/2});
+          batch.update(_tokRef(id),{col:nc,row:nr});
+        }
+        _layers.token.batchDraw();
+        await batch.commit().catch(()=>showNotif('Erreur déplacement groupe','error'));
+        _multiDragOrigin=null; return;
+      }
+      // Token seul
       const c=Math.max(0,Math.min(pg.cols-1,Math.round((g.x()-CELL/2)/CELL)));
       const r=Math.max(0,Math.min(pg.rows-1,Math.round((g.y()-CELL/2)/CELL)));
       if (!STATE.isAdmin && _session?.combat?.active) {
@@ -304,12 +500,12 @@ function _buildShape(t) {
           const d=Math.abs(c-cur.col)+Math.abs(r-cur.row);
           if (d>(_live(cur).displayMovement??6)||cur.movedThisTurn) {
             showNotif(cur.movedThisTurn?'Déjà bougé ce tour.':'Déplacement trop loin !','error');
-            g.position({ x:cur.col*CELL+CELL/2,y:cur.row*CELL+CELL/2 }); _layers.token.batchDraw(); return;
+            g.position({x:cur.col*CELL+CELL/2,y:cur.row*CELL+CELL/2}); _layers.token.batchDraw(); return;
           }
         }
       }
-      g.position({ x:c*CELL+CELL/2,y:r*CELL+CELL/2 }); _layers.token.batchDraw();
-      const patch = { col:c,row:r };
+      g.position({x:c*CELL+CELL/2,y:r*CELL+CELL/2}); _layers.token.batchDraw();
+      const patch={col:c,row:r};
       if (!STATE.isAdmin&&_session?.combat?.active) patch.movedThisTurn=true;
       await updateDoc(_tokRef(t.id),patch).catch(()=>showNotif('Erreur déplacement','error'));
     });
@@ -317,8 +513,25 @@ function _buildShape(t) {
 
   g.on('click', e => {
     e.cancelBubble=true;
-    if (_tool==='attack'&&_attackSrc&&_attackSrc!==t.id) _execAttack(_attackSrc,t.id);
-    else _select(t.id);
+    if (_tool==='attack') {
+      if (_attackSrc && _attackSrc===t.id) {
+        // Re-clic sur l'attaquant → annuler la sélection
+        _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+        _attackSrc=null; _clearHL(); _layers.token.batchDraw();
+      } else if (_attackSrc && _attackSrc!==t.id) {
+        // Clic sur une cible → attaquer
+        _execAttack(_attackSrc, t.id);
+      } else {
+        // Pas d'attaquant encore → le sélectionner
+        _select(t.id);
+      }
+    } else if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
+      // Shift+clic : ajouter / retirer du groupe
+      _toggleMultiSelect(t.id);
+    } else {
+      _clearMultiSelect();
+      _select(t.id);
+    }
   });
 
   return g;
@@ -332,6 +545,15 @@ function _patchShape(id) {
   const rat=hpm>0?Math.max(0,hp/hpm):1, bW=CELL*0.72;
   const fill=g.findOne('.hp-fill');
   if (fill){fill.width(bW*rat);fill.fill(hpColor(rat));}
+  g.findOne('.hp-val')?.text(`${hp}/${hpm}`);
+  // PM
+  const _pm=ld.displayPm;
+  if (_pm!=null) {
+    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.max(0,_pm/pmMax):1, pmW=bW*0.78;
+    g.findOne('.pm-fill')?.width(pmW*pmRat);
+    g.findOne('.pm-val')?.text(`✨${_pm}/${pmMax}`);
+  }
+  g.findOne('.ca-lbl')?.text(`🛡${ld.displayDefense??0}`);
   g.findOne('.lbl')?.text(ld.displayName??e.data.name);
   g.visible(!!(e.data.visible||STATE.isAdmin));
   _layers.token?.batchDraw();
@@ -339,25 +561,34 @@ function _patchShape(id) {
 
 // ── Sélection ───────────────────────────────────────────────────────
 function _select(id) {
+  if (_imgTr&&_selImg) { _imgTr.nodes([]); _selImg=null; _layers.map?.batchDraw(); }
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
   _selected=id;
   _tokens[id]?.shape?.findOne('.sel')?.visible(true);
   _layers.token.batchDraw();
   const data=_tokens[id]?.data;
   _renderInspector(data??null);
-  if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) _showMoveRange(data);
-  if (_tool==='attack'&&data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
-    _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
-    _attackSrc=id;
-    _tokens[id]?.shape?.findOne('.atk')?.visible(true);
-    _layers.token.batchDraw();
+  if (_tool==='attack') {
+    // Mode attaque : désigner l'attaquant + montrer sa portée en rouge
+    if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
+      _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+      _attackSrc=id;
+      _tokens[id]?.shape?.findOne('.atk')?.visible(true);
+      _layers.token.batchDraw();
+      _showAttackRange(data);
+    }
+  } else {
+    if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) _showMoveRange(data);
   }
 }
 
 function _deselect() {
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
   _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
-  _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
+  _selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
+  if (_imgTr)   { _imgTr.nodes([]); _layers.map?.batchDraw(); }
+  if (_imgTrFg) { _imgTrFg.nodes([]); _layers.mapFg?.batchDraw(); }
+  _selImg=null;
   _layers.token?.batchDraw();
 }
 
@@ -383,6 +614,53 @@ function _showMoveRange(t) {
   _layers.grid.batchDraw();
 }
 function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; _layers.grid?.batchDraw(); }
+
+// ── Multi-sélection ─────────────────────────────────────────────
+function _clearMultiSelect() {
+  for (const id of _selectedMulti) {
+    if (id!==_selected) _tokens[id]?.shape?.findOne('.sel')?.visible(false);
+  }
+  _selectedMulti.clear();
+  _layers.token?.batchDraw();
+}
+
+function _toggleMultiSelect(id) {
+  // Inclure le token principal courant dans la multi-sélection
+  if (_selected && !_selectedMulti.has(_selected)) {
+    _selectedMulti.add(_selected);
+    _tokens[_selected]?.shape?.findOne('.sel')?.visible(true);
+  }
+  if (_selectedMulti.has(id)) {
+    _selectedMulti.delete(id);
+    _tokens[id]?.shape?.findOne('.sel')?.visible(false);
+  } else {
+    _selectedMulti.add(id);
+    _tokens[id]?.shape?.findOne('.sel')?.visible(true);
+    _selected = id;
+    _renderInspector(_tokens[id]?.data??null);
+  }
+  _layers.token?.batchDraw();
+}
+
+/** Surbrillance rouge des cases à portée d'attaque de t. */
+function _showAttackRange(t) {
+  _clearHL();
+  if (!_activePage) return;
+  const K=window.Konva;
+  const options=_buildAttackOptions(t);
+  const maxRange=options.length?Math.max(...options.map(o=>o.portee)):(_live(t).displayRange??1);
+  const {cols,rows}=_activePage;
+  for (let dc=-maxRange;dc<=maxRange;dc++) for (let dr=-maxRange;dr<=maxRange;dr++) {
+    if (!dc&&!dr) continue;
+    if (Math.abs(dc)+Math.abs(dr)>maxRange) continue;
+    const c=t.col+dc, r=t.row+dr;
+    if (c<0||r<0||c>=cols||r>=rows) continue;
+    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
+      fill:'rgba(239,68,68,0.1)', stroke:'rgba(239,68,68,0.28)', strokeWidth:1, listening:false });
+    _layers.grid.add(rect); _moveHL.push(rect);
+  }
+  _layers.grid.batchDraw();
+}
 async function _moveTo(id,col,row) {
   const patch={col,row};
   if (!STATE.isAdmin&&_session?.combat?.active) patch.movedThisTurn=true;
@@ -391,35 +669,203 @@ async function _moveTo(id,col,row) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ATTAQUE
+// ATTAQUE — sélection arme/sort puis confirmation
 // ═══════════════════════════════════════════════════════════════════
-async function _execAttack(srcId,tgtId) {
+
+/** Parse "2d6+3", "1d8", "1d4-1" → lance et retourne le total. */
+function _rollDice(formula) {
+  if (!formula) return 1;
+  const m = String(formula).match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
+  if (!m) return Math.max(1, parseInt(formula)||1);
+  let total = 0;
+  for (let i=0; i<parseInt(m[1]); i++) total += Math.floor(Math.random()*parseInt(m[2]))+1;
+  return total + (parseInt(m[3])||0);
+}
+
+/** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
+function _buildAttackOptions(t) {
+  const ld = _live(t);
+  const c  = t.characterId ? _characters[t.characterId] : null;
+  const b  = ld._beast || null;
+  const options = [];
+
+  // ── Créature du bestiaire : ses attaques nommées ──
+  if (b?.attaques?.length) {
+    b.attaques.forEach((atk, idx) => {
+      if (!atk.degats) return;
+      options.push({
+        id:     `beast_${idx}`,
+        icon:   '👹',
+        label:  atk.nom || `Attaque ${idx+1}`,
+        dice:   atk.degats,
+        portee: parseInt(atk.portee)||1,
+        pmCost: 0,
+      });
+    });
+    if (options.length) return options; // on utilise les attaques dédiées
+  }
+
+  // ── Arme principale du personnage (ou attaque générique) ──
+  const weapon = c?.equipement?.['Main principale'];
+  options.push({
+    id:     'weapon',
+    icon:   '⚔️',
+    label:  weapon?.nom || 'Attaque de base',
+    dice:   ld.displayAttackDice || '1d6',
+    portee: ld.displayRange ?? 1,
+    pmCost: 0,
+  });
+
+  // ── Sorts offensifs actifs du deck ──
+  if (c?.deck_sorts?.length) {
+    const pm       = c.pm ?? 0;
+    const mainDice = ld.displayAttackDice || '1d6';
+    c.deck_sorts.forEach((s, idx) => {
+      if (!s.actif) return;
+      if (!s.types?.includes('offensif')) return;
+      const cout = parseInt(s.cout)||0;
+      if (cout > pm) return;
+      options.push({
+        id:     `sort_${idx}`,
+        icon:   '✨',
+        label:  s.nom || `Sort ${idx+1}`,
+        dice:   (s.degats?.trim()) || mainDice,
+        portee: parseInt(s.portee)||ld.displayRange||1,
+        pmCost: cout,
+        sortIdx: idx,
+      });
+    });
+  }
+
+  return options;
+}
+
+// Cache des options d'attaque — évite tout JSON/HTML dans les onclick
+const _atkOptsCache = {};
+
+/** Affiche le modal de sélection d'attaque. */
+async function _execAttack(srcId, tgtId) {
   const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
   if (!src||!tgt) return;
-  const lS=_live(src),lT=_live(tgt);
+  const lS=_live(src), lT=_live(tgt);
   const dist=Math.max(Math.abs(src.col-tgt.col),Math.abs(src.row-tgt.row));
-  if (dist>(lS.displayRange??1)) { showNotif(`Hors de portée (${dist} cases)`,'error'); return; }
-  const dmg=Math.max(1,(lS.displayAttack??5)-(lT.displayDefense??0))+Math.floor(Math.random()*4);
-  const curHp=lT.displayHp??20, maxHp=lT.displayHpMax??20, newHp=Math.max(0,curHp-dmg);
-  const ok=await confirmModal(
-    `<strong>${lS.displayName??src.name}</strong> attaque <strong>${lT.displayName??tgt.name}</strong>.<br>
-     Dégâts : <strong>${dmg}</strong> — PV restants : <strong>${newHp}/${maxHp}</strong>`,
-    {title:'⚔️ Attaque',confirmLabel:'Attaquer',cancelLabel:'Annuler',danger:true}
-  );
-  if (!ok) return;
-  try {
-    await _setHp(tgt,newHp);
-    showNotif(newHp===0?`💀 ${lT.displayName??tgt.name} tombe à 0 PV !`
-      :`⚔️ ${dmg} dégâts → ${lT.displayName??tgt.name} (${newHp}/${maxHp} PV)`,'success');
-  } catch { showNotif('Erreur attaque','error'); }
-  _deselect(); _setTool('select');
+
+  const options = _buildAttackOptions(src);
+  const inRange = options.filter(o => dist <= o.portee);
+  if (!inRange.length) {
+    showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...options.map(o=>o.portee))})`, 'error');
+    return;
+  }
+
+  // Stocke les options dans un cache indexé — pas de JSON dans les onclick
+  const cacheKey = `${srcId}__${tgtId}`;
+  _atkOptsCache[cacheKey] = inRange;
+
+  const pm = lS.displayPm, pmMax = lS.displayPmMax;
+  const pmLine = (pm!=null)
+    ? `<div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem">PM : ${pm}/${pmMax}</div>` : '';
+
+  openModal('⚔️ Choisir une attaque', `
+    <div class="vtt-form">
+      <div style="font-size:.82rem;margin-bottom:.4rem">
+        <strong>${lS.displayName??src.name}</strong>
+        → <strong style="color:#ef4444">${lT.displayName??tgt.name}</strong>
+        <span style="color:var(--text-dim);font-size:.72rem">(${dist} case${dist>1?'s':''})</span>
+      </div>
+      ${pmLine}
+      <div class="vtt-attack-opts">
+        ${inRange.map((o,i)=>`
+        <button class="vtt-attack-opt" onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})">
+          <span class="vtt-attack-opt-icon">${o.icon}</span>
+          <div class="vtt-attack-opt-body">
+            <div class="vtt-attack-opt-name">${o.label}</div>
+            <div class="vtt-attack-opt-meta">
+              🎲 ${o.dice}
+              · 🎯 portée ${o.portee}
+              ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:''}
+            </div>
+          </div>
+        </button>`).join('')}
+      </div>
+      <div style="text-align:right;margin-top:.5rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      </div>
+    </div>`);
 }
+
+window._vttPickOpt = (srcId, tgtId, idx) => {
+  const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
+  if (opt) window._vttExecWithOpt(srcId, tgtId, opt);
+};
+
+window._vttExecWithOpt = async (srcId, tgtId, opt) => {
+  closeModalDirect();
+  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  if (!src||!tgt) return;
+  const lS=_live(src), lT=_live(tgt);
+
+  const dmg    = Math.max(1, _rollDice(opt.dice));
+  const curHp  = lT.displayHp??20, hpMax=lT.displayHpMax??20;
+  const newHp  = Math.max(0, curHp-dmg);
+
+  const ok = await confirmModal(
+    `${opt.icon} <strong>${lS.displayName??src.name}</strong>
+     utilise <strong>${opt.label}</strong><br>
+     🎲 ${opt.dice} → <strong>${dmg} dégâts</strong><br>
+     PV : ${curHp} → <strong>${newHp}/${hpMax}</strong>`,
+    {title:`${opt.icon} ${opt.label}`, confirmLabel:'Confirmer', cancelLabel:'Annuler', danger:true}
+  );
+  if (!ok) return; // annulé : reste en mode attaque avec l'attaquant sélectionné
+
+  try {
+    await _setHp(tgt, newHp);
+    if (opt.pmCost>0 && src.characterId) {
+      const c=_characters[src.characterId];
+      if (c) await updateDoc(_chrRef(src.characterId),{pm:Math.max(0,(c.pm??0)-opt.pmCost)});
+    }
+    if (_session?.combat?.active) await updateDoc(_tokRef(src.id),{attackedThisTurn:true}).catch(()=>{});
+    // Log dans le chat
+    await addDoc(_logCol(), {
+      type:'roll',
+      authorId: STATE.user?.uid||null,
+      authorName: STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ',
+      rollFormula: opt.dice, rollResult: dmg,
+      text:`${lS.displayName??src.name} attaque ${lT.displayName??tgt.name} · ${opt.label} · 🎲${opt.dice}=${dmg}`,
+      createdAt: serverTimestamp(),
+    }).catch(()=>{});
+    showNotif(
+      newHp===0 ? `💀 ${lT.displayName??tgt.name} tombe à 0 PV !`
+                : `${opt.icon} ${dmg} dégâts → ${lT.displayName??tgt.name} (${newHp}/${hpMax} PV)`,
+      'success'
+    );
+  } catch { showNotif('Erreur attaque','error'); }
+  // Rester en mode attaque — effacer juste l'attaquant courant
+  _tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
+  _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+  _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
+  _layers.token?.batchDraw();
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // INSPECTOR
 // ═══════════════════════════════════════════════════════════════════
 function _renderInspector(t) {
   const el=document.getElementById('vtt-inspector'); if (!el) return;
+  // Multi-sélection active
+  if (_selectedMulti.size>1) {
+    const types=[..._selectedMulti].map(id=>_tokens[id]?.data?.type).filter(Boolean);
+    const uniq=t=>({player:'🧑 Joueurs',enemy:'👹 Ennemis',npc:'👤 PNJ'})[t]||t;
+    const typeStr=[...new Set(types)].map(uniq).join(' · ');
+    el.innerHTML=`<div class="vtt-ins-multi">
+      <div style="font-size:2rem;text-align:center">↖↖</div>
+      <div class="vtt-ins-name" style="text-align:center">${_selectedMulti.size} tokens</div>
+      <div class="vtt-ins-type" style="text-align:center">${typeStr}</div>
+      <div style="font-size:.72rem;color:var(--text-dim);text-align:center;margin-top:.5rem;line-height:1.4">
+        Glisse un token pour<br>déplacer tout le groupe
+      </div>
+    </div>`;
+    return;
+  }
   if (!t) { el.innerHTML=`<div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token</div>`; return; }
   const ld=_live(t);
   const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
@@ -478,7 +924,9 @@ function _renderInspector(t) {
 // TRAY — panneau latéral des tokens non placés (MJ uniquement)
 // ═══════════════════════════════════════════════════════════════════
 function _renderTray() {
-  const el=document.getElementById('vtt-tray'); if (!el||!STATE.isAdmin) return;
+  if (!STATE.isAdmin) return;
+  _renderPageList();
+  const el=document.getElementById('vtt-tray-tokens'); if (!el) return;
 
   const all=Object.values(_tokens).map(e=>e.data);
   const unplaced=all.filter(t=>!t.pageId);
@@ -488,6 +936,8 @@ function _renderTray() {
     const ld=_live(t);
     const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
     const rat=hpm>0?Math.max(0,hp/hpm):1;
+    const dupBtn=t.type==='enemy'
+      ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Créer une instance supplémentaire">＋</button>`:'';
     return `<div class="vtt-tray-item ${_selected===t.id?'active':''}" onclick="window._vttSelectFromTray('${t.id}')">
       <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type]??'#888'}">
         ${ld.displayImage?`<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:''}
@@ -496,10 +946,13 @@ function _renderTray() {
         <div class="vtt-tray-name">${ld.displayName??t.name}</div>
         <div class="vtt-tray-hp-bar"><div style="width:${Math.round(rat*100)}%;height:100%;background:${hpColor(rat)};border-radius:2px"></div></div>
       </div>
-      ${!placed
-        ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer sur cette page">▶</button>`
-        :`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer de la carte">↩</button>`
-      }
+      <div style="display:flex;gap:.15rem">
+        ${dupBtn}
+        ${!placed
+          ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer sur cette page">▶</button>`
+          :`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer de la carte">↩</button>`
+        }
+      </div>
     </div>`;
   };
 
@@ -515,7 +968,6 @@ function _renderTray() {
   };
 
   el.innerHTML=`
-    <div class="vtt-tray-header">Tokens</div>
     ${onPage.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Sur cette page (${onPage.length})</div>${byType(onPage)}</div>`:''}
     ${unplaced.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Non placés (${unplaced.length})</div>${byType(unplaced)}</div>`:''}
     ${!onPage.length&&!unplaced.length?'<div class="vtt-tray-empty">Aucun token</div>':''}
@@ -525,7 +977,38 @@ function _renderTray() {
 // ═══════════════════════════════════════════════════════════════════
 // PAGES
 // ═══════════════════════════════════════════════════════════════════
+// ─ Liste verticale des pages dans le tray (MJ) ─────────────────────
+function _renderPageList() {
+  const el=document.getElementById('vtt-tray-pages'); if (!el) return;
+  const broadcastId=_session.activePageId;
+  const sorted=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
+
+  if (!sorted.length) {
+    el.innerHTML=`<div class="vtt-tray-empty">Aucune page<br><small>Clique ＋ pour créer</small></div>`;
+    return;
+  }
+  el.innerHTML=sorted.map(p=>{
+    const isPlayers=p.id===broadcastId, isMj=p.id===_activePage?.id;
+    const cls=isMj&&isPlayers?'mj-and-players':isMj?'mj':isPlayers?'players':'';
+    return `
+    <div class="vtt-page-item ${cls}" onclick="window._vttSwitchPage('${p.id}')" title="${p.cols||24}×${p.rows||18} cases">
+      <div class="vtt-page-item-badges">
+        ${isMj     ?'<span title="Votre vue">📍</span>':''}
+        ${isPlayers?'<span title="Joueurs ici">👥</span>':''}
+      </div>
+      <div class="vtt-page-item-name">${p.name}</div>
+      <div class="vtt-page-item-acts">
+        <button class="vtt-page-item-btn" onclick="event.stopPropagation();window._vttSendToPage('${p.id}')" title="Envoyer tous les joueurs ici">📡</button>
+        <button class="vtt-page-item-btn" onclick="event.stopPropagation();window._vttEditPage('${p.id}')" title="Renommer / redimensionner">✏</button>
+        <button class="vtt-page-item-btn vtt-page-item-del" onclick="event.stopPropagation();window._vttDeletePage('${p.id}')" title="Supprimer">×</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ─ Onglets horizontaux pour les joueurs (toolbar) ───────────────────
 function _renderPageTabs() {
+  if (STATE.isAdmin) { _renderPageList(); return; } // MJ : liste dans le tray
   const el=document.getElementById('vtt-page-tabs'); if (!el) return;
   const sorted=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
   const broadcastId=_session.activePageId;
@@ -537,16 +1020,29 @@ function _renderPageTabs() {
   }
 
   el.innerHTML=sorted.map(p=>{
-    const isPlayers=p.id===broadcastId;
-    const isActive =p.id===_activePage?.id;
-    const cnt=playerCount[p.id]??0;
+    const isPlayers = p.id===broadcastId;        // où sont les joueurs
+    const isMj      = p.id===_activePage?.id;    // où est le MJ (sa propre vue)
+    const cnt       = playerCount[p.id]??0;
+
+    // Badges d'état : chacun indépendant et cumulable
+    const mjBadge      = isMj      ? `<span class="vtt-tab-badge vtt-tab-badge-mj"   title="Votre vue">📍</span>` : '';
+    const playersBadge = isPlayers ? `<span class="vtt-tab-badge vtt-tab-badge-pl"   title="Vos joueurs sont ici">👥</span>` : '';
+    const cntBadge     = cnt>0&&!isPlayers ? `<span class="vtt-page-player-cnt">${cnt}j</span>` : '';
+
+    // Classe de fond : priorité au statut joueurs si le MJ n'est pas dessus
+    const cls = isMj&&isPlayers ? 'active mj-and-players'
+              : isMj            ? 'active'
+              : isPlayers       ? 'players-here'
+              : '';
+
+    const title = [isMj?'📍 Votre vue':'', isPlayers?'👥 Vos joueurs sont ici':'']
+                   .filter(Boolean).join(' · ') || p.name;
+
     return `
-    <button class="vtt-page-tab ${isActive?'active':''} ${isPlayers?'players-here':''}"
-            onclick="window._vttSwitchPage('${p.id}')"
-            title="${isPlayers?'👥 Page actuelle des joueurs':p.name}">
-      ${isPlayers?`<span class="vtt-page-players-badge" title="Joueurs ici">👥</span>`:''}
-      ${p.name}
-      ${cnt>0&&!isPlayers?`<span class="vtt-page-player-cnt">${cnt}</span>`:''}
+    <button class="vtt-page-tab ${cls}" onclick="window._vttSwitchPage('${p.id}')" title="${title}">
+      ${mjBadge}${playersBadge}
+      <span class="vtt-tab-name">${p.name}</span>
+      ${cntBadge}
       ${STATE.isAdmin?`<span class="vtt-page-del" onclick="event.stopPropagation();window._vttDeletePage('${p.id}')">×</span>`:''}
     </button>`;
   }).join('')+
@@ -560,10 +1056,12 @@ function _renderPageTabs() {
 async function _switchPage(pageId) {
   const page=_pages[pageId]; if (!page) return;
   _activePage=page;
-  _layers.map?.destroyChildren(); _layers.token?.destroyChildren(); _clearHL();
+  // Ne pas détruire _layers.map entièrement : _imgTr (Transformer) y vit.
+  // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
+  _layers.token?.destroyChildren(); _clearHL();
   _drawGrid(); _renderMapImages(); _renderAllTokens();
   _renderPageTabs(); _renderTray(); _deselect();
-  if (STATE.isAdmin) await setDoc(_sesRef(),{activePageId:pageId},{merge:true}).catch(()=>{});
+  // Le MJ navigue librement — les joueurs ne suivent que via 📡 Envoyer
 }
 
 function _renderAllTokens() {
@@ -648,7 +1146,23 @@ function _initListeners() {
     _npcsReady=true; _maybeSyncAutoTokens();
   },()=>{}));
 
-  // 5. Tokens
+  // 5. Bestiaire — source de vérité des créatures ennemies
+  _unsubs.push(onSnapshot(_bstCol(), snap => {
+    snap.docChanges().forEach(ch => {
+      if (ch.type==='removed') delete _bestiary[ch.doc.id];
+      else _bestiary[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
+    });
+    const changed=new Set(snap.docChanges().map(c=>c.doc.id));
+    for (const [id,e] of Object.entries(_tokens)) {
+      if (e.data.beastId&&changed.has(e.data.beastId)) {
+        _patchShape(id); if (_selected===id) _renderInspector(e.data);
+      }
+    }
+    _renderTray();
+    _bstsReady=true; _maybeSyncAutoTokens();
+  },()=>{}));
+
+  // 6. Tokens
   _unsubs.push(onSnapshot(_toksCol(), snap => {
     snap.docChanges().forEach(ch => {
       const id=ch.doc.id, data={id,...ch.doc.data()};
@@ -685,7 +1199,113 @@ function _initListeners() {
     _renderTray();
     _toksReady=true; _maybeSyncAutoTokens();
   },()=>{}));
+
+  // 7. Chat / Log de dés
+  _unsubs.push(onSnapshot(_logCol(), snap => {
+    const msgs=snap.docs
+      .map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>(a.createdAt?.toMillis?.()??0)-(b.createdAt?.toMillis?.()??0))
+      .slice(-60);
+    _renderChatLog(msgs);
+  }, e => {
+    console.error('[vtt] chat listener:', e);
+    const el=document.getElementById('vtt-chat-log');
+    if (el) el.innerHTML=`<div class="vtt-log-entry vtt-log-roll" style="color:#ef4444">⚠ Accès refusé — ajouter <code>vttLog</code> aux règles Firestore</div>`;
+  }));
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// MENU CONTEXTUEL (clic-droit images)
+// ═══════════════════════════════════════════════════════════════════
+let _ctxClose = null;
+const _CTX_ACTIONS = {};
+
+function _hideCtxMenu() {
+  document.getElementById('vtt-ctx-menu')?.remove();
+  if (_ctxClose) { document.removeEventListener('mousedown', _ctxClose); _ctxClose=null; }
+}
+
+function _showCtxMenu(x, y, items) {
+  _hideCtxMenu();
+  const el=document.createElement('div');
+  el.id='vtt-ctx-menu'; el.className='vtt-ctx-menu';
+  let idx=0;
+  el.innerHTML=items.map(item=>{
+    if (item==='---') return '<div class="vtt-ctx-sep"></div>';
+    const i=idx++;
+    _CTX_ACTIONS[i]=item.fn;
+    return `<div class="vtt-ctx-item" data-i="${i}">${item.label}</div>`;
+  }).join('');
+  el.addEventListener('click', e=>{
+    const i=e.target.closest('.vtt-ctx-item')?.dataset.i;
+    if (i!=null) { _CTX_ACTIONS[+i]?.(); _hideCtxMenu(); }
+  });
+  // Positionner en évitant de sortir de l'écran
+  el.style.cssText=`left:${x}px;top:${y}px;`;
+  document.body.appendChild(el);
+  _ctxClose=e=>{ if (!el.contains(e.target)) _hideCtxMenu(); };
+  setTimeout(()=>document.addEventListener('mousedown',_ctxClose), 0);
+}
+
+// ── Mode édition carte ───────────────────────────────────────────
+function _setMapMode(on) {
+  _mapMode=on;
+  _layers.map?.listening(on);
+  _layers.mapFg?.listening(on);
+  // Mettre à jour le draggable de toutes les images existantes
+  const toggle = lyr => lyr?.find('Image').forEach(ki=>ki.draggable(on));
+  toggle(_layers.map); toggle(_layers.mapFg);
+  if (!on) {
+    _imgTr?.nodes([]); _imgTrFg?.nodes([]); _selImg=null;
+    _layers.map?.batchDraw(); _layers.mapFg?.batchDraw();
+    _hideCtxMenu();
+  }
+  const btn=document.getElementById('vtt-map-mode-btn');
+  if (btn) { btn.classList.toggle('active',on); btn.textContent=on?'🗺 Carte ✏':'🗺 Carte 🔒'; }
+}
+window._vttToggleMapMode = () => _setMapMode(!_mapMode);
+
+// ═══════════════════════════════════════════════════════════════════
+// CHAT & LOG DE DÉS
+// ═══════════════════════════════════════════════════════════════════
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _renderChatLog(msgs) {
+  const el=document.getElementById('vtt-chat-log'); if (!el) return;
+  const myUid=STATE.user?.uid;
+  el.innerHTML=msgs.map(m=>{
+    const isMe=m.authorId===myUid;
+    const who=`<span class="vtt-log-who${isMe?' me':''}">${_escHtml(m.authorName||'?')}</span>`;
+    if (m.type==='roll') {
+      return `<div class="vtt-log-entry vtt-log-roll">${who} 🎲 <em>${_escHtml(m.rollFormula||'')}</em> → <strong>${m.rollResult}</strong>`
+        +(m.text?`<span class="vtt-log-desc">${_escHtml(m.text)}</span>`:'')
+        +`</div>`;
+    }
+    return `<div class="vtt-log-entry vtt-log-msg">${who} ${_escHtml(m.text||'')}</div>`;
+  }).join('');
+  el.scrollTop=el.scrollHeight;
+}
+
+window._vttSendChat = async () => {
+  const input=document.getElementById('vtt-chat-input');
+  const text=input?.value.trim(); if (!text) return;
+  input.value='';
+  const authorName=STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'Joueur';
+  try {
+    await addDoc(_logCol(),{
+      type:'chat', authorId:STATE.user?.uid||null, authorName, text, createdAt:serverTimestamp(),
+    });
+  } catch(e) {
+    if (input) input.value=text; // restaurer le texte si échec
+    console.error('[vtt] chat send:', e);
+    const reason=e.code==='permission-denied'
+      ? 'Règles Firestore : ajouter vttLog (voir docs/firestore-rules.md)'
+      : e.message;
+    showNotif(`Erreur chat : ${reason}`,'error');
+  }
+};
 
 function _renderCombatBadge() {
   const el=document.getElementById('vtt-combat-badge'); if (!el) return;
@@ -699,14 +1319,72 @@ function _renderCombatBadge() {
 window._vttTool       = t => _setTool(t);
 window._vttSwitchPage = id => _switchPage(id);
 
-window._vttAddPage    = async () => {
-  const name=prompt('Nom de la page :')?.trim(); if (!name) return;
-  await addDoc(_pgsCol(),{name,cols:24,rows:18,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
-    .catch(()=>showNotif('Erreur','error'));
+window._vttAddPage = () => {
+  openModal('➕ Nouvelle page', `
+    <div class="vtt-form">
+      <div class="form-group"><label>Nom</label>
+        <input id="vpf-name" type="text" placeholder="ex : Forêt Sombre" autofocus></div>
+      <div class="vtt-form-row">
+        <div class="form-group"><label>Colonnes (largeur)</label>
+          <input id="vpf-cols" type="number" value="24" min="8" max="200"></div>
+        <div class="form-group"><label>Lignes (hauteur)</label>
+          <input id="vpf-rows" type="number" value="18" min="8" max="200"></div>
+      </div>
+      <small style="color:var(--text-dim);font-size:.72rem">1 case = ${CELL}px · ex : 30×22 pour une grande carte</small>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+        <button class="btn-primary" onclick="window._vttConfirmAddPage()">Créer</button>
+      </div>
+    </div>`);
 };
+window._vttConfirmAddPage = async () => {
+  const name=(document.getElementById('vpf-name')?.value||'').trim();
+  const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-cols')?.value)||24));
+  const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-rows')?.value)||18));
+  if (!name) { showNotif('Nom requis','error'); return; }
+  closeModalDirect();
+  await addDoc(_pgsCol(),{name,cols,rows,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
+    .catch(()=>showNotif('Erreur création page','error'));
+};
+
+window._vttEditPage = id => {
+  const p=_pages[id]; if (!p) return;
+  openModal('✏️ Modifier la page', `
+    <div class="vtt-form">
+      <div class="form-group"><label>Nom</label>
+        <input id="vpe-name" type="text" value="${p.name}" autofocus></div>
+      <div class="vtt-form-row">
+        <div class="form-group"><label>Colonnes</label>
+          <input id="vpe-cols" type="number" value="${p.cols||24}" min="8" max="200"></div>
+        <div class="form-group"><label>Lignes</label>
+          <input id="vpe-rows" type="number" value="${p.rows||18}" min="8" max="200"></div>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+        <button class="btn-primary" onclick="window._vttConfirmEditPage('${id}')">Enregistrer</button>
+      </div>
+    </div>`);
+};
+window._vttConfirmEditPage = async id => {
+  const name=(document.getElementById('vpe-name')?.value||'').trim();
+  const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-cols')?.value)||24));
+  const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-rows')?.value)||18));
+  if (!name) { showNotif('Nom requis','error'); return; }
+  closeModalDirect();
+  await updateDoc(_pgRef(id),{name,cols,rows}).catch(()=>showNotif('Erreur','error'));
+  if (_activePage?.id===id) { _activePage={..._activePage,name,cols,rows}; _drawGrid(); }
+};
+
 window._vttDeletePage = async id => {
   if (!await confirmModal('Supprimer cette page ?',{title:'Supprimer ?',danger:true})) return;
   await deleteDoc(_pgRef(id)).catch(()=>{});
+};
+
+// Envoyer tous les joueurs vers une page spécifique (depuis la liste)
+window._vttSendToPage = async pageId => {
+  const p=_pages[pageId]; if (!p) return;
+  await setDoc(_sesRef(),{activePageId:pageId},{merge:true}).catch(()=>{});
+  showNotif(`📡 Tous les joueurs → « ${p.name} »`,'success');
 };
 
 // Placer un token sur la page active (depuis le tray)
@@ -721,14 +1399,6 @@ window._vttRetireToken = async tokenId => {
   await updateDoc(_tokRef(tokenId),{pageId:null,visible:false}).catch(()=>{});
   if (_selected===tokenId) _deselect();
 };
-// Envoyer TOUS les joueurs sur la page active
-window._vttSendAllHere = async () => {
-  if (!_activePage) { showNotif('Aucune page active','error'); return; }
-  await setDoc(_sesRef(), { activePageId: _activePage.id }, { merge: true })
-    .catch(() => showNotif('Erreur','error'));
-  showNotif(`📡 Tous les joueurs → « ${_activePage.name} »`, 'success');
-};
-
 // Déplacer le token vers une autre page
 window._vttMoveTokenToPage = async (tokenId,pageId) => {
   if (!pageId) return;
@@ -805,6 +1475,89 @@ function _openStatsModal(t) {
       </div>
     </div>`);
 }
+// ── Création d'ennemis personnalisés ────────────────────────────────
+window._vttCreateEnemy = () => {
+  openModal('👹 Créer un ennemi', `
+    <div class="vtt-form">
+      <div class="form-group"><label>Nom</label>
+        <input id="ve-name" type="text" placeholder="ex : Gobelin" autofocus></div>
+      <div class="vtt-form-row">
+        <div class="form-group"><label>PV Max</label>
+          <input id="ve-hp" type="number" value="20" min="1"></div>
+        <div class="form-group"><label>CA / Défense</label>
+          <input id="ve-ca" type="number" value="10" min="0"></div>
+      </div>
+      <div class="vtt-form-row">
+        <div class="form-group"><label>⚔️ Dégâts (dés)</label>
+          <input id="ve-atk" type="text" value="1d6" placeholder="1d6, 2d4+2…"></div>
+        <div class="form-group"><label>🏃 Mouvement</label>
+          <input id="ve-mv" type="number" value="4" min="1"></div>
+      </div>
+      <div class="vtt-form-row">
+        <div class="form-group"><label>🎯 Portée (cases)</label>
+          <input id="ve-range" type="number" value="1" min="1"></div>
+        <div class="form-group"><label>Nombre à créer</label>
+          <input id="ve-count" type="number" value="1" min="1" max="20"></div>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+        <button class="btn-primary" onclick="window._vttConfirmCreateEnemy()">Créer</button>
+      </div>
+    </div>`);
+};
+window._vttConfirmCreateEnemy = async () => {
+  const name  = (document.getElementById('ve-name')?.value||'').trim() || 'Ennemi';
+  const hp    = Math.max(1, parseInt(document.getElementById('ve-hp')?.value)||20);
+  const ca    = parseInt(document.getElementById('ve-ca')?.value)||10;
+  const atk   = document.getElementById('ve-atk')?.value.trim()||'1d6';
+  const mv    = Math.max(1, parseInt(document.getElementById('ve-mv')?.value)||4);
+  const range = Math.max(1, parseInt(document.getElementById('ve-range')?.value)||1);
+  const count = Math.min(20, Math.max(1, parseInt(document.getElementById('ve-count')?.value)||1));
+  closeModalDirect();
+  const batch = writeBatch(db);
+  for (let i=0; i<count; i++) {
+    const ref = doc(_toksCol());
+    batch.set(ref, {
+      name: count>1 ? `${name} ${i+1}` : name,
+      type: 'enemy', characterId: null, npcId: null, ownerId: null,
+      pageId: _activePage?.id||null,
+      col: _activePage ? Math.min(_activePage.cols-1, Math.floor(_activePage.cols/2)+i) : i,
+      row: _activePage ? Math.floor(_activePage.rows/2) : 0,
+      visible: true,
+      hp, hpMax: hp, attackDice: atk, defense: ca, movement: mv, range,
+      imageUrl: null, movedThisTurn: false, attackedThisTurn: false,
+      createdAt: serverTimestamp(),
+    });
+  }
+  await batch.commit().catch(()=>showNotif('Erreur création','error'));
+  showNotif(`👹 ${count>1?`${count} ennemis créés`:'Ennemi créé'} !`,'success');
+};
+
+// Créer une nouvelle instance indépendante d'un ennemi (PV séparés)
+window._vttDuplicateToken = async tokenId => {
+  const t=_tokens[tokenId]?.data; if (!t) return;
+  const baseName=t.name.replace(/ \d+$/, '');
+  const sameGroup=Object.values(_tokens).filter(e=>
+    t.beastId ? e.data.beastId===t.beastId
+              : e.data.name.replace(/ \d+$/,'')===baseName
+  );
+  const num=sameGroup.length+1;
+  const { id:_tid, createdAt:_ca, ...base } = t;
+  const ref=doc(_toksCol());
+  await setDoc(ref, {
+    ...base,
+    name:`${baseName} ${num}`,
+    hp: null,   // PV frais depuis le template bestiaire
+    pageId: _activePage?.id||null,
+    col: _activePage ? Math.min(_activePage.cols-1,(t.col||0)+sameGroup.length) : 0,
+    row: t.row||0,
+    visible: true,
+    movedThisTurn: false, attackedThisTurn: false,
+    createdAt: serverTimestamp(),
+  }).catch(()=>showNotif('Erreur duplication','error'));
+  showNotif(`👹 ${baseName} ${num} créé !`,'success');
+};
+
 window._vttSaveStats = async id => {
   const mv  = document.getElementById('vsf-mv')?.value;
   const rng = document.getElementById('vsf-range')?.value;
@@ -825,21 +1578,43 @@ window._vttSaveStats = async id => {
   showNotif('Stats mises à jour','success');
 };
 
-// ── Upload Firebase Storage ─────────────────────────────────────────
+// ── Upload via ImgBB ────────────────────────────────────────────────
+// Clé API stockée en localStorage (jamais dans le code)
+const _IMGBB_KEY_LS = 'vtt-imgbb-key';
+
+function _getImgbbKey() { return localStorage.getItem(_IMGBB_KEY_LS)||''; }
+
+window._vttSetImgbbKey = () => {
+  const current = _getImgbbKey();
+  const key = prompt('Clé API ImgBB (imgbb.com → Get API key) :', current)?.trim();
+  if (key === null) return;
+  if (key) { localStorage.setItem(_IMGBB_KEY_LS, key); showNotif('Clé ImgBB enregistrée ✓','success'); }
+  else      { localStorage.removeItem(_IMGBB_KEY_LS); showNotif('Clé ImgBB supprimée','success'); }
+};
+
 async function _handleUpload(file) {
   if (!file||!_activePage) return;
+  const key = _getImgbbKey();
+  if (!key) {
+    showNotif('Configure ta clé ImgBB d\'abord (bouton 🔑)','error');
+    return;
+  }
   showNotif('Upload en cours…','success');
   try {
-    const {getStorage,ref,uploadBytes,getDownloadURL}=
-      await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js');
-    const stor=getStorage();
-    const fRef=ref(stor,`adventures/${_aid()}/vtt/${Date.now()}_${file.name}`);
-    await uploadBytes(fRef,file);
-    const url=await getDownloadURL(fRef);
+    const b64 = await new Promise((res,rej)=>{
+      const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file);
+    });
+    const form=new FormData();
+    form.append('key', key);
+    form.append('image', b64);
+    const resp = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body:form });
+    const json = await resp.json();
+    if (!json.success) throw new Error(json.error?.message||'ImgBB error');
+    const url = json.data.url;
     const imgs=[...(_activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:_activePage.cols,h:_activePage.rows}];
     await updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs});
     showNotif('Image ajoutée !','success');
-  } catch(e) { console.error(e); showNotif('Erreur upload','error'); }
+  } catch(e) { console.error(e); showNotif('Erreur upload : '+e.message,'error'); }
 }
 
 // ── Outil + clavier ─────────────────────────────────────────────────
@@ -870,26 +1645,53 @@ function _buildHtml() {
       <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="Sélectionner (S)">↖ Sélect.</button>
       <button class="vtt-tool"        data-tool="attack" onclick="window._vttTool('attack')" title="Attaque (A)">⚔️ Attaque</button>
     </div>
-    <div id="vtt-page-tabs" class="vtt-page-tabs"></div>
+    ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
     <div class="vtt-tool-group vtt-right">
       <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
       ${mj?`
-        <button class="vtt-btn-sm" onclick="window._vttAddPage()"      title="Nouvelle page">＋ Page</button>
-        <button class="vtt-btn-sm" onclick="window._vttSendAllHere()"  title="Envoyer tous les joueurs sur cette page" id="vtt-btn-send-all">📡 Envoyer tous</button>
-        <button class="vtt-btn-sm" onclick="window._vttAddImageUrl()"  title="Fond par URL">🖼 Image</button>
-        <label  class="vtt-btn-sm vtt-upload-lbl">📁 Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
-        <button class="vtt-btn-sm" onclick="window._vttToggleCombat()" title="Combat">⚔ Combat</button>
+        <button class="vtt-btn-sm" id="vtt-map-mode-btn" onclick="window._vttToggleMapMode()" title="Activer l'édition des images (🔒 verrouillé par défaut — évite les déplacements accidentels)">🗺 Carte 🔒</button>
+        <button class="vtt-btn-sm" onclick="window._vttAddImageUrl()"  title="Fond par URL">🖼 URL</button>
+        <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload via ImgBB">📁 Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
+        <button class="vtt-btn-sm" onclick="window._vttSetImgbbKey()" title="Configurer la clé API ImgBB">🔑</button>
+        <button class="vtt-btn-sm" onclick="window._vttToggleCombat()" title="Démarrer/arrêter le combat">⚔ Combat</button>
         <button class="vtt-btn-sm" onclick="window._vttNextRound()"    title="Tour suivant">▶ Tour</button>`:''}
     </div>
   </div>
   <div class="vtt-body">
-    ${mj?`<div class="vtt-tray" id="vtt-tray"><div class="vtt-tray-empty">Chargement…</div></div>`:''}
+    ${mj?`
+    <div class="vtt-tray" id="vtt-tray">
+      <div class="vtt-tray-section">
+        <div class="vtt-tray-section-hd">
+          <span>Pages</span>
+          <button class="vtt-tray-add-btn" onclick="window._vttAddPage()" title="Nouvelle page">＋</button>
+        </div>
+        <div id="vtt-tray-pages"><div class="vtt-tray-empty">Chargement…</div></div>
+      </div>
+      <div class="vtt-tray-section">
+        <div class="vtt-tray-section-hd">
+          <span>Tokens</span>
+          <button class="vtt-tray-add-btn" onclick="window._vttCreateEnemy()" title="Créer un ennemi personnalisé">＋ Ennemi</button>
+        </div>
+        <div id="vtt-tray-tokens"></div>
+      </div>
+    </div>`:''}
     <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
-    <div class="vtt-inspector" id="vtt-inspector">
-      <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token</div>
+    <div class="vtt-right-col">
+      <div class="vtt-inspector" id="vtt-inspector">
+        <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token</div>
+      </div>
+      <div class="vtt-chat">
+        <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
+        <div class="vtt-chat-log" id="vtt-chat-log"></div>
+        <div class="vtt-chat-input-row">
+          <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
+            onkeydown="if(event.key==='Enter')window._vttSendChat()">
+          <button class="vtt-chat-send" onclick="window._vttSendChat()" title="Envoyer">↵</button>
+        </div>
+      </div>
     </div>
   </div>
-  <div class="vtt-hint">S sélect. · A attaque · Échap désélect. · Molette zoom · Clic-droit pan</div>
+  <div class="vtt-hint">S sélect. · A attaque · Échap désélect. · Molette zoom · Clic-droit pan${mj?' · Clic image → redimensionner':''}</div>
 </div>`;
 }
 
