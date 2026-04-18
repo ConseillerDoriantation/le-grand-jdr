@@ -397,6 +397,18 @@ function _renderPanel(c) {
   // mais sans aucune valeur — les joueurs remplissent eux-mêmes.
   const ded = (track.deductions || {});
 
+  // ── CA estimée (utilisée dans le VTT pour le jet de toucher) ──────
+  const statsEstimeesHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">🛡 CA estimée
+        <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">utilisée dans le VTT</span>
+      </div>
+      <input class="input-field" type="number"
+        style="width:100%;font-size:.88rem;font-weight:700;padding:4px 8px;text-align:center"
+        placeholder="?" value="${ded.ca_estimee||''}"
+        onchange="window._bstSetDeduction('${c.id}','ca_estimee',this.value)">
+    </div>`;
+
   const attaquesJoueurHtml = attaques.length ? `
     <div class="bst-section">
       <div class="bst-section-title">⚔️ Attaques <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">${attaques.length} observée${attaques.length>1?'s':''}</span></div>
@@ -459,6 +471,7 @@ function _renderPanel(c) {
   <div class="bst-panel" style="position:sticky;top:1rem">
     ${headerHtml}
     ${suiviHtml(false)}
+    ${statsEstimeesHtml}
     ${attaquesJoueurHtml}
     ${traitsJoueurHtml}
     ${butinsJoueurHtml}

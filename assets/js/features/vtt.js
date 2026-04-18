@@ -13,6 +13,8 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
 import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax } from '../shared/char-stats.js';
+import { getArmorSetData, getWeaponToucherParts, getWeaponDegatsParts } from './characters/data.js';
+import { calcSortDegats, calcSortSoin } from './characters/spells.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import PAGES from './pages.js';
@@ -88,9 +90,13 @@ function _live(t) {
               : (e.hpMax || e.pvMax || e.pv || 20);
 
   // Pour les créatures du bestiaire : HP suivi sur le TOKEN (pas sur la fiche template)
-  const hpCurrent = c ? (c.hp ?? hpMax)
-                  : n ? (n.hp ?? hpMax)
-                  : (t.hp ?? hpMax); // bestiaire + tokens custom
+  // Personnages : pvActuel (champ feuille de perso) — PNJ/custom : hp
+  // Joueur non-admin vs bestiaire : utilise son tracker personnel
+  const playerTrk = (!STATE.isAdmin && b) ? (_playerTracker[t.beastId] || null) : null;
+  const hpCurrent = c ? (c.pvActuel ?? hpMax)
+                  : n ? (n.hp       ?? hpMax)
+                  : playerTrk ? (playerTrk.pvActuel ?? t.hp ?? hpMax)
+                  : (t.hp ?? hpMax);
 
   // Formule de dégâts : arme équipée > première attaque bestiary > override token > fallback
   const weapon    = c?.equipement?.['Main principale'];
@@ -112,23 +118,38 @@ function _live(t) {
     displayHp:         e.hp  ?? t.hp  ?? hpMax,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
-    displayPm:         c ? (c.pm ?? calcPMMax(c)) : null,
+    displayPm:         c ? (c.pmActuel ?? calcPMMax(c)) : null,
     displayPmMax:      c ? calcPMMax(c) : null,
     displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (parseInt(b.vitesse)||4) : (e.vitesse || e.deplacement || 6))),
     displayAttack:     t.attack   ?? (c ? 5+getMod(c,'force') : (b ? (parseInt(b.attaques?.[0]?.toucher)||5) : (e.bonusAttaque||e.attack||5))),
     displayAttackDice: atkDice,
-    displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (parseInt(b.ca)||10) : (e.ca||e.defense||0))),
-    displayRange:      t.range    ?? (b ? (parseInt(b.attaques?.[0]?.portee)||1) : (weapon?.portee ? parseInt(weapon.portee)||1 : 1)),
+    displayDefense:    t.defense  ?? (c ? calcCA(c) : (playerTrk?.deductions?.ca_estimee
+      ? parseInt(playerTrk.deductions.ca_estimee)
+      : (b ? (parseInt(b.ca)||10) : (e.ca||e.defense||0)))),
+    // Priorité : arme équipée > override token (admin) > attaque bestiaire > défaut 1
+    displayRange: (c && weapon?.portee ? (parseInt(weapon.portee)||1) : null)
+               ?? t.range
+               ?? (b ? (parseInt(b.attaques?.[0]?.portee)||1) : 1),
     _beast:            b,   // référence directe pour _buildAttackOptions
   };
 }
 
 // HP écrit sur la fiche source (bidirectionnel)
+// Personnages → pvActuel  |  PNJ/custom → hp
+// Joueur non-admin vs bestiaire → tracker personnel (pas de droit sur vttTokens)
 async function _setHp(t, newHp) {
   const v = Math.max(0, newHp);
-  if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
-  else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
-  else               await updateDoc(_tokRef(t.id),          { hp: v });
+  if (t.characterId) {
+    await updateDoc(_chrRef(t.characterId), { pvActuel: v });
+  } else if (t.npcId) {
+    await updateDoc(_npcRef(t.npcId), { hp: v });
+  } else if (t.beastId && !STATE.isAdmin) {
+    const uid = STATE.user?.uid;
+    if (uid) await setDoc(doc(db, `bestiary_tracker/${uid}`),
+      { data: { [t.beastId]: { pvActuel: v } } }, { merge: true });
+  } else {
+    await updateDoc(_tokRef(t.id), { hp: v });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -405,32 +426,37 @@ function _buildShape(t) {
 
   const g = new K.Group({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2, id:`tok-${t.id}` });
   g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9, stroke:'rgba(255,255,255,0.2)',strokeWidth:2 }));
-  g.add(new K.Circle({ radius:r+7, stroke:'#fff',     strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
-  g.add(new K.Circle({ radius:r+7, stroke:'#ef4444',  strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
-  // ── Barre HP + valeur ────────────────────────────────────────────
-  g.add(new K.Rect({ x:-bW/2,y:r+4,width:bW,height:5,fill:'#1e1e2e',cornerRadius:2,name:'hp-bg' }));
-  g.add(new K.Rect({ x:-bW/2,y:r+4,width:bW*rat,height:5,fill:hpColor(rat),cornerRadius:2,name:'hp-fill' }));
-  g.add(new K.Text({ text:`${hp}/${hpm}`, x:bW/2+2,y:r+3, fontSize:8,
-    fill:'rgba(210,210,210,0.8)', fontFamily:'Inter,sans-serif', listening:false, name:'hp-val' }));
-  // ── Barre PM + valeur (joueurs seulement) ───────────────────────
+  g.add(new K.Circle({ radius:r+7, stroke:'#fff',    strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
+  g.add(new K.Circle({ radius:r+7, stroke:'#ef4444', strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
+  g.add(new K.Circle({ radius:r+5, stroke:'#ff6b6b', strokeWidth:2, dash:[3,3],fill:'rgba(239,68,68,0.08)',  visible:false,name:'tgt'  }));
+  g.add(new K.Circle({ radius:r+5, stroke:'#22c38e', strokeWidth:2, dash:[3,3],fill:'rgba(34,195,142,0.08)', visible:false,name:'htgt' }));
+  // ── Barre HP (valeur centrée sur la barre) ──────────────────────
+  const hpH=10, hpY=r+6;
+  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW,height:hpH,fill:'rgba(0,0,0,0.65)',cornerRadius:3,name:'hp-bg' }));
+  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW*rat,height:hpH,fill:hpColor(rat),cornerRadius:3,name:'hp-fill' }));
+  g.add(new K.Text({ text:`${hp}/${hpm}`, x:-bW/2,y:hpY+1,
+    width:bW,align:'center',fontSize:8,fontStyle:'bold',
+    fill:'rgba(255,255,255,0.93)',fontFamily:'Inter,sans-serif',listening:false,name:'hp-val' }));
+  // ── Barre PM (joueurs seulement) ────────────────────────────────
   const _pm0=ld.displayPm;
+  let _nameY0 = hpY+hpH+4;
   if (_pm0!=null) {
-    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1, pmW0=bW*0.78;
-    g.add(new K.Rect({ x:-pmW0/2,y:r+12,width:pmW0,height:4,fill:'#1e1e2e',cornerRadius:2,name:'pm-bg' }));
-    g.add(new K.Rect({ x:-pmW0/2,y:r+12,width:pmW0*pmRat0,height:4,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
-    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:pmW0/2+2,y:r+11, fontSize:8,
-      fill:'rgba(155,109,255,0.85)', fontFamily:'Inter,sans-serif', listening:false, name:'pm-val' }));
+    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1;
+    const pmY=hpY+hpH+3, pmH=8;
+    g.add(new K.Rect({ x:-bW/2,y:pmY,width:bW,height:pmH,fill:'rgba(0,0,0,0.55)',cornerRadius:2,name:'pm-bg' }));
+    g.add(new K.Rect({ x:-bW/2,y:pmY,width:bW*pmRat0,height:pmH,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
+    g.add(new K.Text({ text:`${_pm0}/${pmMax0}`, x:-bW/2,y:pmY+1,
+      width:bW,align:'center',fontSize:7,
+      fill:'rgba(210,180,255,0.95)',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val' }));
+    _nameY0 = pmY+pmH+3;
   }
-  // ── CA (petite étiquette) ────────────────────────────────────────
-  const _caY0 = _pm0!=null ? r+19 : r+12;
-  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-CELL/2, y:_caY0,
-    width:CELL, align:'center', fontSize:9, fill:'rgba(190,190,190,0.6)',
-    fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl' }));
-  // ── Nom ──────────────────────────────────────────────────────────
-  const _nameY0 = _pm0!=null ? r+27 : r+20;
-  g.add(new K.Text({ text:ld.displayName??t.name, x:-CELL/2, y:_nameY0,
-    width:CELL, align:'center', fontSize:10, fill:'#ddd',
-    fontFamily:'Inter,sans-serif', name:'lbl' }));
+  // ── Nom (fond sombre + texte blanc gras) ────────────────────────
+  const nameH=15;
+  g.add(new K.Rect({ x:-bW/2,y:_nameY0,width:bW,height:nameH,
+    fill:'rgba(0,0,0,0.68)',cornerRadius:3,listening:false,name:'lbl-bg' }));
+  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:_nameY0+2,
+    width:bW,align:'center',fontSize:11,fontStyle:'bold',
+    fill:'#fff',fontFamily:'Inter,sans-serif',name:'lbl' }));
 
   const imgSrc = ld.displayImage;
   if (imgSrc) {
@@ -513,25 +539,25 @@ function _buildShape(t) {
 
   g.on('click', e => {
     e.cancelBubble=true;
-    if (_tool==='attack') {
-      if (_attackSrc && _attackSrc===t.id) {
-        // Re-clic sur l'attaquant → annuler la sélection
-        _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
-        _attackSrc=null; _clearHL(); _layers.token.batchDraw();
-      } else if (_attackSrc && _attackSrc!==t.id) {
-        // Clic sur une cible → attaquer
-        _execAttack(_attackSrc, t.id);
-      } else {
-        // Pas d'attaquant encore → le sélectionner
-        _select(t.id);
-      }
-    } else if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
-      // Shift+clic : ajouter / retirer du groupe
-      _toggleMultiSelect(t.id);
-    } else {
-      _clearMultiSelect();
-      _select(t.id);
+    // Shift+clic : multi-sélection
+    if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
+      _toggleMultiSelect(t.id); return;
     }
+    // Token déjà sélectionné → désélectionner
+    if (_selected===t.id) { _deselect(); return; }
+    // Token ami sélectionné → cliquer une cible = modal d'action unifiée
+    if (_selected && _selected!==t.id) {
+      const srcData=_tokens[_selected]?.data;
+      const srcIsMine=srcData&&(STATE.isAdmin||srcData.ownerId===STATE.user?.uid);
+      if (srcIsMine) {
+        const atkOpts=_buildAttackOptions(srcData);
+        const healOpts=_buildHealOptions(srcData);
+        if (atkOpts.length||healOpts.length) { _execAction(_selected, t.id); return; }
+      }
+    }
+    // Sélection normale
+    _clearMultiSelect();
+    _select(t.id);
   });
 
   return g;
@@ -549,42 +575,43 @@ function _patchShape(id) {
   // PM
   const _pm=ld.displayPm;
   if (_pm!=null) {
-    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.max(0,_pm/pmMax):1, pmW=bW*0.78;
-    g.findOne('.pm-fill')?.width(pmW*pmRat);
-    g.findOne('.pm-val')?.text(`✨${_pm}/${pmMax}`);
+    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.max(0,_pm/pmMax):1;
+    g.findOne('.pm-fill')?.width(bW*pmRat);
+    g.findOne('.pm-val')?.text(`${_pm}/${pmMax}`);
   }
-  g.findOne('.ca-lbl')?.text(`🛡${ld.displayDefense??0}`);
   g.findOne('.lbl')?.text(ld.displayName??e.data.name);
   g.visible(!!(e.data.visible||STATE.isAdmin));
   _layers.token?.batchDraw();
+}
+
+// ── Hostilité (pour l'auto-attaque JRPG) ────────────────────────────
+function _areHostile(typeA, typeB) {
+  return (typeA==='enemy') !== (typeB==='enemy');
 }
 
 // ── Sélection ───────────────────────────────────────────────────────
 function _select(id) {
   if (_imgTr&&_selImg) { _imgTr.nodes([]); _selImg=null; _layers.map?.batchDraw(); }
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
-  _selected=id;
+  _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _clearTargets();
+  _selected=id; _attackSrc=null;
   _tokens[id]?.shape?.findOne('.sel')?.visible(true);
   _layers.token.batchDraw();
   const data=_tokens[id]?.data;
   _renderInspector(data??null);
-  if (_tool==='attack') {
-    // Mode attaque : désigner l'attaquant + montrer sa portée en rouge
-    if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
-      _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
-      _attackSrc=id;
-      _tokens[id]?.shape?.findOne('.atk')?.visible(true);
-      _layers.token.batchDraw();
-      _showAttackRange(data);
-    }
-  } else {
-    if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) _showMoveRange(data);
+  if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
+    _showRanges(data);
+    _attackSrc=id;
+    _tokens[id]?.shape?.findOne('.atk')?.visible(true);
+    _highlightTargets(data);
   }
 }
 
 function _deselect() {
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
   _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _clearTargets();
   _selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
   if (_imgTr)   { _imgTr.nodes([]); _layers.map?.batchDraw(); }
   if (_imgTrFg) { _imgTrFg.nodes([]); _layers.mapFg?.batchDraw(); }
@@ -592,22 +619,70 @@ function _deselect() {
   _layers.token?.batchDraw();
 }
 
-// ── Portée de mouvement ─────────────────────────────────────────────
-function _showMoveRange(t) {
+// ── Highlight des cibles (ennemis = rouge, alliés soignables = vert) ─
+function _highlightTargets(srcData) {
+  if (!_activePage||!srcData) return;
+  const atkOpts  = _buildAttackOptions(srcData);
+  const healOpts = _buildHealOptions(srcData);
+  const maxAtk   = atkOpts.length  ? Math.max(...atkOpts.map(o=>o.portee))  : (_live(srcData).displayRange??1);
+  const maxHeal  = healOpts.length ? Math.max(...healOpts.map(o=>o.portee)) : 0;
+  for (const e of Object.values(_tokens)) {
+    const t=e.data;
+    if (!e.shape||t.pageId!==_activePage.id||t.id===srcData.id) continue;
+    if (_areHostile(srcData.type, t.type)) {
+      const d=Math.abs(t.col-srcData.col)+Math.abs(t.row-srcData.row);
+      e.shape.findOne('.tgt')?.visible(d<=maxAtk);
+      e.shape.findOne('.htgt')?.visible(false);
+    } else if (maxHeal>0) {
+      const d=Math.abs(t.col-srcData.col)+Math.abs(t.row-srcData.row);
+      e.shape.findOne('.htgt')?.visible(d<=maxHeal);
+      e.shape.findOne('.tgt')?.visible(false);
+    }
+  }
+  _layers.token?.batchDraw();
+}
+
+function _clearTargets() {
+  for (const e of Object.values(_tokens)) {
+    e.shape?.findOne('.tgt')?.visible(false);
+    e.shape?.findOne('.htgt')?.visible(false);
+  }
+  _layers.token?.batchDraw();
+}
+
+// ── Portées visuelles sur la grille (déplacement + attaque) ─────────
+function _showRanges(t) {
   _clearHL(); if (!_activePage) return;
   const K=window.Konva, ld=_live(t), mv=ld.displayMovement??6;
+  const atkOpts=_buildAttackOptions(t);
+  const maxAtk=atkOpts.length?Math.max(...atkOpts.map(o=>o.portee)):(ld.displayRange??1);
   const {cols,rows}=_activePage;
   const occ=new Set(Object.values(_tokens)
     .filter(e=>e.data?.pageId===_activePage.id&&e.data.id!==t.id)
     .map(e=>`${e.data.col},${e.data.row}`));
+
+  // Portée d'attaque en arrière-plan (rouge léger)
+  if (maxAtk>0) {
+    for (let dc=-maxAtk;dc<=maxAtk;dc++) for (let dr=-maxAtk;dr<=maxAtk;dr++) {
+      if (!dc&&!dr) continue;
+      if (Math.abs(dc)+Math.abs(dr)>maxAtk) continue;
+      const c=t.col+dc, r=t.row+dr;
+      if (c<0||r<0||c>=cols||r>=rows) continue;
+      const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
+        fill:'rgba(239,68,68,0.06)', stroke:'rgba(239,68,68,0.18)', strokeWidth:1, listening:false });
+      _layers.grid.add(rect); _moveHL.push(rect);
+    }
+  }
+
+  // Portée de déplacement au premier plan (bleu, cliquable)
   for (let dc=-mv;dc<=mv;dc++) for (let dr=-mv;dr<=mv;dr++) {
     if (Math.abs(dc)+Math.abs(dr)>mv) continue;
-    const c=t.col+dc,r=t.row+dr;
+    const c=t.col+dc, r=t.row+dr;
     if (c<0||r<0||c>=cols||r>=rows||(!dc&&!dr)) continue;
     const blk=occ.has(`${c},${r}`);
     const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
-      fill:blk?'rgba(239,68,68,0.1)':'rgba(79,140,255,0.14)',
-      stroke:blk?'rgba(239,68,68,0.3)':'rgba(79,140,255,0.3)',strokeWidth:1,listening:!blk });
+      fill:blk?'rgba(239,68,68,0.1)':'rgba(79,140,255,0.16)',
+      stroke:blk?'rgba(239,68,68,0.3)':'rgba(79,140,255,0.35)', strokeWidth:1, listening:!blk });
     if (!blk){const tc=c,tr=r;rect.on('click',async e=>{e.cancelBubble=true;if(_selected)await _moveTo(_selected,tc,tr);});}
     _layers.grid.add(rect); _moveHL.push(rect);
   }
@@ -642,25 +717,7 @@ function _toggleMultiSelect(id) {
   _layers.token?.batchDraw();
 }
 
-/** Surbrillance rouge des cases à portée d'attaque de t. */
-function _showAttackRange(t) {
-  _clearHL();
-  if (!_activePage) return;
-  const K=window.Konva;
-  const options=_buildAttackOptions(t);
-  const maxRange=options.length?Math.max(...options.map(o=>o.portee)):(_live(t).displayRange??1);
-  const {cols,rows}=_activePage;
-  for (let dc=-maxRange;dc<=maxRange;dc++) for (let dr=-maxRange;dr<=maxRange;dr++) {
-    if (!dc&&!dr) continue;
-    if (Math.abs(dc)+Math.abs(dr)>maxRange) continue;
-    const c=t.col+dc, r=t.row+dr;
-    if (c<0||r<0||c>=cols||r>=rows) continue;
-    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
-      fill:'rgba(239,68,68,0.1)', stroke:'rgba(239,68,68,0.28)', strokeWidth:1, listening:false });
-    _layers.grid.add(rect); _moveHL.push(rect);
-  }
-  _layers.grid.batchDraw();
-}
+
 async function _moveTo(id,col,row) {
   const patch={col,row};
   if (!STATE.isAdmin&&_session?.combat?.active) patch.movedThisTurn=true;
@@ -672,11 +729,12 @@ async function _moveTo(id,col,row) {
 // ATTAQUE — sélection arme/sort puis confirmation
 // ═══════════════════════════════════════════════════════════════════
 
-/** Parse "2d6+3", "1d8", "1d4-1" → lance et retourne le total. */
+/** Parse "2d6+3", "1d8 +3", "1d4 -1" → lance et retourne le total. */
 function _rollDice(formula) {
   if (!formula) return 1;
-  const m = String(formula).match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
-  if (!m) return Math.max(1, parseInt(formula)||1);
+  const f = String(formula).replace(/\s+/g, '');
+  const m = f.match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
+  if (!m) return Math.max(1, parseInt(f)||1);
   let total = 0;
   for (let i=0; i<parseInt(m[1]); i++) total += Math.floor(Math.random()*parseInt(m[2]))+1;
   return total + (parseInt(m[3])||0);
@@ -707,6 +765,7 @@ function _buildAttackOptions(t) {
 
   // ── Arme principale du personnage (ou attaque générique) ──
   const weapon = c?.equipement?.['Main principale'];
+  const isMagicWeapon = /mag\./i.test(weapon?.typeArme||'') || /mag\./i.test(weapon?.sousType||'');
   options.push({
     id:     'weapon',
     icon:   '⚔️',
@@ -714,25 +773,30 @@ function _buildAttackOptions(t) {
     dice:   ld.displayAttackDice || '1d6',
     portee: ld.displayRange ?? 1,
     pmCost: 0,
+    isMagic: isMagicWeapon,
   });
 
-  // ── Sorts offensifs actifs du deck ──
+  // ── Sorts offensifs actifs du deck (tous affichés, désactivés si PM insuffisant) ──
   if (c?.deck_sorts?.length) {
-    const pm       = c.pm ?? 0;
+    const pm       = c.pmActuel ?? calcPMMax(c);
+    const pmDelta  = getArmorSetData(c).modifiers?.spellPmDelta ?? 0; // set léger → -2
     const mainDice = ld.displayAttackDice || '1d6';
     c.deck_sorts.forEach((s, idx) => {
       if (!s.actif) return;
       if (!s.types?.includes('offensif')) return;
-      const cout = parseInt(s.cout)||0;
-      if (cout > pm) return;
+      const coutBase = parseInt(s.pm)||0;
+      const cout     = Math.max(0, coutBase + pmDelta);
       options.push({
-        id:     `sort_${idx}`,
-        icon:   '✨',
-        label:  s.nom || `Sort ${idx+1}`,
-        dice:   (s.degats?.trim()) || mainDice,
-        portee: parseInt(s.portee)||ld.displayRange||1,
-        pmCost: cout,
-        sortIdx: idx,
+        id:       `sort_${idx}`,
+        icon:     '✨',
+        label:    s.nom || `Sort ${idx+1}`,
+        dice:     calcSortDegats(s, c) || (s.degats?.trim()) || mainDice,
+        portee:   parseInt(s.portee)||ld.displayRange||1,
+        pmCost:   cout,
+        sortIdx:  idx,
+        sortRef:  s,   // référence directe pour recalcul dégâts
+        isMagic:  true, // les sorts sont toujours considérés comme magiques
+        disabled: cout > pm,  // affiché mais grisé si PM insuffisant
       });
     });
   }
@@ -740,8 +804,102 @@ function _buildAttackOptions(t) {
   return options;
 }
 
-// Cache des options d'attaque — évite tout JSON/HTML dans les onclick
+/** Construit les options de soin/support pour un token (sorts non offensifs). */
+function _buildHealOptions(t) {
+  const c = t.characterId ? _characters[t.characterId] : null;
+  if (!c?.deck_sorts?.length) return [];
+  const pm      = c.pmActuel ?? calcPMMax(c);
+  const pmDelta = getArmorSetData(c).modifiers?.spellPmDelta ?? 0; // set léger → -2
+  const ld      = _live(t);
+  return c.deck_sorts
+    .filter(s => s.actif && (s.types?.includes('soin') || s.types?.includes('support') || s.types?.includes('defensif')))
+    .map((s, idx) => {
+      const coutBase = parseInt(s.pm) || 0;
+      const cout     = Math.max(0, coutBase + pmDelta);
+      const soinCalc = calcSortSoin(s, c);
+      return {
+        id:       `heal_${idx}`,
+        icon:     '💚',
+        label:    s.nom || `Sort ${idx+1}`,
+        dice:     soinCalc || (s.soin?.trim()) || (s.degats?.trim()) || '1d6',
+        portee:   parseInt(s.portee) || ld.displayRange || 1,
+        pmCost:   cout,
+        sortIdx:  idx,
+        sortRef:  s,
+        isHeal:   true,
+        disabled: cout > pm,
+      };
+    });
+}
+
+// Cache des options d'attaque/soin — évite tout JSON/HTML dans les onclick
 const _atkOptsCache = {};
+// Attaque en cours de résolution (hit roll inter-modals)
+let _pendingAttack = null;
+// Tracker bestiaire du joueur courant (beastId → { pvActuel, deductions, … })
+let _playerTracker = {};
+
+/** Modal d'action unifiée : attaques + soins, sur n'importe quelle cible. */
+async function _execAction(srcId, tgtId) {
+  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  if (!src||!tgt) return;
+  const lS=_live(src), lT=_live(tgt);
+  const dist=Math.max(Math.abs(src.col-tgt.col),Math.abs(src.row-tgt.row));
+
+  const atkOpts  = _buildAttackOptions(src);
+  const healOpts = _buildHealOptions(src);
+  const allOpts  = [...atkOpts, ...healOpts];
+  const inRange  = allOpts.filter(o => dist <= o.portee);
+
+  if (!inRange.length) {
+    showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...allOpts.map(o=>o.portee))})`, 'error');
+    return;
+  }
+
+  const cacheKey = `act__${srcId}__${tgtId}`;
+  _atkOptsCache[cacheKey] = inRange;
+
+  const pm = lS.displayPm, pmMax = lS.displayPmMax;
+  const pmLine = (pm!=null)
+    ? `<div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem">PM : ${pm}/${pmMax}</div>` : '';
+  const tgtColor = _areHostile(src.type, tgt.type) ? '#ef4444' : '#22c38e';
+
+  openModal('⚔️ Action', `
+    <div class="vtt-form">
+      <div style="font-size:.82rem;margin-bottom:.4rem">
+        <strong>${lS.displayName??src.name}</strong>
+        → <strong style="color:${tgtColor}">${lT.displayName??tgt.name}</strong>
+        <span style="color:var(--text-dim);font-size:.72rem">(${dist} case${dist>1?'s':''})</span>
+      </div>
+      ${pmLine}
+      <div class="vtt-attack-opts">
+        ${inRange.map((o,i)=>`
+        <button class="vtt-attack-opt${o.disabled?' vtt-attack-opt--disabled':''}"
+          ${o.disabled?'disabled title="PM insuffisant"':`onclick="window._vttPickAction('${srcId}','${tgtId}',${i})"`}>
+          <span class="vtt-attack-opt-icon">${o.icon}</span>
+          <div class="vtt-attack-opt-body">
+            <div class="vtt-attack-opt-name">${o.label}</div>
+            <div class="vtt-attack-opt-meta">
+              ${o.isHeal?'💚':'🎲'} ${o.dice}
+              · 🎯 portée ${o.portee}
+              ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:''}
+              ${o.disabled?`<span class="vtt-attack-opt-noPm">PM insuffisant</span>`:''}
+            </div>
+          </div>
+        </button>`).join('')}
+      </div>
+      <div style="text-align:right;margin-top:.5rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      </div>
+    </div>`);
+}
+
+window._vttPickAction = (srcId, tgtId, idx) => {
+  const opt = _atkOptsCache[`act__${srcId}__${tgtId}`]?.[+idx];
+  if (!opt || opt.disabled) return;
+  if (opt.isHeal) window._vttExecHealWithOpt(srcId, tgtId, opt);
+  else window._vttExecWithOpt(srcId, tgtId, opt);
+};
 
 /** Affiche le modal de sélection d'attaque. */
 async function _execAttack(srcId, tgtId) {
@@ -775,7 +933,8 @@ async function _execAttack(srcId, tgtId) {
       ${pmLine}
       <div class="vtt-attack-opts">
         ${inRange.map((o,i)=>`
-        <button class="vtt-attack-opt" onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})">
+        <button class="vtt-attack-opt${o.disabled?' vtt-attack-opt--disabled':''}"
+          ${o.disabled?'disabled title="PM insuffisant"':`onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})"`}>
           <span class="vtt-attack-opt-icon">${o.icon}</span>
           <div class="vtt-attack-opt-body">
             <div class="vtt-attack-opt-name">${o.label}</div>
@@ -783,6 +942,7 @@ async function _execAttack(srcId, tgtId) {
               🎲 ${o.dice}
               · 🎯 portée ${o.portee}
               ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:''}
+              ${o.disabled?`<span class="vtt-attack-opt-noPm">PM insuffisant</span>`:''}
             </div>
           </div>
         </button>`).join('')}
@@ -795,54 +955,355 @@ async function _execAttack(srcId, tgtId) {
 
 window._vttPickOpt = (srcId, tgtId, idx) => {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
-  if (opt) window._vttExecWithOpt(srcId, tgtId, opt);
+  if (opt && !opt.disabled) window._vttExecWithOpt(srcId, tgtId, opt);
 };
 
-window._vttExecWithOpt = async (srcId, tgtId, opt) => {
+/**
+ * Ce qu'un joueur non-admin pense savoir d'un token ennemi.
+ * Retourne null si admin (voit tout) ou si pas un ennemi bestiaire.
+ */
+function _playerEnemyView(tgt) {
+  if (STATE.isAdmin) return null;
+  if (!tgt.beastId) return null;
+  const tracker = _playerTracker[tgt.beastId] || {};
+  const ded = tracker.deductions || {};
+  return {
+    knownHp: tracker.pvActuel          ?? null,
+    knownCA: parseInt(ded.ca_estimee)  || null,
+  };
+}
+
+window._vttExecWithOpt = (srcId, tgtId, opt) => {
   closeModalDirect();
   const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
   if (!src||!tgt) return;
   const lS=_live(src), lT=_live(tgt);
+  const c = src.characterId ? _characters[src.characterId] : null;
+  const weapon = c?.equipement?.['Main principale'];
 
-  const dmg    = Math.max(1, _rollDice(opt.dice));
-  const curHp  = lT.displayHp??20, hpMax=lT.displayHpMax??20;
-  const newHp  = Math.max(0, curHp-dmg);
+  // ── Jet de toucher : formule depuis la fiche ──
+  let toucherMod = 0, toucherSetBonus = 0, toucherStatLabel = '';
+  if (c) {
+    const tp = getWeaponToucherParts(c, weapon || {});
+    if (tp.statLabel === null) {
+      const m = String(tp.roll||'').replace(/\s+/g,'').match(/([+-]\d+)$/);
+      toucherMod = m ? parseInt(m[1]) : 0;
+    } else {
+      toucherMod      = tp.statMod      ?? 0;
+      toucherSetBonus = tp.setBonus     ?? 0;
+      toucherStatLabel= tp.statLabel    || '';
+    }
+  }
+  const targetCA = lT.displayDefense ?? 10;
+  const isMagic  = opt.isMagic || false;
 
-  const ok = await confirmModal(
-    `${opt.icon} <strong>${lS.displayName??src.name}</strong>
-     utilise <strong>${opt.label}</strong><br>
-     🎲 ${opt.dice} → <strong>${dmg} dégâts</strong><br>
-     PV : ${curHp} → <strong>${newHp}/${hpMax}</strong>`,
-    {title:`${opt.icon} ${opt.label}`, confirmLabel:'Confirmer', cancelLabel:'Annuler', danger:true}
+  // ── Formule de dégâts depuis la fiche ──
+  let dmgFormula = opt.dice || '1d6';
+  if (c && opt.sortRef) {
+    dmgFormula = calcSortDegats(opt.sortRef, c) || dmgFormula;
+  } else if (c && opt.id === 'weapon' && weapon) {
+    const dp = getWeaponDegatsParts(c, weapon);
+    if (dp?.roll) dmgFormula = dp.roll;
+  }
+
+  // Affichage de la formule de toucher
+  const touchParts = [];
+  if (toucherMod !== 0) touchParts.push(`${toucherMod>0?'+':''}${toucherMod}${toucherStatLabel?` (${toucherStatLabel})`:''}`);
+  if (toucherSetBonus !== 0) touchParts.push(`${toucherSetBonus>0?'+':''}${toucherSetBonus} (set)`);
+  const toucherStr = `1d20${touchParts.map(p=>` ${p}`).join('')}`;
+
+  // Ce que le joueur voit de la cible (limité par son bestiaire)
+  const pv = _playerEnemyView(tgt);
+  const caDisplay = pv
+    ? (pv.knownCA != null
+        ? `${pv.knownCA} <span style="font-size:.7rem;color:var(--text-dim)">(estimée)</span>`
+        : `<span style="color:var(--text-dim)">? (inconnue)</span>`)
+    : String(targetCA);
+
+  const missNote = isMagic
+    ? `<span style="color:#b47fff;font-size:.72rem">✨ Magie : ½ dégâts si raté</span>`
+    : `<span style="color:var(--text-dim);font-size:.72rem">Raté → 0 dégât</span>`;
+
+  // CA effective pour le jet : connue du joueur > vraie valeur (admin/npc/sans bestiaire)
+  const effectiveCA = (pv?.knownCA != null) ? pv.knownCA : targetCA;
+  _pendingAttack = { srcId, tgtId, opt, toucherMod, toucherSetBonus, targetCA: effectiveCA, isMagic, dmgFormula, toucherStr };
+
+  openModal(`${opt.icon} ${opt.label}`, `
+    <div class="vtt-form">
+      <div style="font-size:.82rem;margin-bottom:.5rem">
+        <strong>${lS.displayName??src.name}</strong>
+        → <strong style="color:#ef4444">${lT.displayName??tgt.name}</strong>
+      </div>
+      <div class="vtt-hit-info">
+        <div class="vtt-hit-row">
+          <span>🎯 <strong>Toucher</strong> : ${toucherStr}</span>
+          <span class="vtt-hit-bonus-inline">
+            <span class="vtt-hit-bonus-label">+bonus</span>
+            <input type="number" id="vtt-bonus-touch" value="0" min="-20" max="20">
+          </span>
+        </div>
+        <div>🛡 <strong>CA cible</strong> : ${caDisplay}</div>
+        <div class="vtt-hit-row">
+          <span>🎲 <strong>Dégâts</strong> : ${dmgFormula}</span>
+          <span class="vtt-hit-bonus-inline">
+            <span class="vtt-hit-bonus-label">+bonus</span>
+            <input type="number" id="vtt-bonus-dmg" value="0" min="-20" max="20">
+          </span>
+        </div>
+        <div style="margin-top:.25rem">${missNote}</div>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem">
+        <button class="btn-secondary" onclick="window._vttCancelAttack()">Annuler</button>
+        <button class="btn-primary" onclick="window._vttDoRollHit()">🎲 Lancer !</button>
+      </div>
+    </div>`);
+};
+
+window._vttDoRollHit = async () => {
+  if (!_pendingAttack) return;
+  const { srcId, tgtId, opt, toucherMod, toucherSetBonus, targetCA, isMagic, dmgFormula, toucherStr } = _pendingAttack;
+  const bonusTouch = parseInt(document.getElementById('vtt-bonus-touch')?.value) || 0;
+  const bonusDmg   = parseInt(document.getElementById('vtt-bonus-dmg')?.value)   || 0;
+  _pendingAttack = null;
+
+  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  if (!src||!tgt) return;
+  const lS=_live(src), lT=_live(tgt);
+
+  const d20   = Math.floor(Math.random()*20)+1;
+  const total = d20 + toucherMod + toucherSetBonus + bonusTouch;
+  const hit   = d20 === 20 || (d20 !== 1 && total >= targetCA);
+
+  const dmgBase    = Math.max(1, _rollDice(dmgFormula) + bonusDmg);
+  const dmgHalf    = Math.max(1, Math.floor(dmgBase/2));
+  const dmgApplied = hit ? dmgBase : (isMagic ? dmgHalf : 0);
+
+  const curHp = lT.displayHp??20, hpMax = lT.displayHpMax??20;
+  const newHp = Math.max(0, curHp - dmgApplied);
+
+  // Détail du jet de toucher
+  const bParts = [];
+  if (toucherMod !== 0)    bParts.push(`${toucherMod>0?'+':''}${toucherMod}`);
+  if (toucherSetBonus!==0) bParts.push(`${toucherSetBonus>0?'+':''}${toucherSetBonus}`);
+  if (bonusTouch !== 0)    bParts.push(`${bonusTouch>0?'+':''}${bonusTouch}`);
+  const rollDetail = `[${d20}]${bParts.join('')} = ${total}`;
+
+  const hitColor = hit ? '#22c38e' : '#ef4444';
+  const hitLabel = d20===20 ? '🎉 Critique !' : d20===1 ? '💨 Fumble !' : hit ? '✅ Touché !' : '❌ Raté !';
+
+  // Ce que le joueur voit des PV de la cible
+  const pv = _playerEnemyView(tgt);
+  let hpLine;
+  if (pv) {
+    // Joueur non-admin vs ennemi : ne montre que les dégâts, pas les vrais PV
+    hpLine = dmgApplied > 0
+      ? `💥 <strong>${dmgApplied} dégât${dmgApplied>1?'s':''}</strong> infligé${dmgApplied>1?'s':''}`
+      : `<span style="color:var(--text-dim)">Aucun dégât</span>`;
+  } else {
+    hpLine = `PV : ${curHp} → <strong>${newHp}/${hpMax}</strong>`;
+  }
+
+  let dmgLine;
+  const dmgBonusStr = bonusDmg !== 0 ? ` ${bonusDmg>0?'+':''}${bonusDmg}` : '';
+  if (hit) {
+    dmgLine = `🎲 ${dmgFormula}${dmgBonusStr} → <strong>${dmgBase} dégâts</strong>`;
+  } else if (isMagic) {
+    dmgLine = `🎲 ${dmgFormula}${dmgBonusStr} → <strong>${dmgHalf} dégâts</strong> <span style="color:#b47fff;font-size:.75rem">(½ magie)</span>`;
+  } else {
+    dmgLine = `<span style="color:var(--text-dim)">Raté → 0 dégât</span>`;
+  }
+
+  // ── Appliquer immédiatement ──────────────────────────────────────
+  try {
+    await _setHp(tgt, newHp);
+    if (opt.pmCost>0 && src.characterId) {
+      const c=_characters[src.characterId];
+      if (c) await updateDoc(_chrRef(src.characterId),{pmActuel:Math.max(0,(c.pmActuel??calcPMMax(c))-opt.pmCost)});
+    }
+    if (_session?.combat?.active) await updateDoc(_tokRef(src.id),{attackedThisTurn:true}).catch(()=>{});
+    const hitStr   = hit ? 'Touché' : 'Raté';
+    const bStr     = bonusTouch!==0||bonusDmg!==0
+      ? ` (bonus: touch${bonusTouch>0?'+':''}${bonusTouch} / dmg${bonusDmg>0?'+':''}${bonusDmg})` : '';
+    const caInfo   = pv ? '?' : String(targetCA);
+    await addDoc(_logCol(), {
+      type:'roll', authorId: STATE.user?.uid||null,
+      authorName: STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ',
+      rollFormula: toucherStr, rollResult: total,
+      text:`${lS.displayName??src.name} attaque ${lT.displayName??tgt.name} · ${opt.label} · 🎯${rollDetail}${bStr} vs CA${caInfo} → ${hitStr} · 🎲${dmgFormula}=${dmgApplied} dégâts`,
+      createdAt: serverTimestamp(),
+    }).catch(()=>{});
+  } catch { showNotif('Erreur attaque','error'); return; }
+
+  // ── Afficher le résultat (lecture seule — action déjà appliquée) ──
+  closeModalDirect();
+  openModal(`${opt.icon} ${opt.label} — Résultat`, `
+    <div class="vtt-form">
+      <div style="font-size:.82rem;margin-bottom:.5rem">
+        <strong>${lS.displayName??src.name}</strong>
+        → <strong style="color:#ef4444">${lT.displayName??tgt.name}</strong>
+      </div>
+      <div class="vtt-hit-result">
+        <div><strong style="color:${hitColor}">${hitLabel}</strong></div>
+        <div class="vtt-hit-result-detail">🎯 ${rollDetail}</div>
+        <div style="margin-top:.35rem">${dmgLine}</div>
+        <div style="margin-top:.25rem;font-size:.8rem">${hpLine}</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:.75rem">
+        <button class="btn-primary" data-action="close-modal">Fermer</button>
+      </div>
+    </div>`);
+
+  // Notif résumé
+  showNotif(
+    newHp===0      ? `💀 ${lT.displayName??tgt.name} tombe à 0 PV !`
+    : dmgApplied>0 ? `${opt.icon} ${dmgApplied} dégâts → ${lT.displayName??tgt.name}`
+                   : `💨 Raté ! ${lT.displayName??tgt.name} esquive`,
+    'success'
   );
-  if (!ok) return; // annulé : reste en mode attaque avec l'attaquant sélectionné
+  _clearTargets();
+  _select(srcId);
+  _layers.token?.batchDraw();
+};
+
+window._vttCancelAttack = () => {
+  _pendingAttack = null;
+  closeModalDirect();
+};
+
+// ─ Soin sur allié ───────────────────────────────────────────────────
+async function _execHeal(srcId, tgtId) {
+  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  if (!src||!tgt) return;
+  const lS=_live(src), lT=_live(tgt);
+  const dist=Math.abs(src.col-tgt.col)+Math.abs(src.row-tgt.row);
+  const options=_buildHealOptions(src);
+  const inRange=options.filter(o=>dist<=o.portee);
+  if (!inRange.length) {
+    showNotif(`Hors de portée (${dist} case${dist>1?'s':''})`, 'error'); return;
+  }
+  const cacheKey=`heal__${srcId}__${tgtId}`;
+  _atkOptsCache[cacheKey]=inRange;
+  const pm=lS.displayPm, pmMax=lS.displayPmMax;
+  const pmLine=(pm!=null)?`<div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem">PM : ${pm}/${pmMax}</div>`:'';
+  openModal('💚 Choisir un soin',`
+    <div class="vtt-form">
+      <div style="font-size:.82rem;margin-bottom:.4rem">
+        <strong>${lS.displayName??src.name}</strong>
+        → <strong style="color:#22c38e">${lT.displayName??tgt.name}</strong>
+        <span style="color:var(--text-dim);font-size:.72rem">(${dist} case${dist>1?'s':''})</span>
+      </div>
+      ${pmLine}
+      <div class="vtt-attack-opts">
+        ${inRange.map((o,i)=>`
+        <button class="vtt-attack-opt${o.disabled?' vtt-attack-opt--disabled':''}"
+          ${o.disabled?'disabled title="PM insuffisant"':`onclick="window._vttPickHeal('${srcId}','${tgtId}',${i})"`}>
+          <span class="vtt-attack-opt-icon">${o.icon}</span>
+          <div class="vtt-attack-opt-body">
+            <div class="vtt-attack-opt-name">${o.label}</div>
+            <div class="vtt-attack-opt-meta">
+              💚 ${o.dice} · 🎯 portée ${o.portee}
+              ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:''}
+              ${o.disabled?`<span class="vtt-attack-opt-noPm">PM insuffisant</span>`:''}
+            </div>
+          </div>
+        </button>`).join('')}
+      </div>
+      <div style="text-align:right;margin-top:.5rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      </div>
+    </div>`);
+}
+
+window._vttPickHeal = (srcId, tgtId, idx) => {
+  const opt=_atkOptsCache[`heal__${srcId}__${tgtId}`]?.[+idx];
+  if (opt && !opt.disabled) window._vttExecHealWithOpt(srcId, tgtId, opt);
+};
+
+window._vttExecHealWithOpt = (srcId, tgtId, opt) => {
+  closeModalDirect();
+  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  if (!src||!tgt) return;
+  const lS=_live(src), lT=_live(tgt);
+  const c = src.characterId ? _characters[src.characterId] : null;
+
+  // Formule de soin calculée depuis la fiche
+  let soinFormula = opt.dice || '1d4';
+  if (c && opt.sortRef) {
+    soinFormula = calcSortSoin(opt.sortRef, c) || soinFormula;
+  }
+
+  _pendingAttack = { srcId, tgtId, opt, soinFormula, isHeal: true };
+
+  openModal(`${opt.icon} ${opt.label}`, `
+    <div class="vtt-form">
+      <div style="font-size:.82rem;margin-bottom:.5rem">
+        <strong>${lS.displayName??src.name}</strong>
+        → <strong style="color:#22c38e">${lT.displayName??tgt.name}</strong>
+      </div>
+      <div class="vtt-hit-info" style="border-color:#22c38e33">
+        <div>💚 <strong>Soin</strong> : ${soinFormula}</div>
+        <div style="font-size:.72rem;color:var(--text-dim)">Pas de jet de toucher requis</div>
+      </div>
+      <div class="vtt-hit-bonus-row">
+        <span class="vtt-hit-bonus-label">Bonus soin :</span>
+        <input type="number" id="vtt-manual-bonus-heal" value="0" min="-20" max="20">
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem">
+        <button class="btn-secondary" onclick="window._vttCancelAttack()">Annuler</button>
+        <button class="btn-primary" onclick="window._vttDoRollHeal()">💚 Soigner !</button>
+      </div>
+    </div>`);
+};
+
+window._vttDoRollHeal = async () => {
+  if (!_pendingAttack?.isHeal) return;
+  const { srcId, tgtId, opt, soinFormula } = _pendingAttack;
+  const bonusSoin = parseInt(document.getElementById('vtt-manual-bonus-heal')?.value) || 0;
+  _pendingAttack = null;
+
+  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  if (!src||!tgt) return;
+  const lS=_live(src), lT=_live(tgt);
+  const baseRoll = _rollDice(soinFormula);
+  const healed   = Math.max(1, baseRoll + bonusSoin);
+  const curHp    = lT.displayHp??20, hpMax = lT.displayHpMax??20;
+  const newHp    = Math.min(hpMax, curHp + healed);
+  const bonusStr = bonusSoin!==0 ? ` ${bonusSoin>0?'+':''}${bonusSoin}` : '';
 
   try {
     await _setHp(tgt, newHp);
     if (opt.pmCost>0 && src.characterId) {
       const c=_characters[src.characterId];
-      if (c) await updateDoc(_chrRef(src.characterId),{pm:Math.max(0,(c.pm??0)-opt.pmCost)});
+      if (c) await updateDoc(_chrRef(src.characterId),{pmActuel:Math.max(0,(c.pmActuel??calcPMMax(c))-opt.pmCost)});
     }
-    if (_session?.combat?.active) await updateDoc(_tokRef(src.id),{attackedThisTurn:true}).catch(()=>{});
-    // Log dans le chat
     await addDoc(_logCol(), {
-      type:'roll',
-      authorId: STATE.user?.uid||null,
-      authorName: STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ',
-      rollFormula: opt.dice, rollResult: dmg,
-      text:`${lS.displayName??src.name} attaque ${lT.displayName??tgt.name} · ${opt.label} · 🎲${opt.dice}=${dmg}`,
+      type:'roll', authorId: STATE.user?.uid||null,
+      authorName: STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'Joueur',
+      rollFormula: soinFormula, rollResult: healed,
+      text:`${lS.displayName??src.name} soigne ${lT.displayName??tgt.name} · ${opt.label} · 💚${soinFormula}${bonusStr}=+${healed}`,
       createdAt: serverTimestamp(),
     }).catch(()=>{});
-    showNotif(
-      newHp===0 ? `💀 ${lT.displayName??tgt.name} tombe à 0 PV !`
-                : `${opt.icon} ${dmg} dégâts → ${lT.displayName??tgt.name} (${newHp}/${hpMax} PV)`,
-      'success'
-    );
-  } catch { showNotif('Erreur attaque','error'); }
-  // Rester en mode attaque — effacer juste l'attaquant courant
-  _tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
-  _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
-  _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
+  } catch { showNotif('Erreur soin','error'); return; }
+
+  // Résultat affiché (déjà appliqué)
+  closeModalDirect();
+  openModal(`${opt.icon} ${opt.label} — Résultat`, `
+    <div class="vtt-form">
+      <div class="vtt-hit-result" style="border-color:#22c38e55">
+        <div><strong style="color:#22c38e">💚 Soin appliqué !</strong></div>
+        <div class="vtt-hit-result-detail">🎲 ${soinFormula}${bonusStr} = +${healed} PV</div>
+        <div style="margin-top:.25rem;font-size:.8rem">
+          PV : ${curHp} → <strong>${newHp}/${hpMax}</strong>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:.75rem">
+        <button class="btn-primary" data-action="close-modal">Fermer</button>
+      </div>
+    </div>`);
+
+  showNotif(`💚 +${healed} PV → ${lT.displayName??tgt.name} (${newHp}/${hpMax} PV)`, 'success');
+  _clearTargets();
+  _select(srcId);
   _layers.token?.batchDraw();
 };
 
@@ -1006,51 +1467,15 @@ function _renderPageList() {
   }).join('');
 }
 
-// ─ Onglets horizontaux pour les joueurs (toolbar) ───────────────────
+// ─ Indicateur de page pour les joueurs (lecture seule) ──────────────
 function _renderPageTabs() {
   if (STATE.isAdmin) { _renderPageList(); return; } // MJ : liste dans le tray
   const el=document.getElementById('vtt-page-tabs'); if (!el) return;
-  const sorted=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
-  const broadcastId=_session.activePageId;
-
-  // Compte les joueurs par page (tokens placés de type player)
-  const playerCount={};
-  for (const {data:t} of Object.values(_tokens)) {
-    if (t.type==='player'&&t.pageId) playerCount[t.pageId]=(playerCount[t.pageId]??0)+1;
-  }
-
-  el.innerHTML=sorted.map(p=>{
-    const isPlayers = p.id===broadcastId;        // où sont les joueurs
-    const isMj      = p.id===_activePage?.id;    // où est le MJ (sa propre vue)
-    const cnt       = playerCount[p.id]??0;
-
-    // Badges d'état : chacun indépendant et cumulable
-    const mjBadge      = isMj      ? `<span class="vtt-tab-badge vtt-tab-badge-mj"   title="Votre vue">📍</span>` : '';
-    const playersBadge = isPlayers ? `<span class="vtt-tab-badge vtt-tab-badge-pl"   title="Vos joueurs sont ici">👥</span>` : '';
-    const cntBadge     = cnt>0&&!isPlayers ? `<span class="vtt-page-player-cnt">${cnt}j</span>` : '';
-
-    // Classe de fond : priorité au statut joueurs si le MJ n'est pas dessus
-    const cls = isMj&&isPlayers ? 'active mj-and-players'
-              : isMj            ? 'active'
-              : isPlayers       ? 'players-here'
-              : '';
-
-    const title = [isMj?'📍 Votre vue':'', isPlayers?'👥 Vos joueurs sont ici':'']
-                   .filter(Boolean).join(' · ') || p.name;
-
-    return `
-    <button class="vtt-page-tab ${cls}" onclick="window._vttSwitchPage('${p.id}')" title="${title}">
-      ${mjBadge}${playersBadge}
-      <span class="vtt-tab-name">${p.name}</span>
-      ${cntBadge}
-      ${STATE.isAdmin?`<span class="vtt-page-del" onclick="event.stopPropagation();window._vttDeletePage('${p.id}')">×</span>`:''}
-    </button>`;
-  }).join('')+
-  (sorted.length===0&&STATE.isAdmin
-    ? `<span style="font-size:.75rem;color:var(--text-dim);padding:.3rem .5rem;white-space:nowrap">
-         ← clique <strong>＋ Page</strong> pour commencer
-       </span>`
-    : '');
+  // Les joueurs suivent le MJ — ils voient juste la page courante, sans pouvoir changer
+  const cur=_activePage;
+  el.innerHTML=cur
+    ? `<span class="vtt-page-current" title="Page envoyée par le MJ">📍 ${cur.name}</span>`
+    : `<span class="vtt-page-current vtt-page-current--empty">En attente…</span>`;
 }
 
 async function _switchPage(pageId) {
@@ -1113,17 +1538,27 @@ function _initListeners() {
     }
   },()=>{}));
 
-  // 3. Personnages — source de vérité des HP joueurs
+  // Helper : rafraîchit portées + inspector si le token sélectionné vient d'évoluer
+  function _refreshIfSelected(id) {
+    if (_selected !== id) return;
+    const e = _tokens[id]; if (!e?.data) return;
+    _renderInspector(e.data);
+    if (STATE.isAdmin || e.data.ownerId === STATE.user?.uid) {
+      _showRanges(e.data);
+      _highlightTargets(e.data);
+    }
+  }
+
+  // 3. Personnages — source de vérité (HP, PM, armes, sorts…)
   _unsubs.push(onSnapshot(_chrsCol(), snap => {
     snap.docChanges().forEach(ch => {
       if (ch.type==='removed') delete _characters[ch.doc.id];
       else _characters[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
     });
-    // Refresh des shapes liés
     const changed=new Set(snap.docChanges().map(c=>c.doc.id));
     for (const [id,e] of Object.entries(_tokens)) {
       if (e.data.characterId&&changed.has(e.data.characterId)) {
-        _patchShape(id); if (_selected===id) _renderInspector(e.data);
+        _patchShape(id); _refreshIfSelected(id);
       }
     }
     _renderTray();
@@ -1139,7 +1574,7 @@ function _initListeners() {
     const changed=new Set(snap.docChanges().map(c=>c.doc.id));
     for (const [id,e] of Object.entries(_tokens)) {
       if (e.data.npcId&&changed.has(e.data.npcId)) {
-        _patchShape(id); if (_selected===id) _renderInspector(e.data);
+        _patchShape(id); _refreshIfSelected(id);
       }
     }
     _renderTray();
@@ -1155,7 +1590,7 @@ function _initListeners() {
     const changed=new Set(snap.docChanges().map(c=>c.doc.id));
     for (const [id,e] of Object.entries(_tokens)) {
       if (e.data.beastId&&changed.has(e.data.beastId)) {
-        _patchShape(id); if (_selected===id) _renderInspector(e.data);
+        _patchShape(id); _refreshIfSelected(id);
       }
     }
     _renderTray();
@@ -1186,7 +1621,7 @@ function _initListeners() {
         } else {
           _patchShape(id);
         }
-        if (_selected===id) _renderInspector(data);
+        _refreshIfSelected(id);
       } else {
         _tokens[id]={data,shape:null};
         if (_activePage&&data.pageId===_activePage.id&&(data.visible||STATE.isAdmin)) {
@@ -1199,6 +1634,13 @@ function _initListeners() {
     _renderTray();
     _toksReady=true; _maybeSyncAutoTokens();
   },()=>{}));
+
+  // 7b. Tracker bestiaire joueur (non-admin uniquement — connaissances sur les ennemis)
+  if (!STATE.isAdmin && STATE.user?.uid) {
+    _unsubs.push(onSnapshot(doc(db, `bestiary_tracker/${STATE.user.uid}`), snap => {
+      _playerTracker = snap.exists() ? (snap.data()?.data || {}) : {};
+    }, () => {}));
+  }
 
   // 7. Chat / Log de dés
   _unsubs.push(onSnapshot(_logCol(), snap => {
@@ -1567,7 +2009,7 @@ window._vttSaveStats = async id => {
   const vis = document.getElementById('vsf-visible')?.checked;
   const patch = {
     movement: mv  ? +mv  : null,
-    range:    rng ? +rng : 1,
+    range:    rng ? +rng : null,  // null = ne pas écraser weapon.portee côté _live
     attack:   atk ? +atk : null,
     defense:  def ? +def : null,
     imageUrl: img || null,
@@ -1620,16 +2062,11 @@ async function _handleUpload(file) {
 // ── Outil + clavier ─────────────────────────────────────────────────
 function _setTool(tool) {
   _tool=tool;
-  if (tool!=='attack') { _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false); _attackSrc=null; }
   document.querySelectorAll('.vtt-tool').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
-  const wrap=document.getElementById('vtt-canvas-wrap');
-  if (wrap) wrap.style.cursor=tool==='attack'?'crosshair':'default';
 }
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
-  if (e.key==='s'||e.key==='S') _setTool('select');
-  if (e.key==='a'||e.key==='A') _setTool('attack');
   if (e.key==='Escape') _deselect();
 }
 
@@ -1641,11 +2078,10 @@ function _buildHtml() {
   return `
 <div class="vtt-root" id="vtt-root">
   <div class="vtt-toolbar">
-    <div class="vtt-tool-group">
+    ${mj?`<div class="vtt-tool-group">
       <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="Sélectionner (S)">↖ Sélect.</button>
-      <button class="vtt-tool"        data-tool="attack" onclick="window._vttTool('attack')" title="Attaque (A)">⚔️ Attaque</button>
-    </div>
-    ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
+    </div>`:''}
+    <div id="vtt-page-tabs" class="vtt-page-tabs"></div>
     <div class="vtt-tool-group vtt-right">
       <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
       ${mj?`
@@ -1691,7 +2127,7 @@ function _buildHtml() {
       </div>
     </div>
   </div>
-  <div class="vtt-hint">S sélect. · A attaque · Échap désélect. · Molette zoom · Clic-droit pan${mj?' · Clic image → redimensionner':''}</div>
+  <div class="vtt-hint">Clic = sélect. · Clic ennemi (token sélectionné) = attaque · Shift+clic = multi-sélect. · Échap = désélect. · Molette = zoom · Clic-droit = pan${mj?' · 🗺 Carte = éditer images':''}</div>
 </div>`;
 }
 

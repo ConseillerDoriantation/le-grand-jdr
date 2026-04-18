@@ -62,7 +62,6 @@ export async function sortDrop(e, toIdx) {
   }
 }
 
-
 // ── Helpers calcul sorts ─────────────────────────────────────────────────────
 
 /**
@@ -948,3 +947,9 @@ export async function saveSort(idx) {
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
 }
+
+// ── Exports pour VTT ─────────────────────────────────────────────────────────
+/** Dégâts calculés d'un sort offensif (runes Puissance + chaînage + maîtrise). */
+export function calcSortDegats(s, c) { return _calcSortDegats(s, c); }
+/** Soin calculé d'un sort défensif (runes Protection + chaînage + maîtrise). */
+export function calcSortSoin(s, c)   { return _calcSortSoin(s, c);   }

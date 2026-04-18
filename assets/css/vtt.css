@@ -179,6 +179,24 @@
 
 .vtt-tab-name { /* rien de spécial, juste un wrapper sémantique */ }
 
+/* ── Indicateur de page joueur (lecture seule) ──────────────────── */
+.vtt-page-current {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: .25rem .6rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+.vtt-page-current--empty {
+  opacity: .5;
+  font-style: italic;
+}
+
 /* Petit compteur de tokens joueurs sur une page non-broadcast */
 .vtt-page-player-cnt {
   display: inline-flex;
@@ -217,7 +235,7 @@
 
 /* ── Colonne droite (inspector + chat) ──────────────────────────── */
 .vtt-right-col {
-  width: 220px;
+  width: 300px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -631,6 +649,135 @@
   color: var(--text-dim);
   margin-top: .1rem;
 }
+.vtt-attack-opt--disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  border-color: transparent;
+  background: var(--bg-elevated);
+}
+.vtt-attack-opt--disabled:hover {
+  background: var(--bg-elevated);
+  border-color: transparent;
+}
+.vtt-attack-opt-noPm {
+  display: inline-block;
+  margin-left: .3rem;
+  font-size: .68rem;
+  color: #ef4444;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+/* ── Boutons dans les modals VTT ────────────────────────────────── */
+.vtt-form .btn-primary,
+.vtt-form [data-action="close-modal"].btn-primary {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  color: #fff;
+  padding: .48rem 1.2rem;
+  border-radius: 9px;
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+  letter-spacing: .01em;
+}
+.vtt-form .btn-primary:hover { background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%); }
+.vtt-form .btn-primary:active { transform: scale(.97); }
+
+.vtt-form .btn-secondary,
+.vtt-form [onclick*="Cancel"],
+.vtt-form [onclick*="_vttCancel"] {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-dim);
+  padding: .48rem 1rem;
+  border-radius: 9px;
+  font-size: .82rem;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.vtt-form .btn-secondary:hover,
+.vtt-form [onclick*="_vttCancel"]:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  border-color: rgba(255,255,255,0.18);
+}
+
+/* ── Hit roll modal ─────────────────────────────────────────────── */
+.vtt-hit-info {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .55rem .7rem;
+  margin-bottom: .5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  font-size: .82rem;
+}
+.vtt-hit-result {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .55rem .7rem;
+  margin-bottom: .5rem;
+  font-size: .85rem;
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.vtt-hit-result-detail {
+  font-size: .75rem;
+  color: var(--text-dim);
+  font-family: monospace;
+  margin-top: .1rem;
+}
+/* Ligne de la hit-info avec bonus inline à droite */
+.vtt-hit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+.vtt-hit-bonus-inline {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  flex-shrink: 0;
+}
+.vtt-hit-bonus-label {
+  font-size: .68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.vtt-hit-bonus-inline input[type="number"],
+.vtt-hit-bonus-row input[type="number"] {
+  width: 3.2rem;
+  padding: .18rem .25rem;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: .82rem;
+  font-weight: 600;
+  text-align: center;
+  transition: border-color .15s;
+}
+.vtt-hit-bonus-inline input[type="number"]:focus,
+.vtt-hit-bonus-row input[type="number"]:focus {
+  border-color: rgba(79,140,255,.5);
+  outline: none;
+}
+/* Cas soin : bonus sur sa propre ligne */
+.vtt-hit-bonus-row {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .8rem;
+  color: var(--text-dim);
+  margin-top: .4rem;
+}
 
 /* ── Alias classes (JS ↔ CSS alignement) ───────────────────────── */
 .vtt-ins-hp-pct  { font-size: .7rem; font-weight: 700; min-width: 30px; text-align: right; }
@@ -666,7 +813,7 @@
 
 /* ── Chat & log de dés ──────────────────────────────────────────── */
 .vtt-chat {
-  flex: 0 0 210px;
+  flex: 0 0 360px;
   display: flex;
   flex-direction: column;
   border-top: 2px solid var(--border);
@@ -727,10 +874,10 @@
 
 /* Entrées du log */
 .vtt-log-entry {
-  padding: .18rem .3rem;
-  border-radius: 5px;
-  font-size: .71rem;
-  line-height: 1.35;
+  padding: .22rem .4rem;
+  border-radius: 6px;
+  font-size: .75rem;
+  line-height: 1.4;
   word-break: break-word;
 }
 .vtt-log-roll {
