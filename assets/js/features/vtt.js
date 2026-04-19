@@ -107,7 +107,9 @@ function _live(t) {
 
   return {
     ...t,
-    displayName:       e.nom    || t.name,
+    // Ennemis : le nom du token (instance) prime sur le nom générique du bestiaire
+    // Joueurs/PNJ : le nom de la fiche prime (toujours à jour)
+    displayName:       b ? (t.name || b.nom) : (e.nom || t.name),
     displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
     displayHp:         e.hp  ?? t.hp  ?? hpMax,
     displayHp:         hpCurrent,
@@ -118,7 +120,11 @@ function _live(t) {
     displayAttack:     t.attack   ?? (c ? 5+getMod(c,'force') : (b ? (parseInt(b.attaques?.[0]?.toucher)||5) : (e.bonusAttaque||e.attack||5))),
     displayAttackDice: atkDice,
     displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (parseInt(b.ca)||10) : (e.ca||e.defense||0))),
-    displayRange:      t.range    ?? (b ? (parseInt(b.attaques?.[0]?.portee)||1) : (weapon?.portee ? parseInt(weapon.portee)||1 : 1)),
+    // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
+    // Pour bestiaire/custom : t.range > 1ère attaque bestiary > défaut 1
+    displayRange: c
+      ? (t.range > 1 ? t.range : (weapon?.portee ? parseInt(weapon.portee)||1 : 1))
+      : (t.range ?? (b ? parseInt(b.attaques?.[0]?.portee)||1 : 1)),
     _beast:            b,   // référence directe pour _buildAttackOptions
   };
 }
@@ -422,14 +428,15 @@ function _buildShape(t) {
       fill:'rgba(210,180,255,0.95)',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val' }));
     _nextY += 10;
   }
-  // ── CA ───────────────────────────────────────────────────────────
-  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2, y:_nextY,
-    width:bW, align:'center', fontSize:8, fill:'rgba(210,210,210,0.75)',
+  // ── CA (fond sombre propre) ──────────────────────────────────────
+  g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:11,fill:'rgba(0,0,0,0.6)',cornerRadius:2,listening:false,name:'ca-bg' }));
+  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2,y:_nextY+1,
+    width:bW, align:'center', fontSize:8, fill:'rgba(220,220,220,0.95)',
     fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl' }));
-  // ── Nom (fond sombre pour lisibilité) ────────────────────────────
-  const nameH=13, nameY=_nextY+10;
-  g.add(new K.Rect({ x:-bW/2,y:nameY-1,width:bW,height:nameH,fill:'rgba(0,0,0,0.65)',cornerRadius:3,listening:false }));
-  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:nameY,
+  // ── Nom (fond sombre, séparé de la CA) ──────────────────────────
+  const nameH=13, nameY=_nextY+13;
+  g.add(new K.Rect({ x:-bW/2,y:nameY,width:bW,height:nameH,fill:'rgba(0,0,0,0.65)',cornerRadius:2,listening:false }));
+  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:nameY+1,
     width:bW,align:'center',fontSize:10,fontStyle:'bold',fill:'#fff',
     fontFamily:'Inter,sans-serif',name:'lbl' }));
 
@@ -966,7 +973,7 @@ function _renderTray() {
   const bsts=Object.values(_bestiary);
   const bestiaryHtml=bsts.length
     ? bsts.map(b=>{
-        const img=b.image||'';
+        const img=b.photoURL||b.photo||b.avatar||b.imageUrl||'';
         const pvMax=parseInt(b.pvMax)||'?';
         return `<div class="vtt-tray-item">
           <div class="vtt-tray-dot" style="background:#ef4444">
