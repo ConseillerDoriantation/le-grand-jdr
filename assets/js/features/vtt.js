@@ -404,43 +404,40 @@ function _buildShape(t) {
   const r  = CELL*0.42, bW = CELL*0.9;   // bW élargi pour labels plus lisibles
   const hp = ld.displayHp??20, hpm = ld.displayHpMax??20;
   const rat = hpm>0 ? Math.max(0,hp/hpm) : 1;
-  // Stroke sombre sur les textes : améliore la lisibilité à tous les niveaux de zoom
-  const txtStroke = { stroke:'rgba(0,0,0,0.85)', strokeWidth:0.8 };
-
   const g = new K.Group({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2, id:`tok-${t.id}` });
   g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9, stroke:'rgba(255,255,255,0.2)',strokeWidth:2 }));
   g.add(new K.Circle({ radius:r+7, stroke:'#fff',     strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
   g.add(new K.Circle({ radius:r+7, stroke:'#ef4444',  strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
   // ── Barre HP ────────────────────────────────────────────────────
   const hpH=12, hpY=r+4;
-  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW,height:hpH,fill:'rgba(0,0,0,0.82)',cornerRadius:3,name:'hp-bg' }));
+  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW,height:hpH,fill:'rgba(0,0,0,0.88)',cornerRadius:3,name:'hp-bg' }));
   g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW*rat,height:hpH,fill:hpColor(rat),cornerRadius:3,name:'hp-fill' }));
-  g.add(new K.Text({ text:`${hp}/${hpm}`, x:-bW/2,y:hpY+1.5,
+  g.add(new K.Text({ text:`${hp}/${hpm}`, x:-bW/2,y:hpY+2,
     width:bW,align:'center',fontSize:9,fontStyle:'bold',
-    fill:'#fff',fontFamily:'Inter,sans-serif',listening:false,name:'hp-val',...txtStroke }));
+    fill:'#fff',fontFamily:'Inter,sans-serif',listening:false,name:'hp-val' }));
   // ── Barre PM (joueurs seulement) ────────────────────────────────
   const _pm0=ld.displayPm;
   let _nextY = hpY+hpH+2;
   if (_pm0!=null) {
     const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1;
-    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:10,fill:'rgba(0,0,0,0.75)',cornerRadius:2,name:'pm-bg' }));
+    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:10,fill:'rgba(0,0,0,0.82)',cornerRadius:2,name:'pm-bg' }));
     g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW*pmRat0,height:10,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
-    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:-bW/2,y:_nextY+1.5,
+    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:-bW/2,y:_nextY+2,
       width:bW,align:'center',fontSize:9,
-      fill:'#e8d5ff',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val',...txtStroke }));
+      fill:'#e8d5ff',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val' }));
     _nextY += 12;
   }
   // ── CA ───────────────────────────────────────────────────────────
-  g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:12,fill:'rgba(0,0,0,0.75)',cornerRadius:2,listening:false,name:'ca-bg' }));
-  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2,y:_nextY+1.5,
-    width:bW, align:'center', fontSize:9, fill:'#e0e0e0',
-    fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl',...txtStroke }));
+  g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:12,fill:'rgba(0,0,0,0.82)',cornerRadius:2,listening:false,name:'ca-bg' }));
+  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2,y:_nextY+2,
+    width:bW, align:'center', fontSize:9, fill:'#ddd',
+    fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl' }));
   // ── Nom ──────────────────────────────────────────────────────────
   const nameH=15, nameY=_nextY+14;
-  g.add(new K.Rect({ x:-bW/2,y:nameY,width:bW,height:nameH,fill:'rgba(0,0,0,0.82)',cornerRadius:2,listening:false }));
+  g.add(new K.Rect({ x:-bW/2,y:nameY,width:bW,height:nameH,fill:'rgba(0,0,0,0.88)',cornerRadius:2,listening:false }));
   g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:nameY+2,
     width:bW,align:'center',fontSize:11,fontStyle:'bold',fill:'#fff',
-    fontFamily:'Inter,sans-serif',name:'lbl',...txtStroke }));
+    fontFamily:'Inter,sans-serif',name:'lbl' }));
 
   const imgSrc = ld.displayImage;
   if (imgSrc) {
@@ -1609,7 +1606,7 @@ window._vttPlaceFromBestiary = async beastId => {
     characterId:null, npcId:null, beastId,
     ownerId:null,
     pageId:_activePage.id,
-    col:Math.min(_activePage.cols-1,cx+existing.length),
+    col:Math.min(_activePage.cols-1,cx+active.length),
     row:cy,
     visible:true,
     imageUrl:null, movement:null, range:1, attack:null, defense:null,
