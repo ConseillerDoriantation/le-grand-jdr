@@ -168,12 +168,8 @@ async function _syncAutoTokens() {
       characterId: null, npcId: n.id, beastId: null, ownerId: null,
     });
   }
-  for (const b of Object.values(_bestiary)) {
-    if (!byBeast.has(b.id)) toCreate.push({
-      name: b.nom || 'Créature', type: 'enemy',
-      characterId: null, npcId: null, beastId: b.id, ownerId: null,
-    });
-  }
+  // Les ennemis ne sont PAS auto-créés depuis le bestiaire :
+  // ils sont placés manuellement depuis la section Bestiaire du tray.
 
   if (!toCreate.length) return;
 
@@ -568,12 +564,13 @@ function _select(id) {
   _layers.token.batchDraw();
   const data=_tokens[id]?.data;
   _renderInspector(data??null);
-  // Clic sur un token allié/propre : montrer la portée d'attaque et désigner l'attaquant
+  // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
   if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
     _attackSrc=id;
     _tokens[id]?.shape?.findOne('.atk')?.visible(true);
     _layers.token.batchDraw();
-    _showAttackRange(data);
+    _showMoveRange(data);    // cases bleues cliquables (déplacement)
+    _showAttackRange(data);  // cases rouges par-dessus (visuel portée)
   }
 }
 
@@ -637,9 +634,8 @@ function _toggleMultiSelect(id) {
   _layers.token?.batchDraw();
 }
 
-/** Surbrillance rouge des cases à portée d'attaque de t. */
+/** Surbrillance rouge des cases à portée d'attaque de t (sans clear — le caller nettoie). */
 function _showAttackRange(t) {
-  _clearHL();
   if (!_activePage) return;
   const K=window.Konva;
   const options=_buildAttackOptions(t);
@@ -954,10 +950,11 @@ function _renderTray() {
     </div>`;
   };
 
-  const byType=(arr)=>{
+  // Section "sur la page" : tous types ; section "non placés" : joueurs + PNJ seulement
+  const byType=(arr,includeEnemies=true)=>{
     const players=arr.filter(t=>t.type==='player');
     const npcs   =arr.filter(t=>t.type==='npc');
-    const enemies=arr.filter(t=>t.type==='enemy');
+    const enemies=includeEnemies?arr.filter(t=>t.type==='enemy'):[];
     let html='';
     if (players.length) html+=`<div class="vtt-tray-sep">🧑 Joueurs</div>${players.map(t=>mkItem(t,!!t.pageId)).join('')}`;
     if (npcs.length)    html+=`<div class="vtt-tray-sep">👤 PNJ</div>${npcs.map(t=>mkItem(t,!!t.pageId)).join('')}`;
@@ -965,10 +962,33 @@ function _renderTray() {
     return html;
   };
 
+  // Section Bestiaire : entrées du bestiaire → bouton ▶ pour créer + placer une instance
+  const bsts=Object.values(_bestiary);
+  const bestiaryHtml=bsts.length
+    ? bsts.map(b=>{
+        const img=b.image||'';
+        const pvMax=parseInt(b.pvMax)||'?';
+        return `<div class="vtt-tray-item">
+          <div class="vtt-tray-dot" style="background:#ef4444">
+            ${img?`<img src="${img}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:''}
+          </div>
+          <div class="vtt-tray-info">
+            <div class="vtt-tray-name">${b.nom||'Créature'}</div>
+            <div class="vtt-tray-hp-bar" style="background:rgba(239,68,68,0.18)"><div style="width:100%;height:100%;background:#ef4444;border-radius:2px;opacity:.5"></div></div>
+          </div>
+          <div style="display:flex;gap:.15rem">
+            <button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlaceFromBestiary('${b.id}')" title="Placer une instance sur cette page">▶</button>
+          </div>
+        </div>`;
+      }).join('')
+    : '<div class="vtt-tray-empty" style="font-size:.7rem">Bestiaire vide</div>';
+
+  const unplacedNonEnemy=unplaced.filter(t=>t.type!=='enemy');
+
   el.innerHTML=`
-    ${onPage.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Sur cette page (${onPage.length})</div>${byType(onPage)}</div>`:''}
-    ${unplaced.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Non placés (${unplaced.length})</div>${byType(unplaced)}</div>`:''}
-    ${!onPage.length&&!unplaced.length?'<div class="vtt-tray-empty">Aucun token</div>':''}
+    ${onPage.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Sur cette page (${onPage.length})</div>${byType(onPage,true)}</div>`:''}
+    ${unplacedNonEnemy.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Non placés (${unplacedNonEnemy.length})</div>${byType(unplacedNonEnemy,false)}</div>`:''}
+    <div class="vtt-tray-group"><div class="vtt-tray-group-title">👹 Bestiaire</div>${bestiaryHtml}</div>
   `;
 }
 
@@ -1554,6 +1574,31 @@ window._vttDuplicateToken = async tokenId => {
     createdAt: serverTimestamp(),
   }).catch(()=>showNotif('Erreur duplication','error'));
   showNotif(`👹 ${baseName} ${num} créé !`,'success');
+};
+
+// Placer une instance depuis le bestiaire (crée + place sur la page active)
+window._vttPlaceFromBestiary = async beastId => {
+  if (!_activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
+  const b=_bestiary[beastId]; if (!b) return;
+  const existing=Object.values(_tokens).filter(e=>e.data.beastId===beastId);
+  const num=existing.length+1;
+  const name=num>1?`${b.nom} ${num}`:(b.nom||'Créature');
+  const cx=Math.floor(_activePage.cols/2), cy=Math.floor(_activePage.rows/2);
+  const ref=doc(_toksCol());
+  await setDoc(ref,{
+    name, type:'enemy',
+    characterId:null, npcId:null, beastId,
+    ownerId:null,
+    pageId:_activePage.id,
+    col:Math.min(_activePage.cols-1,cx+existing.length),
+    row:cy,
+    visible:true,
+    imageUrl:null, movement:null, range:1, attack:null, defense:null,
+    hp:null, hpMax:null,
+    movedThisTurn:false, attackedThisTurn:false,
+    createdAt:serverTimestamp(),
+  }).catch(()=>showNotif('Erreur placement','error'));
+  showNotif(`👹 ${name} placé !`,'success');
 };
 
 // Supprimer définitivement un token ennemi

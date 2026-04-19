@@ -228,8 +228,9 @@
 
 /* ── Inspecteur ─────────────────────────────────────────────────── */
 .vtt-inspector {
-  flex: 1 1 0;
-  min-height: 100px;
+  flex: 0 1 auto;
+  max-height: 42%;
+  min-height: 80px;
   overflow-y: auto;
   padding: .75rem;
   display: flex;
@@ -666,7 +667,8 @@
 
 /* ── Chat & log de dés ──────────────────────────────────────────── */
 .vtt-chat {
-  flex: 0 0 260px;
+  flex: 1 1 0;
+  min-height: 220px;
   display: flex;
   flex-direction: column;
   border-top: 2px solid var(--border);
