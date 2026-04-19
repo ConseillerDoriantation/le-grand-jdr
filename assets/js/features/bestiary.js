@@ -223,8 +223,10 @@ function _renderPanel(c) {
   const track    = _tracker[c.id] || {};
   const pvMax    = parseInt(c.pvMax) || 0;
   const pmMax    = parseInt(c.pmMax) || 0;
-  const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : 0;
-  const pmActuel = track.pmActuel !== undefined ? parseInt(track.pmActuel) : 0;
+  const pvActuel  = track.pvActuel   !== undefined ? parseInt(track.pvActuel)   : 0;
+  const pmActuel  = track.pmActuel   !== undefined ? parseInt(track.pmActuel)   : 0;
+  const caEstimee = track.caEstimee  !== undefined ? parseInt(track.caEstimee)  : 0;
+  const vitEstimee= track.vitEstimee !== undefined ? parseInt(track.vitEstimee) : 0;
 
   const attaques = Array.isArray(c.attaques) ? c.attaques : [];
   const traits   = Array.isArray(c.traits)   ? c.traits   : [];
@@ -289,7 +291,7 @@ function _renderPanel(c) {
   const suiviHtml = (showBars) => `
     <div class="bst-section">
       <div class="bst-section-title">📊 Suivi en combat</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+      <div style="display:grid;grid-template-columns:${showBars?'1fr 1fr':'1fr 1fr 1fr'};gap:.75rem">
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem">
             <span style="font-size:.72rem;color:var(--text-dim)">❤️ PV</span>
@@ -320,7 +322,22 @@ function _renderPanel(c) {
           <div style="font-size:.62rem;color:var(--text-dim)">${pmActuel}/${pmMax} PM</div>` :
           `<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">PM estimés</div>`}
         </div>
+        ${!showBars ? `
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem">
+            <span style="font-size:.72rem;color:var(--text-dim)">🛡 CA</span>
+            <input type="number" class="bst-input-sm" id="bst-ca-${c.id}" value="${caEstimee}" min="0"
+              onchange="window._bstSetStat('${c.id}','caEstimee',this.value)">
+          </div>
+          <div style="font-size:.62rem;color:var(--text-dim);font-style:italic">CA estimée</div>
+        </div>` : ''}
       </div>
+      ${!showBars ? `
+      <div style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem">
+        <span style="font-size:.72rem;color:var(--text-dim);flex:1">🏃 Vitesse estimée (cases)</span>
+        <input type="number" class="bst-input-sm" id="bst-vit-${c.id}" value="${vitEstimee}" min="0"
+          onchange="window._bstSetStat('${c.id}','vitEstimee',this.value)">
+      </div>` : ''}
       <div style="margin-top:.6rem">
         <textarea id="bst-notes-${c.id}" placeholder="Notes de combat..." rows="2"
           class="input-field" style="font-size:.78rem;resize:none"
@@ -887,7 +904,7 @@ window._bstReset = (id) => {
   // Admin remet les vraies valeurs, joueur remet à zéro ses déductions
   _tracker[id] = STATE.isAdmin
     ? { pvActuel: parseInt(c.pvMax)||0, pmActuel: parseInt(c.pmMax)||0, notes:'' }
-    : { pvActuel: 0, pmActuel: 0, notes:'', deductions:{} };
+    : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
   _saveTracker();
   _render();
 };

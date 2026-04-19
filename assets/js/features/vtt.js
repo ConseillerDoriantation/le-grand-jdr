@@ -32,6 +32,7 @@ let _session = {}, _pages = {}, _tokens = {};
 let _characters = {};   // characterId → character doc
 let _npcs       = {};   // npcId → npc doc
 let _bestiary   = {};   // beastId → creature doc (bestiaire)
+let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
 let _activePage = null;
 let _tool       = 'select';
 let _selected   = null, _attackSrc = null, _moveHL = [], _lastDrag = 0;
@@ -54,8 +55,9 @@ const _pgRef   = (id) => doc(db, `adventures/${_aid()}/vttPages/${id}`);
 const _tokRef  = (id) => doc(db, `adventures/${_aid()}/vttTokens/${id}`);
 const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
 const _npcRef  = (id) => doc(db, `adventures/${_aid()}/npcs/${id}`);
-const _bstCol  = ()   => collection(db, `adventures/${_aid()}/bestiary`);
-const _bstRef  = (id) => doc(db, `adventures/${_aid()}/bestiary/${id}`);
+const _bstCol        = ()    => collection(db, `adventures/${_aid()}/bestiary`);
+const _bstRef        = (id)  => doc(db, `adventures/${_aid()}/bestiary/${id}`);
+const _bstTrackerRef = (uid) => doc(db, `adventures/${_aid()}/bestiary_tracker/${uid}`);
 const _logCol  = ()   => collection(db, `adventures/${_aid()}/vttLog`);
 
 // ═══════════════════════════════════════════════════════════════════
@@ -105,13 +107,12 @@ function _live(t) {
     || (typeof t.attack==='string' ? t.attack : null)
     || '1d6';
 
-  return {
+  const result = {
     ...t,
     // Ennemis : le nom du token (instance) prime sur le nom générique du bestiaire
     // Joueurs/PNJ : le nom de la fiche prime (toujours à jour)
     displayName:       b ? (t.name || b.nom) : (e.nom || t.name),
     displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
-    displayHp:         e.hp  ?? t.hp  ?? hpMax,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
     displayPm:         c ? (c.pm ?? calcPMMax(c)) : null,
@@ -127,6 +128,20 @@ function _live(t) {
       : (t.range ?? (b ? parseInt(b.attaques?.[0]?.portee)||1 : 1)),
     _beast:            b,   // référence directe pour _buildAttackOptions
   };
+
+  // Joueur sur token ennemi : remplace HP par les estimations du tracker
+  // pvActuel = total estimé (inchangé), pvCombat = HP courant de combat (diminue avec les coups)
+  if (!STATE.isAdmin && b) {
+    const track  = _bstTracker[t.beastId] || {};
+    const estMax = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
+    if (estMax !== null) {
+      const estCur = track.pvCombat !== undefined ? parseInt(track.pvCombat) : estMax;
+      result.displayHp    = estCur;
+      result.displayHpMax = estMax; // barre = pvCombat / pvActuel → vrai ratio
+    }
+  }
+
+  return result;
 }
 
 // HP écrit sur la fiche source (bidirectionnel)
@@ -216,7 +231,7 @@ function _cleanup() {
   _unsubs.forEach(u => u?.());
   _unsubs = []; _stage?.destroy(); _stage = null; _layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
-  _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {};
+  _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
   _moveHL = []; _autoSyncDone = false;
   _selectedMulti.clear(); _multiDragOrigin = null;
@@ -805,17 +820,33 @@ window._vttExecWithOpt = async (srcId, tgtId, opt) => {
   const curHp  = lT.displayHp??20, hpMax=lT.displayHpMax??20;
   const newHp  = Math.max(0, curHp-dmg);
 
+  // Joueur attaquant un ennemi : HP affichés = pvCombat/pvActuel (estimation)
+  const isEstimated = !STATE.isAdmin && tgt.type === 'enemy' && tgt.beastId;
+  const pvLine = isEstimated
+    ? `PV estimés : ${curHp} → <strong>${newHp}/${hpMax}</strong>`
+    : `PV : ${curHp} → <strong>${newHp}/${hpMax}</strong>`;
+
   const ok = await confirmModal(
     `${opt.icon} <strong>${lS.displayName??src.name}</strong>
      utilise <strong>${opt.label}</strong><br>
      🎲 ${opt.dice} → <strong>${dmg} dégâts</strong><br>
-     PV : ${curHp} → <strong>${newHp}/${hpMax}</strong>`,
+     ${pvLine}`,
     {title:`${opt.icon} ${opt.label}`, confirmLabel:'Confirmer', cancelLabel:'Annuler', danger:true}
   );
   if (!ok) return; // annulé : reste en mode attaque avec l'attaquant sélectionné
 
   try {
-    await _setHp(tgt, newHp);
+    if (isEstimated) {
+      // Diminue pvCombat (HP courant de combat) sans toucher pvActuel (total estimé)
+      const uid = STATE.user?.uid;
+      if (uid) {
+        if (!_bstTracker[tgt.beastId]) _bstTracker[tgt.beastId] = {};
+        _bstTracker[tgt.beastId].pvCombat = newHp;
+        await setDoc(_bstTrackerRef(uid), { data: _bstTracker });
+      }
+    } else {
+      await _setHp(tgt, newHp);
+    }
     if (opt.pmCost>0 && src.characterId) {
       const c=_characters[src.characterId];
       if (c) await updateDoc(_chrRef(src.characterId),{pm:Math.max(0,(c.pm??0)-opt.pmCost)});
@@ -876,6 +907,54 @@ function _renderInspector(t) {
     ? Object.values(_pages).filter(p=>p.id!==t.pageId)
         .map(p=>`<option value="${p.id}">${p.name}</option>`).join('') : '';
 
+  // Précalcul du bloc stats (évite l'imbrication de backticks dans le template)
+  let statsHtml;
+  if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
+    const track   = _bstTracker[t.beastId] || {};
+    const pvMax    = track.pvActuel   !== undefined ? parseInt(track.pvActuel)   : null;
+    const pvCur    = track.pvCombat   !== undefined ? parseInt(track.pvCombat)   : pvMax;
+    const pvLabel  = pvMax !== null ? (pvCur??pvMax)+'/'+pvMax : '?';
+    const pvPct    = pvMax > 0 ? Math.round((pvCur??pvMax) / pvMax * 100) : 0;
+    const pvBarCol = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#f59e0b' : '#ef4444';
+    const caLabel  = track.caEstimee  !== undefined ? String(track.caEstimee)  : '?';
+    const vitLabel = track.vitEstimee !== undefined ? String(track.vitEstimee)+' cases' : '?';
+    const pos      = t.pageId ? 'C'+t.col+' L'+t.row : 'Non placé';
+    statsHtml =
+      '<div class="vtt-ins-hp-wrap">' +
+        '<div class="vtt-ins-hp-bar"><div class="vtt-ins-hp-fill" style="width:'+pvPct+'%;background:'+(pvMax!==null?pvBarCol:'#888')+'"></div></div>' +
+        '<span class="vtt-ins-hp-pct" style="color:'+(pvMax!==null?pvBarCol:'var(--text-dim)')+'">'+pvPct+'%</span>' +
+      '</div>' +
+      '<div class="vtt-ins-stats">' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">❤️ PV estimés</span><span class="vtt-ins-val">'+pvLabel+'</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🛡 CA estimée</span><span class="vtt-ins-val">'+caLabel+'</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🏃 Vitesse est.</span><span class="vtt-ins-val">'+vitLabel+'</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">⚔️ Attaque</span><span class="vtt-ins-val">?</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🎯 Portée</span><span class="vtt-ins-val">?</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">📍 Position</span><span class="vtt-ins-val">'+pos+'</span></div>' +
+        '<div style="font-size:.65rem;color:var(--text-dim);font-style:italic;margin-top:.25rem">Valeurs issues de ton bestiaire personnel</div>' +
+      '</div>';
+  } else {
+    const pos     = t.pageId ? 'C'+t.col+' L'+t.row : 'Non placé';
+    const pvInput = STATE.isAdmin
+      ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" onchange="window._vttSetHp(\''+t.id+'\',+this.value)">'
+      : hp;
+    statsHtml =
+      '<div class="vtt-ins-hp-wrap">' +
+        '<div class="vtt-ins-hp-bar"><div class="vtt-ins-hp-fill" style="width:'+Math.round(rat*100)+'%;background:'+hpColor(rat)+'"></div></div>' +
+        '<span class="vtt-ins-hp-pct" style="color:'+hpColor(rat)+'">'+Math.round(rat*100)+'%</span>' +
+      '</div>' +
+      '<div class="vtt-ins-stats">' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">PV</span><span class="vtt-ins-val">'+pvInput+' / '+hpm+'</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🏃 Mouvement</span><span class="vtt-ins-val">'+(ld.displayMovement??6)+' cases</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">⚔️ Attaque</span><span class="vtt-ins-val">'+(ld.displayAttack??5)+'</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🛡 CA / Défense</span><span class="vtt-ins-val">'+(ld.displayDefense??0)+'</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🎯 Portée</span><span class="vtt-ins-val">'+(ld.displayRange??1)+' case(s)</span></div>' +
+        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">📍 Position</span><span class="vtt-ins-val">'+pos+'</span></div>' +
+        (t.movedThisTurn     ? '<div class="vtt-ins-badge">✓ A bougé</div>'                  : '') +
+        (t.attackedThisTurn  ? '<div class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué</div>' : '') +
+      '</div>';
+  }
+
   el.innerHTML=`
     <div class="vtt-ins-header">
       ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
@@ -885,23 +964,7 @@ function _renderInspector(t) {
         <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
       </div>
     </div>
-    <div class="vtt-ins-hp-wrap">
-      <div class="vtt-ins-hp-bar"><div class="vtt-ins-hp-fill" style="width:${Math.round(rat*100)}%;background:${hpColor(rat)}"></div></div>
-      <span class="vtt-ins-hp-pct" style="color:${hpColor(rat)}">${Math.round(rat*100)}%</span>
-    </div>
-    <div class="vtt-ins-stats">
-      <div class="vtt-ins-stat"><span class="vtt-ins-lbl">PV</span>
-        <span class="vtt-ins-val">${STATE.isAdmin
-          ?`<input class="vtt-ins-input" type="number" value="${hp}" min="0" max="${hpm}" onchange="window._vttSetHp('${t.id}',+this.value)">`
-          :hp} / ${hpm}</span></div>
-      <div class="vtt-ins-stat"><span class="vtt-ins-lbl">🏃 Mouvement</span><span class="vtt-ins-val">${ld.displayMovement??6} cases</span></div>
-      <div class="vtt-ins-stat"><span class="vtt-ins-lbl">⚔️ Attaque</span>  <span class="vtt-ins-val">${ld.displayAttack??5}</span></div>
-      <div class="vtt-ins-stat"><span class="vtt-ins-lbl">🛡 CA / Défense</span><span class="vtt-ins-val">${ld.displayDefense??0}</span></div>
-      <div class="vtt-ins-stat"><span class="vtt-ins-lbl">🎯 Portée</span>   <span class="vtt-ins-val">${ld.displayRange??1} case(s)</span></div>
-      <div class="vtt-ins-stat"><span class="vtt-ins-lbl">📍 Position</span> <span class="vtt-ins-val">${t.pageId?`C${t.col} L${t.row}`:'Non placé'}</span></div>
-      ${t.movedThisTurn    ?'<div class="vtt-ins-badge">✓ A bougé</div>'      :''}
-      ${t.attackedThisTurn ?'<div class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué</div>':''}
-    </div>
+    ${statsHtml}
     ${STATE.isAdmin&&pageOpts?`
       <div class="vtt-ins-section">
         <div class="vtt-ins-section-title">Envoyer le joueur vers</div>
@@ -1185,6 +1248,25 @@ function _initListeners() {
     _renderTray();
     _bstsReady=true; _maybeSyncAutoTokens();
   },()=>{}));
+
+  // 5b. Tracker bestiaire joueur (estimations personnelles)
+  if (!STATE.isAdmin) {
+    const uid = STATE.user?.uid;
+    if (uid) {
+      _unsubs.push(onSnapshot(_bstTrackerRef(uid), snap => {
+        _bstTracker = snap.exists() ? (snap.data().data || {}) : {};
+        // Mettre à jour la barre HP de tous les tokens ennemis sur le canvas
+        for (const [id, e] of Object.entries(_tokens)) {
+          if (e.data?.type === 'enemy' && e.data?.beastId) _patchShape(id);
+        }
+        // Rafraîchit l'inspector si un token ennemi est sélectionné
+        if (_selected) {
+          const td = _tokens[_selected]?.data;
+          if (td?.type === 'enemy') _renderInspector(td);
+        }
+      }, () => {}));
+    }
+  }
 
   // 6. Tokens
   _unsubs.push(onSnapshot(_toksCol(), snap => {
