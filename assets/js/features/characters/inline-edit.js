@@ -37,6 +37,7 @@ export function inlineEditText(charId, field, el) {
 // ÉDITION INLINE — NOMBRE
 // ══════════════════════════════════════════════
 async function _syncPlayerNiveau(charId, niveau) {
+  if (!STATE.isAdmin) return; // joueurs sans droit d'écriture sur /players (admin-only)
   const matches = await loadCollectionWhere('players', 'charId', '==', charId);
   if (!matches.length) return;
   await updateInCol('players', matches[0].id, { niveau });
