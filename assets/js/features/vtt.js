@@ -12,7 +12,8 @@ import {
   db, doc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
-import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax } from '../shared/char-stats.js';
+import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort } from '../shared/char-stats.js';
+import { getArmorSetData } from './characters/data.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import PAGES from './pages.js';
@@ -95,9 +96,12 @@ function _live(t) {
                   : (t.hp ?? hpMax); // bestiaire + tokens custom
 
   // Formule de dégâts : arme équipée > première attaque bestiary > override token > fallback
-  const weapon    = c?.equipement?.['Main principale'];
-  const weapStat  = (weapon?.degatsStats?.[0] || weapon?.degatsStat || 'force');
-  const weapMod   = c ? getMod(c, weapStat) : 0;
+  const weapon      = c?.equipement?.['Main principale'];
+  const weapStat    = (weapon?.degatsStats?.[0]  || weapon?.degatsStat  || 'force');
+  const toucherStat = (weapon?.toucherStats?.[0] || weapon?.toucherStat || weapStat);
+  const weapMod     = c ? getMod(c, weapStat)    : 0;
+  const toucherMod  = c ? getMod(c, toucherStat) : 0;
+  const setBonus    = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
   const weapDice  = weapon?.degats
     ? (weapMod !== 0 ? `${weapon.degats}${weapMod>0?'+':''}${weapMod}` : weapon.degats)
     : null;
@@ -118,7 +122,7 @@ function _live(t) {
     displayPm:         c ? (c.pm ?? calcPMMax(c)) : null,
     displayPmMax:      c ? calcPMMax(c) : null,
     displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (parseInt(b.vitesse)||4) : (e.vitesse || e.deplacement || 6))),
-    displayAttack:     t.attack   ?? (c ? 5+getMod(c,'force') : (b ? (parseInt(b.attaques?.[0]?.toucher)||5) : (e.bonusAttaque||e.attack||5))),
+    displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (parseInt(b.attaques?.[0]?.toucher)||5) : (e.bonusAttaque||e.attack||5))),
     displayAttackDice: atkDice,
     displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (parseInt(b.ca)||10) : (e.ca||e.defense||0))),
     // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
@@ -129,7 +133,7 @@ function _live(t) {
     _beast:            b,   // référence directe pour _buildAttackOptions
   };
 
-  // Joueur sur token ennemi : remplace HP par les estimations du tracker
+  // Joueur sur token ennemi : remplace HP et CA par les estimations du tracker
   // pvActuel = total estimé (inchangé), pvCombat = HP courant de combat (diminue avec les coups)
   if (!STATE.isAdmin && b) {
     const track  = _bstTracker[t.beastId] || {};
@@ -137,8 +141,9 @@ function _live(t) {
     if (estMax !== null) {
       const estCur = track.pvCombat !== undefined ? parseInt(track.pvCombat) : estMax;
       result.displayHp    = estCur;
-      result.displayHpMax = estMax; // barre = pvCombat / pvActuel → vrai ratio
+      result.displayHpMax = estMax;
     }
+    if (track.caEstimee !== undefined) result.displayDefense = parseInt(track.caEstimee) || 0;
   }
 
   return result;
@@ -694,6 +699,14 @@ function _rollDice(formula) {
   return total + (parseInt(m[3])||0);
 }
 
+/** Valeur maximale possible d'une formule de dés (ex: "2d6+3" → 15). */
+function _maxDice(formula) {
+  if (!formula) return 1;
+  const m = String(formula).match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
+  if (!m) return Math.max(1, parseInt(formula)||1);
+  return parseInt(m[1]) * parseInt(m[2]) + (parseInt(m[3])||0);
+}
+
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
 function _buildAttackOptions(t) {
   const ld = _live(t);
@@ -706,26 +719,40 @@ function _buildAttackOptions(t) {
     b.attaques.forEach((atk, idx) => {
       if (!atk.degats) return;
       options.push({
-        id:     `beast_${idx}`,
-        icon:   '👹',
-        label:  atk.nom || `Attaque ${idx+1}`,
-        dice:   atk.degats,
-        portee: parseInt(atk.portee)||1,
-        pmCost: 0,
+        id:      `beast_${idx}`,
+        icon:    '👹',
+        label:   atk.nom || `Attaque ${idx+1}`,
+        dice:    atk.degats,
+        toucher: atk.toucher !== undefined && atk.toucher !== '' ? parseInt(atk.toucher)||0 : null,
+        portee:  parseInt(atk.portee)||1,
+        pmCost:  0,
       });
     });
-    if (options.length) return options; // on utilise les attaques dédiées
+    if (options.length) return options;
   }
 
   // ── Arme principale du personnage (ou attaque générique) ──
-  const weapon = c?.equipement?.['Main principale'];
+  const weapon      = c?.equipement?.['Main principale'];
+  const wDmgStat    = weapon?.degatsStats?.[0] || weapon?.degatsStat || 'force';
+  const wTchStat    = weapon?.toucherStats?.[0] || weapon?.toucherStat || wDmgStat;
+  const wDmgMod     = c ? getMod(c, wDmgStat)  : 0;
+  const wTchMod     = c ? getMod(c, wTchStat)  : 0;
+  const wSetBonus   = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
+  const wMaitrise   = c && weapon ? getMaitriseBonus(c, weapon) : 0;
   options.push({
-    id:     'weapon',
-    icon:   '⚔️',
-    label:  weapon?.nom || 'Attaque de base',
-    dice:   ld.displayAttackDice || '1d6',
-    portee: ld.displayRange ?? 1,
-    pmCost: 0,
+    id:               'weapon',
+    icon:             '⚔️',
+    label:            weapon?.nom || 'Attaque de base',
+    rawDice:          weapon?.degats || '1d6',
+    dice:             ld.displayAttackDice || '1d6', // compat — a le mod baked in
+    portee:           ld.displayRange ?? 1,
+    pmCost:           0,
+    toucherMod:       wTchMod,
+    toucherSetBonus:  wSetBonus,
+    toucherStatLabel: statShort(wTchStat) || wTchStat,
+    dmgStatMod:       wDmgMod,
+    dmgStatLabel:     statShort(wDmgStat) || wDmgStat,
+    maitriseBonus:    wMaitrise,
   });
 
   // ── Sorts offensifs actifs du deck ──
@@ -754,6 +781,8 @@ function _buildAttackOptions(t) {
 
 // Cache des options d'attaque — évite tout JSON/HTML dans les onclick
 const _atkOptsCache = {};
+// Contexte de l'attaque en cours (multi-étapes)
+let _atkCtx = null;
 
 /** Affiche le modal de sélection d'attaque. */
 async function _execAttack(srcId, tgtId) {
@@ -807,67 +836,255 @@ async function _execAttack(srcId, tgtId) {
 
 window._vttPickOpt = (srcId, tgtId, idx) => {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
-  if (opt) window._vttExecWithOpt(srcId, tgtId, opt);
-};
-
-window._vttExecWithOpt = async (srcId, tgtId, opt) => {
+  if (!opt) return;
   closeModalDirect();
   const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
   if (!src||!tgt) return;
   const lS=_live(src), lT=_live(tgt);
+  _atkCtx = { srcId, tgtId, opt, lS, lT };
 
-  const dmg    = Math.max(1, _rollDice(opt.dice));
-  const curHp  = lT.displayHp??20, hpMax=lT.displayHpMax??20;
-  const newHp  = Math.max(0, curHp-dmg);
+  const dist    = Math.max(Math.abs(src.col-tgt.col),Math.abs(src.row-tgt.row));
+  const atkBase = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
+  const sn      = n => n>0?`+${n}`:n<0?`${n}`:'';
+  const tag     = (txt, col='var(--text-dim)') =>
+    `<span style="font-size:.6rem;color:${col};margin-left:.05rem">(${txt})</span>`;
 
-  // Joueur attaquant un ennemi : HP affichés = pvCombat/pvActuel (estimation)
-  const isEstimated = !STATE.isAdmin && tgt.type === 'enemy' && tgt.beastId;
-  const pvLine = isEstimated
-    ? `PV estimés : ${curHp} → <strong>${newHp}/${hpMax}</strong>`
-    : `PV : ${curHp} → <strong>${newHp}/${hpMax}</strong>`;
+  // ── Formule toucher ────────────────────────────────────────────────
+  let toucherFormula;
+  if (opt.toucherMod !== undefined) {
+    const p = [`<code style="font-size:.88rem;color:var(--gold)">1d20</code>`];
+    if (opt.toucherMod !== 0)
+      p.push(`<span style="font-size:.85rem;color:var(--gold)">${sn(opt.toucherMod)}</span>${tag(opt.toucherStatLabel)}`);
+    if (opt.toucherSetBonus > 0)
+      p.push(`<span style="font-size:.85rem;color:#22c38e">+${opt.toucherSetBonus}</span>${tag('Set','#22c38e')}`);
+    toucherFormula = p.join(' ');
+  } else {
+    toucherFormula = `<code style="font-size:.88rem;color:var(--gold)">1d20</code>`
+      + (atkBase!==0 ? ` <span style="font-size:.82rem;color:var(--text-muted)">${sn(atkBase)}</span>` : '');
+  }
 
-  const ok = await confirmModal(
-    `${opt.icon} <strong>${lS.displayName??src.name}</strong>
-     utilise <strong>${opt.label}</strong><br>
-     🎲 ${opt.dice} → <strong>${dmg} dégâts</strong><br>
-     ${pvLine}`,
-    {title:`${opt.icon} ${opt.label}`, confirmLabel:'Confirmer', cancelLabel:'Annuler', danger:true}
-  );
-  if (!ok) return; // annulé : reste en mode attaque avec l'attaquant sélectionné
+  // ── Formule dégâts ─────────────────────────────────────────────────
+  let degatsFormula;
+  if (opt.rawDice !== undefined) {
+    const p = [`<code style="font-size:.88rem;color:#ef4444">${opt.rawDice}</code>`];
+    if (opt.dmgStatMod !== 0)
+      p.push(`<span style="font-size:.85rem;color:#ef4444">${sn(opt.dmgStatMod)}</span>${tag(opt.dmgStatLabel)}`);
+    if (opt.maitriseBonus > 0)
+      p.push(`<span style="font-size:.85rem;color:#f59e0b">+${opt.maitriseBonus}</span>${tag('Maîtrise')}`);
+    degatsFormula = p.join(' ');
+  } else {
+    degatsFormula = `<code style="font-size:.88rem;color:#ef4444">${opt.dice}</code>`;
+  }
+
+  const inpStyle = `width:52px;padding:4px 6px;text-align:center;font-size:.88rem;border-radius:7px;
+    border:1px solid var(--border);background:var(--bg-base,var(--bg));color:var(--text);font-family:inherit`;
+
+  openModal(`${opt.icon} ${opt.label}`, `
+    <div class="vtt-form" style="min-width:260px;max-width:340px">
+
+      <!-- En-tête : retour + attaquant → cible -->
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
+        <button onclick="window._vttBackToAtk()"
+          style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
+                 border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
+                 cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
+                 white-space:nowrap">
+          ← Retour
+        </button>
+        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem">
+          <strong>${_escHtml(lS.displayName??src.name)}</strong>
+          <span style="color:var(--text-dim);margin:0 .3rem">→</span>
+          <strong style="color:#ef4444">${_escHtml(lT.displayName??tgt.name)}</strong>
+        </div>
+        <span style="flex-shrink:0;font-size:.62rem;color:var(--text-dim);background:var(--bg-elevated);
+                     padding:.18rem .45rem;border-radius:999px">${dist}c</span>
+      </div>
+
+      <!-- Bloc formules + bonus inputs -->
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem">
+        <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;row-gap:.6rem;column-gap:.7rem">
+          <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">🎯 Toucher</span>
+          <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${toucherFormula}</div>
+          <input type="number" id="atk-bonus-hit" value="0" style="${inpStyle}" placeholder="±0" title="Bonus / malus au toucher">
+
+          <div style="grid-column:1/-1;height:1px;background:var(--border);margin:-.1rem 0"></div>
+
+          <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">⚔️ Dégâts</span>
+          <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${degatsFormula}</div>
+          <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="±0" title="Bonus / malus aux dégâts">
+        </div>
+      </div>
+
+      <!-- Sélecteur de mode (toggle 3 états) -->
+      <div style="margin-bottom:.85rem">
+        <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
+        <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
+          <button id="atk-mode-dis" onclick="window._vttSetMode('dis')"
+            style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                   font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
+            <div style="font-size:.9rem">⬇</div>Désavantage
+          </button>
+          <button id="atk-mode-normal" onclick="window._vttSetMode('normal')"
+            style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                   font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
+            Normal
+          </button>
+          <button id="atk-mode-adv" onclick="window._vttSetMode('adv')"
+            style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                   font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
+            <div style="font-size:.9rem">⬆</div>Avantage
+          </button>
+        </div>
+      </div>
+
+      <!-- Bouton Lancer -->
+      <input type="hidden" id="atk-mode" value="normal">
+      <button onclick="window._vttRollAttack()"
+        style="width:100%;height:46px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
+               font-size:.95rem;font-weight:700;letter-spacing:.02em;
+               background:var(--gold,#f59e0b);color:#1a1a1a">
+        🎲 Lancer !
+      </button>
+
+    </div>`);
+};
+
+window._vttCancelAtk  = () => { _atkCtx=null; closeModalDirect(); };
+
+/** Retourne à la liste de sélection d'attaque sans annuler le combat. */
+window._vttBackToAtk  = () => {
+  const ctx = _atkCtx;
+  closeModalDirect();
+  _atkCtx = null;
+  if (ctx) _execAttack(ctx.srcId, ctx.tgtId);
+};
+
+/** Met à jour le toggle Désavantage / Normal / Avantage. */
+window._vttSetMode = (mode) => {
+  const cfg = {
+    dis:    { bg:'rgba(239,68,68,.18)',  color:'#f87171', weight:'700' },
+    normal: { bg:'var(--bg-elevated)',   color:'var(--text)', weight:'700' },
+    adv:    { bg:'rgba(34,195,142,.18)', color:'#22c38e', weight:'700' },
+  };
+  const off = { bg:'transparent', color:'var(--text-dim)', weight:'400' };
+  ['dis','normal','adv'].forEach(m => {
+    const el = document.getElementById(`atk-mode-${m}`);
+    if (!el) return;
+    const s = m === mode ? cfg[m] : off;
+    el.style.background  = s.bg;
+    el.style.color       = s.color;
+    el.style.fontWeight  = s.weight;
+  });
+  const inp = document.getElementById('atk-mode');
+  if (inp) inp.value = mode;
+};
+
+window._vttRollAttack = async () => {
+  const ctx = _atkCtx; if (!ctx) return;
+  // Lire le mode ET les bonus AVANT de fermer le modal
+  const mode     = document.getElementById('atk-mode')?.value || 'normal';
+  const bonusHit = parseInt(document.getElementById('atk-bonus-hit')?.value)||0;
+  const bonusDmg = parseInt(document.getElementById('atk-bonus-dmg')?.value)||0;
+  closeModalDirect();
+  _atkCtx = null;
+
+  const { srcId, tgtId, opt, lS, lT } = ctx;
+  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  if (!src||!tgt) return;
+
+  // ── Jet de toucher ───────────────────────────────────────────────
+  const roll1    = Math.floor(Math.random()*20)+1;
+  const roll2    = mode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
+  const d20      = mode === 'adv' ? Math.max(roll1, roll2)
+                 : mode === 'dis' ? Math.min(roll1, roll2)
+                 : roll1;
+  const isCrit   = d20 === 20;   // Réussite critique : nat 20 = touché quoi qu'il arrive
+  const isFumble = d20 === 1;    // Échec critique    : nat 1  = raté  quoi qu'il arrive
+  const atkBase  = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
+  const hitTotal = d20 + atkBase + bonusHit;
+  const targetCA = lT.displayDefense ?? 10;
+  const hit      = isCrit ? true : isFumble ? false : hitTotal >= targetCA;
+
+  // ── Jet de dégâts ────────────────────────────────────────────────
+  // rawDice = dé seul (ex: "1d8"), dmgFixed = mods fixes (stat + maîtrise).
+  // Bestiaire/sorts : opt.dice a tout baked in, dmgFixed = 0.
+  const diceToRoll = opt.rawDice || opt.dice;
+  const dmgFixed   = opt.rawDice !== undefined ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0)) : 0;
+
+  let dmgRaw=0, dmgTotal=0, critNormalMax=0, critRaw2=0, critFixed2=0;
+  if (hit) {
+    if (isCrit) {
+      // RC : max du jet normal + relance complète (dés + mods)
+      critNormalMax = _maxDice(diceToRoll) + dmgFixed + bonusDmg;
+      critRaw2      = _rollDice(diceToRoll);
+      critFixed2    = dmgFixed + bonusDmg;
+      dmgRaw        = critRaw2;
+      dmgTotal      = critNormalMax + critRaw2 + critFixed2;
+    } else {
+      dmgRaw   = _rollDice(diceToRoll);
+      dmgTotal = Math.max(1, dmgRaw + dmgFixed + bonusDmg);
+    }
+  }
+
+  // ── Application des dégâts ───────────────────────────────────────
+  const isEstimated = !STATE.isAdmin && tgt.type==='enemy' && tgt.beastId;
+  const curHp = lT.displayHp??20, hpMax = lT.displayHpMax??20;
+  const newHp = hit ? Math.max(0, curHp - dmgTotal) : curHp;
 
   try {
-    if (isEstimated) {
-      // Diminue pvCombat (HP courant de combat) sans toucher pvActuel (total estimé)
-      const uid = STATE.user?.uid;
-      if (uid) {
-        if (!_bstTracker[tgt.beastId]) _bstTracker[tgt.beastId] = {};
-        _bstTracker[tgt.beastId].pvCombat = newHp;
-        await setDoc(_bstTrackerRef(uid), { data: _bstTracker });
+    if (hit) {
+      if (isEstimated) {
+        const uid=STATE.user?.uid;
+        if (uid) {
+          if (!_bstTracker[tgt.beastId]) _bstTracker[tgt.beastId]={};
+          _bstTracker[tgt.beastId].pvCombat=newHp;
+          await setDoc(_bstTrackerRef(uid),{data:_bstTracker});
+        }
+      } else {
+        await _setHp(tgt, newHp);
       }
-    } else {
-      await _setHp(tgt, newHp);
     }
     if (opt.pmCost>0 && src.characterId) {
       const c=_characters[src.characterId];
       if (c) await updateDoc(_chrRef(src.characterId),{pm:Math.max(0,(c.pm??0)-opt.pmCost)});
     }
     if (_session?.combat?.active) await updateDoc(_tokRef(src.id),{attackedThisTurn:true}).catch(()=>{});
-    // Log dans le chat
-    await addDoc(_logCol(), {
-      type:'roll',
-      authorId: STATE.user?.uid||null,
-      authorName: STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ',
-      rollFormula: opt.dice, rollResult: dmg,
-      text:`${lS.displayName??src.name} attaque ${lT.displayName??tgt.name} · ${opt.label} · 🎲${opt.dice}=${dmg}`,
+
+    // ── Log dans le chat ─────────────────────────────────────────
+    await addDoc(_logCol(),{
+      type: 'attack',
+      authorId:     STATE.user?.uid||null,
+      authorName:   STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ',
+      attackerName: lS.displayName??src.name,
+      defenderName: lT.displayName??tgt.name,
+      optLabel:     opt.label,
+      isCrit, isFumble,
+      advMode: mode,
+      hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
+      hitBase: atkBase, hitBonus: bonusHit, hitTotal,
+      hitToucherMod:      opt.toucherMod ?? null,
+      hitToucherSetBonus: opt.toucherSetBonus ?? 0,
+      hitToucherStatLabel:opt.toucherStatLabel ?? null,
+      targetCA, hit,
+      dmgFormula: opt.dice, dmgRawDice: opt.rawDice || null,
+      dmgStatMod: opt.dmgStatMod ?? null, dmgStatLabel: opt.dmgStatLabel ?? null,
+      dmgMaitriseBonus: opt.maitriseBonus ?? 0,
+      dmgRaw, dmgBonus: bonusDmg, dmgTotal,
+      critNormalMax, critRaw2, critFixed2,
+      newHp, hpMax,
       createdAt: serverTimestamp(),
     }).catch(()=>{});
+
     showNotif(
-      newHp===0 ? `💀 ${lT.displayName??tgt.name} tombe à 0 PV !`
-                : `${opt.icon} ${dmg} dégâts → ${lT.displayName??tgt.name} (${newHp}/${hpMax} PV)`,
-      'success'
+      isFumble    ? `💀 Échec critique !`
+      : !hit      ? `🎯 Raté ! (${hitTotal})`
+      : newHp===0 ? `💀 ${lT.displayName??tgt.name} tombe à 0 PV !`
+      : isCrit    ? `💥 Critique ! ${dmgTotal} dégâts → ${lT.displayName??tgt.name}`
+                  : `⚔️ ${dmgTotal} dégâts → ${lT.displayName??tgt.name}`,
+      hit ? 'success' : 'error'
     );
   } catch { showNotif('Erreur attaque','error'); }
-  // Rester en mode attaque — effacer juste l'attaquant courant
+
   _tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
   _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
@@ -1384,6 +1601,91 @@ function _renderChatLog(msgs) {
   el.innerHTML=msgs.map(m=>{
     const isMe=m.authorId===myUid;
     const who=`<span class="vtt-log-who${isMe?' me':''}">${_escHtml(m.authorName||'?')}</span>`;
+    if (m.type==='attack') {
+      const sn  = n => n>0?`+${n}`:n<0?`${n}`:'';
+      const sub = t => `<span style="font-size:.6rem;color:var(--text-dim)">(${t})</span>`;
+
+      // Couleurs selon résultat
+      const isCrit   = m.isCrit;
+      const isFumble = m.isFumble;
+      const borderCol = isCrit   ? '#f59e0b'
+                      : isFumble ? '#7f1d1d'
+                      : m.hit    ? '#22c38e' : '#6b7280';
+      const bgRgb     = isCrit   ? '245,158,11'
+                      : isFumble ? '127,29,29'
+                      : m.hit    ? '34,195,142' : '107,114,128';
+      const accentCol = isCrit   ? '#f59e0b'
+                      : m.hit    ? '#22c38e' : '#ef4444';
+
+      // Badge résultat dans le header
+      const resultBadge = isCrit
+        ? `<span style="font-size:.7rem;font-weight:700;color:#f59e0b;margin-left:auto">💥 CRITIQUE</span>`
+        : isFumble
+        ? `<span style="font-size:.7rem;font-weight:700;color:#ef4444;margin-left:auto">💀 FUMBLE</span>`
+        : '';
+
+      // ── Formule toucher ────────────────────────────────────────────
+      // Affichage des dés pour avantage/désavantage
+      const rolls    = Array.isArray(m.hitD20rolls) && m.hitD20rolls.length > 1 ? m.hitD20rolls : null;
+      const advIcon  = m.advMode === 'adv' ? '⬆' : m.advMode === 'dis' ? '⬇' : '';
+      const diceDisp = rolls
+        ? `1d20(${rolls[0]},${rolls[1]}${advIcon}→${m.hitD20})`
+        : `1d20(${m.hitD20})`;
+      const hitFormula = m.hitToucherStatLabel != null
+        ? [
+            diceDisp,
+            m.hitToucherMod       ? sn(m.hitToucherMod)    + sub(m.hitToucherStatLabel) : '',
+            m.hitToucherSetBonus > 0 ? `+${m.hitToucherSetBonus}` + sub('Set') : '',
+            m.hitBonus            ? sn(m.hitBonus) + sub('bonus') : '',
+          ].filter(Boolean).join(' ')
+        : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`;
+
+      // ── Formule dégâts ─────────────────────────────────────────────
+      let dmgRow = '';
+      if (m.hit) {
+        const baseDice = _escHtml(m.dmgRawDice || m.dmgFormula || '');
+        const mods = [
+          m.dmgStatMod       ? sn(m.dmgStatMod)       + sub(m.dmgStatLabel||'') : '',
+          m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
+          m.dmgBonus         ? sn(m.dmgBonus)          + sub('bonus') : '',
+        ].filter(Boolean).join(' ');
+
+        let dmgFormula;
+        if (isCrit && m.critNormalMax) {
+          // Affichage critique : max(16) + 1d8(5) +3(Dex) +5(Maîtrise)
+          dmgFormula = `max<span style="font-size:.6rem;color:var(--text-dim)">(${m.critNormalMax})</span> + ${baseDice}(${m.dmgRaw}) ${mods}`;
+        } else {
+          dmgFormula = `${baseDice}(${m.dmgRaw}) ${mods}`;
+        }
+
+        dmgRow = `<div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap;margin-top:.2rem">
+          <span style="font-size:.78rem">⚔️</span>
+          <span style="font-size:.7rem;color:var(--text-dim)">${dmgFormula}</span>
+          <span style="font-size:.72rem;color:var(--text-dim)">=</span>
+          <strong style="font-size:1.05rem;color:#ef4444;letter-spacing:-.01em">${m.dmgTotal}</strong>
+          <span style="font-size:.72rem;color:var(--text-dim)">${m.newHp===0?'💀':'dégâts'}</span>
+        </div>`;
+      }
+
+      return `<div class="vtt-log-entry vtt-log-roll"
+          style="border-left:3px solid ${borderCol};padding-left:.5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;margin-bottom:.3rem">
+          <span class="vtt-log-who${isMe?' me':''}">${_escHtml(m.authorName||'?')}</span>
+          <span style="color:var(--text-dim);font-size:.72rem">→</span>
+          <strong style="font-size:.82rem">${_escHtml(m.defenderName||'')}</strong>
+          <span style="color:var(--text-dim);font-size:.65rem">· ${_escHtml(m.optLabel||'')}</span>
+          ${resultBadge}
+        </div>
+        <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap">
+          <span style="font-size:.78rem">🎯</span>
+          <span style="font-size:.7rem;color:var(--text-dim)">${hitFormula}</span>
+          <span style="font-size:.72rem;color:var(--text-dim)">=</span>
+          <strong style="font-size:1.05rem;color:${accentCol};letter-spacing:-.01em">${m.hitTotal}</strong>
+          <span style="font-size:.72rem;color:${accentCol};font-weight:600">${m.hit?'✓':'✗'}</span>
+        </div>
+        ${dmgRow}
+      </div>`;
+    }
     if (m.type==='roll') {
       return `<div class="vtt-log-entry vtt-log-roll">${who} 🎲 <em>${_escHtml(m.rollFormula||'')}</em> → <strong>${m.rollResult}</strong>`
         +(m.text?`<span class="vtt-log-desc">${_escHtml(m.text)}</span>`:'')
