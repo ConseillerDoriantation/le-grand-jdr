@@ -168,12 +168,8 @@ async function _syncAutoTokens() {
       characterId: null, npcId: n.id, beastId: null, ownerId: null,
     });
   }
-  for (const b of Object.values(_bestiary)) {
-    if (!byBeast.has(b.id)) toCreate.push({
-      name: b.nom || 'Créature', type: 'enemy',
-      characterId: null, npcId: null, beastId: b.id, ownerId: null,
-    });
-  }
+  // Les ennemis ne sont PAS auto-créés depuis le bestiaire :
+  // ils sont placés manuellement depuis la section Bestiaire du tray.
 
   if (!toCreate.length) return;
 
@@ -407,30 +403,35 @@ function _buildShape(t) {
   g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9, stroke:'rgba(255,255,255,0.2)',strokeWidth:2 }));
   g.add(new K.Circle({ radius:r+7, stroke:'#fff',     strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
   g.add(new K.Circle({ radius:r+7, stroke:'#ef4444',  strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
-  // ── Barre HP + valeur ────────────────────────────────────────────
-  g.add(new K.Rect({ x:-bW/2,y:r+4,width:bW,height:5,fill:'#1e1e2e',cornerRadius:2,name:'hp-bg' }));
-  g.add(new K.Rect({ x:-bW/2,y:r+4,width:bW*rat,height:5,fill:hpColor(rat),cornerRadius:2,name:'hp-fill' }));
-  g.add(new K.Text({ text:`${hp}/${hpm}`, x:bW/2+2,y:r+3, fontSize:8,
-    fill:'rgba(210,210,210,0.8)', fontFamily:'Inter,sans-serif', listening:false, name:'hp-val' }));
-  // ── Barre PM + valeur (joueurs seulement) ───────────────────────
+  // ── Barre HP (texte centré sur la barre, fond opaque) ───────────
+  const hpH=10, hpY=r+4;
+  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW,height:hpH,fill:'rgba(0,0,0,0.75)',cornerRadius:3,name:'hp-bg' }));
+  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW*rat,height:hpH,fill:hpColor(rat),cornerRadius:3,name:'hp-fill' }));
+  g.add(new K.Text({ text:`${hp}/${hpm}`, x:-bW/2,y:hpY+1,
+    width:bW,align:'center',fontSize:7,fontStyle:'bold',
+    fill:'rgba(255,255,255,0.95)',fontFamily:'Inter,sans-serif',listening:false,name:'hp-val' }));
+  // ── Barre PM (joueurs seulement) ────────────────────────────────
   const _pm0=ld.displayPm;
+  let _nextY = hpY+hpH+2;
   if (_pm0!=null) {
-    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1, pmW0=bW*0.78;
-    g.add(new K.Rect({ x:-pmW0/2,y:r+12,width:pmW0,height:4,fill:'#1e1e2e',cornerRadius:2,name:'pm-bg' }));
-    g.add(new K.Rect({ x:-pmW0/2,y:r+12,width:pmW0*pmRat0,height:4,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
-    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:pmW0/2+2,y:r+11, fontSize:8,
-      fill:'rgba(155,109,255,0.85)', fontFamily:'Inter,sans-serif', listening:false, name:'pm-val' }));
+    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1;
+    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:8,fill:'rgba(0,0,0,0.6)',cornerRadius:2,name:'pm-bg' }));
+    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW*pmRat0,height:8,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
+    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:-bW/2,y:_nextY+1,
+      width:bW,align:'center',fontSize:7,
+      fill:'rgba(210,180,255,0.95)',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val' }));
+    _nextY += 10;
   }
-  // ── CA (petite étiquette) ────────────────────────────────────────
-  const _caY0 = _pm0!=null ? r+19 : r+12;
-  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-CELL/2, y:_caY0,
-    width:CELL, align:'center', fontSize:9, fill:'rgba(190,190,190,0.6)',
+  // ── CA ───────────────────────────────────────────────────────────
+  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2, y:_nextY,
+    width:bW, align:'center', fontSize:8, fill:'rgba(210,210,210,0.75)',
     fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl' }));
-  // ── Nom ──────────────────────────────────────────────────────────
-  const _nameY0 = _pm0!=null ? r+27 : r+20;
-  g.add(new K.Text({ text:ld.displayName??t.name, x:-CELL/2, y:_nameY0,
-    width:CELL, align:'center', fontSize:10, fill:'#ddd',
-    fontFamily:'Inter,sans-serif', name:'lbl' }));
+  // ── Nom (fond sombre pour lisibilité) ────────────────────────────
+  const nameH=13, nameY=_nextY+10;
+  g.add(new K.Rect({ x:-bW/2,y:nameY-1,width:bW,height:nameH,fill:'rgba(0,0,0,0.65)',cornerRadius:3,listening:false }));
+  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:nameY,
+    width:bW,align:'center',fontSize:10,fontStyle:'bold',fill:'#fff',
+    fontFamily:'Inter,sans-serif',name:'lbl' }));
 
   const imgSrc = ld.displayImage;
   if (imgSrc) {
@@ -513,23 +514,16 @@ function _buildShape(t) {
 
   g.on('click', e => {
     e.cancelBubble=true;
-    if (_tool==='attack') {
-      if (_attackSrc && _attackSrc===t.id) {
-        // Re-clic sur l'attaquant → annuler la sélection
-        _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
-        _attackSrc=null; _clearHL(); _layers.token.batchDraw();
-      } else if (_attackSrc && _attackSrc!==t.id) {
-        // Clic sur une cible → attaquer
-        _execAttack(_attackSrc, t.id);
-      } else {
-        // Pas d'attaquant encore → le sélectionner
-        _select(t.id);
-      }
-    } else if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
-      // Shift+clic : ajouter / retirer du groupe
-      _toggleMultiSelect(t.id);
+    if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
+      // Shift+clic : ajouter / retirer du groupe multi-sélection
+      _toggleMultiSelect(t.id); return;
+    }
+    _clearMultiSelect();
+    if (_attackSrc && _attackSrc!==t.id) {
+      // Attaquant déjà désigné → clic sur une cible → lancer l'attaque
+      _execAttack(_attackSrc, t.id);
     } else {
-      _clearMultiSelect();
+      // Sélectionner le token (si token propre, montre la portée d'attaque)
       _select(t.id);
     }
   });
@@ -549,8 +543,8 @@ function _patchShape(id) {
   // PM
   const _pm=ld.displayPm;
   if (_pm!=null) {
-    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.max(0,_pm/pmMax):1, pmW=bW*0.78;
-    g.findOne('.pm-fill')?.width(pmW*pmRat);
+    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.max(0,_pm/pmMax):1;
+    g.findOne('.pm-fill')?.width(bW*pmRat);
     g.findOne('.pm-val')?.text(`✨${_pm}/${pmMax}`);
   }
   g.findOne('.ca-lbl')?.text(`🛡${ld.displayDefense??0}`);
@@ -563,22 +557,20 @@ function _patchShape(id) {
 function _select(id) {
   if (_imgTr&&_selImg) { _imgTr.nodes([]); _selImg=null; _layers.map?.batchDraw(); }
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+  _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _attackSrc=null; _clearHL();
   _selected=id;
   _tokens[id]?.shape?.findOne('.sel')?.visible(true);
   _layers.token.batchDraw();
   const data=_tokens[id]?.data;
   _renderInspector(data??null);
-  if (_tool==='attack') {
-    // Mode attaque : désigner l'attaquant + montrer sa portée en rouge
-    if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
-      _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
-      _attackSrc=id;
-      _tokens[id]?.shape?.findOne('.atk')?.visible(true);
-      _layers.token.batchDraw();
-      _showAttackRange(data);
-    }
-  } else {
-    if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) _showMoveRange(data);
+  // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
+  if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
+    _attackSrc=id;
+    _tokens[id]?.shape?.findOne('.atk')?.visible(true);
+    _layers.token.batchDraw();
+    _showMoveRange(data);    // cases bleues cliquables (déplacement)
+    _showAttackRange(data);  // cases rouges par-dessus (visuel portée)
   }
 }
 
@@ -642,9 +634,8 @@ function _toggleMultiSelect(id) {
   _layers.token?.batchDraw();
 }
 
-/** Surbrillance rouge des cases à portée d'attaque de t. */
+/** Surbrillance rouge des cases à portée d'attaque de t (sans clear — le caller nettoie). */
 function _showAttackRange(t) {
-  _clearHL();
   if (!_activePage) return;
   const K=window.Konva;
   const options=_buildAttackOptions(t);
@@ -938,6 +929,8 @@ function _renderTray() {
     const rat=hpm>0?Math.max(0,hp/hpm):1;
     const dupBtn=t.type==='enemy'
       ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Créer une instance supplémentaire">＋</button>`:'';
+    const delBtn=t.type==='enemy'
+      ?`<button class="vtt-tray-btn" style="color:#ef4444" onclick="event.stopPropagation();window._vttDeleteToken('${t.id}')" title="Supprimer définitivement">×</button>`:'';
     return `<div class="vtt-tray-item ${_selected===t.id?'active':''}" onclick="window._vttSelectFromTray('${t.id}')">
       <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type]??'#888'}">
         ${ld.displayImage?`<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:''}
@@ -952,14 +945,16 @@ function _renderTray() {
           ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer sur cette page">▶</button>`
           :`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer de la carte">↩</button>`
         }
+        ${delBtn}
       </div>
     </div>`;
   };
 
-  const byType=(arr)=>{
+  // Section "sur la page" : tous types ; section "non placés" : joueurs + PNJ seulement
+  const byType=(arr,includeEnemies=true)=>{
     const players=arr.filter(t=>t.type==='player');
     const npcs   =arr.filter(t=>t.type==='npc');
-    const enemies=arr.filter(t=>t.type==='enemy');
+    const enemies=includeEnemies?arr.filter(t=>t.type==='enemy'):[];
     let html='';
     if (players.length) html+=`<div class="vtt-tray-sep">🧑 Joueurs</div>${players.map(t=>mkItem(t,!!t.pageId)).join('')}`;
     if (npcs.length)    html+=`<div class="vtt-tray-sep">👤 PNJ</div>${npcs.map(t=>mkItem(t,!!t.pageId)).join('')}`;
@@ -967,10 +962,33 @@ function _renderTray() {
     return html;
   };
 
+  // Section Bestiaire : entrées du bestiaire → bouton ▶ pour créer + placer une instance
+  const bsts=Object.values(_bestiary);
+  const bestiaryHtml=bsts.length
+    ? bsts.map(b=>{
+        const img=b.image||'';
+        const pvMax=parseInt(b.pvMax)||'?';
+        return `<div class="vtt-tray-item">
+          <div class="vtt-tray-dot" style="background:#ef4444">
+            ${img?`<img src="${img}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:''}
+          </div>
+          <div class="vtt-tray-info">
+            <div class="vtt-tray-name">${b.nom||'Créature'}</div>
+            <div class="vtt-tray-hp-bar" style="background:rgba(239,68,68,0.18)"><div style="width:100%;height:100%;background:#ef4444;border-radius:2px;opacity:.5"></div></div>
+          </div>
+          <div style="display:flex;gap:.15rem">
+            <button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlaceFromBestiary('${b.id}')" title="Placer une instance sur cette page">▶</button>
+          </div>
+        </div>`;
+      }).join('')
+    : '<div class="vtt-tray-empty" style="font-size:.7rem">Bestiaire vide</div>';
+
+  const unplacedNonEnemy=unplaced.filter(t=>t.type!=='enemy');
+
   el.innerHTML=`
-    ${onPage.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Sur cette page (${onPage.length})</div>${byType(onPage)}</div>`:''}
-    ${unplaced.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Non placés (${unplaced.length})</div>${byType(unplaced)}</div>`:''}
-    ${!onPage.length&&!unplaced.length?'<div class="vtt-tray-empty">Aucun token</div>':''}
+    ${onPage.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Sur cette page (${onPage.length})</div>${byType(onPage,true)}</div>`:''}
+    ${unplacedNonEnemy.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Non placés (${unplacedNonEnemy.length})</div>${byType(unplacedNonEnemy,false)}</div>`:''}
+    <div class="vtt-tray-group"><div class="vtt-tray-group-title">👹 Bestiaire</div>${bestiaryHtml}</div>
   `;
 }
 
@@ -1558,6 +1576,39 @@ window._vttDuplicateToken = async tokenId => {
   showNotif(`👹 ${baseName} ${num} créé !`,'success');
 };
 
+// Placer une instance depuis le bestiaire (crée + place sur la page active)
+window._vttPlaceFromBestiary = async beastId => {
+  if (!_activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
+  const b=_bestiary[beastId]; if (!b) return;
+  const existing=Object.values(_tokens).filter(e=>e.data.beastId===beastId);
+  const num=existing.length+1;
+  const name=num>1?`${b.nom} ${num}`:(b.nom||'Créature');
+  const cx=Math.floor(_activePage.cols/2), cy=Math.floor(_activePage.rows/2);
+  const ref=doc(_toksCol());
+  await setDoc(ref,{
+    name, type:'enemy',
+    characterId:null, npcId:null, beastId,
+    ownerId:null,
+    pageId:_activePage.id,
+    col:Math.min(_activePage.cols-1,cx+existing.length),
+    row:cy,
+    visible:true,
+    imageUrl:null, movement:null, range:1, attack:null, defense:null,
+    hp:null, hpMax:null,
+    movedThisTurn:false, attackedThisTurn:false,
+    createdAt:serverTimestamp(),
+  }).catch(()=>showNotif('Erreur placement','error'));
+  showNotif(`👹 ${name} placé !`,'success');
+};
+
+// Supprimer définitivement un token ennemi
+window._vttDeleteToken = async tokenId => {
+  const t=_tokens[tokenId]?.data; if (!t||t.type!=='enemy') return;
+  if (!confirm(`Supprimer définitivement "${t.name}" ?`)) return;
+  await deleteDoc(_tokRef(tokenId)).catch(()=>showNotif('Erreur suppression','error'));
+  showNotif(`🗑 ${t.name} supprimé`,'success');
+};
+
 window._vttSaveStats = async id => {
   const mv  = document.getElementById('vsf-mv')?.value;
   const rng = document.getElementById('vsf-range')?.value;
@@ -1620,16 +1671,11 @@ async function _handleUpload(file) {
 // ── Outil + clavier ─────────────────────────────────────────────────
 function _setTool(tool) {
   _tool=tool;
-  if (tool!=='attack') { _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false); _attackSrc=null; }
   document.querySelectorAll('.vtt-tool').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
-  const wrap=document.getElementById('vtt-canvas-wrap');
-  if (wrap) wrap.style.cursor=tool==='attack'?'crosshair':'default';
 }
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
-  if (e.key==='s'||e.key==='S') _setTool('select');
-  if (e.key==='a'||e.key==='A') _setTool('attack');
   if (e.key==='Escape') _deselect();
 }
 
@@ -1641,10 +1687,6 @@ function _buildHtml() {
   return `
 <div class="vtt-root" id="vtt-root">
   <div class="vtt-toolbar">
-    <div class="vtt-tool-group">
-      <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="Sélectionner (S)">↖ Sélect.</button>
-      <button class="vtt-tool"        data-tool="attack" onclick="window._vttTool('attack')" title="Attaque (A)">⚔️ Attaque</button>
-    </div>
     ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
     <div class="vtt-tool-group vtt-right">
       <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
@@ -1691,7 +1733,7 @@ function _buildHtml() {
       </div>
     </div>
   </div>
-  <div class="vtt-hint">S sélect. · A attaque · Échap désélect. · Molette zoom · Clic-droit pan${mj?' · Clic image → redimensionner':''}</div>
+  <div class="vtt-hint">Clic token allié → portée · Clic ennemi → attaque · Échap désélect. · Molette zoom · Clic-droit pan${mj?' · Clic image → redimensionner':''}</div>
 </div>`;
 }
 
