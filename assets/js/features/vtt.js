@@ -401,44 +401,46 @@ async function _patchImg(imgId, patch) {
 function _buildShape(t) {
   const K  = window.Konva;
   const ld = _live(t);
-  const r  = CELL*0.42, bW = CELL*0.72;
+  const r  = CELL*0.42, bW = CELL*0.9;   // bW élargi pour labels plus lisibles
   const hp = ld.displayHp??20, hpm = ld.displayHpMax??20;
   const rat = hpm>0 ? Math.max(0,hp/hpm) : 1;
+  // Stroke sombre sur les textes : améliore la lisibilité à tous les niveaux de zoom
+  const txtStroke = { stroke:'rgba(0,0,0,0.85)', strokeWidth:0.8 };
 
   const g = new K.Group({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2, id:`tok-${t.id}` });
   g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9, stroke:'rgba(255,255,255,0.2)',strokeWidth:2 }));
   g.add(new K.Circle({ radius:r+7, stroke:'#fff',     strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
   g.add(new K.Circle({ radius:r+7, stroke:'#ef4444',  strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
-  // ── Barre HP (texte centré sur la barre, fond opaque) ───────────
-  const hpH=10, hpY=r+4;
-  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW,height:hpH,fill:'rgba(0,0,0,0.75)',cornerRadius:3,name:'hp-bg' }));
+  // ── Barre HP ────────────────────────────────────────────────────
+  const hpH=12, hpY=r+4;
+  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW,height:hpH,fill:'rgba(0,0,0,0.82)',cornerRadius:3,name:'hp-bg' }));
   g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW*rat,height:hpH,fill:hpColor(rat),cornerRadius:3,name:'hp-fill' }));
-  g.add(new K.Text({ text:`${hp}/${hpm}`, x:-bW/2,y:hpY+1,
-    width:bW,align:'center',fontSize:7,fontStyle:'bold',
-    fill:'rgba(255,255,255,0.95)',fontFamily:'Inter,sans-serif',listening:false,name:'hp-val' }));
+  g.add(new K.Text({ text:`${hp}/${hpm}`, x:-bW/2,y:hpY+1.5,
+    width:bW,align:'center',fontSize:9,fontStyle:'bold',
+    fill:'#fff',fontFamily:'Inter,sans-serif',listening:false,name:'hp-val',...txtStroke }));
   // ── Barre PM (joueurs seulement) ────────────────────────────────
   const _pm0=ld.displayPm;
   let _nextY = hpY+hpH+2;
   if (_pm0!=null) {
     const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1;
-    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:8,fill:'rgba(0,0,0,0.6)',cornerRadius:2,name:'pm-bg' }));
-    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW*pmRat0,height:8,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
-    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:-bW/2,y:_nextY+1,
-      width:bW,align:'center',fontSize:7,
-      fill:'rgba(210,180,255,0.95)',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val' }));
-    _nextY += 10;
+    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:10,fill:'rgba(0,0,0,0.75)',cornerRadius:2,name:'pm-bg' }));
+    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW*pmRat0,height:10,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
+    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:-bW/2,y:_nextY+1.5,
+      width:bW,align:'center',fontSize:9,
+      fill:'#e8d5ff',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val',...txtStroke }));
+    _nextY += 12;
   }
-  // ── CA (fond sombre propre) ──────────────────────────────────────
-  g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:11,fill:'rgba(0,0,0,0.6)',cornerRadius:2,listening:false,name:'ca-bg' }));
-  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2,y:_nextY+1,
-    width:bW, align:'center', fontSize:8, fill:'rgba(220,220,220,0.95)',
-    fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl' }));
-  // ── Nom (fond sombre, séparé de la CA) ──────────────────────────
-  const nameH=13, nameY=_nextY+13;
-  g.add(new K.Rect({ x:-bW/2,y:nameY,width:bW,height:nameH,fill:'rgba(0,0,0,0.65)',cornerRadius:2,listening:false }));
-  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:nameY+1,
-    width:bW,align:'center',fontSize:10,fontStyle:'bold',fill:'#fff',
-    fontFamily:'Inter,sans-serif',name:'lbl' }));
+  // ── CA ───────────────────────────────────────────────────────────
+  g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:12,fill:'rgba(0,0,0,0.75)',cornerRadius:2,listening:false,name:'ca-bg' }));
+  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2,y:_nextY+1.5,
+    width:bW, align:'center', fontSize:9, fill:'#e0e0e0',
+    fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl',...txtStroke }));
+  // ── Nom ──────────────────────────────────────────────────────────
+  const nameH=15, nameY=_nextY+14;
+  g.add(new K.Rect({ x:-bW/2,y:nameY,width:bW,height:nameH,fill:'rgba(0,0,0,0.82)',cornerRadius:2,listening:false }));
+  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:nameY+2,
+    width:bW,align:'center',fontSize:11,fontStyle:'bold',fill:'#fff',
+    fontFamily:'Inter,sans-serif',name:'lbl',...txtStroke }));
 
   const imgSrc = ld.displayImage;
   if (imgSrc) {
@@ -543,7 +545,7 @@ function _patchShape(id) {
   const ld=_live(e.data); const g=e.shape;
   g.to({ x:e.data.col*CELL+CELL/2, y:e.data.row*CELL+CELL/2, duration:0.12 });
   const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
-  const rat=hpm>0?Math.max(0,hp/hpm):1, bW=CELL*0.72;
+  const rat=hpm>0?Math.max(0,hp/hpm):1, bW=CELL*0.9;
   const fill=g.findOne('.hp-fill');
   if (fill){fill.width(bW*rat);fill.fill(hpColor(rat));}
   g.findOne('.hp-val')?.text(`${hp}/${hpm}`);
@@ -1564,14 +1566,15 @@ window._vttDuplicateToken = async tokenId => {
   const baseName=t.name.replace(/ \d+$/, '');
   const sameGroup=Object.values(_tokens).filter(e=>
     t.beastId ? e.data.beastId===t.beastId
-              : e.data.name.replace(/ \d+$/,'')===baseName
+              : (e.data.name||'').replace(/ \d+$/,'')===baseName
   );
-  const num=sameGroup.length+1;
+  const usedNums=new Set(sameGroup.map(e=>{const m=(e.data.name||'').match(/\s(\d+)$/);return m?parseInt(m[1]):1;}));
+  let num=1; while(usedNums.has(num))num++;
   const { id:_tid, createdAt:_ca, ...base } = t;
   const ref=doc(_toksCol());
   await setDoc(ref, {
     ...base,
-    name:`${baseName} ${num}`,
+    name: num===1 ? baseName : `${baseName} ${num}`,
     hp: null,   // PV frais depuis le template bestiaire
     pageId: _activePage?.id||null,
     col: _activePage ? Math.min(_activePage.cols-1,(t.col||0)+sameGroup.length) : 0,
@@ -1587,9 +1590,18 @@ window._vttDuplicateToken = async tokenId => {
 window._vttPlaceFromBestiary = async beastId => {
   if (!_activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
   const b=_bestiary[beastId]; if (!b) return;
-  const existing=Object.values(_tokens).filter(e=>e.data.beastId===beastId);
-  const num=existing.length+1;
-  const name=num>1?`${b.nom} ${num}`:(b.nom||'Créature');
+  // Purger les tokens fantômes (anciens auto-créés, non placés, non modifiés)
+  const ghosts=Object.values(_tokens).filter(e=>e.data.beastId===beastId&&!e.data.pageId&&e.data.hp==null);
+  if (ghosts.length) {
+    const batch=writeBatch(db);
+    ghosts.forEach(g=>batch.delete(_tokRef(g.data.id)));
+    await batch.commit().catch(()=>{});
+  }
+  // Trouver le premier numéro libre parmi les tokens actifs
+  const active=Object.values(_tokens).filter(e=>e.data.beastId===beastId&&(e.data.pageId||e.data.hp!=null));
+  const usedNums=new Set(active.map(e=>{const m=(e.data.name||'').match(/\s(\d+)$/);return m?parseInt(m[1]):1;}));
+  let num=1; while(usedNums.has(num))num++;
+  const name=num===1?(b.nom||'Créature'):`${b.nom} ${num}`;
   const cx=Math.floor(_activePage.cols/2), cy=Math.floor(_activePage.rows/2);
   const ref=doc(_toksCol());
   await setDoc(ref,{
