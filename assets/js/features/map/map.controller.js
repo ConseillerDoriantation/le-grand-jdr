@@ -14,8 +14,8 @@ import { loadMap, loadFogZones } from './data/maps.repo.js';
 
 // Rendu
 import { bindViewport, applyTransform, zoom, resetView, screenToNorm, getImageSize } from './render/viewport.js';
-import { bindMarkers, renderMarkers } from './render/markers.js';
-import { bindFog, renderFog, startFogDraw, stopFogDraw, clearFog, togglePlayerPreview } from './render/fog.js';
+import { bindMarkers, renderMarkers, updateMarkerScales } from './render/markers.js';
+import { bindFog, renderFog, startFogDraw, stopFogDraw, clearFog, togglePlayerPreview, updateFogScales } from './render/fog.js';
 
 // UI
 import { bindSidepanel } from './ui/sidepanel.js';
@@ -27,6 +27,7 @@ import { openMapSettingsModal } from './ui/settings.js';
 import { STATE } from '../../core/state.js';
 import { showNotif } from '../../shared/notifications.js';
 import { confirmModal } from '../../shared/modal.js';
+import { _esc } from '../../shared/html.js';
 
 let rootContainer = null;
 let stylesInjected = false;
@@ -55,7 +56,7 @@ export async function initMap(containerEl) {
   state.selection = null;
   state.mode = 'navigate';
   state.modeContext = null;
-  state.viewport = { scale: 1, offsetX: 0, offsetY: 0 };
+  state.viewport = { scale: 0.14, offsetX: 25, offsetY: -250 };
   state.filters = { types: new Set(), onlyRevealed: false, query: '' };
 
   // 2. Monter le shell DOM
@@ -67,14 +68,10 @@ export async function initMap(containerEl) {
   const canvas    = containerEl.querySelector('#map-fog');
   const panel     = containerEl.querySelector('#map-sidepanel');
 
-  // 3. Brancher les modules de rendu
-  bindViewport(root, transform, img);
-  bindMarkers(svg);
-  bindFog(canvas, root, transform);
-  bindSidepanel(panel);
-
-  // 4. Réactivité
+  // 3. Réactivité (AVANT les binds : bindViewport peut émettre 'viewport:ready'
+  //    de façon synchrone si l'image est déjà en cache du navigateur).
   on('viewport:ready',     onViewportReady);
+  on('viewport:changed',   onViewportChanged);
   on('places:changed',     () => { renderMarkers(); });
   on('organizations:changed', () => { renderMarkers(); });
   on('selection:changed',  () => { renderMarkers(); });
@@ -82,6 +79,12 @@ export async function initMap(containerEl) {
   on('fog:mode',           onFogModeChanged);
   on('marker:click',       onMarkerClick);
   on('panel:action',       onPanelAction);
+
+  // 4. Brancher les modules de rendu
+  bindMarkers(svg);
+  bindFog(canvas, root, transform);
+  bindSidepanel(panel);
+  bindViewport(root, transform, img);
 
   // 5. Événements UI (toolbar, carte, recherche, filtres)
   wireToolbar(containerEl);
@@ -104,7 +107,7 @@ function shellHTML() {
 
       <header class="map-topbar">
         <div class="map-topbar__title">
-          <span class="map-topbar__region">${escapeHtml(regionName)}</span>
+          <span class="map-topbar__region">${_esc(regionName)}</span>
         </div>
         <div class="map-topbar__search">
           <input type="search" id="map-search" placeholder="Rechercher un lieu, une organisation…" autocomplete="off">
@@ -113,10 +116,11 @@ function shellHTML() {
       </header>
 
       <div class="map-workspace">
-        <div id="map-root" class="map-root">
+        <div id="map-root" class="map-root${hasImage ? ' is-loading' : ''}">
+          <div class="map-loader" aria-hidden="true"><span class="map-loader__text">Chargement de la carte</span></div>
           <div id="map-transform" class="map-transform">
             ${hasImage
-              ? `<img id="map-img" src="${escapeHtml(state.map.imageUrl)}" draggable="false" alt="">`
+              ? `<img id="map-img" src="${_esc(state.map.imageUrl)}" draggable="false" alt="">`
               : `<div class="map-placeholder">
                    ${isAdmin
                      ? 'Aucune image. Ouvre ⚙️ Paramètres pour en ajouter une.'
@@ -156,7 +160,7 @@ function wireFilters(container) {
   if (!wrap) return;
   wrap.innerHTML = state.types
     .filter(t => state.places.some(p => p.type === t.id))
-    .map(t => `<button class="map-chip map-chip--filter" data-filter-type="${t.id}" style="--chip:${t.color}">${t.icon} ${escapeHtml(t.label)}</button>`)
+    .map(t => `<button class="map-chip map-chip--filter" data-filter-type="${t.id}" style="--chip:${t.color}">${t.icon} ${_esc(t.label)}</button>`)
     .join('');
 
   wrap.addEventListener('click', e => {
@@ -240,16 +244,26 @@ function wireMapClick(root) {
     if (!place) { exitPlacingMode(); return; }
 
     place.marker = { mapId: state.activeMapId, x, y, icon: null };
-    try {
+    await runAction('save marker', async () => {
       await savePlace(place);
       exitPlacingMode();
       emit('places:changed');
       showNotif(`${place.name} placé sur la carte.`, 'success');
-    } catch (err) {
-      console.error('[map] save marker', err);
-      showNotif('Erreur de sauvegarde de la position.', 'error');
-    }
+    }, 'Erreur de sauvegarde de la position.');
   });
+}
+
+// ── Wrapper try/catch commun aux actions Firestore ───────────────────────────
+// Renvoie true si fn() s'est exécutée sans erreur, false sinon (notif + log).
+async function runAction(label, fn, errorMsg) {
+  try {
+    await fn();
+    return true;
+  } catch (e) {
+    console.error(`[map] ${label}`, e);
+    showNotif(errorMsg, 'error');
+    return false;
+  }
 }
 
 // ── Hooks réactifs ───────────────────────────────────────────────────────────
@@ -257,6 +271,27 @@ function wireMapClick(root) {
 function onViewportReady() {
   renderMarkers();
   renderFog();
+  lastScale = state.viewport.scale;
+  // Révéler la carte seulement après le premier rendu complet (image + fog).
+  rootContainer?.querySelector('#map-root')?.classList.remove('is-loading');
+}
+
+// Pan seul : la transform CSS parent suffit → rien à refaire ici.
+// Zoom : on ne reconstruit pas les SVG, on ne met à jour que le contre-zoom
+// des marqueurs et des ✕ de fog. rAF-throttlé pour encaisser les salves de molette.
+let rafPending = false;
+let lastScale = null;
+function onViewportChanged() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    const cur = state.viewport?.scale;
+    if (cur === lastScale) return;
+    lastScale = cur;
+    updateMarkerScales();
+    updateFogScales();
+  });
 }
 
 function onMarkerClick({ id }) {
@@ -288,15 +323,12 @@ async function onPanelAction({ action, placeId, orgId }) {
       if (!place) return;
       const created = await openOrganizationForm({ placeId, placeName: place.name });
       if (!created) return;
-      try {
+      await runAction('save org', async () => {
         await saveOrganization(created);
         state.organizations = await listOrganizations();
         emit('organizations:changed');
         showNotif('Organisation créée.', 'success');
-      } catch (e) {
-        console.error('[map] save org', e);
-        showNotif('Erreur de création.', 'error');
-      }
+      }, 'Erreur de création.');
       break;
     }
 
@@ -305,15 +337,12 @@ async function onPanelAction({ action, placeId, orgId }) {
       if (!place) return;
       const updated = await openPlaceForm(place);
       if (!updated) return;
-      try {
+      await runAction('save place', async () => {
         await savePlace(updated);
         state.places = await listPlaces();
         emit('places:changed');
         showNotif('Lieu mis à jour.', 'success');
-      } catch (e) {
-        console.error('[map] save place', e);
-        showNotif('Erreur de sauvegarde.', 'error');
-      }
+      }, 'Erreur de sauvegarde.');
       break;
     }
 
@@ -330,17 +359,14 @@ async function onPanelAction({ action, placeId, orgId }) {
       const place = getPlaceById(placeId);
       if (!place) return;
       if (!await confirmModal(`Supprimer "${place.name}" ?`)) return;
-      try {
+      await runAction('delete place', async () => {
         await removePlace(place.id);
         state.places = state.places.filter(p => p.id !== place.id);
         state.selection = null;
         emit('places:changed');
         emit('selection:changed');
         showNotif('Lieu supprimé.', 'success');
-      } catch (e) {
-        console.error('[map] delete place', e);
-        showNotif('Erreur de suppression.', 'error');
-      }
+      }, 'Erreur de suppression.');
       break;
     }
 
@@ -353,15 +379,12 @@ async function onPanelAction({ action, placeId, orgId }) {
         placeName: getPlaceById(org.placeId)?.name || '',
       });
       if (!updated) return;
-      try {
+      await runAction('save org', async () => {
         await saveOrganization(updated);
         state.organizations = await listOrganizations();
         emit('organizations:changed');
         showNotif('Organisation mise à jour.', 'success');
-      } catch (e) {
-        console.error('[map] save org', e);
-        showNotif('Erreur de sauvegarde.', 'error');
-      }
+      }, 'Erreur de sauvegarde.');
       break;
     }
 
@@ -369,7 +392,7 @@ async function onPanelAction({ action, placeId, orgId }) {
       const org = getOrgById(orgId);
       if (!org) return;
       if (!await confirmModal(`Supprimer "${org.name}" ?`)) return;
-      try {
+      await runAction('delete org', async () => {
         await removeOrganization(org.id);
         state.organizations = state.organizations.filter(o => o.id !== org.id);
         // Retour à la fiche du lieu parent
@@ -377,10 +400,7 @@ async function onPanelAction({ action, placeId, orgId }) {
         emit('organizations:changed');
         emit('selection:changed');
         showNotif('Organisation supprimée.', 'success');
-      } catch (e) {
-        console.error('[map] delete org', e);
-        showNotif('Erreur de suppression.', 'error');
-      }
+      }, 'Erreur de suppression.');
       break;
     }
 
@@ -396,27 +416,25 @@ async function onPanelAction({ action, placeId, orgId }) {
 async function onNewPlace() {
   const created = await openPlaceForm(null);
   if (!created) return;
-  try {
+  const ok = await runAction('create place', async () => {
     await savePlace(created);
     state.places = await listPlaces();
     emit('places:changed');
     showNotif(`${created.name} créé.`, 'success');
+  }, 'Erreur de création.');
+  if (!ok) return;
 
-    if (await confirmModal(`Placer "${created.name}" sur la carte maintenant ?`, {
-      confirmLabel: 'Placer',
-      cancelLabel: 'Plus tard',
-      danger: false,
-      icon: '📍',
-    })) {
-      state.selection = { kind: 'place', id: created.id };
-      state.mode = 'placing';
-      state.modeContext = { placeId: created.id };
-      showHint(`Cliquez sur la carte pour placer ${created.name}.`);
-      emit('selection:changed');
-    }
-  } catch (e) {
-    console.error('[map] create place', e);
-    showNotif('Erreur de création.', 'error');
+  if (await confirmModal(`Placer "${created.name}" sur la carte maintenant ?`, {
+    confirmLabel: 'Placer',
+    cancelLabel: 'Plus tard',
+    danger: false,
+    icon: '📍',
+  })) {
+    state.selection = { kind: 'place', id: created.id };
+    state.mode = 'placing';
+    state.modeContext = { placeId: created.id };
+    showHint(`Cliquez sur la carte pour placer ${created.name}.`);
+    emit('selection:changed');
   }
 }
 
@@ -439,12 +457,6 @@ function hideHint() {
   if (!hint) return;
   hint.hidden = true;
   hint.textContent = '';
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => (
-    { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
-  ));
 }
 
 // ── Styles (injectés une seule fois) ─────────────────────────────────────────

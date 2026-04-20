@@ -479,7 +479,7 @@ const PAGES = {
       <div style="
         display:flex;align-items:center;justify-content:space-between;
         padding:0.6rem 1.2rem;
-        background:rgba(11,17,24,0.96);border-bottom:1px solid var(--border);
+        background:var(--bg-panel);border-bottom:1px solid var(--border-strong);
         flex-shrink:0;gap:1rem;
       ">
         <div style="display:flex;align-items:center;gap:0.75rem">
