@@ -98,7 +98,7 @@ function _getSortAction(s) {
  * - Chaque rune Puissance : +1 dé
  * - Chaînage PP : totalPP > 1 → +(totalPP-1)*2 bonus fixe
  */
-function _calcSortDegats(s, c) {
+export function _calcSortDegats(s, c) {
   const equip   = c?.equipement || {};
   const mainP   = equip['Main principale'];
   const armeDeg = mainP?.degats || '1d6';
