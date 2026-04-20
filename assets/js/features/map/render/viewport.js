@@ -23,6 +23,10 @@ export function bindViewport(root, transform, image) {
         w: imgEl.naturalWidth || 1200,
         h: imgEl.naturalHeight || 800,
       };
+      // Re-applique la transformation maintenant que la taille réelle de
+      // l'image est connue : sans ça, le premier affichage peut différer
+      // du résultat d'un resetView alors que state.viewport est identique.
+      applyTransform();
       emit('viewport:ready');
     };
     if (imgEl.complete && imgEl.naturalWidth) onLoad();
@@ -66,7 +70,8 @@ export function screenToNorm(clientX, clientY) {
 export function applyTransform() {
   if (!transformEl) return;
   const { scale, offsetX, offsetY } = state.viewport;
-  transformEl.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+  const t = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+  transformEl.style.transform = t;
 }
 
 export function zoom(factor, centerClientX, centerClientY) {
@@ -88,7 +93,7 @@ export function zoom(factor, centerClientX, centerClientY) {
 }
 
 export function resetView() {
-  state.viewport = { scale: 1, offsetX: 0, offsetY: 0 };
+  state.viewport = { scale: 0.14, offsetX: 25, offsetY: -250 };
   applyTransform();
   emit('viewport:changed');
 }

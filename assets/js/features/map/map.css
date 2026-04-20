@@ -21,8 +21,8 @@
   align-items: center;
   gap: 1rem;
   padding: .6rem .9rem;
-  background: rgba(11, 17, 24, 0.92);
-  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-strong);
   backdrop-filter: blur(6px);
   flex-wrap: wrap;
 }
@@ -95,6 +95,40 @@
 #map-fog {
   position: absolute; top: 0; left: 0;
   pointer-events: none;
+}
+
+/* Loader : masque la carte tant que l'image + le fog ne sont pas prêts.
+   Évite le flash où le joueur verrait la carte brute sans brouillard. */
+.map-loader {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: .9rem;
+  background: #0b1118;
+  z-index: 5;
+  pointer-events: none;
+}
+.map-root.is-loading .map-transform { visibility: hidden; }
+.map-root.is-loading .map-loader { display: flex; }
+
+/* Animation des « … » pour le loader. Largeur fixée pour éviter le décalage
+   du texte à chaque frame. */
+.map-loader__text::after {
+  content: '';
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: mapLoaderDots 1.2s steps(1, end) infinite;
+}
+@keyframes mapLoaderDots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
 }
 
 /* ── Contrôles & admin bar ────────────────────────────────────────────────── */
@@ -438,4 +472,63 @@
 [data-theme="light"] .map-form select.input-field option {
   background-color: #ffffff;
   color: var(--text);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LIGHT MODE — overrides du chrome autour de la carte.
+   On ne touche NI à l'image de fond, NI aux marqueurs (stroke dark = contraste
+   sur n'importe quelle carte), NI au fog joueur (noir = brouillard, thème-agnostique).
+   ════════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="light"] .map-root {
+  background: var(--bg-deep);
+}
+[data-theme="light"] .map-loader {
+  background: var(--bg-deep);
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .map-topbar__search input {
+  background: #ffffff;
+  color: var(--text);
+}
+[data-theme="light"] .map-chip--filter {
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+
+[data-theme="light"] .map-controls button {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: var(--border-strong);
+  color: var(--text-soft);
+}
+[data-theme="light"] .map-controls button:hover {
+  background: var(--gold-glow);
+}
+
+[data-theme="light"] .map-admin-bar {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: var(--border-strong);
+}
+[data-theme="light"] .map-admin-bar button {
+  color: var(--text-soft);
+}
+[data-theme="light"] .map-admin-bar button:hover {
+  background: var(--gold-glow);
+}
+[data-theme="light"] .map-admin-bar button.is-active {
+  background: var(--gold-glow);
+  border-color: var(--border-bright);
+  color: var(--gold);
+}
+
+[data-theme="light"] .map-sidepanel {
+  background: rgba(255, 255, 255, 0.98);
+  border-left-color: var(--border);
+}
+
+[data-theme="light"] .map-mode-hint {
+  background: var(--gold-glow);
+  border-color: var(--border-bright);
+  color: var(--gold);
 }

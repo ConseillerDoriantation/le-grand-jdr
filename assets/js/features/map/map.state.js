@@ -53,3 +53,15 @@ export function getTypeMeta(typeId) {
   return state.types.find(t => t.id === typeId)
     || { id: typeId, label: typeId || 'Inconnu', icon: '📍', color: '#888' };
 }
+
+// Facteur de contre-zoom appliqué aux éléments qui doivent rester lisibles
+// quelle que soit l'échelle (marqueurs, boutons d'édition sur la carte).
+// Formule : z ^ -EXP  (avec EXP < 1)
+// - EXP < 1 ⇒ la taille à l'écran croît doucement avec le zoom et décroît au
+//   dézoom (screen = r · z^(1-EXP), monotone, très plate).
+// - 0.93 donne environ -10 % au dézoom max et +10 % au zoom max par rapport
+//   à la taille de base (r=14), avec ~1.5 % de variation par cran de molette.
+export function getMarkerScale() {
+  const z = state.viewport?.scale || 1;
+  return Math.pow(z, -0.93);
+}
