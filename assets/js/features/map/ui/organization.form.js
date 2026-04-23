@@ -6,6 +6,7 @@ import { _esc } from '../../../shared/html.js';
 import { state } from '../map.state.js';
 import { openFormModal } from '../shared/form-modal.js';
 import { slug } from '../shared/slug.js';
+import { autocompleteHTML, initAutocomplete } from '../../../shared/autocomplete.js';
 
 // Construit la liste de suggestions à partir des catégories déjà utilisées
 // sur d'autres organisations en base (dédup insensible à la casse, triée).
@@ -44,9 +45,6 @@ export function openOrganizationForm({ placeId, existing = null, placeName = '' 
     : `✏️ Modifier — ${_esc(org.name)}`;
 
   const suggestions = buildCategorySuggestions();
-  const catOpts = suggestions
-    .map(c => `<option value="${_esc(c)}"></option>`)
-    .join('');
   const dispOpts = DISPOSITIONS
     .map(d => `<option value="${d}" ${d === (org.meta.disposition || 'neutral') ? 'selected' : ''}>${d}</option>`)
     .join('');
@@ -58,11 +56,14 @@ export function openOrganizationForm({ placeId, existing = null, placeName = '' 
         <input class="input-field" name="name" value="${_esc(org.name)}" required autofocus>
       </div>
 
-      <div class="form-group">
+      <div class="form-group" style="position:relative">
         <label>Catégorie <span class="map-dim map-small">(libre — tape pour ajouter)</span></label>
-        <input class="input-field" name="category" list="map-org-categories"
-               value="${_esc(org.category)}" placeholder="Marchand, Guilde, Taverne…" autocomplete="off">
-        <datalist id="map-org-categories">${catOpts}</datalist>
+        ${autocompleteHTML({
+          id: 'map-org-category',
+          name: 'category',
+          value: org.category,
+          placeholder: 'Marchand, Guilde, Taverne…',
+        })}
       </div>
 
       <div class="form-group">
@@ -110,6 +111,7 @@ export function openOrganizationForm({ placeId, existing = null, placeName = '' 
     title,
     bodyHtml,
     formId: 'map-org-form',
+    onMount: () => initAutocomplete('map-org-category', suggestions),
     parse: (_flat, fd) => {
       // meta.* -> objet meta, le reste au niveau racine
       const flat = {};

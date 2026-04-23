@@ -121,7 +121,6 @@ export function confirmModal(message, {
         </div>
       </div>`;
 
-    // Ouvrir sans titre (masqué) et sans bouton ✕ visible
     const overlay = document.getElementById('modal-overlay');
     const titleEl = document.querySelector('#modal-title span');
     const bodyEl  = document.getElementById('modal-body');

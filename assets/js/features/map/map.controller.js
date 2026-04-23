@@ -358,7 +358,7 @@ async function onPanelAction({ action, placeId, orgId }) {
     case 'delete-place': {
       const place = getPlaceById(placeId);
       if (!place) return;
-      if (!await confirmModal(`Supprimer "${place.name}" ?`)) return;
+      if (!await confirmModal(`Supprimer "${place.name}" ?`, { title: 'Supprimer un lieu' })) return;
       await runAction('delete place', async () => {
         await removePlace(place.id);
         state.places = state.places.filter(p => p.id !== place.id);
@@ -391,7 +391,7 @@ async function onPanelAction({ action, placeId, orgId }) {
     case 'delete-org': {
       const org = getOrgById(orgId);
       if (!org) return;
-      if (!await confirmModal(`Supprimer "${org.name}" ?`)) return;
+      if (!await confirmModal(`Supprimer "${org.name}" ?`, { title: 'Supprimer une organisation'})) return;
       await runAction('delete org', async () => {
         await removeOrganization(org.id);
         state.organizations = state.organizations.filter(o => o.id !== org.id);

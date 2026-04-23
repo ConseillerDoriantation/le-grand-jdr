@@ -6,6 +6,8 @@ import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete
 import { _esc, _norm } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { openWeaponFormatsAdmin } from './characters/data.js';
+import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import Sortable from '../vendor/sortable.esm.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -16,7 +18,7 @@ const TEMPLATES = {
     label: '⚔️ Arme',
     fields: [
       { id:'format',      label:'Format',        type:'format_select' },
-      { id:'sousType',    label:'Type d\'arme',  type:'text',   placeholder:'Épée, Lance, Dague, Arc, Bâton...' },
+      { id:'sousType',    label:'Type d\'arme',  type:'autocomplete', placeholder:'Épée, Lance, Dague, Arc, Bâton...' },
       { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'degats',      label:'Dégâts',        type:'damage_with_stat', placeholder:'1D10, 2D6...' },
       { id:'toucherStat', label:'Toucher',       type:'stat_select' },
@@ -262,6 +264,7 @@ async function renderShop() {
       <div class="sh-topbar-admin">
         <button class="btn btn-gold btn-sm" onclick="openCatModal()" title="Créer une catégorie">📁 Catégorie</button>
         <button class="btn btn-outline btn-sm" onclick="openItemModal()" title="Créer un article">＋ Article</button>
+        <button class="btn btn-outline btn-sm" onclick="openWeaponFormatsAdmin()" title="Gérer les formats d'armes">⚙️ Formats</button>
       </div>`;
   }
 
@@ -1650,11 +1653,18 @@ function openItemModal(itemId) {
     <button class="btn btn-gold" style="width:100%;margin-top:1.2rem" onclick="saveShopItem('${itemId||''}')">
       ${item?'Enregistrer':'Ajouter à la boutique'}
     </button>`);
-  setTimeout(()=>{ document.getElementById('si-nom')?.focus(); _bindPrixListener(); },60);
+  setTimeout(()=>{ document.getElementById('si-nom')?.focus(); _bindPrixListener(); _initAutocompletes(); },60);
+}
+
+const _pendingAutocompletes = [];
+
+function _initAutocompletes() {
+  _pendingAutocompletes.splice(0).forEach(({ id, options }) => initAutocomplete(id, options));
 }
 
 function _buildFieldsHtml(tpl,item) {
   if(!tpl?.fields) return '';
+  _pendingAutocompletes.length = 0;
   let html=`<div class="sh-fields-grid">`;
   tpl.fields.forEach(f=>{
     const val=item?.[f.id]??'';
@@ -1750,9 +1760,18 @@ function _buildFieldsHtml(tpl,item) {
         </button>
       </div>`;
     } else {
-      const inputType = f.type === 'number' ? 'number' : 'text';
-      html+=`<div class="form-group"><label>${f.label}</label>
-        <input type="${inputType}" class="input-field" id="si-${f.id}" value="${val}" placeholder="${f.placeholder||''}"></div>`;
+      if (f.type === 'autocomplete') {
+        const opts = [...new Set(_items.map(i => i?.[f.id]).filter(Boolean))];
+        const inputId = `si-${f.id}`;
+        _pendingAutocompletes.push({ id: inputId, options: opts });
+        html+=`<div class="form-group" style="position:relative"><label>${f.label}</label>
+          ${autocompleteHTML({ id: inputId, value: val, placeholder: f.placeholder || '' })}
+        </div>`;
+      } else {
+        const inputType = f.type === 'number' ? 'number' : 'text';
+        html+=`<div class="form-group"><label>${f.label}</label>
+          <input type="${inputType}" class="input-field" id="si-${f.id}" value="${val}" placeholder="${f.placeholder||''}"></div>`;
+      }
     }
   });
   html+=`</div>`;
@@ -2034,4 +2053,5 @@ Object.assign(window,{
   openShopItemModal, openShopItemDetail, editShopItem, filterShop,
   shopFilterSearch, shopFilterBy, shopFilterReset, shopToggleTag,
   shopSetSort,
+  openWeaponFormatsAdmin,
 });

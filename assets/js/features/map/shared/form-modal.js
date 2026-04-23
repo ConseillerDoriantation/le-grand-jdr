@@ -11,7 +11,7 @@ import { openModal, closeModalDirect } from '../../../shared/modal.js';
  *
  * Si parse() renvoie une valeur falsy, la modale reste ouverte (validation échouée).
  */
-export function openFormModal({ title, bodyHtml, formId, parse }) {
+export function openFormModal({ title, bodyHtml, formId, parse, onMount }) {
   return new Promise(resolve => {
     openModal(title, bodyHtml);
     const form = document.getElementById(formId);
@@ -27,5 +27,7 @@ export function openFormModal({ title, bodyHtml, formId, parse }) {
       const result = parse(entries, fd);
       if (result) close(result);
     });
+
+    onMount?.(form);
   });
 }

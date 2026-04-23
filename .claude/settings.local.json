@@ -51,7 +51,8 @@
       "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\histoire.js\")",
       "Bash(xargs grep:*)",
       "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/shop.js)",
-      "Bash(node --input-type=module --check)"
+      "Bash(node --input-type=module --check)",
+      "Bash(grep -n \"si-\\\\${f.id}\\\\|si-sousType\\\\|f.type === 'autocomplete'\\\\|getElementById.*sousType\" /home/ubuntu/DEV/le-grand-jdr/assets/js/features/shop.js)"
     ]
   }
 }

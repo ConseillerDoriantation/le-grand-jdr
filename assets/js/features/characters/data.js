@@ -319,7 +319,7 @@ window._addWeaponFormat = async () => {
 };
 
 window._deleteWeaponFormat = async (i) => {
-  if (!await confirmModal('Supprimer ce format ?')) return;
+  if (!await confirmModal('Supprimer ce format ?', { title: 'Confirmation de suppression' })) return;
   const formats = [...(_weaponFormats || [])];
   formats.splice(i, 1);
   await saveWeaponFormats(formats);
