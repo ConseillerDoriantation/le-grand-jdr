@@ -5,40 +5,94 @@
 ═══════════════════════════════════════════════════ */
 
 :root {
-  --gold:        #e8b84b;
-  --gold-light:  #f5d17a;
-  --gold-dark:   #c8941e;
-  --gold-glow:   rgba(232,184,75, 0.18);
-  --crimson:       #ef4444;
-  --crimson-light: #f87171;
-  --bg-deep:    #0c0b09;
-  --bg-dark:    #131210;
-  --bg-card:    rgba(20,18,14, 0.88);
-  --bg-card2:   rgba(26,23,17, 0.94);
-  --bg-panel:   rgba(16,14,10, 0.92);
-  --bg-glass:   rgba(18,16,12, 0.76);
-  --bg-elevated:#1d1a14;
+  /* Accent principal — ambre/or chaud (remplace le bleu) */
+  --gold:        oklch(72% 0.14 52);
+  --gold-light:  oklch(82% 0.10 52);
+  --gold-dark:   oklch(58% 0.16 52);
+  --gold-glow:   oklch(72% 0.14 52 / 0.20);
+
+  /* Combat */
+  --crimson:       oklch(58% 0.20 22);
+  --crimson-light: oklch(68% 0.18 22);
+
+  /* Status */
+  --teal:      oklch(65% 0.10 182);
+  --teal-dim:  oklch(65% 0.10 182 / 0.14);
+
+  /* Fonds — plus sombres et plus chauds */
+  --bg-deep:    #09090f;
+  --bg-dark:    #0c0d13;
+  --bg-card:    rgba(20, 21, 32, 0.92);
+  --bg-card2:   rgba(26, 27, 42, 0.95);
+  --bg-panel:   rgba(17, 18, 25, 0.96);
+  --bg-glass:   rgba(14, 15, 22, 0.80);
+  --bg-elevated:#1c1f2d;
+
+  /* Bordures */
   --border:         rgba(255,255,255,0.07);
   --border-strong:  rgba(255,255,255,0.12);
-  --border-bright:  rgba(232,184,75,0.28);
-  --border-accent:  rgba(232,184,75,0.18);
-  --text:       #f5f7fb;
-  --text-soft:  #e8eef7;
-  --text-muted: #98a6b8;
-  --text-dim:   #6e7c8f;
-  --shadow:      rgba(0, 0, 0, 0.55);
-  --shadow-card: 0 18px 40px rgba(3, 8, 16, 0.26);
-  --shadow-soft: 0 28px 70px rgba(3, 8, 16, 0.38);
-  --shadow-glow: 0 1px 0 rgba(255,255,255,0.03), 0 14px 34px rgba(3, 8, 16, 0.28);
-  --green:     #22c38e;
-  --green-dim: rgba(34,195,142,0.16);
-  --blue:      #6aa7ff;
-  --blue-dim:  rgba(106,167,255,0.16);
-  --radius:         18px;
-  --radius-lg:      26px;
-  --sidebar-width:  286px;
+  --border-bright:  oklch(72% 0.14 52 / 0.28);
+  --border-accent:  oklch(72% 0.14 52 / 0.20);
+
+  /* Texte */
+  --text:       #e0ddd6;
+  --text-soft:  #c8c4bc;
+  --text-muted: #7a7970;
+  --text-dim:   #4e4c48;
+
+  /* Ombres */
+  --shadow:      rgba(0, 0, 0, 0.65);
+  --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 24px 56px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 1px 0 rgba(255,255,255,0.03), 0 10px 28px rgba(0, 0, 0, 0.40);
+
+  /* Utilitaires */
+  --green:     oklch(65% 0.15 162);
+  --green-dim: oklch(65% 0.15 162 / 0.14);
+  --blue:      #5c9fff;
+  --blue-dim:  rgba(92,159,255,0.14);
+
+  /* Layout */
+  --radius:         10px;
+  --radius-lg:      14px;
+  --sidebar-width:  220px;
   --content-max:    1680px;
-  --header-height:  64px;
+  --header-height:  60px;
+}
+
+/* ── Mode jour (adapté palette chaude) ── */
+[data-theme="light"] {
+  --gold:        oklch(48% 0.14 52);
+  --gold-light:  oklch(60% 0.12 52);
+  --gold-dark:   oklch(38% 0.16 52);
+  --gold-glow:   oklch(48% 0.14 52 / 0.12);
+  --crimson:       oklch(45% 0.20 22);
+  --crimson-light: oklch(55% 0.18 22);
+  --teal:      oklch(48% 0.12 182);
+  --teal-dim:  oklch(48% 0.12 182 / 0.10);
+  --bg-deep:    #eeede8;
+  --bg-dark:    #f2f1ec;
+  --bg-card:    #f8f7f3;
+  --bg-card2:   #f0efe9;
+  --bg-panel:   #f2f1eb;
+  --bg-glass:   rgba(248,247,243,0.97);
+  --bg-elevated:#ffffff;
+  --border:         rgba(0,0,0,0.08);
+  --border-strong:  rgba(0,0,0,0.13);
+  --border-bright:  oklch(48% 0.14 52 / 0.25);
+  --border-accent:  oklch(48% 0.14 52 / 0.16);
+  --text:       #1c1a16;
+  --text-soft:  #2e2c28;
+  --text-muted: #6b6860;
+  --text-dim:   #9a9890;
+  --shadow:      rgba(10,8,0,0.08);
+  --shadow-card: 0 1px 3px rgba(10,8,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
+  --shadow-soft: 0 6px 20px rgba(10,8,0,0.10);
+  --shadow-glow: 0 1px 0 rgba(255,255,255,0.9), 0 2px 8px rgba(10,8,0,0.08);
+  --green:     oklch(45% 0.14 162);
+  --green-dim: oklch(45% 0.14 162 / 0.10);
+  --blue:      oklch(48% 0.16 250);
+  --blue-dim:  oklch(48% 0.16 250 / 0.10);
 }
 
 /* ══════════════════════════════════════════════════
