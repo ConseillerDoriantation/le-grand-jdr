@@ -1,0 +1,423 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   DARKFORGE-OVERRIDES.CSS  v4
+   ─────────────────────────────────────────────────────────────────────
+   Uniquement des hex/rgba classiques sur les règles critiques
+   pour garantir la compatibilité navigateur.
+   Import en dernier dans main.css :
+     @import url('./darkforge-overrides.css');
+═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Test de chargement — visible dans DevTools Elements ─────────── */
+/* Si vous voyez ce commentaire dans DevTools > Sources, le fichier charge ✓ */
+
+/* ════════════════════════════════════════════════════════════════════
+   FOND DE PAGE
+════════════════════════════════════════════════════════════════════ */
+body {
+  background: #09090f !important;
+  background-image: none !important;
+}
+body::before {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px) !important;
+  background-size: 52px 52px !important;
+  opacity: 1 !important;
+}
+body::after {
+  background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.2) 70%) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   SIDEBAR — style plat (supprime le look "card" arrondi)
+════════════════════════════════════════════════════════════════════ */
+.sidebar {
+  background: #0d0e17 !important;
+  border: none !important;
+  border-right: 1px solid rgba(255,255,255,0.06) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  top: 0 !important;
+  height: 100vh !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   APP LAYOUT — supprime le gap et padding qui créent l'effet "carte"
+════════════════════════════════════════════════════════════════════ */
+.app-layout {
+  gap: 0 !important;
+  padding: 0 !important;
+  min-height: 100vh !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   HEADER — fond plus sombre et cohérent
+════════════════════════════════════════════════════════════════════ */
+.app-header {
+  background: rgba(13,14,23,0.95) !important;
+  border-color: rgba(255,255,255,0.07) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 4px 20px rgba(0,0,0,0.5) !important;
+}
+.header-logo span {
+  background: linear-gradient(135deg, #c8a84b, #e8b84b) !important;
+  box-shadow: 0 4px 12px rgba(232,184,75,0.28) !important;
+}
+.admin-badge {
+  background: rgba(232,184,75,0.12) !important;
+  border-color: rgba(232,184,75,0.24) !important;
+  color: #e8b84b !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   MAIN CONTENT — fond transparent sur le bg body
+════════════════════════════════════════════════════════════════════ */
+.main-content {
+  padding: 1.5rem 1.6rem 2rem !important;
+  background: transparent !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   SIDEBAR — brand icon ambre
+════════════════════════════════════════════════════════════════════ */
+.sidebar-brand-icon {
+  background: linear-gradient(135deg, #c8a84b, #e8b84b) !important;
+  box-shadow: 0 4px 12px rgba(232,184,75,0.3) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   NAV ITEM ACTIVE — ambre
+════════════════════════════════════════════════════════════════════ */
+.nav-item.active {
+  color: #e8b84b !important;
+  background: rgba(232,184,75,0.09) !important;
+  border-color: rgba(232,184,75,0.14) !important;
+  box-shadow: inset 3px 0 0 #e8b84b !important;
+}
+.nav-item.active .nav-icon {
+  filter: drop-shadow(0 0 5px rgba(232,184,75,0.6)) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TABS
+════════════════════════════════════════════════════════════════════ */
+.tab.active {
+  color: #e8b84b !important;
+  border-color: rgba(232,184,75,0.28) !important;
+  background: rgba(232,184,75,0.10) !important;
+  box-shadow: none !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   MODAL
+════════════════════════════════════════════════════════════════════ */
+.modal {
+  background: #0d0e17 !important;
+  border-color: rgba(255,255,255,0.10) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   SCROLLBAR
+════════════════════════════════════════════════════════════════════ */
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.09) !important;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(232,184,75,0.25) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TOGGLE
+════════════════════════════════════════════════════════════════════ */
+.toggle.on {
+  background: rgba(232,184,75,0.22) !important;
+  border-color: rgba(232,184,75,0.38) !important;
+}
+.toggle.on::after { background: #e8b84b !important; }
+
+/* ════════════════════════════════════════════════════════════════════
+   BOUTONS
+════════════════════════════════════════════════════════════════════ */
+.btn-gold {
+  background: linear-gradient(135deg, #b8941e, #e8b84b) !important;
+  border-color: transparent !important;
+  color: #07090c !important;
+  box-shadow: 0 4px 16px rgba(232,184,75,0.22) !important;
+}
+.btn-gold:hover {
+  box-shadow: 0 8px 24px rgba(232,184,75,0.35) !important;
+}
+.btn-primary {
+  background: linear-gradient(135deg, #b8941e, #e8b84b) !important;
+  color: #07090c !important;
+  box-shadow: 0 4px 20px rgba(232,184,75,0.25) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   INPUTS focus
+════════════════════════════════════════════════════════════════════ */
+.input-field:focus,
+.input-sm:focus {
+  border-color: rgba(232,184,75,0.40) !important;
+  background: rgba(232,184,75,0.05) !important;
+  box-shadow: 0 0 0 3px rgba(232,184,75,0.08) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   AUTH
+════════════════════════════════════════════════════════════════════ */
+#auth-screen {
+  background: #09090f !important;
+}
+.auth-box {
+  background: #0d0e17 !important;
+  border-color: rgba(255,255,255,0.10) !important;
+}
+.auth-tab.active {
+  background: rgba(232,184,75,0.10) !important;
+  color: #e8b84b !important;
+}
+.form-group input:focus {
+  border-color: rgba(232,184,75,0.38) !important;
+  background: rgba(232,184,75,0.04) !important;
+  box-shadow: 0 0 0 3px rgba(232,184,75,0.08) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ADVENTURE PICKER
+════════════════════════════════════════════════════════════════════ */
+#adventure-screen {
+  background: #09090f !important;
+}
+.adv-role--mj {
+  background: rgba(232,184,75,0.14) !important;
+  color: #e8b84b !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   DASHBOARD
+════════════════════════════════════════════════════════════════════ */
+.dashboard-kicker {
+  color: #e8b84b !important;
+  background: rgba(232,184,75,0.10) !important;
+  border-color: rgba(232,184,75,0.18) !important;
+}
+.dashboard-cta--primary {
+  background: linear-gradient(135deg, #b8941e, #e8b84b) !important;
+  border-color: rgba(232,184,75,0.28) !important;
+  color: #07090c !important;
+}
+.dashboard-app-button__icon {
+  background: rgba(232,184,75,0.12) !important;
+  border-color: rgba(232,184,75,0.18) !important;
+  box-shadow: 0 6px 16px rgba(232,184,75,0.12) !important;
+}
+.dashboard-app-button:hover {
+  border-color: rgba(232,184,75,0.22) !important;
+  background: linear-gradient(180deg, rgba(232,184,75,0.08), rgba(255,255,255,.02)) !important;
+}
+.dashboard-list-button {
+  border-color: rgba(232,184,75,0.12) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(232,184,75,0.03)) !important;
+}
+.dashboard-list-button:hover {
+  border-color: rgba(232,184,75,0.24) !important;
+  background: linear-gradient(180deg, rgba(232,184,75,0.10), rgba(255,255,255,.06)) !important;
+}
+.dashboard-list-button__icon {
+  background: rgba(232,184,75,0.10) !important;
+  border-color: rgba(232,184,75,0.18) !important;
+}
+.dashboard-list-button__arrow { color: #e8b84b !important; }
+.dashboard-summary-badge {
+  background: rgba(232,184,75,0.10) !important;
+  border-color: rgba(232,184,75,0.18) !important;
+  color: #e8b84b !important;
+}
+.dashboard-eyebrow { color: #e8b84b !important; }
+.dash-hero:hover { border-color: rgba(232,184,75,0.30) !important; }
+.dash-admin {
+  background: rgba(232,184,75,0.04) !important;
+  border-color: rgba(232,184,75,0.13) !important;
+}
+.dash-admin-title { color: #e8b84b !important; }
+.dash-admin-btn {
+  background: rgba(232,184,75,0.08) !important;
+  border-color: rgba(232,184,75,0.20) !important;
+  color: #e8b84b !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   CHAR PILLS
+════════════════════════════════════════════════════════════════════ */
+.char-pill.active {
+  color: #e8b84b !important;
+  border-color: rgba(232,184,75,0.28) !important;
+  background: rgba(232,184,75,0.10) !important;
+  box-shadow: none !important;
+}
+.carac-box:hover {
+  border-color: rgba(232,184,75,0.28) !important;
+  background: rgba(232,184,75,0.05) !important;
+}
+.admin-section {
+  background: rgba(232,184,75,0.05) !important;
+  border-color: rgba(232,184,75,0.14) !important;
+}
+.admin-label { color: #e8b84b !important; }
+
+/* cs-* */
+.cs-carac-card:hover {
+  border-color: rgba(232,184,75,0.28) !important;
+  background: rgba(232,184,75,0.04) !important;
+}
+.cs-tab.active {
+  color: #e8b84b !important;
+  border-bottom-color: #e8b84b !important;
+}
+.cs-titre-chip {
+  background: rgba(232,184,75,0.10) !important;
+  border-color: rgba(232,184,75,0.24) !important;
+  color: #e8b84b !important;
+}
+.cs-set-bonus.active {
+  color: #e8b84b !important;
+  border-color: rgba(232,184,75,0.28) !important;
+  background: rgba(232,184,75,0.08) !important;
+}
+.cs-set-mini-chip {
+  background: rgba(232,184,75,0.08) !important;
+  border-color: rgba(232,184,75,0.22) !important;
+  color: #e8b84b !important;
+}
+.cs-noyau-btn.selected {
+  border-color: #e8b84b !important;
+  background: rgba(232,184,75,0.10) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TIMELINE / PLAYERS
+════════════════════════════════════════════════════════════════════ */
+.timeline::before {
+  background: linear-gradient(180deg, #e8b84b, rgba(232,184,75,0.2), transparent) !important;
+}
+.timeline-dot {
+  border-color: #e8b84b !important;
+  box-shadow: 0 0 0 6px rgba(232,184,75,0.08) !important;
+}
+.player-avatar {
+  border-color: rgba(232,184,75,0.22) !important;
+  background: rgba(232,184,75,0.06) !important;
+}
+.sidebar-profile-avatar {
+  background: rgba(232,184,75,0.12) !important;
+  border-color: rgba(232,184,75,0.22) !important;
+  color: #d4a83e !important;
+}
+.sidebar-profile-role {
+  color: #e8b84b !important;
+  background: rgba(232,184,75,0.10) !important;
+  border-color: rgba(232,184,75,0.20) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TUTORIAL NAV
+════════════════════════════════════════════════════════════════════ */
+.tutorial-nav-item.active {
+  color: #e8b84b !important;
+  border-left-color: #e8b84b !important;
+  background: rgba(232,184,75,0.08) !important;
+  box-shadow: none !important;
+}
+.tutorial-nav-item.active::before {
+  background: #e8b84b !important;
+  box-shadow: 0 0 0 5px rgba(232,184,75,0.12) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   SHOP
+════════════════════════════════════════════════════════════════════ */
+.sh-side-link.active {
+  border-color: rgba(232,184,75,0.28) !important;
+  background: rgba(232,184,75,0.10) !important;
+}
+.sh-side-link.active .sh-side-link-text strong { color: #e8b84b !important; }
+.sh-main-kicker { color: #e8b84b !important; }
+.sh-buy-btn {
+  background: linear-gradient(135deg, #b8941e, #e8b84b) !important;
+  color: #07090c !important;
+}
+.sh-wallet {
+  background: linear-gradient(135deg, rgba(232,184,75,0.10), rgba(232,184,75,0.04)) !important;
+  border-color: rgba(232,184,75,0.22) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   VTT
+════════════════════════════════════════════════════════════════════ */
+.vtt-tool.active {
+  background: rgba(232,184,75,0.12) !important;
+  border-color: rgba(232,184,75,0.28) !important;
+  color: #e8b84b !important;
+}
+.vtt-page-tab.active {
+  background: rgba(232,184,75,0.10) !important;
+  border-color: rgba(232,184,75,0.28) !important;
+  color: #e8b84b !important;
+}
+.vtt-chat-send {
+  background: rgba(232,184,75,0.12) !important;
+  border-color: rgba(232,184,75,0.26) !important;
+  color: #e8b84b !important;
+}
+.vtt-next-btn {
+  background: rgba(232,184,75,0.10) !important;
+  border-color: rgba(232,184,75,0.26) !important;
+  color: #e8b84b !important;
+}
+.vtt-combat-row.current { background: rgba(232,184,75,0.07) !important; }
+.vtt-combat-row.current .vtt-combat-name { color: #e8b84b !important; }
+.vtt-log-who { color: #e8b84b !important; }
+
+/* ════════════════════════════════════════════════════════════════════
+   HP / PM BARS
+════════════════════════════════════════════════════════════════════ */
+.hp-bar-fill      { background: #ef4444 !important; }
+.hp-bar-fill.high { background: #22c38e !important; }
+.hp-bar-fill.mid  { background: #f59e0b !important; }
+.pm-bar-fill      { background: #4f8cff !important; }
+
+/* ════════════════════════════════════════════════════════════════════
+   NOTIFS
+════════════════════════════════════════════════════════════════════ */
+.notif.success {
+  background: rgba(34,195,142,0.12) !important;
+  border-color: rgba(34,195,142,0.28) !important;
+  color: #22c38e !important;
+}
+.notif.error {
+  background: rgba(239,68,68,0.12) !important;
+  border-color: rgba(239,68,68,0.28) !important;
+  color: #ef4444 !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   MODE JOUR
+════════════════════════════════════════════════════════════════════ */
+[data-theme="light"] body {
+  background: #eeede8 !important;
+}
+[data-theme="light"] .sidebar {
+  background: #f0efe9 !important;
+  border-right-color: rgba(0,0,0,0.08) !important;
+  border-radius: 0 !important;
+}
+[data-theme="light"] .nav-item.active {
+  background: rgba(184,148,30,0.08) !important;
+  color: #b8941e !important;
+  box-shadow: inset 3px 0 0 #b8941e !important;
+}
+[data-theme="light"] .tab.active {
+  background: rgba(184,148,30,0.09) !important;
+  border-color: rgba(184,148,30,0.22) !important;
+  color: #b8941e !important;
+}

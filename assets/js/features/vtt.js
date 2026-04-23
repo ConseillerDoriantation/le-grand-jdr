@@ -1174,7 +1174,7 @@ window._vttRollAttack = async () => {
   const _deductPm  = async () => {
     if (opt.pmCost > 0 && src.characterId) {
       const c = _characters[src.characterId];
-      if (c) await updateDoc(_chrRef(src.characterId), {pm: Math.max(0, (c.pm??0) - opt.pmCost)});
+      if (c) await updateDoc(_chrRef(src.characterId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
     }
   };
   const _markAttacked = async () => {
@@ -1210,9 +1210,12 @@ window._vttRollAttack = async () => {
     // ── Vérification PM ──────────────────────────────────────────────
     if (opt.pmCost > 0 && src.characterId) {
       const cPm = _characters[src.characterId];
-      if (cPm && (cPm.pm ?? 0) < opt.pmCost) {
-        showNotif(`⚠ PM insuffisants (${cPm.pm ?? 0}/${opt.pmCost} requis)`, 'error');
-        _cleanup(); return;
+      if (cPm) {
+        const actualPm = cPm.pm ?? calcPMMax(cPm);
+        if (actualPm < opt.pmCost) {
+          showNotif(`⚠ PM insuffisants (${actualPm}/${opt.pmCost} requis)`, 'error');
+          _cleanup(); return;
+        }
       }
     }
 
