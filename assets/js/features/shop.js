@@ -6,6 +6,7 @@ import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete
 import { _esc, _norm } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import Sortable from '../vendor/sortable.esm.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
@@ -282,6 +283,7 @@ async function renderShop() {
   </div>`;
 
   content.innerHTML = html;
+  _mountSortables();
 }
 
 function _renderNoCharBanner() {
@@ -387,18 +389,12 @@ function _renderHome() {
       <p>La boutique est vide.</p>
       ${STATE.isAdmin?'<p style="font-size:0.82rem;margin-top:0.5rem;color:var(--text-dim)">Crée une catégorie pour commencer.</p>':''}</div>`;
   }
-  let html = `<div class="sh-cat-grid">`;
+  let html = `<div class="sh-cat-grid ${STATE.isAdmin?'sh-sortable':''}">`;
   const edit = STATE.isAdmin;
   _cats.forEach(cat => {
     const count = _items.filter(i => i.categorieId === cat.id).length;
     const tpl   = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card ${edit?'sh-cat-draggable':''}"
-      draggable="${edit?'true':'false'}" data-cat-id="${cat.id}"
-      ondragstart="${edit?`shopCatDragStart(event,'${cat.id}')`:''}"
-      ondragover="${edit?'shopCatDragOver(event)':''}"
-      ondrop="${edit?`shopCatDrop(event,'${cat.id}')`:''}"
-      ondragend="${edit?'shopCatDragEnd(event)':''}"
-      onclick="shopGoCat('${cat.id}')">
+    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" onclick="shopGoCat('${cat.id}')">
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
         ${!cat.image?`<div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>`:''}
@@ -711,7 +707,7 @@ function _getActiveShopChar() {
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderItemGrid(cat, items) {
   const tplKey = cat?.template || 'classique';
-  return `<div class="sh-item-grid" id="sh-items-grid">` +
+  return `<div class="sh-item-grid ${STATE.isAdmin?'sh-sortable':''}" id="sh-items-grid">` +
     items.map((item,i) => _renderItemCard(item, tplKey, i)).join('') +
     `</div>`;
 }
@@ -873,9 +869,9 @@ function _renderItemCard(item, tplKey, itemIdx) {
   }
 
   return `
-    <article class="sh-item-card sh-item-card--detailed ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-dnd-handle' : ''}"
+    <article class="sh-item-card sh-item-card--detailed ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-sortable-item' : ''}"
+      data-item-id="${item.id}"
       ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}
-      ${edit && itemIdx !== '' ? `draggable="true" ondragstart="shopItemDragStart(event,'${item.id}')" ondragover="shopItemDragOver(event)" ondrop="shopItemDrop(event,'${item.id}')" ondragend="shopItemDragEnd(event)"` : ''}
     >
       <div class="sh-item-img" style="${item.image ? `background-image:url('${item.image}')` : _catGradient(item.nom || '')}">
         <div class="sh-item-img-overlay"></div>
@@ -1402,70 +1398,92 @@ window._shopFilterRarete = '';
 window._shopFilterDispo  = '';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DRAG & DROP — Catégories
+// DRAG & DROP (SortableJS) — Catégories & Articles
 // ══════════════════════════════════════════════════════════════════════════════
-let _dragCatId = null;
-function shopCatDragStart(e,catId){ _dragCatId=catId; e.currentTarget.style.opacity='0.5'; e.dataTransfer.effectAllowed='move'; }
-function shopCatDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; document.querySelectorAll('.sh-cat-card').forEach(c=>c.classList.remove('sh-cat-drop-target')); e.currentTarget.classList.add('sh-cat-drop-target'); }
-function shopCatDragEnd(e){ e.currentTarget.style.opacity=''; document.querySelectorAll('.sh-cat-card').forEach(c=>c.classList.remove('sh-cat-drop-target')); }
-async function shopCatDrop(e,toCatId){
-  e.preventDefault(); document.querySelectorAll('.sh-cat-card').forEach(c=>c.classList.remove('sh-cat-drop-target'));
-  const fromId=_dragCatId; _dragCatId=null;
-  if(!fromId||fromId===toCatId) return;
-  const fromIdx=_cats.findIndex(c=>c.id===fromId), toIdx=_cats.findIndex(c=>c.id===toCatId);
-  if(fromIdx<0||toIdx<0) return;
-  const [moved]=_cats.splice(fromIdx,1); _cats.splice(toIdx,0,moved);
-  await Promise.all(_cats.map((cat,i)=>updateInCol('shopCategories',cat.id,{ordre:i})));
-  showNotif('Ordre mis à jour.','success'); renderShop();
+let _sortCats = null, _sortItems = null, _dragBlockClick = false, _clickGuardInstalled = false;
+
+function _installClickGuard() {
+  if (_clickGuardInstalled) return;
+  _clickGuardInstalled = true;
+  document.addEventListener('click', (e) => {
+    if (_dragBlockClick) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
 }
 
-// ── Drag & Drop Sous-catégories ───────────────────────────────────────────────
-let _dragScId=null;
-function shopScDragStart(e,scId){ _dragScId=scId; e.currentTarget.style.opacity='0.5'; e.dataTransfer.effectAllowed='move'; }
-function shopScDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after')); const rect=e.currentTarget.getBoundingClientRect(); e.clientY<rect.top+rect.height/2?e.currentTarget.classList.add('sh-dnd-before'):e.currentTarget.classList.add('sh-dnd-after'); }
-function shopScDragEnd(e){ e.currentTarget.style.opacity=''; document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after')); }
-async function shopScDrop(e,toScId){
-  try {
-    e.preventDefault(); document.querySelectorAll('.sh-subcat-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
-    const fromId=_dragScId; _dragScId=null;
-    if(!fromId||fromId===toScId) return;
-    const cat=_cats.find(c=>c.id===_activeCat); if(!cat) return;
-    const scs=[...(cat.sousCats||[])];
-    const fromIdx=scs.findIndex(s=>s.id===fromId), toIdx=scs.findIndex(s=>s.id===toScId);
-    if(fromIdx<0||toIdx<0) return;
-    const rect=e.currentTarget.getBoundingClientRect(), insertAfter=e.clientY>=rect.top+rect.height/2;
-    const [moved]=scs.splice(fromIdx,1);
-    const insertAt=insertAfter?(toIdx>fromIdx?toIdx:toIdx+1):(toIdx>fromIdx?toIdx-1:toIdx);
-    scs.splice(Math.max(0,insertAt),0,moved); cat.sousCats=scs;
-    await updateInCol('shopCategories',_activeCat,{sousCats:scs});
-    showNotif('Ordre mis à jour.','success'); renderShop();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+function _mountSortables() {
+  if (!STATE.isAdmin) return;
+  _installClickGuard();
+
+  _sortCats?.destroy(); _sortCats = null;
+  _sortItems?.destroy(); _sortItems = null;
+
+  const sharedOpts = {
+    animation: 120,
+    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+    draggable: '.sh-sortable-item',
+    filter: 'button, a, input, select, textarea, .btn-icon, .sh-card-admin-inline, .sh-item-actions',
+    preventOnFilter: false,
+    ghostClass:  'sh-sortable-ghost',
+    chosenClass: 'sh-sortable-chosen',
+    dragClass:   'sh-sortable-drag',
+    forceFallback:    true,
+    fallbackOnBody:   true,
+    fallbackTolerance: 5,
+    delay: 150,
+    delayOnTouchOnly: true,
+    touchStartThreshold: 5,
+    onStart: () => { document.body.classList.add('sh-dragging'); _dragBlockClick = true; },
+  };
+
+  const finishDrag = () => {
+    document.body.classList.remove('sh-dragging');
+    setTimeout(() => { _dragBlockClick = false; }, 350);
+  };
+
+  const catGrid = document.querySelector('.sh-cat-grid.sh-sortable');
+  if (catGrid) {
+    _sortCats = new Sortable(catGrid, {
+      ...sharedOpts,
+      onEnd: async (evt) => {
+        finishDrag();
+        if (evt.oldIndex === evt.newIndex) return;
+        const [moved] = _cats.splice(evt.oldIndex, 1);
+        _cats.splice(evt.newIndex, 0, moved);
+        try {
+          await Promise.all(_cats.map((cat, i) => updateInCol('shopCategories', cat.id, { ordre: i })));
+          _cats.forEach((cat, i) => { cat.ordre = i; });
+        } catch (err) {
+          console.error('[sort cats]', err);
+          showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+          renderShop();
+        }
+      },
+    });
   }
-}
 
-// ── Drag & Drop Articles ──────────────────────────────────────────────────────
-let _dragItemId=null;
-function shopItemDragStart(e,itemId){ _dragItemId=itemId; e.currentTarget.style.opacity='0.5'; e.dataTransfer.effectAllowed='move'; }
-function shopItemDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; document.querySelectorAll('.sh-item-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after')); const rect=e.currentTarget.getBoundingClientRect(); e.clientY<rect.top+rect.height/2?e.currentTarget.classList.add('sh-dnd-before'):e.currentTarget.classList.add('sh-dnd-after'); }
-function shopItemDragEnd(e){ e.currentTarget.style.opacity=''; document.querySelectorAll('.sh-item-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after')); }
-async function shopItemDrop(e,toItemId){
-  e.preventDefault(); document.querySelectorAll('.sh-item-card').forEach(c=>c.classList.remove('sh-dnd-before','sh-dnd-after'));
-  const fromId=_dragItemId; _dragItemId=null;
-  if(!fromId||fromId===toItemId) return;
-  let items = _activeCat === '__uncategorized__'
-    ? _items.filter(i => !_cats.find(c => c.id === i.categorieId))
-    : _items.filter(i=>i.categorieId===_activeCat);
-  const fromIdx=items.findIndex(i=>i.id===fromId), toIdx=items.findIndex(i=>i.id===toItemId);
-  if(fromIdx<0||toIdx<0) return;
-  const rect=e.currentTarget.getBoundingClientRect(), insertAfter=e.clientY>=rect.top+rect.height/2;
-  const [moved]=items.splice(fromIdx,1);
-  const insertAt=insertAfter?(toIdx>fromIdx?toIdx:toIdx+1):(toIdx>fromIdx?toIdx-1:toIdx);
-  items.splice(Math.max(0,insertAt),0,moved);
-  await Promise.all(items.map((item,i)=>updateInCol('shop',item.id,{ordre:i})));
-  items.forEach((item,i)=>{ item.ordre=i; });
-  showNotif('Ordre mis à jour.','success'); renderShop();
+  const itemGrid = document.getElementById('sh-items-grid');
+  if (itemGrid && itemGrid.classList.contains('sh-sortable')) {
+    _sortItems = new Sortable(itemGrid, {
+      ...sharedOpts,
+      onEnd: async (evt) => {
+        finishDrag();
+        if (evt.oldIndex === evt.newIndex) return;
+        const visible = _activeCat === '__uncategorized__'
+          ? _items.filter(i => !_cats.find(c => c.id === i.categorieId))
+          : _items.filter(i => i.categorieId === _activeCat);
+        const [moved] = visible.splice(evt.oldIndex, 1);
+        visible.splice(evt.newIndex, 0, moved);
+        try {
+          await Promise.all(visible.map((item, i) => updateInCol('shop', item.id, { ordre: i })));
+          visible.forEach((item, i) => { item.ordre = i; });
+        } catch (err) {
+          console.error('[sort items]', err);
+          showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+          renderShop();
+        }
+      },
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2014,9 +2032,6 @@ Object.assign(window,{
   shopSetChar, buyItem, confirmBuyItem, sellInvItemFromShop,
   toggleDispoInfini, saveShopItem, deleteShopItem,
   openShopItemModal, openShopItemDetail, editShopItem, filterShop,
-  shopCatDragStart, shopCatDragOver, shopCatDragEnd, shopCatDrop,
-  shopScDragStart, shopScDragOver, shopScDragEnd, shopScDrop,
-  shopItemDragStart, shopItemDragOver, shopItemDragEnd, shopItemDrop,
   shopFilterSearch, shopFilterBy, shopFilterReset, shopToggleTag,
   shopSetSort,
 });

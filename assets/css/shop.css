@@ -443,20 +443,6 @@
   border-color: rgba(79,140,255,0.30);
 }
 
-.sh-cat-draggable {
-  cursor: grab;
-}
-
-.sh-cat-draggable:active {
-  cursor: grabbing;
-}
-
-.sh-cat-drop-target {
-  outline: 2px solid var(--gold) !important;
-  outline-offset: 2px;
-  transform: scale(1.01);
-}
-
 .sh-cat-img {
   position: relative;
   display: flex;
@@ -603,24 +589,6 @@
 
 .sh-item-epuise .sh-item-img {
   filter: grayscale(0.2) brightness(0.88);
-}
-
-.sh-dnd-handle {
-  cursor: grab;
-}
-
-.sh-dnd-handle:active {
-  cursor: grabbing;
-}
-
-.sh-dnd-before {
-  position: relative;
-  box-shadow: 0 -3px 0 0 var(--gold) !important;
-}
-
-.sh-dnd-after {
-  position: relative;
-  box-shadow: 0 3px 0 0 var(--gold) !important;
 }
 
 .sh-item-img {
@@ -1679,3 +1647,41 @@ input[type="number"].input-field::-webkit-outer-spin-button {
   color: var(--text-dim);
   font-weight: 700;
 }
+
+/* ══════════════════════════════════════════════════
+   DRAG & DROP (SortableJS)
+══════════════════════════════════════════════════ */
+.sh-sortable-item { position: relative; cursor: grab; }
+.sh-sortable-item:active { cursor: grabbing; }
+
+/* Placeholder laissé à la place de l'élément en cours de drag */
+.sh-sortable-ghost {
+  opacity: 0.35;
+  background: rgba(226, 185, 111, 0.10) !important;
+  outline: 2px dashed var(--gold);
+  outline-offset: -2px;
+}
+
+/* État "sélectionné" pendant le drag */
+.sh-sortable-chosen { cursor: grabbing !important; }
+
+/* Clone suivant le curseur (forceFallback + fallbackOnBody) */
+.sh-sortable-drag {
+  opacity: 0.95 !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 2px var(--gold);
+  cursor: grabbing !important;
+  pointer-events: none;
+  transition: none !important;
+  will-change: transform;
+}
+.sh-sortable-drag,
+.sh-sortable-drag * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Désactive les effets hover et sélection pendant le drag pour garder le curseur réactif */
+body.sh-dragging { cursor: grabbing !important; user-select: none; }
+body.sh-dragging .sh-cat-card:hover,
+body.sh-dragging .sh-item-card:hover { transform: none !important; box-shadow: none !important; }
+body.sh-dragging * { cursor: grabbing !important; }

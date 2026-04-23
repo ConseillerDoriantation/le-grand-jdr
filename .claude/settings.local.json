@@ -49,7 +49,9 @@
       "mcp__Claude_in_Chrome__javascript_tool",
       "Bash(node --input-type=module)",
       "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\histoire.js\")",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/shop.js)",
+      "Bash(node --input-type=module --check)"
     ]
   }
 }

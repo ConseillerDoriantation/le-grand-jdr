@@ -2411,15 +2411,6 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-layout .sh-upload-simple input[type=file]:hover { border-color: var(--gold); }
 [data-theme="light"] .cs-layout .sh-upload-simple input[type=file] { background: #f7f8fa; }
 
-/* DnD catégories */
-.cs-layout .sh-cat-draggable { cursor: grab; }
-.cs-layout .sh-cat-draggable:active { cursor: grabbing; }
-.cs-layout .sh-cat-drop-target {
-  outline: 2px solid var(--gold) !important;
-  outline-offset: 2px;
-  transform: scale(1.02);
-}
-
 /* Barre de recherche */
 .cs-layout .sh-search-wrap { flex: 1; max-width: 340px; }
 .cs-layout .sh-search-input {
@@ -2473,36 +2464,7 @@ input[type=number].input-field::-webkit-outer-spin-button {
   white-space: nowrap;
 }
 
-/* ══════════════════════════════════════════════════
-   DnD — Indicateurs précis (avant/après)
-══════════════════════════════════════════════════ */
-.cs-layout .sh-dnd-handle { cursor: grab; }
-.cs-layout .sh-dnd-handle:active { cursor: grabbing; }
-
-/* Ligne bleue avant */
-.cs-layout .sh-dnd-before {
-  box-shadow: 0 -3px 0 0 var(--gold) !important;
-  position: relative;
-}
-/* Ligne bleue après */
-.cs-layout .sh-dnd-after {
-  box-shadow: 0 3px 0 0 var(--gold) !important;
-  position: relative;
-}
-/* Cards cats (grille) */
-.cs-layout .sh-cat-drop-target {
-  outline: 2px solid var(--gold) !important;
-  outline-offset: 2px;
-  transform: scale(1.01);
-}
-/* Item en cours de drag */
-.cs-layout .sh-item-card[draggable=true]:active,
-.cs-layout .sh-subcat-card[draggable=true]:active,
-.cs-layout .sh-cat-card[draggable=true]:active {
-  opacity: 0.5;
-}
-
-/* Zone cliquable sous-cat (pour séparation DnD/navigation) */
+/* Zone cliquable sous-cat */
 .cs-layout .sh-subcat-click-area {
   display: flex;
   flex-direction: column;
