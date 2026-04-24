@@ -148,6 +148,11 @@ service cloud.firestore {
       match /vttPings/{id} {
         allow read, write: if inAdventure(adventureId);
       }
+
+      // Réactions émotes : 1 doc par joueur (setDoc écrase), tous membres lisent et écrivent
+      match /vttEmoteReactions/{id} {
+        allow read, write: if inAdventure(adventureId);
+      }
     }
   }
 }

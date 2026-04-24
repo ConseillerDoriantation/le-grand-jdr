@@ -47,7 +47,8 @@ let _mapMode    = false;     // true = édition carte activée (images déplaça
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
 let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skills
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
-const _renderedPings = new Set(); // ids des pings déjà animés
+const _renderedPings     = new Set();
+const _renderedReactions = new Set();
 
 // Mapping abréviation compétence → clé getMod
 const _STAT_KEY = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
@@ -68,8 +69,10 @@ const _bstCol        = ()    => collection(db, `adventures/${_aid()}/bestiary`);
 const _bstRef        = (id)  => doc(db, `adventures/${_aid()}/bestiary/${id}`);
 const _bstTrackerRef = (uid) => doc(db, `adventures/${_aid()}/bestiary_tracker/${uid}`);
 const _logCol  = ()   => collection(db, `adventures/${_aid()}/vttLog`);
-const _pingsCol = ()  => collection(db, `adventures/${_aid()}/vttPings`);
-const _pingRef  = uid => doc(db, `adventures/${_aid()}/vttPings/${uid}`);
+const _pingsCol     = ()  => collection(db, `adventures/${_aid()}/vttPings`);
+const _pingRef      = uid => doc(db, `adventures/${_aid()}/vttPings/${uid}`);
+const _reactionsCol = ()  => collection(db, `adventures/${_aid()}/vttEmoteReactions`);
+const _reactionRef  = uid => doc(db, `adventures/${_aid()}/vttEmoteReactions/${uid}`);
 
 // ═══════════════════════════════════════════════════════════════════
 // DONNÉES EFFECTIVES — fusion token + entité liée
@@ -248,7 +251,7 @@ function _cleanup() {
   _resizeObs?.disconnect(); _resizeObs = null;
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
-  _moveHL = []; _autoSyncDone = false; _renderedPings.clear();
+  _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
   _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
   _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
@@ -456,49 +459,56 @@ function _buildShape(t) {
   const hp = ld.displayHp??20, hpm = ld.displayHpMax??20;
   const rat = hpm>0 ? Math.max(0,hp/hpm) : 1;
   const g = new K.Group({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2, id:`tok-${t.id}` });
-  g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9, stroke:'rgba(255,255,255,0.2)',strokeWidth:2 }));
-  g.add(new K.Circle({ radius:r+7, stroke:'#fff',     strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
-  g.add(new K.Circle({ radius:r+7, stroke:'#ef4444',  strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
-  // ── Barre HP ────────────────────────────────────────────────────
-  const hpH=12, hpY=r+4;
-  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW,height:hpH,fill:'rgba(0,0,0,0.88)',cornerRadius:3,name:'hp-bg' }));
-  g.add(new K.Rect({ x:-bW/2,y:hpY,width:bW*rat,height:hpH,fill:hpColor(rat),cornerRadius:3,name:'hp-fill' }));
-  g.add(new K.Text({ text:`${hp}/${hpm}`, x:-bW/2,y:hpY+2,
-    width:bW,align:'center',fontSize:9,fontStyle:'bold',
-    fill:'#fff',fontFamily:'Inter,sans-serif',listening:false,name:'hp-val' }));
-  // ── Barre PM (joueurs seulement) ────────────────────────────────
+  // ── Cercle de base ────────────────────────────────────────────────
+  g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9 }));
+  // ── Anneaux sélection / attaque ───────────────────────────────────
+  g.add(new K.Circle({ radius:r+4, stroke:'#fff',    strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
+  g.add(new K.Circle({ radius:r+4, stroke:'#ef4444', strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
+  // ── Barre HP (texte superposé sur la barre) ───────────────────────
+  const BH=9; // hauteur barre HP
+  g.add(new K.Rect({ x:-bW/2, y:r+4, width:bW, height:BH, fill:'#0d1117', cornerRadius:4, listening:false }));
+  g.add(new K.Rect({ x:-bW/2, y:r+4, width:Math.max(2,bW*rat), height:BH, fill:hpColor(rat), cornerRadius:4, listening:false, name:'hp-fill' }));
+  g.add(new K.Text({ x:-bW/2, y:r+4, width:bW, height:BH, align:'center', verticalAlign:'middle',
+    text:`${hp}/${hpm}`, fontSize:8, fontStyle:'bold', fill:'#fff',
+    shadowColor:'#000', shadowBlur:2, shadowOpacity:.9,
+    fontFamily:'Inter,sans-serif', listening:false, name:'hp-val' }));
+  // ── Barre PM (joueurs seulement, texte superposé) ─────────────────
   const _pm0=ld.displayPm;
-  let _nextY = hpY+hpH+2;
+  let _lblY=r+BH+8;
   if (_pm0!=null) {
     const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1;
-    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:10,fill:'rgba(0,0,0,0.82)',cornerRadius:2,name:'pm-bg' }));
-    g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW*pmRat0,height:10,fill:'#9b6dff',cornerRadius:2,name:'pm-fill' }));
-    g.add(new K.Text({ text:`✨${_pm0}/${pmMax0}`, x:-bW/2,y:_nextY+2,
-      width:bW,align:'center',fontSize:9,
-      fill:'#e8d5ff',fontFamily:'Inter,sans-serif',listening:false,name:'pm-val' }));
-    _nextY += 12;
+    const PMH=8;
+    g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, fill:'#0d1117', cornerRadius:4, listening:false }));
+    g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:Math.max(2,bW*pmRat0), height:PMH, fill:'#9b6dff', cornerRadius:4, listening:false, name:'pm-fill' }));
+    g.add(new K.Text({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, align:'center', verticalAlign:'middle',
+      text:`✨${_pm0}/${pmMax0}`, fontSize:7, fontStyle:'bold', fill:'#fff',
+      shadowColor:'#000', shadowBlur:2, shadowOpacity:.9,
+      fontFamily:'Inter,sans-serif', listening:false, name:'pm-val' }));
+    _lblY=r+BH+PMH+10;
   }
-  // ── CA ───────────────────────────────────────────────────────────
-  g.add(new K.Rect({ x:-bW/2,y:_nextY,width:bW,height:12,fill:'rgba(0,0,0,0.82)',cornerRadius:2,listening:false,name:'ca-bg' }));
-  g.add(new K.Text({ text:`🛡${ld.displayDefense??0}`, x:-bW/2,y:_nextY+2,
-    width:bW, align:'center', fontSize:9, fill:'#ddd',
-    fontFamily:'Inter,sans-serif', listening:false, name:'ca-lbl' }));
-  // ── Nom ──────────────────────────────────────────────────────────
-  const nameH=15, nameY=_nextY+14;
-  g.add(new K.Rect({ x:-bW/2,y:nameY,width:bW,height:nameH,fill:'rgba(0,0,0,0.88)',cornerRadius:2,listening:false }));
-  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2,y:nameY+2,
-    width:bW,align:'center',fontSize:11,fontStyle:'bold',fill:'#fff',
-    fontFamily:'Inter,sans-serif',name:'lbl' }));
+  // ── Badge CA (coin haut-droit) ────────────────────────────────────
+  g.add(new K.Circle({ x:r*.7, y:-r*.7, radius:10, fill:'rgba(15,15,25,0.9)',
+    stroke:'#64748b', strokeWidth:1.5, listening:false, name:'ca-bg' }));
+  g.add(new K.Text({ x:r*.7-10, y:-r*.7-6, width:20, height:12,
+    text:`🛡${ld.displayDefense??0}`, fontSize:9, fontStyle:'bold',
+    fill:'#e2e8f0', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-lbl' }));
+  // ── Nom ───────────────────────────────────────────────────────────
+  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2, y:_lblY,
+    width:bW, align:'center', fontSize:11, fontStyle:'bold', fill:'#fff',
+    fontFamily:'Inter,sans-serif', name:'lbl',
+    shadowColor:'#000', shadowBlur:4, shadowOpacity:1 }));
 
+  // ── Image ronde (K.Group clipper pour repère correct) ─────────────
   const imgSrc = ld.displayImage;
   if (imgSrc) {
+    const clipGrp = new K.Group({ clipFunc: ctx => { ctx.arc(0,0,r,0,Math.PI*2,false); }, listening:false });
     const el=new Image(); el.crossOrigin='anonymous';
     el.onload = () => {
-      const ki = new K.Image({ image:el,x:-r,y:-r,width:r*2,height:r*2,listening:false,
-        clipFunc(ctx){ctx.arc(0,0,r,0,Math.PI*2,false);} });
-      g.add(ki); ki.zIndex(1); _layers.token.batchDraw();
+      clipGrp.add(new K.Image({ image:el, x:-r, y:-r, width:r*2, height:r*2, listening:false }));
+      clipGrp.zIndex(2); _layers.token.batchDraw();
     };
     el.src = imgSrc;
+    g.add(clipGrp); clipGrp.zIndex(2);
   }
 
   const canDrag = STATE.isAdmin || t.ownerId===STATE.user?.uid;
@@ -721,6 +731,57 @@ function _renderPings(pings) {
     _renderedPings.add(pingKey);
     _animatePing(p, pingKey);
   }
+}
+
+// ── Réaction émote style stream — grande bulle qui pop depuis le bas ──
+function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
+  if (_renderedReactions.has(key)) return;
+  _renderedReactions.add(key);
+  const K = window.Konva; if (!K || !_layers.ping) return;
+  const W = _stage?.width() ?? 600;
+  const H = _stage?.height() ?? 400;
+  const BR = 56; // rayon de la bulle
+  const imgR = BR - 4; // l'image remplit presque toute la bulle (4px de bordure blanche)
+  // Position X : répartie aléatoirement, évite les bords
+  const bx = W * 0.12 + Math.random() * W * 0.76;
+  const by = H - BR - 8;
+  const g = new K.Group({ x: bx, y: by, scaleX: 0.2, scaleY: 0.2, opacity: 0 });
+  // Ombre portée
+  g.add(new K.Circle({ radius: BR + 3, fill: 'rgba(0,0,0,0.3)', y: 5, listening: false }));
+  // Bulle blanche (visible comme bordure autour de l'image)
+  g.add(new K.Circle({ radius: BR, fill: '#ffffff', listening: false }));
+  // Image clippée au cercle via un Group (repère centré correct)
+  const clipGrp = new K.Group({
+    clipFunc: ctx => { ctx.arc(0, 0, imgR, 0, Math.PI * 2, false); },
+    listening: false,
+  });
+  g.add(clipGrp);
+  _layers.ping.add(g);
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    clipGrp.add(new K.Image({ image: img,
+      x: -imgR, y: -imgR, width: imgR * 2, height: imgR * 2, listening: false }));
+    _layers.ping.batchDraw();
+  };
+  img.src = emoteUrl;
+  // Pop in : scale 0.2→1.2→1 avec opacité
+  new K.Tween({ node: g, duration: 0.22, opacity: 1, scaleX: 1.2, scaleY: 1.2,
+    easing: K.Easings.EaseOut,
+    onFinish: () => {
+      new K.Tween({ node: g, duration: 0.1, scaleX: 1, scaleY: 1,
+        onFinish: () => {
+          // Reste visible 2s puis de-pop (scale → 0, monte légèrement)
+          setTimeout(() => {
+            new K.Tween({ node: g, duration: 0.35, scaleX: 0.05, scaleY: 0.05,
+              y: by - 30, opacity: 0, easing: K.Easings.EaseIn,
+              onFinish: () => { g.destroy(); _layers.ping?.batchDraw(); }
+            }).play();
+          }, 2000);
+        }
+      }).play();
+    }
+  }).play();
+  _layers.ping.batchDraw();
 }
 
 // ── Multi-sélection ─────────────────────────────────────────────
@@ -1943,7 +2004,20 @@ function _initListeners() {
     _renderPings(pings);
   }, () => {})); // silencieux si pas de règle Firestore
 
-  // 8. Chat / Log de dés
+  // 8. Réactions émotes
+  _unsubs.push(onSnapshot(_reactionsCol(), snap => {
+    const now = Date.now();
+    snap.docs.forEach(d => {
+      const r = { id: d.id, ...d.data() };
+      if (!r.createdAt) return;
+      if ((now - r.createdAt.toMillis()) > 8000) return; // ignorer les vieilles réactions
+      if (r.pageId && r.pageId !== _activePage?.id) return; // mauvaise page
+      const key = `${r.id}_${r.createdAt.toMillis()}`;
+      _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key);
+    });
+  }, () => {})); // silencieux si règle absente
+
+  // 9. Chat / Log de dés
   _unsubs.push(onSnapshot(_logCol(), snap => {
     const msgs=snap.docs
       .map(d=>({id:d.id,...d.data()}))
@@ -2124,14 +2198,20 @@ window._vttToggleEmotePicker = () => {
   if (open) _renderEmotePicker();
 };
 
-window._vttPickEmote = (name) => {
-  const input = document.getElementById('vtt-chat-input');
-  if (!input) return;
-  const tag = `:${name}: `;
-  const pos = input.selectionStart ?? input.value.length;
-  input.value = input.value.slice(0, pos) + tag + input.value.slice(pos);
-  input.selectionStart = input.selectionEnd = pos + tag.length;
-  input.focus();
+window._vttPickEmote = async (name) => {
+  const uid = STATE.user?.uid; if (!uid) return;
+  const em = _emotes.find(e => e.name === name); if (!em) return;
+  // Trouver le token cible : token sélectionné en priorité, sinon propre token
+  let tokenId = _selected;
+  if (!tokenId) {
+    const own = Object.values(_tokens).find(e => e.data.ownerId === uid);
+    tokenId = own?.data?.id ?? null;
+  }
+  await setDoc(_reactionRef(uid), {
+    tokenId, emoteName: name, emoteUrl: em.url,
+    pageId: _activePage?.id ?? null,
+    createdAt: serverTimestamp(),
+  }).catch(() => {});
   document.getElementById('vtt-emote-picker')?.classList.remove('open');
 };
 
