@@ -911,7 +911,7 @@ const PAGES = {
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
   async achievements() {
-    // Utilise window._achItems si déjà chargé+ordonné par achievements.js
+    // Structure uniquement — le rendu justified est délégué à achievements.js
     const items = window._achItems || await loadCollection('achievements');
     const content = document.getElementById('main-content');
 
@@ -934,182 +934,70 @@ const PAGES = {
     const cat       = CATS.find(c => c.id === activeCat) || CATS[0];
     const catItems  = byCat[activeCat] || [];
 
-    let html = `
-
-    <!-- HERO -->
-    <div style="
-      background:linear-gradient(135deg,rgba(79,140,255,0.06) 0%,rgba(232,184,75,0.04) 50%,rgba(34,195,142,0.05) 100%);
+    content.innerHTML = `
+    <div style="background:linear-gradient(135deg,rgba(79,140,255,0.06) 0%,rgba(232,184,75,0.04) 50%,rgba(34,195,142,0.05) 100%);
       border:1px solid var(--border);border-radius:var(--radius-lg);
-      padding:1.8rem 2rem 1.4rem;margin-bottom:1.5rem;position:relative;overflow:hidden;
-    ">
+      padding:1.8rem 2rem 1.4rem;margin-bottom:1.5rem;position:relative;overflow:hidden">
       <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;
         background:radial-gradient(circle,rgba(232,184,75,0.07) 0%,transparent 70%);pointer-events:none"></div>
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap">
         <div>
-          <div style="font-size:0.72rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:0.4rem">Livre des Légendes</div>
+          <div style="font-size:.72rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:.4rem">Livre des Légendes</div>
           <h1 style="font-family:'Cinzel',serif;font-size:1.9rem;color:var(--gold);letter-spacing:2px;line-height:1;margin:0">Hauts-Faits</h1>
-          <p style="font-size:0.83rem;color:var(--text-muted);margin-top:0.5rem;margin-bottom:0">Les exploits de la compagnie, consignés pour l'éternité.</p>
+          <p style="font-size:.83rem;color:var(--text-muted);margin-top:.5rem;margin-bottom:0">Les exploits de la compagnie, consignés pour l'éternité.</p>
         </div>
-        <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
-          ${CATS.map(c => `
-            <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:0.6rem 1rem;text-align:center;min-width:70px">
-              <div style="font-size:1.1rem">${c.emoji}</div>
-              <div style="font-family:'Cinzel',serif;font-size:1rem;color:${c.color};line-height:1.2">${byCat[c.id]?.length || 0}</div>
-              <div style="font-size:0.65rem;color:var(--text-dim);margin-top:1px">${c.label}</div>
-            </div>`).join('')}
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:0.6rem 1rem;text-align:center;min-width:70px">
+        <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+          ${CATS.map(c => `<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:.6rem 1rem;text-align:center;min-width:70px">
+            <div style="font-size:1.1rem">${c.emoji}</div>
+            <div style="font-family:'Cinzel',serif;font-size:1rem;color:${c.color};line-height:1.2">${byCat[c.id]?.length || 0}</div>
+            <div style="font-size:.65rem;color:var(--text-dim);margin-top:1px">${c.label}</div>
+          </div>`).join('')}
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:.6rem 1rem;text-align:center;min-width:70px">
             <div style="font-size:1.1rem">🏆</div>
             <div style="font-family:'Cinzel',serif;font-size:1rem;color:var(--gold);line-height:1.2">${total}</div>
-            <div style="font-size:0.65rem;color:var(--text-dim);margin-top:1px">Total</div>
+            <div style="font-size:.65rem;color:var(--text-dim);margin-top:1px">Total</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ADMIN -->
-    ${STATE.isAdmin ? `
-    <div class="admin-section" style="margin-bottom:1.2rem">
+    ${STATE.isAdmin ? `<div class="admin-section" style="margin-bottom:1.2rem">
       <div class="admin-label">Admin — Hauts-Faits</div>
-      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
         <button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter un Haut-Fait</button>
-        <span style="font-size:0.75rem;color:var(--text-dim)">
-          ↔ Glisser-déposer les cards pour les réordonner
-        </span>
+        <button class="btn btn-outline btn-sm" onclick="window._achOuvrirReordre?.()">↕️ Réordonner</button>
       </div>
     </div>` : ''}
 
-    <!-- ONGLETS -->
-    <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
-      ${CATS.map(c => {
-        const active = c.id === activeCat;
-        const n      = byCat[c.id]?.length || 0;
+    <div style="display:flex;gap:.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
+      ${CATS.map(c => { const active = c.id === activeCat; const n = byCat[c.id]?.length || 0;
         return `<button onclick="window._achCat='${c.id}';navigate('achievements')" style="
-          display:flex;align-items:center;gap:0.5rem;padding:0.5rem 1.1rem;
-          border-radius:999px;cursor:pointer;transition:all 0.15s;font-family:'Cinzel',serif;font-size:0.82rem;
+          display:flex;align-items:center;gap:.5rem;padding:.5rem 1.1rem;border-radius:999px;cursor:pointer;
+          transition:all .15s;font-family:'Cinzel',serif;font-size:.82rem;
           border:1px solid ${active ? c.color : 'var(--border)'};
-          background:${active ? c.glow : 'transparent'};
-          color:${active ? c.color : 'var(--text-muted)'};
+          background:${active ? c.glow : 'transparent'};color:${active ? c.color : 'var(--text-muted)'}
         ">${c.emoji} ${c.label}
-          <span style="border-radius:999px;padding:1px 7px;font-size:0.7rem;font-family:sans-serif;
+          <span style="border-radius:999px;padding:1px 7px;font-size:.7rem;font-family:sans-serif;
             background:${active ? c.color : 'var(--bg-elevated)'};
             color:${active ? '#0b1118' : 'var(--text-dim)'};">${n}</span>
         </button>`;
       }).join('')}
-    </div>`;
+    </div>
 
-
-    // ── Contenu catégorie active ──────────────────────────────────────────
-    if (catItems.length === 0) {
-      html += `
-      <div style="text-align:center;padding:4rem 2rem;color:var(--text-dim)">
-        <div style="font-size:3rem;margin-bottom:1rem;opacity:0.4">${cat.emoji}</div>
-        <p style="font-style:italic;font-size:0.85rem">Aucun haut-fait ${cat.label.toLowerCase()} pour l'instant.</p>
-        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openAchievementModal()">+ Ajouter le premier</button>` : ''}
-      </div>`;
-    } else {
-      html += `
-      <div style="font-size:0.8rem;color:var(--text-dim);font-style:italic;margin-bottom:1.2rem;padding-left:0.25rem">
-        ${cat.emoji} ${cat.desc} — ${catItems.length} haut-fait${catItems.length > 1 ? 's' : ''}
-      </div>
-
-      <!-- GRILLE — id requis pour le drag & drop -->
-      <div id="ach-grid-${cat.id}" style="
-        display:grid;
-        grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
-        gap:1rem;
-      ">`;
-
-      catItems.forEach(a => {
-        html += `
-        <div data-ach-id="${a.id}" style="
-          background:var(--bg-card);border:1px solid var(--border);
-          border-radius:var(--radius-lg);overflow:hidden;
-          display:flex;flex-direction:column;
-          transition:border-color 0.15s,transform 0.15s,opacity 0.15s;
-          ${STATE.isAdmin ? 'cursor:grab;' : 'cursor:default;'}
-        "
-          onmouseenter="if(!this.getAttribute('draggable')||event.buttons===0){this.style.borderColor='${cat.color}';this.style.transform='translateY(-2px)'}"
-          onmouseleave="this.style.borderColor='var(--border)';this.style.transform=''">
-
-          <!-- Zone image — toujours présente, emoji si pas d'image -->
-          <div style="width:100%;aspect-ratio:4/3;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0;${a.imageUrl ? 'cursor:zoom-in;' : ''}"
-            ${a.imageUrl ? `onclick="event.stopPropagation();window._achOpenImage('${a.imageUrl.replace(/'/g, "\\'")}')"` : ''}>
-            ${a.imageUrl
-              ? `<img src="${a.imageUrl}"
-                   style="width:100%;height:100%;object-fit:cover;display:block;pointer-events:none"
-                   loading="lazy" draggable="false">`
-              : `<div style="
-                   width:100%;height:100%;
-                   display:flex;align-items:center;justify-content:center;
-                   font-size:3.5rem;
-                   background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));
-                   pointer-events:none;
-                 ">${a.emoji || cat.emoji}</div>`
-            }
-            <!-- Badge catégorie -->
-            <div style="
-              position:absolute;top:8px;left:8px;
-              background:rgba(11,17,24,0.82);border:1px solid ${cat.color};
-              border-radius:999px;padding:2px 8px;
-              font-size:0.65rem;color:${cat.color};
-              backdrop-filter:blur(4px);pointer-events:none;
-            ">${cat.emoji} ${cat.label}</div>
-            ${a.date ? `<div style="
-              position:absolute;bottom:8px;right:8px;
-              background:rgba(11,17,24,0.75);border-radius:6px;
-              padding:2px 7px;font-size:0.65rem;color:var(--text-dim);
-              pointer-events:none;
-            ">${a.date}</div>` : ''}
-          </div>
-
-          <!-- Corps texte -->
-          <div style="padding:0.85rem;flex:1;display:flex;flex-direction:column;gap:0.4rem">
-            <div style="font-family:'Cinzel',serif;font-size:0.88rem;color:var(--text);line-height:1.3">
-              ${a.titre || 'Haut-Fait'}
-            </div>
-            <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.55;flex:1;font-style:italic">
-              ${a.description || ''}
-            </div>
-            ${(() => {
-              const ids   = a.contributeurs || [];
-              if (!ids.length) return '';
-              const chars = STATE.characters || [];
-              const COLS  = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-              const contribs = ids.map(id => chars.find(c => c.id === id)).filter(Boolean);
-              if (!contribs.length) return '';
-              return `<div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
-                ${contribs.map(c => {
-                  const col      = COLS[c.nom?.charCodeAt(0)%6||0];
-                  const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-                  return `<div title="${_esc(c.nom||'?')}" style="display:flex;flex-direction:column;align-items:center;gap:2px">
-                    <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;
-                      border:2px solid ${col};background:${col}18;
-                      display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                      ${c.photo
-                        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-                        : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.8rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
-                    </div>
-                    <span style="font-size:.58rem;color:${col};font-weight:600;max-width:38px;
-                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center">${_esc(c.nom||'?')}</span>
-                  </div>`;
-                }).join('')}
-              </div>`;
-            })()}
-            ${STATE.isAdmin ? `
-            <div style="display:flex;gap:0.4rem;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
-              <button class="btn btn-outline btn-sm" style="flex:1;font-size:0.72rem"
-                onclick="event.stopPropagation();editAchievement('${a.id}')">✏️ Modifier</button>
-              <button class="btn-icon" style="color:#ff6b6b"
-                onclick="event.stopPropagation();deleteAchievement('${a.id}')">🗑️</button>
-            </div>` : ''}
-          </div>
-        </div>`;
-      });
-
-      html += `</div>`;
-    }
-
-    content.innerHTML = html;
+    ${catItems.length === 0
+      ? `<div style="text-align:center;padding:4rem 2rem;color:var(--text-dim)">
+           <div style="font-size:3rem;margin-bottom:1rem;opacity:.4">${cat.emoji}</div>
+           <p style="font-style:italic;font-size:.85rem">Aucun haut-fait ${cat.label.toLowerCase()} pour l'instant.</p>
+           ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openAchievementModal()">+ Ajouter le premier</button>` : ''}
+         </div>`
+      : `<div style="font-size:.8rem;color:var(--text-dim);font-style:italic;margin-bottom:1.2rem;padding-left:.25rem">
+           ${cat.emoji} ${cat.desc} — ${catItems.length} haut-fait${catItems.length > 1 ? 's' : ''}
+         </div>
+         <div id="ach-grid-${cat.id}" class="ach-justified">
+           <div class="loading"><div class="spinner"></div></div>
+         </div>`
+    }`;
+    // Le justified layout est rempli après par achievements.js
   },
 
   // ─── COLLECTION ─────────────────────────────────────────────────────────────

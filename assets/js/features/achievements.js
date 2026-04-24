@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // ACHIEVEMENTS.JS — Hauts-Faits
-// ✓ Upload + recadrage d'image canvas (ratio 4:3 forcé, 8 poignées)
+// ✓ Upload + redimensionnement image (ratio libre, max 1400px, fond flou à l'affichage)
 // ✓ Hauts-faits sans image affichés correctement (emoji + fond)
 // ✓ Drag & drop précis pour réordonner, ordre persisté dans Firestore
 // ✓ Ordre partagé pour tous les utilisateurs
@@ -9,7 +9,7 @@ import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/fire
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
-import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
+import { _crop } from '../shared/image-upload.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
@@ -80,21 +80,8 @@ function openAchievementModal(id = null) {
         <div style="font-size:0.7rem;color:var(--text-dim);margin-top:2px">JPG · PNG · WebP — max 5 Mo</div>
       </div>
 
-      <!-- Zone crop (cachée initialement) -->
-      <div id="ach-crop-wrap" style="display:none;margin-top:1rem">
-        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem">
-          Déplacez et redimensionnez la sélection — ratio 4:3 verrouillé
-        </div>
-        <canvas id="ach-crop-canvas"
-          style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none">
-        </canvas>
-        <button type="button" class="btn btn-gold btn-sm"
-          style="margin-top:0.6rem;width:100%" onclick="window._achConfirmCrop()">
-          ✂️ Confirmer le recadrage
-        </button>
-        <div id="ach-crop-ok" style="display:none;font-size:0.75rem;color:var(--green);text-align:center;margin-top:4px">
-          ✓ Image recadrée
-        </div>
+      <div id="ach-img-ready" style="display:none;font-size:0.75rem;color:var(--green);text-align:center;margin-top:6px">
+        ✓ Image prête
       </div>
     </div>
 
@@ -212,7 +199,7 @@ function openAchievementModal(id = null) {
     if (!file?.type.startsWith('image/')) return;
     if (file.size > 5 * 1024 * 1024) { showNotif('Image trop lourde (max 5 Mo).', 'error'); return; }
     const r = new FileReader();
-    r.onload = (e) => _initCrop(e.target.result);
+    r.onload = (e) => _resizeAndPreview(e.target.result);
     r.readAsDataURL(file);
   };
 
@@ -235,230 +222,30 @@ function openAchievementModal(id = null) {
   achObs.observe(document.body, { childList: true, subtree: true });
 }
 
-// ── CROPPER ───────────────────────────────────────────────────────────────────
-function _initCrop(dataUrl) {
-  const wrap    = document.getElementById('ach-crop-wrap');
-  const canvas  = document.getElementById('ach-crop-canvas');
-  const preview = document.getElementById('ach-drop-preview');
-  if (!wrap || !canvas) return;
-
+// ── TRAITEMENT IMAGE — redimensionnement sans crop forcé ──────────────────────
+function _resizeAndPreview(dataUrl) {
   _crop.base64 = null;
-  document.getElementById('ach-crop-ok').style.display = 'none';
-  wrap.style.display = 'block';
-
   const img = new Image();
   img.onload = () => {
-    _crop.img   = img;
-    _crop.natW  = img.naturalWidth;
-    _crop.natH  = img.naturalHeight;
+    const MAX = 1400;
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+    if (w > MAX || h > MAX) {
+      if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
+      else        { w = Math.round(w * MAX / h); h = MAX; }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    _crop.base64 = canvas.toDataURL('image/jpeg', 0.88);
 
-    // Canvas affiché à max 400px de large
-    const maxW        = Math.min(400, img.naturalWidth);
-    _crop.dispScale   = maxW / img.naturalWidth;
-    canvas.width      = img.naturalWidth;
-    canvas.height     = img.naturalHeight;
-    canvas.style.width  = maxW + 'px';
-    canvas.style.height = Math.round(img.naturalHeight * _crop.dispScale) + 'px';
-
-    // Sélection initiale 4:3 centrée, 80% de la largeur
-    const R = 4 / 3;
-    let w = img.naturalWidth  * 0.8;
-    let h = w / R;
-    if (h > img.naturalHeight * 0.8) { h = img.naturalHeight * 0.8; w = h * R; }
-    _crop.cropX = Math.round((img.naturalWidth  - w) / 2);
-    _crop.cropY = Math.round((img.naturalHeight - h) / 2);
-    _crop.cropW = Math.round(w);
-    _crop.cropH = Math.round(h);
-
-    _drawCrop();
-    _bindCropEvents(canvas);
-
-    // Petit aperçu dans la zone de drop
-    preview.innerHTML = `<img src="${dataUrl}"
-      style="max-height:50px;border-radius:6px;opacity:0.6">
-      <div style="font-size:0.7rem;color:var(--text-dim);margin-top:4px">Recadrez ci-dessous</div>`;
+    const preview = document.getElementById('ach-drop-preview');
+    if (preview) preview.innerHTML = `<img src="${_crop.base64}" style="max-height:80px;border-radius:8px;max-width:100%">`;
+    const ready = document.getElementById('ach-img-ready');
+    if (ready) ready.style.display = 'block';
   };
   img.src = dataUrl;
 }
-
-function _handles() {
-  const { cropX: x, cropY: y, cropW: w, cropH: h } = _crop;
-  return [
-    { id:'nw', x,       y       }, { id:'n', x:x+w/2, y       }, { id:'ne', x:x+w, y       },
-    { id:'w',  x,       y:y+h/2 },                                { id:'e',  x:x+w, y:y+h/2 },
-    { id:'sw', x,       y:y+h   }, { id:'s', x:x+w/2, y:y+h   }, { id:'se', x:x+w, y:y+h   },
-  ];
-}
-
-function _hitHandle(nx, ny) {
-  const tol = 9 / _crop.dispScale;
-  return _handles().find(h => Math.abs(h.x - nx) < tol && Math.abs(h.y - ny) < tol) || null;
-}
-
-function _drawCrop() {
-  const canvas = document.getElementById('ach-crop-canvas');
-  if (!canvas || !_crop.img) return;
-  const ctx = canvas.getContext('2d');
-  const { img, natW, natH, cropX, cropY, cropW, cropH } = _crop;
-
-  ctx.clearRect(0, 0, natW, natH);
-  ctx.drawImage(img, 0, 0, natW, natH);
-
-  // Fond assombri
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(0, 0, natW, natH);
-
-  // Zone sélectionnée
-  ctx.drawImage(img, cropX, cropY, cropW, cropH, cropX, cropY, cropW, cropH);
-
-  // Bordure
-  ctx.strokeStyle = '#e8b84b';
-  ctx.lineWidth   = 2;
-  ctx.strokeRect(cropX, cropY, cropW, cropH);
-
-  // Tiers
-  ctx.strokeStyle = 'rgba(232,184,75,0.3)';
-  ctx.lineWidth   = 1;
-  for (let i = 1; i <= 2; i++) {
-    ctx.beginPath(); ctx.moveTo(cropX + cropW * i / 3, cropY); ctx.lineTo(cropX + cropW * i / 3, cropY + cropH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cropX, cropY + cropH * i / 3); ctx.lineTo(cropX + cropW, cropY + cropH * i / 3); ctx.stroke();
-  }
-
-  // Poignées
-  ctx.fillStyle   = '#e8b84b';
-  ctx.strokeStyle = '#0b1118';
-  ctx.lineWidth   = 1.5;
-  _handles().forEach(h => {
-    ctx.fillRect(h.x - 6, h.y - 6, 12, 12);
-    ctx.strokeRect(h.x - 6, h.y - 6, 12, 12);
-  });
-
-  // Dimensions
-  ctx.fillStyle = 'rgba(232,184,75,0.9)';
-  ctx.font      = '12px monospace';
-  ctx.fillText(`${cropW} × ${cropH}`, cropX + 6, cropY + 18);
-}
-
-function _toNative(canvas, clientX, clientY) {
-  const r = canvas.getBoundingClientRect();
-  return { x: (clientX - r.left) / _crop.dispScale, y: (clientY - r.top) / _crop.dispScale };
-}
-
-// _clamp → importé depuis shared/image-upload.js
-
-function _bindCropEvents(canvas) {
-  const R   = 4 / 3;
-  const MIN = 40;
-
-  const onStart = (cx, cy) => {
-    const { x, y } = _toNative(canvas, cx, cy);
-    const h        = _hitHandle(x, y);
-    if (h) {
-      _crop.isResizing = true; _crop.handle = h.id;
-    } else {
-      const { cropX, cropY, cropW, cropH } = _crop;
-      if (x >= cropX && x <= cropX + cropW && y >= cropY && y <= cropY + cropH) {
-        _crop.isDragging = true;
-        _crop.startX = x - cropX;
-        _crop.startY = y - cropY;
-      }
-    }
-  };
-
-  const onMove = (cx, cy) => {
-    if (!_crop.isDragging && !_crop.isResizing) return;
-    const { x, y } = _toNative(canvas, cx, cy);
-    const { natW: W, natH: H } = _crop;
-
-    if (_crop.isDragging) {
-      _crop.cropX = Math.round(_clamp(x - _crop.startX, 0, W - _crop.cropW));
-      _crop.cropY = Math.round(_clamp(y - _crop.startY, 0, H - _crop.cropH));
-      _drawCrop(); return;
-    }
-
-    // Redimensionnement avec contrainte 4:3
-    let { cropX, cropY, cropW, cropH, handle } = _crop;
-    const anchor = { x: cropX, y: cropY, x2: cropX + cropW, y2: cropY + cropH };
-
-    if (handle === 'se') {
-      cropW = _clamp(x - anchor.x, MIN, W - anchor.x);
-      cropH = Math.round(cropW / R);
-      if (anchor.y + cropH > H) { cropH = H - anchor.y; cropW = Math.round(cropH * R); }
-    } else if (handle === 'sw') {
-      cropW = _clamp(anchor.x2 - x, MIN, anchor.x2);
-      cropH = Math.round(cropW / R);
-      cropX = anchor.x2 - cropW;
-      if (cropY + cropH > H) { cropH = H - cropY; cropW = Math.round(cropH * R); cropX = anchor.x2 - cropW; }
-    } else if (handle === 'ne') {
-      cropW = _clamp(x - anchor.x, MIN, W - anchor.x);
-      cropH = Math.round(cropW / R);
-      cropY = anchor.y2 - cropH;
-      if (cropY < 0) { cropY = 0; cropH = anchor.y2; cropW = Math.round(cropH * R); }
-    } else if (handle === 'nw') {
-      cropW = _clamp(anchor.x2 - x, MIN, anchor.x2);
-      cropH = Math.round(cropW / R);
-      cropX = anchor.x2 - cropW;
-      cropY = anchor.y2 - cropH;
-      if (cropY < 0) { cropY = 0; cropH = anchor.y2; cropW = Math.round(cropH * R); cropX = anchor.x2 - cropW; }
-    } else if (handle === 'e') {
-      cropW = _clamp(x - anchor.x, MIN, W - anchor.x);
-      cropH = Math.round(cropW / R);
-    } else if (handle === 'w') {
-      cropW = _clamp(anchor.x2 - x, MIN, anchor.x2);
-      cropH = Math.round(cropW / R);
-      cropX = anchor.x2 - cropW;
-    } else if (handle === 's') {
-      cropH = _clamp(y - anchor.y, MIN, H - anchor.y);
-      cropW = Math.round(cropH * R);
-    } else if (handle === 'n') {
-      cropH = _clamp(anchor.y2 - y, MIN, anchor.y2);
-      cropW = Math.round(cropH * R);
-      cropY = anchor.y2 - cropH;
-    }
-
-    _crop.cropX = Math.round(_clamp(cropX, 0, W - MIN));
-    _crop.cropY = Math.round(_clamp(cropY, 0, H - MIN));
-    _crop.cropW = Math.round(_clamp(cropW, MIN, W - _crop.cropX));
-    _crop.cropH = Math.round(_clamp(cropH, MIN, H - _crop.cropY));
-    _drawCrop();
-  };
-
-  const onEnd = () => { _crop.isDragging = false; _crop.isResizing = false; _crop.handle = null; };
-
-  // Curseur
-  const CURSOR_MAP = { nw:'nw-resize', ne:'ne-resize', sw:'sw-resize', se:'se-resize', n:'n-resize', s:'s-resize', e:'e-resize', w:'w-resize' };
-  canvas.addEventListener('mousemove', (e) => {
-    if (_crop.isDragging || _crop.isResizing) return;
-    const { x, y } = _toNative(canvas, e.clientX, e.clientY);
-    const h = _hitHandle(x, y);
-    if (h) { canvas.style.cursor = CURSOR_MAP[h.id]; return; }
-    const { cropX, cropY, cropW, cropH } = _crop;
-    canvas.style.cursor = (x >= cropX && x <= cropX + cropW && y >= cropY && y <= cropY + cropH) ? 'move' : 'crosshair';
-  });
-
-  canvas.addEventListener('mousedown',  (e) => { e.preventDefault(); onStart(e.clientX, e.clientY); });
-  window.addEventListener('mousemove',  (e) => onMove(e.clientX, e.clientY));
-  window.addEventListener('mouseup',    onEnd);
-  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onStart(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
-  canvas.addEventListener('touchmove',  (e) => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
-  canvas.addEventListener('touchend',   onEnd);
-}
-
-window._achConfirmCrop = () => {
-  const { img, cropX, cropY, cropW, cropH } = _crop;
-  if (!img) return;
-  const OUT_W = Math.min(800, cropW);
-  const OUT_H = Math.round(OUT_W / (4 / 3));
-  const out   = document.createElement('canvas');
-  out.width   = OUT_W; out.height = OUT_H;
-  out.getContext('2d').drawImage(img, cropX, cropY, cropW, cropH, 0, 0, OUT_W, OUT_H);
-  _crop.base64 = out.toDataURL('image/jpeg', 0.88);
-
-  document.getElementById('ach-crop-ok').style.display   = 'block';
-  document.getElementById('ach-crop-wrap').style.display  = 'none';
-  const p = document.getElementById('ach-drop-preview');
-  if (p) p.innerHTML = `<img src="${_crop.base64}" style="max-height:80px;border-radius:8px">`;
-};
 
 // ── SAUVEGARDER ───────────────────────────────────────────────────────────────
 async function saveAchievement(id = '') {
@@ -569,51 +356,37 @@ function setupAchievementsDnd(catId) {
       dragged = card;
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', card.dataset.achId);
-      requestAnimationFrame(() => {
-        card.style.opacity   = '0.35';
-        card.style.transform = 'scale(0.96)';
-      });
+      requestAnimationFrame(() => card.classList.add('ach-dragging'));
     });
 
     card.addEventListener('dragend', async () => {
-      card.style.opacity   = '';
-      card.style.transform = '';
+      card.classList.remove('ach-dragging');
       dragged = null;
 
-      // Lire l'ordre depuis le DOM après drop
+      // Lire l'ordre depuis le DOM (traverse toutes les rangées)
       const domOrder = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
 
-      // Reconstruire l'ordre global : conserver les IDs des autres catégories
-      const catIds     = new Set((window._achItems || [])
-        .filter(a => (a.categorie || 'epique') === catId)
-        .map(a => a.id));
+      const catIds      = new Set((window._achItems || [])
+        .filter(a => (a.categorie || 'epique') === catId).map(a => a.id));
       const globalOrder = await _loadOrder();
       const otherIds    = globalOrder.filter(id => !catIds.has(id));
+      const firstOther  = globalOrder.find(id => !catIds.has(id) &&
+        globalOrder.indexOf(id) > Math.max(-1, ...globalOrder.map((v, i) => catIds.has(v) ? i : -1)));
 
-      // Trouver la position d'insertion : juste avant le premier ID d'une autre catégorie
-      // qui était après les items de cette catégorie (ou à la fin)
-      const firstOtherAfter = globalOrder.find(id => !catIds.has(id) &&
-        globalOrder.indexOf(id) > Math.max(...globalOrder.map((v, i) => catIds.has(v) ? i : -1)));
-
-      let merged;
-      if (firstOtherAfter) {
-        const insertAt = otherIds.indexOf(firstOtherAfter);
-        merged = [
-          ...otherIds.slice(0, insertAt),
-          ...domOrder,
-          ...otherIds.slice(insertAt),
-        ];
-      } else {
-        merged = [...otherIds, ...domOrder];
-      }
+      const merged = firstOther
+        ? [...otherIds.slice(0, otherIds.indexOf(firstOther)), ...domOrder, ...otherIds.slice(otherIds.indexOf(firstOther))]
+        : [...otherIds, ...domOrder];
 
       await _saveOrder(merged);
       showNotif('Ordre sauvegardé.', 'success');
+      // Reconstruire le justified layout avec le nouvel ordre DOM
+      await _achRebuildJustified(catId);
     });
 
     card.addEventListener('dragover', (e) => {
       e.preventDefault();
       if (!dragged || card === dragged) return;
+      // Comparer position horizontale au sein d'une rangée
       const rect  = card.getBoundingClientRect();
       const after = e.clientX > rect.left + rect.width / 2;
       if (after) card.after(dragged);
@@ -666,6 +439,212 @@ function _achOpenImage(url) {
   document.body.appendChild(overlay);
 }
 
+// ── JUSTIFIED LAYOUT ENGINE ───────────────────────────────────────────────────
+
+const ACH_CATS = [
+  { id:'epique',   label:'Épique',   emoji:'⚔️',  color:'#4f8cff', glow:'rgba(79,140,255,0.14)' },
+  { id:'comique',  label:'Comique',  emoji:'🎭',  color:'#e8b84b', glow:'rgba(232,184,75,0.14)' },
+  { id:'histoire', label:'Histoire', emoji:'📖',  color:'#22c38e', glow:'rgba(34,195,142,0.14)' },
+];
+
+// Mesure les aspect-ratios manquants en chargeant les images
+async function _achMeasureRatios(items) {
+  return Promise.all(items.map(item => {
+    if (item.aspectRatio)  return Promise.resolve(item);
+    if (!item.imageUrl)    return Promise.resolve({ ...item, aspectRatio: 1 });
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload  = () => resolve({ ...item, aspectRatio: img.naturalWidth / img.naturalHeight });
+      img.onerror = () => resolve({ ...item, aspectRatio: 4 / 3 });
+      img.src = item.imageUrl;
+    });
+  }));
+}
+
+// Algorithme justified : même hauteur par rangée, largeurs proportionnelles au ratio
+// Résultat garanti : conteneur W/H = ratio image → object-fit:cover sans aucun recadrage
+function _achBuildRows(items, containerW, targetH, gap) {
+  const rows = [];
+  let row = [], naturalW = 0;
+
+  const flush = (partial) => {
+    const n      = row.length;
+    const availW = containerW - (n - 1) * gap;
+    const scale  = partial ? 1 : availW / naturalW;
+    const h      = Math.round(targetH * scale);
+    rows.push({ h, items: row.map(i => ({ ...i, w: Math.round(i._ratio * targetH * scale) })) });
+    row = []; naturalW = 0;
+  };
+
+  for (const item of items) {
+    const ratio = item.aspectRatio || 4 / 3;
+    row.push({ ...item, _ratio: ratio });
+    naturalW += ratio * targetH;
+    if (naturalW + (row.length - 1) * gap >= containerW) flush(false);
+  }
+  if (row.length) flush(true); // dernière rangée partielle
+
+  return rows;
+}
+
+// HTML d'une carte dans le justified layout
+function _achCardHTML(item, cat, isAdmin) {
+  const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const chars     = STATE.characters || [];
+  const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
+
+  const contribsHtml = contribs.length ? `
+    <div class="ach-contribs">
+      ${contribs.map(c => {
+        const col      = CHAR_COLS[c.nom?.charCodeAt(0) % 6 || 0];
+        const photoPos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
+        return `<div class="ach-contrib-pill" style="border-color:${col}50">
+          <div class="ach-contrib-avatar" style="background:${col}22;color:${col}">
+            ${c.photo
+              ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+              : (c.nom || '?')[0].toUpperCase()}
+          </div>
+          <span class="ach-contrib-name">${_esc(c.nom || '?')}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
+  const adminHtml = isAdmin ? `
+    <div class="ach-admin-btns">
+      <button class="btn btn-outline btn-sm" style="flex:1;font-size:.7rem"
+        onclick="event.stopPropagation();editAchievement('${item.id}')">✏️ Modifier</button>
+      <button class="btn-icon" style="color:#ff6b6b"
+        onclick="event.stopPropagation();deleteAchievement('${item.id}')">🗑️</button>
+    </div>` : '';
+
+  const imageHtml = item.imageUrl
+    ? `<img src="${item.imageUrl}" loading="lazy" draggable="false">`
+    : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+         font-size:3.5rem;background:linear-gradient(135deg,${cat.glow},var(--bg-panel))">${item.emoji || cat.emoji}</div>`;
+
+  return `
+    <div class="ach-badge-cat" style="color:${cat.color};border-color:${cat.color}55">${cat.emoji} ${cat.label}</div>
+    ${item.date ? `<div class="ach-badge-date">${item.date}</div>` : ''}
+    ${imageHtml}
+    <div class="ach-meta">
+      <div class="ach-meta-title">${_esc(item.titre || 'Haut-Fait')}</div>
+      ${item.description ? `<div class="ach-meta-desc">${_esc(item.description)}</div>` : ''}
+      ${contribsHtml}
+      ${adminHtml}
+    </div>`;
+}
+
+// Rendu justified dans le conteneur
+async function _achRenderJustified(catId, items, cat, container) {
+  const withRatios = await _achMeasureRatios(items);
+
+  // Stocker les ratios mesurés pour les rebuilds DnD
+  withRatios.forEach(item => {
+    const idx = (window._achItems || []).findIndex(a => a.id === item.id);
+    if (idx >= 0) window._achItems[idx] = { ...window._achItems[idx], aspectRatio: item.aspectRatio };
+  });
+
+  const containerW = container.clientWidth || 900;
+  const targetH    = window.innerWidth < 1024 ? (window.innerWidth < 600 ? 150 : 220) : 340;
+  const gap        = 10;
+  const rows       = _achBuildRows(withRatios, containerW, targetH, gap);
+  const isAdmin    = STATE.isAdmin;
+
+  container.innerHTML = rows.map(row => `
+    <div class="ach-row" style="height:${row.h}px">
+      ${row.items.map(item => `
+        <div class="ach-item" data-ach-id="${item.id}"
+          style="width:${item.w}px;height:${row.h}px;${isAdmin ? 'cursor:grab' : ''}"
+          ${item.imageUrl ? `onclick="window._achOpenImage('${item.imageUrl.replace(/'/g, "\\'")}')"` : ''}>
+          ${_achCardHTML(item, cat, isAdmin)}
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+// Rebuild après réordonnancement DnD (lit l'ordre DOM, recalcule le layout)
+async function _achRebuildJustified(catId) {
+  const grid = document.getElementById(`ach-grid-${catId}`);
+  const cat  = ACH_CATS.find(c => c.id === catId);
+  if (!grid || !cat) return;
+
+  const itemsById  = Object.fromEntries((window._achItems || []).map(a => [a.id, a]));
+  const orderedIds = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
+  const ordered    = orderedIds.map(id => itemsById[id]).filter(Boolean);
+
+  await _achRenderJustified(catId, ordered, cat, grid);
+  setupAchievementsDnd(catId);
+}
+window._achRebuildJustified = _achRebuildJustified;
+
+// ── RÉORDONNER (modal simple drag-and-drop vertical) ─────────────────────────
+window._achOuvrirReordre = async function() {
+  const catId    = window._achCat || 'epique';
+  const cat      = ACH_CATS.find(c => c.id === catId);
+  const catItems = (window._achItems || []).filter(a => (a.categorie || 'epique') === catId);
+  if (!catItems.length || !cat) return;
+
+  openModal(`↕️ Réordonner — ${cat.emoji} ${cat.label}`, `
+    <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:.8rem">Glisser les lignes pour changer l'ordre.</p>
+    <div id="ach-reorder-list" style="display:flex;flex-direction:column;gap:6px">
+      ${catItems.map(a => `
+        <div data-reorder-id="${a.id}" draggable="true" style="
+          display:flex;align-items:center;gap:10px;padding:8px 10px;
+          background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;cursor:grab;
+          transition:background .15s">
+          <span style="color:var(--text-dim);font-size:1.1rem;flex-shrink:0">⠿</span>
+          ${a.imageUrl
+            ? `<img src="${a.imageUrl}" style="width:40px;height:30px;border-radius:6px;object-fit:cover;flex-shrink:0">`
+            : `<span style="font-size:1.4rem;flex-shrink:0">${a.emoji || '🏆'}</span>`}
+          <span style="font-size:.85rem;color:var(--text)">${_esc(a.titre || 'Haut-Fait')}</span>
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-gold" style="width:100%;margin-top:12px"
+      onclick="window._achSauvegarderReordre('${catId}')">💾 Enregistrer l'ordre</button>
+  `);
+
+  // DnD vertical sur la liste modale
+  let draggedRow = null;
+  const list = document.getElementById('ach-reorder-list');
+  list?.querySelectorAll('[data-reorder-id]').forEach(row => {
+    row.addEventListener('dragstart', () => { draggedRow = row; row.style.opacity = '.4'; });
+    row.addEventListener('dragend',   () => { draggedRow = null; row.style.opacity = ''; });
+    row.addEventListener('dragover',  e  => {
+      e.preventDefault();
+      if (!draggedRow || row === draggedRow) return;
+      const mid = row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      e.clientY < mid ? row.before(draggedRow) : row.after(draggedRow);
+    });
+  });
+};
+
+window._achSauvegarderReordre = async function(catId) {
+  const list = document.getElementById('ach-reorder-list');
+  if (!list) return;
+
+  const catItems  = (window._achItems || []).filter(a => (a.categorie || 'epique') === catId);
+  const catIds    = new Set(catItems.map(a => a.id));
+  const newCatOrd = [...list.querySelectorAll('[data-reorder-id]')].map(el => el.dataset.reorderId);
+
+  const globalOrder = await _loadOrder();
+  const others      = globalOrder.filter(id => !catIds.has(id));
+  const firstOther  = globalOrder.find(id => !catIds.has(id) &&
+    globalOrder.indexOf(id) > Math.max(-1, ...globalOrder.map((v, i) => catIds.has(v) ? i : -1)));
+
+  let merged;
+  if (firstOther) {
+    const idx = others.indexOf(firstOther);
+    merged = [...others.slice(0, idx), ...newCatOrd, ...others.slice(idx)];
+  } else {
+    merged = [...others, ...newCatOrd];
+  }
+
+  await _saveOrder(merged);
+  window._achItems = _applyOrder(window._achItems, merged);
+  closeModal();
+  showNotif('Ordre sauvegardé.', 'success');
+  await _achRebuildJustified(catId);
+};
+
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
 PAGES.achievements = async function() {
@@ -674,9 +653,18 @@ PAGES.achievements = async function() {
     _loadOrder(),
   ]);
   window._achItems = _applyOrder(items, order);
-  const result = await _origPage();
-  ['epique', 'comique', 'histoire'].forEach(catId => setupAchievementsDnd(catId));
-  return result;
+  await _origPage();
+
+  // Justified layout pour la catégorie active
+  const catId  = window._achCat || 'epique';
+  const cat    = ACH_CATS.find(c => c.id === catId);
+  const grid   = document.getElementById(`ach-grid-${catId}`);
+  const catItems = (window._achItems || []).filter(a => (a.categorie || 'epique') === catId);
+
+  if (cat && grid && catItems.length) {
+    await _achRenderJustified(catId, catItems, cat, grid);
+    setupAchievementsDnd(catId);
+  }
 };
 
 // ── EXPORTS ───────────────────────────────────────────────────────────────────

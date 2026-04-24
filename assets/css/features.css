@@ -433,21 +433,71 @@
 }
 .sort-row:hover { background:rgba(255,255,255,0.03); }
 
-/* Achievements */
-.achievement-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:1.5rem; }
-.achievement-card {
-  background:rgba(255,255,255,0.03); border:1px solid var(--border);
-  border-radius:var(--radius-lg); overflow:hidden; transition:all 0.25s;
+/* ── Justified Gallery (Hauts-Faits) ─────────────────────────────────────── */
+.ach-justified { display:flex; flex-direction:column; gap:10px; }
+.ach-row       { display:flex; gap:10px; }
+
+.ach-item {
+  position:relative; overflow:hidden; border-radius:12px; flex-shrink:0;
+  background:var(--bg-elevated); cursor:zoom-in;
+  transition:transform .2s ease, box-shadow .2s ease;
 }
-.achievement-card:hover { transform:translateY(-3px); box-shadow:0 12px 32px rgba(0,0,0,0.4); border-color:rgba(124,92,255,0.25); }
-.achievement-img {
-  width:100%; height:160px; object-fit:cover;
-  background:rgba(255,255,255,0.03); display:flex; align-items:center; justify-content:center;
-  font-size:4rem;
+.ach-item:hover { transform:scale(1.012); z-index:2; box-shadow:0 10px 44px rgba(0,0,0,.6); }
+.ach-item img   { width:100%; height:100%; object-fit:cover; display:block;
+                  transition:transform .3s ease; }
+.ach-item:hover img { transform:scale(1.04); }
+
+/* Overlay texte */
+.ach-meta {
+  position:absolute; bottom:0; left:0; right:0;
+  padding:52px 12px 11px;
+  background:linear-gradient(transparent, rgba(9,13,20,.94));
+  opacity:0; transition:opacity .2s ease; pointer-events:none;
 }
-.achievement-body { padding:1.2rem; }
-.achievement-title { font-weight:700; font-size:0.95rem; color:var(--text); margin-bottom:0.4rem; }
-.achievement-text { font-size:0.82rem; color:var(--text-muted); line-height:1.5; }
+.ach-item:hover .ach-meta { opacity:1; pointer-events:auto; }
+.ach-meta-title { font-family:'Cinzel',serif; font-size:.82rem; font-weight:600;
+                  color:#fff; line-height:1.3; margin-bottom:3px; }
+.ach-meta-desc  { font-size:.7rem; color:rgba(255,255,255,.72); line-height:1.45;
+                  font-style:italic;
+                  display:-webkit-box; -webkit-line-clamp:3;
+                  -webkit-box-orient:vertical; overflow:hidden; }
+
+/* Badges superposés */
+.ach-badge-cat  {
+  position:absolute; top:8px; left:8px;
+  background:rgba(11,17,24,.82); border-radius:999px; padding:2px 9px;
+  font-size:.62rem; backdrop-filter:blur(4px); pointer-events:none;
+  border:1px solid currentColor;
+}
+.ach-badge-date {
+  position:absolute; top:8px; right:8px;
+  background:rgba(11,17,24,.72); border-radius:6px; padding:2px 7px;
+  font-size:.62rem; color:rgba(255,255,255,.6); pointer-events:none;
+}
+
+/* Contributeurs (dans l'overlay) */
+.ach-contribs       { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+.ach-contrib-pill   { display:flex; align-items:center; gap:3px;
+                      background:rgba(255,255,255,.1); border-radius:999px;
+                      padding:1px 7px 1px 2px; border:1px solid transparent; }
+.ach-contrib-avatar { width:18px; height:18px; border-radius:50%; overflow:hidden;
+                      flex-shrink:0; display:flex; align-items:center; justify-content:center;
+                      font-family:'Cinzel',serif; font-size:.55rem; font-weight:700; }
+.ach-contrib-name   { font-size:.62rem; color:rgba(255,255,255,.88); white-space:nowrap; }
+
+/* Barre admin (dans l'overlay, toujours visible en bas) */
+.ach-admin-btns {
+  display:flex; gap:5px; margin-top:7px; padding-top:7px;
+  border-top:1px solid rgba(255,255,255,.12);
+}
+
+/* Mobile : overlay toujours visible, zoom désactivé */
+@media (max-width:768px) {
+  .ach-meta { opacity:1; }
+  .ach-item:hover { transform:none; }
+  .ach-item:hover img { transform:none; }
+  .ach-badge-cat, .ach-badge-date { display:none; }
+}
 
 /* Collection */
 .collection-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap: 32px; }
