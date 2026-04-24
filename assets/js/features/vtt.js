@@ -10,7 +10,7 @@ import { STATE } from '../core/state.js';
 import { getCurrentAdventureId, getDocData, saveDoc } from '../data/firestore.js';
 import {
   db, doc, collection, addDoc, updateDoc, deleteDoc,
-  setDoc, onSnapshot, serverTimestamp, writeBatch,
+  setDoc, getDocs, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
 import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort } from '../shared/char-stats.js';
 import { getArmorSetData } from './characters/data.js';
@@ -2008,23 +2008,21 @@ function _initListeners() {
     _renderPings(pings);
   }, () => {})); // silencieux si pas de règle Firestore
 
-  // 8. Réactions émotes temps réel (autres joueurs — le local est déjà affiché dans _vttPickEmote)
+  // 8. Réactions émotes temps réel
   _unsubs.push(onSnapshot(_reactionsCol(), snap => {
     const myUid = STATE.user?.uid;
-    snap.docChanges().forEach(ch => {
-      if (ch.type === 'removed') return;
-      if (ch.doc.id === myUid) return; // déjà affiché localement
-      // Ignorer les écritures en attente (hasPendingWrites = true côté autre client n'arrive jamais, mais sécurité)
-      if (ch.doc.metadata?.hasPendingWrites) return;
-      const r = { id: ch.doc.id, ...ch.doc.data() };
-      if (!r.emoteUrl) return; // doc incomplet
-      // Accepter si timestamp absent (compatibilité) ou récent (< 15s)
-      if (r.createdAt && (Date.now() - r.createdAt.toMillis()) > 15000) return;
-      const key = `${r.id}_${r.createdAt?.toMillis?.() ?? r.id}`;
+    const now   = Date.now();
+    snap.docs.forEach(d => {
+      if (d.id === myUid) return; // propre émote, déjà affiché localement
+      const r = { id: d.id, ...d.data() };
+      if (!r.emoteUrl) return;
+      const ts = r.createdAt?.toMillis?.() ?? now;
+      if (now - ts > 12000) return; // ignorer les réactions de plus de 12s
+      const key = `${r.id}_${ts}`;
       _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key);
     });
   }, err => {
-    console.error('[vtt] réactions émotes — accès refusé. Ajouter vttEmoteReactions aux règles Firestore.', err);
+    console.error('[vtt] réactions émotes — erreur listener:', err);
   }));
 
   // 9. Chat / Log de dés
@@ -3059,3 +3057,20 @@ export async function renderVttPage() {
 }
 
 PAGES.vtt=renderVttPage;
+
+// ── Debug émotes (console) ────────────────────────────────────────
+// Tester l'affichage visuel : window._vttDebugEmote('https://url-image.png')
+// Tester la couche Firestore : window._vttDebugFire()
+window._vttDebugEmote = (url) => {
+  const testUrl = url || _emotes[0]?.url || 'https://i.imgur.com/removed.png';
+  console.log('[vtt-emote] test visuel avec', testUrl);
+  _showEmoteBubble(null, testUrl, 'debug', 'dbg_' + Date.now());
+};
+window._vttDebugFire = async () => {
+  console.log('[vtt-emote] collection:', _reactionsCol().path);
+  console.log('[vtt-emote] adventure id:', _aid());
+  console.log('[vtt-emote] emotes chargées:', _emotes.length);
+  console.log('[vtt-emote] réactions déjà vues:', [..._renderedReactions]);
+  const snap = await getDocs(_reactionsCol()).catch(e => { console.error('[vtt-emote] getDocs error:', e); return null; });
+  if (snap) console.log('[vtt-emote] docs Firestore:', snap.docs.map(d => ({ id: d.id, ...d.data() })));
+};
