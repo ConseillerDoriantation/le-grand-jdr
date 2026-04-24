@@ -754,25 +754,48 @@
 }
 .vtt-emote-trigger:hover { background: var(--bg-elevated); }
 
+/* Picker — panel avec barre de recherche + grille */
 .vtt-emote-picker {
-  display: none; flex-wrap: wrap; gap: 4px; align-items: flex-start;
-  padding: .4rem .45rem; border-top: 1px solid var(--border);
-  background: var(--bg-dark); max-height: 130px; overflow-y: auto;
-  scrollbar-width: thin;
+  display: none; flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-dark);
+  max-height: 260px;
 }
 .vtt-emote-picker.open { display: flex; }
 
+.vtt-emote-picker-search {
+  padding: .35rem .4rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.vtt-emote-picker-search input {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: .78rem;
+  padding: .22rem .5rem; outline: none;
+}
+.vtt-emote-picker-search input:focus { border-color: var(--gold); }
+
+.vtt-emote-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 3px; overflow-y: auto; padding: .35rem;
+  scrollbar-width: thin;
+}
 .vtt-emote-item {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: .2rem .3rem; border-radius: 6px; flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: .3rem .2rem; border-radius: 8px;
   background: transparent; border: 1px solid transparent; cursor: pointer;
   transition: background .1s, border-color .1s;
 }
 .vtt-emote-item:hover { background: var(--bg-elevated); border-color: var(--border); }
-.vtt-emote-item img   { width: 28px; height: 28px; object-fit: contain; }
+.vtt-emote-item img   { width: 44px; height: 44px; object-fit: contain; }
 .vtt-emote-item span  {
-  font-size: .5rem; color: var(--text-muted);
-  max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .58rem; color: var(--text-muted);
+  max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: center;
+}
+.vtt-emote-empty-grid {
+  grid-column: 1/-1; text-align: center;
+  font-size: .75rem; color: var(--text-muted); padding: 1rem 0;
 }
 
 .vtt-emote-inline {
@@ -780,14 +803,93 @@
   object-fit: contain; vertical-align: middle; margin: 0 3px;
 }
 
-.vtt-emote-empty { font-size: .72rem; color: var(--text-muted); padding: .1rem .2rem; }
-
-.vtt-emote-manage-item {
-  display: flex; align-items: center; gap: .6rem;
-  padding: .35rem 0; border-bottom: 1px solid var(--border);
+/* ── Console admin — grille de cartes ───────────────────────────── */
+.vtt-emote-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: .55rem;
+  max-height: 360px; overflow-y: auto;
+  padding: .2rem; scrollbar-width: thin;
 }
-.vtt-emote-manage-img  { width: 36px; height: 36px; object-fit: contain; border-radius: 4px; }
-.vtt-emote-manage-name { flex: 1; font-size: .82rem; color: var(--gold); font-family: monospace; }
+.vtt-emote-card {
+  display: flex; flex-direction: column; align-items: center; gap: .3rem;
+  padding: .55rem .4rem .4rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 10px; position: relative; user-select: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.vtt-emote-card:hover  { border-color: var(--gold); box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.vtt-emote-card.sortable-ghost { opacity: .35; }
+.vtt-emote-card.sortable-chosen { box-shadow: 0 0 0 2px var(--gold); }
+.vtt-emote-card img    { width: 60px; height: 60px; object-fit: contain; border-radius: 6px; }
+.vtt-emote-card-name   {
+  font-size: .68rem; color: var(--gold); font-family: monospace;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; text-align: center;
+}
+.vtt-emote-card-drag   {
+  position: absolute; top: 3px; left: 5px;
+  font-size: .85rem; color: var(--text-dim); cursor: grab; opacity: .45;
+  line-height: 1;
+}
+.vtt-emote-card-drag:hover { opacity: 1; }
+.vtt-emote-card-actions { display: flex; gap: .3rem; }
+.vtt-ec-btn {
+  background: transparent; border-radius: 5px; cursor: pointer;
+  padding: .1rem .38rem; font-size: .72rem; transition: background .1s;
+}
+.vtt-ec-edit { border: 1px solid var(--border); color: var(--text-dim); }
+.vtt-ec-edit:hover { background: var(--bg-dark); color: var(--text); }
+.vtt-ec-del  { border: 1px solid #ef4444; color: #ef4444; }
+.vtt-ec-del:hover  { background: rgba(239,68,68,.12); }
+
+/* Panneau d'édition horizontal (sous la grille) */
+.vtt-ec-panel {
+  display: flex; gap: .9rem; align-items: flex-start;
+  padding: .7rem .8rem; border-radius: 10px;
+  background: var(--bg-dark);
+  border: 1.5px solid var(--gold);
+  animation: fadeIn .15s ease;
+}
+.vtt-ec-panel-preview {
+  width: 80px; height: 80px; flex-shrink: 0;
+  object-fit: contain; border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.vtt-ec-panel-fields {
+  flex: 1; display: flex; flex-direction: column; gap: .45rem;
+}
+.vtt-ec-panel-title {
+  font-size: .8rem; font-weight: 700; color: var(--gold);
+  display: flex; align-items: center; gap: .4rem;
+}
+.vtt-ec-panel-row {
+  display: flex; flex-direction: column; gap: .18rem;
+}
+.vtt-ec-panel-row label { font-size: .7rem; color: var(--text-muted); font-weight: 500; }
+.vtt-ec-panel-row input[type=text] {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: .82rem;
+  padding: .28rem .5rem; outline: none; width: 100%; box-sizing: border-box;
+}
+.vtt-ec-panel-row input[type=text]:focus { border-color: var(--gold); }
+.vtt-ec-panel-row input[type=file]  { font-size: .7rem; color: var(--text-muted); }
+.vtt-ec-panel-btns { display: flex; gap: .45rem; margin-top: .1rem; }
+.vtt-ec-save {
+  flex: 1; background: var(--gold); color: #0d0d1a;
+  border: none; border-radius: 6px; font-size: .78rem;
+  font-weight: 700; padding: .3rem .5rem; cursor: pointer;
+}
+.vtt-ec-save:hover { filter: brightness(1.12); }
+.vtt-ec-cancel {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); border-radius: 6px;
+  font-size: .78rem; padding: .3rem .5rem; cursor: pointer;
+}
+.vtt-ec-cancel:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-emote-card.is-editing { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+.vtt-ec-cancel:hover { background: var(--bg-elevated); }
 
 .vtt-log-entry {
   padding: .22rem .35rem; border-radius: 6px;

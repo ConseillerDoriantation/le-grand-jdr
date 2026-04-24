@@ -149,9 +149,10 @@ service cloud.firestore {
         allow read, write: if inAdventure(adventureId);
       }
 
-      // Réactions émotes : 1 doc par joueur (setDoc écrase), tous membres lisent et écrivent
+      // Réactions émotes : 1 doc par joueur (setDoc écrase)
+      // isAdvAdmin inclus car l'admin peut ne pas être dans accessList
       match /vttEmoteReactions/{id} {
-        allow read, write: if inAdventure(adventureId);
+        allow read, write: if inAdventure(adventureId) || isAdvAdmin(adventureId);
       }
     }
   }
