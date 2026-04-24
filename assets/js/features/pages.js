@@ -1157,6 +1157,14 @@ const PAGES = {
             <button class="btn btn-outline" onclick="navigate('tutorial')">📕 Modifier le Tutoriel</button>
           </div>
         </div>
+      </div>
+      <div class="card" style="margin-top:1.2rem">
+        <div class="card-header">⚙️ Réglages du jeu</div>
+        <div style="display:flex;flex-direction:column;gap:0.7rem">
+          <button class="btn btn-outline" onclick="openWeaponFormatsAdmin()">⚔️ Formats d'arme</button>
+          <button class="btn btn-outline" onclick="openCombatStylesAdmin()">🗡️ Styles de combat</button>
+          <button class="btn btn-outline" onclick="window._ouvrirGestionDes ? window._ouvrirGestionDes() : import('./assets/js/features/histoire.js').then(() => window._ouvrirGestionDes?.())">🎲 Compétences de dés</button>
+        </div>
       </div>`;
   },
 

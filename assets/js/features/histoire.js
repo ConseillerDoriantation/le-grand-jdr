@@ -42,15 +42,38 @@ const STAT_COLORS = {
   '': 'var(--text-dim)',
 };
 
+let _diceSkillsCache = null;
+
 function _getDiceSkills() {
+  if (_diceSkillsCache) return _diceSkillsCache;
   try {
     const s = localStorage.getItem('hist_dice_skills');
     if (s) return JSON.parse(s);
   } catch {}
   return DICE_SKILLS_DEFAULT;
 }
-function _saveDiceSkills(skills) {
+
+async function _loadDiceSkills() {
+  try {
+    const doc = await getDocData('world', 'dice_skills');
+    _diceSkillsCache = doc?.skills || null;
+    if (!_diceSkillsCache) {
+      // Pas encore en base : migrer depuis localStorage ou utiliser les défauts
+      try {
+        const s = localStorage.getItem('hist_dice_skills');
+        _diceSkillsCache = s ? JSON.parse(s) : DICE_SKILLS_DEFAULT;
+      } catch { _diceSkillsCache = DICE_SKILLS_DEFAULT; }
+    }
+  } catch {
+    _diceSkillsCache = _getDiceSkills();
+  }
+  return _diceSkillsCache;
+}
+
+async function _saveDiceSkills(skills) {
+  _diceSkillsCache = skills;
   try { localStorage.setItem('hist_dice_skills', JSON.stringify(skills)); } catch {}
+  try { await saveDoc('world', 'dice_skills', { skills }); } catch {}
 }
 
 // ── État du module ────────────────────────────────────────────────────────────
@@ -970,3 +993,6 @@ function _updateWordCount() {
 
 // ── Enregistrement de la page ─────────────────────────────────────────────────
 PAGES.histoire = renderHistoire;
+
+// Préchauffage du cache des compétences dès le chargement du module
+_loadDiceSkills();
