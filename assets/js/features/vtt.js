@@ -2008,20 +2008,24 @@ function _initListeners() {
     _renderPings(pings);
   }, () => {})); // silencieux si pas de règle Firestore
 
-  // 8. Réactions émotes (autres joueurs uniquement — le local est déjà affiché dans _vttPickEmote)
+  // 8. Réactions émotes temps réel (autres joueurs — le local est déjà affiché dans _vttPickEmote)
   _unsubs.push(onSnapshot(_reactionsCol(), snap => {
-    const now = Date.now();
     const myUid = STATE.user?.uid;
     snap.docChanges().forEach(ch => {
       if (ch.type === 'removed') return;
-      if (ch.doc.id === myUid) return; // déjà affiché en local
+      if (ch.doc.id === myUid) return; // déjà affiché localement
+      // Ignorer les écritures en attente (hasPendingWrites = true côté autre client n'arrive jamais, mais sécurité)
+      if (ch.doc.metadata?.hasPendingWrites) return;
       const r = { id: ch.doc.id, ...ch.doc.data() };
-      if (!r.createdAt) return;
-      if ((now - r.createdAt.toMillis()) > 8000) return;
-      const key = `${r.id}_${r.createdAt.toMillis()}`;
+      if (!r.emoteUrl) return; // doc incomplet
+      // Accepter si timestamp absent (compatibilité) ou récent (< 15s)
+      if (r.createdAt && (Date.now() - r.createdAt.toMillis()) > 15000) return;
+      const key = `${r.id}_${r.createdAt?.toMillis?.() ?? r.id}`;
       _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key);
     });
-  }, () => {})); // silencieux si règle Firestore absente
+  }, err => {
+    console.error('[vtt] réactions émotes — accès refusé. Ajouter vttEmoteReactions aux règles Firestore.', err);
+  }));
 
   // 9. Chat / Log de dés
   _unsubs.push(onSnapshot(_logCol(), snap => {
@@ -2182,20 +2186,38 @@ function _applyEmotes(escaped) {
   return escaped;
 }
 
+function _emoteGridHtml(list) {
+  if (!list.length) return '<div class="vtt-emote-empty-grid">Aucune émote trouvée</div>';
+  return list.map(em => {
+    const safe = em.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<button class="vtt-emote-item" onclick="window._vttPickEmote('${safe}')" title=":${_escHtml(em.name)}:">
+      <img src="${em.url}" alt="${_escHtml(em.name)}" loading="lazy">
+      <span>${_escHtml(em.name)}</span>
+    </button>`;
+  }).join('');
+}
+
 function _renderEmotePicker() {
   const el = document.getElementById('vtt-emote-picker');
   if (!el) return;
   if (!_emotes.length) {
-    el.innerHTML = '<span class="vtt-emote-empty">Aucune émote — à configurer dans la Console MJ</span>';
+    el.innerHTML = '<div class="vtt-emote-picker-search"><span class="vtt-emote-empty" style="padding:.5rem;display:block;font-size:.75rem;color:var(--text-muted)">Aucune émote — à configurer dans la Console MJ</span></div>';
     return;
   }
-  el.innerHTML = _emotes.map(em =>
-    `<button class="vtt-emote-item" onclick="window._vttPickEmote('${em.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" title=":${_escHtml(em.name)}:">
-      <img src="${em.url}" alt=":${_escHtml(em.name)}:">
-      <span>${_escHtml(em.name)}</span>
-    </button>`
-  ).join('');
+  el.innerHTML = `
+    <div class="vtt-emote-picker-search">
+      <input type="text" id="vtt-emote-search" placeholder="🔍 Rechercher…" autocomplete="off"
+        oninput="window._vttFilterEmotes(this.value)">
+    </div>
+    <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes)}</div>`;
+  setTimeout(() => document.getElementById('vtt-emote-search')?.focus(), 40);
 }
+
+window._vttFilterEmotes = (q) => {
+  const el = document.getElementById('vtt-emote-grid'); if (!el) return;
+  const filtered = q.trim() ? _emotes.filter(e => e.name.includes(q.trim().toLowerCase())) : _emotes;
+  el.innerHTML = _emoteGridHtml(filtered);
+};
 
 window._vttToggleEmotePicker = () => {
   const el = document.getElementById('vtt-emote-picker');
@@ -2213,7 +2235,7 @@ window._vttPickEmote = async (name) => {
   const localKey = `local_${uid}_${Date.now()}`;
   _showEmoteBubble(null, em.url, name, localKey);
 
-  // Propagation aux autres joueurs via Firestore (silencieux si règle absente)
+  // Propagation aux autres joueurs via Firestore
   let tokenId = _selected;
   if (!tokenId) {
     const own = Object.values(_tokens).find(e => e.data.ownerId === uid);
@@ -2223,75 +2245,171 @@ window._vttPickEmote = async (name) => {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: _activePage?.id ?? null,
     createdAt: serverTimestamp(),
-  }).catch(() => {});
+  }).catch(err => {
+    console.error('[vtt] émote temps réel — écriture refusée. Vérifier la règle vttEmoteReactions dans Firestore.', err);
+  });
 };
 
 window._ouvrirGestionEmotes = async () => {
   await _loadEmotes();
+  const { default: Sortable } = await import('../vendor/sortable.esm.js');
 
-  const _listHtml = (list) => list.length
-    ? list.map((em, i) => `
-        <div class="vtt-emote-manage-item">
-          <img src="${em.url}" class="vtt-emote-manage-img" alt="${_escHtml(em.name)}">
-          <span class="vtt-emote-manage-name">:${_escHtml(em.name)}:</span>
-          <button style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:5px;padding:.1rem .45rem;cursor:pointer;font-size:.75rem" onclick="window._vttDeleteEmote(${i})">✕</button>
-        </div>`).join('')
+  // ── Helper upload ImgBB ──────────────────────────────────────────
+  const _uploadImgbb = async (file) => {
+    const key = _getImgbbKey();
+    if (!key) throw new Error('Clé ImgBB non configurée (bouton 🔑 dans le VTT)');
+    const b64 = await new Promise((res, rej) => {
+      const rd = new FileReader(); rd.onload = () => res(rd.result.split(',')[1]); rd.onerror = rej;
+      rd.readAsDataURL(file);
+    });
+    const fd = new FormData(); fd.append('key', key); fd.append('image', b64);
+    const resp = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body:fd });
+    const json = await resp.json();
+    if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
+    return json.data.url;
+  };
+
+  // ── Rendu de la grille de cartes ─────────────────────────────────
+  const _cardsHtml = (list) => list.length
+    ? `<div id="emote-cards-grid" class="vtt-emote-cards">${
+        list.map((em, i) => `
+          <div class="vtt-emote-card" data-i="${i}">
+            <span class="vtt-emote-card-drag" title="Déplacer">⠿</span>
+            <img src="${em.url}" alt="${_escHtml(em.name)}">
+            <span class="vtt-emote-card-name" title=":${_escHtml(em.name)}:">:${_escHtml(em.name)}:</span>
+            <div class="vtt-emote-card-actions">
+              <button class="vtt-ec-btn vtt-ec-edit" onclick="window._vttEditEmote(${i})" title="Modifier">✏</button>
+              <button class="vtt-ec-btn vtt-ec-del"  onclick="window._vttDeleteEmote(${i})" title="Supprimer">✕</button>
+            </div>
+          </div>`).join('')
+      }</div>`
     : '<div style="color:var(--text-dim);font-size:.8rem;padding:.5rem 0">Aucune émote pour l\'instant.</div>';
 
+  const _inpStyle = 'width:100%;box-sizing:border-box;background:var(--bg-elevated);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:.8rem;padding:.3rem .5rem';
+
   openModal('😄 Gestion des Émotes', `
-    <div style="display:flex;flex-direction:column;gap:.9rem;padding:.3rem 0">
-      <div id="emote-manage-list">${_listHtml(_emotes)}</div>
+    <div style="display:flex;flex-direction:column;gap:.85rem;padding:.3rem 0">
+      <div style="font-size:.72rem;color:var(--text-muted)">Maintenez ⠿ pour réordonner par glisser-déposer. Cliquez ✏ pour modifier.</div>
+      <div id="emote-manage-list">${_cardsHtml(_emotes)}</div>
+      <div id="emote-edit-zone"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
       <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
-      <div class="form-group">
-        <label>Nom (sans espaces, ex: <code>feu</code>, <code>rire</code>)</label>
-        <input type="text" id="emote-add-name" placeholder="nomemote" style="width:100%;box-sizing:border-box;background:var(--bg-elevated);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:.8rem;padding:.3rem .5rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
+        <div class="form-group" style="margin:0">
+          <label style="font-size:.75rem;color:var(--text-muted)">Nom (ex: <code>rire</code>)</label>
+          <input type="text" id="emote-add-name" placeholder="nomemote" style="${_inpStyle}">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label style="font-size:.75rem;color:var(--text-muted)">Image</label>
+          <input type="file" id="emote-add-file" accept="image/*" style="font-size:.78rem;margin-top:.25rem">
+        </div>
       </div>
-      <div class="form-group">
-        <label>Image</label>
-        <input type="file" id="emote-add-file" accept="image/*">
+      <div style="display:flex;align-items:center;gap:.7rem">
+        <button class="btn btn-primary" style="flex:1" onclick="window._vttAddEmote()">➕ Ajouter l'émote</button>
+        <span id="emote-add-status" style="font-size:.78rem;color:var(--text-dim);flex:1;min-height:1rem"></span>
       </div>
-      <button class="btn btn-primary" onclick="window._vttAddEmote()">Ajouter l'émote</button>
-      <div id="emote-add-status" style="font-size:.78rem;color:var(--text-dim);min-height:1rem"></div>
     </div>`);
 
+  // ── SortableJS ───────────────────────────────────────────────────
+  const _initSort = () => {
+    const grid = document.getElementById('emote-cards-grid'); if (!grid) return;
+    new Sortable(grid, {
+      animation: 180, handle: '.vtt-emote-card-drag',
+      ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen',
+      onEnd: async (evt) => {
+        if (evt.oldIndex === evt.newIndex) return;
+        const list = [..._emotes];
+        const [moved] = list.splice(evt.oldIndex, 1);
+        list.splice(evt.newIndex, 0, moved);
+        await _saveEmotes(list);
+        showNotif('Ordre sauvegardé', 'success');
+      },
+    });
+  };
+  _initSort();
+
+  // ── Rafraîchit la grille ─────────────────────────────────────────
+  const _refresh = (clearEdit = true) => {
+    const el = document.getElementById('emote-manage-list'); if (!el) return;
+    el.innerHTML = _cardsHtml(_emotes); _initSort();
+    if (clearEdit) { const ez = document.getElementById('emote-edit-zone'); if (ez) ez.innerHTML = ''; }
+  };
+
+  // ── Supprimer ────────────────────────────────────────────────────
   window._vttDeleteEmote = async (i) => {
+    if (!await confirmModal(`Supprimer :${_emotes[i]?.name}: ?`)) return;
     const list = [..._emotes]; list.splice(i, 1);
-    await _saveEmotes(list);
-    const el = document.getElementById('emote-manage-list');
-    if (el) el.innerHTML = _listHtml(list);
+    await _saveEmotes(list); _refresh();
     showNotif('Émote supprimée', 'success');
   };
 
+  // ── Ouvrir le panneau d'édition (horizontal, sous la grille) ─────
+  window._vttEditEmote = (i) => {
+    const em = _emotes[i]; if (!em) return;
+    // Mettre en évidence la carte sélectionnée
+    document.querySelectorAll('.vtt-emote-card').forEach(c => c.classList.remove('is-editing'));
+    document.querySelector(`.vtt-emote-card[data-i="${i}"]`)?.classList.add('is-editing');
+    // Remplir la zone d'édition
+    const ez = document.getElementById('emote-edit-zone'); if (!ez) return;
+    ez.innerHTML = `
+      <div class="vtt-ec-panel">
+        <img class="vtt-ec-panel-preview" id="ec-preview-${i}" src="${em.url}" alt="${_escHtml(em.name)}">
+        <div class="vtt-ec-panel-fields">
+          <div class="vtt-ec-panel-title">✏ Modifier <span style="font-family:monospace">:${_escHtml(em.name)}:</span></div>
+          <div class="vtt-ec-panel-row">
+            <label>Nouveau nom</label>
+            <input type="text" id="ec-name-${i}" value="${_escHtml(em.name)}" autocomplete="off"
+              onkeydown="if(event.key==='Enter') window._vttSaveEmote(${i})">
+          </div>
+          <div class="vtt-ec-panel-row">
+            <label>Nouvelle image <span style="opacity:.6">(optionnel)</span></label>
+            <input type="file" id="ec-file-${i}" accept="image/*"
+              onchange="const f=this.files?.[0];if(f){const u=URL.createObjectURL(f);document.getElementById('ec-preview-${i}').src=u}">
+          </div>
+          <div class="vtt-ec-panel-btns">
+            <button class="vtt-ec-save"   onclick="window._vttSaveEmote(${i})">✓ Enregistrer</button>
+            <button class="vtt-ec-cancel" onclick="document.getElementById('emote-edit-zone').innerHTML='';document.querySelectorAll('.vtt-emote-card').forEach(c=>c.classList.remove('is-editing'))">✕ Annuler</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById(`ec-name-${i}`)?.focus();
+  };
+
+  // ── Sauvegarder l'édition ────────────────────────────────────────
+  window._vttSaveEmote = async (i) => {
+    const nameEl = document.getElementById(`ec-name-${i}`);
+    const fileEl = document.getElementById(`ec-file-${i}`);
+    const newName = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
+    if (!newName) { showNotif('Nom requis', 'error'); return; }
+    const list = [..._emotes];
+    const em = { ...list[i], name: newName };
+    if (fileEl?.files?.[0]) {
+      showNotif('Upload en cours…', 'info');
+      try { em.url = await _uploadImgbb(fileEl.files[0]); }
+      catch(e) { showNotif('⚠ ' + e.message, 'error'); return; }
+    }
+    list[i] = em;
+    await _saveEmotes(list); _refresh();
+    showNotif(`✓ :${newName}: mis à jour`, 'success');
+  };
+
+  // ── Ajouter ──────────────────────────────────────────────────────
   window._vttAddEmote = async () => {
     const nameEl   = document.getElementById('emote-add-name');
     const fileEl   = document.getElementById('emote-add-file');
     const statusEl = document.getElementById('emote-add-status');
     const name = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
     const file = fileEl?.files?.[0];
-    if (!name)   { if (statusEl) statusEl.textContent = '⚠ Nom requis'; return; }
-    if (!file)   { if (statusEl) statusEl.textContent = '⚠ Image requise'; return; }
-    const key = _getImgbbKey();
-    if (!key) { if (statusEl) statusEl.textContent = '⚠ Configure la clé ImgBB d\'abord (bouton 🔑 dans le VTT)'; return; }
-    if (statusEl) statusEl.textContent = 'Upload en cours…';
+    if (!name) { if (statusEl) statusEl.textContent = '⚠ Nom requis'; return; }
+    if (!file) { if (statusEl) statusEl.textContent = '⚠ Image requise'; return; }
+    if (statusEl) statusEl.textContent = '⏳ Upload…';
     try {
-      const b64 = await new Promise((res, rej) => {
-        const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file);
-      });
-      const form = new FormData(); form.append('key', key); form.append('image', b64);
-      const resp = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
-      const json = await resp.json();
-      if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
-      const list = [..._emotes, { id: Date.now().toString(), name, url: json.data.url }];
-      await _saveEmotes(list);
+      const url = await _uploadImgbb(file);
+      await _saveEmotes([..._emotes, { id: Date.now().toString(), name, url }]);
       if (statusEl) statusEl.textContent = `✓ :${name}: ajoutée !`;
-      if (nameEl) nameEl.value = '';
-      if (fileEl) fileEl.value = '';
-      const listEl = document.getElementById('emote-manage-list');
-      if (listEl) listEl.innerHTML = _listHtml(list);
-    } catch(e) {
-      if (statusEl) statusEl.textContent = '⚠ ' + e.message;
-    }
+      if (nameEl) nameEl.value = ''; if (fileEl) fileEl.value = '';
+      _refresh();
+    } catch(e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; }
   };
 };
 
