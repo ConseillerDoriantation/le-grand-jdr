@@ -6,31 +6,7 @@ import PAGES from './pages.js';
 import { _esc } from '../shared/html.js';
 import { calcOr, getMod } from '../shared/char-stats.js';
 
-// ══════════════════════════════════════════════════════════════════════════════
-// AMÉLIORATIONS STATIQUES (préchargées par défaut)
-// Les améliorations custom sont dans data.ameliorationsCustom[]
-// ══════════════════════════════════════════════════════════════════════════════
-
-export const BASTION_AMELIORATIONS_DEFAULT = [
-  { id:'cuisine',    nom:'Cuisine',              emoji:'🍳', cout:500,
-    description:'Cuisiner avant mission sans marmite ni pierre de feu.',
-    detail:'Permet de préparer des repas avant mission. Les bonus alimentaires s\'appliquent normalement.' },
-  { id:'alchimie',   nom:"Atelier d'Alchimie",   emoji:'⚗️', cout:500,
-    description:'Préparer des potions avant mission sans alambic ni feu.',
-    detail:'Permet de préparer des potions avant mission. Aucun alambic requis.' },
-  { id:'forge',      nom:'Forge',                emoji:'⚒️', cout:500,
-    description:'Crafter armes physiques et armures lourdes avec recette.',
-    detail:'Permet de fabriquer des armes physiques et armures lourdes, à condition de posséder la recette.' },
-  { id:'confection', nom:'Atelier de Confection', emoji:'🧵', cout:500,
-    description:'Crafter armes à dist., armures légères et intermédiaires.',
-    detail:'Permet de fabriquer des armes à distance physiques, armures légères et intermédiaires.' },
-  { id:'orfevrerie', nom:"Atelier d'Orfèvre",    emoji:'💎', cout:500,
-    description:'Crafter armes magiques et bijoux avec recette connue.',
-    detail:'Permet de fabriquer des armes magiques et bijoux. Recette et matériaux nécessaires.' },
-  { id:'stockage',   nom:'Extension Stockage',   emoji:'📦', cout:200,
-    description:'+10 emplacements de stockage permanent au Bastion.',
-    detail:'Augmente la capacité de stockage de 10 emplacements. Peut être achetée plusieurs fois.' },
-];
+// Toutes les améliorations sont désormais créées entièrement par le MJ (ameliorationsCustom[]).
 
 export const BASTION_EVENTS = [
   { id:'vol',        nom:'Vol',               emoji:'🗡️', description:'Des voleurs ont sévi cette nuit.',
@@ -52,11 +28,8 @@ export const BASTION_EVENTS = [
 // ══════════════════════════════════════════════════════════════════════════════
 
 export function calculerRevenuBastion(data) {
-  const amelios   = data.ameliorations || {};
   const custom    = data.ameliorationsCustom || [];
-  const nbStatiq  = Object.values(amelios).filter(Boolean).length;
-  const nbCustom  = custom.filter(a => (a.fondsActuels||0) >= (a.cout||0) && (a.cout||0) > 0).length;
-  const nbAmelios = nbStatiq + nbCustom;
+  const nbAmelios = custom.filter(a => (a.fondsActuels||0) >= (a.cout||0) && (a.cout||0) > 0).length;
   const base      = 100 + nbAmelios * 100;
   const evtId     = data.evenementCourant || 'calme';
   const evt       = BASTION_EVENTS.find(e => e.id === evtId) || BASTION_EVENTS[2];
@@ -70,8 +43,7 @@ export function getDefaultBastion() {
   return {
     nom:'Le Bastion', niveau:1, tresor:0, defense:0,
     description:'Votre bastion attend sa première description.',
-    ameliorations:{}, ameliorationsCustom:[],
-    ameliorationsFonds:{}, ameliorationsConfig:{},
+    ameliorationsCustom:[],
     evenementCourant:'calme',
     fondateurs:[], historique:[],
     activite:'', pnj:'', salles:[], journal:[],
@@ -110,37 +82,17 @@ async function _setCharOr(char, newOr) {
   }
 }
 
-// Fusionner les améliorations statiques avec les données sauvegardées
+// Toutes les améliorations sont custom (créées par le MJ)
 function _getAllAmeliorations(data) {
-  const amelios  = data.ameliorations || {};
-  const config   = data.ameliorationsConfig || {}; // overrides MJ (coût, nom, desc...)
-  const statiques = BASTION_AMELIORATIONS_DEFAULT.map(a => {
-    const ov   = config[a.id] || {};
-    const cout = ov.cout ?? a.cout;
-    return {
-      ...a,
-      nom:         ov.nom         || a.nom,
-      emoji:       ov.emoji       || a.emoji,
-      description: ov.description || a.description,
-      detail:      ov.detail      || a.detail,
-      cout,
-      type:        'statique',
-      fondsActuels: amelios[a.id] ? cout : (data.ameliorationsFonds?.[a.id] || 0),
-      debloquee:   !!amelios[a.id],
-    };
-  });
-  const custom = (data.ameliorationsCustom || []).map(a => ({
+  return (data.ameliorationsCustom || []).map(a => ({
     ...a, type:'custom',
     debloquee: (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0,
   }));
-  return [...statiques, ...custom];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ÉDITION INFOS GÉNÉRALES
 // ══════════════════════════════════════════════════════════════════════════════
-
-export const BASTION_AMELIORATIONS = BASTION_AMELIORATIONS_DEFAULT;
 
 async function editBastion() {
   const current = (await getDocData('bastion','main')) || getDefaultBastion();
@@ -224,95 +176,36 @@ async function gererAmeliorations() {
       <button class="btn btn-gold btn-sm" onclick="creerAmeliorationCustom()">+ Nouvelle</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:.5rem;max-height:60vh;overflow-y:auto">
-      ${toutes.map(a => {
-        const pct      = a.cout > 0 ? Math.min(100, Math.round((a.fondsActuels||0)/a.cout*100)) : 100;
-        const pctColor = pct>=100?'#22c38e':pct>50?'var(--gold)':'#4f8cff';
-        return `
-        <div style="padding:.7rem .85rem;background:var(--bg-elevated);border:1px solid ${a.debloquee?'rgba(34,195,142,.3)':'var(--border)'};border-radius:12px">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.35rem">
-            <div style="display:flex;align-items:center;gap:.45rem">
-              <span>${a.emoji||'🔧'}</span>
-              <span style="font-family:'Cinzel',serif;font-size:.85rem;color:${a.debloquee?'#22c38e':'var(--text)'}">${a.nom}</span>
-              ${a.type==='custom'?`<span style="font-size:.6rem;background:rgba(79,140,255,.12);color:#7fb0ff;border:1px solid rgba(79,140,255,.2);border-radius:4px;padding:1px 5px">Custom</span>`:''}
+      ${toutes.length === 0
+        ? `<div style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic">Aucune amélioration. Créez-en une avec le bouton ci-dessus.</div>`
+        : toutes.map(a => {
+          const pct      = a.cout > 0 ? Math.min(100, Math.round((a.fondsActuels||0)/a.cout*100)) : 100;
+          const pctColor = pct>=100?'#22c38e':pct>50?'var(--gold)':'#4f8cff';
+          return `
+          <div style="padding:.7rem .85rem;background:var(--bg-elevated);border:1px solid ${a.debloquee?'rgba(34,195,142,.3)':'var(--border)'};border-radius:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.35rem">
+              <div style="display:flex;align-items:center;gap:.45rem">
+                <span>${a.emoji||'🔧'}</span>
+                <span style="font-family:'Cinzel',serif;font-size:.85rem;color:${a.debloquee?'#22c38e':'var(--text)'}">${a.nom}</span>
+              </div>
+              <div style="display:flex;gap:.3rem;flex-shrink:0;align-items:center">
+                <button class="btn-icon" style="font-size:.8rem" onclick="modifierAmeliorationCustom('${a.id}')" title="Modifier">✏️</button>
+                <button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerAmeliorationCustom('${a.id}')">🗑️</button>
+                ${!a.debloquee?`<button class="btn-icon" style="font-size:.75rem;color:var(--gold)" onclick="debloquerManuellement('${a.id}')" title="Débloquer manuellement">✅</button>`:''}
+              </div>
             </div>
-            <div style="display:flex;gap:.3rem;flex-shrink:0;align-items:center">
-              <button class="btn-icon" style="font-size:.8rem" onclick="modifierAmelioration('${a.id}','${a.type||'statique'}')" title="Modifier le coût et les infos">✏️</button>
-              ${a.type==='custom'?`<button class="btn-icon" style="color:#ff6b6b;font-size:.8rem" onclick="supprimerAmeliorationCustom('${a.id}')">🗑️</button>`:''}
-              ${!a.debloquee?`<button class="btn-icon" style="font-size:.75rem;color:var(--gold)" onclick="debloquerManuellement('${a.id}','${a.type||'statique'}')" title="Débloquer manuellement">✅</button>`:''}
-            </div>
-          </div>
-          ${a.description?`<p style="font-size:.74rem;color:var(--text-muted);margin:0 0 .4rem">${a.description}</p>`:''}
-          ${!a.debloquee&&a.cout>0?`
-          <div style="display:flex;align-items:center;gap:.5rem">
-            <div style="flex:1;background:var(--bg-card);border-radius:999px;height:6px;overflow:hidden;border:1px solid var(--border)">
-              <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:999px;transition:width .4s"></div>
-            </div>
-            <span style="font-size:.7rem;color:${pctColor};white-space:nowrap;font-weight:600">${a.fondsActuels||0}/${a.cout} or (${pct}%)</span>
-          </div>`:a.debloquee?`<span style="font-size:.72rem;color:#22c38e">✓ Débloquée</span>`:''}
-        </div>`;
-      }).join('')}
+            ${a.description?`<p style="font-size:.74rem;color:var(--text-muted);margin:0 0 .4rem">${a.description}</p>`:''}
+            ${!a.debloquee&&a.cout>0?`
+            <div style="display:flex;align-items:center;gap:.5rem">
+              <div style="flex:1;background:var(--bg-card);border-radius:999px;height:6px;overflow:hidden;border:1px solid var(--border)">
+                <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:999px;transition:width .4s"></div>
+              </div>
+              <span style="font-size:.7rem;color:${pctColor};white-space:nowrap;font-weight:600">${a.fondsActuels||0}/${a.cout} or (${pct}%)</span>
+            </div>`:a.debloquee?`<span style="font-size:.72rem;color:#22c38e">✓ Débloquée</span>`:''}
+          </div>`;
+        }).join('')}
     </div>
   `);
-}
-
-// Modifier une amélioration (statique ou custom)
-async function modifierAmelioration(id, type) {
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  let a;
-  if (type === 'statique') {
-    const base   = BASTION_AMELIORATIONS_DEFAULT.find(x => x.id === id);
-    if (!base) return;
-    const config = (current.ameliorationsConfig||{})[id] || {};
-    a = { ...base, cout: config.cout ?? base.cout, description: config.description || base.description };
-  } else {
-    a = (current.ameliorationsCustom||[]).find(x => x.id === id);
-    if (!a) return;
-  }
-  openModal(`✏️ Modifier — ${a.nom}`, `
-    <div class="form-group"><label>Nom</label>
-      <input class="input-field" id="ma-nom" value="${a.nom||''}"></div>
-    <div class="form-group"><label>Emoji</label>
-      <input class="input-field" id="ma-emoji" value="${a.emoji||'🔧'}" style="max-width:80px"></div>
-    <div class="form-group">
-      <label>Coût total (or) <span style="font-size:.7rem;color:var(--text-dim)">— montant à atteindre pour débloquer</span></label>
-      <input type="number" class="input-field" id="ma-cout" value="${a.cout||500}" min="1">
-    </div>
-    <div class="form-group"><label>Description courte</label>
-      <input class="input-field" id="ma-desc" value="${a.description||''}"></div>
-    <div class="form-group"><label>Détail complet</label>
-      <textarea class="input-field" id="ma-detail" rows="3">${a.detail||''}</textarea></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
-      onclick="confirmerModifAmelioration('${id}','${type}')">Enregistrer</button>
-  `);
-}
-
-async function confirmerModifAmelioration(id, type) {
-  try {
-    const nom  = document.getElementById('ma-nom')?.value?.trim();
-    if (!nom) { showNotif('Nom requis.','error'); return; }
-    const cout = parseInt(document.getElementById('ma-cout')?.value)||500;
-    const desc = document.getElementById('ma-desc')?.value?.trim()||'';
-    const detail = document.getElementById('ma-detail')?.value?.trim()||'';
-    const emoji = document.getElementById('ma-emoji')?.value?.trim()||'🔧';
-    const current = (await getDocData('bastion','main')) || getDefaultBastion();
-
-    if (type === 'statique') {
-      // Stocker l'override dans ameliorationsConfig
-      const config = { ...(current.ameliorationsConfig||{}), [id]: { nom, cout, description: desc, detail, emoji } };
-      // Si le coût change et que des fonds ont déjà été investis, les conserver
-      await saveDoc('bastion','main', { ...current, ameliorationsConfig: config });
-    } else {
-      const customs = (current.ameliorationsCustom||[]).map(a =>
-        a.id === id ? { ...a, nom, cout, description: desc, detail, emoji } : a);
-      await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
-    }
-    closeModalDirect();
-    showNotif('Amélioration mise à jour.','success');
-    await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
 }
 
 // Créer une amélioration custom
@@ -382,18 +275,12 @@ async function supprimerAmeliorationCustom(id) {
 }
 
 // Débloquer manuellement (MJ) sans retirer du trésor
-async function debloquerManuellement(id, type) {
+async function debloquerManuellement(id) {
   try {
     if (!await confirmModal('Débloquer manuellement cette amélioration ?')) return;
     const current = (await getDocData('bastion','main')) || getDefaultBastion();
-    if (type === 'statique') {
-      const amelios = { ...(current.ameliorations||{}), [id]:true };
-      const nb = Object.values(amelios).filter(Boolean).length + (current.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length;
-      await saveDoc('bastion','main', { ...current, ameliorations:amelios, niveau:1+nb });
-    } else {
-      const customs = (current.ameliorationsCustom||[]).map(a => a.id===id ? { ...a, fondsActuels: a.cout||0 } : a);
-      await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
-    }
+    const customs = (current.ameliorationsCustom||[]).map(a => a.id===id ? { ...a, fondsActuels: a.cout||0 } : a);
+    await saveDoc('bastion','main', { ...current, ameliorationsCustom: customs });
     closeModalDirect();
     showNotif('Amélioration débloquée.','success');
     await PAGES.bastion();
@@ -486,19 +373,8 @@ async function confirmerInvestissementAmelioration(amelioId, amelioType) {
     const estDebloque   = nouveauxFonds >= (amelio.cout||1);
 
     let toSave = { ...fresh };
-    if (amelioType === 'statique') {
-      const fonds = { ...(fresh.ameliorationsFonds||{}), [amelioId]: nouveauxFonds };
-      toSave.ameliorationsFonds = fonds;
-      if (estDebloque) {
-        toSave.ameliorations = { ...(fresh.ameliorations||{}), [amelioId]:true };
-        const nb = Object.values(toSave.ameliorations).filter(Boolean).length +
-                   (fresh.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length;
-        toSave.niveau = 1 + nb;
-      }
-    } else {
-      toSave.ameliorationsCustom = (fresh.ameliorationsCustom||[]).map(a =>
-        a.id === amelioId ? { ...a, fondsActuels: nouveauxFonds } : a);
-    }
+    toSave.ameliorationsCustom = (fresh.ameliorationsCustom||[]).map(a =>
+      a.id === amelioId ? { ...a, fondsActuels: nouveauxFonds } : a);
 
     await saveDoc('bastion','main', toSave);
     closeModalDirect();
@@ -513,23 +389,6 @@ async function confirmerInvestissementAmelioration(amelioId, amelioType) {
     console.error('[save]', e);
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
-}
-
-// Rétrocompat — débloquer depuis le trésor directement (ancien flow)
-async function debloquerAmelioration(id) {
-  const current = (await getDocData('bastion','main')) || getDefaultBastion();
-  const amelio  = BASTION_AMELIORATIONS_DEFAULT.find(a => a.id === id);
-  if (!amelio) return;
-  const fondsActuels = current.ameliorationsFonds?.[id] || 0;
-  const restant = amelio.cout - fondsActuels;
-  if ((current.tresor||0) < restant) {
-    showNotif(`Fonds insuffisants — il manque ${restant} or.`,'error'); return;
-  }
-  await investirAmelioration(id, 'statique');
-}
-
-async function confirmDebloquer(id) {
-  await confirmerInvestissementAmelioration(id, 'statique');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1143,16 +1002,15 @@ async function confirmerDepotOrBastion() { window._confirmerOrBastion('deposer',
 async function resetBastion() {
   try {
     const current = (await getDocData('bastion','main')) || getDefaultBastion();
-    const fonds   = current.ameliorationsFonds || {};
     const tresor  = current.tresor || 0;
-    const totalInvesti = Object.values(fonds).reduce((s,v) => s + (parseInt(v)||0), 0) + tresor;
+    const fondsCustom = (current.ameliorationsCustom||[]).reduce((s,a) => s + (parseInt(a.fondsActuels)||0), 0);
 
     const msg = [
       '⚠️ Remettre le Bastion à zéro ?',
       '',
       'Seront effacés : historique, inventaire, améliorations, missions, journal, fondateurs.',
-      totalInvesti > 0 ? `L'or de la cagnotte (${tresor} or) sera perdu.` : '',
-      Object.keys(fonds).length > 0 ? `Les fonds investis dans les améliorations (${totalInvesti} or au total) seront perdus.` : '',
+      tresor > 0 ? `L'or de la cagnotte (${tresor} or) sera perdu.` : '',
+      fondsCustom > 0 ? `Les fonds investis dans les améliorations (${fondsCustom} or) seront perdus.` : '',
       '',
       'Cette action est irréversible.',
     ].filter(Boolean).join('\n');
@@ -1285,15 +1143,12 @@ async function saveBastionLog() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 Object.assign(window, {
-  BASTION_AMELIORATIONS: BASTION_AMELIORATIONS_DEFAULT,
   BASTION_EVENTS, calculerRevenuBastion, getDefaultBastion,
   editBastion, saveBastionInfos, resetBastion,
   gererAmeliorations,
-  modifierAmelioration, confirmerModifAmelioration,
   creerAmeliorationCustom, modifierAmeliorationCustom,
   sauvegarderAmeliorationCustom, supprimerAmeliorationCustom, debloquerManuellement,
   investirAmelioration, confirmerInvestissementAmelioration,
-  debloquerAmelioration, confirmDebloquer,
   tirerEvenement, investirOrBastion, confirmerInvestissement, supprimerHistorique,
   ouvrirInventaireBastion, ajouterDepuisInventaire,
   confirmerDepotDepuisInventaire,

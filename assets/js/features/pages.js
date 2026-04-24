@@ -9,7 +9,7 @@ import { _esc } from '../shared/html.js';
 import { renderCollectionPage } from '../features/collection.js';
 
 const renderCharSheet   = (...args) => window.renderCharSheet?.(...args);
-const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorations: {}, evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
+const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorationsCustom: [], evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
 const getDefaultTutorial = () => window.getDefaultTutorial?.() || [{ title: 'Introduction', content: 'Le tutoriel sera ajouté ici.' }];
 const getInfoStats       = () => window.getInfoStats?.()       || 'Contenu à venir.';
 const getInfoEquipements = () => window.getInfoEquipements?.() || 'Contenu à venir.';
@@ -59,7 +59,7 @@ const PAGES = {
     const doneMissions  = storyItems.filter(i => i.type === 'mission' && i.statut === 'Terminée').length;
 
     // Bastion
-    const bastionLevel  = bastionDoc ? 1 + Object.values(bastionDoc.ameliorations || {}).filter(Boolean).length : null;
+    const bastionLevel  = bastionDoc ? 1 + (bastionDoc.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length : null;
     const bastionNom    = bastionDoc?.nom || 'Le Bastion';
 
     // ── Carte mini personnage ─────────────────────────────────────────
@@ -543,32 +543,22 @@ const PAGES = {
     const doc  = await getDocData('bastion', 'main');
     const data = doc || getDefaultBastion();
 
-    const AMELIORATIONS = window.BASTION_AMELIORATIONS || [];
     const EVENTS        = window.BASTION_EVENTS || [];
     const calcRevenu    = window.calculerRevenuBastion;
 
-    // Fusionne améliorations statiques + custom avec leur état de financement
+    // Toutes les améliorations sont créées par le MJ (ameliorationsCustom)
     function _getAllAmeliorations(d) {
-      const ams    = d.ameliorations || {};
-      const fonds  = d.ameliorationsFonds || {};
-      const statiq = AMELIORATIONS.map(a => ({
-        ...a, type:'statique',
-        fondsActuels: ams[a.id] ? a.cout : (fonds[a.id] || 0),
-        debloquee: !!ams[a.id],
-      }));
-      const custom = (d.ameliorationsCustom||[]).map(a => ({
+      return (d.ameliorationsCustom||[]).map(a => ({
         ...a, type:'custom',
         debloquee: (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0,
       }));
-      return [...statiq, ...custom];
     }
 
     const { brut, fondateurs: partFondateurs, base, nbAmelios, evt } =
       calcRevenu ? calcRevenu(data)
         : { brut:100, fondateurs:10, base:100, nbAmelios:0, evt:{ id:'calme', nom:'Calme', emoji:'☁️', description:'', badgeClass:'badge-blue', badgeText:'±0', couleur:'neutral', modificateur:1, bonus:0 } };
 
-    const amelios          = data.ameliorations || {};
-    const niveau           = 1 + Object.values(amelios).filter(Boolean).length;
+    const niveau           = 1 + (data.ameliorationsCustom||[]).filter(a => (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0).length;
     const fondateursList   = (data.fondateurs||[]).map(f => typeof f==='object'&&f!==null ? f : { charId:null, nom:String(f) });
     const partParFondateur = fondateursList.length > 0 ? Math.round(partFondateurs / fondateursList.length) : 0;
     const historique       = data.historique || [];
@@ -745,7 +735,7 @@ const PAGES = {
                 <div style="display:flex;align-items:center;gap:.4rem">
                   <span style="font-size:1rem">${a.emoji||'🔧'}</span>
                   <span style="font-family:'Cinzel',serif;font-size:.8rem;color:${a.debloquee?'#22c38e':'var(--text)'};line-height:1.25">${a.nom}</span>
-                  ${a.type==='custom'?'<span style="font-size:.58rem;background:rgba(79,140,255,.12);color:#7fb0ff;border:1px solid rgba(79,140,255,.2);border-radius:4px;padding:1px 4px">Custom</span>':''}
+
                 </div>
                 ${a.debloquee
                   ? `<span style="font-size:.68rem;background:rgba(34,195,142,0.12);color:#22c38e;border:1px solid rgba(34,195,142,.22);border-radius:6px;padding:1px 6px;flex-shrink:0">✓ Active</span>`
@@ -763,7 +753,7 @@ const PAGES = {
                 </div>
               </div>
               <button class="btn btn-outline btn-sm" style="font-size:.72rem;margin-top:.1rem"
-                onclick="investirAmelioration('${a.id}','${a.type||'statique'}')">
+                onclick="investirAmelioration('${a.id}','custom')">
                 💰 Contribuer
               </button>` : a.debloquee ? `<div style="height:2px;background:rgba(34,195,142,.25);border-radius:1px;margin-top:auto"></div>` : ''}
             </div>`;
