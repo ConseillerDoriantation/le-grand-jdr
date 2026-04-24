@@ -2010,15 +2010,15 @@ function _initListeners() {
 
   // 8. Réactions émotes temps réel
   _unsubs.push(onSnapshot(_reactionsCol(), snap => {
-    const myUid = STATE.user?.uid;
-    const now   = Date.now();
+    const now = Date.now();
     snap.docs.forEach(d => {
-      if (d.id === myUid) return; // propre émote, déjà affiché localement
       const r = { id: d.id, ...d.data() };
       if (!r.emoteUrl) return;
-      const ts = r.createdAt?.toMillis?.() ?? now;
+      // createdAt stocké comme nombre (ms) — pas de serverTimestamp
+      const ts = typeof r.createdAt === 'number' ? r.createdAt : r.createdAt?.toMillis?.() ?? now;
       if (now - ts > 12000) return; // ignorer les réactions de plus de 12s
       const key = `${r.id}_${ts}`;
+      // _renderedReactions.has(key) bloque le double affichage pour l'émetteur
       _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key);
     });
   }, err => {
@@ -2229,9 +2229,12 @@ window._vttPickEmote = async (name) => {
   const em = _emotes.find(e => e.name === name); if (!em) return;
   document.getElementById('vtt-emote-picker')?.classList.remove('open');
 
-  // Affichage local immédiat — indépendant de Firestore
-  const localKey = `local_${uid}_${Date.now()}`;
-  _showEmoteBubble(null, em.url, name, localKey);
+  // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
+  const ts = Date.now();
+  const key = `${uid}_${ts}`;
+
+  // Affichage local immédiat
+  _showEmoteBubble(null, em.url, name, key);
 
   // Propagation aux autres joueurs via Firestore
   let tokenId = _selected;
@@ -2242,9 +2245,9 @@ window._vttPickEmote = async (name) => {
   setDoc(_reactionRef(uid), {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: _activePage?.id ?? null,
-    createdAt: serverTimestamp(),
+    createdAt: ts,           // nombre (ms) — même valeur que la clé locale
   }).catch(err => {
-    console.error('[vtt] émote temps réel — écriture refusée. Vérifier la règle vttEmoteReactions dans Firestore.', err);
+    console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
   });
 };
 
