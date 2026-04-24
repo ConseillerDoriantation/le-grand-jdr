@@ -706,6 +706,51 @@
 }
 .vtt-chat-send:hover { background: oklch(72% 0.14 52 / 0.18); }
 
+/* ── Émotes ─────────────────────────────────────────────────────── */
+.vtt-emote-trigger {
+  width: 28px; height: 28px; flex-shrink: 0;
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 7px; cursor: pointer; font-size: .9rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s;
+}
+.vtt-emote-trigger:hover { background: var(--bg-elevated); }
+
+.vtt-emote-picker {
+  display: none; flex-wrap: wrap; gap: 4px; align-items: flex-start;
+  padding: .4rem .45rem; border-top: 1px solid var(--border);
+  background: var(--bg-dark); max-height: 130px; overflow-y: auto;
+  scrollbar-width: thin;
+}
+.vtt-emote-picker.open { display: flex; }
+
+.vtt-emote-item {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: .2rem .3rem; border-radius: 6px; flex-shrink: 0;
+  background: transparent; border: 1px solid transparent; cursor: pointer;
+  transition: background .1s, border-color .1s;
+}
+.vtt-emote-item:hover { background: var(--bg-elevated); border-color: var(--border); }
+.vtt-emote-item img   { width: 28px; height: 28px; object-fit: contain; }
+.vtt-emote-item span  {
+  font-size: .5rem; color: var(--text-muted);
+  max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.vtt-emote-inline {
+  display: inline-block; width: 64px; height: 64px;
+  object-fit: contain; vertical-align: middle; margin: 0 3px;
+}
+
+.vtt-emote-empty { font-size: .72rem; color: var(--text-muted); padding: .1rem .2rem; }
+
+.vtt-emote-manage-item {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .35rem 0; border-bottom: 1px solid var(--border);
+}
+.vtt-emote-manage-img  { width: 36px; height: 36px; object-fit: contain; border-radius: 4px; }
+.vtt-emote-manage-name { flex: 1; font-size: .82rem; color: var(--gold); font-family: monospace; }
+
 .vtt-log-entry {
   padding: .22rem .35rem; border-radius: 6px;
   font-size: .72rem; line-height: 1.4; word-break: break-word;

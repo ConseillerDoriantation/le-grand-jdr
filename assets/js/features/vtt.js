@@ -7,7 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
-import { getCurrentAdventureId } from '../data/firestore.js';
+import { getCurrentAdventureId, getDocData, saveDoc } from '../data/firestore.js';
 import {
   db, doc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
@@ -44,6 +44,7 @@ let _imgTr      = null;      // Transformer pour images BG (sous tokens)
 let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens)
 let _selImg     = null;      // id de l'image sélectionnée
 let _mapMode    = false;     // true = édition carte activée (images déplaçables)
+let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
 
 // ── Refs Firestore ──────────────────────────────────────────────────
 const _aid     = ()   => getCurrentAdventureId();
@@ -1867,6 +1868,132 @@ function _escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Émotes ──────────────────────────────────────────────────────────
+async function _loadEmotes() {
+  try {
+    const data = await getDocData('world', 'vtt_emotes');
+    _emotes = data?.emotes || [];
+  } catch { _emotes = []; }
+}
+
+async function _saveEmotes(list) {
+  _emotes = list;
+  try { await saveDoc('world', 'vtt_emotes', { emotes: list }); }
+  catch(e) { showNotif('Erreur sauvegarde émotes : ' + e.message, 'error'); }
+}
+
+// Convertit les balises :nom: en <img> dans un texte déjà échappé
+function _applyEmotes(escaped) {
+  for (const em of _emotes) {
+    const key = `:${_escHtml(em.name)}:`;
+    const img = `<img class="vtt-emote-inline" src="${em.url}" alt="${key}" title="${key}">`;
+    escaped = escaped.split(key).join(img);
+  }
+  return escaped;
+}
+
+function _renderEmotePicker() {
+  const el = document.getElementById('vtt-emote-picker');
+  if (!el) return;
+  if (!_emotes.length) {
+    el.innerHTML = '<span class="vtt-emote-empty">Aucune émote — à configurer dans la Console MJ</span>';
+    return;
+  }
+  el.innerHTML = _emotes.map(em =>
+    `<button class="vtt-emote-item" onclick="window._vttPickEmote('${em.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" title=":${_escHtml(em.name)}:">
+      <img src="${em.url}" alt=":${_escHtml(em.name)}:">
+      <span>${_escHtml(em.name)}</span>
+    </button>`
+  ).join('');
+}
+
+window._vttToggleEmotePicker = () => {
+  const el = document.getElementById('vtt-emote-picker');
+  if (!el) return;
+  const open = el.classList.toggle('open');
+  if (open) _renderEmotePicker();
+};
+
+window._vttPickEmote = (name) => {
+  const input = document.getElementById('vtt-chat-input');
+  if (!input) return;
+  const tag = `:${name}: `;
+  const pos = input.selectionStart ?? input.value.length;
+  input.value = input.value.slice(0, pos) + tag + input.value.slice(pos);
+  input.selectionStart = input.selectionEnd = pos + tag.length;
+  input.focus();
+  document.getElementById('vtt-emote-picker')?.classList.remove('open');
+};
+
+window._ouvrirGestionEmotes = async () => {
+  await _loadEmotes();
+
+  const _listHtml = (list) => list.length
+    ? list.map((em, i) => `
+        <div class="vtt-emote-manage-item">
+          <img src="${em.url}" class="vtt-emote-manage-img" alt="${_escHtml(em.name)}">
+          <span class="vtt-emote-manage-name">:${_escHtml(em.name)}:</span>
+          <button style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:5px;padding:.1rem .45rem;cursor:pointer;font-size:.75rem" onclick="window._vttDeleteEmote(${i})">✕</button>
+        </div>`).join('')
+    : '<div style="color:var(--text-dim);font-size:.8rem;padding:.5rem 0">Aucune émote pour l\'instant.</div>';
+
+  openModal('😄 Gestion des Émotes', `
+    <div style="display:flex;flex-direction:column;gap:.9rem;padding:.3rem 0">
+      <div id="emote-manage-list">${_listHtml(_emotes)}</div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
+      <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
+      <div class="form-group">
+        <label>Nom (sans espaces, ex: <code>feu</code>, <code>rire</code>)</label>
+        <input type="text" id="emote-add-name" placeholder="nomemote" style="width:100%;box-sizing:border-box;background:var(--bg-elevated);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:.8rem;padding:.3rem .5rem">
+      </div>
+      <div class="form-group">
+        <label>Image</label>
+        <input type="file" id="emote-add-file" accept="image/*">
+      </div>
+      <button class="btn btn-primary" onclick="window._vttAddEmote()">Ajouter l'émote</button>
+      <div id="emote-add-status" style="font-size:.78rem;color:var(--text-dim);min-height:1rem"></div>
+    </div>`);
+
+  window._vttDeleteEmote = async (i) => {
+    const list = [..._emotes]; list.splice(i, 1);
+    await _saveEmotes(list);
+    const el = document.getElementById('emote-manage-list');
+    if (el) el.innerHTML = _listHtml(list);
+    showNotif('Émote supprimée', 'success');
+  };
+
+  window._vttAddEmote = async () => {
+    const nameEl   = document.getElementById('emote-add-name');
+    const fileEl   = document.getElementById('emote-add-file');
+    const statusEl = document.getElementById('emote-add-status');
+    const name = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
+    const file = fileEl?.files?.[0];
+    if (!name)   { if (statusEl) statusEl.textContent = '⚠ Nom requis'; return; }
+    if (!file)   { if (statusEl) statusEl.textContent = '⚠ Image requise'; return; }
+    const key = _getImgbbKey();
+    if (!key) { if (statusEl) statusEl.textContent = '⚠ Configure la clé ImgBB d\'abord (bouton 🔑 dans le VTT)'; return; }
+    if (statusEl) statusEl.textContent = 'Upload en cours…';
+    try {
+      const b64 = await new Promise((res, rej) => {
+        const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file);
+      });
+      const form = new FormData(); form.append('key', key); form.append('image', b64);
+      const resp = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
+      const json = await resp.json();
+      if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
+      const list = [..._emotes, { id: Date.now().toString(), name, url: json.data.url }];
+      await _saveEmotes(list);
+      if (statusEl) statusEl.textContent = `✓ :${name}: ajoutée !`;
+      if (nameEl) nameEl.value = '';
+      if (fileEl) fileEl.value = '';
+      const listEl = document.getElementById('emote-manage-list');
+      if (listEl) listEl.innerHTML = _listHtml(list);
+    } catch(e) {
+      if (statusEl) statusEl.textContent = '⚠ ' + e.message;
+    }
+  };
+};
+
 function _renderChatLog(msgs) {
   const el=document.getElementById('vtt-chat-log'); if (!el) return;
   const myUid=STATE.user?.uid;
@@ -2007,7 +2134,7 @@ function _renderChatLog(msgs) {
         +(m.text?`<span class="vtt-log-desc">${_escHtml(m.text)}</span>`:'')
         +`</div>`;
     }
-    return `<div class="vtt-log-entry vtt-log-msg">${who} ${_escHtml(m.text||'')}</div>`;
+    return `<div class="vtt-log-entry vtt-log-msg">${who} ${_applyEmotes(_escHtml(m.text||''))}</div>`;
   }).join('');
   el.scrollTop=el.scrollHeight;
 }
@@ -2441,8 +2568,11 @@ function _buildHtml() {
       <div class="vtt-chat">
         <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
         <div class="vtt-chat-log" id="vtt-chat-log"></div>
+        <div class="vtt-emote-picker" id="vtt-emote-picker"></div>
         <div class="vtt-chat-input-row">
+          <button class="vtt-emote-trigger" onclick="window._vttToggleEmotePicker()" title="Émotes">😄</button>
           <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
             onkeydown="if(event.key==='Enter')window._vttSendChat()">
           <button class="vtt-chat-send" onclick="window._vttSendChat()" title="Envoyer">↵</button>
         </div>
@@ -2475,6 +2605,7 @@ export async function renderVttPage() {
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
   });
+  _loadEmotes(); // non bloquant — les émotes arrivent avant le premier message
   _initListeners();
 }
 
