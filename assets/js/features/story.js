@@ -65,10 +65,13 @@ function _renderGroupPills(groups) {
   const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   const chars  = STATE.characters || [];
   return groups.map(g => {
-    const membres = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
+    const membres   = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
+    const reussite  = g.reussite != null ? g.reussite : '';
+    const recompense = g.recompense || '';
+    const notes     = g.notesReussite || '';
     return `<div style="display:inline-flex;flex-direction:column;gap:.3rem;
       padding:.45rem .55rem;border-radius:10px;vertical-align:top;
-      border:1px solid var(--border-strong);background:var(--bg-elevated)">
+      border:1px solid var(--border-strong);background:var(--bg-elevated);min-width:160px">
       <div style="display:flex;align-items:center;gap:.35rem">
         <button type="button" onclick="window._stApplyGroup(${JSON.stringify(g.membres)})"
           title="Appliquer ce groupe aux participants"
@@ -93,6 +96,24 @@ function _renderGroupPills(groups) {
           </div>`;
         }).join('')}
       </div>` : ''}
+      <div style="border-top:1px solid var(--border);padding-top:.3rem;display:flex;flex-direction:column;gap:.25rem">
+        <div style="display:flex;gap:.35rem;align-items:center">
+          <span style="font-size:.65rem;color:var(--text-dim);white-space:nowrap">Réussite</span>
+          <input type="number" min="0" max="100" value="${reussite}" placeholder="—"
+            style="width:44px;padding:.1rem .25rem;font-size:.7rem;border-radius:4px;
+              border:1px solid var(--border);background:var(--bg-panel);color:var(--text)"
+            oninput="window._stGroupField('${g.id}','reussite',+this.value||0)">
+          <span style="font-size:.65rem;color:var(--text-dim)">%</span>
+        </div>
+        <input type="text" value="${_esc(recompense)}" placeholder="Récompense…"
+          style="width:100%;box-sizing:border-box;padding:.1rem .25rem;font-size:.7rem;border-radius:4px;
+            border:1px solid var(--border);background:var(--bg-panel);color:var(--text)"
+          oninput="window._stGroupField('${g.id}','recompense',this.value)">
+        <textarea placeholder="Notes de réussite…" rows="2"
+          style="width:100%;box-sizing:border-box;padding:.15rem .3rem;font-size:.67rem;border-radius:4px;
+            border:1px solid var(--border);background:var(--bg-panel);color:var(--text);resize:vertical"
+          oninput="window._stGroupField('${g.id}','notesReussite',this.value)">${notes}</textarea>
+      </div>
     </div>`;
   }).join('');
 }
@@ -131,6 +152,7 @@ async function renderStory() {
 
   const acteItems = items
     .filter(i => (i.acte || 'Acte I') === activeActe)
+    .filter(i => STATE.isAdmin || i.visibleJoueurs !== false)
     .sort((a,b) => (a.ordre||0)-(b.ordre||0) || (a.date||'').localeCompare(b.date||''));
 
   acteItems.forEach(i => { if(i.axe) axeColor(i.axe); });
@@ -448,6 +470,9 @@ function _renderTimeline(items) {
             ${hasLiens ? `<div style="position:absolute;top:5px;left:5px;background:rgba(11,17,24,.85);
               border:1px solid rgba(232,184,75,.4);border-radius:999px;padding:1px 6px;
               font-size:.6rem;color:var(--gold)">↝ ${item.liens.length}</div>` : ''}
+            ${STATE.isAdmin && item.visibleJoueurs === false ? `<div style="position:absolute;bottom:26px;left:5px;background:rgba(11,17,24,.85);
+              border:1px solid rgba(255,107,107,.3);border-radius:999px;padding:1px 6px;
+              font-size:.6rem;color:#ff6b6b">🔒</div>` : ''}
             <div style="position:absolute;bottom:0;left:0;right:0;height:2px;background:${color};opacity:.8"></div>
           </div>
           <div style="padding:.5rem .6rem">
@@ -480,9 +505,8 @@ function _renderTimeline(items) {
 async function openStoryDetail(id) {
   const items=await loadCollection('story');
   const item=items.find(i=>i.id===id); if(!item) return;
-  const st=stCfg(item), reussite=parseInt(item.reussite)||0;
+  const st=stCfg(item);
   const participants=item.participants||[];
-  const barColor=reussite>=80?'#22c38e':reussite>=40?'#e8b84b':'#ff6b6b';
   const liensItems=(item.liens||[]).map(lid=>items.find(i=>i.id===lid)).filter(Boolean);
 
   openModal('',`
@@ -534,22 +558,6 @@ async function openStoryDetail(id) {
         </div>
       </div>`:''}
 
-      ${item.type==='mission'&&reussite>0?`
-      <div style="flex:1;min-width:150px">
-        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.5rem">Réussite</div>
-        <div style="background:var(--bg-elevated);border-radius:999px;height:10px;overflow:hidden;margin-bottom:.4rem">
-          <div style="width:${reussite}%;height:100%;background:${barColor};border-radius:999px"></div>
-        </div>
-        <div style="font-family:'Cinzel',serif;font-size:.9rem;color:${barColor}">${reussite} %</div>
-        ${item.notesReussite?`<div style="font-size:.75rem;color:var(--text-muted);margin-top:.4rem;line-height:1.5">
-          ${item.notesReussite.split('\n').map(l=>`<div>• ${l}</div>`).join('')}</div>`:''}
-      </div>`:''}
-
-      ${item.recompense?`
-      <div style="flex:1;min-width:110px">
-        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.5rem">Récompense</div>
-        <div style="font-size:.83rem;color:var(--gold)">${item.recompense}</div>
-      </div>`:''}
     </div>
 
     ${(item.groupes||[]).length?`
@@ -559,27 +567,41 @@ async function openStoryDetail(id) {
         ${(item.groupes||[]).map(g => {
           const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
           const chars = STATE.characters || [];
-          const membres = g.membres.map(id => chars.find(c => c.id === id)).filter(Boolean);
-          return `<div>
-            <div style="font-family:'Cinzel',serif;font-size:.72rem;color:var(--text-muted);
-              margin-bottom:.4rem;letter-spacing:.5px">${g.nom}</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">
+          const membres = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
+          const gr = parseInt(g.reussite)||0;
+          const gBar = gr>=80?'#22c38e':gr>=40?'#e8b84b':'#ff6b6b';
+          return `<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:.6rem .75rem">
+            <div style="font-family:'Cinzel',serif;font-size:.72rem;color:var(--gold);
+              margin-bottom:.45rem;letter-spacing:.5px">${g.nom}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px${gr>0||g.recompense||g.notesReussite?';margin-bottom:.6rem':''}">
               ${membres.length ? membres.map(c => {
                 const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
                 const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
                 return `<div title="${c.nom||''}" style="display:flex;flex-direction:column;align-items:center;gap:3px">
-                  <div style="width:40px;height:40px;border-radius:50%;overflow:hidden;
+                  <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;
                     border:2px solid ${col};background:${col}18;
                     display:flex;align-items:center;justify-content:center;flex-shrink:0">
                     ${c.photo
                       ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-                      : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.85rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
+                      : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.78rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
                   </div>
-                  <span style="font-size:.58rem;color:var(--text-dim);max-width:42px;
+                  <span style="font-size:.56rem;color:var(--text-dim);max-width:38px;
                     text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nom||''}</span>
                 </div>`;
               }).join('') : `<span style="font-size:.73rem;color:var(--text-dim);font-style:italic">Aucun membre trouvé.</span>`}
             </div>
+            ${gr>0?`<div style="margin-bottom:.35rem">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.2rem">
+                <span style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Réussite</span>
+                <span style="font-family:'Cinzel',serif;font-size:.78rem;color:${gBar}">${gr} %</span>
+              </div>
+              <div style="background:var(--bg-panel);border-radius:999px;height:6px;overflow:hidden">
+                <div style="width:${gr}%;height:100%;background:${gBar};border-radius:999px"></div>
+              </div>
+              ${g.notesReussite?`<div style="font-size:.7rem;color:var(--text-muted);margin-top:.35rem;line-height:1.5">
+                ${g.notesReussite.split('\n').filter(Boolean).map(l=>`<div>• ${l}</div>`).join('')}</div>`:''}
+            </div>`:''}
+            ${g.recompense?`<div style="font-size:.76rem;color:var(--gold)">🏆 ${g.recompense}</div>`:''}
           </div>`;
         }).join('')}
       </div>
@@ -789,20 +811,13 @@ async function openStoryModal(item = null) {
               `<option ${s===(item?.statut||'En cours')?'selected':''}>${s}</option>`).join('')}
           </select>
         </div>
-        <div class="form-group">
-          <label>Réussite (%)</label>
-          <input type="number" class="input-field" id="st-reussite"
-            min="0" max="100" value="${item?.reussite||''}" placeholder="100">
+        <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.35rem;font-weight:400">
+            <input type="checkbox" id="st-visible" ${item?.visibleJoueurs===false?'':'checked'}
+              style="accent-color:var(--gold);width:14px;height:14px;cursor:pointer">
+            Visible aux joueurs
+          </label>
         </div>
-      </div>
-      <div class="form-group">
-        <label>Notes de réussite (une par ligne)</label>
-        <textarea class="input-field" id="st-notes-reussite" rows="2"
-          placeholder="La mission a été réussie.">${item?.notesReussite||''}</textarea>
-      </div>
-      <div class="form-group">
-        <label>Récompense</label>
-        <input class="input-field" id="st-recompense" value="${item?.recompense||''}" placeholder="500 or">
       </div>
     </div>
 
@@ -862,6 +877,12 @@ async function openStoryModal(item = null) {
       ${item?'Enregistrer':'Créer'}
     </button>
   `);
+
+  // Mise à jour d'un champ de résultat sur un groupe en mémoire
+  window._stGroupField = (groupId, field, value) => {
+    const g = _modalGroupes.find(g => g.id === groupId);
+    if (g) g[field] = value;
+  };
 
   // Toggle participant dans la grille
   window._toggleStParticipant = (charId) => {
@@ -1155,9 +1176,7 @@ async function saveStory(id = '') {
       imageUrl,
       participants,
       statut:        document.getElementById('st-statut')?.value       ||'En cours',
-      reussite:      parseInt(document.getElementById('st-reussite')?.value)||0,
-      notesReussite: document.getElementById('st-notes-reussite')?.value?.trim()||'',
-      recompense:    document.getElementById('st-recompense')?.value?.trim()||'',
+      visibleJoueurs: document.getElementById('st-visible')?.checked !== false,
       liens,
       ordre:         parseInt(document.getElementById('st-ordre')?.value)||0,
       groupes:       _modalGroupes,
