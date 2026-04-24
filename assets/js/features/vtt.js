@@ -45,7 +45,13 @@ let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens
 let _selImg     = null;      // id de l'image sélectionnée
 let _mapMode    = false;     // true = édition carte activée (images déplaçables)
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
+let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skills
+let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 const _renderedPings = new Set(); // ids des pings déjà animés
+
+// Mapping abréviation compétence → clé getMod
+const _STAT_KEY = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
+const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };
 
 // ── Refs Firestore ──────────────────────────────────────────────────
 const _aid     = ()   => getCurrentAdventureId();
@@ -290,24 +296,35 @@ function _initCanvas(container) {
   });
 
   let _pan = false, _po = null;
+  let _pingTimer = null, _pingOrigin = null;
   _stage.on('mousedown', e => {
     if (e.evt.button===1||e.evt.button===2) {
       _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
     }
+    if (e.evt.button===0 && e.target===_stage) {
+      const ptr = _stage.getPointerPosition();
+      _pingOrigin = { ...ptr };
+      _pingTimer = setTimeout(() => {
+        _pingTimer = null;
+        const sc = _stage.scaleX(), sp = _stage.position();
+        _emitPing((_pingOrigin.x - sp.x) / sc, (_pingOrigin.y - sp.y) / sc);
+      }, 300);
+    }
   });
   _stage.on('mousemove', e => {
     if (_pan) _stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y });
-  });
-  _stage.on('mouseup', () => { _pan=false; });
-  _stage.on('contextmenu', e => e.evt.preventDefault());
-  _stage.on('click', e => {
-    if (e.target===_stage) {
-      _deselect();
-      const sc = _stage.scaleX(), sp = _stage.position();
+    if (_pingTimer && _pingOrigin) {
       const ptr = _stage.getPointerPosition();
-      _emitPing((ptr.x - sp.x) / sc, (ptr.y - sp.y) / sc);
+      const dx = ptr.x - _pingOrigin.x, dy = ptr.y - _pingOrigin.y;
+      if (dx*dx + dy*dy > 64) { clearTimeout(_pingTimer); _pingTimer = null; }
     }
   });
+  _stage.on('mouseup', () => {
+    _pan = false;
+    if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
+  });
+  _stage.on('contextmenu', e => e.evt.preventDefault());
+  _stage.on('click', e => { if (e.target===_stage) _deselect(); });
 
   _resizeObs = new ResizeObserver(() => {
     if (!_stage) return;
@@ -1469,51 +1486,76 @@ function _renderInspector(t) {
     ? Object.values(_pages).filter(p=>p.id!==t.pageId)
         .map(p=>`<option value="${p.id}">${p.name}</option>`).join('') : '';
 
+  // ── Helpers rendu stats ──────────────────────────────────────────
+  const _bar = (lbl, cur, max, col, editHtml='') => {
+    const pct = max > 0 ? Math.round(Math.max(0, cur) / max * 100) : 0;
+    const val = editHtml
+      ? editHtml + '<span style="color:var(--text-muted)"> / '+max+'</span>'
+      : '<span>'+cur+' / '+max+'</span>';
+    return '<div class="vtt-ins-bar-row">' +
+      '<span class="vtt-ins-bar-lbl">'+lbl+'</span>' +
+      '<div class="vtt-ins-bar-track"><div class="vtt-ins-bar-fill" style="width:'+pct+'%;background:'+col+'"></div></div>' +
+      '<span class="vtt-ins-bar-val">'+val+'</span>' +
+    '</div>';
+  };
+  const _stat = (icon, lbl, val, full=false) =>
+    '<div class="vtt-ins-stat'+(full?' full':'')+'">'+
+      '<span class="vtt-ins-stat-label">'+icon+' '+lbl+'</span>'+
+      '<span class="vtt-ins-stat-val">'+val+'</span>'+
+    '</div>';
+
   // Précalcul du bloc stats (évite l'imbrication de backticks dans le template)
   let statsHtml;
   if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
-    const track   = _bstTracker[t.beastId] || {};
+    const track    = _bstTracker[t.beastId] || {};
     const pvMax    = track.pvActuel   !== undefined ? parseInt(track.pvActuel)   : null;
     const pvCur    = track.pvCombat   !== undefined ? parseInt(track.pvCombat)   : pvMax;
-    const pvLabel  = pvMax !== null ? (pvCur??pvMax)+'/'+pvMax : '?';
     const pvPct    = pvMax > 0 ? Math.round((pvCur??pvMax) / pvMax * 100) : 0;
     const pvBarCol = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#f59e0b' : '#ef4444';
     const caLabel  = track.caEstimee  !== undefined ? String(track.caEstimee)  : '?';
     const vitLabel = track.vitEstimee !== undefined ? String(track.vitEstimee)+' cases' : '?';
-    const pos      = t.pageId ? 'C'+t.col+' L'+t.row : 'Non placé';
+    const pos      = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
     statsHtml =
-      '<div class="vtt-ins-hp-wrap">' +
-        '<div class="vtt-ins-hp-bar"><div class="vtt-ins-hp-fill" style="width:'+pvPct+'%;background:'+(pvMax!==null?pvBarCol:'#888')+'"></div></div>' +
-        '<span class="vtt-ins-hp-pct" style="color:'+(pvMax!==null?pvBarCol:'var(--text-dim)')+'">'+pvPct+'%</span>' +
+      '<div class="vtt-ins-bars">' +
+        (pvMax !== null
+          ? _bar('PV', pvCur??pvMax, pvMax, pvBarCol)
+          : '<div class="vtt-ins-bar-row"><span class="vtt-ins-bar-lbl">PV</span><span style="color:var(--text-muted);font-size:.75rem;grid-column:2/-1">inconnus</span></div>') +
       '</div>' +
       '<div class="vtt-ins-stats">' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">❤️ PV estimés</span><span class="vtt-ins-val">'+pvLabel+'</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🛡 CA estimée</span><span class="vtt-ins-val">'+caLabel+'</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🏃 Vitesse est.</span><span class="vtt-ins-val">'+vitLabel+'</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">⚔️ Attaque</span><span class="vtt-ins-val">?</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🎯 Portée</span><span class="vtt-ins-val">?</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">📍 Position</span><span class="vtt-ins-val">'+pos+'</span></div>' +
-        '<div style="font-size:.65rem;color:var(--text-dim);font-style:italic;margin-top:.25rem">Valeurs issues de ton bestiaire personnel</div>' +
-      '</div>';
+        _stat('🛡', 'CA est.', caLabel) +
+        _stat('🏃', 'Vitesse', vitLabel) +
+        _stat('⚔️', 'Attaque', '?') +
+        _stat('🎯', 'Portée', '?') +
+        _stat('📍', 'Position', pos, true) +
+      '</div>' +
+      '<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">Valeurs issues de ton bestiaire personnel</div>';
   } else {
-    const pos     = t.pageId ? 'C'+t.col+' L'+t.row : 'Non placé';
-    const pvInput = STATE.isAdmin
+    const pos    = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
+    const pm     = ld.displayPm    ?? null;
+    const pmMax  = ld.displayPmMax ?? null;
+    const pvEditHtml = STATE.isAdmin
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" onchange="window._vttSetHp(\''+t.id+'\',+this.value)">'
-      : hp;
+      : null;
+    const pmEditHtml = (STATE.isAdmin && pm !== null && pmMax !== null)
+      ? '<input class="vtt-ins-input" type="number" value="'+pm+'" min="0" max="'+pmMax+'" onchange="window._vttSetPm(\''+t.id+'\',+this.value)">'
+      : null;
     statsHtml =
-      '<div class="vtt-ins-hp-wrap">' +
-        '<div class="vtt-ins-hp-bar"><div class="vtt-ins-hp-fill" style="width:'+Math.round(rat*100)+'%;background:'+hpColor(rat)+'"></div></div>' +
-        '<span class="vtt-ins-hp-pct" style="color:'+hpColor(rat)+'">'+Math.round(rat*100)+'%</span>' +
+      '<div class="vtt-ins-bars">' +
+        _bar('PV', hp, hpm, hpColor(rat), pvEditHtml) +
+        (pm !== null && pmMax !== null ? _bar('PM', pm, pmMax, '#b47fff', pmEditHtml) : '') +
       '</div>' +
       '<div class="vtt-ins-stats">' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">PV</span><span class="vtt-ins-val">'+pvInput+' / '+hpm+'</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🏃 Mouvement</span><span class="vtt-ins-val">'+(ld.displayMovement??6)+' cases</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">⚔️ Attaque</span><span class="vtt-ins-val">'+(ld.displayAttack??5)+'</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🛡 CA / Défense</span><span class="vtt-ins-val">'+(ld.displayDefense??0)+'</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">🎯 Portée</span><span class="vtt-ins-val">'+(ld.displayRange??1)+' case(s)</span></div>' +
-        '<div class="vtt-ins-stat"><span class="vtt-ins-lbl">📍 Position</span><span class="vtt-ins-val">'+pos+'</span></div>' +
-        (t.movedThisTurn     ? '<div class="vtt-ins-badge">✓ A bougé</div>'                  : '') +
-        (t.attackedThisTurn  ? '<div class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué</div>' : '') +
+        _stat('🏃', 'Mouvement', (ld.displayMovement??6)+' cases') +
+        _stat('⚔️', 'Attaque', ld.displayAttackDice || (ld.displayAttack??5)) +
+        _stat('🛡', 'CA', ld.displayDefense??0) +
+        _stat('🎯', 'Portée', (ld.displayRange??1)+' case(s)') +
+        _stat('📍', 'Position', pos, true) +
+        ((t.movedThisTurn || t.attackedThisTurn)
+          ? '<div class="vtt-ins-stat full" style="gap:.4rem;flex-wrap:wrap">'+
+              (t.movedThisTurn    ? '<span class="vtt-ins-badge">✓ A bougé</span>' : '')+
+              (t.attackedThisTurn ? '<span class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué</span>' : '')+
+            '</div>'
+          : '') +
       '</div>';
   }
 
@@ -1527,6 +1569,28 @@ function _renderInspector(t) {
       </div>
     </div>
     ${statsHtml}
+    ${(t.type==='player'||t.type==='npc') && _diceSkills.length ? (() => {
+      const c = t.characterId ? _characters[t.characterId] : null;
+      const btns = _diceSkills.map(s => {
+        const statKey = _STAT_KEY[s.stat] || '';
+        const mod  = c && statKey ? getMod(c, statKey) : 0;
+        const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
+        const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
+        return `<button class="vtt-skill-btn" onclick="window._vttRollSkill('${s.name.replace(/'/g,"\\'")}','${s.stat}')">
+          <span class="vtt-sk-name">${s.name}</span>
+          <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
+        </button>`;
+      }).join('');
+      return `<div class="vtt-ins-section">
+        <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
+        <div class="vtt-roll-mode-row">
+          <button class="vtt-roll-mode-btn${_rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" onclick="window._vttSetRollMode('disadvantage')" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
+          <button class="vtt-roll-mode-btn${_rollMode==='normal'?' active':''}" data-mode="normal" onclick="window._vttSetRollMode('normal')" title="Jet classique — 1d20">⚪ Normal</button>
+          <button class="vtt-roll-mode-btn${_rollMode==='advantage'?' active':''}" data-mode="advantage" onclick="window._vttSetRollMode('advantage')" title="Avantage — prend le plus haut des 2 dés">⬆ Avantage</button>
+        </div>
+        <div class="vtt-ins-skills">${btns}</div>
+      </div>`;
+    })() : ''}
     ${STATE.isAdmin&&pageOpts?`
       <div class="vtt-ins-section">
         <div class="vtt-ins-section-title">Envoyer le joueur vers</div>
@@ -1959,6 +2023,69 @@ async function _loadEmotes() {
   } catch { _emotes = []; }
 }
 
+const _DICE_SKILLS_DEFAULT = [
+  { name:'Acrobaties',stat:'DEX'},{name:'Arcanes',stat:'INT'},{name:'Athlétisme',stat:'FOR'},
+  {name:'Charisme',stat:'CHA'},{name:'Combat',stat:''},{name:'Constitution',stat:'CON'},
+  {name:'Dextérité',stat:'DEX'},{name:'Discrétion',stat:'DEX'},{name:'Dressage',stat:'SAG'},
+  {name:'Force',stat:'FOR'},{name:'Histoire',stat:'INT'},{name:'Intimidation',stat:'CHA'},
+  {name:'Investigation',stat:'INT'},{name:'Intelligence',stat:'INT'},{name:'Médecine',stat:'SAG'},
+  {name:'Nature',stat:'INT'},{name:'Perception',stat:'SAG'},{name:'Perspicacité',stat:'SAG'},
+  {name:'Persuasion',stat:'CHA'},{name:'Religion',stat:'INT'},{name:'Représentation',stat:'CHA'},
+  {name:'Sagesse',stat:'SAG'},{name:'Survie',stat:'SAG'},{name:'Tromperie',stat:'CHA'},
+];
+// Initialiser immédiatement : localStorage (ordre perso) > défauts
+_diceSkills = (() => {
+  try { const s = localStorage.getItem('hist_dice_skills'); if (s) return JSON.parse(s); } catch {}
+  return [..._DICE_SKILLS_DEFAULT];
+})();
+
+async function _loadDiceSkills() {
+  try {
+    const data = await getDocData('world', 'dice_skills');
+    if (data?.skills?.length) _diceSkills = data.skills;
+  } catch { /* garde le cache local */ }
+  // Re-render l'inspector si un token est déjà sélectionné
+  if (_selected) _renderInspector(_tokens[_selected]?.data ?? null);
+}
+
+window._vttSetRollMode = mode => {
+  _rollMode = mode;
+  // Mettre à jour les boutons visuellement sans re-render complet
+  document.querySelectorAll('.vtt-roll-mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+};
+
+window._vttRollSkill = async (skillName, stat) => {
+  const t = _tokens[_selected]?.data;
+  const c = t?.characterId ? _characters[t.characterId] : null;
+  const statKey = _STAT_KEY[stat] || '';
+  const mod = c && statKey ? getMod(c, statKey) : 0;
+  const d20 = () => Math.floor(Math.random() * 20) + 1;
+
+  let d1 = d20(), d2, roll;
+  if (_rollMode === 'advantage')    { d2 = d20(); roll = Math.max(d1, d2); }
+  else if (_rollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
+  else                              { roll = d1; }
+
+  const total   = roll + mod;
+  const isCrit  = roll === 20, isFumble = roll === 1;
+  const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
+  try {
+    await addDoc(_logCol(), {
+      type: 'roll',
+      authorId: STATE.user?.uid || null,
+      authorName,
+      rollMode: _rollMode,
+      rollDice: d2 !== undefined ? [d1, d2] : [d1],
+      rollRaw: roll, rollMod: mod,
+      rollResult: total,
+      rollSkill: skillName, rollStat: stat,
+      isCrit, isFumble,
+      createdAt: serverTimestamp(),
+    });
+  } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
+};
+
 async function _saveEmotes(list) {
   _emotes = list;
   try { await saveDoc('world', 'vtt_emotes', { emotes: list }); }
@@ -2213,9 +2340,32 @@ function _renderChatLog(msgs) {
       </div>`;
     }
     if (m.type==='roll') {
-      return `<div class="vtt-log-entry vtt-log-roll">${who} 🎲 <em>${_escHtml(m.rollFormula||'')}</em> → <strong>${m.rollResult}</strong>`
-        +(m.text?`<span class="vtt-log-desc">${_escHtml(m.text)}</span>`:'')
-        +`</div>`;
+      const modStr = m.rollMod > 0 ? `+${m.rollMod}` : m.rollMod < 0 ? `${m.rollMod}` : '';
+      const statCol = _STAT_COLOR[m.rollStat] || 'var(--text-dim)';
+      const resultCol = m.isCrit ? '#ffd700' : m.isFumble ? '#ef4444' : 'var(--text)';
+      const badge = m.isCrit
+        ? `<span style="color:#ffd700;font-size:.65rem;font-weight:700;margin-left:.3rem">✨ CRITIQUE</span>`
+        : m.isFumble
+        ? `<span style="color:#ef4444;font-size:.65rem;font-weight:700;margin-left:.3rem">💀 FUMBLE</span>`
+        : '';
+      const modeIcon = m.rollMode==='advantage' ? '⬆' : m.rollMode==='disadvantage' ? '⬇' : '';
+      const diceStr  = m.rollDice?.length === 2
+        ? (() => {
+            const [a, b] = m.rollDice;
+            const kept = m.rollRaw, dropped = a === kept ? b : a;
+            return `[<strong>${kept}</strong>, <span style="color:var(--text-dim);text-decoration:line-through">${dropped}</span>]`;
+          })()
+        : `[${m.rollRaw}]`;
+      const detail = m.rollSkill
+        ? `<div style="display:flex;align-items:baseline;gap:.35rem;margin-top:.2rem;flex-wrap:wrap">
+            ${modeIcon?`<span style="font-size:.65rem;font-weight:700;color:${m.rollMode==='advantage'?'#22c38e':'#ef4444'}">${modeIcon}</span>`:''}
+            <span style="font-size:.68rem;color:${statCol};font-weight:600">${_escHtml(m.rollSkill)}</span>
+            <span style="font-size:.65rem;color:var(--text-dim)">${diceStr}${modStr?` <span style="color:${statCol}">${modStr}</span>`:''}</span>
+            <span style="font-size:.9rem;font-weight:700;color:${resultCol}">= ${m.rollResult}</span>
+            ${badge}
+          </div>`
+        : `<em>${_escHtml(m.rollFormula||'')}</em> → <strong style="color:${resultCol}">${m.rollResult}</strong>${badge}`;
+      return `<div class="vtt-log-entry vtt-log-roll">${who} 🎲 ${detail}</div>`;
     }
     return `<div class="vtt-log-entry vtt-log-msg">${who} ${_applyEmotes(_escHtml(m.text||''))}</div>`;
   }).join('');
@@ -2351,6 +2501,12 @@ window._vttToggleVisible = async id => {
 window._vttSetHp = async (tokenId,hp) => {
   const t=_tokens[tokenId]?.data; if (!t) return;
   await _setHp(t,hp).catch(()=>{});
+};
+window._vttSetPm = async (tokenId,pm) => {
+  const t=_tokens[tokenId]?.data; if (!t) return;
+  const v=Math.max(0,pm);
+  if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
+  else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pm:v}).catch(()=>{});
 };
 window._vttEditToken = id => _openStatsModal(_tokens[id]?.data??null);
 
@@ -2688,7 +2844,8 @@ export async function renderVttPage() {
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
   });
-  _loadEmotes(); // non bloquant — les émotes arrivent avant le premier message
+  _loadEmotes();      // non bloquant
+  _loadDiceSkills();  // non bloquant
   _initListeners();
 }
 
