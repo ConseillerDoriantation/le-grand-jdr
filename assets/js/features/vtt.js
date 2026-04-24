@@ -733,55 +733,59 @@ function _renderPings(pings) {
   }
 }
 
-// ── Réaction émote style stream — grande bulle qui pop depuis le bas ──
+// ── Réaction émote style stream — toujours bas-droite, indépendant du zoom ──
 function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
   if (_renderedReactions.has(key)) return;
   _renderedReactions.add(key);
-  const K = window.Konva; if (!K || !_layers.ping) return;
-  const W = _stage?.width() ?? 600;
-  const H = _stage?.height() ?? 400;
-  const BR = 56; // rayon de la bulle
-  const imgR = BR - 4; // l'image remplit presque toute la bulle (4px de bordure blanche)
-  // Position X : répartie aléatoirement, évite les bords
-  const bx = W * 0.12 + Math.random() * W * 0.76;
-  const by = H - BR - 8;
-  const g = new K.Group({ x: bx, y: by, scaleX: 0.2, scaleY: 0.2, opacity: 0 });
-  // Ombre portée
-  g.add(new K.Circle({ radius: BR + 3, fill: 'rgba(0,0,0,0.3)', y: 5, listening: false }));
-  // Bulle blanche (visible comme bordure autour de l'image)
-  g.add(new K.Circle({ radius: BR, fill: '#ffffff', listening: false }));
-  // Image clippée au cercle via un Group (repère centré correct)
-  const clipGrp = new K.Group({
-    clipFunc: ctx => { ctx.arc(0, 0, imgR, 0, Math.PI * 2, false); },
-    listening: false,
-  });
-  g.add(clipGrp);
-  _layers.ping.add(g);
-  const img = new Image(); img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    clipGrp.add(new K.Image({ image: img,
-      x: -imgR, y: -imgR, width: imgR * 2, height: imgR * 2, listening: false }));
-    _layers.ping.batchDraw();
-  };
-  img.src = emoteUrl;
-  // Pop in : scale 0.2→1.2→1 avec opacité
-  new K.Tween({ node: g, duration: 0.22, opacity: 1, scaleX: 1.2, scaleY: 1.2,
-    easing: K.Easings.EaseOut,
-    onFinish: () => {
-      new K.Tween({ node: g, duration: 0.1, scaleX: 1, scaleY: 1,
-        onFinish: () => {
-          // Reste visible 2s puis de-pop (scale → 0, monte légèrement)
-          setTimeout(() => {
-            new K.Tween({ node: g, duration: 0.35, scaleX: 0.05, scaleY: 0.05,
-              y: by - 30, opacity: 0, easing: K.Easings.EaseIn,
-              onFinish: () => { g.destroy(); _layers.ping?.batchDraw(); }
-            }).play();
-          }, 2000);
-        }
-      }).play();
-    }
-  }).play();
-  _layers.ping.batchDraw();
+
+  // Injecter le CSS une seule fois
+  if (!document.getElementById('vtt-emote-anim-css')) {
+    const s = document.createElement('style');
+    s.id = 'vtt-emote-anim-css';
+    s.textContent = `
+      @keyframes vttEmoteRise {
+        0%   { transform: scale(0.1)  translateY(0px);   opacity: 0; }
+        12%  { transform: scale(1.22) translateY(0px);   opacity: 1; }
+        22%  { transform: scale(1)    translateY(0px);   opacity: 1; }
+        78%  { transform: scale(1)    translateY(-155px);opacity: 1; }
+        100% { transform: scale(0.08) translateY(-180px);opacity: 0; }
+      }
+      .vtt-emote-bubble {
+        position: absolute; bottom: 0; right: 0;
+        width: 104px; height: 104px; border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 6px 22px rgba(0,0,0,0.5);
+        overflow: hidden;
+        animation: vttEmoteRise 3.6s cubic-bezier(.22,.8,.46,1) forwards;
+        pointer-events: none;
+      }
+      .vtt-emote-bubble img {
+        width: 96px; height: 96px;
+        object-fit: cover; border-radius: 50%;
+        position: absolute; top: 4px; left: 4px;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  // Créer ou réutiliser l'overlay (coin bas-droit du canvas, z-index au-dessus de la vignette)
+  const wrap = document.getElementById('vtt-canvas-wrap');
+  if (!wrap) return;
+  let overlay = document.getElementById('vtt-emote-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'vtt-emote-overlay';
+    overlay.style.cssText = 'position:absolute;bottom:18px;right:18px;width:0;height:0;pointer-events:none;z-index:20;overflow:visible';
+    wrap.appendChild(overlay);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = 'vtt-emote-bubble';
+  const img = document.createElement('img');
+  img.src = emoteUrl; img.alt = emoteName;
+  bubble.appendChild(img);
+  overlay.appendChild(bubble);
+  bubble.addEventListener('animationend', () => bubble.remove(), { once: true });
 }
 
 // ── Multi-sélection ─────────────────────────────────────────────
@@ -2004,18 +2008,20 @@ function _initListeners() {
     _renderPings(pings);
   }, () => {})); // silencieux si pas de règle Firestore
 
-  // 8. Réactions émotes
+  // 8. Réactions émotes (autres joueurs uniquement — le local est déjà affiché dans _vttPickEmote)
   _unsubs.push(onSnapshot(_reactionsCol(), snap => {
     const now = Date.now();
-    snap.docs.forEach(d => {
-      const r = { id: d.id, ...d.data() };
+    const myUid = STATE.user?.uid;
+    snap.docChanges().forEach(ch => {
+      if (ch.type === 'removed') return;
+      if (ch.doc.id === myUid) return; // déjà affiché en local
+      const r = { id: ch.doc.id, ...ch.doc.data() };
       if (!r.createdAt) return;
-      if ((now - r.createdAt.toMillis()) > 8000) return; // ignorer les vieilles réactions
-      if (r.pageId && r.pageId !== _activePage?.id) return; // mauvaise page
+      if ((now - r.createdAt.toMillis()) > 8000) return;
       const key = `${r.id}_${r.createdAt.toMillis()}`;
       _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key);
     });
-  }, () => {})); // silencieux si règle absente
+  }, () => {})); // silencieux si règle Firestore absente
 
   // 9. Chat / Log de dés
   _unsubs.push(onSnapshot(_logCol(), snap => {
@@ -2201,18 +2207,23 @@ window._vttToggleEmotePicker = () => {
 window._vttPickEmote = async (name) => {
   const uid = STATE.user?.uid; if (!uid) return;
   const em = _emotes.find(e => e.name === name); if (!em) return;
-  // Trouver le token cible : token sélectionné en priorité, sinon propre token
+  document.getElementById('vtt-emote-picker')?.classList.remove('open');
+
+  // Affichage local immédiat — indépendant de Firestore
+  const localKey = `local_${uid}_${Date.now()}`;
+  _showEmoteBubble(null, em.url, name, localKey);
+
+  // Propagation aux autres joueurs via Firestore (silencieux si règle absente)
   let tokenId = _selected;
   if (!tokenId) {
     const own = Object.values(_tokens).find(e => e.data.ownerId === uid);
     tokenId = own?.data?.id ?? null;
   }
-  await setDoc(_reactionRef(uid), {
+  setDoc(_reactionRef(uid), {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: _activePage?.id ?? null,
     createdAt: serverTimestamp(),
   }).catch(() => {});
-  document.getElementById('vtt-emote-picker')?.classList.remove('open');
 };
 
 window._ouvrirGestionEmotes = async () => {
