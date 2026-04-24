@@ -143,6 +143,11 @@ service cloud.firestore {
       match /vttLog/{id} {
         allow read, write: if inAdventure(adventureId);
       }
+
+      // Pings temps réel : tous les membres lisent et écrivent (1 doc par joueur)
+      match /vttPings/{id} {
+        allow read, write: if inAdventure(adventureId);
+      }
     }
   }
 }

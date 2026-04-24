@@ -45,6 +45,7 @@ let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens
 let _selImg     = null;      // id de l'image sélectionnée
 let _mapMode    = false;     // true = édition carte activée (images déplaçables)
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
+const _renderedPings = new Set(); // ids des pings déjà animés
 
 // ── Refs Firestore ──────────────────────────────────────────────────
 const _aid     = ()   => getCurrentAdventureId();
@@ -61,6 +62,8 @@ const _bstCol        = ()    => collection(db, `adventures/${_aid()}/bestiary`);
 const _bstRef        = (id)  => doc(db, `adventures/${_aid()}/bestiary/${id}`);
 const _bstTrackerRef = (uid) => doc(db, `adventures/${_aid()}/bestiary_tracker/${uid}`);
 const _logCol  = ()   => collection(db, `adventures/${_aid()}/vttLog`);
+const _pingsCol = ()  => collection(db, `adventures/${_aid()}/vttPings`);
+const _pingRef  = uid => doc(db, `adventures/${_aid()}/vttPings/${uid}`);
 
 // ═══════════════════════════════════════════════════════════════════
 // DONNÉES EFFECTIVES — fusion token + entité liée
@@ -239,7 +242,7 @@ function _cleanup() {
   _resizeObs?.disconnect(); _resizeObs = null;
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
-  _moveHL = []; _autoSyncDone = false;
+  _moveHL = []; _autoSyncDone = false; _renderedPings.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
   _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
   _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
@@ -261,7 +264,8 @@ function _initCanvas(container) {
   _layers.grid  = new K.Layer({ listening: true });
   _layers.token = new K.Layer();
   _layers.mapFg = new K.Layer({ listening: false }); // 1er plan, verrouillé par défaut
-  _stage.add(_layers.bg, _layers.map, _layers.grid, _layers.token, _layers.mapFg);
+  _layers.ping  = new K.Layer({ listening: false }); // pings (au-dessus de tout)
+  _stage.add(_layers.bg, _layers.map, _layers.grid, _layers.token, _layers.mapFg, _layers.ping);
 
   // Transformers pour redimensionner les images (MJ uniquement)
   if (STATE.isAdmin) {
@@ -291,10 +295,19 @@ function _initCanvas(container) {
       _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
     }
   });
-  _stage.on('mousemove', e => { if (_pan) _stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y }); });
-  _stage.on('mouseup', () => { _pan = false; });
+  _stage.on('mousemove', e => {
+    if (_pan) _stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y });
+  });
+  _stage.on('mouseup', () => { _pan=false; });
   _stage.on('contextmenu', e => e.evt.preventDefault());
-  _stage.on('click', e => { if (e.target===_stage) _deselect(); });
+  _stage.on('click', e => {
+    if (e.target===_stage) {
+      _deselect();
+      const sc = _stage.scaleX(), sp = _stage.position();
+      const ptr = _stage.getPointerPosition();
+      _emitPing((ptr.x - sp.x) / sc, (ptr.y - sp.y) / sc);
+    }
+  });
 
   _resizeObs = new ResizeObserver(() => {
     if (!_stage) return;
@@ -625,14 +638,73 @@ function _showMoveRange(t) {
     if (c<0||r<0||c>=cols||r>=rows||(!dc&&!dr)) continue;
     const blk=occ.has(`${c},${r}`);
     const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
-      fill:blk?'rgba(239,68,68,0.1)':'rgba(79,140,255,0.14)',
-      stroke:blk?'rgba(239,68,68,0.3)':'rgba(79,140,255,0.3)',strokeWidth:1,listening:!blk });
+      fill:blk?'rgba(239,68,68,0.22)':'rgba(79,140,255,0.28)',
+      stroke:blk?'rgba(239,68,68,0.65)':'rgba(79,140,255,0.70)',strokeWidth:1.5,listening:!blk });
     if (!blk){const tc=c,tr=r;rect.on('click',async e=>{e.cancelBubble=true;if(_selected)await _moveTo(_selected,tc,tr);});}
     _layers.grid.add(rect); _moveHL.push(rect);
   }
   _layers.grid.batchDraw();
 }
 function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; _layers.grid?.batchDraw(); }
+
+// ── Pings ────────────────────────────────────────────────────────────
+async function _emitPing(wx, wy) {
+  const uid = STATE.user?.uid; if (!uid || !_activePage) return;
+  const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
+  const color = '#ffe600'; // jaune néon — visible sur toutes les cartes
+  try {
+    await setDoc(_pingRef(uid), {
+      x: wx, y: wy, pageId: _activePage.id,
+      authorName, color, createdAt: serverTimestamp(),
+    });
+  } catch(e) { console.warn('[vtt] ping:', e); }
+}
+
+function _animatePing({ id, x, y, color }, pingKey) {
+  if (!_layers.ping) return;
+  const K = window.Konva;
+  const g = new K.Group({ x, y, listening: false });
+
+  // Halo blanc central (flash d'impact)
+  const flash = new K.Circle({ radius: 28, fill: 'white', opacity: 0.9,
+    shadowColor: 'white', shadowBlur: 30, shadowOpacity: 1 });
+  // Point coloré persistant
+  const dot   = new K.Circle({ radius: 16, fill: color, opacity: 1,
+    shadowColor: color, shadowBlur: 20, shadowOpacity: 1 });
+  // 4 anneaux expansifs
+  const mkRing = (sw, op) => new K.Circle({ radius: 24, stroke: color, strokeWidth: sw,
+    fill: 'transparent', opacity: op, shadowColor: color, shadowBlur: 12, shadowOpacity: 0.8 });
+  const ring1 = mkRing(5, 1);
+  const ring2 = mkRing(4, 0.85);
+  const ring3 = mkRing(3, 0.65);
+  const ring4 = mkRing(2, 0.45);
+  g.add(flash, ring1, ring2, ring3, ring4, dot);
+  _layers.ping.add(g);
+  _layers.ping.batchDraw();
+
+  const upd = () => _layers.ping?.batchDraw();
+  // Flash s'efface rapidement
+  new K.Tween({ node: flash, duration: 0.35, radius: 50, opacity: 0, easing: K.Easings.EaseOut, onUpdate: upd }).play();
+  // Anneaux s'expandent en cascade
+  new K.Tween({ node: ring1, duration: 1.2,           radius: 120, opacity: 0, easing: K.Easings.EaseOut, onUpdate: upd }).play();
+  new K.Tween({ node: ring2, duration: 1.4, delay: 0.12, radius: 170, opacity: 0, easing: K.Easings.EaseOut, onUpdate: upd }).play();
+  new K.Tween({ node: ring3, duration: 1.6, delay: 0.24, radius: 220, opacity: 0, easing: K.Easings.EaseOut, onUpdate: upd }).play();
+  new K.Tween({ node: ring4, duration: 1.8, delay: 0.36, radius: 280, opacity: 0, easing: K.Easings.EaseOut, onUpdate: upd }).play();
+  // Point disparaît en dernier
+  new K.Tween({ node: dot, duration: 0.5, delay: 1.5, opacity: 0, easing: K.Easings.EaseIn,
+    onFinish: () => { g.destroy(); _layers.ping?.batchDraw(); } }).play();
+
+  setTimeout(() => _renderedPings.delete(pingKey), 4000);
+}
+
+function _renderPings(pings) {
+  for (const p of pings) {
+    const pingKey = `${p.id}_${p.createdAt?.toMillis?.() ?? 0}`;
+    if (_renderedPings.has(pingKey)) continue;
+    _renderedPings.add(pingKey);
+    _animatePing(p, pingKey);
+  }
+}
 
 // ── Multi-sélection ─────────────────────────────────────────────
 function _clearMultiSelect() {
@@ -674,7 +746,7 @@ function _showAttackRange(t) {
     const c=t.col+dc, r=t.row+dr;
     if (c<0||r<0||c>=cols||r>=rows) continue;
     const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
-      fill:'rgba(239,68,68,0.1)', stroke:'rgba(239,68,68,0.28)', strokeWidth:1, listening:false });
+      fill:'rgba(239,68,68,0.22)', stroke:'rgba(239,68,68,0.65)', strokeWidth:1.5, listening:false });
     _layers.grid.add(rect); _moveHL.push(rect);
   }
   _layers.grid.batchDraw();
@@ -1796,7 +1868,18 @@ function _initListeners() {
     _toksReady=true; _maybeSyncAutoTokens();
   },()=>{}));
 
-  // 7. Chat / Log de dés
+  // 7. Pings temps réel
+  _unsubs.push(onSnapshot(_pingsCol(), snap => {
+    const now = Date.now();
+    const pings = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(p => p.pageId === _activePage?.id
+               && p.createdAt
+               && (now - p.createdAt.toMillis()) < 5000);
+    _renderPings(pings);
+  }, () => {})); // silencieux si pas de règle Firestore
+
+  // 8. Chat / Log de dés
   _unsubs.push(onSnapshot(_logCol(), snap => {
     const msgs=snap.docs
       .map(d=>({id:d.id,...d.data()}))
