@@ -9,7 +9,7 @@
 import { STATE } from '../core/state.js';
 import { getCurrentAdventureId, getDocData, saveDoc } from '../data/firestore.js';
 import {
-  db, doc, collection, addDoc, updateDoc, deleteDoc,
+  db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, getDocs, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
 import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort } from '../shared/char-stats.js';
@@ -2541,10 +2541,21 @@ function _escHtml(s) {
 
 // ── Émotes ──────────────────────────────────────────────────────────
 async function _loadEmotes() {
+  // 1. Tenter le path scopé à l'aventure (path normal)
   try {
     const data = await getDocData('world', 'vtt_emotes');
-    _emotes = data?.emotes || [];
-  } catch { _emotes = []; }
+    if (data?.emotes?.length) { _emotes = data.emotes; return; }
+  } catch(e) { console.warn('[vtt] emotes (adventure path) :', e.message); }
+
+  // 2. Fallback : path global world/vtt_emotes (migration ancien stockage)
+  try {
+    const snap = await getDoc(doc(db, 'world', 'vtt_emotes'));
+    _emotes = snap.data()?.emotes || [];
+    if (_emotes.length) console.info('[vtt] emotes chargées depuis le path global (migration)');
+  } catch(e) {
+    console.warn('[vtt] emotes (global path) :', e.message);
+    _emotes = [];
+  }
 }
 
 const _DICE_SKILLS_DEFAULT = [
@@ -2709,6 +2720,9 @@ window._ouvrirGestionEmotes = async () => {
   const { default: Sortable } = await import('../vendor/sortable.esm.js');
 
   // ── Helper upload ImgBB ──────────────────────────────────────────
+  const _getEmoteAlbum = () => localStorage.getItem('vtt-imgbb-emote-album') || '';
+  const _setEmoteAlbum = v => v ? localStorage.setItem('vtt-imgbb-emote-album', v) : localStorage.removeItem('vtt-imgbb-emote-album');
+
   const _uploadImgbb = async (file) => {
     const key = _getImgbbKey();
     if (!key) throw new Error('Clé ImgBB non configurée (bouton 🔑 dans le VTT)');
@@ -2717,6 +2731,8 @@ window._ouvrirGestionEmotes = async () => {
       rd.readAsDataURL(file);
     });
     const fd = new FormData(); fd.append('key', key); fd.append('image', b64);
+    const album = _getEmoteAlbum();
+    if (album) fd.append('album', album);
     const resp = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body:fd });
     const json = await resp.json();
     if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
@@ -2747,6 +2763,11 @@ window._ouvrirGestionEmotes = async () => {
       <div id="emote-manage-list">${_cardsHtml(_emotes)}</div>
       <div id="emote-edit-zone"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <label style="font-size:.75rem;color:var(--text-muted);white-space:nowrap">📁 Album ImgBB</label>
+        <input type="text" id="emote-album-id" placeholder="ID de l'album (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1" oninput="(v=>v?localStorage.setItem('vtt-imgbb-emote-album',v):localStorage.removeItem('vtt-imgbb-emote-album'))(this.value.trim())">
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
       <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
         <div class="form-group" style="margin:0">
@@ -2754,9 +2775,13 @@ window._ouvrirGestionEmotes = async () => {
           <input type="text" id="emote-add-name" placeholder="nomemote" style="${_inpStyle}">
         </div>
         <div class="form-group" style="margin:0">
-          <label style="font-size:.75rem;color:var(--text-muted)">Image</label>
+          <label style="font-size:.75rem;color:var(--text-muted)">Fichier <span style="opacity:.6">(ou URL ci-dessous)</span></label>
           <input type="file" id="emote-add-file" accept="image/*" style="font-size:.78rem;margin-top:.25rem">
         </div>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.75rem;color:var(--text-muted)">URL directe <span style="opacity:.6">(si déjà hébergé sur ImgBB)</span></label>
+        <input type="text" id="emote-add-url" placeholder="https://i.ibb.co/…" style="${_inpStyle}">
       </div>
       <div style="display:flex;align-items:center;gap:.7rem">
         <button class="btn btn-primary" style="flex:1" onclick="window._vttAddEmote()">➕ Ajouter l'émote</button>
@@ -2851,19 +2876,27 @@ window._ouvrirGestionEmotes = async () => {
   window._vttAddEmote = async () => {
     const nameEl   = document.getElementById('emote-add-name');
     const fileEl   = document.getElementById('emote-add-file');
+    const urlEl    = document.getElementById('emote-add-url');
     const statusEl = document.getElementById('emote-add-status');
     const name = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
     const file = fileEl?.files?.[0];
+    const directUrl = urlEl?.value.trim();
     if (!name) { if (statusEl) statusEl.textContent = '⚠ Nom requis'; return; }
-    if (!file) { if (statusEl) statusEl.textContent = '⚠ Image requise'; return; }
-    if (statusEl) statusEl.textContent = '⏳ Upload…';
-    try {
-      const url = await _uploadImgbb(file);
-      await _saveEmotes([..._emotes, { id: Date.now().toString(), name, url }]);
-      if (statusEl) statusEl.textContent = `✓ :${name}: ajoutée !`;
-      if (nameEl) nameEl.value = ''; if (fileEl) fileEl.value = '';
-      _refresh();
-    } catch(e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; }
+    if (!file && !directUrl) { if (statusEl) statusEl.textContent = '⚠ Fichier ou URL requis'; return; }
+    let url;
+    if (file) {
+      if (statusEl) statusEl.textContent = '⏳ Upload…';
+      try { url = await _uploadImgbb(file); }
+      catch(e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; return; }
+    } else {
+      url = directUrl;
+    }
+    await _saveEmotes([..._emotes, { id: Date.now().toString(), name, url }]);
+    if (statusEl) statusEl.textContent = `✓ :${name}: ajoutée !`;
+    if (nameEl) nameEl.value = '';
+    if (fileEl) fileEl.value = '';
+    if (urlEl)  urlEl.value  = '';
+    _refresh();
   };
 };
 

@@ -1049,8 +1049,8 @@ const PAGES = {
       <div class="card" style="margin-top:1.2rem">
         <div class="card-header">⚙️ Réglages du jeu</div>
         <div style="display:flex;flex-direction:column;gap:0.7rem">
-          <button class="btn btn-outline" onclick="openWeaponFormatsAdmin()">⚔️ Formats d'arme</button>
-          <button class="btn btn-outline" onclick="openCombatStylesAdmin()">🗡️ Styles de combat</button>
+          <button class="btn btn-outline" onclick="window.openWeaponFormatsAdmin ? window.openWeaponFormatsAdmin() : import('./assets/js/features/characters.js').then(() => window.openWeaponFormatsAdmin?.())">⚔️ Formats d'arme</button>
+          <button class="btn btn-outline" onclick="window.openCombatStylesAdmin ? window.openCombatStylesAdmin() : import('./assets/js/features/characters.js').then(() => window.openCombatStylesAdmin?.())">🗡️ Styles de combat</button>
           <button class="btn btn-outline" onclick="window._ouvrirGestionDes ? window._ouvrirGestionDes() : import('./assets/js/features/histoire.js').then(() => window._ouvrirGestionDes?.())">🎲 Compétences de dés</button>
           <button class="btn btn-outline" onclick="window._ouvrirGestionEmotes ? window._ouvrirGestionEmotes() : import('./assets/js/features/vtt.js').then(() => window._ouvrirGestionEmotes?.())">😄 Émotes VTT</button>
         </div>
