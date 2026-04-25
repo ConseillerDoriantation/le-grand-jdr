@@ -128,6 +128,12 @@ service cloud.firestore {
         allow write: if isAdvAdmin(adventureId);
       }
 
+      // Annotations (règle, dessins, formes) : lecture tous, écriture MJ
+      match /vttAnnotations/{id} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+      }
+
       // Tokens : MJ écrit tout.
       // Un joueur peut uniquement déplacer son propre token (col/row/movedThisTurn).
       match /vttTokens/{id} {

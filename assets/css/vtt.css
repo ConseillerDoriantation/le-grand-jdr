@@ -32,6 +32,52 @@
   gap: 3px;
 }
 
+/* ── Draw bar (apparaît dans la toolbar quand outil Dessin actif) ── */
+.vtt-draw-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.vtt-draw-sep {
+  width: 1px; height: 20px;
+  background: var(--border);
+  margin: 0 2px; flex-shrink: 0;
+}
+.vtt-draw-btn {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 1.5px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-muted);
+  cursor: pointer; font-size: .85rem; flex-shrink: 0; transition: all .12s;
+}
+.vtt-draw-btn:hover { background: var(--bg-card2); color: var(--text); }
+.vtt-draw-btn.active {
+  background: var(--gold-glow);
+  border-color: oklch(72% 0.14 52 / 0.40);
+  color: var(--gold);
+}
+.vtt-draw-color {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid transparent; cursor: pointer; flex-shrink: 0; transition: all .12s;
+}
+.vtt-draw-color:hover { transform: scale(1.15); }
+.vtt-draw-color.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--gold);
+  transform: scale(1.1);
+}
+.vtt-draw-wbtn {
+  min-width: 28px; height: 28px; padding: 0 6px;
+  border-radius: 6px; border: 1.5px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-muted);
+  cursor: pointer; font-size: .72rem; font-weight: 600; flex-shrink: 0; transition: all .12s;
+}
+.vtt-draw-wbtn.active {
+  background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.40); color: var(--gold);
+}
+
 .vtt-tool-right { margin-left: auto; }
 
 /* ── Boutons d'outil ────────────────────────────────────────────── */
