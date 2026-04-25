@@ -128,10 +128,14 @@ service cloud.firestore {
         allow write: if isAdvAdmin(adventureId);
       }
 
-      // Annotations (règle, dessins, formes) : lecture tous, écriture MJ
+      // Annotations (dessins) : tous créent, chacun modifie/supprime les siennes, MJ gère tout
       match /vttAnnotations/{id} {
-        allow read:  if inAdventure(adventureId);
-        allow write: if isAdvAdmin(adventureId);
+        allow read:   if inAdventure(adventureId);
+        allow create: if inAdventure(adventureId);
+        allow update: if isAdvAdmin(adventureId) ||
+                         (inAdventure(adventureId) && resource.data.createdBy == request.auth.uid);
+        allow delete: if isAdvAdmin(adventureId) ||
+                         (inAdventure(adventureId) && resource.data.createdBy == request.auth.uid);
       }
 
       // Tokens : MJ écrit tout.

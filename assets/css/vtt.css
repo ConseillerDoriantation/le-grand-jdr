@@ -134,6 +134,18 @@
 }
 .vtt-page-tabs::-webkit-scrollbar { display: none; }
 
+/* Label page courant pour les joueurs (lecture seule) */
+.vtt-page-current-label {
+  font-size: .78rem;
+  color: var(--text-dim);
+  padding: .2rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .vtt-page-tab {
   padding: .25rem .7rem;
   height: 30px;
