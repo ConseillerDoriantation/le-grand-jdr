@@ -195,26 +195,30 @@ function _calcSortCibles(s) {
   return 1 + n + (n - 1); // 1 base + N runes + (N-1) chaînage = 2N
 }
 
-/** Durée en tours (Durée : +2 tours par rune, chaînage : +1 supplémentaire par rune après la 1ère) */
+/** Durée totale en tours = dureeBase + bonus rune Durée */
 function _calcSortDuree(s) {
-  const runes = s.runes || [];
-  const nbDur = runes.filter(r => r === 'Durée').length;
-  if (nbDur === 0) return null;
-  // 1 rune → +2, 2 runes → +2+3=+5, 3 runes → +2+3+4...
-  let total = 0;
-  for (let i = 0; i < nbDur; i++) total += 2 + i;
-  return total;
+  const runes  = s.runes || [];
+  const nbDur  = runes.filter(r => r === 'Durée').length;
+  const base   = (s.dureeBase && s.dureeBase >= 2) ? s.dureeBase : 0;
+  if (nbDur === 0 && base === 0) return null;
+  let runeBonus = 0;
+  for (let i = 0; i < nbDur; i++) runeBonus += 2 + i;
+  return base + runeBonus || null;
 }
 
-/** Zone d'amplification (Amplification : +3m, chaînage : +2m par rune après la 1ère) */
+
+/** Zone W×H définie par le joueur */
 function _calcSortZone(s) {
-  const runes = s.runes || [];
-  const nbAmp = runes.filter(r => r === 'Amplification').length;
-  if (nbAmp === 0) return null;
-  // 1 rune → +3m, 2 runes → +3+2=+5m total (zone 4×4), etc.
-  let total = 3;
-  for (let i = 1; i < nbAmp; i++) total += 2;
-  return total;
+  const w = s.zoneW ? parseInt(s.zoneW) : 0;
+  const h = s.zoneH ? parseInt(s.zoneH) : 0;
+  if (w === 0 && h === 0) return null;
+  return { w, h };
+}
+
+/** Déplacement : { mode:'push'|'pull', distance }, ou null */
+function _calcSortDeplacement(s) {
+  if (!s.deplacement?.mode) return null;
+  return { mode: s.deplacement.mode, distance: Math.max(1, parseInt(s.deplacement.distance) || 1) };
 }
 
 /** Lacération : réduction CA cible */
@@ -294,18 +298,27 @@ function _buildSortResume(s, c) {
     lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
   }
 
-  // Zone (Amplification)
+  // Zone W×H
   const zone = _calcSortZone(s);
-  if (zone) {
-    const nbAmp = runes.filter(r => r === 'Amplification').length;
-    lines.push({ icon:'📐', label:`Zone +${zone}m`, detail: nbAmp > 1 ? `${nbAmp} runes (chaîné : +2m/rune supp.)` : '1 rune Amplification' });
+  if (zone) lines.push({ icon:'📐', label:`Zone ${zone.w}×${zone.h}m`, detail:'' });
+
+  // Déplacement (pousse / attire)
+  const depl = _calcSortDeplacement(s);
+  if (depl) {
+    const dIcon = depl.mode === 'push' ? '↗' : '↙';
+    lines.push({ icon: dIcon, label: depl.mode === 'push' ? `Pousse ${depl.distance}m` : `Attire ${depl.distance}m`, detail:'' });
   }
 
-  // Durée
+  // Durée (base + rune Durée)
   const duree = _calcSortDuree(s);
   if (duree) {
-    const nbDur = runes.filter(r => r === 'Durée').length;
-    lines.push({ icon:'⏱️', label:`+${duree} tours`, detail: nbDur > 1 ? `Chaîné : +${nbDur} tours supp.` : 'Durée de l\'effet' });
+    const nbDur  = runes.filter(r => r === 'Durée').length;
+    const dBase  = (s.dureeBase && s.dureeBase >= 2) ? s.dureeBase : 0;
+    const detail = [
+      dBase > 0  ? `${dBase} tours de base` : '',
+      nbDur > 0  ? `+${duree - dBase} tours (rune Durée${nbDur > 1 ? ' ×'+nbDur : ''})` : '',
+    ].filter(Boolean).join(' · ');
+    lines.push({ icon:'⏱️', label:`${duree} tour${duree > 1 ? 's' : ''}`, detail });
   }
 
   // Lacération
@@ -448,8 +461,12 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     }
   }
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff' });
-  const zone  = _calcSortZone(s);  if (zone)  chips.push({ icon:'📐', val:`+${zone}m`, color:'#b47fff' });
-  const duree = _calcSortDuree(s); if (duree) chips.push({ icon:'⏱️', val:`+${duree}t`, color:'#9ca3af' });
+  const zone  = _calcSortZone(s);
+  if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}m`, color:'#b47fff' });
+  const depl  = _calcSortDeplacement(s);
+  if (depl)  chips.push({ icon: depl.mode==='push' ? '↗' : '↙', val:`${depl.distance}m`, color:'#e8b84b' });
+  const duree = _calcSortDuree(s);
+  if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af' });
 
   const pmVal = pmDelta !== 0
     ? `<span class="cs-sort-pm-old">${s.pm||0}</span><span class="cs-sort-pm-new">${Math.max(0,(s.pm||0)+pmDelta)}</span>`
@@ -624,6 +641,8 @@ export function openSortModal(idx, s) {
 
   // Action override (Auto / Action / Action Bonus uniquement — Réaction = rune)
   window._sortActionEdit = s?.actionOverride || null;  // null = auto
+  // Déplacement (pousse/attire)
+  window._deplModeEdit = s?.deplacement?.mode || null;
 
   const runesHtml = RUNES.map(r => {
     const cnt = window._runeCountsEdit[r.nom]||0;
@@ -763,6 +782,62 @@ export function openSortModal(idx, s) {
       </div>
     </div>
 
+    <!-- Zone de base + Déplacement -->
+    <div class="grid-2" style="gap:.5rem;margin-bottom:.5rem">
+      <div class="form-group" style="margin:0">
+        <label>Zone <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = sort ciblé</span></label>
+        <div style="display:flex;gap:.3rem;align-items:center">
+          <input type="number" class="input-field" id="s-zone-w" min="1" max="50"
+            value="${s?.zoneW||''}" placeholder="—"
+            style="width:50px;text-align:center;padding:.3rem">
+          <span style="font-size:.85rem;color:var(--text-dim);font-weight:600">×</span>
+          <input type="number" class="input-field" id="s-zone-h" min="1" max="50"
+            value="${s?.zoneH||''}" placeholder="—"
+            style="width:50px;text-align:center;padding:.3rem">
+          <span style="font-size:.8rem;color:var(--text-dim)">m</span>
+        </div>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Déplacement</label>
+        <div style="display:flex;flex-direction:column;gap:.3rem">
+          <div style="display:flex;gap:.3rem">
+            ${[
+              { v:null,   label:'Aucun',  col:'#9ca3af' },
+              { v:'push', label:'↗ Pousse', col:'#e8b84b' },
+              { v:'pull', label:'↙ Attire', col:'#4f8cff' },
+            ].map(opt => {
+              const cur = s?.deplacement?.mode || null;
+              const sel = cur === opt.v;
+              return `<button type="button" onclick="window._selectDeplMode(${opt.v===null?'null':`'${opt.v}'`})"
+                id="s-depl-${opt.v??'none'}"
+                style="flex:1;padding:.3rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;transition:all .15s;
+                  border:2px solid ${sel?opt.col:'var(--border)'};
+                  background:${sel?opt.col+'20':'var(--bg-elevated)'};
+                  color:${sel?opt.col:'var(--text-dim)'};
+                  font-weight:${sel?'700':'400'}">${opt.label}</button>`;
+            }).join('')}
+          </div>
+          <div id="s-depl-dist-row" style="${s?.deplacement?.mode ? '' : 'display:none'};display:${s?.deplacement?.mode ? 'flex' : 'none'};gap:.35rem;align-items:center">
+            <input type="number" class="input-field" id="s-depl-dist" min="1" max="30"
+              value="${s?.deplacement?.distance||1}" placeholder="1"
+              style="width:50px;text-align:center;padding:.3rem">
+            <span style="font-size:.8rem;color:var(--text-dim)">mètres</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Durée de base -->
+    <div class="form-group">
+      <label>Durée de base <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = instantané · rune Durée s'ajoute · min. 2 tours</span></label>
+      <div style="display:flex;gap:.35rem;align-items:center">
+        <input type="number" class="input-field" id="s-duree-base" min="2" max="100"
+          value="${s?.dureeBase||''}" placeholder="—"
+          style="width:58px;text-align:center;padding:.3rem">
+        <span style="font-size:.8rem;color:var(--text-dim)">tours</span>
+      </div>
+    </div>
+
     <div class="form-group"><label>Description / Effet libre</label>
       <textarea class="input-field" id="s-effet" rows="2">${s?.effet||''}</textarea>
     </div>
@@ -827,6 +902,23 @@ window._updateSortActionDisplay = () => {
     btn.style.color        = active ? cfg.color : 'var(--text-dim)';
     btn.style.fontWeight   = active ? '700' : '400';
   });
+};
+
+window._selectDeplMode = (mode) => {
+  window._deplModeEdit = mode;
+  const DEPL_CFG = { null:'#9ca3af', push:'#e8b84b', pull:'#4f8cff' };
+  [null, 'push', 'pull'].forEach(v => {
+    const btn = document.getElementById(`s-depl-${v??'none'}`);
+    if (!btn) return;
+    const col = DEPL_CFG[v] || '#9ca3af';
+    const active = v === mode;
+    btn.style.borderColor = active ? col : 'var(--border)';
+    btn.style.background  = active ? col+'20' : 'var(--bg-elevated)';
+    btn.style.color       = active ? col : 'var(--text-dim)';
+    btn.style.fontWeight  = active ? '700' : '400';
+  });
+  const distRow = document.getElementById('s-depl-dist-row');
+  if (distRow) distRow.style.display = mode ? 'flex' : 'none';
 };
 
 window._selectProtMode = (mode) => {
@@ -920,6 +1012,12 @@ export async function saveSort(idx) {
     // Action override (null = auto)
     const actionOverride = window._sortActionEdit || null;
 
+    const zoneWRaw = parseInt(document.getElementById('s-zone-w')?.value) || 0;
+    const zoneHRaw = parseInt(document.getElementById('s-zone-h')?.value) || 0;
+    const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
+    const deplMode = window._deplModeEdit || null;
+    const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
+
     const newSort = {
       nom:      document.getElementById('s-nom')?.value||'Sort',
       pm:       autoPm,
@@ -936,6 +1034,10 @@ export async function saveSort(idx) {
       catId:    document.getElementById('s-catid')?.value || '',
       actif:    idx>=0 ? sorts[idx].actif : false,
       actionOverride,
+      zoneW: zoneWRaw > 0 ? zoneWRaw : null,
+      zoneH: zoneHRaw > 0 ? zoneHRaw : null,
+      dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
+      deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
     };
     if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
     c.deck_sorts=sorts;
