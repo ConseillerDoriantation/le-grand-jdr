@@ -51,6 +51,25 @@ let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
 const _renderedPings     = new Set();
 const _renderedReactions = new Set();
 
+// ── Outils de dessin & règle ────────────────────────────────────────
+const CELL_M = 1.5;          // 1 case = 1.5 mètre
+let _annotations      = {};   // id → { data, shape }
+let _selectedAnnotId  = null; // id de l'annotation sélectionnée
+let _annotTransformer = null; // Konva Transformer pour resize/rotation
+let _drawing      = false;   // tracé en cours
+let _drawPts      = [];      // points crayon libre (world coords)
+let _drawOrigin   = null;    // point de départ pour formes
+let _drawLive     = null;    // forme Konva live (avant sauvegarde)
+let _drawColor    = '#ef4444';
+let _drawWidth    = 2;
+let _drawShape    = 'pencil'; // 'pencil'|'line'|'rect'|'circle'
+let _drawFill     = false;
+let _rulerActive  = false;
+let _rulerOrigin  = null;
+let _rulerLine    = null;
+let _rulerLabel   = null;
+let _rulerHideTimer = null;
+
 // Mapping abréviation compétence → clé getMod
 const _STAT_KEY = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
 const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };
@@ -75,6 +94,8 @@ const _pingsCol     = ()  => collection(db, `adventures/${_aid()}/vttPings`);
 const _pingRef      = uid => doc(db, `adventures/${_aid()}/vttPings/${uid}`);
 const _reactionsCol = ()  => collection(db, `adventures/${_aid()}/vttEmoteReactions`);
 const _reactionRef  = uid => doc(db, `adventures/${_aid()}/vttEmoteReactions/${uid}`);
+const _annotCol     = ()  => collection(db, `adventures/${_aid()}/vttAnnotations`);
+const _annotRef     = id  => doc(db, `adventures/${_aid()}/vttAnnotations/${id}`);
 
 // ═══════════════════════════════════════════════════════════════════
 // DONNÉES EFFECTIVES — fusion token + entité liée
@@ -255,6 +276,10 @@ function _cleanup() {
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
+  _annotations = {}; _drawing = false; _drawLive = null;
+  _selectedAnnotId = null; _annotTransformer = null;
+  _rulerActive = false; _rulerLine = null; _rulerLabel = null;
+  if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
   _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
   _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
   _hideCtxMenu();
@@ -273,10 +298,11 @@ function _initCanvas(container) {
   _layers.bg    = new K.Layer({ listening: false });
   _layers.map   = new K.Layer({ listening: false }); // verrouillé par défaut
   _layers.grid  = new K.Layer({ listening: true });
+  _layers.draw  = new K.Layer();                     // annotations (entre grille et tokens)
   _layers.token = new K.Layer();
   _layers.mapFg = new K.Layer({ listening: false }); // 1er plan, verrouillé par défaut
-  _layers.ping  = new K.Layer({ listening: false }); // pings (au-dessus de tout)
-  _stage.add(_layers.bg, _layers.map, _layers.grid, _layers.token, _layers.mapFg, _layers.ping);
+  _layers.ping  = new K.Layer({ listening: false }); // pings + règle (au-dessus de tout)
+  _stage.add(_layers.bg, _layers.map, _layers.grid, _layers.draw, _layers.token, _layers.mapFg, _layers.ping);
 
   // Transformers pour redimensionner les images (MJ uniquement)
   if (STATE.isAdmin) {
@@ -288,7 +314,27 @@ function _initCanvas(container) {
     };
     _imgTr   = new K.Transformer(trCfg); _layers.map.add(_imgTr);
     _imgTrFg = new K.Transformer(trCfg); _layers.mapFg.add(_imgTrFg);
+
+    // Transformer pour sélectionner/tourner/redimensionner les annotations
+    _annotTransformer = new K.Transformer({
+      rotateEnabled: true, keepRatio: false,
+      borderStroke: '#ffe600', borderStrokeWidth: 1,
+      anchorStroke: '#ffe600', anchorFill: '#1a1a2e', anchorSize: 8, anchorCornerRadius: 2,
+    });
+    _layers.draw.add(_annotTransformer);
   }
+
+  // Listener window pour la règle — window est garanti, pas de conflit avec Konva
+  const _rulerMoveNative = e => {
+    if (_tool !== 'ruler' || !_rulerActive || !_stage) return;
+    const rect = container.getBoundingClientRect();
+    // Ignorer si la souris est hors du canvas
+    if (e.clientX < rect.left || e.clientX > rect.right ||
+        e.clientY < rect.top  || e.clientY > rect.bottom) return;
+    _updateRuler(_stageToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }));
+  };
+  window.addEventListener('mousemove', _rulerMoveNative);
+  _unsubs.push(() => window.removeEventListener('mousemove', _rulerMoveNative));
 
   _stage.on('wheel', e => {
     e.evt.preventDefault();
@@ -306,30 +352,56 @@ function _initCanvas(container) {
     if (e.evt.button===1||e.evt.button===2) {
       _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
     }
-    if (e.evt.button===0 && e.target===_stage) {
-      const ptr = _stage.getPointerPosition();
-      _pingOrigin = { ...ptr };
-      _pingTimer = setTimeout(() => {
-        _pingTimer = null;
-        const sc = _stage.scaleX(), sp = _stage.position();
-        _emitPing((_pingOrigin.x - sp.x) / sc, (_pingOrigin.y - sp.y) / sc);
-      }, 300);
+    if (e.evt.button===0) {
+      const rect0 = _stage.container().getBoundingClientRect();
+      const np = { x: e.evt.clientX - rect0.left, y: e.evt.clientY - rect0.top };
+      // Règle : 1er clic = départ, 2e clic = fin (pas besoin de maintenir)
+      if (_tool === 'ruler') {
+        if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
+        const wp = _stageToWorld(np);
+        if (!_rulerActive) _startRuler(wp);
+        else               _endRuler();
+        return;
+      }
+      // Dessin : cliquer-glisser
+      if (_tool === 'draw') {
+        if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
+        _startDraw(_stageToWorld(np));
+        return;
+      }
+      // Clic normal → ping sur la stage uniquement
+      if (e.target===_stage) {
+        _pingOrigin = { ...np };
+        _pingTimer = setTimeout(() => {
+          _pingTimer = null;
+          const sc = _stage.scaleX(), sp = _stage.position();
+          _emitPing((_pingOrigin.x - sp.x) / sc, (_pingOrigin.y - sp.y) / sc);
+        }, 300);
+      }
     }
   });
   _stage.on('mousemove', e => {
     if (_pan) _stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y });
+    // Coordonnées canvas-relatives à partir de l'événement natif (plus fiable que getPointerPosition)
+    const rect = _stage.container().getBoundingClientRect();
+    const stagePtr = { x: e.evt.clientX - rect.left, y: e.evt.clientY - rect.top };
     if (_pingTimer && _pingOrigin) {
-      const ptr = _stage.getPointerPosition();
-      const dx = ptr.x - _pingOrigin.x, dy = ptr.y - _pingOrigin.y;
+      const dx = stagePtr.x - _pingOrigin.x, dy = stagePtr.y - _pingOrigin.y;
       if (dx*dx + dy*dy > 64) { clearTimeout(_pingTimer); _pingTimer = null; }
     }
+    const wp = _stageToWorld(stagePtr);
+    if (_tool === 'ruler' && _rulerActive)      _updateRuler(wp);
+    if (_tool === 'draw'  && _drawing && !_pan) _updateDraw(wp);
   });
   _stage.on('mouseup', () => {
     _pan = false;
     if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
+    if (_tool === 'draw' && _drawing) _endDraw();
   });
   _stage.on('contextmenu', e => e.evt.preventDefault());
-  _stage.on('click', e => { if (e.target===_stage) _deselect(); });
+  _stage.on('click', e => {
+    if (e.target===_stage) { _deselect(); _deselectAnnot(); }
+  });
 
   _resizeObs = new ResizeObserver(() => {
     if (!_stage) return;
@@ -583,6 +655,7 @@ function _buildShape(t) {
 
   g.on('click', e => {
     e.cancelBubble=true;
+    if (_tool === 'ruler' || _tool === 'draw') return; // outils de dessin ignorent les tokens
     if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
       // Shift+clic : ajouter / retirer du groupe multi-sélection
       _toggleMultiSelect(t.id); return;
@@ -1849,7 +1922,7 @@ async function _switchPage(pageId) {
   // Ne pas détruire _layers.map entièrement : _imgTr (Transformer) y vit.
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
   _layers.token?.destroyChildren(); _clearHL();
-  _drawGrid(); _renderMapImages(); _renderAllTokens();
+  _drawGrid(); _renderMapImages(); _renderAllTokens(); _renderAnnotLayer();
   _renderPageTabs(); _renderTray(); _deselect();
   // Le MJ navigue librement — les joueurs ne suivent que via 📡 Envoyer
 }
@@ -1868,6 +1941,213 @@ function _renderAllTokens() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// OUTILS — RÈGLE & ANNOTATIONS
+// ═══════════════════════════════════════════════════════════════════
+
+// Conversion coords écran → monde
+function _stageToWorld(ptr) {
+  const sc = _stage.scaleX(), sp = _stage.position();
+  return { x: (ptr.x - sp.x) / sc, y: (ptr.y - sp.y) / sc };
+}
+
+// ── Règle ──────────────────────────────────────────────────────────
+function _startRuler(wp) {
+  const K = window.Konva;
+  _rulerActive = true; _rulerOrigin = wp;
+  _clearRuler();
+  _rulerLine  = new K.Line({ points:[wp.x,wp.y,wp.x,wp.y], stroke:'#ffe600', strokeWidth:2,
+    dash:[8,4], lineCap:'round', listening:false, name:'ruler' });
+  _rulerLabel = new K.Text({ x:wp.x, y:wp.y, text:'', fill:'#ffe600', fontSize:13,
+    fontStyle:'bold', shadowColor:'#000', shadowBlur:6, shadowOpacity:.9,
+    shadowOffset:{x:1,y:1}, listening:false, name:'ruler' });
+  _layers.ping.add(_rulerLine, _rulerLabel);
+  _layers.ping.batchDraw();
+}
+function _updateRuler(wp) {
+  if (!_rulerLine || !_rulerOrigin) return;
+  _rulerLine.points([_rulerOrigin.x, _rulerOrigin.y, wp.x, wp.y]);
+  const dxC = (wp.x - _rulerOrigin.x) / CELL;
+  const dyC = (wp.y - _rulerOrigin.y) / CELL;
+  const dist = Math.sqrt(dxC**2 + dyC**2);
+  const distC = Math.round(dist * 2) / 2;
+  const distM = (dist * CELL_M).toFixed(1);
+  _rulerLabel.text(`${distC} case${distC!==1?'s':''} · ${distM}m`);
+  _rulerLabel.position({
+    x: (_rulerOrigin.x + wp.x) / 2 + 6,
+    y: (_rulerOrigin.y + wp.y) / 2 - 18,
+  });
+  _layers.ping.batchDraw();
+}
+function _endRuler() {
+  _rulerActive = false;
+  if (_rulerHideTimer) clearTimeout(_rulerHideTimer);
+  _rulerHideTimer = setTimeout(_clearRuler, 5000);
+}
+function _clearRuler() {
+  if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
+  _layers.ping?.find('.ruler').forEach(s => s.destroy());
+  _rulerLine = null; _rulerLabel = null; _rulerActive = false;
+  _layers.ping?.batchDraw();
+}
+
+// ── Annotations ────────────────────────────────────────────────────
+function _buildAnnotShape(K, data) {
+  const col  = data.color || '#ef4444';
+  const fill = data.fill ? col + '30' : 'transparent';
+  const base = { stroke: col, strokeWidth: data.strokeWidth || 2,
+    lineCap:'round', lineJoin:'round', name:'annot', listening: STATE.isAdmin };
+  let shape;
+  if (data.type === 'freehand' || data.type === 'line') {
+    shape = new K.Line({ ...base, points: data.points || [],
+      x: data.offsetX||0, y: data.offsetY||0,
+      tension: data.type === 'freehand' ? 0.3 : 0, fill:'transparent' });
+  } else if (data.type === 'rect') {
+    shape = new K.Rect({ ...base, x:data.x||0, y:data.y||0,
+      width:data.w||10, height:data.h||10, fill, cornerRadius:3 });
+  } else if (data.type === 'circle') {
+    shape = new K.Circle({ ...base, x:data.x||0, y:data.y||0, radius:data.r||10, fill });
+  }
+  if (!shape) return null;
+  shape._annotId = data.id;
+
+  // Restaurer rotation / scale sauvegardés
+  if (data.rotation) shape.rotation(data.rotation);
+  if (data.scaleX)   shape.scaleX(data.scaleX);
+  if (data.scaleY)   shape.scaleY(data.scaleY);
+
+  if (STATE.isAdmin) {
+    // Clic gauche → sélectionner (mode select uniquement)
+    shape.on('click', e => {
+      if (_tool !== 'select') return;
+      e.cancelBubble = true;
+      _selectedAnnotId = data.id;
+      if (_annotTransformer) { _annotTransformer.nodes([shape]); _layers.draw.batchDraw(); }
+    });
+    // Clic-droit → supprimer (mode select uniquement)
+    shape.on('contextmenu', e => {
+      if (_tool !== 'select') return;
+      e.evt.preventDefault(); e.cancelBubble = true;
+      _deselectAnnot();
+      deleteDoc(_annotRef(data.id)).catch(() => {});
+    });
+    // Fin de drag → sauvegarder position
+    shape.on('dragend', () => {
+      const update = (data.type === 'freehand' || data.type === 'line')
+        ? { offsetX: shape.x(), offsetY: shape.y() }
+        : { x: shape.x(), y: shape.y() };
+      updateDoc(_annotRef(data.id), update).catch(() => {});
+    });
+    // Fin de transformation (rotate/resize) → sauvegarder
+    shape.on('transformend', () => {
+      updateDoc(_annotRef(data.id), {
+        rotation: shape.rotation(),
+        scaleX:   shape.scaleX(),
+        scaleY:   shape.scaleY(),
+        x: shape.x(), y: shape.y(),
+      }).catch(() => {});
+    });
+  }
+  return shape;
+}
+
+function _deselectAnnot() {
+  _selectedAnnotId = null;
+  if (_annotTransformer) { _annotTransformer.nodes([]); _layers.draw?.batchDraw(); }
+}
+
+function _renderAnnotLayer() {
+  if (!_layers.draw || !_activePage) return;
+  const K = window.Konva;
+  Object.values(_annotations).forEach(e => { e.shape?.destroy(); e.shape = null; });
+  for (const [id, e] of Object.entries(_annotations)) {
+    if (e.data.pageId !== _activePage.id) continue;
+    const shape = _buildAnnotShape(K, e.data);
+    if (shape) { _annotations[id].shape = shape; _layers.draw.add(shape); }
+  }
+  _updateAnnotDraggable();
+  _layers.draw.batchDraw();
+}
+
+function _updateAnnotDraggable() {
+  if (!STATE.isAdmin || !_layers.draw) return;
+  const canInteract = _tool === 'select';
+  Object.values(_annotations).forEach(e => {
+    if (!e.shape) return;
+    e.shape.draggable(canInteract);
+    e.shape.listening(canInteract);
+  });
+  _layers.draw.batchDraw();
+}
+
+// ── Draw live (crayon + formes) ────────────────────────────────────
+function _startDraw(wp) {
+  const K = window.Konva;
+  _drawOrigin = wp;
+  const base = { stroke:_drawColor, strokeWidth:_drawWidth, lineCap:'round', lineJoin:'round', listening:false, name:'draw-live' };
+  const fill  = _drawFill ? _drawColor+'30' : 'transparent';
+  if (_drawShape === 'pencil') {
+    _drawPts = [wp.x, wp.y];
+    _drawLive = new K.Line({ ...base, points:_drawPts, tension:0.3 });
+  } else if (_drawShape === 'line') {
+    _drawLive = new K.Line({ ...base, points:[wp.x,wp.y,wp.x,wp.y] });
+  } else if (_drawShape === 'rect') {
+    _drawLive = new K.Rect({ ...base, x:wp.x, y:wp.y, width:0, height:0, fill, cornerRadius:3 });
+  } else if (_drawShape === 'circle') {
+    _drawLive = new K.Circle({ ...base, x:wp.x, y:wp.y, radius:0, fill });
+  }
+  if (_drawLive) { _layers.draw.add(_drawLive); }
+  _drawing = true;
+}
+function _updateDraw(wp) {
+  if (!_drawLive || !_drawOrigin) return;
+  if (_drawShape === 'pencil') {
+    _drawPts.push(wp.x, wp.y);
+    _drawLive.points([..._drawPts]);
+  } else if (_drawShape === 'line') {
+    _drawLive.points([_drawOrigin.x, _drawOrigin.y, wp.x, wp.y]);
+  } else if (_drawShape === 'rect') {
+    const x = Math.min(_drawOrigin.x, wp.x), y = Math.min(_drawOrigin.y, wp.y);
+    _drawLive.setAttrs({ x, y, width:Math.abs(wp.x-_drawOrigin.x), height:Math.abs(wp.y-_drawOrigin.y) });
+  } else if (_drawShape === 'circle') {
+    _drawLive.radius(Math.hypot(wp.x-_drawOrigin.x, wp.y-_drawOrigin.y));
+  }
+  _layers.draw.batchDraw();
+}
+async function _endDraw() {
+  _drawing = false;
+  if (!_drawLive || !_activePage) { _drawLive?.destroy(); _drawLive=null; return; }
+  let data;
+  if (_drawShape === 'pencil' && _drawPts.length >= 6) {
+    data = { type:'freehand', points:_drawPts, offsetX:0, offsetY:0 };
+  } else if (_drawShape === 'line') {
+    const pts = _drawLive.points();
+    if (Math.hypot(pts[2]-pts[0], pts[3]-pts[1]) < 3) { _drawLive.destroy(); _drawLive=null; return; }
+    data = { type:'line', points:pts, offsetX:0, offsetY:0 };
+  } else if (_drawShape === 'rect') {
+    if (_drawLive.width() < 3 && _drawLive.height() < 3) { _drawLive.destroy(); _drawLive=null; return; }
+    data = { type:'rect', x:_drawLive.x(), y:_drawLive.y(), w:_drawLive.width(), h:_drawLive.height(), fill:_drawFill };
+  } else if (_drawShape === 'circle') {
+    if (_drawLive.radius() < 3) { _drawLive.destroy(); _drawLive=null; return; }
+    data = { type:'circle', x:_drawLive.x(), y:_drawLive.y(), r:_drawLive.radius(), fill:_drawFill };
+  }
+  const liveCopy = _drawLive;
+  _drawLive = null;
+  if (!data) { liveCopy.destroy(); _layers.draw.batchDraw(); return; }
+  data = { ...data, pageId:_activePage.id, color:_drawColor, strokeWidth:_drawWidth,
+    createdBy: STATE.user?.uid||null, createdAt: serverTimestamp() };
+  const id = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
+  try {
+    await setDoc(_annotRef(id), data);
+    liveCopy.destroy(); // l'onSnapshot va recréer la version persistée
+  } catch(err) {
+    console.error('[VTT] Annotation save error:', err?.code, err?.message);
+    showNotif('Erreur sauvegarde annotation — vérifiez les règles Firestore', 'error');
+    // Garder liveCopy visible temporairement (non persistée)
+  }
+  _layers.draw.batchDraw();
+}
+
 // SYNC FIRESTORE — onSnapshot sur 5 collections
 // ═══════════════════════════════════════════════════════════════════
 function _initListeners() {
@@ -2009,7 +2289,34 @@ function _initListeners() {
     _toksReady=true; _maybeSyncAutoTokens();
   },()=>{}));
 
-  // 7. Pings temps réel
+  // 7. Annotations (dessins + formes)
+  _unsubs.push(onSnapshot(_annotCol(), snap => {
+    snap.docChanges().forEach(ch => {
+      const id = ch.doc.id;
+      if (ch.type === 'removed') {
+        _annotations[id]?.shape?.destroy();
+        delete _annotations[id];
+        if (_selectedAnnotId === id) _deselectAnnot();
+      } else {
+        const data = { id, ...ch.doc.data() };
+        if (_annotations[id]) {
+          // Mise à jour : si le shape existe encore, l'enlever d'abord
+          _annotations[id].shape?.destroy();
+        }
+        _annotations[id] = { data, shape: null };
+        // Rendre sur la page active seulement
+        if (_activePage && data.pageId === _activePage.id) {
+          const K = window.Konva;
+          const shape = _buildAnnotShape(K, data);
+          if (shape) { _annotations[id].shape = shape; _layers.draw?.add(shape); }
+        }
+      }
+    });
+    _updateAnnotDraggable();
+    _layers.draw?.batchDraw();
+  }, () => {}));
+
+  // 8. Pings temps réel
   _unsubs.push(onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
     const pings = snap.docs
@@ -2672,8 +2979,35 @@ function _renderCombatBadge() {
 // ═══════════════════════════════════════════════════════════════════
 // ACTIONS GLOBALES
 // ═══════════════════════════════════════════════════════════════════
-window._vttTool       = t => _setTool(t);
+window._vttTool       = t => _setTool(_tool === t ? 'select' : t);
 window._vttSwitchPage = id => _switchPage(id);
+
+// ── Outils de dessin ────────────────────────────────────────────────
+window._vttDrawShape = shape => {
+  _drawShape = shape;
+  ['pencil','line','rect','circle'].forEach(s => {
+    document.getElementById(`vtt-ds-${s}`)?.classList.toggle('active', s === shape);
+  });
+};
+window._vttDrawColor = color => {
+  _drawColor = color;
+  document.querySelectorAll('.vtt-draw-color').forEach(b => b.classList.toggle('active', b.dataset.color === color));
+};
+window._vttDrawWidth = w => {
+  _drawWidth = w;
+  document.querySelectorAll('.vtt-draw-wbtn').forEach(b => b.classList.toggle('active', +b.dataset.w === w));
+};
+window._vttToggleDrawFill = () => {
+  _drawFill = !_drawFill;
+  const btn = document.getElementById('vtt-draw-fill-btn');
+  if (btn) { btn.textContent = _drawFill ? '◼' : '◻'; btn.classList.toggle('active', _drawFill); }
+};
+window._vttClearAnnots = async () => {
+  if (!_activePage) return;
+  if (!await confirmModal('Effacer toutes les annotations de cette page ?')) return;
+  const toDelete = Object.values(_annotations).filter(e => e.data.pageId === _activePage.id);
+  await Promise.all(toDelete.map(e => deleteDoc(_annotRef(e.data.id)).catch(()=>{})));
+};
 
 window._vttAddPage = () => {
   openModal('➕ Nouvelle page', `
@@ -3024,13 +3358,29 @@ async function _handleUpload(file) {
 
 // ── Outil + clavier ─────────────────────────────────────────────────
 function _setTool(tool) {
-  _tool=tool;
-  document.querySelectorAll('.vtt-tool').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
+  _tool = tool;
+  document.querySelectorAll('.vtt-tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  // Draw bar
+  const drawBar = document.getElementById('vtt-draw-bar');
+  if (drawBar) drawBar.style.display = tool === 'draw' ? 'flex' : 'none';
+  // Curseur
+  const wrap = document.getElementById('vtt-canvas-wrap');
+  if (wrap) wrap.style.cursor = (tool === 'ruler' || tool === 'draw') ? 'crosshair' : '';
+  // Règle : effacer si on quitte
+  if (tool !== 'ruler') _clearRuler();
+  // Désélection annotation si on quitte le mode select
+  if (tool !== 'select') _deselectAnnot();
+  // Draggability des annotations
+  _updateAnnotDraggable();
 }
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
-  if (e.key==='Escape') _deselect();
+  if (e.key==='Escape') { if (_tool !== 'select') _setTool('select'); else _deselect(); }
+  if ((e.key==='Delete'||e.key==='Backspace') && _selectedAnnotId && _tool==='select') {
+    deleteDoc(_annotRef(_selectedAnnotId)).catch(()=>{});
+    _deselectAnnot();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3042,6 +3392,29 @@ function _buildHtml() {
 <div class="vtt-root" id="vtt-root">
   <div class="vtt-toolbar">
     ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
+    <div class="vtt-tool-group">
+      <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="↖ Sélection — interagir avec les tokens et annotations">↖</button>
+      <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle — 1er clic départ, 2e clic fin">📏</button>
+      ${mj?`<button class="vtt-tool" data-tool="draw" onclick="window._vttTool('draw')" title="✏️ Dessin — dessiner sur la carte">✏️</button>`:''}
+    </div>
+    <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
+      <button class="vtt-draw-btn active" id="vtt-ds-pencil"  onclick="window._vttDrawShape('pencil')"  title="Crayon libre">✏️</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-line"    onclick="window._vttDrawShape('line')"    title="Ligne">╱</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-rect"    onclick="window._vttDrawShape('rect')"    title="Rectangle">⬜</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-circle"  onclick="window._vttDrawShape('circle')"  title="Cercle">⬭</button>
+      <div class="vtt-draw-sep"></div>
+      ${['#ef4444','#f59e0b','#22c38e','#4f8cff','#b47fff','#ffffff','#1a1a2e'].map((c,i)=>
+        `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" onclick="window._vttDrawColor('${c}')" style="background:${c}" title="${c}"></button>`
+      ).join('')}
+      <div class="vtt-draw-sep"></div>
+      ${[2,4,8].map((w,i)=>
+        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" onclick="window._vttDrawWidth(${w})" title="${w}px">${w}</button>`
+      ).join('')}
+      <div class="vtt-draw-sep"></div>
+      <button class="vtt-draw-btn" id="vtt-draw-fill-btn" onclick="window._vttToggleDrawFill()" title="Remplissage (rect/cercle)">◻</button>
+      <div style="flex:1"></div>
+      <button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearAnnots()" title="Effacer toutes les annotations de cette page">🗑 Effacer tout</button>
+    </div>
     <div class="vtt-tool-group vtt-right">
       <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
       ${mj?`
