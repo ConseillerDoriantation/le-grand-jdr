@@ -54,8 +54,21 @@ const _renderedReactions = new Set();
 // ── Outils de dessin & règle ────────────────────────────────────────
 const CELL_M = 1.5;          // 1 case = 1.5 mètre
 let _annotations      = {};   // id → { data, shape }
-let _selectedAnnotId  = null; // id de l'annotation sélectionnée
+let _selectedAnnotId  = null; // id de l'annotation sélectionnée (sélection simple)
+let _selectedAnnotIds = new Set(); // multi-sélection annotations
 let _annotTransformer = null; // Konva Transformer pour resize/rotation
+let _annotGroupDragOrigins = null; // { [id]: {x,y} } pour déplacement groupé annotations
+
+// Marquee (lasso rectangle)
+let _marqueeActive  = false;
+let _marqueeOrigin  = null;   // world coords du départ
+let _marqueeLastWp  = null;   // dernière position pendant le drag
+let _marqueeShape   = null;   // Konva Rect visuel
+let _suppressNextClick = false; // empêche le click de désélectionner après un marquee
+
+// Ping (remonté au niveau module pour accès depuis les fonctions externes)
+let _pingTimer  = null;
+let _pingOrigin = null;
 let _drawing      = false;   // tracé en cours
 let _drawPts      = [];      // points crayon libre (world coords)
 let _drawOrigin   = null;    // point de départ pour formes
@@ -277,7 +290,11 @@ function _cleanup() {
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
   _annotations = {}; _drawing = false; _drawLive = null;
-  _selectedAnnotId = null; _annotTransformer = null;
+  _selectedAnnotId = null; _selectedAnnotIds.clear(); _annotTransformer = null;
+  _annotGroupDragOrigins = null;
+  _marqueeActive = false; _marqueeOrigin = null; _marqueeLastWp = null;
+  _marqueeShape = null; _suppressNextClick = false;
+  _pingTimer = null; _pingOrigin = null;
   _rulerActive = false; _rulerLine = null; _rulerLabel = null;
   if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
   _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
@@ -324,17 +341,51 @@ function _initCanvas(container) {
   });
   _layers.draw.add(_annotTransformer);
 
-  // Listener window pour la règle — window est garanti, pas de conflit avec Konva
-  const _rulerMoveNative = e => {
-    if (_tool !== 'ruler' || !_rulerActive || !_stage) return;
+  // Listener natif window : règle + marquee (bypass Konva, garanti même hors drag)
+  const _nativeMoveHandler = e => {
+    if (!_stage) return;
     const rect = container.getBoundingClientRect();
-    // Ignorer si la souris est hors du canvas
-    if (e.clientX < rect.left || e.clientX > rect.right ||
-        e.clientY < rect.top  || e.clientY > rect.bottom) return;
-    _updateRuler(_stageToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top }));
+    const inCanvas = e.clientX >= rect.left && e.clientX <= rect.right &&
+                     e.clientY >= rect.top  && e.clientY <= rect.bottom;
+    const wp = inCanvas
+      ? _stageToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+      : null;
+
+    // Règle (free-hover, reste dans le canvas)
+    if (wp && _tool === 'ruler' && _rulerActive) _updateRuler(wp);
+
+    // Marquee : suivi pendant le drag (peut sortir légèrement du canvas)
+    if (_tool === 'select' && _marqueeOrigin) {
+      const trackWp = wp ?? _marqueeLastWp; // utiliser la dernière pos connue si hors canvas
+      if (!trackWp) return;
+      if (!_marqueeActive) {
+        const dx = trackWp.x - _marqueeOrigin.x, dy = trackWp.y - _marqueeOrigin.y;
+        if (Math.hypot(dx, dy) > 8) {
+          _marqueeActive = true;
+          if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
+          _clearMultiSelect();
+          _deselectAnnot();
+          const K = window.Konva;
+          _marqueeShape = new K.Rect({
+            x: _marqueeOrigin.x, y: _marqueeOrigin.y, width: 0, height: 0,
+            stroke: '#4f8cff', strokeWidth: 1.5, fill: 'rgba(79,140,255,0.1)',
+            dash: [6, 3], listening: false, name: 'marquee',
+          });
+          _layers.ping.add(_marqueeShape);
+        }
+      }
+      if (_marqueeActive && wp) {
+        _marqueeLastWp = wp;
+        const x = Math.min(_marqueeOrigin.x, wp.x), y = Math.min(_marqueeOrigin.y, wp.y);
+        _marqueeShape?.setAttrs({ x, y,
+          width:  Math.abs(wp.x - _marqueeOrigin.x),
+          height: Math.abs(wp.y - _marqueeOrigin.y) });
+        _layers.ping?.batchDraw();
+      }
+    }
   };
-  window.addEventListener('mousemove', _rulerMoveNative);
-  _unsubs.push(() => window.removeEventListener('mousemove', _rulerMoveNative));
+  window.addEventListener('mousemove', _nativeMoveHandler);
+  _unsubs.push(() => window.removeEventListener('mousemove', _nativeMoveHandler));
 
   _stage.on('wheel', e => {
     e.evt.preventDefault();
@@ -347,7 +398,6 @@ function _initCanvas(container) {
   });
 
   let _pan = false, _po = null;
-  let _pingTimer = null, _pingOrigin = null;
   _stage.on('mousedown', e => {
     if (e.evt.button===1||e.evt.button===2) {
       _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
@@ -369,11 +419,13 @@ function _initCanvas(container) {
         _startDraw(_stageToWorld(np));
         return;
       }
-      // Clic normal → ping sur la stage uniquement
+      // Clic normal → ping (+ départ marquee en mode select)
       if (e.target===_stage) {
+        if (_tool === 'select') _marqueeOrigin = _stageToWorld(np);
         _pingOrigin = { ...np };
         _pingTimer = setTimeout(() => {
           _pingTimer = null;
+          if (_marqueeActive) return; // pas de ping si le lasso est en cours
           const sc = _stage.scaleX(), sp = _stage.position();
           _emitPing((_pingOrigin.x - sp.x) / sc, (_pingOrigin.y - sp.y) / sc);
         }, 300);
@@ -396,11 +448,16 @@ function _initCanvas(container) {
   _stage.on('mouseup', () => {
     _pan = false;
     if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
+    if (_marqueeActive) { _endMarquee(); _suppressNextClick = true; }
+    _marqueeOrigin = null;
     if (_tool === 'draw' && _drawing) _endDraw();
   });
   _stage.on('contextmenu', e => e.evt.preventDefault());
   _stage.on('click', e => {
-    if (e.target===_stage) { _deselect(); _deselectAnnot(); }
+    if (e.target===_stage) {
+      if (_suppressNextClick) { _suppressNextClick = false; return; }
+      _deselect(); _deselectAnnot();
+    }
   });
 
   _resizeObs = new ResizeObserver(() => {
@@ -1987,29 +2044,66 @@ function _buildAnnotShape(K, data) {
     shape.on('click', e => {
       if (_tool !== 'select') return;
       e.cancelBubble = true;
-      _selectedAnnotId = data.id;
-      if (_annotTransformer) { _annotTransformer.nodes([shape]); _layers.draw.batchDraw(); }
+      if (e.evt.shiftKey) {
+        // Shift+clic : toggle dans la multi-sélection
+        if (_selectedAnnotIds.has(data.id)) _selectedAnnotIds.delete(data.id);
+        else _selectedAnnotIds.add(data.id);
+      } else {
+        _selectedAnnotIds.clear();
+        _selectedAnnotIds.add(data.id);
+        _selectedAnnotId = data.id;
+      }
+      _applyAnnotTransformer();
     });
-    // Clic-droit → supprimer (mode select uniquement)
+    // Clic-droit → supprimer la sélection (mode select uniquement)
     shape.on('contextmenu', e => {
       if (_tool !== 'select') return;
       e.evt.preventDefault(); e.cancelBubble = true;
+      // Supprimer toutes les annotations sélectionnées (ou juste celle-ci si pas sélectionnée)
+      const toDelete = _selectedAnnotIds.has(data.id) ? [..._selectedAnnotIds] : [data.id];
+      toDelete.forEach(id => deleteDoc(_annotRef(id)).catch(() => {}));
       _deselectAnnot();
-      deleteDoc(_annotRef(data.id)).catch(() => {});
     });
-    // Fin de drag → sauvegarder position
+    // Début de drag groupé
+    shape.on('dragstart', () => {
+      if (_selectedAnnotIds.has(data.id) && _selectedAnnotIds.size > 1) {
+        _annotGroupDragOrigins = {};
+        for (const id of _selectedAnnotIds) {
+          const s = _annotations[id]?.shape;
+          if (s) _annotGroupDragOrigins[id] = { x: s.x(), y: s.y() };
+        }
+      } else { _annotGroupDragOrigins = null; }
+    });
+    // Déplacement groupé
+    shape.on('dragmove', () => {
+      if (!_annotGroupDragOrigins || !_selectedAnnotIds.has(data.id)) return;
+      const orig = _annotGroupDragOrigins[data.id];
+      if (!orig) return;
+      const dx = shape.x() - orig.x, dy = shape.y() - orig.y;
+      for (const [id, o] of Object.entries(_annotGroupDragOrigins)) {
+        if (id === data.id) continue;
+        _annotations[id]?.shape?.position({ x: o.x + dx, y: o.y + dy });
+      }
+      _layers.draw.batchDraw();
+    });
+    // Fin de drag → sauvegarder position(s)
     shape.on('dragend', () => {
-      const update = (data.type === 'freehand' || data.type === 'line')
-        ? { offsetX: shape.x(), offsetY: shape.y() }
-        : { x: shape.x(), y: shape.y() };
-      updateDoc(_annotRef(data.id), update).catch(() => {});
+      const idsToSave = (_annotGroupDragOrigins && _selectedAnnotIds.has(data.id))
+        ? [..._selectedAnnotIds] : [data.id];
+      for (const id of idsToSave) {
+        const s = _annotations[id]?.shape, ann = _annotations[id]?.data;
+        if (!s || !ann) continue;
+        const update = (ann.type === 'freehand' || ann.type === 'line')
+          ? { offsetX: s.x(), offsetY: s.y() }
+          : { x: s.x(), y: s.y() };
+        updateDoc(_annotRef(id), update).catch(() => {});
+      }
+      _annotGroupDragOrigins = null;
     });
     // Fin de transformation (rotate/resize) → sauvegarder
     shape.on('transformend', () => {
       updateDoc(_annotRef(data.id), {
-        rotation: shape.rotation(),
-        scaleX:   shape.scaleX(),
-        scaleY:   shape.scaleY(),
+        rotation: shape.rotation(), scaleX: shape.scaleX(), scaleY: shape.scaleY(),
         x: shape.x(), y: shape.y(),
       }).catch(() => {});
     });
@@ -2017,8 +2111,67 @@ function _buildAnnotShape(K, data) {
   return shape;
 }
 
+// ── Sélection groupée annotations ──────────────────────────────────
+function _applyAnnotTransformer() {
+  if (!_annotTransformer) return;
+  const shapes = [..._selectedAnnotIds].map(id => _annotations[id]?.shape).filter(Boolean);
+  _annotTransformer.nodes(shapes);
+  _layers.draw?.batchDraw();
+}
+
+function _inRect(cx, cy, r) {
+  return cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
+}
+
+function _selectByRect(r) {
+  _clearMultiSelect();
+  _deselectAnnot();
+  const uid = STATE.user?.uid;
+
+  // Tokens sur la page active
+  for (const [id, {data: t}] of Object.entries(_tokens)) {
+    if (!t || t.pageId !== _activePage?.id) continue;
+    const cx = t.col * CELL + CELL / 2, cy = t.row * CELL + CELL / 2;
+    if (_inRect(cx, cy, r)) {
+      _selectedMulti.add(id);
+      _tokens[id]?.shape?.findOne('.sel')?.visible(true);
+    }
+  }
+
+  // Annotations interactives sur la page active
+  for (const [id, e] of Object.entries(_annotations)) {
+    if (!e.data || e.data.pageId !== _activePage?.id || !e.shape) continue;
+    if (!STATE.isAdmin && e.data.createdBy !== uid) continue;
+    const bb = e.shape.getClientRect({ relativeTo: _stage });
+    const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
+    if (_inRect(cx, cy, r)) _selectedAnnotIds.add(id);
+  }
+
+  _applyAnnotTransformer();
+  if (_selectedMulti.size > 0) _renderInspector(null);
+  else if (_selectedAnnotIds.size > 0) _renderInspector(null);
+  _layers.token?.batchDraw();
+}
+
+function _endMarquee() {
+  _marqueeActive = false;
+  _marqueeShape?.destroy(); _marqueeShape = null;
+  _layers.ping?.batchDraw();
+  if (!_marqueeLastWp || !_marqueeOrigin) { _marqueeLastWp = null; return; }
+  const r = {
+    x: Math.min(_marqueeOrigin.x, _marqueeLastWp.x),
+    y: Math.min(_marqueeOrigin.y, _marqueeLastWp.y),
+    w: Math.abs(_marqueeLastWp.x - _marqueeOrigin.x),
+    h: Math.abs(_marqueeLastWp.y - _marqueeOrigin.y),
+  };
+  _marqueeLastWp = null;
+  if (r.w < 5 && r.h < 5) return;
+  _selectByRect(r);
+}
+
 function _deselectAnnot() {
   _selectedAnnotId = null;
+  _selectedAnnotIds.clear();
   if (_annotTransformer) { _annotTransformer.nodes([]); _layers.draw?.batchDraw(); }
 }
 
@@ -2046,6 +2199,7 @@ function _updateAnnotDraggable() {
     e.shape.draggable(active);
     e.shape.listening(active);
   });
+  if (inSelect) _applyAnnotTransformer(); // maintenir le transformer sur la sélection courante
   _layers.draw.batchDraw();
 }
 
@@ -3346,9 +3500,11 @@ function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
   if (e.key==='Escape') { if (_tool !== 'select') _setTool('select'); else _deselect(); }
-  if ((e.key==='Delete'||e.key==='Backspace') && _selectedAnnotId && _tool==='select') {
-    deleteDoc(_annotRef(_selectedAnnotId)).catch(()=>{});
-    _deselectAnnot();
+  if ((e.key==='Delete'||e.key==='Backspace') && _tool==='select') {
+    if (_selectedAnnotIds.size > 0) {
+      [..._selectedAnnotIds].forEach(id => deleteDoc(_annotRef(id)).catch(()=>{}));
+      _deselectAnnot();
+    }
   }
 }
 
