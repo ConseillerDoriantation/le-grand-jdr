@@ -47,12 +47,14 @@ let _mapMode    = false;     // true = édition carte activée (images déplaça
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
 let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skills
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
+let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
 const _renderedPings     = new Set();
 const _renderedReactions = new Set();
 
 // Mapping abréviation compétence → clé getMod
 const _STAT_KEY = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
 const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };
+const _STAT_RGB   = { FOR:'239,68,68', DEX:'34,195,142', CON:'245,158,11', INT:'79,140,255', SAG:'180,127,255', CHA:'253,108,158' };
 
 // ── Refs Firestore ──────────────────────────────────────────────────
 const _aid     = ()   => getCurrentAdventureId();
@@ -1383,6 +1385,7 @@ window._vttRollAttack = async () => {
         type:'cast',
         authorId: STATE.user?.uid||null, authorName,
         casterName: lS.displayName??src.name,
+        characterImage: lS.displayImage||null,
         targetName: lT.displayName??tgt.name,
         optLabel: opt.label, pmCost: opt.pmCost,
         castEffect: opt.dice,
@@ -1409,6 +1412,7 @@ window._vttRollAttack = async () => {
         type:'attack', isHeal:true,
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
+        characterImage: lS.displayImage||null,
         defenderName: lT.displayName??tgt.name,
         optLabel: opt.label,
         dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
@@ -1482,6 +1486,7 @@ window._vttRollAttack = async () => {
       type: 'attack',
       authorId: STATE.user?.uid||null, authorName,
       attackerName: lS.displayName??src.name,
+      characterImage: lS.displayImage||null,
       defenderName: lT.displayName??tgt.name,
       optLabel: opt.label,
       isCrit, isFumble,
@@ -1652,6 +1657,13 @@ function _renderInspector(t) {
           <button class="vtt-roll-mode-btn${_rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" onclick="window._vttSetRollMode('disadvantage')" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
           <button class="vtt-roll-mode-btn${_rollMode==='normal'?' active':''}" data-mode="normal" onclick="window._vttSetRollMode('normal')" title="Jet classique — 1d20">⚪ Normal</button>
           <button class="vtt-roll-mode-btn${_rollMode==='advantage'?' active':''}" data-mode="advantage" onclick="window._vttSetRollMode('advantage')" title="Avantage — prend le plus haut des 2 dés">⬆ Avantage</button>
+        </div>
+        <div class="vtt-roll-bonus-row">
+          <span class="vtt-roll-bonus-lbl">Bonus contextuel</span>
+          <button class="vtt-roll-bonus-adj" onclick="window._vttAdjBonus(-1)">−</button>
+          <span class="vtt-roll-bonus-val${_rollBonus!==0?' nonzero':''}" id="vtt-bonus-val">${_rollBonus>0?'+'+_rollBonus:_rollBonus}</span>
+          <button class="vtt-roll-bonus-adj" onclick="window._vttAdjBonus(1)">+</button>
+          <button class="vtt-roll-bonus-reset" onclick="window._vttAdjBonus(0,true)" title="Réinitialiser">↺</button>
         </div>
         <div class="vtt-ins-skills">${btns}</div>
       </div>`;
@@ -2137,6 +2149,15 @@ window._vttSetRollMode = mode => {
     b.classList.toggle('active', b.dataset.mode === mode));
 };
 
+window._vttAdjBonus = (delta, reset = false) => {
+  _rollBonus = reset ? 0 : Math.max(-20, Math.min(20, _rollBonus + delta));
+  const el = document.getElementById('vtt-bonus-val');
+  if (el) {
+    el.textContent = _rollBonus > 0 ? `+${_rollBonus}` : `${_rollBonus}`;
+    el.classList.toggle('nonzero', _rollBonus !== 0);
+  }
+};
+
 window._vttRollSkill = async (skillName, stat) => {
   const t = _tokens[_selected]?.data;
   const c = t?.characterId ? _characters[t.characterId] : null;
@@ -2149,17 +2170,19 @@ window._vttRollSkill = async (skillName, stat) => {
   else if (_rollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
   else                              { roll = d1; }
 
-  const total   = roll + mod;
+  const total   = roll + mod + _rollBonus;
   const isCrit  = roll === 20, isFumble = roll === 1;
-  const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
+  const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
+  const characterName = c?.nom || t?.name || null;
+  const characterImage = c?.photoURL || c?.photo || c?.avatar || null;
   try {
     await addDoc(_logCol(), {
       type: 'roll',
       authorId: STATE.user?.uid || null,
-      authorName,
+      authorName, characterName, characterImage,
       rollMode: _rollMode,
       rollDice: d2 !== undefined ? [d1, d2] : [d1],
-      rollRaw: roll, rollMod: mod,
+      rollRaw: roll, rollMod: mod, rollBonus: _rollBonus || 0,
       rollResult: total,
       rollSkill: skillName, rollStat: stat,
       isCrit, isFumble,
@@ -2417,6 +2440,12 @@ window._ouvrirGestionEmotes = async () => {
 function _renderChatLog(msgs) {
   const el=document.getElementById('vtt-chat-log'); if (!el) return;
   const myUid=STATE.user?.uid;
+
+  // Portrait 22px : image si dispo, sinon initiale colorée
+  const _portrait = (url, name, color='var(--gold)') => url
+    ? `<img class="vtt-log-portrait" src="${url}" alt="${_escHtml(name||'')}" onerror="this.style.visibility='hidden'">`
+    : `<div class="vtt-log-portrait" style="background:${color}">${_escHtml((name||'?')[0].toUpperCase())}</div>`;
+
   el.innerHTML=msgs.map(m=>{
     const isMe=m.authorId===myUid;
     const who=`<span class="vtt-log-who${isMe?' me':''}">${_escHtml(m.authorName||'?')}</span>`;
@@ -2424,16 +2453,18 @@ function _renderChatLog(msgs) {
       // Sort CA / utilitaire — pas de jet de dés
       const pmStr = m.pmCost > 0
         ? `<span style="font-size:.65rem;color:#b47fff;margin-left:.3rem">−${m.pmCost} PM</span>` : '';
+      const castWho = m.casterName || m.authorName || '?';
       return `<div class="vtt-log-entry vtt-log-roll"
-          style="border-left:3px solid #b47fff;padding-left:.5rem;background:rgba(180,127,255,.05);border-radius:0 6px 6px 0">
-        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap">
-          ${who}
+          style="border-left:3px solid #b47fff;padding:.3rem .3rem .3rem .5rem;background:rgba(180,127,255,.05);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap">
+          ${_portrait(m.characterImage, castWho, '#b47fff')}
+          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(castWho)}</span>
           <span style="font-size:.72rem;color:var(--text-dim)">✨</span>
           <strong style="font-size:.82rem">${_escHtml(m.optLabel||'')}</strong>
           <span style="color:var(--text-dim);font-size:.65rem">→ ${_escHtml(m.targetName||'')}</span>
           ${pmStr}
         </div>
-        ${m.castEffect && m.castEffect !== '—' ? `<div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem">${_escHtml(m.castEffect)}</div>` : ''}
+        ${m.castEffect && m.castEffect !== '—' ? `<div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem;padding-left:calc(22px + .35rem)">${_escHtml(m.castEffect)}</div>` : ''}
       </div>`;
     }
     if (m.type==='attack' && m.isHeal) {
@@ -2445,10 +2476,12 @@ function _renderChatLog(msgs) {
         m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
         m.dmgBonus ? sn(m.dmgBonus) + sub('bonus') : '',
       ].filter(Boolean).join(' ');
+      const healWho = m.attackerName || m.authorName || '?';
       return `<div class="vtt-log-entry vtt-log-roll"
-          style="border-left:3px solid #22c38e;padding-left:.5rem;background:rgba(34,195,142,.05);border-radius:0 6px 6px 0">
-        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;margin-bottom:.2rem">
-          ${who}
+          style="border-left:3px solid #22c38e;padding:.3rem .3rem .3rem .5rem;background:rgba(34,195,142,.05);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.2rem">
+          ${_portrait(m.characterImage, healWho, '#22c38e')}
+          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(healWho)}</span>
           <span style="color:var(--text-dim);font-size:.72rem">→</span>
           <strong style="font-size:.82rem">${_escHtml(m.defenderName||'')}</strong>
           <span style="color:var(--text-dim);font-size:.65rem">· ${_escHtml(m.optLabel||'')}</span>
@@ -2530,16 +2563,18 @@ function _renderChatLog(msgs) {
         </div>`;
       }
 
+      const atkWho = m.attackerName || m.authorName || '?';
       return `<div class="vtt-log-entry vtt-log-roll"
-          style="border-left:3px solid ${borderCol};padding-left:.5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
-        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;margin-bottom:.3rem">
-          <span class="vtt-log-who${isMe?' me':''}">${_escHtml(m.authorName||'?')}</span>
+          style="border-left:3px solid ${borderCol};padding:.3rem .3rem .3rem .5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.3rem">
+          ${_portrait(m.characterImage, atkWho, borderCol)}
+          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(atkWho)}</span>
           <span style="color:var(--text-dim);font-size:.72rem">→</span>
           <strong style="font-size:.82rem">${_escHtml(m.defenderName||'')}</strong>
           <span style="color:var(--text-dim);font-size:.65rem">· ${_escHtml(m.optLabel||'')}</span>
           ${resultBadge}
         </div>
-        <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap">
+        <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
           <span style="font-size:.78rem">🎯</span>
           <span style="font-size:.7rem;color:var(--text-dim)">${hitFormula}</span>
           <span style="font-size:.72rem;color:var(--text-dim)">=</span>
@@ -2550,32 +2585,59 @@ function _renderChatLog(msgs) {
       </div>`;
     }
     if (m.type==='roll') {
-      const modStr = m.rollMod > 0 ? `+${m.rollMod}` : m.rollMod < 0 ? `${m.rollMod}` : '';
-      const statCol = _STAT_COLOR[m.rollStat] || 'var(--text-dim)';
+      const rollWho  = m.characterName || m.authorName || '?';
+      const statCol  = _STAT_COLOR[m.rollStat] || 'var(--gold)';
+      const statRgb  = _STAT_RGB[m.rollStat]   || '255,210,0';
       const resultCol = m.isCrit ? '#ffd700' : m.isFumble ? '#ef4444' : 'var(--text)';
+      const modStr   = m.rollMod > 0 ? `+${m.rollMod}` : m.rollMod < 0 ? `${m.rollMod}` : '';
+      const bonusStr = m.rollBonus > 0 ? `+${m.rollBonus}` : m.rollBonus < 0 ? `${m.rollBonus}` : '';
       const badge = m.isCrit
-        ? `<span style="color:#ffd700;font-size:.65rem;font-weight:700;margin-left:.3rem">✨ CRITIQUE</span>`
+        ? `<span style="font-size:.65rem;font-weight:700;color:#ffd700;margin-left:auto">✨ CRITIQUE</span>`
         : m.isFumble
-        ? `<span style="color:#ef4444;font-size:.65rem;font-weight:700;margin-left:.3rem">💀 FUMBLE</span>`
+        ? `<span style="font-size:.65rem;font-weight:700;color:#ef4444;margin-left:auto">💀 FUMBLE</span>`
         : '';
-      const modeIcon = m.rollMode==='advantage' ? '⬆' : m.rollMode==='disadvantage' ? '⬇' : '';
-      const diceStr  = m.rollDice?.length === 2
+      const modeIcon = m.rollMode==='advantage'
+        ? `<span style="font-size:.6rem;font-weight:700;color:#22c38e">⬆ Avantage</span>`
+        : m.rollMode==='disadvantage'
+        ? `<span style="font-size:.6rem;font-weight:700;color:#ef4444">⬇ Désav.</span>`
+        : '';
+      const diceStr = m.rollDice?.length === 2
         ? (() => {
             const [a, b] = m.rollDice;
             const kept = m.rollRaw, dropped = a === kept ? b : a;
-            return `[<strong>${kept}</strong>, <span style="color:var(--text-dim);text-decoration:line-through">${dropped}</span>]`;
+            return `[<strong>${kept}</strong>,<span style="color:var(--text-dim);text-decoration:line-through">${dropped}</span>]`;
           })()
         : `[${m.rollRaw}]`;
-      const detail = m.rollSkill
-        ? `<div style="display:flex;align-items:baseline;gap:.35rem;margin-top:.2rem;flex-wrap:wrap">
-            ${modeIcon?`<span style="font-size:.65rem;font-weight:700;color:${m.rollMode==='advantage'?'#22c38e':'#ef4444'}">${modeIcon}</span>`:''}
-            <span style="font-size:.68rem;color:${statCol};font-weight:600">${_escHtml(m.rollSkill)}</span>
-            <span style="font-size:.65rem;color:var(--text-dim)">${diceStr}${modStr?` <span style="color:${statCol}">${modStr}</span>`:''}</span>
-            <span style="font-size:.9rem;font-weight:700;color:${resultCol}">= ${m.rollResult}</span>
+      if (m.rollSkill) {
+        return `<div class="vtt-log-entry vtt-log-roll" style="border-left:3px solid ${statCol};background:rgba(${statRgb},.06);border-radius:0 6px 6px 0;padding:.3rem .3rem .3rem .5rem">
+          <div style="display:flex;align-items:center;gap:.35rem;margin-bottom:.2rem">
+            ${_portrait(m.characterImage, rollWho, statCol)}
+            <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(rollWho)}</span>
+            <span style="font-size:.65rem;color:var(--text-dim)">🎲</span>
+            <span style="font-size:.72rem;font-weight:600;color:${statCol}">${_escHtml(m.rollSkill)}</span>
+            <span style="font-size:.6rem;color:var(--text-dim)">${m.rollStat||''}</span>
+            ${modeIcon}
             ${badge}
-          </div>`
-        : `<em>${_escHtml(m.rollFormula||'')}</em> → <strong style="color:${resultCol}">${m.rollResult}</strong>${badge}`;
-      return `<div class="vtt-log-entry vtt-log-roll">${who} 🎲 ${detail}</div>`;
+          </div>
+          <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
+            <span style="font-size:.7rem;color:var(--text-dim)">${diceStr}</span>
+            ${modStr ? `<span style="font-size:.7rem;color:${statCol}">${modStr}</span>` : ''}
+            ${bonusStr ? `<span style="font-size:.7rem;color:var(--gold)" title="bonus contextuel">${bonusStr}</span>` : ''}
+            <span style="font-size:.72rem;color:var(--text-dim)">=</span>
+            <strong style="font-size:1.05rem;color:${resultCol}">${m.rollResult}</strong>
+          </div>
+        </div>`;
+      }
+      // Jet libre (sans token)
+      return `<div class="vtt-log-entry vtt-log-roll" style="border-left:3px solid var(--gold);padding:.3rem .3rem .3rem .5rem;background:rgba(255,210,0,.04);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem">
+          ${who} <span style="font-size:.65rem;color:var(--text-dim)">🎲</span>
+          <em style="font-size:.68rem;color:var(--text-dim)">${_escHtml(m.rollFormula||'')}</em>
+          <span style="font-size:.72rem;color:var(--text-dim)">→</span>
+          <strong style="color:${resultCol}">${m.rollResult}</strong>
+          ${badge}
+        </div>
+      </div>`;
     }
     return `<div class="vtt-log-entry vtt-log-msg">${who} ${_applyEmotes(_escHtml(m.text||''))}</div>`;
   }).join('');

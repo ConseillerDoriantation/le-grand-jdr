@@ -32,8 +32,9 @@ function stCfg(item){ return STATUT_CFG[item.statut] || STATUT_CFG['En attente']
 // _clamp → utilisé dans shared/image-upload.js
 
 let _axeMap      = {};
-let _modalGroupes = [];   // groupes du modal ouvert (mission courante)
-let _modalStoryId = '';   // id de la mission en édition ('' = nouvelle)
+let _modalGroupes   = [];   // groupes du modal ouvert (mission courante)
+let _modalStoryId   = '';   // id de la mission en édition ('' = nouvelle)
+let _editingGroupId = null; // id du groupe en cours de modification (null = création)
 function axeColor(axe){
   if(!axe) return '#555';
   if(!_axeMap[axe]){ _axeMap[axe] = AXE_COLORS[Object.keys(_axeMap).length % AXE_COLORS.length]; }
@@ -76,10 +77,15 @@ function _renderGroupPills(groups) {
         <button type="button" onclick="window._stApplyGroup(${JSON.stringify(g.membres)})"
           title="Appliquer ce groupe aux participants"
           style="font-size:.75rem;color:var(--gold);font-family:'Cinzel',serif;
-            background:none;border:none;cursor:pointer;padding:0;line-height:1.2">
+            background:none;border:none;cursor:pointer;padding:0;line-height:1.2;flex:1;text-align:left">
           ${g.nom}</button>
+        <span onclick="window._stEditGroup('${g.id}')"
+          title="Modifier ce groupe"
+          style="display:flex;align-items:center;justify-content:center;
+            width:15px;height:15px;border-radius:50%;background:rgba(79,140,255,.15);
+            color:#4f8cff;font-size:.68rem;cursor:pointer;flex-shrink:0">✎</span>
         <span onclick="window._stDeleteGroup('${g.id}')"
-          style="display:flex;align-items:center;justify-content:center;margin-left:.2rem;
+          style="display:flex;align-items:center;justify-content:center;
             width:15px;height:15px;border-radius:50%;background:rgba(255,107,107,.15);
             color:#ff6b6b;font-size:.72rem;font-weight:700;cursor:pointer;flex-shrink:0">×</span>
       </div>
@@ -719,8 +725,8 @@ async function openStoryModal(item = null) {
       </div>
       <div id="st-save-group-form" style="display:none;margin-top:.5rem;padding:.7rem;
         background:var(--bg-panel);border:1px solid var(--border);border-radius:10px">
-        <div style="font-size:.7rem;color:var(--text-dim);font-weight:600;
-          text-transform:uppercase;letter-spacing:.5px;margin-bottom:.45rem">Membres</div>
+        <div id="st-group-form-title" style="font-size:.7rem;color:var(--text-dim);font-weight:600;
+          text-transform:uppercase;letter-spacing:.5px;margin-bottom:.45rem">Nouveau groupe — Membres</div>
         <div id="st-group-picker" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:.35rem;margin-bottom:.55rem">
           ${(() => {
             const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
@@ -931,10 +937,7 @@ async function openStoryModal(item = null) {
     if (nameEl) { nameEl.style.color = picked ? col : 'var(--text-dim)'; nameEl.style.fontWeight = picked ? '700' : '400'; }
   };
 
-  window._stSaveGroupDialog = () => {
-    const form = document.getElementById('st-save-group-form');
-    if (!form) return;
-    // Réinitialiser la sélection du picker
+  const _resetGroupPicker = () => {
     document.querySelectorAll('#st-group-picker [data-picked="1"]').forEach(el => {
       el.dataset.picked = '0';
       el.style.borderColor = 'var(--border)';
@@ -944,9 +947,41 @@ async function openStoryModal(item = null) {
       const nameEl = el.querySelector('span');
       if (nameEl) { nameEl.style.color = 'var(--text-dim)'; nameEl.style.fontWeight = '400'; }
     });
+  };
+
+  window._stSaveGroupDialog = () => {
+    const form = document.getElementById('st-save-group-form');
+    if (!form) return;
+    _editingGroupId = null;
+    _resetGroupPicker();
+    const titleEl = document.getElementById('st-group-form-title');
+    if (titleEl) titleEl.textContent = 'Nouveau groupe — Membres';
     form.style.display = 'block';
     const inp = document.getElementById('st-save-group-name');
     if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+  };
+
+  window._stEditGroup = (groupId) => {
+    const g = _modalGroupes.find(x => x.id === groupId);
+    if (!g) return;
+    const form = document.getElementById('st-save-group-form');
+    if (!form) return;
+    _editingGroupId = groupId;
+    _resetGroupPicker();
+    // Pré-sélectionner les membres existants
+    const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+    (g.membres || []).forEach(charId => {
+      const el = document.getElementById(`st-gpick-${charId}`);
+      if (!el || el.dataset.picked === '1') return;
+      const char = (STATE.characters||[]).find(c => c.id === charId);
+      const col  = char ? PCOLS[char.nom?.charCodeAt(0)%6||0] : '#4f8cff';
+      window._stGroupPickToggle(charId, col);
+    });
+    const titleEl = document.getElementById('st-group-form-title');
+    if (titleEl) titleEl.textContent = `Modifier « ${g.nom} » — Membres`;
+    form.style.display = 'block';
+    const inp = document.getElementById('st-save-group-name');
+    if (inp) { inp.value = g.nom || ''; setTimeout(() => inp.focus(), 50); }
   };
 
   window._stConfirmSaveGroup = async () => {
@@ -955,12 +990,21 @@ async function openStoryModal(item = null) {
     const membres = [...document.querySelectorAll('#st-group-picker [data-picked="1"]')]
       .map(el => el.dataset.gmId).filter(Boolean);
     if (!membres.length) { showNotif('Sélectionne au moins un membre.', 'error'); return; }
-    _modalGroupes = [..._modalGroupes, { id: 'g' + Date.now(), nom, membres }];
+    if (_editingGroupId) {
+      // Mise à jour d'un groupe existant (conserver les champs reussite/recompense/notes)
+      _modalGroupes = _modalGroupes.map(g =>
+        g.id === _editingGroupId ? { ...g, nom, membres } : g
+      );
+      _editingGroupId = null;
+      showNotif(`Groupe « ${nom} » mis à jour.`, 'success');
+    } else {
+      _modalGroupes = [..._modalGroupes, { id: 'g' + Date.now(), nom, membres }];
+      showNotif(`Groupe « ${nom} » créé.`, 'success');
+    }
     await _saveModalGroupes();
     _refreshStGroupsRow(_modalGroupes);
     const form = document.getElementById('st-save-group-form');
     if (form) form.style.display = 'none';
-    showNotif(`Groupe « ${nom} » sauvegardé.`, 'success');
   };
 
   window._stDeleteGroup = async (groupId) => {

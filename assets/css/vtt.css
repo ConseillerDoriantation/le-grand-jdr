@@ -402,6 +402,35 @@
 .vtt-roll-mode-btn.active[data-mode="normal"]       { background: rgba(255,255,255,.08); border-color: var(--text-muted); color: var(--text); }
 .vtt-roll-mode-btn.active[data-mode="disadvantage"] { background: rgba(239,68,68,.15); border-color: #ef4444; color: #ef4444; }
 
+.vtt-roll-bonus-row {
+  display: flex; align-items: center; gap: .3rem;
+  margin-bottom: .3rem;
+}
+.vtt-roll-bonus-lbl {
+  font-size: .62rem; color: var(--text-muted); flex: 1;
+}
+.vtt-roll-bonus-adj {
+  width: 20px; height: 20px; border-radius: 5px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text); font-size: .85rem; font-weight: 700;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  padding: 0; line-height: 1; transition: border-color .1s;
+  flex-shrink: 0;
+}
+.vtt-roll-bonus-adj:hover { border-color: var(--gold-glow); color: var(--gold); }
+.vtt-roll-bonus-val {
+  min-width: 32px; text-align: center;
+  font-size: .78rem; font-weight: 700; font-family: monospace;
+  color: var(--text-muted); transition: color .12s;
+}
+.vtt-roll-bonus-val.nonzero { color: var(--gold); }
+.vtt-roll-bonus-reset {
+  font-size: .6rem; color: var(--text-dim); background: transparent;
+  border: none; cursor: pointer; padding: 0 .1rem; opacity: .55;
+  transition: opacity .1s;
+}
+.vtt-roll-bonus-reset:hover { opacity: 1; color: var(--text); }
+
 .vtt-ins-skills {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -895,13 +924,18 @@
   padding: .22rem .35rem; border-radius: 6px;
   font-size: .72rem; line-height: 1.4; word-break: break-word;
 }
-.vtt-log-roll {
-  background: oklch(58% 0.20 22 / 0.08);
-  border: 1px solid oklch(58% 0.20 22 / 0.18);
-  color: var(--text);
+/* Le fond des entrées de jet est défini inline (couleur de stat / résultat) */
+.vtt-log-roll { color: var(--text); }
+.vtt-log-msg  { background: var(--bg-elevated); color: var(--text-muted); }
+.vtt-log-who  { font-weight: 700; color: var(--gold); margin-right: .25rem; }
+
+/* Portrait 22px dans le log */
+.vtt-log-portrait {
+  width: 22px; height: 22px; border-radius: 50%; object-fit: cover;
+  border: 1.5px solid var(--border); flex-shrink: 0;
+  font-size: .65rem; font-weight: 700; color: #fff;
+  display: flex; align-items: center; justify-content: center;
 }
-.vtt-log-msg { background: var(--bg-elevated); color: var(--text-muted); }
-.vtt-log-who { font-weight: 700; color: var(--gold); margin-right: .25rem; }
 .vtt-log-roll-num {
   font-size: 1rem; font-weight: 700; color: var(--crimson);
   font-family: 'Outfit', sans-serif;
