@@ -114,6 +114,7 @@ onAuthStateChanged(auth, async (user) => {
 
     if (adventures.length === 1) {
       selectAdventure(adventures[0]);
+      showApp();
       await navigate('dashboard');
       return;
     }
@@ -123,6 +124,7 @@ onAuthStateChanged(auth, async (user) => {
     const lastAdv = lastId && adventures.find(a => a.id === lastId);
     if (lastAdv) {
       selectAdventure(lastAdv);
+      showApp();
       await navigate('dashboard');
       return;
     }
