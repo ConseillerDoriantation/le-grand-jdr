@@ -314,15 +314,15 @@ function _initCanvas(container) {
     };
     _imgTr   = new K.Transformer(trCfg); _layers.map.add(_imgTr);
     _imgTrFg = new K.Transformer(trCfg); _layers.mapFg.add(_imgTrFg);
-
-    // Transformer pour sélectionner/tourner/redimensionner les annotations
-    _annotTransformer = new K.Transformer({
-      rotateEnabled: true, keepRatio: false,
-      borderStroke: '#ffe600', borderStrokeWidth: 1,
-      anchorStroke: '#ffe600', anchorFill: '#1a1a2e', anchorSize: 8, anchorCornerRadius: 2,
-    });
-    _layers.draw.add(_annotTransformer);
   }
+
+  // Transformer annotations — disponible pour tous (chaque joueur interagit avec ses propres dessins)
+  _annotTransformer = new K.Transformer({
+    rotateEnabled: true, keepRatio: false,
+    borderStroke: '#ffe600', borderStrokeWidth: 1,
+    anchorStroke: '#ffe600', anchorFill: '#1a1a2e', anchorSize: 8, anchorCornerRadius: 2,
+  });
+  _layers.draw.add(_annotTransformer);
 
   // Listener window pour la règle — window est garanti, pas de conflit avec Konva
   const _rulerMoveNative = e => {
@@ -1869,51 +1869,13 @@ function _renderPageList() {
   }).join('');
 }
 
-// ─ Onglets horizontaux pour les joueurs (toolbar) ───────────────────
+// ─ Indicateur de page courant pour les joueurs (lecture seule) ──────
 function _renderPageTabs() {
   if (STATE.isAdmin) { _renderPageList(); return; } // MJ : liste dans le tray
   const el=document.getElementById('vtt-page-tabs'); if (!el) return;
-  const sorted=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
-  const broadcastId=_session.activePageId;
-
-  // Compte les joueurs par page (tokens placés de type player)
-  const playerCount={};
-  for (const {data:t} of Object.values(_tokens)) {
-    if (t.type==='player'&&t.pageId) playerCount[t.pageId]=(playerCount[t.pageId]??0)+1;
-  }
-
-  el.innerHTML=sorted.map(p=>{
-    const isPlayers = p.id===broadcastId;        // où sont les joueurs
-    const isMj      = p.id===_activePage?.id;    // où est le MJ (sa propre vue)
-    const cnt       = playerCount[p.id]??0;
-
-    // Badges d'état : chacun indépendant et cumulable
-    const mjBadge      = isMj      ? `<span class="vtt-tab-badge vtt-tab-badge-mj"   title="Votre vue">📍</span>` : '';
-    const playersBadge = isPlayers ? `<span class="vtt-tab-badge vtt-tab-badge-pl"   title="Vos joueurs sont ici">👥</span>` : '';
-    const cntBadge     = cnt>0&&!isPlayers ? `<span class="vtt-page-player-cnt">${cnt}j</span>` : '';
-
-    // Classe de fond : priorité au statut joueurs si le MJ n'est pas dessus
-    const cls = isMj&&isPlayers ? 'active mj-and-players'
-              : isMj            ? 'active'
-              : isPlayers       ? 'players-here'
-              : '';
-
-    const title = [isMj?'📍 Votre vue':'', isPlayers?'👥 Vos joueurs sont ici':'']
-                   .filter(Boolean).join(' · ') || p.name;
-
-    return `
-    <button class="vtt-page-tab ${cls}" onclick="window._vttSwitchPage('${p.id}')" title="${title}">
-      ${mjBadge}${playersBadge}
-      <span class="vtt-tab-name">${p.name}</span>
-      ${cntBadge}
-      ${STATE.isAdmin?`<span class="vtt-page-del" onclick="event.stopPropagation();window._vttDeletePage('${p.id}')">×</span>`:''}
-    </button>`;
-  }).join('')+
-  (sorted.length===0&&STATE.isAdmin
-    ? `<span style="font-size:.75rem;color:var(--text-dim);padding:.3rem .5rem;white-space:nowrap">
-         ← clique <strong>＋ Page</strong> pour commencer
-       </span>`
-    : '');
+  // Les joueurs ne naviguent pas — ils voient juste le nom de leur page courante
+  const name = _activePage?.name ?? '…';
+  el.innerHTML = `<span class="vtt-page-current-label">📍 ${name}</span>`;
 }
 
 async function _switchPage(pageId) {
@@ -1995,8 +1957,9 @@ function _clearRuler() {
 function _buildAnnotShape(K, data) {
   const col  = data.color || '#ef4444';
   const fill = data.fill ? col + '30' : 'transparent';
+  // listening sera ajusté par _updateAnnotDraggable selon l'outil et la propriété
   const base = { stroke: col, strokeWidth: data.strokeWidth || 2,
-    lineCap:'round', lineJoin:'round', name:'annot', listening: STATE.isAdmin };
+    lineCap:'round', lineJoin:'round', name:'annot', listening: false };
   let shape;
   if (data.type === 'freehand' || data.type === 'line') {
     shape = new K.Line({ ...base, points: data.points || [],
@@ -2016,7 +1979,10 @@ function _buildAnnotShape(K, data) {
   if (data.scaleX)   shape.scaleX(data.scaleX);
   if (data.scaleY)   shape.scaleY(data.scaleY);
 
-  if (STATE.isAdmin) {
+  // MJ peut tout modifier, joueur seulement ses propres dessins
+  const canEdit = STATE.isAdmin || data.createdBy === STATE.user?.uid;
+
+  if (canEdit) {
     // Clic gauche → sélectionner (mode select uniquement)
     shape.on('click', e => {
       if (_tool !== 'select') return;
@@ -2070,12 +2036,15 @@ function _renderAnnotLayer() {
 }
 
 function _updateAnnotDraggable() {
-  if (!STATE.isAdmin || !_layers.draw) return;
-  const canInteract = _tool === 'select';
+  if (!_layers.draw) return;
+  const inSelect = _tool === 'select';
+  const uid = STATE.user?.uid;
   Object.values(_annotations).forEach(e => {
     if (!e.shape) return;
-    e.shape.draggable(canInteract);
-    e.shape.listening(canInteract);
+    const canEdit = STATE.isAdmin || e.data.createdBy === uid;
+    const active  = inSelect && canEdit;
+    e.shape.draggable(active);
+    e.shape.listening(active);
   });
   _layers.draw.batchDraw();
 }
@@ -3395,7 +3364,7 @@ function _buildHtml() {
     <div class="vtt-tool-group">
       <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="↖ Sélection — interagir avec les tokens et annotations">↖</button>
       <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle — 1er clic départ, 2e clic fin">📏</button>
-      ${mj?`<button class="vtt-tool" data-tool="draw" onclick="window._vttTool('draw')" title="✏️ Dessin — dessiner sur la carte">✏️</button>`:''}
+      <button class="vtt-tool" data-tool="draw" onclick="window._vttTool('draw')" title="✏️ Dessin — dessiner sur la carte">✏️</button>
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
       <button class="vtt-draw-btn active" id="vtt-ds-pencil"  onclick="window._vttDrawShape('pencil')"  title="Crayon libre">✏️</button>
@@ -3413,7 +3382,7 @@ function _buildHtml() {
       <div class="vtt-draw-sep"></div>
       <button class="vtt-draw-btn" id="vtt-draw-fill-btn" onclick="window._vttToggleDrawFill()" title="Remplissage (rect/cercle)">◻</button>
       <div style="flex:1"></div>
-      <button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearAnnots()" title="Effacer toutes les annotations de cette page">🗑 Effacer tout</button>
+      ${mj?`<button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearAnnots()" title="Effacer toutes les annotations de cette page">🗑 Effacer tout</button>`:''}
     </div>
     <div class="vtt-tool-group vtt-right">
       <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
