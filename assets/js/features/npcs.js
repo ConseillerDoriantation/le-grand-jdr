@@ -41,6 +41,7 @@ const NPC_STATS = [
   { key: 'sagesse',      short: 'SAG' },
   { key: 'charisme',     short: 'CHA' },
 ];
+const NPC_COMBAT_DEFAULT = { weaponName: '', damage: '', range: null };
 
 const _modStr = (v) => { const m = getModFromScore(Number(v) || 8); return m >= 0 ? `+${m}` : String(m); };
 const _readNumberOrNull = (id) => {
@@ -49,6 +50,34 @@ const _readNumberOrNull = (id) => {
   const v = parseInt(raw, 10);
   return Number.isFinite(v) ? v : null;
 };
+const _readText = (id) => document.getElementById(id)?.value?.trim() || '';
+const _npcCombat = (npc = {}) => ({ ...NPC_COMBAT_DEFAULT, ...(npc.combat || {}) });
+const _isShopWeapon = (item = {}) => item.template === 'arme' || item.degats;
+const _weaponLabel = (item = {}) => [item.nom, item.sousType || item.typeArme].filter(Boolean).join(' · ');
+const _weaponByLabel = (label) => _shopWeapons.find(w => _weaponLabel(w) === label) || null;
+const _serializeShopWeapon = (item = {}) => ({
+  itemId: item.id || item.itemId || '',
+  nom: item.nom || '',
+  degats: item.degats || '',
+  degatsStat: item.degatsStat || item.statAttaque || '',
+  degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : (item.degatsStat ? [item.degatsStat] : []),
+  toucherStat: item.toucherStat || item.statAttaque || '',
+  statAttaque: item.statAttaque || item.toucherStat || '',
+  typeArme: item.typeArme || item.sousType || '',
+  sousType: item.sousType || '',
+  portee: item.portee || '',
+  traits: Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []),
+  format: item.format || '',
+  toucher: item.toucher || '',
+  particularite: item.particularite || item.effet || '',
+  stats: item.stats || '',
+  fo: parseInt(item.fo) || 0,
+  dex: parseInt(item.dex) || 0,
+  in: parseInt(item.in) || 0,
+  sa: parseInt(item.sa) || 0,
+  co: parseInt(item.co) || 0,
+  ch: parseInt(item.ch) || 0,
+});
 
 // ── Affinité groupe — 5 niveaux fixes ────────────────────────────────────────
 const AFFINITE = [
@@ -87,17 +116,19 @@ let _affiPerso     = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, n
 let _affiniteTypes = [];   // [{id, label, emoji, couleur}]
 let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
 let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
+let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
 let _activeId      = null;
 let _filterSearch  = '';
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
-  const [npcs, affi, typesDoc, places, orgs] = await Promise.all([
+  const [npcs, affi, typesDoc, places, orgs, shopItems] = await Promise.all([
     loadCollection('npcs'),
     loadCollection('npc_affinites'),
     getDocData('npc_affinites', AFFINITE_TYPES_DOC_ID),
     listPlaces().catch(() => []),
     listOrganizations().catch(() => []),
+    loadCollection('shop').catch(() => []),
   ]);
   _npcs          = npcs || [];
   _affiPerso     = (affi || []).filter(a => a.id !== AFFINITE_TYPES_DOC_ID);
@@ -105,6 +136,7 @@ async function _load() {
   _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
   _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  _shopWeapons   = (shopItems || []).filter(_isShopWeapon).sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
@@ -674,6 +706,9 @@ window.npcAffiniteClick = async (npcId, niveau) => {
 function _renderStatsForm(npc) {
   if (!STATE.isAdmin) return '';
   const stats = npc?.stats || {};
+  const combat = _npcCombat(npc);
+  const weapon = combat.weapon || null;
+  const weaponValue = weapon ? _weaponLabel(weapon) : (combat.weaponName || '');
   const vitalInputs = NPC_VITALS.map(v => `
     <div>
       <label style="font-size:.66rem;color:var(--text-dim);display:block;margin-bottom:2px;
@@ -696,6 +731,39 @@ function _renderStatsForm(npc) {
         <span style="color:var(--text-dim);font-weight:400;font-size:.78rem">(admin)</span>
       </label>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin-top:.4rem">${vitalInputs}</div>
+      <div style="margin-top:.55rem;padding:.55rem .6rem;border-radius:9px;
+        background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18)">
+        <div style="font-size:.66rem;color:var(--gold);font-weight:700;
+          letter-spacing:.08em;text-transform:uppercase;margin-bottom:.45rem">Espace combat</div>
+        <div style="display:grid;grid-template-columns:1.35fr 1fr .65fr;gap:.45rem">
+          <div>
+            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
+              font-weight:600">Arme</label>
+            ${autocompleteHTML({
+              id: 'npc-combat-weapon',
+              value: weaponValue,
+              placeholder: _shopWeapons.length ? 'Choisir une arme de boutique…' : 'Aucune arme en boutique',
+              className: 'input-sm',
+            })}
+            <input type="hidden" id="npc-combat-weapon-id" value="${_esc(weapon?.itemId || '')}">
+          </div>
+          <div>
+            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
+              font-weight:600">Dégâts</label>
+            <input type="text" class="input-sm" id="npc-combat-damage"
+              value="${_esc(weapon?.degats || combat.damage)}" placeholder="Auto"
+              disabled style="padding:.35rem .45rem;width:100%;opacity:.75">
+          </div>
+          <div>
+            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
+              font-weight:600">Portée</label>
+            <input type="text" class="input-sm" id="npc-combat-range"
+              value="${_esc(weapon?.portee || combat.range || '')}" placeholder="Auto"
+              disabled style="text-align:center;padding:.35rem .25rem;width:100%;opacity:.75">
+          </div>
+        </div>
+        <div id="npc-combat-weapon-preview" style="margin-top:.45rem"></div>
+      </div>
       <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.35rem;margin-top:.5rem">${statInputs}</div>
     </div>`;
 }
@@ -703,9 +771,12 @@ function _renderStatsForm(npc) {
 function _renderStatsPanel(n) {
   if (!STATE.isAdmin) return '';
   const stats = n?.stats || {};
+  const combat = _npcCombat(n);
+  const weapon = combat.weapon || null;
   const hasVitals = NPC_VITALS.some(v => n?.[v.key] != null);
   const hasStats  = NPC_STATS.some(s => stats[s.key] != null);
-  if (!hasVitals && !hasStats) return '';
+  const hasCombat = !!(weapon || combat.weaponName || combat.damage || combat.range != null);
+  if (!hasVitals && !hasStats && !hasCombat) return '';
 
   const vitals = NPC_VITALS.map(v => `
     <div style="background:var(--bg-elevated);border:1px solid var(--border);
@@ -733,6 +804,24 @@ function _renderStatsPanel(n) {
         <span style="font-size:.62rem;color:var(--text-dim);font-weight:400">(admin)</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem">${vitals}</div>
+      ${hasCombat ? `
+      <div style="display:grid;grid-template-columns:1.35fr 1fr .65fr;gap:.4rem;margin-top:.5rem">
+        <div style="background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18);
+          border-radius:8px;padding:.45rem .5rem">
+          <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">ARME</div>
+          <div style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px">${_esc(weapon?.nom || combat.weaponName || 'Attaque')}</div>
+        </div>
+        <div style="background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18);
+          border-radius:8px;padding:.45rem .5rem;text-align:center">
+          <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">DÉGÂTS</div>
+          <div style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px">${_esc(weapon?.degats || combat.damage || '1d6')}</div>
+        </div>
+        <div style="background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18);
+          border-radius:8px;padding:.45rem .5rem;text-align:center">
+          <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">PORTÉE</div>
+          <div style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px">${_esc(combat.range ?? weapon?.portee ?? '1')}</div>
+        </div>
+      </div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.35rem;margin-top:.5rem">${statCells}</div>
     </div>`;
 }
@@ -982,6 +1071,48 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
   initMultiAutocomplete('npc-orgs', _organisations.map(o => o.name), {
     initialValues: Array.isArray(npc?.organisations) ? npc.organisations : [],
   });
+  const weaponOptions = _shopWeapons.map(_weaponLabel);
+  const updateWeaponPreview = (item) => {
+    const preview = document.getElementById('npc-combat-weapon-preview');
+    const dmg = document.getElementById('npc-combat-damage');
+    const range = document.getElementById('npc-combat-range');
+    const hidden = document.getElementById('npc-combat-weapon-id');
+    if (hidden) hidden.value = item?.id || '';
+    if (dmg) dmg.value = item?.degats || '';
+    if (range) range.value = item?.portee || '';
+    if (!preview) return;
+    if (!item) { preview.innerHTML = ''; return; }
+    const traits = Array.isArray(item.traits) ? item.traits : (item.trait ? [item.trait] : []);
+    const degatsStats = Array.isArray(item.degatsStats) && item.degatsStats.length
+      ? item.degatsStats
+      : (item.degatsStat ? [item.degatsStat] : []);
+    preview.innerHTML = `
+      <div style="padding:.45rem .55rem;border-radius:8px;background:rgba(0,0,0,.16);
+        border:1px solid rgba(255,255,255,.08)">
+        <div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center">
+          ${item.format ? `<span class="badge badge-gold" style="font-size:.62rem">${_esc(item.format)}</span>` : ''}
+          ${item.sousType || item.typeArme ? `<span style="font-size:.68rem;color:var(--text-dim)">${_esc(item.sousType || item.typeArme)}</span>` : ''}
+          ${item.degats ? `<span style="font-size:.7rem;color:#ff6b6b">⚔️ ${_esc(item.degats)}${degatsStats.length ? ` + ${degatsStats.map(_esc).join(' + ')}` : ''}</span>` : ''}
+          ${item.toucherStat ? `<span style="font-size:.7rem;color:#e8b84b">🎯 ${_esc(item.toucherStat)}</span>` : ''}
+          ${item.portee ? `<span style="font-size:.7rem;color:#4f8cff">↗ ${_esc(item.portee)}</span>` : ''}
+        </div>
+        ${traits.length ? `<div style="display:flex;gap:.25rem;flex-wrap:wrap;margin-top:.35rem">
+          ${traits.map(t => `<span style="font-size:.64rem;color:#b47fff;background:rgba(180,127,255,.1);
+            border:1px solid rgba(180,127,255,.2);border-radius:999px;padding:1px 7px">${_esc(t)}</span>`).join('')}
+        </div>` : ''}
+      </div>`;
+  };
+  initAutocomplete('npc-combat-weapon', weaponOptions, {
+    onSelect: (label) => updateWeaponPreview(_weaponByLabel(label)),
+  });
+  const weaponInput = document.getElementById('npc-combat-weapon');
+  const currentWeapon = _shopWeapons.find(w => w.id === (npc?.combat?.weapon?.itemId || ''))
+    || _weaponByLabel(weaponInput?.value || '');
+  updateWeaponPreview(currentWeapon || npc?.combat?.weapon || null);
+  weaponInput?.addEventListener('input', () => {
+    const exact = _weaponByLabel(weaponInput.value);
+    updateWeaponPreview(exact);
+  });
 
   // ── Setup upload + crop portrait ──────────────────────────────────────────
   let _npcCropBase64 = null;
@@ -1158,6 +1289,23 @@ async function saveNpc(id) {
 
     if (STATE.isAdmin) {
       NPC_VITALS.forEach(v => { data[v.key] = _readNumberOrNull(`npc-${v.key}`); });
+      const weaponLabel = _readText('npc-combat-weapon');
+      const weaponId = _readText('npc-combat-weapon-id');
+      const selectedWeapon = weaponId
+        ? _shopWeapons.find(w => w.id === weaponId)
+        : _weaponByLabel(weaponLabel);
+      if (weaponLabel && !selectedWeapon) {
+        showNotif('Choisis une arme existante de la boutique pour le PNJ.', 'error');
+        return;
+      }
+      const weapon = selectedWeapon ? _serializeShopWeapon(selectedWeapon) : null;
+      const combat = {
+        weapon,
+        weaponName: weapon?.nom || '',
+        damage:     weapon?.degats || '',
+        range:      null,
+      };
+      data.combat = (combat.weapon || combat.range != null) ? combat : null;
       const stats = {};
       NPC_STATS.forEach(s => {
         const v = _readNumberOrNull(`npc-stat-${s.key}`);

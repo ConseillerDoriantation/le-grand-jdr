@@ -22,7 +22,6 @@ import PAGES from './pages.js';
 const CELL        = 70;
 const MIN_SCALE   = 0.15;
 const MAX_SCALE   = 4;
-const THROTTLE_MS = 100;
 
 const TYPE_COLOR  = { player:'#4f8cff', enemy:'#ef4444', npc:'#a78bfa' };
 const hpColor     = r => r > 0.5 ? '#22c38e' : r > 0.25 ? '#f59e0b' : '#ef4444';
@@ -36,9 +35,10 @@ let _bestiary   = {};   // beastId → creature doc (bestiaire)
 let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
 let _activePage = null;
 let _tool       = 'select';
-let _selected   = null, _attackSrc = null, _moveHL = [], _lastDrag = 0;
+let _selected   = null, _attackSrc = null, _moveHL = [];
 let _selectedMulti  = new Set();   // ids des tokens en multi-sélection
 let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
+let _middlePanActive= false;       // true pendant le pan caméra au clic molette
 let _autoSyncDone = false;   // empêche la double-création de tokens
 let _imgTr      = null;      // Transformer pour images BG (sous tokens)
 let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens)
@@ -100,6 +100,7 @@ const _numOr = (value, fallback = null) => {
 const _signed = n => n > 0 ? `+${n}` : `${n}`;
 const _npcStatScore = (npc, key) => _numOr(npc?.stats?.[key], 8);
 const _npcStatMod = (npc, key) => getModFromScore(_npcStatScore(npc, key));
+const _npcCombat = (npc = {}) => npc?.combat || {};
 const _tokenStatMod = (t, statKey) => {
   if (!statKey) return 0;
   if (t?.characterId) return getMod(_characters[t.characterId], statKey);
@@ -129,7 +130,6 @@ const _tokRef  = (id) => doc(db, `adventures/${_aid()}/vttTokens/${id}`);
 const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
 const _npcRef  = (id) => doc(db, `adventures/${_aid()}/npcs/${id}`);
 const _bstCol        = ()    => collection(db, `adventures/${_aid()}/bestiary`);
-const _bstRef        = (id)  => doc(db, `adventures/${_aid()}/bestiary/${id}`);
 const _bstTrackerRef = (uid) => doc(db, `adventures/${_aid()}/bestiary_tracker/${uid}`);
 const _logCol  = ()   => collection(db, `adventures/${_aid()}/vttLog`);
 const _pingsCol     = ()  => collection(db, `adventures/${_aid()}/vttPings`);
@@ -167,6 +167,8 @@ function _live(t) {
   const npcHpMax = n ? _numOr(e.pv, _numOr(e.hpMax, _numOr(e.pvMax, 20))) : null;
   const npcPmMax = n ? _numOr(e.pmMax, _numOr(e.pm, null)) : null;
   const npcPmCur = n ? _numOr(e.pmCurrent, npcPmMax) : null;
+  const npcCombat = n ? _npcCombat(e) : {};
+  const npcWeapon = npcCombat.weapon || {};
 
   const hpMax = c ? (calcPVMax(c) || c.pvBase || 20)
               : b ? (_numOr(b.pvMax, 20))
@@ -189,7 +191,8 @@ function _live(t) {
     ? (weapMod !== 0 ? `${weapon.degats}${weapMod>0?'+':''}${weapMod}` : weapon.degats)
     : null;
   const beastDice = b?.attaques?.[0]?.degats || null;
-  const atkDice   = t.attackDice || weapDice || beastDice
+  const npcDice   = npcWeapon.degats || npcCombat.damage || e.attackDice || null;
+  const atkDice   = t.attackDice || weapDice || beastDice || npcDice
     || (c ? `1d6${weapMod>=0?'+':''}${weapMod}` : null)
     || (typeof t.attack==='string' ? t.attack : null)
     || '1d6';
@@ -205,14 +208,18 @@ function _live(t) {
     displayPm:         c ? (c.pm ?? calcPMMax(c)) : n ? npcPmCur : null,
     displayPmMax:      c ? calcPMMax(c) : n ? npcPmMax : null,
     displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6))))),
-    displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, e.stats?.force != null ? _npcStatMod(e, 'force') : 5))))),
+    displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))),
     displayAttackDice: atkDice,
     displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0))))),
     // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
     // Pour bestiaire/custom : t.range > 1ère attaque bestiary > défaut 1
     displayRange: c
       ? (t.range > 1 ? t.range : (weapon?.portee ? parseInt(weapon.portee)||1 : 1))
-      : (t.range ?? (b ? parseInt(b.attaques?.[0]?.portee)||1 : 1)),
+      : b
+        ? (t.range > 1 ? t.range : (_numOr(b.attaques?.[0]?.portee, 1)))
+        : n
+          ? (t.range > 1 ? t.range : (_numOr(npcCombat.range, _numOr(npcWeapon.portee, 1))))
+          : (t.range ?? 1),
     _beast:            b,   // référence directe pour _buildAttackOptions
   };
 
@@ -353,16 +360,29 @@ function _cleanup() {
 // ═══════════════════════════════════════════════════════════════════
 function _initCanvas(container) {
   const K = window.Konva;
+  K.dragButtons = [0, 2]; // Drag autorisé au clic gauche et droit (tokens/images/annotations).
   _stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
-  // Ordre : bg → map (fond, sous tokens) → grid → token → mapFg (premier plan, au-dessus)
-  _layers.bg    = new K.Layer({ listening: false });
-  _layers.map   = new K.Layer({ listening: false }); // verrouillé par défaut
+  // Konva recommande max 3-5 layers. On consolide bg+map dans `backLayer` et
+  // mapFg+ping dans `frontLayer` via des Konva.Group — l'ordre interne préserve
+  // le z-order, et chaque "_layers.X" garde son API (add/find/destroyChildren/listening).
+  // batchDraw() est forwardé vers le layer parent.
+  // Ordre visuel : bg → map → grid → draw → token → mapFg → ping (5 layers Konva).
+  const backLayer  = new K.Layer();
+  const frontLayer = new K.Layer();
+  const _asLayer = (group, parentLayer) => {
+    group.batchDraw = () => parentLayer.batchDraw();
+    return group;
+  };
+  _layers.bg    = _asLayer(new K.Group({ listening: false }), backLayer);
+  _layers.map   = _asLayer(new K.Group({ listening: false }), backLayer);
   _layers.grid  = new K.Layer({ listening: true });
   _layers.draw  = new K.Layer();                     // annotations (entre grille et tokens)
   _layers.token = new K.Layer();
-  _layers.mapFg = new K.Layer({ listening: false }); // 1er plan, verrouillé par défaut
-  _layers.ping  = new K.Layer({ listening: false }); // pings + règle (au-dessus de tout)
-  _stage.add(_layers.bg, _layers.map, _layers.grid, _layers.draw, _layers.token, _layers.mapFg, _layers.ping);
+  _layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
+  _layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
+  backLayer.add(_layers.bg, _layers.map);
+  frontLayer.add(_layers.mapFg, _layers.ping);
+  _stage.add(backLayer, _layers.grid, _layers.draw, _layers.token, frontLayer);
 
   // Transformers pour redimensionner les images (MJ uniquement)
   if (STATE.isAdmin) {
@@ -441,9 +461,55 @@ function _initCanvas(container) {
   });
 
   let _pan = false, _po = null;
+
+  // Pan caméra au clic molette. K.dragButtons=[0] empêche déjà tout drag de
+  // tokens/images/annotations sur autre que clic gauche, donc pas besoin de
+  // toucher .draggable() ici.
+  const _startMiddlePan = e => {
+    if (e.button !== 1) return;
+    if (!_stage) return;
+    e.preventDefault();
+    if (_middlePanActive) return;
+
+    _middlePanActive = true;
+    _pan = true;
+    _po = { x: e.clientX - _stage.x(), y: e.clientY - _stage.y() };
+
+    const onMove = ev => {
+      if ((ev.buttons & 4) === 0) { onUp(); return; }
+      ev.preventDefault();
+      _stage.position({ x: ev.clientX - _po.x, y: ev.clientY - _po.y });
+    };
+    const onUp = () => {
+      _middlePanActive = false;
+      _pan = false;
+      _po = null;
+      window.removeEventListener('mousemove', onMove, true);
+      window.removeEventListener('mouseup',   onUp,   true);
+      window.removeEventListener('blur',      onUp,   true);
+    };
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup',   onUp,   true);
+    window.addEventListener('blur',      onUp,   true);
+  };
+  const _preventMiddleAuxClick = e => {
+    if (e.button === 1) e.preventDefault();
+  };
+  container.addEventListener('mousedown', _startMiddlePan, true);
+  container.addEventListener('auxclick',  _preventMiddleAuxClick, true);
+  _unsubs.push(() => {
+    container.removeEventListener('mousedown', _startMiddlePan, true);
+    container.removeEventListener('auxclick',  _preventMiddleAuxClick, true);
+  });
+
   _stage.on('mousedown', e => {
-    if (e.evt.button===1||e.evt.button===2) {
-      _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
+    if (e.evt.button===2) {
+      e.evt.preventDefault();
+      // Pan caméra au clic droit UNIQUEMENT sur stage vide.
+      // Sur un token/image/annotation, on laisse Konva gérer le drag (K.dragButtons=[0,2]).
+      if (e.target === _stage) {
+        _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
+      }
     }
     if (e.evt.button===0) {
       const rect0 = _stage.container().getBoundingClientRect();
@@ -476,7 +542,7 @@ function _initCanvas(container) {
     }
   });
   _stage.on('mousemove', e => {
-    if (_pan) _stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y });
+    if (_pan && _po) _stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y });
     // Coordonnées canvas-relatives à partir de l'événement natif (plus fiable que getPointerPosition)
     const rect = _stage.container().getBoundingClientRect();
     const stagePtr = { x: e.evt.clientX - rect.left, y: e.evt.clientY - rect.top };
@@ -497,6 +563,7 @@ function _initCanvas(container) {
   });
   _stage.on('contextmenu', e => e.evt.preventDefault());
   _stage.on('click', e => {
+    if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
     if (e.target===_stage) {
       if (_suppressNextClick) { _suppressNextClick = false; return; }
       _deselect(); _deselectAnnot();
@@ -564,6 +631,7 @@ function _renderMapImages() {
 
         // Clic → sélectionner l'image (seulement en mode édition carte)
         ki.on('click', e => {
+          if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
           if (!_mapMode) return;
           e.cancelBubble = true;
           _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
@@ -690,6 +758,12 @@ function _buildShape(t) {
     g.draggable(true);
     // ─ Début du drag : mémoriser les positions du groupe ─
     g.on('dragstart', () => {
+      if (_middlePanActive) {
+        g.stopDrag();
+        g.position({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2 });
+        _layers.token?.batchDraw();
+        return;
+      }
       if (_selectedMulti.has(t.id) && _selectedMulti.size>1) {
         _multiDragOrigin={};
         for (const id of _selectedMulti) {
@@ -754,6 +828,7 @@ function _buildShape(t) {
   }
 
   g.on('click', e => {
+    if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
     e.cancelBubble=true;
     if (_tool === 'ruler' || _tool === 'draw') return; // outils de dessin ignorent les tokens
     if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
@@ -766,6 +841,22 @@ function _buildShape(t) {
       _execAttack(_attackSrc, t.id);
     } else {
       // Sélectionner le token (si token propre, montre la portée d'attaque)
+      _select(t.id);
+    }
+  });
+
+  // Clic droit (sans drag) sur un token : attaque si attaquant désigné,
+  // sinon sélectionne le token (mirror du clic gauche).
+  // Le drag clic-droit reste géré par Konva (K.dragButtons=[0,2]) — contextmenu
+  // ne fire pas si l'utilisateur a effectivement bougé.
+  g.on('contextmenu', e => {
+    e.evt.preventDefault();
+    e.cancelBubble = true;
+    if (_tool === 'ruler' || _tool === 'draw') return;
+    if (_attackSrc && _attackSrc !== t.id) {
+      _execAttack(_attackSrc, t.id);
+    } else {
+      _clearMultiSelect();
       _select(t.id);
     }
   });
@@ -853,7 +944,12 @@ function _showMoveRange(t) {
     const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
       fill:blk?'rgba(239,68,68,0.22)':'rgba(79,140,255,0.28)',
       stroke:blk?'rgba(239,68,68,0.65)':'rgba(79,140,255,0.70)',strokeWidth:1.5,listening:!blk });
-    if (!blk){const tc=c,tr=r;rect.on('click',async e=>{e.cancelBubble=true;if(_selected)await _moveTo(_selected,tc,tr);});}
+    if (!blk){
+      const tc=c, tr=r;
+      const moveSelectedHere = async e => { e.cancelBubble=true; if (_selected) await _moveTo(_selected, tc, tr); };
+      rect.on('click', e => { if (e.evt.button!==0) return; moveSelectedHere(e); });
+      rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
+    }
     _layers.grid.add(rect); _moveHL.push(rect);
   }
   _layers.grid.batchDraw();
@@ -1160,20 +1256,26 @@ function _buildAttackOptions(t) {
   // ── PNJ : stats saisies dans la fiche PNJ ──
   if (!c && t.npcId) {
     const n = _npcs[t.npcId] || {};
-    const dmgMod = _npcStatMod(n, 'force');
+    const combat = _npcCombat(n);
+    const weapon = combat.weapon || {};
+    const dmgStat = (Array.isArray(weapon.degatsStats) && weapon.degatsStats.length
+      ? weapon.degatsStats[0]
+      : (weapon.degatsStat || weapon.statAttaque || 'force'));
+    const dmgMod = _npcStatMod(n, dmgStat);
     options.push({
       id: 'npc_attack',
       icon: '⚔️',
-      label: 'Attaque',
-      rawDice: t.attackDice || n.attackDice || '1d6',
-      dice: t.attackDice || n.attackDice || '1d6',
+      label: weapon.nom || combat.weaponName || 'Attaque',
+      rawDice: t.attackDice || weapon.degats || combat.damage || n.attackDice || '1d6',
+      dice: t.attackDice || weapon.degats || combat.damage || n.attackDice || '1d6',
       portee: ld.displayRange ?? 1,
       pmCost: 0,
       toucher: ld.displayAttack ?? 5,
       dmgStatMod: dmgMod,
-      dmgStatLabel: 'FOR',
+      dmgStatLabel: statShort(dmgStat) || dmgStat,
       maitriseBonus: 0,
       halfOnMiss: false,
+      traits: Array.isArray(weapon.traits) ? weapon.traits : [],
     });
     return options;
   }
@@ -1326,6 +1428,7 @@ async function _execAttack(srcId, tgtId) {
               · 🎯 portée ${o.portee}
               ${(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles} cibles</span>`:''}
               ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:o.pmCost===0&&o.basePm>0?`· <span style="color:#22c38e">✨ gratuit</span>`:''}
+              ${o.traits?.length ? `· <span style="color:#b47fff">${o.traits.slice(0, 2).map(_escHtml).join(', ')}</span>` : ''}
             </div>
           </div>
         </button>`).join('')}
@@ -1808,8 +1911,10 @@ function _renderInspector(t) {
     const pos    = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
     const pm     = ld.displayPm    ?? null;
     const pmMax  = ld.displayPmMax ?? null;
+    const npcCombat = t.npcId ? _npcCombat(_npcs[t.npcId]) : {};
+    const npcWeapon = npcCombat.weapon || {};
     const atkLabel = t.npcId
-      ? (ld.displayAttackDice || '1d6') + _signed(ld.displayAttack ?? 0)
+      ? (npcWeapon.nom || npcCombat.weaponName ? (npcWeapon.nom || npcCombat.weaponName) + ' · ' : '') + (ld.displayAttackDice || '1d6') + _signed(ld.displayAttack ?? 0)
       : (ld.displayAttackDice || (ld.displayAttack??5));
     const pvEditHtml = STATE.isAdmin
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" onchange="window._vttSetHp(\''+t.id+'\',+this.value)">'
@@ -2148,6 +2253,7 @@ function _buildAnnotShape(K, data) {
   if (canEdit) {
     // Clic gauche → sélectionner (mode select uniquement)
     shape.on('click', e => {
+      if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
       if (_tool !== 'select') return;
       e.cancelBubble = true;
       if (e.evt.shiftKey) {
