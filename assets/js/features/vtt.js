@@ -299,7 +299,12 @@ function _cleanup() {
   _unsubs.forEach(u => u?.());
   _unsubs = []; _stage?.destroy(); _stage = null; _layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
-  if (_presHeartbeat)    { clearInterval(_presHeartbeat);  _presHeartbeat = null; }
+  if (_presHeartbeat) {
+    clearInterval(_presHeartbeat); _presHeartbeat = null;
+    // Supprimer le doc de présence immédiatement pour que les autres voient le départ
+    const _uid = STATE.user?.uid;
+    if (_uid) { try { deleteDoc(_pingRef(_uid)).catch(()=>{}); } catch(e){} }
+  }
   if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
   _presence = {}; _miniUid = null; _miniCharId = null;
@@ -2462,13 +2467,13 @@ function _initListeners() {
   _unsubs.push(onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
 
-    // Stocker tous les pings avec lastSeen — le filtrage 2 min se fait dans _renderPresenceCol
+    // Présence : actif si lastSeen < 2 min (double filtrage : ici + render)
     _presence = {};
     snap.docs.forEach(d => {
       const pres = d.data().pres;
       if (!pres?.lastSeen) return;
       const ts = pres.lastSeen?.toMillis?.() ?? (typeof pres.lastSeen === 'number' ? pres.lastSeen : 0);
-      if (ts > 0) _presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?', lastSeen: ts };
+      if (ts > 0 && now - ts < 120_000) _presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?', lastSeen: ts };
     });
     _renderPresenceCol();
 
@@ -3784,9 +3789,11 @@ export async function renderVttPage() {
     };
     _presWrite();
     _presHeartbeat = setInterval(_presWrite, 45_000);
+    // Fermeture navigateur : tentative de suppression (best-effort)
+    const _onUnload = () => { deleteDoc(_pingRef(_presUid)).catch(()=>{}); };
+    window.addEventListener('beforeunload', _onUnload, { once: true });
   }
-  // Rafraîchit la colonne présence toutes les 30s pour expirer les joueurs inactifs
-  // même si aucun snapshot Firestore ne se déclenche
+  // Filet de sécurité : re-rendre la présence toutes les 30s pour expirer les entrants inactifs
   _presRefresh = setInterval(_renderPresenceCol, 30_000);
 }
 
