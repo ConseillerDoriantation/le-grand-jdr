@@ -1769,7 +1769,7 @@ function _renderInspector(t) {
       </div>
     </div>
     ${statsHtml}
-    ${(t.type==='player'||t.type==='npc') && _diceSkills.length ? (() => {
+    ${(t.type==='player'||t.type==='npc') && _diceSkills.length && (STATE.isAdmin||t.ownerId===STATE.user?.uid) ? (() => {
       const c = t.characterId ? _characters[t.characterId] : null;
       const btns = _diceSkills.map(s => {
         const statKey = _STAT_KEY[s.stat] || '';
@@ -2601,6 +2601,8 @@ window._vttAdjBonus = (delta, reset = false) => {
 
 window._vttRollSkill = async (skillName, stat) => {
   const t = _tokens[_selected]?.data;
+  if (!t) return;
+  if (!STATE.isAdmin && t.ownerId !== STATE.user?.uid) return; // joueur ne peut lancer que son propre token
   const c = t?.characterId ? _characters[t.characterId] : null;
   const statKey = _STAT_KEY[stat] || '';
   const mod = c && statKey ? getMod(c, statKey) : 0;
