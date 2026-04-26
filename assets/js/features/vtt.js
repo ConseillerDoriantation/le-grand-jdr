@@ -2936,13 +2936,29 @@ function _renderChatLog(msgs) {
     ? `<img class="vtt-log-portrait" src="${url}" alt="${_escHtml(name||'')}" onerror="this.style.visibility='hidden'">`
     : `<div class="vtt-log-portrait" style="background:${color}">${_escHtml((name||'?')[0].toUpperCase())}</div>`;
 
-  el.innerHTML=msgs.map(m=>{
+  // Timestamp HH:MM depuis le serverTimestamp Firestore
+  const _ts = m => {
+    const ms = m.createdAt?.toMillis?.();
+    if (!ms) return '';
+    const d = new Date(ms);
+    return `<span class="vtt-log-time">${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</span>`;
+  };
+
+  // Groupe badge + timestamp aligné à droite dans un header flex
+  const _right = (badge, ts) => {
+    const inner = [badge, ts].filter(Boolean).join('');
+    return inner ? `<span style="margin-left:auto;display:flex;align-items:center;gap:.25rem">${inner}</span>` : '';
+  };
+
+  el.innerHTML=msgs.map((m, i)=>{
     const isMe=m.authorId===myUid;
     const who=`<span class="vtt-log-who${isMe?' me':''}">${_escHtml(m.authorName||'?')}</span>`;
+    const ts = _ts(m);
+
     if (m.type==='cast') {
       // Sort CA / utilitaire — pas de jet de dés
       const pmStr = m.pmCost > 0
-        ? `<span style="font-size:.65rem;color:#b47fff;margin-left:.3rem">−${m.pmCost} PM</span>` : '';
+        ? `<span style="font-size:.65rem;color:#b47fff">−${m.pmCost} PM</span>` : '';
       const castWho = m.casterName || m.authorName || '?';
       return `<div class="vtt-log-entry vtt-log-roll"
           style="border-left:3px solid #b47fff;padding:.3rem .3rem .3rem .5rem;background:rgba(180,127,255,.05);border-radius:0 6px 6px 0">
@@ -2953,6 +2969,7 @@ function _renderChatLog(msgs) {
           <strong style="font-size:.82rem">${_escHtml(m.optLabel||'')}</strong>
           <span style="color:var(--text-dim);font-size:.65rem">→ ${_escHtml(m.targetName||'')}</span>
           ${pmStr}
+          ${_right('', ts)}
         </div>
         ${m.castEffect && m.castEffect !== '—' ? `<div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem;padding-left:calc(22px + .35rem)">${_escHtml(m.castEffect)}</div>` : ''}
       </div>`;
@@ -2967,6 +2984,8 @@ function _renderChatLog(msgs) {
         m.dmgBonus ? sn(m.dmgBonus) + sub('bonus') : '',
       ].filter(Boolean).join(' ');
       const healWho = m.attackerName || m.authorName || '?';
+      const detailId = `vtt-d-${i}`;
+      const detailHtml = `<div style="font-size:.65rem;color:var(--text-dim)">${baseDice}(${m.dmgRaw}) ${mods} = ${m.dmgTotal}</div>`;
       return `<div class="vtt-log-entry vtt-log-roll"
           style="border-left:3px solid #22c38e;padding:.3rem .3rem .3rem .5rem;background:rgba(34,195,142,.05);border-radius:0 6px 6px 0">
         <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.2rem">
@@ -2975,14 +2994,15 @@ function _renderChatLog(msgs) {
           <span style="color:var(--text-dim);font-size:.72rem">→</span>
           <strong style="font-size:.82rem">${_escHtml(m.defenderName||'')}</strong>
           <span style="color:var(--text-dim);font-size:.65rem">· ${_escHtml(m.optLabel||'')}</span>
+          ${_right('', ts)}
         </div>
-        <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
           <span style="font-size:.78rem">💚</span>
-          <span style="font-size:.7rem;color:var(--text-dim)">${baseDice}(${m.dmgRaw}) ${mods}</span>
-          <span style="font-size:.72rem;color:var(--text-dim)">=</span>
           <strong style="font-size:1.05rem;color:#22c38e;letter-spacing:-.01em">${m.dmgTotal}</strong>
           <span style="font-size:.72rem;color:#22c38e">PV soignés</span>
+          <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
         </div>
+        <div id="${detailId}" style="display:none;padding-left:calc(22px + .35rem);margin-top:.15rem">${detailHtml}</div>
       </div>`;
     }
     if (m.type==='attack') {
@@ -3005,9 +3025,9 @@ function _renderChatLog(msgs) {
                       : m.hit    ? '#22c38e' : '#ef4444';
 
       const resultBadge = isCrit
-        ? `<span style="font-size:.7rem;font-weight:700;color:#f59e0b;margin-left:auto">💥 CRITIQUE</span>`
+        ? `<span style="font-size:.68rem;font-weight:700;color:#f59e0b">💥 CRITIQUE</span>`
         : isFumble
-        ? `<span style="font-size:.7rem;font-weight:700;color:#ef4444;margin-left:auto">💀 FUMBLE</span>`
+        ? `<span style="font-size:.68rem;font-weight:700;color:#ef4444">💀 FUMBLE</span>`
         : '';
 
       const rolls    = Array.isArray(m.hitD20rolls) && m.hitD20rolls.length > 1 ? m.hitD20rolls : null;
@@ -3024,7 +3044,10 @@ function _renderChatLog(msgs) {
           ].filter(Boolean).join(' ')
         : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`;
 
-      let dmgRow = '';
+      const detailId = `vtt-d-${i}`;
+
+      // Ligne dégâts résumée + détail formule
+      let dmgSummary = '', dmgDetailHtml = '';
       if (m.hit || m.halfDmg) {
         const baseDice = _escHtml(m.dmgRawDice || m.dmgFormula || '');
         const mods = [
@@ -3043,35 +3066,37 @@ function _renderChatLog(msgs) {
         }
 
         const dmgColor  = m.halfDmg ? '#b47fff' : '#ef4444';
-        const dmgSuffix = m.newHp===0 ? '💀' : m.halfDmg ? '✦ ½ dégâts' : 'dégâts';
-        dmgRow = `<div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap;margin-top:.2rem">
+        const dmgSuffix = m.newHp===0 ? '💀' : m.halfDmg ? '✦ ½' : 'dégâts';
+        dmgSummary = `<div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem);margin-top:.15rem">
           <span style="font-size:.78rem">⚔️</span>
-          <span style="font-size:.7rem;color:var(--text-dim)">${dmgFormula}</span>
-          <span style="font-size:.72rem;color:var(--text-dim)">=</span>
           <strong style="font-size:1.05rem;color:${dmgColor};letter-spacing:-.01em">${m.dmgTotal}</strong>
           <span style="font-size:.72rem;color:${dmgColor}">${dmgSuffix}</span>
         </div>`;
+        dmgDetailHtml = `<div style="font-size:.65rem;color:var(--text-dim);margin-top:.1rem">⚔️ ${dmgFormula} = <strong style="color:${dmgColor}">${m.dmgTotal}</strong></div>`;
       }
 
       const atkWho = m.attackerName || m.authorName || '?';
       return `<div class="vtt-log-entry vtt-log-roll"
           style="border-left:3px solid ${borderCol};padding:.3rem .3rem .3rem .5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
-        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.3rem">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.2rem">
           ${_portrait(m.characterImage, atkWho, borderCol)}
           <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(atkWho)}</span>
           <span style="color:var(--text-dim);font-size:.72rem">→</span>
           <strong style="font-size:.82rem">${_escHtml(m.defenderName||'')}</strong>
           <span style="color:var(--text-dim);font-size:.65rem">· ${_escHtml(m.optLabel||'')}</span>
-          ${resultBadge}
+          ${_right(resultBadge, ts)}
         </div>
-        <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
+        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
           <span style="font-size:.78rem">🎯</span>
-          <span style="font-size:.7rem;color:var(--text-dim)">${hitFormula}</span>
-          <span style="font-size:.72rem;color:var(--text-dim)">=</span>
           <strong style="font-size:1.05rem;color:${accentCol};letter-spacing:-.01em">${m.hitTotal}</strong>
-          <span style="font-size:.72rem;color:${accentCol};font-weight:600">${m.hit?'✓':'✗'}</span>
+          <span style="font-size:.88rem;color:${accentCol};font-weight:700">${m.hit?'✓':'✗'}</span>
+          <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
         </div>
-        ${dmgRow}
+        ${dmgSummary}
+        <div id="${detailId}" style="display:none;padding-left:calc(22px + .35rem);margin-top:.2rem;border-top:1px solid rgba(255,255,255,.06);padding-top:.2rem">
+          <div style="font-size:.65rem;color:var(--text-dim)">🎯 ${hitFormula} = <strong style="color:${accentCol}">${m.hitTotal}</strong></div>
+          ${dmgDetailHtml}
+        </div>
       </div>`;
     }
     if (m.type==='roll') {
@@ -3082,9 +3107,9 @@ function _renderChatLog(msgs) {
       const modStr   = m.rollMod > 0 ? `+${m.rollMod}` : m.rollMod < 0 ? `${m.rollMod}` : '';
       const bonusStr = m.rollBonus > 0 ? `+${m.rollBonus}` : m.rollBonus < 0 ? `${m.rollBonus}` : '';
       const badge = m.isCrit
-        ? `<span style="font-size:.65rem;font-weight:700;color:#ffd700;margin-left:auto">✨ CRITIQUE</span>`
+        ? `<span style="font-size:.65rem;font-weight:700;color:#ffd700">✨ CRITIQUE</span>`
         : m.isFumble
-        ? `<span style="font-size:.65rem;font-weight:700;color:#ef4444;margin-left:auto">💀 FUMBLE</span>`
+        ? `<span style="font-size:.65rem;font-weight:700;color:#ef4444">💀 FUMBLE</span>`
         : '';
       const modeIcon = m.rollMode==='advantage'
         ? `<span style="font-size:.6rem;font-weight:700;color:#22c38e">⬆ Avantage</span>`
@@ -3107,7 +3132,7 @@ function _renderChatLog(msgs) {
             <span style="font-size:.72rem;font-weight:600;color:${statCol}">${_escHtml(m.rollSkill)}</span>
             <span style="font-size:.6rem;color:var(--text-dim)">${m.rollStat||''}</span>
             ${modeIcon}
-            ${badge}
+            ${_right(badge, ts)}
           </div>
           <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
             <span style="font-size:.7rem;color:var(--text-dim)">${diceStr}</span>
@@ -3125,11 +3150,14 @@ function _renderChatLog(msgs) {
           <em style="font-size:.68rem;color:var(--text-dim)">${_escHtml(m.rollFormula||'')}</em>
           <span style="font-size:.72rem;color:var(--text-dim)">→</span>
           <strong style="color:${resultCol}">${m.rollResult}</strong>
-          ${badge}
+          ${_right(badge, ts)}
         </div>
       </div>`;
     }
-    return `<div class="vtt-log-entry vtt-log-msg">${who} ${_applyEmotes(_escHtml(m.text||''))}</div>`;
+    // Message chat simple
+    return `<div class="vtt-log-entry vtt-log-msg" style="display:flex;align-items:baseline;gap:.25rem">
+      ${who}<span style="flex:1">${_applyEmotes(_escHtml(m.text||''))}</span>${ts}
+    </div>`;
   }).join('');
   el.scrollTop=el.scrollHeight;
 }
