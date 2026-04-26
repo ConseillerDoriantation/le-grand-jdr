@@ -2808,8 +2808,10 @@ function _renderEmotePicker() {
       <input type="text" id="vtt-emote-search" placeholder="🔍 Rechercher…" autocomplete="off"
         oninput="window._vttFilterEmotes(this.value)">
     </div>
-    ${favBlock}
-    <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes, favSet)}</div>`;
+    <div class="vtt-emote-picker-body">
+      ${favBlock}
+      <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes, favSet)}</div>
+    </div>`;
   setTimeout(() => document.getElementById('vtt-emote-search')?.focus(), 40);
 }
 

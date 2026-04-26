@@ -929,7 +929,8 @@
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0,0,0,.6);
-  max-height: 320px;
+  /* S'adapte au contenu, plafonné à la hauteur dispo */
+  max-height: min(460px, calc(100vh - 120px));
   width: 292px;
 }
 .vtt-emote-picker.open { display: flex; }
@@ -945,6 +946,21 @@
 }
 .vtt-emote-picker-search input:focus { border-color: var(--gold); }
 
+/* Zone scrollable unique — contient favoris + toutes les émotes */
+.vtt-emote-picker-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-elevated) transparent;
+}
+.vtt-emote-picker-body::-webkit-scrollbar       { width: 4px; }
+.vtt-emote-picker-body::-webkit-scrollbar-track { background: transparent; }
+.vtt-emote-picker-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.vtt-emote-picker-body::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
 /* Section étiquette (Favoris / Toutes) */
 .vtt-emote-section-lbl {
   padding: .2rem .45rem .15rem;
@@ -953,17 +969,13 @@
 }
 .vtt-emote-section-lbl.gold { color: var(--gold); }
 
+/* Grid — plus de scroll individuel, c'est le body qui scrolle */
 .vtt-emote-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
-  gap: 3px; overflow-y: auto; padding: .3rem;
-  scrollbar-width: thin;
-  scrollbar-color: var(--bg-elevated) transparent;
+  gap: 3px;
+  padding: .3rem;
 }
-.vtt-emote-grid::-webkit-scrollbar       { width: 4px; }
-.vtt-emote-grid::-webkit-scrollbar-track { background: transparent; }
-.vtt-emote-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-.vtt-emote-grid::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 /* Wrapper item + bouton favori */
 .vtt-emote-item-wrap {
   position: relative;
