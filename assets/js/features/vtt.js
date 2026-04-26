@@ -98,6 +98,7 @@ let _presence     = {};   // uid → { uid, pseudo }
 let _presHeartbeat= null; // intervalId du heartbeat
 let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
+let _trayReserveOpen  = false; // section réserve ouverte/fermée dans le tray MJ
 let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
@@ -1837,83 +1838,112 @@ function _renderInspector(t) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// TRAY — panneau latéral des tokens non placés (MJ uniquement)
+// TRAY — panneau latéral MJ
 // ═══════════════════════════════════════════════════════════════════
+window._vttToggleTrayReserve = () => { _trayReserveOpen = !_trayReserveOpen; _renderTray(); };
+
 function _renderTray() {
   if (!STATE.isAdmin) return;
   _renderPageList();
   const el=document.getElementById('vtt-tray-tokens'); if (!el) return;
 
-  const all=Object.values(_tokens).map(e=>e.data);
-  const unplaced=all.filter(t=>!t.pageId);
-  const onPage  =all.filter(t=>t.pageId===_activePage?.id);
+  const all    = Object.values(_tokens).map(e=>e.data);
+  const onPage = all.filter(t=>t.pageId===_activePage?.id);
+  const reserve= all.filter(t=>!t.pageId && t.type!=='enemy');
 
+  // ── Item de token (liste) ─────────────────────────────────────────
   const mkItem=(t,placed)=>{
     const ld=_live(t);
     const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
     const rat=hpm>0?Math.max(0,hp/hpm):1;
+    const typeIcon = t.type==='player'?'🧑':t.type==='npc'?'👤':'👹';
     const dupBtn=t.type==='enemy'
-      ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Créer une instance supplémentaire">＋</button>`:'';
+      ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Dupliquer">＋</button>`:'';
     const delBtn=t.type==='enemy'
-      ?`<button class="vtt-tray-btn" style="color:#ef4444" onclick="event.stopPropagation();window._vttDeleteToken('${t.id}')" title="Supprimer définitivement">×</button>`:'';
+      ?`<button class="vtt-tray-btn vtt-tray-btn-del" onclick="event.stopPropagation();window._vttDeleteToken('${t.id}')" title="Supprimer">×</button>`:'';
+    const actionBtn=!placed
+      ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer">▶</button>`
+      :`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer">↩</button>`;
     return `<div class="vtt-tray-item ${_selected===t.id?'active':''}" onclick="window._vttSelectFromTray('${t.id}')">
       <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type]??'#888'}">
-        ${ld.displayImage?`<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:''}
+        ${ld.displayImage?`<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
+          :`<span style="font-size:.65rem">${typeIcon}</span>`}
       </div>
       <div class="vtt-tray-info">
         <div class="vtt-tray-name">${ld.displayName??t.name}</div>
         <div class="vtt-tray-hp-bar"><div style="width:${Math.round(rat*100)}%;height:100%;background:${hpColor(rat)};border-radius:2px"></div></div>
       </div>
-      <div style="display:flex;gap:.15rem">
-        ${dupBtn}
-        ${!placed
-          ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer sur cette page">▶</button>`
-          :`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer de la carte">↩</button>`
-        }
-        ${delBtn}
-      </div>
+      <div class="vtt-tray-actions">${dupBtn}${actionBtn}${delBtn}</div>
     </div>`;
   };
 
-  // Section "sur la page" : tous types ; section "non placés" : joueurs + PNJ seulement
-  const byType=(arr,includeEnemies=true)=>{
-    const players=arr.filter(t=>t.type==='player');
-    const npcs   =arr.filter(t=>t.type==='npc');
-    const enemies=includeEnemies?arr.filter(t=>t.type==='enemy'):[];
-    let html='';
-    if (players.length) html+=`<div class="vtt-tray-sep">🧑 Joueurs</div>${players.map(t=>mkItem(t,!!t.pageId)).join('')}`;
-    if (npcs.length)    html+=`<div class="vtt-tray-sep">👤 PNJ</div>${npcs.map(t=>mkItem(t,!!t.pageId)).join('')}`;
-    if (enemies.length) html+=`<div class="vtt-tray-sep">👹 Ennemis</div>${enemies.map(t=>mkItem(t,!!t.pageId)).join('')}`;
-    return html;
+  // ── Helper sous-groupe ───────────────────────────────────────────
+  const mkSubGroup = (label, items, placed) => {
+    if (!items.length) return '';
+    return `<div class="vtt-tray-sublabel">${label}</div>${items.map(t=>mkItem(t,placed)).join('')}`;
   };
 
-  // Section Bestiaire : entrées du bestiaire → bouton ▶ pour créer + placer une instance
+  // ── Section 1 : Sur cette page — alliés / ennemis séparés ────────
+  const pageAllies  = onPage.filter(t=>t.type!=='enemy');
+  const pageEnemies = onPage.filter(t=>t.type==='enemy');
+  let pageSec;
+  if (!onPage.length) {
+    pageSec = `<div class="vtt-tray-empty">Aucun token sur cette page</div>`;
+  } else if (!pageAllies.length || !pageEnemies.length) {
+    // Un seul type : pas besoin de sous-groupe
+    pageSec = onPage.map(t=>mkItem(t,true)).join('');
+  } else {
+    pageSec = mkSubGroup('🧑 Alliés', pageAllies, true)
+            + mkSubGroup('👹 Ennemis', pageEnemies, true);
+  }
+
+  // ── Section 2 : Bestiaire — grille d'icônes ───────────────────────
   const bsts=Object.values(_bestiary);
-  const bestiaryHtml=bsts.length
+  const bstGrid = bsts.length
     ? bsts.map(b=>{
         const img=b.photoURL||b.photo||b.avatar||b.imageUrl||'';
         const pvMax=parseInt(b.pvMax)||'?';
-        return `<div class="vtt-tray-item">
-          <div class="vtt-tray-dot" style="background:#ef4444">
-            ${img?`<img src="${img}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`:''}
-          </div>
-          <div class="vtt-tray-info">
-            <div class="vtt-tray-name">${b.nom||'Créature'}</div>
-            <div class="vtt-tray-hp-bar" style="background:rgba(239,68,68,0.18)"><div style="width:100%;height:100%;background:#ef4444;border-radius:2px;opacity:.5"></div></div>
-          </div>
-          <div style="display:flex;gap:.15rem">
-            <button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlaceFromBestiary('${b.id}')" title="Placer une instance sur cette page">▶</button>
-          </div>
-        </div>`;
+        const init=(b.nom||'?')[0].toUpperCase();
+        return `<button class="vtt-bst-tile" onclick="window._vttPlaceFromBestiary('${b.id}')"
+            title="${_escHtml(b.nom||'Créature')} · PV ${pvMax}">
+          ${img
+            ?`<img src="${img}" alt="${_escHtml(b.nom||'')}">`
+            :`<span class="vtt-bst-icon">${init}</span>`}
+          <div class="vtt-bst-name">${_escHtml((b.nom||'Créature').slice(0,8))}</div>
+        </button>`;
       }).join('')
-    : '<div class="vtt-tray-empty" style="font-size:.7rem">Bestiaire vide</div>';
+    : `<div class="vtt-tray-empty">Bestiaire vide</div>`;
 
-  const unplacedNonEnemy=unplaced.filter(t=>t.type!=='enemy');
+  // ── Section 3 : Réserve — joueurs / PNJ séparés ──────────────────
+  const resPlayers = reserve.filter(t=>t.type==='player');
+  const resNpcs    = reserve.filter(t=>t.type==='npc');
+  const reserveSec = _trayReserveOpen && reserve.length
+    ? mkSubGroup('🧑 Joueurs', resPlayers, false) + mkSubGroup('👤 PNJ', resNpcs, false)
+    : '';
 
   el.innerHTML=`
-    ${onPage.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Sur cette page (${onPage.length})</div>${byType(onPage,true)}</div>`:''}
-    ${unplacedNonEnemy.length?`<div class="vtt-tray-group"><div class="vtt-tray-group-title">Non placés (${unplacedNonEnemy.length})</div>${byType(unplacedNonEnemy,false)}</div>`:''}
-    <div class="vtt-tray-group"><div class="vtt-tray-group-title">👹 Bestiaire</div>${bestiaryHtml}</div>
+    <div class="vtt-tray-sect">
+      <div class="vtt-tray-sect-hd">
+        <span>🗺 Sur la page</span>
+        <span class="vtt-tray-count">${onPage.length}</span>
+      </div>
+      ${pageSec}
+    </div>
+    <div class="vtt-tray-sect">
+      <div class="vtt-tray-sect-hd" style="justify-content:space-between">
+        <span>👹 Bestiaire</span>
+        <button class="vtt-tray-add-btn" onclick="window._vttCreateEnemy()" title="Créer un ennemi">＋</button>
+      </div>
+      <div class="vtt-bst-grid">${bstGrid}</div>
+    </div>
+    ${reserve.length || _trayReserveOpen ? `
+    <div class="vtt-tray-sect">
+      <div class="vtt-tray-sect-hd vtt-tray-collapsible" onclick="window._vttToggleTrayReserve()">
+        <span>📦 Réserve</span>
+        <span class="vtt-tray-count">${reserve.length} ${_trayReserveOpen?'▲':'▼'}</span>
+      </div>
+      ${reserveSec}
+    </div>` : ''}
   `;
 }
 
@@ -3721,10 +3751,6 @@ function _buildHtml() {
         <div id="vtt-tray-pages"><div class="vtt-tray-empty">Chargement…</div></div>
       </div>
       <div class="vtt-tray-section">
-        <div class="vtt-tray-section-hd">
-          <span>Tokens</span>
-          <button class="vtt-tray-add-btn" onclick="window._vttCreateEnemy()" title="Créer un ennemi personnalisé">＋ Ennemi</button>
-        </div>
         <div id="vtt-tray-tokens"></div>
       </div>
     </div>`:''}
