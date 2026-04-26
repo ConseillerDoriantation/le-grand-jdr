@@ -162,6 +162,30 @@
   color: #4f8cff;
 }
 
+.hist-toolbar .rte-color-toggle.rte-color-toggle--active {
+  color: var(--rte-current-color) !important;
+  background: color-mix(in srgb, var(--rte-current-color) 20%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--rte-current-color),
+    0 0 0 2px color-mix(in srgb, var(--rte-current-color) 22%, transparent);
+}
+.hist-toolbar .rte-color-toggle.rte-color-toggle--active .rte-color-letter {
+  color: var(--rte-current-color);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--rte-current-color) 45%, transparent);
+}
+.hist-toolbar .rte-color-toggle.rte-color-toggle--active .rte-color-bar {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 4px;
+  display: block;
+  width: auto;
+  height: 4px;
+  background: var(--rte-current-color) !important;
+  border-radius: 999px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--rte-current-color) 50%, transparent);
+}
+
 .hist-toolbar-tags {
   display: flex;
   align-items: center;
@@ -538,8 +562,8 @@
   border-color: var(--border-strong);
 }
 
-/* ── Bouton Scène dans la toolbar ──────────────────────────────────────────── */
-.hist-tool--scene {
+/* ── Boutons larges dans la toolbar ────────────────────────────────────────── */
+.hist-tool--wide {
   width: auto !important;
   padding: 0 8px !important;
   font-size: .75rem !important;

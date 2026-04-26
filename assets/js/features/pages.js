@@ -11,13 +11,6 @@ import { renderCollectionPage } from '../features/collection.js';
 const renderCharSheet   = (...args) => window.renderCharSheet?.(...args);
 const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorationsCustom: [], evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
 const getDefaultTutorial = () => window.getDefaultTutorial?.() || [{ title: 'Introduction', content: 'Le tutoriel sera ajouté ici.' }];
-const getInfoStats       = () => window.getInfoStats?.()       || 'Contenu à venir.';
-const getInfoEquipements = () => window.getInfoEquipements?.() || 'Contenu à venir.';
-const getInfoCombat      = () => window.getInfoCombat?.()      || 'Contenu à venir.';
-const getInfoDeck        = () => window.getInfoDeck?.()        || 'Contenu à venir.';
-const getInfoArtisanat   = () => window.getInfoArtisanat?.()   || 'Contenu à venir.';
-const getInfoBastion     = () => window.getInfoBastion?.()     || 'Contenu à venir.';
-const getInfoEtats       = () => window.getInfoEtats?.()       || 'Contenu à venir.';
 
 const PAGES = {
 
@@ -1091,7 +1084,6 @@ const PAGES = {
       <div class="admin-label">Admin — Hauts-Faits</div>
       <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
         <button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter un Haut-Fait</button>
-        <button class="btn btn-outline btn-sm" onclick="window._achOuvrirReordre?.()">↕️ Réordonner</button>
       </div>
     </div>` : ''}
 
@@ -1181,31 +1173,6 @@ const PAGES = {
           <button class="btn btn-outline" onclick="window._ouvrirGestionEmotes ? window._ouvrirGestionEmotes() : import('./assets/js/features/vtt.js').then(() => window._ouvrirGestionEmotes?.())">😄 Émotes VTT</button>
         </div>
       </div>`;
-  },
-
-  // ─── INFORMATIONS ───────────────────────────────────────────────────────────
-  async informations() {
-    const doc = await getDocData('informations', 'main');
-    const content = document.getElementById('main-content');
-    const defaultSections = [
-      { id: 'stats',       title: '📊 Statistiques & Races',  content: getInfoStats() },
-      { id: 'equipements', title: '⚔️ Équipements & Armures', content: getInfoEquipements() },
-      { id: 'combat',      title: '🎯 Règles de Combat',       content: getInfoCombat() },
-      { id: 'deck',        title: '🃏 Deck & Runes',           content: getInfoDeck() },
-      { id: 'artisanat',   title: '🔨 Artisanat',              content: getInfoArtisanat() },
-      { id: 'bastion',     title: '🏰 Le Bastion',             content: getInfoBastion() },
-      { id: 'etats',       title: '💊 États',                  content: getInfoEtats() },
-    ];
-    const sections      = doc?.sections || defaultSections;
-    const activeSection = window._infoSection || sections[0]?.id;
-    window._infoSection = activeSection;
-    content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📋 Informations du JDR</span></div><div class="page-subtitle">Règles, mécaniques et lore du monde</div></div>
-      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Admin — Modification du contenu</div><button class="btn btn-gold btn-sm" onclick="editInfoSection('${activeSection}')">✏️ Modifier cette section</button></div>` : ''}
-      <div class="grid-2 tutorial-layout-grid" style="gap:1.5rem;align-items:start">
-        <div><div class="tutorial-nav" id="info-nav">${sections.map(s => `<div class="tutorial-nav-item ${s.id === activeSection ? 'active' : ''}" onclick="showInfoSection('${s.id}',this)">${s.title}</div>`).join('')}</div></div>
-        <div><div class="tutorial-content" id="info-content" style="white-space:pre-wrap">${sections.find(s => s.id === activeSection)?.content || ''}</div></div>
-      </div>`;
-    window._infoSections = sections;
   },
 
   // ─── RECETTES ───────────────────────────────────────────────────────────────

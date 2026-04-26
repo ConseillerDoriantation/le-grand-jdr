@@ -446,6 +446,33 @@
 .ach-item img   { width:100%; height:100%; object-fit:cover; display:block;
                   transition:transform .3s ease; }
 .ach-item:hover img { transform:scale(1.04); }
+.ach-sortable-item { cursor:grab; }
+.ach-sortable-item:active { cursor:grabbing; }
+
+.ach-sortable-ghost {
+  opacity:.35;
+  background:rgba(226,185,111,.10) !important;
+  outline:2px dashed var(--gold);
+  outline-offset:-2px;
+}
+.ach-sortable-chosen { cursor:grabbing !important; }
+.ach-sortable-drag {
+  opacity:.95 !important;
+  box-shadow:0 16px 40px rgba(0,0,0,.55), 0 0 0 2px var(--gold);
+  cursor:grabbing !important;
+  pointer-events:none;
+  transition:none !important;
+  will-change:transform;
+}
+.ach-sortable-drag,
+.ach-sortable-drag * {
+  transition:none !important;
+  animation:none !important;
+}
+body.ach-dragging { cursor:grabbing !important; user-select:none; }
+body.ach-dragging .ach-item:hover { transform:none !important; box-shadow:none !important; }
+body.ach-dragging .ach-item:hover img { transform:none !important; }
+body.ach-dragging * { cursor:grabbing !important; }
 
 /* Overlay texte */
 .ach-meta {

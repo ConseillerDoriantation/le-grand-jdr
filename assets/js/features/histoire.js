@@ -8,6 +8,16 @@
 import { getDocData, saveDoc, loadCollection, invalidateCache } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { showNotif } from '../shared/notifications.js';
+import {
+  bindRichTextEditorControls,
+  countRichTextWords,
+  execRichTextCommand,
+  richTextEditableHtml,
+  richTextInlineChipElement,
+  richTextToolbarHtml,
+  replaceRichTextRangeWithNode,
+  selectRichTextNodeContents,
+} from '../shared/rich-text.js';
 import PAGES from './pages.js';
 
 // ── Config des types de tags ──────────────────────────────────────────────────
@@ -41,7 +51,6 @@ const STAT_COLORS = {
   INT: '#4f8cff', SAG: '#a78bfa', CHA: '#ec4899',
   '': 'var(--text-dim)',
 };
-
 let _diceSkillsCache = null;
 
 function _getDiceSkills() {
@@ -81,9 +90,10 @@ let _missionId    = null;
 let _missionTitre = '';
 let _missionActe  = '';
 let _saveTimer    = null;
-let _saveStatus   = 'saved';
 let _allMissions  = [];      // toutes les missions de l'aventure
 let _sidebarOpen  = true;
+let _editorAbort = null;
+let _toolbarControls = null;
 
 // Picker commun
 let _pickerActive = false;
@@ -142,7 +152,7 @@ async function renderHistoire() {
   };
 
   const savedContent = histDoc?.content || '';
-  const wordCount    = _countWords(savedContent);
+  const wordCount    = countRichTextWords(savedContent);
 
   document.getElementById('main-content').innerHTML = `
     <div class="hist-shell" id="hist-shell">
@@ -166,24 +176,34 @@ async function renderHistoire() {
 
       <!-- Barre d'outils -->
       <div class="hist-toolbar" id="hist-toolbar">
-        <div class="hist-toolbar-group">
-          <button class="hist-tool" data-cmd="bold"          title="Gras (Ctrl+B)"><strong>B</strong></button>
-          <button class="hist-tool" data-cmd="italic"        title="Italique (Ctrl+I)"><em>I</em></button>
-          <button class="hist-tool" data-cmd="underline"     title="Souligné (Ctrl+U)"><u>U</u></button>
-        </div>
-        <div class="hist-toolbar-sep"></div>
-        <div class="hist-toolbar-group">
-          <button class="hist-tool" data-cmd="h2"    title="Titre H2">H2</button>
-          <button class="hist-tool" data-cmd="h3"    title="Titre H3">H3</button>
-          <button class="hist-tool" data-cmd="quote" title="Citation">❝</button>
-        </div>
-        <div class="hist-toolbar-sep"></div>
-        <div class="hist-toolbar-group">
-          <button class="hist-tool" data-cmd="insertUnorderedList" title="Liste à puces">☰</button>
-          <button class="hist-tool" data-cmd="hr"    title="Séparateur horizontal">—</button>
-          <button class="hist-tool hist-tool--wide"  data-cmd="scene" title="Ajouter un marqueur de scène">⛳ Scène</button>
-          <button class="hist-tool hist-tool--wide"  data-cmd="dice"  title="Insérer un jet de dé (ou tapez [)">🎲 Dé</button>
-        </div>
+        ${richTextToolbarHtml({
+          editorId: 'hist-editor',
+          commandAttr: 'data-cmd',
+          buttonClass: 'hist-tool',
+          groupClass: 'hist-toolbar-group',
+          separatorClass: 'hist-toolbar-sep',
+          groups: [
+            ['bold', 'italic', 'underline'],
+            ['h2', 'h3', 'blockquote'],
+            [
+              'insertUnorderedList',
+              'insertOrderedList',
+              'insertHorizontalRule',
+            ],
+            [
+              { type: 'color' },
+              { type: 'font' },
+              { type: 'size' },
+              { cmd: 'scene', title: 'Ajouter un marqueur de scène', html: '⛳ Scène', className: 'hist-tool--wide', stateful: false },
+              { cmd: 'dice', title: 'Insérer un jet de dé (ou tapez [)', html: '🎲 Dé', className: 'hist-tool--wide', stateful: false },
+            ],
+          ],
+          commandMeta: {
+            bold: { title: 'Gras (Ctrl+B)', html: '<strong>B</strong>' },
+            italic: { title: 'Italique (Ctrl+I)', html: '<em>I</em>' },
+            underline: { title: 'Souligné (Ctrl+U)', html: '<u>U</u>' },
+          },
+        })}
         <div class="hist-toolbar-sep"></div>
         <div class="hist-toolbar-tags">
           ${Object.entries(TAG_TYPES).map(([, cfg]) =>
@@ -214,13 +234,14 @@ async function renderHistoire() {
 
         <!-- Zone d'écriture -->
         <div class="hist-editor-wrap">
-          <div
-            class="hist-editor"
-            id="hist-editor"
-            contenteditable="true"
-            spellcheck="true"
-            data-placeholder="Commencez à écrire l'histoire de cette mission…&#10;&#10;Tapez @ pour mentionner un PNJ, un lieu… · [ ou 🎲 Dé pour un jet de dé"
-          >${savedContent}</div>
+          ${richTextEditableHtml({
+            id: 'hist-editor',
+            className: 'hist-editor',
+            html: savedContent,
+            placeholder: "Commencez à écrire l'histoire de cette mission…\n\nTapez @ pour mentionner un PNJ, un lieu… · [ ou 🎲 Dé pour un jet de dé",
+            attrs: { spellcheck: 'true' },
+            sanitize: false,
+          })}
         </div>
 
       </div>
@@ -248,6 +269,9 @@ async function renderHistoire() {
 
 // ── Liaison éditeur ───────────────────────────────────────────────────────────
 function _bindEditor() {
+  _editorAbort?.abort();
+  _editorAbort = new AbortController();
+  const { signal } = _editorAbort;
   const editor = document.getElementById('hist-editor');
   if (!editor) return;
 
@@ -256,7 +280,7 @@ function _bindEditor() {
     _schedSave();
     _updateWordCount();
     _updateToc();
-  });
+  }, { signal });
 
   editor.addEventListener('keydown', (e) => {
     if (_pickerActive) {
@@ -276,13 +300,17 @@ function _bindEditor() {
       if (e.key === 'Escape') { _closePicker(); return; }
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); _saveNow(); }
-  });
+  }, { signal });
 
   document.addEventListener('click', (e) => {
+    if (!editor.isConnected) {
+      _editorAbort?.abort();
+      return;
+    }
     if (!e.target.closest('#hist-picker') && !e.target.closest('#hist-editor')) {
       _closePicker();
     }
-  });
+  }, { signal });
 }
 
 // ── Input : détection @ et [ ──────────────────────────────────────────────────
@@ -496,24 +524,24 @@ function _insertTag(item) {
   const sel = window.getSelection();
   if (!sel.rangeCount) return;
 
-  const range = document.createRange();
-  range.setStart(_atStart.node, _atStart.atIndex);
-  range.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
-  range.deleteContents();
+  const span = richTextInlineChipElement({
+    className: `htag htag--${item.type}`,
+    dataset: { type: item.type, id: item.id, label: item.label },
+    style: `color:${cfg.color};background:${cfg.bg};border:1px solid ${cfg.color}40;
+      border-radius:4px;padding:1px 6px;font-size:.88em;font-weight:600;
+      display:inline-block;margin:0 2px;white-space:nowrap;user-select:none;cursor:default;`,
+    text: `${cfg.emoji} ${item.label}`,
+  });
 
-  const span = document.createElement('span');
-  span.className       = `htag htag--${item.type}`;
-  span.contentEditable = 'false';
-  span.dataset.type    = item.type;
-  span.dataset.id      = item.id;
-  span.dataset.label   = item.label;
-  span.style.cssText   = `color:${cfg.color};background:${cfg.bg};border:1px solid ${cfg.color}40;
-    border-radius:4px;padding:1px 6px;font-size:.88em;font-weight:600;
-    display:inline-block;margin:0 2px;white-space:nowrap;user-select:none;cursor:default;`;
-  span.textContent = `${cfg.emoji} ${item.label}`;
-
-  sel.getRangeAt(0).insertNode(span);
-  _placeAfter(span, sel);
+  const endRange = sel.getRangeAt(0);
+  replaceRichTextRangeWithNode({
+    startNode: _atStart.node,
+    startOffset: _atStart.atIndex,
+    endNode: endRange.endContainer,
+    endOffset: endRange.endOffset,
+    node: span,
+    selection: sel,
+  });
   _schedSave();
 }
 
@@ -523,107 +551,49 @@ function _insertDiceTag(skill, dd) {
 
   // Construire le range depuis la position sauvegardée (sans se fier à la sélection courante)
   const endOffset = Math.min(_bracketEnd, _bracketStart.node.textContent.length);
-  const range = document.createRange();
-  range.setStart(_bracketStart.node, _bracketStart.bracketIndex);
-  range.setEnd(_bracketStart.node, endOffset);
-  range.deleteContents();
 
   const col  = STAT_COLORS[skill.stat] || STAT_COLORS[''];
   const label = skill.stat
     ? `🎲 ${skill.name}\u00A0·\u00A0${skill.stat}\u00A0DD\u00A0${dd}`
     : `🎲 ${skill.name}\u00A0DD\u00A0${dd}`;
 
-  const span = document.createElement('span');
-  span.className       = 'htag htag--dice';
-  span.contentEditable = 'false';
-  span.dataset.type    = 'dice';
-  span.dataset.skill   = skill.name;
-  span.dataset.stat    = skill.stat;
-  span.dataset.dd      = dd;
-  span.style.cssText   = `color:${col || '#d97706'};background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);
-    border-radius:4px;padding:1px 6px;font-size:.88em;font-weight:600;
-    display:inline-block;margin:0 2px;white-space:nowrap;user-select:none;cursor:default;`;
-  span.textContent = label;
+  const span = richTextInlineChipElement({
+    className: 'htag htag--dice',
+    dataset: { type: 'dice', skill: skill.name, stat: skill.stat, dd },
+    style: `color:${col || '#d97706'};background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);
+      border-radius:4px;padding:1px 6px;font-size:.88em;font-weight:600;
+      display:inline-block;margin:0 2px;white-space:nowrap;user-select:none;cursor:default;`,
+    text: label,
+  });
 
-  range.insertNode(span);
-
-  // Re-focus l'éditeur, placer le curseur après le chip
   const editor = document.getElementById('hist-editor');
-  editor?.focus();
-  const sel = window.getSelection();
-  _placeAfter(span, sel);
+  replaceRichTextRangeWithNode({
+    startNode: _bracketStart.node,
+    startOffset: _bracketStart.bracketIndex,
+    endOffset,
+    node: span,
+    editor,
+  });
   _schedSave();
-}
-
-// Helper : positionner le curseur juste après un nœud
-function _placeAfter(node, sel) {
-  const r = document.createRange();
-  r.setStartAfter(node);
-  r.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(r);
-  if (!node.nextSibling || (node.nextSibling.nodeType === Node.TEXT_NODE && !node.nextSibling.textContent.startsWith(' '))) {
-    const space = document.createTextNode('\u00A0');
-    node.after(space);
-    r.setStartAfter(space);
-    r.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(r);
-  }
 }
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
 function _bindToolbar() {
-  document.getElementById('hist-toolbar')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-cmd]');
-    if (!btn) return;
-    e.preventDefault();
-    const cmd    = btn.dataset.cmd;
-    const editor = document.getElementById('hist-editor');
-    editor?.focus();
-
-    switch (cmd) {
-      case 'bold':      document.execCommand('bold');      break;
-      case 'italic':    document.execCommand('italic');    break;
-      case 'underline': document.execCommand('underline'); break;
-      case 'insertUnorderedList': document.execCommand('insertUnorderedList'); break;
-      case 'h2':    _wrapBlock('h2');         break;
-      case 'h3':    _wrapBlock('h3');         break;
-      case 'quote': _wrapBlock('blockquote'); break;
-      case 'hr':    document.execCommand('insertHorizontalRule'); break;
-      case 'scene': _insertScene();  return;
+  _toolbarControls?.abort();
+  _toolbarControls = bindRichTextEditorControls({
+    editorId: 'hist-editor',
+    toolbarId: 'hist-toolbar',
+    commandAttr: 'data-cmd',
+    customCommands: {
+      scene: () => {
+        _insertScene();
+        return true;
+      },
       // Le bouton 🎲 insère "[" → déclenche le flux [ naturellement via _onInput
-      case 'dice':  document.execCommand('insertText', false, '['); return;
-    }
-    _schedSave();
+      dice: ({ editor }) => execRichTextCommand(editor, 'insertText', '['),
+    },
+    onAfterCommand: _schedSave,
   });
-}
-
-function _wrapBlock(tag) {
-  const sel = window.getSelection();
-  if (!sel.rangeCount) return;
-  const range = sel.getRangeAt(0);
-
-  let block = range.commonAncestorContainer;
-  while (block && block !== document.getElementById('hist-editor')) {
-    if (block.tagName?.toLowerCase() === tag) {
-      const p = document.createElement('p');
-      while (block.firstChild) p.appendChild(block.firstChild);
-      block.replaceWith(p);
-      return;
-    }
-    block = block.parentNode;
-  }
-
-  const el = document.createElement(tag);
-  try { range.surroundContents(el); }
-  catch { el.appendChild(range.extractContents()); range.insertNode(el); }
-
-  const r2 = document.createRange();
-  r2.selectNodeContents(el);
-  r2.collapse(false);
-  sel.removeAllRanges();
-  sel.addRange(r2);
 }
 
 // ── Marqueurs de scène ────────────────────────────────────────────────────────
@@ -632,19 +602,12 @@ function _insertScene() {
   if (!editor) return;
 
   const n = editor.querySelectorAll('.hist-scene-marker').length + 1;
-  document.execCommand('insertHTML', false,
-    `<div class="hist-scene-marker">Scène ${n}</div><p><br></p>`
-  );
+  execRichTextCommand(editor, 'insertHTML', `<div class="hist-scene-marker">Scène ${n}</div><p><br></p>`);
 
   setTimeout(() => {
     const markers = editor.querySelectorAll('.hist-scene-marker');
     const last    = markers[markers.length - 1];
-    if (last) {
-      const r = document.createRange();
-      r.selectNodeContents(last);
-      window.getSelection()?.removeAllRanges();
-      window.getSelection()?.addRange(r);
-    }
+    if (last) selectRichTextNodeContents(last);
   }, 20);
 
   _updateToc();
@@ -900,7 +863,7 @@ window._ouvrirHandout = function () {
   });
 
   const content   = clone.innerHTML;
-  const wordCount = _countWords(content);
+  const wordCount = countRichTextWords(content);
 
   document.getElementById('hist-handout-modal')?.remove();
 
@@ -965,7 +928,6 @@ async function _saveNow() {
 }
 
 function _setSaveStatus(status) {
-  _saveStatus = status;
   const el = document.getElementById('hist-save-status');
   if (!el) return;
   const map = {
@@ -977,17 +939,11 @@ function _setSaveStatus(status) {
   el.innerHTML = `<span class="hist-save-dot ${cfg.dot}"></span> ${cfg.text}`;
 }
 
-// ── Compteur de mots ──────────────────────────────────────────────────────────
-function _countWords(html) {
-  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  return text ? text.split(' ').length : 0;
-}
-
 function _updateWordCount() {
   const editor = document.getElementById('hist-editor');
   const el     = document.getElementById('hist-wordcount');
   if (!editor || !el) return;
-  const n = _countWords(editor.innerHTML);
+  const n = countRichTextWords(editor.innerHTML);
   el.textContent = `${n} mot${n !== 1 ? 's' : ''}`;
 }
 

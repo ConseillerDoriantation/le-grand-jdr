@@ -4,6 +4,7 @@ import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { modStr } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
+import { richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../../shared/rich-text.js';
 
 // ══════════════════════════════════════════════
 // TAB : CARACTÉRISTIQUES
@@ -179,21 +180,9 @@ export function renderCharNotes(c, canEdit) {
         </div>
         ${isOpen?`<div class="cs-note-body">
           ${canEdit
-            ? `<div class="cs-rte-toolbar">
-                <button type="button" class="cs-rte-btn" onclick="document.execCommand('bold')" title="Gras"><b>G</b></button>
-                <button type="button" class="cs-rte-btn" onclick="document.execCommand('italic')" title="Italique"><i>I</i></button>
-                <button type="button" class="cs-rte-btn" onclick="document.execCommand('underline')" title="Souligné"><u>S</u></button>
-                <button type="button" class="cs-rte-btn" onclick="document.execCommand('strikeThrough')" title="Barré"><s>B</s></button>
-                <span class="cs-rte-sep"></span>
-                <button type="button" class="cs-rte-btn" onclick="document.execCommand('insertUnorderedList')" title="Liste à puces">•</button>
-                <button type="button" class="cs-rte-btn" onclick="document.execCommand('insertOrderedList')" title="Liste numérotée">1.</button>
-                <span class="cs-rte-sep"></span>
-                <button type="button" class="cs-rte-btn" onclick="document.execCommand('removeFormat')" title="Effacer la mise en forme" style="font-size:.7rem">✕fmt</button>
-               </div>
-               <div class="input-field cs-note-editor" id="note-area-${i}" contenteditable="true"
-                    data-placeholder="Contenu de la note...">${note.contenu||''}</div>
+            ? `${richTextEditorHtml({ id: `note-area-${i}`, html: note.contenu || '', placeholder: 'Contenu de la note...', minHeight: 180 })}
                <button class="btn btn-gold btn-sm" style="margin-top:0.6rem" onclick="saveNote(${i})">💾 Enregistrer</button>`
-            : `<div class="cs-note-content">${note.contenu||'<em style=\'opacity:.5\'>Aucun contenu.</em>'}</div>`
+            : richTextContentHtml({ html: note.contenu, className: 'cs-note-content', fallback: '<em style="opacity:.5">Aucun contenu.</em>' })
           }
         </div>`:''}
       </div>`;
@@ -240,9 +229,9 @@ export function editNoteTitle(idx) {
 export async function saveNote(idx) {
   try {
     const c = STATE.activeChar; if(!c) return;
-    const el = document.getElementById(`note-area-${idx}`);
-    if (!el) return;
-    c.notesList[idx].contenu = el.innerHTML;
+    const html = getRichTextHtml(`note-area-${idx}`);
+    if (!c.notesList?.[idx]) return;
+    c.notesList[idx].contenu = html;
     await updateInCol('characters', c.id, {notesList: c.notesList});
     showNotif('Note enregistrée !','success');
   } catch (e) {
