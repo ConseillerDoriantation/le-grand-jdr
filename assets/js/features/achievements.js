@@ -2,9 +2,10 @@
 // ACHIEVEMENTS.JS — Hauts-Faits
 // ✓ Upload + redimensionnement image (ratio libre, max 1400px, fond flou à l'affichage)
 // ✓ Hauts-faits sans image affichés correctement (emoji + fond)
-// ✓ Drag & drop précis pour réordonner, ordre persisté dans Firestore
+// ✓ Drag & drop SortableJS pour réordonner, ordre persisté dans Firestore
 // ✓ Ordre partagé pour tous les utilisateurs
 // ══════════════════════════════════════════════════════════════════════════════
+import Sortable from '../vendor/sortable.esm.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
@@ -21,6 +22,9 @@ const CATS = [
 ];
 
 // _crop → géré par shared/image-upload.js
+let _achRowSortables = [];
+let _achDragBlockClick = false;
+let _achClickGuardInstalled = false;
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 function openAchievementModal(id = null) {
@@ -341,59 +345,101 @@ function _applyOrder(items, order) {
   return [...ordered, ...rest];
 }
 
+function _mergeCategoryOrder(catId, catOrder, globalOrder) {
+  const allIds      = (window._achItems || []).map(a => a.id);
+  const globalIds   = globalOrder.filter(id => allIds.includes(id));
+  const missingIds  = allIds.filter(id => !globalIds.includes(id));
+  const fullOrder   = [...globalIds, ...missingIds];
+  const catIds     = new Set((window._achItems || [])
+    .filter(a => (a.categorie || 'epique') === catId)
+    .map(a => a.id));
+  const cleanOrder = catOrder.filter(id => catIds.has(id));
+  const others     = fullOrder.filter(id => !catIds.has(id));
+  const lastCatIdx = Math.max(-1, ...fullOrder.map((id, i) => catIds.has(id) ? i : -1));
+  const firstOther = fullOrder.find((id, i) => !catIds.has(id) && i > lastCatIdx);
+
+  if (!firstOther) return [...others, ...cleanOrder];
+
+  const idx = others.indexOf(firstOther);
+  return [...others.slice(0, idx), ...cleanOrder, ...others.slice(idx)];
+}
+
+async function _persistCategoryOrder(catId, orderedIds) {
+  const merged = _mergeCategoryOrder(catId, orderedIds, await _loadOrder());
+  await _saveOrder(merged);
+  window._achItems = _applyOrder(window._achItems || [], merged);
+  return merged;
+}
+
+function _installAchievementClickGuard() {
+  if (_achClickGuardInstalled) return;
+  _achClickGuardInstalled = true;
+  document.addEventListener('click', (e) => {
+    if (!_achDragBlockClick) return;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+}
+
+function _finishAchievementDrag() {
+  document.body.classList.remove('ach-dragging');
+  setTimeout(() => { _achDragBlockClick = false; }, 350);
+}
+
+function _destroyAchievementSortables() {
+  _achRowSortables.forEach(sortable => sortable?.destroy());
+  _achRowSortables = [];
+}
+
+function _achievementSortableOptions(overrides = {}) {
+  return {
+    animation: 120,
+    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+    filter: 'button, a, input, select, textarea, .btn, .btn-icon, .ach-admin-btns',
+    preventOnFilter: false,
+    ghostClass: 'ach-sortable-ghost',
+    chosenClass: 'ach-sortable-chosen',
+    dragClass: 'ach-sortable-drag',
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 5,
+    delay: 150,
+    delayOnTouchOnly: true,
+    touchStartThreshold: 5,
+    onStart: () => {
+      document.body.classList.add('ach-dragging');
+      _achDragBlockClick = true;
+    },
+    ...overrides,
+  };
+}
+
 // ── DRAG & DROP ───────────────────────────────────────────────────────────────
 function setupAchievementsDnd(catId) {
-  if (!STATE.isAdmin) return;
+  if (!STATE.isAdmin) {
+    _destroyAchievementSortables();
+    return;
+  }
   const grid = document.getElementById(`ach-grid-${catId}`);
   if (!grid) return;
 
-  let dragged = null;
+  _installAchievementClickGuard();
+  _destroyAchievementSortables();
 
-  grid.querySelectorAll('[data-ach-id]').forEach(card => {
-    card.setAttribute('draggable', 'true');
+  grid.querySelectorAll('.ach-row').forEach(row => {
+    _achRowSortables.push(new Sortable(row, _achievementSortableOptions({
+      group: `achievements-${catId}`,
+      draggable: '.ach-sortable-item',
+      onEnd: async (evt) => {
+        _finishAchievementDrag();
+        if (evt.oldIndex === evt.newIndex && evt.from === evt.to) return;
 
-    card.addEventListener('dragstart', (e) => {
-      dragged = card;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', card.dataset.achId);
-      requestAnimationFrame(() => card.classList.add('ach-dragging'));
-    });
-
-    card.addEventListener('dragend', async () => {
-      card.classList.remove('ach-dragging');
-      dragged = null;
-
-      // Lire l'ordre depuis le DOM (traverse toutes les rangées)
-      const domOrder = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
-
-      const catIds      = new Set((window._achItems || [])
-        .filter(a => (a.categorie || 'epique') === catId).map(a => a.id));
-      const globalOrder = await _loadOrder();
-      const otherIds    = globalOrder.filter(id => !catIds.has(id));
-      const firstOther  = globalOrder.find(id => !catIds.has(id) &&
-        globalOrder.indexOf(id) > Math.max(-1, ...globalOrder.map((v, i) => catIds.has(v) ? i : -1)));
-
-      const merged = firstOther
-        ? [...otherIds.slice(0, otherIds.indexOf(firstOther)), ...domOrder, ...otherIds.slice(otherIds.indexOf(firstOther))]
-        : [...otherIds, ...domOrder];
-
-      await _saveOrder(merged);
-      showNotif('Ordre sauvegardé.', 'success');
-      // Reconstruire le justified layout avec le nouvel ordre DOM
-      await _achRebuildJustified(catId);
-    });
-
-    card.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      if (!dragged || card === dragged) return;
-      // Comparer position horizontale au sein d'une rangée
-      const rect  = card.getBoundingClientRect();
-      const after = e.clientX > rect.left + rect.width / 2;
-      if (after) card.after(dragged);
-      else       card.before(dragged);
-    });
-
-    card.addEventListener('dragenter', (e) => e.preventDefault());
+        const domOrder = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
+        await _persistCategoryOrder(catId, domOrder);
+        showNotif('Ordre sauvegardé.', 'success');
+        await _achRebuildJustified(catId);
+      },
+    })));
   });
 }
 
@@ -553,7 +599,7 @@ async function _achRenderJustified(catId, items, cat, container) {
   container.innerHTML = rows.map(row => `
     <div class="ach-row" style="height:${row.h}px">
       ${row.items.map(item => `
-        <div class="ach-item" data-ach-id="${item.id}"
+        <div class="ach-item ${isAdmin ? 'ach-sortable-item' : ''}" data-ach-id="${item.id}"
           style="width:${item.w}px;height:${row.h}px;${isAdmin ? 'cursor:grab' : ''}"
           ${item.imageUrl ? `onclick="window._achOpenImage('${item.imageUrl.replace(/'/g, "\\'")}')"` : ''}>
           ${_achCardHTML(item, cat, isAdmin)}
@@ -575,75 +621,6 @@ async function _achRebuildJustified(catId) {
   setupAchievementsDnd(catId);
 }
 window._achRebuildJustified = _achRebuildJustified;
-
-// ── RÉORDONNER (modal simple drag-and-drop vertical) ─────────────────────────
-window._achOuvrirReordre = async function() {
-  const catId    = window._achCat || 'epique';
-  const cat      = ACH_CATS.find(c => c.id === catId);
-  const catItems = (window._achItems || []).filter(a => (a.categorie || 'epique') === catId);
-  if (!catItems.length || !cat) return;
-
-  openModal(`↕️ Réordonner — ${cat.emoji} ${cat.label}`, `
-    <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:.8rem">Glisser les lignes pour changer l'ordre.</p>
-    <div id="ach-reorder-list" style="display:flex;flex-direction:column;gap:6px">
-      ${catItems.map(a => `
-        <div data-reorder-id="${a.id}" draggable="true" style="
-          display:flex;align-items:center;gap:10px;padding:8px 10px;
-          background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;cursor:grab;
-          transition:background .15s">
-          <span style="color:var(--text-dim);font-size:1.1rem;flex-shrink:0">⠿</span>
-          ${a.imageUrl
-            ? `<img src="${a.imageUrl}" style="width:40px;height:30px;border-radius:6px;object-fit:cover;flex-shrink:0">`
-            : `<span style="font-size:1.4rem;flex-shrink:0">${a.emoji || '🏆'}</span>`}
-          <span style="font-size:.85rem;color:var(--text)">${_esc(a.titre || 'Haut-Fait')}</span>
-        </div>`).join('')}
-    </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:12px"
-      onclick="window._achSauvegarderReordre('${catId}')">💾 Enregistrer l'ordre</button>
-  `);
-
-  // DnD vertical sur la liste modale
-  let draggedRow = null;
-  const list = document.getElementById('ach-reorder-list');
-  list?.querySelectorAll('[data-reorder-id]').forEach(row => {
-    row.addEventListener('dragstart', () => { draggedRow = row; row.style.opacity = '.4'; });
-    row.addEventListener('dragend',   () => { draggedRow = null; row.style.opacity = ''; });
-    row.addEventListener('dragover',  e  => {
-      e.preventDefault();
-      if (!draggedRow || row === draggedRow) return;
-      const mid = row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
-      e.clientY < mid ? row.before(draggedRow) : row.after(draggedRow);
-    });
-  });
-};
-
-window._achSauvegarderReordre = async function(catId) {
-  const list = document.getElementById('ach-reorder-list');
-  if (!list) return;
-
-  const catItems  = (window._achItems || []).filter(a => (a.categorie || 'epique') === catId);
-  const catIds    = new Set(catItems.map(a => a.id));
-  const newCatOrd = [...list.querySelectorAll('[data-reorder-id]')].map(el => el.dataset.reorderId);
-
-  const globalOrder = await _loadOrder();
-  const others      = globalOrder.filter(id => !catIds.has(id));
-  const firstOther  = globalOrder.find(id => !catIds.has(id) &&
-    globalOrder.indexOf(id) > Math.max(-1, ...globalOrder.map((v, i) => catIds.has(v) ? i : -1)));
-
-  let merged;
-  if (firstOther) {
-    const idx = others.indexOf(firstOther);
-    merged = [...others.slice(0, idx), ...newCatOrd, ...others.slice(idx)];
-  } else {
-    merged = [...others, ...newCatOrd];
-  }
-
-  await _saveOrder(merged);
-  window._achItems = _applyOrder(window._achItems, merged);
-  closeModal();
-  showNotif('Ordre sauvegardé.', 'success');
-  await _achRebuildJustified(catId);
-};
 
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
