@@ -12,7 +12,7 @@ import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, getDocs, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
-import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus } from '../shared/char-stats.js';
 import { getArmorSetData } from './characters/data.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
@@ -93,6 +93,20 @@ const _MS_STATS   = [
   { key:'sagesse',      abbr:'SAG' }, { key:'charisme',     abbr:'CHA' },
 ];
 
+const _numOr = (value, fallback = null) => {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+const _signed = n => n > 0 ? `+${n}` : `${n}`;
+const _npcStatScore = (npc, key) => _numOr(npc?.stats?.[key], 8);
+const _npcStatMod = (npc, key) => getModFromScore(_npcStatScore(npc, key));
+const _tokenStatMod = (t, statKey) => {
+  if (!statKey) return 0;
+  if (t?.characterId) return getMod(_characters[t.characterId], statKey);
+  if (t?.npcId) return _npcStatMod(_npcs[t.npcId], statKey);
+  return 0;
+};
+
 // ── État présence & mini-fiche ──────────────────────────────────────
 let _presence     = {};   // uid → { uid, pseudo }
 let _presHeartbeat= null; // intervalId du heartbeat
@@ -150,13 +164,18 @@ function _live(t) {
     displayRange:    t.range    ?? 1,
   };
 
+  const npcHpMax = n ? _numOr(e.pv, _numOr(e.hpMax, _numOr(e.pvMax, 20))) : null;
+  const npcPmMax = n ? _numOr(e.pmMax, _numOr(e.pm, null)) : null;
+  const npcPmCur = n ? _numOr(e.pmCurrent, npcPmMax) : null;
+
   const hpMax = c ? (calcPVMax(c) || c.pvBase || 20)
-              : b ? (parseInt(b.pvMax) || 20)
-              : (e.hpMax || e.pvMax || e.pv || 20);
+              : b ? (_numOr(b.pvMax, 20))
+              : n ? npcHpMax
+              : (_numOr(e.hpMax, _numOr(e.pvMax, _numOr(e.pv, 20))));
 
   // Pour les créatures du bestiaire : HP suivi sur le TOKEN (pas sur la fiche template)
   const hpCurrent = c ? (c.hp ?? hpMax)
-                  : n ? (n.hp ?? hpMax)
+                  : n ? (_numOr(n.hp, hpMax))
                   : (t.hp ?? hpMax); // bestiaire + tokens custom
 
   // Formule de dégâts : arme équipée > première attaque bestiary > override token > fallback
@@ -183,12 +202,12 @@ function _live(t) {
     displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
-    displayPm:         c ? (c.pm ?? calcPMMax(c)) : null,
-    displayPmMax:      c ? calcPMMax(c) : null,
-    displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (parseInt(b.vitesse)||4) : (e.vitesse || e.deplacement || 6))),
-    displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (parseInt(b.attaques?.[0]?.toucher)||5) : (e.bonusAttaque||e.attack||5))),
+    displayPm:         c ? (c.pm ?? calcPMMax(c)) : n ? npcPmCur : null,
+    displayPmMax:      c ? calcPMMax(c) : n ? npcPmMax : null,
+    displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6))))),
+    displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, e.stats?.force != null ? _npcStatMod(e, 'force') : 5))))),
     displayAttackDice: atkDice,
-    displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (parseInt(b.ca)||10) : (e.ca||e.defense||0))),
+    displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0))))),
     // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
     // Pour bestiaire/custom : t.range > 1ère attaque bestiary > défaut 1
     displayRange: c
@@ -627,7 +646,7 @@ function _buildShape(t) {
     text:`${hp}/${hpm}`, fontSize:8, fontStyle:'bold', fill:'#fff',
     shadowColor:'#000', shadowBlur:2, shadowOpacity:.9,
     fontFamily:'Inter,sans-serif', listening:false, name:'hp-val' }));
-  // ── Barre PM (joueurs seulement, texte superposé) ─────────────────
+  // ── Barre PM (joueurs + PNJ avec PM renseignés, texte superposé) ──
   const _pm0=ld.displayPm;
   let _lblY=r+BH+8;
   if (_pm0!=null) {
@@ -757,6 +776,17 @@ function _buildShape(t) {
 function _patchShape(id) {
   const e=_tokens[id]; if (!e?.shape) return;
   const ld=_live(e.data); const g=e.shape;
+  const hasPmBar = !!g.findOne('.pm-val');
+  if ((ld.displayPm != null) !== hasPmBar) {
+    const shape = _buildShape(e.data);
+    g.destroy();
+    _tokens[id] = { ...e, shape };
+    _layers.token?.add(shape);
+    if (_selected === id) shape.findOne('.sel')?.visible(true);
+    if (_attackSrc === id) shape.findOne('.atk')?.visible(true);
+    _layers.token?.batchDraw();
+    return;
+  }
   g.to({ x:e.data.col*CELL+CELL/2, y:e.data.row*CELL+CELL/2, duration:0.12 });
   const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
   const rat=hpm>0?Math.max(0,hp/hpm):1, bW=CELL*0.9;
@@ -1125,6 +1155,27 @@ function _buildAttackOptions(t) {
       });
     });
     if (options.length) return options;
+  }
+
+  // ── PNJ : stats saisies dans la fiche PNJ ──
+  if (!c && t.npcId) {
+    const n = _npcs[t.npcId] || {};
+    const dmgMod = _npcStatMod(n, 'force');
+    options.push({
+      id: 'npc_attack',
+      icon: '⚔️',
+      label: 'Attaque',
+      rawDice: t.attackDice || n.attackDice || '1d6',
+      dice: t.attackDice || n.attackDice || '1d6',
+      portee: ld.displayRange ?? 1,
+      pmCost: 0,
+      toucher: ld.displayAttack ?? 5,
+      dmgStatMod: dmgMod,
+      dmgStatLabel: 'FOR',
+      maitriseBonus: 0,
+      halfOnMiss: false,
+    });
+    return options;
   }
 
   // ── Arme principale du personnage (ou attaque générique) ──
@@ -1757,6 +1808,9 @@ function _renderInspector(t) {
     const pos    = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
     const pm     = ld.displayPm    ?? null;
     const pmMax  = ld.displayPmMax ?? null;
+    const atkLabel = t.npcId
+      ? (ld.displayAttackDice || '1d6') + _signed(ld.displayAttack ?? 0)
+      : (ld.displayAttackDice || (ld.displayAttack??5));
     const pvEditHtml = STATE.isAdmin
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" onchange="window._vttSetHp(\''+t.id+'\',+this.value)">'
       : null;
@@ -1770,7 +1824,7 @@ function _renderInspector(t) {
       '</div>' +
       '<div class="vtt-ins-stats">' +
         _stat('🏃', 'Mouvement', (ld.displayMovement??6)+' cases') +
-        _stat('⚔️', 'Attaque', ld.displayAttackDice || (ld.displayAttack??5)) +
+        _stat('⚔️', 'Attaque', atkLabel) +
         _stat('🛡', 'CA', ld.displayDefense??0) +
         _stat('🎯', 'Portée', (ld.displayRange??1)+' case(s)') +
         _stat('📍', 'Position', pos, true) +
@@ -1794,10 +1848,9 @@ function _renderInspector(t) {
     </div>
     ${statsHtml}
     ${(t.type==='player'||t.type==='npc') && _diceSkills.length && (STATE.isAdmin||t.ownerId===STATE.user?.uid) ? (() => {
-      const c = t.characterId ? _characters[t.characterId] : null;
       const btns = _diceSkills.map(s => {
         const statKey = _STAT_KEY[s.stat] || '';
-        const mod  = c && statKey ? getMod(c, statKey) : 0;
+        const mod  = _tokenStatMod(t, statKey);
         const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
         const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
         return `<button class="vtt-skill-btn" onclick="window._vttRollSkill('${s.name.replace(/'/g,"\\'")}','${s.stat}')">
@@ -2668,8 +2721,9 @@ window._vttRollSkill = async (skillName, stat) => {
   if (!t) return;
   if (!STATE.isAdmin && t.ownerId !== STATE.user?.uid) return; // joueur ne peut lancer que son propre token
   const c = t?.characterId ? _characters[t.characterId] : null;
+  const n = t?.npcId ? _npcs[t.npcId] : null;
   const statKey = _STAT_KEY[stat] || '';
-  const mod = c && statKey ? getMod(c, statKey) : 0;
+  const mod = _tokenStatMod(t, statKey);
   const d20 = () => Math.floor(Math.random() * 20) + 1;
 
   let d1 = d20(), d2, roll;
@@ -2680,8 +2734,8 @@ window._vttRollSkill = async (skillName, stat) => {
   const total   = roll + mod + _rollBonus;
   const isCrit  = roll === 20, isFumble = roll === 1;
   const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
-  const characterName = c?.nom || t?.name || null;
-  const characterImage = c?.photoURL || c?.photo || c?.avatar || null;
+  const characterName = c?.nom || n?.nom || t?.name || null;
+  const characterImage = c?.photoURL || c?.photo || c?.avatar || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl || null;
   try {
     await addDoc(_logCol(), {
       type: 'roll',
@@ -3419,7 +3473,7 @@ window._vttSetPm = async (tokenId,pm) => {
   const t=_tokens[tokenId]?.data; if (!t) return;
   const v=Math.max(0,pm);
   if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
-  else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pm:v}).catch(()=>{});
+  else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
 };
 window._vttEditToken = id => _openStatsModal(_tokens[id]?.data??null);
 

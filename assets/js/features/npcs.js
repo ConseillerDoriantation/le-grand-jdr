@@ -832,16 +832,22 @@ function _openMjStatsView() {
       </table>
     </div>
     <div style="margin-top:.65rem;font-size:.7rem;color:var(--text-dim);font-style:italic;text-align:center">
-      Clic sur n'importe quelle valeur pour la modifier (Entrée = valider, Échap = annuler) • Clic sur le nom pour ouvrir la fiche
+      Clic sur n'importe quelle valeur pour la modifier (Entrée = valider, Échap = annuler) <br> • Clic sur le nom d'un PNJ pour ouvrir sa fiche
     </div>
   `);
+}
+
+function _restoreMjStatsModal() {
+  const search = document.getElementById('mj-stats-search');
+  if (search) search.value = _mjFilter;
+  const tbody = document.querySelector('#mj-stats-table tbody');
+  if (tbody) tbody.innerHTML = _renderMjStatsTbody();
 }
 
 window._openMjStatsView = _openMjStatsView;
 
 window._mjOpenNpc = (id) => {
-  closeModal();
-  window.selectNpc(id);
+  openNpcModal(id, { stackedFromMjStats: true });
 };
 
 window._mjEditField = (id, field) => {
@@ -908,10 +914,11 @@ window._mjEditField = (id, field) => {
 };
 
 // ── Modal création / édition PNJ ──────────────────────────────────────────────
-function openNpcModal(id = null) {
+function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
   const npc = id ? _npcs.find(n => n.id === id) : null;
+  const open = stackedFromMjStats ? pushModal : openModal;
 
-  openModal(npc ? `✏️ Modifier — ${_esc(npc.nom || 'PNJ')}` : '👥 Nouveau PNJ', `
+  open(npc ? `✏️ Modifier — ${_esc(npc.nom || 'PNJ')}` : '👥 Nouveau PNJ', `
     <div class="grid-2" style="gap:.8rem">
       <div class="form-group" style="margin:0">
         <label>Nom</label>
@@ -968,7 +975,7 @@ function openNpcModal(id = null) {
         onclick="saveNpc('${npc?.id || ''}')">Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
-  `);
+  `, stackedFromMjStats ? _restoreMjStatsModal : null);
 
   // ── Autocomplete Lieu + Organisations ─────────────────────────────────────
   initAutocomplete('npc-lieu', _places.map(p => p.name));
