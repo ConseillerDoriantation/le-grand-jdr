@@ -3757,29 +3757,6 @@ function _buildHtml() {
 <div class="vtt-root" id="vtt-root">
   <div class="vtt-toolbar">
     ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
-    <div class="vtt-tool-group">
-      <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="↖ Sélection — interagir avec les tokens et annotations">↖</button>
-      <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle — 1er clic départ, 2e clic fin">📏</button>
-      <button class="vtt-tool" data-tool="draw" onclick="window._vttTool('draw')" title="✏️ Dessin — dessiner sur la carte">✏️</button>
-    </div>
-    <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
-      <button class="vtt-draw-btn active" id="vtt-ds-pencil"  onclick="window._vttDrawShape('pencil')"  title="Crayon libre">✏️</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-line"    onclick="window._vttDrawShape('line')"    title="Ligne">╱</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-rect"    onclick="window._vttDrawShape('rect')"    title="Rectangle">⬜</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-circle"  onclick="window._vttDrawShape('circle')"  title="Cercle">⬭</button>
-      <div class="vtt-draw-sep"></div>
-      ${['#ef4444','#f59e0b','#22c38e','#4f8cff','#b47fff','#ffffff','#1a1a2e'].map((c,i)=>
-        `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" onclick="window._vttDrawColor('${c}')" style="background:${c}" title="${c}"></button>`
-      ).join('')}
-      <div class="vtt-draw-sep"></div>
-      ${[2,4,8].map((w,i)=>
-        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" onclick="window._vttDrawWidth(${w})" title="${w}px">${w}</button>`
-      ).join('')}
-      <div class="vtt-draw-sep"></div>
-      <button class="vtt-draw-btn" id="vtt-draw-fill-btn" onclick="window._vttToggleDrawFill()" title="Remplissage (rect/cercle)">◻</button>
-      <div style="flex:1"></div>
-      ${mj?`<button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearAnnots()" title="Effacer toutes les annotations de cette page">🗑 Effacer tout</button>`:''}
-    </div>
     <div class="vtt-tool-group vtt-right">
       <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
       ${mj?`
@@ -3849,7 +3826,33 @@ export async function renderVttPage() {
   const wrap=document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
   _initCanvas(wrap);
-  // Float émote injecté APRÈS Konva pour être au-dessus des canvas layers
+  // Floats injectés APRÈS Konva pour être au-dessus des canvas layers
+  const _tf = document.createElement('div');
+  _tf.className = 'vtt-tool-float';
+  _tf.innerHTML = `
+    <div class="vtt-tool-float-tools">
+      <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="↖ Sélection">↖</button>
+      <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle">📏</button>
+      <button class="vtt-tool" data-tool="draw"   onclick="window._vttTool('draw')"   title="✏️ Dessin">✏️</button>
+    </div>
+    <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
+      <button class="vtt-draw-btn active" id="vtt-ds-pencil"  onclick="window._vttDrawShape('pencil')"  title="Crayon libre">✏️</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-line"    onclick="window._vttDrawShape('line')"    title="Ligne">╱</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-rect"    onclick="window._vttDrawShape('rect')"    title="Rectangle">⬜</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-circle"  onclick="window._vttDrawShape('circle')"  title="Cercle">⬭</button>
+      <div class="vtt-draw-sep"></div>
+      ${['#ef4444','#f59e0b','#22c38e','#4f8cff','#b47fff','#ffffff','#1a1a2e'].map((c,i)=>
+        `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" onclick="window._vttDrawColor('${c}')" style="background:${c}" title="${c}"></button>`
+      ).join('')}
+      <div class="vtt-draw-sep"></div>
+      ${[2,4,8].map((w,i)=>
+        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" onclick="window._vttDrawWidth(${w})" title="${w}px">${w}</button>`
+      ).join('')}
+      <div class="vtt-draw-sep"></div>
+      <button class="vtt-draw-btn" id="vtt-draw-fill-btn" onclick="window._vttToggleDrawFill()" title="Remplissage (rect/cercle)">◻</button>
+      ${STATE.isAdmin?`<div class="vtt-draw-sep"></div><button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearAnnots()" title="Effacer toutes les annotations">🗑</button>`:''}
+    </div>`;
+  wrap.appendChild(_tf);
   const _ef = document.createElement('div');
   _ef.className = 'vtt-emote-float';
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker"></div>
