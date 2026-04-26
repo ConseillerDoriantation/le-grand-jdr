@@ -2,7 +2,7 @@
 // PAGES
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
-import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData } from '../data/firestore.js';
+import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData, saveDoc } from '../data/firestore.js';
 import { _esc } from '../shared/html.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
@@ -39,11 +39,13 @@ const PAGES = {
 
     // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
-    const [chars, storyItems, bastionDoc, achievements] = await Promise.all([
+    const [chars, storyItems, bastionDoc, achievements, quests, collectionItems] = await Promise.all([
       loadChars(uid).catch(() => []),
       loadCollection('story').catch(() => []),
       getDocData('bastion', 'main').catch(() => null),
       loadCollection('achievements').catch(() => []),
+      loadCollection('quests').catch(() => []),
+      loadCollection('collection').catch(() => []),
     ]);
     STATE.characters = chars;
 
@@ -289,121 +291,245 @@ const PAGES = {
     // ── Render ────────────────────────────────────────────────────────
     const dash = document.getElementById('dash-root');
     if (!dash) return;
+
+    const _myUid           = STATE.user?.uid;
+    const collectionUnlocked = collectionItems.filter(c => c.unlocked).length;
+    const activeQuests     = quests
+      .filter(q => q.statut === 'active')
+      .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
+
+    // Stocker pour la fonction join
+    window._dashQuestData = quests;
+
+    // Join inline depuis le dashboard (sans charger quests.js)
+    window._dashQuestJoin = async function (id, el) {
+      const quest  = (window._dashQuestData||[]).find(q => q.id === id);
+      if (!quest) return;
+      const myUid  = STATE.user?.uid;
+      const myChar = (STATE.characters||[]).find(c => c.uid === myUid);
+      if (!myChar) { window.showNotif?.('Aucun personnage trouvé.', 'error'); return; }
+      if (el) { el.disabled = true; el.textContent = '…'; }
+      const parts = Array.isArray(quest.participants) ? [...quest.participants] : [];
+      const idx   = parts.findIndex(p => p.uid === myUid);
+      if (idx >= 0) { parts.splice(idx, 1); }
+      else { parts.push({ uid: myUid, charId: myChar.id, nom: myChar.nom||'?', photo: myChar.photo||null, photoX: myChar.photoX||0, photoY: myChar.photoY||0 }); }
+      try {
+        await saveDoc('quests', id, { participants: parts });
+        window.showNotif?.(idx >= 0 ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', idx >= 0 ? 'info' : 'success');
+        await PAGES.dashboard();
+      } catch { window.showNotif?.('Erreur.', 'error'); if (el) { el.disabled = false; } }
+    };
+
+    // ── Helpers ────────────────────────────────────────────────────────
+
+    // Mini-portrait
+    const _portMini = (p, size = 26) => {
+      const pos = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
+      return p.photo
+        ? `<img src="${p.photo}" title="${_esc(p.nom||'?')}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;object-position:${pos};border:2px solid var(--bg-card);flex-shrink:0">`
+        : `<div style="width:${size}px;height:${size}px;border-radius:50%;background:rgba(79,140,255,.18);border:2px solid var(--bg-card);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:${Math.round(size*.38)}px;font-weight:700;color:var(--gold);flex-shrink:0">${(p.nom||'?')[0].toUpperCase()}</div>`;
+    };
+
+    // Carte quête (joinable en place, pas de navigation sur le conteneur)
+    const QDIFF = { facile:'#22c38e', moyen:'#4f8cff', difficile:'#e8b84b', extreme:'#ff6b6b' };
+    const QDLBL = { facile:'Facile',  moyen:'Moyen',   difficile:'Difficile', extreme:'Extrême' };
+    const _dashQuestCard = q => {
+      const col    = QDIFF[q.difficulte] || '#4f8cff';
+      const dlbl   = QDLBL[q.difficulte] || 'Moyen';
+      const parts  = Array.isArray(q.participants) ? q.participants : [];
+      const joined = parts.some(p => p.uid === _myUid);
+      const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');
+      const joinBtn = !STATE.isAdmin
+        ? `<button class="quest-join-btn${joined?' quest-join-btn--joined':''}"
+             onclick="window._dashQuestJoin('${q.id}',this)">
+             ${joined ? '✓ Rejoint' : '+ Rejoindre'}
+           </button>`
+        : '';
+      return `
+      <div class="quest-card quest-card--active">
+        <div class="quest-card-hd">
+          <span class="quest-badge" style="background:${col}22;color:${col};border-color:${col}44">${dlbl}</span>
+          <div style="margin-left:auto;display:flex;gap:.3rem;align-items:center">${joinBtn}</div>
+        </div>
+        <div class="quest-card-title">${_esc(q.titre||'Quête')}</div>
+        ${q.description ? `<div class="quest-card-desc">${_esc(q.description)}</div>` : ''}
+        ${q.recompense  ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
+        ${parts.length > 0 ? `<div class="quest-parts">${portHtml}${parts.length>4?`<span class="quest-parts-count">+${parts.length-4}</span>`:''}</div>` : ''}
+      </div>`;
+    };
+
+    // Bloc mission compact
+    const _missionCard = () => {
+      if (!mission) return null;
+      return `<div class="dash-info-card" onclick="navigate('story')" style="cursor:pointer">
+        <div class="dash-mission-compact">
+          ${mission.imageUrl
+            ? `<img src="${mission.imageUrl}" class="dash-mission-thumb">`
+            : `<div class="dash-mission-thumb dash-mission-thumb--empty">⚔️</div>`}
+          <div style="flex:1;min-width:0">
+            <div class="dash-info-sublabel">Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
+            <div class="dash-info-title">${_esc(mission.titre||'Mission')}</div>
+            ${mission.lieu ? `<div class="dash-info-meta">📍 ${_esc(mission.lieu)}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    };
+
+    // Barre progression trame (compacte, inline)
+    const _progBar = () => {
+      if (totalMissions === 0) return '';
+      const pct = Math.round(doneMissions / totalMissions * 100);
+      return `<div class="dash-info-card" onclick="navigate('story')" style="cursor:pointer">
+        <div class="dash-progress-row">
+          <span class="dash-info-sublabel">📖 Progression aventure</span>
+          <span class="dash-info-sublabel">${doneMissions}/${totalMissions} missions</span>
+        </div>
+        <div class="dash-progress-track"><div class="dash-progress-fill" style="width:${pct}%"></div></div>
+      </div>`;
+    };
+
+    // ── Rendu HTML ──────────────────────────────────────────────────────
     dash.innerHTML = `
 
     <!-- Bandeau aventure -->
     ${STATE.adventure ? `
-    <div class="dash-adv-banner" onclick="window.openAdventureSwitcher?.()" style="cursor:${(STATE.adventures?.length||0) > 1 ? 'pointer' : 'default'}">
-      <span style="font-size:1.1rem">${STATE.adventure.emoji || '⚔️'}</span>
+    <div class="dash-adv-banner" onclick="window.openAdventureSwitcher?.()" style="cursor:${(STATE.adventures?.length||0)>1?'pointer':'default'}">
+      <span style="font-size:1.1rem">${STATE.adventure.emoji||'⚔️'}</span>
       <span class="dash-adv-name">${_esc(STATE.adventure.nom)}</span>
-      ${(STATE.adventures?.length||0) > 1 ? `<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>` : ''}
+      ${(STATE.adventures?.length||0)>1?`<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>`:''}
       <span class="dash-adv-tag">Aventure active</span>
     </div>` : ''}
 
-    <!-- Section personnages -->
-    ${charsHtml}
+    ${STATE.isAdmin ? `
 
-    <!-- Grille : mission + raccourcis -->
-    <div class="dash-2col">
+    <!-- ══ VUE MJ ══ -->
 
-      ${mission ? `
-      <div class="dash-mission" onclick="navigate('story')">
-        <div style="display:flex;align-items:stretch;flex:1">
-          ${mission.imageUrl
-            ? `<div style="width:80px;flex-shrink:0;overflow:hidden"><img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`
-            : `<div class="dash-mission-accent" style="background:#4f8cff"></div>`}
-          <div class="dash-mission-body">
-            <div class="dash-mission-label">⚔️ Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
-            <div class="dash-mission-title">${_esc(mission.titre||'Mission')}</div>
-            ${mission.lieu ? `<div class="dash-mission-lieu">📍 ${_esc(mission.lieu)}</div>` : ''}
-            ${mission.description ? `<div class="dash-mission-desc">${_esc(mission.description)}</div>` : ''}
-          </div>
-          <div class="dash-hero-arrow" style="align-self:center">→</div>
-        </div>
-      </div>` : `
-      <div class="dash-mission" onclick="navigate('story')">
-        <div class="dash-mission-empty">
-          <span style="font-size:1.8rem;opacity:.35">📚</span>
-          <div style="flex:1">
-            <div class="dash-mission-title" style="font-size:.9rem">Voir la Trame</div>
-            <div style="font-size:.75rem;color:var(--text-dim)">Aucune mission active</div>
-          </div>
-          <div class="dash-hero-arrow">→</div>
-        </div>
-      </div>`}
-
-      <div class="dash-ql-wrap">
-        <div class="dash-ql-title">En jeu</div>
-        <div class="dash-ql-grid">
-          ${[
-            { page:'bestiaire', icon:'🐉', label:'Bestiaire', cls:'dash-ql-btn--red'   },
-            { page:'recettes',  icon:'🍳', label:'Recettes',  cls:'dash-ql-btn--green' },
-            { page:'shop',      icon:'🛍️', label:'Boutique',  cls:'dash-ql-btn--gold'  },
-            { page:'bastion',   icon:'🏰', label:'Bastion',   cls:'dash-ql-btn--blue'  },
-          ].map(r => `
-          <button class="dash-ql-btn ${r.cls}" onclick="navigate('${r.page}')">
-            <span class="dash-ql-icon">${r.icon}</span>
-            <span class="dash-ql-label">${r.label}</span>
-          </button>`).join('')}
-        </div>
-      </div>
-
+    <!-- Stats -->
+    <div class="dash-stats-row">
+      ${[
+        { val: chars.length,         label: `Personnage${chars.length!==1?'s':''}`,      nav:'characters',    col:'#4f8cff' },
+        { val: activeQuests.length,  label: `Quête${activeQuests.length!==1?'s':''} active${activeQuests.length!==1?'s':''}`, nav:'quests', col:'#b482ff' },
+        { val: collectionUnlocked,   label: 'Cartes débloquées',                          nav:'collection',    col:'#22d3ee' },
+        { val: achievements.length,  label: `Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}`, nav:'achievements', col:'#e8b84b' },
+      ].map(s => `<div class="dash-stat" onclick="navigate('${s.nav}')">
+        <div class="dash-stat-val" style="color:${s.col}">${s.val}</div>
+        <div class="dash-stat-lbl">${s.label}</div>
+      </div>`).join('')}
     </div>
 
-    <!-- Infos secondaires : bastion + progression -->
-    ${(bastionDoc || totalMissions > 0) ? `
-    <div class="dash-2col">
+    <!-- Personnages -->
+    <div class="dash-sec">
+      <div class="dash-sec-hd">
+        <span class="dash-sec-label">📜 Personnages</span>
+        <button class="dash-sec-link" onclick="navigate('characters')">Voir tous →</button>
+      </div>
+      ${charsHtml}
+    </div>
 
-      ${bastionDoc ? `
-      <div class="dash-mission" onclick="navigate('bastion')" style="cursor:pointer">
-        <div style="display:flex;align-items:stretch;flex:1">
-          <div class="dash-mission-accent" style="background:rgba(232,184,75,.5)"></div>
-          <div class="dash-mission-body">
-            <div class="dash-mission-label">🏰 Bastion</div>
-            <div class="dash-mission-title">${_esc(bastionNom)}</div>
-            <div style="display:flex;gap:.45rem;margin-top:.4rem;flex-wrap:wrap">
-              <span class="dash-chip">Niveau <strong>${bastionLevel}</strong></span>
-              <span class="dash-chip dash-chip--gold">💰 <strong>${bastionDoc.tresor||0}</strong> or</span>
-            </div>
-          </div>
-          <div class="dash-hero-arrow" style="align-self:center">→</div>
-        </div>
-      </div>` : ''}
+    <!-- Quêtes actives (grille pleine largeur) -->
+    <div class="dash-sec">
+      <div class="dash-sec-hd">
+        <span class="dash-sec-label">🗡️ Quêtes actives</span>
+        <button class="dash-sec-link" onclick="navigate('quests')">Gérer →</button>
+      </div>
+      ${activeQuests.length
+        ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>
+           ${activeQuests.length > 4 ? `<button class="dash-sec-link" onclick="navigate('quests')" style="align-self:flex-end">+${activeQuests.length-4} de plus →</button>` : ''}`
+        : `<div class="dash-info-card"><div class="dash-info-empty"><span style="opacity:.3">🗡️</span> Aucune quête active — créez-en depuis la page Quêtes.</div></div>`}
+    </div>
 
-      ${totalMissions > 0 ? `
-      <div class="dash-mission" onclick="navigate('story')" style="cursor:pointer">
-        <div style="display:flex;align-items:stretch;flex:1">
-          <div class="dash-mission-accent" style="background:rgba(34,195,142,.5)"></div>
-          <div class="dash-mission-body">
-            <div class="dash-mission-label">📖 Progression de l'aventure</div>
-            <div class="dash-mission-title" style="font-size:.92rem">${doneMissions} / ${totalMissions} mission${totalMissions>1?'s':''} terminée${doneMissions>1?'s':''}</div>
-            <div style="margin-top:.5rem">
-              <div style="background:rgba(255,255,255,.06);border-radius:999px;height:8px;overflow:hidden">
-                <div style="height:100%;width:${totalMissions > 0 ? Math.round(doneMissions/totalMissions*100) : 0}%;background:linear-gradient(90deg,#4f8cff,#22c38e);border-radius:999px;transition:width .5s"></div>
-              </div>
-            </div>
-            ${achievements.length > 0 ? `<div style="font-size:.71rem;color:var(--text-dim);margin-top:.35rem">🏆 ${achievements.length} haut${achievements.length>1?'s':''}-fait${achievements.length>1?'s':''} accompli${achievements.length>1?'s':''}</div>` : ''}
-          </div>
-          <div class="dash-hero-arrow" style="align-self:center">→</div>
-        </div>
-      </div>` : ''}
-
+    <!-- Trame (compacte, seulement si données) -->
+    ${(mission || totalMissions > 0) ? `
+    <div class="dash-sec">
+      <div class="dash-sec-hd">
+        <span class="dash-sec-label">📖 Trame</span>
+        <button class="dash-sec-link" onclick="navigate('story')">Ouvrir →</button>
+      </div>
+      ${_missionCard() || ''}
+      ${_progBar()}
     </div>` : ''}
 
-    ${STATE.isAdmin ? `
+    <!-- Console MJ -->
     <div class="dash-admin">
       <div class="dash-admin-title">🎲 Console MJ</div>
       <div class="dash-admin-links">
         ${[
-          { page:'story',     label:'📚 Trame'     },
-          { page:'shop',      label:'🛍️ Boutique'  },
-          { page:'npcs',      label:'👥 PNJ'       },
-          { page:'bestiaire', label:'🐉 Bestiaire' },
-          { page:'map',       label:'🗺️ Carte'     },
-          { page:'admin',     label:'⚙️ Admin'     },
+          {page:'story',     label:'📚 Trame'    },
+          {page:'quests',    label:'🗡️ Quêtes'   },
+          {page:'shop',      label:'🛍️ Boutique' },
+          {page:'npcs',      label:'👥 PNJ'      },
+          {page:'bestiaire', label:'🐉 Bestiaire'},
+          {page:'map',       label:'🗺️ Carte'    },
+          {page:'admin',     label:'⚙️ Admin'    },
         ].map(b => `<button class="dash-admin-btn" onclick="navigate('${b.page}')">${b.label}</button>`).join('')}
       </div>
+    </div>
+
+    ` : `
+
+    <!-- ══ VUE JOUEUR ══ -->
+
+    <!-- Héros -->
+    <div class="dash-sec">
+      <div class="dash-sec-hd">
+        <span class="dash-sec-label">⚔️ Mon Aventurier</span>
+        <button class="dash-sec-link" onclick="navigate('characters')">Fiche →</button>
+      </div>
+      ${charsHtml}
+    </div>
+
+    <!-- Mission + progression (seulement si données) -->
+    ${(mission || totalMissions > 0) ? `
+    <div class="dash-sec">
+      <div class="dash-sec-hd">
+        <span class="dash-sec-label">📖 Mission en cours</span>
+        <button class="dash-sec-link" onclick="navigate('story')">Trame →</button>
+      </div>
+      ${_missionCard() || ''}
+      ${_progBar()}
     </div>` : ''}
+
+    <!-- Quêtes actives (joinables en place) -->
+    <div class="dash-sec">
+      <div class="dash-sec-hd">
+        <span class="dash-sec-label">🗡️ Quêtes actives</span>
+        <button class="dash-sec-link" onclick="navigate('quests')">Toutes →</button>
+      </div>
+      ${activeQuests.length
+        ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>
+           ${activeQuests.length > 4 ? `<button class="dash-sec-link" onclick="navigate('quests')" style="align-self:flex-end">+${activeQuests.length-4} de plus →</button>` : ''}`
+        : `<div class="dash-info-card"><div class="dash-info-empty"><span style="opacity:.3">🗡️</span> Aucune quête active pour le moment.</div></div>`}
+    </div>
+
+    <!-- Raccourcis en jeu -->
+    <div class="dash-sec">
+      <div class="dash-sec-hd"><span class="dash-sec-label">🎮 En Jeu</span></div>
+      <div class="dash-ql-grid" style="grid-template-columns:repeat(3,1fr)">
+        ${[
+          {page:'bestiaire',  icon:'🐉', label:'Bestiaire',  cls:'dash-ql-btn--red'    },
+          {page:'recettes',   icon:'🍳', label:'Recettes',   cls:'dash-ql-btn--green'  },
+          {page:'shop',       icon:'🛍️', label:'Boutique',   cls:'dash-ql-btn--gold'   },
+          {page:'bastion',    icon:'🏰', label:'Bastion',    cls:'dash-ql-btn--blue'   },
+          {page:'map',        icon:'🗺️', label:'Carte',      cls:'dash-ql-btn--purple' },
+          {page:'collection', icon:'🃏', label:'Collection', cls:'dash-ql-btn--teal'   },
+        ].map(r => `<button class="dash-ql-btn ${r.cls}" onclick="navigate('${r.page}')">
+          <span class="dash-ql-icon">${r.icon}</span>
+          <span class="dash-ql-label">${r.label}</span>
+        </button>`).join('')}
+      </div>
+    </div>
+
+    `}
+
+    <!-- Bouton Table Virtuelle (en bas) -->
+    <div class="dash-vtt-cta" onclick="navigate('vtt')">
+      <span class="dash-vtt-icon">🎲</span>
+      <div class="dash-vtt-text">
+        <span class="dash-vtt-label">Table Virtuelle</span>
+        <span class="dash-vtt-sub">Entrer dans la session de jeu</span>
+      </div>
+      <span class="dash-vtt-arrow">→</span>
+    </div>
     `;
 
     // Naviguer directement vers la fiche d'un personnage

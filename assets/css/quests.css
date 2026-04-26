@@ -1,0 +1,168 @@
+/* ══════════════════════════════════════════════
+   QUESTS — Page Quêtes
+   ══════════════════════════════════════════════ */
+
+/* ── Grille ──────────────────────────────────── */
+.quest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: .75rem;
+}
+
+/* ── Carte ───────────────────────────────────── */
+.quest-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: .85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .38rem;
+  transition: border-color .15s, transform .12s;
+}
+
+.quest-card--active {
+  border-left: 3px solid rgba(180, 130, 255, .7);
+}
+
+.quest-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+/* ── En-tête de la carte ─────────────────────── */
+.quest-card-hd {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin-bottom: .1rem;
+}
+
+/* ── Badges difficulté / statut ──────────────── */
+.quest-badge {
+  font-size: .66rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ── Titre ───────────────────────────────────── */
+.quest-card-title {
+  font-family: 'Cinzel', serif;
+  font-size: .93rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+/* ── Description ─────────────────────────────── */
+.quest-card-desc {
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Récompense ──────────────────────────────── */
+.quest-reward {
+  font-size: .78rem;
+  color: #c8a73a;
+  font-weight: 600;
+  background: rgba(232, 184, 75, .08);
+  border: 1px solid rgba(232, 184, 75, .2);
+  border-radius: 8px;
+  padding: 3px 8px;
+  width: fit-content;
+}
+
+/* ── Participants ────────────────────────────── */
+.quest-parts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: .3rem;
+}
+
+.quest-parts img,
+.quest-parts div[style] {
+  margin-right: -6px; /* léger chevauchement des portraits */
+}
+
+.quest-parts-count {
+  font-size: .7rem;
+  color: var(--text-dim);
+  margin-left: 10px;
+}
+
+.quest-parts-empty {
+  font-size: .72rem;
+  color: var(--text-dim);
+  font-style: italic;
+  margin-top: .25rem;
+}
+
+/* ── Bouton Rejoindre ────────────────────────── */
+.quest-join-btn {
+  font-size: .75rem;
+  font-weight: 700;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--gold);
+  background: transparent;
+  color: var(--gold);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  white-space: nowrap;
+}
+
+.quest-join-btn:hover {
+  background: var(--gold);
+  color: #1a1a2e;
+}
+
+.quest-join-btn--joined {
+  background: rgba(34, 195, 142, .12);
+  border-color: #22c38e;
+  color: #22c38e;
+}
+
+.quest-join-btn--joined:hover {
+  background: rgba(34, 195, 142, .28);
+}
+
+/* ── Boutons icônes admin ────────────────────── */
+.quest-icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .85rem;
+  opacity: .55;
+  transition: opacity .12s, background .12s;
+  padding: 3px 5px;
+  border-radius: 6px;
+  line-height: 1;
+}
+
+.quest-icon-btn:hover {
+  opacity: 1;
+  background: var(--bg-elevated);
+}
+
+.quest-icon-btn--del:hover {
+  background: rgba(255, 107, 107, .12);
+}
+
+/* ── Responsive ──────────────────────────────── */
+@media (max-width: 640px) {
+  .quest-grid {
+    grid-template-columns: 1fr;
+  }
+}

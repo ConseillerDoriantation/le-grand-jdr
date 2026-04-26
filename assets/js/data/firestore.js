@@ -60,6 +60,7 @@ const _CACHE_TTL = {
   collectionSettings: 5 * 60_000,
   tutorial:           5 * 60_000,
   informations:       5 * 60_000,
+  quests:             30_000,
   map_lieux:          5 * 60_000,
   // Contenu collaboratif — TTL court pour rester à jour
   bastion:            15_000,
