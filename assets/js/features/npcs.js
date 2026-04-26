@@ -16,6 +16,12 @@ import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc } from '../shared/html.js';
+import { listPlaces } from './map/data/places.repo.js';
+import { listOrganizations } from './map/data/organizations.repo.js';
+import {
+  autocompleteHTML, initAutocomplete,
+  multiAutocompleteHTML, initMultiAutocomplete, getMultiAutocompleteValues,
+} from '../shared/autocomplete.js';
 
 // ── Affinité groupe — 5 niveaux fixes ────────────────────────────────────────
 const AFFINITE = [
@@ -52,20 +58,26 @@ const AFFINITE_TYPES_DOC_ID = 'npc_affinite_types';
 let _npcs          = [];
 let _affiPerso     = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, note}]
 let _affiniteTypes = [];   // [{id, label, emoji, couleur}]
+let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
+let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
 let _activeId      = null;
 let _filterSearch  = '';
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
-  const [npcs, affi, typesDoc] = await Promise.all([
+  const [npcs, affi, typesDoc, places, orgs] = await Promise.all([
     loadCollection('npcs'),
     loadCollection('npc_affinites'),
     getDocData('npc_affinites', AFFINITE_TYPES_DOC_ID),
+    listPlaces().catch(() => []),
+    listOrganizations().catch(() => []),
   ]);
   _npcs          = npcs || [];
   _affiPerso     = (affi || []).filter(a => a.id !== AFFINITE_TYPES_DOC_ID);
   _affiniteTypes = Array.isArray(typesDoc?.types) ? typesDoc.types : [];
   _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  _organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
@@ -119,10 +131,7 @@ function _renderPage(content) {
       <div id="npc-list-items" style="background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-lg);overflow:hidden;
         max-height:calc(51vh);overflow-y:auto">
-        ${filtered.length === 0
-          ? `<div style="padding:1.5rem;text-align:center;color:var(--text-dim);
-              font-size:.8rem;font-style:italic">Aucun PNJ trouvé</div>`
-          : filtered.map(n => _renderNavItem(n)).join('')}
+        ${_buildListHtml(filtered)}
       </div>
     </div>
 
@@ -219,6 +228,9 @@ function _renderFicheHeader(n) {
     </span>
 
     ${n.lieu ? `<span style="font-size:.69rem;color:var(--text-dim)">📍 ${_esc(n.lieu)}</span>` : ''}
+    ${Array.isArray(n.organisations) && n.organisations.length
+      ? `<span style="font-size:.69rem;color:var(--text-dim)">🏛️ ${n.organisations.map(_esc).join(', ')}</span>`
+      : ''}
   </div>
 
   ${n.description ? `
@@ -524,12 +536,76 @@ window._npcSearch = (val) => { _filterSearch = val; _refreshList(); };
 function _refreshList() {
   const list = document.getElementById('npc-list-items');
   if (!list) { renderNpcs(); return; }
-  const filtered = _getFiltered();
-  list.innerHTML = filtered.length === 0
-    ? `<div style="padding:1.5rem;text-align:center;color:var(--text-dim);
-        font-size:.8rem;font-style:italic">Aucun PNJ trouvé</div>`
-    : filtered.map(n => _renderNavItem(n)).join('');
+  list.innerHTML = _buildListHtml();
 }
+
+// ── Groupement par organisation (catégories repliables) ──────────────────────
+let _collapsedOrgs = new Set();
+const NO_ORG_KEY = '__no_org__';
+
+function _groupNpcsByOrg(npcs) {
+  // Map<orgName, npc[]> — préserve l'ordre des _organisations connues, "Sans
+  // organisation" en dernier. Les NPCs avec plusieurs orgs apparaissent dans
+  // chaque groupe correspondant.
+  const groups = new Map();
+  _organisations.forEach(o => groups.set(o.name, []));
+  npcs.forEach(n => {
+    const orgs = (Array.isArray(n.organisations) ? n.organisations : []).filter(Boolean);
+    if (!orgs.length) return; // traité ci-dessous
+    orgs.forEach(orgName => {
+      if (!groups.has(orgName)) groups.set(orgName, []); // org orpheline (renommée/supprimée)
+      groups.get(orgName).push(n);
+    });
+  });
+  // "Sans organisation" toujours en dernier.
+  groups.set(NO_ORG_KEY, npcs.filter(n =>
+    !Array.isArray(n.organisations) || !n.organisations.filter(Boolean).length
+  ));
+  return groups;
+}
+
+function _renderNpcOrgGroup(orgName, npcs) {
+  const isNoOrg   = orgName === NO_ORG_KEY;
+  const label     = isNoOrg ? 'Sans organisation' : orgName;
+  const collapsed = _collapsedOrgs.has(orgName);
+  const chev      = collapsed ? '▸' : '▾';
+  const safeKey   = _esc(orgName);
+  const header = `<button type="button" data-org-key="${safeKey}"
+    onclick="window._npcToggleOrgGroup(this)"
+    style="display:flex;align-items:center;justify-content:space-between;width:100%;
+    padding:.5rem .85rem;background:rgba(255,255,255,.03);border:none;
+    border-top:1px solid var(--border);cursor:pointer;color:var(--text-muted);
+    font-size:.74rem;text-align:left">
+    <span style="display:flex;align-items:center;gap:.5rem">
+      <span style="font-size:.65rem;width:10px;display:inline-block">${chev}</span>
+      <span style="font-weight:600">${isNoOrg ? '👤' : '🏛️'} ${_esc(label)}</span>
+    </span>
+    <span style="font-size:.68rem;color:var(--text-dim);background:rgba(255,255,255,.05);
+      border-radius:999px;padding:1px 8px">${npcs.length}</span>
+  </button>`;
+  const items = collapsed ? '' : npcs.map(n => _renderNavItem(n)).join('');
+  return `<div class="npc-org-group">${header}${items}</div>`;
+}
+
+function _buildListHtml(filtered = _getFiltered()) {
+  if (filtered.length === 0) {
+    return `<div style="padding:1.5rem;text-align:center;color:var(--text-dim);
+        font-size:.8rem;font-style:italic">Aucun PNJ trouvé</div>`;
+  }
+  const groups = _groupNpcsByOrg(filtered);
+  return [...groups.entries()]
+    .filter(([, items]) => items.length > 0)
+    .map(([orgName, items]) => _renderNpcOrgGroup(orgName, items))
+    .join('');
+}
+
+window._npcToggleOrgGroup = (btn) => {
+  const key = btn?.dataset?.orgKey;
+  if (key == null) return;
+  if (_collapsedOrgs.has(key)) _collapsedOrgs.delete(key);
+  else _collapsedOrgs.add(key);
+  _refreshList();
+};
 
 // ── Interaction : segment d'affinité groupe (1 clic, admin) ──────────────────
 window.npcAffiniteClick = async (npcId, niveau) => {
@@ -561,7 +637,11 @@ function openNpcModal(id = null) {
     </div>
     <div class="form-group" style="margin-top:.75rem">
       <label>Lieu</label>
-      <input class="input-field" id="npc-lieu" value="${_esc(npc?.lieu || '')}" placeholder="Taverne du Dragon…">
+      ${autocompleteHTML({ id: 'npc-lieu', value: npc?.lieu || '', placeholder: 'Taverne du Dragon…' })}
+    </div>
+    <div class="form-group" style="margin-top:.75rem">
+      <label>Organisations</label>
+      ${multiAutocompleteHTML({ id: 'npc-orgs', placeholder: _organisations.length ? 'Ajouter une organisation…' : 'Aucune organisation en base — texte libre' })}
     </div>
     <div class="form-group" style="margin-top:.75rem">
       <label>Description</label>
@@ -601,6 +681,12 @@ function openNpcModal(id = null) {
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
+
+  // ── Autocomplete Lieu + Organisations ─────────────────────────────────────
+  initAutocomplete('npc-lieu', _places.map(p => p.name));
+  initMultiAutocomplete('npc-orgs', _organisations.map(o => o.name), {
+    initialValues: Array.isArray(npc?.organisations) ? npc.organisations : [],
+  });
 
   // ── Setup upload + crop portrait ──────────────────────────────────────────
   let _npcCropBase64 = null;
@@ -767,10 +853,11 @@ async function saveNpc(id) {
     window._npcImgCleared = false;
 
     const data = {
-      nom:         document.getElementById('npc-nom')?.value?.trim()  || '?',
-      role:        document.getElementById('npc-role')?.value?.trim() || '',
-      lieu:        document.getElementById('npc-lieu')?.value?.trim() || '',
-      description: document.getElementById('npc-desc')?.value?.trim() || '',
+      nom:           document.getElementById('npc-nom')?.value?.trim()  || '?',
+      role:          document.getElementById('npc-role')?.value?.trim() || '',
+      lieu:          document.getElementById('npc-lieu')?.value?.trim() || '',
+      organisations: getMultiAutocompleteValues('npc-orgs'),
+      description:   document.getElementById('npc-desc')?.value?.trim() || '',
       imageUrl,
     };
 
