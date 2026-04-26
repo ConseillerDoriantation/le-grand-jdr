@@ -22,6 +22,33 @@ import {
   autocompleteHTML, initAutocomplete,
   multiAutocompleteHTML, initMultiAutocomplete, getMultiAutocompleteValues,
 } from '../shared/autocomplete.js';
+import { getModFromScore } from '../shared/char-stats.js';
+
+// ── Stats PNJ (admin) ────────────────────────────────────────────────────────
+// Schéma volontairement simple pour les PNJ : pas de formule équipement comme
+// pour les persos joueurs — chaque vitale est saisie directement.
+const NPC_VITALS = [
+  { key: 'pv',      label: 'PV',      icon: '❤️' },
+  { key: 'pm',      label: 'PM',      icon: '✨' },
+  { key: 'ca',      label: 'CA',      icon: '🛡️' },
+  { key: 'vitesse', label: 'Vit.',    icon: '👟' },
+];
+const NPC_STATS = [
+  { key: 'force',        short: 'FOR' },
+  { key: 'dexterite',    short: 'DEX' },
+  { key: 'constitution', short: 'CON' },
+  { key: 'intelligence', short: 'INT' },
+  { key: 'sagesse',      short: 'SAG' },
+  { key: 'charisme',     short: 'CHA' },
+];
+
+const _modStr = (v) => { const m = getModFromScore(Number(v) || 8); return m >= 0 ? `+${m}` : String(m); };
+const _readNumberOrNull = (id) => {
+  const raw = document.getElementById(id)?.value?.trim();
+  if (!raw) return null;
+  const v = parseInt(raw, 10);
+  return Number.isFinite(v) ? v : null;
+};
 
 // ── Affinité groupe — 5 niveaux fixes ────────────────────────────────────────
 const AFFINITE = [
@@ -126,6 +153,19 @@ function _renderPage(content) {
         <input id="npc-search" class="input-field" placeholder="🔍 Rechercher…"
           value="${_filterSearch}" oninput="window._npcSearch(this.value)"
           style="font-size:.8rem;padding:.4rem .6rem">
+
+        ${STATE.isAdmin ? `
+        <button onclick="window._openMjStatsView()"
+          style="margin-top:.5rem;width:100%;padding:.5rem .65rem;
+          background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
+          border-radius:8px;color:#e8b84b;cursor:pointer;font-size:.78rem;
+          font-weight:600;display:flex;align-items:center;justify-content:center;gap:.4rem;
+          transition:all .12s"
+          onmouseover="this.style.background='rgba(232,184,75,.14)'"
+          onmouseout="this.style.background='rgba(232,184,75,.08)'"
+          title="Toutes les stats des PNJ en un coup d'œil — PV/PM ajustables">
+          📊 Stats en un coup d'œil
+        </button>` : ''}
       </div>
 
       <div id="npc-list-items" style="background:var(--bg-card);border:1px solid var(--border);
@@ -175,6 +215,15 @@ function _renderNavItem(n) {
         <span style="font-size:.65rem;color:${af.couleur}">${af.label}</span>
       </div>
     </div>
+
+    ${STATE.isAdmin ? `
+    <button onclick="event.stopPropagation();openNpcModal('${n.id}')" title="Modifier ce PNJ"
+      style="background:transparent;border:none;color:var(--text-dim);cursor:pointer;
+      padding:.3rem .4rem;border-radius:6px;font-size:.85rem;flex-shrink:0;line-height:1;
+      transition:all .12s"
+      onmouseover="this.style.background='rgba(232,184,75,.12)';this.style.color='var(--gold)'"
+      onmouseout="this.style.background='transparent';this.style.color='var(--text-dim)'">✏️</button>
+    ` : ''}
   </div>`;
 }
 
@@ -486,6 +535,7 @@ function _renderFiche(n) {
       <div style="padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.75rem;
         ${hasRightPanel ? 'border-right:1px solid var(--border);' : ''}
         min-width:0">
+        ${_renderStatsPanel(n)}
         ${_renderAffiniteGroupe(n)}
         ${_renderHistorique(n)}
       </div>
@@ -620,6 +670,243 @@ window.npcAffiniteClick = async (npcId, niveau) => {
   _refreshActivePanel();
 };
 
+// ── Stats : rendu (modale + fiche) ───────────────────────────────────────────
+function _renderStatsForm(npc) {
+  if (!STATE.isAdmin) return '';
+  const stats = npc?.stats || {};
+  const vitalInputs = NPC_VITALS.map(v => `
+    <div>
+      <label style="font-size:.66rem;color:var(--text-dim);display:block;margin-bottom:2px;
+        text-align:center;font-weight:600">${v.icon} ${v.label}</label>
+      <input type="number" class="input-sm" id="npc-${v.key}" value="${npc?.[v.key] ?? ''}"
+        placeholder="—" style="text-align:center;padding:.35rem .25rem;width:100%">
+    </div>`).join('');
+  const statInputs = NPC_STATS.map(s => `
+    <div>
+      <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
+        text-align:center;font-weight:700;letter-spacing:.04em">${s.short}</label>
+      <input type="number" class="input-sm" id="npc-stat-${s.key}" value="${stats[s.key] ?? ''}"
+        placeholder="8" style="text-align:center;padding:.35rem .25rem;width:100%">
+    </div>`).join('');
+  return `
+    <div class="form-group" style="margin-top:.75rem;background:rgba(255,255,255,.02);
+      border:1px dashed var(--border);border-radius:10px;padding:.65rem .75rem">
+      <label style="display:flex;align-items:center;gap:.4rem">
+        🛡️ Combat &amp; stats
+        <span style="color:var(--text-dim);font-weight:400;font-size:.78rem">(admin)</span>
+      </label>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin-top:.4rem">${vitalInputs}</div>
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.35rem;margin-top:.5rem">${statInputs}</div>
+    </div>`;
+}
+
+function _renderStatsPanel(n) {
+  if (!STATE.isAdmin) return '';
+  const stats = n?.stats || {};
+  const hasVitals = NPC_VITALS.some(v => n?.[v.key] != null);
+  const hasStats  = NPC_STATS.some(s => stats[s.key] != null);
+  if (!hasVitals && !hasStats) return '';
+
+  const vitals = NPC_VITALS.map(v => `
+    <div style="background:var(--bg-elevated);border:1px solid var(--border);
+      border-radius:8px;padding:.45rem .35rem;text-align:center">
+      <div style="font-size:.6rem;color:var(--text-dim);font-weight:600;letter-spacing:.04em">${v.icon} ${v.label}</div>
+      <div style="font-size:1rem;font-weight:700;color:var(--text);margin-top:2px">${n?.[v.key] ?? '—'}</div>
+    </div>`).join('');
+  const statCells = NPC_STATS.map(s => {
+    const score = stats[s.key];
+    return `
+    <div style="background:var(--bg-elevated);border:1px solid var(--border);
+      border-radius:8px;padding:.4rem .25rem;text-align:center">
+      <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">${s.short}</div>
+      <div style="font-size:.95rem;font-weight:700;color:var(--text)">${score ?? '—'}</div>
+      <div style="font-size:.62rem;color:var(--text-muted)">${score != null ? _modStr(score) : ''}</div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="border:1px dashed var(--border);border-radius:10px;padding:.65rem .75rem;
+      background:rgba(255,255,255,.02)">
+      <div style="font-size:.74rem;color:var(--text-muted);font-weight:600;margin-bottom:.5rem;
+        display:flex;align-items:center;gap:.4rem">
+        🛡️ Combat &amp; stats
+        <span style="font-size:.62rem;color:var(--text-dim);font-weight:400">(admin)</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem">${vitals}</div>
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.35rem;margin-top:.5rem">${statCells}</div>
+    </div>`;
+}
+
+// ── Vue MJ : tableau condensé de tous les PNJ avec stats ────────────────────
+const _mjVitalCellInner = (v) => v == null ? '—' : String(v);
+const _mjStatCellInner  = (s) => s == null ? '—'
+  : `${s}<br><span style="font-size:.6rem;color:var(--text-muted)">${_modStr(s)}</span>`;
+
+function _renderMjStatsRow(n) {
+  const af    = afx(n.affinite?.niveau ?? 2);
+  const stats = n.stats || {};
+
+  const vitalCells = NPC_VITALS.map(v => `
+    <td data-mj-cell="${n.id}-${v.key}"
+      onclick="window._mjEditField('${n.id}','${v.key}')"
+      title="Cliquer pour modifier ${v.label}"
+      style="cursor:pointer;text-align:center;padding:.4rem .25rem;font-weight:700;
+      color:${n[v.key] == null ? 'var(--text-dim)' : 'var(--text)'};
+      background:rgba(232,184,75,.05)">${_mjVitalCellInner(n[v.key])}</td>`).join('');
+
+  const statCells = NPC_STATS.map(s => `
+    <td data-mj-cell="${n.id}-stats.${s.key}"
+      onclick="window._mjEditField('${n.id}','stats.${s.key}')"
+      title="Cliquer pour modifier ${s.short}"
+      style="cursor:pointer;text-align:center;padding:.4rem .2rem;line-height:1.1;
+      color:${stats[s.key] == null ? 'var(--text-dim)' : 'var(--text)'};
+      background:rgba(232,184,75,.05)">${_mjStatCellInner(stats[s.key])}</td>`).join('');
+
+  return `
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"
+      onmouseover="this.style.background='rgba(255,255,255,.02)'"
+      onmouseout="this.style.background='transparent'">
+      <td style="padding:.35rem;text-align:left;cursor:pointer;color:var(--text);
+        max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+        onclick="window._mjOpenNpc('${n.id}')" title="Ouvrir la fiche">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;
+          background:${af.couleur};margin-right:.4rem;vertical-align:middle"></span>
+        <strong>${_esc(n.nom || '?')}</strong>
+      </td>
+      ${vitalCells}
+      ${statCells}
+    </tr>`;
+}
+
+let _mjFilter = '';
+
+function _mjFilteredNpcs() {
+  const q = _mjFilter.trim().toLowerCase();
+  if (!q) return _npcs;
+  return _npcs.filter(n => {
+    if ((n.nom || '').toLowerCase().includes(q)) return true;
+    const orgs = Array.isArray(n.organisations) ? n.organisations : [];
+    return orgs.some(o => (o || '').toLowerCase().includes(q));
+  });
+}
+
+function _renderMjStatsTbody() {
+  const list = _mjFilteredNpcs();
+  if (!list.length) {
+    return `<tr><td colspan="${1 + NPC_VITALS.length + NPC_STATS.length}"
+      style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic">
+      ${_npcs.length ? `Aucun PNJ pour « ${_esc(_mjFilter)} »` : 'Aucun PNJ'}</td></tr>`;
+  }
+  return list.map(_renderMjStatsRow).join('');
+}
+
+window._mjStatsFilter = (val) => {
+  _mjFilter = val || '';
+  const tbody = document.querySelector('#mj-stats-table tbody');
+  if (tbody) tbody.innerHTML = _renderMjStatsTbody();
+};
+
+function _openMjStatsView() {
+  if (!STATE.isAdmin) return;
+  _mjFilter = '';
+
+  openModal('📊 Stats des PNJ', `
+    <input id="mj-stats-search" class="input-field"
+      placeholder="🔍 Rechercher par nom ou organisation…"
+      oninput="window._mjStatsFilter(this.value)"
+      style="font-size:.85rem;padding:.45rem .7rem;margin-bottom:.65rem">
+    <div style="overflow-x:auto;margin:0 -.5rem">
+      <table id="mj-stats-table" style="width:100%;border-collapse:collapse;font-size:.78rem">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);color:var(--text-muted)">
+            <th style="text-align:left;padding:.4rem .35rem;font-weight:600">PNJ</th>
+            ${NPC_VITALS.map(v =>
+              `<th style="text-align:center;padding:.4rem .25rem;font-weight:600;width:42px"
+                title="${v.label}">${v.icon}</th>`).join('')}
+            ${NPC_STATS.map(s =>
+              `<th style="text-align:center;padding:.4rem .2rem;font-weight:700;width:34px;
+                font-size:.68rem;letter-spacing:.04em">${s.short}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>${_renderMjStatsTbody()}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:.65rem;font-size:.7rem;color:var(--text-dim);font-style:italic;text-align:center">
+      Clic sur n'importe quelle valeur pour la modifier (Entrée = valider, Échap = annuler) • Clic sur le nom pour ouvrir la fiche
+    </div>
+  `);
+}
+
+window._openMjStatsView = _openMjStatsView;
+
+window._mjOpenNpc = (id) => {
+  closeModal();
+  window.selectNpc(id);
+};
+
+window._mjEditField = (id, field) => {
+  const cell = document.querySelector(`[data-mj-cell="${id}-${field}"]`);
+  if (!cell) return;
+
+  const isStat   = field.startsWith('stats.');
+  const statKey  = isStat ? field.slice(6) : null;
+  const renderInner = isStat ? _mjStatCellInner : _mjVitalCellInner;
+  const prevHtml = cell.innerHTML;
+
+  const npc  = _npcs.find(n => n.id === id);
+  const prev = isStat ? (npc?.stats || {})[statKey] : npc?.[field];
+
+  const input = document.createElement('input');
+  input.type  = 'number';
+  input.value = prev ?? '';
+  input.style.cssText = 'width:42px;text-align:center;background:var(--bg-elevated);'
+    + 'border:1px solid var(--gold);color:var(--text);border-radius:4px;'
+    + 'padding:1px 3px;font-size:.85rem;outline:none';
+  cell.innerHTML = '';
+  cell.appendChild(input);
+  input.focus();
+  input.select();
+
+  const setCellContent = (val) => {
+    cell.innerHTML = renderInner(val);
+    cell.style.color = val == null ? 'var(--text-dim)' : 'var(--text)';
+  };
+
+  let cancelled = false;
+  const save = async () => {
+    if (cancelled) return;
+    cancelled = true;
+    const raw = input.value.trim();
+    const v   = raw === '' ? null : parseInt(raw, 10);
+    const newVal = (raw === '' || !Number.isFinite(v)) ? null : v;
+    try {
+      await updateInCol('npcs', id, { [field]: newVal });
+      const idx = _npcs.findIndex(n => n.id === id);
+      if (idx >= 0) {
+        if (isStat) {
+          _npcs[idx] = {
+            ..._npcs[idx],
+            stats: { ...(_npcs[idx].stats || {}), [statKey]: newVal },
+          };
+        } else {
+          _npcs[idx] = { ..._npcs[idx], [field]: newVal };
+        }
+      }
+      setCellContent(newVal);
+      if (_activeId === id) _refreshActivePanel();
+    } catch (e) {
+      console.error('[mj edit]', e);
+      showNotif('Erreur de sauvegarde.', 'error');
+      cell.innerHTML = prevHtml;
+    }
+  };
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') { cancelled = true; cell.innerHTML = prevHtml; input.blur(); }
+  });
+};
+
 // ── Modal création / édition PNJ ──────────────────────────────────────────────
 function openNpcModal(id = null) {
   const npc = id ? _npcs.find(n => n.id === id) : null;
@@ -648,6 +935,7 @@ function openNpcModal(id = null) {
       <textarea class="input-field" id="npc-desc" rows="4"
         placeholder="Apparence, personnalité, secrets…">${_esc(npc?.description || '')}</textarea>
     </div>
+    ${_renderStatsForm(npc)}
     <div class="form-group" style="margin-top:.75rem">
       <label>Portrait <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
       <div id="npc-img-drop" style="border:2px dashed var(--border-strong);border-radius:10px;
@@ -860,6 +1148,16 @@ async function saveNpc(id) {
       description:   document.getElementById('npc-desc')?.value?.trim() || '',
       imageUrl,
     };
+
+    if (STATE.isAdmin) {
+      NPC_VITALS.forEach(v => { data[v.key] = _readNumberOrNull(`npc-${v.key}`); });
+      const stats = {};
+      NPC_STATS.forEach(s => {
+        const v = _readNumberOrNull(`npc-stat-${s.key}`);
+        if (v != null) stats[s.key] = v;
+      });
+      data.stats = Object.keys(stats).length ? stats : null;
+    }
 
     if (id) {
       await updateInCol('npcs', id, data);
