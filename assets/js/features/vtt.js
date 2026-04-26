@@ -10,12 +10,13 @@ import { STATE } from '../core/state.js';
 import { getCurrentAdventureId, getDocData, saveDoc } from '../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
-  setDoc, getDocs, onSnapshot, serverTimestamp, writeBatch,
+  setDoc, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus } from '../shared/char-stats.js';
 import { getArmorSetData } from './characters/data.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
+import { _esc } from '../shared/html.js';
 import PAGES from './pages.js';
 
 // ── Constantes ──────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ let _selected   = null, _attackSrc = null, _moveHL = [];
 let _selectedMulti  = new Set();   // ids des tokens en multi-sélection
 let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
+let _suppressTokenClickUntil = 0;   // bloque le click synthétique après clic droit/molette
 let _autoSyncDone = false;   // empêche la double-création de tokens
 let _imgTr      = null;      // Transformer pour images BG (sous tokens)
 let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens)
@@ -460,7 +462,7 @@ function _initCanvas(container) {
     _stage.position({ x: ptr.x - (ptr.x-_stage.x())*(sc/old), y: ptr.y - (ptr.y-_stage.y())*(sc/old) });
   });
 
-  let _pan = false, _po = null;
+  let _pan = false, _po = null, _rightStageDown = null;
 
   // Pan caméra au clic molette. K.dragButtons=[0] empêche déjà tout drag de
   // tokens/images/annotations sur autre que clic gauche, donc pas besoin de
@@ -509,6 +511,7 @@ function _initCanvas(container) {
       // Sur un token/image/annotation, on laisse Konva gérer le drag (K.dragButtons=[0,2]).
       if (e.target === _stage) {
         _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
+        _rightStageDown = { x:e.evt.clientX, y:e.evt.clientY };
       }
     }
     if (e.evt.button===0) {
@@ -561,7 +564,15 @@ function _initCanvas(container) {
     _marqueeOrigin = null;
     if (_tool === 'draw' && _drawing) _endDraw();
   });
-  _stage.on('contextmenu', e => e.evt.preventDefault());
+  _stage.on('contextmenu', e => {
+    e.evt.preventDefault();
+    if (e.target !== _stage) return;
+    const moved = _rightStageDown
+      ? Math.hypot(e.evt.clientX - _rightStageDown.x, e.evt.clientY - _rightStageDown.y) > 6
+      : false;
+    _rightStageDown = null;
+    if (!moved) { _deselect(); _deselectAnnot(); }
+  });
   _stage.on('click', e => {
     if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
     if (e.target===_stage) {
@@ -754,10 +765,15 @@ function _buildShape(t) {
   }
 
   const canDrag = STATE.isAdmin || t.ownerId===STATE.user?.uid;
+  let rightDown = null;
   if (canDrag) {
     g.draggable(true);
+    g.on('mousedown', e => {
+      if (e.evt.button === 2) rightDown = { x:e.evt.clientX, y:e.evt.clientY, dragged:false };
+    });
     // ─ Début du drag : mémoriser les positions du groupe ─
     g.on('dragstart', () => {
+      if (rightDown) rightDown.dragged = true;
       if (_middlePanActive) {
         g.stopDrag();
         g.position({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2 });
@@ -774,6 +790,7 @@ function _buildShape(t) {
     });
     // ─ Pendant le drag : snap + déplacer le groupe ─
     g.on('dragmove', () => {
+      if (rightDown) rightDown.dragged = true;
       const sx=Math.round((g.x()-CELL/2)/CELL)*CELL+CELL/2;
       const sy=Math.round((g.y()-CELL/2)/CELL)*CELL+CELL/2;
       g.position({x:sx,y:sy});
@@ -827,9 +844,20 @@ function _buildShape(t) {
     });
   }
 
-  g.on('click', e => {
-    if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
-    e.cancelBubble=true;
+  const _isAttackTargetInRange = (srcId, tgtId) => {
+    const src = _tokens[srcId]?.data;
+    const tgt = _tokens[tgtId]?.data;
+    if (!src || !tgt) return false;
+    const dist = _tokenAttackDistance(src, tgt);
+    const options = _buildAttackOptions(src);
+    const maxRange = options.length ? Math.max(...options.map(o => o.portee)) : 0;
+    if (options.some(o => dist <= o.portee)) return true;
+    showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${maxRange})`, 'error');
+    return false;
+  };
+
+  const handleTokenAction = (e, opts = {}) => {
+    e.cancelBubble = true;
     if (_tool === 'ruler' || _tool === 'draw') return; // outils de dessin ignorent les tokens
     if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
       // Shift+clic : ajouter / retirer du groupe multi-sélection
@@ -838,27 +866,31 @@ function _buildShape(t) {
     _clearMultiSelect();
     if (_attackSrc && _attackSrc!==t.id) {
       // Attaquant déjà désigné → clic sur une cible → lancer l'attaque
+      if (opts.deselectOutOfRange && !_isAttackTargetInRange(_attackSrc, t.id)) {
+        _deselect();
+        return;
+      }
       _execAttack(_attackSrc, t.id);
     } else {
       // Sélectionner le token (si token propre, montre la portée d'attaque)
       _select(t.id);
     }
+  };
+
+  g.on('click', e => {
+    if (e.evt.button !== 0) return; // le clic droit court passe par contextmenu
+    handleTokenAction(e);
   });
 
-  // Clic droit (sans drag) sur un token : attaque si attaquant désigné,
-  // sinon sélectionne le token (mirror du clic gauche).
-  // Le drag clic-droit reste géré par Konva (K.dragButtons=[0,2]) — contextmenu
-  // ne fire pas si l'utilisateur a effectivement bougé.
   g.on('contextmenu', e => {
     e.evt.preventDefault();
     e.cancelBubble = true;
-    if (_tool === 'ruler' || _tool === 'draw') return;
-    if (_attackSrc && _attackSrc !== t.id) {
-      _execAttack(_attackSrc, t.id);
-    } else {
-      _clearMultiSelect();
-      _select(t.id);
-    }
+    const moved = rightDown
+      ? rightDown.dragged || Math.hypot(e.evt.clientX - rightDown.x, e.evt.clientY - rightDown.y) > 6
+      : false;
+    rightDown = null;
+    if (moved) return;
+    handleTokenAction(e, { deselectOutOfRange: true });
   });
 
   return g;
@@ -1127,21 +1159,25 @@ async function _moveTo(id,col,row) {
 // ═══════════════════════════════════════════════════════════════════
 
 /** Parse "2d6+3", "1d8", "1d4-1" → lance et retourne le total. */
-function _rollDice(formula) {
-  if (!formula) return 1;
+// Parse "NdM[+K]" ou nombre fixe → { n, sides, mod } ou null si non-formule.
+function _parseDice(formula) {
+  if (!formula) return null;
   const m = String(formula).match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
-  if (!m) return Math.max(1, parseInt(formula)||1);
+  return m ? { n:+m[1], sides:+m[2], mod:+(m[3]||0) } : null;
+}
+
+function _rollDice(formula) {
+  const p = _parseDice(formula);
+  if (!p) return Math.max(1, parseInt(formula)||1);
   let total = 0;
-  for (let i=0; i<parseInt(m[1]); i++) total += Math.floor(Math.random()*parseInt(m[2]))+1;
-  return total + (parseInt(m[3])||0);
+  for (let i=0; i<p.n; i++) total += Math.floor(Math.random()*p.sides)+1;
+  return total + p.mod;
 }
 
 /** Valeur maximale possible d'une formule de dés (ex: "2d6+3" → 15). */
 function _maxDice(formula) {
-  if (!formula) return 1;
-  const m = String(formula).match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
-  if (!m) return Math.max(1, parseInt(formula)||1);
-  return parseInt(m[1]) * parseInt(m[2]) + (parseInt(m[3])||0);
+  const p = _parseDice(formula);
+  return p ? p.n * p.sides + p.mod : Math.max(1, parseInt(formula)||1);
 }
 
 /**
@@ -1228,6 +1264,8 @@ function _splitDiceFormula(str) {
   }
   return { rawDice, fixed };
 }
+
+const _tokenAttackDistance = (src, tgt) => Math.abs(src.col - tgt.col) + Math.abs(src.row - tgt.row);
 
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
 function _buildAttackOptions(t) {
@@ -1392,7 +1430,7 @@ async function _execAttack(srcId, tgtId) {
   const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
   if (!src||!tgt) return;
   const lS=_live(src), lT=_live(tgt);
-  const dist=Math.max(Math.abs(src.col-tgt.col),Math.abs(src.row-tgt.row));
+  const dist=_tokenAttackDistance(src, tgt);
 
   const options = _buildAttackOptions(src);
   const inRange = options.filter(o => dist <= o.portee);
@@ -1428,7 +1466,7 @@ async function _execAttack(srcId, tgtId) {
               · 🎯 portée ${o.portee}
               ${(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles} cibles</span>`:''}
               ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:o.pmCost===0&&o.basePm>0?`· <span style="color:#22c38e">✨ gratuit</span>`:''}
-              ${o.traits?.length ? `· <span style="color:#b47fff">${o.traits.slice(0, 2).map(_escHtml).join(', ')}</span>` : ''}
+              ${o.traits?.length ? `· <span style="color:#b47fff">${o.traits.slice(0, 2).map(_esc).join(', ')}</span>` : ''}
             </div>
           </div>
         </button>`).join('')}
@@ -1448,7 +1486,7 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
   const lS=_live(src), lT=_live(tgt);
   _atkCtx = { srcId, tgtId, opt, lS, lT };
 
-  const dist    = Math.max(Math.abs(src.col-tgt.col),Math.abs(src.row-tgt.row));
+  const dist    = _tokenAttackDistance(src, tgt);
   const atkBase = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
   const sn      = n => n>0?`+${n}`:n<0?`${n}`:'';
   const tag     = (txt, col='var(--text-dim)') =>
@@ -1479,7 +1517,7 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
       p.push(`<span style="font-size:.85rem;color:#f59e0b">+${opt.maitriseBonus}</span>${tag('Maîtrise')}`);
     degatsFormula = p.join(' ');
   } else {
-    degatsFormula = `<code style="font-size:.88rem;color:${dmgAccent}">${_escHtml(opt.dice)}</code>`;
+    degatsFormula = `<code style="font-size:.88rem;color:${dmgAccent}">${_esc(opt.dice)}</code>`;
   }
 
   const inpStyle = `width:52px;padding:4px 6px;text-align:center;font-size:.88rem;border-radius:7px;
@@ -1560,9 +1598,9 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
           ← Retour
         </button>
         <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem">
-          <strong>${_escHtml(lS.displayName??src.name)}</strong>
+          <strong>${_esc(lS.displayName??src.name)}</strong>
           <span style="color:var(--text-dim);margin:0 .3rem">→</span>
-          <strong style="color:${opt.isHeal?'#22c38e':'#ef4444'}">${_escHtml(lT.displayName??tgt.name)}</strong>
+          <strong style="color:${opt.isHeal?'#22c38e':'#ef4444'}">${_esc(lT.displayName??tgt.name)}</strong>
         </div>
         <span style="flex-shrink:0;font-size:.62rem;color:var(--text-dim);background:var(--bg-elevated);
                      padding:.18rem .45rem;border-radius:999px">${dist}c</span>
@@ -1679,7 +1717,7 @@ window._vttRollAttack = async () => {
         const actualPm = cPm.pm ?? calcPMMax(cPm);
         if (actualPm < opt.pmCost) {
           showNotif(`⚠ PM insuffisants (${actualPm}/${opt.pmCost} requis)`, 'error');
-          _cleanup(); return;
+          return;
         }
       }
     }
@@ -1700,7 +1738,6 @@ window._vttRollAttack = async () => {
         createdAt: serverTimestamp(),
       }).catch(()=>{});
       showNotif(`✨ ${opt.label} activé !${_ciblSuffix(rCa)}`, 'success');
-      _cleanup();
       return;
     }
 
@@ -1730,7 +1767,6 @@ window._vttRollAttack = async () => {
         createdAt: serverTimestamp(),
       }).catch(()=>{});
       showNotif(`💚 ${healTotal} PV soignés → ${lT.displayName??tgt.name}${_ciblSuffix(rHeal)}`, 'success');
-      _cleanup();
       return;
     }
 
@@ -1824,11 +1860,7 @@ window._vttRollAttack = async () => {
     showNotif(_baseNotif + _ciblSuffix(rAtk), (hit || halfDmg) ? 'success' : 'error');
 
   } catch { showNotif('Erreur attaque','error'); }
-
-  _tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
-  _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
-  _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
-  _layers.token?.batchDraw();
+  finally { _cleanup(); }
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2063,11 +2095,11 @@ function _renderTray() {
         const pvMax=parseInt(b.pvMax)||'?';
         const init=(b.nom||'?')[0].toUpperCase();
         return `<button class="vtt-bst-tile" onclick="window._vttPlaceFromBestiary('${b.id}')"
-            title="${_escHtml(b.nom||'Créature')} · PV ${pvMax}">
+            title="${_esc(b.nom||'Créature')} · PV ${pvMax}">
           ${img
-            ?`<img src="${img}" alt="${_escHtml(b.nom||'')}">`
+            ?`<img src="${img}" alt="${_esc(b.nom||'')}">`
             :`<span class="vtt-bst-icon">${init}</span>`}
-          <div class="vtt-bst-name">${_escHtml((b.nom||'Créature').slice(0,8))}</div>
+          <div class="vtt-bst-name">${_esc((b.nom||'Créature').slice(0,8))}</div>
         </button>`;
       }).join('')
     : `<div class="vtt-tray-empty">Bestiaire vide</div>`;
@@ -2758,10 +2790,6 @@ window._vttToggleMapMode = () => _setMapMode(!_mapMode);
 // ═══════════════════════════════════════════════════════════════════
 // CHAT & LOG DE DÉS
 // ═══════════════════════════════════════════════════════════════════
-function _escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
 // ── Émotes ──────────────────────────────────────────────────────────
 async function _loadEmotes() {
   // 1. Tenter le path scopé à l'aventure (path normal)
@@ -2867,7 +2895,7 @@ async function _saveEmotes(list) {
 // Convertit les balises :nom: en <img> dans un texte déjà échappé
 function _applyEmotes(escaped) {
   for (const em of _emotes) {
-    const key = `:${_escHtml(em.name)}:`;
+    const key = `:${_esc(em.name)}:`;
     const img = `<img class="vtt-emote-inline" src="${em.url}" alt="${key}" title="${key}">`;
     escaped = escaped.split(key).join(img);
   }
@@ -2884,9 +2912,9 @@ function _emoteGridHtml(list, favSet=new Set()) {
     const safe = em.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const isFav = favSet.has(em.name);
     return `<div class="vtt-emote-item-wrap">
-      <button class="vtt-emote-item" onclick="window._vttPickEmote('${safe}')" title=":${_escHtml(em.name)}:">
-        <img src="${em.url}" alt="${_escHtml(em.name)}" loading="lazy">
-        <span>${_escHtml(em.name)}</span>
+      <button class="vtt-emote-item" onclick="window._vttPickEmote('${safe}')" title=":${_esc(em.name)}:">
+        <img src="${em.url}" alt="${_esc(em.name)}" loading="lazy">
+        <span>${_esc(em.name)}</span>
       </button>
       <button class="vtt-emote-fav-btn${isFav?' active':''}" onclick="window._vttToggleFav('${safe}')" title="${isFav?'Retirer des favoris':'Ajouter aux favoris'}">${isFav?'★':'☆'}</button>
     </div>`;
@@ -3030,8 +3058,8 @@ window._ouvrirGestionEmotes = async () => {
         list.map((em, i) => `
           <div class="vtt-emote-card" data-i="${i}">
             <span class="vtt-emote-card-drag" title="Déplacer">⠿</span>
-            <img src="${em.url}" alt="${_escHtml(em.name)}">
-            <span class="vtt-emote-card-name" title=":${_escHtml(em.name)}:">:${_escHtml(em.name)}:</span>
+            <img src="${em.url}" alt="${_esc(em.name)}">
+            <span class="vtt-emote-card-name" title=":${_esc(em.name)}:">:${_esc(em.name)}:</span>
             <div class="vtt-emote-card-actions">
               <button class="vtt-ec-btn vtt-ec-edit" onclick="window._vttEditEmote(${i})" title="Modifier">✏</button>
               <button class="vtt-ec-btn vtt-ec-del"  onclick="window._vttDeleteEmote(${i})" title="Supprimer">✕</button>
@@ -3117,12 +3145,12 @@ window._ouvrirGestionEmotes = async () => {
     const ez = document.getElementById('emote-edit-zone'); if (!ez) return;
     ez.innerHTML = `
       <div class="vtt-ec-panel">
-        <img class="vtt-ec-panel-preview" id="ec-preview-${i}" src="${em.url}" alt="${_escHtml(em.name)}">
+        <img class="vtt-ec-panel-preview" id="ec-preview-${i}" src="${em.url}" alt="${_esc(em.name)}">
         <div class="vtt-ec-panel-fields">
-          <div class="vtt-ec-panel-title">✏ Modifier <span style="font-family:monospace">:${_escHtml(em.name)}:</span></div>
+          <div class="vtt-ec-panel-title">✏ Modifier <span style="font-family:monospace">:${_esc(em.name)}:</span></div>
           <div class="vtt-ec-panel-row">
             <label>Nouveau nom</label>
-            <input type="text" id="ec-name-${i}" value="${_escHtml(em.name)}" autocomplete="off"
+            <input type="text" id="ec-name-${i}" value="${_esc(em.name)}" autocomplete="off"
               onkeydown="if(event.key==='Enter') window._vttSaveEmote(${i})">
           </div>
           <div class="vtt-ec-panel-row">
@@ -3191,8 +3219,8 @@ function _renderChatLog(msgs) {
 
   // Portrait 22px : image si dispo, sinon initiale colorée
   const _portrait = (url, name, color='var(--gold)') => url
-    ? `<img class="vtt-log-portrait" src="${url}" alt="${_escHtml(name||'')}" onerror="this.style.visibility='hidden'">`
-    : `<div class="vtt-log-portrait" style="background:${color}">${_escHtml((name||'?')[0].toUpperCase())}</div>`;
+    ? `<img class="vtt-log-portrait" src="${url}" alt="${_esc(name||'')}" onerror="this.style.visibility='hidden'">`
+    : `<div class="vtt-log-portrait" style="background:${color}">${_esc((name||'?')[0].toUpperCase())}</div>`;
 
   // Timestamp HH:MM depuis le serverTimestamp Firestore
   const _ts = m => {
@@ -3210,7 +3238,7 @@ function _renderChatLog(msgs) {
 
   el.innerHTML=msgs.map((m, i)=>{
     const isMe=m.authorId===myUid;
-    const who=`<span class="vtt-log-who${isMe?' me':''}">${_escHtml(m.authorName||'?')}</span>`;
+    const who=`<span class="vtt-log-who${isMe?' me':''}">${_esc(m.authorName||'?')}</span>`;
     const ts = _ts(m);
 
     if (m.type==='cast') {
@@ -3222,21 +3250,21 @@ function _renderChatLog(msgs) {
           style="border-left:3px solid #b47fff;padding:.3rem .3rem .3rem .5rem;background:rgba(180,127,255,.05);border-radius:0 6px 6px 0">
         <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap">
           ${_portrait(m.characterImage, castWho, '#b47fff')}
-          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(castWho)}</span>
+          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_esc(castWho)}</span>
           <span style="font-size:.72rem;color:var(--text-dim)">✨</span>
-          <strong style="font-size:.82rem">${_escHtml(m.optLabel||'')}</strong>
-          <span style="color:var(--text-dim);font-size:.65rem">→ ${_escHtml(m.targetName||'')}</span>
+          <strong style="font-size:.82rem">${_esc(m.optLabel||'')}</strong>
+          <span style="color:var(--text-dim);font-size:.65rem">→ ${_esc(m.targetName||'')}</span>
           ${pmStr}
           ${_right('', ts)}
         </div>
-        ${m.castEffect && m.castEffect !== '—' ? `<div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem;padding-left:calc(22px + .35rem)">${_escHtml(m.castEffect)}</div>` : ''}
+        ${m.castEffect && m.castEffect !== '—' ? `<div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem;padding-left:calc(22px + .35rem)">${_esc(m.castEffect)}</div>` : ''}
       </div>`;
     }
     if (m.type==='attack' && m.isHeal) {
       // Sort de soin
       const sn  = n => n>0?`+${n}`:n<0?`${n}`:'';
       const sub = t => `<span style="font-size:.6rem;color:var(--text-dim)">(${t})</span>`;
-      const baseDice = _escHtml(m.dmgRawDice || m.dmgFormula || '');
+      const baseDice = _esc(m.dmgRawDice || m.dmgFormula || '');
       const mods = [
         m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
         m.dmgBonus ? sn(m.dmgBonus) + sub('bonus') : '',
@@ -3248,10 +3276,10 @@ function _renderChatLog(msgs) {
           style="border-left:3px solid #22c38e;padding:.3rem .3rem .3rem .5rem;background:rgba(34,195,142,.05);border-radius:0 6px 6px 0">
         <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.2rem">
           ${_portrait(m.characterImage, healWho, '#22c38e')}
-          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(healWho)}</span>
+          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_esc(healWho)}</span>
           <span style="color:var(--text-dim);font-size:.72rem">→</span>
-          <strong style="font-size:.82rem">${_escHtml(m.defenderName||'')}</strong>
-          <span style="color:var(--text-dim);font-size:.65rem">· ${_escHtml(m.optLabel||'')}</span>
+          <strong style="font-size:.82rem">${_esc(m.defenderName||'')}</strong>
+          <span style="color:var(--text-dim);font-size:.65rem">· ${_esc(m.optLabel||'')}</span>
           ${_right('', ts)}
         </div>
         <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
@@ -3307,7 +3335,7 @@ function _renderChatLog(msgs) {
       // Ligne dégâts résumée + détail formule
       let dmgSummary = '', dmgDetailHtml = '';
       if (m.hit || m.halfDmg) {
-        const baseDice = _escHtml(m.dmgRawDice || m.dmgFormula || '');
+        const baseDice = _esc(m.dmgRawDice || m.dmgFormula || '');
         const mods = [
           m.dmgStatMod       ? sn(m.dmgStatMod)       + sub(m.dmgStatLabel||'') : '',
           m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
@@ -3338,10 +3366,10 @@ function _renderChatLog(msgs) {
           style="border-left:3px solid ${borderCol};padding:.3rem .3rem .3rem .5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
         <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.2rem">
           ${_portrait(m.characterImage, atkWho, borderCol)}
-          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(atkWho)}</span>
+          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_esc(atkWho)}</span>
           <span style="color:var(--text-dim);font-size:.72rem">→</span>
-          <strong style="font-size:.82rem">${_escHtml(m.defenderName||'')}</strong>
-          <span style="color:var(--text-dim);font-size:.65rem">· ${_escHtml(m.optLabel||'')}</span>
+          <strong style="font-size:.82rem">${_esc(m.defenderName||'')}</strong>
+          <span style="color:var(--text-dim);font-size:.65rem">· ${_esc(m.optLabel||'')}</span>
           ${_right(resultBadge, ts)}
         </div>
         <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
@@ -3385,9 +3413,9 @@ function _renderChatLog(msgs) {
         return `<div class="vtt-log-entry vtt-log-roll" style="border-left:3px solid ${statCol};background:rgba(${statRgb},.06);border-radius:0 6px 6px 0;padding:.3rem .3rem .3rem .5rem">
           <div style="display:flex;align-items:center;gap:.35rem;margin-bottom:.2rem">
             ${_portrait(m.characterImage, rollWho, statCol)}
-            <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_escHtml(rollWho)}</span>
+            <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_esc(rollWho)}</span>
             <span style="font-size:.65rem;color:var(--text-dim)">🎲</span>
-            <span style="font-size:.72rem;font-weight:600;color:${statCol}">${_escHtml(m.rollSkill)}</span>
+            <span style="font-size:.72rem;font-weight:600;color:${statCol}">${_esc(m.rollSkill)}</span>
             <span style="font-size:.6rem;color:var(--text-dim)">${m.rollStat||''}</span>
             ${modeIcon}
             ${_right(badge, ts)}
@@ -3405,7 +3433,7 @@ function _renderChatLog(msgs) {
       return `<div class="vtt-log-entry vtt-log-roll" style="border-left:3px solid var(--gold);padding:.3rem .3rem .3rem .5rem;background:rgba(255,210,0,.04);border-radius:0 6px 6px 0">
         <div style="display:flex;align-items:center;gap:.35rem">
           ${who} <span style="font-size:.65rem;color:var(--text-dim)">🎲</span>
-          <em style="font-size:.68rem;color:var(--text-dim)">${_escHtml(m.rollFormula||'')}</em>
+          <em style="font-size:.68rem;color:var(--text-dim)">${_esc(m.rollFormula||'')}</em>
           <span style="font-size:.72rem;color:var(--text-dim)">→</span>
           <strong style="color:${resultCol}">${m.rollResult}</strong>
           ${_right(badge, ts)}
@@ -3414,7 +3442,7 @@ function _renderChatLog(msgs) {
     }
     // Message chat simple
     return `<div class="vtt-log-entry vtt-log-msg" style="display:flex;align-items:baseline;gap:.25rem">
-      ${who}<span style="flex:1">${_applyEmotes(_escHtml(m.text||''))}</span>${ts}
+      ${who}<span style="flex:1">${_applyEmotes(_esc(m.text||''))}</span>${ts}
     </div>`;
   }).join('');
   el.scrollTop=el.scrollHeight;
@@ -4470,20 +4498,3 @@ window._vttSelectMiniChar = (uid, charId) => {
 };
 
 PAGES.vtt=renderVttPage;
-
-// ── Debug émotes (console) ────────────────────────────────────────
-// Tester l'affichage visuel : window._vttDebugEmote('https://url-image.png')
-// Tester la couche Firestore : window._vttDebugFire()
-window._vttDebugEmote = (url) => {
-  const testUrl = url || _emotes[0]?.url || 'https://i.imgur.com/removed.png';
-  console.log('[vtt-emote] test visuel avec', testUrl);
-  _showEmoteBubble(null, testUrl, 'debug', 'dbg_' + Date.now());
-};
-window._vttDebugFire = async () => {
-  console.log('[vtt-emote] collection:', _reactionsCol().path);
-  console.log('[vtt-emote] adventure id:', _aid());
-  console.log('[vtt-emote] emotes chargées:', _emotes.length);
-  console.log('[vtt-emote] réactions déjà vues:', [..._renderedReactions]);
-  const snap = await getDocs(_reactionsCol()).catch(e => { console.error('[vtt-emote] getDocs error:', e); return null; });
-  if (snap) console.log('[vtt-emote] docs Firestore:', snap.docs.map(d => ({ id: d.id, ...d.data() })));
-};
