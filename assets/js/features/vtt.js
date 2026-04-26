@@ -2675,14 +2675,22 @@ function _applyEmotes(escaped) {
   return escaped;
 }
 
-function _emoteGridHtml(list) {
+// Favoris émotes — stockés en localStorage
+const _getFavs = () => { try { return JSON.parse(localStorage.getItem('vtt-emote-favs')||'[]'); } catch { return []; } };
+const _setFavs = v => localStorage.setItem('vtt-emote-favs', JSON.stringify(v));
+
+function _emoteGridHtml(list, favSet=new Set()) {
   if (!list.length) return '<div class="vtt-emote-empty-grid">Aucune émote trouvée</div>';
   return list.map(em => {
     const safe = em.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    return `<button class="vtt-emote-item" onclick="window._vttPickEmote('${safe}')" title=":${_escHtml(em.name)}:">
-      <img src="${em.url}" alt="${_escHtml(em.name)}" loading="lazy">
-      <span>${_escHtml(em.name)}</span>
-    </button>`;
+    const isFav = favSet.has(em.name);
+    return `<div class="vtt-emote-item-wrap">
+      <button class="vtt-emote-item" onclick="window._vttPickEmote('${safe}')" title=":${_escHtml(em.name)}:">
+        <img src="${em.url}" alt="${_escHtml(em.name)}" loading="lazy">
+        <span>${_escHtml(em.name)}</span>
+      </button>
+      <button class="vtt-emote-fav-btn${isFav?' active':''}" onclick="window._vttToggleFav('${safe}')" title="${isFav?'Retirer des favoris':'Ajouter aux favoris'}">${isFav?'★':'☆'}</button>
+    </div>`;
   }).join('');
 }
 
@@ -2690,35 +2698,64 @@ function _renderEmotePicker() {
   const el = document.getElementById('vtt-emote-picker');
   if (!el) return;
   if (!_emotes.length) {
-    el.innerHTML = '<div class="vtt-emote-picker-search"><span class="vtt-emote-empty" style="padding:.5rem;display:block;font-size:.75rem;color:var(--text-muted)">Aucune émote — à configurer dans la Console MJ</span></div>';
+    el.innerHTML = '<div class="vtt-emote-picker-search"><span style="padding:.5rem;display:block;font-size:.75rem;color:var(--text-muted)">Aucune émote — à configurer dans la Console MJ</span></div>';
     return;
   }
+  const favSet = new Set(_getFavs());
+  const favEmotes = _emotes.filter(e => favSet.has(e.name));
+  const favBlock = favEmotes.length
+    ? `<div id="vtt-emote-fav-section">
+        <div class="vtt-emote-section-lbl gold">⭐ Favoris</div>
+        <div class="vtt-emote-grid" id="vtt-emote-fav-grid">${_emoteGridHtml(favEmotes, favSet)}</div>
+      </div>
+      <div class="vtt-emote-section-lbl">Toutes</div>`
+    : `<div id="vtt-emote-fav-section" style="display:none"></div>`;
   el.innerHTML = `
     <div class="vtt-emote-picker-search">
       <input type="text" id="vtt-emote-search" placeholder="🔍 Rechercher…" autocomplete="off"
         oninput="window._vttFilterEmotes(this.value)">
     </div>
-    <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes)}</div>`;
+    ${favBlock}
+    <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes, favSet)}</div>`;
   setTimeout(() => document.getElementById('vtt-emote-search')?.focus(), 40);
 }
 
 window._vttFilterEmotes = (q) => {
-  const el = document.getElementById('vtt-emote-grid'); if (!el) return;
+  const favSet = new Set(_getFavs());
+  const grid = document.getElementById('vtt-emote-grid'); if (!grid) return;
   const filtered = q.trim() ? _emotes.filter(e => e.name.includes(q.trim().toLowerCase())) : _emotes;
-  el.innerHTML = _emoteGridHtml(filtered);
+  grid.innerHTML = _emoteGridHtml(filtered, favSet);
+  const favSection = document.getElementById('vtt-emote-fav-section');
+  if (favSection) favSection.style.display = q.trim() ? 'none' : '';
+};
+
+window._vttToggleFav = (name) => {
+  const favs = _getFavs();
+  const idx = favs.indexOf(name);
+  if (idx >= 0) favs.splice(idx, 1); else favs.push(name);
+  _setFavs(favs);
+  // Re-render en préservant la query de recherche
+  const q = document.getElementById('vtt-emote-search')?.value || '';
+  _renderEmotePicker();
+  if (q) {
+    const input = document.getElementById('vtt-emote-search');
+    if (input) { input.value = q; _vttFilterEmotes(q); }
+  }
 };
 
 window._vttToggleEmotePicker = () => {
   const el = document.getElementById('vtt-emote-picker');
+  const btn = document.querySelector('.vtt-emote-trigger');
   if (!el) return;
   const open = el.classList.toggle('open');
+  btn?.classList.toggle('open', open);
   if (open) _renderEmotePicker();
 };
 
 window._vttPickEmote = async (name) => {
   const uid = STATE.user?.uid; if (!uid) return;
   const em = _emotes.find(e => e.name === name); if (!em) return;
-  document.getElementById('vtt-emote-picker')?.classList.remove('open');
+  // Le picker reste ouvert — l'utilisateur ferme manuellement
 
   // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
   const ts = Date.now();
@@ -3670,9 +3707,7 @@ function _buildHtml() {
       <div class="vtt-chat">
         <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
         <div class="vtt-chat-log" id="vtt-chat-log"></div>
-        <div class="vtt-emote-picker" id="vtt-emote-picker"></div>
         <div class="vtt-chat-input-row">
-          <button class="vtt-emote-trigger" onclick="window._vttToggleEmotePicker()" title="Émotes">😄</button>
           <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
             onkeydown="if(event.key==='Enter')window._vttSendChat()">
@@ -3703,6 +3738,12 @@ export async function renderVttPage() {
   const wrap=document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
   _initCanvas(wrap);
+  // Float émote injecté APRÈS Konva pour être au-dessus des canvas layers
+  const _ef = document.createElement('div');
+  _ef.className = 'vtt-emote-float';
+  _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker"></div>
+    <button class="vtt-emote-trigger" onclick="window._vttToggleEmotePicker()" title="Émotes">😄</button>`;
+  wrap.appendChild(_ef);
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';

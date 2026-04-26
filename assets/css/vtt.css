@@ -121,6 +121,24 @@
 .vtt-btn-danger      { border-color: oklch(58% 0.20 22 / 0.30); color: var(--crimson); }
 .vtt-btn-danger:hover{ background: oklch(58% 0.20 22 / 0.10); }
 
+/* Bouton secondaire (Annuler) dans les modals VTT */
+.btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: .42rem .9rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: .78rem; font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.btn-secondary:hover {
+  background: var(--bg-card2);
+  color: var(--text);
+  border-color: rgba(255,255,255,.18);
+}
+
 .vtt-upload-lbl { cursor: pointer; }
 
 /* ── Onglets de page ────────────────────────────────────────────── */
@@ -404,8 +422,11 @@
   text-align: center;
   padding: .1rem .2rem;
   transition: border-color .12s;
+  -moz-appearance: textfield;
 }
 .vtt-ins-input:focus { outline: none; border-color: var(--gold-glow); }
+.vtt-ins-input::-webkit-inner-spin-button,
+.vtt-ins-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
 .vtt-ins-badge {
   display: inline-block;
@@ -831,22 +852,32 @@
 }
 .vtt-chat-send:hover { background: oklch(72% 0.14 52 / 0.18); }
 
-/* ── Émotes ─────────────────────────────────────────────────────── */
-.vtt-emote-trigger {
-  width: 28px; height: 28px; flex-shrink: 0;
-  background: transparent; border: 1px solid var(--border);
-  border-radius: 7px; cursor: pointer; font-size: .9rem;
-  display: flex; align-items: center; justify-content: center;
-  transition: background .12s;
+/* ── Émotes — float sur le canvas ───────────────────────────────── */
+.vtt-emote-float {
+  position: absolute; bottom: 14px; left: 14px; z-index: 10;
+  display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
 }
-.vtt-emote-trigger:hover { background: var(--bg-elevated); }
+.vtt-emote-trigger {
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, box-shadow .12s;
+  box-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+.vtt-emote-trigger:hover { background: var(--bg-elevated); box-shadow: 0 3px 14px rgba(0,0,0,.55); }
+.vtt-emote-trigger.open  { border-color: var(--gold); box-shadow: 0 0 0 2px oklch(72% 0.14 52 / 0.3); }
 
-/* Picker — panel avec barre de recherche + grille */
+/* Picker — panel flottant au-dessus du bouton */
 .vtt-emote-picker {
   display: none; flex-direction: column;
-  border-top: 1px solid var(--border);
-  background: var(--bg-dark);
-  max-height: 260px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  max-height: 320px;
+  width: 292px;
 }
 .vtt-emote-picker.open { display: flex; }
 
@@ -861,25 +892,56 @@
 }
 .vtt-emote-picker-search input:focus { border-color: var(--gold); }
 
+/* Section étiquette (Favoris / Toutes) */
+.vtt-emote-section-lbl {
+  padding: .2rem .45rem .15rem;
+  font-size: .58rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-dim); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.vtt-emote-section-lbl.gold { color: var(--gold); }
+
 .vtt-emote-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-  gap: 3px; overflow-y: auto; padding: .35rem;
+  grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+  gap: 3px; overflow-y: auto; padding: .3rem;
   scrollbar-width: thin;
+  scrollbar-color: var(--bg-elevated) transparent;
+}
+.vtt-emote-grid::-webkit-scrollbar       { width: 4px; }
+.vtt-emote-grid::-webkit-scrollbar-track { background: transparent; }
+.vtt-emote-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.vtt-emote-grid::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+/* Wrapper item + bouton favori */
+.vtt-emote-item-wrap {
+  position: relative;
 }
 .vtt-emote-item {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: .3rem .2rem; border-radius: 8px;
+  padding: .3rem .2rem; border-radius: 8px; width: 100%;
   background: transparent; border: 1px solid transparent; cursor: pointer;
   transition: background .1s, border-color .1s;
 }
 .vtt-emote-item:hover { background: var(--bg-elevated); border-color: var(--border); }
-.vtt-emote-item img   { width: 44px; height: 44px; object-fit: contain; }
+.vtt-emote-item img   { width: 42px; height: 42px; object-fit: contain; }
 .vtt-emote-item span  {
-  font-size: .58rem; color: var(--text-muted);
-  max-width: 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .57rem; color: var(--text-muted);
+  max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   text-align: center;
 }
+/* Bouton étoile favori */
+.vtt-emote-fav-btn {
+  position: absolute; top: 2px; right: 3px;
+  width: 15px; height: 15px;
+  background: transparent; border: none; cursor: pointer;
+  font-size: .68rem; color: var(--text-dim); padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px; opacity: 0;
+  transition: opacity .1s, color .1s;
+}
+.vtt-emote-item-wrap:hover .vtt-emote-fav-btn { opacity: 1; }
+.vtt-emote-fav-btn.active { color: var(--gold); opacity: 1; }
+.vtt-emote-fav-btn:hover  { color: var(--gold); }
+
 .vtt-emote-empty-grid {
   grid-column: 1/-1; text-align: center;
   font-size: .75rem; color: var(--text-muted); padding: 1rem 0;
