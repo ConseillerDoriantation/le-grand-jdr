@@ -53,7 +53,9 @@
       "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/shop.js)",
       "Bash(node --input-type=module --check)",
       "Bash(grep -n \"si-\\\\${f.id}\\\\|si-sousType\\\\|f.type === 'autocomplete'\\\\|getElementById.*sousType\" /home/ubuntu/DEV/le-grand-jdr/assets/js/features/shop.js)",
-      "Bash(powershell -command \"\\(Get-Content 'C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\vtt.js'\\).Count\")"
+      "Bash(powershell -command \"\\(Get-Content 'C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\vtt.js'\\).Count\")",
+      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/informations.js)",
+      "Bash(node -e \"console.log\\('Énergie & Élément'.normalize\\('NFD'\\).replace\\(/[̀-ͯ]/g,''\\).toLowerCase\\(\\).replace\\(/[^a-z0-9]+/g,'-'\\).replace\\(/^-+|-+\\\\$/g,''\\)\\)\")"
     ]
   }
 }

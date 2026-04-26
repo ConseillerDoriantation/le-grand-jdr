@@ -4,6 +4,7 @@
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { modStr } from '../shared/html.js';
+import { bindRichTextEditors } from '../shared/rich-text.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct,
@@ -385,6 +386,7 @@ function _renderTab(leafTab, c, canEdit) {
     carac:       () => renderCharEquip(c, canEdit),
   };
   area.innerHTML = renders[leafTab]?.() || '';
+  bindRichTextEditors(area);
 }
 
 function showCharTab(tab, el) {
