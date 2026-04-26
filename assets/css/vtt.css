@@ -1002,6 +1002,17 @@
   font-size: .65rem; color: var(--text-muted);
   display: block; margin-top: .05rem; opacity: .8;
 }
+.vtt-log-time {
+  font-size: .58rem; color: var(--text-dim); opacity: .6; flex-shrink: 0;
+}
+.vtt-log-detail-btn {
+  font-size: .58rem; padding: .1rem .3rem; border-radius: 3px;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer; line-height: 1.4;
+  transition: background .12s, color .12s;
+}
+.vtt-log-detail-btn:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-log-detail-btn.open  { background: var(--bg-elevated); color: var(--text); border-color: var(--gold); }
 
 /* ── Zoom display ───────────────────────────────────────────────── */
 .vtt-zoom-display {
