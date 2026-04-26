@@ -281,6 +281,46 @@
   background: radial-gradient(ellipse 85% 85% at 50% 50%, transparent 58%, rgba(6,7,12,0.65) 100%);
 }
 
+/* ── Outils flottants sur le canvas ────────────────────────────── */
+.vtt-tool-float {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+.vtt-tool-float > * { pointer-events: auto; }
+
+.vtt-tool-float-tools {
+  display: flex;
+  gap: 3px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 12px rgba(0,0,0,.45);
+}
+
+.vtt-tool-float .vtt-draw-bar {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 12px rgba(0,0,0,.45);
+  flex-direction: row;
+  flex-wrap: wrap;
+  max-width: 230px;
+  gap: 4px;
+  justify-content: flex-end;
+  flex: unset;
+}
+
 /* ── Colonne droite ─────────────────────────────────────────────── */
 .vtt-right-col {
   width: 310px;
