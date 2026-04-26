@@ -4,7 +4,7 @@ import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
-import { statShort, formatItemBonusText } from '../../shared/char-stats.js';
+import { statShort, formatItemBonusText, calcOr } from '../../shared/char-stats.js';
 import {
   _getTraits,
   getEquippedInventoryIndexMap,
@@ -249,11 +249,16 @@ export function renderCharInventaire(c, canEdit) {
 
   const totalItems = invRaw.length;
 
+  const otherCharsGold = (STATE.characters || []).filter(x => x.id !== c.id && x.nom);
+
   let html = `<div class="cs-section cs-section--compact">
     <div class="cs-section-hdr">
       <span class="cs-section-title">🎒 Inventaire</span>
       <span class="cs-hint">${totalItems} objet${totalItems !== 1 ? 's' : ''}</span>
-      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addInvItem()" style="margin-left:auto">🎁 Butin</button>` : ''}
+      <div style="display:flex;gap:.3rem;margin-left:auto">
+        ${otherCharsGold.length ? `<button class="btn btn-outline btn-sm" onclick="openSendGoldModal('${c.id}')" title="Envoyer de l'or à un autre personnage">💰 Or</button>` : ''}
+        ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addInvItem()">🎁 Butin</button>` : ''}
+      </div>
     </div>`;
 
   if (grouped.length === 0) {
@@ -653,6 +658,114 @@ export async function sendInvItem(fromCharId, indicesB64) {
     ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
     : '';
   showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !${sendMsg}`, 'success');
+  window.renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
+}
+
+// ══════════════════════════════════════════════
+// ENVOI D'OR
+// ══════════════════════════════════════════════
+
+export function openSendGoldModal(charId) {
+  const fromChar = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  if (!fromChar) return;
+
+  const orDispo = calcOr(fromChar);
+  const targets = (STATE.characters || []).filter(x => x.id !== charId && x.nom);
+
+  if (!targets.length) {
+    showNotif('Aucun autre personnage disponible.', 'info');
+    return;
+  }
+
+  const targetCards = targets.map(t => {
+    const initiale  = (t.nom || '?')[0].toUpperCase();
+    const couleur   = '#e8b84b';
+    return `<label style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
+      border-radius:8px;cursor:pointer;border:2px solid var(--border);background:var(--bg-elevated);
+      transition:border-color .15s" onmouseover="this.style.borderColor='var(--gold)'"
+      onmouseout="this.style.borderColor='var(--border)'">
+      <input type="radio" name="gold-target" value="${t.id}" style="accent-color:var(--gold)">
+      <div style="width:30px;height:30px;border-radius:50%;background:${couleur}22;
+        border:2px solid ${couleur};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        ${t.photo
+          ? `<img src="${t.photo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+          : `<span style="font-size:.9rem;font-weight:700;color:${couleur}">${initiale}</span>`}
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.84rem;font-weight:600;color:var(--text)">${t.nom}</div>
+        ${t.ownerPseudo ? `<div style="font-size:.68rem;color:var(--text-dim)">${t.ownerPseudo}</div>` : ''}
+      </div>
+    </label>`;
+  }).join('');
+
+  openModal('💰 Envoyer de l\'or', `
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem;
+      padding:.5rem .75rem;background:color-mix(in srgb,var(--gold) 10%,transparent);
+      border:1px solid color-mix(in srgb,var(--gold) 25%,transparent);border-radius:8px">
+      <span style="font-size:1.1rem">💰</span>
+      <span style="font-size:.84rem;color:var(--text)">Ton solde : <strong style="color:var(--gold)">${orDispo} or</strong></span>
+    </div>
+    <div style="font-size:.72rem;color:var(--text-dim);font-weight:600;
+      text-transform:uppercase;letter-spacing:.8px;margin-bottom:.4rem">Destinataire</div>
+    <div style="display:flex;flex-direction:column;gap:.35rem;max-height:220px;overflow-y:auto;margin-bottom:.75rem">
+      ${targetCards}
+    </div>
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label style="font-size:.75rem">Montant <span style="color:var(--text-dim);font-weight:400">(max ${orDispo} or)</span></label>
+      <input type="number" class="input-field" id="gold-amount" min="1" max="${orDispo}" value="1"
+        placeholder="Montant en or" style="max-width:140px">
+    </div>
+    <div style="display:flex;gap:.5rem">
+      <button class="btn btn-gold" style="flex:1" onclick="sendGold('${charId}')">💰 Envoyer</button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>
+  `);
+}
+
+export async function sendGold(fromCharId) {
+  const fromChar = STATE.characters?.find(x => x.id === fromCharId) || STATE.activeChar;
+  if (!fromChar) return;
+
+  const targetId = document.querySelector('input[name="gold-target"]:checked')?.value;
+  if (!targetId) { showNotif('Sélectionne un destinataire.', 'error'); return; }
+
+  const toChar = STATE.characters?.find(x => x.id === targetId);
+  if (!toChar) { showNotif('Personnage introuvable.', 'error'); return; }
+
+  const montant = parseInt(document.getElementById('gold-amount')?.value) || 0;
+  if (montant < 1) { showNotif('Montant invalide.', 'error'); return; }
+
+  const orDispo = calcOr(fromChar);
+  if (orDispo < montant) { showNotif(`Fonds insuffisants (${orDispo} or disponibles).`, 'error'); return; }
+
+  const now = new Date().toLocaleDateString('fr-FR');
+
+  // Sender : dépense
+  const fromCompte = { recettes: [], depenses: [], ...(fromChar.compte || {}) };
+  fromCompte.depenses = [...fromCompte.depenses, {
+    date: now,
+    libelle: `Or envoyé à ${toChar.nom || 'joueur'}`,
+    montant,
+  }];
+
+  // Recipient : recette
+  const toCompte = { recettes: [], depenses: [], ...(toChar.compte || {}) };
+  toCompte.recettes = [...toCompte.recettes, {
+    date: now,
+    libelle: `Or reçu de ${fromChar.nom || 'joueur'}`,
+    montant,
+  }];
+
+  await Promise.all([
+    updateInCol('characters', fromCharId, { compte: fromCompte }),
+    updateInCol('characters', targetId,   { compte: toCompte }),
+  ]);
+
+  fromChar.compte = fromCompte;
+  toChar.compte   = toCompte;
+
+  closeModal();
+  showNotif(`💰 ${montant} or envoyé à ${toChar.nom || 'joueur'} !`, 'success');
   window.renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
 }
 

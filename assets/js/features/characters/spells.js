@@ -330,7 +330,11 @@ function _buildSortResume(s, c) {
   if (chc) lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:'Critique aussi max · chaîné : RC−1/rune' });
 
   // Enchantement / Affliction
-  if (runes.includes('Enchantement')) lines.push({ icon:'✨', label:'Enchantement allié', detail:'Applique l\'élément sur équipement allié · 2 tours · Action Bonus' });
+  if (runes.includes('Enchantement')) {
+    const enchDeg = (s.enchantDegats || '').trim();
+    lines.push({ icon:'✨', label:'Enchantement allié', detail:`Applique l'élément sur équipement allié · 2 tours · Action Bonus${enchDeg ? ` · +${enchDeg}` : ''}` });
+    if (enchDeg) lines.push({ icon:'⚔️', label:enchDeg, detail:'Dégâts bonus sur l\'arme enchantée' });
+  }
   if (runes.includes('Affliction'))   lines.push({ icon:'💀', label:'Affliction ennemi', detail:'Applique l\'élément + état sur équipement ennemi · 2 tours · Action Bonus' });
 
   // Invocation
@@ -467,6 +471,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (depl)  chips.push({ icon: depl.mode==='push' ? '↗' : '↙', val:`${depl.distance}m`, color:'#e8b84b' });
   const duree = _calcSortDuree(s);
   if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af' });
+  if (runesAll.includes('Enchantement') && s.enchantDegats) chips.push({ icon:'✨', val:s.enchantDegats, color:'#e8b84b' });
 
   const pmVal = pmDelta !== 0
     ? `<span class="cs-sort-pm-old">${s.pm||0}</span><span class="cs-sort-pm-new">${Math.max(0,(s.pm||0)+pmDelta)}</span>`
@@ -616,10 +621,10 @@ export function openSortModal(idx, s) {
     {nom:'Puissance',     effet:'+ 1 dé de dégâts · chaîné : +2 fixe/paire'},
     {nom:'Protection',    effet:'+1d4 soin ou +2 CA (2 tr) · chaîné : soin+2 & CA+1'},
     {nom:'Amplification', effet:'Zone +3m · chaîné : +2m/rune supp.'},
-    {nom:'Enchantement',  effet:'Élément sur équip. allié 2 tr → Action Bonus'},
-    {nom:'Affliction',    effet:'Élément + état sur équip. ennemi 2 tr → Action Bonus'},
+    {nom:'Enchantement',  effet:'Applique l\'élément sur équipement allié 2 tours → Action Bonus'},
+    {nom:'Affliction',    effet:'Élément + état sur équipement ennemi 2 tours → Action Bonus'},
     {nom:'Invocation',    effet:'Créature liée · 10 PV, CA 10'},
-    {nom:'Dispersion',    effet:'1 rune = 2 cibles · 2 runes = 4 cibles · N runes = 2N cibles (chaîné) · cibles différentes uniquement'},
+    {nom:'Dispersion',    effet:'1 rune = 2 cibles · 2 runes = 4 cibles · N = 2N cibles · cibles différentes'},
     {nom:'Lacération',    effet:'CA cible −1 · chaîné : −1/rune (max −2, Élites −4)'},
     {nom:'Chance',        effet:'RC 19–20, critique max · chaîné : RC−1/rune'},
     {nom:'Durée',         effet:'+2 tours · chaîné : +1 supp./rune'},
@@ -630,22 +635,23 @@ export function openSortModal(idx, s) {
   const runesSrc = s?.runes||[];
   const runeCounts = {};
   runesSrc.forEach(r => { runeCounts[r] = (runeCounts[r]||0) + 1; });
-  window._runeCountsEdit = {...runeCounts};
+  window._runeCountsEdit = { ...runeCounts };
 
-  const noyauSel  = s?.noyau||'';
-  // Types existants (multi)
+  const noyauSel  = s?.noyau || '';
   const typesInit = Array.isArray(s?.types) && s.types.length ? s.types
     : (s?.typeSoin ? ['defensif'] : (s?.noyau ? ['offensif'] : ['utilitaire']));
 
-  window._sortTypesEdit = new Set(typesInit);
+  window._sortTypesEdit  = new Set(typesInit);
+  window._sortActionEdit = s?.actionOverride || null;
+  window._deplModeEdit   = s?.deplacement?.mode || null;
 
-  // Action override (Auto / Action / Action Bonus uniquement — Réaction = rune)
-  window._sortActionEdit = s?.actionOverride || null;  // null = auto
-  // Déplacement (pousse/attire)
-  window._deplModeEdit = s?.deplacement?.mode || null;
+  // Détecter si options avancées déjà remplies
+  const hasAdvanced = !!(s?.zoneW || s?.zoneH || s?.deplacement?.mode || s?.dureeBase);
+  const hasEnchant  = runesSrc.includes('Enchantement');
+  const hasProt     = runesSrc.includes('Protection');
 
   const runesHtml = RUNES.map(r => {
-    const cnt = window._runeCountsEdit[r.nom]||0;
+    const cnt = window._runeCountsEdit[r.nom] || 0;
     const key = r.nom.replace(/\s/g,'_');
     return `<div class="cs-rune-counter" id="rune-row-${key}">
       <div class="cs-rune-counter-info">
@@ -667,7 +673,7 @@ export function openSortModal(idx, s) {
   ];
   const typeBtnsHtml = TYPE_CFG.map(t => {
     const isSel = typesInit.includes(t.v);
-    return `<button type="button" id="s-type-${t.v}" data-type="${t.v}"
+    return `<button type="button" id="s-type-${t.v}"
       onclick="window._toggleSortType('${t.v}')"
       style="flex:1;padding:.4rem .3rem;border-radius:8px;font-size:.75rem;cursor:pointer;
       border:2px solid ${isSel?t.color:'var(--border)'};
@@ -683,7 +689,7 @@ export function openSortModal(idx, s) {
   ];
   const actionBtnsHtml = ACTION_CFG.map(a => {
     const isSel = (window._sortActionEdit === a.v);
-    return `<button type="button" id="s-action-${a.v??'auto'}" data-action="${a.v??'auto'}"
+    return `<button type="button" id="s-action-${a.v??'auto'}"
       onclick="window._selectSortAction(${a.v===null?'null':`'${a.v}'`})"
       style="flex:1;padding:.35rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;
       border:2px solid ${isSel?a.color:'var(--border)'};
@@ -692,10 +698,27 @@ export function openSortModal(idx, s) {
       font-weight:${isSel?'700':'400'};transition:all .15s">${a.label}</button>`;
   }).join('');
 
+  const deplCur = s?.deplacement?.mode || null;
+  const deplBtnsHtml = [
+    { v:null,   label:'Aucun',    col:'#9ca3af' },
+    { v:'push', label:'↗ Pousse', col:'#e8b84b' },
+    { v:'pull', label:'↙ Attire', col:'#4f8cff' },
+  ].map(opt => {
+    const sel = deplCur === opt.v;
+    return `<button type="button" id="s-depl-${opt.v??'none'}"
+      onclick="window._selectDeplMode(${opt.v===null?'null':`'${opt.v}'`})"
+      style="flex:1;padding:.3rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;transition:all .15s;
+        border:2px solid ${sel?opt.col:'var(--border)'};
+        background:${sel?opt.col+'20':'var(--bg-elevated)'};
+        color:${sel?opt.col:'var(--text-dim)'};
+        font-weight:${sel?'700':'400'}">${opt.label}</button>`;
+  }).join('');
+
   openModal(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort', `
+    <!-- ① Identité -->
     <div class="grid-2" style="gap:.6rem;margin-bottom:.5rem">
       <div class="form-group" style="margin:0"><label>Nom</label>
-        <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu...">
+        <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu…">
       </div>
       <div class="form-group" style="margin:0"><label>Catégorie</label>
         <select class="input-field" id="s-catid">
@@ -707,19 +730,13 @@ export function openSortModal(idx, s) {
       </div>
     </div>
 
-    <!-- Types (multi-sélection) -->
+    <!-- ② Types -->
     <div class="form-group">
-      <label>Type(s) <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— plusieurs possibles</span></label>
+      <label>Type <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— plusieurs possibles</span></label>
       <div style="display:flex;gap:.4rem">${typeBtnsHtml}</div>
     </div>
 
-    <!-- Type d'action -->
-    <div class="form-group">
-      <label>Action <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">— Auto = déduit des runes · Réaction/Concentration = rune</span></label>
-      <div style="display:flex;gap:.3rem" id="s-action-btns">${actionBtnsHtml}</div>
-    </div>
-
-    <!-- Noyau -->
+    <!-- ③ Noyau -->
     <div class="form-group">
       <label>Noyau élémentaire <span style="color:var(--text-dim);font-weight:400">(2 PM)</span></label>
       <div class="cs-noyau-grid" id="noyau-grid">
@@ -729,7 +746,7 @@ export function openSortModal(idx, s) {
       <input type="hidden" id="s-noyau" value="${noyauSel}">
     </div>
 
-    <!-- Runes -->
+    <!-- ④ Runes -->
     <div class="form-group">
       <label>Runes <span style="color:var(--text-dim);font-weight:400">(+2 PM chacune, cumulables)</span></label>
       <div class="cs-rune-list">${runesHtml}</div>
@@ -740,116 +757,131 @@ export function openSortModal(idx, s) {
       <input type="hidden" id="s-pm" value="${s?.pm||2}">
     </div>
 
-    <!-- Dégâts (si offensif) -->
+    <!-- ⑤ Champs conditionnels auto-affichés -->
+
+    <!-- Dégâts — visible si type offensif -->
     <div id="s-degats-section" style="${typesInit.includes('offensif')?'':'display:none'}">
-      <div class="form-group"><label>Dégâts <span style="color:var(--text-dim);font-weight:400">(vide = dégâts de l'arme)</span></label>
+      <div class="form-group"><label>Dégâts <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">vide = dégâts de l'arme principale</span></label>
         <input class="input-field" id="s-degats" value="${s?.degats||''}" placeholder="= arme automatiquement">
       </div>
     </div>
 
-    <!-- Protection : Soin ou CA (visible si rune Protection présente) -->
-    <div id="s-prot-section" style="${(s?.runes||[]).includes('Protection') ? '' : 'display:none'}">
+    <!-- Protection — visible si rune Protection > 0 -->
+    <div id="s-prot-section" style="${hasProt?'':'display:none'}">
       <div class="form-group">
-        <label>Rune Protection — effet <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">que fait-elle ?</span></label>
+        <label>Rune Protection — effet</label>
         <div style="display:flex;gap:.4rem">
           ${[
-            { v:'ca',   label:'🛡️ Augmente la CA',  color:'#22c38e', detail:'+2 CA · 2 tours' },
-            { v:'soin', label:'💚 Soigne',            color:'#4f8cff', detail:'+1d4 par rune'   },
+            { v:'ca',   label:'🛡️ Augmente la CA', color:'#22c38e', detail:'+2 CA · 2 tours' },
+            { v:'soin', label:'💚 Soigne',           color:'#4f8cff', detail:'+1d4 par rune'  },
           ].map(opt => {
             const sel = (s?.protectionMode || 'ca') === opt.v;
             return `<button type="button" id="s-prot-${opt.v}" onclick="window._selectProtMode('${opt.v}')"
-              style="flex:1;padding:.5rem .4rem;border-radius:8px;cursor:pointer;transition:all .15s;
+              style="flex:1;padding:.45rem .4rem;border-radius:8px;cursor:pointer;transition:all .15s;
               border:2px solid ${sel?opt.color:'var(--border)'};
               background:${sel?opt.color+'18':'var(--bg-elevated)'};text-align:center">
-              <div style="font-size:.8rem;font-weight:700;color:${sel?opt.color:'var(--text-dim)'}">${opt.label}</div>
-              <div style="font-size:.68rem;color:var(--text-dim);margin-top:.1rem">${opt.detail}</div>
+              <div style="font-size:.78rem;font-weight:700;color:${sel?opt.color:'var(--text-dim)'}">${opt.label}</div>
+              <div style="font-size:.65rem;color:var(--text-dim);margin-top:.08rem">${opt.detail}</div>
             </button>`;
           }).join('')}
         </div>
         <input type="hidden" id="s-prot-mode" value="${s?.protectionMode||'ca'}">
       </div>
-      <!-- CA custom (visible si mode CA) -->
       <div id="s-ca-section" style="${(s?.protectionMode||'ca')==='ca'?'':'display:none'}">
-        <div class="form-group"><label>Effet CA <span style="color:var(--text-dim);font-weight:400">(libre — ex: CA +2 (2 tours))</span></label>
+        <div class="form-group"><label>Effet CA <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">ex : CA +2 (2 tours)</span></label>
           <input class="input-field" id="s-ca" value="${s?.ca||''}" placeholder="CA +2 (2 tours)">
         </div>
       </div>
-      <!-- Soin custom (visible si mode soin) -->
       <div id="s-soin-section" style="${(s?.protectionMode||'ca')==='soin'?'':'display:none'}">
-        <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400">(vide = 1d4 base · XdY = calcul auto)</span></label>
+        <div class="form-group"><label>Soin <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">vide = 1d4 · XdY = calcul auto</span></label>
           <input class="input-field" id="s-soin" value="${s?.soin||''}" placeholder="= 1d4 automatiquement">
         </div>
       </div>
     </div>
 
-    <!-- Zone de base + Déplacement -->
-    <div class="grid-2" style="gap:.5rem;margin-bottom:.5rem">
-      <div class="form-group" style="margin:0">
-        <label>Zone <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = sort ciblé</span></label>
-        <div style="display:flex;gap:.3rem;align-items:center">
-          <input type="number" class="input-field" id="s-zone-w" min="1" max="50"
-            value="${s?.zoneW||''}" placeholder="—"
-            style="width:50px;text-align:center;padding:.3rem">
-          <span style="font-size:.85rem;color:var(--text-dim);font-weight:600">×</span>
-          <input type="number" class="input-field" id="s-zone-h" min="1" max="50"
-            value="${s?.zoneH||''}" placeholder="—"
-            style="width:50px;text-align:center;padding:.3rem">
-          <span style="font-size:.8rem;color:var(--text-dim)">m</span>
-        </div>
+    <!-- Enchantement dégâts — visible si rune Enchantement > 0 -->
+    <div id="s-enchant-section" style="${hasEnchant?'':'display:none'}">
+      <div class="form-group">
+        <label>✨ Dégâts d'enchantement <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">bonus appliqué à l'arme enchantée (optionnel)</span></label>
+        <input class="input-field" id="s-enchant-degats" value="${s?.enchantDegats||''}"
+          placeholder="ex : +1d6 Feu, +2 Foudre… (laisser vide si aucun dégât bonus)">
       </div>
-      <div class="form-group" style="margin:0">
-        <label>Déplacement</label>
-        <div style="display:flex;flex-direction:column;gap:.3rem">
-          <div style="display:flex;gap:.3rem">
-            ${[
-              { v:null,   label:'Aucun',  col:'#9ca3af' },
-              { v:'push', label:'↗ Pousse', col:'#e8b84b' },
-              { v:'pull', label:'↙ Attire', col:'#4f8cff' },
-            ].map(opt => {
-              const cur = s?.deplacement?.mode || null;
-              const sel = cur === opt.v;
-              return `<button type="button" onclick="window._selectDeplMode(${opt.v===null?'null':`'${opt.v}'`})"
-                id="s-depl-${opt.v??'none'}"
-                style="flex:1;padding:.3rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;transition:all .15s;
-                  border:2px solid ${sel?opt.col:'var(--border)'};
-                  background:${sel?opt.col+'20':'var(--bg-elevated)'};
-                  color:${sel?opt.col:'var(--text-dim)'};
-                  font-weight:${sel?'700':'400'}">${opt.label}</button>`;
-            }).join('')}
+    </div>
+
+    <!-- ⑥ Action -->
+    <div class="form-group">
+      <label>Action <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">Auto = déduit des runes · Réaction/Concentration = rune</span></label>
+      <div style="display:flex;gap:.3rem">${actionBtnsHtml}</div>
+    </div>
+
+    <!-- ⑦ Description -->
+    <div class="form-group">
+      <label>Description / Effet libre</label>
+      <textarea class="input-field" id="s-effet" rows="2">${s?.effet||''}</textarea>
+    </div>
+
+    <!-- ⑧ Options avancées (collapsible) -->
+    <div id="s-advanced-wrap" style="border:1px solid var(--border);border-radius:8px;margin-bottom:.5rem;overflow:hidden">
+      <button type="button" id="s-advanced-toggle"
+        onclick="window._toggleSortAdvanced()"
+        style="width:100%;background:var(--bg-elevated);border:none;padding:.45rem .7rem;
+          cursor:pointer;display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--text-dim)">
+        <span id="s-advanced-chev" style="font-size:.7rem;transition:transform .2s">${hasAdvanced?'▼':'▶'}</span>
+        <span>Options avancées</span>
+        <span style="font-size:.68rem;margin-left:.3rem;color:var(--text-dim);font-style:italic">Zone · Déplacement · Durée</span>
+        ${hasAdvanced ? '<span style="margin-left:auto;font-size:.65rem;color:var(--gold)">● rempli</span>' : ''}
+      </button>
+      <div id="s-advanced-body" style="${hasAdvanced?'':'display:none'};padding:.5rem .7rem .3rem">
+        <div class="grid-2" style="gap:.5rem;margin-bottom:.3rem">
+          <div class="form-group" style="margin:0">
+            <label>Zone <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">vide = ciblé</span></label>
+            <div style="display:flex;gap:.3rem;align-items:center">
+              <input type="number" class="input-field" id="s-zone-w" min="1" max="50"
+                value="${s?.zoneW||''}" placeholder="—" style="width:50px;text-align:center;padding:.3rem">
+              <span style="font-size:.85rem;color:var(--text-dim);font-weight:600">×</span>
+              <input type="number" class="input-field" id="s-zone-h" min="1" max="50"
+                value="${s?.zoneH||''}" placeholder="—" style="width:50px;text-align:center;padding:.3rem">
+              <span style="font-size:.8rem;color:var(--text-dim)">m</span>
+            </div>
           </div>
-          <div id="s-depl-dist-row" style="${s?.deplacement?.mode ? '' : 'display:none'};display:${s?.deplacement?.mode ? 'flex' : 'none'};gap:.35rem;align-items:center">
+          <div class="form-group" style="margin:0">
+            <label>Durée de base <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">min 2 tours</span></label>
+            <div style="display:flex;gap:.35rem;align-items:center">
+              <input type="number" class="input-field" id="s-duree-base" min="2" max="100"
+                value="${s?.dureeBase||''}" placeholder="—" style="width:58px;text-align:center;padding:.3rem">
+              <span style="font-size:.8rem;color:var(--text-dim)">tours</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:.3rem">
+          <label>Déplacement</label>
+          <div style="display:flex;gap:.3rem">${deplBtnsHtml}</div>
+          <div id="s-depl-dist-row" style="${deplCur?'':'display:none'};margin-top:.35rem;display:${deplCur?'flex':'none'};gap:.35rem;align-items:center">
             <input type="number" class="input-field" id="s-depl-dist" min="1" max="30"
-              value="${s?.deplacement?.distance||1}" placeholder="1"
-              style="width:50px;text-align:center;padding:.3rem">
+              value="${s?.deplacement?.distance||1}" placeholder="1" style="width:50px;text-align:center;padding:.3rem">
             <span style="font-size:.8rem;color:var(--text-dim)">mètres</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Durée de base -->
-    <div class="form-group">
-      <label>Durée de base <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = instantané · rune Durée s'ajoute · min. 2 tours</span></label>
-      <div style="display:flex;gap:.35rem;align-items:center">
-        <input type="number" class="input-field" id="s-duree-base" min="2" max="100"
-          value="${s?.dureeBase||''}" placeholder="—"
-          style="width:58px;text-align:center;padding:.3rem">
-        <span style="font-size:.8rem;color:var(--text-dim)">tours</span>
-      </div>
-    </div>
-
-    <div class="form-group"><label>Description / Effet libre</label>
-      <textarea class="input-field" id="s-effet" rows="2">${s?.effet||''}</textarea>
-    </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem" onclick="saveSort(${idx})">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%" onclick="saveSort(${idx})">Enregistrer</button>
   `);
 
   setTimeout(() => {
     updateSortPM();
     window._updateSortActionDisplay();
-
   }, 50);
 }
+
+window._toggleSortAdvanced = () => {
+  const body = document.getElementById('s-advanced-body');
+  const chev = document.getElementById('s-advanced-chev');
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  if (chev) chev.textContent = open ? '▶' : '▼';
+};
 
 window._toggleSortType = (type) => {
   const TYPE_CFG = {
@@ -965,10 +997,14 @@ function _updateRuneDisplay(nom) {
   if (valEl)   valEl.textContent = cnt;
   if (nameEl)  nameEl.classList.toggle('selected', cnt > 0);
   if (minBtn)  minBtn.disabled = cnt === 0;
-  // Afficher/masquer la section Protection si rune Protection modifiée
+  // Sections conditionnelles selon la rune modifiée
   if (nom === 'Protection') {
     const protSec = document.getElementById('s-prot-section');
     if (protSec) protSec.style.display = cnt > 0 ? '' : 'none';
+  }
+  if (nom === 'Enchantement') {
+    const enchSec = document.getElementById('s-enchant-section');
+    if (enchSec) enchSec.style.display = cnt > 0 ? '' : 'none';
   }
 }
 
@@ -1031,9 +1067,10 @@ export async function saveSort(idx) {
       protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
       // Legacy compat : typeSoin si defensif sans offensif + mode soin
       typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
-      catId:    document.getElementById('s-catid')?.value || '',
-      actif:    idx>=0 ? sorts[idx].actif : false,
+      catId:         document.getElementById('s-catid')?.value || '',
+      actif:         idx>=0 ? sorts[idx].actif : false,
       actionOverride,
+      enchantDegats: document.getElementById('s-enchant-degats')?.value?.trim() || '',
       zoneW: zoneWRaw > 0 ? zoneWRaw : null,
       zoneH: zoneHRaw > 0 ? zoneHRaw : null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
