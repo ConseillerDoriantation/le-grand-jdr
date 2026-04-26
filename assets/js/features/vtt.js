@@ -96,6 +96,8 @@ const _MS_STATS   = [
 // ── État présence & mini-fiche ──────────────────────────────────────
 let _presence     = {};   // uid → { uid, pseudo }
 let _presHeartbeat= null; // intervalId du heartbeat
+let _presRefresh  = null; // intervalId du rafraîchissement présence
+let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
@@ -297,7 +299,9 @@ function _cleanup() {
   _unsubs.forEach(u => u?.());
   _unsubs = []; _stage?.destroy(); _stage = null; _layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
-  if (_presHeartbeat) { clearInterval(_presHeartbeat); _presHeartbeat = null; }
+  if (_presHeartbeat)    { clearInterval(_presHeartbeat);  _presHeartbeat = null; }
+  if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
+  if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
   _presence = {}; _miniUid = null; _miniCharId = null;
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
@@ -2458,13 +2462,13 @@ function _initListeners() {
   _unsubs.push(onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
 
-    // Présence : actif si pres.lastSeen < 2 min
+    // Stocker tous les pings avec lastSeen — le filtrage 2 min se fait dans _renderPresenceCol
     _presence = {};
     snap.docs.forEach(d => {
       const pres = d.data().pres;
       if (!pres?.lastSeen) return;
       const ts = pres.lastSeen?.toMillis?.() ?? (typeof pres.lastSeen === 'number' ? pres.lastSeen : 0);
-      if (now - ts < 120_000) _presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?' };
+      if (ts > 0) _presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?', lastSeen: ts };
     });
     _renderPresenceCol();
 
@@ -2743,13 +2747,33 @@ window._vttToggleFav = (name) => {
   }
 };
 
+function _closeEmotePicker() {
+  const el  = document.getElementById('vtt-emote-picker');
+  const btn = document.querySelector('.vtt-emote-trigger');
+  el?.classList.remove('open');
+  btn?.classList.remove('open');
+  if (_emoteCloseOutside) {
+    document.removeEventListener('mousedown', _emoteCloseOutside, true);
+    _emoteCloseOutside = null;
+  }
+}
+
 window._vttToggleEmotePicker = () => {
-  const el = document.getElementById('vtt-emote-picker');
+  const el  = document.getElementById('vtt-emote-picker');
   const btn = document.querySelector('.vtt-emote-trigger');
   if (!el) return;
   const open = el.classList.toggle('open');
   btn?.classList.toggle('open', open);
-  if (open) _renderEmotePicker();
+  if (open) {
+    _renderEmotePicker();
+    _emoteCloseOutside = (e) => {
+      const float = document.querySelector('.vtt-emote-float');
+      if (float && !float.contains(e.target)) _closeEmotePicker();
+    };
+    document.addEventListener('mousedown', _emoteCloseOutside, true);
+  } else {
+    _closeEmotePicker();
+  }
 };
 
 window._vttPickEmote = async (name) => {
@@ -3761,6 +3785,9 @@ export async function renderVttPage() {
     _presWrite();
     _presHeartbeat = setInterval(_presWrite, 45_000);
   }
+  // Rafraîchit la colonne présence toutes les 30s pour expirer les joueurs inactifs
+  // même si aucun snapshot Firestore ne se déclenche
+  _presRefresh = setInterval(_renderPresenceCol, 30_000);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3770,7 +3797,8 @@ export async function renderVttPage() {
 function _renderPresenceCol() {
   const list = document.getElementById('vtt-pres-list');
   if (!list) return;
-  const players = Object.values(_presence);
+  const now = Date.now();
+  const players = Object.values(_presence).filter(p => now - (p.lastSeen ?? 0) < 120_000);
   if (!players.length) {
     list.innerHTML = '<div class="vtt-pres-empty">—</div>';
     return;
