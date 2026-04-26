@@ -12,7 +12,7 @@ import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, getDocs, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
-import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort } from '../shared/char-stats.js';
+import { getMod, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus } from '../shared/char-stats.js';
 import { getArmorSetData } from './characters/data.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
@@ -87,6 +87,18 @@ let _rulerHideTimer = null;
 const _STAT_KEY = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
 const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };
 const _STAT_RGB   = { FOR:'239,68,68', DEX:'34,195,142', CON:'245,158,11', INT:'79,140,255', SAG:'180,127,255', CHA:'253,108,158' };
+const _MS_STATS   = [
+  { key:'force',        abbr:'FOR' }, { key:'dexterite',    abbr:'DEX' },
+  { key:'constitution', abbr:'CON' }, { key:'intelligence', abbr:'INT' },
+  { key:'sagesse',      abbr:'SAG' }, { key:'charisme',     abbr:'CHA' },
+];
+
+// ── État présence & mini-fiche ──────────────────────────────────────
+let _presence     = {};   // uid → { uid, pseudo }
+let _presHeartbeat= null; // intervalId du heartbeat
+let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
+let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
+let _miniTab      = 'combat'; // onglet actif de la mini-fiche
 
 // ── Refs Firestore ──────────────────────────────────────────────────
 const _aid     = ()   => getCurrentAdventureId();
@@ -285,6 +297,8 @@ function _cleanup() {
   _unsubs.forEach(u => u?.());
   _unsubs = []; _stage?.destroy(); _stage = null; _layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
+  if (_presHeartbeat) { clearInterval(_presHeartbeat); _presHeartbeat = null; }
+  _presence = {}; _miniUid = null; _miniCharId = null;
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
@@ -2321,6 +2335,7 @@ function _initListeners() {
     }
     _renderTray();
     _charsReady=true; _maybeSyncAutoTokens();
+    if (_miniUid) _renderMiniSheet(_miniUid); // refresh mini-fiche en temps réel
   },()=>{}));
 
   // 4. PNJ — source de vérité des HP PNJ
@@ -2439,14 +2454,24 @@ function _initListeners() {
     _layers.draw?.batchDraw();
   }, () => {}));
 
-  // 8. Pings temps réel
+  // 8. Pings + présence temps réel
   _unsubs.push(onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
+
+    // Présence : actif si pres.lastSeen < 2 min
+    _presence = {};
+    snap.docs.forEach(d => {
+      const pres = d.data().pres;
+      if (!pres?.lastSeen) return;
+      const ts = pres.lastSeen?.toMillis?.() ?? (typeof pres.lastSeen === 'number' ? pres.lastSeen : 0);
+      if (now - ts < 120_000) _presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?' };
+    });
+    _renderPresenceCol();
+
+    // Pings visuels (< 5 s)
     const pings = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
-      .filter(p => p.pageId === _activePage?.id
-               && p.createdAt
-               && (now - p.createdAt.toMillis()) < 5000);
+      .filter(p => p.pageId === _activePage?.id && p.createdAt && (now - p.createdAt.toMillis()) < 5000);
     _renderPings(pings);
   }, () => {})); // silencieux si pas de règle Firestore
 
@@ -3587,6 +3612,11 @@ function _buildHtml() {
     </div>
   </div>
   <div class="vtt-body">
+    <div class="vtt-presence-col" id="vtt-presence-col">
+      <div class="vtt-pres-hd" title="Joueurs en ligne">👥</div>
+      <div id="vtt-pres-list" class="vtt-pres-list"></div>
+    </div>
+    <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
     ${mj?`
     <div class="vtt-tray" id="vtt-tray">
       <div class="vtt-tray-section">
@@ -3652,7 +3682,497 @@ export async function renderVttPage() {
   _loadEmotes();      // non bloquant
   _loadDiceSkills();  // non bloquant
   _initListeners();
+  // Présence : heartbeat toutes les 45 s
+  const _presUid = STATE.user?.uid;
+  if (_presUid) {
+    const _presWrite = () => {
+      const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
+      setDoc(_pingRef(_presUid), { pres: { pseudo, lastSeen: serverTimestamp() } }, { merge: true }).catch(() => {});
+    };
+    _presWrite();
+    _presHeartbeat = setInterval(_presWrite, 45_000);
+  }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// PRÉSENCE — joueurs actifs sur le VTT
+// ═══════════════════════════════════════════════════════════════════
+
+function _renderPresenceCol() {
+  const list = document.getElementById('vtt-pres-list');
+  if (!list) return;
+  const players = Object.values(_presence);
+  if (!players.length) {
+    list.innerHTML = '<div class="vtt-pres-empty">—</div>';
+    return;
+  }
+  const myUid = STATE.user?.uid;
+  list.innerHTML = players.map(p => {
+    const chars = Object.values(_characters).filter(c => c.uid === p.uid);
+    const char  = chars.find(c => c.id === _miniCharId) || chars[0];
+    const img   = char?.photoURL || char?.photo || char?.avatar || null;
+    const init  = (char?.nom || p.pseudo || '?')[0].toUpperCase();
+    const isOpen = _miniUid === p.uid;
+    const isSelf = p.uid === myUid;
+    return `<div class="vtt-pres-entry${isOpen?' is-open':''}${isSelf?' is-self':''}"
+      onclick="window._vttToggleMiniSheet('${p.uid}')"
+      title="${p.pseudo}${char?.nom ? ' · '+char.nom : ''}">
+      <div class="vtt-pres-avatar"${img?` style="background-image:url('${img}')"`:''}>
+        ${img ? '' : `<span>${init}</span>`}
+        ${isSelf ? '<div class="vtt-pres-self-dot"></div>' : ''}
+      </div>
+      <div class="vtt-pres-name">${p.pseudo}</div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MINI-FICHE PERSONNAGE — 4 onglets
+// ═══════════════════════════════════════════════════════════════════
+
+const _MS_SLOTS = [
+  'Main principale','Hors-main','Tête','Torse','Bottes',
+  'Amulette','Anneau gauche','Anneau droit','Cou','Dos',
+];
+
+// ─── Helpers locaux ───────────────────────────────────────────────
+
+function _msCatItem(item) {
+  const t = item?.template || '';
+  if (t === 'arme'   || item?.degats)                     return 'arme';
+  if (t === 'armure' || item?.slotArmure || item?.typeArmure) return 'armure';
+  if (t === 'bijou'  || item?.slotBijou)                  return 'bijou';
+  if (t === 'consommable')                                return 'consommable';
+  return 'divers';
+}
+
+function _msBuildEquipItem(slot, item, invIndex) {
+  if (!item) return null;
+  const isWeapon = slot.startsWith('Main');
+  const base = {
+    nom: item.nom||'',
+    fo: parseInt(item.fo)||0, dex: parseInt(item.dex)||0,
+    in: parseInt(item.in)||0, sa:  parseInt(item.sa)||0,
+    co: parseInt(item.co)||0, ch:  parseInt(item.ch)||0,
+    sourceInvIndex: invIndex, itemId: item.itemId||'',
+  };
+  if (isWeapon) {
+    const statAtk = item.toucherStat || item.statAttaque
+      || (String(item.format||'').includes('Mag.') ? 'intelligence'
+          : String(item.format||'').includes('Dist.') ? 'dexterite' : 'force');
+    return { ...base,
+      degats: item.degats||'', degatsStat: item.degatsStat||statAtk,
+      toucherStat: statAtk, typeArme: item.typeArme||'',
+      portee: item.portee||'', particularite: item.particularite||item.effet||'',
+      format: item.format||'' };
+  }
+  return { ...base,
+    ca: parseInt(item.ca)||0, typeArmure: item.typeArmure||'',
+    slotArmure: item.slotArmure||'', slotBijou: item.slotBijou||'' };
+}
+
+function _msCanEdit(uid) { return STATE.isAdmin || STATE.user?.uid === uid; }
+
+// Reproduit la logique de compatibilité de characters/equipment.js
+function _msItemFitsSlot(item, slot, equip, idx) {
+  if (!item?.nom) return false;
+  // Déjà équipé dans un autre slot → exclu
+  if (Object.entries(equip).some(([s, e]) => s !== slot && e?.sourceInvIndex === idx)) return false;
+
+  const tpl = item.template || '';
+
+  // ── Armes ────────────────────────────────────────────────────────
+  if (slot.startsWith('Main')) {
+    if (tpl === 'arme') return true;
+    const WFMT = new Set([
+      'Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
+      'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
+    ]);
+    if (item.format && WFMT.has(item.format)) return true;
+    const combined = [item.type, item.sousType, item.nom, item.categorie]
+      .map(v => (v||'').toLowerCase()).join(' ');
+    return ['arme','weapon','épée','lance','hache','arc','arbalète','dague',
+      'baguette','baton','bouclier','shield','torche','masse','marteau',
+      'fléau','rapière','cimeterre','sabre'].some(k => combined.includes(k));
+  }
+
+  // ── Armures (Tête / Torse / Bottes) ─────────────────────────────
+  // Note : slotArmure stocké = 'Tête', 'Torse', 'Pieds' (pas 'Bottes')
+  const ARMOR_MAP = { 'Tête':'Tête', 'Torse':'Torse', 'Bottes':'Pieds' };
+  if (ARMOR_MAP[slot] !== undefined) {
+    if (tpl === 'armure' || item.slotArmure) {
+      return item.slotArmure === ARMOR_MAP[slot] || item.slotArmure === slot;
+    }
+    const t = (item.type||'').toLowerCase();
+    return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
+  }
+
+  // ── Bijoux / accessoires ─────────────────────────────────────────
+  if (['Amulette','Anneau gauche','Anneau droit','Cou','Dos'].includes(slot)) {
+    if (!item.slotBijou) return tpl === 'bijou';
+    if (item.slotBijou === slot) return true;
+    // 'Anneau' générique → compatible avec les deux emplacements bague
+    if (item.slotBijou === 'Anneau' && (slot === 'Anneau gauche' || slot === 'Anneau droit')) return true;
+    return false;
+  }
+
+  return false;
+}
+
+// ─── Handlers exposés ────────────────────────────────────────────
+
+window._vttMsTab = (tab) => { _miniTab = tab; if (_miniUid) _renderMiniSheet(_miniUid); };
+
+window._vttMsEquip = async (charId, uid, slot, invIndex) => {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  invIndex = parseInt(invIndex);
+  const item = (c.inventaire||[])[invIndex]; if (!item) return;
+  const equip = { ...(c.equipement||{}) };
+  // Libère l'item s'il était déjà équipé ailleurs
+  Object.keys(equip).forEach(s => { if (s !== slot && equip[s]?.sourceInvIndex === invIndex) delete equip[s]; });
+  const built = _msBuildEquipItem(slot, item, invIndex); if (!built) return;
+  equip[slot] = built;
+  const bonus = computeEquipStatsBonus(equip);
+  try {
+    await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
+    showNotif(`${item.nom} → ${slot}`, 'success');
+  } catch(e) { showNotif('Erreur sauvegarde', 'error'); }
+};
+
+window._vttMsUnequip = async (charId, uid, slot) => {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  const equip = { ...(c.equipement||{}) };
+  const nom = equip[slot]?.nom || slot;
+  delete equip[slot];
+  const bonus = computeEquipStatsBonus(equip);
+  try {
+    await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
+    showNotif(`${nom} retiré`, 'success');
+  } catch(e) { showNotif('Erreur sauvegarde', 'error'); }
+};
+
+// Appelé par le <select> de l'onglet Équipement
+window._vttMsSlotChange = (sel, charId, uid, slotIdx) => {
+  const slot = _MS_SLOTS[parseInt(slotIdx)]; if (!slot) return;
+  const val = sel.value;
+  if (val === '') window._vttMsUnequip(charId, uid, slot);
+  else            window._vttMsEquip(charId, uid, slot, parseInt(val));
+};
+
+// Ouvre une modale pour choisir le slot cible depuis l'inventaire
+window._vttMsEquipPicker = (charId, uid, invIndex) => {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  invIndex = parseInt(invIndex);
+  const item = (c.inventaire||[])[invIndex]; if (!item) return;
+  const equip = c.equipement||{};
+  // Seuls les slots compatibles avec cet item (sans check "usedElsewhere" pour qu'on puisse déplacer)
+  const slots = _MS_SLOTS.filter(s => _msItemFitsSlot(item, s, {}, invIndex));
+  if (!slots.length) { showNotif('Aucun slot compatible pour cet objet', 'info'); return; }
+  if (slots.length === 1) { window._vttMsEquip(charId, uid, slots[0], invIndex); return; }
+  openModal(`⚔️ Équiper "${item.nom}"`, `
+    <div style="display:flex;flex-direction:column;gap:.4rem">
+      ${slots.map(s => `<button class="btn btn-outline"
+        onclick="closeModal();window._vttMsEquip('${charId}','${uid}',${JSON.stringify(s)},${invIndex})">${s}</button>`).join('')}
+      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" onclick="closeModal()">Annuler</button>
+    </div>`);
+};
+
+// Déséquipe un item depuis l'inventaire (tous les slots où il est équipé)
+window._vttMsUnequipAll = async (charId, uid, invIndex) => {
+  if (!_msCanEdit(uid)) return;
+  invIndex = parseInt(invIndex);
+  const c = _characters[charId]; if (!c) return;
+  const equip = { ...(c.equipement||{}) };
+  Object.keys(equip).forEach(s => { if (equip[s]?.sourceInvIndex === invIndex) delete equip[s]; });
+  const bonus = computeEquipStatsBonus(equip);
+  try {
+    await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
+    showNotif('Déséquipé', 'success');
+  } catch(e) { showNotif('Erreur sauvegarde', 'error'); }
+};
+
+// Active / désactive un sort
+window._vttToggleMsSort = async (charId, uid, idx) => {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  const sorts = [...(c.deck_sorts||[])];
+  if (!sorts[idx]) return;
+  sorts[idx] = { ...sorts[idx], actif: !sorts[idx].actif };
+  try { await updateDoc(_chrRef(charId), { deck_sorts: sorts }); }
+  catch(e) { showNotif('Erreur sauvegarde', 'error'); }
+};
+
+// Modale pour choisir le destinataire d'un objet
+window._vttMsSendPicker = (charId, uid, invIndex) => {
+  if (!_msCanEdit(uid)) return;
+  invIndex = parseInt(invIndex);
+  const c = _characters[charId]; if (!c) return;
+  const item = (c.inventaire||[])[invIndex]; if (!item) return;
+  const targets = Object.entries(_presence)
+    .filter(([pUid]) => pUid !== uid)
+    .flatMap(([pUid, p]) =>
+      Object.values(_characters)
+        .filter(ch => ch.uid === pUid)
+        .map(ch => ({ pUid, charId: ch.id, charNom: ch.nom||p.pseudo, pseudo: p.pseudo }))
+    );
+  if (!targets.length) { showNotif('Aucun joueur présent à qui envoyer l\'objet', 'info'); return; }
+  openModal(`📦 Envoyer "${item.nom||'objet'}"`, `
+    <div style="display:flex;flex-direction:column;gap:.5rem">
+      <p style="margin:0;font-size:.85rem;color:var(--text-dim)">Destinataire :</p>
+      ${targets.map(t => `<button class="btn btn-outline" style="text-align:left"
+        onclick="closeModal();window._vttMsConfirmSend('${charId}','${uid}',${invIndex},'${t.charId}')">
+        ${t.pseudo} → ${t.charNom}</button>`).join('')}
+      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" onclick="closeModal()">Annuler</button>
+    </div>`);
+};
+
+// Effectue le transfert d'objet entre deux personnages
+window._vttMsConfirmSend = async (senderCharId, senderUid, invIndex, recipCharId) => {
+  invIndex = parseInt(invIndex);
+  const sender = _characters[senderCharId]; if (!sender) return;
+  const recip  = _characters[recipCharId];  if (!recip)  return;
+  const senderInv = [...(sender.inventaire||[])];
+  const item = senderInv[invIndex]; if (!item) return;
+  senderInv.splice(invIndex, 1);
+  // Ajuste les sourceInvIndex dans l'équipement du sender
+  const senderEquip = { ...(sender.equipement||{}) };
+  Object.keys(senderEquip).forEach(s => {
+    const e = senderEquip[s]; if (!e) return;
+    if (e.sourceInvIndex === invIndex)    delete senderEquip[s];
+    else if (e.sourceInvIndex > invIndex) senderEquip[s] = { ...e, sourceInvIndex: e.sourceInvIndex - 1 };
+  });
+  const senderBonus = computeEquipStatsBonus(senderEquip);
+  const recipInv = [...(recip.inventaire||[]), { ...item }];
+  try {
+    await updateDoc(_chrRef(senderCharId), { inventaire: senderInv, equipement: senderEquip, statsBonus: senderBonus });
+    await updateDoc(_chrRef(recipCharId),  { inventaire: recipInv });
+    showNotif(`${item.nom||'Objet'} envoyé à ${recip.nom||'joueur'}`, 'success');
+  } catch(e) { console.error('[vtt] send item', e); showNotif('Erreur envoi', 'error'); }
+};
+
+// ─── Rendus par onglet ────────────────────────────────────────────
+
+function _msTabCombat(c) {
+  const pvMax = calcPVMax(c), pmMax = calcPMMax(c);
+  const pvCur = c?.hp ?? pvMax, pmCur = c?.pm ?? pmMax;
+  const pvPct = pvMax > 0 ? Math.round(Math.max(0, pvCur) / pvMax * 100) : 0;
+  const pmPct = pmMax > 0 ? Math.round(Math.max(0, pmCur) / pmMax * 100) : 0;
+  const pvCol = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#f59e0b' : '#ef4444';
+
+  const statsHtml = _MS_STATS.map(s => {
+    const base  = (c?.stats||{})[s.key]      || 8;
+    const bonus = (c?.statsBonus||{})[s.key] || 0;
+    const total = Math.min(22, base + bonus);
+    const mod   = getMod(c, s.key);
+    const col   = _STAT_COLOR[s.abbr];
+    return `<div class="vtt-ms-stat">
+      <span class="vtt-ms-stat-abbr" style="color:${col}">${s.abbr}</span>
+      <span class="vtt-ms-stat-val">${total}</span>
+      <span class="vtt-ms-stat-mod" style="color:${col}">${mod>=0?'+'+mod:mod}</span>
+    </div>`;
+  }).join('');
+
+  const weapon = c?.equipement?.['Main principale'];
+  const weaponHtml = weapon?.nom ? (() => {
+    const wDmgStat = weapon.degatsStat || weapon.degatStat || 'force';
+    const wTchStat = weapon.toucherStat || weapon.statAttaque || 'force';
+    const setBonus = getArmorSetData(c).modifiers.toucherBonus || 0;
+    const maitrise = getMaitriseBonus(c, weapon);
+    const dmgMod   = getMod(c, wDmgStat);
+    const tchTotal = getMod(c, wTchStat) + maitrise + setBonus;
+    return `<div class="vtt-ms-weapon">
+      <div class="vtt-ms-weapon-nom">⚔️ ${weapon.nom}</div>
+      <div class="vtt-ms-weapon-stats">
+        <span>🎲 ${weapon.degats||'—'}${dmgMod!==0?' '+(dmgMod>=0?'+'+dmgMod:dmgMod):''}</span>
+        <span>🎯 ${tchTotal>=0?'+'+tchTotal:tchTotal}</span>
+      </div>
+    </div>`;
+  })() : '';
+
+  const setData = getArmorSetData(c);
+  const setHtml = setData?.active ? `<div class="vtt-ms-setbonus">✨ Set ${setData.type}</div>` : '';
+
+  return `
+    <div class="vtt-ms-bars">
+      <div class="vtt-ms-bar-row">
+        <span class="vtt-ms-bar-lbl">❤ PV</span>
+        <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pvPct}%;background:${pvCol}"></div></div>
+        <span class="vtt-ms-bar-num">${pvCur}/${pvMax}</span>
+      </div>
+      <div class="vtt-ms-bar-row">
+        <span class="vtt-ms-bar-lbl">💧 PM</span>
+        <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pmPct}%;background:#4f8cff"></div></div>
+        <span class="vtt-ms-bar-num">${pmCur}/${pmMax}</span>
+      </div>
+    </div>
+    <div class="vtt-ms-grid">${statsHtml}</div>
+    <div class="vtt-ms-defenses">
+      <div class="vtt-ms-def-item"><span>🛡 CA</span><strong>${calcCA(c)}</strong></div>
+      <div class="vtt-ms-def-item"><span>⚡ Vit.</span><strong>${calcVitesse(c)}</strong></div>
+      <div class="vtt-ms-def-item"><span>🎯 Maît.</span><strong>+${getMaitriseBonus(c)}</strong></div>
+    </div>
+    ${weaponHtml}${setHtml}`;
+}
+
+function _msTabEquipement(c, uid, canEdit) {
+  const equip = c?.equipement||{}, inv = c?.inventaire||[];
+  return `<div class="vtt-ms-slots">${_MS_SLOTS.map((slot, slotIdx) => {
+    const equipped    = equip[slot];
+    const equippedIdx = equipped?.sourceInvIndex ?? -1;
+    const opts = inv.map((item, i) => {
+      if (!_msItemFitsSlot(item, slot, equip, i)) return '';
+      return `<option value="${i}"${equippedIdx===i?' selected':''}>${item.nom}${(item.qte||1)>1?' ×'+item.qte:''}</option>`;
+    }).join('');
+    return `<div class="vtt-ms-slot-row">
+      <span class="vtt-ms-slot-lbl">${slot}</span>
+      <div class="vtt-ms-slot-ctrl">${canEdit
+        ? `<select class="vtt-ms-slot-sel" onchange="window._vttMsSlotChange(this,'${c.id}','${uid}',${slotIdx})">
+             <option value="">— vide —</option>${opts}</select>`
+        : `<span class="vtt-ms-slot-val">${equipped?.nom||'—'}</span>`}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function _msTabSorts(c, uid, canEdit) {
+  const sorts = c?.deck_sorts||[];
+  if (!sorts.length) return '<div class="vtt-ms-empty">Aucun sort</div>';
+  return `<div class="vtt-ms-sorts">${sorts.map((s, i) => {
+    const types = Array.isArray(s.types) ? s.types.join(' · ') : (s.types||'');
+    return `<div class="vtt-ms-sort${s.actif?' is-actif':''}">
+      ${canEdit
+        ? `<button class="vtt-ms-sort-toggle" onclick="window._vttToggleMsSort('${c.id}','${uid}',${i})" title="${s.actif?'Désactiver':'Activer'}">${s.actif?'✅':'⬜'}</button>`
+        : `<span class="vtt-ms-sort-dot${s.actif?' on':''}">${s.actif?'●':'○'}</span>`}
+      <div class="vtt-ms-sort-info">
+        <span class="vtt-ms-sort-nom">${s.nom||'Sort'}</span>
+        <div class="vtt-ms-sort-meta">
+          ${s.pm?`<span class="vtt-ms-sort-pm">${s.pm} PM</span>`:''}
+          ${types?`<span class="vtt-ms-sort-types">${types}</span>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function _msTabInventaire(c, uid, canEdit) {
+  const inv = c?.inventaire||[];
+  if (!inv.length) return '<div class="vtt-ms-empty">Inventaire vide</div>';
+  const groups = { arme:[], armure:[], bijou:[], consommable:[], divers:[] };
+  inv.forEach((item, i) => { if (item?.nom) groups[_msCatItem(item)].push({ item, i }); });
+  const CAT_LABEL = { arme:'⚔️ Armes', armure:'🛡 Armures', bijou:'💍 Bijoux', consommable:'🧪 Consommables', divers:'📦 Divers' };
+  const equip = c?.equipement||{};
+  let html = '<div class="vtt-ms-inv">';
+  for (const [cat, entries] of Object.entries(groups)) {
+    if (!entries.length) continue;
+    html += `<div class="vtt-ms-inv-cat">${CAT_LABEL[cat]} <span class="vtt-ms-inv-cnt">(${entries.length})</span></div>`;
+    for (const { item, i } of entries) {
+      const isEq = Object.values(equip).some(e => e?.sourceInvIndex === i);
+      html += `<div class="vtt-ms-inv-item${isEq?' is-equipped':''}">
+        <div class="vtt-ms-inv-main">
+          <span class="vtt-ms-inv-nom">${item.nom}</span>
+          ${(item.qte||1)>1?`<span class="vtt-ms-inv-qte">×${item.qte}</span>`:''}
+          ${isEq?'<span class="vtt-ms-inv-badge">équipé</span>':''}
+        </div>
+        ${item.degats?`<div class="vtt-ms-inv-detail">${item.degats}${item.typeArme?' · '+item.typeArme:''}</div>`:''}
+        ${item.typeArmure&&!item.degats?`<div class="vtt-ms-inv-detail">${item.typeArmure}</div>`:''}
+        ${canEdit?`<div class="vtt-ms-inv-actions">
+          ${(cat==='arme'||cat==='armure'||cat==='bijou')&&!isEq
+            ?`<button class="vtt-ms-inv-btn" onclick="window._vttMsEquipPicker('${c.id}','${uid}',${i})" title="Équiper">⚔️</button>`
+            :isEq?`<button class="vtt-ms-inv-btn" onclick="window._vttMsUnequipAll('${c.id}','${uid}',${i})" title="Déséquiper">🔓</button>`:''}
+          <button class="vtt-ms-inv-btn" onclick="window._vttMsSendPicker('${c.id}','${uid}',${i})" title="Envoyer">📤</button>
+        </div>`:''}
+      </div>`;
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+// ─── Rendu principal ─────────────────────────────────────────────
+
+function _renderMiniSheet(uid) {
+  const panel = document.getElementById('vtt-mini-panel');
+  if (!panel) return;
+
+  const pres = _presence[uid];
+  if (!uid || !pres) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
+
+  const chars = Object.values(_characters).filter(c => c.uid === uid);
+  if (!chars.length) {
+    panel.classList.add('open');
+    panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${pres.pseudo}.</div>`;
+    return;
+  }
+
+  const validId = chars.find(c => c.id === _miniCharId) ? _miniCharId : chars[0].id;
+  _miniCharId = validId;
+  const c = chars.find(c => c.id === validId);
+  const canEdit = _msCanEdit(uid);
+
+  const img      = c?.photoURL || c?.photo || c?.avatar || null;
+  const init     = (c?.nom || '?')[0].toUpperCase();
+  const subtitle = [c?.race, c?.titreActuel||c?.titre, c?.niveau ? 'Niv.'+c.niveau : ''].filter(Boolean).join(' · ');
+
+  const selectorHtml = chars.length > 1
+    ? `<div class="vtt-ms-selector">${chars.map(ch =>
+        `<button class="vtt-ms-sel-btn${ch.id===validId?' active':''}"
+          onclick="window._vttSelectMiniChar('${uid}','${ch.id}')">${ch.nom||'Perso'}</button>`
+      ).join('')}</div>`
+    : '';
+
+  const TABS = [
+    { key:'combat', icon:'⚔️', label:'Combat'  },
+    { key:'equip',  icon:'🛡',  label:'Équip.'  },
+    { key:'sorts',  icon:'✨',  label:'Sorts'   },
+    { key:'inv',    icon:'🎒',  label:'Invent.' },
+  ];
+  const tabBarHtml = `<div class="vtt-ms-tabbar">${TABS.map(t =>
+    `<button class="vtt-ms-tab${_miniTab===t.key?' active':''}" onclick="window._vttMsTab('${t.key}')">${t.icon} ${t.label}</button>`
+  ).join('')}</div>`;
+
+  const tabHtml =
+      _miniTab === 'combat' ? _msTabCombat(c)
+    : _miniTab === 'equip'  ? _msTabEquipement(c, uid, canEdit)
+    : _miniTab === 'sorts'  ? _msTabSorts(c, uid, canEdit)
+    :                         _msTabInventaire(c, uid, canEdit);
+
+  panel.classList.add('open');
+  panel.innerHTML = `
+    <div class="vtt-ms-header">
+      ${img
+        ? `<img class="vtt-ms-avatar" src="${img}" alt="">`
+        : `<div class="vtt-ms-avatar-init">${init}</div>`}
+      <div class="vtt-ms-info">
+        <div class="vtt-ms-name">${c?.nom||'Personnage'}</div>
+        ${subtitle ? `<div class="vtt-ms-sub">${subtitle}</div>` : ''}
+        <div class="vtt-ms-player">👤 ${pres.pseudo}</div>
+      </div>
+      <button class="vtt-ms-close" onclick="window._vttToggleMiniSheet('${uid}')" title="Fermer">✕</button>
+    </div>
+    ${selectorHtml}
+    ${tabBarHtml}
+    <div class="vtt-ms-tab-content">${tabHtml}</div>`;
+}
+
+window._vttToggleMiniSheet = (uid) => {
+  if (_miniUid === uid) {
+    _miniUid = null; _miniCharId = null;
+    const panel = document.getElementById('vtt-mini-panel');
+    if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
+  } else {
+    _miniUid = uid; _miniCharId = null;
+    _renderMiniSheet(uid);
+  }
+  _renderPresenceCol();
+};
+
+window._vttSelectMiniChar = (uid, charId) => {
+  _miniCharId = charId;
+  _renderMiniSheet(uid);
+};
 
 PAGES.vtt=renderVttPage;
 
