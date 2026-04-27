@@ -950,6 +950,94 @@
   position: absolute; bottom: 14px; left: 14px; z-index: 10;
   display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
 }
+
+/* ── Butin d'aventure ────────────────────────────────────────────── */
+.vtt-loot-float {
+  position: absolute; bottom: 14px; left: 60px; z-index: 10;
+  display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
+}
+.vtt-loot-trigger {
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, box-shadow .12s;
+  box-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+.vtt-loot-trigger:hover { background: var(--bg-elevated); box-shadow: 0 3px 14px rgba(0,0,0,.55); }
+.vtt-loot-trigger.active { border-color: var(--gold); box-shadow: 0 0 0 2px oklch(72% 0.14 52 / 0.3); }
+
+.vtt-loot-panel {
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.6);
+  width: 280px;
+  max-height: min(480px, calc(100vh - 140px));
+  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.vtt-loot-section { padding: .6rem .7rem; }
+.vtt-loot-section + .vtt-loot-section { border-top: 1px solid var(--border); }
+.vtt-loot-sec-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: .45rem; font-size: .78rem; font-weight: 700; color: var(--text);
+}
+.vtt-loot-divider {
+  text-align: center; font-size: .68rem; color: var(--text-dim);
+  padding: .2rem 0; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border);
+  background: rgba(255,255,255,.02);
+}
+.vtt-loot-list { display: flex; flex-direction: column; gap: 3px; }
+.vtt-loot-empty { font-size: .75rem; color: var(--text-dim); padding: .4rem .2rem; }
+.vtt-loot-row {
+  display: flex; align-items: center; gap: 5px;
+  padding: .3rem .35rem; border-radius: 6px;
+  background: var(--bg-elevated); font-size: .8rem;
+  transition: background .1s;
+}
+.vtt-loot-row:hover { background: var(--bg-card2); }
+.vtt-loot-drag {
+  cursor: grab; color: var(--text-dim); font-size: .75rem; flex-shrink: 0;
+}
+.vtt-loot-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.vtt-loot-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vtt-loot-qty {
+  font-size: .72rem; color: var(--text-muted); flex-shrink: 0; font-weight: 600;
+}
+.vtt-loot-take-btn {
+  padding: .2rem .5rem; font-size: .7rem; font-weight: 600;
+  background: var(--gold-glow); border: 1px solid oklch(72% 0.14 52 / 0.3);
+  border-radius: 5px; color: var(--gold); cursor: pointer; flex-shrink: 0;
+  transition: background .1s;
+}
+.vtt-loot-take-btn:hover { background: oklch(72% 0.14 52 / 0.2); }
+.vtt-loot-ghost { opacity: .4; }
+.vtt-icon-btn {
+  width: 20px; height: 20px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 4px;
+  color: var(--text-dim); font-size: .7rem; cursor: pointer;
+  transition: background .1s, color .1s;
+  padding: 0;
+}
+.vtt-icon-btn:hover { background: rgba(239,68,68,.15); color: #ef4444; }
+
+/* Shop browser (modal interne) */
+.vtt-shop-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: .35rem .5rem; border-radius: 7px;
+  cursor: pointer; font-size: .82rem;
+  transition: background .1s;
+}
+.vtt-shop-row:hover { background: var(--bg-elevated); }
+.vtt-shop-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vtt-shop-cat { font-size: .7rem; color: var(--text-dim); flex-shrink: 0; }
 .vtt-emote-trigger {
   width: 34px; height: 34px; flex-shrink: 0;
   background: var(--bg-panel); border: 1px solid var(--border);
