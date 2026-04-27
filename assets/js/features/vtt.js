@@ -7,7 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
-import { getCurrentAdventureId, getDocData, saveDoc } from '../data/firestore.js';
+import { getCurrentAdventureId, getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
@@ -47,6 +47,11 @@ let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens
 let _selImg     = null;      // id de l'image sélectionnée
 let _mapMode    = false;     // true = édition carte activée (images déplaçables)
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
+// ── Butin ─────────────────────────────────────────────────────────
+let _loot            = { stash: [], loot: [] };
+let _lootUnsub       = null;
+let _lootCloseOutside = null;
+const _lootRef  = () => doc(db, `adventures/${_aid()}/vtt/loot`);
 let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skills
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
@@ -336,6 +341,9 @@ function _cleanup() {
   }
   if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
+  if (_lootUnsub) { _lootUnsub(); _lootUnsub = null; }
+  if (_lootCloseOutside) { document.removeEventListener('mousedown', _lootCloseOutside, true); _lootCloseOutside = null; }
+  _loot = { stash: [], loot: [] };
   _presence = {}; _miniUid = null; _miniCharId = null;
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
@@ -2734,6 +2742,14 @@ function _initListeners() {
     const el=document.getElementById('vtt-chat-log');
     if (el) el.innerHTML=`<div class="vtt-log-entry vtt-log-roll" style="color:#ef4444">⚠ Accès refusé — ajouter <code>vttLog</code> aux règles Firestore</div>`;
   }));
+
+  // Butin d'aventure
+  _lootUnsub = onSnapshot(_lootRef(), snap => {
+    _loot = snap.exists() ? snap.data() : {};
+    if (!Array.isArray(_loot.stash)) _loot.stash = [];
+    if (!Array.isArray(_loot.loot))  _loot.loot  = [];
+    _renderLootPanel();
+  }, () => {});
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3883,6 +3899,280 @@ function _keyHandler(e) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// BUTIN D'AVENTURE
+// ═══════════════════════════════════════════════════════════════════
+
+async function _saveLoot() {
+  await setDoc(_lootRef(), { stash: _loot.stash, loot: _loot.loot });
+}
+
+function _renderLootPanel() {
+  const panel = document.getElementById('vtt-loot-panel');
+  if (!panel || panel.dataset.open !== '1') return;
+  const mj = STATE.isAdmin;
+
+  const _itemRow = (item, zone) => {
+    const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
+    return `<div class="vtt-loot-row" data-id="${item.id}">
+      ${zone === 'stash' && mj ? `<span class="vtt-loot-drag" title="Glisser vers le butin">⠿</span>` : ''}
+      <span class="vtt-loot-dot" style="background:${rarColor}"></span>
+      <span class="vtt-loot-name">${_esc(item.nom)}</span>
+      <span class="vtt-loot-qty">×${item.qty}</span>
+      ${zone === 'stash' && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveStash('${item.id}')" title="Retirer">✕</button>` : ''}
+      ${zone === 'loot'  && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveLoot('${item.id}')" title="Retirer">✕</button>` : ''}
+      ${zone === 'loot'  && !mj ? `<button class="vtt-loot-take-btn" onclick="window._vttLootPickQty('${item.id}')">Prendre</button>` : ''}
+    </div>`;
+  };
+
+  panel.innerHTML = `
+    ${mj ? `
+    <div class="vtt-loot-section">
+      <div class="vtt-loot-sec-hd">
+        <span>🔒 Réserve MJ</span>
+        <button class="vtt-btn-sm" onclick="window._vttLootOpenShop()">＋ Ajouter</button>
+      </div>
+      <div class="vtt-loot-list" id="vtt-stash-list">
+        ${_loot.stash.length ? _loot.stash.map(i => _itemRow(i, 'stash')).join('') : '<div class="vtt-loot-empty">Vide — ajoutez des objets</div>'}
+      </div>
+    </div>
+    <div class="vtt-loot-divider">↓ Glisser vers le butin ↓</div>
+    ` : ''}
+    <div class="vtt-loot-section">
+      <div class="vtt-loot-sec-hd">
+        <span>💰 Butin disponible</span>
+        ${mj ? `<button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttLootClear()">🗑</button>` : ''}
+      </div>
+      <div class="vtt-loot-list" id="vtt-loot-list">
+        ${_loot.loot.length ? _loot.loot.map(i => _itemRow(i, 'loot')).join('') : '<div class="vtt-loot-empty">Aucun butin</div>'}
+      </div>
+    </div>`;
+
+  if (mj) _initLootSortable();
+}
+
+function _initLootSortable() {
+  const stashEl = document.getElementById('vtt-stash-list');
+  const lootEl  = document.getElementById('vtt-loot-list');
+  if (!stashEl || !lootEl) return;
+  import('../vendor/sortable.esm.js').then(({ default: Sortable }) => {
+    Sortable.create(stashEl, {
+      group: { name: 'vtt-loot', pull: 'clone', put: false },
+      animation: 150,
+      handle: '.vtt-loot-drag',
+      sort: false,
+      ghostClass: 'vtt-loot-ghost',
+    });
+    Sortable.create(lootEl, {
+      group: { name: 'vtt-loot', pull: false, put: true },
+      animation: 150,
+      ghostClass: 'vtt-loot-ghost',
+      onAdd(evt) {
+        const id = evt.item.dataset.id;
+        evt.item.remove(); // on laisse onSnapshot re-render
+        const src = _loot.stash.find(i => i.id === id);
+        if (!src) return;
+        // Fusionner si même item déjà dans le butin
+        const existing = _loot.loot.find(i => i.itemId === src.itemId);
+        if (existing) { existing.qty += src.qty; }
+        else { _loot.loot.push({ ...src, id: crypto.randomUUID() }); }
+        _loot.stash = _loot.stash.filter(i => i.id !== id);
+        _saveLoot();
+      },
+    });
+  });
+}
+
+function _closeLootPanel() {
+  const panel = document.getElementById('vtt-loot-panel');
+  const btn   = document.getElementById('vtt-loot-trigger');
+  if (panel) { panel.dataset.open = '0'; panel.style.display = 'none'; }
+  btn?.classList.remove('active');
+  if (_lootCloseOutside) {
+    document.removeEventListener('mousedown', _lootCloseOutside, true);
+    _lootCloseOutside = null;
+  }
+}
+
+window._vttToggleLoot = () => {
+  const panel = document.getElementById('vtt-loot-panel');
+  if (!panel) return;
+  const open = panel.dataset.open === '1';
+  if (open) { _closeLootPanel(); return; }
+  panel.dataset.open = '1';
+  panel.style.display = 'flex';
+  document.getElementById('vtt-loot-trigger')?.classList.add('active');
+  _renderLootPanel();
+  _lootCloseOutside = (e) => {
+    const float = document.querySelector('.vtt-loot-float');
+    if (float && !float.contains(e.target)) _closeLootPanel();
+  };
+  document.addEventListener('mousedown', _lootCloseOutside, true);
+};
+
+window._vttLootRemoveStash = (id) => {
+  _loot.stash = _loot.stash.filter(i => i.id !== id);
+  _saveLoot();
+};
+
+window._vttLootRemoveLoot = (id) => {
+  _loot.loot = _loot.loot.filter(i => i.id !== id);
+  _saveLoot();
+};
+
+window._vttLootClear = () => {
+  _loot.loot = [];
+  _saveLoot();
+};
+
+// MJ : choisir un item de la boutique à ajouter au stash
+window._vttLootOpenShop = async () => {
+  const [items, cats] = await Promise.all([loadCollection('shop'), loadCollection('shopCategories')]);
+  const catMap = Object.fromEntries((cats||[]).map(c => [c.id, c]));
+  let filtered = [...items];
+
+  const render = (q = '') => {
+    const q2 = q.toLowerCase().trim();
+    const list = q2 ? filtered.filter(i => i.nom?.toLowerCase().includes(q2)) : filtered;
+    const rows = list.slice(0, 40).map(item => {
+      const cat = catMap[item.categorieId];
+      const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
+      return `<div class="vtt-shop-row" onclick="window._vttLootPickFromShop('${item.id}')">
+        <span class="vtt-loot-dot" style="background:${rarColor}"></span>
+        <span class="vtt-shop-name">${_esc(item.nom||'?')}</span>
+        <span class="vtt-shop-cat">${_esc(cat?.nom||'')}</span>
+      </div>`;
+    }).join('') || '<div style="padding:.5rem;color:var(--text-muted);font-size:.78rem">Aucun résultat</div>';
+    const el = document.getElementById('vtt-shop-list');
+    if (el) el.innerHTML = rows;
+  };
+
+  window._vttLootShopSearch = (q) => render(q);
+  window._vttLootPickFromShop = (itemId) => {
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    openModal(`Ajouter "${_esc(item.nom)}" au stash`, `
+      <div style="padding:.5rem 0">
+        <label style="font-size:.83rem;color:var(--text-muted)">Quantité</label>
+        <input id="vtt-loot-qty-input" type="number" min="1" value="1"
+          style="width:80px;margin-left:.5rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.9rem">
+      </div>
+      <button class="btn-primary" style="width:100%;margin-top:.5rem"
+        onclick="window._vttLootConfirmAdd('${item.id}')">Ajouter au stash</button>`,
+    );
+  };
+  window._vttLootConfirmAdd = (itemId) => {
+    const item = items.find(i => i.id === itemId);
+    const qty  = Math.max(1, parseInt(document.getElementById('vtt-loot-qty-input')?.value) || 1);
+    if (!item) return;
+    const prixVente = Math.round((item.prix || 0) * 0.5);
+    const entry = {
+      id: crypto.randomUUID(), itemId: item.id,
+      nom: item.nom || '?', qty,
+      rarete: item.rarete || 'commune',
+      template: catMap[item.categorieId]?.template || 'classique',
+      categorieId: item.categorieId || '',
+      prixAchat: item.prix || 0, prixVente,
+      format: item.format || '', degats: item.degats || '',
+      degatsStat: item.degatsStat || '', toucherStat: item.toucherStat || '',
+      ca: item.ca || '', effet: item.effet || '', description: item.description || '',
+      slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
+      slotBijou: item.slotBijou || '', sousType: item.sousType || '',
+      portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
+      for: parseInt(item.for)||0, dex: parseInt(item.dex)||0, in: parseInt(item.in)||0,
+      sa: parseInt(item.sa)||0, co: parseInt(item.co)||0, ch: parseInt(item.ch)||0,
+    };
+    // Fusionner si même item déjà dans le stash
+    const existing = _loot.stash.find(s => s.itemId === item.id);
+    if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
+    _saveLoot();
+    closeModalDirect();
+    showNotif(`×${qty} "${item.nom}" ajouté au stash`, 'success');
+  };
+
+  openModal('🎒 Ajouter au stash MJ', `
+    <div style="margin-bottom:.5rem">
+      <input type="text" placeholder="🔍 Rechercher…" oninput="window._vttLootShopSearch(this.value)"
+        style="width:100%;padding:.4rem .7rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.85rem;box-sizing:border-box">
+    </div>
+    <div id="vtt-shop-list" style="max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:2px"></div>`,
+  );
+  setTimeout(() => render(), 50);
+};
+
+// Joueur : choisir la quantité qu'il prend
+window._vttLootPickQty = (id) => {
+  const item = _loot.loot.find(i => i.id === id);
+  if (!item) return;
+  const uid  = STATE.user?.uid;
+  const myChars = Object.values(_characters).filter(c => c.uid === uid);
+  if (!myChars.length) { showNotif('Aucun personnage trouvé', 'error'); return; }
+
+  const charOptions = myChars.map(c =>
+    `<option value="${c.id}">${_esc(c.nom || c.pseudo || '?')}</option>`).join('');
+
+  openModal(`Prendre — ${_esc(item.nom)}`, `
+    <div style="display:flex;flex-direction:column;gap:.7rem;padding:.3rem 0">
+      ${myChars.length > 1 ? `
+        <div>
+          <label style="font-size:.83rem;color:var(--text-muted);display:block;margin-bottom:.3rem">Personnage</label>
+          <select id="vtt-take-char" style="width:100%;padding:.35rem .6rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.85rem">
+            ${charOptions}
+          </select>
+        </div>` : `<input type="hidden" id="vtt-take-char" value="${myChars[0].id}">`}
+      <div>
+        <label style="font-size:.83rem;color:var(--text-muted);display:block;margin-bottom:.3rem">Quantité (max ${item.qty})</label>
+        <input id="vtt-take-qty" type="number" min="1" max="${item.qty}" value="1"
+          style="width:80px;padding:.35rem .6rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.9rem">
+      </div>
+      <button class="btn-primary" onclick="window._vttLootConfirmTake('${id}')">Prendre</button>
+    </div>`);
+};
+
+window._vttLootConfirmTake = async (id) => {
+  const item    = _loot.loot.find(i => i.id === id);
+  if (!item) return;
+  const charId  = document.getElementById('vtt-take-char')?.value;
+  const qty     = Math.min(item.qty, Math.max(1, parseInt(document.getElementById('vtt-take-qty')?.value) || 1));
+  const char    = _characters[charId];
+  if (!char || !charId) { showNotif('Personnage introuvable', 'error'); return; }
+
+  const inv = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
+  for (let k = 0; k < qty; k++) {
+    inv.push({
+      nom: item.nom, source: 'butin', itemId: item.itemId || '',
+      categorieId: item.categorieId || '', template: item.template || 'classique',
+      qte: '1', prixAchat: item.prixAchat || 0, prixVente: item.prixVente || 0,
+      format: item.format || '', rarete: item.rarete || '',
+      degats: item.degats || '', degatsStat: item.degatsStat || '',
+      degatsStats: item.degatsStats || [], toucherStat: item.toucherStat || '',
+      ca: item.ca || '', effet: item.effet || '', description: item.description || '',
+      slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
+      slotBijou: item.slotBijou || '', sousType: item.sousType || '',
+      portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
+      for: item.for||0, dex: item.dex||0, in: item.in||0,
+      sa: item.sa||0, co: item.co||0, ch: item.ch||0,
+    });
+  }
+
+  // Réduire ou retirer du butin
+  if (item.qty - qty <= 0) {
+    _loot.loot = _loot.loot.filter(i => i.id !== id);
+  } else {
+    item.qty -= qty;
+  }
+
+  try {
+    await Promise.all([
+      updateDoc(_chrRef(charId), { inventaire: inv }),
+      _saveLoot(),
+    ]);
+    char.inventaire = inv;
+    closeModalDirect();
+    showNotif(`×${qty} "${item.nom}" envoyé dans l'inventaire de ${_esc(char.nom || char.pseudo || '?')} !`, 'success');
+  } catch { showNotif('Erreur lors de la prise du butin', 'error'); }
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // HTML
 // ═══════════════════════════════════════════════════════════════════
 function _buildHtml() {
@@ -3992,6 +4282,13 @@ export async function renderVttPage() {
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker"></div>
     <button class="vtt-emote-trigger" onclick="window._vttToggleEmotePicker()" title="Émotes">😄</button>`;
   wrap.appendChild(_ef);
+  // Float Butin (bas-gauche du canvas)
+  const _lf = document.createElement('div');
+  _lf.className = 'vtt-loot-float';
+  _lf.innerHTML = `
+    <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none"></div>
+    <button class="vtt-loot-trigger" id="vtt-loot-trigger" onclick="window._vttToggleLoot()" title="Butin d'aventure">💰</button>`;
+  wrap.appendChild(_lf);
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
