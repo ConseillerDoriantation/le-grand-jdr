@@ -1861,7 +1861,7 @@ function refreshItemFields(catId) {
   const cat=_cats.find(c=>c.id===catId);
   const tpl=TEMPLATES[cat?.template||'classique']||TEMPLATES.classique;
   const dyn=document.getElementById('si-dynamic-fields');
-  if(dyn){ dyn.innerHTML=_buildFieldsHtml(tpl,null); _bindPrixListener(); }
+  if(dyn){ dyn.innerHTML=_buildFieldsHtml(tpl,null); _bindPrixListener(); _initAutocompletes(); }
 }
 function refreshSubCatSelect(catId){ refreshItemFields(catId); }
 
