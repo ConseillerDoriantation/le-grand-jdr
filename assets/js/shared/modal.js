@@ -122,11 +122,7 @@ export function confirmModal(message, {
       </div>`;
 
     const overlay = document.getElementById('modal-overlay');
-    const titleEl = document.querySelector('#modal-title span');
-    const bodyEl  = document.getElementById('modal-body');
-    if (titleEl) titleEl.textContent = title || '';
-    if (bodyEl)  bodyEl.innerHTML = bodyHtml;
-    overlay?.classList.add('show');
+    pushModal(title || '', bodyHtml);
 
     const done = (result) => {
       closeModalDirect();

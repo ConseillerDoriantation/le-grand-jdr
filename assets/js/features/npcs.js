@@ -51,7 +51,7 @@ const _readNumberOrNull = (id) => {
   return Number.isFinite(v) ? v : null;
 };
 const _readText = (id) => document.getElementById(id)?.value?.trim() || '';
-const _npcCombat = (npc = {}) => ({ ...NPC_COMBAT_DEFAULT, ...(npc.combat || {}) });
+const _npcCombat = (npc) => ({ ...NPC_COMBAT_DEFAULT, ...(npc?.combat || {}) });
 const _isShopWeapon = (item = {}) => item.template === 'arme' || item.degats;
 const _weaponLabel = (item = {}) => [item.nom, item.sousType || item.typeArme].filter(Boolean).join(' · ');
 const _weaponByLabel = (label) => _shopWeapons.find(w => _weaponLabel(w) === label) || null;
@@ -1063,6 +1063,9 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
       <button class="btn btn-gold" style="flex:1"
         onclick="saveNpc('${npc?.id || ''}')">Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      ${npc?.id ? `<button class="btn btn-sm" title="Supprimer ce PNJ"
+        style="background:transparent;border:1px solid rgba(255,107,107,.3);color:#ff6b6b"
+        onclick="deleteNpc('${npc.id}').then(ok => { if (ok) closeModal(); })">🗑️ Supprimer</button>` : ''}
     </div>
   `, stackedFromMjStats ? _restoreMjStatsModal : null);
 
@@ -1337,7 +1340,7 @@ async function saveNpc(id) {
 
 async function deleteNpc(id) {
   try {
-    if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?')) return;
+    if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?', { title: 'Confirmation de suppression' })) return false;
     await deleteFromCol('npcs', id);
     const toDelete = _affiPerso.filter(a => a.npcId === id);
     await Promise.all(toDelete.map(a => deleteFromCol('npc_affinites', a.id)));
@@ -1346,9 +1349,11 @@ async function deleteNpc(id) {
     if (_activeId === id) _activeId = _npcs[0]?.id || null;
     showNotif('PNJ supprimé.', 'success');
     _renderPage(document.getElementById('main-content'));
+    return true;
   } catch (e) {
     console.error('[deleteNpc]', e);
     showNotif('Erreur de sauvegarde. Réessaie.', 'error');
+    return false;
   }
 }
 

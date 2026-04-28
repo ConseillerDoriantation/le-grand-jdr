@@ -1,6 +1,6 @@
 import { STATE } from '../core/state.js';
 import { saveDoc, getDocData } from '../data/firestore.js';
-import { openModal, closeModal, closeModalDirect, pushModal, confirmModal } from '../shared/modal.js';
+import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, sanitizeRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
@@ -134,14 +134,11 @@ async function deleteInfoSection(id) {
   }
   const section = sections.find((s) => s.id === id);
   if (!section) return;
-  // Empile la modale d'édition pour qu'un Annuler / Escape / clic overlay y revienne.
-  pushModal('Confirmation de suppression', '');
   const ok = await confirmModal(
     `Supprimer la section « ${section.title} » ? Cette action est définitive.`,
     { title: 'Confirmation de suppression' }
   );
   if (!ok) return;
-  // Confirmé : confirmModal a dépilé et restauré la modale d'édition — on la ferme.
   closeModalDirect();
   try {
     const next = sections.filter((s) => s.id !== id);
