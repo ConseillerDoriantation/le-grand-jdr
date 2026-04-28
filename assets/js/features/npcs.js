@@ -112,7 +112,7 @@ const AFFINITE_TYPES_DOC_ID = 'npc_affinite_types';
 
 // ── État local ────────────────────────────────────────────────────────────────
 let _npcs          = [];
-let _affiPerso     = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, note}]
+let _affiPerso     = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, note, notePublique}]
 let _affiniteTypes = [];   // [{id, label, emoji, couleur}]
 let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
 let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
@@ -449,6 +449,7 @@ function _renderRelationChip(a, npcId) {
   const emoji = _getAffiniteTypeEmoji(a.typeId);
   const color = _getAffiniteTypeColor(a.typeId);
   const label = _getAffiniteTypeLabel(a.typeId, a.typeLabel);
+  const noteStyle = 'font-size:.7rem;color:var(--text-muted);font-style:italic;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   return `
   <div style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;
     background:${color}12;border:1px solid ${color}30;border-radius:10px">
@@ -456,9 +457,8 @@ function _renderRelationChip(a, npcId) {
     <div style="flex:1;min-width:0">
       <div style="font-size:.82rem;font-weight:700;color:${color}">${_esc(label) || '—'}</div>
       <div style="font-size:.73rem;color:var(--text-dim)">→ ${_esc(a.charNom || '?')}</div>
-      ${a.note ? `<div style="font-size:.7rem;color:var(--text-muted);font-style:italic;
-        margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-        ${_esc(a.note)}</div>` : ''}
+      ${a.notePublique ? `<div style="${noteStyle}">🌐 ${_esc(a.notePublique)}</div>` : ''}
+      ${a.note ? `<div style="${noteStyle}">🔒 ${_esc(a.note)}</div>` : ''}
     </div>
     <div style="display:flex;gap:.2rem;flex-shrink:0">
       <button onclick="openAffinitePersoModal('${npcId}','${a.id}')"
@@ -475,19 +475,39 @@ function _renderRelationChip(a, npcId) {
   </div>`;
 }
 
-// Chip affinité spécifique — vue joueur
+// Chip affinité spécifique — vue joueur (sa propre relation)
 function _renderRelationChipPlayer(a) {
   const emoji = _getAffiniteTypeEmoji(a.typeId);
   const color = _getAffiniteTypeColor(a.typeId);
   const label = _getAffiniteTypeLabel(a.typeId, a.typeLabel);
+  const noteStyle = 'font-size:.71rem;color:var(--text-muted);font-style:italic;margin-top:1px';
   return `
   <div style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;
     background:${color}12;border:1px solid ${color}30;border-radius:10px">
     <span style="font-size:1.25rem;flex-shrink:0;line-height:1">${emoji}</span>
     <div style="flex:1">
       <div style="font-size:.82rem;font-weight:700;color:${color}">${_esc(label) || '—'}</div>
-      ${a.note ? `<div style="font-size:.71rem;color:var(--text-muted);font-style:italic;
-        margin-top:1px">${_esc(a.note)}</div>` : ''}
+      ${a.notePublique ? `<div style="${noteStyle}">🌐 ${_esc(a.notePublique)}</div>` : ''}
+      ${a.note ? `<div style="${noteStyle}">🔒 ${_esc(a.note)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+// Chip affinité spécifique — vue joueur (lien d'un autre PJ, note publique uniquement)
+function _renderRelationChipPublic(a) {
+  const emoji = _getAffiniteTypeEmoji(a.typeId);
+  const color = _getAffiniteTypeColor(a.typeId);
+  const label = _getAffiniteTypeLabel(a.typeId, a.typeLabel);
+  return `
+  <div style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;
+    background:${color}10;border:1px solid ${color}28;border-radius:10px">
+    <span style="font-size:1.2rem;flex-shrink:0;line-height:1;opacity:.85">${emoji}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:.78rem;font-weight:600;color:${color}">${_esc(label) || '—'}
+        <span style="color:var(--text-dim);font-weight:400">→ ${_esc(a.charNom || '?')}</span>
+      </div>
+      <div style="font-size:.71rem;color:var(--text-muted);font-style:italic;margin-top:1px">
+        ${_esc(a.notePublique)}</div>
     </div>
   </div>`;
 }
@@ -533,8 +553,14 @@ function _renderRelationsPanel(n) {
     </div>`;
   }
 
-  if (!myAffi.length) return '';
-  return `
+  const otherPublic = persoList.filter(a =>
+    (a.notePublique || '').trim() &&
+    !myChars.some(c => c.id === a.charId)
+  );
+
+  if (!myAffi.length && !otherPublic.length) return '';
+
+  const ownPanel = myAffi.length ? `
   <div style="background:rgba(79,140,255,.06);border:1px solid rgba(79,140,255,.2);
     border-radius:12px;padding:.85rem .9rem">
     <div style="font-size:.67rem;font-weight:700;color:var(--gold);
@@ -543,7 +569,20 @@ function _renderRelationsPanel(n) {
     <div style="display:flex;flex-direction:column;gap:.38rem">
       ${myAffi.map(a => _renderRelationChipPlayer(a)).join('')}
     </div>
-  </div>`;
+  </div>` : '';
+
+  const publicPanel = otherPublic.length ? `
+  <div style="background:var(--bg-card);border:1px solid var(--border);
+    border-radius:12px;padding:.85rem .9rem;margin-top:${myAffi.length ? '.5rem' : '0'}">
+    <div style="font-size:.67rem;font-weight:700;color:var(--text-dim);
+      letter-spacing:1.5px;text-transform:uppercase;margin-bottom:.5rem">
+      🌐 Liens connus</div>
+    <div style="display:flex;flex-direction:column;gap:.38rem">
+      ${otherPublic.map(a => _renderRelationChipPublic(a)).join('')}
+    </div>
+  </div>` : '';
+
+  return ownPanel + publicPanel;
 }
 
 // Fiche principale assemblée
@@ -1850,7 +1889,13 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
     </div>
 
     <div class="form-group">
-      <label>Note <span style="color:var(--text-dim);font-weight:400">(visible par ce joueur seulement)</span></label>
+      <label>🌐 Note publique <span style="color:var(--text-dim);font-weight:400">(visible par tous)</span></label>
+      <textarea class="input-field" id="afp-note-publique" rows="2"
+        placeholder="Ex: Sœur de, Ami d'enfance…">${_esc(existing?.notePublique || '')}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>🔒 Note privée <span style="color:var(--text-dim);font-weight:400">(visible par ce joueur seulement)</span></label>
       <textarea class="input-field" id="afp-note" rows="3"
         placeholder="Ex: A rendu un service personnel…">${_esc(existing?.note || '')}</textarea>
     </div>
@@ -1918,8 +1963,9 @@ window.saveAffinitePerso = async (npcId, existingId) => {
 
   const [charId, charNom] = charSel.split('|');
   const type  = _getAffiniteType(typeId);
-  const note  = document.getElementById('afp-note')?.value?.trim() || '';
-  const data  = { npcId, charId, charNom, typeId, typeLabel: type?.label || '', note };
+  const note          = document.getElementById('afp-note')?.value?.trim() || '';
+  const notePublique  = document.getElementById('afp-note-publique')?.value?.trim() || '';
+  const data  = { npcId, charId, charNom, typeId, typeLabel: type?.label || '', note, notePublique };
 
   if (existingId) {
     await updateInCol('npc_affinites', existingId, data);
