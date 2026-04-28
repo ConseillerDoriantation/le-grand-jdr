@@ -1670,10 +1670,10 @@ function _buildFieldsHtml(tpl,item) {
     const val=item?.[f.id]??'';
     if(f.id==='prix'){
       const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO);
-      html+=`<div class="form-group sh-field-prix"><label>${f.label}</label>
+      html+=`<div class="form-group"><label>${f.label}</label>
         <div class="sh-prix-wrap">
-          <input type="number" class="input-field" id="si-${f.id}" value="${val}" min="0" oninput="updatePrixVente(this.value)" style="max-width:110px">
-          <span class="sh-prix-vente-display" id="si-prix-vente">🔄 <strong id="si-pv-val">${pv}</strong> or <span style="color:var(--text-dim);font-size:0.7rem">(60%)</span></span>
+          <input type="number" class="input-field" id="si-${f.id}" value="${val}" min="0" oninput="updatePrixVente(this.value)">
+          <span class="sh-prix-vente-display" id="si-prix-vente" title="Prix de rachat — 60% du prix d'achat">🔄<strong id="si-pv-val">${pv}</strong></span>
         </div></div>`;
     } else if(f.type==='rarete'){
       html+=`<div class="form-group"><label>${f.label}</label>${buildRaretePicker('si', val)}</div>`;
@@ -1682,10 +1682,10 @@ function _buildFieldsHtml(tpl,item) {
       const dispoVal=isInfini?'':(val===''?'':parseInt(val)||'');
       html+=`<div class="form-group"><label>${f.label}</label>
         <div class="sh-dispo-wrap">
-          <input type="number" class="input-field" id="si-dispo" value="${dispoVal}" min="0" placeholder="Ex: 3" style="max-width:90px;${isInfini?'opacity:0.4;pointer-events:none;':''}" ${isInfini?'disabled':''}>
-          <label class="sh-dispo-infini-label">
+          <input type="number" class="input-field" id="si-dispo" value="${dispoVal}" min="0" placeholder="3" ${isInfini?'disabled':''}>
+          <label class="sh-dispo-infini-label" title="Stock illimité">
             <input type="checkbox" id="si-dispo-infini" ${isInfini?'checked':''} onchange="toggleDispoInfini(this)">
-            <span>∞ Illimité</span>
+            <span>∞</span>
           </label>
         </div></div>`;
     } else if(f.type==='select'){
@@ -1724,13 +1724,12 @@ function _buildFieldsHtml(tpl,item) {
     } else if(f.type==='stat_bonus_grid'){
       const parsed = _parseLegacyStats(item||{});
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
-        <div class="grid-3" style="gap:0.7rem">
-          ${ITEM_STATS.map(stat=>`<div class="form-group" style="margin:0">
-            <label style="font-size:0.78rem;color:var(--text-dim)">${stat.short}</label>
-            <input type="number" class="input-field" id="si-${stat.store}" value="${parsed[stat.store]||''}" placeholder="0">
-          </div>`).join('')}
+        <div class="sh-bonus-row">
+          ${ITEM_STATS.map(stat=>`<label class="sh-bonus-cell">
+            <span>${stat.short}</span>
+            <input type="number" id="si-${stat.store}" value="${parsed[stat.store]||''}" placeholder="0">
+          </label>`).join('')}
         </div>
-        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.35rem">Laisse vide ou 0 si l'objet ne donne pas de bonus.</div>
       </div>`;
     } else if(f.type==='textarea'){
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>

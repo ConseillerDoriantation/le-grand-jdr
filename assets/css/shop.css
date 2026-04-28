@@ -1130,25 +1130,28 @@
   grid-column: 1 / -1;
 }
 
-.sh-field-prix {
-  grid-column: 1 / -1;
-}
-
 .sh-prix-wrap {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  flex-wrap: wrap;
+  gap: 0.4rem;
 }
+.sh-prix-wrap input { flex: 1; min-width: 0; }
 
 .sh-prix-vente-display {
-  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.35rem 0.7rem;
+  border-radius: 7px;
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: help;
 }
+.sh-prix-vente-display strong { color: var(--gold); font-weight: 600; }
 
 .sh-upload-simple {
   display: flex;
@@ -1171,8 +1174,55 @@
 .sh-dispo-wrap {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
-  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.sh-dispo-wrap input[type="number"] { flex: 1; min-width: 0; }
+.sh-dispo-wrap input[type="number"]:disabled { opacity: 0.4; pointer-events: none; }
+
+/* Bonus de stats — rangée compacte 6 cellules */
+.sh-bonus-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.4rem;
+}
+.sh-bonus-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.2rem 0.4rem;
+  cursor: text;
+  transition: border-color .12s;
+}
+.sh-bonus-cell:focus-within { border-color: var(--gold); }
+.sh-bonus-cell > span {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-weight: 600;
+  min-width: 1.6rem;
+  text-align: center;
+  user-select: none;
+}
+.sh-bonus-cell input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: center;
+  width: 100%;
+  padding: 0;
+  -moz-appearance: textfield;
+}
+.sh-bonus-cell input:focus { outline: none; }
+.sh-bonus-cell input::-webkit-inner-spin-button,
+.sh-bonus-cell input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+@media (max-width: 540px) {
+  .sh-bonus-row { grid-template-columns: repeat(3, 1fr); }
 }
 
 .sh-dispo-infini-label {
