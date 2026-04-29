@@ -32,13 +32,14 @@ const PAGES = {
 
     // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
-    const [chars, storyItems, bastionDoc, achievements, quests, collectionItems] = await Promise.all([
+    const [chars, storyItems, bastionDoc, achievements, quests, collectionItems, allPartyChars] = await Promise.all([
       loadChars(uid).catch(() => []),
       loadCollection('story').catch(() => []),
       getDocData('bastion', 'main').catch(() => null),
       loadCollection('achievements').catch(() => []),
       loadCollection('quests').catch(() => []),
       loadCollection('collection').catch(() => []),
+      STATE.isAdmin ? Promise.resolve([]) : loadChars(null).catch(() => []),
     ]);
     STATE.characters = chars;
 
@@ -368,168 +369,529 @@ const PAGES = {
       </div>`;
     };
 
-    // Barre progression trame (compacte, inline)
+    // Barre progression trame (v2)
     const _progBar = () => {
       if (totalMissions === 0) return '';
       const pct = Math.round(doneMissions / totalMissions * 100);
-      return `<div class="dash-info-card" onclick="navigate('story')" style="cursor:pointer">
-        <div class="dash-progress-row">
-          <span class="dash-info-sublabel">📖 Progression aventure</span>
-          <span class="dash-info-sublabel">${doneMissions}/${totalMissions} missions</span>
+      return `
+      <div class="dv2-panel-card" onclick="navigate('story')" style="cursor:pointer;padding:16px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)">📖 Progression aventure</span>
+          <span style="font-size:.72rem;color:var(--arcane);font-weight:700;font-family:var(--font-display)">${doneMissions}/${totalMissions} missions</span>
         </div>
-        <div class="dash-progress-track"><div class="dash-progress-fill" style="width:${pct}%"></div></div>
+        <div class="dv2-mission-prog-track">
+          <div class="dv2-mission-prog-fill" data-w="${pct}%"><div class="dv2-mission-shimmer"></div></div>
+        </div>
       </div>`;
     };
 
-    // ── Rendu HTML ──────────────────────────────────────────────────────
-    dash.innerHTML = `
+    // ── Helpers joueur v2 ─────────────────────────────────────────────
 
-    <!-- Bandeau aventure -->
-    ${STATE.adventure ? `
+    function _heroCardV2(c) {
+      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
+      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvCur   = c.pvActuel ?? pvMax;
+      const pmCur   = c.pmActuel ?? pmMax;
+      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
+      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
+      const xpCur   = c.xp || 0;
+      const xpNext  = Math.max(1, (c.niveau || 1) * 100);
+      const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
+      const ca      = window.calcCA?.(c) || 10;
+      const or      = window.calcOr?.(c) || 0;
+      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+      const portrait = c.photo
+        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+        : `<span>${(c.nom||'?')[0].toUpperCase()}</span>`;
+      return `
+      <div class="dv2-hero-card" onclick="window._goToChar('${c.id}')">
+        <div class="dv2-hero-inner">
+          <div class="dv2-portrait-wrap">
+            <div class="dv2-portrait">${portrait}</div>
+            <div class="dv2-portrait-level">NIV.&nbsp;${c.niveau||1}</div>
+          </div>
+          <div class="dv2-hero-info">
+            <div>
+              <div class="dv2-chips">
+                ${c.classe ? `<span class="dv2-chip dv2-chip-blue">${_esc(c.classe)}</span>` : ''}
+                ${c.race   ? `<span class="dv2-chip dv2-chip-purple">${_esc(c.race)}</span>` : ''}
+              </div>
+              <div class="dv2-hero-name">${_esc(c.nom||'Mon Héros')}</div>
+              ${c.titre ? `<div class="dv2-hero-title">${_esc(c.titre)}</div>` : ''}
+            </div>
+            <div class="dv2-stat-bars">
+              <div class="dv2-bar-row">
+                <span class="dv2-bar-label" style="color:#22c38e">PV</span>
+                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-hp" data-w="${pvPct}%"></div></div>
+                <span class="dv2-bar-val">${pvCur}/${pvMax}</span>
+              </div>
+              <div class="dv2-bar-row">
+                <span class="dv2-bar-label" style="color:#6aa7ff">PM</span>
+                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-mp" data-w="${pmPct}%"></div></div>
+                <span class="dv2-bar-val">${pmCur}/${pmMax}</span>
+              </div>
+              <div class="dv2-bar-row">
+                <span class="dv2-bar-label" style="color:#c084fc">XP</span>
+                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-xp" data-w="${xpPct}%"><div class="dv2-bar-xp-shimmer"></div></div></div>
+                <span class="dv2-bar-val">${xpCur}/${xpNext}</span>
+              </div>
+            </div>
+            <div class="dv2-stats-row">
+              <div class="dv2-stat-pill">
+                <div class="dv2-stat-pill-val" style="color:#f4c430">💰 ${or}</div>
+                <div class="dv2-stat-pill-lbl">Or</div>
+              </div>
+              <div class="dv2-stat-pill">
+                <div class="dv2-stat-pill-val" style="color:var(--gold-2)">🛡️ ${ca}</div>
+                <div class="dv2-stat-pill-lbl">CA</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function _partyCardV2(partyChars) {
+      const byPlayer = {};
+      partyChars.forEach(c => {
+        const key = c.uid || c.ownerPseudo || c.id;
+        if (!byPlayer[key] || (c.niveau||1) > (byPlayer[key].niveau||1)) byPlayer[key] = c;
+      });
+      const members = Object.values(byPlayer).slice(0, 5);
+      return `
+      <div class="dv2-party-card">
+        <div class="dv2-panel-header">
+          <div class="dv2-panel-title">⚔️ Groupe <span class="dv2-panel-count">${members.length}</span></div>
+        </div>
+        ${members.length > 0 ? members.map(c => {
+          const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+          const av = c.photo
+            ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
+            : (c.nom||'?')[0].toUpperCase();
+          return `
+          <div class="dv2-party-member" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+            <div class="dv2-party-avatar">${av}</div>
+            <div style="flex:1;min-width:0">
+              <div class="dv2-party-name">${_esc(c.nom||'?')}</div>
+              <div class="dv2-party-sub">Niv.${c.niveau||1}${c.classe?` · ${_esc(c.classe)}`:''}</div>
+            </div>
+            <div class="dv2-party-dot"></div>
+          </div>`;
+        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Les membres du groupe apparaîtront ici.</div>`}
+        ${STATE.adventure ? `
+        <div class="dv2-party-footer">
+          <div class="dv2-party-session-label">Aventure en cours</div>
+          <div class="dv2-party-session-chip">${STATE.adventure.emoji||'⚔️'} ${_esc(STATE.adventure.nom||'Aventure')}</div>
+        </div>` : ''}
+      </div>`;
+    }
+
+    function _missionCardV2() {
+      if (!mission) return '';
+      const pct = totalMissions > 0 ? Math.round(doneMissions / totalMissions * 100) : 0;
+      return `
+      <div class="dv2-mission-card" onclick="navigate('story')" style="cursor:pointer">
+        <div class="dv2-mission-header">
+          <div class="dv2-mission-icon">${mission.imageUrl
+            ? `<img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
+            : '⚔️'}</div>
+          <div class="dv2-mission-info">
+            <div class="dv2-mission-type">Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
+            <div class="dv2-mission-name">${_esc(mission.titre||'Mission')}</div>
+            ${mission.lieu ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:3px">📍 ${_esc(mission.lieu)}</div>` : ''}
+          </div>
+          <div class="dv2-mission-status"><span style="opacity:.7">●</span>&nbsp;En cours</div>
+        </div>
+        ${mission.description ? `<div class="dv2-mission-desc">${_esc(mission.description)}</div>` : ''}
+        ${totalMissions > 0 ? `
+        <div class="dv2-mission-progress">
+          <div class="dv2-mission-prog-labels">
+            <span>Progression de l'aventure</span>
+            <span class="dv2-mission-prog-val">${doneMissions}/${totalMissions}</span>
+          </div>
+          <div class="dv2-mission-prog-track">
+            <div class="dv2-mission-prog-fill" data-w="${pct}%"><div class="dv2-mission-shimmer"></div></div>
+          </div>
+        </div>` : ''}
+      </div>`;
+    }
+
+    function _statsGridV2(c) {
+      const pvMax = window.calcPVMax?.(c) || c.pvBase || 10;
+      const pmMax = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvCur = c.pvActuel ?? pvMax;
+      const pmCur = c.pmActuel ?? pmMax;
+      const pvPct = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
+      const pmPct = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
+      const ca = window.calcCA?.(c) || 10;
+      const or = window.calcOr?.(c) || 0;
+      return `
+      <div class="dv2-stats-grid">
+        <div class="dv2-stat-card dv2-sc-gold" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">💰</span>
+          <div class="dv2-stat-card-val" style="color:#f4c430">${or}</div>
+          <div class="dv2-stat-card-lbl">Or</div>
+        </div>
+        <div class="dv2-stat-card dv2-sc-shield" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">🛡️</span>
+          <div class="dv2-stat-card-val" style="color:var(--gold-2)">${ca}</div>
+          <div class="dv2-stat-card-lbl">Classe d'armure</div>
+        </div>
+        <div class="dv2-stat-card dv2-sc-hp" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">❤️</span>
+          <div class="dv2-stat-card-val" style="color:#22c38e">${pvCur}<span style="font-size:.65em;opacity:.55">/${pvMax}</span></div>
+          <div class="dv2-stat-card-lbl">Points de vie</div>
+          <div class="dv2-stat-card-sub">${pvPct}% restants</div>
+        </div>
+        <div class="dv2-stat-card dv2-sc-mp" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">🔮</span>
+          <div class="dv2-stat-card-val" style="color:#b99fff">${pmCur}<span style="font-size:.65em;opacity:.55">/${pmMax}</span></div>
+          <div class="dv2-stat-card-lbl">Points de magie</div>
+          <div class="dv2-stat-card-sub">${pmPct}% restants</div>
+        </div>
+      </div>`;
+    }
+
+    function _shortcutsV2() {
+      const S = [
+        { page:'bestiaire',  icon:'🐉', label:'Bestiaire',  bg:'rgba(255,90,126,.15)',  bc:'rgba(255,90,126,.3)',  col:'#ff5a7e' },
+        { page:'recettes',   icon:'🍳', label:'Recettes',   bg:'rgba(34,195,142,.15)',  bc:'rgba(34,195,142,.3)',  col:'#22c38e' },
+        { page:'shop',       icon:'🛍️', label:'Boutique',   bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
+        { page:'map',        icon:'🗺️', label:'Carte',      bg:'rgba(79,140,255,.15)',  bc:'rgba(79,140,255,.3)',  col:'#4f8cff' },
+        { page:'collection', icon:'🃏', label:'Collection', bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
+        { page:'vtt',        icon:'🎲', label:'Table VTT',  bg:'rgba(157,111,255,.15)', bc:'rgba(157,111,255,.3)', col:'#9d6fff' },
+        { page:'bastion',    icon:'🏰', label:'Bastion',    bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
+        { page:'characters', icon:'⚔️', label:'Personnage', bg:'rgba(232,184,75,.15)',  bc:'rgba(232,184,75,.3)',  col:'#e8b84b' },
+      ];
+      return `<div class="dv2-shortcuts-grid">${S.map(s => `
+        <button class="dv2-shortcut" onclick="navigate('${s.page}')">
+          <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
+          <span class="dv2-shortcut-label">${s.label}</span>
+        </button>`).join('')}</div>`;
+    }
+
+    function _questsPanelV2() {
+      const QDIFF = { facile:'Facile', moyen:'Moyen', difficile:'Difficile', extreme:'Extrême' };
+      const QDCLS = { facile:'dv2-rarity-common', moyen:'dv2-rarity-rare', difficile:'dv2-rarity-epic', extreme:'dv2-rarity-legendary' };
+      const QICLS = { principale:'dv2-qi-main', secondaire:'dv2-qi-side', quotidienne:'dv2-qi-daily' };
+      const QICON = { principale:'🔥', secondaire:'🗡️', quotidienne:'🌅', extreme:'☠️', difficile:'⚠️' };
+      return `
+      <div class="dv2-panel-card">
+        <div class="dv2-panel-header">
+          <div class="dv2-panel-title">🗡️ Quêtes <span class="dv2-panel-count">${activeQuests.length}</span></div>
+          <button class="dv2-section-action" onclick="navigate('quests')">Voir tout →</button>
+        </div>
+        ${activeQuests.slice(0, 5).length > 0 ? activeQuests.slice(0, 5).map(q => {
+          const icn    = QICON[q.type] || QICON[q.difficulte] || '🗡️';
+          const cls    = QICLS[q.type] || 'dv2-qi-default';
+          const rarity = QDCLS[q.difficulte] || 'dv2-rarity-common';
+          const joined = Array.isArray(q.participants) && q.participants.some(p => p.uid === _myUid);
+          return `
+          <div class="dv2-quest-item" onclick="navigate('quests')">
+            <div class="dv2-quest-icon ${cls}">${icn}</div>
+            <div style="flex:1;min-width:0">
+              <div class="dv2-quest-name">${_esc(q.titre||'Quête')}</div>
+              <div class="dv2-quest-sub">${QDIFF[q.difficulte]||'—'}${joined?' · ✓ Rejointe':''}</div>
+            </div>
+            <div class="dv2-quest-rarity ${rarity}">${(q.difficulte||'').toUpperCase()||'—'}</div>
+          </div>`;
+        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucune quête active.</div>`}
+      </div>`;
+    }
+
+    function _achievementsPanelV2() {
+      return `
+      <div class="dv2-panel-card">
+        <div class="dv2-panel-header">
+          <div class="dv2-panel-title">🏆 Hauts-faits <span class="dv2-panel-count">${achievements.length}</span></div>
+          <button class="dv2-section-action" onclick="navigate('achievements')">Voir tout →</button>
+        </div>
+        ${achievements.slice(0, 5).length > 0 ? achievements.slice(0, 5).map(a => `
+        <div class="dv2-ach-item">
+          <div class="dv2-ach-icon">${a.icone||'🏆'}</div>
+          <div style="flex:1;min-width:0">
+            <div class="dv2-ach-name">${_esc(a.titre||a.nom||'Haut-fait')}</div>
+            <div class="dv2-ach-desc">${_esc(a.description||'')}</div>
+          </div>
+          ${a.xp ? `<div class="dv2-ach-xp">+${a.xp}&nbsp;XP</div>` : ''}
+        </div>`).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucun haut-fait.</div>`}
+      </div>`;
+    }
+
+    function _bastionCardV2() {
+      const salles = (bastionDoc?.salles||[]).filter(s=>s.nom).slice(0, 4);
+      const ev     = bastionDoc?.evenementCourant;
+      return `
+      <div class="dv2-bastion-card" onclick="navigate('bastion')" style="cursor:pointer">
+        <div class="dv2-bastion-header">
+          <div class="dv2-bastion-icon">🏰</div>
+          <div>
+            <div class="dv2-bastion-name">${_esc(bastionNom)}</div>
+            <div class="dv2-bastion-level">Niveau ${bastionLevel}</div>
+          </div>
+          <button class="dv2-section-action" style="margin-left:auto" onclick="event.stopPropagation();navigate('bastion')">Gérer →</button>
+        </div>
+        ${salles.length > 0 ? `
+        <div class="dv2-bastion-rooms">${salles.map(s=>`
+          <div class="dv2-bastion-room"><div class="dv2-bastion-room-dot"></div>${_esc(s.nom)}</div>`).join('')}
+        </div>` : ''}
+        ${ev && ev !== 'calme' ? `<div class="dv2-bastion-note">⚠️ ${_esc(ev)}</div>` : ''}
+      </div>`;
+    }
+
+    // ── Render ──────────────────────────────────────────────────────────
+    const advBanner = STATE.adventure ? `
     <div class="dash-adv-banner" onclick="window.openAdventureSwitcher?.()" style="cursor:${(STATE.adventures?.length||0)>1?'pointer':'default'}">
       <span style="font-size:1.1rem">${STATE.adventure.emoji||'⚔️'}</span>
       <span class="dash-adv-name">${_esc(STATE.adventure.nom)}</span>
       ${(STATE.adventures?.length||0)>1?`<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>`:''}
       <span class="dash-adv-tag">Aventure active</span>
-    </div>` : ''}
+    </div>` : '';
 
-    ${STATE.isAdmin ? `
+    if (STATE.isAdmin) {
 
-    <!-- ══ VUE MJ ══ -->
+      // ── VUE MJ v2 ─────────────────────────────────────────────────────
+      dash.className = 'dv2-root';
+      dash.innerHTML = `
+      ${advBanner}
 
-    <!-- Stats -->
-    <div class="dash-stats-row">
-      ${[
-        { val: chars.length,         label: `Personnage${chars.length!==1?'s':''}`,      nav:'characters',    col:'#4f8cff' },
-        { val: activeQuests.length,  label: `Quête${activeQuests.length!==1?'s':''} active${activeQuests.length!==1?'s':''}`, nav:'quests', col:'#b482ff' },
-        { val: collectionUnlocked,   label: 'Cartes débloquées',                          nav:'collection',    col:'#22d3ee' },
-        { val: achievements.length,  label: `Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}`, nav:'achievements', col:'#e8b84b' },
-      ].map(s => `<div class="dash-stat" onclick="navigate('${s.nav}')">
-        <div class="dash-stat-val" style="color:${s.col}">${s.val}</div>
-        <div class="dash-stat-lbl">${s.label}</div>
-      </div>`).join('')}
-    </div>
-
-    <!-- Personnages -->
-    <div class="dash-sec">
-      <div class="dash-sec-hd">
-        <span class="dash-sec-label">📜 Personnages</span>
-        <button class="dash-sec-link" onclick="navigate('characters')">Voir tous →</button>
+      <!-- En-tête MJ -->
+      <div class="dv2-header">
+        <div>
+          <div class="dv2-greeting-label">Console Maître du Jeu</div>
+          <div class="dv2-greeting-title">Bonjour, ${_esc(pseudo)}</div>
+        </div>
+        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
-      ${charsHtml}
-    </div>
 
-    <!-- Quêtes actives (grille pleine largeur) -->
-    <div class="dash-sec">
-      <div class="dash-sec-hd">
-        <span class="dash-sec-label">🗡️ Quêtes actives</span>
-        <button class="dash-sec-link" onclick="navigate('quests')">Gérer →</button>
+      <!-- Stats 4-col -->
+      <div class="dv2-stats-grid">
+        <div class="dv2-stat-card dv2-sc-shield" onclick="navigate('characters')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">📜</span>
+          <div class="dv2-stat-card-val" style="color:var(--gold-2)">${chars.length}</div>
+          <div class="dv2-stat-card-lbl">Personnage${chars.length!==1?'s':''}</div>
+        </div>
+        <div class="dv2-stat-card dv2-sc-mp" onclick="navigate('quests')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">🗡️</span>
+          <div class="dv2-stat-card-val" style="color:#b99fff">${activeQuests.length}</div>
+          <div class="dv2-stat-card-lbl">Quête${activeQuests.length!==1?'s':''} active${activeQuests.length!==1?'s':''}</div>
+        </div>
+        <div class="dv2-stat-card dv2-sc-hp" onclick="navigate('achievements')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">🏆</span>
+          <div class="dv2-stat-card-val" style="color:#22c38e">${achievements.length}</div>
+          <div class="dv2-stat-card-lbl">Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}</div>
+        </div>
+        <div class="dv2-stat-card dv2-sc-gold" onclick="navigate('collection')" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">🃏</span>
+          <div class="dv2-stat-card-val" style="color:#f4c430">${collectionUnlocked}</div>
+          <div class="dv2-stat-card-lbl">Cartes débloquées</div>
+        </div>
       </div>
-      ${activeQuests.length
-        ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>
-           ${activeQuests.length > 4 ? `<button class="dash-sec-link" onclick="navigate('quests')" style="align-self:flex-end">+${activeQuests.length-4} de plus →</button>` : ''}`
-        : `<div class="dash-info-card"><div class="dash-info-empty"><span style="opacity:.3">🗡️</span> Aucune quête active — créez-en depuis la page Quêtes.</div></div>`}
-    </div>
 
-    <!-- Trame (compacte, seulement si données) -->
-    ${(mission || totalMissions > 0) ? `
-    <div class="dash-sec">
-      <div class="dash-sec-hd">
-        <span class="dash-sec-label">📖 Trame</span>
-        <button class="dash-sec-link" onclick="navigate('story')">Ouvrir →</button>
+      <!-- Personnages -->
+      <div>
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Personnages</span>
+          <div class="dv2-section-label-line"></div>
+          <button class="dv2-section-action" onclick="navigate('characters')">Voir tous →</button>
+        </div>
+        <div class="dv2-panel-card">${charsHtml
+          ? `<div style="padding:12px">${charsHtml}</div>`
+          : `<div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center">Aucun personnage dans cette aventure.</div>`}
+        </div>
       </div>
-      ${_missionCard() || ''}
-      ${_progBar()}
-    </div>` : ''}
 
-    <!-- Console MJ -->
-    <div class="dash-admin">
-      <div class="dash-admin-title">🎲 Console MJ</div>
-      <div class="dash-admin-links">
-        ${[
-          {page:'story',     label:'📚 Trame'    },
-          {page:'quests',    label:'🗡️ Quêtes'   },
-          {page:'shop',      label:'🛍️ Boutique' },
-          {page:'npcs',      label:'👥 PNJ'      },
-          {page:'bestiaire', label:'🐉 Bestiaire'},
-          {page:'map',       label:'🗺️ Carte'    },
-          {page:'admin',     label:'⚙️ Admin'    },
-        ].map(b => `<button class="dash-admin-btn" onclick="navigate('${b.page}')">${b.label}</button>`).join('')}
+      <!-- Mission active -->
+      ${_missionCardV2()}
+
+      <!-- Console MJ -->
+      <div>
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Console MJ</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        <div class="dv2-shortcuts-grid" style="grid-template-columns:repeat(7,1fr)">
+          ${[
+            { page:'story',     icon:'📚', label:'Trame',     bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
+            { page:'quests',    icon:'🗡️', label:'Quêtes',    bg:'rgba(157,111,255,.15)', bc:'rgba(157,111,255,.3)', col:'#9d6fff' },
+            { page:'shop',      icon:'🛍️', label:'Boutique',  bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
+            { page:'npcs',      icon:'👥', label:'PNJ',       bg:'rgba(34,195,142,.15)',  bc:'rgba(34,195,142,.3)',  col:'#22c38e' },
+            { page:'bestiaire', icon:'🐉', label:'Bestiaire', bg:'rgba(255,90,126,.15)',  bc:'rgba(255,90,126,.3)',  col:'#ff5a7e' },
+            { page:'map',       icon:'🗺️', label:'Carte',     bg:'rgba(79,140,255,.15)',  bc:'rgba(79,140,255,.3)',  col:'#4f8cff' },
+            { page:'admin',     icon:'⚙️', label:'Admin',     bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
+          ].map(s => `
+          <button class="dv2-shortcut" onclick="navigate('${s.page}')">
+            <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
+            <span class="dv2-shortcut-label">${s.label}</span>
+          </button>`).join('')}
+        </div>
       </div>
-    </div>
 
-    ` : `
-
-    <!-- ══ VUE JOUEUR ══ -->
-
-    <!-- Héros -->
-    <div class="dash-sec">
-      <div class="dash-sec-hd">
-        <span class="dash-sec-label">⚔️ Mon Aventurier</span>
-        <button class="dash-sec-link" onclick="navigate('characters')">Fiche →</button>
+      <!-- Quêtes actives -->
+      <div>
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Quêtes actives</span>
+          <div class="dv2-section-label-line"></div>
+          <button class="dv2-section-action" onclick="navigate('quests')">Gérer →</button>
+        </div>
+        ${activeQuests.length
+          ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>${activeQuests.length > 4 ? `<button class="dv2-section-action" onclick="navigate('quests')" style="align-self:flex-end;margin-top:6px">+${activeQuests.length-4} de plus →</button>` : ''}`
+          : `<div class="dv2-panel-card"><div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center"><span style="opacity:.3">🗡️</span> Aucune quête active.</div></div>`}
       </div>
-      ${charsHtml}
-    </div>
 
-    <!-- Mission + progression (seulement si données) -->
-    ${(mission || totalMissions > 0) ? `
-    <div class="dash-sec">
-      <div class="dash-sec-hd">
-        <span class="dash-sec-label">📖 Mission en cours</span>
-        <button class="dash-sec-link" onclick="navigate('story')">Trame →</button>
+      <!-- Trame progression -->
+      ${totalMissions > 0 ? `
+      <div>
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Progression aventure</span>
+          <div class="dv2-section-label-line"></div>
+          <button class="dv2-section-action" onclick="navigate('story')">Ouvrir →</button>
+        </div>
+        ${_progBar()}
+      </div>` : ''}
+
+      <!-- Table Virtuelle -->
+      <div class="dash-vtt-cta" onclick="navigate('vtt')">
+        <span class="dash-vtt-icon">🎲</span>
+        <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
+        <span class="dash-vtt-arrow">→</span>
+      </div>`;
+
+    } else {
+
+      // ── VUE JOUEUR v2 ─────────────────────────────────────────────────
+      const heroChar = chars[0] || null;
+
+      // Groupe : participants des quêtes actives que j'ai rejointes
+      const _joinedQuests = activeQuests.filter(q =>
+        Array.isArray(q.participants) && q.participants.some(p => p.uid === _myUid)
+      );
+      const _missionUids = new Set(
+        _joinedQuests.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => u !== _myUid)
+      );
+      const partyMembers = _missionUids.size > 0
+        ? allPartyChars.filter(c => _missionUids.has(c.uid))
+        : [];
+      dash.className = 'dv2-root';
+      dash.innerHTML = `
+      ${advBanner}
+
+      <div class="dv2-header">
+        <div>
+          <div class="dv2-greeting-label">Bonjour, aventurier</div>
+          <div class="dv2-greeting-title">Bienvenue, ${_esc(pseudo)}</div>
+        </div>
+        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
-      ${_missionCard() || ''}
-      ${_progBar()}
-    </div>` : ''}
 
-    <!-- Quêtes actives (joinables en place) -->
-    <div class="dash-sec">
-      <div class="dash-sec-hd">
-        <span class="dash-sec-label">🗡️ Quêtes actives</span>
-        <button class="dash-sec-link" onclick="navigate('quests')">Toutes →</button>
+      ${heroChar ? `
+      <div class="dv2-hero-grid">
+        ${_heroCardV2(heroChar)}
+        ${_partyCardV2(partyMembers)}
+      </div>` : `
+      <div class="dv2-hero-card" onclick="navigate('characters')" style="cursor:pointer">
+        <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
+          <div>
+            <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>
+            <div class="dv2-hero-name" style="font-size:1.1rem;margin-bottom:.4rem">Créer mon personnage</div>
+            <div style="font-size:.8rem;color:var(--text-dim)">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
+          </div>
+        </div>
+      </div>`}
+
+      ${_missionCardV2()}
+
+      <div>
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Navigation rapide</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        ${_shortcutsV2()}
       </div>
-      ${activeQuests.length
-        ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>
-           ${activeQuests.length > 4 ? `<button class="dash-sec-link" onclick="navigate('quests')" style="align-self:flex-end">+${activeQuests.length-4} de plus →</button>` : ''}`
-        : `<div class="dash-info-card"><div class="dash-info-empty"><span style="opacity:.3">🗡️</span> Aucune quête active pour le moment.</div></div>`}
-    </div>
 
-    <!-- Raccourcis en jeu -->
-    <div class="dash-sec">
-      <div class="dash-sec-hd"><span class="dash-sec-label">🎮 En Jeu</span></div>
-      <div class="dash-ql-grid" style="grid-template-columns:repeat(3,1fr)">
-        ${[
-          {page:'bestiaire',  icon:'🐉', label:'Bestiaire',  cls:'dash-ql-btn--red'    },
-          {page:'recettes',   icon:'🍳', label:'Recettes',   cls:'dash-ql-btn--green'  },
-          {page:'shop',       icon:'🛍️', label:'Boutique',   cls:'dash-ql-btn--gold'   },
-          {page:'bastion',    icon:'🏰', label:'Bastion',    cls:'dash-ql-btn--blue'   },
-          {page:'map',        icon:'🗺️', label:'Carte',      cls:'dash-ql-btn--purple' },
-          {page:'collection', icon:'🃏', label:'Collection', cls:'dash-ql-btn--teal'   },
-        ].map(r => `<button class="dash-ql-btn ${r.cls}" onclick="navigate('${r.page}')">
-          <span class="dash-ql-icon">${r.icon}</span>
-          <span class="dash-ql-label">${r.label}</span>
-        </button>`).join('')}
+      <div>
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Aventure</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        <div class="dv2-two-col">
+          ${_questsPanelV2()}
+          ${_achievementsPanelV2()}
+        </div>
       </div>
-    </div>
 
-    `}
+      ${bastionDoc ? `
+      <div>
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Bastion</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        ${_bastionCardV2()}
+      </div>` : ''}
 
-    <!-- Bouton Table Virtuelle (en bas) -->
-    <div class="dash-vtt-cta" onclick="navigate('vtt')">
-      <span class="dash-vtt-icon">🎲</span>
-      <div class="dash-vtt-text">
-        <span class="dash-vtt-label">Table Virtuelle</span>
-        <span class="dash-vtt-sub">Entrer dans la session de jeu</span>
-      </div>
-      <span class="dash-vtt-arrow">→</span>
-    </div>
-    `;
+      <div class="dash-vtt-cta" onclick="navigate('vtt')">
+        <span class="dash-vtt-icon">🎲</span>
+        <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
+        <span class="dash-vtt-arrow">→</span>
+      </div>`;
+    }
 
-    // Naviguer directement vers la fiche d'un personnage
+    // ── Navigation personnage ──────────────────────────────────────────
     window._goToChar = (id) => {
       window._targetCharId = id;
       navigate('characters');
     };
+
+    // ── Toast RPG (injecter une seule fois) ───────────────────────────
+    if (!document.getElementById('dv2-toast-container')) {
+      const tc = document.createElement('div');
+      tc.id = 'dv2-toast-container';
+      tc.className = 'dv2-toast-container';
+      document.body.appendChild(tc);
+    }
+    window._showRPGToast = (type = 'xp', title = '', sub = '', badge = '') => {
+      const tc = document.getElementById('dv2-toast-container');
+      if (!tc) return;
+      const el = document.createElement('div');
+      el.className = `dv2-toast dv2-toast-${type}`;
+      const icons = { xp:'✨', gold:'💰', achievement:'🏆' };
+      const cols  = { xp:'#c084fc', gold:'#f4c430', achievement:'#22c38e' };
+      el.innerHTML = `<div class="dv2-toast-icon">${icons[type]||'✨'}</div><div class="dv2-toast-body"><div class="dv2-toast-title">${title}</div>${sub?`<div class="dv2-toast-sub">${sub}</div>`:''}</div>${badge?`<div class="dv2-toast-badge" style="color:${cols[type]||'#fff'}">${badge}</div>`:''}`;
+      tc.appendChild(el);
+      setTimeout(() => { el.classList.add('dv2-leaving'); setTimeout(() => el.remove(), 350); }, 3500);
+    };
+
+    // ── Animations d'entrée en cascade ────────────────────────────────
+    const _sections = document.querySelectorAll('.dv2-root > *');
+    _sections.forEach((el, i) => {
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(16px)';
+      setTimeout(() => {
+        el.style.transition = 'opacity 0.4s ease, transform 0.4s cubic-bezier(0.22,1,0.36,1)';
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+      }, i * 60);
+    });
+
+    // ── Animations barres (après le délai d'entrée) ────────────────────
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        document.querySelectorAll('.dv2-bar-fill[data-w], .dv2-mission-prog-fill[data-w]').forEach(el => {
+          el.style.width = el.dataset.w;
+        });
+      }, 200);
+    });
+
+    // ── Particules flottantes ──────────────────────────────────────────
+    document.querySelectorAll('.dv2-particle').forEach(p => p.remove());
+    const _pcols = ['rgba(79,140,255,0.6)', 'rgba(157,111,255,0.5)', 'rgba(34,195,142,0.4)'];
+    for (let i = 0; i < 12; i++) {
+      const p = document.createElement('div');
+      p.className = 'dv2-particle';
+      const sz = 1 + Math.random() * 2;
+      p.style.cssText = `left:${Math.random()*100}%;background:${_pcols[i%3]};width:${sz}px;height:${sz}px;animation-duration:${8+Math.random()*12}s;animation-delay:${Math.random()*10}s;--drift:${(Math.random()-.5)*80}px`;
+      document.body.appendChild(p);
+    }
   },
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
