@@ -11,21 +11,24 @@ body {
 
 body {
   font-family: 'Inter', sans-serif;
-  background: var(--bg-deep);
+  background: var(--bg-void);
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
 }
 
-/* Texture overlay — masquée en mode jour */
+/* Fond hexagonal + gradients radiaux */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background-image:
+    radial-gradient(ellipse 80% 60% at 20% 0%, rgba(79,140,255,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(157,111,255,0.06) 0%, transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='52'%3E%3Cpath d='M30 2 L58 17 L58 47 L30 52 L2 47 L2 17 Z' fill='none' stroke='rgba(79,140,255,0.04)' stroke-width='1'/%3E%3C/svg%3E");
+  background-size: auto, auto, 60px 52px;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.4;
   transition: opacity 0.25s;
 }
 [data-theme="light"] body::before {
