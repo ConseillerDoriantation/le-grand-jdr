@@ -72,6 +72,7 @@ let _selectedAnnotId  = null; // id de l'annotation sélectionnée (sélection s
 let _selectedAnnotIds = new Set(); // multi-sélection annotations
 let _annotTransformer = null; // Konva Transformer pour resize/rotation
 let _annotGroupDragOrigins = null; // { [id]: {x,y} } pour déplacement groupé annotations
+let _skipAnnotRebuild = new Set(); // ids dont le onSnapshot doit sauter le rebuild (transform local)
 
 // Marquee (lasso rectangle)
 let _marqueeActive  = false;
@@ -83,6 +84,7 @@ let _suppressNextClick = false; // empêche le click de désélectionner après 
 // Ping (remonté au niveau module pour accès depuis les fonctions externes)
 let _pingTimer  = null;
 let _pingOrigin = null;
+let _drawHistory  = [];      // ids des annotations créées dans la session (pour Ctrl+Z)
 let _drawing      = false;   // tracé en cours
 let _drawPts      = [];      // points crayon libre (world coords)
 let _drawOrigin   = null;    // point de départ pour formes
@@ -358,7 +360,7 @@ function _cleanup() {
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
-  _annotations = {}; _drawing = false; _drawLive = null;
+  _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = [];
   _selectedAnnotId = null; _selectedAnnotIds.clear(); _annotTransformer = null;
   _annotGroupDragOrigins = null;
   _marqueeActive = false; _marqueeOrigin = null; _marqueeLastWp = null;
@@ -2283,8 +2285,11 @@ function _buildAnnotShape(K, data) {
       x: data.offsetX||0, y: data.offsetY||0,
       tension: data.type === 'freehand' ? 0.3 : 0, fill:'transparent' });
   } else if (data.type === 'rect') {
+    const rw = data.w||10, rh = data.h||10;
     shape = new K.Rect({ ...base, x:data.x||0, y:data.y||0,
-      width:data.w||10, height:data.h||10, fill, cornerRadius:3 });
+      width:rw, height:rh, fill, cornerRadius:3,
+      // centered:true = x,y est le centre → offsetX/Y pour pivoter sur place
+      ...(data.centered ? { offsetX: rw/2, offsetY: rh/2 } : {}) });
   } else if (data.type === 'circle') {
     shape = new K.Circle({ ...base, x:data.x||0, y:data.y||0, radius:data.r||10, fill });
   }
@@ -2354,19 +2359,44 @@ function _buildAnnotShape(K, data) {
       for (const id of idsToSave) {
         const s = _annotations[id]?.shape, ann = _annotations[id]?.data;
         if (!s || !ann) continue;
+        // Marquer skip rebuild pour éviter le saut visuel au retour onSnapshot
+        _skipAnnotRebuild.add(id);
         const update = (ann.type === 'freehand' || ann.type === 'line')
           ? { offsetX: s.x(), offsetY: s.y() }
           : { x: s.x(), y: s.y() };
+        if (ann.type !== 'freehand' && ann.type !== 'line') {
+          ann.x = s.x(); ann.y = s.y();
+        }
         updateDoc(_annotRef(id), update).catch(() => {});
       }
       _annotGroupDragOrigins = null;
     });
     // Fin de transformation (rotate/resize) → sauvegarder
     shape.on('transformend', () => {
-      updateDoc(_annotRef(data.id), {
-        rotation: shape.rotation(), scaleX: shape.scaleX(), scaleY: shape.scaleY(),
+      // Marquer cet id pour éviter le destroy/rebuild local dans onSnapshot
+      _skipAnnotRebuild.add(data.id);
+
+      if (data.centered) {
+        // Normaliser scale dans les dimensions pour que le rebuild distant soit correct
+        const newW = Math.max(1, shape.width()  * shape.scaleX());
+        const newH = Math.max(1, shape.height() * shape.scaleY());
+        shape.width(newW); shape.height(newH);
+        shape.scaleX(1);   shape.scaleY(1);
+        shape.offsetX(newW / 2); shape.offsetY(newH / 2);
+        // Mettre à jour data en place (la closure reste valide)
+        data.w = newW; data.h = newH; data.scaleX = 1; data.scaleY = 1;
+      }
+      data.rotation = shape.rotation();
+      data.x = shape.x();
+      data.y = shape.y();
+
+      const patch = {
+        rotation: shape.rotation(),
+        scaleX: shape.scaleX(), scaleY: shape.scaleY(),
         x: shape.x(), y: shape.y(),
-      }).catch(() => {});
+        ...(data.centered ? { centered: true, w: data.w, h: data.h } : {}),
+      };
+      updateDoc(_annotRef(data.id), patch).catch(() => {});
     });
   }
   return shape;
@@ -2510,7 +2540,9 @@ async function _endDraw() {
     data = { type:'line', points:pts, offsetX:0, offsetY:0 };
   } else if (_drawShape === 'rect') {
     if (_drawLive.width() < 3 && _drawLive.height() < 3) { _drawLive.destroy(); _drawLive=null; return; }
-    data = { type:'rect', x:_drawLive.x(), y:_drawLive.y(), w:_drawLive.width(), h:_drawLive.height(), fill:_drawFill };
+    const rw = _drawLive.width(), rh = _drawLive.height();
+    // x, y = centre du rect — l'ancrage est le centre pour que la rotation pivote sur place
+    data = { type:'rect', x: _drawLive.x() + rw/2, y: _drawLive.y() + rh/2, w: rw, h: rh, fill:_drawFill, centered:true };
   } else if (_drawShape === 'circle') {
     if (_drawLive.radius() < 3) { _drawLive.destroy(); _drawLive=null; return; }
     data = { type:'circle', x:_drawLive.x(), y:_drawLive.y(), r:_drawLive.radius(), fill:_drawFill };
@@ -2523,6 +2555,7 @@ async function _endDraw() {
   const id = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
   try {
     await setDoc(_annotRef(id), data);
+    _drawHistory.push(id); // permet Ctrl+Z
     liveCopy.destroy(); // l'onSnapshot va recréer la version persistée
   } catch(err) {
     console.error('[VTT] Annotation save error:', err?.code, err?.message);
@@ -2679,25 +2712,39 @@ function _initListeners() {
     snap.docChanges().forEach(ch => {
       const id = ch.doc.id;
       if (ch.type === 'removed') {
+        // Retirer du transformer avant destroy
+        if (_selectedAnnotIds.has(id)) {
+          _selectedAnnotIds.delete(id);
+          _annotTransformer?.nodes([]);
+        }
         _annotations[id]?.shape?.destroy();
         delete _annotations[id];
-        if (_selectedAnnotId === id) _deselectAnnot();
+        if (_selectedAnnotId === id) { _selectedAnnotId = null; }
       } else {
-        const data = { id, ...ch.doc.data() };
-        if (_annotations[id]) {
-          // Mise à jour : si le shape existe encore, l'enlever d'abord
-          _annotations[id].shape?.destroy();
-        }
-        _annotations[id] = { data, shape: null };
-        // Rendre sur la page active seulement
-        if (_activePage && data.pageId === _activePage.id) {
-          const K = window.Konva;
-          const shape = _buildAnnotShape(K, data);
-          if (shape) { _annotations[id].shape = shape; _layers.draw?.add(shape); }
+        const newData = { id, ...ch.doc.data() };
+        if (_skipAnnotRebuild.has(id)) {
+          // Transform local : le shape visuel est déjà correct — juste mettre à jour les données
+          _skipAnnotRebuild.delete(id);
+          if (_annotations[id]) Object.assign(_annotations[id].data, newData);
+        } else {
+          if (_annotations[id]) {
+            // Vider le transformer avant de détruire l'ancien shape
+            if (_selectedAnnotIds.has(id)) _annotTransformer?.nodes([]);
+            _annotations[id].shape?.destroy();
+          }
+          _annotations[id] = { data: newData, shape: null };
+          // Rendre sur la page active seulement
+          if (_activePage && newData.pageId === _activePage.id) {
+            const K = window.Konva;
+            const shape = _buildAnnotShape(K, newData);
+            if (shape) { _annotations[id].shape = shape; _layers.draw?.add(shape); }
+          }
         }
       }
     });
     _updateAnnotDraggable();
+    // Réappliquer le transformer sur les shapes reconstruits
+    if (_selectedAnnotIds.size > 0) _applyAnnotTransformer();
     _layers.draw?.batchDraw();
   }, () => {}));
 
@@ -3918,6 +3965,12 @@ function _keyHandler(e) {
       [..._selectedAnnotIds].forEach(id => deleteDoc(_annotRef(id)).catch(()=>{}));
       _deselectAnnot();
     }
+  }
+  // Ctrl+Z : annuler le dernier tracé de la session
+  if ((e.ctrlKey||e.metaKey) && e.key==='z' && !e.shiftKey) {
+    e.preventDefault();
+    const lastId = _drawHistory.pop();
+    if (lastId) deleteDoc(_annotRef(lastId)).catch(()=>{});
   }
 }
 
