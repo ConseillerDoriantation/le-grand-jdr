@@ -47,6 +47,13 @@ let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens
 let _selImg     = null;      // id de l'image sélectionnée
 let _mapMode    = false;     // true = édition carte activée (images déplaçables)
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
+// ── Bibliothèque de cartes ─────────────────────────────────────────
+let _mapLib      = { folders: [], images: [] };
+let _mapLibUnsub = null;
+let _libFolder   = null;   // null = racine, string = folderId ouvert
+let _libOpen     = true;   // section collapsible dans le tray
+const _mapLibRef = () => doc(db, `adventures/${_aid()}/vtt/mapLibrary`);
+
 // ── Butin ─────────────────────────────────────────────────────────
 let _loot            = { stash: [], loot: [] };
 let _lootUnsub       = null;
@@ -341,6 +348,8 @@ function _cleanup() {
   }
   if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
+  if (_mapLibUnsub) { _mapLibUnsub(); _mapLibUnsub = null; }
+  _mapLib = { folders: [], images: [] }; _libFolder = null;
   if (_lootUnsub) { _lootUnsub(); _lootUnsub = null; }
   if (_lootCloseOutside) { document.removeEventListener('mousedown', _lootCloseOutside, true); _lootCloseOutside = null; }
   _loot = { stash: [], loot: [] };
@@ -2743,6 +2752,16 @@ function _initListeners() {
     if (el) el.innerHTML=`<div class="vtt-log-entry vtt-log-roll" style="color:#ef4444">⚠ Accès refusé — ajouter <code>vttLog</code> aux règles Firestore</div>`;
   }));
 
+  // Bibliothèque de cartes (MJ only)
+  if (STATE.isAdmin) {
+    _mapLibUnsub = onSnapshot(_mapLibRef(), snap => {
+      _mapLib = snap.exists() ? snap.data() : {};
+      if (!Array.isArray(_mapLib.folders)) _mapLib.folders = [];
+      if (!Array.isArray(_mapLib.images))  _mapLib.images  = [];
+      _renderLibSection();
+    }, () => {});
+  }
+
   // Butin d'aventure
   _lootUnsub = onSnapshot(_lootRef(), snap => {
     _loot = snap.exists() ? snap.data() : {};
@@ -3865,6 +3884,10 @@ async function _handleUpload(file) {
     const url = json.data.url;
     const imgs=[...(_activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:_activePage.cols,h:_activePage.rows}];
     await updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs});
+    // Sauver dans la bibliothèque
+    const entry = { id: crypto.randomUUID(), url, name: file.name, folderId: _libFolder || null };
+    const updLib = { folders: _mapLib.folders||[], images: [...(_mapLib.images||[]), entry] };
+    setDoc(_mapLibRef(), updLib).catch(()=>{});
     showNotif('Image ajoutée !','success');
   } catch(e) { console.error(e); showNotif('Erreur upload : '+e.message,'error'); }
 }
@@ -3897,6 +3920,123 @@ function _keyHandler(e) {
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// BIBLIOTHÈQUE DE CARTES
+// ═══════════════════════════════════════════════════════════════════
+
+async function _saveMapLib() {
+  await setDoc(_mapLibRef(), { folders: _mapLib.folders, images: _mapLib.images });
+}
+
+function _renderLibSection() {
+  const el = document.getElementById('vtt-tray-library');
+  if (!el) return;
+
+  if (!_libOpen) { el.innerHTML = ''; return; }
+
+  const folders = _mapLib.folders || [];
+  const images  = _mapLib.images  || [];
+  const curFolder = _libFolder ? folders.find(f => f.id === _libFolder) : null;
+  const visible = _libFolder
+    ? images.filter(i => i.folderId === _libFolder)
+    : images.filter(i => !i.folderId);
+
+  const folderChips = !_libFolder ? folders.map(f => {
+    const cnt = images.filter(i => i.folderId === f.id).length;
+    return `<div class="vtt-lib-folder-chip" onclick="window._vttLibOpenFolder('${f.id}')">
+      <span>📁 ${_esc(f.name)}</span>
+      <span class="vtt-lib-chip-cnt">${cnt}</span>
+      <button class="vtt-icon-btn" onclick="event.stopPropagation();window._vttLibDelFolder('${f.id}')" title="Supprimer le dossier">✕</button>
+    </div>`;
+  }).join('') : '';
+
+  const imgGrid = visible.length
+    ? `<div class="vtt-lib-grid">${visible.map(img => `
+        <div class="vtt-lib-card" title="${_esc(img.name||'')}">
+          <img src="${img.url}" loading="lazy" onerror="this.parentNode.classList.add('vtt-lib-card--err')">
+          <div class="vtt-lib-card-ov">
+            <button onclick="window._vttLibPlace('${img.id}')" title="Placer sur la carte">▶</button>
+            ${folders.length && !_libFolder ? `<button onclick="window._vttLibMoveMenu('${img.id}',event)" title="Déplacer dans un dossier">📁</button>` : ''}
+            ${_libFolder ? `<button onclick="window._vttLibMoveRoot('${img.id}')" title="Retirer du dossier">↩</button>` : ''}
+            <button onclick="window._vttLibDelImg('${img.id}')" title="Supprimer">🗑</button>
+          </div>
+          <div class="vtt-lib-card-name">${_esc(img.name||'image')}</div>
+        </div>`).join('')}</div>`
+    : `<div class="vtt-tray-empty">Aucune image${_libFolder ? ' dans ce dossier' : ''}</div>`;
+
+  el.innerHTML = `
+    ${_libFolder
+      ? `<button class="vtt-lib-back" onclick="window._vttLibOpenFolder(null)">← ${_esc(curFolder?.name||'Racine')}</button>`
+      : folderChips}
+    ${imgGrid}`;
+}
+
+window._vttLibOpenFolder  = (id) => { _libFolder = id; _renderLibSection(); };
+window._vttLibToggle      = ()  => { _libOpen = !_libOpen; _renderLibSection();
+  document.getElementById('vtt-lib-toggle')?.classList.toggle('open', _libOpen); };
+
+window._vttLibNewFolder   = () => {
+  const name = prompt('Nom du dossier :')?.trim();
+  if (!name) return;
+  _mapLib.folders.push({ id: crypto.randomUUID(), name });
+  _saveMapLib();
+};
+
+window._vttLibDelFolder   = (id) => {
+  // Retirer les images du dossier (les remettre en racine)
+  _mapLib.images  = _mapLib.images.map(i => i.folderId === id ? { ...i, folderId: null } : i);
+  _mapLib.folders = _mapLib.folders.filter(f => f.id !== id);
+  if (_libFolder === id) _libFolder = null;
+  _saveMapLib();
+};
+
+window._vttLibDelImg      = (id) => {
+  _mapLib.images = _mapLib.images.filter(i => i.id !== id);
+  _saveMapLib();
+};
+
+window._vttLibMoveRoot    = (id) => {
+  _mapLib.images = _mapLib.images.map(i => i.id === id ? { ...i, folderId: null } : i);
+  _saveMapLib();
+};
+
+window._vttLibMoveMenu    = (imgId, evt) => {
+  evt.stopPropagation();
+  // Mini popup de sélection de dossier
+  const existing = document.getElementById('vtt-lib-move-popup');
+  if (existing) { existing.remove(); return; }
+  const popup = document.createElement('div');
+  popup.id = 'vtt-lib-move-popup';
+  popup.className = 'vtt-lib-move-popup';
+  popup.innerHTML = _mapLib.folders.map(f =>
+    `<div class="vtt-lib-move-opt" onclick="window._vttLibMoveTo('${imgId}','${f.id}');document.getElementById('vtt-lib-move-popup')?.remove()">📁 ${_esc(f.name)}</div>`
+  ).join('') || '<div style="padding:.4rem;font-size:.75rem;color:var(--text-dim)">Aucun dossier</div>';
+  const rect = evt.currentTarget.getBoundingClientRect();
+  popup.style.top  = (rect.bottom + 4) + 'px';
+  popup.style.left = rect.left + 'px';
+  document.body.appendChild(popup);
+  const close = (e) => { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('mousedown', close, true); } };
+  setTimeout(() => document.addEventListener('mousedown', close, true), 10);
+};
+
+window._vttLibMoveTo      = (imgId, folderId) => {
+  _mapLib.images = _mapLib.images.map(i => i.id === imgId ? { ...i, folderId } : i);
+  _saveMapLib();
+};
+
+window._vttLibPlace       = (imgId) => {
+  if (!_activePage) { showNotif('Aucune page active', 'error'); return; }
+  const img = _mapLib.images.find(i => i.id === imgId);
+  if (!img) return;
+  const imgs = [...(_activePage.backgroundImages??[]), {
+    id: Date.now().toString(), url: img.url, x: 0, y: 0,
+    w: _activePage.cols, h: _activePage.rows,
+  }];
+  updateDoc(_pgRef(_activePage.id), { backgroundImages: imgs })
+    .then(() => showNotif('Image placée sur la carte', 'success'))
+    .catch(() => showNotif('Erreur lors du placement', 'error'));
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // BUTIN D'AVENTURE
@@ -4184,10 +4324,10 @@ function _buildHtml() {
     <div class="vtt-tool-group vtt-right">
       <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
       ${mj?`
-        <button class="vtt-btn-sm" id="vtt-map-mode-btn" onclick="window._vttToggleMapMode()" title="Activer l'édition des images (🔒 verrouillé par défaut — évite les déplacements accidentels)">🗺 Carte 🔒</button>
-        <button class="vtt-btn-sm" onclick="window._vttAddImageUrl()"  title="Fond par URL">🖼 URL</button>
-        <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload via ImgBB">📁 Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
+        <button class="vtt-btn-sm" id="vtt-map-mode-btn" onclick="window._vttToggleMapMode()" title="Activer l'édition des images">🗺 Carte</button>
+        <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via ImgBB — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
         <button class="vtt-btn-sm" onclick="window._vttSetImgbbKey()" title="Configurer la clé API ImgBB">🔑</button>
+        <div class="vtt-tb-sep"></div>
         <button class="vtt-btn-sm" onclick="window._vttToggleCombat()" title="Démarrer/arrêter le combat">⚔ Combat</button>
         <button class="vtt-btn-sm" onclick="window._vttNextRound()"    title="Tour suivant">▶ Tour</button>`:''}
     </div>
@@ -4209,6 +4349,16 @@ function _buildHtml() {
       </div>
       <div class="vtt-tray-section">
         <div id="vtt-tray-tokens"></div>
+      </div>
+      <div class="vtt-tray-section vtt-tray-section--lib">
+        <div class="vtt-tray-section-hd vtt-tray-collapsible" onclick="window._vttLibToggle()">
+          <span>📁 Bibliothèque</span>
+          <div style="display:flex;gap:3px;align-items:center">
+            <button class="vtt-tray-add-btn" onclick="event.stopPropagation();window._vttLibNewFolder()" title="Nouveau dossier">📁</button>
+            <span id="vtt-lib-toggle" class="vtt-tray-count open">▲</span>
+          </div>
+        </div>
+        <div id="vtt-tray-library"></div>
       </div>
     </div>`:''}
     <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
