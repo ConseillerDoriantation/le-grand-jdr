@@ -97,8 +97,9 @@ async function renderQuestsPage() {
     loadCollection('characters').catch(() => []),
   ]);
 
-  // Premier personnage appartenant au joueur
-  const myChar = STATE.isAdmin ? null : (chars.find(c => c.uid === uid) || null);
+  // Personnages du joueur (peut en avoir plusieurs)
+  const myChars = STATE.isAdmin ? [] : chars.filter(c => c.uid === uid);
+  const myChar  = myChars[0] || null; // utilisé pour le check "déjà rejoint"
 
   // Tri : actives → terminées → échouées, puis par date desc
   const sorted = [...quests].sort((a, b) => {
@@ -109,8 +110,9 @@ async function renderQuestsPage() {
     return (b.createdAt || '') > (a.createdAt || '') ? 1 : -1;
   });
 
-  window._questItems  = quests;
-  window._questMyChar = myChar;
+  window._questItems   = quests;
+  window._questMyChar  = myChar;
+  window._questMyChars = myChars;
 
   const activeCount = quests.filter(q => q.statut === 'active').length;
 
@@ -133,36 +135,90 @@ async function renderQuestsPage() {
 
 // ── Toggle participation ──────────────────────
 window._questToggleJoin = async function (id) {
-  const q      = (window._questItems || []).find(x => x.id === id);
-  const myChar = window._questMyChar;
-  if (!q || !myChar) return;
+  const q   = (window._questItems || []).find(x => x.id === id);
+  if (!q) return;
 
   const uid   = STATE.user?.uid;
   const parts = Array.isArray(q.participants) ? [...q.participants] : [];
   const idx   = parts.findIndex(p => p.uid === uid);
 
   if (idx >= 0) {
+    // Quitter — pas besoin de choisir le personnage
     parts.splice(idx, 1);
+    await _questSaveParts(id, parts, true);
   } else {
-    parts.push({
-      uid,
-      charId: myChar.id,
-      nom:    myChar.nom    || '?',
-      photo:  myChar.photo  || null,
-      photoX: myChar.photoX || 0,
-      photoY: myChar.photoY || 0,
-    });
+    // Rejoindre — sélectionner le personnage si plusieurs
+    const myChars = window._questMyChars || [];
+    if (myChars.length > 1) {
+      _questOpenCharPicker(id, myChars);
+    } else {
+      if (!myChars[0]) return;
+      await _questJoinWithChar(id, myChars[0]);
+    }
   }
+};
 
+function _questOpenCharPicker(questId, chars) {
+  const rows = chars.map(c => {
+    const pos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
+    const avatar = c.photo
+      ? `<img src="${_esc(c.photo)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;object-position:${pos};flex-shrink:0">`
+      : `<div style="width:38px;height:38px;border-radius:50%;background:rgba(79,140,255,.18);
+           flex-shrink:0;display:flex;align-items:center;justify-content:center;
+           font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:var(--gold)">
+           ${(c.nom || '?')[0].toUpperCase()}</div>`;
+    const sub = [c.classe, c.race].filter(Boolean).join(' · ');
+    return `<button class="btn btn-outline"
+        style="display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;text-align:left;width:100%"
+        onclick="window._questPickChar('${_esc(questId)}','${_esc(c.id)}')">
+        ${avatar}
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:.88rem;color:var(--text)">${_esc(c.nom || '?')}</div>
+          ${sub ? `<div style="font-size:.72rem;color:var(--text-dim)">${_esc(sub)}</div>` : ''}
+        </div>
+      </button>`;
+  }).join('');
+
+  openModal('Quel personnage rejoint cette quête ?', `
+    <div style="display:flex;flex-direction:column;gap:.45rem">${rows}</div>
+    <div style="margin-top:.75rem;text-align:right">
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>`);
+}
+
+window._questPickChar = async function (questId, charId) {
+  closeModal();
+  const char = (window._questMyChars || []).find(c => c.id === charId);
+  if (!char) return;
+  await _questJoinWithChar(questId, char);
+};
+
+async function _questJoinWithChar(id, char) {
+  const q   = (window._questItems || []).find(x => x.id === id);
+  if (!q) return;
+  const uid   = STATE.user?.uid;
+  const parts = Array.isArray(q.participants) ? [...q.participants] : [];
+  parts.push({
+    uid,
+    charId: char.id,
+    nom:    char.nom    || '?',
+    photo:  char.photo  || null,
+    photoX: char.photoX || 0,
+    photoY: char.photoY || 0,
+  });
+  await _questSaveParts(id, parts, false);
+}
+
+async function _questSaveParts(id, parts, leaving) {
   try {
     await saveDoc('quests', id, { participants: parts });
     invalidateCache('quests');
-    showNotif(idx >= 0 ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', idx >= 0 ? 'info' : 'success');
+    showNotif(leaving ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', leaving ? 'info' : 'success');
     await renderQuestsPage();
   } catch {
     showNotif('Erreur lors de la mise à jour.', 'error');
   }
-};
+}
 
 // ── Modales admin ─────────────────────────────
 window._questNew  = () => _openQuestModal(null);

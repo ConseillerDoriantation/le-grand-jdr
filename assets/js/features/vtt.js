@@ -1967,10 +1967,11 @@ function _renderInspector(t) {
     const atkLabel = t.npcId
       ? (npcWeapon.nom || npcCombat.weaponName ? (npcWeapon.nom || npcCombat.weaponName) + ' · ' : '') + (ld.displayAttackDice || '1d6') + _signed(ld.displayAttack ?? 0)
       : (ld.displayAttackDice || (ld.displayAttack??5));
-    const pvEditHtml = STATE.isAdmin
+    const _canEditToken = STATE.isAdmin || t.ownerId === STATE.user?.uid;
+    const pvEditHtml = _canEditToken
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" onchange="window._vttSetHp(\''+t.id+'\',+this.value)">'
       : null;
-    const pmEditHtml = (STATE.isAdmin && pm !== null && pmMax !== null)
+    const pmEditHtml = (_canEditToken && pm !== null && pmMax !== null)
       ? '<input class="vtt-ins-input" type="number" value="'+pm+'" min="0" max="'+pmMax+'" onchange="window._vttSetPm(\''+t.id+'\',+this.value)">'
       : null;
     statsHtml =
