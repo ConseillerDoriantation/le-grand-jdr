@@ -265,6 +265,7 @@ async function renderShop() {
         <button class="btn btn-gold btn-sm" onclick="openCatModal()" title="Créer une catégorie">📁 Catégorie</button>
         <button class="btn btn-outline btn-sm" onclick="openItemModal()" title="Créer un article">＋ Article</button>
         <button class="btn btn-outline btn-sm" onclick="openWeaponFormatsAdmin()" title="Gérer les formats d'armes">⚙️ Formats</button>
+        <button class="btn btn-outline btn-sm" onclick="openShopExportModal()" title="Exporter / Importer la boutique">⬆️ Export</button>
       </div>`;
   }
 
@@ -2041,6 +2042,281 @@ function openShopItemModal(item){ openItemModal(item?.id); }
 async function editShopItem(id){ openItemModal(id); }
 function filterShop(){}
 
+// ══════════════════════════════════════════════════════════════════════════════
+// EXPORT / IMPORT
+// ══════════════════════════════════════════════════════════════════════════════
+
+function openShopExportModal() {
+  const catRows = _cats.map(cat => {
+    const count = _items.filter(i => i.categorieId === cat.id).length;
+    return `<label class="sh-export-cat-row">
+      <input type="checkbox" class="sh-export-cat-cb" value="${_esc(cat.id)}" checked>
+      <span class="sh-export-cat-label">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>
+      <span class="sh-export-cat-count">${count} article${count !== 1 ? 's' : ''}</span>
+    </label>`;
+  }).join('');
+
+  openModal('📦 Export / Import Boutique', `
+    <div class="sh-export-tabs">
+      <button class="sh-export-tab sh-export-tab--active" id="sh-etab-export"
+        onclick="window._shopTabSwitch('export')">📤 Exporter</button>
+      <button class="sh-export-tab" id="sh-etab-import"
+        onclick="window._shopTabSwitch('import')">📥 Importer</button>
+    </div>
+
+    <div id="sh-tab-export">
+      <div class="form-group" style="margin-bottom:.6rem">
+        <label style="margin-bottom:.35rem;display:block">Catégories</label>
+        <div style="display:flex;gap:.4rem;margin-bottom:.4rem">
+          <button class="btn btn-outline btn-sm" type="button"
+            onclick="window._shopExportSelectAll(true)">Tout</button>
+          <button class="btn btn-outline btn-sm" type="button"
+            onclick="window._shopExportSelectAll(false)">Aucun</button>
+        </div>
+        <div class="sh-export-cat-list">
+          ${catRows || '<em style="color:var(--text-dim)">Aucune catégorie.</em>'}
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:.75rem">
+        <label style="margin-bottom:.35rem;display:block">Format</label>
+        <div class="sh-export-format-row">
+          <label><input type="radio" name="sh-export-fmt" value="json" checked> JSON</label>
+          <label><input type="radio" name="sh-export-fmt" value="csv"> CSV</label>
+          <label><input type="radio" name="sh-export-fmt" value="md"> Markdown</label>
+        </div>
+      </div>
+      <button class="btn btn-gold" onclick="window._shopDoExport()">⬇️ Télécharger</button>
+    </div>
+
+    <div id="sh-tab-import" style="display:none">
+      <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.6rem">
+        Importe un fichier JSON exporté depuis cette boutique. Les catégories et articles
+        sont ajoutés sans écraser l'existant.
+      </p>
+      <div class="form-group" style="margin-bottom:.6rem">
+        <label style="margin-bottom:.35rem;display:block">Fichier JSON</label>
+        <input type="file" id="sh-import-file" accept=".json"
+          style="font-size:.82rem;color:var(--text)"
+          onchange="window._shopPreviewImport(this)">
+      </div>
+      <div id="sh-import-preview"></div>
+      <div id="sh-import-actions" style="display:none;margin-top:.6rem">
+        <button class="btn btn-gold" onclick="window._shopDoImport()">📥 Importer</button>
+      </div>
+    </div>
+  `);
+}
+
+window._shopTabSwitch = function(tab) {
+  document.getElementById('sh-tab-export').style.display = tab === 'export' ? '' : 'none';
+  document.getElementById('sh-tab-import').style.display = tab === 'import' ? '' : 'none';
+  document.getElementById('sh-etab-export').classList.toggle('sh-export-tab--active', tab === 'export');
+  document.getElementById('sh-etab-import').classList.toggle('sh-export-tab--active', tab === 'import');
+};
+
+window._shopExportSelectAll = function(checked) {
+  document.querySelectorAll('.sh-export-cat-cb').forEach(cb => { cb.checked = checked; });
+};
+
+// ── Construction des données d'export ─────────────────────────────────────────
+function _shopBuildExportData(catIds) {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    categories: _cats
+      .filter(c => catIds.includes(c.id))
+      .map(cat => ({
+        nom:      cat.nom,
+        template: cat.template || 'classique',
+        emoji:    cat.emoji    || '',
+        items: _items
+          .filter(i => i.categorieId === cat.id)
+          .map(item => {
+            const exp = { nom: item.nom || '' };
+            // Champs communs
+            const fields = [
+              'rarete','prix','dispo','image',
+              'type','effet','description',
+              'degats','degatsStats','degatsStat','toucherStat','toucher','portee',
+              'format','sousType',
+              'slotArmure','typeArmure','slotBijou',
+              'ca','stats','traits',
+              'for','dex','in','sa','co','ch',
+            ];
+            fields.forEach(f => { if (item[f] !== undefined) exp[f] = item[f]; });
+            return exp;
+          }),
+      })),
+  };
+}
+
+// ── Formateurs ─────────────────────────────────────────────────────────────────
+function _shopExportToJson(data) {
+  return JSON.stringify(data, null, 2);
+}
+
+function _shopExportToCsv(data) {
+  const cols = [
+    'categorie','template','nom','type','rarete','degats','degatsStats','toucherStat',
+    'portee','format','sousType','slotArmure','typeArmure','slotBijou','ca',
+    'for','dex','in','sa','co','ch','traits','effet','description','prix','dispo',
+  ];
+  const esc = v => {
+    const s = v === undefined || v === null ? '' : String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const rows = [cols.join(',')];
+  data.categories.forEach(cat => {
+    cat.items.forEach(item => {
+      rows.push(cols.map(c => {
+        if (c === 'categorie') return esc(cat.nom);
+        if (c === 'template')  return esc(cat.template);
+        if (c === 'traits')    return esc(Array.isArray(item.traits) ? item.traits.join(' | ') : (item.traits || ''));
+        if (c === 'degatsStats') return esc(Array.isArray(item.degatsStats) ? item.degatsStats.join('+') : (item.degatsStats || ''));
+        return esc(item[c]);
+      }).join(','));
+    });
+  });
+  return rows.join('\n');
+}
+
+function _shopExportToMd(data) {
+  const rarName = r => RARETE_NAMES[parseInt(r)] || '';
+  const lines = [
+    `# Export Boutique`,
+    `*Exporté le ${new Date().toLocaleDateString('fr-FR')} — ${data.categories.reduce((a, c) => a + c.items.length, 0)} articles*`,
+    '',
+  ];
+  data.categories.forEach(cat => {
+    lines.push(`## ${cat.emoji || ''} ${cat.nom}`.trim(), '');
+    if (!cat.items.length) { lines.push('*Aucun article.*', ''); return; }
+    cat.items.forEach(item => {
+      lines.push(`### ${item.nom}`);
+      if (item.rarete)      lines.push(`- **Rareté** : ${rarName(item.rarete)}`);
+      if (item.type)        lines.push(`- **Type** : ${item.type}`);
+      if (item.degats) {
+        const mods = Array.isArray(item.degatsStats) ? item.degatsStats.map(s => `+${_statShort(s)}`).join('') : '';
+        lines.push(`- **Dégâts** : ${item.degats}${mods}`);
+      }
+      if (item.toucherStat) lines.push(`- **Toucher** : +${_statShort(item.toucherStat)}`);
+      if (item.portee)      lines.push(`- **Portée** : ${item.portee}`);
+      if (item.ca)          lines.push(`- **CA bonus** : ${item.ca}`);
+      if (item.slotArmure)  lines.push(`- **Emplacement** : ${item.slotArmure} (${item.typeArmure || ''})`);
+      if (item.slotBijou)   lines.push(`- **Slot** : ${item.slotBijou}`);
+      const bonuses = _formatStatBonuses(item);
+      if (bonuses.length)   lines.push(`- **Bonus** : ${bonuses.join(' · ')}`);
+      const traits = Array.isArray(item.traits) ? item.traits : [];
+      if (traits.length)    lines.push(`- **Traits** : ${traits.join(', ')}`);
+      if (item.effet)       lines.push(`- **Effet** : ${item.effet}`);
+      if (item.description) lines.push(`- **Description** : ${item.description}`);
+      const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+      lines.push(`- **Prix** : ${item.prix || 0} or · **Stock** : ${_getItemStockText(dispo)}`);
+      lines.push('');
+    });
+  });
+  return lines.join('\n');
+}
+
+function _shopDownload(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+}
+
+window._shopDoExport = function() {
+  const catIds = [...document.querySelectorAll('.sh-export-cat-cb:checked')].map(cb => cb.value);
+  if (!catIds.length) { showNotif('Sélectionne au moins une catégorie.', 'error'); return; }
+  const fmt  = document.querySelector('input[name="sh-export-fmt"]:checked')?.value || 'json';
+  const data = _shopBuildExportData(catIds);
+  const date = new Date().toISOString().slice(0, 10);
+  if (fmt === 'json') {
+    _shopDownload(`boutique-${date}.json`, _shopExportToJson(data), 'application/json');
+  } else if (fmt === 'csv') {
+    _shopDownload(`boutique-${date}.csv`, _shopExportToCsv(data), 'text/csv;charset=utf-8');
+  } else {
+    _shopDownload(`boutique-${date}.md`, _shopExportToMd(data), 'text/markdown;charset=utf-8');
+  }
+  showNotif('Fichier exporté !', 'success');
+};
+
+// ── Import ─────────────────────────────────────────────────────────────────────
+let _importData = null;
+
+window._shopPreviewImport = function(input) {
+  const file = input.files?.[0];
+  const preview  = document.getElementById('sh-import-preview');
+  const actions  = document.getElementById('sh-import-actions');
+  _importData = null;
+  if (actions) actions.style.display = 'none';
+  if (!file) { if (preview) preview.innerHTML = ''; return; }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data?.categories?.length) throw new Error('Format invalide');
+      _importData = data;
+      const rows = data.categories.map(cat => {
+        const n = cat.items?.length || 0;
+        return `<label class="sh-export-cat-row">
+          <input type="checkbox" class="sh-import-cat-cb" value="${_esc(cat.nom)}" checked>
+          <span class="sh-export-cat-label">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>
+          <span class="sh-export-cat-count">${n} article${n !== 1 ? 's' : ''}</span>
+        </label>`;
+      }).join('');
+      if (preview) preview.innerHTML = `
+        <p style="font-size:.8rem;color:var(--gold);margin-bottom:.4rem">
+          ${data.categories.length} catégorie(s) trouvée(s) — sélectionne celles à importer :
+        </p>
+        <div class="sh-export-cat-list">${rows}</div>`;
+      if (actions) actions.style.display = '';
+    } catch {
+      if (preview) preview.innerHTML = `<p style="color:#ff6b6b;font-size:.82rem">Fichier invalide. Utilise un JSON exporté depuis cette boutique.</p>`;
+    }
+  };
+  reader.readAsText(file);
+};
+
+window._shopDoImport = async function() {
+  if (!_importData) return;
+  const selected = new Set(
+    [...document.querySelectorAll('.sh-import-cat-cb:checked')].map(cb => cb.value)
+  );
+  if (!selected.size) { showNotif('Sélectionne au moins une catégorie.', 'error'); return; }
+
+  const toImport = _importData.categories.filter(c => selected.has(c.nom));
+  let catCount = 0, itemCount = 0;
+
+  try {
+    for (const cat of toImport) {
+      const newCatId = await addToCol('shopCategories', {
+        nom:      cat.nom,
+        template: cat.template || 'classique',
+        emoji:    cat.emoji || '',
+        image:    '',
+        ordre:    _cats.length + catCount,
+        sousCats: [],
+      });
+      catCount++;
+      for (const item of (cat.items || [])) {
+        await addToCol('shop', { ...item, categorieId: newCatId, ordre: itemCount });
+        itemCount++;
+      }
+    }
+    showNotif(`Import terminé : ${catCount} catégorie(s), ${itemCount} article(s).`, 'success');
+    _importData = null;
+    closeModalDirect();
+    await renderShop();
+  } catch (e) {
+    console.error('[import]', e);
+    showNotif('Erreur lors de l\'import.', 'error');
+  }
+};
+
 Object.assign(window,{
   renderShop, shopGoHome, shopGoCat, shopGoSubCat, shopPage,
   openCatModal, saveCat, deleteCat,
@@ -2053,4 +2329,5 @@ Object.assign(window,{
   shopFilterSearch, shopFilterBy, shopFilterReset, shopToggleTag,
   shopSetSort,
   openWeaponFormatsAdmin,
+  openShopExportModal,
 });
