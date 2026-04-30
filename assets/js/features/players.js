@@ -2,6 +2,7 @@
 // PLAYERS.JS — Présentation des Personnages
 // Sommaire avec portraits + fiches narratives complètes
 // ══════════════════════════════════════════════════════════════════════════════
+import Sortable from '../vendor/sortable.esm.js';
 import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
@@ -10,6 +11,22 @@ import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _trunc, _toRoman, _initials } from '../shared/html.js';
 import { getMod as _getMod, calcCA as _ca, calcPVMax as _pvMax, calcPMMax as _pmMax, calcOr as _gold, STAT_META } from '../shared/char-stats.js';
 import { imageDropZoneHTML, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
+import { richTextEditorHtml, getRichTextHtml, richTextContentHtml, bindRichTextEditors } from '../shared/rich-text.js';
+
+// ── Couleurs de tags (même palette que tabs.js) ───────────────────────────────
+const _TAG_COLORS = [
+  ['rgba(79,140,255,.14)','rgba(79,140,255,.35)','#7fb0ff'],
+  ['rgba(34,195,142,.14)','rgba(34,195,142,.35)','#22c38e'],
+  ['rgba(232,184,75,.14)','rgba(232,184,75,.35)','#e8b84b'],
+  ['rgba(180,127,255,.14)','rgba(180,127,255,.35)','#b47fff'],
+  ['rgba(255,107,107,.14)','rgba(255,107,107,.35)','#ff8080'],
+  ['rgba(245,158,11,.14)', 'rgba(245,158,11,.35)', '#f59e0b'],
+];
+function _tagColor(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) & 0xffff;
+  return _TAG_COLORS[h % _TAG_COLORS.length];
+}
 
 // ── Crop image ────────────────────────────────────────────────────────────────
 let _ppCrop = {
@@ -23,10 +40,16 @@ const _ppc = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
 const STORE = {
   items:         [],
   activeId:      '',
+  filterTag:     '',
   presentations: [],
   characters:    [],
   achievements:  [],
 };
+
+// ── localStorage ordre (fallback hors-ligne) ──────────────────────────────────
+const _LS_KEY = 'pp-ordre';
+const _getLocalOrdre = () => { try { return JSON.parse(localStorage.getItem(_LS_KEY)||'null'); } catch { return null; } };
+const _setLocalOrdre = ids => { try { localStorage.setItem(_LS_KEY, JSON.stringify(ids)); } catch {} };
 
 // STAT_META → importé depuis shared/char-stats.js
 
@@ -47,13 +70,14 @@ const _getStat = (c, k) => Math.min(22, (c?.stats?.[k] || 8) + (c?.statsBonus?.[
 function _buildRecord(char=null, pres=null) {
   const level = char?.niveau || 1;
   const nom = char?.nom || "Personnage";
-  const classe = pres?.classe?.trim() || '';
-  const race   = pres?.race?.trim()   || '';
-  const joueur = pres?.joueur?.trim() || char?.ownerPseudo || '';
+  const classe = char?.classe?.trim() || pres?.classe?.trim() || '';
+  const race   = char?.race?.trim()   || pres?.race?.trim()   || '';
+  const joueur = char?.ownerPseudo || pres?.joueur?.trim() || '';
   const imageUrl     = pres?.imageUrl || char?.photo || '';  // illustration narrative (fiche)
   const portraitUrl  = char?.photo || pres?.imageUrl || '';  // portrait fiche (sommaire)
-  const bio    = pres?.bio?.trim() || '';
-  const archive= pres?.archive?.trim() || '';  // Fragment d'archive narratif
+  const bio    = pres?.bio?.trim() || '';          // legacy plain text
+  const content= pres?.content || '';              // rich text HTML
+  const archive= pres?.archive?.trim() || '';
   const source = pres?.archiveSource?.trim() || '';
   const chap   = pres?.chapitre?.trim() || '';  // "Chapitre I : Khaarys"
 
@@ -66,7 +90,7 @@ function _buildRecord(char=null, pres=null) {
     id:             pres?.id || `c:${char?.id||Math.random().toString(36).slice(2)}`,
     presentationId: pres?.id || '',
     charId:         pres?.charId || char?.id || '',
-    nom, classe, race, joueur, imageUrl, portraitUrl, bio, archive, source, chap, level,
+    nom, classe, race, joueur, imageUrl, portraitUrl, bio, content, archive, source, chap, level,
     subtitle:       [classe,race].filter(Boolean).join(' · '),
     titles:         char?.titres || [],
     emoji:          pres?.emoji?.trim() || '',
@@ -91,6 +115,7 @@ function _buildRecord(char=null, pres=null) {
     deckMax:        char ? (3+Math.min(0,_getMod(char,'intelligence'))+Math.floor(Math.max(0,_getMod(char,'intelligence'))*Math.pow(Math.max(0,(char?.niveau||1)-1),.75))) : null,
     quests:         char?.quetes?.length ?? 0,
     inventoryCount: char?.inventaire?.length ?? 0,
+    tags:           pres?.tags || [],
     photoZoom:      char?.photoZoom || 1,
     photoX:         char?.photoX   || 0,
     photoY:         char?.photoY   || 0,
@@ -111,9 +136,14 @@ function _buildDataset(presentations=[], characters=[]) {
     return _buildRecord(c,p);
   });
   presentations.filter(p=>!usedPresIds.has(p.id)).forEach(p=>items.push(_buildRecord(null,p)));
+  const lsOrdre = _getLocalOrdre();
   return items
     .filter(item => STATE.isAdmin || item.visible !== false)
-    .sort((a,b) => (a.ordre??999)-(b.ordre??999) || a.nom.localeCompare(b.nom,'fr',{sensitivity:'base'}));
+    .sort((a,b) => {
+      const ao = (a.ordre??999) !== 999 ? a.ordre : (lsOrdre ? (lsOrdre.indexOf(a.id)+1||999) : 999);
+      const bo = (b.ordre??999) !== 999 ? b.ordre : (lsOrdre ? (lsOrdre.indexOf(b.id)+1||999) : 999);
+      return ao - bo || a.nom.localeCompare(b.nom,'fr',{sensitivity:'base'});
+    });
 }
 
 // ── Portrait inline ───────────────────────────────────────────────────────────
@@ -139,51 +169,68 @@ function _portrait(item, size=52, radius='50%') {
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderSommaire(items) {
   const colors = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const filterTag = STORE.filterTag;
+  const displayed = filterTag
+    ? items.filter(i => (i.tags||[]).some(t => t.toLowerCase() === filterTag.toLowerCase()))
+    : items;
 
-  const cards = items.map((item, idx) => {
+  const isAdmin = STATE.isAdmin;
+
+  const cards = displayed.map((item, idx) => {
     const col   = colors[item.nom.charCodeAt(0)%colors.length];
     const pos   = `${50+(item.photoX||0)*50}% ${50+(item.photoY||0)*50}%`;
     const chap  = item.chap || `Chapitre ${_toRoman(idx+1)} : ${item.nom}`;
-    const locked = !item.bio && !item.portraitUrl && !item.imageUrl;
+    const locked = !item.content && !item.bio && !item.portraitUrl && !item.imageUrl;
+    const hidden = item.visible === false;
 
-    return `<button onclick="window._ppOpenFiche('${_esc(item.id)}')"
-      style="display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;
-      background:var(--bg-elevated);border:1px solid ${locked?'var(--border)':col+'44'};
-      border-radius:12px;cursor:pointer;transition:all .18s;text-align:left;
-      opacity:${locked?.55:1}"
-      onmouseover="this.style.background='${col}10';this.style.borderColor='${col}';this.style.transform='translateX(3px)'"
-      onmouseout="this.style.background='var(--bg-elevated)';this.style.borderColor='${locked?'var(--border)':col+'44'}';this.style.transform=''">
-
-      <!-- Portrait circulaire — toujours le portrait de la fiche de personnage -->
-      <div style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;
-        background:${col}18;border:2px solid ${locked?'rgba(255,255,255,.1)':col};
-        display:flex;align-items:center;justify-content:center">
-        ${item.portraitUrl
-          ? `<img src="${_esc(item.portraitUrl)}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
-          : locked
-            ? `<span style="font-size:1.1rem;opacity:.4">🔒</span>`
-            : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:${col}">${item.initials}</span>`}
-      </div>
-
-      <div style="flex:1;min-width:0">
-        <div style="font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;
-          color:${locked?'var(--text-dim)':'var(--text)'};
-          white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(chap)}</div>
-        ${item.subtitle ? `<div style="font-size:.65rem;color:${col};margin-top:1px">${_esc(item.subtitle)}</div>` : ''}
-      </div>
-    </button>`;
+    return `<div class="pp-card-wrap${isAdmin?' pp-card-admin':''}" data-pp-id="${_esc(item.id)}"
+      style="opacity:${hidden?.45:1}">
+      ${isAdmin ? `<div class="pp-drag-handle" title="Réordonner">⠿</div>` : ''}
+      <button class="pp-card-btn" onclick="window._ppOpenFiche('${_esc(item.id)}')"
+        style="border-color:${locked?'var(--border)':col+'44'}"
+        onmouseover="this.style.background='${col}10';this.style.borderColor='${col}'"
+        onmouseout="this.style.background='';this.style.borderColor='${locked?'var(--border)':col+'44'}'">
+        <div style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;
+          background:${col}18;border:2px solid ${locked?'rgba(255,255,255,.1)':col};
+          display:flex;align-items:center;justify-content:center">
+          ${item.portraitUrl
+            ? `<img src="${_esc(item.portraitUrl)}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
+            : locked
+              ? `<span style="font-size:1.1rem;opacity:.4">🔒</span>`
+              : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:${col}">${item.initials}</span>`}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;
+            color:${locked?'var(--text-dim)':'var(--text)'};
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(chap)}</div>
+          ${item.subtitle ? `<div style="font-size:.65rem;color:${col};margin-top:1px">${_esc(item.subtitle)}</div>` : ''}
+          ${(item.tags||[]).length ? `<div style="display:flex;gap:.25rem;flex-wrap:wrap;margin-top:3px;align-items:center">
+            ${item.tags.slice(0,3).map(t => { const [bg,bc,c]=_tagColor(t); return `<span style="font-size:.58rem;padding:1px 6px;border-radius:999px;background:${bg};border:1px solid ${bc};color:${c};font-weight:600">${_esc(t)}</span>`; }).join('')}
+            ${item.tags.length > 3 ? `<span style="font-size:.58rem;color:var(--text-dim);font-weight:600">+${item.tags.length-3}</span>` : ''}
+          </div>` : ''}
+        </div>
+      </button>
+      ${isAdmin ? `<button class="pp-vis-btn" title="${hidden?'Afficher':'Masquer'} aux joueurs"
+        onclick="window._ppToggleVisible('${_esc(item.id)}')"
+        style="color:${hidden?'var(--text-dim)':'#22c38e'}">${hidden?'🚫':'👁️'}</button>` : ''}
+    </div>`;
   });
 
   return `
   <div style="text-align:center;margin-bottom:1.5rem">
     <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;font-weight:900;
       color:var(--gold);letter-spacing:3px;margin:0">Sommaire</h1>
-    <div style="width:60px;height:2px;background:var(--gold);
-      margin:.5rem auto;border-radius:1px;opacity:.6"></div>
-    <div style="font-size:.8rem;color:var(--text-dim)">${items.length} personnages</div>
+    <div style="width:60px;height:2px;background:var(--gold);margin:.5rem auto;border-radius:1px;opacity:.6"></div>
+    <div style="font-size:.8rem;color:var(--text-dim)">${displayed.length}${filterTag?` / ${items.length}`:''} personnage${items.length!==1?'s':''}</div>
+    ${isAdmin ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:.3rem">⠿ Glisser pour réordonner · 👁️ Basculer la visibilité</div>` : ''}
   </div>
+  ${filterTag ? `<div style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-bottom:1rem">
+    <span style="font-size:.75rem;color:var(--text-dim)">Filtre :</span>
+    ${(() => { const [bg,bc,c]=_tagColor(filterTag); return `<span style="font-size:.72rem;padding:3px 10px;border-radius:999px;background:${bg};border:1px solid ${bc};color:${c};font-weight:600">${_esc(filterTag)}</span>`; })()}
+    <button onclick="window._ppClearFilter()" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.8rem;padding:2px 6px;border-radius:6px;transition:color .12s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">✕ Effacer</button>
+  </div>` : ''}
 
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:.5rem;margin-bottom:2rem">
+  <div id="pp-sortable-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:.5rem;margin-bottom:2rem">
     ${cards.join('')}
   </div>`;
 }
@@ -335,35 +382,20 @@ function _renderFiche(item, items) {
         ${item.titles.slice(0,4).map(t=>`<span style="font-size:.7rem;padding:2px 8px;
           border-radius:999px;background:rgba(232,184,75,.08);
           border:1px solid rgba(232,184,75,.2);color:var(--gold)">${_esc(t)}</span>`).join('')}
-        ${STATE.isAdmin ? `
-        <button onclick="openLinkedPlayerPresent('${_esc(item.charId)}','${_esc(item.presentationId)}')"
-          style="margin-left:auto;font-size:.68rem;padding:2px 8px;border-radius:6px;
-          border:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.08);
-          color:#4f8cff;cursor:pointer">✏️ Modifier</button>` : ''}
       </div>
 
-      <!-- Bio -->
-      ${item.bio ? `
-      <div>
-        <div style="font-size:.7rem;color:var(--text-dim);font-weight:700;
-          text-transform:uppercase;letter-spacing:1.5px;margin-bottom:.5rem">Présentation</div>
-        <div style="font-size:.88rem;color:var(--text-muted);line-height:1.85">
-          ${_nl2br(item.bio)}</div>
+      <!-- Tags traits de caractère (cliquables → filtre sommaire) -->
+      ${(item.tags||[]).length ? `<div style="display:flex;gap:.35rem;flex-wrap:wrap">
+        ${item.tags.map(t => { const [bg,bc,c]=_tagColor(t); return `<button class="pp-tag-chip pp-tag-chip--view" onclick="window._ppFilterTag('${_esc(t)}')" style="background:${bg};border-color:${bc};color:${c};cursor:pointer" title="Filtrer par ce trait">${_esc(t)}</button>`; }).join('')}
       </div>` : ''}
 
-      <!-- Fragment d'archive -->
-      ${item.archive ? `
-      <div style="background:rgba(232,184,75,.04);border:1px solid rgba(232,184,75,.15);
-        border-left:3px solid var(--gold);border-radius:0 10px 10px 0;
-        padding:.85rem 1rem">
-        <div style="font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;
-          color:var(--gold);letter-spacing:2px;text-transform:uppercase;
-          margin-bottom:.5rem">✦ Fragment d'Archive</div>
-        <div style="font-size:.82rem;color:var(--text-muted);line-height:1.8;
-          font-style:italic">${_nl2br(item.archive)}</div>
-        ${item.source ? `<div style="font-size:.68rem;color:var(--text-dim);
-          margin-top:.4rem;text-align:right">— ${_esc(item.source)}</div>` : ''}
-      </div>` : ''}
+      <!-- Présentation libre (rich text) -->
+      ${item.content
+        ? richTextContentHtml({ html: item.content, className: 'pp-rich-content' })
+        : item.bio
+          ? `<div style="font-size:.88rem;color:var(--text-muted);line-height:1.85">${_nl2br(item.bio)}</div>`
+          : ''
+      }
 
       <!-- Stats visuelles -->
       ${statBars}
@@ -449,6 +481,7 @@ async function renderPlayersPage() {
   }
 
   _renderView(content);
+  _initSortable();
 }
 
 function _renderView(content) {
@@ -457,11 +490,6 @@ function _renderView(content) {
 
   content.innerHTML = `
   <div style="max-width:1000px;margin:0 auto">
-    ${STATE.isAdmin ? `
-    <div class="admin-section" style="margin-bottom:1rem">
-      <div class="admin-label">Admin</div>
-      <button class="btn btn-gold btn-sm" onclick="openPlayerPresentModal()">+ Ajouter une présentation</button>
-    </div>` : ''}
 
     <div id="pp-view-area">
       ${activeItem ? _renderFiche(activeItem, items) : _renderSommaire(items)}
@@ -471,7 +499,6 @@ function _renderView(content) {
 
 window._ppOpenFiche = async (id) => {
   STORE.activeId = id;
-  // Recharger les hauts-faits pour avoir les données à jour
   STORE.achievements = await loadCollection('achievements');
   const el = document.getElementById('pp-view-area');
   if (el) el.innerHTML = _renderFiche(STORE.items.find(i=>i.id===id), STORE.items);
@@ -481,8 +508,74 @@ window._ppOpenFiche = async (id) => {
 window._ppBack = () => {
   STORE.activeId = '';
   const el = document.getElementById('pp-view-area');
-  if (el) el.innerHTML = _renderSommaire(STORE.items);
+  if (el) {
+    el.innerHTML = _renderSommaire(STORE.items);
+    _initSortable();
+  }
 };
+
+window._ppFilterTag = (tag) => {
+  STORE.filterTag = tag;
+  STORE.activeId  = '';
+  const el = document.getElementById('pp-view-area');
+  if (el) { el.innerHTML = _renderSommaire(STORE.items); _initSortable(); }
+  window.scrollTo(0, 0);
+};
+
+window._ppClearFilter = () => {
+  STORE.filterTag = '';
+  const el = document.getElementById('pp-view-area');
+  if (el) { el.innerHTML = _renderSommaire(STORE.items); _initSortable(); }
+};
+
+window._ppToggleVisible = async (id) => {
+  const item = STORE.items.find(i=>i.id===id);
+  if (!item?.presentationId) return;
+  const newVal = item.visible === false ? true : false;
+  try {
+    await updateInCol('players', item.presentationId, { visible: newVal });
+    item.visible = newVal;
+    // Mettre à jour le DOM sans re-render complet
+    const wrap = document.querySelector(`[data-pp-id="${id}"]`);
+    if (wrap) {
+      wrap.style.opacity = newVal ? '1' : '.45';
+      const btn = wrap.querySelector('.pp-vis-btn');
+      if (btn) { btn.textContent = newVal ? '👁️' : '🚫'; btn.title = newVal ? 'Masquer aux joueurs' : 'Afficher aux joueurs'; btn.style.color = newVal ? '#22c38e' : 'var(--text-dim)'; }
+    }
+  } catch { showNotif('Erreur.', 'error'); }
+};
+
+let _ppSortable = null;
+function _initSortable() {
+  if (!STATE.isAdmin) return;
+  const list = document.getElementById('pp-sortable-list');
+  if (!list) return;
+  _ppSortable?.destroy();
+  _ppSortable = new Sortable(list, {
+    animation: 150,
+    handle: '.pp-drag-handle',
+    ghostClass: 'pp-sortable-ghost',
+    chosenClass: 'pp-sortable-chosen',
+    forceFallback: true,
+    fallbackOnBody: true,
+    delay: 100,
+    delayOnTouchOnly: true,
+    onEnd: async () => {
+      const ids = [...list.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId);
+      ids.forEach((id, idx) => {
+        const item = STORE.items.find(i=>i.id===id);
+        if (item) item.ordre = idx + 1;
+      });
+      // Fallback local immédiat
+      _setLocalOrdre(ids);
+      // Persister en batch Firestore
+      await Promise.all(ids.map((id, idx) => {
+        const item = STORE.items.find(i=>i.id===id);
+        if (item?.presentationId) return updateInCol('players', item.presentationId, { ordre: idx + 1 });
+      }).filter(Boolean));
+    },
+  });
+}
 
 // _toRoman → importé depuis shared/html.js
 
@@ -494,39 +587,26 @@ async function openPlayerPresentModal(player=null) {
   window.__ppChars = characters;
   const curCharId = player?.charId||'';
 
+  // Fonction conservée pour rétrocompatibilité éventuelle
+  const existingContent = player?.content || player?.bio || '';
+
   openModal(player?`✏️ Modifier — ${player.nom||'PJ'}`:'⚔️ Nouveau personnage', `
     <div class="form-group">
-      <label>Fiche liée</label>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:.5rem">
-        <select class="input-field" id="pp-char-id">
-          <option value="">— Aucun lien —</option>
-          ${characters.map(c=>`<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}</option>`).join('')}
-        </select>
-        <button class="btn btn-outline btn-sm" type="button" onclick="prefillPlayerPresentFromLinkedChar(true)">Préremplir</button>
-      </div>
+      <label>Fiche liée <span style="color:var(--text-dim);font-weight:400">(remplit automatiquement classe, race, joueur)</span></label>
+      <select class="input-field" id="pp-char-id">
+        <option value="">— Aucun lien —</option>
+        ${characters.map(c=>`<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}${c.classe?' — '+_esc(c.classe):''}${c.ownerPseudo?' ('+_esc(c.ownerPseudo)+')':''}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Chapitre <span style="color:var(--text-dim);font-weight:400">(ex: Chapitre I : Khaarys — laisser vide pour auto)</span></label>
+      <input class="input-field" id="pp-chap" value="${_esc(player?.chapitre||'')}" placeholder="Chapitre I : Nom">
     </div>
 
     <div class="grid-2" style="gap:.75rem">
       <div class="form-group" style="margin:0">
-        <label>Chapitre <span style="color:var(--text-dim);font-weight:400">(ex: Chapitre I : Khaarys)</span></label>
-        <input class="input-field" id="pp-chap" value="${_esc(player?.chapitre||'')}" placeholder="Chapitre I : Nom">
-      </div>
-    </div>
-
-    <div class="grid-2" style="gap:.75rem;margin-top:.75rem">
-      <div class="form-group" style="margin:0">
-        <label>Classe</label>
-        <input class="input-field" id="pp-classe" value="${_esc(player?.classe||'')}">
-      </div>
-      <div class="form-group" style="margin:0">
-        <label>Race</label>
-        <input class="input-field" id="pp-race" value="${_esc(player?.race||'')}">
-      </div>
-    </div>
-
-    <div class="grid-2" style="gap:.75rem;margin-top:.75rem">
-      <div class="form-group" style="margin:0">
-        <label>Ordre d'affichage <span style="color:var(--text-dim);font-weight:400">(1 = premier)</span></label>
+        <label>Ordre d'affichage</label>
         <input type="number" class="input-field" id="pp-ordre" value="${player?.ordre??''}" placeholder="Automatique" min="1">
       </div>
       <div class="form-group" style="margin:0">
@@ -552,7 +632,7 @@ async function openPlayerPresentModal(player=null) {
           {id:'pp-show-ca',   label:'Classe d\'Armure (CA)',key:'afficherCA',  def:true },
           {id:'pp-show-or',   label:'Or',                  key:'afficherOr',   def:false},
           {id:'pp-show-stats',label:'Statistiques',         key:'afficherStats',def:true },
-          {id: 'pp-show-lvl', label:'Niveau',              key:'afficherNiveau', def:true}
+          {id:'pp-show-lvl',  label:'Niveau',              key:'afficherNiveau',def:true }
         ].map(f => {
           const checked = player?.[f.key]!==undefined ? player[f.key] : f.def;
           return `<label style="display:flex;align-items:center;gap:.45rem;cursor:pointer;
@@ -565,16 +645,10 @@ async function openPlayerPresentModal(player=null) {
       </div>
     </div>
 
+    <!-- Présentation libre — rich text -->
     <div class="form-group" style="margin-top:.75rem">
-      <label>Présentation narrative</label>
-      <textarea class="input-field" id="pp-bio" rows="4">${_esc(player?.bio||'')}</textarea>
-    </div>
-      <textarea class="input-field" id="pp-archive" rows="3">${_esc(player?.archive||'')}</textarea>
-    </div>
-
-    <div class="form-group">
-      <label>Source du fragment</label>
-      <input class="input-field" id="pp-source" value="${_esc(player?.archiveSource||'')}" placeholder="— Recueil des voix de Granlac,">
+      <label>Présentation</label>
+      ${richTextEditorHtml({ id: 'pp-content', html: existingContent, minHeight: 220, placeholder: 'Décris librement ce personnage…' })}
     </div>
 
     <!-- Upload + crop illustration -->
@@ -609,6 +683,9 @@ async function openPlayerPresentModal(player=null) {
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
+
+  // Activer l'éditeur rich text
+  bindRichTextEditors();
 
   // Setup crop
   window._ppImgBase64 = null;
@@ -727,13 +804,7 @@ async function savePlayerPresent(id='') {
     const data = {
       charId:        document.getElementById('pp-char-id')?.value        || '',
       chapitre:      document.getElementById('pp-chap')?.value?.trim()   || '',
-      classe:        document.getElementById('pp-classe')?.value?.trim() || '',
-      race:          document.getElementById('pp-race')?.value?.trim()   || '',
-      joueur:        document.getElementById('pp-joueur')?.value?.trim() || '',
-      bio:           document.getElementById('pp-bio')?.value            || '',
-      archive:       document.getElementById('pp-archive')?.value        || '',
-      archiveSource: document.getElementById('pp-source')?.value?.trim() || '',
-      emoji:         '',
+      content:       getRichTextHtml('pp-content'),
       imageUrl,
       // Ordre + visibilité
       ordre:         parseInt(document.getElementById('pp-ordre')?.value,10) || 999,
@@ -759,13 +830,6 @@ async function savePlayerPresent(id='') {
   }
 }
 
-function prefillPlayerPresentFromLinkedChar(force=false) {
-  const charId=document.getElementById('pp-char-id')?.value||'';
-  const char=(window.__ppChars||[]).find(c=>c.id===charId);
-  if(!char) return;
-  const set=(id,v)=>{const f=document.getElementById(id);if(!f)return;if(!force&&String(f.value||'').trim())return;f.value=v;};
-  set('pp-joueur',char.ownerPseudo||'');
-}
 
 async function deletePlayerPresent(id) {
   try {
@@ -818,12 +882,6 @@ PAGES.players = renderPlayersPage;
 
 Object.assign(window, {
   renderPlayersPage,
-  openPlayerPresentModal,
-  prefillPlayerPresentFromLinkedChar,
-  savePlayerPresent,
   viewPlayerDetail,
-  editPlayerPresent,
-  openLinkedPlayerPresent,
-  deletePlayerPresent,
   openCharacterSheetFromShowcase,
 });

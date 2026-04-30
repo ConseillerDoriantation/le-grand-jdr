@@ -2,6 +2,164 @@
 
 /* ═══ PAGE-SPECIFIC ═══ */
 
+/* ── Players — sommaire D&D ─────────────────────── */
+.pp-card-wrap {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+}
+.pp-card-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .55rem .8rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background .15s, border-color .15s, transform .15s;
+  min-width: 0;
+}
+.pp-card-btn:hover { transform: translateX(2px); }
+.pp-drag-handle {
+  font-size: 1.1rem;
+  color: var(--text-dim);
+  cursor: grab;
+  padding: .25rem .1rem;
+  flex-shrink: 0;
+  opacity: .5;
+  transition: opacity .15s;
+  user-select: none;
+}
+.pp-card-admin:hover .pp-drag-handle { opacity: 1; }
+.pp-drag-handle:active { cursor: grabbing; }
+.pp-vis-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .95rem;
+  padding: .25rem .3rem;
+  border-radius: 6px;
+  flex-shrink: 0;
+  opacity: .7;
+  transition: opacity .15s;
+}
+.pp-vis-btn:hover { opacity: 1; }
+.pp-sortable-ghost { opacity: .35; }
+.pp-sortable-chosen { box-shadow: 0 4px 20px rgba(0,0,0,.3); }
+
+/* ── Players — rich text dans la fiche narrative ─ */
+.pp-rich-content {
+  font-size: .9rem;
+  line-height: 1.85;
+  color: var(--text-muted);
+}
+.pp-rich-content h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin: 1.1rem 0 .4rem;
+}
+.pp-rich-content h3 {
+  font-size: .88rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: .9rem 0 .3rem;
+}
+.pp-rich-content blockquote {
+  border-left-color: var(--gold);
+  font-style: italic;
+  font-size: .88rem;
+}
+.pp-rich-content p { margin: .35rem 0; }
+
+/* ── Players — tags traits de caractère ─────────── */
+.pp-tags-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  min-height: 2rem;
+  padding: .3rem .4rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+.pp-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  /* couleur injectée en inline via style="" */
+}
+.pp-tag-chip--view {
+  font-size: .68rem;
+  padding: 2px 8px;
+}
+.pp-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .85rem;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  opacity: .6;
+  transition: opacity .12s;
+}
+.pp-tag-remove:hover { opacity: 1; }
+/* Suggestions */
+.pp-tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .28rem;
+  margin-top: .45rem;
+}
+.pp-tag-suggest {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: .67rem;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.pp-tag-suggest:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.pp-tag-suggest--used {
+  opacity: .35;
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+.pp-tag-suggest:disabled,
+#profil-tag-input:disabled,
+#profil-tag-add:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+/* tag cliquable en vue (fiche narrative) */
+.pp-tag-chip--view {
+  transition: filter .12s;
+}
+.pp-tag-chip--view:hover {
+  filter: brightness(1.25);
+}
+
 /* Dashboard */
 .dashboard-workspace {
   display:grid;

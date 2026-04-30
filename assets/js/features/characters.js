@@ -52,7 +52,10 @@ import {
   renderCharMaitrises,
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   previewXpBar, saveXpDirect,
+  renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
+  addProfilTag, removeProfilTag, initProfilTagUi,
 } from './characters/tabs.js';
+import { bindRichTextEditors } from '../shared/rich-text.js';
 
 import {
   inlineEditText, inlineEditNum, inlineEditChip,
@@ -93,13 +96,13 @@ function filterAdminChars(pseudo, el) {
 const _LEAF_TO_TOP = {
   equipement:'combat', sorts:'combat', maitrises:'combat',
   notes:'journal',     quetes:'journal',
-  inventaire:'inventaire', compte:'compte',
+  inventaire:'inventaire', compte:'compte', profil:'profil',
   // rétro-compat
   combat:'combat', carac:'combat',
 };
 const _TOP_DEFAULTS = {
   combat:'equipement', journal:'notes',
-  inventaire:'inventaire', compte:'compte',
+  inventaire:'inventaire', compte:'compte', profil:'profil',
 };
 
 function _resolveTab(raw) {
@@ -377,6 +380,8 @@ function renderCharSheet(c, keepTab) {
         onclick="showCharTab('journal',this)">📖 Journal</button>
       <button class="cs-tab${topTab==='compte'?' active':''}"     data-tab="compte"
         onclick="showCharTab('compte',this)">💰 Compte</button>
+      <button class="cs-tab${topTab==='profil'?' active':''}"    data-tab="profil"
+        onclick="showCharTab('profil',this)">👤 Présentation</button>
     </nav>
 
     <!-- Sous-onglets Combat : Équipement · Sorts · Maîtrises -->
@@ -419,6 +424,7 @@ function _renderTab(leafTab, c, canEdit) {
     notes:       () => renderCharNotes(c, canEdit),
     quetes:      () => renderCharQuetes(c, canEdit),
     compte:      () => renderCharCompte(c, canEdit),
+    profil:      () => renderCharProfil(c, canEdit),
     // rétro-compat
     combat:      () => renderCharEquip(c, canEdit),
     carac:       () => renderCharEquip(c, canEdit),
@@ -427,6 +433,7 @@ function _renderTab(leafTab, c, canEdit) {
   area.classList.remove('cs-tab-fadein');
   void area.offsetWidth; // force reflow
   area.classList.add('cs-tab-fadein');
+  if (leafTab === 'profil') { bindRichTextEditors(); initProfilTagUi(); }
 }
 
 async function setCharAura(charId, aura) {
@@ -441,7 +448,7 @@ async function setCharAura(charId, aura) {
 }
 
 function showCharTab(tab, el) {
-  const isTopTab = ['combat','inventaire','journal','compte'].includes(tab);
+  const isTopTab = ['combat','inventaire','journal','compte','profil'].includes(tab);
   const newTop  = isTopTab ? tab : (_LEAF_TO_TOP[tab] || 'combat');
   const newLeaf = isTopTab ? (_TOP_DEFAULTS[tab] || tab) : tab;
 
@@ -483,6 +490,8 @@ Object.assign(window, {
   renderCharCarac, renderCharEquip, renderCharDeck,
   _renderInventaireBoutique, renderCharInventaire,
   renderCharQuetes, renderCharNotes, renderCharCompte, renderCharMaitrises,
+  renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
+  addProfilTag, removeProfilTag,
 
   // Inventaire
   openSellInvModal, sellInvItemBulk, sellInvItem,
