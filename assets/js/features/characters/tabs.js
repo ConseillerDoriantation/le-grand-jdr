@@ -1,8 +1,8 @@
 import { STATE } from '../../core/state.js';
-import { updateInCol, loadCollection } from '../../data/firestore.js';
+import { updateInCol, loadCollection, loadCollectionWhere, addToCol } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
-import { modStr } from '../../shared/html.js';
+import { modStr, _esc } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../../shared/rich-text.js';
 
@@ -619,4 +619,263 @@ export async function saveXpDirect(charId, input) {
     console.error('[save]', e);
     if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
   }
+}
+
+// ══════════════════════════════════════════════
+// TAB : PRÉSENTATION PUBLIQUE (players page)
+// ══════════════════════════════════════════════
+const _profilCache = {}; // charId → doc | null
+
+const TAG_MAX = 6;
+const TAG_SUGGESTIONS = [
+  'Bienveillant','Vengeur','Courageux','Méfiant','Loyal','Obsessionnel',
+  'Impulsif','Protecteur','Solitaire','Curieux','Ambitieux','Charismatique',
+  'Prudent','Rusé','Empathique','Froid','Fervent','Téméraire',
+];
+// Palette de couleurs pour les tags (hash sur le texte)
+const TAG_COLORS = [
+  ['rgba(79,140,255,.14)','rgba(79,140,255,.35)','#7fb0ff'],   // bleu
+  ['rgba(34,195,142,.14)','rgba(34,195,142,.35)','#22c38e'],   // vert
+  ['rgba(232,184,75,.14)','rgba(232,184,75,.35)','#e8b84b'],   // or
+  ['rgba(180,127,255,.14)','rgba(180,127,255,.35)','#b47fff'],  // violet
+  ['rgba(255,107,107,.14)','rgba(255,107,107,.35)','#ff8080'],  // rouge
+  ['rgba(245,158,11,.14)', 'rgba(245,158,11,.35)', '#f59e0b'],  // orange
+];
+function _tagColor(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) & 0xffff;
+  return TAG_COLORS[h % TAG_COLORS.length];
+}
+
+function _tagChip(text, viewOnly = false) {
+  const [bg, border, color] = _tagColor(text);
+  const cls = viewOnly ? 'pp-tag-chip pp-tag-chip--view' : 'pp-tag-chip';
+  const btn = viewOnly ? '' : `<button type="button" class="pp-tag-remove" onclick="removeProfilTag(this)" aria-label="Supprimer" style="color:${color}">×</button>`;
+  return `<span class="${cls}" data-tag="${_esc(text)}" style="background:${bg};border-color:${border};color:${color}">${_esc(text)}${btn}</span>`;
+}
+
+export function addProfilTag(value) {
+  const input = document.getElementById('profil-tag-input');
+  const val = (value || input?.value || '').trim();
+  if (!val) return;
+  const container = document.getElementById('profil-tags');
+  if (!container) return;
+  // Dédoublonnage insensible à la casse
+  const existing = [...container.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag?.toLowerCase());
+  if (existing.includes(val.toLowerCase())) { if (input) { input.value = ''; input.focus(); } return; }
+  // Limite
+  if (existing.length >= TAG_MAX) return;
+  container.insertAdjacentHTML('beforeend', _tagChip(val));
+  if (input) { input.value = ''; input.focus(); }
+  _updateTagCounter(container);
+}
+
+export function removeProfilTag(btn) {
+  const container = btn.closest('.pp-tags-edit');
+  btn.closest('.pp-tag-chip')?.remove();
+  if (container) _updateTagCounter(container);
+}
+
+function _updateTagCounter(container) {
+  const chips = [...container.querySelectorAll('.pp-tag-chip')];
+  const count = chips.length;
+  const usedLow = chips.map(el => el.dataset.tag?.toLowerCase()).filter(Boolean);
+  const full = count >= TAG_MAX;
+  const counter = document.getElementById('profil-tag-count');
+  if (counter) counter.textContent = `${count}/${TAG_MAX}`;
+  const addBtn = document.getElementById('profil-tag-add');
+  if (addBtn) addBtn.disabled = full;
+  const input = document.getElementById('profil-tag-input');
+  if (input) input.disabled = full;
+  // Griser les suggestions déjà utilisées
+  document.querySelectorAll('.pp-tag-suggest').forEach(btn => {
+    const used = usedLow.includes(btn.textContent.trim().toLowerCase());
+    btn.classList.toggle('pp-tag-suggest--used', used);
+    btn.disabled = used || full;
+  });
+}
+
+export function initProfilTagUi() {
+  const container = document.getElementById('profil-tags');
+  if (container) _updateTagCounter(container);
+}
+
+
+export function renderCharProfil(c, canEdit) {
+  if (c.id in _profilCache) return _buildProfilHtml(c, canEdit, _profilCache[c.id]);
+  _loadAndRenderProfil(c, canEdit);
+  return `<div style="padding:2rem;text-align:center;color:var(--text-dim);font-size:.85rem;opacity:.6">⏳ Chargement…</div>`;
+}
+
+async function _loadAndRenderProfil(c, canEdit) {
+  try {
+    const docs = await loadCollectionWhere('players', 'charId', '==', c.id);
+    _profilCache[c.id] = docs[0] || null;
+  } catch { _profilCache[c.id] = null; }
+  if (window._currentCharTab === 'profil' && window._currentChar?.id === c.id)
+    window._renderTab('profil', c, canEdit);
+}
+
+function _buildProfilHtml(c, canEdit, pres) {
+  const content   = pres?.content || pres?.bio || '';
+  const chapitre  = pres?.chapitre || '';
+  const imageUrl  = pres?.imageUrl || '';
+  const cb = (key, def) => pres?.[key] !== undefined ? pres[key] : def;
+
+  if (!canEdit) {
+    return content
+      ? richTextContentHtml({ html: content, className: 'pp-rich-content' })
+      : `<div style="padding:1.5rem;text-align:center;color:var(--text-dim);font-size:.82rem">Aucune présentation.</div>`;
+  }
+
+  const CHECKS = [
+    { id:'profil-pv',    label:'Points de Vie (PV)',   key:'afficherPV',    def:true  },
+    { id:'profil-pm',    label:'Points de Magie (PM)', key:'afficherPM',    def:true  },
+    { id:'profil-ca',    label:"Classe d'Armure (CA)", key:'afficherCA',    def:true  },
+    { id:'profil-or',    label:'Or',                   key:'afficherOr',    def:false },
+    { id:'profil-stats', label:'Statistiques',          key:'afficherStats', def:true  },
+    { id:'profil-lvl',   label:'Niveau',               key:'afficherNiveau',def:true  },
+  ];
+
+  return `<div class="cs-section">
+    <div class="cs-section-title">👤 Présentation publique
+      <span style="font-size:.7rem;color:var(--text-dim);font-weight:400;margin-left:.5rem">visible sur la page Personnages</span>
+    </div>
+
+    <div class="form-group">
+      <label>Titre du chapitre <span style="color:var(--text-dim);font-size:.75rem">(optionnel)</span></label>
+      <input class="input-field" id="profil-chap" value="${_esc(chapitre)}" placeholder="ex : Chapitre I · Khaarys">
+    </div>
+
+    <div class="form-group">
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        <span>Traits de caractère <span style="color:var(--text-dim);font-size:.75rem">(affichés sur la page Personnages)</span></span>
+        <span id="profil-tag-count" style="font-size:.7rem;color:var(--text-dim);font-weight:400">${(pres?.tags||[]).length}/${TAG_MAX}</span>
+      </label>
+      <div id="profil-tags" class="pp-tags-edit">
+        ${(pres?.tags||[]).map(t => _tagChip(t)).join('')}
+      </div>
+      <div style="display:flex;gap:.4rem;margin-top:.4rem">
+        <input class="input-field" id="profil-tag-input" placeholder="Ajouter un trait…"
+          style="flex:1" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}
+          onkeydown="if(event.key==='Enter'){event.preventDefault();addProfilTag();}">
+        <button class="btn btn-outline btn-sm" id="profil-tag-add" type="button"
+          onclick="addProfilTag()" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}>＋</button>
+      </div>
+      <div class="pp-tag-suggestions">
+        ${TAG_SUGGESTIONS.map(s => `<button type="button" class="pp-tag-suggest" onclick="addProfilTag('${_esc(s)}')">${_esc(s)}</button>`).join('')}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Présentation</label>
+      ${richTextEditorHtml({ id: 'profil-content', html: content, minHeight: 200, placeholder: 'Décris librement ton personnage…' })}
+    </div>
+
+    <div class="form-group">
+      <label>Illustration <span style="color:var(--text-dim);font-size:.75rem">(indépendante de la photo de profil)</span></label>
+      <div style="display:flex;align-items:center;gap:.75rem">
+        ${imageUrl
+          ? `<img src="${_esc(imageUrl)}" style="width:56px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">`
+          : `<div style="width:56px;height:72px;border-radius:8px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:1.4rem;color:var(--text-dim)">🖼️</div>`}
+        <div>
+          <button class="btn btn-outline btn-sm" type="button" onclick="openProfilImageUpload('${_esc(c.id)}')">
+            ${imageUrl ? '🔄 Changer' : '📷 Ajouter une illustration'}
+          </button>
+          ${imageUrl ? `<button class="btn btn-outline btn-sm" style="color:#ff6b6b;margin-left:.35rem" type="button" onclick="removeProfilImage('${_esc(c.id)}')">✕ Retirer</button>` : ''}
+        </div>
+      </div>
+    </div>
+
+    <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem">
+      <div style="font-size:.7rem;font-weight:700;color:var(--text-dim);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:.65rem">
+        🔒 Éléments visibles par les joueurs
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.35rem">
+        ${CHECKS.map(f => `<label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.8rem;color:var(--text-muted);padding:.15rem 0">
+          <input type="checkbox" id="${f.id}" ${cb(f.key, f.def)?'checked':''} style="accent-color:var(--gold)">
+          ${f.label}
+        </label>`).join('')}
+      </div>
+    </div>
+
+    <button class="btn btn-gold btn-sm" onclick="saveCharProfil('${_esc(c.id)}')">💾 Sauvegarder</button>
+  </div>`;
+}
+
+export async function saveCharProfil(charId) {
+  try {
+    const content = getRichTextHtml('profil-content');
+    const tags = [...(document.getElementById('profil-tags')?.querySelectorAll('.pp-tag-chip') || [])]
+      .map(el => el.dataset.tag).filter(Boolean);
+    const data = {
+      charId,
+      chapitre:      document.getElementById('profil-chap')?.value?.trim()   || '',
+      content,
+      tags,
+      imageUrl:      _profilCache[charId]?.imageUrl || '',
+      visible:       _profilCache[charId]?.visible !== false,
+      ordre:         _profilCache[charId]?.ordre ?? 999,
+      afficherPV:    document.getElementById('profil-pv')?.checked    ?? true,
+      afficherPM:    document.getElementById('profil-pm')?.checked    ?? true,
+      afficherCA:    document.getElementById('profil-ca')?.checked    ?? true,
+      afficherOr:    document.getElementById('profil-or')?.checked    ?? false,
+      afficherStats: document.getElementById('profil-stats')?.checked ?? true,
+      afficherNiveau:document.getElementById('profil-lvl')?.checked   ?? true,
+    };
+    const existing = _profilCache[charId];
+    if (existing?.id) {
+      await updateInCol('players', existing.id, data);
+      _profilCache[charId] = { ...existing, ...data };
+    } else {
+      const ref = await addToCol('players', data);
+      _profilCache[charId] = { id: ref?.id || '', ...data };
+    }
+    showNotif('Présentation sauvegardée !', 'success');
+  } catch (e) {
+    console.error('[profil]', e);
+    showNotif('Erreur de sauvegarde.', 'error');
+  }
+}
+
+export function invalidateProfilCache(charId) {
+  delete _profilCache[charId];
+}
+
+export function openProfilImageUpload(charId) {
+  // TODO: réutiliser le crop existant si nécessaire — pour l'instant simple input file
+  const fi = document.createElement('input');
+  fi.type = 'file'; fi.accept = 'image/*';
+  fi.style.cssText = 'position:absolute;opacity:0;width:0;height:0';
+  document.body.appendChild(fi);
+  fi.addEventListener('change', () => {
+    const file = fi.files[0]; fi.remove();
+    if (!file?.type.startsWith('image/')) return;
+    const r = new FileReader();
+    r.onload = async (e) => {
+      const b64 = e.target.result;
+      const pres = _profilCache[charId];
+      const data = pres ? { imageUrl: b64 } : { charId, imageUrl: b64, visible: true, ordre: 999, content: '' };
+      if (pres?.id) {
+        await updateInCol('players', pres.id, { imageUrl: b64 });
+        _profilCache[charId] = { ...pres, imageUrl: b64 };
+      } else {
+        const ref = await addToCol('players', data);
+        _profilCache[charId] = { id: ref?.id || '', ...data };
+      }
+      const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
+      if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
+    };
+    r.readAsDataURL(file);
+  });
+  fi.click();
+}
+
+export async function removeProfilImage(charId) {
+  const pres = _profilCache[charId];
+  if (!pres?.id) return;
+  await updateInCol('players', pres.id, { imageUrl: '' });
+  _profilCache[charId] = { ...pres, imageUrl: '' };
+  const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
+  if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
 }
