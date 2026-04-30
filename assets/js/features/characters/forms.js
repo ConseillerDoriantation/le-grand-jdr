@@ -8,6 +8,13 @@ import PAGES from '../pages.js';
 // ══════════════════════════════════════════════
 // STAT ADJUST (PV/PM actuel)
 // ══════════════════════════════════════════════
+function flashEl(el) {
+  if (!el) return;
+  el.classList.remove('cs-save-flash');
+  void el.offsetWidth;
+  el.classList.add('cs-save-flash');
+}
+
 export async function adjustStat(stat, delta, charId) {
   try {
     const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
@@ -21,11 +28,11 @@ export async function adjustStat(stat, delta, charId) {
     const p = pct(newVal, maxVal);
     if (stat==='pvActuel') {
       const valEl=document.getElementById('pv-val'), barEl=document.getElementById('pv-bar');
-      if(valEl){valEl.textContent=newVal;valEl.style.color=p<25?'var(--crimson-light)':p<50?'#f59e0b':'var(--green)';}
+      if(valEl){valEl.textContent=newVal;valEl.style.color=p<25?'var(--crimson-light)':p<50?'#f59e0b':'var(--green)';flashEl(valEl);}
       if(barEl){barEl.style.width=p+'%';barEl.className='cs-bar-fill cs-bar-hp-fill '+(p>50?'high':p>25?'mid':'');}
     } else {
       const valEl=document.getElementById('pm-val'), barEl=document.getElementById('pm-bar');
-      if(valEl) valEl.textContent=newVal;
+      if(valEl){valEl.textContent=newVal;flashEl(valEl);}
       if(barEl) barEl.style.width=p+'%';
     }
   } catch (e) {

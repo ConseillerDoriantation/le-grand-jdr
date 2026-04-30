@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { updateInCol } from '../../data/firestore.js';
+import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
@@ -109,7 +109,6 @@ export function _renderInventaireBoutique(char) {
             onmouseout="this.style.background='rgba(232,184,75,.08)'">
             🔄 Vendre
           </button>
-          ${(STATE.characters||[]).filter(x=>x.id!==char.id).length ? `
           <button onclick="openSendInvModal('${char.id}','${indicesB64}','${item.nom||''}')"
             style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
@@ -118,7 +117,7 @@ export function _renderInventaireBoutique(char) {
             onmouseout="this.style.background='rgba(79,140,255,.08)'"
             title="Envoyer">
             📤 Envoyer
-          </button>` : ''}
+          </button>
         </div>` : ''}
       </div>
     </div>`;
@@ -198,7 +197,6 @@ export function renderCharInventaire(c, canEdit) {
     }
   });
 
-  const otherChars = STATE.characters?.filter(x => x.id !== c.id) || [];
   const equippedMap = getEquippedInventoryIndexMap(c);
 
   // ── 5 catégories ──
@@ -240,7 +238,7 @@ export function renderCharInventaire(c, canEdit) {
         ${g.qte > 1 ? `<span class="inv-row-qte">×${g.qte}</span>` : ''}
         <div class="inv-row-btns">
           ${canEdit && item.source === 'boutique' ? `<button class="inv-rbtn inv-rbtn--sell" title="Vendre" onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${nomSafe}')">🔄</button>` : ''}
-          ${otherChars.length ? `<button class="inv-rbtn inv-rbtn--send" title="Envoyer" onclick="openSendInvModal('${c.id}','${indicesB64}','${nomSafe}')">↗</button>` : ''}
+          <button class="inv-rbtn inv-rbtn--send" title="Envoyer" onclick="openSendInvModal('${c.id}','${indicesB64}','${nomSafe}')">↗</button>
           ${canEdit ? `<button class="inv-rbtn inv-rbtn--del" title="Supprimer" onclick="openDeleteInvModal('${c.id}','${indicesB64}','${nomSafe}')">✕</button>` : ''}
         </div>
       </div>
@@ -255,9 +253,9 @@ export function renderCharInventaire(c, canEdit) {
     <div class="cs-section-hdr">
       <span class="cs-section-title">🎒 Inventaire</span>
       <span class="cs-hint">${totalItems} objet${totalItems !== 1 ? 's' : ''}</span>
-      <div style="display:flex;gap:.3rem;margin-left:auto">
-        ${otherCharsGold.length ? `<button class="btn btn-outline btn-sm" onclick="openSendGoldModal('${c.id}')" title="Envoyer de l'or à un autre personnage">💰 Or</button>` : ''}
-        ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addInvItem()">🎁 Butin</button>` : ''}
+      <div style="display:flex;gap:.4rem;margin-left:auto;align-items:center">
+        <button class="cs-inv-action-btn cs-inv-action-btn--gold" onclick="openSendGoldModal('${c.id}')" title="Envoyer de l'or à un autre personnage">↗ Or</button>
+        ${canEdit ? `<button class="cs-inv-action-btn" onclick="addInvItem()">🎁 Butin</button>` : ''}
       </div>
     </div>`;
 
@@ -513,7 +511,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
 // ══════════════════════════════════════════════
 // ENVOI
 // ══════════════════════════════════════════════
-export function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
+export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
 
@@ -531,7 +529,14 @@ export function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const maxQte  = indices.length;
   const b64     = btoa(JSON.stringify(indices));
 
-  const otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
+  let otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
+  if (!otherChars.length) {
+    try {
+      const all = await loadCollection('characters');
+      otherChars = all.filter(x => x.id !== charId);
+      window._modalCharTargets = all;
+    } catch(e) { console.error('[sendInv] load chars:', e); }
+  }
   if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
 
   const rareteN   = parseInt(item.rarete) || 0;
@@ -613,7 +618,8 @@ export async function sendInvItem(fromCharId, indicesB64) {
   const targetId = document.querySelector('input[name="send-target"]:checked')?.value;
   if (!targetId) { showNotif('Sélectionne un personnage cible.','error'); return; }
 
-  const toChar = STATE.characters?.find(x => x.id === targetId);
+  const toChar = STATE.characters?.find(x => x.id === targetId)
+    || (window._modalCharTargets || []).find(x => x.id === targetId);
   if (!toChar) { showNotif('Personnage introuvable.','error'); return; }
 
   const allIndices = _decodeIndices(indicesB64);
@@ -665,12 +671,20 @@ export async function sendInvItem(fromCharId, indicesB64) {
 // ENVOI D'OR
 // ══════════════════════════════════════════════
 
-export function openSendGoldModal(charId) {
+export async function openSendGoldModal(charId) {
   const fromChar = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
   if (!fromChar) return;
 
   const orDispo = calcOr(fromChar);
-  const targets = (STATE.characters || []).filter(x => x.id !== charId && x.nom);
+  let targets = (STATE.characters || []).filter(x => x.id !== charId && x.nom);
+
+  if (!targets.length) {
+    try {
+      const all = await loadCollection('characters');
+      targets = all.filter(x => x.id !== charId && x.nom);
+      window._modalCharTargets = all;
+    } catch(e) { console.error('[sendGold] load chars:', e); }
+  }
 
   if (!targets.length) {
     showNotif('Aucun autre personnage disponible.', 'info');
@@ -729,7 +743,8 @@ export async function sendGold(fromCharId) {
   const targetId = document.querySelector('input[name="gold-target"]:checked')?.value;
   if (!targetId) { showNotif('Sélectionne un destinataire.', 'error'); return; }
 
-  const toChar = STATE.characters?.find(x => x.id === targetId);
+  const toChar = STATE.characters?.find(x => x.id === targetId)
+    || (window._modalCharTargets || []).find(x => x.id === targetId);
   if (!toChar) { showNotif('Personnage introuvable.', 'error'); return; }
 
   const montant = parseInt(document.getElementById('gold-amount')?.value) || 0;

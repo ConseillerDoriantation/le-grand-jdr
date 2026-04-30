@@ -3,8 +3,8 @@
 // Toute la logique est dans assets/js/features/characters/
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
+import { updateInCol } from '../data/firestore.js';
 import { modStr } from '../shared/html.js';
-import { bindRichTextEditors } from '../shared/rich-text.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct,
@@ -55,7 +55,7 @@ import {
 } from './characters/tabs.js';
 
 import {
-  inlineEditText, inlineEditNum,
+  inlineEditText, inlineEditNum, inlineEditChip,
   inlineEditStatFromCard, inlineEditStat,
 } from './characters/inline-edit.js';
 
@@ -135,7 +135,7 @@ function renderCharSheet(c, keepTab) {
   const xpPct      = pct(xpCur, xpPalier);
   const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
   const deckMax    = calcDeckMax(c);
-  const pvColor    = pvPct < 25 ? 'var(--crimson-light)' : pvPct < 50 ? '#f59e0b' : 'var(--green)';
+  const pvColor    = pvPct < 25 ? 'var(--crimson, #ff5a7e)' : pvPct < 50 ? 'var(--ember, #ff9544)' : 'var(--emerald, #22c38e)';
   const titres     = c.titres || [];
 
   // ── Stats en bloc 2×3 ────────────────────────
@@ -192,9 +192,7 @@ function renderCharSheet(c, keepTab) {
 <div class="cs-layout">
 
   <!-- ══════════ SIDEBAR ══════════ -->
-  <aside class="cs-sidebar" id="cs-sidebar">
-
-    ${switcher}
+  <aside class="cs-sidebar" id="cs-sidebar" data-aura="${c.aura||'blue'}">
 
     <!-- Identité -->
     <div class="cs-id-block">
@@ -206,12 +204,15 @@ function renderCharSheet(c, keepTab) {
             ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;
                 transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);
                 transform-origin:center">`
-            : `<div class="cs-photo-placeholder">${canEdit
-                ? '<span style="font-size:1.3rem">📷</span>'
-                : '<span style="font-size:1.5rem;opacity:.2">⚔️</span>'
-               }</div>`}
+            : `<div class="cs-photo-placeholder">
+                  <span class="cs-photo-initial">${(c.nom||'?')[0].toUpperCase()}</span>
+                  ${canEdit ? '<div class="cs-photo-edit-hint">📷</div>' : ''}
+                </div>`}
         </div>
         ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="deleteCharPhoto('${c.id}')" title="Supprimer la photo">✕</button>`:''}
+        <div class="cs-lv-badge">${canEdit
+          ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
+          : `Niv.&nbsp;${c.niveau||1}`}</div>
       </div>
       <div class="cs-id-body">
         <div class="cs-name-row">
@@ -224,6 +225,18 @@ function renderCharSheet(c, keepTab) {
           ${titres.map(t=>`<span class="badge badge-gold" style="font-size:.62rem">${t}</span>`).join('')}
           ${canEdit?`<button class="cs-add-titre" onclick="manageTitres('${c.id}')">＋ titre</button>`:''}
         </div>`:''}
+        ${(c.classe||c.race||canEdit)?`<div class="cs-id-chips">
+          ${canEdit
+            ? `<span class="cs-id-chip cs-id-chip--classe${c.classe?'':' cs-id-chip--empty'} cs-editable"
+                title="Modifier la classe" data-fieldval="${c.classe||''}"
+                onclick="inlineEditChip('${c.id}','classe',this,'Classe')">${c.classe||'Classe'}</span>`
+            : (c.classe?`<span class="cs-id-chip cs-id-chip--classe">${c.classe}</span>`:'')}
+          ${canEdit
+            ? `<span class="cs-id-chip cs-id-chip--race${c.race?'':' cs-id-chip--empty'} cs-editable"
+                title="Modifier la race" data-fieldval="${c.race||''}"
+                onclick="inlineEditChip('${c.id}','race',this,'Race')">${c.race||'Race'}</span>`
+            : (c.race?`<span class="cs-id-chip cs-id-chip--race">${c.race}</span>`:'')}
+        </div>`:''}
       </div>
     </div>
 
@@ -234,16 +247,23 @@ function renderCharSheet(c, keepTab) {
           ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
           : `Niv.&nbsp;${c.niveau||1}`}
       </span>
-      <span class="cs-or" title="Solde du Livret de Compte">💰&nbsp;${calcOr(c)}&nbsp;or</span>
+      <div class="cs-or" title="Solde du Livret de Compte">
+        <span class="cs-or-icon">💰</span>
+        <span class="cs-or-amount">${calcOr(c)}</span>
+        <span class="cs-or-label">pièces d'or</span>
+      </div>
     </div>
 
     <!-- XP -->
     <div class="cs-xp-section">
+      <div class="cs-xp-labels">
+        <span>Expérience</span>
+        <span id="xp-pct" class="cs-xp-pct-label">${xpPct}%</span>
+      </div>
       <div class="cs-xp-row">
         <div class="cs-xp-track">
-          <div class="cs-xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div>
+          <div class="cs-xp-fill" id="xp-bar-fill" style="width:${xpPct}%"><div class="cs-xp-shimmer"></div></div>
         </div>
-        <span id="xp-pct" class="cs-xp-pct">${xpPct}%</span>
       </div>
       ${canEdit
         ? `<div class="cs-xp-edit-row">
@@ -254,7 +274,7 @@ function renderCharSheet(c, keepTab) {
               oninput="previewXpBar(this,${xpPalier})" title="XP actuel">
             <span class="cs-xp-edit-label">/ ${xpPalier}</span>
           </div>`
-        : `<div class="cs-xp-edit-label" style="text-align:right">${xpCur} / ${xpPalier} xp</div>`}
+        : `<div class="cs-xp-sub">${xpCur} / ${xpPalier} XP</div>`}
     </div>
 
     <div class="cs-sb-divider"></div>
@@ -316,13 +336,31 @@ function renderCharSheet(c, keepTab) {
     <div class="cs-sb-divider"></div>
 
     <!-- Caractéristiques en bloc 2×3 -->
-    <div class="cs-stats-section">
+    <div class="cs-stats-section" id="cs-stats-section">
       <div class="cs-stats-header">
         <span>Caractéristiques</span>
         ${canEdit?'<span class="cs-hint">clic = modifier</span>':''}
       </div>
       <div class="cs-stats-grid">${statsHtml}</div>
     </div>
+
+    ${canEdit ? `
+    <div class="cs-aura-picker">
+      <span class="cs-aura-picker-label">Aura</span>
+      <div class="cs-aura-dots">
+        ${[
+          {key:'blue',    color:'#4f8cff'},
+          {key:'arcane',  color:'#9d6fff'},
+          {key:'crimson', color:'#ff5a7e'},
+          {key:'gold',    color:'#e8b84b'},
+          {key:'emerald', color:'#22c38e'},
+          {key:'ember',   color:'#ff9544'},
+        ].map(a=>`<button class="cs-aura-dot${(c.aura||'blue')===a.key?' active':''}"
+          data-aura="${a.key}" style="--dot-color:${a.color}"
+          onclick="setCharAura('${c.id}','${a.key}')"
+          title="Aura ${a.key}"></button>`).join('')}
+      </div>
+    </div>` : ''}
 
   </aside>
 
@@ -386,7 +424,20 @@ function _renderTab(leafTab, c, canEdit) {
     carac:       () => renderCharEquip(c, canEdit),
   };
   area.innerHTML = renders[leafTab]?.() || '';
-  bindRichTextEditors(area);
+  area.classList.remove('cs-tab-fadein');
+  void area.offsetWidth; // force reflow
+  area.classList.add('cs-tab-fadein');
+}
+
+async function setCharAura(charId, aura) {
+  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+  if (!c) return;
+  c.aura = aura;
+  await updateInCol('characters', charId, {aura});
+  document.getElementById('cs-sidebar')?.setAttribute('data-aura', aura);
+  document.querySelectorAll('.cs-aura-dot').forEach(d =>
+    d.classList.toggle('active', d.dataset.aura === aura)
+  );
 }
 
 function showCharTab(tab, el) {
@@ -469,9 +520,10 @@ Object.assign(window, {
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
 
   // Inline-edit
-  inlineEditText, inlineEditNum, inlineEditStatFromCard, inlineEditStat,
+  inlineEditText, inlineEditNum, inlineEditChip, inlineEditStatFromCard, inlineEditStat,
 
   // Forms
+  setCharAura,
   adjustStat, saveNotes,
   toggleSort, toggleQuete, deleteQuete, deleteSort, deleteInvItem,
   deleteChar, createNewChar,
