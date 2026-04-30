@@ -394,8 +394,8 @@ const PAGES = {
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const xpCur   = c.xp || 0;
-      const xpNext  = Math.max(1, (c.niveau || 1) * 100);
+      const xpCur   = c.exp || 0;
+      const xpNext  = window.calcPalier?.(c.niveau || 1) || 100;
       const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
       const ca      = window.calcCA?.(c) || 10;
       const or      = window.calcOr?.(c) || 0;
@@ -606,7 +606,7 @@ const PAGES = {
           <div class="dv2-panel-title">🏆 Hauts-faits <span class="dv2-panel-count">${achievements.length}</span></div>
           <button class="dv2-section-action" onclick="navigate('achievements')">Voir tout →</button>
         </div>
-        ${achievements.slice(0, 5).length > 0 ? achievements.slice(0, 5).map(a => `
+        ${achievements.slice(0, 5).length > 0 ? [...achievements].sort((a,b) => { const p = d => { const [j,m,y] = (d||'').split('/'); return y&&m&&j?`${y}${m.padStart(2,'0')}${j.padStart(2,'0')}`:''; }; return p(b.date) > p(a.date) ? 1 : -1; }).slice(0, 5).map(a => `
         <div class="dv2-ach-item">
           <div class="dv2-ach-icon">${a.icone||'🏆'}</div>
           <div style="flex:1;min-width:0">
@@ -769,8 +769,8 @@ const PAGES = {
       const _missionUids = new Set(
         _joinedQuests.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => u !== _myUid)
       );
-      const partyMembers = _missionUids.size > 0
-        ? allPartyChars.filter(c => _missionUids.has(c.uid))
+      const partyMembers = _joinedQuests.length > 0
+        ? [...chars, ...allPartyChars.filter(c => _missionUids.has(c.uid))]
         : [];
       dash.className = 'dv2-root';
       dash.innerHTML = `
