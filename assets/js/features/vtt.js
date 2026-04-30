@@ -4108,13 +4108,13 @@ function _renderLootPanel() {
   const _itemRow = (item, zone) => {
     const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
     return `<div class="vtt-loot-row" data-id="${item.id}">
-      ${zone === 'stash' && mj ? `<span class="vtt-loot-drag" title="Glisser vers le butin">⠿</span>` : ''}
+      ${mj ? `<span class="vtt-loot-drag" title="${zone === 'stash' ? 'Glisser vers le butin' : 'Glisser vers la réserve'}">⠿</span>` : ''}
       <span class="vtt-loot-dot" style="background:${rarColor}"></span>
       <span class="vtt-loot-name">${_esc(item.nom)}</span>
       <span class="vtt-loot-qty">×${item.qty}</span>
       ${zone === 'stash' && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveStash('${item.id}')" title="Retirer">✕</button>` : ''}
       ${zone === 'loot'  && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveLoot('${item.id}')" title="Retirer">✕</button>` : ''}
-      ${zone === 'loot'  && !mj ? `<button class="vtt-loot-take-btn" onclick="window._vttLootPickQty('${item.id}')">Prendre</button>` : ''}
+      ${zone === 'loot' ? `<button class="vtt-loot-take-btn" onclick="window._vttLootPickQty('${item.id}')">Prendre</button>` : ''}
     </div>`;
   };
 
@@ -4129,7 +4129,7 @@ function _renderLootPanel() {
         ${_loot.stash.length ? _loot.stash.map(i => _itemRow(i, 'stash')).join('') : '<div class="vtt-loot-empty">Vide — ajoutez des objets</div>'}
       </div>
     </div>
-    <div class="vtt-loot-divider">↓ Glisser vers le butin ↓</div>
+    <div class="vtt-loot-divider">↕ Glisser entre réserve et butin</div>
     ` : ''}
     <div class="vtt-loot-section">
       <div class="vtt-loot-sec-hd">
@@ -4150,22 +4150,36 @@ function _initLootSortable() {
   if (!stashEl || !lootEl) return;
   import('../vendor/sortable.esm.js').then(({ default: Sortable }) => {
     Sortable.create(stashEl, {
-      group: { name: 'vtt-loot', pull: 'clone', put: false },
+      group: { name: 'vtt-loot', pull: 'clone', put: true },
       animation: 150,
       handle: '.vtt-loot-drag',
       sort: false,
       ghostClass: 'vtt-loot-ghost',
+      onAdd(evt) {
+        // Item glissé depuis le butin vers la réserve
+        const id = evt.item.dataset.id;
+        evt.item.remove();
+        const src = _loot.loot.find(i => i.id === id);
+        if (!src) return;
+        const existing = _loot.stash.find(i => i.itemId === src.itemId);
+        if (existing) { existing.qty += src.qty; }
+        else { _loot.stash.push({ ...src, id: crypto.randomUUID() }); }
+        _loot.loot = _loot.loot.filter(i => i.id !== id);
+        _saveLoot();
+      },
     });
     Sortable.create(lootEl, {
-      group: { name: 'vtt-loot', pull: false, put: true },
+      group: { name: 'vtt-loot', pull: true, put: true },
       animation: 150,
+      handle: '.vtt-loot-drag',
+      sort: false,
       ghostClass: 'vtt-loot-ghost',
       onAdd(evt) {
+        // Item glissé depuis la réserve vers le butin
         const id = evt.item.dataset.id;
-        evt.item.remove(); // on laisse onSnapshot re-render
+        evt.item.remove();
         const src = _loot.stash.find(i => i.id === id);
         if (!src) return;
-        // Fusionner si même item déjà dans le butin
         const existing = _loot.loot.find(i => i.itemId === src.itemId);
         if (existing) { existing.qty += src.qty; }
         else { _loot.loot.push({ ...src, id: crypto.randomUUID() }); }
