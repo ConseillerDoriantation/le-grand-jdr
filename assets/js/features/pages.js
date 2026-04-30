@@ -906,11 +906,16 @@ const PAGES = {
       chars.forEach(c => { if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = []; byUser[c.ownerPseudo].push(c); });
       html += `<div class="admin-section"><div class="admin-label">Vue Admin — Tous les joueurs</div><div class="char-select-bar" id="admin-player-filter"><div class="char-pill active" onclick="filterAdminChars(null,this)">Tous</div>${Object.keys(byUser).map(p => `<div class="char-pill" onclick="filterAdminChars('${p}',this)">${p}</div>`).join('')}</div></div>`;
     }
-    html += `<div style="display:flex;gap:0.8rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center"><button class="btn btn-gold" onclick="createNewChar()">+ Nouveau Personnage</button><span style="font-size:0.78rem;color:var(--text-dim)">Le personnage est créé instantanément — modifie ensuite ses infos sur la fiche.</span></div>`;
     if (chars.length === 0) {
-      html += `<div class="empty-state"><div class="icon">📜</div><p>Aucun personnage. Crée ton premier héros !</p></div>`;
+      html += `<div class="empty-state"><div class="icon">📜</div><p>Aucun personnage. Crée ton premier héros !</p></div>
+        <div style="margin-bottom:1.5rem"><button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button></div>`;
     } else {
-      html += `<div class="char-select-bar" id="char-pills">${chars.map((c, i) => `<div class="char-pill ${i === 0 ? 'active' : ''}" onclick="selectChar('${c.id}',this)">${c.nom || 'Nouveau personnage'}</div>`).join('')}</div><div id="char-sheet-area"></div>`;
+      html += `<div class="char-select-bar" id="char-pills">
+        ${chars.map((c, i) => `<div class="char-pill ${i === 0 ? 'active' : ''}" onclick="selectChar('${c.id}',this)">
+          ${c.nom || '?'}<span class="char-pill-niv">Niv.${c.niveau || 1}</span>
+        </div>`).join('')}
+        <button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button>
+      </div><div id="char-sheet-area"></div>`;
     }
     content.innerHTML = html;
     if (chars.length > 0) {

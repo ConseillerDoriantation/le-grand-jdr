@@ -303,8 +303,12 @@ export function renderCharCompte(c, canEdit) {
       ${visible.map((r,i) => renderRow(r, hidden.length + i, type, canEdit)).join('')}`;
   };
 
+  const otherChars = (STATE.characters||[]).filter(x => x.id !== c.id && x.nom);
+
   return `<div class="cs-section">
-    <div class="cs-section-title">💰 Livret de Compte</div>
+    <div class="cs-section-title">💰 Livret de Compte
+      <button class="cs-send-gold-btn" onclick="openSendGoldModal('${c.id}')" title="Envoyer de l'or à un autre personnage">↗ Envoyer de l'or</button>
+    </div>
 
     <div class="cs-solde-bar">
       <div class="cs-solde-item">

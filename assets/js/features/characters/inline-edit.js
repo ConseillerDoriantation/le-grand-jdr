@@ -34,6 +34,38 @@ export function inlineEditText(charId, field, el) {
 }
 
 // ══════════════════════════════════════════════
+// ÉDITION INLINE — CHIP (classe/race avec placeholder)
+// ══════════════════════════════════════════════
+export function inlineEditChip(charId, field, el, placeholder = '') {
+  const realVal = el.dataset.fieldval ?? '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = realVal;
+  input.placeholder = placeholder;
+  input.className = 'cs-inline-input';
+  input.style.cssText = 'width:80px;min-width:50px;max-width:120px;font-size:inherit;font-weight:inherit;font-family:inherit;color:inherit;text-align:center;';
+
+  const save = async () => {
+    const val = input.value.trim();
+    if (val === realVal) { input.replaceWith(el); return; }
+    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    if (!c) { input.replaceWith(el); return; }
+    c[field] = val;
+    await updateInCol('characters', charId, {[field]: val});
+    el.dataset.fieldval = val;
+    el.textContent = val || placeholder;
+    el.classList.toggle('cs-id-chip--empty', !val);
+    input.replaceWith(el);
+    showNotif('Mis à jour !','success');
+  };
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape'){input.replaceWith(el);} });
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+// ══════════════════════════════════════════════
 // ÉDITION INLINE — NOMBRE
 // ══════════════════════════════════════════════
 async function _syncPlayerNiveau(charId, niveau) {
