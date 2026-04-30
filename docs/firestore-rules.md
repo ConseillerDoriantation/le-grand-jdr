@@ -46,10 +46,9 @@ service cloud.firestore {
     match /collection/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /collectionSettings/{id}{ allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /players/{id} {
-      allow read: if isLoggedIn();
-      allow create: if isLoggedIn() && request.resource.data.uid == request.auth.uid;
-      allow update: if isLoggedIn() &&
-        (resource.data.uid == request.auth.uid || isAdmin());
+      allow read:   if isLoggedIn();
+      allow create: if isLoggedIn();
+      allow update: if isLoggedIn();
       allow delete: if isAdmin();
     }
     match /world/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
@@ -102,7 +101,12 @@ service cloud.firestore {
       match /bestiary_tracker/{id}  { allow read, write: if inAdventure(adventureId); }
       match /collection/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /collectionSettings/{id}{ allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-      match /players/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+
+      // Présentations joueurs : tout membre de l'aventure peut lire et écrire sa propre fiche
+      match /players/{id} {
+        allow read, write: if inAdventure(adventureId);
+      }
+
       match /world/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /informations/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /tutorial/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
@@ -117,8 +121,23 @@ service cloud.firestore {
         allow read: if inAdventure(adventureId);
         allow create: if inAdventure(adventureId) &&
           (request.resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
-        allow update, delete: if inAdventure(adventureId) &&
+        allow update: if inAdventure(adventureId) && (
+          resource.data.uid == request.auth.uid ||
+          isAdvAdmin(adventureId) ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte'])
+        );
+        allow delete: if inAdventure(adventureId) &&
           (resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
+      }
+
+      // Quêtes : lecture tous, création/suppression MJ, mise à jour participants par les joueurs
+      match /quests/{id} {
+        allow read:           if inAdventure(adventureId);
+        allow create, delete: if isAdvAdmin(adventureId);
+        allow update:         if isAdvAdmin(adventureId) ||
+          (inAdventure(adventureId) &&
+           request.resource.data.diff(resource.data)
+             .affectedKeys().hasOnly(['participants']));
       }
 
       // ── VTT ──────────────────────────────────────────────────────
@@ -126,6 +145,11 @@ service cloud.firestore {
       match /vtt/{docId} {
         allow read:  if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
+      }
+
+      // Butin partagé : tous les membres lisent et écrivent
+      match /vtt/loot {
+        allow read, write: if inAdventure(adventureId);
       }
 
       // Pages (cartes) : lecture tous, écriture MJ
