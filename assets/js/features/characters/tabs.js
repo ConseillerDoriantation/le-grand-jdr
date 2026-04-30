@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { updateInCol, loadCollection, loadCollectionWhere, addToCol } from '../../data/firestore.js';
+import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { modStr, _esc } from '../../shared/html.js';
@@ -824,18 +824,14 @@ export async function saveCharProfil(charId) {
       afficherStats: document.getElementById('profil-stats')?.checked ?? true,
       afficherNiveau:document.getElementById('profil-lvl')?.checked   ?? true,
     };
-    const existing = _profilCache[charId];
-    if (existing?.id) {
-      await updateInCol('players', existing.id, data);
-      _profilCache[charId] = { ...existing, ...data };
-    } else {
-      const ref = await addToCol('players', data);
-      _profilCache[charId] = { id: ref?.id || '', ...data };
-    }
+    // Utilise l'ID existant ou le charId comme fallback — saveDoc gère create ET update
+    const docId = _profilCache[charId]?.id || charId;
+    await saveDoc('players', docId, data);
+    _profilCache[charId] = { ...(_profilCache[charId] || {}), id: docId, ...data };
     showNotif('Présentation sauvegardée !', 'success');
   } catch (e) {
     console.error('[profil]', e);
-    showNotif('Erreur de sauvegarde.', 'error');
+    showNotif(`Erreur de sauvegarde (${e?.code || e?.message || '?'}).`, 'error');
   }
 }
 
@@ -861,8 +857,8 @@ export function openProfilImageUpload(charId) {
         await updateInCol('players', pres.id, { imageUrl: b64 });
         _profilCache[charId] = { ...pres, imageUrl: b64 };
       } else {
-        const ref = await addToCol('players', data);
-        _profilCache[charId] = { id: ref?.id || '', ...data };
+        const newId = await addToCol('players', data);
+        _profilCache[charId] = { id: newId, ...data };
       }
       const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
       if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
