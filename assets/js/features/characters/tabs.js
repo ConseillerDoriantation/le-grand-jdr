@@ -810,6 +810,7 @@ export async function saveCharProfil(charId) {
       .map(el => el.dataset.tag).filter(Boolean);
     const data = {
       charId,
+      uid:           STATE.user?.uid || '',
       chapitre:      document.getElementById('profil-chap')?.value?.trim()   || '',
       content,
       tags,
@@ -855,7 +856,7 @@ export function openProfilImageUpload(charId) {
     r.onload = async (e) => {
       const b64 = e.target.result;
       const pres = _profilCache[charId];
-      const data = pres ? { imageUrl: b64 } : { charId, imageUrl: b64, visible: true, ordre: 999, content: '' };
+      const data = pres ? { imageUrl: b64 } : { charId, uid: STATE.user?.uid || '', imageUrl: b64, visible: true, ordre: 999, content: '' };
       if (pres?.id) {
         await updateInCol('players', pres.id, { imageUrl: b64 });
         _profilCache[charId] = { ...pres, imageUrl: b64 };
