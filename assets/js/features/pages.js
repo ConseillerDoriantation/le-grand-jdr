@@ -4,6 +4,7 @@
 import { STATE, FS } from '../core/state.js';
 import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData, saveDoc } from '../data/firestore.js';
 import { _esc } from '../shared/html.js';
+import { calcPalier } from '../shared/char-stats.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -395,7 +396,7 @@ const PAGES = {
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
       const xpCur   = c.exp || 0;
-      const xpNext  = window.calcPalier?.(c.niveau || 1) || 100;
+      const xpNext  = calcPalier(c.niveau || 1);
       const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
       const ca      = window.calcCA?.(c) || 10;
       const or      = window.calcOr?.(c) || 0;
@@ -760,7 +761,6 @@ const PAGES = {
     } else {
 
       // ── VUE JOUEUR v2 ─────────────────────────────────────────────────
-      const heroChar = chars[0] || null;
 
       // Groupe : participants des quêtes actives que j'ai rejointes
       const _joinedQuests = activeQuests.filter(q =>
@@ -772,6 +772,36 @@ const PAGES = {
       const partyMembers = _joinedQuests.length > 0
         ? [...chars, ...allPartyChars.filter(c => _missionUids.has(c.uid))]
         : [];
+
+      // Bloc héros : une carte par personnage du joueur + carte groupe à côté du premier
+      let heroBlock = '';
+      if (chars.length === 0) {
+        heroBlock = `
+        <div class="dv2-hero-card" onclick="navigate('characters')" style="cursor:pointer">
+          <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
+            <div>
+              <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>
+              <div class="dv2-hero-name" style="font-size:1.1rem;margin-bottom:.4rem">Créer mon personnage</div>
+              <div style="font-size:.8rem;color:var(--text-dim)">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
+            </div>
+          </div>
+        </div>`;
+      } else if (chars.length === 1) {
+        heroBlock = `
+        <div class="dv2-hero-grid">
+          ${_heroCardV2(chars[0])}
+          ${_partyCardV2(partyMembers)}
+        </div>`;
+      } else {
+        // Plusieurs personnages : grille adaptative + carte groupe en dessous
+        // auto-fit (vs auto-fill) étire les colonnes pour utiliser toute la largeur
+        heroBlock = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.65rem">
+          ${chars.map(c => _heroCardV2(c)).join('')}
+        </div>
+        ${_partyCardV2(partyMembers)}`;
+      }
+
       dash.className = 'dv2-root';
       dash.innerHTML = `
       ${advBanner}
@@ -784,20 +814,7 @@ const PAGES = {
         <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
 
-      ${heroChar ? `
-      <div class="dv2-hero-grid">
-        ${_heroCardV2(heroChar)}
-        ${_partyCardV2(partyMembers)}
-      </div>` : `
-      <div class="dv2-hero-card" onclick="navigate('characters')" style="cursor:pointer">
-        <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
-          <div>
-            <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>
-            <div class="dv2-hero-name" style="font-size:1.1rem;margin-bottom:.4rem">Créer mon personnage</div>
-            <div style="font-size:.8rem;color:var(--text-dim)">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
-          </div>
-        </div>
-      </div>`}
+      ${heroBlock}
 
       ${_missionCardV2()}
 
