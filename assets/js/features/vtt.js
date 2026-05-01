@@ -246,14 +246,15 @@ function _live(t) {
       const track  = _bstTracker[t.beastId] || {};
       const estMax = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
       if (estMax !== null) {
-        // pvCombatHp : suivi de dégâts propagé à tous les joueurs présents lors de l'attaque.
-        // pvCombatTokId : lie le suivi au token courant → reset auto si nouveau token placé.
-        const pvCombatHp = (track.pvCombatTokId === t.id && track.pvCombatHp != null)
-          ? Math.max(0, parseInt(track.pvCombatHp) || 0) : null;
+        // pvCombatHp est stocké sur le token lui-même (écrit lors des attaques joueur).
+        // Tous les clients le reçoivent via le onSnapshot vttTokens existant.
+        // null → token frais ou jamais frappé par un joueur → afficher pleins PV estimés.
+        const pvCombatHp = t.pvCombatHp != null
+          ? Math.max(0, parseInt(t.pvCombatHp) || 0) : null;
         if (pvCombatHp !== null) {
-          result.displayHp = pvCombatHp;           // suivi de groupe (prioritaire)
+          result.displayHp = pvCombatHp;           // suivi de groupe via token (prioritaire)
         } else if (t.hp !== null) {
-          result.displayHp = Math.min(hpCurrent, estMax); // HP partagé borné à l'estimation
+          result.displayHp = Math.min(hpCurrent, estMax); // HP réel borné à l'estimation
         } else {
           result.displayHp = estMax;               // token frais = pleins PV estimés
         }
@@ -1850,28 +1851,18 @@ window._vttRollAttack = async () => {
     let newHp = curHp;
 
     if (hit || halfDmg) {
-      if (tgt.type==='enemy' && tgt.beastId && !STATE.isAdmin) {
-        // Joueur frappe une créature bestiaire
+      if (tgt.type==='enemy' && tgt.beastId) {
+        // Frappe une créature bestiaire (joueur ou MJ)
+        // pvCombatHp stocké sur le token → un seul write, tous les clients reçoivent via onSnapshot
         const bEnt    = _bestiary[tgt.beastId];
         const realMax = _numOr(bEnt?.pvMax, 20);
         const realCur = tgt.hp !== null ? _numOr(tgt.hp, realMax) : realMax;
         newHp = Math.max(0, realCur - dmgTotal);
-        // HP partagé sur le token — silencieux si règles Firestore incomplètes
-        _setHp(tgt, newHp).catch(() => {});
-        // Suivi de groupe : pvCombatHp propagé à tous les joueurs présents
-        const myTrk     = _bstTracker[tgt.beastId] || {};
-        const prevEstHp = (myTrk.pvCombatTokId === tgt.id && myTrk.pvCombatHp != null)
-          ? Math.max(0, parseInt(myTrk.pvCombatHp) || 0)
+        const prevEstHp = tgt.pvCombatHp != null
+          ? Math.max(0, parseInt(tgt.pvCombatHp) || 0)
           : (lT.displayHpMax ?? realMax);
-        const newEstHp  = Math.max(0, prevEstHp - dmgTotal);
-        // UIDs fiables : propriétaires de personnages (pas _presence qui peut être incomplet)
-        const charUids  = Object.values(_characters).map(c => c.uid).filter(Boolean);
-        const allUids   = [...new Set([STATE.user?.uid, ...charUids])].filter(Boolean);
-        const trkPatch  = {
-          [`data.${tgt.beastId}.pvCombatTokId`]: tgt.id,
-          [`data.${tgt.beastId}.pvCombatHp`]:    newEstHp,
-        };
-        await Promise.all(allUids.map(uid => updateDoc(_bstTrackerRef(uid), trkPatch).catch(() => {})));
+        const newEstHp = Math.max(0, prevEstHp - dmgTotal);
+        await updateDoc(_tokRef(tgt.id), { hp: newHp, pvCombatHp: newEstHp });
       } else {
         newHp = Math.max(0, curHp - dmgTotal);
         await _setHp(tgt, newHp);
