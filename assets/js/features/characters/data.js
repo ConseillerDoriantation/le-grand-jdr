@@ -2,6 +2,7 @@ import { getDocData, saveDoc } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats } from '../../shared/weapon-formats.js';
+import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../shared/damage-types.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
 
@@ -11,6 +12,7 @@ import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus }
 // ══════════════════════════════════════════════
 export let _combatStyles = null; // cache en mémoire
 export let _weaponFormats = null; // cache en mémoire (partagé avec weapon-formats.js)
+let _damageTypes = null; // cache local types de dégâts
 
 export async function loadCombatStyles() {
   if (_combatStyles) return _combatStyles;
@@ -277,41 +279,75 @@ window._backToStylesList = () => _renderCombatStylesModal(_combatStyles || []);
 // FORMATS D'ARMES — Admin
 // ══════════════════════════════════════════════
 export async function openWeaponFormatsAdmin() {
-  const formats = await loadWeaponFormats();
-  _weaponFormats = formats;
-  _renderWeaponFormatsModal(formats);
+  [_weaponFormats, _damageTypes] = await Promise.all([loadWeaponFormats(), loadDamageTypes()]);
+  _renderWeaponFormatsModal(_weaponFormats);
 }
+
+export async function openDamageTypesAdmin() {
+  _damageTypes = await loadDamageTypes();
+  _renderDamageTypesModal(_damageTypes);
+}
+
+const _dmgTypeSelect = (i, val) => {
+  const types = _damageTypes || DEFAULT_DAMAGE_TYPES;
+  const opts = types.map(t =>
+    `<option value="${_esc(t.id)}"${val===t.id?' selected':''}>${_esc(t.label)}</option>`
+  ).join('');
+  return `<select class="input-field" style="font-size:.75rem;padding:2px 6px;width:auto"
+    onchange="window._setWeaponFormatType(${i}, this.value)">
+    <option value=""${!val?' selected':''}>—</option>
+    ${opts}
+  </select>`;
+};
 
 export function _renderWeaponFormatsModal(formats) {
   openModal('⚔️ Formats d\'armes', `
     <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
       Ces formats apparaissent dans la boutique (champ Format) et dans les conditions des styles de combat.
+      Le type <strong>Magique</strong> applique ½ dégâts sur raté (hors fumble).
     </div>
     <div id="wf-list" style="display:flex;flex-direction:column;gap:.35rem">
       ${formats.map((f, i) => `
       <div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
         border:1px solid var(--border);border-radius:8px;padding:.45rem .7rem">
         <span style="flex:1;font-size:.84rem;color:var(--text)">${_esc(f.label)}</span>
+        ${_dmgTypeSelect(i, f.damageType || '')}
         <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="window._deleteWeaponFormat(${i})">🗑️</button>
       </div>`).join('')}
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.75rem">
       <input class="input-field" id="wf-new-label" placeholder="Nouveau format..." style="flex:1">
+      <select class="input-field" id="wf-new-type" style="font-size:.8rem;width:auto">
+        <option value="">—</option>
+        ${(_damageTypes||DEFAULT_DAMAGE_TYPES).map(t=>`<option value="${_esc(t.id)}">${_esc(t.label)}</option>`).join('')}
+      </select>
       <button class="btn btn-gold btn-sm" onclick="window._addWeaponFormat()">+ Ajouter</button>
     </div>
-    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem" onclick="closeModal()">Fermer</button>
+    <div style="display:flex;gap:.4rem;margin-top:.5rem">
+      <button class="btn btn-outline btn-sm" style="flex:1" onclick="window.openDamageTypesAdmin()">⚡ Types de dégâts…</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModal()">Fermer</button>
+    </div>
   `);
   setTimeout(() => document.getElementById('wf-new-label')?.focus(), 60);
 }
 
+window._setWeaponFormatType = async (i, damageType) => {
+  const formats = [...(_weaponFormats || [])];
+  if (!formats[i]) return;
+  formats[i] = { ...formats[i], damageType };
+  await saveWeaponFormats(formats);
+  _weaponFormats = formats;
+};
+
 window._addWeaponFormat = async () => {
-  const label = document.getElementById('wf-new-label')?.value?.trim();
+  const label      = document.getElementById('wf-new-label')?.value?.trim();
+  const damageType = document.getElementById('wf-new-type')?.value || '';
   if (!label) { showNotif('Nom requis.', 'error'); return; }
   const formats = _weaponFormats ? [..._weaponFormats] : [];
   if (formats.some(f => f.label.toLowerCase() === label.toLowerCase())) {
     showNotif('Ce format existe déjà.', 'error'); return;
   }
-  formats.push({ id: `fmt_${Date.now()}`, label });
+  formats.push({ id: `fmt_${Date.now()}`, label, damageType });
   await saveWeaponFormats(formats);
   _weaponFormats = formats;
   showNotif('Format ajouté.', 'success');
@@ -326,6 +362,111 @@ window._deleteWeaponFormat = async (i) => {
   _weaponFormats = formats;
   showNotif('Format supprimé.', 'success');
   _renderWeaponFormatsModal(formats);
+};
+
+// ══════════════════════════════════════════════
+// TYPES DE DÉGÂTS — Admin
+// ══════════════════════════════════════════════
+
+const MISS_EFFECT_LABELS = { none: 'Aucun', half: 'Moitié', full: 'Complets' };
+
+function _renderDamageTypesModal(types) {
+  const mkRules = (t, i) => {
+    const r = t.rules || {};
+    const missOpts = ['none','half','full'].map(v =>
+      `<option value="${v}"${(r.missEffect||'none')===v?' selected':''}>${MISS_EFFECT_LABELS[v]}</option>`
+    ).join('');
+    return `
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem .8rem;margin-top:.35rem;padding:.35rem .5rem;
+      background:var(--bg-base);border-radius:6px;font-size:.76rem;color:var(--text-dim)">
+      <label style="display:flex;align-items:center;gap:.3rem">
+        Dégâts sur raté
+        <select class="input-field" style="font-size:.75rem;padding:2px 5px;width:auto"
+          onchange="window._saveDmgTypeProp(${i},'rules.missEffect',this.value)">
+          ${missOpts}
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:.3rem">
+        Pén. armure
+        <input type="number" class="input-field" min="0" max="100" value="${r.armorPen||0}"
+          style="width:52px;font-size:.75rem;padding:2px 5px"
+          onchange="window._saveDmgTypeProp(${i},'rules.armorPen',+this.value)"> %
+      </label>
+      <label style="display:flex;align-items:center;gap:.3rem">
+        Bonus dégâts
+        <input type="number" class="input-field" value="${r.dmgBonus||0}"
+          style="width:52px;font-size:.75rem;padding:2px 5px"
+          onchange="window._saveDmgTypeProp(${i},'rules.dmgBonus',+this.value)">
+      </label>
+    </div>`;
+  };
+
+  openModal('⚡ Types de dégâts', `
+    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
+      Chaque type définit des règles appliquées automatiquement dans le VTT pour toutes les armes de ce type.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.5rem">
+      ${types.map((t, i) => `
+      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:.5rem .7rem">
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <input class="input-field" value="${_esc(t.label)}" style="flex:1;font-size:.84rem"
+            onchange="window._saveDmgTypeProp(${i},'label',this.value)">
+          <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b"
+            onclick="window._deleteDmgType(${i})">🗑️</button>
+        </div>
+        ${mkRules(t, i)}
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:.4rem;margin-top:.75rem">
+      <input class="input-field" id="dt-new-label" placeholder="Nouveau type..." style="flex:1">
+      <button class="btn btn-gold btn-sm" onclick="window._addDmgType()">+ Ajouter</button>
+    </div>
+    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem" onclick="closeModal()">Fermer</button>
+  `);
+  setTimeout(() => document.getElementById('dt-new-label')?.focus(), 60);
+}
+
+window._saveDmgTypeProp = async (i, path, value) => {
+  const types = [...(_damageTypes || [])];
+  if (!types[i]) return;
+  if (path.startsWith('rules.')) {
+    const key = path.slice(6);
+    types[i] = { ...types[i], rules: { ...types[i].rules, [key]: value } };
+  } else {
+    types[i] = { ...types[i], [path]: value };
+  }
+  await saveDamageTypes(types);
+  _damageTypes = types;
+};
+
+window._addDmgType = async () => {
+  const label = document.getElementById('dt-new-label')?.value?.trim();
+  if (!label) { showNotif('Nom requis.', 'error'); return; }
+  const types = [...(_damageTypes || [])];
+  if (types.some(t => t.label.toLowerCase() === label.toLowerCase())) {
+    showNotif('Ce type existe déjà.', 'error'); return;
+  }
+  types.push({ id: `dt_${Date.now()}`, label, rules: { missEffect: 'none', armorPen: 0, dmgBonus: 0 } });
+  await saveDamageTypes(types);
+  _damageTypes = types;
+  showNotif('Type ajouté.', 'success');
+  _renderDamageTypesModal(types);
+};
+
+window._deleteDmgType = async (i) => {
+  if (!await confirmModal('Supprimer ce type ?', { title: 'Confirmation' })) return;
+  const types = [...(_damageTypes || [])];
+  types.splice(i, 1);
+  await saveDamageTypes(types);
+  _damageTypes = types;
+  showNotif('Type supprimé.', 'success');
+  _renderDamageTypesModal(types);
+};
+
+// expose pour l'appel depuis le modal formats
+window.openDamageTypesAdmin = async () => {
+  _damageTypes = await loadDamageTypes();
+  _renderDamageTypesModal(_damageTypes);
 };
 
 // ══════════════════════════════════════════════
