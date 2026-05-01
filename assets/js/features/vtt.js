@@ -14,6 +14,8 @@ import {
 } from '../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus } from '../shared/char-stats.js';
 import { getArmorSetData } from './characters/data.js';
+import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { loadDamageTypes, getDamageTypeRules } from '../shared/damage-types.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { _esc } from '../shared/html.js';
@@ -42,6 +44,8 @@ let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du dra
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
 let _suppressTokenClickUntil = 0;   // bloque le click synthétique après clic droit/molette
 let _autoSyncDone = false;   // empêche la double-création de tokens
+let _weaponFormats = null;   // cache formats d'armes (damageType, etc.)
+let _damageTypes   = null;   // cache types de dégâts (règles de combat)
 let _imgTr      = null;      // Transformer pour images BG (sous tokens)
 let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens)
 let _selImg     = null;      // id de l'image sélectionnée
@@ -298,14 +302,13 @@ async function _syncAutoTokens() {
   // Index des entités déjà tokenisées
   const byChar  = new Set();
   const byNpc   = new Set();
-  const byBeast = new Set();
   for (const { data } of Object.values(_tokens)) {
     if (data.characterId) byChar.add(data.characterId);
     if (data.npcId)       byNpc.add(data.npcId);
-    if (data.beastId)     byBeast.add(data.beastId);
   }
 
   const toCreate = [];
+  const toDelete = []; // tokens orphelins (personnage/PNJ supprimé)
 
   for (const c of Object.values(_characters)) {
     if (!byChar.has(c.id)) toCreate.push({
@@ -322,9 +325,14 @@ async function _syncAutoTokens() {
   // Les ennemis ne sont PAS auto-créés depuis le bestiaire :
   // ils sont placés manuellement depuis la section Bestiaire du tray.
 
-  if (!toCreate.length) return;
+  // Tokens orphelins : personnage ou PNJ introuvable
+  for (const { data } of Object.values(_tokens)) {
+    if      (data.characterId && !_characters[data.characterId]) toDelete.push(data.id);
+    else if (data.npcId       && !_npcs[data.npcId])             toDelete.push(data.id);
+  }
 
-  // Batch write pour limiter les appels
+  if (!toCreate.length && !toDelete.length) return;
+
   const batch = writeBatch(db);
   for (const base of toCreate) {
     const ref = doc(_toksCol());
@@ -338,6 +346,7 @@ async function _syncAutoTokens() {
       createdAt: serverTimestamp(),
     });
   }
+  for (const id of toDelete) batch.delete(_tokRef(id));
   await batch.commit().catch(e => console.error('[vtt] auto-sync tokens:', e));
 }
 
@@ -1369,9 +1378,9 @@ function _buildAttackOptions(t) {
   const wTchMod     = c ? getMod(c, wTchStat)  : 0;
   const wSetBonus   = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
   const wMaitrise   = c && weapon ? getMaitriseBonus(c, weapon) : 0;
-  // Armes magiques à 2 mains → ½ dégâts garanti même sur raté
-  const MAG_2H      = ['Arme 2M CaC Mag.', 'Arme 2M Dist Mag.'];
-  const halfOnMiss  = MAG_2H.includes(weapon?.format || '');
+  // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
+  const fmt       = _weaponFormats?.find(f => f.label === weapon?.format);
+  const typeRules = getDamageTypeRules(_damageTypes, fmt?.damageType);
 
   options.push({
     id:               'weapon',
@@ -1387,7 +1396,7 @@ function _buildAttackOptions(t) {
     dmgStatMod:       wDmgMod,
     dmgStatLabel:     statShort(wDmgStat2) || wDmgStat2,
     maitriseBonus:    wMaitrise,
-    halfOnMiss,
+    typeRules,
   });
 
   // ── Tous les sorts actifs du deck ──
@@ -1821,30 +1830,40 @@ window._vttRollAttack = async () => {
     const isFumble = d20 === 1;
     const atkBase  = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
     const hitTotal = d20 + atkBase + bonusHit;
-    const targetCA = lT.displayDefense ?? 10;
-    const hit      = isCrit ? true : isFumble ? false : hitTotal >= targetCA;
+    const rules      = opt.typeRules || {};
+    const armorPen   = rules.armorPen || 0;
+    const typeDmgBon = rules.dmgBonus || 0;
+    const missEffect = rules.missEffect || 'none';
+    const rawCA      = lT.displayDefense ?? 10;
+    const targetCA   = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+    const hit        = isCrit ? true : isFumble ? false : hitTotal >= targetCA;
 
     const diceToRoll = opt.rawDice || opt.dice;
     const dmgFixed   = opt.rawDice !== undefined ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0)) : 0;
+    const totalFixed = dmgFixed + bonusDmg + typeDmgBon;
 
     let dmgRaw=0, dmgTotal=0, critNormalMax=0, critRaw2=0, critFixed2=0;
     let halfDmg = false;
     if (hit) {
       if (isCrit) {
-        critNormalMax = _maxDice(diceToRoll) + dmgFixed + bonusDmg;
+        critNormalMax = _maxDice(diceToRoll) + totalFixed;
         critRaw2      = _rollDice(diceToRoll);
-        critFixed2    = dmgFixed + bonusDmg;
+        critFixed2    = totalFixed;
         dmgRaw        = critRaw2;
         dmgTotal      = critNormalMax + critRaw2 + critFixed2;
       } else {
         dmgRaw   = _rollDice(diceToRoll);
-        dmgTotal = Math.max(1, dmgRaw + dmgFixed + bonusDmg);
+        dmgTotal = Math.max(1, dmgRaw + totalFixed);
       }
-    } else if (opt.halfOnMiss && !isFumble) {
-      // ½ dégâts sur raté — SAUF échec critique (nat 1 = 0 dégâts)
-      halfDmg  = true;
-      dmgRaw   = _rollDice(diceToRoll);
-      dmgTotal = Math.max(1, Math.floor(Math.max(1, dmgRaw + dmgFixed + bonusDmg) / 2));
+    } else if (missEffect !== 'none' && !isFumble) {
+      // Dégâts sur raté selon la règle du type (sauf fumble = 0 toujours)
+      dmgRaw = _rollDice(diceToRoll);
+      if (missEffect === 'half') {
+        halfDmg  = true;
+        dmgTotal = Math.max(1, Math.floor(Math.max(1, dmgRaw + totalFixed) / 2));
+      } else { // 'full'
+        dmgTotal = Math.max(1, dmgRaw + totalFixed);
+      }
     }
 
     const curHp = lT.displayHp??20, hpMax = lT.displayHpMax??20;
@@ -2633,8 +2652,14 @@ function _initListeners() {
   // 3. Personnages — source de vérité des HP joueurs
   _unsubs.push(onSnapshot(_chrsCol(), snap => {
     snap.docChanges().forEach(ch => {
-      if (ch.type==='removed') delete _characters[ch.doc.id];
-      else _characters[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
+      if (ch.type==='removed') {
+        delete _characters[ch.doc.id];
+        // Supprimer le token lié si la session VTT est ouverte
+        const tok = Object.values(_tokens).find(e => e.data.characterId === ch.doc.id);
+        if (tok) deleteDoc(_tokRef(tok.data.id)).catch(() => {});
+      } else {
+        _characters[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
+      }
     });
     // Refresh des shapes liés
     const changed=new Set(snap.docChanges().map(c=>c.doc.id));
@@ -4560,6 +4585,9 @@ export async function renderVttPage() {
   });
   _loadEmotes();      // non bloquant
   _loadDiceSkills();  // non bloquant
+  Promise.all([loadWeaponFormats(), loadDamageTypes()]).then(([f, d]) => {
+    _weaponFormats = f; _damageTypes = d;
+  }); // non bloquant
   _initListeners();
   // Présence : heartbeat toutes les 45 s
   const _presUid = STATE.user?.uid;
