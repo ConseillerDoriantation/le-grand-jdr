@@ -169,7 +169,8 @@ service cloud.firestore {
       }
 
       // Tokens : MJ écrit tout.
-      // Un joueur peut uniquement déplacer son propre token (col/row/movedThisTurn).
+      // Un joueur peut déplacer son propre token (col/row/movedThisTurn)
+      // et infliger des dégâts aux ennemis (hp).
       match /vttTokens/{id} {
         allow read: if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
@@ -177,6 +178,9 @@ service cloud.firestore {
           && request.auth.uid == resource.data.ownerId
           && request.resource.data.diff(resource.data)
                .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn']);
+        allow update: if inAdventure(adventureId)
+          && request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['hp']);
       }
 
       // Chat & log de dés : tous les membres de l'aventure peuvent lire et écrire

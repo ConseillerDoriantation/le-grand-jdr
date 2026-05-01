@@ -239,17 +239,35 @@ function _live(t) {
     _beast:            b,   // référence directe pour _buildAttackOptions
   };
 
-  // Joueur sur token ennemi : remplace HP et CA par les estimations du tracker
-  // pvActuel = total estimé (inchangé), pvCombat = HP courant de combat (diminue avec les coups)
-  if (!STATE.isAdmin && b) {
-    const track  = _bstTracker[t.beastId] || {};
-    const estMax = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
-    if (estMax !== null) {
-      const estCur = track.pvCombat !== undefined ? parseInt(track.pvCombat) : estMax;
-      result.displayHp    = estCur;
-      result.displayHpMax = estMax;
+  // Joueur sur token ennemi : remplace HP et CA par les estimations du tracker.
+  // Sans estimation = null → affichage "?/?" sur le token (ne révèle pas les vraies valeurs MJ).
+  if (!STATE.isAdmin && t.type === 'enemy') {
+    if (b) {
+      const track  = _bstTracker[t.beastId] || {};
+      const estMax = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
+      if (estMax !== null) {
+        // pvCombatHp : suivi de dégâts propagé à tous les joueurs présents lors de l'attaque.
+        // pvCombatTokId : lie le suivi au token courant → reset auto si nouveau token placé.
+        const pvCombatHp = (track.pvCombatTokId === t.id && track.pvCombatHp != null)
+          ? Math.max(0, parseInt(track.pvCombatHp) || 0) : null;
+        if (pvCombatHp !== null) {
+          result.displayHp = pvCombatHp;           // suivi de groupe (prioritaire)
+        } else if (t.hp !== null) {
+          result.displayHp = Math.min(hpCurrent, estMax); // HP partagé borné à l'estimation
+        } else {
+          result.displayHp = estMax;               // token frais = pleins PV estimés
+        }
+        result.displayHpMax = estMax;
+      } else {
+        result.displayHp    = null;
+        result.displayHpMax = null;
+      }
+      if (track.caEstimee !== undefined) result.displayDefense = parseInt(track.caEstimee) || 0;
+    } else {
+      // Ennemi sans fiche bestiaire → HP toujours inconnus pour les joueurs
+      result.displayHp    = null;
+      result.displayHpMax = null;
     }
-    if (track.caEstimee !== undefined) result.displayDefense = parseInt(track.caEstimee) || 0;
   }
 
   return result;
@@ -728,8 +746,10 @@ function _buildShape(t) {
   const K  = window.Konva;
   const ld = _live(t);
   const r  = CELL*0.42, bW = CELL*0.9;   // bW élargi pour labels plus lisibles
-  const hp = ld.displayHp??20, hpm = ld.displayHpMax??20;
-  const rat = hpm>0 ? Math.max(0,hp/hpm) : 1;
+  const hpKnown = ld.displayHp !== null && ld.displayHpMax !== null;
+  const hp  = hpKnown ? ld.displayHp  : 0;
+  const hpm = hpKnown ? ld.displayHpMax : 1;
+  const rat = hpKnown ? (hpm>0 ? Math.max(0,hp/hpm) : 1) : 0.5;
   const g = new K.Group({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2, id:`tok-${t.id}` });
   // ── Cercle de base ────────────────────────────────────────────────
   g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9 }));
@@ -739,9 +759,9 @@ function _buildShape(t) {
   // ── Barre HP (texte superposé sur la barre) ───────────────────────
   const BH=9; // hauteur barre HP
   g.add(new K.Rect({ x:-bW/2, y:r+4, width:bW, height:BH, fill:'#0d1117', cornerRadius:4, listening:false }));
-  g.add(new K.Rect({ x:-bW/2, y:r+4, width:Math.max(2,bW*rat), height:BH, fill:hpColor(rat), cornerRadius:4, listening:false, name:'hp-fill' }));
+  g.add(new K.Rect({ x:-bW/2, y:r+4, width:Math.max(2,bW*rat), height:BH, fill:hpKnown?hpColor(rat):'#555', cornerRadius:4, listening:false, name:'hp-fill' }));
   g.add(new K.Text({ x:-bW/2, y:r+4, width:bW, height:BH, align:'center', verticalAlign:'middle',
-    text:`${hp}/${hpm}`, fontSize:8, fontStyle:'bold', fill:'#fff',
+    text:hpKnown?`${hp}/${hpm}`:'?/?', fontSize:8, fontStyle:'bold', fill:'#fff',
     shadowColor:'#000', shadowBlur:2, shadowOpacity:.9,
     fontFamily:'Inter,sans-serif', listening:false, name:'hp-val' }));
   // ── Barre PM (joueurs + PNJ avec PM renseignés, texte superposé) ──
@@ -930,11 +950,12 @@ function _patchShape(id) {
     return;
   }
   g.to({ x:e.data.col*CELL+CELL/2, y:e.data.row*CELL+CELL/2, duration:0.12 });
-  const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
-  const rat=hpm>0?Math.max(0,hp/hpm):1, bW=CELL*0.9;
+  const hpKnownU = ld.displayHp !== null && ld.displayHpMax !== null;
+  const hp=hpKnownU?ld.displayHp:0, hpm=hpKnownU?ld.displayHpMax:1;
+  const rat=hpKnownU?(hpm>0?Math.max(0,hp/hpm):1):0.5, bW=CELL*0.9;
   const fill=g.findOne('.hp-fill');
-  if (fill){fill.width(bW*rat);fill.fill(hpColor(rat));}
-  g.findOne('.hp-val')?.text(`${hp}/${hpm}`);
+  if (fill){fill.width(bW*rat);fill.fill(hpKnownU?hpColor(rat):'#555');}
+  g.findOne('.hp-val')?.text(hpKnownU?`${hp}/${hpm}`:'?/?');
   // PM
   const _pm=ld.displayPm;
   if (_pm!=null) {
@@ -1825,19 +1846,34 @@ window._vttRollAttack = async () => {
       dmgTotal = Math.max(1, Math.floor(Math.max(1, dmgRaw + dmgFixed + bonusDmg) / 2));
     }
 
-    const isEstimated = !STATE.isAdmin && tgt.type==='enemy' && tgt.beastId;
     const curHp = lT.displayHp??20, hpMax = lT.displayHpMax??20;
-    const newHp = (hit || halfDmg) ? Math.max(0, curHp - dmgTotal) : curHp;
+    let newHp = curHp;
 
     if (hit || halfDmg) {
-      if (isEstimated) {
-        const uid=STATE.user?.uid;
-        if (uid) {
-          if (!_bstTracker[tgt.beastId]) _bstTracker[tgt.beastId]={};
-          _bstTracker[tgt.beastId].pvCombat=newHp;
-          await setDoc(_bstTrackerRef(uid),{data:_bstTracker});
-        }
+      if (tgt.type==='enemy' && tgt.beastId && !STATE.isAdmin) {
+        // Joueur frappe une créature bestiaire
+        const bEnt    = _bestiary[tgt.beastId];
+        const realMax = _numOr(bEnt?.pvMax, 20);
+        const realCur = tgt.hp !== null ? _numOr(tgt.hp, realMax) : realMax;
+        newHp = Math.max(0, realCur - dmgTotal);
+        // HP partagé sur le token — silencieux si règles Firestore incomplètes
+        _setHp(tgt, newHp).catch(() => {});
+        // Suivi de groupe : pvCombatHp propagé à tous les joueurs présents
+        const myTrk     = _bstTracker[tgt.beastId] || {};
+        const prevEstHp = (myTrk.pvCombatTokId === tgt.id && myTrk.pvCombatHp != null)
+          ? Math.max(0, parseInt(myTrk.pvCombatHp) || 0)
+          : (lT.displayHpMax ?? realMax);
+        const newEstHp  = Math.max(0, prevEstHp - dmgTotal);
+        // UIDs fiables : propriétaires de personnages (pas _presence qui peut être incomplet)
+        const charUids  = Object.values(_characters).map(c => c.uid).filter(Boolean);
+        const allUids   = [...new Set([STATE.user?.uid, ...charUids])].filter(Boolean);
+        const trkPatch  = {
+          [`data.${tgt.beastId}.pvCombatTokId`]: tgt.id,
+          [`data.${tgt.beastId}.pvCombatHp`]:    newEstHp,
+        };
+        await Promise.all(allUids.map(uid => updateDoc(_bstTrackerRef(uid), trkPatch).catch(() => {})));
       } else {
+        newHp = Math.max(0, curHp - dmgTotal);
         await _setHp(tgt, newHp);
       }
     }
@@ -1937,8 +1973,9 @@ function _renderInspector(t) {
   let statsHtml;
   if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
     const track    = _bstTracker[t.beastId] || {};
-    const pvMax    = track.pvActuel   !== undefined ? parseInt(track.pvActuel)   : null;
-    const pvCur    = track.pvCombat   !== undefined ? parseInt(track.pvCombat)   : pvMax;
+    const pvMax    = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
+    // ld.displayHp est déjà calculé par _live() avec t.hp + borne pvActuel
+    const pvCur    = ld.displayHp !== null ? ld.displayHp : pvMax;
     const pvPct    = pvMax > 0 ? Math.round((pvCur??pvMax) / pvMax * 100) : 0;
     const pvBarCol = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#f59e0b' : '#ef4444';
     const caLabel  = track.caEstimee  !== undefined ? String(track.caEstimee)  : '?';
@@ -2064,8 +2101,9 @@ function _renderTray() {
   // ── Item de token (liste) ─────────────────────────────────────────
   const mkItem=(t,placed)=>{
     const ld=_live(t);
-    const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
-    const rat=hpm>0?Math.max(0,hp/hpm):1;
+    const hpKnownL = ld.displayHp !== null && ld.displayHpMax !== null;
+    const hp=hpKnownL?ld.displayHp:0, hpm=hpKnownL?ld.displayHpMax:1;
+    const rat=hpKnownL?(hpm>0?Math.max(0,hp/hpm):1):0.5;
     const typeIcon = t.type==='player'?'🧑':t.type==='npc'?'👤':'👹';
     const dupBtn=t.type==='enemy'
       ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Dupliquer">＋</button>`:'';
@@ -2081,7 +2119,7 @@ function _renderTray() {
       </div>
       <div class="vtt-tray-info">
         <div class="vtt-tray-name">${ld.displayName??t.name}</div>
-        <div class="vtt-tray-hp-bar"><div style="width:${Math.round(rat*100)}%;height:100%;background:${hpColor(rat)};border-radius:2px"></div></div>
+        <div class="vtt-tray-hp-bar"><div style="width:${Math.round(rat*100)}%;height:100%;background:${hpKnownL?hpColor(rat):'#555'};border-radius:2px"></div></div>
       </div>
       <div class="vtt-tray-actions">${dupBtn}${actionBtn}${delBtn}</div>
     </div>`;
@@ -3694,6 +3732,24 @@ window._vttSetPm = async (tokenId,pm) => {
   if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
 };
+
+window._vttMsSetXp = async (charId, uid, xp) => {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  const val = Math.max(0, Math.round(xp));
+  await updateDoc(_chrRef(charId), { exp: val }).catch(() => {});
+  c.exp = val;
+  _renderMiniSheet(uid);
+};
+
+window._vttMsSetNiveau = async (charId, uid, niveau) => {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  const val = Math.max(1, Math.min(20, Math.round(niveau)));
+  await updateDoc(_chrRef(charId), { niveau: val }).catch(() => {});
+  c.niveau = val;
+  _renderMiniSheet(uid);
+};
 window._vttEditToken = id => _openStatsModal(_tokens[id]?.data??null);
 
 window._vttAddImageUrl = async () => {
@@ -4793,7 +4849,7 @@ window._vttMsConfirmSend = async (senderCharId, senderUid, invIndex, recipCharId
 
 // ─── Rendus par onglet ────────────────────────────────────────────
 
-function _msTabCombat(c) {
+function _msTabCombat(c, uid, canEdit) {
   const pvMax = calcPVMax(c), pmMax = calcPMMax(c);
   const pvCur = c?.hp ?? pvMax, pmCur = c?.pm ?? pmMax;
   const pvPct = pvMax > 0 ? Math.round(Math.max(0, pvCur) / pvMax * 100) : 0;
@@ -4852,7 +4908,40 @@ function _msTabCombat(c) {
       <div class="vtt-ms-def-item"><span>⚡ Vit.</span><strong>${calcVitesse(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>🎯 Maît.</span><strong>+${getMaitriseBonus(c)}</strong></div>
     </div>
-    ${weaponHtml}${setHtml}`;
+    ${weaponHtml}${setHtml}
+    ${_msXpSection(c, uid, canEdit)}`;
+}
+
+function _msXpSection(c, uid, canEdit) {
+  const xp     = parseInt(c?.exp)    || 0;
+  const niv    = parseInt(c?.niveau) || 1;
+  const palier = calcPalier(niv);
+  const pct    = palier > 0 ? Math.min(100, Math.round(xp / palier * 100)) : 0;
+
+  if (canEdit) {
+    return `
+    <div class="vtt-ms-xp">
+      <div class="vtt-ms-xp-row">
+        <span class="vtt-ms-xp-label">⭐ XP</span>
+        <input class="vtt-ms-xp-input" type="number" value="${xp}" min="0"
+          onchange="window._vttMsSetXp('${c.id}','${uid}',+this.value)">
+        <span class="vtt-ms-xp-sep">/ ${palier}</span>
+        <span class="vtt-ms-xp-niv">Niv.</span>
+        <input class="vtt-ms-niv-input" type="number" value="${niv}" min="1" max="20"
+          onchange="window._vttMsSetNiveau('${c.id}','${uid}',+this.value)">
+      </div>
+      <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pct}%;background:#f59e0b"></div></div>
+    </div>`;
+  }
+  return `
+    <div class="vtt-ms-xp">
+      <div class="vtt-ms-xp-row">
+        <span class="vtt-ms-xp-label">⭐ XP</span>
+        <span class="vtt-ms-xp-val">${xp} / ${palier}</span>
+        <span class="vtt-ms-xp-badge">Niv. ${niv}</span>
+      </div>
+      <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pct}%;background:#f59e0b"></div></div>
+    </div>`;
 }
 
 function _msTabEquipement(c, uid, canEdit) {
@@ -4972,7 +5061,7 @@ function _renderMiniSheet(uid) {
   ).join('')}</div>`;
 
   const tabHtml =
-      _miniTab === 'combat' ? _msTabCombat(c)
+      _miniTab === 'combat' ? _msTabCombat(c, uid, canEdit)
     : _miniTab === 'equip'  ? _msTabEquipement(c, uid, canEdit)
     : _miniTab === 'sorts'  ? _msTabSorts(c, uid, canEdit)
     :                         _msTabInventaire(c, uid, canEdit);

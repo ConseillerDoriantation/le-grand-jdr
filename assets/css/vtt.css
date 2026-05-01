@@ -1661,6 +1661,46 @@
   border-radius: 4px;
 }
 
+/* ── XP & Niveau ──────────────────────────────────────────────── */
+.vtt-ms-xp {
+  margin-top: .45rem;
+  padding: .3rem .5rem;
+  border-top: 1px solid var(--border);
+}
+.vtt-ms-xp-row {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin-bottom: .3rem;
+  flex-wrap: wrap;
+}
+.vtt-ms-xp-label { font-size: .67rem; color: var(--text-muted); flex-shrink: 0; width: 36px; }
+.vtt-ms-xp-val   { font-size: .75rem; color: var(--gold); font-weight: 600; flex: 1; }
+.vtt-ms-xp-badge {
+  font-size: .65rem; font-weight: 700;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  border-radius: 4px;
+  padding: .1rem .35rem;
+}
+.vtt-ms-xp-sep  { font-size: .65rem; color: var(--text-muted); }
+.vtt-ms-xp-niv  { font-size: .65rem; color: var(--text-muted); margin-left: .2rem; }
+.vtt-ms-xp-input, .vtt-ms-niv-input {
+  padding: .15rem .35rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--gold);
+  font-size: .75rem;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  transition: border-color .15s;
+}
+.vtt-ms-xp-input  { width: 60px; }
+.vtt-ms-niv-input { width: 42px; }
+.vtt-ms-xp-input:focus, .vtt-ms-niv-input:focus { border-color: var(--gold); }
+
 /* ── Équipement : slots ────────────────────────────────────────── */
 .vtt-ms-slots { display: flex; flex-direction: column; }
 .vtt-ms-slot-row {
