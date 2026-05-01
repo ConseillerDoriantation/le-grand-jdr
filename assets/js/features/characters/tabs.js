@@ -5,6 +5,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { modStr, _esc } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../../shared/rich-text.js';
+import { uploadJpeg } from '../../shared/image-upload.js';
 
 // ══════════════════════════════════════════════
 // TAB : CARACTÉRISTIQUES
@@ -845,25 +846,22 @@ export function openProfilImageUpload(charId) {
   fi.type = 'file'; fi.accept = 'image/*';
   fi.style.cssText = 'position:absolute;opacity:0;width:0;height:0';
   document.body.appendChild(fi);
-  fi.addEventListener('change', () => {
+  fi.addEventListener('change', async () => {
     const file = fi.files[0]; fi.remove();
     if (!file?.type.startsWith('image/')) return;
-    const r = new FileReader();
-    r.onload = async (e) => {
-      const b64 = e.target.result;
-      const pres = _profilCache[charId];
-      const data = pres ? { imageUrl: b64 } : { charId, uid: STATE.user?.uid || '', imageUrl: b64, visible: true, ordre: 999, content: '' };
-      if (pres?.id) {
-        await updateInCol('players', pres.id, { imageUrl: b64 });
-        _profilCache[charId] = { ...pres, imageUrl: b64 };
-      } else {
-        const newId = await addToCol('players', data);
-        _profilCache[charId] = { id: newId, ...data };
-      }
-      const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
-      if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
-    };
-    r.readAsDataURL(file);
+    // Compression avant stockage Firestore (limite 1 MB par doc)
+    const b64  = await uploadJpeg(file, { max: 600, quality: 0.82 });
+    const pres = _profilCache[charId];
+    const data = pres ? { imageUrl: b64 } : { charId, uid: STATE.user?.uid || '', imageUrl: b64, visible: true, ordre: 999, content: '' };
+    if (pres?.id) {
+      await updateInCol('players', pres.id, { imageUrl: b64 });
+      _profilCache[charId] = { ...pres, imageUrl: b64 };
+    } else {
+      const newId = await addToCol('players', data);
+      _profilCache[charId] = { id: newId, ...data };
+    }
+    const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
+    if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
   });
   fi.click();
 }
