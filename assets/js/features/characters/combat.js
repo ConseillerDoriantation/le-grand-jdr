@@ -1,5 +1,8 @@
 import { STATE } from '../../core/state.js';
+import { updateInCol } from '../../data/firestore.js';
+import { showNotif } from '../../shared/notifications.js';
 import { formatItemBonusText } from '../../shared/char-stats.js';
+import { loadDamageTypes, getMagicTypes } from '../../shared/damage-types.js';
 import {
   loadCombatStyles, detectCombatStyle,
   openCombatStylesAdmin, openWeaponFormatsAdmin,
@@ -86,10 +89,37 @@ export function renderCharEquip(c, canEdit) {
     html += `</div>`;
   });
 
+  // ── Placeholder éléments magiques (juste sous les armes) ────────────────
+  const elemPlaceholderId = `cs-elements-${c.id||'x'}`;
   html += `</div>
     <p class="cs-rule-note">🎲 Critique = maximum des dés + relance les dés de dégâts.</p>
+    <div id="${elemPlaceholderId}"></div>
     <div id="${styleId}"></div>
   </div>`;
+
+  // Éléments magiques — rendu async dans le placeholder
+  setTimeout(async () => {
+    const el = document.getElementById(elemPlaceholderId);
+    if (!el) return;
+    const allTypes   = await loadDamageTypes();
+    const magicTypes = getMagicTypes(allTypes);
+    const charElems  = c.elements || [];
+
+    const chips = magicTypes.map(t => {
+      const active = charElems.includes(t.id);
+      return `<span class="cs-elem-chip ${active ? 'cs-elem-chip--on' : ''}"
+        style="--elem-col:${t.color||'#9ca3af'}"
+        ${canEdit ? `onclick="window._toggleCharElement('${c.id}','${t.id}')" title="${active ? 'Retirer' : 'Ajouter'} ${t.label}"` : ''}
+      >${t.icon} ${t.label}</span>`;
+    }).join('');
+
+    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.4rem;padding:.1rem .1rem .55rem">
+      ${chips}
+      ${charElems.length === 0 && !canEdit
+        ? `<span style="font-size:.73rem;color:var(--text-dim);font-style:italic">Aucun élément — armes magiques frappent physique</span>`
+        : ''}
+    </div>`;
+  }, 0);
 
   // Style de combat — rendu async dans le placeholder
   setTimeout(async () => {
@@ -210,3 +240,29 @@ export function renderCharEquip(c, canEdit) {
 
   return html;
 }
+
+/** Active ou désactive un élément sur un personnage. */
+window._toggleCharElement = async (charId, elemId) => {
+  const c = STATE.activeChar;
+  if (!c || c.id !== charId) return;
+  const elems = [...(c.elements || [])];
+  const idx   = elems.indexOf(elemId);
+  if (idx >= 0) elems.splice(idx, 1);
+  else          elems.push(elemId);
+  c.elements = elems;
+  await updateInCol('characters', charId, { elements: elems });
+  showNotif('Éléments mis à jour.', 'success');
+  // Re-render le placeholder in-place
+  const allTypes   = await loadDamageTypes();
+  const magicTypes = getMagicTypes(allTypes);
+  const el = document.getElementById(`cs-elements-${charId}`);
+  if (!el) return;
+  const chips = magicTypes.map(t => {
+    const active = elems.includes(t.id);
+    return `<span class="cs-elem-chip ${active ? 'cs-elem-chip--on' : ''}"
+      style="--elem-col:${t.color||'#9ca3af'}"
+      onclick="window._toggleCharElement('${charId}','${t.id}')" title="${active ? 'Retirer' : 'Ajouter'} ${t.label}"
+    >${t.icon} ${t.label}</span>`;
+  }).join('');
+  el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.4rem;padding:.1rem .1rem .55rem">${chips}</div>`;
+};

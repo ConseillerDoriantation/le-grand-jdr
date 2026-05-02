@@ -4988,3 +4988,38 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-tab-body {
   padding: 1rem 1.1rem;
 }
+
+/* ══════════════════════════════════════════════
+   ÉLÉMENTS MAGIQUES
+══════════════════════════════════════════════ */
+.cs-elem-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.cs-elem-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .35rem .65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+  user-select: none;
+}
+.cs-elem-chip:hover {
+  border-color: var(--elem-col, #9ca3af);
+  background: rgba(255,255,255,.07);
+  color: var(--elem-col, var(--text));
+}
+.cs-elem-chip--on {
+  border-color: var(--elem-col, #9ca3af);
+  background: rgba(255,255,255,.10);
+  color: var(--elem-col, var(--text));
+  font-weight: 700;
+}

@@ -288,39 +288,37 @@ export async function openDamageTypesAdmin() {
   _renderDamageTypesModal(_damageTypes);
 }
 
-const _dmgTypeSelect = (i, val) => {
-  const types = _damageTypes || DEFAULT_DAMAGE_TYPES;
-  const opts = types.map(t =>
-    `<option value="${_esc(t.id)}"${val===t.id?' selected':''}>${_esc(t.label)}</option>`
-  ).join('');
-  return `<select class="input-field" style="font-size:.75rem;padding:2px 6px;width:auto"
-    onchange="window._setWeaponFormatType(${i}, this.value)">
-    <option value=""${!val?' selected':''}>—</option>
-    ${opts}
-  </select>`;
-};
-
 export function _renderWeaponFormatsModal(formats) {
+  const magBadge = (isMagic, i) => {
+    const on = !!isMagic;
+    return `<button
+      onclick="window._toggleWeaponFormatMagic(${i})"
+      style="padding:.25rem .55rem;border-radius:7px;font-size:.7rem;font-weight:700;cursor:pointer;
+             border:1px solid ${on ? '#b47fff' : 'var(--border)'};
+             background:${on ? 'rgba(180,127,255,.18)' : 'var(--bg-base)'};
+             color:${on ? '#c084fc' : 'var(--text-dim)'};white-space:nowrap"
+      title="${on ? 'Cliquer pour passer en physique' : 'Cliquer pour passer en magique'}">
+      ${on ? '🔮 Magique' : '💪 Physique'}
+    </button>`;
+  };
+
   openModal('⚔️ Formats d\'armes', `
     <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
-      Ces formats apparaissent dans la boutique (champ Format) et dans les conditions des styles de combat.
-      Le type <strong>Magique</strong> applique ½ dégâts sur raté (hors fumble).
+      Ces formats apparaissent dans la boutique et dans les styles de combat.<br>
+      <span style="color:#c084fc">Magique</span> = le joueur choisit son élément à l'attaque.
+      <span style="color:#9ca3af">Physique</span> = toujours dégâts physiques.
     </div>
     <div id="wf-list" style="display:flex;flex-direction:column;gap:.35rem">
       ${formats.map((f, i) => `
       <div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
         border:1px solid var(--border);border-radius:8px;padding:.45rem .7rem">
         <span style="flex:1;font-size:.84rem;color:var(--text)">${_esc(f.label)}</span>
-        ${_dmgTypeSelect(i, f.damageType || '')}
+        ${magBadge(f.isMagic, i)}
         <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="window._deleteWeaponFormat(${i})">🗑️</button>
       </div>`).join('')}
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.75rem">
       <input class="input-field" id="wf-new-label" placeholder="Nouveau format..." style="flex:1">
-      <select class="input-field" id="wf-new-type" style="font-size:.8rem;width:auto">
-        <option value="">—</option>
-        ${(_damageTypes||DEFAULT_DAMAGE_TYPES).map(t=>`<option value="${_esc(t.id)}">${_esc(t.label)}</option>`).join('')}
-      </select>
       <button class="btn btn-gold btn-sm" onclick="window._addWeaponFormat()">+ Ajouter</button>
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.5rem">
@@ -331,23 +329,24 @@ export function _renderWeaponFormatsModal(formats) {
   setTimeout(() => document.getElementById('wf-new-label')?.focus(), 60);
 }
 
-window._setWeaponFormatType = async (i, damageType) => {
+window._toggleWeaponFormatMagic = async (i) => {
   const formats = [...(_weaponFormats || [])];
   if (!formats[i]) return;
-  formats[i] = { ...formats[i], damageType };
+  const nowMagic = !formats[i].isMagic;
+  formats[i] = { ...formats[i], isMagic: nowMagic, damageType: nowMagic ? '' : 'physique' };
   await saveWeaponFormats(formats);
   _weaponFormats = formats;
+  _renderWeaponFormatsModal(formats);
 };
 
 window._addWeaponFormat = async () => {
-  const label      = document.getElementById('wf-new-label')?.value?.trim();
-  const damageType = document.getElementById('wf-new-type')?.value || '';
+  const label = document.getElementById('wf-new-label')?.value?.trim();
   if (!label) { showNotif('Nom requis.', 'error'); return; }
   const formats = _weaponFormats ? [..._weaponFormats] : [];
   if (formats.some(f => f.label.toLowerCase() === label.toLowerCase())) {
     showNotif('Ce format existe déjà.', 'error'); return;
   }
-  formats.push({ id: `fmt_${Date.now()}`, label, damageType });
+  formats.push({ id: `fmt_${Date.now()}`, label, damageType: 'physique', isMagic: false });
   await saveWeaponFormats(formats);
   _weaponFormats = formats;
   showNotif('Format ajouté.', 'success');
@@ -376,11 +375,27 @@ function _renderDamageTypesModal(types) {
     const missOpts = ['none','half','full'].map(v =>
       `<option value="${v}"${(r.missEffect||'none')===v?' selected':''}>${MISS_EFFECT_LABELS[v]}</option>`
     ).join('');
+    const isMagic = !!t.isMagic;
     return `
     <div style="display:flex;flex-wrap:wrap;gap:.4rem .8rem;margin-top:.35rem;padding:.35rem .5rem;
       background:var(--bg-base);border-radius:6px;font-size:.76rem;color:var(--text-dim)">
       <label style="display:flex;align-items:center;gap:.3rem">
-        Dégâts sur raté
+        <input type="text" class="input-field" value="${_esc(t.icon||'')}"
+          style="width:38px;font-size:.85rem;text-align:center;padding:2px 4px"
+          placeholder="🔥" title="Icône"
+          onchange="window._saveDmgTypeProp(${i},'icon',this.value)">
+        <input type="color" value="${t.color||'#9ca3af'}" title="Couleur"
+          style="width:26px;height:22px;border:none;border-radius:4px;cursor:pointer;background:none;padding:0"
+          onchange="window._saveDmgTypeProp(${i},'color',this.value)">
+      </label>
+      <label style="display:flex;align-items:center;gap:.3rem">
+        <input type="checkbox" ${isMagic ? 'checked' : ''}
+          onchange="window._saveDmgTypeProp(${i},'isMagic',this.checked)"
+          title="Type magique — armes magiques peuvent utiliser cet élément">
+        Magique
+      </label>
+      <label style="display:flex;align-items:center;gap:.3rem">
+        Raté
         <select class="input-field" style="font-size:.75rem;padding:2px 5px;width:auto"
           onchange="window._saveDmgTypeProp(${i},'rules.missEffect',this.value)">
           ${missOpts}
@@ -403,12 +418,14 @@ function _renderDamageTypesModal(types) {
 
   openModal('⚡ Types de dégâts', `
     <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
-      Chaque type définit des règles appliquées automatiquement dans le VTT pour toutes les armes de ce type.
+      Chaque type définit des règles appliquées automatiquement dans le VTT.<br>
+      <span style="color:var(--gold)">Magique</span> = armes magiques et sorts peuvent utiliser cet élément.
     </div>
     <div style="display:flex;flex-direction:column;gap:.5rem">
       ${types.map((t, i) => `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:.5rem .7rem">
+      <div style="background:var(--bg-elevated);border:1px solid ${t.color||'var(--border)'};border-radius:8px;padding:.5rem .7rem">
         <div style="display:flex;align-items:center;gap:.5rem">
+          <span style="font-size:1rem;min-width:1.2rem;text-align:center">${t.icon||'—'}</span>
           <input class="input-field" value="${_esc(t.label)}" style="flex:1;font-size:.84rem"
             onchange="window._saveDmgTypeProp(${i},'label',this.value)">
           <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b"
@@ -418,6 +435,7 @@ function _renderDamageTypesModal(types) {
       </div>`).join('')}
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.75rem">
+      <input class="input-field" id="dt-new-icon" placeholder="🌊" style="width:44px;text-align:center">
       <input class="input-field" id="dt-new-label" placeholder="Nouveau type..." style="flex:1">
       <button class="btn btn-gold btn-sm" onclick="window._addDmgType()">+ Ajouter</button>
     </div>
@@ -441,12 +459,20 @@ window._saveDmgTypeProp = async (i, path, value) => {
 
 window._addDmgType = async () => {
   const label = document.getElementById('dt-new-label')?.value?.trim();
+  const icon  = document.getElementById('dt-new-icon')?.value?.trim() || '';
   if (!label) { showNotif('Nom requis.', 'error'); return; }
   const types = [...(_damageTypes || [])];
   if (types.some(t => t.label.toLowerCase() === label.toLowerCase())) {
     showNotif('Ce type existe déjà.', 'error'); return;
   }
-  types.push({ id: `dt_${Date.now()}`, label, rules: { missEffect: 'none', armorPen: 0, dmgBonus: 0 } });
+  types.push({
+    id:      `dt_${Date.now()}`,
+    label,
+    icon,
+    color:   '#9ca3af',
+    isMagic: true,
+    rules:   { missEffect: 'half', armorPen: 0, dmgBonus: 0 },
+  });
   await saveDamageTypes(types);
   _damageTypes = types;
   showNotif('Type ajouté.', 'success');
