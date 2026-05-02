@@ -8,14 +8,14 @@ import { getDocData, saveDoc } from '../data/firestore.js';
 let _weaponFormats = null;
 
 export const DEFAULT_WEAPON_FORMATS = [
-  { id:'arme_1m_cac_phy',  label:'Arme 1M CaC Phy.',  damageType:'physique' },
-  { id:'arme_2m_cac_phy',  label:'Arme 2M CaC Phy.',  damageType:'physique' },
-  { id:'arme_2m_dist_phy', label:'Arme 2M Dist Phy.', damageType:'physique' },
-  { id:'arme_2m_cac_mag',  label:'Arme 2M CaC Mag.',  damageType:'magique'  },
-  { id:'arme_2m_dist_mag', label:'Arme 2M Dist Mag.', damageType:'magique'  },
-  { id:'bouclier',         label:'Bouclier',           damageType:'physique' },
-  { id:'baguette',         label:'Baguette',           damageType:'magique'  },
-  { id:'main_libre',       label:'Main Libre',         damageType:'physique' },
+  { id:'arme_1m_cac_phy',  label:'Arme 1M CaC Phy.',  damageType:'physique', isMagic: false },
+  { id:'arme_2m_cac_phy',  label:'Arme 2M CaC Phy.',  damageType:'physique', isMagic: false },
+  { id:'arme_2m_dist_phy', label:'Arme 2M Dist Phy.', damageType:'physique', isMagic: false },
+  { id:'arme_2m_cac_mag',  label:'Arme 2M CaC Mag.',  damageType:'',         isMagic: true  },
+  { id:'arme_2m_dist_mag', label:'Arme 2M Dist Mag.', damageType:'',         isMagic: true  },
+  { id:'bouclier',         label:'Bouclier',           damageType:'physique', isMagic: false },
+  { id:'baguette',         label:'Baguette',           damageType:'',         isMagic: true  },
+  { id:'main_libre',       label:'Main Libre',         damageType:'physique', isMagic: false },
 ];
 
 export async function loadWeaponFormats() {
@@ -28,6 +28,7 @@ export async function loadWeaponFormats() {
       _weaponFormats = doc.formats.map(f => ({
         ...f,
         damageType: f.damageType ?? defMap[f.id]?.damageType ?? '',
+        isMagic:    f.isMagic    ?? defMap[f.id]?.isMagic    ?? false,
       }));
     } else {
       _weaponFormats = DEFAULT_WEAPON_FORMATS;

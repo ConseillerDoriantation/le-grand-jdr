@@ -4,6 +4,7 @@ import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import { getMod, calcPMMax } from '../../shared/char-stats.js';
+import { loadDamageTypes, getMagicTypes } from '../../shared/damage-types.js';
 import { getArmorSetData } from './data.js';
 
 // ── Drag and Drop sorts ──────────────────────
@@ -615,8 +616,9 @@ export function editSort(idx) { openSortModal(idx, (STATE.activeChar?.deck_sorts
 
 let _openSortIdx = -1;
 
-export function openSortModal(idx, s) {
-  const NOYAUX = ['Feu 🔥','Eau 💧','Terre 🪨','Vent 🌬️','Ombre 🌑','Lumière ✨','Physique 💪'];
+export async function openSortModal(idx, s) {
+  const allTypes = await loadDamageTypes();
+  const NOYAUX   = getMagicTypes(allTypes);
   const RUNES = [
     {nom:'Puissance',     effet:'+ 1 dé de dégâts · chaîné : +2 fixe/paire'},
     {nom:'Protection',    effet:'+1d4 soin ou +2 CA (2 tr) · chaîné : soin+2 & CA+1'},
@@ -637,7 +639,19 @@ export function openSortModal(idx, s) {
   runesSrc.forEach(r => { runeCounts[r] = (runeCounts[r]||0) + 1; });
   window._runeCountsEdit = { ...runeCounts };
 
-  const noyauSel  = s?.noyau || '';
+  // Noyau : id de type (nouveau) ou migration depuis label (ancien)
+  let noyauTypeIdSel = s?.noyauTypeId || '';
+  if (!noyauTypeIdSel && s?.noyau) {
+    // Migration : chercher par label ou par label partiel (ex: 'Feu 🔥' → 'feu')
+    const legacy = NOYAUX.find(n =>
+      n.label === s.noyau ||
+      s.noyau.toLowerCase().startsWith(n.label.toLowerCase())
+    );
+    noyauTypeIdSel = legacy?.id || '';
+  }
+  const noyauSel      = noyauTypeIdSel
+    ? (NOYAUX.find(n => n.id === noyauTypeIdSel)?.label || s?.noyau || '')
+    : (s?.noyau || '');
   const typesInit = Array.isArray(s?.types) && s.types.length ? s.types
     : (s?.typeSoin ? ['defensif'] : (s?.noyau ? ['offensif'] : ['utilitaire']));
 
@@ -740,10 +754,13 @@ export function openSortModal(idx, s) {
     <div class="form-group">
       <label>Noyau élémentaire <span style="color:var(--text-dim);font-weight:400">(2 PM)</span></label>
       <div class="cs-noyau-grid" id="noyau-grid">
-        ${NOYAUX.map(n => `<div class="cs-noyau-btn ${noyauSel===n?'selected':''}"
-             onclick="selectNoyau(this,'${n.replace(/'/g,"\\'")}')">${n}</div>`).join('')}
+        ${NOYAUX.map(n => `<div class="cs-noyau-btn ${noyauTypeIdSel===n.id?'selected':''}"
+             style="${noyauTypeIdSel===n.id ? `border-color:${n.color};background:${n.color}20;color:${n.color}` : ''}"
+             onclick="selectNoyau(this,'${n.id}','${n.label} ${n.icon}','${n.color}')"
+             data-noyau-id="${n.id}">${n.icon} ${n.label}</div>`).join('')}
       </div>
       <input type="hidden" id="s-noyau" value="${noyauSel}">
+      <input type="hidden" id="s-noyau-id" value="${noyauTypeIdSel}">
     </div>
 
     <!-- ④ Runes -->
@@ -1019,11 +1036,24 @@ export function updateSortPM() {
   if (dispEl) dispEl.textContent = pm;
 }
 
-export function selectNoyau(el, noyau) {
-  document.querySelectorAll('.cs-noyau-btn').forEach(b => b.classList.remove('selected'));
+export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
+  document.querySelectorAll('.cs-noyau-btn').forEach(b => {
+    b.classList.remove('selected');
+    b.style.borderColor = '';
+    b.style.background  = '';
+    b.style.color       = '';
+  });
   el.classList.add('selected');
-  const input = document.getElementById('s-noyau');
-  if (input) { input.value = noyau; updateSortPM(); }
+  if (noyauColor) {
+    el.style.borderColor = noyauColor;
+    el.style.background  = noyauColor + '20';
+    el.style.color       = noyauColor;
+  }
+  const inputLabel = document.getElementById('s-noyau');
+  const inputId    = document.getElementById('s-noyau-id');
+  if (inputLabel) inputLabel.value = noyauLabel || noyauId;
+  if (inputId)    inputId.value    = noyauId;
+  updateSortPM();
 }
 
 
@@ -1031,7 +1061,8 @@ export async function saveSort(idx) {
   try {
     const c = STATE.activeChar; if(!c) return;
     const sorts = c.deck_sorts||[];
-    const noyau = document.getElementById('s-noyau')?.value||'';
+    const noyau       = document.getElementById('s-noyau')?.value||'';
+    const noyauTypeId = document.getElementById('s-noyau-id')?.value||'';
 
     // Runes depuis _runeCountsEdit
     const runes = [];
@@ -1058,6 +1089,7 @@ export async function saveSort(idx) {
       nom:      document.getElementById('s-nom')?.value||'Sort',
       pm:       autoPm,
       noyau,
+      noyauTypeId,
       runes,
       types,
       degats:   document.getElementById('s-degats')?.value||'',

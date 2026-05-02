@@ -15,7 +15,7 @@ import {
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus } from '../shared/char-stats.js';
 import { getArmorSetData } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
-import { loadDamageTypes, getDamageTypeRules } from '../shared/damage-types.js';
+import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { _esc } from '../shared/html.js';
@@ -1379,8 +1379,11 @@ function _buildAttackOptions(t) {
   const wSetBonus   = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
   const wMaitrise   = c && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
-  const fmt       = _weaponFormats?.find(f => f.label === weapon?.format);
-  const typeRules = getDamageTypeRules(_damageTypes, fmt?.damageType);
+  const fmt        = _weaponFormats?.find(f => f.label === weapon?.format);
+  const isMagicW   = fmt?.isMagic === true;
+  const typeRules  = isMagicW
+    ? getDamageTypeRules(_damageTypes, 'physique')  // fallback si pas d'élément choisi
+    : getDamageTypeRules(_damageTypes, fmt?.damageType || 'physique');
 
   options.push({
     id:               'weapon',
@@ -1397,6 +1400,8 @@ function _buildAttackOptions(t) {
     dmgStatLabel:     statShort(wDmgStat2) || wDmgStat2,
     maitriseBonus:    wMaitrise,
     typeRules,
+    isMagicWeapon:    isMagicW && !isUnarmed,
+    charElements:     (isMagicW && !isUnarmed) ? (c?.elements || []) : [],
   });
 
   // ── Tous les sorts actifs du deck ──
@@ -1423,13 +1428,21 @@ function _buildAttackOptions(t) {
       const cout      = freeCasts > 0 ? 0 : basePm;
 
       if (types.includes('offensif')) {
-        const fullFormula = _vttSortDmgFormula(s, c);
+        const fullFormula    = _vttSortDmgFormula(s, c);
         const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
+        const spellTypeId    = s.noyauTypeId || null;
+        const spellTypeRules = spellTypeId
+          ? getDamageTypeRules(_damageTypes, spellTypeId)
+          : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
+        const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
         options.push({
           id: `sort_${idx}`, icon: '✨', label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: fullFormula,
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
-          halfOnMiss: true,
+          typeRules: spellTypeRules,
+          damageTypeId: spellTypeId,
+          damageTypeIcon: spellTypeObj?.icon || '',
+          damageTypeColor: spellTypeObj?.color || '',
           toucherMod: wTchMod, toucherSetBonus: wSetBonus,
           toucherStatLabel: statShort(wTchStat) || wTchStat,
           dmgStatMod: sStatMod, dmgStatLabel: sStatLbl,
@@ -1514,6 +1527,8 @@ async function _execAttack(srcId, tgtId) {
             <div class="vtt-attack-opt-meta">
               🎲 ${o.rawDice || o.dice}
               · 🎯 portée ${o.portee}
+              ${o.isMagicWeapon ? `· <span style="color:#c084fc">🔮 élément à choisir</span>` : ''}
+              ${!o.isMagicWeapon && o.damageTypeIcon ? `· <span style="color:${o.damageTypeColor||'#9ca3af'}">${o.damageTypeIcon}</span>` : ''}
               ${(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles} cibles</span>`:''}
               ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:o.pmCost===0&&o.basePm>0?`· <span style="color:#22c38e">✨ gratuit</span>`:''}
               ${o.traits?.length ? `· <span style="color:#b47fff">${o.traits.slice(0, 2).map(_esc).join(', ')}</span>` : ''}
@@ -1531,6 +1546,13 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
   if (!opt) return;
   closeModalDirect();
+
+  // Arme magique : choisir l'élément avant de continuer
+  if (opt.isMagicWeapon) {
+    _showElementPicker(srcId, tgtId, +idx);
+    return;
+  }
+
   const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
   if (!src||!tgt) return;
   const lS=_live(src), lT=_live(tgt);
@@ -1603,11 +1625,17 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
         <div style="grid-column:1/-1;height:1px;background:var(--border);margin:-.1rem 0"></div>
 
         <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">⚔️ Dégâts</span>
-        <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${degatsFormula}</div>
+        <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">
+          ${opt.damageTypeIcon ? `<span style="font-size:.85rem;color:${opt.damageTypeColor||'#9ca3af'}">${opt.damageTypeIcon}</span>` : ''}
+          ${degatsFormula}
+        </div>
         <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="±0" title="Bonus / malus aux dégâts">
-        ${opt.halfOnMiss ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
+        ${ (opt.typeRules?.missEffect === 'half') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
           font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
           <span>✦</span><span>½ dégâts garantis même en cas d'échec</span>
+        </div>` : (opt.typeRules?.missEffect === 'full') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
+          font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
+          <span>✦</span><span>Dégâts complets même en cas d'échec</span>
         </div>` : ''}
       </div>
     </div>
@@ -1682,6 +1710,86 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
 };
 
 window._vttCancelAtk  = () => { _atkCtx=null; closeModalDirect(); };
+
+/** Affiche le sélecteur d'élément pour une arme magique. */
+function _showElementPicker(srcId, tgtId, optIdx) {
+  const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[optIdx];
+  if (!opt) return;
+  const src = _tokens[srcId]?.data, tgt = _tokens[tgtId]?.data;
+  if (!src || !tgt) return;
+  const lS = _live(src), lT = _live(tgt);
+
+  const charElements  = opt.charElements || [];
+  const availableTypes = (_damageTypes || []).filter(t => charElements.includes(t.id));
+
+  // Si aucun élément disponible → frappe physique par défaut
+  if (availableTypes.length === 0) {
+    const physRules = getDamageTypeRules(_damageTypes, 'physique');
+    const physType  = getDamageTypeById(_damageTypes, 'physique');
+    _atkOptsCache[`${srcId}__${tgtId}`][optIdx] = {
+      ...opt, isMagicWeapon: false,
+      typeRules: physRules,
+      damageTypeIcon: physType?.icon || '',
+      damageTypeColor: physType?.color || '',
+    };
+    // Proceed directly — re-call _vttPickOpt now that isMagicWeapon is false
+    window._vttPickOpt(srcId, tgtId, optIdx);
+    return;
+  }
+
+  openModal(`${opt.icon} ${opt.label} — Élément`, `
+    <div class="vtt-form" style="min-width:260px;max-width:340px">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
+        <button onclick="window._vttBackToAtk()"
+          style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
+                 border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
+                 cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
+                 white-space:nowrap">← Retour</button>
+        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;
+                    white-space:nowrap;font-size:.82rem">
+          <strong>${_esc(lS.displayName??src.name)}</strong>
+          <span style="color:var(--text-dim);margin:0 .3rem">→</span>
+          <strong style="color:#ef4444">${_esc(lT.displayName??tgt.name)}</strong>
+        </div>
+      </div>
+      <div style="font-size:.72rem;color:var(--text-dim);margin-bottom:.6rem;text-align:center">
+        🔮 Choisir l'élément de l'attaque
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:.45rem">
+        ${availableTypes.map(t => `
+          <button onclick="window._vttPickElement('${srcId}','${tgtId}',${optIdx},'${t.id}')"
+            style="padding:.55rem .4rem;border-radius:10px;cursor:pointer;font-family:inherit;
+                   border:2px solid ${t.color||'var(--border)'};
+                   background:${t.color||'var(--border)'}18;
+                   color:${t.color||'var(--text)'};font-weight:700;font-size:.82rem;
+                   display:flex;align-items:center;justify-content:center;gap:.25rem;
+                   transition:background .12s">
+            <span>${t.icon||''}</span><span>${_esc(t.label)}</span>
+          </button>`).join('')}
+      </div>
+      <div style="text-align:right;margin-top:.75rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      </div>
+    </div>`);
+}
+
+window._vttPickElement = (srcId, tgtId, optIdx, elementId) => {
+  const cacheKey = `${srcId}__${tgtId}`;
+  const opt = _atkOptsCache[cacheKey]?.[+optIdx];
+  if (!opt) return;
+  const typeRules  = getDamageTypeRules(_damageTypes, elementId);
+  const elemType   = getDamageTypeById(_damageTypes, elementId);
+  _atkOptsCache[cacheKey][+optIdx] = {
+    ...opt,
+    isMagicWeapon:    false,
+    typeRules,
+    damageTypeId:     elementId,
+    damageTypeIcon:   elemType?.icon  || '',
+    damageTypeColor:  elemType?.color || '',
+  };
+  closeModalDirect();
+  window._vttPickOpt(srcId, tgtId, +optIdx);
+};
 
 /** Retourne à la liste de sélection d'attaque sans annuler le combat. */
 window._vttBackToAtk  = () => {
@@ -1912,6 +2020,9 @@ window._vttRollAttack = async () => {
       dmgRaw, dmgBonus: bonusDmg, dmgTotal,
       critNormalMax, critRaw2, critFixed2,
       halfDmg, newHp, hpMax,
+      damageTypeId:    opt.damageTypeId    || null,
+      damageTypeIcon:  opt.damageTypeIcon  || null,
+      damageTypeColor: opt.damageTypeColor || null,
       createdAt: serverTimestamp(),
     }).catch(()=>{});
 
