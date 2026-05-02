@@ -1633,3 +1633,13 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 [data-theme="light"] .players-showcase-stat-row__bar {
   background:rgba(0,0,0,0.06);
 }
+
+/* Historique d'affinité (PNJ) — affiche ~5 événements puis scroll */
+.npc-histo-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: .3rem !important;
+  max-height: 200px !important;
+  overflow-y: auto !important;
+  padding-right: .25rem !important;
+}

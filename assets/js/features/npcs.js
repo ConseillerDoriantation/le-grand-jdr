@@ -108,12 +108,18 @@ const TYPE_COLORS = ['#d63031','#e74c3c','#ff6b6b','#ff7675','#ff4757','#e84393'
 ];
 
 const afx = (n) => AFFINITE[Math.max(0, Math.min(4, n ?? 2))];
-const AFFINITE_TYPES_DOC_ID = 'npc_affinite_types';
+const AFFINITE_TYPES_DOC_ID  = 'npc_affinite_types';
+const AFFINITE_SEUILS_DOC_ID = 'npc_affinite_seuils';
+
+// Seuils par défaut (mode valeur) — chaque seuil = borne basse incluse du palier
+const SEUILS_DEFAULT = { hostile: -50, mefiant: -10, neutre: 0, amical: 30, allie: 100 };
+const SEUILS_KEYS    = ['hostile', 'mefiant', 'neutre', 'amical', 'allie'];
 
 // ── État local ────────────────────────────────────────────────────────────────
-let _npcs          = [];
-let _affiPerso     = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, note, notePublique}]
-let _affiniteTypes = [];   // [{id, label, emoji, couleur}]
+let _npcs           = [];
+let _affiPerso      = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, note, notePublique}]
+let _affiniteTypes  = [];   // [{id, label, emoji, couleur}]
+let _affiniteSeuils = { ...SEUILS_DEFAULT };
 let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
 let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
@@ -122,18 +128,20 @@ let _filterSearch  = '';
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
-  const [npcs, affi, typesDoc, places, orgs, shopItems] = await Promise.all([
+  const [npcs, affi, typesDoc, seuilsDoc, places, orgs, shopItems] = await Promise.all([
     loadCollection('npcs'),
     loadCollection('npc_affinites'),
     getDocData('npc_affinites', AFFINITE_TYPES_DOC_ID),
+    getDocData('npc_affinites', AFFINITE_SEUILS_DOC_ID),
     listPlaces().catch(() => []),
     listOrganizations().catch(() => []),
     loadCollection('shop').catch(() => []),
   ]);
-  _npcs          = npcs || [];
-  _affiPerso     = (affi || []).filter(a => a.id !== AFFINITE_TYPES_DOC_ID);
-  _affiniteTypes = Array.isArray(typesDoc?.types) ? typesDoc.types : [];
+  _npcs           = npcs || [];
+  _affiPerso      = (affi || []).filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
+  _affiniteTypes  = Array.isArray(typesDoc?.types) ? typesDoc.types : [];
   _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  _affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
   _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _shopWeapons   = (shopItems || []).filter(_isShopWeapon).sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
@@ -144,6 +152,22 @@ const _getAffiniteType      = (id) => _affiniteTypes.find(t => t.id === id) || n
 const _getAffiniteTypeLabel = (id, fb = '') => _getAffiniteType(id)?.label   || fb || '';
 const _getAffiniteTypeColor = (id) => _getAffiniteType(id)?.couleur || TYPE_COLORS[0];
 const _getAffiniteTypeEmoji = (id) => _getAffiniteType(id)?.emoji   || '✨';
+
+// ── Helpers affinité (mode groupe vs valeur) ─────────────────────────────────
+// En mode "valeur", le niveau est dérivé de la valeur cumulée et des seuils.
+const _niveauFromValeur = (v, s = _affiniteSeuils) => {
+  const x = Number(v) || 0;
+  if (x >= (s.allie   ?? SEUILS_DEFAULT.allie))   return 4;
+  if (x >= (s.amical  ?? SEUILS_DEFAULT.amical))  return 3;
+  if (x >= (s.neutre  ?? SEUILS_DEFAULT.neutre))  return 2;
+  if (x >= (s.mefiant ?? SEUILS_DEFAULT.mefiant)) return 1;
+  return 0;
+};
+const _affiniteNiveau = (n) => {
+  const a = n?.affinite || {};
+  return a.mode === 'valeur' ? _niveauFromValeur(a.valeur) : (a.niveau ?? 2);
+};
+const _affiniteMode = (n) => n?.affinite?.mode === 'valeur' ? 'valeur' : 'groupe';
 
 // ── Rendu principal ───────────────────────────────────────────────────────────
 async function renderNpcs() {
@@ -217,7 +241,8 @@ function _renderPage(content) {
 // ── Nav item ──────────────────────────────────────────────────────────────────
 function _renderNavItem(n) {
   const isActive = n.id === _activeId;
-  const af       = afx(n.affinite?.niveau ?? 2);
+  const niv      = _affiniteNiveau(n);
+  const af       = afx(niv);
   return `
   <div onclick="window.selectNpc('${n.id}')" data-npc-id="${n.id}"
     style="display:flex;align-items:center;gap:.6rem;padding:.55rem .85rem;cursor:pointer;
@@ -242,7 +267,7 @@ function _renderNavItem(n) {
       <div style="display:flex;align-items:center;gap:.4rem;margin-top:2px">
         <div style="display:flex;gap:2px">
           ${AFFINITE.map((a, i) => `<div style="width:6px;height:6px;border-radius:50%;
-            background:${i <= (n.affinite?.niveau ?? 2) ? a.couleur : 'rgba(255,255,255,.08)'}"></div>`).join('')}
+            background:${i <= niv ? a.couleur : 'rgba(255,255,255,.08)'}"></div>`).join('')}
         </div>
         <span style="font-size:.65rem;color:${af.couleur}">${af.label}</span>
       </div>
@@ -263,7 +288,7 @@ function _renderNavItem(n) {
 
 // Portrait + identité (portrait reconnaissable, pas de bannière dans le corps)
 function _renderFicheHeader(n) {
-  const af = afx(n.affinite?.niveau ?? 2);
+  const af = afx(_affiniteNiveau(n));
 
   return `
   <div style="display:grid;grid-template-columns:${n.imageUrl ? '96px' : '0'} 1fr;
@@ -322,17 +347,21 @@ function _renderFicheHeader(n) {
   </div>`;
 }
 
-// Jauge d'affinité groupe (segments cliquables en mode admin)
+// Jauge d'affinité groupe (segments cliquables en mode admin / mode groupe uniquement)
 function _renderAffiniteGroupe(n) {
-  const af  = afx(n.affinite?.niveau ?? 2);
-  const niv = n.affinite?.niveau ?? 2;
+  const niv   = _affiniteNiveau(n);
+  const af    = afx(niv);
+  const isVal = _affiniteMode(n) === 'valeur';
+  // En mode valeur, on désactive le clic direct sur les segments : on ne change
+  // l'affinité qu'en accumulant des deltas via la modal événement.
+  const clickable = STATE.isAdmin && !isVal;
 
   const segments = AFFINITE.map((a, i) => {
     const filled = i < niv, isCurrent = i === niv;
-    const adminAttr = STATE.isAdmin
+    const segAttr = clickable
       ? `onclick="window.npcAffiniteClick('${n.id}',${i})" style="cursor:pointer;flex:1;position:relative"`
       : `style="flex:1;position:relative"`;
-    return `<div ${adminAttr}>
+    return `<div ${segAttr}>
       <div style="height:16px;
         border-radius:${i === 0 ? '999px 0 0 999px' : i === 4 ? '0 999px 999px 0' : '0'};
         background:${isCurrent ? a.couleur : filled ? a.couleur + '88' : 'rgba(255,255,255,.06)'};
@@ -355,14 +384,14 @@ function _renderAffiniteGroupe(n) {
   </style>
   <div style="background:var(--bg-elevated);border:1px solid var(--border);
     border-radius:12px;padding:.85rem 1rem">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.7rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.7rem;gap:.5rem">
       <div style="font-size:.67rem;font-weight:700;color:var(--text-dim);
         letter-spacing:1.5px;text-transform:uppercase">Affinité du groupe</div>
       ${STATE.isAdmin ? `
       <button onclick="openAffiniteGroupeModal('${n.id}')"
         style="font-size:.67rem;background:rgba(79,140,255,.08);
         border:1px solid rgba(79,140,255,.25);border-radius:6px;
-        padding:2px 8px;cursor:pointer;color:var(--gold)">📝 Événement</button>` : ''}
+        padding:2px 8px;cursor:pointer;color:var(--gold);flex-shrink:0">📝 Événement</button>` : ''}
     </div>
 
     <div style="display:flex;gap:3px;margin-bottom:.6rem">${segments}</div>
@@ -381,9 +410,12 @@ function _renderAffiniteGroupe(n) {
       padding:.4rem .6rem;border-left:2px solid ${af.couleur}55;line-height:1.6">
       « ${_esc(n.affinite.note)} »</div>` : ''}
 
-    ${STATE.isAdmin ? `
+    ${STATE.isAdmin && !isVal ? `
     <div style="margin-top:.4rem;font-size:.61rem;color:var(--text-dim);font-style:italic;
       text-align:right">Clic direct sur un segment pour modifier</div>` : ''}
+    ${STATE.isAdmin && isVal ? `
+    <div style="margin-top:.4rem;font-size:.61rem;color:var(--text-dim);font-style:italic;
+      text-align:right">Mode valeur — modifiez via 📝 Événement</div>` : ''}
   </div>`;
 }
 
@@ -402,8 +434,8 @@ function _renderHistorique(n) {
         ${histo.length} événement${histo.length > 1 ? 's' : ''}</span>
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:.3rem">
-      ${histo.slice(-5).reverse().map((h, reversedIndex) => {
+    <div class="npc-histo-list">
+      ${histo.slice().reverse().map((h, reversedIndex) => {
         const realIndex = histo.length - 1 - reversedIndex;
         const d = h.delta || 0;
         const col = d > 0 ? '#22c38e' : d < 0 ? '#ff6b6b' : '#a0aec0';
@@ -732,6 +764,8 @@ window._npcToggleOrgGroup = (btn) => {
 window.npcAffiniteClick = async (npcId, niveau) => {
   const n = _npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
+  // Mode valeur : le niveau est dérivé de la valeur cumulée → clic direct désactivé
+  if (_affiniteMode(n) === 'valeur') return;
   const affinite = { ...n.affinite, niveau };
   await updateInCol('npcs', npcId, { affinite });
   const idx = _npcs.findIndex(x => x.id === npcId);
@@ -871,7 +905,7 @@ const _mjStatCellInner  = (s) => s == null ? '—'
   : `${s}<br><span style="font-size:.6rem;color:var(--text-muted)">${_modStr(s)}</span>`;
 
 function _renderMjStatsRow(n) {
-  const af    = afx(n.affinite?.niveau ?? 2);
+  const af    = afx(_affiniteNiveau(n));
   const stats = n.stats || {};
 
   const vitalCells = NPC_VITALS.map(v => `
@@ -1397,37 +1431,70 @@ async function deleteNpc(id) {
 }
 
 // ── Modal affinité groupe (événement & note) ──────────────────────────────────
+// Deux modes coexistent dans la même UI, le mode est implicite :
+//   • Cliquer un niveau              → mode 'groupe' (manuel)
+//   • Appliquer un delta non nul     → mode 'valeur' (cumulée)
+//   • Aucun des deux → mode courant préservé (note/event purs)
 window.openAffiniteGroupeModal = (npcId) => {
   const n = _npcs.find(x => x.id === npcId);
   if (!n) return;
+  const curMode = _affiniteMode(n);
   const cur     = n.affinite?.niveau ?? 2;
-  const curNote = n.affinite?.note   || '';
+  const valeur  = Number(n.affinite?.valeur) || 0;
+  const curNote = n.affinite?.note || '';
+  const derived = _niveauFromValeur(valeur);
+  const afDer   = afx(derived);
 
   const niveauBtns = AFFINITE.map(a => `
     <button type="button" id="afg-btn-${a.niveau}"
       onclick="window._selectAfgNiveau(${a.niveau})"
       style="flex:1;padding:.5rem .3rem;border-radius:8px;cursor:pointer;transition:all .15s;
-      font-size:.78rem;font-weight:${cur === a.niveau ? '700' : '400'};
-      border:2px solid ${cur === a.niveau ? a.couleur : 'var(--border)'};
-      background:${cur === a.niveau ? a.bg : 'var(--bg-elevated)'};
-      color:${cur === a.niveau ? a.couleur : 'var(--text-dim)'}">
+      font-size:.78rem;font-weight:${curMode === 'groupe' && cur === a.niveau ? '700' : '400'};
+      border:2px solid ${curMode === 'groupe' && cur === a.niveau ? a.couleur : 'var(--border)'};
+      background:${curMode === 'groupe' && cur === a.niveau ? a.bg : 'var(--bg-elevated)'};
+      color:${curMode === 'groupe' && cur === a.niveau ? a.couleur : 'var(--text-dim)'}">
       <div style="font-size:1rem;margin-bottom:2px">${a.icon}</div>${a.label}
     </button>`).join('');
 
+
   openModal(`📝 Événement & Note — ${_esc(n.nom)}`, `
     <input type="hidden" id="afg-niveau" value="${cur}">
+    <input type="hidden" id="afg-valeur" value="${valeur}">
 
     <div class="form-group">
-      <label>Niveau d'affinité</label>
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        <span>Niveau d'affinité <span style="color:var(--text-dim);font-weight:400">(clic = mode manuel)</span></span>
+        ${STATE.isAdmin ? `<button type="button" onclick="window.openAffiniteSeuilsModal()"
+          style="font-size:.66rem;background:rgba(232,184,75,.08);
+          border:1px solid rgba(232,184,75,.25);border-radius:6px;
+          padding:2px 8px;cursor:pointer;color:var(--gold)">⚙️ Seuils</button>` : ''}
+      </label>
       <div style="display:flex;gap:.4rem">${niveauBtns}</div>
     </div>
+
+    <div class="form-group">
+      <label>Valeur cumulée <span style="color:var(--text-dim);font-weight:400">(modifiée par les deltas ci-dessous)</span></label>
+      <div id="afg-valeur-display" data-cur="${valeur}"
+        style="display:flex;align-items:center;gap:.55rem;padding:.55rem .75rem;flex-wrap:wrap;
+        background:${curMode === 'valeur' ? afDer.bg : 'var(--bg-elevated)'};
+        border:1px solid ${curMode === 'valeur' ? afDer.border : 'var(--border)'};border-radius:8px">
+        <span id="afg-valeur-num"
+          style="font-family:'Cinzel',serif;font-size:1.25rem;font-weight:700;color:var(--gold)">
+          ${valeur > 0 ? '+' + valeur : valeur}</span>
+        <span id="afg-valeur-icon" style="font-size:.95rem">${afDer.icon}</span>
+        <span id="afg-valeur-label"
+          style="font-size:.82rem;color:${afDer.couleur};font-weight:600">${afDer.label}</span>
+        <span id="afg-valeur-preview" style="margin-left:auto;font-size:.74rem;color:var(--text-dim)"></span>
+      </div>
+    </div>
+
     <div class="form-group">
       <label>Note <span style="color:var(--text-dim);font-weight:400">(visible par tous)</span></label>
       <textarea class="input-field" id="afg-note" rows="3"
         placeholder="Ex: A aidé lors de la défense de la ville…">${_esc(curNote)}</textarea>
     </div>
     <div class="form-group">
-      <label>Événement <span style="color:var(--text-dim);font-weight:400">(ajouté à l'historique)</span></label>
+      <label>Événement <span style="color:var(--text-dim);font-weight:400">(delta non nul = mode valeur)</span></label>
       <div style="display:flex;gap:.5rem;align-items:center">
         <div style="display:flex;gap:.25rem;flex-shrink:0">
           ${[-2, -1, 0, 1, 2].map(v => `<button type="button" id="afg-delta-${v}"
@@ -1442,13 +1509,15 @@ window.openAffiniteGroupeModal = (npcId) => {
           placeholder="Ex: A trahi la compagnie lors de…" style="flex:1">
       </div>
     </div>
+
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
       <button class="btn btn-gold" style="flex:1"
         onclick="window.saveAffiniteGroupe('${npcId}')">Enregistrer</button>
       <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
     </div>
   `);
-  window._afgDelta = 0;
+  window._afgDelta      = 0;
+  window._afgLastAction = null; // 'niveau' | 'valeur' | null — détermine le mode au save
 };
 
 window._selectAfgNiveau = (n) => {
@@ -1463,6 +1532,27 @@ window._selectAfgNiveau = (n) => {
     btn.style.color       = active ? a.couleur : 'var(--text-dim)';
     btn.style.fontWeight  = active ? '700'     : '400';
   });
+  window._afgLastAction = 'niveau';
+  // Alignement de la valeur cumulée sur le seuil du niveau choisi.
+  // Le niveau et la valeur restent ainsi cohérents : passer en mode delta
+  // ensuite repart d'une base lisible (ex: cliquer Amical → +30).
+  const seuil   = _affiniteSeuils[SEUILS_KEYS[n]] ?? SEUILS_DEFAULT[SEUILS_KEYS[n]] ?? 0;
+  const valInp  = document.getElementById('afg-valeur');
+  const display = document.getElementById('afg-valeur-display');
+  if (valInp)  valInp.value = seuil;
+  if (display) display.dataset.cur = seuil;
+  const af      = afx(n);
+  const numEl   = document.getElementById('afg-valeur-num');
+  const iconEl  = document.getElementById('afg-valeur-icon');
+  const labelEl = document.getElementById('afg-valeur-label');
+  if (numEl)   numEl.textContent   = seuil > 0 ? '+' + seuil : String(seuil);
+  if (iconEl)  iconEl.textContent  = af.icon;
+  if (labelEl) { labelEl.textContent = af.label; labelEl.style.color = af.couleur; }
+  if (display) {
+    display.style.background  = af.bg;
+    display.style.borderColor = af.border;
+  }
+  _refreshAfgValeurPreview();
 };
 
 window._selectAfgDelta = (v) => {
@@ -1476,26 +1566,141 @@ window._selectAfgDelta = (v) => {
       : 'var(--bg-elevated)';
     btn.style.borderWidth = active ? '2px' : '1px';
   });
+  // Un delta nul ne bascule pas en mode valeur (utile pour logger un événement neutre).
+  if (v !== 0) window._afgLastAction = 'valeur';
+  _refreshAfgValeurPreview();
 };
+
+// Affiche la nouvelle valeur + niveau dérivé après application du delta sélectionné.
+function _refreshAfgValeurPreview() {
+  const preview = document.getElementById('afg-valeur-preview');
+  const display = document.getElementById('afg-valeur-display');
+  if (!preview || !display) return;
+  const cur   = parseInt(display.dataset.cur, 10) || 0;
+  const delta = window._afgDelta || 0;
+  if (!delta) { preview.innerHTML = ''; return; }
+  const newVal = cur + delta;
+  const af     = afx(_niveauFromValeur(newVal));
+  preview.innerHTML = `→ <span style="color:${af.couleur};font-weight:600">${newVal > 0 ? '+' + newVal : newVal} ${af.icon} ${af.label}</span>`;
+}
 
 window.saveAffiniteGroupe = async (npcId) => {
   const n = _npcs.find(x => x.id === npcId);
   if (!n) return;
-  const niveau   = parseInt(document.getElementById('afg-niveau')?.value) ?? 2;
-  const note     = document.getElementById('afg-note')?.value?.trim()    || '';
-  const event    = document.getElementById('afg-event')?.value?.trim()   || '';
-  const delta    = window._afgDelta || 0;
-  const curHisto = n.affinite?.historique || [];
-  const newHisto = event
+  const note       = document.getElementById('afg-note')?.value?.trim()  || '';
+  const event      = document.getElementById('afg-event')?.value?.trim() || '';
+  const delta      = window._afgDelta || 0;
+  const lastAction = window._afgLastAction;
+  const curMode    = _affiniteMode(n);
+  const curHisto   = n.affinite?.historique || [];
+  const newHisto   = event
     ? [...curHisto, { date: new Date().toLocaleDateString('fr-FR'), texte: event, delta }]
     : curHisto;
 
-  const affinite = { niveau, note, historique: newHisto };
+  // Mode déterminé par la dernière action ; sinon on préserve le mode courant.
+  const mode = lastAction === 'niveau' ? 'groupe'
+             : lastAction === 'valeur' ? 'valeur'
+             : curMode;
+
+  let affinite;
+  if (mode === 'valeur') {
+    const curVal = parseInt(document.getElementById('afg-valeur')?.value, 10) || 0;
+    // Si on bascule en valeur via delta, on cumule ; sinon (mode déjà valeur sans delta), valeur inchangée.
+    const valeur = lastAction === 'valeur' ? curVal + delta : curVal;
+    affinite = {
+      ...(n.affinite || {}),
+      mode: 'valeur',
+      valeur,
+      niveau: _niveauFromValeur(valeur),
+      note,
+      historique: newHisto,
+    };
+  } else {
+    const niveauRaw = parseInt(document.getElementById('afg-niveau')?.value, 10);
+    const niveau    = Number.isFinite(niveauRaw) ? niveauRaw : 2;
+    // Si l'admin vient de choisir un niveau manuellement, on aligne aussi la
+    // valeur cumulée sur le seuil correspondant — cohérence niveau ↔ valeur.
+    // Sinon (préservation de mode), valeur inchangée.
+    const seuil  = _affiniteSeuils[SEUILS_KEYS[niveau]] ?? SEUILS_DEFAULT[SEUILS_KEYS[niveau]] ?? 0;
+    const valeur = lastAction === 'niveau'
+      ? seuil
+      : (Number(n.affinite?.valeur) || 0);
+    affinite = {
+      ...(n.affinite || {}),
+      mode: 'groupe',
+      niveau,
+      valeur,
+      note,
+      historique: newHisto,
+    };
+  }
+
   await updateInCol('npcs', npcId, { affinite });
   const idx = _npcs.findIndex(x => x.id === npcId);
   if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
   closeModal();
   showNotif('Affinité mise à jour !', 'success');
+  _refreshActivePanel();
+  _refreshList();
+};
+
+// ── Modal de configuration des seuils (mode valeur) ──────────────────────────
+window.openAffiniteSeuilsModal = () => {
+  if (!STATE.isAdmin) return;
+  const s = _affiniteSeuils;
+  const rows = SEUILS_KEYS.map((key, i) => {
+    const a = AFFINITE[i];
+    return `
+      <div style="display:flex;align-items:center;gap:.6rem;padding:.4rem .55rem;
+        background:${a.bg};border:1px solid ${a.border};border-radius:8px;margin-bottom:.4rem">
+        <span style="font-size:1rem">${a.icon}</span>
+        <span style="flex:1;font-size:.82rem;font-weight:600;color:${a.couleur}">${a.label}</span>
+        <span style="font-size:.7rem;color:var(--text-dim)">à partir de</span>
+        <input type="number" id="afs-${key}" class="input-field" value="${s[key] ?? SEUILS_DEFAULT[key]}"
+          style="width:90px;text-align:center;font-weight:700">
+      </div>`;
+  }).join('');
+
+  pushModal('⚙️ Seuils d\'affinité (mode valeur)', `
+    <div style="font-size:.74rem;color:var(--text-dim);margin-bottom:.7rem;line-height:1.5">
+      Chaque seuil = valeur minimale (incluse) pour atteindre ce niveau.<br>
+      Les seuils s'appliquent à tous les PNJ en mode valeur.
+    </div>
+    ${rows}
+    <div style="display:flex;gap:.5rem;margin-top:.85rem">
+      <button class="btn btn-gold" style="flex:1" onclick="window.saveAffiniteSeuils()">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" onclick="window.resetAffiniteSeuils()">Valeurs par défaut</button>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    </div>
+  `);
+};
+
+window.resetAffiniteSeuils = () => {
+  SEUILS_KEYS.forEach(k => {
+    const el = document.getElementById(`afs-${k}`);
+    if (el) el.value = SEUILS_DEFAULT[k];
+  });
+};
+
+window.saveAffiniteSeuils = async () => {
+  if (!STATE.isAdmin) return;
+  const next = {};
+  for (const k of SEUILS_KEYS) {
+    const raw = document.getElementById(`afs-${k}`)?.value;
+    const v   = parseInt(raw, 10);
+    next[k] = Number.isFinite(v) ? v : SEUILS_DEFAULT[k];
+  }
+  // Cohérence : ordre croissant strict — sinon le mapping valeur→niveau devient ambigu.
+  for (let i = 1; i < SEUILS_KEYS.length; i++) {
+    if (next[SEUILS_KEYS[i]] <= next[SEUILS_KEYS[i - 1]]) {
+      showNotif('Les seuils doivent être strictement croissants.', 'error');
+      return;
+    }
+  }
+  await saveDoc('npc_affinites', AFFINITE_SEUILS_DOC_ID, next);
+  _affiniteSeuils = next;
+  closeModal();
+  showNotif('Seuils enregistrés !', 'success');
   _refreshActivePanel();
   _refreshList();
 };
@@ -1996,5 +2201,6 @@ Object.assign(window, {
   renderNpcs, openNpcModal, saveNpc, deleteNpc,
   openAffiniteGroupeModal, openAffinitePersoModal,
   saveAffiniteGroupe, saveAffinitePerso, deleteAffinitePerso,
+  openAffiniteSeuilsModal, saveAffiniteSeuils, resetAffiniteSeuils,
   editHistoriqueEntry, deleteHistoriqueEntry, saveHistoriqueEntry,
 });
