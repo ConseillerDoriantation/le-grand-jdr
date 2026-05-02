@@ -347,14 +347,13 @@ function _renderFicheHeader(n) {
   </div>`;
 }
 
-// Jauge d'affinité groupe (segments cliquables en mode admin / mode groupe uniquement)
+// Jauge d'affinité groupe (segments cliquables en mode admin)
 function _renderAffiniteGroupe(n) {
   const niv   = _affiniteNiveau(n);
   const af    = afx(niv);
   const isVal = _affiniteMode(n) === 'valeur';
-  // En mode valeur, on désactive le clic direct sur les segments : on ne change
-  // l'affinité qu'en accumulant des deltas via la modal événement.
-  const clickable = STATE.isAdmin && !isVal;
+  // Cliquer un segment bascule toujours en mode groupe (la valeur est préservée).
+  const clickable = STATE.isAdmin;
 
   const segments = AFFINITE.map((a, i) => {
     const filled = i < niv, isCurrent = i === niv;
@@ -410,12 +409,9 @@ function _renderAffiniteGroupe(n) {
       padding:.4rem .6rem;border-left:2px solid ${af.couleur}55;line-height:1.6">
       « ${_esc(n.affinite.note)} »</div>` : ''}
 
-    ${STATE.isAdmin && !isVal ? `
+    ${STATE.isAdmin ? `
     <div style="margin-top:.4rem;font-size:.61rem;color:var(--text-dim);font-style:italic;
-      text-align:right">Clic direct sur un segment pour modifier</div>` : ''}
-    ${STATE.isAdmin && isVal ? `
-    <div style="margin-top:.4rem;font-size:.61rem;color:var(--text-dim);font-style:italic;
-      text-align:right">Mode valeur — modifiez via 📝 Événement</div>` : ''}
+      text-align:right">${isVal ? 'Mode valeur (clic segment = bascule manuel)' : 'Clic direct sur un segment pour modifier'}</div>` : ''}
   </div>`;
 }
 
@@ -451,7 +447,7 @@ function _renderHistorique(n) {
           </span>
 
           <span style="flex:1;font-size:.75rem;color:var(--text-muted);line-height:1.5">
-            ${_esc(h.texte || '')}
+            ${h.texte ? _esc(h.texte) : '<em style="color:var(--text-dim)">(sans titre)</em>'}
           </span>
 
           ${h.date ? `<span style="font-size:.64rem;color:var(--text-dim);
@@ -764,9 +760,9 @@ window._npcToggleOrgGroup = (btn) => {
 window.npcAffiniteClick = async (npcId, niveau) => {
   const n = _npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
-  // Mode valeur : le niveau est dérivé de la valeur cumulée → clic direct désactivé
-  if (_affiniteMode(n) === 'valeur') return;
-  const affinite = { ...n.affinite, niveau };
+  // Cliquer un segment force le mode groupe avec ce niveau ; la valeur cumulée
+  // est préservée (système indépendant, modifié uniquement via les événements).
+  const affinite = { ...n.affinite, mode: 'groupe', niveau };
   await updateInCol('npcs', npcId, { affinite });
   const idx = _npcs.findIndex(x => x.id === npcId);
   if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
@@ -1462,18 +1458,18 @@ window.openAffiniteGroupeModal = (npcId) => {
     <input type="hidden" id="afg-valeur" value="${valeur}">
 
     <div class="form-group">
-      <label style="display:flex;align-items:center;justify-content:space-between">
-        <span>Niveau d'affinité <span style="color:var(--text-dim);font-weight:400">(clic = mode manuel)</span></span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
+        <span style="font-size:.78rem;font-weight:600;color:var(--text-muted)">Niveau d'affinité</span>
         ${STATE.isAdmin ? `<button type="button" onclick="window.openAffiniteSeuilsModal()"
           style="font-size:.66rem;background:rgba(232,184,75,.08);
           border:1px solid rgba(232,184,75,.25);border-radius:6px;
           padding:2px 8px;cursor:pointer;color:var(--gold)">⚙️ Seuils</button>` : ''}
-      </label>
+      </div>
       <div style="display:flex;gap:.4rem">${niveauBtns}</div>
     </div>
 
     <div class="form-group">
-      <label>Valeur cumulée <span style="color:var(--text-dim);font-weight:400">(modifiée par les deltas ci-dessous)</span></label>
+      <label>Valeur cumulée</label>
       <div id="afg-valeur-display" data-cur="${valeur}"
         style="display:flex;align-items:center;gap:.55rem;padding:.55rem .75rem;flex-wrap:wrap;
         background:${curMode === 'valeur' ? afDer.bg : 'var(--bg-elevated)'};
@@ -1494,8 +1490,8 @@ window.openAffiniteGroupeModal = (npcId) => {
         placeholder="Ex: A aidé lors de la défense de la ville…">${_esc(curNote)}</textarea>
     </div>
     <div class="form-group">
-      <label>Événement <span style="color:var(--text-dim);font-weight:400">(delta non nul = mode valeur)</span></label>
-      <div style="display:flex;gap:.5rem;align-items:center">
+      <label>Événement</label>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         <div style="display:flex;gap:.25rem;flex-shrink:0">
           ${[-2, -1, 0, 1, 2].map(v => `<button type="button" id="afg-delta-${v}"
             onclick="window._selectAfgDelta(${v})"
@@ -1505,8 +1501,13 @@ window.openAffiniteGroupeModal = (npcId) => {
             background:var(--bg-elevated);
             color:${v < 0 ? '#ff6b6b' : v > 0 ? '#22c38e' : 'var(--text-dim)'}">${v > 0 ? '+' + v : v}</button>`).join('')}
         </div>
+        <input type="number" id="afg-delta-custom" placeholder="±N"
+          oninput="window._setAfgDeltaFromInput(this.value)"
+          style="width:60px;text-align:center;font-weight:700;padding:.4rem;
+          background:var(--bg-elevated);border:1px solid var(--border);
+          border-radius:8px;color:var(--text);font-size:.8rem">
         <input class="input-field" id="afg-event"
-          placeholder="Ex: A trahi la compagnie lors de…" style="flex:1">
+          placeholder="Ex: A trahi la compagnie lors de…" style="flex:1;min-width:140px">
       </div>
     </div>
 
@@ -1533,30 +1534,12 @@ window._selectAfgNiveau = (n) => {
     btn.style.fontWeight  = active ? '700'     : '400';
   });
   window._afgLastAction = 'niveau';
-  // Alignement de la valeur cumulée sur le seuil du niveau choisi.
-  // Le niveau et la valeur restent ainsi cohérents : passer en mode delta
-  // ensuite repart d'une base lisible (ex: cliquer Amical → +30).
-  const seuil   = _affiniteSeuils[SEUILS_KEYS[n]] ?? SEUILS_DEFAULT[SEUILS_KEYS[n]] ?? 0;
-  const valInp  = document.getElementById('afg-valeur');
-  const display = document.getElementById('afg-valeur-display');
-  if (valInp)  valInp.value = seuil;
-  if (display) display.dataset.cur = seuil;
-  const af      = afx(n);
-  const numEl   = document.getElementById('afg-valeur-num');
-  const iconEl  = document.getElementById('afg-valeur-icon');
-  const labelEl = document.getElementById('afg-valeur-label');
-  if (numEl)   numEl.textContent   = seuil > 0 ? '+' + seuil : String(seuil);
-  if (iconEl)  iconEl.textContent  = af.icon;
-  if (labelEl) { labelEl.textContent = af.label; labelEl.style.color = af.couleur; }
-  if (display) {
-    display.style.background  = af.bg;
-    display.style.borderColor = af.border;
-  }
-  _refreshAfgValeurPreview();
+  // La valeur cumulée n'est pas alignée sur le niveau cliqué : c'est un autre
+  // système. Choisir un niveau manuellement ne touche pas à la valeur.
 };
 
-window._selectAfgDelta = (v) => {
-  window._afgDelta = v;
+// Surligne le preset correspondant à v (ou aucun si v hors -2..+2).
+function _highlightAfgPreset(v) {
   [-2, -1, 0, 1, 2].forEach(d => {
     const btn = document.getElementById(`afg-delta-${d}`);
     if (!btn) return;
@@ -1566,8 +1549,24 @@ window._selectAfgDelta = (v) => {
       : 'var(--bg-elevated)';
     btn.style.borderWidth = active ? '2px' : '1px';
   });
+}
+
+window._selectAfgDelta = (v) => {
+  window._afgDelta = v;
+  _highlightAfgPreset(v);
+  const inp = document.getElementById('afg-delta-custom');
+  if (inp) inp.value = v === 0 ? '' : String(v);
   // Un delta nul ne bascule pas en mode valeur (utile pour logger un événement neutre).
   if (v !== 0) window._afgLastAction = 'valeur';
+  _refreshAfgValeurPreview();
+};
+
+// Saisie d'une valeur custom dans l'input numérique (delta arbitraire).
+window._setAfgDeltaFromInput = (raw) => {
+  const v = parseInt(raw, 10);
+  window._afgDelta = Number.isFinite(v) ? v : 0;
+  _highlightAfgPreset(window._afgDelta); // surligne le preset si match, sinon aucun
+  if (window._afgDelta !== 0) window._afgLastAction = 'valeur';
   _refreshAfgValeurPreview();
 };
 
@@ -1593,7 +1592,14 @@ window.saveAffiniteGroupe = async (npcId) => {
   const lastAction = window._afgLastAction;
   const curMode    = _affiniteMode(n);
   const curHisto   = n.affinite?.historique || [];
-  const newHisto   = event
+  // Garde-fou : un delta non nul sans titre serait perdu (impossible à
+  // réviser/supprimer plus tard). On exige un titre dans ce cas.
+  if (delta !== 0 && !event) {
+    showNotif('Ajoute un titre à l\'événement pour conserver le delta.', 'error');
+    return;
+  }
+  // On crée une entrée si on a un titre OU un delta non nul.
+  const newHisto = (event || delta !== 0)
     ? [...curHisto, { date: new Date().toLocaleDateString('fr-FR'), texte: event, delta }]
     : curHisto;
 
@@ -1618,21 +1624,15 @@ window.saveAffiniteGroupe = async (npcId) => {
   } else {
     const niveauRaw = parseInt(document.getElementById('afg-niveau')?.value, 10);
     const niveau    = Number.isFinite(niveauRaw) ? niveauRaw : 2;
-    // Si l'admin vient de choisir un niveau manuellement, on aligne aussi la
-    // valeur cumulée sur le seuil correspondant — cohérence niveau ↔ valeur.
-    // Sinon (préservation de mode), valeur inchangée.
-    const seuil  = _affiniteSeuils[SEUILS_KEYS[niveau]] ?? SEUILS_DEFAULT[SEUILS_KEYS[niveau]] ?? 0;
-    const valeur = lastAction === 'niveau'
-      ? seuil
-      : (Number(n.affinite?.valeur) || 0);
     affinite = {
       ...(n.affinite || {}),
       mode: 'groupe',
       niveau,
-      valeur,
       note,
       historique: newHisto,
     };
+    // affinite.valeur préservée : la valeur cumulée n'évolue qu'à travers les
+    // deltas d'événements, jamais via un clic manuel sur un niveau.
   }
 
   await updateInCol('npcs', npcId, { affinite });
@@ -1824,15 +1824,18 @@ window.deleteHistoriqueEntry = async (npcId, index) => {
   const n = _npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
 
-  if (!await confirmModal('Supprimer cet événement de l\'historique ?')) return;
+  if (!await confirmModal('Supprimer cet événement de l\'historique ?', {title: 'Confirmation de suppression' })) return;
 
   const historique = [...(n.affinite?.historique || [])];
+  const removed = historique[index];
   historique.splice(index, 1);
 
-  const affinite = {
-    ...(n.affinite || {}),
-    historique,
-  };
+  let affinite = { ...(n.affinite || {}), historique };
+  // En mode valeur, on annule l'impact du delta supprimé sur la valeur cumulée.
+  if (_affiniteMode(n) === 'valeur' && removed?.delta) {
+    const valeur = (Number(n.affinite?.valeur) || 0) - removed.delta;
+    affinite = { ...affinite, valeur, niveau: _niveauFromValeur(valeur) };
+  }
 
   await updateInCol('npcs', npcId, { affinite });
 
@@ -1864,24 +1867,33 @@ window.editHistoriqueEntry = (npcId, index) => {
 
     <div class="form-group">
       <label>Impact</label>
-      <div style="display:flex;gap:.35rem">
-        ${[-2, -1, 0, 1, 2].map(v => `
-          <button type="button" id="hist-edit-delta-${v}"
-            onclick="window._selectHistEditDelta(${v})"
-            style="width:36px;height:36px;border-radius:8px;cursor:pointer;font-size:.8rem;
-            font-weight:700;transition:all .12s;
-            border:${entry.delta === v ? '2px' : '1px'} solid ${
-              v < 0 ? 'rgba(255,107,107,.3)' :
-              v > 0 ? 'rgba(34,195,142,.3)' :
-              'var(--border)'
-            };
-            background:${entry.delta === v
-              ? (v < 0 ? 'rgba(255,107,107,.18)' : v > 0 ? 'rgba(34,195,142,.18)' : 'rgba(255,255,255,.1)')
-              : 'var(--bg-elevated)'};
-            color:${v < 0 ? '#ff6b6b' : v > 0 ? '#22c38e' : 'var(--text-dim)'}">
-            ${v > 0 ? '+' + v : v}
-          </button>
-        `).join('')}
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <div style="display:flex;gap:.35rem">
+          ${[-2, -1, 0, 1, 2].map(v => `
+            <button type="button" id="hist-edit-delta-${v}"
+              onclick="window._selectHistEditDelta(${v})"
+              style="width:36px;height:36px;border-radius:8px;cursor:pointer;font-size:.8rem;
+              font-weight:700;transition:all .12s;
+              border:${entry.delta === v ? '2px' : '1px'} solid ${
+                v < 0 ? 'rgba(255,107,107,.3)' :
+                v > 0 ? 'rgba(34,195,142,.3)' :
+                'var(--border)'
+              };
+              background:${entry.delta === v
+                ? (v < 0 ? 'rgba(255,107,107,.18)' : v > 0 ? 'rgba(34,195,142,.18)' : 'rgba(255,255,255,.1)')
+                : 'var(--bg-elevated)'};
+              color:${v < 0 ? '#ff6b6b' : v > 0 ? '#22c38e' : 'var(--text-dim)'}">
+              ${v > 0 ? '+' + v : v}
+            </button>
+          `).join('')}
+        </div>
+        <input type="number" id="hist-edit-delta-custom"
+          value="${[-2,-1,0,1,2].includes(entry.delta || 0) ? '' : (entry.delta || 0)}"
+          placeholder="±N"
+          oninput="window._setHistEditDeltaFromInput(this.value)"
+          style="width:64px;text-align:center;font-weight:700;padding:.4rem;
+          background:var(--bg-elevated);border:1px solid var(--border);
+          border-radius:8px;color:var(--text);font-size:.8rem">
       </div>
     </div>
 
@@ -1895,24 +1907,29 @@ window.editHistoriqueEntry = (npcId, index) => {
   window._histEditDelta = entry.delta || 0;
 };
 
-window._selectHistEditDelta = (v) => {
-  window._histEditDelta = v;
-
+function _highlightHistEditPreset(v) {
   [-2, -1, 0, 1, 2].forEach(d => {
     const btn = document.getElementById(`hist-edit-delta-${d}`);
     if (!btn) return;
-
     const active = d === v;
     btn.style.background = active
-      ? (d < 0
-          ? 'rgba(255,107,107,.18)'
-          : d > 0
-            ? 'rgba(34,195,142,.18)'
-            : 'rgba(255,255,255,.1)')
+      ? (d < 0 ? 'rgba(255,107,107,.18)' : d > 0 ? 'rgba(34,195,142,.18)' : 'rgba(255,255,255,.1)')
       : 'var(--bg-elevated)';
-
     btn.style.borderWidth = active ? '2px' : '1px';
   });
+}
+
+window._selectHistEditDelta = (v) => {
+  window._histEditDelta = v;
+  _highlightHistEditPreset(v);
+  const inp = document.getElementById('hist-edit-delta-custom');
+  if (inp) inp.value = '';
+};
+
+window._setHistEditDeltaFromInput = (raw) => {
+  const v = parseInt(raw, 10);
+  window._histEditDelta = Number.isFinite(v) ? v : 0;
+  _highlightHistEditPreset(window._histEditDelta);
 };
 
 window.saveHistoriqueEntry = async (npcId, index) => {
@@ -1928,16 +1945,21 @@ window.saveHistoriqueEntry = async (npcId, index) => {
   const historique = [...(n.affinite?.historique || [])];
   if (!historique[index]) return;
 
+  const oldDelta = historique[index].delta || 0;
+  const newDelta = window._histEditDelta || 0;
+
   historique[index] = {
     ...historique[index],
     texte,
-    delta: window._histEditDelta || 0,
+    delta: newDelta,
   };
 
-  const affinite = {
-    ...(n.affinite || {}),
-    historique,
-  };
+  let affinite = { ...(n.affinite || {}), historique };
+  // En mode valeur, on rejoue la différence de delta sur la valeur cumulée.
+  if (_affiniteMode(n) === 'valeur' && oldDelta !== newDelta) {
+    const valeur = (Number(n.affinite?.valeur) || 0) - oldDelta + newDelta;
+    affinite = { ...affinite, valeur, niveau: _niveauFromValeur(valeur) };
+  }
 
   await updateInCol('npcs', npcId, { affinite });
 
@@ -2036,7 +2058,7 @@ window.saveAffiniteType = async () => {
 };
 
 window.deleteAffiniteType = async (typeId) => {
-  if (!await confirmModal('Supprimer ce type d\'affinité ?')) return;
+  if (!await confirmModal('Supprimer ce type d\'affinité ?', {title: 'Confirmation de suppression'})) return;
   _affiniteTypes = _affiniteTypes.filter(t => t.id !== typeId);
   await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: _affiniteTypes });
   if (window._aftFormState?.editingId === typeId) {
@@ -2187,7 +2209,7 @@ window.saveAffinitePerso = async (npcId, existingId) => {
 };
 
 window.deleteAffinitePerso = async (id) => {
-  if (!await confirmModal('Supprimer cette affinité ?')) return;
+  if (!await confirmModal('Supprimer cette affinité ?', {title: 'Confirmation de suppression'})) return;
   await deleteFromCol('npc_affinites', id);
   _affiPerso = _affiPerso.filter(a => a.id !== id);
   showNotif('Affinité supprimée.', 'success');
