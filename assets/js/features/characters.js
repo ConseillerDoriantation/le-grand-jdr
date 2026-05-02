@@ -434,6 +434,7 @@ function _renderTab(leafTab, c, canEdit) {
   void area.offsetWidth; // force reflow
   area.classList.add('cs-tab-fadein');
   if (leafTab === 'profil') { bindRichTextEditors(); initProfilTagUi(); }
+  if (leafTab === 'notes') bindRichTextEditors(area);
 }
 
 async function setCharAura(charId, aura) {
