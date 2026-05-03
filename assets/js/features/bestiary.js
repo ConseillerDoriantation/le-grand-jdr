@@ -17,8 +17,15 @@ let _creatures  = [];
 let _tracker    = {}; // { [creatureId]: { pvActuel, pmActuel, notes, deductions:{pv,pm,ca,for,...} } }
 let _searchVal  = '';
 let _filterType = ''; // filtre par type de créature
+let _filterRang  = ''; // filtre par rang (classique, elite, boss)
 let _activeId   = null; // créature ouverte dans le panneau
 let _bestiaireId = 'main'; // id du bestiaire actif (admin peut switcher)
+
+const RANG_STYLE = {
+  classique: { label:'Classique', color:'#a0aec0',         border:'rgba(160,174,192,.45)',   bg:'rgba(160,174,192,.1)' },
+  elite:     { label:'Élite',     color:'#e8b84b',         border:'rgba(232,184,75,.4)',      bg:'rgba(232,184,75,.12)' },
+  boss:      { label:'Boss',      color:'#ff6b6b',         border:'rgba(255,107,107,.4)',     bg:'rgba(255,107,107,.12)' },
+};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU PRINCIPAL
@@ -54,6 +61,7 @@ function _render() {
   const content = document.getElementById('main-content');
   const search  = (_searchVal||'').toLowerCase().trim();
   const fType   = (_filterType||'').toLowerCase().trim();
+  const fRang   = (_filterRang||'').toLowerCase().trim();
 
   // Collecter tous les types distincts pour les boutons de filtre
   const allTypes = [...new Set(_creatures.map(c => c.type||'').filter(Boolean))].sort();
@@ -64,46 +72,12 @@ function _render() {
       (c.type||'').toLowerCase().includes(search) ||
       (c.environnement||'').toLowerCase().includes(search);
     const matchType = !fType || (c.type||'').toLowerCase() === fType;
-    return matchSearch && matchType;
+    const matchRang = !fRang || (c.rang||'classique').toLowerCase() === fRang;
+    return matchSearch && matchType && matchRang;
   });
 
   content.innerHTML = `
-  <style>
-    .bst-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:1rem; }
-    .bst-card {
-      background:var(--bg-card);border:1px solid var(--border);border-radius:14px;
-      overflow:hidden;cursor:pointer;transition:all .15s;
-    }
-    .bst-card:hover { transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4); }
-    .bst-card.active { border-color:var(--gold);box-shadow:0 0 0 2px rgba(232,184,75,.2); }
-    .bst-img { width:100%;height:130px;object-fit:cover;display:block;background:var(--bg-elevated); }
-    .bst-img-placeholder { width:100%;height:130px;display:flex;align-items:center;justify-content:center;
-      font-size:3rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel)); }
-    .bst-card-body { padding:.75rem; }
-    .bst-card-name { font-family:'Cinzel',serif;font-size:.9rem;color:var(--text);font-weight:600; }
-    .bst-card-meta { font-size:.72rem;color:var(--text-dim);margin-top:2px; }
-    .bst-panel {
-      background:var(--bg-card);border:1px solid var(--border);border-radius:14px;
-      overflow:hidden;
-    }
-    .bst-panel-img { width:100%;height:200px;object-fit:cover;display:block;background:var(--bg-elevated); }
-    .bst-stat-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem; }
-    .bst-stat { background:var(--bg-elevated);border-radius:8px;padding:.4rem .5rem;text-align:center; }
-    .bst-stat-val { font-family:'Cinzel',serif;font-size:.95rem;font-weight:700;color:var(--text); }
-    .bst-stat-lbl { font-size:.6rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px; }
-    .bst-section { padding:.75rem 1rem;border-top:1px solid var(--border); }
-    .bst-section-title { font-size:.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:.5rem; }
-    .bst-row { display:flex;align-items:baseline;gap:.5rem;padding:.25rem 0;font-size:.82rem; }
-    .bst-row-label { color:var(--text-dim);flex-shrink:0;min-width:80px; }
-    .bst-row-val { color:var(--text-muted); }
-    .bst-tag { display:inline-flex;align-items:center;gap:.25rem;background:var(--bg-elevated);
-      border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:.72rem;color:var(--text-muted); }
-    .bst-track-bar { height:8px;background:var(--bg-elevated);border-radius:4px;overflow:hidden;margin:.3rem 0; }
-    .bst-track-fill { height:100%;border-radius:4px;transition:width .3s; }
-    .bst-input-sm { background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;
-      padding:3px 8px;font-size:.82rem;color:var(--text);width:60px;text-align:center; }
-    .bst-input-sm:focus { outline:none;border-color:var(--gold); }
-  </style>
+  <div class="bst-page ${_activeId ? 'has-panel' : 'no-panel'}">
 
   <!-- ═══ HEADER ═════════════════════════════════════════════════════════════ -->
   <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem">
@@ -128,34 +102,9 @@ function _render() {
       </div>` : ''}
     </div>
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-      <input id="bst-search" type="text" placeholder="🔍 Rechercher..."
-        class="input-field" style="max-width:220px;font-size:.83rem"
-        value="${_searchVal}"
-        oninput="window._bstSearchInput(this.value)">
       ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openBeastModal()">+ Créature</button>` : ''}
     </div>
   </div>
-
-  <!-- Filtres par type -->
-  ${allTypes.length > 1 ? `
-  <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:1rem">
-    <button onclick="window._bstSetType('')"
-      style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-      border:1px solid ${!_filterType?'var(--gold)':'var(--border)'};
-      background:${!_filterType?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-      color:${!_filterType?'var(--gold)':'var(--text-dim)'};font-weight:${!_filterType?'700':'400'}">
-      Tous
-    </button>
-    ${allTypes.map(t => `
-    <button onclick="window._bstSetType('${t.replace(/'/g,"\\'")}')"
-      style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-      border:1px solid ${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--border)'};
-      background:${(_filterType||'').toLowerCase()===t.toLowerCase()?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-      color:${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--text-dim)'};
-      font-weight:${(_filterType||'').toLowerCase()===t.toLowerCase()?'700':'400'}">
-      ${t}
-    </button>`).join('')}
-  </div>` : ''}
 
   ${filtered.length === 0 ? `
     <div style="text-align:center;padding:4rem;color:var(--text-dim)">
@@ -165,17 +114,68 @@ function _render() {
     </div>
   ` : `
   <!-- ═══ LAYOUT : grille + panneau ════════════════════════════════════════ -->
-  <div style="display:grid;grid-template-columns:${_activeId ? '1fr 380px' : '1fr'};gap:1.25rem;align-items:start">
+  <div class="bst-layout ${_activeId ? 'has-panel' : 'no-panel'}">
 
-    <!-- GRILLE -->
-    <div class="bst-grid">
-      ${filtered.map(c => _renderCard(c)).join('')}
+    <div class="bst-main">
+      <div class="bst-controls">
+        <!-- Filtres par type -->
+        ${allTypes.length > 1 ? `
+        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.5rem">
+          <button onclick="window._bstSetType('')"
+            style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
+            border:1px solid ${!_filterType?'var(--gold)':'var(--border)'};
+            background:${!_filterType?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
+            color:${!_filterType?'var(--gold)':'var(--text-dim)'};font-weight:${!_filterType?'700':'400'}">
+            Tous
+          </button>
+          ${allTypes.map(t => `
+          <button onclick="window._bstSetType('${t.replace(/'/g,"\\'")}')"
+            style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
+            border:1px solid ${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--border)'};
+            background:${(_filterType||'').toLowerCase()===t.toLowerCase()?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
+            color:${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--text-dim)'};
+            font-weight:${(_filterType||'').toLowerCase()===t.toLowerCase()?'700':'400'}">
+            ${t}
+          </button>`).join('')}
+        </div>` : ''}
+        <!-- Filtres par rang -->
+        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:1rem">
+          <button onclick="window._bstSetRang('')"
+            style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
+            border:1px solid ${!_filterRang?'var(--gold)':'var(--border)'};
+            background:${!_filterRang?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
+            color:${!_filterRang?'var(--gold)':'var(--text-dim)'};font-weight:${!_filterRang?'700':'400'}">
+            Tous rangs
+          </button>
+          ${Object.entries(RANG_STYLE).map(([r, rst]) => {
+            const active = _filterRang === r;
+            return `<button onclick="window._bstSetRang('${r}')"
+              style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
+              border:1px solid ${active?rst.border:'var(--border)'};
+              background:${active?rst.bg:'var(--bg-elevated)'};
+              color:${active?rst.color:'var(--text-dim)'};font-weight:${active?'700':'400'}">
+              ${rst.label}
+            </button>`;
+          }).join('')}
+        </div>
+        <div class="bst-tools">
+          <input id="bst-search" type="text" placeholder="🔍 Rechercher..."
+            class="input-field" value="${_searchVal}"
+            oninput="window._bstSearchInput(this.value)">
+        </div>
+      </div>
+
+      <div class="bst-grid">
+        ${filtered.map(c => _renderCard(c)).join('')}
+      </div>
     </div>
 
-    <!-- PANNEAU DÉTAIL -->
-    ${_activeId ? _renderPanel(_creatures.find(c => c.id === _activeId)) : ''}
+    <div class="bst-panel-slot">
+      ${_activeId ? _renderPanel(_creatures.find(c => c.id === _activeId)) : ''}
+    </div>
   </div>
   `}
+  </div>
   `;
 }
 
@@ -183,6 +183,8 @@ function _render() {
 function _renderCard(c) {
   const isActive  = c.id === _activeId;
   const track     = _tracker[c.id] || {};
+  const rang      = c.rang || 'classique';
+  const rs        = RANG_STYLE[rang] || RANG_STYLE.classique;
 
   // Admin uniquement : barre de PV avec max connu
   const pvMax    = STATE.isAdmin ? (parseInt(c.pvMax) || 0) : 0;
@@ -196,7 +198,10 @@ function _renderCard(c) {
       : `<div class="bst-img-placeholder">${c.emoji||'🐲'}</div>`
     }
     <div class="bst-card-body">
-      <div class="bst-card-name">${c.nom||'?'}</div>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.3rem">
+        <div class="bst-card-name">${c.nom||'?'}</div>
+        ${rang !== 'classique' ? `<span style="flex-shrink:0;font-size:.6rem;padding:1px 5px;border-radius:999px;border:1px solid ${rs.border};color:${rs.color};background:${rs.bg};margin-top:2px">${rs.label}</span>` : ''}
+      </div>
       <div class="bst-card-meta">
         ${c.type?`${c.type}`:''}${c.type&&c.environnement?' · ':''}${c.environnement||''}
       </div>
@@ -219,7 +224,9 @@ function _renderCard(c) {
 // ── Panneau détail ────────────────────────────────────────────────────────────
 function _renderPanel(c) {
   if (!c) return '';
-  const track    = _tracker[c.id] || {};
+  const rang  = c.rang || 'classique';
+  const rs    = RANG_STYLE[rang] || RANG_STYLE.classique;
+  const track = _tracker[c.id] || {};
   const pvMax    = parseInt(c.pvMax) || 0;
   const pmMax    = parseInt(c.pmMax) || 0;
   const pvActuel  = track.pvActuel   !== undefined ? parseInt(track.pvActuel)   : 0;
@@ -240,7 +247,10 @@ function _renderPanel(c) {
       }
       <button onclick="window._bstClose()" style="position:absolute;top:10px;right:10px;background:rgba(11,17,24,.8);border:1px solid var(--border);border-radius:999px;color:var(--text-muted);padding:3px 8px;cursor:pointer;font-size:.8rem">✕</button>
       <div style="position:absolute;bottom:10px;left:12px">
-        <div style="font-family:'Cinzel',serif;font-size:1.2rem;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.8);font-weight:700">${c.nom||'?'}</div>
+        <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+          <div style="font-family:'Cinzel',serif;font-size:1.2rem;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.8);font-weight:700">${c.nom||'?'}</div>
+          ${rang !== 'classique' ? `<span style="font-size:.65rem;padding:2px 7px;border-radius:999px;border:1px solid ${rs.border};color:${rs.color};background:rgba(0,0,0,.55)">${rs.label}</span>` : ''}
+        </div>
         ${c.type||c.environnement ? `<div style="font-size:.72rem;color:rgba(255,255,255,.75)">${[c.type,c.environnement].filter(Boolean).join(' · ')}</div>` : ''}
       </div>
     </div>`;
@@ -518,6 +528,20 @@ async function openBeastModal(id = null) {
         <label>Emoji (si pas d'image)</label>
         <input class="input-field" id="bst-emoji" value="${c?.emoji||'🐲'}" style="max-width:80px">
       </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Rang</label>
+        <div id="bst-rang-selector" data-rang="${c?.rang||'classique'}" style="display:flex;gap:.5rem">
+          ${Object.entries(RANG_STYLE).map(([r, rst]) => {
+            const active = (c?.rang||'classique') === r;
+            return `<button type="button" onclick="window._bstSelectRang('${r}')" data-rang-btn="${r}"
+              style="flex:1;padding:.4rem .6rem;border-radius:8px;cursor:pointer;font-size:.82rem;
+              font-weight:${active?'700':'400'};
+              border:1px solid ${active?rst.border:'var(--border)'};
+              background:${active?rst.bg:'var(--bg-elevated)'};
+              color:${active?rst.color:'var(--text-dim)'}">${rst.label}</button>`;
+          }).join('')}
+        </div>
+      </div>
     </div>
 
     <!-- Image upload + crop -->
@@ -715,6 +739,7 @@ async function saveBeast(id = '') {
       niveau:        parseInt(document.getElementById('bst-niveau')?.value)||0,
       dangerositeXp: parseInt(document.getElementById('bst-xp')?.value)||0,
       emoji:         document.getElementById('bst-emoji')?.value?.trim()   || '🐲',
+      rang:          document.getElementById('bst-rang-selector')?.dataset?.rang || 'classique',
       imageUrl,
       description:   document.getElementById('bst-desc')?.value?.trim()   || '',
       // Stats
@@ -780,12 +805,28 @@ async function _saveTracker() {
 
 window._bstOpen = (id) => { _activeId = _activeId === id ? null : id; _render(); };
 window._bstClose = () => { _activeId = null; _render(); };
+window._bstSetRang = (rang) => { _filterRang = rang; _render(); };
+window._bstSelectRang = (rang) => {
+  const sel = document.getElementById('bst-rang-selector');
+  if (!sel) return;
+  sel.dataset.rang = rang;
+  sel.querySelectorAll('[data-rang-btn]').forEach(btn => {
+    const r = btn.dataset.rangBtn;
+    const active = r === rang;
+    const rst = RANG_STYLE[r] || RANG_STYLE.classique;
+    btn.style.fontWeight = active ? '700' : '400';
+    btn.style.border     = `1px solid ${active ? rst.border : 'var(--border)'}`;
+    btn.style.background = active ? rst.bg  : 'var(--bg-elevated)';
+    btn.style.color      = active ? rst.color : 'var(--text-dim)';
+  });
+};
 // Recherche : met à jour la valeur et filtre la grille SANS rerender complet
 window._bstSearchInput = (val) => {
   _searchVal = val;
   // Filtrer en live sans reconstruire toute la page
   const search = val.toLowerCase().trim();
   const fType  = (_filterType||'').toLowerCase().trim();
+  const fRang  = (_filterRang||'').toLowerCase().trim();
   document.querySelectorAll('.bst-card').forEach(card => {
     const id = card.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
     const c  = _creatures.find(x => x.id === id);
@@ -795,7 +836,8 @@ window._bstSearchInput = (val) => {
       (c.type||'').toLowerCase().includes(search) ||
       (c.environnement||'').toLowerCase().includes(search);
     const matchType = !fType || (c.type||'').toLowerCase() === fType;
-    card.style.display = (matchSearch && matchType) ? '' : 'none';
+    const matchRang = !fRang || (c.rang||'classique').toLowerCase() === fRang;
+    card.style.display = (matchSearch && matchType && matchRang) ? '' : 'none';
   });
 };
 
@@ -808,6 +850,7 @@ window._bstSwitchBestiaire = async (id) => {
   _activeId    = null;
   _searchVal   = '';
   _filterType  = '';
+  _filterRang  = '';
   await renderBestiary();
 };
 
@@ -821,6 +864,7 @@ window._bstCreateBestiaire = async () => {
   window._bstBestiaireList = list;
   _bestiaireId = id;
   _activeId    = null;
+  _filterRang  = '';
   await renderBestiary();
 };
 
