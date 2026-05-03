@@ -9,11 +9,10 @@ import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc } from '../shared/html.js';
-import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
-
-// _crop, _clamp → gérés par shared/image-upload.js
+import { attachDropAndCrop } from '../shared/image-crop.js';
 
 // ── État local ────────────────────────────────────────────────────────────────
+let _bstCropper = null;
 let _creatures  = [];
 let _tracker    = {}; // { [creatureId]: { pvActuel, pmActuel, notes, deductions:{pv,pm,ca,for,...} } }
 let _searchVal  = '';
@@ -485,7 +484,7 @@ function _renderPanel(c) {
 // MODAL ADMIN — Créer / Modifier une créature
 // ══════════════════════════════════════════════════════════════════════════════
 async function openBeastModal(id = null) {
-  _crop.base64 = null;
+  _bstCropper?.destroy(); _bstCropper = null;
   const c = id ? _creatures.find(x => x.id === id) : null;
 
   // Sérialiser les tableaux dynamiques
@@ -526,16 +525,13 @@ async function openBeastModal(id = null) {
       <label>Image</label>
       <div id="bst-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
         padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s">
-        <div id="bst-drop-preview">
-          ${c?.imageUrl ? `<img src="${c.imageUrl}" style="max-height:80px;border-radius:8px;max-width:100%">` : `<div style="font-size:2rem;margin-bottom:4px">🖼️</div>`}
-        </div>
-        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">Glisser ou <span style="color:var(--gold)">cliquer pour choisir</span></div>
+        <div id="bst-drop-preview"></div>
       </div>
       <div id="bst-crop-wrap" style="display:none;margin-top:.75rem">
         <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez — ratio 4:3</div>
         <canvas id="bst-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" style="margin-top:.5rem;width:100%" onclick="window._bstConfirmCrop()">✂️ Confirmer le recadrage</button>
-        <div id="bst-crop-ok" style="display:none;font-size:.75rem;color:var(--green);text-align:center;margin-top:4px">✓ Image prête</div>
+        <button type="button" class="btn btn-gold btn-sm" id="bst-crop-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
+        <div id="bst-crop-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
       </div>
     </div>
 
@@ -604,29 +600,18 @@ async function openBeastModal(id = null) {
     </button>
   `);
 
-  // Input file créé en JS
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file'; fileInput.accept = 'image/*';
-  fileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0;pointer-events:none';
-  document.body.appendChild(fileInput);
-
-  const handleFile = (file) => {
-    if (!file?.type.startsWith('image/')) return;
-    if (file.size > 5*1024*1024) { showNotif('Image trop lourde (max 5 Mo).','error'); return; }
-    const r = new FileReader(); r.onload = e => _initBstCrop(e.target.result); r.readAsDataURL(file);
-  };
-  fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
-
-  const dz = document.getElementById('bst-drop-zone');
-  if (dz) {
-    dz.onclick = () => fileInput.click();
-    dz.ondragover  = e => { e.preventDefault(); dz.style.borderColor='var(--gold)'; };
-    dz.ondragleave = () => { dz.style.borderColor='var(--border-strong)'; };
-    dz.ondrop = e => { e.preventDefault(); dz.style.borderColor='var(--border-strong)'; handleFile(e.dataTransfer.files[0]); };
-  }
-
-  const obs = new MutationObserver(() => { if (!document.getElementById('bst-drop-zone')) { fileInput.remove(); obs.disconnect(); } });
-  obs.observe(document.body, { childList:true, subtree:true });
+  _bstCropper?.destroy();
+  _bstCropper = attachDropAndCrop({
+    dropEl:        document.getElementById('bst-drop-zone'),
+    previewEl:     document.getElementById('bst-drop-preview'),
+    cropWrapEl:    document.getElementById('bst-crop-wrap'),
+    canvasId:      'bst-crop-canvas',
+    statusEl:      document.getElementById('bst-crop-ok'),
+    confirmBtnEl:  document.getElementById('bst-crop-confirm'),
+    initialUrl:    c?.imageUrl || '',
+    ratio:         { w: 4, h: 3 },
+    output:        { maxW: 1800, target: 700_000 },
+  });
 }
 
 // ── Lignes dynamiques ─────────────────────────────────────────────────────────
@@ -714,13 +699,11 @@ async function saveBeast(id = '') {
     const nom = document.getElementById('bst-nom')?.value?.trim();
     if (!nom) { showNotif('Le nom est requis.','error'); return; }
 
-    // Image : crop prioritaire sinon existante
-    let imageUrl = '';
-    if (_crop.base64) {
-      imageUrl = _crop.base64;
-    } else if (id) {
-      imageUrl = _creatures.find(c=>c.id===id)?.imageUrl || '';
-    }
+    // Image : nouveau crop > existante (pas de bouton "retirer" ici)
+    const cropResult = _bstCropper?.getResult();
+    let imageUrl = typeof cropResult === 'string'
+      ? cropResult
+      : (id ? (_creatures.find(c=>c.id===id)?.imageUrl || '') : '');
 
     // Vérifier taille Firestore
     if (imageUrl.length > 900_000) { showNotif('Image trop grande, recadrez plus petit.','error'); return; }
@@ -765,7 +748,7 @@ async function saveBeast(id = '') {
       _creatures.sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
     }
 
-    _crop.base64 = null;
+    _bstCropper?.destroy(); _bstCropper = null;
     closeModal();
     showNotif(id ? `${nom} mis à jour !` : `${nom} ajouté au bestiaire !`, 'success');
     _render();
@@ -907,78 +890,6 @@ window._bstReset = (id) => {
     : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
   _saveTracker();
   _render();
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
-// CROPPER (identique achievements/story)
-// ══════════════════════════════════════════════════════════════════════════════
-function _initBstCrop(dataUrl) {
-  const wrap=document.getElementById('bst-crop-wrap'),canvas=document.getElementById('bst-crop-canvas'),prev=document.getElementById('bst-drop-preview');
-  if(!wrap||!canvas) return;
-  _crop.base64=null; document.getElementById('bst-crop-ok').style.display='none'; wrap.style.display='block';
-  const img=new Image();
-  img.onload=()=>{
-    _crop.img=img;_crop.natW=img.naturalWidth;_crop.natH=img.naturalHeight;
-    const mW=Math.min(400,img.naturalWidth);_crop.dispScale=mW/img.naturalWidth;
-    canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
-    canvas.style.width=mW+'px';canvas.style.height=Math.round(img.naturalHeight*_crop.dispScale)+'px';
-    const R=4/3;let w=img.naturalWidth*.8,h=w/R;
-    if(h>img.naturalHeight*.8){h=img.naturalHeight*.8;w=h*R;}
-    _crop.cropX=Math.round((img.naturalWidth-w)/2);_crop.cropY=Math.round((img.naturalHeight-h)/2);
-    _crop.cropW=Math.round(w);_crop.cropH=Math.round(h);
-    _drawBstCrop();_bindBstCrop(canvas);
-    if(prev) prev.innerHTML=`<img src="${dataUrl}" style="max-height:50px;border-radius:6px;opacity:.6"><div style="font-size:.7rem;color:var(--text-dim);margin-top:4px">Recadrez ci-dessous</div>`;
-  };
-  img.src=dataUrl;
-}
-
-function _bstHandles(){const{cropX:x,cropY:y,cropW:w,cropH:h}=_crop;return[{id:'nw',x,y},{id:'n',x:x+w/2,y},{id:'ne',x:x+w,y},{id:'w',x,y:y+h/2},{id:'e',x:x+w,y:y+h/2},{id:'sw',x,y:y+h},{id:'s',x:x+w/2,y:y+h},{id:'se',x:x+w,y:y+h}];}
-function _bstHitH(nx,ny){const t=9/_crop.dispScale;return _bstHandles().find(h=>Math.abs(h.x-nx)<t&&Math.abs(h.y-ny)<t)||null;}
-function _drawBstCrop(){
-  const c=document.getElementById('bst-crop-canvas');if(!c||!_crop.img)return;
-  const ctx=c.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_crop;
-  ctx.clearRect(0,0,natW,natH);ctx.drawImage(img,0,0,natW,natH);
-  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,0,natW,natH);
-  ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
-  ctx.strokeStyle='#e8b84b';ctx.lineWidth=2;ctx.strokeRect(cropX,cropY,cropW,cropH);
-  ctx.strokeStyle='rgba(232,184,75,.3)';ctx.lineWidth=1;
-  for(let i=1;i<=2;i++){ctx.beginPath();ctx.moveTo(cropX+cropW*i/3,cropY);ctx.lineTo(cropX+cropW*i/3,cropY+cropH);ctx.stroke();ctx.beginPath();ctx.moveTo(cropX,cropY+cropH*i/3);ctx.lineTo(cropX+cropW,cropY+cropH*i/3);ctx.stroke();}
-  ctx.fillStyle='#e8b84b';ctx.strokeStyle='#0b1118';ctx.lineWidth=1.5;
-  _bstHandles().forEach(h=>{ctx.fillRect(h.x-6,h.y-6,12,12);ctx.strokeRect(h.x-6,h.y-6,12,12);});
-  ctx.fillStyle='rgba(232,184,75,.9)';ctx.font='12px monospace';ctx.fillText(`${cropW}×${cropH}`,cropX+6,cropY+18);
-}
-function _bstToN(c,cx,cy){const r=c.getBoundingClientRect();return{x:(cx-r.left)/_crop.dispScale,y:(cy-r.top)/_crop.dispScale};}
-function _bindBstCrop(canvas){
-  const R=4/3,MIN=40;
-  const onS=(cx,cy)=>{const{x,y}=_bstToN(canvas,cx,cy),h=_bstHitH(x,y);if(h){_crop.isResizing=true;_crop.handle=h.id;}else{const{cropX,cropY,cropW,cropH}=_crop;if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH){_crop.isDragging=true;_crop.startX=x-cropX;_crop.startY=y-cropY;}}};
-  const onM=(cx,cy)=>{if(!_crop.isDragging&&!_crop.isResizing)return;const{x,y}=_bstToN(canvas,cx,cy),{natW:W,natH:H}=_crop;if(_crop.isDragging){_crop.cropX=Math.round(_clamp(x-_crop.startX,0,W-_crop.cropW));_crop.cropY=Math.round(_clamp(y-_crop.startY,0,H-_crop.cropH));_drawBstCrop();return;}let{cropX,cropY,cropW,cropH,handle}=_crop;const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropH};if(handle==='se'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);}else if(handle==='sw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;}else if(handle==='ne'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);cropY=a.y2-cropH;}else if(handle==='nw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;cropY=a.y2-cropH;}else if(handle==='e'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);}else if(handle==='w'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;}else if(handle==='s'){cropH=_clamp(y-a.y,MIN,H-a.y);cropW=Math.round(cropH*R);}else if(handle==='n'){cropH=_clamp(a.y2-y,MIN,a.y2);cropW=Math.round(cropH*R);cropY=a.y2-cropH;}_crop.cropX=Math.round(_clamp(cropX,0,W-MIN));_crop.cropY=Math.round(_clamp(cropY,0,H-MIN));_crop.cropW=Math.round(_clamp(cropW,MIN,W-_crop.cropX));_crop.cropH=Math.round(_clamp(cropH,MIN,H-_crop.cropY));_drawBstCrop();};
-  const onE=()=>{_crop.isDragging=false;_crop.isResizing=false;_crop.handle=null;};
-  const CM={nw:'nw-resize',ne:'ne-resize',sw:'sw-resize',se:'se-resize',n:'n-resize',s:'s-resize',e:'e-resize',w:'w-resize'};
-  canvas.addEventListener('mousemove',e=>{if(_crop.isDragging||_crop.isResizing)return;const{x,y}=_bstToN(canvas,e.clientX,e.clientY),h=_bstHitH(x,y);if(h){canvas.style.cursor=CM[h.id];return;}const{cropX,cropY,cropW,cropH}=_crop;canvas.style.cursor=(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH)?'move':'crosshair';});
-  canvas.addEventListener('mousedown',e=>{e.preventDefault();onS(e.clientX,e.clientY);});
-  window.addEventListener('mousemove',e=>onM(e.clientX,e.clientY));
-  window.addEventListener('mouseup',onE);
-  canvas.addEventListener('touchstart',e=>{e.preventDefault();onS(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchmove',e=>{e.preventDefault();onM(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchend',onE);
-}
-
-window._bstConfirmCrop = () => {
-  const{img,cropX,cropY,cropW,cropH}=_crop;if(!img)return;
-  // Compression pour Firestore
-  const MAX_W=1800,TARGET=700_000;
-  const scale=cropW>MAX_W?MAX_W/cropW:1;
-  const outW=Math.round(cropW*scale),outH=Math.round(cropH*scale);
-  const out=document.createElement('canvas');out.width=outW;out.height=outH;
-  out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,outW,outH);
-  let b64=out.toDataURL('image/jpeg',.85);
-  if(b64.length>TARGET){b64=out.toDataURL('image/jpeg',.65);}
-  if(b64.length>TARGET){const s=Math.sqrt(TARGET/b64.length);const o2=document.createElement('canvas');o2.width=Math.round(outW*s);o2.height=Math.round(outH*s);o2.getContext('2d').drawImage(out,0,0,o2.width,o2.height);b64=o2.toDataURL('image/jpeg',.75);}
-  _crop.base64=b64;
-  document.getElementById('bst-crop-ok').style.display='block';
-  document.getElementById('bst-crop-wrap').style.display='none';
-  const p=document.getElementById('bst-drop-preview');
-  if(p) p.innerHTML=`<img src="${b64}" style="max-height:80px;border-radius:8px">`;
 };
 
 // ── Override PAGES.bestiaire + exports ───────────────────────────────────────

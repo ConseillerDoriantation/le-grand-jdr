@@ -9,7 +9,7 @@ import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { _esc, _nl2br } from '../shared/html.js';
-import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
+import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES from './pages.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
@@ -25,12 +25,10 @@ const STATUT_CFG = {
   'En attente': { color:'#666',    border:'rgba(128,128,128,0.25)', icon:'◷' },
 };
 
-// _crop → géré par shared/image-upload.js
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function stCfg(item){ return STATUT_CFG[item.statut] || STATUT_CFG['En attente']; }
-// _clamp → utilisé dans shared/image-upload.js
 
+let _stCropper   = null;
 let _axeMap      = {};
 let _modalGroupes   = [];   // groupes du modal ouvert (mission courante)
 let _modalStoryId   = '';   // id de la mission en édition ('' = nouvelle)
@@ -638,7 +636,7 @@ async function openStoryDetail(id) {
 
 // ── MODAL AJOUT / ÉDITION ─────────────────────────────────────────────────────
 async function openStoryModal(item = null) {
-  _crop.base64 = null;
+  _stCropper?.destroy(); _stCropper = null;
   const acteActif   = window._storyActe || 'Acte I';
   const allItems    = await loadCollection('story');
   const autresItems = allItems.filter(i => i.id !== item?.id);
@@ -689,26 +687,14 @@ async function openStoryModal(item = null) {
     <div class="form-group">
       <label>Image (bannière)</label>
       <div id="st-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
-        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s"
-        onclick="document.getElementById('st-file').click()"
-        ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
-        ondragleave="this.style.borderColor='var(--border-strong)'"
-        ondrop="event.preventDefault();this.style.borderColor='var(--border-strong)';window._stFile(event.dataTransfer.files[0])">
-        <div id="st-drop-preview">
-          ${item?.imageUrl
-            ?`<img src="${item.imageUrl}" style="max-height:70px;border-radius:8px;max-width:100%">`
-            :`<div style="font-size:1.8rem;margin-bottom:4px">🖼️</div>`}
-        </div>
-        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">
-          Glisser ou <span style="color:var(--gold)">cliquer pour choisir</span>
-        </div>
+        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s">
+        <div id="st-drop-preview"></div>
       </div>
       <div id="st-crop-wrap" style="display:none;margin-top:.75rem">
         <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez — ratio 4:3 verrouillé</div>
         <canvas id="st-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" style="margin-top:.5rem;width:100%"
-          onclick="window._stConfirmCrop()">✂️ Confirmer le recadrage</button>
-        <div id="st-crop-ok" style="display:none;font-size:.75rem;color:var(--green);text-align:center;margin-top:4px">✓ Image recadrée</div>
+        <button type="button" class="btn btn-gold btn-sm" id="st-crop-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
+        <div id="st-crop-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
       </div>
     </div>
 
@@ -1021,39 +1007,20 @@ async function openStoryModal(item = null) {
     if (el) el.dataset.selected = '1';
   });
 
-  // ── Input file créé en JS (évite l'orphelin DOM via innerHTML) ────────────
-  const stFileInput = document.createElement('input');
-  stFileInput.type   = 'file';
-  stFileInput.id     = 'st-file';
-  stFileInput.accept = 'image/*';
-  stFileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0;pointer-events:none';
-  document.body.appendChild(stFileInput);
-
-  const handleStFile = (file) => {
-    if(!file?.type.startsWith('image/')) return;
-    if(file.size>5*1024*1024){ showNotif('Image trop lourde (max 5 Mo).','error'); return; }
-    const r=new FileReader();
-    r.onload=(e)=>_initStCrop(e.target.result);
-    r.readAsDataURL(file);
-  };
-
-  stFileInput.addEventListener('change', () => handleStFile(stFileInput.files[0]));
-  window._stFile = handleStFile;
-
-  // Rebind drop zone avec event listeners natifs
-  const stDropZone = document.getElementById('st-drop-zone');
-  if (stDropZone) {
-    stDropZone.onclick     = () => stFileInput.click();
-    stDropZone.ondragover  = (e) => { e.preventDefault(); stDropZone.style.borderColor = 'var(--gold)'; };
-    stDropZone.ondragleave = ()  => { stDropZone.style.borderColor = 'var(--border-strong)'; };
-    stDropZone.ondrop      = (e) => { e.preventDefault(); stDropZone.style.borderColor = 'var(--border-strong)'; handleStFile(e.dataTransfer.files[0]); };
-  }
-
-  // Nettoyer quand le modal se ferme
-  const stObs = new MutationObserver(() => {
-    if (!document.getElementById('st-drop-zone')) { stFileInput.remove(); stObs.disconnect(); }
+  // ── Upload + crop image (4:3 verrouillé) ──────────────────────────────────
+  _stCropper?.destroy();
+  _stCropper = attachDropAndCrop({
+    dropEl:        document.getElementById('st-drop-zone'),
+    previewEl:     document.getElementById('st-drop-preview'),
+    cropWrapEl:    document.getElementById('st-crop-wrap'),
+    canvasId:      'st-crop-canvas',
+    statusEl:      document.getElementById('st-crop-ok'),
+    confirmBtnEl:  document.getElementById('st-crop-confirm'),
+    initialUrl:    item?.imageUrl || '',
+    ratio:         { w: 4, h: 3 },
+    previewMaxH:   70,
+    output:        { maxW: 800, target: 700_000 },
   });
-  stObs.observe(document.body, { childList: true, subtree: true });
 
   // Toggle visuel d'une card lien
   window._toggleLien = (id) => {
@@ -1071,127 +1038,20 @@ async function openStoryModal(item = null) {
   };
 }
 
-// ── CROPPER ───────────────────────────────────────────────────────────────────
-function _initStCrop(dataUrl) {
-  const wrap=document.getElementById('st-crop-wrap');
-  const canvas=document.getElementById('st-crop-canvas');
-  const prev=document.getElementById('st-drop-preview');
-  if(!wrap||!canvas) return;
-  _crop.base64=null;
-  document.getElementById('st-crop-ok').style.display='none';
-  wrap.style.display='block';
-  const img=new Image();
-  img.onload=()=>{
-    _crop.img=img; _crop.natW=img.naturalWidth; _crop.natH=img.naturalHeight;
-    const maxW=Math.min(400,img.naturalWidth);
-    _crop.dispScale=maxW/img.naturalWidth;
-    canvas.width=img.naturalWidth; canvas.height=img.naturalHeight;
-    canvas.style.width=maxW+'px';
-    canvas.style.height=Math.round(img.naturalHeight*_crop.dispScale)+'px';
-    const R=4/3; let w=img.naturalWidth*.8,h=w/R;
-    if(h>img.naturalHeight*.8){h=img.naturalHeight*.8;w=h*R;}
-    _crop.cropX=Math.round((img.naturalWidth-w)/2); _crop.cropY=Math.round((img.naturalHeight-h)/2);
-    _crop.cropW=Math.round(w); _crop.cropH=Math.round(h);
-    _drawStCrop(); _bindStCrop(canvas);
-    if(prev) prev.innerHTML=`<img src="${dataUrl}" style="max-height:50px;border-radius:6px;opacity:.6">
-      <div style="font-size:.7rem;color:var(--text-dim);margin-top:4px">Recadrez ci-dessous</div>`;
-  };
-  img.src=dataUrl;
-}
-
-function _stHandles(){const{cropX:x,cropY:y,cropW:w,cropH:h}=_crop;return[{id:'nw',x,y},{id:'n',x:x+w/2,y},{id:'ne',x:x+w,y},{id:'w',x,y:y+h/2},{id:'e',x:x+w,y:y+h/2},{id:'sw',x,y:y+h},{id:'s',x:x+w/2,y:y+h},{id:'se',x:x+w,y:y+h}];}
-function _stHitH(nx,ny){const tol=9/_crop.dispScale;return _stHandles().find(h=>Math.abs(h.x-nx)<tol&&Math.abs(h.y-ny)<tol)||null;}
-function _drawStCrop(){
-  const canvas=document.getElementById('st-crop-canvas');if(!canvas||!_crop.img)return;
-  const ctx=canvas.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_crop;
-  ctx.clearRect(0,0,natW,natH);ctx.drawImage(img,0,0,natW,natH);
-  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,0,natW,natH);
-  ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
-  ctx.strokeStyle='#e8b84b';ctx.lineWidth=2;ctx.strokeRect(cropX,cropY,cropW,cropH);
-  ctx.strokeStyle='rgba(232,184,75,.3)';ctx.lineWidth=1;
-  for(let i=1;i<=2;i++){
-    ctx.beginPath();ctx.moveTo(cropX+cropW*i/3,cropY);ctx.lineTo(cropX+cropW*i/3,cropY+cropH);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(cropX,cropY+cropH*i/3);ctx.lineTo(cropX+cropW,cropY+cropH*i/3);ctx.stroke();
-  }
-  ctx.fillStyle='#e8b84b';ctx.strokeStyle='#0b1118';ctx.lineWidth=1.5;
-  _stHandles().forEach(h=>{ctx.fillRect(h.x-6,h.y-6,12,12);ctx.strokeRect(h.x-6,h.y-6,12,12);});
-  ctx.fillStyle='rgba(232,184,75,.9)';ctx.font='12px monospace';
-  ctx.fillText(`${cropW} × ${cropH}`,cropX+6,cropY+18);
-}
-function _stToN(c,cx,cy){const r=c.getBoundingClientRect();return{x:(cx-r.left)/_crop.dispScale,y:(cy-r.top)/_crop.dispScale};}
-function _bindStCrop(canvas){
-  const R=4/3,MIN=40;
-  const onStart=(cx,cy)=>{
-    const{x,y}=_stToN(canvas,cx,cy),h=_stHitH(x,y);
-    if(h){_crop.isResizing=true;_crop.handle=h.id;}
-    else{const{cropX,cropY,cropW,cropH}=_crop;
-      if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH)
-        {_crop.isDragging=true;_crop.startX=x-cropX;_crop.startY=y-cropY;}}
-  };
-  const onMove=(cx,cy)=>{
-    if(!_crop.isDragging&&!_crop.isResizing)return;
-    const{x,y}=_stToN(canvas,cx,cy),{natW:W,natH:H}=_crop;
-    if(_crop.isDragging){
-      _crop.cropX=Math.round(_clamp(x-_crop.startX,0,W-_crop.cropW));
-      _crop.cropY=Math.round(_clamp(y-_crop.startY,0,H-_crop.cropH));
-      _drawStCrop();return;
-    }
-    let{cropX,cropY,cropW,cropH,handle}=_crop;
-    const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropH};
-    if(handle==='se'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);}
-    else if(handle==='sw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;}
-    else if(handle==='ne'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);cropY=a.y2-cropH;}
-    else if(handle==='nw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;cropY=a.y2-cropH;}
-    else if(handle==='e'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=Math.round(cropW/R);}
-    else if(handle==='w'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=Math.round(cropW/R);cropX=a.x2-cropW;}
-    else if(handle==='s'){cropH=_clamp(y-a.y,MIN,H-a.y);cropW=Math.round(cropH*R);}
-    else if(handle==='n'){cropH=_clamp(a.y2-y,MIN,a.y2);cropW=Math.round(cropH*R);cropY=a.y2-cropH;}
-    _crop.cropX=Math.round(_clamp(cropX,0,W-MIN));_crop.cropY=Math.round(_clamp(cropY,0,H-MIN));
-    _crop.cropW=Math.round(_clamp(cropW,MIN,W-_crop.cropX));_crop.cropH=Math.round(_clamp(cropH,MIN,H-_crop.cropY));
-    _drawStCrop();
-  };
-  const onEnd=()=>{_crop.isDragging=false;_crop.isResizing=false;_crop.handle=null;};
-  const CM={nw:'nw-resize',ne:'ne-resize',sw:'sw-resize',se:'se-resize',n:'n-resize',s:'s-resize',e:'e-resize',w:'w-resize'};
-  canvas.addEventListener('mousemove',e=>{
-    if(_crop.isDragging||_crop.isResizing)return;
-    const{x,y}=_stToN(canvas,e.clientX,e.clientY),h=_stHitH(x,y);
-    if(h){canvas.style.cursor=CM[h.id];return;}
-    const{cropX,cropY,cropW,cropH}=_crop;
-    canvas.style.cursor=(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH)?'move':'crosshair';
-  });
-  canvas.addEventListener('mousedown',e=>{e.preventDefault();onStart(e.clientX,e.clientY);});
-  window.addEventListener('mousemove',e=>onMove(e.clientX,e.clientY));
-  window.addEventListener('mouseup',onEnd);
-  canvas.addEventListener('touchstart',e=>{e.preventDefault();onStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchmove',e=>{e.preventDefault();onMove(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchend',onEnd);
-}
-
-window._stConfirmCrop = () => {
-  const{img,cropX,cropY,cropW,cropH}=_crop;if(!img)return;
-  const OUT_W=Math.min(800,cropW),OUT_H=Math.round(OUT_W/(4/3));
-  const out=document.createElement('canvas');out.width=OUT_W;out.height=OUT_H;
-  out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,OUT_W,OUT_H);
-  _crop.base64=out.toDataURL('image/jpeg',.88);
-  document.getElementById('st-crop-ok').style.display='block';
-  document.getElementById('st-crop-wrap').style.display='none';
-  const p=document.getElementById('st-drop-preview');
-  if(p) p.innerHTML=`<img src="${_crop.base64}" style="max-height:70px;border-radius:8px">`;
-};
-
 // ── SAUVEGARDER ───────────────────────────────────────────────────────────────
 async function saveStory(id = '') {
   try {
     const titre=document.getElementById('st-titre')?.value?.trim();
     if(!titre){showNotif('Le titre est requis.','error');return;}
 
-    // Image : crop prioritaire, sinon existante en base
-    let imageUrl='';
-    if(_crop.base64){
-      imageUrl=_crop.base64;
-    } else if(id){
-      const existing=(await loadCollection('story')).find(i=>i.id===id);
-      imageUrl=existing?.imageUrl||'';
+    // Image : nouveau crop > existante (pas de bouton "retirer")
+    const cropResult = _stCropper?.getResult();
+    let imageUrl = '';
+    if (typeof cropResult === 'string') {
+      imageUrl = cropResult;
+    } else if (id) {
+      const existing = (await loadCollection('story')).find(i => i.id === id);
+      imageUrl = existing?.imageUrl || '';
     }
 
     // Participants depuis la grille de sélection
@@ -1234,7 +1094,7 @@ async function saveStory(id = '') {
     else   await addToCol('story',data);
 
     window._storyActe=data.acte;
-    _crop.base64=null;
+    _stCropper?.destroy(); _stCropper = null;
     closeModal();
     showNotif(id?'Mission mise à jour.':`"${titre}" ajoutée !`,'success');
     await PAGES.story();

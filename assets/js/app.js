@@ -26,9 +26,9 @@ import { initTheme, toggleTheme } from './shared/theme.js';
 
 // ── Modules chargés au boot (nécessaires immédiatement) ──────────────────────
 // uploadImage  : expose window.previewUploadPng/Jpeg (utilisé dans tout le HTML)
-// photo-cropper: expose window.openPhotoCropper (utilisé dès la fiche perso)
+// character-photo: expose window.openCharacterPhotoPicker (utilisé dès la fiche perso)
 import './features/uploadImage.js';
-import './features/photo-cropper.js';
+import './features/character-photo.js';
 
 // ── Exposition sur window EN PREMIER ─────────────────────────────────────────
 // toggleTheme doit être disponible avant le rendu

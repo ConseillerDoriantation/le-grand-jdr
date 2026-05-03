@@ -10,8 +10,8 @@ import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/fire
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
-import { _crop } from '../shared/image-upload.js';
 import { STATE } from '../core/state.js';
+import { attachDropAndResize } from '../shared/image-crop.js';
 import PAGES from './pages.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
@@ -21,15 +21,15 @@ const CATS = [
   { id: 'histoire', label: '📖 Histoire', color: '#22c38e', glow: 'rgba(34,195,142,0.14)'  },
 ];
 
-// _crop → géré par shared/image-upload.js
 let _achRowSortables = [];
 let _achDragBlockClick = false;
 let _achClickGuardInstalled = false;
+let _achUploader = null;
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 function openAchievementModal(id = null) {
   const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
-  _crop.base64 = null;
+  _achUploader?.destroy(); _achUploader = null;
 
   openModal(
     id ? `✏️ Modifier — ${ex?.titre || 'Haut-Fait'}` : '🏆 Nouveau Haut-Fait',
@@ -68,25 +68,12 @@ function openAchievementModal(id = null) {
         border:2px dashed var(--border-strong);border-radius:12px;
         padding:1.2rem;text-align:center;cursor:pointer;
         transition:border-color 0.15s;background:var(--bg-elevated);
-      "
-        onclick="document.getElementById('ach-file').click()"
-        ondragover="event.preventDefault();this.style.borderColor='var(--gold)'"
-        ondragleave="this.style.borderColor='var(--border-strong)'"
-        ondrop="event.preventDefault();this.style.borderColor='var(--border-strong)';window._achFile(event.dataTransfer.files[0])">
-        <div id="ach-drop-preview">
-          ${ex?.imageUrl
-            ? `<img src="${ex.imageUrl}" style="max-height:80px;border-radius:8px;max-width:100%">`
-            : `<div style="font-size:2rem;margin-bottom:4px">🖼️</div>`}
-        </div>
-        <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
-          Glisser une image ou <span style="color:var(--gold)">cliquer pour choisir</span>
-        </div>
-        <div style="font-size:0.7rem;color:var(--text-dim);margin-top:2px">JPG · PNG · WebP — max 5 Mo</div>
+      ">
+        <div id="ach-drop-preview"></div>
+        <div style="font-size:0.7rem;color:var(--text-dim);margin-top:4px">JPG · PNG · WebP — max 5 Mo</div>
       </div>
 
-      <div id="ach-img-ready" style="display:none;font-size:0.75rem;color:var(--green);text-align:center;margin-top:6px">
-        ✓ Image prête
-      </div>
+      <div id="ach-img-ready" style="display:none;font-size:0.75rem;text-align:center;margin-top:6px"></div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
@@ -191,64 +178,16 @@ function openAchievementModal(id = null) {
     } else if (!active && dotEl) dotEl.remove();
   };
 
-  // ── Input file créé en JS (évite l'orphelin DOM via innerHTML) ────────────
-  const achFileInput = document.createElement('input');
-  achFileInput.type   = 'file';
-  achFileInput.id     = 'ach-file';
-  achFileInput.accept = 'image/*';
-  achFileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0;pointer-events:none';
-  document.body.appendChild(achFileInput);
-
-  const handleAchFile = (file) => {
-    if (!file?.type.startsWith('image/')) return;
-    if (file.size > 5 * 1024 * 1024) { showNotif('Image trop lourde (max 5 Mo).', 'error'); return; }
-    const r = new FileReader();
-    r.onload = (e) => _resizeAndPreview(e.target.result);
-    r.readAsDataURL(file);
-  };
-
-  achFileInput.addEventListener('change', () => handleAchFile(achFileInput.files[0]));
-  window._achFile = handleAchFile;
-
-  // Rebind la drop zone avec addEventListener (pas onclick inline)
-  const achDropZone = document.getElementById('ach-drop-zone');
-  if (achDropZone) {
-    achDropZone.onclick     = () => achFileInput.click();
-    achDropZone.ondragover  = (e) => { e.preventDefault(); achDropZone.style.borderColor = 'var(--gold)'; };
-    achDropZone.ondragleave = ()  => { achDropZone.style.borderColor = 'var(--border-strong)'; };
-    achDropZone.ondrop      = (e) => { e.preventDefault(); achDropZone.style.borderColor = 'var(--border-strong)'; handleAchFile(e.dataTransfer.files[0]); };
-  }
-
-  // Nettoyer quand le modal se ferme
-  const achObs = new MutationObserver(() => {
-    if (!document.getElementById('ach-drop-zone')) { achFileInput.remove(); achObs.disconnect(); }
+  // ── Upload + redimensionnement (max 1400px, JPEG .88, pas de crop) ────────
+  _achUploader = attachDropAndResize({
+    dropEl:       document.getElementById('ach-drop-zone'),
+    previewEl:    document.getElementById('ach-drop-preview'),
+    statusEl:     document.getElementById('ach-img-ready'),
+    initialUrl:   ex?.imageUrl || '',
+    resize:       { maxW: 1400, quality: 0.88 },
+    maxFileSize:  5 * 1024 * 1024,
+    onError:      (err) => showNotif(err.message || 'Image trop lourde.', 'error'),
   });
-  achObs.observe(document.body, { childList: true, subtree: true });
-}
-
-// ── TRAITEMENT IMAGE — redimensionnement sans crop forcé ──────────────────────
-function _resizeAndPreview(dataUrl) {
-  _crop.base64 = null;
-  const img = new Image();
-  img.onload = () => {
-    const MAX = 1400;
-    let w = img.naturalWidth;
-    let h = img.naturalHeight;
-    if (w > MAX || h > MAX) {
-      if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
-      else        { w = Math.round(w * MAX / h); h = MAX; }
-    }
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-    _crop.base64 = canvas.toDataURL('image/jpeg', 0.88);
-
-    const preview = document.getElementById('ach-drop-preview');
-    if (preview) preview.innerHTML = `<img src="${_crop.base64}" style="max-height:80px;border-radius:8px;max-width:100%">`;
-    const ready = document.getElementById('ach-img-ready');
-    if (ready) ready.style.display = 'block';
-  };
-  img.src = dataUrl;
 }
 
 // ── SAUVEGARDER ───────────────────────────────────────────────────────────────
@@ -257,13 +196,9 @@ async function saveAchievement(id = '') {
     const titre = document.getElementById('ach-titre')?.value?.trim();
     if (!titre) { showNotif('Le titre est requis.', 'error'); return; }
 
-    let imageUrl = '';
-    if (_crop.base64) {
-      imageUrl = _crop.base64;
-    } else {
-      const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
-      imageUrl  = ex?.imageUrl || '';
-    }
+    const uploaded = _achUploader?.getResult();
+    const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
+    const imageUrl = typeof uploaded === 'string' ? uploaded : (ex?.imageUrl || '');
 
     const contribRaw = document.getElementById('ach-contributeurs')?.value || '';
     const contributeurs = contribRaw ? contribRaw.split(',').filter(Boolean) : [];
@@ -292,7 +227,7 @@ async function saveAchievement(id = '') {
       }
     }
 
-    _crop.base64 = null;
+    _achUploader?.destroy(); _achUploader = null;
     closeModal();
     showNotif(id ? 'Haut-Fait mis à jour.' : `"${titre}" ajouté !`, 'success');
     await PAGES.achievements();

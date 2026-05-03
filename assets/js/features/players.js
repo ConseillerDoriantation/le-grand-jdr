@@ -10,7 +10,7 @@ import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _trunc, _toRoman, _initials } from '../shared/html.js';
 import { getMod as _getMod, calcCA as _ca, calcPVMax as _pvMax, calcPMMax as _pmMax, calcOr as _gold, STAT_META } from '../shared/char-stats.js';
-import { imageDropZoneHTML, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
+import { attachDropAndCrop } from '../shared/image-crop.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml, bindRichTextEditors } from '../shared/rich-text.js';
 
 // ── Couleurs de tags (même palette que tabs.js) ───────────────────────────────
@@ -28,13 +28,8 @@ function _tagColor(text) {
   return _TAG_COLORS[h % _TAG_COLORS.length];
 }
 
-// ── Crop image ────────────────────────────────────────────────────────────────
-let _ppCrop = {
-  img:null, cropX:0,cropY:0,cropW:0,cropH:0,
-  startX:0,startY:0,isDragging:false,isResizing:false,handle:null,
-  natW:0,natH:0,dispScale:1, base64:null,
-};
-const _ppc = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+// ── Cropper actif (modal de présentation) ─────────────────────────────────────
+let _ppCropper = null;
 
 // ── État ──────────────────────────────────────────────────────────────────────
 const STORE = {
@@ -656,22 +651,15 @@ async function openPlayerPresentModal(player=null) {
       <label>Illustration</label>
       <div id="pp-img-drop" style="border:2px dashed var(--border-strong);border-radius:10px;
         padding:.85rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
-        <div id="pp-img-preview">
-          ${player?.imageUrl
-            ? `<img src="${_esc(player.imageUrl)}" style="max-height:80px;border-radius:8px;max-width:100%">`
-            : `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
-               <div style="font-size:.75rem;color:var(--text-muted)">
-                 <span style="color:var(--gold)">Cliquer</span> ou glisser une image</div>`}
-        </div>
+        <div id="pp-img-preview"></div>
       </div>
       <div id="pp-crop-wrap" style="display:none;margin-top:.6rem">
         <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.35rem">Recadrez l'illustration</div>
         <canvas id="pp-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" style="width:100%;margin-top:.4rem"
-          onclick="window._ppConfirmCrop()">✂️ Confirmer</button>
-        <div id="pp-crop-ok" style="display:none;font-size:.72rem;text-align:center;margin-top:3px;color:var(--green)"></div>
+        <button type="button" class="btn btn-gold btn-sm" id="pp-crop-confirm" style="width:100%;margin-top:.4rem">✂️ Confirmer</button>
+        <div id="pp-crop-ok" style="display:none;font-size:.72rem;text-align:center;margin-top:3px"></div>
       </div>
-      ${player?.imageUrl ? `<button type="button" onclick="window._ppClearImg()"
+      ${player?.imageUrl ? `<button type="button" id="pp-img-clear"
         style="font-size:.72rem;background:none;border:none;cursor:pointer;color:#ff6b6b;margin-top:.3rem">
         ✕ Retirer l'image</button>` : ''}
     </div>
@@ -687,119 +675,35 @@ async function openPlayerPresentModal(player=null) {
   // Activer l'éditeur rich text
   bindRichTextEditors();
 
-  // Setup crop
-  window._ppImgBase64 = null;
-  window._ppImgCleared = false;
-
-  const fi = document.createElement('input');
-  fi.type='file'; fi.accept='image/*';
-  fi.style.cssText='position:absolute;opacity:0;width:0;height:0';
-  document.body.appendChild(fi);
-
-  const handleFile = (file) => {
-    if(!file?.type.startsWith('image/')) return;
-    const r=new FileReader();
-    r.onload=(e)=>_initPpCrop(e.target.result);
-    r.readAsDataURL(file);
-  };
-  fi.addEventListener('change',()=>handleFile(fi.files[0]));
-  const drop = document.getElementById('pp-img-drop');
-  drop?.addEventListener('click',()=>fi.click());
-  drop?.addEventListener('dragover',e=>{e.preventDefault();drop.style.borderColor='var(--gold)';});
-  drop?.addEventListener('dragleave',()=>{drop.style.borderColor='var(--border-strong)';});
-  drop?.addEventListener('drop',e=>{e.preventDefault();drop.style.borderColor='var(--border-strong)';handleFile(e.dataTransfer.files[0]);});
-
-  const obs=new MutationObserver(()=>{if(!document.getElementById('pp-img-drop')){fi.remove();obs.disconnect();}});
-  obs.observe(document.body,{childList:true,subtree:true});
-
-  window._ppClearImg = () => {
-    window._ppImgBase64=''; window._ppImgCleared=true;
-    const prev=document.getElementById('pp-img-preview');
-    if(prev) prev.innerHTML=`<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
-      <div style="font-size:.75rem;color:var(--text-muted)"><span style="color:var(--gold)">Cliquer</span> ou glisser</div>`;
-    document.getElementById('pp-crop-wrap').style.display='none';
-  };
+  // Upload + crop illustration (ratio libre, cadrage initial 3:4 portrait)
+  _ppCropper?.destroy();
+  _ppCropper = attachDropAndCrop({
+    dropEl:        document.getElementById('pp-img-drop'),
+    previewEl:     document.getElementById('pp-img-preview'),
+    cropWrapEl:    document.getElementById('pp-crop-wrap'),
+    canvasId:      'pp-crop-canvas',
+    statusEl:      document.getElementById('pp-crop-ok'),
+    confirmBtnEl:  document.getElementById('pp-crop-confirm'),
+    clearBtnEl:    document.getElementById('pp-img-clear'),
+    initialUrl:    player?.imageUrl || '',
+    initialRatio:  { w: 3, h: 4 },
+    maxDisplayW:   440,
+  });
 }
-
-function _initPpCrop(dataUrl) {
-  const wrap=document.getElementById('pp-crop-wrap');
-  const canvas=document.getElementById('pp-crop-canvas');
-  if(!wrap||!canvas) return;
-  wrap.style.display='block';
-  document.getElementById('pp-crop-ok').style.display='none';
-  const img=new Image();
-  img.onload=()=>{
-    _ppCrop.img=img;_ppCrop.natW=img.naturalWidth;_ppCrop.natH=img.naturalHeight;
-    const maxW=Math.min(440,img.naturalWidth);
-    _ppCrop.dispScale=maxW/img.naturalWidth;
-    canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
-    canvas.style.width=maxW+'px';canvas.style.height=Math.round(img.naturalHeight*_ppCrop.dispScale)+'px';
-    // Ratio portrait 3:4 par défaut
-    const w=Math.round(Math.min(img.naturalWidth,img.naturalHeight*0.75));
-    const h=Math.round(w*4/3);
-    _ppCrop.cropX=Math.round((img.naturalWidth-w)/2);
-    _ppCrop.cropY=Math.round((img.naturalHeight-h)/2);
-    _ppCrop.cropW=w;_ppCrop.cropH=Math.min(h,img.naturalHeight);
-    _drawPpCrop();_bindPpCrop(canvas);
-    const prev=document.getElementById('pp-img-preview');
-    if(prev) prev.innerHTML=`<img src="${dataUrl}" style="max-height:50px;border-radius:6px;opacity:.6">
-      <div style="font-size:.68rem;color:var(--text-dim);margin-top:3px">Recadrez ci-dessous</div>`;
-  };
-  img.src=dataUrl;
-}
-function _ppHandles(){const{cropX:x,cropY:y,cropW:w,cropH:h}=_ppCrop;return[{id:'nw',x,y},{id:'n',x:x+w/2,y},{id:'ne',x:x+w,y},{id:'w',x,y:y+h/2},{id:'e',x:x+w,y:y+h/2},{id:'sw',x,y:y+h},{id:'s',x:x+w/2,y:y+h},{id:'se',x:x+w,y:y+h}];}
-function _ppHitH(nx,ny){const t=9/_ppCrop.dispScale;return _ppHandles().find(h=>Math.abs(h.x-nx)<t&&Math.abs(h.y-ny)<t)||null;}
-function _drawPpCrop(){
-  const c=document.getElementById('pp-crop-canvas');if(!c||!_ppCrop.img)return;
-  const ctx=c.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_ppCrop;
-  ctx.clearRect(0,0,natW,natH);ctx.drawImage(img,0,0,natW,natH);
-  ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,0,natW,natH);
-  ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
-  ctx.strokeStyle='var(--gold)';ctx.lineWidth=2;ctx.strokeRect(cropX,cropY,cropW,cropH);
-  ctx.fillStyle='var(--gold)';ctx.strokeStyle='#0b1118';ctx.lineWidth=1.5;
-  _ppHandles().forEach(h=>{ctx.fillRect(h.x-5,h.y-5,10,10);ctx.strokeRect(h.x-5,h.y-5,10,10);});
-}
-function _ppToN(c,cx,cy){const r=c.getBoundingClientRect();return{x:(cx-r.left)/_ppCrop.dispScale,y:(cy-r.top)/_ppCrop.dispScale};}
-function _bindPpCrop(canvas){
-  const MIN=40;
-  const onStart=(cx,cy)=>{const{x,y}=_ppToN(canvas,cx,cy),h=_ppHitH(x,y);if(h){_ppCrop.isResizing=true;_ppCrop.handle=h.id;}else{const{cropX,cropY,cropW,cropH}=_ppCrop;if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH){_ppCrop.isDragging=true;_ppCrop.startX=x-cropX;_ppCrop.startY=y-cropY;}}};
-  const onMove=(cx,cy)=>{if(!_ppCrop.isDragging&&!_ppCrop.isResizing)return;const{x,y}=_ppToN(canvas,cx,cy),{natW:W,natH:H}=_ppCrop;if(_ppCrop.isDragging){_ppCrop.cropX=Math.round(_ppc(x-_ppCrop.startX,0,W-_ppCrop.cropW));_ppCrop.cropY=Math.round(_ppc(y-_ppCrop.startY,0,H-_ppCrop.cropH));_drawPpCrop();return;}let{cropX,cropY,cropW,cropH,handle}=_ppCrop;const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropH};if(handle==='se'){cropW=_ppc(x-a.x,MIN,W-a.x);cropH=_ppc(y-a.y,MIN,H-a.y);}else if(handle==='sw'){cropW=_ppc(a.x2-x,MIN,a.x2);cropH=_ppc(y-a.y,MIN,H-a.y);cropX=a.x2-cropW;}else if(handle==='ne'){cropW=_ppc(x-a.x,MIN,W-a.x);cropH=_ppc(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}else if(handle==='nw'){cropW=_ppc(a.x2-x,MIN,a.x2);cropH=_ppc(a.y2-y,MIN,a.y2);cropX=a.x2-cropW;cropY=a.y2-cropH;}else if(handle==='e'){cropW=_ppc(x-a.x,MIN,W-a.x);}else if(handle==='w'){cropW=_ppc(a.x2-x,MIN,a.x2);cropX=a.x2-cropW;}else if(handle==='s'){cropH=_ppc(y-a.y,MIN,H-a.y);}else if(handle==='n'){cropH=_ppc(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}_ppCrop.cropX=Math.round(_ppc(cropX,0,W-MIN));_ppCrop.cropY=Math.round(_ppc(cropY,0,H-MIN));_ppCrop.cropW=Math.round(_ppc(cropW,MIN,W-_ppCrop.cropX));_ppCrop.cropH=Math.round(_ppc(cropH,MIN,H-_ppCrop.cropY));_drawPpCrop();};
-  const onEnd=()=>{_ppCrop.isDragging=false;_ppCrop.isResizing=false;_ppCrop.handle=null;};
-  canvas.addEventListener('mousedown',e=>{e.preventDefault();onStart(e.clientX,e.clientY);});
-  window.addEventListener('mousemove',e=>onMove(e.clientX,e.clientY));
-  window.addEventListener('mouseup',onEnd);
-  canvas.addEventListener('touchstart',e=>{e.preventDefault();onStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchmove',e=>{e.preventDefault();onMove(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchend',onEnd);
-}
-window._ppConfirmCrop = () => {
-  const{img,cropX,cropY,cropW,cropH}=_ppCrop;if(!img)return;
-  const TARGET=700_000;
-  const scale=cropW>1400?1400/cropW:1;
-  const out=document.createElement('canvas');out.width=Math.round(cropW*scale);out.height=Math.round(cropH*scale);
-  out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,out.width,out.height);
-  let b64;
-  for(const q of[.85,.75,.65,.55]){b64=out.toDataURL('image/jpeg',q);if(b64.length<=TARGET)break;}
-  window._ppImgBase64=b64;
-  document.getElementById('pp-crop-wrap').style.display='none';
-  const ok=document.getElementById('pp-crop-ok');
-  if(ok){ok.style.display='block';ok.textContent=`✓ Image prête (${Math.round(b64.length/1024)} KB)`;}
-  const prev=document.getElementById('pp-img-preview');
-  if(prev) prev.innerHTML=`<img src="${b64}" style="max-height:80px;border-radius:8px">`;
-};
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 async function savePlayerPresent(id='') {
   try {
-    // Image : crop > existante > effacée
-    let imageUrl='';
-    if(window._ppImgBase64!=null&&window._ppImgBase64!==undefined){
-      imageUrl=window._ppImgBase64;
-    } else if(id && !window._ppImgCleared){
-      const existing=STORE.presentations.find(p=>p.id===id);
-      imageUrl=existing?.imageUrl||'';
+    // Image : nouveau crop > existante > effacée
+    const cropResult = _ppCropper?.getResult();
+    let imageUrl = '';
+    if (typeof cropResult === 'string')      imageUrl = cropResult;
+    else if (cropResult === null)            imageUrl = '';
+    else if (id) {
+      const existing = STORE.presentations.find(p => p.id === id);
+      imageUrl = existing?.imageUrl || '';
     }
-    window._ppImgBase64=null; window._ppImgCleared=false;
+    _ppCropper?.destroy(); _ppCropper = null;
 
     const data = {
       charId:        document.getElementById('pp-char-id')?.value        || '',

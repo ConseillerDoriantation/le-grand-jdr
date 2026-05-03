@@ -24,6 +24,8 @@ import {
   multiAutocompleteHTML, initMultiAutocomplete, getMultiAutocompleteValues,
 } from '../shared/autocomplete.js';
 import { getModFromScore } from '../shared/char-stats.js';
+import { bindImageUploadDropZone } from '../shared/image-upload.js';
+import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
 // Schéma volontairement simple pour les PNJ : pas de formule équipement comme
@@ -126,6 +128,8 @@ let _organisations = [];   // [{ id, name }] — alimente la sélection Organisa
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
 let _activeId      = null;
 let _filterSearch  = '';
+let _pendingNpcImg = null;
+let _npcImgCleared = false;
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
@@ -153,6 +157,12 @@ const _getAffiniteType      = (id) => _affiniteTypes.find(t => t.id === id) || n
 const _getAffiniteTypeLabel = (id, fb = '') => _getAffiniteType(id)?.label   || fb || '';
 const _getAffiniteTypeColor = (id) => _getAffiniteType(id)?.couleur || TYPE_COLORS[0];
 const _getAffiniteTypeEmoji = (id) => _getAffiniteType(id)?.emoji   || '✨';
+// Vue résumée pour les chips d'affinité spécifique (label déjà échappé).
+const _typeView = (a) => ({
+  emoji: _getAffiniteTypeEmoji(a.typeId),
+  color: _getAffiniteTypeColor(a.typeId),
+  label: _esc(_getAffiniteTypeLabel(a.typeId, a.typeLabel)) || '—',
+});
 
 // ── Helpers affinité (mode groupe vs valeur) ─────────────────────────────────
 // En mode "valeur", le niveau est dérivé de la valeur cumulée et des seuils.
@@ -514,16 +524,14 @@ function _renderHistorique(n) {
 
 // Chip affinité spécifique — vue admin
 function _renderRelationChip(a, npcId) {
-  const emoji = _getAffiniteTypeEmoji(a.typeId);
-  const color = _getAffiniteTypeColor(a.typeId);
-  const label = _getAffiniteTypeLabel(a.typeId, a.typeLabel);
+  const { emoji, color, label } = _typeView(a);
   const noteStyle = 'font-size:.7rem;color:var(--text-muted);font-style:italic;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   return `
   <div style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;
     background:${color}12;border:1px solid ${color}30;border-radius:10px">
     <span style="font-size:1.25rem;flex-shrink:0;line-height:1">${emoji}</span>
     <div style="flex:1;min-width:0">
-      <div style="font-size:.82rem;font-weight:700;color:${color}">${_esc(label) || '—'}</div>
+      <div style="font-size:.82rem;font-weight:700;color:${color}">${label}</div>
       <div style="font-size:.73rem;color:var(--text-dim)">→ ${_esc(a.charNom || '?')}</div>
       ${a.notePublique ? `<div style="${noteStyle}">🌐 ${_esc(a.notePublique)}</div>` : ''}
       ${a.note ? `<div style="${noteStyle}">🔒 ${_esc(a.note)}</div>` : ''}
@@ -545,16 +553,14 @@ function _renderRelationChip(a, npcId) {
 
 // Chip affinité spécifique — vue joueur (sa propre relation)
 function _renderRelationChipPlayer(a) {
-  const emoji = _getAffiniteTypeEmoji(a.typeId);
-  const color = _getAffiniteTypeColor(a.typeId);
-  const label = _getAffiniteTypeLabel(a.typeId, a.typeLabel);
+  const { emoji, color, label } = _typeView(a);
   const noteStyle = 'font-size:.71rem;color:var(--text-muted);font-style:italic;margin-top:1px';
   return `
   <div style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;
     background:${color}12;border:1px solid ${color}30;border-radius:10px">
     <span style="font-size:1.25rem;flex-shrink:0;line-height:1">${emoji}</span>
     <div style="flex:1">
-      <div style="font-size:.82rem;font-weight:700;color:${color}">${_esc(label) || '—'}</div>
+      <div style="font-size:.82rem;font-weight:700;color:${color}">${label}</div>
       ${a.notePublique ? `<div style="${noteStyle}">🌐 ${_esc(a.notePublique)}</div>` : ''}
       ${a.note ? `<div style="${noteStyle}">🔒 ${_esc(a.note)}</div>` : ''}
     </div>
@@ -563,15 +569,13 @@ function _renderRelationChipPlayer(a) {
 
 // Chip affinité spécifique — vue joueur (lien d'un autre PJ, note publique uniquement)
 function _renderRelationChipPublic(a) {
-  const emoji = _getAffiniteTypeEmoji(a.typeId);
-  const color = _getAffiniteTypeColor(a.typeId);
-  const label = _getAffiniteTypeLabel(a.typeId, a.typeLabel);
+  const { emoji, color, label } = _typeView(a);
   return `
   <div style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;
     background:${color}10;border:1px solid ${color}28;border-radius:10px">
     <span style="font-size:1.2rem;flex-shrink:0;line-height:1;opacity:.85">${emoji}</span>
     <div style="flex:1;min-width:0">
-      <div style="font-size:.78rem;font-weight:600;color:${color}">${_esc(label) || '—'}
+      <div style="font-size:.78rem;font-weight:600;color:${color}">${label}
         <span style="color:var(--text-dim);font-weight:400">→ ${_esc(a.charNom || '?')}</span>
       </div>
       <div style="font-size:.71rem;color:var(--text-muted);font-style:italic;margin-top:1px">
@@ -900,21 +904,16 @@ function _renderStatsPanel(n) {
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem">${vitals}</div>
       ${hasCombat ? `
       <div style="display:grid;grid-template-columns:1.35fr 1fr .65fr;gap:.4rem;margin-top:.5rem">
+        ${[
+          ['ARME',   weapon?.nom || combat.weaponName || 'Attaque', false],
+          ['DÉGÂTS', weapon?.degats || combat.damage || '1d6',      true],
+          ['PORTÉE', combat.range ?? weapon?.portee ?? '1',         true],
+        ].map(([label, val, center]) => `
         <div style="background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18);
-          border-radius:8px;padding:.45rem .5rem">
-          <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">ARME</div>
-          <div style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px">${_esc(weapon?.nom || combat.weaponName || 'Attaque')}</div>
-        </div>
-        <div style="background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18);
-          border-radius:8px;padding:.45rem .5rem;text-align:center">
-          <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">DÉGÂTS</div>
-          <div style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px">${_esc(weapon?.degats || combat.damage || '1d6')}</div>
-        </div>
-        <div style="background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18);
-          border-radius:8px;padding:.45rem .5rem;text-align:center">
-          <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">PORTÉE</div>
-          <div style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px">${_esc(combat.range ?? weapon?.portee ?? '1')}</div>
-        </div>
+          border-radius:8px;padding:.45rem .5rem${center ? ';text-align:center' : ''}">
+          <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">${label}</div>
+          <div style="font-size:.9rem;font-weight:700;color:var(--text);margin-top:2px">${_esc(val)}</div>
+        </div>`).join('')}
       </div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.35rem;margin-top:.5rem">${statCells}</div>
     </div>`;
@@ -1139,17 +1138,9 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
                  <span style="color:var(--gold)">Cliquer</span> ou glisser une image</div>`}
         </div>
       </div>
-      <div id="npc-crop-wrap" style="display:none;margin-top:.6rem">
-        <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.35rem">
-          Recadrez — ratio 1:1</div>
-        <canvas id="npc-crop-canvas" style="display:block;width:100%;border-radius:8px;
-          cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" style="width:100%;margin-top:.4rem"
-          onclick="window._npcConfirmCrop()">✂️ Confirmer</button>
-        <div id="npc-crop-ok" style="display:none;font-size:.72rem;
-          text-align:center;margin-top:3px;color:var(--green)"></div>
-      </div>
-      ${npc?.imageUrl ? `<button type="button" onclick="window._npcClearImg()"
+      <div id="npc-crop-wrap" style="display:none;margin-top:.6rem"></div>
+      <div id="npc-crop-ok" style="display:none;font-size:.72rem;text-align:center;margin-top:3px;color:var(--green)"></div>
+      ${npc?.imageUrl ? `<button type="button" id="npc-img-clear"
         style="margin-top:.3rem;font-size:.72rem;background:none;border:none;
         cursor:pointer;color:#ff6b6b">✕ Retirer l'image</button>` : ''}
     </div>
@@ -1211,169 +1202,83 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     updateWeaponPreview(exact);
   });
 
-  // ── Setup upload + crop portrait ──────────────────────────────────────────
-  let _npcCropBase64 = null;
-  const npcFileInput = document.createElement('input');
-  npcFileInput.type = 'file'; npcFileInput.accept = 'image/*';
-  npcFileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0';
-  document.body.appendChild(npcFileInput);
+  // ── Upload → crop pan/zoom → stockage temporaire du portrait PNJ ──────────
+  const dropEl = document.getElementById('npc-img-drop');
+  const previewEl = document.getElementById('npc-img-preview');
+  const cropWrapEl = document.getElementById('npc-crop-wrap');
+  const okEl = document.getElementById('npc-crop-ok');
+  let npcCropper = null;
+  let uploadBinding = null;
+  let modalObs = null;
 
-  const handleNpcFile = (file) => {
-    if (!file?.type.startsWith('image/')) return;
-    const r = new FileReader();
-    r.onload = (e) => _initNpcCrop(e.target.result);
-    r.readAsDataURL(file);
+  const destroyNpcCropper = () => { npcCropper?.destroy(); npcCropper = null; };
+  const cleanupNpcImageUi = () => {
+    destroyNpcCropper();
+    uploadBinding?.destroy();
+    modalObs?.disconnect();
   };
-
-  npcFileInput.addEventListener('change', () => handleNpcFile(npcFileInput.files[0]));
-  const npcDrop = document.getElementById('npc-img-drop');
-  npcDrop?.addEventListener('click', () => npcFileInput.click());
-  npcDrop?.addEventListener('dragover', e => { e.preventDefault(); npcDrop.style.borderColor = 'var(--gold)'; });
-  npcDrop?.addEventListener('dragleave', () => { npcDrop.style.borderColor = 'var(--border-strong)'; });
-  npcDrop?.addEventListener('drop', e => {
-    e.preventDefault(); npcDrop.style.borderColor = 'var(--border-strong)';
-    handleNpcFile(e.dataTransfer.files[0]);
-  });
-
-  const npcObs = new MutationObserver(() => {
-    if (!document.getElementById('npc-img-drop')) { npcFileInput.remove(); npcObs.disconnect(); }
-  });
-  npcObs.observe(document.body, { childList: true, subtree: true });
-
-  // Crop 1:1
-  let _npcCrop = {
-    img: null, cropX: 0, cropY: 0, cropW: 0, cropH: 0,
-    startX: 0, startY: 0, isDragging: false, isResizing: false,
-    handle: null, natW: 0, natH: 0, dispScale: 1,
+  const showNpcCrop = (dataUrl) => {
+    if (!cropWrapEl) return;
+    destroyNpcCropper();
+    if (okEl) okEl.style.display = 'none';
+    cropWrapEl.innerHTML = `${panZoomCropHTML({ idPrefix: 'npc-crop', viewSize: 260 })}
+      <button type="button" class="btn btn-gold btn-sm" id="npc-crop-confirm"
+        style="width:100%;margin-top:.5rem">✂️ Confirmer le recadrage</button>`;
+    cropWrapEl.style.display = 'block';
+    npcCropper = attachPanZoomCrop({
+      idPrefix: 'npc-crop',
+      dataUrl,
+      viewSize: 260,
+      outputSize: 300,
+    });
+    document.getElementById('npc-crop-confirm')?.addEventListener('click', confirmNpcCrop);
+    if (previewEl) previewEl.innerHTML = `<img src="${dataUrl}" style="max-height:50px;border-radius:50%;opacity:.6">
+      <div style="font-size:.68rem;color:var(--text-dim);margin-top:3px">Recadrez ci-dessous</div>`;
   };
-  const _nc = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-  function _initNpcCrop(dataUrl) {
-    const wrap = document.getElementById('npc-crop-wrap');
-    const canvas = document.getElementById('npc-crop-canvas');
-    if (!wrap || !canvas) return;
-    wrap.style.display = 'block';
-    document.getElementById('npc-crop-ok').style.display = 'none';
-    const img = new Image();
-    img.onload = () => {
-      _npcCrop.img = img; _npcCrop.natW = img.naturalWidth; _npcCrop.natH = img.naturalHeight;
-      const maxW = Math.min(400, img.naturalWidth);
-      _npcCrop.dispScale = maxW / img.naturalWidth;
-      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-      canvas.style.width  = maxW + 'px';
-      canvas.style.height = Math.round(img.naturalHeight * _npcCrop.dispScale) + 'px';
-      const sq = Math.min(img.naturalWidth, img.naturalHeight);
-      _npcCrop.cropX = Math.round((img.naturalWidth  - sq) / 2);
-      _npcCrop.cropY = Math.round((img.naturalHeight - sq) / 2);
-      _npcCrop.cropW = sq; _npcCrop.cropH = sq;
-      _drawNpcCrop(); _bindNpcCrop(canvas);
-      const prev = document.getElementById('npc-img-preview');
-      if (prev) prev.innerHTML = `<img src="${dataUrl}" style="max-height:50px;border-radius:50%;opacity:.6">
-        <div style="font-size:.68rem;color:var(--text-dim);margin-top:3px">Recadrez ci-dessous</div>`;
-    };
-    img.src = dataUrl;
+  function confirmNpcCrop() {
+    const b64 = npcCropper?.getBase64();
+    if (!b64) return;
+    destroyNpcCropper();
+    if (cropWrapEl) cropWrapEl.style.display = 'none';
+    if (okEl) { okEl.style.display = 'block'; okEl.textContent = `✓ Portrait prêt (${Math.round(b64.length / 1024)} KB)`; }
+    if (previewEl) previewEl.innerHTML = `<img src="${b64}" style="max-height:70px;border-radius:50%;aspect-ratio:1;object-fit:cover;border:2px solid var(--gold)">`;
+    _pendingNpcImg = b64;
+    _npcImgCleared = false;
   }
-
-  function _npcHandles() {
-    const { cropX: x, cropY: y, cropW: w } = _npcCrop;
-    return [{ id: 'nw', x, y }, { id: 'ne', x: x + w, y }, { id: 'sw', x, y: y + w }, { id: 'se', x: x + w, y: y + w }];
-  }
-  function _npcHitH(nx, ny) {
-    const tol = 9 / _npcCrop.dispScale;
-    return _npcHandles().find(h => Math.abs(h.x - nx) < tol && Math.abs(h.y - ny) < tol) || null;
-  }
-  function _drawNpcCrop() {
-    const canvas = document.getElementById('npc-crop-canvas'); if (!canvas || !_npcCrop.img) return;
-    const ctx = canvas.getContext('2d'), { img, natW, natH, cropX, cropY, cropW, cropH } = _npcCrop;
-    ctx.clearRect(0, 0, natW, natH); ctx.drawImage(img, 0, 0, natW, natH);
-    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, natW, natH);
-    ctx.drawImage(img, cropX, cropY, cropW, cropH, cropX, cropY, cropW, cropH);
-    ctx.save(); ctx.beginPath();
-    ctx.arc(cropX + cropW / 2, cropY + cropH / 2, cropW / 2, 0, Math.PI * 2);
-    ctx.strokeStyle = 'var(--gold)'; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
-    ctx.fillStyle = 'var(--gold)'; ctx.strokeStyle = '#0b1118'; ctx.lineWidth = 1.5;
-    _npcHandles().forEach(h => { ctx.fillRect(h.x - 5, h.y - 5, 10, 10); ctx.strokeRect(h.x - 5, h.y - 5, 10, 10); });
-  }
-  function _npcToN(c, cx, cy) {
-    const r = c.getBoundingClientRect();
-    return { x: (cx - r.left) / _npcCrop.dispScale, y: (cy - r.top) / _npcCrop.dispScale };
-  }
-  function _bindNpcCrop(canvas) {
-    const MIN = 40;
-    const onStart = (cx, cy) => {
-      const { x, y } = _npcToN(canvas, cx, cy), h = _npcHitH(x, y);
-      if (h) { _npcCrop.isResizing = true; _npcCrop.handle = h.id; }
-      else {
-        const { cropX, cropY, cropW } = _npcCrop;
-        if (x >= cropX && x <= cropX + cropW && y >= cropY && y <= cropY + cropW) {
-          _npcCrop.isDragging = true; _npcCrop.startX = x - cropX; _npcCrop.startY = y - cropY;
-        }
-      }
-    };
-    const onMove = (cx, cy) => {
-      if (!_npcCrop.isDragging && !_npcCrop.isResizing) return;
-      const { x, y } = _npcToN(canvas, cx, cy), { natW: W, natH: H } = _npcCrop;
-      if (_npcCrop.isDragging) {
-        _npcCrop.cropX = Math.round(_nc(x - _npcCrop.startX, 0, W - _npcCrop.cropW));
-        _npcCrop.cropY = Math.round(_nc(y - _npcCrop.startY, 0, H - _npcCrop.cropH));
-        _drawNpcCrop(); return;
-      }
-      const { cropX, cropY, cropW, handle } = _npcCrop;
-      const a = { x: cropX, y: cropY, x2: cropX + cropW, y2: cropY + cropW };
-      const newW = handle === 'se' || handle === 'ne'
-        ? _nc(x - a.x, MIN, Math.min(W - a.x, H - a.y))
-        : _nc(a.x2 - x, MIN, Math.min(a.x2, a.y2));
-      if (handle === 'sw' || handle === 'nw') _npcCrop.cropX = Math.round(a.x2 - newW);
-      if (handle === 'nw' || handle === 'ne') _npcCrop.cropY = Math.round(a.y2 - newW);
-      _npcCrop.cropW = Math.round(newW); _npcCrop.cropH = Math.round(newW); _drawNpcCrop();
-    };
-    const onEnd = () => { _npcCrop.isDragging = false; _npcCrop.isResizing = false; _npcCrop.handle = null; };
-    canvas.addEventListener('mousedown', e => { e.preventDefault(); onStart(e.clientX, e.clientY); });
-    window.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
-    window.addEventListener('mouseup', onEnd);
-    canvas.addEventListener('touchstart', e => { e.preventDefault(); onStart(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
-    canvas.addEventListener('touchmove',  e => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
-    canvas.addEventListener('touchend', onEnd);
-  }
-
-  window._npcConfirmCrop = () => {
-    const { img, cropX, cropY, cropW, cropH } = _npcCrop; if (!img) return;
-    const sz = Math.min(400, cropW);
-    const out = document.createElement('canvas'); out.width = sz; out.height = sz;
-    out.getContext('2d').drawImage(img, cropX, cropY, cropW, cropH, 0, 0, sz, sz);
-    _npcCropBase64 = out.toDataURL('image/jpeg', .88);
-    document.getElementById('npc-crop-wrap').style.display = 'none';
-    const ok = document.getElementById('npc-crop-ok');
-    if (ok) { ok.style.display = 'block'; ok.textContent = `✓ Portrait prêt (${Math.round(_npcCropBase64.length / 1024)} KB)`; }
-    const prev = document.getElementById('npc-img-preview');
-    if (prev) prev.innerHTML = `<img src="${_npcCropBase64}" style="max-height:70px;border-radius:50%;aspect-ratio:1;object-fit:cover;border:2px solid var(--gold)">`;
-    window._pendingNpcImg = _npcCropBase64;
-  };
-
-  window._npcClearImg = () => {
-    window._pendingNpcImg  = '';
-    window._npcImgCleared  = true;
-    const prev = document.getElementById('npc-img-preview');
-    if (prev) prev.innerHTML = `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
+  function clearNpcImg() {
+    _pendingNpcImg = '';
+    _npcImgCleared = true;
+    destroyNpcCropper();
+    if (previewEl) previewEl.innerHTML = `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
       <div style="font-size:.75rem;color:var(--text-muted)"><span style="color:var(--gold)">Cliquer</span> ou glisser</div>`;
-    document.getElementById('npc-crop-wrap').style.display = 'none';
-  };
+    if (cropWrapEl) cropWrapEl.style.display = 'none';
+    if (okEl) okEl.style.display = 'none';
+  }
 
-  window._pendingNpcImg  = null;
-  window._npcImgCleared  = false;
+  _pendingNpcImg = null;
+  _npcImgCleared = false;
+  uploadBinding = bindImageUploadDropZone(dropEl, { onImage: ({ dataUrl }) => showNpcCrop(dataUrl) });
+  document.getElementById('npc-img-clear')?.addEventListener('click', clearNpcImg);
+
+  const overlay = document.getElementById('modal-overlay');
+  modalObs = new MutationObserver(() => {
+    if (!dropEl || !document.body.contains(dropEl) || !overlay?.classList.contains('show')) cleanupNpcImageUi();
+  });
+  modalObs.observe(document.body, { childList: true, subtree: true });
+  if (overlay) modalObs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
 }
 
 // ── Sauvegarde / suppression PNJ ─────────────────────────────────────────────
 async function saveNpc(id) {
   try {
     let imageUrl = '';
-    if (window._pendingNpcImg !== null && window._pendingNpcImg !== undefined) {
-      imageUrl = window._pendingNpcImg;
-    } else if (id && !window._npcImgCleared) {
+    if (_pendingNpcImg !== null && _pendingNpcImg !== undefined) {
+      imageUrl = _pendingNpcImg;
+    } else if (id && !_npcImgCleared) {
       imageUrl = _npcs.find(n => n.id === id)?.imageUrl || '';
     }
-    window._pendingNpcImg = null;
-    window._npcImgCleared = false;
+    _pendingNpcImg = null;
+    _npcImgCleared = false;
 
     const data = {
       nom:           document.getElementById('npc-nom')?.value?.trim()  || '?',

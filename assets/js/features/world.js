@@ -9,7 +9,7 @@ import { getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../shared/html.js';
-import { _crop, _clamp, bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop } from '../shared/image-upload.js';
+import { attachDropAndCrop } from '../shared/image-crop.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
@@ -17,15 +17,13 @@ import PAGES from './pages.js';
 let _sections     = [];
 let _activeId     = null;
 let _dragIdx      = null;
+let _wiCropper    = null;
 
 // ── Icônes disponibles ────────────────────────────────────────────────────────
 const ICONES = [
   '📖','🌍','🏔️','🌊','🏙️','🌲','⚔️','🛡️','🔮','💀',
   '👑','⚙️','🌑','☀️','🐉','🗝️','📜','🗺️','🏛️','✨',
 ];
-
-// ── Crop image (même pattern que story.js / bestiary.js) ─────────────────────
-// _crop, _clamp → gérés par shared/image-upload.js
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
@@ -326,22 +324,15 @@ window.openWorldSectionModal = (id = null) => {
       <div id="wi-img-drop" style="border:2px dashed var(--border-strong);border-radius:10px;
         padding:.85rem;text-align:center;cursor:pointer;background:var(--bg-elevated);
         transition:border-color .15s">
-        <div id="wi-img-preview">
-          ${s?.imageUrl
-            ? `<img src="${s.imageUrl}" style="max-height:70px;border-radius:6px;max-width:100%">`
-            : `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
-               <div style="font-size:.75rem;color:var(--text-muted)">
-                 <span style="color:var(--gold)">Cliquer pour choisir</span> ou glisser une image</div>`}
-        </div>
+        <div id="wi-img-preview"></div>
       </div>
       <div id="wi-crop-wrap" style="display:none;margin-top:.6rem">
         <canvas id="wi-crop-canvas" style="display:block;width:100%;border-radius:8px;
           cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" style="width:100%;margin-top:.4rem"
-          onclick="window._wiConfirmCrop()">✂️ Confirmer</button>
+        <button type="button" class="btn btn-gold btn-sm" id="wi-crop-confirm" style="width:100%;margin-top:.4rem">✂️ Confirmer</button>
         <div id="wi-crop-ok" style="display:none;font-size:.73rem;text-align:center;margin-top:3px"></div>
       </div>
-      ${s?.imageUrl ? `<button type="button" onclick="window._wiClearImg()"
+      ${s?.imageUrl ? `<button type="button" id="wi-img-clear"
         style="margin-top:.3rem;font-size:.72rem;background:none;border:none;
         cursor:pointer;color:#ff6b6b">✕ Retirer l'image</button>` : ''}
     </div>
@@ -362,30 +353,22 @@ window.openWorldSectionModal = (id = null) => {
     </div>
   `);
 
-  // Setup drop zone image
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file'; fileInput.accept = 'image/*';
-  fileInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0';
-  document.body.appendChild(fileInput);
-
-  const handleFile = file => {
-    if (!file?.type.startsWith('image/')) return;
-    const r = new FileReader();
-    r.onload = e => _initWiCrop(e.target.result);
-    r.readAsDataURL(file);
-  };
-
-  fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
-  const drop = document.getElementById('wi-img-drop');
-  drop?.addEventListener('click', () => fileInput.click());
-  drop?.addEventListener('dragover', e => { e.preventDefault(); drop.style.borderColor='var(--gold)'; });
-  drop?.addEventListener('dragleave', () => { drop.style.borderColor='var(--border-strong)'; });
-  drop?.addEventListener('drop', e => { e.preventDefault(); drop.style.borderColor='var(--border-strong)'; handleFile(e.dataTransfer.files[0]); });
-
-  const obs = new MutationObserver(() => {
-    if (!document.getElementById('wi-img-drop')) { fileInput.remove(); obs.disconnect(); }
+  // Upload + crop bannière (ratio libre, cadrage initial 16:6)
+  _wiCropper?.destroy();
+  _wiCropper = attachDropAndCrop({
+    dropEl:        document.getElementById('wi-img-drop'),
+    previewEl:     document.getElementById('wi-img-preview'),
+    cropWrapEl:    document.getElementById('wi-crop-wrap'),
+    canvasId:      'wi-crop-canvas',
+    statusEl:      document.getElementById('wi-crop-ok'),
+    confirmBtnEl:  document.getElementById('wi-crop-confirm'),
+    clearBtnEl:    document.getElementById('wi-img-clear'),
+    initialUrl:    s?.imageUrl || '',
+    initialRatio:  { w: 16, h: 6 },
+    maxDisplayW:   460,
+    previewMaxH:   70,
+    output:        { qualities: [0.82, 0.72, 0.60, 0.50] },
   });
-  obs.observe(document.body, { childList:true, subtree:true });
 };
 
 window._selectWorldIcon = (ic) => {
@@ -399,18 +382,6 @@ window._selectWorldIcon = (ic) => {
   if (inp) inp.value = ic;
 };
 
-window._wiClearImg = () => {
-  _crop.base64 = null;
-  const prev = document.getElementById('wi-img-preview');
-  if (prev) prev.innerHTML = `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
-    <div style="font-size:.75rem;color:var(--text-muted)">
-      <span style="color:var(--gold)">Cliquer pour choisir</span> ou glisser</div>`;
-  const wrap = document.getElementById('wi-crop-wrap');
-  if (wrap) wrap.style.display = 'none';
-  // Marquer l'image comme supprimée
-  window._wiImgCleared = true;
-};
-
 window.saveWorldSection = async () => {
   const titre = document.getElementById('wi-titre')?.value?.trim();
   if (!titre) { showNotif('Un titre est requis.', 'error'); return; }
@@ -421,13 +392,13 @@ window.saveWorldSection = async () => {
   const contenu = document.getElementById('wi-contenu')?.value || '';
   const hidden  = document.getElementById('wi-hidden')?.checked || false;
 
-  // Résoudre l'image
+  // Résoudre l'image : nouveau crop > existante > effacée
   const existing = _sections.find(s => s.id === id);
+  const cropResult = _wiCropper?.getResult();
   let imageUrl = existing?.imageUrl || '';
-  if (_crop.base64)               imageUrl = _crop.base64;
-  if (window._wiImgCleared)       imageUrl = '';
-  window._wiImgCleared = false;
-  _crop.base64 = null;
+  if (typeof cropResult === 'string') imageUrl = cropResult;
+  else if (cropResult === null)       imageUrl = '';
+  _wiCropper?.destroy(); _wiCropper = null;
 
   const section = { id, titre, icone, contenu, imageUrl, visible: !hidden };
 
@@ -452,87 +423,6 @@ window.deleteWorldSection = async (id) => {
   await _save();
   showNotif('Section supprimée.', 'success');
   renderWorld();
-};
-
-// ── Crop image ────────────────────────────────────────────────────────────────
-function _initWiCrop(dataUrl) {
-  const wrap   = document.getElementById('wi-crop-wrap');
-  const canvas = document.getElementById('wi-crop-canvas');
-  if (!wrap || !canvas) return;
-  _crop.base64 = null;
-  wrap.style.display = 'block';
-  document.getElementById('wi-crop-ok').style.display = 'none';
-
-  const img = new Image();
-  img.onload = () => {
-    _crop.img = img; _crop.natW = img.naturalWidth; _crop.natH = img.naturalHeight;
-    const maxW = Math.min(460, img.naturalWidth);
-    _crop.dispScale = maxW / img.naturalWidth;
-    canvas.width  = img.naturalWidth; canvas.height = img.naturalHeight;
-    canvas.style.width  = maxW + 'px';
-    canvas.style.height = Math.round(img.naturalHeight * _crop.dispScale) + 'px';
-    // Ratio 16:6 par défaut
-    const h16_6 = Math.round(img.naturalWidth * 6 / 16);
-    _crop.cropX = 0; _crop.cropY = Math.max(0, Math.round((img.naturalHeight - h16_6) / 2));
-    _crop.cropW = img.naturalWidth; _crop.cropH = Math.min(h16_6, img.naturalHeight);
-    _drawWiCrop(); _bindWiCrop(canvas);
-    const prev = document.getElementById('wi-img-preview');
-    if (prev) prev.innerHTML = `<img src="${dataUrl}" style="max-height:50px;border-radius:5px;opacity:.6">
-      <div style="font-size:.68rem;color:var(--text-dim);margin-top:3px">Recadrez ci-dessous</div>`;
-  };
-  img.src = dataUrl;
-}
-
-function _wiHandles(){const{cropX:x,cropY:y,cropW:w,cropH:h}=_crop;return[{id:'nw',x,y},{id:'n',x:x+w/2,y},{id:'ne',x:x+w,y},{id:'w',x,y:y+h/2},{id:'e',x:x+w,y:y+h/2},{id:'sw',x,y:y+h},{id:'s',x:x+w/2,y:y+h},{id:'se',x:x+w,y:y+h}];}
-function _wiHitH(nx,ny){const tol=9/_crop.dispScale;return _wiHandles().find(h=>Math.abs(h.x-nx)<tol&&Math.abs(h.y-ny)<tol)||null;}
-function _drawWiCrop(){
-  const canvas=document.getElementById('wi-crop-canvas');if(!canvas||!_crop.img) return;
-  const ctx=canvas.getContext('2d'),{img,natW,natH,cropX,cropY,cropW,cropH}=_crop;
-  ctx.clearRect(0,0,natW,natH); ctx.drawImage(img,0,0,natW,natH);
-  ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(0,0,natW,natH);
-  ctx.drawImage(img,cropX,cropY,cropW,cropH,cropX,cropY,cropW,cropH);
-  ctx.strokeStyle='var(--gold)'; ctx.lineWidth=2; ctx.strokeRect(cropX,cropY,cropW,cropH);
-  ctx.fillStyle='var(--gold)'; ctx.strokeStyle='#0b1118'; ctx.lineWidth=1.5;
-  _wiHandles().forEach(h=>{ctx.fillRect(h.x-5,h.y-5,10,10);ctx.strokeRect(h.x-5,h.y-5,10,10);});
-}
-function _wiToN(c,cx,cy){const r=c.getBoundingClientRect();return{x:(cx-r.left)/_crop.dispScale,y:(cy-r.top)/_crop.dispScale};}
-function _bindWiCrop(canvas){
-  const MIN=40;
-  const onStart=(cx,cy)=>{const{x,y}=_wiToN(canvas,cx,cy),h=_wiHitH(x,y);if(h){_crop.isResizing=true;_crop.handle=h.id;}else{const{cropX,cropY,cropW,cropH}=_crop;if(x>=cropX&&x<=cropX+cropW&&y>=cropY&&y<=cropY+cropH){_crop.isDragging=true;_crop.startX=x-cropX;_crop.startY=y-cropY;}}};
-  const onMove=(cx,cy)=>{if(!_crop.isDragging&&!_crop.isResizing)return;const{x,y}=_wiToN(canvas,cx,cy),{natW:W,natH:H}=_crop;if(_crop.isDragging){_crop.cropX=Math.round(_clamp(x-_crop.startX,0,W-_crop.cropW));_crop.cropY=Math.round(_clamp(y-_crop.startY,0,H-_crop.cropH));_drawWiCrop();return;}let{cropX,cropY,cropW,cropH,handle}=_crop;const a={x:cropX,y:cropY,x2:cropX+cropW,y2:cropY+cropH};if(handle==='se'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=_clamp(y-a.y,MIN,H-a.y);}else if(handle==='sw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=_clamp(y-a.y,MIN,H-a.y);cropX=a.x2-cropW;}else if(handle==='ne'){cropW=_clamp(x-a.x,MIN,W-a.x);cropH=_clamp(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}else if(handle==='nw'){cropW=_clamp(a.x2-x,MIN,a.x2);cropH=_clamp(a.y2-y,MIN,a.y2);cropX=a.x2-cropW;cropY=a.y2-cropH;}else if(handle==='e'){cropW=_clamp(x-a.x,MIN,W-a.x);}else if(handle==='w'){cropW=_clamp(a.x2-x,MIN,a.x2);cropX=a.x2-cropW;}else if(handle==='s'){cropH=_clamp(y-a.y,MIN,H-a.y);}else if(handle==='n'){cropH=_clamp(a.y2-y,MIN,a.y2);cropY=a.y2-cropH;}_crop.cropX=Math.round(_clamp(cropX,0,W-MIN));_crop.cropY=Math.round(_clamp(cropY,0,H-MIN));_crop.cropW=Math.round(_clamp(cropW,MIN,W-_crop.cropX));_crop.cropH=Math.round(_clamp(cropH,MIN,H-_crop.cropY));_drawWiCrop();};
-  const onEnd=()=>{_crop.isDragging=false;_crop.isResizing=false;_crop.handle=null;};
-  canvas.addEventListener('mousedown',e=>{e.preventDefault();onStart(e.clientX,e.clientY);});
-  window.addEventListener('mousemove',e=>onMove(e.clientX,e.clientY));
-  window.addEventListener('mouseup',onEnd);
-  canvas.addEventListener('touchstart',e=>{e.preventDefault();onStart(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchmove',e=>{e.preventDefault();onMove(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-  canvas.addEventListener('touchend',onEnd);
-}
-
-window._wiConfirmCrop = () => {
-  const {img,cropX,cropY,cropW,cropH} = _crop;
-  if (!img) return;
-  const statusEl = document.getElementById('wi-crop-ok');
-  if (statusEl) { statusEl.style.display='block'; statusEl.textContent='⏳ Compression…'; }
-  setTimeout(() => {
-    // Comprimer pour Firestore (~700KB max base64)
-    const TARGET = 700_000;
-    const scale  = cropW > 1400 ? 1400/cropW : 1;
-    const out    = document.createElement('canvas');
-    out.width = Math.round(cropW*scale); out.height = Math.round(cropH*scale);
-    out.getContext('2d').drawImage(img,cropX,cropY,cropW,cropH,0,0,out.width,out.height);
-    let b64;
-    for (const q of [0.82,0.72,0.60,0.50]) {
-      b64 = out.toDataURL('image/jpeg',q);
-      if (b64.length <= TARGET) break;
-    }
-    _crop.base64 = b64;
-    const wrap = document.getElementById('wi-crop-wrap');
-    if (wrap) wrap.style.display = 'none';
-    if (statusEl) { statusEl.textContent=`✓ Image prête (${Math.round(b64.length/1024)} KB)`; statusEl.style.color='var(--green)'; }
-    const prev = document.getElementById('wi-img-preview');
-    if (prev) prev.innerHTML = `<img src="${b64}" style="max-height:70px;border-radius:6px">`;
-  }, 0);
 };
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────

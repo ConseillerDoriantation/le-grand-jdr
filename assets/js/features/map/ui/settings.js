@@ -1,18 +1,18 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // Modal "Paramètres de la carte" — upload/crop de l'image de fond + nom région.
-// Réutilise les helpers `shared/image-upload.js` (comme l'ancien map.js).
+// Réutilise les helpers `shared/image-crop.js` (comme l'ancien map.js).
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { openModal, closeModalDirect } from '../../../shared/modal.js';
 import { showNotif } from '../../../shared/notifications.js';
 import { loadMap, saveMap } from '../data/maps.repo.js';
-import {
-  bindImageDropZone, confirmCanvasCrop, getCroppedBase64, resetCrop,
-} from '../../../shared/image-upload.js';
+import { attachDropAndCrop } from '../../../shared/image-crop.js';
+
+let _mapCropper = null;
 
 export async function openMapSettingsModal(onSaved) {
   const doc = await loadMap();
-  resetCrop();
+  _mapCropper?.destroy(); _mapCropper = null;
 
   openModal('⚙️ Paramètres de la carte', `
     <div class="form-group">
@@ -35,15 +35,8 @@ export async function openMapSettingsModal(onSaved) {
       <label>Ou importer un fichier <span class="map-dim map-small">(compressé automatiquement pour Firestore)</span></label>
       <div id="map-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
         padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s">
-        <div id="map-drop-preview">
-          ${doc?.imageUrl && !doc.imageUrl.startsWith('http')
-            ? `<img src="${doc.imageUrl}" style="max-height:80px;border-radius:8px;max-width:100%">`
-            : `<div style="font-size:2rem;margin-bottom:4px">🗺️</div>`}
-        </div>
-        <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">
-          Glisser ou <span style="color:var(--gold)">cliquer pour choisir</span>
-        </div>
-        <div style="font-size:.7rem;color:var(--text-dim);margin-top:2px">
+        <div id="map-drop-preview"></div>
+        <div style="font-size:.7rem;color:var(--text-dim);margin-top:4px">
           JPG · PNG · WebP — max ~1400px, compressé à 900 KB pour tenir dans Firestore
         </div>
       </div>
@@ -66,17 +59,17 @@ export async function openMapSettingsModal(onSaved) {
     </div>
   `);
 
-  bindImageDropZone({
-    dropId: 'map-drop-zone',
-    previewId: 'map-drop-preview',
-    canvasWrapId: 'map-crop-wrap',
-    canvasId: 'map-crop-canvas',
-  });
-
-  document.getElementById('map-crop-confirm')?.addEventListener('click', () => {
-    // Cible 900 KB (proche de la limite Firestore 1 MB) pour maximiser la
-    // qualité quand le MJ choisit la voie "upload" plutôt que l'URL.
-    confirmCanvasCrop('map-crop-canvas', 'map-crop-ok', 900_000);
+  // Cible 900 KB (proche de la limite Firestore 1 MB) pour maximiser la
+  // qualité quand le MJ choisit l'upload plutôt que l'URL distante.
+  _mapCropper = attachDropAndCrop({
+    dropEl:        document.getElementById('map-drop-zone'),
+    previewEl:     document.getElementById('map-drop-preview'),
+    cropWrapEl:    document.getElementById('map-crop-wrap'),
+    canvasId:      'map-crop-canvas',
+    statusEl:      document.getElementById('map-crop-ok'),
+    confirmBtnEl:  document.getElementById('map-crop-confirm'),
+    initialUrl:    doc?.imageUrl && !doc.imageUrl.startsWith('http') ? doc.imageUrl : '',
+    output:        { target: 900_000 },
   });
 
   document.getElementById('map-settings-cancel')?.addEventListener('click', () => {
@@ -86,18 +79,19 @@ export async function openMapSettingsModal(onSaved) {
   document.getElementById('map-settings-save')?.addEventListener('click', async () => {
     const regionName = document.getElementById('map-region-name')?.value?.trim() || '';
     const urlValue = document.getElementById('map-image-url')?.value?.trim() || '';
-    const cropped = getCroppedBase64();
+    const cropped = _mapCropper?.getResult();
 
     // Priorité 1 : URL explicite (qualité maximale).
     // Priorité 2 : fichier uploadé fraîchement (compressé).
     // Sinon : on ne touche pas à imageUrl (merge Firestore conserve l'existant).
     const payload = { regionName };
     if (urlValue) payload.imageUrl = urlValue;
-    else if (cropped) payload.imageUrl = cropped;
+    else if (typeof cropped === 'string') payload.imageUrl = cropped;
 
     try {
       await saveMap(payload);
       showNotif('Carte mise à jour.', 'success');
+      _mapCropper?.destroy(); _mapCropper = null;
       closeModalDirect();
       if (typeof onSaved === 'function') await onSaved();
     } catch (e) {

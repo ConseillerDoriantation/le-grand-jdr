@@ -201,7 +201,7 @@ function renderCharSheet(c, keepTab) {
     <div class="cs-id-block">
       <div class="cs-photo-wrap" id="char-photo-wrap">
         <div class="cs-photo" id="char-photo"
-             onclick="${canEdit?`openPhotoCropper('${c.id}')`:''}"
+             ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}
              style="cursor:${canEdit?'pointer':'default'}">
           ${c.photo
             ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;
@@ -212,7 +212,7 @@ function renderCharSheet(c, keepTab) {
                   ${canEdit ? '<div class="cs-photo-edit-hint">📷</div>' : ''}
                 </div>`}
         </div>
-        ${canEdit&&c.photo?`<button class="cs-photo-del" onclick="deleteCharPhoto('${c.id}')" title="Supprimer la photo">✕</button>`:''}
+        ${canEdit&&c.photo?`<button class="cs-photo-del" data-action="delete-character-photo" data-charid="${c.id}" title="Supprimer la photo">✕</button>`:''}
         <div class="cs-lv-badge">${canEdit
           ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
           : `Niv.&nbsp;${c.niveau||1}`}</div>
