@@ -106,16 +106,8 @@ function _render() {
     </div>
   </div>
 
-  ${filtered.length === 0 ? `
-    <div style="text-align:center;padding:4rem;color:var(--text-dim)">
-      <div style="font-size:3rem;margin-bottom:.75rem;opacity:.3">🐉</div>
-      <p style="font-style:italic">${_creatures.length === 0 ? 'Aucune créature dans le bestiaire.' : 'Aucun résultat.'}</p>
-      ${STATE.isAdmin && _creatures.length === 0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openBeastModal()">+ Ajouter la première créature</button>` : ''}
-    </div>
-  ` : `
   <!-- ═══ LAYOUT : grille + panneau ════════════════════════════════════════ -->
   <div class="bst-layout ${_activeId ? 'has-panel' : 'no-panel'}">
-
     <div class="bst-main">
       <div class="bst-controls">
         <!-- Filtres par type -->
@@ -165,16 +157,23 @@ function _render() {
         </div>
       </div>
 
+      ${filtered.length === 0 ? `
+        <div style="text-align:center;padding:4rem;color:var(--text-dim)">
+          <div style="font-size:3rem;margin-bottom:.75rem;opacity:.3">🐉</div>
+          <p style="font-style:italic">${_creatures.length === 0 ? 'Aucune créature dans le bestiaire.' : 'Aucun résultat pour ce filtre.'}</p>
+          ${STATE.isAdmin && _creatures.length === 0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openBeastModal()">+ Ajouter la première créature</button>` : ''}
+        </div>
+      ` : `
       <div class="bst-grid">
         ${filtered.map(c => _renderCard(c)).join('')}
       </div>
+      `}
     </div>
 
     <div class="bst-panel-slot">
       ${_activeId ? _renderPanel(_creatures.find(c => c.id === _activeId)) : ''}
     </div>
   </div>
-  `}
   </div>
   `;
 }
@@ -237,6 +236,7 @@ function _renderPanel(c) {
   const attaques = Array.isArray(c.attaques) ? c.attaques : [];
   const traits   = Array.isArray(c.traits)   ? c.traits   : [];
   const butins   = Array.isArray(c.butins)   ? c.butins   : [];
+  const description = c.description == null ? '' : String(c.description);
 
   // ── Blocs partagés MJ + Joueur ───────────────────────────────────────────
   const headerHtml = `
@@ -290,10 +290,10 @@ function _renderPanel(c) {
         </div>`).join('')}
     </div>` : '';
 
-  const descHtml = c.description ? `
+  const descHtml = description ? `
     <div class="bst-section">
       <div class="bst-section-title">📖 Description</div>
-      <div style="font-size:.82rem;color:var(--text-muted);line-height:1.7">${c.description.replace(/\n/g,'<br>')}</div>
+      <div style="font-size:.82rem;color:var(--text-muted);line-height:1.7">${_esc(description).replace(/\n/g,'<br>')}</div>
     </div>` : '';
 
   // ── Suivi combat (commun, adapté selon vue) ──────────────────────────────
@@ -819,7 +819,19 @@ function _syncActivePanel() {
   });
 
   if (panelSlot) {
-    panelSlot.innerHTML = activeCreature ? _renderPanel(activeCreature) : '';
+    try {
+      panelSlot.innerHTML = activeCreature ? _renderPanel(activeCreature) : '';
+    } catch (err) {
+      console.error('[bestiary] render panel failed:', err, activeCreature);
+      panelSlot.innerHTML = activeCreature ? `
+        <div class="bst-panel">
+          <div class="bst-section">
+            <div class="bst-section-title">Fiche creature</div>
+            <div style="font-family:'Cinzel',serif;font-size:1.1rem;color:var(--text);font-weight:700">${_esc(activeCreature.nom || 'Creature')}</div>
+            <div style="font-size:.78rem;color:var(--text-dim);margin-top:.35rem">Impossible d'afficher toutes les informations de cette creature.</div>
+          </div>
+        </div>` : '';
+    }
   }
 }
 
