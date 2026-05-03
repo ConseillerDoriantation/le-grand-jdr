@@ -160,6 +160,34 @@ function _legacyToucherTextFromData(data = {}) {
   return short ? `+${short}` : '';
 }
 
+function _getRareteNum(value) {
+  const direct = parseInt(value);
+  if (direct > 0) return direct;
+
+  const normalized = _norm(String(value || '').replace(/★/g, '').trim());
+  const byName = RARETE_NAMES.findIndex(name => _norm(name) === normalized);
+  if (byName > 0) return byName;
+
+  const stars = String(value || '').match(/★/g)?.length || 0;
+  return stars > 0 ? stars : 0;
+}
+
+function _getItemStatFilterKeys(item = {}) {
+  const keys = new Set();
+  const parsed = _parseLegacyStats(item);
+
+  ITEM_STATS.forEach(stat => {
+    if (parseInt(parsed[stat.store]) || 0) keys.add(stat.key);
+  });
+
+  _getDegatsStats(item).forEach(key => keys.add(key));
+
+  const toucherStat = _normalizeStatKey(item.toucherStat || item.toucher || item.statAttaque || '');
+  if (toucherStat) keys.add(toucherStat);
+
+  return [...keys];
+}
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ÉTAT
@@ -500,7 +528,7 @@ function _getFilteredItems(catId) {
         case 'prix_desc':
           return (parseFloat(b.prix)||0) - (parseFloat(a.prix)||0);
         case 'rarete':
-          return (parseInt(b.rarete)||0) - (parseInt(a.rarete)||0);
+          return _getRareteNum(b.rarete) - _getRareteNum(a.rarete);
         default:
           return 0;
       }
@@ -541,9 +569,9 @@ function _renderItemsView() {
       </div>
     </div>
   </div>
-  <div style="display:flex;flex-direction:column;gap:.75rem;margin-bottom:1rem">
-    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px;position:relative">
+  <div class="sh-filter-panel">
+    <div class="sh-filter-toolbar">
+      <div class="sh-filter-search">
         <input type="text" id="sh-search" class="input-field"
           placeholder="🔍 Rechercher..."
           value="${_filterSearch||''}"
@@ -561,7 +589,7 @@ function _renderItemsView() {
         <option value="prix_desc" ${_filterSort==='prix_desc'?'selected':''}>Prix ↓</option>
         <option value="rarete"    ${_filterSort==='rarete'?'selected':''}>Rareté</option>
       </select>
-      <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0">
+      <div class="sh-filter-actions">
         <span id="sh-count" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
         <button id="sh-clear-btn" onclick="shopFilterReset()"
           style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
@@ -571,23 +599,24 @@ function _renderItemsView() {
       </div>
     </div>
     ${tagGroups.length > 0 ? `
-    <div style="display:flex;flex-direction:column;gap:.4rem">
+    <div class="sh-filter-groups">
       ${tagGroups.map(group => `
-      <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-        <span style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;flex-shrink:0;min-width:70px">${group.label}</span>
+      <div class="sh-filter-group sh-filter-group--${group.key}">
+        <span class="sh-filter-label">${group.label}</span>
+        <div class="sh-filter-tags">
         ${group.tags.map(tag => {
           const active = _filterTags.has(tag.value);
           const sv = tag.value.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-          return `<button
+          return `<button class="sh-filter-chip"
             data-tag-value="${tag.value.replace(/"/g,'&quot;')}"
             data-tag-color="${tag.color}"
             onclick="shopToggleTag('${sv}')"
-            style="font-size:.72rem;border-radius:999px;padding:3px 10px;cursor:pointer;
-            border:1px solid ${active ? tag.color : 'var(--border)'};
+            style="border:1px solid ${active ? tag.color : 'var(--border)'};
             background:${active ? tag.color+'22' : 'var(--bg-elevated)'};
             color:${active ? tag.color : 'var(--text-dim)'};
             transition:all .15s;font-weight:${active?'600':'400'}">${tag.label}</button>`;
         }).join('')}
+        </div>
       </div>`).join('')}
     </div>` : ''}
   </div>
@@ -625,11 +654,10 @@ function _getItemTags(item) {
   if (item.slotBijou)  tags.add(`slotBijou:${item.slotBijou}`);
   if (item.type)       tags.add(`type:${item.type}`);
 
-  if (item.rarete) {
-    const labels = {1:'Commun',2:'Peu commun',3:'Rare',4:'Très rare'};
-    const l = labels[parseInt(item.rarete)];
-    if (l) tags.add(`rarete:${l}`);
-  }
+  _getItemStatFilterKeys(item).forEach(key => tags.add(`stat:${key}`));
+
+  const rareteNum = _getRareteNum(item.rarete);
+  if (rareteNum) tags.add(`rarete:${RARETE_NAMES[rareteNum] || String(rareteNum)}`);
 
   const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
   if (dispo !== null && dispo > 0) tags.add('dispo:En stock');
@@ -652,7 +680,27 @@ function _buildTagGroups(items) {
     mk('Type',        'type',       uniq(items.filter(i => i.type && !i.format && !i.slotArmure && !i.slotBijou).map(i => i.type)), 'var(--text-muted)'),
   ].filter(Boolean);
 
-  const raretes = uniq(items.map(i => parseInt(i.rarete)).filter(Boolean));
+  const statKeys = ITEM_STATS
+    .map(stat => stat.key)
+    .filter(key => items.some(item => _getItemStatFilterKeys(item).includes(key)));
+
+  if (statKeys.length) {
+    groups.push({
+      label: 'Stats',
+      key: 'stat',
+      tags: statKeys.map(key => {
+        const visual = _statVisual(key);
+        const stat = ITEM_STAT_BY_KEY[key];
+        return {
+          value: `stat:${key}`,
+          label: stat?.short || visual.short,
+          color: visual.color,
+        };
+      }),
+    });
+  }
+
+  const raretes = uniq(items.map(i => _getRareteNum(i.rarete)).filter(Boolean));
   if (raretes.length) {
     groups.push({
       label: 'Rareté',
@@ -811,7 +859,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
   const cat = _cats.find(c => c.id === item.categorieId);
   const edit = STATE.isAdmin;
 
-  const rareteNum = parseInt(item.rarete) || 0;
+  const rareteNum = _getRareteNum(item.rarete);
   const rareteStarsHtml = rareteNum ? _rareteStars(rareteNum) : '';
   const rareteName = rareteNum ? (RARETE_NAMES[rareteNum] || '') : '';
   const rareteColor = rareteNum > 0 ? _rareteColor(RARETE_NAMES[rareteNum]) : '';
@@ -1003,7 +1051,7 @@ function openShopItemDetail(itemId) {
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
       <div>
         <div style="font-family:'Cinzel',serif;font-size:1.15rem;font-weight:700;color:var(--text)">${_esc(item.nom)}</div>
-        <div style="font-size:.75rem;color:var(--text-dim)">${cat?.nom||''} ${item.rarete?'· '+_rareteStars(item.rarete):''}</div>
+        <div style="font-size:.75rem;color:var(--text-dim)">${cat?.nom||''} ${_getRareteNum(item.rarete)?'· '+_rareteStars(_getRareteNum(item.rarete)):''}</div>
       </div>
       <div style="text-align:right">
         <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:var(--gold)">💰 ${prix} or</div>
