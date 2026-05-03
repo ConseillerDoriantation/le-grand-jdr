@@ -128,6 +128,7 @@ let _organisations = [];   // [{ id, name }] — alimente la sélection Organisa
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
 let _activeId      = null;
 let _filterSearch  = '';
+let _activeOrgFilter = null;
 let _pendingNpcImg = null;
 let _npcImgCleared = false;
 
@@ -285,10 +286,10 @@ function _renderPage(content) {
         </button>` : ''}
       </div>
 
-      <div id="npc-list-items" style="background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-lg);overflow:hidden;
-        max-height:calc(51vh);overflow-y:auto">
-        ${_buildListHtml(filtered)}
+      <div id="npc-list-shell" class="npc-list-shell">
+        <div id="npc-list-items" class="npc-list-items" onscroll="window._npcListScrolled(this)">
+          ${_buildListHtml(filtered)}
+        </div>
       </div>
     </div>
 
@@ -297,6 +298,7 @@ function _renderPage(content) {
       ${active ? _renderFiche(active) : _renderEmpty()}
     </div>
   </div>`;
+  _scheduleNpcListScrollHint();
 }
 
 // ── Nav item ──────────────────────────────────────────────────────────────────
@@ -724,16 +726,45 @@ window.selectNpc = (id) => {
   _refreshActivePanel();
 };
 
-window._npcSearch = (val) => { _filterSearch = val; _refreshList(); };
+window._npcSearch = (val) => {
+  _filterSearch = val;
+  _refreshList({ keepScroll: false });
+};
 
-function _refreshList() {
+function _refreshList({ keepScroll = true } = {}) {
   const list = document.getElementById('npc-list-items');
   if (!list) { renderNpcs(); return; }
+  const scrollTop = keepScroll ? list.scrollTop : 0;
   list.innerHTML = _buildListHtml();
+  list.scrollTop = scrollTop;
+  _scheduleNpcListScrollHint();
 }
 
-// ── Groupement par organisation (catégories repliables) ──────────────────────
-let _collapsedOrgs = new Set();
+function _scheduleNpcListScrollHint() {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => _updateNpcListScrollHint());
+    return;
+  }
+  _updateNpcListScrollHint();
+}
+
+function _updateNpcListScrollHint(list = document.getElementById('npc-list-items')) {
+  const shell = document.getElementById('npc-list-shell');
+  if (!shell || !list) return;
+
+  const maxScroll = list.scrollHeight - list.clientHeight;
+  const canScroll = maxScroll > 4;
+  const atTop = list.scrollTop <= 2;
+  const atBottom = list.scrollTop >= maxScroll - 2;
+
+  shell.classList.toggle('is-scrollable', canScroll);
+  shell.classList.toggle('can-scroll-up', canScroll && !atTop);
+  shell.classList.toggle('can-scroll-down', canScroll && !atBottom);
+}
+
+window._npcListScrolled = (list) => _updateNpcListScrollHint(list);
+
+// ── Groupement par organisation (navigation par catégories) ──────────────────
 const NO_ORG_KEY = '__no_org__';
 
 function _groupNpcsByOrg(npcs) {
@@ -757,27 +788,81 @@ function _groupNpcsByOrg(npcs) {
   return groups;
 }
 
-function _renderNpcOrgGroup(orgName, npcs) {
+function _orgLabel(orgName) {
+  return orgName === NO_ORG_KEY ? 'Sans organisation' : orgName;
+}
+
+function _orgIcon(orgName) {
+  return orgName === NO_ORG_KEY ? '👤' : '🏛️';
+}
+
+function _visibleOrgEntries(groups) {
+  return [...groups.entries()].filter(([, items]) => items.length > 0);
+}
+
+function _renderOrgIndex(entries) {
+  const groupCount = entries.length;
+  const totalCount = entries.reduce((sum, [, items]) => sum + items.length, 0);
+  return `
+    <div class="npc-list-modebar">
+      <span>Catégories</span>
+      <span>${groupCount} groupe${groupCount > 1 ? 's' : ''} · ${totalCount} PNJ</span>
+    </div>
+    <div class="npc-org-index">
+      ${entries.map(([orgName, items]) => _renderOrgIndexItem(orgName, items)).join('')}
+    </div>`;
+}
+
+function _renderOrgIndexItem(orgName, npcs) {
   const isNoOrg   = orgName === NO_ORG_KEY;
-  const label     = isNoOrg ? 'Sans organisation' : orgName;
-  const collapsed = _collapsedOrgs.has(orgName);
-  const chev      = collapsed ? '▸' : '▾';
+  const label     = _orgLabel(orgName);
   const safeKey   = _esc(orgName);
-  const header = `<button type="button" data-org-key="${safeKey}"
-    onclick="window._npcToggleOrgGroup(this)"
-    style="display:flex;align-items:center;justify-content:space-between;width:100%;
-    padding:.5rem .85rem;background:rgba(255,255,255,.03);border:none;
-    border-top:1px solid var(--border);cursor:pointer;color:var(--text-muted);
-    font-size:.74rem;text-align:left">
-    <span style="display:flex;align-items:center;gap:.5rem">
-      <span style="font-size:.65rem;width:10px;display:inline-block">${chev}</span>
-      <span style="font-weight:600">${isNoOrg ? '👤' : '🏛️'} ${_esc(label)}</span>
+  const hasActiveNpc = _activeId && npcs.some(n => n.id === _activeId);
+
+  return `<button type="button" data-org-key="${safeKey}" title="${_esc(label)}"
+    class="npc-org-card ${hasActiveNpc ? 'is-active' : ''}"
+    onclick="window._npcSelectOrg(this)">
+    <span class="npc-org-card-main">
+      <span class="npc-org-icon">${isNoOrg ? '👤' : '🏛️'}</span>
+      <span class="npc-org-card-text">
+        <strong>${_esc(label)}</strong>
+      </span>
     </span>
-    <span style="font-size:.68rem;color:var(--text-dim);background:rgba(255,255,255,.05);
-      border-radius:999px;padding:1px 8px">${npcs.length}</span>
+    <span class="npc-org-count">${npcs.length}</span>
   </button>`;
-  const items = collapsed ? '' : npcs.map(n => _renderNavItem(n)).join('');
-  return `<div class="npc-org-group">${header}${items}</div>`;
+}
+
+function _renderOrgDrilldown(orgName, npcs) {
+  const label = _orgLabel(orgName);
+  const count = npcs.length;
+  return `
+    <div class="npc-drill-head">
+      <button type="button" class="npc-drill-back" onclick="window._npcBackToOrgs()">‹</button>
+      <span class="npc-drill-title">
+        <strong>${_orgIcon(orgName)} ${_esc(label)}</strong>
+        <small>${count} PNJ</small>
+      </span>
+    </div>
+    <div class="npc-drill-list">
+      ${npcs.map(n => _renderNavItem(n)).join('')}
+    </div>`;
+}
+
+function _renderSearchResults(entries, total) {
+  return `
+    <div class="npc-list-modebar">
+      <span>Résultats</span>
+      <span>${total} PNJ</span>
+    </div>
+    ${entries.map(([orgName, items]) => `
+      <div class="npc-search-group">
+        <div class="npc-search-group-title">
+          <span>${_orgIcon(orgName)} ${_esc(_orgLabel(orgName))}</span>
+          <span>${items.length}</span>
+        </div>
+        ${items.map(n => _renderNavItem(n)).join('')}
+      </div>
+    `).join('')}`;
 }
 
 function _buildListHtml(filtered = _getFiltered()) {
@@ -786,18 +871,28 @@ function _buildListHtml(filtered = _getFiltered()) {
         font-size:.8rem;font-style:italic">Aucun PNJ trouvé</div>`;
   }
   const groups = _groupNpcsByOrg(filtered);
-  return [...groups.entries()]
-    .filter(([, items]) => items.length > 0)
-    .map(([orgName, items]) => _renderNpcOrgGroup(orgName, items))
-    .join('');
+  const entries = _visibleOrgEntries(groups);
+  if (_filterSearch.trim()) return _renderSearchResults(entries, filtered.length);
+
+  if (_activeOrgFilter) {
+    const selected = groups.get(_activeOrgFilter) || [];
+    if (selected.length) return _renderOrgDrilldown(_activeOrgFilter, selected);
+    _activeOrgFilter = null;
+  }
+
+  return _renderOrgIndex(entries);
 }
 
-window._npcToggleOrgGroup = (btn) => {
+window._npcSelectOrg = (btn) => {
   const key = btn?.dataset?.orgKey;
   if (key == null) return;
-  if (_collapsedOrgs.has(key)) _collapsedOrgs.delete(key);
-  else _collapsedOrgs.add(key);
-  _refreshList();
+  _activeOrgFilter = key;
+  _refreshList({ keepScroll: false });
+};
+
+window._npcBackToOrgs = () => {
+  _activeOrgFilter = null;
+  _refreshList({ keepScroll: false });
 };
 
 // ── Stats : rendu (modale + fiche) ───────────────────────────────────────────
