@@ -192,7 +192,7 @@ function _renderCard(c) {
   const pvPct    = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel/pvMax*100))) : 0;
   const pvColor  = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#e8b84b' : '#ff6b6b';
 
-  return `<div class="bst-card ${isActive?'active':''}" onclick="window._bstOpen('${c.id}')">
+  return `<div class="bst-card ${isActive?'active':''}" data-beast-id="${_esc(c.id)}" onclick="window._bstOpen('${c.id}')">
     ${c.imageUrl
       ? `<img class="bst-img" src="${c.imageUrl}" alt="${c.nom||''}" loading="lazy">`
       : `<div class="bst-img-placeholder">${c.emoji||'🐲'}</div>`
@@ -803,8 +803,34 @@ async function _saveTracker() {
   } catch (e) { notifySaveError(e); }
 }
 
-window._bstOpen = (id) => { _activeId = _activeId === id ? null : id; _render(); };
-window._bstClose = () => { _activeId = null; _render(); };
+function _syncActivePanel() {
+  const page = document.querySelector('.bst-page');
+  const layout = document.querySelector('.bst-layout');
+  const panelSlot = document.querySelector('.bst-panel-slot');
+  const activeCreature = _creatures.find(c => c.id === _activeId);
+
+  page?.classList.toggle('has-panel', !!activeCreature);
+  page?.classList.toggle('no-panel', !activeCreature);
+  layout?.classList.toggle('has-panel', !!activeCreature);
+  layout?.classList.toggle('no-panel', !activeCreature);
+
+  document.querySelectorAll('.bst-card').forEach(card => {
+    card.classList.toggle('active', card.dataset.beastId === _activeId);
+  });
+
+  if (panelSlot) {
+    panelSlot.innerHTML = activeCreature ? _renderPanel(activeCreature) : '';
+  }
+}
+
+window._bstOpen = (id) => {
+  _activeId = _activeId === id ? null : id;
+  _syncActivePanel();
+};
+window._bstClose = () => {
+  _activeId = null;
+  _syncActivePanel();
+};
 window._bstSetRang = (rang) => { _filterRang = rang; _render(); };
 window._bstSelectRang = (rang) => {
   const sel = document.getElementById('bst-rang-selector');
@@ -828,7 +854,7 @@ window._bstSearchInput = (val) => {
   const fType  = (_filterType||'').toLowerCase().trim();
   const fRang  = (_filterRang||'').toLowerCase().trim();
   document.querySelectorAll('.bst-card').forEach(card => {
-    const id = card.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+    const id = card.dataset.beastId;
     const c  = _creatures.find(x => x.id === id);
     if (!c) return;
     const matchSearch = !search ||
@@ -899,7 +925,9 @@ window._bstAdjust = (id, type, delta) => {
     if (type==='pv') bar.style.background = pct>50?'#22c38e':pct>25?'#e8b84b':'#ff6b6b';
   }
   if (STATE.isAdmin && max) {
-    const cardBar = document.querySelector(`[onclick="window._bstOpen('${id}')"] .bst-track-fill`);
+    const cardBar = [...document.querySelectorAll('.bst-card')]
+      .find(card => card.dataset.beastId === id)
+      ?.querySelector('.bst-track-fill');
     if (cardBar && type==='pv') { const pct=Math.round(newVal/max*100); cardBar.style.width=pct+'%'; cardBar.style.background=pct>50?'#22c38e':pct>25?'#e8b84b':'#ff6b6b'; }
   }
   _saveTracker();
