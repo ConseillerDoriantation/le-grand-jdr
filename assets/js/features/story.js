@@ -6,7 +6,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { _esc, _nl2br } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
@@ -47,10 +47,7 @@ async function loadActes() {
 async function saveActes(list) {
   try {
     await saveDoc('story_meta','actes',{ list });
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── Groupes de participants (per-mission) ─────────────────────────────────────
@@ -1098,10 +1095,7 @@ async function saveStory(id = '') {
     closeModal();
     showNotif(id?'Mission mise à jour.':`"${titre}" ajoutée !`,'success');
     await PAGES.story();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── ÉDITER / SUPPRIMER ────────────────────────────────────────────────────────
@@ -1116,10 +1110,7 @@ async function deleteStory(id){
     await deleteFromCol('story',id);
     showNotif('Élément supprimé.','success');
     await PAGES.story();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── NOUVEL ACTE ───────────────────────────────────────────────────────────────

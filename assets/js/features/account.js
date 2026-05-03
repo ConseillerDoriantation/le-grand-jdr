@@ -20,7 +20,7 @@ import {
 } from '../data/firestore.js';
 
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif }             from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
 import { _esc, _norm }           from '../shared/html.js';
@@ -70,10 +70,7 @@ async function _liquidateInventory(inventaire = []) {
     }));
 
     return totalOr;
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 /**
@@ -94,10 +91,7 @@ async function _purgeUserCharacters(uid) {
     STATE.characters = (STATE.characters || []).filter(c => c.uid !== uid);
 
     return { nbPersos: chars.length, totalOr };
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -487,10 +481,7 @@ async function deleteCharWithRefund(charId) {
     STATE.characters = (STATE.characters||[]).filter(x => x.id !== charId);
     showNotif(`Personnage "${c.nom||'?'}" supprimé.${nbItems>0?` (${nbItems} objet${nbItems>1?'s':''} remis en stock)`:''}`, 'success');
     return true;
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

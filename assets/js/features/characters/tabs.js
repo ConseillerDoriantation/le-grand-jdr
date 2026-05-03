@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
-import { showNotif } from '../../shared/notifications.js';
+import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { modStr, _esc } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../../shared/rich-text.js';
@@ -235,10 +235,7 @@ export async function saveNote(idx) {
     c.notesList[idx].contenu = html;
     await updateInCol('characters', c.id, {notesList: c.notesList});
     showNotif('Note enregistrée !','success');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export async function deleteNote(idx) {
@@ -250,10 +247,7 @@ export async function deleteNote(idx) {
     await updateInCol('characters', c.id, {notesList: c.notesList});
     window._renderTab('notes', c, window._canEditChar);
     showNotif('Note supprimée.','success');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -394,10 +388,7 @@ export async function deleteCompteRow(type, idx) {
     await updateInCol('characters', c.id, {compte: c.compte});
     window._renderTab('compte', c, window._canEditChar);
     refreshOrDisplay(c);
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export function inlineEditCompteField(type, idx, field, el) {
@@ -563,10 +554,7 @@ export async function saveMaitrise(idx) {
     closeModal();
     showNotif(idx < 0 ? `Maîtrise "${typeArme}" ajoutée !` : 'Maîtrise mise à jour.', 'success');
     window.renderCharSheet(c, 'maitrises');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export async function deleteMaitrise(idx) {
@@ -578,10 +566,7 @@ export async function deleteMaitrise(idx) {
     await updateInCol('characters', c.id, { maitrises: c.maitrises });
     showNotif('Maîtrise supprimée.', 'success');
     window.renderCharSheet(c, 'maitrises');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── XP helpers (utilisés dans renderCharSheet header) ──────────────────────
@@ -616,10 +601,7 @@ export async function saveXpDirect(charId, input) {
     previewXpBar(input, palier);
     await updateInCol('characters', charId, {exp: val});
     showNotif('XP mis à jour !', 'success');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════

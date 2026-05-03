@@ -12,3 +12,12 @@ export function showNotif(msg, type = 'success') {
   clearTimeout(_timer);
   _timer = setTimeout(() => el.classList.remove('show'), 3000);
 }
+
+/**
+ * Loggue une erreur de sauvegarde et affiche un toast.
+ * Centralise le pattern try/catch présent dans toutes les features.
+ */
+export function notifySaveError(e, message = 'Erreur de sauvegarde. Réessaie.') {
+  console.error('[save]', e);
+  showNotif(message, 'error');
+}

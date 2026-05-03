@@ -13,7 +13,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal, pushModal, updateModalContent, confirmModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc } from '../shared/html.js';
@@ -1331,10 +1331,7 @@ async function saveNpc(id) {
     closeModal();
     _refreshActivePanel();
     _refreshList();
-  } catch (e) {
-    console.error('[saveNpc]', e);
-    showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function deleteNpc(id) {
@@ -1349,11 +1346,7 @@ async function deleteNpc(id) {
     showNotif('PNJ supprimé.', 'success');
     _renderPage(document.getElementById('main-content'));
     return true;
-  } catch (e) {
-    console.error('[deleteNpc]', e);
-    showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-    return false;
-  }
+  } catch (e) { notifySaveError(e); return false; }
 }
 
 // ── Modal affinité groupe (événement & note) ──────────────────────────────────

@@ -1,6 +1,6 @@
 import { getDocData, saveDoc } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
-import { showNotif } from '../../shared/notifications.js';
+import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../shared/damage-types.js';
 import { _esc, modStr } from '../../shared/html.js';
@@ -126,10 +126,7 @@ export async function openCombatStylesAdmin() {
   try {
     const styles = await loadCombatStyles();
     _renderCombatStylesModal(styles);
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export function _renderCombatStylesModal(styles) {

@@ -5,7 +5,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc } from '../shared/html.js';
@@ -752,10 +752,7 @@ async function saveBeast(id = '') {
     closeModal();
     showNotif(id ? `${nom} mis à jour !` : `${nom} ajouté au bestiaire !`, 'success');
     _render();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function deleteBeast(id) {
@@ -768,10 +765,7 @@ async function deleteBeast(id) {
     if (_activeId === id) _activeId = null;
     _render();
     showNotif('Créature supprimée.','success');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -781,10 +775,7 @@ async function _saveTracker() {
   try {
     const uid = STATE.user?.uid; if (!uid) return;
     await saveDoc('bestiary_tracker', uid, { data: _tracker });
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 window._bstOpen = (id) => { _activeId = _activeId === id ? null : id; _render(); };

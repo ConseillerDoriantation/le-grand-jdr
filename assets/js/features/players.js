@@ -6,7 +6,7 @@ import Sortable from '../vendor/sortable.esm.js';
 import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _trunc, _toRoman, _initials } from '../shared/html.js';
 import { getMod as _getMod, calcCA as _ca, calcPVMax as _pvMax, calcPMMax as _pmMax, calcOr as _gold, STAT_META } from '../shared/char-stats.js';
@@ -728,10 +728,7 @@ async function savePlayerPresent(id='') {
     closeModal();
     showNotif('Présentation enregistrée !','success');
     await PAGES.players();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 
@@ -742,10 +739,7 @@ async function deletePlayerPresent(id) {
     showNotif('Supprimée.','success');
     STORE.activeId='';
     await PAGES.players();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function editPlayerPresent(id) {

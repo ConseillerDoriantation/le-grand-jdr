@@ -7,7 +7,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { STATE } from '../core/state.js';
@@ -42,10 +42,7 @@ async function _load() {
 async function _save() {
   try {
     await saveDoc('world', 'main', { sections: _sections });
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── Rendu principal ───────────────────────────────────────────────────────────

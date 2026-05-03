@@ -1,6 +1,6 @@
 import { getDocData, saveDoc, loadCollection, updateInCol } from '../data/firestore.js';
 import { openModal, closeModal, closeModalDirect } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc } from '../shared/html.js';
@@ -76,10 +76,7 @@ async function _setCharOr(char, newOr) {
     }
     char.compte = compte;
     await updateInCol('characters', char.id, { compte });
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // Toutes les améliorations sont custom (créées par le MJ)
@@ -156,10 +153,7 @@ async function saveBastionInfos() {
     closeModalDirect();
     showNotif('Bastion mis à jour.','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -254,10 +248,7 @@ async function sauvegarderAmeliorationCustom(id) {
     closeModalDirect();
     showNotif(id?'Amélioration mise à jour.':'Amélioration créée !','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function supprimerAmeliorationCustom(id) {
@@ -268,10 +259,7 @@ async function supprimerAmeliorationCustom(id) {
     closeModalDirect();
     showNotif('Amélioration supprimée.','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // Débloquer manuellement (MJ) sans retirer du trésor
@@ -284,10 +272,7 @@ async function debloquerManuellement(id) {
     closeModalDirect();
     showNotif('Amélioration débloquée.','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // Investir dans une amélioration spécifique (joueur ou trésor)
@@ -385,10 +370,7 @@ async function confirmerInvestissementAmelioration(amelioId, amelioType) {
       'success'
     );
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -434,10 +416,7 @@ async function tirerEvenement() {
       : ' — Aucun fondateur';
     showNotif(`${evt.emoji} ${evt.nom} — ${brut} or brut, ${partFondateurs} or distribués${distText}`, 'success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function investirOrBastion() {
@@ -482,10 +461,7 @@ async function confirmerInvestissement() {
     closeModalDirect();
     showNotif(`+${montant} or investis dans le Bastion !`,'success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function supprimerHistorique(entryId) {
@@ -520,10 +496,7 @@ async function supprimerHistorique(entryId) {
 
     showNotif('Cycle supprimé et distributions annulées.','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -666,10 +639,7 @@ async function ouvrirInventaireBastion() {
             }).join('')}
       </div>
     `);
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // Switch onglet inventaire
@@ -812,10 +782,7 @@ async function confirmerDepotDepuisInventaire() {
     closeModalDirect();
     showNotif(`${checked.length} objet${checked.length>1?'s':''} déposé${checked.length>1?'s':''} au Bastion.`,'success');
     await ouvrirInventaireBastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function recupererObjetBastion(itemId) {
@@ -865,10 +832,7 @@ async function recupererObjetBastion(itemId) {
     await saveDoc('bastion','main', { ...current, inventaire:inv.filter(i=>i.id!==itemId), invHistorique:invHisto });
     showNotif(`${item.nom} récupéré !`,'success');
     await ouvrirInventaireBastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function supprimerObjetBastion(itemId) {
@@ -878,10 +842,7 @@ async function supprimerObjetBastion(itemId) {
     await saveDoc('bastion','main', { ...current, inventaire:(current.inventaire||[]).filter(i=>i.id!==itemId) });
     showNotif('Objet supprimé.','success');
     await ouvrirInventaireBastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // Déposer de l'or dans l'inventaire
@@ -1020,10 +981,7 @@ async function resetBastion() {
     closeModalDirect();
     showNotif('Bastion remis à zéro.', 'success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function ouvrirMissionsBastion() {
@@ -1078,10 +1036,7 @@ async function sauvegarderMissionBastion() {
     closeModalDirect();
     showNotif('Mission créée !','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function changerStatutMission(id, statut) {
@@ -1091,10 +1046,7 @@ async function changerStatutMission(id, statut) {
     closeModalDirect();
     showNotif(`Mission "${statut}".`,'success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function supprimerMissionBastion(id) {
@@ -1105,10 +1057,7 @@ async function supprimerMissionBastion(id) {
     closeModalDirect();
     showNotif('Mission supprimée.','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1132,10 +1081,7 @@ async function saveBastionLog() {
     closeModalDirect();
     showNotif('Entrée ajoutée.','success');
     await PAGES.bastion();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

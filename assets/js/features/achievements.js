@@ -8,7 +8,7 @@
 import Sortable from '../vendor/sortable.esm.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { STATE } from '../core/state.js';
 import { attachDropAndResize } from '../shared/image-crop.js';
@@ -231,10 +231,7 @@ async function saveAchievement(id = '') {
     closeModal();
     showNotif(id ? 'Haut-Fait mis à jour.' : `"${titre}" ajouté !`, 'success');
     await PAGES.achievements();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── ÉDITER ────────────────────────────────────────────────────────────────────
@@ -253,10 +250,7 @@ async function deleteAchievement(id) {
     await _saveOrder(order);
     showNotif('Haut-Fait supprimé.', 'success');
     await PAGES.achievements();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── ORDRE ─────────────────────────────────────────────────────────────────────
@@ -267,10 +261,7 @@ async function _loadOrder() {
 async function _saveOrder(order) {
   try {
     await saveDoc('achievements_meta', 'order', { order });
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 function _applyOrder(items, order) {
   if (!order.length) return items;

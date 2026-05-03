@@ -1,6 +1,6 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 
 let _cards = [];
@@ -106,10 +106,7 @@ async function toggleUnlock(id) {
 
     showNotif(card.unlocked ? 'Carte verrouillée.' : 'Carte débloquée.', 'success');
     await renderCollectionPage();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── Template modal ───────────────────────────────────────────────────────────
@@ -139,10 +136,7 @@ async function saveTemplate() {
     closeModal();
     showNotif('Template mis à jour.', 'success');
     await renderCollectionPage();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ── Modale ajout / édition ───────────────────────────────────────────────────
@@ -175,10 +169,7 @@ async function saveCard(id = '') {
     closeModal();
     showNotif('Carte enregistrée.', 'success');
     await renderCollectionPage();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 function viewCard(id) {
@@ -197,10 +188,7 @@ async function deleteCard(id) {
     await deleteFromCol('collection', id);
     showNotif('Carte supprimée.', 'success');
     await renderCollectionPage();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 Object.assign(window, {

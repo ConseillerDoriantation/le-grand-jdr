@@ -1,7 +1,7 @@
 import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { pickImageFile } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 
@@ -82,10 +82,7 @@ async function saveCroppedCharacterPhoto(charId) {
     closeModal();
     showNotif('Photo enregistrée !', 'success');
     window.renderCharSheet?.(c, window._currentCharTab || 'combat');
-  } catch (e) {
-    console.error('[saveCroppedCharacterPhoto]', e);
-    showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function deleteCharPhoto(charId) {
@@ -96,10 +93,7 @@ async function deleteCharPhoto(charId) {
     await updateInCol('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });
     showNotif('Photo supprimée.', 'success');
     window.renderCharSheet?.(c, window._currentCharTab || 'combat');
-  } catch (e) {
-    console.error('[deleteCharPhoto]', e);
-    showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 document.addEventListener('click', (e) => {

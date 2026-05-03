@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
-import { showNotif } from '../../shared/notifications.js';
+import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { computeEquipStatsBonus } from '../../shared/char-stats.js';
 import { _getTraits } from './data.js';
 
@@ -113,10 +113,7 @@ export async function equipSlotFromInv(val, slot) {
     closeModal();
     showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
     window.renderCharSheet(c, 'combat');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -445,10 +442,7 @@ export async function saveEquipSlot(slot) {
     closeModal();
     showNotif('Équipement mis à jour !','success');
     window.renderCharSheet(c,'combat');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -466,8 +460,5 @@ export async function clearEquipSlot(slot) {
     closeModal();
     showNotif('Emplacement libéré.','success');
     window.renderCharSheet(c,'combat');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }

@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
-import { showNotif } from '../../shared/notifications.js';
+import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr } from '../../shared/char-stats.js';
@@ -432,10 +432,7 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !${unequipMsg}`, 'success');
     window.refreshOrDisplay?.(c);
     window.renderCharSheet(c, window._currentCharTab || 'inventaire');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export async function sellInvItem(charId, invIndex) {
@@ -502,10 +499,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
       : '';
     showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
     window.renderCharSheet(c, window._currentCharTab || 'inventaire');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -992,10 +986,7 @@ export async function saveInvItemFromShop() {
     const panel = document.getElementById('loot-qty-panel');
     if (panel) panel.style.display = 'none';
     window._lootRenderGrid?.(window._lootCurCat, document.getElementById('loot-search')?.value || '');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export function editInvItem(idx) {
@@ -1028,8 +1019,5 @@ export async function saveInvItem(idx) {
     closeModal();
     showNotif('Inventaire mis à jour !','success');
     window.renderCharSheet(c,'inventaire');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }

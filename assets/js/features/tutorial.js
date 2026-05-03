@@ -1,6 +1,6 @@
 import { getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import PAGES from './pages.js';
 
 function getDefaultTutorial() {
@@ -46,10 +46,7 @@ async function saveTutorial() {
     closeModal();
     showNotif('Tutoriel mis à jour.', 'success');
     await PAGES.tutorial();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 Object.assign(window, { getDefaultTutorial, showTutSection, editTutorial, saveTutorial });

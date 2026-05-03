@@ -1,7 +1,7 @@
 import { STATE } from '../core/state.js';
 import { saveDoc, getDocData } from '../data/firestore.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, sanitizeRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import PAGES from './pages.js';
@@ -85,10 +85,7 @@ async function saveInfoSection(id) {
     closeModal();
     showNotif('Section mise à jour.', 'success');
     await PAGES.informations();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 function addInfoSection() {

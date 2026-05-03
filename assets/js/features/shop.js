@@ -1,7 +1,7 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModalDirect } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
@@ -1224,10 +1224,7 @@ async function confirmBuyItem(itemId, directQty) {
         pastille.classList.add('sh-wallet-or--flash');
       }
     });
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 window._restockShopItem = async (itemId) => {
@@ -1287,10 +1284,7 @@ async function sellInvItemFromShop(charId, invIndex) {
     c.compte     = { ...compte, recettes };
 
     showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 window.sellInvItemFromShop = sellInvItemFromShop;
@@ -1456,11 +1450,7 @@ function _mountSortables() {
         try {
           await Promise.all(_cats.map((cat, i) => updateInCol('shopCategories', cat.id, { ordre: i })));
           _cats.forEach((cat, i) => { cat.ordre = i; });
-        } catch (err) {
-          console.error('[sort cats]', err);
-          showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-          renderShop();
-        }
+        } catch (err) { notifySaveError(err); renderShop(); }
       },
     });
   }
@@ -1480,11 +1470,7 @@ function _mountSortables() {
         try {
           await Promise.all(visible.map((item, i) => updateInCol('shop', item.id, { ordre: i })));
           visible.forEach((item, i) => { item.ordre = i; });
-        } catch (err) {
-          console.error('[sort items]', err);
-          showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-          renderShop();
-        }
+        } catch (err) { notifySaveError(err); renderShop(); }
       },
     });
   }
@@ -1538,10 +1524,7 @@ async function saveCat(catId) {
     if(catId) await updateInCol('shopCategories',catId,data);
     else await addToCol('shopCategories',{...data,ordre:_cats.length,sousCats:[]});
     closeModalDirect(); showNotif(catId?'Catégorie mise à jour.':'Catégorie créée !','success'); renderShop();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function deleteCat(catId) {
@@ -1553,10 +1536,7 @@ async function deleteCat(catId) {
     await deleteFromCol('shopCategories',catId);
     if(_activeCat===catId){_view='home';_activeCat=null;}
     showNotif(`Catégorie et ${toDelete.length} article(s) supprimés.`,'success'); renderShop();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1599,10 +1579,7 @@ async function saveSubCat(catId,scId) {
     else sousCats.push({id:'sc_'+Date.now(),nom,emoji,image});
     await updateInCol('shopCategories',catId,{sousCats});
     closeModalDirect(); showNotif(scId?'Sous-catégorie mise à jour.':'Sous-catégorie créée !','success'); renderShop();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function deleteSubCat(catId,scId) {
@@ -1612,10 +1589,7 @@ async function deleteSubCat(catId,scId) {
     const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
     await updateInCol('shopCategories',catId,{sousCats});
     showNotif('Sous-catégorie supprimée.','success'); renderShop();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1958,10 +1932,7 @@ async function saveShopItem(itemId) {
     if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
 
     closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 /**
@@ -2032,10 +2003,7 @@ async function deleteShopItem(itemId) {
     if (!await confirmModal('Supprimer cet article ?', { title: 'Confirmation de suppression' })) return;
     await deleteFromCol('shop',itemId);
     showNotif('Article supprimé.','success'); renderShop();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 function openShopItemModal(item){ openItemModal(item?.id); }

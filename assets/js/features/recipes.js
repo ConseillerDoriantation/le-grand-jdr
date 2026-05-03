@@ -8,7 +8,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _rareteTag } from '../shared/rarity.js';
@@ -560,10 +560,7 @@ async function saveRecipe(id, fallbackType) {
     showNotif(id ? `"${nom}" mis à jour !` : `"${nom}" créé !`, 'success');
     _tab = data.type;
     _render();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -651,10 +648,7 @@ async function saveShopRecipe(id) {
     closeModal();
     showNotif('Recette mise à jour !', 'success');
     _render();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function deleteShopRecipe(id) {
@@ -672,10 +666,7 @@ async function deleteShopRecipe(id) {
 
     showNotif('Recette retirée.', 'success');
     _render();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 async function deleteRecipe(id) {
@@ -686,10 +677,7 @@ async function deleteRecipe(id) {
     _all = _all.filter(x => x.id !== id);
     showNotif('Recette supprimée.', 'success');
     _render();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -738,10 +726,7 @@ async function saveAcces(id) {
     closeModal();
     showNotif(`Accès mis à jour — ${newAcces.length} joueur${newAcces.length>1?'s':''}.`, 'success');
     _render();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -804,10 +789,7 @@ async function sendRecipe(id) {
     closeModal();
     showNotif(`"${r.nom}" transmise à ${targetName}. Tu n'y as plus accès.`, 'success');
     _render();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

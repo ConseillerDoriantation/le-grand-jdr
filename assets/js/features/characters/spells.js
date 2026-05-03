@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
-import { showNotif } from '../../shared/notifications.js';
+import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import { getMod, calcPMMax } from '../../shared/char-stats.js';
 import { loadDamageTypes, getMagicTypes } from '../../shared/damage-types.js';
@@ -57,10 +57,7 @@ export async function sortDrop(e, toIdx) {
     c.deck_sorts = sorts;
     await updateInCol('characters', c.id, {deck_sorts: sorts});
     window.renderCharSheet(c, 'sorts');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 
@@ -1114,8 +1111,5 @@ export async function saveSort(idx) {
     closeModal();
     showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
     window.renderCharSheet(c,'sorts');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }

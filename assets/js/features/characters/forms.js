@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
-import { showNotif } from '../../shared/notifications.js';
+import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
 import PAGES from '../pages.js';
 
@@ -35,10 +35,7 @@ export async function adjustStat(stat, delta, charId) {
       if(valEl){valEl.textContent=newVal;flashEl(valEl);}
       if(barEl) barEl.style.width=p+'%';
     }
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -51,10 +48,7 @@ export async function saveNotes() {
     c.notes = notes;
     await updateInCol('characters', c.id, {notes});
     showNotif('Notes sauvegardées !','success');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -68,10 +62,7 @@ export async function toggleSort(idx) {
     c.deck_sorts=sorts;
     await updateInCol('characters',c.id,{deck_sorts:sorts});
     window.renderCharSheet(c,'sorts');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -83,10 +74,7 @@ export async function toggleQuete(idx) {
     c.quetes[idx].valide=!c.quetes[idx].valide;
     await updateInCol('characters',c.id,{quetes:c.quetes});
     window.renderCharSheet(c,'quetes');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export async function deleteQuete(idx) {
@@ -95,10 +83,7 @@ export async function deleteQuete(idx) {
     c.quetes.splice(idx,1);
     await updateInCol('characters',c.id,{quetes:c.quetes});
     window.renderCharSheet(c,'quetes');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export function addQuete() {
@@ -125,10 +110,7 @@ export async function saveQuete() {
     closeModal();
     showNotif('Quête ajoutée !','success');
     window.renderCharSheet(c,'quetes');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -140,10 +122,7 @@ export async function deleteSort(idx) {
     c.deck_sorts.splice(idx,1);
     await updateInCol('characters',c.id,{deck_sorts:c.deck_sorts});
     window.renderCharSheet(c,'sorts');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export async function deleteInvItem(idx) {
@@ -152,10 +131,7 @@ export async function deleteInvItem(idx) {
     c.inventaire.splice(idx,1);
     await updateInCol('characters',c.id,{inventaire:c.inventaire});
     window.renderCharSheet(c,'inventaire');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -228,10 +204,7 @@ export async function deleteChar(id) {
 
     showNotif('Personnage supprimé.', 'success');
     PAGES.characters();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 export async function createNewChar() {
@@ -250,10 +223,7 @@ export async function createNewChar() {
     await addToCol('characters', data);
     showNotif('Personnage créé !','success');
     PAGES.characters();
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -307,10 +277,7 @@ export async function saveTitres(charId) {
     closeModal();
     window.renderCharSheet(c, window._currentCharTab);
     showNotif('Titres mis à jour !','success');
-  } catch (e) {
-    console.error('[save]', e);
-    if (window.showNotif) window.showNotif('Erreur de sauvegarde. Réessaie.', 'error');
-  }
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
