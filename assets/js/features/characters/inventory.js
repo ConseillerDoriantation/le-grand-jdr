@@ -3,6 +3,7 @@ import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
+import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr } from '../../shared/char-stats.js';
 import {
@@ -802,11 +803,11 @@ export async function addInvItem() {
 
   const RC = ['','#9ca3af','#4f8cff','#b47fff','#e8b84b'];
 
-  const getRecents = () => { try { return JSON.parse(localStorage.getItem('jdr_loot_recent')||'[]'); } catch { return []; } };
+  const getRecents = () => lsJson.get('jdr_loot_recent', []);
   window._lootSaveRecent = (id) => {
     const r = getRecents().filter(x => x !== id);
     r.unshift(id);
-    localStorage.setItem('jdr_loot_recent', JSON.stringify(r.slice(0, 8)));
+    lsJson.set('jdr_loot_recent', r.slice(0, 8));
   };
 
   const renderItems = (catId, search) => {

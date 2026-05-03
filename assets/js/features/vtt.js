@@ -19,6 +19,8 @@ import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../share
 import { showNotif } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { _esc } from '../shared/html.js';
+import { lsJson } from '../shared/local-storage.js';
+import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import PAGES from './pages.js';
 
 // ── Constantes ──────────────────────────────────────────────────────
@@ -3057,21 +3059,8 @@ async function _loadEmotes() {
   }
 }
 
-const _DICE_SKILLS_DEFAULT = [
-  { name:'Acrobaties',stat:'DEX'},{name:'Arcanes',stat:'INT'},{name:'Athlétisme',stat:'FOR'},
-  {name:'Charisme',stat:'CHA'},{name:'Combat',stat:''},{name:'Constitution',stat:'CON'},
-  {name:'Dextérité',stat:'DEX'},{name:'Discrétion',stat:'DEX'},{name:'Dressage',stat:'SAG'},
-  {name:'Force',stat:'FOR'},{name:'Histoire',stat:'INT'},{name:'Intimidation',stat:'CHA'},
-  {name:'Investigation',stat:'INT'},{name:'Intelligence',stat:'INT'},{name:'Médecine',stat:'SAG'},
-  {name:'Nature',stat:'INT'},{name:'Perception',stat:'SAG'},{name:'Perspicacité',stat:'SAG'},
-  {name:'Persuasion',stat:'CHA'},{name:'Religion',stat:'INT'},{name:'Représentation',stat:'CHA'},
-  {name:'Sagesse',stat:'SAG'},{name:'Survie',stat:'SAG'},{name:'Tromperie',stat:'CHA'},
-];
 // Initialiser immédiatement : localStorage (ordre perso) > défauts
-_diceSkills = (() => {
-  try { const s = localStorage.getItem('hist_dice_skills'); if (s) return JSON.parse(s); } catch {}
-  return [..._DICE_SKILLS_DEFAULT];
-})();
+_diceSkills = lsJson.get(DICE_SKILLS_STORAGE_KEY, [...DICE_SKILLS_DEFAULT]);
 
 async function _loadDiceSkills() {
   try {
@@ -3151,8 +3140,8 @@ function _applyEmotes(escaped) {
 }
 
 // Favoris émotes — stockés en localStorage
-const _getFavs = () => { try { return JSON.parse(localStorage.getItem('vtt-emote-favs')||'[]'); } catch { return []; } };
-const _setFavs = v => localStorage.setItem('vtt-emote-favs', JSON.stringify(v));
+const _getFavs = () => lsJson.get('vtt-emote-favs', []);
+const _setFavs = v => lsJson.set('vtt-emote-favs', v);
 
 function _emoteGridHtml(list, favSet=new Set()) {
   if (!list.length) return '<div class="vtt-emote-empty-grid">Aucune émote trouvée</div>';

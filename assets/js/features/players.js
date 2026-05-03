@@ -11,6 +11,7 @@ import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _trunc, _toRoman, _initials } from '../shared/html.js';
 import { getMod as _getMod, calcCA as _ca, calcPVMax as _pvMax, calcPMMax as _pmMax, calcOr as _gold, STAT_META } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
+import { lsJson } from '../shared/local-storage.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml, bindRichTextEditors } from '../shared/rich-text.js';
 
 // ── Couleurs de tags (même palette que tabs.js) ───────────────────────────────
@@ -43,8 +44,8 @@ const STORE = {
 
 // ── localStorage ordre (fallback hors-ligne) ──────────────────────────────────
 const _LS_KEY = 'pp-ordre';
-const _getLocalOrdre = () => { try { return JSON.parse(localStorage.getItem(_LS_KEY)||'null'); } catch { return null; } };
-const _setLocalOrdre = ids => { try { localStorage.setItem(_LS_KEY, JSON.stringify(ids)); } catch {} };
+const _getLocalOrdre = () => lsJson.get(_LS_KEY, null);
+const _setLocalOrdre = ids => lsJson.set(_LS_KEY, ids);
 
 // STAT_META → importé depuis shared/char-stats.js
 

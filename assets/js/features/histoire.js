@@ -8,6 +8,8 @@
 import { getDocData, saveDoc, loadCollection, invalidateCache } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { showNotif } from '../shared/notifications.js';
+import { lsJson } from '../shared/local-storage.js';
+import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import {
   bindRichTextEditorControls,
   countRichTextWords,
@@ -30,22 +32,6 @@ const TAG_TYPES = {
   joueur:       { label: 'Joueur',       color: '#ec4899', bg: 'rgba(236,72,153,.18)', emoji: '🎮', col: 'users'         },
 };
 
-// ── Compétences par défaut (modifiables via le panneau de gestion) ────────────
-const DICE_SKILLS_DEFAULT = [
-  { name: 'Acrobaties',     stat: 'DEX' }, { name: 'Arcanes',        stat: 'INT' },
-  { name: 'Athlétisme',     stat: 'FOR' }, { name: 'Charisme',       stat: 'CHA' },
-  { name: 'Combat',         stat: ''    }, { name: 'Constitution',   stat: 'CON' },
-  { name: 'Dextérité',      stat: 'DEX' }, { name: 'Discrétion',     stat: 'DEX' },
-  { name: 'Dressage',       stat: 'SAG' }, { name: 'Force',          stat: 'FOR' },
-  { name: 'Histoire',       stat: 'INT' }, { name: 'Intimidation',   stat: 'CHA' },
-  { name: 'Investigation',  stat: 'INT' }, { name: 'Intelligence',   stat: 'INT' },
-  { name: 'Médecine',       stat: 'SAG' }, { name: 'Nature',         stat: 'INT' },
-  { name: 'Perception',     stat: 'SAG' }, { name: 'Perspicacité',   stat: 'SAG' },
-  { name: 'Persuasion',     stat: 'CHA' }, { name: 'Religion',       stat: 'INT' },
-  { name: 'Représentation', stat: 'CHA' }, { name: 'Sagesse',        stat: 'SAG' },
-  { name: 'Survie',         stat: 'SAG' }, { name: 'Tromperie',      stat: 'CHA' },
-];
-
 const STAT_COLORS = {
   FOR: '#ef4444', DEX: '#22c38e', CON: '#f97316',
   INT: '#4f8cff', SAG: '#a78bfa', CHA: '#ec4899',
@@ -55,11 +41,7 @@ let _diceSkillsCache = null;
 
 function _getDiceSkills() {
   if (_diceSkillsCache) return _diceSkillsCache;
-  try {
-    const s = localStorage.getItem('hist_dice_skills');
-    if (s) return JSON.parse(s);
-  } catch {}
-  return DICE_SKILLS_DEFAULT;
+  return lsJson.get(DICE_SKILLS_STORAGE_KEY, DICE_SKILLS_DEFAULT);
 }
 
 async function _loadDiceSkills() {
@@ -68,10 +50,7 @@ async function _loadDiceSkills() {
     _diceSkillsCache = doc?.skills || null;
     if (!_diceSkillsCache) {
       // Pas encore en base : migrer depuis localStorage ou utiliser les défauts
-      try {
-        const s = localStorage.getItem('hist_dice_skills');
-        _diceSkillsCache = s ? JSON.parse(s) : DICE_SKILLS_DEFAULT;
-      } catch { _diceSkillsCache = DICE_SKILLS_DEFAULT; }
+      _diceSkillsCache = lsJson.get(DICE_SKILLS_STORAGE_KEY, DICE_SKILLS_DEFAULT);
     }
   } catch {
     _diceSkillsCache = _getDiceSkills();
@@ -81,7 +60,7 @@ async function _loadDiceSkills() {
 
 async function _saveDiceSkills(skills) {
   _diceSkillsCache = skills;
-  try { localStorage.setItem('hist_dice_skills', JSON.stringify(skills)); } catch {}
+  lsJson.set(DICE_SKILLS_STORAGE_KEY, skills);
   try { await saveDoc('world', 'dice_skills', { skills }); } catch {}
 }
 
