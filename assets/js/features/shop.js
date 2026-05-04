@@ -1229,7 +1229,8 @@ async function confirmBuyItem(itemId, directQty) {
       degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : (item.degatsStat ? [item.degatsStat] : []),
       toucher:item.toucher||'', toucherStat:item.toucherStat||'',
       ca:item.ca||'', stats:item.stats||'',
-      for:parseInt(item.for)||0, dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
+      fo:parseInt(item.fo ?? item.for)||0, for:parseInt(item.for ?? item.fo)||0,
+      dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
       sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
       effet:item.effet||'', description:item.description||'',
       slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
@@ -1735,7 +1736,7 @@ function _buildFieldsHtml(tpl,item) {
           </div>
           <button type="button" class="sh-dmg-add" onclick="window._shopDegatsStatAdd()">+ Mod</button>
         </div>
-        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.4rem">Ex : 2d4 + Fo + Sa pour les Bandes du moine.</div>
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.4rem">Ex : 2d4 + For + Sa pour les Bandes du moine.</div>
       </div>`;
     } else if(f.type==='stat_select'){
       const selected = _normalizeStatKey(item?.[f.id] || item?.toucher || item?.statAttaque || '');

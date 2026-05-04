@@ -12,7 +12,7 @@ import { uploadJpeg } from '../../shared/image-upload.js';
 // ══════════════════════════════════════════════
 export function renderCharCarac(c, canEdit) {
   const STATS_TAB = [
-    {key:'force',label:'Force',abbr:'Fo'},
+    {key:'force',label:'Force',abbr:'For'},
     {key:'dexterite',label:'Dextérité',abbr:'Dex'},
     {key:'constitution',label:'Constitution',abbr:'Co'},
     {key:'intelligence',label:'Intelligence',abbr:'Int'},

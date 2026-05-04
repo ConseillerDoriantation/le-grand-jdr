@@ -12,7 +12,7 @@ import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus } from '../shared/char-stats.js';
 import { getArmorSetData } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
@@ -4458,7 +4458,8 @@ window._vttLootOpenShop = async () => {
       slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
       slotBijou: item.slotBijou || '', sousType: item.sousType || '',
       portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
-      for: parseInt(item.for)||0, dex: parseInt(item.dex)||0, in: parseInt(item.in)||0,
+      fo: parseInt(item.fo ?? item.for)||0, for: parseInt(item.for ?? item.fo)||0,
+      dex: parseInt(item.dex)||0, in: parseInt(item.in)||0,
       sa: parseInt(item.sa)||0, co: parseInt(item.co)||0, ch: parseInt(item.ch)||0,
     };
     // Fusionner si même item déjà dans le stash
@@ -4529,7 +4530,8 @@ window._vttLootConfirmTake = async (id) => {
       slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
       slotBijou: item.slotBijou || '', sousType: item.sousType || '',
       portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
-      for: item.for||0, dex: item.dex||0, in: item.in||0,
+      fo: item.fo ?? item.for || 0, for: item.for ?? item.fo || 0,
+      dex: item.dex||0, in: item.in||0,
       sa: item.sa||0, co: item.co||0, ch: item.ch||0,
     });
   }
@@ -4764,9 +4766,9 @@ function _msBuildEquipItem(slot, item, invIndex) {
   const isWeapon = slot.startsWith('Main');
   const base = {
     nom: item.nom||'',
-    fo: parseInt(item.fo)||0, dex: parseInt(item.dex)||0,
-    in: parseInt(item.in)||0, sa:  parseInt(item.sa)||0,
-    co: parseInt(item.co)||0, ch:  parseInt(item.ch)||0,
+    fo: getItemStatBonus(item, 'force'), dex: getItemStatBonus(item, 'dexterite'),
+    in: getItemStatBonus(item, 'intelligence'), sa:  getItemStatBonus(item, 'sagesse'),
+    co: getItemStatBonus(item, 'constitution'), ch:  getItemStatBonus(item, 'charisme'),
     sourceInvIndex: invIndex, itemId: item.itemId||'',
   };
   if (isWeapon) {

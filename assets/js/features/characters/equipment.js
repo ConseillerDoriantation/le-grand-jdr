@@ -2,7 +2,7 @@ import { STATE } from '../../core/state.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { computeEquipStatsBonus } from '../../shared/char-stats.js';
+import { computeEquipStatsBonus, getItemStatBonus } from '../../shared/char-stats.js';
 import { _getTraits } from './data.js';
 
 // ══════════════════════════════════════════════
@@ -49,12 +49,12 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
       format: item.format || '',
       toucher: item.toucher || '',
       stats: item.stats || '',
-      fo: parseInt(item.fo) || 0,
-      dex: parseInt(item.dex) || 0,
-      in: parseInt(item.in) || 0,
-      sa: parseInt(item.sa) || 0,
-      co: parseInt(item.co) || 0,
-      ch: parseInt(item.ch) || 0,
+      fo: getItemStatBonus(item, 'force'),
+      dex: getItemStatBonus(item, 'dexterite'),
+      in: getItemStatBonus(item, 'intelligence'),
+      sa: getItemStatBonus(item, 'sagesse'),
+      co: getItemStatBonus(item, 'constitution'),
+      ch: getItemStatBonus(item, 'charisme'),
       sourceInvIndex: invIndex,
       itemId: item.itemId || '',
     };
@@ -63,12 +63,12 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
   return {
     nom: item.nom || '',
     traits: Array.isArray(item.traits) ? [...item.traits] : [],
-    fo: parseInt(item.fo) || 0,
-    dex: parseInt(item.dex) || 0,
-    in: parseInt(item.in) || 0,
-    sa: parseInt(item.sa) || 0,
-    co: parseInt(item.co) || 0,
-    ch: parseInt(item.ch) || 0,
+    fo: getItemStatBonus(item, 'force'),
+    dex: getItemStatBonus(item, 'dexterite'),
+    in: getItemStatBonus(item, 'intelligence'),
+    sa: getItemStatBonus(item, 'sagesse'),
+    co: getItemStatBonus(item, 'constitution'),
+    ch: getItemStatBonus(item, 'charisme'),
     ca: parseInt(item.ca) || 0,
     typeArmure: item.typeArmure || '',
     slotArmure: item.slotArmure ? inferArmorSlotValue(slot, item) : '',
@@ -274,12 +274,12 @@ export function editEquipSlot(slot) {
       ? [...equipped.degatsStats]
       : (equipped.degatsStat ? [equipped.degatsStat] : []),
     stats: equipped.stats || '',
-    fo: parseInt(equipped.fo) || 0,
-    dex: parseInt(equipped.dex) || 0,
-    in: parseInt(equipped.in) || 0,
-    sa: parseInt(equipped.sa) || 0,
-    co: parseInt(equipped.co) || 0,
-    ch: parseInt(equipped.ch) || 0,
+    fo: getItemStatBonus(equipped, 'force'),
+    dex: getItemStatBonus(equipped, 'dexterite'),
+    in: getItemStatBonus(equipped, 'intelligence'),
+    sa: getItemStatBonus(equipped, 'sagesse'),
+    co: getItemStatBonus(equipped, 'constitution'),
+    ch: getItemStatBonus(equipped, 'charisme'),
     typeArmure: equipped.typeArmure || '',
     slotArmure: equipped.slotArmure || '',
     slotBijou: equipped.slotBijou || '',
@@ -338,9 +338,20 @@ export function previewEquipFromInv(val, slot) {
     }
     const typeArmureEl = document.getElementById('eq-type-armure');
     if (typeArmureEl && item.typeArmure) typeArmureEl.value = item.typeArmure;
-    ['fo','dex','in','sa','co','ch'].forEach(k => {
+    const statFields = [
+      ['fo', 'force'],
+      ['dex', 'dexterite'],
+      ['in', 'intelligence'],
+      ['sa', 'sagesse'],
+      ['co', 'constitution'],
+      ['ch', 'charisme'],
+    ];
+    statFields.forEach(([k, full]) => {
       const el = document.getElementById('eq-'+k);
-      if (el && item[k] !== undefined) el.value = item[k];
+      if (el) {
+        const val = getItemStatBonus(item, full);
+        if (val !== 0 || item[k] !== undefined || (k === 'fo' && item.for !== undefined)) el.value = val;
+      }
     });
     const caEl = document.getElementById('eq-ca');
     if (caEl && item.ca) caEl.value = parseInt(item.ca)||0;

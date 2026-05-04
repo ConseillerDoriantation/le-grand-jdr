@@ -17,6 +17,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc } from '../shared/html.js';
+import { getItemStatBonus } from '../shared/char-stats.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
 import {
@@ -74,12 +75,12 @@ const _serializeShopWeapon = (item = {}) => ({
   toucher: item.toucher || '',
   particularite: item.particularite || item.effet || '',
   stats: item.stats || '',
-  fo: parseInt(item.fo) || 0,
-  dex: parseInt(item.dex) || 0,
-  in: parseInt(item.in) || 0,
-  sa: parseInt(item.sa) || 0,
-  co: parseInt(item.co) || 0,
-  ch: parseInt(item.ch) || 0,
+  fo: getItemStatBonus(item, 'force'),
+  dex: getItemStatBonus(item, 'dexterite'),
+  in: getItemStatBonus(item, 'intelligence'),
+  sa: getItemStatBonus(item, 'sagesse'),
+  co: getItemStatBonus(item, 'constitution'),
+  ch: getItemStatBonus(item, 'charisme'),
 });
 
 // ── Affinité groupe — 5 niveaux fixes ────────────────────────────────────────

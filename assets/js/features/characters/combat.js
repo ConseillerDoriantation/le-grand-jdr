@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
-import { formatItemBonusText } from '../../shared/char-stats.js';
+import { formatItemBonusText, getItemStatBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes, getMagicTypes } from '../../shared/damage-types.js';
 import {
   loadCombatStyles, detectCombatStyle,
@@ -154,12 +154,20 @@ export function renderCharEquip(c, canEdit) {
   const armorRow1 = ['Tête','Torse','Bottes'];
   const armorRow2 = ['Anneau','Amulette','Objet magique'];
   const totals = {fo:0,dex:0,in:0,sa:0,co:0,ch:0,ca:0};
-  Object.values(equip).forEach(it => Object.keys(totals).forEach(k => { totals[k]+=(it[k]||0); }));
-  const totalStr = Object.entries(totals).filter(([,v])=>v!==0).map(([k,v])=>`${k.toUpperCase()} ${v>0?'+'+v:v}`).join(' · ');
+  const statByStore = { fo:'force', dex:'dexterite', in:'intelligence', sa:'sagesse', co:'constitution', ch:'charisme' };
+  const statDisplay = { fo:'FOR', dex:'DEX', in:'IN', sa:'SA', co:'CO', ch:'CH', ca:'CA' };
+  Object.values(equip).forEach(it => {
+    Object.entries(statByStore).forEach(([store, full]) => { totals[store] += getItemStatBonus(it, full); });
+    totals.ca += parseInt(it?.ca) || 0;
+  });
+  const totalStr = Object.entries(totals).filter(([,v])=>v!==0).map(([k,v])=>`${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}`).join(' · ');
 
   const _armorCard = (slot) => {
     const item          = equip[slot]||{};
-    const bonuses       = ['fo','dex','in','sa','co','ch','ca'].filter(k=>item[k]);
+    const statBonuses   = Object.entries(statByStore)
+      .map(([store, full]) => [store, getItemStatBonus(item, full)])
+      .filter(([, val]) => val);
+    const caBonus       = parseInt(item.ca) || 0;
     const armorTypeMeta = getArmorTypeMeta(item.typeArmure || '');
     const traits        = _getTraits(item);
     return `<div class="cs-armor-card${item.nom?' cs-armor-card--on':''}">
@@ -168,9 +176,10 @@ export function renderCharEquip(c, canEdit) {
         ${canEdit?`<button class="cs-weap-edit" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
       </div>
       <span class="cs-armor-card-nom">${item.nom||'—'}</span>
-      ${armorTypeMeta.label||bonuses.length?`<div class="cs-armor-card-badges">
+      ${armorTypeMeta.label||statBonuses.length||caBonus?`<div class="cs-armor-card-badges">
         ${armorTypeMeta.label?`<span class="cs-cbadge cs-cbadge--${armorTypeMeta.tone||'dim'}">${armorTypeMeta.label}</span>`:''}
-        ${bonuses.map(k=>`<span class="cs-cbadge cs-cbadge--gold">${k.toUpperCase()} ${item[k]>0?'+'+item[k]:item[k]}</span>`).join('')}
+        ${statBonuses.map(([k, v])=>`<span class="cs-cbadge cs-cbadge--gold">${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}</span>`).join('')}
+        ${caBonus ? `<span class="cs-cbadge cs-cbadge--gold">CA ${caBonus>0?'+'+caBonus:caBonus}</span>` : ''}
       </div>`:''}
       ${traits.length?`<div class="cs-armor-card-traits">${traits.map(t=>`<span class="cs-trait">${t}</span>`).join('')}</div>`:''}
     </div>`;

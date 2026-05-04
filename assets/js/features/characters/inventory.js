@@ -63,11 +63,11 @@ export function _renderInventaireBoutique(char) {
     if (item.toucherStat) infos.push({ label: 'Toucher',    val: statShort(item.toucherStat), color: '#e8b84b' });
     else if (item.toucher) infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
     if (item.ca || item.ca === 0) infos.push({ label: '🛡️ CA', val: item.ca });
-    if (bonusText)        infos.push({ label: 'Stats',      val: bonusText,   color: '#4f8cff' });
     _getTraits(item).forEach(t => infos.push({ label: 'Trait', val: t, color: '#b47fff', italic: true }));
     if (item.type)        infos.push({ label: 'Type',       val: item.type });
     if (item.effet)       infos.push({ label: 'Effet',      val: item.effet });
     if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
+    if (bonusText)        infos.push({ label: 'Stats',      val: bonusText,   color: '#4f8cff' });
 
     return `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
@@ -159,6 +159,7 @@ function _invCategory(item) {
 // ── Chips compactes pour une ligne (max 3) ────
 function _invRowChips(item) {
   const chips = [];
+  const bonus = formatItemBonusText(item);
   if (item.degats) {
     const shs = _itemDegatsStatsShorts(item);
     chips.push({ val: shs.length ? `${item.degats}+${shs.join('+')}` : item.degats, color: '#ff6b6b' });
@@ -170,15 +171,14 @@ function _invRowChips(item) {
   if (item.slotArmure)       chips.push({ val: item.slotArmure, color: '#4f8cff' });
   else if (item.slotBijou)   chips.push({ val: item.slotBijou,  color: '#c084fc' });
   if (item.typeArmure)       chips.push({ val: item.typeArmure, color: '#22c38e' });
-  const bonus = formatItemBonusText(item);
-  if (bonus) chips.push({ val: bonus, color: '#4f8cff' });
   if (chips.length < 2 && item.sousType) chips.push({ val: item.sousType, color: '#a0aec0' });
   if (chips.length < 2 && item.format)   chips.push({ val: item.format,   color: '#a0aec0' });
   if (chips.length === 0 && item.effet)
     chips.push({ val: item.effet.length > 42 ? item.effet.slice(0,42)+'…' : item.effet, color: 'var(--text-muted)' });
   if (chips.length === 0 && item.type)
     chips.push({ val: item.type, color: 'var(--text-dim)' });
-  return chips.slice(0, 3);
+  if (!bonus) return chips.slice(0, 3);
+  return [...chips.slice(0, 2), { val: bonus, color: '#4f8cff' }];
 }
 
 export function renderCharInventaire(c, canEdit) {

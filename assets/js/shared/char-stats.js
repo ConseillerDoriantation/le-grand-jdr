@@ -15,7 +15,7 @@ export const STAT_META = [
 ];
 
 export const ITEM_STAT_META = [
-  { full: 'force',        store: 'fo',  short: 'Fo',  label: 'Force' },
+  { full: 'force',        store: 'fo',  aliases: ['for'], short: 'For', label: 'Force' },
   { full: 'dexterite',    store: 'dex', short: 'Dex', label: 'Dextérité' },
   { full: 'intelligence', store: 'in',  short: 'Int', label: 'Intelligence' },
   { full: 'sagesse',      store: 'sa',  short: 'Sag', label: 'Sagesse' },
@@ -24,11 +24,29 @@ export const ITEM_STAT_META = [
 ];
 
 export const ITEM_STAT_BY_FULL  = Object.fromEntries(ITEM_STAT_META.map(s => [s.full,  s]));
-export const ITEM_STAT_BY_STORE = Object.fromEntries(ITEM_STAT_META.map(s => [s.store, s]));
+export const ITEM_STAT_BY_STORE = Object.fromEntries(
+  ITEM_STAT_META.flatMap(s => [s.store, ...(s.aliases || [])].map(store => [store, s]))
+);
 
 /** Retourne le label court d'une stat (ex: 'dexterite' → 'Dex'). */
 export function statShort(key) {
   return ITEM_STAT_BY_FULL[key]?.short || '';
+}
+
+/**
+ * Lit un bonus de stat sur un item en acceptant les anciens alias boutique
+ * (notamment `for` pour Force) et le format canonique d'équipement (`fo`).
+ */
+export function getItemStatBonus(item = {}, statOrStore = '') {
+  const meta = ITEM_STAT_BY_FULL[statOrStore] || ITEM_STAT_BY_STORE[statOrStore];
+  if (!meta) return 0;
+  const stores = [meta.store, ...(meta.aliases || [])];
+  for (const store of stores) {
+    if (item?.[store] === undefined || item?.[store] === '') continue;
+    const val = parseInt(item[store]);
+    return Number.isNaN(val) ? 0 : val;
+  }
+  return 0;
 }
 
 // ── Calculs de base ───────────────────────────────────────────────────────────
@@ -171,11 +189,10 @@ export function getMaitriseBonus(c, item = {}) {
  */
 export function computeEquipStatsBonus(equip = {}) {
   const bonus = { force: 0, dexterite: 0, intelligence: 0, sagesse: 0, constitution: 0, charisme: 0 };
-  const MAP = { fo: 'force', dex: 'dexterite', in: 'intelligence', sa: 'sagesse', co: 'constitution', ch: 'charisme' };
   Object.values(equip).forEach(it => {
     if (!it) return;
-    Object.entries(MAP).forEach(([store, full]) => {
-      bonus[full] += parseInt(it[store]) || 0;
+    ITEM_STAT_META.forEach(meta => {
+      bonus[meta.full] += getItemStatBonus(it, meta.full);
     });
   });
   return bonus;
@@ -186,7 +203,7 @@ export function computeEquipStatsBonus(equip = {}) {
  */
 export function collectItemBonusEntries(item = {}) {
   return ITEM_STAT_META
-    .map(s => ({ meta: s, val: parseInt(item[s.store]) || 0 }))
+    .map(s => ({ meta: s, val: getItemStatBonus(item, s.full) }))
     .filter(({ val }) => val !== 0);
 }
 
