@@ -4530,7 +4530,7 @@ window._vttLootConfirmTake = async (id) => {
       slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
       slotBijou: item.slotBijou || '', sousType: item.sousType || '',
       portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
-      fo: item.fo ?? item.for || 0, for: item.for ?? item.fo || 0,
+      fo: (item.fo ?? item.for) || 0, for: (item.for ?? item.fo) || 0,
       dex: item.dex||0, in: item.in||0,
       sa: item.sa||0, co: item.co||0, ch: item.ch||0,
     });
