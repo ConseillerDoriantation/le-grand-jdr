@@ -12,7 +12,7 @@
 // <g data-scale>, au lieu de régénérer tout l'innerHTML à chaque zoom.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { state, emit, getTypeMeta, getOrgsOfPlace, getMarkerScale } from '../map.state.js';
+import { state, emit, getTypeMeta, getOrgsOfPlace, getMarkerScale, placeMatchesSearch } from '../map.state.js';
 import { getImageSize } from './viewport.js';
 import { STATE } from '../../../core/state.js';
 import { _esc } from '../../../shared/html.js';
@@ -59,11 +59,7 @@ function isVisible(place) {
 
   if (state.filters.types.size && !state.filters.types.has(place.type)) return false;
 
-  const q = (state.filters.query || '').trim().toLowerCase();
-  if (q) {
-    const hay = `${place.name} ${place.summary} ${(place.tags || []).join(' ')}`.toLowerCase();
-    if (!hay.includes(q)) return false;
-  }
+  if (!placeMatchesSearch(place, state.filters.query)) return false;
   return true;
 }
 

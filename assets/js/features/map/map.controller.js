@@ -4,7 +4,7 @@
 // Les autres modules ne communiquent que via map.state (pub/sub).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { state, emit, on, resetListeners, getPlaceById, getOrgById } from './map.state.js';
+import { state, emit, on, resetListeners, getPlaceById, getOrgById, placeMatchesSearch } from './map.state.js';
 
 // Data
 import { listPlaceTypes } from './data/types.repo.js';
@@ -185,10 +185,7 @@ function wireSearch(container) {
       emit('filters:changed');
       // Si un seul résultat matche un lieu, on le sélectionne
       if (state.filters.query.length >= 2) {
-        const q = state.filters.query.toLowerCase();
-        const hit = state.places.find(p =>
-          p.name.toLowerCase().includes(q) ||
-          (p.tags || []).some(t => t.toLowerCase().includes(q)));
+        const hit = state.places.find(p => placeMatchesSearch(p, state.filters.query));
         if (hit) {
           state.selection = { kind: 'place', id: hit.id };
           emit('selection:changed');

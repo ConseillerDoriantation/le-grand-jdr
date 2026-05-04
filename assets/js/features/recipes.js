@@ -12,7 +12,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _rareteTag } from '../shared/rarity.js';
-import { _esc, _norm } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
 let _all        = [];
@@ -70,6 +70,36 @@ function _findRaw(id) {
   return _all.find(x => x.id === id) || _shopItems.find(i => i.id === id) || null;
 }
 function _isShopItem(id) { return _shopItems.some(i => i.id === id); }
+
+function _recipeSearchText(r = {}) {
+  const ingredientText = Array.isArray(r.ingredients)
+    ? r.ingredients.map(ig => [ig.nom, ig.quantite].filter(Boolean).join(' ')).join(' ')
+    : '';
+  const tabLabel = TABS.find(t => t.id === r.type)?.label || '';
+  return _norm([
+    r.nom,
+    r.type,
+    tabLabel,
+    r.famille,
+    r.duree,
+    r.description,
+    r.effet,
+    r.format,
+    r.typeObjet,
+    r.typeArmure,
+    r.atelierReq,
+    r.ingredients_texte,
+    ingredientText,
+  ].filter(Boolean).join(' '));
+}
+
+function _filterRecipesBySearch(recipes) {
+  const q = _norm(_filterTxt);
+  return recipes.filter(r => {
+    if (!q) return r.type === _tab;
+    return _searchIncludes(_recipeSearchText(r), _filterTxt);
+  });
+}
 
 // ── Conversion item boutique → recette ───────────────────────────────────────
 function _shopItemAtelierReq(item, type) {
@@ -159,14 +189,7 @@ function _render() {
   const visible  = _visible();
   const tabInfo  = TABS.find(t => t.id === _tab) || TABS[0];
 
-  const filtered = visible.filter(r => {
-    if (r.type !== _tab) return false;
-    if (!_filterTxt) return true;
-    const s = _filterTxt.toLowerCase();
-    return (r.nom||'').toLowerCase().includes(s)
-        || (r.description||'').toLowerCase().includes(s)
-        || (r.effet||'').toLowerCase().includes(s);
-  });
+  const filtered = _filterRecipesBySearch(visible);
 
   // Compteurs par onglet
   const counts = {};
@@ -272,14 +295,7 @@ function _renderGrid() {
   const visible = _visible();
   const tabInfo = TABS.find(t => t.id === _tab) || TABS[0];
   const borderColor = { cuisine:'#e8b84b', potion:'#22c38e', arme:'#ff6b6b', armure:'#4f8cff', bijou:'#c084fc' };
-  const filtered = visible.filter(r => {
-    if (r.type !== _tab) return false;
-    if (!_filterTxt) return true;
-    const s = _filterTxt.toLowerCase();
-    return (r.nom||'').toLowerCase().includes(s)
-        || (r.description||'').toLowerCase().includes(s)
-        || (r.effet||'').toLowerCase().includes(s);
-  });
+  const filtered = _filterRecipesBySearch(visible);
   wrap.innerHTML = _gridHtml(filtered, tabInfo, visible, borderColor);
 }
 

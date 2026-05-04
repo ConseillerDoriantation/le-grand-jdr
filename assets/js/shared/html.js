@@ -31,8 +31,25 @@ export function _norm(v = '') {
   return String(v || '')
     .trim()
     .toLowerCase()
+    .replace(/œ/g, 'oe')
+    .replace(/æ/g, 'ae')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
+}
+
+function _normLoose(v = '') {
+  return _norm(v).replace(/([aeiouy])\1+/g, '$1');
+}
+
+/**
+ * Recherche insensible à la casse, aux accents, aux ligatures et aux doubles voyelles.
+ */
+export function _searchIncludes(text = '', query = '') {
+  const q = _norm(query);
+  if (!q) return true;
+  const hay = _norm(text);
+  if (hay.includes(q)) return true;
+  return _normLoose(hay).includes(_normLoose(q));
 }
 
 /**

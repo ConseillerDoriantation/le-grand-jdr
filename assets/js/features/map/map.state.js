@@ -3,6 +3,8 @@
 // Aucun module ne doit muter directement window/globals : tout passe par ici.
 // ══════════════════════════════════════════════════════════════════════════════
 
+import { _norm, _searchIncludes } from '../../shared/html.js';
+
 const listeners = new Map();
 
 export const state = {
@@ -52,6 +54,43 @@ export const getOrgsOfPlace = placeId =>
 export function getTypeMeta(typeId) {
   return state.types.find(t => t.id === typeId)
     || { id: typeId, label: typeId || 'Inconnu', icon: '📍', color: '#888' };
+}
+
+function searchPart(value) {
+  if (Array.isArray(value)) return value.map(searchPart).join(' ');
+  if (value && typeof value === 'object') return Object.values(value).map(searchPart).join(' ');
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function organizationSearchText(org = {}) {
+  return _norm([
+    org.name,
+    org.category,
+    org.summary,
+    org.description,
+    org.tags,
+    org.meta,
+  ].map(searchPart).join(' '));
+}
+
+function placeSearchText(place = {}) {
+  const type = getTypeMeta(place.type);
+  const orgs = getOrgsOfPlace(place.id).map(organizationSearchText);
+  return _norm([
+    place.name,
+    place.type,
+    type.label,
+    type.icon,
+    place.summary,
+    place.description,
+    place.tags,
+    place.meta,
+    orgs,
+  ].map(searchPart).join(' '));
+}
+
+export function placeMatchesSearch(place, query) {
+  return _searchIncludes(placeSearchText(place), query);
 }
 
 // Facteur de contre-zoom appliqué aux éléments qui doivent rester lisibles

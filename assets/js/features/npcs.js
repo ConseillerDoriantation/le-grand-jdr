@@ -16,7 +16,7 @@ import { openModal, closeModal, pushModal, updateModalContent, confirmModal } fr
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
-import { _esc } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { getItemStatBonus } from '../shared/char-stats.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
@@ -59,6 +59,22 @@ const _npcCombat = (npc) => ({ ...NPC_COMBAT_DEFAULT, ...(npc?.combat || {}) });
 const _isShopWeapon = (item = {}) => item.template === 'arme' || item.degats;
 const _weaponLabel = (item = {}) => [item.nom, item.sousType || item.typeArme].filter(Boolean).join(' · ');
 const _weaponByLabel = (label) => _shopWeapons.find(w => _weaponLabel(w) === label) || null;
+const _searchPart = (value) => {
+  if (Array.isArray(value)) return value.map(_searchPart).join(' ');
+  if (value && typeof value === 'object') return Object.values(value).map(_searchPart).join(' ');
+  return value === null || value === undefined ? '' : String(value);
+};
+const _npcSearchText = (n = {}) => _norm([
+  n.nom,
+  n.role,
+  n.lieu,
+  n.organisations,
+  n.description,
+  n.combat?.weaponName,
+  n.combat?.weapon,
+  n.combat?.damage,
+].map(_searchPart).join(' '));
+const _npcMatchesSearch = (n, query) => _searchIncludes(_npcSearchText(n), query);
 const _serializeShopWeapon = (item = {}) => ({
   itemId: item.id || item.itemId || '',
   nom: item.nom || '',
@@ -710,13 +726,7 @@ function _renderEmpty() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function _getFiltered() {
-  return _npcs.filter(n => {
-    if (_filterSearch) {
-      const s = _filterSearch.toLowerCase();
-      return (n.nom || '').toLowerCase().includes(s) || (n.role || '').toLowerCase().includes(s);
-    }
-    return true;
-  });
+  return _npcs.filter(n => _npcMatchesSearch(n, _filterSearch));
 }
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────
@@ -1059,13 +1069,7 @@ function _renderMjStatsRow(n) {
 let _mjFilter = '';
 
 function _mjFilteredNpcs() {
-  const q = _mjFilter.trim().toLowerCase();
-  if (!q) return _npcs;
-  return _npcs.filter(n => {
-    if ((n.nom || '').toLowerCase().includes(q)) return true;
-    const orgs = Array.isArray(n.organisations) ? n.organisations : [];
-    return orgs.some(o => (o || '').toLowerCase().includes(q));
-  });
+  return _npcs.filter(n => _npcMatchesSearch(n, _mjFilter));
 }
 
 function _renderMjStatsTbody() {

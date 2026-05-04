@@ -8,7 +8,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
-import { _esc } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 
 // ── État local ────────────────────────────────────────────────────────────────
@@ -26,6 +26,42 @@ const RANG_STYLE = {
   elite:     { label:'Élite',     color:'#e8b84b',         border:'rgba(232,184,75,.4)',      bg:'rgba(232,184,75,.12)' },
   boss:      { label:'Boss',      color:'#ff6b6b',         border:'rgba(255,107,107,.4)',     bg:'rgba(255,107,107,.12)' },
 };
+
+function _beastSearchText(c = {}) {
+  const attaques = Array.isArray(c.attaques)
+    ? c.attaques.map(a => [a.nom, a.toucher, a.degats, a.portee, a.description].filter(Boolean).join(' ')).join(' ')
+    : '';
+  const traits = Array.isArray(c.traits)
+    ? c.traits.map(t => [t.nom, t.description].filter(Boolean).join(' ')).join(' ')
+    : '';
+  const butins = Array.isArray(c.butins)
+    ? c.butins.map(b => [b.nom, b.quantite, b.chance].filter(Boolean).join(' ')).join(' ')
+    : '';
+
+  return _norm([
+    c.nom,
+    c.type,
+    c.environnement,
+    c.description,
+    c.emoji,
+    c.rang,
+    c.niveau,
+    c.dangerositeXp,
+    attaques,
+    traits,
+    butins,
+  ].filter(v => v !== undefined && v !== null && v !== '').join(' '));
+}
+
+function _beastMatchesFilters(c, { search = _searchVal, type = _filterType, rang = _filterRang } = {}) {
+  const q = _norm(search);
+  const fType = _norm(type);
+  const fRang = _norm(rang);
+  const matchSearch = !q || _searchIncludes(_beastSearchText(c), search);
+  const matchType = !fType || _norm(c.type) === fType;
+  const matchRang = !fRang || _norm(c.rang || 'classique') === fRang;
+  return matchSearch && matchType && matchRang;
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU PRINCIPAL
@@ -59,22 +95,11 @@ async function renderBestiary() {
 
 function _render() {
   const content = document.getElementById('main-content');
-  const search  = (_searchVal||'').toLowerCase().trim();
-  const fType   = (_filterType||'').toLowerCase().trim();
-  const fRang   = (_filterRang||'').toLowerCase().trim();
 
   // Collecter tous les types distincts pour les boutons de filtre
   const allTypes = [...new Set(_creatures.map(c => c.type||'').filter(Boolean))].sort();
 
-  const filtered = _creatures.filter(c => {
-    const matchSearch = !search ||
-      (c.nom||'').toLowerCase().includes(search) ||
-      (c.type||'').toLowerCase().includes(search) ||
-      (c.environnement||'').toLowerCase().includes(search);
-    const matchType = !fType || (c.type||'').toLowerCase() === fType;
-    const matchRang = !fRang || (c.rang||'classique').toLowerCase() === fRang;
-    return matchSearch && matchType && matchRang;
-  });
+  const filtered = _creatures.filter(c => _beastMatchesFilters(c));
 
   content.innerHTML = `
   <div class="bst-page ${_activeId ? 'has-panel' : 'no-panel'}">
@@ -123,10 +148,10 @@ function _render() {
           ${allTypes.map(t => `
           <button onclick="window._bstSetType('${t.replace(/'/g,"\\'")}')"
             style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-            border:1px solid ${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--border)'};
-            background:${(_filterType||'').toLowerCase()===t.toLowerCase()?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-            color:${(_filterType||'').toLowerCase()===t.toLowerCase()?'var(--gold)':'var(--text-dim)'};
-            font-weight:${(_filterType||'').toLowerCase()===t.toLowerCase()?'700':'400'}">
+            border:1px solid ${_norm(_filterType)===_norm(t)?'var(--gold)':'var(--border)'};
+            background:${_norm(_filterType)===_norm(t)?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
+            color:${_norm(_filterType)===_norm(t)?'var(--gold)':'var(--text-dim)'};
+            font-weight:${_norm(_filterType)===_norm(t)?'700':'400'}">
             ${t}
           </button>`).join('')}
         </div>` : ''}
@@ -862,20 +887,11 @@ window._bstSelectRang = (rang) => {
 window._bstSearchInput = (val) => {
   _searchVal = val;
   // Filtrer en live sans reconstruire toute la page
-  const search = val.toLowerCase().trim();
-  const fType  = (_filterType||'').toLowerCase().trim();
-  const fRang  = (_filterRang||'').toLowerCase().trim();
   document.querySelectorAll('.bst-card').forEach(card => {
     const id = card.dataset.beastId;
     const c  = _creatures.find(x => x.id === id);
     if (!c) return;
-    const matchSearch = !search ||
-      (c.nom||'').toLowerCase().includes(search) ||
-      (c.type||'').toLowerCase().includes(search) ||
-      (c.environnement||'').toLowerCase().includes(search);
-    const matchType = !fType || (c.type||'').toLowerCase() === fType;
-    const matchRang = !fRang || (c.rang||'classique').toLowerCase() === fRang;
-    card.style.display = (matchSearch && matchType && matchRang) ? '' : 'none';
+    card.style.display = _beastMatchesFilters(c, { search: val }) ? '' : 'none';
   });
 };
 

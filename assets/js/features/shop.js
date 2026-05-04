@@ -3,7 +3,7 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/fi
 import { openModal, closeModalDirect } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
-import { _esc, _norm } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
@@ -476,19 +476,29 @@ function _getBaseItems(catId) {
     : _items.filter(i => i.categorieId === catId);
 }
 
+function _itemSearchText(item = {}) {
+  return _norm([
+    item.nom,
+    item.type,
+    item.sousType,
+    item.categorie,
+    item.format,
+    item.slotArmure,
+    item.typeArmure,
+    item.slotBijou,
+    item.description,
+    item.effet,
+    ...(Array.isArray(item.traits) ? item.traits : []),
+  ].filter(Boolean).join(' '));
+}
+
 function _getFilteredItems(catId) {
   let items = _getBaseItems(catId);
 
   // 🔎 Recherche
-  const search = (_filterSearch || '').toLowerCase().trim();
+  const search = _norm(_filterSearch);
   if (search) {
-    items = items.filter(i =>
-      (i.nom || '').toLowerCase().includes(search) ||
-      (i.type || '').toLowerCase().includes(search) ||
-      (i.sousType || '').toLowerCase().includes(search) ||
-      (i.description || '').toLowerCase().includes(search) ||
-      (i.effet || '').toLowerCase().includes(search)
-    );
+    items = items.filter(i => _searchIncludes(_itemSearchText(i), search));
   }
 
   // 🏷️ Tags
@@ -547,7 +557,7 @@ function _renderItemsView() {
   const tplCat = TEMPLATES[cat.template || 'classique'];
 
   let items = _getFilteredItems(_activeCat);
-  const search = (_filterSearch||'').toLowerCase().trim();
+  const search = _norm(_filterSearch);
 
   const total = items.length;
   const pages = Math.ceil(total / PAGE_SIZE);
@@ -1388,7 +1398,7 @@ function _updateItemsOnly() {
   if (!cat) { renderShop(); return; }
 
   let items = _getFilteredItems(_activeCat);
-  const search = (_filterSearch||'').toLowerCase().trim();
+  const search = _norm(_filterSearch);
 
   const total  = items.length;
   const pages  = Math.ceil(total / PAGE_SIZE);
