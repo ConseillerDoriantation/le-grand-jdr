@@ -1,14 +1,14 @@
 const rareteColors = {
     'Commun':    '#9ca3af',
-    'Peu commun':'#4ade80',
+    'Singulier': '#4ade80',
     'Rare':      '#60a5fa',
-    'Très rare': '#c084fc',
-    'Légendaire':'#fbbf24',
+    'Mythique':  '#c084fc',
+    'Légendaire':'#f97316',
 };
 
-export const RARETE_NAMES = ['', 'Commun', 'Peu commun', 'Rare', 'Très rare'];
+export const RARETE_NAMES = ['', 'Commun', 'Singulier', 'Rare', 'Mythique', 'Légendaire'];
 
-export const _RARETE_LABELS = ['', '★ Commun', '★★ Peu commun', '★★★ Rare', '★★★★ Très rare'];
+export const _RARETE_LABELS = ['', '★ Commun', '★★ Singulier', '★★★ Rare', '★★★★ Mythique', '★★★★★ Légendaire'];
 
 export function _rareteLabel(val) {
     return _RARETE_LABELS[parseInt(val) || 0] || '';
@@ -22,7 +22,7 @@ export function _rareteStars(val) {
     const n = parseInt(val) || 0;
     if (n <= 0) return '';
     const color = rareteColors[RARETE_NAMES[n]] || 'var(--text-dim)';
-    const stars = '★'.repeat(n) + '☆'.repeat(4 - n);
+    const stars = '★'.repeat(n) + '☆'.repeat(5 - n);
     return `<span class="sh-rarete-stars" style="color:${color}" title="${RARETE_NAMES[n]}">${stars}</span>`;
 }
 
@@ -31,7 +31,7 @@ export function _rareteTag(val, className = '') {
     const n = parseInt(val) || 0;
     if (n <= 0) return '';
     const color = rareteColors[RARETE_NAMES[n]] || 'var(--text-dim)';
-    const stars = '★'.repeat(n) + '☆'.repeat(4 - n);
+    const stars = '★'.repeat(n) + '☆'.repeat(5 - n);
     return `<span${className ? ` class="${className}"` : ''} style="color:${color}">${stars}</span>`;
 }
 
@@ -40,7 +40,7 @@ export function buildRaretePicker(idPrefix, currentVal) {
     const activeColor = rareteColors[RARETE_NAMES[cur]] || '#c084fc';
     return `
         <div class="sh-rarete-picker" id="${idPrefix}-rarete-wrap">
-            ${[1, 2, 3, 4].map(n => `<button type="button" class="sh-rarete-star-btn" data-val="${n}"
+            ${[1, 2, 3, 4, 5].map(n => `<button type="button" class="sh-rarete-star-btn" data-val="${n}"
                 onclick="pickRarete('${idPrefix}', ${n})"
                 style="color:${cur >= n ? activeColor : 'var(--text-dim)'}">★</button>`).join('')}
             <input type="hidden" id="${idPrefix}-rarete" value="${currentVal || ''}">
