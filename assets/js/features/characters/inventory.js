@@ -78,7 +78,7 @@ export function _renderInventaireBoutique(char) {
           <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600;line-height:1.2">
             ${item.nom || '?'}
           </div>
-          ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${'★'.repeat(rareteN)+'☆'.repeat(4-rareteN)} ${rareteL}</div>` : ''}
+          ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${'★'.repeat(rareteN)+'☆'.repeat(5-rareteN)} ${rareteL}</div>` : ''}
         </div>
         <span style="font-size:.72rem;background:var(--bg-elevated);border:1px solid var(--border);
           border-radius:999px;padding:2px 8px;color:var(--text-muted);flex-shrink:0">×${g.qte}</span>
