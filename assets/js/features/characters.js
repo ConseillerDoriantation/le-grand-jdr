@@ -51,7 +51,7 @@ import {
   addCompteRow, deleteCompteRow, inlineEditCompteField,
   renderCharMaitrises,
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
-  previewXpBar, saveXpDirect,
+  previewXpBar, saveXpDirect, addXpDelta,
   renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
   addProfilTag, removeProfilTag, initProfilTagUi,
 } from './characters/tabs.js';
@@ -269,13 +269,21 @@ function renderCharSheet(c, keepTab) {
         </div>
       </div>
       ${canEdit
-        ? `<div class="cs-xp-edit-row">
-            <label class="cs-xp-edit-label">XP</label>
-            <input type="number" class="cs-xp-input cs-inline-num" id="xp-direct-input"
-              value="${xpCur}" min="0" max="${xpPalier}"
-              onchange="saveXpDirect('${c.id}',this)"
-              oninput="previewXpBar(this,${xpPalier})" title="XP actuel">
-            <span class="cs-xp-edit-label">/ ${xpPalier}</span>
+        ? `<div class="cs-xp-bottom-row">
+            <div class="cs-xp-total-group">
+              <input type="number" class="cs-xp-input cs-inline-num" id="xp-direct-input"
+                value="${xpCur}" min="0" max="${xpPalier}"
+                onchange="saveXpDirect('${c.id}',this)"
+                oninput="previewXpBar(this,${xpPalier})" title="Modifier l'XP total">
+              <span class="cs-xp-edit-label">/ ${xpPalier}</span>
+            </div>
+            <div class="cs-xp-delta-group">
+              <span class="cs-xp-add-icon">+</span>
+              <input type="number" class="cs-xp-input cs-xp-add-input" id="xp-add-input-${c.id}"
+                min="1" placeholder="gagné"
+                onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}"
+                title="XP à ajouter — Entrée pour valider">
+            </div>
           </div>`
         : `<div class="cs-xp-sub">${xpCur} / ${xpPalier} XP</div>`}
     </div>
@@ -524,7 +532,7 @@ Object.assign(window, {
   addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
 
   // XP
-  previewXpBar, saveXpDirect,
+  previewXpBar, saveXpDirect, addXpDelta,
 
   // Maîtrises
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,

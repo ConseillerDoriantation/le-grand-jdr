@@ -3858,6 +3858,17 @@ window._vttMsSetXp = async (charId, uid, xp) => {
   _renderMiniSheet(uid);
 };
 
+window._vttMsAddXp = async (charId, uid, delta) => {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  const d = Math.round(delta);
+  if (!d || d <= 0) return;
+  const newXp = Math.max(0, (parseInt(c.exp) || 0) + d);
+  await updateDoc(_chrRef(charId), { exp: newXp }).catch(() => {});
+  c.exp = newXp;
+  _renderMiniSheet(uid);
+};
+
 window._vttMsSetNiveau = async (charId, uid, niveau) => {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
@@ -5045,11 +5056,20 @@ function _msXpSection(c, uid, canEdit) {
       <div class="vtt-ms-xp-row">
         <span class="vtt-ms-xp-label">⭐ XP</span>
         <input class="vtt-ms-xp-input" type="number" value="${xp}" min="0"
-          onchange="window._vttMsSetXp('${c.id}','${uid}',+this.value)">
+          onchange="window._vttMsSetXp('${c.id}','${uid}',+this.value)"
+          onkeydown="if(event.key==='Enter'){window._vttMsSetXp('${c.id}','${uid}',+this.value);this.blur();event.preventDefault()}"
+          title="XP total — Entrée pour valider">
         <span class="vtt-ms-xp-sep">/ ${palier}</span>
         <span class="vtt-ms-xp-niv">Niv.</span>
         <input class="vtt-ms-niv-input" type="number" value="${niv}" min="1" max="20"
           onchange="window._vttMsSetNiveau('${c.id}','${uid}',+this.value)">
+      </div>
+      <div class="vtt-ms-xp-row vtt-ms-xp-add-row">
+        <span class="vtt-ms-xp-add-icon">+</span>
+        <input class="vtt-ms-xp-input vtt-ms-xp-delta-input" type="number" min="1" placeholder="gagné"
+          id="vtt-xp-delta-${c.id}-${uid}"
+          onkeydown="if(event.key==='Enter'){window._vttMsAddXp('${c.id}','${uid}',+this.value);event.preventDefault()}"
+          title="XP à ajouter — Entrée pour valider">
       </div>
       <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pct}%;background:#f59e0b"></div></div>
     </div>`;

@@ -1700,6 +1700,15 @@
 .vtt-ms-xp-input  { width: 60px; }
 .vtt-ms-niv-input { width: 42px; }
 .vtt-ms-xp-input:focus, .vtt-ms-niv-input:focus { border-color: var(--gold); }
+.vtt-ms-xp-add-row { margin-top: .2rem; }
+.vtt-ms-xp-add-icon { font-size: .65rem; color: #c084fc; flex-shrink: 0; }
+.vtt-ms-xp-delta-input {
+  width: 70px !important;
+  background: rgba(139,92,246,.10) !important;
+  border-color: rgba(139,92,246,.22) !important;
+}
+.vtt-ms-xp-delta-input::placeholder { color: rgba(192,132,252,.45) !important; }
+.vtt-ms-xp-delta-input:focus { border-color: #c084fc !important; box-shadow: 0 0 0 2px rgba(192,132,252,.12); }
 
 /* ── Équipement : slots ────────────────────────────────────────── */
 .vtt-ms-slots { display: flex; flex-direction: column; }
