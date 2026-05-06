@@ -1919,6 +1919,91 @@
 .vtt-mt-btn-validate:disabled { opacity: .4; cursor: not-allowed; }
 .vtt-mt-btn-validate:disabled:hover { background: rgba(139,92,246,.18); border-color: rgba(139,92,246,.4); color: #c084fc; }
 
+/* ── Lanceur de dés libre ───────────────────────────────────────── */
+.vtt-dice-float {
+  position: absolute; bottom: 14px; left: 106px; z-index: 10;
+  display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
+}
+.vtt-dice-trigger {
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, box-shadow .12s;
+  box-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+.vtt-dice-trigger:hover { background: var(--bg-elevated); box-shadow: 0 3px 14px rgba(0,0,0,.55); }
+.vtt-dice-trigger.active { border-color: var(--gold); box-shadow: 0 0 0 2px oklch(72% 0.14 52 / 0.3); }
+.vtt-dice-panel {
+  flex-direction: column; gap: .5rem;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.6);
+  padding: .6rem; width: 258px;
+}
+.vtt-dice-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: .8rem; font-weight: 700; color: var(--text);
+  padding-bottom: .4rem; border-bottom: 1px solid var(--border);
+}
+.vtt-dice-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: .3rem;
+}
+.vtt-dice-die-btn {
+  position: relative; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  aspect-ratio: 1; border: 1.5px solid var(--border);
+  border-radius: 7px; background: var(--bg-elevated);
+  cursor: pointer; font-size: .68rem; font-weight: 700; color: var(--text-muted);
+  transition: border-color .1s, background .1s, color .1s;
+  user-select: none;
+}
+.vtt-dice-die-btn:hover { border-color: var(--gold); background: rgba(255,210,0,.08); color: var(--gold); }
+.vtt-dice-die-btn.active { border-color: var(--gold); background: rgba(255,210,0,.14); color: var(--gold); }
+.vtt-dice-die-cnt {
+  position: absolute; top: 1px; right: 2px;
+  font-size: .48rem; font-weight: 800; color: var(--gold); line-height: 1;
+}
+.vtt-dice-formula-row {
+  display: flex; align-items: center; justify-content: space-between; gap: .4rem;
+  background: rgba(255,255,255,.04); border-radius: 6px;
+  padding: .3rem .45rem; min-height: 28px;
+}
+.vtt-dice-formula-str {
+  font-size: .72rem; font-family: monospace; color: var(--text-soft);
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vtt-dice-clear-btn {
+  font-size: .65rem; color: var(--text-dim); background: none; border: none;
+  cursor: pointer; padding: 0 .2rem; flex-shrink: 0;
+  transition: color .1s;
+}
+.vtt-dice-clear-btn:hover { color: #ef4444; }
+.vtt-dice-bonus-row {
+  display: flex; align-items: center; gap: .35rem;
+}
+.vtt-dice-bonus-lbl { font-size: .72rem; color: var(--text-muted); flex: 1; }
+.vtt-dice-bonus-inp {
+  width: 46px; text-align: center; font-size: .78rem; font-weight: 700;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); padding: .2rem;
+  -moz-appearance: textfield;
+}
+.vtt-dice-bonus-inp::-webkit-outer-spin-button,
+.vtt-dice-bonus-inp::-webkit-inner-spin-button { -webkit-appearance: none; }
+.vtt-dice-mode-row {
+  display: flex; gap: .3rem;
+}
+.vtt-dice-roll-btn {
+  width: 100%; padding: .45rem; font-size: .82rem; font-weight: 700;
+  background: rgba(255,210,0,.12); border: 1px solid rgba(255,210,0,.35);
+  border-radius: 8px; color: var(--gold); cursor: pointer;
+  transition: background .12s, box-shadow .12s;
+}
+.vtt-dice-roll-btn:hover:not(:disabled) {
+  background: rgba(255,210,0,.22); box-shadow: 0 0 12px rgba(255,210,0,.2);
+}
+.vtt-dice-roll-btn:disabled { opacity: .4; cursor: not-allowed; }
+
 /* ── Zone AoE – hint + kbd ──────────────────────────────────────── */
 .vtt-zone-hint {
   font-size: .68rem;
