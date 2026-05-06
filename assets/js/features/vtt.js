@@ -69,6 +69,11 @@ let _loot            = { stash: [], loot: [] };
 let _lootUnsub       = null;
 let _lootCloseOutside = null;
 const _lootRef  = () => doc(db, `adventures/${_aid()}/vtt/loot`);
+// ── Lanceur de dés libre ───────────────────────────────────────────
+let _diceFormula   = {};        // { faces→count } ex: { 20:2, 6:1 }
+let _diceFreeBonus = 0;
+let _diceFreeMode  = 'normal';  // 'advantage'|'normal'|'disadvantage'
+let _diceCloseOut  = null;
 let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skills
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
@@ -238,7 +243,15 @@ function _live(t) {
     displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6))))),
     displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))),
     displayAttackDice: atkDice,
-    displayDefense:    t.defense  ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0))))),
+    displayDefense:    (t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))))) + (() => {
+      const r = _session?.combat?.round ?? 0;
+      return (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
+        .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
+    })(),
+    _activeCaBuff: (() => {
+      const r = _session?.combat?.round ?? 0;
+      return (t.buffs || []).find(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)) || null;
+    })(),
     // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
     // Pour bestiaire/custom : t.range > 1ère attaque bestiary > défaut 1
     displayRange: c
@@ -799,12 +812,27 @@ function _buildShape(t) {
       fontFamily:'Inter,sans-serif', listening:false, name:'pm-val' }));
     _lblY=r+BH+PMH+10;
   }
-  // ── Badge CA (coin haut-droit) ────────────────────────────────────
-  g.add(new K.Circle({ x:r*.7, y:-r*.7, radius:10, fill:'rgba(15,15,25,0.9)',
-    stroke:'#64748b', strokeWidth:1.5, listening:false, name:'ca-bg' }));
+  // ── Badge CA (coin haut-droit) + indicateur buff ─────────────────
+  const _buff = ld._activeCaBuff;
+  const _buffed = !!_buff;
+  const _round  = _session?.combat?.round ?? 0;
+  const _toursLeft = _buff
+    ? (_buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞')
+    : null;
+  g.add(new K.Circle({ x:r*.7, y:-r*.7, radius:10,
+    fill: _buffed ? 'rgba(30,27,80,0.95)' : 'rgba(15,15,25,0.9)',
+    stroke: _buffed ? '#818cf8' : '#64748b',
+    strokeWidth: _buffed ? 2.5 : 1.5,
+    listening:false, name:'ca-bg' }));
   g.add(new K.Text({ x:r*.7-10, y:-r*.7-6, width:20, height:12,
     text:`🛡${ld.displayDefense??0}`, fontSize:9, fontStyle:'bold',
-    fill:'#e2e8f0', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-lbl' }));
+    fill: _buffed ? '#c4b5fd' : '#e2e8f0',
+    fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-lbl' }));
+  if (_buffed) {
+    g.add(new K.Text({ x:r*.7-10, y:-r*.7+5, width:20, height:9,
+      text:`${_toursLeft}↺`, fontSize:7, fontStyle:'bold',
+      fill:'#818cf8', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
+  }
   // ── Nom ───────────────────────────────────────────────────────────
   g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2, y:_lblY,
     width:bW, align:'center', fontSize:11, fontStyle:'bold', fill:'#fff',
@@ -973,8 +1001,10 @@ function _buildShape(t) {
 function _patchShape(id) {
   const e=_tokens[id]; if (!e?.shape) return;
   const ld=_live(e.data); const g=e.shape;
-  const hasPmBar = !!g.findOne('.pm-val');
-  if ((ld.displayPm != null) !== hasPmBar) {
+  const hasPmBar   = !!g.findOne('.pm-val');
+  const hasCaBuff  = !!g.findOne('.ca-buff-turns');
+  const needsCaBuff = !!ld._activeCaBuff;
+  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff) {
     const shape = _buildShape(e.data);
     g.destroy();
     _tokens[id] = { ...e, shape };
@@ -998,7 +1028,19 @@ function _patchShape(id) {
     g.findOne('.pm-fill')?.width(bW*pmRat);
     g.findOne('.pm-val')?.text(`✨${_pm}/${pmMax}`);
   }
+  // CA + buff
+  const _buff   = ld._activeCaBuff;
+  const _buffed = !!_buff;
+  const _round  = _session?.combat?.round ?? 0;
   g.findOne('.ca-lbl')?.text(`🛡${ld.displayDefense??0}`);
+  g.findOne('.ca-lbl')?.fill(_buffed ? '#c4b5fd' : '#e2e8f0');
+  g.findOne('.ca-bg')?.stroke(_buffed ? '#818cf8' : '#64748b');
+  g.findOne('.ca-bg')?.strokeWidth(_buffed ? 2.5 : 1.5);
+  g.findOne('.ca-bg')?.fill(_buffed ? 'rgba(30,27,80,0.95)' : 'rgba(15,15,25,0.9)');
+  if (_buff) {
+    const tl = _buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞';
+    g.findOne('.ca-buff-turns')?.text(`${tl}↺`);
+  }
   g.findOne('.lbl')?.text(ld.displayName??e.data.name);
   g.visible(!!(e.data.visible||STATE.isAdmin));
   _layers.token?.batchDraw();
@@ -1315,6 +1357,22 @@ function _vttSortSoinFormula(s, c) {
   return maitrStr ? base + maitrStr : base;
 }
 
+/** Parse le bonus CA numérique depuis la chaîne libre (ex: "CA +2 (2 tours)" → 2). */
+function _parseCaBonus(caStr) {
+  const m = (caStr || '+2').match(/([+-]?\d+)/);
+  return m ? (parseInt(m[1]) || 2) : 2;
+}
+
+/** Durée totale du sort en tours = dureeBase + bonus runes Durée. Miroir local. */
+function _sortDureeVtt(s) {
+  const runes  = s.runes || [];
+  const nbDur  = runes.filter(r => r === 'Durée').length;
+  const base   = (s.dureeBase >= 1) ? +s.dureeBase : 0;
+  let bonus = 0;
+  for (let i = 0; i < nbDur; i++) bonus += 2 + i;
+  return base + bonus || null;
+}
+
 /**
  * Nombre de cibles d'un sort (rune Dispersion).
  * Miroir local de _calcSortCibles (spells.js).
@@ -1495,6 +1553,7 @@ function _buildAttackOptions(t) {
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
           zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           isCaSort: true, halfOnMiss: false,
+          caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
         });
 
       } else {
@@ -2316,22 +2375,50 @@ window._vttRollAttack = async () => {
       }
     }
 
-    // ── CA / Utilitaire : juste consommer le PM, loguer ─────────────
+    // ── CA / Utilitaire : consommer PM, appliquer buff, loguer ─────────
     if (opt.isCaSort || opt.isUtil) {
       await _deductPm();
       await _markAttacked();
       const rCa = _handleMultiCast();
+
+      // Appliquer le buff CA sur chaque cible
+      const buffResults = [];
+      if (opt.isCaSort) {
+        const round = _session?.combat?.round ?? 0;
+        const dur   = opt.sortDuree ?? null;
+        const baseRound = Math.max(1, round); // traiter round 0 comme round 1
+        const newBuff = {
+          type: 'ca',
+          bonus: opt.caBonus ?? 2,
+          totalDuration: dur,
+          startRound: round,
+          expiresAtRound: dur != null ? baseRound + dur - 1 : null,
+          sortLabel: opt.label,
+          icon: '🛡',
+        };
+        for (const curTgtId of targetIds) {
+          const curTgtData = _tokens[curTgtId]?.data; if (!curTgtData) continue;
+          const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === 'ca' && b.sortLabel === opt.label));
+          await updateDoc(_tokRef(curTgtId), { buffs: [...existingBuffs, newBuff] }).catch(()=>{});
+          buffResults.push(_live(curTgtData).displayName ?? curTgtData.name);
+        }
+      }
+
+      const targetsLabel = buffResults.length > 1
+        ? buffResults.join(', ')
+        : (lT.displayName ?? tgt.name);
       await addDoc(_logCol(), {
-        type:'cast',
+        type: 'cast',
         authorId: STATE.user?.uid||null, authorName,
         casterName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
-        targetName: lT.displayName??tgt.name,
+        targetName: targetsLabel,
         optLabel: opt.label, pmCost: opt.pmCost,
         castEffect: opt.dice,
         createdAt: serverTimestamp(),
       }).catch(()=>{});
-      showNotif(`✨ ${opt.label} activé !${_ciblSuffix(rCa)}`, 'success');
+      const buffInfo = opt.isCaSort ? ` (+${opt.caBonus??2} CA${opt.sortDuree ? `, ${opt.sortDuree}t` : ''})` : '';
+      showNotif(`✨ ${opt.label} activé !${buffInfo}${_ciblSuffix(rCa)}`, 'success');
       return;
     }
 
@@ -4187,6 +4274,35 @@ function _renderChatLog(msgs) {
         </div>
       </div>`;
     }
+    if (m.type==='dice-free') {
+      const totalCol = m.total>=20?'#22c38e':m.total<=3?'#ef4444':'var(--text)';
+      const modeLabel = m.mode==='advantage'
+        ? `<span style="font-size:.6rem;font-weight:700;color:#22c38e">⬆ Avantage</span>`
+        : m.mode==='disadvantage'
+        ? `<span style="font-size:.6rem;font-weight:700;color:#ef4444">⬇ Désav.</span>` : '';
+      const detail = (m.groups||[]).map(g => {
+        if (g.kept!=null) {
+          const dropped = g.rolls.find(r=>r!==g.kept)??g.rolls[1];
+          return `d${g.faces}[<strong>${g.kept}</strong>&thinsp;<span style="color:var(--text-dim);text-decoration:line-through">${dropped}</span>]`;
+        }
+        return `${g.count}d${g.faces}[${g.rolls.join(', ')}]`;
+      });
+      if (m.bonus) detail.push(m.bonus>0
+        ?`<span style="color:var(--gold)">+${m.bonus}</span>`
+        :`<span style="color:#ef4444">${m.bonus}</span>`);
+      return `<div class="vtt-log-entry vtt-log-roll" style="border-left:3px solid var(--gold);padding:.3rem .3rem .3rem .5rem;background:rgba(255,210,0,.04);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;margin-bottom:.1rem">
+          ${who} <span style="font-size:.65rem;color:var(--text-dim)">🎲</span>
+          <code style="font-size:.68rem;background:rgba(255,255,255,.07);padding:0 .3rem;border-radius:4px">${_esc(m.formula||'')}</code>
+          ${modeLabel} ${_right('',ts)}
+        </div>
+        <div style="display:flex;align-items:baseline;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
+          <span style="font-size:.68rem;color:var(--text-dim)">${detail.join(' · ')}</span>
+          <span style="font-size:.7rem;color:var(--text-dim)">=</span>
+          <strong style="font-size:1.1rem;color:${totalCol}">${m.total}</strong>
+        </div>
+      </div>`;
+    }
     if (m.type==='roll') {
       const rollWho  = m.characterName || m.authorName || '?';
       const statCol  = _STAT_COLOR[m.rollStat] || 'var(--gold)';
@@ -4467,9 +4583,31 @@ window._vttNextRound = async () => {
   const round=(_session.combat.round??1)+1;
   await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
   const b=writeBatch(db);
-  Object.keys(_tokens).forEach(id=>b.update(_tokRef(id),{movedThisTurn:false,attackedThisTurn:false}));
+  const expiredNotifs = [];
+  Object.keys(_tokens).forEach(id => {
+    const tokData = _tokens[id]?.data;
+    const updates = { movedThisTurn: false, attackedThisTurn: false };
+    if (tokData?.buffs?.length) {
+      const remaining = tokData.buffs.filter(bf => {
+        const isExpired =
+          // cas normal : expiresAtRound calculé
+          (bf.expiresAtRound != null && round > bf.expiresAtRound) ||
+          // fallback : anciens buffs (expiresAtRound null) avec totalDuration+startRound
+          (bf.expiresAtRound == null && bf.totalDuration != null && bf.startRound != null &&
+           round - Math.max(1, bf.startRound) >= bf.totalDuration);
+        if (isExpired) {
+          expiredNotifs.push(`${bf.icon ?? '✨'} ${bf.sortLabel ?? 'Buff'} expiré sur ${_live(tokData).displayName ?? tokData.name}`);
+          return false;
+        }
+        return true;
+      });
+      if (remaining.length !== tokData.buffs.length) updates.buffs = remaining;
+    }
+    b.update(_tokRef(id), updates);
+  });
   await b.commit().catch(()=>{});
-  showNotif(`Round ${round} !`,'success');
+  expiredNotifs.forEach(msg => showNotif(msg, 'info'));
+  showNotif(`Round ${round} !`, 'success');
 };
 
 // ── Modal stats combat (override des stats auto) ────────────────────
@@ -5131,6 +5269,125 @@ window._vttLootConfirmTake = async (id) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════
+// LANCEUR DE DÉS LIBRE
+// ═══════════════════════════════════════════════════════════════════
+const _ALL_DICE = [4, 6, 8, 10, 12, 20, 100];
+
+function _closeDicePanel() {
+  const panel = document.getElementById('vtt-dice-panel');
+  const btn   = document.getElementById('vtt-dice-trigger');
+  if (panel) { panel.dataset.open='0'; panel.style.display='none'; }
+  btn?.classList.remove('active');
+  if (_diceCloseOut) { document.removeEventListener('mousedown', _diceCloseOut, true); _diceCloseOut=null; }
+}
+
+window._vttToggleDice = () => {
+  const panel = document.getElementById('vtt-dice-panel'); if (!panel) return;
+  if (panel.dataset.open==='1') { _closeDicePanel(); return; }
+  panel.dataset.open='1'; panel.style.display='flex';
+  document.getElementById('vtt-dice-trigger')?.classList.add('active');
+  _renderDicePanel();
+  _diceCloseOut = e => { const f=document.querySelector('.vtt-dice-float'); if(f&&!f.contains(e.target)) _closeDicePanel(); };
+  document.addEventListener('mousedown', _diceCloseOut, true);
+};
+
+window._vttDiceAddDie    = f => { _diceFormula[f]=(_diceFormula[f]||0)+1; _renderDicePanel(); };
+window._vttDiceRemoveDie = f => { if(_diceFormula[f]>1) _diceFormula[f]--; else delete _diceFormula[f]; _renderDicePanel(); };
+window._vttDiceClear     = () => { _diceFormula={}; _diceFreeBonus=0; _renderDicePanel(); };
+window._vttDiceBonusStep = d => { _diceFreeBonus=(_diceFreeBonus||0)+d; _renderDicePanel(); };
+window._vttDiceBonusSet  = v => { _diceFreeBonus=isNaN(v)?0:+v; };
+window._vttDiceMode      = m => { _diceFreeMode=m; _renderDicePanel(); };
+
+function _renderDicePanel() {
+  const el = document.getElementById('vtt-dice-panel'); if (!el) return;
+  const faces = Object.keys(_diceFormula).map(Number).sort((a,b)=>b-a);
+  const hasDice = faces.some(f => _diceFormula[f]>0);
+  const hasD20single = _diceFormula[20]===1;
+
+  // Formule lisible
+  const fmtParts = faces.map(f=>`${_diceFormula[f]}d${f===100?'%':f}`);
+  if (_diceFreeBonus>0) fmtParts.push(`+${_diceFreeBonus}`);
+  else if (_diceFreeBonus<0) fmtParts.push(String(_diceFreeBonus));
+  const formulaStr = fmtParts.join(' + ') || '—';
+
+  el.innerHTML = `
+    <div class="vtt-dice-hd">
+      <span>🎲 Lancer des dés</span>
+      <button class="vtt-icon-btn" onclick="window._vttToggleDice()" title="Fermer">✕</button>
+    </div>
+    <div class="vtt-dice-grid">
+      ${_ALL_DICE.map(f => {
+        const cnt = _diceFormula[f]||0;
+        return `<button class="vtt-dice-die-btn${cnt?' active':''}"
+          onclick="window._vttDiceAddDie(${f})"
+          oncontextmenu="event.preventDefault();window._vttDiceRemoveDie(${f})"
+          title="Clic : ajouter · Clic droit : retirer">
+          d${f===100?'%':f}${cnt?`<span class="vtt-dice-die-cnt">×${cnt}</span>`:''}
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="vtt-dice-formula-row">
+      <code class="vtt-dice-formula-str">${formulaStr}</code>
+      ${hasDice?`<button class="vtt-dice-clear-btn" onclick="window._vttDiceClear()">✕</button>`:''}
+    </div>
+    <div class="vtt-dice-bonus-row">
+      <span class="vtt-dice-bonus-lbl">Bonus</span>
+      <button class="vtt-icon-btn" onclick="window._vttDiceBonusStep(-1)">−</button>
+      <input id="vtt-dice-bonus-inp" type="number" class="vtt-dice-bonus-inp" value="${_diceFreeBonus}"
+        oninput="window._vttDiceBonusSet(+this.value)">
+      <button class="vtt-icon-btn" onclick="window._vttDiceBonusStep(+1)">＋</button>
+    </div>
+    ${hasD20single ? `<div class="vtt-dice-mode-row">
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='disadvantage'?' active':''}" onclick="window._vttDiceMode('disadvantage')">⬇ Désav.</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='normal'?' active':''}" onclick="window._vttDiceMode('normal')">⚪ Normal</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='advantage'?' active':''}" onclick="window._vttDiceMode('advantage')">⬆ Avantage</button>
+    </div>` : ''}
+    <button class="vtt-dice-roll-btn" onclick="window._vttDiceRoll()"
+      ${!hasDice&&!_diceFreeBonus?'disabled':''}>
+      🎲 Lancer !
+    </button>`;
+}
+
+window._vttDiceRoll = () => {
+  const faces = Object.keys(_diceFormula).map(Number).sort((a,b)=>b-a);
+  if (!faces.length && !_diceFreeBonus) return;
+  const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'Joueur';
+
+  const groups = [];
+  let total = 0;
+  for (const f of faces) {
+    const count = _diceFormula[f]; if (!count) continue;
+    const rolls = []; let subtotal = 0;
+    let kept;
+    if (f===20 && count===1 && _diceFreeMode!=='normal') {
+      const r1=Math.floor(Math.random()*20)+1, r2=Math.floor(Math.random()*20)+1;
+      kept = _diceFreeMode==='advantage' ? Math.max(r1,r2) : Math.min(r1,r2);
+      rolls.push(r1,r2); subtotal=kept;
+    } else {
+      for(let i=0;i<count;i++){ const r=Math.floor(Math.random()*f)+1; rolls.push(r); subtotal+=r; }
+    }
+    const g = { faces:f, count, rolls, subtotal };
+    if (kept !== undefined) g.kept = kept;
+    groups.push(g);
+    total += subtotal;
+  }
+  total += (_diceFreeBonus||0);
+
+  const fmtParts = faces.map(f=>`${_diceFormula[f]}d${f===100?'%':f}`);
+  if (_diceFreeBonus>0) fmtParts.push(`+${_diceFreeBonus}`);
+  else if (_diceFreeBonus<0) fmtParts.push(String(_diceFreeBonus));
+  const formula = fmtParts.join('+');
+
+  addDoc(_logCol(), {
+    type:'dice-free', authorId:STATE.user?.uid||null, authorName,
+    formula, groups, bonus:_diceFreeBonus||0, mode:_diceFreeMode, total,
+    createdAt:serverTimestamp(),
+  }).catch(()=>{});
+  showNotif(`🎲 ${formula} = ${total}`, 'success');
+  _closeDicePanel();
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // HTML
 // ═══════════════════════════════════════════════════════════════════
 function _buildHtml() {
@@ -5257,6 +5514,13 @@ export async function renderVttPage() {
     <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none"></div>
     <button class="vtt-loot-trigger" id="vtt-loot-trigger" onclick="window._vttToggleLoot()" title="Butin d'aventure">💰</button>`;
   wrap.appendChild(_lf);
+  // Float Lanceur de dés (bas-gauche du canvas, 3e bouton)
+  const _drf = document.createElement('div');
+  _drf.className = 'vtt-dice-float';
+  _drf.innerHTML = `
+    <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none"></div>
+    <button class="vtt-dice-trigger" id="vtt-dice-trigger" onclick="window._vttToggleDice()" title="Lancer des dés libres">🎲</button>`;
+  wrap.appendChild(_drf);
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
