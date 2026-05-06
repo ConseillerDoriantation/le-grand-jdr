@@ -2927,6 +2927,42 @@ input[type=number].input-field::-webkit-outer-spin-button {
   color: var(--text-dim) !important;
   text-align: center !important;
 }
+/* ── Ligne XP compacte (total gauche / +delta droite) ──────────── */
+.cs-xp-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-top: 0.1rem;
+}
+.cs-xp-total-group,
+.cs-xp-delta-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.cs-xp-add-icon {
+  font-size: .65rem;
+  color: #c084fc;
+  flex-shrink: 0;
+}
+.cs-xp-add-input {
+  width: 48px !important;
+  font-size: .64rem !important;
+  padding: 1px 4px !important;
+  background: rgba(139,92,246,.10) !important;
+  border: 1px solid rgba(139,92,246,.22) !important;
+  border-radius: 5px !important;
+  color: var(--text) !important;
+  text-align: center !important;
+}
+.cs-xp-add-input::placeholder { color: rgba(192,132,252,.45) !important; }
+.cs-xp-add-input:focus {
+  border-color: #c084fc !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(192,132,252,.12);
+}
+[data-theme="light"] .cs-xp-add-input { background: rgba(139,92,246,.07) !important; border-color: rgba(139,92,246,.25) !important; color: #4c1d95 !important; }
 
 /* ── Séparateur sidebar ──────────────────────── */
 .cs-sb-divider {
@@ -5023,3 +5059,33 @@ input[type=number].input-field::-webkit-outer-spin-button {
   color: var(--elem-col, var(--text));
   font-weight: 700;
 }
+
+/* ── XP delta widget (fiche perso) ─────────────────────────────── */
+.cs-xp-add-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  margin-left: .4rem;
+}
+.cs-xp-delta-input {
+  width: 52px;
+  padding: .1rem .3rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: .75rem;
+  text-align: center;
+}
+.cs-xp-delta-input:focus { border-color: var(--gold); outline: none; }
+.cs-xp-add-btn {
+  padding: .1rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-soft);
+  font-size: .72rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.cs-xp-add-btn:hover { background: rgba(255,255,255,.08); border-color: var(--gold); color: var(--gold); }

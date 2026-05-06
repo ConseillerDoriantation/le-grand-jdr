@@ -106,7 +106,14 @@ export function renderCharCarac(c, canEdit) {
              ${canEdit?`onclick="inlineEditNum('${c.id}','palier',this,1,99999)" title="Cliquer pour modifier"`:''}>
           ${c.palier||100}
         </div>
-        <div class="cs-base-sub">XP actuel : ${c.exp||0}</div>
+        <div class="cs-base-sub">
+          XP actuel : <span id="cs-xp-val-${c.id}">${c.exp||0}</span>
+          ${canEdit ? `
+          <span class="cs-xp-add-wrap">
+            +<input id="cs-xp-delta-${c.id}" class="cs-xp-delta-input" type="number" min="0" placeholder="XP" title="XP à ajouter">
+            <button class="cs-xp-add-btn" onclick="window._csAddXp('${c.id}')">Ajouter</button>
+          </span>` : ''}
+        </div>
       </div>
     </div>
   </div>`;
@@ -579,6 +586,21 @@ export function previewXpBar(input, palier) {
   if (pct) pct.textContent = p + '%';
 }
 
+window._csAddXp = async (charId) => {
+  const input = document.getElementById(`cs-xp-delta-${charId}`);
+  if (!input) return;
+  const delta = parseInt(input.value);
+  if (!delta || delta <= 0) return;
+  const c = (STATE.characters||[]).find(x => x.id === charId) || STATE.activeChar;
+  if (!c) return;
+  const newXp = (parseInt(c.exp) || 0) + delta;
+  await updateInCol('characters', charId, { exp: newXp });
+  c.exp = newXp;
+  input.value = '';
+  const lbl = document.getElementById(`cs-xp-val-${charId}`);
+  if (lbl) lbl.textContent = newXp;
+};
+
 window._toggleCompteHist = (type, count) => {
   const rows = document.querySelectorAll(`.cs-hist-old-${type}`);
   const btn  = document.getElementById(`cs-hist-btn-${type}`);
@@ -601,6 +623,25 @@ export async function saveXpDirect(charId, input) {
     previewXpBar(input, palier);
     await updateInCol('characters', charId, {exp: val});
     showNotif('XP mis à jour !', 'success');
+  } catch (e) { notifySaveError(e); }
+}
+
+export async function addXpDelta(charId) {
+  try {
+    const input = document.getElementById(`xp-add-input-${charId}`);
+    if (!input) return;
+    const delta = parseInt(input.value);
+    if (!delta || delta <= 0) return;
+    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    if (!c) return;
+    const palier = calcPalier(c.niveau||1);
+    const newXp = (parseInt(c.exp)||0) + delta;
+    c.exp = newXp;
+    input.value = '';
+    await updateInCol('characters', charId, {exp: newXp});
+    const directInput = document.getElementById('xp-direct-input');
+    if (directInput) { directInput.value = newXp; previewXpBar(directInput, palier); }
+    showNotif(`+${delta} XP !`, 'success');
   } catch (e) { notifySaveError(e); }
 }
 
