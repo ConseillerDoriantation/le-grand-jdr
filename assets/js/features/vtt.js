@@ -204,9 +204,9 @@ function _live(t) {
 
   // Formule de dégâts : arme équipée > première attaque bestiary > override token > fallback
   const weapon      = c?.equipement?.['Main principale'];
-  const weapStat    = (weapon?.degatsStats?.[0]  || weapon?.degatsStat  || 'force');
-  const toucherStat = (weapon?.toucherStats?.[0] || weapon?.toucherStat || weapStat);
-  const weapMod     = c ? getMod(c, weapStat)    : 0;
+  const weapStats   = weapon?.degatsStats?.length ? weapon.degatsStats : [weapon?.degatsStat || 'force'];
+  const toucherStat = (weapon?.toucherStats?.[0] || weapon?.toucherStat || weapStats[0]);
+  const weapMod     = c ? weapStats.reduce((sum, s) => sum + getMod(c, s), 0) : 0;
   const toucherMod  = c ? getMod(c, toucherStat) : 0;
   const setBonus    = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
   const weapDice  = weapon?.degats
@@ -1371,15 +1371,17 @@ function _buildAttackOptions(t) {
   }
 
   // ── Arme principale du personnage (ou attaque générique) ──
-  const weapon      = c?.equipement?.['Main principale'];
-  const wDmgStat    = weapon?.degatsStats?.[0] || weapon?.degatsStat || 'force';
-  const isUnarmed   = !weapon?.nom;
-  const wDmgStat2   = isUnarmed ? 'force' : (weapon?.degatsStats?.[0] || weapon?.degatsStat || 'force');
-  const wTchStat    = isUnarmed ? 'force' : (weapon?.toucherStats?.[0] || weapon?.toucherStat || wDmgStat2);
-  const wDmgMod     = c ? getMod(c, wDmgStat2) : 0;
-  const wTchMod     = c ? getMod(c, wTchStat)  : 0;
-  const wSetBonus   = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
-  const wMaitrise   = c && weapon ? getMaitriseBonus(c, weapon) : 0;
+  const weapon       = c?.equipement?.['Main principale'];
+  const isUnarmed    = !weapon?.nom;
+  const wDmgStats    = isUnarmed ? ['force']
+    : (weapon?.degatsStats?.length ? weapon.degatsStats : [weapon?.degatsStat || 'force']);
+  const wTchStat     = isUnarmed ? 'force'
+    : (weapon?.toucherStats?.[0] || weapon?.toucherStat || wDmgStats[0]);
+  const wDmgMod      = c ? wDmgStats.reduce((sum, s) => sum + getMod(c, s), 0) : 0;
+  const wDmgStatLabel= wDmgStats.map(s => statShort(s) || s).join('+');
+  const wTchMod      = c ? getMod(c, wTchStat)  : 0;
+  const wSetBonus    = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
+  const wMaitrise    = c && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
   const fmt        = _weaponFormats?.find(f => f.label === weapon?.format);
   const isMagicW   = fmt?.isMagic === true;
@@ -1399,7 +1401,7 @@ function _buildAttackOptions(t) {
     toucherSetBonus:  wSetBonus,
     toucherStatLabel: statShort(wTchStat) || wTchStat,
     dmgStatMod:       wDmgMod,
-    dmgStatLabel:     statShort(wDmgStat2) || wDmgStat2,
+    dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
     typeRules,
     isMagicWeapon:    isMagicW && !isUnarmed,
