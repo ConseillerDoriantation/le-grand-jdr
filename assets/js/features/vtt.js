@@ -41,6 +41,10 @@ let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, ca
 let _activePage = null;
 let _tool       = 'select';
 let _selected   = null, _attackSrc = null, _moveHL = [];
+let _mtCtx      = null; // contexte multi-cibles actif { srcId, opt, optIdx, targets[], maxTargets, lines Map }
+let _mtPending  = null; // cibles validées en attente du roll : string[]
+let _zoneCtx    = null; // contexte zone AoE { srcId, tgtId, opt, optIdx, wPx, hPx, x, y, placed }
+let _zonePreview= null; // Konva.Group prévisualisation zone
 let _selectedMulti  = new Set();   // ids des tokens en multi-sélection
 let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
@@ -153,7 +157,9 @@ const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
 const _npcRef  = (id) => doc(db, `adventures/${_aid()}/npcs/${id}`);
 const _bstCol        = ()    => collection(db, `adventures/${_aid()}/bestiary`);
 const _bstTrackerRef = (uid) => doc(db, `adventures/${_aid()}/bestiary_tracker/${uid}`);
-const _logCol  = ()   => collection(db, `adventures/${_aid()}/vttLog`);
+const _logCol      = ()  => collection(db, `adventures/${_aid()}/vttLog`);
+const _castingCol  = ()  => collection(db, `adventures/${_aid()}/vttCasting`);
+const _castingRef  = uid => doc(db, `adventures/${_aid()}/vttCasting/${uid}`);
 const _pingsCol     = ()  => collection(db, `adventures/${_aid()}/vttPings`);
 const _pingRef      = uid => doc(db, `adventures/${_aid()}/vttPings/${uid}`);
 const _reactionsCol = ()  => collection(db, `adventures/${_aid()}/vttEmoteReactions`);
@@ -385,6 +391,7 @@ function _cleanup() {
   if (_lootUnsub) { _lootUnsub(); _lootUnsub = null; }
   if (_lootCloseOutside) { document.removeEventListener('mousedown', _lootCloseOutside, true); _lootCloseOutside = null; }
   _loot = { stash: [], loot: [] };
+  _mtClear(true);
   _presence = {}; _miniUid = null; _miniCharId = null;
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
@@ -605,6 +612,7 @@ function _initCanvas(container) {
     const wp = _stageToWorld(stagePtr);
     if (_tool === 'ruler' && _rulerActive)      _updateRuler(wp);
     if (_tool === 'draw'  && _drawing && !_pan) _updateDraw(wp);
+    if (_zoneCtx) _zoneUpdatePreview(wp);
   });
   _stage.on('mouseup', () => {
     _pan = false;
@@ -626,6 +634,7 @@ function _initCanvas(container) {
     if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
     if (e.target===_stage) {
       if (_suppressNextClick) { _suppressNextClick = false; return; }
+      if (_zoneCtx) { _zoneCtx.placed = !_zoneCtx.placed; return; }
       _deselect(); _deselectAnnot();
     }
   });
@@ -915,9 +924,23 @@ function _buildShape(t) {
       _toggleMultiSelect(t.id); return;
     }
     _clearMultiSelect();
-    if (_attackSrc && _attackSrc!==t.id) {
-      // Attaquant déjà désigné → clic sur une cible → lancer l'attaque
-      if (opts.deselectOutOfRange && !_isAttackTargetInRange(_attackSrc, t.id)) {
+
+    // Mode zone AoE actif → le clic verrouille / déverrouille le placement
+    if (_zoneCtx && t.id !== _zoneCtx.srcId) {
+      _zoneCtx.placed = !_zoneCtx.placed;
+      return;
+    }
+
+    // Mode ciblage multi-cibles actif → basculer la cible
+    if (_mtCtx && t.id !== _mtCtx.srcId) {
+      _mtToggleTarget(t.id);
+      return;
+    }
+
+    if (_attackSrc) {
+      // Attaquant désigné → clic sur n'importe quel token (y compris soi-même) = attaque/soin
+      // Vérification portée uniquement pour les cibles différentes
+      if (_attackSrc !== t.id && opts.deselectOutOfRange && !_isAttackTargetInRange(_attackSrc, t.id)) {
         _deselect();
         return;
       }
@@ -1443,6 +1466,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '✨', label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: fullFormula,
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           typeRules: spellTypeRules,
           damageTypeId: spellTypeId,
           damageTypeIcon: spellTypeObj?.icon || '',
@@ -1460,6 +1484,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '💚', label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: soinFormula,
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
         });
 
@@ -1468,6 +1493,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '🛡️', label: s.nom || `Sort ${idx+1}`,
           dice: s.ca || 'CA +2 (2 tours)',
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           isCaSort: true, halfOnMiss: false,
         });
 
@@ -1476,6 +1502,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '✨', label: s.nom || `Sort ${idx+1}`,
           dice: s.effet ? s.effet.slice(0, 40) : '—',
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           isUtil: true, halfOnMiss: false,
         });
       }
@@ -1533,7 +1560,7 @@ async function _execAttack(srcId, tgtId) {
               · 🎯 portée ${o.portee}
               ${o.isMagicWeapon ? `· <span style="color:#c084fc">🔮 élément à choisir</span>` : ''}
               ${!o.isMagicWeapon && o.damageTypeIcon ? `· <span style="color:${o.damageTypeColor||'#9ca3af'}">${o.damageTypeIcon}</span>` : ''}
-              ${(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles} cibles</span>`:''}
+              ${(o.zoneW>0||o.zoneH>0)?`· <span style="color:#fde047">📐 ${o.zoneW}×${o.zoneH}c</span>`:(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles} cibles</span>`:''}
               ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:o.pmCost===0&&o.basePm>0?`· <span style="color:#22c38e">✨ gratuit</span>`:''}
               ${o.traits?.length ? `· <span style="color:#b47fff">${o.traits.slice(0, 2).map(_esc).join(', ')}</span>` : ''}
             </div>
@@ -1553,14 +1580,30 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
 
   // Arme magique : choisir l'élément avant de continuer
   if (opt.isMagicWeapon) {
+    _mtPending = null; // sécurité
     _showElementPicker(srcId, tgtId, +idx);
+    return;
+  }
+
+  // Sort à zone AoE : entrer en mode placement (sauf si on revient d'une validation)
+  if ((opt.zoneW > 0 || opt.zoneH > 0) && opt.sortIdx !== undefined && !_mtPending) {
+    _startZonePlacement(srcId, tgtId, opt, +idx);
+    return;
+  }
+
+  // Sort multi-cibles : entrer en mode de sélection (sauf si on revient d'une validation)
+  if ((opt.nbCibles || 1) > 1 && opt.sortIdx !== undefined && !_mtPending) {
+    _startMultiTarget(srcId, tgtId, opt, +idx);
     return;
   }
 
   const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
   if (!src||!tgt) return;
   const lS=_live(src), lT=_live(tgt);
-  _atkCtx = { srcId, tgtId, opt, lS, lT };
+  // Si on arrive d'une validation multi-cibles, stocker les cibles dans le contexte
+  const allTargets = _mtPending && _mtPending.length > 0 ? [..._mtPending] : null;
+  _mtPending = null;
+  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets };
 
   const dist    = _tokenAttackDistance(src, tgt);
   const atkBase = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
@@ -1670,7 +1713,7 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
   openModal(`${opt.icon} ${opt.label}`, `
     <div class="vtt-form" style="min-width:260px;max-width:340px">
 
-      <!-- En-tête : retour + attaquant → cible -->
+      <!-- En-tête : retour + attaquant → cible(s) -->
       <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
         <button onclick="window._vttBackToAtk()"
           style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
@@ -1679,26 +1722,42 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
                  white-space:nowrap">
           ← Retour
         </button>
-        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem">
+        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;font-size:.82rem">
           <strong>${_esc(lS.displayName??src.name)}</strong>
           <span style="color:var(--text-dim);margin:0 .3rem">→</span>
-          <strong style="color:${opt.isHeal?'#22c38e':'#ef4444'}">${_esc(lT.displayName??tgt.name)}</strong>
+          ${allTargets && allTargets.length > 1
+            ? `<strong style="color:#4f8cff">🎯 ${allTargets.length} cibles</strong>`
+            : `<strong style="color:${opt.isHeal?'#22c38e':'#ef4444'}">${_esc(lT.displayName??tgt.name)}</strong>`}
         </div>
         <span style="flex-shrink:0;font-size:.62rem;color:var(--text-dim);background:var(--bg-elevated);
                      padding:.18rem .45rem;border-radius:999px">${dist}c</span>
       </div>
+      ${allTargets && allTargets.length > 1 ? `
+      <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.7rem">
+        ${allTargets.map(id => {
+          const td = _tokens[id]?.data;
+          const nm = td ? (_live(td).displayName ?? td.name ?? id) : id;
+          return `<span style="font-size:.65rem;padding:.15rem .45rem;border-radius:999px;
+            background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:#4f8cff">${_esc(nm)}</span>`;
+        }).join('')}
+      </div>` : ''}
 
       ${centerBlock}
 
-      <!-- Infos multi-cibles + PM -->
-      ${(opt.nbCibles||1) > 1 || opt.pmCost > 0 || (opt.pmCost===0 && opt.basePm>0) ? `
+      <!-- Infos zone / multi-cibles + PM -->
+      ${(opt.zoneW>0||opt.zoneH>0) || (opt.nbCibles||1) > 1 || opt.pmCost > 0 || (opt.pmCost===0 && opt.basePm>0) ? `
       <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem">
-        ${(opt.nbCibles||1)>1?`<span style="font-size:.7rem;color:#4f8cff;display:flex;align-items:center;gap:.25rem">
+        ${(opt.zoneW>0||opt.zoneH>0)?`<span style="font-size:.7rem;color:#f97316;display:flex;align-items:center;gap:.25rem">
+          📐 Zone <strong style="color:#fde047">${opt.zoneW}×${opt.zoneH} cases</strong>
+          · <strong>${allTargets?.length||1}</strong> cible${(allTargets?.length||1)>1?'s':''}
+          ${opt.pmCost===0&&opt.basePm>0?'<span style="color:#22c38e;font-size:.65rem">(PM déjà payé)</span>':''}
+        </span>`:''}
+        ${!(opt.zoneW>0||opt.zoneH>0)&&(opt.nbCibles||1)>1?`<span style="font-size:.7rem;color:#4f8cff;display:flex;align-items:center;gap:.25rem">
           🎯 <strong>${opt.nbCibles}</strong> cibles différentes
           ${opt.pmCost===0&&opt.basePm>0?'<span style="color:#22c38e;font-size:.65rem">(PM déjà payé)</span>':''}
         </span>`:''}
         ${opt.pmCost>0?`<span style="font-size:.7rem;color:#b47fff">✨ ${opt.pmCost} PM</span>`:''}
-        ${opt.pmCost===0&&opt.basePm>0&&(opt.nbCibles||1)<=1?`<span style="font-size:.7rem;color:#22c38e">✨ Gratuit</span>`:''}
+        ${opt.pmCost===0&&opt.basePm>0&&(opt.nbCibles||1)<=1&&!(opt.zoneW>0||opt.zoneH>0)?`<span style="font-size:.7rem;color:#22c38e">✨ Gratuit</span>`:''}
       </div>` : ''}
 
       <!-- Bouton Lancer -->
@@ -1823,6 +1882,377 @@ window._vttSetMode = (mode) => {
   if (inp) inp.value = mode;
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// MULTI-CIBLAGE — sélection visuelle pour les sorts multi-cibles
+// ═══════════════════════════════════════════════════════════════════
+
+/** Centre pixel d'un token dans le repère Konva. */
+function _tokenCenter(t) {
+  return { x: t.col * CELL + CELL / 2, y: t.row * CELL + CELL / 2 };
+}
+
+/** Dessine une ligne pointillée src→tgt sur le layer token. */
+function _mtDrawLine(srcData, tgtData, color) {
+  const K = window.Konva; if (!K || !_layers.token) return null;
+  const s = _tokenCenter(srcData), t = _tokenCenter(tgtData);
+  const line = new K.Line({
+    points: [s.x, s.y, t.x, t.y],
+    stroke: color || '#c084fc',
+    strokeWidth: 2.5,
+    dash: [10, 6],
+    lineCap: 'round',
+    opacity: 0.9,
+    listening: false,
+    name: 'mt-line',
+  });
+  _layers.token.add(line);
+  _layers.token.batchDraw();
+  return line;
+}
+
+/** Supprime toutes les lignes du contexte local. */
+function _mtClearLines() {
+  if (!_mtCtx?.lines) return;
+  _mtCtx.lines.forEach(l => l.destroy());
+  _mtCtx.lines.clear();
+  _layers.token?.batchDraw();
+}
+
+/** Supprime les lignes distantes (broadcast). */
+function _clearRemoteLines() {
+  _layers.token?.find('.remote-mt-line').forEach(l => l.destroy());
+  _layers.token?.batchDraw();
+}
+
+/** Affiche ou met à jour le HUD flottant. */
+function _mtRefreshHud() {
+  const existing = document.getElementById('vtt-mt-hud');
+  if (existing) existing.remove();
+  if (!_mtCtx) return;
+
+  const { opt, targets, maxTargets } = _mtCtx;
+  const names = targets.map(id => {
+    const td = _tokens[id]?.data;
+    return td ? (_live(td).displayName ?? td.name ?? id) : id;
+  });
+  const remaining = maxTargets - targets.length;
+
+  const div = document.createElement('div');
+  div.id = 'vtt-mt-hud';
+  div.className = 'vtt-mt-hud';
+  div.innerHTML = `
+    <div class="vtt-mt-hud-header">
+      <span>${opt.icon} <strong>${_esc(opt.label)}</strong></span>
+      <span class="vtt-mt-hud-count">${targets.length} / ${maxTargets}</span>
+    </div>
+    <div class="vtt-mt-hud-chips">
+      ${names.map(n => `<span class="vtt-mt-chip vtt-mt-chip--sel">${_esc(n)}</span>`).join('')}
+      ${remaining > 0 ? `<span class="vtt-mt-chip vtt-mt-chip--empty">+${remaining} cible${remaining > 1 ? 's' : ''}</span>` : ''}
+    </div>
+    <div class="vtt-mt-hud-hint">Cliquez sur les tokens cibles · Entrée = valider</div>
+    <div class="vtt-mt-hud-actions">
+      <button class="vtt-mt-btn-cancel" onclick="window._mtCancel()">✕ Annuler</button>
+      <button class="vtt-mt-btn-validate" onclick="window._mtValidate()"
+        ${targets.length === 0 ? 'disabled' : ''}>✓ Valider (${targets.length})</button>
+    </div>`;
+  document.body.appendChild(div);
+
+  // Entrée = valider
+  const _hudKey = e => { if (e.key === 'Enter') window._mtValidate(); if (e.key === 'Escape') window._mtCancel(); };
+  div._hudKey = _hudKey;
+  document.addEventListener('keydown', _hudKey, { once: false });
+  div._removeKey = () => document.removeEventListener('keydown', _hudKey);
+}
+
+/** Broadcast l'état du ciblage à tous les clients via Firestore. */
+async function _mtBroadcast() {
+  const uid = STATE.user?.uid || 'anon';
+  if (!_mtCtx) {
+    await setDoc(_castingRef(uid), { active: false }, { merge: true }).catch(() => {});
+    return;
+  }
+  const { srcId, targets, opt } = _mtCtx;
+  await setDoc(_castingRef(uid), {
+    active: true, srcId, targets,
+    spellName: opt.label, spellIcon: opt.icon,
+    pageId: _activePage?.id || null,
+    updatedAt: Date.now(),
+  }).catch(() => {});
+}
+
+/** Supprime lignes, HUD, contexte et broadcast. */
+function _mtClear(broadcast = true) {
+  _zoneClear();
+  const hud = document.getElementById('vtt-mt-hud');
+  if (hud?._removeKey) hud._removeKey();
+  hud?.remove();
+  _mtClearLines();
+  _mtCtx = null;
+  if (broadcast) {
+    const uid = STATE.user?.uid || 'anon';
+    setDoc(_castingRef(uid), { active: false }, { merge: true }).catch(() => {});
+  }
+}
+
+/** Entre en mode ciblage pour un sort multi-cibles. */
+function _startMultiTarget(srcId, firstTgtId, opt, optIdx) {
+  _mtClear(false);
+  _mtCtx = { srcId, opt, optIdx, targets: [firstTgtId], maxTargets: opt.nbCibles, lines: new Map() };
+
+  const srcData = _tokens[srcId]?.data, tgtData = _tokens[firstTgtId]?.data;
+  if (srcData && tgtData) {
+    const line = _mtDrawLine(srcData, tgtData);
+    if (line) _mtCtx.lines.set(firstTgtId, line);
+  }
+
+  _mtRefreshHud();
+  _mtBroadcast();
+}
+
+/** Bascule une cible dans/hors de la sélection. */
+function _mtToggleTarget(tgtId) {
+  if (!_mtCtx) return;
+  const { srcId, targets, maxTargets, lines } = _mtCtx;
+  const idx = targets.indexOf(tgtId);
+
+  if (idx !== -1) {
+    targets.splice(idx, 1);
+    lines.get(tgtId)?.destroy();
+    lines.delete(tgtId);
+    _layers.token?.batchDraw();
+  } else {
+    if (targets.length >= maxTargets) {
+      showNotif(`Maximum ${maxTargets} cibles pour ce sort`, 'error');
+      return;
+    }
+    const srcData = _tokens[srcId]?.data, tgtData = _tokens[tgtId]?.data;
+    if (srcData && tgtData) {
+      const dist = _tokenAttackDistance(srcData, tgtData);
+      if (dist > (_mtCtx.opt.portee || 1)) {
+        showNotif(`Hors de portée (${dist}c — portée du sort : ${_mtCtx.opt.portee}c)`, 'error');
+        return;
+      }
+    }
+    targets.push(tgtId);
+    if (srcData && tgtData) {
+      const line = _mtDrawLine(srcData, tgtData);
+      if (line) lines.set(tgtId, line);
+    }
+  }
+
+  _mtRefreshHud();
+  _mtBroadcast();
+}
+
+window._mtCancel = () => { _mtClear(); showNotif('Ciblage annulé', 'info'); };
+
+window._mtValidate = () => {
+  if (!_mtCtx || _mtCtx.targets.length === 0) return;
+  const { srcId, opt, optIdx, targets } = _mtCtx;
+
+  // Stocker les cibles avant de vider le contexte
+  _mtPending = [...targets];
+  _mtClear(true);
+
+  // Rouvrir le modal d'attaque pour cette sélection (en sautant le re-ciblage)
+  // On utilise la première cible comme tgtId pour l'affichage modal
+  const firstTgt = targets[0];
+  const cacheKey = `${srcId}__${firstTgt}`;
+  // Le cache peut ne pas exister pour firstTgt si ce n'est pas la cible initiale
+  // → on reconstruire le cache pour cette cible
+  const src = _tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
+  const tgtData = _tokens[firstTgt]?.data; if (!tgtData) { _mtPending = null; return; }
+  const options = _buildAttackOptions(src);
+  const dist    = _tokenAttackDistance(src, tgtData);
+  const inRange = options.filter(o => dist <= o.portee);
+  _atkOptsCache[cacheKey] = inRange;
+
+  // Appeler _vttPickOpt — _mtPending non null empêche la re-entrée en mode ciblage
+  window._vttPickOpt(srcId, firstTgt, optIdx);
+};
+
+// ── Zone AoE ──────────────────────────────────────────────────────────
+
+/** Supprime la prévisualisation zone et son HUD. */
+function _zoneClear() {
+  const hud = document.getElementById('vtt-zone-hud');
+  if (hud?._removeKey) hud._removeKey();
+  hud?.remove();
+  _zonePreview?.destroy();
+  _zonePreview = null;
+  _zoneCtx = null;
+  _layers.token?.batchDraw();
+}
+
+/** (Re)Construit le rectangle Konva de prévisualisation. */
+function _buildZonePreview() {
+  if (!_zoneCtx || !_layers.token) return;
+  _zonePreview?.destroy();
+  const K = window.Konva;
+  const { wPx, hPx, x, y } = _zoneCtx;
+  const group = new K.Group({ x, y, listening: false, name: 'zone-preview' });
+  group.add(new K.Rect({
+    x: -wPx / 2, y: -hPx / 2,
+    width: wPx, height: hPx,
+    fill: 'rgba(253,224,71,0.22)',
+    stroke: '#fde047',
+    strokeWidth: 3, dash: [10, 5],
+    cornerRadius: 3, listening: false,
+  }));
+  // Halo intérieur pour la lisibilité sur fond clair ou sombre
+  group.add(new K.Rect({
+    x: -wPx / 2 + 2, y: -hPx / 2 + 2,
+    width: wPx - 4, height: hPx - 4,
+    fill: 'transparent',
+    stroke: 'rgba(253,224,71,0.45)',
+    strokeWidth: 1, listening: false,
+  }));
+  group.add(new K.Text({
+    x: -wPx / 2 + 5, y: -hPx / 2 + 4,
+    text: `${_zoneCtx.opt.zoneW}×${_zoneCtx.opt.zoneH}c`,
+    fill: '#fde047', fontSize: 11, fontStyle: 'bold', listening: false,
+  }));
+  _layers.token.add(group);
+  _zonePreview = group;
+  _layers.token.batchDraw();
+}
+
+/** Déplace la prévisualisation si la zone n'est pas posée. */
+function _zoneUpdatePreview(wp) {
+  if (!_zoneCtx || !_zonePreview || _zoneCtx.placed) return;
+  const { wPx, hPx } = _zoneCtx;
+  // Snapper le coin haut-gauche sur la grille (pas le centre)
+  const snapX = Math.round((wp.x - wPx / 2) / CELL) * CELL + wPx / 2;
+  const snapY = Math.round((wp.y - hPx / 2) / CELL) * CELL + hPx / 2;
+  _zoneCtx.x = snapX; _zoneCtx.y = snapY;
+  _zonePreview.position({ x: snapX, y: snapY });
+  _layers.token.batchDraw();
+}
+
+/** Affiche le HUD de placement de zone. */
+function _showZoneHud() {
+  document.getElementById('vtt-zone-hud')?.remove();
+  const opt = _zoneCtx.opt;
+  const hud = document.createElement('div');
+  hud.id = 'vtt-zone-hud';
+  hud.className = 'vtt-mt-hud';
+  hud.innerHTML = `
+    <div class="vtt-mt-hud-header">
+      <span>${_esc(opt.icon || '✨')} ${_esc(opt.label)}</span>
+      <span class="vtt-mt-hud-count" style="color:#fde047;background:rgba(253,224,71,.12);border-color:rgba(253,224,71,.35)">📐 ${opt.zoneW}×${opt.zoneH} cases</span>
+    </div>
+    <div class="vtt-zone-hint">
+      Déplacez · Clic = poser/reprendre · <kbd>R</kbd> = tourner · <kbd>Entrée</kbd> = valider
+    </div>
+    <div class="vtt-mt-hud-actions">
+      <button class="vtt-mt-btn-cancel"   onclick="window._zoneCancel()">✕ Annuler</button>
+      <button class="vtt-mt-btn-validate" onclick="window._zoneValidate()">✓ Valider</button>
+    </div>`;
+  const onKey = e => {
+    if (e.key === 'Enter')              { e.preventDefault(); window._zoneValidate(); }
+    if (e.key === 'Escape')             window._zoneCancel();
+    if (e.key === 'r' || e.key === 'R') window._zoneRotate();
+  };
+  document.addEventListener('keydown', onKey);
+  hud._removeKey = () => document.removeEventListener('keydown', onKey);
+  document.body.appendChild(hud);
+}
+
+/** Entre en mode placement de zone pour un sort AoE. */
+function _startZonePlacement(srcId, tgtId, opt, optIdx) {
+  _zoneClear();
+  _mtCtx = null; // annuler multi-cibles sans broadcast (zone prend la main)
+  const wPx = opt.zoneW * CELL;  // zoneW/H = nombre de cases
+  const hPx = opt.zoneH * CELL;
+  _zoneCtx = { srcId, tgtId, opt, optIdx, wPx, hPx, x: 0, y: 0, placed: false };
+  _buildZonePreview();
+  _showZoneHud();
+}
+
+window._zoneCancel = () => { _zoneClear(); showNotif('Zone annulée', 'info'); };
+
+window._zoneRotate = () => {
+  if (!_zoneCtx) return;
+  [_zoneCtx.wPx, _zoneCtx.hPx] = [_zoneCtx.hPx, _zoneCtx.wPx];
+  _buildZonePreview();
+  _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
+  _layers.token?.batchDraw();
+};
+
+window._zoneValidate = () => {
+  if (!_zoneCtx) return;
+  const { srcId, opt, wPx, hPx, x, y } = _zoneCtx;
+
+  // Vérification portée : centre de la zone vs lanceur
+  const srcData = _tokens[srcId]?.data;
+  if (srcData) {
+    const sc = _tokenCenter(srcData);
+    const distCells = Math.hypot(x - sc.x, y - sc.y) / CELL;
+    if (distCells > (opt.portee || 1) + 0.5) {
+      showNotif(`Zone hors de portée (${Math.round(distCells)}c — portée : ${opt.portee}c)`, 'error');
+      return;
+    }
+  }
+
+  // Détection des tokens dans le rectangle (centré sur x, y)
+  const x1 = x - wPx / 2, x2 = x + wPx / 2;
+  const y1 = y - hPx / 2, y2 = y + hPx / 2;
+  const targets = Object.values(_tokens)
+    .filter(e => {
+      if (!e.data || e.data.pageId !== _activePage?.id) return false;
+      if (!e.data.visible && !STATE.isAdmin) return false;
+      // Exclure le lanceur seulement pour les sorts offensifs (soin/buff zone peut se cibler)
+      if (e.data.id === srcId && !opt.isHeal && !opt.isCaSort && !opt.isUtil) return false;
+      const tc = _tokenCenter(e.data);
+      return tc.x >= x1 && tc.x <= x2 && tc.y >= y1 && tc.y <= y2;
+    })
+    .map(e => e.data.id);
+
+  if (!targets.length) {
+    showNotif('Aucune cible dans la zone', 'error');
+    return;
+  }
+
+  const { optIdx } = _zoneCtx;
+  _zoneClear();
+
+  // Flux identique à multi-cibles : stocker les cibles, ouvrir la modale d'attaque
+  _mtPending = targets;
+  const firstTgt = targets[0];
+  const src = _tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
+  if (!_tokens[firstTgt]?.data) { _mtPending = null; return; }
+  // Le sort zone est mis seul dans le cache à l'index 0 (portée déjà vérifiée sur la zone)
+  _atkOptsCache[`${srcId}__${firstTgt}`] = [opt];
+  window._vttPickOpt(srcId, firstTgt, 0);
+};
+
+/** Rendu des lignes de ciblage distantes (broadcast Firestore). */
+function _renderRemoteCastings(docs) {
+  if (!_layers.token) return;
+  _clearRemoteLines();
+  const myUid = STATE.user?.uid;
+  docs.forEach(d => {
+    const c = d.data();
+    if (!c.active || c.pageId !== _activePage?.id || d.id === myUid) return;
+    const srcEntry = Object.values(_tokens).find(e => e.data?.id === c.srcId);
+    if (!srcEntry) return;
+    (c.targets || []).forEach(tgtId => {
+      const tgtEntry = Object.values(_tokens).find(e => e.data?.id === tgtId);
+      if (!tgtEntry) return;
+      const K = window.Konva;
+      const s = _tokenCenter(srcEntry.data), t = _tokenCenter(tgtEntry.data);
+      const line = new K.Line({
+        points: [s.x, s.y, t.x, t.y],
+        stroke: '#4f8cff', strokeWidth: 2,
+        dash: [10, 6], lineCap: 'round',
+        opacity: 0.55, listening: false, name: 'remote-mt-line',
+      });
+      _layers.token.add(line);
+    });
+  });
+  _layers.token.batchDraw();
+}
+
 window._vttRollAttack = async () => {
   const ctx = _atkCtx; if (!ctx) return;
   const mode     = document.getElementById('atk-mode')?.value || 'normal';
@@ -1831,9 +2261,11 @@ window._vttRollAttack = async () => {
   closeModalDirect();
   _atkCtx = null;
 
-  const { srcId, tgtId, opt, lS, lT } = ctx;
+  const { srcId, tgtId, opt, lS, lT, allTargets } = ctx;
   const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
   if (!src||!tgt) return;
+  // Liste des cibles : multi si allTargets, sinon cible unique
+  const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
 
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
   const _deductPm  = async () => {
@@ -1903,36 +2335,66 @@ window._vttRollAttack = async () => {
       return;
     }
 
-    // ── Soin : roll du soin, ajout de PV à la cible ─────────────────
+    // ── Soin : roll partagé, appliqué à toutes les cibles ───────────
     if (opt.isHeal) {
       const diceToRoll = opt.rawDice || opt.dice;
       const healFixed  = (opt.maitriseBonus || 0) + bonusDmg;
       const healRaw    = _rollDice(diceToRoll);
       const healTotal  = Math.max(1, healRaw + healFixed);
-      const curHp  = lT.displayHp ?? 20, hpMax = lT.displayHpMax ?? 20;
-      const newHp  = Math.min(hpMax, curHp + healTotal);
-      await _setHp(tgt, newHp);
       await _deductPm();
       await _markAttacked();
-      const rHeal = _handleMultiCast();
-      await addDoc(_logCol(), {
-        type:'attack', isHeal:true,
-        authorId: STATE.user?.uid||null, authorName,
-        attackerName: lS.displayName??src.name,
-        characterImage: lS.displayImage||null,
-        defenderName: lT.displayName??tgt.name,
-        optLabel: opt.label,
-        dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
-        dmgMaitriseBonus: opt.maitriseBonus??0,
-        dmgRaw: healRaw, dmgBonus: bonusDmg, dmgTotal: healTotal,
-        newHp, hpMax,
-        createdAt: serverTimestamp(),
-      }).catch(()=>{});
-      showNotif(`💚 ${healTotal} PV soignés → ${lT.displayName??tgt.name}${_ciblSuffix(rHeal)}`, 'success');
+
+      // Appliquer à chaque cible
+      const healResults = [];
+      for (const curTgtId of targetIds) {
+        const curTgtData = _tokens[curTgtId]?.data; if (!curTgtData) continue;
+        const lCur = _live(curTgtData);
+        const curHp = lCur.displayHp ?? 20, hpMax = lCur.displayHpMax ?? 20;
+        const newHp = Math.min(hpMax, curHp + healTotal);
+        await _setHp(curTgtData, newHp);
+        healResults.push({ name: lCur.displayName ?? curTgtData.name, newHp, hpMax });
+      }
+
+      const isMultiHeal = healResults.length > 1;
+      if (isMultiHeal) {
+        await addDoc(_logCol(), {
+          type: 'attack-multi', isHeal: true,
+          authorId: STATE.user?.uid||null, authorName,
+          attackerName: lS.displayName??src.name,
+          characterImage: lS.displayImage||null,
+          optLabel: opt.label,
+          isCrit: false, isFumble: false, advMode: mode,
+          hitD20: null, hitTotal: null,
+          dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+          dmgMaitriseBonus: opt.maitriseBonus??0,
+          dmgRaw: healRaw, dmgBonus: bonusDmg,
+          targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: null })),
+          createdAt: serverTimestamp(),
+        }).catch(()=>{});
+        showNotif(`💚 ${healTotal} PV soignés → ${healResults.map(r=>r.name).join(', ')}`, 'success');
+      } else {
+        const r = healResults[0];
+        if (r) {
+          await addDoc(_logCol(), {
+            type:'attack', isHeal:true,
+            authorId: STATE.user?.uid||null, authorName,
+            attackerName: lS.displayName??src.name,
+            characterImage: lS.displayImage||null,
+            defenderName: r.name,
+            optLabel: opt.label,
+            dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+            dmgMaitriseBonus: opt.maitriseBonus??0,
+            dmgRaw: healRaw, dmgBonus: bonusDmg, dmgTotal: healTotal,
+            newHp: r.newHp, hpMax: r.hpMax,
+            createdAt: serverTimestamp(),
+          }).catch(()=>{});
+          showNotif(`💚 ${healTotal} PV soignés → ${r.name}`, 'success');
+        }
+      }
       return;
     }
 
-    // ── Attaque offensive ─────────────────────────────────────────────
+    // ── Attaque offensive — un seul roll d20, appliqué à chaque cible ──
     const roll1    = Math.floor(Math.random()*20)+1;
     const roll2    = mode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
     const d20      = mode === 'adv' ? Math.max(roll1, roll2)
@@ -1946,98 +2408,126 @@ window._vttRollAttack = async () => {
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
     const missEffect = rules.missEffect || 'none';
-    const rawCA      = lT.displayDefense ?? 10;
-    const targetCA   = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
-    const hit        = isCrit ? true : isFumble ? false : hitTotal >= targetCA;
 
     const diceToRoll = opt.rawDice || opt.dice;
     const dmgFixed   = opt.rawDice !== undefined ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0)) : 0;
     const totalFixed = dmgFixed + bonusDmg + typeDmgBon;
 
-    let dmgRaw=0, dmgTotal=0, critNormalMax=0, critRaw2=0, critFixed2=0;
-    let halfDmg = false;
-    if (hit) {
+    // ── Dés tirés UNE SEULE fois, partagés entre toutes les cibles ──────
+    let sharedDmgRaw = 0, sharedDmgTotalHit = 0, sharedDmgTotalHalf = 0;
+    let sharedCritNormalMax = 0, sharedCritRaw2 = 0, sharedCritFixed2 = 0;
+    if (!isFumble) {
       if (isCrit) {
-        critNormalMax = _maxDice(diceToRoll) + totalFixed;
-        critRaw2      = _rollDice(diceToRoll);
-        critFixed2    = totalFixed;
-        dmgRaw        = critRaw2;
-        dmgTotal      = critNormalMax + critRaw2 + critFixed2;
+        sharedCritNormalMax = _maxDice(diceToRoll) + totalFixed;
+        sharedCritRaw2      = _rollDice(diceToRoll);
+        sharedCritFixed2    = totalFixed;
+        sharedDmgRaw        = sharedCritRaw2;
+        sharedDmgTotalHit   = sharedCritNormalMax + sharedCritRaw2 + sharedCritFixed2;
       } else {
-        dmgRaw   = _rollDice(diceToRoll);
-        dmgTotal = Math.max(1, dmgRaw + totalFixed);
+        sharedDmgRaw      = _rollDice(diceToRoll);
+        sharedDmgTotalHit = Math.max(1, sharedDmgRaw + totalFixed);
       }
-    } else if (missEffect !== 'none' && !isFumble) {
-      // Dégâts sur raté selon la règle du type (sauf fumble = 0 toujours)
-      dmgRaw = _rollDice(diceToRoll);
-      if (missEffect === 'half') {
-        halfDmg  = true;
-        dmgTotal = Math.max(1, Math.floor(Math.max(1, dmgRaw + totalFixed) / 2));
-      } else { // 'full'
-        dmgTotal = Math.max(1, dmgRaw + totalFixed);
-      }
+      if (missEffect === 'half')  sharedDmgTotalHalf = Math.max(1, Math.floor(sharedDmgTotalHit / 2));
+      else if (missEffect === 'full') sharedDmgTotalHalf = sharedDmgTotalHit;
     }
 
-    const curHp = lT.displayHp??20, hpMax = lT.displayHpMax??20;
-    let newHp = curHp;
-
-    if (hit || halfDmg) {
-      if (tgt.type==='enemy' && tgt.beastId) {
-        // Frappe une créature bestiaire (joueur ou MJ)
-        // pvCombatHp stocké sur le token → un seul write, tous les clients reçoivent via onSnapshot
-        const bEnt    = _bestiary[tgt.beastId];
-        const realMax = _numOr(bEnt?.pvMax, 20);
-        const realCur = tgt.hp !== null ? _numOr(tgt.hp, realMax) : realMax;
-        newHp = Math.max(0, realCur - dmgTotal);
-        const prevEstHp = tgt.pvCombatHp != null
-          ? Math.max(0, parseInt(tgt.pvCombatHp) || 0)
-          : (lT.displayHpMax ?? realMax);
-        const newEstHp = Math.max(0, prevEstHp - dmgTotal);
-        await updateDoc(_tokRef(tgt.id), { hp: newHp, pvCombatHp: newEstHp });
-      } else {
-        newHp = Math.max(0, curHp - dmgTotal);
-        await _setHp(tgt, newHp);
-      }
-    }
     await _deductPm();
     await _markAttacked();
-    const rAtk = _handleMultiCast();
 
-    await addDoc(_logCol(),{
-      type: 'attack',
-      authorId: STATE.user?.uid||null, authorName,
-      attackerName: lS.displayName??src.name,
-      characterImage: lS.displayImage||null,
-      defenderName: lT.displayName??tgt.name,
-      optLabel: opt.label,
-      isCrit, isFumble,
-      advMode: mode,
-      hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
-      hitBase: atkBase, hitBonus: bonusHit, hitTotal,
-      hitToucherMod:      opt.toucherMod ?? null,
-      hitToucherSetBonus: opt.toucherSetBonus ?? 0,
-      hitToucherStatLabel:opt.toucherStatLabel ?? null,
-      targetCA, hit,
-      dmgFormula: opt.dice, dmgRawDice: opt.rawDice || null,
-      dmgStatMod: opt.dmgStatMod ?? null, dmgStatLabel: opt.dmgStatLabel ?? null,
-      dmgMaitriseBonus: opt.maitriseBonus ?? 0,
-      dmgRaw, dmgBonus: bonusDmg, dmgTotal,
-      critNormalMax, critRaw2, critFixed2,
-      halfDmg, newHp, hpMax,
-      damageTypeId:    opt.damageTypeId    || null,
-      damageTypeIcon:  opt.damageTypeIcon  || null,
-      damageTypeColor: opt.damageTypeColor || null,
-      createdAt: serverTimestamp(),
-    }).catch(()=>{});
+    // ── Appliquer les HP + collecter résultats par cible ──────────────
+    const targetResults = [];
+    for (const curTgtId of targetIds) {
+      const curTgtData = _tokens[curTgtId]?.data;
+      if (!curTgtData) continue;
+      const lCurTgt = _live(curTgtData);
 
-    const _baseNotif =
-      isFumble    ? `💀 Échec critique !`
-      : halfDmg   ? `✦ ${dmgTotal} dégâts (½) → ${lT.displayName??tgt.name}`
-      : !hit      ? `🎯 Raté ! (${hitTotal})`
-      : newHp===0 ? `💀 ${lT.displayName??tgt.name} tombe à 0 PV !`
-      : isCrit    ? `💥 Critique ! ${dmgTotal} dégâts → ${lT.displayName??tgt.name}`
-                  : `⚔️ ${dmgTotal} dégâts → ${lT.displayName??tgt.name}`;
-    showNotif(_baseNotif + _ciblSuffix(rAtk), (hit || halfDmg) ? 'success' : 'error');
+      const rawCA    = lCurTgt.displayDefense ?? 10;
+      const targetCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+      const hit      = isCrit ? true : isFumble ? false : hitTotal >= targetCA;
+      const halfDmg  = !hit && missEffect !== 'none' && !isFumble;
+      const dmgTotal = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
+
+      const curHp = lCurTgt.displayHp ?? 20, hpMax = lCurTgt.displayHpMax ?? 20;
+      let newHp = curHp;
+      if (hit || halfDmg) {
+        if (curTgtData.type === 'enemy' && curTgtData.beastId) {
+          const bEnt    = _bestiary[curTgtData.beastId];
+          const realMax = _numOr(bEnt?.pvMax, 20);
+          const realCur = curTgtData.hp !== null ? _numOr(curTgtData.hp, realMax) : realMax;
+          newHp = Math.max(0, realCur - dmgTotal);
+          const prevEst = curTgtData.pvCombatHp != null ? Math.max(0, parseInt(curTgtData.pvCombatHp)||0) : (lCurTgt.displayHpMax??realMax);
+          await updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: Math.max(0, prevEst - dmgTotal) });
+        } else {
+          newHp = Math.max(0, curHp - dmgTotal);
+          await _setHp(curTgtData, newHp);
+        }
+      }
+      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, newHp, hpMax });
+    }
+
+    // ── Un seul message dans le log ────────────────────────────────────
+    const isMulti = targetResults.length > 1;
+    if (isMulti) {
+      await addDoc(_logCol(), {
+        type: 'attack-multi',
+        authorId: STATE.user?.uid||null, authorName,
+        attackerName: lS.displayName??src.name,
+        characterImage: lS.displayImage||null,
+        optLabel: opt.label,
+        isCrit, isFumble, advMode: mode,
+        hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
+        hitBase: atkBase, hitBonus: bonusHit, hitTotal,
+        hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
+        hitToucherStatLabel: opt.toucherStatLabel??null,
+        dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+        dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
+        dmgMaitriseBonus: opt.maitriseBonus??0,
+        dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg,
+        critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
+        damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
+        damageTypeColor: opt.damageTypeColor||null,
+        targets: targetResults,
+        createdAt: serverTimestamp(),
+      }).catch(()=>{});
+    } else {
+      const r = targetResults[0];
+      if (r) await addDoc(_logCol(), {
+        type: 'attack',
+        authorId: STATE.user?.uid||null, authorName,
+        attackerName: lS.displayName??src.name,
+        characterImage: lS.displayImage||null,
+        defenderName: r.name,
+        optLabel: opt.label,
+        isCrit, isFumble, advMode: mode,
+        hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
+        hitBase: atkBase, hitBonus: bonusHit, hitTotal,
+        hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
+        hitToucherStatLabel: opt.toucherStatLabel??null,
+        targetCA: r.targetCA, hit: r.hit,
+        dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+        dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
+        dmgMaitriseBonus: opt.maitriseBonus??0,
+        dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgTotal: r.dmgTotal,
+        critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
+        halfDmg: r.halfDmg, newHp: r.newHp, hpMax: r.hpMax,
+        damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
+        damageTypeColor: opt.damageTypeColor||null,
+        createdAt: serverTimestamp(),
+      }).catch(()=>{});
+    }
+
+    // Notif consolidée
+    const notifParts = targetResults.map(r => {
+      const nm = r.name;
+      return isFumble    ? `💀 Fumble`
+           : r.halfDmg  ? `✦ ${r.dmgTotal}(½) → ${nm}`
+           : !r.hit     ? `🎯 Raté vs ${nm}`
+           : r.newHp===0 ? `💀 ${nm} tombe !`
+           : isCrit     ? `💥 Crit! ${r.dmgTotal} → ${nm}`
+                        : `⚔️ ${r.dmgTotal} → ${nm}`;
+    });
+    const anyHit = targetResults.some(r => r.hit || r.halfDmg);
+    showNotif(notifParts.join(' · '), anyHit ? 'success' : 'error');
 
   } catch { showNotif('Erreur attaque','error'); }
   finally { _cleanup(); }
@@ -2918,7 +3408,12 @@ function _initListeners() {
     _layers.draw?.batchDraw();
   }, () => {}));
 
-  // 8. Pings + présence temps réel
+  // 8. Ciblage multi-sorts temps réel (lignes pointillées broadcast)
+  _unsubs.push(onSnapshot(_castingCol(), snap => {
+    _renderRemoteCastings(snap.docs);
+  }, () => {}));
+
+  // 9. Pings + présence temps réel
   _unsubs.push(onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
 
@@ -2939,7 +3434,7 @@ function _initListeners() {
     _renderPings(pings);
   }, () => {})); // silencieux si pas de règle Firestore
 
-  // 8. Réactions émotes temps réel
+  // 10. Réactions émotes temps réel
   _unsubs.push(onSnapshot(_reactionsCol(), snap => {
     const now = Date.now();
     snap.docs.forEach(d => {
@@ -2956,7 +3451,7 @@ function _initListeners() {
     console.error('[vtt] réactions émotes — erreur listener:', err);
   }));
 
-  // 9. Chat / Log de dés
+  // 11. Chat / Log de dés
   _unsubs.push(onSnapshot(_logCol(), snap => {
     const msgs=snap.docs
       .map(d=>({id:d.id,...d.data()}))
@@ -3528,6 +4023,74 @@ function _renderChatLog(msgs) {
           <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
         </div>
         <div id="${detailId}" style="display:none;padding-left:calc(22px + .35rem);margin-top:.15rem">${detailHtml}</div>
+      </div>`;
+    }
+    if (m.type==='attack-multi') {
+      const sn  = n => n>0?`+${n}`:n<0?`${n}`:'';
+      const sub = t => `<span style="font-size:.6rem;color:var(--text-dim)">(${t})</span>`;
+      const isCrit = m.isCrit, isFumble = m.isFumble;
+      const borderCol = isCrit ? '#f59e0b' : isFumble ? '#7f1d1d' : '#b47fff';
+      const bgRgb     = isCrit ? '245,158,11' : isFumble ? '127,29,29' : '180,127,255';
+      const accentCol = isCrit ? '#f59e0b' : m.targets?.some(r=>r.hit) ? '#22c38e' : '#ef4444';
+      const resultBadge = isCrit
+        ? `<span style="font-size:.68rem;font-weight:700;color:#f59e0b">💥 CRITIQUE</span>`
+        : isFumble ? `<span style="font-size:.68rem;font-weight:700;color:#ef4444">💀 FUMBLE</span>` : '';
+      const rolls   = Array.isArray(m.hitD20rolls) && m.hitD20rolls.length > 1 ? m.hitD20rolls : null;
+      const advIcon = m.advMode === 'adv' ? '⬆' : m.advMode === 'dis' ? '⬇' : '';
+      const diceDisp = rolls ? `1d20(${rolls[0]},${rolls[1]}${advIcon}→${m.hitD20})` : `1d20(${m.hitD20})`;
+      const hitFormula = m.hitToucherStatLabel != null
+        ? [diceDisp,
+           m.hitToucherMod ? sn(m.hitToucherMod)+sub(m.hitToucherStatLabel) : '',
+           m.hitToucherSetBonus > 0 ? `+${m.hitToucherSetBonus}`+sub('Set') : '',
+           m.hitBonus ? sn(m.hitBonus)+sub('bonus') : '',
+          ].filter(Boolean).join(' ')
+        : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`;
+      // Formule dégâts commune
+      const baseDice = _esc(m.dmgRawDice || m.dmgFormula || '');
+      const dmgMods  = [
+        m.dmgStatMod ? sn(m.dmgStatMod)+sub(m.dmgStatLabel||'') : '',
+        m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}`+sub('Maîtrise') : '',
+        m.dmgBonus ? sn(m.dmgBonus)+sub('bonus') : '',
+      ].filter(Boolean).join(' ');
+      const dmgFormStr = isCrit && m.critNormalMax
+        ? `max(${m.critNormalMax}) + ${baseDice}(${m.dmgRaw}) ${dmgMods}`
+        : `${baseDice}(${m.dmgRaw}) ${dmgMods}`;
+      const atkWho = m.attackerName || m.authorName || '?';
+      const detailId = `vtt-d-${i}`;
+      // Grille des cibles
+      const targetsHtml = (m.targets || []).map(r => {
+        const hitCol  = r.hit ? '#22c38e' : r.halfDmg ? '#b47fff' : '#6b7280';
+        const hitIcon = r.hit ? '✓' : r.halfDmg ? '✦' : '✗';
+        const dmgStr  = (r.hit || r.halfDmg) ? `<strong style="color:${hitCol}">${r.dmgTotal}</strong>${r.halfDmg?' <span style="font-size:.6rem;color:#b47fff">½</span>':''}${r.newHp===0?' 💀':''}` : '';
+        return `<div style="display:flex;align-items:center;gap:.3rem;padding:.1rem 0">
+          <span style="font-size:.72rem;color:${hitCol};font-weight:700;width:.85rem;text-align:center">${hitIcon}</span>
+          <span style="font-size:.72rem;flex:1;color:var(--text-soft)">${_esc(r.name)}</span>
+          <span style="font-size:.65rem;color:var(--text-dim)">CA${r.targetCA}</span>
+          ${dmgStr ? `<span style="font-size:.75rem">${dmgStr}</span>` : ''}
+        </div>`;
+      }).join('');
+      return `<div class="vtt-log-entry vtt-log-roll"
+          style="border-left:3px solid ${borderCol};padding:.3rem .3rem .3rem .5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.2rem">
+          ${_portrait(m.characterImage, atkWho, borderCol)}
+          <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_esc(atkWho)}</span>
+          <span style="color:var(--text-dim);font-size:.72rem">✨</span>
+          <strong style="font-size:.82rem">${_esc(m.optLabel||'')}</strong>
+          <span style="font-size:.65rem;color:#b47fff">🎯 ${(m.targets||[]).length} cibles</span>
+          ${_right(resultBadge, ts)}
+        </div>
+        <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
+          <span style="font-size:.72rem">🎯</span>
+          <strong style="font-size:1rem;color:${accentCol}">${m.hitTotal}</strong>
+          <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
+        </div>
+        <div style="padding-left:calc(22px + .35rem);margin-top:.25rem;border-top:1px solid rgba(255,255,255,.06);padding-top:.2rem">
+          ${targetsHtml}
+        </div>
+        <div id="${detailId}" style="display:none;padding-left:calc(22px + .35rem);margin-top:.2rem;border-top:1px solid rgba(255,255,255,.06);padding-top:.2rem">
+          <div style="font-size:.65rem;color:var(--text-dim)">🎯 ${hitFormula} = <strong style="color:${accentCol}">${m.hitTotal}</strong></div>
+          <div style="font-size:.65rem;color:var(--text-dim);margin-top:.1rem">⚔️ ${dmgFormStr}</div>
+        </div>
       </div>`;
     }
     if (m.type==='attack') {
