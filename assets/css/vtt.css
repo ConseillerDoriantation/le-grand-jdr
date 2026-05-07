@@ -2082,6 +2082,169 @@
 }
 .vtt-dice-roll-btn:disabled { opacity: .4; cursor: not-allowed; }
 
+/* ── Sons & Musique ─────────────────────────────────────────────── */
+.vtt-music-float {
+  position: absolute; bottom: 14px; left: 152px; z-index: 10;
+  display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
+}
+.vtt-music-trigger {
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, box-shadow .12s;
+  box-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+.vtt-music-trigger:hover { background: var(--bg-elevated); box-shadow: 0 3px 14px rgba(0,0,0,.55); }
+.vtt-music-trigger.active { border-color: var(--gold); box-shadow: 0 0 0 2px oklch(72% 0.14 52 / 0.3); }
+
+.vtt-music-panel {
+  flex-direction: column;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.65);
+  width: 290px; max-height: 480px; overflow: hidden;
+  bottom: calc(100% + .4rem); left: 0; position: absolute;
+}
+
+.vtt-music-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .45rem .6rem; border-bottom: 1px solid var(--border);
+  font-size: .78rem; font-weight: 700; color: var(--text); flex-shrink: 0;
+}
+
+.vtt-music-tabs {
+  display: flex; gap: .2rem; padding: .3rem .4rem;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.vtt-music-tab {
+  flex: 1; padding: .22rem; font-size: .68rem; font-weight: 600;
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); cursor: pointer; transition: background .1s, color .1s;
+}
+.vtt-music-tab:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-music-tab.active { background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.35); color: var(--gold); }
+
+.vtt-music-body {
+  flex: 1; overflow-y: auto; min-height: 0;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+
+.vtt-music-upload-btn {
+  display: block; width: calc(100% - .8rem); margin: .4rem;
+  padding: .3rem .5rem; font-size: .72rem; font-weight: 600; text-align: center;
+  background: rgba(255,255,255,.04); border: 1px dashed var(--border);
+  border-radius: 7px; color: var(--text-muted); cursor: pointer;
+  transition: background .1s, border-color .1s, color .1s;
+}
+.vtt-music-upload-btn:hover { background: var(--bg-elevated); border-color: var(--gold); color: var(--gold); }
+
+.vtt-music-empty {
+  padding: .8rem .6rem; font-size: .72rem; color: var(--text-dim); text-align: center;
+}
+
+.vtt-music-list { display: flex; flex-direction: column; }
+
+/* Sons */
+.vtt-music-son-item {
+  display: flex; align-items: center; gap: .3rem;
+  padding: .3rem .5rem; border-bottom: 1px solid rgba(255,255,255,.04);
+  transition: background .1s;
+}
+.vtt-music-son-item:hover { background: var(--bg-elevated); }
+.vtt-music-son-item.is-playing { background: oklch(72% 0.14 52 / 0.08); }
+.vtt-music-son-name {
+  flex: 1; font-size: .7rem; font-weight: 500; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vtt-music-son-acts { display: flex; gap: .15rem; flex-shrink: 0; }
+.vtt-mact {
+  padding: .15rem .3rem; font-size: .65rem; border-radius: 5px;
+  background: none; border: 1px solid var(--border); color: var(--text-muted);
+  cursor: pointer; transition: background .1s, color .1s, border-color .1s;
+}
+.vtt-mact:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-mact.on { background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.4); color: var(--gold); }
+.vtt-mact-del:hover { color: #ef4444; border-color: oklch(58% 0.20 22 / 0.4); }
+
+/* Playlists */
+.vtt-music-pl-item {
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.vtt-music-pl-item.is-playing > .vtt-music-pl-hd { background: oklch(72% 0.14 52 / 0.08); }
+.vtt-music-pl-hd {
+  display: flex; align-items: center; gap: .3rem;
+  padding: .3rem .5rem; cursor: default;
+}
+.vtt-music-pl-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+}
+.vtt-music-pl-name {
+  flex: 1; font-size: .72rem; font-weight: 700; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vtt-music-pl-cnt {
+  font-size: .62rem; color: var(--text-dim);
+  background: var(--bg-elevated); border-radius: 4px;
+  padding: 0 .3rem; flex-shrink: 0;
+}
+.vtt-music-pl-sounds { padding: 0 .5rem .3rem 1.4rem; }
+.vtt-music-pl-sound {
+  display: flex; align-items: center; gap: .3rem;
+  padding: .18rem 0; font-size: .66rem; color: var(--text-muted);
+}
+.vtt-music-pl-snum { color: var(--text-dim); width: 14px; text-align: right; flex-shrink: 0; }
+.vtt-music-pl-sname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vtt-music-pl-addsound {
+  display: flex; gap: .25rem; margin-top: .2rem;
+}
+.vtt-music-sel {
+  flex: 1; font-size: .66rem; padding: .15rem .3rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 5px; color: var(--text);
+}
+
+/* Now playing */
+.vtt-music-np {
+  flex-shrink: 0; border-top: 1px solid var(--border);
+  padding: .4rem .55rem .45rem; display: flex; flex-direction: column; gap: .3rem;
+}
+.vtt-music-np-name {
+  font-size: .68rem; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vtt-music-np-name em { font-style: normal; color: var(--text-muted); }
+.vtt-music-prog-row {
+  display: flex; align-items: center; gap: .35rem;
+}
+.vtt-music-prog-bar {
+  flex: 1; height: 4px; background: var(--bg-elevated);
+  border-radius: 2px; cursor: pointer; overflow: hidden;
+}
+.vtt-music-prog-fill {
+  height: 100%; background: var(--gold); border-radius: 2px;
+  transition: width .3s linear;
+}
+.vtt-music-prog-time {
+  font-size: .58rem; color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums;
+}
+.vtt-music-ctrl-row {
+  display: flex; align-items: center; gap: .25rem;
+}
+.vtt-music-ctrl {
+  padding: .18rem .38rem; font-size: .7rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-muted); cursor: pointer;
+  transition: background .1s, color .1s;
+}
+.vtt-music-ctrl:hover { background: var(--bg-card2); color: var(--text); }
+.vtt-music-vol-lbl {
+  display: flex; align-items: center; gap: .25rem;
+  margin-left: auto; font-size: .68rem; color: var(--text-dim);
+}
+.vtt-music-vol-inp {
+  width: 72px; height: 4px; accent-color: var(--gold); cursor: pointer;
+}
+
 /* ── Zone AoE – hint + kbd ──────────────────────────────────────── */
 .vtt-zone-hint {
   font-size: .68rem;
