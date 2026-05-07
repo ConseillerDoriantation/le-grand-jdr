@@ -4122,9 +4122,16 @@ function _renderChatLog(msgs) {
       const resultBadge = isCrit
         ? `<span style="font-size:.68rem;font-weight:700;color:#f59e0b">💥 CRITIQUE</span>`
         : isFumble ? `<span style="font-size:.68rem;font-weight:700;color:#ef4444">💀 FUMBLE</span>` : '';
-      const rolls   = Array.isArray(m.hitD20rolls) && m.hitD20rolls.length > 1 ? m.hitD20rolls : null;
-      const advIcon = m.advMode === 'adv' ? '⬆' : m.advMode === 'dis' ? '⬇' : '';
-      const diceDisp = rolls ? `1d20(${rolls[0]},${rolls[1]}${advIcon}→${m.hitD20})` : `1d20(${m.hitD20})`;
+      const rolls    = Array.isArray(m.hitD20rolls) && m.hitD20rolls.length > 1 ? m.hitD20rolls : null;
+      const advBadge = m.advMode==='adv'
+        ? `<span style="font-size:.62rem;font-weight:700;color:#22c38e" title="Avantage">⬆</span>`
+        : m.advMode==='dis'
+        ? `<span style="font-size:.62rem;font-weight:700;color:#ef4444" title="Désavantage">⬇</span>` : '';
+      // Détail : dé gardé en gras, dé rejeté barré
+      const diceDisp = rolls
+        ? (() => { const dropped=rolls.find(r=>r!==m.hitD20)??rolls[1];
+            return `d20[<strong>${m.hitD20}</strong>&thinsp;<span style="text-decoration:line-through;color:var(--text-dim)">${dropped}</span>]`; })()
+        : `d20[${m.hitD20}]`;
       const hitFormula = m.hitToucherStatLabel != null
         ? [diceDisp,
            m.hitToucherMod ? sn(m.hitToucherMod)+sub(m.hitToucherStatLabel) : '',
@@ -4169,6 +4176,7 @@ function _renderChatLog(msgs) {
         <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
           <span style="font-size:.72rem">🎯</span>
           <strong style="font-size:1rem;color:${accentCol}">${m.hitTotal}</strong>
+          ${advBadge}
           <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
         </div>
         <div style="padding-left:calc(22px + .35rem);margin-top:.25rem;border-top:1px solid rgba(255,255,255,.06);padding-top:.2rem">
@@ -4206,10 +4214,15 @@ function _renderChatLog(msgs) {
         : '';
 
       const rolls    = Array.isArray(m.hitD20rolls) && m.hitD20rolls.length > 1 ? m.hitD20rolls : null;
-      const advIcon  = m.advMode === 'adv' ? '⬆' : m.advMode === 'dis' ? '⬇' : '';
+      const advBadge = m.advMode==='adv'
+        ? `<span style="font-size:.62rem;font-weight:700;color:#22c38e" title="Avantage">⬆</span>`
+        : m.advMode==='dis'
+        ? `<span style="font-size:.62rem;font-weight:700;color:#ef4444" title="Désavantage">⬇</span>` : '';
+      // Détail : dé gardé en gras, dé rejeté barré
       const diceDisp = rolls
-        ? `1d20(${rolls[0]},${rolls[1]}${advIcon}→${m.hitD20})`
-        : `1d20(${m.hitD20})`;
+        ? (() => { const dropped=rolls.find(r=>r!==m.hitD20)??rolls[1];
+            return `d20[<strong>${m.hitD20}</strong>&thinsp;<span style="text-decoration:line-through;color:var(--text-dim)">${dropped}</span>]`; })()
+        : `d20[${m.hitD20}]`;
       const hitFormula = m.hitToucherStatLabel != null
         ? [
             diceDisp,
@@ -4265,6 +4278,7 @@ function _renderChatLog(msgs) {
           <span style="font-size:.78rem">🎯</span>
           <strong style="font-size:1.05rem;color:${accentCol};letter-spacing:-.01em">${m.hitTotal}</strong>
           <span style="font-size:.88rem;color:${accentCol};font-weight:700">${m.hit?'✓':'✗'}</span>
+          ${advBadge}
           <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
         </div>
         ${dmgSummary}
@@ -4352,6 +4366,7 @@ function _renderChatLog(msgs) {
         <div style="display:flex;align-items:center;gap:.35rem">
           ${who} <span style="font-size:.65rem;color:var(--text-dim)">🎲</span>
           <em style="font-size:.68rem;color:var(--text-dim)">${_esc(m.rollFormula||'')}</em>
+          ${modeIcon}
           <span style="font-size:.72rem;color:var(--text-dim)">→</span>
           <strong style="color:${resultCol}">${m.rollResult}</strong>
           ${_right(badge, ts)}
