@@ -10,6 +10,9 @@
   height: 100%;
   background: var(--bg-dark);
   overflow: hidden;
+  /* Annule le max-width:1680px et le margin:0 auto de .main-content > * */
+  max-width: 100% !important;
+  margin: 0 !important;
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────── */
@@ -1017,6 +1020,8 @@
   position: fixed; z-index: 9999;
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
+  max-height: min(340px, 60vh); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 28px rgba(0,0,0,0.55);
   padding: .25rem 0; min-width: 210px; font-size: .82rem;
@@ -1889,6 +1894,25 @@
 [data-theme="light"] .vtt-chat-input  { background: #fff; }
 [data-theme="light"] .vtt-log-msg     { background: #eae9e3; }
 
+/* ── Grand écran ≥ 1440px ───────────────────────────────────────── */
+@media (min-width: 1440px) {
+  .vtt-tray      { width: 210px; }
+  .vtt-right-col { width: 340px; }
+}
+
+/* ── Très grand écran ≥ 1920px (Full HD large / 2K) ─────────────── */
+@media (min-width: 1920px) {
+  .vtt-tray      { width: 240px; }
+  .vtt-right-col { width: 380px; }
+}
+
+/* ── Ultra large ≥ 2560px (2K / 4K) ────────────────────────────── */
+@media (min-width: 2560px) {
+  .vtt-tray      { width: 280px; }
+  .vtt-right-col { width: 440px; }
+  .vtt-toolbar   { min-height: 42px; }
+}
+
 /* ── Mobile ─────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .vtt-right-col { display: none; }
@@ -2165,6 +2189,7 @@
 .vtt-mact:hover { background: var(--bg-elevated); color: var(--text); }
 .vtt-mact.on { background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.4); color: var(--gold); }
 .vtt-mact-del:hover { color: #ef4444; border-color: oklch(58% 0.20 22 / 0.4); }
+.vtt-mact-preview.on { color: #22c38e; border-color: rgba(34,195,142,.4); background: rgba(34,195,142,.1); }
 
 /* Playlists */
 .vtt-music-pl-item {
@@ -2202,6 +2227,76 @@
   background: var(--bg-elevated); border: 1px solid var(--border);
   border-radius: 5px; color: var(--text);
 }
+
+/* Modal création de playlist */
+.vtt-pl-modal-lbl {
+  display: block; font-size: .78rem; font-weight: 600;
+  color: var(--text-muted); margin-bottom: .3rem;
+}
+.vtt-pl-modal-inp {
+  width: 100%; padding: .45rem .65rem; font-size: .88rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); box-sizing: border-box;
+  transition: border-color .15s;
+}
+.vtt-pl-modal-inp:focus { outline: none; border-color: var(--gold); }
+.vtt-pl-color-row { display: flex; gap: .4rem; flex-wrap: wrap; }
+.vtt-pl-color-btn {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2.5px solid transparent; cursor: pointer;
+  transition: transform .1s, border-color .1s;
+}
+.vtt-pl-color-btn:hover { transform: scale(1.15); }
+.vtt-pl-color-btn.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); transform: scale(1.15); }
+.vtt-pl-modal-submit {
+  width: 100%; padding: .5rem; font-size: .85rem; font-weight: 700;
+  background: var(--gold-glow); border: 1px solid oklch(72% 0.14 52 / 0.4);
+  border-radius: 8px; color: var(--gold); cursor: pointer;
+  transition: background .12s;
+}
+.vtt-pl-modal-submit:hover { background: oklch(72% 0.14 52 / 0.22); }
+
+/* Sons tab — ligne de boutons d'import */
+.vtt-music-son-actions-row {
+  display: flex; gap: .3rem; padding: .4rem .4rem .2rem;
+}
+.vtt-music-son-actions-row .vtt-music-upload-btn { margin: 0; width: auto; }
+
+/* Pool de sons (onglet Playlists) */
+.vtt-music-pool-hd {
+  font-size: .62rem; font-weight: 700; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .05em;
+  padding: .4rem .5rem .15rem;
+}
+.vtt-music-pool {
+  display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--border); padding-bottom: .25rem; margin-bottom: .25rem;
+  max-height: 140px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.vtt-music-pool-item {
+  display: flex; align-items: center; gap: .3rem;
+  padding: .2rem .5rem; cursor: grab; user-select: none;
+  font-size: .68rem; color: var(--text-muted);
+  transition: background .1s;
+}
+.vtt-music-pool-item:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-music-pool-item:active { cursor: grabbing; }
+.vtt-music-pool-grip { color: var(--text-dim); font-size: .7rem; flex-shrink: 0; cursor: grab; }
+.vtt-music-pool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Drop zone vide dans playlist */
+.vtt-music-pl-empty-drop {
+  padding: .3rem .5rem; font-size: .65rem; color: var(--text-dim);
+  font-style: italic; text-align: center;
+  border: 1px dashed var(--border); border-radius: 5px; margin: .2rem .3rem;
+}
+/* Ghost Sortable */
+.vtt-sort-ghost { opacity: .35; background: var(--gold-glow) !important; }
+
+/* Sons dans playlist — grip handle */
+.vtt-music-pl-sound { cursor: default; }
+.vtt-music-pl-sound .vtt-music-pool-grip { cursor: grab; }
 
 /* Now playing */
 .vtt-music-np {
