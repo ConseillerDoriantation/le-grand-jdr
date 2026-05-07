@@ -145,6 +145,7 @@ let _presHeartbeat= null; // intervalId du heartbeat
 let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _trayReserveOpen  = false; // section réserve ouverte/fermée dans le tray MJ
+let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
@@ -1512,6 +1513,11 @@ function _buildAttackOptions(t) {
       const freeCasts = _multiCastFree.get(freeKey) || 0;
       const cout      = freeCasts > 0 ? 0 : basePm;
 
+      // Infos catégorie pour le tri dans le modal VTT
+      const sortCats = c.sort_cats || [];
+      const sortCat  = s.catId ? sortCats.find(ct => ct.id === s.catId) : null;
+      const _catMeta = { catId: s.catId || null, catLabel: sortCat?.nom || null, catColor: sortCat?.couleur || null };
+
       if (types.includes('offensif')) {
         const fullFormula    = _vttSortDmgFormula(s, c);
         const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
@@ -1533,6 +1539,7 @@ function _buildAttackOptions(t) {
           toucherStatLabel: statShort(wTchStat) || wTchStat,
           dmgStatMod: sStatMod, dmgStatLabel: sStatLbl,
           maitriseBonus: sFixed,
+          ..._catMeta,
         });
 
       } else if (types.includes('defensif') && protMode === 'soin') {
@@ -1544,6 +1551,7 @@ function _buildAttackOptions(t) {
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
           zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
+          ..._catMeta,
         });
 
       } else if (types.includes('defensif') && protMode === 'ca') {
@@ -1554,6 +1562,7 @@ function _buildAttackOptions(t) {
           zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           isCaSort: true, halfOnMiss: false,
           caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
+          ..._catMeta,
         });
 
       } else {
@@ -1563,6 +1572,7 @@ function _buildAttackOptions(t) {
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
           zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
           isUtil: true, halfOnMiss: false,
+          ..._catMeta,
         });
       }
     });
@@ -1597,35 +1607,100 @@ async function _execAttack(srcId, tgtId) {
   _atkOptsCache[cacheKey] = inRange;
 
   const pm = lS.displayPm, pmMax = lS.displayPmMax;
-  const pmLine = (pm!=null)
-    ? `<div style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem">PM : ${pm}/${pmMax}</div>` : '';
+  const pmBar = (pm!=null)
+    ? `<div class="vtt-atk-pm-bar">
+        <span style="color:#b47fff">✨</span>
+        <div class="vtt-atk-pm-track"><div class="vtt-atk-pm-fill" style="width:${pmMax>0?Math.round(pm/pmMax*100):0}%"></div></div>
+        <span style="font-size:.72rem;color:#b47fff;font-weight:700">${pm}/${pmMax}</span>
+      </div>` : '';
 
-  openModal('⚔️ Choisir une attaque', `
+  // Séparer armes et sorts
+  const weaponOpts = inRange.filter(o => o.sortIdx === undefined);
+  const spellOpts  = inRange.filter(o => o.sortIdx !== undefined);
+
+  // Grouper les sorts par catégorie (ordre des sort_cats du personnage)
+  const srcChar   = _characters[src.characterId] || null;
+  const sortCats  = srcChar?.sort_cats || [];
+  const hasCats   = sortCats.length > 0 && spellOpts.some(o => o.catId);
+
+  // Construire une map catId → opts (préserve l'ordre des sort_cats)
+  const catMap = new Map();
+  spellOpts.forEach(o => {
+    const cId = o.catId || '__none';
+    if (!catMap.has(cId)) catMap.set(cId, []);
+    catMap.get(cId).push(o);
+  });
+  // Ordre : catégories connues d'abord (dans l'ordre du joueur), puis __none
+  const catOrder = [
+    ...sortCats.filter(c => catMap.has(c.id)),
+    ...(catMap.has('__none') ? [{ id: '__none', nom: null, couleur: '#6b7280' }] : []),
+  ];
+
+  // Rendu d'un bouton option
+  const _optBtn = (o, i) => `
+    <button class="vtt-attack-opt" onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})">
+      <span class="vtt-attack-opt-icon">${o.icon}</span>
+      <div class="vtt-attack-opt-body">
+        <div class="vtt-attack-opt-name">${_esc(o.label)}</div>
+        <div class="vtt-attack-opt-meta">
+          🎲 ${_esc(o.rawDice || o.dice)}
+          · 🎯 ${o.portee}c
+          ${o.isMagicWeapon ? `· <span style="color:#c084fc">🔮 élément</span>` : ''}
+          ${!o.isMagicWeapon && o.damageTypeIcon ? `· <span style="color:${o.damageTypeColor||'#9ca3af'}">${o.damageTypeIcon}</span>` : ''}
+          ${(o.zoneW>0||o.zoneH>0)?`· <span style="color:#fde047">📐 ${o.zoneW}×${o.zoneH}c</span>`:(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles}</span>`:''}
+          ${o.pmCost>0?`· <span style="color:#b47fff">✨${o.pmCost}PM</span>`:o.pmCost===0&&o.basePm>0?`· <span style="color:#22c38e">✨ gratuit</span>`:''}
+          ${o.traits?.length ? `· <span style="color:var(--text-dim)">${o.traits.slice(0,2).map(_esc).join(', ')}</span>` : ''}
+        </div>
+      </div>
+    </button>`;
+
+  // Construire le HTML des options groupées
+  let optsHtml = '';
+
+  // ── Armes ──
+  if (weaponOpts.length) {
+    if (spellOpts.length) {
+      optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:#94a3b8"><span>⚔️ Physique</span></div>`;
+    }
+    optsHtml += weaponOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+  }
+
+  // ── Sorts (groupés ou non) ──
+  if (spellOpts.length) {
+    if (hasCats) {
+      catOrder.forEach(cat => {
+        const catOpts = catMap.get(cat.id) || [];
+        if (!catOpts.length) return;
+        if (cat.nom) {
+          optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:${cat.couleur}">
+            <span>${_esc(cat.nom)}</span>
+            <span class="vtt-opt-cat-count">${catOpts.length}</span>
+          </div>`;
+        } else if (catMap.size > 1 || weaponOpts.length) {
+          // Sorts sans catégorie — n'afficher l'en-tête que si d'autres groupes existent
+          optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:#6b7280"><span>✨ Autres sorts</span></div>`;
+        }
+        optsHtml += catOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+      });
+    } else {
+      // Pas de catégories : afficher un en-tête "Sorts" seulement si des armes sont aussi présentes
+      if (weaponOpts.length) {
+        optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:#818cf8"><span>✨ Sorts</span></div>`;
+      }
+      optsHtml += spellOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+    }
+  }
+
+  openModal('⚔️ Choisir une action', `
     <div class="vtt-form">
-      <div style="font-size:.82rem;margin-bottom:.4rem">
-        <strong>${lS.displayName??src.name}</strong>
-        → <strong style="color:#ef4444">${lT.displayName??tgt.name}</strong>
-        <span style="color:var(--text-dim);font-size:.72rem">(${dist} case${dist>1?'s':''})</span>
+      <div class="vtt-atk-modal-hd">
+        <span><strong>${_esc(lS.displayName??src.name)}</strong></span>
+        <span style="color:var(--text-dim)">→</span>
+        <strong style="color:#ef4444">${_esc(lT.displayName??tgt.name)}</strong>
+        <span class="vtt-atk-dist">${dist}c</span>
       </div>
-      ${pmLine}
-      <div class="vtt-attack-opts">
-        ${inRange.map((o,i)=>`
-        <button class="vtt-attack-opt" onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})">
-          <span class="vtt-attack-opt-icon">${o.icon}</span>
-          <div class="vtt-attack-opt-body">
-            <div class="vtt-attack-opt-name">${o.label}</div>
-            <div class="vtt-attack-opt-meta">
-              🎲 ${o.rawDice || o.dice}
-              · 🎯 portée ${o.portee}
-              ${o.isMagicWeapon ? `· <span style="color:#c084fc">🔮 élément à choisir</span>` : ''}
-              ${!o.isMagicWeapon && o.damageTypeIcon ? `· <span style="color:${o.damageTypeColor||'#9ca3af'}">${o.damageTypeIcon}</span>` : ''}
-              ${(o.zoneW>0||o.zoneH>0)?`· <span style="color:#fde047">📐 ${o.zoneW}×${o.zoneH}c</span>`:(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles} cibles</span>`:''}
-              ${o.pmCost>0?`· <span style="color:#b47fff">✨ ${o.pmCost} PM</span>`:o.pmCost===0&&o.basePm>0?`· <span style="color:#22c38e">✨ gratuit</span>`:''}
-              ${o.traits?.length ? `· <span style="color:#b47fff">${o.traits.slice(0, 2).map(_esc).join(', ')}</span>` : ''}
-            </div>
-          </div>
-        </button>`).join('')}
-      </div>
+      ${pmBar}
+      <div class="vtt-attack-opts">${optsHtml}</div>
       <div style="text-align:right;margin-top:.5rem">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
       </div>
@@ -2790,109 +2865,162 @@ function _renderInspector(t) {
 // TRAY — panneau latéral MJ
 // ═══════════════════════════════════════════════════════════════════
 window._vttToggleTrayReserve = () => { _trayReserveOpen = !_trayReserveOpen; _renderTray(); };
+window._vttTrayFilter = f => { _trayFilter = f; _renderTray(); };
 
 function _renderTray() {
   if (!STATE.isAdmin) return;
   _renderPageList();
-  const el=document.getElementById('vtt-tray-tokens'); if (!el) return;
+  const el = document.getElementById('vtt-tray-tokens'); if (!el) return;
 
-  const all    = Object.values(_tokens).map(e=>e.data);
-  const onPage = all.filter(t=>t.pageId===_activePage?.id);
-  const reserve= all.filter(t=>!t.pageId && t.type!=='enemy');
+  const all      = Object.values(_tokens).map(e => e.data);
+  const onPage   = all.filter(t => t.pageId === _activePage?.id);
+  const reserve  = all.filter(t => !t.pageId && t.type !== 'enemy');
+  const inCombat = !!_session?.combat?.active;
 
-  // ── Item de token (liste) ─────────────────────────────────────────
-  const mkItem=(t,placed)=>{
-    const ld=_live(t);
+  // Filtre par type
+  const applyFilter = arr => _trayFilter === 'all' ? arr : arr.filter(t => t.type === _trayFilter);
+
+  // ── Item liste (sur la page) ──────────────────────────────────────
+  const mkItem = (t, placed) => {
+    const ld = _live(t);
     const hpKnownL = ld.displayHp !== null && ld.displayHpMax !== null;
-    const hp=hpKnownL?ld.displayHp:0, hpm=hpKnownL?ld.displayHpMax:1;
-    const rat=hpKnownL?(hpm>0?Math.max(0,hp/hpm):1):0.5;
-    const typeIcon = t.type==='player'?'🧑':t.type==='npc'?'👤':'👹';
-    const dupBtn=t.type==='enemy'
-      ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Dupliquer">＋</button>`:'';
-    const delBtn=t.type==='enemy'
-      ?`<button class="vtt-tray-btn vtt-tray-btn-del" onclick="event.stopPropagation();window._vttDeleteToken('${t.id}')" title="Supprimer">×</button>`:'';
-    const actionBtn=!placed
-      ?`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer">▶</button>`
-      :`<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer">↩</button>`;
-    return `<div class="vtt-tray-item ${_selected===t.id?'active':''}" onclick="window._vttSelectFromTray('${t.id}')">
-      <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type]??'#888'}">
-        ${ld.displayImage?`<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
-          :`<span style="font-size:.65rem">${typeIcon}</span>`}
+    const hp = hpKnownL ? ld.displayHp : 0, hpm = hpKnownL ? ld.displayHpMax : 1;
+    const rat = hpKnownL ? (hpm > 0 ? Math.max(0, hp / hpm) : 1) : 0.5;
+    const typeIcon = t.type === 'player' ? '🧑' : t.type === 'npc' ? '👤' : '👹';
+    const dupBtn = t.type === 'enemy'
+      ? `<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Dupliquer">＋</button>` : '';
+    const delBtn = t.type === 'enemy'
+      ? `<button class="vtt-tray-btn vtt-tray-btn-del" onclick="event.stopPropagation();window._vttDeleteToken('${t.id}')" title="Supprimer">×</button>` : '';
+    const actionBtn = !placed
+      ? `<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer">▶</button>`
+      : `<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer">↩</button>`;
+    // HP fraction visible pour les ennemis en combat
+    const hpFrac = inCombat && t.type === 'enemy' && hpKnownL
+      ? `<span class="vtt-tray-hp-frac" style="color:${hpColor(rat)}">${hp}/${hpm}</span>` : '';
+    return `<div class="vtt-tray-item ${_selected === t.id ? 'active' : ''}" onclick="window._vttSelectFromTray('${t.id}')">
+      <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type] ?? '#888'}">
+        ${ld.displayImage
+          ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
+          : `<span style="font-size:.65rem">${typeIcon}</span>`}
       </div>
       <div class="vtt-tray-info">
-        <div class="vtt-tray-name">${ld.displayName??t.name}</div>
-        <div class="vtt-tray-hp-bar"><div style="width:${Math.round(rat*100)}%;height:100%;background:${hpKnownL?hpColor(rat):'#555'};border-radius:2px"></div></div>
+        <div class="vtt-tray-name">${_esc(ld.displayName ?? t.name)}</div>
+        <div class="vtt-tray-hp-row">
+          <div class="vtt-tray-hp-bar" style="flex:1"><div style="width:${Math.round(rat * 100)}%;height:100%;background:${hpKnownL ? hpColor(rat) : '#555'};border-radius:2px"></div></div>
+          ${hpFrac}
+        </div>
       </div>
       <div class="vtt-tray-actions">${dupBtn}${actionBtn}${delBtn}</div>
     </div>`;
   };
 
-  // ── Helper sous-groupe ───────────────────────────────────────────
-  const mkSubGroup = (label, items, placed) => {
-    if (!items.length) return '';
-    return `<div class="vtt-tray-sublabel">${label}</div>${items.map(t=>mkItem(t,placed)).join('')}`;
+  // ── Chip compact (réserve) ────────────────────────────────────────
+  const mkChip = t => {
+    const ld = _live(t);
+    const typeIcon = t.type === 'player' ? '🧑' : '👤';
+    const col = TYPE_COLOR[t.type] ?? '#888';
+    return `<button class="vtt-res-chip" onclick="window._vttPlace('${t.id}')"
+        title="Placer ${_esc(ld.displayName ?? t.name)}">
+      <div class="vtt-res-chip-dot" style="border-color:${col};color:${col}">
+        ${ld.displayImage
+          ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
+          : `<span>${typeIcon}</span>`}
+      </div>
+      <span class="vtt-res-chip-name">${_esc(ld.displayName ?? t.name)}</span>
+    </button>`;
   };
 
-  // ── Section 1 : Sur cette page — alliés / ennemis séparés ────────
-  const pageAllies  = onPage.filter(t=>t.type!=='enemy');
-  const pageEnemies = onPage.filter(t=>t.type==='enemy');
-  let pageSec;
-  if (!onPage.length) {
-    pageSec = `<div class="vtt-tray-empty">Aucun token sur cette page</div>`;
-  } else if (!pageAllies.length || !pageEnemies.length) {
-    // Un seul type : pas besoin de sous-groupe
-    pageSec = onPage.map(t=>mkItem(t,true)).join('');
+  // ── Pills de filtre ───────────────────────────────────────────────
+  const filterPills = `<div class="vtt-tray-filters">
+    ${[['all','Tout'],['player','🧑'],['npc','👤'],['enemy','👹']].map(([v,l]) =>
+      `<button class="vtt-tray-fp${_trayFilter === v ? ' active' : ''}" onclick="window._vttTrayFilter('${v}')">${l}</button>`
+    ).join('')}
+  </div>`;
+
+  // ── Sur la page — groupé par type ────────────────────────────────
+  const filteredPage = applyFilter(onPage);
+  let pageSec = '';
+  if (!filteredPage.length) {
+    pageSec = `<div class="vtt-tray-empty">${_trayFilter === 'all' ? 'Aucun token sur cette page' : 'Aucun ici'}</div>`;
   } else {
-    pageSec = mkSubGroup('🧑 Alliés', pageAllies, true)
-            + mkSubGroup('👹 Ennemis', pageEnemies, true);
+    const pagePlayers = filteredPage.filter(t => t.type === 'player');
+    const pageNpcs    = filteredPage.filter(t => t.type === 'npc');
+    let   pageEnemies = filteredPage.filter(t => t.type === 'enemy');
+
+    // En combat : ennemis triés par HP% croissant (blessés en premier)
+    if (inCombat && pageEnemies.length > 1) {
+      pageEnemies = [...pageEnemies].sort((a, b) => {
+        const la = _live(a), lb = _live(b);
+        const ra = (la.displayHp ?? 1) / Math.max(1, la.displayHpMax ?? 1);
+        const rb = (lb.displayHp ?? 1) / Math.max(1, lb.displayHpMax ?? 1);
+        return ra - rb; // plus blessé = plus haut
+      });
+    }
+
+    const multiType = [pagePlayers, pageNpcs, pageEnemies].filter(g => g.length).length > 1;
+    const mkGrp = (icon, label, items) => {
+      if (!items.length) return '';
+      const hdr = multiType ? `<div class="vtt-tray-sublabel">${icon} ${label}</div>` : '';
+      return hdr + items.map(t => mkItem(t, true)).join('');
+    };
+    pageSec = mkGrp('🧑', 'Joueurs', pagePlayers)
+            + mkGrp('👤', 'PNJ', pageNpcs)
+            + mkGrp('👹', 'Ennemis', pageEnemies);
   }
 
-  // ── Section 2 : Bestiaire — grille d'icônes ───────────────────────
-  const bsts=Object.values(_bestiary);
-  const bstGrid = bsts.length
-    ? bsts.map(b=>{
-        const img=b.photoURL||b.photo||b.avatar||b.imageUrl||'';
-        const pvMax=parseInt(b.pvMax)||'?';
-        const init=(b.nom||'?')[0].toUpperCase();
-        return `<button class="vtt-bst-tile" onclick="window._vttPlaceFromBestiary('${b.id}')"
-            title="${_esc(b.nom||'Créature')} · PV ${pvMax}">
-          ${img
-            ?`<img src="${img}" alt="${_esc(b.nom||'')}">`
-            :`<span class="vtt-bst-icon">${init}</span>`}
-          <div class="vtt-bst-name">${_esc((b.nom||'Créature').slice(0,8))}</div>
-        </button>`;
-      }).join('')
-    : `<div class="vtt-tray-empty">Bestiaire vide</div>`;
+  // ── Réserve — grid compacte, toujours visible ────────────────────
+  const filteredRes = applyFilter(reserve);
+  let reserveSec = '';
+  if (filteredRes.length) {
+    const resPlayers = filteredRes.filter(t => t.type === 'player');
+    const resNpcs    = filteredRes.filter(t => t.type === 'npc');
+    const multiResType = resPlayers.length > 0 && resNpcs.length > 0;
+    const resHtml = (multiResType
+      ? (resPlayers.length ? `<div class="vtt-tray-sublabel">🧑 Joueurs</div><div class="vtt-reserve-grid">${resPlayers.map(mkChip).join('')}</div>` : '')
+        + (resNpcs.length ? `<div class="vtt-tray-sublabel">👤 PNJ</div><div class="vtt-reserve-grid">${resNpcs.map(mkChip).join('')}</div>` : '')
+      : `<div class="vtt-reserve-grid">${filteredRes.map(mkChip).join('')}</div>`);
+    reserveSec = `<div class="vtt-tray-sect">
+      <div class="vtt-tray-sect-hd">
+        <span>📦 Réserve</span>
+        <span class="vtt-tray-count">${filteredRes.length}</span>
+      </div>
+      ${resHtml}
+    </div>`;
+  }
 
-  // ── Section 3 : Réserve — joueurs / PNJ séparés ──────────────────
-  const resPlayers = reserve.filter(t=>t.type==='player');
-  const resNpcs    = reserve.filter(t=>t.type==='npc');
-  const reserveSec = _trayReserveOpen && reserve.length
-    ? mkSubGroup('🧑 Joueurs', resPlayers, false) + mkSubGroup('👤 PNJ', resNpcs, false)
+  // ── Bestiaire ─────────────────────────────────────────────────────
+  const showBst = _trayFilter === 'all' || _trayFilter === 'enemy';
+  const bsts = Object.values(_bestiary);
+  const bstGrid = showBst
+    ? (bsts.length
+        ? bsts.map(b => {
+            const img = b.photoURL || b.photo || b.avatar || b.imageUrl || '';
+            const init = (b.nom || '?')[0].toUpperCase();
+            return `<button class="vtt-bst-tile" onclick="window._vttPlaceFromBestiary('${b.id}')"
+                title="${_esc(b.nom || 'Créature')} · PV ${parseInt(b.pvMax) || '?'}">
+              ${img ? `<img src="${img}" alt="${_esc(b.nom || '')}">` : `<span class="vtt-bst-icon">${init}</span>`}
+              <div class="vtt-bst-name">${_esc((b.nom || 'Créature').slice(0, 8))}</div>
+            </button>`;
+          }).join('')
+        : `<div class="vtt-tray-empty">Bestiaire vide</div>`)
     : '';
 
-  el.innerHTML=`
+  el.innerHTML = `
+    ${filterPills}
     <div class="vtt-tray-sect">
       <div class="vtt-tray-sect-hd">
         <span>🗺 Sur la page</span>
-        <span class="vtt-tray-count">${onPage.length}</span>
+        <span class="vtt-tray-count">${filteredPage.length}${filteredPage.length !== onPage.length ? `/${onPage.length}` : ''}</span>
       </div>
       ${pageSec}
     </div>
-    <div class="vtt-tray-sect">
+    ${reserveSec}
+    ${showBst ? `<div class="vtt-tray-sect">
       <div class="vtt-tray-sect-hd" style="justify-content:space-between">
         <span>👹 Bestiaire</span>
         <button class="vtt-tray-add-btn" onclick="window._vttCreateEnemy()" title="Créer un ennemi">＋</button>
       </div>
       <div class="vtt-bst-grid">${bstGrid}</div>
-    </div>
-    ${reserve.length || _trayReserveOpen ? `
-    <div class="vtt-tray-sect">
-      <div class="vtt-tray-sect-hd vtt-tray-collapsible" onclick="window._vttToggleTrayReserve()">
-        <span>📦 Réserve</span>
-        <span class="vtt-tray-count">${reserve.length} ${_trayReserveOpen?'▲':'▼'}</span>
-      </div>
-      ${reserveSec}
     </div>` : ''}
   `;
 }

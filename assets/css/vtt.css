@@ -750,6 +750,46 @@
   font-size: .72rem; text-align: center;
 }
 
+/* ── Filtres du tray ────────────────────────────────────────────── */
+.vtt-tray-filters {
+  display: flex; gap: .2rem; padding: .3rem .35rem;
+  border-bottom: 1px solid var(--border);
+}
+.vtt-tray-fp {
+  flex: 1; padding: .2rem .25rem; font-size: .65rem; font-weight: 600;
+  background: none; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text-dim); cursor: pointer; transition: background .1s, color .1s;
+}
+.vtt-tray-fp:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-tray-fp.active { background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.35); color: var(--gold); }
+
+/* ── HP row avec fraction optionnelle ───────────────────────────── */
+.vtt-tray-hp-row { display: flex; align-items: center; gap: .3rem; margin-top: .2rem; }
+.vtt-tray-hp-frac { font-size: .58rem; font-weight: 700; flex-shrink: 0; }
+
+/* ── Grille compacte de la réserve ──────────────────────────────── */
+.vtt-reserve-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: .2rem; padding: .2rem .35rem .3rem;
+}
+.vtt-res-chip {
+  display: flex; align-items: center; gap: .25rem;
+  padding: .25rem .3rem; border-radius: 6px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  cursor: pointer; text-align: left; min-width: 0; width: 100%;
+  transition: background .1s, border-color .1s;
+}
+.vtt-res-chip:hover { background: var(--bg-card2); border-color: oklch(58% 0.20 22 / 0.35); }
+.vtt-res-chip-dot {
+  width: 18px; height: 18px; border-radius: 50%;
+  overflow: hidden; display: flex; align-items: center; justify-content: center;
+  font-size: .6rem; border: 1.5px solid currentColor; flex-shrink: 0;
+}
+.vtt-res-chip-name {
+  font-size: .63rem; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+
 /* ── Bibliothèque de cartes ─────────────────────────────────────── */
 .vtt-tray-section--lib { flex-shrink: 0; }
 
@@ -918,7 +958,45 @@
 }
 
 /* ── Sélection d'attaque ────────────────────────────────────────── */
-.vtt-attack-opts { display: flex; flex-direction: column; gap: .35rem; }
+.vtt-atk-modal-hd {
+  display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+  font-size: .82rem; margin-bottom: .4rem;
+}
+.vtt-atk-dist {
+  margin-left: auto; font-size: .7rem; color: var(--text-dim);
+  background: var(--bg-elevated); border-radius: 5px; padding: 1px 6px;
+}
+.vtt-atk-pm-bar {
+  display: flex; align-items: center; gap: .4rem; margin-bottom: .5rem;
+}
+.vtt-atk-pm-track {
+  flex: 1; height: 5px; background: rgba(180,127,255,.15);
+  border-radius: 3px; overflow: hidden;
+}
+.vtt-atk-pm-fill {
+  height: 100%; background: #b47fff; border-radius: 3px;
+  transition: width .2s;
+}
+
+/* En-têtes de catégorie */
+.vtt-opt-cat-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .2rem .5rem .2rem .55rem;
+  margin: .2rem 0 .05rem;
+  font-size: .68rem; font-weight: 700; letter-spacing: .03em;
+  color: var(--cat-col, var(--text-dim));
+  border-left: 2.5px solid var(--cat-col, var(--border));
+  background: rgba(255,255,255,.025);
+  border-radius: 0 5px 5px 0;
+}
+.vtt-opt-cat-count {
+  font-size: .6rem; font-weight: 600; opacity: .75;
+  background: rgba(255,255,255,.07); padding: 1px 6px; border-radius: 8px;
+}
+/* Premier en-tête : pas de marge haute */
+.vtt-opt-cat-hdr:first-child { margin-top: 0; }
+
+.vtt-attack-opts { display: flex; flex-direction: column; gap: .3rem; }
 .vtt-attack-opt {
   display: flex; align-items: center; gap: .6rem;
   padding: .5rem .65rem;
