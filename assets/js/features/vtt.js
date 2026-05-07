@@ -75,6 +75,14 @@ let _diceFreeBonus = 0;
 let _diceFreeMode  = 'normal';  // 'advantage'|'normal'|'disadvantage'
 let _diceCloseOut  = null;
 let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skills
+// — Musique / sons
+let _sounds        = [];     // [{id, name, url, createdAt}]
+let _playlists     = [];     // [{id, name, color, soundIds[]}]
+let _musicState    = {};     // état Firestore courant
+let _audioEl       = null;   // HTMLAudioElement actif
+let _musicTab      = 'sons'; // 'sons' | 'playlists'
+let _musicCloseOut = null;
+let _musicProgTimer = null;
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
 const _renderedPings     = new Set();
@@ -170,8 +178,13 @@ const _pingsCol     = ()  => collection(db, `adventures/${_aid()}/vttPings`);
 const _pingRef      = uid => doc(db, `adventures/${_aid()}/vttPings/${uid}`);
 const _reactionsCol = ()  => collection(db, `adventures/${_aid()}/vttEmoteReactions`);
 const _reactionRef  = uid => doc(db, `adventures/${_aid()}/vttEmoteReactions/${uid}`);
-const _annotCol     = ()  => collection(db, `adventures/${_aid()}/vttAnnotations`);
-const _annotRef     = id  => doc(db, `adventures/${_aid()}/vttAnnotations/${id}`);
+const _annotCol      = ()  => collection(db, `adventures/${_aid()}/vttAnnotations`);
+const _annotRef      = id  => doc(db, `adventures/${_aid()}/vttAnnotations/${id}`);
+const _sonsCol       = ()  => collection(db, `adventures/${_aid()}/vttSons`);
+const _sonRef        = id  => doc(db, `adventures/${_aid()}/vttSons/${id}`);
+const _playlistsCol  = ()  => collection(db, `adventures/${_aid()}/vttPlaylists`);
+const _playlistRef   = id  => doc(db, `adventures/${_aid()}/vttPlaylists/${id}`);
+const _musicStateRef = ()  => doc(db, `adventures/${_aid()}/vtt/music`);
 
 // ═══════════════════════════════════════════════════════════════════
 // DONNÉES EFFECTIVES — fusion token + entité liée
@@ -3696,6 +3709,27 @@ function _initListeners() {
     if (!Array.isArray(_loot.loot))  _loot.loot  = [];
     _renderLootPanel();
   }, () => {});
+
+  // 12. Sons VTT
+  _unsubs.push(onSnapshot(_sonsCol(), snap => {
+    _sounds = snap.docs
+      .map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>(a.createdAt?.toMillis?.()??0)-(b.createdAt?.toMillis?.()??0));
+    if (document.getElementById('vtt-music-panel')?.dataset.open==='1') _renderMusicPanel();
+  }, ()=>{}));
+
+  // 13. Playlists VTT
+  _unsubs.push(onSnapshot(_playlistsCol(), snap => {
+    _playlists = snap.docs
+      .map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>(a.createdAt?.toMillis?.()??0)-(b.createdAt?.toMillis?.()??0));
+    if (document.getElementById('vtt-music-panel')?.dataset.open==='1') _renderMusicPanel();
+  }, ()=>{}));
+
+  // 14. État musique — sync pour tous les clients
+  _unsubs.push(onSnapshot(_musicStateRef(), snap => {
+    _syncMusicPlayback(snap.exists() ? snap.data() : {});
+  }, ()=>{}));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -5531,6 +5565,358 @@ window._vttDiceRoll = () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════
+// MUSIQUE / SONS
+// ═══════════════════════════════════════════════════════════════════
+
+function _closeMusicPanel() {
+  const panel = document.getElementById('vtt-music-panel');
+  if (panel) { panel.dataset.open='0'; panel.style.display='none'; }
+  document.getElementById('vtt-music-trigger')?.classList.remove('active');
+  if (_musicCloseOut) { document.removeEventListener('mousedown', _musicCloseOut, true); _musicCloseOut=null; }
+  clearInterval(_musicProgTimer); _musicProgTimer=null;
+}
+
+window._vttToggleMusic = () => {
+  const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
+  if (panel.dataset.open==='1') { _closeMusicPanel(); return; }
+  panel.dataset.open='1'; panel.style.display='flex';
+  document.getElementById('vtt-music-trigger')?.classList.add('active');
+  _renderMusicPanel();
+  _musicCloseOut = e => {
+    const f = document.querySelector('.vtt-music-float');
+    if (f && !f.contains(e.target)) _closeMusicPanel();
+  };
+  document.addEventListener('mousedown', _musicCloseOut, true);
+};
+
+window._vttMusicTab = t => { _musicTab=t; _renderMusicPanel(); };
+
+// ── Rendu du panel ──────────────────────────────────────────────────
+function _renderMusicPanel() {
+  const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
+  const mj = STATE.isAdmin;
+  const ms = _musicState;
+  const playing = !!(ms.playing && ms.currentSoundId);
+  const curSound = playing ? _sounds.find(s=>s.id===ms.currentSoundId) : null;
+
+  panel.innerHTML = `
+    <div class="vtt-music-hd">
+      <span>🎵 Sons &amp; Musique</span>
+      <button class="vtt-panel-close" onclick="window._vttToggleMusic()">✕</button>
+    </div>
+    <div class="vtt-music-tabs">
+      <button class="vtt-music-tab${_musicTab==='sons'?' active':''}" onclick="window._vttMusicTab('sons')">Sons</button>
+      <button class="vtt-music-tab${_musicTab==='playlists'?' active':''}" onclick="window._vttMusicTab('playlists')">Playlists</button>
+    </div>
+    <div class="vtt-music-body">${_musicTab==='sons' ? _renderSonsTab(mj) : _renderPlaylistsTab(mj)}</div>
+    ${_renderNowPlaying(curSound, ms)}`;
+
+  // Bind volume slider local
+  const vsl = panel.querySelector('#vtt-music-vol');
+  if (vsl) {
+    vsl.value = Math.round((_audioEl?.volume ?? ms.volume ?? 0.7) * 100);
+    vsl.oninput = e => { if (_audioEl) _audioEl.volume = +e.target.value / 100; };
+  }
+  // Barre de progression
+  clearInterval(_musicProgTimer);
+  if (_audioEl && !_audioEl.paused) {
+    _musicProgTimer = setInterval(_updateMusicProg, 500);
+  }
+}
+
+function _updateMusicProg() {
+  if (!_audioEl) return;
+  const fill = document.getElementById('vtt-music-prog-fill');
+  const time = document.getElementById('vtt-music-prog-time');
+  const d = _audioEl.duration || 0;
+  const c = _audioEl.currentTime || 0;
+  if (fill) fill.style.width = d ? `${(c/d)*100}%` : '0%';
+  if (time) time.textContent = `${_fmtTime(c)} / ${_fmtTime(d)}`;
+}
+
+function _fmtTime(s) {
+  if (!isFinite(s)) return '0:00';
+  const m = Math.floor(s/60), sec = Math.floor(s%60);
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function _renderSonsTab(mj) {
+  let h = '';
+  if (mj) h += `<button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()">＋ Ajouter un son (URL)</button>`;
+  if (!_sounds.length) return h + `<div class="vtt-music-empty">Aucun son importé</div>`;
+  return h + `<div class="vtt-music-list">${_sounds.map(s => {
+    const active = _musicState.playing && _musicState.currentSoundId===s.id && !_musicState.currentPlaylistId;
+    return `<div class="vtt-music-son-item${active?' is-playing':''}">
+      <span class="vtt-music-son-name" title="${_esc(s.name)}">${_esc(s.name)}</span>
+      <div class="vtt-music-son-acts">
+        <button class="vtt-mact${active&&!_musicState.loop?' on':''}" onclick="window._vttPlaySound('${s.id}',false)" title="Lire">${active&&!_musicState.paused&&!_musicState.loop?'⏸':'▶'}</button>
+        <button class="vtt-mact${active&&_musicState.loop?' on':''}" onclick="window._vttPlaySound('${s.id}',true)" title="Boucle">🔁</button>
+        ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeleteSound('${s.id}')" title="Supprimer">🗑</button>`:''}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function _renderPlaylistsTab(mj) {
+  let h = '';
+  if (mj) h += `<button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()">＋ Nouvelle playlist</button>`;
+  if (!_playlists.length) return h + `<div class="vtt-music-empty">Aucune playlist</div>`;
+  return h + `<div class="vtt-music-list">${_playlists.map(pl => {
+    const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
+    const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
+    return `<div class="vtt-music-pl-item${active?' is-playing':''}">
+      <div class="vtt-music-pl-hd">
+        <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
+        <span class="vtt-music-pl-name">${_esc(pl.name)}</span>
+        <span class="vtt-music-pl-cnt">${sounds.length}</span>
+        <div class="vtt-music-son-acts">
+          <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',false)" title="Lire en ordre">▶</button>
+          <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',true)" title="Aléatoire">🔀</button>
+          ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeletePlaylist('${pl.id}')" title="Supprimer">🗑</button>`:''}
+        </div>
+      </div>
+      <div class="vtt-music-pl-sounds">
+        ${sounds.map((s,i)=>`<div class="vtt-music-pl-sound">
+          <span class="vtt-music-pl-snum">${i+1}</span>
+          <span class="vtt-music-pl-sname">${_esc(s.name)}</span>
+          ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttRemoveSoundFromPlaylist('${pl.id}','${s.id}')" title="Retirer">✕</button>`:''}
+        </div>`).join('')}
+        ${mj&&_sounds.filter(s=>!(pl.soundIds||[]).includes(s.id)).length?`
+        <div class="vtt-music-pl-addsound">
+          <select id="vtt-pl-sel-${pl.id}" class="vtt-music-sel">
+            <option value="">Ajouter…</option>
+            ${_sounds.filter(s=>!(pl.soundIds||[]).includes(s.id)).map(s=>`<option value="${s.id}">${_esc(s.name)}</option>`).join('')}
+          </select>
+          <button class="vtt-mact" onclick="window._vttAddSoundToPlaylist('${pl.id}',document.getElementById('vtt-pl-sel-${pl.id}').value)">＋</button>
+        </div>`:''}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function _renderNowPlaying(curSound, ms) {
+  const pl = ms.currentPlaylistId ? _playlists.find(p=>p.id===ms.currentPlaylistId) : null;
+  return `<div class="vtt-music-np">
+    <div class="vtt-music-np-name">${curSound
+      ? `🎵 ${_esc(curSound.name)}${pl?` · <em>${_esc(pl.name)}</em>`:''}${ms.loop?' 🔁':''}${ms.shuffle?' 🔀':''}`
+      : '<span style="color:var(--text-dim)">— Rien en lecture —</span>'
+    }</div>
+    ${curSound ? `<div class="vtt-music-prog-row">
+      <div class="vtt-music-prog-bar" onclick="window._vttSeek(event,this)">
+        <div class="vtt-music-prog-fill" id="vtt-music-prog-fill" style="width:0%"></div>
+      </div>
+      <span class="vtt-music-prog-time" id="vtt-music-prog-time">0:00 / 0:00</span>
+    </div>` : ''}
+    <div class="vtt-music-ctrl-row">
+      ${curSound ? `
+        <button class="vtt-music-ctrl" onclick="window._vttToggleMusicPause()" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
+        ${pl?`<button class="vtt-music-ctrl" onclick="window._vttMusicNext()" title="Suivant">⏭</button>`:''}
+        <button class="vtt-music-ctrl" onclick="window._vttStopMusic()" title="Arrêter">⏹</button>
+      ` : ''}
+      <label class="vtt-music-vol-lbl">🔊<input type="range" id="vtt-music-vol" class="vtt-music-vol-inp" min="0" max="100" step="1"></label>
+    </div>
+  </div>`;
+}
+
+// ── Seek sur clic barre de progression ─────────────────────────────
+window._vttSeek = (e, bar) => {
+  if (!_audioEl || !_audioEl.duration) return;
+  const rect = bar.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  _audioEl.currentTime = ratio * _audioEl.duration;
+  _updateMusicProg();
+};
+
+// ── Lecture / contrôles ─────────────────────────────────────────────
+window._vttPlaySound = async (soundId, loop) => {
+  const ms = _musicState;
+  // Toggle si même son sans playlist
+  if (ms.playing && ms.currentSoundId===soundId && !ms.currentPlaylistId && !!ms.loop===!!loop)
+    return window._vttStopMusic();
+  await _setMusicState({ playing:true, paused:false, currentSoundId:soundId,
+    currentPlaylistId:null, loop:!!loop, shuffle:false, volume:ms.volume??0.7,
+    startedAt:serverTimestamp() });
+};
+
+window._vttPlayPlaylist = async (playlistId, shuffle) => {
+  const pl = _playlists.find(p=>p.id===playlistId);
+  if (!pl || !pl.soundIds?.length) return;
+  const ms = _musicState;
+  // Toggle si même playlist + même mode
+  if (ms.playing && ms.currentPlaylistId===playlistId && !!ms.shuffle===!!shuffle)
+    return window._vttStopMusic();
+  // Ordre (Fisher-Yates si shuffle)
+  const order = pl.soundIds.map((_,i)=>i);
+  if (shuffle) {
+    for (let i=order.length-1;i>0;i--) {
+      const j=Math.floor(Math.random()*(i+1));
+      [order[i],order[j]]=[order[j],order[i]];
+    }
+  }
+  await _setMusicState({ playing:true, paused:false,
+    currentSoundId:pl.soundIds[order[0]], currentPlaylistId:playlistId,
+    loop:false, shuffle:!!shuffle, shuffleOrder:order, playlistIndex:0,
+    volume:ms.volume??0.7, startedAt:serverTimestamp() });
+};
+
+window._vttMusicNext = async () => {
+  const ms = _musicState;
+  if (!ms.currentPlaylistId) return;
+  const pl = _playlists.find(p=>p.id===ms.currentPlaylistId); if (!pl) return;
+  const order = ms.shuffleOrder || pl.soundIds.map((_,i)=>i);
+  const nextIdx = ((ms.playlistIndex||0) + 1) % order.length;
+  await _setMusicState({ ...ms, playlistIndex:nextIdx,
+    currentSoundId:pl.soundIds[order[nextIdx]], startedAt:serverTimestamp() });
+};
+
+window._vttToggleMusicPause = async () => {
+  const paused = !_musicState.paused;
+  if (_audioEl) { paused ? _audioEl.pause() : _audioEl.play().catch(()=>{}); }
+  await _setMusicState({ ..._musicState, paused });
+};
+
+window._vttStopMusic = async () => {
+  _killAudio();
+  await _setMusicState({ playing:false, paused:false, currentSoundId:null, currentPlaylistId:null });
+};
+
+function _killAudio() {
+  if (_audioEl) {
+    _audioEl.pause();
+    if (_audioEl._endedHandler) _audioEl.removeEventListener('ended', _audioEl._endedHandler);
+    _audioEl.src=''; _audioEl=null;
+  }
+  clearInterval(_musicProgTimer); _musicProgTimer=null;
+}
+
+async function _setMusicState(patch) {
+  if (!_aid()) return;
+  await setDoc(_musicStateRef(), patch, {merge:true}).catch(()=>{});
+}
+
+// ── Sync lecture ────────────────────────────────────────────────────
+function _syncMusicPlayback(ms) {
+  _musicState = ms;
+  const panel = document.getElementById('vtt-music-panel');
+
+  if (!ms.playing || !ms.currentSoundId) {
+    _killAudio();
+    if (panel?.dataset.open==='1') _renderMusicPanel();
+    return;
+  }
+
+  if (ms.paused) {
+    if (_audioEl && !_audioEl.paused) _audioEl.pause();
+    if (panel?.dataset.open==='1') _renderMusicPanel();
+    return;
+  }
+
+  const sound = _sounds.find(s=>s.id===ms.currentSoundId);
+  if (!sound) { if (panel?.dataset.open==='1') _renderMusicPanel(); return; }
+
+  // Même son déjà en lecture → pas de restart
+  if (_audioEl && _audioEl.dataset.soundId===ms.currentSoundId && !_audioEl.paused && !_audioEl.ended) {
+    _audioEl.loop = ms.loop ?? false;
+    if (panel?.dataset.open==='1') _renderMusicPanel();
+    return;
+  }
+
+  // Nouveau son
+  _killAudio();
+  const el = new Audio(sound.url);
+  el.dataset.soundId = ms.currentSoundId;
+  el.volume = ms.volume ?? 0.7;
+  el.loop = ms.loop ?? false;
+
+  // Sync temps (non-loop uniquement)
+  if (ms.startedAt && !ms.loop) {
+    el.addEventListener('loadedmetadata', () => {
+      const elapsed = (Date.now() - (ms.startedAt?.toMillis?.() ?? Date.now())) / 1000;
+      if (elapsed < el.duration - 0.5) el.currentTime = elapsed;
+    }, {once:true});
+  }
+
+  // Auto-avance playlist (MJ uniquement pour éviter les doublons)
+  if (ms.currentPlaylistId && STATE.isAdmin) {
+    el._endedHandler = () => window._vttMusicNext();
+    el.addEventListener('ended', el._endedHandler);
+  }
+
+  // Erreur de chargement (URL inaccessible, format non supporté…)
+  el.addEventListener('error', () => {
+    const codes = {1:'Chargement interrompu', 2:'Erreur réseau', 3:'Décodage impossible', 4:'URL inaccessible'};
+    const msg = codes[el.error?.code] ?? 'Erreur audio inconnue';
+    console.error('[vtt music] audio error:', el.error?.code, el.error?.message, sound.url);
+    showNotif(`🔇 ${msg} — vérifier l'URL du son`, 'error');
+    _killAudio();
+    if (document.getElementById('vtt-music-panel')?.dataset.open==='1') _renderMusicPanel();
+  }, {once:true});
+
+  // Démarre le timer de progression seulement quand les métadonnées sont chargées
+  el.addEventListener('loadedmetadata', () => {
+    _updateMusicProg();
+    if (!_musicProgTimer) _musicProgTimer = setInterval(_updateMusicProg, 500);
+  }, {once:true});
+
+  el.play().catch(err => {
+    if (err.name === 'NotAllowedError')
+      showNotif('🔇 Cliquez sur la page pour activer le son', 'info');
+    else
+      console.error('[vtt music] play() error:', err.name, err.message);
+  });
+  _audioEl = el;
+  if (panel?.dataset.open==='1') _renderMusicPanel();
+}
+
+// ── Ajout d'un son par URL ───────────────────────────────────────────
+window._vttAddSonUrl = async () => {
+  const url  = prompt('URL directe du fichier audio (mp3, ogg, wav…) :')?.trim();
+  if (!url) return;
+  const name = prompt('Nom du son :', url.split('/').pop()?.replace(/\.[^.]+$/,'') || 'Son')?.trim();
+  if (!name) return;
+  await addDoc(_sonsCol(), { name, url, createdAt:serverTimestamp(), addedBy:STATE.user?.uid||null });
+  showNotif(`✅ "${name}" ajouté`, 'success');
+};
+
+window._vttDeleteSound = async soundId => {
+  const s = _sounds.find(x=>x.id===soundId); if (!s) return;
+  if (!await confirmModal(`Supprimer "${s.name}" ?`)) return;
+  if (_musicState.currentSoundId===soundId) await window._vttStopMusic();
+  for (const pl of _playlists.filter(p=>(p.soundIds||[]).includes(soundId)))
+    await updateDoc(_playlistRef(pl.id), { soundIds:(pl.soundIds||[]).filter(id=>id!==soundId) }).catch(()=>{});
+  await deleteDoc(_sonRef(soundId)).catch(()=>{});
+};
+
+// ── Playlists ───────────────────────────────────────────────────────
+window._vttCreatePlaylist = async () => {
+  const name = prompt('Nom de la playlist :'); if (!name?.trim()) return;
+  const colors = ['#6366f1','#22c38e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316'];
+  await addDoc(_playlistsCol(), {
+    name:name.trim(), color:colors[_playlists.length%colors.length],
+    soundIds:[], createdAt:serverTimestamp(),
+  });
+};
+
+window._vttDeletePlaylist = async plId => {
+  const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
+  if (!await confirmModal(`Supprimer la playlist "${pl.name}" ?`)) return;
+  if (_musicState.currentPlaylistId===plId) await window._vttStopMusic();
+  await deleteDoc(_playlistRef(plId)).catch(()=>{});
+};
+
+window._vttAddSoundToPlaylist = async (plId, soundId) => {
+  if (!soundId) return;
+  const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
+  if ((pl.soundIds||[]).includes(soundId)) return;
+  await updateDoc(_playlistRef(plId), { soundIds:[...(pl.soundIds||[]), soundId] }).catch(()=>{});
+};
+
+window._vttRemoveSoundFromPlaylist = async (plId, soundId) => {
+  const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
+  await updateDoc(_playlistRef(plId), { soundIds:(pl.soundIds||[]).filter(id=>id!==soundId) }).catch(()=>{});
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // HTML
 // ═══════════════════════════════════════════════════════════════════
 function _buildHtml() {
@@ -5664,6 +6050,13 @@ export async function renderVttPage() {
     <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none"></div>
     <button class="vtt-dice-trigger" id="vtt-dice-trigger" onclick="window._vttToggleDice()" title="Lancer des dés libres">🎲</button>`;
   wrap.appendChild(_drf);
+  // Float Musique (bas-gauche du canvas, 4e bouton)
+  const _mf = document.createElement('div');
+  _mf.className = 'vtt-music-float';
+  _mf.innerHTML = `
+    <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none"></div>
+    <button class="vtt-music-trigger" id="vtt-music-trigger" onclick="window._vttToggleMusic()" title="Sons &amp; Musique">🎵</button>`;
+  wrap.appendChild(_mf);
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
