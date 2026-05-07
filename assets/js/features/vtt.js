@@ -5599,17 +5599,27 @@ function _renderMusicPanel() {
   const playing = !!(ms.playing && ms.currentSoundId);
   const curSound = playing ? _sounds.find(s=>s.id===ms.currentSoundId) : null;
 
-  panel.innerHTML = `
-    <div class="vtt-music-hd">
-      <span>🎵 Sons &amp; Musique</span>
-      <button class="vtt-panel-close" onclick="window._vttToggleMusic()">✕</button>
-    </div>
-    <div class="vtt-music-tabs">
-      <button class="vtt-music-tab${_musicTab==='sons'?' active':''}" onclick="window._vttMusicTab('sons')">Sons</button>
-      <button class="vtt-music-tab${_musicTab==='playlists'?' active':''}" onclick="window._vttMusicTab('playlists')">Playlists</button>
-    </div>
-    <div class="vtt-music-body">${_musicTab==='sons' ? _renderSonsTab(mj) : _renderPlaylistsTab(mj)}</div>
-    ${_renderNowPlaying(curSound, ms)}`;
+  // Joueurs : panel minimal — uniquement en lecture + volume
+  if (!mj) {
+    panel.innerHTML = `
+      <div class="vtt-music-hd">
+        <span>🎵 Musique</span>
+        <button class="vtt-ms-close" onclick="window._vttToggleMusic()">✕</button>
+      </div>
+      ${_renderNowPlaying(curSound, ms)}`;
+  } else {
+    panel.innerHTML = `
+      <div class="vtt-music-hd">
+        <span>🎵 Sons &amp; Musique</span>
+        <button class="vtt-ms-close" onclick="window._vttToggleMusic()">✕</button>
+      </div>
+      <div class="vtt-music-tabs">
+        <button class="vtt-music-tab${_musicTab==='sons'?' active':''}" onclick="window._vttMusicTab('sons')">Sons</button>
+        <button class="vtt-music-tab${_musicTab==='playlists'?' active':''}" onclick="window._vttMusicTab('playlists')">Playlists</button>
+      </div>
+      <div class="vtt-music-body">${_musicTab==='sons' ? _renderSonsTab(mj) : _renderPlaylistsTab(mj)}</div>
+      ${_renderNowPlaying(curSound, ms)}`;
+  }
 
   // Bind volume slider local
   const vsl = panel.querySelector('#vtt-music-vol');
@@ -5695,6 +5705,7 @@ function _renderPlaylistsTab(mj) {
 }
 
 function _renderNowPlaying(curSound, ms) {
+  const mj = STATE.isAdmin;
   const pl = ms.currentPlaylistId ? _playlists.find(p=>p.id===ms.currentPlaylistId) : null;
   return `<div class="vtt-music-np">
     <div class="vtt-music-np-name">${curSound
@@ -5702,13 +5713,13 @@ function _renderNowPlaying(curSound, ms) {
       : '<span style="color:var(--text-dim)">— Rien en lecture —</span>'
     }</div>
     ${curSound ? `<div class="vtt-music-prog-row">
-      <div class="vtt-music-prog-bar" onclick="window._vttSeek(event,this)">
+      <div class="vtt-music-prog-bar"${mj?' onclick="window._vttSeek(event,this)"':''} style="${mj?'':'cursor:default'}">
         <div class="vtt-music-prog-fill" id="vtt-music-prog-fill" style="width:0%"></div>
       </div>
       <span class="vtt-music-prog-time" id="vtt-music-prog-time">0:00 / 0:00</span>
     </div>` : ''}
     <div class="vtt-music-ctrl-row">
-      ${curSound ? `
+      ${mj && curSound ? `
         <button class="vtt-music-ctrl" onclick="window._vttToggleMusicPause()" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
         ${pl?`<button class="vtt-music-ctrl" onclick="window._vttMusicNext()" title="Suivant">⏭</button>`:''}
         <button class="vtt-music-ctrl" onclick="window._vttStopMusic()" title="Arrêter">⏹</button>
