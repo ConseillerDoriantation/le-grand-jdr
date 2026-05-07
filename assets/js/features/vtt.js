@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
+import Sortable from '../vendor/sortable.esm.js';
 import { getCurrentAdventureId, getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
@@ -83,6 +84,8 @@ let _audioEl       = null;   // HTMLAudioElement actif
 let _musicTab      = 'sons'; // 'sons' | 'playlists'
 let _musicCloseOut = null;
 let _musicProgTimer = null;
+let _musicSortables = [];   // instances Sortable actives
+let _previewEl     = null;  // aperçu local MJ (non diffusé)
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
 const _renderedPings     = new Set();
@@ -437,7 +440,7 @@ function _cleanup() {
   _hideCtxMenu();
   document.removeEventListener('keydown', _keyHandler);
   const mc = document.getElementById('main-content');
-  if (mc) mc.style.overflow = '';
+  if (mc) { mc.style.overflow = ''; mc.style.height = ''; }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3759,8 +3762,12 @@ function _showCtxMenu(x, y, items) {
     if (i!=null) { _CTX_ACTIONS[+i]?.(); _hideCtxMenu(); }
   });
   // Positionner en évitant de sortir de l'écran
-  el.style.cssText=`left:${x}px;top:${y}px;`;
+  el.style.cssText=`left:${x}px;top:${y}px;visibility:hidden`;
   document.body.appendChild(el);
+  const r=el.getBoundingClientRect(), vw=window.innerWidth, vh=window.innerHeight;
+  const left = r.right  > vw ? Math.max(0, x - r.width)  : x;
+  const top  = r.bottom > vh ? Math.max(0, y - r.height) : y;
+  el.style.cssText=`left:${left}px;top:${top}px;`;
   _ctxClose=e=>{ if (!el.contains(e.target)) _hideCtxMenu(); };
   setTimeout(()=>document.addEventListener('mousedown',_ctxClose), 0);
 }
@@ -5574,7 +5581,28 @@ function _closeMusicPanel() {
   document.getElementById('vtt-music-trigger')?.classList.remove('active');
   if (_musicCloseOut) { document.removeEventListener('mousedown', _musicCloseOut, true); _musicCloseOut=null; }
   clearInterval(_musicProgTimer); _musicProgTimer=null;
+  _musicSortables.forEach(s => s.destroy()); _musicSortables=[];
+  _stopPreview();
 }
+
+function _stopPreview() {
+  if (_previewEl) { _previewEl.pause(); _previewEl.src=''; _previewEl=null; }
+  document.querySelectorAll('.vtt-mact-preview.on').forEach(b => b.classList.remove('on'));
+}
+
+window._vttPreview = (soundId, btn) => {
+  const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
+  // Même son → stop
+  if (_previewEl && _previewEl.dataset.soundId===soundId) { _stopPreview(); return; }
+  _stopPreview();
+  const el = new Audio(sound.url);
+  el.dataset.soundId = soundId;
+  el.volume = 0.7;
+  el.addEventListener('ended', _stopPreview);
+  el.play().catch(() => showNotif('Impossible de lire ce son', 'error'));
+  _previewEl = el;
+  btn?.classList.add('on');
+};
 
 window._vttToggleMusic = () => {
   const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
@@ -5584,7 +5612,8 @@ window._vttToggleMusic = () => {
   _renderMusicPanel();
   _musicCloseOut = e => {
     const f = document.querySelector('.vtt-music-float');
-    if (f && !f.contains(e.target)) _closeMusicPanel();
+    const ctx = document.getElementById('vtt-ctx-menu');
+    if (f && !f.contains(e.target) && !ctx?.contains(e.target)) _closeMusicPanel();
   };
   document.addEventListener('mousedown', _musicCloseOut, true);
 };
@@ -5632,6 +5661,8 @@ function _renderMusicPanel() {
   if (_audioEl && !_audioEl.paused) {
     _musicProgTimer = setInterval(_updateMusicProg, 500);
   }
+  // Sortables (MJ + onglet playlists uniquement)
+  if (mj && _musicTab === 'playlists') _initMusicSortable();
 }
 
 function _updateMusicProg() {
@@ -5652,8 +5683,12 @@ function _fmtTime(s) {
 
 function _renderSonsTab(mj) {
   let h = '';
-  if (mj) h += `<button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()">＋ Ajouter un son (URL)</button>`;
-  if (!_sounds.length) return h + `<div class="vtt-music-empty">Aucun son importé</div>`;
+  if (mj) h += `
+    <div class="vtt-music-son-actions-row">
+      <button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()" style="flex:1">＋ URL</button>
+      <button class="vtt-music-upload-btn" onclick="window._vttImportGithubRelease()" style="flex:2">📥 Importer depuis GitHub</button>
+    </div>`;
+  if (!_sounds.length) return h + `<div class="vtt-music-empty">Aucun son — ajoutez une URL ou importez depuis GitHub</div>`;
   return h + `<div class="vtt-music-list">${_sounds.map(s => {
     const active = _musicState.playing && _musicState.currentSoundId===s.id && !_musicState.currentPlaylistId;
     return `<div class="vtt-music-son-item${active?' is-playing':''}">
@@ -5670,8 +5705,31 @@ function _renderSonsTab(mj) {
 function _renderPlaylistsTab(mj) {
   let h = '';
   if (mj) h += `<button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()">＋ Nouvelle playlist</button>`;
-  if (!_playlists.length) return h + `<div class="vtt-music-empty">Aucune playlist</div>`;
-  return h + `<div class="vtt-music-list">${_playlists.map(pl => {
+
+  // Pool — sons non encore placés dans une playlist
+  if (mj) {
+    const usedIds = new Set(_playlists.flatMap(pl => pl.soundIds || []));
+    const poolSounds = _sounds.filter(s => !usedIds.has(s.id));
+    if (poolSounds.length) {
+      h += `<div class="vtt-music-pool-hd">📦 Non classés (${poolSounds.length})</div>
+      <div class="vtt-music-pool" id="vtt-music-pool">
+        ${poolSounds.map(s=>`<div class="vtt-music-pool-item" data-sound-id="${s.id}" title="${_esc(s.name)}" oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}')">
+          <span class="vtt-music-pool-grip">⠿</span>
+          <span class="vtt-music-pool-name">${_esc(s.name)}</span>
+          <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu">🎧</button>
+        </div>`).join('')}
+      </div>`;
+    } else if (_sounds.length) {
+      h += `<div class="vtt-music-pool-hd">📦 Non classés</div>
+      <div class="vtt-music-empty" style="padding:.3rem .5rem">Tous les sons sont classés ✓</div>`;
+    } else {
+      h += `<div class="vtt-music-empty">Aucun son — ajoutez-en dans l'onglet Sons</div>`;
+    }
+  }
+
+  if (!_playlists.length) return h + `<div class="vtt-music-empty" style="margin-top:.4rem">Aucune playlist</div>`;
+
+  h += _playlists.map(pl => {
     const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
     const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
     return `<div class="vtt-music-pl-item${active?' is-playing':''}">
@@ -5685,23 +5743,56 @@ function _renderPlaylistsTab(mj) {
           ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeletePlaylist('${pl.id}')" title="Supprimer">🗑</button>`:''}
         </div>
       </div>
-      <div class="vtt-music-pl-sounds">
-        ${sounds.map((s,i)=>`<div class="vtt-music-pl-sound">
-          <span class="vtt-music-pl-snum">${i+1}</span>
+      <div class="vtt-music-pl-sounds vtt-pl-drop" id="vtt-pl-drop-${pl.id}" data-pl-id="${pl.id}">
+        ${sounds.map(s=>`<div class="vtt-music-pl-sound" data-sound-id="${s.id}" ${mj?`oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}','${pl.id}')"`:''}">
+          ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
           <span class="vtt-music-pl-sname">${_esc(s.name)}</span>
+          <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu">🎧</button>
           ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttRemoveSoundFromPlaylist('${pl.id}','${s.id}')" title="Retirer">✕</button>`:''}
         </div>`).join('')}
-        ${mj&&_sounds.filter(s=>!(pl.soundIds||[]).includes(s.id)).length?`
-        <div class="vtt-music-pl-addsound">
-          <select id="vtt-pl-sel-${pl.id}" class="vtt-music-sel">
-            <option value="">Ajouter…</option>
-            ${_sounds.filter(s=>!(pl.soundIds||[]).includes(s.id)).map(s=>`<option value="${s.id}">${_esc(s.name)}</option>`).join('')}
-          </select>
-          <button class="vtt-mact" onclick="window._vttAddSoundToPlaylist('${pl.id}',document.getElementById('vtt-pl-sel-${pl.id}').value)">＋</button>
-        </div>`:''}
+        ${!sounds.length?`<div class="vtt-music-pl-empty-drop">Glisser des sons ici</div>`:''}
       </div>
     </div>`;
-  }).join('')}</div>`;
+  }).join('');
+  return h;
+}
+
+// ── Initialisation Sortable ────────────────────────────────────────
+function _initMusicSortable() {
+  _musicSortables.forEach(s => s.destroy()); _musicSortables = [];
+
+  const pool = document.getElementById('vtt-music-pool');
+  if (pool) {
+    _musicSortables.push(new Sortable(pool, {
+      group: { name: 'vtt-sounds', pull: 'clone', put: false },
+      sort: false,
+      animation: 120,
+      ghostClass: 'vtt-sort-ghost',
+    }));
+  }
+
+  document.querySelectorAll('.vtt-pl-drop').forEach(el => {
+    const plId = el.dataset.plId;
+    _musicSortables.push(new Sortable(el, {
+      group: { name: 'vtt-sounds', pull: false, put: true },
+      animation: 120,
+      ghostClass: 'vtt-sort-ghost',
+      filter: '.vtt-music-pl-empty-drop,.vtt-mact',
+      onAdd: async evt => {
+        const soundId = evt.item.dataset.soundId;
+        evt.item.remove(); // Sortable a cloné → on supprime, Firestore va re-render
+        const pl = _playlists.find(p=>p.id===plId); if (!pl||!soundId) return;
+        if ((pl.soundIds||[]).includes(soundId)) return;
+        await updateDoc(_playlistRef(plId), { soundIds:[...(pl.soundIds||[]), soundId] }).catch(()=>{});
+      },
+      onUpdate: async evt => {
+        const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
+        const items = [...el.querySelectorAll('[data-sound-id]')];
+        const newOrder = items.map(i=>i.dataset.soundId).filter(Boolean);
+        await updateDoc(_playlistRef(plId), { soundIds: newOrder }).catch(()=>{});
+      },
+    }));
+  });
 }
 
 function _renderNowPlaying(curSound, ms) {
@@ -5794,7 +5885,8 @@ window._vttStopMusic = async () => {
 function _killAudio() {
   if (_audioEl) {
     _audioEl.pause();
-    if (_audioEl._endedHandler) _audioEl.removeEventListener('ended', _audioEl._endedHandler);
+    if (_audioEl._endedHandler)  _audioEl.removeEventListener('ended', _audioEl._endedHandler);
+    if (_audioEl._errorHandler)  _audioEl.removeEventListener('error', _audioEl._errorHandler);
     _audioEl.src=''; _audioEl=null;
   }
   clearInterval(_musicProgTimer); _musicProgTimer=null;
@@ -5854,14 +5946,15 @@ function _syncMusicPlayback(ms) {
   }
 
   // Erreur de chargement (URL inaccessible, format non supporté…)
-  el.addEventListener('error', () => {
+  el._errorHandler = () => {
     const codes = {1:'Chargement interrompu', 2:'Erreur réseau', 3:'Décodage impossible', 4:'URL inaccessible'};
     const msg = codes[el.error?.code] ?? 'Erreur audio inconnue';
     console.error('[vtt music] audio error:', el.error?.code, el.error?.message, sound.url);
     showNotif(`🔇 ${msg} — vérifier l'URL du son`, 'error');
     _killAudio();
     if (document.getElementById('vtt-music-panel')?.dataset.open==='1') _renderMusicPanel();
-  }, {once:true});
+  };
+  el.addEventListener('error', el._errorHandler, {once:true});
 
   // Démarre le timer de progression seulement quand les métadonnées sont chargées
   el.addEventListener('loadedmetadata', () => {
@@ -5878,6 +5971,67 @@ function _syncMusicPlayback(ms) {
   _audioEl = el;
   if (panel?.dataset.open==='1') _renderMusicPanel();
 }
+
+// ── Menu contextuel son ──────────────────────────────────────────────
+// currentPlId : playlist d'où vient le clic (undefined = pool)
+window._vttSoundCtxMenu = (e, soundId, currentPlId) => {
+  if (!_playlists.length) return;
+  const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
+
+  const items = [];
+
+  // Playlists cibles (exclut celle d'où il vient s'il y est déjà)
+  const targets = _playlists.filter(pl =>
+    pl.id !== currentPlId && !(pl.soundIds||[]).includes(soundId)
+  );
+  if (targets.length) {
+    items.push({ label: `<span style="color:var(--text-dim);font-size:.65rem">Ajouter à…</span>`, fn: null });
+    targets.forEach(pl => items.push({
+      label: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pl.color||'#6366f1'};margin-right:.4rem"></span>${_esc(pl.name)}`,
+      fn: () => window._vttAddSoundToPlaylist(pl.id, soundId),
+    }));
+  }
+
+  // Retirer de la playlist courante
+  if (currentPlId) {
+    if (items.length) items.push('---');
+    items.push({ label: '✕ Retirer de cette playlist', fn: () => window._vttRemoveSoundFromPlaylist(currentPlId, soundId) });
+  }
+
+  if (items.length) _showCtxMenu(e.clientX, e.clientY, items);
+};
+
+// ── Import GitHub Release ────────────────────────────────────────────
+window._vttImportGithubRelease = async () => {
+  const LS_REPO = 'vtt-music-gh-repo', LS_TAG = 'vtt-music-gh-tag';
+  const defRepo = localStorage.getItem(LS_REPO) || 'ConseillerDoriantation/le-grand-jdr';
+  const defTag  = localStorage.getItem(LS_TAG)  || 'sounds-v1';
+  const repo = prompt('Repo GitHub (owner/repo) :', defRepo)?.trim(); if (!repo) return;
+  const tag  = prompt('Tag de la release :', defTag)?.trim();          if (!tag)  return;
+  localStorage.setItem(LS_REPO, repo); localStorage.setItem(LS_TAG, tag);
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`);
+    if (!res.ok) { showNotif(`Release introuvable (${res.status})`, 'error'); return; }
+    const data = await res.json();
+    const audioExts = /\.(mp3|ogg|wav|flac|m4a|aac)$/i;
+    const assets = (data.assets||[]).filter(a => audioExts.test(a.name));
+    if (!assets.length) { showNotif('Aucun fichier audio dans cette release', 'info'); return; }
+
+    const existingUrls = new Set(_sounds.map(s => s.url));
+    const newAssets = assets.filter(a => !existingUrls.has(a.browser_download_url));
+    if (!newAssets.length) { showNotif('Tous ces sons sont déjà importés', 'info'); return; }
+
+    for (const a of newAssets) {
+      const name = a.name.replace(/\.[^.]+$/, '').replace(/[._-]+/g, ' ').trim();
+      await addDoc(_sonsCol(), { name, url: a.browser_download_url, createdAt: serverTimestamp(), addedBy: STATE.user?.uid||null });
+    }
+    showNotif(`✅ ${newAssets.length} son(s) importé(s)`, 'success');
+  } catch(e) {
+    console.error('[vtt music] github import:', e);
+    showNotif('Erreur lors de l\'import GitHub', 'error');
+  }
+};
 
 // ── Ajout d'un son par URL ───────────────────────────────────────────
 window._vttAddSonUrl = async () => {
@@ -5899,13 +6053,36 @@ window._vttDeleteSound = async soundId => {
 };
 
 // ── Playlists ───────────────────────────────────────────────────────
-window._vttCreatePlaylist = async () => {
-  const name = prompt('Nom de la playlist :'); if (!name?.trim()) return;
-  const colors = ['#6366f1','#22c38e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316'];
-  await addDoc(_playlistsCol(), {
-    name:name.trim(), color:colors[_playlists.length%colors.length],
-    soundIds:[], createdAt:serverTimestamp(),
-  });
+window._vttCreatePlaylist = () => {
+  const colors = ['#6366f1','#22c38e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
+  const defColor = colors[_playlists.length % colors.length];
+  openModal('Nouvelle playlist', `
+    <div style="display:flex;flex-direction:column;gap:.9rem">
+      <div>
+        <label class="vtt-pl-modal-lbl">Nom</label>
+        <input id="vtt-pl-name-inp" type="text" class="vtt-pl-modal-inp"
+          placeholder="Ex : Donjon, Combat, Ambiance…"
+          onkeydown="if(event.key==='Enter')window._vttCreatePlaylistConfirm()">
+      </div>
+      <div>
+        <label class="vtt-pl-modal-lbl">Couleur</label>
+        <div class="vtt-pl-color-row">
+          ${colors.map(c=>`<button type="button" class="vtt-pl-color-btn${c===defColor?' sel':''}"
+            data-color="${c}" style="background:${c}"
+            onclick="document.querySelectorAll('.vtt-pl-color-btn').forEach(b=>b.classList.remove('sel'));this.classList.add('sel')">
+          </button>`).join('')}
+        </div>
+      </div>
+      <button class="vtt-pl-modal-submit" onclick="window._vttCreatePlaylistConfirm()">Créer la playlist</button>
+    </div>`);
+  setTimeout(() => { document.getElementById('vtt-pl-name-inp')?.focus(); }, 60);
+};
+
+window._vttCreatePlaylistConfirm = async () => {
+  const name  = document.getElementById('vtt-pl-name-inp')?.value?.trim(); if (!name) return;
+  const color = document.querySelector('.vtt-pl-color-btn.sel')?.dataset.color || '#6366f1';
+  closeModalDirect();
+  await addDoc(_playlistsCol(), { name, color, soundIds:[], createdAt:serverTimestamp() });
 };
 
 window._vttDeletePlaylist = async plId => {
@@ -5977,7 +6154,7 @@ function _buildHtml() {
       </div>
     </div>`:''}
     <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
-    <div class="vtt-right-col">
+    <div class="vtt-right-col" id="vtt-right-col">
       <div class="vtt-inspector" id="vtt-inspector">
         <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token</div>
       </div>
@@ -6006,6 +6183,7 @@ export async function renderVttPage() {
   if (!content) return;
   content.innerHTML='<div class="loading"><div class="spinner"></div> Chargement de la table…</div>';
   content.style.overflow='hidden';
+  content.style.height='100%';
   try { await _loadKonva(); }
   catch {
     content.innerHTML='<div style="padding:2rem;color:var(--text-dim)">Impossible de charger Konva.js.</div>';
