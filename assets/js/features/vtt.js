@@ -440,7 +440,7 @@ function _cleanup() {
   _hideCtxMenu();
   document.removeEventListener('keydown', _keyHandler);
   const mc = document.getElementById('main-content');
-  if (mc) { mc.style.overflow = ''; mc.style.height = ''; }
+  if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.paddingBottom = ''; }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6183,7 +6183,8 @@ export async function renderVttPage() {
   if (!content) return;
   content.innerHTML='<div class="loading"><div class="spinner"></div> Chargement de la table…</div>';
   content.style.overflow='hidden';
-  content.style.height='100%';
+  content.style.height='100vh';
+  content.style.paddingBottom='0';
   try { await _loadKonva(); }
   catch {
     content.innerHTML='<div style="padding:2rem;color:var(--text-dim)">Impossible de charger Konva.js.</div>';
