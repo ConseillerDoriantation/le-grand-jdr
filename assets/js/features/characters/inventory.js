@@ -5,7 +5,8 @@ import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
-import { statShort, formatItemBonusText, calcOr } from '../../shared/char-stats.js';
+import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
+import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import {
   _getTraits,
   getEquippedInventoryIndexMap,
@@ -65,7 +66,7 @@ export function _renderInventaireBoutique(char) {
     if (item.ca || item.ca === 0) infos.push({ label: '🛡️ CA', val: item.ca });
     _getTraits(item).forEach(t => infos.push({ label: 'Trait', val: t, color: '#b47fff', italic: true }));
     if (item.type)        infos.push({ label: 'Type',       val: item.type });
-    if (item.effet)       infos.push({ label: 'Effet',      val: item.effet });
+    { const eff = getItemEffectText(item); if (eff) infos.push({ label: 'Effet', val: eff }); }
     if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
     if (bonusText)        infos.push({ label: 'Stats',      val: bonusText,   color: '#4f8cff' });
 
@@ -336,6 +337,22 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
   const hasEquipped = equippedSlots.length > 0;
 
+  // Reprise sur améliorations : par item, on peut rembourser un % du coût investi.
+  const settings = getUpgradeSettings();
+  const refundRatio = parseFloat(settings?.refundUpgradeRatio) || 0;
+  const upgradedItems = c
+    ? indices.map(idx => c.inventaire?.[idx]).filter(it => it && hasUpgrades(it))
+    : [];
+  const upgradedCount = upgradedItems.length;
+  const refundPerItem = upgradedItems.map(it => calcUpgradeRefund(it, settings));
+  const totalRefundAll = refundPerItem.reduce((s, n) => s + n, 0);
+  const lostInvestmentAll = upgradedItems.reduce((s, it) => s + getUpgradeTotalCost(it), 0) - totalRefundAll;
+  // Pour le calcul live (qty variable), on rembourse les `qty` premiers items améliorés.
+  const refundsCum = refundPerItem.reduce((acc, v) => { acc.push((acc[acc.length-1]||0) + v); return acc; }, []);
+  const refundForQty = (q) => refundsCum[Math.min(q, upgradedCount) - 1] || 0;
+  // Expose le tableau cumulatif au handler inline pour live-update.
+  window.__sellRefundsCum = refundsCum;
+
   openModal(`🔄 Vendre — ${nom}`, `
     ${hasEquipped ? `
     <div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);
@@ -351,6 +368,14 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
     <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
       <strong style="color:var(--gold)">${prixVente} or</strong> par unité · ${maxQte} en stock
     </div>
+    ${upgradedCount > 0 ? `
+    <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);
+      border-radius:10px;padding:.6rem .85rem;margin-bottom:.85rem;font-size:.8rem;color:var(--text-muted)">
+      <strong style="color:var(--gold)">⚠️ Item${upgradedCount>1?'s':''} amélioré${upgradedCount>1?'s':''}</strong>
+      ${refundRatio > 0
+        ? `· Reprise ${Math.round(refundRatio * 100)}% des PO investies — <strong style="color:var(--gold)">+${totalRefundAll} or</strong> max si tu vends les ${upgradedCount}.`
+        : `· Les améliorations seront perdues sans remboursement (${lostInvestmentAll} PO investies).`}
+    </div>` : ''}
     <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
       <label style="flex-shrink:0">Quantité</label>
       <div style="display:flex;align-items:center;gap:.4rem">
@@ -358,11 +383,11 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
         <input type="number" id="sell-qty" min="1" max="${maxQte}" value="1"
           style="width:60px;text-align:center" class="input-field"
-          oninput="document.getElementById('sell-total').textContent=(Math.min(Math.max(1,parseInt(this.value)||1),${maxQte})*${prixVente})+' or'">
+          oninput="window._sellRefreshTotal(this,${prixVente},${maxQte})">
         <button type="button" onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event('input'))"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
       </div>
-      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="sell-total" style="color:var(--gold)">${prixVente} or</strong></span>
+      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="sell-total" style="color:var(--gold)">${prixVente + refundForQty(1)} or</strong>${upgradedCount && refundRatio > 0 ? ` <span id="sell-refund-hint" style="font-size:.7rem;color:var(--text-dim)">(dont +${refundForQty(1)} reprise)</span>` : ''}</span>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
@@ -372,6 +397,18 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
     </div>
   `);
 }
+
+// Live-update du total dans la modale de vente (qty × prix + reprise upgrades).
+window._sellRefreshTotal = (input, prixVente, maxQte) => {
+  const q = Math.min(Math.max(1, parseInt(input.value) || 1), maxQte);
+  const cum = Array.isArray(window.__sellRefundsCum) ? window.__sellRefundsCum : [];
+  const refund = cum[Math.min(q, cum.length) - 1] || 0;
+  const total = q * prixVente + refund;
+  const totalEl = document.getElementById('sell-total');
+  if (totalEl) totalEl.textContent = `${total} or`;
+  const hintEl = document.getElementById('sell-refund-hint');
+  if (hintEl) hintEl.textContent = refund > 0 ? `(dont +${refund} reprise)` : '';
+};
 
 export async function sellInvItemBulk(charId, indicesB64, prixVente) {
   try {
@@ -391,6 +428,10 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     const itemNom  = item.nom || 'objet';
     const totalPrix = prixVente * qty;
 
+    // Reprise des améliorations : somme des refunds des items vendus.
+    const settings = getUpgradeSettings();
+    const refundTotal = indicesToSell.reduce((s, idx) => s + calcUpgradeRefund(inv[idx], settings), 0);
+
     const sorted = [...indicesToSell].sort((a,b)=>b-a);
     sorted.forEach(idx => inv.splice(idx, 1));
 
@@ -401,6 +442,13 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
       libelle: qty > 1 ? `Vente ×${qty} : ${itemNom}` : `Vente : ${itemNom}`,
       montant: totalPrix,
     });
+    if (refundTotal > 0) {
+      recettes.push({
+        date:    new Date().toLocaleDateString('fr-FR'),
+        libelle: `Reprise améliorations : ${itemNom}`,
+        montant: refundTotal,
+      });
+    }
 
     if (item.itemId && window.sellInvItemFromShop) {
       for (let i = 0; i < qty; i++) {
@@ -430,7 +478,8 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     const unequipMsg = equipSync.removedSlots.length
       ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
       : '';
-    showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or !${unequipMsg}`, 'success');
+    const refundMsg = refundTotal > 0 ? ` (+${refundTotal} or de reprise)` : '';
+    showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or${refundMsg} !${unequipMsg}`, 'success');
     window.refreshOrDisplay?.(c);
     window.renderCharSheet(c, window._currentCharTab || 'inventaire');
   } catch (e) { notifySaveError(e); }

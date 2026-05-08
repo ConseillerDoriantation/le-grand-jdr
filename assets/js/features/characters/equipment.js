@@ -2,8 +2,8 @@ import { STATE } from '../../core/state.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { computeEquipStatsBonus, getItemStatBonus } from '../../shared/char-stats.js';
-import { _getTraits } from './data.js';
+import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../../shared/char-stats.js';
+import { _getTraits, _getBaseTraits, _getAddedTraits } from './data.js';
 
 // ══════════════════════════════════════════════
 // HELPERS D'INFÉRENCE
@@ -27,14 +27,22 @@ function inferAccessorySlotValue(slot, item = {}) {
   return item.slotBijou || slot;
 }
 
-function buildEquippedItemFromInventory(slot, item, invIndex) {
+export function buildEquippedItemFromInventory(slot, item, invIndex) {
   if (!item) return null;
   const isWeapon = slot.startsWith('Main');
+
+  // Traits BRUTS (base + addedTraits) — pas la version transformée par effectBonus.
+  // L'item équipé conserve `upgrades.effectBonus` pour que `_getTraits(equippedItem)`
+  // applique la transformation à l'affichage sans double application.
+  const rawTraits   = [..._getBaseTraits(item), ..._getAddedTraits(item)];
+  const effectBonus = parseInt(item.upgrades?.effectBonus) || 0;
+  const equipUpgrades = effectBonus > 0 ? { effectBonus } : undefined;
 
   if (isWeapon) {
     return {
       nom: item.nom || '',
-      traits: Array.isArray(item.traits) ? [...item.traits] : [],
+      traits: rawTraits,
+      ...(equipUpgrades ? { upgrades: equipUpgrades } : {}),
       sousType: item.sousType || '',
       degats: item.degats || '',
       degatsStat: item.degatsStat || inferAttackStatFromItem(item),
@@ -45,7 +53,7 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
       statAttaque: inferAttackStatFromItem(item),
       typeArme: item.typeArme || item.type || '',
       portee: item.portee || '',
-      particularite: item.particularite || item.effet || item.description || '',
+      particularite: item.particularite || getItemEffectText(item) || item.description || '',
       format: item.format || '',
       toucher: item.toucher || '',
       stats: item.stats || '',
@@ -62,7 +70,8 @@ function buildEquippedItemFromInventory(slot, item, invIndex) {
 
   return {
     nom: item.nom || '',
-    traits: Array.isArray(item.traits) ? [...item.traits] : [],
+    traits: rawTraits,
+    ...(equipUpgrades ? { upgrades: equipUpgrades } : {}),
     fo: getItemStatBonus(item, 'force'),
     dex: getItemStatBonus(item, 'dexterite'),
     in: getItemStatBonus(item, 'intelligence'),
@@ -315,7 +324,7 @@ export function previewEquipFromInv(val, slot) {
         : (item.degatsStat ? [item.degatsStat] : [inferredStat]);
       window._equipSelectedMeta.typeArme      = item.typeArme      || item.sousType || '';
       window._equipSelectedMeta.portee        = item.portee        || '';
-      window._equipSelectedMeta.particularite = item.particularite || item.effet || '';
+      window._equipSelectedMeta.particularite = item.particularite || getItemEffectText(item) || '';
       window._equipSelectedMeta.format        = item.format        || '';
       window._equipSelectedMeta.toucher       = item.toucher       || '';
       window._equipSelectedMeta.stats         = item.stats         || '';

@@ -18,6 +18,7 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { getItemStatBonus } from '../shared/char-stats.js';
+import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
 import {
@@ -86,7 +87,7 @@ const _serializeShopWeapon = (item = {}) => ({
   typeArme: item.typeArme || item.sousType || '',
   sousType: item.sousType || '',
   portee: item.portee || '',
-  traits: Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []),
+  traits: _getTraits(item),
   format: item.format || '',
   toucher: item.toucher || '',
   particularite: item.particularite || item.effet || '',
@@ -1270,7 +1271,7 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     if (range) range.value = item?.portee || '';
     if (!preview) return;
     if (!item) { preview.innerHTML = ''; return; }
-    const traits = Array.isArray(item.traits) ? item.traits : (item.trait ? [item.trait] : []);
+    const traits = _getTraits(item);
     const degatsStats = Array.isArray(item.degatsStats) && item.degatsStats.length
       ? item.degatsStats
       : (item.degatsStat ? [item.degatsStat] : []);

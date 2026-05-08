@@ -6,6 +6,8 @@ import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
+import { openArtisanModal } from './artisan.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import Sortable from '../vendor/sortable.esm.js';
@@ -285,7 +287,8 @@ async function renderShop() {
         </div>
       </div>
 
-      <div class="sh-topbar-tools">`;
+      <div class="sh-topbar-tools">
+        <button class="btn btn-gold btn-sm" onclick="openArtisanModal()" title="Améliorer ton équipement">🔨 Artisan</button>`;
 
   if (STATE.isAdmin) {
     html += `
@@ -293,6 +296,7 @@ async function renderShop() {
         <button class="btn btn-gold btn-sm" onclick="openCatModal()" title="Créer une catégorie">📁 Catégorie</button>
         <button class="btn btn-outline btn-sm" onclick="openItemModal()" title="Créer un article">＋ Article</button>
         <button class="btn btn-outline btn-sm" onclick="openWeaponFormatsAdmin()" title="Gérer les formats d'armes">⚙️ Formats</button>
+        <button class="btn btn-outline btn-sm" onclick="openUpgradeSettingsAdmin()" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
         <button class="btn btn-outline btn-sm" onclick="openShopExportModal()" title="Exporter / Importer la boutique">⬆️ Export</button>
       </div>`;
   }

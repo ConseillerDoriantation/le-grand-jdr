@@ -34,10 +34,11 @@ export function statShort(key) {
 }
 
 /**
- * Lit un bonus de stat sur un item en acceptant les anciens alias boutique
- * (notamment `for` pour Force) et le format canonique d'équipement (`fo`).
+ * Lit le bonus de base d'un item, sans tenir compte des améliorations
+ * (`upgrades.statBonus`). Utile pour la revente / boutique / recettes
+ * où l'on veut la valeur originale de l'item.
  */
-export function getItemStatBonus(item = {}, statOrStore = '') {
+export function getItemBaseStatBonus(item = {}, statOrStore = '') {
   const meta = ITEM_STAT_BY_FULL[statOrStore] || ITEM_STAT_BY_STORE[statOrStore];
   if (!meta) return 0;
   const stores = [meta.store, ...(meta.aliases || [])];
@@ -47,6 +48,62 @@ export function getItemStatBonus(item = {}, statOrStore = '') {
     return Number.isNaN(val) ? 0 : val;
   }
   return 0;
+}
+
+/**
+ * Lit la portion d'amélioration d'un bonus de stat (`upgrades.statBonus[store]`).
+ * Renvoie 0 si l'item n'a pas d'améliorations.
+ */
+export function getItemUpgradeStatBonus(item = {}, statOrStore = '') {
+  const meta = ITEM_STAT_BY_FULL[statOrStore] || ITEM_STAT_BY_STORE[statOrStore];
+  if (!meta) return 0;
+  const v = parseInt(item?.upgrades?.statBonus?.[meta.store]);
+  return Number.isNaN(v) ? 0 : v;
+}
+
+/**
+ * Bonus d'effet d'amélioration (anneaux : +N à l'effet flat).
+ */
+export function getItemEffectBonus(item = {}) {
+  const v = parseInt(item?.upgrades?.effectBonus);
+  return Number.isNaN(v) ? 0 : v;
+}
+
+/**
+ * Texte d'effet d'un item avec amélioration appliquée.
+ * Si l'effet contient un nombre (ex: "+1 vitesse", "1 CA"), il est incrémenté
+ * de `effectBonus` directement (ex: "+2 vitesse" au palier 1, "+3 vitesse" au 2).
+ * Sinon, fallback sur un suffixe descriptif "(renforcé +N)".
+ */
+export function getItemEffectText(item = {}) {
+  const base  = item?.effet || '';
+  const bonus = getItemEffectBonus(item);
+  if (bonus <= 0) return base;
+
+  // Tente d'incrémenter le premier nombre positif trouvé dans le texte.
+  // Ex: "+1 vitesse"  → "+2 vitesse" au palier 1
+  //     "1 vitesse"   → "2 vitesse"
+  //     "Vitesse +1"  → "Vitesse +2"
+  const m = base.match(/(?<![\d.])(\+?)(\d+)(?![\d.])/);
+  if (m) {
+    const sign  = m[1] || '';
+    const value = parseInt(m[2]);
+    const newVal = value + bonus;
+    return base.replace(m[0], `${sign}${newVal}`);
+  }
+
+  // Fallback : pas de nombre trouvé, suffixe descriptif
+  const suffix = base ? ` (renforcé +${bonus})` : `Effet renforcé +${bonus}`;
+  return base + suffix;
+}
+
+/**
+ * Lit un bonus de stat sur un item en acceptant les anciens alias boutique
+ * (notamment `for` pour Force) et le format canonique d'équipement (`fo`).
+ * Inclut automatiquement les améliorations issues de `item.upgrades.statBonus`.
+ */
+export function getItemStatBonus(item = {}, statOrStore = '') {
+  return getItemBaseStatBonus(item, statOrStore) + getItemUpgradeStatBonus(item, statOrStore);
 }
 
 // ── Calculs de base ───────────────────────────────────────────────────────────
