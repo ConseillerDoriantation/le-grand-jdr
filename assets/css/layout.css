@@ -284,42 +284,89 @@ html, body { min-height:100%; }
   flex: 1;
 }
 
-/* Section labels — petites capitales sobres, hiérarchie claire */
+/* Sections repliables (<details>) — densité optimisée */
+.sidebar-section {
+  margin: 0;
+}
+.sidebar-section + .sidebar-section,
+.sidebar-section + .sidebar-nav-group--standalone {
+  margin-top: 2px;
+}
+.sidebar-section[open] {
+  padding-bottom: 4px;
+}
+/* Masque le marker natif (triangle) du <summary> sur tous les navigateurs */
+.sidebar-section > summary { list-style: none; }
+.sidebar-section > summary::-webkit-details-marker { display: none; }
+.sidebar-section > summary::marker { content: ''; }
+
+/* Section labels — cliquables, petites capitales sobres */
 .sidebar-section-label {
-  font-size: .6rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .58rem;
   font-weight: 600;
   letter-spacing: .18em;
   text-transform: uppercase;
   color: var(--text-dim);
-  opacity: .7;
-  padding: 18px 18px 6px;
-  pointer-events: none;
+  opacity: .65;
+  padding: 8px 16px 4px;
+  margin: 0;
+  cursor: pointer;
   user-select: none;
+  transition: opacity .14s ease, color .14s ease;
+}
+.sidebar-section-label:hover {
+  opacity: 1;
+  color: var(--text-muted);
+}
+.sidebar-section-label .sl-text {
+  flex: 1;
+}
+.sidebar-section-label .sl-chevron {
+  width: 11px;
+  height: 11px;
+  stroke: currentColor;
+  fill: none;
+  opacity: .8;
+  transform: rotate(0deg);
+  transition: transform .18s ease;
+  flex-shrink: 0;
+}
+/* Section repliée → flèche pointe vers la droite */
+.sidebar-section:not([open]) .sl-chevron {
+  transform: rotate(-90deg);
 }
 
-/* Nav groups + sep */
+/* Nav groups */
 .sidebar-nav-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+}
+.sidebar-nav-group--standalone {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,.05);
 }
 .sidebar-sep {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(255,255,255,.06) 30%, rgba(255,255,255,.06) 70%, transparent);
-  margin: .35rem 1rem;
+  margin: .15rem 1rem;
 }
 
-/* nav-item — sobre, professionnel, contraste maîtrisé */
+/* nav-item — densité augmentée, professionnel */
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   margin: 0 8px;
-  padding: 8px 11px;
-  border-radius: 7px;
+  padding: 6px 11px;
+  border-radius: 6px;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: .82rem;
+  font-size: .8rem;
   font-weight: 500;
   letter-spacing: .005em;
   transition: color .14s ease, background-color .14s ease;

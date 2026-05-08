@@ -129,9 +129,15 @@ export function initEventDelegation() {
 
 // ── Synchronisation de l'état actif de la nav ─
 function _syncNav(page) {
-  document.querySelectorAll('.nav-item[data-navigate]').forEach((el) =>
-    el.classList.toggle('active', el.dataset.navigate === page)
-  );
+  document.querySelectorAll('.nav-item[data-navigate]').forEach((el) => {
+    const isActive = el.dataset.navigate === page;
+    el.classList.toggle('active', isActive);
+    // Ouvre automatiquement la section <details> parente si l'item actif y est replié
+    if (isActive) {
+      const section = el.closest('.sidebar-section');
+      if (section && !section.open) section.open = true;
+    }
+  });
   document.querySelectorAll('.bottom-nav-item[data-page]').forEach((el) =>
     el.classList.toggle('active', el.dataset.page === page)
   );
