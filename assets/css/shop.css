@@ -1890,3 +1890,222 @@ body.sh-dragging * { cursor: grabbing !important; }
   gap: .35rem;
   cursor: pointer;
 }
+
+/* ══════════════════════════════════════════════
+   ARTISAN — modale d'amélioration d'équipement
+   ══════════════════════════════════════════════ */
+
+/* — Sac de fragments — */
+.art-frag-bag {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: .7rem .85rem;
+}
+.art-frag-bag-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .5rem;
+}
+.art-frag-cat {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  padding: .25rem 0;
+}
+.art-frag-cat + .art-frag-cat {
+  border-top: 1px solid var(--border);
+  margin-top: .25rem;
+  padding-top: .45rem;
+}
+.art-frag-cat-hd {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 110px;
+  padding-top: .15rem;
+}
+.art-frag-cat-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+.art-frag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .72rem;
+  font-weight: 600;
+  background: rgba(180, 127, 255, 0.1);
+  border: 1px solid rgba(180, 127, 255, 0.28);
+  color: #c084fc;
+  padding: .2rem .5rem;
+  border-radius: 999px;
+}
+.art-frag-chip-n {
+  font-size: .68rem;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.art-frag-empty {
+  font-size: .76rem;
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: center;
+  padding: .35rem 0;
+}
+
+/* — Liste des items améliorables — */
+.art-empty {
+  font-size: .8rem;
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: center;
+  padding: 1rem .5rem;
+}
+.art-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  max-height: 38vh;
+  overflow-y: auto;
+  padding-right: .3rem;
+}
+.art-item-row {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: .55rem .7rem;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.art-item-row:hover {
+  border-color: rgba(79, 140, 255, .25);
+}
+.art-item-hd {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.art-item-cat {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+.art-item-name {
+  flex: 1;
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.art-slot-count {
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  padding: .15rem .45rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.art-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  align-items: center;
+}
+.art-trait-chip {
+  font-size: .7rem;
+  color: #b47fff;
+  background: rgba(180, 127, 255, 0.08);
+  border: 1px solid rgba(180, 127, 255, 0.22);
+  padding: .12rem .45rem;
+  border-radius: 6px;
+  font-style: italic;
+}
+.art-trait-chip--added {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+.art-no-traits {
+  font-size: .7rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.art-up-bonus-wrap {
+  margin-left: auto;
+  display: inline-flex;
+  gap: .25rem;
+  flex-wrap: wrap;
+}
+.art-up-chip {
+  font-size: .68rem;
+  font-weight: 700;
+  color: #4ade80;
+  background: rgba(34, 195, 142, 0.1);
+  border: 1px solid rgba(34, 195, 142, 0.28);
+  padding: .12rem .45rem;
+  border-radius: 6px;
+}
+.art-item-actions {
+  display: flex;
+  gap: .4rem;
+  margin-top: .15rem;
+}
+.art-item-actions .btn-sm {
+  flex: 1;
+  font-size: .72rem;
+  padding: .35rem .55rem;
+  min-height: 0;
+}
+
+/* — Sections de la sous-modale (Traits / Stats) — */
+.art-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: .6rem;
+  overflow: hidden;
+}
+.art-section-hd {
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--gold);
+  padding: .55rem .8rem;
+  background: rgba(232, 184, 75, 0.04);
+  border-bottom: 1px solid var(--border);
+}
+.art-section-bd {
+  padding: .6rem .8rem;
+}
+.art-muted {
+  font-size: .76rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.art-frag-row {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .25rem 0;
+}
+.art-frag-row + .art-frag-row {
+  border-top: 1px solid rgba(255, 255, 255, .04);
+}
+.art-frag-row-n {
+  font-size: .72rem;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.art-frag-row .btn-sm {
+  font-size: .7rem;
+  padding: .3rem .55rem;
+  min-height: 0;
+}

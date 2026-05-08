@@ -495,11 +495,47 @@ window.openDamageTypesAdmin = async () => {
 // ══════════════════════════════════════════════
 // COMPUTED STATS
 // ══════════════════════════════════════════════
-// Retourne la liste des traits d'un item — priorité à traits[] (array), fallback sur trait (string legacy)
+// Traits de base d'un item — priorité à traits[] (array), fallback sur trait (string legacy)
+// N'inclut PAS les traits ajoutés par amélioration (upgrades.addedTraits).
+// Filtre les traits supprimés à l'écrasement (upgrades.removedBaseTraits).
+export function _getBaseTraits(item = {}) {
+  const removed = new Set(item?.upgrades?.removedBaseTraits || []);
+  const out = [];
+  if (Array.isArray(item.traits) && item.traits.length > 0) {
+    item.traits.forEach(t => { if (t && !removed.has(t)) out.push(t); });
+  } else if (item.trait && !removed.has(item.trait)) {
+    out.push(item.trait);
+  }
+  return out;
+}
+
+// Traits ajoutés par amélioration via l'artisan (upgrades.addedTraits).
+export function _getAddedTraits(item = {}) {
+  return Array.isArray(item?.upgrades?.addedTraits)
+    ? item.upgrades.addedTraits.filter(Boolean)
+    : [];
+}
+
+// Tous les traits effectifs d'un item : base + améliorations.
+// Si l'item a un `upgrades.effectBonus` (anneaux), incrémente le PREMIER nombre
+// trouvé dans la liste des traits (l'effet flat de l'anneau y est typiquement
+// stocké, ex : "+1 vitesse" → "+2 vitesse" au palier 1).
 export function _getTraits(item = {}) {
-  if (Array.isArray(item.traits) && item.traits.length > 0) return item.traits.filter(Boolean);
-  if (item.trait) return [item.trait];
-  return [];
+  const all = [..._getBaseTraits(item), ..._getAddedTraits(item)];
+  const bonus = parseInt(item?.upgrades?.effectBonus) || 0;
+  if (bonus <= 0) return all;
+
+  let applied = false;
+  return all.map(t => {
+    if (applied) return t;
+    const txt = String(t);
+    const m = txt.match(/(?<![\d.])(\+?)(\d+)(?![\d.])/);
+    if (!m) return t;
+    applied = true;
+    const sign  = m[1] || '';
+    const value = parseInt(m[2]);
+    return txt.replace(m[0], `${sign}${value + bonus}`);
+  });
 }
 
 export function getEquippedInventoryIndexMap(c) {
