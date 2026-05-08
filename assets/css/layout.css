@@ -41,6 +41,7 @@ html, body { min-height:100%; }
   color:var(--text);
   background:none;
   -webkit-text-fill-color:inherit;
+  cursor:pointer;
 }
 .header-logo span {
   width:36px;
@@ -222,6 +223,7 @@ html, body { min-height:100%; }
   gap: 10px;
   padding: 0 6px 16px;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
 }
 .sidebar-brand-icon {
   width: 36px;
