@@ -767,11 +767,6 @@ function _buildProfilHtml(c, canEdit, pres) {
     </div>
 
     <div class="form-group">
-      <label>Titre du chapitre <span style="color:var(--text-dim);font-size:.75rem">(optionnel)</span></label>
-      <input class="input-field" id="profil-chap" value="${_esc(chapitre)}" placeholder="ex : Chapitre I · Khaarys">
-    </div>
-
-    <div class="form-group">
       <label style="display:flex;align-items:center;justify-content:space-between">
         <span>Traits de caractère <span style="color:var(--text-dim);font-size:.75rem">(affichés sur la page Personnages)</span></span>
         <span id="profil-tag-count" style="font-size:.7rem;color:var(--text-dim);font-weight:400">${(pres?.tags||[]).length}/${TAG_MAX}</span>
