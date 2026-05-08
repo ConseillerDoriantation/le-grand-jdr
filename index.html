@@ -104,6 +104,9 @@
     <symbol id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"/>
     </symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </symbol>
   </defs>
 </svg>
 
@@ -208,97 +211,107 @@
       <!-- Middle : nav scrollable -->
       <div class="sidebar-scroll">
 
-        <div class="sidebar-sep" role="separator"></div>
+        <details class="sidebar-section" data-section="essentiel" open>
+          <summary class="sidebar-section-label">
+            <span class="sl-text">Essentiel</span>
+            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+          </summary>
+          <div class="sidebar-nav-group">
+            <a class="nav-item active" data-navigate="dashboard" title="Accueil">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-home"/></svg>
+              <span class="nav-label">Accueil</span>
+            </a>
+            <a class="nav-item" data-navigate="characters" title="Personnage">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-scroll"/></svg>
+              <span class="nav-label">Personnage</span>
+            </a>
+            <a class="nav-item" data-navigate="shop" title="Boutique">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-bag"/></svg>
+              <span class="nav-label">Boutique</span>
+            </a>
+            <a class="nav-item" data-navigate="story" title="Trame">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-book"/></svg>
+              <span class="nav-label">Trame</span>
+            </a>
+          </div>
+        </details>
 
-        <div class="sidebar-section-label">Essentiel</div>
-        <div class="sidebar-nav-group">
-          <a class="nav-item active" data-navigate="dashboard" title="Accueil">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-home"/></svg>
-            <span class="nav-label">Accueil</span>
-          </a>
-          <a class="nav-item" data-navigate="characters" title="Personnage">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-scroll"/></svg>
-            <span class="nav-label">Personnage</span>
-          </a>
-          <a class="nav-item" data-navigate="shop" title="Boutique">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-bag"/></svg>
-            <span class="nav-label">Boutique</span>
-          </a>
-          <a class="nav-item" data-navigate="story" title="Trame">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-book"/></svg>
-            <span class="nav-label">Trame</span>
-          </a>
-        </div>
+        <details class="sidebar-section" data-section="en-jeu" open>
+          <summary class="sidebar-section-label">
+            <span class="sl-text">En Jeu</span>
+            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+          </summary>
+          <div class="sidebar-nav-group">
+            <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-paw"/></svg>
+              <span class="nav-label">Bestiaire</span>
+            </a>
+            <a class="nav-item" data-navigate="recettes" title="Recettes">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-flame"/></svg>
+              <span class="nav-label">Recettes</span>
+            </a>
+            <a class="nav-item" data-navigate="bastion" title="Bastion">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-castle"/></svg>
+              <span class="nav-label">Bastion</span>
+            </a>
+            <a class="nav-item" data-navigate="informations" title="Informations">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-clipboard"/></svg>
+              <span class="nav-label">Infos</span>
+            </a>
+            <a class="nav-item" data-navigate="quests" title="Quêtes">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-sword"/></svg>
+              <span class="nav-label">Quêtes</span>
+            </a>
+          </div>
+        </details>
 
-        <div class="sidebar-sep" role="separator"></div>
+        <details class="sidebar-section" data-section="univers" open>
+          <summary class="sidebar-section-label">
+            <span class="sl-text">Univers</span>
+            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+          </summary>
+          <div class="sidebar-nav-group">
+            <a class="nav-item" data-navigate="map" title="Carte">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-map"/></svg>
+              <span class="nav-label">Carte</span>
+            </a>
+            <a class="nav-item" data-navigate="npcs" title="PNJ">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-users"/></svg>
+              <span class="nav-label">PNJ</span>
+            </a>
+            <a class="nav-item" data-navigate="world" title="Le Monde">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-globe"/></svg>
+              <span class="nav-label">Monde</span>
+            </a>
+            <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-trophy"/></svg>
+              <span class="nav-label">Hauts-Faits</span>
+            </a>
+            <a class="nav-item" data-navigate="players" title="Joueurs">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-swords"/></svg>
+              <span class="nav-label">Joueurs</span>
+            </a>
+            <a class="nav-item" data-navigate="collection" title="Collection">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-layers"/></svg>
+              <span class="nav-label">Collection</span>
+            </a>
+          </div>
+        </details>
 
-        <div class="sidebar-section-label">En Jeu</div>
-        <div class="sidebar-nav-group">
-          <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-paw"/></svg>
-            <span class="nav-label">Bestiaire</span>
-          </a>
-          <a class="nav-item" data-navigate="recettes" title="Recettes">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-flame"/></svg>
-            <span class="nav-label">Recettes</span>
-          </a>
-          <a class="nav-item" data-navigate="bastion" title="Bastion">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-castle"/></svg>
-            <span class="nav-label">Bastion</span>
-          </a>
-          <a class="nav-item" data-navigate="informations" title="Informations">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-clipboard"/></svg>
-            <span class="nav-label">Infos</span>
-          </a>
-          <a class="nav-item" data-navigate="quests" title="Quêtes">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-sword"/></svg>
-            <span class="nav-label">Quêtes</span>
-          </a>
-        </div>
+        <details class="sidebar-section" data-section="table" open>
+          <summary class="sidebar-section-label">
+            <span class="sl-text">Table de Jeu</span>
+            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+          </summary>
+          <div class="sidebar-nav-group">
+            <a class="nav-item" data-navigate="vtt" title="Table virtuelle">
+              <svg class="nav-icon" aria-hidden="true"><use href="#icon-dice"/></svg>
+              <span class="nav-label">Table Virtuelle</span>
+            </a>
+          </div>
+        </details>
 
-        <div class="sidebar-sep" role="separator"></div>
-
-        <div class="sidebar-section-label">Univers</div>
-        <div class="sidebar-nav-group">
-          <a class="nav-item" data-navigate="map" title="Carte">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-map"/></svg>
-            <span class="nav-label">Carte</span>
-          </a>
-          <a class="nav-item" data-navigate="npcs" title="PNJ">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-users"/></svg>
-            <span class="nav-label">PNJ</span>
-          </a>
-          <a class="nav-item" data-navigate="world" title="Le Monde">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-globe"/></svg>
-            <span class="nav-label">Monde</span>
-          </a>
-          <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-trophy"/></svg>
-            <span class="nav-label">Hauts-Faits</span>
-          </a>
-          <a class="nav-item" data-navigate="players" title="Joueurs">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-swords"/></svg>
-            <span class="nav-label">Joueurs</span>
-          </a>
-          <a class="nav-item" data-navigate="collection" title="Collection">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-layers"/></svg>
-            <span class="nav-label">Collection</span>
-          </a>
-        </div>
-
-        <div class="sidebar-sep" role="separator"></div>
-
-        <div class="sidebar-section-label">Table de Jeu</div>
-        <div class="sidebar-nav-group">
-          <a class="nav-item" data-navigate="vtt" title="Table virtuelle">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-dice"/></svg>
-            <span class="nav-label">Table Virtuelle</span>
-          </a>
-        </div>
-
-        <div class="sidebar-sep" role="separator"></div>
-
-        <div class="sidebar-nav-group">
+        <div class="sidebar-nav-group sidebar-nav-group--standalone">
           <a class="nav-item" data-navigate="aventures" title="Aventures">
             <svg class="nav-icon" aria-hidden="true"><use href="#icon-compass"/></svg>
             <span class="nav-label">Aventures</span>

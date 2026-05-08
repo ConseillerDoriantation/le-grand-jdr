@@ -53,9 +53,35 @@ export function showApp() {
   // ── Bottom nav mobile dynamique ─────────────────
   _updateMobileBottomNav();
 
+  // ── Sections sidebar repliables (état persistant) ─
+  _initCollapsibleSections();
+
   // ── Items admin-only ────────────────────────────
   document.querySelectorAll('.admin-only').forEach((el) => {
     el.style.display = STATE.isAdmin ? 'flex' : 'none';
+  });
+}
+
+// ── Persistance du repli des sections sidebar ──────
+// Stocke un objet { sectionId: bool } dans localStorage.
+function _initCollapsibleSections() {
+  const KEY = 'jdr-sidebar-sections';
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+
+  const sections = document.querySelectorAll('.sidebar-section[data-section]');
+  sections.forEach((sec) => {
+    const id = sec.dataset.section;
+    if (id in state) sec.open = !!state[id];
+    // Évite de réattacher le listener si showApp() est rappelé
+    if (sec.dataset.collapsibleBound) return;
+    sec.dataset.collapsibleBound = '1';
+    sec.addEventListener('toggle', () => {
+      let s = {};
+      try { s = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+      s[id] = sec.open;
+      try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
+    });
   });
 }
 
