@@ -144,16 +144,16 @@ function _updateMobileBottomNav() {
   if (!nav) return;
 
   const playerItems = [
-    { page: 'dashboard',  icon: '🏠', label: 'Accueil'   },
-    { page: 'characters', icon: '📜', label: 'Perso'     },
-    { page: 'story',      icon: '📚', label: 'Trame'     },
-    { page: 'bestiaire',  icon: '🐉', label: 'Bestiaire' },
+    { page: 'dashboard',  icon: 'home',   label: 'Accueil'   },
+    { page: 'characters', icon: 'scroll', label: 'Perso'     },
+    { page: 'story',      icon: 'book',   label: 'Trame'     },
+    { page: 'bestiaire',  icon: 'paw',    label: 'Bestiaire' },
   ];
   const mjItems = [
-    { page: 'dashboard',  icon: '🏠', label: 'Accueil'  },
-    { page: 'story',      icon: '📚', label: 'Trame'    },
-    { page: 'bestiaire',  icon: '🐉', label: 'Bestiaire'},
-    { page: 'admin',      icon: '⚙️', label: 'Console'  },
+    { page: 'dashboard',  icon: 'home',  label: 'Accueil'  },
+    { page: 'story',      icon: 'book',  label: 'Trame'    },
+    { page: 'bestiaire',  icon: 'paw',   label: 'Bestiaire'},
+    { page: 'admin',      icon: 'cog',   label: 'Console'  },
   ];
 
   const items = STATE.isAdmin ? mjItems : playerItems;
@@ -162,11 +162,11 @@ function _updateMobileBottomNav() {
   nav.innerHTML = items.map(i => `
     <button class="bottom-nav-item ${currentPage === i.page ? 'active' : ''}"
       type="button" data-navigate="${i.page}" data-page="${i.page}">
-      <span class="bn-icon" aria-hidden="true">${i.icon}</span>
+      <svg class="bn-icon" aria-hidden="true"><use href="#icon-${i.icon}"/></svg>
       <span>${i.label}</span>
     </button>`).join('') + `
     <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
-      <span class="bn-icon" aria-hidden="true">⋯</span>
+      <svg class="bn-icon" aria-hidden="true"><use href="#icon-more"/></svg>
       <span>Plus</span>
     </button>`;
 }
