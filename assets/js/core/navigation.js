@@ -35,6 +35,12 @@ const _loaded = new Set();
 
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
+  // Reset des inline styles que certaines pages posent sur #main-content
+  // (ex. VTT pose overflow/height/paddingBottom et ne nettoie qu'à la
+  //  ré-entrée dans la page → casse le scroll des pages suivantes).
+  const mc = document.getElementById('main-content');
+  if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.paddingBottom = ''; }
+
   setPage(page);
   _syncNav(page);
   _renderLoading();
