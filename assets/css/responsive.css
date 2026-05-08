@@ -55,12 +55,24 @@
   border: none;
   background: none;
 }
-.bottom-nav-item .bn-icon { font-size: 1.1rem; line-height: 1; }
+.bottom-nav-item .bn-icon {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  opacity: .82;
+  transition: opacity .14s ease, stroke .14s ease;
+}
 .bottom-nav-item.active {
-  color: white;
-  background: linear-gradient(180deg, rgba(110, 165, 255, .22), rgba(79, 140, 255, .14));
+  color: var(--text);
+  background: rgba(255,255,255,0.04);
+}
+.bottom-nav-item.active .bn-icon {
+  opacity: 1;
+  stroke: var(--gold);
 }
 .bottom-nav-item:hover { color: var(--text); }
+.bottom-nav-item:hover .bn-icon { opacity: 1; }
 
 /* ═══════════════════════════════════════════════════════════
    MORE-MENU  (défini globalement, affiché < 768px via .show)
@@ -97,13 +109,25 @@
   background: rgba(255, 255, 255, .03);
   border: 1px solid rgba(255, 255, 255, .06);
 }
-.more-menu-item .icon { font-size: 1.2rem; }
+.more-menu-item .icon {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  opacity: .85;
+  transition: opacity .14s ease, stroke .14s ease;
+}
 .more-menu-item.active {
-  color: white;
-  background: linear-gradient(180deg, rgba(110, 165, 255, .22), rgba(79, 140, 255, .14));
-  border-color: rgba(79, 140, 255, .22);
+  color: var(--text);
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.1);
+}
+.more-menu-item.active .icon {
+  opacity: 1;
+  stroke: var(--gold);
 }
 .more-menu-item:hover { color: var(--text); }
+.more-menu-item:hover .icon { opacity: 1; }
 
 /* ═══════════════════════════════════════════════════════════
    MOBILE  < 768px
