@@ -3,6 +3,7 @@ import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../../shared/char-stats.js';
+import { _esc } from '../../shared/html.js';
 import { _getTraits, _getBaseTraits, _getAddedTraits } from './data.js';
 
 // ══════════════════════════════════════════════
@@ -203,6 +204,10 @@ export function editEquipSlot(slot) {
   const hasCompat = compatibles.length > 0;
   const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
 
+  // Aperçu inventaire-only pour armures & bijoux : l'objet équipé est lu depuis l'inventaire,
+  // plus de saisie manuelle pour ces slots. Les armes (Main…) gardent leur logique meta.
+  const equippedHasItem = !!equipped?.nom;
+
   openModal(`${isWeapon?'⚔️':isBijou?'💍':'🛡️'} Équiper — ${slot}`, `
     ${hasCompat
       ? `<div class="form-group">
@@ -218,58 +223,26 @@ export function editEquipSlot(slot) {
         </div>`
     }
 
-    ${!isWeapon ? (isBijou ? `
-    <!-- ── Bijou ── -->
-    <div class="form-group"><label>Description / effet</label>
-      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: +1 à tous les jets de sauvegarde">
-    </div>
-    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
-      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance feu, Vision nocturne...">
-    </div>
-    <div class="form-group"><label>Bonus de statistiques</label>
-      <div class="grid-4" style="gap:.5rem">
-        ${[['fo','For'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha'],['ca','CA']].map(([k,l])=>`
-          <div class="form-group" style="margin:0"><label style="font-size:.68rem">${l}</label>
-            <input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||''}" placeholder="0">
-          </div>`).join('')}
-      </div>
-    </div>
-    `
-    : `
-    <!-- ── Armure ── -->
-    <div class="form-group">
-      <label>Type d'armure
-        ${slot==='Torse' ? `<span style="font-size:.68rem;font-weight:400;color:var(--text-dim)">
-          · Légère +2 CA · Intermédiaire +4 CA · Lourde +6 CA</span>` : ''}
-      </label>
-      <select class="input-field sh-modal-select" id="eq-type-armure">
-        <option value="">— Aucun —</option>
-          ${['Légère','Intermédiaire','Lourde'].map(t=>`<option value="${t}" ${(equipped.typeArmure||'')=== t?'selected':''}>${t}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>CA apportée <span style="font-size:.68rem;font-weight:400;color:var(--text-dim)">· uniquement pour armures à bonus spécifique · laisser vide en général</span></label>
-      <input type="number" class="input-field" id="eq-ca" value="${equipped.ca||''}" placeholder="vide">
-    </div>
-    <div class="form-group"><label>Traits <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">séparés par des virgules</span></label>
-      <input class="input-field" id="eq-traits" value="${(Array.isArray(equipped.traits)?equipped.traits:equipped.trait?[equipped.trait]:[]).join(', ')}" placeholder="ex: Résistance, Discrétion désavantage...">
-    </div>
-    <div class="form-group"><label>Bonus de statistiques</label>
-      <div class="grid-4" style="gap:.5rem">
-        ${[['fo','For'],['dex','Dex'],['in','Int'],['sa','Sag'],['co','Con'],['ch','Cha']].map(([k,l])=>`
-          <div class="form-group" style="margin:0"><label style="font-size:.68rem">${l}</label>
-            <input type="number" class="input-field" id="eq-${k}" value="${equipped[k]||''}" placeholder="0">
-          </div>`).join('')}
-      </div>
-    </div>
-    <div class="form-group"><label>Particularité</label>
-      <input class="input-field" id="eq-particularite" value="${equipped.particularite||''}" placeholder="ex: Résistance aux dégâts de feu...">
-    </div>
-    `):''}
+    ${!isWeapon
+      ? `<!-- Aperçu de l'objet équipé (lecture seule, hérité de l'inventaire) -->
+         ${equippedHasItem ? `
+         <div style="margin-top:.85rem;padding:.65rem .85rem;background:var(--bg-elevated);
+           border:1px solid var(--border);border-radius:8px;font-size:.78rem">
+           <div style="font-weight:700;color:var(--text);margin-bottom:.25rem">${_esc(equipped.nom||'')}</div>
+           ${equipped.typeArmure ? `<span class="badge badge-gold" style="font-size:.65rem;margin-right:.3rem">${equipped.typeArmure}</span>` : ''}
+           ${equipped.ca ? `<span style="font-size:.72rem;color:#4f8cff">🛡️ CA +${equipped.ca}</span>` : ''}
+           ${equipped.particularite ? `<div style="font-size:.72rem;color:var(--text-muted);margin-top:.25rem">${_esc(equipped.particularite)}</div>` : ''}
+           ${(Array.isArray(equipped.traits) ? equipped.traits : []).filter(Boolean).map(t=>
+             `<div style="font-size:.7rem;color:#b47fff;font-style:italic;margin-top:.1rem">${_esc(t)}</div>`
+           ).join('')}
+         </div>` : ''}`
+      : ''
+    }
 
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>
-      <button class="btn btn-danger" onclick="clearEquipSlot('${slot}')">Retirer</button>
+      ${isWeapon ? `<button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>` : ''}
+      ${equippedHasItem ? `<button class="btn btn-danger" ${isWeapon?'':'style="flex:1"'} onclick="clearEquipSlot('${slot}')">Retirer</button>` : ''}
+      ${!isWeapon && !equippedHasItem ? `<button class="btn btn-outline" style="flex:1" onclick="closeModal()">Fermer</button>` : ''}
     </div>
   `);
 
@@ -332,39 +305,9 @@ export function previewEquipFromInv(val, slot) {
       window._equipSelectedMeta.sousType      = item.sousType      || '';
       window._equipSelectedMeta.sourceInvIndex = Number.isInteger(compat?.invIndex) ? compat.invIndex : -1;
     }
-  } else {
-    window._equipSelTypeArmure = item.typeArmure||'';
-    window._equipSelSlotArmure = item.slotArmure||'';
-    if (window._equipSelectedMeta) {
-      window._equipSelectedMeta.typeArmure = item.typeArmure || '';
-      window._equipSelectedMeta.slotArmure = item.slotArmure || '';
-      window._equipSelectedMeta.traits     = Array.isArray(item.traits) ? [...item.traits] : [];
-    }
-    const traitsElA = document.getElementById('eq-traits');
-    if (traitsElA) {
-      const t = Array.isArray(item.traits) ? item.traits : (item.trait ? [item.trait] : []);
-      traitsElA.value = t.join(', ');
-    }
-    const typeArmureEl = document.getElementById('eq-type-armure');
-    if (typeArmureEl && item.typeArmure) typeArmureEl.value = item.typeArmure;
-    const statFields = [
-      ['fo', 'force'],
-      ['dex', 'dexterite'],
-      ['in', 'intelligence'],
-      ['sa', 'sagesse'],
-      ['co', 'constitution'],
-      ['ch', 'charisme'],
-    ];
-    statFields.forEach(([k, full]) => {
-      const el = document.getElementById('eq-'+k);
-      if (el) {
-        const val = getItemStatBonus(item, full);
-        if (val !== 0 || item[k] !== undefined || (k === 'fo' && item.for !== undefined)) el.value = val;
-      }
-    });
-    const caEl = document.getElementById('eq-ca');
-    if (caEl && item.ca) caEl.value = parseInt(item.ca)||0;
   }
+  // Armures & bijoux : pas de pré-remplissage manuel — l'équipement passe directement
+  // par equipSlotFromInv qui dérive l'objet équipé depuis l'inventaire.
 
   const preview = document.getElementById('eq-inv-preview');
   if (preview) {
@@ -395,11 +338,6 @@ export async function saveEquipSlot(slot) {
     const meta = window._equipSelectedMeta || {};
     const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
 
-    const readTraits = () => {
-      const raw = document.getElementById('eq-traits')?.value || '';
-      return raw.split(',').map(t => t.trim()).filter(Boolean);
-    };
-
     if (slot.startsWith('Main')) {
       equip[slot] = {
         nom:           meta.nom           || '',
@@ -423,37 +361,11 @@ export async function saveEquipSlot(slot) {
         in: parseInt(meta.in)||0, sa: parseInt(meta.sa)||0,
         co: parseInt(meta.co)||0, ch: parseInt(meta.ch)||0,
       };
-    } else if (isBijou) {
-      equip[slot] = {
-        nom:           document.getElementById('eq-nom')?.value||'',
-        particularite: document.getElementById('eq-particularite')?.value||'',
-        traits:        readTraits(),
-        fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
-        dex: parseInt(document.getElementById('eq-dex')?.value)||0,
-        in:  parseInt(document.getElementById('eq-in')?.value)||0,
-        sa:  parseInt(document.getElementById('eq-sa')?.value)||0,
-        co:  parseInt(document.getElementById('eq-co')?.value)||0,
-        ch:  parseInt(document.getElementById('eq-ch')?.value)||0,
-        ca:  parseInt(document.getElementById('eq-ca')?.value)||0,
-        slotBijou:  slot,
-        typeArmure: meta.typeArmure||'',
-        slotArmure: meta.slotArmure||'',
-      };
     } else {
-      equip[slot] = {
-        nom:           document.getElementById('eq-nom')?.value||'',
-        typeArmure:    document.getElementById('eq-type-armure')?.value || meta.typeArmure||'',
-        ca:            parseInt(document.getElementById('eq-ca')?.value)||0,
-        traits:        readTraits(),
-        particularite: document.getElementById('eq-particularite')?.value||'',
-        fo:  parseInt(document.getElementById('eq-fo')?.value)||0,
-        dex: parseInt(document.getElementById('eq-dex')?.value)||0,
-        in:  parseInt(document.getElementById('eq-in')?.value)||0,
-        sa:  parseInt(document.getElementById('eq-sa')?.value)||0,
-        co:  parseInt(document.getElementById('eq-co')?.value)||0,
-        ch:  parseInt(document.getElementById('eq-ch')?.value)||0,
-        slotArmure: meta.slotArmure||'',
-      };
+      // Armures & bijoux : équipés exclusivement via inventaire (equipSlotFromInv).
+      // Cette branche ne devrait plus être atteinte ; on no-op proprement si appelée.
+      closeModal();
+      return;
     }
     c.equipement = equip;
     const bonus = computeEquipStatsBonus(equip);
