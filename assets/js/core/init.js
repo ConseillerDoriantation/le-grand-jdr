@@ -99,6 +99,17 @@ onAuthStateChanged(auth, async (user) => {
 
   showApp();
 
+  // Pré-télécharger Konva en arrière-plan (utilisé par le VTT)
+  // Chemin doit rester synchro avec assets/js/features/vtt.js (_loadKonva)
+  if (!document.getElementById('preload-konva')) {
+    const _kp = document.createElement('link');
+    _kp.id = 'preload-konva';
+    _kp.rel = 'preload';
+    _kp.as = 'script';
+    _kp.href = './assets/js/vendor/konva-10.3.0.min.js';
+    document.head.appendChild(_kp);
+  }
+
   // ── Charger les aventures accessibles ──────────
   try {
     const adventures = await loadUserAdventures(user.uid);

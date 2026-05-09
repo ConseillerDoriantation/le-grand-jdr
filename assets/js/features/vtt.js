@@ -395,7 +395,7 @@ async function _loadKonva() {
   if (window.Konva) return;
   await new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://unpkg.com/konva@9.3.18/konva.min.js';
+    s.src = './assets/js/vendor/konva-10.3.0.min.js';
     s.onload = res; s.onerror = () => rej(new Error('Konva.js introuvable'));
     document.head.appendChild(s);
   });
@@ -2820,6 +2820,18 @@ window._vttRollAttack = async () => {
 // ═══════════════════════════════════════════════════════════════════
 // INSPECTOR
 // ═══════════════════════════════════════════════════════════════════
+// Coalesce les rafales de snapshots (chrs/npcs/bsts/toks) → 1 render par tick
+let _inspectorDirty = false;
+function _renderInspectorSoon() {
+  if (_inspectorDirty) return;
+  _inspectorDirty = true;
+  queueMicrotask(() => {
+    _inspectorDirty = false;
+    const t = _selected ? (_tokens[_selected]?.data ?? null) : null;
+    _renderInspector(t);
+  });
+}
+
 function _renderInspector(t) {
   const el=document.getElementById('vtt-inspector'); if (!el) return;
   // Multi-sélection active
@@ -2988,6 +3000,14 @@ function _renderInspector(t) {
 // ═══════════════════════════════════════════════════════════════════
 window._vttToggleTrayReserve = () => { _trayReserveOpen = !_trayReserveOpen; _renderTray(); };
 window._vttTrayFilter = f => { _trayFilter = f; _renderTray(); };
+
+// Coalesce les rafales de snapshots (chrs/npcs/bsts/toks au mount) → 1 render par tick
+let _trayDirty = false;
+function _renderTraySoon() {
+  if (_trayDirty) return;
+  _trayDirty = true;
+  queueMicrotask(() => { _trayDirty = false; _renderTray(); });
+}
 
 function _renderTray() {
   if (!STATE.isAdmin) return;
@@ -3607,10 +3627,10 @@ function _initListeners() {
     const changed=new Set(snap.docChanges().map(c=>c.doc.id));
     for (const [id,e] of Object.entries(_tokens)) {
       if (e.data.characterId&&changed.has(e.data.characterId)) {
-        _patchShape(id); if (_selected===id) _renderInspector(e.data);
+        _patchShape(id); if (_selected===id) _renderInspectorSoon();
       }
     }
-    _renderTray();
+    _renderTraySoon();
     _charsReady=true; _maybeSyncAutoTokens();
     if (_miniUid) _renderMiniSheet(_miniUid); // refresh mini-fiche en temps réel
   },()=>{}));
@@ -3624,10 +3644,10 @@ function _initListeners() {
     const changed=new Set(snap.docChanges().map(c=>c.doc.id));
     for (const [id,e] of Object.entries(_tokens)) {
       if (e.data.npcId&&changed.has(e.data.npcId)) {
-        _patchShape(id); if (_selected===id) _renderInspector(e.data);
+        _patchShape(id); if (_selected===id) _renderInspectorSoon();
       }
     }
-    _renderTray();
+    _renderTraySoon();
     _npcsReady=true; _maybeSyncAutoTokens();
   },()=>{}));
 
@@ -3640,10 +3660,10 @@ function _initListeners() {
     const changed=new Set(snap.docChanges().map(c=>c.doc.id));
     for (const [id,e] of Object.entries(_tokens)) {
       if (e.data.beastId&&changed.has(e.data.beastId)) {
-        _patchShape(id); if (_selected===id) _renderInspector(e.data);
+        _patchShape(id); if (_selected===id) _renderInspectorSoon();
       }
     }
-    _renderTray();
+    _renderTraySoon();
     _bstsReady=true; _maybeSyncAutoTokens();
   },()=>{}));
 
@@ -3660,7 +3680,7 @@ function _initListeners() {
         // Rafraîchit l'inspector si un token ennemi est sélectionné
         if (_selected) {
           const td = _tokens[_selected]?.data;
-          if (td?.type === 'enemy') _renderInspector(td);
+          if (td?.type === 'enemy') _renderInspectorSoon();
         }
       }, () => {}));
     }
@@ -3690,7 +3710,7 @@ function _initListeners() {
         } else {
           _patchShape(id);
         }
-        if (_selected===id) _renderInspector(data);
+        if (_selected===id) _renderInspectorSoon();
       } else {
         _tokens[id]={data,shape:null};
         if (_activePage&&data.pageId===_activePage.id&&(data.visible||STATE.isAdmin)) {
@@ -3700,7 +3720,7 @@ function _initListeners() {
         }
       }
     });
-    _renderTray();
+    _renderTraySoon();
     _toksReady=true; _maybeSyncAutoTokens();
   },()=>{}));
 
@@ -6399,7 +6419,12 @@ export async function renderVttPage() {
   content.style.overflow='hidden';
   content.style.height='100vh';
   content.style.paddingBottom='0';
-  try { await _loadKonva(); }
+  // Lancer en parallèle : téléchargement Konva + reads Firestore non critiques
+  const _konvaP   = _loadKonva();
+  const _emotesP  = _loadEmotes();
+  const _skillsP  = _loadDiceSkills();
+  const _formatsP = Promise.all([loadWeaponFormats(), loadDamageTypes()]);
+  try { await _konvaP; }
   catch {
     content.innerHTML='<div style="padding:2rem;color:var(--text-dim)">Impossible de charger Konva.js.</div>';
     content.style.overflow=''; return;
@@ -6465,11 +6490,19 @@ export async function renderVttPage() {
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
   });
-  _loadEmotes();      // non bloquant
-  _loadDiceSkills();  // non bloquant
-  Promise.all([loadWeaponFormats(), loadDamageTypes()]).then(([f, d]) => {
-    _weaponFormats = f; _damageTypes = d;
-  }); // non bloquant
+  // Récupérer les promesses lancées en amont (parallèles à Konva)
+  _emotesP.then(() => {
+    _renderEmotePicker();
+    // Précharge + décode en mémoire pour affichage instantané au clic
+    _emotes.forEach(em => {
+      const img = new Image();
+      img.src = em.url;
+      img.decode().catch(() => {}); // ignore erreurs réseau / format
+    });
+  });
+  _formatsP.then(([f, d]) => { _weaponFormats = f; _damageTypes = d; });
+  // _skillsP : _loadDiceSkills met à jour _diceSkills et rerend l'inspector si besoin
+  void _skillsP;
   _initListeners();
   // Présence : heartbeat toutes les 45 s
   const _presUid = STATE.user?.uid;
