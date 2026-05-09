@@ -9,12 +9,14 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { loadDamageTypes } from '../shared/damage-types.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 
 // ── État local ────────────────────────────────────────────────────────────────
 let _bstCropper = null;
 let _creatures  = [];
 let _tracker    = {}; // { [creatureId]: { pvActuel, pmActuel, notes, deductions:{pv,pm,ca,for,...} } }
+let _damageTypes = null;
 let _searchVal  = '';
 let _filterType = ''; // filtre par type de créature
 let _filterRang  = ''; // filtre par rang (classique, elite, boss)
@@ -63,6 +65,140 @@ function _beastMatchesFilters(c, { search = _searchVal, type = _filterType, rang
   return matchSearch && matchType && matchRang;
 }
 
+// Métadonnées visuelles communes aux 4 catégories de relation aux dégâts.
+// Palette neutre alignée avec DMG_INTERACTIONS du VTT : aucune teinte ne
+// suggère "bon / mauvais" pour le joueur attaquant.
+const DMG_RELATIONS = [
+  { key: 'absorptions', label: 'Absorptions', short: 'Soin',       icon: '💚', color: '#b47fff' },
+  { key: 'immunites',   label: 'Immunités',   short: 'Aucun dégât', icon: '🚫', color: '#94a3b8' },
+  { key: 'resistances', label: 'Résistances', short: '½ dégâts',  icon: '🛡️', color: '#4f8cff' },
+  { key: 'faiblesses',  label: 'Faiblesses',  short: '×2 dégâts',  icon: '💢', color: '#f59e0b' },
+];
+
+function _damageTypeBadge(typeId, types, color) {
+  const type = (types || []).find(t => t.id === typeId);
+  const label = type ? `${type.icon||''} ${_esc(type.label)}` : _esc(typeId);
+  return `<span style="font-size:.72rem;padding:.18rem .5rem;border-radius:999px;border:1px solid ${color};color:${color};background:${color}1a">${label}</span>`;
+}
+
+function _renderRelationCard(rel, ids, types) {
+  if (!Array.isArray(ids) || ids.length === 0) return '';
+  return `<div style="display:flex;flex-direction:column;gap:.35rem;padding:.5rem .6rem;
+    border:1px solid ${rel.color}33;background:${rel.color}10;border-radius:10px;border-left:3px solid ${rel.color}">
+    <div style="display:flex;align-items:center;gap:.4rem">
+      <span style="font-size:.9rem">${rel.icon}</span>
+      <span style="font-size:.74rem;font-weight:700;color:${rel.color};letter-spacing:.02em">${rel.label}</span>
+      <span style="font-size:.62rem;color:var(--text-dim);margin-left:auto">${rel.short}</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:.3rem">
+      ${ids.map(id => _damageTypeBadge(id, types, rel.color)).join('')}
+    </div>
+  </div>`;
+}
+
+function _renderDamageProfile(beast, types) {
+  if (!beast) return '';
+  const cards = DMG_RELATIONS.map(rel => _renderRelationCard(rel, beast[rel.key], types)).filter(Boolean);
+  if (!cards.length) return '';
+  return `<div class="bst-section">
+    <div class="bst-section-title">🛡️ Relations aux dégâts</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem">
+      ${cards.join('')}
+    </div>
+  </div>`;
+}
+
+/** Mini-récap pictogrammes pour la card admin (compact). */
+function _renderDamageProfileMini(beast) {
+  if (!beast) return '';
+  const parts = DMG_RELATIONS
+    .map(rel => {
+      const n = (beast[rel.key] || []).length;
+      if (!n) return null;
+      return `<span title="${rel.label} (${n})" style="display:inline-flex;align-items:center;gap:1px;font-size:.6rem;color:${rel.color};background:${rel.color}1a;border:1px solid ${rel.color}55;padding:0 4px;border-radius:6px">${rel.icon}<strong style="font-size:.55rem">${n}</strong></span>`;
+    })
+    .filter(Boolean);
+  if (!parts.length) return '';
+  return `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:.3rem">${parts.join('')}</div>`;
+}
+
+/**
+ * Matrice unique : lignes = types de dégâts, colonnes = catégories.
+ * Vue compacte qui rend les conflits (un type coché dans 2 catégories)
+ * immédiatement visibles sur une même ligne.
+ */
+function _renderDamageTypeMatrix(beast, types) {
+  const rels = DMG_RELATIONS;
+
+  const headerCells = rels.map(rel =>
+    `<div style="text-align:center;padding:.5rem .25rem;font-size:.66rem;font-weight:700;color:${rel.color};
+      border-left:1px solid var(--border);background:${rel.color}10">
+      <div style="font-size:1rem;line-height:1">${rel.icon}</div>
+      <div style="margin-top:.2rem;letter-spacing:.02em">${_esc(rel.label.replace(/s$/, '.'))}</div>
+      <div style="font-size:.55rem;font-weight:400;color:var(--text-dim);margin-top:.05rem">${rel.short}</div>
+    </div>`
+  ).join('');
+
+  const bodyCells = types.map(t => {
+    const cells = rels.map(rel => {
+      const arr = Array.isArray(beast?.[rel.key]) ? beast[rel.key] : [];
+      const checked = arr.includes(t.id);
+      return `<label data-bst-cell="${t.id}" data-bst-rel="${rel.key}"
+        style="display:flex;align-items:center;justify-content:center;cursor:pointer;
+               border-top:1px solid var(--border);border-left:1px solid var(--border);
+               background:${checked ? `${rel.color}22` : 'transparent'};transition:background .12s;padding:.4rem .25rem">
+        <input type="checkbox" name="bst-${rel.key}" value="${t.id}" ${checked?'checked':''}
+          style="accent-color:${rel.color};margin:0;width:15px;height:15px;cursor:pointer"
+          onchange="window._bstSyncDmgConflicts()">
+      </label>`;
+    }).join('');
+    return `<div data-bst-row="${t.id}"
+        style="display:flex;align-items:center;gap:.45rem;padding:.4rem .65rem;font-size:.78rem;color:var(--text);
+               border-top:1px solid var(--border);min-width:0">
+        <span style="font-size:.95rem;flex-shrink:0">${t.icon||''}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(t.label)}</span>
+        <span data-bst-row-warn="${t.id}" style="display:none;margin-left:auto;font-size:.62rem;color:#f59e0b;font-weight:700"
+          title="Ce type est sélectionné dans plusieurs catégories">⚠</span>
+      </div>${cells}`;
+  }).join('');
+
+  return `<div data-bst-matrix style="border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--bg-elevated)">
+    <div style="display:grid;grid-template-columns:minmax(140px,1.6fr) repeat(${rels.length}, minmax(56px,1fr));align-items:stretch">
+      <div style="padding:.5rem .65rem;font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)">Type</div>
+      ${headerCells}
+      ${bodyCells}
+    </div>
+  </div>`;
+}
+
+/** Met en évidence les types de dégâts cochés dans plusieurs catégories (matrice). */
+window._bstSyncDmgConflicts = () => {
+  const matrix = document.querySelector('[data-bst-matrix]');
+  if (!matrix) return;
+  const counts = new Map();
+  matrix.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
+    counts.set(cb.value, (counts.get(cb.value) || 0) + 1);
+  });
+  matrix.querySelectorAll('[data-bst-cell]').forEach(cell => {
+    const cb = cell.querySelector('input[type=checkbox]');
+    const checked = !!cb?.checked;
+    const rel = DMG_RELATIONS.find(r => r.key === cell.dataset.bstRel);
+    const isConflict = checked && (counts.get(cell.dataset.bstCell) || 0) > 1;
+    cell.style.background = isConflict ? 'rgba(245,158,11,.22)'
+                          : checked    ? `${rel?.color || 'var(--gold)'}22`
+                                       : 'transparent';
+    cell.style.boxShadow = isConflict ? '0 0 0 1px #f59e0b inset' : 'none';
+  });
+  matrix.querySelectorAll('[data-bst-row-warn]').forEach(warn => {
+    const tid = warn.dataset.bstRowWarn;
+    warn.style.display = (counts.get(tid) || 0) > 1 ? 'inline' : 'none';
+  });
+};
+
+function _readDamageTypeSelections(name) {
+  return [...document.querySelectorAll(`input[name=bst-${name}]:checked`)].map(el => el.value).filter(Boolean);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
@@ -83,6 +219,8 @@ async function renderBestiary() {
   _creatures = await loadCollection(col);
   _creatures.sort((a,b) => (a.nom||'').localeCompare(b.nom||''));
   window._bstCurrentCol = col;
+
+  if (!_damageTypes) _damageTypes = await loadDamageTypes();
 
   const uid = STATE.user?.uid;
   if (uid) {
@@ -236,6 +374,7 @@ function _renderCard(c) {
         </div>
         <div style="font-size:.65rem;color:var(--text-dim)">${pvActuel}/${pvMax} PV</div>
       </div>` : ''}
+      ${STATE.isAdmin ? _renderDamageProfileMini(c) : ''}
     </div>
     ${STATE.isAdmin ? `
     <div style="display:flex;gap:3px;padding:.4rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
@@ -320,6 +459,8 @@ function _renderPanel(c) {
       <div class="bst-section-title">📖 Description</div>
       <div style="font-size:.82rem;color:var(--text-muted);line-height:1.7">${_esc(description).replace(/\n/g,'<br>')}</div>
     </div>` : '';
+
+  const damageProfileHtml = _renderDamageProfile(c, _damageTypes);
 
   // ── Suivi combat (commun, adapté selon vue) ──────────────────────────────
   const suiviHtml = (showBars) => `
@@ -432,6 +573,7 @@ function _renderPanel(c) {
         </div>` : ''}
       </div>
       ${suiviHtml(true)}
+      ${damageProfileHtml}
       ${descHtml}
       ${attaquesHtml}
       ${traitsHtml}
@@ -510,6 +652,7 @@ function _renderPanel(c) {
   <div class="bst-panel" style="position:sticky;top:1rem">
     ${headerHtml}
     ${suiviHtml(false)}
+    ${damageProfileHtml}
     ${attaquesJoueurHtml}
     ${traitsJoueurHtml}
     ${butinsJoueurHtml}
@@ -522,8 +665,11 @@ async function openBeastModal(id = null) {
   _bstCropper?.destroy(); _bstCropper = null;
   const c = id ? _creatures.find(x => x.id === id) : null;
 
+  const allDamageTypes = await loadDamageTypes();
+  window._bstDamageTypes = allDamageTypes;
+
   // Sérialiser les tableaux dynamiques
-  const attaques = c?.attaques || [{ nom:'', toucher:'', degats:'', portee:'', description:'' }];
+  const attaques = c?.attaques || [{ nom:'', toucher:'', degats:'', portee:'', description:'', damageTypeId:'' }];
   const traits   = c?.traits   || [{ nom:'', description:'' }];
   const butins   = c?.butins   || [{ nom:'', quantite:'', chance:'' }];
 
@@ -605,6 +751,14 @@ async function openBeastModal(id = null) {
       <textarea class="input-field" id="bst-desc" rows="3" placeholder="Apparence, comportement...">${c?.description||''}</textarea>
     </div>
 
+    <div class="form-group">
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        <span>🛡️ Relations aux dégâts</span>
+        <span style="font-size:.62rem;color:var(--text-dim);font-weight:400">⚠ ligne = type coché dans plusieurs catégories</span>
+      </label>
+      ${_renderDamageTypeMatrix(c, allDamageTypes)}
+    </div>
+
     <!-- ATTAQUES dynamiques -->
     <div class="form-group">
       <label style="display:flex;align-items:center;justify-content:space-between">
@@ -649,6 +803,9 @@ async function openBeastModal(id = null) {
     </button>
   `);
 
+  // Surligner d'éventuels conflits de catégories sur l'état initial.
+  window._bstSyncDmgConflicts?.();
+
   _bstCropper?.destroy();
   _bstCropper = attachDropAndCrop({
     dropEl:        document.getElementById('bst-drop-zone'),
@@ -671,6 +828,12 @@ function _attackRow(a={}, i) {
       <input class="input-field" placeholder="Toucher" value="${a.toucher||''}" id="bst-att-toucher-${i}" style="font-size:.78rem;padding:4px 6px">
       <input class="input-field" placeholder="Dégâts" value="${a.degats||''}" id="bst-att-degats-${i}" style="font-size:.78rem;padding:4px 6px">
       <input class="input-field" placeholder="Portée" value="${a.portee||''}" id="bst-att-portee-${i}" style="font-size:.78rem;padding:4px 6px">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr;gap:.4rem;margin-bottom:.3rem">
+      <select class="input-field" id="bst-att-dmgtype-${i}" style="font-size:.78rem;padding:4px 6px">
+        <option value="">Type de dégâts (physique par défaut)</option>
+        ${(window._bstDamageTypes||[]).map(t=>`<option value="${t.id}"${a.damageTypeId===t.id?' selected':''}>${t.icon||''} ${_esc(t.label)}</option>`).join('')}
+      </select>
     </div>
     <div style="display:flex;gap:.4rem">
       <input class="input-field" placeholder="Description de l'effet..." value="${a.description||''}" id="bst-att-desc-${i}" style="flex:1;font-size:.78rem;padding:4px 6px">
@@ -723,6 +886,7 @@ function _readRows(type) {
       toucher:     document.getElementById(`bst-att-toucher-${i}`)?.value?.trim() || '',
       degats:      document.getElementById(`bst-att-degats-${i}`)?.value?.trim()  || '',
       portee:      document.getElementById(`bst-att-portee-${i}`)?.value?.trim()  || '',
+      damageTypeId:document.getElementById(`bst-att-dmgtype-${i}`)?.value || '',
       description: document.getElementById(`bst-att-desc-${i}`)?.value?.trim()   || '',
     })).filter(a => a.nom || a.degats);
   }
@@ -779,6 +943,10 @@ async function saveBeast(id = '') {
       charisme:       parseInt(document.getElementById('bst-charisme')?.value)||0,
       vitesse:        parseInt(document.getElementById('bst-vitesse')?.value)||0,
       initiative:     parseInt(document.getElementById('bst-initiative')?.value)||0,
+      resistances:    _readDamageTypeSelections('resistances'),
+      immunites:      _readDamageTypeSelections('immunites'),
+      absorptions:    _readDamageTypeSelections('absorptions'),
+      faiblesses:     _readDamageTypeSelections('faiblesses'),
       // Tableaux dynamiques
       attaques: _readRows('attaques'),
       traits:   _readRows('traits'),

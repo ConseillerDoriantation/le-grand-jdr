@@ -1415,6 +1415,49 @@ function _splitDiceFormula(str) {
   return { rawDice, fixed };
 }
 
+// Métadonnées d'affichage des interactions de dégâts (icône, couleur, label).
+// Palette neutre côté attaquant : aucune couleur ne sous-entend "bon / mauvais"
+// pour ne pas tromper le joueur (la valeur ½ / ×2 / 0 / +N reste la source
+// de lecture).
+const DMG_INTERACTIONS = {
+  'Résistance': { icon: '🛡️', color: '#4f8cff', short: '½'   }, // bleu défensif
+  'Immunité':   { icon: '🚫', color: '#94a3b8', short: 'Imm.' }, // gris ardoise (mur)
+  'Absorption': { icon: '💚', color: '#b47fff', short: 'Abs.' }, // violet (anormal, soigne)
+  'Faiblesse':  { icon: '💢', color: '#f59e0b', short: '×2'  }, // orange chaud
+};
+
+/**
+ * Applique l'interaction du profil de dégâts d'une créature (immun./absorp./faib./résist.).
+ * - Si dmgTotal vaut 0 (raté sans missEffect), l'interaction n'est PAS appliquée :
+ *   on n'invente pas 1 dégât minimum sur une attaque qui n'a rien fait.
+ * - Absorption : renvoie un dmgTotal négatif (le call site soustrait ⇒ soin).
+ *   Le plafonnement à pvMax est laissé au call site.
+ */
+function _applyDamageTypeInteraction(dmgTotal, typeId, beast) {
+  if (!beast) return { dmgTotal, interaction: null };
+  const effectiveTypeId = typeId || 'physique';
+  const has = (arr) => Array.isArray(arr) && arr.includes(effectiveTypeId);
+
+  if (has(beast.immunites))   return { dmgTotal: 0, interaction: 'Immunité' };
+  // Pour les autres interactions : pas d'effet si dmgTotal est nul.
+  if (dmgTotal <= 0) return { dmgTotal, interaction: null };
+  if (has(beast.absorptions)) return { dmgTotal: -dmgTotal,                       interaction: 'Absorption' };
+  if (has(beast.faiblesses))  return { dmgTotal: dmgTotal * 2,                    interaction: 'Faiblesse' };
+  if (has(beast.resistances)) return { dmgTotal: Math.max(1, Math.floor(dmgTotal / 2)), interaction: 'Résistance' };
+  return { dmgTotal, interaction: null };
+}
+
+/** Récupère l'interaction prévue (sans modifier de valeur) pour preview. */
+function _previewDamageInteraction(typeId, beast) {
+  if (!beast) return null;
+  const id = typeId || 'physique';
+  if (Array.isArray(beast.immunites)   && beast.immunites.includes(id))   return 'Immunité';
+  if (Array.isArray(beast.absorptions) && beast.absorptions.includes(id)) return 'Absorption';
+  if (Array.isArray(beast.faiblesses)  && beast.faiblesses.includes(id))  return 'Faiblesse';
+  if (Array.isArray(beast.resistances) && beast.resistances.includes(id)) return 'Résistance';
+  return null;
+}
+
 const _tokenAttackDistance = (src, tgt) => Math.abs(src.col - tgt.col) + Math.abs(src.row - tgt.row);
 
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
@@ -1428,6 +1471,9 @@ function _buildAttackOptions(t) {
   if (b?.attaques?.length) {
     b.attaques.forEach((atk, idx) => {
       if (!atk.degats) return;
+      const atkTypeId = atk.damageTypeId || null;
+      const atkTypeObj = atkTypeId ? getDamageTypeById(_damageTypes, atkTypeId) : null;
+      const atkTypeRules = atkTypeId ? getDamageTypeRules(_damageTypes, atkTypeId) : getDamageTypeRules(_damageTypes, 'physique');
       options.push({
         id:      `beast_${idx}`,
         icon:    '👹',
@@ -1436,6 +1482,10 @@ function _buildAttackOptions(t) {
         toucher: atk.toucher !== undefined && atk.toucher !== '' ? parseInt(atk.toucher)||0 : null,
         portee:  parseInt(atk.portee)||1,
         pmCost:  0,
+        typeRules: atkTypeRules,
+        damageTypeId: atkTypeId,
+        damageTypeIcon: atkTypeObj?.icon || '',
+        damageTypeColor: atkTypeObj?.color || '',
       });
     });
     if (options.length) return options;
@@ -1464,6 +1514,9 @@ function _buildAttackOptions(t) {
       maitriseBonus: 0,
       halfOnMiss: false,
       traits: Array.isArray(weapon.traits) ? weapon.traits : [],
+      damageTypeId: 'physique',
+      damageTypeIcon: '💪',
+      damageTypeColor: '#9ca3af',
     });
     return options;
   }
@@ -1502,6 +1555,9 @@ function _buildAttackOptions(t) {
     dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
     typeRules,
+    damageTypeId:     isMagicW ? null : (fmt?.damageType || 'physique'),
+    damageTypeIcon:   isMagicW ? '' : (getDamageTypeById(_damageTypes, fmt?.damageType || 'physique')?.icon || ''),
+    damageTypeColor:  isMagicW ? '' : (getDamageTypeById(_damageTypes, fmt?.damageType || 'physique')?.color || ''),
     isMagicWeapon:    isMagicW && !isUnarmed,
     charElements:     (isMagicW && !isUnarmed) ? (c?.elements || []) : [],
   });
@@ -1798,6 +1854,38 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
   const btnFg      = opt.isHeal || isCastOnly ? '#fff' : '#1a1a1a';
   const btnLabel   = opt.isHeal ? '💚 Soigner !' : isCastOnly ? '✨ Activer !' : '🎲 Lancer !';
 
+  // ── Preview d'interaction (immunité / résistance / faiblesse / absorption) ──
+  // Aperçu donné pour l'attaque offensive uniquement, et seulement si la cible
+  // est une créature liée au bestiaire (les joueurs n'ont pas de profil).
+  let interactionPreviewHtml = '';
+  if (!isCastOnly && !opt.isHeal && opt.damageTypeId) {
+    const targetIdsPrev = (_atkCtx?.allTargets?.length ? _atkCtx.allTargets : [tgtId]);
+    const buckets = {}; // interactionLabel → count
+    for (const tid of targetIdsPrev) {
+      const td = _tokens[tid]?.data;
+      if (!td || td.type !== 'enemy' || !td.beastId) continue;
+      const inter = _previewDamageInteraction(opt.damageTypeId, _bestiary[td.beastId]);
+      if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
+    }
+    const entries = Object.entries(buckets);
+    if (entries.length) {
+      const isMulti = targetIdsPrev.length > 1;
+      const badges = entries.map(([label, n]) => {
+        const meta = DMG_INTERACTIONS[label] || { icon: 'ℹ️', color: 'var(--text-dim)', short: '' };
+        return `<span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:700;
+                  color:${meta.color};background:${meta.color}1a;border:1px solid ${meta.color}55;
+                  padding:.18rem .45rem;border-radius:999px">
+                  ${meta.icon} ${_esc(label)}${isMulti ? ` ×${n}` : ''}
+                  <span style="font-size:.6rem;font-weight:400;opacity:.8">${meta.short}</span>
+                </span>`;
+      }).join(' ');
+      interactionPreviewHtml = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;
+        font-size:.65rem;color:var(--text-dim);padding:.3rem .1rem 0">
+        <span>🎯 Cible :</span>${badges}
+      </div>`;
+    }
+  }
+
   const centerBlock = isCastOnly ? `
     <div style="background:var(--bg-elevated);border-radius:10px;padding:.85rem;margin-bottom:.85rem;
                 display:flex;align-items:center;gap:.6rem">
@@ -1834,6 +1922,7 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
           font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
           <span>✦</span><span>Dégâts complets même en cas d'échec</span>
         </div>` : ''}
+        ${interactionPreviewHtml}
       </div>
     </div>
 
@@ -2623,24 +2712,34 @@ window._vttRollAttack = async () => {
       const targetCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
       const hit      = isCrit ? true : isFumble ? false : hitTotal >= targetCA;
       const halfDmg  = !hit && missEffect !== 'none' && !isFumble;
-      const dmgTotal = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
+      let dmgTotal   = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
+      let interaction = null;
 
       const curHp = lCurTgt.displayHp ?? 20, hpMax = lCurTgt.displayHpMax ?? 20;
       let newHp = curHp;
+      // Valeur AVANT interaction du profil de la créature (pour log "10 → 5").
+      let dmgPre = dmgTotal;
       if (hit || halfDmg) {
         if (curTgtData.type === 'enemy' && curTgtData.beastId) {
           const bEnt    = _bestiary[curTgtData.beastId];
+          const result  = _applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, bEnt);
+          dmgTotal      = result.dmgTotal;
+          interaction   = result.interaction;
+
           const realMax = _numOr(bEnt?.pvMax, 20);
           const realCur = curTgtData.hp !== null ? _numOr(curTgtData.hp, realMax) : realMax;
-          newHp = Math.max(0, realCur - dmgTotal);
+          // Plafonner par realMax pour éviter qu'une absorption (dmgTotal négatif)
+          // ne soigne au-dessus du PV max de la créature.
+          newHp = Math.max(0, Math.min(realMax, realCur - dmgTotal));
           const prevEst = curTgtData.pvCombatHp != null ? Math.max(0, parseInt(curTgtData.pvCombatHp)||0) : (lCurTgt.displayHpMax??realMax);
-          await updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: Math.max(0, prevEst - dmgTotal) });
+          const newEst  = Math.max(0, Math.min(realMax, prevEst - dmgTotal));
+          await updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst });
         } else {
           newHp = Math.max(0, curHp - dmgTotal);
           await _setHp(curTgtData, newHp);
         }
       }
-      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, newHp, hpMax });
+      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, dmgPre, newHp, hpMax, interaction });
     }
 
     // ── Un seul message dans le log ────────────────────────────────────
@@ -2661,6 +2760,7 @@ window._vttRollAttack = async () => {
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg,
+        dmgFull: sharedDmgTotalHit, dmgFullHalf: sharedDmgTotalHalf,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,
@@ -2686,10 +2786,12 @@ window._vttRollAttack = async () => {
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgTotal: r.dmgTotal,
+        dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         halfDmg: r.halfDmg, newHp: r.newHp, hpMax: r.hpMax,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,
+        interaction: r.interaction || null,
         createdAt: serverTimestamp(),
       }).catch(()=>{});
     }
@@ -2697,12 +2799,16 @@ window._vttRollAttack = async () => {
     // Notif consolidée
     const notifParts = targetResults.map(r => {
       const nm = r.name;
-      return isFumble    ? `💀 Fumble`
-           : r.halfDmg  ? `✦ ${r.dmgTotal}(½) → ${nm}`
-           : !r.hit     ? `🎯 Raté vs ${nm}`
-           : r.newHp===0 ? `💀 ${nm} tombe !`
-           : isCrit     ? `💥 Crit! ${r.dmgTotal} → ${nm}`
-                        : `⚔️ ${r.dmgTotal} → ${nm}`;
+      const interMeta = r.interaction ? DMG_INTERACTIONS[r.interaction] : null;
+      const interTag  = interMeta ? ` ${interMeta.icon}${interMeta.short}` : '';
+      const dmgLabel = r.dmgTotal < 0 ? `+${Math.abs(r.dmgTotal)}` : r.dmgTotal;
+      return isFumble       ? `💀 Fumble`
+           : r.interaction === 'Immunité' && r.hit ? `🚫 Immunisé · ${nm}`
+           : r.halfDmg     ? `✦ ${dmgLabel}(½)${interTag} → ${nm}`
+           : !r.hit        ? `🎯 Raté vs ${nm}`
+           : r.newHp===0   ? `💀 ${nm} tombe !`
+           : isCrit        ? `💥 ${dmgLabel}${interTag} → ${nm}`
+                           : `⚔️ ${dmgLabel}${interTag} → ${nm}`;
     });
     const anyHit = targetResults.some(r => r.hit || r.halfDmg);
     showNotif(notifParts.join(' · '), anyHit ? 'success' : 'error');
@@ -4322,14 +4428,30 @@ function _renderChatLog(msgs) {
       const detailId = `vtt-d-${i}`;
       // Grille des cibles
       const targetsHtml = (m.targets || []).map(r => {
-        const hitCol  = r.hit ? '#22c38e' : r.halfDmg ? '#b47fff' : '#6b7280';
+        const inter   = r.interaction && DMG_INTERACTIONS[r.interaction];
+        const baseCol = r.hit ? '#22c38e' : r.halfDmg ? '#b47fff' : '#6b7280';
+        // Valeur dégâts : rouge standard ; vert si soin (absorption) ; violet si demi-dégâts.
+        const dmgCol  = r.interaction === 'Absorption' ? '#22c38e'
+                      : r.halfDmg                      ? '#b47fff'
+                                                        : '#ef4444';
         const hitIcon = r.hit ? '✓' : r.halfDmg ? '✦' : '✗';
-        const dmgStr  = (r.hit || r.halfDmg) ? `<strong style="color:${hitCol}">${r.dmgTotal}</strong>${r.halfDmg?' <span style="font-size:.6rem;color:#b47fff">½</span>':''}${r.newHp===0?' 💀':''}` : '';
+        const finalSign = r.dmgTotal < 0 ? `+${-r.dmgTotal}` : r.dmgTotal;
+        const preSign   = r.dmgPre != null && r.dmgPre !== r.dmgTotal ? (r.dmgPre < 0 ? `+${-r.dmgPre}` : r.dmgPre) : null;
+        const preBlock  = preSign != null
+          ? `<span style="font-size:.65rem;color:var(--text-muted,var(--text-dim))">${preSign}</span><span style="font-size:.6rem;color:${dmgCol};margin:0 2px">→</span>`
+          : '';
+        const dmgStr = (r.hit || r.halfDmg)
+          ? `${preBlock}<strong style="color:${dmgCol}">${finalSign}</strong>${r.halfDmg?' <span style="font-size:.6rem;color:#b47fff">½</span>':''}${r.newHp===0?' 💀':''}`
+          : '';
+        const interBadge = inter
+          ? `<span title="${_esc(r.interaction)}" style="display:inline-flex;align-items:center;font-size:.58rem;color:${inter.color};background:${inter.color}1a;border:1px solid ${inter.color}55;padding:0 4px;border-radius:5px;gap:2px;font-weight:600">${inter.icon}<span>${inter.short}</span></span>`
+          : '';
         return `<div style="display:flex;align-items:center;gap:.3rem;padding:.1rem 0">
-          <span style="font-size:.72rem;color:${hitCol};font-weight:700;width:.85rem;text-align:center">${hitIcon}</span>
-          <span style="font-size:.72rem;flex:1;color:var(--text-soft)">${_esc(r.name)}</span>
-          <span style="font-size:.65rem;color:var(--text-dim)">CA${r.targetCA}</span>
-          ${dmgStr ? `<span style="font-size:.75rem">${dmgStr}</span>` : ''}
+          <span style="font-size:.72rem;color:${baseCol};font-weight:700;width:.85rem;text-align:center">${hitIcon}</span>
+          <span style="font-size:.72rem;flex:1;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(r.name)}</span>
+          ${interBadge}
+          <span style="font-size:.62rem;color:var(--text-dim)">CA${r.targetCA}</span>
+          ${dmgStr ? `<span style="font-size:.75rem;display:inline-flex;align-items:center;gap:1px">${dmgStr}</span>` : ''}
         </div>`;
       }).join('');
       return `<div class="vtt-log-entry vtt-log-roll"
@@ -4413,23 +4535,115 @@ function _renderChatLog(msgs) {
           m.dmgBonus         ? sn(m.dmgBonus)          + sub('bonus') : '',
         ].filter(Boolean).join(' ');
 
-        let dmgFormula;
-        if (isCrit && m.critNormalMax) {
-          dmgFormula = `max<span style="font-size:.6rem;color:var(--text-dim)">(${m.critNormalMax})</span> + ${baseDice}(${m.dmgRaw}) ${mods}`;
-        } else if (m.halfDmg) {
-          dmgFormula = `${baseDice}(${m.dmgRaw}) ${mods} ÷2`;
-        } else {
-          dmgFormula = `${baseDice}(${m.dmgRaw}) ${mods}`;
+        // Formule brute (sans aucune réduction). Le ÷2 et la résistance/etc. sont
+        // affichés sur des lignes séparées, plus lisibles.
+        const dmgFormulaRaw = (isCrit && m.critNormalMax)
+          ? `max<span style="font-size:.6rem;color:var(--text-dim)">(${m.critNormalMax})</span> + ${baseDice}(${m.dmgRaw}) ${mods}`
+          : `${baseDice}(${m.dmgRaw}) ${mods}`;
+
+        const interMeta = m.interaction && DMG_INTERACTIONS[m.interaction];
+        // Couleur dégâts : standard rouge ; vert seulement quand l'absorption transforme en soin ;
+        // violet quand demi-dégâts (échec garanti d'arme/sort magique).
+        const dmgColor  = m.interaction === 'Absorption' ? '#22c38e'
+                        : m.halfDmg                      ? '#b47fff'
+                                                          : '#ef4444';
+        const dmgSign   = m.dmgTotal < 0 ? `+${-m.dmgTotal}` : m.dmgTotal;
+        const preSign   = m.dmgPre != null && m.dmgPre !== m.dmgTotal ? (m.dmgPre < 0 ? `+${-m.dmgPre}` : m.dmgPre) : null;
+        const headIcon  = m.interaction === 'Absorption' ? '💚'
+                        : m.interaction === 'Immunité'   ? '🚫'
+                                                          : '⚔️';
+        const dmgSuffix = m.interaction === 'Absorption' ? 'PV soignés'
+                        : m.interaction === 'Immunité'   ? 'aucun dégât'
+                        : m.newHp === 0                  ? '💀'
+                        : m.halfDmg                      ? '✦ ½'
+                                                          : 'dégâts';
+        const interTag = interMeta
+          ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:.66rem;color:${interMeta.color};background:${interMeta.color}1a;border:1px solid ${interMeta.color}55;padding:1px 6px;border-radius:999px;font-weight:600">${interMeta.icon} ${_esc(m.interaction)} ${interMeta.short}</span>`
+          : '';
+        // Sommaire compact : "(pre →) final dégâts" + badge.
+        const preBlock = preSign != null
+          ? `<span style="font-size:.82rem;color:var(--text-muted,var(--text-dim));font-weight:500">${preSign}</span><span style="font-size:.78rem;color:${dmgColor};margin:0 .12rem">→</span>`
+          : '';
+        dmgSummary = `<div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem);margin-top:.15rem">
+          <span style="font-size:.78rem">${headIcon}</span>
+          ${preBlock}
+          <strong style="font-size:1.05rem;color:${dmgColor};letter-spacing:-.01em">${dmgSign}</strong>
+          <span style="font-size:.72rem;color:${dmgColor}">${dmgSuffix}</span>
+          ${interTag}
+        </div>`;
+
+        // ── Détail : chaîne d'opérations simple, une étape par ligne ──────
+        // Calcule le total brut (avant échec ½ ET avant interaction) :
+        // logs récents = champ `dmgFull` direct ; logs anciens = recomposé.
+        const isCritLog = isCrit || (m.critNormalMax > 0);
+        const fullValComputed = isCritLog
+          ? (m.critNormalMax || 0) + (m.dmgRaw || 0) + (m.critFixed2 || 0)
+          : (m.dmgRaw || 0) + (m.dmgStatMod || 0) + (m.dmgMaitriseBonus || 0) + (m.dmgBonus || 0);
+        const fullVal = m.dmgFull ?? Math.max(1, fullValComputed);
+        const halfVal = m.halfDmg ? Math.max(1, Math.floor(fullVal / 2)) : null;
+        const interInVal = halfVal ?? fullVal;
+        const fmtN = v => v < 0 ? `+${-v}` : `${v}`;
+
+        // ── Détail : "reçu" du calcul, lecture verticale top-down ─────────
+        // Une ligne par étape, libellé + opérateur à gauche, résultat aligné à droite.
+        // La dernière ligne (valeur finale) est surlignée dans la couleur de l'effet.
+        const rows = [];
+        const totalRows = 1
+          + (halfVal != null && halfVal !== fullVal ? 1 : 0)
+          + (interMeta && m.dmgTotal !== interInVal ? 1 : 0);
+
+        const row = ({ label, op, val, color, isFinal }) => `
+          <div style="display:grid;grid-template-columns:1fr auto;align-items:baseline;column-gap:.6rem;
+            padding:${isFinal ? '.2rem .5rem' : '.1rem .5rem'};
+            ${isFinal ? `background:${color}14;border-radius:6px` : ''}">
+            <div style="display:flex;align-items:baseline;gap:.4rem;min-width:0">
+              <span style="color:${color || 'var(--text-dim)'};font-weight:${isFinal||!color?'700':'600'};font-size:.66rem;flex-shrink:0">${op}</span>
+              <span style="color:var(--text-soft,var(--text));font-size:.68rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>
+            </div>
+            <strong style="color:${color || '#ef4444'};font-size:${isFinal?'1rem':'.82rem'};font-variant-numeric:tabular-nums;min-width:1.6rem;text-align:right;line-height:1">${val}</strong>
+          </div>
+        `;
+
+        // Ligne 1 — Brut (formule complète + total)
+        rows.push(row({
+          label: dmgFormulaRaw,
+          op:    '🎲',
+          val:   fullVal,
+          color: totalRows === 1 ? '#ef4444' : null,
+          isFinal: totalRows === 1,
+        }));
+
+        // Ligne 2 — Échec ½ (si applicable)
+        if (halfVal != null && halfVal !== fullVal) {
+          const isFinal = !(interMeta && m.dmgTotal !== interInVal);
+          rows.push(row({
+            label: 'Échec ½ (arme magique)',
+            op:    '✦',
+            val:   halfVal,
+            color: '#b47fff',
+            isFinal,
+          }));
         }
 
-        const dmgColor  = m.halfDmg ? '#b47fff' : '#ef4444';
-        const dmgSuffix = m.newHp===0 ? '💀' : m.halfDmg ? '✦ ½' : 'dégâts';
-        dmgSummary = `<div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem);margin-top:.15rem">
-          <span style="font-size:.78rem">⚔️</span>
-          <strong style="font-size:1.05rem;color:${dmgColor};letter-spacing:-.01em">${m.dmgTotal}</strong>
-          <span style="font-size:.72rem;color:${dmgColor}">${dmgSuffix}</span>
+        // Ligne 3 — Interaction du profil de la créature (si applicable)
+        if (interMeta && m.dmgTotal !== interInVal) {
+          const factorLabel = m.interaction === 'Résistance' ? '½ Résistance'
+                            : m.interaction === 'Faiblesse'  ? '×2 Faiblesse'
+                            : m.interaction === 'Immunité'   ? 'Immunité'
+                            : m.interaction === 'Absorption' ? 'Absorption (soin)'
+                                                                : m.interaction;
+          rows.push(row({
+            label: factorLabel,
+            op:    interMeta.icon,
+            val:   fmtN(m.dmgTotal),
+            color: dmgColor,
+            isFinal: true,
+          }));
+        }
+
+        dmgDetailHtml = `<div style="margin-top:.25rem;display:flex;flex-direction:column;gap:.05rem">
+          ${rows.join('')}
         </div>`;
-        dmgDetailHtml = `<div style="font-size:.65rem;color:var(--text-dim);margin-top:.1rem">⚔️ ${dmgFormula} = <strong style="color:${dmgColor}">${m.dmgTotal}</strong></div>`;
       }
 
       const atkWho = m.attackerName || m.authorName || '?';
