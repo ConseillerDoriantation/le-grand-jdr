@@ -699,6 +699,18 @@ async function openBeastModal(id = null) {
         <label>Emoji (si pas d'image)</label>
         <input class="input-field" id="bst-emoji" value="${c?.emoji||'🐲'}" style="max-width:80px">
       </div>
+      <div class="form-group">
+        <label>Taille token VTT (cases L × H)</label>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <select class="input-field" id="bst-tokenW" style="flex:1">
+            ${[1,2,3,4,5].map(n => `<option value="${n}"${(c?.tokenW||c?.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
+          </select>
+          <span style="color:var(--text-dim)">×</span>
+          <select class="input-field" id="bst-tokenH" style="flex:1">
+            ${[1,2,3,4,5].map(n => `<option value="${n}"${(c?.tokenH||c?.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
+          </select>
+        </div>
+      </div>
       <div class="form-group" style="grid-column:1/-1">
         <label>Rang</label>
         <div id="bst-rang-selector" data-rang="${c?.rang||'classique'}" style="display:flex;gap:.5rem">
@@ -928,6 +940,8 @@ async function saveBeast(id = '') {
       niveau:        parseInt(document.getElementById('bst-niveau')?.value)||0,
       dangerositeXp: parseInt(document.getElementById('bst-xp')?.value)||0,
       emoji:         document.getElementById('bst-emoji')?.value?.trim()   || '🐲',
+      tokenW:        Math.max(1, Math.min(5, parseInt(document.getElementById('bst-tokenW')?.value)||1)),
+      tokenH:        Math.max(1, Math.min(5, parseInt(document.getElementById('bst-tokenH')?.value)||1)),
       rang:          document.getElementById('bst-rang-selector')?.dataset?.rang || 'classique',
       imageUrl,
       description:   document.getElementById('bst-desc')?.value?.trim()   || '',

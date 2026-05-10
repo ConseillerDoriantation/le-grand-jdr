@@ -212,6 +212,8 @@ function _live(t) {
     displayAttackDice: t.attackDice || '1d6',
     displayDefense:  t.defense  ?? 0,
     displayRange:    t.range    ?? 1,
+    displayTokenW:   Math.max(1, Math.min(5, t.tokenW ?? t.tokenSize ?? 1)),
+    displayTokenH:   Math.max(1, Math.min(5, t.tokenH ?? t.tokenSize ?? 1)),
   };
 
   const npcHpMax = n ? _numOr(e.pv, _numOr(e.hpMax, _numOr(e.pvMax, 20))) : null;
@@ -279,6 +281,8 @@ function _live(t) {
           ? (t.range > 1 ? t.range : (_numOr(npcCombat.range, _numOr(npcWeapon.portee, 1))))
           : (t.range ?? 1),
     _beast:            b,   // référence directe pour _buildAttackOptions
+    displayTokenW:     Math.max(1, Math.min(5, t.tokenW ?? t.tokenSize ?? b?.tokenW ?? b?.tokenSize ?? 1)),
+    displayTokenH:     Math.max(1, Math.min(5, t.tokenH ?? t.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1)),
   };
 
   // Joueur sur token ennemi : remplace HP et CA par les estimations du tracker.
@@ -796,17 +800,21 @@ async function _patchImg(imgId, patch) {
 function _buildShape(t) {
   const K  = window.Konva;
   const ld = _live(t);
-  const r  = CELL*0.42, bW = CELL*0.9;   // bW élargi pour labels plus lisibles
+  const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
+  // Rayons ellipse (proportionnels à la bounding box) ; r = rayon vertical, sert d'ancre Y aux barres.
+  const rx = CELL*sw*0.42, ry = CELL*sh*0.42, r = ry, bW = CELL*sw*0.9;
   const hpKnown = ld.displayHp !== null && ld.displayHpMax !== null;
   const hp  = hpKnown ? ld.displayHp  : 0;
   const hpm = hpKnown ? ld.displayHpMax : 1;
   const rat = hpKnown ? (hpm>0 ? Math.max(0,hp/hpm) : 1) : 0.5;
-  const g = new K.Group({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2, id:`tok-${t.id}` });
-  // ── Cercle de base ────────────────────────────────────────────────
-  g.add(new K.Circle({ radius:r, fill:TYPE_COLOR[t.type]??'#888', opacity:.9 }));
+  const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
+  g.setAttr('tokenW', sw);
+  g.setAttr('tokenH', sh);
+  // ── Forme de base (ellipse, équivalente à un cercle quand W===H) ──
+  g.add(new K.Ellipse({ radiusX:rx, radiusY:ry, fill:TYPE_COLOR[t.type]??'#888', opacity:.9 }));
   // ── Anneaux sélection / attaque ───────────────────────────────────
-  g.add(new K.Circle({ radius:r+4, stroke:'#fff',    strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
-  g.add(new K.Circle({ radius:r+4, stroke:'#ef4444', strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
+  g.add(new K.Ellipse({ radiusX:rx+4, radiusY:ry+4, stroke:'#fff',    strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
+  g.add(new K.Ellipse({ radiusX:rx+4, radiusY:ry+4, stroke:'#ef4444', strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
   // ── Barre HP (texte superposé sur la barre) ───────────────────────
   const BH=9; // hauteur barre HP
   g.add(new K.Rect({ x:-bW/2, y:r+4, width:bW, height:BH, fill:'#0d1117', cornerRadius:4, listening:false }));
@@ -836,17 +844,18 @@ function _buildShape(t) {
   const _toursLeft = _buff
     ? (_buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞')
     : null;
-  g.add(new K.Circle({ x:r*.7, y:-r*.7, radius:10,
+  const _caX = rx*.7, _caY = -ry*.7;
+  g.add(new K.Circle({ x:_caX, y:_caY, radius:10,
     fill: _buffed ? 'rgba(30,27,80,0.95)' : 'rgba(15,15,25,0.9)',
     stroke: _buffed ? '#818cf8' : '#64748b',
     strokeWidth: _buffed ? 2.5 : 1.5,
     listening:false, name:'ca-bg' }));
-  g.add(new K.Text({ x:r*.7-10, y:-r*.7-6, width:20, height:12,
+  g.add(new K.Text({ x:_caX-10, y:_caY-6, width:20, height:12,
     text:`🛡${ld.displayDefense??0}`, fontSize:9, fontStyle:'bold',
     fill: _buffed ? '#c4b5fd' : '#e2e8f0',
     fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-lbl' }));
   if (_buffed) {
-    g.add(new K.Text({ x:r*.7-10, y:-r*.7+5, width:20, height:9,
+    g.add(new K.Text({ x:_caX-10, y:_caY+5, width:20, height:9,
       text:`${_toursLeft}↺`, fontSize:7, fontStyle:'bold',
       fill:'#818cf8', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
   }
@@ -856,13 +865,13 @@ function _buildShape(t) {
     fontFamily:'Inter,sans-serif', name:'lbl',
     shadowColor:'#000', shadowBlur:4, shadowOpacity:1 }));
 
-  // ── Image ronde (K.Group clipper pour repère correct) ─────────────
+  // ── Image clippée à l'ellipse (équivalent cercle quand W===H) ─────
   const imgSrc = ld.displayImage;
   if (imgSrc) {
-    const clipGrp = new K.Group({ clipFunc: ctx => { ctx.arc(0,0,r,0,Math.PI*2,false); }, listening:false });
+    const clipGrp = new K.Group({ clipFunc: ctx => { ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2,false); }, listening:false });
     const el=new Image(); el.crossOrigin='anonymous';
     el.onload = () => {
-      clipGrp.add(new K.Image({ image:el, x:-r, y:-r, width:r*2, height:r*2, listening:false }));
+      clipGrp.add(new K.Image({ image:el, x:-rx, y:-ry, width:rx*2, height:ry*2, listening:false }));
       clipGrp.zIndex(2); _layers.token.batchDraw();
     };
     el.src = imgSrc;
@@ -881,7 +890,7 @@ function _buildShape(t) {
       if (rightDown) rightDown.dragged = true;
       if (_middlePanActive) {
         g.stopDrag();
-        g.position({ x:t.col*CELL+CELL/2, y:t.row*CELL+CELL/2 });
+        g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
         _layers.token?.batchDraw();
         return;
       }
@@ -896,17 +905,18 @@ function _buildShape(t) {
     // ─ Pendant le drag : snap + déplacer le groupe ─
     g.on('dragmove', () => {
       if (rightDown) rightDown.dragged = true;
-      const sx=Math.round((g.x()-CELL/2)/CELL)*CELL+CELL/2;
-      const sy=Math.round((g.y()-CELL/2)/CELL)*CELL+CELL/2;
+      const sx=Math.round((g.x()-sw*CELL/2)/CELL)*CELL+sw*CELL/2;
+      const sy=Math.round((g.y()-sh*CELL/2)/CELL)*CELL+sh*CELL/2;
       g.position({x:sx,y:sy});
       if (_multiDragOrigin && _selectedMulti.has(t.id)) {
         const dx=sx-_multiDragOrigin[t.id].x, dy=sy-_multiDragOrigin[t.id].y;
         for (const [id,orig] of Object.entries(_multiDragOrigin)) {
           if (id===t.id) continue;
           const s=_tokens[id]?.shape; if (!s) continue;
+          const d2=_tokenDims(_tokens[id].data);
           s.position({
-            x:Math.round((orig.x+dx-CELL/2)/CELL)*CELL+CELL/2,
-            y:Math.round((orig.y+dy-CELL/2)/CELL)*CELL+CELL/2,
+            x:Math.round((orig.x+dx-d2.w*CELL/2)/CELL)*CELL+d2.w*CELL/2,
+            y:Math.round((orig.y+dy-d2.h*CELL/2)/CELL)*CELL+d2.h*CELL/2,
           });
         }
         _layers.token.batchDraw();
@@ -920,9 +930,10 @@ function _buildShape(t) {
         const batch=writeBatch(db);
         for (const id of _selectedMulti) {
           const s=_tokens[id]?.shape; if (!s) continue;
-          const nc=Math.max(0,Math.min(pg.cols-1,Math.round((s.x()-CELL/2)/CELL)));
-          const nr=Math.max(0,Math.min(pg.rows-1,Math.round((s.y()-CELL/2)/CELL)));
-          s.position({x:nc*CELL+CELL/2,y:nr*CELL+CELL/2});
+          const d2=_tokenDims(_tokens[id].data);
+          const nc=Math.max(0,Math.min(pg.cols-d2.w,Math.round((s.x()-d2.w*CELL/2)/CELL)));
+          const nr=Math.max(0,Math.min(pg.rows-d2.h,Math.round((s.y()-d2.h*CELL/2)/CELL)));
+          s.position({x:nc*CELL+d2.w*CELL/2,y:nr*CELL+d2.h*CELL/2});
           batch.update(_tokRef(id),{col:nc,row:nr});
         }
         _layers.token.batchDraw();
@@ -930,19 +941,19 @@ function _buildShape(t) {
         _multiDragOrigin=null; return;
       }
       // Token seul
-      const c=Math.max(0,Math.min(pg.cols-1,Math.round((g.x()-CELL/2)/CELL)));
-      const r=Math.max(0,Math.min(pg.rows-1,Math.round((g.y()-CELL/2)/CELL)));
+      const c=Math.max(0,Math.min(pg.cols-sw,Math.round((g.x()-sw*CELL/2)/CELL)));
+      const r=Math.max(0,Math.min(pg.rows-sh,Math.round((g.y()-sh*CELL/2)/CELL)));
       if (!STATE.isAdmin && _session?.combat?.active) {
         const cur=_tokens[t.id]?.data;
         if (cur) {
           const d=Math.abs(c-cur.col)+Math.abs(r-cur.row);
           if (d>(_live(cur).displayMovement??6)||cur.movedThisTurn) {
             showNotif(cur.movedThisTurn?'Déjà bougé ce tour.':'Déplacement trop loin !','error');
-            g.position({x:cur.col*CELL+CELL/2,y:cur.row*CELL+CELL/2}); _layers.token.batchDraw(); return;
+            g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); _layers.token.batchDraw(); return;
           }
         }
       }
-      g.position({x:c*CELL+CELL/2,y:r*CELL+CELL/2}); _layers.token.batchDraw();
+      g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); _layers.token.batchDraw();
       const patch={col:c,row:r};
       if (!STATE.isAdmin&&_session?.combat?.active) patch.movedThisTurn=true;
       await updateDoc(_tokRef(t.id),patch).catch(()=>showNotif('Erreur déplacement','error'));
@@ -1021,7 +1032,10 @@ function _patchShape(id) {
   const hasPmBar   = !!g.findOne('.pm-val');
   const hasCaBuff  = !!g.findOne('.ca-buff-turns');
   const needsCaBuff = !!ld._activeCaBuff;
-  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff) {
+  const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
+  // Si la taille a changé (modif bestiaire ou override), reconstruire
+  const sizeMismatch = (g.getAttr('tokenW') || 1) !== sw || (g.getAttr('tokenH') || 1) !== sh;
+  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
     _tokens[id] = { ...e, shape };
@@ -1031,10 +1045,10 @@ function _patchShape(id) {
     _layers.token?.batchDraw();
     return;
   }
-  g.to({ x:e.data.col*CELL+CELL/2, y:e.data.row*CELL+CELL/2, duration:0.12 });
+  g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.12 });
   const hpKnownU = ld.displayHp !== null && ld.displayHpMax !== null;
   const hp=hpKnownU?ld.displayHp:0, hpm=hpKnownU?ld.displayHpMax:1;
-  const rat=hpKnownU?(hpm>0?Math.max(0,hp/hpm):1):0.5, bW=CELL*0.9;
+  const rat=hpKnownU?(hpm>0?Math.max(0,hp/hpm):1):0.5, bW=CELL*sw*0.9;
   const fill=g.findOne('.hp-fill');
   if (fill){fill.width(bW*rat);fill.fill(hpKnownU?hpColor(rat):'#555');}
   g.findOne('.hp-val')?.text(hpKnownU?`${hp}/${hpm}`:'?/?');
@@ -1098,16 +1112,29 @@ function _deselect() {
 function _showMoveRange(t) {
   _clearHL(); if (!_activePage) return;
   const K=window.Konva, ld=_live(t), mv=ld.displayMovement??6;
+  const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const {cols,rows}=_activePage;
-  const occ=new Set(Object.values(_tokens)
-    .filter(e=>e.data?.pageId===_activePage.id&&e.data.id!==t.id)
-    .map(e=>`${e.data.col},${e.data.row}`));
+  // Cases occupées : bounding box complète de chaque autre token
+  const occ=new Set();
+  for (const e of Object.values(_tokens)) {
+    if (e.data?.pageId !== _activePage.id || e.data.id === t.id) continue;
+    const d=_tokenDims(e.data);
+    for (let oc=0; oc<d.w; oc++) for (let or=0; or<d.h; or++) {
+      occ.add(`${e.data.col+oc},${e.data.row+or}`);
+    }
+  }
+  const isBlocked = (c, r) => {
+    for (let oc=0; oc<sw; oc++) for (let or=0; or<sh; or++) {
+      if (occ.has(`${c+oc},${r+or}`)) return true;
+    }
+    return false;
+  };
   for (let dc=-mv;dc<=mv;dc++) for (let dr=-mv;dr<=mv;dr++) {
     if (Math.abs(dc)+Math.abs(dr)>mv) continue;
     const c=t.col+dc,r=t.row+dr;
-    if (c<0||r<0||c>=cols||r>=rows||(!dc&&!dr)) continue;
-    const blk=occ.has(`${c},${r}`);
-    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
+    if (c<0||r<0||c+sw>cols||r+sh>rows||(!dc&&!dr)) continue;
+    const blk=isBlocked(c, r);
+    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:sw*CELL,height:sh*CELL,
       fill:blk?'rgba(239,68,68,0.22)':'rgba(79,140,255,0.28)',
       stroke:blk?'rgba(239,68,68,0.65)':'rgba(79,140,255,0.70)',strokeWidth:1.5,listening:!blk });
     if (!blk){
@@ -1270,11 +1297,14 @@ function _showAttackRange(t) {
   const options=_buildAttackOptions(t);
   const maxRange=options.length?Math.max(...options.map(o=>o.portee)):(_live(t).displayRange??1);
   const {cols,rows}=_activePage;
-  for (let dc=-maxRange;dc<=maxRange;dc++) for (let dr=-maxRange;dr<=maxRange;dr++) {
-    if (!dc&&!dr) continue;
-    if (Math.abs(dc)+Math.abs(dr)>maxRange) continue;
-    const c=t.col+dc, r=t.row+dr;
-    if (c<0||r<0||c>=cols||r>=rows) continue;
+  const sd = _tokenDims(t);
+  for (let c=0; c<cols; c++) for (let r=0; r<rows; r++) {
+    // Ignorer les cases occupées par le token source lui-même
+    if (c>=t.col && c<t.col+sd.w && r>=t.row && r<t.row+sd.h) continue;
+    // Distance Manhattan entre la case (c,r) et la bounding box du token source
+    const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
+    const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
+    if (dx + dy > maxRange) continue;
     const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
       fill:'rgba(239,68,68,0.22)', stroke:'rgba(239,68,68,0.65)', strokeWidth:1.5, listening:false });
     _layers.grid.add(rect); _moveHL.push(rect);
@@ -1458,7 +1488,21 @@ function _previewDamageInteraction(typeId, beast) {
   return null;
 }
 
-const _tokenAttackDistance = (src, tgt) => Math.abs(src.col - tgt.col) + Math.abs(src.row - tgt.row);
+// Dimensions du token en cases (W × H). Compat : si seul tokenSize est défini, on l'applique aux deux.
+const _tokenDims = t => {
+  const b = t?.beastId ? _bestiary[t.beastId] : null;
+  const w = t?.tokenW ?? t?.tokenSize ?? b?.tokenW ?? b?.tokenSize ?? 1;
+  const h = t?.tokenH ?? t?.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1;
+  return { w: Math.max(1, Math.min(5, w)), h: Math.max(1, Math.min(5, h)) };
+};
+// Distance Manhattan entre bounding boxes WxH (0 = adjacent ou chevauchant côté).
+// Pour deux 1×1, équivaut à |Δcol| + |Δrow|.
+const _tokenAttackDistance = (src, tgt) => {
+  const s = _tokenDims(src), g = _tokenDims(tgt);
+  const dx = Math.max(0, Math.max(src.col, tgt.col) - Math.min(src.col + s.w - 1, tgt.col + g.w - 1));
+  const dy = Math.max(0, Math.max(src.row, tgt.row) - Math.min(src.row + s.h - 1, tgt.row + g.h - 1));
+  return dx + dy;
+};
 
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
 function _buildAttackOptions(t) {
@@ -2125,9 +2169,10 @@ window._vttSetMode = (mode) => {
 // MULTI-CIBLAGE — sélection visuelle pour les sorts multi-cibles
 // ═══════════════════════════════════════════════════════════════════
 
-/** Centre pixel d'un token dans le repère Konva. */
+/** Centre pixel d'un token dans le repère Konva (tient compte de la taille W×H). */
 function _tokenCenter(t) {
-  return { x: t.col * CELL + CELL / 2, y: t.row * CELL + CELL / 2 };
+  const d = _tokenDims(t);
+  return { x: t.col * CELL + d.w * CELL / 2, y: t.row * CELL + d.h * CELL / 2 };
 }
 
 /** Dessine une ligne pointillée src→tgt sur le layer token. */
@@ -3433,7 +3478,7 @@ function _selectByRect(r) {
   // Tokens sur la page active
   for (const [id, {data: t}] of Object.entries(_tokens)) {
     if (!t || t.pageId !== _activePage?.id) continue;
-    const cx = t.col * CELL + CELL / 2, cy = t.row * CELL + CELL / 2;
+    const { x: cx, y: cy } = _tokenCenter(t);
     if (_inRect(cx, cy, r)) {
       _selectedMulti.add(id);
       _tokens[id]?.shape?.findOne('.sel')?.visible(true);
@@ -5042,6 +5087,19 @@ function _openStatsModal(t) {
         <div class="form-group"><label>⚔️ Attaque</label>  <input id="vsf-atk"   type="number" value="${t.attack??''}"    placeholder="${ld.displayAttack??5} (auto)"></div>
         <div class="form-group"><label>🛡 CA/Défense</label><input id="vsf-def"  type="number" value="${t.defense??''}"   placeholder="${ld.displayDefense??0} (auto)"></div>
       </div>
+      <div class="form-group"><label>📐 Taille token (cases L × H)</label>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <select id="vsf-tokenW" class="input-field" style="flex:1">
+            <option value=""${t.tokenW==null?' selected':''}>Auto (${ld.displayTokenW||1})</option>
+            ${[1,2,3,4,5].map(n => `<option value="${n}"${t.tokenW===n?' selected':''}>${n}</option>`).join('')}
+          </select>
+          <span style="color:var(--text-dim)">×</span>
+          <select id="vsf-tokenH" class="input-field" style="flex:1">
+            <option value=""${t.tokenH==null?' selected':''}>Auto (${ld.displayTokenH||1})</option>
+            ${[1,2,3,4,5].map(n => `<option value="${n}"${t.tokenH===n?' selected':''}>${n}</option>`).join('')}
+          </select>
+        </div>
+      </div>
       <div class="form-group"><label>URL image (optionnel)</label>
         <input id="vsf-img" type="text" value="${t.imageUrl??''}" placeholder="Remplace la photo du perso">
       </div>
@@ -5155,6 +5213,8 @@ window._vttPlaceFromBestiary = async beastId => {
   const usedNums=new Set(active.map(e=>{const m=(e.data.name||'').match(/\s(\d+)$/);return m?parseInt(m[1]):1;}));
   let num=1; while(usedNums.has(num))num++;
   const name=num===1?(b.nom||'Créature'):`${b.nom} ${num}`;
+  const sw = Math.max(1, Math.min(5, b.tokenW || b.tokenSize || 1));
+  const sh = Math.max(1, Math.min(5, b.tokenH || b.tokenSize || 1));
   const cx=Math.floor(_activePage.cols/2), cy=Math.floor(_activePage.rows/2);
   const ref=doc(_toksCol());
   await setDoc(ref,{
@@ -5162,8 +5222,8 @@ window._vttPlaceFromBestiary = async beastId => {
     characterId:null, npcId:null, beastId,
     ownerId:null,
     pageId:_activePage.id,
-    col:Math.min(_activePage.cols-1,cx+active.length),
-    row:cy,
+    col:Math.max(0,Math.min(_activePage.cols-sw,cx+active.length)),
+    row:Math.max(0,Math.min(_activePage.rows-sh,cy)),
     visible:true,
     imageUrl:null, movement:null, range:1, attack:null, defense:null,
     hp:null, hpMax:null,
@@ -5188,6 +5248,8 @@ window._vttSaveStats = async id => {
   const def = document.getElementById('vsf-def')?.value;
   const img = document.getElementById('vsf-img')?.value.trim();
   const vis = document.getElementById('vsf-visible')?.checked;
+  const tw = document.getElementById('vsf-tokenW')?.value;
+  const th = document.getElementById('vsf-tokenH')?.value;
   const patch = {
     movement: mv  ? +mv  : null,
     range:    rng ? +rng : 1,
@@ -5195,7 +5257,18 @@ window._vttSaveStats = async id => {
     defense:  def ? +def : null,
     imageUrl: img || null,
     visible:  vis ?? true,
+    tokenW:   tw ? Math.max(1, Math.min(5, parseInt(tw)||1)) : null,
+    tokenH:   th ? Math.max(1, Math.min(5, parseInt(th)||1)) : null,
   };
+  // Clamper la position dans la nouvelle bounding box (héritage bête si override null)
+  const cur = _tokens[id]?.data;
+  if (cur && _activePage) {
+    const b = cur.beastId ? _bestiary[cur.beastId] : null;
+    const sw = patch.tokenW ?? b?.tokenW ?? b?.tokenSize ?? 1;
+    const sh = patch.tokenH ?? b?.tokenH ?? b?.tokenSize ?? 1;
+    patch.col = Math.max(0, Math.min(_activePage.cols - sw, cur.col ?? 0));
+    patch.row = Math.max(0, Math.min(_activePage.rows - sh, cur.row ?? 0));
+  }
   await updateDoc(_tokRef(id),patch).catch(()=>showNotif('Erreur','error'));
   closeModalDirect();
   showNotif('Stats mises à jour','success');
