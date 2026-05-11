@@ -271,19 +271,31 @@ export function renderCharCompte(c, canEdit) {
 
   const HIST_LIMIT = 5;
 
-  const renderRow = (row, i, type, canEdit, extraClass = '', extraStyle = '') => `
-    <tr class="cs-compte-row${extraClass ? ' ' + extraClass : ''}"${extraStyle ? ` style="${extraStyle}"` : ''}>
-      <td>${canEdit
-        ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'date',this)">${row.date||'—'}</span>`
-        : (row.date||'—')}</td>
-      <td>${canEdit
-        ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'libelle',this)">${row.libelle||'—'}</span>`
-        : (row.libelle||'—')}</td>
-      <td class="${type==='recettes'?'cs-montant-pos':'cs-montant-neg'}">${canEdit
-        ? `<span class="cs-editable-num" onclick="inlineEditCompteField('${type}',${i},'montant',this)">${row.montant||0}</span>`
-        : (row.montant||0)} or</td>
-      ${canEdit?`<td><button class="btn-icon" onclick="deleteCompteRow('${type}',${i})">🗑️</button></td>`:''}
+  const renderRow = (row, i, type, canEdit, extraClass = '', extraStyle = '') => {
+    const trOpen = `<tr class="cs-compte-row${extraClass ? ' ' + extraClass : ''}"${extraStyle ? ` style="${extraStyle}"` : ''}>`;
+    const montantClass = type==='recettes'?'cs-montant-pos':'cs-montant-neg';
+    if (!canEdit) {
+      return `${trOpen}
+        <td>${_esc(row.date||'—')}</td>
+        <td>${_esc(row.libelle||'—')}</td>
+        <td class="${montantClass}">${row.montant||0} or</td>
+      </tr>`;
+    }
+    return `${trOpen}
+      <td><input class="cs-compte-input cs-compte-input-date" type="text" value="${_esc(row.date||'')}" placeholder="—"
+        onchange="saveCompteField('${type}',${i},'date',this.value)"
+        onkeydown="if(event.key==='Enter')this.blur()"></td>
+      <td><input class="cs-compte-input cs-compte-input-libelle" type="text" value="${_esc(row.libelle||'')}" placeholder="Libellé…"
+        onchange="saveCompteField('${type}',${i},'libelle',this.value)"
+        onkeydown="if(event.key==='Enter')this.blur()"></td>
+      <td class="${montantClass}">
+        <input class="cs-compte-input cs-compte-input-montant" type="number" value="${row.montant||''}" placeholder="0"
+          onchange="saveCompteField('${type}',${i},'montant',this.value)"
+          onkeydown="if(event.key==='Enter')this.blur()"><span class="cs-compte-or-lbl">or</span>
+      </td>
+      <td><button class="btn-icon" onclick="deleteCompteRow('${type}',${i})">🗑️</button></td>
     </tr>`;
+  };
 
   const renderRows = (list, type, canEdit) => {
     if (list.length === 0) return `<tr><td colspan="4" class="cs-compte-empty">Aucune entrée.</td></tr>`;
@@ -385,6 +397,12 @@ export function addCompteRow(type) {
   updateInCol('characters', c.id, {compte}).then(()=>{
     window._renderTab('compte', c, window._canEditChar);
     refreshOrDisplay(c);
+    // Focus auto sur le montant de la nouvelle ligne (dernier input de sa colonne)
+    const tableIdx = type === 'recettes' ? 0 : 1;
+    const table = document.querySelectorAll('.cs-compte-table')[tableIdx];
+    const inputs = table?.querySelectorAll('.cs-compte-input-montant');
+    const last = inputs?.[inputs.length - 1];
+    if (last) { last.focus(); last.select(); }
   });
 }
 
@@ -398,28 +416,41 @@ export async function deleteCompteRow(type, idx) {
   } catch (e) { notifySaveError(e); }
 }
 
-export function inlineEditCompteField(type, idx, field, el) {
-  const c = STATE.activeChar; if(!c) return;
-  const cur = el.textContent.replace(/ or$/,'').trim();
-  const isNum = field === 'montant';
-  const input = document.createElement('input');
-  input.type = isNum ? 'number' : 'text';
-  input.value = cur;
-  input.className = 'cs-inline-input' + (isNum ? ' cs-inline-num' : '');
-  input.style.cssText = 'width:' + (isNum ? '70px' : '120px') + ';font-size:inherit;';
-
-  const save = async () => {
-    const val = isNum ? (parseFloat(input.value)||0) : (input.value.trim()||cur);
-    c.compte = c.compte||{recettes:[],depenses:[]};
-    c.compte[type][idx][field] = val;
+export async function saveCompteField(type, idx, field, value) {
+  try {
+    const c = STATE.activeChar; if(!c) return;
+    c.compte = c.compte || {recettes:[], depenses:[]};
+    const list = c.compte[type] = c.compte[type] || [];
+    if (!list[idx]) return;
+    const newVal = field === 'montant' ? (parseFloat(value)||0) : ((value||'').trim());
+    if (list[idx][field] === newVal) return;
+    list[idx][field] = newVal;
     await updateInCol('characters', c.id, {compte: c.compte});
-    window._renderTab('compte', c, window._canEditChar);
-    refreshOrDisplay(c);
-  };
-  input.addEventListener('blur', save);
-  input.addEventListener('keydown', e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape') input.replaceWith(el); });
-  el.replaceWith(input);
-  input.focus(); input.select();
+    if (field === 'montant') {
+      _refreshCompteTotals(c);
+      refreshOrDisplay(c);
+    }
+  } catch (e) { notifySaveError(e); }
+}
+
+function _refreshCompteTotals(c) {
+  const compte = c.compte || {recettes:[], depenses:[]};
+  const totalR = (compte.recettes||[]).reduce((s,r)=>s+(parseFloat(r.montant)||0),0);
+  const totalD = (compte.depenses||[]).reduce((s,d)=>s+(parseFloat(d.montant)||0),0);
+  const solde  = totalR - totalD;
+  const vals = document.querySelectorAll('.cs-solde-bar .cs-solde-val');
+  if (vals[0]) vals[0].textContent = `+${totalR} or`;
+  if (vals[1]) vals[1].textContent = `−${totalD} or`;
+  if (vals[2]) {
+    vals[2].textContent = `${solde>=0?'+':''}${solde} or`;
+    vals[2].classList.toggle('pos', solde>=0);
+    vals[2].classList.toggle('neg', solde<0);
+  }
+  const tables = document.querySelectorAll('.cs-compte-table');
+  const recFoot = tables[0]?.querySelector('tfoot .cs-montant-pos');
+  const depFoot = tables[1]?.querySelector('tfoot .cs-montant-neg');
+  if (recFoot) recFoot.textContent = `+${totalR} or`;
+  if (depFoot) depFoot.textContent = `−${totalD} or`;
 }
 
 // ══════════════════════════════════════════════

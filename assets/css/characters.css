@@ -702,6 +702,44 @@
 .cs-montant-pos { color: var(--green); font-weight: 700; }
 .cs-montant-neg { color: var(--crimson-light); font-weight: 700; }
 
+/* Inputs édition livret de compte */
+.cs-compte-input {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.28rem 0.45rem;
+  font-family: inherit;
+  font-size: inherit;
+  outline: none;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.cs-compte-input:hover { background: rgba(255,255,255,0.07); border-color: var(--border-bright); }
+.cs-compte-input:focus {
+  border-color: var(--gold, #d4af37);
+  background: rgba(255,255,255,0.09);
+  box-shadow: 0 0 0 2px rgba(212,175,55,0.22);
+}
+.cs-compte-input-date    { width: 88px; font-size: .75rem; color: var(--text-dim); }
+.cs-compte-input-libelle { width: 100%; min-width: 80px; }
+.cs-compte-input-montant {
+  width: 72px; text-align: right; font-weight: 700;
+  -moz-appearance: textfield;
+}
+.cs-compte-input-montant::-webkit-inner-spin-button,
+.cs-compte-input-montant::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cs-montant-pos .cs-compte-input-montant { color: var(--green); }
+.cs-montant-neg .cs-compte-input-montant { color: var(--crimson-light); }
+.cs-compte-or-lbl { margin-left: .3rem; font-size: .72rem; color: var(--text-dim); font-weight: 600; }
+
+[data-theme="light"] .cs-compte-input {
+  background: #fff;
+  border-color: rgba(0,0,0,0.14);
+  color: var(--text);
+}
+[data-theme="light"] .cs-compte-input:hover { background: #f7f8fa; }
+[data-theme="light"] .cs-compte-input:focus { background: #fff; }
+
 .cs-hist-expand-row td { padding: 0 !important; }
 .cs-hist-expand-btn {
   display: block;

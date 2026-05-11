@@ -48,7 +48,7 @@ import {
   renderCharCarac, renderCharQuetes, renderCharNotes,
   toggleNote, addNote, editNoteTitle, saveNote, deleteNote,
   renderCharCompte, refreshOrDisplay,
-  addCompteRow, deleteCompteRow, inlineEditCompteField,
+  addCompteRow, deleteCompteRow, saveCompteField,
   renderCharMaitrises,
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   previewXpBar, saveXpDirect, addXpDelta,
@@ -526,7 +526,7 @@ Object.assign(window, {
   openCombatStylesAdmin, openWeaponFormatsAdmin, openDamageTypesAdmin,
 
   // Compte
-  addCompteRow, deleteCompteRow, inlineEditCompteField,
+  addCompteRow, deleteCompteRow, saveCompteField,
 
   // Notes
   addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
