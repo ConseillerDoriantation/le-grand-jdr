@@ -964,10 +964,10 @@ function _buildShape(t) {
     const src = _tokens[srcId]?.data;
     const tgt = _tokens[tgtId]?.data;
     if (!src || !tgt) return false;
-    const dist = _tokenAttackDistance(src, tgt);
     const options = _buildAttackOptions(src);
+    if (options.some(o => _tokenAttackDistance(src, tgt, o.portee) <= o.portee)) return true;
+    const dist = _tokenAttackDistance(src, tgt);
     const maxRange = options.length ? Math.max(...options.map(o => o.portee)) : 0;
-    if (options.some(o => dist <= o.portee)) return true;
     showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${maxRange})`, 'error');
     return false;
   };
@@ -1114,35 +1114,17 @@ function _showMoveRange(t) {
   const K=window.Konva, ld=_live(t), mv=ld.displayMovement??6;
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const {cols,rows}=_activePage;
-  // Cases occupées : bounding box complète de chaque autre token
-  const occ=new Set();
-  for (const e of Object.values(_tokens)) {
-    if (e.data?.pageId !== _activePage.id || e.data.id === t.id) continue;
-    const d=_tokenDims(e.data);
-    for (let oc=0; oc<d.w; oc++) for (let or=0; or<d.h; or++) {
-      occ.add(`${e.data.col+oc},${e.data.row+or}`);
-    }
-  }
-  const isBlocked = (c, r) => {
-    for (let oc=0; oc<sw; oc++) for (let or=0; or<sh; or++) {
-      if (occ.has(`${c+oc},${r+or}`)) return true;
-    }
-    return false;
-  };
+  // Pas de check collision : le drag & drop laisse passer, l'affichage doit faire pareil.
   for (let dc=-mv;dc<=mv;dc++) for (let dr=-mv;dr<=mv;dr++) {
     if (Math.abs(dc)+Math.abs(dr)>mv) continue;
     const c=t.col+dc,r=t.row+dr;
     if (c<0||r<0||c+sw>cols||r+sh>rows||(!dc&&!dr)) continue;
-    const blk=isBlocked(c, r);
-    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:sw*CELL,height:sh*CELL,
-      fill:blk?'rgba(239,68,68,0.22)':'rgba(79,140,255,0.28)',
-      stroke:blk?'rgba(239,68,68,0.65)':'rgba(79,140,255,0.70)',strokeWidth:1.5,listening:!blk });
-    if (!blk){
-      const tc=c, tr=r;
-      const moveSelectedHere = async e => { e.cancelBubble=true; if (_selected) await _moveTo(_selected, tc, tr); };
-      rect.on('click', e => { if (e.evt.button!==0) return; moveSelectedHere(e); });
-      rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
-    }
+    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
+      fill:'rgba(79,140,255,0.28)', stroke:'rgba(79,140,255,0.70)', strokeWidth:1.5, listening:true });
+    const tc=c, tr=r;
+    const moveSelectedHere = async e => { e.cancelBubble=true; if (_selected) await _moveTo(_selected, tc, tr); };
+    rect.on('click', e => { if (e.evt.button!==0) return; moveSelectedHere(e); });
+    rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
     _layers.grid.add(rect); _moveHL.push(rect);
   }
   _layers.grid.batchDraw();
@@ -1296,15 +1278,18 @@ function _showAttackRange(t) {
   const K=window.Konva;
   const options=_buildAttackOptions(t);
   const maxRange=options.length?Math.max(...options.map(o=>o.portee)):(_live(t).displayRange??1);
+  // Pure mêlée (portée max = 1) → Chebyshev (8 dirs, inclut diagonales). Sinon Manhattan (losange).
+  const meleeOnly = maxRange === 1;
   const {cols,rows}=_activePage;
   const sd = _tokenDims(t);
   for (let c=0; c<cols; c++) for (let r=0; r<rows; r++) {
     // Ignorer les cases occupées par le token source lui-même
     if (c>=t.col && c<t.col+sd.w && r>=t.row && r<t.row+sd.h) continue;
-    // Distance Manhattan entre la case (c,r) et la bounding box du token source
+    // Distance entre la case (c,r) et la bounding box du token source
     const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
     const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
-    if (dx + dy > maxRange) continue;
+    const dist = meleeOnly ? Math.max(dx, dy) : (dx + dy);
+    if (dist > maxRange) continue;
     const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
       fill:'rgba(239,68,68,0.22)', stroke:'rgba(239,68,68,0.65)', strokeWidth:1.5, listening:false });
     _layers.grid.add(rect); _moveHL.push(rect);
@@ -1495,13 +1480,14 @@ const _tokenDims = t => {
   const h = t?.tokenH ?? t?.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1;
   return { w: Math.max(1, Math.min(5, w)), h: Math.max(1, Math.min(5, h)) };
 };
-// Distance Manhattan entre bounding boxes WxH (0 = adjacent ou chevauchant côté).
-// Pour deux 1×1, équivaut à |Δcol| + |Δrow|.
-const _tokenAttackDistance = (src, tgt) => {
+// Distance d'attaque entre bounding boxes WxH (0 = adjacent / chevauchement de côté).
+// portee === 1 (mêlée) → Chebyshev (8 directions, inclut diagonales).
+// portee > 1 ou non précisé → Manhattan (losange, 4 directions).
+const _tokenAttackDistance = (src, tgt, portee = null) => {
   const s = _tokenDims(src), g = _tokenDims(tgt);
   const dx = Math.max(0, Math.max(src.col, tgt.col) - Math.min(src.col + s.w - 1, tgt.col + g.w - 1));
   const dy = Math.max(0, Math.max(src.row, tgt.row) - Math.min(src.row + s.h - 1, tgt.row + g.h - 1));
-  return dx + dy;
+  return portee === 1 ? Math.max(dx, dy) : dx + dy;
 };
 
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
@@ -1712,7 +1698,7 @@ async function _execAttack(srcId, tgtId) {
   const dist=_tokenAttackDistance(src, tgt);
 
   const options = _buildAttackOptions(src);
-  const inRange = options.filter(o => dist <= o.portee);
+  const inRange = options.filter(o => _tokenAttackDistance(src, tgt, o.portee) <= o.portee);
   if (!inRange.length) {
     showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...options.map(o=>o.portee))})`, 'error');
     return;
@@ -2311,9 +2297,10 @@ function _mtToggleTarget(tgtId) {
     }
     const srcData = _tokens[srcId]?.data, tgtData = _tokens[tgtId]?.data;
     if (srcData && tgtData) {
-      const dist = _tokenAttackDistance(srcData, tgtData);
-      if (dist > (_mtCtx.opt.portee || 1)) {
-        showNotif(`Hors de portée (${dist}c — portée du sort : ${_mtCtx.opt.portee}c)`, 'error');
+      const portee = _mtCtx.opt.portee || 1;
+      const dist = _tokenAttackDistance(srcData, tgtData, portee);
+      if (dist > portee) {
+        showNotif(`Hors de portée (${dist}c — portée du sort : ${portee}c)`, 'error');
         return;
       }
     }
@@ -2347,8 +2334,7 @@ window._mtValidate = () => {
   const src = _tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
   const tgtData = _tokens[firstTgt]?.data; if (!tgtData) { _mtPending = null; return; }
   const options = _buildAttackOptions(src);
-  const dist    = _tokenAttackDistance(src, tgtData);
-  const inRange = options.filter(o => dist <= o.portee);
+  const inRange = options.filter(o => _tokenAttackDistance(src, tgtData, o.portee) <= o.portee);
   _atkOptsCache[cacheKey] = inRange;
 
   // Appeler _vttPickOpt — _mtPending non null empêche la re-entrée en mode ciblage
