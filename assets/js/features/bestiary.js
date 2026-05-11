@@ -3,7 +3,7 @@
 // ✓ Admin : CRUD créatures, image+crop, attaques/traits/butins dynamiques
 // ✓ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -22,6 +22,18 @@ let _filterType = ''; // filtre par type de créature
 let _filterRang  = ''; // filtre par rang (classique, elite, boss)
 let _activeId   = null; // créature ouverte dans le panneau
 let _bestiaireId = 'main'; // id du bestiaire actif (admin peut switcher)
+let _viewAsUid   = null; // admin : voir le bestiaire d'un joueur (null = vue MJ)
+let _playersList = []; // [{ uid, pseudo }] — peuplé côté admin
+
+// Vue "MJ" effective : admin ET pas en train de consulter un joueur.
+// Quand l'admin bascule sur un joueur, on rend exactement comme côté joueur
+// pour pouvoir voir/modifier ses estimations.
+function _isViewingPlayer() {
+  return STATE.isAdmin && _viewAsUid && _viewAsUid !== STATE.user?.uid;
+}
+function _isAdminView() {
+  return STATE.isAdmin && !_isViewingPlayer();
+}
 
 const RANG_STYLE = {
   classique: { label:'Classique', color:'#a0aec0',         border:'rgba(160,174,192,.45)',   bg:'rgba(160,174,192,.1)' },
@@ -200,6 +212,57 @@ function _readDamageTypeSelections(name) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// BANDEAU AVATARS — sélecteur de vue (MJ ↔ joueur)
+// ══════════════════════════════════════════════════════════════════════════════
+function _avatarTile({ active, ringColor, onClick, imageUrl, fallback, pseudo, charNom }) {
+  const ring = active ? ringColor : 'var(--border)';
+  const shadow = active ? `0 0 0 2px ${ringColor}33` : 'none';
+  const labelColor = active ? ringColor : 'var(--text-dim)';
+  return `<button onclick="${onClick}" title="${_esc(pseudo)}${charNom?` — ${_esc(charNom)}`:''}"
+    style="display:flex;flex-direction:column;align-items:center;gap:.25rem;padding:.25rem;
+    border:none;background:none;cursor:pointer;border-radius:8px;min-width:54px;
+    transition:background .12s"
+    onmouseover="this.style.background='rgba(255,255,255,.04)'"
+    onmouseout="this.style.background='none'">
+    <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;
+      border:2px solid ${ring};box-shadow:${shadow};
+      background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;
+      font-weight:700;color:var(--text);font-size:1rem;flex-shrink:0">
+      ${imageUrl
+        ? `<img src="${imageUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`
+        : _esc(fallback)}
+    </div>
+    <div style="font-size:.62rem;color:${labelColor};max-width:72px;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis;font-weight:${active?'700':'400'}">${_esc(pseudo)}</div>
+  </button>`;
+}
+
+function _renderPlayerAvatars() {
+  return `<div style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:flex-start;margin-top:.5rem;
+    padding:.4rem .5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
+    ${_avatarTile({
+      active:    !_viewAsUid,
+      ringColor: 'var(--gold)',
+      onClick:   `window._bstViewAs('')`,
+      imageUrl:  '',
+      fallback:  '👑',
+      pseudo:    'MJ',
+      charNom:   '',
+    })}
+    <div style="width:1px;align-self:stretch;background:var(--border);margin:0 .15rem"></div>
+    ${_playersList.map(p => _avatarTile({
+      active:    _viewAsUid === p.uid,
+      ringColor: '#4f8cff',
+      onClick:   `window._bstViewAs('${p.uid}')`,
+      imageUrl:  p.portraitUrl,
+      fallback:  p.initial,
+      pseudo:    p.pseudo,
+      charNom:   p.charNom,
+    })).join('')}
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // RENDU PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderBestiary() {
@@ -212,6 +275,35 @@ async function renderBestiary() {
     const list = meta?.list || [];
     if (!list.find(b => b.id === 'main')) list.unshift({ id:'main', label:'Bestiaire principal' });
     window._bstBestiaireList = list;
+
+    // Liste des joueurs (uid + pseudo) pour la vue "bestiaire d'un joueur".
+    // Source primaire : STATE.characters (déjà chargé via la page d'accueil).
+    // Fallback : loadChars(null) si on arrive direct au bestiaire.
+    let chars = STATE.characters;
+    if (!chars || !chars.length) {
+      try { chars = await loadChars(null); } catch { chars = []; }
+    }
+    // Portrait du PJ : même ordre de fallback que le VTT pour la cohérence.
+    // Tout est déjà en mémoire (STATE.characters), aucune lecture Firestore en plus.
+    const seen = new Map();
+    (chars || []).forEach(c => {
+      if (!c?.uid || c.uid === STATE.user?.uid) return;
+      const pseudo = c.ownerPseudo || c.nom || c.uid;
+      const photo  = c.photoURL || c.photo || c.avatar || c.portraitUrl || c.imageUrl || '';
+      const existing = seen.get(c.uid);
+      // Préférer un PJ qui a une photo, sinon le premier rencontré.
+      if (!existing || (!existing.portraitUrl && photo)) {
+        seen.set(c.uid, {
+          uid:         c.uid,
+          pseudo,
+          charNom:     c.nom || '',
+          portraitUrl: photo,
+          initial:     (pseudo || '?').charAt(0).toUpperCase(),
+        });
+      }
+    });
+    _playersList = [...seen.values()]
+      .sort((a,b) => a.pseudo.localeCompare(b.pseudo, 'fr', { sensitivity:'base' }));
   }
 
   // Charger les créatures du bestiaire actif
@@ -222,10 +314,13 @@ async function renderBestiary() {
 
   if (!_damageTypes) _damageTypes = await loadDamageTypes();
 
-  const uid = STATE.user?.uid;
-  if (uid) {
-    const trackerDoc = await getDocData('bestiary_tracker', uid);
+  // Tracker : MJ peut consulter celui d'un joueur via _viewAsUid
+  const trackerUid = _viewAsUid || STATE.user?.uid;
+  if (trackerUid) {
+    const trackerDoc = await getDocData('bestiary_tracker', trackerUid);
     _tracker = trackerDoc?.data || {};
+  } else {
+    _tracker = {};
   }
 
   _render();
@@ -263,11 +358,23 @@ function _render() {
           + Nouveau
         </button>
       </div>` : ''}
-    </div>
-    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openBeastModal()">+ Créature</button>` : ''}
+      ${STATE.isAdmin && _playersList.length ? _renderPlayerAvatars() : ''}
     </div>
   </div>
+
+  ${_isViewingPlayer() ? `
+  <div style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;margin-bottom:.75rem;
+    border:1px solid rgba(79,140,255,.35);background:rgba(79,140,255,.08);border-radius:8px">
+    <span style="font-size:.8rem">👁</span>
+    <span style="font-size:.78rem;color:var(--text)">
+      Vue du bestiaire de <strong style="color:#4f8cff">${_esc(_playersList.find(p=>p.uid===_viewAsUid)?.pseudo || '?')}</strong>
+      — tes modifications sont enregistrées chez ce joueur.
+    </span>
+    <button onclick="window._bstViewAs('')" style="margin-left:auto;font-size:.7rem;padding:2px 10px;
+      border-radius:999px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);cursor:pointer">
+      Revenir à la vue MJ
+    </button>
+  </div>` : ''}
 
   <!-- ═══ LAYOUT : grille + panneau ════════════════════════════════════════ -->
   <div class="bst-layout ${_activeId ? 'has-panel' : 'no-panel'}">
@@ -313,10 +420,11 @@ function _render() {
             </button>`;
           }).join('')}
         </div>
-        <div class="bst-tools">
+        <div class="bst-tools" style="display:flex;gap:.5rem;align-items:center">
           <input id="bst-search" type="text" placeholder="🔍 Rechercher..."
-            class="input-field" value="${_searchVal}"
+            class="input-field" value="${_searchVal}" style="flex:1"
             oninput="window._bstSearchInput(this.value)">
+          ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="flex-shrink:0" onclick="openBeastModal()">+ Créature</button>` : ''}
         </div>
       </div>
 
@@ -349,7 +457,7 @@ function _renderCard(c) {
   const rs        = RANG_STYLE[rang] || RANG_STYLE.classique;
 
   // Admin uniquement : barre de PV avec max connu
-  const pvMax    = STATE.isAdmin ? (parseInt(c.pvMax) || 0) : 0;
+  const pvMax    = _isAdminView() ? (parseInt(c.pvMax) || 0) : 0;
   const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
   const pvPct    = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel/pvMax*100))) : 0;
   const pvColor  = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#e8b84b' : '#ff6b6b';
@@ -367,14 +475,14 @@ function _renderCard(c) {
       <div class="bst-card-meta">
         ${c.type?`${c.type}`:''}${c.type&&c.environnement?' · ':''}${c.environnement||''}
       </div>
-      ${STATE.isAdmin && pvMax > 0 ? `
+      ${_isAdminView() && pvMax > 0 ? `
       <div style="margin-top:.5rem">
         <div class="bst-track-bar">
           <div class="bst-track-fill" style="width:${pvPct}%;background:${pvColor}"></div>
         </div>
         <div style="font-size:.65rem;color:var(--text-dim)">${pvActuel}/${pvMax} PV</div>
       </div>` : ''}
-      ${STATE.isAdmin ? _renderDamageProfileMini(c) : ''}
+      ${_isAdminView() ? _renderDamageProfileMini(c) : ''}
     </div>
     ${STATE.isAdmin ? `
     <div style="display:flex;gap:3px;padding:.4rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
@@ -525,7 +633,7 @@ function _renderPanel(c) {
     </div>`;
 
   // ── VUE ADMIN ─────────────────────────────────────────────────────────────
-  if (STATE.isAdmin) {
+  if (_isAdminView()) {
     // Calcul modificateur D&D : floor((stat - 10) / 2)
     const mod = (val) => {
       const n = parseInt(val);
@@ -991,7 +1099,7 @@ async function deleteBeast(id) {
   try {
     const col = window._bstCurrentCol || 'bestiary';
     const c = _creatures.find(x=>x.id===id);
-    if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`)) return;
+    if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`, {title: 'Supprimer la créature'})) return;
     await deleteFromCol(col, id);
     _creatures = _creatures.filter(x=>x.id!==id);
     if (_activeId === id) _activeId = null;
@@ -1005,7 +1113,7 @@ async function deleteBeast(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function _saveTracker() {
   try {
-    const uid = STATE.user?.uid; if (!uid) return;
+    const uid = _viewAsUid || STATE.user?.uid; if (!uid) return;
     await saveDoc('bestiary_tracker', uid, { data: _tracker });
   } catch (e) { notifySaveError(e); }
 }
@@ -1090,6 +1198,15 @@ window._bstSwitchBestiaire = async (id) => {
   await renderBestiary();
 };
 
+// Vue admin → joueur : voir/modifier les estimations d'un joueur.
+// uid vide ou égal à l'UID admin → retour à la vue MJ.
+window._bstViewAs = async (uid) => {
+  if (!STATE.isAdmin) return;
+  _viewAsUid = (uid && uid !== STATE.user?.uid) ? uid : null;
+  _activeId  = null;
+  await renderBestiary();
+};
+
 window._bstCreateBestiaire = async () => {
   const label = prompt('Nom du nouveau bestiaire :');
   if (!label?.trim()) return;
@@ -1120,8 +1237,8 @@ window._bstAdjust = (id, type, delta) => {
   const c = _creatures.find(x=>x.id===id); if (!c) return;
   if (!_tracker[id]) _tracker[id] = {};
   const curKey = type==='pv'?'pvActuel':'pmActuel';
-  // Admin : connaît le max et le respecte. Joueur : pas de borne max (stats masquées)
-  const max    = STATE.isAdmin ? (parseInt(c[type==='pv'?'pvMax':'pmMax'])||0) : null;
+  // Vue MJ : connaît le max et le respecte. Vue joueur (ou MJ consultant un joueur) : pas de borne max.
+  const max    = _isAdminView() ? (parseInt(c[type==='pv'?'pvMax':'pmMax'])||0) : null;
   const cur    = _tracker[id][curKey] !== undefined ? parseInt(_tracker[id][curKey]) : (max ?? 0);
   const newVal = max !== null ? Math.max(0, Math.min(max, cur + delta)) : Math.max(0, cur + delta);
   _tracker[id][curKey] = newVal;
@@ -1134,7 +1251,7 @@ window._bstAdjust = (id, type, delta) => {
     bar.style.width = pct+'%';
     if (type==='pv') bar.style.background = pct>50?'#22c38e':pct>25?'#e8b84b':'#ff6b6b';
   }
-  if (STATE.isAdmin && max) {
+  if (_isAdminView() && max) {
     const cardBar = [...document.querySelectorAll('.bst-card')]
       .find(card => card.dataset.beastId === id)
       ?.querySelector('.bst-track-fill');
@@ -1157,8 +1274,8 @@ window._bstSetNotes = (id, val) => {
 
 window._bstReset = (id) => {
   const c = _creatures.find(x=>x.id===id); if (!c) return;
-  // Admin remet les vraies valeurs, joueur remet à zéro ses déductions
-  _tracker[id] = STATE.isAdmin
+  // Vue MJ : remet les vraies valeurs. Vue joueur (ou MJ consultant un joueur) : remet les estimations à zéro.
+  _tracker[id] = _isAdminView()
     ? { pvActuel: parseInt(c.pvMax)||0, pmActuel: parseInt(c.pmMax)||0, notes:'' }
     : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
   _saveTracker();
