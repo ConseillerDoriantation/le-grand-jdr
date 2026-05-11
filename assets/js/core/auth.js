@@ -10,6 +10,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  GoogleAuthProvider,
+  signInWithPopup,
 } from '../config/firebase.js';
 
 import { setProfile } from './state.js';
@@ -39,6 +41,11 @@ export function getAuthError(error) {
     'auth/missing-password': 'Mot de passe manquant.',
     'auth/network-request-failed': 'Erreur réseau. Réessaie.',
     'auth/too-many-requests': 'Trop de tentatives. Réessaie plus tard.',
+    'auth/popup-closed-by-user': 'Fenêtre Google fermée avant la fin.',
+    'auth/popup-blocked': 'Fenêtre Google bloquée par le navigateur.',
+    'auth/cancelled-popup-request': '',
+    'auth/account-exists-with-different-credential':
+      'Un compte existe déjà avec cet email. Connecte-toi avec l’email/mot de passe.',
   };
 
   return map[code] || message || 'Erreur inconnue pendant l’authentification.';
@@ -161,6 +168,25 @@ export async function doRegister() {
   }
 }
 
+export async function doGoogleLogin() {
+  clearAuthError();
+
+  const button = document.querySelector('[data-action="google-login"]');
+
+  try {
+    setButtonLoading(button, true, 'Connexion...');
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await signInWithPopup(auth, provider);
+    clearAuthError();
+  } catch (error) {
+    console.error('[auth] doGoogleLogin error:', error);
+    setAuthError(getAuthError(error));
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 export async function doLogout() {
   try {
     await signOut(auth);
@@ -189,6 +215,7 @@ export function bindAuthUI() {
 
   const loginBtn = getLoginButton();
   const registerBtn = getRegisterButton();
+  const googleBtn = document.querySelector('[data-action="google-login"]');
   const loginTab = getLoginTabButton();
   const registerTab = getRegisterTabButton();
   const logoutBtn = document.querySelector('[data-action="logout"]');
@@ -204,6 +231,13 @@ export function bindAuthUI() {
     registerBtn.addEventListener('click', (e) => {
       e.preventDefault();
       doRegister();
+    });
+  }
+
+  if (googleBtn) {
+    googleBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      doGoogleLogin();
     });
   }
 
@@ -238,6 +272,7 @@ export function initAuth() {
     switchAuthTab,
     doLogin,
     doRegister,
+    doGoogleLogin,
     doLogout,
   });
 }
