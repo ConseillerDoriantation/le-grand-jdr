@@ -575,6 +575,37 @@ async function renderBestiary() {
   _render();
 }
 
+// ── Création rapide d'une créature sans modal ──────────────────────────────────
+window._bstCreateDraft = async function () {
+  if (!STATE.isAdmin) return;
+  const col = 'bestiary';
+  const data = {
+    nom: 'Nouvelle créature', emoji: '🐲', rang: 'classique',
+    type: '', environnement: '', niveau: 0, dangerositeXp: 0,
+    pvMax: 0, pmMax: 0, ca: 0, vitesse: 0, initiative: 0,
+    force: 0, dexterite: 0, constitution: 0, intelligence: 0, sagesse: 0, charisme: 0,
+    tokenW: 1, tokenH: 1, imageUrl: '', description: '',
+    resistances: [], immunites: [], absorptions: [], faiblesses: [],
+    attaques: [], traits: [], butins: [],
+  };
+  try {
+    const newId = await addToCol(col, data);
+    if (typeof newId === 'string') {
+      _creatures.push({ ...data, id: newId });
+    } else {
+      _creatures = await loadCollection(col);
+    }
+    _creatures.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+    _activeId = typeof newId === 'string' ? newId : (_creatures[_creatures.length - 1]?.id ?? null);
+    _render();
+    setTimeout(() => {
+      const nameInput = document.querySelector('.bst-panel-name-input');
+      nameInput?.focus();
+      nameInput?.select();
+    }, 50);
+  } catch (e) { notifySaveError(e); }
+};
+
 function _render() {
   const content = document.getElementById('main-content');
 
@@ -663,7 +694,7 @@ function _render() {
           ${_esc(t)}
         </button>`).join('')}
     </div>
-    ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="white-space:nowrap;flex-shrink:0" onclick="openBeastModal()">+ Créature</button>` : ''}
+    ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="white-space:nowrap;flex-shrink:0" onclick="window._bstCreateDraft()">+ Créature</button>` : ''}
   </div>
 
   <!-- ═ LAYOUT ═══════════════════════════════════════════════════════════════ -->
@@ -674,7 +705,7 @@ function _render() {
           <div class="bst-empty-icon">🐉</div>
           <div class="bst-empty-title">${_creatures.length===0 ? 'Aucune créature dans le bestiaire' : 'Aucun résultat'}</div>
           <div class="bst-empty-sub">${_creatures.length===0 ? 'Ajoutez la première créature pour commencer.' : 'Essayez un filtre différent.'}</div>
-          ${STATE.isAdmin && _creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openBeastModal()">+ Ajouter la première créature</button>` : ''}
+          ${STATE.isAdmin && _creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="window._bstCreateDraft()">+ Ajouter la première créature</button>` : ''}
         </div>` : `
         <div class="bst-grid">
           ${filtered.map(c => _renderCard(c)).join('')}
@@ -752,12 +783,12 @@ function _renderPanel(c) {
 
   const pvMax     = parseInt(c.pvMax)    || 0;
   const pmMax     = parseInt(c.pmMax)    || 0;
-  const pvActuel  = track.pvActuel  !== undefined ? parseInt(track.pvActuel)  : (pvMax || 0);
-  const pmActuel  = track.pmActuel  !== undefined ? parseInt(track.pmActuel)  : (pmMax || 0);
-  const caEstimee = track.caEstimee !== undefined ? parseInt(track.caEstimee) : 0;
-  const vitEstimee= track.vitEstimee!== undefined ? parseInt(track.vitEstimee): 0;
-  const pvPct     = pvMax > 0 ? Math.round(pvActuel / pvMax * 100) : 0;
-  const pmPct     = pmMax > 0 ? Math.round(pmActuel / pmMax * 100) : 0;
+  const pvActuel  = track.pvActuel  !== undefined ? parseInt(track.pvActuel)  : null;
+  const pmActuel  = track.pmActuel  !== undefined ? parseInt(track.pmActuel)  : null;
+  const caEstimee = track.caEstimee !== undefined ? parseInt(track.caEstimee) : null;
+  const vitEstimee= track.vitEstimee!== undefined ? parseInt(track.vitEstimee): null;
+  const pvPct     = pvMax > 0 && pvActuel !== null ? Math.round(pvActuel / pvMax * 100) : 0;
+  const pmPct     = pmMax > 0 && pmActuel !== null ? Math.round(pmActuel / pmMax * 100) : 0;
 
   const attaques  = Array.isArray(c.attaques) ? c.attaques : [];
   const traits    = Array.isArray(c.traits)   ? c.traits   : [];

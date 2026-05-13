@@ -802,8 +802,16 @@ export async function openSortModal(idx, s) {
         <input type="hidden" id="s-prot-mode" value="${s?.protectionMode||'ca'}">
       </div>
       <div id="s-ca-section" style="${(s?.protectionMode||'ca')==='ca'?'':'display:none'}">
-        <div class="form-group"><label>Effet CA <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">ex : CA +2 (2 tours)</span></label>
-          <input class="input-field" id="s-ca" value="${s?.ca||''}" placeholder="CA +2 (2 tours)">
+        <div class="form-group"><label>Effet CA <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">ex : CA +2</span></label>
+          <input class="input-field" id="s-ca" value="${s?.ca||''}" placeholder="CA +2">
+        </div>
+        <div class="form-group"><label>Durée <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">tours (min 2)</span></label>
+          <div style="display:flex;gap:.35rem;align-items:center">
+            <input type="number" class="input-field" id="s-ca-duree" min="2" max="100"
+              value="${s?.dureeBase||''}" placeholder="—" style="width:58px;text-align:center;padding:.3rem"
+              oninput="const a=document.getElementById('s-duree-base');if(a)a.value=this.value;">
+            <span style="font-size:.8rem;color:var(--text-dim)">tours</span>
+          </div>
         </div>
       </div>
       <div id="s-soin-section" style="${(s?.protectionMode||'ca')==='soin'?'':'display:none'}">
@@ -858,11 +866,12 @@ export async function openSortModal(idx, s) {
               <span style="font-size:.8rem;color:var(--text-dim)">m</span>
             </div>
           </div>
-          <div class="form-group" style="margin:0">
+          <div class="form-group" style="margin:0" id="s-duree-base-row">
             <label>Durée de base <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">min 2 tours</span></label>
             <div style="display:flex;gap:.35rem;align-items:center">
               <input type="number" class="input-field" id="s-duree-base" min="2" max="100"
-                value="${s?.dureeBase||''}" placeholder="—" style="width:58px;text-align:center;padding:.3rem">
+                value="${s?.dureeBase||''}" placeholder="—" style="width:58px;text-align:center;padding:.3rem"
+                oninput="const a=document.getElementById('s-ca-duree');if(a)a.value=this.value;">
               <span style="font-size:.8rem;color:var(--text-dim)">tours</span>
             </div>
           </div>
@@ -1078,7 +1087,10 @@ export async function saveSort(idx) {
 
     const zoneWRaw = parseInt(document.getElementById('s-zone-w')?.value) || 0;
     const zoneHRaw = parseInt(document.getElementById('s-zone-h')?.value) || 0;
-    const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
+    // s-ca-duree : champ durée visible dans la section CA (priorité sur s-duree-base avancé)
+    const dureeBaseRaw = parseInt(document.getElementById('s-ca-duree')?.value)
+                      || parseInt(document.getElementById('s-duree-base')?.value)
+                      || 0;
     const deplMode = window._deplModeEdit || null;
     const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
 

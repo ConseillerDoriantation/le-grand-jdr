@@ -1402,7 +1402,11 @@ function _sortDureeVtt(s) {
   const base   = (s.dureeBase >= 1) ? +s.dureeBase : 0;
   let bonus = 0;
   for (let i = 0; i < nbDur; i++) bonus += 2 + i;
-  return base + bonus || null;
+  if (base + bonus > 0) return base + bonus;
+  // Fallback : lire "X tours" dans le champ ca (ex : "CA +2 (2 tours)")
+  // si dureeBase n'a pas été renseigné dans les options avancées
+  const m = String(s.ca || '').match(/(\d+)\s*tours?/i);
+  return m ? parseInt(m[1]) : null;
 }
 
 /**
@@ -3023,6 +3027,7 @@ function _renderInspector(t) {
         <button class="vtt-btn-sm" onclick="window._vttEditToken('${t.id}')" title="Modifier les stats combat">⚙️ Stats</button>
         <button class="vtt-btn-sm" onclick="window._vttToggleVisible('${t.id}')" title="Visibilité joueurs">${t.visible?'👁':'🙈'}</button>
         ${t.pageId?`<button class="vtt-btn-sm" onclick="window._vttRetireToken('${t.id}')" title="Retirer de la carte">↩</button>`:''}
+        ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearBuffs('${t.id}')" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
       </div>` :''}`;
 }
 
@@ -4967,6 +4972,12 @@ window._vttSelectFromTray = id => {
 window._vttToggleVisible = async id => {
   const t=_tokens[id]?.data; if (!t) return;
   await updateDoc(_tokRef(id),{visible:!t.visible}).catch(()=>{});
+};
+window._vttClearBuffs = async id => {
+  if (!STATE.isAdmin) return;
+  const t=_tokens[id]?.data; if (!t) return;
+  await updateDoc(_tokRef(id),{buffs:[]}).catch(()=>{});
+  showNotif('Buffs supprimés.','success');
 };
 window._vttSetHp = async (tokenId,hp) => {
   const t=_tokens[tokenId]?.data; if (!t) return;
