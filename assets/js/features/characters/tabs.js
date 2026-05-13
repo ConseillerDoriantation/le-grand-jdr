@@ -822,8 +822,9 @@ function _buildProfilHtml(c, canEdit, pres) {
       ${richTextEditorHtml({ id: 'profil-content', html: content, minHeight: 200, placeholder: 'Décris librement ton personnage…' })}
     </div>
 
+    ${STATE.isAdmin ? `
     <div class="form-group">
-      <label>Illustration <span style="color:var(--text-dim);font-size:.75rem">(indépendante de la photo de profil)</span></label>
+      <label>Illustration <span style="color:var(--text-dim);font-size:.75rem">(indépendante de la photo de profil — MJ uniquement)</span></label>
       <div style="display:flex;align-items:center;gap:.75rem">
         ${imageUrl
           ? `<img src="${_esc(imageUrl)}" style="width:56px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">`
@@ -835,7 +836,7 @@ function _buildProfilHtml(c, canEdit, pres) {
           ${imageUrl ? `<button class="btn btn-outline btn-sm" style="color:#ff6b6b;margin-left:.35rem" type="button" onclick="removeProfilImage('${_esc(c.id)}')">✕ Retirer</button>` : ''}
         </div>
       </div>
-    </div>
+    </div>` : ''}
 
     <div style="background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem">
       <div style="font-size:.7rem;font-weight:700;color:var(--text-dim);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:.65rem">
@@ -890,7 +891,11 @@ export function invalidateProfilCache(charId) {
 }
 
 export function openProfilImageUpload(charId) {
-  // TODO: réutiliser le crop existant si nécessaire — pour l'instant simple input file
+  const key = localStorage.getItem('vtt-imgbb-key') || '';
+  if (!key) {
+    showNotif('Clé ImgBB manquante — configurez-la dans le VTT (Paramètres → Clé ImgBB).', 'error');
+    return;
+  }
   const fi = document.createElement('input');
   fi.type = 'file'; fi.accept = 'image/*';
   fi.style.cssText = 'position:absolute;opacity:0;width:0;height:0';
@@ -898,19 +903,36 @@ export function openProfilImageUpload(charId) {
   fi.addEventListener('change', async () => {
     const file = fi.files[0]; fi.remove();
     if (!file?.type.startsWith('image/')) return;
-    // Compression avant stockage Firestore (limite 1 MB par doc)
-    const b64  = await uploadJpeg(file, { max: 600, quality: 0.82 });
-    const pres = _profilCache[charId];
-    const data = pres ? { imageUrl: b64 } : { charId, uid: STATE.user?.uid || '', imageUrl: b64, visible: true, ordre: 999, content: '' };
-    if (pres?.id) {
-      await updateInCol('players', pres.id, { imageUrl: b64 });
-      _profilCache[charId] = { ...pres, imageUrl: b64 };
-    } else {
-      const newId = await addToCol('players', data);
-      _profilCache[charId] = { id: newId, ...data };
+    showNotif('Upload en cours…', 'info');
+    try {
+      // Compression JPEG puis upload imgbb (pas de base64 en Firestore)
+      const b64full = await uploadJpeg(file, { max: 1400, quality: 0.88 });
+      const b64 = b64full.replace(/^data:[^;]+;base64,/, '');
+      const fd = new FormData();
+      fd.append('key', key);
+      fd.append('image', b64);
+      const resp = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: fd });
+      const json = await resp.json();
+      if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
+      const imageUrl = json.data.url;
+      const pres = _profilCache[charId];
+      const data = pres
+        ? { imageUrl }
+        : { charId, uid: STATE.user?.uid || '', imageUrl, visible: true, ordre: 999, content: '' };
+      if (pres?.id) {
+        await updateInCol('players', pres.id, { imageUrl });
+        _profilCache[charId] = { ...pres, imageUrl };
+      } else {
+        const newId = await addToCol('players', data);
+        _profilCache[charId] = { id: newId, ...data };
+      }
+      const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+      if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
+      showNotif('Illustration mise à jour !', 'success');
+    } catch (e) {
+      console.error('[profilImage]', e);
+      showNotif(`Erreur upload : ${e?.message || '?'}`, 'error');
     }
-    const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
-    if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
   });
   fi.click();
 }
