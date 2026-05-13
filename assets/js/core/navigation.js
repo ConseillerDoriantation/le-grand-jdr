@@ -123,6 +123,17 @@ export function initEventDelegation() {
     if (action === 'register')          { e.preventDefault(); window.doRegister?.(); return; }
     if (action === 'auth-tab-login')    { window.switchAuthTab?.('login');           return; }
     if (action === 'auth-tab-register') { window.switchAuthTab?.('register');        return; }
+    if (action === 'toggle-pw') {
+      const btn = e.target.closest('[data-action="toggle-pw"]');
+      const input = btn && document.getElementById(btn.dataset.target);
+      if (input) {
+        const shown = input.type === 'text';
+        input.type = shown ? 'password' : 'text';
+        btn.classList.toggle('pw-toggle--on', !shown);
+        btn.setAttribute('aria-label', shown ? 'Afficher le mot de passe' : 'Masquer le mot de passe');
+      }
+      return;
+    }
   });
 
   document.addEventListener('keydown', (e) => {
