@@ -109,15 +109,23 @@ export function inlineEditNum(charId, field, el, min=0, max=99999) {
 export function inlineEditStatFromCard(event, charId, statKey, cardEl) {
   if (!cardEl) return;
   if (event?.target?.closest('input, button, textarea, select, a')) return;
+  // Joueur : redirige vers l'onglet Caracs (allocation explicite)
+  if (!STATE.isAdmin) {
+    window.showCharTab?.('carac');
+    showNotif('Allouez vos points dans l\'onglet Caracs.', 'info');
+    return;
+  }
   if (cardEl.querySelector('input.cs-inline-input')) return;
   const baseEl = cardEl.querySelector('.js-stat-base');
   if (!baseEl) return;
   inlineEditStat(charId, statKey, baseEl);
 }
 
+// Édite la BASE d'une stat (MJ uniquement). stats[key] est recalculé = base + levelUps[key]
 export function inlineEditStat(charId, statKey, el) {
   const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
-  const cur = parseInt((c?.stats||{})[statKey]) || 8;
+  const lvlUp = parseInt((c?.statsLevelUps||{})[statKey]) || 0;
+  const cur = (c?.statsBase||{})[statKey] ?? Math.max(1, (parseInt((c?.stats||{})[statKey])||8) - lvlUp);
   const input = document.createElement('input');
   input.type = 'number';
   input.value = cur;
@@ -129,12 +137,18 @@ export function inlineEditStat(charId, statKey, el) {
     const val = Math.max(1, Math.min(30, parseInt(input.value)||cur));
     const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
     if (!c) { input.replaceWith(el); return; }
-    c.stats = c.stats||{};
-    c.stats[statKey] = val;
-    await updateInCol('characters', charId, {stats: c.stats});
+    c.stats         = c.stats || {};
+    c.statsBase     = c.statsBase || {};
+    c.statsLevelUps = c.statsLevelUps || {};
+    c.statsBase[statKey] = val;
+    c.stats[statKey] = val + (c.statsLevelUps[statKey] || 0);
+    await updateInCol('characters', charId, {
+      stats: c.stats,
+      statsBase: c.statsBase,
+    });
     input.replaceWith(el);
     window.renderCharSheet(c, window._currentCharTab);
-    showNotif('Stat mise à jour !','success');
+    showNotif('Base mise à jour !','success');
   };
   input.addEventListener('blur', save);
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape'){input.replaceWith(el);} });

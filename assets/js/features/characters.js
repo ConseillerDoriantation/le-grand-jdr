@@ -141,6 +141,12 @@ function renderCharSheet(c, keepTab) {
   const pvColor    = pvPct < 25 ? 'var(--crimson, #ff5a7e)' : pvPct < 50 ? 'var(--ember, #ff9544)' : 'var(--emerald, #22c38e)';
   const titres     = c.titres || [];
 
+  // ── Points de niveau à dépenser (badge sidebar + sous-onglet Caracs) ─────
+  const _STATS_KEYS_LVL = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
+  const _lvlEarned = Math.max(0, (c.niveau||1) - 1);
+  const _lvlSpent  = _STATS_KEYS_LVL.reduce((s,k) => s + (parseInt((c.statsLevelUps||{})[k])||0), 0);
+  const lvlPointsRemaining = _lvlEarned - _lvlSpent;
+
   // ── Stats en bloc 2×3 ────────────────────────
   // Ordre : For Dex Int / Con Sag Cha
   const STATS = [
@@ -350,7 +356,13 @@ function renderCharSheet(c, keepTab) {
     <div class="cs-stats-section" id="cs-stats-section">
       <div class="cs-stats-header">
         <span>Caractéristiques</span>
-        ${canEdit?'<span class="cs-hint">clic = modifier</span>':''}
+        ${lvlPointsRemaining > 0 && canEdit
+          ? `<button onclick="showCharTab('carac')"
+              style="background:rgba(232,184,75,.15);border:1px solid rgba(232,184,75,.4);color:var(--gold);font-size:.65rem;padding:2px 9px;border-radius:999px;cursor:pointer;font-weight:700;letter-spacing:.04em"
+              title="Allouer vos points dans l'onglet Caracs">🎯 ${lvlPointsRemaining} pt${lvlPointsRemaining>1?'s':''}</button>`
+          : canEdit
+            ? `<button onclick="showCharTab('carac')" class="cs-hint" style="background:none;border:none;color:var(--text-dim);font-size:.7rem;cursor:pointer;padding:2px 6px;border-radius:6px" title="Voir le détail des caractéristiques">📊 détails</button>`
+            : ''}
       </div>
       <div class="cs-stats-grid">${statsHtml}</div>
     </div>
@@ -392,7 +404,7 @@ function renderCharSheet(c, keepTab) {
         onclick="showCharTab('profil',this)">👤 Présentation</button>
     </nav>
 
-    <!-- Sous-onglets Combat : Équipement · Sorts · Maîtrises -->
+    <!-- Sous-onglets Combat : Équipement · Sorts · Maîtrises · Caracs -->
     <div class="cs-subtab-bar" id="cs-subtabs-combat"
          style="display:${topTab==='combat'?'flex':'none'}">
       <button class="cs-subtab${leafTab==='equipement'?' active':''}" data-subtab="equipement"
@@ -401,6 +413,8 @@ function renderCharSheet(c, keepTab) {
         onclick="showCharTab('sorts',this)">✨ Sorts</button>
       <button class="cs-subtab${leafTab==='maitrises'?' active':''}"  data-subtab="maitrises"
         onclick="showCharTab('maitrises',this)">🎯 Maîtrises</button>
+      <button class="cs-subtab${leafTab==='carac'?' active':''}" data-subtab="carac"
+        onclick="showCharTab('carac',this)">📊 Caracs${lvlPointsRemaining>0?` <span class="cs-subtab-badge">${lvlPointsRemaining}</span>`:''}</button>
     </div>
 
     <!-- Sous-onglets Journal : Notes · Quêtes -->
@@ -425,6 +439,7 @@ function _renderTab(leafTab, c, canEdit) {
   const area = document.getElementById('char-tab-content');
   if (!area) return;
   const renders = {
+    carac:       () => renderCharCarac(c, canEdit),
     equipement:  () => renderCharEquip(c, canEdit),
     sorts:       () => renderCharDeck(c, canEdit),
     maitrises:   () => renderCharMaitrises(c, canEdit),
@@ -435,7 +450,6 @@ function _renderTab(leafTab, c, canEdit) {
     profil:      () => renderCharProfil(c, canEdit),
     // rétro-compat
     combat:      () => renderCharEquip(c, canEdit),
-    carac:       () => renderCharEquip(c, canEdit),
   };
   area.innerHTML = renders[leafTab]?.() || '';
   area.classList.remove('cs-tab-fadein');

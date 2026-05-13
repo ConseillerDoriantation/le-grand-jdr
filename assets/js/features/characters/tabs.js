@@ -10,6 +10,16 @@ import { uploadJpeg } from '../../shared/image-upload.js';
 // ══════════════════════════════════════════════
 // TAB : CARACTÉRISTIQUES
 // ══════════════════════════════════════════════
+const STATS_KEYS = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
+
+// Calcule l'état des points de niveau pour un personnage
+function _computeLevelPoints(c) {
+  const sLvl = c?.statsLevelUps || {};
+  const earned = Math.max(0, (c?.niveau || 1) - 1);
+  const spent  = STATS_KEYS.reduce((sum, k) => sum + (parseInt(sLvl[k]) || 0), 0);
+  return { earned, spent, remaining: earned - spent };
+}
+
 export function renderCharCarac(c, canEdit) {
   const STATS_TAB = [
     {key:'force',label:'Force',abbr:'For'},
@@ -19,111 +29,207 @@ export function renderCharCarac(c, canEdit) {
     {key:'sagesse',label:'Sagesse',abbr:'Sag'},
     {key:'charisme',label:'Charisme',abbr:'Cha'},
   ];
-  const s = c.stats||{force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
-  const sb = c.statsBonus||{};
+  const s     = c.stats || {force:10,dexterite:8,intelligence:8,sagesse:8,constitution:8,charisme:10};
+  const sb    = c.statsBonus    || {};
+  const sBase = c.statsBase     || {};
+  const sLvl  = c.statsLevelUps || {};
+  const isMJ  = STATE.isAdmin;
+  const { earned, spent, remaining } = _computeLevelPoints(c);
 
-  let html = `<div class="cs-section">
+  const bannerCls = remaining > 0 ? 'go' : remaining < 0 ? 'warn' : 'ok';
+  const bannerMsg = remaining > 0
+    ? `🎯 <strong>${remaining}</strong> point${remaining>1?'s':''} de niveau à dépenser`
+    : remaining < 0
+      ? `⚠️ <strong>${Math.abs(remaining)}</strong> point${Math.abs(remaining)>1?'s':''} en trop`
+      : earned === 0
+        ? `✨ Aucun point à dépenser (niveau 1)`
+        : `✅ Tous les points (${spent}/${earned}) alloués`;
+
+  let html = `<div class="cs-caracs-tab">
+  <!-- ── COLONNE PRINCIPALE : caracs ─────────────────────────── -->
+  <div class="cs-section cs-caracs-tab-main">
     <div class="cs-section-title">📊 Caractéristiques
-      ${canEdit?'<span class="cs-hint">cliquer sur la valeur de base pour modifier</span>':''}
+      <span class="cs-hint">Base : MJ · Niveau : joueur</span>
     </div>
-    <div style="display:grid;gap:.5rem">
-      <div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:0 .75rem;color:var(--text-dim);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">
+
+    <!-- Bandeau points -->
+    <div class="cs-lvlpts-banner cs-lvlpts-banner--${bannerCls}">
+      <div class="cs-lvlpts-msg">${bannerMsg}</div>
+      <div class="cs-lvlpts-meta">
+        <span>Niveau ${c.niveau||1}</span>
+        <span>${spent}/${earned} dépensés</span>
+      </div>
+    </div>
+
+    <div class="cs-carac-detail-grid">
+      <div class="cs-carac-detail-head">
         <span>Stat</span>
-        <span style="text-align:center">Base</span>
-        <span style="text-align:center">Équip.</span>
-        <span style="text-align:center">Total</span>
-        <span style="text-align:center">Mod</span>
+        <span title="Définie par le MJ">Base ${isMJ?'✎':'🔒'}</span>
+        <span title="Points alloués via niveaux">Niveau</span>
+        <span>Équip.</span>
+        <span>Total</span>
+        <span>Mod</span>
       </div>`;
 
   STATS_TAB.forEach(st => {
-    const base = s[st.key]||8;
-    const bonus = sb[st.key]||0;
-    const total = base + bonus;
-    const m = getMod(c, st.key);
-    const bonusStr = bonus > 0 ? `+${bonus}` : String(bonus);
-    const modClass = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    html += `<div style="display:grid;grid-template-columns:minmax(120px,1.3fr) repeat(4,minmax(62px,.7fr));gap:.5rem;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:14px;background:var(--bg-elevated)">
-      <div>
-        <div style="font-weight:700;color:var(--text)">${st.label}</div>
-        <div style="font-size:.72rem;color:var(--text-dim)">${st.abbr}</div>
+    const total      = s[st.key] || 8;
+    const lvlUp      = sLvl[st.key] || 0;
+    const base       = sBase[st.key] ?? Math.max(1, total - lvlUp);
+    const equip      = sb[st.key] || 0;
+    const finalTotal = total + equip;
+    const m          = getMod(c, st.key);
+    const equipStr   = equip > 0 ? `+${equip}` : String(equip);
+    const lvlStr     = lvlUp > 0 ? `+${lvlUp}` : '0';
+    const modClass   = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
+    const minusDis   = lvlUp <= 0;
+    const plusDis    = remaining <= 0;
+
+    html += `<div class="cs-carac-detail-row">
+      <div class="cs-carac-name">
+        <span class="cs-carac-name-lbl">${st.label}</span>
+        <span class="cs-carac-name-abbr">${st.abbr}</span>
       </div>
-      <div style="text-align:center">
-        <span class="${canEdit?'cs-editable':''}"
-              ${canEdit?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base"`:''}
-              style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:700;color:var(--text)">
+      <div class="cs-carac-cell">
+        <span class="cs-carac-chip cs-carac-chip--base ${isMJ?'cs-editable':''}"
+              ${isMJ?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base (MJ)"`:''}>
           ${base}
         </span>
       </div>
-      <div style="text-align:center">
-        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:${bonus ? 'rgba(79,140,255,.10)' : 'var(--bg-card)'};font-weight:700;color:${bonus ? '#7fb0ff' : 'var(--text-dim)'}">
-          ${bonusStr}
-        </span>
+      <div class="cs-carac-cell cs-lvl-controls">
+        ${canEdit ? `<button class="cs-lvl-btn cs-lvl-btn--minus" ${minusDis?'disabled':''}
+          onclick="window._allocStatPoint('${c.id}','${st.key}',-1)" title="Retirer un point">−</button>` : ''}
+        <span class="cs-carac-chip cs-carac-chip--lvl${lvlUp>0?' cs-carac-chip--lvl-pos':''}">${lvlStr}</span>
+        ${canEdit ? `<button class="cs-lvl-btn cs-lvl-btn--plus" ${plusDis?'disabled':''}
+          onclick="window._allocStatPoint('${c.id}','${st.key}',1)" title="${plusDis?'Aucun point disponible':'Ajouter un point'}">+</button>` : ''}
       </div>
-      <div style="text-align:center">
-        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);font-weight:800;color:var(--text)">
-          ${total}
-        </span>
+      <div class="cs-carac-cell">
+        <span class="cs-carac-chip${equip?' cs-carac-chip--equip-pos':''}">${equipStr}</span>
       </div>
-      <div style="text-align:center">
-        <span class="cs-carac-detail-mod ${modClass}" style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:.32rem .55rem;border-radius:10px">
-          ${modStr(m)}
-        </span>
+      <div class="cs-carac-cell">
+        <span class="cs-carac-chip cs-carac-chip--total">${finalTotal}</span>
+      </div>
+      <div class="cs-carac-cell">
+        <span class="cs-carac-mod ${modClass}">${modStr(m)}</span>
       </div>
     </div>`;
   });
   html += `</div>
-    <div style="margin-top:.65rem;font-size:.76rem;color:var(--text-dim)">
-      Total = Base + bonus d'équipement. Le modificateur est calculé à partir du total.
+    <div class="cs-carac-footnote">
+      <strong>Total</strong> = Base + Niveau + Équip. — le modificateur tient compte de l'équipement (plafond 22).
+      ${isMJ?' · MJ : clic sur Base pour ajuster.':''}
     </div>
   </div>`;
 
-  html += `<div class="cs-section">
-    <div class="cs-section-title">⚙️ Base PV & PM
-      ${canEdit?'<span class="cs-hint">cliquer pour modifier — les max sont recalculés</span>':''}
-    </div>
-    <div class="cs-base-grid">
-      <div class="cs-base-card">
-        <div class="cs-base-label">PV Base (niv.1)</div>
-        <div class="cs-base-val ${canEdit?'cs-editable':''}"
-             ${canEdit?`onclick="inlineEditNum('${c.id}','pvBase',this,1,999)" title="Cliquer pour modifier"`:''}>
-          ${c.pvBase||10}
-        </div>
-        <div class="cs-base-formula">PV max actuel : ${calcPVMax(c)}</div>
-        <div class="cs-base-sub">PV max = Base + Mod(Co) × (Niv−1)</div>
-      </div>
-      <div class="cs-base-card">
-        <div class="cs-base-label">PM Base (niv.1)</div>
-        <div class="cs-base-val ${canEdit?'cs-editable':''}"
-             ${canEdit?`onclick="inlineEditNum('${c.id}','pmBase',this,1,999)" title="Cliquer pour modifier"`:''}>
-          ${c.pmBase||10}
-        </div>
-        <div class="cs-base-formula">PM max actuel : ${calcPMMax(c)}</div>
-        <div class="cs-base-sub">PM max = Base + Mod(Sa) × (Niv−1)</div>
-      </div>
-      <div class="cs-base-card">
-        <div class="cs-base-label">Palier XP suivant</div>
-        <div class="cs-base-val ${canEdit?'cs-editable':''}"
-             ${canEdit?`onclick="inlineEditNum('${c.id}','palier',this,1,99999)" title="Cliquer pour modifier"`:''}>
-          ${c.palier||100}
-        </div>
-        <div class="cs-base-sub">
-          XP actuel : <span id="cs-xp-val-${c.id}">${c.exp||0}</span>
-          ${canEdit ? `
-          <span class="cs-xp-add-wrap">
-            +<input id="cs-xp-delta-${c.id}" class="cs-xp-delta-input" type="number" min="0" placeholder="XP" title="XP à ajouter">
-            <button class="cs-xp-add-btn" onclick="window._csAddXp('${c.id}')">Ajouter</button>
-          </span>` : ''}
-        </div>
-      </div>
-    </div>
-  </div>`;
+  // ── Vitalité (PV / PM) avec formule décomposée ─────────────────────────────
+  const niv     = c.niveau || 1;
+  const lvlGain = Math.max(0, niv - 1);
+  const modCo   = getMod(c, 'constitution');
+  const modSa   = getMod(c, 'sagesse');
+  const pvBase  = c.pvBase || 10;
+  const pmBase  = c.pmBase || 10;
+  const pvMaxV  = calcPVMax(c);
+  const pmMaxV  = calcPMMax(c);
+  const pvProg  = modCo > 0 ? Math.floor(modCo * lvlGain) : modCo;
+  const pmProg  = modSa > 0 ? Math.floor(modSa * lvlGain) : modSa;
 
-  if (c.setBonusActif) {
-    html += `<div class="cs-section">
-      <div class="cs-section-title">✨ Bonus de Set</div>
-      <div style="font-size:0.85rem;color:var(--text-muted);font-style:italic">${c.setBonusActif}</div>
+  // Carte vitale (PV ou PM)
+  const _vitalCard = ({cls, icon, title, base, baseField, mod, modLbl, prog, max, helpPos, helpNeg}) => {
+    const isPositive = mod > 0;
+    return `<div class="cs-vital-card cs-vital-card--${cls}">
+      <div class="cs-vital-card-hdr">
+        <span class="cs-vital-card-title">${icon} ${title}</span>
+        <span class="cs-vital-card-total">${max}</span>
+      </div>
+      <div class="cs-vital-formula">
+        <span class="cs-vital-part ${canEdit?'cs-vital-part--edit':''}"
+              ${canEdit?`onclick="inlineEditNum('${c.id}','${baseField}',this,1,999)" title="Modifier la base (niv. 1)"`:''}>
+          <span class="cs-vital-part-lbl">Base</span>
+          <span class="cs-vital-part-val">${base}</span>
+        </span>
+        <span class="cs-vital-op">+</span>
+        ${isPositive
+          ? `<span class="cs-vital-part">
+              <span class="cs-vital-part-lbl">${modLbl}</span>
+              <span class="cs-vital-part-val">${mod>0?`+${mod}`:mod}</span>
+            </span>
+            <span class="cs-vital-op">×</span>
+            <span class="cs-vital-part">
+              <span class="cs-vital-part-lbl">Niveaux</span>
+              <span class="cs-vital-part-val">${lvlGain}</span>
+            </span>
+            <span class="cs-vital-op">=</span>
+            <span class="cs-vital-part cs-vital-part--prog">
+              <span class="cs-vital-part-lbl">Progression</span>
+              <span class="cs-vital-part-val">${prog>0?`+${prog}`:prog}</span>
+            </span>`
+          : `<span class="cs-vital-part cs-vital-part--neg" title="Malus appliqué une seule fois, pas par niveau">
+              <span class="cs-vital-part-lbl">${modLbl}</span>
+              <span class="cs-vital-part-val">${prog}</span>
+            </span>`}
+        <span class="cs-vital-eq">=</span>
+        <span class="cs-vital-total">${max}</span>
+      </div>
+      <div class="cs-vital-help">
+        ${isPositive ? helpPos.replace('{mod}', `+${mod}`).replace('{niv}', lvlGain) : helpNeg.replace('{mod}', mod)}
+      </div>
     </div>`;
-  }
+  };
+
+  html += `<div class="cs-section cs-caracs-tab-side">
+    <div class="cs-section-title">❤️ Vitalité
+      <span class="cs-hint">${canEdit?'clic sur Base pour modifier':''}</span>
+    </div>
+    <div class="cs-vitals-cards">
+      ${_vitalCard({
+        cls:'pv', icon:'❤️', title:'Points de Vie',
+        base:pvBase, baseField:'pvBase',
+        mod:modCo, modLbl:'Mod. Con', prog:pvProg, max:pvMaxV,
+        helpPos:'Tu gagnes {mod} PV par niveau au-delà du 1er ({niv} niveaux gagnés).',
+        helpNeg:'Malus de Constitution ({mod}) appliqué une seule fois, pas par niveau.',
+      })}
+      ${_vitalCard({
+        cls:'pm', icon:'🔵', title:'Points de Magie',
+        base:pmBase, baseField:'pmBase',
+        mod:modSa, modLbl:'Mod. Sag', prog:pmProg, max:pmMaxV,
+        helpPos:'Tu gagnes {mod} PM par niveau au-delà du 1er ({niv} niveaux gagnés).',
+        helpNeg:'Malus de Sagesse ({mod}) appliqué une seule fois, pas par niveau.',
+      })}
+    </div>
+
+    <!-- XP -->
+    ${(() => {
+      const xpCur = c.exp || 0;
+      const xpPal = calcPalier(niv);
+      const xpPct = Math.min(100, Math.max(0, xpPal > 0 ? Math.round((xpCur / xpPal) * 100) : 0));
+      return `<div class="cs-xp-card">
+        <div class="cs-xp-card-hdr">
+          <span class="cs-vital-card-title">⭐ Expérience</span>
+          <span class="cs-vital-card-total">${xpCur} / ${xpPal}</span>
+        </div>
+        <div class="cs-xp-card-progress" title="${xpPct}% du palier">
+          <div class="cs-xp-card-progress-fill" style="width:${xpPct}%"></div>
+        </div>
+        <div class="cs-xp-card-info">
+          <span>${xpPct}% du palier</span>
+          <span>→ Niveau <strong>${niv+1}</strong> à ${xpPal} XP</span>
+        </div>
+        ${canEdit ? `<div class="cs-xp-card-add">
+          <label>+ Gagner de l'XP</label>
+          <div class="cs-xp-card-add-row">
+            <input id="cs-xp-delta-${c.id}" class="cs-xp-delta-input" type="number" min="0" placeholder="XP" title="XP à ajouter">
+            <button class="cs-xp-add-btn" onclick="window._csAddXp('${c.id}')">Ajouter</button>
+          </div>
+        </div>` : ''}
+      </div>`;
+    })()}
+
+    ${c.setBonusActif ? `<div class="cs-set-bonus-box">
+      <div class="cs-set-bonus-title">✨ Bonus de Set actif</div>
+      <div class="cs-set-bonus-text">${c.setBonusActif}</div>
+    </div>` : ''}
+  </div>
+
+</div>`; // /cs-caracs-tab
   return html;
 }
 
@@ -616,6 +722,49 @@ export function previewXpBar(input, palier) {
   if (bar) bar.style.width = p + '%';
   if (pct) pct.textContent = p + '%';
 }
+
+// ── Allocation d'un point de niveau sur une caractéristique ──────────────────
+window._allocStatPoint = async (charId, key, delta) => {
+  try {
+    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    if (!c) return;
+    c.stats         = c.stats || {};
+    c.statsBase     = c.statsBase || {};
+    c.statsLevelUps = c.statsLevelUps || {};
+
+    // Migration douce : snapshot de la base lors de la 1re interaction
+    if (c.statsBase[key] === undefined) {
+      c.statsBase[key] = Math.max(1, (c.stats[key] || 8) - (c.statsLevelUps[key] || 0));
+    }
+
+    const curLvl = c.statsLevelUps[key] || 0;
+    const newLvl = curLvl + delta;
+    if (newLvl < 0) return;
+
+    // Garde-fou : ne pas dépasser les points gagnés
+    if (delta > 0) {
+      const { remaining } = _computeLevelPoints(c);
+      if (remaining <= 0) {
+        showNotif('Aucun point de niveau disponible.', 'error');
+        return;
+      }
+    }
+
+    c.statsLevelUps[key] = newLvl;
+    c.stats[key] = (c.statsBase[key] || 8) + newLvl;
+
+    await updateInCol('characters', charId, {
+      stats:         c.stats,
+      statsBase:     c.statsBase,
+      statsLevelUps: c.statsLevelUps,
+    });
+
+    window.renderCharSheet(c, window._currentCharTab);
+  } catch (e) { notifySaveError(e); }
+};
+
+// Expose le helper pour la sidebar
+window._csLevelPoints = _computeLevelPoints;
 
 window._csAddXp = async (charId) => {
   const input = document.getElementById(`cs-xp-delta-${charId}`);
