@@ -24,8 +24,8 @@ export function renderCharCarac(c, canEdit) {
   const STATS_TAB = [
     {key:'force',label:'Force',abbr:'For'},
     {key:'dexterite',label:'Dextérité',abbr:'Dex'},
-    {key:'constitution',label:'Constitution',abbr:'Co'},
     {key:'intelligence',label:'Intelligence',abbr:'Int'},
+    {key:'constitution',label:'Constitution',abbr:'Co'},
     {key:'sagesse',label:'Sagesse',abbr:'Sag'},
     {key:'charisme',label:'Charisme',abbr:'Cha'},
   ];
