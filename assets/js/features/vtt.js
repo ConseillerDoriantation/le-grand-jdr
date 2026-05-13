@@ -18,6 +18,10 @@ import { getArmorSetData } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
 import { showNotif } from '../shared/notifications.js';
+import {
+  fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
+  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
+} from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { _esc } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
@@ -469,12 +473,17 @@ function _initCanvas(container) {
   _layers.map   = _asLayer(new K.Group({ listening: false }), backLayer);
   _layers.grid  = new K.Layer({ listening: true });
   _layers.draw  = new K.Layer();                     // annotations (entre grille et tokens)
+  _layers.walls = new K.Layer({ listening: true });  // murs/portes/fenêtres/lumières
   _layers.token = new K.Layer();
+  _layers.fog   = new K.Layer({ listening: false }); // masque de brouillard
   _layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
   _layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
   backLayer.add(_layers.bg, _layers.map);
   frontLayer.add(_layers.mapFg, _layers.ping);
-  _stage.add(backLayer, _layers.grid, _layers.draw, _layers.token, frontLayer);
+  // fog AVANT walls : les murs/portes/lumières restent toujours lisibles au-dessus du brouillard
+  _stage.add(backLayer, _layers.grid, _layers.draw, _layers.token, _layers.fog, _layers.walls, frontLayer);
+  fogInit(_stage, _layers, CELL);
+  fogSetPgRef(id => _pgRef(id));
 
   // Transformers pour redimensionner les images (MJ uniquement)
   if (STATE.isAdmin) {
@@ -595,6 +604,7 @@ function _initCanvas(container) {
   });
 
   _stage.on('mousedown', e => {
+    if (fogIsEditMode()) return; // éditeur de murs gère ses propres events
     if (e.evt.button===2) {
       e.evt.preventDefault();
       // Pan caméra au clic droit UNIQUEMENT sur stage vide.
@@ -953,10 +963,19 @@ function _buildShape(t) {
           }
         }
       }
+      // Blocage par les murs (joueurs seulement)
+      if (!STATE.isAdmin && (_activePage?.walls||[]).length) {
+        const cur=_tokens[t.id]?.data;
+        if (cur && fogWallBlocksPath(cur.col, cur.row, c, r, _activePage.walls)) {
+          showNotif('🧱 Chemin bloqué !', 'error');
+          g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); _layers.token.batchDraw(); return;
+        }
+      }
       g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); _layers.token.batchDraw();
       const patch={col:c,row:r};
       if (!STATE.isAdmin&&_session?.combat?.active) patch.movedThisTurn=true;
       await updateDoc(_tokRef(t.id),patch).catch(()=>showNotif('Erreur déplacement','error'));
+      fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
     });
   }
 
@@ -1296,10 +1315,18 @@ function _showAttackRange(t) {
   }
   _layers.grid.batchDraw();
 }
-async function _moveTo(id,col,row) {
-  const patch={col,row};
-  if (!STATE.isAdmin&&_session?.combat?.active) patch.movedThisTurn=true;
-  await updateDoc(_tokRef(id),patch).catch(()=>showNotif('Déplacement refusé','error'));
+async function _moveTo(id, col, row) {
+  // Blocage par les murs (joueurs seulement, même logique que le drag)
+  if (!STATE.isAdmin && (_activePage?.walls||[]).length) {
+    const cur = _tokens[id]?.data;
+    if (cur && fogWallBlocksPath(cur.col, cur.row, col, row, _activePage.walls)) {
+      showNotif('🧱 Chemin bloqué !', 'error');
+      return;
+    }
+  }
+  const patch = {col, row};
+  if (!STATE.isAdmin && _session?.combat?.active) patch.movedThisTurn = true;
+  await updateDoc(_tokRef(id), patch).catch(() => showNotif('Déplacement refusé', 'error'));
   _clearHL();
 }
 
@@ -3260,6 +3287,8 @@ async function _switchPage(pageId) {
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
   _layers.token?.destroyChildren(); _clearHL();
   _drawGrid(); _renderMapImages(); _renderAllTokens(); _renderAnnotLayer();
+  fogRenderWalls(page, STATE.isAdmin);
+  fogUpdateSoon(page, _tokens, STATE.isAdmin);
   _renderPageTabs(); _renderTray(); _deselect();
   // Le MJ navigue librement — les joueurs ne suivent que via 📡 Envoyer
 }
@@ -3644,7 +3673,12 @@ function _initListeners() {
       if (ch.type==='removed') delete _pages[ch.doc.id];
       else {
         _pages[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
-        if (_activePage?.id===ch.doc.id) { _activePage=_pages[ch.doc.id]; _renderMapImages(); }
+        if (_activePage?.id===ch.doc.id) {
+          _activePage=_pages[ch.doc.id];
+          _renderMapImages();
+          fogRenderWalls(_activePage, STATE.isAdmin);
+          fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
+        }
       }
     });
     _renderPageTabs();
@@ -3767,6 +3801,9 @@ function _initListeners() {
     });
     _renderTraySoon();
     _toksReady=true; _maybeSyncAutoTokens();
+    // Recalcul fog si un token joueur a bougé
+    if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player'))
+      fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
   },()=>{}));
 
   // 7. Annotations (dessins + formes)
@@ -4873,6 +4910,12 @@ function _renderCombatBadge() {
 // ACTIONS GLOBALES
 // ═══════════════════════════════════════════════════════════════════
 window._vttTool       = t => _setTool(_tool === t ? 'select' : t);
+window._vttFogTool    = t => fogSetEditTool(t, _activePage);
+window._vttToggleFog  = async () => {
+  if (!_activePage) return;
+  const next = !_activePage.fogEnabled;
+  await updateDoc(_pgRef(_activePage.id), { fogEnabled: next }).catch(() => showNotif('Erreur fog','error'));
+};
 window._vttSwitchPage = id => _switchPage(id);
 
 // ── Outils de dessin ────────────────────────────────────────────────
@@ -4942,6 +4985,12 @@ window._vttEditPage = id => {
         <div class="form-group"><label>Lignes</label>
           <input id="vpe-rows" type="number" value="${p.rows||18}" min="8" max="200"></div>
       </div>
+      <div class="form-group" style="margin-top:.5rem">
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" id="vpe-fog" ${p.fogEnabled?'checked':''}>
+          <span>👁 Éclairage dynamique (brouillard de guerre)</span>
+        </label>
+      </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
         <button class="btn-primary" onclick="window._vttConfirmEditPage('${id}')">Enregistrer</button>
@@ -4953,9 +5002,10 @@ window._vttConfirmEditPage = async id => {
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-rows')?.value)||18));
   if (!name) { showNotif('Nom requis','error'); return; }
+  const fogEnabled = document.getElementById('vpe-fog')?.checked ?? false;
   closeModalDirect();
-  await updateDoc(_pgRef(id),{name,cols,rows}).catch(()=>showNotif('Erreur','error'));
-  if (_activePage?.id===id) { _activePage={..._activePage,name,cols,rows}; _drawGrid(); }
+  await updateDoc(_pgRef(id),{name,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
+  if (_activePage?.id===id) { _activePage={..._activePage,name,cols,rows,fogEnabled}; _drawGrid(); }
 };
 
 window._vttDeletePage = async id => {
@@ -5345,9 +5395,16 @@ function _setTool(tool) {
   // Draw bar
   const drawBar = document.getElementById('vtt-draw-bar');
   if (drawBar) drawBar.style.display = tool === 'draw' ? 'flex' : 'none';
+  // Walls bar
+  const wallsBar = document.getElementById('vtt-walls-bar');
+  if (wallsBar) wallsBar.style.display = tool === 'walls' ? 'flex' : 'none';
   // Curseur
   const wrap = document.getElementById('vtt-canvas-wrap');
-  if (wrap) wrap.style.cursor = (tool === 'ruler' || tool === 'draw') ? 'crosshair' : '';
+  if (wrap) wrap.style.cursor = (tool === 'ruler' || tool === 'draw' || tool === 'walls') ? 'crosshair' : '';
+  // Éditeur de murs
+  fogToggleEditMode(tool === 'walls', _activePage);
+  if (tool === 'walls') fogRenderWalls(_activePage, true);
+  else if (_activePage) fogRenderWalls(_activePage, STATE.isAdmin); // quitter édition → redraw normal
   // Règle : effacer si on quitte
   if (tool !== 'ruler') _clearRuler();
   // Désélection annotation si on quitte le mode select
@@ -6449,9 +6506,24 @@ function _buildHtml() {
         <button class="vtt-btn-sm" onclick="window._vttSetImgbbKey()" title="Configurer la clé API ImgBB">🔑</button>
         <div class="vtt-tb-sep"></div>
         <button class="vtt-btn-sm" onclick="window._vttToggleCombat()" title="Démarrer/arrêter le combat">⚔ Combat</button>
-        <button class="vtt-btn-sm" onclick="window._vttNextRound()"    title="Tour suivant">▶ Tour</button>`:''}
+        <button class="vtt-btn-sm" onclick="window._vttNextRound()"    title="Tour suivant">▶ Tour</button>
+        <div class="vtt-tb-sep"></div>
+        <button class="vtt-tool vtt-btn-sm" data-tool="walls" onclick="window._vttTool('walls')" title="Éditeur murs, portes, fenêtres et sources lumineuses">🧱 Murs</button>`:''}
     </div>
   </div>
+  ${mj?`
+  <div id="vtt-walls-bar" style="display:none;align-items:center;gap:.35rem;padding:.25rem .6rem;background:#12121f;border-bottom:1px solid #2a2d3e;flex-wrap:wrap">
+    <span style="font-size:.7rem;color:#6b7280;margin-right:.2rem">Outil :</span>
+    <button class="vtt-btn-sm active" data-fog-tool="wall"   onclick="window._vttFogTool('wall')"   title="Tracer un mur">🧱 Mur</button>
+    <button class="vtt-btn-sm"        data-fog-tool="door"   onclick="window._vttFogTool('door')"   title="Tracer une porte">🚪 Porte</button>
+    <button class="vtt-btn-sm"        data-fog-tool="window" onclick="window._vttFogTool('window')" title="Tracer une fenêtre">🪟 Fenêtre</button>
+    <button class="vtt-btn-sm"        data-fog-tool="light"  onclick="window._vttFogTool('light')"  title="Placer une source lumineuse">💡 Lumière</button>
+    <button class="vtt-btn-sm"        data-fog-tool="eraser" onclick="window._vttFogTool('eraser')" title="Effacer (clic sur segment ou source)">🗑 Effacer</button>
+    <div class="vtt-tb-sep"></div>
+    <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver le brouillard de guerre sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
+    <span style="font-size:.68rem;color:#4b5563;margin-left:.4rem">Clic sur la grille pour tracer · Clic-droit pour annuler · Clic segment = sélectionner → menu</span>
+  </div>`:''}
+
   <div class="vtt-body">
     <div class="vtt-presence-col" id="vtt-presence-col">
       <div class="vtt-pres-hd" title="Joueurs en ligne">👥</div>
