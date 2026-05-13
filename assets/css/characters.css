@@ -3115,6 +3115,358 @@ input[type=number].input-field::-webkit-outer-spin-button {
 }
 
 /* ══════════════════════════════════════════════
+   ONGLET CARACS — Layout principal
+══════════════════════════════════════════════ */
+.cs-caracs-tab {
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: 1fr;
+}
+/* Sur écran large, 2 colonnes : table à gauche, vitalité à droite */
+@media (min-width: 1280px) {
+  .cs-caracs-tab {
+    grid-template-columns: minmax(0, 1.55fr) minmax(360px, 1fr);
+    align-items: start;
+  }
+}
+.cs-caracs-tab-main,
+.cs-caracs-tab-side { margin: 0; }
+
+/* Badge ronde sur sous-onglet (points à dépenser) */
+.cs-subtab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 0.35rem;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  background: rgba(232,184,75,0.20);
+  border: 1px solid rgba(232,184,75,0.45);
+  color: var(--gold);
+  font-size: 0.62rem; font-weight: 800;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Bandeau "points à dépenser" ─────────────── */
+.cs-lvlpts-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+  padding: 0.9rem 1.1rem; margin-bottom: 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+}
+.cs-lvlpts-banner--go { background: rgba(232,184,75,0.10); border-color: rgba(232,184,75,0.35); }
+.cs-lvlpts-banner--ok { background: rgba(34,195,142,0.08); border-color: rgba(34,195,142,0.25); }
+.cs-lvlpts-banner--warn { background: rgba(255,107,107,0.10); border-color: rgba(255,107,107,0.35); }
+.cs-lvlpts-msg { font-size: 0.95rem; line-height: 1.3; }
+.cs-lvlpts-banner--go .cs-lvlpts-msg { color: var(--gold); }
+.cs-lvlpts-banner--ok .cs-lvlpts-msg { color: #22c38e; }
+.cs-lvlpts-banner--warn .cs-lvlpts-msg { color: #ff6b6b; }
+.cs-lvlpts-meta {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0.1rem;
+  font-size: 0.72rem; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* ── Tableau Caracs ───────────────────────────── */
+.cs-carac-detail-grid { display: grid; gap: 0.5rem; }
+
+.cs-carac-detail-head,
+.cs-carac-detail-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1.3fr) repeat(5, minmax(64px, 1fr));
+  gap: 0.55rem;
+  align-items: center;
+}
+.cs-carac-detail-head {
+  padding: 0 0.85rem 0.2rem;
+  color: var(--text-dim);
+  font-size: 0.66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.10em;
+}
+.cs-carac-detail-head > span { text-align: center; }
+.cs-carac-detail-head > span:first-child { text-align: left; }
+
+.cs-carac-detail-row {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  transition: border-color 0.15s;
+}
+.cs-carac-detail-row:hover { border-color: rgba(232,184,75,0.18); }
+
+.cs-carac-name { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
+.cs-carac-name-lbl { font-weight: 700; color: var(--text); font-size: 0.88rem; }
+.cs-carac-name-abbr { font-size: 0.66rem; color: var(--text-dim); letter-spacing: 0.05em; }
+
+.cs-carac-cell { display: flex; align-items: center; justify-content: center; }
+
+.cs-carac-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; padding: 0.32rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-weight: 700; font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: all 0.12s;
+}
+.cs-carac-chip--base.cs-editable { cursor: pointer; }
+.cs-carac-chip--base.cs-editable:hover {
+  border-color: rgba(232,184,75,0.45);
+  background: rgba(232,184,75,0.08);
+  color: var(--gold);
+}
+.cs-carac-chip--lvl { min-width: 42px; color: var(--text-dim); }
+.cs-carac-chip--lvl-pos {
+  background: rgba(232,184,75,0.12);
+  border-color: rgba(232,184,75,0.35);
+  color: var(--gold);
+}
+.cs-carac-chip--equip-pos {
+  background: rgba(79,140,255,0.10);
+  border-color: rgba(79,140,255,0.30);
+  color: #7fb0ff;
+}
+.cs-carac-chip--total { font-weight: 800; font-size: 0.95rem; }
+
+.cs-lvl-controls { gap: 0.3rem; }
+.cs-lvl-btn {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700; font-size: 1.05rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s;
+  padding: 0;
+}
+.cs-lvl-btn:hover:not(:disabled) {
+  border-color: rgba(232,184,75,0.4);
+  background: rgba(232,184,75,0.10);
+  color: var(--gold);
+}
+.cs-lvl-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+.cs-lvl-btn--plus:not(:disabled) {
+  background: rgba(232,184,75,0.10);
+  border-color: rgba(232,184,75,0.35);
+  color: var(--gold);
+}
+.cs-lvl-btn--plus:not(:disabled):hover { background: rgba(232,184,75,0.20); }
+
+.cs-carac-mod {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; padding: 0.32rem 0.5rem;
+  border-radius: 10px;
+  font-weight: 800; font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border);
+}
+.cs-carac-mod.pos { background: rgba(34,195,142,0.10); border-color: rgba(34,195,142,0.30); color: #22c38e; }
+.cs-carac-mod.neg { background: rgba(255,107,107,0.10); border-color: rgba(255,107,107,0.30); color: #ff6b6b; }
+.cs-carac-mod.zero { background: var(--bg-card); color: var(--text-dim); }
+
+.cs-carac-footnote {
+  margin-top: 0.7rem;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* ── Cartes de vitalité (PV / PM / XP) avec formule visuelle ─── */
+.cs-vitals-cards { display: grid; gap: 0.8rem; }
+
+.cs-vital-card,
+.cs-xp-card {
+  padding: 1rem 1.1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: grid; gap: 0.7rem;
+}
+.cs-vital-card--pv { border-left: 3px solid #ff6b6b; }
+.cs-vital-card--pm { border-left: 3px solid #4f8cff; }
+.cs-xp-card { border-left: 3px solid var(--gold); }
+
+.cs-vital-card-hdr,
+.cs-xp-card-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem;
+}
+.cs-vital-card-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.82rem; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text);
+}
+.cs-vital-card-total {
+  font-family: 'Cinzel', serif;
+  font-size: 1.4rem; font-weight: 800;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.cs-vital-formula {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem;
+}
+.cs-vital-part {
+  display: inline-flex; flex-direction: column; align-items: center;
+  padding: 0.3rem 0.55rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  line-height: 1.1;
+  min-width: 48px;
+}
+.cs-vital-part--edit { cursor: pointer; transition: all 0.12s; }
+.cs-vital-part--edit:hover {
+  border-color: rgba(232,184,75,0.45);
+  background: rgba(232,184,75,0.08);
+}
+.cs-vital-part--prog {
+  background: rgba(34,195,142,0.08);
+  border-color: rgba(34,195,142,0.25);
+}
+.cs-vital-part--prog .cs-vital-part-val { color: #22c38e; }
+.cs-vital-part--neg {
+  background: rgba(255,107,107,0.08);
+  border-color: rgba(255,107,107,0.25);
+}
+.cs-vital-part--neg .cs-vital-part-val { color: #ff6b6b; }
+.cs-vital-part-lbl {
+  font-size: 0.58rem; font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 0.12rem;
+}
+.cs-vital-part-val {
+  font-weight: 700; font-size: 0.95rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.cs-vital-op {
+  color: var(--text-dim);
+  font-weight: 700; font-size: 0.95rem;
+}
+.cs-vital-eq {
+  color: var(--gold);
+  font-weight: 800; font-size: 1.1rem;
+  margin: 0 0.1rem;
+}
+.cs-vital-total {
+  padding: 0.32rem 0.7rem;
+  background: rgba(232,184,75,0.12);
+  border: 1px solid rgba(232,184,75,0.4);
+  border-radius: 8px;
+  font-family: 'Cinzel', serif;
+  font-size: 1rem; font-weight: 800;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.cs-vital-help {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-style: italic;
+  line-height: 1.4;
+  padding-top: 0.45rem;
+  border-top: 1px dashed var(--border);
+}
+
+/* ── Carte XP ─────────────────────────────────── */
+.cs-xp-card-progress {
+  height: 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.cs-xp-card-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold, #e8b84b), #ff9544);
+  border-radius: 999px;
+  transition: width 0.6s ease;
+  box-shadow: 0 0 8px rgba(232,184,75,0.35);
+}
+.cs-xp-card-info {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; flex-wrap: wrap;
+  font-size: 0.78rem; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.cs-xp-card-info strong { color: var(--gold); }
+.cs-xp-card-add label {
+  font-size: 0.65rem; font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  display: block; margin-bottom: 0.3rem;
+}
+.cs-xp-card-add-row { display: flex; gap: 0.4rem; align-items: center; }
+.cs-xp-card-add-row .cs-xp-delta-input {
+  flex: 1; padding: 0.4rem 0.6rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text); font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  outline: none; transition: border-color 0.15s;
+  -moz-appearance: textfield;
+}
+.cs-xp-card-add-row .cs-xp-delta-input::-webkit-outer-spin-button,
+.cs-xp-card-add-row .cs-xp-delta-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cs-xp-card-add-row .cs-xp-delta-input:focus { border-color: var(--gold); }
+.cs-xp-card-add-row .cs-xp-add-btn {
+  padding: 0.4rem 0.85rem;
+  background: rgba(232,184,75,0.15);
+  border: 1px solid rgba(232,184,75,0.4);
+  border-radius: 8px;
+  color: var(--gold); font-weight: 700; font-size: 0.78rem;
+  cursor: pointer; transition: all 0.12s;
+}
+.cs-xp-card-add-row .cs-xp-add-btn:hover {
+  background: rgba(232,184,75,0.25);
+}
+
+/* ── Bonus de set ─────────────────────────────── */
+.cs-set-bonus-box {
+  padding: 0.85rem 1rem;
+  background: rgba(232,184,75,0.06);
+  border: 1px solid rgba(232,184,75,0.25);
+  border-radius: 12px;
+}
+.cs-set-bonus-title {
+  font-size: 0.7rem; font-weight: 700;
+  color: var(--gold);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 0.35rem;
+}
+.cs-set-bonus-text {
+  font-size: 0.85rem; color: var(--text-muted);
+  font-style: italic; line-height: 1.5;
+}
+
+/* Mobile : tableau plus compact */
+@media (max-width: 720px) {
+  .cs-carac-detail-head,
+  .cs-carac-detail-row {
+    grid-template-columns: minmax(70px, 1fr) repeat(5, minmax(46px, 0.85fr));
+    gap: 0.25rem;
+    padding-left: 0.5rem; padding-right: 0.5rem;
+  }
+  .cs-carac-name-lbl { font-size: 0.78rem; }
+  .cs-carac-chip, .cs-carac-mod { min-width: 38px; font-size: 0.82rem; padding: 0.28rem 0.35rem; }
+  .cs-lvl-btn { width: 24px; height: 24px; font-size: 0.95rem; }
+  .cs-lvl-controls { gap: 0.18rem; }
+  .cs-vital-formula { gap: 0.3rem; }
+  .cs-vital-part { min-width: 42px; padding: 0.25rem 0.4rem; }
+}
+
+/* ══════════════════════════════════════════════
    RESPONSIVE — mobile (empilé)
 ══════════════════════════════════════════════ */
 @media (max-width: 860px) {
@@ -3136,6 +3488,44 @@ input[type=number].input-field::-webkit-outer-spin-button {
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   }
   .cs-srow { grid-template-columns: 32px 32px 38px 1fr; }
+}
+
+/* ══════════════════════════════════════════════
+   RESPONSIVE — grand écran (≥1500px)
+══════════════════════════════════════════════ */
+@media (min-width: 1500px) {
+  .cs-sidebar { width: 340px; min-width: 340px; }
+  .cs-caracs-tab { gap: 1.6rem; }
+  .cs-carac-detail-row { padding: 0.85rem 1.1rem; }
+  .cs-carac-name-lbl { font-size: 0.95rem; }
+  .cs-carac-chip, .cs-carac-mod { min-width: 52px; padding: 0.4rem 0.6rem; font-size: 0.95rem; }
+  .cs-carac-chip--total { font-size: 1.05rem; }
+  .cs-lvl-btn { width: 30px; height: 30px; font-size: 1.15rem; }
+  .cs-lvl-controls { gap: 0.4rem; }
+  .cs-vital-card, .cs-xp-card { padding: 1.2rem 1.3rem; gap: 0.85rem; }
+  .cs-vital-card-title { font-size: 0.9rem; }
+  .cs-vital-card-total { font-size: 1.8rem; }
+  .cs-vital-part { min-width: 56px; padding: 0.4rem 0.6rem; }
+  .cs-vital-part-val { font-size: 1.05rem; }
+  .cs-vital-part-lbl { font-size: 0.62rem; }
+  .cs-vital-total { font-size: 1.15rem; padding: 0.4rem 0.85rem; }
+  .cs-vital-help { font-size: 0.78rem; }
+  .cs-lvlpts-banner { padding: 1.1rem 1.3rem; }
+  .cs-lvlpts-msg { font-size: 1.05rem; }
+}
+
+@media (min-width: 1700px) {
+  .cs-caracs-tab { grid-template-columns: minmax(0, 1.6fr) minmax(420px, 1fr); }
+}
+
+@media (min-width: 1900px) {
+  .cs-sidebar { width: 360px; min-width: 360px; padding: 28px 22px; }
+  .cs-caracs-tab { grid-template-columns: minmax(0, 1.55fr) minmax(460px, 1fr); gap: 1.8rem; }
+  .cs-carac-detail-head, .cs-carac-detail-row {
+    grid-template-columns: minmax(140px, 1.4fr) repeat(5, minmax(80px, 1fr));
+    gap: 0.7rem;
+  }
+  .cs-carac-detail-row { padding: 1rem 1.25rem; }
 }
 
 /* ══════════════════════════════════════════════
