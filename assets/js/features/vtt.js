@@ -2754,6 +2754,7 @@ window._vttRollAttack = async () => {
       let newHp = curHp;
       // Valeur AVANT interaction du profil de la créature (pour log "10 → 5").
       let dmgPre = dmgTotal;
+      let dmgReduction = 0;
       if (hit || halfDmg) {
         if (curTgtData.type === 'enemy' && curTgtData.beastId) {
           const bEnt    = _bestiary[curTgtData.beastId];
@@ -2770,11 +2771,19 @@ window._vttRollAttack = async () => {
           const newEst  = Math.max(0, Math.min(realMax, prevEst - dmgTotal));
           await updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst });
         } else {
+          // Set Lourd : réduction de 2 dégâts par coup, minimum 1 dégât
+          if (dmgTotal > 0 && curTgtData.characterId) {
+            const tgtChar = STATE.characters.find(x => x.id === curTgtData.characterId);
+            if (tgtChar) {
+              dmgReduction = getArmorSetData(tgtChar).modifiers.damageReduction || 0;
+              if (dmgReduction > 0) dmgTotal = Math.max(1, dmgTotal - dmgReduction);
+            }
+          }
           newHp = Math.max(0, curHp - dmgTotal);
           await _setHp(curTgtData, newHp);
         }
       }
-      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, dmgPre, newHp, hpMax, interaction });
+      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction });
     }
 
     // ── Un seul message dans le log ────────────────────────────────────
@@ -2821,7 +2830,7 @@ window._vttRollAttack = async () => {
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgTotal: r.dmgTotal,
-        dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal,
+        dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         halfDmg: r.halfDmg, newHp: r.newHp, hpMax: r.hpMax,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
@@ -4502,10 +4511,13 @@ function _renderChatLog(msgs) {
         const interBadge = inter
           ? `<span title="${_esc(r.interaction)}" style="display:inline-flex;align-items:center;font-size:.58rem;color:${inter.color};background:${inter.color}1a;border:1px solid ${inter.color}55;padding:0 4px;border-radius:5px;gap:2px;font-weight:600">${inter.icon}<span>${inter.short}</span></span>`
           : '';
+        const setLBadge = r.dmgReduction > 0
+          ? `<span title="Set Lourd −${r.dmgReduction}" style="display:inline-flex;align-items:center;font-size:.58rem;color:#60a5fa;background:#60a5fa1a;border:1px solid #60a5fa55;padding:0 4px;border-radius:5px;gap:2px;font-weight:600">🛡<span>−${r.dmgReduction}</span></span>`
+          : '';
         return `<div style="display:flex;align-items:center;gap:.3rem;padding:.1rem 0">
           <span style="font-size:.72rem;color:${baseCol};font-weight:700;width:.85rem;text-align:center">${hitIcon}</span>
           <span style="font-size:.72rem;flex:1;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(r.name)}</span>
-          ${interBadge}
+          ${interBadge}${setLBadge}
           <span style="font-size:.62rem;color:var(--text-dim)">CA${r.targetCA}</span>
           ${dmgStr ? `<span style="font-size:.75rem;display:inline-flex;align-items:center;gap:1px">${dmgStr}</span>` : ''}
         </div>`;
@@ -4646,7 +4658,8 @@ function _renderChatLog(msgs) {
         const rows = [];
         const totalRows = 1
           + (halfVal != null && halfVal !== fullVal ? 1 : 0)
-          + (interMeta && m.dmgTotal !== interInVal ? 1 : 0);
+          + (interMeta && m.dmgTotal !== interInVal ? 1 : 0)
+          + (m.dmgReduction > 0 ? 1 : 0);
 
         const row = ({ label, op, val, color, isFinal }) => `
           <div style="display:grid;grid-template-columns:1fr auto;align-items:baseline;column-gap:.6rem;
@@ -4671,7 +4684,7 @@ function _renderChatLog(msgs) {
 
         // Ligne 2 — Échec ½ (si applicable)
         if (halfVal != null && halfVal !== fullVal) {
-          const isFinal = !(interMeta && m.dmgTotal !== interInVal);
+          const isFinal = !(interMeta && m.dmgTotal !== interInVal) && !(m.dmgReduction > 0);
           rows.push(row({
             label: 'Échec ½ (arme magique)',
             op:    '✦',
@@ -4693,6 +4706,17 @@ function _renderChatLog(msgs) {
             op:    interMeta.icon,
             val:   fmtN(m.dmgTotal),
             color: dmgColor,
+            isFinal: !(m.dmgReduction > 0),
+          }));
+        }
+
+        // Ligne 4 — Set Lourd : réduction dégâts (si applicable)
+        if (m.dmgReduction > 0) {
+          rows.push(row({
+            label: `Set Lourd −${m.dmgReduction} (min. 1)`,
+            op:    '🛡',
+            val:   fmtN(m.dmgTotal),
+            color: '#60a5fa',
             isFinal: true,
           }));
         }
