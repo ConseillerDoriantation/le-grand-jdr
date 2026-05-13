@@ -169,7 +169,8 @@ service cloud.firestore {
       }
 
       // Tokens : MJ écrit tout.
-      // Un joueur peut déplacer son propre token (col/row/movedThisTurn)
+      // Un joueur peut déplacer son propre token (col/row/movedThisTurn),
+      // l'invoquer / le retirer sur la carte active (pageId/visible),
       // et infliger des dégâts aux ennemis (hp + pvCombatHp pour le suivi de groupe).
       match /vttTokens/{id} {
         allow read: if inAdventure(adventureId);
@@ -177,7 +178,7 @@ service cloud.firestore {
         allow update: if inAdventure(adventureId)
           && request.auth.uid == resource.data.ownerId
           && request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn']);
+               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'pageId', 'visible']);
         allow update: if inAdventure(adventureId)
           && request.resource.data.diff(resource.data)
                .affectedKeys().hasOnly(['hp', 'pvCombatHp']);

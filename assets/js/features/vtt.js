@@ -3055,7 +3055,7 @@ function _renderTraySoon() {
 }
 
 function _renderTray() {
-  if (!STATE.isAdmin) return;
+  if (!STATE.isAdmin) { _renderPageTabs(); return; }
   _renderPageList();
   const el = document.getElementById('vtt-tray-tokens'); if (!el) return;
 
@@ -3250,7 +3250,13 @@ function _renderPageTabs() {
   const el=document.getElementById('vtt-page-tabs'); if (!el) return;
   // Les joueurs ne naviguent pas — ils voient juste le nom de leur page courante
   const name = _activePage?.name ?? '…';
-  el.innerHTML = `<span class="vtt-page-current-label">📍 ${name}</span>`;
+  const uid  = STATE.user?.uid;
+  const myTok = uid ? Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data : null;
+  const canInvoke = !!(myTok && _activePage && myTok.pageId !== _activePage.id);
+  const invokeBtn = canInvoke
+    ? `<button class="vtt-btn-sm" onclick="window._vttInvokeMyToken()" title="Placer ton token sur cette carte">🧑 Invoquer mon token</button>`
+    : '';
+  el.innerHTML = `<span class="vtt-page-current-label">📍 ${_esc(name)}</span>${invokeBtn}`;
 }
 
 async function _switchPage(pageId) {
@@ -4982,6 +4988,16 @@ window._vttRetireToken = async tokenId => {
   await updateDoc(_tokRef(tokenId),{pageId:null,visible:false}).catch(()=>{});
   if (_selected===tokenId) _deselect();
 };
+// Le joueur invoque son propre token sur la carte active
+window._vttInvokeMyToken = async () => {
+  if (!_activePage) { showNotif('Aucune carte active','error'); return; }
+  const uid = STATE.user?.uid; if (!uid) return;
+  const tok = Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data;
+  if (!tok) { showNotif('Aucun token associé à ton personnage','error'); return; }
+  const cC = Math.floor(_activePage.cols/2), cR = Math.floor(_activePage.rows/2);
+  await updateDoc(_tokRef(tok.id),{pageId:_activePage.id,col:cC,row:cR,visible:true})
+    .catch(err => { console.error('[vtt] invocation:', err); showNotif('Erreur invocation','error'); });
+};
 // Déplacer le token vers une autre page
 window._vttMoveTokenToPage = async (tokenId,pageId) => {
   if (!pageId) return;
@@ -5360,9 +5376,35 @@ function _keyHandler(e) {
   if (e.target.matches('input,textarea,select')) return;
   if (e.key==='Escape') { if (_tool !== 'select') _setTool('select'); else _deselect(); }
   if ((e.key==='Delete'||e.key==='Backspace') && _tool==='select') {
+    // 1) Annotations sélectionnées
     if (_selectedAnnotIds.size > 0) {
+      e.preventDefault();
       [..._selectedAnnotIds].forEach(id => deleteDoc(_annotRef(id)).catch(()=>{}));
       _deselectAnnot();
+    }
+    // 2) Image de carte sélectionnée (MJ, mode édition)
+    else if (STATE.isAdmin && _selImg && _mapMode && _activePage) {
+      e.preventDefault();
+      const imgs = (_activePage.backgroundImages ?? []).filter(i => i.id !== _selImg);
+      updateDoc(_pgRef(_activePage.id), { backgroundImages: imgs }).catch(()=>{});
+      _selImg = null;
+      _imgTr?.nodes([]); _imgTrFg?.nodes([]);
+      _layers.map?.batchDraw(); _layers.mapFg?.batchDraw();
+    }
+    // 3) Tokens sélectionnés → retrait du canvas (pageId=null)
+    else {
+      const ids = _selectedMulti.size > 0 ? [..._selectedMulti] : (_selected ? [_selected] : []);
+      if (ids.length) {
+        e.preventDefault();
+        const uid = STATE.user?.uid;
+        for (const id of ids) {
+          const t = _tokens[id]?.data; if (!t) continue;
+          if (STATE.isAdmin || t.ownerId === uid) {
+            updateDoc(_tokRef(id), { pageId: null, visible: false }).catch(()=>{});
+          }
+        }
+        _deselect();
+      }
     }
   }
   // Ctrl+Z : annuler le dernier tracé de la session
