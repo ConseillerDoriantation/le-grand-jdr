@@ -148,6 +148,241 @@ function _renderDamageProfileMini(beast) {
   return `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:.3rem">${parts.join('')}</div>`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ÉDITION INLINE — Panneau admin (auto-save Firestore)
+// ══════════════════════════════════════════════════════════════════════════════
+const _bstPending = {};
+let _bstSaveTimer = null;
+
+function _bstFlushSaves() {
+  const col = window._bstCurrentCol || 'bestiary';
+  const ids = Object.keys(_bstPending);
+  if (!ids.length) return;
+  ids.forEach(id => {
+    const patch = _bstPending[id];
+    delete _bstPending[id];
+    updateInCol(col, id, patch)
+      .then(() => {
+        const idx = _creatures.findIndex(c => c.id === id);
+        if (idx >= 0) Object.assign(_creatures[idx], patch);
+      })
+      .catch(notifySaveError);
+  });
+}
+
+function _bstQueueSave(id, patch) {
+  _bstPending[id] = { ...(_bstPending[id] || {}), ...patch };
+  clearTimeout(_bstSaveTimer);
+  _bstSaveTimer = setTimeout(_bstFlushSaves, 400);
+}
+
+// Auto-save générique (texte / select)
+window._bstUpdate = (id, field, val) => _bstQueueSave(id, { [field]: val });
+window._bstUpdateNum = (id, field, val) => _bstQueueSave(id, { [field]: parseInt(val) || 0 });
+
+// Nom : sync visuel des cartes et du hero
+window._bstUpdateNom = (id, val) => {
+  _bstQueueSave(id, { nom: val });
+  document.querySelectorAll(`.bst-card[data-beast-id="${id}"] .bst-card-name`)
+    .forEach(el => el.textContent = val || '?');
+};
+
+// Caracs : sauve + recalcule le modificateur affiché
+window._bstUpdateCarac = (id, key, val) => {
+  _bstQueueSave(id, { [key]: parseInt(val) || 0 });
+  const n = parseInt(val);
+  let txt = '', cls = 'zero';
+  if (!isNaN(n)) {
+    const m = Math.floor((n - 10) / 2);
+    txt = m >= 0 ? `+${m}` : `${m}`;
+    cls = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
+  }
+  const modEl = document.querySelector(`[data-bst-mod="${id}-${key}"]`);
+  if (modEl) { modEl.textContent = txt; modEl.className = `bst-carac-mod ${cls}`; }
+};
+
+// Changement de rang : sauve + met à jour cartes + panneau (couleurs + label)
+window._bstSelectRangPanel = (id, rang) => {
+  _bstQueueSave(id, { rang });
+  const rs = RANG_STYLE[rang] || RANG_STYLE.classique;
+  document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
+    card.style.setProperty('--rang-c', rs.color);
+    card.style.setProperty('--rang-glow', rs.glow);
+    const rangEl = card.querySelector('.bst-card-rang');
+    if (rangEl) rangEl.textContent = rs.label;
+  });
+  const panel = document.querySelector('.bst-panel');
+  if (panel) {
+    panel.style.setProperty('--rang-c', rs.color);
+    panel.style.setProperty('--rang-glow', rs.glow);
+  }
+  document.querySelectorAll('[data-bst-rang-btn]').forEach(btn => {
+    const r = btn.dataset.bstRangBtn;
+    const rst = RANG_STYLE[r] || RANG_STYLE.classique;
+    const active = r === rang;
+    btn.classList.toggle('active', active);
+    btn.style.color       = active ? rst.color : '';
+    btn.style.borderColor = active ? rst.color : '';
+    btn.style.background  = active ? `${rst.color}1a` : '';
+  });
+};
+
+// Toggle relation aux dégâts
+window._bstToggleDmg = (id, rel, typeId) => {
+  const c = _creatures.find(x => x.id === id);
+  if (!c) return;
+  const set = new Set(Array.isArray(c[rel]) ? c[rel] : []);
+  if (set.has(typeId)) set.delete(typeId); else set.add(typeId);
+  c[rel] = [...set];
+  _bstQueueSave(id, { [rel]: c[rel] });
+  const chip = document.querySelector(`[data-dmg-chip="${id}-${rel}-${typeId}"]`);
+  if (chip) {
+    const active = set.has(typeId);
+    const meta = DMG_RELATIONS.find(r => r.key === rel);
+    chip.classList.toggle('active', active);
+    chip.style.color       = active ? meta.color : '';
+    chip.style.borderColor = active ? meta.color : '';
+    chip.style.background  = active ? `${meta.color}1a` : '';
+  }
+};
+
+// Lecture + save d'un tableau dynamique (attaques / traits / butins) depuis le panneau
+window._bstSaveArr = (id, type) => {
+  const container = document.getElementById(`bst-p-${type}-${id}`);
+  if (!container) return;
+  const rows = [...container.querySelectorAll('.bst-p-row')];
+  let arr;
+  if (type === 'attaques') {
+    arr = rows.map(row => ({
+      nom:          row.querySelector('[data-f=nom]')?.value?.trim()     || '',
+      toucher:      row.querySelector('[data-f=toucher]')?.value?.trim() || '',
+      degats:       row.querySelector('[data-f=degats]')?.value?.trim()  || '',
+      portee:       row.querySelector('[data-f=portee]')?.value?.trim()  || '',
+      damageTypeId: row.querySelector('[data-f=dmgType]')?.value         || '',
+      description:  row.querySelector('[data-f=desc]')?.value?.trim()    || '',
+    })).filter(a => a.nom || a.degats || a.description);
+  } else if (type === 'traits') {
+    arr = rows.map(row => ({
+      nom:         row.querySelector('[data-f=nom]')?.value?.trim()  || '',
+      description: row.querySelector('[data-f=desc]')?.value?.trim() || '',
+    })).filter(t => t.nom || t.description);
+  } else {
+    arr = rows.map(row => ({
+      nom:      row.querySelector('[data-f=nom]')?.value?.trim()    || '',
+      quantite: row.querySelector('[data-f=qte]')?.value?.trim()    || '',
+      chance:   row.querySelector('[data-f=chance]')?.value?.trim() || '',
+    })).filter(b => b.nom);
+  }
+  _bstQueueSave(id, { [type]: arr });
+  // Met à jour le compteur en titre
+  const countEl = document.querySelector(`[data-bst-count="${id}-${type}"]`);
+  if (countEl) countEl.textContent = arr.length;
+};
+
+window._bstAddPanelRow = (id, type) => {
+  const container = document.getElementById(`bst-p-${type}-${id}`);
+  if (!container) return;
+  const i = container.querySelectorAll('.bst-p-row').length;
+  const html = type === 'attaques' ? _panelAttackRow({}, id, i)
+             : type === 'traits'   ? _panelTraitRow({}, id, i)
+             :                       _panelButinRow({}, id, i);
+  const tpl = document.createElement('div');
+  tpl.innerHTML = html.trim();
+  container.appendChild(tpl.firstElementChild);
+};
+
+window._bstRemovePanelRow = (id, type, btn) => {
+  const row = btn?.closest?.('.bst-p-row');
+  if (!row) return;
+  row.remove();
+  window._bstSaveArr(id, type);
+};
+
+// Row renderers (panneau)
+function _panelAttackRow(a = {}, id, i) {
+  const types = window._bstDamageTypes || _damageTypes || [];
+  return `<div class="bst-p-row">
+    <div class="bst-p-row-grid bst-p-row-grid-2">
+      <input class="bst-p-input" data-f="nom" placeholder="Nom de l'attaque" value="${_esc(a.nom||'')}"
+        oninput="window._bstSaveArr('${id}','attaques')">
+      <select class="bst-p-input" data-f="dmgType"
+        onchange="window._bstSaveArr('${id}','attaques')">
+        <option value="">Type de dégâts</option>
+        ${types.map(t => `<option value="${t.id}"${a.damageTypeId===t.id?' selected':''}>${t.icon||''} ${_esc(t.label)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="bst-p-row-grid bst-p-row-grid-3">
+      <input class="bst-p-input" data-f="toucher" placeholder="🎯 Toucher" value="${_esc(a.toucher||'')}"
+        oninput="window._bstSaveArr('${id}','attaques')">
+      <input class="bst-p-input" data-f="degats" placeholder="⚔️ Dégâts" value="${_esc(a.degats||'')}"
+        oninput="window._bstSaveArr('${id}','attaques')">
+      <input class="bst-p-input" data-f="portee" placeholder="📏 Portée" value="${_esc(a.portee||'')}"
+        oninput="window._bstSaveArr('${id}','attaques')">
+    </div>
+    <div class="bst-p-row-grid" style="grid-template-columns:1fr auto">
+      <input class="bst-p-input" data-f="desc" placeholder="Description / effet…" value="${_esc(a.description||'')}"
+        oninput="window._bstSaveArr('${id}','attaques')">
+      <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','attaques',this)" title="Retirer">✕</button>
+    </div>
+  </div>`;
+}
+
+function _panelTraitRow(t = {}, id, i) {
+  return `<div class="bst-p-row">
+    <div class="bst-p-row-grid" style="grid-template-columns:1fr auto">
+      <input class="bst-p-input" data-f="nom" placeholder="Nom du trait" value="${_esc(t.nom||'')}"
+        oninput="window._bstSaveArr('${id}','traits')">
+      <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','traits',this)" title="Retirer">✕</button>
+    </div>
+    <input class="bst-p-input" data-f="desc" placeholder="Description…" value="${_esc(t.description||'')}"
+      oninput="window._bstSaveArr('${id}','traits')">
+  </div>`;
+}
+
+function _panelButinRow(b = {}, id, i) {
+  return `<div class="bst-p-row">
+    <div class="bst-p-row-grid" style="grid-template-columns:1fr 80px 80px auto">
+      <input class="bst-p-input" data-f="nom" placeholder="Nom de l'objet" value="${_esc(b.nom||'')}"
+        oninput="window._bstSaveArr('${id}','butins')">
+      <input class="bst-p-input" data-f="qte" placeholder="Qté" value="${_esc(b.quantite||'')}"
+        oninput="window._bstSaveArr('${id}','butins')">
+      <input class="bst-p-input" data-f="chance" placeholder="Chance" value="${_esc(b.chance||'')}"
+        oninput="window._bstSaveArr('${id}','butins')">
+      <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','butins',this)" title="Retirer">✕</button>
+    </div>
+  </div>`;
+}
+
+// Matrice de relations aux dégâts (panneau, version chips compacte)
+function _renderDamageMatrixPanel(c, types) {
+  return `<div class="bst-section">
+    <div class="bst-section-title">🛡️ Relations aux dégâts</div>
+    <div class="bst-dmg-edit">
+      ${DMG_RELATIONS.map(rel => {
+        const active = Array.isArray(c[rel.key]) ? c[rel.key] : [];
+        return `<div class="bst-dmg-edit-row" style="border-left:3px solid ${rel.color};background:${rel.color}08">
+          <div class="bst-dmg-edit-head">
+            <span class="bst-dmg-icon">${rel.icon}</span>
+            <span class="bst-dmg-name" style="color:${rel.color}">${rel.label}</span>
+            <span class="bst-dmg-rule">${rel.short}</span>
+          </div>
+          <div class="bst-dmg-edit-chips">
+            ${(types || []).map(t => {
+              const isActive = active.includes(t.id);
+              return `<button type="button" data-dmg-chip="${c.id}-${rel.key}-${t.id}"
+                class="bst-dmg-chip${isActive?' active':''}"
+                style="${isActive?`color:${rel.color};border-color:${rel.color};background:${rel.color}1a`:''}"
+                onclick="window._bstToggleDmg('${c.id}','${rel.key}','${t.id}')">
+                ${t.icon||''} ${_esc(t.label)}
+              </button>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
 /**
  * Matrice unique : lignes = types de dégâts, colonnes = catégories.
  * Vue compacte qui rend les conflits (un type coché dans 2 catégories)
@@ -498,8 +733,7 @@ function _renderCard(c) {
 
     ${STATE.isAdmin ? `
     <div style="display:flex;gap:3px;padding:.35rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
-      <button class="btn-icon" style="font-size:.7rem" onclick="event.stopPropagation();openBeastModal('${c.id}')">✏️</button>
-      <button class="btn-icon" style="font-size:.7rem;color:#ff5a7e" onclick="event.stopPropagation();deleteBeast('${c.id}')">🗑️</button>
+      <button class="btn-icon" style="font-size:.7rem;color:#ff5a7e" onclick="event.stopPropagation();deleteBeast('${c.id}')" title="Supprimer">🗑️</button>
     </div>` : ''}
   </div>`;
 }
@@ -509,6 +743,10 @@ function _renderPanel(c) {
   if (!c) return '';
   const rang  = c.rang || 'classique';
   const rs    = RANG_STYLE[rang] || RANG_STYLE.classique;
+
+  // MJ : panneau entièrement éditable (auto-save Firestore)
+  if (_isAdminView()) return _renderPanelAdmin(c, rs);
+
   const track = _tracker[c.id] || {};
   const ded   = track.deductions || {};
 
@@ -556,7 +794,7 @@ function _renderPanel(c) {
   // Joueur : estimations modifiables (track.pvActuel, etc.) — synchronisées
   //          avec le VTT en temps réel (saisie ici → "?" disparaît côté VTT).
   const _estCell = (cls, lbl, trackKey, trackVal) => `
-    <div class="bst-stat-cell ${cls}">
+    <div class="bst-stat-cell ${cls}" onclick="this.querySelector('input')?.focus()">
       <input type="number" id="bst-${cls}-${c.id}"
         value="${trackVal || ''}" placeholder="?" min="0"
         class="bst-stat-track-input"
@@ -574,25 +812,12 @@ function _renderPanel(c) {
     <div class="bst-section">
       <div class="bst-section-title">Statistiques</div>
       <div class="bst-stats-base">
-        ${_isAdminView() ? `
-          ${_staticCell('pv',  'PV',   c.pvMax)}
-          ${_staticCell('pm',  'PM',   c.pmMax)}
-          ${_staticCell('ca',  'CA',   c.ca)}
-          ${_staticCell('vit', 'Vit.', c.vitesse ? c.vitesse+'m' : '')}
-          ${_staticCell('init','Init.',c.initiative)}
-        ` : `
-          ${_estCell('pv',  'PV',   'pvActuel',   pvActuel)}
-          ${_estCell('pm',  'PM',   'pmActuel',   pmActuel)}
-          ${_estCell('ca',  'CA',   'caEstimee',  caEstimee)}
-          ${_estCell('vit', 'Vit.', 'vitEstimee', vitEstimee)}
-          ${_staticCell('init','Init.', '')}
-        `}
+        ${_estCell('pv',  'PV',   'pvActuel',   pvActuel)}
+        ${_estCell('pm',  'PM',   'pmActuel',   pmActuel)}
+        ${_estCell('ca',  'CA',   'caEstimee',  caEstimee)}
+        ${_estCell('vit', 'Vit.', 'vitEstimee', vitEstimee)}
+        ${_staticCell('init','XP', '')}
       </div>
-      ${(_isAdminView() && (c.niveau || c.dangerositeXp)) ? `
-      <div class="bst-tag-row">
-        ${c.niveau        ? `<span class="bst-tag">Niv. ${c.niveau}</span>` : ''}
-        ${c.dangerositeXp ? `<span class="bst-tag">⭐ ${c.dangerositeXp} XP</span>` : ''}
-      </div>` : ''}
     </div>`;
 
   // ── Caracs (6) : MJ seulement ────────────────────────────────────────────
@@ -712,12 +937,198 @@ function _renderPanel(c) {
         </div>`).join('')}
     </div>` : '';
 
-  // ── Admin actions ─────────────────────────────────────────────────────────
-  const adminActionsHtml = _isAdminView() ? `
-    <div class="bst-admin-actions">
-      <button class="bst-btn-edit" onclick="openBeastModal('${c.id}')">✏️ Modifier</button>
-      <button class="bst-btn-delete" onclick="deleteBeast('${c.id}')">🗑️</button>
-    </div>` : '';
+  return `
+  <div class="bst-panel" style="--rang-c:${rs.color};--rang-glow:${rs.glow}">
+    ${heroHtml}
+    <div class="bst-panel-body">
+      ${vitalsHtml}
+      ${descHtml}
+      ${attaquesJoueurHtml}
+      ${traitsJoueurHtml}
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PANNEAU MJ — entièrement éditable, auto-save
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderPanelAdmin(c, rs) {
+  const types     = _damageTypes || window._bstDamageTypes || [];
+  const attaques  = Array.isArray(c.attaques) ? c.attaques : [];
+  const traits    = Array.isArray(c.traits)   ? c.traits   : [];
+  const butins    = Array.isArray(c.butins)   ? c.butins   : [];
+
+  const modOf = (val) => {
+    const n = parseInt(val);
+    if (!val || isNaN(n)) return { txt:'', cls:'zero' };
+    const m = Math.floor((n - 10) / 2);
+    return { txt: m >= 0 ? `+${m}` : `${m}`, cls: m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero' };
+  };
+
+  // ── Hero éditable : image cliquable, rang selector, nom, type, env ──────
+  const heroHtml = `
+    <div class="bst-panel-hero">
+      ${c.imageUrl
+        ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}"
+             style="cursor:pointer" onclick="window.openBeastImageModal('${c.id}')">`
+        : `<div class="bst-panel-empty" style="cursor:pointer" onclick="window.openBeastImageModal('${c.id}')">${c.emoji||'🐲'}</div>`}
+      <button class="bst-panel-img-edit" onclick="window.openBeastImageModal('${c.id}')" title="Changer l'image">📷</button>
+      <div class="bst-panel-mj-badge">MJ</div>
+      <button class="bst-panel-close" onclick="window._bstClose()">✕</button>
+      <div class="bst-panel-hero-info">
+        <div class="bst-panel-rang-selector">
+          ${Object.entries(RANG_STYLE).map(([r, rst]) => {
+            const active = (c.rang||'classique') === r;
+            return `<button type="button" data-bst-rang-btn="${r}"
+              class="bst-rang-btn${active?' active':''}"
+              style="${active?`color:${rst.color};border-color:${rst.color};background:${rst.color}1a`:''}"
+              onclick="window._bstSelectRangPanel('${c.id}','${r}')">${rst.label}</button>`;
+          }).join('')}
+        </div>
+        <input class="bst-panel-name-input" value="${_esc(c.nom||'')}" placeholder="Nom de la créature…"
+          oninput="window._bstUpdateNom('${c.id}', this.value)">
+        <div class="bst-panel-meta-edit">
+          <input class="bst-panel-edit-inline" placeholder="Type" value="${_esc(c.type||'')}"
+            oninput="window._bstUpdate('${c.id}','type',this.value)">
+          <span class="bst-panel-meta-dot">·</span>
+          <input class="bst-panel-edit-inline" placeholder="Environnement" value="${_esc(c.environnement||'')}"
+            oninput="window._bstUpdate('${c.id}','environnement',this.value)">
+        </div>
+      </div>
+    </div>`;
+
+  // ── Statistiques (5 cellules : PV PM CA Vit XP) + niveau + initiative ───
+  const vitalsHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">Statistiques</div>
+      <div class="bst-stats-base">
+        <div class="bst-stat-cell pv" onclick="this.querySelector('input')?.focus()">
+          <input type="number" min="0" value="${c.pvMax||''}" placeholder="0" class="bst-stat-track-input"
+            oninput="window._bstUpdateNum('${c.id}','pvMax',this.value)">
+          <div class="bst-stat-lbl">PV</div>
+        </div>
+        <div class="bst-stat-cell pm" onclick="this.querySelector('input')?.focus()">
+          <input type="number" min="0" value="${c.pmMax||''}" placeholder="0" class="bst-stat-track-input"
+            oninput="window._bstUpdateNum('${c.id}','pmMax',this.value)">
+          <div class="bst-stat-lbl">PM</div>
+        </div>
+        <div class="bst-stat-cell ca" onclick="this.querySelector('input')?.focus()">
+          <input type="number" min="0" value="${c.ca||''}" placeholder="0" class="bst-stat-track-input"
+            oninput="window._bstUpdateNum('${c.id}','ca',this.value)">
+          <div class="bst-stat-lbl">CA</div>
+        </div>
+        <div class="bst-stat-cell vit" onclick="this.querySelector('input')?.focus()">
+          <input type="number" min="0" value="${c.vitesse||''}" placeholder="0" class="bst-stat-track-input"
+            oninput="window._bstUpdateNum('${c.id}','vitesse',this.value)">
+          <div class="bst-stat-lbl">Vit. (m)</div>
+        </div>
+        <div class="bst-stat-cell init" onclick="this.querySelector('input')?.focus()">
+          <input type="number" min="0" value="${c.dangerositeXp||''}" placeholder="0" class="bst-stat-track-input"
+            oninput="window._bstUpdateNum('${c.id}','dangerositeXp',this.value)">
+          <div class="bst-stat-lbl">XP</div>
+        </div>
+      </div>
+      <div class="bst-niv-row">
+        <span class="bst-niv-lbl">Niveau / FP</span>
+        <input type="number" min="0" value="${c.niveau||''}" placeholder="—"
+          class="bst-p-input bst-p-input-sm"
+          oninput="window._bstUpdateNum('${c.id}','niveau',this.value)">
+        <span class="bst-niv-lbl">Initiative</span>
+        <input type="number" value="${c.initiative||''}" placeholder="—"
+          class="bst-p-input bst-p-input-sm"
+          oninput="window._bstUpdateNum('${c.id}','initiative',this.value)">
+        <span class="bst-niv-lbl">Emoji</span>
+        <input value="${_esc(c.emoji||'🐲')}" placeholder="🐲"
+          class="bst-p-input bst-p-input-sm" style="width:40px"
+          oninput="window._bstUpdate('${c.id}','emoji',this.value)">
+      </div>
+    </div>`;
+
+  // ── Caracs (6, avec auto-modificateur) ─────────────────────────────────
+  const caracsHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">Caractéristiques</div>
+      <div class="bst-caracs">
+        ${[
+          ['FOR','force'],['DEX','dexterite'],['CON','constitution'],
+          ['INT','intelligence'],['SAG','sagesse'],['CHA','charisme'],
+        ].map(([lbl, key]) => {
+          const { txt, cls } = modOf(c[key]);
+          return `<div class="bst-carac">
+            <input type="number" min="0" value="${c[key]||''}" placeholder="—"
+              class="bst-carac-input"
+              oninput="window._bstUpdateCarac('${c.id}','${key}',this.value)">
+            <div class="bst-carac-mod ${cls}" data-bst-mod="${c.id}-${key}">${txt}</div>
+            <div class="bst-carac-lbl">${lbl}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  // ── Token VTT (taille en cases) ────────────────────────────────────────
+  const tokenHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">Token VTT (cases)</div>
+      <div class="bst-token-row">
+        <span class="bst-niv-lbl">Largeur</span>
+        <select class="bst-p-input bst-p-input-sm" onchange="window._bstUpdateNum('${c.id}','tokenW',this.value)">
+          ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenW||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
+        </select>
+        <span class="bst-niv-lbl">×</span>
+        <span class="bst-niv-lbl">Hauteur</span>
+        <select class="bst-p-input bst-p-input-sm" onchange="window._bstUpdateNum('${c.id}','tokenH',this.value)">
+          ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenH||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+
+  // ── Description (textarea) ─────────────────────────────────────────────
+  const descHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">Description</div>
+      <textarea class="bst-panel-textarea" placeholder="Apparence, comportement, lore…" rows="3"
+        oninput="window._bstUpdate('${c.id}','description',this.value)">${_esc(c.description||'')}</textarea>
+    </div>`;
+
+  // ── Relations aux dégâts (matrice chips compacte) ─────────────────────
+  const dmgHtml = _renderDamageMatrixPanel(c, types);
+
+  // ── Attaques (ajout / édition / suppression inline) ───────────────────
+  const attaquesHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">
+        ⚔️ Attaques
+        <span class="bst-section-count" data-bst-count="${c.id}-attaques">${attaques.length}</span>
+        <button class="bst-add-row-btn" onclick="window._bstAddPanelRow('${c.id}','attaques')">+ Ajouter</button>
+      </div>
+      <div id="bst-p-attaques-${c.id}" class="bst-p-rows">
+        ${attaques.map((a, i) => _panelAttackRow(a, c.id, i)).join('')}
+      </div>
+    </div>`;
+
+  const traitsHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">
+        ✨ Traits & Capacités
+        <span class="bst-section-count" data-bst-count="${c.id}-traits">${traits.length}</span>
+        <button class="bst-add-row-btn" onclick="window._bstAddPanelRow('${c.id}','traits')">+ Ajouter</button>
+      </div>
+      <div id="bst-p-traits-${c.id}" class="bst-p-rows">
+        ${traits.map((t, i) => _panelTraitRow(t, c.id, i)).join('')}
+      </div>
+    </div>`;
+
+  const butinsHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">
+        💰 Butins
+        <span class="bst-section-count" data-bst-count="${c.id}-butins">${butins.length}</span>
+        <button class="bst-add-row-btn" onclick="window._bstAddPanelRow('${c.id}','butins')">+ Ajouter</button>
+      </div>
+      <div id="bst-p-butins-${c.id}" class="bst-p-rows">
+        ${butins.map((b, i) => _panelButinRow(b, c.id, i)).join('')}
+      </div>
+    </div>`;
 
   return `
   <div class="bst-panel" style="--rang-c:${rs.color};--rang-glow:${rs.glow}">
@@ -725,14 +1136,15 @@ function _renderPanel(c) {
     <div class="bst-panel-body">
       ${vitalsHtml}
       ${caracsHtml}
+      ${tokenHtml}
       ${descHtml}
       ${dmgHtml}
       ${attaquesHtml}
-      ${attaquesJoueurHtml}
       ${traitsHtml}
-      ${traitsJoueurHtml}
       ${butinsHtml}
-      ${adminActionsHtml}
+      <div class="bst-admin-actions">
+        <button class="bst-btn-delete" style="flex:1" onclick="deleteBeast('${c.id}')">🗑️ Supprimer cette créature</button>
+      </div>
     </div>
   </div>`;
 }
@@ -909,6 +1321,95 @@ async function openBeastModal(id = null) {
     output:        { maxW: 1800, target: 700_000 },
   });
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODAL IMAGE — édition rapide de l'image depuis le panneau admin
+// ══════════════════════════════════════════════════════════════════════════════
+async function openBeastImageModal(id) {
+  const c = _creatures.find(x => x.id === id);
+  if (!c) return;
+  _bstCropper?.destroy(); _bstCropper = null;
+
+  openModal(`📷 Image — ${_esc(c.nom || 'Créature')}`, `
+    <div class="form-group">
+      <label>Image (ratio 4:3)</label>
+      <div id="bst-img-drop" style="border:2px dashed var(--border-strong);border-radius:12px;
+        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
+        <div id="bst-img-preview"></div>
+      </div>
+      <div id="bst-img-crop-wrap" style="display:none;margin-top:.75rem">
+        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez l'image</div>
+        <canvas id="bst-img-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
+        <button type="button" class="btn btn-gold btn-sm" id="bst-img-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
+        <div id="bst-img-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-gold" style="flex:1" onclick="window._bstSaveImage('${id}')">💾 Enregistrer</button>
+      ${c.imageUrl ? `<button class="btn btn-outline" onclick="window._bstRemoveImage('${id}')">🗑 Retirer</button>` : ''}
+    </div>
+  `);
+
+  _bstCropper = attachDropAndCrop({
+    dropEl:        document.getElementById('bst-img-drop'),
+    previewEl:     document.getElementById('bst-img-preview'),
+    cropWrapEl:    document.getElementById('bst-img-crop-wrap'),
+    canvasId:      'bst-img-canvas',
+    statusEl:      document.getElementById('bst-img-ok'),
+    confirmBtnEl:  document.getElementById('bst-img-confirm'),
+    initialUrl:    c?.imageUrl || '',
+    ratio:         { w: 4, h: 3 },
+    output:        { maxW: 1800, target: 700_000 },
+  });
+}
+
+window._bstSaveImage = async (id) => {
+  try {
+    const cropResult = _bstCropper?.getResult();
+    const current = _creatures.find(c => c.id === id)?.imageUrl || '';
+    const imageUrl = typeof cropResult === 'string' ? cropResult : current;
+    if (imageUrl && imageUrl.length > 900_000) {
+      showNotif('Image trop grande, recadrez plus petit.', 'error');
+      return;
+    }
+    const col = window._bstCurrentCol || 'bestiary';
+    await updateInCol(col, id, { imageUrl });
+    const idx = _creatures.findIndex(c => c.id === id);
+    if (idx >= 0) _creatures[idx].imageUrl = imageUrl;
+    _bstCropper?.destroy(); _bstCropper = null;
+    closeModal();
+    _syncActivePanel();
+    // MAJ visuel carte
+    const card = document.querySelector(`.bst-card[data-beast-id="${id}"]`);
+    if (card && imageUrl) {
+      let img = card.querySelector('.bst-card-img');
+      if (!img) {
+        const empty = card.querySelector('.bst-card-empty');
+        if (empty) {
+          img = document.createElement('img');
+          img.className = 'bst-card-img';
+          img.loading = 'lazy';
+          empty.replaceWith(img);
+        }
+      }
+      if (img) img.src = imageUrl;
+    }
+    showNotif('Image mise à jour.', 'success');
+  } catch (e) { notifySaveError(e); }
+};
+
+window._bstRemoveImage = async (id) => {
+  try {
+    const col = window._bstCurrentCol || 'bestiary';
+    await updateInCol(col, id, { imageUrl: '' });
+    const idx = _creatures.findIndex(c => c.id === id);
+    if (idx >= 0) _creatures[idx].imageUrl = '';
+    _bstCropper?.destroy(); _bstCropper = null;
+    closeModal();
+    _syncActivePanel();
+    showNotif('Image retirée.', 'success');
+  } catch (e) { notifySaveError(e); }
+};
 
 // ── Lignes dynamiques ─────────────────────────────────────────────────────────
 function _attackRow(a={}, i) {
@@ -1257,6 +1758,7 @@ PAGES.bestiaire = renderBestiary;
 Object.assign(window, {
   renderBestiary,
   openBeastModal,
+  openBeastImageModal,
   saveBeast,
   deleteBeast,
 });

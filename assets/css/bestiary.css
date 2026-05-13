@@ -487,6 +487,183 @@
   background: rgba(255,255,255,0.04); border: 1px solid var(--border-md); color: var(--text-muted);
 }
 
+/* ═══ ÉDITION INLINE (panneau MJ) ════════════════════════════════════════ */
+
+/* Bouton 📷 sur le hero pour ouvrir la modal image */
+.bst-panel-img-edit {
+  position: absolute; bottom: 12px; right: 12px; z-index: 3;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(8,13,21,0.78); backdrop-filter: blur(8px);
+  border: 1px solid var(--border-md); color: var(--text);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 0.9rem; transition: all 0.15s;
+}
+.bst-panel-img-edit:hover {
+  background: rgba(180,127,255,0.25); border-color: var(--arcane);
+  transform: scale(1.06);
+}
+
+/* Sélecteur de rang dans le hero */
+.bst-panel-rang-selector {
+  display: flex; gap: 4px; margin-bottom: 8px;
+}
+.bst-rang-btn {
+  padding: 3px 12px; border-radius: var(--r-full);
+  font-family: var(--font-display); font-size: 0.58rem; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  background: rgba(8,13,21,0.7); backdrop-filter: blur(8px);
+  border: 1px solid var(--border-md); color: var(--text-muted);
+  cursor: pointer; transition: all 0.15s;
+}
+.bst-rang-btn:hover { color: var(--text-soft); border-color: var(--border-strong); }
+
+/* Inputs nom / type / environnement dans le hero */
+.bst-panel-name-input {
+  width: 100%;
+  background: transparent; border: none; outline: none;
+  font-family: 'Cinzel Decorative', 'Cinzel', serif;
+  font-size: 1.4rem; font-weight: 900; color: #fff;
+  letter-spacing: 0.04em; line-height: 1.05;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.8);
+  padding: 2px 4px; border-radius: 4px;
+  transition: background 0.15s;
+}
+.bst-panel-name-input:hover  { background: rgba(255,255,255,0.05); }
+.bst-panel-name-input:focus  { background: rgba(180,127,255,0.10); }
+.bst-panel-name-input::placeholder { color: rgba(255,255,255,0.4); }
+
+.bst-panel-meta-edit {
+  display: flex; align-items: center; gap: 6px; margin-top: 4px;
+}
+.bst-panel-edit-inline {
+  background: transparent; border: none; outline: none;
+  color: rgba(255,255,255,0.78); font-size: 0.76rem;
+  padding: 2px 6px; border-radius: 4px;
+  flex: 1; min-width: 0;
+  transition: background 0.15s;
+}
+.bst-panel-edit-inline:hover { background: rgba(255,255,255,0.05); }
+.bst-panel-edit-inline:focus { background: rgba(180,127,255,0.10); color: #fff; }
+.bst-panel-edit-inline::placeholder { color: rgba(255,255,255,0.35); font-style: italic; }
+.bst-panel-meta-dot { color: rgba(255,255,255,0.4); flex-shrink: 0; }
+
+/* Inputs génériques du panneau */
+.bst-p-input {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 9px;
+  color: var(--text); font-family: inherit; font-size: 0.78rem;
+  outline: none; transition: all 0.15s;
+  width: 100%; box-sizing: border-box;
+}
+.bst-p-input:hover { border-color: var(--border-md); }
+.bst-p-input:focus { border-color: rgba(180,127,255,0.45); background: rgba(180,127,255,0.06); }
+.bst-p-input::placeholder { color: var(--text-dim); }
+.bst-p-input-sm { width: auto; padding: 3px 7px; font-size: 0.74rem; }
+
+/* Select : forcer le thème sombre */
+select.bst-p-input {
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+  padding-right: 26px; cursor: pointer;
+}
+select.bst-p-input option {
+  background: var(--bg-elevated, #1e2030); color: var(--text, #e2e8f0);
+}
+
+/* Masquer les flèches sur les <input type=number> */
+.bst-p-input[type=number] { -moz-appearance: textfield; }
+.bst-p-input[type=number]::-webkit-outer-spin-button,
+.bst-p-input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Ligne niveau + initiative + emoji */
+.bst-niv-row, .bst-token-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  flex-wrap: wrap;
+}
+.bst-niv-lbl {
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.10em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.bst-niv-row .bst-p-input-sm,
+.bst-token-row .bst-p-input-sm { width: 60px; text-align: center; }
+
+/* Caracs éditables */
+.bst-carac-input {
+  width: 100%; background: transparent; border: none; outline: none;
+  font-family: var(--font-mono); font-size: 0.86rem; font-weight: 700;
+  color: var(--text-soft); text-align: center; line-height: 1;
+  padding: 0; -moz-appearance: textfield;
+}
+.bst-carac-input::-webkit-outer-spin-button,
+.bst-carac-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.bst-carac-input::placeholder { color: var(--text-dim); }
+.bst-carac-input:focus { color: var(--gold-2); }
+
+/* Textarea description / inputs row */
+.bst-panel-textarea {
+  width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 10px 12px;
+  color: var(--text-soft); font-family: inherit; font-size: 0.82rem; line-height: 1.5;
+  resize: vertical; outline: none; transition: all 0.15s;
+  box-sizing: border-box;
+}
+.bst-panel-textarea:focus {
+  border-color: rgba(180,127,255,0.35); background: rgba(180,127,255,0.04);
+}
+
+/* Bouton "+ Ajouter" dans les titres de section */
+.bst-add-row-btn {
+  margin-left: auto; padding: 3px 10px; border-radius: var(--r-full);
+  background: rgba(180,127,255,0.10); border: 1px solid rgba(180,127,255,0.30);
+  color: var(--arcane); font-size: 0.64rem; font-weight: 700;
+  letter-spacing: 0.04em; cursor: pointer; transition: all 0.15s;
+  text-transform: none;
+}
+.bst-add-row-btn:hover { background: rgba(180,127,255,0.20); }
+
+/* Rows éditables (attaques / traits / butins) */
+.bst-p-rows { display: flex; flex-direction: column; gap: 8px; }
+.bst-p-row {
+  background: rgba(255,255,255,0.025); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.bst-p-row-grid { display: grid; gap: 5px; }
+.bst-p-row-grid-2 { grid-template-columns: 2fr 1fr; }
+.bst-p-row-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+.bst-p-row-remove {
+  width: 26px; height: 26px; border-radius: 6px;
+  background: rgba(255,90,126,0.08); border: 1px solid rgba(255,90,126,0.25);
+  color: var(--crimson); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; transition: all 0.12s;
+}
+.bst-p-row-remove:hover { background: rgba(255,90,126,0.18); }
+
+/* Matrice de dégâts (panneau, chips) */
+.bst-dmg-edit { display: flex; flex-direction: column; gap: 6px; }
+.bst-dmg-edit-row {
+  padding: 8px 10px; border-radius: var(--r-sm);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.bst-dmg-edit-head {
+  display: flex; align-items: center; gap: 6px; font-family: var(--font-display);
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.06em;
+}
+.bst-dmg-edit-head .bst-dmg-rule {
+  margin-left: auto; font-size: 0.54rem; color: var(--text-dim);
+  font-family: inherit; font-weight: 500;
+}
+.bst-dmg-edit-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.bst-dmg-chip {
+  padding: 3px 8px; border-radius: var(--r-full);
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+  color: var(--text-muted); cursor: pointer; transition: all 0.12s;
+  font-size: 0.66rem; font-weight: 600;
+}
+.bst-dmg-chip:hover { color: var(--text-soft); border-color: var(--border-md); }
+
 /* Déductions joueur */
 .bst-deduct-input {
   width: 100%; background: transparent;
