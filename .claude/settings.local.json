@@ -86,7 +86,13 @@
       "Bash(cp \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\characters.js\" \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\assets\\\\js\\\\features\\\\characters.js\")",
       "Bash(cp \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\pages.js\" \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\assets\\\\js\\\\features\\\\pages.js\")",
       "Bash(cp \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\css\\\\characters.css\" \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\assets\\\\css\\\\characters.css\")",
-      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/npcs.js)"
+      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/npcs.js)",
+      "Bash(dir \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\" /s /b)",
+      "Bash(findstr -i \"achiev\")",
+      "Bash(find \"C:/Users/Moi/Documents/GitHub/le-grand-jdr\" -iname \"*achiev*\" 2>/dev/null)",
+      "Bash(find \"C:/Users/Moi\" -iname \"achievements*\" 2>/dev/null | head -20)",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/achievements.js\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/pages.js\")"
     ]
   }
 }

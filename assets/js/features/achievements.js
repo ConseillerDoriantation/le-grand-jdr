@@ -26,6 +26,11 @@ let _achDragBlockClick = false;
 let _achClickGuardInstalled = false;
 let _achUploader = null;
 
+// ── State global vue / filtre / recherche ─────────────────────────────────
+window._achFilter ??= 'all';     // 'all' | 'epique' | 'comique' | 'histoire'
+window._achView   ??= 'galerie'; // 'galerie' | 'timeline'
+window._achSearch ??= '';
+
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 function openAchievementModal(id = null) {
   const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
@@ -342,11 +347,11 @@ function _achievementSortableOptions(overrides = {}) {
 
 // ── DRAG & DROP ───────────────────────────────────────────────────────────────
 function setupAchievementsDnd(catId) {
-  if (!STATE.isAdmin) {
+  if (!STATE.isAdmin || !catId) {
     _destroyAchievementSortables();
     return;
   }
-  const grid = document.getElementById(`ach-grid-${catId}`);
+  const grid = document.getElementById('ach-gallery');
   if (!grid) return;
 
   _installAchievementClickGuard();
@@ -363,7 +368,7 @@ function setupAchievementsDnd(catId) {
         const domOrder = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
         await _persistCategoryOrder(catId, domOrder);
         showNotif('Ordre sauvegardé.', 'success');
-        await _achRebuildJustified(catId);
+        await _achRebuildGallery(catId);
       },
     })));
   });
@@ -414,9 +419,9 @@ function _achOpenImage(url) {
 // ── JUSTIFIED LAYOUT ENGINE ───────────────────────────────────────────────────
 
 const ACH_CATS = [
-  { id:'epique',   label:'Épique',   emoji:'⚔️',  color:'#4f8cff', glow:'rgba(79,140,255,0.14)' },
-  { id:'comique',  label:'Comique',  emoji:'🎭',  color:'#e8b84b', glow:'rgba(232,184,75,0.14)' },
-  { id:'histoire', label:'Histoire', emoji:'📖',  color:'#22c38e', glow:'rgba(34,195,142,0.14)' },
+  { id:'epique',   label:'Épique',   emoji:'⚔️',  color:'#4f8cff', glow:'rgba(79,140,255,0.18)',  line:'rgba(79,140,255,0.35)'  },
+  { id:'comique',  label:'Comique',  emoji:'🎭',  color:'#e8b84b', glow:'rgba(232,184,75,0.18)',  line:'rgba(232,184,75,0.35)'  },
+  { id:'histoire', label:'Histoire', emoji:'📖',  color:'#22c38e', glow:'rgba(34,195,142,0.18)', line:'rgba(34,195,142,0.35)' },
 ];
 
 // Mesure les aspect-ratios manquants en chargeant les images
@@ -459,24 +464,25 @@ function _achBuildRows(items, containerW, targetH, gap) {
   return rows;
 }
 
-// HTML d'une carte dans le justified layout
-function _achCardHTML(item, cat, isAdmin) {
+// ── HTML d'une carte galerie ──────────────────────────────────────────────────
+function _achCardHTML(item, isAdmin) {
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   const chars     = STATE.characters || [];
   const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
+  const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
 
   const contribsHtml = contribs.length ? `
     <div class="ach-contribs">
       ${contribs.map(c => {
-        const col      = CHAR_COLS[c.nom?.charCodeAt(0) % 6 || 0];
+        const col      = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
         const photoPos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
-        return `<div class="ach-contrib-pill" style="border-color:${col}50">
-          <div class="ach-contrib-avatar" style="background:${col}22;color:${col}">
+        return `<div class="ach-contrib" style="border-color:${col}55">
+          <div class="ach-contrib-av" style="background:${col}22;color:${col};border-color:${col}">
             ${c.photo
               ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
               : (c.nom || '?')[0].toUpperCase()}
           </div>
-          <span class="ach-contrib-name">${_esc(c.nom || '?')}</span>
+          <span class="ach-contrib-name" style="color:${col}">${_esc(c.nom || '?')}</span>
         </div>`;
       }).join('')}
     </div>` : '';
@@ -490,63 +496,279 @@ function _achCardHTML(item, cat, isAdmin) {
     </div>` : '';
 
   const imageHtml = item.imageUrl
-    ? `<img src="${item.imageUrl}" loading="lazy" draggable="false">`
-    : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;
-         font-size:3.5rem;background:linear-gradient(135deg,${cat.glow},var(--bg-panel))">${item.emoji || cat.emoji}</div>`;
+    ? `<img class="ach-img" src="${item.imageUrl}" loading="lazy" draggable="false">`
+    : `<div class="ach-img-empty"><div class="ach-img-empty-emoji">${item.emoji || cat.emoji}</div></div>`;
 
   return `
-    <div class="ach-badge-cat" style="color:${cat.color};border-color:${cat.color}55">${cat.emoji} ${cat.label}</div>
-    ${item.date ? `<div class="ach-badge-date">${item.date}</div>` : ''}
+    <div class="ach-cat-badge">${cat.emoji} ${cat.label}</div>
+    ${item.date ? `<div class="ach-date-badge">${item.date}</div>` : ''}
     ${imageHtml}
     <div class="ach-meta">
-      <div class="ach-meta-title">${_esc(item.titre || 'Haut-Fait')}</div>
-      ${item.description ? `<div class="ach-meta-desc">${_esc(item.description)}</div>` : ''}
+      <div class="ach-title">${_esc(item.titre || 'Haut-Fait')}</div>
+      ${item.description ? `<div class="ach-desc">${_esc(item.description)}</div>` : ''}
       ${contribsHtml}
       ${adminHtml}
     </div>`;
 }
 
-// Rendu justified dans le conteneur
-async function _achRenderJustified(catId, items, cat, container) {
+// ── Rendu justified dans le conteneur ────────────────────────────────────────
+async function _achRenderJustified(catId, items, container) {
   const withRatios = await _achMeasureRatios(items);
-
-  // Stocker les ratios mesurés pour les rebuilds DnD
   withRatios.forEach(item => {
     const idx = (window._achItems || []).findIndex(a => a.id === item.id);
     if (idx >= 0) window._achItems[idx] = { ...window._achItems[idx], aspectRatio: item.aspectRatio };
   });
 
   const containerW = container.clientWidth || 900;
-  const targetH    = window.innerWidth < 1024 ? (window.innerWidth < 600 ? 150 : 220) : 340;
-  const gap        = 10;
+  const w = window.innerWidth;
+  const targetH = w < 600 ? 150 : w < 1024 ? 220 : w < 1440 ? 300 : w < 1920 ? 380 : 440;
+  const gap     = 10;
   const rows       = _achBuildRows(withRatios, containerW, targetH, gap);
   const isAdmin    = STATE.isAdmin;
 
-  container.innerHTML = rows.map(row => `
+  container.innerHTML = rows.map((row, rowIdx) => `
     <div class="ach-row" style="height:${row.h}px">
-      ${row.items.map(item => `
-        <div class="ach-item ${isAdmin ? 'ach-sortable-item' : ''}" data-ach-id="${item.id}"
-          style="width:${item.w}px;height:${row.h}px;${isAdmin ? 'cursor:grab' : ''}"
-          ${item.imageUrl ? `onclick="window._achOpenImage('${item.imageUrl.replace(/'/g, "\\'")}')"` : ''}>
-          ${_achCardHTML(item, cat, isAdmin)}
-        </div>`).join('')}
+      ${row.items.map((item, colIdx) => {
+        const icat    = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+        const noDesc  = !item.description ? ' no-desc' : '';
+        const delay   = (rowIdx * 4 + colIdx) * 30;
+        return `<div class="ach-item${isAdmin ? ' ach-sortable-item' : ''}${noDesc}" data-ach-id="${item.id}"
+          style="width:${item.w}px;height:${row.h}px;--c:${icat.color};--c-glow:${icat.glow};--c-line:${icat.line};animation-delay:${delay}ms;${isAdmin ? 'cursor:grab' : ''}"
+          onclick="window._achOpenLightbox('${item.id}')">
+          ${_achCardHTML(item, isAdmin)}
+        </div>`;
+      }).join('')}
     </div>`).join('');
 }
 
-// Rebuild après réordonnancement DnD (lit l'ordre DOM, recalcule le layout)
-async function _achRebuildJustified(catId) {
-  const grid = document.getElementById(`ach-grid-${catId}`);
-  const cat  = ACH_CATS.find(c => c.id === catId);
-  if (!grid || !cat) return;
-
+// ── Rebuild galerie après DnD ─────────────────────────────────────────────────
+async function _achRebuildGallery(catId) {
+  const grid = document.getElementById('ach-gallery');
+  if (!grid) return;
   const itemsById  = Object.fromEntries((window._achItems || []).map(a => [a.id, a]));
   const orderedIds = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
   const ordered    = orderedIds.map(id => itemsById[id]).filter(Boolean);
-
-  await _achRenderJustified(catId, ordered, cat, grid);
+  await _achRenderJustified(catId, ordered, grid);
   setupAchievementsDnd(catId);
 }
-window._achRebuildJustified = _achRebuildJustified;
+window._achRebuildJustified = _achRebuildGallery; // compat
+window._achRebuildGallery   = _achRebuildGallery;
+
+// ── parseDate helper ──────────────────────────────────────────────────────────
+const _MOIS = {janvier:0,février:1,mars:2,avril:3,mai:4,juin:5,juillet:6,août:7,septembre:8,octobre:9,novembre:10,décembre:11};
+function parseDate(str) {
+  const m = str?.match(/(\d+)\s+(\w+)\s+(\d+)/i);
+  if (!m) return 0;
+  return new Date(+m[3], _MOIS[m[2].toLowerCase()] ?? 0, +m[1]).getTime();
+}
+
+// ── Timeline HTML ─────────────────────────────────────────────────────────────
+function _renderTimeline(items) {
+  const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const chars   = STATE.characters || [];
+  const isAdmin = STATE.isAdmin;
+  const sorted  = [...items].sort((a, b) => parseDate(a.date) - parseDate(b.date));
+
+  if (!sorted.length) return '';
+
+  const cardHTML = (item, side) => {
+    const cat     = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+    const contribs = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
+    const imgEl   = item.imageUrl
+      ? `<img class="tl-card-img" src="${item.imageUrl}" loading="lazy">`
+      : `<div class="tl-card-empty" style="--c-glow:${cat.glow}">${item.emoji || cat.emoji}</div>`;
+    const contribsEl = contribs.length ? `
+      <div class="tl-card-contribs">
+        ${contribs.map(c => {
+          const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
+          const pos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
+          return `<div class="tl-card-contrib" style="border-color:${col}55;color:${col}">
+            <div class="tl-card-contrib-av" style="background:${col}22;color:${col}">
+              ${c.photo ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">` : (c.nom||'?')[0]}
+            </div>
+            ${_esc(c.nom || '?')}
+          </div>`;
+        }).join('')}
+      </div>` : '';
+    const adminEl = isAdmin ? `
+      <div class="tl-card-admin">
+        <button class="btn btn-outline btn-sm" style="flex:1;font-size:.7rem"
+          onclick="event.stopPropagation();editAchievement('${item.id}')">✏️ Modifier</button>
+        <button class="btn-icon" style="color:#ff6b6b"
+          onclick="event.stopPropagation();deleteAchievement('${item.id}')">🗑️</button>
+      </div>` : '';
+
+    return `<div class="tl-card" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line}"
+      onclick="${item.imageUrl ? `window._achOpenLightbox('${item.id}')` : 'void 0'}">
+      ${imgEl}
+      <div class="tl-card-body">
+        <div class="tl-card-cat" style="background:${cat.glow};border:1px solid ${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
+        <div class="tl-card-title">${_esc(item.titre || 'Haut-Fait')}</div>
+        ${item.description ? `<div class="tl-card-desc">${_esc(item.description)}</div>` : ''}
+        ${contribsEl}
+        ${adminEl}
+      </div>
+    </div>`;
+  };
+
+  return `<div class="timeline">
+    ${sorted.map((item, idx) => {
+      const side  = idx % 2 === 0 ? 'left' : 'right';
+      const cat   = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+      const delay = `${idx * 60}ms`;
+      return `<div class="tl-item ${side}" style="animation-delay:${delay}">
+        ${side === 'left'  ? cardHTML(item, side) : '<div class="tl-spacer"></div>'}
+        <div class="tl-node-wrap">
+          <div class="tl-node">
+            <div class="tl-node-dot" style="--c:${cat.color};--c-glow:${cat.glow}">${cat.emoji}</div>
+            ${item.date ? `<div class="tl-node-date" style="color:${cat.color}">${item.date}</div>` : ''}
+          </div>
+        </div>
+        ${side === 'right' ? cardHTML(item, side) : '<div class="tl-spacer"></div>'}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// ── Rendu du contenu (filtre + vue) ──────────────────────────────────────────
+async function _achRenderContent() {
+  const contentEl = document.getElementById('ach-content');
+  if (!contentEl) return;
+
+  const all    = window._achItems || [];
+  const filter = window._achFilter || 'all';
+  const search = (window._achSearch || '').trim().toLowerCase();
+
+  let filtered = filter === 'all' ? all : all.filter(a => (a.categorie || 'epique') === filter);
+  if (search) {
+    filtered = filtered.filter(a =>
+      (a.titre || '').toLowerCase().includes(search) ||
+      (a.description || '').toLowerCase().includes(search)
+    );
+  }
+
+  // Map lightbox
+  window._achLightboxItems = Object.fromEntries(all.map(a => [a.id, a]));
+
+  if (!filtered.length) {
+    const catDef = ACH_CATS.find(c => c.id === filter);
+    contentEl.innerHTML = `
+      <div class="hall-empty">
+        <div class="hall-empty-icon">${catDef?.emoji || '🏆'}</div>
+        <div class="hall-empty-title">${search ? 'Aucun résultat' : 'Aucun haut-fait'}</div>
+        <div class="hall-empty-sub">${search ? `pour « ${_esc(search)} »` : STATE.isAdmin ? 'Ajoutez le premier !' : ''}</div>
+      </div>`;
+    return;
+  }
+
+  if ((window._achView || 'galerie') === 'timeline') {
+    contentEl.innerHTML = _renderTimeline(filtered);
+    return;
+  }
+
+  // Galerie justified
+  const galleryEl = document.createElement('div');
+  galleryEl.id        = 'ach-gallery';
+  galleryEl.className = 'ach-justified';
+  contentEl.innerHTML = '';
+  contentEl.appendChild(galleryEl);
+
+  await _achRenderJustified(filter, filtered, galleryEl);
+  setupAchievementsDnd(filter !== 'all' ? filter : null);
+}
+
+// ── Actions état (appelées depuis les boutons HTML) ───────────────────────────
+window._achSetFilter = (filter) => {
+  window._achFilter = filter;
+  document.querySelectorAll('.hall-counter').forEach(el => {
+    el.classList.toggle('active', el.dataset.filter === filter);
+  });
+  _achRenderContent();
+};
+window._achSetView = (view) => {
+  window._achView = view;
+  document.querySelectorAll('.view-tab').forEach((btn, i) => {
+    btn.classList.toggle('active', i === (view === 'timeline' ? 1 : 0));
+  });
+  _achRenderContent();
+};
+let _achSearchTimer = null;
+window._achSetSearch = (val) => {
+  window._achSearch = val;
+  clearTimeout(_achSearchTimer);
+  _achSearchTimer = setTimeout(_achRenderContent, 240);
+};
+
+// ── LIGHTBOX ENRICHIE ─────────────────────────────────────────────────────────
+function _achOpenLightbox(itemId) {
+  const item = (window._achLightboxItems || {})[itemId] || (window._achItems || []).find(a => a.id === itemId);
+  if (!item) return;
+  const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+  const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const chars     = STATE.characters || [];
+  const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
+
+  const existing = document.getElementById('ach-lightbox');
+  if (existing) existing.remove();
+
+  const contribsHtml = contribs.length ? `
+    <div class="ach-lb-contribs">
+      ${contribs.map(c => {
+        const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
+        return `<span style="display:flex;align-items:center;gap:4px;font-size:.68rem;color:${col}">
+          <span style="width:16px;height:16px;border-radius:50%;background:${col}22;border:1px solid ${col};
+            display:flex;align-items:center;justify-content:center;font-size:.55rem;font-family:'Cinzel',serif;font-weight:700">
+            ${(c.nom||'?')[0]}
+          </span>${_esc(c.nom || '?')}</span>`;
+      }).join('')}
+    </div>` : '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ach-lightbox';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.94);backdrop-filter:blur(14px);display:flex;align-items:center;justify-content:center;padding:40px;cursor:zoom-out;animation:lb-fade .22s ease';
+  overlay.innerHTML = `
+    <style>
+      @keyframes lb-fade  { from { opacity:0 } to { opacity:1 } }
+      @keyframes lb-scale { from { transform:scale(.92);opacity:0 } to { transform:scale(1);opacity:1 } }
+    </style>
+    ${item.imageUrl ? `<img style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:14px;
+      box-shadow:0 30px 90px rgba(0,0,0,.8);animation:lb-scale .28s cubic-bezier(.22,1,.36,1);pointer-events:none;display:block"
+      src="${item.imageUrl}">` : ''}
+    <div class="ach-lb-info" style="${item.imageUrl ? '' : 'position:static;background:transparent;padding:20px 0 0;text-align:center'}">
+      <div class="ach-lb-cat" style="background:${cat.glow};border-color:${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
+      <div class="ach-lb-title">${_esc(item.titre || 'Haut-Fait')}</div>
+      ${item.description ? `<div class="ach-lb-desc">${_esc(item.description)}</div>` : ''}
+      ${contribsHtml}
+    </div>
+    <button style="position:absolute;top:22px;right:26px;width:40px;height:40px;border-radius:50%;
+      background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff;
+      font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;
+      transition:background .15s" onmouseover="this.style.background='rgba(255,255,255,.2)'"
+      onmouseout="this.style.background='rgba(255,255,255,.1)'">✕</button>
+  `;
+
+  const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
+  overlay.addEventListener('click', close);
+  overlay.querySelector('button').addEventListener('click', e => { e.stopPropagation(); close(); });
+  const onKey = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+}
+// Alias backward-compat (ouverture directe par URL)
+window._achOpenImage = (url) => {
+  const item = (window._achItems || []).find(a => a.imageUrl === url);
+  if (item) { _achOpenLightbox(item.id); return; }
+  // Fallback : afficher juste l'image sans meta
+  const existing = document.getElementById('ach-lightbox');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'ach-lightbox';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+  overlay.innerHTML = `<img style="max-width:90vw;max-height:90vh;border-radius:12px" src="${url}">`;
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', close);
+  document.body.appendChild(overlay);
+};
 
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
@@ -556,18 +778,12 @@ PAGES.achievements = async function() {
     _loadOrder(),
   ]);
   window._achItems = _applyOrder(items, order);
-  await _origPage();
+  window._achFilter ??= 'all';
+  window._achView   ??= 'galerie';
+  window._achSearch ??= '';
 
-  // Justified layout pour la catégorie active
-  const catId  = window._achCat || 'epique';
-  const cat    = ACH_CATS.find(c => c.id === catId);
-  const grid   = document.getElementById(`ach-grid-${catId}`);
-  const catItems = (window._achItems || []).filter(a => (a.categorie || 'epique') === catId);
-
-  if (cat && grid && catItems.length) {
-    await _achRenderJustified(catId, catItems, cat, grid);
-    setupAchievementsDnd(catId);
-  }
+  await _origPage();    // génère le shell (hero + controls + #ach-content)
+  await _achRenderContent();
 };
 
 // ── EXPORTS ───────────────────────────────────────────────────────────────────
@@ -577,5 +793,6 @@ Object.assign(window, {
   editAchievement,
   deleteAchievement,
   setupAchievementsDnd,
-  _achOpenImage,
+  _achOpenLightbox,
+  _achRenderContent,
 });

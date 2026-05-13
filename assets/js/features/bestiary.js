@@ -36,9 +36,9 @@ function _isAdminView() {
 }
 
 const RANG_STYLE = {
-  classique: { label:'Classique', color:'#a0aec0',         border:'rgba(160,174,192,.45)',   bg:'rgba(160,174,192,.1)' },
-  elite:     { label:'Élite',     color:'#e8b84b',         border:'rgba(232,184,75,.4)',      bg:'rgba(232,184,75,.12)' },
-  boss:      { label:'Boss',      color:'#ff6b6b',         border:'rgba(255,107,107,.4)',     bg:'rgba(255,107,107,.12)' },
+  classique: { label:'Classique', color:'#94a3b8', glow:'rgba(148,163,184,0.18)', border:'rgba(148,163,184,0.40)', bg:'rgba(148,163,184,0.10)' },
+  elite:     { label:'Élite',     color:'#e8b84b', glow:'rgba(232,184,75,0.22)',  border:'rgba(232,184,75,0.40)',  bg:'rgba(232,184,75,0.12)'  },
+  boss:      { label:'Boss',      color:'#ff5a7e', glow:'rgba(255,90,126,0.24)',  border:'rgba(255,90,126,0.40)',  bg:'rgba(255,90,126,0.12)'  },
 };
 
 function _beastSearchText(c = {}) {
@@ -110,13 +110,27 @@ function _renderRelationCard(rel, ids, types) {
 
 function _renderDamageProfile(beast, types) {
   if (!beast) return '';
-  const cards = DMG_RELATIONS.map(rel => _renderRelationCard(rel, beast[rel.key], types)).filter(Boolean);
+  const cards = DMG_RELATIONS.map(rel => {
+    const ids = Array.isArray(beast[rel.key]) ? beast[rel.key] : [];
+    if (!ids.length) return null;
+    const tags = ids.map(id => {
+      const type = (types||[]).find(t => t.id === id);
+      const label = type ? `${type.icon||''} ${_esc(type.label)}` : _esc(id);
+      return `<span class="bst-dmg-tag" style="border-color:${rel.color}55;color:${rel.color}">${label}</span>`;
+    }).join('');
+    return `<div class="bst-dmg-card" style="border-color:${rel.color}33;border-left-color:${rel.color}">
+      <div class="bst-dmg-head">
+        <span class="bst-dmg-icon">${rel.icon}</span>
+        <span class="bst-dmg-name" style="color:${rel.color}">${rel.label}</span>
+        <span class="bst-dmg-rule">${rel.short}</span>
+      </div>
+      <div class="bst-dmg-tags">${tags}</div>
+    </div>`;
+  }).filter(Boolean);
   if (!cards.length) return '';
   return `<div class="bst-section">
     <div class="bst-section-title">🛡️ Relations aux dégâts</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem">
-      ${cards.join('')}
-    </div>
+    <div class="bst-dmg-grid">${cards.join('')}</div>
   </div>`;
 }
 
@@ -329,165 +343,163 @@ async function renderBestiary() {
 function _render() {
   const content = document.getElementById('main-content');
 
-  // Collecter tous les types distincts pour les boutons de filtre
   const allTypes = [...new Set(_creatures.map(c => c.type||'').filter(Boolean))].sort();
-
   const filtered = _creatures.filter(c => _beastMatchesFilters(c));
+
+  // Comptes par rang (total, sans filtre rang)
+  const byRang = { classique:0, elite:0, boss:0 };
+  _creatures.forEach(c => { const r = c.rang||'classique'; if (byRang[r]!==undefined) byRang[r]++; });
+
+  const ribbonData = [
+    { label:'Total',    icon:'🐾', count:_creatures.length, c:'#7eb0ff',              filter:'' },
+    { label:'Classique',icon:'◆',  count:byRang.classique,  c:RANG_STYLE.classique.color, filter:'classique' },
+    { label:'Élite',    icon:'★',  count:byRang.elite,      c:RANG_STYLE.elite.color,     filter:'elite'     },
+    { label:'Boss',     icon:'☠',  count:byRang.boss,       c:RANG_STYLE.boss.color,      filter:'boss'      },
+  ];
+
+  const bstList = window._bstBestiaireList || [{ id:'main', label:'Bestiaire principal' }];
+  const tabsHtml = STATE.isAdmin ? `
+    <div class="bst-tabs">
+      ${bstList.map(b => `
+        <button class="bst-tab${b.id===_bestiaireId?' active':''}" onclick="window._bstSwitchBestiaire('${b.id}')">
+          📜 ${_esc(b.label)}
+        </button>`).join('')}
+      <button class="bst-tab add" onclick="window._bstCreateBestiaire()">+ Nouveau</button>
+    </div>` : '';
 
   content.innerHTML = `
   <div class="bst-page ${_activeId ? 'has-panel' : 'no-panel'}">
 
-  <!-- ═══ HEADER ═════════════════════════════════════════════════════════════ -->
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem">
-    <div>
-      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:.2rem">Encyclopédie</div>
-      <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;color:var(--gold);letter-spacing:2px;margin:0">Bestiaire</h1>
-      ${STATE.isAdmin && (window._bstBestiaireList||[]).length > 1 ? `
-      <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.55rem">
-        ${(window._bstBestiaireList||[]).map(b => `
-          <button onclick="window._bstSwitchBestiaire('${b.id}')"
-            style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-            border:1px solid ${b.id===_bestiaireId?'var(--gold)':'var(--border)'};
-            background:${b.id===_bestiaireId?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-            color:${b.id===_bestiaireId?'var(--gold)':'var(--text-dim)'};font-weight:${b.id===_bestiaireId?'700':'400'}">
-            ${b.label}
-          </button>`).join('')}
-        <button onclick="window._bstCreateBestiaire()"
-          style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-          border:1px dashed var(--border);background:transparent;color:var(--text-dim)">
-          + Nouveau
-        </button>
-      </div>` : ''}
-      ${STATE.isAdmin && _playersList.length ? _renderPlayerAvatars() : ''}
+  <!-- ═ HERO ═══════════════════════════════════════════════════════════════ -->
+  <div class="bst-hero">
+    <div class="bst-hero-row">
+      <div class="bst-hero-title-block">
+        <div class="bst-eyebrow">Encyclopédie des Créatures</div>
+        <h1 class="bst-title">✦ Cartulaire des Bêtes ✦</h1>
+        <p class="bst-subtitle">— Ce qui rôde au-delà des cendres —</p>
+      </div>
+      ${tabsHtml ? `<div>${tabsHtml}</div>` : ''}
     </div>
+
+    <div class="bst-ribbon">
+      ${ribbonData.map(r => `
+        <div class="bst-ribbon-item${(!r.filter && !_filterRang)||(r.filter && _filterRang===r.filter)?' active':''}"
+          style="--c:${r.c}"
+          onclick="window._bstSetRang('${r.filter}')">
+          <div class="bst-ribbon-icon">${r.icon}</div>
+          <div>
+            <div class="bst-ribbon-num">${r.count}</div>
+            <div class="bst-ribbon-lbl">${r.label}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+
+    ${STATE.isAdmin && _playersList.length ? _renderPlayerAvatars() : ''}
   </div>
 
   ${_isViewingPlayer() ? `
-  <div style="display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;margin-bottom:.75rem;
-    border:1px solid rgba(79,140,255,.35);background:rgba(79,140,255,.08);border-radius:8px">
-    <span style="font-size:.8rem">👁</span>
+  <div style="display:flex;align-items:center;gap:.6rem;padding:.6rem 2rem;
+    border-bottom:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.06)">
+    <span>👁</span>
     <span style="font-size:.78rem;color:var(--text)">
-      Vue du bestiaire de <strong style="color:#4f8cff">${_esc(_playersList.find(p=>p.uid===_viewAsUid)?.pseudo || '?')}</strong>
+      Vue du bestiaire de <strong style="color:#4f8cff">${_esc(_playersList.find(p=>p.uid===_viewAsUid)?.pseudo||'?')}</strong>
       — tes modifications sont enregistrées chez ce joueur.
     </span>
-    <button onclick="window._bstViewAs('')" style="margin-left:auto;font-size:.7rem;padding:2px 10px;
+    <button onclick="window._bstViewAs('')" style="margin-left:auto;font-size:.7rem;padding:3px 10px;
       border-radius:999px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);cursor:pointer">
       Revenir à la vue MJ
     </button>
   </div>` : ''}
 
-  <!-- ═══ LAYOUT : grille + panneau ════════════════════════════════════════ -->
-  <div class="bst-layout ${_activeId ? 'has-panel' : 'no-panel'}">
-    <div class="bst-main">
-      <div class="bst-controls">
-        <!-- Filtres par type -->
-        ${allTypes.length > 1 ? `
-        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.5rem">
-          <button onclick="window._bstSetType('')"
-            style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-            border:1px solid ${!_filterType?'var(--gold)':'var(--border)'};
-            background:${!_filterType?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-            color:${!_filterType?'var(--gold)':'var(--text-dim)'};font-weight:${!_filterType?'700':'400'}">
-            Tous
-          </button>
-          ${allTypes.map(t => `
-          <button onclick="window._bstSetType('${t.replace(/'/g,"\\'")}')"
-            style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-            border:1px solid ${_norm(_filterType)===_norm(t)?'var(--gold)':'var(--border)'};
-            background:${_norm(_filterType)===_norm(t)?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-            color:${_norm(_filterType)===_norm(t)?'var(--gold)':'var(--text-dim)'};
-            font-weight:${_norm(_filterType)===_norm(t)?'700':'400'}">
-            ${t}
-          </button>`).join('')}
-        </div>` : ''}
-        <!-- Filtres par rang -->
-        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:1rem">
-          <button onclick="window._bstSetRang('')"
-            style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-            border:1px solid ${!_filterRang?'var(--gold)':'var(--border)'};
-            background:${!_filterRang?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-            color:${!_filterRang?'var(--gold)':'var(--text-dim)'};font-weight:${!_filterRang?'700':'400'}">
-            Tous rangs
-          </button>
-          ${Object.entries(RANG_STYLE).map(([r, rst]) => {
-            const active = _filterRang === r;
-            return `<button onclick="window._bstSetRang('${r}')"
-              style="font-size:.72rem;padding:2px 10px;border-radius:999px;cursor:pointer;
-              border:1px solid ${active?rst.border:'var(--border)'};
-              background:${active?rst.bg:'var(--bg-elevated)'};
-              color:${active?rst.color:'var(--text-dim)'};font-weight:${active?'700':'400'}">
-              ${rst.label}
-            </button>`;
-          }).join('')}
-        </div>
-        <div class="bst-tools" style="display:flex;gap:.5rem;align-items:center">
-          <input id="bst-search" type="text" placeholder="🔍 Rechercher..."
-            class="input-field" value="${_searchVal}" style="flex:1"
-            oninput="window._bstSearchInput(this.value)">
-          ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="flex-shrink:0" onclick="openBeastModal()">+ Créature</button>` : ''}
-        </div>
-      </div>
+  <!-- ═ CONTROLS ════════════════════════════════════════════════════════════ -->
+  <div class="bst-controls-bar">
+    <div class="bst-search-wrap">
+      <span style="color:var(--text-dim);font-size:.9rem;flex-shrink:0">🔍</span>
+      <input type="text" id="bst-search" placeholder="Rechercher…"
+        value="${_esc(_searchVal)}"
+        oninput="window._bstSearchInput(this.value)"
+        style="background:none;border:none;outline:none;color:var(--text);font-size:.8rem;flex:1;min-width:0">
+    </div>
+    <div class="chip-row">
+      <button class="chip${!_filterType?' active':''}" onclick="window._bstSetType('')">Tous</button>
+      ${allTypes.map(t => `
+        <button class="chip${_norm(_filterType)===_norm(t)?' active':''}"
+          onclick="window._bstSetType('${t.replace(/'/g,"\\'")}')">
+          ${_esc(t)}
+        </button>`).join('')}
+    </div>
+    ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="white-space:nowrap;flex-shrink:0" onclick="openBeastModal()">+ Créature</button>` : ''}
+  </div>
 
+  <!-- ═ LAYOUT ═══════════════════════════════════════════════════════════════ -->
+  <div class="bst-layout ${_activeId ? 'has-panel' : 'no-panel'}">
+    <div class="bst-grid-wrap">
       ${filtered.length === 0 ? `
-        <div style="text-align:center;padding:4rem;color:var(--text-dim)">
-          <div style="font-size:3rem;margin-bottom:.75rem;opacity:.3">🐉</div>
-          <p style="font-style:italic">${_creatures.length === 0 ? 'Aucune créature dans le bestiaire.' : 'Aucun résultat pour ce filtre.'}</p>
-          ${STATE.isAdmin && _creatures.length === 0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openBeastModal()">+ Ajouter la première créature</button>` : ''}
-        </div>
-      ` : `
-      <div class="bst-grid">
-        ${filtered.map(c => _renderCard(c)).join('')}
-      </div>
-      `}
+        <div class="bst-empty">
+          <div class="bst-empty-icon">🐉</div>
+          <div class="bst-empty-title">${_creatures.length===0 ? 'Aucune créature dans le bestiaire' : 'Aucun résultat'}</div>
+          <div class="bst-empty-sub">${_creatures.length===0 ? 'Ajoutez la première créature pour commencer.' : 'Essayez un filtre différent.'}</div>
+          ${STATE.isAdmin && _creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openBeastModal()">+ Ajouter la première créature</button>` : ''}
+        </div>` : `
+        <div class="bst-grid">
+          ${filtered.map(c => _renderCard(c)).join('')}
+        </div>`}
     </div>
 
     <div class="bst-panel-slot">
       ${_activeId ? _renderPanel(_creatures.find(c => c.id === _activeId)) : ''}
     </div>
   </div>
-  </div>
-  `;
+  </div>`;
 }
 
 // ── Card créature ─────────────────────────────────────────────────────────────
 function _renderCard(c) {
-  const isActive  = c.id === _activeId;
-  const track     = _tracker[c.id] || {};
-  const rang      = c.rang || 'classique';
-  const rs        = RANG_STYLE[rang] || RANG_STYLE.classique;
+  const isActive = c.id === _activeId;
+  const rang     = c.rang || 'classique';
+  const rs       = RANG_STYLE[rang] || RANG_STYLE.classique;
+  const track    = _tracker[c.id] || {};
 
-  // Admin uniquement : barre de PV avec max connu
-  const pvMax    = _isAdminView() ? (parseInt(c.pvMax) || 0) : 0;
+  const pvMax    = _isAdminView() ? (parseInt(c.pvMax)||0) : 0;
   const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
   const pvPct    = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel/pvMax*100))) : 0;
-  const pvColor  = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#e8b84b' : '#ff6b6b';
 
-  return `<div class="bst-card ${isActive?'active':''}" data-beast-id="${_esc(c.id)}" onclick="window._bstOpen('${c.id}')">
+  return `<div class="bst-card${isActive?' active':''}"
+    style="--rang-c:${rs.color};--rang-glow:${rs.glow}"
+    data-beast-id="${_esc(c.id)}"
+    onclick="window._bstOpen('${c.id}')">
+
     ${c.imageUrl
-      ? `<img class="bst-img" src="${c.imageUrl}" alt="${c.nom||''}" loading="lazy">`
-      : `<div class="bst-img-placeholder">${c.emoji||'🐲'}</div>`
-    }
+      ? `<img class="bst-card-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}" loading="lazy">`
+      : `<div class="bst-card-empty">${c.emoji||'🐲'}</div>`}
+
+    <div class="bst-card-rang">${_esc(rs.label)}</div>
+    ${c.niveau ? `<div class="bst-card-niveau">${c.niveau}</div>` : ''}
+
     <div class="bst-card-body">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.3rem">
-        <div class="bst-card-name">${c.nom||'?'}</div>
-        ${rang !== 'classique' ? `<span style="flex-shrink:0;font-size:.6rem;padding:1px 5px;border-radius:999px;border:1px solid ${rs.border};color:${rs.color};background:${rs.bg};margin-top:2px">${rs.label}</span>` : ''}
-      </div>
-      <div class="bst-card-meta">
-        ${c.type?`${c.type}`:''}${c.type&&c.environnement?' · ':''}${c.environnement||''}
-      </div>
-      ${_isAdminView() && pvMax > 0 ? `
-      <div style="margin-top:.5rem">
-        <div class="bst-track-bar">
-          <div class="bst-track-fill" style="width:${pvPct}%;background:${pvColor}"></div>
-        </div>
-        <div style="font-size:.65rem;color:var(--text-dim)">${pvActuel}/${pvMax} PV</div>
+      <div class="bst-card-name">${_esc(c.nom||'?')}</div>
+      ${c.type||c.environnement
+        ? `<div class="bst-card-meta">${_esc([c.type,c.environnement].filter(Boolean).join(' · '))}</div>`
+        : ''}
+
+      ${_isAdminView() && (c.pvMax||c.ca||c.vitesse) ? `
+      <div class="bst-card-stats">
+        ${c.pvMax   ? `<span class="bst-card-stat">❤️ ${c.pvMax}</span>`   : ''}
+        ${c.ca      ? `<span class="bst-card-stat">🛡️ ${c.ca}</span>`      : ''}
+        ${c.vitesse ? `<span class="bst-card-stat">💨 ${c.vitesse}m</span>` : ''}
       </div>` : ''}
-      ${_isAdminView() ? _renderDamageProfileMini(c) : ''}
+
+      ${_isAdminView() && pvMax > 0 ? `
+      <div class="bst-card-pv">
+        <div class="bst-card-pv-fill" style="width:${pvPct}%"></div>
+      </div>
+      <div class="bst-card-pv-lbl"><span>${pvActuel} PV</span><span>/ ${pvMax}</span></div>` : ''}
     </div>
+
     ${STATE.isAdmin ? `
-    <div style="display:flex;gap:3px;padding:.4rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
+    <div style="display:flex;gap:3px;padding:.35rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
       <button class="btn-icon" style="font-size:.7rem" onclick="event.stopPropagation();openBeastModal('${c.id}')">✏️</button>
-      <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="event.stopPropagation();deleteBeast('${c.id}')">🗑️</button>
+      <button class="btn-icon" style="font-size:.7rem;color:#ff5a7e" onclick="event.stopPropagation();deleteBeast('${c.id}')">🗑️</button>
     </div>` : ''}
   </div>`;
 }
@@ -498,272 +510,230 @@ function _renderPanel(c) {
   const rang  = c.rang || 'classique';
   const rs    = RANG_STYLE[rang] || RANG_STYLE.classique;
   const track = _tracker[c.id] || {};
-  const pvMax    = parseInt(c.pvMax) || 0;
-  const pmMax    = parseInt(c.pmMax) || 0;
-  const pvActuel  = track.pvActuel   !== undefined ? parseInt(track.pvActuel)   : 0;
-  const pmActuel  = track.pmActuel   !== undefined ? parseInt(track.pmActuel)   : 0;
-  const caEstimee = track.caEstimee  !== undefined ? parseInt(track.caEstimee)  : 0;
-  const vitEstimee= track.vitEstimee !== undefined ? parseInt(track.vitEstimee) : 0;
+  const ded   = track.deductions || {};
 
-  const attaques = Array.isArray(c.attaques) ? c.attaques : [];
-  const traits   = Array.isArray(c.traits)   ? c.traits   : [];
-  const butins   = Array.isArray(c.butins)   ? c.butins   : [];
+  const pvMax     = parseInt(c.pvMax)    || 0;
+  const pmMax     = parseInt(c.pmMax)    || 0;
+  const pvActuel  = track.pvActuel  !== undefined ? parseInt(track.pvActuel)  : (pvMax || 0);
+  const pmActuel  = track.pmActuel  !== undefined ? parseInt(track.pmActuel)  : (pmMax || 0);
+  const caEstimee = track.caEstimee !== undefined ? parseInt(track.caEstimee) : 0;
+  const vitEstimee= track.vitEstimee!== undefined ? parseInt(track.vitEstimee): 0;
+  const pvPct     = pvMax > 0 ? Math.round(pvActuel / pvMax * 100) : 0;
+  const pmPct     = pmMax > 0 ? Math.round(pmActuel / pmMax * 100) : 0;
+
+  const attaques  = Array.isArray(c.attaques) ? c.attaques : [];
+  const traits    = Array.isArray(c.traits)   ? c.traits   : [];
+  const butins    = Array.isArray(c.butins)   ? c.butins   : [];
   const description = c.description == null ? '' : String(c.description);
 
-  // ── Blocs partagés MJ + Joueur ───────────────────────────────────────────
-  const headerHtml = `
-    <div style="position:relative">
+  // Calcul modificateur D&D : floor((stat - 10) / 2)
+  const mod = (val) => {
+    const n = parseInt(val);
+    if (!val || isNaN(n)) return null;
+    const m = Math.floor((n - 10) / 2);
+    return m >= 0 ? `+${m}` : `${m}`;
+  };
+
+  // ── Hero du panneau ──────────────────────────────────────────────────────
+  const heroHtml = `
+    <div class="bst-panel-hero">
       ${c.imageUrl
-        ? `<img class="bst-panel-img" src="${c.imageUrl}" alt="${c.nom||''}">`
-        : `<div style="height:200px;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));display:flex;align-items:center;justify-content:center;font-size:5rem">${c.emoji||'🐲'}</div>`
-      }
-      <button onclick="window._bstClose()" style="position:absolute;top:10px;right:10px;background:rgba(11,17,24,.8);border:1px solid var(--border);border-radius:999px;color:var(--text-muted);padding:3px 8px;cursor:pointer;font-size:.8rem">✕</button>
-      <div style="position:absolute;bottom:10px;left:12px">
-        <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap">
-          <div style="font-family:'Cinzel',serif;font-size:1.2rem;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.8);font-weight:700">${c.nom||'?'}</div>
-          ${rang !== 'classique' ? `<span style="font-size:.65rem;padding:2px 7px;border-radius:999px;border:1px solid ${rs.border};color:${rs.color};background:rgba(0,0,0,.55)">${rs.label}</span>` : ''}
-        </div>
-        ${c.type||c.environnement ? `<div style="font-size:.72rem;color:rgba(255,255,255,.75)">${[c.type,c.environnement].filter(Boolean).join(' · ')}</div>` : ''}
+        ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}">`
+        : `<div class="bst-panel-empty">${c.emoji||'🐲'}</div>`}
+      ${_isAdminView() ? `<div class="bst-panel-mj-badge">MJ</div>` : ''}
+      <button class="bst-panel-close" onclick="window._bstClose()">✕</button>
+      <div class="bst-panel-hero-info">
+        <div class="bst-panel-rang">${_esc(rs.label)}</div>
+        <div class="bst-panel-name">${_esc(c.nom||'?')}</div>
+        ${c.type||c.environnement
+          ? `<div class="bst-panel-meta">${_esc([c.type,c.environnement].filter(Boolean).join(' · '))}</div>`
+          : ''}
       </div>
     </div>`;
 
-  const attaquesHtml = attaques.length ? `
+  // ── Vitaux (5) ───────────────────────────────────────────────────────────
+  // MJ : valeurs réelles (lecture seule, depuis c.pvMax / c.pmMax / c.ca / …)
+  // Joueur : estimations modifiables (track.pvActuel, etc.) — synchronisées
+  //          avec le VTT en temps réel (saisie ici → "?" disparaît côté VTT).
+  const _estCell = (cls, lbl, trackKey, trackVal) => `
+    <div class="bst-stat-cell ${cls}">
+      <input type="number" id="bst-${cls}-${c.id}"
+        value="${trackVal || ''}" placeholder="?" min="0"
+        class="bst-stat-track-input"
+        onchange="window._bstSetStat('${c.id}','${trackKey}',this.value)">
+      <div class="bst-stat-lbl">${lbl}</div>
+    </div>`;
+
+  const _staticCell = (cls, lbl, val) => `
+    <div class="bst-stat-cell ${cls}">
+      <div class="bst-stat-val">${val || '—'}</div>
+      <div class="bst-stat-lbl">${lbl}</div>
+    </div>`;
+
+  const vitalsHtml = `
     <div class="bst-section">
-      <div class="bst-section-title">⚔️ Attaques</div>
-      ${attaques.map(a => `
-        <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:var(--bg-elevated);border-radius:8px;border-left:2px solid #ff6b6b">
-          <div style="font-size:.82rem;font-weight:600;color:var(--text)">${a.nom||'Attaque'}</div>
-          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.2rem">
-            ${a.toucher ? `<span style="font-size:.72rem;color:#e8b84b">🎯 ${a.toucher}</span>` : ''}
-            ${a.degats  ? `<span style="font-size:.72rem;color:#ff6b6b">⚔️ ${a.degats}</span>` : ''}
-            ${a.portee  ? `<span style="font-size:.72rem;color:var(--text-dim)">📏 ${a.portee}</span>` : ''}
-          </div>
-          ${a.description ? `<div style="font-size:.75rem;color:var(--text-dim);margin-top:.2rem;font-style:italic">${a.description}</div>` : ''}
-        </div>`).join('')}
+      <div class="bst-section-title">Statistiques</div>
+      <div class="bst-stats-base">
+        ${_isAdminView() ? `
+          ${_staticCell('pv',  'PV',   c.pvMax)}
+          ${_staticCell('pm',  'PM',   c.pmMax)}
+          ${_staticCell('ca',  'CA',   c.ca)}
+          ${_staticCell('vit', 'Vit.', c.vitesse ? c.vitesse+'m' : '')}
+          ${_staticCell('init','Init.',c.initiative)}
+        ` : `
+          ${_estCell('pv',  'PV',   'pvActuel',   pvActuel)}
+          ${_estCell('pm',  'PM',   'pmActuel',   pmActuel)}
+          ${_estCell('ca',  'CA',   'caEstimee',  caEstimee)}
+          ${_estCell('vit', 'Vit.', 'vitEstimee', vitEstimee)}
+          ${_staticCell('init','Init.', '')}
+        `}
+      </div>
+      ${(_isAdminView() && (c.niveau || c.dangerositeXp)) ? `
+      <div class="bst-tag-row">
+        ${c.niveau        ? `<span class="bst-tag">Niv. ${c.niveau}</span>` : ''}
+        ${c.dangerositeXp ? `<span class="bst-tag">⭐ ${c.dangerositeXp} XP</span>` : ''}
+      </div>` : ''}
+    </div>`;
+
+  // ── Caracs (6) : MJ seulement ────────────────────────────────────────────
+  const caracsHtml = _isAdminView() ? `
+    <div class="bst-section">
+      <div class="bst-section-title">Caractéristiques</div>
+      <div class="bst-caracs">
+        ${[
+          ['FOR', c.force],['DEX', c.dexterite],['CON', c.constitution],
+          ['INT', c.intelligence],['SAG', c.sagesse],['CHA', c.charisme],
+        ].map(([lbl, val]) => {
+          const m = mod(val);
+          const posNeg = !m ? 'zero' : parseInt(m) > 0 ? 'pos' : 'neg';
+          return `<div class="bst-carac">
+            <div class="bst-carac-val">${val||'—'}</div>
+            ${m ? `<div class="bst-carac-mod ${posNeg}">${m}</div>` : ''}
+            <div class="bst-carac-lbl">${lbl}</div>
+          </div>`;
+        }).join('')}
+      </div>
     </div>` : '';
 
-  const traitsHtml = traits.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">✨ Traits & Capacités</div>
-      ${traits.map(t => `
-        <div style="margin-bottom:.4rem;padding:.4rem .6rem;border-left:2px solid #b47fff;background:var(--bg-elevated);border-radius:0 8px 8px 0">
-          <div style="font-size:.8rem;font-weight:600;color:var(--text)">${t.nom||''}</div>
-          ${t.description ? `<div style="font-size:.75rem;color:var(--text-muted);margin-top:.1rem">${t.description}</div>` : ''}
-        </div>`).join('')}
-    </div>` : '';
-
-  const butinsHtml = butins.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">💰 Butins</div>
-      ${butins.map(b => `
-        <div class="bst-row">
-          <span class="bst-row-label">${b.nom||'Objet'}</span>
-          <span class="bst-row-val">${b.quantite||''}${b.chance?` — ${b.chance}`:''}</span>
-        </div>`).join('')}
-    </div>` : '';
-
+  // ── Description ──────────────────────────────────────────────────────────
   const descHtml = description ? `
     <div class="bst-section">
-      <div class="bst-section-title">📖 Description</div>
-      <div style="font-size:.82rem;color:var(--text-muted);line-height:1.7">${_esc(description).replace(/\n/g,'<br>')}</div>
+      <div class="bst-section-title">Description</div>
+      <div class="bst-desc">${_esc(description).replace(/\n/g,'<br>')}</div>
     </div>` : '';
 
-  const damageProfileHtml = _renderDamageProfile(c, _damageTypes);
+  // ── Relations aux dégâts : MJ SEULEMENT ─────────────────────────────────
+  const dmgHtml = _isAdminView() ? _renderDamageProfile(c, _damageTypes) : '';
 
-  // ── Suivi combat (commun, adapté selon vue) ──────────────────────────────
-  const suiviHtml = (showBars) => `
+
+  // ── Attaques MJ ──────────────────────────────────────────────────────────
+  const attaquesHtml = _isAdminView() && attaques.length ? `
     <div class="bst-section">
-      <div class="bst-section-title">📊 Suivi en combat</div>
-      <div style="display:grid;grid-template-columns:${showBars?'1fr 1fr':'1fr 1fr 1fr'};gap:.75rem">
-        <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem">
-            <span style="font-size:.72rem;color:var(--text-dim)">❤️ PV</span>
-            <div style="display:flex;align-items:center;gap:.3rem">
-              <button onclick="window._bstAdjust('${c.id}','pv',-1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">−</button>
-              <input type="number" class="bst-input-sm" id="bst-pv-${c.id}" value="${pvActuel}" min="0"
-                onchange="window._bstSetStat('${c.id}','pvActuel',this.value)">
-              <button onclick="window._bstAdjust('${c.id}','pv',1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">+</button>
-            </div>
+      <div class="bst-section-title">⚔️ Attaques <span class="bst-section-count">${attaques.length}</span></div>
+      ${attaques.map(a => `
+        <div class="bst-atk">
+          <div class="bst-atk-name">${_esc(a.nom||'Attaque')}</div>
+          <div class="bst-atk-stats">
+            ${a.toucher ? `<span class="bst-atk-stat touch">🎯 ${_esc(a.toucher)}</span>` : ''}
+            ${a.degats  ? `<span class="bst-atk-stat dmg">⚔️ ${_esc(a.degats)}</span>`   : ''}
+            ${a.portee  ? `<span class="bst-atk-stat range">📏 ${_esc(a.portee)}</span>` : ''}
           </div>
-          ${showBars ? `
-          <div class="bst-track-bar"><div class="bst-track-fill" id="bst-pvbar-${c.id}" style="width:${pvMax>0?Math.round(pvActuel/pvMax*100):0}%;background:${pvMax>0&&pvActuel/pvMax>0.5?'#22c38e':pvMax>0&&pvActuel/pvMax>0.25?'#e8b84b':'#ff6b6b'}"></div></div>
-          <div style="font-size:.62rem;color:var(--text-dim)">${pvActuel}/${pvMax} PV</div>` :
-          `<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">PV estimés</div>`}
-        </div>
-        <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem">
-            <span style="font-size:.72rem;color:var(--text-dim)">💙 PM</span>
-            <div style="display:flex;align-items:center;gap:.3rem">
-              <button onclick="window._bstAdjust('${c.id}','pm',-1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">−</button>
-              <input type="number" class="bst-input-sm" id="bst-pm-${c.id}" value="${pmActuel}" min="0"
-                onchange="window._bstSetStat('${c.id}','pmActuel',this.value)">
-              <button onclick="window._bstAdjust('${c.id}','pm',1)" style="width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:.9rem;color:var(--text)">+</button>
-            </div>
-          </div>
-          ${showBars ? `
-          <div class="bst-track-bar"><div class="bst-track-fill" id="bst-pmbar-${c.id}" style="width:${pmMax>0?Math.round(pmActuel/pmMax*100):0}%;background:#4f8cff"></div></div>
-          <div style="font-size:.62rem;color:var(--text-dim)">${pmActuel}/${pmMax} PM</div>` :
-          `<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">PM estimés</div>`}
-        </div>
-        ${!showBars ? `
-        <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem">
-            <span style="font-size:.72rem;color:var(--text-dim)">🛡 CA</span>
-            <input type="number" class="bst-input-sm" id="bst-ca-${c.id}" value="${caEstimee}" min="0"
-              onchange="window._bstSetStat('${c.id}','caEstimee',this.value)">
-          </div>
-          <div style="font-size:.62rem;color:var(--text-dim);font-style:italic">CA estimée</div>
-        </div>` : ''}
-      </div>
-      ${!showBars ? `
-      <div style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem">
-        <span style="font-size:.72rem;color:var(--text-dim);flex:1">🏃 Vitesse estimée (cases)</span>
-        <input type="number" class="bst-input-sm" id="bst-vit-${c.id}" value="${vitEstimee}" min="0"
-          onchange="window._bstSetStat('${c.id}','vitEstimee',this.value)">
-      </div>` : ''}
-      <div style="margin-top:.6rem">
-        <textarea id="bst-notes-${c.id}" placeholder="Notes de combat..." rows="2"
-          class="input-field" style="font-size:.78rem;resize:none"
-          onchange="window._bstSetNotes('${c.id}',this.value)">${track.notes||''}</textarea>
-      </div>
-      <button onclick="window._bstReset('${c.id}')"
-        style="font-size:.7rem;color:var(--text-dim);background:none;border:none;cursor:pointer;margin-top:.25rem;text-decoration:underline">
-        Réinitialiser
-      </button>
-    </div>`;
+          ${a.description ? `<div class="bst-atk-desc">${_esc(a.description)}</div>` : ''}
+        </div>`).join('')}
+    </div>` : '';
 
-  // ── VUE ADMIN ─────────────────────────────────────────────────────────────
-  if (_isAdminView()) {
-    // Calcul modificateur D&D : floor((stat - 10) / 2)
-    const mod = (val) => {
-      const n = parseInt(val);
-      if (!val || isNaN(n)) return null;
-      const m = Math.floor((n - 10) / 2);
-      return m >= 0 ? `+${m}` : `${m}`;
-    };
-    const statCaracs = [
-      ['FOR', c.force], ['DEX', c.dexterite], ['CON', c.constitution],
-      ['INT', c.intelligence], ['SAG', c.sagesse], ['CHA', c.charisme],
-    ];
-    const statBase = [
-      ['PV', c.pvMax||'—'], ['PM', c.pmMax||'—'], ['CA', c.ca||'—'],
-      ['Vit.', c.vitesse ? `${c.vitesse}m` : '—'], ['Init.', c.initiative||'—'],
-    ];
-    return `
-    <div class="bst-panel" style="position:sticky;top:1rem">
-      ${headerHtml}
-      <div style="position:absolute;top:10px;left:10px;background:rgba(79,140,255,.85);border-radius:6px;padding:2px 8px;font-size:.62rem;font-weight:700;color:#fff;letter-spacing:1px">MJ</div>
-      <div class="bst-section">
-        <div class="bst-section-title">📈 Statistiques</div>
-        <!-- Stats de base : PV / PM / CA / Vit / Init -->
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem;margin-bottom:.5rem">
-          ${statBase.map(([l,v]) => `
-            <div class="bst-stat">
-              <div class="bst-stat-val">${v}</div>
-              <div class="bst-stat-lbl">${l}</div>
-            </div>`).join('')}
-        </div>
-        <!-- Caractéristiques avec modificateur -->
-        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.4rem">
-          ${statCaracs.map(([l,v]) => {
-            const m = mod(v);
-            return `<div class="bst-stat">
-              <div class="bst-stat-val" style="font-size:.82rem">${v||'—'}</div>
-              ${m ? `<div style="font-size:.68rem;color:${parseInt(m)>=0?'#22c38e':'#ff6b6b'};font-weight:600">${m}</div>` : ''}
-              <div class="bst-stat-lbl">${l}</div>
-            </div>`;
-          }).join('')}
-        </div>
-        ${c.niveau||c.dangerositeXp ? `
-        <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
-          ${c.niveau        ? `<span class="bst-tag">Niv. ${c.niveau}</span>` : ''}
-          ${c.dangerositeXp ? `<span class="bst-tag">⭐ ${c.dangerositeXp} XP</span>` : ''}
-        </div>` : ''}
-      </div>
-      ${suiviHtml(true)}
-      ${damageProfileHtml}
-      ${descHtml}
-      ${attaquesHtml}
-      ${traitsHtml}
-      ${butinsHtml}
-      <div class="bst-section" style="display:flex;gap:.5rem">
-        <button class="btn btn-outline btn-sm" style="flex:1" onclick="openBeastModal('${c.id}')">✏️ Modifier</button>
-        <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)" onclick="deleteBeast('${c.id}')">🗑️</button>
-      </div>
-    </div>`;
-  }
-
-  // ── VUE JOUEUR ────────────────────────────────────────────────────────────
-  // Lignes vides à deviner : autant de lignes que le MJ a créées,
-  // mais sans aucune valeur — les joueurs remplissent eux-mêmes.
-  const ded = (track.deductions || {});
-
-  const attaquesJoueurHtml = attaques.length ? `
+  // ── Traits MJ ────────────────────────────────────────────────────────────
+  const traitsHtml = _isAdminView() && traits.length ? `
     <div class="bst-section">
-      <div class="bst-section-title">⚔️ Attaques <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">${attaques.length} observée${attaques.length>1?'s':''}</span></div>
+      <div class="bst-section-title">✨ Traits & Capacités <span class="bst-section-count">${traits.length}</span></div>
+      ${traits.map(t => `
+        <div class="bst-trait">
+          <div class="bst-trait-name">${_esc(t.nom||'')}</div>
+          ${t.description ? `<div class="bst-trait-desc">${_esc(t.description)}</div>` : ''}
+        </div>`).join('')}
+    </div>` : '';
+
+  // ── Butins MJ (jamais joueur) ─────────────────────────────────────────────
+  const butinsHtml = _isAdminView() && butins.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">💰 Butins <span class="bst-section-count">${butins.length}</span></div>
+      <div class="bst-loots">
+        ${butins.map(b => `
+          <div class="bst-loot">
+            <span class="bst-loot-name">${_esc(b.nom||'Objet')}</span>
+            ${b.quantite ? `<span class="bst-loot-qty">${_esc(b.quantite)}</span>` : ''}
+            ${b.chance   ? `<span class="bst-loot-chance">${_esc(b.chance)}</span>` : ''}
+          </div>`).join('')}
+      </div>
+    </div>` : '';
+
+  // ── Attaques Joueur : lignes vides à compléter ────────────────────────────
+  const attaquesJoueurHtml = !_isAdminView() && attaques.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">⚔️ Attaques
+        <span class="bst-section-count">${attaques.length} observée${attaques.length>1?'s':''}</span>
+      </div>
       ${attaques.map((_, i) => `
-        <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:var(--bg-elevated);border-radius:8px;border-left:2px solid rgba(255,107,107,.35)">
-          <input class="input-field" style="font-size:.8rem;font-weight:600;padding:3px 6px;margin-bottom:.25rem;width:100%"
-            placeholder="Nom de l'attaque..."
-            value="${(ded['att_nom_'+i]||'')}"
+        <div class="bst-atk">
+          <input class="bst-deduct-input" style="margin-bottom:6px;font-weight:600"
+            placeholder="Nom de l'attaque…"
+            value="${_esc(ded['att_nom_'+i]||'')}"
             onchange="window._bstSetDeduction('${c.id}','att_nom_${i}',this.value)">
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.3rem">
-            <input class="input-field" style="font-size:.72rem;padding:2px 5px"
-              placeholder="🎯 Toucher"
-              value="${(ded['att_toucher_'+i]||'')}"
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
+            <input class="bst-deduct-input" placeholder="🎯 Toucher"
+              value="${_esc(ded['att_toucher_'+i]||'')}"
               onchange="window._bstSetDeduction('${c.id}','att_toucher_${i}',this.value)">
-            <input class="input-field" style="font-size:.72rem;padding:2px 5px"
-              placeholder="⚔️ Dégâts"
-              value="${(ded['att_degats_'+i]||'')}"
+            <input class="bst-deduct-input" placeholder="⚔️ Dégâts"
+              value="${_esc(ded['att_degats_'+i]||'')}"
               onchange="window._bstSetDeduction('${c.id}','att_degats_${i}',this.value)">
-            <input class="input-field" style="font-size:.72rem;padding:2px 5px"
-              placeholder="📏 Portée"
-              value="${(ded['att_portee_'+i]||'')}"
+            <input class="bst-deduct-input" placeholder="📏 Portée"
+              value="${_esc(ded['att_portee_'+i]||'')}"
               onchange="window._bstSetDeduction('${c.id}','att_portee_${i}',this.value)">
           </div>
         </div>`).join('')}
     </div>` : '';
 
-  const traitsJoueurHtml = traits.length ? `
+  // ── Traits Joueur : lignes vides à compléter ──────────────────────────────
+  const traitsJoueurHtml = !_isAdminView() && traits.length ? `
     <div class="bst-section">
-      <div class="bst-section-title">✨ Traits & Capacités <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">${traits.length} trait${traits.length>1?'s':''}</span></div>
+      <div class="bst-section-title">✨ Traits & Capacités
+        <span class="bst-section-count">${traits.length} trait${traits.length>1?'s':''}</span>
+      </div>
       ${traits.map((_, i) => `
-        <div style="margin-bottom:.4rem;padding:.4rem .6rem;border-left:2px solid rgba(180,127,255,.35);background:var(--bg-elevated);border-radius:0 8px 8px 0">
-          <input class="input-field" style="font-size:.8rem;font-weight:600;padding:3px 6px;margin-bottom:.2rem;width:100%"
-            placeholder="Nom du trait..."
-            value="${(ded['tr_nom_'+i]||'')}"
+        <div class="bst-trait">
+          <input class="bst-deduct-input" style="margin-bottom:5px;font-weight:600"
+            placeholder="Nom du trait…"
+            value="${_esc(ded['tr_nom_'+i]||'')}"
             onchange="window._bstSetDeduction('${c.id}','tr_nom_${i}',this.value)">
-          <input class="input-field" style="font-size:.74rem;padding:2px 6px;width:100%"
-            placeholder="Description..."
-            value="${(ded['tr_desc_'+i]||'')}"
+          <input class="bst-deduct-input"
+            placeholder="Description…"
+            value="${_esc(ded['tr_desc_'+i]||'')}"
             onchange="window._bstSetDeduction('${c.id}','tr_desc_${i}',this.value)">
         </div>`).join('')}
     </div>` : '';
 
-  const butinsJoueurHtml = butins.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">💰 Butins <span style="font-size:.62rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">${butins.length} objet${butins.length>1?'s':''}</span></div>
-      ${butins.map((_, i) => `
-        <div class="bst-row" style="gap:.4rem">
-          <input class="input-field" style="flex:1;font-size:.78rem;padding:3px 6px"
-            placeholder="Objet..."
-            value="${(ded['bu_nom_'+i]||'')}"
-            onchange="window._bstSetDeduction('${c.id}','bu_nom_${i}',this.value)">
-          <input class="input-field" style="width:80px;font-size:.78rem;padding:3px 6px"
-            placeholder="Quantité"
-            value="${(ded['bu_qte_'+i]||'')}"
-            onchange="window._bstSetDeduction('${c.id}','bu_qte_${i}',this.value)">
-        </div>`).join('')}
+  // ── Admin actions ─────────────────────────────────────────────────────────
+  const adminActionsHtml = _isAdminView() ? `
+    <div class="bst-admin-actions">
+      <button class="bst-btn-edit" onclick="openBeastModal('${c.id}')">✏️ Modifier</button>
+      <button class="bst-btn-delete" onclick="deleteBeast('${c.id}')">🗑️</button>
     </div>` : '';
 
   return `
-  <div class="bst-panel" style="position:sticky;top:1rem">
-    ${headerHtml}
-    ${suiviHtml(false)}
-    ${damageProfileHtml}
-    ${attaquesJoueurHtml}
-    ${traitsJoueurHtml}
-    ${butinsJoueurHtml}
+  <div class="bst-panel" style="--rang-c:${rs.color};--rang-glow:${rs.glow}">
+    ${heroHtml}
+    <div class="bst-panel-body">
+      ${vitalsHtml}
+      ${caracsHtml}
+      ${descHtml}
+      ${dmgHtml}
+      ${attaquesHtml}
+      ${attaquesJoueurHtml}
+      ${traitsHtml}
+      ${traitsJoueurHtml}
+      ${butinsHtml}
+      ${adminActionsHtml}
+    </div>
   </div>`;
 }
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1249,13 +1219,12 @@ window._bstAdjust = (id, type, delta) => {
   if (bar && max) {
     const pct = Math.round(newVal/max*100);
     bar.style.width = pct+'%';
-    if (type==='pv') bar.style.background = pct>50?'#22c38e':pct>25?'#e8b84b':'#ff6b6b';
   }
-  if (_isAdminView() && max) {
+  if (_isAdminView() && max && type === 'pv') {
     const cardBar = [...document.querySelectorAll('.bst-card')]
       .find(card => card.dataset.beastId === id)
-      ?.querySelector('.bst-track-fill');
-    if (cardBar && type==='pv') { const pct=Math.round(newVal/max*100); cardBar.style.width=pct+'%'; cardBar.style.background=pct>50?'#22c38e':pct>25?'#e8b84b':'#ff6b6b'; }
+      ?.querySelector('.bst-card-pv-fill');
+    if (cardBar) { cardBar.style.width = Math.round(newVal/max*100)+'%'; }
   }
   _saveTracker();
 };

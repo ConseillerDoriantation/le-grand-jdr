@@ -88,6 +88,17 @@
   --rarity-mythic-text:    #ff9544;
   --rarity-mythic-border:  rgba(255,149,68,0.35);
   --rarity-mythic-bg:      rgba(255,149,68,0.12);
+
+  /* ── Rang bestiaire ── */
+  --rang-classique:      #94a3b8;
+  --rang-classique-glow: rgba(148,163,184,0.18);
+  --rang-classique-line: rgba(148,163,184,0.35);
+  --rang-elite:          #e8b84b;
+  --rang-elite-glow:     rgba(232,184,75,0.22);
+  --rang-elite-line:     rgba(232,184,75,0.40);
+  --rang-boss:           #ff5a7e;
+  --rang-boss-glow:      rgba(255,90,126,0.24);
+  --rang-boss-line:      rgba(255,90,126,0.42);
 }
 
 /* ══════════════════════════════════════════════════

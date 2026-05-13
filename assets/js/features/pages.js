@@ -1414,92 +1414,57 @@ const PAGES = {
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
   async achievements() {
-    // Structure uniquement — le rendu justified est délégué à achievements.js
+    // Shell uniquement — le contenu est délégué à achievements.js (_achRenderContent)
     const items = window._achItems || await loadCollection('achievements');
     const content = document.getElementById('main-content');
 
     const CATS = [
-      { id: 'epique',   label: 'Épique',   emoji: '⚔️',  color: '#4f8cff', glow: 'rgba(79,140,255,0.14)', desc: 'Les grandes victoires et exploits héroïques' },
-      { id: 'comique',  label: 'Comique',  emoji: '🎭',  color: '#e8b84b', glow: 'rgba(232,184,75,0.14)', desc: 'Les moments mémorables et catastrophes créatives' },
-      { id: 'histoire', label: 'Histoire', emoji: '📖',  color: '#22c38e', glow: 'rgba(34,195,142,0.14)', desc: 'Les tournants narratifs qui ont forgé la légende' },
+      { id: 'epique',   label: 'Épique',   emoji: '⚔️',  color: '#4f8cff' },
+      { id: 'comique',  label: 'Comique',  emoji: '🎭',  color: '#e8b84b' },
+      { id: 'histoire', label: 'Histoire', emoji: '📖',  color: '#22c38e' },
     ];
+    const byCat = { epique: 0, comique: 0, histoire: 0 };
+    items.forEach(a => { const c = a.categorie || 'epique'; if (c in byCat) byCat[c]++; });
+    const total        = items.length;
+    const activeFilter = window._achFilter ?? 'all';
+    const activeView   = window._achView   ?? 'galerie';
 
-    const byCat = {};
-    CATS.forEach(c => { byCat[c.id] = []; });
-    items.forEach(a => {
-      const catId = a.categorie || 'epique';
-      if (byCat[catId]) byCat[catId].push(a);
-    });
-
-    const total     = items.length;
-    const activeCat = window._achCat || CATS[0].id;
-    window._achCat  = activeCat;
-    const cat       = CATS.find(c => c.id === activeCat) || CATS[0];
-    const catItems  = byCat[activeCat] || [];
-
-    content.innerHTML = `
-    <div style="background:linear-gradient(135deg,rgba(79,140,255,0.06) 0%,rgba(232,184,75,0.04) 50%,rgba(34,195,142,0.05) 100%);
-      border:1px solid var(--border);border-radius:var(--radius-lg);
-      padding:1.8rem 2rem 1.4rem;margin-bottom:1.5rem;position:relative;overflow:hidden">
-      <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;
-        background:radial-gradient(circle,rgba(232,184,75,0.07) 0%,transparent 70%);pointer-events:none"></div>
-      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-        <div>
-          <div style="font-size:.72rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:.4rem">Livre des Légendes</div>
-          <h1 style="font-family:'Cinzel',serif;font-size:1.9rem;color:var(--gold);letter-spacing:2px;line-height:1;margin:0">Hauts-Faits</h1>
-          <p style="font-size:.83rem;color:var(--text-muted);margin-top:.5rem;margin-bottom:0">Les exploits de la compagnie, consignés pour l'éternité.</p>
+    content.innerHTML = `<div class="hall-root">
+    <div class="hall-hero">
+      <div class="hall-eyebrow"></div>
+      <h1 class="hall-title">✦ Hauts-Faits ✦</h1>
+      <p class="hall-sub">Les exploits de la compagnie, consignés pour l'éternité.</p>
+      <div class="hall-counters">
+        <div class="hall-counter${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" onclick="window._achSetFilter('all')">
+          <div class="hall-counter-icon">🏆</div>
+          <div class="hall-counter-info"><div class="hall-counter-num">${total}</div><div class="hall-counter-lbl">Total</div></div>
         </div>
-        <div style="display:flex;gap:.75rem;flex-wrap:wrap">
-          ${CATS.map(c => `<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:.6rem 1rem;text-align:center;min-width:70px">
-            <div style="font-size:1.1rem">${c.emoji}</div>
-            <div style="font-family:'Cinzel',serif;font-size:1rem;color:${c.color};line-height:1.2">${byCat[c.id]?.length || 0}</div>
-            <div style="font-size:.65rem;color:var(--text-dim);margin-top:1px">${c.label}</div>
-          </div>`).join('')}
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:.6rem 1rem;text-align:center;min-width:70px">
-            <div style="font-size:1.1rem">🏆</div>
-            <div style="font-family:'Cinzel',serif;font-size:1rem;color:var(--gold);line-height:1.2">${total}</div>
-            <div style="font-size:.65rem;color:var(--text-dim);margin-top:1px">Total</div>
-          </div>
-        </div>
+        ${CATS.map(c => `
+        <div class="hall-counter${activeFilter === c.id ? ' active' : ''}" style="--c:${c.color}" data-filter="${c.id}" onclick="window._achSetFilter('${c.id}')">
+          <div class="hall-counter-icon">${c.emoji}</div>
+          <div class="hall-counter-info"><div class="hall-counter-num">${byCat[c.id] || 0}</div><div class="hall-counter-lbl">${c.label}</div></div>
+        </div>`).join('')}
       </div>
     </div>
-
-    ${STATE.isAdmin ? `<div class="admin-section" style="margin-bottom:1.2rem">
-      <div class="admin-label">Admin — Hauts-Faits</div>
-      <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
-        <button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter un Haut-Fait</button>
+    <div class="controls-bar">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="view-toggle">
+          <button class="view-tab${activeView !== 'timeline' ? ' active' : ''}" onclick="window._achSetView('galerie')">▦ Galerie</button>
+          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" onclick="window._achSetView('timeline')">⋮ Chronologie</button>
+        </div>
+        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter</button>` : ''}
       </div>
-    </div>` : ''}
-
-    <div style="display:flex;gap:.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
-      ${CATS.map(c => { const active = c.id === activeCat; const n = byCat[c.id]?.length || 0;
-        return `<button onclick="window._achCat='${c.id}';navigate('achievements')" style="
-          display:flex;align-items:center;gap:.5rem;padding:.5rem 1.1rem;border-radius:999px;cursor:pointer;
-          transition:all .15s;font-family:'Cinzel',serif;font-size:.82rem;
-          border:1px solid ${active ? c.color : 'var(--border)'};
-          background:${active ? c.glow : 'transparent'};color:${active ? c.color : 'var(--text-muted)'}
-        ">${c.emoji} ${c.label}
-          <span style="border-radius:999px;padding:1px 7px;font-size:.7rem;font-family:sans-serif;
-            background:${active ? c.color : 'var(--bg-elevated)'};
-            color:${active ? '#0b1118' : 'var(--text-dim)'};">${n}</span>
-        </button>`;
-      }).join('')}
+      <div class="search-wrap">
+        <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
+        <input type="text" placeholder="Rechercher…" id="ach-search-input"
+          value="${_esc(window._achSearch || '')}"
+          oninput="window._achSetSearch(this.value)">
+      </div>
     </div>
-
-    ${catItems.length === 0
-      ? `<div style="text-align:center;padding:4rem 2rem;color:var(--text-dim)">
-           <div style="font-size:3rem;margin-bottom:1rem;opacity:.4">${cat.emoji}</div>
-           <p style="font-style:italic;font-size:.85rem">Aucun haut-fait ${cat.label.toLowerCase()} pour l'instant.</p>
-           ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openAchievementModal()">+ Ajouter le premier</button>` : ''}
-         </div>`
-      : `<div style="font-size:.8rem;color:var(--text-dim);font-style:italic;margin-bottom:1.2rem;padding-left:.25rem">
-           ${cat.emoji} ${cat.desc} — ${catItems.length} haut-fait${catItems.length > 1 ? 's' : ''}
-         </div>
-         <div id="ach-grid-${cat.id}" class="ach-justified">
-           <div class="loading"><div class="spinner"></div></div>
-         </div>`
-    }`;
-    // Le justified layout est rempli après par achievements.js
+    <div class="hall-content">
+      <div id="ach-content"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+    </div>`;
   },
 
   // ─── COLLECTION ─────────────────────────────────────────────────────────────
