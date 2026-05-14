@@ -163,10 +163,15 @@ async function loadProfile(user) {
     const q        = query(collection(db, "users"), where("email", "==", user.email));
     const existing = await getDocs(q);
     if (!existing.empty) {
-      const existingData = existing.docs[0].data();
+      const existingDoc  = existing.docs[0];
+      const existingData = existingDoc.data();
       const profile = { ...existingData, uid: user.uid };
       await setDoc(ref, profile, { merge: true });
       setProfile(profile);
+      // Supprimer l'ancien doc orphelin (uid différent, même email)
+      if (existingDoc.id !== user.uid) {
+        try { await deleteDoc(existingDoc.ref); } catch (e) { /* non bloquant */ }
+      }
       return;
     }
   } catch (error) {
@@ -231,3 +236,4 @@ async function _runMigrationFromPicker(uid) {
 
 // Exposer pour le bouton HTML du picker
 window._runMigrationFromPicker = () => _runMigrationFromPicker(STATE.user?.uid);
+
