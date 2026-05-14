@@ -170,16 +170,16 @@ function _updateMobileBottomNav() {
   if (!nav) return;
 
   const playerItems = [
-    { page: 'dashboard',  icon: 'home',   label: 'Accueil'   },
-    { page: 'characters', icon: 'scroll', label: 'Perso'     },
-    { page: 'story',      icon: 'book',   label: 'Trame'     },
-    { page: 'bestiaire',  icon: 'paw',    label: 'Bestiaire' },
+    { page: 'dashboard',  icon: 'home',   label: 'Accueil'  },
+    { page: 'characters', icon: 'scroll', label: 'Perso'    },
+    { page: 'quests',     icon: 'sword',  label: 'Quêtes'   },
+    { page: 'shop',       icon: 'bag',    label: 'Boutique' },
   ];
   const mjItems = [
-    { page: 'dashboard',  icon: 'home',  label: 'Accueil'  },
-    { page: 'story',      icon: 'book',  label: 'Trame'    },
-    { page: 'bestiaire',  icon: 'paw',   label: 'Bestiaire'},
-    { page: 'admin',      icon: 'cog',   label: 'Console'  },
+    { page: 'dashboard',  icon: 'home',   label: 'Accueil'  },
+    { page: 'characters', icon: 'scroll', label: 'Perso'    },
+    { page: 'quests',     icon: 'sword',  label: 'Quêtes'   },
+    { page: 'admin',      icon: 'cog',    label: 'Console'  },
   ];
 
   const items = STATE.isAdmin ? mjItems : playerItems;
