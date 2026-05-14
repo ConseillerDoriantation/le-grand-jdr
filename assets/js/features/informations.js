@@ -1,13 +1,14 @@
 import { STATE } from '../core/state.js';
 import { saveDoc, getDocData } from '../data/firestore.js';
+import { watchDoc } from '../shared/realtime.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, sanitizeRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import PAGES from './pages.js';
 
-async function renderInformations() {
-  const doc = await getDocData('informations', 'main');
+async function renderInformations(liveData = null) {
+  const doc = liveData ?? await getDocData('informations', 'main');
   const content = document.getElementById('main-content');
   const sections = Array.isArray(doc?.sections) ? doc.sections.filter((section) => section?.id) : [];
   // Si la section mémorisée n'existe plus (suppression / changement de doc),
@@ -31,6 +32,14 @@ async function renderInformations() {
       <div>${richTextContentHtml({ html: activeContent, className: 'tutorial-content', attrs: { id: 'info-content', style: 'white-space:pre-wrap' } })}</div>
     </div>` : emptyHtml}`;
   window._infoSections = sections;
+
+  // Abonnement temps réel — le premier fire (snapshot initial) est ignoré.
+  let first = true;
+  watchDoc('informations', 'informations', 'main', data => {
+    if (first) { first = false; return; }
+    if (STATE.currentPage !== 'informations') return;
+    renderInformations(data);
+  });
 }
 
 function showInfoSection(id, el) {

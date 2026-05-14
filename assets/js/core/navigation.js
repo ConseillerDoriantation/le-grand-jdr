@@ -4,6 +4,7 @@
 
 import { STATE, setPage } from './state.js';
 import PAGES from '../features/pages.js';
+import { unwatchAll } from '../shared/realtime.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -35,6 +36,8 @@ const _loaded = new Set();
 
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
+  unwatchAll(); // stopper tous les listeners temps réel de la page précédente
+
   // Reset des inline styles que certaines pages posent sur #main-content
   // (ex. VTT pose overflow/height/paddingBottom et ne nettoie qu'à la
   //  ré-entrée dans la page → casse le scroll des pages suivantes).
