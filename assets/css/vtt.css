@@ -492,6 +492,18 @@
   border-color: oklch(58% 0.20 22 / 0.30);
   color: var(--crimson);
 }
+.vtt-ins-badge-action {
+  background: oklch(55% 0.18 145 / 0.15);
+  border: 1px solid oklch(55% 0.18 145 / 0.35);
+  color: #4ade80;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: .7rem; font-weight: 600;
+  padding: .15rem .5rem;
+  border-radius: 5px;
+  transition: background .15s;
+}
+.vtt-ins-badge-action:hover { background: oklch(55% 0.18 145 / 0.28); }
 
 .vtt-ins-section { padding-top: .5rem; border-top: 1px solid var(--border); }
 .vtt-ins-section-title {
@@ -499,6 +511,27 @@
   text-transform: uppercase; letter-spacing: .08em;
   margin-bottom: .3rem; font-family: 'Cinzel', serif;
 }
+
+/* Actions de combat */
+.vtt-combat-actions { display: flex; flex-direction: column; gap: .3rem; }
+.vtt-combat-action-btn {
+  display: flex; align-items: center; gap: .55rem;
+  width: 100%; padding: .45rem .6rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer; font-family: inherit;
+  text-align: left; transition: background .15s, border-color .15s;
+}
+.vtt-combat-action-btn:hover:not([disabled]) {
+  background: oklch(55% 0.18 145 / 0.12);
+  border-color: oklch(55% 0.18 145 / 0.4);
+}
+.vtt-combat-action-btn.used {
+  opacity: .45; cursor: default;
+}
+.vtt-ca-icon { font-size: 1.1rem; flex-shrink: 0; }
+.vtt-ca-body { display: flex; flex-direction: column; }
+.vtt-ca-name { font-size: .8rem; font-weight: 600; color: var(--text); }
+.vtt-ca-desc { font-size: .68rem; color: var(--text-dim); margin-top: .05rem; }
 .vtt-ins-select {
   width: 100%;
   background: var(--bg-elevated);

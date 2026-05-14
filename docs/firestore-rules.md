@@ -180,7 +180,7 @@ service cloud.firestore {
         allow update: if inAdventure(adventureId)
           && request.auth.uid == resource.data.ownerId
           && request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn']);
+               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt']);
         allow update: if inAdventure(adventureId)
           && request.resource.data.diff(resource.data)
                .affectedKeys().hasOnly(['hp', 'pvCombatHp']);
