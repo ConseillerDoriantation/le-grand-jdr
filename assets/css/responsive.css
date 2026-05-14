@@ -270,10 +270,22 @@
     font-size: .85rem;
   }
 
-  /* Bouton déconnexion : texte masqué, juste icône */
+  /* Bouton déconnexion : icône seule, texte masqué */
   .btn-logout {
-    padding: .4rem .6rem;
-    font-size: .75rem;
+    font-size: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .btn-logout::after {
+    content: "⏻";
+    font-size: .95rem;
+    line-height: 1;
   }
 }
 
@@ -342,17 +354,25 @@
     text-align: left;
   }
 
-  /* ── 5. Hauts-Faits : meta overlay toujours visible (pas de hover sur touch) ── */
-  .ach-meta {
-    opacity: 1 !important;
-    transform: translateY(0) !important;
-    pointer-events: auto !important;
-    /* Dégradé plus opaque pour lisibilité sur fond image */
-    background: linear-gradient(to top, rgba(4,8,20,0.88) 0%, rgba(4,8,20,0.55) 60%, transparent 100%);
+  /* ── 5. Hauts-Faits : grille 2 colonnes propre ── */
+  .ach-justified {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+    overflow: hidden;
   }
-  /* On allège le clamp pour laisser respirer le texte */
-  .ach-title { -webkit-line-clamp: 2; font-size: .82rem; }
-  .ach-desc  { -webkit-line-clamp: 2; font-size: .70rem; }
+  .ach-row { display: contents !important; }
+  .ach-item {
+    width: auto !important;
+    height: auto !important;
+    aspect-ratio: 4 / 3;
+    flex-shrink: unset;
+    min-width: 0; /* empêche le débordement dans la grille */
+  }
+  /* Masquer tout — image seule, tap pour le détail */
+  .ach-meta,
+  .ach-cat-badge,
+  .ach-date-badge { display: none !important; }
 
   /* ── 6. VTT — message desktop requis ── */
   .vtt-mobile-only {

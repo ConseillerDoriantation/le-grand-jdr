@@ -95,7 +95,8 @@
       "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/pages.js\")",
       "Bash(node --check assets/js/features/vtt.js)",
       "Bash([ -f \"$SRC/$f\" ])",
-      "Bash(cp C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/__TRACKED_VAR__ C:/Users/Moi/Documents/GitHub/le-grand-jdr/__TRACKED_VAR__)"
+      "Bash(cp C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/__TRACKED_VAR__ C:/Users/Moi/Documents/GitHub/le-grand-jdr/__TRACKED_VAR__)",
+      "Bash(cp \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/css/responsive.css\" \\\\ *)"
     ]
   }
 }
