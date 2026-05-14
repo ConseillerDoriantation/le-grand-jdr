@@ -4,6 +4,7 @@
 // Joueur : voir les quêtes actives et y participer avec son personnage
 // ══════════════════════════════════════════════
 import { loadCollection, addToCol, saveDoc, deleteFromCol, invalidateCache } from '../data/firestore.js';
+import { watch } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
@@ -86,22 +87,22 @@ function _questCard(q, myChar) {
   </div>`;
 }
 
-// ── Page principale ───────────────────────────
-async function renderQuestsPage() {
+// ── Cache local pour re-renders subscription ──
+let _chars = null;
+
+// ── Rendu depuis les données (sans rechargement Firestore) ────────────────
+function _applyQuestsRender(quests) {
   const content = document.getElementById('main-content');
-  content.innerHTML = `<div class="loading"><div class="spinner"></div> Chargement…</div>`;
+  if (!content || content.querySelector('.spinner')) return; // chargement en cours
 
-  const uid = STATE.user?.uid;
-  const [quests, chars] = await Promise.all([
-    loadCollection('quests').catch(() => []),
-    loadCollection('characters').catch(() => []),
-  ]);
+  const uid     = STATE.user?.uid;
+  const myChars = STATE.isAdmin ? [] : (_chars || []).filter(c => c.uid === uid);
+  const myChar  = myChars[0] || null;
 
-  // Personnages du joueur (peut en avoir plusieurs)
-  const myChars = STATE.isAdmin ? [] : chars.filter(c => c.uid === uid);
-  const myChar  = myChars[0] || null; // utilisé pour le check "déjà rejoint"
+  window._questItems   = quests;
+  window._questMyChar  = myChar;
+  window._questMyChars = myChars;
 
-  // Tri : actives → terminées → échouées, puis par date desc
   const sorted = [...quests].sort((a, b) => {
     const ord = { active: 0, terminee: 1, echouee: 2 };
     const sa  = ord[a.statut] ?? 1;
@@ -109,10 +110,6 @@ async function renderQuestsPage() {
     if (sa !== sb) return sa - sb;
     return (b.createdAt || '') > (a.createdAt || '') ? 1 : -1;
   });
-
-  window._questItems   = quests;
-  window._questMyChar  = myChar;
-  window._questMyChars = myChars;
 
   const activeCount = quests.filter(q => q.statut === 'active').length;
 
@@ -131,6 +128,27 @@ async function renderQuestsPage() {
     ? `<div class="empty-state"><div class="icon">📋</div><p>Aucune quête pour l'instant.</p></div>`
     : `<div class="quest-grid">${sorted.map(q => _questCard(q, myChar)).join('')}</div>`}
   `;
+}
+
+// ── Page principale ───────────────────────────
+async function renderQuestsPage() {
+  const content = document.getElementById('main-content');
+  content.innerHTML = `<div class="loading"><div class="spinner"></div> Chargement…</div>`;
+
+  const [quests, chars] = await Promise.all([
+    loadCollection('quests').catch(() => []),
+    loadCollection('characters').catch(() => []),
+  ]);
+  _chars = chars;
+  _applyQuestsRender(quests);
+
+  // Abonnement temps réel : le premier fire (snapshot initial) est ignoré.
+  let first = true;
+  watch('quests', 'quests', data => {
+    if (first) { first = false; return; }
+    if (STATE.currentPage !== 'quests') return;
+    _applyQuestsRender(data);
+  });
 }
 
 // ── Toggle participation ──────────────────────
@@ -212,9 +230,8 @@ async function _questJoinWithChar(id, char) {
 async function _questSaveParts(id, parts, leaving) {
   try {
     await saveDoc('quests', id, { participants: parts });
-    invalidateCache('quests');
     showNotif(leaving ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', leaving ? 'info' : 'success');
-    await renderQuestsPage();
+    // La subscription temps réel met à jour l'affichage automatiquement
   } catch {
     showNotif('Erreur lors de la mise à jour.', 'error');
   }
@@ -286,7 +303,7 @@ window._questSave = async function (id) {
       showNotif('Quête créée !', 'success');
     }
     closeModal();
-    await renderQuestsPage();
+    // La subscription temps réel met à jour l'affichage automatiquement
   } catch {
     showNotif('Erreur lors de l\'enregistrement.', 'error');
   }
@@ -298,7 +315,7 @@ window._questDelete = async function (id) {
   try {
     await deleteFromCol('quests', id);
     showNotif('Quête supprimée.', 'info');
-    await renderQuestsPage();
+    // La subscription temps réel met à jour l'affichage automatiquement
   } catch {
     showNotif('Erreur lors de la suppression.', 'error');
   }

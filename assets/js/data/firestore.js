@@ -8,6 +8,7 @@ import {
   doc, setDoc, getDoc,
   collection, getDocs,
   addDoc, updateDoc, deleteDoc,
+  onSnapshot,
   query, where, orderBy,
 } from '../config/firebase.js';
 
@@ -99,6 +100,36 @@ function _cacheInvalidate(colOrPath) {
 
 // Exposer pour permettre aux features de forcer un refresh si besoin
 export function invalidateCache(col) { _cacheInvalidate(_colPath(col)); }
+
+// ── Abonnements temps réel ─────────────────────
+// Retourne la fonction de désabonnement (à appeler pour stopper l'écoute).
+// Met à jour le cache automatiquement à chaque changement.
+
+export function subscribeCollection(col, callback) {
+  const path = _colPath(col);
+  return onSnapshot(
+    collection(db, path),
+    snap => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _cacheSet(`${path}:all`, data);
+      callback(data);
+    },
+    err => _handleFirestoreError(err, `subscribeCollection(${path})`)
+  );
+}
+
+export function subscribeDoc(col, id, callback) {
+  const path = _colPath(col);
+  return onSnapshot(
+    doc(db, path, id),
+    snap => {
+      const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+      if (data) _cacheSet(`${path}:${id}`, data);
+      callback(data);
+    },
+    err => _handleFirestoreError(err, `subscribeDoc(${path}/${id})`)
+  );
+}
 
 // ── Gestionnaire d'erreur centralisé ───────────
 // Affiche un toast si showNotif est disponible, sinon console.error uniquement.
