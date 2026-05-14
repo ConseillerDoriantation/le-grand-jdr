@@ -7,6 +7,8 @@
 html,
 body {
   min-height: 100%;
+  overflow-x: hidden; /* bloque le scroll horizontal sur les deux niveaux */
+  max-width: 100%;
 }
 
 body {
@@ -14,7 +16,6 @@ body {
   background: var(--bg-void);
   color: var(--text);
   min-height: 100vh;
-  overflow-x: hidden;
 }
 
 /* Fond hexagonal + gradients radiaux */

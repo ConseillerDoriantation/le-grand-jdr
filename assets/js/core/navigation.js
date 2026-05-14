@@ -69,6 +69,12 @@ export async function navigate(page) {
     return;
   }
 
+  // VTT non disponible sur mobile
+  if (page === 'vtt' && window.innerWidth < 768) {
+    _renderMobileOnly();
+    return;
+  }
+
   // Rendre la page
   try {
     await PAGES[page]();
@@ -164,6 +170,21 @@ function _syncNav(page) {
   document.querySelectorAll('.more-menu-item[data-navigate]').forEach((el) =>
     el.classList.toggle('active', el.dataset.navigate === page)
   );
+}
+
+function _renderMobileOnly() {
+  const content = document.getElementById('main-content');
+  if (!content) return;
+  content.innerHTML = `
+    <div class="vtt-mobile-only">
+      <div style="font-size:3rem">🖥️</div>
+      <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:var(--text)">
+        Table Virtuelle
+      </div>
+      <div style="font-size:.9rem;color:var(--text-muted);max-width:280px;line-height:1.6">
+        La Table Virtuelle est disponible uniquement sur ordinateur.
+      </div>
+    </div>`;
 }
 
 function _renderLoading() {

@@ -291,3 +291,87 @@
   /* Stat chips feuille perso : 2 colonnes */
   .cs-carac-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   TOUCH & LISIBILITÉ MOBILE — améliorations transversales
+   Appliqué sur tous les écrans tactiles (< 768px)
+═══════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* ── 1. Cibles tactiles : minimum 44px (recommandation Apple / Google) ── */
+  .btn-sm {
+    min-height: 44px;
+    padding: 0 .9rem;
+  }
+  .quest-join-btn {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: .82rem;
+  }
+  .quest-icon-btn {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-icon {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* ── 2. Lisibilité — plancher de taille pour le contenu dense ── */
+  .quest-badge       { font-size: .72rem; }
+  .quest-card-desc   { font-size: .84rem; line-height: 1.55; }
+  .quest-parts-count { font-size: .74rem; }
+  .quest-card-title  { font-size: 1rem; }
+
+  /* Bestiaire : cartes et panel */
+  .bst-panel-slot  { max-width: 100% !important; }
+  .bst-panel-body  { padding: 14px 14px 32px; }
+  .bst-section-title { font-size: .8rem; }
+
+  /* ── 3. Overflow horizontal — protection au niveau des conteneurs ── */
+  .main-content,
+  .bst-page,
+  .app-layout    { max-width: 100%; }
+
+  /* ── 4. Inputs numériques — pleine largeur sur mobile ── */
+  .input-field[type=number] {
+    width: 100%;
+    text-align: left;
+  }
+
+  /* ── 5. Hauts-Faits : meta overlay toujours visible (pas de hover sur touch) ── */
+  .ach-meta {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+    pointer-events: auto !important;
+    /* Dégradé plus opaque pour lisibilité sur fond image */
+    background: linear-gradient(to top, rgba(4,8,20,0.88) 0%, rgba(4,8,20,0.55) 60%, transparent 100%);
+  }
+  /* On allège le clamp pour laisser respirer le texte */
+  .ach-title { -webkit-line-clamp: 2; font-size: .82rem; }
+  .ach-desc  { -webkit-line-clamp: 2; font-size: .70rem; }
+
+  /* ── 6. VTT — message desktop requis ── */
+  .vtt-mobile-only {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 55vh;
+    gap: 1.2rem;
+    padding: 2rem;
+    text-align: center;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TRÈS PETIT MOBILE  < 400px — cas extrêmes
+═══════════════════════════════════════════════════════════ */
+@media (max-width: 400px) {
+  .app-layout { padding: 10px 8px 88px; }
+  .quest-card { padding: .85rem .75rem; }
+  .bst-grid-wrap { padding: 10px 8px 24px !important; }
+}

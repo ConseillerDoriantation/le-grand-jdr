@@ -5517,3 +5517,216 @@ input[type=number].input-field::-webkit-outer-spin-button {
   transition: background .15s, border-color .15s;
 }
 .cs-xp-add-btn:hover { background: rgba(255,255,255,.08); border-color: var(--gold); color: var(--gold); }
+
+/* ══════════════════════════════════════════════
+   MOBILE — Feuille de personnage (< 768px)
+   Redesign complet : sidebar→header compact,
+   identité en ligne, onglets scrollables.
+══════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* ── Layout global : sidebar au-dessus du contenu ── */
+  .cs-layout {
+    flex-direction: column;
+  }
+
+  /* ── Sidebar : pleine largeur, pas de sticky ── */
+  .cs-sidebar {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    max-height: none;
+    overflow-y: visible;
+    padding: 16px 14px 14px;
+    gap: 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  /* ── Colonne principale : coins bas seulement ── */
+  .cs-main-col {
+    border-left: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    min-height: 0;
+  }
+
+  /* ── Identité : photo à gauche, infos à droite ── */
+  .cs-id-block {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+    padding-top: 0;
+  }
+
+  /* Portrait plus compact */
+  .cs-photo-wrap {
+    padding-bottom: 10px;
+    flex-shrink: 0;
+  }
+  .cs-photo {
+    width: 72px;
+    height: 88px;
+    border-radius: 16px;
+    font-size: 2.2rem;
+  }
+  .cs-lv-badge {
+    font-size: 0.58rem;
+    padding: 2px 10px;
+  }
+
+  /* Corps identité : aligné à gauche */
+  .cs-id-body {
+    align-items: flex-start;
+    text-align: left;
+    gap: 0.28rem;
+    padding-top: 2px;
+  }
+  .cs-name {
+    font-size: 1.1rem;
+    text-align: left;
+    max-width: 100%;
+  }
+  .cs-id-chips {
+    justify-content: flex-start;
+    margin-top: 2px;
+  }
+  .cs-id-chip {
+    font-size: 0.70rem;
+    padding: 3px 10px;
+  }
+  .cs-titres {
+    max-height: 48px;
+  }
+
+  /* ── Switcher de personnage : compact ── */
+  .cs-switcher {
+    gap: 6px;
+    padding-bottom: 4px;
+  }
+  .cs-switch-pill {
+    font-size: 0.70rem;
+    padding: 4px 10px;
+  }
+
+  /* ── Or : plus compact ── */
+  .cs-or {
+    font-size: 1rem;
+    padding: 9px 12px;
+  }
+
+  /* ── XP : on réduit un peu ── */
+  .cs-xp-bottom-row {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  /* ── PV / PM : valeurs moins énormes ── */
+  .cs-vital-val {
+    font-size: 1.75rem;
+  }
+  .cs-vital-block {
+    padding: 10px 8px 9px;
+    gap: 6px;
+  }
+
+  /* Touch targets PV/PM ─ min 36px */
+  .cs-vbtn {
+    width: 32px;
+    height: 32px;
+    font-size: 1.05rem;
+  }
+
+  /* ── CA / Vitesse / Deck : valeurs plus compactes ── */
+  .cs-chip-val {
+    font-size: 1.2rem;
+  }
+  .cs-stat-chip {
+    padding: 8px 4px;
+  }
+
+  /* ── Stats 3×2 (déjà défini globalement, on renforce) ── */
+  .cs-stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.3rem;
+  }
+
+  /* ── Onglets : scrollables horizontalement ── */
+  .cs-tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    padding: 10px 12px 0;
+    gap: 2px;
+  }
+  .cs-tabs::-webkit-scrollbar { display: none; }
+  .cs-tab {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 0.78rem;
+    flex-shrink: 0;
+  }
+
+  /* ── Sous-onglets : scrollables ── */
+  .cs-subtab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    padding: 8px 12px;
+    gap: 5px;
+  }
+  .cs-subtab-bar::-webkit-scrollbar { display: none; }
+  .cs-subtab {
+    min-height: 40px;
+    padding: 4px 12px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ── Corps d'onglet ── */
+  .cs-tab-body {
+    padding: 0.85rem 0.9rem;
+    min-height: 0;
+  }
+
+  /* ── Sélecteur de perso admin ── */
+  .cs-aura-picker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+}
+
+/* ── Très petit mobile (< 480px) ── */
+@media (max-width: 480px) {
+  .cs-sidebar {
+    padding: 12px 12px 12px;
+  }
+  .cs-photo {
+    width: 60px;
+    height: 74px;
+    border-radius: 13px;
+    font-size: 1.8rem;
+  }
+  .cs-name {
+    font-size: 0.95rem;
+  }
+  .cs-tab {
+    font-size: 0.72rem;
+    padding: 0 10px;
+  }
+  .cs-vital-val {
+    font-size: 1.5rem;
+  }
+  .cs-chip-val {
+    font-size: 1.05rem;
+  }
+  .cs-stats-grid {
+    gap: 0.22rem;
+  }
+}
