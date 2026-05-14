@@ -2027,18 +2027,26 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
     </div>
   ` : opt.isHeal ? `
     <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem">
-      <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;row-gap:.6rem;column-gap:.7rem">
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;row-gap:.6rem;column-gap:.5rem">
+        <div style="grid-column:1/3"></div>
+        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">±mod</span>
+        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">+dés</span>
         <span style="font-size:.68rem;color:#22c38e;white-space:nowrap">💚 Soin</span>
         <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${degatsFormula}</div>
-        <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="±0" title="Bonus / malus au soin">
+        <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus / malus flat au soin">
+        <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés bonus au soin (même type de dé)">
       </div>
     </div>
   ` : `
     <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem">
-      <div style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;row-gap:.6rem;column-gap:.7rem">
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;row-gap:.6rem;column-gap:.5rem">
+        <div style="grid-column:1/3"></div>
+        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">±mod</span>
+        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">+dés</span>
         <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">🎯 Toucher</span>
         <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${toucherFormula}</div>
-        <input type="number" id="atk-bonus-hit" value="0" style="${inpStyle}" placeholder="±0" title="Bonus / malus au toucher">
+        <input type="number" id="atk-bonus-hit" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat au toucher">
+        <input type="number" id="atk-bonus-hit-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="d20 supplémentaires au toucher (sommés)">
 
         <div style="grid-column:1/-1;height:1px;background:var(--border);margin:-.1rem 0"></div>
 
@@ -2047,7 +2055,8 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
           ${opt.damageTypeIcon ? `<span style="font-size:.85rem;color:${opt.damageTypeColor||'#9ca3af'}">${opt.damageTypeIcon}</span>` : ''}
           ${degatsFormula}
         </div>
-        <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="±0" title="Bonus / malus aux dégâts">
+        <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat aux dégâts">
+        <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés supplémentaires aux dégâts (même type)">
         ${ (opt.typeRules?.missEffect === 'half') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
           font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
           <span>✦</span><span>½ dégâts garantis même en cas d'échec</span>
@@ -2630,8 +2639,10 @@ function _renderRemoteCastings(docs) {
 window._vttRollAttack = async () => {
   const ctx = _atkCtx; if (!ctx) return;
   const mode     = document.getElementById('atk-mode')?.value || 'normal';
-  const bonusHit = parseInt(document.getElementById('atk-bonus-hit')?.value)||0;
-  const bonusDmg = parseInt(document.getElementById('atk-bonus-dmg')?.value)||0;
+  const bonusHit     = parseInt(document.getElementById('atk-bonus-hit')?.value)||0;
+  const bonusDmg     = parseInt(document.getElementById('atk-bonus-dmg')?.value)||0;
+  const bonusHitDice = parseInt(document.getElementById('atk-bonus-hit-dice')?.value)||0;
+  const bonusDmgDice = parseInt(document.getElementById('atk-bonus-dmg-dice')?.value)||0;
   closeModalDirect();
   _atkCtx = null;
 
@@ -2737,11 +2748,21 @@ window._vttRollAttack = async () => {
       return;
     }
 
+    // ── Helper : formule de dés effective (bonus dés dégâts) ────────
+    const _effectiveDmgDice = formula => {
+      if (!bonusDmgDice) return formula;
+      const p = _parseDice(formula);
+      if (!p) return formula;
+      const newN = Math.max(1, p.n + bonusDmgDice);
+      return `${newN}d${p.sides}` + (p.mod !== 0 ? (p.mod > 0 ? `+${p.mod}` : `${p.mod}`) : '');
+    };
+
     // ── Soin : roll partagé, appliqué à toutes les cibles ───────────
     if (opt.isHeal) {
-      const diceToRoll = opt.rawDice || opt.dice;
-      const healFixed  = (opt.maitriseBonus || 0) + bonusDmg;
-      const healRaw    = _rollDice(diceToRoll);
+      const diceToRoll   = opt.rawDice || opt.dice;
+      const effectiveDice = _effectiveDmgDice(diceToRoll);
+      const healFixed    = (opt.maitriseBonus || 0) + bonusDmg;
+      const healRaw      = _rollDice(effectiveDice);
       const healTotal  = Math.max(1, healRaw + healFixed);
       await _deductPm();
       await _markAttacked();
@@ -2768,8 +2789,9 @@ window._vttRollAttack = async () => {
           isCrit: false, isFumble: false, advMode: mode,
           hitD20: null, hitTotal: null,
           dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+          dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
           dmgMaitriseBonus: opt.maitriseBonus??0,
-          dmgRaw: healRaw, dmgBonus: bonusDmg,
+          dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
           targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: null })),
           createdAt: serverTimestamp(),
         }).catch(()=>{});
@@ -2785,9 +2807,10 @@ window._vttRollAttack = async () => {
             defenderName: r.name,
             optLabel: opt.label,
             dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+            dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
             dmgMaitriseBonus: opt.maitriseBonus??0,
-            dmgRaw: healRaw, dmgBonus: bonusDmg, dmgTotal: healTotal,
-            newHp: r.newHp, hpMax: r.hpMax,
+            dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
+            dmgTotal: healTotal, newHp: r.newHp, hpMax: r.hpMax,
             createdAt: serverTimestamp(),
           }).catch(()=>{});
           showNotif(`💚 ${healTotal} PV soignés → ${r.name}`, 'success');
@@ -2805,28 +2828,40 @@ window._vttRollAttack = async () => {
     const isCrit   = d20 === 20;
     const isFumble = d20 === 1;
     const atkBase  = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
-    const hitTotal = d20 + atkBase + bonusHit;
+    // Dés supplémentaires au toucher (sommés au total)
+    const extraHitRolls = [];
+    let extraHitSum = 0;
+    if (bonusHitDice !== 0) {
+      const cnt = Math.abs(bonusHitDice);
+      for (let k = 0; k < cnt; k++) {
+        const r = Math.floor(Math.random() * 20) + 1;
+        extraHitRolls.push(r);
+        extraHitSum += bonusHitDice > 0 ? r : -r;
+      }
+    }
+    const hitTotal = d20 + atkBase + bonusHit + extraHitSum;
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
     const missEffect = rules.missEffect || 'none';
 
-    const diceToRoll = opt.rawDice || opt.dice;
-    const dmgFixed   = opt.rawDice !== undefined ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0)) : 0;
-    const totalFixed = dmgFixed + bonusDmg + typeDmgBon;
+    const diceToRoll    = opt.rawDice || opt.dice;
+    const effectiveDice = _effectiveDmgDice(diceToRoll);
+    const dmgFixed      = opt.rawDice !== undefined ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0)) : 0;
+    const totalFixed  = dmgFixed + bonusDmg + typeDmgBon;
 
     // ── Dés tirés UNE SEULE fois, partagés entre toutes les cibles ──────
     let sharedDmgRaw = 0, sharedDmgTotalHit = 0, sharedDmgTotalHalf = 0;
     let sharedCritNormalMax = 0, sharedCritRaw2 = 0, sharedCritFixed2 = 0;
     if (!isFumble) {
       if (isCrit) {
-        sharedCritNormalMax = _maxDice(diceToRoll) + totalFixed;
-        sharedCritRaw2      = _rollDice(diceToRoll);
+        sharedCritNormalMax = _maxDice(effectiveDice) + totalFixed;
+        sharedCritRaw2      = _rollDice(effectiveDice);
         sharedCritFixed2    = totalFixed;
         sharedDmgRaw        = sharedCritRaw2;
         sharedDmgTotalHit   = sharedCritNormalMax + sharedCritRaw2 + sharedCritFixed2;
       } else {
-        sharedDmgRaw      = _rollDice(diceToRoll);
+        sharedDmgRaw      = _rollDice(effectiveDice);
         sharedDmgTotalHit = Math.max(1, sharedDmgRaw + totalFixed);
       }
       if (missEffect === 'half')  sharedDmgTotalHalf = Math.max(1, Math.floor(sharedDmgTotalHit / 2));
@@ -2901,10 +2936,12 @@ window._vttRollAttack = async () => {
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
         hitToucherStatLabel: opt.toucherStatLabel??null,
         dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+        dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
-        dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg,
+        dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
         dmgFull: sharedDmgTotalHit, dmgFullHalf: sharedDmgTotalHalf,
+        bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,
@@ -2927,10 +2964,12 @@ window._vttRollAttack = async () => {
         hitToucherStatLabel: opt.toucherStatLabel??null,
         targetCA: r.targetCA, hit: r.hit,
         dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
+        dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
-        dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgTotal: r.dmgTotal,
-        dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
+        dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
+        dmgTotal: r.dmgTotal, dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
+        bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         halfDmg: r.halfDmg, newHp: r.newHp, hpMax: r.hpMax,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
@@ -4574,10 +4613,11 @@ function _renderChatLog(msgs) {
       // Sort de soin
       const sn  = n => n>0?`+${n}`:n<0?`${n}`:'';
       const sub = t => `<span style="font-size:.6rem;color:var(--text-dim)">(${t})</span>`;
-      const baseDice = _esc(m.dmgRawDice || m.dmgFormula || '');
+      const baseDice = _esc(m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || '');
       const mods = [
         m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
         m.dmgBonus ? sn(m.dmgBonus) + sub('bonus') : '',
+        m.dmgBonusDice ? sn(m.dmgBonusDice) + sub('dés') : '',
       ].filter(Boolean).join(' ');
       const healWho = m.attackerName || m.authorName || '?';
       const detailId = `vtt-d-${i}`;
@@ -4621,19 +4661,23 @@ function _renderChatLog(msgs) {
         ? (() => { const dropped=rolls.find(r=>r!==m.hitD20)??rolls[1];
             return `d20[<strong>${m.hitD20}</strong>&thinsp;<span style="text-decoration:line-through;color:var(--text-dim)">${dropped}</span>]`; })()
         : `d20[${m.hitD20}]`;
-      const hitFormula = m.hitToucherStatLabel != null
+      const extraHitDisp = m.extraHitRolls?.length
+        ? ' ' + m.extraHitRolls.map(r=>`+d20[${r}]`).join(' ') : '';
+      const hitFormula = (m.hitToucherStatLabel != null
         ? [diceDisp,
            m.hitToucherMod ? sn(m.hitToucherMod)+sub(m.hitToucherStatLabel) : '',
            m.hitToucherSetBonus > 0 ? `+${m.hitToucherSetBonus}`+sub('Set') : '',
            m.hitBonus ? sn(m.hitBonus)+sub('bonus') : '',
           ].filter(Boolean).join(' ')
-        : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`;
+        : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`)
+        + extraHitDisp;
       // Formule dégâts commune
-      const baseDice = _esc(m.dmgRawDice || m.dmgFormula || '');
+      const baseDice = _esc(m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || '');
       const dmgMods  = [
         m.dmgStatMod ? sn(m.dmgStatMod)+sub(m.dmgStatLabel||'') : '',
         m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}`+sub('Maîtrise') : '',
         m.dmgBonus ? sn(m.dmgBonus)+sub('bonus') : '',
+        m.dmgBonusDice ? sn(m.dmgBonusDice)+sub('dés') : '',
       ].filter(Boolean).join(' ');
       const dmgFormStr = isCrit && m.critNormalMax
         ? `max(${m.critNormalMax}) + ${baseDice}(${m.dmgRaw}) ${dmgMods}`
@@ -4731,25 +4775,29 @@ function _renderChatLog(msgs) {
         ? (() => { const dropped=rolls.find(r=>r!==m.hitD20)??rolls[1];
             return `d20[<strong>${m.hitD20}</strong>&thinsp;<span style="text-decoration:line-through;color:var(--text-dim)">${dropped}</span>]`; })()
         : `d20[${m.hitD20}]`;
-      const hitFormula = m.hitToucherStatLabel != null
+      const extraHitDisp = m.extraHitRolls?.length
+        ? ' ' + m.extraHitRolls.map(r=>`+d20[${r}]`).join(' ') : '';
+      const hitFormula = (m.hitToucherStatLabel != null
         ? [
             diceDisp,
             m.hitToucherMod       ? sn(m.hitToucherMod)    + sub(m.hitToucherStatLabel) : '',
             m.hitToucherSetBonus > 0 ? `+${m.hitToucherSetBonus}` + sub('Set') : '',
             m.hitBonus            ? sn(m.hitBonus) + sub('bonus') : '',
           ].filter(Boolean).join(' ')
-        : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`;
+        : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`)
+        + extraHitDisp;
 
       const detailId = `vtt-d-${i}`;
 
       // Ligne dégâts résumée + détail formule
       let dmgSummary = '', dmgDetailHtml = '';
       if (m.hit || m.halfDmg) {
-        const baseDice = _esc(m.dmgRawDice || m.dmgFormula || '');
+        const baseDice = _esc(m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || '');
         const mods = [
           m.dmgStatMod       ? sn(m.dmgStatMod)       + sub(m.dmgStatLabel||'') : '',
           m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
           m.dmgBonus         ? sn(m.dmgBonus)          + sub('bonus') : '',
+          m.dmgBonusDice     ? sn(m.dmgBonusDice)      + sub('dés') : '',
         ].filter(Boolean).join(' ');
 
         // Formule brute (sans aucune réduction). Le ÷2 et la résistance/etc. sont
