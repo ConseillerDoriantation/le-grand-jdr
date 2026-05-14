@@ -153,9 +153,12 @@ service cloud.firestore {
       }
 
       // Pages (cartes) : lecture tous, écriture MJ
+      // Exception : les joueurs peuvent mettre à jour le champ `walls` (ouvrir/fermer portes et fenêtres)
       match /vttPages/{id} {
         allow read:  if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
+        allow update: if inAdventure(adventureId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['walls']);
       }
 
       // Annotations (dessins) : tous créent, chacun modifie/supprime les siennes, MJ gère tout
@@ -178,7 +181,7 @@ service cloud.firestore {
         allow update: if inAdventure(adventureId)
           && request.auth.uid == resource.data.ownerId
           && request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'pageId', 'visible']);
+               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt']);
         allow update: if inAdventure(adventureId)
           && request.resource.data.diff(resource.data)
                .affectedKeys().hasOnly(['hp', 'pvCombatHp']);
