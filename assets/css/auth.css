@@ -242,3 +242,29 @@
   margin-top: 1rem;
   min-height: 1.2rem;
 }
+
+/* ── Toggle affichage mot de passe ─────────────────────────────── */
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 2.6rem; }
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.35rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.pw-toggle:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.pw-toggle:focus-visible { outline: 2px solid rgba(226, 185, 111, 0.5); outline-offset: 1px; }
+.pw-icon { width: 18px; height: 18px; }
+.pw-toggle .pw-icon-off { display: none; }
+.pw-toggle.pw-toggle--on .pw-icon-on  { display: none; }
+.pw-toggle.pw-toggle--on .pw-icon-off { display: block; }

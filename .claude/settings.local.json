@@ -92,7 +92,8 @@
       "Bash(find \"C:/Users/Moi/Documents/GitHub/le-grand-jdr\" -iname \"*achiev*\" 2>/dev/null)",
       "Bash(find \"C:/Users/Moi\" -iname \"achievements*\" 2>/dev/null | head -20)",
       "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/achievements.js\")",
-      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/pages.js\")"
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/pages.js\")",
+      "Bash(node --check assets/js/features/vtt.js)"
     ]
   }
 }
