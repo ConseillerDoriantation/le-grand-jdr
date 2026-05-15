@@ -2296,6 +2296,832 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .cs-rune-btn { background: #f0f2f6; border-color: rgba(0,0,0,0.10); }
 [data-theme="light"] .cs-sort-pm-display { background: rgba(37,99,235,0.06); border-color: rgba(37,99,235,0.18); }
 
+/* ─────────────────────────────────────────────────
+   FORGE DE SORTS — Mes runes (cartes actives)
+───────────────────────────────────────────────── */
+.cs-runes-active-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+.cs-rune-active {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.65rem 0.8rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--rune-c) 14%, var(--bg-panel)) 0%, var(--bg-panel) 80%);
+  border: 1px solid color-mix(in srgb, var(--rune-c) 35%, transparent);
+  border-left: 4px solid var(--rune-c);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+}
+.cs-rune-active-main { min-width: 0; }
+.cs-rune-active-hdr {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.15rem;
+}
+.cs-rune-active-icon { font-size: 1.1rem; line-height: 1; }
+.cs-rune-active-nom {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+}
+.cs-rune-active-x {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--rune-c);
+  background: color-mix(in srgb, var(--rune-c) 18%, transparent);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.cs-rune-active-contrib {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 0.1rem;
+}
+.cs-rune-active-chain {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #e8b84b;
+  margin-top: 0.18rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.cs-rune-active-ctrl {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.cs-rune-active-ctrl .cs-rune-btn {
+  width: 30px;
+  height: 30px;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+/* État vide — pas de rune sélectionnée */
+.cs-rune-active-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  background: rgba(255,255,255,0.025);
+  border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 10px;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+.cs-rune-active-empty-icon { font-size: 1.4rem; opacity: 0.7; }
+[data-theme="light"] .cs-rune-active-empty {
+  background: rgba(0,0,0,0.02);
+  border-color: rgba(0,0,0,0.10);
+}
+
+/* ─────────────────────────────────────────────────
+   FORGE DE SORTS — Picker (Ajouter une rune)
+───────────────────────────────────────────────── */
+.cs-runes-picker {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem 0.5rem;
+  background: rgba(255,255,255,0.015);
+}
+[data-theme="light"] .cs-runes-picker {
+  background: rgba(0,0,0,0.015);
+  border-color: rgba(0,0,0,0.08);
+}
+.cs-runes-picker-hdr {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 0.45rem;
+  letter-spacing: 0.02em;
+}
+.cs-runes-picker-hdr span {
+  font-weight: 400;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-left: 0.3rem;
+  font-style: italic;
+}
+.cs-rune-pick-group { margin-bottom: 0.55rem; }
+.cs-rune-pick-group:last-child { margin-bottom: 0; }
+.cs-rune-pick-group-title {
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 0.3rem;
+}
+.cs-rune-pick-group-title span {
+  font-weight: 400;
+  font-size: 0.6rem;
+  font-style: italic;
+  margin-left: 0.35rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.cs-rune-pick-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.35rem;
+}
+.cs-rune-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.55rem;
+  background: var(--bg-elevated);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text);
+  transition: all 0.12s ease;
+  font-family: inherit;
+  text-align: left;
+}
+.cs-rune-pick-item:hover {
+  background: color-mix(in srgb, var(--rune-c) 10%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--rune-c) 50%, transparent);
+  transform: translateY(-1px);
+}
+.cs-rune-pick-item.has-count {
+  background: color-mix(in srgb, var(--rune-c) 12%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--rune-c) 40%, transparent);
+}
+.cs-rune-pick-icon { font-size: 0.95rem; flex-shrink: 0; }
+.cs-rune-pick-nom { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-rune-pick-cnt {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--rune-c);
+  background: color-mix(in srgb, var(--rune-c) 22%, transparent);
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.cs-rune-pick-add {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cs-rune-pick-item:hover .cs-rune-pick-add { color: var(--rune-c); opacity: 1; }
+
+/* Message quand toutes les runes sont actives */
+.cs-runes-picker-empty {
+  padding: 0.7rem 0.9rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: center;
+  background: rgba(255,255,255,0.02);
+  border: 1px dashed rgba(255,255,255,0.10);
+  border-radius: 8px;
+}
+[data-theme="light"] .cs-runes-picker-empty {
+  background: rgba(0,0,0,0.02);
+  border-color: rgba(0,0,0,0.08);
+}
+
+/* ─────────────────────────────────────────────────
+   AUTO-VAL — Chip lecture seule + bouton "✏️ Custom"
+   Évite le piège "input vide qui invite à taper"
+───────────────────────────────────────────────── */
+.cs-spell-autoval {
+  margin-bottom: 0.55rem;
+}
+.cs-spell-autoval-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+.cs-spell-autoval-display {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  background: rgba(34,195,142,0.06);
+  border: 1px solid rgba(34,195,142,0.25);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.cs-spell-autoval-val {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #22c38e;
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: 0.01em;
+}
+.cs-spell-autoval-source {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-style: italic;
+  flex: 1;
+  min-width: 0;
+}
+.cs-spell-autoval.is-custom .cs-spell-autoval-display { display: none; }
+.cs-spell-autoval-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cs-spell-autoval-edit .input-field { flex: 1; }
+.cs-spell-autoval-btn {
+  padding: 0.4rem 0.65rem;
+  border-radius: 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: all 0.12s ease;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.cs-spell-autoval-btn:hover {
+  background: rgba(232,184,75,0.12);
+  border-color: rgba(232,184,75,0.30);
+  color: #e8b84b;
+}
+[data-theme="light"] .cs-spell-autoval-display {
+  background: rgba(34,195,142,0.06);
+  border-color: rgba(22,163,116,0.30);
+}
+[data-theme="light"] .cs-spell-autoval-val { color: #15803d; }
+[data-theme="light"] .cs-spell-autoval-btn {
+  background: #f4f6fa;
+  border-color: rgba(0,0,0,0.10);
+}
+[data-theme="light"] .cs-rune-pick-item { background: #f4f6fa; border-color: rgba(0,0,0,0.08); }
+
+/* ─────────────────────────────────────────────────
+   ENCHANTEMENT / AFFLICTION — Boîtes avec slot picker
+───────────────────────────────────────────────── */
+.cs-spell-slot-box {
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  margin-bottom: 0.6rem;
+  border-left: 4px solid;
+}
+.cs-spell-slot-box--ench {
+  background: linear-gradient(135deg, rgba(232,184,75,0.10), rgba(232,184,75,0.03));
+  border: 1px solid rgba(232,184,75,0.28);
+  border-left-color: #e8b84b;
+}
+.cs-spell-slot-box--aff {
+  background: linear-gradient(135deg, rgba(139,92,246,0.10), rgba(139,92,246,0.03));
+  border: 1px solid rgba(139,92,246,0.28);
+  border-left-color: #8b5cf6;
+}
+[data-theme="light"] .cs-spell-slot-box--ench { background: linear-gradient(135deg, rgba(217,119,6,0.08), rgba(217,119,6,0.02)); }
+[data-theme="light"] .cs-spell-slot-box--aff  { background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(124,58,237,0.02)); }
+
+.cs-spell-slot-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+.cs-spell-slot-title span {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: 0.4rem;
+  font-style: italic;
+}
+
+.cs-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.35rem;
+  margin-bottom: 0.1rem;
+}
+.cs-slot-btn {
+  padding: 0.45rem 0.4rem;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  border: 2px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-weight: 500;
+  font-family: inherit;
+  text-align: center;
+}
+.cs-slot-btn:hover {
+  background: rgba(79,140,255,0.08);
+  border-color: rgba(79,140,255,0.30);
+  color: var(--text);
+}
+.cs-slot-btn.selected {
+  border-color: #4f8cff;
+  background: rgba(79,140,255,0.18);
+  color: #4f8cff;
+  font-weight: 700;
+}
+[data-theme="light"] .cs-slot-btn { background: #f0f3f8; border-color: rgba(0,0,0,0.10); }
+[data-theme="light"] .cs-slot-btn.selected { background: rgba(37,99,235,0.12); color: #1d4ed8; border-color: #1d4ed8; }
+
+/* ── Chip "💡 Suggéré : …" (Enchantement / Affliction) ────────── */
+.cs-spell-suggest {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.4rem;
+  background: linear-gradient(135deg, rgba(232,184,75,0.10), rgba(232,184,75,0.03));
+  border: 1px solid rgba(232,184,75,0.32);
+  border-radius: 7px;
+  font-size: 0.76rem;
+  flex-wrap: wrap;
+}
+.cs-spell-suggest--aff {
+  background: linear-gradient(135deg, rgba(139,92,246,0.10), rgba(139,92,246,0.03));
+  border-color: rgba(139,92,246,0.32);
+}
+.cs-spell-suggest-icon { font-size: 0.95rem; }
+.cs-spell-suggest-label {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+.cs-spell-suggest-val {
+  color: var(--text);
+  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+}
+.cs-spell-suggest-btn {
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(232,184,75,0.45);
+  background: rgba(232,184,75,0.18);
+  color: #e8b84b;
+  font-family: inherit;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cs-spell-suggest--aff .cs-spell-suggest-btn {
+  border-color: rgba(139,92,246,0.45);
+  background: rgba(139,92,246,0.18);
+  color: #c4b5fd;
+}
+.cs-spell-suggest-btn:hover { transform: translateY(-1px); filter: brightness(1.15); }
+[data-theme="light"] .cs-spell-suggest    { background: linear-gradient(135deg, rgba(217,119,6,0.08), rgba(217,119,6,0.02)); }
+[data-theme="light"] .cs-spell-suggest--aff { background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(124,58,237,0.02)); }
+[data-theme="light"] .cs-spell-suggest-btn { color: #b45309; }
+[data-theme="light"] .cs-spell-suggest--aff .cs-spell-suggest-btn { color: #6d28d9; }
+
+/* ═══════════════════════════════════════════════════════════
+   MODAL DE SORT — Forge (large · 2 colonnes desktop)
+═══════════════════════════════════════════════════════════ */
+
+/* Élargit le modal QUAND il contient une forge de sort.
+   Utilise :has() (Chrome 105+, Safari 15.4+, Firefox 121+) — fallback élégant : modal normal. */
+.modal:has(.cs-spell-forge) {
+  max-width: 1080px;
+  padding: 1.3rem 1.4rem;
+}
+.modal:has(.cs-spell-forge) .modal-title {
+  margin-bottom: 0.8rem;
+  padding-bottom: 0.55rem;
+}
+
+/* Wrapper de la forge */
+.cs-spell-forge {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Grille 2 colonnes (desktop) — colonne gauche large, droite condensée */
+.cs-spell-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.cs-spell-grid-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cs-spell-grid-col--right > * { /* densité un peu plus serrée à droite */
+  margin-bottom: 0.5rem;
+}
+
+/* Mobile / tablet étroit — repli en colonne unique */
+@media (max-width: 900px) {
+  .modal:has(.cs-spell-forge) { max-width: 96vw; padding: 1rem; }
+  .cs-spell-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+/* Bouton Enregistrer plus marqué */
+.cs-spell-save {
+  margin-top: 0.6rem;
+  padding: 0.85rem 1rem !important;
+  font-size: 0.95rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 14px rgba(232,184,75,0.22);
+}
+
+/* La preview sticky doit rester en haut au-dessus de la grille */
+.cs-spell-forge .cs-spell-preview--sticky {
+  margin-bottom: 0.7rem;
+  z-index: 6;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MODAL DE SORT — Refonte visuelle (sections + identité)
+═══════════════════════════════════════════════════════════ */
+
+/* Bandeau d'identité : icône carrée + nom large + catégorie */
+.cs-spell-identity {
+  display: grid;
+  grid-template-columns: 64px 1fr 0.9fr;
+  gap: 0.55rem;
+  margin-bottom: 0.7rem;
+}
+.cs-spell-identity-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.cs-spell-identity-field label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+.cs-spell-identity-field .input-field {
+  height: 38px;
+  padding: 0 0.55rem;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+.cs-spell-identity-field select.input-field { padding-right: 1.8rem; }
+.cs-spell-icon-input {
+  text-align: center;
+  font-size: 1.25rem !important;
+  padding: 0 !important;
+  line-height: 38px;
+}
+
+/* Section visuelle (Noyau, Runes) — card avec titre proéminent */
+.cs-spell-section {
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0));
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.7rem;
+}
+.cs-spell-section-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.cs-spell-section-hint {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.cs-spell-section--noyau {
+  background: linear-gradient(180deg, rgba(180,127,255,0.05), rgba(180,127,255,0.01));
+  border-color: rgba(180,127,255,0.20);
+}
+.cs-spell-section--noyau .cs-spell-section-title { color: #c084fc; }
+.cs-spell-section--runes {
+  background: linear-gradient(180deg, rgba(79,140,255,0.04), rgba(79,140,255,0.01));
+  border-color: rgba(79,140,255,0.18);
+}
+.cs-spell-section--runes .cs-spell-section-title { color: #60a5fa; }
+[data-theme="light"] .cs-spell-section {
+  background: linear-gradient(180deg, rgba(0,0,0,0.015), rgba(0,0,0,0));
+  border-color: rgba(0,0,0,0.07);
+}
+[data-theme="light"] .cs-spell-section--noyau .cs-spell-section-title { color: #7c3aed; }
+[data-theme="light"] .cs-spell-section--runes .cs-spell-section-title { color: #2563eb; }
+
+/* Bande inline compacte (Type, Action, Déplacement) — pas de bordure, juste un label + boutons */
+.cs-spell-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.1rem;
+  margin-bottom: 0.4rem;
+  flex-wrap: wrap;
+}
+.cs-spell-inline-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  min-width: 100px;
+  flex-shrink: 0;
+}
+.cs-spell-inline-row > div { flex: 1; min-width: 0; }
+
+/* Description / Effet libre — plus compact */
+.cs-spell-desc {
+  margin-bottom: 0.6rem;
+}
+.cs-spell-desc label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.cs-spell-desc textarea {
+  font-size: 0.78rem;
+  resize: vertical;
+  min-height: 50px;
+}
+
+/* ─────────────────────────────────────────────────
+   TOGGLE SWITCH — Validation MJ (style iOS-like, gold quand actif)
+───────────────────────────────────────────────── */
+.cs-mj-validation {
+  position: relative;
+  margin-bottom: 0.55rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.025), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 0.5rem 0.7rem;
+  transition: all 0.18s ease;
+}
+.cs-mj-validation.is-on {
+  background: linear-gradient(135deg, rgba(34,195,142,0.12), rgba(34,195,142,0.03));
+  border-color: rgba(34,195,142,0.4);
+  box-shadow: 0 2px 8px rgba(34,195,142,0.10);
+}
+.cs-mj-validation input[type=checkbox] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.cs-mj-validation-label {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+  margin: 0;
+}
+.cs-mj-validation-switch {
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 999px;
+  position: relative;
+  transition: background 0.18s ease;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.cs-mj-validation-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #f4f5f7;
+  border-radius: 50%;
+  transition: left 0.22s cubic-bezier(.4,1.4,.6,1), background 0.18s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.cs-mj-validation.is-on .cs-mj-validation-switch {
+  background: linear-gradient(135deg, #22c38e, #16a370);
+  border-color: rgba(34,195,142,0.5);
+}
+.cs-mj-validation.is-on .cs-mj-validation-thumb {
+  left: 18px;
+  background: #ffffff;
+}
+.cs-mj-validation-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+.cs-mj-validation-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.cs-mj-validation-sub {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-style: italic;
+  line-height: 1.3;
+}
+.cs-mj-validation-state {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
+.cs-mj-validation-state::before { content: '⏳ En attente'; }
+.cs-mj-validation.is-on .cs-mj-validation-state {
+  background: rgba(34,195,142,0.20);
+  color: #22c38e;
+}
+.cs-mj-validation.is-on .cs-mj-validation-state::before { content: '✅ Validé'; }
+/* Variant readonly (joueur non-admin qui voit le badge) */
+.cs-mj-validation--readonly { cursor: default; }
+.cs-mj-validation--readonly .cs-mj-validation-label { cursor: default; }
+[data-theme="light"] .cs-mj-validation {
+  background: linear-gradient(135deg, rgba(0,0,0,0.02), rgba(0,0,0,0.005));
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .cs-mj-validation.is-on {
+  background: linear-gradient(135deg, rgba(22,163,116,0.10), rgba(22,163,116,0.02));
+  border-color: rgba(22,163,116,0.45);
+}
+[data-theme="light"] .cs-mj-validation-switch {
+  background: #e5e7eb;
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .cs-mj-validation-thumb { background: #fff; }
+
+/* ── Icône custom + badge MJ validé dans la fiche du sort ───── */
+.cs-sort-icon {
+  font-size: 1.05rem;
+  margin-right: 0.15rem;
+  display: inline-block;
+  vertical-align: middle;
+}
+.cs-sort-validated {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-size: 0.78rem;
+  filter: drop-shadow(0 0 2px rgba(34,195,142,0.6));
+  cursor: help;
+}
+
+/* ── Section dédiée Durée de base / Déplacement (remplaçant Options avancées) ── */
+.cs-duree-section,
+.cs-depl-section {
+  padding: 0.5rem 0.7rem;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  margin-bottom: 0.55rem;
+}
+[data-theme="light"] .cs-duree-section,
+[data-theme="light"] .cs-depl-section {
+  background: rgba(0,0,0,0.02);
+  border-color: rgba(0,0,0,0.06);
+}
+
+/* ── Section Limites MJ ──────────────────────── */
+.cs-mj-limits {
+  background: rgba(232,184,75,0.04);
+  border: 1px solid rgba(232,184,75,0.22);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.55rem;
+}
+.cs-mj-limits-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #e8b84b;
+  margin-bottom: 0.4rem;
+}
+.cs-mj-limits-title span {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 0.68rem;
+  font-style: italic;
+}
+[data-theme="light"] .cs-mj-limits { background: rgba(217,119,6,0.06); border-color: rgba(217,119,6,0.30); }
+[data-theme="light"] .cs-mj-limits-title { color: #b45309; }
+
+/* ── Aperçu live des effets du sort (modal) ────── */
+.cs-spell-preview {
+  background: linear-gradient(180deg, rgba(79,140,255,0.10), rgba(79,140,255,0.05));
+  border: 1px solid rgba(79,140,255,0.30);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 2px 8px rgba(79,140,255,0.08);
+}
+/* Variant sticky : reste collé en haut du modal pendant l'édition */
+.cs-spell-preview--sticky {
+  position: sticky;
+  top: -0.5rem;
+  z-index: 5;
+  margin-top: -0.25rem;
+  backdrop-filter: blur(8px);
+  background: linear-gradient(180deg, rgba(20,28,46,0.96), rgba(20,28,46,0.92));
+  border-color: rgba(79,140,255,0.4);
+}
+[data-theme="light"] .cs-spell-preview--sticky {
+  background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(247,249,253,0.95));
+  border-color: rgba(37,99,235,0.35);
+}
+.cs-spell-preview-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--blue);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 0.4rem;
+}
+.cs-spell-preview-pm {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.cs-spell-preview-pm strong {
+  color: var(--blue);
+  font-size: 0.85rem;
+  font-family: 'Outfit', sans-serif;
+}
+.cs-spell-preview-body { display: flex; flex-direction: column; gap: 0.15rem; }
+.cs-spell-preview-body:empty::before {
+  content: "Choisis un noyau et des runes…";
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  font-style: italic;
+}
+.cs-spell-preview-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  padding: 0.12rem 0;
+  flex-wrap: wrap;
+}
+.cs-spell-preview-icon { flex-shrink: 0; width: 1.1rem; text-align: center; }
+.cs-spell-preview-label { color: var(--text); font-weight: 600; }
+.cs-spell-preview-detail { color: var(--text-dim); font-size: 0.7rem; font-style: italic; }
+
+/* Variante : ligne de combo détecté (mise en avant doré) */
+.cs-spell-preview-row--combo {
+  padding: 0.25rem 0.45rem;
+  margin: 0.2rem 0;
+  background: linear-gradient(90deg, rgba(232,184,75,0.10), rgba(232,184,75,0.03));
+  border-left: 3px solid #e8b84b;
+  border-radius: 0 6px 6px 0;
+}
+.cs-spell-preview-row--combo .cs-spell-preview-label { color: #e8b84b; font-weight: 700; }
+.cs-spell-preview-row--combo .cs-spell-preview-detail { color: var(--text); font-style: normal; font-weight: 500; }
+[data-theme="light"] .cs-spell-preview-row--combo {
+  background: linear-gradient(90deg, rgba(217,119,6,0.08), rgba(217,119,6,0.02));
+  border-left-color: #d97706;
+}
+[data-theme="light"] .cs-spell-preview-row--combo .cs-spell-preview-label { color: #b45309; }
+[data-theme="light"] .cs-spell-preview { background: rgba(37,99,235,0.05); border-color: rgba(37,99,235,0.25); }
+
 /* ══════════════════════════════════════════════════
    BOUTIQUE — Nouveaux éléments v18
 ══════════════════════════════════════════════════ */

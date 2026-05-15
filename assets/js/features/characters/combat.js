@@ -7,7 +7,7 @@ import {
   loadCombatStyles, detectCombatStyle,
   openCombatStylesAdmin, openWeaponFormatsAdmin,
   _getTraits, getArmorTypeMeta, getArmorSetChipText, getArmorSetData,
-  getWeaponToucherParts, getWeaponDegatsParts,
+  getWeaponToucherParts, getWeaponDegatsParts, getMainWeapon,
 } from './data.js';
 
 // ── renderCharEquip ───────────────────────────────────────────────────────────
@@ -31,13 +31,15 @@ export function renderCharEquip(c, canEdit) {
     <div class="cs-weap-grid">`;
 
   weaponSlots.forEach(slot => {
-    const item    = equip[slot]||{};
+    // Main principale vide → poings par défaut. Main secondaire vide reste vide.
+    const rawItem = equip[slot] || {};
+    const item    = (slot === 'Main principale' && !rawItem.nom) ? getMainWeapon(c) : rawItem;
     const statKey = item.statAttaque==='dexterite' ? 'dexterite'
                   : item.statAttaque==='intelligence' ? 'intelligence' : 'force';
     const traits       = item.nom ? _getTraits(item) : [];
     const bonusDisplay = item.nom ? formatItemBonusText(item) : null;
 
-    html += `<div class="cs-weap-card">
+    html += `<div class="cs-weap-card${item.isDefault ? ' cs-weap-card--default' : ''}">
       <div class="cs-weap-card-hdr">
         <span class="cs-weap-slot-lbl">${slot}</span>
         ${canEdit ? `<button class="cs-weap-edit" onclick="editEquipSlot('${slot}')">✏️</button>` : ''}
@@ -61,8 +63,8 @@ export function renderCharEquip(c, canEdit) {
 
       html += `
       <div class="cs-weap-card-nom">
-        <span class="cs-weap-nom">${item.nom}</span>
-        ${item.format ? `<span class="cs-cbadge cs-cbadge--dim">${item.format}</span>` : ''}
+        <span class="cs-weap-nom">${item.isDefault ? `${item.icon} ` : ''}${item.nom}</span>
+        ${item.isDefault ? '<span class="cs-cbadge cs-cbadge--dim">Par défaut</span>' : (item.format ? `<span class="cs-cbadge cs-cbadge--dim">${item.format}</span>` : '')}
       </div>
       <div class="cs-weap-rolls">
         <div class="cs-weap-roll-block">
