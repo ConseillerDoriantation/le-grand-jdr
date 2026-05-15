@@ -17,6 +17,7 @@ import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, get
 import { getArmorSetData } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
+import { loadSpellMatrices, getInvokedArm } from '../shared/spell-matrices.js';
 import { showNotif } from '../shared/notifications.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -57,6 +58,7 @@ let _suppressTokenClickUntil = 0;   // bloque le click synthétique après clic 
 let _autoSyncDone = false;   // empêche la double-création de tokens
 let _weaponFormats = null;   // cache formats d'armes (damageType, etc.)
 let _damageTypes   = null;   // cache types de dégâts (règles de combat)
+let _spellMatrices = null;   // cache matrices MJ (armes invoquées, combos config)
 let _imgTr      = null;      // Transformer pour images BG (sous tokens)
 let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens)
 let _selImg     = null;      // id de l'image sélectionnée
@@ -148,9 +150,17 @@ const _npcStatScore = (npc, key) => _numOr(npc?.stats?.[key], 8);
 const _npcStatMod = (npc, key) => getModFromScore(_npcStatScore(npc, key));
 const _npcCombat = (npc = {}) => npc?.combat || {};
 const _tokenStatMod = (t, statKey) => {
-  if (!statKey) return 0;
-  if (t?.characterId) return getMod(_characters[t.characterId], statKey);
-  if (t?.npcId) return _npcStatMod(_npcs[t.npcId], statKey);
+  if (!t || !statKey) return 0;
+  if (t.characterId) {
+    const c = _characters[t.characterId];
+    return c ? getMod(c, statKey) : 0;
+  }
+  if (t.npcId) return _npcStatMod(_npcs[t.npcId] || {}, statKey);
+  if (t.beastId) {
+    const b = _bestiary[t.beastId];
+    const score = b?.stats?.[statKey] ?? 10;
+    return Math.floor((Math.min(22, score) - 10) / 2);
+  }
   return 0;
 };
 
@@ -263,7 +273,15 @@ function _live(t) {
     displayHpMax:      hpMax,
     displayPm:         c ? (c.pm ?? calcPMMax(c)) : n ? npcPmCur : null,
     displayPmMax:      c ? calcPMMax(c) : n ? npcPmMax : null,
-    displayMovement:   t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6))))),
+    displayMovement: (() => {
+      const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6)))));
+      const r = _session?.combat?.round ?? 0;
+      const moveDelta = (t.buffs || [])
+        .filter(bf => (bf.type === 'move_bonus' || bf.type === 'move_debuff')
+          && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
+        .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
+      return Math.max(0, baseMv + moveDelta);
+    })(),
     displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))),
     displayAttackDice: atkDice,
     displayDefense:    (t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))))) + (() => {
@@ -277,13 +295,21 @@ function _live(t) {
     })(),
     // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
     // Pour bestiaire/custom : t.range > 1ère attaque bestiary > défaut 1
-    displayRange: c
-      ? (t.range > 1 ? t.range : (weapon?.portee ? parseInt(weapon.portee)||1 : 1))
-      : b
-        ? (t.range > 1 ? t.range : (_numOr(b.attaques?.[0]?.portee, 1)))
-        : n
-          ? (t.range > 1 ? t.range : (_numOr(npcCombat.range, _numOr(npcWeapon.portee, 1))))
-          : (t.range ?? 1),
+    // Bonus de portée temporaire (buff range_bonus = Allonge magique etc.)
+    displayRange: (() => {
+      const baseRange = c
+        ? (t.range > 1 ? t.range : (weapon?.portee ? parseInt(weapon.portee)||1 : 1))
+        : b
+          ? (t.range > 1 ? t.range : (_numOr(b.attaques?.[0]?.portee, 1)))
+          : n
+            ? (t.range > 1 ? t.range : (_numOr(npcCombat.range, _numOr(npcWeapon.portee, 1))))
+            : (t.range ?? 1);
+      const r = _session?.combat?.round ?? 0;
+      const rangeBonus = (t.buffs || [])
+        .filter(bf => bf.type === 'range_bonus' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
+        .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
+      return baseRange + rangeBonus;
+    })(),
     _beast:            b,   // référence directe pour _buildAttackOptions
     displayTokenW:     Math.max(1, Math.min(5, t.tokenW ?? t.tokenSize ?? b?.tokenW ?? b?.tokenSize ?? 1)),
     displayTokenH:     Math.max(1, Math.min(5, t.tokenH ?? t.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1)),
@@ -330,6 +356,45 @@ async function _setHp(t, newHp) {
   if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
   else               await updateDoc(_tokRef(t.id),          { hp: v });
+}
+
+/**
+ * Déclenche un JS Sa de concentration auto sur tous les buffs canalisés du token
+ * qui vient de subir des dégâts. À appeler depuis tout point qui inflige des dégâts
+ * hors `_vttRollAttack` (édition manuelle, DoT, environnement…).
+ * Retourne un tableau de notes pour log/notif.
+ */
+async function _vttTriggerConcentrationSave(td, damageAmount) {
+  if (!td || damageAmount <= 0) return [];
+  const buffs = (td.buffs || []).filter(b => b?.canalisePersistant && b?.concentrationDD != null);
+  if (!buffs.length) return [];
+  const sagMod = _tokenStatMod(td, 'sagesse');
+  const tgtName = _live(td).displayName ?? td.name;
+  const notes = [];
+  let removed = [];
+  for (const cb of buffs) {
+    const dd = cb.concentrationDD;
+    const roll = Math.floor(Math.random() * 20) + 1;
+    const tot = roll + sagMod;
+    const success = roll === 20 || (roll !== 1 && tot >= dd);
+    const rollStr = `JS Sa ${roll}${sagMod>=0?'+':''}${sagMod}=${tot} vs DD${dd}`;
+    if (success) {
+      notes.push(`🧠 ${rollStr} · ${cb.sortLabel} tenu (${tgtName})`);
+    } else {
+      notes.push(`💢 ${rollStr} ÉCHEC · ${cb.sortLabel} rompu sur ${tgtName}`);
+      removed.push(cb);
+      // Supprime les summons canalisés liés
+      const summonsToKill = Object.values(_tokens).filter(e =>
+        e?.data?.summonOwnerId === (cb.casterId || td.id) && e?.data?.summonCanalise
+      );
+      for (const s of summonsToKill) await deleteDoc(_tokRef(s.data.id)).catch(() => {});
+    }
+  }
+  if (removed.length) {
+    const remaining = (td.buffs || []).filter(b => !removed.includes(b));
+    await updateDoc(_tokRef(td.id), { buffs: remaining }).catch(() => {});
+  }
+  return notes;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -898,6 +963,14 @@ function _buildShape(t) {
     // ─ Début du drag : mémoriser les positions du groupe ─
     g.on('dragstart', () => {
       if (rightDown) rightDown.dragged = true;
+      // En mode placement de zone ou de ciblage multi-cibles : pas de déplacement de token
+      // (le sort doit rester prioritaire — un drag accidentel ne déplace pas le PJ)
+      if (_zoneCtx || _mtCtx) {
+        g.stopDrag();
+        g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
+        _layers.token?.batchDraw();
+        return;
+      }
       if (_middlePanActive) {
         g.stopDrag();
         g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
@@ -1159,7 +1232,18 @@ function _showMoveRange(t) {
     const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
       fill:'rgba(79,140,255,0.28)', stroke:'rgba(79,140,255,0.70)', strokeWidth:1.5, listening:true });
     const tc=c, tr=r;
-    const moveSelectedHere = async e => { e.cancelBubble=true; if (_selected) await _moveTo(_selected, tc, tr); };
+    const moveSelectedHere = async e => {
+      // En mode placement de zone ou de ciblage multi-cibles : le sort est prioritaire
+      // on bascule placed pour zone et on annule le déplacement
+      if (_zoneCtx) {
+        e.cancelBubble = true;
+        _zoneCtx.placed = !_zoneCtx.placed;
+        return;
+      }
+      if (_mtCtx) { e.cancelBubble = true; return; }
+      e.cancelBubble = true;
+      if (_selected) await _moveTo(_selected, tc, tr);
+    };
     rect.on('click', e => { if (e.evt.button!==0) return; moveSelectedHere(e); });
     rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
     _layers.grid.add(rect); _moveHL.push(rect);
@@ -1446,7 +1530,11 @@ function _vttSortDmgFormula(s, c) {
 /**
  * Formule de soin calculée d'un sort défensif (mode soin).
  * Miroir local de _calcSortSoin (spells.js).
- * Inclut : 1d4 base + runes Protection + chaînage + maîtrise arme principale.
+ * Inclut : 1d4 base + runes Protection + chaînage + maîtrise + mod de stat.
+ * Stat utilisée :
+ *  - Noyau magique avec arme magique équipée → stat d'attaque de l'arme
+ *  - Noyau magique sans arme magique (Poings) → Intelligence
+ *  - Noyau physique / pas de noyau → Constitution
  */
 function _vttSortSoinFormula(s, c) {
   const mainP    = c?.equipement?.['Main principale'];
@@ -1455,22 +1543,36 @@ function _vttSortSoinFormula(s, c) {
   const nbProt   = runes.filter(r => r === 'Protection').length;
   const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base     = (s.soin || '').trim();
-  const maitrStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
+
+  // Détermine la stat de soin selon la nature du noyau (magique vs physique)
+  const dmgTypes = _damageTypes;
+  const noyauTypeId = s?.noyauTypeId;
+  const isMagic = !!(dmgTypes && noyauTypeId && dmgTypes.find(x => x.id === noyauTypeId)?.isMagic);
+  let statKey = 'constitution';
+  if (isMagic) {
+    const fmt = _weaponFormats?.find(f => f.label === mainP?.format);
+    const isMagicWeapon = fmt?.isMagic === true && mainP?.nom;
+    statKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
+  }
+  const statMod = c ? getMod(c, statKey) : 0;
+
+  const totalFlat = maitrise + statMod;
+  const flatStr = totalFlat > 0 ? ` +${totalFlat}` : totalFlat < 0 ? ` ${totalFlat}` : '';
   if (!base || base.toLowerCase() === '= base') {
     let r = `${1 + nbProt}d4`;
     if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-    return r + maitrStr;
+    return r + flatStr;
   }
   if (nbProt > 0) {
     const m = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (m) {
       let r = `${parseInt(m[1]) + nbProt}${m[2]}${m[3]}`;
       if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return r + maitrStr;
+      return r + flatStr;
     }
     return base;
   }
-  return maitrStr ? base + maitrStr : base;
+  return flatStr ? base + flatStr : base;
 }
 
 /** Parse le bonus CA numérique depuis la chaîne libre (ex: "CA +2 (2 tours)" → 2). */
@@ -1479,18 +1581,34 @@ function _parseCaBonus(caStr) {
   return m ? (parseInt(m[1]) || 2) : 2;
 }
 
-/** Durée totale du sort en tours = dureeBase + bonus runes Durée. Miroir local. */
+/** Durée totale du sort en tours = dureeBase + bonus runes Durée. Miroir local.
+ *  Fallbacks :
+ *   - parse "X tours" dans le champ ca (override manuel)
+ *   - 2 tours par défaut si le sort comporte une rune persistante (Ench, Aff,
+ *     Protection mode CA, Invocation, ou Amplification seule = sort de terrain)
+ */
 function _sortDureeVtt(s) {
-  const runes  = s.runes || [];
+  const runes  = s?.runes || [];
   const nbDur  = runes.filter(r => r === 'Durée').length;
-  const base   = (s.dureeBase >= 1) ? +s.dureeBase : 0;
+  const base   = (s?.dureeBase >= 1) ? +s.dureeBase : 0;
   let bonus = 0;
   for (let i = 0; i < nbDur; i++) bonus += 2 + i;
   if (base + bonus > 0) return base + bonus;
-  // Fallback : lire "X tours" dans le champ ca (ex : "CA +2 (2 tours)")
-  // si dureeBase n'a pas été renseigné dans les options avancées
-  const m = String(s.ca || '').match(/(\d+)\s*tours?/i);
-  return m ? parseInt(m[1]) : null;
+  // Fallback 1 : lire "X tours" dans le champ ca (ex : "CA +2 (2 tours)")
+  const m = String(s?.ca || '').match(/(\d+)\s*tours?/i);
+  if (m) return parseInt(m[1]);
+  // Fallback 2 : 2 tours par défaut si rune persistante détectée
+  const protMode = s?.protectionMode || 'ca';
+  const hasProtCA = runes.includes('Protection') && protMode === 'ca';
+  const hasEnch   = runes.includes('Enchantement');
+  const hasAff    = runes.includes('Affliction');
+  const hasInv    = runes.includes('Invocation');
+  const nbAmp     = runes.filter(r => r === 'Amplification').length;
+  const nbP       = runes.filter(r => r === 'Puissance').length;
+  const nbProt    = runes.filter(r => r === 'Protection').length;
+  const isTerrain = nbAmp > 0 && nbP === 0 && nbProt === 0;
+  if (hasProtCA || hasEnch || hasAff || hasInv || isTerrain) return 2;
+  return null;
 }
 
 /**
@@ -1499,8 +1617,18 @@ function _sortDureeVtt(s) {
  * 0 rune = 1 cible ; N runes = 2N cibles (chaînage).
  */
 function _vttSortCibles(s) {
-  const n = (s.runes || []).filter(r => r === 'Dispersion').length;
-  return n === 0 ? 1 : 1 + n + (n - 1); // = 2N
+  const runes = s?.runes || [];
+  const nbDisp = runes.filter(r => r === 'Dispersion').length;
+  if (nbDisp === 0) return 1;
+  const nbAmp = runes.filter(r => r === 'Amplification').length;
+  const nbAff = runes.filter(r => r === 'Affliction').length;
+  const nbInv = runes.filter(r => r === 'Invocation').length;
+  // Combos qui absorbent la Dispersion :
+  //  - Amp + Disp → zone élargie (pas de cibles supplémentaires)
+  //  - Aff + Inv + Disp → invocations multiples (sentinelles) → pas de cibles supplémentaires
+  if (nbAmp > 0) return 1;
+  if (nbAff > 0 && nbInv > 0) return 1;
+  return 2 * nbDisp; // 1 base + N + (N-1) chaînage = 2N
 }
 
 /** Sépare "NdM +K +L" en { rawDice:"NdM", fixed:K+L }. */
@@ -1578,12 +1706,399 @@ const _tokenAttackDistance = (src, tgt, portee = null) => {
   return portee === 1 ? Math.max(dx, dy) : dx + dy;
 };
 
+/**
+ * Détecte les modificateurs spéciaux d'un sort (combos, lacération, chance, déplacement…).
+ * Miroir local des helpers de spells.js — évite cross-import features/characters.
+ * Renvoie null si aucun mod actif, sinon un objet avec les flags pertinents.
+ */
+function _vttSpellMods(s) {
+  if (!s) return null;
+  const runes = s.runes || [];
+  const counts = {};
+  runes.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  const nbP    = counts.Puissance     || 0;
+  const nbProt = counts.Protection    || 0;
+  const nbLac  = counts.Lacération    || 0;
+  const nbCh   = counts.Chance        || 0;
+  const nbReac = counts.Réaction      || 0;
+  const nbEnch = counts.Enchantement  || 0;
+  const nbInv  = counts.Invocation    || 0;
+  const nbAff  = counts.Affliction    || 0;
+  const nbAmp  = counts.Amplification || 0;
+  const nbDur  = counts.Durée         || 0;
+  const nbConc = counts.Concentration || 0;
+  const nbDisp = counts.Dispersion    || 0;
+  const protMode = s.protectionMode || 'ca';
+
+  // Stats propres de la Sentinelle (combo Affliction + Invocation)
+  const _chainProt = nbProt > 1 ? (nbProt - 1) : 0;
+  const _chainP    = nbP > 1 ? (nbP - 1) * 2 : 0;
+  const sentinelDice  = 1 + nbP;
+  const sentinelDmg   = _chainP > 0 ? `${sentinelDice}d4 +${_chainP}` : `${sentinelDice}d4`;
+  const sentinelHp    = 10 + 5 * nbProt + _chainProt;
+  const sentinelCa    = 10 + 2 * nbProt + _chainProt;
+  const sentinelRangeM = nbAmp === 0 ? 1 : (4 * nbAmp - 1);
+
+  const mods = {
+    // Drain : Puissance + Protection → soigne le lanceur d'un % des dégâts
+    // Formule : 25% + 25% × nbProt → Prot×1=50% · ×2=75% · ×3=100% · ×4=125%
+    drain: (nbP > 0 && nbProt > 0)
+      ? { pct: 0.25 + 0.25 * nbProt, nbProt } : null,
+    // Lacération : -CA brut sur la cible (plafonné en jeu : 2 joueur · 4 élite/boss)
+    laceration: nbLac > 0
+      ? { runes: nbLac, reduction: 2*nbLac - 1, max: 2, maxElite: 4 } : null,
+    // Chance : étend la plage critique (RC 20 → 21-2N..20)
+    chance: nbCh > 0
+      ? { rc: 20 - (2*nbCh - 1) } : null,
+    // Concentration : DD du JS Sagesse en cas de dégâts reçus
+    concentration: nbConc > 0
+      ? { dd: 11 + 2 * (nbConc - 1), runes: nbConc } : null,
+    // Déplacement : push / pull, distance en cases (1 case ≈ 1.5m)
+    deplacement: s.deplacement?.mode
+      ? { mode: s.deplacement.mode, distance: Math.max(1, Math.ceil((parseInt(s.deplacement.distance)||1) / CELL_M)) }
+      : null,
+    // Allonge magique : Ench + Amp + slot arme → portée étendue (au lieu d'une zone)
+    allonge: (nbEnch > 0 && nbAmp > 0 && (s.enchantSlot || 'arme') === 'arme')
+      ? { meters: 4*nbAmp - 1, cells: Math.ceil((4*nbAmp - 1) / CELL_M) } : null,
+    // Enchantement slot=arme : bonus dégâts sur les attaques d'arme de la cible (allié)
+    // Formule auto : (1+Puiss)d4 +2 — appliquée pendant 2 tours par défaut
+    // ⚠️ Absorbé par le combo Arme invoquée (Ench + Inv) → on ne le déclenche pas alors
+    enchantArmeDmg: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot || 'arme') === 'arme')
+      ? {
+          formula: (s.enchantDegats || '').trim() || `${1 + nbP}d4 +2`,
+          element: s.noyauTypeId || null,
+          nbCibles: nbEnch === 1 ? 1 : nbEnch + 1,
+        } : null,
+    // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
+    // Auto : +2 cases / rune Puissance, ou +1 par défaut
+    enchantPieds: (nbEnch > 0 && nbInv === 0 && s.enchantSlot === 'pieds')
+      ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+    // Enchantement slot=tete / torse : effet libre (matrice), buff générique
+    enchantGeneric: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
+      ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+    // Affliction : JS Sa DD 11 (modulable selon nb runes Concentration)
+    // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
+    // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
+    // ⚠️ Absorbé par le combo Aura punitive (Prot + Aff sans Puiss) → l'affliction est gérée par l'aura
+    affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0 && nbP === 0))
+      ? {
+          slot: s.afflictionSlot || 'arme',
+          effect: s.afflictionEffect || '',
+          element: s.noyauTypeId || null,
+          dd: 11,
+          // Stat de sauvegarde selon le slot (heuristique simple)
+          saveStat: s.afflictionSlot === 'torse' ? 'constitution'
+                  : s.afflictionSlot === 'pieds' ? 'force'
+                  : s.afflictionSlot === 'tete'  ? 'sagesse'
+                  : 'dexterite',
+        } : null,
+    // Aura punitive : Protection + Affliction sans Puissance (sinon Drain prime)
+    // Au cast, applique l'affliction Torse de l'élément à tous les ennemis dans la zone Manhattan
+    auraPunitive: (nbProt > 0 && nbAff > 0 && nbP === 0)
+      ? {
+          radius: nbProt,                    // portée Manhattan = nb runes Protection
+          element: s.noyauTypeId || null,
+          dd: 11,
+          saveStat: 'constitution',           // torse → Constitution
+        } : null,
+    // Sort suspendu : Réaction + Durée. Stocke le sort pour déclenchement hors-tour
+    sortSuspendu: (nbReac > 0 && nbDur > 0)
+      ? { graceTurns: nbDur + 1 } : null,
+    // Coup de chance : Chance + Réaction. Permet de relancer un d20 d'attaque raté
+    coupChance: (nbCh > 0 && nbReac > 0)
+      ? { charges: nbCh } : null,
+    // Bouclier réactif : Réaction + Protection (CA) → annule 1 attaque (sans bonus CA)
+    bouclierReactif: (nbReac > 0 && nbProt > 0 && protMode === 'ca')
+      ? { nbProt, tier: nbProt >= 3 ? 'boss' : nbProt === 2 ? 'elite' : 'mob' } : null,
+    // Arme invoquée : Ench + Invocation → token allié temporaire (2 tours)
+    armeInvoquee: (nbEnch > 0 && nbInv > 0)
+      ? { elementId: s.noyauTypeId || null, nbPuissance: nbP } : null,
+    // Sentinelle : Affliction + Invocation → token stationnaire (stats propres, 2 tours)
+    // Dispersion permet d'invoquer plusieurs sentinelles : 1 base + 2N pour N runes (chaînage standard)
+    sentinelle: (nbAff > 0 && nbInv > 0)
+      ? {
+          slot: s.afflictionSlot || 'arme',
+          elementId: s.noyauTypeId || null,
+          effect: s.afflictionEffect || '',
+          dmgDice: sentinelDmg,
+          hp: sentinelHp, ca: sentinelCa,
+          rangeCells: Math.max(1, Math.ceil(sentinelRangeM / CELL_M)),
+          rangeMeters: sentinelRangeM,
+          nbInvocations: nbDisp > 0 ? 2 * nbDisp : 1,
+          nbP, nbProt, nbAmp,
+        } : null,
+    // Canalisé persistant : Durée + Concentration → durée liée à la concentration
+    canalisePersistant: (nbDur > 0 && nbConc > 0)
+      ? { graceTurns: nbDur + 1, dd: 11 + 2 * (nbConc - 1) } : null,
+  };
+
+  // Renvoie null si aucun mod actif (évite de polluer opt.mods inutilement)
+  const any = Object.values(mods).some(v => v !== null);
+  return any ? mods : null;
+}
+
+/** Rang d'un attaquant pour comparaisons de tier (PJ = 'classique' par défaut). */
+function _attackerRank(src) {
+  if (!src) return 'classique';
+  if (src.beastId) return String(_bestiary[src.beastId]?.rang || 'classique').toLowerCase();
+  if (src.npcId)   return String(_npcs[src.npcId]?.rang || 'classique').toLowerCase();
+  if (src.characterId) return 'classique'; // PJ : tier classique par défaut
+  return 'classique';
+}
+
+/** Le bouclier réactif (tier) bloque-t-il une attaque venant d'un rang donné ?
+ *  tier=mob  → bloque rang ≤ classique/mob
+ *  tier=elite→ bloque rang ≤ élite
+ *  tier=boss → bloque tous les rangs
+ */
+function _shieldBlocks(shieldTier, attackerRank) {
+  const RANK = { 'classique': 1, 'mob': 1, 'élite': 2, 'elite': 2, 'boss': 3 };
+  const r = RANK[String(attackerRank).toLowerCase()] || 1;
+  const t = RANK[String(shieldTier).toLowerCase()] || 1;
+  return r <= t;
+}
+
+/**
+ * Déplace une cible de N cases dans la direction (push) ou opposée (pull) au lanceur.
+ * Snap grille, s'arrête au premier blocage (autre token sur la case, hors-page).
+ * Renvoie le nombre de cases effectivement parcourues.
+ */
+async function _vttApplyDeplacement(src, tgtData, mode, distance) {
+  if (!src || !tgtData || !distance) return 0;
+  // Vecteur source → cible (toujours en cellules, repère grille)
+  const dCol = tgtData.col - src.col;
+  const dRow = tgtData.row - src.row;
+  const len  = Math.hypot(dCol, dRow);
+  if (len < 0.001) return 0;
+  // Direction unitaire en cellules ; push = sens cible→loin, pull = inverse
+  const sign = mode === 'pull' ? -1 : 1;
+  const stepC = Math.sign(Math.round((dCol / len) * sign));
+  const stepR = Math.sign(Math.round((dRow / len) * sign));
+  if (stepC === 0 && stepR === 0) return 0;
+
+  let nc = tgtData.col, nr = tgtData.row;
+  let moved = 0;
+  for (let i = 0; i < distance; i++) {
+    const tryC = nc + stepC, tryR = nr + stepR;
+    // Collision avec un autre token sur la même page
+    const collide = Object.values(_tokens).some(e => {
+      const d = e?.data;
+      if (!d || d.id === tgtData.id || d.pageId !== tgtData.pageId) return false;
+      const dim = _tokenDims(d);
+      return tryC >= d.col && tryC < d.col + dim.w && tryR >= d.row && tryR < d.row + dim.h;
+    });
+    if (collide) break;
+    nc = tryC; nr = tryR; moved++;
+  }
+  if (moved > 0) {
+    await updateDoc(_tokRef(tgtData.id), { col: nc, row: nr }).catch(() => {});
+  }
+  return moved;
+}
+
+/**
+ * Crée un token "convoqué" (sentinelle, arme invoquée, etc.) sur la page active.
+ * - kind: 'sentinelle' | 'arme_invoquee'
+ * - center: { col, row } position désirée (sera ajustée si occupée pour arme invoquée)
+ * - Le token : 10 PV / CA 10 par défaut, owner = lanceur, durée 2 tours (expiresAtRound)
+ * - Persisté en Firestore via _toksCol, visible par tous, contrôlable par l'owner
+ */
+async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }) {
+  if (!_activePage) return null;
+  const src = _tokens[srcId]?.data; if (!src) return null;
+  const round = _session?.combat?.round ?? 0;
+  const baseRound = Math.max(1, round);
+  if (kind !== 'sentinelle') return null; // seul kind supporté désormais
+
+  // Sentinelle : snap dans les bornes de la page
+  const targetCol = Math.max(0, Math.min(_activePage.cols - 1, col));
+  const targetRow = Math.max(0, Math.min(_activePage.rows - 1, row));
+
+  const ownerName = _live(src).displayName ?? src.name;
+  const baseName  = `🪤 Sentinelle de ${ownerName}`;
+
+  // Stats propres de la sentinelle (calculées en amont dans _vttSpellMods)
+  const st = opt?.mods?.sentinelle || {};
+  const attackDice = st.dmgDice || '1d4';
+  const hp = st.hp || 10;
+  const ca = st.ca || 10;
+  const rangeCells = st.rangeCells || 1;
+
+  // Bonus au toucher = stat de spell du lanceur (mod) + 5 baseline
+  // Permet à la sentinelle de toucher à peu près comme une attaque de sort du lanceur
+  let attackBonus = 5;
+  if (src.characterId) {
+    const c = _characters[src.characterId];
+    if (c) {
+      const mainP   = c?.equipement?.['Main principale'];
+      const statKey = mainP?.toucherStat || mainP?.statAttaque || 'force';
+      attackBonus = (getMod(c, statKey) || 0) + 5;
+    }
+  } else if (src.npcId) {
+    attackBonus = (_npcStatMod(_npcs[src.npcId] || {}, 'force') || 0) + 5;
+  }
+
+  // Seuil critique hérité du sort (combo Chance)
+  const chanceRc = opt?.mods?.chance?.rc ?? 20;
+
+  const tokenData = {
+    name: baseName,
+    type: 'npc',                       // allié contrôlable
+    characterId: null, npcId: null, beastId: null,
+    ownerId: src.characterId ? STATE.user?.uid || null : null,
+    summonOwnerId: srcId,              // lien vers le lanceur (contrôle + cleanup)
+    summonKind: kind,
+    summonExpiresAtRound: baseRound + durationTurns - 1,
+    summonCanalise: !!opt?.mods?.canalisePersistant,
+    summonConcentrationDD: opt?.mods?.canalisePersistant?.dd || opt?.mods?.concentration?.dd || null,
+    // Stats héritées du sort qui l'a invoquée — utilisées par _buildAttackOptions
+    summonChanceRc: chanceRc,
+    // Élément : priorité au noyau du sort (st.elementId), sinon damageTypeId de l'option offensive, sinon null
+    summonElementId: st.elementId || opt?.damageTypeId || null,
+    summonNbPuissance: st.nbP || 0,
+    summonNbProtection: st.nbProt || 0,
+    summonNbAmplification: st.nbAmp || 0,
+    pageId: _activePage.id,
+    col: targetCol, row: targetRow,
+    visible: true,
+    hp, hpMax: hp,
+    defense: ca,
+    movement: 0,                       // sentinelle stationnaire
+    range: rangeCells,
+    attackDice,
+    attack: attackBonus,
+    imageUrl: null,
+    movedThisTurn: false, attackedThisTurn: false,
+    createdAt: serverTimestamp(),
+  };
+
+  const ref = doc(_toksCol());
+  await setDoc(ref, tokenData).catch(() => {});
+  return { id: ref.id, ...tokenData };
+}
+
+/**
+ * Helper commun : champs de buff partagés (durée, canalisation, source).
+ * Évite la duplication entre les différents types d'enchantements/afflictions.
+ */
+function _buffShared(opt, srcId) {
+  const round = _session?.combat?.round ?? 0;
+  const baseRound = Math.max(1, round);
+  const dur = opt.sortDuree ?? 2;
+  const isCanalise = !!opt.mods?.canalisePersistant;
+  const concDD = opt.mods?.concentration?.dd ?? (isCanalise ? 11 : null);
+  // Firestore rejette `undefined` — on omet les champs au lieu de les mettre à undefined
+  return {
+    startRound: round,
+    totalDuration: isCanalise ? null : dur,
+    expiresAtRound: isCanalise ? null : baseRound + dur - 1,
+    casterId: srcId || null,
+    sortLabel: opt.label || '',
+    ...(isCanalise ? { canalisePersistant: true, concentrationDD: concDD } : {}),
+  };
+}
+
+/** Applique les buffs d'enchantement (arme/pieds/tête/torse) sur les alliés ciblés. */
+async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
+  const shared = _buffShared(opt, srcId);
+  const buffs = [];
+  if (opt.mods?.enchantArmeDmg) {
+    buffs.push({ ...shared, type: 'dmg_bonus', slot: 'arme', icon: '⚔️',
+      formula: opt.mods.enchantArmeDmg.formula, element: opt.mods.enchantArmeDmg.element });
+  }
+  if (opt.mods?.enchantPieds) {
+    buffs.push({ ...shared, type: 'move_bonus', slot: 'pieds', icon: '👢',
+      bonus: opt.mods.enchantPieds.bonusCells });
+  }
+  if (opt.mods?.enchantGeneric) {
+    buffs.push({ ...shared, type: 'enchantment',
+      slot: opt.mods.enchantGeneric.slot, effect: opt.mods.enchantGeneric.effect,
+      icon: opt.mods.enchantGeneric.slot === 'tete' ? '👁️' : '👕' });
+  }
+  if (!buffs.length) return;
+  const types = new Set(buffs.map(b => b.type));
+  for (const tid of targetIds) {
+    const td = _tokens[tid]?.data; if (!td) continue;
+    const existing = (td.buffs || []).filter(b => !(types.has(b.type) && b.sortLabel === opt.label));
+    await updateDoc(_tokRef(tid), { buffs: [...existing, ...buffs] }).catch(() => {});
+  }
+}
+
+const _STAT_SHORT = { force:'For', dexterite:'Dex', constitution:'Con', sagesse:'Sag', intelligence:'Int', charisme:'Cha' };
+
+/** Applique une affliction : JS Sa de la cible, buff selon slot si échec. */
+async function _vttApplyAfflictions(srcId, targetIds, opt) {
+  const aff = opt.mods?.affliction; if (!aff) return;
+  const shared = _buffShared(opt, srcId);
+  const statShortStr = _STAT_SHORT[aff.saveStat] || aff.saveStat;
+  for (const tid of targetIds) {
+    const td = _tokens[tid]?.data; if (!td) continue;
+    const saveMod = _tokenStatMod(td, aff.saveStat);
+    const roll = Math.floor(Math.random() * 20) + 1;
+    const tot = roll + saveMod;
+    const success = roll === 20 || (roll !== 1 && tot >= aff.dd);
+    const tgtName = _live(td).displayName ?? td.name;
+    const rollStr = `JS ${statShortStr} ${roll}${saveMod>=0?'+':''}${saveMod}=${tot} vs DD${aff.dd}`;
+    if (success) {
+      showNotif(`🛡️ ${tgtName} résiste · ${rollStr}`, 'info');
+      continue;
+    }
+    let newBuff;
+    if (aff.slot === 'torse') {
+      // DoT : 1d4+2 dégâts/tour au début du tour de la cible
+      newBuff = { ...shared, type: 'dot', slot: 'torse', icon: '🩸',
+        formula: '1d4 +2', element: aff.element, effect: aff.effect };
+    } else if (aff.slot === 'pieds') {
+      // Débuff mouvement : -2 cases par défaut
+      newBuff = { ...shared, type: 'move_debuff', slot: 'pieds', icon: '👢',
+        bonus: -2, effect: aff.effect };
+    } else {
+      // Tête (sensoriel) / Arme (combat) : effet libre, à interpréter par le MJ
+      newBuff = { ...shared, type: 'affliction',
+        slot: aff.slot, effect: aff.effect, element: aff.element,
+        icon: aff.slot === 'tete' ? '👁️' : '⚔️' };
+    }
+    const existing = (td.buffs || []).filter(b => !(b.type === newBuff.type && b.sortLabel === opt.label));
+    await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] }).catch(() => {});
+    showNotif(`💢 ${tgtName} subit ${opt.label} · ${rollStr} (échec)`, 'success');
+  }
+}
+
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
 function _buildAttackOptions(t) {
   const ld = _live(t);
   const c  = t.characterId ? _characters[t.characterId] : null;
   const b  = ld._beast || null;
   const options = [];
+
+  // ── Token convoqué (sentinelle) : utilise ses stats propres stockées au spawn ─
+  // Les combos Chance/Puissance hérités du sort sont propagés via les champs summon*
+  if (t.summonKind === 'sentinelle') {
+    const sentinelMods = {
+      // Réinjecte le combo Chance hérité pour que _vttRollAttack utilise le bon RC
+      chance: (t.summonChanceRc && t.summonChanceRc < 20) ? { rc: t.summonChanceRc } : null,
+    };
+    options.push({
+      id: 'summon_attack',
+      icon: '🪤',
+      label: 'Attaque sentinelle',
+      rawDice: t.attackDice || '1d4',
+      dice:    t.attackDice || '1d4',
+      portee:  t.range ?? 1,
+      pmCost:  0,
+      toucher: t.attack ?? 5,           // bonus toucher hérité du lanceur
+      dmgStatMod: 0,
+      dmgStatLabel: '—',
+      maitriseBonus: 0,
+      halfOnMiss: false,
+      typeRules: getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'),
+      damageTypeId:    t.summonElementId || 'physique',
+      damageTypeIcon:  getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.icon || '',
+      damageTypeColor: getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.color || '',
+      mods: sentinelMods,
+    });
+    return options;
+  }
 
   // ── Créature du bestiaire : ses attaques nommées ──
   if (b?.attaques?.length) {
@@ -1639,32 +2154,53 @@ function _buildAttackOptions(t) {
     return options;
   }
 
+  // ── Arme invoquée active (buff weapon_replace) : remplace l'arme principale ──
+  const _r0 = _session?.combat?.round ?? 0;
+  const wReplace = (t.buffs || []).find(b => b?.type === 'weapon_replace'
+    && (b.expiresAtRound == null || _r0 === 0 || _r0 <= b.expiresAtRound));
+
   // ── Arme principale du personnage (ou attaque générique) ──
   const weapon       = c?.equipement?.['Main principale'];
-  const isUnarmed    = !weapon?.nom;
-  const wDmgStats    = isUnarmed ? ['force']
-    : (weapon?.degatsStats?.length ? weapon.degatsStats : [weapon?.degatsStat || 'force']);
-  const wTchStat     = isUnarmed ? 'force'
-    : (weapon?.toucherStats?.[0] || weapon?.toucherStat || wDmgStats[0]);
+  const isUnarmed    = !wReplace && !weapon?.nom;
+  // Stats actives : buff weapon_replace > équipement > poings
+  const wDmgStats    = wReplace ? [wReplace.statDegats || 'force']
+                                : isUnarmed ? ['force']
+                                  : (weapon?.degatsStats?.length ? weapon.degatsStats : [weapon?.degatsStat || 'force']);
+  const wTchStat     = wReplace ? (wReplace.statToucher || 'force')
+                                : isUnarmed ? 'force'
+                                  : (weapon?.toucherStats?.[0] || weapon?.toucherStat || wDmgStats[0]);
   const wDmgMod      = c ? wDmgStats.reduce((sum, s) => sum + getMod(c, s), 0) : 0;
   const wDmgStatLabel= wDmgStats.map(s => statShort(s) || s).join('+');
   const wTchMod      = c ? getMod(c, wTchStat)  : 0;
   const wSetBonus    = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
-  const wMaitrise    = c && weapon ? getMaitriseBonus(c, weapon) : 0;
+  const wMaitrise    = c && !wReplace && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
-  const fmt        = _weaponFormats?.find(f => f.label === weapon?.format);
-  const isMagicW   = fmt?.isMagic === true;
-  const typeRules  = isMagicW
-    ? getDamageTypeRules(_damageTypes, 'physique')  // fallback si pas d'élément choisi
-    : getDamageTypeRules(_damageTypes, fmt?.damageType || 'physique');
+  const wReplaceTypeId = wReplace?.element || 'physique';
+  const fmt        = wReplace ? null : _weaponFormats?.find(f => f.label === weapon?.format);
+  const isMagicW   = wReplace ? true : fmt?.isMagic === true;
+  const typeRules  = wReplace
+    ? getDamageTypeRules(_damageTypes, wReplaceTypeId)
+    : (isMagicW
+        ? getDamageTypeRules(_damageTypes, 'physique')
+        : getDamageTypeRules(_damageTypes, fmt?.damageType || 'physique'));
+
+  // Formule dés finale : arme invoquée → buff.weaponDice + mod stat ; sinon comportement actuel
+  const wDmgDiceRaw = wReplace ? wReplace.weaponDice
+                                : (isUnarmed ? '2d4' : (weapon?.degats || '1d6'));
+  const wDmgDiceFinal = wReplace
+    ? `${wReplace.weaponDice}${wDmgMod!==0?(wDmgMod>0?'+':'')+wDmgMod:''}`
+    : (isUnarmed ? `2d4${wDmgMod!==0?(wDmgMod>0?'+':'')+wDmgMod:''}` : (ld.displayAttackDice || '1d6'));
+  const wLabel = wReplace ? `⚔️ ${wReplace.weaponName} (invoquée)`
+                          : (isUnarmed ? 'Coup de poing' : (weapon.nom || 'Attaque de base'));
+  const wPortee = wReplace ? Math.max(1, wReplace.weaponRange || 1) : (ld.displayRange ?? 1);
 
   options.push({
     id:               'weapon',
-    icon:             isUnarmed ? '👊' : '⚔️',
-    label:            isUnarmed ? 'Coup de poing' : (weapon.nom || 'Attaque de base'),
-    rawDice:          isUnarmed ? '2d4' : (weapon?.degats || '1d6'),
-    dice:             isUnarmed ? `2d4${wDmgMod!==0?(wDmgMod>0?'+':'')+wDmgMod:''}` : (ld.displayAttackDice || '1d6'),
-    portee:           ld.displayRange ?? 1,
+    icon:             wReplace ? '🔮' : (isUnarmed ? '👊' : '⚔️'),
+    label:            wLabel,
+    rawDice:          wDmgDiceRaw,
+    dice:             wDmgDiceFinal,
+    portee:           wPortee,
     pmCost:           0,
     toucherMod:       wTchMod,
     toucherSetBonus:  wSetBonus,
@@ -1673,11 +2209,14 @@ function _buildAttackOptions(t) {
     dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
     typeRules,
-    damageTypeId:     isMagicW ? null : (fmt?.damageType || 'physique'),
-    damageTypeIcon:   isMagicW ? '' : (getDamageTypeById(_damageTypes, fmt?.damageType || 'physique')?.icon || ''),
-    damageTypeColor:  isMagicW ? '' : (getDamageTypeById(_damageTypes, fmt?.damageType || 'physique')?.color || ''),
-    isMagicWeapon:    isMagicW && !isUnarmed,
-    charElements:     (isMagicW && !isUnarmed) ? (c?.elements || []) : [],
+    damageTypeId:     wReplace ? wReplaceTypeId : (isMagicW ? null : (fmt?.damageType || 'physique')),
+    damageTypeIcon:   wReplace ? (getDamageTypeById(_damageTypes, wReplaceTypeId)?.icon || '✨')
+                                : (isMagicW ? '' : (getDamageTypeById(_damageTypes, fmt?.damageType || 'physique')?.icon || '')),
+    damageTypeColor:  wReplace ? (getDamageTypeById(_damageTypes, wReplaceTypeId)?.color || '')
+                                : (isMagicW ? '' : (getDamageTypeById(_damageTypes, fmt?.damageType || 'physique')?.color || '')),
+    isMagicWeapon:    !!wReplace || (isMagicW && !isUnarmed),
+    charElements:     wReplace ? [wReplaceTypeId] : ((isMagicW && !isUnarmed) ? (c?.elements || []) : []),
+    isInvokedWeapon:  !!wReplace,
   });
 
   // ── Tous les sorts actifs du deck ──
@@ -1691,17 +2230,31 @@ function _buildAttackOptions(t) {
 
     c.deck_sorts.forEach((s, idx) => {
       if (!s.actif) return;
-      const portee    = parseInt(s.portee) || ld.displayRange || 1;
+      const baseRange = parseInt(s.portee) || ld.displayRange || 1;
+      const mods      = _vttSpellMods(s);
+      // Allonge magique : ne modifie pas la portée du sort lui-même (c'est un enchantement
+      // qui s'applique à l'arme de la cible via un buff `range_bonus` posé au cast, durée
+      // 2 tours par défaut — voir branche d'application dans _vttRollAttack).
+      const portee    = baseRange;
+      let zoneW       = mods?.allonge ? 0 : (s.zoneW || 0);
+      let zoneH       = mods?.allonge ? 0 : (s.zoneH || 0);
+      // Sentinelle : force une zone (min 1×1) pour pouvoir choisir l'emplacement
+      if (mods?.sentinelle && (zoneW <= 0 || zoneH <= 0)) {
+        zoneW = Math.max(1, zoneW || 1);
+        zoneH = Math.max(1, zoneH || 1);
+      }
       const types     = Array.isArray(s.types) && s.types.length ? s.types
                       : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
       const protMode  = s.protectionMode || 'ca';
       const nbCibles  = _vttSortCibles(s);
 
       // Coût PM : applique le delta du set, puis vérifie si cible gratuite (multi-cibles)
-      const basePm    = Math.max(0, (parseInt(s.pm) || 0) + spellPmDelta);
-      const freeKey   = `${t.id}_${idx}`;
-      const freeCasts = _multiCastFree.get(freeKey) || 0;
-      const cout      = freeCasts > 0 ? 0 : basePm;
+      // ou si le sort vient d'être déclenché depuis un suspended_spell (gratuit one-shot).
+      const basePm     = Math.max(0, (parseInt(s.pm) || 0) + spellPmDelta);
+      const freeKey    = `${t.id}_${idx}`;
+      const freeCasts  = _multiCastFree.get(freeKey) || 0;
+      const isOneShot  = _freeNextCast.has(freeKey);
+      const cout       = (freeCasts > 0 || isOneShot) ? 0 : basePm;
 
       // Infos catégorie pour le tri dans le modal VTT
       const sortCats = c.sort_cats || [];
@@ -1720,7 +2273,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '✨', label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: fullFormula,
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
-          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
+          zoneW, zoneH, mods,
           typeRules: spellTypeRules,
           damageTypeId: spellTypeId,
           damageTypeIcon: spellTypeObj?.icon || '',
@@ -1739,7 +2292,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '💚', label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: soinFormula,
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
-          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
+          zoneW, zoneH, mods,
           isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
           ..._catMeta,
         });
@@ -1749,7 +2302,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '🛡️', label: s.nom || `Sort ${idx+1}`,
           dice: s.ca || 'CA +2 (2 tours)',
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
-          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
+          zoneW, zoneH, mods,
           isCaSort: true, halfOnMiss: false,
           caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
           ..._catMeta,
@@ -1760,7 +2313,7 @@ function _buildAttackOptions(t) {
           id: `sort_${idx}`, icon: '✨', label: s.nom || `Sort ${idx+1}`,
           dice: s.effet ? s.effet.slice(0, 40) : '—',
           portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
-          zoneW: s.zoneW || 0, zoneH: s.zoneH || 0,
+          zoneW, zoneH, mods,
           isUtil: true, halfOnMiss: false,
           ..._catMeta,
         });
@@ -1777,6 +2330,10 @@ const _atkOptsCache = {};
 let _atkCtx = null;
 // Sorts multi-cibles : casts gratuits restants — key: "${tokenId}_${sortIdx}"
 const _multiCastFree = new Map();
+// Sorts gratuits one-shot (déclenchement d'un sort suspendu) — Set<"${tokenId}_${sortIdx}">
+const _freeNextCast = new Set();
+// Flag : true pendant l'exécution d'un sort suspendu (évite la re-suspension en boucle)
+let _suspendedTriggerActive = false;
 
 /** Affiche le modal de sélection d'attaque. */
 async function _execAttack(srcId, tgtId) {
@@ -2547,7 +3104,13 @@ function _startZonePlacement(srcId, tgtId, opt, optIdx) {
   _mtCtx = null; // annuler multi-cibles sans broadcast (zone prend la main)
   const wPx = opt.zoneW * CELL;  // zoneW/H = nombre de cases
   const hPx = opt.zoneH * CELL;
-  _zoneCtx = { srcId, tgtId, opt, optIdx, wPx, hPx, x: 0, y: 0, placed: false };
+  // Sort d'invocation avec Dispersion : N placements successifs
+  const nbInvoc = opt?.mods?.sentinelle?.nbInvocations || 1;
+  _zoneCtx = {
+    srcId, tgtId, opt, optIdx, wPx, hPx, x: 0, y: 0, placed: false,
+    invocationsTotal: nbInvoc,
+    invocationsDone: 0,
+  };
   _buildZonePreview();
   _showZoneHud();
 }
@@ -2562,7 +3125,7 @@ window._zoneRotate = () => {
   _layers.token?.batchDraw();
 };
 
-window._zoneValidate = () => {
+window._zoneValidate = async () => {
   if (!_zoneCtx) return;
   const { srcId, opt, wPx, hPx, x, y } = _zoneCtx;
 
@@ -2591,7 +3154,38 @@ window._zoneValidate = () => {
     })
     .map(e => e.data.id);
 
-  if (!targets.length) {
+  // ── Combo Sentinelle : spawn d'un token au centre de la zone ────────
+  // Le token apparaît même sans cible présente (le piège attend les ennemis)
+  // Avec Dispersion, plusieurs sentinelles peuvent être posées en boucle.
+  if (opt?.mods?.sentinelle) {
+    const col = Math.round((x - wPx / 2) / CELL);
+    const row = Math.round((y - hPx / 2) / CELL);
+    await _vttSpawnSummon({ kind: 'sentinelle', srcId, col, row, opt, durationTurns: 2 });
+    _zoneCtx.invocationsDone = (_zoneCtx.invocationsDone || 0) + 1;
+    const total = _zoneCtx.invocationsTotal || 1;
+    const done  = _zoneCtx.invocationsDone;
+    if (done < total) {
+      // Reste des sentinelles à placer : on re-prépare le placement
+      showNotif(`🪤 Sentinelle ${done}/${total} posée — place la suivante`, 'info');
+      _zoneCtx.placed = false;
+      // Rafraîchit le HUD pour montrer la progression
+      _zoneCtx.opt = {
+        ..._zoneCtx.opt,
+        label: `${opt.label} (${done + 1}/${total})`,
+      };
+      _showZoneHud();
+      // Reposionne la prévisualisation au centre du stage actuel
+      _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
+      _layers.token?.batchDraw();
+      return; // reste en mode placement
+    }
+    showNotif(`🪤 ${total} sentinelle${total > 1 ? 's' : ''} posée${total > 1 ? 's' : ''}`, 'success');
+    // Si aucune cible présente, on s'arrête là (sentinelles posées, pas d'attaque)
+    if (!targets.length) {
+      _zoneClear();
+      return;
+    }
+  } else if (!targets.length) {
     showNotif('Aucune cible dans la zone', 'error');
     return;
   }
@@ -2701,30 +3295,168 @@ window._vttRollAttack = async () => {
       }
     }
 
+    // ── Combo Sort suspendu : on stocke l'opt + cible et on n'exécute pas l'effet ──
+    // Le sort sera déclenché plus tard via le bouton dans l'inspector du porteur.
+    if (opt.mods?.sortSuspendu && !_suspendedTriggerActive) {
+      await _deductPm();
+      const sharedSusp = _buffShared(opt, srcId);
+      const suspBuff = {
+        ...sharedSusp,
+        type: 'suspended_spell',
+        sortIdx: opt.sortIdx ?? null,
+        tgtId: tgtId,
+        icon: '🔮',
+      };
+      const existing = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortLabel === opt.label));
+      await updateDoc(_tokRef(srcId), { buffs: [...existing, suspBuff] }).catch(() => {});
+      showNotif(`🔮 ${opt.label} suspendu — à déclencher hors de votre tour`, 'success');
+      _cleanup();
+      return;
+    }
+
+    // ── Combo Coup de chance : applique le buff lucky_reroll au lanceur ──
+    if (opt.mods?.coupChance) {
+      const sharedLuck = _buffShared(opt, srcId);
+      const luckBuff = {
+        ...sharedLuck,
+        type: 'lucky_reroll',
+        charges: opt.mods.coupChance.charges,
+        icon: '🍀',
+      };
+      const existing = (src.buffs || []).filter(b => !(b.type === 'lucky_reroll' && b.sortLabel === opt.label));
+      await updateDoc(_tokRef(srcId), { buffs: [...existing, luckBuff] }).catch(() => {});
+    }
+
+    // ── Combo Aura punitive : applique l'affliction Torse aux ennemis dans la zone ──
+    if (opt.mods?.auraPunitive) {
+      const aura = opt.mods.auraPunitive;
+      const radius = Math.max(1, aura.radius || 1);
+      // Cibles dans la zone Manhattan radius autour du porteur (hors lanceur lui-même)
+      const inZone = Object.values(_tokens).filter(e => {
+        const d = e?.data; if (!d || d.id === srcId) return false;
+        if (d.pageId !== _activePage?.id) return false;
+        const dist = _tokenAttackDistance(src, d);
+        return dist <= radius;
+      });
+      // Forge un opt "affliction torse" virtuel pour réutiliser _vttApplyAfflictions
+      const auraOpt = {
+        ...opt,
+        mods: {
+          ...opt.mods,
+          affliction: {
+            slot: 'torse',
+            effect: opt.mods.affliction?.effect || '',
+            element: aura.element,
+            dd: aura.dd,
+            saveStat: aura.saveStat,
+          },
+        },
+      };
+      await _vttApplyAfflictions(srcId, inZone.map(e => e.data.id), auraOpt);
+      showNotif(`🌀 Aura punitive · ${inZone.length} ennemi${inZone.length > 1 ? 's' : ''} dans la zone`, 'success');
+    }
+
+    // ── Combo Arme invoquée : remplace temporairement l'arme principale ───
+    // Le lanceur "manifeste" une arme magique (selon la matrice MJ de l'élément)
+    // pour la durée du sort (2 tours par défaut). Pas de token séparé : le PJ utilise
+    // simplement cette arme à la place de son équipement habituel pendant l'effet.
+    if (opt.mods?.armeInvoquee) {
+      const shared = _buffShared(opt, srcId);
+      const arm    = getInvokedArm(_spellMatrices, opt.mods.armeInvoquee.elementId);
+      const baseDmg = arm?.degats || '1d8';
+      const nbP     = opt.mods.armeInvoquee.nbPuissance || 0;
+      let armDice = baseDmg;
+      if (nbP > 0) {
+        const m = baseDmg.match(/^(\d+)(d\d+)(.*)$/i);
+        armDice = m ? `${parseInt(m[1]) + nbP}${m[2]}${m[3]}` : `${baseDmg} +${nbP}d6`;
+      }
+      const wrBuff = {
+        ...shared,
+        type: 'weapon_replace',
+        icon: '⚔️',
+        weaponName:  arm?.weapon || 'Arme invoquée',
+        weaponDice:  armDice,
+        weaponRange: arm?.portee || 1,
+        statToucher: arm?.statToucher || 'force',
+        statDegats:  arm?.statDegats  || 'force',
+        element:     opt.mods.armeInvoquee.elementId || null,
+        note:        arm?.note || '',
+      };
+      const existing = (src.buffs || []).filter(b => !(b.type === 'weapon_replace' && b.sortLabel === opt.label));
+      await updateDoc(_tokRef(srcId), { buffs: [...existing, wrBuff] }).catch(() => {});
+      showNotif(`⚔️ ${wrBuff.weaponName} équipée (${armDice})`, 'success');
+    }
+
+    // ── Combo Allonge magique : applique un buff de portée +X cases sur les cibles ──
+    // L'enchantement s'applique aux alliés (slot=arme) pour 2 tours par défaut.
+    if (opt.mods?.allonge) {
+      const shared = _buffShared(opt, srcId);
+      const rangeBuff = { ...shared, type: 'range_bonus', icon: '🏹',
+        bonus: opt.mods.allonge.cells, bonusMeters: opt.mods.allonge.meters };
+      for (const tid of (allTargets && allTargets.length ? allTargets : [tgtId])) {
+        const td = _tokens[tid]?.data; if (!td) continue;
+        const existing = (td.buffs || []).filter(b => !(b.type === 'range_bonus' && b.sortLabel === opt.label));
+        await updateDoc(_tokRef(tid), { buffs: [...existing, rangeBuff] }).catch(() => {});
+      }
+    }
+
+    // ── Enchantements (slot arme / pieds / tête / torse) : buffs sur alliés ──
+    if (opt.mods?.enchantArmeDmg || opt.mods?.enchantPieds || opt.mods?.enchantGeneric) {
+      await _vttApplyEnchantBuffs(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+    }
+
+    // ── Afflictions : JS Sa de la cible, buff (DoT, débuff mouvement, etc.) sur échec ──
+    if (opt.mods?.affliction) {
+      await _vttApplyAfflictions(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+    }
+
     // ── CA / Utilitaire : consommer PM, appliquer buff, loguer ─────────
     if (opt.isCaSort || opt.isUtil) {
       await _deductPm();
       await _markAttacked();
       const rCa = _handleMultiCast();
 
-      // Appliquer le buff CA sur chaque cible
+      // Appliquer le buff CA sur chaque cible (ou bouclier réactif si combo détecté)
       const buffResults = [];
+      const isShieldReactive = !!opt.mods?.bouclierReactif;
       if (opt.isCaSort) {
         const round = _session?.combat?.round ?? 0;
         const dur   = opt.sortDuree ?? null;
         const baseRound = Math.max(1, round); // traiter round 0 comme round 1
-        const newBuff = {
+        // Canalisé persistant : pas d'expiration automatique (jusqu'à rupture concentration)
+      const isCanalise = !!opt.mods?.canalisePersistant;
+      const concDD = opt.mods?.concentration?.dd ?? (isCanalise ? 11 : null);
+      // Firestore : pas de `undefined` → spread conditionnel pour les champs facultatifs
+      const _canFields = isCanalise ? { canalisePersistant: true, concentrationDD: concDD } : {};
+      const newBuff = isShieldReactive ? {
+          // Bouclier réactif : annule 1 attaque (pas de bonus CA)
+          type: 'shield_reactive',
+          tier: opt.mods.bouclierReactif.tier,         // 'mob' | 'elite' | 'boss'
+          nbProt: opt.mods.bouclierReactif.nbProt,
+          charges: 1,
+          totalDuration: isCanalise ? null : dur,
+          startRound: round,
+          expiresAtRound: isCanalise ? null : (dur != null ? baseRound + dur - 1 : null),
+          casterId: srcId,
+          sortLabel: opt.label,
+          icon: '🛡️',
+          ..._canFields,
+        } : {
           type: 'ca',
           bonus: opt.caBonus ?? 2,
-          totalDuration: dur,
+          totalDuration: isCanalise ? null : dur,
           startRound: round,
-          expiresAtRound: dur != null ? baseRound + dur - 1 : null,
+          expiresAtRound: isCanalise ? null : (dur != null ? baseRound + dur - 1 : null),
+          casterId: srcId,
           sortLabel: opt.label,
-          icon: '🛡',
+          icon: isCanalise ? '🧠' : '🛡',
+          ..._canFields,
         };
+        const buffType = newBuff.type;
         for (const curTgtId of targetIds) {
           const curTgtData = _tokens[curTgtId]?.data; if (!curTgtData) continue;
-          const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === 'ca' && b.sortLabel === opt.label));
+          // Filtre les buffs existants du même sort (anti-stack)
+          const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === buffType && b.sortLabel === opt.label));
           await updateDoc(_tokRef(curTgtId), { buffs: [...existingBuffs, newBuff] }).catch(()=>{});
           buffResults.push(_live(curTgtData).displayName ?? curTgtData.name);
         }
@@ -2819,14 +3551,65 @@ window._vttRollAttack = async () => {
       return;
     }
 
+    // ── Bouclier réactif : check des cibles, consomme charges, marque les "blocked" ──
+    const attackerRank = _attackerRank(src);
+    const blockedTargets = new Set();
+    {
+      const curRound = _session?.combat?.round ?? 0;
+      for (const tid of targetIds) {
+        const td = _tokens[tid]?.data;
+        const buffs = td?.buffs || [];
+        const shield = buffs.find(b =>
+          b?.type === 'shield_reactive'
+          && (b.charges == null || b.charges > 0)
+          && (b.expiresAtRound == null || b.expiresAtRound >= curRound)
+          && _shieldBlocks(b.tier, attackerRank)
+        );
+        if (!shield) continue;
+        blockedTargets.add(tid);
+        // Consommer la charge (1 charge → retire le buff ; >1 → décrémente)
+        const remaining = (shield.charges == null) ? 0 : Math.max(0, shield.charges - 1);
+        const newBuffs = remaining > 0
+          ? buffs.map(b => b === shield ? { ...b, charges: remaining } : b)
+          : buffs.filter(b => b !== shield);
+        await updateDoc(_tokRef(tid), { buffs: newBuffs }).catch(() => {});
+      }
+    }
+
     // ── Attaque offensive — un seul roll d20, appliqué à chaque cible ──
     const roll1    = Math.floor(Math.random()*20)+1;
     const roll2    = mode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
-    const d20      = mode === 'adv' ? Math.max(roll1, roll2)
+    let d20        = mode === 'adv' ? Math.max(roll1, roll2)
                    : mode === 'dis' ? Math.min(roll1, roll2)
                    : roll1;
-    const isCrit   = d20 === 20;
-    const isFumble = d20 === 1;
+    // Combo Chance : RC abaissée (19-20, 17-20…) — élargit la plage critique
+    const critThreshold = Math.max(2, Math.min(20, opt.mods?.chance?.rc ?? 20));
+    let isCrit   = d20 >= critThreshold;
+    let isFumble = d20 === 1;
+
+    // ── Combo Coup de chance : relance si le d20 est sous le seuil de touche estimé ──
+    // On vérifie le buff lucky_reroll sur le lanceur. Si charge dispo ET (fumble ou attaque
+    // probablement ratée), on relance. Critère pragmatique : on relance si d20 < 10 (non-crit).
+    const luckyReroll = (src.buffs || []).find(b =>
+      b?.type === 'lucky_reroll' && (b.charges || 0) > 0
+      && (b.expiresAtRound == null || (_session?.combat?.round ?? 0) === 0 || (_session?.combat?.round ?? 0) <= b.expiresAtRound)
+    );
+    let luckUsed = false;
+    if (luckyReroll && !isCrit && d20 < 10) {
+      const newRoll = Math.floor(Math.random() * 20) + 1;
+      if (newRoll > d20) {
+        d20 = newRoll;
+        isCrit   = d20 >= critThreshold;
+        isFumble = d20 === 1;
+      }
+      luckUsed = true;
+      // Décrémente / retire le buff
+      const remaining = luckyReroll.charges - 1;
+      const newBuffs = remaining > 0
+        ? (src.buffs || []).map(b => b === luckyReroll ? { ...b, charges: remaining } : b)
+        : (src.buffs || []).filter(b => b !== luckyReroll);
+      await updateDoc(_tokRef(srcId), { buffs: newBuffs }).catch(() => {});
+    }
     const atkBase  = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
     // Dés supplémentaires au toucher (sommés au total)
     const extraHitRolls = [];
@@ -2868,6 +3651,30 @@ window._vttRollAttack = async () => {
       else if (missEffect === 'full') sharedDmgTotalHalf = sharedDmgTotalHit;
     }
 
+    // ── Bonus dégâts depuis buffs d'enchantement arme actifs sur le lanceur ──
+    // Ne s'applique qu'aux attaques d'arme (id='weapon' ou 'npc_attack' ou bestiaire)
+    // pour éviter de doubler les dégâts sur les sorts qui scalent déjà sur l'arme.
+    const _isWeaponAttack = opt.id === 'weapon' || opt.id === 'npc_attack' || opt.id?.startsWith?.('beast_');
+    let buffDmgBonus = 0;
+    const buffDmgNotes = [];
+    if (_isWeaponAttack && !isFumble) {
+      const round_eff = _session?.combat?.round ?? 0;
+      const srcDmgBuffs = (src.buffs || []).filter(b =>
+        b.type === 'dmg_bonus' && b.slot === 'arme'
+        && (b.expiresAtRound == null || round_eff === 0 || round_eff <= b.expiresAtRound)
+      );
+      for (const buff of srcDmgBuffs) {
+        if (!buff.formula) continue;
+        const rolled = _rollDice(buff.formula);
+        buffDmgBonus += rolled;
+        buffDmgNotes.push(`${buff.icon ?? '⚔️'} +${rolled} (${buff.sortLabel}: ${buff.formula})`);
+      }
+      if (buffDmgBonus > 0) {
+        sharedDmgTotalHit += buffDmgBonus;
+        if (sharedDmgTotalHalf > 0) sharedDmgTotalHalf += Math.floor(buffDmgBonus / 2);
+      }
+    }
+
     await _deductPm();
     await _markAttacked();
 
@@ -2880,8 +3687,10 @@ window._vttRollAttack = async () => {
 
       const rawCA    = lCurTgt.displayDefense ?? 10;
       const targetCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
-      const hit      = isCrit ? true : isFumble ? false : hitTotal >= targetCA;
-      const halfDmg  = !hit && missEffect !== 'none' && !isFumble;
+      // Bouclier réactif : annule complètement l'attaque (pas de touche, pas de demi-dégâts, pas de fumble visuel)
+      const isBlocked = blockedTargets.has(curTgtId);
+      const hit      = isBlocked ? false : (isCrit ? true : isFumble ? false : hitTotal >= targetCA);
+      const halfDmg  = !isBlocked && !hit && missEffect !== 'none' && !isFumble;
       let dmgTotal   = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
       let interaction = null;
 
@@ -2918,11 +3727,119 @@ window._vttRollAttack = async () => {
           await _setHp(curTgtData, newHp);
         }
       }
-      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction });
+      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction, shieldBlocked: isBlocked, _data: curTgtData });
+    }
+
+    // ── Combos post-attaque (Lacération, Déplacement, Drain, Concentration) ──
+    const _mods = opt.mods || null;
+    const modNotes = []; // notes textuelles pour la notif/log
+
+    // ── JS Concentration auto : pour chaque cible qui a subi des dégâts et qui
+    //    porte un sort canalisé actif, lance un JS Sagesse vs concentrationDD.
+    //    En cas d'échec, retire le buff canalisé (et ses summons liés).
+    for (const r of targetResults) {
+      if (!(r.hit || r.halfDmg) || r.dmgTotal <= 0) continue;
+      const td = r._data; if (!td?.buffs?.length) continue;
+      const canalisedBuffs = td.buffs.filter(b => b?.canalisePersistant && b?.concentrationDD != null);
+      if (!canalisedBuffs.length) continue;
+      // Modificateur de Sagesse du PJ porteur (PNJ/Bestiaire : fallback +0)
+      let sagMod = 0;
+      if (td.characterId) {
+        const cTgt = _characters[td.characterId];
+        if (cTgt) sagMod = getMod(cTgt, 'sagesse');
+      } else if (td.npcId) {
+        sagMod = _npcStatMod(_npcs[td.npcId] || {}, 'sagesse');
+      }
+      for (const cb of canalisedBuffs) {
+        const dd = cb.concentrationDD;
+        const roll = Math.floor(Math.random() * 20) + 1;
+        const tot = roll + sagMod;
+        const success = roll === 20 || (roll !== 1 && tot >= dd);
+        const tgtName = _live(td).displayName ?? td.name;
+        if (success) {
+          modNotes.push(`🧠 JS Sa ${roll}${sagMod>=0?'+':''}${sagMod}=${tot} vs DD${dd} · concentration tenue (${tgtName})`);
+        } else {
+          modNotes.push(`💢 JS Sa ${roll}${sagMod>=0?'+':''}${sagMod}=${tot} vs DD${dd} ÉCHEC · ${cb.sortLabel} rompu sur ${tgtName}`);
+          // Retire le buff canalisé
+          const remaining = (td.buffs || []).filter(b => b !== cb);
+          await updateDoc(_tokRef(td.id), { buffs: remaining }).catch(() => {});
+          // Supprime les summons liés (sentinelle/arme invoquée) du même lanceur si canalisés
+          const summonsToKill = Object.values(_tokens).filter(e =>
+            e?.data?.summonOwnerId === (cb.casterId || td.id)
+            && e?.data?.summonCanalise
+          );
+          for (const s of summonsToKill) {
+            await deleteDoc(_tokRef(s.data.id)).catch(() => {});
+          }
+        }
+      }
+    }
+
+    if (_mods) {
+      const round = _session?.combat?.round ?? 0;
+      const baseRound = Math.max(1, round);
+
+      for (const r of targetResults) {
+        const wasHit = r.hit || r.halfDmg;
+        if (!wasHit || !r._data) continue;
+        const curTgtData = r._data;
+
+        // ── Lacération : -CA brut sur la cible (plafonné selon rang) ────
+        if (_mods.laceration) {
+          const lac = _mods.laceration;
+          const beast = curTgtData.beastId ? _bestiary[curTgtData.beastId] : null;
+          const rang = (beast?.rang || 'classique').toLowerCase();
+          const cap = (rang === 'elite' || rang === 'élite' || rang === 'boss') ? lac.maxElite : lac.max;
+          const reduction = Math.min(lac.reduction, cap);
+          const sortLabel = `Lacération · ${opt.label}`;
+          const newBuff = {
+            type: 'ca', bonus: -reduction,
+            totalDuration: 2, startRound: round,
+            expiresAtRound: baseRound + 2 - 1,
+            sortLabel, icon: '🩸',
+          };
+          const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === 'ca' && b.sortLabel === sortLabel));
+          await updateDoc(_tokRef(curTgtData.id), { buffs: [...existingBuffs, newBuff] }).catch(() => {});
+          modNotes.push(`🩸 CA −${reduction} → ${r.name}`);
+        }
+
+        // ── Déplacement (push/pull) ────────────────────────────────────
+        if (_mods.deplacement && r.newHp > 0) {
+          const moved = await _vttApplyDeplacement(src, curTgtData, _mods.deplacement.mode, _mods.deplacement.distance);
+          if (moved > 0) {
+            const verb = _mods.deplacement.mode === 'pull' ? '↙ tiré' : '↗ poussé';
+            modNotes.push(`${verb} ${moved}c → ${r.name}`);
+          }
+        }
+      }
+
+      // ── Drain : soigne le lanceur d'un % des dégâts infligés ──
+      // Formule : pct = 25% + 25% × nbProt (50/75/100/125% pour Prot×1/2/3/4)
+      // Peut dépasser 100% des PV manquants (cap à hpMax), mais pas de surcharge
+      if (_mods.drain && targetResults.some(r => r.hit || r.halfDmg)) {
+        const totalDealt = targetResults.reduce((acc, r) => {
+          if (!(r.hit || r.halfDmg)) return acc;
+          // Utilise dmgPre (avant interaction immunité/absorption) pour le drain
+          const base = (r.dmgPre != null && r.dmgPre > 0) ? r.dmgPre : Math.max(0, r.dmgTotal);
+          return acc + base;
+        }, 0);
+        const healAmt = Math.max(1, Math.floor(totalDealt * _mods.drain.pct));
+        const srcLive = _live(src);
+        const srcHp = srcLive.displayHp ?? 20;
+        const srcHpMax = srcLive.displayHpMax ?? 20;
+        const newSrcHp = Math.min(srcHpMax, srcHp + healAmt);
+        if (newSrcHp > srcHp) {
+          await _setHp(src, newSrcHp);
+          const pctLabel = Math.round(_mods.drain.pct * 100);
+          modNotes.push(`🩸 Drain ${pctLabel}% → +${healAmt} PV (${srcLive.displayName ?? src.name})`);
+        }
+      }
     }
 
     // ── Un seul message dans le log ────────────────────────────────────
-    const isMulti = targetResults.length > 1;
+    // Strip _data (référence token interne, non sérialisable Firestore)
+    const cleanResults = targetResults.map(({ _data, ...rest }) => rest);
+    const isMulti = cleanResults.length > 1;
     if (isMulti) {
       await addDoc(_logCol(), {
         type: 'attack-multi',
@@ -2945,11 +3862,11 @@ window._vttRollAttack = async () => {
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,
-        targets: targetResults,
+        targets: cleanResults,
         createdAt: serverTimestamp(),
       }).catch(()=>{});
     } else {
-      const r = targetResults[0];
+      const r = cleanResults[0];
       if (r) await addDoc(_logCol(), {
         type: 'attack',
         authorId: STATE.user?.uid||null, authorName,
@@ -2980,12 +3897,13 @@ window._vttRollAttack = async () => {
     }
 
     // Notif consolidée
-    const notifParts = targetResults.map(r => {
+    const notifParts = cleanResults.map(r => {
       const nm = r.name;
       const interMeta = r.interaction ? DMG_INTERACTIONS[r.interaction] : null;
       const interTag  = interMeta ? ` ${interMeta.icon}${interMeta.short}` : '';
       const dmgLabel = r.dmgTotal < 0 ? `+${Math.abs(r.dmgTotal)}` : r.dmgTotal;
-      return isFumble       ? `💀 Fumble`
+      return r.shieldBlocked ? `🛡️ Bouclier réactif · ${nm}`
+           : isFumble       ? `💀 Fumble`
            : r.interaction === 'Immunité' && r.hit ? `🚫 Immunisé · ${nm}`
            : r.halfDmg     ? `✦ ${dmgLabel}(½)${interTag} → ${nm}`
            : !r.hit        ? `🎯 Raté vs ${nm}`
@@ -2993,11 +3911,26 @@ window._vttRollAttack = async () => {
            : isCrit        ? `💥 ${dmgLabel}${interTag} → ${nm}`
                            : `⚔️ ${dmgLabel}${interTag} → ${nm}`;
     });
-    const anyHit = targetResults.some(r => r.hit || r.halfDmg);
+    // Ajoute les notes de combo (Lacération, Déplacement, Drain) à la notif
+    if (modNotes.length) notifParts.push(...modNotes);
+    if (buffDmgNotes.length) notifParts.push(...buffDmgNotes);
+    if (luckUsed) notifParts.unshift(`🍀 Coup de chance utilisé (d20 → ${d20})`);
+    const anyHit = cleanResults.some(r => r.hit || r.halfDmg);
     showNotif(notifParts.join(' · '), anyHit ? 'success' : 'error');
 
-  } catch { showNotif('Erreur attaque','error'); }
-  finally { _cleanup(); }
+  } catch (err) {
+    console.error('[VTT] Erreur attaque', err);
+    showNotif(`Erreur attaque : ${err?.message || err}`, 'error');
+  }
+  finally {
+    // Consomme un éventuel "free cast one-shot" (déclenchement d'un sort suspendu)
+    if (opt.sortIdx !== undefined) {
+      _freeNextCast.delete(`${srcId}_${opt.sortIdx}`);
+    }
+    // Reset du flag de déclenchement de sort suspendu (le cast est terminé)
+    _suspendedTriggerActive = false;
+    _cleanup();
+  }
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3134,6 +4067,60 @@ function _renderInspector(t) {
       '</div>';
   }
 
+  // ── Effets actifs (buffs, debuffs, DoT, enchantements, afflictions…) ──
+  const _r = _session?.combat?.round ?? 0;
+  const _activeBuffs = (t.buffs || []).filter(bf =>
+    bf?.expiresAtRound == null || _r === 0 || _r <= bf.expiresAtRound);
+  const _buffsHtml = _activeBuffs.length ? (() => {
+    const _BUFF_LABEL = {
+      ca: 'Bonus CA', dot: 'Dégâts/tour', dmg_bonus: 'Dégâts bonus',
+      move_bonus: 'Mouvement +', move_debuff: 'Mouvement −',
+      range_bonus: 'Portée +', shield_reactive: 'Bouclier réactif',
+      enchantment: 'Enchantement', affliction: 'Affliction',
+    };
+    const items = _activeBuffs.map((bf, i) => {
+      const ic = bf.icon || '✨';
+      const lbl = bf.sortLabel || _BUFF_LABEL[bf.type] || bf.type || 'Effet';
+      // Calcul durée restante
+      let durStr;
+      if (bf.canalisePersistant) durStr = '∞ canalisé';
+      else if (bf.expiresAtRound != null && _r > 0) durStr = `${bf.expiresAtRound - _r + 1}t`;
+      else if (bf.totalDuration != null) durStr = `${bf.totalDuration}t`;
+      else durStr = '∞';
+      // Détail (bonus, formule, slot, charges)
+      const detail = bf.type === 'dmg_bonus' ? `+${bf.formula}`
+                   : bf.type === 'move_bonus' || bf.type === 'move_debuff' ? `${bf.bonus > 0 ? '+' : ''}${bf.bonus} c`
+                   : bf.type === 'range_bonus' ? `+${bf.bonus} c`
+                   : bf.type === 'ca' ? `${bf.bonus >= 0 ? '+' : ''}${bf.bonus} CA`
+                   : bf.type === 'dot' ? `${bf.formula} / tour`
+                   : bf.type === 'shield_reactive' ? `${bf.charges || 1} charge · ${bf.tier}`
+                   : bf.effect ? bf.effect.slice(0, 24) : '';
+      const rmBtn = STATE.isAdmin
+        ? `<button class="vtt-buff-rm" onclick="window._vttRemoveBuff('${t.id}',${i})" title="Retirer">✕</button>` : '';
+      // Sort suspendu : bouton ▶ pour le déclencher (porteur ou MJ)
+      const canTrigger = bf.type === 'suspended_spell' && (STATE.isAdmin || t.ownerId === STATE.user?.uid);
+      const trigBtn = canTrigger
+        ? `<button class="vtt-buff-trigger" onclick="window._vttTriggerSuspendedSpell('${t.id}',${i})" title="Déclencher le sort suspendu">▶</button>` : '';
+      return `<div class="vtt-buff-item" title="${_esc(lbl)}${detail?' · '+_esc(detail):''}">
+        <span class="vtt-buff-ic">${ic}</span>
+        <span class="vtt-buff-lbl">${_esc(lbl)}</span>
+        ${detail ? `<span class="vtt-buff-detail">${_esc(detail)}</span>` : ''}
+        <span class="vtt-buff-dur">${durStr}</span>
+        ${trigBtn}${rmBtn}
+      </div>`;
+    }).join('');
+    const addBtn = STATE.isAdmin
+      ? `<button class="vtt-btn-sm" onclick="window._vttAddBuffPrompt('${t.id}')" title="Ajouter un effet manuel">＋</button>` : '';
+    return `<div class="vtt-ins-section">
+      <div class="vtt-ins-section-title">✨ Effets actifs ${addBtn}</div>
+      <div class="vtt-buff-list">${items}</div>
+    </div>`;
+  })() : (STATE.isAdmin
+    ? `<div class="vtt-ins-section">
+        <div class="vtt-ins-section-title">✨ Effets actifs <button class="vtt-btn-sm" onclick="window._vttAddBuffPrompt('${t.id}')">＋</button></div>
+        <div style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun effet actif</div>
+      </div>` : '');
+
   el.innerHTML=`
     <div class="vtt-ins-header">
       ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
@@ -3144,6 +4131,7 @@ function _renderInspector(t) {
       </div>
     </div>
     ${statsHtml}
+    ${_buffsHtml}
     ${(() => {
       const inCombat = !!_session?.combat?.active;
       const canEdit  = STATE.isAdmin || t.ownerId === STATE.user?.uid;
@@ -5247,9 +6235,145 @@ window._vttClearBuffs = async id => {
   await updateDoc(_tokRef(id),{buffs:[]}).catch(()=>{});
   showNotif('Buffs supprimés.','success');
 };
+/** Déclenche un sort suspendu : marque le sort gratuit puis ouvre le modal d'attaque. */
+window._vttTriggerSuspendedSpell = async (tokenId, buffIdx) => {
+  const t = _tokens[tokenId]?.data; if (!t?.buffs?.length) return;
+  if (!STATE.isAdmin && t.ownerId !== STATE.user?.uid) return;
+  // Index visible (parmi les buffs actifs) → index réel dans t.buffs
+  const r = _session?.combat?.round ?? 0;
+  const activeIdxs = t.buffs.map((bf, i) => ({ bf, i }))
+    .filter(({ bf }) => bf?.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)
+    .map(({ i }) => i);
+  const realIdx = activeIdxs[buffIdx];
+  const buff = t.buffs[realIdx];
+  if (!buff || buff.type !== 'suspended_spell') return;
+  // Marque le sort comme gratuit pour le prochain cast
+  if (buff.sortIdx != null) _freeNextCast.add(`${tokenId}_${buff.sortIdx}`);
+  // Retire le buff suspendu
+  const remaining = t.buffs.filter((_, i) => i !== realIdx);
+  await updateDoc(_tokRef(tokenId), { buffs: remaining }).catch(() => {});
+  // Active le flag pour éviter la re-suspension immédiate
+  _suspendedTriggerActive = true;
+  try {
+    await _execAttack(tokenId, buff.tgtId || tokenId);
+  } finally {
+    // Le flag reste actif jusqu'à la fin du modal — désactivé par sécurité après 30s
+    setTimeout(() => { _suspendedTriggerActive = false; }, 30_000);
+  }
+};
+
+/** Retire un buff à l'index donné (MJ uniquement). */
+window._vttRemoveBuff = async (tokenId, idx) => {
+  if (!STATE.isAdmin) return;
+  const t = _tokens[tokenId]?.data; if (!t || !Array.isArray(t.buffs)) return;
+  // Recalcule l'index parmi les buffs actifs (pour matcher l'affichage)
+  const r = _session?.combat?.round ?? 0;
+  const activeIndexes = t.buffs
+    .map((bf, i) => ({ bf, i }))
+    .filter(({ bf }) => bf?.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)
+    .map(({ i }) => i);
+  const realIdx = activeIndexes[idx];
+  if (realIdx == null) return;
+  const newBuffs = t.buffs.filter((_, i) => i !== realIdx);
+  await updateDoc(_tokRef(tokenId), { buffs: newBuffs }).catch(() => {});
+  showNotif('Effet retiré', 'info');
+};
+
+/** Ouvre une modale simple pour ajouter manuellement un effet sur le token (MJ). */
+window._vttAddBuffPrompt = async (tokenId) => {
+  if (!STATE.isAdmin) return;
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const TYPES = [
+    { v:'ca',          ic:'🛡', lbl:'Bonus CA',         needsBonus:true },
+    { v:'dot',         ic:'🩸', lbl:'DoT (dégâts/tour)', needsFormula:true },
+    { v:'dmg_bonus',   ic:'⚔️', lbl:'Dégâts bonus arme', needsFormula:true },
+    { v:'move_bonus',  ic:'👢', lbl:'Mouvement +',       needsBonus:true },
+    { v:'move_debuff', ic:'👢', lbl:'Mouvement −',       needsBonus:true },
+    { v:'range_bonus', ic:'🏹', lbl:'Portée +',          needsBonus:true },
+    { v:'enchantment', ic:'✨', lbl:'Enchantement (libre)', needsEffect:true },
+    { v:'affliction',  ic:'💀', lbl:'Affliction (libre)',   needsEffect:true },
+  ];
+  const opts = TYPES.map(t => `<option value="${t.v}">${t.ic} ${t.lbl}</option>`).join('');
+  openModal(`✨ Ajouter un effet sur ${t.name}`, `
+    <div class="vtt-form" style="display:flex;flex-direction:column;gap:.7rem">
+      <div class="form-group">
+        <label>Type d'effet</label>
+        <select id="vab-type" class="input-field">${opts}</select>
+      </div>
+      <div class="form-group">
+        <label>Label / nom du sort</label>
+        <input id="vab-label" class="input-field" placeholder="ex : Brûlure (Feu)" value="Effet manuel">
+      </div>
+      <div class="form-group" id="vab-bonus-row">
+        <label>Valeur numérique (positive ou négative)</label>
+        <input id="vab-bonus" class="input-field" type="number" value="2">
+      </div>
+      <div class="form-group" id="vab-formula-row" style="display:none">
+        <label>Formule de dés</label>
+        <input id="vab-formula" class="input-field" placeholder="ex : 1d4 +2" value="1d4 +2">
+      </div>
+      <div class="form-group" id="vab-effect-row" style="display:none">
+        <label>Effet (texte libre)</label>
+        <input id="vab-effect" class="input-field" placeholder="ex : Aveuglé, désavantage attaque…">
+      </div>
+      <div class="form-group">
+        <label>Durée (tours · vide = permanent)</label>
+        <input id="vab-dur" class="input-field" type="number" value="2" min="0">
+      </div>
+      <button class="btn btn-gold" onclick="window._vttConfirmAddBuff('${tokenId}')">Ajouter</button>
+    </div>
+    <script>
+      document.getElementById('vab-type').onchange = e => {
+        const meta = ${JSON.stringify(TYPES)}.find(x => x.v === e.target.value);
+        document.getElementById('vab-bonus-row').style.display   = meta.needsBonus   ? '' : 'none';
+        document.getElementById('vab-formula-row').style.display = meta.needsFormula ? '' : 'none';
+        document.getElementById('vab-effect-row').style.display  = meta.needsEffect  ? '' : 'none';
+      };
+    </script>
+  `);
+};
+
+window._vttConfirmAddBuff = async (tokenId) => {
+  if (!STATE.isAdmin) return;
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const type    = document.getElementById('vab-type')?.value || 'ca';
+  const label   = document.getElementById('vab-label')?.value?.trim() || 'Effet manuel';
+  const bonus   = parseInt(document.getElementById('vab-bonus')?.value) || 0;
+  const formula = document.getElementById('vab-formula')?.value?.trim() || '';
+  const effect  = document.getElementById('vab-effect')?.value?.trim() || '';
+  const durRaw  = document.getElementById('vab-dur')?.value;
+  const dur     = durRaw === '' ? null : Math.max(0, parseInt(durRaw) || 0);
+  const round = _session?.combat?.round ?? 0;
+  const baseRound = Math.max(1, round);
+  const ICONS = { ca:'🛡', dot:'🩸', dmg_bonus:'⚔️', move_bonus:'👢', move_debuff:'👢', range_bonus:'🏹', enchantment:'✨', affliction:'💀' };
+  const newBuff = {
+    type, bonus, formula: formula || undefined, effect: effect || undefined,
+    sortLabel: label, icon: ICONS[type] || '✨',
+    startRound: round, totalDuration: dur,
+    expiresAtRound: dur != null && dur > 0 ? baseRound + dur - 1 : null,
+    casterId: null,
+  };
+  // Slot par défaut pour les types qui en dépendent (dmg_bonus → arme, move_* → pieds)
+  if (type === 'dmg_bonus')                       newBuff.slot = 'arme';
+  if (type === 'move_bonus' || type === 'move_debuff') newBuff.slot = 'pieds';
+  const existing = (t.buffs || []);
+  await updateDoc(_tokRef(tokenId), { buffs: [...existing, newBuff] }).catch(() => {});
+  closeModalDirect();
+  showNotif(`${newBuff.icon} ${label} appliqué`, 'success');
+};
+
 window._vttSetHp = async (tokenId,hp) => {
   const t=_tokens[tokenId]?.data; if (!t) return;
+  // Détecte une perte de PV pour déclencher un JS de concentration auto
+  const lT = _live(t);
+  const prevHp = lT.displayHp ?? t.hp ?? null;
+  const newHp  = Math.max(0, hp);
+  const delta  = prevHp != null ? Math.max(0, prevHp - newHp) : 0;
   await _setHp(t,hp).catch(()=>{});
+  if (delta > 0) {
+    const notes = await _vttTriggerConcentrationSave(t, delta);
+    notes.forEach(msg => showNotif(msg, msg.startsWith('💢') ? 'error' : 'info'));
+  }
 };
 window._vttSetPm = async (tokenId,pm) => {
   const t=_tokens[tokenId]?.data; if (!t) return;
@@ -5318,12 +6442,46 @@ window._vttNextRound = async () => {
   if (!STATE.isAdmin||!_session?.combat?.active) return;
   const round=(_session.combat.round??1)+1;
   await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
+
+  // ── Application des DoT en début de round (avant le cleanup des buffs) ──
+  // Chaque buff de type 'dot' inflige sa formule à son porteur
+  const dotNotifs = [];
+  for (const id of Object.keys(_tokens)) {
+    const td = _tokens[id]?.data;
+    const dots = (td?.buffs || []).filter(b => b.type === 'dot'
+      && (b.expiresAtRound == null || round <= b.expiresAtRound));
+    if (!dots.length) continue;
+    let total = 0;
+    for (const dot of dots) {
+      total += _rollDice(dot.formula || '1d4 +2');
+    }
+    if (total <= 0) continue;
+    const lT = _live(td);
+    const curHp = lT.displayHp ?? td.hp ?? 20;
+    const newHp = Math.max(0, curHp - total);
+    await _setHp(td, newHp).catch(() => {});
+    dotNotifs.push(`🩸 ${total} dégâts DoT → ${lT.displayName ?? td.name}`);
+    // JS de concentration auto si la cible porte un sort canalisé
+    const concNotes = await _vttTriggerConcentrationSave(td, total);
+    dotNotifs.push(...concNotes);
+  }
+
   const b=writeBatch(db);
   const expiredNotifs = [];
   Object.keys(_tokens).forEach(id => {
     const tokData = _tokens[id]?.data;
+    if (!tokData) return;
+    // ── Cleanup auto des tokens summons expirés (sentinelle, arme invoquée) ──
+    // Les summons non-canalisés expirent à round > summonExpiresAtRound.
+    // Les summons canalisés (summonCanalise: true) persistent tant que la
+    // concentration tient — supprimés via le JS Sa raté.
+    if (tokData.summonExpiresAtRound != null && !tokData.summonCanalise && round > tokData.summonExpiresAtRound) {
+      expiredNotifs.push(`${tokData.summonKind === 'sentinelle' ? '🪤' : '⚔️'} ${tokData.name} dissipé`);
+      b.delete(_tokRef(id));
+      return; // skip buff cleanup pour token supprimé
+    }
     const updates = { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false };
-    if (tokData?.buffs?.length) {
+    if (tokData.buffs?.length) {
       const remaining = tokData.buffs.filter(bf => {
         const isExpired =
           // cas normal : expiresAtRound calculé
@@ -5342,6 +6500,7 @@ window._vttNextRound = async () => {
     b.update(_tokRef(id), updates);
   });
   await b.commit().catch(()=>{});
+  dotNotifs.forEach(msg => showNotif(msg, 'error'));
   expiredNotifs.forEach(msg => showNotif(msg, 'info'));
   showNotif(`Round ${round} !`, 'success');
 };
@@ -6915,6 +8074,8 @@ export async function renderVttPage() {
     });
   });
   _formatsP.then(([f, d]) => { _weaponFormats = f; _damageTypes = d; });
+  // Précharge les matrices MJ (combos, armes invoquées) pour les sorts en combat
+  loadSpellMatrices().then(m => { _spellMatrices = m; }).catch(() => {});
   // _skillsP : _loadDiceSkills met à jour _diceSkills et rerend l'inspector si besoin
   void _skillsP;
   _initListeners();

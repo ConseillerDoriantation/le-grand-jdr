@@ -27,6 +27,9 @@ export const COMBO_IDS = [
   'sentinelle',
   'canalise_persistant',
   'bouclier_reactif',
+  'aura_punitive',
+  'sort_suspendu',
+  'coup_chance',
 ];
 
 // Métadonnées d'affichage des combos (le MJ peut activer/désactiver et renommer)
@@ -38,6 +41,9 @@ export const COMBO_DEFAULTS = Object.freeze({
   sentinelle:           { enabled: true, name: 'Sentinelle / Piège' },
   canalise_persistant:  { enabled: true, name: 'Sort canalisé persistant' },
   bouclier_reactif:     { enabled: true, name: 'Bouclier réactif' },
+  aura_punitive:        { enabled: true, name: 'Aura punitive' },
+  sort_suspendu:        { enabled: true, name: 'Sort suspendu' },
+  coup_chance:          { enabled: true, name: 'Coup de chance' },
 });
 
 // Modèle vide utilisé en fallback. Le MJ remplit via la console.
@@ -111,13 +117,30 @@ export function invalidateSpellMatricesCache() {
 }
 
 /**
- * Renvoie la suggestion d'effet pour une combinaison (catégorie, élément, slot).
+ * Renvoie la (première) suggestion d'effet pour une combinaison (catégorie, élément, slot).
+ * Compat ascendante : la matrice stockait une string ; elle peut aussi être un tableau
+ * (multi-suggestions). On retourne le 1er élément du tableau ou la string elle-même.
  * categorie: 'enchant' | 'affliction'
- * Retourne '' si rien défini en console MJ.
  */
 export function suggestSpellEffect(matrices, categorie, elementId, slot) {
   if (!matrices || !elementId || !slot) return '';
-  return matrices?.[categorie]?.[elementId]?.[slot] || '';
+  const raw = matrices?.[categorie]?.[elementId]?.[slot];
+  if (!raw) return '';
+  if (Array.isArray(raw)) return (raw[0] || '').toString().trim();
+  return String(raw).trim();
+}
+
+/**
+ * Renvoie toutes les suggestions d'effet pour (catégorie, élément, slot) — tableau de strings.
+ * Compat ascendante : si la matrice stockait une string, renvoie [string]. Si tableau,
+ * renvoie le tableau filtré (non vide). Si rien défini, renvoie [].
+ */
+export function getMatrixSuggestions(matrices, categorie, elementId, slot) {
+  if (!matrices || !elementId || !slot) return [];
+  const raw = matrices?.[categorie]?.[elementId]?.[slot];
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  return arr.map(s => String(s || '').trim()).filter(Boolean);
 }
 
 /**

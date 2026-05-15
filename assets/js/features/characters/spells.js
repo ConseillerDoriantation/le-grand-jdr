@@ -5,7 +5,7 @@ import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import { getMod, calcPMMax } from '../../shared/char-stats.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
-import { loadSpellMatrices, suggestSpellEffect, getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
+import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions, getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
 
 // ── Drag and Drop sorts ──────────────────────
@@ -197,8 +197,10 @@ const SORT_COMBOS = [
     icon: '🩸',
     defaultName: 'Drain personnel',
     detect: (counts) => counts.Puissance > 0 && counts.Protection > 0,
-    describe: (counts) =>
-      `Puissance ×${counts.Puissance} + Protection ×${counts.Protection} · le soin vient des dégâts (utilise les Limites MJ pour la fraction)`,
+    describe: (counts) => {
+      const pct = Math.round((0.25 + 0.25 * counts.Protection) * 100);
+      return `Puissance ×${counts.Puissance} + Protection ×${counts.Protection} · dégâts de l'arme · ${pct}% des dégâts soigne le lanceur`;
+    },
   },
   {
     id: 'zone_elargie',
@@ -222,9 +224,9 @@ const SORT_COMBOS = [
         const dmg = STAT_LBL[arm.statDegats]  || arm.statDegats;
         const statStr = (arm.statToucher === arm.statDegats) ? tch : `Touche:${tch} / Dégâts:${dmg}`;
         const puissBonus = nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : '';
-        return `${arm.weapon} · ${arm.degats}${puissBonus} · ${statStr} · portée ${arm.portee}m${arm.note ? ` · ${arm.note}` : ''}`;
+        return `${arm.weapon} · ${arm.degats}${puissBonus} · ${statStr} · portée ${arm.portee}m · 2 tours par défaut${arm.note ? ` · ${arm.note}` : ''}`;
       }
-      return `Arme générique 1d8${nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : ''} · 2 tours · ⚠️ matrice Armes invoquées vide pour cet élément`;
+      return `Arme générique 1d8${nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : ''} · 2 tours par défaut · ⚠️ matrice Armes invoquées vide pour cet élément`;
     },
   },
   {
@@ -242,8 +244,13 @@ const SORT_COMBOS = [
     icon: '🪤',
     defaultName: 'Sentinelle / Piège',
     detect: (counts) => counts.Affliction > 0 && counts.Invocation > 0,
-    describe: () =>
-      `Affliction + Invocation · pose une sentinelle stationnaire (10 PV, CA 10) qui afflige toute cible entrant dans sa zone (au lieu d'un projectile)`,
+    describe: (counts, s) => {
+      const st = _calcSentinelStats(s || {});
+      const nbDisp = counts.Dispersion || 0;
+      const nbSent = nbDisp > 0 ? 2 * nbDisp : 1;
+      const sentStr = nbSent > 1 ? `${nbSent} sentinelles stationnaires (placement libre dans la portée)` : 'sentinelle stationnaire';
+      return `Affliction + Invocation · ${sentStr} · ${st.hp} PV · CA ${st.ca} · attaque ${st.dmg} · portée ${st.portee}m · 2 tours par défaut`;
+    },
   },
   {
     id: 'canalise_persistant',
@@ -262,6 +269,39 @@ const SORT_COMBOS = [
       const nbP = counts.Protection;
       const tier = nbP >= 3 ? 'Boss ou inférieur' : nbP === 2 ? 'Élite ou inférieur' : 'Mob classique';
       return `Réaction + Protection ×${nbP} · annule 1 attaque entrante en réaction (pas de bonus CA) · plafond cible : ${tier}`;
+    },
+  },
+  {
+    id: 'aura_punitive',
+    icon: '🌀',
+    defaultName: 'Aura punitive',
+    // Protection + Affliction (sans Puissance, sinon c'est Drain qui prime)
+    detect: (counts) => counts.Protection > 0 && counts.Affliction > 0 && (counts.Puissance || 0) === 0,
+    describe: (counts) => {
+      const radius = counts.Protection;
+      return `Protection ×${counts.Protection} + Affliction ×${counts.Affliction} · zone ${radius}c (Manhattan) autour du lanceur · tout ennemi présent au cast subit l'affliction Torse de l'élément (JS Con DD 11) · pas de bonus CA`;
+    },
+  },
+  {
+    id: 'sort_suspendu',
+    icon: '🔮',
+    defaultName: 'Sort suspendu',
+    // Réaction + Durée : stocke le sort, déclenchement manuel hors-tour
+    detect: (counts) => counts.Réaction > 0 && (counts.Durée || 0) > 0,
+    describe: (counts) => {
+      const turns = (counts.Durée || 0) + 1;
+      return `Réaction + Durée ×${counts.Durée || 0} · le sort est stocké au cast (PM payé) · déclenchable hors de votre tour pendant ${turns} tour${turns > 1 ? 's' : ''}`;
+    },
+  },
+  {
+    id: 'coup_chance',
+    icon: '🍀',
+    defaultName: 'Coup de chance',
+    // Chance + Réaction : relance d'attaque sur rate
+    detect: (counts) => (counts.Chance || 0) > 0 && counts.Réaction > 0,
+    describe: (counts) => {
+      const charges = counts.Chance || 0;
+      return `Chance ×${charges} + Réaction · ${charges} relance${charges > 1 ? 's' : ''} automatique${charges > 1 ? 's' : ''} d'attaque ratée pendant 2 tours`;
     },
   },
 ];
@@ -411,8 +451,12 @@ function _calcSortCibles(s) {
   const runes = s.runes || [];
   const nbDisp = runes.filter(r => r === 'Dispersion').length;
   const nbAmp  = runes.filter(r => r === 'Amplification').length;
+  const nbAff  = runes.filter(r => r === 'Affliction').length;
+  const nbInv  = runes.filter(r => r === 'Invocation').length;
   // Combo Amp + Disp → mode zone, pas de cibles séparées
   if (nbAmp > 0 && nbDisp > 0) return 1;
+  // Combo Sentinelle (Aff + Inv) + Disp → invocations multiples, pas de cibles séparées
+  if (nbAff > 0 && nbInv > 0 && nbDisp > 0) return 1;
   if (nbDisp === 0) return 1;
   return 2 * nbDisp; // 2N cibles différentes
 }
@@ -520,6 +564,76 @@ function _calcChance(s) {
   return { runes: nb, rc: 20 - reduction, reduction };
 }
 
+/** Drain : pourcentage des dégâts soigné au lanceur.
+ *  Formule : 25% + 25% × nbProtection → Prot×1=50, ×2=75, ×3=100, ×4=125…
+ *  Le drain est piloté entièrement par les runes ; plus de soinFraction.
+ */
+function _calcDrainPct(s) {
+  const runes = s?.runes || [];
+  const nbP    = runes.filter(r => r === 'Puissance').length;
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  if (!nbP || !nbProt) return 0;
+  return 0.25 + 0.25 * nbProt;
+}
+
+/** DD du jet de Sagesse de concentration : 11 + 2×(n-1).
+ *  1 rune Concentration = DD 11 · 2 = 13 · 3 = 15 · etc.
+ */
+function _calcConcentrationDD(s) {
+  const nb = (s?.runes || []).filter(r => r === 'Concentration').length;
+  if (!nb) return null;
+  return 11 + 2 * (nb - 1);
+}
+
+/** Stats propres de la Sentinelle (combo Affliction + Invocation).
+ *  - Dégâts : 1d4 base + Puissance avec chaînage standard (+2/rune au-delà de la 1ère)
+ *  - PV     : 10 + 5×nbProt + chaînage (+1/rune au-delà de la 1ère)
+ *  - CA     : 10 + 2×nbProt + chaînage (+1/rune au-delà de la 1ère)
+ *  - Portée : 1m (Manhattan) sans Amp · sinon 4N-1 mètres (3, 7, 11, 15…)
+ */
+function _calcSentinelStats(s) {
+  const runes = s?.runes || [];
+  const nbP    = runes.filter(r => r === 'Puissance').length;
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  const nbAmp  = runes.filter(r => r === 'Amplification').length;
+  // Dégâts d4 : base 1d4 + 1d4 par Puissance, chaînage +2 par paire au-delà de la 1ère
+  const nbDice = 1 + nbP;
+  const chainDmg = nbP > 1 ? (nbP - 1) * 2 : 0;
+  const dmg = chainDmg > 0 ? `${nbDice}d4 +${chainDmg}` : `${nbDice}d4`;
+  // PV : chainage +1 par rune au-delà de la 1ère
+  const chainProt = nbProt > 1 ? (nbProt - 1) : 0;
+  const hp = 10 + 5 * nbProt + chainProt;
+  const ca = 10 + 2 * nbProt + chainProt;
+  // Portée : 1m sans Amp, sinon longueur Amp (réutilise _ampLength)
+  const portee = nbAmp === 0 ? 1 : _ampLength(nbAmp);
+  return { dmg, hp, ca, portee, nbP, nbProt, nbAmp };
+}
+
+/** Stats propres de l'Arme invoquée (combo Enchantement + Invocation).
+ *  Lit la matrice MJ pour l'arme de base de l'élément, puis ajoute Puissance.
+ */
+function _calcInvokedArmStats(s) {
+  const runes = s?.runes || [];
+  const nbP = runes.filter(r => r === 'Puissance').length;
+  const arm = getInvokedArm(window._spellMatricesCache, s?.noyauTypeId);
+  const baseDmg = arm?.degats || '1d8';
+  let dmg = baseDmg;
+  if (nbP > 0) {
+    const m = baseDmg.match(/^(\d+)(d\d+)(.*)$/i);
+    dmg = m ? `${parseInt(m[1]) + nbP}${m[2]}${m[3]}` : `${baseDmg} +${nbP}d6`;
+  }
+  return {
+    weapon: arm?.weapon || 'Arme magique',
+    dmg,
+    statToucher: arm?.statToucher || 'force',
+    statDegats:  arm?.statDegats || 'force',
+    portee: arm?.portee || 1,
+    note: arm?.note || '',
+    hp: 10, ca: 10, // par défaut, peuvent être enrichis ensuite
+    nbP,
+  };
+}
+
 /**
  * Génère le résumé textuel complet des effets d'un sort
  * sous forme de tableau de lignes {icon, label, detail}
@@ -539,7 +653,8 @@ function _buildSortResume(s, c) {
                     || (runes.includes('Protection') && (s.protectionMode || 'ca') === 'ca' && !runes.includes('Réaction'))
                     || !!(s.dureeBase && s.dureeBase >= 2);
   const natureStr = isPersistent ? '⏳ Persistant' : '⏱️ Instantané';
-  lines.push({ icon: '', label: `${actionStr} · ${natureStr}`, detail: concentration ? 'JS Sagesse DD 11 si dégâts reçus · jusqu\'à 10 tours' : '' });
+  const concDD = _calcConcentrationDD(s);
+  lines.push({ icon: '', label: `${actionStr} · ${natureStr}`, detail: concDD ? `JS Sagesse DD ${concDD} si dégâts reçus · jusqu'à 10 tours` : '' });
 
   // Portée du sort = portée de l'arme principale équipée (ou Poings = 1m)
   // Sauf si combo Allonge magique : portée étendue (voir ligne dédiée plus bas)
@@ -584,10 +699,11 @@ function _buildSortResume(s, c) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     if (mode === 'soin') {
-      // Override MJ : soin = fraction des dégâts (ex : Drain)
-      if (s.soinFraction && s.soinFraction > 0) {
-        const pct = Math.round(s.soinFraction * 100);
-        lines.push({ icon:'💚', label:`${pct}% des dégâts`, detail:`Limite MJ · scale avec Puissance${monoStr}` });
+      // Combo Drain (Puissance + Protection mode soin) : pas de soin direct,
+      // le lanceur récupère un pourcentage des dégâts infligés (formule des runes).
+      if (comboIds.has('drain')) {
+        const pct = Math.round(_calcDrainPct(s) * 100);
+        lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · pas de soin direct · scale avec Protection` });
       } else {
         const mainPsoin  = getMainWeapon(c);
         const maitrSoin  = _getMaitriseBonus(c, mainPsoin);
@@ -639,6 +755,9 @@ function _buildSortResume(s, c) {
     } else {
       zoneDetail = 'Zone manuelle (override MJ)';
     }
+    // Sort de terrain : Amplification seule (sans Puissance ni Protection) → 2 tours par défaut
+    const isTerrain = zoneCalc.source === 'runes' && nbPuiss === 0 && nbProt === 0;
+    if (isTerrain) zoneDetail += ' · 2 tours par défaut (sort de terrain)';
     lines.push({ icon:'📐', label:`Zone ${zoneCalc.w}×${zoneCalc.h}m`, detail: zoneDetail });
   } else if (zoneCalc && comboIds.has('allonge_magique')) {
     // Allonge magique : la longueur Amp devient la portée de l'arme enchantée
@@ -719,12 +838,22 @@ function _buildSortResume(s, c) {
   // Invocation — masquée si absorbée par un combo (Arme invoquée, Sentinelle)
   const hideInvoc = comboIds.has('arme_invoquee') || comboIds.has('sentinelle');
   if (runes.includes('Invocation') && !hideInvoc) {
-    lines.push({ icon:'🐾', label:'Invocation', detail:'Créature liée · 10 PV · CA 10' });
+    lines.push({ icon:'🐾', label:'Invocation', detail:'Créature liée · 10 PV · CA 10 · 2 tours par défaut' });
+  }
+
+  // Détails Sentinelle — affichés à la place de la ligne classique Invocation/Affliction
+  if (comboIds.has('sentinelle')) {
+    const st = _calcSentinelStats(s);
+    const nbDisp = runes.filter(r => r === 'Dispersion').length;
+    const nbSent = nbDisp > 0 ? 2 * nbDisp : 1;
+    const countStr = nbSent > 1 ? ` · ×${nbSent} sentinelles` : '';
+    lines.push({ icon:'🪤', label:`Sentinelle · ${st.hp} PV · CA ${st.ca}${countStr}`, detail:`Attaque ${st.dmg} · portée ${st.portee}m · stationnaire · 2 tours par défaut` });
   }
 
   // Concentration (rappel JS si pas déjà mentionné)
   if (concentration && action !== 'action') {
-    lines.push({ icon:'🧠', label:'Concentration', detail:'JS Sagesse DD 11 si dégâts reçus · jusqu\'à 10 tours' });
+    const dd = _calcConcentrationDD(s) ?? 11;
+    lines.push({ icon:'🧠', label:'Concentration', detail:`JS Sagesse DD ${dd} si dégâts reçus · jusqu'à 10 tours` });
   }
 
   // Limite MJ (texte libre)
@@ -842,18 +971,19 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   }
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
+    const activeIds = new Set(_activeCombos(s).map(co => co.id));
     if (mode === 'soin') {
-      // Override MJ : soin = fraction des dégâts
-      if (s.soinFraction && s.soinFraction > 0) {
-        chips.push({ icon:'💚', val: `${Math.round(s.soinFraction*100)}% dégâts`, color:'#22c38e' });
+      // Combo Drain : pas de soin direct, % drain depuis les dégâts
+      if (activeIds.has('drain')) {
+        const pct = Math.round(_calcDrainPct(s) * 100);
+        chips.push({ icon:'🩸', val: `Drain ${pct}%`, color:'#ff6b6b' });
       } else {
         const soinBase = _calcSortSoin(s, c); // inclut maîtrise
         chips.push({ icon:'💚', val: soinBase, color:'#22c38e' });
       }
     } else {
-      // Mode CA — sauf si combo Bouclier réactif (réaction = pas de bonus CA)
-      const isReactiveShield = _activeCombos(s).some(co => co.id === 'bouclier_reactif');
-      if (isReactiveShield) {
+      // Mode CA — sauf si combo Bouclier réactif (réaction = pas de bonus CA, pas de soin)
+      if (activeIds.has('bouclier_reactif')) {
         chips.push({ icon:'🛡️', val:'Bloque 1', color:'#22c38e' });
       } else {
         chips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
@@ -1071,9 +1201,29 @@ function _runeLiveContribution(nom, counts) {
     case 'Protection': {
       const chainSoin = cnt > 1 ? (cnt - 1) * 2 : 0;
       const chainCA   = cnt > 1 ? (cnt - 1)     : 0;
+      // Contexte : lit le mode et la présence de Réaction pour adapter le label
+      const protMode = (typeof document !== 'undefined'
+        ? document.getElementById('s-prot-mode')?.value : null) || 'ca';
+      const hasReac = (counts.Réaction || 0) > 0;
+      // Combo Bouclier réactif (Réa + Prot mode CA) : pas de soin, blocage 1 attaque
+      if (hasReac && protMode === 'ca') {
+        const tier = cnt >= 3 ? 'Boss ou inférieur' : cnt === 2 ? 'Élite ou inférieur' : 'Mob classique';
+        return {
+          main:  `Combo Bouclier réactif · Bloque 1 attaque entrante · plafond ${tier}`,
+          chain: cnt > 1 ? `🔗 Augmente le tier d'ennemi qu'on peut bloquer (Protection ×${cnt})` : null,
+        };
+      }
+      // Mode CA pur (sans Réaction)
+      if (protMode === 'ca') {
+        return {
+          main:  `+${cnt*2} CA · sur 1 cible (2 tours)`,
+          chain: cnt > 1 ? `🔗 Chaîné +${chainCA} CA (Protection ×${cnt})` : null,
+        };
+      }
+      // Mode soin
       return {
-        main:  `+${cnt}d4 soin OU +${cnt*2} CA · sur 1 cible (2 tours)`,
-        chain: cnt > 1 ? `🔗 Chaîné +${chainSoin} soin · OU +${chainCA} CA (Protection ×${cnt})` : null,
+        main:  `+${cnt}d4 soin · sur 1 cible`,
+        chain: cnt > 1 ? `🔗 Chaîné +${chainSoin} soin (Protection ×${cnt})` : null,
       };
     }
     case 'Amplification': {
@@ -1317,8 +1467,11 @@ export async function openSortModal(idx, s) {
     <!-- ① Identité — bandeau aligné (icône + nom + catégorie) -->
     <div class="cs-spell-identity">
       <div class="cs-spell-identity-field"><label>Icône</label>
-        <input class="input-field cs-spell-icon-input" id="s-icon" value="${s?.icon||''}" maxlength="3"
-          placeholder="🔥" title="Emoji ou caractère court · vide = icône du noyau">
+        <button type="button" id="s-icon-btn" class="cs-spell-icon-btn"
+          onclick="window._toggleSortIconPicker()"
+          title="Cliquer pour choisir une icône">${s?.icon || '🔮'}</button>
+        <input type="hidden" id="s-icon" value="${s?.icon||''}">
+        <div id="s-icon-picker" class="cs-spell-icon-picker" style="display:none"></div>
       </div>
       <div class="cs-spell-identity-field cs-spell-identity-field--name"><label>Nom du sort</label>
         <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu, Vague de soin…">
@@ -1408,8 +1561,8 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
-    <!-- Soin — visible si type Défensif sélectionné OU rune Protection en mode soin (indépendant) -->
-    <div id="s-soin-section" style="${(typesInit.includes('defensif') || (hasProt && (s?.protectionMode||'ca')==='soin'))?'':'display:none'}">
+    <!-- Soin — visible UNIQUEMENT si Protection en mode soin (jamais en mode CA, évite la confusion avec Bouclier réactif) -->
+    <div id="s-soin-section" style="${(hasProt && (s?.protectionMode||'ca')==='soin')?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-soin',
         label: '💚 Soin',
@@ -1440,9 +1593,8 @@ export async function openSortModal(idx, s) {
         <label>Effet de l'enchantement <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">texte libre — décris l'effet thématique</span></label>
         <div id="s-enchant-suggest" class="cs-spell-suggest" style="display:none">
           <span class="cs-spell-suggest-icon">💡</span>
-          <span class="cs-spell-suggest-label">Suggéré :</span>
-          <span class="cs-spell-suggest-val" id="s-enchant-suggest-val"></span>
-          <button type="button" class="cs-spell-suggest-btn" onclick="window._applySpellSuggest('enchant')">↓ Appliquer</button>
+          <span class="cs-spell-suggest-label">Suggestions :</span>
+          <div class="cs-spell-suggest-list" id="s-enchant-suggest-list"></div>
         </div>
         <textarea class="input-field" id="s-enchant-effect" rows="2"
           oninput="window._markSpellEffectTouched('enchant')"
@@ -1480,9 +1632,8 @@ export async function openSortModal(idx, s) {
         <label>Effet de l'affliction <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">texte libre — décris l'effet thématique</span></label>
         <div id="s-affliction-suggest" class="cs-spell-suggest cs-spell-suggest--aff" style="display:none">
           <span class="cs-spell-suggest-icon">💡</span>
-          <span class="cs-spell-suggest-label">Suggéré :</span>
-          <span class="cs-spell-suggest-val" id="s-affliction-suggest-val"></span>
-          <button type="button" class="cs-spell-suggest-btn" onclick="window._applySpellSuggest('affliction')">↓ Appliquer</button>
+          <span class="cs-spell-suggest-label">Suggestions :</span>
+          <div class="cs-spell-suggest-list" id="s-affliction-suggest-list"></div>
         </div>
         <textarea class="input-field" id="s-affliction-effect" rows="2"
           oninput="window._markSpellEffectTouched('affliction')"
@@ -1544,26 +1695,6 @@ export async function openSortModal(idx, s) {
         </label>
       </div>` : (s?.mjValidated ? '<div class="cs-mj-validation cs-mj-validation--readonly is-on"><span class="cs-mj-validation-state"></span><span class="cs-mj-validation-info"><span class="cs-mj-validation-title">Sort validé par le MJ</span></span></div>' : '')}
 
-      <div class="form-group" style="margin-bottom:.4rem">
-        <label style="font-size:.72rem">Soin = fraction des dégâts <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(override des runes Protection·soin)</span></label>
-        <select class="input-field" id="s-soin-fraction" style="padding:.3rem .5rem;font-size:.78rem">
-          ${[['', '— Non, utiliser les runes —'],['0.25','25% des dégâts'],['0.5','50% des dégâts'],['0.75','75% des dégâts'],['1','100% des dégâts']]
-            .map(([v,lbl]) => `<option value="${v}" ${String(s?.soinFraction||'')===v?'selected':''}>${lbl}</option>`).join('')}
-        </select>
-      </div>
-
-      <div class="form-group" style="margin-bottom:.4rem">
-        <label style="font-size:.72rem">Zone override (override des runes Amplification) <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">force une zone W×H spécifique</span></label>
-        <div style="display:flex;gap:.35rem;align-items:center">
-          <input type="number" class="input-field" id="s-zone-w" min="1" max="50"
-            value="${s?.zoneW||''}" placeholder="—" style="width:55px;text-align:center;padding:.3rem">
-          <span style="font-size:.85rem;color:var(--text-dim);font-weight:600">×</span>
-          <input type="number" class="input-field" id="s-zone-h" min="1" max="50"
-            value="${s?.zoneH||''}" placeholder="—" style="width:55px;text-align:center;padding:.3rem">
-          <span style="font-size:.8rem;color:var(--text-dim)">m</span>
-        </div>
-      </div>
-
       <div class="form-group" style="margin-bottom:0">
         <label style="font-size:.72rem">Notes / restrictions <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(affichées dans la fiche)</span></label>
         <textarea class="input-field" id="s-mj-notes" rows="2" placeholder="ex : soin va uniquement au lanceur">${s?.mjNotes||''}</textarea>
@@ -1573,7 +1704,9 @@ export async function openSortModal(idx, s) {
     </div><!-- /grid-col--right -->
    </div><!-- /cs-spell-grid -->
 
-    <button class="btn btn-gold cs-spell-save" style="width:100%" onclick="saveSort(${idx})">💾 Enregistrer le sort</button>
+    <div class="cs-spell-save-bar">
+      <button class="btn btn-gold cs-spell-save" onclick="saveSort(${idx})">💾 Enregistrer le sort</button>
+    </div>
    </div><!-- /cs-spell-forge -->
   `);
 
@@ -1611,17 +1744,19 @@ function _applyTypeChange() {
   window._updateSortPreview?.();
 }
 
-/** Met à jour la visibilité des sections Dégâts/Soin selon types + runes + mode protection. */
+/** Met à jour la visibilité des sections Dégâts/Soin selon types + runes + mode protection.
+ *  Soin n'apparaît que si le mode Protection est explicitement 'soin' (ne s'affiche jamais
+ *  en mode CA pour éviter la confusion avec le Bouclier réactif).
+ */
 function _refreshConditionalSections() {
   const isOffensive = window._sortTypesEdit.has('offensif');
-  const isDefensive = window._sortTypesEdit.has('defensif');
   const counts      = window._runeCountsEdit || {};
   const hasProt     = (counts.Protection || 0) > 0;
   const protMode    = document.getElementById('s-prot-mode')?.value || 'ca';
   const dSec = document.getElementById('s-degats-section');
   const sSec = document.getElementById('s-soin-section');
   if (dSec) dSec.style.display = isOffensive ? '' : 'none';
-  if (sSec) sSec.style.display = (isDefensive || (hasProt && protMode === 'soin')) ? '' : 'none';
+  if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
 }
 
 window._toggleSortType = (type) => {
@@ -1696,6 +1831,8 @@ window._selectProtMode = (mode) => {
     const s = _buildSortFromDOM();
     dureeSec.style.display = _needsDureeBase(s) ? '' : 'none';
   }
+  // Re-render des runes actives pour adapter le texte de Protection (CA/Soin/Bouclier réactif)
+  _renderRunesSection?.();
   window._updateSortPreview?.();
 };
 
@@ -1815,23 +1952,88 @@ function _refreshSpellSuggestions() {
   const enchSlot = document.getElementById('s-enchant-slot')?.value || 'arme';
   const affSlot  = document.getElementById('s-affliction-slot')?.value || 'arme';
 
-  const applySuggestion = (cat, suggestion) => {
+  const renderSuggestions = (cat, suggestions) => {
     const wrap = document.getElementById(`s-${cat}-suggest`);
-    const valEl = document.getElementById(`s-${cat}-suggest-val`);
+    const list = document.getElementById(`s-${cat}-suggest-list`);
     const txtEl = document.getElementById(`s-${cat}-effect`);
-    if (!wrap) return;
-    if (!suggestion) { wrap.style.display = 'none'; return; }
-    if (valEl) valEl.textContent = suggestion;
+    if (!wrap || !list) return;
+    if (!suggestions.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
     wrap.style.display = '';
-    // Pré-remplissage agressif : textarea vide → injection automatique
+    // Encode chaque suggestion en base64 pour passage sans risque dans l'onclick
+    list.innerHTML = suggestions.map(s => {
+      const encoded = btoa(unescape(encodeURIComponent(s)));
+      return `<button type="button" class="cs-spell-suggest-btn"
+        onclick="window._pickSpellSuggestion('${cat}','${encoded}')"
+        title="Cliquer pour appliquer cette suggestion">↓ ${_esc(s)}</button>`;
+    }).join('');
+    // Pré-remplissage agressif : si la textarea est vide et jamais touchée,
+    // injecte la 1ère suggestion (comportement historique)
     if (txtEl && !txtEl.value.trim() && !txtEl.dataset.userTouched) {
-      txtEl.value = suggestion;
+      txtEl.value = suggestions[0];
     }
   };
 
-  applySuggestion('enchant',    suggestSpellEffect(matrices, 'enchant',    noyauId, enchSlot));
-  applySuggestion('affliction', suggestSpellEffect(matrices, 'affliction', noyauId, affSlot));
+  renderSuggestions('enchant',    getMatrixSuggestions(matrices, 'enchant',    noyauId, enchSlot));
+  renderSuggestions('affliction', getMatrixSuggestions(matrices, 'affliction', noyauId, affSlot));
 }
+
+/** Bibliothèque d'icônes pour les sorts (emojis sélectionnés pour le thème JdR). */
+const SPELL_ICONS = [
+  // Élémentaires
+  '🔥','💧','🌪','🌍','⚡','❄️','☀️','🌙','⭐','✨',
+  // Offensifs
+  '⚔️','🗡️','🏹','💥','💣','☄️','🌋','🌊','🌩','🩸',
+  // Défensifs / soin
+  '🛡️','🛡','💚','💗','❤️‍🩹','✝️','🪽','🕊','🌿','🍀',
+  // Contrôle / état
+  '💀','☠️','🕸','🪨','🪤','🧊','🔇','😵','🥶','🥵',
+  // Magie / arcanes
+  '🔮','🪄','📜','📖','🎴','🌀','♾️','♾','🧿','👁️',
+  // Invocations / créatures
+  '🐾','🐺','🐉','🦅','🦂','🐍','🦋','🦇','🦴','🐾',
+  // Divers
+  '👊','👋','🫳','🫸','🤚','🪦','🗿','🎭','🃏','🎲',
+];
+
+// Ferme le picker quand on clique en dehors
+function _bindSortIconPickerOutsideClose() {
+  if (window._sortIconPickerOutsideBound) return;
+  window._sortIconPickerOutsideBound = true;
+  document.addEventListener('click', (e) => {
+    const picker = document.getElementById('s-icon-picker');
+    const btn    = document.getElementById('s-icon-btn');
+    if (!picker || picker.style.display === 'none') return;
+    if (picker.contains(e.target) || btn?.contains(e.target)) return;
+    picker.style.display = 'none';
+  }, true);
+}
+
+window._toggleSortIconPicker = () => {
+  _bindSortIconPickerOutsideClose();
+  const picker = document.getElementById('s-icon-picker');
+  if (!picker) return;
+  if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
+  // Génère la grille à l'ouverture (au cas où la sélection courante a changé)
+  const current = document.getElementById('s-icon')?.value || '';
+  picker.innerHTML = SPELL_ICONS.map(ic => {
+    const sel = ic === current ? ' is-selected' : '';
+    return `<button type="button" class="cs-spell-icon-opt${sel}"
+      onclick="window._pickSortIcon('${ic.replace(/'/g, "\\'")}')">${ic}</button>`;
+  }).join('') + `<button type="button" class="cs-spell-icon-opt cs-spell-icon-opt--clear"
+      onclick="window._pickSortIcon('')" title="Aucune icône — utilise celle du noyau">✕</button>`;
+  picker.style.display = 'grid';
+};
+
+window._pickSortIcon = (icon) => {
+  const hidden = document.getElementById('s-icon');
+  const btn    = document.getElementById('s-icon-btn');
+  const picker = document.getElementById('s-icon-picker');
+  if (hidden) hidden.value = icon;
+  if (btn)    btn.textContent = icon || '🔮';
+  if (picker) picker.style.display = 'none';
+  // Met à jour la preview live
+  window._updateSortPreview?.();
+};
 
 // Marque la textarea comme "touchée par l'utilisateur" dès qu'il y tape :
 // empêche le pré-remplissage agressif d'écraser ses changements ultérieurs.
@@ -1842,16 +2044,28 @@ window._markSpellEffectTouched = (cat) => {
 window._refreshSpellSuggestions = _refreshSpellSuggestions;
 
 /**
- * Applique la suggestion en cours dans la textarea d'effet.
+ * Applique une suggestion spécifique (base64 encodé) dans la textarea d'effet.
+ * Appelé depuis les boutons générés par _refreshSpellSuggestions.
  * cat = 'enchant' | 'affliction'
  */
-window._applySpellSuggest = (cat) => {
-  const valEl = document.getElementById(`s-${cat}-suggest-val`);
+window._pickSpellSuggestion = (cat, encoded) => {
   const txtEl = document.getElementById(`s-${cat}-effect`);
-  if (!valEl || !txtEl) return;
-  txtEl.value = valEl.textContent || '';
+  if (!txtEl) return;
+  let suggestion = '';
+  try { suggestion = decodeURIComponent(escape(atob(encoded))); } catch { suggestion = ''; }
+  if (!suggestion) return;
+  txtEl.value = suggestion;
+  txtEl.dataset.userTouched = '1';                 // évite l'écrasement auto au prochain refresh
   txtEl.dispatchEvent(new Event('input', { bubbles: true })); // trigger preview update
   txtEl.focus();
+};
+
+// Compat ascendante : si du code legacy appelle encore _applySpellSuggest,
+// on tente de prendre la 1ère suggestion disponible.
+window._applySpellSuggest = (cat) => {
+  const list = document.getElementById(`s-${cat}-suggest-list`);
+  const firstBtn = list?.querySelector('.cs-spell-suggest-btn');
+  if (firstBtn) firstBtn.click();
 };
 
 /**
@@ -1896,12 +2110,9 @@ function _buildSortFromDOM() {
     for (let i=0; i<cnt; i++) runes.push(nom);
   });
   const types = [...(window._sortTypesEdit || new Set(['utilitaire']))];
-  const zoneW = parseInt(document.getElementById('s-zone-w')?.value) || 0;
-  const zoneH = parseInt(document.getElementById('s-zone-h')?.value) || 0;
   const dureeBase = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = window._deplModeEdit || null;
   const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
-  const fracRaw  = document.getElementById('s-soin-fraction')?.value || '';
   const iconRaw  = document.getElementById('s-icon')?.value || '';
   const mjValid  = document.getElementById('s-mj-validated')?.checked || false;
   return {
@@ -1919,11 +2130,10 @@ function _buildSortFromDOM() {
     enchantEffect:    document.getElementById('s-enchant-effect')?.value || '',
     afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'arme',
     afflictionEffect: document.getElementById('s-affliction-effect')?.value || '',
-    zoneW: zoneW > 0 ? zoneW : null,
-    zoneH: zoneH > 0 ? zoneH : null,
+    zoneW: null,
+    zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
     deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
-    soinFraction: fracRaw ? parseFloat(fracRaw) : null,
     mjNotes: document.getElementById('s-mj-notes')?.value || '',
   };
 }
@@ -1995,8 +2205,6 @@ export async function saveSort(idx) {
     // Action override (null = auto)
     const actionOverride = window._sortActionEdit || null;
 
-    const zoneWRaw = parseInt(document.getElementById('s-zone-w')?.value) || 0;
-    const zoneHRaw = parseInt(document.getElementById('s-zone-h')?.value) || 0;
     const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
     const deplMode = window._deplModeEdit || null;
     const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
@@ -2031,11 +2239,10 @@ export async function saveSort(idx) {
       enchantEffect:    document.getElementById('s-enchant-effect')?.value || '',
       afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'arme',
       afflictionEffect: document.getElementById('s-affliction-effect')?.value || '',
-      zoneW: zoneWRaw > 0 ? zoneWRaw : null,
-      zoneH: zoneHRaw > 0 ? zoneHRaw : null,
+      zoneW: null,
+      zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
       deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
-      soinFraction: parseFloat(document.getElementById('s-soin-fraction')?.value) || null,
       mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
     };
     if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
