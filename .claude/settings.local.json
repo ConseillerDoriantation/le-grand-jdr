@@ -96,7 +96,10 @@
       "Bash(node --check assets/js/features/vtt.js)",
       "Bash([ -f \"$SRC/$f\" ])",
       "Bash(cp C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/__TRACKED_VAR__ C:/Users/Moi/Documents/GitHub/le-grand-jdr/__TRACKED_VAR__)",
-      "Bash(cp \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/css/responsive.css\" \\\\ *)"
+      "Bash(cp \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/css/responsive.css\" \\\\ *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\" -Recurse -Filter \"*.js\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)"
     ]
   }
 }

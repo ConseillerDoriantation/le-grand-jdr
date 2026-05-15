@@ -164,13 +164,13 @@ html, body { min-height:100%; }
   padding:0;
 }
 
-/* SIDEBAR — glassmorphism flush */
+/* SIDEBAR — glassmorphism flush · fixed pour suivre le scroll sans ambiguïté */
 .sidebar {
   width: 260px;
   min-width: 260px;
-  flex-shrink: 0;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -180,6 +180,11 @@ html, body { min-height:100%; }
   border-radius: 0;
   background: var(--bg-panel);
   z-index: 50;
+}
+/* Compense l'espace de la sidebar fixe sur desktop (mobile : sidebar masquée → pas de padding) */
+.app-layout { padding-left: 260px; }
+@media (max-width: 768px) {
+  .app-layout { padding-left: 0; }
 }
 .sidebar::-webkit-scrollbar { display: none; }
 /* Halo or chaud en haut + nuance arcane en bas → vibe "grimoire" subtile */
@@ -625,7 +630,7 @@ html, body { min-height:100%; }
   .app-header { display: none !important; }
   .app-layout {
     min-height: 100vh;
-    padding: 0;
+    padding-left: 260px;
     gap: 0;
   }
   .main-content {

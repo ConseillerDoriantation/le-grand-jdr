@@ -3,8 +3,35 @@ import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../shared/damage-types.js';
+import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
+
+// ══════════════════════════════════════════════
+// ARME PAR DÉFAUT — Poings (mains nues)
+// Si "Main principale" est vide, le personnage frappe à mains nues :
+//   - 2d4 de dégâts (au lieu de 1d6)
+//   - Force pour le toucher ET les dégâts
+// ══════════════════════════════════════════════
+export const DEFAULT_UNARMED = Object.freeze({
+  nom:         'Poings',
+  degats:      '2d4',
+  statAttaque: 'force',
+  format:      'À une main',
+  portee:      1,
+  icon:        '👊',
+  isDefault:   true, // flag pour distinguer de l'équipement réel
+});
+
+/**
+ * Retourne l'arme principale équipée, ou un objet "Poings" virtuel si vide.
+ * Toujours un objet utilisable (jamais null/undefined).
+ */
+export function getMainWeapon(c) {
+  const mainP = c?.equipement?.['Main principale'];
+  if (mainP && mainP.nom) return mainP;
+  return { ...DEFAULT_UNARMED };
+}
 
 // ══════════════════════════════════════════════
 // STYLES DE COMBAT
@@ -491,6 +518,321 @@ window.openDamageTypesAdmin = async () => {
   _damageTypes = await loadDamageTypes();
   _renderDamageTypesModal(_damageTypes);
 };
+
+// ══════════════════════════════════════════════
+// MATRICES DE SORTS — Admin (Enchantement / Affliction / Protection CA)
+// Source : world/spell_matrices · UI multi-onglets, sauvegarde explicite
+// ══════════════════════════════════════════════
+
+let _spellMatricesDraft = null; // brouillon en cours d'édition
+let _spellMatricesTab   = 'enchant';
+
+export async function openSpellMatricesAdmin() {
+  const [types, matrices] = await Promise.all([loadDamageTypes(), loadSpellMatrices()]);
+  // Copie profonde pour éviter de muter le cache avant Enregistrer
+  _spellMatricesDraft = {
+    enchant:      { ...(matrices.enchant      || {}) },
+    affliction:   { ...(matrices.affliction   || {}) },
+    protectionCA: { ...(matrices.protectionCA || {}) },
+    combos:       { ...(matrices.combos       || {}) },
+    combo_arms:   { ...(matrices.combo_arms   || {}) },
+  };
+  _spellMatricesTab = 'enchant';
+  _renderSpellMatricesModal(types);
+}
+
+function _renderSpellMatricesModal(types) {
+  const TABS = [
+    { id:'enchant',      label:'✨ Enchantement',     desc:'Effets sur les alliés (Action Bonus · 2 tours)' },
+    { id:'affliction',   label:'💀 Affliction',       desc:'Effets sur les ennemis (Action · 2 tours)'      },
+    { id:'protectionCA', label:'🛡️ Protection CA',    desc:'Variantes du bonus CA par élément'              },
+    { id:'combos',       label:'🔗 Combos',           desc:'Activer / renommer les combos de runes'         },
+    { id:'combo_arms',   label:'⚔️ Armes invoquées',  desc:'Arme par élément pour le combo Enchant+Invoc'   },
+  ];
+
+  const tabBtns = TABS.map(t => {
+    const active = _spellMatricesTab === t.id;
+    return `<button type="button" onclick="window._switchSpellMatrixTab('${t.id}')"
+      style="flex:1;padding:.5rem .4rem;border-radius:8px 8px 0 0;font-size:.78rem;cursor:pointer;
+        border:1px solid var(--border);border-bottom:none;
+        background:${active?'var(--bg-elevated)':'var(--bg-base)'};
+        color:${active?'var(--text)':'var(--text-dim)'};
+        font-weight:${active?'700':'400'};margin-bottom:-1px">${t.label}</button>`;
+  }).join('');
+
+  const currentTab = TABS.find(t => t.id === _spellMatricesTab);
+  let tabBodyHtml = '';
+
+  if (_spellMatricesTab === 'protectionCA') {
+    // Tableau : élément → mod CA + note
+    tabBodyHtml = `
+      <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 .6rem">
+        Bonus de CA par rune Protection selon l'élément du noyau.
+        Valeur par défaut : <strong>+2</strong> par rune. La note s'affiche dans la fiche du sort.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:.35rem">
+        ${types.map(t => {
+          const ov  = _spellMatricesDraft.protectionCA[t.id] || {};
+          const mod = ov.mod ?? 2;
+          const note = ov.note || '';
+          return `<div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
+            border:1px solid var(--border);border-radius:7px;padding:.4rem .6rem">
+            <span style="min-width:120px;font-size:.85rem;color:${t.color||'var(--text)'};font-weight:600">${t.icon||''} ${_esc(t.label)}</span>
+            <label style="display:flex;align-items:center;gap:.25rem;font-size:.72rem;color:var(--text-dim)">
+              CA /rune
+              <input type="number" min="0" max="10" step="1" value="${mod}"
+                onchange="window._setSpellMatrixCAMod('${t.id}', this.value)"
+                style="width:48px;padding:.2rem;text-align:center;background:var(--bg-base);
+                border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:.85rem">
+            </label>
+            <input class="input-field" placeholder="Note (ex: désavantage à distance contre la cible)"
+              value="${_esc(note)}" oninput="window._setSpellMatrixCANote('${t.id}', this.value)"
+              style="flex:1;font-size:.74rem;padding:.25rem .45rem">
+          </div>`;
+        }).join('')}
+      </div>`;
+  } else if (_spellMatricesTab === 'combos') {
+    // Liste des combos avec checkbox enabled + champ nom personnalisé
+    const COMBO_DESCS = {
+      drain:               'Puissance + Protection → dégâts ET soin sur le même lancer',
+      zone_elargie:        'Amplification + Dispersion → Dispersion élargit la zone au lieu d\'ajouter des cibles',
+      arme_invoquee:       'Enchantement + Invocation → manifeste une arme magique élémentaire (voir onglet Armes invoquées)',
+      allonge_magique:     'Enchantement (Arme) + Amplification → portée d\'arme étendue au lieu d\'une zone',
+      sentinelle:          'Affliction + Invocation → sentinelle stationnaire qui afflige à l\'entrée',
+      canalise_persistant: 'Durée + Concentration → tient tant que la concentration · grâce après rupture',
+      bouclier_reactif:    'Réaction + Protection (CA) → consommé en réaction à une attaque entrante',
+    };
+    tabBodyHtml = `
+      <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 .6rem">
+        Active ou désactive chaque combo, et renomme-le si tu veux un libellé personnalisé.
+        Décocher un combo le retire de la détection automatique côté joueur.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:.4rem">
+        ${COMBO_IDS.map(id => {
+          const def = COMBO_DEFAULTS[id] || { enabled: true, name: id };
+          const ov  = _spellMatricesDraft.combos[id] || {};
+          const enabled = ov.enabled !== undefined ? !!ov.enabled : def.enabled;
+          const name    = (ov.name && ov.name.trim()) || def.name;
+          return `<div style="display:flex;align-items:center;gap:.55rem;background:var(--bg-elevated);
+            border:1px solid var(--border);border-radius:8px;padding:.5rem .7rem">
+            <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.78rem">
+              <input type="checkbox" ${enabled?'checked':''}
+                onchange="window._setSpellMatrixComboEnabled('${id}', this.checked)">
+              <span style="color:${enabled?'var(--text)':'var(--text-dim)'};font-weight:${enabled?'700':'400'}">${def.name}</span>
+            </label>
+            <input class="input-field" placeholder="Nom personnalisé (vide = ${_esc(def.name)})"
+              value="${_esc(ov.name||'')}"
+              oninput="window._setSpellMatrixComboName('${id}', this.value)"
+              style="flex:1;font-size:.74rem;padding:.25rem .45rem">
+            <span style="font-size:.66rem;color:var(--text-dim);font-style:italic;min-width:50%;text-align:right">${COMBO_DESCS[id] || ''}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+  } else if (_spellMatricesTab === 'combo_arms') {
+    // Matrice : élément → arme invoquée (nom, dégâts, stat, portée, note)
+    const statOpts = [
+      { v:'force',        l:'Force'        },
+      { v:'dexterite',    l:'Dextérité'    },
+      { v:'intelligence', l:'Intelligence' },
+      { v:'constitution', l:'Constitution' },
+      { v:'sagesse',      l:'Sagesse'      },
+      { v:'charisme',     l:'Charisme'     },
+    ];
+    tabBodyHtml = `
+      <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 .6rem">
+        Définit l'arme manifestée pour chaque élément quand le combo
+        <strong>Enchantement + Invocation</strong> est actif. Laisse vide pour utiliser le fallback générique 1d8.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:.55rem;max-height:55vh;overflow-y:auto;padding-right:.3rem">
+        ${types.map(t => {
+          const a = _spellMatricesDraft.combo_arms[t.id] || {};
+          return `<div style="background:var(--bg-elevated);border:1px solid var(--border);
+            border-radius:8px;padding:.5rem .7rem">
+            <div style="font-size:.85rem;color:${t.color||'var(--text)'};font-weight:700;margin-bottom:.4rem">
+              ${t.icon||''} ${_esc(t.label)}
+            </div>
+            <div style="display:grid;grid-template-columns:1.4fr .9fr 1fr 1fr .6fr 1.6fr;gap:.35rem;align-items:end">
+              <label style="display:flex;flex-direction:column;gap:.1rem">
+                <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Arme</span>
+                <input class="input-field" placeholder="ex : Épée flottante"
+                  value="${_esc(a.weapon||'')}"
+                  oninput="window._setSpellMatrixArm('${t.id}','weapon', this.value)"
+                  style="font-size:.76rem;padding:.25rem .4rem">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:.1rem">
+                <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Dégâts</span>
+                <input class="input-field" placeholder="ex : 1d8 +2"
+                  value="${_esc(a.degats||'')}"
+                  oninput="window._setSpellMatrixArm('${t.id}','degats', this.value)"
+                  style="font-size:.76rem;padding:.25rem .4rem">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:.1rem">
+                <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Stat Toucher</span>
+                <select class="input-field"
+                  onchange="window._setSpellMatrixArm('${t.id}','statToucher', this.value)"
+                  style="font-size:.74rem;padding:.25rem .4rem">
+                  ${statOpts.map(o => `<option value="${o.v}" ${(a.statToucher||a.stat||'force')===o.v?'selected':''}>${o.l}</option>`).join('')}
+                </select>
+              </label>
+              <label style="display:flex;flex-direction:column;gap:.1rem">
+                <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Stat Dégâts</span>
+                <select class="input-field"
+                  onchange="window._setSpellMatrixArm('${t.id}','statDegats', this.value)"
+                  style="font-size:.74rem;padding:.25rem .4rem">
+                  ${statOpts.map(o => `<option value="${o.v}" ${(a.statDegats||a.stat||'force')===o.v?'selected':''}>${o.l}</option>`).join('')}
+                </select>
+              </label>
+              <label style="display:flex;flex-direction:column;gap:.1rem">
+                <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Portée (m)</span>
+                <input type="number" min="1" max="30" placeholder="1"
+                  value="${a.portee||''}"
+                  oninput="window._setSpellMatrixArm('${t.id}','portee', this.value)"
+                  style="font-size:.76rem;padding:.25rem .4rem;background:var(--bg-base);
+                  border:1px solid var(--border);border-radius:5px;color:var(--text);text-align:center">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:.1rem">
+                <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Note (propriétés)</span>
+                <input class="input-field" placeholder="ex : Action Bonus chaque tour…"
+                  value="${_esc(a.note||'')}"
+                  oninput="window._setSpellMatrixArm('${t.id}','note', this.value)"
+                  style="font-size:.74rem;padding:.25rem .4rem">
+              </label>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  } else {
+    // Tableau (élément × slot) → effet texte
+    const catKey = _spellMatricesTab;
+    const placeholderEx = catKey === 'enchant'
+      ? 'ex : Vision Nocturne, Vitesse +2 cases…'
+      : 'ex : Cécité, DoT 1d4+2/tour, Entrave…';
+    tabBodyHtml = `
+      <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 .6rem">
+        Pour chaque <strong>(élément × slot)</strong>, décris l'effet thématique appliqué.
+        Vide = aucune suggestion pour cette combinaison (le joueur devra taper l'effet manuellement).
+      </p>
+      <div style="display:flex;flex-direction:column;gap:.55rem;max-height:55vh;overflow-y:auto;padding-right:.3rem">
+        ${types.map(t => {
+          const row = _spellMatricesDraft[catKey][t.id] || {};
+          return `<div style="background:var(--bg-elevated);border:1px solid var(--border);
+            border-radius:8px;padding:.5rem .7rem">
+            <div style="font-size:.85rem;color:${t.color||'var(--text)'};font-weight:700;margin-bottom:.4rem">
+              ${t.icon||''} ${_esc(t.label)}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.35rem">
+              ${SPELL_SLOTS.map(slot => {
+                const val = row[slot] || '';
+                return `<label style="display:flex;flex-direction:column;gap:.15rem">
+                  <span style="font-size:.7rem;color:var(--text-dim);font-weight:600">${SLOT_LABELS[slot]}</span>
+                  <input class="input-field" placeholder="${placeholderEx}"
+                    value="${_esc(val)}"
+                    oninput="window._setSpellMatrixEffect('${catKey}','${t.id}','${slot}', this.value)"
+                    style="font-size:.76rem;padding:.3rem .45rem">
+                </label>`;
+              }).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  openModal('🔮 Matrices de sorts', `
+    <p style="font-size:.78rem;color:var(--text-dim);margin-bottom:.6rem">
+      ${currentTab.desc}<br>
+      <em style="font-size:.7rem">Les effets remplis ici sont proposés aux joueurs sous forme de suggestion cliquable.
+      Ils restent libres de saisir leur propre effet.</em>
+    </p>
+    <div style="display:flex;gap:.15rem;margin-bottom:0">${tabBtns}</div>
+    <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:0 8px 8px 8px;padding:.7rem">
+      ${tabBodyHtml}
+    </div>
+    <div style="display:flex;gap:.4rem;margin-top:.7rem">
+      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold btn-sm"    style="flex:2" onclick="window._saveSpellMatrices()">💾 Enregistrer les matrices</button>
+    </div>
+  `);
+}
+
+window._switchSpellMatrixTab = (tab) => {
+  _spellMatricesTab = tab;
+  loadDamageTypes().then(types => _renderSpellMatricesModal(types));
+};
+
+window._setSpellMatrixEffect = (catKey, elementId, slot, value) => {
+  if (!_spellMatricesDraft[catKey][elementId]) _spellMatricesDraft[catKey][elementId] = {};
+  const v = (value || '').trim();
+  if (v) _spellMatricesDraft[catKey][elementId][slot] = v;
+  else   delete _spellMatricesDraft[catKey][elementId][slot];
+  if (Object.keys(_spellMatricesDraft[catKey][elementId]).length === 0) {
+    delete _spellMatricesDraft[catKey][elementId];
+  }
+};
+
+window._setSpellMatrixCAMod = (elementId, val) => {
+  const n = parseInt(val);
+  if (!Number.isFinite(n)) return;
+  if (!_spellMatricesDraft.protectionCA[elementId]) _spellMatricesDraft.protectionCA[elementId] = {};
+  _spellMatricesDraft.protectionCA[elementId].mod = Math.max(0, Math.min(10, n));
+};
+
+window._setSpellMatrixCANote = (elementId, val) => {
+  if (!_spellMatricesDraft.protectionCA[elementId]) _spellMatricesDraft.protectionCA[elementId] = {};
+  const v = (val || '').trim();
+  if (v) _spellMatricesDraft.protectionCA[elementId].note = v;
+  else   delete _spellMatricesDraft.protectionCA[elementId].note;
+  // Cleanup si entrée vide (ni mod ≠ 2, ni note)
+  const entry = _spellMatricesDraft.protectionCA[elementId];
+  if (entry && (entry.mod === undefined || entry.mod === 2) && !entry.note) {
+    delete _spellMatricesDraft.protectionCA[elementId];
+  }
+};
+
+window._setSpellMatrixComboEnabled = (comboId, enabled) => {
+  if (!_spellMatricesDraft.combos[comboId]) _spellMatricesDraft.combos[comboId] = {};
+  _spellMatricesDraft.combos[comboId].enabled = !!enabled;
+  // Cleanup : retire l'entrée si elle correspond aux défauts et pas de nom custom
+  const def = COMBO_DEFAULTS[comboId];
+  const e   = _spellMatricesDraft.combos[comboId];
+  if (def && e.enabled === def.enabled && !(e.name && e.name.trim())) {
+    delete _spellMatricesDraft.combos[comboId];
+  }
+  loadDamageTypes().then(types => _renderSpellMatricesModal(types));
+};
+
+window._setSpellMatrixComboName = (comboId, val) => {
+  if (!_spellMatricesDraft.combos[comboId]) _spellMatricesDraft.combos[comboId] = {};
+  const v = (val || '').trim();
+  if (v) _spellMatricesDraft.combos[comboId].name = v;
+  else   delete _spellMatricesDraft.combos[comboId].name;
+  // Cleanup
+  const def = COMBO_DEFAULTS[comboId];
+  const e   = _spellMatricesDraft.combos[comboId];
+  if (def && (e.enabled === undefined || e.enabled === def.enabled) && !(e.name && e.name.trim())) {
+    delete _spellMatricesDraft.combos[comboId];
+  }
+};
+
+window._setSpellMatrixArm = (elementId, key, val) => {
+  if (!_spellMatricesDraft.combo_arms[elementId]) _spellMatricesDraft.combo_arms[elementId] = {};
+  const v = (val == null) ? '' : String(val).trim();
+  if (v) _spellMatricesDraft.combo_arms[elementId][key] = (key === 'portee') ? (parseInt(v) || 1) : v;
+  else   delete _spellMatricesDraft.combo_arms[elementId][key];
+  // Cleanup si toutes les clés sont vides
+  const e = _spellMatricesDraft.combo_arms[elementId];
+  const meaningful = ['weapon','degats','statToucher','statDegats','portee','note'].some(k => e[k] !== undefined && e[k] !== '');
+  if (!meaningful) delete _spellMatricesDraft.combo_arms[elementId];
+};
+
+window._saveSpellMatrices = async () => {
+  try {
+    await saveSpellMatrices(_spellMatricesDraft);
+    closeModal();
+    showNotif('Matrices de sorts enregistrées.', 'success');
+  } catch (e) { notifySaveError(e); }
+};
+
+window.openSpellMatricesAdmin = openSpellMatricesAdmin;
 
 // ══════════════════════════════════════════════
 // COMPUTED STATS

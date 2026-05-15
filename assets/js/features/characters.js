@@ -13,7 +13,7 @@ import {
 // ── Sous-modules ─────────────────────────────────────────────────────────────
 import {
   loadCombatStyles, _defaultCombatStyles, detectCombatStyle,
-  openCombatStylesAdmin, openWeaponFormatsAdmin, openDamageTypesAdmin,
+  openCombatStylesAdmin, openWeaponFormatsAdmin, openDamageTypesAdmin, openSpellMatricesAdmin,
   _getTraits, getEquippedInventoryIndexMap, syncEquipmentAfterInventoryMutation,
   normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData,
   applyFlatBonusToRollText, getToucherDisplay, getDegatsDisplay,
@@ -537,7 +537,7 @@ Object.assign(window, {
   openSortCatEditor,
 
   // Combat styles
-  openCombatStylesAdmin, openWeaponFormatsAdmin, openDamageTypesAdmin,
+  openCombatStylesAdmin, openWeaponFormatsAdmin, openDamageTypesAdmin, openSpellMatricesAdmin,
 
   // Compte
   addCompteRow, deleteCompteRow, saveCompteField,
