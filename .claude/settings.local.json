@@ -99,7 +99,10 @@
       "Bash(cp \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/css/responsive.css\" \\\\ *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\" -Recurse -Filter \"*.js\")",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(Sort-Object)"
+      "Bash(Sort-Object)",
+      "Bash(node --check assets/js/features/characters/spells.js)",
+      "Bash(node --check assets/js/features/characters/data.js)",
+      "Bash(node --check assets/js/shared/spell-matrices.js)"
     ]
   }
 }

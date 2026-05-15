@@ -702,15 +702,16 @@ function _renderSpellMatricesModal(types) {
         }).join('')}
       </div>`;
   } else {
-    // Tableau (élément × slot) → effet texte
+    // Tableau (élément × slot) → liste d'effets (1 effet par ligne)
     const catKey = _spellMatricesTab;
     const placeholderEx = catKey === 'enchant'
-      ? 'ex : Vision Nocturne, Vitesse +2 cases…'
-      : 'ex : Cécité, DoT 1d4+2/tour, Entrave…';
+      ? 'Vision nocturne\nŒil de l\'aigle (+perception)\nHalo guidant (+influence)'
+      : 'Cécité (JS Sa)\nÉblouissement (désavantage)\nIllusion sensorielle';
     tabBodyHtml = `
       <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 .6rem">
-        Pour chaque <strong>(élément × slot)</strong>, décris l'effet thématique appliqué.
-        Vide = aucune suggestion pour cette combinaison (le joueur devra taper l'effet manuellement).
+        Pour chaque <strong>(élément × slot)</strong>, liste les effets thématiques possibles.
+        <strong>Un effet par ligne</strong> — le joueur pourra piocher dans cette liste ou écrire le sien.
+        Vide = pas de suggestion pour cette combinaison.
       </p>
       <div style="display:flex;flex-direction:column;gap:.55rem;max-height:55vh;overflow-y:auto;padding-right:.3rem">
         ${types.map(t => {
@@ -722,13 +723,18 @@ function _renderSpellMatricesModal(types) {
             </div>
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.35rem">
               ${SPELL_SLOTS.map(slot => {
-                const val = row[slot] || '';
+                const raw = row[slot];
+                // Normalisation : array OU string legacy → lignes séparées par \n
+                const txt = Array.isArray(raw) ? raw.join('\n') : (raw || '');
+                const count = Array.isArray(raw) ? raw.length : (raw ? 1 : 0);
+                const badge = count > 1
+                  ? `<span style="font-size:.6rem;background:rgba(212,165,68,.18);color:var(--gold);border:1px solid rgba(212,165,68,.32);padding:1px 5px;border-radius:99px;font-weight:700">${count}</span>`
+                  : '';
                 return `<label style="display:flex;flex-direction:column;gap:.15rem">
-                  <span style="font-size:.7rem;color:var(--text-dim);font-weight:600">${SLOT_LABELS[slot]}</span>
-                  <input class="input-field" placeholder="${placeholderEx}"
-                    value="${_esc(val)}"
+                  <span style="font-size:.7rem;color:var(--text-dim);font-weight:600;display:flex;align-items:center;gap:.3rem">${SLOT_LABELS[slot]} ${badge}</span>
+                  <textarea class="input-field" rows="3" placeholder="${_esc(placeholderEx)}"
                     oninput="window._setSpellMatrixEffect('${catKey}','${t.id}','${slot}', this.value)"
-                    style="font-size:.76rem;padding:.3rem .45rem">
+                    style="font-size:.74rem;padding:.3rem .45rem;font-family:inherit;resize:vertical;min-height:60px">${_esc(txt)}</textarea>
                 </label>`;
               }).join('')}
             </div>
@@ -761,9 +767,19 @@ window._switchSpellMatrixTab = (tab) => {
 
 window._setSpellMatrixEffect = (catKey, elementId, slot, value) => {
   if (!_spellMatricesDraft[catKey][elementId]) _spellMatricesDraft[catKey][elementId] = {};
-  const v = (value || '').trim();
-  if (v) _spellMatricesDraft[catKey][elementId][slot] = v;
-  else   delete _spellMatricesDraft[catKey][elementId][slot];
+  // Multi-ligne : chaque ligne non vide devient une suggestion distincte
+  const lines = String(value || '')
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    delete _spellMatricesDraft[catKey][elementId][slot];
+  } else if (lines.length === 1) {
+    // Une seule suggestion → stocke en string (rétrocompat minimaliste)
+    _spellMatricesDraft[catKey][elementId][slot] = lines[0];
+  } else {
+    _spellMatricesDraft[catKey][elementId][slot] = lines;
+  }
   if (Object.keys(_spellMatricesDraft[catKey][elementId]).length === 0) {
     delete _spellMatricesDraft[catKey][elementId];
   }

@@ -2670,6 +2670,14 @@ input[type=number].input-field::-webkit-outer-spin-button {
   flex: 1;
   min-width: 0;
 }
+/* Liste de boutons de suggestions (matrice multi-effets) */
+.cs-spell-suggest-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
 .cs-spell-suggest-btn {
   padding: 0.3rem 0.55rem;
   border-radius: 6px;
@@ -2704,6 +2712,7 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .modal:has(.cs-spell-forge) {
   max-width: 1080px;
   padding: 1.3rem 1.4rem;
+  padding-bottom: 0; /* la barre sticky gère le fond */
 }
 .modal:has(.cs-spell-forge) .modal-title {
   margin-bottom: 0.8rem;
@@ -2742,15 +2751,38 @@ input[type=number].input-field::-webkit-outer-spin-button {
   }
 }
 
-/* Bouton Enregistrer plus marqué */
+/* Barre sticky "Enregistrer le sort" — toujours visible en bas du modal */
+.cs-spell-save-bar {
+  position: sticky;
+  bottom: 0;
+  margin: 0.5rem -1.4rem 0;
+  padding: 0.75rem 1.4rem 1.3rem;
+  background: linear-gradient(to top, rgba(16,25,45,0.99) 55%, rgba(16,25,45,0));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(255,255,255,0.07);
+  z-index: 10;
+  display: flex;
+  align-items: stretch;
+}
+[data-theme="light"] .cs-spell-save-bar {
+  background: linear-gradient(to top, rgba(247,249,253,0.99) 55%, rgba(247,249,253,0));
+  border-top-color: rgba(0,0,0,0.07);
+}
+
+/* Bouton Enregistrer */
 .cs-spell-save {
-  margin-top: 0.6rem;
+  flex: 1;
   padding: 0.85rem 1rem !important;
-  font-size: 0.95rem !important;
+  font-size: 0.97rem !important;
   font-weight: 700 !important;
-  letter-spacing: 0.02em;
-  border-radius: 12px !important;
-  box-shadow: 0 4px 14px rgba(232,184,75,0.22);
+  letter-spacing: 0.04em;
+  border-radius: 11px !important;
+  box-shadow: 0 4px 20px rgba(79,140,255,0.32), 0 1px 4px rgba(0,0,0,0.3);
+  transition: box-shadow 0.2s, transform 0.15s !important;
+}
+.cs-spell-save:hover {
+  box-shadow: 0 6px 28px rgba(79,140,255,0.48), 0 2px 8px rgba(0,0,0,0.35) !important;
 }
 
 /* La preview sticky doit rester en haut au-dessus de la grille */
@@ -2796,6 +2828,71 @@ input[type=number].input-field::-webkit-outer-spin-button {
   font-size: 1.25rem !important;
   padding: 0 !important;
   line-height: 38px;
+}
+
+/* Bouton icône + popover picker */
+.cs-spell-identity-field { position: relative; }
+.cs-spell-icon-btn {
+  width: 100%;
+  height: 38px;
+  font-size: 1.35rem;
+  line-height: 1;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+.cs-spell-icon-btn:hover {
+  background: rgba(79,140,255,0.10);
+  border-color: rgba(79,140,255,0.32);
+  transform: translateY(-1px);
+}
+.cs-spell-icon-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1100;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 4px;
+  padding: 8px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-elevated, #1a1d2a);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.55);
+}
+.cs-spell-icon-opt {
+  width: 100%;
+  aspect-ratio: 1;
+  font-size: 1.15rem;
+  line-height: 1;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s, border-color .12s;
+}
+.cs-spell-icon-opt:hover {
+  background: rgba(79,140,255,0.18);
+  border-color: rgba(79,140,255,0.40);
+}
+.cs-spell-icon-opt.is-selected {
+  background: rgba(212,165,68,0.20);
+  border-color: rgba(212,165,68,0.55);
+}
+.cs-spell-icon-opt--clear {
+  font-size: 0.95rem;
+  color: var(--text-dim);
 }
 
 /* Section visuelle (Noyau, Runes) — card avec titre proéminent */
