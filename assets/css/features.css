@@ -739,6 +739,99 @@
   border:1px solid var(--border-md);
   font-size:.6rem; font-weight:600; color:var(--text-muted); pointer-events:none;
 }
+
+/* Badge "Haut-Fait secret" — MJ uniquement */
+.ach-secret-badge {
+  position:absolute; top:36px; right:10px; z-index:3;
+  padding:3px 9px; border-radius:999px;
+  background:rgba(180,127,255,0.18);
+  backdrop-filter:blur(8px);
+  border:1px solid rgba(180,127,255,0.45);
+  font-size:.58rem; font-weight:700; letter-spacing:.05em;
+  color:#cfa8ff; pointer-events:none;
+  text-transform:uppercase;
+}
+
+/* ── Barre extra : filtre par perso + tri timeline ────────────────────── */
+.ach-extra-bar {
+  display:flex; align-items:center; gap:.7rem;
+  flex-wrap:wrap;
+  margin-bottom:1rem;
+  padding:.55rem .7rem;
+  background:var(--bg-elevated);
+  border:1px solid var(--border);
+  border-radius:12px;
+}
+.ach-char-filter {
+  display:flex; gap:.4rem; flex-wrap:wrap; flex:1; min-width:0;
+}
+.ach-char-chip {
+  display:flex; align-items:center; gap:.4rem;
+  padding:.3rem .55rem .3rem .3rem;
+  border-radius:999px;
+  background:var(--bg-card);
+  border:1.5px solid var(--border);
+  color:var(--text-muted);
+  font-size:.72rem; font-weight:600;
+  cursor:pointer;
+  transition:all .15s;
+  --c:#7eb0ff;
+}
+.ach-char-chip:hover {
+  border-color:var(--c);
+  color:var(--text);
+}
+.ach-char-chip.active {
+  border-color:var(--c);
+  background:color-mix(in oklab, var(--c) 12%, var(--bg-card));
+  color:var(--c);
+  box-shadow:0 0 0 1px var(--c) inset;
+}
+.ach-char-chip-av {
+  width:22px; height:22px; border-radius:50%;
+  overflow:hidden;
+  background:color-mix(in oklab, var(--c) 18%, transparent);
+  display:flex; align-items:center; justify-content:center;
+  font-size:.7rem; color:var(--c);
+  flex-shrink:0;
+}
+.ach-char-chip-name {
+  max-width:9ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.ach-char-chip-count {
+  font-size:.62rem;
+  font-weight:700;
+  padding:1px 6px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.08);
+}
+.ach-char-chip.active .ach-char-chip-count {
+  background:color-mix(in oklab, var(--c) 22%, transparent);
+  color:var(--c);
+}
+/* Premier chip (Tous) — sans avatar */
+.ach-char-chip[data-charid="all"] {
+  --c:#cbd5e1;
+  padding:.3rem .7rem;
+}
+
+/* Bouton inversion sens timeline */
+.ach-sort-toggle {
+  padding:.35rem .8rem;
+  border-radius:8px;
+  background:var(--bg-card);
+  border:1.5px solid var(--border);
+  color:var(--text);
+  font-size:.74rem; font-weight:600;
+  cursor:pointer;
+  transition:all .15s;
+  white-space:nowrap;
+  flex-shrink:0;
+}
+.ach-sort-toggle:hover {
+  border-color:var(--gold, #e8b84b);
+  color:var(--gold, #e8b84b);
+}
 /* Meta overlay — apparaît au survol */
 .ach-meta {
   position:absolute; left:0; right:0; bottom:0; z-index:2;

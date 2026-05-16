@@ -1,11 +1,9 @@
 /* ════════════════════════════════════════════════════════════════════
-   print.css — Mode impression / export PDF
-   Activé via `body.print-character` + @media print.
-   Stratégie : on cache TOUT, sauf le contenu de #char-sheet-area,
-   qu'on repositionne en haut de page avec un thème lisible noir/blanc.
-════════════════════════════════════════════════════════════════════ */
+   print.css — Styles du menu Export uniquement
+   La feuille d'impression vit dans une fenêtre dédiée (export.js).
+═══════════════════════════════════════════════════════════════════ */
 
-/* ─── Menu Export (toujours visible, hors print) ─────────────────── */
+/* ─── Bouton 📤 dans le header de fiche ──────────────────────────── */
 .cs-export-btn {
   background: rgba(79,140,255,0.12);
   border: 1px solid rgba(79,140,255,0.28);
@@ -22,6 +20,7 @@
   transform: translateY(-1px);
 }
 
+/* ─── Menu déroulant (JSON / PDF) ────────────────────────────────── */
 .cs-export-menu {
   position: absolute;
   top: 100%;
@@ -43,7 +42,6 @@
   border-color: rgba(0,0,0,0.12);
   box-shadow: 0 12px 32px rgba(0,0,0,0.15);
 }
-
 .cs-export-opt {
   display: flex;
   align-items: center;
@@ -60,128 +58,10 @@
 }
 .cs-export-opt:hover { background: rgba(79,140,255,0.12); }
 .cs-export-opt-ico { font-size: 1.15rem; flex: 0 0 auto; }
-.cs-export-opt-txt {
-  display: flex; flex-direction: column; line-height: 1.25; min-width: 0;
-}
+.cs-export-opt-txt { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 .cs-export-opt-txt strong { font-size: 0.85rem; font-weight: 700; }
 .cs-export-opt-txt small {
   font-size: 0.7rem;
   color: var(--text-dim, rgba(255,255,255,0.55));
   font-weight: 400;
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   Règles d'impression
-════════════════════════════════════════════════════════════════════ */
-@media print {
-  @page { margin: 12mm; }
-
-  html, body {
-    background: #fff !important;
-    color: #000 !important;
-    font-size: 10pt !important;
-  }
-
-  body.print-character * {
-    visibility: hidden;
-  }
-  body.print-character #char-sheet-area,
-  body.print-character #char-sheet-area * {
-    visibility: visible;
-  }
-  body.print-character #char-sheet-area {
-    position: absolute !important;
-    left: 0;
-    top: 0;
-    width: 100%;
-    background: #fff !important;
-  }
-
-  /* Cacher les contrôles interactifs dans la fiche */
-  body.print-character .cs-delete-btn,
-  body.print-character .cs-export-btn,
-  body.print-character .cs-export-menu,
-  body.print-character .cs-photo-del,
-  body.print-character .cs-photo-edit-hint,
-  body.print-character .cs-add-titre,
-  body.print-character .cs-aura-picker,
-  body.print-character .cs-vbtn,
-  body.print-character .cs-vital-base-btn,
-  body.print-character .cs-xp-add-input,
-  body.print-character .cs-xp-delta-group,
-  body.print-character .cs-tabs,
-  body.print-character .cs-subtab-bar,
-  body.print-character .cs-spell-icon-btn,
-  body.print-character .cs-hint,
-  body.print-character [data-action] {
-    display: none !important;
-    visibility: hidden !important;
-  }
-
-  /* Layout : colonne unique, blocs encadrés */
-  body.print-character .cs-layout {
-    display: block !important;
-    background: #fff !important;
-  }
-  body.print-character .cs-sidebar,
-  body.print-character .cs-main-col {
-    width: 100% !important;
-    background: #fff !important;
-    box-shadow: none !important;
-    border: 1px solid #bbb !important;
-    border-radius: 4px !important;
-    padding: 10pt !important;
-    margin-bottom: 10pt !important;
-    color: #000 !important;
-  }
-
-  /* Texte / liens en noir */
-  body.print-character .cs-sidebar *,
-  body.print-character .cs-main-col * {
-    color: #000 !important;
-    text-shadow: none !important;
-  }
-
-  /* Barres PV / PM / XP — silhouette grise */
-  body.print-character .cs-bar-bg {
-    background: #eee !important;
-    border: 1px solid #888 !important;
-  }
-  body.print-character .cs-bar-fill,
-  body.print-character .cs-xp-fill {
-    background: #555 !important;
-  }
-
-  /* Badges / chips — bordure noire, fond blanc */
-  body.print-character .cs-stat-chip,
-  body.print-character .cs-id-chip,
-  body.print-character .badge,
-  body.print-character .cs-level-badge {
-    background: #fff !important;
-    border: 1px solid #888 !important;
-    color: #000 !important;
-  }
-
-  /* Photo : conserver mais en niveaux de gris pour économiser l'encre couleur */
-  body.print-character .cs-photo img {
-    filter: grayscale(0.4) contrast(1.05);
-  }
-
-  /* Éviter les coupures inopinées */
-  body.print-character .cs-vitals-row,
-  body.print-character .cs-stats-section,
-  body.print-character .cs-sort-row,
-  body.print-character .cs-inv-row,
-  body.print-character .cs-id-block {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
-  /* Cacher les modals/toast/notifs qui pourraient être ouverts */
-  body.print-character .modal-overlay,
-  body.print-character .notif-container,
-  body.print-character #notif-container,
-  body.print-character .toast {
-    display: none !important;
-  }
 }
