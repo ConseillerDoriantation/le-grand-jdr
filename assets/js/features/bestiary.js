@@ -179,6 +179,16 @@ function _bstQueueSave(id, patch) {
 // Auto-save générique (texte / select)
 window._bstUpdate = (id, field, val) => _bstQueueSave(id, { [field]: val });
 window._bstUpdateNum = (id, field, val) => _bstQueueSave(id, { [field]: parseInt(val) || 0 });
+window._bstToggleHidden = (id) => {
+  const c = _creatures.find(x => x.id === id);
+  if (!c) return;
+  const next = !c.hidden;
+  c.hidden = next;
+  _bstQueueSave(id, { hidden: next });
+  // Re-render panel + cartes pour refléter le badge
+  if (typeof _syncActivePanel === 'function') _syncActivePanel();
+  if (typeof _render === 'function') _render();
+};
 
 // Nom : sync visuel des cartes et du hero
 window._bstUpdateNom = (id, val) => {
@@ -557,7 +567,9 @@ async function renderBestiary() {
 
   // Charger les créatures du bestiaire actif
   const col = _bestiaireId === 'main' ? 'bestiary' : `bestiary_${_bestiaireId}`;
-  _creatures = await loadCollection(col);
+  const allCreatures = await loadCollection(col);
+  // Les créatures marquées hidden ne sont visibles que pour le MJ
+  _creatures = STATE.isAdmin ? allCreatures : allCreatures.filter(c => !c.hidden);
   _creatures.sort((a,b) => (a.nom||'').localeCompare(b.nom||''));
   window._bstCurrentCol = col;
 
@@ -741,6 +753,7 @@ function _renderCard(c) {
 
     <div class="bst-card-rang">${_esc(rs.label)}</div>
     ${c.niveau ? `<div class="bst-card-niveau">${c.niveau}</div>` : ''}
+    ${STATE.isAdmin && c.hidden ? `<div class="bst-card-hidden" title="Caché aux joueurs">🔒</div>` : ''}
 
     <div class="bst-card-body">
       <div class="bst-card-name">${_esc(c.nom||'?')}</div>
@@ -1015,6 +1028,12 @@ function _renderPanelAdmin(c, rs) {
               style="${active?`color:${rst.color};border-color:${rst.color};background:${rst.color}1a`:''}"
               onclick="window._bstSelectRangPanel('${c.id}','${r}')">${rst.label}</button>`;
           }).join('')}
+          <button type="button" class="bst-rang-btn bst-hidden-toggle${c.hidden?' active':''}"
+            onclick="window._bstToggleHidden('${c.id}')"
+            title="${c.hidden ? 'Visible : actuellement cachée aux joueurs — clic pour afficher' : 'Cacher cette créature aux joueurs (boss spoiler, contenu surprise)'}"
+            style="${c.hidden ? 'color:#b47fff;border-color:#b47fff;background:rgba(180,127,255,0.10)' : ''}">
+            ${c.hidden ? '🔒 Cachée' : '👁 Visible'}
+          </button>
         </div>
         <input class="bst-panel-name-input" value="${_esc(c.nom||'')}" placeholder="Nom de la créature…"
           oninput="window._bstUpdateNom('${c.id}', this.value)">
@@ -1245,6 +1264,15 @@ async function openBeastModal(id = null) {
               color:${active?rst.color:'var(--text-dim)'}">${rst.label}</button>`;
           }).join('')}
         </div>
+      </div>
+
+      <div class="form-group" style="grid-column:1/-1;display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:8px;background:rgba(180,127,255,0.08);border:1px solid rgba(180,127,255,0.18)">
+        <input type="checkbox" id="bst-hidden" ${c?.hidden ? 'checked' : ''}
+          style="width:18px;height:18px;cursor:pointer;accent-color:#b47fff">
+        <label for="bst-hidden" style="margin:0;cursor:pointer;display:flex;flex-direction:column;gap:2px;flex:1">
+          <span style="font-weight:600;font-size:.85rem;color:#b47fff">🔒 Caché aux joueurs</span>
+          <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">Réservé au MJ. Utile pour les boss spoiler, créatures non rencontrées ou contenu surprise.</span>
+        </label>
       </div>
     </div>
 
@@ -1553,6 +1581,7 @@ async function saveBeast(id = '') {
       tokenW:        Math.max(1, Math.min(5, parseInt(document.getElementById('bst-tokenW')?.value)||1)),
       tokenH:        Math.max(1, Math.min(5, parseInt(document.getElementById('bst-tokenH')?.value)||1)),
       rang:          document.getElementById('bst-rang-selector')?.dataset?.rang || 'classique',
+      hidden:        !!document.getElementById('bst-hidden')?.checked,
       imageUrl,
       description:   document.getElementById('bst-desc')?.value?.trim()   || '',
       // Stats

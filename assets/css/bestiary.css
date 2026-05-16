@@ -240,6 +240,22 @@
   color: var(--rang-c, var(--text));
   box-shadow: 0 0 10px var(--rang-glow, rgba(255,255,255,0.04));
 }
+/* Badge "Caché aux joueurs" — MJ uniquement */
+.bst-card-hidden {
+  position: absolute; top: 42px; right: 8px;
+  padding: 2px 8px; border-radius: var(--r-full);
+  background: rgba(180,127,255,0.20);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(180,127,255,0.50);
+  font-size: 0.62rem; font-weight: 700;
+  color: #cfa8ff; letter-spacing: 0.04em;
+  pointer-events: none;
+}
+[data-theme="light"] .bst-card-hidden {
+  background: rgba(124,58,237,0.12);
+  border-color: rgba(124,58,237,0.40);
+  color: #6d28d9;
+}
 .bst-card-body {
   padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1;
 }
@@ -516,6 +532,22 @@
   cursor: pointer; transition: all 0.15s;
 }
 .bst-rang-btn:hover { color: var(--text-soft); border-color: var(--border-strong); }
+/* Toggle "Caché aux joueurs" — séparé visuellement du rang */
+.bst-hidden-toggle {
+  margin-left: 8px;
+  border-left: 1px solid var(--border-md);
+  padding-left: 14px !important;
+}
+.bst-hidden-toggle.active {
+  color: #cfa8ff !important;
+  border-color: #b47fff !important;
+  background: rgba(180,127,255,0.10) !important;
+}
+[data-theme="light"] .bst-hidden-toggle.active {
+  color: #6d28d9 !important;
+  border-color: rgba(124,58,237,0.50) !important;
+  background: rgba(124,58,237,0.10) !important;
+}
 
 /* Inputs nom / type / environnement dans le hero */
 .bst-panel-name-input {
