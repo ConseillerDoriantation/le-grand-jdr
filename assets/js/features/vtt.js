@@ -7759,35 +7759,39 @@ function _musicSearchInput(placeholder) {
 
 // Filtre les éléments du panel à l'aide des classes existantes — pas de re-render
 // pour préserver le focus du champ et l'état des Sortable.
+// NB: on utilise style.display plutôt que l'attribut `hidden`, car les items
+// portent `display: flex` (classe), ce qui bat la règle UA `[hidden]{display:none}`
+// à spécificité égale.
 function _applyMusicFilter(query, tab) {
   const q = (query || '').trim().toLowerCase();
   const root = document.querySelector('.vtt-music-body'); if (!root) return;
   const match = el => (el?.textContent || '').toLowerCase().includes(q);
+  const show = (el, ok) => { if (el) el.style.display = ok ? '' : 'none'; };
 
   if (tab === 'sons') {
     root.querySelectorAll('.vtt-music-son-item').forEach(el => {
-      el.hidden = q && !match(el.querySelector('.vtt-music-son-name'));
+      show(el, !q || match(el.querySelector('.vtt-music-son-name')));
     });
     return;
   }
   // Playlists : pool + playlists (avec filtrage des sons internes)
   root.querySelectorAll('.vtt-music-pool-item').forEach(el => {
-    el.hidden = q && !match(el.querySelector('.vtt-music-pool-name'));
+    show(el, !q || match(el.querySelector('.vtt-music-pool-name')));
   });
   root.querySelectorAll('.vtt-music-pl-item').forEach(pl => {
     const plMatch = !q || match(pl.querySelector('.vtt-music-pl-name'));
     const sounds = pl.querySelectorAll('.vtt-music-pl-sound');
     if (plMatch) {
-      pl.hidden = false;
-      sounds.forEach(s => { s.hidden = false; });
+      show(pl, true);
+      sounds.forEach(s => show(s, true));
       return;
     }
     let anyMatch = false;
     sounds.forEach(s => {
       const ok = match(s.querySelector('.vtt-music-pl-sname'));
-      s.hidden = !ok; if (ok) anyMatch = true;
+      show(s, ok); if (ok) anyMatch = true;
     });
-    pl.hidden = !anyMatch;
+    show(pl, anyMatch);
   });
 }
 
