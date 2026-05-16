@@ -898,7 +898,7 @@ function _buildShape(t) {
   const hpKnown = ld.displayHp !== null && ld.displayHpMax !== null;
   const hp  = hpKnown ? ld.displayHp  : 0;
   const hpm = hpKnown ? ld.displayHpMax : 1;
-  const rat = hpKnown ? (hpm>0 ? Math.max(0,hp/hpm) : 1) : 0.5;
+  const rat = hpKnown ? (hpm>0 ? Math.min(1, Math.max(0,hp/hpm)) : 1) : 0.5;
   const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
   g.setAttr('tokenW', sw);
   g.setAttr('tokenH', sh);
@@ -919,7 +919,7 @@ function _buildShape(t) {
   const _pm0=ld.displayPm;
   let _lblY=r+BH+8;
   if (_pm0!=null) {
-    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1;
+    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.min(1,Math.max(0,_pm0/pmMax0)):1;
     const PMH=8;
     g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, fill:'#0d1117', cornerRadius:4, listening:false }));
     g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:Math.max(2,bW*pmRat0), height:PMH, fill:'#9b6dff', cornerRadius:4, listening:false, name:'pm-fill' }));
@@ -1099,6 +1099,17 @@ function _buildShape(t) {
   const handleTokenAction = (e, opts = {}) => {
     e.cancelBubble = true;
     if (_tool === 'ruler' || _tool === 'draw') return; // outils de dessin ignorent les tokens
+    // Si le token du joueur est masqué sous un autre token, prioriser son propre token
+    // lors d'une sélection simple (sauf attaque/zone/cible multi/shift).
+    if (!STATE.isAdmin && !_attackSrc && !_zoneCtx && !_mtCtx && !e.evt.shiftKey
+        && t.ownerId !== STATE.user?.uid) {
+      const ownId = _findOwnTokenAtPointer();
+      if (ownId && ownId !== t.id) {
+        _clearMultiSelect();
+        _select(ownId);
+        return;
+      }
+    }
     if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
       // Shift+clic : ajouter / retirer du groupe multi-sélection
       _toggleMultiSelect(t.id); return;
@@ -1172,14 +1183,14 @@ function _patchShape(id) {
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.12 });
   const hpKnownU = ld.displayHp !== null && ld.displayHpMax !== null;
   const hp=hpKnownU?ld.displayHp:0, hpm=hpKnownU?ld.displayHpMax:1;
-  const rat=hpKnownU?(hpm>0?Math.max(0,hp/hpm):1):0.5, bW=CELL*sw*0.9;
+  const rat=hpKnownU?(hpm>0?Math.min(1,Math.max(0,hp/hpm)):1):0.5, bW=CELL*sw*0.9;
   const fill=g.findOne('.hp-fill');
   if (fill){fill.width(bW*rat);fill.fill(hpKnownU?hpColor(rat):'#555');}
   g.findOne('.hp-val')?.text(hpKnownU?`${hp}/${hpm}`:'?/?');
   // PM
   const _pm=ld.displayPm;
   if (_pm!=null) {
-    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.max(0,_pm/pmMax):1;
+    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.min(1,Math.max(0,_pm/pmMax)):1;
     g.findOne('.pm-fill')?.width(bW*pmRat);
     g.findOne('.pm-val')?.text(`✨${_pm}/${pmMax}`);
   }
@@ -1713,6 +1724,21 @@ const _tokenDims = t => {
   const h = t?.tokenH ?? t?.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1;
   return { w: Math.max(1, Math.min(5, w)), h: Math.max(1, Math.min(5, h)) };
 };
+
+// Cherche un token possédé par le joueur courant couvrant la position du pointeur.
+// Sert à débloquer la sélection quand le token du joueur est masqué sous un autre.
+function _findOwnTokenAtPointer() {
+  const uid = STATE.user?.uid; if (!uid || !_stage) return null;
+  const pos = _stage.getPointerPosition(); if (!pos) return null;
+  const w = _stageToWorld(pos);
+  const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
+  for (const [id, entry] of Object.entries(_tokens)) {
+    const d = entry?.data; if (!d || d.ownerId !== uid) continue;
+    const dim = _tokenDims(d);
+    if (cx >= d.col && cx < d.col + dim.w && cy >= d.row && cy < d.row + dim.h) return id;
+  }
+  return null;
+}
 // Distance d'attaque entre bounding boxes WxH (0 = adjacent / chevauchement de côté).
 // portee === 1 (mêlée) → Chebyshev (8 directions, inclut diagonales).
 // portee > 1 ou non précisé → Manhattan (losange, 4 directions).
