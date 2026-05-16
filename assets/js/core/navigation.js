@@ -29,6 +29,7 @@ const FEATURE_MAP = {
   histoire:     () => import('../features/histoire.js'),
   vtt:          () => import('../features/vtt.js'),
   quests:       () => import('../features/quests.js'),
+  agenda:       () => import('../features/agenda.js'),
 };
 
 // Garde les modules déjà chargés pour ne pas re-importer

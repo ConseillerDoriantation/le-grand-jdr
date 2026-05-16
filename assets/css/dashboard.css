@@ -392,6 +392,56 @@
   font-weight: 600;
 }
 
+/* Variante : prochaine séance validée — accent doré */
+.dv2-party-footer--session .dv2-party-session-label {
+  color: var(--gold, #e8b84b);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.dv2-party-session-chip--validated {
+  background: linear-gradient(135deg, rgba(232,184,75,0.16), rgba(232,184,75,0.06)) !important;
+  border-color: rgba(232,184,75,0.45) !important;
+  display: flex !important;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px !important;
+  position: relative;
+}
+.dv2-party-session-chip--validated::before {
+  content: '🎲';
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  font-size: 1rem;
+  opacity: 0.85;
+}
+.dv2-pss-date {
+  font-family: 'Cinzel', serif;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: capitalize;
+  padding-right: 22px; /* place pour le 🎲 */
+}
+.dv2-pss-slot {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--gold, #e8b84b);
+}
+.dv2-pss-quest {
+  font-size: 0.64rem;
+  color: var(--text-dim);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+[data-theme="light"] .dv2-party-footer--session .dv2-party-session-label { color: #a16207; }
+[data-theme="light"] .dv2-party-session-chip--validated {
+  background: linear-gradient(135deg, rgba(234,179,8,0.12), rgba(234,179,8,0.04)) !important;
+  border-color: rgba(234,179,8,0.40) !important;
+}
+[data-theme="light"] .dv2-pss-slot { color: #a16207; }
+
 /* ── Mission active ────────────────────────────── */
 .dv2-mission-card {
   position: relative;

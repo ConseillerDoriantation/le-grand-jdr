@@ -32,6 +32,7 @@ import {
 import { showApp, showAuth, showAdventurePicker } from "./layout.js";
 import { navigate } from "./navigation.js";
 import { loadUserAdventures, selectAdventure, runMigration } from "./adventure.js";
+import { unwatchAll } from "../shared/realtime.js";
 
 // Exposer pickAdventure tôt (avant lazy-load de aventures.js)
 // pour que le picker HTML puisse l'appeler
@@ -71,6 +72,9 @@ window.STATE = STATE;
 // ── Auth state ─────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
+    // Stoppe tous les abonnements Firestore avant de perdre l'auth
+    // (sinon les listeners tirent avec auth=null → "Accès refusé")
+    unwatchAll();
     setUser(null);
     setProfile(null);
     setAdmin(false);

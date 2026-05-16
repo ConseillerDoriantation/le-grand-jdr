@@ -93,7 +93,7 @@ let _chars = null;
 // ── Rendu depuis les données (sans rechargement Firestore) ────────────────
 function _applyQuestsRender(quests) {
   const content = document.getElementById('main-content');
-  if (!content || content.querySelector('.spinner')) return; // chargement en cours
+  if (!content) return;
 
   const uid     = STATE.user?.uid;
   const myChars = STATE.isAdmin ? [] : (_chars || []).filter(c => c.uid === uid);
