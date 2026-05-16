@@ -197,6 +197,14 @@ service cloud.firestore {
         allow read, write: if inAdventure(adventureId);
       }
 
+      // Présence app-wide : heartbeat depuis le client (1 doc par joueur, id = uid).
+      // Lecture : tous les membres (pour permettre au MJ d'afficher qui est connecté).
+      // Écriture : chacun écrit/supprime uniquement sa propre entrée.
+      match /presence/{uid} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if inAdventure(adventureId) && uid == request.auth.uid;
+      }
+
       // Réactions émotes : 1 doc par joueur (setDoc écrase)
       // isAdvAdmin inclus car l'admin peut ne pas être dans accessList
       match /vttEmoteReactions/{id} {

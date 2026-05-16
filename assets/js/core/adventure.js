@@ -20,6 +20,7 @@ import {
 } from './state.js';
 
 import { setCurrentAdventure } from '../data/firestore.js';
+import { startPresence } from '../shared/presence.js';
 
 // ── Charger les aventures accessibles ──────────
 export async function loadUserAdventures(uid) {
@@ -43,6 +44,9 @@ export function selectAdventure(adv) {
   const uid = STATE.user?.uid;
   const isAdvAdmin = Array.isArray(adv.admins) && adv.admins.includes(uid);
   setAdmin(STATE.isSuperAdmin || isAdvAdmin);
+
+  // Heartbeat de présence pour cette aventure
+  if (uid) startPresence(adv.id, uid);
 }
 
 // ── Créer une aventure ──────────────────────────
