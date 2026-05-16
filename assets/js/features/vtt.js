@@ -87,8 +87,7 @@ let _sounds        = [];     // [{id, name, url, createdAt}]
 let _playlists     = [];     // [{id, name, color, soundIds[]}]
 let _musicState    = {};     // état Firestore courant
 let _audioEl       = null;   // HTMLAudioElement actif
-let _musicTab      = 'sons'; // 'sons' | 'playlists'
-let _musicSearch   = { sons: '', playlists: '' }; // filtre par onglet, persisté en session
+let _musicSearch   = ''; // filtre texte unique (vue unifiée), persisté en session
 let _musicCloseOut = null;
 let _musicProgTimer = null;
 let _musicSortables = [];   // instances Sortable actives
@@ -7645,6 +7644,35 @@ function _setUserVolume(v) {
   return clamped;
 }
 
+// État replié/déplié des catégories — persisté localement (par utilisateur)
+const _CAT_COLLAPSE_KEY = 'vtt:musicCollapsed';
+function _loadCollapseMap() {
+  try { return JSON.parse(localStorage.getItem(_CAT_COLLAPSE_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+function _isCatCollapsed(catId) { return !!_loadCollapseMap()[catId]; }
+function _setCatCollapsed(catId, collapsed) {
+  const map = _loadCollapseMap();
+  if (collapsed) map[catId] = true; else delete map[catId];
+  try { localStorage.setItem(_CAT_COLLAPSE_KEY, JSON.stringify(map)); } catch {}
+}
+window._vttToggleMusicCat = (catId) => {
+  const cat = document.querySelector(`.vtt-music-cat[data-cat-id="${CSS.escape(catId)}"]`);
+  if (!cat) return;
+  const collapsed = cat.dataset.collapsed === '1';
+  cat.dataset.collapsed = collapsed ? '0' : '1';
+  _setCatCollapsed(catId, !collapsed);
+};
+window._vttToggleAllMusicCats = () => {
+  const cats = document.querySelectorAll('.vtt-music-body .vtt-music-cat');
+  if (!cats.length) return;
+  const collapseAll = [...cats].some(c => c.dataset.collapsed !== '1');
+  cats.forEach(c => {
+    c.dataset.collapsed = collapseAll ? '1' : '0';
+    _setCatCollapsed(c.dataset.catId, collapseAll);
+  });
+};
+
 window._vttPreview = (soundId, btn) => {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
   // Même son → stop
@@ -7673,8 +7701,6 @@ window._vttToggleMusic = () => {
   document.addEventListener('mousedown', _musicCloseOut, true);
 };
 
-window._vttMusicTab = t => { _musicTab=t; _renderMusicPanel(); };
-
 // ── Rendu du panel ──────────────────────────────────────────────────
 function _renderMusicPanel() {
   const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
@@ -7697,23 +7723,19 @@ function _renderMusicPanel() {
         <span>🎵 Sons &amp; Musique</span>
         <button class="vtt-ms-close" onclick="window._vttToggleMusic()">✕</button>
       </div>
-      <div class="vtt-music-tabs">
-        <button class="vtt-music-tab${_musicTab==='sons'?' active':''}" onclick="window._vttMusicTab('sons')">Sons</button>
-        <button class="vtt-music-tab${_musicTab==='playlists'?' active':''}" onclick="window._vttMusicTab('playlists')">Playlists</button>
-      </div>
-      <div class="vtt-music-body">${_musicTab==='sons' ? _renderSonsTab(mj) : _renderPlaylistsTab(mj)}</div>
+      <div class="vtt-music-body">${_renderMusicList(mj)}</div>
       ${_renderNowPlaying(curSound, ms)}`;
   }
 
-  // Bind champ de recherche — état persisté par onglet
+  // Bind champ de recherche — filtre unique persisté en session
   const sf = panel.querySelector('#vtt-music-search');
   if (sf) {
-    sf.value = _musicSearch[_musicTab] || '';
+    sf.value = _musicSearch || '';
     sf.oninput = e => {
-      _musicSearch[_musicTab] = e.target.value;
-      _applyMusicFilter(e.target.value, _musicTab);
+      _musicSearch = e.target.value;
+      _applyMusicFilter(e.target.value);
     };
-    if (sf.value) _applyMusicFilter(sf.value, _musicTab);
+    _applyMusicFilter(sf.value);
   }
   // Bind volume slider local — préférence par utilisateur (localStorage)
   const vsl = panel.querySelector('#vtt-music-vol');
@@ -7730,8 +7752,8 @@ function _renderMusicPanel() {
   if (_audioEl && !_audioEl.paused) {
     _musicProgTimer = setInterval(_updateMusicProg, 500);
   }
-  // Sortables (MJ + onglet playlists uniquement)
-  if (mj && _musicTab === 'playlists') _initMusicSortable();
+  // Sortables (MJ uniquement — vue unifiée)
+  if (mj) _initMusicSortable();
 }
 
 function _updateMusicProg() {
@@ -7750,125 +7772,138 @@ function _fmtTime(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-function _musicSearchInput(placeholder) {
-  return `<div class="vtt-music-search-row">
-    <input type="search" id="vtt-music-search" class="vtt-music-search"
-      placeholder="${placeholder}" autocomplete="off">
-  </div>`;
-}
-
-// Filtre les éléments du panel à l'aide des classes existantes — pas de re-render
-// pour préserver le focus du champ et l'état des Sortable.
-// NB: on utilise style.display plutôt que l'attribut `hidden`, car les items
-// portent `display: flex` (classe), ce qui bat la règle UA `[hidden]{display:none}`
-// à spécificité égale.
-function _applyMusicFilter(query, tab) {
+// Filtre la vue unifiée par texte : masque les catégories sans match,
+// auto-déplie les catégories qui en ont un. Préserve l'état persisté quand
+// le champ est vidé. NB: on utilise style.display car les items portent
+// `display: flex` (classe) qui bat la règle UA `[hidden]{display:none}`.
+function _applyMusicFilter(query) {
   const q = (query || '').trim().toLowerCase();
   const root = document.querySelector('.vtt-music-body'); if (!root) return;
-  const match = el => (el?.textContent || '').toLowerCase().includes(q);
+  const text = el => (el?.textContent || '').toLowerCase();
   const show = (el, ok) => { if (el) el.style.display = ok ? '' : 'none'; };
 
-  if (tab === 'sons') {
-    root.querySelectorAll('.vtt-music-son-item').forEach(el => {
-      show(el, !q || match(el.querySelector('.vtt-music-son-name')));
+  root.querySelectorAll('.vtt-music-cat').forEach(cat => {
+    const catId = cat.dataset.catId;
+    const catNameEl = cat.querySelector('.vtt-music-cat-name');
+    const catMatch = !q || text(catNameEl).includes(q);
+    const sons = cat.querySelectorAll('[data-sound-id]');
+    let anySonMatch = false;
+    sons.forEach(s => {
+      const nameEl = s.querySelector('.vtt-music-pool-name, .vtt-music-pl-sname');
+      const ok = !q || catMatch || text(nameEl).includes(q);
+      show(s, ok);
+      if (ok && q) anySonMatch = true;
     });
-    return;
-  }
-  // Playlists : pool + playlists (avec filtrage des sons internes)
-  root.querySelectorAll('.vtt-music-pool-item').forEach(el => {
-    show(el, !q || match(el.querySelector('.vtt-music-pool-name')));
-  });
-  root.querySelectorAll('.vtt-music-pl-item').forEach(pl => {
-    const plMatch = !q || match(pl.querySelector('.vtt-music-pl-name'));
-    const sounds = pl.querySelectorAll('.vtt-music-pl-sound');
-    if (plMatch) {
-      show(pl, true);
-      sounds.forEach(s => show(s, true));
-      return;
-    }
-    let anyMatch = false;
-    sounds.forEach(s => {
-      const ok = match(s.querySelector('.vtt-music-pl-sname'));
-      show(s, ok); if (ok) anyMatch = true;
-    });
-    show(pl, anyMatch);
-  });
-}
-
-function _renderSonsTab(mj) {
-  let h = _musicSearchInput('🔍 Rechercher un son…');
-  if (mj) h += `
-    <div class="vtt-music-son-actions-row">
-      <button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()" style="flex:1">＋ URL</button>
-      <button class="vtt-music-upload-btn" onclick="window._vttImportGithubRelease()" style="flex:2">📥 Importer depuis GitHub</button>
-    </div>`;
-  if (!_sounds.length) return h + `<div class="vtt-music-empty">Aucun son — ajoutez une URL ou importez depuis GitHub</div>`;
-  return h + `<div class="vtt-music-list">${_sounds.map(s => {
-    const active = _musicState.playing && _musicState.currentSoundId===s.id && !_musicState.currentPlaylistId;
-    return `<div class="vtt-music-son-item${active?' is-playing':''}">
-      <span class="vtt-music-son-name" title="${_esc(s.name)}">${_esc(s.name)}</span>
-      <div class="vtt-music-son-acts">
-        <button class="vtt-mact${active&&!_musicState.loop?' on':''}" onclick="window._vttPlaySound('${s.id}',false)" title="Lire">${active&&!_musicState.paused&&!_musicState.loop?'⏸':'▶'}</button>
-        <button class="vtt-mact${active&&_musicState.loop?' on':''}" onclick="window._vttPlaySound('${s.id}',true)" title="Boucle">🔁</button>
-        ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeleteSound('${s.id}')" title="Supprimer">🗑</button>`:''}
-      </div>
-    </div>`;
-  }).join('')}</div>`;
-}
-
-function _renderPlaylistsTab(mj) {
-  let h = _musicSearchInput('🔍 Rechercher une playlist ou un son…');
-  if (mj) h += `<button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()">＋ Nouvelle playlist</button>`;
-
-  // Pool — sons non encore placés dans une playlist
-  if (mj) {
-    const usedIds = new Set(_playlists.flatMap(pl => pl.soundIds || []));
-    const poolSounds = _sounds.filter(s => !usedIds.has(s.id));
-    if (poolSounds.length) {
-      h += `<div class="vtt-music-pool-hd">📦 Non classés (${poolSounds.length})</div>
-      <div class="vtt-music-pool" id="vtt-music-pool">
-        ${poolSounds.map(s=>`<div class="vtt-music-pool-item" data-sound-id="${s.id}" title="${_esc(s.name)}" oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}')">
-          <span class="vtt-music-pool-grip">⠿</span>
-          <span class="vtt-music-pool-name">${_esc(s.name)}</span>
-          <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu">🎧</button>
-        </div>`).join('')}
-      </div>`;
-    } else if (_sounds.length) {
-      h += `<div class="vtt-music-pool-hd">📦 Non classés</div>
-      <div class="vtt-music-empty" style="padding:.3rem .5rem">Tous les sons sont classés ✓</div>`;
+    if (q) {
+      const visible = catMatch || anySonMatch;
+      show(cat, visible);
+      // Force déplie pendant une recherche (sans toucher au localStorage)
+      if (visible) cat.dataset.collapsed = '0';
     } else {
-      h += `<div class="vtt-music-empty">Aucun son — ajoutez-en dans l'onglet Sons</div>`;
+      show(cat, true);
+      cat.dataset.collapsed = _isCatCollapsed(catId) ? '1' : '0';
     }
+  });
+}
+
+// Rendu unifié : pool "Non classés" + playlists, tous pliables.
+function _renderMusicList(mj) {
+  let h = `<div class="vtt-music-search-row">
+    <input type="search" id="vtt-music-search" class="vtt-music-search"
+      placeholder="🔍 Rechercher un son ou une catégorie…" autocomplete="off">
+    <button class="vtt-music-collapse-all" onclick="window._vttToggleAllMusicCats()" title="Tout replier / déplier">⇕</button>
+  </div>`;
+
+  if (mj) {
+    h += `<div class="vtt-music-son-actions-row">
+      <button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()" style="flex:1" title="Ajouter un son via URL">＋ URL</button>
+      <button class="vtt-music-upload-btn" onclick="window._vttImportGithubRelease()" style="flex:1.4" title="Importer depuis une release GitHub">📥 GitHub</button>
+      <button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()" style="flex:1.2" title="Créer une nouvelle catégorie/playlist">＋ Catégorie</button>
+    </div>`;
   }
 
-  if (!_playlists.length) return h + `<div class="vtt-music-empty" style="margin-top:.4rem">Aucune playlist</div>`;
+  if (!_sounds.length && !_playlists.length) {
+    return h + `<div class="vtt-music-empty">Aucun son — ajoutez une URL ou importez depuis GitHub</div>`;
+  }
 
-  h += _playlists.map(pl => {
-    const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
-    const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
-    return `<div class="vtt-music-pl-item${active?' is-playing':''}">
-      <div class="vtt-music-pl-hd">
-        <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
-        <span class="vtt-music-pl-name">${_esc(pl.name)}</span>
-        <span class="vtt-music-pl-cnt">${sounds.length}</span>
-        <div class="vtt-music-son-acts">
-          <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',false)" title="Lire en ordre">▶</button>
-          <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',true)" title="Aléatoire">🔀</button>
-          ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeletePlaylist('${pl.id}')" title="Supprimer">🗑</button>`:''}
+  // "Non classés" : sons absents de toute playlist
+  const usedIds = new Set(_playlists.flatMap(pl => pl.soundIds || []));
+  const poolSounds = _sounds.filter(s => !usedIds.has(s.id));
+  if (poolSounds.length) {
+    const collapsed = _isCatCollapsed('pool');
+    h += `<div class="vtt-music-cat" data-cat-id="pool" data-collapsed="${collapsed?1:0}">
+      <div class="vtt-music-cat-hd" onclick="window._vttToggleMusicCat('pool')">
+        <span class="vtt-music-cat-chevron"></span>
+        <span class="vtt-music-cat-name">📦 Non classés</span>
+        <span class="vtt-music-pl-cnt">${poolSounds.length}</span>
+      </div>
+      <div class="vtt-music-cat-body">
+        <div class="vtt-music-pool" id="vtt-music-pool">
+          ${poolSounds.map(s => _renderSonRow(s, null, mj)).join('')}
         </div>
       </div>
-      <div class="vtt-music-pl-sounds vtt-pl-drop" id="vtt-pl-drop-${pl.id}" data-pl-id="${pl.id}">
-        ${sounds.map(s=>`<div class="vtt-music-pl-sound" data-sound-id="${s.id}" ${mj?`oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}','${pl.id}')"`:''}">
-          ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
-          <span class="vtt-music-pl-sname">${_esc(s.name)}</span>
-          <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu">🎧</button>
-          ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttRemoveSoundFromPlaylist('${pl.id}','${s.id}')" title="Retirer">✕</button>`:''}
-        </div>`).join('')}
-        ${!sounds.length?`<div class="vtt-music-pl-empty-drop">Glisser des sons ici</div>`:''}
-      </div>
     </div>`;
-  }).join('');
+  }
+
+  if (_playlists.length) {
+    h += _playlists.map(pl => {
+      const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
+      const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
+      const collapsed = _isCatCollapsed(pl.id);
+      return `<div class="vtt-music-cat vtt-music-pl-item${active?' is-playing':''}" data-cat-id="${pl.id}" data-collapsed="${collapsed?1:0}">
+        <div class="vtt-music-cat-hd vtt-music-pl-hd" onclick="window._vttToggleMusicCat('${pl.id}')">
+          <span class="vtt-music-cat-chevron"></span>
+          <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
+          <span class="vtt-music-pl-name vtt-music-cat-name">${_esc(pl.name)}</span>
+          <span class="vtt-music-pl-cnt">${sounds.length}</span>
+          <div class="vtt-music-son-acts" onclick="event.stopPropagation()">
+            <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',false)" title="Lire en ordre">▶</button>
+            <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',true)" title="Aléatoire">🔀</button>
+            ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeletePlaylist('${pl.id}')" title="Supprimer">🗑</button>`:''}
+          </div>
+        </div>
+        <div class="vtt-music-cat-body">
+          <div class="vtt-music-pl-sounds vtt-pl-drop" id="vtt-pl-drop-${pl.id}" data-pl-id="${pl.id}">
+            ${sounds.map(s => _renderSonRow(s, pl.id, mj)).join('')}
+            ${!sounds.length?`<div class="vtt-music-pl-empty-drop">Glisser des sons ici</div>`:''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
   return h;
+}
+
+// Ligne d'un son (utilisée dans pool et dans chaque playlist)
+// plId=null → son dans le pool "Non classés"
+function _renderSonRow(s, plId, mj) {
+  const ms = _musicState;
+  const isPool = !plId;
+  const isCurrent = ms.playing && ms.currentSoundId === s.id;
+  const inSingleMode = isCurrent && !ms.currentPlaylistId;
+  const inThisPlaylist = isCurrent && ms.currentPlaylistId === plId;
+  const rowActive = inSingleMode || inThisPlaylist;
+  const playOn = inSingleMode && !ms.loop;
+  const loopOn = inSingleMode && !!ms.loop;
+  const rowClass = isPool ? 'vtt-music-pool-item' : 'vtt-music-pl-sound';
+  const nameClass = isPool ? 'vtt-music-pool-name' : 'vtt-music-pl-sname';
+  const ctx = mj
+    ? `oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}'${isPool?'':`,'${plId}'`})"`
+    : '';
+  const delBtn = mj
+    ? (isPool
+        ? `<button class="vtt-mact vtt-mact-del" onclick="event.stopPropagation();window._vttDeleteSound('${s.id}')" title="Supprimer définitivement">🗑</button>`
+        : `<button class="vtt-mact vtt-mact-del" onclick="event.stopPropagation();window._vttRemoveSoundFromPlaylist('${plId}','${s.id}')" title="Retirer de la catégorie">✕</button>`)
+    : '';
+  return `<div class="${rowClass}${rowActive?' is-playing':''}" data-sound-id="${s.id}" title="${_esc(s.name)}" ${ctx}>
+    ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
+    <span class="${nameClass}">${_esc(s.name)}</span>
+    <button class="vtt-mact${playOn?' on':''}" onclick="event.stopPropagation();window._vttPlaySound('${s.id}',false)" title="Lire">${playOn && !ms.paused?'⏸':'▶'}</button>
+    <button class="vtt-mact${loopOn?' on':''}" onclick="event.stopPropagation();window._vttPlaySound('${s.id}',true)" title="Boucle">🔁</button>
+    <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu local (MJ)">🎧</button>
+    ${delBtn}
+  </div>`;
 }
 
 // ── Initialisation Sortable ────────────────────────────────────────
@@ -7882,6 +7917,8 @@ function _initMusicSortable() {
       sort: false,
       animation: 120,
       ghostClass: 'vtt-sort-ghost',
+      filter: '.vtt-mact',
+      handle: '.vtt-music-pool-grip,.vtt-music-pool-name',
     }));
   }
 
@@ -7892,6 +7929,7 @@ function _initMusicSortable() {
       animation: 120,
       ghostClass: 'vtt-sort-ghost',
       filter: '.vtt-music-pl-empty-drop,.vtt-mact',
+      handle: '.vtt-music-pool-grip,.vtt-music-pl-sname',
       onAdd: async evt => {
         const soundId = evt.item.dataset.soundId;
         evt.item.remove(); // Sortable a cloné → on supprime, Firestore va re-render
