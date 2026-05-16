@@ -70,6 +70,10 @@ import {
   addQuete, saveQuete, deleteCharPhoto,
 } from './characters/forms.js';
 
+import {
+  exportCharJSON, exportCharPDF, openCharExportMenu,
+} from './characters/export.js';
+
 // ══════════════════════════════════════════════
 // SÉLECTION
 // ══════════════════════════════════════════════
@@ -228,6 +232,7 @@ function renderCharSheet(c, keepTab) {
           ${canEdit
             ? `<span class="cs-name cs-editable" onclick="inlineEditText('${c.id}','nom',this)" title="Modifier">${c.nom||'Nouveau personnage'}</span>`
             : `<span class="cs-name">${c.nom||'Nouveau personnage'}</span>`}
+          ${canEdit?`<button class="cs-export-btn" onclick="openCharExportMenu('${c.id}',this)" title="Exporter la fiche (JSON ou PDF)">📤</button>`:''}
           ${canEdit?`<button class="cs-delete-btn" onclick="deleteChar('${c.id}')" title="Supprimer ce personnage">🗑️</button>`:''}
         </div>
         ${titres.length||canEdit?`<div class="cs-titres">
@@ -561,4 +566,7 @@ Object.assign(window, {
   deleteChar, createNewChar,
   manageTitres, addTitre, removeTitre, saveTitres,
   addQuete, saveQuete, deleteCharPhoto,
+
+  // Export fiche
+  exportCharJSON, exportCharPDF, openCharExportMenu,
 });

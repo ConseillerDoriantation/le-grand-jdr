@@ -175,6 +175,13 @@ let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
 
+// ── Timer de session ────────────────────────────────────────────────
+// Stocké dans _session.timer = { startedAt:ms, accumulated:ms, running:bool, label:string }
+let _timerTick = null; // intervalId pour rafraîchir l'affichage
+
+// ── Combat tracker (overlay haut-gauche sur le canvas) ──────────────
+let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
+
 // ── Refs Firestore ──────────────────────────────────────────────────
 const _aid     = ()   => getCurrentAdventureId();
 const _sesRef  = ()   => doc(db,  `adventures/${_aid()}/vtt/session`);
@@ -488,6 +495,7 @@ function _cleanup() {
     if (_uid) { try { deleteDoc(_pingRef(_uid)).catch(()=>{}); } catch(e){} }
   }
   if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
+  _timerStopTick();
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
   if (_mapLibUnsub) { _mapLibUnsub(); _mapLibUnsub = null; }
   _mapLib = { folders: [], images: [] }; _libFolder = null;
@@ -4224,6 +4232,27 @@ function _renderTray() {
   const reserve  = all.filter(t => !t.pageId && t.type !== 'enemy');
   const inCombat = !!_session?.combat?.active;
 
+  // Tokens placés sur d'autres pages (perso/PNJ seulement, déduplication par entité,
+  // et on cache les persos déjà présents sur la page active).
+  const entityOnCurrent = new Set();
+  for (const t of onPage) {
+    if (t.characterId) entityOnCurrent.add('c:' + t.characterId);
+    if (t.npcId)       entityOnCurrent.add('n:' + t.npcId);
+  }
+  const elsewhereRaw = all.filter(t =>
+    t.pageId && t.pageId !== _activePage?.id
+    && t.type !== 'enemy'
+    && (t.characterId || t.npcId)
+    && !entityOnCurrent.has((t.characterId ? 'c:' + t.characterId : 'n:' + t.npcId))
+  );
+  const elsewhereSeen = new Set();
+  const elsewhere = elsewhereRaw.filter(t => {
+    const k = t.characterId ? 'c:' + t.characterId : 'n:' + t.npcId;
+    if (elsewhereSeen.has(k)) return false;
+    elsewhereSeen.add(k);
+    return true;
+  });
+
   // Filtre par type
   const applyFilter = arr => _trayFilter === 'all' ? arr : arr.filter(t => t.type === _trayFilter);
 
@@ -4315,6 +4344,36 @@ function _renderTray() {
             + mkGrp('👹', 'Ennemis', pageEnemies);
   }
 
+  // ── Sur d'autres pages — chips avec "+" pour dupliquer ici ───────
+  const filteredElsewhere = applyFilter(elsewhere);
+  let elsewhereSec = '';
+  if (filteredElsewhere.length) {
+    const mkElsewhereChip = t => {
+      const ld = _live(t);
+      const typeIcon = t.type === 'player' ? '🧑' : '👤';
+      const col = TYPE_COLOR[t.type] ?? '#888';
+      const pageName = _pages[t.pageId]?.name || '?';
+      return `<button class="vtt-res-chip vtt-res-chip--elsewhere" onclick="window._vttDuplicateOnPage('${t.id}')"
+          title="${_esc(ld.displayName ?? t.name)} — sur « ${_esc(pageName)} ». Clic = placer aussi ici (HP partagés).">
+        <div class="vtt-res-chip-dot" style="border-color:${col};color:${col}">
+          ${ld.displayImage
+            ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
+            : `<span>${typeIcon}</span>`}
+          <span class="vtt-res-chip-plus">+</span>
+        </div>
+        <span class="vtt-res-chip-name">${_esc(ld.displayName ?? t.name)}</span>
+        <span class="vtt-res-chip-sub">${_esc(pageName)}</span>
+      </button>`;
+    };
+    elsewhereSec = `<div class="vtt-tray-sect">
+      <div class="vtt-tray-sect-hd">
+        <span>🗂 Sur d'autres pages</span>
+        <span class="vtt-tray-count">${filteredElsewhere.length}</span>
+      </div>
+      <div class="vtt-reserve-grid">${filteredElsewhere.map(mkElsewhereChip).join('')}</div>
+    </div>`;
+  }
+
   // ── Réserve — grid compacte, toujours visible ────────────────────
   const filteredRes = applyFilter(reserve);
   let reserveSec = '';
@@ -4361,6 +4420,7 @@ function _renderTray() {
       </div>
       ${pageSec}
     </div>
+    ${elsewhereSec}
     ${reserveSec}
     ${showBst ? `<div class="vtt-tray-sect">
       <div class="vtt-tray-sect-hd" style="justify-content:space-between">
@@ -4429,6 +4489,7 @@ async function _switchPage(pageId) {
   fogRenderWalls(page, STATE.isAdmin);
   fogUpdateSoon(page, _tokens, STATE.isAdmin);
   _renderPageTabs(); _renderTray(); _deselect();
+  _renderCombatTracker();
   // Le MJ navigue librement — les joueurs ne suivent que via 📡 Envoyer
 }
 
@@ -4803,7 +4864,8 @@ function _initListeners() {
       const target=_session.playerPages?.[uid]??_session.activePageId;
       if (target&&_pages[target]&&_activePage?.id!==target) _switchPage(target);
     }
-    _renderCombatBadge();
+    _renderTimer();
+    _renderCombatTracker();
   },()=>{}));
 
   // 2. Pages
@@ -4939,6 +5001,7 @@ function _initListeners() {
       }
     });
     _renderTraySoon();
+    _renderCombatTrackerSoon();
     _toksReady=true; _maybeSyncAutoTokens();
     // Recalcul fog si un token joueur a bougé
     if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player'))
@@ -6048,12 +6111,6 @@ window._vttSendChat = async () => {
   }
 };
 
-function _renderCombatBadge() {
-  const el=document.getElementById('vtt-combat-badge'); if (!el) return;
-  if (_session?.combat?.active) { el.textContent=`⚔️ Round ${_session.combat.round??1}`; el.style.display='flex'; }
-  else el.style.display='none';
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // ACTIONS GLOBALES
 // ═══════════════════════════════════════════════════════════════════
@@ -6199,9 +6256,62 @@ window._vttPlace = async tokenId => {
   await updateDoc(_tokRef(tokenId),{pageId:_activePage.id,col:cC,row:cR,visible:true})
     .catch(()=>showNotif('Erreur placement','error'));
 };
-// Retirer un token de la carte (le remet dans le tray)
+// Dupliquer un perso/PNJ déjà placé sur une autre page → nouveau token sur la page active.
+// Le HP/PM/stats sont partagés via la fiche perso ; les buffs et état de tour restent par-instance.
+window._vttDuplicateOnPage = async srcTokenId => {
+  if (!STATE.isAdmin) return;
+  if (!_activePage) { showNotif('Crée d\'abord une page','error'); return; }
+  const src = _tokens[srcTokenId]?.data;
+  if (!src) { showNotif('Token introuvable','error'); return; }
+  if (src.type === 'enemy') { window._vttDuplicateToken?.(srcTokenId); return; }
+  const cC = Math.floor(_activePage.cols/2), cR = Math.floor(_activePage.rows/2);
+  try {
+    await addDoc(_toksCol(), {
+      name: src.name || 'Token',
+      type: src.type,
+      characterId: src.characterId || null,
+      npcId:       src.npcId       || null,
+      beastId:     src.beastId     || null,
+      ownerId:     src.ownerId     || null,
+      pageId: _activePage.id, col: cC, row: cR,
+      visible: true,
+      imageUrl: src.imageUrl || null,
+      movement: src.movement ?? null, range: src.range ?? 1,
+      attack: src.attack ?? null, attackDice: src.attackDice || null,
+      defense: src.defense ?? null,
+      hp: src.hp ?? null, hpMax: src.hpMax ?? null,
+      tokenW: src.tokenW ?? null, tokenH: src.tokenH ?? null,
+      buffs: [],
+      movedThisTurn: false, attackedThisTurn: false, movedCells: 0, bonusMvt: 0,
+      createdAt: serverTimestamp(),
+    });
+    showNotif('+ Placé sur cette page','success');
+  } catch (e) {
+    console.error('[vtt] duplicate-on-page:', e);
+    showNotif('Erreur duplication','error');
+  }
+};
+// Retirer un token de la carte.
+// Si plusieurs tokens partagent la même entité (perso/PNJ dupliqué), on supprime celui-ci ;
+// sinon on le renvoie en réserve.
 window._vttRetireToken = async tokenId => {
-  await updateDoc(_tokRef(tokenId),{pageId:null,visible:false}).catch(()=>{});
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const key = t.characterId || t.npcId; // les ennemis (beastId) sont gérés par _vttDeleteToken
+  let isDuplicate = false;
+  if (key) {
+    let count = 0;
+    for (const e of Object.values(_tokens)) {
+      const d = e.data;
+      if ((d.characterId && d.characterId === t.characterId) ||
+          (d.npcId && d.npcId === t.npcId)) count++;
+      if (count > 1) { isDuplicate = true; break; }
+    }
+  }
+  if (isDuplicate) {
+    await deleteDoc(_tokRef(tokenId)).catch(()=>{});
+  } else {
+    await updateDoc(_tokRef(tokenId),{pageId:null,visible:false}).catch(()=>{});
+  }
   if (_selected===tokenId) _deselect();
 };
 // Le joueur invoque son propre token sur la carte active
@@ -7897,6 +8007,211 @@ window._vttRemoveSoundFromPlaylist = async (plId, soundId) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════
+// TIMER DE SESSION — partagé via _session.timer, visible par tous
+// ═══════════════════════════════════════════════════════════════════
+function _timerElapsedMs() {
+  const t = _session?.timer;
+  if (!t) return 0;
+  const acc = +t.accumulated || 0;
+  if (t.running && t.startedAt) return acc + Math.max(0, Date.now() - (+t.startedAt));
+  return acc;
+}
+function _timerFmt(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${pad(m)}:${pad(ss)}`;
+}
+function _renderTimer() {
+  const el = document.getElementById('vtt-timer');
+  if (!el) return;
+  const t = _session?.timer || {};
+  const mj = STATE.isAdmin;
+  const running = !!t.running;
+  const label = (t.label || '').toString().slice(0, 40);
+  const ms = _timerElapsedMs();
+  const idle = ms === 0 && !running && !label;
+
+  // Joueur sans timer actif et sans label → on cache
+  if (!mj && idle) { el.innerHTML = ''; el.classList.remove('vtt-timer--on'); return; }
+
+  el.classList.toggle('vtt-timer--on', running);
+  el.classList.toggle('vtt-timer--paused', !running && ms > 0);
+  el.innerHTML = `
+    <span class="vtt-timer-ico" title="${running ? 'En cours' : (ms > 0 ? 'En pause' : 'Arrêté')}">${running ? '⏱️' : (ms > 0 ? '⏸️' : '⏱️')}</span>
+    <span class="vtt-timer-val">${_timerFmt(ms)}</span>
+    ${label ? `<span class="vtt-timer-label" title="${_esc(label)}">${_esc(label)}</span>` : ''}
+    ${mj ? `
+      <span class="vtt-timer-ctrls">
+        <button class="vtt-timer-btn" onclick="window._vttTimerToggle()" title="${running ? 'Mettre en pause' : (ms > 0 ? 'Reprendre' : 'Démarrer')}">${running ? '⏸' : '▶'}</button>
+        <button class="vtt-timer-btn" onclick="window._vttTimerReset()" title="Réinitialiser">↺</button>
+        <button class="vtt-timer-btn" onclick="window._vttTimerLabel()" title="Modifier le libellé (Combat, Repos, Énigme…)">🏷</button>
+      </span>` : ''}
+  `;
+}
+function _timerStartTick() {
+  if (_timerTick) return;
+  _timerTick = setInterval(() => {
+    if (_session?.timer?.running) _renderTimer();
+  }, 1000);
+}
+function _timerStopTick() {
+  if (_timerTick) { clearInterval(_timerTick); _timerTick = null; }
+}
+
+window._vttTimerToggle = async () => {
+  if (!STATE.isAdmin) return;
+  const t = _session?.timer || {};
+  const now = Date.now();
+  if (t.running && t.startedAt) {
+    const acc = (+t.accumulated || 0) + Math.max(0, now - (+t.startedAt));
+    await setDoc(_sesRef(), { timer: { ...t, running: false, accumulated: acc, startedAt: null } }, { merge: true }).catch(()=>{});
+  } else {
+    await setDoc(_sesRef(), { timer: { accumulated: +t.accumulated || 0, label: t.label || '', running: true, startedAt: now } }, { merge: true }).catch(()=>{});
+  }
+};
+window._vttTimerReset = async () => {
+  if (!STATE.isAdmin) return;
+  const ok = await confirmModal('Réinitialiser le minuteur à 00:00 ?', { title: '↺ Reset minuteur', okLabel: 'Réinitialiser', cancelLabel: 'Annuler' }).catch(()=>false);
+  if (!ok) return;
+  const t = _session?.timer || {};
+  await setDoc(_sesRef(), { timer: { running: false, accumulated: 0, startedAt: null, label: t.label || '' } }, { merge: true }).catch(()=>{});
+};
+window._vttTimerLabel = async () => {
+  if (!STATE.isAdmin) return;
+  const cur = _session?.timer?.label || '';
+  const next = prompt('Libellé du minuteur (laisser vide pour effacer) :', cur);
+  if (next === null) return;
+  const t = _session?.timer || {};
+  await setDoc(_sesRef(), { timer: { ...t, label: next.trim().slice(0, 40) } }, { merge: true }).catch(()=>{});
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// COMBAT TRACKER — overlay haut-gauche, visible quand combat actif
+// ═══════════════════════════════════════════════════════════════════
+function _trackerPortrait(ld, t) {
+  // Photo prioritaire : fiche perso/PNJ via _live (champ displayImage)
+  const url = ld.displayImage || null;
+  if (url) return `<img class="vct-photo" src="${url}" alt="">`;
+  const init = ((ld.displayName || t.name || '?').trim()[0] || '?').toUpperCase();
+  return `<div class="vct-photo vct-photo-init">${init}</div>`;
+}
+function _trackerRow(t) {
+  const ld = _live(t);
+  const moved = !!t.movedThisTurn || (t.movedCells || 0) > 0;
+  const acted = !!t.attackedThisTurn;
+  const done  = moved && acted;
+  const partial = moved !== acted;
+  const cls = done ? 'vct-row--done' : (partial ? 'vct-row--partial' : 'vct-row--todo');
+  const name = _esc(ld.displayName || t.name || '—');
+  return `
+    <div class="vct-row ${cls}" data-tok="${t.id}" onclick="window._vttTrackerFocus('${t.id}')" title="Cliquer pour centrer sur ce token">
+      ${_trackerPortrait(ld, t)}
+      <div class="vct-info">
+        <div class="vct-name">${name}</div>
+        <div class="vct-status">
+          <span class="vct-pill ${moved ? 'vct-pill--on' : ''}" title="Déplacement effectué">🏃 ${moved ? '✓' : '·'}</span>
+          <span class="vct-pill ${acted ? 'vct-pill--on' : ''}" title="Action effectuée">⚔ ${acted ? '✓' : '·'}</span>
+        </div>
+      </div>
+    </div>`;
+}
+function _renderCombatTracker() {
+  const el = document.getElementById('vtt-combat-tracker');
+  if (!el) return;
+  const active = !!_session?.combat?.active;
+  const mj = STATE.isAdmin;
+
+  // Combat inactif :
+  //   - MJ → carte compacte avec bouton "Démarrer le combat"
+  //   - Joueur → masqué
+  if (!active) {
+    if (!mj) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div class="vct-header vct-header--idle">
+        <div class="vct-title">
+          <span class="vct-title-ico">⚔️</span>
+          <span class="vct-title-txt vct-title-txt--idle">Combat</span>
+        </div>
+        <button class="vct-mj-btn vct-mj-btn--start" onclick="window._vttToggleCombat()" title="Démarrer le combat — reset déplacement & action de tous les tokens">▶ Démarrer</button>
+      </div>`;
+    return;
+  }
+  el.style.display = 'block';
+
+  const round = _session?.combat?.round ?? 1;
+  const pageId = _activePage?.id;
+  const onPage = Object.values(_tokens).map(x => x?.data || x).filter(t => t && t.pageId === pageId);
+  const allies = onPage.filter(t => t.type === 'player' || t.type === 'npc');
+  const enemies = onPage.filter(t => t.type === 'enemy');
+
+  // tab par défaut "allies" — joueurs non-MJ ne voient pas l'onglet ennemis
+  const tab = (!mj && _combatTab === 'enemies') ? 'allies' : _combatTab;
+  const list = tab === 'enemies' ? enemies : allies;
+
+  // tri : joueurs d'abord, puis PNJ ; ennemis par HP% croissant
+  if (tab === 'allies') {
+    list.sort((a, b) => {
+      const r = (a.type === 'player' ? 0 : 1) - (b.type === 'player' ? 0 : 1);
+      if (r !== 0) return r;
+      const na = _live(a).displayName || a.name || '';
+      const nb = _live(b).displayName || b.name || '';
+      return na.localeCompare(nb);
+    });
+  }
+
+  const rows = list.length
+    ? list.map(_trackerRow).join('')
+    : `<div class="vct-empty">${tab === 'enemies' ? 'Aucun ennemi sur la page' : 'Aucun token allié sur la page'}</div>`;
+
+  el.innerHTML = `
+    <div class="vct-header">
+      <div class="vct-title">
+        <span class="vct-title-ico">⚔️</span>
+        <span class="vct-title-txt">Combat</span>
+        <span class="vct-round">Tour ${round}</span>
+      </div>
+      ${mj ? `
+        <div class="vct-mj-ctrls">
+          <button class="vct-mj-btn" onclick="window._vttNextRound()" title="Tour suivant — reset déplacement & action">▶ Tour</button>
+          <button class="vct-mj-btn vct-mj-btn--danger" onclick="window._vttToggleCombat()" title="Terminer le combat">⏹</button>
+        </div>` : ''}
+    </div>
+    ${mj ? `
+      <div class="vct-tabs">
+        <button class="vct-tab ${tab==='allies' ? 'active' : ''}" onclick="window._vttCombatTab('allies')">👥 Joueurs &amp; PNJ <span class="vct-tab-count">${allies.length}</span></button>
+        <button class="vct-tab ${tab==='enemies' ? 'active' : ''}" onclick="window._vttCombatTab('enemies')">👹 Ennemis <span class="vct-tab-count">${enemies.length}</span></button>
+      </div>` : ''}
+    <div class="vct-list">${rows}</div>
+  `;
+}
+// Re-render groupé via microtask (évite les multi-rerender lors d'un batch reset)
+let _trackerDirty = false;
+function _renderCombatTrackerSoon() {
+  if (_trackerDirty) return;
+  _trackerDirty = true;
+  queueMicrotask(() => { _trackerDirty = false; _renderCombatTracker(); });
+}
+
+window._vttCombatTab = (tab) => {
+  if (tab !== 'allies' && tab !== 'enemies') return;
+  if (tab === 'enemies' && !STATE.isAdmin) return;
+  _combatTab = tab;
+  _renderCombatTracker();
+};
+window._vttTrackerFocus = (tokId) => {
+  // Centrer/sélectionner le token cliqué
+  const t = _tokens[tokId]?.data;
+  if (!t) return;
+  if (STATE.isAdmin || t.type !== 'enemy') {
+    try { _select(tokId); } catch {}
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // HTML
 // ═══════════════════════════════════════════════════════════════════
 function _buildHtml() {
@@ -7906,30 +8221,12 @@ function _buildHtml() {
   <div class="vtt-toolbar">
     ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
     <div class="vtt-tool-group vtt-right">
-      <div id="vtt-combat-badge" class="vtt-combat-badge" style="display:none"></div>
       ${mj?`
-        <button class="vtt-btn-sm" id="vtt-map-mode-btn" onclick="window._vttToggleMapMode()" title="Activer l'édition des images">🗺 Carte</button>
+        <button class="vtt-btn-sm" id="vtt-map-mode-btn" onclick="window._vttToggleMapMode()" title="Verrouille / déverrouille le calque des cartes en arrière-plan">🗺 Carte</button>
         <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via ImgBB — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
-        <button class="vtt-btn-sm" onclick="window._vttSetImgbbKey()" title="Configurer la clé API ImgBB">🔑</button>
-        <div class="vtt-tb-sep"></div>
-        <button class="vtt-btn-sm" onclick="window._vttToggleCombat()" title="Démarrer/arrêter le combat">⚔ Combat</button>
-        <button class="vtt-btn-sm" onclick="window._vttNextRound()"    title="Tour suivant">▶ Tour</button>
-        <div class="vtt-tb-sep"></div>
-        <button class="vtt-tool vtt-btn-sm" data-tool="walls" onclick="window._vttTool('walls')" title="Éditeur murs, portes, fenêtres et sources lumineuses">🧱 Murs</button>`:''}
+        <button class="vtt-btn-sm" onclick="window._vttSetImgbbKey()" title="Configurer la clé API ImgBB">🔑</button>`:''}
     </div>
   </div>
-  ${mj?`
-  <div id="vtt-walls-bar" style="display:none;align-items:center;gap:.35rem;padding:.25rem .6rem;background:#12121f;border-bottom:1px solid #2a2d3e;flex-wrap:wrap">
-    <span style="font-size:.7rem;color:#6b7280;margin-right:.2rem">Outil :</span>
-    <button class="vtt-btn-sm active" data-fog-tool="wall"   onclick="window._vttFogTool('wall')"   title="Tracer un mur">🧱 Mur</button>
-    <button class="vtt-btn-sm"        data-fog-tool="door"   onclick="window._vttFogTool('door')"   title="Tracer une porte">🚪 Porte</button>
-    <button class="vtt-btn-sm"        data-fog-tool="window" onclick="window._vttFogTool('window')" title="Tracer une fenêtre">🪟 Fenêtre</button>
-    <button class="vtt-btn-sm"        data-fog-tool="light"  onclick="window._vttFogTool('light')"  title="Placer une source lumineuse">💡 Lumière</button>
-    <button class="vtt-btn-sm"        data-fog-tool="eraser" onclick="window._vttFogTool('eraser')" title="Effacer (clic sur segment ou source)">🗑 Effacer</button>
-    <div class="vtt-tb-sep"></div>
-    <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver le brouillard de guerre sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
-    <span style="font-size:.68rem;color:#4b5563;margin-left:.4rem">Clic sur la grille pour tracer · Clic-droit pour annuler · Clic segment = sélectionner → menu</span>
-  </div>`:''}
 
   <div class="vtt-body">
     <div class="vtt-presence-col" id="vtt-presence-col">
@@ -8006,6 +8303,7 @@ export async function renderVttPage() {
   const wrap=document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
   _initCanvas(wrap);
+  _timerStartTick();
   // Floats injectés APRÈS Konva pour être au-dessus des canvas layers
   const _tf = document.createElement('div');
   _tf.className = 'vtt-tool-float';
@@ -8014,6 +8312,7 @@ export async function renderVttPage() {
       <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="↖ Sélection">↖</button>
       <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle">📏</button>
       <button class="vtt-tool" data-tool="draw"   onclick="window._vttTool('draw')"   title="✏️ Dessin">✏️</button>
+      ${STATE.isAdmin?`<button class="vtt-tool" data-tool="walls" onclick="window._vttTool('walls')" title="🧱 Murs / Éclairage dynamique">🧱</button>`:''}
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
       <button class="vtt-draw-btn active" id="vtt-ds-pencil"  onclick="window._vttDrawShape('pencil')"  title="Crayon libre">✏️</button>
@@ -8031,8 +8330,31 @@ export async function renderVttPage() {
       <div class="vtt-draw-sep"></div>
       <button class="vtt-draw-btn" id="vtt-draw-fill-btn" onclick="window._vttToggleDrawFill()" title="Remplissage (rect/cercle)">◻</button>
       ${STATE.isAdmin?`<div class="vtt-draw-sep"></div><button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearAnnots()" title="Effacer toutes les annotations">🗑</button>`:''}
-    </div>`;
+    </div>
+    ${STATE.isAdmin?`
+    <div id="vtt-walls-bar" class="vtt-walls-bar" style="display:none">
+      <span class="vtt-walls-bar-label">Outil :</span>
+      <button class="vtt-btn-sm active" data-fog-tool="wall"   onclick="window._vttFogTool('wall')"   title="Tracer un mur">🧱 Mur</button>
+      <button class="vtt-btn-sm"        data-fog-tool="door"   onclick="window._vttFogTool('door')"   title="Tracer une porte">🚪 Porte</button>
+      <button class="vtt-btn-sm"        data-fog-tool="window" onclick="window._vttFogTool('window')" title="Tracer une fenêtre">🪟 Fenêtre</button>
+      <button class="vtt-btn-sm"        data-fog-tool="light"  onclick="window._vttFogTool('light')"  title="Placer une source lumineuse">💡 Lumière</button>
+      <button class="vtt-btn-sm"        data-fog-tool="eraser" onclick="window._vttFogTool('eraser')" title="Effacer (clic sur segment ou source)">🗑 Effacer</button>
+      <div class="vtt-tb-sep"></div>
+      <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver le brouillard de guerre sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
+      <div class="vtt-walls-bar-hint">Clic grille = tracer · Clic-droit = annuler · Clic segment = menu</div>
+    </div>`:''}`;
   wrap.appendChild(_tf);
+
+  // ─── Overlay haut-gauche : Timer + Combat tracker ──────────────────
+  const _ovTL = document.createElement('div');
+  _ovTL.className = 'vtt-overlay-tl';
+  _ovTL.innerHTML = `
+    <div id="vtt-timer" class="vtt-timer" aria-live="polite"></div>
+    <div id="vtt-combat-tracker" class="vtt-combat-tracker" style="display:none"></div>
+  `;
+  wrap.appendChild(_ovTL);
+  _renderTimer();
+  _renderCombatTracker();
   const _ef = document.createElement('div');
   _ef.className = 'vtt-emote-float';
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker"></div>
