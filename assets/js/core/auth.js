@@ -15,6 +15,7 @@ import {
 } from '../config/firebase.js';
 
 import { setProfile } from './state.js';
+import { unwatchAll } from '../shared/realtime.js';
 export { showApp, showAuth } from './layout.js';
 
 function clearAuthError() {
@@ -189,6 +190,9 @@ export async function doGoogleLogin() {
 
 export async function doLogout() {
   try {
+    // Stoppe d'abord les abonnements temps réel pour éviter les
+    // "Accès refusé" lorsque l'auth est révoquée.
+    try { unwatchAll(); } catch {}
     await signOut(auth);
   } catch (error) {
     console.error('[auth] doLogout error:', error);

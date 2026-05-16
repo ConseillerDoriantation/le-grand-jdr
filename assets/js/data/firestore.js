@@ -209,6 +209,24 @@ export async function getDocData(col, id) {
   }
 }
 
+// Variante silencieuse : pas de notif "Accès refusé" si lecture optionnelle qui
+// peut légitimement échouer (rules non configurées). Renvoie null en silence.
+export async function getDocDataSilent(col, id) {
+  const path = _colPath(col);
+  const key  = `${path}:${id}`;
+  const cached = _cacheGet(key);
+  if (cached) return cached;
+  try {
+    const snap = await getDoc(doc(db, path, id));
+    const data = snap.exists() ? snap.data() : null;
+    if (data) _cacheSet(key, data);
+    return data;
+  } catch (e) {
+    console.debug(`[firestore] silent read failed: ${path}/${id}`, e?.code || e);
+    return null;
+  }
+}
+
 export async function saveDoc(col, id, data) {
   const path = _colPath(col);
   try {

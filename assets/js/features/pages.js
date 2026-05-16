@@ -2,7 +2,7 @@
 // PAGES
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
-import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData, saveDoc } from '../data/firestore.js';
+import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc } from '../shared/html.js';
 import { calcPalier } from '../shared/char-stats.js';
 
@@ -33,7 +33,7 @@ const PAGES = {
 
     // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
-    const [chars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, allPartyChars] = await Promise.all([
+    const [chars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, allPartyChars, nextSession] = await Promise.all([
       loadChars(uid).catch(() => []),
       loadCollection('story').catch(() => []),
       getDocData('bastion', 'main').catch(() => null),
@@ -41,10 +41,21 @@ const PAGES = {
       loadCollection('quests').catch(() => []),
       loadCollection('collection').catch(() => []),
       STATE.isAdmin ? Promise.resolve([]) : loadChars(null).catch(() => []),
+      getDocDataSilent('agenda_session', 'next'),
     ]);
     // Les hauts-faits secrets restent invisibles aux joueurs partout dans le dashboard
     const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
     STATE.characters = chars;
+
+    // Formate la prochaine séance pour affichage (date FR + créneau)
+    const _SLOT_LABELS = { m: '🌞 Matin', a: '☀️ Aprem', s: '🌙 Soir' };
+    function _formatNextSession(sess) {
+      if (!sess || !sess.date) return null;
+      const d = new Date(sess.date + 'T12:00:00');
+      const dateFr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+      return { dateFr, slotLabel: _SLOT_LABELS[sess.slot] || '', questTitle: sess.questTitle || '' };
+    }
+    const nextSessionFmt = _formatNextSession(nextSession);
 
     const pseudo = STATE.profile?.pseudo || 'Aventurier';
 
@@ -481,7 +492,16 @@ const PAGES = {
             <div class="dv2-party-dot"></div>
           </div>`;
         }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Les membres du groupe apparaîtront ici.</div>`}
-        ${STATE.adventure ? `
+        ${nextSessionFmt ? `
+        <div class="dv2-party-footer dv2-party-footer--session">
+          <div class="dv2-party-session-label">Prochaine séance prévue pour :</div>
+          <div class="dv2-party-session-chip dv2-party-session-chip--validated">
+            <span class="dv2-pss-date">${_esc(nextSessionFmt.dateFr)}</span>
+            <span class="dv2-pss-slot">${nextSessionFmt.slotLabel}</span>
+            ${nextSessionFmt.questTitle ? `<span class="dv2-pss-quest">${_esc(nextSessionFmt.questTitle)}</span>` : ''}
+          </div>
+        </div>`
+        : STATE.adventure ? `
         <div class="dv2-party-footer">
           <div class="dv2-party-session-label">Aventure en cours</div>
           <div class="dv2-party-session-chip">${STATE.adventure.emoji||'⚔️'} ${_esc(STATE.adventure.nom||'Aventure')}</div>
