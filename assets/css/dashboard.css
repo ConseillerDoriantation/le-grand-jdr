@@ -758,3 +758,273 @@
   .dv2-stats-grid { grid-template-columns: repeat(2, 1fr); }
   .dv2-hero-inner { flex-direction: column; align-items: center; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   MODE JOUR — Overrides pour le dashboard
+   Les .dv2-* utilisent des bg/borders sombres hardcodés qui ne
+   passent pas en light : on les neutralise ici avec la palette douce.
+════════════════════════════════════════════════════════════════════ */
+[data-theme="light"] .dv2-hero-card,
+[data-theme="light"] .dv2-party-card,
+[data-theme="light"] .dv2-panel-card {
+  background: var(--bg-elevated) !important;
+  border-color: rgba(37,99,235,0.16) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+[data-theme="light"] .dv2-hero-card:hover {
+  border-color: rgba(37,99,235,0.32) !important;
+  box-shadow: var(--shadow-soft), 0 0 30px rgba(37,99,235,0.06) !important;
+}
+[data-theme="light"] .dv2-hero-card::before {
+  background: linear-gradient(135deg, rgba(37,99,235,0.05) 0%, rgba(157,111,255,0.03) 50%, transparent 100%) !important;
+}
+[data-theme="light"] .dv2-hero-card::after {
+  background: radial-gradient(circle at 100% 0%, rgba(157,111,255,0.09) 0%, transparent 70%) !important;
+}
+
+[data-theme="light"] .dv2-mission-card {
+  background: var(--bg-elevated) !important;
+  border-color: rgba(157,111,255,0.28) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+[data-theme="light"] .dv2-mission-card:hover {
+  border-color: rgba(157,111,255,0.45) !important;
+  box-shadow: var(--shadow-soft), 0 0 30px rgba(157,111,255,0.07) !important;
+}
+[data-theme="light"] .dv2-mission-card::before {
+  background: linear-gradient(135deg, rgba(157,111,255,0.05) 0%, transparent 60%) !important;
+}
+[data-theme="light"] .dv2-mission-card::after {
+  background: radial-gradient(circle at 100% 100%, rgba(157,111,255,0.05) 0%, transparent 70%) !important;
+}
+
+/* Portrait — texte foncé sur fond clair */
+[data-theme="light"] .dv2-portrait {
+  background: linear-gradient(160deg, rgba(37,99,235,0.10), rgba(157,111,255,0.06)) !important;
+  border-color: rgba(37,99,235,0.22) !important;
+  color: #1d4ed8 !important;
+  box-shadow: 0 0 24px rgba(37,99,235,0.08), inset 0 1px 0 rgba(255,255,255,0.5) !important;
+}
+[data-theme="light"] .dv2-portrait-level {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+  color: #fff !important;
+}
+
+/* Chips — coloration adaptée au fond clair */
+[data-theme="light"] .dv2-chip {
+  background: rgba(37,99,235,0.08) !important;
+  border-color: rgba(37,99,235,0.22) !important;
+  color: #1d4ed8 !important;
+}
+[data-theme="light"] .dv2-chip-purple {
+  background: rgba(124,58,237,0.10) !important;
+  border-color: rgba(124,58,237,0.28) !important;
+  color: #6d28d9 !important;
+}
+[data-theme="light"] .dv2-chip-green {
+  background: rgba(5,150,105,0.10) !important;
+  border-color: rgba(5,150,105,0.28) !important;
+  color: #047857 !important;
+}
+[data-theme="light"] .dv2-chip-ember {
+  background: rgba(234,88,12,0.10) !important;
+  border-color: rgba(234,88,12,0.28) !important;
+  color: #c2410c !important;
+}
+
+/* Barres PV/PM/XP — fond clair derrière la barre colorée */
+[data-theme="light"] .dv2-bar-track,
+[data-theme="light"] .dv2-mission-prog-track {
+  background: rgba(15,23,42,0.07) !important;
+}
+[data-theme="light"] .dv2-bar-fill::after,
+[data-theme="light"] .dv2-mission-prog-fill::after {
+  background: rgba(255,255,255,0.55) !important; /* glow conservé pour relief */
+}
+
+/* Stats pills (or, ca, magie, bonus) */
+[data-theme="light"] .dv2-stat-pill {
+  background: var(--bg-card) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="light"] .dv2-stat-pill:hover {
+  background: rgba(37,99,235,0.06) !important;
+  border-color: rgba(37,99,235,0.22) !important;
+}
+
+/* Membres groupe — hover plus visible */
+[data-theme="light"] .dv2-party-member:hover {
+  background: rgba(15,23,42,0.04) !important;
+}
+[data-theme="light"] .dv2-party-avatar {
+  background: linear-gradient(135deg, rgba(37,99,235,0.12), rgba(157,111,255,0.08)) !important;
+  border-color: rgba(37,99,235,0.22) !important;
+  color: #1d4ed8 !important;
+}
+[data-theme="light"] .dv2-party-session-chip {
+  background: rgba(37,99,235,0.06) !important;
+  border-color: rgba(37,99,235,0.18) !important;
+  color: var(--text-soft) !important;
+}
+
+/* Mission */
+[data-theme="light"] .dv2-mission-icon {
+  background: linear-gradient(135deg, rgba(124,58,237,0.16), rgba(37,99,235,0.08)) !important;
+  border-color: rgba(124,58,237,0.30) !important;
+  box-shadow: 0 0 16px rgba(124,58,237,0.10) !important;
+}
+[data-theme="light"] .dv2-mission-type { color: #6d28d9 !important; }
+[data-theme="light"] .dv2-mission-prog-val { color: #6d28d9 !important; }
+[data-theme="light"] .dv2-mission-status {
+  background: rgba(5,150,105,0.10) !important;
+  border-color: rgba(5,150,105,0.30) !important;
+  color: #047857 !important;
+}
+
+/* Cartes statistiques — versions claires */
+[data-theme="light"] .dv2-stat-card {
+  box-shadow: var(--shadow-card) !important;
+}
+[data-theme="light"] .dv2-sc-gold {
+  background: linear-gradient(135deg, rgba(234,179,8,0.16), rgba(234,179,8,0.05)) !important;
+  border-color: rgba(234,179,8,0.32) !important;
+}
+[data-theme="light"] .dv2-sc-gold:hover {
+  border-color: rgba(234,179,8,0.50) !important;
+  box-shadow: var(--shadow-soft), 0 0 18px rgba(234,179,8,0.10) !important;
+}
+[data-theme="light"] .dv2-sc-shield {
+  background: linear-gradient(135deg, rgba(37,99,235,0.14), rgba(37,99,235,0.04)) !important;
+  border-color: rgba(37,99,235,0.30) !important;
+}
+[data-theme="light"] .dv2-sc-shield:hover {
+  border-color: rgba(37,99,235,0.50) !important;
+  box-shadow: var(--shadow-soft), 0 0 18px rgba(37,99,235,0.10) !important;
+}
+[data-theme="light"] .dv2-sc-hp {
+  background: linear-gradient(135deg, rgba(5,150,105,0.14), rgba(5,150,105,0.04)) !important;
+  border-color: rgba(5,150,105,0.32) !important;
+}
+[data-theme="light"] .dv2-sc-hp:hover {
+  border-color: rgba(5,150,105,0.50) !important;
+  box-shadow: var(--shadow-soft), 0 0 18px rgba(5,150,105,0.10) !important;
+}
+[data-theme="light"] .dv2-sc-mp {
+  background: linear-gradient(135deg, rgba(124,58,237,0.14), rgba(124,58,237,0.04)) !important;
+  border-color: rgba(124,58,237,0.32) !important;
+}
+[data-theme="light"] .dv2-sc-mp:hover {
+  border-color: rgba(124,58,237,0.50) !important;
+  box-shadow: var(--shadow-soft), 0 0 18px rgba(124,58,237,0.10) !important;
+}
+
+/* Shortcuts */
+[data-theme="light"] .dv2-shortcut {
+  background: var(--bg-elevated) !important;
+  border-color: rgba(37,99,235,0.14) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+[data-theme="light"] .dv2-shortcut:hover {
+  background: rgba(37,99,235,0.06) !important;
+  border-color: rgba(37,99,235,0.28) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+[data-theme="light"] .dv2-shortcut-label { color: var(--text-soft) !important; }
+
+/* Quest items */
+[data-theme="light"] .dv2-quest-item:hover,
+[data-theme="light"] .dv2-ach-item:hover {
+  background: rgba(15,23,42,0.04) !important;
+}
+[data-theme="light"] .dv2-qi-main {
+  background: rgba(234,88,12,0.10) !important;
+  border-color: rgba(234,88,12,0.28) !important;
+  color: #c2410c !important;
+}
+[data-theme="light"] .dv2-qi-side {
+  background: rgba(37,99,235,0.10) !important;
+  border-color: rgba(37,99,235,0.28) !important;
+  color: #1d4ed8 !important;
+}
+[data-theme="light"] .dv2-qi-daily {
+  background: rgba(5,150,105,0.10) !important;
+  border-color: rgba(5,150,105,0.28) !important;
+  color: #047857 !important;
+}
+[data-theme="light"] .dv2-qi-default {
+  background: rgba(124,58,237,0.10) !important;
+  border-color: rgba(124,58,237,0.28) !important;
+  color: #6d28d9 !important;
+}
+
+/* Achievements */
+[data-theme="light"] .dv2-ach-icon {
+  background: rgba(234,179,8,0.12) !important;
+  border-color: rgba(234,179,8,0.30) !important;
+  color: #a16207 !important;
+}
+[data-theme="light"] .dv2-ach-xp { color: #6d28d9 !important; }
+
+/* Panneau de session badge */
+[data-theme="light"] .dv2-session-badge {
+  background: rgba(5,150,105,0.10) !important;
+  border-color: rgba(5,150,105,0.28) !important;
+  color: #047857 !important;
+}
+[data-theme="light"] .dv2-panel-count {
+  background: rgba(37,99,235,0.10) !important;
+  border-color: rgba(37,99,235,0.24) !important;
+  color: #1d4ed8 !important;
+}
+
+/* Bastion */
+[data-theme="light"] .dv2-bastion-card {
+  background: var(--bg-elevated) !important;
+  border-color: rgba(234,88,12,0.22) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+[data-theme="light"] .dv2-bastion-card:hover {
+  border-color: rgba(234,88,12,0.40) !important;
+  box-shadow: var(--shadow-soft), 0 0 22px rgba(234,88,12,0.05) !important;
+}
+[data-theme="light"] .dv2-bastion-card::before {
+  background: radial-gradient(circle at 100% 0%, rgba(234,88,12,0.07) 0%, transparent 70%) !important;
+}
+[data-theme="light"] .dv2-bastion-icon {
+  background: linear-gradient(135deg, rgba(234,88,12,0.14), rgba(234,88,12,0.04)) !important;
+  border-color: rgba(234,88,12,0.30) !important;
+  color: #c2410c !important;
+  box-shadow: 0 0 14px rgba(234,88,12,0.08) !important;
+}
+[data-theme="light"] .dv2-bastion-level { color: #c2410c !important; }
+[data-theme="light"] .dv2-bastion-room {
+  background: var(--bg-card) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="light"] .dv2-bastion-room-dot { background: #c2410c !important; }
+[data-theme="light"] .dv2-bastion-note {
+  background: rgba(234,88,12,0.06) !important;
+  border-color: rgba(234,88,12,0.22) !important;
+  color: #c2410c !important;
+}
+
+/* Toasts RPG */
+[data-theme="light"] .dv2-toast {
+  background: var(--bg-elevated) !important;
+  box-shadow: var(--shadow-soft) !important;
+  color: var(--text) !important;
+}
+[data-theme="light"] .dv2-toast-xp          { border-color: rgba(124,58,237,0.32) !important; }
+[data-theme="light"] .dv2-toast-gold        { border-color: rgba(234,179,8,0.32) !important; }
+[data-theme="light"] .dv2-toast-achievement { border-color: rgba(5,150,105,0.32) !important; }
+
+/* Section labels */
+[data-theme="light"] .dv2-section-label-line {
+  background: linear-gradient(90deg, rgba(37,99,235,0.20), transparent) !important;
+}
+
+/* Particules de fond — atténuées en mode jour */
+[data-theme="light"] .dv2-particle {
+  background: rgba(37,99,235,0.18) !important;
+  opacity: 0.4;
+}

@@ -114,25 +114,29 @@
   --gold-glow:   rgba(37, 99, 235, 0.10);
   --crimson:       #dc2626;
   --crimson-light: #ef4444;
-  --bg-deep:    #e8eaf0;
-  --bg-dark:    #f0f2f6;
-  --bg-card:    #f7f8fa;
-  --bg-card2:   #f3f4f7;
-  --bg-panel:   #f0f2f6;
-  --bg-glass:   rgba(245,246,249,0.96);
-  --bg-elevated:#ffffff;
-  --border:         rgba(0,0,0,0.09);
-  --border-strong:  rgba(0,0,0,0.15);
+  /* Palette douce sans blanc pur : tons gris bleutés type Notion/Apple.
+     Page : gris ardoise très clair, surfaces : off-white légèrement teinté. */
+  --bg-void:    #d6dae2;
+  --bg-deep:    #e0e3ea;   /* fond principal de la page */
+  --bg-dark:    #e6e9ef;
+  --bg-card:    #eef1f5;
+  --bg-card2:   #e9ecf1;
+  --bg-panel:   #ebedf2;
+  --bg-glass:   rgba(238,241,245,0.94);
+  --bg-elevated:#f5f7fa;   /* off-white pour cards / inputs (au lieu de #fff) */
+  --border:         rgba(15,23,42,0.08);
+  --border-md:      rgba(15,23,42,0.11);
+  --border-strong:  rgba(15,23,42,0.16);
   --border-bright:  rgba(37,99,235,0.28);
   --border-accent:  rgba(37,99,235,0.18);
-  --text:       #111827;
-  --text-soft:  #1f2937;
-  --text-muted: #6b7280;
-  --text-dim:   #9ca3af;
-  --shadow:      rgba(15,23,42,0.07);
-  --shadow-card: 0 1px 4px rgba(15,23,42,0.07), 0 0 0 1px rgba(0,0,0,0.05);
-  --shadow-soft: 0 6px 24px rgba(15,23,42,0.10);
-  --shadow-glow: 0 1px 0 rgba(255,255,255,0.9), 0 2px 8px rgba(15,23,42,0.07);
+  --text:       #1f2937;
+  --text-soft:  #334155;
+  --text-muted: #64748b;
+  --text-dim:   #94a3b8;
+  --shadow:      rgba(15,23,42,0.06);
+  --shadow-card: 0 1px 3px rgba(15,23,42,0.05), 0 0 0 1px rgba(15,23,42,0.04);
+  --shadow-soft: 0 4px 18px rgba(15,23,42,0.08);
+  --shadow-glow: 0 1px 0 rgba(255,255,255,0.7), 0 2px 6px rgba(15,23,42,0.05);
   --green:     #059669;
   --green-dim: rgba(5,150,105,0.12);
   --blue:      #2563eb;
@@ -144,7 +148,7 @@
    body a un background hardcodé sombre
 ══════════════════════════════════════════════════ */
 [data-theme="light"] body {
-  background: #e8eaf0;
+  background: var(--bg-deep);
 }
 [data-theme="light"] body::before {
   opacity: 0;
@@ -162,8 +166,8 @@
   box-shadow: 0 1px 0 rgba(0,0,0,0.05), 0 2px 12px rgba(0,0,0,0.04) !important;
 }
 [data-theme="light"] .sidebar {
-  background: #eceef3 !important;
-  border-right: 1px solid rgba(0,0,0,0.08) !important;
+  background: var(--bg-card) !important;
+  border-right: 1px solid var(--border) !important;
 }
 [data-theme="light"] .main-content {
   background: transparent;
@@ -219,7 +223,7 @@
    CARDS GÉNÉRIQUES
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .card {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border: 1px solid rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -231,11 +235,11 @@
   color: var(--text-muted);
 }
 [data-theme="light"] .stat-box {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border: 1px solid rgba(0,0,0,0.08) !important;
 }
 [data-theme="light"] .stat-box:hover {
-  background: #f5f8ff !important;
+  background: var(--bg-card) !important;
   border-color: rgba(37,99,235,0.18) !important;
 }
 
@@ -244,7 +248,7 @@
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .dashboard-hero__main,
 [data-theme="light"] .dashboard-hero__meta {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border: 1px solid rgba(0,0,0,0.07) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -269,12 +273,12 @@
   color: var(--text) !important;
 }
 [data-theme="light"] .dashboard-app-button {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
 [data-theme="light"] .dashboard-app-button:hover {
-  background: #f5f8ff !important;
+  background: var(--bg-card) !important;
   border-color: rgba(37,99,235,0.20) !important;
   box-shadow: var(--shadow-soft) !important;
 }
@@ -289,12 +293,12 @@
   color: var(--text) !important;
 }
 [data-theme="light"] .dashboard-list-button {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(37,99,235,0.12) !important;
   box-shadow: var(--shadow-card) !important;
 }
 [data-theme="light"] .dashboard-list-button:hover {
-  background: #f5f8ff !important;
+  background: var(--bg-card) !important;
   border-color: rgba(37,99,235,0.24) !important;
   box-shadow: var(--shadow-soft) !important;
 }
@@ -329,7 +333,7 @@
    PERSONNAGES
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .char-section {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -378,7 +382,7 @@
    BOUTIQUE / SHOP
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .shop-item {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -391,7 +395,7 @@
    ACHIEVEMENTS / HAUTS-FAITS
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .achievement-card {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -408,7 +412,7 @@
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .coll-card,
 [data-theme="light"] .collection-card {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
 }
 [data-theme="light"] .coll-img {
@@ -419,7 +423,7 @@
    PNJ
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .npc-card {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -431,7 +435,7 @@
    JOUEURS
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .player-card {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -448,13 +452,13 @@
    LE MONDE / WORLD
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .world-content {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
   color: var(--text-soft) !important;
 }
 [data-theme="light"] .map-container {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
 }
@@ -486,7 +490,7 @@
    TUTORIEL
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .tutorial-content {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.08) !important;
   box-shadow: var(--shadow-card) !important;
   color: var(--text-soft) !important;
@@ -525,7 +529,7 @@
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .input-field,
 [data-theme="light"] .input-sm {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.13) !important;
   color: var(--text) !important;
   box-shadow: none !important;
@@ -533,10 +537,10 @@
 [data-theme="light"] .input-field:focus,
 [data-theme="light"] .input-sm:focus {
   border-color: rgba(37,99,235,0.45) !important;
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   box-shadow: 0 0 0 3px rgba(37,99,235,0.10) !important;
 }
-[data-theme="light"] textarea.input-field { background: #ffffff !important; }
+[data-theme="light"] textarea.input-field { background: var(--bg-elevated) !important; }
 
 /* ══════════════════════════════════════════════════
    BOUTONS
@@ -551,12 +555,12 @@
   box-shadow: 0 4px 18px rgba(37,99,235,0.35) !important;
 }
 [data-theme="light"] .btn-outline {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.12) !important;
   color: var(--text-muted) !important;
 }
 [data-theme="light"] .btn-outline:hover {
-  background: #f5f8ff !important;
+  background: var(--bg-card) !important;
   border-color: rgba(37,99,235,0.28) !important;
   color: var(--text) !important;
 }
@@ -585,7 +589,7 @@
    MODAL
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .modal {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.10) !important;
   box-shadow: 0 8px 40px rgba(15,23,42,0.14) !important;
 }
@@ -638,7 +642,7 @@
   background: radial-gradient(ellipse 100% 80% at 50% 0%, rgba(37,99,235,0.07) 0%, transparent 70%) !important;
 }
 [data-theme="light"] .auth-box {
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   border-color: rgba(0,0,0,0.10) !important;
   box-shadow: 0 4px 32px rgba(15,23,42,0.10) !important;
 }
@@ -655,7 +659,7 @@
 }
 [data-theme="light"] .form-group input:focus {
   border-color: rgba(37,99,235,0.45) !important;
-  background: #ffffff !important;
+  background: var(--bg-elevated) !important;
   box-shadow: 0 0 0 3px rgba(37,99,235,0.10) !important;
 }
 [data-theme="light"] .btn-primary {
