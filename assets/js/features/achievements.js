@@ -27,9 +27,11 @@ let _achClickGuardInstalled = false;
 let _achUploader = null;
 
 // ── State global vue / filtre / recherche ─────────────────────────────────
-window._achFilter ??= 'all';     // 'all' | 'epique' | 'comique' | 'histoire'
-window._achView   ??= 'galerie'; // 'galerie' | 'timeline'
-window._achSearch ??= '';
+window._achFilter     ??= 'all';     // 'all' | 'epique' | 'comique' | 'histoire'
+window._achCharFilter ??= 'all';     // 'all' | charId
+window._achView       ??= 'galerie'; // 'galerie' | 'timeline'
+window._achSearch     ??= '';
+window._achTimelineDesc ??= false;   // true = plus récent en haut
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 function openAchievementModal(id = null) {
@@ -89,10 +91,20 @@ function openAchievementModal(id = null) {
       </div>
       <div class="form-group">
         <label>Date</label>
-        <input class="input-field" id="ach-date"
-          value="${ex?.date || new Date().toLocaleDateString('fr-FR')}">
+        <input type="date" class="input-field" id="ach-date"
+          value="${_toISO(ex?.date) || _todayISO()}">
       </div>
     </div>
+
+    ${STATE.isAdmin ? `
+    <div class="form-group" style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:8px;background:rgba(180,127,255,0.08);border:1px solid rgba(180,127,255,0.18)">
+      <input type="checkbox" id="ach-secret" ${ex?.secret ? 'checked' : ''}
+        style="width:18px;height:18px;cursor:pointer;accent-color:#b47fff">
+      <label for="ach-secret" style="margin:0;cursor:pointer;display:flex;flex-direction:column;gap:2px;flex:1">
+        <span style="font-weight:600;font-size:.85rem;color:#b47fff">🔒 Haut-Fait secret (MJ uniquement)</span>
+        <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">Caché aux joueurs jusqu'à la révélation. Utile pour les prophéties, twists, récompenses surprise.</span>
+      </label>
+    </div>` : ''}
 
     ${(() => {
       const chars = STATE.characters || [];
@@ -215,6 +227,7 @@ async function saveAchievement(id = '') {
       emoji:        document.getElementById('ach-emoji')?.value?.trim() || '🏆',
       date:         document.getElementById('ach-date')?.value?.trim()  || '',
       contributeurs,
+      secret:       !!document.getElementById('ach-secret')?.checked,
     };
 
     let docId = id;
@@ -499,9 +512,14 @@ function _achCardHTML(item, isAdmin) {
     ? `<img class="ach-img" src="${item.imageUrl}" loading="lazy" draggable="false">`
     : `<div class="ach-img-empty"><div class="ach-img-empty-emoji">${item.emoji || cat.emoji}</div></div>`;
 
+  const secretBadge = (isAdmin && item.secret)
+    ? `<div class="ach-secret-badge" title="Caché aux joueurs">🔒 Secret</div>` : '';
+
+  const dateDisplay = _formatDateFr(item.date);
   return `
     <div class="ach-cat-badge">${cat.emoji} ${cat.label}</div>
-    ${item.date ? `<div class="ach-date-badge">${item.date}</div>` : ''}
+    ${dateDisplay ? `<div class="ach-date-badge">${_esc(dateDisplay)}</div>` : ''}
+    ${secretBadge}
     ${imageHtml}
     <div class="ach-meta">
       <div class="ach-title">${_esc(item.titre || 'Haut-Fait')}</div>
@@ -555,11 +573,59 @@ window._achRebuildJustified = _achRebuildGallery; // compat
 window._achRebuildGallery   = _achRebuildGallery;
 
 // ── parseDate helper ──────────────────────────────────────────────────────────
-const _MOIS = {janvier:0,février:1,mars:2,avril:3,mai:4,juin:5,juillet:6,août:7,septembre:8,octobre:9,novembre:10,décembre:11};
+// Accepte plusieurs formats : "15 mars 2024", "15/03/2024", "15-03-2024",
+// "2024-03-15" (ISO), "15.03.2024". Retourne le timestamp ms ou 0 si invalide.
+const _MOIS = {
+  janvier:0, fevrier:1, février:1, mars:2, avril:3, mai:4, juin:5,
+  juillet:6, aout:7, août:7, septembre:8, octobre:9, novembre:10,
+  decembre:11, décembre:11,
+  // formes abrégées courantes
+  janv:0, fevr:1, févr:1, juil:6, sept:8, oct:9, nov:10, dec:11, déc:11,
+};
 function parseDate(str) {
-  const m = str?.match(/(\d+)\s+(\w+)\s+(\d+)/i);
-  if (!m) return 0;
-  return new Date(+m[3], _MOIS[m[2].toLowerCase()] ?? 0, +m[1]).getTime();
+  if (!str) return 0;
+  const s = String(str).trim();
+  if (!s) return 0;
+
+  // ISO yyyy-mm-dd (ou yyyy/mm/dd)
+  let m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]).getTime() || 0;
+
+  // dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy (français)
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+  if (m) {
+    let y = +m[3]; if (y < 100) y += 2000;
+    return new Date(y, +m[2] - 1, +m[1]).getTime() || 0;
+  }
+
+  // "15 mars 2024" — mois en lettres (avec ou sans accent)
+  m = s.match(/(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\.?\s+(\d{2,4})/);
+  if (m) {
+    const moisKey = m[2].toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const moisIdx = _MOIS[moisKey] ?? _MOIS[m[2].toLowerCase()];
+    if (moisIdx == null) return 0;
+    let y = +m[3]; if (y < 100) y += 2000;
+    return new Date(y, moisIdx, +m[1]).getTime() || 0;
+  }
+
+  return 0;
+}
+
+// ── helpers date : ISO (stockage / input) vs FR (affichage) ──────────────────
+function _todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function _toISO(str) {
+  const ts = parseDate(str);
+  if (!ts) return '';
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function _formatDateFr(str) {
+  const ts = parseDate(str);
+  if (!ts) return str ? String(str) : '';
+  return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 // ── Timeline HTML ─────────────────────────────────────────────────────────────
@@ -567,7 +633,16 @@ function _renderTimeline(items) {
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   const chars   = STATE.characters || [];
   const isAdmin = STATE.isAdmin;
-  const sorted  = [...items].sort((a, b) => parseDate(a.date) - parseDate(b.date));
+  // Tri chronologique. Les hauts-faits sans date valide sont relégués à la fin
+  // (peu importe le sens du tri). Sens contrôlé par window._achTimelineDesc.
+  const desc = !!window._achTimelineDesc;
+  const sorted = [...items].sort((a, b) => {
+    const da = parseDate(a.date), db = parseDate(b.date);
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return desc ? db - da : da - db;
+  });
 
   if (!sorted.length) return '';
 
@@ -598,9 +673,12 @@ function _renderTimeline(items) {
           onclick="event.stopPropagation();deleteAchievement('${item.id}')">🗑️</button>
       </div>` : '';
 
-    return `<div class="tl-card" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line}"
+    const secretBadge = (isAdmin && item.secret)
+      ? `<div class="ach-secret-badge" style="position:absolute;top:8px;right:8px;z-index:3">🔒 Secret</div>` : '';
+    return `<div class="tl-card" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line};position:relative"
       onclick="${item.imageUrl ? `window._achOpenLightbox('${item.id}')` : 'void 0'}">
       ${imgEl}
+      ${secretBadge}
       <div class="tl-card-body">
         <div class="tl-card-cat" style="background:${cat.glow};border:1px solid ${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
         <div class="tl-card-title">${_esc(item.titre || 'Haut-Fait')}</div>
@@ -621,7 +699,7 @@ function _renderTimeline(items) {
         <div class="tl-node-wrap">
           <div class="tl-node">
             <div class="tl-node-dot" style="--c:${cat.color};--c-glow:${cat.glow}">${cat.emoji}</div>
-            ${item.date ? `<div class="tl-node-date" style="color:${cat.color}">${item.date}</div>` : ''}
+            ${(() => { const d = _formatDateFr(item.date); return d ? `<div class="tl-node-date" style="color:${cat.color}">${_esc(d)}</div>` : ''; })()}
           </div>
         </div>
         ${side === 'right' ? cardHTML(item, side) : '<div class="tl-spacer"></div>'}
@@ -630,16 +708,80 @@ function _renderTimeline(items) {
   </div>`;
 }
 
+// ── Barre additionnelle : chips par perso + sens timeline ────────────────────
+function _achRenderControlsExtras() {
+  // On l'injecte au-dessus de #ach-content, à l'intérieur de .hall-content
+  const root = document.querySelector('.hall-content');
+  if (!root) return;
+  let bar = document.getElementById('ach-extra-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'ach-extra-bar';
+    bar.className = 'ach-extra-bar';
+    root.insertBefore(bar, root.firstChild);
+  }
+
+  // Chips perso : seulement ceux qui ont au moins 1 HF visible pour l'utilisateur
+  const all = window._achItems || [];
+  const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
+  const counts = new Map();
+  visible.forEach(a => (a.contributeurs || []).forEach(cid => counts.set(cid, (counts.get(cid)||0)+1)));
+  const chars = (STATE.characters || []).filter(c => counts.has(c.id));
+  const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const active = window._achCharFilter || 'all';
+  const isTimeline = (window._achView || 'galerie') === 'timeline';
+  const desc = !!window._achTimelineDesc;
+
+  const charChips = chars.length ? `
+    <div class="ach-char-filter">
+      <button class="ach-char-chip${active==='all'?' active':''}" data-charid="all"
+        onclick="window._achSetCharFilter('all')" title="Tous les personnages">👥 Tous</button>
+      ${chars.map(c => {
+        const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
+        const pos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+        const isOn = active === c.id;
+        return `<button class="ach-char-chip${isOn?' active':''}" data-charid="${c.id}"
+          onclick="window._achSetCharFilter('${c.id}')"
+          style="--c:${col}" title="${_esc(c.nom||'?')} — ${counts.get(c.id)} haut${counts.get(c.id)>1?'s':''}-fait${counts.get(c.id)>1?'s':''}">
+          <span class="ach-char-chip-av">
+            ${c.photo ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
+                      : `<span style="font-family:'Cinzel',serif;font-weight:700">${(c.nom||'?')[0].toUpperCase()}</span>`}
+          </span>
+          <span class="ach-char-chip-name">${_esc((c.nom||'?').slice(0,12))}</span>
+          <span class="ach-char-chip-count">${counts.get(c.id)}</span>
+        </button>`;
+      }).join('')}
+    </div>` : '';
+
+  const sortBtn = isTimeline ? `
+    <button class="ach-sort-toggle" onclick="window._achToggleTimelineDir()"
+      title="Inverser le sens de la chronologie">
+      ${desc ? '↓ Plus récent en haut' : '↑ Plus ancien en haut'}
+    </button>` : '';
+
+  bar.innerHTML = charChips + sortBtn;
+  bar.style.display = (charChips || sortBtn) ? 'flex' : 'none';
+}
+
 // ── Rendu du contenu (filtre + vue) ──────────────────────────────────────────
 async function _achRenderContent() {
   const contentEl = document.getElementById('ach-content');
   if (!contentEl) return;
+  _achRenderControlsExtras();
 
-  const all    = window._achItems || [];
-  const filter = window._achFilter || 'all';
-  const search = (window._achSearch || '').trim().toLowerCase();
+  const all        = window._achItems || [];
+  const filter     = window._achFilter || 'all';
+  const charFilter = window._achCharFilter || 'all';
+  const search     = (window._achSearch || '').trim().toLowerCase();
+  const isAdmin    = STATE.isAdmin;
 
-  let filtered = filter === 'all' ? all : all.filter(a => (a.categorie || 'epique') === filter);
+  // 1. Filtre secret (joueurs ne voient pas les HF secrets)
+  let filtered = isAdmin ? all : all.filter(a => !a.secret);
+  // 2. Filtre catégorie
+  if (filter !== 'all') filtered = filtered.filter(a => (a.categorie || 'epique') === filter);
+  // 3. Filtre par perso contributeur
+  if (charFilter !== 'all') filtered = filtered.filter(a => (a.contributeurs || []).includes(charFilter));
+  // 4. Recherche
   if (search) {
     filtered = filtered.filter(a =>
       (a.titre || '').toLowerCase().includes(search) ||
@@ -647,16 +789,24 @@ async function _achRenderContent() {
     );
   }
 
-  // Map lightbox
-  window._achLightboxItems = Object.fromEntries(all.map(a => [a.id, a]));
+  // Map lightbox (limitée aussi pour les joueurs : pas d'ouverture d'un HF secret)
+  const visibleForLightbox = isAdmin ? all : all.filter(a => !a.secret);
+  window._achLightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
 
   if (!filtered.length) {
     const catDef = ACH_CATS.find(c => c.id === filter);
+    const charName = charFilter !== 'all'
+      ? ((STATE.characters || []).find(c => c.id === charFilter)?.nom || 'ce personnage')
+      : null;
+    let title = 'Aucun haut-fait';
+    let sub = STATE.isAdmin ? 'Ajoutez le premier !' : '';
+    if (search) { title = 'Aucun résultat'; sub = `pour « ${_esc(search)} »`; }
+    else if (charName) { title = `Aucun haut-fait`; sub = `pour « ${_esc(charName)} »`; }
     contentEl.innerHTML = `
       <div class="hall-empty">
         <div class="hall-empty-icon">${catDef?.emoji || '🏆'}</div>
-        <div class="hall-empty-title">${search ? 'Aucun résultat' : 'Aucun haut-fait'}</div>
-        <div class="hall-empty-sub">${search ? `pour « ${_esc(search)} »` : STATE.isAdmin ? 'Ajoutez le premier !' : ''}</div>
+        <div class="hall-empty-title">${title}</div>
+        <div class="hall-empty-sub">${sub}</div>
       </div>`;
     return;
   }
@@ -697,6 +847,17 @@ window._achSetSearch = (val) => {
   window._achSearch = val;
   clearTimeout(_achSearchTimer);
   _achSearchTimer = setTimeout(_achRenderContent, 240);
+};
+window._achSetCharFilter = (charId) => {
+  window._achCharFilter = charId || 'all';
+  document.querySelectorAll('.ach-char-chip').forEach(el => {
+    el.classList.toggle('active', el.dataset.charid === window._achCharFilter);
+  });
+  _achRenderContent();
+};
+window._achToggleTimelineDir = () => {
+  window._achTimelineDesc = !window._achTimelineDesc;
+  _achRenderContent();
 };
 
 // ── LIGHTBOX ENRICHIE ─────────────────────────────────────────────────────────

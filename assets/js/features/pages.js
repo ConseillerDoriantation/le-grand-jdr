@@ -33,7 +33,7 @@ const PAGES = {
 
     // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
-    const [chars, storyItems, bastionDoc, achievements, quests, collectionItems, allPartyChars] = await Promise.all([
+    const [chars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, allPartyChars] = await Promise.all([
       loadChars(uid).catch(() => []),
       loadCollection('story').catch(() => []),
       getDocData('bastion', 'main').catch(() => null),
@@ -42,6 +42,8 @@ const PAGES = {
       loadCollection('collection').catch(() => []),
       STATE.isAdmin ? Promise.resolve([]) : loadChars(null).catch(() => []),
     ]);
+    // Les hauts-faits secrets restent invisibles aux joueurs partout dans le dashboard
+    const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
     STATE.characters = chars;
 
     const pseudo = STATE.profile?.pseudo || 'Aventurier';
@@ -1415,7 +1417,9 @@ const PAGES = {
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
   async achievements() {
     // Shell uniquement — le contenu est délégué à achievements.js (_achRenderContent)
-    const items = window._achItems || await loadCollection('achievements');
+    const allItems = window._achItems || await loadCollection('achievements');
+    // Les joueurs ne doivent rien voir des HF secrets, y compris dans les compteurs
+    const items = STATE.isAdmin ? allItems : allItems.filter(a => !a.secret);
     const content = document.getElementById('main-content');
 
     const CATS = [
