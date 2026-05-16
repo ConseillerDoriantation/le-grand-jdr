@@ -88,6 +88,7 @@ let _playlists     = [];     // [{id, name, color, soundIds[]}]
 let _musicState    = {};     // état Firestore courant
 let _audioEl       = null;   // HTMLAudioElement actif
 let _musicTab      = 'sons'; // 'sons' | 'playlists'
+let _musicSearch   = { sons: '', playlists: '' }; // filtre par onglet, persisté en session
 let _musicCloseOut = null;
 let _musicProgTimer = null;
 let _musicSortables = [];   // instances Sortable actives
@@ -7631,6 +7632,19 @@ function _stopPreview() {
   document.querySelectorAll('.vtt-mact-preview.on').forEach(b => b.classList.remove('on'));
 }
 
+// Préférence de volume locale à chaque utilisateur, persistée entre sessions
+// pour ne pas être réinitialisée à chaque nouvelle musique.
+const _USER_VOL_KEY = 'vtt:musicVolume';
+function _getUserVolume() {
+  const v = parseFloat(localStorage.getItem(_USER_VOL_KEY));
+  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.7;
+}
+function _setUserVolume(v) {
+  const clamped = Math.max(0, Math.min(1, v));
+  try { localStorage.setItem(_USER_VOL_KEY, String(clamped)); } catch(e){}
+  return clamped;
+}
+
 window._vttPreview = (soundId, btn) => {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
   // Même son → stop
@@ -7638,7 +7652,7 @@ window._vttPreview = (soundId, btn) => {
   _stopPreview();
   const el = new Audio(sound.url);
   el.dataset.soundId = soundId;
-  el.volume = 0.7;
+  el.volume = _getUserVolume();
   el.addEventListener('ended', _stopPreview);
   el.play().catch(() => showNotif('Impossible de lire ce son', 'error'));
   _previewEl = el;
@@ -7691,11 +7705,25 @@ function _renderMusicPanel() {
       ${_renderNowPlaying(curSound, ms)}`;
   }
 
-  // Bind volume slider local
+  // Bind champ de recherche — état persisté par onglet
+  const sf = panel.querySelector('#vtt-music-search');
+  if (sf) {
+    sf.value = _musicSearch[_musicTab] || '';
+    sf.oninput = e => {
+      _musicSearch[_musicTab] = e.target.value;
+      _applyMusicFilter(e.target.value, _musicTab);
+    };
+    if (sf.value) _applyMusicFilter(sf.value, _musicTab);
+  }
+  // Bind volume slider local — préférence par utilisateur (localStorage)
   const vsl = panel.querySelector('#vtt-music-vol');
   if (vsl) {
-    vsl.value = Math.round((_audioEl?.volume ?? ms.volume ?? 0.7) * 100);
-    vsl.oninput = e => { if (_audioEl) _audioEl.volume = +e.target.value / 100; };
+    vsl.value = Math.round(_getUserVolume() * 100);
+    vsl.oninput = e => {
+      const v = _setUserVolume(+e.target.value / 100);
+      if (_audioEl)   _audioEl.volume = v;
+      if (_previewEl) _previewEl.volume = v;
+    };
   }
   // Barre de progression
   clearInterval(_musicProgTimer);
@@ -7722,8 +7750,49 @@ function _fmtTime(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
+function _musicSearchInput(placeholder) {
+  return `<div class="vtt-music-search-row">
+    <input type="search" id="vtt-music-search" class="vtt-music-search"
+      placeholder="${placeholder}" autocomplete="off">
+  </div>`;
+}
+
+// Filtre les éléments du panel à l'aide des classes existantes — pas de re-render
+// pour préserver le focus du champ et l'état des Sortable.
+function _applyMusicFilter(query, tab) {
+  const q = (query || '').trim().toLowerCase();
+  const root = document.querySelector('.vtt-music-body'); if (!root) return;
+  const match = el => (el?.textContent || '').toLowerCase().includes(q);
+
+  if (tab === 'sons') {
+    root.querySelectorAll('.vtt-music-son-item').forEach(el => {
+      el.hidden = q && !match(el.querySelector('.vtt-music-son-name'));
+    });
+    return;
+  }
+  // Playlists : pool + playlists (avec filtrage des sons internes)
+  root.querySelectorAll('.vtt-music-pool-item').forEach(el => {
+    el.hidden = q && !match(el.querySelector('.vtt-music-pool-name'));
+  });
+  root.querySelectorAll('.vtt-music-pl-item').forEach(pl => {
+    const plMatch = !q || match(pl.querySelector('.vtt-music-pl-name'));
+    const sounds = pl.querySelectorAll('.vtt-music-pl-sound');
+    if (plMatch) {
+      pl.hidden = false;
+      sounds.forEach(s => { s.hidden = false; });
+      return;
+    }
+    let anyMatch = false;
+    sounds.forEach(s => {
+      const ok = match(s.querySelector('.vtt-music-pl-sname'));
+      s.hidden = !ok; if (ok) anyMatch = true;
+    });
+    pl.hidden = !anyMatch;
+  });
+}
+
 function _renderSonsTab(mj) {
-  let h = '';
+  let h = _musicSearchInput('🔍 Rechercher un son…');
   if (mj) h += `
     <div class="vtt-music-son-actions-row">
       <button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()" style="flex:1">＋ URL</button>
@@ -7744,7 +7813,7 @@ function _renderSonsTab(mj) {
 }
 
 function _renderPlaylistsTab(mj) {
-  let h = '';
+  let h = _musicSearchInput('🔍 Rechercher une playlist ou un son…');
   if (mj) h += `<button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()">＋ Nouvelle playlist</button>`;
 
   // Pool — sons non encore placés dans une playlist
@@ -7877,7 +7946,7 @@ window._vttPlaySound = async (soundId, loop) => {
   if (ms.playing && ms.currentSoundId===soundId && !ms.currentPlaylistId && !!ms.loop===!!loop)
     return window._vttStopMusic();
   await _setMusicState({ playing:true, paused:false, currentSoundId:soundId,
-    currentPlaylistId:null, loop:!!loop, shuffle:false, volume:ms.volume??0.7,
+    currentPlaylistId:null, loop:!!loop, shuffle:false,
     startedAt:serverTimestamp() });
 };
 
@@ -7899,7 +7968,7 @@ window._vttPlayPlaylist = async (playlistId, shuffle) => {
   await _setMusicState({ playing:true, paused:false,
     currentSoundId:pl.soundIds[order[0]], currentPlaylistId:playlistId,
     loop:false, shuffle:!!shuffle, shuffleOrder:order, playlistIndex:0,
-    volume:ms.volume??0.7, startedAt:serverTimestamp() });
+    startedAt:serverTimestamp() });
 };
 
 window._vttMusicNext = async () => {
@@ -7969,7 +8038,7 @@ function _syncMusicPlayback(ms) {
   _killAudio();
   const el = new Audio(sound.url);
   el.dataset.soundId = ms.currentSoundId;
-  el.volume = ms.volume ?? 0.7;
+  el.volume = _getUserVolume();
   el.loop = ms.loop ?? false;
 
   // Sync temps (non-loop uniquement)
