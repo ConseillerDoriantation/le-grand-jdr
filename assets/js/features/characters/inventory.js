@@ -1056,15 +1056,23 @@ export function editInvItem(idx) {
 export async function saveInvItem(idx) {
   try {
     const c = STATE.activeChar; if(!c) return;
-    const inv = c.inventaire||[];
-    const newItem = {
+    const inv = [...(c.inventaire || [])];
+    // Convention "1 entrée = 1 unité" : on respecte la qté saisie en N entrées
+    const qte = Math.max(1, parseInt(document.getElementById('inv-qte')?.value) || 1);
+    const baseItem = {
       nom: document.getElementById('inv-nom')?.value||'?',
       type: document.getElementById('inv-type')?.value||'',
-      qte: document.getElementById('inv-qte')?.value||'1',
+      qte: '1',
       description: document.getElementById('inv-desc')?.value||'',
     };
-    if (idx>=0) inv[idx]=newItem; else inv.push(newItem);
-    c.inventaire=inv;
+    if (idx >= 0) {
+      // Édition : remplace l'entrée idx, puis push qte-1 copies supplémentaires
+      inv[idx] = { ...baseItem };
+      for (let i = 1; i < qte; i++) inv.push({ ...baseItem });
+    } else {
+      for (let i = 0; i < qte; i++) inv.push({ ...baseItem });
+    }
+    c.inventaire = inv;
     await updateInCol('characters',c.id,{inventaire:inv});
     closeModal();
     showNotif('Inventaire mis à jour !','success');
