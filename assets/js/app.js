@@ -30,6 +30,15 @@ import { initTheme, toggleTheme } from './shared/theme.js';
 import './features/uploadImage.js';
 import './features/character-photo.js';
 
+// Quick-view perso accessible depuis le dashboard, VTT, etc. — lazy load au 1er clic
+window._openQuickView = async (id) => {
+  if (!window._quickViewChar) {
+    try { await import('./features/characters/quick-view.js'); }
+    catch (e) { console.error('[quick-view] load failed:', e); return; }
+  }
+  window._quickViewChar?.(id);
+};
+
 // ── Exposition sur window EN PREMIER ─────────────────────────────────────────
 // toggleTheme doit être disponible avant le rendu
 // car index.html utilise onclick="toggleTheme()"

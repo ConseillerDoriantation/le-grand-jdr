@@ -3697,16 +3697,15 @@ input[type=number].input-field::-webkit-outer-spin-button {
 }
 
 /* ── Sidebar ─────────────────────────────────── */
+/* Pas de scroll indépendant : sticky-top pour rester visible tant que la
+   colonne droite scrolle. Si la sidebar dépasse 100vh, elle continue dans
+   le flux normal (pas de barre de scroll dédiée). */
 .cs-sidebar {
   position: sticky;
   top: 0;
+  align-self: flex-start;
   width: 300px;
   min-width: 300px;
-  max-height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
   background: var(--bg-panel, var(--bg-card));
   border-right: 1px solid var(--border);
   border-radius: var(--radius-lg) 0 0 var(--radius-lg);
@@ -3715,8 +3714,6 @@ input[type=number].input-field::-webkit-outer-spin-button {
   flex-direction: column;
   gap: 14px;
 }
-.cs-sidebar::-webkit-scrollbar { width: 4px; }
-.cs-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 /* Aura themes — drives portrait border/glow + sidebar bg gradient */
 [data-aura="gold"] {
@@ -4411,6 +4408,75 @@ input[type=number].input-field::-webkit-outer-spin-button {
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   }
   .cs-srow { grid-template-columns: 32px 32px 38px 1fr; }
+}
+
+/* ══════════════════════════════════════════════
+   MOBILE — < 600px : compacter densité
+══════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  /* Tabs scrollables horizontalement plutôt que serrées */
+  .cs-tabs,
+  .cs-subtab-bar {
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+  }
+  .cs-tabs::-webkit-scrollbar,
+  .cs-subtab-bar::-webkit-scrollbar { display: none; }
+  .cs-tab,
+  .cs-subtab { flex-shrink: 0; }
+
+  /* Photo et bloc d'identité plus compacts */
+  .cs-id-block { gap: 0.7rem; }
+  .cs-photo-wrap { width: 90px; min-width: 90px; }
+  .cs-photo { width: 90px; height: 90px; }
+  .cs-name { font-size: 1.1rem; }
+  .cs-id-chips { gap: 4px; }
+  .cs-id-chip { font-size: 0.7rem; padding: 2px 8px; }
+
+  /* Sidebar globale plus ramassée */
+  .cs-sidebar { padding: 14px 12px; }
+  .cs-vitals-row { gap: 8px; }
+  .cs-vital-val { font-size: 1.3rem; }
+  .cs-secondary-row { gap: 5px; flex-wrap: wrap; }
+  .cs-stat-chip { padding: 4px 8px; font-size: 0.75rem; }
+  .cs-stat-chip .cs-chip-val { font-size: 0.85rem; }
+
+  /* Stats 2x3 deviennent 3x2 (plus large que haut sur mobile) */
+  .cs-stats-grid { gap: 5px; }
+  .cs-stats-grid .cs-srow {
+    padding: 4px 6px;
+    grid-template-columns: 28px 28px 36px 1fr;
+    gap: 4px;
+  }
+
+  /* Contenu d'onglet : moins de padding */
+  .cs-tab-body { padding: 14px 12px; }
+
+  /* Réduire les marges autour des sections */
+  .cs-section { padding: 14px 12px; }
+  .cs-section-hdr { margin-bottom: 8px; }
+  .cs-section-title { font-size: 0.92rem; }
+
+  /* Bouton Export / Delete : ne pas casser le layout en flex-wrap */
+  .cs-name-row {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+}
+
+/* ══════════════════════════════════════════════
+   MOBILE — < 420px : ultra serré
+══════════════════════════════════════════════ */
+@media (max-width: 420px) {
+  .cs-name { font-size: 1rem; }
+  .cs-tab { font-size: 0.78rem; padding: 6px 10px; }
+  .cs-subtab { font-size: 0.74rem; padding: 4px 8px; }
+  .cs-vital-controls { gap: 6px; }
+  .cs-vbtn { width: 26px; height: 26px; font-size: 0.85rem; }
+  /* PV/PM en colonne plutôt que côte-à-côte si vraiment étroit */
+  .cs-vitals-row { grid-template-columns: 1fr; }
 }
 
 /* ══════════════════════════════════════════════

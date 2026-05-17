@@ -490,6 +490,8 @@ const PAGES = {
         if (!byPlayer[key] || (c.niveau||1) > (byPlayer[key].niveau||1)) byPlayer[key] = c;
       });
       const members = Object.values(byPlayer).slice(0, 5);
+      // Cache global pour que le quick-view trouve les persos d'autres joueurs
+      window._partyCharsCache = partyChars;
       return `
       <div class="dv2-party-card">
         <div class="dv2-panel-header">
@@ -500,13 +502,17 @@ const PAGES = {
           const av = c.photo
             ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
             : (c.nom||'?')[0].toUpperCase();
+          const isOwn = STATE.isAdmin || c.uid === STATE.user?.uid;
           return `
-          <div class="dv2-party-member" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+          <div class="dv2-party-member" onclick="window._openQuickView('${c.id}')" style="cursor:pointer"
+            title="Cliquer pour aperçu rapide">
             <div class="dv2-party-avatar">${av}</div>
             <div style="flex:1;min-width:0">
               <div class="dv2-party-name">${_esc(c.nom||'?')}</div>
               <div class="dv2-party-sub">Niv.${c.niveau||1}${c.classe?` · ${_esc(c.classe)}`:''}</div>
             </div>
+            ${isOwn ? `<button class="dv2-party-fullopen" onclick="event.stopPropagation();window._goToChar('${c.id}')"
+              title="Ouvrir la fiche complète">→</button>` : ''}
             <div class="dv2-party-dot"></div>
           </div>`;
         }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Les membres du groupe apparaîtront ici.</div>`}

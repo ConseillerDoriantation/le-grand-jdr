@@ -74,6 +74,8 @@ import {
   exportCharJSON, exportCharPDF, openCharExportMenu,
 } from './characters/export.js';
 
+import { quickViewChar } from './characters/quick-view.js';
+
 // ══════════════════════════════════════════════
 // SÉLECTION
 // ══════════════════════════════════════════════
@@ -475,10 +477,23 @@ async function setCharAura(charId, aura) {
   );
 }
 
+// Mémorise la position de scroll par onglet (clé : charId + tab)
+const _scrollByTab = new Map();
+function _scrollKey(charId, tab) { return `${charId || '?'}::${tab}`; }
+
 function showCharTab(tab, el) {
   const isTopTab = ['combat','inventaire','journal','compte','profil'].includes(tab);
   const newTop  = isTopTab ? tab : (_LEAF_TO_TOP[tab] || 'combat');
   const newLeaf = isTopTab ? (_TOP_DEFAULTS[tab] || tab) : tab;
+
+  // Mémorise la position de scroll de l'onglet quitté (pour le restituer plus tard)
+  const prevLeaf = window._currentCharTab;
+  const prevChar = window._currentChar?.id;
+  if (prevLeaf && prevChar) {
+    const area = document.getElementById('char-tab-content');
+    const scrollTop = area?.scrollTop ?? window.scrollY ?? 0;
+    if (scrollTop > 0) _scrollByTab.set(_scrollKey(prevChar, prevLeaf), scrollTop);
+  }
 
   window._currentTopTab  = newTop;
   window._currentCharTab = newLeaf;
@@ -500,6 +515,17 @@ function showCharTab(tab, el) {
   );
 
   _renderTab(newLeaf, window._currentChar, window._canEditChar);
+
+  // Restitue le scroll de l'onglet rejoint (si on y était déjà passé)
+  const charId = window._currentChar?.id;
+  const saved  = charId ? _scrollByTab.get(_scrollKey(charId, newLeaf)) : null;
+  if (saved != null) {
+    requestAnimationFrame(() => {
+      const area = document.getElementById('char-tab-content');
+      if (area) area.scrollTop = saved;
+      else window.scrollTo({ top: saved, behavior: 'instant' });
+    });
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -569,4 +595,7 @@ Object.assign(window, {
 
   // Export fiche
   exportCharJSON, exportCharPDF, openCharExportMenu,
+
+  // Quick-view
+  quickViewChar,
 });
