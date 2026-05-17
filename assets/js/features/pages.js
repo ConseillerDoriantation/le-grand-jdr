@@ -69,8 +69,25 @@ const PAGES = {
     const totalMissions = storyItems.filter(i => i.type === 'mission').length;
     const doneMissions  = storyItems.filter(i => i.type === 'mission' && i.statut === 'Terminée').length;
 
-    // Bastion
-    const bastionLevel  = bastionDoc ? 1 + (bastionDoc.ameliorationsCustom||[]).filter(a=>(a.fondsActuels||0)>=(a.cout||1)&&(a.cout||1)>0).length : null;
+    // Bastion — compatibilité ancien & nouveau modèle
+    function _bastionLevel(d) {
+      if (!d) return null;
+      // Nouveau modèle : niveau = nb salles construites + 1
+      if (d.salles && typeof d.salles === 'object' && !Array.isArray(d.salles)) {
+        return 1 + Object.values(d.salles).filter(s => (s?.niveau || 0) > 0).length;
+      }
+      // Ancien modèle : niveau = nb améliorations débloquées + 1
+      return 1 + (d.ameliorationsCustom || []).filter(a => (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0).length;
+    }
+    function _bastionSallesArr(d) {
+      if (!d?.salles) return [];
+      if (Array.isArray(d.salles)) return d.salles.filter(s => s?.nom);
+      // Nouveau modèle : { [slug]: {niveau, ...} }
+      return Object.entries(d.salles)
+        .filter(([_, s]) => (s?.niveau || 0) > 0)
+        .map(([slug, s]) => ({ nom: slug.charAt(0).toUpperCase() + slug.slice(1), niveau: s.niveau }));
+    }
+    const bastionLevel  = _bastionLevel(bastionDoc);
     const bastionNom    = bastionDoc?.nom || 'Le Bastion';
 
     // ── Carte mini personnage ─────────────────────────────────────────
@@ -643,22 +660,42 @@ const PAGES = {
     }
 
     function _bastionCardV2() {
-      const salles = (bastionDoc?.salles||[]).filter(s=>s.nom).slice(0, 4);
-      const ev     = bastionDoc?.evenementCourant;
+      // Détection du nouveau modèle (salles = objet) vs ancien (array)
+      const isNewModel = bastionDoc?.salles && typeof bastionDoc.salles === 'object' && !Array.isArray(bastionDoc.salles);
+      const emoji   = bastionDoc?.emoji || '🏰';
+      const semaine = bastionDoc?.semaine;
+      const or      = bastionDoc?.or || 0;
+      const salles  = _bastionSallesArr(bastionDoc).slice(0, 6);
+
+      // Constructions en cours (nouveau modèle uniquement)
+      let buildingCount = 0;
+      if (isNewModel) {
+        buildingCount = Object.values(bastionDoc.salles || {})
+          .filter(s => s?.weeksLeftToBuild > 0).length;
+      }
+
+      const ev = bastionDoc?.evenementCourant;
       return `
       <div class="dv2-bastion-card" onclick="navigate('bastion')" style="cursor:pointer">
         <div class="dv2-bastion-header">
-          <div class="dv2-bastion-icon">🏰</div>
-          <div>
+          <div class="dv2-bastion-icon">${_esc(emoji)}</div>
+          <div style="flex:1;min-width:0">
             <div class="dv2-bastion-name">${_esc(bastionNom)}</div>
-            <div class="dv2-bastion-level">Niveau ${bastionLevel}</div>
+            <div class="dv2-bastion-level">${semaine ? `Période ${semaine}` : `Niveau ${bastionLevel}`}${bastionDoc?.lieu ? ` · ${_esc(bastionDoc.lieu)}` : ''}</div>
           </div>
-          <button class="dv2-section-action" style="margin-left:auto" onclick="event.stopPropagation();navigate('bastion')">Gérer →</button>
+          <button class="dv2-section-action" onclick="event.stopPropagation();navigate('bastion')">Gérer →</button>
         </div>
+
+        ${isNewModel ? `
+        <div class="dv2-bastion-stats">
+          <div class="dv2-bs-stat"><span class="dv2-bs-stat-ico">💰</span><span class="dv2-bs-stat-val">${or}</span><span class="dv2-bs-stat-lbl">or</span></div>
+          ${buildingCount > 0 ? `<div class="dv2-bs-stat dv2-bs-stat--build"><span class="dv2-bs-stat-ico">🏗</span><span class="dv2-bs-stat-val">${buildingCount}</span><span class="dv2-bs-stat-lbl">en construction</span></div>` : ''}
+        </div>` : ''}
+
         ${salles.length > 0 ? `
         <div class="dv2-bastion-rooms">${salles.map(s=>`
-          <div class="dv2-bastion-room"><div class="dv2-bastion-room-dot"></div>${_esc(s.nom)}</div>`).join('')}
-        </div>` : ''}
+          <div class="dv2-bastion-room"><div class="dv2-bastion-room-dot"></div>${_esc(s.nom)}${s.niveau ? ` <span style="font-size:.62rem;opacity:.7">Niv.${s.niveau}</span>` : ''}</div>`).join('')}
+        </div>` : `<div class="dv2-bastion-note" style="background:none;border:none;color:var(--text-dim);font-style:italic">Aucune salle construite</div>`}
         ${ev && ev !== 'calme' ? `<div class="dv2-bastion-note">⚠️ ${_esc(ev)}</div>` : ''}
       </div>`;
     }

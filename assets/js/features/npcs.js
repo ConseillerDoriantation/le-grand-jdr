@@ -424,7 +424,40 @@ function _renderFicheHeader(n) {
   <div style="font-size:.81rem;color:var(--text-muted);line-height:1.75;margin-top:.1rem;
     padding:.55rem .65rem;background:rgba(255,255,255,.02);border-radius:7px;
     border-left:2px solid ${af.couleur}44">${_esc(n.description)}</div>` : ''}
+
+  ${_renderBastionProfil(n)}
 </div>
+  </div>`;
+}
+
+// Bloc "Profil bastion" : visible MJ toujours, joueur seulement si disposition = Allié
+function _renderBastionProfil(n) {
+  const isAllie = n.disposition === 'Allié';
+  // Si pas allié et qu'on n'est pas MJ → masqué
+  if (!isAllie && !STATE.isAdmin) return '';
+  const hasInfo = (n.activites && n.activites.length) || n.passif || n.salaireSuggere;
+  if (!hasInfo) return '';
+
+  const ACT_LABELS = {
+    forge: '🔨 Forge', atelier_confection: '🧵 Atelier de confection',
+    atelier_orfevre: '💎 Orfèvre', herboristerie: '🌿 Herboristerie',
+    taverne: '🍻 Taverne', comptoir: '💰 Comptoir',
+    bibliotheque: '📜 Bibliothèque', sanctuaire: '✨ Sanctuaire',
+    voliere: '🦅 Volière',
+  };
+
+  const activites = (n.activites || []).map(a => ACT_LABELS[a] || a);
+  const mjBadge = !isAllie ? `<span style="font-size:.58rem;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(180,127,255,0.18);border:1px solid rgba(180,127,255,0.45);color:#cfa8ff;letter-spacing:.04em;text-transform:uppercase;margin-left:.4rem">MJ only</span>` : '';
+
+  return `<div style="margin-top:.5rem;padding:.55rem .75rem;background:rgba(232,184,75,0.05);border:1px solid rgba(232,184,75,0.20);border-radius:8px;font-size:.78rem">
+    <div style="font-weight:700;color:var(--gold,#e8b84b);letter-spacing:.04em;text-transform:uppercase;font-size:.66rem;margin-bottom:.35rem;display:flex;align-items:center">
+      🏰 Recrutable au Bastion${mjBadge}
+    </div>
+    ${activites.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:.3rem">
+      ${activites.map(a => `<span style="font-size:.66rem;padding:1px 7px;border-radius:999px;background:rgba(232,184,75,0.10);border:1px solid rgba(232,184,75,0.32);color:var(--gold,#e8b84b);font-weight:600">${_esc(a)}</span>`).join('')}
+    </div>` : ''}
+    ${n.passif ? `<div style="color:var(--text-soft);font-style:italic;line-height:1.45">🎁 ${_esc(n.passif)}</div>` : ''}
+    ${n.salaireSuggere ? `<div style="margin-top:.25rem;color:var(--text-muted);font-size:.7rem">💰 ${n.salaireSuggere} or / sem.</div>` : ''}
   </div>`;
 }
 
@@ -1225,6 +1258,51 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
       <textarea class="input-field" id="npc-desc" rows="4"
         placeholder="Apparence, personnalité, secrets…">${_esc(npc?.description || '')}</textarea>
     </div>
+
+    <!-- Bastion : embauchage -->
+    <div class="form-group" style="margin-top:.75rem;padding:.7rem .9rem;background:rgba(232,184,75,.06);border:1px solid rgba(232,184,75,.22);border-radius:10px">
+      <label style="display:flex;align-items:center;gap:.4rem;color:var(--gold,#e8b84b);font-weight:700;margin-bottom:.5rem">
+        🏰 Profil bastion <span style="font-size:.7rem;font-weight:400;color:var(--text-dim);text-transform:none;letter-spacing:0">(si embauché comme employé)</span>
+      </label>
+      <div class="grid-2" style="gap:.6rem">
+        <div>
+          <label style="font-size:.72rem;color:var(--text-muted)">Salaire suggéré (or/sem.)</label>
+          <input type="number" class="input-field" id="npc-salaireSuggere" min="0"
+            value="${parseInt(npc?.salaireSuggere) || 0}" placeholder="0">
+        </div>
+        <div>
+          <label style="font-size:.72rem;color:var(--text-muted)">Réservé MJ</label>
+          <select class="input-field" id="npc-embauchable" style="${STATE.isAdmin?'':'pointer-events:none;opacity:.6'}">
+            <option value="oui" ${npc?.embauchable!==false?'selected':''}>Visible côté joueurs</option>
+            <option value="non" ${npc?.embauchable===false?'selected':''}>Caché aux joueurs</option>
+          </select>
+        </div>
+      </div>
+      <label style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem;display:block">Activités / spécialités <span style="color:var(--text-dim);font-weight:400">(salles où ce PNJ peut travailler)</span></label>
+      <div id="npc-activites-wrap" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:.3rem">
+        ${[
+          ['forge',              '🔨 Forge'],
+          ['atelier_confection', '🧵 Atelier de confection'],
+          ['atelier_orfevre',    '💎 Atelier d\'orfèvre'],
+          ['herboristerie',      '🌿 Herboristerie'],
+          ['taverne',            '🍻 Taverne'],
+          ['comptoir',           '💰 Comptoir'],
+          ['bibliotheque',       '📜 Bibliothèque'],
+          ['sanctuaire',         '✨ Sanctuaire'],
+          ['voliere',            '🦅 Volière'],
+        ].map(([slug, label]) => {
+          const checked = (npc?.activites || []).includes(slug);
+          return `<label class="npc-act-pill ${checked?'active':''}">
+            <input type="checkbox" value="${slug}" ${checked?'checked':''} style="display:none">
+            ${label}
+          </label>`;
+        }).join('')}
+      </div>
+      <label style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem;display:block">Passif / bonus en tant qu'employé</label>
+      <textarea class="input-field" id="npc-passif" rows="2"
+        placeholder="ex: +20% à la production de la Forge · Réduction de 10% sur les achats…">${_esc(npc?.passif || '')}</textarea>
+    </div>
+
     ${_renderStatsForm(npc)}
     <div class="form-group" style="margin-top:.75rem">
       <label>Portrait <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
@@ -1254,6 +1332,17 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
         onclick="deleteNpc('${npc.id}').then(ok => { if (ok) closeModal(); })">🗑️ Supprimer</button>` : ''}
     </div>
   `, stackedFromMjStats ? _restoreMjStatsModal : null);
+
+  // ── Toggle des pills activités (delegation locale) ────────────────────────
+  document.getElementById('npc-activites-wrap')?.addEventListener('click', (e) => {
+    const pill = e.target.closest('.npc-act-pill');
+    if (!pill) return;
+    const cb = pill.querySelector('input[type=checkbox]');
+    if (!cb) return;
+    e.preventDefault();
+    cb.checked = !cb.checked;
+    pill.classList.toggle('active', cb.checked);
+  });
 
   // ── Autocomplete Lieu + Organisations ─────────────────────────────────────
   initAutocomplete('npc-lieu', _places.map(p => p.name));
@@ -1388,6 +1477,11 @@ async function saveNpc(id) {
       organisations: getMultiAutocompleteValues('npc-orgs'),
       description:   document.getElementById('npc-desc')?.value?.trim() || '',
       imageUrl,
+      // Bastion : embauchage
+      passif:         document.getElementById('npc-passif')?.value?.trim() || '',
+      salaireSuggere: parseInt(document.getElementById('npc-salaireSuggere')?.value) || 0,
+      embauchable:    document.getElementById('npc-embauchable')?.value !== 'non',
+      activites:      [...document.querySelectorAll('#npc-activites-wrap input[type=checkbox]:checked')].map(el => el.value),
     };
 
     if (STATE.isAdmin) {
