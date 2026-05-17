@@ -283,7 +283,21 @@ export async function loadChars(uid = null) {
       ? query(collection(db, path), where('uid', '==', uid))
       : collection(db, path);
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const chars = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Migration silencieuse : convention "1 entrée = 1 unité" — split les qte>1
+    try {
+      const { normalizeInventaire, inventaireNeedsNorm } = await import('../shared/inventory-utils.js');
+      for (const c of chars) {
+        if (!inventaireNeedsNorm(c.inventaire)) continue;
+        const normalized = normalizeInventaire(c.inventaire);
+        c.inventaire = normalized;
+        // Fire-and-forget : si l'écriture échoue (droits Firestore), pas grave, on retentera.
+        updateDoc(doc(db, path, c.id), { inventaire: normalized })
+          .then(() => console.debug(`[inv] normalized ${c.nom || c.id} (${normalized.length} entries)`))
+          .catch(e => console.debug(`[inv] silent normalize failed for ${c.id}:`, e?.code));
+      }
+    } catch (e) { console.debug('[inv] norm utility load failed:', e); }
+    return chars;
   } catch (e) {
     _handleFirestoreError(e, 'loadChars');
     return [];
