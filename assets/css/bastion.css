@@ -1462,8 +1462,47 @@
 @media (max-width: 900px) {
   .bs-gauges { grid-template-columns: 1fr; }
   .bs-hero { flex-direction: column; align-items: stretch; text-align: center; }
-  .bs-hero-actions { justify-content: center; }
+  .bs-hero-actions { justify-content: center; flex-wrap: wrap; }
 }
 @media (max-width: 540px) {
+  .bs-root { padding: 12px 10px 40px; }
   .bs-rooms-grid { grid-template-columns: 1fr; }
+  .bs-hero { padding: 16px; }
+  .bs-hero-emoji { font-size: 2.2rem; }
+  .bs-hero-title { font-size: 1.3rem; }
+  .bs-hero-actions { gap: 6px; }
+  .bs-hero-actions .btn { font-size: 0.78rem; padding: 5px 10px; }
+
+  /* Coffre : filtres serrés → empilés proprement */
+  .bs-coffre-filters { gap: 6px; }
+  .bs-coffre-pills { gap: 3px; }
+  .bs-coffre-pill {
+    font-size: 0.66rem;
+    padding: 3px 8px;
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .bs-coffre-pill-count { font-size: 0.58rem; padding: 1px 4px; }
+  .bs-coffre { grid-template-columns: 1fr; }
+
+  /* Personnel mini-cards plus compact */
+  .bs-emp-mini { padding: 5px 7px; gap: 6px; }
+  .bs-emp-mini-name { font-size: 0.74rem; }
+  .bs-emp-mini-bonus { font-size: 0.64rem; }
+
+  /* Chronique : préfixe semaine sur sa propre ligne pour gagner de la largeur */
+  .bs-histo-row {
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+    padding: 6px 0;
+  }
+  .bs-histo-week { font-size: 0.62rem; opacity: 0.7; }
+
+  /* Personnel modal : stats en colonne */
+  .bs-perso-stats { grid-template-columns: 1fr; gap: 6px; }
+  .bs-personnel { grid-template-columns: 1fr; }
+
+  /* Préview : résumé en colonne */
+  .bs-preview-summary { grid-template-columns: 1fr 1fr; }
 }

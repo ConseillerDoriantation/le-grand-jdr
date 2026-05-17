@@ -70,9 +70,15 @@ export async function navigate(page) {
     return;
   }
 
-  // VTT non disponible sur mobile
+  // VTT : sur mobile, basculer en mode spectateur (lecture seule + chat)
   if (page === 'vtt' && window.innerWidth < 768) {
-    _renderMobileOnly();
+    try {
+      const mod = await import('../features/vtt-spectator.js');
+      await mod.renderVttSpectator();
+    } catch (err) {
+      console.error('[nav] vtt-spectator failed:', err);
+      _renderMobileOnly();
+    }
     return;
   }
 

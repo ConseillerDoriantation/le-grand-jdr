@@ -767,6 +767,23 @@ select.bst-p-input option {
   .bst-ribbon-item { min-width: 90px; padding: 8px 10px; gap: 7px; }
   .bst-ribbon-num { font-size: 1.1rem; }
 }
+/* Petit mobile : grid à 2 colonnes plutôt qu'auto-fill (sinon 1 colonne géante) */
+@media (max-width: 540px) {
+  .bst-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .bst-card-name { font-size: 0.78rem; }
+  .bst-card-meta { font-size: 0.68rem; }
+  .bst-card-stat { font-size: 0.65rem; padding: 2px 6px; }
+  .bst-stats-base,
+  .bst-caracs { grid-template-columns: repeat(2, 1fr); }
+  .bst-tabs { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  .bst-tabs::-webkit-scrollbar { display: none; }
+  .bst-tabs > * { flex-shrink: 0; }
+  .bst-ribbon { flex-wrap: wrap; gap: 5px; }
+  .bst-ribbon-item { min-width: 70px; padding: 6px 8px; flex: 1; }
+}
+@media (max-width: 380px) {
+  .bst-grid { grid-template-columns: 1fr; }
+}
 @media (min-width: 1921px) {
   .bst-layout { grid-template-columns: minmax(0, 1fr) 520px; }
   .bst-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
