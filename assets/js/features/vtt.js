@@ -87,7 +87,7 @@ let _sounds        = [];     // [{id, name, url, createdAt}]
 let _playlists     = [];     // [{id, name, color, soundIds[]}]
 let _musicState    = {};     // état Firestore courant
 let _audioEl       = null;   // HTMLAudioElement actif
-let _musicTab      = 'sons'; // 'sons' | 'playlists'
+let _musicSearch   = ''; // filtre texte unique (vue unifiée), persisté en session
 let _musicCloseOut = null;
 let _musicProgTimer = null;
 let _musicSortables = [];   // instances Sortable actives
@@ -127,8 +127,6 @@ let _drawShape    = 'pencil'; // 'pencil'|'line'|'rect'|'circle'
 let _drawFill     = false;
 let _rulerActive  = false;
 let _rulerOrigin  = null;
-let _rulerLine    = null;
-let _rulerLabel   = null;
 let _rulerHideTimer = null;
 
 // Mapping abréviation compétence → clé getMod
@@ -514,8 +512,10 @@ function _cleanup() {
   _marqueeActive = false; _marqueeOrigin = null; _marqueeLastWp = null;
   _marqueeShape = null; _suppressNextClick = false;
   _pingTimer = null; _pingOrigin = null;
-  _rulerActive = false; _rulerLine = null; _rulerLabel = null;
+  _rulerActive = false; _rulerOrigin = null; _rulerNodes = null; _rulerLastCell = null; _rulerHoverDot = null;
   if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
+  if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
+  _mjRulerLastWrite = 0; _mjRulerBroadcasting = false; _mjRulerRemote = null;
   _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
   _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
   _hideCtxMenu();
@@ -590,6 +590,7 @@ function _initCanvas(container) {
 
     // Règle (free-hover, reste dans le canvas)
     if (wp && _tool === 'ruler' && _rulerActive) _updateRuler(wp);
+    else if (!wp && _rulerHoverDot) _hideRulerHover();
 
     // Marquee : suivi pendant le drag (peut sortir légèrement du canvas)
     if (_tool === 'select' && _marqueeOrigin) {
@@ -680,6 +681,12 @@ function _initCanvas(container) {
     if (fogIsEditMode()) return; // éditeur de murs gère ses propres events
     if (e.evt.button===2) {
       e.evt.preventDefault();
+      // Règle : clic droit = annulation immédiate (en cours ou figée), sans changer d'outil.
+      if (_tool === 'ruler' && (_rulerActive || _rulerNodes)) {
+        _clearRuler();
+        _rightStageDown = null;
+        return;
+      }
       // Pan caméra au clic droit UNIQUEMENT sur stage vide.
       // Sur un token/image/annotation, on laisse Konva gérer le drag (K.dragButtons=[0,2]).
       if (e.target === _stage) {
@@ -728,6 +735,7 @@ function _initCanvas(container) {
     }
     const wp = _stageToWorld(stagePtr);
     if (_tool === 'ruler' && _rulerActive)      _updateRuler(wp);
+    else if (_tool === 'ruler')                 _showRulerHover(wp);
     if (_tool === 'draw'  && _drawing && !_pan) _updateDraw(wp);
     if (_zoneCtx) _zoneUpdatePreview(wp);
   });
@@ -741,6 +749,7 @@ function _initCanvas(container) {
   _stage.on('contextmenu', e => {
     e.evt.preventDefault();
     if (e.target !== _stage) return;
+    if (_tool === 'ruler') return; // clic droit en mode règle = annulation, pas de désélection
     const moved = _rightStageDown
       ? Math.hypot(e.evt.clientX - _rightStageDown.x, e.evt.clientY - _rightStageDown.y) > 6
       : false;
@@ -889,7 +898,7 @@ function _buildShape(t) {
   const hpKnown = ld.displayHp !== null && ld.displayHpMax !== null;
   const hp  = hpKnown ? ld.displayHp  : 0;
   const hpm = hpKnown ? ld.displayHpMax : 1;
-  const rat = hpKnown ? (hpm>0 ? Math.max(0,hp/hpm) : 1) : 0.5;
+  const rat = hpKnown ? (hpm>0 ? Math.min(1, Math.max(0,hp/hpm)) : 1) : 0.5;
   const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
   g.setAttr('tokenW', sw);
   g.setAttr('tokenH', sh);
@@ -910,7 +919,7 @@ function _buildShape(t) {
   const _pm0=ld.displayPm;
   let _lblY=r+BH+8;
   if (_pm0!=null) {
-    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.max(0,_pm0/pmMax0):1;
+    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.min(1,Math.max(0,_pm0/pmMax0)):1;
     const PMH=8;
     g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, fill:'#0d1117', cornerRadius:4, listening:false }));
     g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:Math.max(2,bW*pmRat0), height:PMH, fill:'#9b6dff', cornerRadius:4, listening:false, name:'pm-fill' }));
@@ -1090,6 +1099,17 @@ function _buildShape(t) {
   const handleTokenAction = (e, opts = {}) => {
     e.cancelBubble = true;
     if (_tool === 'ruler' || _tool === 'draw') return; // outils de dessin ignorent les tokens
+    // Si le token du joueur est masqué sous un autre token, prioriser son propre token
+    // lors d'une sélection simple (sauf attaque/zone/cible multi/shift).
+    if (!STATE.isAdmin && !_attackSrc && !_zoneCtx && !_mtCtx && !e.evt.shiftKey
+        && t.ownerId !== STATE.user?.uid) {
+      const ownId = _findOwnTokenAtPointer();
+      if (ownId && ownId !== t.id) {
+        _clearMultiSelect();
+        _select(ownId);
+        return;
+      }
+    }
     if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
       // Shift+clic : ajouter / retirer du groupe multi-sélection
       _toggleMultiSelect(t.id); return;
@@ -1163,14 +1183,14 @@ function _patchShape(id) {
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.12 });
   const hpKnownU = ld.displayHp !== null && ld.displayHpMax !== null;
   const hp=hpKnownU?ld.displayHp:0, hpm=hpKnownU?ld.displayHpMax:1;
-  const rat=hpKnownU?(hpm>0?Math.max(0,hp/hpm):1):0.5, bW=CELL*sw*0.9;
+  const rat=hpKnownU?(hpm>0?Math.min(1,Math.max(0,hp/hpm)):1):0.5, bW=CELL*sw*0.9;
   const fill=g.findOne('.hp-fill');
   if (fill){fill.width(bW*rat);fill.fill(hpKnownU?hpColor(rat):'#555');}
   g.findOne('.hp-val')?.text(hpKnownU?`${hp}/${hpm}`:'?/?');
   // PM
   const _pm=ld.displayPm;
   if (_pm!=null) {
-    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.max(0,_pm/pmMax):1;
+    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.min(1,Math.max(0,_pm/pmMax)):1;
     g.findOne('.pm-fill')?.width(bW*pmRat);
     g.findOne('.pm-val')?.text(`✨${_pm}/${pmMax}`);
   }
@@ -1704,6 +1724,21 @@ const _tokenDims = t => {
   const h = t?.tokenH ?? t?.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1;
   return { w: Math.max(1, Math.min(5, w)), h: Math.max(1, Math.min(5, h)) };
 };
+
+// Cherche un token possédé par le joueur courant couvrant la position du pointeur.
+// Sert à débloquer la sélection quand le token du joueur est masqué sous un autre.
+function _findOwnTokenAtPointer() {
+  const uid = STATE.user?.uid; if (!uid || !_stage) return null;
+  const pos = _stage.getPointerPosition(); if (!pos) return null;
+  const w = _stageToWorld(pos);
+  const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
+  for (const [id, entry] of Object.entries(_tokens)) {
+    const d = entry?.data; if (!d || d.ownerId !== uid) continue;
+    const dim = _tokenDims(d);
+    if (cx >= d.col && cx < d.col + dim.w && cy >= d.row && cy < d.row + dim.h) return id;
+  }
+  return null;
+}
 // Distance d'attaque entre bounding boxes WxH (0 = adjacent / chevauchement de côté).
 // portee === 1 (mêlée) → Chebyshev (8 directions, inclut diagonales).
 // portee > 1 ou non précisé → Manhattan (losange, 4 directions).
@@ -4490,6 +4525,7 @@ async function _switchPage(pageId) {
   fogUpdateSoon(page, _tokens, STATE.isAdmin);
   _renderPageTabs(); _renderTray(); _deselect();
   _renderCombatTracker();
+  _renderMjRulerRemote(_session?.mjRuler);
   // Le MJ navigue librement — les joueurs ne suivent que via 📡 Envoyer
 }
 
@@ -4518,32 +4554,95 @@ function _stageToWorld(ptr) {
 }
 
 // ── Règle ──────────────────────────────────────────────────────────
-function _startRuler(wp) {
-  const K = window.Konva;
-  _rulerActive = true; _rulerOrigin = wp;
-  _clearRuler();
-  _rulerLine  = new K.Line({ points:[wp.x,wp.y,wp.x,wp.y], stroke:'#ffe600', strokeWidth:2,
-    dash:[8,4], lineCap:'round', listening:false, name:'ruler' });
-  _rulerLabel = new K.Text({ x:wp.x, y:wp.y, text:'', fill:'#ffe600', fontSize:13,
-    fontStyle:'bold', shadowColor:'#000', shadowBlur:6, shadowOpacity:.9,
-    shadowOffset:{x:1,y:1}, listening:false, name:'ruler' });
-  _layers.ping.add(_rulerLine, _rulerLabel);
+// Comptage Manhattan (|dc|+|dr|) : cohérent avec _moveTo / _showMoveRange.
+// Les extrémités sont snappées au centre de la case sous le curseur.
+const RULER_COLOR = '#ffe600';
+const RULER_LABEL_OFFSET = { x: 6, y: -18 };
+const _fmtRulerCells = n => `${n} case${n !== 1 ? 's' : ''} · ${(n * CELL_M).toFixed(1)}m`;
+const _snapToCellCenter = wp => {
+  const c = Math.floor(wp.x / CELL), r = Math.floor(wp.y / CELL);
+  return { c, r, x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 };
+};
+const _rulerLabelPos = (x1, y1, x2, y2) => ({
+  x: (x1 + x2) / 2 + RULER_LABEL_OFFSET.x,
+  y: (y1 + y2) / 2 + RULER_LABEL_OFFSET.y,
+});
+// Crée line + label + dot d'origine, regroupés pour destruction unique.
+function _buildRulerNodes(K, name, opacity = 1) {
+  const group = new K.Group({ listening: false, name });
+  const line = new K.Line({
+    points: [0, 0, 0, 0], stroke: RULER_COLOR, strokeWidth: 2, dash: [8, 4],
+    lineCap: 'round', opacity, listening: false,
+  });
+  const dot = new K.Circle({
+    x: 0, y: 0, radius: 4, fill: RULER_COLOR, opacity,
+    shadowColor: '#000', shadowBlur: 4, shadowOpacity: 0.7, listening: false,
+  });
+  const label = new K.Text({
+    x: 0, y: 0, text: '', fill: RULER_COLOR, fontSize: 13, fontStyle: 'bold',
+    shadowColor: '#000', shadowBlur: 6, shadowOpacity: 0.9,
+    shadowOffset: { x: 1, y: 1 }, opacity, listening: false,
+  });
+  group.add(line, dot, label);
+  return { group, line, dot, label };
+}
+function _setRulerNodes(nodes, x1, y1, x2, y2, text) {
+  nodes.line.points([x1, y1, x2, y2]);
+  nodes.dot.position({ x: x1, y: y1 });
+  const p = _rulerLabelPos(x1, y1, x2, y2);
+  nodes.label.text(text);
+  nodes.label.position(p);
+}
+
+let _rulerNodes = null;     // nodes locaux (MJ ou joueur, pour l'utilisateur courant)
+let _rulerLastCell = null;  // dernière case survolée — court-circuite si inchangée
+let _rulerHoverDot = null;  // aperçu de la case de départ avant le 1er clic
+
+function _showRulerHover(wp) {
+  if (!_layers.ping || _rulerNodes) { _hideRulerHover(); return; } // pas d'aperçu si une règle est déjà visible
+  const o = _snapToCellCenter(wp);
+  if (!_rulerHoverDot) {
+    const K = window.Konva;
+    _rulerHoverDot = new K.Circle({
+      radius: 5, fill: RULER_COLOR, opacity: 0.45,
+      stroke: '#000', strokeWidth: 1, listening: false, name: 'ruler-hover',
+    });
+    _layers.ping.add(_rulerHoverDot);
+  }
+  _rulerHoverDot.position({ x: o.x, y: o.y });
   _layers.ping.batchDraw();
 }
-function _updateRuler(wp) {
-  if (!_rulerLine || !_rulerOrigin) return;
-  _rulerLine.points([_rulerOrigin.x, _rulerOrigin.y, wp.x, wp.y]);
-  const dxC = (wp.x - _rulerOrigin.x) / CELL;
-  const dyC = (wp.y - _rulerOrigin.y) / CELL;
-  const dist = Math.sqrt(dxC**2 + dyC**2);
-  const distC = Math.round(dist * 2) / 2;
-  const distM = (dist * CELL_M).toFixed(1);
-  _rulerLabel.text(`${distC} case${distC!==1?'s':''} · ${distM}m`);
-  _rulerLabel.position({
-    x: (_rulerOrigin.x + wp.x) / 2 + 6,
-    y: (_rulerOrigin.y + wp.y) / 2 - 18,
-  });
+function _hideRulerHover() {
+  if (!_rulerHoverDot) return;
+  _rulerHoverDot.destroy();
+  _rulerHoverDot = null;
+  _layers.ping?.batchDraw();
+}
+
+function _startRuler(wp) {
+  const K = window.Konva;
+  _clearRuler();
+  _hideRulerHover();
+  const o = _snapToCellCenter(wp);
+  _rulerActive = true;
+  _rulerOrigin = o;
+  _rulerLastCell = { c: o.c, r: o.r };
+  _rulerNodes = _buildRulerNodes(K, 'ruler');
+  _setRulerNodes(_rulerNodes, o.x, o.y, o.x, o.y, _fmtRulerCells(0));
+  _layers.ping.add(_rulerNodes.group);
   _layers.ping.batchDraw();
+  _broadcastMjRuler(o.x, o.y, 0);
+}
+function _updateRuler(wp) {
+  if (!_rulerNodes || !_rulerOrigin) return;
+  const e = _snapToCellCenter(wp);
+  // Court-circuit : pas de redraw ni de broadcast si la case n'a pas changé.
+  if (_rulerLastCell && e.c === _rulerLastCell.c && e.r === _rulerLastCell.r) return;
+  _rulerLastCell = { c: e.c, r: e.r };
+  const cells = Math.abs(e.c - _rulerOrigin.c) + Math.abs(e.r - _rulerOrigin.r);
+  _setRulerNodes(_rulerNodes, _rulerOrigin.x, _rulerOrigin.y, e.x, e.y, _fmtRulerCells(cells));
+  _layers.ping.batchDraw();
+  _broadcastMjRuler(e.x, e.y, cells);
 }
 function _endRuler() {
   _rulerActive = false;
@@ -4552,9 +4651,69 @@ function _endRuler() {
 }
 function _clearRuler() {
   if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
-  _layers.ping?.find('.ruler').forEach(s => s.destroy());
-  _rulerLine = null; _rulerLabel = null; _rulerActive = false;
+  _rulerNodes?.group.destroy();
+  _rulerNodes = null;
+  _rulerActive = false; _rulerOrigin = null; _rulerLastCell = null;
   _layers.ping?.batchDraw();
+  _clearMjRulerBroadcast();
+}
+
+// Diffusion de la règle du MJ (visible par tous les joueurs via _session.mjRuler).
+// Throttle pour lisser les écritures Firestore.
+const MJ_RULER_THROTTLE = 120;
+let _mjRulerLastWrite = 0;
+let _mjRulerPendingTimer = null;
+let _mjRulerBroadcasting = false; // évite un setDoc(null) inutile si jamais diffusé
+function _broadcastMjRuler(x2, y2, cells) {
+  if (!STATE.isAdmin || !_activePage || !_rulerOrigin) return;
+  const payload = {
+    pageId: _activePage.id,
+    x1: _rulerOrigin.x, y1: _rulerOrigin.y,
+    x2, y2, cells,
+  };
+  const now = Date.now();
+  const wait = Math.max(0, MJ_RULER_THROTTLE - (now - _mjRulerLastWrite));
+  if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
+  const flush = () => {
+    _mjRulerPendingTimer = null;
+    _mjRulerLastWrite = Date.now();
+    _mjRulerBroadcasting = true;
+    setDoc(_sesRef(), { mjRuler: payload }, { merge: true }).catch(() => {});
+  };
+  if (wait === 0) flush();
+  else _mjRulerPendingTimer = setTimeout(flush, wait);
+}
+function _clearMjRulerBroadcast() {
+  if (!STATE.isAdmin) return;
+  if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
+  if (!_mjRulerBroadcasting) return; // rien n'a été diffusé → pas de write à effacer
+  _mjRulerLastWrite = 0;
+  _mjRulerBroadcasting = false;
+  setDoc(_sesRef(), { mjRuler: null }, { merge: true }).catch(() => {});
+}
+
+// Rendu de la règle MJ chez les joueurs — mise à jour en place, sans destroy/rebuild.
+let _mjRulerRemote = null;
+function _renderMjRulerRemote(data) {
+  if (STATE.isAdmin) return; // le MJ voit déjà sa règle locale
+  if (!_layers.ping) return;
+  const visible = data && _activePage && data.pageId === _activePage.id;
+  if (!visible) {
+    if (_mjRulerRemote) {
+      _mjRulerRemote.group.destroy();
+      _mjRulerRemote = null;
+      _layers.ping.batchDraw();
+    }
+    return;
+  }
+  if (!_mjRulerRemote) {
+    _mjRulerRemote = _buildRulerNodes(window.Konva, 'mj-ruler', 0.85);
+    _layers.ping.add(_mjRulerRemote.group);
+  }
+  const cells = data.cells ?? 0;
+  _setRulerNodes(_mjRulerRemote, data.x1, data.y1, data.x2, data.y2,
+    `MJ : ${_fmtRulerCells(cells)}`);
+  _layers.ping.batchDraw();
 }
 
 // ── Annotations ────────────────────────────────────────────────────
@@ -4866,6 +5025,7 @@ function _initListeners() {
     }
     _renderTimer();
     _renderCombatTracker();
+    _renderMjRulerRemote(_session.mjRuler);
   },()=>{}));
 
   // 2. Pages
@@ -6877,7 +7037,7 @@ function _setTool(tool) {
   if (tool === 'walls') fogRenderWalls(_activePage, true);
   else if (_activePage) fogRenderWalls(_activePage, STATE.isAdmin); // quitter édition → redraw normal
   // Règle : effacer si on quitte
-  if (tool !== 'ruler') _clearRuler();
+  if (tool !== 'ruler') { _clearRuler(); _hideRulerHover(); }
   // Désélection annotation si on quitte le mode select
   if (tool !== 'select') _deselectAnnot();
   // Draggability des annotations
@@ -6899,6 +7059,11 @@ function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
   if (e.key==='Escape') { if (_tool !== 'select') _setTool('select'); else _deselect(); }
+  // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie)
+  if ((e.key==='r' || e.key==='R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    window._vttTool('ruler');
+  }
   if ((e.key==='Delete'||e.key==='Backspace') && _tool==='select') {
     // 1) Annotations sélectionnées
     if (_selectedAnnotIds.size > 0) {
@@ -7492,6 +7657,48 @@ function _stopPreview() {
   document.querySelectorAll('.vtt-mact-preview.on').forEach(b => b.classList.remove('on'));
 }
 
+// Préférence de volume locale à chaque utilisateur, persistée entre sessions
+// pour ne pas être réinitialisée à chaque nouvelle musique.
+const _USER_VOL_KEY = 'vtt:musicVolume';
+function _getUserVolume() {
+  const v = parseFloat(localStorage.getItem(_USER_VOL_KEY));
+  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.7;
+}
+function _setUserVolume(v) {
+  const clamped = Math.max(0, Math.min(1, v));
+  try { localStorage.setItem(_USER_VOL_KEY, String(clamped)); } catch(e){}
+  return clamped;
+}
+
+// État replié/déplié des catégories — persisté localement (par utilisateur)
+const _CAT_COLLAPSE_KEY = 'vtt:musicCollapsed';
+function _loadCollapseMap() {
+  try { return JSON.parse(localStorage.getItem(_CAT_COLLAPSE_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+function _isCatCollapsed(catId) { return !!_loadCollapseMap()[catId]; }
+function _setCatCollapsed(catId, collapsed) {
+  const map = _loadCollapseMap();
+  if (collapsed) map[catId] = true; else delete map[catId];
+  try { localStorage.setItem(_CAT_COLLAPSE_KEY, JSON.stringify(map)); } catch {}
+}
+window._vttToggleMusicCat = (catId) => {
+  const cat = document.querySelector(`.vtt-music-cat[data-cat-id="${CSS.escape(catId)}"]`);
+  if (!cat) return;
+  const collapsed = cat.dataset.collapsed === '1';
+  cat.dataset.collapsed = collapsed ? '0' : '1';
+  _setCatCollapsed(catId, !collapsed);
+};
+window._vttToggleAllMusicCats = () => {
+  const cats = document.querySelectorAll('.vtt-music-body .vtt-music-cat');
+  if (!cats.length) return;
+  const collapseAll = [...cats].some(c => c.dataset.collapsed !== '1');
+  cats.forEach(c => {
+    c.dataset.collapsed = collapseAll ? '1' : '0';
+    _setCatCollapsed(c.dataset.catId, collapseAll);
+  });
+};
+
 window._vttPreview = (soundId, btn) => {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
   // Même son → stop
@@ -7499,7 +7706,7 @@ window._vttPreview = (soundId, btn) => {
   _stopPreview();
   const el = new Audio(sound.url);
   el.dataset.soundId = soundId;
-  el.volume = 0.7;
+  el.volume = _getUserVolume();
   el.addEventListener('ended', _stopPreview);
   el.play().catch(() => showNotif('Impossible de lire ce son', 'error'));
   _previewEl = el;
@@ -7519,8 +7726,6 @@ window._vttToggleMusic = () => {
   };
   document.addEventListener('mousedown', _musicCloseOut, true);
 };
-
-window._vttMusicTab = t => { _musicTab=t; _renderMusicPanel(); };
 
 // ── Rendu du panel ──────────────────────────────────────────────────
 function _renderMusicPanel() {
@@ -7544,27 +7749,37 @@ function _renderMusicPanel() {
         <span>🎵 Sons &amp; Musique</span>
         <button class="vtt-ms-close" onclick="window._vttToggleMusic()">✕</button>
       </div>
-      <div class="vtt-music-tabs">
-        <button class="vtt-music-tab${_musicTab==='sons'?' active':''}" onclick="window._vttMusicTab('sons')">Sons</button>
-        <button class="vtt-music-tab${_musicTab==='playlists'?' active':''}" onclick="window._vttMusicTab('playlists')">Playlists</button>
-      </div>
-      <div class="vtt-music-body">${_musicTab==='sons' ? _renderSonsTab(mj) : _renderPlaylistsTab(mj)}</div>
+      <div class="vtt-music-body">${_renderMusicList(mj)}</div>
       ${_renderNowPlaying(curSound, ms)}`;
   }
 
-  // Bind volume slider local
+  // Bind champ de recherche — filtre unique persisté en session
+  const sf = panel.querySelector('#vtt-music-search');
+  if (sf) {
+    sf.value = _musicSearch || '';
+    sf.oninput = e => {
+      _musicSearch = e.target.value;
+      _applyMusicFilter(e.target.value);
+    };
+    _applyMusicFilter(sf.value);
+  }
+  // Bind volume slider local — préférence par utilisateur (localStorage)
   const vsl = panel.querySelector('#vtt-music-vol');
   if (vsl) {
-    vsl.value = Math.round((_audioEl?.volume ?? ms.volume ?? 0.7) * 100);
-    vsl.oninput = e => { if (_audioEl) _audioEl.volume = +e.target.value / 100; };
+    vsl.value = Math.round(_getUserVolume() * 100);
+    vsl.oninput = e => {
+      const v = _setUserVolume(+e.target.value / 100);
+      if (_audioEl)   _audioEl.volume = v;
+      if (_previewEl) _previewEl.volume = v;
+    };
   }
   // Barre de progression
   clearInterval(_musicProgTimer);
   if (_audioEl && !_audioEl.paused) {
     _musicProgTimer = setInterval(_updateMusicProg, 500);
   }
-  // Sortables (MJ + onglet playlists uniquement)
-  if (mj && _musicTab === 'playlists') _initMusicSortable();
+  // Sortables (MJ uniquement — vue unifiée)
+  if (mj) _initMusicSortable();
 }
 
 function _updateMusicProg() {
@@ -7583,80 +7798,138 @@ function _fmtTime(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-function _renderSonsTab(mj) {
-  let h = '';
-  if (mj) h += `
-    <div class="vtt-music-son-actions-row">
-      <button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()" style="flex:1">＋ URL</button>
-      <button class="vtt-music-upload-btn" onclick="window._vttImportGithubRelease()" style="flex:2">📥 Importer depuis GitHub</button>
-    </div>`;
-  if (!_sounds.length) return h + `<div class="vtt-music-empty">Aucun son — ajoutez une URL ou importez depuis GitHub</div>`;
-  return h + `<div class="vtt-music-list">${_sounds.map(s => {
-    const active = _musicState.playing && _musicState.currentSoundId===s.id && !_musicState.currentPlaylistId;
-    return `<div class="vtt-music-son-item${active?' is-playing':''}">
-      <span class="vtt-music-son-name" title="${_esc(s.name)}">${_esc(s.name)}</span>
-      <div class="vtt-music-son-acts">
-        <button class="vtt-mact${active&&!_musicState.loop?' on':''}" onclick="window._vttPlaySound('${s.id}',false)" title="Lire">${active&&!_musicState.paused&&!_musicState.loop?'⏸':'▶'}</button>
-        <button class="vtt-mact${active&&_musicState.loop?' on':''}" onclick="window._vttPlaySound('${s.id}',true)" title="Boucle">🔁</button>
-        ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeleteSound('${s.id}')" title="Supprimer">🗑</button>`:''}
-      </div>
-    </div>`;
-  }).join('')}</div>`;
+// Filtre la vue unifiée par texte : masque les catégories sans match,
+// auto-déplie les catégories qui en ont un. Préserve l'état persisté quand
+// le champ est vidé. NB: on utilise style.display car les items portent
+// `display: flex` (classe) qui bat la règle UA `[hidden]{display:none}`.
+function _applyMusicFilter(query) {
+  const q = (query || '').trim().toLowerCase();
+  const root = document.querySelector('.vtt-music-body'); if (!root) return;
+  const text = el => (el?.textContent || '').toLowerCase();
+  const show = (el, ok) => { if (el) el.style.display = ok ? '' : 'none'; };
+
+  root.querySelectorAll('.vtt-music-cat').forEach(cat => {
+    const catId = cat.dataset.catId;
+    const catNameEl = cat.querySelector('.vtt-music-cat-name');
+    const catMatch = !q || text(catNameEl).includes(q);
+    const sons = cat.querySelectorAll('[data-sound-id]');
+    let anySonMatch = false;
+    sons.forEach(s => {
+      const nameEl = s.querySelector('.vtt-music-pool-name, .vtt-music-pl-sname');
+      const ok = !q || catMatch || text(nameEl).includes(q);
+      show(s, ok);
+      if (ok && q) anySonMatch = true;
+    });
+    if (q) {
+      const visible = catMatch || anySonMatch;
+      show(cat, visible);
+      // Force déplie pendant une recherche (sans toucher au localStorage)
+      if (visible) cat.dataset.collapsed = '0';
+    } else {
+      show(cat, true);
+      cat.dataset.collapsed = _isCatCollapsed(catId) ? '1' : '0';
+    }
+  });
 }
 
-function _renderPlaylistsTab(mj) {
-  let h = '';
-  if (mj) h += `<button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()">＋ Nouvelle playlist</button>`;
+// Rendu unifié : pool "Non classés" + playlists, tous pliables.
+function _renderMusicList(mj) {
+  let h = `<div class="vtt-music-search-row">
+    <input type="search" id="vtt-music-search" class="vtt-music-search"
+      placeholder="🔍 Rechercher un son ou une catégorie…" autocomplete="off">
+    <button class="vtt-music-collapse-all" onclick="window._vttToggleAllMusicCats()" title="Tout replier / déplier">⇕</button>
+  </div>`;
 
-  // Pool — sons non encore placés dans une playlist
   if (mj) {
-    const usedIds = new Set(_playlists.flatMap(pl => pl.soundIds || []));
-    const poolSounds = _sounds.filter(s => !usedIds.has(s.id));
-    if (poolSounds.length) {
-      h += `<div class="vtt-music-pool-hd">📦 Non classés (${poolSounds.length})</div>
-      <div class="vtt-music-pool" id="vtt-music-pool">
-        ${poolSounds.map(s=>`<div class="vtt-music-pool-item" data-sound-id="${s.id}" title="${_esc(s.name)}" oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}')">
-          <span class="vtt-music-pool-grip">⠿</span>
-          <span class="vtt-music-pool-name">${_esc(s.name)}</span>
-          <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu">🎧</button>
-        </div>`).join('')}
-      </div>`;
-    } else if (_sounds.length) {
-      h += `<div class="vtt-music-pool-hd">📦 Non classés</div>
-      <div class="vtt-music-empty" style="padding:.3rem .5rem">Tous les sons sont classés ✓</div>`;
-    } else {
-      h += `<div class="vtt-music-empty">Aucun son — ajoutez-en dans l'onglet Sons</div>`;
-    }
+    h += `<div class="vtt-music-son-actions-row">
+      <button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()" style="flex:1" title="Ajouter un son via URL">＋ URL</button>
+      <button class="vtt-music-upload-btn" onclick="window._vttImportGithubRelease()" style="flex:1.4" title="Importer depuis une release GitHub">📥 GitHub</button>
+      <button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()" style="flex:1.2" title="Créer une nouvelle catégorie/playlist">＋ Catégorie</button>
+    </div>`;
   }
 
-  if (!_playlists.length) return h + `<div class="vtt-music-empty" style="margin-top:.4rem">Aucune playlist</div>`;
+  if (!_sounds.length && !_playlists.length) {
+    return h + `<div class="vtt-music-empty">Aucun son — ajoutez une URL ou importez depuis GitHub</div>`;
+  }
 
-  h += _playlists.map(pl => {
-    const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
-    const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
-    return `<div class="vtt-music-pl-item${active?' is-playing':''}">
-      <div class="vtt-music-pl-hd">
-        <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
-        <span class="vtt-music-pl-name">${_esc(pl.name)}</span>
-        <span class="vtt-music-pl-cnt">${sounds.length}</span>
-        <div class="vtt-music-son-acts">
-          <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',false)" title="Lire en ordre">▶</button>
-          <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',true)" title="Aléatoire">🔀</button>
-          ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeletePlaylist('${pl.id}')" title="Supprimer">🗑</button>`:''}
+  // "Non classés" : sons absents de toute playlist
+  const usedIds = new Set(_playlists.flatMap(pl => pl.soundIds || []));
+  const poolSounds = _sounds.filter(s => !usedIds.has(s.id));
+  if (poolSounds.length) {
+    const collapsed = _isCatCollapsed('pool');
+    h += `<div class="vtt-music-cat" data-cat-id="pool" data-collapsed="${collapsed?1:0}">
+      <div class="vtt-music-cat-hd" onclick="window._vttToggleMusicCat('pool')">
+        <span class="vtt-music-cat-chevron"></span>
+        <span class="vtt-music-cat-name">📦 Non classés</span>
+        <span class="vtt-music-pl-cnt">${poolSounds.length}</span>
+      </div>
+      <div class="vtt-music-cat-body">
+        <div class="vtt-music-pool" id="vtt-music-pool">
+          ${poolSounds.map(s => _renderSonRow(s, null, mj)).join('')}
         </div>
       </div>
-      <div class="vtt-music-pl-sounds vtt-pl-drop" id="vtt-pl-drop-${pl.id}" data-pl-id="${pl.id}">
-        ${sounds.map(s=>`<div class="vtt-music-pl-sound" data-sound-id="${s.id}" ${mj?`oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}','${pl.id}')"`:''}">
-          ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
-          <span class="vtt-music-pl-sname">${_esc(s.name)}</span>
-          <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu">🎧</button>
-          ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttRemoveSoundFromPlaylist('${pl.id}','${s.id}')" title="Retirer">✕</button>`:''}
-        </div>`).join('')}
-        ${!sounds.length?`<div class="vtt-music-pl-empty-drop">Glisser des sons ici</div>`:''}
-      </div>
     </div>`;
-  }).join('');
+  }
+
+  if (_playlists.length) {
+    h += _playlists.map(pl => {
+      const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
+      const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
+      const collapsed = _isCatCollapsed(pl.id);
+      return `<div class="vtt-music-cat vtt-music-pl-item${active?' is-playing':''}" data-cat-id="${pl.id}" data-collapsed="${collapsed?1:0}">
+        <div class="vtt-music-cat-hd vtt-music-pl-hd" onclick="window._vttToggleMusicCat('${pl.id}')">
+          <span class="vtt-music-cat-chevron"></span>
+          <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
+          <span class="vtt-music-pl-name vtt-music-cat-name">${_esc(pl.name)}</span>
+          <span class="vtt-music-pl-cnt">${sounds.length}</span>
+          <div class="vtt-music-son-acts" onclick="event.stopPropagation()">
+            <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',false)" title="Lire en ordre">▶</button>
+            <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',true)" title="Aléatoire">🔀</button>
+            ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeletePlaylist('${pl.id}')" title="Supprimer">🗑</button>`:''}
+          </div>
+        </div>
+        <div class="vtt-music-cat-body">
+          <div class="vtt-music-pl-sounds vtt-pl-drop" id="vtt-pl-drop-${pl.id}" data-pl-id="${pl.id}">
+            ${sounds.map(s => _renderSonRow(s, pl.id, mj)).join('')}
+            ${!sounds.length?`<div class="vtt-music-pl-empty-drop">Glisser des sons ici</div>`:''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
   return h;
+}
+
+// Ligne d'un son (utilisée dans pool et dans chaque playlist)
+// plId=null → son dans le pool "Non classés"
+function _renderSonRow(s, plId, mj) {
+  const ms = _musicState;
+  const isPool = !plId;
+  const isCurrent = ms.playing && ms.currentSoundId === s.id;
+  const inSingleMode = isCurrent && !ms.currentPlaylistId;
+  const inThisPlaylist = isCurrent && ms.currentPlaylistId === plId;
+  const rowActive = inSingleMode || inThisPlaylist;
+  const playOn = inSingleMode && !ms.loop;
+  const loopOn = inSingleMode && !!ms.loop;
+  const rowClass = isPool ? 'vtt-music-pool-item' : 'vtt-music-pl-sound';
+  const nameClass = isPool ? 'vtt-music-pool-name' : 'vtt-music-pl-sname';
+  const ctx = mj
+    ? `oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}'${isPool?'':`,'${plId}'`})"`
+    : '';
+  const delBtn = mj
+    ? (isPool
+        ? `<button class="vtt-mact vtt-mact-del" onclick="event.stopPropagation();window._vttDeleteSound('${s.id}')" title="Supprimer définitivement">🗑</button>`
+        : `<button class="vtt-mact vtt-mact-del" onclick="event.stopPropagation();window._vttRemoveSoundFromPlaylist('${plId}','${s.id}')" title="Retirer de la catégorie">✕</button>`)
+    : '';
+  return `<div class="${rowClass}${rowActive?' is-playing':''}" data-sound-id="${s.id}" title="${_esc(s.name)}" ${ctx}>
+    ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
+    <span class="${nameClass}">${_esc(s.name)}</span>
+    <button class="vtt-mact${playOn?' on':''}" onclick="event.stopPropagation();window._vttPlaySound('${s.id}',false)" title="Lire">${playOn && !ms.paused?'⏸':'▶'}</button>
+    <button class="vtt-mact${loopOn?' on':''}" onclick="event.stopPropagation();window._vttPlaySound('${s.id}',true)" title="Boucle">🔁</button>
+    <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu local (MJ)">🎧</button>
+    ${delBtn}
+  </div>`;
 }
 
 // ── Initialisation Sortable ────────────────────────────────────────
@@ -7670,6 +7943,8 @@ function _initMusicSortable() {
       sort: false,
       animation: 120,
       ghostClass: 'vtt-sort-ghost',
+      filter: '.vtt-mact',
+      handle: '.vtt-music-pool-grip,.vtt-music-pool-name',
     }));
   }
 
@@ -7680,6 +7955,7 @@ function _initMusicSortable() {
       animation: 120,
       ghostClass: 'vtt-sort-ghost',
       filter: '.vtt-music-pl-empty-drop,.vtt-mact',
+      handle: '.vtt-music-pool-grip,.vtt-music-pl-sname',
       onAdd: async evt => {
         const soundId = evt.item.dataset.soundId;
         evt.item.remove(); // Sortable a cloné → on supprime, Firestore va re-render
@@ -7738,7 +8014,7 @@ window._vttPlaySound = async (soundId, loop) => {
   if (ms.playing && ms.currentSoundId===soundId && !ms.currentPlaylistId && !!ms.loop===!!loop)
     return window._vttStopMusic();
   await _setMusicState({ playing:true, paused:false, currentSoundId:soundId,
-    currentPlaylistId:null, loop:!!loop, shuffle:false, volume:ms.volume??0.7,
+    currentPlaylistId:null, loop:!!loop, shuffle:false,
     startedAt:serverTimestamp() });
 };
 
@@ -7760,7 +8036,7 @@ window._vttPlayPlaylist = async (playlistId, shuffle) => {
   await _setMusicState({ playing:true, paused:false,
     currentSoundId:pl.soundIds[order[0]], currentPlaylistId:playlistId,
     loop:false, shuffle:!!shuffle, shuffleOrder:order, playlistIndex:0,
-    volume:ms.volume??0.7, startedAt:serverTimestamp() });
+    startedAt:serverTimestamp() });
 };
 
 window._vttMusicNext = async () => {
@@ -7830,7 +8106,7 @@ function _syncMusicPlayback(ms) {
   _killAudio();
   const el = new Audio(sound.url);
   el.dataset.soundId = ms.currentSoundId;
-  el.volume = ms.volume ?? 0.7;
+  el.volume = _getUserVolume();
   el.loop = ms.loop ?? false;
 
   // Sync temps (non-loop uniquement)
@@ -8310,7 +8586,7 @@ export async function renderVttPage() {
   _tf.innerHTML = `
     <div class="vtt-tool-float-tools">
       <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="↖ Sélection">↖</button>
-      <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle">📏</button>
+      <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler">📏</button>
       <button class="vtt-tool" data-tool="draw"   onclick="window._vttTool('draw')"   title="✏️ Dessin">✏️</button>
       ${STATE.isAdmin?`<button class="vtt-tool" data-tool="walls" onclick="window._vttTool('walls')" title="🧱 Murs / Éclairage dynamique">🧱</button>`:''}
     </div>

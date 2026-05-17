@@ -5,6 +5,7 @@ import { STATE, FS } from '../core/state.js';
 import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc } from '../shared/html.js';
 import { calcPalier } from '../shared/char-stats.js';
+import { watch } from '../shared/realtime.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -748,6 +749,9 @@ const PAGES = {
         </div>
       </div>
 
+      <!-- Joueurs connectés (rempli en temps réel) -->
+      <div id="dash-presence"></div>
+
       <!-- Personnages -->
       <div>
         <div class="dv2-section-label">
@@ -816,6 +820,57 @@ const PAGES = {
         <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
         <span class="dash-vtt-arrow">→</span>
       </div>`;
+
+      // ── Présence temps réel (MJ uniquement) ─────────────────────────
+      // Filtre : actif si lastSeen < 2 min (cohérent avec la présence VTT)
+      // Exclut le MJ lui-même. Cleanup auto via unwatchAll au prochain navigate.
+      const _renderPresence = (list) => {
+        const slot = document.getElementById('dash-presence');
+        if (!slot) return;
+        const now = Date.now();
+        const active = (list || [])
+          .filter(p => p.uid && p.uid !== _myUid)
+          .map(p => ({ ...p, ts: p.lastSeen?.toMillis?.() ?? 0 }))
+          .filter(p => p.ts > 0 && (now - p.ts) < 120_000);
+        if (!active.length) {
+          slot.innerHTML = `
+            <div class="dv2-section-label">
+              <span class="dv2-section-label-text">Joueurs connectés</span>
+              <div class="dv2-section-label-line"></div>
+            </div>
+            <div class="dv2-panel-card">
+              <div style="padding:14px 16px;color:var(--text-dim);font-size:.78rem;display:flex;align-items:center;gap:.5rem">
+                <span style="width:8px;height:8px;border-radius:50%;background:#555"></span>
+                Aucun joueur connecté pour le moment.
+              </div>
+            </div>`;
+          return;
+        }
+        const pills = active.map(p => {
+          const ch = chars.find(c => c.uid === p.uid) || null;
+          const pos = ch ? `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%` : '50% 50%';
+          const portrait = ch?.photo
+            ? `<img src="${ch.photo}" style="width:30px;height:30px;border-radius:50%;object-fit:cover;object-position:${pos};border:2px solid rgba(34,195,142,.55);flex-shrink:0">`
+            : `<div style="width:30px;height:30px;border-radius:50%;background:rgba(34,195,142,.15);border:2px solid rgba(34,195,142,.55);display:flex;align-items:center;justify-content:center;color:var(--gold);font-family:'Cinzel',serif;font-size:.78rem;font-weight:700;flex-shrink:0">${(p.pseudo||'?')[0].toUpperCase()}</div>`;
+          return `
+          <div style="display:flex;align-items:center;gap:.55rem;background:rgba(34,195,142,.07);border:1px solid rgba(34,195,142,.22);border-radius:999px;padding:3px 12px 3px 3px">
+            ${portrait}
+            <div style="display:flex;flex-direction:column;line-height:1.15;min-width:0">
+              <span style="font-size:.78rem;color:var(--text);font-weight:600;white-space:nowrap">${_esc(p.pseudo||'?')}</span>
+              ${ch ? `<span style="font-size:.65rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${_esc(ch.nom||'?')}</span>` : ''}
+            </div>
+          </div>`;
+        }).join('');
+        slot.innerHTML = `
+          <div class="dv2-section-label">
+            <span class="dv2-section-label-text">Joueurs connectés (${active.length})</span>
+            <div class="dv2-section-label-line"></div>
+          </div>
+          <div class="dv2-panel-card">
+            <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">${pills}</div>
+          </div>`;
+      };
+      watch('presence', 'presence', _renderPresence);
 
     } else {
 
