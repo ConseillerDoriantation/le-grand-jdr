@@ -83,7 +83,14 @@ service cloud.firestore {
       allow update: if isAdvAdmin(adventureId);
       allow delete: if isAdmin();
 
-      match /shop/{id}              { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      // Boutique : MJ écrit tout, les joueurs peuvent uniquement mettre à jour `dispo`
+      // (décrément à l'achat, incrément à la revente).
+      match /shop/{id} {
+        allow read:   if inAdventure(adventureId);
+        allow write:  if isAdvAdmin(adventureId);
+        allow update: if inAdventure(adventureId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dispo']);
+      }
       match /shopCategories/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /story/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /story_meta/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }

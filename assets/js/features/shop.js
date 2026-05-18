@@ -4,7 +4,7 @@ import { openModal, closeModalDirect } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
-import { calcOr, computeEquipStatsBonus } from '../shared/char-stats.js';
+import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
@@ -1093,6 +1093,140 @@ function _renderItemCard(item, tplKey, itemIdx) {
   `;
 }
 
+// ── Comparaison d'équipement (boutique → fiche perso) ─────────────────────────
+// Résout le slot d'équipement ciblé par un item boutique.
+// Armes → 'Main principale' par défaut. Armures/bijoux → leur slot dédié.
+function _resolveSlotForItem(item) {
+  if (item.degats || item.toucherStat || item.degatsStat) return 'Main principale';
+  if (item.slotArmure) {
+    return item.slotArmure === 'Pieds' ? 'Bottes' : item.slotArmure;
+  }
+  if (item.slotBijou) return item.slotBijou;
+  return null;
+}
+
+// Construit un item équipé minimal à partir d'un item boutique
+// (champs nécessaires aux calculs : statsBonus, CA, type d'armure pour le bouclier).
+function _buildSimEquipFromShop(slot, shopItem) {
+  const base = {
+    nom: shopItem.nom || '',
+    fo:  getItemStatBonus(shopItem, 'force'),
+    dex: getItemStatBonus(shopItem, 'dexterite'),
+    in:  getItemStatBonus(shopItem, 'intelligence'),
+    sa:  getItemStatBonus(shopItem, 'sagesse'),
+    co:  getItemStatBonus(shopItem, 'constitution'),
+    ch:  getItemStatBonus(shopItem, 'charisme'),
+  };
+  if (slot.startsWith('Main')) {
+    return { ...base, degats: shopItem.degats || '', sousType: shopItem.sousType || '', toucherStat: shopItem.toucherStat || '' };
+  }
+  return {
+    ...base,
+    ca: parseInt(shopItem.ca) || 0,
+    typeArmure: shopItem.typeArmure || '',
+    slotArmure: shopItem.slotArmure || '',
+    slotBijou:  shopItem.slotBijou  || '',
+  };
+}
+
+function _simulateCharWithItem(c, slot, shopItem) {
+  const equip = { ...(c.equipement || {}) };
+  equip[slot] = _buildSimEquipFromShop(slot, shopItem);
+  const statsBonus = computeEquipStatsBonus(equip);
+  return { ...c, equipement: equip, statsBonus };
+}
+
+function _cmpRow(label, cur, next, { numeric = true } = {}) {
+  let deltaHtml = '';
+  if (numeric) {
+    const d = (parseFloat(next) || 0) - (parseFloat(cur) || 0);
+    if (d > 0)      deltaHtml = `<span class="sh-cmp-delta sh-cmp-delta--up">+${d}</span>`;
+    else if (d < 0) deltaHtml = `<span class="sh-cmp-delta sh-cmp-delta--down">${d}</span>`;
+    else            deltaHtml = `<span class="sh-cmp-delta sh-cmp-delta--eq">=</span>`;
+  }
+  const curDisp  = (cur === '' || cur == null) ? '—' : cur;
+  const nextDisp = (next === '' || next == null) ? '—' : next;
+  return `<div class="sh-cmp-row">
+    <span class="sh-cmp-label">${label}</span>
+    <span class="sh-cmp-cur">${curDisp}</span>
+    <span class="sh-cmp-arr">→</span>
+    <span class="sh-cmp-new">${nextDisp}</span>
+    ${deltaHtml}
+  </div>`;
+}
+
+function _renderComparePanel(c, item, slot) {
+  if (!c || !slot) return '';
+  const current = (c.equipement || {})[slot] || null;
+  const sim = _simulateCharWithItem(c, slot, item);
+  const isWeapon = slot.startsWith('Main');
+
+  const rows = [];
+  rows.push(_cmpRow('CA',     calcCA(c),     calcCA(sim)));
+  rows.push(_cmpRow('PV max', calcPVMax(c), calcPVMax(sim)));
+  rows.push(_cmpRow('PM max', calcPMMax(c), calcPMMax(sim)));
+
+  ITEM_STAT_META.forEach(meta => {
+    const cur  = (c.statsBonus  || {})[meta.full] || 0;
+    const next = (sim.statsBonus || {})[meta.full] || 0;
+    if (cur === 0 && next === 0) return;
+    rows.push(_cmpRow(meta.short, cur, next));
+  });
+
+  if (isWeapon) {
+    rows.push(_cmpRow('Dégâts', current?.degats || '—', item.degats || '—', { numeric: false }));
+  }
+
+  // Traits gagnés / perdus
+  const curTraits = new Set(Array.isArray(current?.traits) ? current.traits.filter(Boolean) : []);
+  const newTraitsArr = Array.isArray(item.traits)
+    ? item.traits
+    : (item.trait ? String(item.trait).split(',').map(t => t.trim()).filter(Boolean) : []);
+  const newTraits = new Set(newTraitsArr);
+  const added   = [...newTraits].filter(t => !curTraits.has(t));
+  const removed = [...curTraits].filter(t => !newTraits.has(t));
+
+  const traitsBlock = (added.length || removed.length) ? `
+    <div class="sh-cmp-traits">
+      ${added.map(t => `<span class="sh-cmp-trait sh-cmp-trait--add">+ ${_esc(t)}</span>`).join('')}
+      ${removed.map(t => `<span class="sh-cmp-trait sh-cmp-trait--del">− ${_esc(t)}</span>`).join('')}
+    </div>` : '';
+
+  const curName = current?.nom ? _esc(current.nom) : '<em style="color:var(--text-dim)">— Aucun —</em>';
+  const newName = _esc(item.nom || '');
+
+  return `
+    <div class="sh-cmp">
+      <div class="sh-cmp-head">
+        <span class="sh-cmp-title">🔄 Impact sur ${_esc(c.nom || 'le personnage')}</span>
+        <span class="sh-cmp-slot">${slot}</span>
+      </div>
+      <div class="sh-cmp-names">
+        <div class="sh-cmp-name sh-cmp-name--cur"><span class="sh-cmp-coltitle">Actuel</span>${curName}</div>
+        <div class="sh-cmp-name sh-cmp-name--new"><span class="sh-cmp-coltitle">Nouveau</span>${newName}</div>
+      </div>
+      <div class="sh-cmp-rows">
+        ${rows.join('')}
+      </div>
+      ${traitsBlock}
+    </div>`;
+}
+
+// Vente intégrée : revend l'objet d'inventaire actuellement équipé sur ce slot.
+async function _sellCurrentEquipForShop(slot) {
+  const c = _getActiveShopChar();
+  if (!c) return;
+  const eq = (c.equipement || {})[slot];
+  const invIndex = eq?.sourceInvIndex;
+  if (!Number.isInteger(invIndex) || invIndex < 0) {
+    showNotif("Cet équipement n'a pas d'objet d'inventaire associé.", 'error');
+    return;
+  }
+  closeModalDirect();
+  await sellInvItemFromShop(c.id, invIndex);
+}
+window._sellCurrentEquipForShop = _sellCurrentEquipForShop;
+
 function openShopItemDetail(itemId) {
   const item = _items.find(i => i.id === itemId);
   if (!item) return;
@@ -1127,6 +1261,14 @@ function openShopItemDetail(itemId) {
   if (item.effet)       rows.push(['Effet', item.effet]);
   if (statBonuses.length) rows.push(['Bonus stats', statBonuses.join(', ')]);
 
+  const compareSlot   = hasChar ? _resolveSlotForItem(item) : null;
+  const comparePanel  = compareSlot ? _renderComparePanel(activeChar, item, compareSlot) : '';
+  const equippedHere  = compareSlot ? (activeChar.equipement || {})[compareSlot] : null;
+  const sellPrice     = equippedHere && Number.isInteger(equippedHere.sourceInvIndex)
+    ? (parseFloat(activeChar.inventaire?.[equippedHere.sourceInvIndex]?.prixVente) || 0)
+    : 0;
+  const canSellCurrent = !!equippedHere && Number.isInteger(equippedHere.sourceInvIndex) && equippedHere.sourceInvIndex >= 0;
+
   openModal(_esc(item.nom), `
     ${item.image ? `<div style="margin:-1.5rem -1.5rem .75rem;"><img src="${item.image}" style="width:100%;height:180px;object-fit:cover;border-radius:22px 22px 0 0;display:block"></div>` : ''}
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
@@ -1147,6 +1289,8 @@ function openShopItemDetail(itemId) {
       </div>`).join('')}
     </div>` : ''}
 
+    ${comparePanel}
+
     ${traitsArr.length ? `<div style="margin-bottom:.75rem">
       <div style="font-size:.68rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem">Traits</div>
       <div style="display:flex;flex-wrap:wrap;gap:.35rem">
@@ -1160,8 +1304,14 @@ function openShopItemDetail(itemId) {
       <div style="font-size:.75rem;color:${dispo===null?'var(--text-dim)':dispo===0?'#ff6b6b':'#22c38e'}">
         ${dispo===null?'∞ Stock illimité':dispo===0?'Épuisé':`${dispo} en stock`}
       </div>
-      <div style="display:flex;gap:.5rem">
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end">
         ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="closeModalDirect();openItemModal('${item.id}')">✏️ Modifier</button>` : ''}
+        ${canSellCurrent ? `
+          <button class="btn btn-outline btn-sm" title="Revendre l'objet actuellement équipé sur ${compareSlot}"
+            onclick="window._sellCurrentEquipForShop('${compareSlot}')">
+            💰 Revendre l'actuel${sellPrice ? ` (+${sellPrice} or)` : ''}
+          </button>
+        ` : ''}
         ${!hasChar ? `
           <button
             class="btn btn-outline btn-sm"

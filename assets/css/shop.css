@@ -2125,3 +2125,141 @@ body.sh-dragging * { cursor: grabbing !important; }
   padding: .3rem .55rem;
   min-height: 0;
 }
+
+/* ── Panneau de comparaison équipement (modal détail boutique) ────────────── */
+.sh-cmp {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: .65rem .75rem;
+  margin-bottom: .75rem;
+}
+.sh-cmp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-bottom: .55rem;
+}
+.sh-cmp-title {
+  font-size: .72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+.sh-cmp-slot {
+  font-size: .68rem;
+  color: var(--gold);
+  background: rgba(212, 175, 55, .08);
+  border: 1px solid rgba(212, 175, 55, .25);
+  padding: .12rem .45rem;
+  border-radius: 999px;
+}
+.sh-cmp-names {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .5rem;
+  margin-bottom: .55rem;
+}
+.sh-cmp-name {
+  background: rgba(255, 255, 255, .02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .35rem .5rem;
+  font-size: .8rem;
+  color: var(--text);
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  min-width: 0;
+}
+.sh-cmp-name--new {
+  border-color: rgba(34, 195, 142, .35);
+  background: rgba(34, 195, 142, .05);
+}
+.sh-cmp-coltitle {
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.sh-cmp-rows {
+  display: flex;
+  flex-direction: column;
+}
+.sh-cmp-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  align-items: center;
+  gap: .4rem;
+  padding: .3rem 0;
+  font-size: .78rem;
+  color: var(--text);
+}
+.sh-cmp-row + .sh-cmp-row {
+  border-top: 1px solid rgba(255, 255, 255, .04);
+}
+.sh-cmp-label {
+  color: var(--text-dim);
+  font-size: .74rem;
+}
+.sh-cmp-cur {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.sh-cmp-arr {
+  color: var(--text-dim);
+  font-size: .7rem;
+}
+.sh-cmp-new {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sh-cmp-delta {
+  font-size: .72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.2rem;
+  text-align: right;
+}
+.sh-cmp-delta--up   { color: #22c38e; }
+.sh-cmp-delta--down { color: #ff6b6b; }
+.sh-cmp-delta--eq   { color: var(--text-dim); font-weight: 500; }
+
+.sh-cmp-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  margin-top: .55rem;
+  padding-top: .55rem;
+  border-top: 1px solid rgba(255, 255, 255, .04);
+}
+.sh-cmp-trait {
+  font-size: .7rem;
+  padding: .15rem .5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, .02);
+}
+.sh-cmp-trait--add {
+  color: #22c38e;
+  border-color: rgba(34, 195, 142, .35);
+  background: rgba(34, 195, 142, .08);
+}
+.sh-cmp-trait--del {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, .35);
+  background: rgba(255, 107, 107, .08);
+  text-decoration: line-through;
+}
+
+@media (max-width: 520px) {
+  .sh-cmp-names { grid-template-columns: 1fr; }
+  .sh-cmp-row { gap: .25rem; font-size: .74rem; }
+  .sh-cmp-arr { display: none; }
+  .sh-cmp-delta { min-width: 1.8rem; }
+}
