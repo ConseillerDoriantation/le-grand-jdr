@@ -2670,12 +2670,12 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
         </div>
         <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat aux dégâts">
         <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés supplémentaires aux dégâts (même type)">
-        ${ (opt.typeRules?.missEffect === 'half') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
-          font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
-          <span>✦</span><span>½ dégâts garantis même en cas d'échec</span>
-        </div>` : (opt.typeRules?.missEffect === 'full') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
+        ${ (opt.typeRules?.missEffect === 'full') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
           font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
           <span>✦</span><span>Dégâts complets même en cas d'échec</span>
+        </div>` : (opt.typeRules?.missEffect === 'half' || opt.pmCost > 0) ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
+          font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
+          <span>✦</span><span>½ dégâts garantis même en cas d'échec${opt.typeRules?.missEffect !== 'half' && opt.pmCost > 0 ? ' (mana consommé)' : ''}</span>
         </div>` : ''}
         ${interactionPreviewHtml}
       </div>
@@ -3682,7 +3682,11 @@ window._vttRollAttack = async () => {
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
-    const missEffect = rules.missEffect || 'none';
+    let   missEffect = rules.missEffect || 'none';
+    // Règle générale : tout sort / compétence qui consomme du mana fait au moins
+    // ½ dégâts (arrondi inf.) en cas d'échec. Si le type de dégâts définit déjà
+    // 'half' ou 'full', on respecte (pas de cumul, on ne dégrade pas non plus).
+    if (missEffect === 'none' && opt.pmCost > 0) missEffect = 'half';
 
     const diceToRoll    = opt.rawDice || opt.dice;
     const effectiveDice = _effectiveDmgDice(diceToRoll);
@@ -5170,6 +5174,8 @@ function _initListeners() {
     _renderTimer();
     _renderCombatTracker();
     _renderMjRulerRemote(_session.mjRuler);
+    _renderShortRest();
+    _checkShortRestAutoApply();
   },()=>{}));
 
   // 2. Pages
@@ -5310,6 +5316,10 @@ function _initListeners() {
     // Recalcul fog si un token joueur a bougé
     if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player'))
       fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
+    // Si la composition des joueurs présents change, le panneau "Court repos" doit suivre
+    if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player')) {
+      _renderShortRest(); _checkShortRestAutoApply();
+    }
   },()=>{}));
 
   // 7. Annotations (dessins + formes)
@@ -6457,6 +6467,201 @@ window._vttFogClearOps = async () => {
   await updateDoc(_pgRef(_activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
 };
 window._vttSwitchPage = id => _switchPage(id);
+
+// ══════════════════════════════════════════════════════════════════════════
+// COURT REPOS — Vote du groupe, régénère ½ PV / ½ PM (arrondi sup.)
+// ──────────────────────────────────────────────────────────────────────────
+// Stockage session.shortRest = { max, count, vote: { votes: {uid:true} } | null }
+// Vote complet (tous les owners de player tokens placés ont voté) → MJ applique.
+// MJ peut forcer / annuler / régler max / reset compteur.
+// ══════════════════════════════════════════════════════════════════════════
+function _shortRestPresentUids() {
+  const uids = new Set();
+  for (const e of Object.values(_tokens)) {
+    const t = e?.data;
+    if (t?.type === 'player' && t.pageId && t.ownerId) uids.add(t.ownerId);
+  }
+  return [...uids];
+}
+function _shortRestPresentChars() {
+  const seen = new Set(), chars = [];
+  for (const e of Object.values(_tokens)) {
+    const t = e?.data;
+    if (t?.type === 'player' && t.pageId && t.characterId && !seen.has(t.characterId)) {
+      seen.add(t.characterId);
+      const c = _characters[t.characterId];
+      if (c) chars.push(c);
+    }
+  }
+  return chars;
+}
+function _shortRestPresentNames() {
+  // ownerId → nom à afficher (perso le plus récemment vu)
+  const out = {};
+  for (const e of Object.values(_tokens)) {
+    const t = e?.data;
+    if (t?.type === 'player' && t.ownerId && !out[t.ownerId]) {
+      const c = t.characterId ? _characters[t.characterId] : null;
+      out[t.ownerId] = c?.nom || t.name || t.ownerId.slice(0, 6);
+    }
+  }
+  return out;
+}
+
+window._vttShortRestVote = async () => {
+  const uid = STATE.user?.uid; if (!uid) return;
+  const sr  = _session?.shortRest || { max: 0, count: 0, vote: null };
+  if ((sr.count || 0) >= (sr.max ?? 0)) {
+    showNotif('Plus de court repos disponible', 'error'); return;
+  }
+  const votes = { ...(sr.vote?.votes || {}), [uid]: true };
+  await setDoc(_sesRef(), { shortRest: { ...sr, vote: { votes } } }, { merge: true })
+    .catch(() => showNotif('Erreur vote', 'error'));
+};
+
+window._vttShortRestUnvote = async () => {
+  const uid = STATE.user?.uid; if (!uid) return;
+  const sr  = _session?.shortRest; if (!sr?.vote) return;
+  const votes = { ...sr.vote.votes };
+  delete votes[uid];
+  const newVote = Object.keys(votes).length ? { votes } : null;
+  await setDoc(_sesRef(), { shortRest: { ...sr, vote: newVote } }, { merge: true })
+    .catch(() => {});
+};
+
+window._vttShortRestCancel = async () => {
+  if (!STATE.isAdmin) return;
+  const sr = _session?.shortRest; if (!sr) return;
+  await setDoc(_sesRef(), { shortRest: { ...sr, vote: null } }, { merge: true });
+};
+
+window._vttShortRestForce = async () => {
+  if (!STATE.isAdmin) return;
+  await _applyShortRest({ forced: true });
+};
+
+window._vttShortRestSetMax = async (val) => {
+  if (!STATE.isAdmin) return;
+  const max = Math.max(0, Math.min(20, parseInt(val) || 0));
+  const sr  = _session?.shortRest || { count: 0, vote: null };
+  await setDoc(_sesRef(), { shortRest: { ...sr, max } }, { merge: true });
+};
+
+window._vttShortRestResetCount = async () => {
+  if (!STATE.isAdmin) return;
+  const sr = _session?.shortRest || { max: 0 };
+  await setDoc(_sesRef(), { shortRest: { ...sr, count: 0, vote: null } }, { merge: true });
+};
+
+async function _applyShortRest({ forced = false } = {}) {
+  const sr = _session?.shortRest || { max: 0, count: 0, vote: null };
+  if ((sr.count || 0) >= (sr.max ?? 0)) {
+    showNotif('Plus de court repos disponible', 'error'); return;
+  }
+  const chars = _shortRestPresentChars();
+  await Promise.all(chars.map(c => {
+    const maxHp = calcPVMax(c);
+    const maxPm = calcPMMax(c);
+    const curHp = Math.max(0, Number(c.hp) || 0);
+    const curPm = Math.max(0, Number(c.pm) || 0);
+    const newHp = Math.min(maxHp, curHp + Math.ceil(maxHp / 2));
+    const newPm = Math.min(maxPm, curPm + Math.ceil(maxPm / 2));
+    return updateDoc(_chrRef(c.id), { hp: newHp, pm: newPm }).catch(() => {});
+  }));
+  const newCount = (sr.count || 0) + 1;
+  await setDoc(_sesRef(), { shortRest: { ...sr, count: newCount, vote: null } }, { merge: true });
+  const tag = forced ? ' (forcé par le MJ)' : '';
+  showNotif(`💤 Court repos pris${tag} — ${chars.length} perso(s) régénéré(s) · ${newCount}/${sr.max ?? 0}`, 'success');
+}
+
+// Auto-apply : seul le MJ déclenche pour éviter les races.
+function _checkShortRestAutoApply() {
+  if (!STATE.isAdmin) return;
+  const sr = _session?.shortRest;
+  if (!sr?.vote) return;
+  if ((sr.count || 0) >= (sr.max ?? 0)) return;
+  const present = _shortRestPresentUids();
+  if (!present.length) return;
+  const voted = Object.keys(sr.vote.votes || {});
+  if (!present.every(u => voted.includes(u))) return;
+  _applyShortRest({ forced: false });
+}
+
+function _renderShortRest() {
+  const trigger = document.getElementById('vtt-rest-trigger');
+  const panel   = document.getElementById('vtt-rest-panel');
+  const body    = document.getElementById('vtt-rest-body');
+  if (!trigger) return;
+
+  const sr   = _session?.shortRest || { max: 0, count: 0, vote: null };
+  const max  = sr.max ?? 0;
+  const used = sr.count || 0;
+  const rem  = Math.max(0, max - used);
+
+  trigger.textContent = `💤 ${used}/${max}`;
+  trigger.classList.toggle('vtt-rest-trigger--out',    rem === 0);
+  trigger.classList.toggle('vtt-rest-trigger--voting', !!sr.vote);
+
+  if (!panel || panel.dataset.open !== '1' || !body) return;
+
+  const uid     = STATE.user?.uid;
+  const present = _shortRestPresentUids();
+  const voted   = Object.keys(sr.vote?.votes || {});
+  const names   = _shortRestPresentNames();
+  const onPage  = present.includes(uid);
+  const hasV    = voted.includes(uid);
+
+  const voteList = sr.vote ? present.map(u => `
+    <div class="vtt-rest-voter">
+      <span class="vtt-rest-voter-ic ${voted.includes(u) ? 'on' : ''}">${voted.includes(u) ? '✓' : '⋯'}</span>
+      <span class="vtt-rest-voter-name">${_esc(names[u] || u.slice(0,6))}</span>
+    </div>`).join('') : '';
+
+  body.innerHTML = `
+    <div class="vtt-rest-counter">
+      <span><b>${used}</b>/${max} utilisé(s)</span>
+      <span class="vtt-rest-remaining">${rem} restant${rem>1?'s':''}</span>
+    </div>
+    <div class="vtt-rest-desc">Régénère <b>½ PV</b> et <b>½ PM</b> (arrondi sup.) à tous les persos placés.</div>
+    ${sr.vote ? `
+      <div class="vtt-rest-vote-hd">Vote en cours · ${voted.length}/${present.length || '?'}</div>
+      <div class="vtt-rest-voters">${voteList || '<div class="vtt-rest-help">Aucun joueur sur la map.</div>'}</div>` : ''}
+    ${rem > 0 && onPage ? `
+      <div class="vtt-rest-actions">
+        ${hasV
+          ? `<button class="vtt-rest-btn vtt-rest-btn--voted" onclick="window._vttShortRestUnvote()">✓ Voté — retirer</button>`
+          : `<button class="vtt-rest-btn vtt-rest-btn--vote" onclick="window._vttShortRestVote()">Voter pour un court repos</button>`}
+      </div>` : ''}
+    ${rem === 0 ? '<div class="vtt-rest-help">Plus de court repos disponible pour cette aventure.</div>' : ''}
+    ${rem > 0 && !onPage && !STATE.isAdmin ? '<div class="vtt-rest-help">Tu n\'as aucun token placé sur la map.</div>' : ''}
+    ${STATE.isAdmin ? `
+      <div class="vtt-rest-mj">
+        <div class="vtt-rest-mj-row">
+          <label class="vtt-rest-mj-lbl">Max pour l'aventure</label>
+          <input type="number" min="0" max="20" value="${max}" class="vtt-rest-mj-input"
+            onchange="window._vttShortRestSetMax(this.value)">
+        </div>
+        <div class="vtt-rest-mj-btns">
+          ${rem > 0 ? `<button class="vtt-rest-btn vtt-rest-btn--force" onclick="window._vttShortRestForce()">💤 Forcer le court repos</button>` : ''}
+          ${sr.vote ? `<button class="vtt-rest-btn vtt-rest-btn--cancel" onclick="window._vttShortRestCancel()">✕ Annuler le vote</button>` : ''}
+          ${used > 0 ? `<button class="vtt-rest-btn vtt-rest-btn--reset" onclick="window._vttShortRestResetCount()">↺ Reset compteur</button>` : ''}
+        </div>
+      </div>` : ''}
+  `;
+}
+
+window._vttToggleShortRest = () => {
+  const panel = document.getElementById('vtt-rest-panel'); if (!panel) return;
+  const open = panel.dataset.open === '1';
+  if (open) {
+    panel.dataset.open = '0'; panel.style.display = 'none';
+    document.getElementById('vtt-rest-trigger')?.classList.remove('active');
+  } else {
+    panel.dataset.open = '1'; panel.style.display = 'flex';
+    document.getElementById('vtt-rest-trigger')?.classList.add('active');
+    _renderShortRest();
+  }
+};
 
 // ── Suivi joueur du bestiaire (déductions, notes) depuis l'inspecteur VTT ──
 // Écrit dans le même document Firestore que la fiche bestiaire → cohérent partout.
@@ -8928,6 +9133,16 @@ export async function renderVttPage() {
     <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none"></div>
     <button class="vtt-music-trigger" id="vtt-music-trigger" onclick="window._vttToggleMusic()" title="Sons &amp; Musique">🎵</button>`;
   wrap.appendChild(_mf);
+  // Float Court repos (bas-gauche du canvas, 5e bouton)
+  const _rf = document.createElement('div');
+  _rf.className = 'vtt-rest-float';
+  _rf.innerHTML = `
+    <div class="vtt-rest-panel" id="vtt-rest-panel" data-open="0" style="display:none">
+      <div class="vtt-rest-header">💤 Court repos</div>
+      <div class="vtt-rest-body" id="vtt-rest-body"></div>
+    </div>
+    <button class="vtt-rest-trigger" id="vtt-rest-trigger" onclick="window._vttToggleShortRest()" title="Court repos du groupe">💤 0/0</button>`;
+  wrap.appendChild(_rf);
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
