@@ -814,6 +814,106 @@
 }
 .vtt-ins-section-title .vtt-btn-sm { margin-left: auto; padding: 0 .4rem; min-width: 22px; height: 22px; }
 
+/* ── Fiche créature dans l'inspecteur (MJ + Joueur) ─────────────────────── */
+.vtt-creat-mj, .vtt-creat-pl { display: flex; flex-direction: column; gap: .35rem; }
+.vtt-creat-rang {
+  margin-left: auto; padding: 1px .45rem;
+  font-size: .58rem; letter-spacing: .08em; text-transform: uppercase;
+  border-radius: 999px; font-family: 'Cinzel', serif;
+}
+.vtt-creat-rang--classique { background: rgba(148,163,184,.15); color: #cbd5e1; border: 1px solid rgba(148,163,184,.4); }
+.vtt-creat-rang--elite     { background: rgba(167,139,250,.15); color: #c4b5fd; border: 1px solid rgba(167,139,250,.4); }
+.vtt-creat-rang--boss      { background: rgba(239,68,68,.18);   color: #fca5a5; border: 1px solid rgba(239,68,68,.4); }
+
+.vtt-creat-vitals {
+  display: flex; flex-wrap: wrap; gap: .3rem .5rem;
+  font-size: .72rem; color: var(--text-muted);
+}
+.vtt-creat-vital b { color: var(--text); font-weight: 700; }
+.vtt-creat-stats6 {
+  display: flex; flex-wrap: wrap; gap: .25rem;
+  margin-top: .15rem;
+}
+.vtt-creat-stat-pill {
+  font-size: .65rem; padding: .15rem .45rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text-muted);
+}
+.vtt-creat-stat-pill b { color: var(--text); margin-right: .15rem; }
+
+.vtt-creat-aff {
+  font-size: .7rem; line-height: 1.35; color: var(--text-muted);
+}
+.vtt-creat-aff-lbl {
+  font-weight: 700; margin-right: .25rem;
+}
+
+.vtt-creat-desc {
+  font-size: .72rem; line-height: 1.4; color: var(--text-muted);
+  font-style: italic; padding: .3rem .4rem;
+  background: var(--bg-elevated); border-radius: 5px;
+  white-space: pre-wrap;
+}
+
+.vtt-creat-sub-title {
+  font-size: .68rem; font-weight: 700; color: var(--text);
+  margin-top: .35rem; padding-top: .3rem;
+  border-top: 1px dashed var(--border);
+}
+
+.vtt-creat-atk, .vtt-creat-trait, .vtt-creat-atk-edit, .vtt-creat-trait-edit {
+  padding: .35rem .45rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .72rem;
+  display: flex; flex-direction: column; gap: .25rem;
+}
+.vtt-creat-atk-name, .vtt-creat-trait-name { font-weight: 700; color: var(--text); }
+.vtt-creat-atk-stats { display: flex; flex-wrap: wrap; gap: .35rem; }
+.vtt-creat-atk-stat {
+  font-size: .65rem; padding: 1px .4rem; border-radius: 4px;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border);
+}
+.vtt-creat-atk-stat.touch { color: #fbbf24; border-color: rgba(251,191,36,.35); }
+.vtt-creat-atk-stat.dmg   { color: #fca5a5; border-color: rgba(239,68,68,.35); }
+.vtt-creat-atk-stat.range { color: #86efac; border-color: rgba(34,197,94,.35); }
+.vtt-creat-atk-desc, .vtt-creat-trait-desc {
+  font-size: .68rem; color: var(--text-muted); line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.vtt-creat-loots { display: flex; flex-direction: column; gap: .2rem; }
+.vtt-creat-loot {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .25rem .45rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 5px; font-size: .7rem;
+}
+.vtt-creat-loot-name { flex: 1; color: var(--text); font-weight: 600; }
+.vtt-creat-loot-meta {
+  font-size: .62rem; color: var(--text-dim);
+  background: rgba(255,255,255,.04); padding: 0 .35rem; border-radius: 3px;
+}
+
+/* Vue joueur : champs de déduction */
+.vtt-creat-help {
+  font-size: .65rem; color: var(--text-dim); font-style: italic;
+  line-height: 1.35;
+}
+.vtt-creat-input {
+  width: 100%; padding: .2rem .4rem;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text);
+  font-size: .72rem; font-family: inherit;
+  box-sizing: border-box;
+}
+.vtt-creat-input:focus { border-color: var(--gold); outline: none; }
+.vtt-creat-atk-row3 {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px;
+}
+.vtt-creat-notes { resize: vertical; min-height: 50px; }
+
 /* Liste d'effets actifs sur un token (buffs/débuffs/DoT/enchant…) */
 .vtt-buff-list { display: flex; flex-direction: column; gap: .25rem; }
 .vtt-buff-item {
