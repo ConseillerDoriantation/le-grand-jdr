@@ -222,17 +222,45 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
     }
   }
 
-  // ── Brouillard de guerre manuel — appliqué APRÈS le LOS, dans l'ordre.
-  //    'reveal' = cutout forcé (toujours visible) ; 'hide' = blackout forcé.
-  for (const op of (page.fogOps || [])) {
-    if (op.type === 'reveal') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = 'rgba(0,0,0,1)';
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = `rgba(0,0,0,${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
+  // ── Brouillard de guerre manuel ─────────────────────────────────────────
+  // Pour que les zones de "hide" superposées s'unifient (pas d'accumulation
+  // d'alpha), on construit d'abord deux masques boolean (hide / reveal)
+  // mutuellement exclusifs, en respectant l'ordre des ops (dernier = priorité),
+  // puis on les applique à alpha exact sur le canvas LOS.
+  const ops = page.fogOps || [];
+  if (ops.length) {
+    const mkMask = () => {
+      const cnv = document.createElement('canvas');
+      cnv.width = W; cnv.height = H;
+      return { cnv, c: cnv.getContext('2d') };
+    };
+    const hide = mkMask();
+    const reveal = mkMask();
+
+    for (const op of ops) {
+      const x = op.x*C, y = op.y*C, w = op.w*C, h = op.h*C;
+      const [add, sub] = op.type === 'hide' ? [hide, reveal] : [reveal, hide];
+      add.c.globalCompositeOperation = 'source-over';
+      add.c.fillStyle = 'rgba(0,0,0,1)';
+      add.c.fillRect(x, y, w, h);
+      sub.c.globalCompositeOperation = 'destination-out';
+      sub.c.fillStyle = 'rgba(0,0,0,1)';
+      sub.c.fillRect(x, y, w, h);
     }
-    ctx.fillRect(op.x*C, op.y*C, op.w*C, op.h*C);
+
+    // 1) Reveal : force-visible (cut LOS dans ces zones)
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(reveal.cnv, 0, 0);
+
+    // 2) Hide : on vide le LOS dans les zones de hide, puis on repeint à alpha exact
+    ctx.drawImage(hide.cnv, 0, 0);
+    const paint = mkMask();
+    paint.c.fillStyle = `rgba(0,0,0,${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
+    paint.c.fillRect(0, 0, W, H);
+    paint.c.globalCompositeOperation = 'destination-in';
+    paint.c.drawImage(hide.cnv, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(paint.cnv, 0, 0);
   }
 
   ctx.globalCompositeOperation = 'source-over';
@@ -367,17 +395,21 @@ export function fogRenderWalls(page, isAdmin) {
     }
   }
 
-  // ── Rectangles de brouillard manuel en mode édition (cliquables) ─────────
+  // ── Rectangles de brouillard manuel en mode édition ──────────────────────
+  // Contours subtils (le remplissage visible vient du canvas fog unifié).
+  // Le rect sélectionné est mis en évidence avec un fill plus prononcé.
   if (_editMode && isAdmin) {
     for (const op of (page.fogOps || [])) {
       const sel = _selectedId === op.id;
-      const fill = op.type === 'hide' ? 'rgba(15,23,42,0.35)' : 'rgba(253,224,71,0.18)';
       const stroke = sel ? '#fff' : EDIT_COLOR[op.type];
       const rect = new K.Rect({
         x: op.x * C, y: op.y * C,
         width: op.w * C, height: op.h * C,
-        fill, stroke, strokeWidth: sel ? 2.5 : 1.5,
-        dash: [6, 4], listening: true,
+        fill: sel ? (op.type === 'hide' ? 'rgba(15,23,42,0.4)' : 'rgba(253,224,71,0.2)') : 'transparent',
+        stroke, strokeWidth: sel ? 2.5 : 1,
+        dash: sel ? [6, 4] : [3, 4],
+        opacity: sel ? 1 : 0.55,
+        listening: true,
       });
       rect.on('click tap', e => { e.cancelBubble = true; _selectItem(op.id); });
       _wallsLayer.add(rect);
@@ -495,15 +527,17 @@ export function fogToggleEditMode(enabled, page) {
     return { x: (p.x - sp.x) / sc, y: (p.y - sp.y) / sc };
   };
 
-  // Snap dynamique selon les modificateurs clavier (lus sur l'évènement Konva)
-  //   défaut : 1 case (coins de grille — propre)
-  //   Alt    : 1/2 case (demi-case — ajustements fins)
-  //   Shift  : 1/10 case (placement libre — précis au pixel près)
+  // Snap dynamique selon les modificateurs clavier (lus sur l'évènement Konva).
+  // Outils ligne (murs/portes/fenêtres) : défaut 1 case (grille propre).
+  // Outils rect (hide/reveal) : défaut 0.5 case (meilleure précision sur les zones).
+  //   Alt   : moitié du pas par défaut (1/2 ou 1/4 case)
+  //   Shift : 1/10 case (placement libre — précis au pixel près)
   const _snapStep = ev => {
     const e = ev?.evt || ev || {};
     if (e.shiftKey) return 0.1;
-    if (e.altKey)   return 0.5;
-    return 1;
+    const rect = _editTool === 'hide' || _editTool === 'reveal';
+    if (e.altKey) return rect ? 0.25 : 0.5;
+    return rect ? 0.5 : 1;
   };
   const _snap = (pos, step) => ({
     col: Math.round(pos.x / _CELL / step) * step,

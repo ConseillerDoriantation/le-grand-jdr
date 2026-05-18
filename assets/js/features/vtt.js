@@ -352,6 +352,19 @@ function _live(t) {
     }
   }
 
+  // ── Badge CA affiché sur le token ────────────────────────────────────────
+  // • MJ : vraie CA (avec buffs) — toujours.
+  // • Joueur sur ennemi avec fiche bestiaire : son estimation, ou "?" si vide.
+  // • Reste (joueur/PNJ) : vraie CA.
+  if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
+    const track = _bstTracker[t.beastId] || {};
+    result.caBadge = track.caEstimee !== undefined && track.caEstimee !== ''
+      ? String(parseInt(track.caEstimee) || 0)
+      : '?';
+  } else {
+    result.caBadge = String(result.displayDefense ?? 0);
+  }
+
   return result;
 }
 
@@ -943,7 +956,7 @@ function _buildShape(t) {
     strokeWidth: _buffed ? 2.5 : 1.5,
     listening:false, name:'ca-bg' }));
   g.add(new K.Text({ x:_caX-10, y:_caY-6, width:20, height:12,
-    text:`🛡${ld.displayDefense??0}`, fontSize:9, fontStyle:'bold',
+    text:`🛡${ld.caBadge ?? (ld.displayDefense??0)}`, fontSize:9, fontStyle:'bold',
     fill: _buffed ? '#c4b5fd' : '#e2e8f0',
     fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-lbl' }));
   if (_buffed) {
@@ -4044,12 +4057,11 @@ function _renderInspector(t) {
   if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
     const track    = _bstTracker[t.beastId] || {};
     const pvMax    = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
-    // ld.displayHp est déjà calculé par _live() avec t.hp + borne pvActuel
     const pvCur    = ld.displayHp !== null ? ld.displayHp : pvMax;
     const pvPct    = pvMax > 0 ? Math.round((pvCur??pvMax) / pvMax * 100) : 0;
     const pvBarCol = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#f59e0b' : '#ef4444';
-    const caLabel  = track.caEstimee  !== undefined ? String(track.caEstimee)  : '?';
-    const vitLabel = track.vitEstimee !== undefined ? String(track.vitEstimee)+' cases' : '?';
+    const caLabel  = track.caEstimee  !== undefined && track.caEstimee  !== '' ? String(track.caEstimee)  : '?';
+    const vitLabel = track.vitEstimee !== undefined && track.vitEstimee !== '' ? String(track.vitEstimee)+' cases' : '?';
     const pos      = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
     statsHtml =
       '<div class="vtt-ins-bars">' +
@@ -4060,8 +4072,6 @@ function _renderInspector(t) {
       '<div class="vtt-ins-stats">' +
         _stat('🛡', 'CA est.', caLabel) +
         _stat('🏃', 'Vitesse', vitLabel) +
-        _stat('⚔️', 'Attaque', '?') +
-        _stat('🎯', 'Portée', '?') +
         _stat('📍', 'Position', pos, true) +
       '</div>' +
       '<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">Valeurs issues de ton bestiaire personnel</div>';
@@ -4108,6 +4118,139 @@ function _renderInspector(t) {
             '</div>'
           : '') +
       '</div>';
+  }
+
+  // ── Infos créature (bestiaire) ─────────────────────────────────────────
+  // MJ : fiche complète (CA réelle, stats, attaques, traits, butins…)
+  // Joueur : ses propres déductions sur les attaques et traits
+  let _creatureHtml = '';
+  if (t.type === 'enemy' && t.beastId) {
+    const beast = _bestiary[t.beastId];
+    if (beast) {
+      const _atk = Array.isArray(beast.attaques) ? beast.attaques : [];
+      const _trt = Array.isArray(beast.traits)   ? beast.traits   : [];
+      const _btn = Array.isArray(beast.butins)   ? beast.butins   : [];
+
+      if (STATE.isAdmin) {
+        // ── Vue MJ : tout est révélé ───────────────────────────────────
+        const _stats6 = ['force','dexterite','constitution','intelligence','sagesse','charisme']
+          .map(k => {
+            const v = parseInt(beast[k]);
+            if (!v && v !== 0) return null;
+            const m = Math.floor((v - 10) / 2);
+            const ms = m >= 0 ? '+'+m : m;
+            return `<span class="vtt-creat-stat-pill"><b>${k.slice(0,3).toUpperCase()}</b> ${v} <span style="color:var(--text-dim)">(${ms})</span></span>`;
+          }).filter(Boolean).join('');
+
+        const _affHtml = ((arr, label, color) => {
+          if (!Array.isArray(arr) || !arr.length) return '';
+          return `<div class="vtt-creat-aff"><span class="vtt-creat-aff-lbl" style="color:${color}">${label}</span> ${arr.map(x => _esc(typeof x === 'object' ? (x.nom || x.type || '?') : x)).join(', ')}</div>`;
+        });
+
+        const realCaBuffed = (typeof calcCA === 'function' && ld.displayDefense !== undefined) ? ld.displayDefense : (beast.ca ?? 0);
+        const rsLabel = { classique:'Classique', elite:'Élite', boss:'Boss' }[String(beast.rang||'').toLowerCase()] || 'Classique';
+
+        _creatureHtml = `
+          <div class="vtt-ins-section vtt-creat-mj">
+            <div class="vtt-ins-section-title">📜 Fiche créature
+              <span class="vtt-creat-rang vtt-creat-rang--${String(beast.rang||'classique').toLowerCase()}">${rsLabel}</span>
+            </div>
+            <div class="vtt-creat-vitals">
+              <span class="vtt-creat-vital">🛡 CA <b>${beast.ca ?? '?'}</b>${realCaBuffed !== (beast.ca ?? 0) ? ` <span style="color:#a78bfa">(actuel ${realCaBuffed})</span>` : ''}</span>
+              <span class="vtt-creat-vital">❤️ PV max <b>${beast.pvMax ?? '?'}</b></span>
+              ${beast.pmMax ? `<span class="vtt-creat-vital">💧 PM max <b>${beast.pmMax}</b></span>` : ''}
+              <span class="vtt-creat-vital">🏃 Vit. <b>${beast.vitesse ?? '?'}</b></span>
+              ${beast.initiative ? `<span class="vtt-creat-vital">⚡ Init. <b>${beast.initiative}</b></span>` : ''}
+              ${beast.niveau ? `<span class="vtt-creat-vital">📊 Nv. <b>${beast.niveau}</b></span>` : ''}
+            </div>
+            ${_stats6 ? `<div class="vtt-creat-stats6">${_stats6}</div>` : ''}
+            ${_affHtml(beast.faiblesses,  'Faiblesses',   '#f87171')}
+            ${_affHtml(beast.resistances, 'Résistances',  '#fbbf24')}
+            ${_affHtml(beast.immunites,   'Immunités',    '#94a3b8')}
+            ${_affHtml(beast.absorptions, 'Absorptions',  '#a78bfa')}
+            ${beast.description ? `<div class="vtt-creat-desc">${_esc(beast.description)}</div>` : ''}
+            ${_atk.length ? `
+              <div class="vtt-creat-sub-title">⚔️ Attaques (${_atk.length})</div>
+              ${_atk.map(a => `
+                <div class="vtt-creat-atk">
+                  <div class="vtt-creat-atk-name">${_esc(a.nom || 'Attaque')}</div>
+                  <div class="vtt-creat-atk-stats">
+                    ${a.toucher ? `<span class="vtt-creat-atk-stat touch">🎯 ${_esc(a.toucher)}</span>` : ''}
+                    ${a.degats  ? `<span class="vtt-creat-atk-stat dmg">⚔️ ${_esc(a.degats)}</span>`   : ''}
+                    ${a.portee  ? `<span class="vtt-creat-atk-stat range">📏 ${_esc(a.portee)}</span>` : ''}
+                  </div>
+                  ${a.description ? `<div class="vtt-creat-atk-desc">${_esc(a.description)}</div>` : ''}
+                </div>`).join('')}` : ''}
+            ${_trt.length ? `
+              <div class="vtt-creat-sub-title">✨ Traits (${_trt.length})</div>
+              ${_trt.map(tr => `
+                <div class="vtt-creat-trait">
+                  <div class="vtt-creat-trait-name">${_esc(tr.nom || '')}</div>
+                  ${tr.description ? `<div class="vtt-creat-trait-desc">${_esc(tr.description)}</div>` : ''}
+                </div>`).join('')}` : ''}
+            ${_btn.length ? `
+              <div class="vtt-creat-sub-title">💰 Butins (${_btn.length})</div>
+              <div class="vtt-creat-loots">
+                ${_btn.map(b => `
+                  <div class="vtt-creat-loot">
+                    <span class="vtt-creat-loot-name">${_esc(b.nom || 'Objet')}</span>
+                    ${b.quantite ? `<span class="vtt-creat-loot-meta">${_esc(b.quantite)}</span>` : ''}
+                    ${b.chance   ? `<span class="vtt-creat-loot-meta">${_esc(b.chance)}</span>`   : ''}
+                  </div>`).join('')}
+              </div>` : ''}
+          </div>`;
+      } else {
+        // ── Vue joueur : seulement ses propres déductions ──────────────
+        const track = _bstTracker[t.beastId] || {};
+        const ded   = track.deductions || {};
+        const _bid  = t.beastId;
+        const _hasNotes = (track.notes || '').trim().length > 0;
+        // Détermine si au moins une déduction d'attaque ou de trait est renseignée
+        const _hasAnyDed = Object.values(ded).some(v => v && String(v).trim());
+
+        _creatureHtml = `
+          <div class="vtt-ins-section vtt-creat-pl">
+            <div class="vtt-ins-section-title">📝 Mes observations</div>
+            <div class="vtt-creat-help">Renseigne ici ce que tu as découvert sur cette créature. Sauvegardé automatiquement (visible aussi dans le Bestiaire).</div>
+            ${_atk.length ? `
+              <div class="vtt-creat-sub-title">⚔️ Attaques observées (${_atk.length})</div>
+              ${_atk.map((_, i) => `
+                <div class="vtt-creat-atk-edit">
+                  <input class="vtt-creat-input" placeholder="Nom de l'attaque…"
+                    value="${_esc(ded['att_nom_'+i] || '')}"
+                    onchange="window._vttBstDed('${_bid}','att_nom_${i}',this.value)">
+                  <div class="vtt-creat-atk-row3">
+                    <input class="vtt-creat-input" placeholder="🎯 Toucher"
+                      value="${_esc(ded['att_toucher_'+i] || '')}"
+                      onchange="window._vttBstDed('${_bid}','att_toucher_${i}',this.value)">
+                    <input class="vtt-creat-input" placeholder="⚔️ Dégâts"
+                      value="${_esc(ded['att_degats_'+i] || '')}"
+                      onchange="window._vttBstDed('${_bid}','att_degats_${i}',this.value)">
+                    <input class="vtt-creat-input" placeholder="📏 Portée"
+                      value="${_esc(ded['att_portee_'+i] || '')}"
+                      onchange="window._vttBstDed('${_bid}','att_portee_${i}',this.value)">
+                  </div>
+                </div>`).join('')}` : ''}
+            ${_trt.length ? `
+              <div class="vtt-creat-sub-title">✨ Traits observés (${_trt.length})</div>
+              ${_trt.map((_, i) => `
+                <div class="vtt-creat-trait-edit">
+                  <input class="vtt-creat-input" placeholder="Nom du trait…"
+                    value="${_esc(ded['tr_nom_'+i] || '')}"
+                    onchange="window._vttBstDed('${_bid}','tr_nom_${i}',this.value)">
+                  <input class="vtt-creat-input" placeholder="Description…"
+                    value="${_esc(ded['tr_desc_'+i] || '')}"
+                    onchange="window._vttBstDed('${_bid}','tr_desc_${i}',this.value)">
+                </div>`).join('')}` : ''}
+            <div class="vtt-creat-sub-title">📔 Notes</div>
+            <textarea class="vtt-creat-input vtt-creat-notes" rows="3" placeholder="Tes notes sur cette créature…"
+              onchange="window._vttBstNotes('${_bid}',this.value)">${_esc(track.notes || '')}</textarea>
+            ${!_atk.length && !_trt.length && !_hasNotes && !_hasAnyDed
+              ? '<div class="vtt-creat-help" style="margin-top:.4rem">Aucune attaque/trait recensé par le MJ pour cette créature pour le moment.</div>'
+              : ''}
+          </div>`;
+      }
+    }
   }
 
   // ── Effets actifs (buffs, debuffs, DoT, enchantements, afflictions…) ──
@@ -4174,6 +4317,7 @@ function _renderInspector(t) {
       </div>
     </div>
     ${statsHtml}
+    ${_creatureHtml}
     ${_buffsHtml}
     ${(() => {
       const inCombat = !!_session?.combat?.active;
@@ -6313,6 +6457,27 @@ window._vttFogClearOps = async () => {
   await updateDoc(_pgRef(_activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
 };
 window._vttSwitchPage = id => _switchPage(id);
+
+// ── Suivi joueur du bestiaire (déductions, notes) depuis l'inspecteur VTT ──
+// Écrit dans le même document Firestore que la fiche bestiaire → cohérent partout.
+const _saveBstTracker = async () => {
+  const uid = STATE.user?.uid; if (!uid) return;
+  try { await saveDoc('bestiary_tracker', uid, { data: _bstTracker }); }
+  catch (e) { console.error('[vtt] tracker save', e); }
+};
+window._vttBstDed = (beastId, key, val) => {
+  if (!_bstTracker[beastId]) _bstTracker[beastId] = {};
+  if (!_bstTracker[beastId].deductions) _bstTracker[beastId].deductions = {};
+  const v = (val ?? '').toString();
+  if (!v.trim()) delete _bstTracker[beastId].deductions[key];
+  else           _bstTracker[beastId].deductions[key] = v;
+  _saveBstTracker();
+};
+window._vttBstNotes = (beastId, val) => {
+  if (!_bstTracker[beastId]) _bstTracker[beastId] = {};
+  _bstTracker[beastId].notes = (val ?? '').toString();
+  _saveBstTracker();
+};
 
 // ── Outils de dessin ────────────────────────────────────────────────
 window._vttDrawShape = shape => {
@@ -8719,7 +8884,7 @@ export async function renderVttPage() {
       <div class="vtt-tb-sep"></div>
       <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
       <div class="vtt-walls-bar-hint">
-        Clic = tracer · <kbd>Alt</kbd> demi-case · <kbd>Shift</kbd> libre · Clic segment/zone = menu<br>
+        Murs : grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · Clic segment/zone = menu<br>
         <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
         <span class="vtt-fog-dot vtt-fog-dot--bad"></span>sommet isolé (fuite possible) ·
         <span class="vtt-fog-dot vtt-fog-dot--snap"></span>aimantation pendant tracé</span>
