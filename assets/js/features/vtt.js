@@ -7242,16 +7242,21 @@ function _renderLootPanel() {
   if (!panel || panel.dataset.open !== '1') return;
   const mj = STATE.isAdmin;
 
+  const uid = STATE.user?.uid;
+  const myChars = Object.values(_characters).filter(c => c.uid === uid);
   const _itemRow = (item, zone) => {
     const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
-    return `<div class="vtt-loot-row" data-id="${item.id}">
-      ${mj ? `<span class="vtt-loot-drag" title="${zone === 'stash' ? 'Glisser vers le butin' : 'Glisser vers la réserve'}">⠿</span>` : ''}
-      <span class="vtt-loot-dot" style="background:${rarColor}"></span>
-      <span class="vtt-loot-name">${_esc(item.nom)}</span>
-      <span class="vtt-loot-qty">×${item.qty}</span>
-      ${zone === 'stash' && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveStash('${item.id}')" title="Retirer">✕</button>` : ''}
-      ${zone === 'loot'  && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveLoot('${item.id}')" title="Retirer">✕</button>` : ''}
-      ${zone === 'loot' ? `<button class="vtt-loot-take-btn" onclick="window._vttLootPickQty('${item.id}')">Prendre</button>` : ''}
+    return `<div class="vtt-loot-row-wrap" data-id="${item.id}">
+      <div class="vtt-loot-row" data-id="${item.id}">
+        ${mj ? `<span class="vtt-loot-drag" title="${zone === 'stash' ? 'Glisser vers le butin' : 'Glisser vers la réserve'}">⠿</span>` : ''}
+        <span class="vtt-loot-dot" style="background:${rarColor}"></span>
+        <span class="vtt-loot-name">${_esc(item.nom)}</span>
+        <span class="vtt-loot-qty">×${item.qty}</span>
+        ${zone === 'stash' && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveStash('${item.id}')" title="Retirer">✕</button>` : ''}
+        ${zone === 'loot'  && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveLoot('${item.id}')" title="Retirer">✕</button>` : ''}
+        ${zone === 'loot' && myChars.length ? `<button class="vtt-loot-take-btn" onclick="window._vttLootToggleTake('${item.id}')">Prendre</button>` : ''}
+      </div>
+      ${zone === 'loot' ? `<div class="vtt-loot-take-inline" id="vtt-take-inline-${item.id}" style="display:none"></div>` : ''}
     </div>`;
   };
 
@@ -7369,116 +7374,200 @@ window._vttLootClear = () => {
   _saveLoot();
 };
 
-// MJ : choisir un item de la boutique à ajouter au stash
+// MJ : sélecteur boutique avec catégories + ajout inline (pas de 2e modal)
+let _lootShopState = { items: [], catMap: {}, cats: [], activeCat: '', search: '' };
+
 window._vttLootOpenShop = async () => {
   const [items, cats] = await Promise.all([loadCollection('shop'), loadCollection('shopCategories')]);
-  const catMap = Object.fromEntries((cats||[]).map(c => [c.id, c]));
-  let filtered = [...items];
+  _lootShopState.items = items || [];
+  _lootShopState.cats = cats || [];
+  _lootShopState.catMap = Object.fromEntries((cats||[]).map(c => [c.id, c]));
+  _lootShopState.activeCat = '';
+  _lootShopState.search = '';
 
-  const render = (q = '') => {
-    const q2 = q.toLowerCase().trim();
-    const list = q2 ? filtered.filter(i => i.nom?.toLowerCase().includes(q2)) : filtered;
-    const rows = list.slice(0, 40).map(item => {
-      const cat = catMap[item.categorieId];
-      const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
-      return `<div class="vtt-shop-row" onclick="window._vttLootPickFromShop('${item.id}')">
-        <span class="vtt-loot-dot" style="background:${rarColor}"></span>
-        <span class="vtt-shop-name">${_esc(item.nom||'?')}</span>
-        <span class="vtt-shop-cat">${_esc(cat?.nom||'')}</span>
-      </div>`;
-    }).join('') || '<div style="padding:.5rem;color:var(--text-muted);font-size:.78rem">Aucun résultat</div>';
-    const el = document.getElementById('vtt-shop-list');
-    if (el) el.innerHTML = rows;
-  };
-
-  window._vttLootShopSearch = (q) => render(q);
-  window._vttLootPickFromShop = (itemId) => {
-    const item = items.find(i => i.id === itemId);
-    if (!item) return;
-    openModal(`Ajouter "${_esc(item.nom)}" au stash`, `
-      <div style="padding:.5rem 0">
-        <label style="font-size:.83rem;color:var(--text-muted)">Quantité</label>
-        <input id="vtt-loot-qty-input" type="number" min="1" value="1"
-          style="width:80px;margin-left:.5rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.9rem">
-      </div>
-      <button class="btn-primary" style="width:100%;margin-top:.5rem"
-        onclick="window._vttLootConfirmAdd('${item.id}')">Ajouter au stash</button>`,
-    );
-  };
-  window._vttLootConfirmAdd = (itemId) => {
-    const item = items.find(i => i.id === itemId);
-    const qty  = Math.max(1, parseInt(document.getElementById('vtt-loot-qty-input')?.value) || 1);
-    if (!item) return;
-    const prixVente = Math.round((item.prix || 0) * 0.5);
-    const entry = {
-      id: crypto.randomUUID(), itemId: item.id,
-      nom: item.nom || '?', qty,
-      rarete: item.rarete || 'commune',
-      template: catMap[item.categorieId]?.template || 'classique',
-      categorieId: item.categorieId || '',
-      prixAchat: item.prix || 0, prixVente,
-      format: item.format || '', degats: item.degats || '',
-      degatsStat: item.degatsStat || '', toucherStat: item.toucherStat || '',
-      ca: item.ca || '', effet: item.effet || '', description: item.description || '',
-      slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
-      slotBijou: item.slotBijou || '', sousType: item.sousType || '',
-      portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
-      fo: parseInt(item.fo ?? item.for)||0, for: parseInt(item.for ?? item.fo)||0,
-      dex: parseInt(item.dex)||0, in: parseInt(item.in)||0,
-      sa: parseInt(item.sa)||0, co: parseInt(item.co)||0, ch: parseInt(item.ch)||0,
-    };
-    // Fusionner si même item déjà dans le stash
-    const existing = _loot.stash.find(s => s.itemId === item.id);
-    if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
-    _saveLoot();
-    closeModalDirect();
-    showNotif(`×${qty} "${item.nom}" ajouté au stash`, 'success');
-  };
-
-  openModal('🎒 Ajouter au stash MJ', `
-    <div style="margin-bottom:.5rem">
-      <input type="text" placeholder="🔍 Rechercher…" oninput="window._vttLootShopSearch(this.value)"
-        style="width:100%;padding:.4rem .7rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.85rem;box-sizing:border-box">
+  openModal('🎒 Ajouter à la réserve MJ', `
+    <input type="text" id="vtt-loot-search" placeholder="🔍 Rechercher un objet…"
+      class="input-field" style="width:100%;margin-bottom:.5rem"
+      oninput="window._vttLootShopSearch(this.value)">
+    <div id="vtt-loot-cats" class="vtt-loot-cats"></div>
+    <div id="vtt-loot-shop-list" class="vtt-loot-shop-list"></div>
+    <div style="font-size:.7rem;color:var(--text-dim);margin-top:.5rem;font-style:italic">
+      ⓘ Tu peux enchaîner les ajouts sans fermer cette fenêtre.
     </div>
-    <div id="vtt-shop-list" style="max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:2px"></div>`,
-  );
-  setTimeout(() => render(), 50);
+  `);
+  _renderLootShopCats();
+  _renderLootShopList();
 };
 
-// Joueur : choisir la quantité qu'il prend
-window._vttLootPickQty = (id) => {
+window._vttLootShopSearch = (q) => {
+  _lootShopState.search = (q || '').toLowerCase().trim();
+  _renderLootShopList();
+};
+window._vttLootShopSetCat = (catId) => {
+  _lootShopState.activeCat = catId === _lootShopState.activeCat ? '' : catId;
+  _renderLootShopCats();
+  _renderLootShopList();
+};
+
+function _renderLootShopCats() {
+  const el = document.getElementById('vtt-loot-cats');
+  if (!el) return;
+  const { cats, activeCat, items } = _lootShopState;
+  const counts = {};
+  items.forEach(it => { const k = it.categorieId || '_'; counts[k] = (counts[k] || 0) + 1; });
+  const pill = (id, label, count) => `<button class="vtt-loot-cat-pill${activeCat === id ? ' active' : ''}"
+      onclick="window._vttLootShopSetCat('${id}')">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
+  el.innerHTML = pill('', 'Toutes', items.length) +
+    cats.filter(c => counts[c.id]).map(c => pill(c.id, (c.emoji || '') + ' ' + c.nom, counts[c.id])).join('');
+}
+
+function _renderLootShopList() {
+  const el = document.getElementById('vtt-loot-shop-list');
+  if (!el) return;
+  const { items, catMap, activeCat, search } = _lootShopState;
+  let list = activeCat ? items.filter(i => i.categorieId === activeCat) : items;
+  if (search) list = list.filter(i => (i.nom || '').toLowerCase().includes(search));
+  list = list.slice(0, 80);
+  if (!list.length) {
+    el.innerHTML = '<div class="vtt-loot-empty-list">Aucun objet correspondant</div>';
+    return;
+  }
+  el.innerHTML = list.map(item => {
+    const cat = catMap[item.categorieId];
+    const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
+    const inStash = (_loot.stash || []).find(s => s.itemId === item.id);
+    const stashTag = inStash ? `<span class="vtt-loot-instash" title="Déjà dans la réserve">×${inStash.qty}</span>` : '';
+    return `<div class="vtt-loot-shop-row">
+      <span class="vtt-loot-dot" style="background:${rarColor}"></span>
+      <span class="vtt-loot-shop-name">${_esc(item.nom || '?')}</span>
+      ${cat ? `<span class="vtt-loot-shop-cat">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>` : ''}
+      ${stashTag}
+      <input type="number" min="1" value="1" class="vtt-loot-shop-qty" id="vtt-loot-q-${item.id}">
+      <button class="vtt-loot-shop-add" onclick="window._vttLootInlineAdd('${item.id}', this)" title="Ajouter à la réserve">＋</button>
+    </div>`;
+  }).join('');
+}
+
+window._vttLootInlineAdd = (itemId, btn) => {
+  const item = _lootShopState.items.find(i => i.id === itemId);
+  if (!item) return;
+  const qtyEl = document.getElementById(`vtt-loot-q-${itemId}`);
+  const qty = Math.max(1, parseInt(qtyEl?.value) || 1);
+  const prixVente = Math.round((item.prix || 0) * 0.5);
+  const entry = {
+    id: crypto.randomUUID(), itemId: item.id,
+    nom: item.nom || '?', qty,
+    rarete: item.rarete || 'commune',
+    template: _lootShopState.catMap[item.categorieId]?.template || 'classique',
+    categorieId: item.categorieId || '',
+    prixAchat: item.prix || 0, prixVente,
+    format: item.format || '', degats: item.degats || '',
+    degatsStat: item.degatsStat || '', degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : [],
+    toucherStat: item.toucherStat || '',
+    ca: item.ca || '', effet: item.effet || '', description: item.description || '',
+    slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
+    slotBijou: item.slotBijou || '', sousType: item.sousType || '',
+    portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
+    fo: parseInt(item.fo ?? item.for)||0, for: parseInt(item.for ?? item.fo)||0,
+    dex: parseInt(item.dex)||0, in: parseInt(item.in)||0,
+    sa: parseInt(item.sa)||0, co: parseInt(item.co)||0, ch: parseInt(item.ch)||0,
+  };
+  // Fusion si déjà présent
+  const existing = _loot.stash.find(s => s.itemId === item.id);
+  if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
+  _saveLoot();
+  // Feedback visuel sans fermer la modal
+  if (btn) {
+    btn.textContent = '✓';
+    btn.classList.add('vtt-loot-shop-add--ok');
+    setTimeout(() => {
+      btn.textContent = '＋';
+      btn.classList.remove('vtt-loot-shop-add--ok');
+    }, 800);
+  }
+  if (qtyEl) qtyEl.value = '1';
+  showNotif(`+${qty} "${item.nom}"`, 'success');
+  _renderLootShopList(); // pour mettre à jour le badge "Déjà dans la réserve"
+};
+
+// Joueur : expand inline sur la ligne pour choisir perso + quantité (pas de 2e modal)
+// État courant par item : qty choisie + perso sélectionné (chip)
+const _lootTakeState = {}; // { [itemId]: { qty, charId } }
+
+window._vttLootToggleTake = (id) => {
+  const el = document.getElementById(`vtt-take-inline-${id}`);
+  if (!el) return;
+  document.querySelectorAll('.vtt-loot-take-inline').forEach(o => {
+    if (o !== el) { o.style.display = 'none'; o.innerHTML = ''; }
+  });
+  if (el.style.display === 'block') { el.style.display = 'none'; el.innerHTML = ''; delete _lootTakeState[id]; return; }
+
   const item = _loot.loot.find(i => i.id === id);
   if (!item) return;
-  const uid  = STATE.user?.uid;
+  const uid = STATE.user?.uid;
   const myChars = Object.values(_characters).filter(c => c.uid === uid);
   if (!myChars.length) { showNotif('Aucun personnage trouvé', 'error'); return; }
 
-  const charOptions = myChars.map(c =>
-    `<option value="${c.id}">${_esc(c.nom || c.pseudo || '?')}</option>`).join('');
+  _lootTakeState[id] = { qty: item.qty, charId: myChars[0].id };
+  _renderLootTake(id);
+  el.style.display = 'block';
+};
 
-  openModal(`Prendre — ${_esc(item.nom)}`, `
-    <div style="display:flex;flex-direction:column;gap:.7rem;padding:.3rem 0">
-      ${myChars.length > 1 ? `
-        <div>
-          <label style="font-size:.83rem;color:var(--text-muted);display:block;margin-bottom:.3rem">Personnage</label>
-          <select id="vtt-take-char" style="width:100%;padding:.35rem .6rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.85rem">
-            ${charOptions}
-          </select>
-        </div>` : `<input type="hidden" id="vtt-take-char" value="${myChars[0].id}">`}
-      <div>
-        <label style="font-size:.83rem;color:var(--text-muted);display:block;margin-bottom:.3rem">Quantité (max ${item.qty})</label>
-        <input id="vtt-take-qty" type="number" min="1" max="${item.qty}" value="1"
-          style="width:80px;padding:.35rem .6rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.9rem">
+function _renderLootTake(id) {
+  const el = document.getElementById(`vtt-take-inline-${id}`);
+  const item = _loot.loot.find(i => i.id === id);
+  const st = _lootTakeState[id];
+  if (!el || !item || !st) return;
+  const uid = STATE.user?.uid;
+  const myChars = Object.values(_characters).filter(c => c.uid === uid);
+  const max = item.qty;
+  st.qty = Math.max(1, Math.min(max, st.qty || 1));
+
+  const charBar = myChars.length > 1 ? `
+    <div class="vtt-loot-take-chars">
+      ${myChars.map(c => `
+        <button class="vtt-loot-char-chip${st.charId === c.id ? ' active' : ''}"
+          onclick="window._vttLootTakeSetChar('${id}','${c.id}')"
+          title="${_esc(c.nom || c.pseudo || '?')}">
+          ${_esc(c.nom || c.pseudo || '?')}
+        </button>`).join('')}
+    </div>` : '';
+
+  el.innerHTML = `
+    ${charBar}
+    <div class="vtt-loot-take-row">
+      <div class="vtt-loot-stepper">
+        <button class="vtt-loot-step" onclick="window._vttLootTakeStep('${id}',-1)" ${st.qty<=1?'disabled':''}>−</button>
+        <span class="vtt-loot-step-val">${st.qty}<span class="vtt-loot-step-max">/${max}</span></span>
+        <button class="vtt-loot-step" onclick="window._vttLootTakeStep('${id}',1)" ${st.qty>=max?'disabled':''}>+</button>
       </div>
-      <button class="btn-primary" onclick="window._vttLootConfirmTake('${id}')">Prendre</button>
-    </div>`);
+      ${max > 1 ? `<button class="vtt-loot-step-all" onclick="window._vttLootTakeStep('${id}','max')" ${st.qty>=max?'disabled':''}>Tout</button>` : ''}
+      <button class="vtt-loot-take-cancel" onclick="window._vttLootToggleTake('${id}')" title="Annuler">✕</button>
+    </div>
+    <button class="vtt-loot-take-go" onclick="window._vttLootConfirmTake('${id}')">Prendre ×${st.qty}</button>
+  `;
+}
+
+window._vttLootTakeSetChar = (id, charId) => {
+  if (!_lootTakeState[id]) return;
+  _lootTakeState[id].charId = charId;
+  _renderLootTake(id);
+};
+window._vttLootTakeStep = (id, delta) => {
+  const item = _loot.loot.find(i => i.id === id);
+  const st = _lootTakeState[id];
+  if (!item || !st) return;
+  if (delta === 'max') st.qty = item.qty;
+  else st.qty = Math.max(1, Math.min(item.qty, (st.qty || 1) + delta));
+  _renderLootTake(id);
 };
 
 window._vttLootConfirmTake = async (id) => {
   const item    = _loot.loot.find(i => i.id === id);
   if (!item) return;
-  const charId  = document.getElementById('vtt-take-char')?.value;
-  const qty     = Math.min(item.qty, Math.max(1, parseInt(document.getElementById('vtt-take-qty')?.value) || 1));
+  const st      = _lootTakeState[id] || {};
+  const charId  = st.charId;
+  const qty     = Math.min(item.qty, Math.max(1, st.qty || 1));
   const char    = _characters[charId];
   if (!char || !charId) { showNotif('Personnage introuvable', 'error'); return; }
 
@@ -7514,8 +7603,8 @@ window._vttLootConfirmTake = async (id) => {
       _saveLoot(),
     ]);
     char.inventaire = inv;
-    closeModalDirect();
-    showNotif(`×${qty} "${item.nom}" envoyé dans l'inventaire de ${_esc(char.nom || char.pseudo || '?')} !`, 'success');
+    delete _lootTakeState[id];
+    showNotif(`×${qty} "${item.nom}" → ${_esc(char.nom || char.pseudo || '?')}`, 'success');
   } catch { showNotif('Erreur lors de la prise du butin', 'error'); }
 };
 
@@ -8617,7 +8706,12 @@ export async function renderVttPage() {
       <button class="vtt-btn-sm"        data-fog-tool="eraser" onclick="window._vttFogTool('eraser')" title="Effacer (clic sur segment ou source)">🗑 Effacer</button>
       <div class="vtt-tb-sep"></div>
       <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver le brouillard de guerre sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
-      <div class="vtt-walls-bar-hint">Clic grille = tracer · Clic-droit = annuler · Clic segment = menu</div>
+      <div class="vtt-walls-bar-hint">
+        Clic = tracer · <kbd>Alt</kbd> demi-case · <kbd>Shift</kbd> libre · Clic segment = menu<br>
+        <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
+        <span class="vtt-fog-dot vtt-fog-dot--bad"></span>sommet isolé (fuite possible) ·
+        <span class="vtt-fog-dot vtt-fog-dot--snap"></span>aimantation pendant tracé</span>
+      </div>
     </div>`:''}`;
   wrap.appendChild(_tf);
 

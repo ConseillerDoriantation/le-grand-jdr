@@ -510,6 +510,31 @@
   line-height: 1.35;
   opacity: 0.75;
 }
+.vtt-fog-legend {
+  display: inline-flex; align-items: center; flex-wrap: wrap;
+  gap: .35rem; margin-top: 2px;
+}
+.vtt-fog-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1px solid #000;
+  vertical-align: middle; margin-right: 2px;
+}
+.vtt-fog-dot--ok   { background: #22c55e; }
+.vtt-fog-dot--bad  { background: #fbbf24; }
+.vtt-fog-dot--snap { background: #fde047; }
+.vtt-walls-bar-hint kbd {
+  display: inline-block;
+  padding: 0 .3rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .62rem;
+  color: var(--text);
+  line-height: 1.2;
+}
 
 /* Indicateurs d'onglet */
 .vtt-page-default { color: var(--gold); font-size: .55rem; vertical-align: middle; margin-right: .15rem; }
@@ -1555,6 +1580,160 @@
 }
 .vtt-loot-take-btn:hover { background: oklch(72% 0.14 52 / 0.2); }
 .vtt-loot-ghost { opacity: .4; }
+
+/* Player : zone inline pour prendre le butin (pas de modal) */
+.vtt-loot-row-wrap { display: flex; flex-direction: column; gap: 2px; }
+.vtt-loot-take-inline {
+  display: flex; flex-direction: column; gap: .35rem;
+  padding: .45rem .5rem; margin: 2px 0 4px 14px;
+  background: var(--bg-card2); border: 1px solid var(--border);
+  border-radius: 7px;
+  animation: vtt-take-slide .15s ease-out;
+}
+@keyframes vtt-take-slide {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.vtt-loot-take-chars {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.vtt-loot-char-chip {
+  padding: .22rem .55rem;
+  border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: .72rem; cursor: pointer;
+  transition: background .1s, border-color .1s, color .1s;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vtt-loot-char-chip:hover { background: var(--bg-card2); color: var(--text); }
+.vtt-loot-char-chip.active {
+  background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.5);
+  color: var(--gold); font-weight: 600;
+}
+.vtt-loot-take-row {
+  display: flex; align-items: center; gap: 5px;
+}
+.vtt-loot-stepper {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-elevated); overflow: hidden;
+  flex-shrink: 0;
+}
+.vtt-loot-step {
+  width: 24px; height: 26px; padding: 0;
+  background: none; border: none; color: var(--text);
+  font-size: .95rem; font-weight: 700; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .1s;
+}
+.vtt-loot-step:hover:not(:disabled) { background: var(--bg-card2); }
+.vtt-loot-step:disabled { opacity: .3; cursor: not-allowed; }
+.vtt-loot-step-val {
+  min-width: 42px; padding: 0 .35rem;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .85rem; font-weight: 700; color: var(--text);
+  border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.vtt-loot-step-max { font-size: .65rem; color: var(--text-dim); font-weight: 500; margin-left: 1px; }
+.vtt-loot-step-all {
+  padding: 0 .5rem; height: 26px; flex-shrink: 0;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-muted);
+  font-size: .7rem; font-weight: 600; cursor: pointer;
+  transition: background .1s, color .1s;
+}
+.vtt-loot-step-all:hover:not(:disabled) { background: var(--bg-card2); color: var(--text); }
+.vtt-loot-step-all:disabled { opacity: .3; cursor: not-allowed; }
+.vtt-loot-take-go {
+  width: 100%; height: 28px;
+  padding: 0 .6rem;
+  background: var(--gold-glow); border: 1px solid oklch(72% 0.14 52 / 0.4);
+  border-radius: 6px; color: var(--gold);
+  font-size: .8rem; font-weight: 700; cursor: pointer;
+  transition: background .12s;
+}
+.vtt-loot-take-go:hover { background: oklch(72% 0.14 52 / 0.3); }
+.vtt-loot-take-cancel {
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; cursor: pointer; font-size: .8rem;
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  padding: 0; transition: background .1s, color .1s;
+}
+.vtt-loot-take-cancel:hover { background: rgba(239,68,68,.15); color: #ef4444; }
+
+/* MJ : sélecteur boutique avec catégories + ajout inline */
+.vtt-loot-cats {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: .6rem;
+}
+.vtt-loot-cat-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: .25rem .55rem; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: .72rem; cursor: pointer;
+  transition: background .1s, border-color .1s, color .1s;
+}
+.vtt-loot-cat-pill:hover { background: var(--bg-card2); color: var(--text); }
+.vtt-loot-cat-pill.active {
+  background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.5);
+  color: var(--gold);
+}
+.vtt-loot-cat-count {
+  font-size: .65rem; font-weight: 700;
+  background: rgba(0,0,0,.25); padding: 0 .35rem; border-radius: 999px;
+}
+.vtt-loot-shop-list {
+  display: flex; flex-direction: column; gap: 3px;
+  max-height: 50vh; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  padding-right: 2px;
+}
+.vtt-loot-shop-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: .35rem .45rem; border-radius: 6px;
+  background: var(--bg-elevated); font-size: .82rem;
+  transition: background .1s;
+}
+.vtt-loot-shop-row:hover { background: var(--bg-card2); }
+.vtt-loot-shop-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vtt-loot-shop-cat {
+  font-size: .68rem; color: var(--text-dim); flex-shrink: 0;
+  background: rgba(255,255,255,.04); padding: 1px .4rem; border-radius: 4px;
+}
+.vtt-loot-instash {
+  font-size: .65rem; font-weight: 700; color: var(--gold);
+  background: var(--gold-glow); padding: 1px .35rem; border-radius: 4px;
+  border: 1px solid oklch(72% 0.14 52 / 0.3); flex-shrink: 0;
+}
+.vtt-loot-shop-qty {
+  width: 44px; padding: .2rem .3rem; flex-shrink: 0;
+  border-radius: 5px; border: 1px solid var(--border);
+  background: var(--bg-panel); color: var(--text);
+  font-size: .78rem; text-align: center;
+}
+.vtt-loot-shop-add {
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--gold-glow); border: 1px solid oklch(72% 0.14 52 / 0.4);
+  border-radius: 5px; color: var(--gold);
+  font-size: .95rem; font-weight: 700; cursor: pointer;
+  padding: 0; transition: background .12s, transform .12s;
+}
+.vtt-loot-shop-add:hover { background: oklch(72% 0.14 52 / 0.3); }
+.vtt-loot-shop-add--ok {
+  background: oklch(70% 0.16 145 / 0.25) !important;
+  border-color: oklch(70% 0.16 145 / 0.5) !important;
+  color: #22c38e !important;
+  transform: scale(1.1);
+}
+.vtt-loot-empty-list {
+  padding: 1rem .5rem; text-align: center;
+  color: var(--text-dim); font-size: .8rem; font-style: italic;
+}
 .vtt-icon-btn {
   width: 20px; height: 20px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
