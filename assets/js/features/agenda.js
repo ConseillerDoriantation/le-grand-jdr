@@ -14,6 +14,7 @@
 
 import { STATE } from '../core/state.js';
 import { loadCollection, saveDoc, getDocDataSilent, deleteFromCol } from '../data/firestore.js';
+import { watch, watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { openModal, closeModal } from '../shared/modal.js';
@@ -588,6 +589,44 @@ async function renderAgendaPage() {
   _renderSuggestions();
   _renderCalendar();
   _renderGroupView();
+
+  // ── Abonnements temps réel ───────────────────────────────────────────────
+  // Le premier fire (snapshot initial) est ignoré : déjà rendu plus haut.
+  // unwatchAll() côté navigation s'occupe du cleanup.
+  // Note: on ne touche pas à _ag.myAvail pour éviter d'écraser une édition
+  // locale en cours (debounce 600ms avant _saveAvail). Mon calendrier
+  // personnel reste piloté par mes propres clics.
+  let _firstAvails = true, _firstQuests = true, _firstUsers = true, _firstSession = true;
+
+  watch('agenda-avails', 'availabilities', data => {
+    if (_firstAvails) { _firstAvails = false; return; }
+    if (STATE.currentPage !== 'agenda') return;
+    _ag.allAvails = data;
+    _renderSuggestions();
+    _renderGroupView();
+  });
+
+  watch('agenda-quests', 'quests', data => {
+    if (_firstQuests) { _firstQuests = false; return; }
+    if (STATE.currentPage !== 'agenda') return;
+    _ag.quests = data;
+    _renderSuggestions();
+  });
+
+  watch('agenda-users', 'users', data => {
+    if (_firstUsers) { _firstUsers = false; return; }
+    if (STATE.currentPage !== 'agenda') return;
+    _ag.users = data;
+    _renderGroupView();
+  });
+
+  watchDoc('agenda-session', 'agenda_session', 'next', data => {
+    if (_firstSession) { _firstSession = false; return; }
+    if (STATE.currentPage !== 'agenda') return;
+    _ag.nextSession = data;
+    _renderSessionBanner();
+    _renderSuggestions();
+  });
 }
 
 PAGES.agenda = renderAgendaPage;

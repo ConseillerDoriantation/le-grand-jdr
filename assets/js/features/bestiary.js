@@ -4,6 +4,7 @@
 // ✓ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { watch, watchDoc } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -585,6 +586,46 @@ async function renderBestiary() {
   }
 
   _render();
+
+  // ── Abonnements temps réel ─────────────────────────────────────────────
+  // Premier fire (snapshot initial) ignoré : déjà rendu par _render() au-dessus.
+  // Les noms 'bst-creatures' / 'bst-tracker' sont réutilisés : si l'admin
+  // switche de bestiaire ou de "viewAs", watch() kill l'ancien listener et
+  // crée le nouveau sur la bonne collection / le bon doc.
+  let _firstCreatures = true, _firstTracker = true;
+
+  watch('bst-creatures', col, data => {
+    if (_firstCreatures) { _firstCreatures = false; return; }
+    if (STATE.currentPage !== 'bestiary') return;
+    if (_bstShouldSkipLiveRender()) return;
+    const all = data || [];
+    _creatures = STATE.isAdmin ? all : all.filter(c => !c.hidden);
+    _creatures.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+    _render();
+  });
+
+  if (trackerUid) {
+    watchDoc('bst-tracker', 'bestiary_tracker', trackerUid, doc => {
+      if (_firstTracker) { _firstTracker = false; return; }
+      if (STATE.currentPage !== 'bestiary') return;
+      if (_bstShouldSkipLiveRender()) return;
+      _tracker = doc?.data || {};
+      _render();
+    });
+  }
+}
+
+// Évite d'écraser une édition admin en cours : la fiche du panneau a des
+// inputs/textarea avec auto-save debouncé (_bstQueueSave 400ms). Si on
+// re-render alors qu'un champ est focus, le curseur saute. On préfère
+// attendre le prochain snapshot (qui arrivera après la sauvegarde).
+function _bstShouldSkipLiveRender() {
+  const ae = document.activeElement;
+  if (!ae) return false;
+  const tag = ae.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !ae.isContentEditable) return false;
+  const main = document.getElementById('main-content');
+  return !!(main && main.contains(ae));
 }
 
 // ── Création rapide d'une créature sans modal ──────────────────────────────────

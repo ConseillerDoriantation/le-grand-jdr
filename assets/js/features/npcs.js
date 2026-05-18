@@ -12,6 +12,7 @@
 //     npc_affinites/npc_affinite_seuils  → seuils valeur→niveau
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { watch } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, updateModalContent, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -258,6 +259,35 @@ async function renderNpcs() {
   await _load();
   if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
   _renderPage(content);
+
+  // ── Abonnements temps réel ─────────────────────────────────────────────
+  // Premier fire (snapshot initial) ignoré : déjà rendu par _renderPage.
+  // unwatchAll() côté navigation s'occupe du cleanup.
+  let _firstNpcs = true, _firstAffi = true;
+
+  watch('npcs-list', 'npcs', data => {
+    if (_firstNpcs) { _firstNpcs = false; return; }
+    if (STATE.currentPage !== 'npcs') return;
+    _npcs = data || [];
+    _refreshList({ keepScroll: true });
+    _refreshActivePanel();
+  });
+
+  // Une seule subscription pour la collection npc_affinites : on y range
+  // les relations PNJ↔joueur + les 2 docs spéciaux (types, seuils).
+  watch('npcs-affi', 'npc_affinites', data => {
+    if (_firstAffi) { _firstAffi = false; return; }
+    if (STATE.currentPage !== 'npcs') return;
+    const arr = data || [];
+    _affiPerso = arr.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
+    const typesDoc  = arr.find(a => a.id === AFFINITE_TYPES_DOC_ID);
+    const seuilsDoc = arr.find(a => a.id === AFFINITE_SEUILS_DOC_ID);
+    _affiniteTypes = Array.isArray(typesDoc?.types) ? [...typesDoc.types] : [];
+    _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    _affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
+    _refreshList({ keepScroll: true });
+    _refreshActivePanel();
+  });
 }
 
 function _renderPage(content) {

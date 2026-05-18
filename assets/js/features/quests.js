@@ -142,12 +142,20 @@ async function renderQuestsPage() {
   _chars = chars;
   _applyQuestsRender(quests);
 
-  // Abonnement temps réel : le premier fire (snapshot initial) est ignoré.
-  let first = true;
+  // Abonnements temps réel : le premier fire (snapshot initial) est ignoré.
+  // - quests       : liste, statuts, participants
+  // - characters   : noms/portraits des participants (changement côté joueur)
+  let _firstQuests = true, _firstChars = true;
   watch('quests', 'quests', data => {
-    if (first) { first = false; return; }
+    if (_firstQuests) { _firstQuests = false; return; }
     if (STATE.currentPage !== 'quests') return;
     _applyQuestsRender(data);
+  });
+  watch('quests-chars', 'characters', data => {
+    if (_firstChars) { _firstChars = false; return; }
+    if (STATE.currentPage !== 'quests') return;
+    _chars = data || [];
+    _applyQuestsRender(window._questItems || []);
   });
 }
 

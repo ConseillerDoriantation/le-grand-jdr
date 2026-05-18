@@ -7,6 +7,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { watch, watchDoc } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
@@ -25,6 +26,7 @@ let _achRowSortables = [];
 let _achDragBlockClick = false;
 let _achClickGuardInstalled = false;
 let _achUploader = null;
+let _currentOrder = [];     // miroir de l'ordre Firestore, sert aux re-renders live
 
 // ── State global vue / filtre / recherche ─────────────────────────────────
 window._achFilter     ??= 'all';     // 'all' | 'epique' | 'comique' | 'histoire'
@@ -938,6 +940,7 @@ PAGES.achievements = async function() {
     loadCollection('achievements'),
     _loadOrder(),
   ]);
+  _currentOrder    = order;
   window._achItems = _applyOrder(items, order);
   window._achFilter ??= 'all';
   window._achView   ??= 'galerie';
@@ -945,6 +948,30 @@ PAGES.achievements = async function() {
 
   await _origPage();    // génère le shell (hero + controls + #ach-content)
   await _achRenderContent();
+
+  // ── Abonnements temps réel ─────────────────────────────────────────────
+  // Premier fire (snapshot initial) ignoré : déjà rendu juste au-dessus.
+  // On évite de re-render pendant un drag SortableJS pour ne pas casser
+  // l'instance en cours ; les saves admin re-render explicitement après onEnd.
+  // unwatchAll() côté navigation s'occupe du cleanup.
+  let _firstItems = true, _firstOrder = true;
+
+  watch('ach-items', 'achievements', items => {
+    if (_firstItems) { _firstItems = false; return; }
+    if (STATE.currentPage !== 'achievements') return;
+    if (document.body.classList.contains('ach-dragging')) return;
+    window._achItems = _applyOrder(items, _currentOrder);
+    _achRenderContent();
+  });
+
+  watchDoc('ach-order', 'achievements_meta', 'order', doc => {
+    if (_firstOrder) { _firstOrder = false; return; }
+    if (STATE.currentPage !== 'achievements') return;
+    if (document.body.classList.contains('ach-dragging')) return;
+    _currentOrder    = Array.isArray(doc?.order) ? doc.order : [];
+    window._achItems = _applyOrder(window._achItems || [], _currentOrder);
+    _achRenderContent();
+  });
 };
 
 // ── EXPORTS ───────────────────────────────────────────────────────────────────
