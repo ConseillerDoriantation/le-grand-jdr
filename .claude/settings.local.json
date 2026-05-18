@@ -105,7 +105,9 @@
       "Bash(node --check assets/js/shared/spell-matrices.js)",
       "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/vtt.js)",
       "Bash(python3 -c \"import json; json.load\\(open\\('/home/ubuntu/DEV/le-grand-jdr/.claude/settings.local.json'\\)\\)\")",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/command-palette.js)",
+      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/app.js)"
     ]
   }
 }

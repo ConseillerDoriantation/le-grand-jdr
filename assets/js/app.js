@@ -30,6 +30,9 @@ import { initTheme, toggleTheme } from './shared/theme.js';
 import './features/uploadImage.js';
 import './features/character-photo.js';
 
+// Recherche globale (Ctrl+K / Cmd+K) — auto-init à l'import
+import './features/command-palette.js';
+
 // Quick-view perso accessible depuis le dashboard, VTT, etc. — lazy load au 1er clic
 window._openQuickView = async (id) => {
   if (!window._quickViewChar) {
