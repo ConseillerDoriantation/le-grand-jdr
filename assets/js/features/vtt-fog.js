@@ -31,6 +31,7 @@ let _stageEvts  = {};     // {event: fn} — listeners de l'éditeur, pour netto
 let _page       = null;   // référence TOUJOURS à jour vers la page active (évite closures stales)
 
 let _fogPending = false;  // debounce requestAnimationFrame
+let _snapDot    = null;   // indicateur d'aimantation pendant l'édition
 
 let _pgRefFn = null;      // (pageId) → Firestore DocumentReference
 
@@ -82,8 +83,31 @@ function _segsSect(ax, ay, bx, by, cx, cy, dx, dy) {
  * @param {number} H - hauteur de la carte (pixels)
  * @returns {Array} [{x,y}] — sommets du polygone, triés par angle
  */
+// Soude les extrémités très proches sur un point canonique commun.
+// Évite qu'un rayon "passe entre" deux murs censés se toucher (drift float).
+function _weldBlockers(blockers, tol) {
+  const unique = [];
+  const find = (x, y) => {
+    for (const u of unique) {
+      if (Math.abs(u.x - x) <= tol && Math.abs(u.y - y) <= tol) return u;
+    }
+    const np = { x, y }; unique.push(np); return np;
+  };
+  return blockers.map(b => {
+    const a = find(b.x1, b.y1);
+    const c = find(b.x2, b.y2);
+    return { x1: a.x, y1: a.y, x2: c.x, y2: c.y };
+  });
+}
+
 function _visPoly(ox, oy, blockers, W, H) {
-  const EPS = 0.0001;
+  // EPS angulaire augmenté : 0.0005 rad ≈ 0.029°, latéral ≈ 0.5px à 1000px.
+  // Assez grand pour que les rayons "+/-EPS" passent réellement de part et d'autre d'un coin,
+  // assez petit pour ne pas fusionner deux coins voisins.
+  const EPS = 5e-4;
+  // Soude les bouts de murs voisins (tolérance = 1/20 de case) pour éliminer les "fentes" sub-pixel
+  blockers = _weldBlockers(blockers, _CELL / 20);
+
   const boundary = [
     { x1:0, y1:0, x2:W, y2:0 },
     { x1:W, y1:0, x2:W, y2:H },
@@ -92,9 +116,12 @@ function _visPoly(ox, oy, blockers, W, H) {
   ];
   const all = [...blockers, ...boundary];
 
-  // Angles vers tous les coins de segments
+  // Angles vers tous les coins de segments.
+  // IMPORTANT : tous les angles doivent être dans la plage [-π, π] (= la plage de atan2).
+  // Sinon le tri place certains sommets à la mauvaise position et le polygone
+  // se referme avec une arête fantôme qui crée un wedge sombre dans la vision.
   const angles = [];
-  for (const a of [0, Math.PI*.5, Math.PI, Math.PI*1.5]) {
+  for (const a of [-Math.PI/2, 0, Math.PI/2, Math.PI]) {
     angles.push(a-EPS, a, a+EPS);
   }
   for (const s of all) {
@@ -331,6 +358,32 @@ export function fogRenderWalls(page, isAdmin) {
     }
   }
 
+  // ── Diagnostic des extrémités en mode édition ────────────────────────────
+  // Vert = sommet partagé avec un autre mur (joint propre)
+  // Jaune = sommet isolé (potentielle fuite de lumière → fermer la pièce !)
+  if (_editMode && isAdmin) {
+    const TOL = 0.05; // tolérance d'identification (1/20 case)
+    const seen = []; // [{col, row, count}]
+    const visit = (col, row) => {
+      for (const s of seen) {
+        if (Math.abs(s.col - col) <= TOL && Math.abs(s.row - row) <= TOL) { s.count++; return; }
+      }
+      seen.push({ col, row, count: 1 });
+    };
+    for (const w of walls) { visit(w.x1, w.y1); visit(w.x2, w.y2); }
+    for (const s of seen) {
+      const isolated = s.count < 2;
+      _wallsLayer.add(new K.Circle({
+        x: s.col * C, y: s.row * C,
+        radius: isolated ? 5 : 3.5,
+        fill: isolated ? '#fbbf24' : '#22c55e',
+        stroke: '#000', strokeWidth: isolated ? 1 : 0.5,
+        opacity: isolated ? 0.95 : 0.75,
+        listening: false,
+      }));
+    }
+  }
+
   // ── Sources lumineuses (MJ seulement) ────────────────────────────────────
   if (isAdmin) {
     for (const ls of lights) {
@@ -398,6 +451,7 @@ export function fogToggleEditMode(enabled, page) {
   _drawStart  = null;
   _removeCtxMenu();
   if (_preview) { _preview.destroy(); _preview = null; }
+  if (_snapDot) { _snapDot.destroy(); _snapDot = null; }
 
   // Retirer les anciens listeners
   if (_stage) {
@@ -415,35 +469,72 @@ export function fogToggleEditMode(enabled, page) {
     return { x: (p.x - sp.x) / sc, y: (p.y - sp.y) / sc };
   };
 
-  // Snap à la grille
-  const _snapGrid = pos => ({
-    col: Math.round(pos.x / _CELL),
-    row: Math.round(pos.y / _CELL),
+  // Snap dynamique selon les modificateurs clavier (lus sur l'évènement Konva)
+  //   défaut : 1 case (coins de grille — propre)
+  //   Alt    : 1/2 case (demi-case — ajustements fins)
+  //   Shift  : 1/10 case (placement libre — précis au pixel près)
+  const _snapStep = ev => {
+    const e = ev?.evt || ev || {};
+    if (e.shiftKey) return 0.1;
+    if (e.altKey)   return 0.5;
+    return 1;
+  };
+  const _snap = (pos, step) => ({
+    col: Math.round(pos.x / _CELL / step) * step,
+    row: Math.round(pos.y / _CELL / step) * step,
   });
+  // Aimantation aux extrémités de murs existants (rayon = 0.35 case)
+  // → assure que deux murs adjacents partagent EXACTEMENT le même point, donc l'éclairage est étanche.
+  const _snapVertex = (col, row) => {
+    if (!_page) return null;
+    const TH = 0.35;
+    for (const w of (_page.walls || [])) {
+      if (Math.abs(w.x1 - col) <= TH && Math.abs(w.y1 - row) <= TH) return { col: w.x1, row: w.y1 };
+      if (Math.abs(w.x2 - col) <= TH && Math.abs(w.y2 - row) <= TH) return { col: w.x2, row: w.y2 };
+    }
+    return null;
+  };
+  // Petit cercle indicateur quand on accroche un sommet (state module : _snapDot)
+  const _showSnapDot = (col, row) => {
+    const K = window.Konva; if (!K) return;
+    if (!_snapDot) {
+      _snapDot = new K.Circle({
+        radius: 6, fill: '#fde047', stroke: '#000', strokeWidth: 1,
+        opacity: 0.9, listening: false,
+      });
+      _wallsLayer?.add(_snapDot);
+    }
+    _snapDot.position({ x: col*_CELL, y: row*_CELL });
+    _snapDot.visible(true);
+  };
+  const _hideSnapDot = () => { if (_snapDot) _snapDot.visible(false); };
 
-  // Snap demi-case (pour les sources lumineuses = centre de case)
-  const _snapHalf = pos => ({
-    x: Math.round(pos.x / _CELL * 2) / 2,
-    y: Math.round(pos.y / _CELL * 2) / 2,
-  });
+  let _currentStep = 1; // mis à jour à mousedown, conservé pendant le drag
 
   const onDown = e => {
     if (e.evt?.button === 2) return; // clic-droit = pan
     const pos = _worldPos(); if (!pos) return;
     const K = window.Konva;
 
+    _currentStep = _snapStep(e);
+
     if (_editTool === 'light') {
-      const snap = _snapHalf(pos);
-      _addLightSource(snap.x, snap.y); // utilise _page (toujours à jour)
+      // Lumière : même logique de snap, défaut 1/2 (centre de case)
+      const step = _currentStep === 1 ? 0.5 : _currentStep;
+      const s = _snap(pos, step);
+      _addLightSource(s.col, s.row);
       return;
     }
     if (_editTool === 'eraser') {
-      _deleteAtPos(pos); // utilise _page (toujours à jour)
+      _deleteAtPos(pos);
       return;
     }
 
-    const { col, row } = _snapGrid(pos);
+    let { col, row } = _snap(pos, _currentStep);
+    const v = _snapVertex(col, row);
+    if (v) { col = v.col; row = v.row; }
     _drawStart = { col, row };
+    _hideSnapDot();
     _preview = new K.Line({
       points:      [col*_CELL, row*_CELL, col*_CELL, row*_CELL],
       stroke:      EDIT_COLOR[_editTool] || '#ef4444',
@@ -456,22 +547,42 @@ export function fogToggleEditMode(enabled, page) {
     _wallsLayer?.batchDraw();
   };
 
-  const onMove = () => {
-    if (!_drawStart || !_preview) return;
+  const onMove = e => {
+    if (!_drawStart || !_preview) {
+      // Hors tracé : on indique quand même le sommet aimanté possible
+      if (_editTool === 'wall' || _editTool === 'door' || _editTool === 'window') {
+        const pos = _worldPos(); if (!pos) { _hideSnapDot(); _wallsLayer?.batchDraw(); return; }
+        const step = _snapStep(e);
+        const { col, row } = _snap(pos, step);
+        const v = _snapVertex(col, row);
+        if (v) _showSnapDot(v.col, v.row); else _hideSnapDot();
+        _wallsLayer?.batchDraw();
+      }
+      return;
+    }
     const pos = _worldPos(); if (!pos) return;
-    const { col, row } = _snapGrid(pos);
+    _currentStep = _snapStep(e);
+    let { col, row } = _snap(pos, _currentStep);
+    const v = _snapVertex(col, row);
+    if (v) { col = v.col; row = v.row; _showSnapDot(col, row); } else _hideSnapDot();
     _preview.points([_drawStart.col*_CELL, _drawStart.row*_CELL, col*_CELL, row*_CELL]);
     _wallsLayer?.batchDraw();
   };
 
-  const onUp = () => {
+  const onUp = e => {
     if (!_drawStart) return;
     const pos = _worldPos();
     if (_preview) { _preview.destroy(); _preview = null; }
+    _hideSnapDot();
     if (!pos) { _drawStart = null; return; }
-    const { col, row } = _snapGrid(pos);
-    if (col !== _drawStart.col || row !== _drawStart.row) {
-      _addWall(_drawStart.col, _drawStart.row, col, row, _editTool); // utilise _page
+    _currentStep = _snapStep(e);
+    let { col, row } = _snap(pos, _currentStep);
+    const v = _snapVertex(col, row);
+    if (v) { col = v.col; row = v.row; }
+    // Éviter les segments trop courts (clic accidentel)
+    const minLen = _currentStep;
+    if (Math.abs(col - _drawStart.col) >= minLen * 0.5 || Math.abs(row - _drawStart.row) >= minLen * 0.5) {
+      _addWall(_drawStart.col, _drawStart.row, col, row, _editTool);
     }
     _drawStart = null;
     _wallsLayer?.batchDraw();
