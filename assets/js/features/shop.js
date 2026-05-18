@@ -419,6 +419,28 @@ function _renderSidebar() {
 // VUE HOME
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderHome() {
+  const searchBar = `
+    <div class="sh-home-search-wrap" style="margin-bottom:1rem">
+      <div class="sh-filter-search" style="max-width:520px">
+        <input type="text" id="sh-home-search" class="input-field"
+          placeholder="🔍 Rechercher un article dans toutes les catégories..."
+          value="${_filterSearch||''}"
+          oninput="shopFilterSearch(this.value)"
+          autocomplete="off"
+          style="width:100%;padding-right:2.2rem">
+        ${_filterSearch ? `<button onclick="shopFilterSearch('')" aria-label="Effacer la recherche"
+          style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
+      </div>
+    </div>
+    <div id="sh-home-results">`;
+
+  return searchBar + _renderHomeResults() + `</div>`;
+}
+
+function _renderHomeResults() {
+  if (_norm(_filterSearch)) return _renderHomeSearchResults();
+
   const orphaned = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
 
   if (_cats.length === 0 && orphaned.length === 0) {
@@ -470,6 +492,50 @@ function _renderHome() {
 
   html += `</div>`;
   return html;
+}
+
+function _renderHomeSearchResults() {
+  const search = _norm(_filterSearch);
+  const matched = _items
+    .filter(i => _searchIncludes(_itemSearchText(i), search))
+    .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' }));
+
+  if (matched.length === 0) {
+    return `<div class="empty-state"><div class="icon">🔍</div>
+      <p>Aucun résultat pour « ${_esc(_filterSearch)} ».</p></div>`;
+  }
+
+  const total = matched.length;
+  const pages = Math.ceil(total / PAGE_SIZE);
+  const p     = Math.max(1, Math.min(_page, pages));
+  const slice = matched.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
+
+  let html = `<div style="margin-bottom:.75rem;color:var(--text-dim);font-size:.85rem">
+    ${total} résultat${total>1?'s':''} dans toutes les catégories
+  </div>`;
+  html += _renderMixedItemGrid(slice);
+
+  if (pages > 1) {
+    html += `<div class="sh-pagination">`;
+    if (p>1) html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
+    const st=Math.max(1,p-2), en=Math.min(pages,p+2);
+    if(st>1) html+=`<button class="sh-page-btn" onclick="shopPage(1)">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" onclick="shopPage(${i})">${i}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" onclick="shopPage(${pages})">${pages}</button>`;
+    if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
+    html += `</div>`;
+  }
+  return html;
+}
+
+function _renderMixedItemGrid(items) {
+  return `<div class="sh-item-grid">` +
+    items.map((item, i) => {
+      const cat = _cats.find(c => c.id === item.categorieId);
+      const tplKey = cat?.template || 'classique';
+      return _renderItemCard(item, tplKey, i);
+    }).join('') +
+    `</div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1356,7 +1422,7 @@ function shopFilterSearch(val) {
   _filterSearch = val;
   _page = 1;
   if (_view === 'items') _updateItemsOnly();
-  else renderShop();
+  else _updateHomeOnly();
 }
 
 function shopToggleTag(val) {
@@ -1433,6 +1499,14 @@ function _updateItemsOnly() {
     html += `</div>`;
   }
   grid.innerHTML = html;
+}
+
+// ── Mise à jour partielle vue home — résultats sans toucher le champ texte ──
+function _updateHomeOnly() {
+  const results = document.getElementById('sh-home-results');
+  if (!results) { renderShop(); return; }
+  results.innerHTML = _renderHomeResults();
+  _mountSortables();
 }
 
 // Compat
