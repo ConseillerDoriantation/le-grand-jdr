@@ -5,6 +5,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { calcOr, computeEquipStatsBonus } from '../shared/char-stats.js';
+import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
@@ -1254,25 +1255,17 @@ async function confirmBuyItem(itemId, directQty) {
       traits:Array.isArray(item.traits)?[...item.traits]:[],
     };
 
-    const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     for (let i = 0; i < qty; i++) inv.push({...invItem});
 
-    const compte   = c.compte || { recettes:[], depenses:[] };
-    const depenses = [...(compte.depenses||[])];
-    depenses.push({
-      date:    new Date().toLocaleDateString('fr-FR'),
-      libelle: qty > 1 ? `Achat ×${qty} : ${item.nom}` : `Achat : ${item.nom}`,
-      montant: total,
+    const libelle = qty > 1 ? `Achat ×${qty} : ${item.nom}` : `Achat : ${item.nom}`;
+    const res = await useGold(charId, -total, libelle, {
+      charObj: c,
+      extraPayload: { inventaire: inv },
     });
+    if (!res.ok) { showNotif(res.error || 'Erreur achat', 'error'); return; }
 
-    await updateInCol('characters', charId, {
-      inventaire: inv,
-      compte: { ...compte, depenses },
-    });
-    c.inventaire = inv;
-    c.compte     = { ...compte, depenses };
-
-    const newOr = calcOr(c);
+    const newOr = res.newBalance;
     if (directQty == null) closeModalDirect();
     showNotif(`✅ ×${qty} "${item.nom}" acheté${qty>1?'s':''} pour ${total} or !`, 'success');
     renderShop();
@@ -1329,22 +1322,13 @@ async function sellInvItemFromShop(charId, invIndex) {
       }
     }
 
-    const compte   = c.compte || { recettes:[], depenses:[] };
-    const recettes = [...(compte.recettes||[])];
-    recettes.push({
-      date:    new Date().toLocaleDateString('fr-FR'),
-      libelle: `Vente : ${itemNom}`,
-      montant: prixVente,
-    });
-
     inv.splice(invIndex, 1);
 
-    await updateInCol('characters', charId, {
-      inventaire: inv,
-      compte:     { ...compte, recettes },
+    const res = await useGold(charId, +prixVente, `Vente : ${itemNom}`, {
+      charObj: c,
+      extraPayload: { inventaire: inv },
     });
-    c.inventaire = inv;
-    c.compte     = { ...compte, recettes };
+    if (!res.ok) { showNotif(res.error || 'Erreur vente', 'error'); return; }
 
     showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
   } catch (e) { notifySaveError(e); }

@@ -21,6 +21,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { _esc } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
+import { useGold } from '../shared/economy.js';
 import PAGES from './pages.js';
 
 // Cache items boutique (rechargé à l'ouverture de l'éditeur)
@@ -1579,16 +1580,13 @@ window._bastionDoTransfer = async (direction) => {
   if (!isDeposit && amount > bastionOr) { showNotif(`Le trésor n'a que ${bastionOr} or.`, 'error'); return; }
 
   try {
-    const now = new Date().toLocaleDateString('fr-FR');
-    const compte = { recettes: [], depenses: [], ...(char.compte || {}) };
-    if (isDeposit) {
-      compte.depenses = [...compte.depenses, { date: now, libelle: 'Or versé au Bastion', montant: amount }];
-    } else {
-      compte.recettes = [...compte.recettes, { date: now, libelle: 'Or retiré du Bastion', montant: amount }];
-    }
-    char.compte = compte;
-    await updateInCol('characters', char.id, { compte });
+    // 1. Mouvement côté perso (via le module economy unifié)
+    const reason = isDeposit ? 'Or versé au Bastion' : 'Or retiré du Bastion';
+    const delta  = isDeposit ? -amount : +amount;
+    const res = await useGold(char.id, delta, reason, { charObj: char });
+    if (!res.ok) { showNotif(res.error || 'Erreur transaction', 'error'); return; }
 
+    // 2. Mouvement côté bastion + historique
     const b = { ..._bastion };
     b.or = Math.max(0, (b.or || 0) + (isDeposit ? amount : -amount));
     const verb = isDeposit ? 'verse' : 'retire';
