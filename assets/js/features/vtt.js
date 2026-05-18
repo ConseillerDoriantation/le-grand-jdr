@@ -8719,7 +8719,7 @@ export async function renderVttPage() {
       <div class="vtt-tb-sep"></div>
       <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
       <div class="vtt-walls-bar-hint">
-        Clic = tracer · <kbd>Alt</kbd> demi-case · <kbd>Shift</kbd> libre · Clic segment/zone = menu<br>
+        Murs : grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · Clic segment/zone = menu<br>
         <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
         <span class="vtt-fog-dot vtt-fog-dot--bad"></span>sommet isolé (fuite possible) ·
         <span class="vtt-fog-dot vtt-fog-dot--snap"></span>aimantation pendant tracé</span>
