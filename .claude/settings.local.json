@@ -107,7 +107,19 @@
       "Bash(python3 -c \"import json; json.load\\(open\\('/home/ubuntu/DEV/le-grand-jdr/.claude/settings.local.json'\\)\\)\")",
       "Bash(git add *)",
       "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/command-palette.js)",
-      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/app.js)"
+      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/app.js)",
+      "Bash(node --check assets/js/core/layout.js)",
+      "Bash(node --check assets/js/core/navigation.js)",
+      "Bash(node --check assets/js/shared/html.js)",
+      "Bash(awk '/async dashboard\\\\\\(\\\\\\)/{flag=1; start=NR} flag && /^  },/{print \"dashboard ends at line:\", NR; exit}' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/pages.js)",
+      "Bash(awk -F: '$2 >= 24 && $2 <= 1023')",
+      "Bash(awk 'NR>=24 && NR<=1023' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/pages.js)",
+      "Bash(awk 'NR>=685 && NR<=700' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/pages.js)",
+      "Bash(awk 'NR>=695 && NR<=730' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/pages.js)",
+      "Bash(node --check assets/js/features/quests.js)",
+      "Bash(node --check assets/js/features/agenda.js)",
+      "Bash(node --check assets/js/features/bastion.js)",
+      "Bash(node --check assets/js/features/vtt-spectator.js)"
     ]
   }
 }

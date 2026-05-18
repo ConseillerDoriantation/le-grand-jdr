@@ -24,7 +24,7 @@ import {
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
-import { _esc } from '../shared/html.js';
+import { _esc, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import PAGES from './pages.js';
@@ -8822,7 +8822,7 @@ export async function renderVttPage() {
   _cleanup();
   const content=document.getElementById('main-content');
   if (!content) return;
-  content.innerHTML='<div class="loading"><div class="spinner"></div> Chargement de la table…</div>';
+  content.innerHTML = appSplashHtml('Chargement de la table…');
   content.style.overflow='hidden';
   content.style.height='100vh';
   content.style.paddingBottom='0';

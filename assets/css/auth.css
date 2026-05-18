@@ -7,6 +7,60 @@
   background: var(--bg-deep);
 }
 
+/* ── Splash réutilisable — boot (plein écran) + chargement de page (inline) ── */
+.app-splash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-splash-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.app-splash-sigil {
+  font-size: 3rem;
+  filter: drop-shadow(0 0 12px rgba(226, 185, 111, .35));
+}
+.app-splash-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--text);
+  text-transform: uppercase;
+}
+.app-splash-label {
+  font-size: .82rem;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+.app-splash-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(226, 185, 111, .15);
+  border-top-color: var(--gold, #e2b96f);
+  border-radius: 50%;
+  animation: app-splash-spin .8s linear infinite;
+}
+@keyframes app-splash-spin { to { transform: rotate(360deg); } }
+
+/* Variante plein écran : masque le flash auth pendant la restauration Firebase. */
+#boot-splash {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-deep);
+  z-index: 9999;
+}
+
+/* Variante inline : utilisée par #main-content pendant la navigation. */
+.app-splash--inline {
+  min-height: 50vh;
+  padding: 2rem;
+}
+.app-splash--inline .app-splash-sigil { font-size: 2.4rem; }
+
 #auth-screen::before {
   content: '';
   position: absolute;

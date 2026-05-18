@@ -87,3 +87,18 @@ export function _initials(name = '') {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   return parts.length ? parts.slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') : '?';
 }
+
+/**
+ * Loader inline réutilisable (emblème + spinner + label).
+ * Utilise les classes `.app-splash--inline` partagées avec #boot-splash.
+ */
+export function appSplashHtml(label = 'Chargement…') {
+  return `
+    <div class="app-splash app-splash--inline">
+      <div class="app-splash-inner">
+        <span class="app-splash-sigil" aria-hidden="true">⚔️</span>
+        <div class="app-splash-spinner"></div>
+        ${label ? `<div class="app-splash-label">${_esc(label)}</div>` : ''}
+      </div>
+    </div>`;
+}

@@ -8,7 +8,7 @@ import { STATE } from '../core/state.js';
 import {
   db, doc, collection, addDoc, serverTimestamp,
 } from '../config/firebase.js';
-import { _esc } from '../shared/html.js';
+import { _esc, appSplashHtml } from '../shared/html.js';
 import { showNotif } from '../shared/notifications.js';
 import { getCurrentAdventureId } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
@@ -197,7 +197,7 @@ export async function renderVttSpectator() {
     return;
   }
 
-  content.innerHTML = `<div class="loading"><div class="spinner"></div> Connexion à la table…</div>`;
+  content.innerHTML = appSplashHtml('Connexion à la table…');
 
   // Abonnements realtime — gérés par watch/watchDoc, nettoyés par unwatchAll()
   watchDoc('vsp-session', 'vtt', 'session', (data) => {

@@ -19,7 +19,7 @@ import { db, doc, setDoc } from '../config/firebase.js';
 import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
-import { _esc } from '../shared/html.js';
+import { _esc, appSplashHtml } from '../shared/html.js';
 import { calcOr } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import PAGES from './pages.js';
@@ -2092,7 +2092,7 @@ function _renderPage() {
 async function renderBastionPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
-  content.innerHTML = `<div class="loading"><div class="spinner"></div> Chargement du Bastion…</div>`;
+  content.innerHTML = appSplashHtml('Chargement du Bastion…');
 
   // 1ère lecture (bastion + shop + npcs en parallèle — pour snapshots & portraits)
   _shopItemsCache = null; _npcsCache = null; // reset au cas où on aurait changé d'aventure

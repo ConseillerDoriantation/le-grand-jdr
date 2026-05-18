@@ -5,6 +5,7 @@
 import { STATE, setPage } from './state.js';
 import PAGES from '../features/pages.js';
 import { unwatchAll } from '../shared/realtime.js';
+import { appSplashHtml } from '../shared/html.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -196,10 +197,8 @@ function _renderMobileOnly() {
 
 function _renderLoading() {
   const content = document.getElementById('main-content');
-  if (content) {
-    content.innerHTML =
-      '<div class="loading"><div class="spinner"></div> Chargement…</div>';
-  }
+  if (!content) return;
+  content.innerHTML = appSplashHtml();
 }
 
 function _renderPageError(page, err) {

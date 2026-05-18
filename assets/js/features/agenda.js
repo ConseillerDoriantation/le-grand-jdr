@@ -16,7 +16,7 @@ import { STATE } from '../core/state.js';
 import { loadCollection, saveDoc, getDocDataSilent, deleteFromCol } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { _esc } from '../shared/html.js';
+import { _esc, appSplashHtml } from '../shared/html.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import PAGES from './pages.js';
 
@@ -529,7 +529,7 @@ window._agToggleGroupView = () => {
 async function renderAgendaPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
-  content.innerHTML = `<div class="loading"><div class="spinner"></div> Chargement de l'agenda…</div>`;
+  content.innerHTML = appSplashHtml("Chargement de l'agenda…");
 
   // Charge en parallèle
   const [avails, quests, users, nextSession] = await Promise.all([

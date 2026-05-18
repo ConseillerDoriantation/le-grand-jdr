@@ -4,6 +4,12 @@
 
 import { STATE } from './state.js';
 
+// Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
+function _hideBootSplash() {
+  const el = document.getElementById('boot-splash');
+  if (el) el.style.display = 'none';
+}
+
 // ── Switcher d'aventure (disponible dès le chargement) ────────────────────────
 window.openAdventureSwitcher = function () {
   const adventures = STATE.adventures;
@@ -30,6 +36,7 @@ window.openAdventureSwitcher = function () {
 };
 
 export function showApp() {
+  _hideBootSplash();
   const authScreen  = document.getElementById('auth-screen');
   const advScreen   = document.getElementById('adventure-screen');
   const app         = document.getElementById('app');
@@ -86,6 +93,7 @@ function _initCollapsibleSections() {
 }
 
 export function showAuth() {
+  _hideBootSplash();
   const authScreen = document.getElementById('auth-screen');
   const advScreen  = document.getElementById('adventure-screen');
   const app        = document.getElementById('app');
@@ -96,6 +104,7 @@ export function showAuth() {
 
 // ── Afficher le sélecteur d'aventure ──────────
 export function showAdventurePicker(adventures = []) {
+  _hideBootSplash();
   const authScreen = document.getElementById('auth-screen');
   const advScreen  = document.getElementById('adventure-screen');
   const app        = document.getElementById('app');

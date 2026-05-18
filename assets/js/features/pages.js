@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
 import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
-import { _esc } from '../shared/html.js';
+import { _esc, appSplashHtml } from '../shared/html.js';
 import { calcPalier } from '../shared/char-stats.js';
 import { watch } from '../shared/realtime.js';
 
@@ -20,17 +20,9 @@ const PAGES = {
   async dashboard() {
     const content = document.getElementById('main-content');
 
-    // Squelette animé
-    content.innerHTML = `
-    <div class="dash-root" id="dash-root">
-      <div style="height:100px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite"></div>
-      <div style="height:80px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite .1s"></div>
-      <div class="dash-2col">
-        <div style="height:120px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite .15s"></div>
-        <div style="height:120px;background:var(--bg-card);border-radius:var(--radius-lg);border:1px solid var(--border);animation:pulse 1.5s ease infinite .2s"></div>
-      </div>
-    </div>
-    <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}</style>`;
+    // Loader splash visible tant que les données ne sont pas chargées.
+    // Le wrapper #dash-root est conservé : le rendu final l'utilise pour s'y injecter.
+    content.innerHTML = `<div class="dash-root" id="dash-root">${appSplashHtml()}</div>`;
 
     // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
@@ -1584,7 +1576,7 @@ const PAGES = {
       </div>
     </div>
     <div class="hall-content">
-      <div id="ach-content"><div class="loading"><div class="spinner"></div></div></div>
+      <div id="ach-content">${appSplashHtml('')}</div>
     </div>
     </div>`;
   },

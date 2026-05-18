@@ -114,8 +114,17 @@
   </defs>
 </svg>
 
+<!-- ═══ SPLASH DE BOOT (évite le flash auth pendant la restauration Firebase) ═ -->
+<div id="boot-splash" class="app-splash" aria-hidden="true">
+  <div class="app-splash-inner">
+    <span class="app-splash-sigil">⚔️</span>
+    <div class="app-splash-title">Grimorium</div>
+    <div class="app-splash-spinner"></div>
+  </div>
+</div>
+
 <!-- ═══ ÉCRAN D'AUTHENTIFICATION ════════════════════════════════════════════ -->
-<div id="auth-screen">
+<div id="auth-screen" style="display:none">
   <div class="auth-box">
     <div class="auth-emblem">
       <span class="sigil">⚔️</span>
@@ -378,7 +387,13 @@
 
     <!-- Contenu principal -->
     <main class="main-content" id="main-content" role="main">
-      <div class="loading"><div class="spinner"></div> Chargement…</div>
+      <div class="app-splash app-splash--inline">
+        <div class="app-splash-inner">
+          <span class="app-splash-sigil" aria-hidden="true">⚔️</span>
+          <div class="app-splash-spinner"></div>
+          <div class="app-splash-label">Chargement…</div>
+        </div>
+      </div>
     </main>
 
   </div>

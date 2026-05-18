@@ -7,7 +7,7 @@ import { loadCollection, addToCol, saveDoc, deleteFromCol, invalidateCache } fro
 import { watch } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc } from '../shared/html.js';
+import { _esc, appSplashHtml } from '../shared/html.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 
@@ -133,7 +133,7 @@ function _applyQuestsRender(quests) {
 // ── Page principale ───────────────────────────
 async function renderQuestsPage() {
   const content = document.getElementById('main-content');
-  content.innerHTML = `<div class="loading"><div class="spinner"></div> Chargement…</div>`;
+  content.innerHTML = appSplashHtml();
 
   const [quests, chars] = await Promise.all([
     loadCollection('quests').catch(() => []),
