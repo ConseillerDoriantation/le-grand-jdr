@@ -4,7 +4,7 @@ import { openModal, closeModalDirect } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
-import { calcOr } from '../shared/char-stats.js';
+import { calcOr, computeEquipStatsBonus } from '../shared/char-stats.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
@@ -2049,9 +2049,18 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
     });
 
     if (changed) {
+      // Recalcule statsBonus en fonction du nouvel équipement —
+      // crucial quand le MJ change les stats d'un objet (ex: +Int → +Sa)
+      // pour que les bonus du perso restent en phase avec l'objet équipé.
+      const newStatsBonus = computeEquipStatsBonus(equip);
       c.inventaire = inv;
       c.equipement = equip;
-      updates.push(updateInCol('characters', c.id, { inventaire: inv, equipement: equip }));
+      c.statsBonus = newStatsBonus;
+      updates.push(updateInCol('characters', c.id, {
+        inventaire: inv,
+        equipement: equip,
+        statsBonus: newStatsBonus,
+      }));
     }
   });
 
