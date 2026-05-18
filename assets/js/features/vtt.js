@@ -9002,9 +9002,12 @@ function _renderPresenceCol() {
 // MINI-FICHE PERSONNAGE — 4 onglets
 // ═══════════════════════════════════════════════════════════════════
 
+// Slots canoniques — mêmes clés que la vraie fiche personnage (characters/combat.js
+// + characters/equipment.js). NE PAS inventer d'emplacements ici.
 const _MS_SLOTS = [
-  'Main principale','Hors-main','Tête','Torse','Bottes',
-  'Amulette','Anneau gauche','Anneau droit','Cou','Dos',
+  'Main principale', 'Main secondaire',
+  'Tête', 'Torse', 'Bottes',
+  'Anneau', 'Amulette', 'Objet magique',
 ];
 
 // ─── Helpers locaux ───────────────────────────────────────────────
@@ -9045,7 +9048,8 @@ function _msBuildEquipItem(slot, item, invIndex) {
 
 function _msCanEdit(uid) { return STATE.isAdmin || STATE.user?.uid === uid; }
 
-// Reproduit la logique de compatibilité de characters/equipment.js
+// Reproduit STRICTEMENT la logique de characters/equipment.js (editEquipSlot)
+// pour que les items équipables dans la vraie fiche le soient aussi ici.
 function _msItemFitsSlot(item, slot, equip, idx) {
   if (!item?.nom) return false;
   // Déjà équipé dans un autre slot → exclu
@@ -9053,7 +9057,7 @@ function _msItemFitsSlot(item, slot, equip, idx) {
 
   const tpl = item.template || '';
 
-  // ── Armes ────────────────────────────────────────────────────────
+  // ── Armes (Main principale / Main secondaire) ────────────────────
   if (slot.startsWith('Main')) {
     if (tpl === 'arme') return true;
     const WFMT = new Set([
@@ -9069,23 +9073,21 @@ function _msItemFitsSlot(item, slot, equip, idx) {
   }
 
   // ── Armures (Tête / Torse / Bottes) ─────────────────────────────
-  // Note : slotArmure stocké = 'Tête', 'Torse', 'Pieds' (pas 'Bottes')
+  // slotArmure stocké côté item = 'Tête' | 'Torse' | 'Pieds'
+  // (libellé "Bottes" pour l'affichage, mais valeur réelle "Pieds")
   const ARMOR_MAP = { 'Tête':'Tête', 'Torse':'Torse', 'Bottes':'Pieds' };
   if (ARMOR_MAP[slot] !== undefined) {
     if (tpl === 'armure' || item.slotArmure) {
-      return item.slotArmure === ARMOR_MAP[slot] || item.slotArmure === slot;
+      return item.slotArmure === ARMOR_MAP[slot];
     }
     const t = (item.type||'').toLowerCase();
     return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
   }
 
-  // ── Bijoux / accessoires ─────────────────────────────────────────
-  if (['Amulette','Anneau gauche','Anneau droit','Cou','Dos'].includes(slot)) {
-    if (!item.slotBijou) return tpl === 'bijou';
-    if (item.slotBijou === slot) return true;
-    // 'Anneau' générique → compatible avec les deux emplacements bague
-    if (item.slotBijou === 'Anneau' && (slot === 'Anneau gauche' || slot === 'Anneau droit')) return true;
-    return false;
+  // ── Bijoux / accessoires (Anneau / Amulette / Objet magique) ─────
+  // Règle stricte = même que la vraie fiche : item.slotBijou === slot
+  if (slot === 'Anneau' || slot === 'Amulette' || slot === 'Objet magique') {
+    return item.slotBijou === slot;
   }
 
   return false;
