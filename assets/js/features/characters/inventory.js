@@ -6,6 +6,7 @@ import { _esc } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
+import { useGoldMulti } from '../../shared/economy.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import {
   _getTraits,
@@ -435,21 +436,6 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     const sorted = [...indicesToSell].sort((a,b)=>b-a);
     sorted.forEach(idx => inv.splice(idx, 1));
 
-    const compte   = c.compte || { recettes:[], depenses:[] };
-    const recettes = [...(compte.recettes||[])];
-    recettes.push({
-      date:    new Date().toLocaleDateString('fr-FR'),
-      libelle: qty > 1 ? `Vente ×${qty} : ${itemNom}` : `Vente : ${itemNom}`,
-      montant: totalPrix,
-    });
-    if (refundTotal > 0) {
-      recettes.push({
-        date:    new Date().toLocaleDateString('fr-FR'),
-        libelle: `Reprise améliorations : ${itemNom}`,
-        montant: refundTotal,
-      });
-    }
-
     if (item.itemId && window.sellInvItemFromShop) {
       for (let i = 0; i < qty; i++) {
         await window._restockShopItem?.(item.itemId);
@@ -457,22 +443,23 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     }
 
     const equipSync = syncEquipmentAfterInventoryMutation(c, indicesToSell);
-    const payload = {
-      inventaire: inv,
-      compte: { ...compte, recettes },
-    };
+    const extraPayload = { inventaire: inv };
     if (equipSync.changed) {
-      payload.equipement = equipSync.equipement;
-      payload.statsBonus = equipSync.statsBonus;
+      extraPayload.equipement = equipSync.equipement;
+      extraPayload.statsBonus = equipSync.statsBonus;
     }
 
-    await updateInCol('characters', charId, payload);
-    c.inventaire = inv;
-    c.compte     = { ...compte, recettes };
-    if (equipSync.changed) {
-      c.equipement = equipSync.equipement;
-      c.statsBonus = equipSync.statsBonus;
+    // Une ligne par produit financier : vente + reprise (si > 0), une seule écriture
+    const entries = [{
+      delta: +totalPrix,
+      reason: qty > 1 ? `Vente ×${qty} : ${itemNom}` : `Vente : ${itemNom}`,
+    }];
+    if (refundTotal > 0) {
+      entries.push({ delta: +refundTotal, reason: `Reprise améliorations : ${itemNom}` });
     }
+
+    const res = await useGoldMulti(charId, entries, { charObj: c, extraPayload });
+    if (!res.ok) { showNotif(res.error || 'Erreur vente', 'error'); return; }
 
     closeModal();
     const unequipMsg = equipSync.removedSlots.length
