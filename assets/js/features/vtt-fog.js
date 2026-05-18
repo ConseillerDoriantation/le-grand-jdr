@@ -22,7 +22,7 @@ let _fogLayer   = null;   // Konva.Layer pour le masque de brouillard
 let _wallsLayer = null;   // Konva.Layer pour les visuels mur/porte/fenêtre
 
 let _editMode   = false;  // éditeur de murs actif ?
-let _editTool   = 'wall'; // 'wall' | 'door' | 'window' | 'light' | 'eraser'
+let _editTool   = 'wall'; // 'wall' | 'door' | 'window' | 'light' | 'eraser' | 'hide' | 'reveal'
 let _drawStart  = null;   // {col,row} — début du segment en cours de tracé
 let _preview    = null;   // Konva.Line de prévisualisation
 let _selectedId = null;   // id du segment/lumière sélectionné
@@ -43,7 +43,7 @@ const LIGHT_DEF_R = 5;              // rayon par défaut des sources (cases)
 
 const WALL_COLOR  = { wall:'#64748b', door:'#c2410c', window:'#38bdf8' };
 const WALL_W      = { wall:3,         door:3,          window:2          };
-const EDIT_COLOR  = { wall:'#ef4444', door:'#fb923c',  window:'#67e8f9', light:'#fbbf24' };
+const EDIT_COLOR  = { wall:'#ef4444', door:'#fb923c',  window:'#67e8f9', light:'#fbbf24', hide:'#1e293b', reveal:'#fde047' };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MATH
@@ -155,76 +155,84 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
   const C = _CELL;
   const W = (page.cols || 24) * C;
   const H = (page.rows || 18) * C;
+  const fogEnabled = !!page.fogEnabled;
 
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // Plein noir (semi-transparent pour le MJ, opaque pour les joueurs)
-  ctx.fillStyle = `rgba(0,0,0,${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
-  ctx.fillRect(0, 0, W, H);
-
-  // Segments bloquants LOS : murs + portes fermées.
-  // Les fenêtres (ouvertes OU fermées) laissent toujours passer la vision.
-  const walls = page.walls || [];
-  const blockers = walls
-    .filter(w => w.type === 'wall' || (w.type === 'door' && !w.open))
-    .map(w => ({ x1: w.x1*C, y1: w.y1*C, x2: w.x2*C, y2: w.y2*C }));
-
-  ctx.globalCompositeOperation = 'destination-out';
-  // fillStyle DOIT être opaque pour un effacement complet du masque
-  ctx.fillStyle = 'rgba(0,0,0,1)';
-
-  // Helpers canvas
-  const fillPoly = poly => {
-    if (poly.length < 3) return;
-    ctx.beginPath();
-    ctx.moveTo(poly[0].x, poly[0].y);
-    for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
-    ctx.closePath();
-    ctx.fill();
-  };
-  const fillPolyClipped = (poly, cx, cy, r) => {
-    if (poly.length < 3) return;
-    ctx.save();
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.clip();
-    fillPoly(poly);
-    ctx.restore();
-  };
-
-  const lights = page.lightSources || [];
-
-  // Sources lumineuses : LOS depuis le centre, clippée au rayon
-  for (const ls of lights) {
-    const lx = ls.x * C, ly = ls.y * C;
-    const r  = (ls.radius ?? LIGHT_DEF_R) * C;
-    fillPolyClipped(_visPoly(lx, ly, blockers, W, H), lx, ly, r);
+  // Si l'éclairage dynamique est activé : masque noir partout puis cutout LOS.
+  // Sinon : canvas transparent — seul le brouillard manuel s'y dépose.
+  if (fogEnabled) {
+    ctx.fillStyle = `rgba(0,0,0,${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
+    ctx.fillRect(0, 0, W, H);
   }
 
-  // Tokens joueurs
-  const playerToks = Object.values(tokens || {})
-    .map(e => e.data)
-    .filter(t => t && t.type === 'player' && t.pageId === page.id);
+  if (fogEnabled) {
+    // Segments bloquants LOS : murs + portes fermées.
+    // Les fenêtres (ouvertes OU fermées) laissent toujours passer la vision.
+    const walls = page.walls || [];
+    const blockers = walls
+      .filter(w => w.type === 'wall' || (w.type === 'door' && !w.open))
+      .map(w => ({ x1: w.x1*C, y1: w.y1*C, x2: w.x2*C, y2: w.y2*C }));
 
-  for (const tok of playerToks) {
-    const tw = tok.tokenW ?? tok.tokenSize ?? 1;
-    const th = tok.tokenH ?? tok.tokenSize ?? 1;
-    const ox = (tok.col + tw * 0.5) * C;
-    const oy = (tok.row + th * 0.5) * C;
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0,0,0,1)';
 
-    // En lumière si dans le rayon d'au moins une source, ou aucune source définie
-    const inLight = lights.length === 0 || lights.some(ls => {
-      const r = (ls.radius ?? LIGHT_DEF_R) * C;
-      return Math.hypot(ox - ls.x*C, oy - ls.y*C) <= r;
-    });
-
-    const poly = _visPoly(ox, oy, blockers, W, H);
-    if (inLight) {
+    const fillPoly = poly => {
+      if (poly.length < 3) return;
+      ctx.beginPath();
+      ctx.moveTo(poly[0].x, poly[0].y);
+      for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+      ctx.closePath();
+      ctx.fill();
+    };
+    const fillPolyClipped = (poly, cx, cy, r) => {
+      if (poly.length < 3) return;
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.clip();
       fillPoly(poly);
-    } else {
-      // Obscurité : vision limitée à DARK_CELLS case(s)
-      fillPolyClipped(poly, ox, oy, DARK_CELLS * C);
+      ctx.restore();
+    };
+
+    const lights = page.lightSources || [];
+
+    for (const ls of lights) {
+      const lx = ls.x * C, ly = ls.y * C;
+      const r  = (ls.radius ?? LIGHT_DEF_R) * C;
+      fillPolyClipped(_visPoly(lx, ly, blockers, W, H), lx, ly, r);
     }
+
+    const playerToks = Object.values(tokens || {})
+      .map(e => e.data)
+      .filter(t => t && t.type === 'player' && t.pageId === page.id);
+
+    for (const tok of playerToks) {
+      const tw = tok.tokenW ?? tok.tokenSize ?? 1;
+      const th = tok.tokenH ?? tok.tokenSize ?? 1;
+      const ox = (tok.col + tw * 0.5) * C;
+      const oy = (tok.row + th * 0.5) * C;
+      const inLight = lights.length === 0 || lights.some(ls => {
+        const r = (ls.radius ?? LIGHT_DEF_R) * C;
+        return Math.hypot(ox - ls.x*C, oy - ls.y*C) <= r;
+      });
+      const poly = _visPoly(ox, oy, blockers, W, H);
+      if (inLight) fillPoly(poly);
+      else         fillPolyClipped(poly, ox, oy, DARK_CELLS * C);
+    }
+  }
+
+  // ── Brouillard de guerre manuel — appliqué APRÈS le LOS, dans l'ordre.
+  //    'reveal' = cutout forcé (toujours visible) ; 'hide' = blackout forcé.
+  for (const op of (page.fogOps || [])) {
+    if (op.type === 'reveal') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = 'rgba(0,0,0,1)';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = `rgba(0,0,0,${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
+    }
+    ctx.fillRect(op.x*C, op.y*C, op.w*C, op.h*C);
   }
 
   ctx.globalCompositeOperation = 'source-over';
@@ -254,14 +262,15 @@ export function fogUpdate(page, tokens, isAdmin) {
   if (!_fogLayer || !page) return;
   _fogLayer.destroyChildren();
 
-  if (!page.fogEnabled) {
+  // Rien à dessiner si ni LOS ni ops manuelles
+  const hasFogOps = (page.fogOps || []).length > 0;
+  if (!page.fogEnabled && !hasFogOps) {
     _fogLayer.batchDraw();
-    return; // fog désactivé sur cette page
+    return;
   }
 
   const K = window.Konva;
   if (!K) return;
-  // Le MJ voit le fog semi-transparent (FOG_ALPHA_ADMIN) pour garder la carte lisible
   const canvas = _buildFogCanvas(page, tokens, !!isAdmin);
   const img = new K.Image({ image: canvas, x: 0, y: 0, listening: false });
   _fogLayer.add(img);
@@ -355,6 +364,23 @@ export function fogRenderWalls(page, isAdmin) {
         });
         _wallsLayer.add(hl); hl.moveToBottom();
       }
+    }
+  }
+
+  // ── Rectangles de brouillard manuel en mode édition (cliquables) ─────────
+  if (_editMode && isAdmin) {
+    for (const op of (page.fogOps || [])) {
+      const sel = _selectedId === op.id;
+      const fill = op.type === 'hide' ? 'rgba(15,23,42,0.35)' : 'rgba(253,224,71,0.18)';
+      const stroke = sel ? '#fff' : EDIT_COLOR[op.type];
+      const rect = new K.Rect({
+        x: op.x * C, y: op.y * C,
+        width: op.w * C, height: op.h * C,
+        fill, stroke, strokeWidth: sel ? 2.5 : 1.5,
+        dash: [6, 4], listening: true,
+      });
+      rect.on('click tap', e => { e.cancelBubble = true; _selectItem(op.id); });
+      _wallsLayer.add(rect);
     }
   }
 
@@ -511,6 +537,9 @@ export function fogToggleEditMode(enabled, page) {
 
   let _currentStep = 1; // mis à jour à mousedown, conservé pendant le drag
 
+  const _isLineTool = t => t === 'wall' || t === 'door' || t === 'window';
+  const _isRectTool = t => t === 'hide' || t === 'reveal';
+
   const onDown = e => {
     if (e.evt?.button === 2) return; // clic-droit = pan
     const pos = _worldPos(); if (!pos) return;
@@ -519,7 +548,6 @@ export function fogToggleEditMode(enabled, page) {
     _currentStep = _snapStep(e);
 
     if (_editTool === 'light') {
-      // Lumière : même logique de snap, défaut 1/2 (centre de case)
       const step = _currentStep === 1 ? 0.5 : _currentStep;
       const s = _snap(pos, step);
       _addLightSource(s.col, s.row);
@@ -531,42 +559,63 @@ export function fogToggleEditMode(enabled, page) {
     }
 
     let { col, row } = _snap(pos, _currentStep);
-    const v = _snapVertex(col, row);
-    if (v) { col = v.col; row = v.row; }
-    _drawStart = { col, row };
-    _hideSnapDot();
-    _preview = new K.Line({
-      points:      [col*_CELL, row*_CELL, col*_CELL, row*_CELL],
-      stroke:      EDIT_COLOR[_editTool] || '#ef4444',
-      strokeWidth: _editTool === 'window' ? 2 : 3,
-      lineCap:     'round',
-      dash:        _editTool === 'window' ? [8, 5] : [],
-      listening:   false,
-    });
+
+    if (_isLineTool(_editTool)) {
+      const v = _snapVertex(col, row);
+      if (v) { col = v.col; row = v.row; }
+      _drawStart = { col, row };
+      _hideSnapDot();
+      _preview = new K.Line({
+        points:      [col*_CELL, row*_CELL, col*_CELL, row*_CELL],
+        stroke:      EDIT_COLOR[_editTool] || '#ef4444',
+        strokeWidth: _editTool === 'window' ? 2 : 3,
+        lineCap:     'round',
+        dash:        _editTool === 'window' ? [8, 5] : [],
+        listening:   false,
+      });
+    } else if (_isRectTool(_editTool)) {
+      _drawStart = { col, row };
+      const fill = _editTool === 'hide' ? 'rgba(15,23,42,0.55)' : 'rgba(253,224,71,0.22)';
+      _preview = new K.Rect({
+        x: col*_CELL, y: row*_CELL, width: 0, height: 0,
+        fill, stroke: EDIT_COLOR[_editTool], strokeWidth: 1.5,
+        dash: [6, 4], listening: false,
+      });
+    } else { return; }
     _wallsLayer?.add(_preview);
     _wallsLayer?.batchDraw();
   };
 
   const onMove = e => {
-    if (!_drawStart || !_preview) {
-      // Hors tracé : on indique quand même le sommet aimanté possible
-      if (_editTool === 'wall' || _editTool === 'door' || _editTool === 'window') {
-        const pos = _worldPos(); if (!pos) { _hideSnapDot(); _wallsLayer?.batchDraw(); return; }
-        const step = _snapStep(e);
-        const { col, row } = _snap(pos, step);
+    if (_drawStart && _preview) {
+      const pos = _worldPos(); if (!pos) return;
+      _currentStep = _snapStep(e);
+      let { col, row } = _snap(pos, _currentStep);
+
+      if (_isLineTool(_editTool)) {
         const v = _snapVertex(col, row);
-        if (v) _showSnapDot(v.col, v.row); else _hideSnapDot();
-        _wallsLayer?.batchDraw();
+        if (v) { col = v.col; row = v.row; _showSnapDot(col, row); } else _hideSnapDot();
+        _preview.points([_drawStart.col*_CELL, _drawStart.row*_CELL, col*_CELL, row*_CELL]);
+      } else if (_isRectTool(_editTool)) {
+        const x = Math.min(_drawStart.col, col);
+        const y = Math.min(_drawStart.row, row);
+        const w = Math.abs(col - _drawStart.col);
+        const h = Math.abs(row - _drawStart.row);
+        _preview.x(x*_CELL); _preview.y(y*_CELL);
+        _preview.width(w*_CELL); _preview.height(h*_CELL);
       }
+      _wallsLayer?.batchDraw();
       return;
     }
-    const pos = _worldPos(); if (!pos) return;
-    _currentStep = _snapStep(e);
-    let { col, row } = _snap(pos, _currentStep);
-    const v = _snapVertex(col, row);
-    if (v) { col = v.col; row = v.row; _showSnapDot(col, row); } else _hideSnapDot();
-    _preview.points([_drawStart.col*_CELL, _drawStart.row*_CELL, col*_CELL, row*_CELL]);
-    _wallsLayer?.batchDraw();
+    // Hors tracé : indicateur d'aimantation uniquement pour outils ligne
+    if (_isLineTool(_editTool)) {
+      const pos = _worldPos(); if (!pos) { _hideSnapDot(); _wallsLayer?.batchDraw(); return; }
+      const step = _snapStep(e);
+      const { col, row } = _snap(pos, step);
+      const v = _snapVertex(col, row);
+      if (v) _showSnapDot(v.col, v.row); else _hideSnapDot();
+      _wallsLayer?.batchDraw();
+    }
   };
 
   const onUp = e => {
@@ -577,12 +626,20 @@ export function fogToggleEditMode(enabled, page) {
     if (!pos) { _drawStart = null; return; }
     _currentStep = _snapStep(e);
     let { col, row } = _snap(pos, _currentStep);
-    const v = _snapVertex(col, row);
-    if (v) { col = v.col; row = v.row; }
-    // Éviter les segments trop courts (clic accidentel)
-    const minLen = _currentStep;
-    if (Math.abs(col - _drawStart.col) >= minLen * 0.5 || Math.abs(row - _drawStart.row) >= minLen * 0.5) {
-      _addWall(_drawStart.col, _drawStart.row, col, row, _editTool);
+
+    if (_isLineTool(_editTool)) {
+      const v = _snapVertex(col, row);
+      if (v) { col = v.col; row = v.row; }
+      const minLen = _currentStep;
+      if (Math.abs(col - _drawStart.col) >= minLen * 0.5 || Math.abs(row - _drawStart.row) >= minLen * 0.5) {
+        _addWall(_drawStart.col, _drawStart.row, col, row, _editTool);
+      }
+    } else if (_isRectTool(_editTool)) {
+      const x = Math.min(_drawStart.col, col);
+      const y = Math.min(_drawStart.row, row);
+      const w = Math.abs(col - _drawStart.col);
+      const h = Math.abs(row - _drawStart.row);
+      if (w >= 0.1 && h >= 0.1) _addFogRect(_editTool, x, y, w, h);
     }
     _drawStart = null;
     _wallsLayer?.batchDraw();
@@ -617,6 +674,15 @@ function _addLightSource(x, y) {
     .catch(() => showNotif('Erreur sauvegarde', 'error'));
 }
 
+function _addFogRect(type, x, y, w, h) {
+  if (!_page) return;
+  const ref = _pgRef(_page.id); if (!ref) return;
+  const op = { id: _uid(), type, x, y, w, h };
+  const ops = [...(_page.fogOps || []), op];
+  updateDoc(ref, { fogOps: ops })
+    .catch(() => showNotif('Erreur sauvegarde', 'error'));
+}
+
 function _deleteAtPos(pos) {
   if (!_page) return;
   const C = _CELL, THRESH = C * 0.25;
@@ -643,6 +709,16 @@ function _deleteAtPos(pos) {
       return;
     }
   }
+  // Cherche un rectangle de brouillard sous le curseur (dernier ajouté en priorité)
+  const fogOps = _page.fogOps || [];
+  for (let i = fogOps.length - 1; i >= 0; i--) {
+    const r = fogOps[i];
+    if (pos.x >= r.x*C && pos.x <= (r.x+r.w)*C && pos.y >= r.y*C && pos.y <= (r.y+r.h)*C) {
+      const ref = _pgRef(_page.id); if (!ref) return;
+      updateDoc(ref, { fogOps: fogOps.filter(o => o.id !== r.id) }).catch(() => {});
+      return;
+    }
+  }
 }
 
 function _selectItem(id) {
@@ -664,7 +740,8 @@ function _showCtxMenu(id) {
 
   const wall  = (_page.walls        || []).find(w => w.id === id);
   const light = (_page.lightSources || []).find(l => l.id === id);
-  if (!wall && !light) return;
+  const fogOp = (_page.fogOps       || []).find(o => o.id === id);
+  if (!wall && !light && !fogOp) return;
 
   // Position écran
   const p  = _stage.getPointerPosition() || { x: 0, y: 0 };
@@ -751,6 +828,24 @@ function _showCtxMenu(id) {
     sep();
     btn('🗑 Supprimer', () => {
       if (_page) updateDoc(_pgRef(_page.id), { lightSources: (_page.lightSources||[]).filter(l=>l.id!==id) }).catch(()=>{});
+      _selectedId = null;
+    }, true);
+  }
+
+  if (fogOp) {
+    const TYPE = { hide: '🌑 Zone cachée', reveal: '💡 Zone révélée' };
+    const header = document.createElement('div');
+    Object.assign(header.style, { padding:'.35rem .6rem', color:'#a78bfa', fontSize:'.72rem', fontWeight:'600' });
+    header.textContent = TYPE[fogOp.type] || fogOp.type;
+    menu.appendChild(header);
+    btn(fogOp.type === 'hide' ? '🔄 Convertir en révélation' : '🔄 Convertir en cache', () => {
+      const ops = (_page?.fogOps || []).map(o => o.id === id
+        ? { ...o, type: o.type === 'hide' ? 'reveal' : 'hide' } : o);
+      if (_page) updateDoc(_pgRef(_page.id), { fogOps: ops }).catch(() => {});
+    });
+    sep();
+    btn('🗑 Supprimer', () => {
+      if (_page) updateDoc(_pgRef(_page.id), { fogOps: (_page.fogOps||[]).filter(o=>o.id!==id) }).catch(() => {});
       _selectedId = null;
     }, true);
   }

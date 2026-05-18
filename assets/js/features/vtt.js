@@ -6305,6 +6305,13 @@ window._vttToggleFog  = async () => {
   const next = !_activePage.fogEnabled;
   await updateDoc(_pgRef(_activePage.id), { fogEnabled: next }).catch(() => showNotif('Erreur fog','error'));
 };
+window._vttFogClearOps = async () => {
+  if (!_activePage) return;
+  const n = (_activePage.fogOps || []).length;
+  if (!n) { showNotif('Aucune zone de brouillard sur cette page', 'info'); return; }
+  if (!confirm(`Supprimer ${n} zone(s) de brouillard manuel de cette page ?`)) return;
+  await updateDoc(_pgRef(_activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
+};
 window._vttSwitchPage = id => _switchPage(id);
 
 // ── Outils de dessin ────────────────────────────────────────────────
@@ -8703,11 +8710,16 @@ export async function renderVttPage() {
       <button class="vtt-btn-sm"        data-fog-tool="door"   onclick="window._vttFogTool('door')"   title="Tracer une porte">🚪 Porte</button>
       <button class="vtt-btn-sm"        data-fog-tool="window" onclick="window._vttFogTool('window')" title="Tracer une fenêtre">🪟 Fenêtre</button>
       <button class="vtt-btn-sm"        data-fog-tool="light"  onclick="window._vttFogTool('light')"  title="Placer une source lumineuse">💡 Lumière</button>
-      <button class="vtt-btn-sm"        data-fog-tool="eraser" onclick="window._vttFogTool('eraser')" title="Effacer (clic sur segment ou source)">🗑 Effacer</button>
       <div class="vtt-tb-sep"></div>
-      <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver le brouillard de guerre sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
+      <button class="vtt-btn-sm"        data-fog-tool="hide"   onclick="window._vttFogTool('hide')"   title="Cacher une zone (drag rectangle)">🌑 Cacher</button>
+      <button class="vtt-btn-sm"        data-fog-tool="reveal" onclick="window._vttFogTool('reveal')" title="Révéler une zone (drag rectangle, prioritaire sur le LOS)">🔦 Révéler</button>
+      <div class="vtt-tb-sep"></div>
+      <button class="vtt-btn-sm"        data-fog-tool="eraser" onclick="window._vttFogTool('eraser')" title="Effacer (clic sur mur, lumière ou zone de brouillard)">🗑 Effacer</button>
+      <button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttFogClearOps()" title="Supprimer toutes les zones de brouillard manuel de cette page">🧹 Vider brouillard</button>
+      <div class="vtt-tb-sep"></div>
+      <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
       <div class="vtt-walls-bar-hint">
-        Clic = tracer · <kbd>Alt</kbd> demi-case · <kbd>Shift</kbd> libre · Clic segment = menu<br>
+        Clic = tracer · <kbd>Alt</kbd> demi-case · <kbd>Shift</kbd> libre · Clic segment/zone = menu<br>
         <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
         <span class="vtt-fog-dot vtt-fog-dot--bad"></span>sommet isolé (fuite possible) ·
         <span class="vtt-fog-dot vtt-fog-dot--snap"></span>aimantation pendant tracé</span>
