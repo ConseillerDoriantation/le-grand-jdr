@@ -2670,12 +2670,12 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
         </div>
         <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat aux dégâts">
         <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés supplémentaires aux dégâts (même type)">
-        ${ (opt.typeRules?.missEffect === 'half') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
-          font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
-          <span>✦</span><span>½ dégâts garantis même en cas d'échec</span>
-        </div>` : (opt.typeRules?.missEffect === 'full') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
+        ${ (opt.typeRules?.missEffect === 'full') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
           font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
           <span>✦</span><span>Dégâts complets même en cas d'échec</span>
+        </div>` : (opt.typeRules?.missEffect === 'half' || opt.pmCost > 0) ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
+          font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
+          <span>✦</span><span>½ dégâts garantis même en cas d'échec${opt.typeRules?.missEffect !== 'half' && opt.pmCost > 0 ? ' (mana consommé)' : ''}</span>
         </div>` : ''}
         ${interactionPreviewHtml}
       </div>
@@ -3682,7 +3682,11 @@ window._vttRollAttack = async () => {
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
-    const missEffect = rules.missEffect || 'none';
+    let   missEffect = rules.missEffect || 'none';
+    // Règle générale : tout sort / compétence qui consomme du mana fait au moins
+    // ½ dégâts (arrondi inf.) en cas d'échec. Si le type de dégâts définit déjà
+    // 'half' ou 'full', on respecte (pas de cumul, on ne dégrade pas non plus).
+    if (missEffect === 'none' && opt.pmCost > 0) missEffect = 'half';
 
     const diceToRoll    = opt.rawDice || opt.dice;
     const effectiveDice = _effectiveDmgDice(diceToRoll);
