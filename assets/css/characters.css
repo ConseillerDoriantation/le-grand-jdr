@@ -2505,6 +2505,35 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-spell-autoval {
   margin-bottom: 0.55rem;
 }
+
+/* Stats override (Toucher / Dégâts / Soin) — toujours visibles sous la chip,
+   indépendamment du mode Auto/Custom de la formule */
+.cs-spell-autoval-edit-row {
+  display: flex; gap: 0.4rem; align-items: center;
+}
+.cs-spell-autoval-edit-row > .input-field { flex: 1; }
+.cs-spell-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  background: rgba(255,255,255,0.025);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+.cs-spell-stats-grid.one { grid-template-columns: 1fr; }
+.cs-spell-stats-grid > div {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cs-spell-stats-tag {
+  font-size: 0.66rem; color: var(--text-dim);
+  font-weight: 600;
+}
+.cs-spell-stats-grid select.input-field {
+  font-size: 0.78rem;
+  padding: 0.25rem 0.4rem;
+}
 .cs-spell-autoval-label {
   font-size: 0.74rem;
   font-weight: 600;
