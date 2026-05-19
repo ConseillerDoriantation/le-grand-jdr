@@ -14,6 +14,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus } from '../shared/char-stats.js';
+import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { getArmorSetData } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
@@ -1453,23 +1454,43 @@ function _toggleMultiSelect(id) {
 /** Surbrillance rouge des cases à portée d'attaque de t (sans clear — le caller nettoie). */
 function _showAttackRange(t) {
   if (!_activePage) return;
-  const K=window.Konva;
-  const options=_buildAttackOptions(t);
-  const maxRange=options.length?Math.max(...options.map(o=>o.portee)):(_live(t).displayRange??1);
-  // Pure mêlée (portée max = 1) → Chebyshev (8 dirs, inclut diagonales). Sinon Manhattan (losange).
-  const meleeOnly = maxRange === 1;
-  const {cols,rows}=_activePage;
+  const K = window.Konva;
+  const options = _buildAttackOptions(t);
+  if (!options.length) return;
+  // Portée "naturelle" = la plus courte parmi toutes les options (typiquement l'arme).
+  // Les cases dans cette portée s'affichent en ROUGE SOLIDE (attaque immédiate).
+  // Les cases atteintes uniquement par des sorts/actions longues s'affichent en
+  // VIOLET POINTILLÉ — clair que seul un sort y arrive.
+  const minPortee = Math.min(...options.map(o => o.portee));
+  const { cols, rows } = _activePage;
   const sd = _tokenDims(t);
-  for (let c=0; c<cols; c++) for (let r=0; r<rows; r++) {
-    // Ignorer les cases occupées par le token source lui-même
-    if (c>=t.col && c<t.col+sd.w && r>=t.row && r<t.row+sd.h) continue;
-    // Distance entre la case (c,r) et la bounding box du token source
+
+  // Métrique de distance par option : mêlée (portée=1) = Chebyshev, sinon Manhattan
+  const _reachByOpt = (dx, dy, portee) =>
+    (portee === 1 ? Math.max(dx, dy) : (dx + dy)) <= portee;
+
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+    if (c >= t.col && c < t.col + sd.w && r >= t.row && r < t.row + sd.h) continue;
     const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
     const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
-    const dist = meleeOnly ? Math.max(dx, dy) : (dx + dy);
-    if (dist > maxRange) continue;
-    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
-      fill:'rgba(239,68,68,0.22)', stroke:'rgba(239,68,68,0.65)', strokeWidth:1.5, listening:false });
+
+    // Trouve la plus PETITE portée parmi les options qui peuvent atteindre cette case.
+    let bestPortee = Infinity;
+    for (const o of options) {
+      if (_reachByOpt(dx, dy, o.portee) && o.portee < bestPortee) bestPortee = o.portee;
+    }
+    if (bestPortee === Infinity) continue;
+
+    const isPrimary = bestPortee === minPortee;
+    const rect = isPrimary
+      // Portée principale (arme / attaque immédiate) — rouge plein
+      ? new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
+          fill:'rgba(239,68,68,0.22)', stroke:'rgba(239,68,68,0.65)',
+          strokeWidth:1.5, listening:false })
+      // Portée étendue (sorts / actions longue distance uniquement) — violet pointillé
+      : new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
+          fill:'rgba(167,139,250,0.10)', stroke:'rgba(167,139,250,0.55)',
+          strokeWidth:1.2, dash:[6,4], listening:false });
     _layers.grid.add(rect); _moveHL.push(rect);
   }
   _layers.grid.batchDraw();
@@ -2377,6 +2398,92 @@ function _buildAttackOptions(t) {
     });
   }
 
+  // ── Actions/Bonus/Réactions définies sur des objets de l'inventaire ─────
+  // Format item.actions = [{ id, type, nom, description, pmCost, consommable,
+  //   degats, degatsStat, typeId, portee, nbCibles, isHeal, targetSelf }]
+  if (c && Array.isArray(c.inventaire)) {
+    c.inventaire.forEach((item, invIdx) => {
+      const acts = Array.isArray(item?.actions) ? item.actions : [];
+      if (!acts.length) return;
+      acts.forEach(a => {
+        const formula = a.degats || '';
+        const { rawDice, fixed } = _splitDiceFormula(formula);
+        const typeRules = a.typeId
+          ? getDamageTypeRules(_damageTypes, a.typeId)
+          : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
+        const typeObj = a.typeId ? getDamageTypeById(_damageTypes, a.typeId) : null;
+        const sStatMod = a.degatsStat ? getMod(c, a.degatsStat) : 0;
+        const sStatLbl = a.degatsStat ? (statShort(a.degatsStat) || a.degatsStat) : '';
+        const icon = a.type === 'reaction' ? '⚡' : a.type === 'bonus' ? '💫' : '🎯';
+        options.push({
+          id: `itemact_${invIdx}_${a.id}`,
+          icon,
+          label: `${item.nom || 'Objet'} — ${a.nom || 'Action'}`,
+          rawDice, dice: formula || '0',
+          portee: parseInt(a.portee) || 1,
+          pmCost: parseInt(a.pmCost) || 0,
+          nbCibles: Math.max(1, parseInt(a.nbCibles) || 1),
+          zoneW: 0, zoneH: 0,
+          isHeal: !!a.isHeal,
+          targetSelf: !!a.targetSelf,
+          typeRules,
+          damageTypeId:    a.typeId || '',
+          damageTypeIcon:  typeObj?.icon  || '',
+          damageTypeColor: typeObj?.color || '',
+          toucherMod: 0, toucherSetBonus: 0,
+          toucherStatLabel: '',
+          dmgStatMod: sStatMod, dmgStatLabel: sStatLbl,
+          maitriseBonus: fixed,
+          traits: [],
+          actionType: a.type || 'action',
+          actionDescription: a.description || '',
+          // Pour la consommation à l'usage :
+          _itemAction: {
+            invIndex:    invIdx,
+            itemId:      item.itemId || '',
+            itemNom:     item.nom    || '',
+            actionId:    a.id        || '',
+            consommable: !!a.consommable,
+          },
+        });
+      });
+    });
+  }
+
+  // ── Stacking : si un objet est présent en N exemplaires (3 potions), on ne
+  // veut PAS N×K lignes dans le picker — on déduplique par (item, action).
+  // Pour les consommables : on affiche " (×N)" pour indiquer le stock restant.
+  // Pour les non-consommables : pas de compteur (une seule entrée suffit).
+  // L'entrée conservée (première rencontrée) garde son invIndex → _consumeItem
+  // retire la 1ère copie correspondante via itemId/itemNom, donc le stack diminue
+  // proprement au fil des usages.
+  {
+    const seen = new Map();
+    const stacked = [];
+    for (const o of options) {
+      if (!o._itemAction) { stacked.push(o); continue; }
+      const m = o._itemAction;
+      const key = `${m.itemId || m.itemNom || ''}__${m.actionId || ''}`;
+      const existing = seen.get(key);
+      if (existing) {
+        existing._itemAction.stackCount = (existing._itemAction.stackCount || 1) + 1;
+        continue; // doublon écarté
+      }
+      o._itemAction.stackCount = 1;
+      seen.set(key, o);
+      stacked.push(o);
+    }
+    // Décorer les libellés des stacks > 1 pour les consommables
+    for (const o of seen.values()) {
+      const n = o._itemAction.stackCount;
+      if (n > 1 && o._itemAction.consommable) {
+        o.label = `${o.label} (×${n})`;
+      }
+    }
+    options.length = 0;
+    options.push(...stacked);
+  }
+
   return options;
 }
 
@@ -2399,7 +2506,8 @@ async function _execAttack(srcId, tgtId) {
   const dist=_tokenAttackDistance(src, tgt);
 
   const options = _buildAttackOptions(src);
-  const inRange = options.filter(o => _tokenAttackDistance(src, tgt, o.portee) <= o.portee);
+  // Les actions "sur soi" sont toujours disponibles (la portée et la distance n'ont pas de sens).
+  const inRange = options.filter(o => o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee);
   if (!inRange.length) {
     showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...options.map(o=>o.portee))})`, 'error');
     return;
@@ -2417,9 +2525,10 @@ async function _execAttack(srcId, tgtId) {
         <span style="font-size:.72rem;color:#b47fff;font-weight:700">${pm}/${pmMax}</span>
       </div>` : '';
 
-  // Séparer armes et sorts
-  const weaponOpts = inRange.filter(o => o.sortIdx === undefined);
-  const spellOpts  = inRange.filter(o => o.sortIdx !== undefined);
+  // Séparer armes, sorts et actions d'objet
+  const itemActOpts = inRange.filter(o => o._itemAction);
+  const weaponOpts  = inRange.filter(o => !o._itemAction && o.sortIdx === undefined);
+  const spellOpts   = inRange.filter(o => !o._itemAction && o.sortIdx !== undefined);
 
   // Grouper les sorts par catégorie (ordre des sort_cats du personnage)
   const srcChar   = _characters[src.characterId] || null;
@@ -2439,59 +2548,110 @@ async function _execAttack(srcId, tgtId) {
     ...(catMap.has('__none') ? [{ id: '__none', nom: null, couleur: '#6b7280' }] : []),
   ];
 
-  // Rendu d'un bouton option
-  const _optBtn = (o, i) => `
-    <button class="vtt-attack-opt" onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})">
-      <span class="vtt-attack-opt-icon">${o.icon}</span>
-      <div class="vtt-attack-opt-body">
-        <div class="vtt-attack-opt-name">${_esc(o.label)}</div>
-        <div class="vtt-attack-opt-meta">
-          🎲 ${_esc(o.rawDice || o.dice)}
-          · 🎯 ${o.portee}c
-          ${o.isMagicWeapon ? `· <span style="color:#c084fc">🔮 élément</span>` : ''}
-          ${!o.isMagicWeapon && o.damageTypeIcon ? `· <span style="color:${o.damageTypeColor||'#9ca3af'}">${o.damageTypeIcon}</span>` : ''}
-          ${(o.zoneW>0||o.zoneH>0)?`· <span style="color:#fde047">📐 ${o.zoneW}×${o.zoneH}c</span>`:(o.nbCibles||1)>1?`· <span style="color:#4f8cff">×${o.nbCibles}</span>`:''}
-          ${o.pmCost>0?`· <span style="color:#b47fff">✨${o.pmCost}PM</span>`:o.pmCost===0&&o.basePm>0?`· <span style="color:#22c38e">✨ gratuit</span>`:''}
-          ${o.traits?.length ? `· <span style="color:var(--text-dim)">${o.traits.slice(0,2).map(_esc).join(', ')}</span>` : ''}
-        </div>
-      </div>
-    </button>`;
+  // Rendu d'un bouton option — card avec stats pills bien lisibles
+  const _pill = (cls, html) => `<span class="vtt-aopt-pill ${cls}">${html}</span>`;
+  const _optBtn = (o, i) => {
+    const dist     = _tokenAttackDistance(src, tgt, o.portee);
+    const canHit   = dist <= o.portee;
+    const isHeal   = !!o.isHeal;
+    const isUtil   = !!(o.isCaSort || o.isUtil);
+    const stack    = o._itemAction?.stackCount > 1 && o._itemAction?.consommable
+                       ? `<span class="vtt-aopt-stack">×${o._itemAction.stackCount}</span>` : '';
+    const desc     = (o.actionDescription || '').trim();
 
-  // Construire le HTML des options groupées
+    // Pills principales
+    const pills = [];
+    const targetSelf = !!o.targetSelf;
+    // Portée — si "soi-même", on n'affiche pas la portée (sans objet)
+    if (!targetSelf) pills.push(_pill('range', `🎯 ${o.portee}c`));
+    // Cible / zone / soi
+    if (targetSelf) {
+      pills.push(_pill('targets self', `🧍 Sur soi`));
+    } else if (o.zoneW > 0 || o.zoneH > 0) {
+      pills.push(_pill('zone', `📐 ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
+    } else if ((o.nbCibles || 1) > 1) {
+      pills.push(_pill('targets', `👥 ${o.nbCibles} cibles`));
+    } else if (isHeal) {
+      pills.push(_pill('targets single', `🎯 1 allié`));
+    } else {
+      pills.push(_pill('targets single', `🎯 1 cible`));
+    }
+    // Dés (formule)
+    if (o.rawDice || o.dice) {
+      const formula = o.rawDice || o.dice;
+      pills.push(_pill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(formula)}${isHeal ? ' PV' : ''}`));
+    } else if (isUtil) {
+      pills.push(_pill('util', `🔧 Utilitaire`));
+    }
+    // Type de dégâts (icône colorée)
+    if (o.isMagicWeapon) {
+      pills.push(`<span class="vtt-aopt-pill type" style="color:#c084fc;border-color:rgba(192,132,252,.4)">🔮 Élément</span>`);
+    } else if (o.damageTypeIcon) {
+      pills.push(`<span class="vtt-aopt-pill type" style="color:${o.damageTypeColor||'#9ca3af'};border-color:${o.damageTypeColor||'#9ca3af'}55">${o.damageTypeIcon}</span>`);
+    }
+    // PM
+    if (o.pmCost > 0) {
+      pills.push(_pill('pm', `✨ ${o.pmCost} PM`));
+    } else if (o.pmCost === 0 && o.basePm > 0) {
+      pills.push(_pill('pm-free', `✨ Gratuit`));
+    }
+    // Traits courts
+    if (o.traits?.length) {
+      pills.push(`<span class="vtt-aopt-pill traits">${o.traits.slice(0,2).map(_esc).join(' · ')}</span>`);
+    }
+
+    return `
+      <button class="vtt-aopt ${canHit?'':'vtt-aopt--oor'}" onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})">
+        <div class="vtt-aopt-icon">${o.icon}</div>
+        <div class="vtt-aopt-body">
+          <div class="vtt-aopt-head">
+            <span class="vtt-aopt-name">${_esc(o.label)}</span>${stack}
+          </div>
+          <div class="vtt-aopt-pills">${pills.join('')}</div>
+          ${desc ? `<div class="vtt-aopt-desc">${_esc(desc)}</div>` : ''}
+        </div>
+      </button>`;
+  };
+
+  // Construire le HTML des options groupées (chaque section en card visuelle)
   let optsHtml = '';
+  const _section = (icon, title, color, count, body) => `
+    <div class="vtt-aopt-section">
+      <div class="vtt-aopt-section-hd" style="--cat-col:${color}">
+        <span class="vtt-aopt-section-icon">${icon}</span>
+        <span class="vtt-aopt-section-title">${title}</span>
+        <span class="vtt-aopt-section-count">${count}</span>
+      </div>
+      <div class="vtt-aopt-section-body">${body}</div>
+    </div>`;
 
   // ── Armes ──
   if (weaponOpts.length) {
-    if (spellOpts.length) {
-      optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:#94a3b8"><span>⚔️ Physique</span></div>`;
-    }
-    optsHtml += weaponOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+    const body = weaponOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+    optsHtml += _section('⚔️', 'Attaques d\'arme', '#94a3b8', weaponOpts.length, body);
   }
 
-  // ── Sorts (groupés ou non) ──
+  // ── Sorts (groupés par catégorie ou non) ──
   if (spellOpts.length) {
     if (hasCats) {
       catOrder.forEach(cat => {
         const catOpts = catMap.get(cat.id) || [];
         if (!catOpts.length) return;
-        if (cat.nom) {
-          optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:${cat.couleur}">
-            <span>${_esc(cat.nom)}</span>
-            <span class="vtt-opt-cat-count">${catOpts.length}</span>
-          </div>`;
-        } else if (catMap.size > 1 || weaponOpts.length) {
-          // Sorts sans catégorie — n'afficher l'en-tête que si d'autres groupes existent
-          optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:#6b7280"><span>✨ Autres sorts</span></div>`;
-        }
-        optsHtml += catOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+        const title = cat.nom || 'Autres sorts';
+        const color = cat.couleur || '#818cf8';
+        const body  = catOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+        optsHtml += _section('✨', title, color, catOpts.length, body);
       });
     } else {
-      // Pas de catégories : afficher un en-tête "Sorts" seulement si des armes sont aussi présentes
-      if (weaponOpts.length) {
-        optsHtml += `<div class="vtt-opt-cat-hdr" style="--cat-col:#818cf8"><span>✨ Sorts</span></div>`;
-      }
-      optsHtml += spellOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+      const body = spellOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+      optsHtml += _section('✨', 'Sorts', '#818cf8', spellOpts.length, body);
     }
+  }
+
+  // ── Actions d'objets (potions, parchemins, armes spéciales…) ──
+  if (itemActOpts.length) {
+    const body = itemActOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
+    optsHtml += _section('🎯', 'Actions d\'objets', '#fbbf24', itemActOpts.length, body);
   }
 
   // ── Section Courir (si combat actif et pas encore utilisé) ──────────
@@ -2499,26 +2659,30 @@ async function _execAttack(srcId, tgtId) {
   const couru    = (src.bonusMvt || 0) > 0;
   const canEditSrc = STATE.isAdmin || src.ownerId === STATE.user?.uid;
   const courirHtml = (inCombat && !couru && canEditSrc)
-    ? `<div class="vtt-opt-cat-hdr" style="--cat-col:#4ade80"><span>🏃 Déplacement</span></div>
-       <button class="vtt-attack-opt" onclick="window._vttCourir('${srcId}');window._closeActionModal?.()">
-         <span class="vtt-attack-opt-icon">🏃</span>
-         <div class="vtt-attack-opt-body">
-           <div class="vtt-attack-opt-name">Courir</div>
-           <div class="vtt-attack-opt-meta" style="color:#4ade80">+${lS.displayMovement??6} cases de mouvement ce tour</div>
-         </div>
-       </button>`
+    ? _section('🏃', 'Déplacement', '#4ade80', 1, `
+        <button class="vtt-aopt" onclick="window._vttCourir('${srcId}');window._closeActionModal?.()">
+          <div class="vtt-aopt-icon">🏃</div>
+          <div class="vtt-aopt-body">
+            <div class="vtt-aopt-head"><span class="vtt-aopt-name">Courir</span></div>
+            <div class="vtt-aopt-pills">
+              <span class="vtt-aopt-pill" style="color:#4ade80;border-color:rgba(74,222,128,.4)">+${lS.displayMovement??6} cases ce tour</span>
+            </div>
+          </div>
+        </button>`)
     : '';
 
   openModal('⚔️ Choisir une action', `
-    <div class="vtt-form">
-      <div class="vtt-atk-modal-hd">
-        <span><strong>${_esc(lS.displayName??src.name)}</strong></span>
-        <span style="color:var(--text-dim)">→</span>
-        <strong style="color:#ef4444">${_esc(lT.displayName??tgt.name)}</strong>
-        <span class="vtt-atk-dist">${dist}c</span>
+    <div class="vtt-form vtt-aopt-modal">
+      <div class="vtt-aopt-modal-hd">
+        <div class="vtt-aopt-modal-targets">
+          <span class="vtt-aopt-modal-src"><strong>${_esc(lS.displayName??src.name)}</strong></span>
+          <span class="vtt-aopt-modal-arrow">→</span>
+          <span class="vtt-aopt-modal-tgt"><strong>${_esc(lT.displayName??tgt.name)}</strong></span>
+        </div>
+        <span class="vtt-aopt-modal-dist" title="Distance source → cible">📏 ${dist}c</span>
       </div>
       ${pmBar}
-      <div class="vtt-attack-opts">${optsHtml}${courirHtml}</div>
+      <div class="vtt-aopt-list">${optsHtml}${courirHtml}</div>
       <div style="text-align:right;margin-top:.5rem">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
       </div>
@@ -2529,6 +2693,10 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
   if (!opt) return;
   closeModalDirect();
+
+  // Auto-cible le lanceur si l'action est marquée "sur soi" (potions, buffs perso, etc.)
+  // → la cible cliquée à l'origine est ignorée, l'effet s'applique au lanceur.
+  if (opt.targetSelf) tgtId = srcId;
 
   // Arme magique : choisir l'élément avant de continuer
   if (opt.isMagicWeapon) {
@@ -3309,6 +3477,22 @@ window._vttRollAttack = async () => {
       if (c) await updateDoc(_chrRef(src.characterId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
     }
   };
+  // Consomme 1 exemplaire de l'objet si l'option vient d'un item-action marqué `consommable`.
+  // Convention "1 entrée = 1 unité" → on retire la 1ère entrée correspondante.
+  // Ré-évaluation par itemId (l'index peut s'être déplacé entre build et usage).
+  const _consumeItem = async () => {
+    const meta = opt._itemAction;
+    if (!meta?.consommable || !src.characterId) return;
+    const c = _characters[src.characterId]; if (!c) return;
+    const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    let idx = -1;
+    if (meta.itemId)  idx = inv.findIndex(it => it?.itemId === meta.itemId);
+    if (idx < 0 && meta.itemNom) idx = inv.findIndex(it => it?.nom === meta.itemNom);
+    if (idx < 0) return; // déjà consommé
+    inv.splice(idx, 1);
+    await updateDoc(_chrRef(src.characterId), { inventaire: inv }).catch(() => {});
+    showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
+  };
   const _markAttacked = async () => {
     if (_session?.combat?.active) await updateDoc(_tokRef(src.id), {attackedThisTurn:true}).catch(()=>{});
   };
@@ -3469,6 +3653,7 @@ window._vttRollAttack = async () => {
     // ── CA / Utilitaire : consommer PM, appliquer buff, loguer ─────────
     if (opt.isCaSort || opt.isUtil) {
       await _deductPm();
+      await _consumeItem();
       await _markAttacked();
       const rCa = _handleMultiCast();
 
@@ -3553,6 +3738,7 @@ window._vttRollAttack = async () => {
       const healRaw      = _rollDice(effectiveDice);
       const healTotal  = Math.max(1, healRaw + healFixed);
       await _deductPm();
+      await _consumeItem();
       await _markAttacked();
 
       // Appliquer à chaque cible
@@ -3736,6 +3922,7 @@ window._vttRollAttack = async () => {
     }
 
     await _deductPm();
+    await _consumeItem();
     await _markAttacked();
 
     // ── Appliquer les HP + collecter résultats par cible ──────────────
@@ -7830,25 +8017,14 @@ window._vttLootInlineAdd = (itemId, btn) => {
   if (!item) return;
   const qtyEl = document.getElementById(`vtt-loot-q-${itemId}`);
   const qty = Math.max(1, parseInt(qtyEl?.value) || 1);
+  const template = _lootShopState.catMap[item.categorieId]?.template || 'classique';
   const prixVente = Math.round((item.prix || 0) * 0.5);
-  const entry = {
-    id: crypto.randomUUID(), itemId: item.id,
-    nom: item.nom || '?', qty,
-    rarete: item.rarete || 'commune',
-    template: _lootShopState.catMap[item.categorieId]?.template || 'classique',
-    categorieId: item.categorieId || '',
-    prixAchat: item.prix || 0, prixVente,
-    format: item.format || '', degats: item.degats || '',
-    degatsStat: item.degatsStat || '', degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : [],
-    toucherStat: item.toucherStat || '',
-    ca: item.ca || '', effet: item.effet || '', description: item.description || '',
-    slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
-    slotBijou: item.slotBijou || '', sousType: item.sousType || '',
-    portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
-    fo: parseInt(item.fo ?? item.for)||0, for: parseInt(item.for ?? item.fo)||0,
-    dex: parseInt(item.dex)||0, in: parseInt(item.in)||0,
-    sa: parseInt(item.sa)||0, co: parseInt(item.co)||0, ch: parseInt(item.ch)||0,
-  };
+  // Snapshot canonique (préserve tous les champs présents et futurs)
+  const base = shopItemToInvEntry(item, { source: 'butin', template, prixVente });
+  // Le stash a son propre id local et porte la quantité empilée
+  const entry = { ...base, id: crypto.randomUUID(), qty };
+  delete entry.qte;
+  delete entry.source;
   // Fusion si déjà présent
   const existing = _loot.stash.find(s => s.itemId === item.id);
   if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
@@ -7949,23 +8125,9 @@ window._vttLootConfirmTake = async (id) => {
   if (!char || !charId) { showNotif('Personnage introuvable', 'error'); return; }
 
   const inv = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
-  for (let k = 0; k < qty; k++) {
-    inv.push({
-      nom: item.nom, source: 'butin', itemId: item.itemId || '',
-      categorieId: item.categorieId || '', template: item.template || 'classique',
-      qte: '1', prixAchat: item.prixAchat || 0, prixVente: item.prixVente || 0,
-      format: item.format || '', rarete: item.rarete || '',
-      degats: item.degats || '', degatsStat: item.degatsStat || '',
-      degatsStats: item.degatsStats || [], toucherStat: item.toucherStat || '',
-      ca: item.ca || '', effet: item.effet || '', description: item.description || '',
-      slotArmure: item.slotArmure || '', typeArmure: item.typeArmure || '',
-      slotBijou: item.slotBijou || '', sousType: item.sousType || '',
-      portee: item.portee || '', traits: Array.isArray(item.traits) ? [...item.traits] : [],
-      fo: (item.fo ?? item.for) || 0, for: (item.for ?? item.fo) || 0,
-      dex: item.dex||0, in: item.in||0,
-      sa: item.sa||0, co: item.co||0, ch: item.ch||0,
-    });
-  }
+  // Snapshot canonique loot → inventaire (préserve tous les champs présents et futurs)
+  const baseEntry = shopItemToInvEntry(item, { source: 'butin' });
+  for (let k = 0; k < qty; k++) inv.push({ ...baseEntry });
 
   // Réduire ou retirer du butin
   if (item.qty - qty <= 0) {

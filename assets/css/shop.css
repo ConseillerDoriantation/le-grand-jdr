@@ -2263,3 +2263,122 @@ body.sh-dragging * { cursor: grabbing !important; }
   .sh-cmp-arr { display: none; }
   .sh-cmp-delta { min-width: 1.8rem; }
 }
+
+/* ── Éditeur d'Actions sur un article (modal article) ──────────────── */
+.si-actions-section { display: flex; flex-direction: column; gap: .5rem; }
+.si-actions-label {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem; font-weight: 600;
+}
+.si-actions-hint { font-size: .7rem; color: var(--text-dim); font-weight: 400; }
+.si-actions-empty {
+  font-size: .78rem; color: var(--text-dim); font-style: italic;
+  padding: .5rem; text-align: center;
+  background: var(--bg-elevated); border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+#si-actions-list { display: flex; flex-direction: column; gap: .55rem; }
+.si-action-row {
+  display: flex; flex-direction: column; gap: .4rem;
+  padding: .6rem .65rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.si-action-head {
+  display: grid; grid-template-columns: 160px 1fr 28px; gap: .4rem;
+  align-items: center;
+}
+.si-act-rm {
+  width: 28px; height: 28px; padding: 0;
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); cursor: pointer; font-size: .85rem;
+  transition: background .12s, color .12s;
+}
+.si-act-rm:hover { background: rgba(239,68,68,.15); color: #ef4444; border-color: rgba(239,68,68,.3); }
+.si-act-desc { resize: vertical; min-height: 48px; font-size: .82rem; }
+.si-act-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .4rem;
+}
+.si-act-grid label {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: .72rem; color: var(--text-muted); font-weight: 600;
+}
+.si-act-grid label .input-field { font-size: .82rem; }
+.si-act-hint {
+  font-size: .65rem; color: var(--text-dim); font-weight: 400; margin-left: .2rem;
+}
+.si-act-flags {
+  display: flex; flex-direction: column; gap: .2rem;
+  padding: .35rem .5rem;
+  background: rgba(255,255,255,.03); border-radius: 6px;
+  border: 1px dashed var(--border);
+}
+.si-act-flags label {
+  font-size: .78rem; color: var(--text-muted);
+  display: flex; align-items: center; gap: .45rem;
+  cursor: pointer;
+}
+.si-act-flags input[type="checkbox"] { margin: 0; cursor: pointer; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .si-act-grid { grid-template-columns: repeat(2, 1fr); }
+  .si-action-head { grid-template-columns: 1fr 28px; }
+  .si-action-head .si-act-type { grid-column: 1/-1; }
+  .si-action-head .si-act-nom { grid-column: 1/2; }
+}
+
+/* ── Modal article : refonte sectionnée ─────────────────────────────── */
+.sh-modal { display: flex; flex-direction: column; gap: .75rem; }
+.sh-sec {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.sh-sec-hd {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .55rem .8rem;
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01));
+  border-bottom: 1px solid var(--border);
+}
+.sh-sec-icon { font-size: 1rem; flex-shrink: 0; }
+.sh-sec-title {
+  font-family: 'Cinzel', serif; font-size: .88rem; font-weight: 700;
+  color: var(--text); letter-spacing: .02em;
+}
+.sh-sec-hint {
+  font-size: .68rem; color: var(--text-dim); font-weight: 400;
+  margin-left: auto; font-style: italic;
+}
+.sh-sec-body { padding: .8rem; }
+.sh-sec-body .sh-fields-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .6rem;
+}
+.sh-sec-body .sh-fields-grid .form-group { margin: 0; }
+.sh-sec-body .sh-fields-grid .sh-field-full { grid-column: 1/-1; }
+.sh-sec-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .6rem;
+}
+.sh-sec-grid .form-group { margin: 0; }
+.sh-sec-grid .sh-field-full { grid-column: 1/-1; }
+
+.sh-hint { font-size: .68rem; color: var(--text-dim); font-weight: 400; }
+
+.sh-recipe-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; font-size: .88rem; color: var(--text);
+}
+.sh-recipe-row label { cursor: pointer; margin: 0; }
+.sh-recipe-row input[type="checkbox"] { margin: 0; cursor: pointer; flex-shrink: 0; width: 18px; height: 18px; }
+
+.sh-modal-save {
+  width: 100%; margin-top: .25rem;
+  padding: .75rem; font-size: .95rem; font-weight: 700;
+}
+
+@media (max-width: 600px) {
+  .sh-sec-body .sh-fields-grid { grid-template-columns: 1fr; }
+  .sh-sec-grid { grid-template-columns: 1fr; }
+}

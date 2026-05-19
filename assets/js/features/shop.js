@@ -7,6 +7,8 @@ import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { loadDamageTypes } from '../shared/damage-types.js';
+import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
@@ -1451,25 +1453,12 @@ async function confirmBuyItem(itemId, directQty) {
     const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
     const cat       = _cats.find(cc => cc.id === item.categorieId);
     const tplKey    = cat?.template || 'classique';
-    const invItem   = {
-      nom:item.nom||'?', source:'boutique', itemId:item.id,
-      categorieId:item.categorieId||'', template:tplKey, qte:'1',
-      prixAchat:prix, prixVente,
-      format:item.format||'', rarete:item.rarete||'',
-      degats:item.degats||'', degatsStat:item.degatsStat||'',
-      degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : (item.degatsStat ? [item.degatsStat] : []),
-      toucher:item.toucher||'', toucherStat:item.toucherStat||'',
-      ca:item.ca||'', stats:item.stats||'',
-      fo:parseInt(item.fo ?? item.for)||0, for:parseInt(item.for ?? item.fo)||0,
-      dex:parseInt(item.dex)||0, in:parseInt(item.in)||0,
-      sa:parseInt(item.sa)||0, co:parseInt(item.co)||0, ch:parseInt(item.ch)||0,
-      effet:item.effet||'', description:item.description||'',
-      slotArmure:item.slotArmure||'', typeArmure:item.typeArmure||'',
-      slotBijou:item.slotBijou||'',
-      sousType:item.sousType||'',
-      portee:item.portee||'',
-      traits:Array.isArray(item.traits)?[...item.traits]:[],
-    };
+    const invItem   = shopItemToInvEntry(item, {
+      source:    'boutique',
+      template:  tplKey,
+      prixAchat: prix,
+      prixVente,
+    });
 
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     for (let i = 0; i < qty; i++) inv.push({...invItem});
@@ -1864,8 +1853,199 @@ async function deleteSubCat(catId,scId) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODAL ARTICLE — champs dynamiques selon template
+// ÉDITEUR D'ACTIONS — chaque article peut exposer 1+ Actions/Bonus/Réactions
+// ──────────────────────────────────────────────────────────────────────────────
+// Schéma d'une action :
+//   { id, type:'action'|'bonus'|'reaction', nom, description,
+//     pmCost, consommable,
+//     degats (formule), degatsStat (force/dex/in/sa/co/ch),
+//     typeId (damageType), portee, nbCibles, isHeal, targetSelf }
 // ══════════════════════════════════════════════════════════════════════════════
+let _shopDamageTypes = null;
+async function _shopEnsureDamageTypes() {
+  if (!_shopDamageTypes) _shopDamageTypes = await loadDamageTypes();
+  return _shopDamageTypes;
+}
+
+const _ACT_TYPE_LABEL = { action: '🎯 Action', bonus: '💫 Action bonus', reaction: '⚡ Réaction' };
+const _ACT_STATS      = [
+  { v:'',           lbl:'Aucune' },
+  { v:'force',      lbl:'Force' },
+  { v:'dexterite',  lbl:'Dextérité' },
+  { v:'intelligence', lbl:'Intelligence' },
+  { v:'sagesse',    lbl:'Sagesse' },
+  { v:'constitution', lbl:'Constitution' },
+  { v:'charisme',   lbl:'Charisme' },
+];
+
+function _shopActionId() { return 'a' + Math.random().toString(36).slice(2, 10); }
+
+function _shopRenderActionRow(act) {
+  const a = act || {};
+  const id = a.id || _shopActionId();
+  const typeOpts = Object.entries(_ACT_TYPE_LABEL)
+    .map(([v, lbl]) => `<option value="${v}" ${a.type===v?'selected':''}>${lbl}</option>`).join('');
+  const statOpts = _ACT_STATS
+    .map(s => `<option value="${s.v}" ${a.degatsStat===s.v?'selected':''}>${s.lbl}</option>`).join('');
+  const dtOpts = (_shopDamageTypes || []).map(t =>
+    `<option value="${t.id}" ${a.typeId===t.id?'selected':''}>${t.icon||''} ${t.nom||t.id}</option>`).join('');
+  return `
+    <div class="si-action-row" data-action-id="${id}">
+      <div class="si-action-head">
+        <select class="input-field si-act-type">${typeOpts}</select>
+        <input class="input-field si-act-nom" placeholder="Nom de l'action…" value="${_esc(a.nom||'')}">
+        <button type="button" class="si-act-rm" title="Supprimer cette action"
+          onclick="window._shopRemoveAction('${id}')">✕</button>
+      </div>
+      <textarea class="input-field si-act-desc" rows="2" placeholder="Description (effet narratif)…">${_esc(a.description||'')}</textarea>
+      <div class="si-act-grid">
+        <label>Dés <span class="si-act-hint">(2d6+3, 1d8…)</span>
+          <input class="input-field si-act-degats" value="${_esc(a.degats||'')}" placeholder="2d6">
+        </label>
+        <label>Stat de scaling
+          <select class="input-field si-act-stat">${statOpts}</select>
+        </label>
+        <label>Type
+          <select class="input-field si-act-typeid"><option value="">— Aucun —</option>${dtOpts}</select>
+        </label>
+        <label>Portée <span class="si-act-hint">(cases)</span>
+          <input type="number" class="input-field si-act-portee" min="0" max="50" value="${a.portee||0}">
+        </label>
+        <label>Cibles <span class="si-act-hint">(1 = mono)</span>
+          <input type="number" class="input-field si-act-cibles" min="1" max="10" value="${a.nbCibles||1}">
+        </label>
+        <label>PM consommés
+          <input type="number" class="input-field si-act-pm" min="0" max="99" value="${a.pmCost||0}">
+        </label>
+      </div>
+      <div class="si-act-flags">
+        <label><input type="checkbox" class="si-act-heal" ${a.isHeal?'checked':''}> Soigne (au lieu d'infliger des dégâts)</label>
+        <label><input type="checkbox" class="si-act-self" ${a.targetSelf?'checked':''}> Cible le lanceur lui-même</label>
+        <label><input type="checkbox" class="si-act-conso" ${a.consommable?'checked':''}> Consomme 1 exemplaire de l'objet à l'usage</label>
+      </div>
+    </div>`;
+}
+
+function _shopRenderActionsSection(actions) {
+  const list = Array.isArray(actions) ? actions : [];
+  return `
+    <div class="form-group si-actions-section">
+      <label class="si-actions-label">
+        <span>⚡ Actions disponibles <span class="si-actions-hint">(action, bonus, réaction — chacune indépendante)</span></span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="window._shopAddAction()">＋ Ajouter</button>
+      </label>
+      <div id="si-actions-list">
+        ${list.map(_shopRenderActionRow).join('') || '<div class="si-actions-empty">Aucune action définie — clique sur ＋ Ajouter pour en créer.</div>'}
+      </div>
+    </div>`;
+}
+
+function _shopCollectActions() {
+  const out = [];
+  document.querySelectorAll('#si-actions-list .si-action-row[data-action-id]').forEach(row => {
+    const id = row.dataset.actionId;
+    const nom = (row.querySelector('.si-act-nom')?.value || '').trim();
+    const degats = (row.querySelector('.si-act-degats')?.value || '').trim();
+    // Une action vide (sans nom et sans dés) est ignorée
+    if (!nom && !degats) return;
+    out.push({
+      id,
+      type:        row.querySelector('.si-act-type')?.value   || 'action',
+      nom,
+      description: (row.querySelector('.si-act-desc')?.value || '').trim(),
+      pmCost:      Math.max(0, parseInt(row.querySelector('.si-act-pm')?.value)     || 0),
+      consommable: !!row.querySelector('.si-act-conso')?.checked,
+      degats,
+      degatsStat:  row.querySelector('.si-act-stat')?.value   || '',
+      typeId:      row.querySelector('.si-act-typeid')?.value || '',
+      portee:      Math.max(0, parseInt(row.querySelector('.si-act-portee')?.value) || 0),
+      nbCibles:    Math.max(1, parseInt(row.querySelector('.si-act-cibles')?.value) || 1),
+      isHeal:      !!row.querySelector('.si-act-heal')?.checked,
+      targetSelf:  !!row.querySelector('.si-act-self')?.checked,
+    });
+  });
+  return out;
+}
+
+window._shopAddAction = () => {
+  const list = document.getElementById('si-actions-list'); if (!list) return;
+  // Si la zone vide est affichée, on la remplace
+  if (list.querySelector('.si-actions-empty')) list.innerHTML = '';
+  list.insertAdjacentHTML('beforeend', _shopRenderActionRow({}));
+};
+window._shopRemoveAction = (id) => {
+  document.querySelector(`.si-action-row[data-action-id="${id}"]`)?.remove();
+  const list = document.getElementById('si-actions-list');
+  if (list && !list.querySelector('.si-action-row')) {
+    list.innerHTML = '<div class="si-actions-empty">Aucune action définie — clique sur ＋ Ajouter pour en créer.</div>';
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODAL ARTICLE — refonte sectionnée (Identification / Économie / Caractéristiques
+// / Bonus / Traits / Actions / Recette). Les IDs d'inputs sont préservés pour
+// que saveShopItem fonctionne sans modification.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Map des sections selon le template — chaque section liste les `field.id`
+// du template qu'elle doit afficher. Si une section est vide pour un template
+// donné, elle n'est pas rendue.
+const _SHOP_SECTION_MAP = {
+  arme: {
+    economy: ['prix', 'dispo', 'rarete'],
+    char:    ['format', 'sousType', 'degats', 'toucherStat', 'portee'],
+    bonus:   ['statBonuses'],
+    traits:  ['traits'],
+  },
+  armure: {
+    economy: ['prix', 'dispo', 'rarete'],
+    char:    ['slotArmure', 'typeArmure', 'ca'],
+    bonus:   ['statBonuses'],
+    traits:  ['traits'],
+  },
+  bijou: {
+    economy: ['prix', 'dispo', 'rarete'],
+    char:    ['slotBijou'],
+    bonus:   ['statBonuses'],
+    traits:  ['traits'],
+  },
+  classique: { economy: ['prix', 'dispo'], char: ['type', 'effet', 'description'] },
+  libre:     { economy: ['prix', 'dispo'], char: ['type', 'description']           },
+};
+
+function _shopBuildSection(tpl, item, fieldIds) {
+  if (!fieldIds?.length) return '';
+  const subTpl = { ...tpl, fields: tpl.fields.filter(f => fieldIds.includes(f.id)) };
+  if (!subTpl.fields.length) return '';
+  return _buildFieldsHtml(subTpl, item);
+}
+
+function _shopSectionCard(icon, title, hint, content) {
+  if (!content) return '';
+  return `<section class="sh-sec">
+    <header class="sh-sec-hd">
+      <span class="sh-sec-icon">${icon}</span>
+      <span class="sh-sec-title">${title}</span>
+      ${hint ? `<span class="sh-sec-hint">${hint}</span>` : ''}
+    </header>
+    <div class="sh-sec-body">${content}</div>
+  </section>`;
+}
+
+function _shopBuildDynamicSections(tpl, item, tplKey) {
+  const sec = _SHOP_SECTION_MAP[tplKey] || _SHOP_SECTION_MAP.classique;
+  const economy = _shopBuildSection(tpl, item, sec.economy || []);
+  const char    = _shopBuildSection(tpl, item, sec.char    || []);
+  const bonus   = _shopBuildSection(tpl, item, sec.bonus   || []);
+  const traits  = _shopBuildSection(tpl, item, sec.traits  || []);
+  return [
+    _shopSectionCard('💰', 'Économie', 'Prix, stock' + (sec.economy?.includes('rarete') ? ' & rareté' : ''), economy),
+    _shopSectionCard('⚙️', 'Caractéristiques', tpl.label || '', char),
+    _shopSectionCard('✨', 'Bonus de stats', 'Appliqués quand l\'objet est équipé', bonus),
+    _shopSectionCard('🏷️', 'Traits', 'Particularités narratives & mécaniques', traits),
+  ].join('');
+}
+
 function openItemModal(itemId) {
   const item       = itemId ? _items.find(i=>i.id===itemId) : null;
   const defCatId   = item?.categorieId || _activeCat || '';
@@ -1873,33 +2053,54 @@ function openItemModal(itemId) {
   const tplKey     = cat?.template || 'classique';
   const tpl        = TEMPLATES[tplKey] || TEMPLATES.classique;
   const catOptions = _cats.map(c=>`<option value="${c.id}" ${defCatId===c.id?'selected':''}>${c.nom} (${TEMPLATES[c.template||'classique']?.label||''})</option>`).join('');
-  const fieldsHtml = _buildFieldsHtml(tpl, item);
   const recipeCheckboxChecked = item ? !(item?.recipeMeta?.hidden) : ['arme','armure','bijou'].includes(tplKey);
-  openModal(item?'✏️ Modifier l\'article':'🛒 Nouvel article',`
-    <div class="form-group"><label>Catégorie</label>
-      <select class="input-field sh-modal-select" id="si-cat" onchange="refreshItemFields(this.value)">
-        <option value="">— Aucune —</option>${catOptions}
-      </select>
-    </div>
-    <div class="form-group"><label>Nom de l'article</label>
-      <input class="input-field" id="si-nom" value="${item?.nom||''}" placeholder="Nom...">
-    </div>
-    <div class="form-group"><label>Image</label>
-      <div class="sh-upload-simple">
-        <input type="file" id="si-img-file" accept="image/*" onchange="previewUpload('si-img-file','si-img-preview','si-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
-        <input type="hidden" id="si-img-b64" value="${item?.image||''}">
+
+  // ── Identification (statique, indépendant du template) ─────────────
+  const identHtml = `
+    <div class="sh-sec-grid">
+      <div class="form-group sh-field-full">
+        <label>Catégorie</label>
+        <select class="input-field sh-modal-select" id="si-cat" onchange="refreshItemFields(this.value)">
+          <option value="">— Aucune —</option>${catOptions}
+        </select>
       </div>
-      <div id="si-img-preview">${item?.image?`<img src="${item.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
-    </div>
-    <div id="si-dynamic-fields">${fieldsHtml}</div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.75rem;border-radius:8px;border:1px solid var(--border);">
-      <span style="font-size:.90rem;color:var(--text-dim);white-space:nowrap;">Activer la recette pour cet item</span>
-      <input type="checkbox" id="si-has-recipe" ${recipeCheckboxChecked ? 'checked' : ''} style="margin:0;flex-shrink:0;cursor:pointer;">
-    </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1.2rem" onclick="saveShopItem('${itemId||''}')">
-      ${item?'Enregistrer':'Ajouter à la boutique'}
-    </button>`);
+      <div class="form-group sh-field-full">
+        <label>Nom de l'article</label>
+        <input class="input-field" id="si-nom" value="${item?.nom||''}" placeholder="Ex : Épée longue, Potion de soin…">
+      </div>
+      <div class="form-group sh-field-full">
+        <label>Image <span class="sh-hint">(facultatif)</span></label>
+        <div class="sh-upload-simple">
+          <input type="file" id="si-img-file" accept="image/*" onchange="previewUpload('si-img-file','si-img-preview','si-img-b64')">
+          <input type="hidden" id="si-img-b64" value="${item?.image||''}">
+        </div>
+        <div id="si-img-preview">${item?.image?`<img src="${item.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
+      </div>
+    </div>`;
+
+  // ── Recette (checkbox simple) ──────────────────────────────────────
+  const recipeHtml = `
+    <div class="sh-recipe-row">
+      <label for="si-has-recipe">Activer la recette pour cet item</label>
+      <input type="checkbox" id="si-has-recipe" ${recipeCheckboxChecked ? 'checked' : ''}>
+    </div>`;
+
+  openModal(item ? `✏️ ${item.nom||'Article'}` : '🛒 Nouvel article', `
+    <div class="sh-modal">
+      ${_shopSectionCard('📝', 'Identification', '', identHtml)}
+      <div id="si-sections-dynamic">${_shopBuildDynamicSections(tpl, item, tplKey)}</div>
+      ${_shopSectionCard('⚡', 'Actions', 'Effets utilisables — action, action bonus, réaction', `<div id="si-actions-host">${_shopRenderActionsSection(item?.actions)}</div>`)}
+      ${_shopSectionCard('🔧', 'Recette', '', recipeHtml)}
+      <button class="btn btn-gold sh-modal-save" onclick="saveShopItem('${itemId||''}')">
+        ${item ? '💾 Enregistrer' : '➕ Ajouter à la boutique'}
+      </button>
+    </div>`);
+
   setTimeout(()=>{ document.getElementById('si-nom')?.focus(); _bindPrixListener(); _initAutocompletes(); },60);
+  _shopEnsureDamageTypes().then(() => {
+    const host = document.getElementById('si-actions-host');
+    if (host) host.innerHTML = _shopRenderActionsSection(_shopCollectActions().length ? _shopCollectActions() : (item?.actions || []));
+  });
 }
 
 const _pendingAutocompletes = [];
@@ -2104,10 +2305,14 @@ function toggleDispoInfini(cb){
 function updatePrixVente(val){ const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO); const el=document.getElementById('si-pv-val'); if(el) el.textContent=pv; }
 
 function refreshItemFields(catId) {
-  const cat=_cats.find(c=>c.id===catId);
-  const tpl=TEMPLATES[cat?.template||'classique']||TEMPLATES.classique;
-  const dyn=document.getElementById('si-dynamic-fields');
-  if(dyn){ dyn.innerHTML=_buildFieldsHtml(tpl,null); _bindPrixListener(); _initAutocompletes(); }
+  const cat    = _cats.find(c=>c.id===catId);
+  const tplKey = cat?.template || 'classique';
+  const tpl    = TEMPLATES[tplKey] || TEMPLATES.classique;
+  const host   = document.getElementById('si-sections-dynamic');
+  if (host) {
+    host.innerHTML = _shopBuildDynamicSections(tpl, null, tplKey);
+    _bindPrixListener(); _initAutocompletes();
+  }
 }
 function refreshSubCatSelect(catId){ refreshItemFields(catId); }
 
@@ -2186,6 +2391,9 @@ async function saveShopItem(itemId) {
 
     data.prixVente=Math.round((parseFloat(data.prix)||0)*PRIX_VENTE_RATIO);
 
+    // Actions/Bonus/Réactions définies sur l'item — propagées à l'inventaire
+    data.actions = _shopCollectActions();
+
     const hasRecipe = document.getElementById('si-has-recipe')?.checked;
     if (hasRecipe) {
       if (item?.recipeMeta) {
@@ -2215,11 +2423,14 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
   const chars = STATE.characters || [];
   if (!chars.length) return;
 
-  const SYNC_FIELDS = [
-    'nom','format','rarete','degats','degatsStat','degatsStats','toucher','toucherStat','ca','stats',
-    'for','dex','in','sa','co','ch','traits','portee','type','effet','description',
-    'slotArmure','typeArmure','slotBijou','prixVente','sousType',
-  ];
+  // Tous les champs présents dans `newData` sont propagés SAUF ceux qui n'ont
+  // pas de sens dans un inventaire (méta boutique). Ce blocklist est aligné avec
+  // celui de `shopItemToInvEntry` (assets/js/shared/inventory-utils.js) pour
+  // garantir la cohérence des 4 paths (achat / butin take / butin add / sync).
+  const SYNC_BLOCKLIST = new Set([
+    'id', 'image', 'dispo', 'recipeMeta', 'prix', 'categorieId',
+  ]);
+  const SYNC_FIELDS = Object.keys(newData).filter(k => !SYNC_BLOCKLIST.has(k));
 
   const updates = [];
 
