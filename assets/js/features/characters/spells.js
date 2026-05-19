@@ -109,7 +109,7 @@ export function _calcSortDegats(s, c) {
   const nbPuiss = runes.filter(r => r === 'Puissance').length;
   const bonusVal = nbPuiss > 1 ? (nbPuiss - 1) * 2 : 0;
 
-  // Bonus de maîtrise de l'arme principale
+  // Bonus de maîtrise de l'arme principale (toujours appliqué)
   const maitrise = _getMaitriseBonus(c, mainP);
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
@@ -332,10 +332,12 @@ function _activeCombos(s) {
 // calculée par défaut, et ne saisit que s'il veut explicitement override.
 function _autoSourceDegats(s, c) {
   const mainP   = getMainWeapon(c);
-  const statKey = mainP.statAttaque || 'force';
+  // Override du sort sur la stat de dégâts (override sort > arme principale)
+  const statKey = s?.degatsStat || mainP.statAttaque || 'force';
   const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || 'For';
   const nbP     = (s.runes||[]).filter(r => r === 'Puissance').length;
-  const parts   = [mainP.isDefault ? `Poings ${mainP.degats}` : (mainP.nom || 'arme'), statLbl];
+  const srcLbl  = s?.degatsStat ? `stat sort (${statLbl})` : statLbl;
+  const parts   = [mainP.isDefault ? `Poings ${mainP.degats}` : (mainP.nom || 'arme'), srcLbl];
   if (nbP > 0) parts.push(`Puissance ×${nbP}`);
   return `auto · ${parts.join(' + ')}`;
 }
@@ -344,10 +346,13 @@ function _autoSourceSoin(s) {
   const isMagic = _isNoyauMagic(s);
   const statKey = _getSortSoinStatKey(s, STATE.activeChar);
   const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
-  const natureStr = isMagic ? 'magique · stat arme' : 'physique · Constitution';
+  // Le label reflète si la stat vient d'un override de sort ou de l'auto-dérivation arme/noyau
+  const natureStr = s?.degatsStat
+    ? `stat sort (${statLbl})`
+    : (isMagic ? `magique · stat arme (${statLbl})` : `physique · Constitution (${statLbl})`);
   return nbProt > 0
-    ? `auto · base 1d4 +${nbProt}d4 (Protection) · ${natureStr} (${statLbl})`
-    : `auto · base 1d4 · ${natureStr} (${statLbl})`;
+    ? `auto · base 1d4 +${nbProt}d4 (Protection) · ${natureStr}`
+    : `auto · base 1d4 · ${natureStr}`;
 }
 function _autoSourceCA(s) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
@@ -368,13 +373,49 @@ function _autoSourceEnchantDeg(s) {
   return nbP > 0 ? `auto · (1+${nbP} Puissance)d4 +2` : 'auto · 1d4 +2';
 }
 
+// Lit la valeur d'un <select> seulement s'il est RÉELLEMENT visible (aucun
+// ancêtre en display:none). Évite de lire la valeur d'un sélecteur de stat
+// caché qui aurait conservé sa valeur initiale et qui écraserait la sélection
+// utilisateur sur la section visible.
+function _readVisibleStatOverride(...ids) {
+  for (const id of ids) {
+    const el = document.getElementById(id); if (!el) continue;
+    let n = el, visible = true;
+    while (n && n !== document.body) {
+      if (n.style?.display === 'none') { visible = false; break; }
+      n = n.parentElement;
+    }
+    if (visible && el.value) return el.value;
+  }
+  return '';
+}
+
+// Helper : options HTML pour les select de stat de sort.
+// Utilisé à plusieurs endroits (Toucher, Dégâts, Soin) — single source of truth.
+function _SPELL_STAT_OPTIONS(selected = '') {
+  return [
+    ['',           'Auto (arme)'],
+    ['force',       'Force'],
+    ['dexterite',   'Dextérité'],
+    ['intelligence','Intelligence'],
+    ['sagesse',     'Sagesse'],
+    ['constitution','Constitution'],
+    ['charisme',    'Charisme'],
+  ].map(([v, lbl]) => `<option value="${v}" ${selected===v?'selected':''}>${lbl}</option>`).join('');
+}
+
 /**
  * Génère le HTML d'un champ auto-calculé avec toggle Custom / Auto.
  * fieldId = id de l'input override (ex: 's-degats')
  * Le wrapper contient deux modes : display (chip lecture seule) et edit (input).
  */
-function _autoValHtml({ fieldId, label, autoValue, autoSource, currentValue, placeholder }) {
+function _autoValHtml({ fieldId, label, autoValue, autoSource, currentValue, placeholder, extraEdit }) {
+  // Mode Custom = toggle pour overrider la FORMULE.
+  // Les sélecteurs de STAT (extraEdit) sont TOUJOURS visibles : changer la stat
+  // ne nécessite pas de passer en mode Custom de la formule (ce sont des overrides
+  // indépendants). Cela évite que l'override de stat ne soit jamais saisi.
   const hasOverride = !!(currentValue && String(currentValue).trim());
+  const extraHtml   = extraEdit?.html || '';
   return `
     <div class="cs-spell-autoval ${hasOverride ? 'is-custom' : ''}">
       <div class="cs-spell-autoval-label">${label}</div>
@@ -384,9 +425,12 @@ function _autoValHtml({ fieldId, label, autoValue, autoSource, currentValue, pla
         <button type="button" class="cs-spell-autoval-btn" onclick="window._enableSortCustom('${fieldId}')">✏️ Custom</button>
       </div>
       <div class="cs-spell-autoval-edit" id="${fieldId}-edit" style="${hasOverride?'':'display:none'}">
-        <input class="input-field" id="${fieldId}" value="${currentValue||''}" placeholder="${placeholder||''}">
-        <button type="button" class="cs-spell-autoval-btn" onclick="window._disableSortCustom('${fieldId}')">↺ Auto</button>
+        <div class="cs-spell-autoval-edit-row">
+          <input class="input-field" id="${fieldId}" value="${currentValue||''}" placeholder="${placeholder||''}">
+          <button type="button" class="cs-spell-autoval-btn" onclick="window._disableSortCustom('${fieldId}')">↺ Auto</button>
+        </div>
       </div>
+      ${extraHtml}
     </div>
   `;
 }
@@ -477,6 +521,8 @@ function _isNoyauMagic(s) {
  *   - Noyau physique / pas de noyau → Constitution
  */
 function _getSortSoinStatKey(s, c) {
+  // Override explicite du sort > déduction auto selon noyau
+  if (s?.degatsStat) return s.degatsStat;
   if (_isNoyauMagic(s)) {
     const mainP = getMainWeapon(c);
     if (mainP.isDefault) return 'intelligence';
@@ -681,7 +727,8 @@ function _buildSortResume(s, c) {
   // Dégâts (si offensif)
   if (types.includes('offensif')) {
     const mainP   = getMainWeapon(c);
-    const statKey = mainP.statAttaque || mainP.toucherStat || 'force';
+    // Override du sort sur la stat de dégâts > stat de l'arme principale
+    const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
     const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
     const modAtk  = Math.floor((Math.min(22, statVal) - 10) / 2);
     const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
@@ -1524,7 +1571,26 @@ export async function openSortModal(idx, s) {
         autoValue:  _calcSortDegats(s || {}, STATE.activeChar),
         autoSource: _autoSourceDegats(s || {}, STATE.activeChar),
         currentValue: s?.degats,
-        placeholder: 'ex : 3d8 +2, 2d10 Feu…',
+        placeholder: 'ex : 3d8 +2, 2d10 Feu… (vide = formule auto)',
+        // Mode Custom : la formule ET les stats sont éditables ensemble.
+        extraEdit: {
+          hasOverride: !!(s?.toucherStat || s?.degatsStat),
+          html: `
+            <div class="cs-spell-stats-grid">
+              <div>
+                <span class="cs-spell-stats-tag">🎯 Toucher</span>
+                <select class="input-field" id="s-toucher-stat">
+                  ${_SPELL_STAT_OPTIONS(s?.toucherStat)}
+                </select>
+              </div>
+              <div>
+                <span class="cs-spell-stats-tag">⚔️ Dégâts</span>
+                <select class="input-field" id="s-degats-stat" onchange="window._refreshAutoValChips?.()">
+                  ${_SPELL_STAT_OPTIONS(s?.degatsStat)}
+                </select>
+              </div>
+            </div>`,
+        },
       })}
     </div>
 
@@ -1561,7 +1627,8 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
-    <!-- Soin — visible UNIQUEMENT si Protection en mode soin (jamais en mode CA, évite la confusion avec Bouclier réactif) -->
+    <!-- Soin — visible UNIQUEMENT si Protection en mode soin (jamais en mode CA, évite la confusion avec Bouclier réactif).
+         Si le sort est aussi Offensif, on n'expose PAS le sélecteur de stat ici (déjà dans Dégâts). -->
     <div id="s-soin-section" style="${(hasProt && (s?.protectionMode||'ca')==='soin')?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-soin',
@@ -1569,7 +1636,19 @@ export async function openSortModal(idx, s) {
         autoValue:  _calcSortSoin(s || {}, STATE.activeChar),
         autoSource: _autoSourceSoin(s || {}),
         currentValue: s?.soin,
-        placeholder: 'ex : 3d6 +2, moitié des dégâts…',
+        placeholder: 'ex : 3d6 +2, moitié des dégâts… (vide = formule auto)',
+        extraEdit: typesInit.includes('offensif') ? null : {
+          hasOverride: !!s?.degatsStat,
+          html: `
+            <div class="cs-spell-stats-grid one">
+              <div>
+                <span class="cs-spell-stats-tag">💚 Stat de soin</span>
+                <select class="input-field" id="s-degats-stat-soin" onchange="window._refreshAutoValChips?.()">
+                  ${_SPELL_STAT_OPTIONS(s?.degatsStat)}
+                </select>
+              </div>
+            </div>`,
+        },
       })}
     </div>
 
@@ -1665,6 +1744,17 @@ export async function openSortModal(idx, s) {
         <span style="font-size:.8rem;color:var(--text-dim)">tours</span>
       </div>
     </div>
+
+    <!-- ⑧b Portée — override de la portée de l'arme (laisser vide = portée d'arme) -->
+    <div class="form-group">
+      <label>🎯 Portée <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">cases — laisser vide pour utiliser la portée de l'arme</span></label>
+      <div style="display:flex;gap:.4rem;align-items:center">
+        <input type="number" class="input-field" id="s-portee" min="0" max="50"
+          value="${s?.portee||''}" placeholder="auto (arme)" style="width:100px;text-align:center;padding:.3rem">
+        <span style="font-size:.8rem;color:var(--text-dim)">cases</span>
+      </div>
+    </div>
+
 
     <!-- ⑨ Déplacement — bande inline compacte -->
     <div class="cs-spell-inline-row">
@@ -1831,8 +1921,9 @@ window._selectProtMode = (mode) => {
     const s = _buildSortFromDOM();
     dureeSec.style.display = _needsDureeBase(s) ? '' : 'none';
   }
-  // Re-render des runes actives pour adapter le texte de Protection (CA/Soin/Bouclier réactif)
-  _renderRunesSection?.();
+  // Re-render des runes actives pour que la carte Protection reflète le mode courant
+  // (CA → "+2 CA · sur 1 cible (2 tours)" / Soin → "+1d4 soin · sur 1 cible")
+  _refreshRunesSection?.('Protection');
   window._updateSortPreview?.();
 };
 
@@ -1901,19 +1992,26 @@ window._enableSortCustom = (fieldId) => {
   const display = document.getElementById(`${fieldId}-display`);
   const edit    = document.getElementById(`${fieldId}-edit`);
   const input   = document.getElementById(fieldId);
+  const wrap    = display?.parentElement; // .cs-spell-autoval
   if (display) display.style.display = 'none';
   if (edit)    edit.style.display = '';
+  if (wrap)    wrap.classList.add('is-custom');   // CSS gère aussi via la classe
   if (input) { input.focus(); input.select?.(); }
 };
 
-/** Repasse en mode "Auto" — vide le champ override, revient au chip. */
+/** Repasse en mode "Auto" — vide UNIQUEMENT la formule override.
+ *  Les overrides de stat sont indépendants : pour les remettre en Auto,
+ *  l'utilisateur sélectionne "Auto (arme)" dans le menu déroulant.
+ */
 window._disableSortCustom = (fieldId) => {
   const display = document.getElementById(`${fieldId}-display`);
   const edit    = document.getElementById(`${fieldId}-edit`);
   const input   = document.getElementById(fieldId);
+  const wrap    = display?.parentElement; // .cs-spell-autoval
   if (input)   input.value = '';
   if (edit)    edit.style.display = 'none';
   if (display) display.style.display = '';
+  if (wrap)    wrap.classList.remove('is-custom');  // sinon la chip reste cachée par CSS
   _refreshAutoValChips();
   window._updateSortPreview?.();
 };
@@ -2134,6 +2232,11 @@ function _buildSortFromDOM() {
     zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
     deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
+    // Portée + stats overrides : doivent être lus du DOM pour que la preview live
+    // et les chips auto reflètent la sélection courante (sinon auto-dérivation kick in).
+    portee:      (parseInt(document.getElementById('s-portee')?.value) || 0) || null,
+    toucherStat: _readVisibleStatOverride('s-toucher-stat'),
+    degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
     mjNotes: document.getElementById('s-mj-notes')?.value || '',
   };
 }
@@ -2243,6 +2346,13 @@ export async function saveSort(idx) {
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
       deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
+      // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
+      portee:     (parseInt(document.getElementById('s-portee')?.value) || 0) || null,
+      // Stats overrides : '' = suit l'arme principale (auto).
+      // On lit uniquement les sélecteurs VISIBLES (helper _readVisibleStatOverride)
+      // → évite que le sélecteur d'une section cachée n'écrase la sélection utilisateur.
+      toucherStat: _readVisibleStatOverride('s-toucher-stat'),
+      degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
       mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
     };
     if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);

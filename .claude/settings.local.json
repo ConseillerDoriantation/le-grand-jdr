@@ -119,7 +119,8 @@
       "Bash(node --check assets/js/features/quests.js)",
       "Bash(node --check assets/js/features/agenda.js)",
       "Bash(node --check assets/js/features/bastion.js)",
-      "Bash(node --check assets/js/features/vtt-spectator.js)"
+      "Bash(node --check assets/js/features/vtt-spectator.js)",
+      "Bash(grep -E \"\\\\.js$\")"
     ]
   }
 }
