@@ -243,7 +243,12 @@ const _tokenStatMod = (t, statKey) => {
   if (t.npcId) return _npcStatMod(_npcs[t.npcId] || {}, statKey);
   if (t.beastId) {
     const b = _bestiary[t.beastId];
-    const score = b?.stats?.[statKey] ?? 10;
+    // Le bestiaire stocke les stats DIRECTEMENT sur l'objet (b.force, b.constitution…)
+    // et non dans b.stats. Fallback sur b.stats si jamais des données legacy utilisent
+    // cette structure. Score par défaut 10 si non saisi (mod 0).
+    let score = b?.[statKey];
+    if (!Number.isFinite(score) || score <= 0) score = b?.stats?.[statKey];
+    if (!Number.isFinite(score) || score <= 0) score = 10;
     return Math.floor((Math.min(22, score) - 10) / 2);
   }
   return 0;
@@ -1051,13 +1056,12 @@ function _buildShape(t) {
       text:`${_toursLeft}↺`, fontSize:7, fontStyle:'bold',
       fill:'#818cf8', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
   }
-  // ── Badges d'états (conditions) — top-left du token ──────────────
+  // ── Badges d'états (conditions / debuffs) — top-left du token ──────────────
   const _condRound = _session?.combat?.round ?? 0;
   const _activeConditions = (t.conditions || []).filter(c =>
     c.expiresAtRound == null || _condRound === 0 || _condRound <= c.expiresAtRound
   );
   if (_activeConditions.length) {
-    // Empilage : jusqu'à 4 badges visibles, sinon "+N"
     const maxShow = 4;
     const display = _activeConditions.slice(0, maxShow);
     const overflow = _activeConditions.length - display.length;
@@ -1075,6 +1079,51 @@ function _buildShape(t) {
     });
     if (overflow > 0) {
       const cx = -rx*.7, cy = -ry*.7 + maxShow * 20;
+      g.add(new K.Circle({ x:cx, y:cy, radius:10,
+        fill: '#374151', stroke: '#000', strokeWidth: 1.2, listening:false }));
+      g.add(new K.Text({ x:cx-10, y:cy-6, width:20, height:12,
+        text: `+${overflow}`, fontSize:9, fontStyle:'bold',
+        fill:'#fff', fontFamily:'Inter,sans-serif', align:'center', listening:false }));
+    }
+  }
+
+  // ── Badges de buffs/debuffs (DoT, enchant, CA bonus…) — top-right du token ──
+  // Affiché en miroir des états : permet de voir d'un coup d'œil les effets actifs
+  // qui ne sont pas des conditions D&D (enchant arme, DoT, bouclier, etc.)
+  const _buffsRound = _session?.combat?.round ?? 0;
+  const _BUFF_VIZ = {
+    dot:             { icon:'🩸', color:'#dc2626' }, // DoT (debuff)
+    dmg_bonus:       { icon:'⚔️', color:'#f59e0b' }, // enchant arme alliée
+    move_bonus:      { icon:'👢', color:'#22c55e' }, // mouvement +
+    move_debuff:     { icon:'👢', color:'#7c2d12' }, // mouvement −
+    range_bonus:     { icon:'🏹', color:'#0ea5e9' }, // portée +
+    ca:              { icon:'🛡', color:'#06b6d4' }, // bonus CA
+    shield_reactive: { icon:'🛡', color:'#a78bfa' }, // bouclier réactif
+    enchantment:     { icon:'✨', color:'#e8b84b' }, // enchant générique
+    affliction:      { icon:'💀', color:'#8b5cf6' }, // affliction générique
+    weapon_replace:  { icon:'🔮', color:'#a78bfa' }, // arme invoquée
+  };
+  const _activeBuffs = (t.buffs || []).filter(b =>
+    b.expiresAtRound == null || _buffsRound === 0 || _buffsRound <= b.expiresAtRound
+  );
+  if (_activeBuffs.length) {
+    const maxShow = 4;
+    const display = _activeBuffs.slice(0, maxShow);
+    const overflow = _activeBuffs.length - display.length;
+    display.forEach((bf, i) => {
+      const viz = _BUFF_VIZ[bf.type] || { icon: bf.icon || '✨', color: '#9ca3af' };
+      const cx = rx*.7;
+      const cy = -ry*.7 + i * 20;
+      g.add(new K.Circle({ x:cx, y:cy, radius:10,
+        fill: viz.color, stroke: '#000', strokeWidth: 1.2,
+        listening:false, name:'buff-bg' }));
+      g.add(new K.Text({ x:cx-10, y:cy-7, width:20, height:14,
+        text: viz.icon, fontSize:11, fontStyle:'bold',
+        fontFamily:'Inter,sans-serif', align:'center', verticalAlign:'middle',
+        listening:false, name:'buff-ic' }));
+    });
+    if (overflow > 0) {
+      const cx = rx*.7, cy = -ry*.7 + maxShow * 20;
       g.add(new K.Circle({ x:cx, y:cy, radius:10,
         fill: '#374151', stroke: '#000', strokeWidth: 1.2, listening:false }));
       g.add(new K.Text({ x:cx-10, y:cy-6, width:20, height:12,
@@ -1308,7 +1357,13 @@ function _patchShape(id) {
   ).length;
   const _renderedCondCount = g.find('.cond-ic').length;
   const condMismatch = _activeCondCount !== _renderedCondCount;
-  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || condMismatch) {
+  // Buffs : pareil que les conditions, on regarde le compteur affiché vs actif
+  const _activeBuffCount = (e.data.buffs || []).filter(b =>
+    b.expiresAtRound == null || _condRoundP === 0 || _condRoundP <= b.expiresAtRound
+  ).length;
+  const _renderedBuffCount = g.find('.buff-ic').length;
+  const buffMismatch = _activeBuffCount !== _renderedBuffCount;
+  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || condMismatch || buffMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
     _tokens[id] = { ...e, shape };
@@ -1671,7 +1726,9 @@ async function _moveTo(id, col, row) {
 // Parse "NdM[+K]" ou nombre fixe → { n, sides, mod } ou null si non-formule.
 function _parseDice(formula) {
   if (!formula) return null;
-  const m = String(formula).match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
+  // Tolère les espaces autour du +/- (ex: "1d4 +2", "2d6 + 3", "1d4-2")
+  const cleaned = String(formula).replace(/\s+/g, '');
+  const m = cleaned.match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
   return m ? { n:+m[1], sides:+m[2], mod:+(m[3]||0) } : null;
 }
 
@@ -1681,6 +1738,19 @@ function _rollDice(formula) {
   let total = 0;
   for (let i=0; i<p.n; i++) total += Math.floor(Math.random()*p.sides)+1;
   return total + p.mod;
+}
+/** Variante détaillée : retourne aussi les rolls individuels et le mod.
+ *  Utile pour afficher "1d4(3) +2 = 5" dans les logs. */
+function _rollDiceDetailed(formula) {
+  const p = _parseDice(formula);
+  if (!p) {
+    const flat = Math.max(0, parseInt(formula)||0);
+    return { rolls: [], mod: flat, total: flat, n: 0, sides: 0, formula: String(formula) };
+  }
+  const rolls = [];
+  for (let i=0; i<p.n; i++) rolls.push(Math.floor(Math.random()*p.sides)+1);
+  const total = rolls.reduce((a,b)=>a+b, 0) + p.mod;
+  return { rolls, mod: p.mod, total, n: p.n, sides: p.sides, formula: String(formula) };
 }
 
 /** Valeur maximale possible d'une formule de dés (ex: "2d6+3" → 15). */
@@ -1789,9 +1859,11 @@ function _parseCaBonus(caStr) {
 function _sortDureeVtt(s) {
   const runes  = s?.runes || [];
   const nbDur  = runes.filter(r => r === 'Durée').length;
-  const base   = (s?.dureeBase >= 1) ? +s.dureeBase : 0;
-  let bonus = 0;
-  for (let i = 0; i < nbDur; i++) bonus += 2 + i;
+  // Base 2 tours pour tout sort persistant ; override manuel via s.dureeBase
+  const base   = (s?.dureeBase >= 2) ? +s.dureeBase : 2;
+  // Bonus Durée : +2 par rune, +1 chaînage par rune au-delà de la 1ère
+  // → 1:+2 · 2:+5 · 3:+8 · 4:+11
+  const bonus  = nbDur > 0 ? (2 * nbDur + (nbDur - 1)) : 0;
   if (base + bonus > 0) return base + bonus;
   // Fallback 1 : lire "X tours" dans le champ ca (ex : "CA +2 (2 tours)")
   const m = String(s?.ca || '').match(/(\d+)\s*tours?/i);
@@ -1974,15 +2046,20 @@ function _vttSpellMods(s) {
     // Allonge magique : Ench + Amp + slot arme → portée étendue (au lieu d'une zone)
     allonge: (nbEnch > 0 && nbAmp > 0 && (s.enchantSlot || 'arme') === 'arme')
       ? { meters: 4*nbAmp - 1, cells: Math.ceil((4*nbAmp - 1) / CELL_M) } : null,
-    // Enchantement slot=arme : bonus dégâts sur les attaques d'arme de la cible (allié)
-    // Formule auto : (1+Puiss)d4 +2 — appliquée pendant 2 tours par défaut
+    // Enchantement mode Dégâts : bonus dégâts sur les attaques d'arme de l'allié
+    // Formule auto : (1+Puiss)d4 +2 — appliquée pendant la durée du sort
     // ⚠️ Absorbé par le combo Arme invoquée (Ench + Inv) → on ne le déclenche pas alors
-    enchantArmeDmg: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot || 'arme') === 'arme')
+    enchantArmeDmg: (nbEnch > 0 && nbInv === 0
+                     && (s.enchantMode || 'dmg') === 'dmg'
+                     && (s.enchantSlot || 'arme') === 'arme')
       ? {
           formula: (s.enchantDegats || '').trim() || `${1 + nbP}d4 +2`,
           element: s.noyauTypeId || null,
           nbCibles: nbEnch === 1 ? 1 : nbEnch + 1,
         } : null,
+    // Enchantement mode État : applique l'état choisi directement à l'allié
+    enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+      ? (s.enchantEtatId || null) : null,
     // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
     // Auto : +2 cases / rune Puissance, ou +1 par défaut
     enchantPieds: (nbEnch > 0 && nbInv === 0 && s.enchantSlot === 'pieds')
@@ -1990,22 +2067,46 @@ function _vttSpellMods(s) {
     // Enchantement slot=tete / torse : effet libre (matrice), buff générique
     enchantGeneric: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
       ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
-    // Affliction : JS Sa DD 11 (modulable selon nb runes Concentration)
+    // Affliction : JS Sa DD scalable selon nb runes Affliction
+    // Base 11, +2 par rune supplémentaire, +1 par chainage (= nbAff-1)
+    // → nbAff=1 : DD 11 · nbAff=2 : 11+2+1=14 · nbAff=3 : 11+4+2=17
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
     // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
     // ⚠️ Absorbé par le combo Aura punitive (Prot + Aff sans Puiss) → l'affliction est gérée par l'aura
     affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0 && nbP === 0))
-      ? {
-          slot: s.afflictionSlot || 'arme',
-          effect: s.afflictionEffect || '',
-          element: s.noyauTypeId || null,
-          dd: 11,
-          // Stat de sauvegarde selon le slot (heuristique simple)
-          saveStat: s.afflictionSlot === 'torse' ? 'constitution'
-                  : s.afflictionSlot === 'pieds' ? 'force'
-                  : s.afflictionSlot === 'tete'  ? 'sagesse'
-                  : 'dexterite',
-        } : null,
+      ? (() => {
+          // Mode DoT : formule scalable par défaut, override possible via afflictionDotFormula
+          // Base 1d4+2, +1 dé par Puissance, +2 fixe par chaînage Puissance (≥2)
+          // → nbP=0:1d4+2 · nbP=1:2d4+2 · nbP=2:3d4+4 · nbP=3:4d4+6
+          const dotDice = 1 + nbP;
+          const dotMod  = 2 + 2 * Math.max(0, nbP - 1);
+          const dotAutoFormula = `${dotDice}d4 +${dotMod}`;
+          const dotFormula = (s.afflictionDotFormula || '').trim() || dotAutoFormula;
+          // Stat de sauvegarde dérivée :
+          //  - mode "État" : prend la defaultSaveStat de l'état choisi (si lib chargée)
+          //  - mode "DoT"  : Constitution (poison/brûlure D&D standard)
+          //  - fallback final : Constitution
+          const mode = s.afflictionMode || 'dot';
+          let saveStat = 'constitution';
+          if (mode === 'etat' && s.afflictionEtatId) {
+            const etatLib = CONDITION_BY_ID[s.afflictionEtatId];
+            if (etatLib?.defaultSaveStat) saveStat = etatLib.defaultSaveStat;
+          }
+          // Legacy : si un ancien sort a explicitement afflictionSaveStat, on respecte
+          if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
+          return {
+            slot:     s.afflictionSlot || 'torse',
+            mode,
+            effect:   s.afflictionEffect || '',
+            element:  s.noyauTypeId || null,
+            dd:       11 + 3 * (nbAff - 1),
+            nbAff,
+            nbP,
+            dotFormula,
+            etatId:   s.afflictionEtatId || null,
+            saveStat,
+          };
+        })() : null,
     // Aura punitive : Protection + Affliction sans Puissance (sinon Drain prime)
     // Au cast, applique l'affliction Torse de l'élément à tous les ennemis dans la zone Manhattan
     auraPunitive: (nbProt > 0 && nbAff > 0 && nbP === 0)
@@ -2212,9 +2313,37 @@ function _buffShared(opt, srcId) {
   };
 }
 
-/** Applique les buffs d'enchantement (arme/pieds/tête/torse) sur les alliés ciblés. */
+/** Applique les buffs d'enchantement (mode Dégâts arme OU mode État sur allié). */
 async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   const shared = _buffShared(opt, srcId);
+
+  // Mode "État" : applique directement un état choisi à chaque allié ciblé.
+  // Pas de JS (effet bénéfique consenti). Durée selon defaultDuration de l'état.
+  const etatId = opt.mods?.enchantEtatId;
+  if (etatId && CONDITION_BY_ID[etatId]) {
+    const lib = CONDITION_BY_ID[etatId];
+    const round = _session?.combat?.round ?? 0;
+    const isConsumed = !!lib.effects?.consumedByAttackAgainst;
+    const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
+      ? lib.defaultDuration : 2;
+    const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+    for (const tid of targetIds) {
+      const td = _tokens[tid]?.data; if (!td) continue;
+      const existingConds = td.conditions || [];
+      if (existingConds.some(c => c.id === etatId)) continue;
+      const newCond = {
+        id: etatId, appliedAt: Date.now(), appliedBy: srcId || null,
+        source: opt.label || '', saveDC: lib.defaultDC || null,
+        saveStat: lib.defaultSaveStat || null, expiresAtRound,
+      };
+      await updateDoc(_tokRef(tid), { conditions: [...existingConds, newCond] }).catch(() => {});
+      const name = _live(td).displayName ?? td.name;
+      showNotif(`${lib.icon} ${name} : ${lib.label}`, 'success');
+    }
+    return;
+  }
+
+  // Mode "Dégâts" (par défaut) : buffs slot-based legacy
   const buffs = [];
   if (opt.mods?.enchantArmeDmg) {
     buffs.push({ ...shared, type: 'dmg_bonus', slot: 'arme', icon: '⚔️',
@@ -2230,10 +2359,17 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
       icon: opt.mods.enchantGeneric.slot === 'tete' ? '👁️' : '👕' });
   }
   if (!buffs.length) return;
-  const types = new Set(buffs.map(b => b.type));
+  // ── Anti-stack global : un buff dmg_bonus arme remplace TOUS les anciens dmg_bonus arme.
+  // Les autres types (move_bonus, range_bonus, enchantment) se filtrent par sort label
+  // pour permettre des effets différents de sources différentes.
   for (const tid of targetIds) {
     const td = _tokens[tid]?.data; if (!td) continue;
-    const existing = (td.buffs || []).filter(b => !(types.has(b.type) && b.sortLabel === opt.label));
+    const existing = (td.buffs || []).filter(b => {
+      // Retire tout buff dmg_bonus arme : non cumulable, le dernier en vigueur l'emporte
+      if (b.type === 'dmg_bonus' && b.slot === 'arme') return false;
+      // Autres types : retire seulement les buffs du même sort (par label)
+      return !(b.type !== 'dmg_bonus' && b.sortLabel === opt.label);
+    });
     await updateDoc(_tokRef(tid), { buffs: [...existing, ...buffs] }).catch(() => {});
   }
 }
@@ -2245,6 +2381,31 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
   const aff = opt.mods?.affliction; if (!aff) return;
   const shared = _buffShared(opt, srcId);
   const statShortStr = _STAT_SHORT[aff.saveStat] || aff.saveStat;
+  const dotFormula = aff.dotFormula || '1d4';
+  const mode = aff.mode || 'dot';
+  const srcTok = _tokens[srcId]?.data;
+  const srcName = srcTok ? (_live(srcTok).displayName ?? srcTok.name) : '?';
+
+  // ── Log d'annonce du cast (1 message global) ────────────────────────
+  // « A lance Silence sur B » avant les JS individuels
+  const tgtNames = targetIds.map(tid => {
+    const td = _tokens[tid]?.data;
+    return td ? (_live(td).displayName ?? td.name) : '?';
+  }).join(', ');
+  await addDoc(_logCol(), {
+    type: 'affliction-cast',
+    authorId: STATE.user?.uid || null,
+    authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
+    casterName: srcName, characterImage: srcTok?.image || null,
+    targetName: tgtNames,
+    optLabel: opt.label || 'Affliction',
+    mode, dd: aff.dd, statLabel: statShortStr,
+    effectLbl: mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]
+               ? `${CONDITION_BY_ID[aff.etatId].icon} ${CONDITION_BY_ID[aff.etatId].label}`
+               : `🩸 DoT ${dotFormula}/tour`,
+    createdAt: serverTimestamp(),
+  }).catch(() => {});
+
   for (const tid of targetIds) {
     const td = _tokens[tid]?.data; if (!td) continue;
     const saveMod = _tokenStatMod(td, aff.saveStat);
@@ -2253,28 +2414,116 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
     const success = roll === 20 || (roll !== 1 && tot >= aff.dd);
     const tgtName = _live(td).displayName ?? td.name;
     const rollStr = `JS ${statShortStr} ${roll}${saveMod>=0?'+':''}${saveMod}=${tot} vs DD${aff.dd}`;
+
+    // ── Log du JS dans le chat ──────────────────────────────────────────
+    // Permet au MJ et aux joueurs de voir le résultat du jet, le mod utilisé
+    // et la résolution (résistance vs application de l'effet).
+    const _effectLbl = (() => {
+      if (mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]) {
+        const l = CONDITION_BY_ID[aff.etatId];
+        return `${l.icon} ${l.label}`;
+      }
+      return `🩸 DoT ${dotFormula}/tour`;
+    })();
+    await addDoc(_logCol(), {
+      type: 'save',
+      authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
+      tokenName: tgtName,
+      conditionLabel: _effectLbl,
+      sortLabel: opt.label || '',
+      statLabel: statShortStr, mod: saveMod, d20: roll, total: tot, dd: aff.dd,
+      passed: success,
+      createdAt: serverTimestamp(),
+    }).catch(() => {});
+
     if (success) {
       showNotif(`🛡️ ${tgtName} résiste · ${rollStr}`, 'info');
       continue;
     }
-    let newBuff;
-    if (aff.slot === 'torse') {
-      // DoT : 1d4+2 dégâts/tour au début du tour de la cible
-      newBuff = { ...shared, type: 'dot', slot: 'torse', icon: '🩸',
-        formula: '1d4 +2', element: aff.element, effect: aff.effect };
-    } else if (aff.slot === 'pieds') {
-      // Débuff mouvement : -2 cases par défaut
-      newBuff = { ...shared, type: 'move_debuff', slot: 'pieds', icon: '👢',
-        bonus: -2, effect: aff.effect };
-    } else {
-      // Tête (sensoriel) / Arme (combat) : effet libre, à interpréter par le MJ
-      newBuff = { ...shared, type: 'affliction',
-        slot: aff.slot, effect: aff.effect, element: aff.element,
-        icon: aff.slot === 'tete' ? '👁️' : '⚔️' };
+
+    // ── Mode "État" : applique l'état choisi avec sa durée par défaut ──
+    if (mode === 'etat') {
+      // Diagnostic clair si l'état est mal configuré
+      if (!aff.etatId) {
+        showNotif(`⚠️ Sort "${opt.label}" en mode État sans état choisi — rien n'est appliqué`, 'warning');
+        continue;
+      }
+      const lib = CONDITION_BY_ID[aff.etatId];
+      if (!lib) {
+        showNotif(`⚠️ État "${aff.etatId}" introuvable en BDD — vérifier les réglages`, 'error');
+        continue;
+      }
+      const round = _session?.combat?.round ?? 0;
+      const isConsumed = !!lib.effects?.consumedByAttackAgainst;
+      const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
+        ? lib.defaultDuration : 2;
+      const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+      const existingConds = td.conditions || [];
+      if (existingConds.some(c => c.id === aff.etatId)) {
+        showNotif(`${lib.icon} ${tgtName} portait déjà ${lib.label}`, 'info');
+        continue;
+      }
+      const newCond = {
+        id: aff.etatId,
+        appliedAt: Date.now(),
+        appliedBy: srcId || null,
+        source: opt.label || '',
+        saveDC: lib.defaultDC || aff.dd,
+        saveStat: lib.defaultSaveStat || aff.saveStat || null,
+        expiresAtRound,
+      };
+      // Surface l'erreur si l'update Firestore échoue (permissions, etc.)
+      try {
+        await updateDoc(_tokRef(tid), { conditions: [...existingConds, newCond] });
+        showNotif(`${lib.icon} ${tgtName} subit ${lib.label} · ${rollStr} (échec)`, 'success');
+      } catch (err) {
+        console.error('[VTT] État non appliqué :', err);
+        showNotif(`⚠️ ${tgtName} : échec d'application de ${lib.label} (${err?.message || err})`, 'error');
+      }
+      continue;
     }
-    const existing = (td.buffs || []).filter(b => !(b.type === newBuff.type && b.sortLabel === opt.label));
-    await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] }).catch(() => {});
-    showNotif(`💢 ${tgtName} subit ${opt.label} · ${rollStr} (échec)`, 'success');
+
+    // ── Mode "DoT" (par défaut) : applique un buff de type 'dot' avec la formule ──
+    // ⚠️ Non cumulable : un seul DoT actif à la fois sur une cible. Le dernier
+    // appliqué remplace TOUS les DoT existants (peu importe la source).
+    // ✦ Proc immédiat : le DoT inflige son tick au moment du cast aussi (pas
+    //   seulement aux rounds suivants).
+    const newBuff = {
+      ...shared, type: 'dot', slot: aff.slot, icon: '🩸',
+      formula: dotFormula, element: aff.element, effect: aff.effect,
+    };
+    const existing = (td.buffs || []).filter(b => b.type !== 'dot');
+    try {
+      await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] });
+    } catch (err) {
+      console.error('[VTT] DoT non appliqué :', err);
+      showNotif(`⚠️ ${tgtName} : échec d'application du DoT (${err?.message || err})`, 'error');
+      continue;
+    }
+
+    // Roll du tick immédiat avec détail des dés
+    const det = _rollDiceDetailed(dotFormula);
+    if (det.total > 0) {
+      const lT = _live(td);
+      const curHp = lT.displayHp ?? td.hp ?? 20;
+      const newHp = Math.max(0, curHp - det.total);
+      await _setHp(td, newHp).catch(() => {});
+      // Log du tick immédiat (cohérent avec le tick de round suivant)
+      await addDoc(_logCol(), {
+        type: 'dot-tick',
+        authorId: STATE.user?.uid || null,
+        authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
+        tokenName: tgtName,
+        rolls: [{ formula: dotFormula, rolled: det.total, rolledDice: det.rolls, mod: det.mod, sides: det.sides, sortLabel: opt.label || 'DoT' }],
+        total: det.total, newHp, hpMax: lT.displayHpMax ?? 20,
+        immediate: true,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+      showNotif(`🩸 ${tgtName} : DoT ${dotFormula} → ${det.total} dégâts (proc cast)`, 'success');
+    } else {
+      showNotif(`🩸 ${tgtName} : DoT ${dotFormula}/tour · ${rollStr} (échec)`, 'success');
+    }
   }
 }
 
@@ -2408,28 +2657,23 @@ function _buildAttackOptions(t) {
                           : (isUnarmed ? 'Coup de poing' : (weapon.nom || 'Attaque de base'));
   const wPortee = wReplace ? Math.max(1, wReplace.weaponRange || 1) : (ld.displayRange ?? 1);
 
-  // ── Enchantement magique actif : override l'élément de l'arme ───────────
-  // Si le porteur a un buff dmg_bonus (slot=arme) avec un élément MAGIQUE
-  // (différent de "physique"), l'arme frappe désormais dans cet élément
-  // pendant la durée du buff. Un enchantement "physique" (sans élément ou
-  // avec element='physique') n'override RIEN — il ajoute juste les dégâts bonus.
+  // ── Détecte un buff d'enchantement actif (purement visuel/marquage ici).
+  // L'enchantement N'override PAS l'élément de l'arme : l'arme reste PHYSIQUE
+  // (donc miss = 0 dégâts, pas de demi-dégâts). Le bonus s'ajoute uniquement
+  // sur un coup réussi (géré dans _vttRollAttack). On garde juste le label
+  // « · enchantée » et l'élément du bonus en métadonnée pour affichage.
   const _round_eff = _session?.combat?.round ?? 0;
-  const _magicEnchantBuff = (t.buffs || []).find(b =>
+  const _enchantBuff = (t.buffs || []).find(b =>
     b.type === 'dmg_bonus' && b.slot === 'arme'
-    && b.element && b.element !== 'physique'
     && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound)
   );
   const _wDefaultTypeId = wReplace ? wReplaceTypeId : (isMagicW ? null : (fmt?.damageType || 'physique'));
-  const _wFinalTypeId   = _magicEnchantBuff ? _magicEnchantBuff.element : _wDefaultTypeId;
-  const _wFinalTypeObj  = _wFinalTypeId ? getDamageTypeById(_damageTypes, _wFinalTypeId) : null;
-  const _wFinalRules    = _magicEnchantBuff
-    ? getDamageTypeRules(_damageTypes, _magicEnchantBuff.element)
-    : typeRules;
+  const _wFinalTypeObj  = _wDefaultTypeId ? getDamageTypeById(_damageTypes, _wDefaultTypeId) : null;
 
   options.push({
     id:               'weapon',
-    icon:             wReplace ? '🔮' : (_magicEnchantBuff ? '🪄' : (isUnarmed ? '👊' : '⚔️')),
-    label:            wLabel + (_magicEnchantBuff ? ' · enchantée' : ''),
+    icon:             wReplace ? '🔮' : (_enchantBuff ? '🪄' : (isUnarmed ? '👊' : '⚔️')),
+    label:            wLabel + (_enchantBuff ? ' · enchantée' : ''),
     rawDice:          wDmgDiceRaw,
     dice:             wDmgDiceFinal,
     portee:           wPortee,
@@ -2440,14 +2684,14 @@ function _buildAttackOptions(t) {
     dmgStatMod:       wDmgMod,
     dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
-    typeRules:        _wFinalRules,
-    damageTypeId:     _wFinalTypeId,
+    typeRules:        typeRules,           // règles d'arme PHYSIQUE inchangées
+    damageTypeId:     _wDefaultTypeId,
     damageTypeIcon:   _wFinalTypeObj?.icon || (wReplace ? '✨' : ''),
-    damageTypeColor:  _wFinalTypeObj?.color || '',
+    damageTypeColor: _wFinalTypeObj?.color || '',
     isMagicWeapon:    !!wReplace || (isMagicW && !isUnarmed),
     charElements:     wReplace ? [wReplaceTypeId] : ((isMagicW && !isUnarmed) ? (c?.elements || []) : []),
     isInvokedWeapon:  !!wReplace,
-    enchantedElement: _magicEnchantBuff ? _magicEnchantBuff.element : null,
+    enchantedElement: _enchantBuff?.element || null,
   });
 
   // ── Tous les sorts actifs du deck ──
@@ -2482,9 +2726,12 @@ function _buildAttackOptions(t) {
       const protMode  = s.protectionMode || 'ca';
       const nbCibles  = _vttSortCibles(s);
 
-      // Coût PM : applique le delta du set, puis vérifie si cible gratuite (multi-cibles)
-      // ou si le sort vient d'être déclenché depuis un suspended_spell (gratuit one-shot).
-      const pmRaw      = parseInt(s.pm) || 0;
+      // Coût PM : pmOverride MJ prend le pas sur le coût auto-calculé, puis on
+      // applique le delta du set léger (clampé à 0 minimum), puis on vérifie
+      // si cible gratuite (multi-cibles ou sort suspendu déclenché).
+      const pmRaw      = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
+                         ? s.pmOverride
+                         : (parseInt(s.pm) || 0);
       const basePm     = Math.max(0, pmRaw + spellPmDelta);
       const freeKey    = `${t.id}_${idx}`;
       const freeCasts  = _multiCastFree.get(freeKey) || 0;
@@ -2514,20 +2761,58 @@ function _buildAttackOptions(t) {
       // ET aucune formule de dégâts d'impact (s.degats vide).
       // → On affiche une option SANS pilule "dégâts" qui appliquera juste le buff
       //    sur l'allié ciblé. Le bonus de dégâts arrivera plus tard sur les attaques.
-      const isEnchantOnly = !!mods?.enchantArmeDmg && !((s.degats || '').trim());
+      // isEnchantOnly : mode Dégâts (enchantArmeDmg) OU mode État (enchantEtatId)
+      // sans formule de dégâts d'impact saisie sur le sort.
+      const isEnchantOnly = (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim());
+      // Affliction-only : si la rune Affliction est présente, on ne fait jamais
+      // de dégâts d'impact (comme l'Enchantement). Le sort applique son DoT ou son
+      // état via le JS de sauvegarde de la cible.
+      const isAfflictionOnly = !!mods?.affliction;
       if (isEnchantOnly) {
-        const enchTypeObj = mods.enchantArmeDmg.element
-          ? getDamageTypeById(_damageTypes, mods.enchantArmeDmg.element) : null;
+        const enchMode = s.enchantMode || 'dmg';
+        const isEtat   = enchMode === 'etat' && !!mods?.enchantEtatId;
+        const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
+        const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
+        const etatLib = isEtat ? CONDITION_BY_ID[mods.enchantEtatId] : null;
+        const labelDice = isEtat
+          ? (etatLib ? `${etatLib.icon || ''} ${etatLib.label}` : 'État')
+          : (mods.enchantArmeDmg?.formula || '1d4+2');
         options.push({
-          id: `sort_${idx}`, icon: '🪄', label: s.nom || `Sort ${idx+1}`,
+          id: `sort_${idx}`, icon: isEtat ? '✨' : '🪄',
+          label: s.nom || `Sort ${idx+1}`,
           dice: '', // pas de formule d'impact
           portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
           zoneW, zoneH, mods,
           isEnchant: true,
-          enchantFormula: mods.enchantArmeDmg.formula,
-          enchantElement: mods.enchantArmeDmg.element || null,
+          enchantMode: enchMode,
+          enchantFormula: mods.enchantArmeDmg?.formula || '',
+          enchantEtatId: mods.enchantEtatId || null,
+          enchantElement: elementId,
           enchantElementIcon: enchTypeObj?.icon || '',
           enchantElementColor: enchTypeObj?.color || '',
+          isUtil: true, halfOnMiss: false,
+          actionType,
+          ..._catMeta,
+        });
+      } else if (isAfflictionOnly) {
+        // Sort d'affliction pur : pas de dégâts d'impact, juste le JS + DoT/État
+        const aff = mods.affliction;
+        const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
+        options.push({
+          id: `sort_${idx}`, icon: aff.mode === 'etat' ? '⛓' : '🩸',
+          label: s.nom || `Sort ${idx+1}`,
+          dice: aff.mode === 'dot' ? `${aff.dotFormula}/tour` : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
+          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
+          zoneW, zoneH, mods,
+          isAffliction: true,
+          afflictionMode: aff.mode,
+          afflictionDotFormula: aff.dotFormula,
+          afflictionEtatId: aff.etatId || null,
+          afflictionDD: aff.dd,
+          afflictionSaveStat: aff.saveStat,
+          afflictionElement: aff.element || null,
+          afflictionElementIcon: aTypeObj?.icon || '',
+          afflictionElementColor: aTypeObj?.color || '',
           isUtil: true, halfOnMiss: false,
           actionType,
           ..._catMeta,
@@ -2815,24 +3100,49 @@ async function _execAttack(srcId, tgtId) {
 
     // Portée — si "soi-même", on n'affiche pas la portée (sans objet)
     if (!targetSelf) pills.push(_pill('range', `🎯 ${o.portee}c`));
-    // Cible / zone / soi / allié (pour enchant et heal)
+    // Cible / zone / soi / allié / ennemi (selon le type de sort)
+    const isFriendly = isEnchant || isHeal;          // alliés
+    const isHostile  = !!o.isAffliction;             // ennemis explicites
     if (targetSelf) {
       pills.push(_pill('targets self', `🧍 Sur soi`));
     } else if (o.zoneW > 0 || o.zoneH > 0) {
       pills.push(_pill('zone', `📐 ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
     } else if ((o.nbCibles || 1) > 1) {
-      pills.push(_pill('targets', `👥 ${o.nbCibles} ${isEnchant || isHeal ? 'alliés' : 'cibles'}`));
-    } else if (isEnchant || isHeal) {
-      pills.push(_pill('targets single', `🎯 1 allié`));
+      const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
+      pills.push(_pill('targets', `👥 ${o.nbCibles} ${lbl}`));
+    } else if (isFriendly) {
+      pills.push(_pill('targets single', `🤝 1 allié`));
+    } else if (isHostile) {
+      pills.push(_pill('targets single', `💢 1 ennemi`));
     } else {
       pills.push(_pill('targets single', `🎯 1 cible`));
     }
-    // Effet principal de l'option (dégâts / soin / enchant / utilitaire)
+    // Effet principal de l'option (dégâts / soin / enchant / affliction / utilitaire)
     if (isEnchant) {
-      // Sort d'enchantement : pas de dégâts d'impact, juste un buff sur l'allié
+      // Sort d'enchantement : pas de dégâts d'impact, juste un buff/état sur l'allié
       const elemIcon = o.enchantElementIcon || '🪄';
       const elemCol  = o.enchantElementColor || '#a78bfa';
-      pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(o.enchantFormula || '1d4+2')} / arme alliée</span>`);
+      if (o.enchantMode === 'etat' && o.enchantEtatId) {
+        const lib = CONDITION_BY_ID[o.enchantEtatId];
+        const lbl = lib ? `${lib.icon} ${lib.label} sur allié` : '✨ État sur allié';
+        pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
+      } else {
+        pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(o.enchantFormula || '1d4+2')} / arme alliée</span>`);
+      }
+    } else if (o.isAffliction) {
+      // Sort d'affliction : pas de dégâts d'impact, JS de la cible → DoT ou État
+      const elemIcon = o.afflictionElementIcon || '💀';
+      const elemCol  = o.afflictionElementColor || '#ef4444';
+      if (o.afflictionMode === 'etat' && o.afflictionEtatId) {
+        const lib = CONDITION_BY_ID[o.afflictionEtatId];
+        const lbl = lib ? `${lib.icon} ${lib.label}` : '⛓ État';
+        pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
+      } else {
+        pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} ${_esc(o.afflictionDotFormula || '1d4')} / tour</span>`);
+      }
+      // Pill séparé pour le JS de sauvegarde
+      const statLbl = (_STAT_SHORT[o.afflictionSaveStat] || o.afflictionSaveStat || '').toUpperCase();
+      pills.push(_pill('save', `🛡 JS ${statLbl} DD ${o.afflictionDD}`));
     } else if (isUtil) {
       // Sort utilitaire : pas de damage pill, juste un résumé de l'effet
       const effetTxt = (o.dice || '').trim();
@@ -3172,7 +3482,59 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
     }
   }
 
-  const centerBlock = isCastOnly ? `
+  // ── Bloc spécifique Affliction (JS de la cible) ────────────────────
+  const _STAT_SH = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
+  const isAffCast = !!opt.isAffliction;
+  const isEnchCast = !!opt.isEnchant;
+  let utilBlock = '';
+  if (isAffCast) {
+    const statLbl = (_STAT_SH[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
+    const dd = opt.afflictionDD;
+    const effectLbl = opt.afflictionMode === 'etat' && opt.afflictionEtatId
+      ? (() => { const l = CONDITION_BY_ID[opt.afflictionEtatId]; return l ? `${l.icon} ${l.label}` : 'État'; })()
+      : `🩸 DoT ${opt.afflictionDotFormula}/tour`;
+    utilBlock = `
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem;
+                  border-left:3px solid #ef4444">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.45rem">
+          <span style="font-size:1.4rem">${opt.icon}</span>
+          <div style="flex:1">
+            <div style="font-size:.85rem;color:var(--text);font-weight:700">Affliction</div>
+            <div style="font-size:.7rem;color:var(--text-dim)">Sur échec du JS : applique l'effet</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap;font-size:.75rem">
+          <span style="background:rgba(239,68,68,.14);color:#fca5a5;padding:.2rem .55rem;border-radius:999px;border:1px solid rgba(239,68,68,.35);font-weight:700">
+            🛡 JS ${statLbl} DD ${dd}
+          </span>
+          <span style="background:rgba(139,92,246,.14);color:#c4b5fd;padding:.2rem .55rem;border-radius:999px;border:1px solid rgba(139,92,246,.35);font-weight:700">
+            ${effectLbl}
+          </span>
+        </div>
+      </div>`;
+  } else if (isEnchCast) {
+    const effectLbl = opt.enchantMode === 'etat' && opt.enchantEtatId
+      ? (() => { const l = CONDITION_BY_ID[opt.enchantEtatId]; return l ? `${l.icon} ${l.label}` : 'État'; })()
+      : `⚔️ +${opt.enchantFormula || '1d4+2'} / arme alliée`;
+    utilBlock = `
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem;
+                  border-left:3px solid #e8b84b">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.45rem">
+          <span style="font-size:1.4rem">${opt.icon}</span>
+          <div style="flex:1">
+            <div style="font-size:.85rem;color:var(--text);font-weight:700">Enchantement</div>
+            <div style="font-size:.7rem;color:var(--text-dim)">Buff direct sur l'allié — pas de JS</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap;font-size:.75rem">
+          <span style="background:rgba(232,184,75,.14);color:#fbbf24;padding:.2rem .55rem;border-radius:999px;border:1px solid rgba(232,184,75,.35);font-weight:700">
+            ${effectLbl}
+          </span>
+        </div>
+      </div>`;
+  }
+
+  const centerBlock = (isAffCast || isEnchCast) ? utilBlock : isCastOnly ? `
     <div style="background:var(--bg-elevated);border-radius:10px;padding:.85rem;margin-bottom:.85rem;
                 display:flex;align-items:center;gap:.6rem">
       <span style="font-size:1.2rem">${opt.icon}</span>
@@ -4037,8 +4399,9 @@ window._vttRollAttack = async () => {
       }
     }
 
-    // ── Enchantements (slot arme / pieds / tête / torse) : buffs sur alliés ──
-    if (opt.mods?.enchantArmeDmg || opt.mods?.enchantPieds || opt.mods?.enchantGeneric) {
+    // ── Enchantements (mode Dégâts ou mode État) : buffs / états sur alliés ──
+    if (opt.mods?.enchantArmeDmg || opt.mods?.enchantPieds || opt.mods?.enchantGeneric
+        || opt.mods?.enchantEtatId) {
       await _vttApplyEnchantBuffs(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
     }
 
@@ -4103,18 +4466,53 @@ window._vttRollAttack = async () => {
       const targetsLabel = buffResults.length > 1
         ? buffResults.join(', ')
         : (lT.displayName ?? tgt.name);
-      await addDoc(_logCol(), {
-        type: 'cast',
-        authorId: STATE.user?.uid||null, authorName,
-        casterName: lS.displayName??src.name,
-        characterImage: lS.displayImage||null,
-        targetName: targetsLabel,
-        optLabel: opt.label, pmCost: opt.pmCost,
-        castEffect: opt.dice,
-        createdAt: serverTimestamp(),
-      }).catch(()=>{});
-      const buffInfo = opt.isCaSort ? ` (+${opt.caBonus??2} CA${opt.sortDuree ? `, ${opt.sortDuree}t` : ''})` : '';
-      showNotif(`✨ ${opt.label} activé !${buffInfo}${_ciblSuffix(rCa)}`, 'success');
+
+      // ── Construit un castEffect détaillé selon le type de sort ──
+      let castEffect = opt.dice || '';
+      const _STAT_LBL = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
+      if (opt.isAffliction) {
+        const statLbl = (_STAT_LBL[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
+        if (opt.afflictionMode === 'etat' && opt.afflictionEtatId) {
+          const lib = CONDITION_BY_ID[opt.afflictionEtatId];
+          castEffect = `${lib ? `${lib.icon} ${lib.label}` : 'État'} · JS ${statLbl} DD ${opt.afflictionDD}`;
+        } else {
+          castEffect = `🩸 DoT ${opt.afflictionDotFormula}/tour · JS ${statLbl} DD ${opt.afflictionDD}`;
+        }
+      } else if (opt.isEnchant) {
+        if (opt.enchantMode === 'etat' && opt.enchantEtatId) {
+          const lib = CONDITION_BY_ID[opt.enchantEtatId];
+          castEffect = `${lib ? `${lib.icon} ${lib.label}` : 'État'} (sans JS)`;
+        } else if (opt.enchantFormula) {
+          castEffect = `⚔️ +${opt.enchantFormula} / arme alliée`;
+        }
+      }
+
+      // Log "cast" générique : sauté pour les afflictions (déjà loggées via
+      // 'affliction-cast' AVANT, suivi du save log et de l'application).
+      // Évite le doublon trompeur "Brulure activé!" qui suggère un succès
+      // alors que le JS pourrait avoir réussi.
+      if (!opt.isAffliction) {
+        await addDoc(_logCol(), {
+          type: 'cast',
+          authorId: STATE.user?.uid||null, authorName,
+          casterName: lS.displayName??src.name,
+          characterImage: lS.displayImage||null,
+          targetName: targetsLabel,
+          optLabel: opt.label, pmCost: opt.pmCost,
+          castEffect,
+          createdAt: serverTimestamp(),
+        }).catch(()=>{});
+      }
+      // Notif post-cast : neutre pour les afflictions (les notifs JS et effet
+      // arrivent juste après dans _vttApplyAfflictions et indiquent le résultat)
+      if (opt.isAffliction) {
+        showNotif(`🪄 ${opt.label} lancé · résultat des JS ci-dessous`, 'info');
+      } else {
+        const buffInfo = opt.isCaSort ? ` (+${opt.caBonus??2} CA${opt.sortDuree ? `, ${opt.sortDuree}t` : ''})`
+                       : opt.isEnchant    ? ` · ${castEffect}`
+                       : '';
+        showNotif(`✨ ${opt.label} activé !${buffInfo}${_ciblSuffix(rCa)}`, 'success');
+      }
       return;
     }
 
@@ -4362,44 +4760,66 @@ window._vttRollAttack = async () => {
     const totalFixed  = dmgFixed + bonusDmg + typeDmgBon;
 
     // ── Dés tirés UNE SEULE fois, partagés entre toutes les cibles ──────
+    // On stocke aussi les rolls individuels pour affichage détaillé dans le log
     let sharedDmgRaw = 0, sharedDmgTotalHit = 0, sharedDmgTotalHalf = 0;
     let sharedCritNormalMax = 0, sharedCritRaw2 = 0, sharedCritFixed2 = 0;
+    let sharedDmgRollsDetail = null; // { rolls:[3,5,2], sides:6, mod:0 } - rolls individuels
+    let sharedCritRollsDetail = null;
     if (!isFumble) {
       if (isCrit) {
         sharedCritNormalMax = _maxDice(effectiveDice) + totalFixed;
-        sharedCritRaw2      = _rollDice(effectiveDice);
+        const critDet = _rollDiceDetailed(effectiveDice);
+        sharedCritRaw2      = critDet.total;
+        sharedCritRollsDetail = { rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod };
         sharedCritFixed2    = totalFixed;
         sharedDmgRaw        = sharedCritRaw2;
         sharedDmgTotalHit   = sharedCritNormalMax + sharedCritRaw2 + sharedCritFixed2;
       } else {
-        sharedDmgRaw      = _rollDice(effectiveDice);
+        const det = _rollDiceDetailed(effectiveDice);
+        sharedDmgRaw      = det.total;
+        sharedDmgRollsDetail = { rolls: det.rolls, sides: det.sides, mod: det.mod };
         sharedDmgTotalHit = Math.max(1, sharedDmgRaw + totalFixed);
       }
       if (missEffect === 'half')  sharedDmgTotalHalf = Math.max(1, Math.floor(sharedDmgTotalHit / 2));
       else if (missEffect === 'full') sharedDmgTotalHalf = sharedDmgTotalHit;
     }
 
-    // ── Bonus dégâts depuis buffs d'enchantement arme actifs sur le lanceur ──
-    // Ne s'applique qu'aux attaques d'arme (id='weapon' ou 'npc_attack' ou bestiaire)
-    // pour éviter de doubler les dégâts sur les sorts qui scalent déjà sur l'arme.
+    // ── Bonus dégâts depuis buff d'enchantement arme actif sur le lanceur ──
+    // Règles :
+    //  • S'applique aux Actions uniquement (attaques d'arme + sorts type 'action').
+    //    Exclu : Actions Bonus, Réactions (actionType === 'bonus' / 'reaction')
+    //  • Bonus appliqué UNIQUEMENT sur un coup réussi (pas sur les demi-dégâts).
+    //  • Non cumulable : un seul buff dmg_bonus actif (le dernier appliqué wins,
+    //    déjà garanti par _vttApplyEnchantBuffs qui retire les anciens).
     const _isWeaponAttack = opt.id === 'weapon' || opt.id === 'npc_attack' || opt.id?.startsWith?.('beast_');
+    const _isActionType   = !opt.actionType || opt.actionType === 'action';
+    const _eligibleForEnchant = (_isWeaponAttack || opt.sortIdx !== undefined) && _isActionType;
     let buffDmgBonus = 0;
     const buffDmgNotes = [];
-    if (_isWeaponAttack && !isFumble) {
+    let buffDmgDetail = null; // { formula, rolls, mod, total, sortLabel, element }
+    if (_eligibleForEnchant && !isFumble) {
       const round_eff = _session?.combat?.round ?? 0;
-      const srcDmgBuffs = (src.buffs || []).filter(b =>
+      const srcDmgBuff = (src.buffs || []).find(b =>
         b.type === 'dmg_bonus' && b.slot === 'arme'
         && (b.expiresAtRound == null || round_eff === 0 || round_eff <= b.expiresAtRound)
       );
-      for (const buff of srcDmgBuffs) {
-        if (!buff.formula) continue;
-        const rolled = _rollDice(buff.formula);
-        buffDmgBonus += rolled;
-        buffDmgNotes.push(`${buff.icon ?? '⚔️'} +${rolled} (${buff.sortLabel}: ${buff.formula})`);
-      }
-      if (buffDmgBonus > 0) {
-        sharedDmgTotalHit += buffDmgBonus;
-        if (sharedDmgTotalHalf > 0) sharedDmgTotalHalf += Math.floor(buffDmgBonus / 2);
+      if (srcDmgBuff?.formula) {
+        const det = _rollDiceDetailed(srcDmgBuff.formula);
+        if (det.total > 0) {
+          buffDmgBonus = det.total;
+          buffDmgDetail = {
+            formula: srcDmgBuff.formula,
+            rolls: det.rolls, mod: det.mod, sides: det.sides,
+            total: det.total,
+            sortLabel: srcDmgBuff.sortLabel || 'Enchantement',
+            element: srcDmgBuff.element || null,
+          };
+          // Affichage détaillé dans la notif : "+1d4(3) +2 = 5 (Boule de Feu)"
+          const rollsStr = det.rolls.length ? `(${det.rolls.join(',')})` : '';
+          const modStr = det.mod > 0 ? ` +${det.mod}` : det.mod < 0 ? ` ${det.mod}` : '';
+          buffDmgNotes.push(`${srcDmgBuff.icon ?? '⚔️'} +${det.n}d${det.sides}${rollsStr}${modStr} = ${det.total} (${buffDmgDetail.sortLabel})`);
+          sharedDmgTotalHit += det.total;
+        }
       }
     }
 
@@ -4660,6 +5080,11 @@ window._vttRollAttack = async () => {
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,
+        buffDmgBonus: buffDmgBonus || 0,
+        buffDmgNotes: buffDmgNotes.length ? buffDmgNotes : null,
+        buffDmgDetail: buffDmgDetail || null,
+        dmgRollsDetail: sharedDmgRollsDetail || null,
+        critRollsDetail: sharedCritRollsDetail || null,
         targets: cleanResults,
         createdAt: serverTimestamp(),
       }).catch(()=>{});
@@ -4690,6 +5115,11 @@ window._vttRollAttack = async () => {
         halfDmg: r.halfDmg, newHp: r.newHp, hpMax: r.hpMax,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,
+        buffDmgBonus: buffDmgBonus || 0,
+        buffDmgNotes: buffDmgNotes.length ? buffDmgNotes : null,
+        buffDmgDetail: buffDmgDetail || null,
+        dmgRollsDetail: sharedDmgRollsDetail || null,
+        critRollsDetail: sharedCritRollsDetail || null,
         interaction: r.interaction || null,
         createdAt: serverTimestamp(),
       }).catch(()=>{});
@@ -4712,7 +5142,10 @@ window._vttRollAttack = async () => {
     });
     // Ajoute les notes de combo (Lacération, Déplacement, Drain) à la notif
     if (modNotes.length) notifParts.push(...modNotes);
-    if (buffDmgNotes.length) notifParts.push(...buffDmgNotes);
+    // Notes d'enchantement uniquement si au moins une cible a été touchée
+    // (pas de pollution sur les ratés)
+    const _anyHitForEnchant = cleanResults.some(r => r.hit);
+    if (buffDmgNotes.length && _anyHitForEnchant) notifParts.push(...buffDmgNotes);
     if (luckUsed) notifParts.unshift(`🍀 Coup de chance utilisé (d20 → ${d20})`);
     const anyHit = cleanResults.some(r => r.hit || r.halfDmg);
     showNotif(notifParts.join(' · '), anyHit ? 'success' : 'error');
@@ -6738,6 +7171,72 @@ function _renderChatLog(msgs) {
     const who=`<span class="vtt-log-who${isMe?' me':''}">${_esc(m.authorName||'?')}</span>`;
     const ts = _ts(m);
 
+    if (m.type==='affliction-cast') {
+      // Annonce de cast d'affliction : "X lance Sort sur Y"
+      return `<div class="vtt-log-entry"
+          style="border-left:3px solid #8b5cf6;padding:.3rem .3rem .3rem .5rem;background:rgba(139,92,246,.06);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap">
+          ${_portrait(m.characterImage, m.casterName||'?', '#8b5cf6')}
+          <strong style="font-size:.78rem">${_esc(m.casterName||'?')}</strong>
+          <span style="font-size:.7rem;color:var(--text-dim)">lance</span>
+          <strong style="font-size:.82rem;color:#c4b5fd">${_esc(m.optLabel||'')}</strong>
+          <span style="font-size:.7rem;color:var(--text-dim)">sur</span>
+          <strong style="font-size:.78rem">${_esc(m.targetName||'?')}</strong>
+          ${_right('', ts)}
+        </div>
+        <div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem">
+          ${_esc(m.effectLbl||'')} · JS ${_esc(m.statLabel||'?')} DD ${m.dd}
+        </div>
+      </div>`;
+    }
+    if (m.type==='dot-tick') {
+      // Tick DoT : début de round OU proc immédiat (immediate=true)
+      const rollsTxt = (m.rolls || []).map(r => {
+        const dicePart = r.rolledDice?.length
+          ? `${r.rolledDice.length}d${r.sides}(${r.rolledDice.join(',')})`
+          : r.formula;
+        const modPart = r.mod > 0 ? ` +${r.mod}` : r.mod < 0 ? ` ${r.mod}` : '';
+        return `${r.sortLabel}: ${dicePart}${modPart} = ${r.rolled}`;
+      }).join(' · ');
+      const lbl = m.immediate ? 'subit (proc cast)' : 'subit (tick)';
+      return `<div class="vtt-log-entry"
+          style="border-left:3px solid #dc2626;padding:.3rem .3rem .3rem .5rem;background:rgba(220,38,38,.06);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap">
+          <span>🩸</span>
+          <strong style="font-size:.78rem">${_esc(m.tokenName||'?')}</strong>
+          <span style="font-size:.7rem;color:var(--text-dim)">${lbl}</span>
+          <strong style="font-size:.82rem;color:#fca5a5">−${m.total}</strong>
+          <span style="font-size:.65rem;color:var(--text-dim)">PV</span>
+          ${m.newHp != null && m.hpMax ? `<span style="font-size:.65rem;color:var(--text-dim)">→ ${m.newHp}/${m.hpMax}</span>` : ''}
+          ${_right('', ts)}
+        </div>
+        ${rollsTxt ? `<div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem">${rollsTxt}</div>` : ''}
+      </div>`;
+    }
+    if (m.type==='save') {
+      // Jet de sauvegarde (affliction, condition…)
+      const passed = !!m.passed;
+      const borderCol = passed ? '#22c38e' : '#ef4444';
+      const bgRgb = passed ? '34,195,142' : '239,68,68';
+      const resultLbl = passed ? '✅ Réussi' : '💢 Échec';
+      const modStr = (m.mod >= 0 ? '+' : '') + m.mod;
+      return `<div class="vtt-log-entry vtt-log-roll"
+          style="border-left:3px solid ${borderCol};padding:.3rem .3rem .3rem .5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
+        <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap">
+          <span style="font-size:.72rem">🛡</span>
+          <strong style="font-size:.78rem;color:var(--text)">${_esc(m.tokenName||'?')}</strong>
+          <span style="font-size:.7rem;color:var(--text-dim)">JS ${_esc(m.statLabel||'?')} DD ${m.dd}</span>
+          <span style="font-size:.7rem;color:var(--text-dim)">·</span>
+          <span style="font-size:.78rem;font-weight:700;color:${borderCol}">${resultLbl}</span>
+          ${m.sortLabel ? `<span style="font-size:.65rem;color:var(--text-dim)">(${_esc(m.sortLabel)})</span>` : ''}
+          ${_right('', ts)}
+        </div>
+        <div style="font-size:.68rem;color:var(--text-dim);margin-top:.15rem">
+          d20[${m.d20}] ${modStr} = <strong>${m.total}</strong> vs DD ${m.dd}
+          ${!passed && m.conditionLabel ? ` · applique ${_esc(m.conditionLabel)}` : ''}
+        </div>
+      </div>`;
+    }
     if (m.type==='cast') {
       // Sort CA / utilitaire — pas de jet de dés
       const pmStr = m.pmCost > 0
@@ -6869,17 +7368,35 @@ function _renderChatLog(msgs) {
           ].filter(Boolean).join(' ')
         : `${diceDisp} ${sn(m.hitBase)}${m.hitBonus?' '+sn(m.hitBonus)+sub('bonus'):''}`)
         + extraHitDisp;
-      // Formule dégâts commune
+      // Formule dégâts commune — affiche les rolls individuels si disponibles
       const baseDice = _esc(m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || '');
+      // Rendu détaillé du jet de base : "1d6(4)" ou "2d6(3,5)" si rolls dispo
+      const renderDiceRolls = (det, fallbackRaw) => {
+        if (det?.rolls?.length) {
+          return `${det.rolls.length}d${det.sides}(<strong>${det.rolls.join(',')}</strong>)`;
+        }
+        return `${baseDice}(${fallbackRaw})`;
+      };
       const dmgMods  = [
         m.dmgStatMod ? sn(m.dmgStatMod)+sub(m.dmgStatLabel||'') : '',
         m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}`+sub('Maîtrise') : '',
         m.dmgBonus ? sn(m.dmgBonus)+sub('bonus') : '',
         m.dmgBonusDice ? sn(m.dmgBonusDice)+sub('dés') : '',
       ].filter(Boolean).join(' ');
+      // Bonus enchant détaillé : "+1d4(3) +2" plutôt que "+5 (Enchant)"
+      const enchantDetail = (() => {
+        const bd = m.buffDmgDetail;
+        if (!bd) return m.buffDmgBonus ? `+${m.buffDmgBonus}`+sub('Enchant') : '';
+        const rollsStr = bd.rolls?.length ? `(<strong>${bd.rolls.join(',')}</strong>)` : '';
+        const modStr = bd.mod > 0 ? ` +${bd.mod}` : bd.mod < 0 ? ` ${bd.mod}` : '';
+        const nicePart = bd.rolls?.length ? `+${bd.rolls.length}d${bd.sides}${rollsStr}${modStr}` : `+${bd.total}`;
+        return `${nicePart} ${sub(bd.sortLabel || 'Enchant')}`;
+      })();
+      const baseRoll = renderDiceRolls(m.dmgRollsDetail, m.dmgRaw);
+      const critRoll = renderDiceRolls(m.critRollsDetail, m.dmgRaw);
       const dmgFormStr = isCrit && m.critNormalMax
-        ? `max(${m.critNormalMax}) + ${baseDice}(${m.dmgRaw}) ${dmgMods}`
-        : `${baseDice}(${m.dmgRaw}) ${dmgMods}`;
+        ? `max(${m.critNormalMax}) + ${critRoll} ${dmgMods} ${enchantDetail}`
+        : `${baseRoll} ${dmgMods} ${enchantDetail}`;
       const atkWho = m.attackerName || m.authorName || '?';
       const detailId = `vtt-d-${i}`;
       // Grille des cibles
@@ -6987,22 +7504,35 @@ function _renderChatLog(msgs) {
 
       const detailId = `vtt-d-${i}`;
 
-      // Ligne dégâts résumée + détail formule
+      // Ligne dégâts résumée + détail formule — rolls individuels si dispo
       let dmgSummary = '', dmgDetailHtml = '';
       if (m.hit || m.halfDmg) {
         const baseDice = _esc(m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || '');
+        const renderRolls = (det, fallback) => det?.rolls?.length
+          ? `${det.rolls.length}d${det.sides}(<strong>${det.rolls.join(',')}</strong>)`
+          : `${baseDice}(${fallback})`;
         const mods = [
           m.dmgStatMod       ? sn(m.dmgStatMod)       + sub(m.dmgStatLabel||'') : '',
           m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
           m.dmgBonus         ? sn(m.dmgBonus)          + sub('bonus') : '',
           m.dmgBonusDice     ? sn(m.dmgBonusDice)      + sub('dés') : '',
         ].filter(Boolean).join(' ');
-
+        // Bonus enchant détaillé
+        const enchantDetail = (() => {
+          const bd = m.buffDmgDetail;
+          if (!bd) return m.buffDmgBonus ? `+${m.buffDmgBonus}`+sub('Enchant') : '';
+          const rollsStr = bd.rolls?.length ? `(<strong>${bd.rolls.join(',')}</strong>)` : '';
+          const modStr = bd.mod > 0 ? ` +${bd.mod}` : bd.mod < 0 ? ` ${bd.mod}` : '';
+          const nicePart = bd.rolls?.length ? `+${bd.rolls.length}d${bd.sides}${rollsStr}${modStr}` : `+${bd.total}`;
+          return `${nicePart} ${sub(bd.sortLabel || 'Enchant')}`;
+        })();
+        const baseRollDisp = renderRolls(m.dmgRollsDetail, m.dmgRaw);
+        const critRollDisp = renderRolls(m.critRollsDetail, m.dmgRaw);
         // Formule brute (sans aucune réduction). Le ÷2 et la résistance/etc. sont
         // affichés sur des lignes séparées, plus lisibles.
         const dmgFormulaRaw = (isCrit && m.critNormalMax)
-          ? `max<span style="font-size:.6rem;color:var(--text-dim)">(${m.critNormalMax})</span> + ${baseDice}(${m.dmgRaw}) ${mods}`
-          : `${baseDice}(${m.dmgRaw}) ${mods}`;
+          ? `max<span style="font-size:.6rem;color:var(--text-dim)">(${m.critNormalMax})</span> + ${critRollDisp} ${mods} ${enchantDetail}`
+          : `${baseRollDisp} ${mods} ${enchantDetail}`;
 
         const interMeta = m.interaction && DMG_INTERACTIONS[m.interaction];
         // Couleur dégâts : standard rouge ; vert seulement quand l'absorption transforme en soin ;
@@ -7040,8 +7570,8 @@ function _renderChatLog(msgs) {
         // logs récents = champ `dmgFull` direct ; logs anciens = recomposé.
         const isCritLog = isCrit || (m.critNormalMax > 0);
         const fullValComputed = isCritLog
-          ? (m.critNormalMax || 0) + (m.dmgRaw || 0) + (m.critFixed2 || 0)
-          : (m.dmgRaw || 0) + (m.dmgStatMod || 0) + (m.dmgMaitriseBonus || 0) + (m.dmgBonus || 0);
+          ? (m.critNormalMax || 0) + (m.dmgRaw || 0) + (m.critFixed2 || 0) + (m.buffDmgBonus || 0)
+          : (m.dmgRaw || 0) + (m.dmgStatMod || 0) + (m.dmgMaitriseBonus || 0) + (m.dmgBonus || 0) + (m.buffDmgBonus || 0);
         const fullVal = m.dmgFull ?? Math.max(1, fullValComputed);
         const halfVal = m.halfDmg ? Math.max(1, Math.floor(fullVal / 2)) : null;
         const interInVal = halfVal ?? fullVal;
@@ -7720,6 +8250,17 @@ window._vttClearBuffs = async id => {
 // HANDLERS — Conditions (états) sur les tokens
 // ══════════════════════════════════════════════════════════════════════════════
 /** Ouvre la modal de sélection d'un état à appliquer. */
+// Expose la librairie des états aux autres modules (spells.js → dropdown affliction)
+window._vttGetConditionLibrary = () => CONDITION_LIBRARY.map(c => ({
+  id: c.id, label: c.label, icon: c.icon, color: c.color,
+}));
+window._vttEnsureConditionsLoaded = async () => {
+  if (CONDITION_LIBRARY.length <= CONDITION_DEFAULT_LIBRARY.length) {
+    await _loadConditionsOverrides().catch(() => {});
+  }
+  return window._vttGetConditionLibrary();
+};
+
 window._vttConditionAdd = (tokenId) => {
   if (!STATE.isAdmin) return;
   openModal('⚡ Appliquer un état', `
@@ -7892,27 +8433,36 @@ window._vttConditionEditSave = async (tokenId, idx) => {
 async function _loadConditionsOverrides() {
   try {
     const d = await getDocData('world', 'conditions');
-    if (d?.library?.length) {
-      // Merge : pour chaque entrée de la lib par défaut, on prend l'override si présent.
-      // Puis on ajoute tous les états customs (id absent de la lib par défaut).
-      const byId = Object.fromEntries(d.library.map(c => [c.id, c]));
-      const merged = CONDITION_DEFAULT_LIBRARY.map(def => {
-        const ov = byId[def.id];
-        if (!ov) return { ...def, effects: { ...def.effects } };
-        return {
-          ...def, ...ov,
-          effects: { ...def.effects, ...(ov.effects || {}) },
-        };
-      });
-      // Ajoute les customs (ids non standards) à la fin
-      for (const c of d.library) {
-        if (!CONDITION_DEFAULT_IDS.has(c.id)) {
-          merged.push({ ...c, effects: { ...(c.effects || {}) } });
-        }
+    if (!d?.library?.length) {
+      // ── Première initialisation : seed Firestore avec les défauts D&D ──
+      // À partir de ce moment, TOUS les états vivent en BDD (plus de fallback codé).
+      if (STATE.isAdmin) {
+        const seed = CONDITION_DEFAULT_LIBRARY.map(c => ({ ...c, effects: { ...c.effects } }));
+        try {
+          await saveDoc('world', 'conditions', { library: seed });
+        } catch {}
       }
-      CONDITION_LIBRARY = merged;
-      _rebuildConditionIndex();
+      // CONDITION_LIBRARY reste sur les défauts en mémoire
+      return;
     }
+    // Données présentes en BDD : merge avec les défauts pour les ids standards,
+    // puis ajout des customs (ids non standards).
+    const byId = Object.fromEntries(d.library.map(c => [c.id, c]));
+    const merged = CONDITION_DEFAULT_LIBRARY.map(def => {
+      const ov = byId[def.id];
+      if (!ov) return { ...def, effects: { ...def.effects } };
+      return {
+        ...def, ...ov,
+        effects: { ...def.effects, ...(ov.effects || {}) },
+      };
+    });
+    for (const c of d.library) {
+      if (!CONDITION_DEFAULT_IDS.has(c.id)) {
+        merged.push({ ...c, effects: { ...(c.effects || {}) } });
+      }
+    }
+    CONDITION_LIBRARY = merged;
+    _rebuildConditionIndex();
   } catch {}
 }
 
@@ -8537,7 +9087,7 @@ window._vttNextRound = async () => {
   await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
 
   // ── Application des DoT en début de round (avant le cleanup des buffs) ──
-  // Chaque buff de type 'dot' inflige sa formule à son porteur
+  // Chaque buff de type 'dot' inflige sa formule à son porteur ; log dans le chat
   const dotNotifs = [];
   for (const id of Object.keys(_tokens)) {
     const td = _tokens[id]?.data;
@@ -8545,15 +9095,32 @@ window._vttNextRound = async () => {
       && (b.expiresAtRound == null || round <= b.expiresAtRound));
     if (!dots.length) continue;
     let total = 0;
+    const rolls = [];
     for (const dot of dots) {
-      total += _rollDice(dot.formula || '1d4 +2');
+      const det = _rollDiceDetailed(dot.formula || '1d4 +2');
+      total += det.total;
+      rolls.push({
+        formula: dot.formula || '1d4 +2',
+        rolled: det.total, rolledDice: det.rolls, mod: det.mod, sides: det.sides,
+        sortLabel: dot.sortLabel || 'DoT',
+      });
     }
     if (total <= 0) continue;
     const lT = _live(td);
+    const tgtName = lT.displayName ?? td.name;
     const curHp = lT.displayHp ?? td.hp ?? 20;
     const newHp = Math.max(0, curHp - total);
     await _setHp(td, newHp).catch(() => {});
-    dotNotifs.push(`🩸 ${total} dégâts DoT → ${lT.displayName ?? td.name}`);
+    dotNotifs.push(`🩸 ${total} dégâts DoT → ${tgtName}`);
+    // Log dans le chat avec le détail
+    await addDoc(_logCol(), {
+      type: 'dot-tick',
+      authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
+      tokenName: tgtName,
+      rolls, total, newHp, hpMax: lT.displayHpMax ?? 20,
+      createdAt: serverTimestamp(),
+    }).catch(() => {});
     // JS de concentration auto si la cible porte un sort canalisé
     const concNotes = await _vttTriggerConcentrationSave(td, total);
     dotNotifs.push(...concNotes);

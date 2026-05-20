@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { updateInCol } from '../../data/firestore.js';
+import { updateInCol, getDocData } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
@@ -445,6 +445,35 @@ const SPELL_SLOTS = [
 const SLOT_LABEL = { arme:'⚔️ Arme', tete:'👁️ Tête', torse:'👕 Torse', pieds:'👢 Pieds' };
 
 /**
+ * Dégâts du DoT d'affliction (mode 'dot') effectifs (auto si vide).
+ * Formule : (1 + nbPuissance)d4 + (2 + 2 × max(0, nbPuissance - 1))
+ * → 0 Puiss : 1d4 +2 · 1 Puiss : 2d4 +2 · 2 Puiss : 3d4 +4 · 3 Puiss : 4d4 +6
+ */
+/** Mapping legacy slot → stat de sauvegarde (rétro-compat sorts existants). */
+function _legacySlotToStat(slot) {
+  if (slot === 'torse') return 'constitution';
+  if (slot === 'pieds') return 'force';
+  if (slot === 'tete')  return 'sagesse';
+  if (slot === 'arme')  return 'dexterite';
+  return 'constitution';
+}
+
+export function _calcAfflictionDot(s) {
+  const manual = (s?.afflictionDotFormula || '').trim();
+  if (manual) return manual;
+  const nbPuiss = (s?.runes || []).filter(r => r === 'Puissance').length;
+  const dice = 1 + nbPuiss;
+  const mod  = 2 + 2 * Math.max(0, nbPuiss - 1);
+  return `${dice}d4 +${mod}`;
+}
+function _autoSourceAfflictionDot(s) {
+  const nbP = (s?.runes || []).filter(r => r === 'Puissance').length;
+  if (nbP === 0) return '1 Affliction · base';
+  if (nbP === 1) return '+1 Puiss · 1 dé bonus';
+  return `+${nbP} Puiss · ${nbP} dés + chaînage`;
+}
+
+/**
  * Dégâts d'enchantement effectifs (auto si vide ET slot=arme).
  * Formule : (1 + nbPuissance)d4 + 2 dans l'élément
  */
@@ -543,16 +572,26 @@ function _needsDureeBase(s) {
   return false;
 }
 
-/** Durée totale en tours = dureeBase + bonus rune Durée
- *  Durée ×1 → +2 tours · ×N → 2 + (N-1) = N+1 tours (chaînage +1 / rune)
+/** Durée totale en tours d'un sort.
+ *  Base 2 tours (sort persistant) + bonus rune Durée.
+ *  Bonus Durée : chaque rune ajoute +2, chaînage ajoute +1 supplémentaire par rune au-delà de la 1ère.
+ *  → 0 Durée : 2 · 1 Durée : 4 (=2+2) · 2 Durée : 7 (=2+4+1) · 3 Durée : 10 (=2+6+2) · 4 Durée : 13
+ *  Override : s.dureeBase remplace la base 2 si supérieur (saisie manuelle).
  */
 function _calcSortDuree(s) {
-  const runes  = s.runes || [];
+  const runes  = s?.runes || [];
   const nbDur  = runes.filter(r => r === 'Durée').length;
-  const base   = (s.dureeBase && s.dureeBase >= 2) ? s.dureeBase : 0;
-  if (nbDur === 0 && base === 0) return null;
-  const runeBonus = nbDur > 0 ? (nbDur + 1) : 0;
-  return base + runeBonus || null;
+  // Base : 2 tours par défaut, ou override manuel via s.dureeBase
+  const base   = (s?.dureeBase && s.dureeBase >= 2) ? s.dureeBase : 2;
+  // Bonus Durée scalable : 2 par rune + 1 par chaînage
+  const runeBonus = nbDur > 0 ? (2 * nbDur + (nbDur - 1)) : 0;
+  return base + runeBonus;
+}
+function _autoSourceDuree(s) {
+  const nbDur = (s?.runes || []).filter(r => r === 'Durée').length;
+  if (nbDur === 0) return 'base persistante';
+  if (nbDur === 1) return '+1 Durée · +2 tours';
+  return `+${nbDur} Durée · +${2*nbDur + (nbDur-1)} tours (chaînage)`;
 }
 
 
@@ -724,8 +763,14 @@ function _buildSortResume(s, c) {
   const isMonoCib  = !isZone && nbCibles === 1;
   const monoStr    = isMonoCib ? ' · sur 1 cible' : '';
 
-  // Dégâts (si offensif)
-  if (types.includes('offensif')) {
+  // Dégâts (si offensif) — masque la ligne pour les sorts Soutien/Contrôle/Méta
+  // qui ne font pas de dégâts d'impact (Enchantement et Affliction sont auto-suppressés).
+  // Sinon, sans formule explicite, on affichait le "1d6" de l'arme par défaut, ce qui
+  // donnait une impression trompeuse de dégâts directs.
+  const isEnchantOnly  = runes.includes('Enchantement') && !((s.degats || '').trim());
+  const isAfflictionSpell = runes.includes('Affliction'); // affliction = jamais d'impact
+  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell;
+  if (types.includes('offensif') && !_suppressImpactDmg) {
     const mainP   = getMainWeapon(c);
     // Override du sort sur la stat de dégâts > stat de l'arme principale
     const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
@@ -739,6 +784,59 @@ function _buildSortResume(s, c) {
     const maitriseStr = maitrise !== 0 ? ` + Maî(${maitrise > 0 ? '+'+maitrise : maitrise})` : '';
     const detail = `Dégâts · ${statLbl}(${modAtkStr})${maitriseStr}${monoStr}`;
     lines.push({ icon:'⚔️', label:deg, detail });
+  }
+
+  // ── Bloc Affliction (DoT ou État appliqué à la cible) ──
+  if (isAfflictionSpell) {
+    const afflictionMode = s.afflictionMode || 'dot';
+    const nbAff = runes.filter(r => r === 'Affliction').length;
+    const dd    = 11 + 3 * (nbAff - 1);
+    const duree = _calcSortDuree(s);
+    // Stat de JS : dérivée comme côté VTT
+    //  • mode 'etat' : prend la defaultSaveStat de l'état choisi
+    //  • mode 'dot'  : Constitution par défaut (poison/brûlure D&D)
+    //  • override explicite s.afflictionSaveStat respecté
+    let saveStat = 'constitution';
+    const lib = (_conditionsLibCache
+                || (typeof window._vttGetConditionLibrary === 'function'
+                    ? window._vttGetConditionLibrary() : []));
+    if (afflictionMode === 'etat' && s.afflictionEtatId) {
+      const etat = lib.find(c2 => c2.id === s.afflictionEtatId);
+      if (etat?.defaultSaveStat) saveStat = etat.defaultSaveStat;
+    }
+    if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
+    const STAT_SHORT = { force:'For', dexterite:'Dex', constitution:'Con',
+                         intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
+    const statLbl = STAT_SHORT[saveStat] || saveStat;
+    if (afflictionMode === 'etat' && s.afflictionEtatId) {
+      const etat = lib.find(c2 => c2.id === s.afflictionEtatId);
+      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : 'État inconnu';
+      lines.push({ icon:'⛓', label:`État appliqué : ${lbl}`,
+                   detail:`JS ${statLbl} DD ${dd} de la cible pour résister` });
+    } else {
+      const formula = _calcAfflictionDot(s);
+      lines.push({ icon:'🩸', label:`DoT ${formula} / tour`,
+                   detail:`${duree} tour${duree>1?'s':''} · JS ${statLbl} DD ${dd} de la cible` });
+    }
+  }
+
+  // ── Bloc Enchantement (bonus dégâts arme ou État appliqué à l'allié) ──
+  if (runes.includes('Enchantement')) {
+    const enchantMode = s.enchantMode || 'dmg';
+    const duree = _calcSortDuree(s);
+    if (enchantMode === 'etat' && s.enchantEtatId) {
+      const etat = (_conditionsLibCache || (typeof window._vttGetConditionLibrary === 'function' ? window._vttGetConditionLibrary() : []))
+                   .find(c2 => c2.id === s.enchantEtatId);
+      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : 'État inconnu';
+      lines.push({ icon:'✨', label:`Buff allié : ${lbl}`,
+                   detail:`Action Bonus · sans JS (effet bénéfique)` });
+    } else {
+      const formula = _calcEnchantDegats(s);
+      if (formula) {
+        lines.push({ icon:'✨', label:`Arme alliée +${formula}`,
+                     detail:`${duree} tour${duree>1?'s':''} · Action Bonus` });
+      }
+    }
   }
 
   // Protection : Soin ou CA selon protectionMode
@@ -819,20 +917,24 @@ function _buildSortResume(s, c) {
   }
 
   // Durée (base + rune Durée) — combo Sort canalisé persistant : tant que la concentration tient
-  const duree = _calcSortDuree(s);
-  if (duree) {
-    const nbDur  = runes.filter(r => r === 'Durée').length;
-    const dBase  = (s.dureeBase && s.dureeBase >= 2) ? s.dureeBase : 0;
+  // Affichée uniquement pour les sorts persistants (Enchant, Affliction, Protection CA, rune Durée)
+  if (_needsDureeBase(s)) {
+    const duree = _calcSortDuree(s);
+    const nbDur = runes.filter(r => r === 'Durée').length;
+    const hasOverride = s.dureeBase && s.dureeBase >= 2;
+    const baseVal = hasOverride ? s.dureeBase : 2;
+    const runeBonus = duree - baseVal;
     if (comboIds.has('canalise_persistant')) {
       lines.push({
         icon:'⏱️',
-        label: `Tant que concentration · +${duree - dBase} tours de grâce`,
-        detail: `Sort canalisé persistant · pas de plafond 10t · les ${duree - dBase} tours s'appliquent après rupture de concentration`,
+        label: `Tant que concentration · +${runeBonus} tours de grâce`,
+        detail: `Sort canalisé persistant · pas de plafond 10t · les ${runeBonus} tours s'appliquent après rupture de concentration`,
       });
     } else {
+      const baseLbl = hasOverride ? `${baseVal} base (override)` : '2 base';
       const detail = [
-        dBase > 0  ? `${dBase} tours de base` : '',
-        nbDur > 0  ? `+${duree - dBase} tours (rune Durée${nbDur > 1 ? ' ×'+nbDur : ''})` : '',
+        baseLbl,
+        nbDur > 0 ? `+${runeBonus} (Durée ×${nbDur}${nbDur>1?' avec chaînage':''})` : '',
       ].filter(Boolean).join(' · ');
       lines.push({ icon:'⏱️', label:`${duree} tour${duree > 1 ? 's' : ''}`, detail });
     }
@@ -947,7 +1049,8 @@ export function renderCharDeck(c, canEdit) {
     </div>
     <p class="cs-sort-info">
       <strong>Noyau + Runes.</strong> PM = 2 × (noyau + runes).
-      Dégâts sorts = arme principale <em>(${armeDeg})</em>. Soin base = 1d4.
+      Sorts offensifs : dégâts d'arme <em>(${armeDeg})</em> + bonus runes.
+      Soin base = 1d4. <em>Enchantement</em> et <em>Affliction</em> n'infligent pas de dégâts d'impact.
     </p>`;
 
   if (pmDelta !== 0) {
@@ -1008,28 +1111,73 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const statModS = statMod >= 0 ? `+${statMod}` : `${statMod}`;
   const maitrise = _getMaitriseBonus(c, mainP || {});
 
+  // ── Détection des modes "sans dégâts d'impact" ─────────────────────
+  const hasEnchant    = runesAll.includes('Enchantement');
+  const hasAffliction = runesAll.includes('Affliction');
+  const enchantMode   = s.enchantMode || 'dmg';
+  const afflictionMode = s.afflictionMode || 'dot';
+  // Enchantement-only : pas de dégâts d'impact si pas de degats explicite
+  const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
+  // Affliction = jamais d'impact (comme défini côté VTT)
+  const suppressImpactDmg = isEnchantOnly || hasAffliction;
+
   // Chips clés pour la ligne compacte
   const chips = [];
-  if (types.includes('offensif')) {
-    const degBase = _calcSortDegats(s, c); // inclut chaînage + maîtrise
+
+  // ── 1. Dégâts d'impact (offensif standard) ──
+  if (types.includes('offensif') && !suppressImpactDmg) {
+    const degBase = _calcSortDegats(s, c);
     let val = degBase;
     if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
     chips.push({ icon:'⚔️', val, color:'#ff6b6b' });
   }
+
+  // ── 2. Affliction (DoT formula OU état appliqué) ──
+  if (hasAffliction) {
+    if (afflictionMode === 'etat' && s.afflictionEtatId) {
+      // Lecture du label de l'état depuis le cache si dispo
+      const etat = _conditionsLibCache?.find(c2 => c2.id === s.afflictionEtatId)
+                || (typeof window._vttGetConditionLibrary === 'function'
+                    ? window._vttGetConditionLibrary().find(c2 => c2.id === s.afflictionEtatId)
+                    : null);
+      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : 'État';
+      chips.push({ icon:'⛓', val: lbl, color:'#8b5cf6' });
+    } else {
+      // Mode DoT : formule scalée
+      const dot = _calcAfflictionDot(s);
+      chips.push({ icon:'🩸', val: `${dot}/t`, color:'#8b5cf6' });
+    }
+  }
+
+  // ── 3. Enchantement (bonus dégâts OU état sur allié) ──
+  if (hasEnchant) {
+    if (enchantMode === 'etat' && s.enchantEtatId) {
+      const etat = _conditionsLibCache?.find(c2 => c2.id === s.enchantEtatId)
+                || (typeof window._vttGetConditionLibrary === 'function'
+                    ? window._vttGetConditionLibrary().find(c2 => c2.id === s.enchantEtatId)
+                    : null);
+      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : 'État';
+      chips.push({ icon:'✨', val: lbl, color:'#e8b84b' });
+    } else {
+      // Mode Dégâts : formule bonus sur arme alliée
+      const degAuto = _calcEnchantDegats(s);
+      if (degAuto) chips.push({ icon:'✨', val: `+${degAuto}`, color:'#e8b84b' });
+    }
+  }
+
+  // ── 4. Protection (CA ou Soin) ──
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     const activeIds = new Set(_activeCombos(s).map(co => co.id));
     if (mode === 'soin') {
-      // Combo Drain : pas de soin direct, % drain depuis les dégâts
       if (activeIds.has('drain')) {
         const pct = Math.round(_calcDrainPct(s) * 100);
         chips.push({ icon:'🩸', val: `Drain ${pct}%`, color:'#ff6b6b' });
       } else {
-        const soinBase = _calcSortSoin(s, c); // inclut maîtrise
+        const soinBase = _calcSortSoin(s, c);
         chips.push({ icon:'💚', val: soinBase, color:'#22c38e' });
       }
     } else {
-      // Mode CA — sauf si combo Bouclier réactif (réaction = pas de bonus CA, pas de soin)
       if (activeIds.has('bouclier_reactif')) {
         chips.push({ icon:'🛡️', val:'Bloque 1', color:'#22c38e' });
       } else {
@@ -1037,27 +1185,24 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       }
     }
   }
+
+  // ── 5. Cibles / zone / déplacement / durée ──
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff' });
   const zone  = _calcSortZone(s);
   if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}m`, color:'#b47fff' });
   const depl  = _calcSortDeplacement(s);
   if (depl)  chips.push({ icon: depl.mode==='push' ? '↗' : '↙', val:`${depl.distance}m`, color:'#e8b84b' });
-  const duree = _calcSortDuree(s);
-  if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af' });
-  if (runesAll.includes('Enchantement')) {
-    const slot = s.enchantSlot || 'arme';
-    if (slot === 'arme') {
-      const degAuto = _calcEnchantDegats(s);
-      if (degAuto) chips.push({ icon:'✨', val: degAuto, color:'#e8b84b' });
-    } else {
-      const icons = { tete:'👁️', torse:'👕', pieds:'👢' };
-      chips.push({ icon: icons[slot] || '✨', val: (s.enchantEffect||'').slice(0,14) || 'Enchant', color:'#e8b84b' });
-    }
+  // Durée : affichée uniquement pour les sorts persistants
+  if (_needsDureeBase(s)) {
+    const duree = _calcSortDuree(s);
+    if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af' });
   }
-  if (runesAll.includes('Affliction')) {
-    const slot = s.afflictionSlot || 'arme';
-    const icons = { arme:'⚔️', tete:'👁️', torse:'👕', pieds:'👢' };
-    chips.push({ icon: icons[slot] || '💀', val: (s.afflictionEffect||'').slice(0,14) || 'Affliction', color:'#8b5cf6' });
+
+  // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
+  if (hasAffliction) {
+    const nbAff = runesAll.filter(r => r === 'Affliction').length;
+    const dd = 11 + 3 * (nbAff - 1);
+    chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444' });
   }
 
   const pmVal = pmDelta !== 0
@@ -1563,8 +1708,9 @@ export async function openSortModal(idx, s) {
 
     <!-- ⑤ Champs conditionnels auto-affichés -->
 
-    <!-- Dégâts — visible si type offensif (auto-val avec toggle Custom) -->
-    <div id="s-degats-section" style="${typesInit.includes('offensif')?'':'display:none'}">
+    <!-- Dégâts — visible si type offensif (auto-val avec toggle Custom) ;
+         masqué quand Affliction est présente (la Puissance scale le DoT à la place) -->
+    <div id="s-degats-section" style="${(typesInit.includes('offensif') && !runesSrc.includes('Affliction'))?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-degats',
         label: '⚔️ Dégâts',
@@ -1655,31 +1801,23 @@ export async function openSortModal(idx, s) {
     <!-- Enchantement — visible si rune Enchantement > 0 -->
     <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
       <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours · Action Bonus</span></div>
+
+      <!-- Mode toggle : Dégâts (bonus arme) vs État (buff sur allié) -->
       <div class="form-group">
-        <label>Slot enchanté</label>
-        <div class="cs-slot-grid">
-          ${SPELL_SLOTS.map(opt => {
-            const cur = s?.enchantSlot || 'arme';
-            const sel = cur === opt.v;
-            return `<button type="button" id="s-enchant-slot-${opt.v}"
-              onclick="window._selectSpellSlot('enchant','${opt.v}')"
-              class="cs-slot-btn ${sel?'selected':''}">${opt.label}</button>`;
-          }).join('')}
+        <label>Mode</label>
+        <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr">
+          <button type="button" id="s-enchant-mode-dmg"
+            onclick="window._selectEnchantMode('dmg')"
+            class="cs-slot-btn ${(s?.enchantMode||'dmg')==='dmg'?'selected':''}">⚔️ Bonus dégâts arme</button>
+          <button type="button" id="s-enchant-mode-etat"
+            onclick="window._selectEnchantMode('etat')"
+            class="cs-slot-btn ${s?.enchantMode==='etat'?'selected':''}">✨ État sur allié</button>
         </div>
-        <input type="hidden" id="s-enchant-slot" value="${s?.enchantSlot||'arme'}">
+        <input type="hidden" id="s-enchant-mode" value="${s?.enchantMode||'dmg'}">
       </div>
-      <div class="form-group">
-        <label>Effet de l'enchantement <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">texte libre — décris l'effet thématique</span></label>
-        <div id="s-enchant-suggest" class="cs-spell-suggest" style="display:none">
-          <span class="cs-spell-suggest-icon">💡</span>
-          <span class="cs-spell-suggest-label">Suggestions :</span>
-          <div class="cs-spell-suggest-list" id="s-enchant-suggest-list"></div>
-        </div>
-        <textarea class="input-field" id="s-enchant-effect" rows="2"
-          oninput="window._markSpellEffectTouched('enchant')"
-          placeholder="ex : Vision Nocturne (Lumière+Tête), Vitesse +2 (Vent+Pieds)…">${s?.enchantEffect||''}</textarea>
-      </div>
-      <div id="s-enchant-degats-row" style="${(s?.enchantSlot||'arme')==='arme'?'':'display:none'}">
+
+      <!-- Mode Dégâts : formule des dégâts bonus sur l'arme alliée -->
+      <div id="s-enchant-dmg-block" style="${(s?.enchantMode||'dmg')==='dmg'?'':'display:none'}">
         ${_autoValHtml({
           fieldId: 's-enchant-degats',
           label: '⚔️ Dégâts bonus sur l\'arme enchantée',
@@ -1689,34 +1827,58 @@ export async function openSortModal(idx, s) {
           placeholder: 'ex : +1d6 Feu, +2 Foudre, 1d8…',
         })}
       </div>
+
+      <!-- Mode État : applique un état choisi à l'allié ciblé -->
+      <div id="s-enchant-etat-block" class="form-group" style="${s?.enchantMode==='etat'?'':'display:none'}">
+        <label>État appliqué à l'allié <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— buff/bénédiction ; durée selon l'état</span></label>
+        <select class="input-field" id="s-enchant-etat">
+          <option value="">— Aucun (effet libre uniquement) —</option>
+        </select>
+        <input type="hidden" id="s-enchant-etat-saved" value="${s?.enchantEtatId||''}">
+      </div>
     </div>
 
     <!-- Affliction — visible si rune Affliction > 0 -->
     <div id="s-affliction-section" class="cs-spell-slot-box cs-spell-slot-box--aff" style="${runesSrc.includes('Affliction')?'':'display:none'}">
-      <div class="cs-spell-slot-title">💀 Affliction <span>Cible ennemie · 2 tours · Action</span></div>
+      <div class="cs-spell-slot-title">💀 Affliction <span>Cible ennemie · 2 tours · Action · pas de dégâts d'impact</span></div>
+
+      <!-- Mode toggle : DoT (dégâts par tour) vs État (Entravé, Renversé, etc.) -->
       <div class="form-group">
-        <label>Slot affligé</label>
-        <div class="cs-slot-grid">
-          ${SPELL_SLOTS.map(opt => {
-            const cur = s?.afflictionSlot || 'arme';
-            const sel = cur === opt.v;
-            return `<button type="button" id="s-affliction-slot-${opt.v}"
-              onclick="window._selectSpellSlot('affliction','${opt.v}')"
-              class="cs-slot-btn ${sel?'selected':''}">${opt.label}</button>`;
-          }).join('')}
+        <label>Mode</label>
+        <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr">
+          <button type="button" id="s-affliction-mode-dot"
+            onclick="window._selectAfflictionMode('dot')"
+            class="cs-slot-btn ${(s?.afflictionMode||'dot')==='dot'?'selected':''}">🩸 DoT (dégâts/tour)</button>
+          <button type="button" id="s-affliction-mode-etat"
+            onclick="window._selectAfflictionMode('etat')"
+            class="cs-slot-btn ${s?.afflictionMode==='etat'?'selected':''}">⛓ État</button>
         </div>
-        <input type="hidden" id="s-affliction-slot" value="${s?.afflictionSlot||'arme'}">
+        <input type="hidden" id="s-affliction-mode" value="${s?.afflictionMode||'dot'}">
       </div>
-      <div class="form-group">
-        <label>Effet de l'affliction <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">texte libre — décris l'effet thématique</span></label>
-        <div id="s-affliction-suggest" class="cs-spell-suggest cs-spell-suggest--aff" style="display:none">
-          <span class="cs-spell-suggest-icon">💡</span>
-          <span class="cs-spell-suggest-label">Suggestions :</span>
-          <div class="cs-spell-suggest-list" id="s-affliction-suggest-list"></div>
-        </div>
-        <textarea class="input-field" id="s-affliction-effect" rows="2"
-          oninput="window._markSpellEffectTouched('affliction')"
-          placeholder="ex : Cécité (Lumière+Tête), DoT 1d4+2/tour (Feu+Torse), Entrave (Terre+Pieds)…">${s?.afflictionEffect||''}</textarea>
+
+      <!-- Slot legacy conservé en hidden pour rétro-compat des sorts existants -->
+      <input type="hidden" id="s-affliction-slot" value="${s?.afflictionSlot||'torse'}">
+      <input type="hidden" id="s-affliction-save-stat" value="${s?.afflictionSaveStat||''}">
+
+      <!-- DoT mode : formule de dégâts par tour (auto + custom override) -->
+      <div id="s-affliction-dot-block" style="${(s?.afflictionMode||'dot')==='dot'?'':'display:none'}">
+        ${_autoValHtml({
+          fieldId: 's-affliction-dot-formula',
+          label: '⚔️ Dégâts du DoT par tour',
+          autoValue:  _calcAfflictionDot(s || {}),
+          autoSource: _autoSourceAfflictionDot(s || {}),
+          currentValue: s?.afflictionDotFormula,
+          placeholder: 'ex : 1d4 +2, 3d6, 2d8 +4…',
+        })}
+      </div>
+
+      <!-- État mode : liste déroulante -->
+      <div id="s-affliction-etat-block" class="form-group" style="${s?.afflictionMode==='etat'?'':'display:none'}">
+        <label>État infligé sur échec <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— appliqué avec sa durée par défaut</span></label>
+        <select class="input-field" id="s-affliction-etat">
+          <option value="">— Aucun (effet libre uniquement) —</option>
+        </select>
+        <input type="hidden" id="s-affliction-etat-saved" value="${s?.afflictionEtatId||''}">
       </div>
     </div>
 
@@ -1735,14 +1897,17 @@ export async function openSortModal(idx, s) {
       <textarea class="input-field" id="s-effet" rows="2" placeholder="Décris brièvement le sort, son apparence, ses conditions particulières…">${s?.effet||''}</textarea>
     </div>
 
-    <!-- ⑧ Durée de base — visible si rune Durée OU Protection mode CA OU rune Enchant/Affliction -->
-    <div id="s-duree-base-section" class="form-group cs-duree-section" style="${_needsDureeBase(s)?'':'display:none'}">
-      <label>⏳ Durée de base <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">tours (min 2) · les runes Durée s'ajoutent par-dessus</span></label>
-      <div style="display:flex;gap:.4rem;align-items:center">
-        <input type="number" class="input-field" id="s-duree-base" min="2" max="100"
-          value="${s?.dureeBase||''}" placeholder="—" style="width:70px;text-align:center;padding:.3rem">
-        <span style="font-size:.8rem;color:var(--text-dim)">tours</span>
-      </div>
+    <!-- ⑧ Durée — auto-calculée (base 2 tours + Durée scalée), override possible.
+         Visible pour tous les sorts persistants (Enchant, Affliction, Protection CA, rune Durée). -->
+    <div id="s-duree-base-section" class="cs-duree-section" style="${_needsDureeBase(s)?'':'display:none'}">
+      ${_autoValHtml({
+        fieldId: 's-duree-base',
+        label: '⏳ Durée (tours)',
+        autoValue:  String(_calcSortDuree(s || {})),
+        autoSource: _autoSourceDuree(s || {}),
+        currentValue: s?.dureeBase,
+        placeholder: 'ex : 5',
+      })}
     </div>
 
     <!-- ⑧b Portée — override de la portée de l'arme (laisser vide = portée d'arme) -->
@@ -1785,10 +1950,18 @@ export async function openSortModal(idx, s) {
         </label>
       </div>` : (s?.mjValidated ? '<div class="cs-mj-validation cs-mj-validation--readonly is-on"><span class="cs-mj-validation-state"></span><span class="cs-mj-validation-info"><span class="cs-mj-validation-title">Sort validé par le MJ</span></span></div>' : '')}
 
-      <div class="form-group" style="margin-bottom:0">
+      <div class="form-group" style="margin-bottom:.5rem">
         <label style="font-size:.72rem">Notes / restrictions <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(affichées dans la fiche)</span></label>
         <textarea class="input-field" id="s-mj-notes" rows="2" placeholder="ex : soin va uniquement au lanceur">${s?.mjNotes||''}</textarea>
       </div>
+
+      ${STATE.isAdmin ? `
+      <div class="form-group" style="margin-bottom:0">
+        <label style="font-size:.72rem">Coût PM personnalisé <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(MJ — vide = auto selon runes ; set léger appliqué par-dessus, jamais en dessous de 0)</span></label>
+        <input type="number" class="input-field" id="s-pm-override" min="0" max="50"
+          value="${s?.pmOverride ?? ''}" placeholder="auto"
+          style="max-width:120px">
+      </div>` : ''}
     </div>
 
     </div><!-- /grid-col--right -->
@@ -1811,8 +1984,55 @@ export async function openSortModal(idx, s) {
       modal.addEventListener('input',  _updateSortPreview);
       modal.addEventListener('change', _updateSortPreview);
     }
+    // Populate les listes déroulantes d'état (affliction + enchantement)
+    _populateAfflictionEtatSelect();
+    _populateEnchantEtatSelect();
   }, 50);
 }
+
+// Cache des états en mémoire pour éviter de retaper Firestore à chaque dropdown
+let _conditionsLibCache = null;
+
+/** Source unique : lit world/conditions dans Firestore.
+ *  Plus aucun fallback codé en dur — la BDD est seedée par vtt.js au premier load.
+ *  Préfère la lib VTT en mémoire (live, à jour avec les éditions de session). */
+async function _loadAllConditions() {
+  // 1) Lib VTT en mémoire : live, prioritaire (la plus à jour si VTT chargé)
+  if (typeof window._vttGetConditionLibrary === 'function') {
+    const fromVtt = window._vttGetConditionLibrary();
+    if (Array.isArray(fromVtt) && fromVtt.length) return fromVtt;
+  }
+  // 2) Cache Firestore (déjà lu une fois cette session)
+  if (_conditionsLibCache) return _conditionsLibCache;
+  // 3) Lecture Firestore directe
+  try {
+    const d = await getDocData('world', 'conditions');
+    if (d?.library?.length) {
+      _conditionsLibCache = d.library.map(c => ({
+        id: c.id, label: c.label || c.id, icon: c.icon || '✨',
+      }));
+      return _conditionsLibCache;
+    }
+  } catch {}
+  return [];
+}
+
+/** Remplit un <select> d'état (Enchantement OU Affliction) depuis la BDD. */
+async function _populateConditionSelect(selectId, savedHiddenId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const savedVal = document.getElementById(savedHiddenId)?.value || '';
+  const lib = await _loadAllConditions();
+  if (!lib.length) {
+    sel.innerHTML = `<option value="">⚠️ Aucun état en BDD — ouvrir le VTT une fois pour initialiser</option>`;
+    return;
+  }
+  sel.innerHTML = `<option value="">— Aucun —</option>`
+    + lib.map(c => `<option value="${c.id}" ${c.id===savedVal?'selected':''}>${c.icon||''} ${c.label}</option>`).join('');
+}
+
+function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved'); }
+function _populateAfflictionEtatSelect() { return _populateConditionSelect('s-affliction-etat', 's-affliction-etat-saved'); }
 
 /** Re-style les boutons de type + ajuste la visibilité des sections conditionnelles. */
 function _applyTypeChange() {
@@ -1842,10 +2062,14 @@ function _refreshConditionalSections() {
   const isOffensive = window._sortTypesEdit.has('offensif');
   const counts      = window._runeCountsEdit || {};
   const hasProt     = (counts.Protection || 0) > 0;
+  const hasAffliction = (counts.Affliction || 0) > 0;
   const protMode    = document.getElementById('s-prot-mode')?.value || 'ca';
   const dSec = document.getElementById('s-degats-section');
   const sSec = document.getElementById('s-soin-section');
-  if (dSec) dSec.style.display = isOffensive ? '' : 'none';
+  // Affliction supprime les dégâts d'impact : la rune Puissance scale le DoT
+  // de l'affliction, pas un dégât direct. On cache donc la section Dégâts pour
+  // éviter le piège visuel "1d6 / Puissance ajoute 1d4" sans effet réel.
+  if (dSec) dSec.style.display = (isOffensive && !hasAffliction) ? '' : 'none';
   if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
 }
 
@@ -2031,6 +2255,8 @@ function _refreshAutoValChips() {
   apply('s-soin',           _calcSortSoin(s, c),    _autoSourceSoin(s));
   apply('s-ca',             _getSortCA(s),          _autoSourceCA(s));
   apply('s-enchant-degats', _calcEnchantDegats(s),  _autoSourceEnchantDeg(s));
+  apply('s-affliction-dot-formula', _calcAfflictionDot(s), _autoSourceAfflictionDot(s));
+  apply('s-duree-base', String(_calcSortDuree(s)), _autoSourceDuree(s));
 }
 window._refreshAutoValChips = _refreshAutoValChips;
 
@@ -2170,6 +2396,32 @@ window._applySpellSuggest = (cat) => {
  * Sélectionne un slot pour Enchantement ou Affliction.
  * groupId : 'enchant' ou 'affliction'
  */
+/** Toggle Dégâts/État pour l'enchantement. */
+window._selectEnchantMode = (mode) => {
+  const hidden = document.getElementById('s-enchant-mode');
+  if (hidden) hidden.value = mode;
+  document.getElementById('s-enchant-mode-dmg')?.classList.toggle('selected', mode === 'dmg');
+  document.getElementById('s-enchant-mode-etat')?.classList.toggle('selected', mode === 'etat');
+  const dmgBlock = document.getElementById('s-enchant-dmg-block');
+  const etatBlock = document.getElementById('s-enchant-etat-block');
+  if (dmgBlock) dmgBlock.style.display = mode === 'dmg' ? '' : 'none';
+  if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
+  window._updateSortPreview?.();
+};
+
+/** Toggle DoT/État pour l'affliction (analogie ProtMode CA/Soin). */
+window._selectAfflictionMode = (mode) => {
+  const hidden = document.getElementById('s-affliction-mode');
+  if (hidden) hidden.value = mode;
+  document.getElementById('s-affliction-mode-dot')?.classList.toggle('selected', mode === 'dot');
+  document.getElementById('s-affliction-mode-etat')?.classList.toggle('selected', mode === 'etat');
+  const dotBlock = document.getElementById('s-affliction-dot-block');
+  const etatBlock = document.getElementById('s-affliction-etat-block');
+  if (dotBlock) dotBlock.style.display = mode === 'dot' ? '' : 'none';
+  if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
+  window._updateSortPreview?.();
+};
+
 window._selectSpellSlot = (groupId, slotV) => {
   const hidden = document.getElementById(`s-${groupId}-slot`);
   if (hidden) hidden.value = slotV;
@@ -2224,10 +2476,13 @@ function _buildSortFromDOM() {
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
     actionOverride: window._sortActionEdit || null,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
-    enchantSlot:      document.getElementById('s-enchant-slot')?.value || 'arme',
-    enchantEffect:    document.getElementById('s-enchant-effect')?.value || '',
+    enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+    enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+    enchantSlot:      'arme', // legacy compat (preview live, sera écrasé à la save par la valeur en BDD)
+    enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
     afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'arme',
     afflictionEffect: document.getElementById('s-affliction-effect')?.value || '',
+    afflictionEtatId: document.getElementById('s-affliction-etat')?.value || null,
     zoneW: null,
     zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
@@ -2318,11 +2573,18 @@ export async function saveSort(idx) {
       ? (document.getElementById('s-mj-validated')?.checked || false)
       : prevValidated;
 
+    // PM override (MJ uniquement) : si vide → null (utilise autoPm). Si admin n'existe pas ce champ.
+    const pmOvrRaw = STATE.isAdmin ? document.getElementById('s-pm-override')?.value : null;
+    const pmOvrInt = pmOvrRaw != null && pmOvrRaw !== '' ? parseInt(pmOvrRaw) : null;
+    const pmOverride = (pmOvrInt != null && Number.isFinite(pmOvrInt) && pmOvrInt >= 0)
+      ? pmOvrInt
+      : (STATE.isAdmin ? null : (idx >= 0 ? sorts[idx]?.pmOverride ?? null : null));
     const newSort = {
       icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
       mjValidated,
       nom:      document.getElementById('s-nom')?.value||'Sort',
       pm:       autoPm,
+      pmOverride,
       noyau,
       noyauTypeId,
       runes,
@@ -2338,10 +2600,20 @@ export async function saveSort(idx) {
       actif:         idx>=0 ? sorts[idx].actif : false,
       actionOverride,
       enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
-      enchantSlot:      document.getElementById('s-enchant-slot')?.value || 'arme',
-      enchantEffect:    document.getElementById('s-enchant-effect')?.value || '',
-      afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'arme',
-      afflictionEffect: document.getElementById('s-affliction-effect')?.value || '',
+      enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+      enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+      // enchantSlot legacy : conservé en BDD pour rétro-compat des combos, mais
+      // l'UI n'expose plus de slot. Défaut 'arme' aligné sur le bonus dégâts.
+      enchantSlot:      idx >= 0 ? (sorts[idx]?.enchantSlot || 'arme') : 'arme',
+      enchantEffect:    document.getElementById('s-enchant-effect')?.value
+                        ?? (idx >= 0 ? (sorts[idx]?.enchantEffect || '') : ''),
+      afflictionSlot:    document.getElementById('s-affliction-slot')?.value || 'torse',
+      afflictionSaveStat: document.getElementById('s-affliction-save-stat')?.value || 'constitution',
+      afflictionMode:    document.getElementById('s-affliction-mode')?.value || 'dot',
+      afflictionEffect:  document.getElementById('s-affliction-effect')?.value
+                         ?? (idx >= 0 ? (sorts[idx]?.afflictionEffect || '') : ''),
+      afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
+      afflictionEtatId:  document.getElementById('s-affliction-etat')?.value || null,
       zoneW: null,
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,

@@ -120,7 +120,8 @@
       "Bash(node --check assets/js/features/agenda.js)",
       "Bash(node --check assets/js/features/bastion.js)",
       "Bash(node --check assets/js/features/vtt-spectator.js)",
-      "Bash(grep -E \"\\\\.js$\")"
+      "Bash(grep -E \"\\\\.js$\")",
+      "Bash(grep -v \"//\")"
     ]
   }
 }
