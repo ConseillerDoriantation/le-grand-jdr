@@ -1636,6 +1636,7 @@ const PAGES = {
           <button class="btn btn-outline" onclick="window.openSpellMatricesAdmin ? window.openSpellMatricesAdmin() : import('./assets/js/features/characters.js').then(() => window.openSpellMatricesAdmin?.())">🔮 Matrices de sorts</button>
           <button class="btn btn-outline" onclick="window._ouvrirGestionDes ? window._ouvrirGestionDes() : import('./assets/js/features/histoire.js').then(() => window._ouvrirGestionDes?.())">🎲 Compétences de dés</button>
           <button class="btn btn-outline" onclick="window._ouvrirGestionEmotes ? window._ouvrirGestionEmotes() : import('./assets/js/features/vtt.js').then(() => window._ouvrirGestionEmotes?.())">😄 Émotes VTT</button>
+          <button class="btn btn-outline" onclick="window._vttConditionConfig ? window._vttConditionConfig() : import('./assets/js/features/vtt.js').then(() => window._vttConditionConfig?.())">🎭 États & conditions</button>
         </div>
       </div>`;
   },

@@ -130,6 +130,92 @@ let _rulerActive  = false;
 let _rulerOrigin  = null;
 let _rulerHideTimer = null;
 
+// ══════════════════════════════════════════════════════════════════════════════
+// LIBRAIRIE DES ÉTATS (CONDITIONS) — inspirée des conditions D&D 5e
+// ──────────────────────────────────────────────────────────────────────────────
+// Stocké sur le token : t.conditions = [{
+//   id, source, saveDC, saveStat, expiresAtRound, appliedAt
+// }]
+// `effects` est consommé par le moteur de combat pour appliquer
+// automatiquement avantage/désavantage et restrictions de déplacement.
+// ══════════════════════════════════════════════════════════════════════════════
+const CONDITION_DEFAULT_LIBRARY = [
+  { id:'blinded',       label:'Aveuglé',     icon:'🙈', color:'#6b7280',
+    desc:'Ne peut pas voir, échec auto aux tests de Vue. Ses attaques : désavantage. Attaques contre lui : avantage.',
+    defaultSaveStat:'constitution', defaultDC:12,
+    effects:{ attackBy:'dis', attackAgainst:'adv' } },
+  { id:'charmed',       label:'Charmé',      icon:'💖', color:'#ec4899',
+    desc:'Ne peut pas attaquer le charmeur ni le viser par un effet nuisible. Avantage social pour le charmeur.',
+    defaultSaveStat:'sagesse',     defaultDC:13,
+    effects:{} },
+  { id:'deafened',      label:'Assourdi',    icon:'🔇', color:'#94a3b8',
+    desc:'Ne peut pas entendre, échec auto aux tests basés sur l\'Ouïe.',
+    defaultSaveStat:'constitution', defaultDC:10,
+    effects:{} },
+  { id:'frightened',    label:'Effrayé',     icon:'😱', color:'#f59e0b',
+    desc:'Désavantage à ses jets tant que la source est en vue. Ne peut s\'en approcher volontairement.',
+    defaultSaveStat:'sagesse',     defaultDC:13,
+    effects:{ attackBy:'dis' } },
+  { id:'grappled',      label:'Empoigné',    icon:'🤼', color:'#a16207',
+    desc:'Vitesse 0. Prend fin si le saisisseur est neutralisé.',
+    defaultSaveStat:'force',       defaultDC:12,
+    effects:{ movementMod:0 } },
+  { id:'incapacitated', label:'Neutralisé',  icon:'💤', color:'#737373',
+    desc:'Ne peut effectuer aucune action ni réaction.',
+    defaultSaveStat:'constitution', defaultDC:12,
+    effects:{ cantAct:true } },
+  { id:'invisible',     label:'Invisible',   icon:'👻', color:'#9ca3af',
+    desc:'Ne peut être vu sans détection. Avantage à ses attaques, désavantage aux attaques contre lui.',
+    defaultSaveStat:null,           defaultDC:null,
+    effects:{ attackBy:'adv', attackAgainst:'dis' } },
+  { id:'paralyzed',     label:'Paralysé',    icon:'⚡', color:'#fbbf24',
+    desc:'Neutralisé, ne peut bouger ni parler. Échec auto JS Force/Dex. Avantage aux attaques. CaC à ≤1,50m = critique.',
+    defaultSaveStat:'constitution', defaultDC:14,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
+  { id:'petrified',     label:'Pétrifié',    icon:'🗿', color:'#78716c',
+    desc:'Transformé en pierre. Neutralisé, vitesse 0. Résistance à tous les dégâts (50%).',
+    defaultSaveStat:'constitution', defaultDC:15,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, dmgReductionPct:50 } },
+  { id:'poisoned',      label:'Empoisonné',  icon:'☠️', color:'#22c55e',
+    desc:'Désavantage aux jets d\'attaque et aux tests de caractéristique.',
+    defaultSaveStat:'constitution', defaultDC:12,
+    effects:{ attackBy:'dis' } },
+  { id:'prone',         label:'À terre',     icon:'🛌', color:'#a78bfa',
+    desc:'Désavantage à ses attaques. Avantage aux attaques au CaC ≤1,50m, désavantage à distance. Se relever coûte ½ mouvement.',
+    defaultSaveStat:null,           defaultDC:null,
+    effects:{ attackBy:'dis', attackAgainstMelee:'adv', attackAgainstRanged:'dis' } },
+  { id:'restrained',    label:'Entravé',     icon:'⛓️', color:'#dc2626',
+    desc:'Vitesse 0. Désavantage à ses attaques et JS Dextérité. Avantage aux attaques contre lui.',
+    defaultSaveStat:'force',       defaultDC:13,
+    effects:{ movementMod:0, attackBy:'dis', attackAgainst:'adv' } },
+  { id:'stunned',       label:'Étourdi',     icon:'💫', color:'#06b6d4',
+    desc:'Neutralisé, ne peut bouger. Échec auto JS Force/Dex. Avantage aux attaques contre lui.',
+    defaultSaveStat:'constitution', defaultDC:13,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true } },
+  { id:'unconscious',   label:'Inconscient', icon:'😵', color:'#0f172a',
+    desc:'Neutralisé, à terre, lâche ses objets. Échec auto JS Force/Dex. Avantage aux attaques. CaC ≤1,50m = critique.',
+    defaultSaveStat:'constitution', defaultDC:15,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
+  { id:'silenced',      label:'Silencé',     icon:'🤐', color:'#0ea5e9',
+    desc:'Ne peut pas lancer de sort ni utiliser de compétence. Les attaques d\'arme et les actions d\'objets restent disponibles.',
+    defaultSaveStat:'constitution', defaultDC:13, defaultDuration:2,
+    effects:{ cantCastSpells:true } },
+  { id:'marked',        label:'Marqué',      icon:'🎯', color:'#f43f5e',
+    desc:'Avantage aux attaques contre la cible et +1d6 dégâts subis. L\'effet se consomme dès qu\'un coup touche.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:null,
+    effects:{ attackAgainst:'adv', dmgTakenBonus:'1d6', consumedByAttackAgainst:true } },
+];
+
+// Librairie en mémoire — peut être surchargée par les overrides MJ chargés depuis Firestore
+let CONDITION_LIBRARY = CONDITION_DEFAULT_LIBRARY.map(c => ({ ...c, effects: { ...c.effects } }));
+let CONDITION_BY_ID   = Object.fromEntries(CONDITION_LIBRARY.map(c => [c.id, c]));
+const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
+
+function _rebuildConditionIndex() {
+  CONDITION_BY_ID = Object.fromEntries(CONDITION_LIBRARY.map(c => [c.id, c]));
+}
+function _isCustomCondition(id) { return !CONDITION_DEFAULT_IDS.has(id); }
+
 // Mapping abréviation compétence → clé getMod
 const _STAT_KEY = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
 const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };
@@ -965,6 +1051,37 @@ function _buildShape(t) {
       text:`${_toursLeft}↺`, fontSize:7, fontStyle:'bold',
       fill:'#818cf8', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
   }
+  // ── Badges d'états (conditions) — top-left du token ──────────────
+  const _condRound = _session?.combat?.round ?? 0;
+  const _activeConditions = (t.conditions || []).filter(c =>
+    c.expiresAtRound == null || _condRound === 0 || _condRound <= c.expiresAtRound
+  );
+  if (_activeConditions.length) {
+    // Empilage : jusqu'à 4 badges visibles, sinon "+N"
+    const maxShow = 4;
+    const display = _activeConditions.slice(0, maxShow);
+    const overflow = _activeConditions.length - display.length;
+    display.forEach((cond, i) => {
+      const lib = CONDITION_BY_ID[cond.id] || { icon: '❓', color: '#888' };
+      const cx = -rx*.7;
+      const cy = -ry*.7 + i * 20;
+      g.add(new K.Circle({ x:cx, y:cy, radius:10,
+        fill: lib.color, stroke: '#000', strokeWidth: 1.2,
+        listening:false, name:'cond-bg' }));
+      g.add(new K.Text({ x:cx-10, y:cy-7, width:20, height:14,
+        text: lib.icon, fontSize:11, fontStyle:'bold',
+        fontFamily:'Inter,sans-serif', align:'center', verticalAlign:'middle',
+        listening:false, name:'cond-ic' }));
+    });
+    if (overflow > 0) {
+      const cx = -rx*.7, cy = -ry*.7 + maxShow * 20;
+      g.add(new K.Circle({ x:cx, y:cy, radius:10,
+        fill: '#374151', stroke: '#000', strokeWidth: 1.2, listening:false }));
+      g.add(new K.Text({ x:cx-10, y:cy-6, width:20, height:12,
+        text: `+${overflow}`, fontSize:9, fontStyle:'bold',
+        fill:'#fff', fontFamily:'Inter,sans-serif', align:'center', listening:false }));
+    }
+  }
   // ── Nom ───────────────────────────────────────────────────────────
   g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2, y:_lblY,
     width:bW, align:'center', fontSize:11, fontStyle:'bold', fill:'#fff',
@@ -1184,7 +1301,14 @@ function _patchShape(id) {
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   // Si la taille a changé (modif bestiaire ou override), reconstruire
   const sizeMismatch = (g.getAttr('tokenW') || 1) !== sw || (g.getAttr('tokenH') || 1) !== sh;
-  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch) {
+  // Conditions : si le nombre d'états actifs change, reconstruire (badges canvas)
+  const _condRoundP = _session?.combat?.round ?? 0;
+  const _activeCondCount = (e.data.conditions || []).filter(c =>
+    c.expiresAtRound == null || _condRoundP === 0 || _condRoundP <= c.expiresAtRound
+  ).length;
+  const _renderedCondCount = g.find('.cond-ic').length;
+  const condMismatch = _activeCondCount !== _renderedCondCount;
+  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || condMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
     _tokens[id] = { ...e, shape };
@@ -1457,11 +1581,12 @@ function _showAttackRange(t) {
   const K = window.Konva;
   const options = _buildAttackOptions(t);
   if (!options.length) return;
-  // Portée "naturelle" = la plus courte parmi toutes les options (typiquement l'arme).
-  // Les cases dans cette portée s'affichent en ROUGE SOLIDE (attaque immédiate).
-  // Les cases atteintes uniquement par des sorts/actions longues s'affichent en
-  // VIOLET POINTILLÉ — clair que seul un sort y arrive.
-  const minPortee = Math.min(...options.map(o => o.portee));
+  // Portée "naturelle" = celle de l'ARME du perso (option sans sortIdx et sans
+  // _itemAction). C'est ce que le joueur considère comme sa portée de base, même
+  // pour un grimoire portée 8. Fallback : plus courte portée si aucune arme
+  // identifiable (tokens enemy/sentinelle).
+  const weaponOpt = options.find(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf);
+  const weaponPortee = weaponOpt ? weaponOpt.portee : Math.min(...options.map(o => o.portee));
   const { cols, rows } = _activePage;
   const sd = _tokenDims(t);
 
@@ -1474,14 +1599,19 @@ function _showAttackRange(t) {
     const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
     const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
 
-    // Trouve la plus PETITE portée parmi les options qui peuvent atteindre cette case.
-    let bestPortee = Infinity;
-    for (const o of options) {
-      if (_reachByOpt(dx, dy, o.portee) && o.portee < bestPortee) bestPortee = o.portee;
+    // Une case est ROUGE si elle est atteinte par l'arme principale.
+    // VIOLET pointillé si elle n'est atteinte que par des sorts/actions plus longues.
+    const reachedByWeapon = weaponOpt ? _reachByOpt(dx, dy, weaponPortee) : false;
+    let reachedByOther = false;
+    if (!reachedByWeapon) {
+      for (const o of options) {
+        if (o === weaponOpt) continue;
+        if (_reachByOpt(dx, dy, o.portee)) { reachedByOther = true; break; }
+      }
     }
-    if (bestPortee === Infinity) continue;
+    if (!reachedByWeapon && !reachedByOther) continue;
 
-    const isPrimary = bestPortee === minPortee;
+    const isPrimary = reachedByWeapon;
     const rect = isPrimary
       // Portée principale (arme / attaque immédiate) — rouge plein
       ? new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
@@ -2321,7 +2451,10 @@ function _buildAttackOptions(t) {
   });
 
   // ── Tous les sorts actifs du deck ──
-  if (c?.deck_sorts?.length) {
+  // Silence : si le porteur a un état avec cantCastSpells, on saute toute la
+  // génération des options de sort. Les attaques d'arme et actions d'objet restent.
+  const _silenced = _hasConditionEffect(t, 'cantCastSpells');
+  if (!_silenced && c?.deck_sorts?.length) {
     const mainP2      = c?.equipement?.['Main principale'];
     const sStatKey    = mainP2?.statAttaque || mainP2?.toucherStat || 'force';
     const sStatMod    = getMod(c, sStatKey);
@@ -2351,11 +2484,14 @@ function _buildAttackOptions(t) {
 
       // Coût PM : applique le delta du set, puis vérifie si cible gratuite (multi-cibles)
       // ou si le sort vient d'être déclenché depuis un suspended_spell (gratuit one-shot).
-      const basePm     = Math.max(0, (parseInt(s.pm) || 0) + spellPmDelta);
+      const pmRaw      = parseInt(s.pm) || 0;
+      const basePm     = Math.max(0, pmRaw + spellPmDelta);
       const freeKey    = `${t.id}_${idx}`;
       const freeCasts  = _multiCastFree.get(freeKey) || 0;
       const isOneShot  = _freeNextCast.has(freeKey);
       const cout       = (freeCasts > 0 || isOneShot) ? 0 : basePm;
+      // Métadonnées set léger (exposées au picker pour l'affichage du badge PM)
+      const _pmMeta    = { pmRaw, pmSetDelta: spellPmDelta };
 
       // Infos catégorie pour le tri dans le modal VTT
       const sortCats = c.sort_cats || [];
@@ -2385,7 +2521,7 @@ function _buildAttackOptions(t) {
         options.push({
           id: `sort_${idx}`, icon: '🪄', label: s.nom || `Sort ${idx+1}`,
           dice: '', // pas de formule d'impact
-          portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
           zoneW, zoneH, mods,
           isEnchant: true,
           enchantFormula: mods.enchantArmeDmg.formula,
@@ -2413,7 +2549,7 @@ function _buildAttackOptions(t) {
         options.push({
           id: `sort_${idx}`, icon: sortIcon, label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: fullFormula,
-          portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
           zoneW, zoneH, mods,
           typeRules: spellTypeRules,
           damageTypeId: spellTypeId,
@@ -2430,9 +2566,7 @@ function _buildAttackOptions(t) {
       } else if (types.includes('defensif') && protMode === 'soin') {
         const soinFormula = _vttSortSoinFormula(s, c);
         const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
-        // Pour l'affichage : exposer la stat utilisée (override ou auto)
-        // — la valeur est déjà bakée dans la formule, mais on l'affiche en pill
-        // pour que le joueur comprenne d'où vient le "+X".
+        // Stat de soin (override > auto noyau/arme)
         let soinStatKey;
         if (s.degatsStat) {
           soinStatKey = s.degatsStat;
@@ -2448,13 +2582,18 @@ function _buildAttackOptions(t) {
           }
         }
         const soinStatMod = c ? getMod(c, soinStatKey) : 0;
+        // Stat de toucher (override > stat de l'arme), pour le jet d20 → DD 2
+        const soinTouchStat = s.toucherStat || wTchStat;
+        const soinTouchMod  = c ? getMod(c, soinTouchStat) : wTchMod;
         options.push({
           id: `sort_${idx}`, icon: '💚', label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: soinFormula,
-          portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
           zoneW, zoneH, mods,
           isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
           dmgStatMod: soinStatMod, dmgStatLabel: statShort(soinStatKey) || soinStatKey,
+          toucherMod: soinTouchMod, toucherSetBonus: wSetBonus,
+          toucherStatLabel: statShort(soinTouchStat) || soinTouchStat,
           actionType,
           ..._catMeta,
         });
@@ -2463,7 +2602,7 @@ function _buildAttackOptions(t) {
         options.push({
           id: `sort_${idx}`, icon: '🛡️', label: s.nom || `Sort ${idx+1}`,
           dice: s.ca || 'CA +2 (2 tours)',
-          portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
           zoneW, zoneH, mods,
           isCaSort: true, halfOnMiss: false,
           caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
@@ -2475,7 +2614,7 @@ function _buildAttackOptions(t) {
         options.push({
           id: `sort_${idx}`, icon: sortIcon, label: s.nom || `Sort ${idx+1}`,
           dice: s.effet ? s.effet.slice(0, 40) : '—',
-          portee, pmCost: cout, basePm, sortIdx: idx, nbCibles,
+          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
           zoneW, zoneH, mods,
           isUtil: true, halfOnMiss: false,
           actionType,
@@ -2661,12 +2800,17 @@ async function _execAttack(srcId, tgtId) {
     // Construit ici, injecté dans .vtt-aopt-head pour qu'il soit la 1re info
     // visible avec le nom du sort, sans noyer les pills techniques.
     let pmBadge = '';
+    // Indicateur set léger : delta négatif → coût réduit visible sur le badge
+    const _setReduc = o.pmSetDelta && o.pmSetDelta < 0;
+    const _setExtra = _setReduc
+      ? `<span class="vtt-aopt-pm-set" title="Set léger : −${-o.pmSetDelta} PM (coût brut ${o.pmRaw})">🍃 −${-o.pmSetDelta}</span>`
+      : '';
     if (o.pmCost > 0) {
-      pmBadge = `<span class="vtt-aopt-pm">🔮 ${o.pmCost} PM</span>`;
+      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">🔮 ${o.pmCost} PM${_setExtra}</span>`;
     } else if (o.pmCost === 0 && o.basePm > 0) {
       pmBadge = `<span class="vtt-aopt-pm vtt-aopt-pm--free" title="Cast offert (multi-cibles ou sort suspendu déclenché)">🎁 Gratuit</span>`;
     } else if (o.basePm > 0) {
-      pmBadge = `<span class="vtt-aopt-pm">🔮 ${o.basePm} PM</span>`;
+      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">🔮 ${o.basePm} PM${_setExtra}</span>`;
     }
 
     // Portée — si "soi-même", on n'affiche pas la portée (sans objet)
@@ -2729,10 +2873,12 @@ async function _execAttack(srcId, tgtId) {
       </button>`;
   };
 
-  // Construire le HTML des options groupées (chaque section en card visuelle)
+  // Construire le HTML des options groupées + tabs filtrables.
+  // Chaque section porte data-tab-id, chaque option porte data-name pour la recherche.
   let optsHtml = '';
-  const _section = (icon, title, color, count, body) => `
-    <div class="vtt-aopt-section">
+  const tabs = []; // { id, icon, title, color, count }
+  const _section = (tabId, icon, title, color, count, body) => `
+    <div class="vtt-aopt-section" data-tab-id="${tabId}">
       <div class="vtt-aopt-section-hd" style="--cat-col:${color}">
         <span class="vtt-aopt-section-icon">${icon}</span>
         <span class="vtt-aopt-section-title">${title}</span>
@@ -2740,11 +2886,17 @@ async function _execAttack(srcId, tgtId) {
       </div>
       <div class="vtt-aopt-section-body">${body}</div>
     </div>`;
+  const _optBtnWithName = (o, i) => {
+    const html = _optBtn(o, i);
+    const name = (o.label || '').toLowerCase().replace(/"/g, '');
+    return html.replace('<button ', `<button data-name="${name}" `);
+  };
 
   // ── Armes ──
   if (weaponOpts.length) {
-    const body = weaponOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
-    optsHtml += _section('⚔️', 'Attaques d\'arme', '#94a3b8', weaponOpts.length, body);
+    const body = weaponOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
+    optsHtml += _section('weapons', '⚔️', 'Attaques d\'arme', '#94a3b8', weaponOpts.length, body);
+    tabs.push({ id:'weapons', icon:'⚔️', title:'Armes', color:'#94a3b8', count:weaponOpts.length });
   }
 
   // ── Sorts (groupés par catégorie ou non) ──
@@ -2755,28 +2907,33 @@ async function _execAttack(srcId, tgtId) {
         if (!catOpts.length) return;
         const title = cat.nom || 'Autres sorts';
         const color = cat.couleur || '#818cf8';
-        const body  = catOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
-        optsHtml += _section('✨', title, color, catOpts.length, body);
+        const tabId = `cat_${cat.id}`;
+        const body  = catOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
+        optsHtml += _section(tabId, '✨', title, color, catOpts.length, body);
+        tabs.push({ id:tabId, icon:'✨', title, color, count:catOpts.length });
       });
     } else {
-      const body = spellOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
-      optsHtml += _section('✨', 'Sorts', '#818cf8', spellOpts.length, body);
+      const body = spellOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
+      optsHtml += _section('spells', '✨', 'Sorts', '#818cf8', spellOpts.length, body);
+      tabs.push({ id:'spells', icon:'✨', title:'Sorts', color:'#818cf8', count:spellOpts.length });
     }
   }
 
   // ── Actions d'objets (potions, parchemins, armes spéciales…) ──
   if (itemActOpts.length) {
-    const body = itemActOpts.map(o => _optBtn(o, inRange.indexOf(o))).join('');
-    optsHtml += _section('🎯', 'Actions d\'objets', '#fbbf24', itemActOpts.length, body);
+    const body = itemActOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
+    optsHtml += _section('items', '🎯', 'Actions d\'objets', '#fbbf24', itemActOpts.length, body);
+    tabs.push({ id:'items', icon:'🎯', title:'Objets', color:'#fbbf24', count:itemActOpts.length });
   }
 
   // ── Section Courir (si combat actif et pas encore utilisé) ──────────
   const inCombat = !!_session?.combat?.active;
   const couru    = (src.bonusMvt || 0) > 0;
   const canEditSrc = STATE.isAdmin || src.ownerId === STATE.user?.uid;
-  const courirHtml = (inCombat && !couru && canEditSrc)
-    ? _section('🏃', 'Déplacement', '#4ade80', 1, `
-        <button class="vtt-aopt" onclick="window._vttCourir('${srcId}');window._closeActionModal?.()">
+  let courirHtml = '';
+  if (inCombat && !couru && canEditSrc) {
+    const body = `
+        <button class="vtt-aopt" data-name="courir" onclick="window._vttCourir('${srcId}');window._closeActionModal?.()">
           <div class="vtt-aopt-icon">🏃</div>
           <div class="vtt-aopt-body">
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">Courir</span></div>
@@ -2784,8 +2941,40 @@ async function _execAttack(srcId, tgtId) {
               <span class="vtt-aopt-pill" style="color:#4ade80;border-color:rgba(74,222,128,.4)">+${lS.displayMovement??6} cases ce tour</span>
             </div>
           </div>
-        </button>`)
-    : '';
+        </button>`;
+    courirHtml = _section('move', '🏃', 'Déplacement', '#4ade80', 1, body);
+    tabs.push({ id:'move', icon:'🏃', title:'Déplacement', color:'#4ade80', count:1 });
+  }
+
+  // Tabs HTML : "Tous" en premier, puis une tab par catégorie (si plus d'une catégorie)
+  const totalCount = tabs.reduce((s, t) => s + t.count, 0);
+  const showTabs = tabs.length > 1;
+  const tabsHtml = showTabs ? `
+    <div class="vtt-aopt-tabs" role="tablist">
+      <button type="button" class="vtt-aopt-tab is-active" data-tab="__all"
+        onclick="window._vttAoptFilter('__all', this)">
+        <span class="vtt-aopt-tab-ic">⚡</span>
+        <span class="vtt-aopt-tab-lbl">Tous</span>
+        <span class="vtt-aopt-tab-cnt">${totalCount}</span>
+      </button>
+      ${tabs.map(t => `
+        <button type="button" class="vtt-aopt-tab" data-tab="${t.id}"
+          style="--tab-col:${t.color}"
+          onclick="window._vttAoptFilter('${t.id}', this)">
+          <span class="vtt-aopt-tab-ic">${t.icon}</span>
+          <span class="vtt-aopt-tab-lbl">${_esc(t.title)}</span>
+          <span class="vtt-aopt-tab-cnt">${t.count}</span>
+        </button>`).join('')}
+    </div>` : '';
+
+  const searchHtml = totalCount >= 6 ? `
+    <div class="vtt-aopt-search">
+      <span class="vtt-aopt-search-ic">🔍</span>
+      <input type="text" class="vtt-aopt-search-input" placeholder="Filtrer par nom…"
+        oninput="window._vttAoptSearch(this.value)" autofocus>
+      <button type="button" class="vtt-aopt-search-clr" title="Effacer"
+        onclick="const i=this.previousElementSibling;i.value='';window._vttAoptSearch('');i.focus()">✕</button>
+    </div>` : '';
 
   openModal('⚔️ Choisir une action', `
     <div class="vtt-form vtt-aopt-modal">
@@ -2798,11 +2987,78 @@ async function _execAttack(srcId, tgtId) {
         <span class="vtt-aopt-modal-dist" title="Distance source → cible">📏 ${dist}c</span>
       </div>
       ${pmBar}
+      ${tabsHtml}
+      ${searchHtml}
       <div class="vtt-aopt-list">${optsHtml}${courirHtml}</div>
-      <div style="text-align:right;margin-top:.5rem">
+      <div class="vtt-aopt-empty" style="display:none">
+        <span style="opacity:.5">Aucune action ne correspond.</span>
+      </div>
+      <div class="vtt-aopt-footer">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
       </div>
     </div>`);
+  // Marque #modal-box pour le styling spécifique (plus fiable que :has() seul).
+  // Nettoyé à chaque réouverture (au cas où) et au close via observer.
+  const box = document.getElementById('modal-box');
+  if (box) {
+    box.classList.add('modal--aopt');
+    const overlay = document.getElementById('modal-overlay');
+    if (overlay && !overlay._aoptObs) {
+      const obs = new MutationObserver(() => {
+        if (!overlay.classList.contains('show')) {
+          box.classList.remove('modal--aopt');
+        }
+      });
+      obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+      overlay._aoptObs = obs;
+    }
+  }
+}
+
+/** Filtre les sections du picker d'actions par tab. '__all' = tout afficher. */
+window._vttAoptFilter = (tabId, btn) => {
+  document.querySelectorAll('.vtt-aopt-tab').forEach(b => b.classList.remove('is-active'));
+  btn?.classList.add('is-active');
+  document.querySelectorAll('.vtt-aopt-section').forEach(s => {
+    s.style.display = (tabId === '__all' || s.dataset.tabId === tabId) ? '' : 'none';
+  });
+  // Re-applique le filtre de recherche (au cas où)
+  const q = document.querySelector('.vtt-aopt-search-input')?.value || '';
+  if (q) window._vttAoptSearch(q);
+  else _vttAoptCheckEmpty();
+};
+
+/** Filtre les options du picker par texte (cherche dans data-name). */
+window._vttAoptSearch = (raw) => {
+  const q = (raw || '').toLowerCase().trim();
+  const activeTab = document.querySelector('.vtt-aopt-tab.is-active')?.dataset.tab || '__all';
+  document.querySelectorAll('.vtt-aopt-section').forEach(s => {
+    const inTab = activeTab === '__all' || s.dataset.tabId === activeTab;
+    if (!inTab) { s.style.display = 'none'; return; }
+    let visibleCount = 0;
+    s.querySelectorAll('.vtt-aopt').forEach(btn => {
+      const name = btn.dataset.name || '';
+      const match = !q || name.includes(q);
+      btn.style.display = match ? '' : 'none';
+      if (match) visibleCount++;
+    });
+    s.style.display = visibleCount > 0 ? '' : 'none';
+    // Met à jour le compteur affiché — mémorise la valeur d'origine pour pouvoir restaurer
+    const cnt = s.querySelector('.vtt-aopt-section-count');
+    if (cnt) {
+      if (cnt.dataset.origCount == null) cnt.dataset.origCount = cnt.textContent;
+      cnt.textContent = q ? visibleCount : cnt.dataset.origCount;
+    }
+  });
+  _vttAoptCheckEmpty();
+};
+
+function _vttAoptCheckEmpty() {
+  const list = document.querySelector('.vtt-aopt-list');
+  const empty = document.querySelector('.vtt-aopt-empty');
+  if (!list || !empty) return;
+  const anyVisible = !!list.querySelector('.vtt-aopt-section:not([style*="display: none"])');
+  empty.style.display = anyVisible ? 'none' : '';
 }
 
 window._vttPickOpt = (srcId, tgtId, idx) => {
@@ -2932,6 +3188,31 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
         <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${degatsFormula}</div>
         <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus / malus flat au soin">
         <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés bonus au soin (même type de dé)">
+        <div style="grid-column:1/-1;font-size:.62rem;color:var(--text-dim);font-style:italic;padding-top:.15rem">
+          ✦ Jet de toucher (DD 2) — vise les critiques 💥 et les fumbles 💔
+        </div>
+      </div>
+    </div>
+
+    <!-- Sélecteur de mode (Avantage / Normal / Désavantage) — partagé avec les attaques -->
+    <div style="margin-bottom:.85rem">
+      <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
+      <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
+        <button id="atk-mode-dis" onclick="window._vttSetMode('dis')"
+          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
+          <div style="font-size:.9rem">⬇</div>Désavantage
+        </button>
+        <button id="atk-mode-normal" onclick="window._vttSetMode('normal')"
+          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                 font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
+          Normal
+        </button>
+        <button id="atk-mode-adv" onclick="window._vttSetMode('adv')"
+          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
+          <div style="font-size:.9rem">⬆</div>Avantage
+        </button>
       </div>
     </div>
   ` : `
@@ -3846,16 +4127,80 @@ window._vttRollAttack = async () => {
       return `${newN}d${p.sides}` + (p.mod !== 0 ? (p.mod > 0 ? `+${p.mod}` : `${p.mod}`) : '');
     };
 
-    // ── Soin : roll partagé, appliqué à toutes les cibles ───────────
+    // ── Soin : d20 partagé (crit / fumble), puis roll appliqué à toutes les cibles ──
+    // Le jet de toucher utilise la stat du sort (toucherStat override, sinon arme)
+    // et se compare à un DD fixe de 2 — donc tout sauf un nat 1 passe.
+    // L'intérêt : voir les crits (20 nat) qui maximisent le soin, et les fumbles (1 nat) qui ratent.
+    const HEAL_DD = 2;
     if (opt.isHeal) {
+      // Mode effectif : choix utilisateur + états du lanceur uniquement
+      // (les états de la cible ne devraient pas affecter un soin)
+      let hMode = mode;
+      const hCondMods = _conditionsAttackMods(src, null, opt);
+      if (hMode === 'normal') {
+        if (hCondMods.hasAdv && !hCondMods.hasDis) hMode = 'adv';
+        else if (hCondMods.hasDis && !hCondMods.hasAdv) hMode = 'dis';
+      }
+      // Roll d20 avec mode adv/dis
+      const hRoll1 = Math.floor(Math.random()*20)+1;
+      const hRoll2 = hMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
+      const hD20   = hMode === 'adv' ? Math.max(hRoll1, hRoll2)
+                    : hMode === 'dis' ? Math.min(hRoll1, hRoll2)
+                    : hRoll1;
+      // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
+      const hCritThreshold = Math.max(2, Math.min(20, opt.mods?.chance?.rc ?? 20));
+      const hIsCrit   = hD20 >= hCritThreshold;
+      const hIsFumble = hD20 === 1;
+      // Total : d20 + mod toucher + bonus set + bonus contextuel
+      const hTouchMod = opt.toucherMod || 0;
+      const hSetBon   = opt.toucherSetBonus || 0;
+      const hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
+
       const diceToRoll   = opt.rawDice || opt.dice;
       const effectiveDice = _effectiveDmgDice(diceToRoll);
       const healFixed    = (opt.maitriseBonus || 0) + bonusDmg;
-      const healRaw      = _rollDice(effectiveDice);
-      const healTotal  = Math.max(1, healRaw + healFixed);
+
+      // PM toujours consommé (même sur échec critique) — le mana brûle quand on tente le sort
       await _deductPm();
       await _consumeItem();
       await _markAttacked();
+
+      // ── Échec critique : sort raté, aucun soin appliqué ─────────────
+      if (hIsFumble) {
+        const tgtNames = targetIds.map(tid => _live(_tokens[tid]?.data || {}).displayName).filter(Boolean).join(', ');
+        await addDoc(_logCol(), {
+          type: 'attack', isHeal: true, isFumble: true, advMode: hMode, advAuto: hMode !== mode,
+          advReasons: hMode !== mode ? hCondMods.reasons : null,
+          authorId: STATE.user?.uid||null, authorName,
+          attackerName: lS.displayName??src.name,
+          characterImage: lS.displayImage||null,
+          defenderName: tgtNames || (lT.displayName??tgt.name),
+          optLabel: opt.label,
+          hitD20: hD20, hitRoll1: hRoll1, hitRoll2: hRoll2,
+          hitD20rolls: hRoll2 != null ? [hRoll1, hRoll2] : null,
+          hitToucherMod: hTouchMod, hitToucherSetBonus: hSetBon,
+          hitToucherStatLabel: opt.toucherStatLabel || '',
+          hitBonus: bonusHit, hitTotal: hHitTotal, healDD: HEAL_DD,
+          dmgTotal: 0, newHp: null, hpMax: null,
+          dmgFormula: opt.dice, pmCost: opt.pmCost || 0,
+          createdAt: serverTimestamp(),
+        }).catch(()=>{});
+        showNotif(`💔 Échec critique (${hD20}) — sort raté, ${opt.pmCost||0} PM consommés`, 'error');
+        return;
+      }
+
+      // ── Soin normal ou critique ────────────────────────────────────
+      // Crit : max(dés) + 1 roll supplémentaire + 2× les bonus fixes (même logique que les attaques)
+      let healRaw, healTotal;
+      if (hIsCrit) {
+        const maxDice = _maxDice(effectiveDice);
+        const critRoll = _rollDice(effectiveDice);
+        healRaw   = critRoll;          // pour le log (le "raw" est le 2e jet)
+        healTotal = Math.max(1, maxDice + critRoll + 2 * healFixed);
+      } else {
+        healRaw   = _rollDice(effectiveDice);
+        healTotal = Math.max(1, healRaw + healFixed);
+      }
 
       // Appliquer à chaque cible
       const healResults = [];
@@ -3869,6 +4214,18 @@ window._vttRollAttack = async () => {
       }
 
       const isMultiHeal = healResults.length > 1;
+      const critTag = hIsCrit ? ' 💥 CRITIQUE' : '';
+      // Payload commun pour le log (jet de toucher détaillé)
+      const hitPayload = {
+        isCrit: hIsCrit, isFumble: false, advMode: hMode, advAuto: hMode !== mode,
+        advReasons: hMode !== mode ? hCondMods.reasons : null,
+        hitD20: hD20, hitRoll1: hRoll1, hitRoll2: hRoll2,
+        hitD20rolls: hRoll2 != null ? [hRoll1, hRoll2] : null,
+        hitToucherMod: hTouchMod, hitToucherSetBonus: hSetBon,
+        hitToucherStatLabel: opt.toucherStatLabel || '',
+        hitBonus: bonusHit, hitTotal: hHitTotal, healDD: HEAL_DD,
+      };
+
       if (isMultiHeal) {
         await addDoc(_logCol(), {
           type: 'attack-multi', isHeal: true,
@@ -3876,16 +4233,15 @@ window._vttRollAttack = async () => {
           attackerName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
           optLabel: opt.label,
-          isCrit: false, isFumble: false, advMode: mode,
-          hitD20: null, hitTotal: null,
+          ...hitPayload,
           dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
           dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
           dmgMaitriseBonus: opt.maitriseBonus??0,
           dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
-          targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: null })),
+          targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: HEAL_DD })),
           createdAt: serverTimestamp(),
         }).catch(()=>{});
-        showNotif(`💚 ${healTotal} PV soignés → ${healResults.map(r=>r.name).join(', ')}`, 'success');
+        showNotif(`💚${critTag} ${healTotal} PV soignés → ${healResults.map(r=>r.name).join(', ')}`, 'success');
       } else {
         const r = healResults[0];
         if (r) {
@@ -3896,6 +4252,7 @@ window._vttRollAttack = async () => {
             characterImage: lS.displayImage||null,
             defenderName: r.name,
             optLabel: opt.label,
+            ...hitPayload,
             dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
             dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
             dmgMaitriseBonus: opt.maitriseBonus??0,
@@ -3903,7 +4260,7 @@ window._vttRollAttack = async () => {
             dmgTotal: healTotal, newHp: r.newHp, hpMax: r.hpMax,
             createdAt: serverTimestamp(),
           }).catch(()=>{});
-          showNotif(`💚 ${healTotal} PV soignés → ${r.name}`, 'success');
+          showNotif(`💚${critTag} ${healTotal} PV soignés → ${r.name}`, 'success');
         }
       }
       return;
@@ -3934,11 +4291,20 @@ window._vttRollAttack = async () => {
       }
     }
 
+    // ── Mode effectif : combine choix utilisateur + états sur attaquant/cible ──
+    // Règle D&D : avantage + désavantage = annulés (mode 'normal').
+    // Le mode explicite du joueur est respecté mais peut être renforcé.
+    let effectiveMode = mode;
+    const condMods = _conditionsAttackMods(src, tgt, opt);
+    if (mode === 'normal') {
+      if (condMods.hasAdv && !condMods.hasDis) effectiveMode = 'adv';
+      else if (condMods.hasDis && !condMods.hasAdv) effectiveMode = 'dis';
+    }
     // ── Attaque offensive — un seul roll d20, appliqué à chaque cible ──
     const roll1    = Math.floor(Math.random()*20)+1;
-    const roll2    = mode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
-    let d20        = mode === 'adv' ? Math.max(roll1, roll2)
-                   : mode === 'dis' ? Math.min(roll1, roll2)
+    const roll2    = effectiveMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
+    let d20        = effectiveMode === 'adv' ? Math.max(roll1, roll2)
+                   : effectiveMode === 'dis' ? Math.min(roll1, roll2)
                    : roll1;
     // Combo Chance : RC abaissée (19-20, 17-20…) — élargit la plage critique
     const critThreshold = Math.max(2, Math.min(20, opt.mods?.chance?.rc ?? 20));
@@ -4057,6 +4423,38 @@ window._vttRollAttack = async () => {
       let dmgTotal   = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
       let interaction = null;
 
+      // ── Bonus de dégâts subis depuis les états actifs de la cible (Marqué, etc.) ──
+      // Roule la formule (ex: "1d6") par état. Appliqué sur hit ET demi-dégâts.
+      const _condDmgNotes = [];
+      if ((hit || halfDmg) && dmgTotal > 0) {
+        for (const { lib } of _activeConditionsOf(curTgtData)) {
+          const f = lib?.effects?.dmgTakenBonus;
+          if (!f) continue;
+          const b = _rollDice(String(f));
+          if (b > 0) {
+            dmgTotal += b;
+            _condDmgNotes.push(`+${b} ${lib.icon || ''} ${lib.label}`);
+          }
+        }
+      }
+
+      // ── Réduction des dégâts subis depuis les états actifs (Pétrifié, etc.) ──
+      // On prend la plus forte réduction parmi tous les états actifs (ne stack pas).
+      if ((hit || halfDmg) && dmgTotal > 0) {
+        let bestPct = 0; let bestLib = null;
+        for (const { lib } of _activeConditionsOf(curTgtData)) {
+          const p = lib?.effects?.dmgReductionPct || 0;
+          if (p > bestPct) { bestPct = p; bestLib = lib; }
+        }
+        if (bestPct > 0) {
+          const before = dmgTotal;
+          dmgTotal = bestPct >= 100 ? 0 : Math.max(0, Math.floor(dmgTotal * (1 - bestPct / 100)));
+          if (bestLib) {
+            _condDmgNotes.push(`−${before - dmgTotal} ${bestLib.icon || '🛡'} ${bestLib.label} (${bestPct}%)`);
+          }
+        }
+      }
+
       const curHp = lCurTgt.displayHp ?? 20, hpMax = lCurTgt.displayHpMax ?? 20;
       let newHp = curHp;
       // Valeur AVANT interaction du profil de la créature (pour log "10 → 5").
@@ -4090,12 +4488,48 @@ window._vttRollAttack = async () => {
           await _setHp(curTgtData, newHp);
         }
       }
-      targetResults.push({ name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg, dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction, shieldBlocked: isBlocked, _data: curTgtData });
+      // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
+      //    l'effet `consumedByAttackAgainst` est activé après que les bonus
+      //    de dégâts aient été appliqués. Persistance immédiate.
+      const _consumedNotes = [];
+      if (hit) {
+        const curConds = curTgtData.conditions || [];
+        const remaining = [];
+        for (const c of curConds) {
+          const lib = CONDITION_BY_ID[c.id];
+          if (lib?.effects?.consumedByAttackAgainst) {
+            _consumedNotes.push(`${lib.icon || '🎯'} ${lib.label} consommé`);
+          } else {
+            remaining.push(c);
+          }
+        }
+        if (remaining.length !== curConds.length) {
+          await updateDoc(_tokRef(curTgtData.id), { conditions: remaining }).catch(() => {});
+        }
+      }
+
+      targetResults.push({
+        name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg,
+        dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction,
+        shieldBlocked: isBlocked,
+        condDmgNotes: _condDmgNotes, consumedNotes: _consumedNotes,
+        _data: curTgtData,
+      });
     }
 
     // ── Combos post-attaque (Lacération, Déplacement, Drain, Concentration) ──
     const _mods = opt.mods || null;
     const modNotes = []; // notes textuelles pour la notif/log
+
+    // Remonte dans modNotes les effets liés aux états (dégâts bonus + consommations)
+    for (const r of targetResults) {
+      if (r.condDmgNotes?.length) {
+        for (const n of r.condDmgNotes) modNotes.push(`💢 ${n} → ${r.name}`);
+      }
+      if (r.consumedNotes?.length) {
+        for (const n of r.consumedNotes) modNotes.push(n + ` (${r.name})`);
+      }
+    }
 
     // ── JS Concentration auto : pour chaque cible qui a subi des dégâts et qui
     //    porte un sort canalisé actif, lance un JS Sagesse vs concentrationDD.
@@ -4210,7 +4644,8 @@ window._vttRollAttack = async () => {
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
         optLabel: opt.label,
-        isCrit, isFumble, advMode: mode,
+        isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
+        advReasons: effectiveMode !== mode ? condMods.reasons : null,
         hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
@@ -4237,7 +4672,8 @@ window._vttRollAttack = async () => {
         characterImage: lS.displayImage||null,
         defenderName: r.name,
         optLabel: opt.label,
-        isCrit, isFumble, advMode: mode,
+        isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
+        advReasons: effectiveMode !== mode ? condMods.reasons : null,
         hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
@@ -4614,6 +5050,49 @@ function _renderInspector(t) {
         <div style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun effet actif</div>
       </div>` : '');
 
+  // ── Conditions / États du token (visibles par tous, gérables par le MJ) ──
+  const _conds = Array.isArray(t.conditions) ? t.conditions : [];
+  const _condIsActive = c => c.expiresAtRound == null || _r === 0 || _r <= c.expiresAtRound;
+  const _activeConds = _conds.filter(_condIsActive);
+  const _condsHtml = (() => {
+    const addBtn = STATE.isAdmin
+      ? `<span class="vtt-ins-section-actions">
+          <button class="vtt-btn-sm" onclick="window._vttConditionAdd('${t.id}')" title="Appliquer un état">＋</button>
+          <button class="vtt-btn-sm" onclick="window._vttConditionConfig()" title="Réglages : ce que chaque état fait, sa stat de JS et son DD par défaut">⚙</button>
+        </span>` : '';
+    if (!_activeConds.length && !STATE.isAdmin) return ''; // joueurs : section cachée si vide
+    const rows = _activeConds.map((cond, i) => {
+      const lib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓', color: '#888', desc: '' };
+      const dur = cond.expiresAtRound != null && _r > 0
+        ? `${cond.expiresAtRound - _r + 1}t`
+        : (cond.expiresAtRound != null ? 'fin' : '∞');
+      const srcLine = cond.source ? `<div class="vtt-cond-src">📝 ${_esc(cond.source)}</div>` : '';
+      const saveLbl = cond.saveDC && cond.saveStat
+        ? `${statShort(cond.saveStat) || cond.saveStat} DD ${cond.saveDC}` : null;
+      const realIdx = _conds.indexOf(cond);
+      const ctrls = STATE.isAdmin ? `
+        <div class="vtt-cond-ctrls">
+          ${saveLbl ? `<button class="vtt-cond-save" onclick="window._vttConditionSave('${t.id}',${realIdx})" title="Lancer le jet de sauvegarde">🎲 JS ${saveLbl}</button>` : ''}
+          <button class="vtt-cond-edit" onclick="window._vttConditionEdit('${t.id}',${realIdx})" title="Modifier durée, DD, source">✏️</button>
+          <button class="vtt-cond-rm" onclick="window._vttConditionRemove('${t.id}',${realIdx})" title="Retirer l'état">✕</button>
+        </div>` : '';
+      return `<div class="vtt-cond-item" style="--cond-c:${lib.color}">
+        <div class="vtt-cond-hd">
+          <span class="vtt-cond-ic">${lib.icon}</span>
+          <span class="vtt-cond-nom">${lib.label}</span>
+          <span class="vtt-cond-dur">${dur}</span>
+        </div>
+        <div class="vtt-cond-desc">${lib.desc}</div>
+        ${srcLine}
+        ${ctrls}
+      </div>`;
+    }).join('');
+    return `<div class="vtt-ins-section">
+      <div class="vtt-ins-section-title">⚡ États ${addBtn}</div>
+      <div class="vtt-cond-list">${rows || '<div style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun état actif</div>'}</div>
+    </div>`;
+  })();
+
   el.innerHTML=`
     <div class="vtt-ins-header">
       ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
@@ -4625,6 +5104,7 @@ function _renderInspector(t) {
     </div>
     ${statsHtml}
     ${_creatureHtml}
+    ${_condsHtml}
     ${_buffsHtml}
     ${(() => {
       const inCombat = !!_session?.combat?.active;
@@ -6278,32 +6758,82 @@ function _renderChatLog(msgs) {
       </div>`;
     }
     if (m.type==='attack' && m.isHeal) {
-      // Sort de soin
+      // Sort de soin avec jet de toucher (DD 2) — affichage miroir d'une attaque
       const sn  = n => n>0?`+${n}`:n<0?`${n}`:'';
       const sub = t => `<span style="font-size:.6rem;color:var(--text-dim)">(${t})</span>`;
+      const isCrit   = !!m.isCrit;
+      const isFumble = !!m.isFumble;
+
+      // Couleurs (vert par défaut, doré pour crit, rouge pour fumble)
+      const borderCol = isCrit ? '#f59e0b' : isFumble ? '#7f1d1d' : '#22c38e';
+      const bgRgb     = isCrit ? '245,158,11' : isFumble ? '127,29,29' : '34,195,142';
+
+      // Badge résultat
+      const resultBadge = isCrit
+        ? `<span style="font-size:.68rem;font-weight:700;color:#f59e0b">💥 CRITIQUE</span>`
+        : isFumble
+          ? `<span style="font-size:.68rem;font-weight:700;color:#ef4444">💔 ÉCHEC CRIT.</span>`
+          : '';
+
+      // Badge avantage/désavantage
+      const advBadge = m.advMode==='adv'
+        ? `<span style="font-size:.62rem;font-weight:700;color:#22c38e" title="Avantage">⬆</span>`
+        : m.advMode==='dis'
+          ? `<span style="font-size:.62rem;font-weight:700;color:#ef4444" title="Désavantage">⬇</span>` : '';
+
+      // Affichage du d20 (avec dé rejeté barré si adv/dis)
+      const rolls = Array.isArray(m.hitD20rolls) && m.hitD20rolls.length > 1 ? m.hitD20rolls : null;
+      const diceDisp = rolls
+        ? (() => { const dropped = rolls.find(r=>r!==m.hitD20)??rolls[1];
+            return `d20[<strong>${m.hitD20}</strong>&thinsp;<span style="text-decoration:line-through;color:var(--text-dim)">${dropped}</span>]`; })()
+        : `d20[<strong>${m.hitD20 ?? '?'}</strong>]`;
+
+      // Formule du jet de toucher
+      const hitFormula = [
+        diceDisp,
+        m.hitToucherMod ? sn(m.hitToucherMod) + sub(m.hitToucherStatLabel||'') : '',
+        m.hitToucherSetBonus > 0 ? `+${m.hitToucherSetBonus}` + sub('Set') : '',
+        m.hitBonus ? sn(m.hitBonus) + sub('bonus') : '',
+      ].filter(Boolean).join(' ');
+      const ddLabel = m.healDD != null ? `vs DD ${m.healDD}` : '';
+
+      // Formule du soin
       const baseDice = _esc(m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || '');
-      const mods = [
+      const dmgMods = [
         m.dmgMaitriseBonus > 0 ? `+${m.dmgMaitriseBonus}` + sub('Maîtrise') : '',
         m.dmgBonus ? sn(m.dmgBonus) + sub('bonus') : '',
         m.dmgBonusDice ? sn(m.dmgBonusDice) + sub('dés') : '',
       ].filter(Boolean).join(' ');
+
       const healWho = m.attackerName || m.authorName || '?';
       const detailId = `vtt-d-${i}`;
-      const detailHtml = `<div style="font-size:.65rem;color:var(--text-dim)">${baseDice}(${m.dmgRaw}) ${mods} = ${m.dmgTotal}</div>`;
+      const detailHtml = `
+        <div style="font-size:.7rem;color:var(--text-soft);line-height:1.5">
+          <div>🎯 Toucher : ${hitFormula} = <strong>${m.hitTotal ?? m.hitD20 ?? '?'}</strong> ${ddLabel}</div>
+          ${isFumble
+            ? '<div style="color:#ef4444">💔 Échec critique — sort raté, mana consommé</div>'
+            : `<div>💚 Soin : ${baseDice}(${m.dmgRaw}) ${dmgMods} = <strong style="color:#22c38e">${m.dmgTotal}</strong>${isCrit ? ' <span style="color:#f59e0b">(critique : max + jet + 2× bonus)</span>' : ''}</div>`}
+        </div>`;
+
+      const headlineVal = isFumble
+        ? `<strong style="font-size:1.05rem;color:#ef4444">RATÉ</strong><span style="font-size:.72rem;color:var(--text-dim)">(${m.pmCost||0} PM consommés)</span>`
+        : `<strong style="font-size:1.05rem;color:#22c38e;letter-spacing:-.01em">${m.dmgTotal}</strong><span style="font-size:.72rem;color:#22c38e">PV soignés</span>`;
+
       return `<div class="vtt-log-entry vtt-log-roll"
-          style="border-left:3px solid #22c38e;padding:.3rem .3rem .3rem .5rem;background:rgba(34,195,142,.05);border-radius:0 6px 6px 0">
+          style="border-left:3px solid ${borderCol};padding:.3rem .3rem .3rem .5rem;background:rgba(${bgRgb},.05);border-radius:0 6px 6px 0">
         <div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;margin-bottom:.2rem">
-          ${_portrait(m.characterImage, healWho, '#22c38e')}
+          ${_portrait(m.characterImage, healWho, borderCol)}
           <span style="font-weight:700;font-size:.78rem;color:var(--text)">${_esc(healWho)}</span>
           <span style="color:var(--text-dim);font-size:.72rem">→</span>
           <strong style="font-size:.82rem">${_esc(m.defenderName||'')}</strong>
           <span style="color:var(--text-dim);font-size:.65rem">· ${_esc(m.optLabel||'')}</span>
+          ${advBadge}
+          ${resultBadge}
           ${_right('', ts)}
         </div>
         <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
-          <span style="font-size:.78rem">💚</span>
-          <strong style="font-size:1.05rem;color:#22c38e;letter-spacing:-.01em">${m.dmgTotal}</strong>
-          <span style="font-size:.72rem;color:#22c38e">PV soignés</span>
+          <span style="font-size:.78rem">${isFumble ? '💔' : '💚'}</span>
+          ${headlineVal}
           <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
         </div>
         <div id="${detailId}" style="display:none;padding-left:calc(22px + .35rem);margin-top:.15rem">${detailHtml}</div>
@@ -7185,6 +7715,619 @@ window._vttClearBuffs = async id => {
   await updateDoc(_tokRef(id),{buffs:[]}).catch(()=>{});
   showNotif('Buffs supprimés.','success');
 };
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HANDLERS — Conditions (états) sur les tokens
+// ══════════════════════════════════════════════════════════════════════════════
+/** Ouvre la modal de sélection d'un état à appliquer. */
+window._vttConditionAdd = (tokenId) => {
+  if (!STATE.isAdmin) return;
+  openModal('⚡ Appliquer un état', `
+    <div class="vtt-cond-picker">
+      ${CONDITION_LIBRARY.map(c => `
+        <button class="vtt-cond-pick" style="--cond-c:${c.color}"
+          onclick="window._vttConditionApply('${tokenId}','${c.id}')">
+          <span class="vtt-cond-pick-ic">${c.icon}</span>
+          <div class="vtt-cond-pick-body">
+            <div class="vtt-cond-pick-nom">${c.label}</div>
+            <div class="vtt-cond-pick-desc">${c.desc}</div>
+          </div>
+        </button>
+      `).join('')}
+    </div>
+    <div style="font-size:.7rem;color:var(--text-dim);font-style:italic;margin-top:.5rem">
+      Durée par défaut : 2 tours en combat (1 coup pour les états « on hit »). Modifiable via ✏️ dans l'inspector.
+    </div>
+  `);
+};
+
+/** Applique l'état avec les défauts de la librairie (DC + stat préremplis),
+ *  puis ouvre la modal d'édition pour ajuster source/durée si besoin. */
+window._vttConditionApply = async (tokenId, condId) => {
+  const lib = CONDITION_BY_ID[condId]; if (!lib) return;
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  // Évite les doublons (même état déjà appliqué)
+  const existing = (t.conditions || []).some(c => c.id === condId);
+  if (existing) {
+    showNotif(`${lib.icon} ${lib.label} déjà appliqué`, 'info');
+    closeModalDirect();
+    return;
+  }
+  // Durée par défaut : valeur définie sur l'état (defaultDuration), sinon
+  // 2 tours par convention. Ignorée pour les états qui se consomment au 1er coup.
+  const round = _session?.combat?.round ?? 0;
+  const isConsumed = !!lib.effects?.consumedByAttackAgainst;
+  const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
+    ? lib.defaultDuration
+    : 2;
+  const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+  const cond = {
+    id: condId,
+    appliedAt: Date.now(),
+    appliedBy: STATE.user?.uid || null,
+    source: '',
+    saveDC: lib.defaultDC || null,
+    saveStat: lib.defaultSaveStat || null,
+    expiresAtRound,
+  };
+  const newConds = [...(t.conditions || []), cond];
+  await updateDoc(_tokRef(tokenId), { conditions: newConds }).catch(() => {});
+  closeModalDirect();
+  const durLbl = isConsumed ? ' (1 coup)'
+    : (expiresAtRound != null ? ` (${dur} tour${dur>1?'s':''})` : '');
+  showNotif(`${lib.icon} ${lib.label} appliqué${durLbl}`, 'success');
+  _renderInspectorSoon?.();
+};
+
+/** Retire un état du token (par index dans le tableau). */
+window._vttConditionRemove = async (tokenId, idx) => {
+  if (!STATE.isAdmin) return;
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const conds = [...(t.conditions || [])];
+  const removed = conds[idx]; if (!removed) return;
+  conds.splice(idx, 1);
+  await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
+  const lib = CONDITION_BY_ID[removed.id];
+  if (lib) showNotif(`${lib.icon} ${lib.label} retiré`, 'info');
+};
+
+/** Lance un jet de sauvegarde pour tenter de finir l'état. */
+window._vttConditionSave = async (tokenId, idx) => {
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const cond = (t.conditions || [])[idx]; if (!cond) return;
+  const lib = CONDITION_BY_ID[cond.id];
+  const statKey = cond.saveStat || 'constitution';
+  const DD = cond.saveDC || 10;
+  const mod = c => getMod(c, statKey);
+  // Récupère le perso ou NPC source des stats
+  const ch = t.characterId ? _characters[t.characterId] : null;
+  const np = t.npcId ? _npcs[t.npcId] : null;
+  const statSrc = ch || np || { stats: {} };
+  const modVal = ch || np ? mod(statSrc) : 0;
+  const d20 = Math.floor(Math.random()*20)+1;
+  const total = d20 + modVal;
+  const passed = d20 !== 1 && (d20 === 20 || total >= DD);
+  const statLbl = statShort(statKey) || statKey;
+  showNotif(`🎲 JS ${statLbl} : d20[${d20}]${modVal>=0?'+':''}${modVal} = ${total} vs DD ${DD} → ${passed?'✅ Réussi — état retiré':'❌ Échec'}`, passed?'success':'error');
+  // Log
+  await addDoc(_logCol(), {
+    type: 'save', authorId: STATE.user?.uid||null,
+    authorName: STATE.profile?.pseudo||STATE.profile?.prenom||'?',
+    tokenName: _live(t).displayName || t.name,
+    conditionId: cond.id, conditionLabel: lib?.label || cond.id,
+    statLabel: statLbl, mod: modVal, d20, total, dd: DD, passed,
+    createdAt: serverTimestamp(),
+  }).catch(()=>{});
+  if (passed) {
+    const conds = [...(t.conditions || [])]; conds.splice(idx, 1);
+    await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
+  }
+};
+
+/** Modal d'édition d'un état (source / DD / stat / durée). */
+window._vttConditionEdit = (tokenId, idx) => {
+  if (!STATE.isAdmin) return;
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const cond = (t.conditions || [])[idx]; if (!cond) return;
+  const lib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓' };
+  const round = _session?.combat?.round ?? 0;
+  const turnsLeft = cond.expiresAtRound != null && round > 0
+    ? (cond.expiresAtRound - round + 1)
+    : (cond.expiresAtRound != null ? 0 : '');
+  openModal(`✏️ ${lib.icon} ${lib.label}`, `
+    <div class="vtt-cond-edit">
+      <div class="form-group">
+        <label>Source / Origine</label>
+        <input class="input-field" id="ce-source" value="${_esc(cond.source||'')}" placeholder="Ex: Lacération de l'orc, gaz toxique…">
+      </div>
+      <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+        <div>
+          <label>DD du jet de sauvegarde</label>
+          <input type="number" class="input-field" id="ce-dd" value="${cond.saveDC||''}" placeholder="ex: 13">
+        </div>
+        <div>
+          <label>Stat du jet</label>
+          <select class="input-field" id="ce-stat">
+            <option value="">— Aucun JS —</option>
+            <option value="force"        ${cond.saveStat==='force'?'selected':''}>Force</option>
+            <option value="dexterite"    ${cond.saveStat==='dexterite'?'selected':''}>Dextérité</option>
+            <option value="constitution" ${cond.saveStat==='constitution'?'selected':''}>Constitution</option>
+            <option value="intelligence" ${cond.saveStat==='intelligence'?'selected':''}>Intelligence</option>
+            <option value="sagesse"      ${cond.saveStat==='sagesse'?'selected':''}>Sagesse</option>
+            <option value="charisme"     ${cond.saveStat==='charisme'?'selected':''}>Charisme</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Durée (tours restants) <span style="font-size:.7rem;color:var(--text-dim)">— vide = jusqu'à dissipation manuelle</span></label>
+        <input type="number" class="input-field" id="ce-turns" value="${turnsLeft}" min="0" max="100" placeholder="∞">
+      </div>
+      <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
+        onclick="window._vttConditionEditSave('${tokenId}',${idx})">💾 Enregistrer</button>
+    </div>
+  `);
+};
+
+window._vttConditionEditSave = async (tokenId, idx) => {
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const cond = (t.conditions || [])[idx]; if (!cond) return;
+  const source = document.getElementById('ce-source')?.value?.trim() || '';
+  const saveDC = parseInt(document.getElementById('ce-dd')?.value) || null;
+  const saveStat = document.getElementById('ce-stat')?.value || null;
+  const turns = parseInt(document.getElementById('ce-turns')?.value) || 0;
+  const round = _session?.combat?.round ?? 0;
+  const expiresAtRound = turns > 0 && round > 0 ? round + turns - 1 : null;
+  const conds = [...(t.conditions || [])];
+  conds[idx] = { ...cond, source, saveDC, saveStat: saveDC ? saveStat : null, expiresAtRound };
+  await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
+  closeModalDirect();
+  showNotif('État mis à jour', 'success');
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RÉGLAGES DES ÉTATS — modal accessible via le bouton ⚙ de la section États
+// Sauvegardé dans world/conditions → utilisable sur toutes les aventures.
+// Surcharge la librairie par défaut au chargement (loadConditions).
+// ══════════════════════════════════════════════════════════════════════════════
+async function _loadConditionsOverrides() {
+  try {
+    const d = await getDocData('world', 'conditions');
+    if (d?.library?.length) {
+      // Merge : pour chaque entrée de la lib par défaut, on prend l'override si présent.
+      // Puis on ajoute tous les états customs (id absent de la lib par défaut).
+      const byId = Object.fromEntries(d.library.map(c => [c.id, c]));
+      const merged = CONDITION_DEFAULT_LIBRARY.map(def => {
+        const ov = byId[def.id];
+        if (!ov) return { ...def, effects: { ...def.effects } };
+        return {
+          ...def, ...ov,
+          effects: { ...def.effects, ...(ov.effects || {}) },
+        };
+      });
+      // Ajoute les customs (ids non standards) à la fin
+      for (const c of d.library) {
+        if (!CONDITION_DEFAULT_IDS.has(c.id)) {
+          merged.push({ ...c, effects: { ...(c.effects || {}) } });
+        }
+      }
+      CONDITION_LIBRARY = merged;
+      _rebuildConditionIndex();
+    }
+  } catch {}
+}
+
+window._vttConditionConfig = async (opts = {}) => {
+  if (!STATE.isAdmin) return;
+  // S'assure que les overrides MJ sont chargés (utile quand on l'appelle depuis
+  // la Console MJ sans avoir encore ouvert le VTT cette session).
+  // skipReload : utilisé après un ajout/édition local en mémoire pour ne pas
+  // écraser les changements non encore persistés avec les données de Firestore.
+  if (!opts.skipReload) {
+    await _loadConditionsOverrides().catch(() => {});
+  }
+
+  const STATS = [
+    ['', '—'], ['force','For'], ['dexterite','Dex'],
+    ['constitution','Con'], ['intelligence','Int'],
+    ['sagesse','Sag'], ['charisme','Cha'],
+  ];
+  // Pill toggle 3 options : —/Avantage/Désavantage
+  const advTriToggle = (id, current) => {
+    const opts = [
+      ['',    '—',    'none'],
+      ['adv', '⬆ Adv', 'adv'],
+      ['dis', '⬇ Dis', 'dis'],
+    ];
+    return `<div class="vtt-cc-tri" data-cc-tri-id="${id}" data-cc-tri-value="${current||''}">
+      ${opts.map(([v, lbl, cls]) => `
+        <button type="button" class="vtt-cc-tri-opt vtt-cc-tri-${cls} ${(current||'')===v?'is-on':''}"
+          onclick="(()=>{const w=this.parentElement;w.dataset.ccTriValue='${v}';w.querySelectorAll('.vtt-cc-tri-opt').forEach(b=>b.classList.remove('is-on'));this.classList.add('is-on');}).call(this)">${lbl}</button>
+      `).join('')}
+    </div>`;
+  };
+  // Pill bool toggle (flag)
+  const boolToggle = (id, label, on) =>
+    `<button type="button" class="vtt-cc-flag-pill ${on?'is-on':''}" data-cc-flag-id="${id}"
+       onclick="this.classList.toggle('is-on');this.dataset.ccFlagOn=this.classList.contains('is-on')?'1':'';">
+       <span class="vtt-cc-flag-check">${on?'✓':'○'}</span><span>${label}</span>
+     </button>`;
+
+  // Compte les effets actifs (pour le badge dans la liste)
+  const _countActiveEffects = (eff = {}) =>
+    [eff.attackBy, eff.attackAgainst, eff.attackAgainstMelee, eff.attackAgainstRanged]
+      .filter(v => v === 'adv' || v === 'dis').length
+    + (eff.movementMod === 0 ? 1 : 0)
+    + (eff.cantAct ? 1 : 0) + (eff.failsStrSaves ? 1 : 0)
+    + (eff.failsDexSaves ? 1 : 0) + (eff.meleeCritOnHit ? 1 : 0);
+
+  // Liste à gauche (compacte, scrollable) + bouton création
+  const addBtn = `<button type="button" class="vtt-cc-list-add"
+      onclick="window._vttConditionConfigAddNew()">＋ Nouvel état</button>`;
+  const listItems = addBtn + CONDITION_LIBRARY.map((c, idx) => {
+    const count = _countActiveEffects(c.effects || {});
+    const isCustom = _isCustomCondition(c.id);
+    return `<button type="button" class="vtt-cc-list-item ${idx === 0 ? 'is-active' : ''} ${isCustom ? 'is-custom' : ''}"
+        style="--cond-c:${c.color}"
+        onclick="window._vttConditionConfigSelect(${idx})"
+        title="${isCustom ? 'État personnalisé' : ''}">
+      <span class="vtt-cc-list-ic">${c.icon}</span>
+      <span class="vtt-cc-list-nom">${_esc(c.label)}</span>
+      ${count ? `<span class="vtt-cc-list-cnt">${count}</span>` : ''}
+    </button>`;
+  }).join('');
+
+  // Détails à droite (tous rendus, seul l'index 0 visible)
+  const details = CONDITION_LIBRARY.map((c, idx) => {
+    const eff = c.effects || {};
+    const statOpts = STATS.map(([v, l]) =>
+      `<option value="${v}" ${(c.defaultSaveStat||'')===v?'selected':''}>${l}</option>`).join('');
+    const isCustom = _isCustomCondition(c.id);
+    return `<div class="vtt-cc-detail ${idx === 0 ? 'is-active' : ''}"
+        id="vtt-cc-detail-${idx}" style="--cond-c:${c.color}">
+      <div class="vtt-cc-detail-hd">
+        <input type="text" class="input-field vtt-cc-detail-icon"
+          id="cc-${idx}-icon" value="${_esc(c.icon || '')}" maxlength="3"
+          title="Emoji ou caractère affiché sur le token"
+          style="width:46px;text-align:center;font-size:1.3rem;padding:.3rem">
+        <div class="vtt-cc-detail-titles">
+          <input type="text" class="input-field vtt-cc-detail-label"
+            id="cc-${idx}-label" value="${_esc(c.label)}" placeholder="Nom de l'état">
+          <span class="vtt-cc-detail-id">id : <code>${c.id}</code>${isCustom ? ' · personnalisé' : ''}</span>
+        </div>
+        <input type="color" class="vtt-cc-color-pick" id="cc-${idx}-color"
+          value="${c.color}" title="Couleur de l'état">
+        ${isCustom ? `<button type="button" class="vtt-cc-detail-del"
+          onclick="window._vttConditionConfigDelete(${idx})"
+          title="Supprimer cet état personnalisé">🗑</button>` : ''}
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">📖 Description / règles narratives</div>
+        <textarea class="input-field" id="cc-${idx}-desc" rows="3"
+          placeholder="Effet narratif et règles racontées au joueur…">${_esc(c.desc||'')}</textarea>
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">🎲 Jet de sauvegarde par défaut</div>
+        <div class="vtt-cc-grp-hint">Pré-rempli quand le MJ applique l'état. Modifiable au cas par cas.</div>
+        <div class="vtt-cc-save-grid">
+          <label><span>Caractéristique du jet</span>
+            <select class="input-field" id="cc-${idx}-stat">${statOpts}</select>
+          </label>
+          <label><span>DD par défaut</span>
+            <input type="number" class="input-field" id="cc-${idx}-dc"
+              value="${c.defaultDC ?? ''}" min="0" max="30" placeholder="—">
+          </label>
+        </div>
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">⏱ Durée par défaut</div>
+        <div class="vtt-cc-grp-hint">Nombre de tours en combat à l'application. Vide / 0 = jusqu'à dissipation manuelle. Ignoré si l'état se consomme au 1er coup.</div>
+        <input type="number" class="input-field" id="cc-${idx}-duration"
+          value="${c.defaultDuration ?? ''}" min="0" max="100" placeholder="ex: 2"
+          style="max-width:140px">
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">⚔️ Effets sur les jets d'attaque</div>
+        <div class="vtt-cc-grp-hint">Avantage / Désavantage automatique appliqué en combat.</div>
+        <div class="vtt-cc-adv-grid">
+          <div class="vtt-cc-adv-row">
+            <span class="vtt-cc-adv-lbl">Quand <strong>il attaque</strong></span>
+            ${advTriToggle(`cc-${idx}-atkBy`, eff.attackBy)}
+          </div>
+          <div class="vtt-cc-adv-row">
+            <span class="vtt-cc-adv-lbl">Quand <strong>on l'attaque</strong></span>
+            ${advTriToggle(`cc-${idx}-atkAg`, eff.attackAgainst)}
+          </div>
+          <div class="vtt-cc-adv-row">
+            <span class="vtt-cc-adv-lbl">Attaque <strong>CaC</strong> contre <small>(≤1,5m)</small></span>
+            ${advTriToggle(`cc-${idx}-atkAgM`, eff.attackAgainstMelee)}
+          </div>
+          <div class="vtt-cc-adv-row">
+            <span class="vtt-cc-adv-lbl">Attaque <strong>à distance</strong> contre</span>
+            ${advTriToggle(`cc-${idx}-atkAgR`, eff.attackAgainstRanged)}
+          </div>
+        </div>
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">🚷 Restrictions & effets spéciaux</div>
+        <div class="vtt-cc-grp-hint">Clique pour activer / désactiver. Plusieurs peuvent être cumulés.</div>
+        <div class="vtt-cc-flags-pills">
+          ${boolToggle(`cc-${idx}-movementZero`, '🚷 Vitesse 0',           eff.movementMod === 0)}
+          ${boolToggle(`cc-${idx}-cantAct`,      '💤 Ne peut pas agir',   !!eff.cantAct)}
+          ${boolToggle(`cc-${idx}-cantCast`,     '🤐 Ne peut pas lancer de sort', !!eff.cantCastSpells)}
+          ${boolToggle(`cc-${idx}-failsStr`,     '❌ Échec JS Force',     !!eff.failsStrSaves)}
+          ${boolToggle(`cc-${idx}-failsDex`,     '❌ Échec JS Dextérité', !!eff.failsDexSaves)}
+          ${boolToggle(`cc-${idx}-meleeCrit`,    '💥 CaC ≤1,5m = critique', !!eff.meleeCritOnHit)}
+          ${boolToggle(`cc-${idx}-consumed`,     '🎯 Se consomme au 1er coup encaissé', !!eff.consumedByAttackAgainst)}
+        </div>
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">💢 Dégâts subis bonus</div>
+        <div class="vtt-cc-grp-hint">Dés/valeur ajoutés aux dégâts reçus par la cible portant l'état (ex: <code>1d6</code> ou <code>4</code>).</div>
+        <input type="text" class="input-field" id="cc-${idx}-dmgTaken"
+          value="${_esc(eff.dmgTakenBonus || '')}" placeholder="—" maxlength="20"
+          style="max-width:160px">
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">🛡 Réduction des dégâts subis</div>
+        <div class="vtt-cc-grp-hint">Pourcentage des dégâts reçus annulé (0 = aucun effet, 50 = demi-dégâts, 100 = immunité totale).</div>
+        <input type="number" class="input-field" id="cc-${idx}-dmgReduc"
+          value="${eff.dmgReductionPct ?? ''}" min="0" max="100" placeholder="—"
+          style="max-width:140px">
+      </div>
+    </div>`;
+  }).join('');
+
+  openModal('🎭 Réglages des états', `
+    <div class="vtt-cc-modal vtt-cc-modal--master">
+      <div class="vtt-cc-intro">
+        Chaque état appliqué utilise ces réglages par défaut. Tu peux les ajuster au cas par cas via ✏️ dans l'inspector. Sélectionne un état dans la liste pour configurer ses effets.
+      </div>
+      <div class="vtt-cc-layout">
+        <aside class="vtt-cc-list">${listItems}</aside>
+        <section class="vtt-cc-details">${details}</section>
+      </div>
+      <div class="vtt-cc-footer">
+        <button class="btn btn-outline" onclick="window._vttConditionConfigReset()">↺ Réinitialiser aux défauts</button>
+        <button class="btn btn-gold" onclick="window._vttConditionConfigSave()">💾 Enregistrer</button>
+      </div>
+    </div>
+  `);
+};
+
+/** Sélectionne un état dans la modal de réglages (left list → swap right detail). */
+window._vttConditionConfigSelect = (idx) => {
+  document.querySelectorAll('.vtt-cc-list-item').forEach((b, i) => {
+    b.classList.toggle('is-active', i === idx);
+  });
+  document.querySelectorAll('.vtt-cc-detail').forEach((d, i) => {
+    d.classList.toggle('is-active', i === idx);
+  });
+  // Scroll top du détail
+  document.querySelector('.vtt-cc-details')?.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window._vttConditionConfigSave = async () => {
+  if (!STATE.isAdmin) return;
+  const triVal = (id) => document.querySelector(`[data-cc-tri-id="${id}"]`)?.dataset.ccTriValue || '';
+  const flagOn = (id) => document.querySelector(`[data-cc-flag-id="${id}"]`)?.classList.contains('is-on');
+  const newLib = CONDITION_LIBRARY.map((c, idx) => {
+    const get = (k) => document.getElementById(`cc-${idx}-${k}`);
+    const eff = {};
+    const atkBy  = triVal(`cc-${idx}-atkBy`);  if (atkBy)  eff.attackBy = atkBy;
+    const atkAg  = triVal(`cc-${idx}-atkAg`);  if (atkAg)  eff.attackAgainst = atkAg;
+    const atkAgM = triVal(`cc-${idx}-atkAgM`); if (atkAgM) eff.attackAgainstMelee  = atkAgM;
+    const atkAgR = triVal(`cc-${idx}-atkAgR`); if (atkAgR) eff.attackAgainstRanged = atkAgR;
+    if (flagOn(`cc-${idx}-movementZero`)) eff.movementMod = 0;
+    if (flagOn(`cc-${idx}-cantAct`))      eff.cantAct = true;
+    if (flagOn(`cc-${idx}-cantCast`))     eff.cantCastSpells = true;
+    if (flagOn(`cc-${idx}-failsStr`))     eff.failsStrSaves = true;
+    if (flagOn(`cc-${idx}-failsDex`))     eff.failsDexSaves = true;
+    if (flagOn(`cc-${idx}-meleeCrit`))    eff.meleeCritOnHit = true;
+    if (flagOn(`cc-${idx}-consumed`))     eff.consumedByAttackAgainst = true;
+    const dmgTaken = get('dmgTaken')?.value?.trim();
+    if (dmgTaken) eff.dmgTakenBonus = dmgTaken;
+    const dmgReduc = parseInt(get('dmgReduc')?.value);
+    if (Number.isFinite(dmgReduc) && dmgReduc > 0) eff.dmgReductionPct = Math.min(100, dmgReduc);
+    const dc = parseInt(get('dc')?.value);
+    const stat = get('stat')?.value || null;
+    const dur = parseInt(get('duration')?.value);
+    return {
+      ...c,
+      label: get('label')?.value?.trim() || c.label,
+      icon:  get('icon')?.value?.trim() || c.icon,
+      color: get('color')?.value?.trim() || c.color,
+      desc:  get('desc')?.value || c.desc,
+      defaultSaveStat: stat,
+      defaultDC: Number.isFinite(dc) && dc > 0 ? dc : null,
+      defaultDuration: Number.isFinite(dur) && dur > 0 ? dur : null,
+      effects: eff,
+    };
+  });
+  try {
+    await saveDoc('world', 'conditions', { library: newLib });
+    CONDITION_LIBRARY = newLib;
+    _rebuildConditionIndex();
+    showNotif('✅ Réglages des états enregistrés', 'success');
+    closeModalDirect();
+  } catch (e) {
+    showNotif('Erreur sauvegarde : ' + (e?.message || e), 'error');
+  }
+};
+
+window._vttConditionConfigReset = async () => {
+  if (!STATE.isAdmin) return;
+  if (!await confirmModal(
+    'Remettre tous les états aux valeurs par défaut ? Les overrides MJ et les états personnalisés seront effacés.',
+    { title: '↺ Réinitialiser ?', confirmLabel: 'Réinitialiser', danger: true, icon: '↺' }
+  )) return;
+  try {
+    await saveDoc('world', 'conditions', { library: [] });
+    CONDITION_LIBRARY = CONDITION_DEFAULT_LIBRARY.map(c => ({ ...c, effects: { ...c.effects } }));
+    _rebuildConditionIndex();
+    closeModalDirect();
+    showNotif('↺ Réglages remis aux défauts', 'success');
+    // Réouvrir pour confirmation visuelle
+    setTimeout(() => window._vttConditionConfig(), 100);
+  } catch {}
+};
+
+/** Ajoute un nouvel état personnalisé à la lib en mémoire et réouvre la modale dessus.
+ *  La persistance se fait quand le MJ clique sur Enregistrer. */
+window._vttConditionConfigAddNew = async () => {
+  if (!STATE.isAdmin) return;
+  // Capture les modifs en cours dans la modale avant de la fermer/rouvrir
+  const _capture = () => {
+    const triVal = (id) => document.querySelector(`[data-cc-tri-id="${id}"]`)?.dataset.ccTriValue || '';
+    const flagOn = (id) => document.querySelector(`[data-cc-flag-id="${id}"]`)?.classList.contains('is-on');
+    CONDITION_LIBRARY = CONDITION_LIBRARY.map((c, idx) => {
+      const get = (k) => document.getElementById(`cc-${idx}-${k}`);
+      if (!get('label')) return c; // si le DOM n'a pas ce détail, on ne touche pas
+      const eff = {};
+      const atkBy  = triVal(`cc-${idx}-atkBy`);  if (atkBy)  eff.attackBy = atkBy;
+      const atkAg  = triVal(`cc-${idx}-atkAg`);  if (atkAg)  eff.attackAgainst = atkAg;
+      const atkAgM = triVal(`cc-${idx}-atkAgM`); if (atkAgM) eff.attackAgainstMelee  = atkAgM;
+      const atkAgR = triVal(`cc-${idx}-atkAgR`); if (atkAgR) eff.attackAgainstRanged = atkAgR;
+      if (flagOn(`cc-${idx}-movementZero`)) eff.movementMod = 0;
+      if (flagOn(`cc-${idx}-cantAct`))      eff.cantAct = true;
+      if (flagOn(`cc-${idx}-cantCast`))     eff.cantCastSpells = true;
+      if (flagOn(`cc-${idx}-failsStr`))     eff.failsStrSaves = true;
+      if (flagOn(`cc-${idx}-failsDex`))     eff.failsDexSaves = true;
+      if (flagOn(`cc-${idx}-meleeCrit`))    eff.meleeCritOnHit = true;
+      if (flagOn(`cc-${idx}-consumed`))     eff.consumedByAttackAgainst = true;
+      const dmgTaken = get('dmgTaken')?.value?.trim();
+      if (dmgTaken) eff.dmgTakenBonus = dmgTaken;
+      const dmgReduc = parseInt(get('dmgReduc')?.value);
+      if (Number.isFinite(dmgReduc) && dmgReduc > 0) eff.dmgReductionPct = Math.min(100, dmgReduc);
+      const dc = parseInt(get('dc')?.value);
+      const stat = get('stat')?.value || null;
+      const dur = parseInt(get('duration')?.value);
+      return {
+        ...c,
+        label: get('label')?.value?.trim() || c.label,
+        icon:  get('icon')?.value?.trim() || c.icon,
+        color: get('color')?.value?.trim() || c.color,
+        desc:  get('desc')?.value ?? c.desc,
+        defaultSaveStat: stat,
+        defaultDC: Number.isFinite(dc) && dc > 0 ? dc : null,
+        defaultDuration: Number.isFinite(dur) && dur > 0 ? dur : null,
+        effects: eff,
+      };
+    });
+  };
+  try { _capture(); } catch {}
+
+  const newId = `custom_${Date.now().toString(36)}`;
+  CONDITION_LIBRARY.push({
+    id: newId,
+    label: 'Nouvel état',
+    icon: '✨',
+    color: '#9ca3af',
+    desc: '',
+    defaultSaveStat: null,
+    defaultDC: null,
+    effects: {},
+  });
+  _rebuildConditionIndex();
+  closeModalDirect();
+  // Réouvre SANS reload Firestore (la nouvelle entrée n'est pas encore persistée,
+  // un reload l'écraserait → bug "+ Nouvel état n'ajoute qu'une fois")
+  setTimeout(async () => {
+    await window._vttConditionConfig({ skipReload: true });
+    const lastIdx = CONDITION_LIBRARY.length - 1;
+    window._vttConditionConfigSelect?.(lastIdx);
+    // Focus l'input label pour rename direct
+    document.getElementById(`cc-${lastIdx}-label`)?.focus();
+    document.getElementById(`cc-${lastIdx}-label`)?.select();
+  }, 80);
+};
+
+/** Supprime un état personnalisé (non-default). Persistance immédiate. */
+window._vttConditionConfigDelete = async (idx) => {
+  if (!STATE.isAdmin) return;
+  const c = CONDITION_LIBRARY[idx]; if (!c) return;
+  if (!_isCustomCondition(c.id)) {
+    showNotif('Les états par défaut ne peuvent pas être supprimés', 'warning');
+    return;
+  }
+  if (!await confirmModal(
+    `Supprimer l'état « ${c.label} » ? Les tokens qui le portent garderont la donnée mais elle ne sera plus reconnue.`,
+    { title: `🗑 Supprimer ${c.label} ?`, confirmLabel: 'Supprimer', danger: true, icon: '🗑' }
+  )) return;
+  CONDITION_LIBRARY = CONDITION_LIBRARY.filter((_, i) => i !== idx);
+  _rebuildConditionIndex();
+  try {
+    // Persiste l'état actuel de la lib (sans le state supprimé)
+    // On ne sauvegarde QUE les non-défauts modifiés + customs restants
+    const toSave = CONDITION_LIBRARY.filter(c2 =>
+      _isCustomCondition(c2.id) || true /* keep all so future loads merge correctly */);
+    await saveDoc('world', 'conditions', { library: toSave });
+    closeModalDirect();
+    showNotif('🗑 État supprimé', 'success');
+    setTimeout(() => window._vttConditionConfig(), 80);
+  } catch (e) {
+    showNotif('Erreur suppression : ' + (e?.message || e), 'error');
+  }
+};
+
+/** Helper : true si le token porte un état actif dont l'effet `effectKey` est truthy. */
+function _hasConditionEffect(token, effectKey) {
+  const round = _session?.combat?.round ?? 0;
+  for (const c of (token?.conditions || [])) {
+    if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) continue;
+    const eff = CONDITION_BY_ID[c.id]?.effects;
+    if (eff && eff[effectKey]) return true;
+  }
+  return false;
+}
+
+/** Helper : retourne la liste des états actifs sur un token (objets {cond, lib}). */
+function _activeConditionsOf(token) {
+  const round = _session?.combat?.round ?? 0;
+  const out = [];
+  for (const c of (token?.conditions || [])) {
+    if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) continue;
+    const lib = CONDITION_BY_ID[c.id]; if (!lib) continue;
+    out.push({ cond: c, lib });
+  }
+  return out;
+}
+
+/** Helper : retourne les modificateurs avantage/désavantage d'un attaquant et d'une cible
+ *  selon leurs états actifs. À appeler par _vttRollAttack. */
+function _conditionsAttackMods(srcToken, tgtToken, opt) {
+  const isMelee = (opt?.portee || 1) <= 1;
+  const round = _session?.combat?.round ?? 0;
+  const isActive = c => c.expiresAtRound == null || round === 0 || round <= c.expiresAtRound;
+
+  let hasAdv = false, hasDis = false;
+  const reasons = []; // pour log
+
+  // Attaquant : ses propres états affectent ses attaques
+  for (const c of (srcToken?.conditions || [])) {
+    if (!isActive(c)) continue;
+    const eff = CONDITION_BY_ID[c.id]?.effects; if (!eff) continue;
+    if (eff.attackBy === 'adv') { hasAdv = true; reasons.push(`+adv (${CONDITION_BY_ID[c.id].label} sur lanceur)`); }
+    if (eff.attackBy === 'dis') { hasDis = true; reasons.push(`+dis (${CONDITION_BY_ID[c.id].label} sur lanceur)`); }
+  }
+  // Cible : ses états affectent les attaques entrantes
+  for (const c of (tgtToken?.conditions || [])) {
+    if (!isActive(c)) continue;
+    const eff = CONDITION_BY_ID[c.id]?.effects; if (!eff) continue;
+    if (eff.attackAgainst === 'adv') { hasAdv = true; reasons.push(`+adv (${CONDITION_BY_ID[c.id].label} sur cible)`); }
+    if (eff.attackAgainst === 'dis') { hasDis = true; reasons.push(`+dis (${CONDITION_BY_ID[c.id].label} sur cible)`); }
+    // À terre : adv si CaC, dis si distance
+    if (isMelee && eff.attackAgainstMelee === 'adv')  { hasAdv = true; reasons.push(`+adv (CaC vs ${CONDITION_BY_ID[c.id].label})`); }
+    if (!isMelee && eff.attackAgainstRanged === 'dis'){ hasDis = true; reasons.push(`+dis (dist. vs ${CONDITION_BY_ID[c.id].label})`); }
+  }
+  return { hasAdv, hasDis, reasons };
+}
 /** Déclenche un sort suspendu : marque le sort gratuit puis ouvre le modal d'attaque. */
 window._vttTriggerSuspendedSpell = async (tokenId, buffIdx) => {
   const t = _tokens[tokenId]?.data; if (!t?.buffs?.length) return;
@@ -9438,6 +10581,8 @@ export async function renderVttPage() {
   _formatsP.then(([f, d]) => { _weaponFormats = f; _damageTypes = d; });
   // Précharge les matrices MJ (combos, armes invoquées) pour les sorts en combat
   loadSpellMatrices().then(m => { _spellMatrices = m; }).catch(() => {});
+  // Précharge les overrides MJ de la librairie d'états (CONDITION_LIBRARY)
+  _loadConditionsOverrides().catch(() => {});
   // _skillsP : _loadDiceSkills met à jour _diceSkills et rerend l'inspector si besoin
   void _skillsP;
   _initListeners();
