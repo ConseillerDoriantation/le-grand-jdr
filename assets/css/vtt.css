@@ -2363,32 +2363,239 @@
 .vtt-emote-card.is-editing { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
 .vtt-ec-cancel:hover { background: var(--bg-elevated); }
 
+/* ═══════════════════════════════════════════════════════════════════
+   CHAT LOG — Système unifié de messages
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Entrée de base — toutes les actions du chat utilisent .vtt-log */
+.vtt-log {
+  --log-c: #6b7280;
+  display: flex; flex-direction: column; gap: .3rem;
+  padding: .45rem .55rem .45rem .65rem;
+  border-radius: 8px;
+  border-left: 3px solid var(--log-c);
+  background: color-mix(in oklab, var(--log-c) 7%, transparent);
+  color: var(--text);
+  font-size: .76rem; line-height: 1.45;
+  word-break: break-word;
+}
+/* Thèmes par résultat */
+.vtt-log--miss   { --log-c: #6b7280; opacity: .9; }
+.vtt-log--hit    { --log-c: #22c38e; }
+.vtt-log--crit   { --log-c: #f59e0b; }
+.vtt-log--fumble { --log-c: #ef4444; }
+.vtt-log--half   { --log-c: #b47fff; }
+.vtt-log--heal   { --log-c: #22c38e; }
+.vtt-log--cast   { --log-c: #b47fff; }
+.vtt-log--aff    { --log-c: #8b5cf6; }
+.vtt-log--saveok   { --log-c: #22c38e; }
+.vtt-log--savefail { --log-c: #ef4444; }
+.vtt-log--dot    { --log-c: #dc2626; }
+.vtt-log--roll   { --log-c: #e8b84b; }
+.vtt-log--chat   { --log-c: transparent; background: rgba(255,255,255,.02); border-left: 0; padding: .25rem .55rem; }
+
+/* ── Header : Source ▸ Cible + label sort + badges ─────────────────── */
+.vtt-log-head {
+  display: flex; align-items: center; gap: .4rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.vtt-log-actor {
+  display: inline-flex; align-items: center; gap: .35rem;
+  min-width: 0;
+}
+.vtt-log-portrait-lg {
+  width: 30px; height: 30px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0;
+  border: 2px solid var(--log-c);
+  background: var(--bg-elevated);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: .85rem; color: #fff;
+  letter-spacing: -.02em;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+}
+.vtt-log-name {
+  font-weight: 700; font-size: .85rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 9rem;
+}
+.vtt-log-arrow {
+  font-size: 1rem; color: var(--log-c);
+  font-weight: 700; line-height: 1;
+  opacity: .85;
+}
+.vtt-log-label {
+  font-size: .72rem; font-weight: 600;
+  color: var(--log-c);
+  background: color-mix(in oklab, var(--log-c) 14%, transparent);
+  padding: .15rem .5rem; border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid color-mix(in oklab, var(--log-c) 35%, transparent);
+}
+.vtt-log-meta {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: .3rem;
+  flex-shrink: 0;
+}
+.vtt-log-time {
+  font-size: .58rem; color: var(--text-dim); opacity: .7;
+}
+.vtt-log-badge {
+  font-size: .62rem; font-weight: 800;
+  padding: .12rem .45rem; border-radius: 999px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.vtt-log-badge--crit    { color: #f59e0b; background: rgba(245,158,11,.18); }
+.vtt-log-badge--fumble  { color: #ef4444; background: rgba(239,68,68,.18); }
+.vtt-log-badge--adv     { color: #22c38e; background: rgba(34,195,142,.16); }
+.vtt-log-badge--dis     { color: #ef4444; background: rgba(239,68,68,.16); }
+.vtt-log-badge--ok      { color: #22c38e; background: rgba(34,195,142,.18); }
+.vtt-log-badge--fail    { color: #ef4444; background: rgba(239,68,68,.18); }
+.vtt-log-badge--pm      { color: #c4b5fd; background: rgba(180,127,255,.18); }
+
+/* ── Body : ligne principale avec résultat ───────────────────────────── */
+.vtt-log-body {
+  display: flex; align-items: baseline; gap: .45rem;
+  flex-wrap: wrap;
+  padding-left: 0;
+}
+.vtt-log-icon { font-size: 1.05rem; line-height: 1; }
+.vtt-log-result {
+  font-size: 1.45rem; font-weight: 800;
+  color: var(--log-c);
+  font-variant-numeric: tabular-nums;
+  line-height: 1; letter-spacing: -.02em;
+}
+.vtt-log-result-sub {
+  font-size: .72rem; color: var(--text-dim); font-weight: 600;
+}
+.vtt-log-vs {
+  font-size: .72rem; color: var(--text-dim);
+}
+.vtt-log-text { flex: 1; min-width: 0; font-size: .8rem; }
+
+/* Toggle détail */
+.vtt-log-toggle {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer;
+  padding: .15rem .55rem; border-radius: 6px;
+  font-size: .62rem; font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.vtt-log-toggle:hover {
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  border-color: var(--log-c);
+}
+.vtt-log-toggle.is-open {
+  background: color-mix(in oklab, var(--log-c) 18%, transparent);
+  color: var(--log-c);
+  border-color: var(--log-c);
+}
+
+/* ── Panneau détail ──────────────────────────────────────────────────── */
+.vtt-log-detail {
+  display: none;
+  padding: .35rem .5rem;
+  background: rgba(0,0,0,.18);
+  border-radius: 6px;
+  border-left: 2px solid color-mix(in oklab, var(--log-c) 45%, transparent);
+}
+.vtt-log-detail.is-open { display: flex; flex-direction: column; gap: .15rem; }
+.vtt-log-detail-row {
+  display: grid; grid-template-columns: 1fr auto;
+  gap: .5rem; align-items: baseline;
+  padding: .1rem 0;
+  font-size: .72rem;
+}
+.vtt-log-detail-label {
+  color: var(--text-soft, var(--text));
+  display: flex; align-items: baseline; gap: .35rem;
+}
+.vtt-log-detail-label .op {
+  color: var(--text-dim); font-weight: 700; font-size: .68rem;
+}
+.vtt-log-detail-val {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--text);
+  text-align: right;
+}
+.vtt-log-detail-row.is-final {
+  background: color-mix(in oklab, var(--log-c) 15%, transparent);
+  border-radius: 5px;
+  padding: .2rem .4rem;
+  margin: .15rem -.1rem 0;
+}
+.vtt-log-detail-row.is-final .vtt-log-detail-val { color: var(--log-c); font-size: .92rem; }
+
+/* Liste de cibles (multi-attack) */
+.vtt-log-targets {
+  display: flex; flex-direction: column; gap: .2rem;
+  margin-top: .1rem;
+}
+.vtt-log-target {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  align-items: center; gap: .35rem;
+  padding: .25rem .4rem;
+  background: rgba(255,255,255,.03);
+  border-radius: 6px;
+  border-left: 2px solid var(--row-c, var(--border));
+  font-size: .72rem;
+}
+.vtt-log-target-portrait {
+  width: 24px; height: 24px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0;
+  border: 1.5px solid var(--row-c, var(--border));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: .7rem; color: #fff;
+}
+.vtt-log-target-name {
+  font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vtt-log-target-ca {
+  font-size: .62rem; color: var(--text-dim);
+  padding: .1rem .35rem; border-radius: 4px;
+  background: rgba(255,255,255,.04);
+}
+.vtt-log-target-dmg {
+  font-weight: 800; font-size: .88rem;
+  color: var(--row-c, var(--text));
+  font-variant-numeric: tabular-nums;
+  min-width: 2rem; text-align: right;
+}
+
+/* Message chat simple */
+.vtt-log-chat-msg {
+  display: flex; align-items: baseline; gap: .4rem;
+  flex-wrap: wrap;
+}
+.vtt-log-chat-who {
+  font-weight: 700; color: var(--gold);
+  font-size: .8rem;
+}
+.vtt-log-chat-who.me { color: oklch(72% 0.18 280); }
+.vtt-log-chat-text { color: var(--text); flex: 1; font-size: .82rem; }
+
+/* Compat : ancienne classe gardée pour les rares appels résiduels */
 .vtt-log-entry {
   padding: .22rem .35rem; border-radius: 6px;
   font-size: .72rem; line-height: 1.4; word-break: break-word;
 }
-/* Le fond des entrées de jet est défini inline (couleur de stat / résultat) */
 .vtt-log-roll { color: var(--text); }
 .vtt-log-msg  { background: var(--bg-elevated); color: var(--text-muted); }
 .vtt-log-who  { font-weight: 700; color: var(--gold); margin-right: .25rem; }
-
-/* Portrait 22px dans le log */
 .vtt-log-portrait {
   width: 22px; height: 22px; border-radius: 50%; object-fit: cover;
   border: 1.5px solid var(--border); flex-shrink: 0;
   font-size: .65rem; font-weight: 700; color: #fff;
   display: flex; align-items: center; justify-content: center;
-}
-.vtt-log-roll-num {
-  font-size: 1rem; font-weight: 700; color: var(--crimson);
-  font-family: 'Outfit', sans-serif;
-}
-.vtt-log-roll-desc {
-  font-size: .65rem; color: var(--text-muted);
-  display: block; margin-top: .05rem; opacity: .8;
-}
-.vtt-log-time {
-  font-size: .58rem; color: var(--text-dim); opacity: .6; flex-shrink: 0;
 }
 .vtt-log-detail-btn {
   font-size: .58rem; padding: .1rem .3rem; border-radius: 3px;
