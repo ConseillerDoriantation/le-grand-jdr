@@ -121,7 +121,8 @@
       "Bash(node --check assets/js/features/bastion.js)",
       "Bash(node --check assets/js/features/vtt-spectator.js)",
       "Bash(grep -E \"\\\\.js$\")",
-      "Bash(grep -v \"//\")"
+      "Bash(grep -v \"//\")",
+      "Bash(grep -n \"pmOverride,$\" \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/spells.js\")"
     ]
   }
 }

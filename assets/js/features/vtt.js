@@ -1831,9 +1831,13 @@ function _vttSortSoinFormula(s, c) {
       statKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
     }
   }
-  const statMod = c ? getMod(c, statKey) : 0;
+  // Stat 'none' : aucun modificateur de carac (potion à valeur fixe, etc.)
+  // Dans ce cas on n'ajoute NI la stat NI la maîtrise → effet 100% fixe.
+  const noStatMod = statKey === 'none';
+  const statMod = noStatMod ? 0 : (c ? getMod(c, statKey) : 0);
+  const effectiveMaitrise = noStatMod ? 0 : maitrise;
 
-  const totalFlat = maitrise + statMod;
+  const totalFlat = effectiveMaitrise + statMod;
   const flatStr = totalFlat > 0 ? ` +${totalFlat}` : totalFlat < 0 ? ` ${totalFlat}` : '';
   if (!base || base.toLowerCase() === '= base') {
     let r = `${1 + nbProt}d4`;
@@ -2466,7 +2470,11 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
       const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
         ? lib.defaultDuration : 2;
+      // Si combat actif (round > 0) : expiresAtRound calculé direct
+      // Si combat inactif (round = 0) : on stocke pendingDuration pour reporter
+      //   le calcul au démarrage du combat (sinon l'état durerait à l'infini)
       const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+      const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
       const existingConds = td.conditions || [];
       if (existingConds.some(c => c.id === aff.etatId)) {
         showNotif(`${lib.icon} ${tgtName} portait déjà ${lib.label}`, 'info');
@@ -2480,6 +2488,7 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
         saveDC: lib.defaultDC || aff.dd,
         saveStat: lib.defaultSaveStat || aff.saveStat || null,
         expiresAtRound,
+        ...(pendingDuration != null ? { pendingDuration } : {}),
       };
       // Surface l'erreur si l'update Firestore échoue (permissions, etc.)
       try {
@@ -2716,7 +2725,11 @@ function _buildAttackOptions(t) {
 
     c.deck_sorts.forEach((s, idx) => {
       if (!s.actif) return;
-      const baseRange = parseInt(s.portee) || ld.displayRange || 1;
+      // Portée du sort : préserve EXPLICITEMENT 0 (sur soi uniquement).
+      // `s.portee == null` ou champ vide → fallback portée d'arme/défaut.
+      const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
+        ? parseInt(s.portee)
+        : (ld.displayRange || 1);
       const mods      = _vttSpellMods(s);
       // Allonge magique : ne modifie pas la portée du sort lui-même (c'est un enchantement
       // qui s'applique à l'arme de la cible via un buff `range_bonus` posé au cast, durée
@@ -2837,8 +2850,11 @@ function _buildAttackOptions(t) {
         // Si renseignés sur le sort, ils remplacent la stat de l'arme principale.
         const ovrTouchStat = s.toucherStat || wTchStat;
         const ovrDmgStat   = s.degatsStat  || sStatKey;
-        const ovrTouchMod  = c ? getMod(c, ovrTouchStat) : wTchMod;
-        const ovrDmgMod    = c ? getMod(c, ovrDmgStat)   : sStatMod;
+        // Stat 'none' = pas de modificateur (utile pour potions/objets à effet fixe)
+        const ovrTouchNoMod = ovrTouchStat === 'none';
+        const ovrDmgNoMod   = ovrDmgStat   === 'none';
+        const ovrTouchMod  = ovrTouchNoMod ? 0 : (c ? getMod(c, ovrTouchStat) : wTchMod);
+        const ovrDmgMod    = ovrDmgNoMod   ? 0 : (c ? getMod(c, ovrDmgStat)   : sStatMod);
         options.push({
           id: `sort_${idx}`, icon: sortIcon, label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: fullFormula,
@@ -2849,9 +2865,11 @@ function _buildAttackOptions(t) {
           damageTypeIcon: spellTypeObj?.icon || '',
           damageTypeColor: spellTypeObj?.color || '',
           toucherMod: ovrTouchMod, toucherSetBonus: wSetBonus,
-          toucherStatLabel: statShort(ovrTouchStat) || ovrTouchStat,
-          dmgStatMod: ovrDmgMod, dmgStatLabel: statShort(ovrDmgStat) || ovrDmgStat,
+          toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
+          dmgStatMod: ovrDmgMod,
+          dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
           maitriseBonus: sFixed,
+          mjAlwaysMax: !!s.mjAlwaysMax,
           actionType,
           ..._catMeta,
         });
@@ -2874,19 +2892,25 @@ function _buildAttackOptions(t) {
             soinStatKey = 'constitution';
           }
         }
-        const soinStatMod = c ? getMod(c, soinStatKey) : 0;
+        // Stat 'none' = aucun modificateur (potion à valeur fixe)
+        const soinNoMod = soinStatKey === 'none';
+        const soinStatMod = soinNoMod ? 0 : (c ? getMod(c, soinStatKey) : 0);
+        const soinStatLabel = soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey);
         // Stat de toucher (override > stat de l'arme), pour le jet d20 → DD 2
         const soinTouchStat = s.toucherStat || wTchStat;
-        const soinTouchMod  = c ? getMod(c, soinTouchStat) : wTchMod;
+        const soinTouchNoMod = soinTouchStat === 'none';
+        const soinTouchMod  = soinTouchNoMod ? 0 : (c ? getMod(c, soinTouchStat) : wTchMod);
+        const soinTouchLabel = soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat);
         options.push({
           id: `sort_${idx}`, icon: '💚', label: s.nom || `Sort ${idx+1}`,
           rawDice: sRawDice, dice: soinFormula,
           portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
           zoneW, zoneH, mods,
           isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
-          dmgStatMod: soinStatMod, dmgStatLabel: statShort(soinStatKey) || soinStatKey,
+          mjAlwaysMax: !!s.mjAlwaysMax,
+          dmgStatMod: soinStatMod, dmgStatLabel: soinStatLabel,
           toucherMod: soinTouchMod, toucherSetBonus: wSetBonus,
-          toucherStatLabel: statShort(soinTouchStat) || soinTouchStat,
+          toucherStatLabel: soinTouchLabel,
           actionType,
           ..._catMeta,
         });
@@ -2917,54 +2941,190 @@ function _buildAttackOptions(t) {
     });
   }
 
-  // ── Actions/Bonus/Réactions définies sur des objets de l'inventaire ─────
-  // Format item.actions = [{ id, type, nom, description, pmCost, consommable,
-  //   degats, degatsStat, typeId, portee, nbCibles, isHeal, targetSelf }]
-  if (c && Array.isArray(c.inventaire)) {
+  // ── Actions d'objets : traitées EXACTEMENT comme des sorts du deck ─────
+  // Chaque item.actions[i] est un sort complet (mêmes champs que deck_sorts) :
+  // noyau, runes, types, modes (Affliction DoT/État, Enchantement Dégâts/État…).
+  // On réutilise donc tout le pipeline sort (_vttSpellMods, isAfflictionOnly, etc.)
+  // en ajoutant juste les méta de consommation et d'identification objet.
+  if (c && Array.isArray(c.inventaire) && !_silenced) {
+    const mainP2I    = c?.equipement?.['Main principale'];
+    const sStatKeyI  = mainP2I?.statAttaque || mainP2I?.toucherStat || 'force';
+    const sStatModI  = getMod(c, sStatKeyI);
+    const sStatLblI  = statShort(sStatKeyI) || sStatKeyI;
+    const spellPmDeltaI = getArmorSetData(c).modifiers.spellPmDelta || 0;
+
     c.inventaire.forEach((item, invIdx) => {
       const acts = Array.isArray(item?.actions) ? item.actions : [];
       if (!acts.length) return;
-      acts.forEach(a => {
-        const formula = a.degats || '';
-        const { rawDice, fixed } = _splitDiceFormula(formula);
-        const typeRules = a.typeId
-          ? getDamageTypeRules(_damageTypes, a.typeId)
-          : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
-        const typeObj = a.typeId ? getDamageTypeById(_damageTypes, a.typeId) : null;
-        const sStatMod = a.degatsStat ? getMod(c, a.degatsStat) : 0;
-        const sStatLbl = a.degatsStat ? (statShort(a.degatsStat) || a.degatsStat) : '';
-        const icon = a.type === 'reaction' ? '⚡' : a.type === 'bonus' ? '💫' : '🎯';
-        options.push({
-          id: `itemact_${invIdx}_${a.id}`,
-          icon,
-          label: `${item.nom || 'Objet'} — ${a.nom || 'Action'}`,
-          rawDice, dice: formula || '0',
-          portee: parseInt(a.portee) || 1,
-          pmCost: parseInt(a.pmCost) || 0,
-          nbCibles: Math.max(1, parseInt(a.nbCibles) || 1),
-          zoneW: 0, zoneH: 0,
-          isHeal: !!a.isHeal,
-          targetSelf: !!a.targetSelf,
-          typeRules,
-          damageTypeId:    a.typeId || '',
-          damageTypeIcon:  typeObj?.icon  || '',
-          damageTypeColor: typeObj?.color || '',
-          toucherMod: 0, toucherSetBonus: 0,
-          toucherStatLabel: '',
-          dmgStatMod: sStatMod, dmgStatLabel: sStatLbl,
-          maitriseBonus: fixed,
-          traits: [],
-          actionType: a.type || 'action',
-          actionDescription: a.description || '',
-          // Pour la consommation à l'usage :
-          _itemAction: {
-            invIndex:    invIdx,
-            itemId:      item.itemId || '',
-            itemNom:     item.nom    || '',
-            actionId:    a.id        || '',
-            consommable: !!a.consommable,
-          },
-        });
+      acts.forEach((s, actIdx) => {
+        // s a maintenant le schéma d'un sort complet (deck_sorts shape)
+        // Portée du sort : préserve EXPLICITEMENT 0 (sur soi uniquement).
+      // `s.portee == null` ou champ vide → fallback portée d'arme/défaut.
+      const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
+        ? parseInt(s.portee)
+        : (ld.displayRange || 1);
+        const mods      = _vttSpellMods(s);
+        const portee    = mods?.allonge ? baseRange : baseRange;
+        const zoneW     = mods?.allonge ? 0 : (s.zoneW || 0);
+        const zoneH     = mods?.allonge ? 0 : (s.zoneH || 0);
+        const types     = Array.isArray(s.types) && s.types.length ? s.types
+                        : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
+        const protMode  = s.protectionMode || 'ca';
+        const nbCibles  = _vttSortCibles(s) || 1;
+
+        // Coût PM : override > calc auto ; set léger appliqué (jamais < 0)
+        const pmRaw     = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
+                          ? s.pmOverride
+                          : (parseInt(s.pm) || 0);
+        const basePm    = Math.max(0, pmRaw + spellPmDeltaI);
+        const cout      = basePm;
+        const _pmMeta   = { pmRaw, pmSetDelta: spellPmDeltaI };
+
+        // Méta objet (consommation à l'usage, identification)
+        const itemMeta = {
+          invIndex:    invIdx,
+          itemId:      item.itemId || '',
+          itemNom:     item.nom    || '',
+          actionId:    s.id        || `a${actIdx}`,
+          consommable: !!item.consommable,
+        };
+
+        // Type d'action
+        const _sRunes = s.runes || [];
+        const actionType = _sRunes.includes('Réaction') ? 'reaction'
+                         : _sRunes.includes('Enchantement') ? 'bonus'
+                         : (s.actionOverride === 'action_bonus' ? 'bonus'
+                            : s.actionOverride === 'reaction'   ? 'reaction'
+                                                                  : 'action');
+        const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '🎯';
+
+        // Préfixe label avec le nom de l'objet pour ne pas perdre l'origine
+        const labelBase = s.nom || `Action ${actIdx+1}`;
+        const fullLabel = `${item.nom || 'Objet'} — ${labelBase}`;
+
+        // ── Branches reprises des sorts perso ───────────────────────────
+        const isEnchantOnly  = !!mods?.enchantArmeDmg && !((s.degats || '').trim());
+        const isAfflictionOnly = !!mods?.affliction;
+
+        if (isEnchantOnly) {
+          const enchMode = s.enchantMode || 'dmg';
+          const isEtat   = enchMode === 'etat' && !!mods?.enchantEtatId;
+          const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
+          const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
+          options.push({
+            id: `itemact_${invIdx}_${actIdx}`, icon: isEtat ? '✨' : '🪄',
+            label: fullLabel, dice: '',
+            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
+            zoneW, zoneH, mods,
+            isEnchant: true, enchantMode: enchMode,
+            enchantFormula: mods.enchantArmeDmg?.formula || '',
+            enchantEtatId: mods.enchantEtatId || null,
+            enchantElement: elementId,
+            enchantElementIcon: enchTypeObj?.icon || '',
+            enchantElementColor: enchTypeObj?.color || '',
+            isUtil: true, halfOnMiss: false,
+            actionType, _itemAction: itemMeta,
+          });
+        } else if (isAfflictionOnly) {
+          const aff = mods.affliction;
+          const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
+          options.push({
+            id: `itemact_${invIdx}_${actIdx}`,
+            icon: aff.mode === 'etat' ? '⛓' : '🩸',
+            label: fullLabel,
+            dice: aff.mode === 'dot'
+                  ? `${aff.dotFormula}/tour`
+                  : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
+            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
+            zoneW, zoneH, mods,
+            isAffliction: true,
+            afflictionMode: aff.mode,
+            afflictionDotFormula: aff.dotFormula,
+            afflictionEtatId: aff.etatId || null,
+            afflictionDD: aff.dd,
+            afflictionSaveStat: aff.saveStat,
+            afflictionElement: aff.element || null,
+            afflictionElementIcon: aTypeObj?.icon || '',
+            afflictionElementColor: aTypeObj?.color || '',
+            isUtil: true, halfOnMiss: false,
+            actionType, _itemAction: itemMeta,
+          });
+        } else if (types.includes('offensif')) {
+          // Sort offensif classique (Boule de feu d'objet, etc.)
+          const fullFormula    = _vttSortDmgFormula(s, c);
+          const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
+          const spellTypeId    = s.noyauTypeId || null;
+          const spellTypeRules = spellTypeId ? getDamageTypeRules(_damageTypes, spellTypeId)
+                                              : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
+          const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
+          const ovrTouchStat   = s.toucherStat || sStatKeyI;
+          const ovrDmgStat     = s.degatsStat  || sStatKeyI;
+          const ovrTouchNoMod  = ovrTouchStat === 'none';
+          const ovrDmgNoMod    = ovrDmgStat   === 'none';
+          const ovrTouchMod    = ovrTouchNoMod ? 0 : getMod(c, ovrTouchStat);
+          const ovrDmgMod      = ovrDmgNoMod   ? 0 : getMod(c, ovrDmgStat);
+          options.push({
+            id: `itemact_${invIdx}_${actIdx}`, icon: sortIcon, label: fullLabel,
+            rawDice: sRawDice, dice: fullFormula,
+            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
+            zoneW, zoneH, mods,
+            typeRules: spellTypeRules,
+            damageTypeId:    spellTypeId,
+            damageTypeIcon:  spellTypeObj?.icon  || '',
+            damageTypeColor: spellTypeObj?.color || '',
+            toucherMod: ovrTouchMod, toucherSetBonus: 0,
+            toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
+            dmgStatMod: ovrDmgMod,
+            dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
+            maitriseBonus: sFixed,
+            mjAlwaysMax: !!s.mjAlwaysMax,
+            actionType, _itemAction: itemMeta,
+          });
+        } else if (types.includes('defensif') && protMode === 'soin') {
+          // Soin
+          const soinFormula = _vttSortSoinFormula(s, c);
+          const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
+          const soinStatKey = s.degatsStat || 'constitution';
+          const soinNoMod   = soinStatKey === 'none';
+          const soinStatMod = soinNoMod ? 0 : getMod(c, soinStatKey);
+          const soinTouchStat = s.toucherStat || sStatKeyI;
+          const soinTouchNoMod = soinTouchStat === 'none';
+          const soinTouchMod  = soinTouchNoMod ? 0 : getMod(c, soinTouchStat);
+          options.push({
+            id: `itemact_${invIdx}_${actIdx}`, icon: '💚', label: fullLabel,
+            rawDice: sRawDice, dice: soinFormula,
+            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
+            zoneW, zoneH, mods,
+            isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
+            mjAlwaysMax: !!s.mjAlwaysMax,
+            dmgStatMod: soinStatMod,
+            dmgStatLabel: soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey),
+            toucherMod: soinTouchMod, toucherSetBonus: 0,
+            toucherStatLabel: soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat),
+            actionType, _itemAction: itemMeta,
+          });
+        } else if (types.includes('defensif') && protMode === 'ca') {
+          // Buff CA
+          options.push({
+            id: `itemact_${invIdx}_${actIdx}`, icon: '🛡️', label: fullLabel,
+            dice: s.ca || 'CA +2 (2 tours)',
+            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
+            zoneW, zoneH, mods,
+            isCaSort: true, halfOnMiss: false,
+            caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
+            actionType, _itemAction: itemMeta,
+          });
+        } else {
+          // Utilitaire libre
+          options.push({
+            id: `itemact_${invIdx}_${actIdx}`, icon: sortIcon, label: fullLabel,
+            dice: s.effet ? s.effet.slice(0, 40) : '—',
+            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
+            zoneW, zoneH, mods,
+            isUtil: true, halfOnMiss: false,
+            actionType, _itemAction: itemMeta,
+          });
+        }
       });
     });
   }
@@ -3002,6 +3162,14 @@ function _buildAttackOptions(t) {
     options.length = 0;
     options.push(...stacked);
   }
+
+  // ── Portée 0 = sur le lanceur uniquement (clic strict sur soi) ─────────
+  // On garde portee=0 strict. Le filtre `inRange` ne sera satisfait que si
+  // src === tgt (distance 0). targetSelf n'est PAS forcé : sinon l'option
+  // apparaîtrait peu importe le clic. L'utilisateur doit cliquer sur son
+  // propre token pour accéder à ces sorts.
+  // Pour les actions explicitement "sur soi" via flag targetSelf (potions),
+  // le comportement existant est préservé (l'option apparaît toujours).
 
   return options;
 }
@@ -3210,11 +3378,14 @@ async function _execAttack(srcId, tgtId) {
     return html.replace('<button ', `<button data-name="${name}" `);
   };
 
-  // ── Armes ──
-  if (weaponOpts.length) {
-    const body = weaponOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
-    optsHtml += _section('weapons', '⚔️', 'Attaques d\'arme', '#94a3b8', weaponOpts.length, body);
-    tabs.push({ id:'weapons', icon:'⚔️', title:'Armes', color:'#94a3b8', count:weaponOpts.length });
+  // ── 🛡 Arsenal : armes + actions d'objets (équipement physique) ──
+  //   Regroupe ce qui est "immédiatement utilisable" depuis l'équipement,
+  //   par opposition aux sorts (catégories dédiées) et au déplacement.
+  const arsenalOpts = [...weaponOpts, ...itemActOpts];
+  if (arsenalOpts.length) {
+    const body = arsenalOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
+    optsHtml += _section('arsenal', '🛡', 'Arsenal', '#94a3b8', arsenalOpts.length, body);
+    tabs.push({ id:'arsenal', icon:'🛡', title:'Arsenal', color:'#94a3b8', count:arsenalOpts.length });
   }
 
   // ── Sorts (groupés par catégorie ou non) ──
@@ -3235,13 +3406,6 @@ async function _execAttack(srcId, tgtId) {
       optsHtml += _section('spells', '✨', 'Sorts', '#818cf8', spellOpts.length, body);
       tabs.push({ id:'spells', icon:'✨', title:'Sorts', color:'#818cf8', count:spellOpts.length });
     }
-  }
-
-  // ── Actions d'objets (potions, parchemins, armes spéciales…) ──
-  if (itemActOpts.length) {
-    const body = itemActOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
-    optsHtml += _section('items', '🎯', 'Actions d\'objets', '#fbbf24', itemActOpts.length, body);
-    tabs.push({ id:'items', icon:'🎯', title:'Objets', color:'#fbbf24', count:itemActOpts.length });
   }
 
   // ── Section Courir (si combat actif et pas encore utilisé) ──────────
@@ -4425,6 +4589,7 @@ window._vttRollAttack = async () => {
       await _markAttacked();
       const rCa = _handleMultiCast();
 
+
       // Appliquer le buff CA sur chaque cible (ou bouclier réactif si combo détecté)
       const buffResults = [];
       const isShieldReactive = !!opt.mods?.bouclierReactif;
@@ -4596,9 +4761,15 @@ window._vttRollAttack = async () => {
       }
 
       // ── Soin normal ou critique ────────────────────────────────────
-      // Crit : max(dés) + 1 roll supplémentaire + 2× les bonus fixes (même logique que les attaques)
+      // Crit : max(dés) + 1 roll supplémentaire + 2× les bonus fixes
+      // Si opt.mjAlwaysMax (flag MJ) : remplace le jet par la valeur max systématique
       let healRaw, healTotal;
-      if (hIsCrit) {
+      if (opt.mjAlwaysMax) {
+        // Valeur max garantie (potion 1d6+4 → toujours 10, etc.)
+        const maxDice = _maxDice(effectiveDice);
+        healRaw   = maxDice;
+        healTotal = Math.max(1, maxDice + healFixed);
+      } else if (hIsCrit) {
         const maxDice = _maxDice(effectiveDice);
         const critRoll = _rollDice(effectiveDice);
         healRaw   = critRoll;          // pour le log (le "raw" est le 2e jet)
@@ -4775,7 +4946,14 @@ window._vttRollAttack = async () => {
     let sharedDmgRollsDetail = null; // { rolls:[3,5,2], sides:6, mod:0 } - rolls individuels
     let sharedCritRollsDetail = null;
     if (!isFumble) {
-      if (isCrit) {
+      if (opt.mjAlwaysMax) {
+        // Flag MJ : la formule de base tire toujours sa valeur max (potions, objets fixes).
+        // Le crit ne s'applique pas — la valeur est déjà maximale.
+        const maxDice = _maxDice(effectiveDice);
+        sharedDmgRaw         = maxDice;
+        sharedDmgRollsDetail = null;  // pas de rolls individuels en mode max
+        sharedDmgTotalHit    = Math.max(1, maxDice + totalFixed);
+      } else if (isCrit) {
         sharedCritNormalMax = _maxDice(effectiveDice) + totalFixed;
         const critDet = _rollDiceDetailed(effectiveDice);
         sharedCritRaw2      = critDet.total;
@@ -4954,6 +5132,7 @@ window._vttRollAttack = async () => {
         _data: curTgtData,
       });
     }
+
 
     // ── Combos post-attaque (Lacération, Déplacement, Drain, Concentration) ──
     const _mods = opt.mods || null;
@@ -8797,7 +8976,10 @@ window._vttConditionApply = async (tokenId, condId) => {
   const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
     ? lib.defaultDuration
     : 2;
+  // Hors combat (round=0) : on stocke pendingDuration pour différer le calcul
+  // à l'ouverture du combat. Sinon l'état durerait à l'infini.
   const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+  const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
   const cond = {
     id: condId,
     appliedAt: Date.now(),
@@ -8806,12 +8988,13 @@ window._vttConditionApply = async (tokenId, condId) => {
     saveDC: lib.defaultDC || null,
     saveStat: lib.defaultSaveStat || null,
     expiresAtRound,
+    ...(pendingDuration != null ? { pendingDuration } : {}),
   };
   const newConds = [...(t.conditions || []), cond];
   await updateDoc(_tokRef(tokenId), { conditions: newConds }).catch(() => {});
   closeModalDirect();
   const durLbl = isConsumed ? ' (1 coup)'
-    : (expiresAtRound != null ? ` (${dur} tour${dur>1?'s':''})` : '');
+    : (expiresAtRound != null || pendingDuration != null) ? ` (${dur} tour${dur>1?'s':''})` : '';
   showNotif(`${lib.icon} ${lib.label} appliqué${durLbl}`, 'success');
   _renderInspectorSoon?.();
 };
@@ -9572,7 +9755,29 @@ window._vttToggleCombat = async () => {
   await setDoc(_sesRef(),{combat:{active,round:active?1:0}},{merge:true});
   if (active) {
     const b=writeBatch(db);
-    Object.keys(_tokens).forEach(id=>b.update(_tokRef(id),{movedThisTurn:false,movedCells:0,bonusMvt:0,attackedThisTurn:false}));
+    // Au démarrage du combat (round 1), on convertit les conditions à durée
+    // différée (pendingDuration, posées hors combat) en expiresAtRound réel.
+    // Sinon ces états resteraient indéfiniment.
+    const startRound = 1;
+    Object.keys(_tokens).forEach(id => {
+      const tokData = _tokens[id]?.data;
+      if (!tokData) return;
+      const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, attackedThisTurn:false };
+      if (Array.isArray(tokData.conditions) && tokData.conditions.length) {
+        let changed = false;
+        const newConds = tokData.conditions.map(c => {
+          if (c.pendingDuration != null && c.expiresAtRound == null) {
+            changed = true;
+            const dur = parseInt(c.pendingDuration) || 0;
+            const { pendingDuration, ...rest } = c;
+            return { ...rest, expiresAtRound: dur > 0 ? startRound + dur - 1 : null };
+          }
+          return c;
+        });
+        if (changed) updates.conditions = newConds;
+      }
+      b.update(_tokRef(id), updates);
+    });
     await b.commit().catch(()=>{});
     showNotif('⚔️ Combat démarré !','success');
   } else showNotif('Combat terminé.','success');
@@ -9652,6 +9857,22 @@ window._vttNextRound = async () => {
         return true;
       });
       if (remaining.length !== tokData.buffs.length) updates.buffs = remaining;
+    }
+    // ── Cleanup des états (conditions) expirés ────────────────────────
+    // Les conditions ont aussi un expiresAtRound (posé au cast d'affliction
+    // ou via l'édition manuelle). Mêmes règles d'expiration que les buffs.
+    if (tokData.conditions?.length) {
+      const remainingConds = tokData.conditions.filter(c => {
+        if (c.expiresAtRound != null && round > c.expiresAtRound) {
+          const lib = CONDITION_BY_ID[c.id];
+          const icon = lib?.icon || '⛓';
+          const label = lib?.label || c.id;
+          expiredNotifs.push(`${icon} ${label} expiré sur ${_live(tokData).displayName ?? tokData.name}`);
+          return false;
+        }
+        return true;
+      });
+      if (remainingConds.length !== tokData.conditions.length) updates.conditions = remainingConds;
     }
     b.update(_tokRef(id), updates);
   });

@@ -3098,6 +3098,27 @@ input[type=number].input-field::-webkit-outer-spin-button {
 /* Variant readonly (joueur non-admin qui voit le badge) */
 .cs-mj-validation--readonly { cursor: default; }
 .cs-mj-validation--readonly .cs-mj-validation-label { cursor: default; }
+
+/* Variant --max : toggle "Toujours valeur maximum" (doré) */
+.cs-mj-validation--max.is-on {
+  background: linear-gradient(135deg, rgba(245,158,11,0.14), rgba(245,158,11,0.03));
+  border-color: rgba(245,158,11,0.45);
+  box-shadow: 0 2px 8px rgba(245,158,11,0.12);
+}
+.cs-mj-validation--max.is-on .cs-mj-validation-switch {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-color: rgba(245,158,11,0.55);
+}
+.cs-mj-validation--max .cs-mj-validation-state::before { content: 'Aléatoire'; }
+.cs-mj-validation--max.is-on .cs-mj-validation-state {
+  background: rgba(245,158,11,0.20);
+  color: #f59e0b;
+}
+.cs-mj-validation--max.is-on .cs-mj-validation-state::before { content: '🎲 Max garanti'; }
+[data-theme="light"] .cs-mj-validation--max.is-on {
+  background: linear-gradient(135deg, rgba(217,119,6,0.10), rgba(217,119,6,0.02));
+  border-color: rgba(217,119,6,0.45);
+}
 [data-theme="light"] .cs-mj-validation {
   background: linear-gradient(135deg, rgba(0,0,0,0.02), rgba(0,0,0,0.005));
   border-color: rgba(0,0,0,0.08);
