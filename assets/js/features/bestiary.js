@@ -5,7 +5,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, pushModal, popModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
@@ -40,6 +40,299 @@ const RANG_STYLE = {
   classique: { label:'Classique', color:'#94a3b8', glow:'rgba(148,163,184,0.18)', border:'rgba(148,163,184,0.40)', bg:'rgba(148,163,184,0.10)' },
   elite:     { label:'Élite',     color:'#e8b84b', glow:'rgba(232,184,75,0.22)',  border:'rgba(232,184,75,0.40)',  bg:'rgba(232,184,75,0.12)'  },
   boss:      { label:'Boss',      color:'#ff5a7e', glow:'rgba(255,90,126,0.24)',  border:'rgba(255,90,126,0.40)',  bg:'rgba(255,90,126,0.12)'  },
+};
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ARMES NATURELLES + ACTIONS — métadonnées partagées avec la modal de sorts.
+// Les actions de créature utilisent EXACTEMENT le même schéma que les sorts de
+// personnage et les actions d'objet (boutique). On délègue à `editItemSpell`.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const _BST_STAT_OPTIONS = [
+  { key:'none',         short:'—',   label:'Aucun' },
+  { key:'force',        short:'For', label:'Force' },
+  { key:'dexterite',    short:'Dex', label:'Dextérité' },
+  { key:'intelligence', short:'Int', label:'Intelligence' },
+  { key:'sagesse',      short:'Sag', label:'Sagesse' },
+  { key:'constitution', short:'Con', label:'Constitution' },
+  { key:'charisme',     short:'Cha', label:'Charisme' },
+];
+
+function _bstUuid() { return 'a_' + Math.random().toString(36).slice(2, 9); }
+
+// ── Cache des objets boutique (pour le picker de butins) ─────────────────────
+let _bstShopItemsCache = null;
+let _bstShopItemsLoading = null;
+async function _bstEnsureShopItems() {
+  if (_bstShopItemsCache) return _bstShopItemsCache;
+  if (_bstShopItemsLoading) return _bstShopItemsLoading;
+  _bstShopItemsLoading = loadCollection('shop')
+    .then(items => {
+      _bstShopItemsCache = (items || [])
+        .sort((a,b) => (a.nom||'').localeCompare(b.nom||'', 'fr', {sensitivity:'base'}));
+      return _bstShopItemsCache;
+    })
+    .catch(() => { _bstShopItemsCache = []; return _bstShopItemsCache; })
+    .finally(() => { _bstShopItemsLoading = null; });
+  return _bstShopItemsLoading;
+}
+
+/** Re-render des selects de butins (après chargement async des items). */
+function _bstRefreshButinSelects(cid) {
+  const host = document.getElementById(`bst-p-butins-${cid}`);
+  if (!host) return;
+  const c = _creatures.find(x => x.id === cid);
+  const butins = Array.isArray(c?.butins) ? c.butins : [];
+  host.innerHTML = butins.map((b,i) => _panelButinRow(b, cid, i)).join('');
+}
+
+/** Convertit une créature en "char-like" object utilisable par la modal de sort.
+ *  L'arme naturelle choisie est placée sur l'emplacement "Main principale". */
+function _bstCreatureToChar(c, armeId) {
+  const armes = Array.isArray(c?.armesNaturelles) ? c.armesNaturelles : [];
+  const arme  = armes.find(a => a.id === armeId) || armes[0] || null;
+  const stats = {
+    force:        parseInt(c?.force)        || 10,
+    dexterite:    parseInt(c?.dexterite)    || 10,
+    intelligence: parseInt(c?.intelligence) || 10,
+    sagesse:      parseInt(c?.sagesse)      || 10,
+    constitution: parseInt(c?.constitution) || 10,
+    charisme:     parseInt(c?.charisme)     || 10,
+  };
+  const equipement = {};
+  if (arme) {
+    // Bonus fixes : on les place dans la formule de dégâts s'ils existent et
+    // qu'aucun bonus n'est déjà collé à la fin de la formule. Ça permet à
+    // _calcSortDegats de les "ramasser" comme un bonus de maîtrise.
+    let degats = arme.degats || '';
+    const flatD = parseInt(arme.degatsFlat) || 0;
+    if (flatD && !/[+\-]\s*\d+\s*$/.test(degats)) {
+      degats = `${degats}${flatD > 0 ? ' +' : ' '}${flatD}`.trim();
+    }
+    equipement['Main principale'] = {
+      nom:         arme.nom || 'Arme naturelle',
+      degats,
+      degatsStat:  arme.degatsStat  || 'force',
+      degatsStats: [arme.degatsStat || 'force'],
+      toucherStat: arme.toucherStat || arme.degatsStat || 'force',
+      statAttaque: arme.toucherStat || arme.degatsStat || 'force',
+      toucherFlat: parseInt(arme.toucherFlat) || 0,
+      portee:      arme.portee || '',
+      typeArme:    'CaC',
+      format:      'Arme naturelle',
+      sousType:    arme.nom || '',
+      traits:      [],
+    };
+  }
+  return {
+    id:        c?.id || '',
+    nom:       c?.nom || 'Créature',
+    photoURL:  c?.imageUrl || '',
+    stats,
+    statsBonus: {},
+    equipement,
+    deck_sorts: Array.isArray(c?.actions) ? c.actions : [],
+  };
+}
+
+// Cache local des actions de la créature en cours d'édition (admin)
+let _bstActionsCache = [];
+let _bstActionsCreatureId = null;
+let _bstActionsArmeIdCtx  = null; // arme naturelle utilisée pour le calcul
+
+function _bstActionsCacheLoad(creatureId, actions) {
+  _bstActionsCreatureId = creatureId || null;
+  _bstActionsCache = Array.isArray(actions) ? actions.map(a => ({ ...a })) : [];
+}
+
+async function _bstEnsureSpellsModule() {
+  const mod = await import('./characters/spells.js');
+  const keys = [
+    'addSort','editSort','openSortModal','saveSort',
+    'addItemSpell','editItemSpell',
+    'runeIncrement','runeDecrement','selectNoyau',
+    'updateSortPM','toggleSortDetail',
+    'openSortCatEditor',
+    'sortDragStart','sortDragOver','sortDrop','sortDragEnd',
+  ];
+  keys.forEach(k => {
+    if (typeof mod[k] === 'function' && typeof window[k] !== 'function') window[k] = mod[k];
+  });
+  return mod;
+}
+
+function _bstActionsPersist() {
+  if (!_bstActionsCreatureId) return;
+  _bstQueueSave(_bstActionsCreatureId, { actions: _bstActionsCache, attaques: [] });
+  const c = _creatures.find(x => x.id === _bstActionsCreatureId);
+  if (c) { c.actions = _bstActionsCache.map(a => ({...a})); c.attaques = []; }
+  const count = document.querySelector(`[data-bst-count="${_bstActionsCreatureId}-actions"]`);
+  if (count) count.textContent = _bstActionsCache.length;
+}
+
+function _bstRefreshActionsHost() {
+  if (!_bstActionsCreatureId) return;
+  const host = document.getElementById(`bst-p-actions-${_bstActionsCreatureId}`);
+  if (host) host.innerHTML = _bstRenderActionsList();
+}
+
+function _bstRenderActionCard(act, idx) {
+  const a = act || {};
+  const runes = a.runes || [];
+  const types = a.types || [];
+  const typeBadges = types.map(t => {
+    const col = t==='offensif' ? '#ff6b6b' : t==='defensif' ? '#22c38e' : '#b47fff';
+    return `<span style="font-size:.6rem;font-weight:700;padding:.1rem .4rem;border-radius:999px;color:${col};background:${col}1a;border:1px solid ${col}55">${t}</span>`;
+  }).join(' ');
+  const runeCounts = {};
+  runes.forEach(r => { runeCounts[r] = (runeCounts[r] || 0) + 1; });
+  const runeBadges = Object.entries(runeCounts).map(([r,n]) =>
+    `<span style="font-size:.62rem;font-weight:600;padding:.1rem .4rem;border-radius:5px;background:rgba(168,127,255,.12);color:#c4b5fd;border:1px solid rgba(168,127,255,.3)">${r}${n>1?`×${n}`:''}</span>`).join(' ');
+  return `
+    <div class="bst-action-card">
+      <span style="font-size:1.3rem;flex-shrink:0">${_esc(a.icon||'🔮')}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.85rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(a.nom || 'Sans nom')}</div>
+        <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.2rem">
+          ${typeBadges}${runeBadges}
+          ${a.noyau ? `<span style="font-size:.62rem;color:var(--text-dim)">⚛ ${_esc(a.noyau)}</span>` : ''}
+          <span style="font-size:.62rem;color:#b47fff">${a.pmOverride ?? a.pm ?? '?'} PM</span>
+        </div>
+      </div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="window._bstEditAction(${idx})" title="Modifier">✏️</button>
+      <button type="button" class="btn-icon" onclick="window._bstRemoveAction(${idx})" title="Supprimer" style="color:#ef4444">🗑</button>
+    </div>`;
+}
+
+function _bstRenderActionsList() {
+  if (!_bstActionsCache.length) {
+    return `<div class="bst-actions-empty">Aucune action — clique sur ＋ Ajouter pour ouvrir l'éditeur de sort.</div>`;
+  }
+  return _bstActionsCache.map((a,i) => _bstRenderActionCard(a,i)).join('');
+}
+
+window._bstAddAction = async () => {
+  const mod = await _bstEnsureSpellsModule();
+  if (typeof mod.addItemSpell !== 'function') { showNotif('Module sorts indisponible', 'error'); return; }
+  const c = _creatures.find(x => x.id === _bstActionsCreatureId);
+  if (!c) return;
+  const charForCalc = _bstCreatureToChar(c, _bstActionsArmeIdCtx);
+  const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Créature' };
+  mod.addItemSpell(fakeItem, async (updatedItem) => {
+    _bstActionsCache = Array.isArray(updatedItem?.actions) ? updatedItem.actions.map(a => ({...a})) : [];
+    _bstActionsPersist();
+    _bstRefreshActionsHost();
+  }, charForCalc);
+};
+
+window._bstEditAction = async (idx) => {
+  const mod = await _bstEnsureSpellsModule();
+  if (typeof mod.editItemSpell !== 'function') { showNotif('Module sorts indisponible', 'error'); return; }
+  const c = _creatures.find(x => x.id === _bstActionsCreatureId);
+  if (!c) return;
+  const charForCalc = _bstCreatureToChar(c, _bstActionsArmeIdCtx);
+  const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Créature' };
+  mod.editItemSpell(fakeItem, idx, async (updatedItem) => {
+    _bstActionsCache = Array.isArray(updatedItem?.actions) ? updatedItem.actions.map(a => ({...a})) : [];
+    _bstActionsPersist();
+    _bstRefreshActionsHost();
+  }, charForCalc);
+};
+
+window._bstRemoveAction = (idx) => {
+  if (!Number.isFinite(idx) || !_bstActionsCache[idx]) return;
+  if (!confirm('Supprimer cette action ?')) return;
+  _bstActionsCache.splice(idx, 1);
+  _bstActionsPersist();
+  _bstRefreshActionsHost();
+};
+
+// ── Armes naturelles : édition inline ─────────────────────────────────────────
+function _bstRenderArmeRow(a = {}, cid, idx) {
+  const optsHTML = (sel) => _BST_STAT_OPTIONS.map(s =>
+    `<option value="${s.key}"${sel===s.key?' selected':''}>${s.short}</option>`).join('');
+  return `<div class="bst-p-row" data-arme-id="${a.id || ''}">
+    <div class="bst-p-row-grid" style="grid-template-columns:1fr 130px auto">
+      <input class="bst-p-input" data-f="nom" placeholder="Nom (Griffes, Morsure…)"
+        value="${_esc(a.nom||'')}"
+        oninput="window._bstSaveArmes('${cid}')">
+      <input class="bst-p-input" data-f="degats" placeholder="⚔️ 1d8+2"
+        value="${_esc(a.degats||'')}"
+        oninput="window._bstSaveArmes('${cid}')">
+      <button class="bst-p-row-remove" onclick="window._bstRemoveArme('${cid}',this)" title="Retirer">✕</button>
+    </div>
+    <div class="bst-p-row-grid" style="grid-template-columns:1fr 90px 1fr 90px 1fr">
+      <label class="bst-p-mini">Stat dégâts
+        <select class="bst-p-input" data-f="degatsStat" onchange="window._bstSaveArmes('${cid}')">
+          ${optsHTML(a.degatsStat || 'force')}
+        </select>
+      </label>
+      <label class="bst-p-mini" title="Bonus fixe ajouté aux dégâts (en plus / à la place de la stat)">+ Bonus
+        <input class="bst-p-input" data-f="degatsFlat" type="number"
+          value="${a.degatsFlat ?? ''}" placeholder="0"
+          oninput="window._bstSaveArmes('${cid}')">
+      </label>
+      <label class="bst-p-mini">Stat toucher
+        <select class="bst-p-input" data-f="toucherStat" onchange="window._bstSaveArmes('${cid}')">
+          ${optsHTML(a.toucherStat || a.degatsStat || 'force')}
+        </select>
+      </label>
+      <label class="bst-p-mini" title="Bonus fixe ajouté au toucher (en plus / à la place de la stat)">+ Bonus
+        <input class="bst-p-input" data-f="toucherFlat" type="number"
+          value="${a.toucherFlat ?? ''}" placeholder="0"
+          oninput="window._bstSaveArmes('${cid}')">
+      </label>
+      <label class="bst-p-mini">Portée
+        <input class="bst-p-input" data-f="portee" placeholder="Contact, 9m"
+          value="${_esc(a.portee||'')}"
+          oninput="window._bstSaveArmes('${cid}')">
+      </label>
+    </div>
+  </div>`;
+}
+
+window._bstAddArme = (cid) => {
+  const host = document.getElementById(`bst-p-armes-${cid}`);
+  if (!host) return;
+  const c = _creatures.find(x => x.id === cid);
+  const armes = Array.isArray(c?.armesNaturelles) ? [...c.armesNaturelles] : [];
+  armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', portee:'' });
+  if (c) c.armesNaturelles = armes;
+  host.innerHTML = armes.map((a,i) => _bstRenderArmeRow(a, cid, i)).join('');
+  _bstQueueSave(cid, { armesNaturelles: armes });
+};
+
+window._bstRemoveArme = (cid, btn) => {
+  const row = btn?.closest?.('.bst-p-row'); if (!row) return;
+  row.remove();
+  window._bstSaveArmes(cid);
+};
+
+window._bstSaveArmes = (cid) => {
+  const host = document.getElementById(`bst-p-armes-${cid}`);
+  if (!host) return;
+  const rows = [...host.querySelectorAll('.bst-p-row')];
+  const armes = rows.map(r => {
+    const flatD = parseInt(r.querySelector('[data-f=degatsFlat]')?.value);
+    const flatT = parseInt(r.querySelector('[data-f=toucherFlat]')?.value);
+    return {
+      id:          r.dataset.armeId || _bstUuid(),
+      nom:         r.querySelector('[data-f=nom]')?.value?.trim() || '',
+      degats:      r.querySelector('[data-f=degats]')?.value?.trim() || '',
+      degatsStat:  r.querySelector('[data-f=degatsStat]')?.value || 'force',
+      degatsFlat:  Number.isFinite(flatD) ? flatD : 0,
+      toucherStat: r.querySelector('[data-f=toucherStat]')?.value || 'force',
+      toucherFlat: Number.isFinite(flatT) ? flatT : 0,
+      portee:      r.querySelector('[data-f=portee]')?.value?.trim() || '',
+    };
+  }).filter(a => a.nom || a.degats);
+  const c = _creatures.find(x => x.id === cid);
+  if (c) c.armesNaturelles = armes;
+  _bstQueueSave(cid, { armesNaturelles: armes });
+  // Si l'arme contextuelle a disparu, on prend la première dispo
+  if (cid === _bstActionsCreatureId && !armes.find(a => a.id === _bstActionsArmeIdCtx)) {
+    _bstActionsArmeIdCtx = armes[0]?.id || null;
+  }
 };
 
 function _beastSearchText(c = {}) {
@@ -278,11 +571,25 @@ window._bstSaveArr = (id, type) => {
       description: row.querySelector('[data-f=desc]')?.value?.trim() || '',
     })).filter(t => t.nom || t.description);
   } else {
-    arr = rows.map(row => ({
-      nom:      row.querySelector('[data-f=nom]')?.value?.trim()    || '',
-      quantite: row.querySelector('[data-f=qte]')?.value?.trim()    || '',
-      chance:   row.querySelector('[data-f=chance]')?.value?.trim() || '',
-    })).filter(b => b.nom);
+    // butins : objets boutique. Préserve la dénorm (nom/image) existante du
+    // butin pour ne pas la perdre quand l'utilisateur modifie juste qte/chance
+    // avant que le cache boutique soit chargé.
+    const items   = _bstShopItemsCache || [];
+    const creature = _creatures.find(x => x.id === id);
+    const prev    = Array.isArray(creature?.butins) ? creature.butins : [];
+    const prevById = Object.fromEntries(prev.filter(b => b.itemId).map(b => [b.itemId, b]));
+    arr = rows.map(row => {
+      const itemId = row.querySelector('[data-f=itemId]')?.value || '';
+      const ref    = itemId ? items.find(x => x.id === itemId) : null;
+      const prevB  = itemId ? prevById[itemId] : null;
+      return {
+        itemId,
+        nom:      ref?.nom   || prevB?.nom   || '',
+        image:    ref?.image || prevB?.image || '',
+        quantite: row.querySelector('[data-f=qte]')?.value?.trim()    || '',
+        chance:   row.querySelector('[data-f=chance]')?.value?.trim() || '',
+      };
+    }).filter(b => b.itemId);
   }
   _bstQueueSave(id, { [type]: arr });
   // Met à jour le compteur en titre
@@ -351,18 +658,161 @@ function _panelTraitRow(t = {}, id, i) {
 }
 
 function _panelButinRow(b = {}, id, i) {
-  return `<div class="bst-p-row">
-    <div class="bst-p-row-grid" style="grid-template-columns:1fr 80px 80px auto">
-      <input class="bst-p-input" data-f="nom" placeholder="Nom de l'objet" value="${_esc(b.nom||'')}"
-        oninput="window._bstSaveArr('${id}','butins')">
-      <input class="bst-p-input" data-f="qte" placeholder="Qté" value="${_esc(b.quantite||'')}"
-        oninput="window._bstSaveArr('${id}','butins')">
-      <input class="bst-p-input" data-f="chance" placeholder="Chance" value="${_esc(b.chance||'')}"
-        oninput="window._bstSaveArr('${id}','butins')">
-      <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','butins',this)" title="Retirer">✕</button>
-    </div>
+  // Carte compacte : pas de sélecteur — l'objet est piqué via la modal picker.
+  // Si l'item n'existe plus en boutique, on tombe sur les valeurs dénormalisées.
+  const items = _bstShopItemsCache || [];
+  const ref   = b.itemId ? items.find(x => x.id === b.itemId) : null;
+  const nom   = ref?.nom   || b.nom   || '? Objet supprimé';
+  const image = ref?.image || b.image || '';
+  const rar   = ref?.rarete || '';
+  const rarColor = _bstRarColor(rar);
+  const orphan = b.itemId && !ref ? true : false;
+  return `<div class="bst-p-row bst-butin-card${orphan?' is-orphan':''}" data-butin-id="${b.itemId || ''}" title="${_esc(nom)}${orphan?' (supprimé de la boutique)':''}">
+    <span class="bst-butin-dot" style="background:${rarColor}"></span>
+    ${image
+      ? `<img class="bst-butin-img" src="${_esc(image)}" alt="">`
+      : `<span class="bst-butin-img bst-butin-img--empty">📦</span>`}
+    <span class="bst-butin-name">${_esc(nom)}${orphan?` <span class="bst-butin-orphan-tag">⚠</span>`:''}</span>
+    <input class="bst-p-input bst-butin-mini" data-f="qte" type="text" placeholder="1" title="Quantité"
+      value="${_esc(b.quantite||'')}"
+      oninput="window._bstSaveArr('${id}','butins')">
+    <input class="bst-p-input bst-butin-mini" data-f="chance" type="text" placeholder="100%" title="Chance"
+      value="${_esc(b.chance||'')}"
+      oninput="window._bstSaveArr('${id}','butins')">
+    <input type="hidden" data-f="itemId" value="${_esc(b.itemId||'')}">
+    <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','butins',this)" title="Retirer">✕</button>
   </div>`;
 }
+
+// Couleur par rareté (alignée avec VTT loot)
+function _bstRarColor(rar) {
+  return {
+    commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff',
+    tres_rare:'#b47fff', legendaire:'#f59e0b',
+  }[rar] || '#9ca3af';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PICKER OBJET BOUTIQUE — réutilise la même UX que la réserve MJ du VTT :
+// search + catégories pills + liste cliquable. Ajout enchainé sans fermer.
+// ─────────────────────────────────────────────────────────────────────────────
+let _bstPickerState = { items: [], cats: [], catMap: {}, activeCat: '', search: '', creatureId: null };
+
+window._bstButinPickerOpen = async (creatureId) => {
+  if (!creatureId) return;
+  // Charge boutique + catégories en parallèle
+  const [items, cats] = await Promise.all([
+    _bstShopItemsCache ? Promise.resolve(_bstShopItemsCache) : loadCollection('shop'),
+    loadCollection('shopCategories').catch(() => []),
+  ]);
+  if (!_bstShopItemsCache) _bstShopItemsCache = items || [];
+  _bstPickerState = {
+    items: items || [],
+    cats: cats || [],
+    catMap: Object.fromEntries((cats||[]).map(c => [c.id, c])),
+    activeCat: '',
+    search: '',
+    creatureId,
+  };
+
+  pushModal('🎒 Ajouter un butin', `
+    <input type="text" id="bst-pick-search" placeholder="🔍 Rechercher un objet…"
+      class="input-field" style="width:100%;margin-bottom:.5rem"
+      oninput="window._bstButinPickerSearch(this.value)" autofocus>
+    <div id="bst-pick-cats" class="vtt-loot-cats"></div>
+    <div id="bst-pick-list" class="vtt-loot-shop-list"></div>
+    <div style="font-size:.7rem;color:var(--text-dim);margin-top:.5rem;font-style:italic">
+      ⓘ Tu peux enchaîner les ajouts sans fermer cette fenêtre.
+    </div>
+  `);
+  _bstRenderPickerCats();
+  _bstRenderPickerList();
+  setTimeout(() => document.getElementById('bst-pick-search')?.focus(), 30);
+};
+
+window._bstButinPickerSearch = (q) => {
+  _bstPickerState.search = (q || '').toLowerCase().trim();
+  _bstRenderPickerList();
+};
+window._bstButinPickerSetCat = (catId) => {
+  _bstPickerState.activeCat = catId === _bstPickerState.activeCat ? '' : catId;
+  _bstRenderPickerCats();
+  _bstRenderPickerList();
+};
+
+function _bstRenderPickerCats() {
+  const el = document.getElementById('bst-pick-cats');
+  if (!el) return;
+  const { cats, activeCat, items } = _bstPickerState;
+  const counts = {};
+  items.forEach(it => { const k = it.categorieId || '_'; counts[k] = (counts[k] || 0) + 1; });
+  const pill = (id, label, count) => `<button class="vtt-loot-cat-pill${activeCat === id ? ' active' : ''}"
+      onclick="window._bstButinPickerSetCat('${id}')">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
+  el.innerHTML = pill('', 'Toutes', items.length) +
+    cats.filter(c => counts[c.id]).map(c => pill(c.id, (c.emoji || '') + ' ' + c.nom, counts[c.id])).join('');
+}
+
+function _bstRenderPickerList() {
+  const el = document.getElementById('bst-pick-list');
+  if (!el) return;
+  const { items, catMap, activeCat, search, creatureId } = _bstPickerState;
+  const c = _creatures.find(x => x.id === creatureId);
+  const owned = new Set((c?.butins || []).map(b => b.itemId).filter(Boolean));
+
+  let list = activeCat ? items.filter(i => i.categorieId === activeCat) : items;
+  if (search) list = list.filter(i => _norm(i.nom || '').includes(_norm(search)));
+  list = list.slice(0, 80);
+  if (!list.length) {
+    el.innerHTML = '<div class="vtt-loot-empty-list">Aucun objet correspondant</div>';
+    return;
+  }
+  el.innerHTML = list.map(item => {
+    const cat = catMap[item.categorieId];
+    const rarColor = _bstRarColor(item.rarete);
+    const alreadyTag = owned.has(item.id) ? `<span class="vtt-loot-instash" title="Déjà dans le butin">✓</span>` : '';
+    return `<div class="vtt-loot-shop-row">
+      <span class="vtt-loot-dot" style="background:${rarColor}"></span>
+      <span class="vtt-loot-shop-name">${_esc(item.nom || '?')}</span>
+      ${cat ? `<span class="vtt-loot-shop-cat">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>` : ''}
+      ${alreadyTag}
+      <button class="vtt-loot-shop-add" onclick="window._bstButinPickerAdd('${item.id}', this)" title="Ajouter au butin">＋</button>
+    </div>`;
+  }).join('');
+}
+
+window._bstButinPickerAdd = (itemId, btn) => {
+  const { items, creatureId } = _bstPickerState;
+  const item = items.find(i => i.id === itemId);
+  if (!item) return;
+  const c = _creatures.find(x => x.id === creatureId);
+  if (!c) return;
+  // Évite les doublons stricts
+  const butins = Array.isArray(c.butins) ? [...c.butins] : [];
+  if (butins.find(b => b.itemId === itemId)) {
+    showNotif('Déjà dans le butin de cette créature', 'warning');
+    return;
+  }
+  butins.push({
+    itemId,
+    nom:   item.nom   || '',
+    image: item.image || '',
+    quantite: '1',
+    chance:   '100%',
+  });
+  c.butins = butins;
+  _bstQueueSave(creatureId, { butins });
+  _bstRefreshButinSelects(creatureId);
+  // Compteur de section
+  const countEl = document.querySelector(`[data-bst-count="${creatureId}-butins"]`);
+  if (countEl) countEl.textContent = butins.length;
+  // Feedback visuel
+  if (btn) {
+    btn.textContent = '✓';
+    btn.classList.add('vtt-loot-shop-add--ok');
+    setTimeout(() => { btn.textContent = '＋'; btn.classList.remove('vtt-loot-shop-add--ok'); }, 700);
+  }
+  _bstRenderPickerList(); // pour mettre à jour le badge "Déjà"
+};
 
 // Matrice de relations aux dégâts (panneau, version chips compacte)
 function _renderDamageMatrixPanel(c, types) {
@@ -639,7 +1089,7 @@ window._bstCreateDraft = async function () {
     force: 0, dexterite: 0, constitution: 0, intelligence: 0, sagesse: 0, charisme: 0,
     tokenW: 1, tokenH: 1, imageUrl: '', description: '',
     resistances: [], immunites: [], absorptions: [], faiblesses: [],
-    attaques: [], traits: [], butins: [],
+    armesNaturelles: [], actions: [], traits: [], butins: [],
   };
   try {
     const newId = await addToCol(col, data);
@@ -977,30 +1427,35 @@ function _renderPanel(c) {
       </div>
     </div>` : '';
 
-  // ── Attaques Joueur : lignes vides à compléter ────────────────────────────
-  const attaquesJoueurHtml = !_isAdminView() && attaques.length ? `
+  // ── Actions Joueur : estimation par action (nom + dégâts + portée) ────────
+  // Indexée par action.id (stable même si l'ordre change). Fallback sur idx
+  // pour la rétro-compat avec les anciennes clés `att_*`.
+  const actsJ = Array.isArray(c.actions) ? c.actions : [];
+  const attaquesJoueurHtml = !_isAdminView() && actsJ.length ? `
     <div class="bst-section">
-      <div class="bst-section-title">⚔️ Attaques
-        <span class="bst-section-count">${attaques.length} observée${attaques.length>1?'s':''}</span>
+      <div class="bst-section-title">⚔️ Actions
+        <span class="bst-section-count">${actsJ.length} observée${actsJ.length>1?'s':''}</span>
       </div>
-      ${attaques.map((_, i) => `
-        <div class="bst-atk">
+      ${actsJ.map((act, i) => {
+        const k = act.id || `idx_${i}`;
+        return `<div class="bst-atk">
           <input class="bst-deduct-input" style="margin-bottom:6px;font-weight:600"
-            placeholder="Nom de l'attaque…"
-            value="${_esc(ded['att_nom_'+i]||'')}"
-            onchange="window._bstSetDeduction('${c.id}','att_nom_${i}',this.value)">
+            placeholder="Nom de l'action…"
+            value="${_esc(ded['act_nom_'+k]||'')}"
+            onchange="window._bstSetDeduction('${c.id}','act_nom_${k}',this.value)">
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
             <input class="bst-deduct-input" placeholder="🎯 Toucher"
-              value="${_esc(ded['att_toucher_'+i]||'')}"
-              onchange="window._bstSetDeduction('${c.id}','att_toucher_${i}',this.value)">
+              value="${_esc(ded['act_toucher_'+k]||'')}"
+              onchange="window._bstSetDeduction('${c.id}','act_toucher_${k}',this.value)">
             <input class="bst-deduct-input" placeholder="⚔️ Dégâts"
-              value="${_esc(ded['att_degats_'+i]||'')}"
-              onchange="window._bstSetDeduction('${c.id}','att_degats_${i}',this.value)">
+              value="${_esc(ded['act_degats_'+k]||'')}"
+              onchange="window._bstSetDeduction('${c.id}','act_degats_${k}',this.value)">
             <input class="bst-deduct-input" placeholder="📏 Portée"
-              value="${_esc(ded['att_portee_'+i]||'')}"
-              onchange="window._bstSetDeduction('${c.id}','att_portee_${i}',this.value)">
+              value="${_esc(ded['act_portee_'+k]||'')}"
+              onchange="window._bstSetDeduction('${c.id}','act_portee_${k}',this.value)">
           </div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>` : '';
 
   // ── Traits Joueur : lignes vides à compléter ──────────────────────────────
@@ -1184,18 +1639,50 @@ function _renderPanelAdmin(c, rs) {
   // ── Relations aux dégâts (matrice chips compacte) ─────────────────────
   const dmgHtml = _renderDamageMatrixPanel(c, types);
 
-  // ── Attaques (ajout / édition / suppression inline) ───────────────────
-  const attaquesHtml = `
+  // ── Armes naturelles + Actions (sortilèges-style) ─────────────────────
+  // 1) Armes naturelles : sources de dégâts de base (comme une arme équipée).
+  //    Chaque action peut s'y référer via la modal de sort (preview = dégâts arme).
+  // 2) Actions : sorts au format unifié, éditées via la même modal que les
+  //    sorts de personnage et les actions d'objet.
+  const armes = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
+  const acts  = Array.isArray(c.actions)         ? c.actions         : [];
+
+  // Charge le cache d'actions de CETTE créature pour les handlers _bstAddAction/_bstEditAction
+  _bstActionsCacheLoad(c.id, acts);
+  _bstActionsArmeIdCtx = armes[0]?.id || null;
+
+  const armesHtml = `
     <div class="bst-section">
       <div class="bst-section-title">
-        ⚔️ Attaques
-        <span class="bst-section-count" data-bst-count="${c.id}-attaques">${attaques.length}</span>
-        <button class="bst-add-row-btn" onclick="window._bstAddPanelRow('${c.id}','attaques')">+ Ajouter</button>
+        🦷 Armes naturelles
+        <span class="bst-section-count" data-bst-count="${c.id}-armes">${armes.length}</span>
+        <button class="bst-add-row-btn" onclick="window._bstAddArme('${c.id}')">+ Ajouter</button>
       </div>
-      <div id="bst-p-attaques-${c.id}" class="bst-p-rows">
-        ${attaques.map((a, i) => _panelAttackRow(a, c.id, i)).join('')}
+      <div class="bst-section-hint">Comme une arme équipée pour les sorts dérivés. La 1ʳᵉ sert de référence par défaut aux actions.</div>
+      <div id="bst-p-armes-${c.id}" class="bst-p-rows">
+        ${armes.map((a, i) => _bstRenderArmeRow(a, c.id, i)).join('')}
       </div>
     </div>`;
+
+  const actionsHtml = `
+    <div class="bst-section">
+      <div class="bst-section-title">
+        ⚔️ Actions
+        <span class="bst-section-count" data-bst-count="${c.id}-actions">${acts.length}</span>
+        <button class="bst-add-row-btn" onclick="window._bstAddAction()">+ Ajouter</button>
+      </div>
+      <div class="bst-section-hint">Sorts unifiés — même éditeur que les sorts de personnage et les actions d'objet.</div>
+      <div id="bst-p-actions-${c.id}" class="bst-p-rows bst-actions-host">
+        ${_bstRenderActionsList()}
+      </div>
+    </div>`;
+
+  const attaquesHtml = armesHtml + actionsHtml;
+
+  // Lazy-load des objets boutique pour peupler les selects de butins
+  if (!_bstShopItemsCache) {
+    _bstEnsureShopItems().then(() => _bstRefreshButinSelects(c.id));
+  }
 
   const traitsHtml = `
     <div class="bst-section">
@@ -1214,7 +1701,7 @@ function _renderPanelAdmin(c, rs) {
       <div class="bst-section-title">
         💰 Butins
         <span class="bst-section-count" data-bst-count="${c.id}-butins">${butins.length}</span>
-        <button class="bst-add-row-btn" onclick="window._bstAddPanelRow('${c.id}','butins')">+ Ajouter</button>
+        <button class="bst-add-row-btn" onclick="window._bstButinPickerOpen('${c.id}')">+ Ajouter</button>
       </div>
       <div id="bst-p-butins-${c.id}" class="bst-p-rows">
         ${butins.map((b, i) => _panelButinRow(b, c.id, i)).join('')}

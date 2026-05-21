@@ -792,3 +792,75 @@ select.bst-p-input option {
   .bst-layout { grid-template-columns: minmax(0, 1fr) 560px; }
   .bst-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 }
+
+/* ── Armes naturelles + Actions (refonte unifiée avec les sorts) ───────── */
+.bst-section-hint {
+  font-size: .7rem; color: var(--text-dim); font-style: italic;
+  margin: -.15rem 0 .35rem; padding: 0 .15rem;
+}
+.bst-p-mini {
+  display: flex; flex-direction: column; gap: .15rem;
+  font-size: .65rem; color: var(--text-dim); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .02em;
+}
+.bst-p-mini .bst-p-input { font-size: .8rem; }
+.bst-actions-host { gap: .45rem; }
+.bst-action-card {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .55rem .7rem;
+  background: var(--bg-elevated, rgba(255,255,255,.03));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: border-color .12s;
+}
+.bst-action-card:hover { border-color: var(--gold); }
+.bst-actions-empty {
+  padding: .8rem .9rem;
+  font-size: .8rem; color: var(--text-dim); font-style: italic;
+  background: rgba(255,255,255,.02);
+  border: 1px dashed var(--border);
+  border-radius: 8px; text-align: center;
+}
+
+/* ── Butin : ligne compacte (dot · img · nom · qte · chance · ✕) ──────── */
+/* Override explicite de `.bst-p-row` qui force flex-direction: column. */
+.bst-butin-card.bst-p-row {
+  display: flex; flex-direction: row; align-items: center; gap: .4rem;
+  padding: .25rem .45rem;
+  background: var(--bg-elevated, rgba(255,255,255,.03));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: border-color .12s;
+  min-height: 0;
+}
+.bst-butin-card:hover { border-color: var(--gold); }
+.bst-butin-card.is-orphan { border-color: #ef4444; background: rgba(239,68,68,.06); }
+.bst-butin-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  box-shadow: 0 0 3px currentColor;
+}
+.bst-butin-img {
+  width: 22px; height: 22px; border-radius: 4px; flex-shrink: 0;
+  object-fit: cover; background: rgba(255,255,255,.04);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .85rem;
+}
+.bst-butin-img--empty { color: var(--text-dim); }
+.bst-butin-name {
+  flex: 1; min-width: 0;
+  font-weight: 600; font-size: .78rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bst-butin-orphan-tag {
+  color: #ef4444; font-weight: 700; margin-left: .2rem;
+}
+.bst-butin-mini {
+  width: 52px !important; text-align: center;
+  font-size: .72rem !important; padding: .2rem .25rem !important;
+  flex-shrink: 0;
+}
+.bst-butin-card .bst-p-row-remove {
+  padding: 0 .3rem; font-size: .75rem;
+}
+/* La liste de butins : pas de gap-pile énorme entre rows */
+.bst-p-rows .bst-butin-card + .bst-butin-card { margin-top: .2rem; }
