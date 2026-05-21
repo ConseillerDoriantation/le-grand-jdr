@@ -122,7 +122,15 @@
       "Bash(node --check assets/js/features/vtt-spectator.js)",
       "Bash(grep -E \"\\\\.js$\")",
       "Bash(grep -v \"//\")",
-      "Bash(grep -n \"pmOverride,$\" \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/spells.js\")"
+      "Bash(grep -n \"pmOverride,$\" \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/characters/spells.js\")",
+      "Bash(awk 'NR>=1653 && NR<=2079' \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/bestiary.js\")",
+      "Bash(awk 'NR>=2078 && NR<=2082' \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/bestiary.js\")",
+      "Bash(awk '/^async function openBeastImageModal/,/^}/')",
+      "Bash(awk '/^window\\\\._bstSaveImage/,/^};?$/')",
+      "Bash(awk '/^window\\\\._bstRemoveImage/,/^};?$/')",
+      "Bash(node --check assets/js/features/bestiary.js)",
+      "Bash(sed -i '2057,2268d;2012d' \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/shop.js\")",
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/shop.js\")"
     ]
   }
 }

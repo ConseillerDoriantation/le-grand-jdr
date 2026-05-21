@@ -336,8 +336,11 @@ window._bstSaveArmes = (cid) => {
 };
 
 function _beastSearchText(c = {}) {
-  const attaques = Array.isArray(c.attaques)
-    ? c.attaques.map(a => [a.nom, a.toucher, a.degats, a.portee, a.description].filter(Boolean).join(' ')).join(' ')
+  const armes = Array.isArray(c.armesNaturelles)
+    ? c.armesNaturelles.map(a => [a.nom, a.degats, a.portee].filter(Boolean).join(' ')).join(' ')
+    : '';
+  const actions = Array.isArray(c.actions)
+    ? c.actions.map(a => [a.nom, a.noyau].filter(Boolean).join(' ')).join(' ')
     : '';
   const traits = Array.isArray(c.traits)
     ? c.traits.map(t => [t.nom, t.description].filter(Boolean).join(' ')).join(' ')
@@ -355,7 +358,8 @@ function _beastSearchText(c = {}) {
     c.rang,
     c.niveau,
     c.dangerositeXp,
-    attaques,
+    armes,
+    actions,
     traits,
     butins,
   ].filter(v => v !== undefined && v !== null && v !== '').join(' '));
@@ -550,22 +554,14 @@ window._bstToggleDmg = (id, rel, typeId) => {
   }
 };
 
-// Lecture + save d'un tableau dynamique (attaques / traits / butins) depuis le panneau
+// Lecture + save d'un tableau dynamique (traits / butins) depuis le panneau.
+// Les attaques sont gérées via `actions` + `armesNaturelles` ailleurs.
 window._bstSaveArr = (id, type) => {
   const container = document.getElementById(`bst-p-${type}-${id}`);
   if (!container) return;
   const rows = [...container.querySelectorAll('.bst-p-row')];
   let arr;
-  if (type === 'attaques') {
-    arr = rows.map(row => ({
-      nom:          row.querySelector('[data-f=nom]')?.value?.trim()     || '',
-      toucher:      row.querySelector('[data-f=toucher]')?.value?.trim() || '',
-      degats:       row.querySelector('[data-f=degats]')?.value?.trim()  || '',
-      portee:       row.querySelector('[data-f=portee]')?.value?.trim()  || '',
-      damageTypeId: row.querySelector('[data-f=dmgType]')?.value         || '',
-      description:  row.querySelector('[data-f=desc]')?.value?.trim()    || '',
-    })).filter(a => a.nom || a.degats || a.description);
-  } else if (type === 'traits') {
+  if (type === 'traits') {
     arr = rows.map(row => ({
       nom:         row.querySelector('[data-f=nom]')?.value?.trim()  || '',
       description: row.querySelector('[data-f=desc]')?.value?.trim() || '',
@@ -600,12 +596,12 @@ window._bstSaveArr = (id, type) => {
 window._bstAddPanelRow = (id, type) => {
   const container = document.getElementById(`bst-p-${type}-${id}`);
   if (!container) return;
+  // Seules les sections "traits" passent ici. Les butins ont leur propre picker,
+  // les armes naturelles et actions ont leurs handlers dédiés.
+  if (type !== 'traits') return;
   const i = container.querySelectorAll('.bst-p-row').length;
-  const html = type === 'attaques' ? _panelAttackRow({}, id, i)
-             : type === 'traits'   ? _panelTraitRow({}, id, i)
-             :                       _panelButinRow({}, id, i);
   const tpl = document.createElement('div');
-  tpl.innerHTML = html.trim();
+  tpl.innerHTML = _panelTraitRow({}, id, i).trim();
   container.appendChild(tpl.firstElementChild);
 };
 
@@ -617,34 +613,6 @@ window._bstRemovePanelRow = (id, type, btn) => {
 };
 
 // Row renderers (panneau)
-function _panelAttackRow(a = {}, id, i) {
-  const types = window._bstDamageTypes || _damageTypes || [];
-  return `<div class="bst-p-row">
-    <div class="bst-p-row-grid bst-p-row-grid-2">
-      <input class="bst-p-input" data-f="nom" placeholder="Nom de l'attaque" value="${_esc(a.nom||'')}"
-        oninput="window._bstSaveArr('${id}','attaques')">
-      <select class="bst-p-input" data-f="dmgType"
-        onchange="window._bstSaveArr('${id}','attaques')">
-        <option value="">Type de dégâts</option>
-        ${types.map(t => `<option value="${t.id}"${a.damageTypeId===t.id?' selected':''}>${t.icon||''} ${_esc(t.label)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="bst-p-row-grid bst-p-row-grid-3">
-      <input class="bst-p-input" data-f="toucher" placeholder="🎯 Toucher" value="${_esc(a.toucher||'')}"
-        oninput="window._bstSaveArr('${id}','attaques')">
-      <input class="bst-p-input" data-f="degats" placeholder="⚔️ Dégâts" value="${_esc(a.degats||'')}"
-        oninput="window._bstSaveArr('${id}','attaques')">
-      <input class="bst-p-input" data-f="portee" placeholder="📏 Portée" value="${_esc(a.portee||'')}"
-        oninput="window._bstSaveArr('${id}','attaques')">
-    </div>
-    <div class="bst-p-row-grid" style="grid-template-columns:1fr auto">
-      <input class="bst-p-input" data-f="desc" placeholder="Description / effet…" value="${_esc(a.description||'')}"
-        oninput="window._bstSaveArr('${id}','attaques')">
-      <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','attaques',this)" title="Retirer">✕</button>
-    </div>
-  </div>`;
-}
-
 function _panelTraitRow(t = {}, id, i) {
   return `<div class="bst-p-row">
     <div class="bst-p-row-grid" style="grid-template-columns:1fr auto">
@@ -1294,9 +1262,7 @@ function _renderPanel(c) {
   const pvPct     = pvMax > 0 && pvActuel !== null ? Math.round(pvActuel / pvMax * 100) : 0;
   const pmPct     = pmMax > 0 && pmActuel !== null ? Math.round(pmActuel / pmMax * 100) : 0;
 
-  const attaques  = Array.isArray(c.attaques) ? c.attaques : [];
-  const traits    = Array.isArray(c.traits)   ? c.traits   : [];
-  const butins    = Array.isArray(c.butins)   ? c.butins   : [];
+  const traits    = Array.isArray(c.traits) ? c.traits : [];
   const description = c.description == null ? '' : String(c.description);
 
   // Calcul modificateur D&D : floor((stat - 10) / 2)
@@ -1386,47 +1352,6 @@ function _renderPanel(c) {
   const dmgHtml = _isAdminView() ? _renderDamageProfile(c, _damageTypes) : '';
 
 
-  // ── Attaques MJ ──────────────────────────────────────────────────────────
-  const attaquesHtml = _isAdminView() && attaques.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">⚔️ Attaques <span class="bst-section-count">${attaques.length}</span></div>
-      ${attaques.map(a => `
-        <div class="bst-atk">
-          <div class="bst-atk-name">${_esc(a.nom||'Attaque')}</div>
-          <div class="bst-atk-stats">
-            ${a.toucher ? `<span class="bst-atk-stat touch">🎯 ${_esc(a.toucher)}</span>` : ''}
-            ${a.degats  ? `<span class="bst-atk-stat dmg">⚔️ ${_esc(a.degats)}</span>`   : ''}
-            ${a.portee  ? `<span class="bst-atk-stat range">📏 ${_esc(a.portee)}</span>` : ''}
-          </div>
-          ${a.description ? `<div class="bst-atk-desc">${_esc(a.description)}</div>` : ''}
-        </div>`).join('')}
-    </div>` : '';
-
-  // ── Traits MJ ────────────────────────────────────────────────────────────
-  const traitsHtml = _isAdminView() && traits.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">✨ Traits & Capacités <span class="bst-section-count">${traits.length}</span></div>
-      ${traits.map(t => `
-        <div class="bst-trait">
-          <div class="bst-trait-name">${_esc(t.nom||'')}</div>
-          ${t.description ? `<div class="bst-trait-desc">${_esc(t.description)}</div>` : ''}
-        </div>`).join('')}
-    </div>` : '';
-
-  // ── Butins MJ (jamais joueur) ─────────────────────────────────────────────
-  const butinsHtml = _isAdminView() && butins.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">💰 Butins <span class="bst-section-count">${butins.length}</span></div>
-      <div class="bst-loots">
-        ${butins.map(b => `
-          <div class="bst-loot">
-            <span class="bst-loot-name">${_esc(b.nom||'Objet')}</span>
-            ${b.quantite ? `<span class="bst-loot-qty">${_esc(b.quantite)}</span>` : ''}
-            ${b.chance   ? `<span class="bst-loot-chance">${_esc(b.chance)}</span>` : ''}
-          </div>`).join('')}
-      </div>
-    </div>` : '';
-
   // ── Actions Joueur : estimation par action (nom + dégâts + portée) ────────
   // Indexée par action.id (stable même si l'ordre change). Fallback sur idx
   // pour la rétro-compat avec les anciennes clés `att_*`.
@@ -1494,9 +1419,8 @@ function _renderPanel(c) {
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderPanelAdmin(c, rs) {
   const types     = _damageTypes || window._bstDamageTypes || [];
-  const attaques  = Array.isArray(c.attaques) ? c.attaques : [];
-  const traits    = Array.isArray(c.traits)   ? c.traits   : [];
-  const butins    = Array.isArray(c.butins)   ? c.butins   : [];
+  const traits    = Array.isArray(c.traits) ? c.traits : [];
+  const butins    = Array.isArray(c.butins) ? c.butins : [];
 
   const modOf = (val) => {
     const n = parseInt(val);
@@ -1726,433 +1650,6 @@ function _renderPanelAdmin(c, rs) {
     </div>
   </div>`;
 }
-// ══════════════════════════════════════════════════════════════════════════════
-// MODAL ADMIN — Créer / Modifier une créature
-// ══════════════════════════════════════════════════════════════════════════════
-async function openBeastModal(id = null) {
-  _bstCropper?.destroy(); _bstCropper = null;
-  const c = id ? _creatures.find(x => x.id === id) : null;
-
-  const allDamageTypes = await loadDamageTypes();
-  window._bstDamageTypes = allDamageTypes;
-
-  // Sérialiser les tableaux dynamiques
-  const attaques = c?.attaques || [{ nom:'', toucher:'', degats:'', portee:'', description:'', damageTypeId:'' }];
-  const traits   = c?.traits   || [{ nom:'', description:'' }];
-  const butins   = c?.butins   || [{ nom:'', quantite:'', chance:'' }];
-
-  openModal(c ? `✏️ Modifier — ${c.nom||'Créature'}` : '🐉 Nouvelle créature', `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-      <div class="form-group" style="grid-column:1/-1">
-        <label>Nom</label>
-        <input class="input-field" id="bst-nom" value="${c?.nom||''}" placeholder="Gobelin, Dragon rouge...">
-      </div>
-      <div class="form-group">
-        <label>Type</label>
-        <input class="input-field" id="bst-type" value="${c?.type||''}" placeholder="Humanoïde, Bête, Mort-vivant...">
-      </div>
-      <div class="form-group">
-        <label>Environnement</label>
-        <input class="input-field" id="bst-env" value="${c?.environnement||''}" placeholder="Forêt, Donjon...">
-      </div>
-      <div class="form-group">
-        <label>Niveau / FP</label>
-        <input type="number" class="input-field" id="bst-niveau" value="${c?.niveau||''}" placeholder="1">
-      </div>
-      <div class="form-group">
-        <label>XP récompense</label>
-        <input type="number" class="input-field" id="bst-xp" value="${c?.dangerositeXp||''}" placeholder="100">
-      </div>
-      <div class="form-group">
-        <label>Emoji (si pas d'image)</label>
-        <input class="input-field" id="bst-emoji" value="${c?.emoji||'🐲'}" style="max-width:80px">
-      </div>
-      <div class="form-group">
-        <label>Taille token VTT (cases L × H)</label>
-        <div style="display:flex;gap:.5rem;align-items:center">
-          <select class="input-field" id="bst-tokenW" style="flex:1">
-            ${[1,2,3,4,5].map(n => `<option value="${n}"${(c?.tokenW||c?.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
-          </select>
-          <span style="color:var(--text-dim)">×</span>
-          <select class="input-field" id="bst-tokenH" style="flex:1">
-            ${[1,2,3,4,5].map(n => `<option value="${n}"${(c?.tokenH||c?.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div class="form-group" style="grid-column:1/-1">
-        <label>Rang</label>
-        <div id="bst-rang-selector" data-rang="${c?.rang||'classique'}" style="display:flex;gap:.5rem">
-          ${Object.entries(RANG_STYLE).map(([r, rst]) => {
-            const active = (c?.rang||'classique') === r;
-            return `<button type="button" onclick="window._bstSelectRang('${r}')" data-rang-btn="${r}"
-              style="flex:1;padding:.4rem .6rem;border-radius:8px;cursor:pointer;font-size:.82rem;
-              font-weight:${active?'700':'400'};
-              border:1px solid ${active?rst.border:'var(--border)'};
-              background:${active?rst.bg:'var(--bg-elevated)'};
-              color:${active?rst.color:'var(--text-dim)'}">${rst.label}</button>`;
-          }).join('')}
-        </div>
-      </div>
-
-      <div class="form-group" style="grid-column:1/-1;display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:8px;background:rgba(180,127,255,0.08);border:1px solid rgba(180,127,255,0.18)">
-        <input type="checkbox" id="bst-hidden" ${c?.hidden ? 'checked' : ''}
-          style="width:18px;height:18px;cursor:pointer;accent-color:#b47fff">
-        <label for="bst-hidden" style="margin:0;cursor:pointer;display:flex;flex-direction:column;gap:2px;flex:1">
-          <span style="font-weight:600;font-size:.85rem;color:#b47fff">🔒 Caché aux joueurs</span>
-          <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">Réservé au MJ. Utile pour les boss spoiler, créatures non rencontrées ou contenu surprise.</span>
-        </label>
-      </div>
-    </div>
-
-    <!-- Image upload + crop -->
-    <div class="form-group">
-      <label>Image</label>
-      <div id="bst-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
-        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s">
-        <div id="bst-drop-preview"></div>
-      </div>
-      <div id="bst-crop-wrap" style="display:none;margin-top:.75rem">
-        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez — ratio 4:3</div>
-        <canvas id="bst-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" id="bst-crop-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
-        <div id="bst-crop-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
-      </div>
-    </div>
-
-    <!-- Stats -->
-    <div class="form-group">
-      <label>Statistiques</label>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem">
-        ${[['pvMax','❤️ PV Max'],['pmMax','💙 PM Max'],['ca','🛡️ CA'],
-           ['force','FOR'],['dexterite','DEX'],['constitution','CON'],
-           ['intelligence','INT'],['sagesse','SAG'],['charisme','CHA'],
-           ['vitesse','Vitesse (m)'],['initiative','Initiative']].map(([k,l]) => `
-          <div>
-            <label style="font-size:.68rem;color:var(--text-dim)">${l}</label>
-            <input type="number" class="input-field" id="bst-${k}" value="${c?.[k]||''}" style="padding:4px 6px">
-          </div>`).join('')}
-      </div>
-    </div>
-
-    <!-- Description -->
-    <div class="form-group">
-      <label>Description</label>
-      <textarea class="input-field" id="bst-desc" rows="3" placeholder="Apparence, comportement...">${c?.description||''}</textarea>
-    </div>
-
-    <div class="form-group">
-      <label style="display:flex;align-items:center;justify-content:space-between">
-        <span>🛡️ Relations aux dégâts</span>
-        <span style="font-size:.62rem;color:var(--text-dim);font-weight:400">⚠ ligne = type coché dans plusieurs catégories</span>
-      </label>
-      ${_renderDamageTypeMatrix(c, allDamageTypes)}
-    </div>
-
-    <!-- ATTAQUES dynamiques -->
-    <div class="form-group">
-      <label style="display:flex;align-items:center;justify-content:space-between">
-        ⚔️ Attaques
-        <button type="button" onclick="window._bstAddRow('attaques')"
-          style="font-size:.72rem;background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
-          border-radius:6px;padding:2px 8px;cursor:pointer;color:var(--gold)">+ Ligne</button>
-      </label>
-      <div id="bst-attaques-list" style="display:flex;flex-direction:column;gap:.4rem">
-        ${attaques.map((a, i) => _attackRow(a, i)).join('')}
-      </div>
-    </div>
-
-    <!-- TRAITS dynamiques -->
-    <div class="form-group">
-      <label style="display:flex;align-items:center;justify-content:space-between">
-        ✨ Traits & Capacités
-        <button type="button" onclick="window._bstAddRow('traits')"
-          style="font-size:.72rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
-          border-radius:6px;padding:2px 8px;cursor:pointer;color:#4f8cff">+ Ligne</button>
-      </label>
-      <div id="bst-traits-list" style="display:flex;flex-direction:column;gap:.4rem">
-        ${traits.map((t, i) => _traitRow(t, i)).join('')}
-      </div>
-    </div>
-
-    <!-- BUTINS dynamiques -->
-    <div class="form-group">
-      <label style="display:flex;align-items:center;justify-content:space-between">
-        💰 Butins
-        <button type="button" onclick="window._bstAddRow('butins')"
-          style="font-size:.72rem;background:rgba(34,195,142,.08);border:1px solid rgba(34,195,142,.3);
-          border-radius:6px;padding:2px 8px;cursor:pointer;color:#22c38e">+ Ligne</button>
-      </label>
-      <div id="bst-butins-list" style="display:flex;flex-direction:column;gap:.4rem">
-        ${butins.map((b, i) => _butinRow(b, i)).join('')}
-      </div>
-    </div>
-
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveBeast('${id||''}')">
-      ${c ? 'Enregistrer' : 'Créer la créature'}
-    </button>
-  `);
-
-  // Surligner d'éventuels conflits de catégories sur l'état initial.
-  window._bstSyncDmgConflicts?.();
-
-  _bstCropper?.destroy();
-  _bstCropper = attachDropAndCrop({
-    dropEl:        document.getElementById('bst-drop-zone'),
-    previewEl:     document.getElementById('bst-drop-preview'),
-    cropWrapEl:    document.getElementById('bst-crop-wrap'),
-    canvasId:      'bst-crop-canvas',
-    statusEl:      document.getElementById('bst-crop-ok'),
-    confirmBtnEl:  document.getElementById('bst-crop-confirm'),
-    initialUrl:    c?.imageUrl || '',
-    ratio:         { w: 4, h: 3 },
-    output:        { maxW: 1800, target: 700_000 },
-  });
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MODAL IMAGE — édition rapide de l'image depuis le panneau admin
-// ══════════════════════════════════════════════════════════════════════════════
-async function openBeastImageModal(id) {
-  const c = _creatures.find(x => x.id === id);
-  if (!c) return;
-  _bstCropper?.destroy(); _bstCropper = null;
-
-  openModal(`📷 Image — ${_esc(c.nom || 'Créature')}`, `
-    <div class="form-group">
-      <label>Image (ratio 4:3)</label>
-      <div id="bst-img-drop" style="border:2px dashed var(--border-strong);border-radius:12px;
-        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
-        <div id="bst-img-preview"></div>
-      </div>
-      <div id="bst-img-crop-wrap" style="display:none;margin-top:.75rem">
-        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez l'image</div>
-        <canvas id="bst-img-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" id="bst-img-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
-        <div id="bst-img-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
-      </div>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="window._bstSaveImage('${id}')">💾 Enregistrer</button>
-      ${c.imageUrl ? `<button class="btn btn-outline" onclick="window._bstRemoveImage('${id}')">🗑 Retirer</button>` : ''}
-    </div>
-  `);
-
-  _bstCropper = attachDropAndCrop({
-    dropEl:        document.getElementById('bst-img-drop'),
-    previewEl:     document.getElementById('bst-img-preview'),
-    cropWrapEl:    document.getElementById('bst-img-crop-wrap'),
-    canvasId:      'bst-img-canvas',
-    statusEl:      document.getElementById('bst-img-ok'),
-    confirmBtnEl:  document.getElementById('bst-img-confirm'),
-    initialUrl:    c?.imageUrl || '',
-    ratio:         { w: 4, h: 3 },
-    output:        { maxW: 1800, target: 700_000 },
-  });
-}
-
-window._bstSaveImage = async (id) => {
-  try {
-    const cropResult = _bstCropper?.getResult();
-    const current = _creatures.find(c => c.id === id)?.imageUrl || '';
-    const imageUrl = typeof cropResult === 'string' ? cropResult : current;
-    if (imageUrl && imageUrl.length > 900_000) {
-      showNotif('Image trop grande, recadrez plus petit.', 'error');
-      return;
-    }
-    const col = window._bstCurrentCol || 'bestiary';
-    await updateInCol(col, id, { imageUrl });
-    const idx = _creatures.findIndex(c => c.id === id);
-    if (idx >= 0) _creatures[idx].imageUrl = imageUrl;
-    _bstCropper?.destroy(); _bstCropper = null;
-    closeModal();
-    _syncActivePanel();
-    // MAJ visuel carte
-    const card = document.querySelector(`.bst-card[data-beast-id="${id}"]`);
-    if (card && imageUrl) {
-      let img = card.querySelector('.bst-card-img');
-      if (!img) {
-        const empty = card.querySelector('.bst-card-empty');
-        if (empty) {
-          img = document.createElement('img');
-          img.className = 'bst-card-img';
-          img.loading = 'lazy';
-          empty.replaceWith(img);
-        }
-      }
-      if (img) img.src = imageUrl;
-    }
-    showNotif('Image mise à jour.', 'success');
-  } catch (e) { notifySaveError(e); }
-};
-
-window._bstRemoveImage = async (id) => {
-  try {
-    const col = window._bstCurrentCol || 'bestiary';
-    await updateInCol(col, id, { imageUrl: '' });
-    const idx = _creatures.findIndex(c => c.id === id);
-    if (idx >= 0) _creatures[idx].imageUrl = '';
-    _bstCropper?.destroy(); _bstCropper = null;
-    closeModal();
-    _syncActivePanel();
-    showNotif('Image retirée.', 'success');
-  } catch (e) { notifySaveError(e); }
-};
-
-// ── Lignes dynamiques ─────────────────────────────────────────────────────────
-function _attackRow(a={}, i) {
-  return `<div class="bst-dyn-row" id="bst-att-${i}" style="background:var(--bg-elevated);border-radius:8px;padding:.5rem;border:1px solid var(--border)">
-    <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:.4rem;margin-bottom:.3rem">
-      <input class="input-field" placeholder="Nom attaque" value="${a.nom||''}" id="bst-att-nom-${i}" style="font-size:.78rem;padding:4px 6px">
-      <input class="input-field" placeholder="Toucher" value="${a.toucher||''}" id="bst-att-toucher-${i}" style="font-size:.78rem;padding:4px 6px">
-      <input class="input-field" placeholder="Dégâts" value="${a.degats||''}" id="bst-att-degats-${i}" style="font-size:.78rem;padding:4px 6px">
-      <input class="input-field" placeholder="Portée" value="${a.portee||''}" id="bst-att-portee-${i}" style="font-size:.78rem;padding:4px 6px">
-    </div>
-    <div style="display:grid;grid-template-columns:1fr;gap:.4rem;margin-bottom:.3rem">
-      <select class="input-field" id="bst-att-dmgtype-${i}" style="font-size:.78rem;padding:4px 6px">
-        <option value="">Type de dégâts (physique par défaut)</option>
-        ${(window._bstDamageTypes||[]).map(t=>`<option value="${t.id}"${a.damageTypeId===t.id?' selected':''}>${t.icon||''} ${_esc(t.label)}</option>`).join('')}
-      </select>
-    </div>
-    <div style="display:flex;gap:.4rem">
-      <input class="input-field" placeholder="Description de l'effet..." value="${a.description||''}" id="bst-att-desc-${i}" style="flex:1;font-size:.78rem;padding:4px 6px">
-      <button type="button" onclick="window._bstRemoveRow('attaques',${i})" style="color:#ff6b6b;background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 4px">✕</button>
-    </div>
-  </div>`;
-}
-
-function _traitRow(t={}, i) {
-  return `<div class="bst-dyn-row" id="bst-tr-${i}" style="background:var(--bg-elevated);border-radius:8px;padding:.5rem;border:1px solid var(--border)">
-    <div style="display:flex;gap:.4rem">
-      <input class="input-field" placeholder="Nom du trait" value="${t.nom||''}" id="bst-tr-nom-${i}" style="width:160px;font-size:.78rem;padding:4px 6px;flex-shrink:0">
-      <input class="input-field" placeholder="Description..." value="${t.description||''}" id="bst-tr-desc-${i}" style="flex:1;font-size:.78rem;padding:4px 6px">
-      <button type="button" onclick="window._bstRemoveRow('traits',${i})" style="color:#ff6b6b;background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 4px">✕</button>
-    </div>
-  </div>`;
-}
-
-function _butinRow(b={}, i) {
-  return `<div class="bst-dyn-row" id="bst-bu-${i}" style="background:var(--bg-elevated);border-radius:8px;padding:.5rem;border:1px solid var(--border)">
-    <div style="display:flex;gap:.4rem">
-      <input class="input-field" placeholder="Nom de l'objet" value="${b.nom||''}" id="bst-bu-nom-${i}" style="flex:1;font-size:.78rem;padding:4px 6px">
-      <input class="input-field" placeholder="Quantité" value="${b.quantite||''}" id="bst-bu-qte-${i}" style="width:80px;font-size:.78rem;padding:4px 6px">
-      <input class="input-field" placeholder="Chance %" value="${b.chance||''}" id="bst-bu-chance-${i}" style="width:80px;font-size:.78rem;padding:4px 6px">
-      <button type="button" onclick="window._bstRemoveRow('butins',${i})" style="color:#ff6b6b;background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 4px">✕</button>
-    </div>
-  </div>`;
-}
-
-// ── Ajouter / supprimer une ligne dynamique ───────────────────────────────────
-window._bstAddRow = (type) => {
-  const container = document.getElementById(`bst-${type}-list`);
-  if (!container) return;
-  const i = container.querySelectorAll('.bst-dyn-row').length;
-  const div = document.createElement('div');
-  div.innerHTML = type==='attaques' ? _attackRow({},i) : type==='traits' ? _traitRow({},i) : _butinRow({},i);
-  container.appendChild(div.firstElementChild);
-};
-
-window._bstRemoveRow = (type, i) => {
-  const row = document.getElementById(`bst-${type==='attaques'?'att':type==='traits'?'tr':'bu'}-${i}`);
-  row?.remove();
-};
-
-// ── Lire les lignes dynamiques depuis le DOM ──────────────────────────────────
-function _readRows(type) {
-  if (type === 'attaques') {
-    return [...document.querySelectorAll('#bst-attaques-list .bst-dyn-row')].map((_,i) => ({
-      nom:         document.getElementById(`bst-att-nom-${i}`)?.value?.trim()     || '',
-      toucher:     document.getElementById(`bst-att-toucher-${i}`)?.value?.trim() || '',
-      degats:      document.getElementById(`bst-att-degats-${i}`)?.value?.trim()  || '',
-      portee:      document.getElementById(`bst-att-portee-${i}`)?.value?.trim()  || '',
-      damageTypeId:document.getElementById(`bst-att-dmgtype-${i}`)?.value || '',
-      description: document.getElementById(`bst-att-desc-${i}`)?.value?.trim()   || '',
-    })).filter(a => a.nom || a.degats);
-  }
-  if (type === 'traits') {
-    return [...document.querySelectorAll('#bst-traits-list .bst-dyn-row')].map((_,i) => ({
-      nom:         document.getElementById(`bst-tr-nom-${i}`)?.value?.trim()  || '',
-      description: document.getElementById(`bst-tr-desc-${i}`)?.value?.trim() || '',
-    })).filter(t => t.nom || t.description);
-  }
-  // butins
-  return [...document.querySelectorAll('#bst-butins-list .bst-dyn-row')].map((_,i) => ({
-    nom:      document.getElementById(`bst-bu-nom-${i}`)?.value?.trim()    || '',
-    quantite: document.getElementById(`bst-bu-qte-${i}`)?.value?.trim()    || '',
-    chance:   document.getElementById(`bst-bu-chance-${i}`)?.value?.trim() || '',
-  })).filter(b => b.nom);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SAUVEGARDER / SUPPRIMER
-// ══════════════════════════════════════════════════════════════════════════════
-async function saveBeast(id = '') {
-  try {
-    const nom = document.getElementById('bst-nom')?.value?.trim();
-    if (!nom) { showNotif('Le nom est requis.','error'); return; }
-
-    // Image : nouveau crop > existante (pas de bouton "retirer" ici)
-    const cropResult = _bstCropper?.getResult();
-    let imageUrl = typeof cropResult === 'string'
-      ? cropResult
-      : (id ? (_creatures.find(c=>c.id===id)?.imageUrl || '') : '');
-
-    // Vérifier taille Firestore
-    if (imageUrl.length > 900_000) { showNotif('Image trop grande, recadrez plus petit.','error'); return; }
-
-    const data = {
-      nom,
-      type:          document.getElementById('bst-type')?.value?.trim()    || '',
-      environnement: document.getElementById('bst-env')?.value?.trim()     || '',
-      niveau:        parseInt(document.getElementById('bst-niveau')?.value)||0,
-      dangerositeXp: parseInt(document.getElementById('bst-xp')?.value)||0,
-      emoji:         document.getElementById('bst-emoji')?.value?.trim()   || '🐲',
-      tokenW:        Math.max(1, Math.min(5, parseInt(document.getElementById('bst-tokenW')?.value)||1)),
-      tokenH:        Math.max(1, Math.min(5, parseInt(document.getElementById('bst-tokenH')?.value)||1)),
-      rang:          document.getElementById('bst-rang-selector')?.dataset?.rang || 'classique',
-      hidden:        !!document.getElementById('bst-hidden')?.checked,
-      imageUrl,
-      description:   document.getElementById('bst-desc')?.value?.trim()   || '',
-      // Stats
-      pvMax:          parseInt(document.getElementById('bst-pvMax')?.value)||0,
-      pmMax:          parseInt(document.getElementById('bst-pmMax')?.value)||0,
-      ca:             parseInt(document.getElementById('bst-ca')?.value)||0,
-      force:          parseInt(document.getElementById('bst-force')?.value)||0,
-      dexterite:      parseInt(document.getElementById('bst-dexterite')?.value)||0,
-      constitution:   parseInt(document.getElementById('bst-constitution')?.value)||0,
-      intelligence:   parseInt(document.getElementById('bst-intelligence')?.value)||0,
-      sagesse:        parseInt(document.getElementById('bst-sagesse')?.value)||0,
-      charisme:       parseInt(document.getElementById('bst-charisme')?.value)||0,
-      vitesse:        parseInt(document.getElementById('bst-vitesse')?.value)||0,
-      initiative:     parseInt(document.getElementById('bst-initiative')?.value)||0,
-      resistances:    _readDamageTypeSelections('resistances'),
-      immunites:      _readDamageTypeSelections('immunites'),
-      absorptions:    _readDamageTypeSelections('absorptions'),
-      faiblesses:     _readDamageTypeSelections('faiblesses'),
-      // Tableaux dynamiques
-      attaques: _readRows('attaques'),
-      traits:   _readRows('traits'),
-      butins:   _readRows('butins'),
-    };
-
-    const col = window._bstCurrentCol || 'bestiary';
-
-    if (id) {
-      await updateInCol(col, id, data);
-      const idx = _creatures.findIndex(c=>c.id===id);
-      if (idx>=0) _creatures[idx] = { ...data, id };
-    } else {
-      const newId = await addToCol(col, data);
-      if (typeof newId === 'string') _creatures.push({ ...data, id: newId });
-      else _creatures = await loadCollection(col);
-      _creatures.sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
-    }
-
-    _bstCropper?.destroy(); _bstCropper = null;
-    closeModal();
-    showNotif(id ? `${nom} mis à jour !` : `${nom} ajouté au bestiaire !`, 'success');
-    _render();
-  } catch (e) { notifySaveError(e); }
-}
 
 async function deleteBeast(id) {
   try {
@@ -2343,10 +1840,96 @@ window._bstReset = (id) => {
 // ── Override PAGES.bestiaire + exports ───────────────────────────────────────
 PAGES.bestiaire = renderBestiary;
 
+// ──────────────────────────────────────────────────────────────────────────────
+// MODAL IMAGE — éditeur d'image dédié de la créature (depuis le panneau)
+// ──────────────────────────────────────────────────────────────────────────────
+async function openBeastImageModal(id) {
+  const c = _creatures.find(x => x.id === id);
+  if (!c) return;
+  _bstCropper?.destroy(); _bstCropper = null;
+
+  openModal(`📷 Image — ${_esc(c.nom || 'Créature')}`, `
+    <div class="form-group">
+      <label>Image (ratio 4:3)</label>
+      <div id="bst-img-drop" style="border:2px dashed var(--border-strong);border-radius:12px;
+        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
+        <div id="bst-img-preview"></div>
+      </div>
+      <div id="bst-img-crop-wrap" style="display:none;margin-top:.75rem">
+        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez l'image</div>
+        <canvas id="bst-img-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
+        <button type="button" class="btn btn-gold btn-sm" id="bst-img-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
+        <div id="bst-img-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:.75rem">
+      <button class="btn btn-gold" style="flex:1" onclick="window._bstSaveImage('${id}')">💾 Enregistrer</button>
+      ${c.imageUrl ? `<button class="btn btn-outline" onclick="window._bstRemoveImage('${id}')">🗑 Retirer</button>` : ''}
+    </div>
+  `);
+
+  _bstCropper = attachDropAndCrop({
+    dropEl:        document.getElementById('bst-img-drop'),
+    previewEl:     document.getElementById('bst-img-preview'),
+    cropWrapEl:    document.getElementById('bst-img-crop-wrap'),
+    canvasId:      'bst-img-canvas',
+    statusEl:      document.getElementById('bst-img-ok'),
+    confirmBtnEl:  document.getElementById('bst-img-confirm'),
+    initialUrl:    c?.imageUrl || '',
+    ratio:         { w: 4, h: 3 },
+    output:        { maxW: 1800, target: 700_000 },
+  });
+}
+
+window._bstSaveImage = async (id) => {
+  try {
+    const cropResult = _bstCropper?.getResult();
+    const current = _creatures.find(c => c.id === id)?.imageUrl || '';
+    const imageUrl = typeof cropResult === 'string' ? cropResult : current;
+    if (imageUrl && imageUrl.length > 900_000) {
+      showNotif('Image trop grande, recadrez plus petit.', 'error');
+      return;
+    }
+    const col = window._bstCurrentCol || 'bestiary';
+    await updateInCol(col, id, { imageUrl });
+    const idx = _creatures.findIndex(c => c.id === id);
+    if (idx >= 0) _creatures[idx].imageUrl = imageUrl;
+    _bstCropper?.destroy(); _bstCropper = null;
+    closeModal();
+    _syncActivePanel();
+    const card = document.querySelector(`.bst-card[data-beast-id="${id}"]`);
+    if (card && imageUrl) {
+      let img = card.querySelector('.bst-card-img');
+      if (!img) {
+        const empty = card.querySelector('.bst-card-empty');
+        if (empty) {
+          img = document.createElement('img');
+          img.className = 'bst-card-img';
+          img.loading = 'lazy';
+          empty.replaceWith(img);
+        }
+      }
+      if (img) img.src = imageUrl;
+    }
+    showNotif('Image mise à jour.', 'success');
+  } catch (e) { notifySaveError(e); }
+};
+
+window._bstRemoveImage = async (id) => {
+  try {
+    const col = window._bstCurrentCol || 'bestiary';
+    await updateInCol(col, id, { imageUrl: '' });
+    const idx = _creatures.findIndex(c => c.id === id);
+    if (idx >= 0) _creatures[idx].imageUrl = '';
+    _bstCropper?.destroy(); _bstCropper = null;
+    closeModal();
+    _syncActivePanel();
+    showNotif('Image retirée.', 'success');
+  } catch (e) { notifySaveError(e); }
+};
+
 Object.assign(window, {
   renderBestiary,
-  openBeastModal,
   openBeastImageModal,
-  saveBeast,
   deleteBeast,
 });
