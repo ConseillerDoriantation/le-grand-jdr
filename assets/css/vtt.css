@@ -3067,36 +3067,103 @@
 .vtt-ms-sort-pm      { font-size: .58rem; background: color-mix(in srgb, #4f8cff 20%, transparent); color: #4f8cff; padding: .04rem .22rem; border-radius: 3px; }
 .vtt-ms-sort-types   { font-size: .58rem; background: color-mix(in srgb, var(--gold) 15%, transparent); color: var(--gold); padding: .04rem .22rem; border-radius: 3px; }
 
-/* ── Inventaire ─────────────────────────────────────────────────── */
-.vtt-ms-inv { display: flex; flex-direction: column; }
+/* ── Inventaire (cards compactes avec image + rareté + actions) ───────── */
+.vtt-ms-inv { display: flex; flex-direction: column; gap: .15rem; }
 .vtt-ms-inv-cat {
-  font-size: .61rem; font-weight: 700; color: var(--text-muted);
+  display: flex; align-items: center; gap: .35rem;
+  font-size: .62rem; font-weight: 700; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: .05em;
-  padding: .3rem 0 .12rem;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: .08rem;
+  padding: .45rem 0 .15rem;
+  margin-top: .1rem;
 }
-.vtt-ms-inv-cnt  { font-weight: 400; opacity: .7; }
+.vtt-ms-inv-cat:first-child { padding-top: .15rem; margin-top: 0; }
+.vtt-ms-inv-cat-lbl { flex: 1; }
+.vtt-ms-inv-cnt {
+  font-weight: 700; font-size: .58rem;
+  padding: .05rem .35rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+  color: var(--gold);
+}
+
 .vtt-ms-inv-item {
-  display: flex; flex-direction: column; gap: .06rem;
-  padding: .22rem .12rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
-  font-size: .67rem;
+  display: flex; align-items: center; gap: .4rem;
+  padding: .3rem .4rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .68rem;
+  position: relative;
+  transition: border-color .12s, background .12s;
 }
-.vtt-ms-inv-item:last-child { border-bottom: none; }
-.vtt-ms-inv-item.is-equipped { background: color-mix(in srgb, var(--gold) 5%, transparent); }
-.vtt-ms-inv-main   { display: flex; align-items: center; gap: .28rem; flex-wrap: wrap; }
-.vtt-ms-inv-nom    { font-weight: 600; color: var(--text); }
-.vtt-ms-inv-qte    { color: var(--text-dim); font-size: .61rem; }
-.vtt-ms-inv-badge  { font-size: .56rem; background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold); padding: .04rem .2rem; border-radius: 3px; }
-.vtt-ms-inv-detail { font-size: .61rem; color: var(--text-muted); }
-.vtt-ms-inv-actions { display: flex; gap: .18rem; margin-top: .12rem; }
+.vtt-ms-inv-item:hover { border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); }
+.vtt-ms-inv-item.is-equipped {
+  background: color-mix(in srgb, var(--gold) 8%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--gold) 35%, var(--border));
+}
+
+/* Pastille de rareté à gauche */
+.vtt-ms-inv-rar {
+  position: absolute; left: -1px; top: 6px; bottom: 6px; width: 3px;
+  border-radius: 2px;
+}
+
+/* Vignette image */
+.vtt-ms-inv-img {
+  width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: 5px; object-fit: cover;
+  background: color-mix(in srgb, var(--bg-panel) 80%, transparent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+}
+.vtt-ms-inv-img--empty { color: var(--text-dim); }
+
+/* Corps texte */
+.vtt-ms-inv-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .08rem; }
+.vtt-ms-inv-line1 { display: flex; align-items: center; gap: .3rem; flex-wrap: nowrap; }
+.vtt-ms-inv-nom {
+  font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.vtt-ms-inv-qte {
+  flex-shrink: 0;
+  font-weight: 700; font-size: .62rem;
+  color: var(--gold);
+  padding: .03rem .3rem; border-radius: 4px;
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+}
+.vtt-ms-inv-badge {
+  flex-shrink: 0;
+  font-size: .55rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .03em;
+  background: color-mix(in srgb, var(--gold) 22%, transparent);
+  color: var(--gold);
+  padding: .04rem .3rem; border-radius: 3px;
+}
+.vtt-ms-inv-detail {
+  font-size: .6rem; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Actions à droite */
+.vtt-ms-inv-actions {
+  display: flex; gap: .2rem; flex-shrink: 0;
+  margin-left: .1rem;
+}
 .vtt-ms-inv-btn {
-  background: none; border: 1px solid var(--border); border-radius: 4px;
-  cursor: pointer; font-size: .7rem; padding: .08rem .22rem;
-  color: var(--text-muted); transition: background .12s, color .12s;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: 5px;
+  cursor: pointer; font-size: .82rem;
+  color: var(--text-muted);
+  transition: background .12s, color .12s, border-color .12s, transform .12s;
 }
-.vtt-ms-inv-btn:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-ms-inv-btn:hover {
+  background: color-mix(in srgb, var(--gold) 14%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--gold) 40%, var(--border));
+  color: var(--text); transform: scale(1.05);
+}
 
 /* Mode jour */
 [data-theme="light"] .vtt-presence-col { background: #f2f1eb; }
