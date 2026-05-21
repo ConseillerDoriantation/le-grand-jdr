@@ -2580,8 +2580,58 @@ function _buildAttackOptions(t) {
     return options;
   }
 
-  // ── Créature du bestiaire : ses attaques nommées ──
-  if (b?.attaques?.length) {
+  // ── Créature du bestiaire : armes naturelles + actions (sorts) ───────────
+  // Helper : modificateur d'une stat sur la créature (sans char)
+  const _bMod = (statKey) => {
+    if (!b || statKey === 'none' || !statKey) return 0;
+    const v = parseInt(b[statKey]);
+    if (!Number.isFinite(v)) return 0;
+    return Math.floor((Math.min(22, v) - 10) / 2);
+  };
+
+  // 1) Armes naturelles : une option par arme, avec stat dégâts/toucher + bonus fixes
+  if (Array.isArray(b?.armesNaturelles) && b.armesNaturelles.length) {
+    b.armesNaturelles.forEach((w, idx) => {
+      if (!w.degats && !w.nom) return;
+      const dStat   = w.degatsStat  || 'force';
+      const tStat   = w.toucherStat || dStat;
+      const dMod    = _bMod(dStat);
+      const tMod    = _bMod(tStat);
+      const flatD   = parseInt(w.degatsFlat)  || 0;
+      const flatT   = parseInt(w.toucherFlat) || 0;
+      const toucherTotal = (tStat === 'none' ? 0 : tMod) + flatT;
+      options.push({
+        id:      `beast_arme_${idx}`,
+        icon:    '🦷',
+        label:   w.nom || `Arme ${idx+1}`,
+        rawDice: w.degats || '1d4',
+        dice:    w.degats || '1d4',
+        portee:  parseInt(w.portee) || 1,
+        pmCost:  0,
+        toucher: toucherTotal,            // total numérique utilisé par les jets
+        toucherMod: toucherTotal,         // pour l'affichage détaillé (formule 1d20 +X (stat))
+        toucherSetBonus: 0,
+        toucherStatLabel: tStat === 'none'
+          ? (flatT ? 'fixe' : '')
+          : (statShort(tStat) || tStat) + (flatT ? ` +${flatT}` : ''),
+        dmgStatMod:   dStat === 'none' ? flatD : dMod + flatD,
+        dmgStatLabel: dStat === 'none'
+          ? (flatD ? 'fixe' : '—')
+          : (statShort(dStat) || dStat) + (flatD ? ` +${flatD}` : ''),
+        maitriseBonus: 0,
+        halfOnMiss: false,
+        typeRules: getDamageTypeRules(_damageTypes, 'physique'),
+        damageTypeId: 'physique',
+        damageTypeIcon: '',
+        damageTypeColor: '',
+      });
+    });
+  }
+
+  // 2) Legacy `attaques` : conservé en fallback si une vieille créature n'a pas
+  //    encore été migrée vers armesNaturelles. N'apparaît que si aucune arme
+  //    naturelle n'a été définie (pour éviter doublons pendant la transition).
+  if (b && !options.length && Array.isArray(b.attaques) && b.attaques.length) {
     b.attaques.forEach((atk, idx) => {
       if (!atk.degats) return;
       const atkTypeId = atk.damageTypeId || null;
@@ -2601,8 +2651,156 @@ function _buildAttackOptions(t) {
         damageTypeColor: atkTypeObj?.color || '',
       });
     });
-    if (options.length) return options;
   }
+
+  // ── Créature : actions/sorts unifiés (sorts du bestiaire) ───────────────
+  // Construit un char synthétique depuis la créature et utilise les helpers
+  // existants pour les formules de dégâts/soin/affliction/enchant.
+  if (b && Array.isArray(b.actions) && b.actions.length) {
+    const armesN = Array.isArray(b.armesNaturelles) ? b.armesNaturelles : [];
+    const arme0  = armesN[0] || null;
+    const bChar = {
+      id:   b.id || `beast_${t.beastId}`,
+      nom:  b.nom || 'Créature',
+      stats: {
+        force:        parseInt(b.force)        || 10,
+        dexterite:    parseInt(b.dexterite)    || 10,
+        intelligence: parseInt(b.intelligence) || 10,
+        sagesse:      parseInt(b.sagesse)      || 10,
+        constitution: parseInt(b.constitution) || 10,
+        charisme:     parseInt(b.charisme)     || 10,
+      },
+      statsBonus: {},
+      equipement: arme0 ? {
+        'Main principale': {
+          nom:         arme0.nom || 'Arme naturelle',
+          degats:      arme0.degats || '1d4',
+          degatsStat:  arme0.degatsStat  || 'force',
+          degatsStats: [arme0.degatsStat || 'force'],
+          toucherStat: arme0.toucherStat || arme0.degatsStat || 'force',
+          statAttaque: arme0.toucherStat || arme0.degatsStat || 'force',
+          portee:      arme0.portee || '',
+          typeArme:    'CaC',
+          format:      'Arme naturelle',
+          sousType:    arme0.nom || '',
+          traits:      [],
+        },
+      } : {},
+      deck_sorts: b.actions, sort_cats: [], elements: [],
+    };
+    const bMainP   = bChar.equipement['Main principale'];
+    const bStatKey = bMainP?.statAttaque || bMainP?.toucherStat || 'force';
+
+    b.actions.forEach((s, actIdx) => {
+      const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
+        ? parseInt(s.portee) : (parseInt(arme0?.portee) || 1);
+      const mods    = _vttSpellMods(s);
+      const portee  = baseRange;
+      const zoneW   = mods?.allonge ? 0 : (s.zoneW || 0);
+      const zoneH   = mods?.allonge ? 0 : (s.zoneH || 0);
+      const types   = Array.isArray(s.types) && s.types.length ? s.types
+                    : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
+      const protMode = s.protectionMode || 'ca';
+      const nbCibles = _vttSortCibles(s) || 1;
+      const pmRaw    = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
+                       ? s.pmOverride : (parseInt(s.pm) || 0);
+      const cout     = Math.max(0, pmRaw);
+      const _sRunes  = s.runes || [];
+      const actionType = _sRunes.includes('Réaction') ? 'reaction'
+                       : _sRunes.includes('Enchantement') ? 'bonus'
+                       : (s.actionOverride === 'action_bonus' ? 'bonus'
+                          : s.actionOverride === 'reaction'   ? 'reaction' : 'action');
+      const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';
+      const label = s.nom || `Action ${actIdx+1}`;
+      const id = `beast_act_${actIdx}`;
+      const isEnchantOnly    = (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim());
+      const isAfflictionOnly = !!mods?.affliction;
+
+      if (isEnchantOnly) {
+        const enchMode  = s.enchantMode || 'dmg';
+        const isEtat    = enchMode === 'etat' && !!mods?.enchantEtatId;
+        const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
+        const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
+        options.push({ id, icon: isEtat ? '✨' : '🪄', label, dice: '',
+          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
+          isEnchant: true, enchantMode: enchMode,
+          enchantFormula: mods.enchantArmeDmg?.formula || '',
+          enchantEtatId: mods.enchantEtatId || null,
+          enchantElement: elementId,
+          enchantElementIcon: enchTypeObj?.icon || '',
+          enchantElementColor: enchTypeObj?.color || '',
+          isUtil: true, halfOnMiss: false, actionType });
+      } else if (isAfflictionOnly) {
+        const aff = mods.affliction;
+        const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
+        options.push({ id, icon: aff.mode === 'etat' ? '⛓' : '🩸', label,
+          dice: aff.mode === 'dot' ? `${aff.dotFormula}/tour`
+                                   : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
+          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
+          isAffliction: true,
+          afflictionMode: aff.mode, afflictionDotFormula: aff.dotFormula,
+          afflictionEtatId: aff.etatId || null,
+          afflictionDD: aff.dd, afflictionSaveStat: aff.saveStat,
+          afflictionElement: aff.element || null,
+          afflictionElementIcon: aTypeObj?.icon || '',
+          afflictionElementColor: aTypeObj?.color || '',
+          isUtil: true, halfOnMiss: false, actionType });
+      } else if (types.includes('offensif')) {
+        const fullFormula = _vttSortDmgFormula(s, bChar);
+        const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
+        const spellTypeId    = s.noyauTypeId || null;
+        const spellTypeRules = spellTypeId ? getDamageTypeRules(_damageTypes, spellTypeId)
+                                            : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
+        const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
+        const ovrTouchStat   = s.toucherStat || bStatKey;
+        const ovrDmgStat     = s.degatsStat  || bStatKey;
+        const ovrTouchNoMod  = ovrTouchStat === 'none';
+        const ovrDmgNoMod    = ovrDmgStat   === 'none';
+        const ovrTouchMod    = ovrTouchNoMod ? 0 : getMod(bChar, ovrTouchStat);
+        const ovrDmgMod      = ovrDmgNoMod   ? 0 : getMod(bChar, ovrDmgStat);
+        options.push({ id, icon: sortIcon, label,
+          rawDice: sRawDice, dice: fullFormula,
+          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
+          typeRules: spellTypeRules, damageTypeId: spellTypeId,
+          damageTypeIcon: spellTypeObj?.icon || '',
+          damageTypeColor: spellTypeObj?.color || '',
+          toucherMod: ovrTouchMod, toucherSetBonus: 0,
+          toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
+          dmgStatMod: ovrDmgMod,
+          dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
+          maitriseBonus: sFixed,
+          mjAlwaysMax: !!s.mjAlwaysMax,
+          actionType });
+      } else if (types.includes('defensif') && protMode === 'soin') {
+        const soinFormula = _vttSortSoinFormula(s, bChar);
+        const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
+        const soinStatKey = s.degatsStat || 'constitution';
+        const soinNoMod   = soinStatKey === 'none';
+        const soinStatMod = soinNoMod ? 0 : getMod(bChar, soinStatKey);
+        const soinTouchStat = s.toucherStat || bStatKey;
+        const soinTouchNoMod = soinTouchStat === 'none';
+        const soinTouchMod   = soinTouchNoMod ? 0 : getMod(bChar, soinTouchStat);
+        options.push({ id, icon: '💚', label, rawDice: sRawDice, dice: soinFormula,
+          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
+          isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
+          mjAlwaysMax: !!s.mjAlwaysMax,
+          dmgStatMod: soinStatMod,
+          dmgStatLabel: soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey),
+          toucherMod: soinTouchMod, toucherSetBonus: 0,
+          toucherStatLabel: soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat),
+          actionType });
+      } else {
+        // Utilitaire / buff CA / autre — option générique sans dégâts
+        options.push({ id, icon: sortIcon, label, dice: '',
+          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
+          isUtil: true, halfOnMiss: false, actionType });
+      }
+    });
+  }
+
+  // Beast token : on n'enchaîne PAS sur les branches PNJ / personnage —
+  // une créature n'a ni inventaire de PJ ni "poings" génériques.
+  if (t.beastId) return options;
 
   // ── PNJ : stats saisies dans la fiche PNJ ──
   if (!c && t.npcId) {
@@ -5507,9 +5705,13 @@ function _renderInspector(t) {
   if (t.type === 'enemy' && t.beastId) {
     const beast = _bestiary[t.beastId];
     if (beast) {
-      const _atk = Array.isArray(beast.attaques) ? beast.attaques : [];
-      const _trt = Array.isArray(beast.traits)   ? beast.traits   : [];
-      const _btn = Array.isArray(beast.butins)   ? beast.butins   : [];
+      // Nouveau schéma : armesNaturelles + actions (spells unifiés) + butins (objets boutique)
+      // Legacy : `attaques` (texte libre) — affiché en fallback si encore présent.
+      const _atk     = Array.isArray(beast.attaques)        ? beast.attaques        : [];
+      const _armesN  = Array.isArray(beast.armesNaturelles) ? beast.armesNaturelles : [];
+      const _actions = Array.isArray(beast.actions)         ? beast.actions         : [];
+      const _trt     = Array.isArray(beast.traits)          ? beast.traits          : [];
+      const _btn     = Array.isArray(beast.butins)          ? beast.butins          : [];
 
       if (STATE.isAdmin) {
         // ── Vue MJ : tout est révélé ───────────────────────────────────
@@ -5549,10 +5751,48 @@ function _renderInspector(t) {
             ${_affHtml(beast.immunites,   'Immunités',    '#94a3b8')}
             ${_affHtml(beast.absorptions, 'Absorptions',  '#a78bfa')}
             ${beast.description ? `<div class="vtt-creat-desc">${_esc(beast.description)}</div>` : ''}
+            ${_armesN.length ? `
+              <div class="vtt-creat-sub-title">🦷 Armes naturelles (${_armesN.length})</div>
+              ${_armesN.map(w => {
+                const statShort = { force:'For', dexterite:'Dex', intelligence:'Int', sagesse:'Sag', constitution:'Con', charisme:'Cha', none:'—' };
+                const dStat = statShort[w.degatsStat]  || '';
+                const tStat = statShort[w.toucherStat] || '';
+                const flatD = parseInt(w.degatsFlat)  || 0;
+                const flatT = parseInt(w.toucherFlat) || 0;
+                return `<div class="vtt-creat-atk">
+                  <div class="vtt-creat-atk-name">${_esc(w.nom || 'Arme')}</div>
+                  <div class="vtt-creat-atk-stats">
+                    ${w.degats ? `<span class="vtt-creat-atk-stat dmg">⚔️ ${_esc(w.degats)}${dStat?` <span style="opacity:.7">(${dStat}${flatD?` ${flatD>0?'+':''}${flatD}`:''})</span>`:''}</span>` : ''}
+                    ${tStat || flatT ? `<span class="vtt-creat-atk-stat touch">🎯 ${tStat}${flatT?` ${flatT>0?'+':''}${flatT}`:''}</span>` : ''}
+                    ${w.portee  ? `<span class="vtt-creat-atk-stat range">📏 ${_esc(w.portee)}</span>` : ''}
+                  </div>
+                </div>`;
+              }).join('')}` : ''}
+            ${_actions.length ? `
+              <div class="vtt-creat-sub-title">⚔️ Actions (${_actions.length})</div>
+              ${_actions.map(a => {
+                const runes = a.runes || [];
+                const runeCounts = {};
+                runes.forEach(r => { runeCounts[r] = (runeCounts[r] || 0) + 1; });
+                const runeBadges = Object.entries(runeCounts).map(([r,n]) =>
+                  `<span class="vtt-creat-rune">${r}${n>1?`×${n}`:''}</span>`).join(' ');
+                const typeBadges = (a.types || []).map(t => {
+                  const col = t==='offensif' ? '#ff6b6b' : t==='defensif' ? '#22c38e' : '#b47fff';
+                  return `<span class="vtt-creat-act-type" style="--c:${col}">${t}</span>`;
+                }).join('');
+                return `<div class="vtt-creat-act">
+                  <div class="vtt-creat-act-head">
+                    <span class="vtt-creat-act-ico">${_esc(a.icon||'🔮')}</span>
+                    <span class="vtt-creat-act-name">${_esc(a.nom||'Action')}</span>
+                    <span class="vtt-creat-act-pm">${a.pmOverride ?? a.pm ?? '?'} PM</span>
+                  </div>
+                  ${typeBadges || runeBadges ? `<div class="vtt-creat-act-badges">${typeBadges}${runeBadges}</div>` : ''}
+                </div>`;
+              }).join('')}` : ''}
             ${_atk.length ? `
-              <div class="vtt-creat-sub-title">⚔️ Attaques (${_atk.length})</div>
+              <div class="vtt-creat-sub-title" style="color:#f87171">⚠ Attaques legacy (${_atk.length}) — à migrer en actions</div>
               ${_atk.map(a => `
-                <div class="vtt-creat-atk">
+                <div class="vtt-creat-atk" style="opacity:.7">
                   <div class="vtt-creat-atk-name">${_esc(a.nom || 'Attaque')}</div>
                   <div class="vtt-creat-atk-stats">
                     ${a.toucher ? `<span class="vtt-creat-atk-stat touch">🎯 ${_esc(a.toucher)}</span>` : ''}
@@ -5571,12 +5811,20 @@ function _renderInspector(t) {
             ${_btn.length ? `
               <div class="vtt-creat-sub-title">💰 Butins (${_btn.length})</div>
               <div class="vtt-creat-loots">
-                ${_btn.map(b => `
-                  <div class="vtt-creat-loot">
+                ${_btn.map((b,i) => {
+                  const orphan = !b.itemId;
+                  return `<div class="vtt-creat-loot" data-loot-idx="${i}">
+                    ${b.image
+                      ? `<img class="vtt-creat-loot-img" src="${_esc(b.image)}" alt="">`
+                      : `<span class="vtt-creat-loot-img vtt-creat-loot-img--empty">📦</span>`}
                     <span class="vtt-creat-loot-name">${_esc(b.nom || 'Objet')}</span>
                     ${b.quantite ? `<span class="vtt-creat-loot-meta">${_esc(b.quantite)}</span>` : ''}
                     ${b.chance   ? `<span class="vtt-creat-loot-meta">${_esc(b.chance)}</span>`   : ''}
-                  </div>`).join('')}
+                    ${orphan
+                      ? `<span class="vtt-creat-loot-add" style="opacity:.4;cursor:not-allowed" title="Objet supprimé de la boutique">＋</span>`
+                      : `<button class="vtt-creat-loot-add" onclick="window._vttCreatSendLootToStash('${t.beastId}',${i},this)" title="Envoyer à la réserve MJ">＋</button>`}
+                  </div>`;
+                }).join('')}
               </div>` : ''}
           </div>`;
       } else {
@@ -5592,25 +5840,27 @@ function _renderInspector(t) {
           <div class="vtt-ins-section vtt-creat-pl">
             <div class="vtt-ins-section-title">📝 Mes observations</div>
             <div class="vtt-creat-help">Renseigne ici ce que tu as découvert sur cette créature. Sauvegardé automatiquement (visible aussi dans le Bestiaire).</div>
-            ${_atk.length ? `
-              <div class="vtt-creat-sub-title">⚔️ Attaques observées (${_atk.length})</div>
-              ${_atk.map((_, i) => `
-                <div class="vtt-creat-atk-edit">
-                  <input class="vtt-creat-input" placeholder="Nom de l'attaque…"
-                    value="${_esc(ded['att_nom_'+i] || '')}"
-                    onchange="window._vttBstDed('${_bid}','att_nom_${i}',this.value)">
+            ${_actions.length ? `
+              <div class="vtt-creat-sub-title">⚔️ Actions observées (${_actions.length})</div>
+              ${_actions.map((act, i) => {
+                const k = act.id || `idx_${i}`;
+                return `<div class="vtt-creat-atk-edit">
+                  <input class="vtt-creat-input" placeholder="Nom de l'action…"
+                    value="${_esc(ded['act_nom_'+k] || '')}"
+                    onchange="window._vttBstDed('${_bid}','act_nom_${k}',this.value)">
                   <div class="vtt-creat-atk-row3">
                     <input class="vtt-creat-input" placeholder="🎯 Toucher"
-                      value="${_esc(ded['att_toucher_'+i] || '')}"
-                      onchange="window._vttBstDed('${_bid}','att_toucher_${i}',this.value)">
+                      value="${_esc(ded['act_toucher_'+k] || '')}"
+                      onchange="window._vttBstDed('${_bid}','act_toucher_${k}',this.value)">
                     <input class="vtt-creat-input" placeholder="⚔️ Dégâts"
-                      value="${_esc(ded['att_degats_'+i] || '')}"
-                      onchange="window._vttBstDed('${_bid}','att_degats_${i}',this.value)">
+                      value="${_esc(ded['act_degats_'+k] || '')}"
+                      onchange="window._vttBstDed('${_bid}','act_degats_${k}',this.value)">
                     <input class="vtt-creat-input" placeholder="📏 Portée"
-                      value="${_esc(ded['att_portee_'+i] || '')}"
-                      onchange="window._vttBstDed('${_bid}','att_portee_${i}',this.value)">
+                      value="${_esc(ded['act_portee_'+k] || '')}"
+                      onchange="window._vttBstDed('${_bid}','act_portee_${k}',this.value)">
                   </div>
-                </div>`).join('')}` : ''}
+                </div>`;
+              }).join('')}` : ''}
             ${_trt.length ? `
               <div class="vtt-creat-sub-title">✨ Traits observés (${_trt.length})</div>
               ${_trt.map((_, i) => `
@@ -5625,8 +5875,8 @@ function _renderInspector(t) {
             <div class="vtt-creat-sub-title">📔 Notes</div>
             <textarea class="vtt-creat-input vtt-creat-notes" rows="3" placeholder="Tes notes sur cette créature…"
               onchange="window._vttBstNotes('${_bid}',this.value)">${_esc(track.notes || '')}</textarea>
-            ${!_atk.length && !_trt.length && !_hasNotes && !_hasAnyDed
-              ? '<div class="vtt-creat-help" style="margin-top:.4rem">Aucune attaque/trait recensé par le MJ pour cette créature pour le moment.</div>'
+            ${!_actions.length && !_trt.length && !_hasNotes && !_hasAnyDed
+              ? '<div class="vtt-creat-help" style="margin-top:.4rem">Aucune action/trait recensé par le MJ pour cette créature pour le moment.</div>'
               : ''}
           </div>`;
       }
@@ -10562,6 +10812,55 @@ function _renderLootShopList() {
     </div>`;
   }).join('');
 }
+
+/** MJ : envoie un butin de créature (depuis le panneau token) vers la réserve.
+ *  Lit le `butins[idx]` de la créature ciblée, recharge l'item boutique complet
+ *  (pour avoir tous les champs), puis empile dans `_loot.stash`. */
+window._vttCreatSendLootToStash = async (beastId, idx, btn) => {
+  if (!STATE.isAdmin) return;
+  const beast = _bestiary[beastId];
+  const b = beast?.butins?.[idx];
+  if (!b?.itemId) { showNotif('Butin invalide', 'error'); return; }
+
+  // Charge la boutique au besoin (cache partagé avec le picker MJ)
+  if (!_lootShopState.items?.length) {
+    const [items, cats] = await Promise.all([
+      loadCollection('shop').catch(() => []),
+      loadCollection('shopCategories').catch(() => []),
+    ]);
+    _lootShopState.items  = items || [];
+    _lootShopState.cats   = cats  || [];
+    _lootShopState.catMap = Object.fromEntries((cats||[]).map(c => [c.id, c]));
+  }
+
+  const item = _lootShopState.items.find(i => i.id === b.itemId);
+  if (!item) { showNotif('Objet introuvable en boutique', 'error'); return; }
+
+  // Quantité : extrait le 1er entier du champ libre "1", "1-3", "2d4"… défaut 1.
+  const qMatch = String(b.quantite || '').match(/\d+/);
+  const qty = Math.max(1, qMatch ? parseInt(qMatch[0]) : 1);
+
+  const template = _lootShopState.catMap?.[item.categorieId]?.template || 'classique';
+  const prixVente = Math.round((item.prix || 0) * 0.5);
+  const base = shopItemToInvEntry(item, { source: 'butin', template, prixVente });
+  const entry = { ...base, id: crypto.randomUUID(), qty };
+  delete entry.qte; delete entry.source;
+
+  const existing = _loot.stash.find(s => s.itemId === item.id);
+  if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
+  await _saveLoot();
+
+  // Feedback visuel sur le bouton
+  if (btn) {
+    btn.textContent = '✓';
+    btn.classList.add('vtt-creat-loot-add--ok');
+    setTimeout(() => {
+      btn.textContent = '＋';
+      btn.classList.remove('vtt-creat-loot-add--ok');
+    }, 800);
+  }
+  showNotif(`+${qty} "${item.nom}" → réserve MJ`, 'success');
+};
 
 window._vttLootInlineAdd = (itemId, btn) => {
   const item = _lootShopState.items.find(i => i.id === itemId);
