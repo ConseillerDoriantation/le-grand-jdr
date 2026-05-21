@@ -13,7 +13,7 @@ import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { getArmorSetData } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
@@ -5766,13 +5766,17 @@ function _renderInspector(t) {
       </div>`;
     })()}
     ${(t.type==='player'||t.type==='npc') && _diceSkills.length && (STATE.isAdmin||t.ownerId===STATE.user?.uid) ? (() => {
+      const cForBonus = t?.characterId ? _characters[t.characterId] : null;
       const btns = _diceSkills.map(s => {
         const statKey = _STAT_KEY[s.stat] || '';
-        const mod  = _tokenStatMod(t, statKey);
+        const statMod = _tokenStatMod(t, statKey);
+        const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
+        const mod = statMod + eqBonus;
         const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
         const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
-        return `<button class="vtt-skill-btn" onclick="window._vttRollSkill('${s.name.replace(/'/g,"\\'")}','${s.stat}')">
-          <span class="vtt-sk-name">${s.name}</span>
+        const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
+        return `<button class="vtt-skill-btn" onclick="window._vttRollSkill('${s.name.replace(/'/g,"\\'")}','${s.stat}')"${eqTitle}>
+          <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em">●</span>':''}</span>
           <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
         </button>`;
       }).join('');
@@ -6992,6 +6996,8 @@ window._vttRollSkill = async (skillName, stat) => {
   const n = t?.npcId ? _npcs[t.npcId] : null;
   const statKey = _STAT_KEY[stat] || '';
   const mod = _tokenStatMod(t, statKey);
+  // Bonus de compétence depuis les items équipés (pour les PJ)
+  const equipSkillBonus = c ? computeEquipSkillBonus(c.equipement || {}, skillName) : 0;
   const d20 = () => Math.floor(Math.random() * 20) + 1;
 
   let d1 = d20(), d2, roll;
@@ -6999,7 +7005,7 @@ window._vttRollSkill = async (skillName, stat) => {
   else if (_rollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
   else                              { roll = d1; }
 
-  const total   = roll + mod + _rollBonus;
+  const total   = roll + mod + _rollBonus + equipSkillBonus;
   const isCrit  = roll === 20, isFumble = roll === 1;
   const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
   const characterName = c?.nom || n?.nom || t?.name || null;
@@ -7014,6 +7020,7 @@ window._vttRollSkill = async (skillName, stat) => {
       rollRaw: roll, rollMod: mod, rollBonus: _rollBonus || 0,
       rollResult: total,
       rollSkill: skillName, rollStat: stat,
+      rollEquipBonus: equipSkillBonus || 0,
       isCrit, isFumble,
       createdAt: serverTimestamp(),
     });
@@ -7733,6 +7740,7 @@ function _renderChatLog(msgs) {
     const resultCol = m.isCrit ? '#ffd700' : m.isFumble ? '#ef4444' : 'var(--text)';
     const modStr   = m.rollMod > 0 ? `+${m.rollMod}` : m.rollMod < 0 ? `${m.rollMod}` : '';
     const bonusStr = m.rollBonus > 0 ? `+${m.rollBonus}` : m.rollBonus < 0 ? `${m.rollBonus}` : '';
+    const equipStr = m.rollEquipBonus > 0 ? `+${m.rollEquipBonus}` : m.rollEquipBonus < 0 ? `${m.rollEquipBonus}` : '';
     const badges = [
       m.isCrit ? `<span class="vtt-log-badge vtt-log-badge--crit">✨ CRIT</span>` : '',
       m.isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
@@ -7748,7 +7756,7 @@ function _renderChatLog(msgs) {
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🎲</span>
       <strong class="vtt-log-result" style="color:${resultCol};font-size:1.3rem">${m.rollResult ?? '?'}</strong>
-      <span class="vtt-log-result-sub">${diceStr} ${modStr ? `${modStr}${sub(m.rollStat||'')}` : ''} ${bonusStr ? `${bonusStr}${sub('bonus')}` : ''}</span>
+      <span class="vtt-log-result-sub">${diceStr} ${modStr ? `${modStr}${sub(m.rollStat||'')}` : ''} ${equipStr ? `${equipStr}${sub('équip.')}` : ''} ${bonusStr ? `${bonusStr}${sub('bonus')}` : ''}</span>
     </div>`;
     return `<div class="vtt-log vtt-log--roll">${head}${body}</div>`;
   };

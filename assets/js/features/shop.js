@@ -29,6 +29,8 @@ const TEMPLATES = {
       { id:'toucherStat', label:'Toucher',       type:'stat_select' },
       { id:'portee',      label:'Portée',        type:'text',   placeholder:'Contact, 1m50, 9m / 27m...' },
       { id:'statBonuses', label:'Bonus de stats',type:'stat_bonus_grid' },
+      { id:'derivedBonuses', label:'Bonus dérivés', type:'derived_bonus_grid' },
+      { id:'skillBonuses',   label:'Bonus de compétences', type:'skill_bonus_grid' },
       { id:'traits',      label:'Traits',        type:'trait_list', placeholder:'Ajouter un trait...' },
       { id:'prix',        label:'Prix 🪙',       type:'number', placeholder:'0' },
       { id:'dispo',       label:'Dispo',         type:'dispo' },
@@ -44,6 +46,8 @@ const TEMPLATES = {
       { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'ca',          label:'CA bonus',      type:'number', placeholder:'0' },
       { id:'statBonuses', label:'Bonus de stats',type:'stat_bonus_grid' },
+      { id:'derivedBonuses', label:'Bonus dérivés', type:'derived_bonus_grid' },
+      { id:'skillBonuses',   label:'Bonus de compétences', type:'skill_bonus_grid' },
       { id:'traits',      label:'Traits',        type:'trait_list', placeholder:'Ajouter un trait...' },
       { id:'prix',        label:'Prix 🪙',       type:'number', placeholder:'0' },
       { id:'dispo',       label:'Dispo',         type:'dispo' },
@@ -56,6 +60,8 @@ const TEMPLATES = {
         options:['Amulette','Anneau','Objet magique'] },
       { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'statBonuses', label:'Bonus de stats',type:'stat_bonus_grid' },
+      { id:'derivedBonuses', label:'Bonus dérivés', type:'derived_bonus_grid' },
+      { id:'skillBonuses',   label:'Bonus de compétences', type:'skill_bonus_grid' },
       { id:'traits',      label:'Traits',        type:'trait_list', placeholder:'Ajouter un trait...' },
       { id:'prix',        label:'Prix 🪙',       type:'number', placeholder:'0' },
       { id:'dispo',       label:'Dispo',         type:'dispo' },
@@ -1867,6 +1873,103 @@ async function _shopEnsureDamageTypes() {
   return _shopDamageTypes;
 }
 
+// Cache des compétences de dés (chargées depuis world/dice_skills)
+let _shopDiceSkillsCache = null;
+async function _shopLoadDiceSkills() {
+  if (_shopDiceSkillsCache) return _shopDiceSkillsCache;
+  try {
+    const { getDocData } = await import('../data/firestore.js');
+    const doc = await getDocData('world', 'dice_skills');
+    if (doc?.skills?.length) {
+      _shopDiceSkillsCache = doc.skills;
+      return _shopDiceSkillsCache;
+    }
+  } catch {}
+  // Fallback : liste par défaut
+  try {
+    const mod = await import('../shared/dice-skills.js');
+    _shopDiceSkillsCache = mod.DICE_SKILLS_DEFAULT || [];
+  } catch {
+    _shopDiceSkillsCache = [];
+  }
+  return _shopDiceSkillsCache;
+}
+
+/** Rend une chip de bonus de compétence (skillName + value + bouton ✕). */
+function _shopRenderSkillChipHTML(skillName, val) {
+  const v = parseInt(val) || 0;
+  const sign = v > 0 ? '+' : '';
+  const col = v > 0 ? '#22c38e' : v < 0 ? '#ef4444' : 'var(--text-dim)';
+  return `<span class="sh-skill-chip" data-skill="${_esc(skillName)}" data-val="${v}"
+      style="display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .55rem;
+             background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:999px;
+             font-size:.78rem;font-weight:600">
+      <strong style="color:${col};font-variant-numeric:tabular-nums">${sign}${v}</strong>
+      <span>${_esc(skillName)}</span>
+      <button type="button" onclick="window._shopRemoveSkillBonus('${skillName.replace(/'/g, "\\'")}')"
+        style="background:transparent;border:0;cursor:pointer;color:var(--text-dim);padding:0;
+               font-size:.85rem;line-height:1;margin-left:.15rem"
+        title="Retirer">✕</button>
+    </span>`;
+}
+
+/** Peuple le dropdown des compétences disponibles à ajouter (exclut celles déjà sélectionnées). */
+async function _shopPopulateSkillPicker(savedBonuses = {}) {
+  const picker = document.getElementById('si-skill-picker');
+  if (!picker) return;
+  const skills = await _shopLoadDiceSkills();
+  const used = new Set(Object.keys(savedBonuses));
+  if (!skills.length) {
+    picker.innerHTML = '<option value="">⚠️ Aucune compétence — définir dans Console MJ</option>';
+    return;
+  }
+  // Filtre les compétences déjà ajoutées
+  const available = skills.filter(sk => !used.has(sk.name));
+  picker.innerHTML = `<option value="">— Choisir une compétence —</option>`
+    + available.map(sk => `<option value="${_esc(sk.name)}">${_esc(sk.name)}${sk.stat ? ` (${sk.stat})` : ''}</option>`).join('');
+}
+
+/** Ajoute un bonus de compétence (chip) depuis le picker. */
+window._shopAddSkillBonus = () => {
+  const picker = document.getElementById('si-skill-picker');
+  const valInp = document.getElementById('si-skill-val');
+  const skillName = picker?.value;
+  const val = parseInt(valInp?.value);
+  if (!skillName) { showNotif('Choisis une compétence', 'warning'); return; }
+  if (!Number.isFinite(val) || val === 0) { showNotif('Valeur invalide (≠ 0)', 'warning'); return; }
+  // Ajoute la chip dans le container
+  const chips = document.getElementById('si-skill-chips');
+  const empty = chips?.querySelector('.sh-skill-empty');
+  if (empty) empty.remove();
+  chips?.insertAdjacentHTML('beforeend', _shopRenderSkillChipHTML(skillName, val));
+  // Retire l'option du picker
+  picker.querySelector(`option[value="${skillName}"]`)?.remove();
+  picker.value = '';
+  if (valInp) valInp.value = '';
+};
+
+/** Retire un bonus de compétence. */
+window._shopRemoveSkillBonus = (skillName) => {
+  const chips = document.getElementById('si-skill-chips');
+  const chip = chips?.querySelector(`.sh-skill-chip[data-skill="${CSS.escape(skillName)}"]`);
+  chip?.remove();
+  // Réinjecte dans le picker (au bon endroit alphabétique, avec sa stat)
+  const picker = document.getElementById('si-skill-picker');
+  if (picker && _shopDiceSkillsCache) {
+    const sk = _shopDiceSkillsCache.find(s => s.name === skillName);
+    if (sk) {
+      const opt = document.createElement('option');
+      opt.value = sk.name;
+      opt.textContent = sk.name + (sk.stat ? ` (${sk.stat})` : '');
+      picker.appendChild(opt);
+    }
+  }
+  // Si plus aucune chip : ré-affiche le placeholder vide
+  if (chips && !chips.querySelector('.sh-skill-chip')) {
+    chips.innerHTML = '<span class="sh-skill-empty" style="font-size:.75rem;color:var(--text-dim);font-style:italic">Aucun bonus — clique sur ＋ pour en ajouter</span>';
+  }
+};
+
 // Lib des états (chargée depuis world/conditions ou exposée par vtt.js)
 let _shopConditionsLib = null;
 async function _shopEnsureConditions() {
@@ -2257,137 +2360,212 @@ window._shopRemoveAction = (idx) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODAL ARTICLE — refonte sectionnée (Identification / Économie / Caractéristiques
-// / Bonus / Traits / Actions / Recette). Les IDs d'inputs sont préservés pour
-// que saveShopItem fonctionne sans modification.
+// MODAL ARTICLE — refonte (v2) : header compact + onglets sticky + footer fixe.
+// Les IDs d'inputs sont préservés (saveShopItem inchangé).
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Map des sections selon le template — chaque section liste les `field.id`
-// du template qu'elle doit afficher. Si une section est vide pour un template
-// donné, elle n'est pas rendue.
-const _SHOP_SECTION_MAP = {
-  arme: {
-    economy: ['prix', 'dispo', 'rarete'],
-    char:    ['format', 'sousType', 'degats', 'toucherStat', 'portee'],
-    bonus:   ['statBonuses'],
-    traits:  ['traits'],
-  },
-  armure: {
-    economy: ['prix', 'dispo', 'rarete'],
-    char:    ['slotArmure', 'typeArmure', 'ca'],
-    bonus:   ['statBonuses'],
-    traits:  ['traits'],
-  },
-  bijou: {
-    economy: ['prix', 'dispo', 'rarete'],
-    char:    ['slotBijou'],
-    bonus:   ['statBonuses'],
-    traits:  ['traits'],
-  },
-  classique: { economy: ['prix', 'dispo'], char: ['type', 'effet', 'description'] },
-  libre:     { economy: ['prix', 'dispo'], char: ['type', 'description']           },
+// Onglets disponibles par template (ordre = ordre d'affichage)
+const _SI_TABS = {
+  arme:      ['essentiel', 'bonus', 'traits', 'actions', 'meta'],
+  armure:    ['essentiel', 'bonus', 'traits', 'actions', 'meta'],
+  bijou:     ['essentiel', 'bonus', 'traits', 'actions', 'meta'],
+  classique: ['essentiel', 'actions', 'meta'],
+  libre:     ['essentiel', 'meta'],
 };
 
-function _shopBuildSection(tpl, item, fieldIds) {
+const _SI_TAB_DEF = {
+  essentiel: { label: 'Essentiel', icon: '⚙️' },
+  bonus:     { label: 'Bonus',     icon: '✨' },
+  traits:    { label: 'Traits',    icon: '🏷️' },
+  actions:   { label: 'Actions',   icon: '⚡' },
+  meta:      { label: 'Méta',      icon: '🔧' },
+};
+
+// Champs de chaque onglet, par template. L'onglet "essentiel" regroupe TOUT
+// ce qu'on touche 95% du temps : caractéristiques + prix/dispo/rareté.
+const _SI_TAB_FIELDS = {
+  arme: {
+    essentiel: ['format','sousType','rarete','degats','toucherStat','portee','prix','dispo'],
+    bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
+    traits:    ['traits'],
+  },
+  armure: {
+    essentiel: ['slotArmure','typeArmure','rarete','ca','prix','dispo'],
+    bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
+    traits:    ['traits'],
+  },
+  bijou: {
+    essentiel: ['slotBijou','rarete','prix','dispo'],
+    bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
+    traits:    ['traits'],
+  },
+  classique: {
+    essentiel: ['type','effet','description','prix','dispo'],
+  },
+  libre: {
+    essentiel: ['type','description','prix','dispo'],
+  },
+};
+
+function _siBuildFieldsSubset(tpl, item, fieldIds) {
   if (!fieldIds?.length) return '';
   const subTpl = { ...tpl, fields: tpl.fields.filter(f => fieldIds.includes(f.id)) };
   if (!subTpl.fields.length) return '';
   return _buildFieldsHtml(subTpl, item);
 }
 
-function _shopSectionCard(icon, title, hint, content) {
-  if (!content) return '';
-  return `<section class="sh-sec">
-    <header class="sh-sec-hd">
-      <span class="sh-sec-icon">${icon}</span>
-      <span class="sh-sec-title">${title}</span>
-      ${hint ? `<span class="sh-sec-hint">${hint}</span>` : ''}
-    </header>
-    <div class="sh-sec-body">${content}</div>
-  </section>`;
+/** Contenu d'un onglet (HTML). */
+function _siBuildTabContent(tab, tpl, item, tplKey) {
+  if (tab === 'essentiel' || tab === 'bonus' || tab === 'traits') {
+    return _siBuildFieldsSubset(tpl, item, _SI_TAB_FIELDS[tplKey]?.[tab] || []);
+  }
+  if (tab === 'actions') {
+    return `<div class="si-actions-toggle">
+      <label>
+        <input type="checkbox" id="si-consommable" ${item?.consommable?'checked':''}>
+        <span class="si-actions-toggle-lbl">🧪 Objet consommable</span>
+        <span class="si-actions-toggle-hint">— perd 1 exemplaire à chaque utilisation</span>
+      </label>
+    </div>
+    <div id="si-actions-host">${_shopRenderActionsSection(item?.actions)}</div>`;
+  }
+  if (tab === 'meta') {
+    const recipeChk = item ? !(item?.recipeMeta?.hidden) : ['arme','armure','bijou'].includes(tplKey);
+    return `<div class="si-meta-grid">
+      <label class="si-meta-row">
+        <input type="checkbox" id="si-has-recipe" ${recipeChk ? 'checked' : ''}>
+        <span>
+          <strong>Recette d'artisanat</strong>
+          <em>Permet de fabriquer cet objet via l'Artisan</em>
+        </span>
+      </label>
+    </div>`;
+  }
+  return '';
 }
 
-function _shopBuildDynamicSections(tpl, item, tplKey) {
-  const sec = _SHOP_SECTION_MAP[tplKey] || _SHOP_SECTION_MAP.classique;
-  const economy = _shopBuildSection(tpl, item, sec.economy || []);
-  const char    = _shopBuildSection(tpl, item, sec.char    || []);
-  const bonus   = _shopBuildSection(tpl, item, sec.bonus   || []);
-  const traits  = _shopBuildSection(tpl, item, sec.traits  || []);
-  return [
-    _shopSectionCard('💰', 'Économie', 'Prix, stock' + (sec.economy?.includes('rarete') ? ' & rareté' : ''), economy),
-    _shopSectionCard('⚙️', 'Caractéristiques', tpl.label || '', char),
-    _shopSectionCard('✨', 'Bonus de stats', 'Appliqués quand l\'objet est équipé', bonus),
-    _shopSectionCard('🏷️', 'Traits', 'Particularités narratives & mécaniques', traits),
-  ].join('');
+/** Construit la barre d'onglets + tous les panneaux (1 seul visible à la fois). */
+function _siBuildTabs(tpl, item, tplKey, activeTab = 'essentiel') {
+  const tabs = _SI_TABS[tplKey] || ['essentiel'];
+  const active = tabs.includes(activeTab) ? activeTab : tabs[0];
+  const strip = tabs.map((t, i) => {
+    const d = _SI_TAB_DEF[t];
+    return `<button type="button" class="si-tab${t===active?' is-active':''}"
+              data-tab="${t}" onclick="window._siSetTab('${t}')"
+              title="Alt+${i+1}">${d.icon} <span>${d.label}</span></button>`;
+  }).join('');
+  const panels = tabs.map(t => `
+    <div class="si-panel${t===active?' is-active':''}" data-panel="${t}">
+      ${_siBuildTabContent(t, tpl, item, tplKey)}
+    </div>`).join('');
+  return `<nav class="si-tabs">${strip}</nav>
+    <div class="si-panels">${panels}</div>`;
 }
+
+/** Switch d'onglet — pure manipulation DOM, ne reconstruit rien. */
+window._siSetTab = (name) => {
+  document.querySelectorAll('.si-tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === name));
+  document.querySelectorAll('.si-panel').forEach(p => p.classList.toggle('is-active', p.dataset.panel === name));
+};
+
+/** Mini "carte" live qui montre comment l'objet apparaîtra dans la boutique. */
+function _siRefreshChip() {
+  const chip = document.getElementById('si-name-chip');
+  if (!chip) return;
+  const nom = document.getElementById('si-nom')?.value || '—';
+  const rN  = parseInt(document.getElementById('si-rarete')?.value) || 0;
+  const rar = rN > 0 ? (RARETE_NAMES[rN] || '') : '';
+  const col = rar ? (_rareteColor(rar) || 'var(--text)') : 'var(--text)';
+  chip.innerHTML = `<span style="color:${col}">${_esc(nom)}</span>${rar?` <em style="color:${col};opacity:.7;font-size:.72rem;font-style:normal">· ${_esc(rar)}</em>`:''}`;
+}
+window._siRefreshChip = _siRefreshChip;
 
 function openItemModal(itemId) {
-  const item       = itemId ? _items.find(i=>i.id===itemId) : null;
-  // Reset/init du cache d'actions à l'ouverture de l'item courant
+  const item   = itemId ? _items.find(i=>i.id===itemId) : null;
   _shopActionsCacheLoad(item?.actions || []);
-  // Précharge spells.js pour exposer les handlers (runeIncrement, selectNoyau, etc.)
-  // sur window dès maintenant — la modal de sort ne peut pas attendre.
   _shopEnsureSpellsModule().catch(() => {});
+
   const defCatId   = item?.categorieId || _activeCat || '';
   const cat        = _cats.find(c=>c.id===defCatId);
   const tplKey     = cat?.template || 'classique';
   const tpl        = TEMPLATES[tplKey] || TEMPLATES.classique;
   const catOptions = _cats.map(c=>`<option value="${c.id}" ${defCatId===c.id?'selected':''}>${c.nom} (${TEMPLATES[c.template||'classique']?.label||''})</option>`).join('');
-  const recipeCheckboxChecked = item ? !(item?.recipeMeta?.hidden) : ['arme','armure','bijou'].includes(tplKey);
 
-  // ── Identification (statique, indépendant du template) ─────────────
-  const identHtml = `
-    <div class="sh-sec-grid">
-      <div class="form-group sh-field-full">
-        <label>Catégorie</label>
-        <select class="input-field sh-modal-select" id="si-cat" onchange="refreshItemFields(this.value)">
-          <option value="">— Aucune —</option>${catOptions}
-        </select>
-      </div>
-      <div class="form-group sh-field-full">
-        <label>Nom de l'article</label>
-        <input class="input-field" id="si-nom" value="${item?.nom||''}" placeholder="Ex : Épée longue, Potion de soin…">
-      </div>
-      <div class="form-group sh-field-full">
-        <label>Image <span class="sh-hint">(facultatif)</span></label>
-        <div class="sh-upload-simple">
-          <input type="file" id="si-img-file" accept="image/*" onchange="previewUpload('si-img-file','si-img-preview','si-img-b64')">
-          <input type="hidden" id="si-img-b64" value="${item?.image||''}">
+  const imgPreviewHtml = item?.image
+    ? `<img src="${item.image}" alt="">`
+    : `<span class="si-img-placeholder">+</span>`;
+
+  const headerHtml = `
+    <div class="si-header">
+      <label class="si-img-btn" title="Cliquer pour changer l'image">
+        <input type="file" id="si-img-file" accept="image/*"
+               onchange="previewUpload('si-img-file','si-img-preview-thumb','si-img-b64')"
+               style="display:none">
+        <input type="hidden" id="si-img-b64" value="${item?.image||''}">
+        <div id="si-img-preview-thumb" class="si-img-thumb">${imgPreviewHtml}</div>
+      </label>
+      <div class="si-header-fields">
+        <input class="input-field si-name-input" id="si-nom"
+               value="${(item?.nom||'').replace(/"/g,'&quot;')}"
+               placeholder="Nom de l'article…"
+               oninput="window._siRefreshChip()">
+        <div class="si-header-row2">
+          <select class="input-field sh-modal-select si-cat-select" id="si-cat"
+                  onchange="refreshItemFields(this.value)">
+            <option value="">— Catégorie —</option>${catOptions}
+          </select>
+          <span class="si-name-chip" id="si-name-chip"></span>
         </div>
-        <div id="si-img-preview">${item?.image?`<img src="${item.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
       </div>
-    </div>`;
-
-  // ── Recette (checkbox simple) ──────────────────────────────────────
-  const recipeHtml = `
-    <div class="sh-recipe-row">
-      <label for="si-has-recipe">Activer la recette pour cet item</label>
-      <input type="checkbox" id="si-has-recipe" ${recipeCheckboxChecked ? 'checked' : ''}>
     </div>`;
 
   openModal(item ? `✏️ ${item.nom||'Article'}` : '🛒 Nouvel article', `
-    <div class="sh-modal">
-      ${_shopSectionCard('📝', 'Identification', '', identHtml)}
-      <div id="si-sections-dynamic">${_shopBuildDynamicSections(tpl, item, tplKey)}</div>
-      ${_shopSectionCard('⚡', 'Actions', 'Sorts embarqués — l\'objet peut être un Élixir, un Parchemin, une Dague magique…',
-        `<div class="form-group" style="margin-bottom:.6rem;padding:.5rem .65rem;background:rgba(180,127,255,.06);border-radius:8px;border-left:3px solid rgba(180,127,255,.4)">
-          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:600">
-            <input type="checkbox" id="si-consommable" ${item?.consommable?'checked':''}>
-            <span>🧪 Objet consommable</span>
-            <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— perd 1 exemplaire à chaque utilisation</span>
-          </label>
-        </div>
-        <div id="si-actions-host">${_shopRenderActionsSection(item?.actions)}</div>`)}
-      ${_shopSectionCard('🔧', 'Recette', '', recipeHtml)}
-      <button class="btn btn-gold sh-modal-save" onclick="saveShopItem('${itemId||''}')">
-        ${item ? '💾 Enregistrer' : '➕ Ajouter à la boutique'}
-      </button>
+    <div class="si-modal">
+      ${headerHtml}
+      <div class="si-body" id="si-sections-dynamic">${_siBuildTabs(tpl, item, tplKey)}</div>
+      <footer class="si-footer">
+        <button class="btn btn-outline" onclick="closeModalDirect()">Annuler</button>
+        <button class="btn btn-gold" onclick="saveShopItem('${itemId||''}')">
+          ${item ? '💾 Enregistrer' : '➕ Ajouter'}
+        </button>
+      </footer>
     </div>`);
 
-  setTimeout(()=>{ document.getElementById('si-nom')?.focus(); _bindPrixListener(); _initAutocompletes(); },60);
+  setTimeout(() => {
+    document.getElementById('si-nom')?.focus();
+    _bindPrixListener();
+    _initAutocompletes();
+    _siRefreshChip();
+    _siBindShortcuts();
+  }, 60);
+
   _shopEnsureDamageTypes().then(() => {
     const host = document.getElementById('si-actions-host');
     if (host) host.innerHTML = _shopRenderActionsSection(_shopCollectActions().length ? _shopCollectActions() : (item?.actions || []));
+  });
+}
+
+/** Alt+1..5 pour switcher d'onglet + rafraîchir la chip de prévisualisation. */
+function _siBindShortcuts() {
+  const modal = document.querySelector('.si-modal');
+  if (!modal || modal._siBound) return;
+  modal._siBound = true;
+
+  // Raccourcis clavier Alt+1..9 → onglet
+  document.addEventListener('keydown', (e) => {
+    if (!document.querySelector('.si-modal')) return;
+    if (!e.altKey || e.ctrlKey || e.metaKey) return;
+    const n = parseInt(e.key);
+    if (!Number.isFinite(n) || n < 1 || n > 9) return;
+    const btns = document.querySelectorAll('.si-tab');
+    if (btns[n-1]) { e.preventDefault(); btns[n-1].click(); }
+  });
+
+  // Délégation : tout clic sur une étoile de rareté → refresh de la chip
+  modal.addEventListener('click', (e) => {
+    if (e.target.closest('.sh-rarete-star-btn')) {
+      setTimeout(_siRefreshChip, 0); // après que pickRarete ait mis à jour le hidden
+    }
   });
 }
 
@@ -2466,6 +2644,47 @@ function _buildFieldsHtml(tpl,item) {
           </label>`).join('')}
         </div>
       </div>`;
+    } else if(f.type==='derived_bonus_grid'){
+      // Bonus dérivés : +X PV max, +X PM max, +X Vitesse, +X Initiative
+      const D = [
+        { id:'pvMaxBonus',     short:'PV',   label:'PV max',     icon:'❤️' },
+        { id:'pmMaxBonus',     short:'PM',   label:'PM max',     icon:'✨' },
+        { id:'vitesseBonus',   short:'Vit',  label:'Vitesse',    icon:'👢' },
+        { id:'initiativeBonus',short:'Init', label:'Initiative', icon:'⚡' },
+      ];
+      html+=`<div class="form-group sh-field-full"><label>${f.label} <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— ajoutés au calcul de base quand l'objet est équipé</span></label>
+        <div class="sh-bonus-row">
+          ${D.map(d=>`<label class="sh-bonus-cell" title="${d.label}">
+            <span>${d.icon} ${d.short}</span>
+            <input type="number" id="si-${d.id}" value="${item?.[d.id]||''}" placeholder="0">
+          </label>`).join('')}
+        </div>
+      </div>`;
+    } else if(f.type==='skill_bonus_grid'){
+      // Bonus de compétences en mode "chips ajoutables" — UX compacte.
+      // Le MJ ajoute uniquement les compétences pertinentes via un sélecteur.
+      const sb = item?.skillBonuses || {};
+      const chips = Object.entries(sb)
+        .filter(([_, v]) => parseInt(v) !== 0 && v !== '')
+        .map(([name, val]) => _shopRenderSkillChipHTML(name, val))
+        .join('');
+      html+=`<div class="form-group sh-field-full">
+        <label>${f.label} <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— bonus sur les jets de compétences (Intimidation, Perception…)</span></label>
+        <div id="si-skill-chips" class="sh-skill-chips" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.4rem;min-height:1.5rem">
+          ${chips || '<span class="sh-skill-empty" style="font-size:.75rem;color:var(--text-dim);font-style:italic">Aucun bonus — clique sur ＋ pour en ajouter</span>'}
+        </div>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <select class="input-field" id="si-skill-picker" style="flex:1">
+            <option value="">— Choisir une compétence —</option>
+          </select>
+          <input type="number" class="input-field" id="si-skill-val" placeholder="+1" min="-10" max="10"
+            style="width:80px;text-align:center">
+          <button type="button" class="btn btn-outline btn-sm" onclick="window._shopAddSkillBonus()">＋</button>
+        </div>
+      </div>`;
+      // Le HTML n'est pas encore dans le DOM (on construit la string).
+      // On défère le populate au prochain tick pour que getElementById trouve le select.
+      setTimeout(() => _shopPopulateSkillPicker(sb).catch(() => {}), 0);
     } else if(f.type==='textarea'){
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
         <textarea class="input-field" id="si-${f.id}" rows="2">${val}</textarea></div>`;
@@ -2598,8 +2817,10 @@ function refreshItemFields(catId) {
   const tpl    = TEMPLATES[tplKey] || TEMPLATES.classique;
   const host   = document.getElementById('si-sections-dynamic');
   if (host) {
-    host.innerHTML = _shopBuildDynamicSections(tpl, null, tplKey);
-    _bindPrixListener(); _initAutocompletes();
+    // Conserve l'onglet actif si possible (sinon retombe sur "essentiel")
+    const cur = document.querySelector('.si-tab.is-active')?.dataset.tab || 'essentiel';
+    host.innerHTML = _siBuildTabs(tpl, null, tplKey, cur);
+    _bindPrixListener(); _initAutocompletes(); _siRefreshChip();
   }
 }
 function refreshSubCatSelect(catId){ refreshItemFields(catId); }
@@ -2617,7 +2838,15 @@ function previewUpload(fileInputId,previewId,hiddenId) {
       canvas.getContext('2d').drawImage(img,0,0,w,h);
       const b64=canvas.toDataURL('image/jpeg',0.72);
       const hidden=document.getElementById(hiddenId); if(hidden) hidden.value=b64;
-      const preview=document.getElementById(previewId); if(preview) preview.innerHTML=`<img src="${b64}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
+      const preview=document.getElementById(previewId);
+      if (preview) {
+        // Si le conteneur est la vignette ronde du nouveau modal, remplit-la full.
+        if (preview.classList.contains('si-img-thumb')) {
+          preview.innerHTML = `<img src="${b64}" alt="">`;
+        } else {
+          preview.innerHTML = `<img src="${b64}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
+        }
+      }
       const kb=Math.round(b64.length*3/4/1024);
       if(kb>700) showNotif(`⚠️ Image encore lourde (${kb}KB).`,'error');
       else showNotif(`✅ Image prête (${kb}KB)`,'success');
@@ -2656,6 +2885,21 @@ async function saveShopItem(itemId) {
         ITEM_STATS.forEach(stat => {
           data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
         });
+      } else if (f.type === 'derived_bonus_grid') {
+        // Bonus dérivés : PV/PM max, Vitesse, Initiative
+        ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
+          const v = parseInt(document.getElementById(`si-${k}`)?.value);
+          data[k] = Number.isFinite(v) ? v : 0;
+        });
+      } else if (f.type === 'skill_bonus_grid') {
+        // Bonus de compétences : lecture depuis les chips ajoutées
+        const out = {};
+        document.querySelectorAll('#si-skill-chips .sh-skill-chip').forEach(chip => {
+          const name = chip.dataset.skill;
+          const v = parseInt(chip.dataset.val);
+          if (name && Number.isFinite(v) && v !== 0) out[name] = v;
+        });
+        data.skillBonuses = out;
       } else if (f.type === 'trait_list') {
         const inputs = document.querySelectorAll('#si-traits-list input');
         const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
