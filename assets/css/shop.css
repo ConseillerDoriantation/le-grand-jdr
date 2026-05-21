@@ -2382,3 +2382,184 @@ body.sh-dragging * { cursor: grabbing !important; }
   .sh-sec-body .sh-fields-grid { grid-template-columns: 1fr; }
   .sh-sec-grid { grid-template-columns: 1fr; }
 }
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   MODAL ARTICLE V2 — header compact + onglets + footer sticky
+   ═════════════════════════════════════════════════════════════════════════════ */
+.si-modal {
+  display: flex; flex-direction: column;
+  gap: .65rem;
+  min-height: 0;
+}
+
+/* ── Header (image + nom + cat + chip live) ─────────────────────────── */
+.si-header {
+  display: flex; gap: .75rem; align-items: stretch;
+  padding: .65rem; border-radius: 10px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
+}
+.si-img-btn {
+  position: relative; cursor: pointer; flex-shrink: 0;
+  display: block;
+}
+.si-img-thumb {
+  width: 64px; height: 64px;
+  border-radius: 10px; overflow: hidden;
+  background: rgba(255,255,255,.04);
+  border: 1px dashed var(--border);
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color .15s, transform .15s;
+}
+.si-img-btn:hover .si-img-thumb {
+  border-color: var(--gold); border-style: solid;
+  transform: scale(1.03);
+}
+.si-img-thumb img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.si-img-placeholder {
+  font-size: 1.6rem; color: var(--text-dim); font-weight: 300;
+  line-height: 1;
+}
+.si-header-fields {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: .4rem;
+  justify-content: center;
+}
+.si-name-input {
+  font-size: 1.05rem; font-weight: 600;
+  padding: .5rem .65rem;
+}
+.si-header-row2 {
+  display: flex; gap: .5rem; align-items: center;
+  flex-wrap: wrap;
+}
+.si-cat-select {
+  flex: 0 0 220px; max-width: 100%;
+  font-size: .82rem; padding: .35rem .5rem;
+}
+.si-name-chip {
+  flex: 1; min-width: 0;
+  font-size: .85rem; font-weight: 700;
+  padding: .35rem .6rem; border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Onglets (sticky en haut du body) ────────────────────────────────── */
+.si-tabs {
+  display: flex; gap: .3rem;
+  padding: .25rem; margin: 0;
+  background: rgba(0,0,0,.18);
+  border-radius: 10px;
+  position: sticky; top: 0; z-index: 5;
+  overflow-x: auto;
+}
+.si-tab {
+  flex: 1 1 auto;
+  padding: .5rem .65rem;
+  font-size: .82rem; font-weight: 600;
+  background: transparent; color: var(--text-dim);
+  border: 0; border-radius: 7px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+  transition: background .12s, color .12s;
+  white-space: nowrap;
+}
+.si-tab:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.si-tab.is-active {
+  background: linear-gradient(135deg, rgba(212,175,55,.22), rgba(212,175,55,.10));
+  color: var(--gold);
+  box-shadow: inset 0 0 0 1px rgba(212,175,55,.35);
+}
+.si-tab span { font-weight: 700; }
+
+/* ── Panneaux (1 seul visible à la fois) ─────────────────────────────── */
+.si-body {
+  display: flex; flex-direction: column; gap: .5rem;
+  min-height: 0;
+}
+/* Conteneur des panneaux : hauteur fixe pour que la modal ne saute pas
+   entre onglets de tailles différentes. Le contenu interne scrolle si besoin. */
+.si-panels {
+  position: relative;
+  min-height: 480px;
+  display: flex; flex-direction: column;
+}
+.si-panel { display: none; flex: 1; min-height: 0; }
+.si-panel.is-active {
+  display: flex; flex-direction: column; gap: .65rem;
+  animation: siFade .14s ease-out;
+}
+@keyframes siFade {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Le contenu des panneaux réutilise .sh-fields-grid — on resserre un peu */
+.si-panel .sh-fields-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: .55rem;
+}
+.si-panel .sh-fields-grid .form-group { margin: 0; }
+.si-panel .sh-fields-grid .sh-field-full { grid-column: 1 / -1; }
+
+/* ── Onglet Actions (toggle consommable) ─────────────────────────────── */
+.si-actions-toggle {
+  padding: .55rem .65rem; margin-bottom: .55rem;
+  background: rgba(180,127,255,.07);
+  border-radius: 8px;
+  border-left: 3px solid rgba(180,127,255,.45);
+}
+.si-actions-toggle label {
+  display: flex; align-items: center; gap: .55rem;
+  cursor: pointer; font-weight: 600; margin: 0;
+}
+.si-actions-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.si-actions-toggle-lbl { font-size: .9rem; }
+.si-actions-toggle-hint { font-size: .72rem; color: var(--text-dim); font-weight: 400; }
+
+/* ── Onglet Méta (recette) ───────────────────────────────────────────── */
+.si-meta-grid {
+  display: flex; flex-direction: column; gap: .5rem;
+}
+.si-meta-row {
+  display: flex; align-items: flex-start; gap: .65rem;
+  padding: .7rem .8rem; border-radius: 10px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.si-meta-row:hover { border-color: var(--gold); }
+.si-meta-row input[type="checkbox"] {
+  width: 18px; height: 18px; margin-top: .15rem; cursor: pointer; flex-shrink: 0;
+}
+.si-meta-row span { display: flex; flex-direction: column; gap: .15rem; }
+.si-meta-row strong { font-size: .9rem; }
+.si-meta-row em {
+  font-size: .75rem; color: var(--text-dim); font-style: normal;
+}
+
+/* ── Footer (sticky bas) ─────────────────────────────────────────────── */
+.si-footer {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; gap: .5rem; justify-content: flex-end;
+  padding: .65rem 0 .15rem;
+  background: linear-gradient(to top, var(--bg, #1a1a1a) 60%, transparent);
+  margin-top: .25rem;
+}
+.si-footer .btn { padding: .6rem 1.1rem; font-weight: 600; }
+.si-footer .btn-gold { padding: .6rem 1.4rem; }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .si-header { flex-direction: row; }
+  .si-img-thumb { width: 52px; height: 52px; }
+  .si-cat-select { flex: 1 1 100%; }
+  .si-name-chip { flex: 1 1 100%; }
+  .si-panel .sh-fields-grid { grid-template-columns: 1fr; }
+  .si-tab span { display: none; }   /* sur mobile : icônes seules */
+  .si-tab { flex: 1; }
+  .si-panels { min-height: 420px; }
+}

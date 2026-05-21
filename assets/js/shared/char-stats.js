@@ -146,9 +146,18 @@ export function calcCA(c) {
   return caBase + getMod(c, 'dexterite') + caEquip + bouclierBonus;
 }
 
-/** Vitesse de déplacement. */
+/** Vitesse de déplacement (base + bonus items équipés). */
 export function calcVitesse(c) {
-  return 3 + getMod(c, 'force');
+  const base = 3 + getMod(c, 'force');
+  const bonus = computeEquipDerivedBonus(c?.equipement).vitesseBonus;
+  return Math.max(0, base + bonus);
+}
+
+/** Initiative (mod Dex + bonus items équipés). */
+export function calcInitiative(c) {
+  const base = getMod(c, 'dexterite');
+  const bonus = computeEquipDerivedBonus(c?.equipement).initiativeBonus;
+  return base + bonus;
 }
 
 /** Capacité maximale du deck de sorts. */
@@ -162,22 +171,25 @@ export function calcDeckMax(c) {
  * PV maximum.
  * Bonus positif : +modCon par niveau gagné.
  * Malus négatif : appliqué une seule fois (pas multiplié par niveau).
+ * Bonus items équipés : ajouté à la fin.
  */
 export function calcPVMax(c) {
   const modCo = getMod(c, 'constitution');
   const niv   = c?.niveau || 1;
   const progression = modCo > 0 ? Math.floor(modCo * (niv - 1)) : modCo;
-  return Math.max(1, (c?.pvBase || 10) + progression);
+  const equipBonus = computeEquipDerivedBonus(c?.equipement).pvMaxBonus;
+  return Math.max(1, (c?.pvBase || 10) + progression + equipBonus);
 }
 
 /**
- * PM maximum (même logique que PV avec Sagesse).
+ * PM maximum (même logique que PV avec Sagesse + bonus items équipés).
  */
 export function calcPMMax(c) {
   const modSa = getMod(c, 'sagesse');
   const niv   = c?.niveau || 1;
   const progression = modSa > 0 ? Math.floor(modSa * (niv - 1)) : modSa;
-  return Math.max(0, (c?.pmBase || 10) + progression);
+  const equipBonus = computeEquipDerivedBonus(c?.equipement).pmMaxBonus;
+  return Math.max(0, (c?.pmBase || 10) + progression + equipBonus);
 }
 
 /**
@@ -273,5 +285,69 @@ export function formatItemBonusText(item = {}) {
     .join(' ');
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// BONUS DÉRIVÉS — PV/PM max, Vitesse, Initiative, Compétences de dés
+// ═══════════════════════════════════════════════════════════════════
+// Chaque item peut définir :
+//   - pvMaxBonus, pmMaxBonus, vitesseBonus, initiativeBonus  (nombres)
+//   - skillBonuses: { "Intimidation": 1, "Perception": 2, ... }
+// Ces bonus s'ajoutent au calcul de base quand l'item est équipé.
+
+const DERIVED_BONUS_KEYS = ['pvMaxBonus', 'pmMaxBonus', 'vitesseBonus', 'initiativeBonus'];
+
+/** Lit le palier d'amélioration "effet" appliqué à l'item (Artisan). */
+function _effectUpgrade(it) {
+  const v = parseInt(it?.upgrades?.effectBonus);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** Ajoute le palier d'amélioration à une valeur de bonus (positive uniquement). */
+function _bumpBonus(val, upgrade) {
+  if (!Number.isFinite(val) || val <= 0 || upgrade <= 0) return val;
+  return val + upgrade;
+}
+
+/** Agrège les bonus dérivés de tous les items équipés (avec amélioration Artisan). */
+export function computeEquipDerivedBonus(equip = {}) {
+  const out = { pvMaxBonus: 0, pmMaxBonus: 0, vitesseBonus: 0, initiativeBonus: 0 };
+  Object.values(equip || {}).forEach(it => {
+    if (!it) return;
+    const up = _effectUpgrade(it);
+    DERIVED_BONUS_KEYS.forEach(k => {
+      const v = parseInt(it[k]);
+      if (Number.isFinite(v)) out[k] += _bumpBonus(v, up);
+    });
+  });
+  return out;
+}
+
+/** Bonus total sur une compétence de dés (par nom) provenant des items équipés. */
+export function computeEquipSkillBonus(equip = {}, skillName = '') {
+  if (!skillName) return 0;
+  let total = 0;
+  Object.values(equip || {}).forEach(it => {
+    if (!it?.skillBonuses) return;
+    const v = parseInt(it.skillBonuses[skillName]);
+    if (Number.isFinite(v)) total += _bumpBonus(v, _effectUpgrade(it));
+  });
+  return total;
+}
+
+/** Map complète des bonus de compétences agrégés depuis les items équipés. */
+export function computeEquipAllSkillBonuses(equip = {}) {
+  const out = {};
+  Object.values(equip || {}).forEach(it => {
+    if (!it?.skillBonuses) return;
+    const up = _effectUpgrade(it);
+    Object.entries(it.skillBonuses).forEach(([name, val]) => {
+      const v = parseInt(val);
+      if (!Number.isFinite(v) || v === 0) return;
+      const bumped = _bumpBonus(v, up);
+      out[name] = (out[name] || 0) + bumped;
+    });
+  });
+  return out;
+}
+
 // ── Exposition globale (pour les appels depuis HTML inline) ───────────────────
-Object.assign(window, { getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct });
+Object.assign(window, { getMod, calcCA, calcVitesse, calcInitiative, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct, computeEquipDerivedBonus, computeEquipSkillBonus, computeEquipAllSkillBonuses });
