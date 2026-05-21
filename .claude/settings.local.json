@@ -130,7 +130,8 @@
       "Bash(awk '/^window\\\\._bstRemoveImage/,/^};?$/')",
       "Bash(node --check assets/js/features/bestiary.js)",
       "Bash(sed -i '2057,2268d;2012d' \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/shop.js\")",
-      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/shop.js\")"
+      "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/shop.js\")",
+      "Bash(node .migrate-vtt.mjs)"
     ]
   }
 }
