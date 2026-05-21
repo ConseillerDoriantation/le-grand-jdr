@@ -257,6 +257,20 @@ function _catEmoji(nom) {
   return '📦';
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// VISIBILITÉ — une catégorie « masquée » et tous ses articles sont cachés aux
+// joueurs dans la boutique. Ils restent accessibles via le butin et leur
+// revente fonctionne toujours (le prix de revente est stocké sur l'objet).
+// ──────────────────────────────────────────────────────────────────────────────
+function _visibleCats() {
+  return STATE.isAdmin ? _cats : _cats.filter(c => !c.masquee);
+}
+function _visibleItems() {
+  if (STATE.isAdmin) return _items;
+  const hidden = new Set(_cats.filter(c => c.masquee).map(c => c.id));
+  return _items.filter(i => !hidden.has(i.categorieId));
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ANIMATION — count-up/down d'un nombre
 // ══════════════════════════════════════════════════════════════════════════════
@@ -279,6 +293,10 @@ function _animateCount(el, from, to, duration = 400) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderShop() {
   await loadShopData();
+  // Un joueur ne peut pas rester sur une catégorie devenue masquée.
+  if (_view === 'items' && !STATE.isAdmin && _cats.find(c => c.id === _activeCat)?.masquee) {
+    _view = 'home'; _activeCat = null;
+  }
   const content = document.getElementById('main-content');
   if (!content) return;
 
@@ -374,7 +392,8 @@ function _renderSidebarTop() {
 }
 
 function _renderSidebar() {
-  const totalItems = _items.length;
+  const cats       = _visibleCats();
+  const totalItems = _visibleItems().length;
   const orphaned   = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
 
   return `
@@ -384,7 +403,7 @@ function _renderSidebar() {
           <span class="sh-side-link-icon">🏠</span>
           <span class="sh-side-link-text">
             <strong>Toutes les catégories</strong>
-            <small>${_cats.length} catégorie${_cats.length!==1?'s':''} • ${totalItems} article${totalItems!==1?'s':''}</small>
+            <small>${cats.length} catégorie${cats.length!==1?'s':''} • ${totalItems} article${totalItems!==1?'s':''}</small>
           </span>
         </button>
       </div>
@@ -392,16 +411,16 @@ function _renderSidebar() {
       <div class="sh-sidebar-section">
         <div class="sh-sidebar-label">Catégories</div>
         <div class="sh-side-list">
-          ${_cats.map(cat => {
+          ${cats.map(cat => {
             const count = _items.filter(i => i.categorieId === cat.id).length;
             const active = _view === 'items' && _activeCat === cat.id;
             const tpl = TEMPLATES[cat.template || 'classique'];
 
             return `
-              <button class="sh-side-link ${active ? 'active' : ''}" onclick="shopGoCat('${cat.id}')">
+              <button class="sh-side-link ${active ? 'active' : ''}" onclick="shopGoCat('${cat.id}')"${cat.masquee ? ' style="opacity:.6"' : ''}>
                 <span class="sh-side-link-icon">${cat.emoji || _catEmoji(cat.nom)}</span>
                 <span class="sh-side-link-text">
-                  <strong>${cat.nom}</strong>
+                  <strong>${cat.nom}${cat.masquee ? ' <span title="Masquée aux joueurs">🙈</span>' : ''}</strong>
                   <small>${tpl?.label || 'Type'} • ${count} article${count > 1 ? 's' : ''}</small>
                 </span>
               </button>
@@ -449,19 +468,20 @@ function _renderHome() {
 function _renderHomeResults() {
   if (_norm(_filterSearch)) return _renderHomeSearchResults();
 
+  const cats     = _visibleCats();
   const orphaned = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
 
-  if (_cats.length === 0 && orphaned.length === 0) {
+  if (cats.length === 0 && orphaned.length === 0) {
     return `<div class="empty-state"><div class="icon">🛒</div>
       <p>La boutique est vide.</p>
       ${STATE.isAdmin?'<p style="font-size:0.82rem;margin-top:0.5rem;color:var(--text-dim)">Crée une catégorie pour commencer.</p>':''}</div>`;
   }
   let html = `<div class="sh-cat-grid ${STATE.isAdmin?'sh-sortable':''}">`;
   const edit = STATE.isAdmin;
-  _cats.forEach(cat => {
+  cats.forEach(cat => {
     const count = _items.filter(i => i.categorieId === cat.id).length;
     const tpl   = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" onclick="shopGoCat('${cat.id}')">
+    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" onclick="shopGoCat('${cat.id}')"${cat.masquee?' style="opacity:.6"':''}>
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
         ${!cat.image?`<div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>`:''}
@@ -469,7 +489,7 @@ function _renderHomeResults() {
       </div>
       <div class="sh-cat-body">
         <div class="sh-cat-name-row">
-          <div class="sh-cat-name">${cat.nom}</div>
+          <div class="sh-cat-name">${cat.nom}${cat.masquee?' <span title="Masquée aux joueurs" style="font-size:.85em">🙈</span>':''}</div>
           ${edit?`<div class="sh-card-admin-inline" onclick="event.stopPropagation()">
             <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" onclick="openCatModal('${cat.id}')">✏️</button>
             <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" onclick="deleteCat('${cat.id}')">🗑️</button>
@@ -504,7 +524,7 @@ function _renderHomeResults() {
 
 function _renderHomeSearchResults() {
   const search = _norm(_filterSearch);
-  const matched = _items
+  const matched = _visibleItems()
     .filter(i => _searchIncludes(_itemSearchText(i), search))
     .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' }));
 
@@ -550,9 +570,10 @@ function _renderMixedItemGrid(items) {
 // VUE ARTICLES — filtres dynamiques multi-tags + recherche temps réel
 // ══════════════════════════════════════════════════════════════════════════════
 function _getBaseItems(catId) {
+  const items = _visibleItems();
   return catId === '__uncategorized__'
-    ? _items.filter(i => !_cats.find(c => c.id === i.categorieId))
-    : _items.filter(i => i.categorieId === catId);
+    ? items.filter(i => !_cats.find(c => c.id === i.categorieId))
+    : items.filter(i => i.categorieId === catId);
 }
 
 function _itemSearchText(item = {}) {
@@ -654,7 +675,7 @@ function _renderItemsView() {
       <div style="min-width:0;flex:1">
         <div class="sh-main-kicker">${tplCat?.label || 'Catégorie'}</div>
         <div class="sh-main-title">${_esc(cat.nom)}</div>
-        <div class="sh-main-meta">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}</div>
+        <div class="sh-main-meta">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${cat.masquee ? ' · 🙈 Masquée aux joueurs' : ''}</div>
       </div>
     </div>
   </div>
@@ -1768,6 +1789,11 @@ function openCatModal(catId) {
       </div>
       <div id="cat-img-preview">${cat?.image?`<img src="${cat.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
     </div>
+    <div class="sh-recipe-row">
+      <label for="cat-masquee">👁️ Masquer cette catégorie aux joueurs</label>
+      <input type="checkbox" id="cat-masquee" ${cat?.masquee?'checked':''}>
+    </div>
+    <p class="sh-hint" style="margin:.35rem 0 0">Les articles restent disponibles en butin et restent revendables.</p>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCat('${catId||''}')">
       ${cat?'Enregistrer':'Créer'}
     </button>`);
@@ -1786,7 +1812,7 @@ async function saveCat(catId) {
   try {
     const nom=document.getElementById('cat-nom')?.value.trim();
     if(!nom){showNotif('Nom requis.','error');return;}
-    const data={ nom, template:document.getElementById('cat-template')?.value||'classique', emoji:document.getElementById('cat-emoji')?.value.trim()||'', image:document.getElementById('cat-img-b64')?.value||'' };
+    const data={ nom, template:document.getElementById('cat-template')?.value||'classique', emoji:document.getElementById('cat-emoji')?.value.trim()||'', image:document.getElementById('cat-img-b64')?.value||'', masquee:document.getElementById('cat-masquee')?.checked||false };
     if(catId) await updateInCol('shopCategories',catId,data);
     else await addToCol('shopCategories',{...data,ordre:_cats.length,sousCats:[]});
     closeModalDirect(); showNotif(catId?'Catégorie mise à jour.':'Catégorie créée !','success'); renderShop();

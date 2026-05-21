@@ -58,12 +58,13 @@ async function _loadEntries() {
   const now = Date.now();
   if (_cache && (now - _cache.ts) < CACHE_TTL_MS) return _cache.entries;
 
-  const [npcs, chars, quests, shop, bestiary, achievements, collection, story, recipes] =
+  const [npcs, chars, quests, shop, shopCats, bestiary, achievements, collection, story, recipes] =
     await Promise.all([
       loadCollection('npcs').catch(() => []),
       loadChars(STATE.isAdmin ? null : STATE.user?.uid).catch(() => []),
       loadCollection('quests').catch(() => []),
       loadCollection('shop').catch(() => []),
+      loadCollection('shopCategories').catch(() => []),
       loadCollection('bestiary').catch(() => []),
       loadCollection('achievements').catch(() => []),
       loadCollection('collection').catch(() => []),
@@ -73,6 +74,14 @@ async function _loadEntries() {
 
   // Cohérence avec le reste de l'app : on cache les hauts-faits secrets aux non-MJ.
   const achFiltered = STATE.isAdmin ? achievements : achievements.filter(a => !a.secret);
+
+  // Cohérence avec la boutique : articles des catégories masquées cachés aux non-MJ.
+  const hiddenCatIds = STATE.isAdmin
+    ? new Set()
+    : new Set(shopCats.filter(c => c.masquee).map(c => c.id));
+  const shopFiltered = hiddenCatIds.size
+    ? shop.filter(it => !hiddenCatIds.has(it.categorieId))
+    : shop;
 
   const entries = [];
 
@@ -124,7 +133,7 @@ async function _loadEntries() {
   }
 
   // Boutique
-  for (const it of shop) {
+  for (const it of shopFiltered) {
     const title = _firstStr(it, ['nom']);
     if (!title) continue;
     entries.push({
