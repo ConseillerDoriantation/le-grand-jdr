@@ -15,6 +15,7 @@ import {
 } from '../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
+import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
@@ -10862,118 +10863,60 @@ window._vttLootClear = () => {
   _saveLoot();
 };
 
-// MJ : sélecteur boutique avec catégories + ajout inline (pas de 2e modal)
-let _lootShopState = { items: [], catMap: {}, cats: [], activeCat: '', search: '' };
+// ─────────────────────────────────────────────────────────────────────────────
+// PICKER OBJET BOUTIQUE — utilise le composant partagé shared/shop-picker.js
+// ─────────────────────────────────────────────────────────────────────────────
 
-window._vttLootOpenShop = async () => {
-  const [items, cats] = await Promise.all([loadCollection('shop'), loadCollection('shopCategories')]);
-  _lootShopState.items = items || [];
-  _lootShopState.cats = cats || [];
-  _lootShopState.catMap = Object.fromEntries((cats||[]).map(c => [c.id, c]));
-  _lootShopState.activeCat = '';
-  _lootShopState.search = '';
-
-  openModal('🎒 Ajouter à la réserve MJ', `
-    <input type="text" id="vtt-loot-search" placeholder="🔍 Rechercher un objet…"
-      class="input-field" style="width:100%;margin-bottom:.5rem"
-      data-vtt-fn="_vttLootShopSearch" data-vtt-on="input" data-vtt-args="$value">
-    <div id="vtt-loot-cats" class="vtt-loot-cats"></div>
-    <div id="vtt-loot-shop-list" class="vtt-loot-shop-list"></div>
-    <div style="font-size:.7rem;color:var(--text-dim);margin-top:.5rem;font-style:italic">
-      ⓘ Tu peux enchaîner les ajouts sans fermer cette fenêtre.
-    </div>
-  `);
-  _renderLootShopCats();
-  _renderLootShopList();
-};
-
-window._vttLootShopSearch = (q) => {
-  _lootShopState.search = (q || '').toLowerCase().trim();
-  _renderLootShopList();
-};
-window._vttLootShopSetCat = (catId) => {
-  _lootShopState.activeCat = catId === _lootShopState.activeCat ? '' : catId;
-  _renderLootShopCats();
-  _renderLootShopList();
-};
-
-function _renderLootShopCats() {
-  const el = document.getElementById('vtt-loot-cats');
-  if (!el) return;
-  const { cats, activeCat, items } = _lootShopState;
-  const counts = {};
-  items.forEach(it => { const k = it.categorieId || '_'; counts[k] = (counts[k] || 0) + 1; });
-  const pill = (id, label, count) => `<button class="vtt-loot-cat-pill${activeCat === id ? ' active' : ''}"
-      data-vtt-fn="_vttLootShopSetCat" data-vtt-args="${id}">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
-  el.innerHTML = pill('', 'Toutes', items.length) +
-    cats.filter(c => counts[c.id]).map(c => pill(c.id, (c.emoji || '') + ' ' + c.nom, counts[c.id])).join('');
+/** Helper interne : ajoute un objet boutique au stash (avec fusion). */
+async function _vttLootAddItemToStash(item, qty, catTemplate) {
+  const template = catTemplate || 'classique';
+  const prixVente = Math.round((item.prix || 0) * 0.5);
+  const base = shopItemToInvEntry(item, { source: 'butin', template, prixVente });
+  const entry = { ...base, id: crypto.randomUUID(), qty };
+  delete entry.qte;
+  delete entry.source;
+  const existing = _loot.stash.find(s => s.itemId === item.id);
+  if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
+  await _saveLoot();
 }
 
-function _renderLootShopList() {
-  const el = document.getElementById('vtt-loot-shop-list');
-  if (!el) return;
-  const { items, catMap, activeCat, search } = _lootShopState;
-  let list = activeCat ? items.filter(i => i.categorieId === activeCat) : items;
-  if (search) list = list.filter(i => (i.nom || '').toLowerCase().includes(search));
-  list = list.slice(0, 80);
-  if (!list.length) {
-    el.innerHTML = '<div class="vtt-loot-empty-list">Aucun objet correspondant</div>';
-    return;
-  }
-  el.innerHTML = list.map(item => {
-    const cat = catMap[item.categorieId];
-    const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
-    const inStash = (_loot.stash || []).find(s => s.itemId === item.id);
-    const stashTag = inStash ? `<span class="vtt-loot-instash" title="Déjà dans la réserve">×${inStash.qty}</span>` : '';
-    return `<div class="vtt-loot-shop-row">
-      <span class="vtt-loot-dot" style="background:${rarColor}"></span>
-      <span class="vtt-loot-shop-name">${_esc(item.nom || '?')}</span>
-      ${cat ? `<span class="vtt-loot-shop-cat">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>` : ''}
-      ${stashTag}
-      <input type="number" min="1" value="1" class="vtt-loot-shop-qty" id="vtt-loot-q-${item.id}">
-      <button class="vtt-loot-shop-add" data-vtt-fn="_vttLootInlineAdd" data-vtt-args="${item.id}|$this" title="Ajouter à la réserve">＋</button>
-    </div>`;
-  }).join('');
-}
+window._vttLootOpenShop = () => openShopPicker({
+  title: '🎒 Ajouter à la réserve MJ',
+  hint: 'Tu peux enchaîner les ajouts sans fermer cette fenêtre.',
+  showQtyInput: true,
+  // Map<itemId, qty> exposé en mode "has-like" pour le badge "×N déjà dedans"
+  alreadyPicked: () => {
+    const map = new Map();
+    (_loot.stash || []).forEach(s => { if (s.itemId) map.set(s.itemId, s.qty); });
+    // L'API attend un Set#has — on adapte avec un proxy : `has(id)` retourne la qty (truthy)
+    return { has: (id) => map.get(id) || false };
+  },
+  ownedBadgeTitle: 'Déjà dans la réserve',
+  onPick: async (item, { qty }) => {
+    const { catMap } = await getShopItemById(item.id);
+    const template = catMap?.[item.categorieId]?.template || 'classique';
+    await _vttLootAddItemToStash(item, qty, template);
+    showNotif(`+${qty} "${item.nom}"`, 'success');
+  },
+});
 
-/** MJ : envoie un butin de créature (depuis le panneau token) vers la réserve.
- *  Lit le `butins[idx]` de la créature ciblée, recharge l'item boutique complet
- *  (pour avoir tous les champs), puis empile dans `_loot.stash`. */
+/** MJ : envoie un butin de créature (depuis le panneau token) vers la réserve. */
 window._vttCreatSendLootToStash = async (beastId, idx, btn) => {
   if (!STATE.isAdmin) return;
   const beast = _bestiary[beastId];
   const b = beast?.butins?.[idx];
   if (!b?.itemId) { showNotif('Butin invalide', 'error'); return; }
 
-  // Charge la boutique au besoin (cache partagé avec le picker MJ)
-  if (!_lootShopState.items?.length) {
-    const [items, cats] = await Promise.all([
-      loadCollection('shop').catch(() => []),
-      loadCollection('shopCategories').catch(() => []),
-    ]);
-    _lootShopState.items  = items || [];
-    _lootShopState.cats   = cats  || [];
-    _lootShopState.catMap = Object.fromEntries((cats||[]).map(c => [c.id, c]));
-  }
-
-  const item = _lootShopState.items.find(i => i.id === b.itemId);
+  const { item, catMap } = await getShopItemById(b.itemId);
   if (!item) { showNotif('Objet introuvable en boutique', 'error'); return; }
 
-  // Quantité : extrait le 1er entier du champ libre "1", "1-3", "2d4"… défaut 1.
+  // Quantité : extrait le 1er entier du champ libre ("1", "1-3", "2d4"…), défaut 1
   const qMatch = String(b.quantite || '').match(/\d+/);
   const qty = Math.max(1, qMatch ? parseInt(qMatch[0]) : 1);
 
-  const template = _lootShopState.catMap?.[item.categorieId]?.template || 'classique';
-  const prixVente = Math.round((item.prix || 0) * 0.5);
-  const base = shopItemToInvEntry(item, { source: 'butin', template, prixVente });
-  const entry = { ...base, id: crypto.randomUUID(), qty };
-  delete entry.qte; delete entry.source;
+  const template = catMap?.[item.categorieId]?.template || 'classique';
+  await _vttLootAddItemToStash(item, qty, template);
 
-  const existing = _loot.stash.find(s => s.itemId === item.id);
-  if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
-  await _saveLoot();
-
-  // Feedback visuel sur le bouton
   if (btn) {
     btn.textContent = '✓';
     btn.classList.add('vtt-creat-loot-add--ok');
@@ -10983,37 +10926,6 @@ window._vttCreatSendLootToStash = async (beastId, idx, btn) => {
     }, 800);
   }
   showNotif(`+${qty} "${item.nom}" → réserve MJ`, 'success');
-};
-
-window._vttLootInlineAdd = (itemId, btn) => {
-  const item = _lootShopState.items.find(i => i.id === itemId);
-  if (!item) return;
-  const qtyEl = document.getElementById(`vtt-loot-q-${itemId}`);
-  const qty = Math.max(1, parseInt(qtyEl?.value) || 1);
-  const template = _lootShopState.catMap[item.categorieId]?.template || 'classique';
-  const prixVente = Math.round((item.prix || 0) * 0.5);
-  // Snapshot canonique (préserve tous les champs présents et futurs)
-  const base = shopItemToInvEntry(item, { source: 'butin', template, prixVente });
-  // Le stash a son propre id local et porte la quantité empilée
-  const entry = { ...base, id: crypto.randomUUID(), qty };
-  delete entry.qte;
-  delete entry.source;
-  // Fusion si déjà présent
-  const existing = _loot.stash.find(s => s.itemId === item.id);
-  if (existing) { existing.qty += qty; } else { _loot.stash.push(entry); }
-  _saveLoot();
-  // Feedback visuel sans fermer la modal
-  if (btn) {
-    btn.textContent = '✓';
-    btn.classList.add('vtt-loot-shop-add--ok');
-    setTimeout(() => {
-      btn.textContent = '＋';
-      btn.classList.remove('vtt-loot-shop-add--ok');
-    }, 800);
-  }
-  if (qtyEl) qtyEl.value = '1';
-  showNotif(`+${qty} "${item.nom}"`, 'success');
-  _renderLootShopList(); // pour mettre à jour le badge "Déjà dans la réserve"
 };
 
 // Joueur : expand inline sur la ligne pour choisir perso + quantité (pas de 2e modal)

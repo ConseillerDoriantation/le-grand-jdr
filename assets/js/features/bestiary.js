@@ -12,6 +12,7 @@ import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
+import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -675,134 +676,42 @@ function _panelButinRow(b = {}, id, i) {
   </div>`;
 }
 
-// Couleur par rareté (alignée avec VTT loot)
-function _bstRarColor(rar) {
-  return {
-    commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff',
-    tres_rare:'#b47fff', legendaire:'#f59e0b',
-  }[rar] || '#9ca3af';
-}
+// Couleur par rareté — délègue au composant partagé.
+const _bstRarColor = getRareteColor;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PICKER OBJET BOUTIQUE — réutilise la même UX que la réserve MJ du VTT :
-// search + catégories pills + liste cliquable. Ajout enchainé sans fermer.
+// PICKER OBJET BOUTIQUE — utilise le composant partagé shared/shop-picker.js
 // ─────────────────────────────────────────────────────────────────────────────
-let _bstPickerState = { items: [], cats: [], catMap: {}, activeCat: '', search: '', creatureId: null };
-
 window._bstButinPickerOpen = async (creatureId) => {
   if (!creatureId) return;
-  // Charge boutique + catégories en parallèle
-  const [items, cats] = await Promise.all([
-    _bstShopItemsCache ? Promise.resolve(_bstShopItemsCache) : loadCollection('shop'),
-    loadCollection('shopCategories').catch(() => []),
-  ]);
-  if (!_bstShopItemsCache) _bstShopItemsCache = items || [];
-  _bstPickerState = {
-    items: items || [],
-    cats: cats || [],
-    catMap: Object.fromEntries((cats||[]).map(c => [c.id, c])),
-    activeCat: '',
-    search: '',
-    creatureId,
-  };
-
-  pushModal('🎒 Ajouter un butin', `
-    <input type="text" id="bst-pick-search" placeholder="🔍 Rechercher un objet…"
-      class="input-field" style="width:100%;margin-bottom:.5rem"
-      data-bst-action="pickerSearch" data-bst-on="input" autofocus>
-    <div id="bst-pick-cats" class="vtt-loot-cats"></div>
-    <div id="bst-pick-list" class="vtt-loot-shop-list"></div>
-    <div style="font-size:.7rem;color:var(--text-dim);margin-top:.5rem;font-style:italic">
-      ⓘ Tu peux enchaîner les ajouts sans fermer cette fenêtre.
-    </div>
-  `);
-  _bstRenderPickerCats();
-  _bstRenderPickerList();
-  setTimeout(() => document.getElementById('bst-pick-search')?.focus(), 30);
-};
-
-window._bstButinPickerSearch = (q) => {
-  _bstPickerState.search = (q || '').toLowerCase().trim();
-  _bstRenderPickerList();
-};
-window._bstButinPickerSetCat = (catId) => {
-  _bstPickerState.activeCat = catId === _bstPickerState.activeCat ? '' : catId;
-  _bstRenderPickerCats();
-  _bstRenderPickerList();
-};
-
-function _bstRenderPickerCats() {
-  const el = document.getElementById('bst-pick-cats');
-  if (!el) return;
-  const { cats, activeCat, items } = _bstPickerState;
-  const counts = {};
-  items.forEach(it => { const k = it.categorieId || '_'; counts[k] = (counts[k] || 0) + 1; });
-  const pill = (id, label, count) => `<button class="vtt-loot-cat-pill${activeCat === id ? ' active' : ''}"
-      data-bst-action="pickerSetCat" data-cat="${id}">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
-  el.innerHTML = pill('', 'Toutes', items.length) +
-    cats.filter(c => counts[c.id]).map(c => pill(c.id, (c.emoji || '') + ' ' + c.nom, counts[c.id])).join('');
-}
-
-function _bstRenderPickerList() {
-  const el = document.getElementById('bst-pick-list');
-  if (!el) return;
-  const { items, catMap, activeCat, search, creatureId } = _bstPickerState;
-  const c = _creatures.find(x => x.id === creatureId);
-  const owned = new Set((c?.butins || []).map(b => b.itemId).filter(Boolean));
-
-  let list = activeCat ? items.filter(i => i.categorieId === activeCat) : items;
-  if (search) list = list.filter(i => _norm(i.nom || '').includes(_norm(search)));
-  list = list.slice(0, 80);
-  if (!list.length) {
-    el.innerHTML = '<div class="vtt-loot-empty-list">Aucun objet correspondant</div>';
-    return;
-  }
-  el.innerHTML = list.map(item => {
-    const cat = catMap[item.categorieId];
-    const rarColor = _bstRarColor(item.rarete);
-    const alreadyTag = owned.has(item.id) ? `<span class="vtt-loot-instash" title="Déjà dans le butin">✓</span>` : '';
-    return `<div class="vtt-loot-shop-row">
-      <span class="vtt-loot-dot" style="background:${rarColor}"></span>
-      <span class="vtt-loot-shop-name">${_esc(item.nom || '?')}</span>
-      ${cat ? `<span class="vtt-loot-shop-cat">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>` : ''}
-      ${alreadyTag}
-      <button class="vtt-loot-shop-add" data-bst-action="pickerAdd" data-item-id="${item.id}" title="Ajouter au butin">＋</button>
-    </div>`;
-  }).join('');
-}
-
-window._bstButinPickerAdd = (itemId, btn) => {
-  const { items, creatureId } = _bstPickerState;
-  const item = items.find(i => i.id === itemId);
-  if (!item) return;
   const c = _creatures.find(x => x.id === creatureId);
   if (!c) return;
-  // Évite les doublons stricts
-  const butins = Array.isArray(c.butins) ? [...c.butins] : [];
-  if (butins.find(b => b.itemId === itemId)) {
-    showNotif('Déjà dans le butin de cette créature', 'warning');
-    return;
-  }
-  butins.push({
-    itemId,
-    nom:   item.nom   || '',
-    image: item.image || '',
-    quantite: '1',
-    chance:   '100%',
+  await openShopPicker({
+    title: '🎒 Ajouter un butin',
+    modalMode: 'push',
+    hint: 'Tu peux enchaîner les ajouts sans fermer cette fenêtre.',
+    ownedBadgeTitle: 'Déjà dans le butin',
+    alreadyPicked: () => new Set((c.butins || []).map(b => b.itemId).filter(Boolean)),
+    onPick: (item) => {
+      const butins = Array.isArray(c.butins) ? [...c.butins] : [];
+      if (butins.find(b => b.itemId === item.id)) {
+        showNotif('Déjà dans le butin de cette créature', 'warning');
+        return false; // empêche l'ajout
+      }
+      butins.push({
+        itemId:   item.id,
+        nom:      item.nom   || '',
+        image:    item.image || '',
+        quantite: '1',
+        chance:   '100%',
+      });
+      c.butins = butins;
+      _bstQueueSave(creatureId, { butins });
+      _bstRefreshButinSelects(creatureId);
+      const countEl = document.querySelector(`[data-bst-count="${creatureId}-butins"]`);
+      if (countEl) countEl.textContent = butins.length;
+    },
   });
-  c.butins = butins;
-  _bstQueueSave(creatureId, { butins });
-  _bstRefreshButinSelects(creatureId);
-  // Compteur de section
-  const countEl = document.querySelector(`[data-bst-count="${creatureId}-butins"]`);
-  if (countEl) countEl.textContent = butins.length;
-  // Feedback visuel
-  if (btn) {
-    btn.textContent = '✓';
-    btn.classList.add('vtt-loot-shop-add--ok');
-    setTimeout(() => { btn.textContent = '＋'; btn.classList.remove('vtt-loot-shop-add--ok'); }, 700);
-  }
-  _bstRenderPickerList(); // pour mettre à jour le badge "Déjà"
 };
 
 // Matrice de relations aux dégâts (panneau, version chips compacte)
@@ -1978,11 +1887,8 @@ Object.assign(bstHandlers, {
   saveArr:        (el) => window._bstSaveArr(el.dataset.id, el.dataset.type),
   removeRow:      (el) => window._bstRemovePanelRow(el.dataset.id, el.dataset.type, el),
 
-  // Picker de butin
+  // Picker de butin (délégation au composant partagé shop-picker.js — pas de handlers locaux)
   pickerOpen:     (el) => window._bstButinPickerOpen(el.dataset.id),
-  pickerSearch:   (el) => window._bstButinPickerSearch(el.value),
-  pickerSetCat:   (el) => window._bstButinPickerSetCat(el.dataset.cat || ''),
-  pickerAdd:      (el) => window._bstButinPickerAdd(el.dataset.itemId, el),
 
   // Image
   openImage:      (el) => window.openBeastImageModal(el.dataset.id),
