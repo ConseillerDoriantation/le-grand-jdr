@@ -12605,29 +12605,76 @@ function _msTabSorts(c, uid, canEdit) {
 function _msTabInventaire(c, uid, canEdit) {
   const inv = c?.inventaire||[];
   if (!inv.length) return '<div class="vtt-ms-empty">Inventaire vide</div>';
-  const groups = { arme:[], armure:[], bijou:[], consommable:[], divers:[] };
-  inv.forEach((item, i) => { if (item?.nom) groups[_msCatItem(item)].push({ item, i }); });
-  const CAT_LABEL = { arme:'⚔️ Armes', armure:'🛡 Armures', bijou:'💍 Bijoux', consommable:'🧪 Consommables', divers:'📦 Divers' };
+
   const equip = c?.equipement||{};
+  const CAT_LABEL = { arme:'⚔️ Armes', armure:'🛡 Armures', bijou:'💍 Bijoux', consommable:'🧪 Consommables', divers:'📦 Divers' };
+  const cats = { arme:[], armure:[], bijou:[], consommable:[], divers:[] };
+
+  // 1) Empilage par `itemId` UNIQUEMENT (objets boutique). Les entrées sans
+  //    itemId restent une ligne par exemplaire — pas de fusion sur le nom.
+  const stacksById = new Map();
+  const singletons = [];
+  inv.forEach((item, i) => {
+    if (!item?.nom) return;
+    if (item.itemId) {
+      if (!stacksById.has(item.itemId)) stacksById.set(item.itemId, { item, indices: [] });
+      stacksById.get(item.itemId).indices.push(i);
+    } else {
+      singletons.push({ item, indices: [i] });
+    }
+  });
+  // 2) Range les groupes/singletons par catégorie
+  for (const g of [...stacksById.values(), ...singletons]) {
+    cats[_msCatItem(g.item)].push(g);
+  }
+
+  const _rarColor = (rar) => ({
+    commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff',
+    tres_rare:'#b47fff', legendaire:'#f59e0b',
+  })[rar] || '#9ca3af';
+
   let html = '<div class="vtt-ms-inv">';
-  for (const [cat, entries] of Object.entries(groups)) {
-    if (!entries.length) continue;
-    html += `<div class="vtt-ms-inv-cat">${CAT_LABEL[cat]} <span class="vtt-ms-inv-cnt">(${entries.length})</span></div>`;
-    for (const { item, i } of entries) {
-      const isEq = Object.values(equip).some(e => e?.sourceInvIndex === i);
+  for (const [cat, groups] of Object.entries(cats)) {
+    if (!groups.length) continue;
+    const totalUnits = groups.reduce((s,g) => s + g.indices.length, 0);
+    html += `<div class="vtt-ms-inv-cat">
+      <span class="vtt-ms-inv-cat-lbl">${CAT_LABEL[cat]}</span>
+      <span class="vtt-ms-inv-cnt">${totalUnits}</span>
+    </div>`;
+    for (const g of groups) {
+      const item = g.item;
+      const firstIdx = g.indices[0];
+      const total = g.indices.length;
+      const equippedIdx = g.indices.find(idx => Object.values(equip).some(e => e?.sourceInvIndex === idx));
+      const isEq = equippedIdx !== undefined;
+      const idxToEquip = g.indices.find(idx => !Object.values(equip).some(e => e?.sourceInvIndex === idx)) ?? firstIdx;
+      const idxToUnequip = equippedIdx ?? firstIdx;
+      const detail = item.degats
+        ? `${item.degats}${item.typeArme?' · '+item.typeArme:''}${item.portee?' · '+item.portee:''}`
+        : (item.typeArmure ? `${item.typeArmure}${item.ca?' · CA +'+item.ca:''}` : '');
+      const rarDot = item.rarete
+        ? `<span class="vtt-ms-inv-rar" style="background:${_rarColor(item.rarete)}"></span>` : '';
       html += `<div class="vtt-ms-inv-item${isEq?' is-equipped':''}">
-        <div class="vtt-ms-inv-main">
-          <span class="vtt-ms-inv-nom">${item.nom}</span>
-          ${(item.qte||1)>1?`<span class="vtt-ms-inv-qte">×${item.qte}</span>`:''}
-          ${isEq?'<span class="vtt-ms-inv-badge">équipé</span>':''}
+        ${rarDot}
+        ${item.image
+          ? `<img class="vtt-ms-inv-img" src="${item.image}" alt="">`
+          : `<span class="vtt-ms-inv-img vtt-ms-inv-img--empty">${cat==='consommable'?'🧪':cat==='arme'?'⚔️':cat==='armure'?'🛡':cat==='bijou'?'💍':'📦'}</span>`}
+        <div class="vtt-ms-inv-body">
+          <div class="vtt-ms-inv-line1">
+            <span class="vtt-ms-inv-nom" title="${_esc(item.nom)}">${_esc(item.nom)}</span>
+            ${total>1?`<span class="vtt-ms-inv-qte">×${total}</span>`:''}
+            ${isEq?'<span class="vtt-ms-inv-badge">équipé</span>':''}
+          </div>
+          ${detail?`<div class="vtt-ms-inv-detail">${_esc(detail)}</div>`:''}
         </div>
-        ${item.degats?`<div class="vtt-ms-inv-detail">${item.degats}${item.typeArme?' · '+item.typeArme:''}</div>`:''}
-        ${item.typeArmure&&!item.degats?`<div class="vtt-ms-inv-detail">${item.typeArmure}</div>`:''}
         ${canEdit?`<div class="vtt-ms-inv-actions">
-          ${(cat==='arme'||cat==='armure'||cat==='bijou')&&!isEq
-            ?`<button class="vtt-ms-inv-btn" onclick="window._vttMsEquipPicker('${c.id}','${uid}',${i})" title="Équiper">⚔️</button>`
-            :isEq?`<button class="vtt-ms-inv-btn" onclick="window._vttMsUnequipAll('${c.id}','${uid}',${i})" title="Déséquiper">🔓</button>`:''}
-          <button class="vtt-ms-inv-btn" onclick="window._vttMsSendPicker('${c.id}','${uid}',${i})" title="Envoyer">📤</button>
+          ${(cat==='arme'||cat==='armure'||cat==='bijou') && (!isEq || total > 1)
+            ?`<button class="vtt-ms-inv-btn" onclick="window._vttMsEquipPicker('${c.id}','${uid}',${idxToEquip})" title="Équiper">⚔️</button>`
+            :''}
+          ${isEq
+            ?`<button class="vtt-ms-inv-btn" onclick="window._vttMsUnequipAll('${c.id}','${uid}',${idxToUnequip})" title="Déséquiper">🔓</button>`
+            :''}
+          <button class="vtt-ms-inv-btn" onclick="window._vttMsSendPicker('${c.id}','${uid}',${firstIdx})" title="Envoyer">📤</button>
         </div>`:''}
       </div>`;
     }
