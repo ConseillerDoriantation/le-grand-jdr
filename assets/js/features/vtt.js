@@ -38,6 +38,128 @@ const MAX_SCALE   = 4;
 const TYPE_COLOR  = { player:'#4f8cff', enemy:'#ef4444', npc:'#a78bfa' };
 const hpColor     = r => r > 0.5 ? '#22c38e' : r > 0.25 ? '#f59e0b' : '#ef4444';
 
+// ══════════════════════════════════════════════════════════════════════════════
+// DÉLÉGATION D'ÉVÉNEMENTS — dispatcher générique pour vtt.js
+// Pattern : <button data-vtt-fn="_vttFoo" data-vtt-args="arg1|arg2">…</button>
+//   - data-vtt-fn   : nom de la fonction (sur `window`)
+//   - data-vtt-args : args séparés par "|" (vide pour appel sans args)
+//   - data-vtt-on   : type d'event ('click' par défaut, sinon 'input'/'change')
+//   - Tokens dans args : $value, $checked, $this, $id → résolus depuis l'élément
+//   - Auto-conversion : "true"/"false"/"null", entiers, floats
+// ══════════════════════════════════════════════════════════════════════════════
+function _vttResolveArg(token, el) {
+  if (token === '$value')   {
+    // Coercion auto en nombre si l'input est type="number" — les handlers attendent souvent un Number
+    if (el.type === 'number' || el.type === 'range') {
+      const n = parseFloat(el.value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    return el.value;
+  }
+  if (token === '$checked') return el.checked;
+  if (token === '$this')    return el;
+  if (token === '$id')      return el.id;
+  if (token === 'true')     return true;
+  if (token === 'false')    return false;
+  if (token === 'null')     return null;
+  if (token === '')         return '';
+  if (/^-?\d+$/.test(token))      return parseInt(token, 10);
+  if (/^-?\d*\.\d+$/.test(token)) return parseFloat(token);
+  return token;
+}
+// Helper : ferme la modal avant d'appeler fn(...args). Utilisable via data-vtt-fn.
+window._vttCloseAnd = (fnName, ...args) => {
+  if (typeof closeModal === 'function') closeModal();
+  const fn = window[fnName];
+  if (typeof fn === 'function') fn(...args);
+};
+
+// Helper : toggle d'un bloc "détail" dans le chat log (data-vtt-fn="_vttToggleLogDetail" data-vtt-args="ID_DU_DETAIL")
+// Le bouton lui-même reçoit la classe `.open` quand le détail est visible.
+window._vttToggleLogDetail = function(detailId) {
+  // `this` est le bouton via data-vtt-fn — le dispatcher l'a comme `$this` si demandé,
+  // sinon on retrouve le bouton via querySelector du detail puis previousElementSibling.
+  const d = document.getElementById(detailId);
+  if (!d) return;
+  const open = d.style.display !== 'none';
+  d.style.display = open ? 'none' : 'block';
+  // Le bouton cliqué est passé par event.currentTarget — récupérable via l'élément délégué.
+  // Approche pragmatique : on cherche le bouton qui matche cette action+args dans le DOM.
+  const btn = document.querySelector(`[data-vtt-fn="_vttToggleLogDetail"][data-vtt-args="${detailId}"]`);
+  btn?.classList.toggle('open', !open);
+};
+
+// Helpers ciblés pour les cas inline restants (chaînage / manipulation DOM directe)
+window._vttCourirAndClose = (srcId) => {
+  window._vttCourir?.(srcId);
+  window._closeActionModal?.();
+};
+window._vttClearAoptSearch = (btn) => {
+  const inp = btn.previousElementSibling;
+  if (inp) { inp.value = ''; window._vttAoptSearch?.(''); inp.focus(); }
+};
+window._vttMoveTokenAndReset = (sel, tid) => {
+  if (!sel.value) return;
+  window._vttMoveTokenToPage?.(tid, sel.value);
+  sel.value = '';
+};
+window._vttSetEmoteAlbum = (v) => {
+  const t = (v || '').trim();
+  if (t) localStorage.setItem('vtt-imgbb-emote-album', t);
+  else localStorage.removeItem('vtt-imgbb-emote-album');
+};
+window._vttPreviewEmoteFile = (input, previewId) => {
+  const f = input.files?.[0]; if (!f) return;
+  const u = URL.createObjectURL(f);
+  const p = document.getElementById(previewId); if (p) p.src = u;
+};
+window._vttCancelEmoteEdit = () => {
+  document.getElementById('emote-edit-zone').innerHTML = '';
+  document.querySelectorAll('.vtt-emote-card').forEach(c => c.classList.remove('is-editing'));
+};
+window._vttCcTriSet = (btn, value) => {
+  const w = btn.parentElement;
+  w.dataset.ccTriValue = value;
+  w.querySelectorAll('.vtt-cc-tri-opt').forEach(b => b.classList.remove('is-on'));
+  btn.classList.add('is-on');
+};
+window._vttCcFlagToggle = (btn) => {
+  btn.classList.toggle('is-on');
+  btn.dataset.ccFlagOn = btn.classList.contains('is-on') ? '1' : '';
+};
+window._vttLibMoveToAndClose = (imgId, folderId) => {
+  window._vttLibMoveTo?.(imgId, folderId);
+  document.getElementById('vtt-lib-move-popup')?.remove();
+};
+window._vttPlColorSelect = (btn) => {
+  document.querySelectorAll('.vtt-pl-color-btn').forEach(b => b.classList.remove('sel'));
+  btn.classList.add('sel');
+};
+// No-op pour les wrappers qui servaient juste à event.stopPropagation() (closest() suffit)
+window._vttNoop = () => {};
+
+function _vttBindDispatch() {
+  if (_vttBindDispatch._bound) return;
+  _vttBindDispatch._bound = true;
+  const dispatch = (e) => {
+    const el = e.target.closest('[data-vtt-fn]');
+    if (!el) return;
+    const expectedOn = el.dataset.vttOn || 'click';
+    if (expectedOn !== e.type) return;
+    const fn = window[el.dataset.vttFn];
+    if (typeof fn !== 'function') return;
+    const argsStr = el.dataset.vttArgs;
+    const args = (argsStr === undefined || argsStr === '')
+      ? []
+      : argsStr.split('|').map(a => _vttResolveArg(a, el));
+    fn(...args);
+  };
+  document.addEventListener('click',  dispatch, true);
+  document.addEventListener('input',  dispatch, true);
+  document.addEventListener('change', dispatch, true);
+}
+_vttBindDispatch();
+
 // ── État module ─────────────────────────────────────────────────────
 let _stage   = null, _layers = {}, _unsubs = [], _resizeObs = null;
 let _session = {}, _pages = {}, _tokens = {};
@@ -3544,7 +3666,7 @@ async function _execAttack(srcId, tgtId) {
     }
 
     return `
-      <button class="vtt-aopt ${canHit?'':'vtt-aopt--oor'}" onclick="window._vttPickOpt('${srcId}','${tgtId}',${i})">
+      <button class="vtt-aopt ${canHit?'':'vtt-aopt--oor'}" data-vtt-fn="_vttPickOpt" data-vtt-args="${srcId}|${tgtId}|${i}">
         <div class="vtt-aopt-icon">${o.icon}</div>
         <div class="vtt-aopt-body">
           <div class="vtt-aopt-head">
@@ -3613,7 +3735,7 @@ async function _execAttack(srcId, tgtId) {
   let courirHtml = '';
   if (inCombat && !couru && canEditSrc) {
     const body = `
-        <button class="vtt-aopt" data-name="courir" onclick="window._vttCourir('${srcId}');window._closeActionModal?.()">
+        <button class="vtt-aopt" data-name="courir" data-vtt-fn="_vttCourirAndClose" data-vtt-args="${srcId}">
           <div class="vtt-aopt-icon">🏃</div>
           <div class="vtt-aopt-body">
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">Courir</span></div>
@@ -3632,7 +3754,7 @@ async function _execAttack(srcId, tgtId) {
   const tabsHtml = showTabs ? `
     <div class="vtt-aopt-tabs" role="tablist">
       <button type="button" class="vtt-aopt-tab is-active" data-tab="__all"
-        onclick="window._vttAoptFilter('__all', this)">
+        data-vtt-fn="_vttAoptFilter" data-vtt-args="__all|$this">
         <span class="vtt-aopt-tab-ic">⚡</span>
         <span class="vtt-aopt-tab-lbl">Tous</span>
         <span class="vtt-aopt-tab-cnt">${totalCount}</span>
@@ -3640,7 +3762,7 @@ async function _execAttack(srcId, tgtId) {
       ${tabs.map(t => `
         <button type="button" class="vtt-aopt-tab" data-tab="${t.id}"
           style="--tab-col:${t.color}"
-          onclick="window._vttAoptFilter('${t.id}', this)">
+          data-vtt-fn="_vttAoptFilter" data-vtt-args="${t.id}|$this">
           <span class="vtt-aopt-tab-ic">${t.icon}</span>
           <span class="vtt-aopt-tab-lbl">${_esc(t.title)}</span>
           <span class="vtt-aopt-tab-cnt">${t.count}</span>
@@ -3651,9 +3773,9 @@ async function _execAttack(srcId, tgtId) {
     <div class="vtt-aopt-search">
       <span class="vtt-aopt-search-ic">🔍</span>
       <input type="text" class="vtt-aopt-search-input" placeholder="Filtrer par nom…"
-        oninput="window._vttAoptSearch(this.value)" autofocus>
+        data-vtt-fn="_vttAoptSearch" data-vtt-on="input" data-vtt-args="$value" autofocus>
       <button type="button" class="vtt-aopt-search-clr" title="Effacer"
-        onclick="const i=this.previousElementSibling;i.value='';window._vttAoptSearch('');i.focus()">✕</button>
+        data-vtt-fn="_vttClearAoptSearch" data-vtt-args="$this">✕</button>
     </div>` : '';
 
   openModal('⚔️ Choisir une action', `
@@ -3930,17 +4052,17 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
     <div style="margin-bottom:.85rem">
       <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
       <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
-        <button id="atk-mode-dis" onclick="window._vttSetMode('dis')"
+        <button id="atk-mode-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis"
           style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
                  font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
           <div style="font-size:.9rem">⬇</div>Désavantage
         </button>
-        <button id="atk-mode-normal" onclick="window._vttSetMode('normal')"
+        <button id="atk-mode-normal" data-vtt-fn="_vttSetMode" data-vtt-args="normal"
           style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
                  font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
           Normal
         </button>
-        <button id="atk-mode-adv" onclick="window._vttSetMode('adv')"
+        <button id="atk-mode-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv"
           style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
                  font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
           <div style="font-size:.9rem">⬆</div>Avantage
@@ -3982,17 +4104,17 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
     <div style="margin-bottom:.85rem">
       <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
       <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
-        <button id="atk-mode-dis" onclick="window._vttSetMode('dis')"
+        <button id="atk-mode-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis"
           style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
                  font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
           <div style="font-size:.9rem">⬇</div>Désavantage
         </button>
-        <button id="atk-mode-normal" onclick="window._vttSetMode('normal')"
+        <button id="atk-mode-normal" data-vtt-fn="_vttSetMode" data-vtt-args="normal"
           style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
                  font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
           Normal
         </button>
-        <button id="atk-mode-adv" onclick="window._vttSetMode('adv')"
+        <button id="atk-mode-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv"
           style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
                  font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
           <div style="font-size:.9rem">⬆</div>Avantage
@@ -4006,7 +4128,7 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
 
       <!-- En-tête : retour + attaquant → cible(s) -->
       <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
-        <button onclick="window._vttBackToAtk()"
+        <button data-vtt-fn="_vttBackToAtk"
           style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
                  border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
                  cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
@@ -4053,7 +4175,7 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
 
       <!-- Bouton Lancer -->
       <input type="hidden" id="atk-mode" value="normal">
-      <button onclick="window._vttRollAttack()"
+      <button data-vtt-fn="_vttRollAttack"
         style="width:100%;height:46px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
                font-size:.95rem;font-weight:700;letter-spacing:.02em;
                background:${btnColor};color:${btnFg}">
@@ -4095,7 +4217,7 @@ function _showElementPicker(srcId, tgtId, optIdx) {
   openModal(`${opt.icon} ${opt.label} — Élément`, `
     <div class="vtt-form" style="min-width:260px;max-width:340px">
       <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
-        <button onclick="window._vttBackToAtk()"
+        <button data-vtt-fn="_vttBackToAtk"
           style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
                  border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
                  cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
@@ -4112,7 +4234,7 @@ function _showElementPicker(srcId, tgtId, optIdx) {
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:.45rem">
         ${availableTypes.map(t => `
-          <button onclick="window._vttPickElement('${srcId}','${tgtId}',${optIdx},'${t.id}')"
+          <button data-vtt-fn="_vttPickElement" data-vtt-args="${srcId}|${tgtId}|${optIdx}|${t.id}"
             style="padding:.55rem .4rem;border-radius:10px;cursor:pointer;font-family:inherit;
                    border:2px solid ${t.color||'var(--border)'};
                    background:${t.color||'var(--border)'}18;
@@ -4244,8 +4366,8 @@ function _mtRefreshHud() {
     </div>
     <div class="vtt-mt-hud-hint">Cliquez sur les tokens cibles · Entrée = valider</div>
     <div class="vtt-mt-hud-actions">
-      <button class="vtt-mt-btn-cancel" onclick="window._mtCancel()">✕ Annuler</button>
-      <button class="vtt-mt-btn-validate" onclick="window._mtValidate()"
+      <button class="vtt-mt-btn-cancel" data-vtt-fn="_mtCancel">✕ Annuler</button>
+      <button class="vtt-mt-btn-validate" data-vtt-fn="_mtValidate"
         ${targets.length === 0 ? 'disabled' : ''}>✓ Valider (${targets.length})</button>
     </div>`;
   document.body.appendChild(div);
@@ -4438,8 +4560,8 @@ function _showZoneHud() {
       Déplacez · Clic = poser/reprendre · <kbd>R</kbd> = tourner · <kbd>Entrée</kbd> = valider
     </div>
     <div class="vtt-mt-hud-actions">
-      <button class="vtt-mt-btn-cancel"   onclick="window._zoneCancel()">✕ Annuler</button>
-      <button class="vtt-mt-btn-validate" onclick="window._zoneValidate()">✓ Valider</button>
+      <button class="vtt-mt-btn-cancel"   data-vtt-fn="_zoneCancel">✕ Annuler</button>
+      <button class="vtt-mt-btn-validate" data-vtt-fn="_zoneValidate">✓ Valider</button>
     </div>`;
   const onKey = e => {
     if (e.key === 'Enter')              { e.preventDefault(); window._zoneValidate(); }
@@ -5665,10 +5787,10 @@ function _renderInspector(t) {
     const _canEditToken = STATE.isAdmin || t.ownerId === STATE.user?.uid;
     const _inCombat = !!_session?.combat?.active;
     const pvEditHtml = _canEditToken
-      ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" onchange="window._vttSetHp(\''+t.id+'\',+this.value)">'
+      ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" data-vtt-fn="_vttSetHp" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
       : null;
     const pmEditHtml = (_canEditToken && pm !== null && pmMax !== null)
-      ? '<input class="vtt-ins-input" type="number" value="'+pm+'" min="0" max="'+pmMax+'" onchange="window._vttSetPm(\''+t.id+'\',+this.value)">'
+      ? '<input class="vtt-ins-input" type="number" value="'+pm+'" min="0" max="'+pmMax+'" data-vtt-fn="_vttSetPm" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
       : null;
     statsHtml =
       '<div class="vtt-ins-bars">' +
@@ -5822,7 +5944,7 @@ function _renderInspector(t) {
                     ${b.chance   ? `<span class="vtt-creat-loot-meta">${_esc(b.chance)}</span>`   : ''}
                     ${orphan
                       ? `<span class="vtt-creat-loot-add" style="opacity:.4;cursor:not-allowed" title="Objet supprimé de la boutique">＋</span>`
-                      : `<button class="vtt-creat-loot-add" onclick="window._vttCreatSendLootToStash('${t.beastId}',${i},this)" title="Envoyer à la réserve MJ">＋</button>`}
+                      : `<button class="vtt-creat-loot-add" data-vtt-fn="_vttCreatSendLootToStash" data-vtt-args="${t.beastId}|${i}|$this" title="Envoyer à la réserve MJ">＋</button>`}
                   </div>`;
                 }).join('')}
               </div>` : ''}
@@ -5847,17 +5969,17 @@ function _renderInspector(t) {
                 return `<div class="vtt-creat-atk-edit">
                   <input class="vtt-creat-input" placeholder="Nom de l'action…"
                     value="${_esc(ded['act_nom_'+k] || '')}"
-                    onchange="window._vttBstDed('${_bid}','act_nom_${k}',this.value)">
+                    data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|act_nom_${k}|$value">
                   <div class="vtt-creat-atk-row3">
                     <input class="vtt-creat-input" placeholder="🎯 Toucher"
                       value="${_esc(ded['act_toucher_'+k] || '')}"
-                      onchange="window._vttBstDed('${_bid}','act_toucher_${k}',this.value)">
+                      data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|act_toucher_${k}|$value">
                     <input class="vtt-creat-input" placeholder="⚔️ Dégâts"
                       value="${_esc(ded['act_degats_'+k] || '')}"
-                      onchange="window._vttBstDed('${_bid}','act_degats_${k}',this.value)">
+                      data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|act_degats_${k}|$value">
                     <input class="vtt-creat-input" placeholder="📏 Portée"
                       value="${_esc(ded['act_portee_'+k] || '')}"
-                      onchange="window._vttBstDed('${_bid}','act_portee_${k}',this.value)">
+                      data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|act_portee_${k}|$value">
                   </div>
                 </div>`;
               }).join('')}` : ''}
@@ -5867,14 +5989,14 @@ function _renderInspector(t) {
                 <div class="vtt-creat-trait-edit">
                   <input class="vtt-creat-input" placeholder="Nom du trait…"
                     value="${_esc(ded['tr_nom_'+i] || '')}"
-                    onchange="window._vttBstDed('${_bid}','tr_nom_${i}',this.value)">
+                    data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|tr_nom_${i}|$value">
                   <input class="vtt-creat-input" placeholder="Description…"
                     value="${_esc(ded['tr_desc_'+i] || '')}"
-                    onchange="window._vttBstDed('${_bid}','tr_desc_${i}',this.value)">
+                    data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|tr_desc_${i}|$value">
                 </div>`).join('')}` : ''}
             <div class="vtt-creat-sub-title">📔 Notes</div>
             <textarea class="vtt-creat-input vtt-creat-notes" rows="3" placeholder="Tes notes sur cette créature…"
-              onchange="window._vttBstNotes('${_bid}',this.value)">${_esc(track.notes || '')}</textarea>
+              data-vtt-fn="_vttBstNotes" data-vtt-on="change" data-vtt-args="${_bid}|$value">${_esc(track.notes || '')}</textarea>
             ${!_actions.length && !_trt.length && !_hasNotes && !_hasAnyDed
               ? '<div class="vtt-creat-help" style="margin-top:.4rem">Aucune action/trait recensé par le MJ pour cette créature pour le moment.</div>'
               : ''}
@@ -5912,11 +6034,11 @@ function _renderInspector(t) {
                    : bf.type === 'shield_reactive' ? `${bf.charges || 1} charge · ${bf.tier}`
                    : bf.effect ? bf.effect.slice(0, 24) : '';
       const rmBtn = STATE.isAdmin
-        ? `<button class="vtt-buff-rm" onclick="window._vttRemoveBuff('${t.id}',${i})" title="Retirer">✕</button>` : '';
+        ? `<button class="vtt-buff-rm" data-vtt-fn="_vttRemoveBuff" data-vtt-args="${t.id}|${i}" title="Retirer">✕</button>` : '';
       // Sort suspendu : bouton ▶ pour le déclencher (porteur ou MJ)
       const canTrigger = bf.type === 'suspended_spell' && (STATE.isAdmin || t.ownerId === STATE.user?.uid);
       const trigBtn = canTrigger
-        ? `<button class="vtt-buff-trigger" onclick="window._vttTriggerSuspendedSpell('${t.id}',${i})" title="Déclencher le sort suspendu">▶</button>` : '';
+        ? `<button class="vtt-buff-trigger" data-vtt-fn="_vttTriggerSuspendedSpell" data-vtt-args="${t.id}|${i}" title="Déclencher le sort suspendu">▶</button>` : '';
       return `<div class="vtt-buff-item" title="${_esc(lbl)}${detail?' · '+_esc(detail):''}">
         <span class="vtt-buff-ic">${ic}</span>
         <span class="vtt-buff-lbl">${_esc(lbl)}</span>
@@ -5926,14 +6048,14 @@ function _renderInspector(t) {
       </div>`;
     }).join('');
     const addBtn = STATE.isAdmin
-      ? `<button class="vtt-btn-sm" onclick="window._vttAddBuffPrompt('${t.id}')" title="Ajouter un effet manuel">＋</button>` : '';
+      ? `<button class="vtt-btn-sm" data-vtt-fn="_vttAddBuffPrompt" data-vtt-args="${t.id}" title="Ajouter un effet manuel">＋</button>` : '';
     return `<div class="vtt-ins-section">
       <div class="vtt-ins-section-title">✨ Effets actifs ${addBtn}</div>
       <div class="vtt-buff-list">${items}</div>
     </div>`;
   })() : (STATE.isAdmin
     ? `<div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">✨ Effets actifs <button class="vtt-btn-sm" onclick="window._vttAddBuffPrompt('${t.id}')">＋</button></div>
+        <div class="vtt-ins-section-title">✨ Effets actifs <button class="vtt-btn-sm" data-vtt-fn="_vttAddBuffPrompt" data-vtt-args="${t.id}">＋</button></div>
         <div style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun effet actif</div>
       </div>` : '');
 
@@ -5944,8 +6066,8 @@ function _renderInspector(t) {
   const _condsHtml = (() => {
     const addBtn = STATE.isAdmin
       ? `<span class="vtt-ins-section-actions">
-          <button class="vtt-btn-sm" onclick="window._vttConditionAdd('${t.id}')" title="Appliquer un état">＋</button>
-          <button class="vtt-btn-sm" onclick="window._vttConditionConfig()" title="Réglages : ce que chaque état fait, sa stat de JS et son DD par défaut">⚙</button>
+          <button class="vtt-btn-sm" data-vtt-fn="_vttConditionAdd" data-vtt-args="${t.id}" title="Appliquer un état">＋</button>
+          <button class="vtt-btn-sm" data-vtt-fn="_vttConditionConfig" title="Réglages : ce que chaque état fait, sa stat de JS et son DD par défaut">⚙</button>
         </span>` : '';
     if (!_activeConds.length && !STATE.isAdmin) return ''; // joueurs : section cachée si vide
     const rows = _activeConds.map((cond, i) => {
@@ -5959,9 +6081,9 @@ function _renderInspector(t) {
       const realIdx = _conds.indexOf(cond);
       const ctrls = STATE.isAdmin ? `
         <div class="vtt-cond-ctrls">
-          ${saveLbl ? `<button class="vtt-cond-save" onclick="window._vttConditionSave('${t.id}',${realIdx})" title="Lancer le jet de sauvegarde">🎲 JS ${saveLbl}</button>` : ''}
-          <button class="vtt-cond-edit" onclick="window._vttConditionEdit('${t.id}',${realIdx})" title="Modifier durée, DD, source">✏️</button>
-          <button class="vtt-cond-rm" onclick="window._vttConditionRemove('${t.id}',${realIdx})" title="Retirer l'état">✕</button>
+          ${saveLbl ? `<button class="vtt-cond-save" data-vtt-fn="_vttConditionSave" data-vtt-args="${t.id}|${realIdx}" title="Lancer le jet de sauvegarde">🎲 JS ${saveLbl}</button>` : ''}
+          <button class="vtt-cond-edit" data-vtt-fn="_vttConditionEdit" data-vtt-args="${t.id}|${realIdx}" title="Modifier durée, DD, source">✏️</button>
+          <button class="vtt-cond-rm" data-vtt-fn="_vttConditionRemove" data-vtt-args="${t.id}|${realIdx}" title="Retirer l'état">✕</button>
         </div>` : '';
       return `<div class="vtt-cond-item" style="--cond-c:${lib.color}">
         <div class="vtt-cond-hd">
@@ -6004,7 +6126,7 @@ function _renderInspector(t) {
         <div class="vtt-ins-section-title">⚔️ Actions de combat</div>
         <div class="vtt-combat-actions">
           <button class="vtt-combat-action-btn${couru?' used':''}"
-            onclick="window._vttCourir('${t.id}')"
+            data-vtt-fn="_vttCourir" data-vtt-args="${t.id}"
             ${couru?'disabled':''}>
             <span class="vtt-ca-icon">🏃</span>
             <span class="vtt-ca-body">
@@ -6025,7 +6147,7 @@ function _renderInspector(t) {
         const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
         const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
         const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
-        return `<button class="vtt-skill-btn" onclick="window._vttRollSkill('${s.name.replace(/'/g,"\\'")}','${s.stat}')"${eqTitle}>
+        return `<button class="vtt-skill-btn" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}>
           <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em">●</span>':''}</span>
           <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
         </button>`;
@@ -6033,16 +6155,16 @@ function _renderInspector(t) {
       return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
         <div class="vtt-roll-mode-row">
-          <button class="vtt-roll-mode-btn${_rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" onclick="window._vttSetRollMode('disadvantage')" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
-          <button class="vtt-roll-mode-btn${_rollMode==='normal'?' active':''}" data-mode="normal" onclick="window._vttSetRollMode('normal')" title="Jet classique — 1d20">⚪ Normal</button>
-          <button class="vtt-roll-mode-btn${_rollMode==='advantage'?' active':''}" data-mode="advantage" onclick="window._vttSetRollMode('advantage')" title="Avantage — prend le plus haut des 2 dés">⬆ Avantage</button>
+          <button class="vtt-roll-mode-btn${_rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
+          <button class="vtt-roll-mode-btn${_rollMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" title="Jet classique — 1d20">⚪ Normal</button>
+          <button class="vtt-roll-mode-btn${_rollMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" title="Avantage — prend le plus haut des 2 dés">⬆ Avantage</button>
         </div>
         <div class="vtt-roll-bonus-row">
           <span class="vtt-roll-bonus-lbl">Bonus contextuel</span>
-          <button class="vtt-roll-bonus-adj" onclick="window._vttAdjBonus(-1)">−</button>
+          <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="-1">−</button>
           <span class="vtt-roll-bonus-val${_rollBonus!==0?' nonzero':''}" id="vtt-bonus-val">${_rollBonus>0?'+'+_rollBonus:_rollBonus}</span>
-          <button class="vtt-roll-bonus-adj" onclick="window._vttAdjBonus(1)">+</button>
-          <button class="vtt-roll-bonus-reset" onclick="window._vttAdjBonus(0,true)" title="Réinitialiser">↺</button>
+          <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="1">+</button>
+          <button class="vtt-roll-bonus-reset" data-vtt-fn="_vttAdjBonus" data-vtt-args="0|true" title="Réinitialiser">↺</button>
         </div>
         <div class="vtt-ins-skills">${btns}</div>
       </div>`;
@@ -6050,18 +6172,18 @@ function _renderInspector(t) {
     ${STATE.isAdmin&&pageOpts?`
       <div class="vtt-ins-section">
         <div class="vtt-ins-section-title">Envoyer le joueur vers</div>
-        <select class="vtt-ins-select" onchange="window._vttMoveTokenToPage('${t.id}',this.value);this.value=''">
+        <select class="vtt-ins-select" data-vtt-fn="_vttMoveTokenAndReset" data-vtt-on="change" data-vtt-args="$this|${t.id}">
           <option value="">— choisir une page —</option>${pageOpts}
         </select>
       </div>` :''}
     ${STATE.isAdmin?`
       <div class="vtt-ins-actions">
-        <button class="vtt-btn-sm" onclick="window._vttEditToken('${t.id}')" title="Modifier les stats combat">⚙️ Stats</button>
-        <button class="vtt-btn-sm" onclick="window._vttToggleVisible('${t.id}')" title="Visibilité joueurs">${t.visible?'👁':'🙈'}</button>
-        ${_session?.combat?.active?`<button class="vtt-btn-sm" onclick="window._vttResetTurn('${t.id}')" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
+        <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
+        <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible?'👁':'🙈'}</button>
+        ${_session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
 
-        ${t.pageId?`<button class="vtt-btn-sm" onclick="window._vttRetireToken('${t.id}')" title="Retirer de la carte">↩</button>`:''}
-        ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearBuffs('${t.id}')" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
+        ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩</button>`:''}
+        ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
       </div>` :''}`;
 }
 
@@ -6121,16 +6243,16 @@ function _renderTray() {
     const rat = hpKnownL ? (hpm > 0 ? Math.max(0, hp / hpm) : 1) : 0.5;
     const typeIcon = t.type === 'player' ? '🧑' : t.type === 'npc' ? '👤' : '👹';
     const dupBtn = t.type === 'enemy'
-      ? `<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttDuplicateToken('${t.id}')" title="Dupliquer">＋</button>` : '';
+      ? `<button class="vtt-tray-btn" data-vtt-fn="_vttDuplicateToken" data-vtt-args="${t.id}" title="Dupliquer">＋</button>` : '';
     const delBtn = t.type === 'enemy'
-      ? `<button class="vtt-tray-btn vtt-tray-btn-del" onclick="event.stopPropagation();window._vttDeleteToken('${t.id}')" title="Supprimer">×</button>` : '';
+      ? `<button class="vtt-tray-btn vtt-tray-btn-del" data-vtt-fn="_vttDeleteToken" data-vtt-args="${t.id}" title="Supprimer">×</button>` : '';
     const actionBtn = !placed
-      ? `<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttPlace('${t.id}')" title="Placer">▶</button>`
-      : `<button class="vtt-tray-btn" onclick="event.stopPropagation();window._vttRetireToken('${t.id}')" title="Retirer">↩</button>`;
+      ? `<button class="vtt-tray-btn" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}" title="Placer">▶</button>`
+      : `<button class="vtt-tray-btn" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer">↩</button>`;
     // HP fraction visible pour les ennemis en combat
     const hpFrac = inCombat && t.type === 'enemy' && hpKnownL
       ? `<span class="vtt-tray-hp-frac" style="color:${hpColor(rat)}">${hp}/${hpm}</span>` : '';
-    return `<div class="vtt-tray-item ${_selected === t.id ? 'active' : ''}" onclick="window._vttSelectFromTray('${t.id}')">
+    return `<div class="vtt-tray-item ${_selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}">
       <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type] ?? '#888'}">
         ${ld.displayImage
           ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
@@ -6152,7 +6274,7 @@ function _renderTray() {
     const ld = _live(t);
     const typeIcon = t.type === 'player' ? '🧑' : '👤';
     const col = TYPE_COLOR[t.type] ?? '#888';
-    return `<button class="vtt-res-chip" onclick="window._vttPlace('${t.id}')"
+    return `<button class="vtt-res-chip" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}"
         title="Placer ${_esc(ld.displayName ?? t.name)}">
       <div class="vtt-res-chip-dot" style="border-color:${col};color:${col}">
         ${ld.displayImage
@@ -6166,7 +6288,7 @@ function _renderTray() {
   // ── Pills de filtre ───────────────────────────────────────────────
   const filterPills = `<div class="vtt-tray-filters">
     ${[['all','Tout'],['player','🧑'],['npc','👤'],['enemy','👹']].map(([v,l]) =>
-      `<button class="vtt-tray-fp${_trayFilter === v ? ' active' : ''}" onclick="window._vttTrayFilter('${v}')">${l}</button>`
+      `<button class="vtt-tray-fp${_trayFilter === v ? ' active' : ''}" data-vtt-fn="_vttTrayFilter" data-vtt-args="${v}">${l}</button>`
     ).join('')}
   </div>`;
 
@@ -6210,7 +6332,7 @@ function _renderTray() {
       const typeIcon = t.type === 'player' ? '🧑' : '👤';
       const col = TYPE_COLOR[t.type] ?? '#888';
       const pageName = _pages[t.pageId]?.name || '?';
-      return `<button class="vtt-res-chip vtt-res-chip--elsewhere" onclick="window._vttDuplicateOnPage('${t.id}')"
+      return `<button class="vtt-res-chip vtt-res-chip--elsewhere" data-vtt-fn="_vttDuplicateOnPage" data-vtt-args="${t.id}"
           title="${_esc(ld.displayName ?? t.name)} — sur « ${_esc(pageName)} ». Clic = placer aussi ici (HP partagés).">
         <div class="vtt-res-chip-dot" style="border-color:${col};color:${col}">
           ${ld.displayImage
@@ -6259,7 +6381,7 @@ function _renderTray() {
         ? bsts.map(b => {
             const img = b.photoURL || b.photo || b.avatar || b.imageUrl || '';
             const init = (b.nom || '?')[0].toUpperCase();
-            return `<button class="vtt-bst-tile" onclick="window._vttPlaceFromBestiary('${b.id}')"
+            return `<button class="vtt-bst-tile" data-vtt-fn="_vttPlaceFromBestiary" data-vtt-args="${b.id}"
                 title="${_esc(b.nom || 'Créature')} · PV ${parseInt(b.pvMax) || '?'}">
               ${img ? `<img src="${img}" alt="${_esc(b.nom || '')}">` : `<span class="vtt-bst-icon">${init}</span>`}
               <div class="vtt-bst-name">${_esc((b.nom || 'Créature').slice(0, 8))}</div>
@@ -6282,7 +6404,7 @@ function _renderTray() {
     ${showBst ? `<div class="vtt-tray-sect">
       <div class="vtt-tray-sect-hd" style="justify-content:space-between">
         <span>👹 Bestiaire</span>
-        <button class="vtt-tray-add-btn" onclick="window._vttCreateEnemy()" title="Créer un ennemi">＋</button>
+        <button class="vtt-tray-add-btn" data-vtt-fn="_vttCreateEnemy" title="Créer un ennemi">＋</button>
       </div>
       <div class="vtt-bst-grid">${bstGrid}</div>
     </div>` : ''}
@@ -6306,16 +6428,16 @@ function _renderPageList() {
     const isPlayers=p.id===broadcastId, isMj=p.id===_activePage?.id;
     const cls=isMj&&isPlayers?'mj-and-players':isMj?'mj':isPlayers?'players':'';
     return `
-    <div class="vtt-page-item ${cls}" onclick="window._vttSwitchPage('${p.id}')" title="${p.cols||24}×${p.rows||18} cases">
+    <div class="vtt-page-item ${cls}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${p.cols||24}×${p.rows||18} cases">
       <div class="vtt-page-item-badges">
         ${isMj     ?'<span title="Votre vue">📍</span>':''}
         ${isPlayers?'<span title="Joueurs ici">👥</span>':''}
       </div>
       <div class="vtt-page-item-name">${p.name}</div>
       <div class="vtt-page-item-acts">
-        <button class="vtt-page-item-btn" onclick="event.stopPropagation();window._vttSendToPage('${p.id}')" title="Envoyer tous les joueurs ici">📡</button>
-        <button class="vtt-page-item-btn" onclick="event.stopPropagation();window._vttEditPage('${p.id}')" title="Renommer / redimensionner">✏</button>
-        <button class="vtt-page-item-btn vtt-page-item-del" onclick="event.stopPropagation();window._vttDeletePage('${p.id}')" title="Supprimer">×</button>
+        <button class="vtt-page-item-btn" data-vtt-fn="_vttSendToPage" data-vtt-args="${p.id}" title="Envoyer tous les joueurs ici">📡</button>
+        <button class="vtt-page-item-btn" data-vtt-fn="_vttEditPage" data-vtt-args="${p.id}" title="Renommer / redimensionner">✏</button>
+        <button class="vtt-page-item-btn vtt-page-item-del" data-vtt-fn="_vttDeletePage" data-vtt-args="${p.id}" title="Supprimer">×</button>
       </div>
     </div>`;
   }).join('');
@@ -6331,7 +6453,7 @@ function _renderPageTabs() {
   const myTok = uid ? Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data : null;
   const canInvoke = !!(myTok && _activePage && myTok.pageId !== _activePage.id);
   const invokeBtn = canInvoke
-    ? `<button class="vtt-btn-sm" onclick="window._vttInvokeMyToken()" title="Placer ton token sur cette carte">🧑 Invoquer mon token</button>`
+    ? `<button class="vtt-btn-sm" data-vtt-fn="_vttInvokeMyToken" title="Placer ton token sur cette carte">🧑 Invoquer mon token</button>`
     : '';
   el.innerHTML = `<span class="vtt-page-current-label">📍 ${_esc(name)}</span>${invokeBtn}`;
 }
@@ -7303,11 +7425,11 @@ function _emoteGridHtml(list, favSet=new Set()) {
     const safe = em.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const isFav = favSet.has(em.name);
     return `<div class="vtt-emote-item-wrap">
-      <button class="vtt-emote-item" onclick="window._vttPickEmote('${safe}')" title=":${_esc(em.name)}:">
+      <button class="vtt-emote-item" data-vtt-fn="_vttPickEmote" data-vtt-args="${safe}" title=":${_esc(em.name)}:">
         <img src="${em.url}" alt="${_esc(em.name)}" loading="lazy">
         <span>${_esc(em.name)}</span>
       </button>
-      <button class="vtt-emote-fav-btn${isFav?' active':''}" onclick="window._vttToggleFav('${safe}')" title="${isFav?'Retirer des favoris':'Ajouter aux favoris'}">${isFav?'★':'☆'}</button>
+      <button class="vtt-emote-fav-btn${isFav?' active':''}" data-vtt-fn="_vttToggleFav" data-vtt-args="${safe}" title="${isFav?'Retirer des favoris':'Ajouter aux favoris'}">${isFav?'★':'☆'}</button>
     </div>`;
   }).join('');
 }
@@ -7331,7 +7453,7 @@ function _renderEmotePicker() {
   el.innerHTML = `
     <div class="vtt-emote-picker-search">
       <input type="text" id="vtt-emote-search" placeholder="🔍 Rechercher…" autocomplete="off"
-        oninput="window._vttFilterEmotes(this.value)">
+        data-vtt-fn="_vttFilterEmotes" data-vtt-on="input" data-vtt-args="$value">
     </div>
     <div class="vtt-emote-picker-body">
       ${favBlock}
@@ -7452,8 +7574,8 @@ window._ouvrirGestionEmotes = async () => {
             <img src="${em.url}" alt="${_esc(em.name)}">
             <span class="vtt-emote-card-name" title=":${_esc(em.name)}:">:${_esc(em.name)}:</span>
             <div class="vtt-emote-card-actions">
-              <button class="vtt-ec-btn vtt-ec-edit" onclick="window._vttEditEmote(${i})" title="Modifier">✏</button>
-              <button class="vtt-ec-btn vtt-ec-del"  onclick="window._vttDeleteEmote(${i})" title="Supprimer">✕</button>
+              <button class="vtt-ec-btn vtt-ec-edit" data-vtt-fn="_vttEditEmote" data-vtt-args="${i}" title="Modifier">✏</button>
+              <button class="vtt-ec-btn vtt-ec-del"  data-vtt-fn="_vttDeleteEmote" data-vtt-args="${i}" title="Supprimer">✕</button>
             </div>
           </div>`).join('')
       }</div>`
@@ -7469,7 +7591,8 @@ window._ouvrirGestionEmotes = async () => {
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
       <div style="display:flex;align-items:center;gap:.6rem">
         <label style="font-size:.75rem;color:var(--text-muted);white-space:nowrap">📁 Album ImgBB</label>
-        <input type="text" id="emote-album-id" placeholder="ID de l'album (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1" oninput="(v=>v?localStorage.setItem('vtt-imgbb-emote-album',v):localStorage.removeItem('vtt-imgbb-emote-album'))(this.value.trim())">
+        <input type="text" id="emote-album-id" placeholder="ID de l'album (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1"
+          data-vtt-fn="_vttSetEmoteAlbum" data-vtt-on="input" data-vtt-args="$value">
       </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
       <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
@@ -7488,7 +7611,7 @@ window._ouvrirGestionEmotes = async () => {
         <input type="text" id="emote-add-url" placeholder="https://i.ibb.co/…" style="${_inpStyle}">
       </div>
       <div style="display:flex;align-items:center;gap:.7rem">
-        <button class="btn btn-primary" style="flex:1" onclick="window._vttAddEmote()">➕ Ajouter l'émote</button>
+        <button class="btn btn-primary" style="flex:1" data-vtt-fn="_vttAddEmote">➕ Ajouter l'émote</button>
         <span id="emote-add-status" style="font-size:.78rem;color:var(--text-dim);flex:1;min-height:1rem"></span>
       </div>
     </div>`);
@@ -7547,11 +7670,11 @@ window._ouvrirGestionEmotes = async () => {
           <div class="vtt-ec-panel-row">
             <label>Nouvelle image <span style="opacity:.6">(optionnel)</span></label>
             <input type="file" id="ec-file-${i}" accept="image/*"
-              onchange="const f=this.files?.[0];if(f){const u=URL.createObjectURL(f);document.getElementById('ec-preview-${i}').src=u}">
+              data-vtt-fn="_vttPreviewEmoteFile" data-vtt-on="change" data-vtt-args="$this|ec-preview-${i}">
           </div>
           <div class="vtt-ec-panel-btns">
-            <button class="vtt-ec-save"   onclick="window._vttSaveEmote(${i})">✓ Enregistrer</button>
-            <button class="vtt-ec-cancel" onclick="document.getElementById('emote-edit-zone').innerHTML='';document.querySelectorAll('.vtt-emote-card').forEach(c=>c.classList.remove('is-editing'))">✕ Annuler</button>
+            <button class="vtt-ec-save"   data-vtt-fn="_vttSaveEmote" data-vtt-args="${i}">✓ Enregistrer</button>
+            <button class="vtt-ec-cancel" data-vtt-fn="_vttCancelEmoteEdit">✕ Annuler</button>
           </div>
         </div>
       </div>`;
@@ -8266,7 +8389,7 @@ function _renderChatLog_legacy(msgs) {
         <div style="display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;padding-left:calc(22px + .35rem)">
           <span style="font-size:.78rem">${isFumble ? '💔' : '💚'}</span>
           ${headlineVal}
-          <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
+          <button class="vtt-log-detail-btn" data-vtt-fn="_vttToggleLogDetail" data-vtt-args="${detailId}">détail</button>
         </div>
         <div id="${detailId}" style="display:none;padding-left:calc(22px + .35rem);margin-top:.15rem">${detailHtml}</div>
       </div>`;
@@ -8377,7 +8500,7 @@ function _renderChatLog_legacy(msgs) {
           <span style="font-size:.72rem">🎯</span>
           <strong style="font-size:1rem;color:${accentCol}">${m.hitTotal}</strong>
           ${advBadge}
-          <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
+          <button class="vtt-log-detail-btn" data-vtt-fn="_vttToggleLogDetail" data-vtt-args="${detailId}">détail</button>
         </div>
         <div style="padding-left:calc(22px + .35rem);margin-top:.25rem;border-top:1px solid rgba(255,255,255,.06);padding-top:.2rem">
           ${targetsHtml}
@@ -8600,7 +8723,7 @@ function _renderChatLog_legacy(msgs) {
           <strong style="font-size:1.05rem;color:${accentCol};letter-spacing:-.01em">${m.hitTotal}</strong>
           <span style="font-size:.88rem;color:${accentCol};font-weight:700">${m.hit?'✓':'✗'}</span>
           ${advBadge}
-          <button class="vtt-log-detail-btn" onclick="(e=>{const d=document.getElementById('${detailId}');const o=d.style.display!=='none';d.style.display=o?'none':'block';e.currentTarget.classList.toggle('open',!o)})(event)">détail</button>
+          <button class="vtt-log-detail-btn" data-vtt-fn="_vttToggleLogDetail" data-vtt-args="${detailId}">détail</button>
         </div>
         ${dmgSummary}
         <div id="${detailId}" style="display:none;padding-left:calc(22px + .35rem);margin-top:.2rem;border-top:1px solid rgba(255,255,255,.06);padding-top:.2rem">
@@ -8925,8 +9048,8 @@ function _renderShortRest() {
     ${rem > 0 && onPage ? `
       <div class="vtt-rest-actions">
         ${hasV
-          ? `<button class="vtt-rest-btn vtt-rest-btn--voted" onclick="window._vttShortRestUnvote()">✓ Voté — retirer</button>`
-          : `<button class="vtt-rest-btn vtt-rest-btn--vote" onclick="window._vttShortRestVote()">Voter pour un court repos</button>`}
+          ? `<button class="vtt-rest-btn vtt-rest-btn--voted" data-vtt-fn="_vttShortRestUnvote">✓ Voté — retirer</button>`
+          : `<button class="vtt-rest-btn vtt-rest-btn--vote" data-vtt-fn="_vttShortRestVote">Voter pour un court repos</button>`}
       </div>` : ''}
     ${rem === 0 ? '<div class="vtt-rest-help">Plus de court repos disponible pour cette aventure.</div>' : ''}
     ${rem > 0 && !onPage && !STATE.isAdmin ? '<div class="vtt-rest-help">Tu n\'as aucun token placé sur la map.</div>' : ''}
@@ -8935,12 +9058,12 @@ function _renderShortRest() {
         <div class="vtt-rest-mj-row">
           <label class="vtt-rest-mj-lbl">Max pour l'aventure</label>
           <input type="number" min="0" max="20" value="${max}" class="vtt-rest-mj-input"
-            onchange="window._vttShortRestSetMax(this.value)">
+            data-vtt-fn="_vttShortRestSetMax" data-vtt-on="change" data-vtt-args="$value">
         </div>
         <div class="vtt-rest-mj-btns">
-          ${rem > 0 ? `<button class="vtt-rest-btn vtt-rest-btn--force" onclick="window._vttShortRestForce()">💤 Forcer le court repos</button>` : ''}
-          ${sr.vote ? `<button class="vtt-rest-btn vtt-rest-btn--cancel" onclick="window._vttShortRestCancel()">✕ Annuler le vote</button>` : ''}
-          ${used > 0 ? `<button class="vtt-rest-btn vtt-rest-btn--reset" onclick="window._vttShortRestResetCount()">↺ Reset compteur</button>` : ''}
+          ${rem > 0 ? `<button class="vtt-rest-btn vtt-rest-btn--force" data-vtt-fn="_vttShortRestForce">💤 Forcer le court repos</button>` : ''}
+          ${sr.vote ? `<button class="vtt-rest-btn vtt-rest-btn--cancel" data-vtt-fn="_vttShortRestCancel">✕ Annuler le vote</button>` : ''}
+          ${used > 0 ? `<button class="vtt-rest-btn vtt-rest-btn--reset" data-vtt-fn="_vttShortRestResetCount">↺ Reset compteur</button>` : ''}
         </div>
       </div>` : ''}
   `;
@@ -9021,7 +9144,7 @@ window._vttAddPage = () => {
       <small style="color:var(--text-dim);font-size:.72rem">1 case = ${CELL}px · ex : 30×22 pour une grande carte</small>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" onclick="window._vttConfirmAddPage()">Créer</button>
+        <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer</button>
       </div>
     </div>`);
 };
@@ -9055,7 +9178,7 @@ window._vttEditPage = id => {
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" onclick="window._vttConfirmEditPage('${id}')">Enregistrer</button>
+        <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
       </div>
     </div>`);
 };
@@ -9200,7 +9323,7 @@ window._vttConditionAdd = (tokenId) => {
     <div class="vtt-cond-picker">
       ${CONDITION_LIBRARY.map(c => `
         <button class="vtt-cond-pick" style="--cond-c:${c.color}"
-          onclick="window._vttConditionApply('${tokenId}','${c.id}')">
+          data-vtt-fn="_vttConditionApply" data-vtt-args="${tokenId}|${c.id}">
           <span class="vtt-cond-pick-ic">${c.icon}</span>
           <div class="vtt-cond-pick-body">
             <div class="vtt-cond-pick-nom">${c.label}</div>
@@ -9341,7 +9464,7 @@ window._vttConditionEdit = (tokenId, idx) => {
         <input type="number" class="input-field" id="ce-turns" value="${turnsLeft}" min="0" max="100" placeholder="∞">
       </div>
       <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
-        onclick="window._vttConditionEditSave('${tokenId}',${idx})">💾 Enregistrer</button>
+        data-vtt-fn="_vttConditionEditSave" data-vtt-args="${tokenId}|${idx}">💾 Enregistrer</button>
     </div>
   `);
 };
@@ -9428,14 +9551,14 @@ window._vttConditionConfig = async (opts = {}) => {
     return `<div class="vtt-cc-tri" data-cc-tri-id="${id}" data-cc-tri-value="${current||''}">
       ${opts.map(([v, lbl, cls]) => `
         <button type="button" class="vtt-cc-tri-opt vtt-cc-tri-${cls} ${(current||'')===v?'is-on':''}"
-          onclick="(()=>{const w=this.parentElement;w.dataset.ccTriValue='${v}';w.querySelectorAll('.vtt-cc-tri-opt').forEach(b=>b.classList.remove('is-on'));this.classList.add('is-on');}).call(this)">${lbl}</button>
+          data-vtt-fn="_vttCcTriSet" data-vtt-args="$this|${v}">${lbl}</button>
       `).join('')}
     </div>`;
   };
   // Pill bool toggle (flag)
   const boolToggle = (id, label, on) =>
     `<button type="button" class="vtt-cc-flag-pill ${on?'is-on':''}" data-cc-flag-id="${id}"
-       onclick="this.classList.toggle('is-on');this.dataset.ccFlagOn=this.classList.contains('is-on')?'1':'';">
+       data-vtt-fn="_vttCcFlagToggle" data-vtt-args="$this">
        <span class="vtt-cc-flag-check">${on?'✓':'○'}</span><span>${label}</span>
      </button>`;
 
@@ -9449,13 +9572,13 @@ window._vttConditionConfig = async (opts = {}) => {
 
   // Liste à gauche (compacte, scrollable) + bouton création
   const addBtn = `<button type="button" class="vtt-cc-list-add"
-      onclick="window._vttConditionConfigAddNew()">＋ Nouvel état</button>`;
+      data-vtt-fn="_vttConditionConfigAddNew">＋ Nouvel état</button>`;
   const listItems = addBtn + CONDITION_LIBRARY.map((c, idx) => {
     const count = _countActiveEffects(c.effects || {});
     const isCustom = _isCustomCondition(c.id);
     return `<button type="button" class="vtt-cc-list-item ${idx === 0 ? 'is-active' : ''} ${isCustom ? 'is-custom' : ''}"
         style="--cond-c:${c.color}"
-        onclick="window._vttConditionConfigSelect(${idx})"
+        data-vtt-fn="_vttConditionConfigSelect" data-vtt-args="${idx}"
         title="${isCustom ? 'État personnalisé' : ''}">
       <span class="vtt-cc-list-ic">${c.icon}</span>
       <span class="vtt-cc-list-nom">${_esc(c.label)}</span>
@@ -9484,7 +9607,7 @@ window._vttConditionConfig = async (opts = {}) => {
         <input type="color" class="vtt-cc-color-pick" id="cc-${idx}-color"
           value="${c.color}" title="Couleur de l'état">
         ${isCustom ? `<button type="button" class="vtt-cc-detail-del"
-          onclick="window._vttConditionConfigDelete(${idx})"
+          data-vtt-fn="_vttConditionConfigDelete" data-vtt-args="${idx}"
           title="Supprimer cet état personnalisé">🗑</button>` : ''}
       </div>
 
@@ -9581,8 +9704,8 @@ window._vttConditionConfig = async (opts = {}) => {
         <section class="vtt-cc-details">${details}</section>
       </div>
       <div class="vtt-cc-footer">
-        <button class="btn btn-outline" onclick="window._vttConditionConfigReset()">↺ Réinitialiser aux défauts</button>
-        <button class="btn btn-gold" onclick="window._vttConditionConfigSave()">💾 Enregistrer</button>
+        <button class="btn btn-outline" data-vtt-fn="_vttConditionConfigReset">↺ Réinitialiser aux défauts</button>
+        <button class="btn btn-gold" data-vtt-fn="_vttConditionConfigSave">💾 Enregistrer</button>
       </div>
     </div>
   `);
@@ -9900,7 +10023,7 @@ window._vttAddBuffPrompt = async (tokenId) => {
         <label>Durée (tours · vide = permanent)</label>
         <input id="vab-dur" class="input-field" type="number" value="2" min="0">
       </div>
-      <button class="btn btn-gold" onclick="window._vttConfirmAddBuff('${tokenId}')">Ajouter</button>
+      <button class="btn btn-gold" data-vtt-fn="_vttConfirmAddBuff" data-vtt-args="${tokenId}">Ajouter</button>
     </div>
     <script>
       document.getElementById('vab-type').onchange = e => {
@@ -10176,7 +10299,7 @@ function _openStatsModal(t) {
       </small>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" onclick="window._vttSaveStats('${t.id}')">💾 Enregistrer</button>
+        <button class="btn-primary" data-vtt-fn="_vttSaveStats" data-vtt-args="${t.id}">💾 Enregistrer</button>
       </div>
     </div>`);
 }
@@ -10206,7 +10329,7 @@ window._vttCreateEnemy = () => {
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" onclick="window._vttConfirmCreateEnemy()">Créer</button>
+        <button class="btn-primary" data-vtt-fn="_vttConfirmCreateEnemy">Créer</button>
       </div>
     </div>`);
 };
@@ -10500,10 +10623,10 @@ function _renderLibSection() {
 
   const folderChips = !_libFolder ? folders.map(f => {
     const cnt = images.filter(i => i.folderId === f.id).length;
-    return `<div class="vtt-lib-folder-chip" onclick="window._vttLibOpenFolder('${f.id}')">
+    return `<div class="vtt-lib-folder-chip" data-vtt-fn="_vttLibOpenFolder" data-vtt-args="${f.id}">
       <span>📁 ${_esc(f.name)}</span>
       <span class="vtt-lib-chip-cnt">${cnt}</span>
-      <button class="vtt-icon-btn" onclick="event.stopPropagation();window._vttLibDelFolder('${f.id}')" title="Supprimer le dossier">✕</button>
+      <button class="vtt-icon-btn" data-vtt-fn="_vttLibDelFolder" data-vtt-args="${f.id}" title="Supprimer le dossier">✕</button>
     </div>`;
   }).join('') : '';
 
@@ -10512,10 +10635,10 @@ function _renderLibSection() {
         <div class="vtt-lib-card" title="${_esc(img.name||'')}">
           <img src="${img.url}" loading="lazy" onerror="this.parentNode.classList.add('vtt-lib-card--err')">
           <div class="vtt-lib-card-ov">
-            <button onclick="window._vttLibPlace('${img.id}')" title="Placer sur la carte">▶</button>
-            ${folders.length && !_libFolder ? `<button onclick="window._vttLibMoveMenu('${img.id}',event)" title="Déplacer dans un dossier">📁</button>` : ''}
-            ${_libFolder ? `<button onclick="window._vttLibMoveRoot('${img.id}')" title="Retirer du dossier">↩</button>` : ''}
-            <button onclick="window._vttLibDelImg('${img.id}')" title="Supprimer">🗑</button>
+            <button data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="Placer sur la carte">▶</button>
+            ${folders.length && !_libFolder ? `<button data-vtt-fn="_vttLibMoveMenu" data-vtt-args="${img.id}|event" title="Déplacer dans un dossier">📁</button>` : ''}
+            ${_libFolder ? `<button data-vtt-fn="_vttLibMoveRoot" data-vtt-args="${img.id}" title="Retirer du dossier">↩</button>` : ''}
+            <button data-vtt-fn="_vttLibDelImg" data-vtt-args="${img.id}" title="Supprimer">🗑</button>
           </div>
           <div class="vtt-lib-card-name">${_esc(img.name||'image')}</div>
         </div>`).join('')}</div>`
@@ -10523,7 +10646,7 @@ function _renderLibSection() {
 
   el.innerHTML = `
     ${_libFolder
-      ? `<button class="vtt-lib-back" onclick="window._vttLibOpenFolder(null)">← ${_esc(curFolder?.name||'Racine')}</button>`
+      ? `<button class="vtt-lib-back" data-vtt-fn="_vttLibOpenFolder" data-vtt-args="null">← ${_esc(curFolder?.name||'Racine')}</button>`
       : folderChips}
     ${imgGrid}`;
 }
@@ -10566,7 +10689,7 @@ window._vttLibMoveMenu    = (imgId, evt) => {
   popup.id = 'vtt-lib-move-popup';
   popup.className = 'vtt-lib-move-popup';
   popup.innerHTML = _mapLib.folders.map(f =>
-    `<div class="vtt-lib-move-opt" onclick="window._vttLibMoveTo('${imgId}','${f.id}');document.getElementById('vtt-lib-move-popup')?.remove()">📁 ${_esc(f.name)}</div>`
+    `<div class="vtt-lib-move-opt" data-vtt-fn="_vttLibMoveToAndClose" data-vtt-args="${imgId}|${f.id}">📁 ${_esc(f.name)}</div>`
   ).join('') || '<div style="padding:.4rem;font-size:.75rem;color:var(--text-dim)">Aucun dossier</div>';
   const rect = evt.currentTarget.getBoundingClientRect();
   popup.style.top  = (rect.bottom + 4) + 'px';
@@ -10617,9 +10740,9 @@ function _renderLootPanel() {
         <span class="vtt-loot-dot" style="background:${rarColor}"></span>
         <span class="vtt-loot-name">${_esc(item.nom)}</span>
         <span class="vtt-loot-qty">×${item.qty}</span>
-        ${zone === 'stash' && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveStash('${item.id}')" title="Retirer">✕</button>` : ''}
-        ${zone === 'loot'  && mj ? `<button class="vtt-icon-btn" onclick="window._vttLootRemoveLoot('${item.id}')" title="Retirer">✕</button>` : ''}
-        ${zone === 'loot' && myChars.length ? `<button class="vtt-loot-take-btn" onclick="window._vttLootToggleTake('${item.id}')">Prendre</button>` : ''}
+        ${zone === 'stash' && mj ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" title="Retirer">✕</button>` : ''}
+        ${zone === 'loot'  && mj ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" title="Retirer">✕</button>` : ''}
+        ${zone === 'loot' && myChars.length ? `<button class="vtt-loot-take-btn" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${item.id}">Prendre</button>` : ''}
       </div>
       ${zone === 'loot' ? `<div class="vtt-loot-take-inline" id="vtt-take-inline-${item.id}" style="display:none"></div>` : ''}
     </div>`;
@@ -10630,7 +10753,7 @@ function _renderLootPanel() {
     <div class="vtt-loot-section">
       <div class="vtt-loot-sec-hd">
         <span>🔒 Réserve MJ</span>
-        <button class="vtt-btn-sm" onclick="window._vttLootOpenShop()">＋ Ajouter</button>
+        <button class="vtt-btn-sm" data-vtt-fn="_vttLootOpenShop">＋ Ajouter</button>
       </div>
       <div class="vtt-loot-list" id="vtt-stash-list">
         ${_loot.stash.length ? _loot.stash.map(i => _itemRow(i, 'stash')).join('') : '<div class="vtt-loot-empty">Vide — ajoutez des objets</div>'}
@@ -10641,7 +10764,7 @@ function _renderLootPanel() {
     <div class="vtt-loot-section">
       <div class="vtt-loot-sec-hd">
         <span>💰 Butin disponible</span>
-        ${mj ? `<button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttLootClear()">🗑</button>` : ''}
+        ${mj ? `<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttLootClear">🗑</button>` : ''}
       </div>
       <div class="vtt-loot-list" id="vtt-loot-list">
         ${_loot.loot.length ? _loot.loot.map(i => _itemRow(i, 'loot')).join('') : '<div class="vtt-loot-empty">Aucun butin</div>'}
@@ -10753,7 +10876,7 @@ window._vttLootOpenShop = async () => {
   openModal('🎒 Ajouter à la réserve MJ', `
     <input type="text" id="vtt-loot-search" placeholder="🔍 Rechercher un objet…"
       class="input-field" style="width:100%;margin-bottom:.5rem"
-      oninput="window._vttLootShopSearch(this.value)">
+      data-vtt-fn="_vttLootShopSearch" data-vtt-on="input" data-vtt-args="$value">
     <div id="vtt-loot-cats" class="vtt-loot-cats"></div>
     <div id="vtt-loot-shop-list" class="vtt-loot-shop-list"></div>
     <div style="font-size:.7rem;color:var(--text-dim);margin-top:.5rem;font-style:italic">
@@ -10781,7 +10904,7 @@ function _renderLootShopCats() {
   const counts = {};
   items.forEach(it => { const k = it.categorieId || '_'; counts[k] = (counts[k] || 0) + 1; });
   const pill = (id, label, count) => `<button class="vtt-loot-cat-pill${activeCat === id ? ' active' : ''}"
-      onclick="window._vttLootShopSetCat('${id}')">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
+      data-vtt-fn="_vttLootShopSetCat" data-vtt-args="${id}">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
   el.innerHTML = pill('', 'Toutes', items.length) +
     cats.filter(c => counts[c.id]).map(c => pill(c.id, (c.emoji || '') + ' ' + c.nom, counts[c.id])).join('');
 }
@@ -10808,7 +10931,7 @@ function _renderLootShopList() {
       ${cat ? `<span class="vtt-loot-shop-cat">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>` : ''}
       ${stashTag}
       <input type="number" min="1" value="1" class="vtt-loot-shop-qty" id="vtt-loot-q-${item.id}">
-      <button class="vtt-loot-shop-add" onclick="window._vttLootInlineAdd('${item.id}', this)" title="Ajouter à la réserve">＋</button>
+      <button class="vtt-loot-shop-add" data-vtt-fn="_vttLootInlineAdd" data-vtt-args="${item.id}|$this" title="Ajouter à la réserve">＋</button>
     </div>`;
   }).join('');
 }
@@ -10930,7 +11053,7 @@ function _renderLootTake(id) {
     <div class="vtt-loot-take-chars">
       ${myChars.map(c => `
         <button class="vtt-loot-char-chip${st.charId === c.id ? ' active' : ''}"
-          onclick="window._vttLootTakeSetChar('${id}','${c.id}')"
+          data-vtt-fn="_vttLootTakeSetChar" data-vtt-args="${id}|${c.id}"
           title="${_esc(c.nom || c.pseudo || '?')}">
           ${_esc(c.nom || c.pseudo || '?')}
         </button>`).join('')}
@@ -10940,14 +11063,14 @@ function _renderLootTake(id) {
     ${charBar}
     <div class="vtt-loot-take-row">
       <div class="vtt-loot-stepper">
-        <button class="vtt-loot-step" onclick="window._vttLootTakeStep('${id}',-1)" ${st.qty<=1?'disabled':''}>−</button>
+        <button class="vtt-loot-step" data-vtt-fn="_vttLootTakeStep" data-vtt-args="${id}|-1" ${st.qty<=1?'disabled':''}>−</button>
         <span class="vtt-loot-step-val">${st.qty}<span class="vtt-loot-step-max">/${max}</span></span>
-        <button class="vtt-loot-step" onclick="window._vttLootTakeStep('${id}',1)" ${st.qty>=max?'disabled':''}>+</button>
+        <button class="vtt-loot-step" data-vtt-fn="_vttLootTakeStep" data-vtt-args="${id}|1" ${st.qty>=max?'disabled':''}>+</button>
       </div>
-      ${max > 1 ? `<button class="vtt-loot-step-all" onclick="window._vttLootTakeStep('${id}','max')" ${st.qty>=max?'disabled':''}>Tout</button>` : ''}
-      <button class="vtt-loot-take-cancel" onclick="window._vttLootToggleTake('${id}')" title="Annuler">✕</button>
+      ${max > 1 ? `<button class="vtt-loot-step-all" data-vtt-fn="_vttLootTakeStep" data-vtt-args="${id}|max" ${st.qty>=max?'disabled':''}>Tout</button>` : ''}
+      <button class="vtt-loot-take-cancel" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${id}" title="Annuler">✕</button>
     </div>
-    <button class="vtt-loot-take-go" onclick="window._vttLootConfirmTake('${id}')">Prendre ×${st.qty}</button>
+    <button class="vtt-loot-take-go" data-vtt-fn="_vttLootConfirmTake" data-vtt-args="${id}">Prendre ×${st.qty}</button>
   `;
 }
 
@@ -11042,13 +11165,13 @@ function _renderDicePanel() {
   el.innerHTML = `
     <div class="vtt-dice-hd">
       <span>🎲 Lancer des dés</span>
-      <button class="vtt-icon-btn" onclick="window._vttToggleDice()" title="Fermer">✕</button>
+      <button class="vtt-icon-btn" data-vtt-fn="_vttToggleDice" title="Fermer">✕</button>
     </div>
     <div class="vtt-dice-grid">
       ${_ALL_DICE.map(f => {
         const cnt = _diceFormula[f]||0;
         return `<button class="vtt-dice-die-btn${cnt?' active':''}"
-          onclick="window._vttDiceAddDie(${f})"
+          data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}"
           oncontextmenu="event.preventDefault();window._vttDiceRemoveDie(${f})"
           title="Clic : ajouter · Clic droit : retirer">
           d${f===100?'%':f}${cnt?`<span class="vtt-dice-die-cnt">×${cnt}</span>`:''}
@@ -11057,21 +11180,21 @@ function _renderDicePanel() {
     </div>
     <div class="vtt-dice-formula-row">
       <code class="vtt-dice-formula-str">${formulaStr}</code>
-      ${hasDice?`<button class="vtt-dice-clear-btn" onclick="window._vttDiceClear()">✕</button>`:''}
+      ${hasDice?`<button class="vtt-dice-clear-btn" data-vtt-fn="_vttDiceClear">✕</button>`:''}
     </div>
     <div class="vtt-dice-bonus-row">
       <span class="vtt-dice-bonus-lbl">Bonus</span>
-      <button class="vtt-icon-btn" onclick="window._vttDiceBonusStep(-1)">−</button>
+      <button class="vtt-icon-btn" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="-1">−</button>
       <input id="vtt-dice-bonus-inp" type="number" class="vtt-dice-bonus-inp" value="${_diceFreeBonus}"
-        oninput="window._vttDiceBonusSet(+this.value)">
-      <button class="vtt-icon-btn" onclick="window._vttDiceBonusStep(+1)">＋</button>
+        data-vtt-fn="_vttDiceBonusSet" data-vtt-on="input" data-vtt-args="$value">
+      <button class="vtt-icon-btn" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="+1">＋</button>
     </div>
     ${hasD20single ? `<div class="vtt-dice-mode-row">
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='disadvantage'?' active':''}" onclick="window._vttDiceMode('disadvantage')">⬇ Désav.</button>
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='normal'?' active':''}" onclick="window._vttDiceMode('normal')">⚪ Normal</button>
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='advantage'?' active':''}" onclick="window._vttDiceMode('advantage')">⬆ Avantage</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='disadvantage'?' active':''}" data-vtt-fn="_vttDiceMode" data-vtt-args="disadvantage">⬇ Désav.</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='normal'?' active':''}" data-vtt-fn="_vttDiceMode" data-vtt-args="normal">⚪ Normal</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='advantage'?' active':''}" data-vtt-fn="_vttDiceMode" data-vtt-args="advantage">⬆ Avantage</button>
     </div>` : ''}
-    <button class="vtt-dice-roll-btn" onclick="window._vttDiceRoll()"
+    <button class="vtt-dice-roll-btn" data-vtt-fn="_vttDiceRoll"
       ${!hasDice&&!_diceFreeBonus?'disabled':''}>
       🎲 Lancer !
     </button>`;
@@ -11218,14 +11341,14 @@ function _renderMusicPanel() {
     panel.innerHTML = `
       <div class="vtt-music-hd">
         <span>🎵 Musique</span>
-        <button class="vtt-ms-close" onclick="window._vttToggleMusic()">✕</button>
+        <button class="vtt-ms-close" data-vtt-fn="_vttToggleMusic">✕</button>
       </div>
       ${_renderNowPlaying(curSound, ms)}`;
   } else {
     panel.innerHTML = `
       <div class="vtt-music-hd">
         <span>🎵 Sons &amp; Musique</span>
-        <button class="vtt-ms-close" onclick="window._vttToggleMusic()">✕</button>
+        <button class="vtt-ms-close" data-vtt-fn="_vttToggleMusic">✕</button>
       </div>
       <div class="vtt-music-body">${_renderMusicList(mj)}</div>
       ${_renderNowPlaying(curSound, ms)}`;
@@ -11315,14 +11438,14 @@ function _renderMusicList(mj) {
   let h = `<div class="vtt-music-search-row">
     <input type="search" id="vtt-music-search" class="vtt-music-search"
       placeholder="🔍 Rechercher un son ou une catégorie…" autocomplete="off">
-    <button class="vtt-music-collapse-all" onclick="window._vttToggleAllMusicCats()" title="Tout replier / déplier">⇕</button>
+    <button class="vtt-music-collapse-all" data-vtt-fn="_vttToggleAllMusicCats" title="Tout replier / déplier">⇕</button>
   </div>`;
 
   if (mj) {
     h += `<div class="vtt-music-son-actions-row">
-      <button class="vtt-music-upload-btn" onclick="window._vttAddSonUrl()" style="flex:1" title="Ajouter un son via URL">＋ URL</button>
-      <button class="vtt-music-upload-btn" onclick="window._vttImportGithubRelease()" style="flex:1.4" title="Importer depuis une release GitHub">📥 GitHub</button>
-      <button class="vtt-music-upload-btn" onclick="window._vttCreatePlaylist()" style="flex:1.2" title="Créer une nouvelle catégorie/playlist">＋ Catégorie</button>
+      <button class="vtt-music-upload-btn" data-vtt-fn="_vttAddSonUrl" style="flex:1" title="Ajouter un son via URL">＋ URL</button>
+      <button class="vtt-music-upload-btn" data-vtt-fn="_vttImportGithubRelease" style="flex:1.4" title="Importer depuis une release GitHub">📥 GitHub</button>
+      <button class="vtt-music-upload-btn" data-vtt-fn="_vttCreatePlaylist" style="flex:1.2" title="Créer une nouvelle catégorie/playlist">＋ Catégorie</button>
     </div>`;
   }
 
@@ -11336,7 +11459,7 @@ function _renderMusicList(mj) {
   if (poolSounds.length) {
     const collapsed = _isCatCollapsed('pool');
     h += `<div class="vtt-music-cat" data-cat-id="pool" data-collapsed="${collapsed?1:0}">
-      <div class="vtt-music-cat-hd" onclick="window._vttToggleMusicCat('pool')">
+      <div class="vtt-music-cat-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="pool">
         <span class="vtt-music-cat-chevron"></span>
         <span class="vtt-music-cat-name">📦 Non classés</span>
         <span class="vtt-music-pl-cnt">${poolSounds.length}</span>
@@ -11355,15 +11478,15 @@ function _renderMusicList(mj) {
       const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
       const collapsed = _isCatCollapsed(pl.id);
       return `<div class="vtt-music-cat vtt-music-pl-item${active?' is-playing':''}" data-cat-id="${pl.id}" data-collapsed="${collapsed?1:0}">
-        <div class="vtt-music-cat-hd vtt-music-pl-hd" onclick="window._vttToggleMusicCat('${pl.id}')">
+        <div class="vtt-music-cat-hd vtt-music-pl-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="${pl.id}">
           <span class="vtt-music-cat-chevron"></span>
           <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
           <span class="vtt-music-pl-name vtt-music-cat-name">${_esc(pl.name)}</span>
           <span class="vtt-music-pl-cnt">${sounds.length}</span>
-          <div class="vtt-music-son-acts" onclick="event.stopPropagation()">
-            <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',false)" title="Lire en ordre">▶</button>
-            <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" onclick="window._vttPlayPlaylist('${pl.id}',true)" title="Aléatoire">🔀</button>
-            ${mj?`<button class="vtt-mact vtt-mact-del" onclick="window._vttDeletePlaylist('${pl.id}')" title="Supprimer">🗑</button>`:''}
+          <div class="vtt-music-son-acts" data-vtt-fn="_vttNoop">
+            <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${pl.id}|false" title="Lire en ordre">▶</button>
+            <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${pl.id}|true" title="Aléatoire">🔀</button>
+            ${mj?`<button class="vtt-mact vtt-mact-del" data-vtt-fn="_vttDeletePlaylist" data-vtt-args="${pl.id}" title="Supprimer">🗑</button>`:''}
           </div>
         </div>
         <div class="vtt-music-cat-body">
@@ -11397,15 +11520,15 @@ function _renderSonRow(s, plId, mj) {
     : '';
   const delBtn = mj
     ? (isPool
-        ? `<button class="vtt-mact vtt-mact-del" onclick="event.stopPropagation();window._vttDeleteSound('${s.id}')" title="Supprimer définitivement">🗑</button>`
-        : `<button class="vtt-mact vtt-mact-del" onclick="event.stopPropagation();window._vttRemoveSoundFromPlaylist('${plId}','${s.id}')" title="Retirer de la catégorie">✕</button>`)
+        ? `<button class="vtt-mact vtt-mact-del" data-vtt-fn="_vttDeleteSound" data-vtt-args="${s.id}" title="Supprimer définitivement">🗑</button>`
+        : `<button class="vtt-mact vtt-mact-del" data-vtt-fn="_vttRemoveSoundFromPlaylist" data-vtt-args="${plId}|${s.id}" title="Retirer de la catégorie">✕</button>`)
     : '';
   return `<div class="${rowClass}${rowActive?' is-playing':''}" data-sound-id="${s.id}" title="${_esc(s.name)}" ${ctx}>
     ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
     <span class="${nameClass}">${_esc(s.name)}</span>
-    <button class="vtt-mact${playOn?' on':''}" onclick="event.stopPropagation();window._vttPlaySound('${s.id}',false)" title="Lire">${playOn && !ms.paused?'⏸':'▶'}</button>
-    <button class="vtt-mact${loopOn?' on':''}" onclick="event.stopPropagation();window._vttPlaySound('${s.id}',true)" title="Boucle">🔁</button>
-    <button class="vtt-mact vtt-mact-preview" onclick="event.stopPropagation();window._vttPreview('${s.id}',this)" title="Aperçu local (MJ)">🎧</button>
+    <button class="vtt-mact${playOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|false" title="Lire">${playOn && !ms.paused?'⏸':'▶'}</button>
+    <button class="vtt-mact${loopOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|true" title="Boucle">🔁</button>
+    <button class="vtt-mact vtt-mact-preview" data-vtt-fn="_vttPreview" data-vtt-args="${s.id}|$this" title="Aperçu local (MJ)">🎧</button>
     ${delBtn}
   </div>`;
 }
@@ -11460,16 +11583,16 @@ function _renderNowPlaying(curSound, ms) {
       : '<span style="color:var(--text-dim)">— Rien en lecture —</span>'
     }</div>
     ${curSound ? `<div class="vtt-music-prog-row">
-      <div class="vtt-music-prog-bar"${mj?' onclick="window._vttSeek(event,this)"':''} style="${mj?'':'cursor:default'}">
+      <div class="vtt-music-prog-bar"${mj?' data-vtt-fn="_vttSeek" data-vtt-args="event|$this"':''} style="${mj?'':'cursor:default'}">
         <div class="vtt-music-prog-fill" id="vtt-music-prog-fill" style="width:0%"></div>
       </div>
       <span class="vtt-music-prog-time" id="vtt-music-prog-time">0:00 / 0:00</span>
     </div>` : ''}
     <div class="vtt-music-ctrl-row">
       ${mj && curSound ? `
-        <button class="vtt-music-ctrl" onclick="window._vttToggleMusicPause()" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
-        ${pl?`<button class="vtt-music-ctrl" onclick="window._vttMusicNext()" title="Suivant">⏭</button>`:''}
-        <button class="vtt-music-ctrl" onclick="window._vttStopMusic()" title="Arrêter">⏹</button>
+        <button class="vtt-music-ctrl" data-vtt-fn="_vttToggleMusicPause" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
+        ${pl?`<button class="vtt-music-ctrl" data-vtt-fn="_vttMusicNext" title="Suivant">⏭</button>`:''}
+        <button class="vtt-music-ctrl" data-vtt-fn="_vttStopMusic" title="Arrêter">⏹</button>
       ` : ''}
       <label class="vtt-music-vol-lbl">🔊<input type="range" id="vtt-music-vol" class="vtt-music-vol-inp" min="0" max="100" step="1"></label>
     </div>
@@ -11725,11 +11848,11 @@ window._vttCreatePlaylist = () => {
         <div class="vtt-pl-color-row">
           ${colors.map(c=>`<button type="button" class="vtt-pl-color-btn${c===defColor?' sel':''}"
             data-color="${c}" style="background:${c}"
-            onclick="document.querySelectorAll('.vtt-pl-color-btn').forEach(b=>b.classList.remove('sel'));this.classList.add('sel')">
+            data-vtt-fn="_vttPlColorSelect" data-vtt-args="$this">
           </button>`).join('')}
         </div>
       </div>
-      <button class="vtt-pl-modal-submit" onclick="window._vttCreatePlaylistConfirm()">Créer la playlist</button>
+      <button class="vtt-pl-modal-submit" data-vtt-fn="_vttCreatePlaylistConfirm">Créer la playlist</button>
     </div>`);
   setTimeout(() => { document.getElementById('vtt-pl-name-inp')?.focus(); }, 60);
 };
@@ -11799,9 +11922,9 @@ function _renderTimer() {
     ${label ? `<span class="vtt-timer-label" title="${_esc(label)}">${_esc(label)}</span>` : ''}
     ${mj ? `
       <span class="vtt-timer-ctrls">
-        <button class="vtt-timer-btn" onclick="window._vttTimerToggle()" title="${running ? 'Mettre en pause' : (ms > 0 ? 'Reprendre' : 'Démarrer')}">${running ? '⏸' : '▶'}</button>
-        <button class="vtt-timer-btn" onclick="window._vttTimerReset()" title="Réinitialiser">↺</button>
-        <button class="vtt-timer-btn" onclick="window._vttTimerLabel()" title="Modifier le libellé (Combat, Repos, Énigme…)">🏷</button>
+        <button class="vtt-timer-btn" data-vtt-fn="_vttTimerToggle" title="${running ? 'Mettre en pause' : (ms > 0 ? 'Reprendre' : 'Démarrer')}">${running ? '⏸' : '▶'}</button>
+        <button class="vtt-timer-btn" data-vtt-fn="_vttTimerReset" title="Réinitialiser">↺</button>
+        <button class="vtt-timer-btn" data-vtt-fn="_vttTimerLabel" title="Modifier le libellé (Combat, Repos, Énigme…)">🏷</button>
       </span>` : ''}
   `;
 }
@@ -11861,7 +11984,7 @@ function _trackerRow(t) {
   const cls = done ? 'vct-row--done' : (partial ? 'vct-row--partial' : 'vct-row--todo');
   const name = _esc(ld.displayName || t.name || '—');
   return `
-    <div class="vct-row ${cls}" data-tok="${t.id}" onclick="window._vttTrackerFocus('${t.id}')" title="Cliquer pour centrer sur ce token">
+    <div class="vct-row ${cls}" data-tok="${t.id}" data-vtt-fn="_vttTrackerFocus" data-vtt-args="${t.id}" title="Cliquer pour centrer sur ce token">
       ${_trackerPortrait(ld, t)}
       <div class="vct-info">
         <div class="vct-name">${name}</div>
@@ -11890,7 +12013,7 @@ function _renderCombatTracker() {
           <span class="vct-title-ico">⚔️</span>
           <span class="vct-title-txt vct-title-txt--idle">Combat</span>
         </div>
-        <button class="vct-mj-btn vct-mj-btn--start" onclick="window._vttToggleCombat()" title="Démarrer le combat — reset déplacement & action de tous les tokens">▶ Démarrer</button>
+        <button class="vct-mj-btn vct-mj-btn--start" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement & action de tous les tokens">▶ Démarrer</button>
       </div>`;
     return;
   }
@@ -11930,14 +12053,14 @@ function _renderCombatTracker() {
       </div>
       ${mj ? `
         <div class="vct-mj-ctrls">
-          <button class="vct-mj-btn" onclick="window._vttNextRound()" title="Tour suivant — reset déplacement & action">▶ Tour</button>
-          <button class="vct-mj-btn vct-mj-btn--danger" onclick="window._vttToggleCombat()" title="Terminer le combat">⏹</button>
+          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Tour suivant — reset déplacement & action">▶ Tour</button>
+          <button class="vct-mj-btn vct-mj-btn--danger" data-vtt-fn="_vttToggleCombat" title="Terminer le combat">⏹</button>
         </div>` : ''}
     </div>
     ${mj ? `
       <div class="vct-tabs">
-        <button class="vct-tab ${tab==='allies' ? 'active' : ''}" onclick="window._vttCombatTab('allies')">👥 Joueurs &amp; PNJ <span class="vct-tab-count">${allies.length}</span></button>
-        <button class="vct-tab ${tab==='enemies' ? 'active' : ''}" onclick="window._vttCombatTab('enemies')">👹 Ennemis <span class="vct-tab-count">${enemies.length}</span></button>
+        <button class="vct-tab ${tab==='allies' ? 'active' : ''}" data-vtt-fn="_vttCombatTab" data-vtt-args="allies">👥 Joueurs &amp; PNJ <span class="vct-tab-count">${allies.length}</span></button>
+        <button class="vct-tab ${tab==='enemies' ? 'active' : ''}" data-vtt-fn="_vttCombatTab" data-vtt-args="enemies">👹 Ennemis <span class="vct-tab-count">${enemies.length}</span></button>
       </div>` : ''}
     <div class="vct-list">${rows}</div>
   `;
@@ -11976,9 +12099,9 @@ function _buildHtml() {
     ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
     <div class="vtt-tool-group vtt-right">
       ${mj?`
-        <button class="vtt-btn-sm" id="vtt-map-mode-btn" onclick="window._vttToggleMapMode()" title="Verrouille / déverrouille le calque des cartes en arrière-plan">🗺 Carte</button>
+        <button class="vtt-btn-sm" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Verrouille / déverrouille le calque des cartes en arrière-plan">🗺 Carte</button>
         <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via ImgBB — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
-        <button class="vtt-btn-sm" onclick="window._vttSetImgbbKey()" title="Configurer la clé API ImgBB">🔑</button>`:''}
+        <button class="vtt-btn-sm" data-vtt-fn="_vttSetImgbbKey" title="Configurer la clé API ImgBB">🔑</button>`:''}
     </div>
   </div>
 
@@ -11993,7 +12116,7 @@ function _buildHtml() {
       <div class="vtt-tray-section">
         <div class="vtt-tray-section-hd">
           <span>Pages</span>
-          <button class="vtt-tray-add-btn" onclick="window._vttAddPage()" title="Nouvelle page">＋</button>
+          <button class="vtt-tray-add-btn" data-vtt-fn="_vttAddPage" title="Nouvelle page">＋</button>
         </div>
         <div id="vtt-tray-pages"><div class="vtt-tray-empty">Chargement…</div></div>
       </div>
@@ -12001,10 +12124,10 @@ function _buildHtml() {
         <div id="vtt-tray-tokens"></div>
       </div>
       <div class="vtt-tray-section vtt-tray-section--lib">
-        <div class="vtt-tray-section-hd vtt-tray-collapsible" onclick="window._vttLibToggle()">
+        <div class="vtt-tray-section-hd vtt-tray-collapsible" data-vtt-fn="_vttLibToggle">
           <span>📁 Bibliothèque</span>
           <div style="display:flex;gap:3px;align-items:center">
-            <button class="vtt-tray-add-btn" onclick="event.stopPropagation();window._vttLibNewFolder()" title="Nouveau dossier">📁</button>
+            <button class="vtt-tray-add-btn" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button>
             <span id="vtt-lib-toggle" class="vtt-tray-count open">▲</span>
           </div>
         </div>
@@ -12023,7 +12146,7 @@ function _buildHtml() {
           <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
             onkeydown="if(event.key==='Enter')window._vttSendChat()">
-          <button class="vtt-chat-send" onclick="window._vttSendChat()" title="Envoyer">↵</button>
+          <button class="vtt-chat-send" data-vtt-fn="_vttSendChat" title="Envoyer">↵</button>
         </div>
       </div>
     </div>
@@ -12063,43 +12186,43 @@ export async function renderVttPage() {
   _tf.className = 'vtt-tool-float';
   _tf.innerHTML = `
     <div class="vtt-tool-float-tools">
-      <button class="vtt-tool active" data-tool="select" onclick="window._vttTool('select')" title="↖ Sélection">↖</button>
-      <button class="vtt-tool" data-tool="ruler"  onclick="window._vttTool('ruler')"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler">📏</button>
-      <button class="vtt-tool" data-tool="draw"   onclick="window._vttTool('draw')"   title="✏️ Dessin">✏️</button>
-      ${STATE.isAdmin?`<button class="vtt-tool" data-tool="walls" onclick="window._vttTool('walls')" title="🧱 Murs / Éclairage dynamique">🧱</button>`:''}
+      <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection">↖</button>
+      <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler">📏</button>
+      <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin">✏️</button>
+      ${STATE.isAdmin?`<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique">🧱</button>`:''}
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
-      <button class="vtt-draw-btn active" id="vtt-ds-pencil"  onclick="window._vttDrawShape('pencil')"  title="Crayon libre">✏️</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-line"    onclick="window._vttDrawShape('line')"    title="Ligne">╱</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-rect"    onclick="window._vttDrawShape('rect')"    title="Rectangle">⬜</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-circle"  onclick="window._vttDrawShape('circle')"  title="Cercle">⬭</button>
+      <button class="vtt-draw-btn active" id="vtt-ds-pencil"  data-vtt-fn="_vttDrawShape" data-vtt-args="pencil"  title="Crayon libre">✏️</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-line"    data-vtt-fn="_vttDrawShape" data-vtt-args="line"    title="Ligne">╱</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-rect"    data-vtt-fn="_vttDrawShape" data-vtt-args="rect"    title="Rectangle">⬜</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-circle"  data-vtt-fn="_vttDrawShape" data-vtt-args="circle"  title="Cercle">⬭</button>
       <div class="vtt-draw-sep"></div>
       ${['#ef4444','#f59e0b','#22c38e','#4f8cff','#b47fff','#ffffff','#1a1a2e'].map((c,i)=>
-        `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" onclick="window._vttDrawColor('${c}')" style="background:${c}" title="${c}"></button>`
+        `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" data-vtt-fn="_vttDrawColor" data-vtt-args="${c}" style="background:${c}" title="${c}"></button>`
       ).join('')}
       <div class="vtt-draw-sep"></div>
       ${[2,4,8].map((w,i)=>
-        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" onclick="window._vttDrawWidth(${w})" title="${w}px">${w}</button>`
+        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" data-vtt-fn="_vttDrawWidth" data-vtt-args="${w}" title="${w}px">${w}</button>`
       ).join('')}
       <div class="vtt-draw-sep"></div>
-      <button class="vtt-draw-btn" id="vtt-draw-fill-btn" onclick="window._vttToggleDrawFill()" title="Remplissage (rect/cercle)">◻</button>
-      ${STATE.isAdmin?`<div class="vtt-draw-sep"></div><button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttClearAnnots()" title="Effacer toutes les annotations">🗑</button>`:''}
+      <button class="vtt-draw-btn" id="vtt-draw-fill-btn" data-vtt-fn="_vttToggleDrawFill" title="Remplissage (rect/cercle)">◻</button>
+      ${STATE.isAdmin?`<div class="vtt-draw-sep"></div><button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearAnnots" title="Effacer toutes les annotations">🗑</button>`:''}
     </div>
     ${STATE.isAdmin?`
     <div id="vtt-walls-bar" class="vtt-walls-bar" style="display:none">
       <span class="vtt-walls-bar-label">Outil :</span>
-      <button class="vtt-btn-sm active" data-fog-tool="wall"   onclick="window._vttFogTool('wall')"   title="Tracer un mur">🧱 Mur</button>
-      <button class="vtt-btn-sm"        data-fog-tool="door"   onclick="window._vttFogTool('door')"   title="Tracer une porte">🚪 Porte</button>
-      <button class="vtt-btn-sm"        data-fog-tool="window" onclick="window._vttFogTool('window')" title="Tracer une fenêtre">🪟 Fenêtre</button>
-      <button class="vtt-btn-sm"        data-fog-tool="light"  onclick="window._vttFogTool('light')"  title="Placer une source lumineuse">💡 Lumière</button>
+      <button class="vtt-btn-sm active" data-fog-tool="wall"   data-vtt-fn="_vttFogTool" data-vtt-args="wall"   title="Tracer un mur">🧱 Mur</button>
+      <button class="vtt-btn-sm"        data-fog-tool="door"   data-vtt-fn="_vttFogTool" data-vtt-args="door"   title="Tracer une porte">🚪 Porte</button>
+      <button class="vtt-btn-sm"        data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window" title="Tracer une fenêtre">🪟 Fenêtre</button>
+      <button class="vtt-btn-sm"        data-fog-tool="light"  data-vtt-fn="_vttFogTool" data-vtt-args="light"  title="Placer une source lumineuse">💡 Lumière</button>
       <div class="vtt-tb-sep"></div>
-      <button class="vtt-btn-sm"        data-fog-tool="hide"   onclick="window._vttFogTool('hide')"   title="Cacher une zone (drag rectangle)">🌑 Cacher</button>
-      <button class="vtt-btn-sm"        data-fog-tool="reveal" onclick="window._vttFogTool('reveal')" title="Révéler une zone (drag rectangle, prioritaire sur le LOS)">🔦 Révéler</button>
+      <button class="vtt-btn-sm"        data-fog-tool="hide"   data-vtt-fn="_vttFogTool" data-vtt-args="hide"   title="Cacher une zone (drag rectangle)">🌑 Cacher</button>
+      <button class="vtt-btn-sm"        data-fog-tool="reveal" data-vtt-fn="_vttFogTool" data-vtt-args="reveal" title="Révéler une zone (drag rectangle, prioritaire sur le LOS)">🔦 Révéler</button>
       <div class="vtt-tb-sep"></div>
-      <button class="vtt-btn-sm"        data-fog-tool="eraser" onclick="window._vttFogTool('eraser')" title="Effacer (clic sur mur, lumière ou zone de brouillard)">🗑 Effacer</button>
-      <button class="vtt-btn-sm vtt-btn-danger" onclick="window._vttFogClearOps()" title="Supprimer toutes les zones de brouillard manuel de cette page">🧹 Vider brouillard</button>
+      <button class="vtt-btn-sm"        data-fog-tool="eraser" data-vtt-fn="_vttFogTool" data-vtt-args="eraser" title="Effacer (clic sur mur, lumière ou zone de brouillard)">🗑 Effacer</button>
+      <button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttFogClearOps" title="Supprimer toutes les zones de brouillard manuel de cette page">🧹 Vider brouillard</button>
       <div class="vtt-tb-sep"></div>
-      <button class="vtt-btn-sm" id="vtt-fog-toggle" onclick="window._vttToggleFog()" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
+      <button class="vtt-btn-sm" id="vtt-fog-toggle" data-vtt-fn="_vttToggleFog" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
       <div class="vtt-walls-bar-hint">
         Murs : grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · Clic segment/zone = menu<br>
         <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
@@ -12122,28 +12245,28 @@ export async function renderVttPage() {
   const _ef = document.createElement('div');
   _ef.className = 'vtt-emote-float';
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker"></div>
-    <button class="vtt-emote-trigger" onclick="window._vttToggleEmotePicker()" title="Émotes">😄</button>`;
+    <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes">😄</button>`;
   wrap.appendChild(_ef);
   // Float Butin (bas-gauche du canvas)
   const _lf = document.createElement('div');
   _lf.className = 'vtt-loot-float';
   _lf.innerHTML = `
     <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none"></div>
-    <button class="vtt-loot-trigger" id="vtt-loot-trigger" onclick="window._vttToggleLoot()" title="Butin d'aventure">💰</button>`;
+    <button class="vtt-loot-trigger" id="vtt-loot-trigger" data-vtt-fn="_vttToggleLoot" title="Butin d'aventure">💰</button>`;
   wrap.appendChild(_lf);
   // Float Lanceur de dés (bas-gauche du canvas, 3e bouton)
   const _drf = document.createElement('div');
   _drf.className = 'vtt-dice-float';
   _drf.innerHTML = `
     <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none"></div>
-    <button class="vtt-dice-trigger" id="vtt-dice-trigger" onclick="window._vttToggleDice()" title="Lancer des dés libres">🎲</button>`;
+    <button class="vtt-dice-trigger" id="vtt-dice-trigger" data-vtt-fn="_vttToggleDice" title="Lancer des dés libres">🎲</button>`;
   wrap.appendChild(_drf);
   // Float Musique (bas-gauche du canvas, 4e bouton)
   const _mf = document.createElement('div');
   _mf.className = 'vtt-music-float';
   _mf.innerHTML = `
     <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none"></div>
-    <button class="vtt-music-trigger" id="vtt-music-trigger" onclick="window._vttToggleMusic()" title="Sons &amp; Musique">🎵</button>`;
+    <button class="vtt-music-trigger" id="vtt-music-trigger" data-vtt-fn="_vttToggleMusic" title="Sons &amp; Musique">🎵</button>`;
   wrap.appendChild(_mf);
   // Float Court repos (bas-gauche du canvas, 5e bouton)
   const _rf = document.createElement('div');
@@ -12153,7 +12276,7 @@ export async function renderVttPage() {
       <div class="vtt-rest-header">💤 Court repos</div>
       <div class="vtt-rest-body" id="vtt-rest-body"></div>
     </div>
-    <button class="vtt-rest-trigger" id="vtt-rest-trigger" onclick="window._vttToggleShortRest()" title="Court repos du groupe">💤 0/0</button>`;
+    <button class="vtt-rest-trigger" id="vtt-rest-trigger" data-vtt-fn="_vttToggleShortRest" title="Court repos du groupe">💤 0/0</button>`;
   wrap.appendChild(_rf);
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
@@ -12216,7 +12339,7 @@ function _renderPresenceCol() {
     const isOpen = _miniUid === p.uid;
     const isSelf = p.uid === myUid;
     return `<div class="vtt-pres-entry${isOpen?' is-open':''}${isSelf?' is-self':''}"
-      onclick="window._vttToggleMiniSheet('${p.uid}')"
+      data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${p.uid}"
       title="${p.pseudo}${char?.nom ? ' · '+char.nom : ''}">
       <div class="vtt-pres-avatar"${img?` style="background-image:url('${img}')"`:''}>
         ${img ? '' : `<span>${init}</span>`}
@@ -12378,8 +12501,8 @@ window._vttMsEquipPicker = (charId, uid, invIndex) => {
   openModal(`⚔️ Équiper "${item.nom}"`, `
     <div style="display:flex;flex-direction:column;gap:.4rem">
       ${slots.map(s => `<button class="btn btn-outline"
-        onclick="closeModal();window._vttMsEquip('${charId}','${uid}',${JSON.stringify(s)},${invIndex})">${s}</button>`).join('')}
-      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" onclick="closeModal()">Annuler</button>
+        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsEquip|${charId}|${uid}|${s}|${invIndex}">${s}</button>`).join('')}
+      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
     </div>`);
 };
 
@@ -12426,9 +12549,9 @@ window._vttMsSendPicker = (charId, uid, invIndex) => {
     <div style="display:flex;flex-direction:column;gap:.5rem">
       <p style="margin:0;font-size:.85rem;color:var(--text-dim)">Destinataire :</p>
       ${targets.map(t => `<button class="btn btn-outline" style="text-align:left"
-        onclick="closeModal();window._vttMsConfirmSend('${charId}','${uid}',${invIndex},'${t.charId}')">
+        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsConfirmSend|${charId}|${uid}|${invIndex}|${t.charId}">
         ${t.pseudo} → ${t.charNom}</button>`).join('')}
-      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
     </div>`);
 };
 
@@ -12533,19 +12656,19 @@ function _msXpSection(c, uid, canEdit) {
       <div class="vtt-ms-xp-row">
         <span class="vtt-ms-xp-label">⭐ XP</span>
         <input class="vtt-ms-xp-input" type="number" value="${xp}" min="0"
-          onchange="window._vttMsSetXp('${c.id}','${uid}',+this.value)"
-          onkeydown="if(event.key==='Enter'){window._vttMsSetXp('${c.id}','${uid}',+this.value);this.blur();event.preventDefault()}"
+          data-vtt-fn="_vttMsSetXp" data-vtt-on="change" data-vtt-args="${c.id}|${uid}|$value"
+          onkeydown="if(event.key==='Enter'){window._vttMsSetXp('${c.id}','${uid}',$value);this.blur();event.preventDefault()}"
           title="XP total — Entrée pour valider">
         <span class="vtt-ms-xp-sep">/ ${palier}</span>
         <span class="vtt-ms-xp-niv">Niv.</span>
         <input class="vtt-ms-niv-input" type="number" value="${niv}" min="1" max="20"
-          onchange="window._vttMsSetNiveau('${c.id}','${uid}',+this.value)">
+          data-vtt-fn="_vttMsSetNiveau" data-vtt-on="change" data-vtt-args="${c.id}|${uid}|$value">
       </div>
       <div class="vtt-ms-xp-row vtt-ms-xp-add-row">
         <span class="vtt-ms-xp-add-icon">+</span>
         <input class="vtt-ms-xp-input vtt-ms-xp-delta-input" type="number" min="1" placeholder="gagné"
           id="vtt-xp-delta-${c.id}-${uid}"
-          onkeydown="if(event.key==='Enter'){window._vttMsAddXp('${c.id}','${uid}',+this.value);event.preventDefault()}"
+          onkeydown="if(event.key==='Enter'){window._vttMsAddXp('${c.id}','${uid}',$value);event.preventDefault()}"
           title="XP à ajouter — Entrée pour valider">
       </div>
       <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pct}%;background:#f59e0b"></div></div>
@@ -12574,7 +12697,7 @@ function _msTabEquipement(c, uid, canEdit) {
     return `<div class="vtt-ms-slot-row">
       <span class="vtt-ms-slot-lbl">${slot}</span>
       <div class="vtt-ms-slot-ctrl">${canEdit
-        ? `<select class="vtt-ms-slot-sel" onchange="window._vttMsSlotChange(this,'${c.id}','${uid}',${slotIdx})">
+        ? `<select class="vtt-ms-slot-sel" data-vtt-fn="_vttMsSlotChange" data-vtt-on="change" data-vtt-args="$this|${c.id}|${uid}|${slotIdx}">
              <option value="">— vide —</option>${opts}</select>`
         : `<span class="vtt-ms-slot-val">${equipped?.nom||'—'}</span>`}
       </div>
@@ -12589,7 +12712,7 @@ function _msTabSorts(c, uid, canEdit) {
     const types = Array.isArray(s.types) ? s.types.join(' · ') : (s.types||'');
     return `<div class="vtt-ms-sort${s.actif?' is-actif':''}">
       ${canEdit
-        ? `<button class="vtt-ms-sort-toggle" onclick="window._vttToggleMsSort('${c.id}','${uid}',${i})" title="${s.actif?'Désactiver':'Activer'}">${s.actif?'✅':'⬜'}</button>`
+        ? `<button class="vtt-ms-sort-toggle" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${s.actif?'Désactiver':'Activer'}">${s.actif?'✅':'⬜'}</button>`
         : `<span class="vtt-ms-sort-dot${s.actif?' on':''}">${s.actif?'●':'○'}</span>`}
       <div class="vtt-ms-sort-info">
         <span class="vtt-ms-sort-nom">${s.nom||'Sort'}</span>
@@ -12669,12 +12792,12 @@ function _msTabInventaire(c, uid, canEdit) {
         </div>
         ${canEdit?`<div class="vtt-ms-inv-actions">
           ${(cat==='arme'||cat==='armure'||cat==='bijou') && (!isEq || total > 1)
-            ?`<button class="vtt-ms-inv-btn" onclick="window._vttMsEquipPicker('${c.id}','${uid}',${idxToEquip})" title="Équiper">⚔️</button>`
+            ?`<button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsEquipPicker" data-vtt-args="${c.id}|${uid}|${idxToEquip}" title="Équiper">⚔️</button>`
             :''}
           ${isEq
-            ?`<button class="vtt-ms-inv-btn" onclick="window._vttMsUnequipAll('${c.id}','${uid}',${idxToUnequip})" title="Déséquiper">🔓</button>`
+            ?`<button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsUnequipAll" data-vtt-args="${c.id}|${uid}|${idxToUnequip}" title="Déséquiper">🔓</button>`
             :''}
-          <button class="vtt-ms-inv-btn" onclick="window._vttMsSendPicker('${c.id}','${uid}',${firstIdx})" title="Envoyer">📤</button>
+          <button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsSendPicker" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Envoyer">📤</button>
         </div>`:''}
       </div>`;
     }
@@ -12711,7 +12834,7 @@ function _renderMiniSheet(uid) {
   const selectorHtml = chars.length > 1
     ? `<div class="vtt-ms-selector">${chars.map(ch =>
         `<button class="vtt-ms-sel-btn${ch.id===validId?' active':''}"
-          onclick="window._vttSelectMiniChar('${uid}','${ch.id}')">${ch.nom||'Perso'}</button>`
+          data-vtt-fn="_vttSelectMiniChar" data-vtt-args="${uid}|${ch.id}">${ch.nom||'Perso'}</button>`
       ).join('')}</div>`
     : '';
 
@@ -12722,7 +12845,7 @@ function _renderMiniSheet(uid) {
     { key:'inv',    icon:'🎒',  label:'Invent.' },
   ];
   const tabBarHtml = `<div class="vtt-ms-tabbar">${TABS.map(t =>
-    `<button class="vtt-ms-tab${_miniTab===t.key?' active':''}" onclick="window._vttMsTab('${t.key}')">${t.icon} ${t.label}</button>`
+    `<button class="vtt-ms-tab${_miniTab===t.key?' active':''}" data-vtt-fn="_vttMsTab" data-vtt-args="${t.key}">${t.icon} ${t.label}</button>`
   ).join('')}</div>`;
 
   const tabHtml =
@@ -12742,7 +12865,7 @@ function _renderMiniSheet(uid) {
         ${subtitle ? `<div class="vtt-ms-sub">${subtitle}</div>` : ''}
         <div class="vtt-ms-player">👤 ${pres.pseudo}</div>
       </div>
-      <button class="vtt-ms-close" onclick="window._vttToggleMiniSheet('${uid}')" title="Fermer">✕</button>
+      <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer">✕</button>
     </div>
     ${selectorHtml}
     ${tabBarHtml}

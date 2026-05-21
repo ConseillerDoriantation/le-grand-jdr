@@ -13,6 +13,31 @@ import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 
+// ══════════════════════════════════════════════════════════════════════════════
+// DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
+// Pattern : <button data-bst-action="open" data-id="…">…</button>
+// + bstHandlers.open = (el) => _bstOpen(el.dataset.id)
+// Un seul listener par type d'événement, idempotent, scope module.
+// ══════════════════════════════════════════════════════════════════════════════
+const bstHandlers = {};
+function _bstBindDispatch() {
+  if (_bstBindDispatch._bound) return;
+  _bstBindDispatch._bound = true;
+  const dispatch = (e) => {
+    const el = e.target.closest('[data-bst-action]');
+    if (!el) return;
+    const fn = bstHandlers[el.dataset.bstAction];
+    if (typeof fn !== 'function') return;
+    // Filtre par type d'événement si data-bst-on est précisé (ex: "input")
+    if (el.dataset.bstOn && el.dataset.bstOn !== e.type) return;
+    fn(el, e);
+  };
+  document.addEventListener('click',  dispatch, true);
+  document.addEventListener('input',  dispatch, true);
+  document.addEventListener('change', dispatch, true);
+}
+_bstBindDispatch();
+
 // ── État local ────────────────────────────────────────────────────────────────
 let _bstCropper = null;
 let _creatures  = [];
@@ -199,8 +224,8 @@ function _bstRenderActionCard(act, idx) {
           <span style="font-size:.62rem;color:#b47fff">${a.pmOverride ?? a.pm ?? '?'} PM</span>
         </div>
       </div>
-      <button type="button" class="btn btn-outline btn-sm" onclick="window._bstEditAction(${idx})" title="Modifier">✏️</button>
-      <button type="button" class="btn-icon" onclick="window._bstRemoveAction(${idx})" title="Supprimer" style="color:#ef4444">🗑</button>
+      <button type="button" class="btn btn-outline btn-sm" data-bst-action="editAction" data-idx="${idx}" title="Modifier">✏️</button>
+      <button type="button" class="btn-icon" data-bst-action="removeAction" data-idx="${idx}" title="Supprimer" style="color:#ef4444">🗑</button>
     </div>`;
 }
 
@@ -251,41 +276,40 @@ window._bstRemoveAction = (idx) => {
 function _bstRenderArmeRow(a = {}, cid, idx) {
   const optsHTML = (sel) => _BST_STAT_OPTIONS.map(s =>
     `<option value="${s.key}"${sel===s.key?' selected':''}>${s.short}</option>`).join('');
+  // Note : tous les inputs/selects sauvent via la délégation `saveArmes`. L'attribut
+  // `data-bst-on` filtre l'event (sinon le click de focus déclencherait aussi).
+  const inputAttrs  = `data-bst-action="saveArmes" data-bst-on="input"  data-id="${cid}"`;
+  const selectAttrs = `data-bst-action="saveArmes" data-bst-on="change" data-id="${cid}"`;
   return `<div class="bst-p-row" data-arme-id="${a.id || ''}">
     <div class="bst-p-row-grid" style="grid-template-columns:1fr 130px auto">
       <input class="bst-p-input" data-f="nom" placeholder="Nom (Griffes, Morsure…)"
-        value="${_esc(a.nom||'')}"
-        oninput="window._bstSaveArmes('${cid}')">
+        value="${_esc(a.nom||'')}" ${inputAttrs}>
       <input class="bst-p-input" data-f="degats" placeholder="⚔️ 1d8+2"
-        value="${_esc(a.degats||'')}"
-        oninput="window._bstSaveArmes('${cid}')">
-      <button class="bst-p-row-remove" onclick="window._bstRemoveArme('${cid}',this)" title="Retirer">✕</button>
+        value="${_esc(a.degats||'')}" ${inputAttrs}>
+      <button class="bst-p-row-remove" data-bst-action="removeArme" data-id="${cid}" title="Retirer">✕</button>
     </div>
     <div class="bst-p-row-grid" style="grid-template-columns:1fr 90px 1fr 90px 1fr">
       <label class="bst-p-mini">Stat dégâts
-        <select class="bst-p-input" data-f="degatsStat" onchange="window._bstSaveArmes('${cid}')">
+        <select class="bst-p-input" data-f="degatsStat" ${selectAttrs}>
           ${optsHTML(a.degatsStat || 'force')}
         </select>
       </label>
       <label class="bst-p-mini" title="Bonus fixe ajouté aux dégâts (en plus / à la place de la stat)">+ Bonus
         <input class="bst-p-input" data-f="degatsFlat" type="number"
-          value="${a.degatsFlat ?? ''}" placeholder="0"
-          oninput="window._bstSaveArmes('${cid}')">
+          value="${a.degatsFlat ?? ''}" placeholder="0" ${inputAttrs}>
       </label>
       <label class="bst-p-mini">Stat toucher
-        <select class="bst-p-input" data-f="toucherStat" onchange="window._bstSaveArmes('${cid}')">
+        <select class="bst-p-input" data-f="toucherStat" ${selectAttrs}>
           ${optsHTML(a.toucherStat || a.degatsStat || 'force')}
         </select>
       </label>
       <label class="bst-p-mini" title="Bonus fixe ajouté au toucher (en plus / à la place de la stat)">+ Bonus
         <input class="bst-p-input" data-f="toucherFlat" type="number"
-          value="${a.toucherFlat ?? ''}" placeholder="0"
-          oninput="window._bstSaveArmes('${cid}')">
+          value="${a.toucherFlat ?? ''}" placeholder="0" ${inputAttrs}>
       </label>
       <label class="bst-p-mini">Portée
         <input class="bst-p-input" data-f="portee" placeholder="Contact, 9m"
-          value="${_esc(a.portee||'')}"
-          oninput="window._bstSaveArmes('${cid}')">
+          value="${_esc(a.portee||'')}" ${inputAttrs}>
       </label>
     </div>
   </div>`;
@@ -614,14 +638,13 @@ window._bstRemovePanelRow = (id, type, btn) => {
 
 // Row renderers (panneau)
 function _panelTraitRow(t = {}, id, i) {
+  const inputAttrs = `data-bst-action="saveArr" data-bst-on="input" data-id="${id}" data-type="traits"`;
   return `<div class="bst-p-row">
     <div class="bst-p-row-grid" style="grid-template-columns:1fr auto">
-      <input class="bst-p-input" data-f="nom" placeholder="Nom du trait" value="${_esc(t.nom||'')}"
-        oninput="window._bstSaveArr('${id}','traits')">
-      <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','traits',this)" title="Retirer">✕</button>
+      <input class="bst-p-input" data-f="nom" placeholder="Nom du trait" value="${_esc(t.nom||'')}" ${inputAttrs}>
+      <button class="bst-p-row-remove" data-bst-action="removeRow" data-id="${id}" data-type="traits" title="Retirer">✕</button>
     </div>
-    <input class="bst-p-input" data-f="desc" placeholder="Description…" value="${_esc(t.description||'')}"
-      oninput="window._bstSaveArr('${id}','traits')">
+    <input class="bst-p-input" data-f="desc" placeholder="Description…" value="${_esc(t.description||'')}" ${inputAttrs}>
   </div>`;
 }
 
@@ -643,12 +666,12 @@ function _panelButinRow(b = {}, id, i) {
     <span class="bst-butin-name">${_esc(nom)}${orphan?` <span class="bst-butin-orphan-tag">⚠</span>`:''}</span>
     <input class="bst-p-input bst-butin-mini" data-f="qte" type="text" placeholder="1" title="Quantité"
       value="${_esc(b.quantite||'')}"
-      oninput="window._bstSaveArr('${id}','butins')">
+      data-bst-action="saveArr" data-bst-on="input" data-id="${id}" data-type="butins">
     <input class="bst-p-input bst-butin-mini" data-f="chance" type="text" placeholder="100%" title="Chance"
       value="${_esc(b.chance||'')}"
-      oninput="window._bstSaveArr('${id}','butins')">
+      data-bst-action="saveArr" data-bst-on="input" data-id="${id}" data-type="butins">
     <input type="hidden" data-f="itemId" value="${_esc(b.itemId||'')}">
-    <button class="bst-p-row-remove" onclick="window._bstRemovePanelRow('${id}','butins',this)" title="Retirer">✕</button>
+    <button class="bst-p-row-remove" data-bst-action="removeRow" data-id="${id}" data-type="butins" title="Retirer">✕</button>
   </div>`;
 }
 
@@ -686,7 +709,7 @@ window._bstButinPickerOpen = async (creatureId) => {
   pushModal('🎒 Ajouter un butin', `
     <input type="text" id="bst-pick-search" placeholder="🔍 Rechercher un objet…"
       class="input-field" style="width:100%;margin-bottom:.5rem"
-      oninput="window._bstButinPickerSearch(this.value)" autofocus>
+      data-bst-action="pickerSearch" data-bst-on="input" autofocus>
     <div id="bst-pick-cats" class="vtt-loot-cats"></div>
     <div id="bst-pick-list" class="vtt-loot-shop-list"></div>
     <div style="font-size:.7rem;color:var(--text-dim);margin-top:.5rem;font-style:italic">
@@ -715,7 +738,7 @@ function _bstRenderPickerCats() {
   const counts = {};
   items.forEach(it => { const k = it.categorieId || '_'; counts[k] = (counts[k] || 0) + 1; });
   const pill = (id, label, count) => `<button class="vtt-loot-cat-pill${activeCat === id ? ' active' : ''}"
-      onclick="window._bstButinPickerSetCat('${id}')">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
+      data-bst-action="pickerSetCat" data-cat="${id}">${_esc(label)}${count != null ? ` <span class="vtt-loot-cat-count">${count}</span>` : ''}</button>`;
   el.innerHTML = pill('', 'Toutes', items.length) +
     cats.filter(c => counts[c.id]).map(c => pill(c.id, (c.emoji || '') + ' ' + c.nom, counts[c.id])).join('');
 }
@@ -743,7 +766,7 @@ function _bstRenderPickerList() {
       <span class="vtt-loot-shop-name">${_esc(item.nom || '?')}</span>
       ${cat ? `<span class="vtt-loot-shop-cat">${_esc((cat.emoji || '') + ' ' + cat.nom)}</span>` : ''}
       ${alreadyTag}
-      <button class="vtt-loot-shop-add" onclick="window._bstButinPickerAdd('${item.id}', this)" title="Ajouter au butin">＋</button>
+      <button class="vtt-loot-shop-add" data-bst-action="pickerAdd" data-item-id="${item.id}" title="Ajouter au butin">＋</button>
     </div>`;
   }).join('');
 }
@@ -801,7 +824,7 @@ function _renderDamageMatrixPanel(c, types) {
               return `<button type="button" data-dmg-chip="${c.id}-${rel.key}-${t.id}"
                 class="bst-dmg-chip${isActive?' active':''}"
                 style="${isActive?`color:${rel.color};border-color:${rel.color};background:${rel.color}1a`:''}"
-                onclick="window._bstToggleDmg('${c.id}','${rel.key}','${t.id}')">
+                data-bst-action="toggleDmg" data-id="${c.id}" data-key="${rel.key}" data-tid="${t.id}">
                 ${t.icon||''} ${_esc(t.label)}
               </button>`;
             }).join('')}
@@ -839,7 +862,7 @@ function _renderDamageTypeMatrix(beast, types) {
                background:${checked ? `${rel.color}22` : 'transparent'};transition:background .12s;padding:.4rem .25rem">
         <input type="checkbox" name="bst-${rel.key}" value="${t.id}" ${checked?'checked':''}
           style="accent-color:${rel.color};margin:0;width:15px;height:15px;cursor:pointer"
-          onchange="window._bstSyncDmgConflicts()">
+          data-bst-action="syncDmgConfl" data-bst-on="change">
       </label>`;
     }).join('');
     return `<div data-bst-row="${t.id}"
@@ -892,11 +915,11 @@ function _readDamageTypeSelections(name) {
 // ══════════════════════════════════════════════════════════════════════════════
 // BANDEAU AVATARS — sélecteur de vue (MJ ↔ joueur)
 // ══════════════════════════════════════════════════════════════════════════════
-function _avatarTile({ active, ringColor, onClick, imageUrl, fallback, pseudo, charNom }) {
+function _avatarTile({ active, ringColor, uid, imageUrl, fallback, pseudo, charNom }) {
   const ring = active ? ringColor : 'var(--border)';
   const shadow = active ? `0 0 0 2px ${ringColor}33` : 'none';
   const labelColor = active ? ringColor : 'var(--text-dim)';
-  return `<button onclick="${onClick}" title="${_esc(pseudo)}${charNom?` — ${_esc(charNom)}`:''}"
+  return `<button data-bst-action="viewAs" data-uid="${uid || ''}" title="${_esc(pseudo)}${charNom?` — ${_esc(charNom)}`:''}"
     style="display:flex;flex-direction:column;align-items:center;gap:.25rem;padding:.25rem;
     border:none;background:none;cursor:pointer;border-radius:8px;min-width:54px;
     transition:background .12s"
@@ -921,7 +944,7 @@ function _renderPlayerAvatars() {
     ${_avatarTile({
       active:    !_viewAsUid,
       ringColor: 'var(--gold)',
-      onClick:   `window._bstViewAs('')`,
+      uid:       '',
       imageUrl:  '',
       fallback:  '👑',
       pseudo:    'MJ',
@@ -931,7 +954,7 @@ function _renderPlayerAvatars() {
     ${_playersList.map(p => _avatarTile({
       active:    _viewAsUid === p.uid,
       ringColor: '#4f8cff',
-      onClick:   `window._bstViewAs('${p.uid}')`,
+      uid:       p.uid,
       imageUrl:  p.portraitUrl,
       fallback:  p.initial,
       pseudo:    p.pseudo,
@@ -1098,10 +1121,10 @@ function _render() {
   const tabsHtml = STATE.isAdmin ? `
     <div class="bst-tabs">
       ${bstList.map(b => `
-        <button class="bst-tab${b.id===_bestiaireId?' active':''}" onclick="window._bstSwitchBestiaire('${b.id}')">
+        <button class="bst-tab${b.id===_bestiaireId?' active':''}" data-bst-action="switchBest" data-id="${b.id}">
           📜 ${_esc(b.label)}
         </button>`).join('')}
-      <button class="bst-tab add" onclick="window._bstCreateBestiaire()">+ Nouveau</button>
+      <button class="bst-tab add" data-bst-action="createBest">+ Nouveau</button>
     </div>` : '';
 
   content.innerHTML = `
@@ -1122,7 +1145,7 @@ function _render() {
       ${ribbonData.map(r => `
         <div class="bst-ribbon-item${(!r.filter && !_filterRang)||(r.filter && _filterRang===r.filter)?' active':''}"
           style="--c:${r.c}"
-          onclick="window._bstSetRang('${r.filter}')">
+          data-bst-action="setRang" data-rang="${r.filter}">
           <div class="bst-ribbon-icon">${r.icon}</div>
           <div>
             <div class="bst-ribbon-num">${r.count}</div>
@@ -1142,7 +1165,7 @@ function _render() {
       Vue du bestiaire de <strong style="color:#4f8cff">${_esc(_playersList.find(p=>p.uid===_viewAsUid)?.pseudo||'?')}</strong>
       — tes modifications sont enregistrées chez ce joueur.
     </span>
-    <button onclick="window._bstViewAs('')" style="margin-left:auto;font-size:.7rem;padding:3px 10px;
+    <button data-bst-action="viewAs" data-uid="" style="margin-left:auto;font-size:.7rem;padding:3px 10px;
       border-radius:999px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);cursor:pointer">
       Revenir à la vue MJ
     </button>
@@ -1154,18 +1177,18 @@ function _render() {
       <span style="color:var(--text-dim);font-size:.9rem;flex-shrink:0">🔍</span>
       <input type="text" id="bst-search" placeholder="Rechercher…"
         value="${_esc(_searchVal)}"
-        oninput="window._bstSearchInput(this.value)"
+        data-bst-action="search" data-bst-on="input"
         style="background:none;border:none;outline:none;color:var(--text);font-size:.8rem;flex:1;min-width:0">
     </div>
     <div class="chip-row">
-      <button class="chip${!_filterType?' active':''}" onclick="window._bstSetType('')">Tous</button>
+      <button class="chip${!_filterType?' active':''}" data-bst-action="setType" data-type="">Tous</button>
       ${allTypes.map(t => `
         <button class="chip${_norm(_filterType)===_norm(t)?' active':''}"
-          onclick="window._bstSetType('${t.replace(/'/g,"\\'")}')">
+          data-bst-action="setType" data-type="${_esc(t)}">
           ${_esc(t)}
         </button>`).join('')}
     </div>
-    ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="white-space:nowrap;flex-shrink:0" onclick="window._bstCreateDraft()">+ Créature</button>` : ''}
+    ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="white-space:nowrap;flex-shrink:0" data-bst-action="createDraft">+ Créature</button>` : ''}
   </div>
 
   <!-- ═ LAYOUT ═══════════════════════════════════════════════════════════════ -->
@@ -1176,7 +1199,7 @@ function _render() {
           <div class="bst-empty-icon">🐉</div>
           <div class="bst-empty-title">${_creatures.length===0 ? 'Aucune créature dans le bestiaire' : 'Aucun résultat'}</div>
           <div class="bst-empty-sub">${_creatures.length===0 ? 'Ajoutez la première créature pour commencer.' : 'Essayez un filtre différent.'}</div>
-          ${STATE.isAdmin && _creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="window._bstCreateDraft()">+ Ajouter la première créature</button>` : ''}
+          ${STATE.isAdmin && _creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" data-bst-action="createDraft">+ Ajouter la première créature</button>` : ''}
         </div>` : `
         <div class="bst-grid">
           ${filtered.map(c => _renderCard(c)).join('')}
@@ -1204,7 +1227,7 @@ function _renderCard(c) {
   return `<div class="bst-card${isActive?' active':''}"
     style="--rang-c:${rs.color};--rang-glow:${rs.glow}"
     data-beast-id="${_esc(c.id)}"
-    onclick="window._bstOpen('${c.id}')">
+    data-bst-action="open" data-id="${c.id}">
 
     ${c.imageUrl
       ? `<img class="bst-card-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}" loading="lazy">`
@@ -1236,7 +1259,7 @@ function _renderCard(c) {
 
     ${STATE.isAdmin ? `
     <div style="display:flex;gap:3px;padding:.35rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
-      <button class="btn-icon" style="font-size:.7rem;color:#ff5a7e" onclick="event.stopPropagation();deleteBeast('${c.id}')" title="Supprimer">🗑️</button>
+      <button class="btn-icon" style="font-size:.7rem;color:#ff5a7e" data-bst-action="deleteBeast" data-id="${c.id}" title="Supprimer">🗑️</button>
     </div>` : ''}
   </div>`;
 }
@@ -1280,7 +1303,7 @@ function _renderPanel(c) {
         ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}">`
         : `<div class="bst-panel-empty">${c.emoji||'🐲'}</div>`}
       ${_isAdminView() ? `<div class="bst-panel-mj-badge">MJ</div>` : ''}
-      <button class="bst-panel-close" onclick="window._bstClose()">✕</button>
+      <button class="bst-panel-close" data-bst-action="close">✕</button>
       <div class="bst-panel-hero-info">
         <div class="bst-panel-rang">${_esc(rs.label)}</div>
         <div class="bst-panel-name">${_esc(c.nom||'?')}</div>
@@ -1295,11 +1318,11 @@ function _renderPanel(c) {
   // Joueur : estimations modifiables (track.pvActuel, etc.) — synchronisées
   //          avec le VTT en temps réel (saisie ici → "?" disparaît côté VTT).
   const _estCell = (cls, lbl, trackKey, trackVal) => `
-    <div class="bst-stat-cell ${cls}" onclick="this.querySelector('input')?.focus()">
+    <div class="bst-stat-cell ${cls}" data-bst-action="focusInput">
       <input type="number" id="bst-${cls}-${c.id}"
         value="${trackVal || ''}" placeholder="?" min="0"
         class="bst-stat-track-input"
-        onchange="window._bstSetStat('${c.id}','${trackKey}',this.value)">
+        data-bst-action="setStat" data-bst-on="change" data-id="${c.id}" data-key="${trackKey}">
       <div class="bst-stat-lbl">${lbl}</div>
     </div>`;
 
@@ -1363,21 +1386,18 @@ function _renderPanel(c) {
       </div>
       ${actsJ.map((act, i) => {
         const k = act.id || `idx_${i}`;
+        const dedAttr = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="act_${suffix}_${k}"`;
         return `<div class="bst-atk">
           <input class="bst-deduct-input" style="margin-bottom:6px;font-weight:600"
             placeholder="Nom de l'action…"
-            value="${_esc(ded['act_nom_'+k]||'')}"
-            onchange="window._bstSetDeduction('${c.id}','act_nom_${k}',this.value)">
+            value="${_esc(ded['act_nom_'+k]||'')}" ${dedAttr('nom')}>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
             <input class="bst-deduct-input" placeholder="🎯 Toucher"
-              value="${_esc(ded['act_toucher_'+k]||'')}"
-              onchange="window._bstSetDeduction('${c.id}','act_toucher_${k}',this.value)">
+              value="${_esc(ded['act_toucher_'+k]||'')}" ${dedAttr('toucher')}>
             <input class="bst-deduct-input" placeholder="⚔️ Dégâts"
-              value="${_esc(ded['act_degats_'+k]||'')}"
-              onchange="window._bstSetDeduction('${c.id}','act_degats_${k}',this.value)">
+              value="${_esc(ded['act_degats_'+k]||'')}" ${dedAttr('degats')}>
             <input class="bst-deduct-input" placeholder="📏 Portée"
-              value="${_esc(ded['act_portee_'+k]||'')}"
-              onchange="window._bstSetDeduction('${c.id}','act_portee_${k}',this.value)">
+              value="${_esc(ded['act_portee_'+k]||'')}" ${dedAttr('portee')}>
           </div>
         </div>`;
       }).join('')}
@@ -1389,17 +1409,17 @@ function _renderPanel(c) {
       <div class="bst-section-title">✨ Traits & Capacités
         <span class="bst-section-count">${traits.length} trait${traits.length>1?'s':''}</span>
       </div>
-      ${traits.map((_, i) => `
-        <div class="bst-trait">
+      ${traits.map((_, i) => {
+        const dedAttr = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="tr_${suffix}_${i}"`;
+        return `<div class="bst-trait">
           <input class="bst-deduct-input" style="margin-bottom:5px;font-weight:600"
             placeholder="Nom du trait…"
-            value="${_esc(ded['tr_nom_'+i]||'')}"
-            onchange="window._bstSetDeduction('${c.id}','tr_nom_${i}',this.value)">
+            value="${_esc(ded['tr_nom_'+i]||'')}" ${dedAttr('nom')}>
           <input class="bst-deduct-input"
             placeholder="Description…"
-            value="${_esc(ded['tr_desc_'+i]||'')}"
-            onchange="window._bstSetDeduction('${c.id}','tr_desc_${i}',this.value)">
-        </div>`).join('')}
+            value="${_esc(ded['tr_desc_'+i]||'')}" ${dedAttr('desc')}>
+        </div>`;
+      }).join('')}
     </div>` : '';
 
   return `
@@ -1434,11 +1454,11 @@ function _renderPanelAdmin(c, rs) {
     <div class="bst-panel-hero">
       ${c.imageUrl
         ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}"
-             style="cursor:pointer" onclick="window.openBeastImageModal('${c.id}')">`
-        : `<div class="bst-panel-empty" style="cursor:pointer" onclick="window.openBeastImageModal('${c.id}')">${c.emoji||'🐲'}</div>`}
-      <button class="bst-panel-img-edit" onclick="window.openBeastImageModal('${c.id}')" title="Changer l'image">📷</button>
+             style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">`
+        : `<div class="bst-panel-empty" style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">${c.emoji||'🐲'}</div>`}
+      <button class="bst-panel-img-edit" data-bst-action="openImage" data-id="${c.id}" title="Changer l'image">📷</button>
       <div class="bst-panel-mj-badge">MJ</div>
-      <button class="bst-panel-close" onclick="window._bstClose()">✕</button>
+      <button class="bst-panel-close" data-bst-action="close">✕</button>
       <div class="bst-panel-hero-info">
         <div class="bst-panel-rang-selector">
           ${Object.entries(RANG_STYLE).map(([r, rst]) => {
@@ -1446,23 +1466,23 @@ function _renderPanelAdmin(c, rs) {
             return `<button type="button" data-bst-rang-btn="${r}"
               class="bst-rang-btn${active?' active':''}"
               style="${active?`color:${rst.color};border-color:${rst.color};background:${rst.color}1a`:''}"
-              onclick="window._bstSelectRangPanel('${c.id}','${r}')">${rst.label}</button>`;
+              data-bst-action="selectRang" data-id="${c.id}" data-rang="${r}">${rst.label}</button>`;
           }).join('')}
           <button type="button" class="bst-rang-btn bst-hidden-toggle${c.hidden?' active':''}"
-            onclick="window._bstToggleHidden('${c.id}')"
+            data-bst-action="toggleHidden" data-id="${c.id}"
             title="${c.hidden ? 'Visible : actuellement cachée aux joueurs — clic pour afficher' : 'Cacher cette créature aux joueurs (boss spoiler, contenu surprise)'}"
             style="${c.hidden ? 'color:#b47fff;border-color:#b47fff;background:rgba(180,127,255,0.10)' : ''}">
             ${c.hidden ? '🔒 Cachée' : '👁 Visible'}
           </button>
         </div>
         <input class="bst-panel-name-input" value="${_esc(c.nom||'')}" placeholder="Nom de la créature…"
-          oninput="window._bstUpdateNom('${c.id}', this.value)">
+          data-bst-action="updateNom" data-bst-on="input" data-id="${c.id}">
         <div class="bst-panel-meta-edit">
           <input class="bst-panel-edit-inline" placeholder="Type" value="${_esc(c.type||'')}"
-            oninput="window._bstUpdate('${c.id}','type',this.value)">
+            data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="type">
           <span class="bst-panel-meta-dot">·</span>
           <input class="bst-panel-edit-inline" placeholder="Environnement" value="${_esc(c.environnement||'')}"
-            oninput="window._bstUpdate('${c.id}','environnement',this.value)">
+            data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="environnement">
         </div>
       </div>
     </div>`;
@@ -1472,45 +1492,32 @@ function _renderPanelAdmin(c, rs) {
     <div class="bst-section">
       <div class="bst-section-title">Statistiques</div>
       <div class="bst-stats-base">
-        <div class="bst-stat-cell pv" onclick="this.querySelector('input')?.focus()">
-          <input type="number" min="0" value="${c.pvMax||''}" placeholder="0" class="bst-stat-track-input"
-            oninput="window._bstUpdateNum('${c.id}','pvMax',this.value)">
-          <div class="bst-stat-lbl">PV</div>
-        </div>
-        <div class="bst-stat-cell pm" onclick="this.querySelector('input')?.focus()">
-          <input type="number" min="0" value="${c.pmMax||''}" placeholder="0" class="bst-stat-track-input"
-            oninput="window._bstUpdateNum('${c.id}','pmMax',this.value)">
-          <div class="bst-stat-lbl">PM</div>
-        </div>
-        <div class="bst-stat-cell ca" onclick="this.querySelector('input')?.focus()">
-          <input type="number" min="0" value="${c.ca||''}" placeholder="0" class="bst-stat-track-input"
-            oninput="window._bstUpdateNum('${c.id}','ca',this.value)">
-          <div class="bst-stat-lbl">CA</div>
-        </div>
-        <div class="bst-stat-cell vit" onclick="this.querySelector('input')?.focus()">
-          <input type="number" min="0" value="${c.vitesse||''}" placeholder="0" class="bst-stat-track-input"
-            oninput="window._bstUpdateNum('${c.id}','vitesse',this.value)">
-          <div class="bst-stat-lbl">Vit. (m)</div>
-        </div>
-        <div class="bst-stat-cell init" onclick="this.querySelector('input')?.focus()">
-          <input type="number" min="0" value="${c.dangerositeXp||''}" placeholder="0" class="bst-stat-track-input"
-            oninput="window._bstUpdateNum('${c.id}','dangerositeXp',this.value)">
-          <div class="bst-stat-lbl">XP</div>
-        </div>
+        ${[
+          ['pv',  'PV',     'pvMax',         c.pvMax],
+          ['pm',  'PM',     'pmMax',         c.pmMax],
+          ['ca',  'CA',     'ca',            c.ca],
+          ['vit', 'Vit. (m)','vitesse',      c.vitesse],
+          ['init','XP',     'dangerositeXp', c.dangerositeXp],
+        ].map(([cls, lbl, field, val]) => `
+          <div class="bst-stat-cell ${cls}" data-bst-action="focusInput">
+            <input type="number" min="0" value="${val||''}" placeholder="0" class="bst-stat-track-input"
+              data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="${field}">
+            <div class="bst-stat-lbl">${lbl}</div>
+          </div>`).join('')}
       </div>
       <div class="bst-niv-row">
         <span class="bst-niv-lbl">Niveau / FP</span>
         <input type="number" min="0" value="${c.niveau||''}" placeholder="—"
           class="bst-p-input bst-p-input-sm"
-          oninput="window._bstUpdateNum('${c.id}','niveau',this.value)">
+          data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="niveau">
         <span class="bst-niv-lbl">Initiative</span>
         <input type="number" value="${c.initiative||''}" placeholder="—"
           class="bst-p-input bst-p-input-sm"
-          oninput="window._bstUpdateNum('${c.id}','initiative',this.value)">
+          data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="initiative">
         <span class="bst-niv-lbl">Emoji</span>
         <input value="${_esc(c.emoji||'🐲')}" placeholder="🐲"
           class="bst-p-input bst-p-input-sm" style="width:40px"
-          oninput="window._bstUpdate('${c.id}','emoji',this.value)">
+          data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="emoji">
       </div>
     </div>`;
 
@@ -1527,7 +1534,7 @@ function _renderPanelAdmin(c, rs) {
           return `<div class="bst-carac">
             <input type="number" min="0" value="${c[key]||''}" placeholder="—"
               class="bst-carac-input"
-              oninput="window._bstUpdateCarac('${c.id}','${key}',this.value)">
+              data-bst-action="updateCarac" data-bst-on="input" data-id="${c.id}" data-key="${key}">
             <div class="bst-carac-mod ${cls}" data-bst-mod="${c.id}-${key}">${txt}</div>
             <div class="bst-carac-lbl">${lbl}</div>
           </div>`;
@@ -1541,12 +1548,12 @@ function _renderPanelAdmin(c, rs) {
       <div class="bst-section-title">Token VTT (cases)</div>
       <div class="bst-token-row">
         <span class="bst-niv-lbl">Largeur</span>
-        <select class="bst-p-input bst-p-input-sm" onchange="window._bstUpdateNum('${c.id}','tokenW',this.value)">
+        <select class="bst-p-input bst-p-input-sm" data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenW">
           ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenW||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
         </select>
         <span class="bst-niv-lbl">×</span>
         <span class="bst-niv-lbl">Hauteur</span>
-        <select class="bst-p-input bst-p-input-sm" onchange="window._bstUpdateNum('${c.id}','tokenH',this.value)">
+        <select class="bst-p-input bst-p-input-sm" data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenH">
           ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenH||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
         </select>
       </div>
@@ -1557,7 +1564,7 @@ function _renderPanelAdmin(c, rs) {
     <div class="bst-section">
       <div class="bst-section-title">Description</div>
       <textarea class="bst-panel-textarea" placeholder="Apparence, comportement, lore…" rows="3"
-        oninput="window._bstUpdate('${c.id}','description',this.value)">${_esc(c.description||'')}</textarea>
+        data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="description">${_esc(c.description||'')}</textarea>
     </div>`;
 
   // ── Relations aux dégâts (matrice chips compacte) ─────────────────────
@@ -1580,7 +1587,7 @@ function _renderPanelAdmin(c, rs) {
       <div class="bst-section-title">
         🦷 Armes naturelles
         <span class="bst-section-count" data-bst-count="${c.id}-armes">${armes.length}</span>
-        <button class="bst-add-row-btn" onclick="window._bstAddArme('${c.id}')">+ Ajouter</button>
+        <button class="bst-add-row-btn" data-bst-action="addArme" data-id="${c.id}">+ Ajouter</button>
       </div>
       <div class="bst-section-hint">Comme une arme équipée pour les sorts dérivés. La 1ʳᵉ sert de référence par défaut aux actions.</div>
       <div id="bst-p-armes-${c.id}" class="bst-p-rows">
@@ -1593,7 +1600,7 @@ function _renderPanelAdmin(c, rs) {
       <div class="bst-section-title">
         ⚔️ Actions
         <span class="bst-section-count" data-bst-count="${c.id}-actions">${acts.length}</span>
-        <button class="bst-add-row-btn" onclick="window._bstAddAction()">+ Ajouter</button>
+        <button class="bst-add-row-btn" data-bst-action="addAction">+ Ajouter</button>
       </div>
       <div class="bst-section-hint">Sorts unifiés — même éditeur que les sorts de personnage et les actions d'objet.</div>
       <div id="bst-p-actions-${c.id}" class="bst-p-rows bst-actions-host">
@@ -1613,7 +1620,7 @@ function _renderPanelAdmin(c, rs) {
       <div class="bst-section-title">
         ✨ Traits & Capacités
         <span class="bst-section-count" data-bst-count="${c.id}-traits">${traits.length}</span>
-        <button class="bst-add-row-btn" onclick="window._bstAddPanelRow('${c.id}','traits')">+ Ajouter</button>
+        <button class="bst-add-row-btn" data-bst-action="addRow" data-id="${c.id}" data-type="traits">+ Ajouter</button>
       </div>
       <div id="bst-p-traits-${c.id}" class="bst-p-rows">
         ${traits.map((t, i) => _panelTraitRow(t, c.id, i)).join('')}
@@ -1625,7 +1632,7 @@ function _renderPanelAdmin(c, rs) {
       <div class="bst-section-title">
         💰 Butins
         <span class="bst-section-count" data-bst-count="${c.id}-butins">${butins.length}</span>
-        <button class="bst-add-row-btn" onclick="window._bstButinPickerOpen('${c.id}')">+ Ajouter</button>
+        <button class="bst-add-row-btn" data-bst-action="pickerOpen" data-id="${c.id}">+ Ajouter</button>
       </div>
       <div id="bst-p-butins-${c.id}" class="bst-p-rows">
         ${butins.map((b, i) => _panelButinRow(b, c.id, i)).join('')}
@@ -1645,7 +1652,7 @@ function _renderPanelAdmin(c, rs) {
       ${traitsHtml}
       ${butinsHtml}
       <div class="bst-admin-actions">
-        <button class="bst-btn-delete" style="flex:1" onclick="deleteBeast('${c.id}')">🗑️ Supprimer cette créature</button>
+        <button class="bst-btn-delete" style="flex:1" data-bst-action="deleteBeast" data-id="${c.id}">🗑️ Supprimer cette créature</button>
       </div>
     </div>
   </div>`;
@@ -1863,8 +1870,8 @@ async function openBeastImageModal(id) {
       </div>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="window._bstSaveImage('${id}')">💾 Enregistrer</button>
-      ${c.imageUrl ? `<button class="btn btn-outline" onclick="window._bstRemoveImage('${id}')">🗑 Retirer</button>` : ''}
+      <button class="btn btn-gold" style="flex:1" data-bst-action="saveImage" data-id="${id}">💾 Enregistrer</button>
+      ${c.imageUrl ? `<button class="btn btn-outline" data-bst-action="removeImage" data-id="${id}">🗑 Retirer</button>` : ''}
     </div>
   `);
 
@@ -1927,6 +1934,64 @@ window._bstRemoveImage = async (id) => {
     showNotif('Image retirée.', 'success');
   } catch (e) { notifySaveError(e); }
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HANDLERS DE DÉLÉGATION — chaque entrée lit ses paramètres dans `el.dataset`
+// et appelle la fonction existante. Les fonctions restent sur `window` tant que
+// d'autres features (legacy) peuvent encore les invoquer.
+// ──────────────────────────────────────────────────────────────────────────────
+Object.assign(bstHandlers, {
+  // Galerie / navigation
+  open:           (el) => window._bstOpen(el.dataset.id),
+  close:          ()   => window._bstClose(),
+  createDraft:    ()   => window._bstCreateDraft(),
+  switchBest:     (el) => window._bstSwitchBestiaire(el.dataset.id),
+  createBest:     ()   => window._bstCreateBestiaire(),
+  setRang:        (el) => window._bstSetRang(el.dataset.rang),
+  setType:        (el) => window._bstSetType(el.dataset.type),
+  search:         (el) => window._bstSearchInput(el.value),
+  viewAs:         (el) => window._bstViewAs(el.dataset.uid || ''),
+
+  // Panneau admin : édition inline
+  updateNom:      (el) => window._bstUpdateNom(el.dataset.id, el.value),
+  update:         (el) => window._bstUpdate(el.dataset.id, el.dataset.field, el.value),
+  updateNum:      (el) => window._bstUpdateNum(el.dataset.id, el.dataset.field, el.value),
+  updateCarac:    (el) => window._bstUpdateCarac(el.dataset.id, el.dataset.key, el.value),
+  selectRang:     (el) => window._bstSelectRangPanel(el.dataset.id, el.dataset.rang),
+  toggleHidden:   (el) => window._bstToggleHidden(el.dataset.id),
+  toggleDmg:      (el) => window._bstToggleDmg(el.dataset.id, el.dataset.key, el.dataset.tid),
+  syncDmgConfl:   ()   => window._bstSyncDmgConflicts(),
+  focusInput:     (el) => el.querySelector('input')?.focus(),
+
+  // Vue joueur : estimations / déductions
+  setStat:        (el) => window._bstSetStat(el.dataset.id, el.dataset.key, el.value),
+  setDeduction:   (el) => window._bstSetDeduction(el.dataset.id, el.dataset.key, el.value),
+
+  // Sections dynamiques (armes / actions / traits / butins)
+  addArme:        (el) => window._bstAddArme(el.dataset.id),
+  saveArmes:      (el) => window._bstSaveArmes(el.dataset.id),
+  removeArme:     (el) => window._bstRemoveArme(el.dataset.id, el),
+  addAction:      ()   => window._bstAddAction(),
+  editAction:     (el) => window._bstEditAction(parseInt(el.dataset.idx)),
+  removeAction:   (el) => window._bstRemoveAction(parseInt(el.dataset.idx)),
+  addRow:         (el) => window._bstAddPanelRow(el.dataset.id, el.dataset.type),
+  saveArr:        (el) => window._bstSaveArr(el.dataset.id, el.dataset.type),
+  removeRow:      (el) => window._bstRemovePanelRow(el.dataset.id, el.dataset.type, el),
+
+  // Picker de butin
+  pickerOpen:     (el) => window._bstButinPickerOpen(el.dataset.id),
+  pickerSearch:   (el) => window._bstButinPickerSearch(el.value),
+  pickerSetCat:   (el) => window._bstButinPickerSetCat(el.dataset.cat || ''),
+  pickerAdd:      (el) => window._bstButinPickerAdd(el.dataset.itemId, el),
+
+  // Image
+  openImage:      (el) => window.openBeastImageModal(el.dataset.id),
+  saveImage:      (el) => window._bstSaveImage(el.dataset.id),
+  removeImage:    (el) => window._bstRemoveImage(el.dataset.id),
+
+  // Suppression créature
+  deleteBeast:    (el, ev) => { ev?.stopPropagation?.(); deleteBeast(el.dataset.id); },
+});
 
 Object.assign(window, {
   renderBestiary,

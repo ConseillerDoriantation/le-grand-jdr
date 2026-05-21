@@ -16,6 +16,29 @@ import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import Sortable from '../vendor/sortable.esm.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
+// DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
+// Pattern : <button data-sh-action="open" data-id="…">…</button>
+// + shHandlers.open = (el) => openItemModal(el.dataset.id)
+// ══════════════════════════════════════════════════════════════════════════════
+const shHandlers = {};
+function _shBindDispatch() {
+  if (_shBindDispatch._bound) return;
+  _shBindDispatch._bound = true;
+  const dispatch = (e) => {
+    const el = e.target.closest('[data-sh-action]');
+    if (!el) return;
+    const fn = shHandlers[el.dataset.shAction];
+    if (typeof fn !== 'function') return;
+    if (el.dataset.shOn && el.dataset.shOn !== e.type) return;
+    fn(el, e);
+  };
+  document.addEventListener('click',  dispatch, true);
+  document.addEventListener('input',  dispatch, true);
+  document.addEventListener('change', dispatch, true);
+}
+_shBindDispatch();
+
+// ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
 // ══════════════════════════════════════════════════════════════════════════════
 const TEMPLATES = {
@@ -297,16 +320,16 @@ async function renderShop() {
       </div>
 
       <div class="sh-topbar-tools">
-        <button class="btn btn-gold btn-sm" onclick="openArtisanModal()" title="Améliorer ton équipement">🔨 Artisan</button>`;
+        <button class="btn btn-gold btn-sm" data-sh-action="openArtisan" title="Améliorer ton équipement">🔨 Artisan</button>`;
 
   if (STATE.isAdmin) {
     html += `
       <div class="sh-topbar-admin">
-        <button class="btn btn-gold btn-sm" onclick="openCatModal()" title="Créer une catégorie">📁 Catégorie</button>
-        <button class="btn btn-outline btn-sm" onclick="openItemModal()" title="Créer un article">＋ Article</button>
-        <button class="btn btn-outline btn-sm" onclick="openWeaponFormatsAdmin()" title="Gérer les formats d'armes">⚙️ Formats</button>
-        <button class="btn btn-outline btn-sm" onclick="openUpgradeSettingsAdmin()" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
-        <button class="btn btn-outline btn-sm" onclick="openShopExportModal()" title="Exporter / Importer la boutique">⬆️ Export</button>
+        <button class="btn btn-gold btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
+        <button class="btn btn-outline btn-sm" data-sh-action="openItemModal" title="Créer un article">＋ Article</button>
+        <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les formats d'armes">⚙️ Formats</button>
+        <button class="btn btn-outline btn-sm" data-sh-action="openUpgradeStg" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
+        <button class="btn btn-outline btn-sm" data-sh-action="openExport" title="Exporter / Importer la boutique">⬆️ Export</button>
       </div>`;
   }
 
@@ -357,7 +380,7 @@ function _renderSidebarTop() {
       <select
         class="input-field sh-modal-select sh-char-select"
         id="sh-char-sel"
-        onchange="shopSetChar(this.value)"
+        data-sh-action="setChar" data-sh-on="change"
         aria-label="Personnage actif"
       >
         ${chars.map(c => `<option value="${c.id}" ${activeId===c.id?'selected':''}>${c.nom||'?'}</option>`).join('')}
@@ -380,7 +403,7 @@ function _renderSidebar() {
   return `
     <aside class="sh-sidebar">
       <div class="sh-sidebar-section">
-        <button class="sh-side-link ${_view === 'home' ? 'active' : ''}" onclick="shopGoHome()">
+        <button class="sh-side-link ${_view === 'home' ? 'active' : ''}" data-sh-action="goHome">
           <span class="sh-side-link-icon">🏠</span>
           <span class="sh-side-link-text">
             <strong>Toutes les catégories</strong>
@@ -398,7 +421,7 @@ function _renderSidebar() {
             const tpl = TEMPLATES[cat.template || 'classique'];
 
             return `
-              <button class="sh-side-link ${active ? 'active' : ''}" onclick="shopGoCat('${cat.id}')">
+              <button class="sh-side-link ${active ? 'active' : ''}" data-sh-action="goCat" data-id="${cat.id}">
                 <span class="sh-side-link-icon">${cat.emoji || _catEmoji(cat.nom)}</span>
                 <span class="sh-side-link-text">
                   <strong>${cat.nom}</strong>
@@ -409,7 +432,7 @@ function _renderSidebar() {
           }).join('')}
           ${orphaned.length > 0 ? `
             <button class="sh-side-link ${_view === 'items' && _activeCat === '__uncategorized__' ? 'active' : ''}"
-              onclick="shopGoCat('__uncategorized__')" style="opacity:.8">
+              data-sh-action="goCat" data-id="__uncategorized__" style="opacity:.8">
               <span class="sh-side-link-icon">📦</span>
               <span class="sh-side-link-text">
                 <strong>Non classé</strong>
@@ -433,10 +456,10 @@ function _renderHome() {
         <input type="text" id="sh-home-search" class="input-field"
           placeholder="🔍 Rechercher un article dans toutes les catégories..."
           value="${_filterSearch||''}"
-          oninput="shopFilterSearch(this.value)"
+          data-sh-action="search" data-sh-on="input"
           autocomplete="off"
           style="width:100%;padding-right:2.2rem">
-        ${_filterSearch ? `<button onclick="shopFilterSearch('')" aria-label="Effacer la recherche"
+        ${_filterSearch ? `<button data-sh-action="clearSearch" aria-label="Effacer la recherche"
           style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
           background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
       </div>
@@ -461,7 +484,7 @@ function _renderHomeResults() {
   _cats.forEach(cat => {
     const count = _items.filter(i => i.categorieId === cat.id).length;
     const tpl   = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" onclick="shopGoCat('${cat.id}')">
+    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" data-sh-action="goCat" data-id="${cat.id}">
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
         ${!cat.image?`<div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>`:''}
@@ -470,9 +493,9 @@ function _renderHomeResults() {
       <div class="sh-cat-body">
         <div class="sh-cat-name-row">
           <div class="sh-cat-name">${cat.nom}</div>
-          ${edit?`<div class="sh-card-admin-inline" onclick="event.stopPropagation()">
-            <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" onclick="openCatModal('${cat.id}')">✏️</button>
-            <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" onclick="deleteCat('${cat.id}')">🗑️</button>
+          ${edit?`<div class="sh-card-admin-inline" data-sh-action="stop">
+            <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" data-sh-action="openCatModal" data-id="${cat.id}">✏️</button>
+            <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" data-sh-action="deleteCat" data-id="${cat.id}">🗑️</button>
           </div>`:''}
         </div>
         <div class="sh-cat-meta">${count} article${count!==1?'s':''}</div>
@@ -483,7 +506,7 @@ function _renderHomeResults() {
   // Carte virtuelle "Non classé" pour les articles sans catégorie valide
   if (orphaned.length > 0) {
     const n = orphaned.length;
-    html += `<div class="sh-cat-card" onclick="shopGoCat('__uncategorized__')" style="opacity:.85">
+    html += `<div class="sh-cat-card" data-sh-action="goCat" data-id="__uncategorized__" style="opacity:.85">
       <div class="sh-cat-img" style="background:linear-gradient(135deg,#2a2a3e,#1a1a2a)">
         <div class="sh-cat-img-overlay"></div>
         <div class="sh-cat-img-emoji">📦</div>
@@ -525,12 +548,12 @@ function _renderHomeSearchResults() {
 
   if (pages > 1) {
     html += `<div class="sh-pagination">`;
-    if (p>1) html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
+    if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" onclick="shopPage(1)">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
-    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" onclick="shopPage(${i})">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" onclick="shopPage(${pages})">${pages}</button>`;
-    if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
+    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
   return html;
@@ -664,14 +687,14 @@ function _renderItemsView() {
         <input type="text" id="sh-search" class="input-field"
           placeholder="🔍 Rechercher..."
           value="${_filterSearch||''}"
-          oninput="shopFilterSearch(this.value)"
+          data-sh-action="search" data-sh-on="input"
           autocomplete="off"
           style="width:100%;padding-right:2.2rem">
-        ${_filterSearch ? `<button onclick="shopFilterSearch('')"
+        ${_filterSearch ? `<button data-sh-action="clearSearch"
           style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
           background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
       </div>
-      <select class="input-field sh-sort-select" onchange="shopSetSort(this.value)" aria-label="Trier par" title="Trier les articles">
+      <select class="input-field sh-sort-select" data-sh-action="setSort" data-sh-on="change" aria-label="Trier par" title="Trier les articles">
         <option value="ordre"     ${_filterSort==='ordre'?'selected':''}>Ordre manuel</option>
         <option value="nom"       ${_filterSort==='nom'?'selected':''}>Nom (A→Z)</option>
         <option value="prix_asc"  ${_filterSort==='prix_asc'?'selected':''}>Prix ↑</option>
@@ -680,11 +703,11 @@ function _renderItemsView() {
       </select>
       <div class="sh-filter-actions">
         <span id="sh-count" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
-        <button id="sh-clear-btn" onclick="shopFilterReset()"
+        <button id="sh-clear-btn" data-sh-action="resetFilters"
           style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
           border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b;
           display:${hasFilters?'':'none'}">✕ Tout effacer</button>
-        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openItemModal()">+ Article</button>` : ''}
+        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-sh-action="openItemModal">+ Article</button>` : ''}
       </div>
     </div>
     ${tagGroups.length > 0 ? `
@@ -699,7 +722,7 @@ function _renderItemsView() {
           return `<button class="sh-filter-chip"
             data-tag-value="${tag.value.replace(/"/g,'&quot;')}"
             data-tag-color="${tag.color}"
-            onclick="shopToggleTag('${sv}')"
+            data-sh-action="toggleTag" data-tag="${tag.value.replace(/"/g,'&quot;')}"
             style="border:1px solid ${active ? tag.color : 'var(--border)'};
             background:${active ? tag.color+'22' : 'var(--bg-elevated)'};
             color:${active ? tag.color : 'var(--text-dim)'};
@@ -714,19 +737,19 @@ function _renderItemsView() {
   if (slice.length === 0) {
     html += `<div class="empty-state"><div class="icon">📦</div>
       <p>${hasFilters ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasFilters && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>` : ''}</div>`;
+      ${!hasFilters && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" data-sh-action="openItemModal">+ Ajouter</button>` : ''}</div>`;
   } else {
     html += _renderItemGrid(cat, slice);
   }
 
   if (pages > 1) {
     html += `<div class="sh-pagination">`;
-    if (p>1) html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
+    if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const start=Math.max(1,p-2), end=Math.min(pages,p+2);
-    if(start>1) html+=`<button class="sh-page-btn" onclick="shopPage(1)">1</button>${start>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
-    for(let i=start;i<=end;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" onclick="shopPage(${i})">${i}</button>`;
-    if(end<pages) html+=`${end<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" onclick="shopPage(${pages})">${pages}</button>`;
-    if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
+    if(start>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${start>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    for(let i=start;i<=end;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
+    if(end<pages) html+=`${end<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
   html += `</div>`;
@@ -1006,7 +1029,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
   } else if (tropCher) {
     buyBtnHtml = `<button class="btn sh-buy-btn sh-buy-btn--poor" disabled title="Il te manque ${manque} or">Pas assez d'or</button>`;
   } else {
-    buyBtnHtml = `<button class="btn sh-buy-btn" onclick="event.stopPropagation();buyItem('${item.id}')">🛒 Acheter</button>`;
+    buyBtnHtml = `<button class="btn sh-buy-btn" data-sh-action="buyItem" data-id="${item.id}">🛒 Acheter</button>`;
   }
 
   return `
@@ -1033,7 +1056,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
         </div>
       </div>
 
-      <div class="sh-item-body" onclick="openShopItemDetail('${item.id}')">
+      <div class="sh-item-body" data-sh-action="openDetail" data-id="${item.id}">
         <div class="sh-item-header">
           <div class="sh-item-name">${_esc(item.nom || '?')}</div>
         </div>
@@ -1092,9 +1115,9 @@ function _renderItemCard(item, tplKey, itemIdx) {
       </div>
 
       ${edit ? `
-        <div class="sh-item-actions" onclick="event.stopPropagation()">
-          <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" onclick="openItemModal('${item.id}')">✏️</button>
-          <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" onclick="deleteShopItem('${item.id}')">🗑️</button>
+        <div class="sh-item-actions" data-sh-action="stop">
+          <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
+          <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
         </div>
       ` : ''}
     </article>
@@ -1313,10 +1336,10 @@ function openShopItemDetail(itemId) {
         ${dispo===null?'∞ Stock illimité':dispo===0?'Épuisé':`${dispo} en stock`}
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end">
-        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="closeModalDirect();openItemModal('${item.id}')">✏️ Modifier</button>` : ''}
+        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-sh-action="editFromDetail" data-id="${item.id}">✏️ Modifier</button>` : ''}
         ${canSellCurrent ? `
           <button class="btn btn-outline btn-sm" title="Revendre l'objet actuellement équipé sur ${compareSlot}"
-            onclick="window._sellCurrentEquipForShop('${compareSlot}')">
+            data-sh-action="sellEquip" data-slot="${compareSlot}">
             💰 Revendre l'actuel${sellPrice ? ` (+${sellPrice} or)` : ''}
           </button>
         ` : ''}
@@ -1348,7 +1371,7 @@ function openShopItemDetail(itemId) {
             Pas assez d'or
           </button>
         ` : `
-          <button class="btn btn-gold btn-sm" onclick="closeModalDirect();buyItem('${item.id}')">
+          <button class="btn btn-gold btn-sm" data-sh-action="buyFromDetail" data-id="${item.id}">
             🛒 Acheter
           </button>
         `}
@@ -1407,28 +1430,23 @@ async function buyItem(itemId) {
       <label style="flex-shrink:0">Quantité</label>
       <div style="display:flex;align-items:center;gap:.4rem">
         <button type="button"
-          onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event('input'))"
+          data-sh-action="qtyDown"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
         <input type="number" id="buy-qty" min="1" max="${maxQte}" value="1"
           style="width:60px;text-align:center" class="input-field"
-          oninput="
-            const v=Math.min(Math.max(1,parseInt(this.value)||1),${maxQte});
-            this.value=v;
-            document.getElementById('buy-total').textContent=(v*${prix})+' or';
-            document.getElementById('buy-confirm').textContent='🛒 Acheter ×'+v+' — '+(v*${prix})+' or';
-          ">
+          data-sh-action="qtyInput" data-sh-on="input" data-prix="${prix}">
         <button type="button"
-          onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event('input'))"
+          data-sh-action="qtyUp"
           style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
       </div>
       <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="buy-total" style="color:var(--gold)">${prix} or</strong></span>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button id="buy-confirm" class="btn btn-gold" style="flex:1"
-        onclick="confirmBuyItem('${itemId}')">
+        data-sh-action="confirmBuy" data-id="${itemId}">
         🛒 Acheter ×1 — ${prix} or
       </button>
-      <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
+      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
     </div>
   `);
 }
@@ -1628,19 +1646,19 @@ function _updateItemsOnly() {
   if (slice.length === 0) {
     html = `<div class="empty-state"><div class="icon">📦</div>
       <p>${hasF ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasF && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" onclick="openItemModal()">+ Ajouter</button>` : ''}</div>`;
+      ${!hasF && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" data-sh-action="openItemModal">+ Ajouter</button>` : ''}</div>`;
   } else {
     html = _renderItemGrid(cat, slice);
   }
 
   if (pages > 1) {
     html += `<div class="sh-pagination">`;
-    if (p>1) html += `<button class="sh-page-btn" onclick="shopPage(${p-1})">← Précédent</button>`;
+    if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" onclick="shopPage(1)">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
-    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" onclick="shopPage(${i})">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" onclick="shopPage(${pages})">${pages}</button>`;
-    if(p<pages) html+=`<button class="sh-page-btn" onclick="shopPage(${p+1})">Suivant →</button>`;
+    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
   grid.innerHTML = html;
@@ -1763,12 +1781,14 @@ function openCatModal(catId) {
     </div>
     <div class="form-group"><label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
       <div class="sh-upload-simple">
-        <input type="file" id="cat-img-file" accept="image/*" onchange="previewUpload('cat-img-file','cat-img-preview','cat-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="file" id="cat-img-file" accept="image/*"
+          data-sh-action="uploadImg" data-sh-on="change" data-preview="cat-img-preview" data-hidden="cat-img-b64"
+          style="font-size:0.8rem;color:var(--text-muted)">
         <input type="hidden" id="cat-img-b64" value="${cat?.image||''}">
       </div>
       <div id="cat-img-preview">${cat?.image?`<img src="${cat.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCat('${catId||''}')">
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-sh-action="saveCat" data-id="${catId||''}">
       ${cat?'Enregistrer':'Créer'}
     </button>`);
   setTimeout(()=>{ document.getElementById('cat-nom')?.focus(); _updateTplPreview(); document.getElementById('cat-template')?.addEventListener('change',_updateTplPreview); },60);
@@ -1822,12 +1842,14 @@ function openSubCatModal(catId,scId) {
     </div>
     <div class="form-group"><label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
       <div class="sh-upload-simple">
-        <input type="file" id="sc-img-file" accept="image/*" onchange="previewUpload('sc-img-file','sc-img-preview','sc-img-b64')" style="font-size:0.8rem;color:var(--text-muted)">
+        <input type="file" id="sc-img-file" accept="image/*"
+          data-sh-action="uploadImg" data-sh-on="change" data-preview="sc-img-preview" data-hidden="sc-img-b64"
+          style="font-size:0.8rem;color:var(--text-muted)">
         <input type="hidden" id="sc-img-b64" value="${sc?.image||''}">
       </div>
       <div id="sc-img-preview">${sc?.image?`<img src="${sc.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveSubCat('${catId}','${scId||''}')">
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-sh-action="saveSubCat" data-cat="${catId}" data-sc="${scId||''}">
       ${sc?'Enregistrer':'Créer'}
     </button>`);
   setTimeout(()=>document.getElementById('sc-nom')?.focus(),50);
@@ -1906,7 +1928,7 @@ function _shopRenderSkillChipHTML(skillName, val) {
              font-size:.78rem;font-weight:600">
       <strong style="color:${col};font-variant-numeric:tabular-nums">${sign}${v}</strong>
       <span>${_esc(skillName)}</span>
-      <button type="button" onclick="window._shopRemoveSkillBonus('${skillName.replace(/'/g, "\\'")}')"
+      <button type="button" data-sh-action="skillRemove" data-skill="${skillName.replace(/"/g, '&quot;')}"
         style="background:transparent;border:0;cursor:pointer;color:var(--text-dim);padding:0;
                font-size:.85rem;line-height:1;margin-left:.15rem"
         title="Retirer">✕</button>
@@ -2048,8 +2070,8 @@ function _shopRenderActionCard(act, idx) {
           <span style="font-size:.62rem;color:#b47fff">${a.pmOverride ?? a.pm ?? '?'} PM</span>
         </div>
       </div>
-      <button type="button" class="btn btn-outline btn-sm" onclick="window._shopEditAction(${idx})" title="Modifier">✏️</button>
-      <button type="button" class="btn-icon" onclick="window._shopRemoveAction(${idx})" title="Supprimer" style="color:#ef4444">🗑</button>
+      <button type="button" class="btn btn-outline btn-sm" data-sh-action="editAction" data-idx="${idx}" title="Modifier">✏️</button>
+      <button type="button" class="btn-icon" data-sh-action="removeAction" data-idx="${idx}" title="Supprimer" style="color:#ef4444">🗑</button>
     </div>`;
 }
 
@@ -2066,7 +2088,7 @@ function _shopRenderActionsSection(actions) {
     <div class="form-group si-actions-section">
       <label class="si-actions-label">
         <span>⚡ Actions disponibles <span class="si-actions-hint">(sorts embarqués — même modal que les sorts de personnage)</span></span>
-        <button type="button" class="btn btn-outline btn-sm" onclick="window._shopAddAction()">＋ Ajouter</button>
+        <button type="button" class="btn btn-outline btn-sm" data-sh-action="addAction">＋ Ajouter</button>
       </label>
       <div id="si-actions-list" style="display:flex;flex-direction:column;gap:.4rem">
         ${list.length
@@ -2238,7 +2260,7 @@ function _siBuildTabs(tpl, item, tplKey, activeTab = 'essentiel') {
   const strip = tabs.map((t, i) => {
     const d = _SI_TAB_DEF[t];
     return `<button type="button" class="si-tab${t===active?' is-active':''}"
-              data-tab="${t}" onclick="window._siSetTab('${t}')"
+              data-tab="${t}" data-sh-action="setTab"
               title="Alt+${i+1}">${d.icon} <span>${d.label}</span></button>`;
   }).join('');
   const panels = tabs.map(t => `
@@ -2286,7 +2308,7 @@ function openItemModal(itemId) {
     <div class="si-header">
       <label class="si-img-btn" title="Cliquer pour changer l'image">
         <input type="file" id="si-img-file" accept="image/*"
-               onchange="previewUpload('si-img-file','si-img-preview-thumb','si-img-b64')"
+               data-sh-action="uploadImg" data-sh-on="change" data-preview="si-img-preview-thumb" data-hidden="si-img-b64"
                style="display:none">
         <input type="hidden" id="si-img-b64" value="${item?.image||''}">
         <div id="si-img-preview-thumb" class="si-img-thumb">${imgPreviewHtml}</div>
@@ -2295,10 +2317,10 @@ function openItemModal(itemId) {
         <input class="input-field si-name-input" id="si-nom"
                value="${(item?.nom||'').replace(/"/g,'&quot;')}"
                placeholder="Nom de l'article…"
-               oninput="window._siRefreshChip()">
+               data-sh-action="refreshChip" data-sh-on="input">
         <div class="si-header-row2">
           <select class="input-field sh-modal-select si-cat-select" id="si-cat"
-                  onchange="refreshItemFields(this.value)">
+                  data-sh-action="refreshFields" data-sh-on="change">
             <option value="">— Catégorie —</option>${catOptions}
           </select>
           <span class="si-name-chip" id="si-name-chip"></span>
@@ -2311,8 +2333,8 @@ function openItemModal(itemId) {
       ${headerHtml}
       <div class="si-body" id="si-sections-dynamic">${_siBuildTabs(tpl, item, tplKey)}</div>
       <footer class="si-footer">
-        <button class="btn btn-outline" onclick="closeModalDirect()">Annuler</button>
-        <button class="btn btn-gold" onclick="saveShopItem('${itemId||''}')">
+        <button class="btn btn-outline" data-sh-action="closeModal">Annuler</button>
+        <button class="btn btn-gold" data-sh-action="saveItem" data-id="${itemId||''}">
           ${item ? '💾 Enregistrer' : '➕ Ajouter'}
         </button>
       </footer>
@@ -2372,7 +2394,7 @@ function _buildFieldsHtml(tpl,item) {
       const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO);
       html+=`<div class="form-group"><label>${f.label}</label>
         <div class="sh-prix-wrap">
-          <input type="number" class="input-field" id="si-${f.id}" value="${val}" min="0" oninput="updatePrixVente(this.value)">
+          <input type="number" class="input-field" id="si-${f.id}" value="${val}" min="0" data-sh-action="prixInput" data-sh-on="input">
           <span class="sh-prix-vente-display" id="si-prix-vente" title="Prix de rachat — 60% du prix d'achat">🔄<strong id="si-pv-val">${pv}</strong></span>
         </div></div>`;
     } else if(f.type==='rarete'){
@@ -2384,7 +2406,7 @@ function _buildFieldsHtml(tpl,item) {
         <div class="sh-dispo-wrap">
           <input type="number" class="input-field" id="si-dispo" value="${dispoVal}" min="0" placeholder="3" ${isInfini?'disabled':''}>
           <label class="sh-dispo-infini-label" title="Stock illimité">
-            <input type="checkbox" id="si-dispo-infini" ${isInfini?'checked':''} onchange="toggleDispoInfini(this)">
+            <input type="checkbox" id="si-dispo-infini" ${isInfini?'checked':''} data-sh-action="dispoInfini" data-sh-on="change">
             <span>∞</span>
           </label>
         </div></div>`;
@@ -2410,7 +2432,7 @@ function _buildFieldsHtml(tpl,item) {
           <div id="si-degats-stats-list" class="sh-dmg-chips">
             ${statsArr.map((key,i)=>_renderDegatsStatChip(key,i)).join('')}
           </div>
-          <button type="button" class="sh-dmg-add" onclick="window._shopDegatsStatAdd()">+ Mod</button>
+          <button type="button" class="sh-dmg-add" data-sh-action="degatsAdd">+ Mod</button>
         </div>
         <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.4rem">Ex : 2d4 + For + Sa pour les Bandes du moine.</div>
       </div>`;
@@ -2466,7 +2488,7 @@ function _buildFieldsHtml(tpl,item) {
           </select>
           <input type="number" class="input-field" id="si-skill-val" placeholder="+1" min="-10" max="10"
             style="width:80px;text-align:center">
-          <button type="button" class="btn btn-outline btn-sm" onclick="window._shopAddSkillBonus()">＋</button>
+          <button type="button" class="btn btn-outline btn-sm" data-sh-action="skillAdd">＋</button>
         </div>
       </div>`;
       // Le HTML n'est pas encore dans le DOM (on construit la string).
@@ -2485,12 +2507,12 @@ function _buildFieldsHtml(tpl,item) {
           ${traitsArr.map((t,i)=>`
           <div style="display:flex;gap:.4rem;align-items:center" data-trait-idx="${i}">
             <input class="input-field" style="flex:1;font-size:.83rem" value="${t.replace(/"/g,'&quot;')}"
-              oninput="window._shopTraitUpdate(${i},this.value)" placeholder="Trait...">
-            <button type="button" onclick="window._shopTraitRemove(${i})"
+              data-sh-action="traitUpdate" data-sh-on="input" data-idx="${i}" placeholder="Trait...">
+            <button type="button" data-sh-action="traitRemove" data-idx="${i}"
               style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:2px 6px">✕</button>
           </div>`).join('')}
         </div>
-        <button type="button" onclick="window._shopTraitAdd()"
+        <button type="button" data-sh-action="traitAdd"
           style="font-size:.75rem;padding:4px 12px;border-radius:8px;cursor:pointer;
           border:1px dashed var(--border);background:transparent;color:var(--text-dim);
           transition:all .12s;width:100%"
@@ -2538,8 +2560,8 @@ function _shopTraitsRender(arr) {
   list.innerHTML = arr.map((t,i)=>`
     <div style="display:flex;gap:.4rem;align-items:center" data-trait-idx="${i}">
       <input class="input-field" style="flex:1;font-size:.83rem" value="${t.replace(/"/g,'&quot;')}"
-        oninput="window._shopTraitUpdate(${i},this.value)" placeholder="Trait...">
-      <button type="button" onclick="window._shopTraitRemove(${i})"
+        data-sh-action="traitUpdate" data-sh-on="input" data-idx="${i}" placeholder="Trait...">
+      <button type="button" data-sh-action="traitRemove" data-idx="${i}"
         style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:2px 6px">✕</button>
     </div>`).join('');
 }
@@ -2559,10 +2581,10 @@ window._shopTraitRemove = (i) => {
 // ── Gestion dynamique des modificateurs de dégâts ─────────────────────────────
 function _renderDegatsStatChip(key, i) {
   return `<span class="sh-dmg-sep">+</span><span class="sh-dmg-chip" data-dstat-idx="${i}">
-    <select onchange="window._shopDegatsStatUpdate(${i},this.value)">
+    <select data-sh-action="degatsUpdate" data-sh-on="change" data-idx="${i}">
       ${ITEM_STATS.map(s=>`<option value="${s.key}" ${key===s.key?'selected':''}>${s.short}</option>`).join('')}
     </select>
-    <button type="button" title="Retirer ce modificateur" onclick="window._shopDegatsStatRemove(${i})">✕</button>
+    <button type="button" title="Retirer ce modificateur" data-sh-action="degatsRemove" data-idx="${i}">✕</button>
   </span>`;
 }
 function _shopDegatsStatsGet() {
@@ -2839,9 +2861,9 @@ function openShopExportModal() {
   openModal('📦 Export / Import Boutique', `
     <div class="sh-export-tabs">
       <button class="sh-export-tab sh-export-tab--active" id="sh-etab-export"
-        onclick="window._shopTabSwitch('export')">📤 Exporter</button>
+        data-sh-action="tabSwitch" data-tab="export">📤 Exporter</button>
       <button class="sh-export-tab" id="sh-etab-import"
-        onclick="window._shopTabSwitch('import')">📥 Importer</button>
+        data-sh-action="tabSwitch" data-tab="import">📥 Importer</button>
     </div>
 
     <div id="sh-tab-export">
@@ -2849,9 +2871,9 @@ function openShopExportModal() {
         <label style="margin-bottom:.35rem;display:block">Catégories</label>
         <div style="display:flex;gap:.4rem;margin-bottom:.4rem">
           <button class="btn btn-outline btn-sm" type="button"
-            onclick="window._shopExportSelectAll(true)">Tout</button>
+            data-sh-action="exportSelectAll" data-all="true">Tout</button>
           <button class="btn btn-outline btn-sm" type="button"
-            onclick="window._shopExportSelectAll(false)">Aucun</button>
+            data-sh-action="exportSelectAll" data-all="false">Aucun</button>
         </div>
         <div class="sh-export-cat-list">
           ${catRows || '<em style="color:var(--text-dim)">Aucune catégorie.</em>'}
@@ -2865,7 +2887,7 @@ function openShopExportModal() {
           <label><input type="radio" name="sh-export-fmt" value="md"> Markdown</label>
         </div>
       </div>
-      <button class="btn btn-gold" onclick="window._shopDoExport()">⬇️ Télécharger</button>
+      <button class="btn btn-gold" data-sh-action="doExport">⬇️ Télécharger</button>
     </div>
 
     <div id="sh-tab-import" style="display:none">
@@ -2877,11 +2899,11 @@ function openShopExportModal() {
         <label style="margin-bottom:.35rem;display:block">Fichier JSON</label>
         <input type="file" id="sh-import-file" accept=".json"
           style="font-size:.82rem;color:var(--text)"
-          onchange="window._shopPreviewImport(this)">
+          data-sh-action="previewImport" data-sh-on="change">
       </div>
       <div id="sh-import-preview"></div>
       <div id="sh-import-actions" style="display:none;margin-top:.6rem">
-        <button class="btn btn-gold" onclick="window._shopDoImport()">📥 Importer</button>
+        <button class="btn btn-gold" data-sh-action="doImport">📥 Importer</button>
       </div>
     </div>
   `);
@@ -3096,6 +3118,87 @@ window._shopDoImport = async function() {
     showNotif('Erreur lors de l\'import.', 'error');
   }
 };
+
+// ──────────────────────────────────────────────────────────────────────────────
+// HANDLERS DE DÉLÉGATION (data-sh-action="…")
+// ──────────────────────────────────────────────────────────────────────────────
+Object.assign(shHandlers, {
+  // Header / navigation principale
+  openArtisan:    () => openArtisanModal(),
+  openCatModal:   (el) => openCatModal(el.dataset.id || ''),
+  openItemModal:  (el) => openItemModal(el.dataset.id || ''),
+  openWeaponFmts: () => openWeaponFormatsAdmin(),
+  openUpgradeStg: () => openUpgradeSettingsAdmin(),
+  openExport:     () => openShopExportModal(),
+  closeModal:     () => closeModalDirect(),
+  // Sidebar / catégories
+  goHome:         () => shopGoHome(),
+  goCat:          (el) => shopGoCat(el.dataset.id),
+  setChar:        (el) => shopSetChar(el.value),
+  search:         (el) => shopFilterSearch(el.value),
+  clearSearch:    () => shopFilterSearch(''),
+  setSort:        (el) => shopSetSort(el.value),
+  resetFilters:   () => shopFilterReset(),
+  toggleTag:      (el) => shopToggleTag(el.dataset.tag),
+  page:           (el) => shopPage(parseInt(el.dataset.page)),
+  deleteCat:      (el) => deleteCat(el.dataset.id),
+  // Items
+  buyItem:        (el, ev) => { ev?.stopPropagation?.(); buyItem(el.dataset.id); },
+  confirmBuy:     (el) => confirmBuyItem(el.dataset.id),
+  openDetail:     (el) => openShopItemDetail(el.dataset.id),
+  deleteItem:     (el) => deleteShopItem(el.dataset.id),
+  editFromDetail: (el) => { closeModalDirect(); openItemModal(el.dataset.id); },
+  buyFromDetail:  (el) => { closeModalDirect(); buyItem(el.dataset.id); },
+  sellEquip:      (el) => window._sellCurrentEquipForShop(el.dataset.slot),
+  // Stepper quantité achat
+  qtyDown:        (el) => { const inp = el.nextElementSibling; inp?.stepDown(); inp?.dispatchEvent(new Event('input')); },
+  qtyUp:          (el) => { const inp = el.previousElementSibling; inp?.stepUp(); inp?.dispatchEvent(new Event('input')); },
+  qtyInput:       (el) => _shBuyQtyInput(el),
+  // Modal article : tabs, prix, dispo, image, nom
+  setTab:         (el) => window._siSetTab(el.dataset.tab),
+  refreshChip:    () => window._siRefreshChip(),
+  refreshFields:  (el) => refreshItemFields(el.value),
+  prixInput:      (el) => updatePrixVente(el.value),
+  dispoInfini:    (el) => toggleDispoInfini(el),
+  uploadImg:      (el) => previewUpload(el.id, el.dataset.preview, el.dataset.hidden),
+  saveItem:       (el) => saveShopItem(el.dataset.id || ''),
+  // Modal article : actions/sorts
+  addAction:      () => window._shopAddAction(),
+  editAction:     (el) => window._shopEditAction(parseInt(el.dataset.idx)),
+  removeAction:   (el) => window._shopRemoveAction(parseInt(el.dataset.idx)),
+  // Modal article : traits + degats stats + skills
+  traitAdd:       () => window._shopTraitAdd(),
+  traitUpdate:    (el) => window._shopTraitUpdate(parseInt(el.dataset.idx), el.value),
+  traitRemove:    (el) => window._shopTraitRemove(parseInt(el.dataset.idx)),
+  degatsAdd:      () => window._shopDegatsStatAdd(),
+  degatsUpdate:   (el) => window._shopDegatsStatUpdate(parseInt(el.dataset.idx), el.value),
+  degatsRemove:   (el) => window._shopDegatsStatRemove(parseInt(el.dataset.idx)),
+  skillAdd:       () => window._shopAddSkillBonus(),
+  skillRemove:    (el) => window._shopRemoveSkillBonus(el.dataset.skill),
+  // Modal catégorie/sous-cat
+  saveCat:        (el) => saveCat(el.dataset.id || ''),
+  saveSubCat:     (el) => saveSubCat(el.dataset.cat, el.dataset.sc || ''),
+  // Export / import
+  tabSwitch:      (el) => window._shopTabSwitch(el.dataset.tab),
+  exportSelectAll:(el) => window._shopExportSelectAll(el.dataset.all === 'true'),
+  doExport:       () => window._shopDoExport(),
+  previewImport:  (el) => window._shopPreviewImport(el),
+  doImport:       () => window._shopDoImport(),
+  // No-op : juste pour empêcher la propagation au parent (équivalent stopPropagation)
+  stop:           (el, ev) => ev?.stopPropagation?.(),
+});
+
+// Handler dédié à l'input de quantité de l'achat (calcul total live)
+function _shBuyQtyInput(el) {
+  const max = parseInt(el.max) || 1;
+  const prix = parseInt(el.dataset.prix) || 0;
+  const v = Math.min(Math.max(1, parseInt(el.value) || 1), max);
+  el.value = v;
+  const total = document.getElementById('buy-total');
+  const confirmBtn = document.getElementById('buy-confirm');
+  if (total) total.textContent = (v * prix) + ' or';
+  if (confirmBtn) confirmBtn.textContent = `🛒 Acheter ×${v} — ${v * prix} or`;
+}
 
 Object.assign(window,{
   renderShop, shopGoHome, shopGoCat, shopGoSubCat, shopPage,
