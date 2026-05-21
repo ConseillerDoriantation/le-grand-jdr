@@ -1867,6 +1867,34 @@ async function _shopEnsureDamageTypes() {
   return _shopDamageTypes;
 }
 
+// Lib des états (chargée depuis world/conditions ou exposée par vtt.js)
+let _shopConditionsLib = null;
+async function _shopEnsureConditions() {
+  if (_shopConditionsLib) return _shopConditionsLib;
+  // Priorité : lib VTT en mémoire (déjà mergée avec customs)
+  if (typeof window._vttGetConditionLibrary === 'function') {
+    const fromVtt = window._vttGetConditionLibrary();
+    if (Array.isArray(fromVtt) && fromVtt.length) {
+      _shopConditionsLib = fromVtt;
+      return fromVtt;
+    }
+  }
+  try {
+    const { getDocData } = await import('../data/firestore.js');
+    const d = await getDocData('world', 'conditions');
+    if (d?.library?.length) {
+      _shopConditionsLib = d.library.map(c => ({
+        id: c.id, label: c.label || c.id, icon: c.icon || '✨',
+        defaultSaveStat: c.defaultSaveStat || null,
+        defaultDC: c.defaultDC || null,
+        defaultDuration: c.defaultDuration || null,
+      }));
+      return _shopConditionsLib;
+    }
+  } catch {}
+  return [];
+}
+
 const _ACT_TYPE_LABEL = { action: '🎯 Action', bonus: '💫 Action bonus', reaction: '⚡ Réaction' };
 const _ACT_STATS      = [
   { v:'',           lbl:'Aucune' },
@@ -1880,105 +1908,352 @@ const _ACT_STATS      = [
 
 function _shopActionId() { return 'a' + Math.random().toString(36).slice(2, 10); }
 
-function _shopRenderActionRow(act) {
+// ═══════════════════════════════════════════════════════════════════
+// ÉDITEUR D'ACTIONS — réutilise la modal de sort de perso (spells.js)
+// ═══════════════════════════════════════════════════════════════════
+// L'item.actions[i] est un sort complet (mêmes champs que deck_sorts).
+// On ouvre la VRAIE modal de création de sort (editItemSpell) pour éditer.
+// Cache mémoire pendant l'édition de l'item courant :
+let _shopActionsCache = [];
+
+/** Reset/charge le cache d'actions au moment d'ouvrir un item dans le shop. */
+function _shopActionsCacheLoad(actions) {
+  _shopActionsCache = Array.isArray(actions) ? actions.map(a => ({ ...a })) : [];
+}
+
+/** Carte récap d'une action (lecture seule + boutons Edit/Suppr). */
+function _shopRenderActionCard(act, idx) {
   const a = act || {};
-  const id = a.id || _shopActionId();
-  const typeOpts = Object.entries(_ACT_TYPE_LABEL)
-    .map(([v, lbl]) => `<option value="${v}" ${a.type===v?'selected':''}>${lbl}</option>`).join('');
-  const statOpts = _ACT_STATS
-    .map(s => `<option value="${s.v}" ${a.degatsStat===s.v?'selected':''}>${s.lbl}</option>`).join('');
-  const dtOpts = (_shopDamageTypes || []).map(t =>
-    `<option value="${t.id}" ${a.typeId===t.id?'selected':''}>${t.icon||''} ${t.nom||t.id}</option>`).join('');
+  const runes = a.runes || [];
+  const types = a.types || [];
+  const typeBadges = types.map(t => {
+    const col = t==='offensif' ? '#ff6b6b' : t==='defensif' ? '#22c38e' : '#b47fff';
+    return `<span style="font-size:.6rem;font-weight:700;padding:.1rem .4rem;border-radius:999px;color:${col};background:${col}1a;border:1px solid ${col}55">${t}</span>`;
+  }).join(' ');
+  // Compteur de runes : "Aff×2, Puiss×1"
+  const runeCounts = {};
+  runes.forEach(r => { runeCounts[r] = (runeCounts[r] || 0) + 1; });
+  const runeBadges = Object.entries(runeCounts).map(([r, n]) =>
+    `<span style="font-size:.62rem;font-weight:600;padding:.1rem .4rem;border-radius:5px;background:rgba(168,127,255,.12);color:#c4b5fd;border:1px solid rgba(168,127,255,.3)">${r}${n>1?`×${n}`:''}</span>`).join(' ');
   return `
-    <div class="si-action-row" data-action-id="${id}">
-      <div class="si-action-head">
-        <select class="input-field si-act-type">${typeOpts}</select>
-        <input class="input-field si-act-nom" placeholder="Nom de l'action…" value="${_esc(a.nom||'')}">
-        <button type="button" class="si-act-rm" title="Supprimer cette action"
-          onclick="window._shopRemoveAction('${id}')">✕</button>
+    <div class="si-action-card" style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px">
+      <span style="font-size:1.3rem;flex-shrink:0">${_esc(a.icon||'🔮')}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.85rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(a.nom || 'Sans nom')}</div>
+        <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.2rem">
+          ${typeBadges}${runeBadges}
+          ${a.noyau ? `<span style="font-size:.62rem;color:var(--text-dim)">⚛ ${_esc(a.noyau)}</span>` : ''}
+          <span style="font-size:.62rem;color:#b47fff">${a.pmOverride ?? a.pm ?? '?'} PM</span>
+        </div>
       </div>
-      <textarea class="input-field si-act-desc" rows="2" placeholder="Description (effet narratif)…">${_esc(a.description||'')}</textarea>
-      <div class="si-act-grid">
-        <label>Dés <span class="si-act-hint">(2d6+3, 1d8…)</span>
-          <input class="input-field si-act-degats" value="${_esc(a.degats||'')}" placeholder="2d6">
-        </label>
-        <label>Stat de scaling
-          <select class="input-field si-act-stat">${statOpts}</select>
-        </label>
-        <label>Type
-          <select class="input-field si-act-typeid"><option value="">— Aucun —</option>${dtOpts}</select>
-        </label>
-        <label>Portée <span class="si-act-hint">(cases)</span>
-          <input type="number" class="input-field si-act-portee" min="0" max="50" value="${a.portee||0}">
-        </label>
-        <label>Cibles <span class="si-act-hint">(1 = mono)</span>
-          <input type="number" class="input-field si-act-cibles" min="1" max="10" value="${a.nbCibles||1}">
-        </label>
-        <label>PM consommés
-          <input type="number" class="input-field si-act-pm" min="0" max="99" value="${a.pmCost||0}">
-        </label>
-      </div>
-      <div class="si-act-flags">
-        <label><input type="checkbox" class="si-act-heal" ${a.isHeal?'checked':''}> Soigne (au lieu d'infliger des dégâts)</label>
-        <label><input type="checkbox" class="si-act-self" ${a.targetSelf?'checked':''}> Cible le lanceur lui-même</label>
-        <label><input type="checkbox" class="si-act-conso" ${a.consommable?'checked':''}> Consomme 1 exemplaire de l'objet à l'usage</label>
-      </div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="window._shopEditAction(${idx})" title="Modifier">✏️</button>
+      <button type="button" class="btn-icon" onclick="window._shopRemoveAction(${idx})" title="Supprimer" style="color:#ef4444">🗑</button>
     </div>`;
 }
 
+const _RUNE_LIST = [
+  'Puissance', 'Protection', 'Lacération', 'Chance',
+  'Réaction', 'Enchantement', 'Invocation', 'Affliction',
+  'Amplification', 'Durée', 'Concentration', 'Dispersion',
+];
+
+// Ancienne fonction conservée pour rétro-compat — retourne la carte récap.
+function _shopRenderActionRow(act, idx) {
+  return _shopRenderActionCard(act, idx);
+}
+
+// (legacy bloated editor removed — supprimé pour éviter conflit avec la vraie modal)
+function _shopRenderActionRow_legacy(act) {
+  const a = act || {};
+  const id = a.id || _shopActionId();
+
+  // Types (chips multi-select)
+  const types = Array.isArray(a.types) && a.types.length ? a.types
+              : (a.noyau ? ['offensif'] : ['utilitaire']);
+  const typeChips = ['offensif','defensif','utilitaire'].map(t => {
+    const on = types.includes(t);
+    const col = t==='offensif' ? '#ff6b6b' : t==='defensif' ? '#22c38e' : '#b47fff';
+    return `<button type="button" class="si-act-type-chip ${on?'is-on':''}" data-type="${t}"
+      style="--c:${col}">${t}</button>`;
+  }).join('');
+
+  // Noyau (élément, optionnel)
+  const dtOpts = (_shopDamageTypes || []).map(t =>
+    `<option value="${t.id}" ${a.noyauTypeId===t.id?'selected':''}>${t.icon||''} ${t.nom||t.id}</option>`).join('');
+
+  // Runes (compteur par rune)
+  const runeCounts = {};
+  (a.runes || []).forEach(r => { runeCounts[r] = (runeCounts[r] || 0) + 1; });
+  const runesHtml = _RUNE_LIST.map(r => `
+    <div class="si-rune-counter" data-rune="${r}">
+      <span class="si-rune-name">${r}</span>
+      <div class="si-rune-ctrl">
+        <button type="button" onclick="window._shopRuneDelta('${id}','${r}',-1)">−</button>
+        <span class="si-rune-val">${runeCounts[r] || 0}</span>
+        <button type="button" onclick="window._shopRuneDelta('${id}','${r}',+1)">＋</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Liste d'états pour les modes "État"
+  const etatOpts = (_shopConditionsLib || []).map(c =>
+    `<option value="${c.id}">${c.icon||''} ${c.label||c.id}</option>`).join('');
+
+  // Mode Affliction (DoT/État)
+  const afflictionMode = a.afflictionMode || 'dot';
+  // Mode Enchantement (Dégâts/État)
+  const enchantMode    = a.enchantMode || 'dmg';
+  // Mode Protection (CA/Soin)
+  const protMode       = a.protectionMode || 'ca';
+
+  return `
+    <div class="si-action-row" data-action-id="${id}">
+      <div class="si-action-head">
+        <input class="input-field si-act-icon" placeholder="🔮" maxlength="3"
+          value="${_esc(a.icon||'')}" style="width:50px;text-align:center;font-size:1.2rem">
+        <input class="input-field si-act-nom" placeholder="Nom de l'action (ex: Élixir de Silence)"
+          value="${_esc(a.nom||'')}">
+        <button type="button" class="si-act-rm" title="Supprimer cette action"
+          onclick="window._shopRemoveAction('${id}')">✕</button>
+      </div>
+
+      <div class="si-act-types">
+        <span class="si-act-label">Types :</span>
+        ${typeChips}
+      </div>
+
+      <div class="si-act-grid">
+        <label>Noyau (élément)
+          <select class="input-field si-act-noyau-id">
+            <option value="">— Aucun —</option>${dtOpts}
+          </select>
+        </label>
+        <label>Portée <span class="si-act-hint">(cases ; vide = portée d'arme)</span>
+          <input type="number" class="input-field si-act-portee" min="0" max="50" value="${a.portee||''}">
+        </label>
+        <label>Coût PM <span class="si-act-hint">(override ; vide = auto runes)</span>
+          <input type="number" class="input-field si-act-pm-ovr" min="0" max="99" value="${a.pmOverride??''}" placeholder="auto">
+        </label>
+      </div>
+
+      <div class="si-runes-section">
+        <div class="si-act-label">Runes <span class="si-act-hint">(combinent les effets)</span></div>
+        <div class="si-runes-grid">${runesHtml}</div>
+      </div>
+
+      <!-- Mode Affliction : visible si rune Affliction -->
+      <div class="si-act-block" data-show-if-rune="Affliction" style="${runeCounts.Affliction?'':'display:none'}">
+        <div class="si-act-label">💀 Affliction</div>
+        <div class="si-act-grid">
+          <label>Mode
+            <select class="input-field si-act-aff-mode">
+              <option value="dot"  ${afflictionMode==='dot' ?'selected':''}>🩸 DoT (dégâts/tour)</option>
+              <option value="etat" ${afflictionMode==='etat'?'selected':''}>⛓ État</option>
+            </select>
+          </label>
+          <label>Formule DoT <span class="si-act-hint">(vide = 1d4 +2 auto, scalé par Puissance)</span>
+            <input type="text" class="input-field si-act-aff-dot" value="${_esc(a.afflictionDotFormula||'')}"
+              placeholder="auto" style="${afflictionMode==='dot'?'':'opacity:.5'}">
+          </label>
+          <label>État infligé <span class="si-act-hint">(mode État)</span>
+            <select class="input-field si-act-aff-etat" style="${afflictionMode==='etat'?'':'opacity:.5'}">
+              <option value="">— Aucun —</option>${etatOpts}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <!-- Mode Enchantement : visible si rune Enchantement -->
+      <div class="si-act-block" data-show-if-rune="Enchantement" style="${runeCounts.Enchantement?'':'display:none'}">
+        <div class="si-act-label">✨ Enchantement</div>
+        <div class="si-act-grid">
+          <label>Mode
+            <select class="input-field si-act-ench-mode">
+              <option value="dmg"  ${enchantMode==='dmg' ?'selected':''}>⚔️ Bonus dégâts arme</option>
+              <option value="etat" ${enchantMode==='etat'?'selected':''}>✨ État sur allié</option>
+            </select>
+          </label>
+          <label>Formule dégâts <span class="si-act-hint">(vide = auto)</span>
+            <input type="text" class="input-field si-act-ench-deg" value="${_esc(a.enchantDegats||'')}"
+              placeholder="auto" style="${enchantMode==='dmg'?'':'opacity:.5'}">
+          </label>
+          <label>État appliqué <span class="si-act-hint">(mode État)</span>
+            <select class="input-field si-act-ench-etat" style="${enchantMode==='etat'?'':'opacity:.5'}">
+              <option value="">— Aucun —</option>${etatOpts}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <!-- Mode Protection : visible si rune Protection ou Soin -->
+      <div class="si-act-block" data-show-if-rune="Protection" style="${runeCounts.Protection?'':'display:none'}">
+        <div class="si-act-label">🛡 Protection</div>
+        <div class="si-act-grid">
+          <label>Mode
+            <select class="input-field si-act-prot-mode">
+              <option value="ca"   ${protMode==='ca'  ?'selected':''}>🛡 Bonus CA</option>
+              <option value="soin" ${protMode==='soin'?'selected':''}>💚 Soin</option>
+            </select>
+          </label>
+          <label>CA formule <span class="si-act-hint">(ex: CA +3)</span>
+            <input type="text" class="input-field si-act-ca" value="${_esc(a.ca||'')}"
+              placeholder="auto" style="${protMode==='ca'?'':'opacity:.5'}">
+          </label>
+          <label>Soin formule <span class="si-act-hint">(ex: 2d4+2)</span>
+            <input type="text" class="input-field si-act-soin" value="${_esc(a.soin||'')}"
+              placeholder="auto" style="${protMode==='soin'?'':'opacity:.5'}">
+          </label>
+        </div>
+      </div>
+
+      <div class="si-act-grid">
+        <label>Dégâts d'impact <span class="si-act-hint">(offensif standard)</span>
+          <input type="text" class="input-field si-act-degats" value="${_esc(a.degats||'')}" placeholder="2d6+2">
+        </label>
+        <label>Effet libre / description
+          <input type="text" class="input-field si-act-effet" value="${_esc(a.effet||'')}" placeholder="effet narratif…">
+        </label>
+      </div>
+
+      <textarea class="input-field si-act-desc" rows="2"
+        placeholder="Notes additionnelles (apparence, déclencheurs…)">${_esc(a.description||'')}</textarea>
+
+      <div class="si-act-flags" style="margin-top:.4rem">
+        <label><input type="checkbox" class="si-act-self" ${a.targetSelf?'checked':''}> Sur soi (auto-ciblage du lanceur)</label>
+      </div>
+
+      <!-- Stockage interne des données dérivées (runes, types) -->
+      <input type="hidden" class="si-act-runes-data" value="${_esc(JSON.stringify(a.runes||[]))}">
+      <input type="hidden" class="si-act-types-data" value="${_esc(JSON.stringify(types))}">
+    </div>`;
+}
+
+// Helpers pour la manipulation runes/types en édition
+window._shopRuneDelta = (rowId, rune, delta) => {
+  const row = document.querySelector(`.si-action-row[data-action-id="${rowId}"]`); if (!row) return;
+  const ctn = row.querySelector(`.si-rune-counter[data-rune="${rune}"] .si-rune-val`);
+  const cur = parseInt(ctn?.textContent) || 0;
+  const next = Math.max(0, Math.min(5, cur + delta));
+  if (ctn) ctn.textContent = next;
+  // Met à jour hidden runes
+  const hidden = row.querySelector('.si-act-runes-data');
+  const list = [];
+  row.querySelectorAll('.si-rune-counter').forEach(rc => {
+    const n = parseInt(rc.querySelector('.si-rune-val')?.textContent) || 0;
+    for (let i = 0; i < n; i++) list.push(rc.dataset.rune);
+  });
+  if (hidden) hidden.value = JSON.stringify(list);
+  // Toggle visibilité des blocs conditionnels
+  const counts = {};
+  list.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  row.querySelectorAll('[data-show-if-rune]').forEach(el => {
+    const r = el.dataset.showIfRune;
+    el.style.display = counts[r] ? '' : 'none';
+  });
+};
+
+// Toggle des chips de type sur clic
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.si-act-type-chip');
+  if (!chip) return;
+  e.preventDefault();
+  chip.classList.toggle('is-on');
+  const row = chip.closest('.si-action-row'); if (!row) return;
+  const hidden = row.querySelector('.si-act-types-data');
+  const types = Array.from(row.querySelectorAll('.si-act-type-chip.is-on')).map(c => c.dataset.type);
+  if (hidden) hidden.value = JSON.stringify(types);
+});
+
 function _shopRenderActionsSection(actions) {
-  const list = Array.isArray(actions) ? actions : [];
+  // Init le cache si pas déjà fait (premier render)
+  if (actions && _shopActionsCache.length === 0 && Array.isArray(actions) && actions.length) {
+    _shopActionsCacheLoad(actions);
+  }
+  // Précharge la lib des états (utile pour l'éditeur de sort)
+  _shopEnsureConditions();
+  const list = _shopActionsCache;
   return `
     <div class="form-group si-actions-section">
       <label class="si-actions-label">
-        <span>⚡ Actions disponibles <span class="si-actions-hint">(action, bonus, réaction — chacune indépendante)</span></span>
+        <span>⚡ Actions disponibles <span class="si-actions-hint">(sorts embarqués — même modal que les sorts de personnage)</span></span>
         <button type="button" class="btn btn-outline btn-sm" onclick="window._shopAddAction()">＋ Ajouter</button>
       </label>
-      <div id="si-actions-list">
-        ${list.map(_shopRenderActionRow).join('') || '<div class="si-actions-empty">Aucune action définie — clique sur ＋ Ajouter pour en créer.</div>'}
+      <div id="si-actions-list" style="display:flex;flex-direction:column;gap:.4rem">
+        ${list.length
+          ? list.map((a, i) => _shopRenderActionCard(a, i)).join('')
+          : '<div class="si-actions-empty">Aucune action définie — clique sur ＋ Ajouter pour ouvrir l\'éditeur de sort.</div>'}
       </div>
     </div>`;
 }
 
 function _shopCollectActions() {
-  const out = [];
-  document.querySelectorAll('#si-actions-list .si-action-row[data-action-id]').forEach(row => {
-    const id = row.dataset.actionId;
-    const nom = (row.querySelector('.si-act-nom')?.value || '').trim();
-    const degats = (row.querySelector('.si-act-degats')?.value || '').trim();
-    // Une action vide (sans nom et sans dés) est ignorée
-    if (!nom && !degats) return;
-    out.push({
-      id,
-      type:        row.querySelector('.si-act-type')?.value   || 'action',
-      nom,
-      description: (row.querySelector('.si-act-desc')?.value || '').trim(),
-      pmCost:      Math.max(0, parseInt(row.querySelector('.si-act-pm')?.value)     || 0),
-      consommable: !!row.querySelector('.si-act-conso')?.checked,
-      degats,
-      degatsStat:  row.querySelector('.si-act-stat')?.value   || '',
-      typeId:      row.querySelector('.si-act-typeid')?.value || '',
-      portee:      Math.max(0, parseInt(row.querySelector('.si-act-portee')?.value) || 0),
-      nbCibles:    Math.max(1, parseInt(row.querySelector('.si-act-cibles')?.value) || 1),
-      isHeal:      !!row.querySelector('.si-act-heal')?.checked,
-      targetSelf:  !!row.querySelector('.si-act-self')?.checked,
-    });
-  });
-  return out;
+  // Les actions sont maintenant éditées via la modal de sort qui maintient
+  // _shopActionsCache. On retourne le cache courant tel quel.
+  return _shopActionsCache.map(a => ({ ...a }));
 }
 
-window._shopAddAction = () => {
-  const list = document.getElementById('si-actions-list'); if (!list) return;
-  // Si la zone vide est affichée, on la remplace
-  if (list.querySelector('.si-actions-empty')) list.innerHTML = '';
-  list.insertAdjacentHTML('beforeend', _shopRenderActionRow({}));
-};
-window._shopRemoveAction = (id) => {
-  document.querySelector(`.si-action-row[data-action-id="${id}"]`)?.remove();
-  const list = document.getElementById('si-actions-list');
-  if (list && !list.querySelector('.si-action-row')) {
-    list.innerHTML = '<div class="si-actions-empty">Aucune action définie — clique sur ＋ Ajouter pour en créer.</div>';
+/** Re-render in-place de la section actions depuis le cache. */
+function _shopRefreshActionsHost() {
+  const host = document.getElementById('si-actions-host');
+  if (host) host.innerHTML = _shopRenderActionsSection(_shopActionsCache);
+}
+
+/** Hook commun appelé par la modal de sort après save : met à jour le cache. */
+async function _shopActionsOnSave(itemSnapshot) {
+  // editItemSpell passe l'item avec son nouveau item.actions. On synchronise le cache.
+  _shopActionsCache = Array.isArray(itemSnapshot?.actions)
+    ? itemSnapshot.actions.map(a => ({ ...a })) : [];
+  _shopRefreshActionsHost();
+}
+
+/** Charge spells.js et expose tous les handlers nécessaires sur window
+ *  (au cas où characters.js n'aurait pas été chargé — ex: shop ouvert d'abord). */
+async function _shopEnsureSpellsModule() {
+  const mod = await import('./characters/spells.js');
+  // Liste des handlers utilisés par les onclick du modal sort
+  const exposeKeys = [
+    'addSort', 'editSort', 'openSortModal', 'saveSort',
+    'addItemSpell', 'editItemSpell',
+    'runeIncrement', 'runeDecrement', 'selectNoyau',
+    'updateSortPM', 'toggleSortDetail',
+    'openSortCatEditor',
+    'sortDragStart', 'sortDragOver', 'sortDrop', 'sortDragEnd',
+  ];
+  exposeKeys.forEach(k => {
+    if (typeof mod[k] === 'function' && typeof window[k] !== 'function') {
+      window[k] = mod[k];
+    }
+  });
+  return mod;
+}
+
+window._shopAddAction = async () => {
+  const mod = await _shopEnsureSpellsModule();
+  if (typeof mod.addItemSpell !== 'function') {
+    showNotif('Module sorts indisponible', 'error'); return;
   }
+  const fakeItem = { actions: _shopActionsCache, nom: document.getElementById('si-nom')?.value || 'Objet' };
+  mod.addItemSpell(fakeItem, async (updatedItem) => {
+    await _shopActionsOnSave(updatedItem);
+  });
+};
+
+window._shopEditAction = async (idx) => {
+  const mod = await _shopEnsureSpellsModule();
+  if (typeof mod.editItemSpell !== 'function') {
+    showNotif('Module sorts indisponible', 'error'); return;
+  }
+  const fakeItem = { actions: _shopActionsCache, nom: document.getElementById('si-nom')?.value || 'Objet' };
+  mod.editItemSpell(fakeItem, idx, async (updatedItem) => {
+    await _shopActionsOnSave(updatedItem);
+  });
+};
+
+window._shopRemoveAction = (idx) => {
+  if (!Number.isFinite(idx)) return;
+  if (!confirm('Supprimer cette action ?')) return;
+  _shopActionsCache.splice(idx, 1);
+  _shopRefreshActionsHost();
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2048,6 +2323,11 @@ function _shopBuildDynamicSections(tpl, item, tplKey) {
 
 function openItemModal(itemId) {
   const item       = itemId ? _items.find(i=>i.id===itemId) : null;
+  // Reset/init du cache d'actions à l'ouverture de l'item courant
+  _shopActionsCacheLoad(item?.actions || []);
+  // Précharge spells.js pour exposer les handlers (runeIncrement, selectNoyau, etc.)
+  // sur window dès maintenant — la modal de sort ne peut pas attendre.
+  _shopEnsureSpellsModule().catch(() => {});
   const defCatId   = item?.categorieId || _activeCat || '';
   const cat        = _cats.find(c=>c.id===defCatId);
   const tplKey     = cat?.template || 'classique';
@@ -2089,7 +2369,15 @@ function openItemModal(itemId) {
     <div class="sh-modal">
       ${_shopSectionCard('📝', 'Identification', '', identHtml)}
       <div id="si-sections-dynamic">${_shopBuildDynamicSections(tpl, item, tplKey)}</div>
-      ${_shopSectionCard('⚡', 'Actions', 'Effets utilisables — action, action bonus, réaction', `<div id="si-actions-host">${_shopRenderActionsSection(item?.actions)}</div>`)}
+      ${_shopSectionCard('⚡', 'Actions', 'Sorts embarqués — l\'objet peut être un Élixir, un Parchemin, une Dague magique…',
+        `<div class="form-group" style="margin-bottom:.6rem;padding:.5rem .65rem;background:rgba(180,127,255,.06);border-radius:8px;border-left:3px solid rgba(180,127,255,.4)">
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:600">
+            <input type="checkbox" id="si-consommable" ${item?.consommable?'checked':''}>
+            <span>🧪 Objet consommable</span>
+            <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— perd 1 exemplaire à chaque utilisation</span>
+          </label>
+        </div>
+        <div id="si-actions-host">${_shopRenderActionsSection(item?.actions)}</div>`)}
       ${_shopSectionCard('🔧', 'Recette', '', recipeHtml)}
       <button class="btn btn-gold sh-modal-save" onclick="saveShopItem('${itemId||''}')">
         ${item ? '💾 Enregistrer' : '➕ Ajouter à la boutique'}
@@ -2393,6 +2681,8 @@ async function saveShopItem(itemId) {
 
     // Actions/Bonus/Réactions définies sur l'item — propagées à l'inventaire
     data.actions = _shopCollectActions();
+    // Flag consommable (item-level) : retire 1 exemplaire à chaque usage d'action
+    data.consommable = !!document.getElementById('si-consommable')?.checked;
 
     const hasRecipe = document.getElementById('si-has-recipe')?.checked;
     if (hasRecipe) {
