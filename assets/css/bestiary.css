@@ -448,42 +448,18 @@
 .bst-dmg-tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .bst-dmg-tag { font-size: 0.6rem; font-weight: 600; padding: 2px 7px; border-radius: var(--r-full); border: 1px solid; }
 
-/* Attaques */
+/* Attaques (container — réutilisé pour les estimations joueur) */
 .bst-atk {
   background: rgba(255,90,126,0.04); border: 1px solid rgba(255,90,126,0.15);
   border-left: 3px solid var(--crimson); border-radius: var(--r-sm);
   padding: 10px 12px; display: flex; flex-direction: column; gap: 5px;
 }
-.bst-atk-name { font-family: var(--font-display); font-size: 0.84rem; font-weight: 700; color: var(--text); }
-.bst-atk-stats { display: flex; flex-wrap: wrap; gap: 10px; }
-.bst-atk-stat { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 600; }
-.bst-atk-stat.touch { color: var(--amber); }
-.bst-atk-stat.dmg   { color: var(--crimson); }
-.bst-atk-stat.range { color: var(--text-muted); }
-.bst-atk-desc { font-size: 0.74rem; color: var(--text-muted); line-height: 1.5; font-style: italic; }
 
-/* Traits */
+/* Traits (container — réutilisé pour les estimations joueur) */
 .bst-trait {
   background: rgba(180,127,255,0.04); border: 1px solid rgba(180,127,255,0.15);
   border-left: 3px solid var(--arcane); border-radius: var(--r-sm);
   padding: 8px 12px; display: flex; flex-direction: column; gap: 3px;
-}
-.bst-trait-name { font-family: var(--font-display); font-size: 0.78rem; font-weight: 700; color: var(--text); }
-.bst-trait-desc { font-size: 0.74rem; color: var(--text-muted); line-height: 1.5; }
-
-/* Butins */
-.bst-loots { display: flex; flex-direction: column; gap: 4px; }
-.bst-loot {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 12px; background: rgba(34,195,142,0.04);
-  border: 1px solid rgba(34,195,142,0.12); border-radius: var(--r-sm);
-}
-.bst-loot-name { flex: 1; font-size: 0.78rem; color: var(--text); }
-.bst-loot-qty  { font-size: 0.72rem; font-weight: 700; color: var(--emerald); }
-.bst-loot-chance {
-  font-size: 0.64rem; color: var(--text-dim);
-  padding: 1px 7px; background: rgba(34,195,142,0.08);
-  border: 1px solid rgba(34,195,142,0.18); border-radius: var(--r-full);
 }
 
 /* Description */

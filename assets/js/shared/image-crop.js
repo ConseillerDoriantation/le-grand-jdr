@@ -54,19 +54,23 @@ function _imagePreviewHtml(url, maxHeight) {
 
 export function panZoomCropHTML({
   idPrefix = 'crop',
-  viewSize = 300,
+  viewSize = 300,           // taille du viewport carré (rétrocompat)
+  viewW = null,             // largeur viewport (override viewSize)
+  viewH = null,             // hauteur viewport (override viewSize)
   hint = true,
 } = {}) {
+  const w = viewW ?? viewSize;
+  const h = viewH ?? viewSize;
   const hintHtml = hint
     ? `<p style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem;text-align:center">Glisse pour repositionner · Scroll ou slider pour zoomer</p>`
     : '';
   return `
     ${hintHtml}
-    <div id="${idPrefix}-zone" style="position:relative;width:${viewSize}px;height:${viewSize}px;margin:0 auto;border-radius:14px;overflow:hidden;background:#111827;cursor:grab;touch-action:none;border:2px solid var(--border-bright)">
+    <div id="${idPrefix}-zone" style="position:relative;width:${w}px;height:${h}px;margin:0 auto;border-radius:14px;overflow:hidden;background:#111827;cursor:grab;touch-action:none;border:2px solid var(--border-bright)">
       <img id="${idPrefix}-img" alt="" style="position:absolute;transform-origin:0 0;pointer-events:none;display:block;user-select:none;max-width:none;max-height:none">
       <div style="position:absolute;inset:0;pointer-events:none;border:1px dashed rgba(255,255,255,.15);border-radius:12px"></div>
     </div>
-    <div style="width:${viewSize}px;margin:.75rem auto 0">
+    <div style="width:${w}px;margin:.75rem auto 0;max-width:100%">
       <div style="display:flex;align-items:center;gap:.6rem">
         <span style="font-size:.65rem;color:var(--text-dim)">-</span>
         <input type="range" id="${idPrefix}-zoom" min="0.1" max="4" step="0.01" value="1" style="flex:1;accent-color:var(--gold)">
@@ -79,10 +83,19 @@ export function attachPanZoomCrop({
   idPrefix = 'crop',
   dataUrl,
   viewSize = 300,
-  outputSize = 300,
+  viewW = null,
+  viewH = null,
+  outputSize = 300,         // taille de sortie carrée (rétrocompat)
+  outputW = null,           // largeur output (override outputSize)
+  outputH = null,           // hauteur output (override outputSize)
   jpegQuality = 0.88,
   background = '#111827',
 }) {
+  // Résolution des dimensions effectives (viewport + output)
+  const vw = viewW ?? viewSize;
+  const vh = viewH ?? viewSize;
+  const ow = outputW ?? outputSize;
+  const oh = outputH ?? outputSize;
   const zone = document.getElementById(`${idPrefix}-zone`);
   const img = document.getElementById(`${idPrefix}-img`);
   const slider = document.getElementById(`${idPrefix}-zoom`);
@@ -98,7 +111,7 @@ export function attachPanZoomCrop({
   };
 
   const h = {
-    sliderInput: () => { zoomTo(parseFloat(slider.value), viewSize / 2, viewSize / 2); apply(); },
+    sliderInput: () => { zoomTo(parseFloat(slider.value), vw / 2, vh / 2); apply(); },
     wheel: (e) => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.08 : 0.93;
@@ -126,7 +139,7 @@ export function attachPanZoomCrop({
       } else if (e.touches.length === 2 && s.t0 > 0) {
         const d = pinch(e), factor = d / s.t0;
         const nv = _clamp(s.scale * factor, parseFloat(slider.min), parseFloat(slider.max));
-        zoomTo(nv, viewSize / 2, viewSize / 2);
+        zoomTo(nv, vw / 2, vh / 2);
         slider.value = nv; s.t0 = d; apply();
       }
       e.preventDefault();
@@ -136,13 +149,14 @@ export function attachPanZoomCrop({
 
   img.onload = () => {
     s.naturalW = img.naturalWidth; s.naturalH = img.naturalHeight;
-    const init = Math.max(viewSize / s.naturalW, viewSize / s.naturalH);
+    // Initial scale : "cover" du viewport — l'image remplit au minimum la zone
+    const init = Math.max(vw / s.naturalW, vh / s.naturalH);
     s.scale = init;
-    slider.min = (Math.min(viewSize / s.naturalW, viewSize / s.naturalH) * 0.5).toFixed(3);
+    slider.min = (Math.min(vw / s.naturalW, vh / s.naturalH) * 0.5).toFixed(3);
     slider.max = (init * 6).toFixed(3);
     slider.value = init;
-    s.ox = (viewSize - s.naturalW * init) / 2;
-    s.oy = (viewSize - s.naturalH * init) / 2;
+    s.ox = (vw - s.naturalW * init) / 2;
+    s.oy = (vh - s.naturalH * init) / 2;
     apply();
   };
   img.src = dataUrl;
@@ -162,19 +176,58 @@ export function attachPanZoomCrop({
   return {
     getBase64() {
       if (!s.naturalW) return null;
+      // Coords source : zone visible du viewport, ramenée aux pixels de l'image originale
       const srcX = -s.ox / s.scale, srcY = -s.oy / s.scale;
-      const srcW = viewSize / s.scale, srcH = viewSize / s.scale;
+      const srcW = vw / s.scale, srcH = vh / s.scale;
       const cx = Math.max(0, srcX), cy = Math.max(0, srcY);
       const cw = Math.min(srcW, s.naturalW - cx);
       const ch = Math.min(srcH, s.naturalH - cy);
-      const dx = Math.max(0, (0 - srcX) * (outputSize / srcW));
-      const dy = Math.max(0, (0 - srcY) * (outputSize / srcH));
+      // Dest : ow × oh, position décalée si le crop dépasse de l'image
+      const dx = Math.max(0, (0 - srcX) * (ow / srcW));
+      const dy = Math.max(0, (0 - srcY) * (oh / srcH));
       const out = document.createElement('canvas');
-      out.width = outputSize; out.height = outputSize;
+      out.width = ow; out.height = oh;
       const ctx = out.getContext('2d');
-      ctx.fillStyle = background; ctx.fillRect(0, 0, outputSize, outputSize);
-      ctx.drawImage(img, cx, cy, cw, ch, dx, dy, cw * (outputSize / srcW), ch * (outputSize / srcH));
+      ctx.fillStyle = background; ctx.fillRect(0, 0, ow, oh);
+      ctx.drawImage(img, cx, cy, cw, ch, dx, dy, cw * (ow / srcW), ch * (oh / srcH));
       return out.toDataURL('image/jpeg', jpegQuality);
+    },
+    // Retourne les paramètres de cadrage en fractions du viewport — utile pour
+    // appliquer le crop via CSS sans dupliquer l'image en Firestore. Beaucoup
+    // plus léger que getBase64() (4 nombres au lieu de ~50KB).
+    //   offX, offY  : position de l'image (relative au viewport, peut être négative)
+    //   imgW, imgH  : taille de l'image (relative au viewport, ≥1 si "cover")
+    // Au render : container de ratio vw:vh, img positionnée absolute avec
+    //   left=offX*100%, top=offY*100%, width=imgW*100%.
+    getCropParams() {
+      if (!s.naturalW) return null;
+      return {
+        offX: s.ox / vw,
+        offY: s.oy / vh,
+        imgW: (s.scale * s.naturalW) / vw,
+        imgH: (s.scale * s.naturalH) / vh,
+      };
+    },
+    // Restaure un cadrage depuis des params précédemment sauvegardés.
+    // Attend que l'image soit chargée si elle ne l'est pas encore.
+    setCropParams(params) {
+      if (!params) return;
+      const apply2 = () => {
+        if (!s.naturalW) return false;
+        // Reconstitue scale + offsets depuis les fractions stockées
+        const newScale = (params.imgW * vw) / s.naturalW;
+        s.scale = newScale;
+        s.ox = params.offX * vw;
+        s.oy = params.offY * vh;
+        slider.value = newScale;
+        apply();
+        return true;
+      };
+      if (!apply2()) {
+        // image pas encore chargée — réessayer après onload
+        const prev = img.onload;
+        img.onload = () => { if (typeof prev === 'function') prev(); apply2(); };
+      }
     },
     destroy() { unbind.forEach(fn => fn()); },
   };
