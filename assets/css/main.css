@@ -1,3 +1,28 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   Le Grand JDR — Index CSS principal
+   ════════════════════════════════════════════════════════════════════════════
+
+   Convention de naming des classes (par préfixe = par feature) :
+     .sh-*    → shop (boutique, sidebar, items, sub-cats)
+     .si-*    → shop item modal (modale article : header, tabs, panneaux)
+     .bst-*   → bestiary (cartes, panneau, dégâts, traits, butins…)
+     .vtt-*   → VTT principal (canvas, tokens, panneaux, log, picker d'attaque)
+     .vtt-ms-* → VTT mini-fiche (panneau latéral perso)
+     .vtt-loot-* → VTT réserve & butin (réutilisé par shared/shop-picker.js)
+     .vtt-creat-* → VTT panneau créature (depuis token bestiaire)
+     .cs-*    → fiche perso (character sheet)
+     .ag-*    → agenda
+     .ach-*   → achievements
+     .qst-*   → quests / aventures
+
+   Règles :
+     - Toute classe doit appartenir à un préfixe — pas de noms nus
+     - BEM-light : modifiers en `.foo--variant`, état en `.is-active`
+     - Composants partagés : préfixe défini par leur 1ʳᵉ feature d'origine, gardé
+       même si réutilisé ailleurs (ex: .vtt-loot-* utilisé aussi par bestiary picker
+       via shared/shop-picker.js)
+     ════════════════════════════════════════════════════════════════════════ */
+
 @import url('./tokens.css');
 @import url('./base.css');
 @import url('./auth.css');

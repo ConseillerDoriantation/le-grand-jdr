@@ -2667,6 +2667,182 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
   }
 }
 
+/** Construit une option d'attaque à partir d'un sort `s` (schéma deck_sorts).
+ *
+ *  Pipeline unifié utilisé par TROIS branches :
+ *    1. Sorts de personnage (`c.deck_sorts`)
+ *    2. Actions d'objet (`c.inventaire[i].actions`)
+ *    3. Actions de créature (`b.actions`)
+ *
+ *  Chaque branche fournit son `ctx` (identité, char pour calculs, fallbacks
+ *  pour stats par défaut, extras à fusionner type `_itemAction` / `_catMeta`).
+ *
+ *  Retourne l'option (caller pushe dans `options`).
+ */
+function _buildSpellOption(s, ctx) {
+  const {
+    id, sortIdx, label,
+    c,                              // char ou char synthétique (utilisé par getMod / formules)
+    portee,
+    pmCost, basePm, pmRaw, pmSetDelta = 0,
+    fallbackTouchStat,              // stat toucher par défaut si s.toucherStat absent
+    fallbackDmgStat,                // stat dégâts par défaut si s.degatsStat absent
+    fallbackTouchMod = 0,           // mod toucher si c absent / 'none'
+    fallbackDmgMod   = 0,           // mod dégâts si c absent / 'none'
+    touchSetBonus    = 0,           // bonus set armure (perso uniquement)
+    enchantOnlyAlsoEtat = true,     // false = item branch (que enchantArmeDmg compte)
+    extras = {},                    // _itemAction / _catMeta / etc.
+  } = ctx;
+
+  // ── Pré-calculs communs aux 3 branches ─────────────────────────────────
+  const mods = _vttSpellMods(s);
+  const types = Array.isArray(s.types) && s.types.length ? s.types
+              : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
+  const protMode = s.protectionMode || 'ca';
+  let zoneW = mods?.allonge ? 0 : (s.zoneW || 0);
+  let zoneH = mods?.allonge ? 0 : (s.zoneH || 0);
+  // Sentinelle : force une zone min 1×1 (utile pour le placement)
+  if (mods?.sentinelle && (zoneW <= 0 || zoneH <= 0)) {
+    zoneW = Math.max(1, zoneW || 1);
+    zoneH = Math.max(1, zoneH || 1);
+  }
+  const nbCibles = _vttSortCibles(s) || 1;
+
+  const _sRunes = s.runes || [];
+  const actionType = _sRunes.includes('Réaction')
+    ? 'reaction'
+    : _sRunes.includes('Enchantement')
+      ? 'bonus'
+      : (s.actionOverride === 'action_bonus' ? 'bonus' : s.actionOverride === 'reaction' ? 'reaction' : 'action');
+  const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';
+
+  // Bloc de champs communs réutilisé dans chaque variante d'option
+  const common = {
+    id, sortIdx, portee,
+    pmCost, basePm, pmRaw, pmSetDelta,
+    nbCibles, zoneW, zoneH, mods, actionType,
+    ...extras,
+  };
+
+  const isEnchantOnly = enchantOnlyAlsoEtat
+    ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim())
+    : ( !!mods?.enchantArmeDmg && !((s.degats || '').trim()));
+  const isAfflictionOnly = !!mods?.affliction;
+
+  if (isEnchantOnly) {
+    const enchMode  = s.enchantMode || 'dmg';
+    const isEtat    = enchMode === 'etat' && !!mods?.enchantEtatId;
+    const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
+    const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
+    return { ...common,
+      icon: isEtat ? '✨' : '🪄', label, dice: '',
+      isEnchant: true, enchantMode: enchMode,
+      enchantFormula: mods.enchantArmeDmg?.formula || '',
+      enchantEtatId: mods.enchantEtatId || null,
+      enchantElement: elementId,
+      enchantElementIcon: enchTypeObj?.icon || '',
+      enchantElementColor: enchTypeObj?.color || '',
+      isUtil: true, halfOnMiss: false,
+    };
+  }
+  if (isAfflictionOnly) {
+    const aff = mods.affliction;
+    const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
+    return { ...common,
+      icon: aff.mode === 'etat' ? '⛓' : '🩸', label,
+      dice: aff.mode === 'dot'
+            ? `${aff.dotFormula}/tour`
+            : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
+      isAffliction: true,
+      afflictionMode: aff.mode,
+      afflictionDotFormula: aff.dotFormula,
+      afflictionEtatId: aff.etatId || null,
+      afflictionDD: aff.dd, afflictionSaveStat: aff.saveStat,
+      afflictionElement: aff.element || null,
+      afflictionElementIcon: aTypeObj?.icon || '',
+      afflictionElementColor: aTypeObj?.color || '',
+      isUtil: true, halfOnMiss: false,
+    };
+  }
+  if (types.includes('offensif')) {
+    const fullFormula    = _vttSortDmgFormula(s, c);
+    const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
+    const spellTypeId    = s.noyauTypeId || null;
+    const spellTypeRules = spellTypeId
+      ? getDamageTypeRules(_damageTypes, spellTypeId)
+      : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
+    const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
+    const ovrTouchStat   = s.toucherStat || fallbackTouchStat;
+    const ovrDmgStat     = s.degatsStat  || fallbackDmgStat;
+    const ovrTouchNoMod  = ovrTouchStat === 'none';
+    const ovrDmgNoMod    = ovrDmgStat   === 'none';
+    const ovrTouchMod    = ovrTouchNoMod ? 0 : (c ? getMod(c, ovrTouchStat) : fallbackTouchMod);
+    const ovrDmgMod      = ovrDmgNoMod   ? 0 : (c ? getMod(c, ovrDmgStat)   : fallbackDmgMod);
+    return { ...common,
+      icon: sortIcon, label,
+      rawDice: sRawDice, dice: fullFormula,
+      typeRules: spellTypeRules,
+      damageTypeId: spellTypeId,
+      damageTypeIcon: spellTypeObj?.icon || '',
+      damageTypeColor: spellTypeObj?.color || '',
+      toucherMod: ovrTouchMod, toucherSetBonus: touchSetBonus,
+      toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
+      dmgStatMod: ovrDmgMod,
+      dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
+      maitriseBonus: sFixed,
+      mjAlwaysMax: !!s.mjAlwaysMax,
+    };
+  }
+  if (types.includes('defensif') && protMode === 'soin') {
+    const soinFormula = _vttSortSoinFormula(s, c);
+    const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
+    // Stat de soin : override > auto (magique → stat arme magique ou Int ; physique → Con)
+    let soinStatKey;
+    if (s.degatsStat) {
+      soinStatKey = s.degatsStat;
+    } else {
+      const mainP = c?.equipement?.['Main principale'];
+      const isMagic = !!(_damageTypes && s?.noyauTypeId
+        && _damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
+      if (isMagic) {
+        const fmt = _weaponFormats?.find(f => f.label === mainP?.format);
+        const isMagicWeapon = fmt?.isMagic === true && mainP?.nom;
+        soinStatKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
+      } else {
+        soinStatKey = 'constitution';
+      }
+    }
+    const soinNoMod   = soinStatKey === 'none';
+    const soinStatMod = soinNoMod ? 0 : (c ? getMod(c, soinStatKey) : 0);
+    const soinTouchStat = s.toucherStat || fallbackTouchStat;
+    const soinTouchNoMod = soinTouchStat === 'none';
+    const soinTouchMod   = soinTouchNoMod ? 0 : (c ? getMod(c, soinTouchStat) : fallbackTouchMod);
+    return { ...common,
+      icon: '💚', label, rawDice: sRawDice, dice: soinFormula,
+      isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
+      mjAlwaysMax: !!s.mjAlwaysMax,
+      dmgStatMod: soinStatMod,
+      dmgStatLabel: soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey),
+      toucherMod: soinTouchMod, toucherSetBonus: touchSetBonus,
+      toucherStatLabel: soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat),
+    };
+  }
+  if (types.includes('defensif') && protMode === 'ca') {
+    return { ...common,
+      icon: '🛡️', label,
+      dice: s.ca || 'CA +2 (2 tours)',
+      isCaSort: true, halfOnMiss: false,
+      caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
+    };
+  }
+  // Utilitaire libre
+  return { ...common,
+    icon: sortIcon, label,
+    dice: s.effet ? s.effet.slice(0, 40) : '—',
+    isUtil: true, halfOnMiss: false,
+  };
+}
+
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
 function _buildAttackOptions(t) {
   const ld = _live(t);
@@ -2817,107 +2993,21 @@ function _buildAttackOptions(t) {
     b.actions.forEach((s, actIdx) => {
       const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
         ? parseInt(s.portee) : (parseInt(arme0?.portee) || 1);
-      const mods    = _vttSpellMods(s);
-      const portee  = baseRange;
-      const zoneW   = mods?.allonge ? 0 : (s.zoneW || 0);
-      const zoneH   = mods?.allonge ? 0 : (s.zoneH || 0);
-      const types   = Array.isArray(s.types) && s.types.length ? s.types
-                    : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
-      const protMode = s.protectionMode || 'ca';
-      const nbCibles = _vttSortCibles(s) || 1;
-      const pmRaw    = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
-                       ? s.pmOverride : (parseInt(s.pm) || 0);
-      const cout     = Math.max(0, pmRaw);
-      const _sRunes  = s.runes || [];
-      const actionType = _sRunes.includes('Réaction') ? 'reaction'
-                       : _sRunes.includes('Enchantement') ? 'bonus'
-                       : (s.actionOverride === 'action_bonus' ? 'bonus'
-                          : s.actionOverride === 'reaction'   ? 'reaction' : 'action');
-      const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';
-      const label = s.nom || `Action ${actIdx+1}`;
-      const id = `beast_act_${actIdx}`;
-      const isEnchantOnly    = (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim());
-      const isAfflictionOnly = !!mods?.affliction;
+      const pmRaw = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
+                    ? s.pmOverride : (parseInt(s.pm) || 0);
+      const cout  = Math.max(0, pmRaw);
 
-      if (isEnchantOnly) {
-        const enchMode  = s.enchantMode || 'dmg';
-        const isEtat    = enchMode === 'etat' && !!mods?.enchantEtatId;
-        const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
-        const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
-        options.push({ id, icon: isEtat ? '✨' : '🪄', label, dice: '',
-          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
-          isEnchant: true, enchantMode: enchMode,
-          enchantFormula: mods.enchantArmeDmg?.formula || '',
-          enchantEtatId: mods.enchantEtatId || null,
-          enchantElement: elementId,
-          enchantElementIcon: enchTypeObj?.icon || '',
-          enchantElementColor: enchTypeObj?.color || '',
-          isUtil: true, halfOnMiss: false, actionType });
-      } else if (isAfflictionOnly) {
-        const aff = mods.affliction;
-        const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
-        options.push({ id, icon: aff.mode === 'etat' ? '⛓' : '🩸', label,
-          dice: aff.mode === 'dot' ? `${aff.dotFormula}/tour`
-                                   : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
-          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
-          isAffliction: true,
-          afflictionMode: aff.mode, afflictionDotFormula: aff.dotFormula,
-          afflictionEtatId: aff.etatId || null,
-          afflictionDD: aff.dd, afflictionSaveStat: aff.saveStat,
-          afflictionElement: aff.element || null,
-          afflictionElementIcon: aTypeObj?.icon || '',
-          afflictionElementColor: aTypeObj?.color || '',
-          isUtil: true, halfOnMiss: false, actionType });
-      } else if (types.includes('offensif')) {
-        const fullFormula = _vttSortDmgFormula(s, bChar);
-        const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
-        const spellTypeId    = s.noyauTypeId || null;
-        const spellTypeRules = spellTypeId ? getDamageTypeRules(_damageTypes, spellTypeId)
-                                            : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
-        const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
-        const ovrTouchStat   = s.toucherStat || bStatKey;
-        const ovrDmgStat     = s.degatsStat  || bStatKey;
-        const ovrTouchNoMod  = ovrTouchStat === 'none';
-        const ovrDmgNoMod    = ovrDmgStat   === 'none';
-        const ovrTouchMod    = ovrTouchNoMod ? 0 : getMod(bChar, ovrTouchStat);
-        const ovrDmgMod      = ovrDmgNoMod   ? 0 : getMod(bChar, ovrDmgStat);
-        options.push({ id, icon: sortIcon, label,
-          rawDice: sRawDice, dice: fullFormula,
-          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
-          typeRules: spellTypeRules, damageTypeId: spellTypeId,
-          damageTypeIcon: spellTypeObj?.icon || '',
-          damageTypeColor: spellTypeObj?.color || '',
-          toucherMod: ovrTouchMod, toucherSetBonus: 0,
-          toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
-          dmgStatMod: ovrDmgMod,
-          dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
-          maitriseBonus: sFixed,
-          mjAlwaysMax: !!s.mjAlwaysMax,
-          actionType });
-      } else if (types.includes('defensif') && protMode === 'soin') {
-        const soinFormula = _vttSortSoinFormula(s, bChar);
-        const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
-        const soinStatKey = s.degatsStat || 'constitution';
-        const soinNoMod   = soinStatKey === 'none';
-        const soinStatMod = soinNoMod ? 0 : getMod(bChar, soinStatKey);
-        const soinTouchStat = s.toucherStat || bStatKey;
-        const soinTouchNoMod = soinTouchStat === 'none';
-        const soinTouchMod   = soinTouchNoMod ? 0 : getMod(bChar, soinTouchStat);
-        options.push({ id, icon: '💚', label, rawDice: sRawDice, dice: soinFormula,
-          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
-          isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
-          mjAlwaysMax: !!s.mjAlwaysMax,
-          dmgStatMod: soinStatMod,
-          dmgStatLabel: soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey),
-          toucherMod: soinTouchMod, toucherSetBonus: 0,
-          toucherStatLabel: soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat),
-          actionType });
-      } else {
-        // Utilitaire / buff CA / autre — option générique sans dégâts
-        options.push({ id, icon: sortIcon, label, dice: '',
-          portee, pmCost: cout, basePm: cout, sortIdx: `b${actIdx}`, nbCibles, zoneW, zoneH, mods,
-          isUtil: true, halfOnMiss: false, actionType });
-      }
+      options.push(_buildSpellOption(s, {
+        id:    `beast_act_${actIdx}`,
+        sortIdx: `b${actIdx}`,
+        label: s.nom || `Action ${actIdx+1}`,
+        c:     bChar,
+        portee: baseRange,
+        pmCost: cout, basePm: cout, pmRaw, pmSetDelta: 0,
+        fallbackTouchStat: bStatKey, fallbackDmgStat: bStatKey,
+        touchSetBonus: 0,
+        enchantOnlyAlsoEtat: true,
+      }));
     });
   }
 
@@ -3040,225 +3130,40 @@ function _buildAttackOptions(t) {
     const mainP2      = c?.equipement?.['Main principale'];
     const sStatKey    = mainP2?.statAttaque || mainP2?.toucherStat || 'force';
     const sStatMod    = getMod(c, sStatKey);
-    const sStatLbl    = statShort(sStatKey) || sStatKey;
     // Réduction PM du set léger (spellPmDelta est négatif pour le set léger → coût réduit)
     const spellPmDelta = c ? (getArmorSetData(c).modifiers.spellPmDelta || 0) : 0;
 
     c.deck_sorts.forEach((s, idx) => {
       if (!s.actif) return;
       // Portée du sort : préserve EXPLICITEMENT 0 (sur soi uniquement).
-      // `s.portee == null` ou champ vide → fallback portée d'arme/défaut.
       const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
         ? parseInt(s.portee)
         : (ld.displayRange || 1);
-      const mods      = _vttSpellMods(s);
-      // Allonge magique : ne modifie pas la portée du sort lui-même (c'est un enchantement
-      // qui s'applique à l'arme de la cible via un buff `range_bonus` posé au cast, durée
-      // 2 tours par défaut — voir branche d'application dans _vttRollAttack).
-      const portee    = baseRange;
-      let zoneW       = mods?.allonge ? 0 : (s.zoneW || 0);
-      let zoneH       = mods?.allonge ? 0 : (s.zoneH || 0);
-      // Sentinelle : force une zone (min 1×1) pour pouvoir choisir l'emplacement
-      if (mods?.sentinelle && (zoneW <= 0 || zoneH <= 0)) {
-        zoneW = Math.max(1, zoneW || 1);
-        zoneH = Math.max(1, zoneH || 1);
-      }
-      const types     = Array.isArray(s.types) && s.types.length ? s.types
-                      : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
-      const protMode  = s.protectionMode || 'ca';
-      const nbCibles  = _vttSortCibles(s);
-
-      // Coût PM : pmOverride MJ prend le pas sur le coût auto-calculé, puis on
-      // applique le delta du set léger (clampé à 0 minimum), puis on vérifie
-      // si cible gratuite (multi-cibles ou sort suspendu déclenché).
-      const pmRaw      = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
-                         ? s.pmOverride
-                         : (parseInt(s.pm) || 0);
-      const basePm     = Math.max(0, pmRaw + spellPmDelta);
-      const freeKey    = `${t.id}_${idx}`;
-      const freeCasts  = _multiCastFree.get(freeKey) || 0;
-      const isOneShot  = _freeNextCast.has(freeKey);
-      const cout       = (freeCasts > 0 || isOneShot) ? 0 : basePm;
-      // Métadonnées set léger (exposées au picker pour l'affichage du badge PM)
-      const _pmMeta    = { pmRaw, pmSetDelta: spellPmDelta };
-
-      // Infos catégorie pour le tri dans le modal VTT
+      // Coût PM : pmOverride MJ > calc auto, puis delta set léger (clampé à 0 min),
+      // puis vérification si cible gratuite (multi-cibles ou sort suspendu).
+      const pmRaw     = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
+                        ? s.pmOverride : (parseInt(s.pm) || 0);
+      const basePm    = Math.max(0, pmRaw + spellPmDelta);
+      const freeKey   = `${t.id}_${idx}`;
+      const freeCasts = _multiCastFree.get(freeKey) || 0;
+      const isOneShot = _freeNextCast.has(freeKey);
+      const cout      = (freeCasts > 0 || isOneShot) ? 0 : basePm;
+      // Catégorie pour le tri dans le modal VTT
       const sortCats = c.sort_cats || [];
       const sortCat  = s.catId ? sortCats.find(ct => ct.id === s.catId) : null;
-      const _catMeta = { catId: s.catId || null, catLabel: sortCat?.nom || null, catColor: sortCat?.couleur || null };
+      const catMeta  = { catId: s.catId || null, catLabel: sortCat?.nom || null, catColor: sortCat?.couleur || null };
 
-      // Type d'action du sort (Réaction > Enchantement = Bonus > sinon Action ou override).
-      // Logique miroir de _getSortAction (spells.js).
-      const _sRunes = s.runes || [];
-      const actionType = _sRunes.includes('Réaction')
-        ? 'reaction'
-        : _sRunes.includes('Enchantement')
-          ? 'bonus'
-          : (s.actionOverride === 'action_bonus' ? 'bonus' : s.actionOverride === 'reaction' ? 'reaction' : 'action');
-      // Icône selon type d'action (cohérente avec les item-actions)
-      const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';
-
-      // ── Sort d'enchantement pur (pas d'impact damage) ─────────────────
-      // Détecté quand le sort a la rune Enchantement slot=arme (mods.enchantArmeDmg)
-      // ET aucune formule de dégâts d'impact (s.degats vide).
-      // → On affiche une option SANS pilule "dégâts" qui appliquera juste le buff
-      //    sur l'allié ciblé. Le bonus de dégâts arrivera plus tard sur les attaques.
-      // isEnchantOnly : mode Dégâts (enchantArmeDmg) OU mode État (enchantEtatId)
-      // sans formule de dégâts d'impact saisie sur le sort.
-      const isEnchantOnly = (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim());
-      // Affliction-only : si la rune Affliction est présente, on ne fait jamais
-      // de dégâts d'impact (comme l'Enchantement). Le sort applique son DoT ou son
-      // état via le JS de sauvegarde de la cible.
-      const isAfflictionOnly = !!mods?.affliction;
-      if (isEnchantOnly) {
-        const enchMode = s.enchantMode || 'dmg';
-        const isEtat   = enchMode === 'etat' && !!mods?.enchantEtatId;
-        const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
-        const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
-        const etatLib = isEtat ? CONDITION_BY_ID[mods.enchantEtatId] : null;
-        const labelDice = isEtat
-          ? (etatLib ? `${etatLib.icon || ''} ${etatLib.label}` : 'État')
-          : (mods.enchantArmeDmg?.formula || '1d4+2');
-        options.push({
-          id: `sort_${idx}`, icon: isEtat ? '✨' : '🪄',
-          label: s.nom || `Sort ${idx+1}`,
-          dice: '', // pas de formule d'impact
-          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
-          zoneW, zoneH, mods,
-          isEnchant: true,
-          enchantMode: enchMode,
-          enchantFormula: mods.enchantArmeDmg?.formula || '',
-          enchantEtatId: mods.enchantEtatId || null,
-          enchantElement: elementId,
-          enchantElementIcon: enchTypeObj?.icon || '',
-          enchantElementColor: enchTypeObj?.color || '',
-          isUtil: true, halfOnMiss: false,
-          actionType,
-          ..._catMeta,
-        });
-      } else if (isAfflictionOnly) {
-        // Sort d'affliction pur : pas de dégâts d'impact, juste le JS + DoT/État
-        const aff = mods.affliction;
-        const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
-        options.push({
-          id: `sort_${idx}`, icon: aff.mode === 'etat' ? '⛓' : '🩸',
-          label: s.nom || `Sort ${idx+1}`,
-          dice: aff.mode === 'dot' ? `${aff.dotFormula}/tour` : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
-          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
-          zoneW, zoneH, mods,
-          isAffliction: true,
-          afflictionMode: aff.mode,
-          afflictionDotFormula: aff.dotFormula,
-          afflictionEtatId: aff.etatId || null,
-          afflictionDD: aff.dd,
-          afflictionSaveStat: aff.saveStat,
-          afflictionElement: aff.element || null,
-          afflictionElementIcon: aTypeObj?.icon || '',
-          afflictionElementColor: aTypeObj?.color || '',
-          isUtil: true, halfOnMiss: false,
-          actionType,
-          ..._catMeta,
-        });
-      } else if (types.includes('offensif')) {
-        const fullFormula    = _vttSortDmgFormula(s, c);
-        const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
-        const spellTypeId    = s.noyauTypeId || null;
-        const spellTypeRules = spellTypeId
-          ? getDamageTypeRules(_damageTypes, spellTypeId)
-          : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
-        const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
-        // Overrides du sort sur les stats de toucher et de dégâts.
-        // Si renseignés sur le sort, ils remplacent la stat de l'arme principale.
-        const ovrTouchStat = s.toucherStat || wTchStat;
-        const ovrDmgStat   = s.degatsStat  || sStatKey;
-        // Stat 'none' = pas de modificateur (utile pour potions/objets à effet fixe)
-        const ovrTouchNoMod = ovrTouchStat === 'none';
-        const ovrDmgNoMod   = ovrDmgStat   === 'none';
-        const ovrTouchMod  = ovrTouchNoMod ? 0 : (c ? getMod(c, ovrTouchStat) : wTchMod);
-        const ovrDmgMod    = ovrDmgNoMod   ? 0 : (c ? getMod(c, ovrDmgStat)   : sStatMod);
-        options.push({
-          id: `sort_${idx}`, icon: sortIcon, label: s.nom || `Sort ${idx+1}`,
-          rawDice: sRawDice, dice: fullFormula,
-          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
-          zoneW, zoneH, mods,
-          typeRules: spellTypeRules,
-          damageTypeId: spellTypeId,
-          damageTypeIcon: spellTypeObj?.icon || '',
-          damageTypeColor: spellTypeObj?.color || '',
-          toucherMod: ovrTouchMod, toucherSetBonus: wSetBonus,
-          toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
-          dmgStatMod: ovrDmgMod,
-          dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
-          maitriseBonus: sFixed,
-          mjAlwaysMax: !!s.mjAlwaysMax,
-          actionType,
-          ..._catMeta,
-        });
-
-      } else if (types.includes('defensif') && protMode === 'soin') {
-        const soinFormula = _vttSortSoinFormula(s, c);
-        const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
-        // Stat de soin (override > auto noyau/arme)
-        let soinStatKey;
-        if (s.degatsStat) {
-          soinStatKey = s.degatsStat;
-        } else {
-          const isMagic = !!(_damageTypes && s?.noyauTypeId
-            && _damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
-          if (isMagic) {
-            const fmt = _weaponFormats?.find(f => f.label === mainP2?.format);
-            const isMagicWeapon = fmt?.isMagic === true && mainP2?.nom;
-            soinStatKey = isMagicWeapon ? (mainP2.statAttaque || mainP2.toucherStat || 'intelligence') : 'intelligence';
-          } else {
-            soinStatKey = 'constitution';
-          }
-        }
-        // Stat 'none' = aucun modificateur (potion à valeur fixe)
-        const soinNoMod = soinStatKey === 'none';
-        const soinStatMod = soinNoMod ? 0 : (c ? getMod(c, soinStatKey) : 0);
-        const soinStatLabel = soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey);
-        // Stat de toucher (override > stat de l'arme), pour le jet d20 → DD 2
-        const soinTouchStat = s.toucherStat || wTchStat;
-        const soinTouchNoMod = soinTouchStat === 'none';
-        const soinTouchMod  = soinTouchNoMod ? 0 : (c ? getMod(c, soinTouchStat) : wTchMod);
-        const soinTouchLabel = soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat);
-        options.push({
-          id: `sort_${idx}`, icon: '💚', label: s.nom || `Sort ${idx+1}`,
-          rawDice: sRawDice, dice: soinFormula,
-          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
-          zoneW, zoneH, mods,
-          isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
-          mjAlwaysMax: !!s.mjAlwaysMax,
-          dmgStatMod: soinStatMod, dmgStatLabel: soinStatLabel,
-          toucherMod: soinTouchMod, toucherSetBonus: wSetBonus,
-          toucherStatLabel: soinTouchLabel,
-          actionType,
-          ..._catMeta,
-        });
-
-      } else if (types.includes('defensif') && protMode === 'ca') {
-        options.push({
-          id: `sort_${idx}`, icon: '🛡️', label: s.nom || `Sort ${idx+1}`,
-          dice: s.ca || 'CA +2 (2 tours)',
-          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
-          zoneW, zoneH, mods,
-          isCaSort: true, halfOnMiss: false,
-          caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
-          actionType,
-          ..._catMeta,
-        });
-
-      } else {
-        options.push({
-          id: `sort_${idx}`, icon: sortIcon, label: s.nom || `Sort ${idx+1}`,
-          dice: s.effet ? s.effet.slice(0, 40) : '—',
-          portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: idx, nbCibles,
-          zoneW, zoneH, mods,
-          isUtil: true, halfOnMiss: false,
-          actionType,
-          ..._catMeta,
-        });
-      }
+      options.push(_buildSpellOption(s, {
+        id: `sort_${idx}`, sortIdx: idx, label: s.nom || `Sort ${idx+1}`,
+        c,
+        portee: baseRange,
+        pmCost: cout, basePm, pmRaw, pmSetDelta: spellPmDelta,
+        fallbackTouchStat: wTchStat,    fallbackDmgStat: sStatKey,
+        fallbackTouchMod:  wTchMod,     fallbackDmgMod:  sStatMod,
+        touchSetBonus: wSetBonus,
+        enchantOnlyAlsoEtat: true,
+        extras: catMeta,
+      }));
     });
   }
 
@@ -3270,36 +3175,19 @@ function _buildAttackOptions(t) {
   if (c && Array.isArray(c.inventaire) && !_silenced) {
     const mainP2I    = c?.equipement?.['Main principale'];
     const sStatKeyI  = mainP2I?.statAttaque || mainP2I?.toucherStat || 'force';
-    const sStatModI  = getMod(c, sStatKeyI);
-    const sStatLblI  = statShort(sStatKeyI) || sStatKeyI;
     const spellPmDeltaI = getArmorSetData(c).modifiers.spellPmDelta || 0;
 
     c.inventaire.forEach((item, invIdx) => {
       const acts = Array.isArray(item?.actions) ? item.actions : [];
       if (!acts.length) return;
       acts.forEach((s, actIdx) => {
-        // s a maintenant le schéma d'un sort complet (deck_sorts shape)
         // Portée du sort : préserve EXPLICITEMENT 0 (sur soi uniquement).
-      // `s.portee == null` ou champ vide → fallback portée d'arme/défaut.
-      const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
-        ? parseInt(s.portee)
-        : (ld.displayRange || 1);
-        const mods      = _vttSpellMods(s);
-        const portee    = mods?.allonge ? baseRange : baseRange;
-        const zoneW     = mods?.allonge ? 0 : (s.zoneW || 0);
-        const zoneH     = mods?.allonge ? 0 : (s.zoneH || 0);
-        const types     = Array.isArray(s.types) && s.types.length ? s.types
-                        : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
-        const protMode  = s.protectionMode || 'ca';
-        const nbCibles  = _vttSortCibles(s) || 1;
-
-        // Coût PM : override > calc auto ; set léger appliqué (jamais < 0)
-        const pmRaw     = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
-                          ? s.pmOverride
-                          : (parseInt(s.pm) || 0);
-        const basePm    = Math.max(0, pmRaw + spellPmDeltaI);
-        const cout      = basePm;
-        const _pmMeta   = { pmRaw, pmSetDelta: spellPmDeltaI };
+        const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
+          ? parseInt(s.portee) : (ld.displayRange || 1);
+        const pmRaw  = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
+                       ? s.pmOverride : (parseInt(s.pm) || 0);
+        const basePm = Math.max(0, pmRaw + spellPmDeltaI);
+        const cout   = basePm;
 
         // Méta objet (consommation à l'usage, identification)
         const itemMeta = {
@@ -3310,142 +3198,23 @@ function _buildAttackOptions(t) {
           consommable: !!item.consommable,
         };
 
-        // Type d'action
-        const _sRunes = s.runes || [];
-        const actionType = _sRunes.includes('Réaction') ? 'reaction'
-                         : _sRunes.includes('Enchantement') ? 'bonus'
-                         : (s.actionOverride === 'action_bonus' ? 'bonus'
-                            : s.actionOverride === 'reaction'   ? 'reaction'
-                                                                  : 'action');
-        const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '🎯';
-
-        // Préfixe label avec le nom de l'objet pour ne pas perdre l'origine
         const labelBase = s.nom || `Action ${actIdx+1}`;
         const fullLabel = `${item.nom || 'Objet'} — ${labelBase}`;
 
-        // ── Branches reprises des sorts perso ───────────────────────────
-        const isEnchantOnly  = !!mods?.enchantArmeDmg && !((s.degats || '').trim());
-        const isAfflictionOnly = !!mods?.affliction;
-
-        if (isEnchantOnly) {
-          const enchMode = s.enchantMode || 'dmg';
-          const isEtat   = enchMode === 'etat' && !!mods?.enchantEtatId;
-          const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
-          const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
-          options.push({
-            id: `itemact_${invIdx}_${actIdx}`, icon: isEtat ? '✨' : '🪄',
-            label: fullLabel, dice: '',
-            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
-            zoneW, zoneH, mods,
-            isEnchant: true, enchantMode: enchMode,
-            enchantFormula: mods.enchantArmeDmg?.formula || '',
-            enchantEtatId: mods.enchantEtatId || null,
-            enchantElement: elementId,
-            enchantElementIcon: enchTypeObj?.icon || '',
-            enchantElementColor: enchTypeObj?.color || '',
-            isUtil: true, halfOnMiss: false,
-            actionType, _itemAction: itemMeta,
-          });
-        } else if (isAfflictionOnly) {
-          const aff = mods.affliction;
-          const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
-          options.push({
-            id: `itemact_${invIdx}_${actIdx}`,
-            icon: aff.mode === 'etat' ? '⛓' : '🩸',
-            label: fullLabel,
-            dice: aff.mode === 'dot'
-                  ? `${aff.dotFormula}/tour`
-                  : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
-            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
-            zoneW, zoneH, mods,
-            isAffliction: true,
-            afflictionMode: aff.mode,
-            afflictionDotFormula: aff.dotFormula,
-            afflictionEtatId: aff.etatId || null,
-            afflictionDD: aff.dd,
-            afflictionSaveStat: aff.saveStat,
-            afflictionElement: aff.element || null,
-            afflictionElementIcon: aTypeObj?.icon || '',
-            afflictionElementColor: aTypeObj?.color || '',
-            isUtil: true, halfOnMiss: false,
-            actionType, _itemAction: itemMeta,
-          });
-        } else if (types.includes('offensif')) {
-          // Sort offensif classique (Boule de feu d'objet, etc.)
-          const fullFormula    = _vttSortDmgFormula(s, c);
-          const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
-          const spellTypeId    = s.noyauTypeId || null;
-          const spellTypeRules = spellTypeId ? getDamageTypeRules(_damageTypes, spellTypeId)
-                                              : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
-          const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
-          const ovrTouchStat   = s.toucherStat || sStatKeyI;
-          const ovrDmgStat     = s.degatsStat  || sStatKeyI;
-          const ovrTouchNoMod  = ovrTouchStat === 'none';
-          const ovrDmgNoMod    = ovrDmgStat   === 'none';
-          const ovrTouchMod    = ovrTouchNoMod ? 0 : getMod(c, ovrTouchStat);
-          const ovrDmgMod      = ovrDmgNoMod   ? 0 : getMod(c, ovrDmgStat);
-          options.push({
-            id: `itemact_${invIdx}_${actIdx}`, icon: sortIcon, label: fullLabel,
-            rawDice: sRawDice, dice: fullFormula,
-            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
-            zoneW, zoneH, mods,
-            typeRules: spellTypeRules,
-            damageTypeId:    spellTypeId,
-            damageTypeIcon:  spellTypeObj?.icon  || '',
-            damageTypeColor: spellTypeObj?.color || '',
-            toucherMod: ovrTouchMod, toucherSetBonus: 0,
-            toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
-            dmgStatMod: ovrDmgMod,
-            dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
-            maitriseBonus: sFixed,
-            mjAlwaysMax: !!s.mjAlwaysMax,
-            actionType, _itemAction: itemMeta,
-          });
-        } else if (types.includes('defensif') && protMode === 'soin') {
-          // Soin
-          const soinFormula = _vttSortSoinFormula(s, c);
-          const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
-          const soinStatKey = s.degatsStat || 'constitution';
-          const soinNoMod   = soinStatKey === 'none';
-          const soinStatMod = soinNoMod ? 0 : getMod(c, soinStatKey);
-          const soinTouchStat = s.toucherStat || sStatKeyI;
-          const soinTouchNoMod = soinTouchStat === 'none';
-          const soinTouchMod  = soinTouchNoMod ? 0 : getMod(c, soinTouchStat);
-          options.push({
-            id: `itemact_${invIdx}_${actIdx}`, icon: '💚', label: fullLabel,
-            rawDice: sRawDice, dice: soinFormula,
-            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
-            zoneW, zoneH, mods,
-            isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
-            mjAlwaysMax: !!s.mjAlwaysMax,
-            dmgStatMod: soinStatMod,
-            dmgStatLabel: soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey),
-            toucherMod: soinTouchMod, toucherSetBonus: 0,
-            toucherStatLabel: soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat),
-            actionType, _itemAction: itemMeta,
-          });
-        } else if (types.includes('defensif') && protMode === 'ca') {
-          // Buff CA
-          options.push({
-            id: `itemact_${invIdx}_${actIdx}`, icon: '🛡️', label: fullLabel,
-            dice: s.ca || 'CA +2 (2 tours)',
-            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
-            zoneW, zoneH, mods,
-            isCaSort: true, halfOnMiss: false,
-            caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
-            actionType, _itemAction: itemMeta,
-          });
-        } else {
-          // Utilitaire libre
-          options.push({
-            id: `itemact_${invIdx}_${actIdx}`, icon: sortIcon, label: fullLabel,
-            dice: s.effet ? s.effet.slice(0, 40) : '—',
-            portee, pmCost: cout, basePm, ..._pmMeta, sortIdx: `i${invIdx}_${actIdx}`, nbCibles,
-            zoneW, zoneH, mods,
-            isUtil: true, halfOnMiss: false,
-            actionType, _itemAction: itemMeta,
-          });
-        }
+        options.push(_buildSpellOption(s, {
+          id: `itemact_${invIdx}_${actIdx}`,
+          sortIdx: `i${invIdx}_${actIdx}`,
+          label: fullLabel,
+          c,
+          portee: baseRange,
+          pmCost: cout, basePm, pmRaw, pmSetDelta: spellPmDeltaI,
+          fallbackTouchStat: sStatKeyI, fallbackDmgStat: sStatKeyI,
+          touchSetBonus: 0,
+          // Différence historique : items ne déclenchent isEnchantOnly que pour enchantArmeDmg
+          // (pas enchantEtatId). Préservé pour rétrocompat.
+          enchantOnlyAlsoEtat: false,
+          extras: { _itemAction: itemMeta },
+        }));
       });
     });
   }

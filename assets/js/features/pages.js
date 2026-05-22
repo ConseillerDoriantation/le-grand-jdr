@@ -1503,25 +1503,10 @@ const PAGES = {
 
   // ─── PLAYERS ────────────────────────────────────────────────────────────────
   async players() {
+    // Implémentation effective dans features/players.js (override PAGES.players)
     if (typeof window.renderPlayersPage === 'function') {
       await window.renderPlayersPage();
-      return;
     }
-
-    const items = await loadCollection('players');
-    const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">⚔️ Présentation des Joueurs</div><div class="page-subtitle">Les héros de cette aventure</div></div>`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" onclick="openPlayerPresentModal()">+ Ajouter / Modifier</button></div>`;
-    if (items.length === 0) {
-      html += `<div class="empty-state"><div class="icon">⚔️</div><p>Aucun joueur présenté pour l'instant.</p></div>`;
-    } else {
-      html += `<div class="players-grid">`;
-      items.forEach(p => {
-        html += `<div class="player-card" onclick="viewPlayerDetail('${p.id}')"><div class="player-avatar">${p.emoji || '⚔️'}</div><div class="player-name">${p.nom || '?'}</div><div class="player-class">${p.classe || ''} — ${p.race || ''}</div><div style="margin-top:0.5rem"><span class="badge badge-gold">Niv. ${p.niveau || 1}</span></div>${STATE.isAdmin ? `<div style="margin-top:0.5rem;display:flex;gap:0.3rem;justify-content:center"><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editPlayerPresent('${p.id}')">✏️</button><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deletePlayerPresent('${p.id}')">🗑️</button></div>` : ''}</div>`;
-      });
-      html += '</div>';
-    }
-    content.innerHTML = html;
   },
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────

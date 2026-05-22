@@ -133,7 +133,10 @@
       "Bash(node --check \"C:/Users/Moi/Documents/GitHub/le-grand-jdr/.claude/worktrees/zen-banzai/assets/js/features/shop.js\")",
       "Bash(node .migrate-vtt.mjs)",
       "Bash(awk '/_vttLootInlineAdd/ {start=$1} /^[0-9]+:};$/ && start')",
-      "Bash(node --check assets/js/shared/shop-picker.js)"
+      "Bash(node --check assets/js/shared/shop-picker.js)",
+      "Bash(grep -vE '\\\\.\\(js|css|html|md|json|svg\\)$')",
+      "Bash(node --check assets/js/shared/image-crop.js)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }
