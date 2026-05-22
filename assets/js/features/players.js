@@ -298,7 +298,6 @@ function _renderHero(items, filtered) {
       <div class="pp-hero-title-block">
         <div class="pp-hero-eyebrow">Compagnons d'Aventure</div>
         <h1 class="pp-hero-title">✦ Roster de Campagne ✦</h1>
-        <p class="pp-hero-subtitle">— Ceux qui ont marché vers le cendre —</p>
       </div>
       <div class="pp-hero-stats">
         <div class="pp-hero-stat"><div class="pp-hero-stat-num">${items.length}</div><div class="pp-hero-stat-lbl">Personnage${items.length>1?'s':''}</div></div>

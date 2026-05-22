@@ -1045,7 +1045,6 @@ function _render() {
       <div class="bst-hero-title-block">
         <div class="bst-eyebrow">Encyclopédie des Créatures</div>
         <h1 class="bst-title">✦ Cartulaire des Bêtes ✦</h1>
-        <p class="bst-subtitle">— Ce qui rôde au-delà des cendres —</p>
       </div>
       ${tabsHtml ? `<div>${tabsHtml}</div>` : ''}
     </div>
