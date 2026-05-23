@@ -61,8 +61,7 @@ async function renderWorld() {
   const activeSection = visible.find(s => s.id === _activeId) || null;
 
   content.innerHTML = `
-  <div style="display:grid;grid-template-columns:240px 1fr;gap:1.2rem;align-items:start;
-    max-width:1100px;margin:0 auto">
+  <div class="world-shell" style="display:grid;grid-template-columns:240px 1fr;gap:1.2rem;align-items:start;margin:0 auto">
 
     <!-- ── SIDEBAR NAVIGATION ───────────────────────────────────────────── -->
     <div style="position:sticky;top:1rem">

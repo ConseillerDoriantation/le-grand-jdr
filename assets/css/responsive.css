@@ -398,33 +398,44 @@
 
 /* ═══════════════════════════════════════════════════════════
    GRAND ÉCRAN / ULTRA-WIDE — appliqué à TOUTES les pages
-   Stratégie : on remonte progressivement --content-max (qui cape
-   `.main-content > *`) puis on libère les wrappers de page qui
-   ont leur propre max-width hard-coded (.ag-root, .bs-root,
-   .dv2-root, .pp-page, etc.).
+   Stratégie :
+     1. Variables CSS pilotées par breakpoint :
+        --content-max  : cape `.main-content > *` (touches toutes
+                          les pages qui ne définissent pas leur
+                          propre wrapper).
+        --page-max     : utilisée par les wrappers spécifiques
+                          (.ag-root, .bs-root, .dv2-root, .pp-page,
+                          .world-shell, .npc-shell). Ces wrappers
+                          ont `max-width: var(--page-max, <fallback>)`,
+                          donc l'override par variable suffit, peu
+                          importe l'ordre d'import CSS.
 ═══════════════════════════════════════════════════════════ */
+
+/* Wrappers de pages qui héritent désormais du cap global --page-max */
+.world-shell { max-width: var(--page-max, 1100px); }
+.npc-shell   { max-width: var(--page-max, 1200px); }
+
 @media (min-width: 1600px) {
-  :root { --content-max: 1800px; }
+  :root { --content-max: 1800px; --page-max: 1500px; }
 }
 @media (min-width: 1920px) {
-  :root { --content-max: 2000px; }
-  .ag-root, .bs-root, .dv2-root { max-width: 1700px; }
+  :root { --content-max: 2000px; --page-max: 1700px; }
 }
 @media (min-width: 2200px) {
-  :root { --content-max: 2300px; }
+  :root { --content-max: 2300px; --page-max: 2100px; }
   .ag-root, .bs-root, .dv2-root,
-  .pp-page {
-    max-width: none;
+  .pp-page, .world-shell, .npc-shell {
     padding-left:  clamp(2rem, 4vw, 5rem);
     padding-right: clamp(2rem, 4vw, 5rem);
   }
 }
 @media (min-width: 2600px) {
-  :root { --content-max: 2700px; }
+  :root { --content-max: 2700px; --page-max: 2500px; }
 }
 @media (min-width: 3000px) {
-  :root { --content-max: 3000px; }
-  .ag-root, .bs-root, .dv2-root, .pp-page {
+  :root { --content-max: 3000px; --page-max: 2800px; }
+  .ag-root, .bs-root, .dv2-root,
+  .pp-page, .world-shell, .npc-shell {
     padding-left:  clamp(3rem, 5vw, 7rem);
     padding-right: clamp(3rem, 5vw, 7rem);
   }

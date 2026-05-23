@@ -3,7 +3,7 @@
 ═══════════════════════════════════════════════════════════════════ */
 
 .ag-root {
-  max-width: 1280px;
+  max-width: var(--page-max, 1280px);
   margin: 0 auto;
   padding: 18px 18px 60px;
   display: flex;

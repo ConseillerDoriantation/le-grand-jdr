@@ -295,8 +295,7 @@ function _renderPage(content) {
   const active   = _npcs.find(n => n.id === _activeId) || filtered[0] || null;
 
   content.innerHTML = `
-  <div style="display:grid;grid-template-columns:280px 1fr;gap:1rem;
-    align-items:start;max-width:1200px;margin:0 auto">
+  <div class="npc-shell" style="display:grid;grid-template-columns:280px 1fr;gap:1rem;align-items:start;margin:0 auto">
 
     <!-- ═══ SIDEBAR ═════════════════════════════════════════════════════ -->
     <div style="position:sticky;top:0;display:flex;flex-direction:column;gap:.6rem">
