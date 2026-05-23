@@ -14,8 +14,8 @@
   padding: 0 1rem 3rem;
 }
 /* Responsive grand écran : largeur progressive, puis remplit tout l'espace dispo */
-@media (min-width: 1500px) { .pp-page { max-width: 1440px; padding: 0 1.5rem 3rem; } }
-@media (min-width: 1920px) { .pp-page { max-width: 1700px; padding: 0 2rem 3rem; } }
+@media (min-width: 1500px) { .pp-page { max-width: var(--page-max, 1440px); padding: 0 1.5rem 3rem; } }
+@media (min-width: 1920px) { .pp-page { max-width: var(--page-max, 1700px); padding: 0 2rem 3rem; } }
 @media (min-width: 2200px) {
   /* Ultra-wide : on relâche le cap et on utilise tout l'espace, marges aérées */
   .pp-page { max-width: none; padding: 0 clamp(2rem, 5vw, 6rem) 3rem; }
