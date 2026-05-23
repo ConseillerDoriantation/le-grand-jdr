@@ -137,7 +137,8 @@
       "Bash(grep -vE '\\\\.\\(js|css|html|md|json|svg\\)$')",
       "Bash(node --check assets/js/shared/image-crop.js)",
       "Bash(echo \"exit=$?\")",
-      "Bash(gh run *)"
+      "Bash(gh run *)",
+      "Bash(node --check assets/js/features/shop.js assets/js/shared/char-stats.js assets/js/features/characters/equipment.js)"
     ]
   }
 }

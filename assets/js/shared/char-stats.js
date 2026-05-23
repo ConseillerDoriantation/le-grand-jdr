@@ -138,12 +138,16 @@ export function calcCA(c) {
   else if (torse === 'Lourde')   caBase = 14;
 
   const caEquip = Object.values(equip).reduce((s, it) => s + (it?.ca || 0), 0);
-
+  // Bonus dérivé "caBonus" configurable par item (boucliers, amulettes, etc.)
+  const caBonusDerived = computeEquipDerivedBonus(equip).caBonus;
+  // Fallback rétrocompat : un bouclier sans caBonus défini garde +2
   const mainS  = equip['Main secondaire'];
   const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
-  const bouclierBonus = (stypeS.includes('bouclier') || stypeS.includes('shield')) ? 2 : 0;
+  const isShield = stypeS.includes('bouclier') || stypeS.includes('shield');
+  const shieldHasOwnBonus = Number.isFinite(parseInt(mainS?.caBonus)) && parseInt(mainS.caBonus) !== 0;
+  const bouclierFallback = (isShield && !shieldHasOwnBonus) ? 2 : 0;
 
-  return caBase + getMod(c, 'dexterite') + caEquip + bouclierBonus;
+  return caBase + getMod(c, 'dexterite') + caEquip + caBonusDerived + bouclierFallback;
 }
 
 /** Vitesse de déplacement (base + bonus items équipés). */
@@ -293,7 +297,7 @@ export function formatItemBonusText(item = {}) {
 //   - skillBonuses: { "Intimidation": 1, "Perception": 2, ... }
 // Ces bonus s'ajoutent au calcul de base quand l'item est équipé.
 
-const DERIVED_BONUS_KEYS = ['pvMaxBonus', 'pmMaxBonus', 'vitesseBonus', 'initiativeBonus'];
+const DERIVED_BONUS_KEYS = ['pvMaxBonus', 'pmMaxBonus', 'vitesseBonus', 'initiativeBonus', 'caBonus'];
 
 /** Lit le palier d'amélioration "effet" appliqué à l'item (Artisan). */
 function _effectUpgrade(it) {
@@ -309,7 +313,7 @@ function _bumpBonus(val, upgrade) {
 
 /** Agrège les bonus dérivés de tous les items équipés (avec amélioration Artisan). */
 export function computeEquipDerivedBonus(equip = {}) {
-  const out = { pvMaxBonus: 0, pmMaxBonus: 0, vitesseBonus: 0, initiativeBonus: 0 };
+  const out = { pvMaxBonus: 0, pmMaxBonus: 0, vitesseBonus: 0, initiativeBonus: 0, caBonus: 0 };
   Object.values(equip || {}).forEach(it => {
     if (!it) return;
     const up = _effectUpgrade(it);
