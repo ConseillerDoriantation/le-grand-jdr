@@ -4,6 +4,16 @@
   box-sizing: border-box;
 }
 
+/* Base typographique normalisée — rend l'apparence identique sous Chrome,
+   Opera, Edge, Firefox et Safari (zoom natif, anti-aliasing, fake-bold, etc.) */
+html {
+  font-size: 16px;                       /* base fixe : neutralise les réglages "taille de police" du navigateur */
+  -webkit-text-size-adjust: 100%;        /* iOS / Safari : pas d'ajustement auto */
+  -moz-text-size-adjust:    100%;
+  text-size-adjust:         100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
 html,
 body {
   min-height: 100%;
@@ -16,6 +26,26 @@ body {
   background: var(--bg-void);
   color: var(--text);
   min-height: 100vh;
+  font-weight: 400;                      /* baseline explicite — évite que Chrome rende plus "gras" qu'Opera */
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;   /* Chrome / Safari / Opera : anti-aliasing uniforme */
+  -moz-osx-font-smoothing: grayscale;    /* Firefox macOS : pareil */
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;                  /* interdit le fake-bold / fake-italic des poids manquants */
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+/* Form controls : héritent vraiment de body — certains navigateurs (notamment
+   Opera et Safari) appliquent leurs propres styles plus petits par défaut */
+button, input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  -webkit-font-smoothing: inherit;
+  -moz-osx-font-smoothing: inherit;
+  letter-spacing: inherit;
+  color: inherit;
 }
 
 /* Fond hexagonal + gradients radiaux */
@@ -39,13 +69,6 @@ body::before {
 body > * {
   position: relative;
   z-index: 1;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
 }
 
 img {
