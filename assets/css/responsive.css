@@ -395,3 +395,37 @@
   .quest-card { padding: .85rem .75rem; }
   .bst-grid-wrap { padding: 10px 8px 24px !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   GRAND ÉCRAN / ULTRA-WIDE — appliqué à TOUTES les pages
+   Stratégie : on remonte progressivement --content-max (qui cape
+   `.main-content > *`) puis on libère les wrappers de page qui
+   ont leur propre max-width hard-coded (.ag-root, .bs-root,
+   .dv2-root, .pp-page, etc.).
+═══════════════════════════════════════════════════════════ */
+@media (min-width: 1600px) {
+  :root { --content-max: 1800px; }
+}
+@media (min-width: 1920px) {
+  :root { --content-max: 2000px; }
+  .ag-root, .bs-root, .dv2-root { max-width: 1700px; }
+}
+@media (min-width: 2200px) {
+  :root { --content-max: 2300px; }
+  .ag-root, .bs-root, .dv2-root,
+  .pp-page {
+    max-width: none;
+    padding-left:  clamp(2rem, 4vw, 5rem);
+    padding-right: clamp(2rem, 4vw, 5rem);
+  }
+}
+@media (min-width: 2600px) {
+  :root { --content-max: 2700px; }
+}
+@media (min-width: 3000px) {
+  :root { --content-max: 3000px; }
+  .ag-root, .bs-root, .dv2-root, .pp-page {
+    padding-left:  clamp(3rem, 5vw, 7rem);
+    padding-right: clamp(3rem, 5vw, 7rem);
+  }
+}
