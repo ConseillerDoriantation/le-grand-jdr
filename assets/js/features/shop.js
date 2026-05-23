@@ -2486,6 +2486,7 @@ function _buildFieldsHtml(tpl,item) {
         { id:'pmMaxBonus',     short:'PM',   label:'PM max',     icon:'✨' },
         { id:'vitesseBonus',   short:'Vit',  label:'Vitesse',    icon:'👢' },
         { id:'initiativeBonus',short:'Init', label:'Initiative', icon:'⚡' },
+        { id:'caBonus',        short:'CA',   label:'Classe d\'Armure', icon:'🛡️' },
       ];
       html+=`<div class="form-group sh-field-full"><label>${f.label} <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— ajoutés au calcul de base quand l'objet est équipé</span></label>
         <div class="sh-bonus-row">
@@ -2721,8 +2722,8 @@ async function saveShopItem(itemId) {
           data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
         });
       } else if (f.type === 'derived_bonus_grid') {
-        // Bonus dérivés : PV/PM max, Vitesse, Initiative
-        ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
+        // Bonus dérivés : PV/PM max, Vitesse, Initiative, CA
+        ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus'].forEach(k => {
           const v = parseInt(document.getElementById(`si-${k}`)?.value);
           data[k] = Number.isFinite(v) ? v : 0;
         });

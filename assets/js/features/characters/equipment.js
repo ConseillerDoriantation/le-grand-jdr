@@ -69,6 +69,7 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
       pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
       vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
       initiativeBonus:parseInt(item.initiativeBonus)|| 0,
+      caBonus:        parseInt(item.caBonus)        || 0,
       skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
                       ? { ...item.skillBonuses } : {},
       sourceInvIndex: invIndex,
