@@ -5,9 +5,12 @@
 }
 
 /* Base typographique normalisée — rend l'apparence identique sous Chrome,
-   Opera, Edge, Firefox et Safari (zoom natif, anti-aliasing, fake-bold, etc.) */
+   Opera, Edge, Firefox et Safari (zoom natif, anti-aliasing, fake-bold, etc.)
+   Note : tout le projet utilise `rem`, donc cette baseline pilote la taille
+   globale. On la garde un peu plus grosse que 16px pour rester lisible
+   même quand un navigateur sous-échantillonne (Opera sur Windows haut-DPI). */
 html {
-  font-size: 16px;                       /* base fixe : neutralise les réglages "taille de police" du navigateur */
+  font-size: clamp(16px, calc(0.35vw + 14px), 19px);
   -webkit-text-size-adjust: 100%;        /* iOS / Safari : pas d'ajustement auto */
   -moz-text-size-adjust:    100%;
   text-size-adjust:         100%;
