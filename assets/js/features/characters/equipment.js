@@ -96,6 +96,7 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
     pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
     vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
     initiativeBonus:parseInt(item.initiativeBonus)|| 0,
+    caBonus:        parseInt(item.caBonus)        || 0,
     skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
                     ? { ...item.skillBonuses } : {},
     sourceInvIndex: invIndex,
@@ -181,16 +182,13 @@ export function editEquipSlot(slot) {
       const tpl = item.template || '';
 
       if (isWeapon) {
-        // Pas de restriction par slot : toute arme est équipable dans Main principale ou secondaire
+        // Strict : on accepte UNIQUEMENT les items de template "arme" (boucliers
+        // inclus, ils sont catégorisés comme armes via sousType=Bouclier).
+        // Fallback rétrocompat : items legacy sans template mais avec un champ
+        // arme explicite (degats / toucher / format reconnu).
         if (tpl === 'arme') return true;
-        if (item.format && WEAPON_FORMATS.has(item.format)) return true;
-        const combined = [item.type, item.sousType, item.nom, item.categorie]
-          .map(s => (s||'').toLowerCase()).join(' ');
-        return [
-          'arme','weapon','épée','lance','hache','arc','arbalète',
-          'dague','baguette','baton','bouclier','shield','torche',
-          'masse','marteau','fléau','rapière','cimeterre','sabre',
-        ].some(k => combined.includes(k));
+        if (!tpl && (item.degats || item.toucher || (item.format && WEAPON_FORMATS.has(item.format)))) return true;
+        return false;
       }
 
       const armureRule = SLOT_ARMURE[slot];
@@ -245,7 +243,7 @@ export function editEquipSlot(slot) {
            border:1px solid var(--border);border-radius:8px;font-size:.78rem">
            <div style="font-weight:700;color:var(--text);margin-bottom:.25rem">${_esc(equipped.nom||'')}</div>
            ${equipped.typeArmure ? `<span class="badge badge-gold" style="font-size:.65rem;margin-right:.3rem">${equipped.typeArmure}</span>` : ''}
-           ${equipped.ca ? `<span style="font-size:.72rem;color:#4f8cff">🛡️ CA +${equipped.ca}</span>` : ''}
+           ${(equipped.ca || equipped.caBonus) ? `<span style="font-size:.72rem;color:#4f8cff">🛡️ CA +${(parseInt(equipped.ca)||0) + (parseInt(equipped.caBonus)||0)}</span>` : ''}
            ${equipped.particularite ? `<div style="font-size:.72rem;color:var(--text-muted);margin-top:.25rem">${_esc(equipped.particularite)}</div>` : ''}
            ${(Array.isArray(equipped.traits) ? equipped.traits : []).filter(Boolean).map(t=>
              `<div style="font-size:.7rem;color:#b47fff;font-style:italic;margin-top:.1rem">${_esc(t)}</div>`
@@ -332,7 +330,7 @@ export function previewEquipFromInv(val, slot) {
       item.typeArmure && `<span class="badge badge-gold" style="font-size:.65rem">${item.typeArmure}</span>`,
       item.degats && `<span style="font-size:.75rem;color:#ff6b6b">⚔️ ${item.degats}</span>`,
       item.toucher && `<span style="font-size:.75rem;color:#e8b84b">🎯 ${item.toucher}</span>`,
-      item.ca && `<span style="font-size:.75rem;color:#4f8cff">🛡️ CA +${item.ca}</span>`,
+      (item.ca || item.caBonus) && `<span style="font-size:.75rem;color:#4f8cff">🛡️ CA +${(parseInt(item.ca)||0) + (parseInt(item.caBonus)||0)}</span>`,
     ].filter(Boolean).join(' ');
     preview.innerHTML = `<div class="cs-equip-inv-item" style="margin-top:.5rem;padding:.5rem .75rem;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border)">
       <strong style="font-size:.85rem">${item.nom}</strong>

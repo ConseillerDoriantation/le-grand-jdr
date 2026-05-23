@@ -64,7 +64,10 @@ export function _renderInventaireBoutique(char) {
     }
     if (item.toucherStat) infos.push({ label: 'Toucher',    val: statShort(item.toucherStat), color: '#e8b84b' });
     else if (item.toucher) infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
-    if (item.ca || item.ca === 0) infos.push({ label: '🛡️ CA', val: item.ca });
+    {
+      const caTot = (parseInt(item.ca)||0) + (parseInt(item.caBonus)||0);
+      if (caTot || item.ca === 0 || item.caBonus === 0) infos.push({ label: '🛡️ CA', val: caTot });
+    }
     _getTraits(item).forEach(t => infos.push({ label: 'Trait', val: t, color: '#b47fff', italic: true }));
     if (item.type)        infos.push({ label: 'Type',       val: item.type });
     { const eff = getItemEffectText(item); if (eff) infos.push({ label: 'Effet', val: eff }); }
@@ -168,8 +171,11 @@ function _invRowChips(item) {
   }
   if (item.toucherStat || (item.toucher && !item.degats))
     chips.push({ val: item.toucherStat ? statShort(item.toucherStat) : item.toucher, color: '#e8b84b' });
-  if (item.ca != null && item.ca !== '')
-    chips.push({ val: `CA+${parseInt(item.ca)||0}`, color: '#4f8cff' });
+  {
+    const caTot = (parseInt(item.ca)||0) + (parseInt(item.caBonus)||0);
+    if (caTot !== 0 || (item.ca != null && item.ca !== ''))
+      chips.push({ val: `CA+${caTot}`, color: '#4f8cff' });
+  }
   if (item.slotArmure)       chips.push({ val: item.slotArmure, color: '#4f8cff' });
   else if (item.slotBijou)   chips.push({ val: item.slotBijou,  color: '#c084fc' });
   if (item.typeArmure)       chips.push({ val: item.typeArmure, color: '#22c38e' });

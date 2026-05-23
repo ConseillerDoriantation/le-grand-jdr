@@ -160,7 +160,7 @@ export function renderCharEquip(c, canEdit) {
   const statDisplay = { fo:'FOR', dex:'DEX', in:'IN', sa:'SA', co:'CO', ch:'CH', ca:'CA' };
   Object.values(equip).forEach(it => {
     Object.entries(statByStore).forEach(([store, full]) => { totals[store] += getItemStatBonus(it, full); });
-    totals.ca += parseInt(it?.ca) || 0;
+    totals.ca += (parseInt(it?.ca) || 0) + (parseInt(it?.caBonus) || 0);
   });
   const totalStr = Object.entries(totals).filter(([,v])=>v!==0).map(([k,v])=>`${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}`).join(' · ');
 
@@ -169,7 +169,7 @@ export function renderCharEquip(c, canEdit) {
     const statBonuses   = Object.entries(statByStore)
       .map(([store, full]) => [store, getItemStatBonus(item, full)])
       .filter(([, val]) => val);
-    const caBonus       = parseInt(item.ca) || 0;
+    const caBonus       = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
     const armorTypeMeta = getArmorTypeMeta(item.typeArmure || '');
     const traits        = _getTraits(item);
     return `<div class="cs-armor-card${item.nom?' cs-armor-card--on':''}">
