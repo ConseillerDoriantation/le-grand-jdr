@@ -12,6 +12,32 @@ import {
 
 // ── renderCharEquip ───────────────────────────────────────────────────────────
 
+function _renderElementAccessHtml(c, magicTypes, canManageElements) {
+  const charElems = c.elements || [];
+  const chips = magicTypes.map(t => {
+    const active = charElems.includes(t.id);
+    const cls = `cs-elem-chip ${active ? 'cs-elem-chip--on' : ''} ${canManageElements ? '' : 'cs-elem-chip--readonly'}`;
+    const attrs = canManageElements
+      ? `onclick="window._toggleCharElement('${c.id}','${t.id}')" title="${active ? 'Retirer' : 'Ajouter'} ${t.label}"`
+      : `title="${active ? 'Accessible' : 'Non accessible'}"`;
+    return '<span class="' + cls + '" style="--elem-col:' + (t.color || '#9ca3af') + '" ' + attrs + '>' + (t.icon || '') + ' ' + t.label + '</span>';
+  }).join('');
+
+  const empty = charElems.length === 0
+    ? `<span class="cs-elem-empty">${canManageElements ? 'Aucun élément accordé.' : 'Aucun élément débloqué par le MJ.'}</span>`
+    : '';
+  const hint = canManageElements
+    ? 'Clique pour accorder ou retirer un noyau magique à ce personnage.'
+    : 'Noyaux magiques débloqués par le MJ pour la forge de sorts.';
+
+  return `<div class="cs-elem-access">
+    <div class="cs-elem-access-head">
+      <span>🌀 Runes noyaux accessibles</span>
+      <small>${hint}</small>
+    </div>
+    <div class="cs-elem-grid">${chips}${empty}</div>
+  </div>`;
+}
 export function renderCharEquip(c, canEdit) {
   const equip      = c.equipement||{};
   const weaponSlots = ['Main principale','Main secondaire'];
@@ -105,22 +131,7 @@ export function renderCharEquip(c, canEdit) {
     if (!el) return;
     const allTypes   = await loadDamageTypes();
     const magicTypes = getMagicTypes(allTypes);
-    const charElems  = c.elements || [];
-
-    const chips = magicTypes.map(t => {
-      const active = charElems.includes(t.id);
-      return `<span class="cs-elem-chip ${active ? 'cs-elem-chip--on' : ''}"
-        style="--elem-col:${t.color||'#9ca3af'}"
-        ${canEdit ? `onclick="window._toggleCharElement('${c.id}','${t.id}')" title="${active ? 'Retirer' : 'Ajouter'} ${t.label}"` : ''}
-      >${t.icon} ${t.label}</span>`;
-    }).join('');
-
-    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.4rem;padding:.1rem .1rem .55rem">
-      ${chips}
-      ${charElems.length === 0 && !canEdit
-        ? `<span style="font-size:.73rem;color:var(--text-dim);font-style:italic">Aucun élément — armes magiques frappent physique</span>`
-        : ''}
-    </div>`;
+    el.innerHTML = _renderElementAccessHtml(c, magicTypes, STATE.isAdmin);
   }, 0);
 
   // Style de combat — rendu async dans le placeholder
@@ -254,6 +265,7 @@ export function renderCharEquip(c, canEdit) {
 
 /** Active ou désactive un élément sur un personnage. */
 window._toggleCharElement = async (charId, elemId) => {
+  if (!STATE.isAdmin) { showNotif('Seul le MJ peut modifier les noyaux accessibles.', 'error'); return; }
   const c = STATE.activeChar;
   if (!c || c.id !== charId) return;
   const elems = [...(c.elements || [])];
@@ -268,12 +280,5 @@ window._toggleCharElement = async (charId, elemId) => {
   const magicTypes = getMagicTypes(allTypes);
   const el = document.getElementById(`cs-elements-${charId}`);
   if (!el) return;
-  const chips = magicTypes.map(t => {
-    const active = elems.includes(t.id);
-    return `<span class="cs-elem-chip ${active ? 'cs-elem-chip--on' : ''}"
-      style="--elem-col:${t.color||'#9ca3af'}"
-      onclick="window._toggleCharElement('${charId}','${t.id}')" title="${active ? 'Retirer' : 'Ajouter'} ${t.label}"
-    >${t.icon} ${t.label}</span>`;
-  }).join('');
-  el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.4rem;padding:.1rem .1rem .55rem">${chips}</div>`;
+  el.innerHTML = _renderElementAccessHtml(c, magicTypes, true);
 };

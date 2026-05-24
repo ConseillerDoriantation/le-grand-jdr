@@ -1574,9 +1574,8 @@ export async function openSortModal(idx, s) {
   // Caches globaux utilisés par _getSortCA, _calcSortSoin, suggestions...
   window._spellMatricesCache = matrices;
   window._damageTypesCache   = allTypes;
-  // Tous les types de dégâts sont proposables comme noyau (y compris Physique).
-  // Le MJ contrôle la liste via la console.
-  const NOYAUX = allTypes;
+  // Tous les types de dégâts restent la source globale des noyaux.
+  // L'accès joueur aux noyaux magiques est ensuite filtré par personnage (c.elements).
   const RUNES = RUNE_META; // alias local pour compat ascendante
 
   const runesSrc = s?.runes||[];
@@ -1588,14 +1587,27 @@ export async function openSortModal(idx, s) {
   let noyauTypeIdSel = s?.noyauTypeId || '';
   if (!noyauTypeIdSel && s?.noyau) {
     // Migration : chercher par label ou par label partiel (ex: 'Feu 🔥' → 'feu')
-    const legacy = NOYAUX.find(n =>
+    const legacy = allTypes.find(n =>
       n.label === s.noyau ||
       s.noyau.toLowerCase().startsWith(n.label.toLowerCase())
     );
     noyauTypeIdSel = legacy?.id || '';
   }
+  const charForAccess = STATE.activeChar || _itemEditCtx?.charForCalc || null;
+  const charElements  = new Set(charForAccess?.elements || []);
+  const canUseAllNoyaux = STATE.isAdmin || !charForAccess;
+  const allowedNoyaux = canUseAllNoyaux
+    ? [...allTypes]
+    : allTypes.filter(n => !n.isMagic || charElements.has(n.id));
+  const selectedNoyau = noyauTypeIdSel ? allTypes.find(n => n.id === noyauTypeIdSel) : null;
+  const selectedLocked = selectedNoyau && !allowedNoyaux.some(n => n.id === selectedNoyau.id);
+  const NOYAUX = selectedLocked
+    ? [...allowedNoyaux, { ...selectedNoyau, locked: true }]
+    : allowedNoyaux;
+  window._sortAllowedNoyauIds = new Set(allowedNoyaux.map(n => n.id));
+
   const noyauSel      = noyauTypeIdSel
-    ? (NOYAUX.find(n => n.id === noyauTypeIdSel)?.label || s?.noyau || '')
+    ? (selectedNoyau?.label || s?.noyau || '')
     : (s?.noyau || '');
   // Pas de type par défaut sur un sort nouveau — l'utilisateur choisit. Compat legacy uniquement.
   const typesInit = Array.isArray(s?.types) ? s.types
@@ -1705,15 +1717,22 @@ export async function openSortModal(idx, s) {
 
     <!-- ③ Noyau — section visuelle dédiée -->
     <div class="cs-spell-section cs-spell-section--noyau">
-      <div class="cs-spell-section-title">🌀 Noyau élémentaire <span class="cs-spell-section-hint">cœur du sort · 2 PM · obligatoire</span></div>
+      <div class="cs-spell-section-title">🌀 Rune noyau élémentaire <span class="cs-spell-section-hint">cœur du sort · 2 PM · obligatoire</span></div>
       <div class="cs-noyau-grid" id="noyau-grid">
-        ${NOYAUX.map(n => `<div class="cs-noyau-btn ${noyauTypeIdSel===n.id?'selected':''}"
-             style="${noyauTypeIdSel===n.id ? `border-color:${n.color};background:${n.color}20;color:${n.color}` : ''}"
-             onclick="selectNoyau(this,'${n.id}','${n.label} ${n.icon}','${n.color}')"
-             data-noyau-id="${n.id}">${n.icon} ${n.label}</div>`).join('')}
+        ${NOYAUX.length ? NOYAUX.map(n => {
+          const selected = noyauTypeIdSel === n.id;
+          const locked = !!n.locked;
+          const selectedStyle = selected ? `border-color:${n.color};background:${n.color}20;color:${n.color}` : '';
+          const attrs = locked
+            ? `title="Ce noyau n'est plus accessible à ce personnage" aria-disabled="true"`
+            : `onclick="selectNoyau(this,'${n.id}','${n.label} ${n.icon}','${n.color}')" title="Choisir ${n.label}"`;
+          const lockedBadge = locked ? '<span class="cs-noyau-lock">non accessible</span>' : '';
+          return `<div class="cs-noyau-btn ${selected?'selected':''}${locked?' cs-noyau-btn--locked':''}" style="${selectedStyle}" ${attrs} data-noyau-id="${n.id}">${n.icon} ${n.label}${lockedBadge}</div>`;
+        }).join('') : '<div class="cs-noyau-empty">Aucun noyau accessible. Demande au MJ de débloquer un élément sur ta fiche.</div>'}
       </div>
       <input type="hidden" id="s-noyau" value="${noyauSel}">
       <input type="hidden" id="s-noyau-id" value="${noyauTypeIdSel}">
+      <div id="s-noyau-error" class="cs-spell-field-error" hidden>Sélectionne une rune noyau pour enregistrer ce sort.</div>
     </div>
 
     <!-- ④ Runes — Forge -->
@@ -2584,6 +2603,37 @@ function _updateSortPreview() {
 }
 window._updateSortPreview = _updateSortPreview;
 
+function _setNoyauRequiredError(show, message = 'Sélectionne une rune noyau pour enregistrer ce sort.') {
+  const section = document.querySelector('.cs-spell-section--noyau');
+  const error   = document.getElementById('s-noyau-error');
+  section?.classList.toggle('is-invalid', !!show);
+  document.querySelectorAll('.cs-noyau-btn').forEach(btn => {
+    btn.setAttribute('aria-invalid', show ? 'true' : 'false');
+  });
+  if (error) {
+    error.textContent = message;
+    error.hidden = !show;
+  }
+}
+
+function _requireNoyauSelection() {
+  const noyauTypeId = (document.getElementById('s-noyau-id')?.value || '').trim();
+  const noyauLabel  = (document.getElementById('s-noyau')?.value || '').trim();
+  const allowedIds = window._sortAllowedNoyauIds;
+  const hasNoyau = !!(noyauTypeId && noyauLabel);
+  const hasAccess = !allowedIds || allowedIds.has(noyauTypeId);
+  const valid = hasNoyau && hasAccess;
+  const message = hasNoyau && !hasAccess
+    ? "Ce noyau n'est pas accessible à ce personnage. Le MJ doit lui débloquer cet élément."
+    : 'Sélectionne une rune noyau pour enregistrer ce sort.';
+  _setNoyauRequiredError(!valid, message);
+  if (!valid) {
+    showNotif(message, 'error');
+    document.querySelector('.cs-spell-section--noyau')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  return valid;
+}
+
 export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
   document.querySelectorAll('.cs-noyau-btn').forEach(b => {
     b.classList.remove('selected');
@@ -2601,6 +2651,7 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
   const inputId    = document.getElementById('s-noyau-id');
   if (inputLabel) inputLabel.value = noyauLabel || noyauId;
   if (inputId)    inputId.value    = noyauId;
+  _setNoyauRequiredError(false);
   // Le changement de noyau affecte le calcul des soins (magique → arme · physique → Con)
   // et les suggestions matrice (Enchant/Affliction · Protection CA)
   updateSortPM();
@@ -2612,6 +2663,7 @@ export async function saveSort(idx) {
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
   try {
+    if (!_requireNoyauSelection()) return;
     const c = STATE.activeChar; if(!c) return;
     const sorts = c.deck_sorts||[];
     const noyau       = document.getElementById('s-noyau')?.value||'';
@@ -2785,6 +2837,7 @@ function _buildSortFromForm(idx, prevList = []) {
 async function _saveItemSpell() {
   if (!_itemEditCtx) return false;
   try {
+    if (!_requireNoyauSelection()) return false;
     const { item, idx, onSave } = _itemEditCtx;
     const acts = Array.isArray(item.actions) ? [...item.actions] : [];
     const newSort = _buildSortFromForm(idx, acts);

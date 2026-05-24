@@ -874,6 +874,27 @@
   font-weight: 700;
   box-shadow: 0 0 0 2px rgba(79,140,255,0.20);
 }
+.cs-noyau-btn--locked {
+  opacity: .62;
+  cursor: not-allowed;
+  filter: grayscale(.35);
+}
+.cs-noyau-lock {
+  display: block;
+  margin-top: .14rem;
+  font-size: .58rem;
+  color: #fca5a5;
+  font-weight: 700;
+}
+.cs-noyau-empty {
+  grid-column: 1 / -1;
+  padding: .55rem .65rem;
+  border: 1px dashed rgba(255,255,255,0.16);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: .74rem;
+  font-style: italic;
+}
 
 /* Mode jour */
 [data-theme="light"] .cs-noyau-btn {
@@ -890,6 +911,8 @@
   border-color: rgba(37,99,235,0.40);
   color: #1d4ed8;
 }
+[data-theme="light"] .cs-noyau-lock { color: #b91c1c; }
+[data-theme="light"] .cs-noyau-empty { border-color: rgba(0,0,0,0.14); }
 
 /* ══════════════════════════════════════════════════
    DRAG AND DROP SORTS
@@ -2953,6 +2976,18 @@ input[type=number].input-field::-webkit-outer-spin-button {
   border-color: rgba(180,127,255,0.20);
 }
 .cs-spell-section--noyau .cs-spell-section-title { color: #c084fc; }
+.cs-spell-section--noyau.is-invalid {
+  border-color: rgba(239,68,68,0.62);
+  box-shadow: 0 0 0 2px rgba(239,68,68,0.14);
+}
+.cs-spell-field-error {
+  margin-top: 0.45rem;
+  color: #fca5a5;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.cs-spell-field-error[hidden] { display: none; }
 .cs-spell-section--runes {
   background: linear-gradient(180deg, rgba(79,140,255,0.04), rgba(79,140,255,0.01));
   border-color: rgba(79,140,255,0.18);
@@ -2963,6 +2998,11 @@ input[type=number].input-field::-webkit-outer-spin-button {
   border-color: rgba(0,0,0,0.07);
 }
 [data-theme="light"] .cs-spell-section--noyau .cs-spell-section-title { color: #7c3aed; }
+[data-theme="light"] .cs-spell-section--noyau.is-invalid {
+  border-color: rgba(220,38,38,0.55);
+  box-shadow: 0 0 0 2px rgba(220,38,38,0.10);
+}
+[data-theme="light"] .cs-spell-field-error { color: #b91c1c; }
 [data-theme="light"] .cs-spell-section--runes .cs-spell-section-title { color: #2563eb; }
 
 /* Bande inline compacte (Type, Action, Déplacement) — pas de bordure, juste un label + boutons */
@@ -6565,6 +6605,24 @@ input[type=number].input-field::-webkit-outer-spin-button {
 /* ══════════════════════════════════════════════
    ÉLÉMENTS MAGIQUES
 ══════════════════════════════════════════════ */
+.cs-elem-access {
+  padding: .15rem .1rem .65rem;
+}
+.cs-elem-access-head {
+  display: flex;
+  flex-direction: column;
+  gap: .12rem;
+  margin-bottom: .45rem;
+  color: var(--text);
+  font-size: .78rem;
+  font-weight: 700;
+}
+.cs-elem-access-head small {
+  color: var(--text-dim);
+  font-size: .68rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
 .cs-elem-grid {
   display: flex;
   flex-wrap: wrap;
@@ -6595,6 +6653,25 @@ input[type=number].input-field::-webkit-outer-spin-button {
   background: rgba(255,255,255,.10);
   color: var(--elem-col, var(--text));
   font-weight: 700;
+}
+.cs-elem-chip--readonly {
+  cursor: default;
+}
+.cs-elem-chip--readonly:not(.cs-elem-chip--on) {
+  opacity: .52;
+}
+.cs-elem-chip--readonly:hover {
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+}
+.cs-elem-chip--readonly.cs-elem-chip--on:hover {
+  background: rgba(255,255,255,.10);
+  color: var(--elem-col, var(--text));
+}
+.cs-elem-empty {
+  font-size: .73rem;
+  color: var(--text-dim);
+  font-style: italic;
 }
 
 /* ── XP delta widget (fiche perso) ─────────────────────────────── */
