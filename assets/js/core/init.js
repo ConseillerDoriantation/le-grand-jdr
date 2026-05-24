@@ -29,7 +29,7 @@ import {
   setAdventures,
 } from "./state.js";
 
-import { showApp, showAuth, showAdventurePicker } from "./layout.js";
+import { showAppLoading, showAuth, showAdventurePicker } from "./layout.js";
 import { navigate } from "./navigation.js";
 import { loadUserAdventures, selectAdventure, runMigration } from "./adventure.js";
 import { unwatchAll } from "../shared/realtime.js";
@@ -47,7 +47,7 @@ window.pickAdventure = async (adventureId) => {
   selectAdventure(adv);
   const { hideAdventurePicker } = await import('./layout.js');
   hideAdventurePicker();
-  showApp();
+  showAppLoading();
   await navigate('dashboard');
 };
 
@@ -105,7 +105,7 @@ onAuthStateChanged(auth, async (user) => {
   const isSuperAdmin = STATE.profile?.isAdmin === true || user.email === ADMIN_EMAIL;
   setSuperAdmin(isSuperAdmin);
 
-  showApp();
+  showAppLoading();
 
   // Pré-télécharger Konva en arrière-plan (utilisé par le VTT)
   // Chemin doit rester synchro avec assets/js/features/vtt.js (_loadKonva)
@@ -133,7 +133,7 @@ onAuthStateChanged(auth, async (user) => {
 
     if (adventures.length === 1) {
       selectAdventure(adventures[0]);
-      showApp();
+      showAppLoading();
       await navigate('dashboard');
       return;
     }
@@ -143,7 +143,7 @@ onAuthStateChanged(auth, async (user) => {
     const lastAdv = lastId && adventures.find(a => a.id === lastId);
     if (lastAdv) {
       selectAdventure(lastAdv);
-      showApp();
+      showAppLoading();
       await navigate('dashboard');
       return;
     }
@@ -229,7 +229,7 @@ async function _runMigrationFromPicker(uid) {
 
     if (adventures.length > 0) {
       selectAdventure(adventures[0]);
-      showApp();
+      showAppLoading();
       await navigate('dashboard');
     } else {
       log('⚠️ Migration terminée mais aventure introuvable — recharge la page.');

@@ -3,6 +3,7 @@
 // ══════════════════════════════════════════════
 
 import { STATE } from './state.js';
+import { appSplashHtml } from '../shared/html.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
 function _hideBootSplash() {
@@ -34,6 +35,12 @@ window.openAdventureSwitcher = function () {
     `);
   }
 };
+
+export function showAppLoading(label = 'Chargement…') {
+  const content = document.getElementById('main-content');
+  if (content) content.innerHTML = appSplashHtml(label);
+  showApp();
+}
 
 export function showApp() {
   _hideBootSplash();

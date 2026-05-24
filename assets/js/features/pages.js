@@ -1040,9 +1040,7 @@ const PAGES = {
         <div style="margin-bottom:1.5rem"><button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button></div>`;
     } else {
       html += `<div class="char-select-bar" id="char-pills">
-        ${chars.map((c, i) => `<div class="char-pill ${i === 0 ? 'active' : ''}" onclick="selectChar('${c.id}',this)">
-          ${c.nom || '?'}<span class="char-pill-niv">Niv.${c.niveau || 1}</span>
-        </div>`).join('')}
+        ${chars.map((c, i) => window.charNavCardHtml ? window.charNavCardHtml(c, i === 0) : `<button type="button" class="char-pill ${i === 0 ? 'active' : ''}" data-charid="${_esc(c.id)}" onclick="selectChar('${c.id}',this)">${_esc(c.nom || '?')}</button>`).join('')}
         <button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button>
       </div><div id="char-sheet-area"></div>`;
     }
@@ -1055,7 +1053,7 @@ const PAGES = {
       STATE.activeChar = charToShow;
       // Mettre à jour la pill active
       document.querySelectorAll('#char-pills .char-pill').forEach(p => {
-        p.classList.toggle('active', p.getAttribute('onclick')?.includes(charToShow.id));
+        p.classList.toggle('active', p.dataset.charid === charToShow.id);
       });
       renderCharSheet(charToShow);
     }

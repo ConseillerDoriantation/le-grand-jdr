@@ -22,7 +22,11 @@ export function inlineEditText(charId, field, el) {
     el.textContent = val;
     input.replaceWith(el);
     if (field === 'nom') {
-      document.querySelectorAll('#char-pills .char-pill.active').forEach(p=>p.textContent=val);
+      document.querySelectorAll('#char-pills .char-pill.active').forEach(p => {
+        const name = p.querySelector('.char-pill-name');
+        if (name) name.textContent = val;
+        else p.textContent = val;
+      });
     }
     showNotif('Mis à jour !','success');
   };

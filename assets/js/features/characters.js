@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
-import { modStr } from '../shared/html.js';
+import { _esc, modStr } from '../shared/html.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct,
@@ -79,20 +79,41 @@ import { quickViewChar } from './characters/quick-view.js';
 // ══════════════════════════════════════════════
 // SÉLECTION
 // ══════════════════════════════════════════════
+function charNavCardHtml(c, active = false) {
+  const id = c.id || '';
+  const name = c.nom || 'Sans nom';
+  const initial = name.trim().charAt(0).toUpperCase() || '?';
+  const level = c.niveau || 1;
+  const photoPos = `${50 + (Number(c.photoX) || 0) * 50}% ${50 + (Number(c.photoY) || 0) * 50}%`;
+  const details = [c.classe, c.race].filter(Boolean).join(' · ') || c.ownerPseudo || '';
+  const portrait = c.photo
+    ? `<img class="char-pill-img" src="${_esc(c.photo)}" alt="" style="object-position:${photoPos}">`
+    : `<span class="char-pill-img char-pill-img--empty" aria-hidden="true">${_esc(initial)}</span>`;
+
+  return `<button type="button" class="char-pill ${active ? 'active' : ''}" data-charid="${_esc(id)}" onclick="selectChar('${id}',this)">
+    <span class="char-pill-img-wrap">${portrait}</span>
+    <span class="char-pill-niv" aria-label="Niveau ${_esc(level)}">${_esc(level)}</span>
+    <span class="char-pill-body">
+      <span class="char-pill-name">${_esc(name)}</span>
+      ${details ? `<span class="char-pill-meta">${_esc(details)}</span>` : ''}
+    </span>
+  </button>`;
+}
+
 function selectChar(id, el) {
-  document.querySelectorAll('#char-pills .char-pill').forEach(p=>p.classList.remove('active'));
-  el.classList.add('active');
+  document.querySelectorAll('#char-pills .char-pill').forEach(p=>p.classList.toggle('active', p.dataset.charid === id));
+  if (el) el.classList.add('active');
   const c = STATE.characters.find(x=>x.id===id);
   if (c) { STATE.activeChar=c; renderCharSheet(c, window._currentCharTab||'carac'); }
 }
 
 function filterAdminChars(pseudo, el) {
   document.querySelectorAll('#admin-player-filter .char-pill').forEach(p=>p.classList.remove('active'));
-  el.classList.add('active');
+  if (el) el.classList.add('active');
   const pills = document.querySelector('#char-pills');
   if (!pills) return;
   const chars = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
-  pills.innerHTML = chars.map((c,i)=>`<div class="char-pill ${i===0?'active':''}" onclick="selectChar('${c.id}',this)">${c.nom||'Sans nom'}</div>`).join('');
+  pills.innerHTML = `${chars.map((c,i)=>charNavCardHtml(c, i===0)).join('')}<button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button>`;
   if (chars.length > 0) { STATE.activeChar=chars[0]; renderCharSheet(chars[0]); }
 }
 
@@ -533,7 +554,7 @@ function showCharTab(tab, el) {
 // ══════════════════════════════════════════════
 Object.assign(window, {
   // Noyau
-  selectChar, filterAdminChars,
+  charNavCardHtml, selectChar, filterAdminChars,
   renderCharSheet, showCharTab,
   _renderTab, refreshOrDisplay,
 

@@ -1748,7 +1748,7 @@ async function openCharacterSheetFromShowcase(charId) {
   await window.navigate?.('characters');
   setTimeout(() => {
     const pill = Array.from(document.querySelectorAll('#char-pills .char-pill'))
-      .find(e => e.getAttribute('onclick')?.includes(`'${charId}'`));
+      .find(e => e.dataset.charid === charId || e.getAttribute('onclick')?.includes(`'${charId}'`));
     if (pill) { pill.click(); return; }
     const c = window.STATE?.characters?.find(e => e.id === charId);
     if (c && window.renderCharSheet) { window.STATE.activeChar = c; window.renderCharSheet(c); }
