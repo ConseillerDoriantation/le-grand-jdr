@@ -1545,10 +1545,10 @@ function _renderRunesSection() {
         ${runesInGroup.map(r => `
           <button type="button" class="cs-rune-pick-item"
             style="--rune-c:${r.color}" onclick="runeIncrement('${r.nom}')"
-            title="${r.effet}">
+            data-tip="${r.effet}" aria-label="Ajouter ${r.nom} — ${r.effet}">
             <span class="cs-rune-pick-icon">${r.icon}</span>
             <span class="cs-rune-pick-nom">${r.nom}</span>
-            <span class="cs-rune-pick-add">+ Ajouter</span>
+            <span class="cs-rune-pick-add" aria-hidden="true">+</span>
           </button>
         `).join('')}
       </div>

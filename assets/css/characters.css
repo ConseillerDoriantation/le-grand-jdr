@@ -2456,21 +2456,24 @@ input[type=number].input-field::-webkit-outer-spin-button {
 }
 .cs-rune-pick-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0.35rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.4rem;
 }
 .cs-rune-pick-item {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.55rem;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
   background: var(--bg-elevated);
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 7px;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   color: var(--text);
-  transition: all 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
   font-family: inherit;
   text-align: left;
 }
@@ -2483,8 +2486,19 @@ input[type=number].input-field::-webkit-outer-spin-button {
   background: color-mix(in srgb, var(--rune-c) 12%, var(--bg-elevated));
   border-color: color-mix(in srgb, var(--rune-c) 40%, transparent);
 }
-.cs-rune-pick-icon { font-size: 0.95rem; flex-shrink: 0; }
-.cs-rune-pick-nom { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-rune-pick-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.cs-rune-pick-nom {
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
 .cs-rune-pick-cnt {
   font-size: 0.7rem;
   font-weight: 700;
@@ -2494,16 +2508,65 @@ input[type=number].input-field::-webkit-outer-spin-button {
   border-radius: 999px;
   flex-shrink: 0;
 }
+/* Bouton d'ajout : icône "+" discrète, colorée au hover. Plus de label
+   "AJOUTER" qui volait la place du nom. */
 .cs-rune-pick-add {
-  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 0.95rem;
   font-weight: 700;
+  line-height: 1;
   color: var(--text-dim);
+  background: rgba(255,255,255,0.04);
+  border-radius: 999px;
   flex-shrink: 0;
   opacity: 0.7;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
-.cs-rune-pick-item:hover .cs-rune-pick-add { color: var(--rune-c); opacity: 1; }
+.cs-rune-pick-item:hover .cs-rune-pick-add {
+  color: #fff;
+  background: var(--rune-c);
+  opacity: 1;
+}
+[data-theme="light"] .cs-rune-pick-add { background: rgba(0,0,0,0.05); }
+
+/* Tooltip survol — description de la rune (data-tip = effet) */
+.cs-rune-pick-item[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%) translateY(3px);
+  width: max-content;
+  max-width: 220px;
+  padding: 0.4rem 0.55rem;
+  background: rgba(20,22,30,0.97);
+  color: #f4f4f7;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--rune-c) 50%, rgba(255,255,255,0.10));
+  box-shadow: 0 4px 14px rgba(0,0,0,0.40);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease 0.22s, transform 0.15s ease 0.22s;
+  z-index: 50;
+}
+.cs-rune-pick-item[data-tip]:hover::after,
+.cs-rune-pick-item[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+[data-theme="light"] .cs-rune-pick-item[data-tip]::after {
+  background: #1f232b;
+  color: #fff;
+}
 
 /* Message quand toutes les runes sont actives */
 .cs-runes-picker-empty {
