@@ -16,6 +16,7 @@ import {
 
 import { setProfile } from './state.js';
 import { unwatchAll } from '../shared/realtime.js';
+import { releaseSessionData } from '../data/firestore.js';
 export { showApp, showAuth } from './layout.js';
 
 function clearAuthError() {
@@ -193,6 +194,7 @@ export async function doLogout() {
     // Stoppe d'abord les abonnements temps réel pour éviter les
     // "Accès refusé" lorsque l'auth est révoquée.
     try { unwatchAll(); } catch {}
+    try { releaseSessionData(); } catch {}
     await signOut(auth);
   } catch (error) {
     console.error('[auth] doLogout error:', error);

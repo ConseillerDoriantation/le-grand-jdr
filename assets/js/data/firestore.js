@@ -1,6 +1,21 @@
 // ══════════════════════════════════════════════
 // FIRESTORE — Couche d'accès aux données
-// Tous les appels DB passent ici.
+//
+// Trois niveaux de cache (du plus prioritaire au moins) :
+//   1. Live session — un onSnapshot couvre toute la session pour les
+//      collections lues par plusieurs pages (shop, npcs, story, quests,
+//      characters, achievements, collection, shopCategories) + 3 docs
+//      (bastion/main, world/main, agenda_session/next). Coût initial :
+//      1 lecture par doc à l'entrée d'aventure (servie par IndexedDB sur
+//      cache chaud → ~0 lecture facturée). Coût ensuite : uniquement les
+//      deltas réels (latency-compensation auto sur nos propres writes).
+//   2. Cache TTL en mémoire — pour les collections page-scoped (bestiary,
+//      npc_affinites, etc.). Évite de re-fetch entre nav.
+//   3. Cache IndexedDB de Firestore (config/firebase.js) — servi à
+//      getDocs/onSnapshot quand on n'a rien en mémoire.
+//
+// Dédoublonnage des requêtes "en vol" : deux loadCollection simultanés sur
+// la même collection partagent la même Promise → 1 seul fetch.
 // ══════════════════════════════════════════════
 
 import {
@@ -13,16 +28,17 @@ import {
 } from '../config/firebase.js';
 
 // ── Scope aventure ─────────────────────────────
-// Toutes les collections (sauf globales) sont scopées à l'aventure courante.
-// setCurrentAdventure() est appelé après sélection d'une aventure.
 let _adventureId = null;
 
 // Collections globales — non scopées à une aventure
 const _GLOBAL_COLS = new Set(['users', 'adventures']);
 
 export function setCurrentAdventure(id) {
+  if (id === _adventureId) return;
+  // Tear down listeners de l'aventure précédente avant de changer de scope.
+  releaseSessionData();
+  _cache.clear();
   _adventureId = id;
-  _cache.clear(); // vider le cache à chaque changement d'aventure
 }
 
 export function getCurrentAdventureId() { return _adventureId; }
@@ -35,46 +51,32 @@ function _colPath(col) {
   return col;
 }
 
-// ── Cache mémoire ──────────────────────────────
-// Évite les re-lectures Firestore inutiles entre navigations.
-// TTL par type de collection (en ms) :
-//   - Contenus MJ (shop, story, world...) : 5 min — changent rarement en session
-//   - Bastion : 15s — modifié par les joueurs, besoin de fraîcheur
-//   - Pas de cache sur characters (chaque joueur modifie le sien en permanence)
+// ── Cache TTL legacy (pour collections NON session-live) ──────────
+// Sert principalement aux pages dont la collection n'a pas été promue
+// "session-live" (ex: bestiary, npc_affinites, recipes…).
 const _CACHE_TTL = {
-  // Contenus gérés par le MJ uniquement — stables pendant une session
-  shop:               5 * 60_000,
-  shopCategories:     5 * 60_000,
-  story:              5 * 60_000,
-  story_meta:         5 * 60_000,
-  story_histories:    5 * 60_000,
-  world:              5 * 60_000,
-  players:            5 * 60_000,
-  achievements:       5 * 60_000,
-  achievements_meta:  5 * 60_000,
-  npcs:               5 * 60_000,
   bestiary:           5 * 60_000,
   bestiary_meta:      5 * 60_000,
+  npc_affinites:      5 * 60_000,
   recipes:            5 * 60_000,
   recettes:           5 * 60_000,
-  collection:         5 * 60_000,
-  collectionSettings: 5 * 60_000,
   tutorial:           5 * 60_000,
-  informations:       5 * 60_000,
-  quests:             30_000,
+  story_meta:         5 * 60_000,
+  story_histories:    5 * 60_000,
   map_lieux:          5 * 60_000,
-  // Contenu collaboratif — TTL court pour rester à jour
-  bastion:            15_000,
+  place_types:        5 * 60_000,
+  places:             5 * 60_000,
+  organizations:      5 * 60_000,
+  players:            5 * 60_000,
   // Aventures — TTL moyen (structure change rarement en session)
   adventures:         60_000,
 };
 
-const _cache = new Map(); // clé → { data, ts }
+const _cache = new Map(); // key → { data, ts }
 
 function _cacheGet(key) {
   const entry = _cache.get(key);
   if (!entry) return null;
-  // key peut être 'shop:all' ou 'adventures/x/shop:all' — extraire le nom de collection
   const colName = key.split(':')[0].split('/').pop();
   const ttl = _CACHE_TTL[colName];
   if (!ttl) return null;
@@ -85,28 +87,214 @@ function _cacheGet(key) {
 function _cacheSet(key, data) {
   const colName = key.split(':')[0].split('/').pop();
   const ttl = _CACHE_TTL[colName];
-  if (!ttl) return; // Pas de TTL = pas de cache pour cette collection
+  if (!ttl) return;
   _cache.set(key, { data, ts: Date.now() });
 }
 
-// Invalider le cache d'une collection après une écriture
-// Accepte soit un nom de collection ('shop') soit un chemin complet ('adventures/x/shop')
-function _cacheInvalidate(colOrPath) {
-  const prefix = colOrPath + ':';
-  for (const key of _cache.keys()) {
-    if (key.startsWith(prefix)) _cache.delete(key);
+// Patch chirurgical du cache TTL après une écriture — évite l'invalidation
+// totale (qui force un re-fetch complet de la collection).
+function _cachePatchAdd(path, docData) {
+  const allKey = `${path}:all`;
+  const all = _cache.get(allKey);
+  if (all) _cache.set(allKey, { data: [...all.data, docData], ts: all.ts });
+  _cache.set(`${path}:${docData.id}`, { data: docData, ts: Date.now() });
+}
+
+function _cachePatchUpdate(path, id, partial) {
+  const allKey = `${path}:all`;
+  const all = _cache.get(allKey);
+  if (all) {
+    const newData = all.data.map(d => d.id === id ? { ...d, ...partial } : d);
+    _cache.set(allKey, { data: newData, ts: all.ts });
+  }
+  const single = _cache.get(`${path}:${id}`);
+  if (single) {
+    _cache.set(`${path}:${id}`, { data: { ...single.data, ...partial }, ts: single.ts });
   }
 }
 
-// Exposer pour permettre aux features de forcer un refresh si besoin
-export function invalidateCache(col) { _cacheInvalidate(_colPath(col)); }
+function _cachePatchSave(path, id, partial) {
+  const allKey = `${path}:all`;
+  const all = _cache.get(allKey);
+  if (all) {
+    const found = all.data.some(d => d.id === id);
+    const data = found
+      ? all.data.map(d => d.id === id ? { ...d, ...partial } : d)
+      : [...all.data, { id, ...partial }];
+    _cache.set(allKey, { data, ts: all.ts });
+  }
+  const singleKey = `${path}:${id}`;
+  const single = _cache.get(singleKey);
+  const data = { ...(single?.data || {}), ...partial };
+  if (single) _cache.set(singleKey, { data, ts: single.ts });
+  else _cacheSet(singleKey, data);
+}
 
-// ── Abonnements temps réel ─────────────────────
-// Retourne la fonction de désabonnement (à appeler pour stopper l'écoute).
-// Met à jour le cache automatiquement à chaque changement.
+function _cachePatchDelete(path, id) {
+  const allKey = `${path}:all`;
+  const all = _cache.get(allKey);
+  if (all) _cache.set(allKey, { data: all.data.filter(d => d.id !== id), ts: all.ts });
+  _cache.delete(`${path}:${id}`);
+}
+
+
+// ── Cache LIVE session ─────────────────────────
+// Un onSnapshot par collection ou doc, vivant toute la session de l'aventure.
+// Toutes les pages consomment ces listeners — plus jamais de re-fetch sur nav.
+const _liveCollections = new Map(); // path → entry
+const _liveDocs        = new Map(); // `${path}:${id}` → entry
+//
+// entry = {
+//   data:           T[],          // données les plus récentes
+//   observers:      Set<{cb}>,    // callbacks à notifier sur update
+//   firstReceived:  boolean,      // true dès le 1er snapshot reçu
+//   unsub:          () => void,
+//   ready:          Promise<T[]>, // résolue au 1er snapshot
+// }
+
+function _primeCol(col) {
+  const path = _colPath(col);
+  const existing = _liveCollections.get(path);
+  if (existing) return existing.ready;
+
+  const entry = {
+    data: [],
+    observers: new Set(),
+    firstReceived: false,
+    failed: false,
+    unsub: null,
+    ready: null,
+  };
+  _liveCollections.set(path, entry);
+
+  entry.ready = new Promise(resolve => {
+    let resolved = false;
+    entry.unsub = onSnapshot(
+      collection(db, path),
+      snap => {
+        entry.data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        entry.firstReceived = true;
+        // Notifier tous les observers de page
+        entry.observers.forEach(o => {
+          try { o.cb(entry.data); } catch (e) { console.error('[firestore] observer error', e); }
+        });
+        if (!resolved) { resolved = true; resolve(entry.data); }
+      },
+      err => {
+        entry.failed = true;
+        // Permission-denied : la règle Firestore peut filtrer cette collection
+        // pour ce rôle (ex: joueur sans accès à un doc admin). Pas une erreur.
+        if (err?.code !== 'permission-denied') {
+          _handleFirestoreError(err, `primeSession(${path})`);
+        }
+        entry.firstReceived = true; // débloquer les awaits sur ready
+        if (!resolved) { resolved = true; resolve([]); }
+      }
+    );
+  });
+  return entry.ready;
+}
+
+function _primeDoc(col, id) {
+  const path = _colPath(col);
+  const key = `${path}:${id}`;
+  const existing = _liveDocs.get(key);
+  if (existing) return existing.ready;
+
+  const entry = {
+    data: null,
+    observers: new Set(),
+    firstReceived: false,
+    failed: false,
+    unsub: null,
+    ready: null,
+  };
+  _liveDocs.set(key, entry);
+
+  entry.ready = new Promise(resolve => {
+    let resolved = false;
+    entry.unsub = onSnapshot(
+      doc(db, path, id),
+      snap => {
+        entry.data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+        entry.firstReceived = true;
+        entry.observers.forEach(o => {
+          try { o.cb(entry.data); } catch (e) { console.error('[firestore] observer error', e); }
+        });
+        if (!resolved) { resolved = true; resolve(entry.data); }
+      },
+      err => {
+        entry.failed = true;
+        if (err?.code !== 'permission-denied') {
+          _handleFirestoreError(err, `primeSessionDoc(${path}/${id})`);
+        }
+        entry.firstReceived = true;
+        if (!resolved) { resolved = true; resolve(null); }
+      }
+    );
+  });
+  return entry.ready;
+}
+
+// Liste des collections promues "session-live" : choisies parce qu'elles
+// sont lues par 3+ pages et que la donnée ne grossit pas démesurément.
+// `bestiary` est volontairement exclu (volume potentiellement énorme).
+const _SESSION_COLLECTIONS = [
+  'shop', 'shopCategories',
+  'npcs', 'story',
+  'achievements',
+  'quests',
+  'characters',
+  'collection',
+];
+const _SESSION_DOCS = [
+  ['bastion',         'main'],
+  ['world',           'main'],
+  ['agenda_session',  'next'],
+];
+
+// Démarre tous les listeners session pour l'aventure courante.
+// Fire-and-forget côté caller — chaque page individuelle await la `ready`
+// du listener via subscribeCollection / loadCollection si besoin.
+export function primeSessionData() {
+  if (!_adventureId) return Promise.resolve();
+  const promises = [];
+  for (const col of _SESSION_COLLECTIONS) promises.push(_primeCol(col));
+  for (const [col, id] of _SESSION_DOCS) promises.push(_primeDoc(col, id));
+  return Promise.all(promises);
+}
+
+// Tear down tous les listeners session + vide le cache.
+// Appelé : changement d'aventure, logout.
+export function releaseSessionData() {
+  _liveCollections.forEach(entry => { try { entry.unsub?.(); } catch (_) {} });
+  _liveCollections.clear();
+  _liveDocs.forEach(entry => { try { entry.unsub?.(); } catch (_) {} });
+  _liveDocs.clear();
+  _inflight.clear();
+  _cache.clear();
+}
+
+// ── In-flight coalescing ───────────────────────
+// Si une 2e requête arrive pendant qu'une 1ère est en vol pour la même clé,
+// elle réutilise la Promise existante (1 seul fetch réseau).
+const _inflight = new Map();
+
+// ── Abonnements (subscribe) ────────────────────
+// Si la collection / doc est déjà en session-live, on hook dans le listener
+// existant — ZÉRO nouveau listener Firestore (donc 0 lecture supplémentaire).
+// Sinon : nouveau listener éphémère (page-scoped, killé par unwatchAll).
 
 export function subscribeCollection(col, callback) {
   const path = _colPath(col);
+  const live = _liveCollections.get(path);
+  if (live && !live.failed) {
+    const observer = { cb: callback };
+    live.observers.add(observer);
+    // Appel asynchrone pour matcher la sémantique onSnapshot (jamais sync)
+    if (live.firstReceived) Promise.resolve().then(() => callback(live.data));
+    return () => live.observers.delete(observer);
+  }
   return onSnapshot(
     collection(db, path),
     snap => {
@@ -120,6 +308,14 @@ export function subscribeCollection(col, callback) {
 
 export function subscribeDoc(col, id, callback) {
   const path = _colPath(col);
+  const liveKey = `${path}:${id}`;
+  const live = _liveDocs.get(liveKey);
+  if (live && !live.failed) {
+    const observer = { cb: callback };
+    live.observers.add(observer);
+    if (live.firstReceived) Promise.resolve().then(() => callback(live.data));
+    return () => live.observers.delete(observer);
+  }
   return onSnapshot(
     doc(db, path, id),
     snap => {
@@ -132,9 +328,6 @@ export function subscribeDoc(col, id, callback) {
 }
 
 // ── Gestionnaire d'erreur centralisé ───────────
-// Affiche un toast si showNotif est disponible, sinon console.error uniquement.
-// code : code Firebase (ex: 'permission-denied', 'unavailable')
-// ctx  : contexte lisible (ex: 'loadCollection(shop)')
 function _handleFirestoreError(e, ctx) {
   console.error(`[firestore] ${ctx}`, e);
 
@@ -154,84 +347,200 @@ function _handleFirestoreError(e, ctx) {
   }
 }
 
-// ── Collections ────────────────────────────────
+// ── Lectures ───────────────────────────────────
 export async function loadCollection(col) {
   const path = _colPath(col);
-  const key  = `${path}:all`;
+
+  // 1. Live session — 0 lecture facturée
+  const live = _liveCollections.get(path);
+  if (live && !live.failed) {
+    if (!live.firstReceived) await live.ready;
+    return live.data;
+  }
+
+  // 2. Cache TTL en mémoire
+  const key = `${path}:all`;
   const cached = _cacheGet(key);
   if (cached) return cached;
-  try {
-    const snap = await getDocs(collection(db, path));
-    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    _cacheSet(key, data);
-    return data;
-  } catch (e) {
-    _handleFirestoreError(e, `loadCollection(${path})`);
-    return [];
-  }
+
+  // 3. Coalescing : si une requête identique est déjà en vol, on partage
+  if (_inflight.has(key)) return _inflight.get(key);
+
+  // 4. Fetch (servi du cache IndexedDB de Firestore si dispo)
+  const promise = (async () => {
+    try {
+      const snap = await getDocs(collection(db, path));
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _cacheSet(key, data);
+      return data;
+    } catch (e) {
+      _handleFirestoreError(e, `loadCollection(${path})`);
+      return [];
+    } finally {
+      _inflight.delete(key);
+    }
+  })();
+  _inflight.set(key, promise);
+  return promise;
 }
 
 export async function loadCollectionOrdered(col, field) {
   const path = _colPath(col);
-  try {
-    const snap = await getDocs(query(collection(db, path), orderBy(field)));
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch {
-    return loadCollection(col);
+  const live = _liveCollections.get(path);
+  if (live && !live.failed) {
+    if (!live.firstReceived) await live.ready;
+    return [...live.data].sort((a, b) => {
+      const av = a[field], bv = b[field];
+      if (av === bv) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return av < bv ? -1 : 1;
+    });
   }
+  const key = `${path}:ordered:${field}`;
+  if (_inflight.has(key)) return _inflight.get(key);
+  const promise = (async () => {
+    try {
+      const snap = await getDocs(query(collection(db, path), orderBy(field)));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch {
+      return loadCollection(col);
+    } finally {
+      _inflight.delete(key);
+    }
+  })();
+  _inflight.set(key, promise);
+  return promise;
 }
 
 export async function loadCollectionWhere(col, field, op, value) {
   const path = _colPath(col);
-  try {
-    const snap = await getDocs(query(collection(db, path), where(field, op, value)));
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (e) {
-    _handleFirestoreError(e, `loadCollectionWhere(${path})`);
-    return [];
+
+  // Filtre client-side sur le live cache si la collection y est
+  const live = _liveCollections.get(path);
+  if (live && !live.failed) {
+    if (!live.firstReceived) await live.ready;
+    return live.data.filter(d => _matchOp(d[field], op, value));
   }
+
+  const key = `${path}:where:${field}:${op}:${JSON.stringify(value)}`;
+  if (_inflight.has(key)) return _inflight.get(key);
+  const promise = (async () => {
+    try {
+      const snap = await getDocs(query(collection(db, path), where(field, op, value)));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      _handleFirestoreError(e, `loadCollectionWhere(${path})`);
+      return [];
+    } finally {
+      _inflight.delete(key);
+    }
+  })();
+  _inflight.set(key, promise);
+  return promise;
+}
+
+function _matchOp(v, op, value) {
+  if (op === '==') return v === value;
+  if (op === '!=') return v !== value;
+  if (op === '>')  return v >  value;
+  if (op === '<')  return v <  value;
+  if (op === '>=') return v >= value;
+  if (op === '<=') return v <= value;
+  if (op === 'array-contains') return Array.isArray(v) && v.includes(value);
+  if (op === 'in')             return Array.isArray(value) && value.includes(v);
+  return false;
 }
 
 // ── Documents ──────────────────────────────────
 export async function getDocData(col, id) {
   const path = _colPath(col);
-  const key  = `${path}:${id}`;
-  const cached = _cacheGet(key);
-  if (cached) return cached;
-  try {
-    const snap = await getDoc(doc(db, path, id));
-    const data = snap.exists() ? snap.data() : null;
-    if (data) _cacheSet(key, data);
-    return data;
-  } catch (e) {
-    _handleFirestoreError(e, `getDocData(${path}/${id})`);
-    return null;
+
+  // 1. Live doc (ex: bastion/main)
+  const liveKey = `${path}:${id}`;
+  const liveD = _liveDocs.get(liveKey);
+  if (liveD && !liveD.failed) {
+    if (!liveD.firstReceived) await liveD.ready;
+    return liveD.data ? { ...liveD.data } : null;
   }
+
+  // 2. Live collection — chercher l'item dedans
+  const liveC = _liveCollections.get(path);
+  if (liveC && !liveC.failed) {
+    if (!liveC.firstReceived) await liveC.ready;
+    const found = liveC.data.find(d => d.id === id);
+    return found ? { ...found } : null;
+  }
+
+  // 3. Cache TTL
+  const cached = _cacheGet(liveKey);
+  if (cached) return cached;
+
+  // 4. Coalescing + fetch
+  if (_inflight.has(liveKey)) return _inflight.get(liveKey);
+  const promise = (async () => {
+    try {
+      const snap = await getDoc(doc(db, path, id));
+      const data = snap.exists() ? snap.data() : null;
+      if (data) _cacheSet(liveKey, data);
+      return data;
+    } catch (e) {
+      _handleFirestoreError(e, `getDocData(${path}/${id})`);
+      return null;
+    } finally {
+      _inflight.delete(liveKey);
+    }
+  })();
+  _inflight.set(liveKey, promise);
+  return promise;
 }
 
-// Variante silencieuse : pas de notif "Accès refusé" si lecture optionnelle qui
-// peut légitimement échouer (rules non configurées). Renvoie null en silence.
+// Variante silencieuse : pas de notif "Accès refusé" si lecture optionnelle
 export async function getDocDataSilent(col, id) {
   const path = _colPath(col);
-  const key  = `${path}:${id}`;
-  const cached = _cacheGet(key);
-  if (cached) return cached;
-  try {
-    const snap = await getDoc(doc(db, path, id));
-    const data = snap.exists() ? snap.data() : null;
-    if (data) _cacheSet(key, data);
-    return data;
-  } catch (e) {
-    console.debug(`[firestore] silent read failed: ${path}/${id}`, e?.code || e);
-    return null;
+
+  const liveKey = `${path}:${id}`;
+  const liveD = _liveDocs.get(liveKey);
+  if (liveD && !liveD.failed) {
+    if (!liveD.firstReceived) await liveD.ready;
+    return liveD.data ? { ...liveD.data } : null;
   }
+  const liveC = _liveCollections.get(path);
+  if (liveC && !liveC.failed) {
+    if (!liveC.firstReceived) await liveC.ready;
+    const found = liveC.data.find(d => d.id === id);
+    return found ? { ...found } : null;
+  }
+  const cached = _cacheGet(liveKey);
+  if (cached) return cached;
+  if (_inflight.has(liveKey)) return _inflight.get(liveKey);
+  const promise = (async () => {
+    try {
+      const snap = await getDoc(doc(db, path, id));
+      const data = snap.exists() ? snap.data() : null;
+      if (data) _cacheSet(liveKey, data);
+      return data;
+    } catch (e) {
+      console.debug(`[firestore] silent read failed: ${path}/${id}`, e?.code || e);
+      return null;
+    } finally {
+      _inflight.delete(liveKey);
+    }
+  })();
+  _inflight.set(liveKey, promise);
+  return promise;
 }
 
+// ── Écritures ──────────────────────────────────
+// Avec un listener live actif sur la collection/doc, Firestore propage
+// l'écriture localement via latency-compensation : les observers sont
+// notifiés instantanément. Pour le cache TTL (non-live), on patche
+// chirurgicalement pour éviter une invalidation totale.
 export async function saveDoc(col, id, data) {
   const path = _colPath(col);
   try {
     await setDoc(doc(db, path, id), data, { merge: true });
-    _cacheInvalidate(path);
+    _cachePatchSave(path, id, data);
   } catch (e) {
     _handleFirestoreError(e, `saveDoc(${path}/${id})`);
     throw e;
@@ -241,11 +550,9 @@ export async function saveDoc(col, id, data) {
 export async function addToCol(col, data) {
   const path = _colPath(col);
   try {
-    const ref = await addDoc(collection(db, path), {
-      ...data,
-      createdAt: new Date().toISOString(),
-    });
-    _cacheInvalidate(path);
+    const enriched = { ...data, createdAt: new Date().toISOString() };
+    const ref = await addDoc(collection(db, path), enriched);
+    _cachePatchAdd(path, { id: ref.id, ...enriched });
     return ref.id;
   } catch (e) {
     _handleFirestoreError(e, `addToCol(${path})`);
@@ -257,7 +564,7 @@ export async function updateInCol(col, id, data) {
   const path = _colPath(col);
   try {
     await updateDoc(doc(db, path, id), data);
-    _cacheInvalidate(path);
+    _cachePatchUpdate(path, id, data);
   } catch (e) {
     _handleFirestoreError(e, `updateInCol(${path}/${id})`);
     throw e;
@@ -268,7 +575,7 @@ export async function deleteFromCol(col, id) {
   const path = _colPath(col);
   try {
     await deleteDoc(doc(db, path, id));
-    _cacheInvalidate(path);
+    _cachePatchDelete(path, id);
   } catch (e) {
     _handleFirestoreError(e, `deleteFromCol(${path}/${id})`);
     throw e;
@@ -278,30 +585,35 @@ export async function deleteFromCol(col, id) {
 // ── Spécifique personnages ─────────────────────
 export async function loadChars(uid = null) {
   const path = _colPath('characters');
-  try {
-    const q = uid
-      ? query(collection(db, path), where('uid', '==', uid))
-      : collection(db, path);
-    const snap = await getDocs(q);
-    const chars = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    // Migration silencieuse : convention "1 entrée = 1 unité" — split les qte>1
-    try {
-      const { normalizeInventaire, inventaireNeedsNorm } = await import('../shared/inventory-utils.js');
-      for (const c of chars) {
-        if (!inventaireNeedsNorm(c.inventaire)) continue;
-        const normalized = normalizeInventaire(c.inventaire);
-        c.inventaire = normalized;
-        // Fire-and-forget : si l'écriture échoue (droits Firestore), pas grave, on retentera.
-        updateDoc(doc(db, path, c.id), { inventaire: normalized })
-          .then(() => console.debug(`[inv] normalized ${c.nom || c.id} (${normalized.length} entries)`))
-          .catch(e => console.debug(`[inv] silent normalize failed for ${c.id}:`, e?.code));
-      }
-    } catch (e) { console.debug('[inv] norm utility load failed:', e); }
-    return chars;
-  } catch (e) {
-    _handleFirestoreError(e, 'loadChars');
-    return [];
+
+  // Source : live cache si dispo, sinon loadCollection (qui peut aussi
+  // tomber sur du IndexedDB Firestore cache).
+  let chars;
+  const live = _liveCollections.get(path);
+  if (live && !live.failed) {
+    if (!live.firstReceived) await live.ready;
+    chars = live.data;
+  } else {
+    chars = await loadCollection('characters');
   }
+
+  if (uid) chars = chars.filter(c => c.uid === uid);
+
+  // Migration silencieuse : convention "1 entrée = 1 unité" — split les qte>1
+  // Idempotente : ne s'exécute que sur les inventaires non normalisés.
+  try {
+    const { normalizeInventaire, inventaireNeedsNorm } = await import('../shared/inventory-utils.js');
+    for (const c of chars) {
+      if (!inventaireNeedsNorm(c.inventaire)) continue;
+      const normalized = normalizeInventaire(c.inventaire);
+      c.inventaire = normalized;
+      // Fire-and-forget : si l'écriture échoue (droits), retentée au prochain pass.
+      updateDoc(doc(db, path, c.id), { inventaire: normalized })
+        .then(() => console.debug(`[inv] normalized ${c.nom || c.id} (${normalized.length} entries)`))
+        .catch(e => console.debug(`[inv] silent normalize failed for ${c.id}:`, e?.code));
+    }
+  } catch (e) { console.debug('[inv] norm utility load failed:', e); }
+  return chars;
 }
 
 export async function countUserChars(uid = null) {

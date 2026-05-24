@@ -3,7 +3,7 @@
 // Admin : créer / modifier / supprimer des quêtes
 // Joueur : voir les quêtes actives et y participer avec son personnage
 // ══════════════════════════════════════════════
-import { loadCollection, addToCol, saveDoc, deleteFromCol, invalidateCache } from '../data/firestore.js';
+import { addToCol, saveDoc, deleteFromCol } from '../data/firestore.js';
 import { watch } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
@@ -138,26 +138,22 @@ async function renderQuestsPage() {
   const content = document.getElementById('main-content');
   content.innerHTML = appSplashHtml();
 
-  const [quests, chars, places] = await Promise.all([
-    loadCollection('quests').catch(() => []),
-    loadCollection('characters').catch(() => []),
-    listPlaces().catch(() => []),
-  ]);
-  _chars = chars;
-  _places = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-  _applyQuestsRender(quests);
+  // `listPlaces` n'est pas couvert par un listener temps réel : on garde le
+  // fetch initial. `quests` et `characters` sont, eux, gérés intégralement par
+  // les abonnements ci-dessous → le snapshot initial fournit déjà les données,
+  // pas besoin d'un loadCollection en plus (économie : 2× lectures au montage).
+  _places = ((await listPlaces().catch(() => [])) || [])
+    .filter(p => p?.name)
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
-  // Abonnements temps réel : le premier fire (snapshot initial) est ignoré.
-  // - quests       : liste, statuts, participants
-  // - characters   : noms/portraits des participants (changement côté joueur)
-  let _firstQuests = true, _firstChars = true;
+  // Abonnements temps réel — le premier fire fait le rendu initial.
+  // Avec la persistance IndexedDB, ce premier fire est servi du cache local
+  // (instantané, sans lecture facturée) si la collection a déjà été vue.
   watch('quests', 'quests', data => {
-    if (_firstQuests) { _firstQuests = false; return; }
     if (STATE.currentPage !== 'quests') return;
-    _applyQuestsRender(data);
+    _applyQuestsRender(data || []);
   });
   watch('quests-chars', 'characters', data => {
-    if (_firstChars) { _firstChars = false; return; }
     if (STATE.currentPage !== 'quests') return;
     _chars = data || [];
     _applyQuestsRender(window._questItems || []);

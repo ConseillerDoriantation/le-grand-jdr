@@ -11,7 +11,7 @@
 //     npc_affinites/npc_affinite_types   → types d'affinités {id,label,emoji,couleur}
 //     npc_affinites/npc_affinite_seuils  → seuils valeur→niveau
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, deleteFromCol, saveDoc } from '../data/firestore.js';
 import { watch } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, updateModalContent, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -152,21 +152,18 @@ let _pendingNpcImg = null;
 let _npcImgCleared = false;
 
 // ── Chargement ────────────────────────────────────────────────────────────────
+// `npcs` et `shop` sont session-live → 0 lecture facturée. `npc_affinites` est
+// piloté entièrement par le watch plus bas (collection unique avec docs spéciaux
+// types/seuils + relations PJ↔PNJ). `places` et `organizations` restent un fetch
+// page-scoped (1 lecture initiale, servi du cache IndexedDB sur cache chaud).
 async function _load() {
-  const [npcs, affi, typesDoc, seuilsDoc, places, orgs, shopItems] = await Promise.all([
+  const [npcs, places, orgs, shopItems] = await Promise.all([
     loadCollection('npcs'),
-    loadCollection('npc_affinites'),
-    getDocData('npc_affinites', AFFINITE_TYPES_DOC_ID),
-    getDocData('npc_affinites', AFFINITE_SEUILS_DOC_ID),
     listPlaces().catch(() => []),
     listOrganizations().catch(() => []),
     loadCollection('shop').catch(() => []),
   ]);
   _npcs           = npcs || [];
-  _affiPerso      = (affi || []).filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
-  _affiniteTypes  = Array.isArray(typesDoc?.types) ? typesDoc.types : [];
-  _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-  _affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
   _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _shopWeapons   = (shopItems || []).filter(_isShopWeapon).sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
@@ -261,12 +258,10 @@ async function renderNpcs() {
   _renderPage(content);
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
-  // Premier fire (snapshot initial) ignoré : déjà rendu par _renderPage.
-  // unwatchAll() côté navigation s'occupe du cleanup.
-  let _firstNpcs = true, _firstAffi = true;
-
+  // Pour `npcs` (session-live) le watch ne refait aucune lecture facturée.
+  // Pour `npc_affinites` (page-scoped), le watch sert aussi de fetch initial
+  // → pas de double-read.
   watch('npcs-list', 'npcs', data => {
-    if (_firstNpcs) { _firstNpcs = false; return; }
     if (STATE.currentPage !== 'npcs') return;
     _npcs = data || [];
     _refreshList({ keepScroll: true });
@@ -276,7 +271,6 @@ async function renderNpcs() {
   // Une seule subscription pour la collection npc_affinites : on y range
   // les relations PNJ↔joueur + les 2 docs spéciaux (types, seuils).
   watch('npcs-affi', 'npc_affinites', data => {
-    if (_firstAffi) { _firstAffi = false; return; }
     if (STATE.currentPage !== 'npcs') return;
     const arr = data || [];
     _affiPerso = arr.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);

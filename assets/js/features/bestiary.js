@@ -916,36 +916,25 @@ async function renderBestiary() {
       .sort((a,b) => a.pseudo.localeCompare(b.pseudo, 'fr', { sensitivity:'base' }));
   }
 
-  // Charger les créatures du bestiaire actif
+  // Bestiaire actif — créatures et tracker pilotés en temps réel.
+  // Pas de loadCollection initial : le 1er fire du watch ci-dessous fournit
+  // les données (servies du cache IndexedDB local sur cache chaud → instantané).
   const col = _bestiaireId === 'main' ? 'bestiary' : `bestiary_${_bestiaireId}`;
-  const allCreatures = await loadCollection(col);
-  // Les créatures marquées hidden ne sont visibles que pour le MJ
-  _creatures = STATE.isAdmin ? allCreatures : allCreatures.filter(c => !c.hidden);
-  _creatures.sort((a,b) => (a.nom||'').localeCompare(b.nom||''));
+  _creatures = [];
+  _tracker   = {};
   window._bstCurrentCol = col;
 
   if (!_damageTypes) _damageTypes = await loadDamageTypes();
 
-  // Tracker : MJ peut consulter celui d'un joueur via _viewAsUid
   const trackerUid = _viewAsUid || STATE.user?.uid;
-  if (trackerUid) {
-    const trackerDoc = await getDocData('bestiary_tracker', trackerUid);
-    _tracker = trackerDoc?.data || {};
-  } else {
-    _tracker = {};
-  }
 
-  _render();
+  _render(); // shell avec liste vide — sera repeuplé au 1er fire du watch
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
-  // Premier fire (snapshot initial) ignoré : déjà rendu par _render() au-dessus.
-  // Les noms 'bst-creatures' / 'bst-tracker' sont réutilisés : si l'admin
-  // switche de bestiaire ou de "viewAs", watch() kill l'ancien listener et
-  // crée le nouveau sur la bonne collection / le bon doc.
-  let _firstCreatures = true, _firstTracker = true;
-
+  // Le 1er fire fait le rendu initial. Les noms 'bst-creatures'/'bst-tracker'
+  // sont réutilisés : si l'admin switche de bestiaire/viewAs, watch() kill
+  // l'ancien listener et crée le nouveau sur la bonne collection / doc.
   watch('bst-creatures', col, data => {
-    if (_firstCreatures) { _firstCreatures = false; return; }
     if (STATE.currentPage !== 'bestiary') return;
     if (_bstShouldSkipLiveRender()) return;
     const all = data || [];
@@ -956,7 +945,6 @@ async function renderBestiary() {
 
   if (trackerUid) {
     watchDoc('bst-tracker', 'bestiary_tracker', trackerUid, doc => {
-      if (_firstTracker) { _firstTracker = false; return; }
       if (STATE.currentPage !== 'bestiary') return;
       if (_bstShouldSkipLiveRender()) return;
       _tracker = doc?.data || {};

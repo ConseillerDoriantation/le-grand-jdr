@@ -7,11 +7,12 @@
 import { STATE } from '../core/state.js';
 import {
   db, doc, collection, addDoc, serverTimestamp,
+  query, orderBy, limit,
 } from '../config/firebase.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { showNotif } from '../shared/notifications.js';
 import { getCurrentAdventureId } from '../data/firestore.js';
-import { watch, watchDoc } from '../shared/realtime.js';
+import { watch, watchDoc, watchQuery } from '../shared/realtime.js';
 
 const SLOTS = [
   { id: 'm', emoji: '🌞', label: 'Matin' },
@@ -205,11 +206,12 @@ export async function renderVttSpectator() {
     _renderAll();
   });
 
-  watch('vsp-log', 'vttLog', (msgs) => {
+  // Chat limité côté serveur aux 60 derniers messages — évite de relire
+  // tout l'historique du chat à chaque ouverture sur mobile.
+  watchQuery('vsp-log', query(_logCol(), orderBy('createdAt', 'desc'), limit(60)), (msgs) => {
     _logMessages = (msgs || [])
       .slice()
-      .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
-      .slice(-60);
+      .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
     _renderAll();
   });
 

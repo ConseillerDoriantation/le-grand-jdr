@@ -11,12 +11,14 @@ import { getAuth,
          onAuthStateChanged,
          GoogleAuthProvider,
          signInWithPopup }        from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore,
+import { initializeFirestore,
+         persistentLocalCache,
+         persistentMultipleTabManager,
          doc, setDoc, getDoc,
          collection, getDocs,
          addDoc, updateDoc, deleteDoc,
          writeBatch,
-         query, where, orderBy,
+         query, where, orderBy, limit,
          onSnapshot,
          serverTimestamp }         from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
@@ -31,7 +33,22 @@ const firebaseConfig = {
 
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db   = getFirestore(app);
+
+// Persistance IndexedDB : Firestore sert les lectures depuis le cache local
+// avant tout aller-retour réseau. Combiné avec onSnapshot, ça permet aux pages
+// déjà visitées de réafficher leurs données instantanément, et coupe la
+// majorité des lectures facturées entre sessions / reloads.
+// `persistentMultipleTabManager` rend le cache compatible avec plusieurs onglets.
+let db;
+try {
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  });
+} catch (e) {
+  // Fallback (navigateur sans IndexedDB, mode privé restrictif, etc.)
+  console.warn('[firebase] persistance IndexedDB indisponible, fallback mémoire :', e?.message || e);
+  db = initializeFirestore(app, {});
+}
 
 // ⚠️  Côté client uniquement — la vraie protection est dans les règles Firestore.
 //    Voir docs/firestore-rules.md
@@ -49,7 +66,7 @@ export {
   collection, getDocs,
   addDoc, updateDoc, deleteDoc,
   writeBatch,
-  query, where, orderBy,
+  query, where, orderBy, limit,
   onSnapshot,
   serverTimestamp,
 };

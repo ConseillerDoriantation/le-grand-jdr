@@ -140,7 +140,12 @@
       "Bash(gh run *)",
       "Bash(node --check assets/js/features/shop.js assets/js/shared/char-stats.js assets/js/features/characters/equipment.js)",
       "Bash(node --check assets/js/features/characters/equipment.js assets/js/features/characters/combat.js assets/js/features/characters/inventory.js assets/js/shared/char-stats.js)",
-      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/map/ui/sidepanel.js)"
+      "Bash(node --check /home/ubuntu/DEV/le-grand-jdr/assets/js/features/map/ui/sidepanel.js)",
+      "Bash(node --check assets/js/data/firestore.js)",
+      "Bash(node --check assets/js/config/firebase.js)",
+      "Bash(node --check assets/js/shared/realtime.js)",
+      "Bash(node --check assets/js/core/adventure.js)",
+      "Bash(node --check assets/js/core/init.js)"
     ]
   }
 }

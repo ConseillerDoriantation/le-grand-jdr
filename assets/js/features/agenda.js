@@ -13,7 +13,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
-import { loadCollection, saveDoc, getDocDataSilent, deleteFromCol } from '../data/firestore.js';
+import { saveDoc, deleteFromCol } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
@@ -531,19 +531,16 @@ async function renderAgendaPage() {
   if (!content) return;
   content.innerHTML = appSplashHtml("Chargement de l'agenda…");
 
-  // Charge en parallèle
-  const [avails, quests, users, nextSession] = await Promise.all([
-    loadCollection('availabilities').catch(() => []),
-    loadCollection('quests').catch(() => []),
-    loadCollection('users').catch(() => []),
-    getDocDataSilent('agenda_session', 'next'),
-  ]);
-
-  _ag.allAvails   = avails;
-  _ag.quests      = quests;
-  _ag.users       = users;
-  _ag.nextSession = nextSession;
-  _ag.myAvail     = avails.find(a => (a.uid || a.id) === STATE.user?.uid) || { slots: {}, recurring: {} };
+  // Pas de fetch initial : on s'appuie entièrement sur les watches ci-dessous.
+  // - quests + agenda_session sont session-live (0 lecture supplémentaire).
+  // - availabilities + users sont page-scoped, le 1er fire des watches fait
+  //   le rendu initial. Avec la persistance IndexedDB, c'est instantané sur
+  //   cache chaud (et 1 seule lecture quand il faut aller au serveur).
+  _ag.allAvails   = [];
+  _ag.quests      = [];
+  _ag.users       = [];
+  _ag.nextSession = null;
+  _ag.myAvail     = { slots: {}, recurring: {} };
 
   content.innerHTML = `
     <div class="ag-root">
@@ -591,37 +588,36 @@ async function renderAgendaPage() {
   _renderGroupView();
 
   // ── Abonnements temps réel ───────────────────────────────────────────────
-  // Le premier fire (snapshot initial) est ignoré : déjà rendu plus haut.
-  // unwatchAll() côté navigation s'occupe du cleanup.
-  // Note: on ne touche pas à _ag.myAvail pour éviter d'écraser une édition
-  // locale en cours (debounce 600ms avant _saveAvail). Mon calendrier
-  // personnel reste piloté par mes propres clics.
-  let _firstAvails = true, _firstQuests = true, _firstUsers = true, _firstSession = true;
-
+  // Le 1er fire fait le rendu initial. Pour quests + agenda_session qui sont
+  // session-live (cf. firestore.js), c'est servi du cache mémoire → 0 lecture.
+  // Pour availabilities + users : 1 fetch initial puis deltas seulement.
+  // Note: `_ag.myAvail` est piloté par mes propres clics (debounce 600ms),
+  // on ne le touche pas dans les watches pour ne pas écraser une édition en cours.
   watch('agenda-avails', 'availabilities', data => {
-    if (_firstAvails) { _firstAvails = false; return; }
     if (STATE.currentPage !== 'agenda') return;
-    _ag.allAvails = data;
+    _ag.allAvails = data || [];
+    if (_ag.myAvail && (!_ag.myAvail.slots || !Object.keys(_ag.myAvail.slots).length)) {
+      const mine = _ag.allAvails.find(a => (a.uid || a.id) === STATE.user?.uid);
+      if (mine) _ag.myAvail = mine;
+    }
+    _renderCalendar();
     _renderSuggestions();
     _renderGroupView();
   });
 
   watch('agenda-quests', 'quests', data => {
-    if (_firstQuests) { _firstQuests = false; return; }
     if (STATE.currentPage !== 'agenda') return;
-    _ag.quests = data;
+    _ag.quests = data || [];
     _renderSuggestions();
   });
 
   watch('agenda-users', 'users', data => {
-    if (_firstUsers) { _firstUsers = false; return; }
     if (STATE.currentPage !== 'agenda') return;
-    _ag.users = data;
+    _ag.users = data || [];
     _renderGroupView();
   });
 
   watchDoc('agenda-session', 'agenda_session', 'next', data => {
-    if (_firstSession) { _firstSession = false; return; }
     if (STATE.currentPage !== 'agenda') return;
     _ag.nextSession = data;
     _renderSessionBanner();

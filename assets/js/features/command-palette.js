@@ -9,11 +9,14 @@ import { loadCollection, loadChars } from '../data/firestore.js';
 import { _esc, _norm, _searchIncludes, _trunc } from '../shared/html.js';
 
 const MAX_RESULTS = 30;
-const CACHE_TTL_MS = 60_000;
 
-let _cache       = null;   // { ts, entries[] }
+// Pas de cache local : les 8 collections principales sont session-live
+// (cf. firestore.js), donc loadCollection retourne instantanément du cache
+// mémoire. Reconstruire l'index à chaque ouverture est suffisamment rapide
+// (~5-10 ms pour ~500 entrées) et garantit des résultats toujours frais.
 let _open        = false;
 let _activeIndex = 0;
+let _entries     = [];
 let _results     = [];
 let _query       = '';
 let _initialized = false;
@@ -55,9 +58,6 @@ function _firstStr(obj, keys) {
 }
 
 async function _loadEntries() {
-  const now = Date.now();
-  if (_cache && (now - _cache.ts) < CACHE_TTL_MS) return _cache.entries;
-
   const [npcs, chars, quests, shop, shopCats, bestiary, achievements, collection, story, recipes] =
     await Promise.all([
       loadCollection('npcs').catch(() => []),
@@ -205,11 +205,8 @@ async function _loadEntries() {
     });
   }
 
-  _cache = { ts: now, entries };
   return entries;
 }
-
-function _invalidateCache() { _cache = null; }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RECHERCHE
@@ -412,10 +409,8 @@ function _mountModal() {
   input.addEventListener('input', () => {
     _query = input.value;
     _activeIndex = 0;
-    if (_cache) {
-      _results = _filterAndSort(_cache.entries, _query);
-      _renderList();
-    }
+    _results = _filterAndSort(_entries, _query);
+    _renderList();
   });
 
   input.addEventListener('keydown', (e) => {
@@ -445,6 +440,7 @@ async function openPalette() {
   _open = true;
   _query = '';
   _activeIndex = 0;
+  _entries = [];
   _results = [];
 
   const input = _mountModal();
@@ -454,9 +450,9 @@ async function openPalette() {
   setTimeout(() => input?.focus(), 30);
 
   try {
-    const entries = await _loadEntries();
+    _entries = await _loadEntries();
     if (!_open) return; // l'utilisateur a fermé entre-temps
-    _results = _filterAndSort(entries, _query);
+    _results = _filterAndSort(_entries, _query);
     _renderList();
   } catch (e) {
     console.error('[cmd-palette] load failed:', e);
@@ -487,7 +483,6 @@ export function initCommandPalette() {
 
   window.openCommandPalette  = openPalette;
   window.closeCommandPalette = closePalette;
-  window._invalidateCommandPaletteCache = _invalidateCache;
 }
 
 // Auto-init à l'import

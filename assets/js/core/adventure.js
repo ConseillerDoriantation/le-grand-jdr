@@ -19,7 +19,7 @@ import {
   setSuperAdmin,
 } from './state.js';
 
-import { setCurrentAdventure } from '../data/firestore.js';
+import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
 
 // ── Charger les aventures accessibles ──────────
@@ -38,12 +38,19 @@ export async function loadUserAdventures(uid) {
 // Met à jour STATE, active le scope Firestore, retourne true si OK
 export function selectAdventure(adv) {
   setAdventure(adv);
+  // `setCurrentAdventure` tear-down les listeners session de l'aventure
+  // précédente avant de changer de scope.
   setCurrentAdventure(adv.id);
 
   // isAdmin : vrai si admin global (profile.isAdmin) OU admin de cette aventure
   const uid = STATE.user?.uid;
   const isAdvAdmin = Array.isArray(adv.admins) && adv.admins.includes(uid);
   setAdmin(STATE.isSuperAdmin || isAdvAdmin);
+
+  // Démarre les listeners session-live (1 onSnapshot/collection partagée
+  // par toutes les pages — coupe la majorité des lectures pour la session).
+  // Fire-and-forget : chaque page await sa ready si elle en a besoin.
+  primeSessionData();
 
   // Heartbeat de présence pour cette aventure
   if (uid) startPresence(adv.id, uid);

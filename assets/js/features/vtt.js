@@ -12,6 +12,7 @@ import { getCurrentAdventureId, getDocData, saveDoc, loadCollection } from '../d
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
+  query, orderBy, limit,
 } from '../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
@@ -6972,18 +6973,24 @@ function _initListeners() {
     console.error('[vtt] réactions émotes — erreur listener:', err);
   }));
 
-  // 11. Chat / Log de dés
-  _unsubs.push(onSnapshot(_logCol(), snap => {
-    const msgs=snap.docs
-      .map(d=>({id:d.id,...d.data()}))
-      .sort((a,b)=>(a.createdAt?.toMillis?.()??0)-(b.createdAt?.toMillis?.()??0))
-      .slice(-60);
-    _renderChatLog(msgs);
-  }, e => {
-    console.error('[vtt] chat listener:', e);
-    const el=document.getElementById('vtt-chat-log');
-    if (el) el.innerHTML=`<div class="vtt-log-entry vtt-log-roll" style="color:#ef4444">⚠ Accès refusé — ajouter <code>vttLog</code> aux règles Firestore</div>`;
-  }));
+  // 11. Chat / Log de dés — limité côté serveur aux 80 derniers messages.
+  // Évite de relire l'historique complet du chat à chaque ouverture de page
+  // (économie majeure sur des sessions longues : passe d'une lecture par
+  // message historique à une lecture par message récent).
+  _unsubs.push(onSnapshot(
+    query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
+    snap => {
+      const msgs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
+      _renderChatLog(msgs);
+    },
+    e => {
+      console.error('[vtt] chat listener:', e);
+      const el = document.getElementById('vtt-chat-log');
+      if (el) el.innerHTML = `<div class="vtt-log-entry vtt-log-roll" style="color:#ef4444">⚠ Accès refusé — ajouter <code>vttLog</code> aux règles Firestore</div>`;
+    }
+  ));
 
   // Bibliothèque de cartes (MJ only)
   if (STATE.isAdmin) {

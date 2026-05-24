@@ -291,6 +291,19 @@ function _applyOrder(items, order) {
   return [...ordered, ...rest];
 }
 
+function _refreshAchievementCounters() {
+  const all = window._achItems || [];
+  const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
+  const counts = { all: visible.length };
+  CATS.forEach(c => {
+    counts[c.id] = visible.filter(a => (a.categorie || 'epique') === c.id).length;
+  });
+  document.querySelectorAll('.hall-counter[data-filter]').forEach(el => {
+    const num = el.querySelector('.hall-counter-num');
+    if (num) num.textContent = counts[el.dataset.filter] ?? 0;
+  });
+}
+
 function _mergeCategoryOrder(catId, catOrder, globalOrder) {
   const allIds      = (window._achItems || []).map(a => a.id);
   const globalIds   = globalOrder.filter(id => allIds.includes(id));
@@ -769,6 +782,7 @@ function _achRenderControlsExtras() {
 async function _achRenderContent() {
   const contentEl = document.getElementById('ach-content');
   if (!contentEl) return;
+  _refreshAchievementCounters();
   _achRenderControlsExtras();
 
   const all        = window._achItems || [];
@@ -941,7 +955,7 @@ PAGES.achievements = async function() {
     _loadOrder(),
   ]);
   _currentOrder    = order;
-  window._achItems = _applyOrder(items, order);
+  window._achItems = _applyOrder(items || [], order);
   window._achFilter ??= 'all';
   window._achView   ??= 'galerie';
   window._achSearch ??= '';
@@ -950,22 +964,17 @@ PAGES.achievements = async function() {
   await _achRenderContent();
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
-  // Premier fire (snapshot initial) ignoré : déjà rendu juste au-dessus.
   // On évite de re-render pendant un drag SortableJS pour ne pas casser
   // l'instance en cours ; les saves admin re-render explicitement après onEnd.
   // unwatchAll() côté navigation s'occupe du cleanup.
-  let _firstItems = true, _firstOrder = true;
-
   watch('ach-items', 'achievements', items => {
-    if (_firstItems) { _firstItems = false; return; }
     if (STATE.currentPage !== 'achievements') return;
     if (document.body.classList.contains('ach-dragging')) return;
-    window._achItems = _applyOrder(items, _currentOrder);
+    window._achItems = _applyOrder(items || [], _currentOrder);
     _achRenderContent();
   });
 
   watchDoc('ach-order', 'achievements_meta', 'order', doc => {
-    if (_firstOrder) { _firstOrder = false; return; }
     if (STATE.currentPage !== 'achievements') return;
     if (document.body.classList.contains('ach-dragging')) return;
     _currentOrder    = Array.isArray(doc?.order) ? doc.order : [];

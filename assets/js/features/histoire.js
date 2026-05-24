@@ -5,7 +5,7 @@
 // Admin uniquement — chaque mission a son histoire attachée
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { getDocData, saveDoc, loadCollection, invalidateCache } from '../data/firestore.js';
+import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { showNotif } from '../shared/notifications.js';
 import { lsJson } from '../shared/local-storage.js';
@@ -897,7 +897,7 @@ async function _saveNow() {
       missionTitre: _missionTitre,
       updatedAt:    new Date().toISOString(),
     });
-    invalidateCache('story_histories');
+    // Cache patché automatiquement par saveDoc — pas besoin d'invalider.
     _setSaveStatus('saved');
   } catch (e) {
     console.error('[histoire] save failed', e);

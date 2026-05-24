@@ -2,7 +2,7 @@
 // PAGES
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
-import { countUserChars, loadChars, loadCollection, loadCollectionOrdered, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
+import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { calcPalier } from '../shared/char-stats.js';
 import { watch } from '../shared/realtime.js';

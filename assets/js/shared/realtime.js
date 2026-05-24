@@ -5,8 +5,14 @@
 //   watch('quests', 'quests', data => renderQuests(data));
 //   watchDoc('info', 'informations', 'main', data => renderInfo(data));
 //   unwatchAll(); // appelé automatiquement à chaque navigation
+//
+// Si la collection / doc est déjà couvert par un listener "session-live"
+// (cf. firestore.js _SESSION_COLLECTIONS), `subscribeCollection` hook
+// dans le listener existant — aucun nouveau listener Firestore créé,
+// aucune lecture facturée. Le callback reçoit les données du cache live.
 // ══════════════════════════════════════════════════════════════════════════════
 import { subscribeCollection, subscribeDoc } from '../data/firestore.js';
+import { onSnapshot } from '../config/firebase.js';
 
 // Map nom → fonction de désabonnement
 const _subs = new Map();
@@ -22,6 +28,19 @@ export function watch(name, col, callback) {
 export function watchDoc(name, col, id, callback) {
   _subs.get(name)?.();
   const unsub = subscribeDoc(col, id, callback);
+  _subs.set(name, unsub);
+}
+
+// Abonner à une query Firestore (limit, orderBy, where…)
+// `queryRef` est une référence de Query déjà construite avec query(col, ...).
+// Utile quand on veut limiter côté serveur (ex: chat avec limit(80)).
+export function watchQuery(name, queryRef, callback) {
+  _subs.get(name)?.();
+  const unsub = onSnapshot(
+    queryRef,
+    snap => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    err => console.error(`[realtime] watchQuery(${name}):`, err),
+  );
   _subs.set(name, unsub);
 }
 
