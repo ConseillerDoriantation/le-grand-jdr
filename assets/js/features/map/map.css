@@ -282,17 +282,118 @@
   border-top: 1px solid var(--border);
   padding-top: .7rem;
 }
-.map-panel__section-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: .5rem;
-}
 .map-panel__section h4 {
   font-size: .72rem;
   color: var(--text-dim);
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  margin: 0;
+  margin: 0 0 .5rem;
 }
+
+/* ── Section pliable : header = bouton, body = wrapper toggleable ─────────── */
+.map-panel__section-head {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.map-panel__section-trigger {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  background: none;
+  border: none;
+  padding: .35rem .45rem;
+  margin: -.35rem -.45rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  transition: background .12s;
+}
+.map-panel__section-trigger:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.map-panel__section-trigger:focus-visible {
+  outline: 2px solid var(--border-bright);
+  outline-offset: 1px;
+}
+.map-panel__section-title {
+  font-size: .72rem;
+  color: var(--text-dim);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 600;
+  flex: 1;
+}
+.map-panel__section-trigger:hover .map-panel__section-title { color: var(--text-soft); }
+.map-panel__chev {
+  display: inline-block;
+  font-size: .65rem;
+  color: var(--text-dim);
+  width: .8em;
+  text-align: center;
+  transition: transform .15s;
+}
+.map-panel__section.is-collapsed .map-panel__chev { transform: rotate(-90deg); }
+.map-panel__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.15rem;
+  padding: 0 .45rem;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: .67rem;
+  font-weight: 600;
+  letter-spacing: .3px;
+}
+
+.map-panel__section-body { margin-top: .55rem; }
+.map-panel__section.is-collapsed .map-panel__section-body { display: none; }
+/* En mode recherche, on force l'ouverture pour ne rien cacher */
+.map-panel.is-searching .map-panel__section.is-collapsed .map-panel__section-body { display: block; }
+
+/* "Aucun résultat" dans une section : masqué par défaut, visible si la section
+   est vide de matches durant une recherche. */
+.map-panel__empty-match {
+  display: none;
+  padding: .4rem .2rem;
+  font-size: .74rem;
+  color: var(--text-dim);
+  font-style: italic;
+  list-style: none;
+}
+.map-panel.is-searching .map-panel__section.is-empty-match .map-panel__empty-match { display: block; }
+
+/* ── Barre de recherche du panneau ────────────────────────────────────────── */
+.map-panel__searchbar {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: .15rem .55rem .15rem .8rem;
+  transition: border-color .12s;
+}
+.map-panel__searchbar:focus-within { border-color: var(--border-bright); }
+.map-panel__searchbar-icon { font-size: .8rem; opacity: .6; }
+.map-panel__searchbar input {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: .35rem 0;
+  color: var(--text-soft);
+  font-size: .82rem;
+  outline: none;
+}
+.map-panel__searchbar input::placeholder { color: var(--text-dim); }
+
 .map-panel__notes {
   background: rgba(226, 185, 111, 0.05);
   border: 1px solid rgba(226, 185, 111, 0.15);

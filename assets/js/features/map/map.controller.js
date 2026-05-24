@@ -11,6 +11,9 @@ import { listPlaceTypes } from './data/types.repo.js';
 import { listPlaces, savePlace, removePlace } from './data/places.repo.js';
 import { listOrganizations, saveOrganization, removeOrganization } from './data/organizations.repo.js';
 import { loadMap, loadFogZones } from './data/maps.repo.js';
+import { listLinkedNpcs } from './data/npcs.repo.js';
+import { listLinkedQuests } from './data/quests.repo.js';
+import { listMissionsWithPlaces } from './data/story.repo.js';
 
 // Rendu
 import { bindViewport, applyTransform, zoom, resetView, screenToNorm, getImageSize } from './render/viewport.js';
@@ -40,18 +43,25 @@ export async function initMap(containerEl) {
   injectStyles();
 
   // 1. Charger les données en parallèle
-  const [map, types, places, organizations, fogZones] = await Promise.all([
+  const [map, types, places, organizations, fogZones, npcs, quests, missions] = await Promise.all([
     loadMap(),
     listPlaceTypes(),
     listPlaces(),
     listOrganizations(),
     loadFogZones(),
+    listLinkedNpcs(),
+    listLinkedQuests(),
+    // Missions = contenu MJ privé : on ne le charge que pour l'admin.
+    STATE.isAdmin ? listMissionsWithPlaces() : Promise.resolve([]),
   ]);
 
   state.map = map;
   state.types = types;
   state.places = places;
   state.organizations = organizations;
+  state.npcs = npcs;
+  state.quests = quests;
+  state.missions = missions;
   state.fogZones = fogZones;
   state.selection = null;
   state.mode = 'navigate';

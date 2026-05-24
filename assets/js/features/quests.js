@@ -10,6 +10,7 @@ import { showNotif } from '../shared/notifications.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
+import { listPlaces } from './map/data/places.repo.js';
 
 // ── Constantes ────────────────────────────────
 const DIFF = [
@@ -83,12 +84,14 @@ function _questCard(q, myChar) {
     <div class="quest-card-title">${_esc(q.titre || 'Quête')}</div>
     ${q.description ? `<div class="quest-card-desc">${_esc(q.description)}</div>` : ''}
     ${q.recompense  ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
+    ${q.lieu ? `<div style="font-size:.78rem;color:var(--text-dim);margin-top:.15rem">📍 ${_esc(q.lieu)}</div>` : ''}
     ${partsHtml}
   </div>`;
 }
 
 // ── Cache local pour re-renders subscription ──
 let _chars = null;
+let _places = [];   // [{ id, name }] — alimente le datalist Lieu
 
 // ── Rendu depuis les données (sans rechargement Firestore) ────────────────
 function _applyQuestsRender(quests) {
@@ -135,11 +138,13 @@ async function renderQuestsPage() {
   const content = document.getElementById('main-content');
   content.innerHTML = appSplashHtml();
 
-  const [quests, chars] = await Promise.all([
+  const [quests, chars, places] = await Promise.all([
     loadCollection('quests').catch(() => []),
     loadCollection('characters').catch(() => []),
+    listPlaces().catch(() => []),
   ]);
   _chars = chars;
+  _places = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _applyQuestsRender(quests);
 
   // Abonnements temps réel : le premier fire (snapshot initial) est ignoré.
@@ -267,6 +272,13 @@ function _openQuestModal(id) {
       <label>Récompense</label>
       <input class="input-field" id="q-recompense" value="${_esc(ex?.recompense || '')}" placeholder="ex: 300 XP + 50 or">
     </div>
+    <div class="form-group">
+      <label>Lieu <span style="color:var(--text-dim);font-weight:400">(optionnel — relie la quête à la carte)</span></label>
+      <input class="input-field" id="q-lieu" list="q-lieu-options" value="${_esc(ex?.lieu || '')}" placeholder="ex: Valdoran" autocomplete="off">
+      <datalist id="q-lieu-options">
+        ${_places.map(p => `<option value="${_esc(p.name)}"></option>`).join('')}
+      </datalist>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
       <div class="form-group">
         <label>Difficulté</label>
@@ -295,12 +307,13 @@ window._questSave = async function (id) {
   const titre      = document.getElementById('q-titre')?.value.trim();
   const desc       = document.getElementById('q-desc')?.value.trim();
   const recompense = document.getElementById('q-recompense')?.value.trim();
+  const lieu       = document.getElementById('q-lieu')?.value.trim();
   const difficulte = document.getElementById('q-difficulte')?.value;
   const statut     = document.getElementById('q-statut')?.value;
 
   if (!titre) { showNotif('Le titre est obligatoire.', 'error'); return; }
 
-  const data = { titre, description: desc || '', recompense: recompense || '', difficulte, statut };
+  const data = { titre, description: desc || '', recompense: recompense || '', lieu: lieu || '', difficulte, statut };
 
   try {
     if (id) {
