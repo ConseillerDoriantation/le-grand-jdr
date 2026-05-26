@@ -96,7 +96,16 @@ function _cacheSet(key, data) {
 function _cachePatchAdd(path, docData) {
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
-  if (all) _cache.set(allKey, { data: [...all.data, docData], ts: all.ts });
+  if (all) {
+    // Dédupe : si un onSnapshot actif a déjà inséré le doc via
+    // latency-compensation (le snapshot fire avant la résolution de addDoc),
+    // on remplace plutôt que d'append — sinon on duplique l'entrée.
+    const exists = all.data.some(d => d.id === docData.id);
+    const data = exists
+      ? all.data.map(d => d.id === docData.id ? docData : d)
+      : [...all.data, docData];
+    _cache.set(allKey, { data, ts: all.ts });
+  }
   _cache.set(`${path}:${docData.id}`, { data: docData, ts: Date.now() });
 }
 

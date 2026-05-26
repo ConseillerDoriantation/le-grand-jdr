@@ -916,30 +916,28 @@ async function renderBestiary() {
       .sort((a,b) => a.pseudo.localeCompare(b.pseudo, 'fr', { sensitivity:'base' }));
   }
 
-  // Bestiaire actif — créatures et tracker pilotés en temps réel.
-  // Pas de loadCollection initial : le 1er fire du watch ci-dessous fournit
-  // les données (servies du cache IndexedDB local sur cache chaud → instantané).
+  // Bestiaire actif — hydraté depuis le cache TTL (instant si chaud) puis
+  // tenu à jour par le watch ci-dessous.
   const col = _bestiaireId === 'main' ? 'bestiary' : `bestiary_${_bestiaireId}`;
-  _creatures = [];
-  _tracker   = {};
+  _tracker = {};
   window._bstCurrentCol = col;
 
   if (!_damageTypes) _damageTypes = await loadDamageTypes();
 
+  await _bstHydrate();
+  _render();
+
   const trackerUid = _viewAsUid || STATE.user?.uid;
 
-  _render(); // shell avec liste vide — sera repeuplé au 1er fire du watch
-
   // ── Abonnements temps réel ─────────────────────────────────────────────
-  // Le 1er fire fait le rendu initial. Les noms 'bst-creatures'/'bst-tracker'
-  // sont réutilisés : si l'admin switche de bestiaire/viewAs, watch() kill
-  // l'ancien listener et crée le nouveau sur la bonne collection / doc.
+  // Les noms 'bst-creatures'/'bst-tracker' sont réutilisés : si l'admin
+  // switche de bestiaire/viewAs, watch() kill l'ancien listener et crée
+  // le nouveau sur la bonne collection / doc.
   watch('bst-creatures', col, data => {
     if (STATE.currentPage !== 'bestiaire') return;
     if (_bstShouldSkipLiveRender()) return;
-    const all = data || [];
-    _creatures = STATE.isAdmin ? all : all.filter(c => !c.hidden);
-    _creatures.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+    _bstApplyData(data);
+    if (_bstSig() === _bstRenderSig) return;
     _render();
   });
 
@@ -948,10 +946,37 @@ async function renderBestiary() {
       if (STATE.currentPage !== 'bestiaire') return;
       if (_bstShouldSkipLiveRender()) return;
       _tracker = doc?.data || {};
+      if (_bstSig() === _bstRenderSig) return;
       _render();
     });
   }
 }
+
+// Applique une liste fraîche à _creatures : filtre les `hidden` pour les
+// joueurs et trie par nom. Source unique utilisée par le watch et l'hydratation
+// — toute logique de mise à jour de la liste doit passer par ici.
+function _bstApplyData(all) {
+  const arr = all || [];
+  _creatures = (STATE.isAdmin ? [...arr] : arr.filter(c => !c.hidden))
+    .sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+}
+
+// Re-charge _creatures depuis loadCollection (cache TTL en mémoire patché par
+// addToCol/updateInCol/deleteFromCol, sinon IndexedDB Firestore). Sert à
+// rester cohérent juste après une opération CRUD, sans dépendre du timing du
+// watch (qui peut être skippé si un input du panneau précédent a le focus).
+async function _bstHydrate() {
+  const col = window._bstCurrentCol || 'bestiary';
+  _bstApplyData(await loadCollection(col));
+}
+
+// Signature des données qui pilotent le rendu de la page (cartes + panneau
+// joueur). Mise à jour par _render à la fin, comparée par les watchers
+// onSnapshot avant de re-rendre : un fire qui n'apporte aucun changement
+// (cache → serveur, hydratation → 1er fire) ne reconstruit pas le DOM et
+// les cartes ne clignotent pas.
+let _bstRenderSig = '';
+function _bstSig() { return JSON.stringify({ c: _creatures, t: _tracker }); }
 
 // Évite d'écraser une édition admin en cours : la fiche du panneau a des
 // inputs/textarea avec auto-save debouncé (_bstQueueSave 400ms). Si on
@@ -969,7 +994,7 @@ function _bstShouldSkipLiveRender() {
 // ── Création rapide d'une créature sans modal ──────────────────────────────────
 window._bstCreateDraft = async function () {
   if (!STATE.isAdmin) return;
-  const col = 'bestiary';
+  const col = window._bstCurrentCol || 'bestiary';
   const data = {
     nom: 'Nouvelle créature', emoji: '🐲', rang: 'classique',
     type: '', environnement: '', niveau: 0, dangerositeXp: 0,
@@ -981,13 +1006,8 @@ window._bstCreateDraft = async function () {
   };
   try {
     const newId = await addToCol(col, data);
-    if (typeof newId === 'string') {
-      _creatures.push({ ...data, id: newId });
-    } else {
-      _creatures = await loadCollection(col);
-    }
-    _creatures.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
-    _activeId = typeof newId === 'string' ? newId : (_creatures[_creatures.length - 1]?.id ?? null);
+    await _bstHydrate();
+    _activeId = newId;
     _render();
     setTimeout(() => {
       const nameInput = document.querySelector('.bst-panel-name-input');
@@ -1107,6 +1127,8 @@ function _render() {
     </div>
   </div>
   </div>`;
+
+  _bstRenderSig = _bstSig();
 }
 
 // ── Card créature ─────────────────────────────────────────────────────────────
@@ -1560,8 +1582,8 @@ async function deleteBeast(id) {
     const c = _creatures.find(x=>x.id===id);
     if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`, {title: 'Supprimer la créature'})) return;
     await deleteFromCol(col, id);
-    _creatures = _creatures.filter(x=>x.id!==id);
     if (_activeId === id) _activeId = null;
+    await _bstHydrate();
     _render();
     showNotif('Créature supprimée.','success');
   } catch (e) { notifySaveError(e); }

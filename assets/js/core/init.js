@@ -109,10 +109,13 @@ onAuthStateChanged(auth, async (user) => {
 
   // Pré-télécharger Konva en arrière-plan (utilisé par le VTT)
   // Chemin doit rester synchro avec assets/js/features/vtt.js (_loadKonva)
+  // `prefetch` (pas `preload`) car la ressource n'est consommée qu'à la
+  // navigation vers le VTT : `preload` déclencherait un warning navigateur
+  // si l'utilisateur n'ouvre pas le VTT dans les premières secondes.
   if (!document.getElementById('preload-konva')) {
     const _kp = document.createElement('link');
     _kp.id = 'preload-konva';
-    _kp.rel = 'preload';
+    _kp.rel = 'prefetch';
     _kp.as = 'script';
     _kp.href = './assets/js/vendor/konva-10.3.0.min.js';
     document.head.appendChild(_kp);
