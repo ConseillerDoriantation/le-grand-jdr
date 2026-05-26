@@ -27,7 +27,7 @@ import {
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
-import { _esc, appSplashHtml } from '../shared/html.js';
+import { _esc, _searchIncludes, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import PAGES from './pages.js';
@@ -383,8 +383,19 @@ let _presence     = {};   // uid → { uid, pseudo }
 let _presHeartbeat= null; // intervalId du heartbeat
 let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
-let _trayReserveOpen  = false; // section réserve ouverte/fermée dans le tray MJ
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
+let _traySearch       = '';    // filtre texte appliqué à la réserve
+// Sous-sections togglables (en ligne reste toujours visible) — persistées
+// par navigateur via localStorage, défaut : repliées (le MJ regarde d'abord
+// les joueurs présents).
+const _loadTrayPref = (k, dflt = false) => {
+  try { const v = localStorage.getItem('vtt-tray-' + k); return v == null ? dflt : v === '1'; }
+  catch { return dflt; }
+};
+const _saveTrayPref = (k, v) => { try { localStorage.setItem('vtt-tray-' + k, v ? '1' : '0'); } catch {} };
+let _trayOnOpen  = _loadTrayPref('on');
+let _trayOffOpen = _loadTrayPref('off');
+let _trayNpcOpen = _loadTrayPref('npc');
 let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
@@ -652,44 +663,62 @@ function _maybeSyncAutoTokens() {
 }
 
 async function _syncAutoTokens() {
-  // Index des entités déjà tokenisées
-  const byChar  = new Set();
-  const byNpc   = new Set();
+  // ─ 1. Scanner les tokens existants : tokens orphelins + doublons réserve ─
+  // Règle : un perso/PNJ peut avoir plusieurs tokens *placés* sur des pages
+  // différentes (cf. _vttDuplicateOnPage), mais UN SEUL token en réserve
+  // (pageId === null). Les doublons en réserve viennent de syncs concurrents
+  // historiques (multi-tab / multi-admin) avant l'introduction des IDs
+  // déterministes ci-dessous.
+  const hasAnyToken     = new Set();  // 'c:<id>' | 'n:<id>' : a au moins 1 token
+  const reserveSeen     = new Map();  // 'c:<id>' | 'n:<id>' → 1er token réserve gardé
+  const toDelete        = [];
+
   for (const { data } of Object.values(_tokens)) {
-    if (data.characterId) byChar.add(data.characterId);
-    if (data.npcId)       byNpc.add(data.npcId);
+    let key = null;
+    if (data.characterId) key = 'c:' + data.characterId;
+    else if (data.npcId)  key = 'n:' + data.npcId;
+    if (!key) continue;
+
+    // Orphelin : l'entité a été supprimée → drop quoi qu'il arrive
+    if (data.characterId && !_characters[data.characterId]) { toDelete.push(data.id); continue; }
+    if (data.npcId       && !_npcs[data.npcId])             { toDelete.push(data.id); continue; }
+
+    hasAnyToken.add(key);
+
+    // Doublons réserve : on garde le 1er rencontré, on drop les autres
+    if (!data.pageId) {
+      if (reserveSeen.has(key)) toDelete.push(data.id);
+      else                      reserveSeen.set(key, data);
+    }
   }
 
+  // ─ 2. Identifier les entités sans aucun token → à créer ──────────────
   const toCreate = [];
-  const toDelete = []; // tokens orphelins (personnage/PNJ supprimé)
-
   for (const c of Object.values(_characters)) {
-    if (!byChar.has(c.id)) toCreate.push({
+    if (!hasAnyToken.has('c:' + c.id)) toCreate.push({
+      detId: `auto_c_${c.id}`,
       name: c.nom || 'Personnage', type: 'player',
       characterId: c.id, npcId: null, beastId: null, ownerId: c.uid || null,
     });
   }
   for (const n of Object.values(_npcs)) {
-    if (!byNpc.has(n.id)) toCreate.push({
+    if (!hasAnyToken.has('n:' + n.id)) toCreate.push({
+      detId: `auto_n_${n.id}`,
       name: n.nom || 'PNJ', type: 'npc',
       characterId: null, npcId: n.id, beastId: null, ownerId: null,
     });
   }
-  // Les ennemis ne sont PAS auto-créés depuis le bestiaire :
-  // ils sont placés manuellement depuis la section Bestiaire du tray.
-
-  // Tokens orphelins : personnage ou PNJ introuvable
-  for (const { data } of Object.values(_tokens)) {
-    if      (data.characterId && !_characters[data.characterId]) toDelete.push(data.id);
-    else if (data.npcId       && !_npcs[data.npcId])             toDelete.push(data.id);
-  }
+  // Les ennemis ne sont PAS auto-créés depuis le bestiaire : ils sont placés
+  // manuellement depuis la section Bestiaire du tray.
 
   if (!toCreate.length && !toDelete.length) return;
 
   const batch = writeBatch(db);
-  for (const base of toCreate) {
-    const ref = doc(_toksCol());
-    batch.set(ref, {
+  for (const { detId, ...base } of toCreate) {
+    // ID déterministe (auto_c_<id> / auto_n_<id>) : si deux syncs concurrents
+    // (multi-tab, multi-admin) créent en même temps, `batch.set` écrase au
+    // lieu de dupliquer → garantie d'unicité au niveau Firestore.
+    batch.set(doc(_toksCol(), detId), {
       ...base,
       pageId: null, col: 0, row: 0,
       visible: false, imageUrl: null,
@@ -699,7 +728,7 @@ async function _syncAutoTokens() {
       createdAt: serverTimestamp(),
     });
   }
-  for (const id of toDelete) batch.delete(_tokRef(id));
+  for (const id of new Set(toDelete)) batch.delete(_tokRef(id));
   await batch.commit().catch(e => console.error('[vtt] auto-sync tokens:', e));
 }
 
@@ -754,6 +783,7 @@ function _cleanup() {
   if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
   _mjRulerLastWrite = 0; _mjRulerBroadcasting = false; _mjRulerRemote = null;
   _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
+  _traySearch = '';
   _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
   _hideCtxMenu();
   document.removeEventListener('keydown', _keyHandler);
@@ -5961,8 +5991,12 @@ function _renderInspector(t) {
 // ═══════════════════════════════════════════════════════════════════
 // TRAY — panneau latéral MJ
 // ═══════════════════════════════════════════════════════════════════
-window._vttToggleTrayReserve = () => { _trayReserveOpen = !_trayReserveOpen; _renderTray(); };
-window._vttTrayFilter = f => { _trayFilter = f; _renderTray(); };
+window._vttTrayFilter = f => { _trayFilter = f; _renderTraySoon(); };
+window._vttTraySearch = v => { _traySearch = String(v || ''); _renderTraySoon(); };
+window._vttTrayClearSearch = () => { _traySearch = ''; _renderTraySoon(); };
+window._vttToggleOn  = () => { _trayOnOpen  = !_trayOnOpen;  _saveTrayPref('on',  _trayOnOpen);  _renderTraySoon(); };
+window._vttToggleOff = () => { _trayOffOpen = !_trayOffOpen; _saveTrayPref('off', _trayOffOpen); _renderTraySoon(); };
+window._vttToggleNpc = () => { _trayNpcOpen = !_trayNpcOpen; _saveTrayPref('npc', _trayNpcOpen); _renderTraySoon(); };
 
 // Coalesce les rafales de snapshots (chrs/npcs/bsts/toks au mount) → 1 render par tick
 let _trayDirty = false;
@@ -5976,6 +6010,12 @@ function _renderTray() {
   if (!STATE.isAdmin) { _renderPageTabs(); return; }
   _renderPageList();
   const el = document.getElementById('vtt-tray-tokens'); if (!el) return;
+
+  // Sauve focus + caret du champ recherche : sans ça, chaque keystroke
+  // déclenche un rerender qui détruit l'input → focus perdu.
+  const ae = document.activeElement;
+  const searchFocused = ae?.classList?.contains('vtt-tray-search-input') && el.contains(ae);
+  const caretPos = searchFocused ? ae.selectionStart : null;
 
   const all      = Object.values(_tokens).map(e => e.data);
   const onPage   = all.filter(t => t.pageId === _activePage?.id);
@@ -6040,7 +6080,31 @@ function _renderTray() {
     </div>`;
   };
 
-  // ── Chip compact (réserve) ────────────────────────────────────────
+  // ── Ligne compacte (réserve) — 1 par ligne, nom complet, statut online ─
+  const _onlineTs = Date.now();
+  const isOnline = uid => !!(uid && _presence[uid] && _onlineTs - (_presence[uid].lastSeen || 0) < 120_000);
+  const mkResLine = t => {
+    const ld = _live(t);
+    const typeIcon = t.type === 'player' ? '🧑' : '👤';
+    const col = TYPE_COLOR[t.type] ?? '#888';
+    const showStatus = t.type === 'player';
+    const online = showStatus && isOnline(t.ownerId);
+    const statusDot = showStatus
+      ? `<span class="vtt-res-line-status ${online ? 'is-online' : ''}" title="${online ? 'En ligne' : 'Hors ligne'}"></span>`
+      : '';
+    const name = _esc(ld.displayName ?? t.name);
+    return `<button class="vtt-res-line" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}" title="Placer ${name}">
+      <span class="vtt-res-line-dot" style="border-color:${col};color:${col}">
+        ${ld.displayImage
+          ? `<img src="${ld.displayImage}" alt="">`
+          : `<span>${typeIcon}</span>`}
+        ${statusDot}
+      </span>
+      <span class="vtt-res-line-name">${name}</span>
+    </button>`;
+  };
+
+  // Conservé pour la section "Sur d'autres pages" qui utilise toujours la grid.
   const mkChip = t => {
     const ld = _live(t);
     const typeIcon = t.type === 'player' ? '🧑' : '👤';
@@ -6124,23 +6188,57 @@ function _renderTray() {
     </div>`;
   }
 
-  // ── Réserve — grid compacte, toujours visible ────────────────────
+  // ── Réserve — toujours dépliée, triée par utilité (online > offline > PNJ) ─
+  // Objectif : 1 coup d'œil = je sais qui placer ; 1 clic = c'est placé.
   const filteredRes = applyFilter(reserve);
   let reserveSec = '';
   if (filteredRes.length) {
-    const resPlayers = filteredRes.filter(t => t.type === 'player');
-    const resNpcs    = filteredRes.filter(t => t.type === 'npc');
-    const multiResType = resPlayers.length > 0 && resNpcs.length > 0;
-    const resHtml = (multiResType
-      ? (resPlayers.length ? `<div class="vtt-tray-sublabel">🧑 Joueurs</div><div class="vtt-reserve-grid">${resPlayers.map(mkChip).join('')}</div>` : '')
-        + (resNpcs.length ? `<div class="vtt-tray-sublabel">👤 PNJ</div><div class="vtt-reserve-grid">${resNpcs.map(mkChip).join('')}</div>` : '')
-      : `<div class="vtt-reserve-grid">${filteredRes.map(mkChip).join('')}</div>`);
+    const sortByName = arr => [...arr].sort((a, b) =>
+      (_live(a).displayName ?? a.name ?? '').localeCompare(_live(b).displayName ?? b.name ?? '', 'fr', { sensitivity:'base' }));
+    const searched = filteredRes.filter(t =>
+      !_traySearch || _searchIncludes(_live(t).displayName ?? t.name ?? '', _traySearch));
+
+    // Tri par utilité MJ : ceux qui jouent maintenant en haut.
+    const presentPlayers = sortByName(searched.filter(t => t.type === 'player' && isOnline(t.ownerId)));
+    const absentPlayers  = sortByName(searched.filter(t => t.type === 'player' && !isOnline(t.ownerId)));
+    const npcs           = sortByName(searched.filter(t => t.type === 'npc'));
+
+    // La recherche force l'ouverture des sous-sections — sinon le MJ tape
+    // et ne voit aucun résultat parce que la section est repliée.
+    const forceOpen = !!_traySearch;
+    const mkBlock = (label, items, toggleFn = null, open = true) => {
+      if (!items.length) return '';
+      const collapsible = !!toggleFn;
+      const isOpen = collapsible ? (open || forceOpen) : true;
+      const caret = collapsible ? `<span class="vtt-tray-sub-caret">${isOpen ? '▾' : '▸'}</span>` : '';
+      const attrs = collapsible ? `data-vtt-fn="${toggleFn}"` : '';
+      const cls = `vtt-tray-sublabel${collapsible ? ' vtt-tray-sub-toggle' : ''}`;
+      const body = isOpen ? items.map(mkResLine).join('') : '';
+      return `<div class="${cls}" ${attrs}>${caret}${label} <span class="vtt-tray-sublabel-n">${items.length}</span></div>${body}`;
+    };
+
+    const clrBtn = _traySearch
+      ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttTrayClearSearch" title="Effacer">✕</button>` : '';
+
+    const scrollContent = searched.length
+      ? mkBlock('🟢 En ligne',   presentPlayers, '_vttToggleOn',  _trayOnOpen)
+        + mkBlock('🕓 Hors ligne', absentPlayers,  '_vttToggleOff', _trayOffOpen)
+        + mkBlock('👤 PNJ',        npcs,           '_vttToggleNpc', _trayNpcOpen)
+      : `<div class="vtt-tray-empty">Aucun résultat</div>`;
+
     reserveSec = `<div class="vtt-tray-sect">
       <div class="vtt-tray-sect-hd">
         <span>📦 Réserve</span>
         <span class="vtt-tray-count">${filteredRes.length}</span>
       </div>
-      ${resHtml}
+      <div class="vtt-tray-search">
+        <span class="vtt-tray-search-ic">🔍</span>
+        <input type="text" class="vtt-tray-search-input" placeholder="Rechercher…"
+          value="${_esc(_traySearch)}"
+          data-vtt-fn="_vttTraySearch" data-vtt-on="input" data-vtt-args="$value">
+        ${clrBtn}
+      </div>
+      <div class="vtt-res-scroll">${scrollContent}</div>
     </div>`;
   }
 
@@ -6180,6 +6278,17 @@ function _renderTray() {
       <div class="vtt-bst-grid">${bstGrid}</div>
     </div>` : ''}
   `;
+
+  // Restaure le focus + caret de la recherche après le rerender.
+  if (searchFocused) {
+    const inp = el.querySelector('.vtt-tray-search-input');
+    if (inp) {
+      inp.focus();
+      if (caretPos != null) {
+        try { inp.setSelectionRange(caretPos, caretPos); } catch (_) {}
+      }
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6948,6 +7057,10 @@ function _initListeners() {
       if (ts > 0 && now - ts < 120_000) _presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?', lastSeen: ts };
     });
     _renderPresenceCol();
+    // Le tray range les joueurs par statut online → faut re-render quand la
+    // présence change, sinon la section "En ligne" reste vide à l'arrivée
+    // jusqu'au prochain clic.
+    if (STATE.isAdmin) _renderTraySoon();
 
     // Pings visuels (< 5 s)
     const pings = snap.docs

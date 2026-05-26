@@ -145,7 +145,8 @@
       "Bash(node --check assets/js/config/firebase.js)",
       "Bash(node --check assets/js/shared/realtime.js)",
       "Bash(node --check assets/js/core/adventure.js)",
-      "Bash(node --check assets/js/core/init.js)"
+      "Bash(node --check assets/js/core/init.js)",
+      "Bash(grep -n '_vttResolveArg\\\\|case '\\\\''$value'\\\\''\\\\|case \"$value\"' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/vtt.js)"
     ]
   }
 }
