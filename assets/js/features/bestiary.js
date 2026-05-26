@@ -935,7 +935,7 @@ async function renderBestiary() {
   // sont réutilisés : si l'admin switche de bestiaire/viewAs, watch() kill
   // l'ancien listener et crée le nouveau sur la bonne collection / doc.
   watch('bst-creatures', col, data => {
-    if (STATE.currentPage !== 'bestiary') return;
+    if (STATE.currentPage !== 'bestiaire') return;
     if (_bstShouldSkipLiveRender()) return;
     const all = data || [];
     _creatures = STATE.isAdmin ? all : all.filter(c => !c.hidden);
@@ -945,7 +945,7 @@ async function renderBestiary() {
 
   if (trackerUid) {
     watchDoc('bst-tracker', 'bestiary_tracker', trackerUid, doc => {
-      if (STATE.currentPage !== 'bestiary') return;
+      if (STATE.currentPage !== 'bestiaire') return;
       if (_bstShouldSkipLiveRender()) return;
       _tracker = doc?.data || {};
       _render();
