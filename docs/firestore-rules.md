@@ -194,7 +194,11 @@ service cloud.firestore {
                .affectedKeys().hasOnly(['hp', 'pvCombatHp']);
       }
 
-      // Chat & log de dés : tous les membres de l'aventure peuvent lire et écrire
+      // Chat & log de dés : tous les membres de l'aventure peuvent lire et écrire.
+      // À durcir : les messages `gmOnly == true` (jets cachés du MJ) ne sont
+      // filtrés que côté client — un joueur peut techniquement les lire en
+      // s'abonnant directement à la collection. Pour une vraie protection,
+      // restreindre la lecture des docs `gmOnly` à `isAdmin(adventureId)`.
       match /vttLog/{id} {
         allow read, write: if inAdventure(adventureId);
       }

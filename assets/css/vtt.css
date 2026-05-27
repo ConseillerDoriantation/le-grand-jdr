@@ -1054,6 +1054,21 @@
 .vtt-roll-mode-btn.active[data-mode="advantage"]    { background: rgba(34,195,142,.15); border-color: #22c38e; color: #22c38e; }
 .vtt-roll-mode-btn.active[data-mode="normal"]       { background: rgba(255,255,255,.08); border-color: var(--text-muted); color: var(--text); }
 .vtt-roll-mode-btn.active[data-mode="disadvantage"] { background: rgba(239,68,68,.15); border-color: #ef4444; color: #ef4444; }
+.vtt-roll-hide-btn {
+  flex: 1; min-width: 0;
+  background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.55); color: #22c38e;
+  letter-spacing: .02em;
+}
+.vtt-roll-hide-btn:hover { border-color: #22c38e; color: #22c38e; }
+.vtt-roll-hide-btn.active {
+  background: rgba(167,139,250,.28);
+  border-color: #a78bfa;
+  color: #fff;
+  text-shadow: 0 0 6px rgba(167,139,250,.7);
+  box-shadow: 0 0 0 1px #a78bfa inset, 0 0 8px rgba(167,139,250,.45);
+  text-transform: uppercase;
+}
+.vtt-roll-hide-btn.active:hover { border-color: #c4b5fd; color: #fff; }
 
 .vtt-roll-bonus-row {
   display: flex; align-items: center; gap: .3rem;
@@ -2612,6 +2627,7 @@
 .vtt-log-badge--ok      { color: #22c38e; background: rgba(34,195,142,.18); }
 .vtt-log-badge--fail    { color: #ef4444; background: rgba(239,68,68,.18); }
 .vtt-log-badge--pm      { color: #c4b5fd; background: rgba(180,127,255,.18); }
+.vtt-log-badge--hidden  { color: #c4b5fd; background: rgba(120,80,200,.22); }
 
 /* ── Body : ligne principale avec résultat ───────────────────────────── */
 .vtt-log-body {

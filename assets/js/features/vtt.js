@@ -219,6 +219,7 @@ let _musicSortables = [];   // instances Sortable actives
 let _previewEl     = null;  // aperçu local MJ (non diffusé)
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
+let _rollHidden = lsJson.get('vtt-roll-hidden', false); // MJ only — jet caché des joueurs
 const _renderedPings     = new Set();
 const _renderedReactions = new Set();
 
@@ -5967,6 +5968,15 @@ function _renderInspector(t) {
           <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="1">+</button>
           <button class="vtt-roll-bonus-reset" data-vtt-fn="_vttAdjBonus" data-vtt-args="0|true" title="Réinitialiser">↺</button>
         </div>
+        ${STATE.isAdmin ? `
+        <div class="vtt-roll-bonus-row">
+          <span class="vtt-roll-bonus-lbl">Visibilité</span>
+          <button class="vtt-roll-mode-btn vtt-roll-hide-btn${_rollHidden?' active':''}" id="vtt-roll-hide-btn"
+            data-vtt-fn="_vttToggleRollHidden"
+            title="Jet caché : seul le MJ voit le résultat dans le log">
+            ${_rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
+          </button>
+        </div>` : ''}
         <div class="vtt-ins-skills">${btns}</div>
       </div>`;
     })() : ''}
@@ -7250,6 +7260,17 @@ window._vttAdjBonus = (delta, reset = false) => {
   }
 };
 
+window._vttToggleRollHidden = () => {
+  if (!STATE.isAdmin) return;
+  _rollHidden = !_rollHidden;
+  lsJson.set('vtt-roll-hidden', _rollHidden);
+  const btn = document.getElementById('vtt-roll-hide-btn');
+  if (btn) {
+    btn.classList.toggle('active', _rollHidden);
+    btn.textContent = _rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs';
+  }
+};
+
 window._vttRollSkill = async (skillName, stat) => {
   const t = _tokens[_selected]?.data;
   if (!t) return;
@@ -7272,6 +7293,7 @@ window._vttRollSkill = async (skillName, stat) => {
   const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
   const characterName = c?.nom || n?.nom || t?.name || null;
   const characterImage = c?.photoURL || c?.photo || c?.avatar || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl || null;
+  const gmOnly = STATE.isAdmin && _rollHidden;
   try {
     await addDoc(_logCol(), {
       type: 'roll',
@@ -7284,8 +7306,10 @@ window._vttRollSkill = async (skillName, stat) => {
       rollSkill: skillName, rollStat: stat,
       rollEquipBonus: equipSkillBonus || 0,
       isCrit, isFumble,
+      gmOnly,
       createdAt: serverTimestamp(),
     });
+    if (gmOnly) showNotif('Jet caché — visible uniquement par le MJ', 'success');
   } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
 };
 
@@ -7620,6 +7644,7 @@ window._ouvrirGestionEmotes = async () => {
 function _renderChatLog(msgs) {
   const el = document.getElementById('vtt-chat-log'); if (!el) return;
   const myUid = STATE.user?.uid;
+  if (!STATE.isAdmin) msgs = msgs.filter(m => !m.gmOnly);
 
   // ═══════════════════════════════════════════════════════════════════
   // HELPERS — composants réutilisables pour tous les types de log
@@ -8005,6 +8030,7 @@ function _renderChatLog(msgs) {
     const bonusStr = m.rollBonus > 0 ? `+${m.rollBonus}` : m.rollBonus < 0 ? `${m.rollBonus}` : '';
     const equipStr = m.rollEquipBonus > 0 ? `+${m.rollEquipBonus}` : m.rollEquipBonus < 0 ? `${m.rollEquipBonus}` : '';
     const badges = [
+      m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet caché — invisible des joueurs">🕶 Caché</span>` : '',
       m.isCrit ? `<span class="vtt-log-badge vtt-log-badge--crit">✨ CRIT</span>` : '',
       m.isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
       _advBadge(m.rollMode === 'advantage' ? 'adv' : m.rollMode === 'disadvantage' ? 'dis' : null),
