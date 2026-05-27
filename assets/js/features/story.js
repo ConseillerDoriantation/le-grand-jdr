@@ -5,7 +5,7 @@
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
-import { openModal, closeModal, confirmModal } from '../shared/modal.js';
+import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { _esc, _nl2br } from '../shared/html.js';
@@ -33,6 +33,40 @@ let _axeMap      = {};
 let _modalGroupes   = [];   // groupes du modal ouvert (mission courante)
 let _modalStoryId   = '';   // id de la mission en édition ('' = nouvelle)
 let _editingGroupId = null; // id du groupe en cours de modification (null = création)
+
+// ── Préférences persistées (handoff STORY.md §11) ─────────────────────────────
+const STORY_PREFS_KEY = 'story-prefs-v2';
+const STORY_PREFS_DEFAULT = { view: 'carte', search: '', statut: '', zoom: 1, panX: 0, panY: 0 };
+function getStoryPrefs() {
+  try { return { ...STORY_PREFS_DEFAULT, ...(JSON.parse(localStorage.getItem(STORY_PREFS_KEY)) || {}) }; }
+  catch { return { ...STORY_PREFS_DEFAULT }; }
+}
+function setStoryPrefs(patch) {
+  try { localStorage.setItem(STORY_PREFS_KEY, JSON.stringify({ ...getStoryPrefs(), ...patch })); }
+  catch {}
+}
+
+// Avancement d'une mission : 100 si Terminée, 0 si Échouée, sinon moyenne des
+// réussites des groupes, sinon 50 si En cours, sinon 0.
+function itemProgress(item) {
+  if (item.statut === 'Terminée') return 100;
+  if (item.statut === 'Échouée')  return 0;
+  const groupes = item.groupes || [];
+  if (groupes.length) {
+    const vals = groupes.map(g => parseInt(g.reussite) || 0);
+    return Math.round(vals.reduce((a,b)=>a+b,0) / vals.length);
+  }
+  return item.statut === 'En cours' ? 50 : 0;
+}
+
+// Cache des items pour les handlers (tooltips, etc.)
+let _mapItemsCache = [];
+
+// Normalisation pour recherche : minuscules + sans accents
+// "Étoile" → "etoile", "Mystères" → "mysteres", "œuf" → "œuf" (non transformé mais OK)
+function _normalize(s) {
+  return (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
 function axeColor(axe){
   if(!axe) return '#555';
   if(!_axeMap[axe]){ _axeMap[axe] = AXE_COLORS[Object.keys(_axeMap).length % AXE_COLORS.length]; }
@@ -120,18 +154,198 @@ function _renderGroupPills(groups) {
 }
 function _refreshStGroupsRow(groups) {
   const row = document.getElementById('st-groups-row');
-  if (!row) return;
-  row.innerHTML = _renderGroupPills(groups) + `
-    <button type="button" onclick="window._stSaveGroupDialog()"
-      style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
-        background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;
-        align-self:flex-start;margin-top:.1rem;transition:all .15s"
-      onmouseover="this.style.opacity='1';this.style.background='rgba(232,184,75,.06)'"
-      onmouseout="this.style.opacity='.8';this.style.background='transparent'">
-      + Nouveau groupe</button>`;
+  if (row) {
+    row.innerHTML = _renderGroupPills(groups) + `
+      <button type="button" onclick="window._stSaveGroupDialog()"
+        style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
+          background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;
+          align-self:flex-start;margin-top:.1rem;transition:all .15s"
+        onmouseover="this.style.opacity='1';this.style.background='rgba(232,184,75,.06)'"
+        onmouseout="this.style.opacity='.8';this.style.background='transparent'">
+        + Nouveau groupe</button>`;
+  }
+  // Nouvelle vue par cards (modal v2)
+  const list = document.getElementById('st-groups-list');
+  if (list) list.innerHTML = _renderGroupCards(groups);
 }
 
-// ── RENDU PRINCIPAL ───────────────────────────────────────────────────────────
+// Expose closeModalDirect aux onclick inline du footer
+if (typeof window !== 'undefined' && !window.closeModalDirect) {
+  window.closeModalDirect = closeModalDirect;
+}
+
+// ── Bindings de la nouvelle modale mission : tabs, segments, live preview ────
+function _initMissionModalUI(item) {
+  const shell = document.querySelector('.mn-shell');
+  if (!shell) return;
+
+  // Tabs
+  shell.querySelectorAll('.mn-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      shell.querySelectorAll('.mn-tab').forEach(t => t.classList.toggle('is-active', t === btn));
+      shell.querySelectorAll('.mn-panel').forEach(p =>
+        p.classList.toggle('is-active', p.dataset.panel === tab));
+    });
+  });
+
+  // Type segmented control → met à jour input caché + preview hero
+  const typeSeg = shell.querySelector('#mn-type-seg');
+  const typeInp = shell.querySelector('#st-type');
+  const typeLbl = shell.querySelector('#mn-type-preview');
+  typeSeg?.querySelectorAll('.mn-seg').forEach(b => {
+    b.addEventListener('click', () => {
+      const v = b.dataset.type;
+      typeSeg.querySelectorAll('.mn-seg').forEach(x => x.classList.toggle('is-active', x === b));
+      if (typeInp) typeInp.value = v;
+      if (typeLbl) typeLbl.textContent = v === 'event' ? 'Événement' : 'Mission';
+    });
+  });
+
+  // Statut pills cliquables → met à jour input caché + preview hero
+  const statutPills = shell.querySelector('#mn-statut-pills');
+  const statutInp = shell.querySelector('#st-statut');
+  const statutPreview = shell.querySelector('#mn-statut-preview');
+  statutPills?.querySelectorAll('.mn-statut-pill').forEach(p => {
+    p.addEventListener('click', () => {
+      const v = p.dataset.statut;
+      statutPills.querySelectorAll('.mn-statut-pill').forEach(x => x.classList.toggle('is-active', x === p));
+      if (statutInp) statutInp.value = v;
+      if (statutPreview) {
+        const cfg = stCfg({ statut: v });
+        statutPreview.style.color = cfg.color;
+        statutPreview.style.borderColor = cfg.border;
+        statutPreview.innerHTML = `${cfg.icon} <span>${_esc(v)}</span>`;
+      }
+    });
+  });
+
+  // Live preview : titre, acte, axe
+  const acteInp = shell.querySelector('#st-acte');
+  const actePreview = shell.querySelector('#mn-acte-preview');
+  acteInp?.addEventListener('input', () => {
+    if (actePreview) actePreview.textContent = acteInp.value || 'Acte I';
+  });
+
+  const axeInp = shell.querySelector('#st-axe');
+  const axePreview = shell.querySelector('#mn-axe-preview');
+  axeInp?.addEventListener('input', () => {
+    if (axePreview) {
+      const v = axeInp.value.trim();
+      if (v) {
+        axePreview.style.color = _axeMap[v] || 'var(--text-muted)';
+        axePreview.textContent = `● ${v}`;
+      } else {
+        axePreview.textContent = '';
+      }
+    }
+  });
+
+  // Filtre live du picker de groupe
+  const pickerSearch = shell.querySelector('#mn-picker-search');
+  pickerSearch?.addEventListener('input', () => {
+    const q = _normalize(pickerSearch.value);
+    shell.querySelectorAll('.st-group-pick').forEach(el => {
+      const name = _normalize(el.dataset.charName || '');
+      el.style.display = !q || name.includes(q) ? '' : 'none';
+    });
+  });
+
+  // Filtre live des liens
+  const liensSearch = shell.querySelector('#mn-liens-search');
+  liensSearch?.addEventListener('input', () => {
+    const q = _normalize(liensSearch.value);
+    shell.querySelectorAll('[id^="lien-card-"]').forEach(el => {
+      const text = _normalize(el.textContent || '');
+      el.style.display = !q || text.includes(q) ? '' : 'none';
+    });
+  });
+
+  // Raccourcis clavier : Ctrl+S = sauver, Escape = fermer (Escape déjà géré globalement)
+  if (!shell._kbBound) {
+    shell._kbBound = true;
+    const id = item?.id || '';
+    const onKey = (e) => {
+      if (!document.querySelector('.mn-shell')) {
+        document.removeEventListener('keydown', onKey);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        const btn = document.getElementById('mn-save-btn');
+        btn?.click();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+  }
+}
+
+// Cards de groupes pour la modale v2 — chaque card affiche : nom, membres,
+// réussite/récompense/notes (édition inline), boutons éditer/supprimer.
+function _renderGroupCards(groups) {
+  if (!groups.length) {
+    return `<div class="st-groups-empty">
+      Aucun groupe. Crée-en un pour rattacher des personnages.
+    </div>`;
+  }
+  const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const chars = STATE.characters || [];
+  return groups.map(g => {
+    const membres = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
+    const reussite = g.reussite != null ? g.reussite : '';
+    const recompense = g.recompense || '';
+    const notes = g.notesReussite || '';
+    const reusVal = parseInt(g.reussite) || 0;
+    const reusColor = reusVal>=80 ? '#22c38e' : reusVal>=40 ? '#e8b84b' : reusVal>0 ? '#ff8a4c' : 'var(--text-dim)';
+    return `<div class="st-group-card">
+      <div class="st-group-card-head">
+        <div class="st-group-card-title">${_esc(g.nom)}</div>
+        <div class="st-group-card-actions">
+          <button type="button" class="st-icon-btn" title="Modifier" onclick="window._stEditGroup('${g.id}')">✎</button>
+          <button type="button" class="st-icon-btn st-icon-btn--danger" title="Supprimer" onclick="window._stDeleteGroup('${g.id}')">🗑️</button>
+        </div>
+      </div>
+      <div class="st-group-card-members">
+        ${membres.length ? membres.map(c => {
+          const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
+          const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+          return `<div class="st-group-member" title="${_esc(c.nom||'')}" style="--col:${col}">
+            ${c.photo
+              ? `<img src="${_esc(c.photo)}" style="object-position:${pp}">`
+              : `<span>${(c.nom||'?')[0].toUpperCase()}</span>`}
+            <span class="st-group-member-name">${_esc(c.nom||'')}</span>
+          </div>`;
+        }).join('') : '<span class="st-group-empty-members">Aucun membre — édite le groupe pour en ajouter.</span>'}
+      </div>
+      <div class="st-group-card-fields">
+        <label class="st-group-field">
+          <span class="st-group-field-lbl">Réussite</span>
+          <div class="st-group-field-row">
+            <input type="number" min="0" max="100" value="${reussite}" placeholder="0"
+              style="border-color:${reusColor};color:${reusColor}"
+              oninput="window._stGroupField('${g.id}','reussite',+this.value||0)">
+            <span class="st-group-field-suffix" style="color:${reusColor}">%</span>
+          </div>
+        </label>
+        <label class="st-group-field st-group-field--wide">
+          <span class="st-group-field-lbl">🏆 Récompense</span>
+          <input type="text" value="${_esc(recompense)}" placeholder="XP, butin, faveur…"
+            oninput="window._stGroupField('${g.id}','recompense',this.value)">
+        </label>
+        <label class="st-group-field st-group-field--full">
+          <span class="st-group-field-lbl">📝 Notes de réussite</span>
+          <textarea rows="2" placeholder="Ce qui s'est passé, conséquences…"
+            oninput="window._stGroupField('${g.id}','notesReussite',this.value)">${_esc(notes)}</textarea>
+        </label>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RENDU PRINCIPAL — orchestrateur conforme handoff STORY.md
+// Bannière cinéma · Cockpit (anneau + minis + prochaine) · Acts · Controls · View
+// ══════════════════════════════════════════════════════════════════════════════
 async function renderStory() {
   const content = document.getElementById('main-content');
   _axeMap = {};
@@ -141,7 +355,8 @@ async function renderStory() {
     loadActes(),
   ]);
 
-  // Fusionner actes Firestore + actes déduits des items
+  const prefs = getStoryPrefs();
+
   const fromItems = [...new Set(items.map(i => i.acte).filter(Boolean))];
   const allActes  = [...new Set([...savedActes, ...fromItems])].sort();
   if (!allActes.length) allActes.push('Acte I');
@@ -151,87 +366,718 @@ async function renderStory() {
     : allActes[0];
   window._storyActe = activeActe;
 
+  // Items de l'acte courant, visibles selon rôle
   const acteItems = items
     .filter(i => (i.acte || 'Acte I') === activeActe)
-    .filter(i => STATE.isAdmin || i.visibleJoueurs !== false)
-    .sort((a,b) => (a.ordre||0)-(b.ordre||0) || (a.date||'').localeCompare(b.date||''));
+    .filter(i => STATE.isAdmin || i.visibleJoueurs !== false);
 
-  acteItems.forEach(i => { if(i.axe) axeColor(i.axe); });
+  // Filtres recherche (insensible aux accents) + statut
+  const qNorm = _normalize((prefs.search || '').trim());
+  const filteredItems = acteItems.filter(i => {
+    if (prefs.statut && (i.statut || 'En attente') !== prefs.statut) return false;
+    if (!qNorm) return true;
+    const hay = _normalize([i.titre, i.axe, i.lieu, i.description, i.date].join(' '));
+    return hay.includes(qNorm);
+  }).sort((a,b) => (a.ordre||0)-(b.ordre||0) || (a.date||'').localeCompare(b.date||''));
+
+  // Palette d'axes : à partir de TOUS les items de l'acte (pas seulement filtrés)
+  acteItems.forEach(i => { if (i.axe) axeColor(i.axe); });
   const axes = Object.keys(_axeMap);
 
+  // Statistiques de cockpit
+  const counts = { total: acteItems.length, term: 0, cours: 0, attente: 0, echec: 0 };
+  acteItems.forEach(i => {
+    const s = i.statut || 'En attente';
+    if (s === 'Terminée') counts.term++;
+    else if (s === 'En cours') counts.cours++;
+    else if (s === 'Échouée') counts.echec++;
+    else counts.attente++;
+  });
+  const progPct = counts.total ? Math.round((counts.term / counts.total) * 100) : 0;
+
+  // Mission hero pour la bannière : En cours avec image, sinon dernière Terminée
+  // avec image, sinon première avec image.
+  const heroMission = acteItems.find(i => i.statut === 'En cours' && i.imageUrl)
+    || [...acteItems].reverse().find(i => i.statut === 'Terminée' && i.imageUrl)
+    || acteItems.find(i => i.imageUrl)
+    || acteItems[0] || null;
+
+  // Prochaine étape (mission En cours sinon première En attente)
+  const nextMission = acteItems.find(i => i.statut === 'En cours')
+    || acteItems.find(i => i.statut === 'En attente')
+    || null;
+
+  // Stroke-dasharray pour l'anneau de progression (r=26 → C=2πr≈163.36)
+  const ringC = 2 * Math.PI * 26;
+  const ringFill = (progPct / 100) * ringC;
+
   content.innerHTML = `
-  <style>
-    .sn{cursor:pointer;transition:transform .15s;}
-    .sn:hover{transform:translateY(-3px);z-index:10;}
-    .sn:hover .sn-inner{box-shadow:0 8px 28px rgba(0,0,0,.45);}
-    .sn-inner{transition:box-shadow .15s;}
-    .stl-wrap{overflow-x:auto;overflow-y:visible;padding-bottom:1.5rem;}
-    .stl-wrap::-webkit-scrollbar{height:4px;}
-    .stl-wrap::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:2px;}
-  </style>
+  <div class="trame-shell">
 
-  <div style="background:linear-gradient(135deg,rgba(79,140,255,.05),rgba(232,184,75,.04));
-    border:1px solid var(--border);border-radius:var(--radius-lg);
-    padding:1.4rem 1.8rem;margin-bottom:1.4rem;
-    display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-    <div>
-      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:.3rem">Chroniques de la Compagnie</div>
-      <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;color:var(--gold);letter-spacing:2px;line-height:1;margin:0">La Trame</h1>
+    ${_renderBanner(heroMission, activeActe)}
+
+    <!-- ── COCKPIT ──────────────────────────────────────────── -->
+    <div class="cockpit">
+      <div class="cockpit-progress">
+        <div class="progress-ring" title="${counts.term}/${counts.total} terminées">
+          <svg viewBox="0 0 60 60">
+            <defs>
+              <linearGradient id="trame-ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="var(--amber)"/>
+                <stop offset="100%" stop-color="var(--ember)"/>
+              </linearGradient>
+            </defs>
+            <circle class="progress-ring-bg" cx="30" cy="30" r="26"/>
+            <circle class="progress-ring-fill" cx="30" cy="30" r="26"
+              stroke-dasharray="${ringFill.toFixed(2)} ${ringC.toFixed(2)}"
+              stroke-dashoffset="0"/>
+          </svg>
+          <div class="progress-ring-val">${progPct}%</div>
+        </div>
+        <div class="cockpit-counts">
+          <div class="cockpit-counts-num">${counts.term}<small>/</small><span style="color:var(--text-muted)">${counts.total}</span></div>
+          <div class="cockpit-counts-lbl">Missions accomplies</div>
+        </div>
+      </div>
+
+      <div class="cockpit-divider"></div>
+
+      <div class="cockpit-minis">
+        <div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-cours);color:var(--st-cours)"></span><span class="cockpit-mini-num" style="color:var(--st-cours)">${counts.cours}</span><span class="cockpit-mini-lbl">En cours</span></div>
+        <div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-attente);color:var(--st-attente)"></span><span class="cockpit-mini-num" style="color:var(--text)">${counts.attente}</span><span class="cockpit-mini-lbl">À venir</span></div>
+        <div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-terminee);color:var(--st-terminee)"></span><span class="cockpit-mini-num" style="color:var(--st-terminee)">${counts.term}</span><span class="cockpit-mini-lbl">Réussies</span></div>
+        ${counts.echec ? `<div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-echec);color:var(--st-echec)"></span><span class="cockpit-mini-num" style="color:var(--st-echec)">${counts.echec}</span><span class="cockpit-mini-lbl">Échouées</span></div>` : ''}
+      </div>
+
+      ${nextMission ? `
+      <div class="cockpit-next" onclick="openStoryDetail('${nextMission.id}')">
+        <div class="cockpit-next-icon">⇒</div>
+        <div>
+          <div class="cockpit-next-lbl">Prochaine étape</div>
+          <div class="cockpit-next-title">${_esc(nextMission.titre || 'Sans titre')}</div>
+          ${nextMission.axe ? `<div class="cockpit-next-axe" style="color:${_axeMap[nextMission.axe] || 'var(--text-muted)'}">● ${_esc(nextMission.axe)}</div>` : ''}
+        </div>
+      </div>` : ''}
     </div>
-    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
-      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openStoryModal()">+ Ajouter</button>` : ''}
-      <div style="display:flex;gap:.5rem;font-size:.72rem;color:var(--text-dim);flex-wrap:wrap">
-        ${Object.entries(STATUT_CFG).map(([s,c]) =>
-          `<span style="display:flex;align-items:center;gap:4px">
-            <span style="width:7px;height:7px;border-radius:50%;background:${c.color};display:inline-block"></span>${s}
-          </span>`).join('')}
+
+    <!-- ── ACTS BAR ─────────────────────────────────────────── -->
+    <div class="acts-bar">
+      <div class="acts">
+        ${allActes.map(acte => {
+          const active = acte === activeActe;
+          const n = items.filter(i => (i.acte || 'Acte I') === acte).length;
+          return `<button class="act ${active ? 'active' : ''}"
+            onclick="window._storyActe='${_esc(acte)}';navigate('story')">
+            ${_esc(acte)}<span class="act-count">${n}</span>
+          </button>`;
+        }).join('')}
+        ${STATE.isAdmin ? `<button class="act-new" onclick="openNewActeModal()">+ Nouvel acte</button>` : ''}
+      </div>
+      ${STATE.isAdmin ? `<button class="btn-add" onclick="openStoryModal()">+ Nouvelle mission</button>` : ''}
+    </div>
+
+    <!-- ── CONTROLS (recherche + statut + view toggle) ─────── -->
+    <div class="controls">
+      <div class="search-wrap">
+        <span style="color:var(--text-dim);font-size:.85rem">🔍</span>
+        <input type="text" id="st-search" placeholder="Rechercher un titre, un axe, un lieu… (sans accents OK)"
+          value="${_esc(prefs.search)}" oninput="window._stOnSearch(this)">
+        ${prefs.search ? `<button onclick="window._stSetFilter('search','')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:.75rem">✕</button>` : ''}
+      </div>
+      <select class="statut-select" onchange="window._stSetFilter('statut', this.value)">
+        <option value="">Tous les statuts</option>
+        ${Object.keys(STATUT_CFG).map(s => `<option value="${s}" ${prefs.statut===s?'selected':''}>${STATUT_CFG[s].icon} ${s}</option>`).join('')}
+      </select>
+      <div class="view-toggle" role="tablist">
+        <button class="view-tab ${prefs.view==='carte'?'active':''}" onclick="window._stSetView('carte')">🗺️ Carte</button>
+        <button class="view-tab ${prefs.view==='saga'?'active':''}" onclick="window._stSetView('saga')">📚 Saga</button>
+        <button class="view-tab ${prefs.view==='chronique'?'active':''}" onclick="window._stSetView('chronique')">📖 Chronique</button>
+        <button class="view-tab ${prefs.view==='list'?'active':''}" onclick="window._stSetView('list')">📋 Liste</button>
       </div>
     </div>
+
+    <!-- ── CONTENU ──────────────────────────────────────────── -->
+    <div class="content-scroll">
+      ${filteredItems.length === 0 ? `
+        <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
+          <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
+          <p style="font-style:italic">${q || prefs.statut ? 'Aucune mission ne correspond aux filtres.' : `Aucune mission pour ${_esc(activeActe)}.`}</p>
+          ${q || prefs.statut
+            ? `<button class="btn btn-outline btn-sm" onclick="window._stResetFilters()">↺ Réinitialiser</button>`
+            : (STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="openStoryModal()">+ Ajouter la première</button>` : '')}
+        </div>` :
+        prefs.view === 'carte'     ? _renderMapView(filteredItems) :
+        prefs.view === 'saga'      ? _renderSagaView(filteredItems) :
+        prefs.view === 'chronique' ? _renderChroniqueView(filteredItems) :
+        prefs.view === 'list'      ? _renderListView(filteredItems) :
+        _renderMapView(filteredItems)
+      }
+    </div>
   </div>
-
-  <div style="display:flex;gap:.5rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center">
-    ${allActes.map(acte => {
-      const active = acte === activeActe;
-      const n = items.filter(i => (i.acte||'Acte I') === acte).length;
-      return `<button onclick="window._storyActe='${acte}';navigate('story')" style="
-        display:flex;align-items:center;gap:.5rem;padding:.55rem 1.2rem;
-        border-radius:999px;cursor:pointer;font-family:'Cinzel',serif;font-size:.82rem;
-        border:1px solid ${active?'var(--gold)':'var(--border)'};
-        background:${active?'rgba(232,184,75,.1)':'transparent'};
-        color:${active?'var(--gold)':'var(--text-muted)'};transition:all .15s;">
-        ${acte}
-        <span style="font-size:.68rem;border-radius:999px;padding:1px 6px;
-          background:${active?'var(--gold)':'var(--bg-elevated)'};
-          color:${active?'#0b1118':'var(--text-dim)'};">${n}</span>
-      </button>`;
-    }).join('')}
-    ${STATE.isAdmin ? `
-    <button onclick="openNewActeModal()" style="padding:.5rem .9rem;border-radius:999px;cursor:pointer;
-      border:1px dashed var(--border);background:transparent;color:var(--text-dim);font-size:.8rem">+ Acte</button>` : ''}
-  </div>
-
-  ${axes.length ? `
-  <div style="display:flex;gap:.5rem;margin-bottom:1.2rem;flex-wrap:wrap;align-items:center">
-    <span style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase">Axes :</span>
-    ${axes.map(a => `
-      <span style="display:flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text-muted);
-        background:var(--bg-elevated);border:1px solid var(--border);border-radius:999px;padding:3px 10px">
-        <span style="width:10px;height:3px;border-radius:1px;background:${_axeMap[a]};display:inline-block"></span>${a}
-      </span>`).join('')}
-  </div>` : ''}
-
-  ${acteItems.length === 0 ? `
-    <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
-      <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
-      <p style="font-style:italic">Aucune mission pour ${activeActe}.</p>
-      ${STATE.isAdmin?`<button class="btn btn-outline btn-sm" style="margin-top:1rem" onclick="openStoryModal()">+ Ajouter la première</button>`:''}
-    </div>` : `
-    <div class="stl-wrap">
-      <div id="story-tl" style="position:relative;min-width:max-content;padding:1rem 1.5rem 2.5rem">
-        ${_renderTimeline(acteItems)}
-      </div>
-    </div>`}
   `;
+
+  if (prefs.view === 'carte') requestAnimationFrame(() => _initMapInteractions());
+}
+
+// Handlers de prefs exposés à window pour les inputs inline
+window._stSetFilter = (key, val) => { setStoryPrefs({ [key]: val }); PAGES.story?.(); };
+window._stSetView   = (view)     => { setStoryPrefs({ view });        PAGES.story?.(); };
+window._stResetFilters = () => { setStoryPrefs({ search:'', statut:'' }); PAGES.story?.(); };
+
+// Recherche : préserve le focus et la position du curseur après le re-render
+// complet de la page (sinon l'input perd le focus à chaque caractère tapé)
+window._stOnSearch = (el) => {
+  const caret = el.selectionStart;
+  setStoryPrefs({ search: el.value });
+  PAGES.story?.().then(() => {
+    const next = document.getElementById('st-search');
+    if (next) {
+      next.focus();
+      try { next.setSelectionRange(caret, caret); } catch {}
+    }
+  });
+};
+
+// ── Bannière cinématique ──────────────────────────────────────────────────────
+function _renderBanner(hero, activeActe) {
+  if (!hero) {
+    return `<div class="trame-banner trame-banner--empty">
+      <div class="trame-banner-content">
+        <div class="trame-banner-eyebrow">Chroniques de la Compagnie</div>
+        <h1 class="trame-banner-title">La Trame</h1>
+      </div>
+    </div>`;
+  }
+  const st = stCfg(hero);
+  const eyebrow = hero.statut === 'En cours' ? `${activeActe} · Mission en cours`
+    : hero.statut === 'Terminée' ? `${activeActe} · Dernière victoire`
+    : `${activeActe} · ${hero.statut || ''}`;
+  const bgUrl = (hero.imageUrl || '').replace(/"/g, '%22');
+  return `<div class="trame-banner" onclick="openStoryDetail('${hero.id}')">
+    ${hero.imageUrl ? `<div class="trame-banner-bg" style='background-image:url("${bgUrl}")'></div>` : ''}
+    <div class="trame-banner-fade"></div>
+    <div class="trame-banner-content">
+      <div class="trame-banner-eyebrow">${_esc(eyebrow)}</div>
+      <h1 class="trame-banner-title">${_esc(hero.titre || 'Sans titre')}</h1>
+      ${hero.lieu || hero.date ? `<div class="trame-banner-meta">
+        ${hero.date ? `<span>📅 ${_esc(hero.date)}</span>` : ''}
+        ${hero.lieu ? `<span>📍 ${_esc(hero.lieu)}</span>` : ''}
+        <span style="color:${st.color}">${st.icon} ${_esc(hero.statut || 'En attente')}</span>
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VUE CARTE — Lignes narratives (style métro) — handoff STORY.md §6 ⭐
+// • 1 axe = 1 couloir horizontal avec carte d'en-tête à gauche
+// • Stations = missions ordonnées par `ordre`, positions déterministes
+// • Liens INTRA-axe représentés par la ligne de métro elle-même
+// • Liens INTER-axes = S-curves verticales pointillées dorées
+// • Grille verticale dashée subtile = repère temporel commun
+// • Zoom molette + pan, pas de drag des nœuds
+// ══════════════════════════════════════════════════════════════════════════════
+const MAP_HEADER_W = 240;
+const MAP_COL_W    = 220;
+const MAP_LANE_H   = 200;
+const MAP_TOP_PAD  = 70;
+const MAP_BOT_PAD  = 40;
+const MAP_NODE_R   = 38;
+
+function _renderMapView(missions) {
+  _mapItemsCache = missions;
+
+  // ── 1. Grouper par axe ─────────────────────────────────────────────────
+  const byAxe = new Map();
+  missions.forEach(m => {
+    const k = m.axe || '__none__';
+    if (!byAxe.has(k)) byAxe.set(k, []);
+    byAxe.get(k).push(m);
+  });
+  byAxe.forEach(list => list.sort((a,b) =>
+    (a.ordre||0) - (b.ordre||0) || (a.date||'').localeCompare(b.date||'')));
+
+  // ── 2. ALIGNEMENT TEMPOREL GLOBAL ──────────────────────────────────────
+  // Toutes les missions partagent une grille d'ordres communs. Deux missions
+  // de même `ordre` (peu importe leur axe) tombent dans la MÊME colonne X.
+  // → permet de voir "ce qui se passe en même temps" entre axes parallèles.
+  const allOrdres = [...new Set(missions.map(m => m.ordre || 0))].sort((a,b) => a - b);
+  if (!allOrdres.length) allOrdres.push(0);
+  const ordreToCol = new Map(allOrdres.map((o, i) => [o, i]));
+
+  // ── 3. Sub-rows : si 2+ missions du même axe ont le même ordre, on les
+  //    empile verticalement dans la lane (split de ligne).
+  const lanes = [...byAxe.entries()].map(([axe, list], laneIdx) => {
+    // Grouper par colonne (= par valeur d'ordre)
+    const byCol = new Map();
+    list.forEach(m => {
+      const col = ordreToCol.get(m.ordre || 0) ?? 0;
+      if (!byCol.has(col)) byCol.set(col, []);
+      byCol.get(col).push(m);
+    });
+    const maxSubs = Math.max(1, ...[...byCol.values()].map(a => a.length));
+    return {
+      axe, list, byCol, maxSubs,
+      color: axe === '__none__' ? '#7a8fa8' : (_axeMap[axe] || '#7a8fa8'),
+      label: axe === '__none__' ? 'Hors axe' : axe,
+      term: list.filter(m => m.statut === 'Terminée').length,
+    };
+  });
+
+  // ── 4. Hauteur dynamique par lane (selon sub-rows max) ─────────────────
+  const SUB_GAP = 22;
+  const SUB_BLOCK_H = MAP_NODE_R * 2 + 60;  // place pour titre + date sous le nœud
+  const laneY = []; let curY = MAP_TOP_PAD;
+  lanes.forEach(l => {
+    const h = Math.max(MAP_LANE_H, l.maxSubs * SUB_BLOCK_H + (l.maxSubs - 1) * SUB_GAP + 60);
+    l.height = h;
+    l.y = curY + h / 2;
+    laneY.push(l.y);
+    curY += h;
+  });
+  const maxCols = allOrdres.length;
+  const MAP_W = MAP_HEADER_W + maxCols * MAP_COL_W + 40;
+  const MAP_H = curY + MAP_BOT_PAD;
+
+  // ── 5. Positions de chaque station ─────────────────────────────────────
+  const positions = {};
+  lanes.forEach(l => {
+    l.byCol.forEach((subs, col) => {
+      const N = subs.length;
+      subs.forEach((m, subRow) => {
+        const x = MAP_HEADER_W + col * MAP_COL_W + MAP_COL_W/2;
+        // Centré sur la lane si N=1 ; sinon empilé symétriquement autour du centre
+        const yOff = N === 1
+          ? 0
+          : (subRow - (N - 1) / 2) * (SUB_BLOCK_H + SUB_GAP) * 0.7;
+        positions[m.id] = { x, y: l.y + yOff };
+      });
+    });
+  });
+
+  // ── DEFS : clipPaths + dégradés de lane + marker ──
+  const clipDefs = missions.filter(m => positions[m.id]).map(m => `
+    <clipPath id="st-clip-${_esc(m.id)}">
+      <circle cx="${positions[m.id].x}" cy="${positions[m.id].y}" r="${MAP_NODE_R}"/>
+    </clipPath>`).join('');
+  const laneGrads = lanes.map((l, i) => `
+    <linearGradient id="lane-grad-${i}" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="${l.color}" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="${l.color}" stop-opacity="0.02"/>
+    </linearGradient>`).join('');
+  const defs = `<defs>
+    <marker id="trame-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="rgba(244,196,48,0.75)"/>
+    </marker>
+    ${clipDefs}${laneGrads}
+  </defs>`;
+
+  // ── GRILLE CHRONOLOGIQUE (lignes verticales très subtiles) ──
+  const gridLines = Array.from({ length: maxCols }, (_, i) => {
+    const x = MAP_HEADER_W + i * MAP_COL_W + MAP_COL_W/2;
+    return `<line x1="${x}" y1="${MAP_TOP_PAD - 10}" x2="${x}" y2="${MAP_H - 20}"
+      stroke="rgba(255,255,255,0.025)" stroke-width="1" stroke-dasharray="2 6"/>`;
+  }).join('');
+
+  // ── COULOIRS (bande + en-tête + ligne de métro + CH.NN) ──
+  const lanesSvg = lanes.map((l, idx) => {
+    const headerLabel = l.label.length > 22 ? l.label.slice(0, 21) + '…' : l.label;
+    const pct = l.list.length ? Math.round(l.term / l.list.length * 100) : 0;
+    const fillW = 130 * (l.list.length ? l.term / l.list.length : 0);
+    // Endpoints de la ligne de métro = première et dernière colonne occupée par cet axe
+    const occupiedCols = [...l.byCol.keys()];
+    const firstCol = occupiedCols.length ? Math.min(...occupiedCols) : 0;
+    const lastCol  = occupiedCols.length ? Math.max(...occupiedCols) : 0;
+    const firstX = MAP_HEADER_W + firstCol * MAP_COL_W + MAP_COL_W/2;
+    const lastX  = MAP_HEADER_W + lastCol  * MAP_COL_W + MAP_COL_W/2;
+    const laneTop = l.y - l.height/2;
+    const headerY = laneTop + 24;
+    const headerH = l.height - 48;
+    const headerLabelY = l.y - 18;
+    return `<g>
+      <!-- Bande de fond colorée -->
+      <rect x="${MAP_HEADER_W - 8}" y="${laneTop + 18}"
+        width="${MAP_W - MAP_HEADER_W}" height="${l.height - 36}"
+        fill="url(#lane-grad-${idx})" rx="20"/>
+      <!-- Carte d'en-tête à gauche -->
+      <rect x="16" y="${headerY}"
+        width="${MAP_HEADER_W - 38}" height="${headerH}"
+        fill="var(--bg-card)" stroke="${l.color}" stroke-opacity="0.4" stroke-width="1.5" rx="14"/>
+      <rect x="16" y="${headerY}" width="4" height="${headerH}" fill="${l.color}" rx="2"/>
+      <text x="32" y="${headerLabelY}" fill="${l.color}"
+        font-family="Cinzel, serif" font-size="16" font-weight="700">${_esc(headerLabel)}</text>
+      <text x="32" y="${l.y + 2}" fill="var(--text-dim)" font-size="10" letter-spacing="0.14em"
+        font-family="JetBrains Mono, monospace">
+        ${l.list.length} CHAPITRE${l.list.length > 1 ? 'S' : ''}
+      </text>
+      <rect x="32" y="${l.y + 16}" width="130" height="5" fill="rgba(255,255,255,0.08)" rx="2.5"/>
+      <rect x="32" y="${l.y + 16}" width="${fillW.toFixed(1)}" height="5" fill="${l.color}" rx="2.5"/>
+      <text x="170" y="${l.y + 21}" fill="${l.color}" font-size="11" font-weight="700"
+        font-family="JetBrains Mono, monospace">${pct}%</text>
+      <!-- Ligne de métro (glow + solide) — uniquement entre première et dernière colonne -->
+      ${l.list.length > 0 && firstCol !== lastCol ? `
+        <line x1="${firstX}" y1="${l.y}" x2="${lastX}" y2="${l.y}"
+          stroke="${l.color}" stroke-width="14" opacity="0.10" stroke-linecap="round"/>
+        <line x1="${firstX}" y1="${l.y}" x2="${lastX}" y2="${l.y}"
+          stroke="${l.color}" stroke-width="5" opacity="0.55" stroke-linecap="round"/>
+      ` : ''}
+      <!-- Pour les sub-rows : connecteur vertical entre la ligne de métro et chaque sous-station -->
+      ${[...l.byCol.entries()].map(([col, subs]) => {
+        if (subs.length <= 1) return '';
+        const x = MAP_HEADER_W + col * MAP_COL_W + MAP_COL_W/2;
+        const ys = subs.map(m => positions[m.id]?.y).filter(Number.isFinite);
+        if (!ys.length) return '';
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        return `<line x1="${x}" y1="${minY}" x2="${x}" y2="${maxY}"
+          stroke="${l.color}" stroke-width="3" opacity="0.32" stroke-linecap="round"/>`;
+      }).join('')}
+      <!-- Numéros de chapitre au-dessus de chaque station, basés sur l'ordre GLOBAL -->
+      ${l.list.map(m => {
+        const p = positions[m.id]; if (!p) return '';
+        const colIdx = ordreToCol.get(m.ordre || 0) ?? 0;
+        return `<text x="${p.x}" y="${p.y - MAP_NODE_R - 22}"
+          text-anchor="middle" fill="var(--text-dim)" font-size="9"
+          letter-spacing="0.18em" font-weight="700"
+          font-family="JetBrains Mono, monospace">CH.${String(colIdx + 1).padStart(2,'0')}</text>`;
+      }).join('')}
+    </g>`;
+  }).join('');
+
+  // ── LIENS INTER-AXES uniquement (S-curves verticales pointillées) ──
+  const itemMap = new Map(missions.map(m => [m.id, m]));
+  const crossLiens = [];
+  missions.forEach(m => (m.liens || []).forEach(tid => {
+    const fp = positions[m.id], tp = positions[tid];
+    if (!fp || !tp || !itemMap.has(tid)) return;
+    if (Math.abs(fp.y - tp.y) > 5) crossLiens.push({ fp, tp });
+  }));
+  const liensSvg = crossLiens.map(({ fp, tp }) => {
+    const midY = (fp.y + tp.y) / 2;
+    const d = `M${fp.x} ${fp.y} C${fp.x} ${midY} ${tp.x} ${midY} ${tp.x} ${tp.y}`;
+    return `<g>
+      <path d="${d}" stroke="rgba(244,196,48,0.10)" stroke-width="8" fill="none" stroke-linecap="round"/>
+      <path d="${d}" stroke="rgba(244,196,48,0.65)" stroke-width="2.2" stroke-dasharray="7 5"
+        fill="none" marker-end="url(#trame-arrow)" class="map-edge"/>
+    </g>`;
+  }).join('');
+
+  // ── STATIONS (nœuds illustrés) ──
+  const nodesSvg = missions.map(m => {
+    const p = positions[m.id]; if (!p) return '';
+    const st = stCfg(m);
+    const axeCol = m.axe ? (_axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
+    const prog = itemProgress(m);
+    const init = (m.titre || '?')[0]?.toUpperCase() || '?';
+    const progR = MAP_NODE_R + 6;
+    const progAng = (Math.max(0, Math.min(100, prog)) / 100) * 360;
+    const endX = p.x + progR * Math.sin(progAng * Math.PI / 180);
+    const endY = p.y - progR * Math.cos(progAng * Math.PI / 180);
+    const largeArc = progAng > 180 ? 1 : 0;
+    const progPath = progAng > 0
+      ? `M${p.x} ${p.y - progR} A${progR} ${progR} 0 ${largeArc} 1 ${endX.toFixed(1)} ${endY.toFixed(1)}`
+      : '';
+    return `<g class="map-node" data-id="${_esc(m.id)}"
+        style="--node-color:${st.color};--axe-color:${axeCol}"
+        tabindex="0" role="button" aria-label="${_esc(m.titre||'')}">
+      <circle cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 18}" fill="${axeCol}" opacity="0.10"/>
+      <circle cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 3}" fill="var(--bg-void)"/>
+      <circle class="map-node-ring" cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 2}"
+        fill="var(--bg-card)" stroke="${st.color}" stroke-width="3"/>
+      ${progPath ? `<path d="${progPath}" stroke="${st.color}" stroke-width="3.5"
+        fill="none" stroke-linecap="round" opacity="0.9"/>` : ''}
+      ${m.imageUrl
+        ? `<image href="${_esc(m.imageUrl)}" x="${p.x - MAP_NODE_R}" y="${p.y - MAP_NODE_R}"
+            width="${MAP_NODE_R*2}" height="${MAP_NODE_R*2}"
+            clip-path="url(#st-clip-${_esc(m.id)})" preserveAspectRatio="xMidYMid slice"/>`
+        : `<text x="${p.x}" y="${p.y}" text-anchor="middle" dy=".35em"
+            font-family="Cinzel, serif" font-weight="700" font-size="22"
+            fill="${st.color}">${_esc(init)}</text>`}
+      <circle cx="${p.x + MAP_NODE_R - 4}" cy="${p.y - MAP_NODE_R + 4}"
+        r="9" fill="${st.color}" stroke="var(--bg-card)" stroke-width="2"/>
+      <text x="${p.x + MAP_NODE_R - 4}" y="${p.y - MAP_NODE_R + 4}"
+        text-anchor="middle" dy=".34em" font-size="10" font-weight="700"
+        fill="#0b0814">${st.icon}</text>
+      <text class="map-node-label" x="${p.x}" y="${p.y + MAP_NODE_R + 22}"
+        text-anchor="middle" font-size="13" font-weight="600" fill="var(--text)">
+        ${_esc((m.titre || '').slice(0, 22))}${(m.titre||'').length > 22 ? '…' : ''}
+      </text>
+      ${m.date ? `<text x="${p.x}" y="${p.y + MAP_NODE_R + 38}" text-anchor="middle"
+        font-size="9" fill="var(--text-dim)" font-family="JetBrains Mono, monospace">
+        ${_esc(m.date)}</text>` : ''}
+    </g>`;
+  }).join('');
+
+  const prefs = getStoryPrefs();
+  return `
+    <div class="map-shell">
+      <div class="map-toolbar">
+        <button class="map-tool" onclick="window._stMapZoom(0.85)" title="Dézoomer">−</button>
+        <span class="map-zoom-val">${Math.round(prefs.zoom * 100)}%</span>
+        <button class="map-tool" onclick="window._stMapZoom(1.18)" title="Zoomer">+</button>
+        <button class="map-tool" onclick="window._stMapReset()" title="Recentrer">⊙</button>
+        <span class="map-hint">Chaque ligne = un axe narratif · Stations dans l'ordre des chapitres · Pointillés dorés = liens inter-axes</span>
+      </div>
+      <div class="map-viewport" id="st-map-viewport">
+        <svg id="st-map-svg" viewBox="0 0 ${MAP_W} ${MAP_H}" class="map-svg"
+          preserveAspectRatio="xMidYMid meet">
+          ${defs}
+          ${gridLines}
+          ${lanesSvg}
+          ${liensSvg}
+          ${nodesSvg}
+        </svg>
+        <div class="map-tooltip" id="st-map-tooltip" style="display:none"></div>
+      </div>
+    </div>`;
+}
+
+// Interactions carte : zoom molette + boutons, pan, hover tooltip, clic = détail
+function _initMapInteractions() {
+  const viewport = document.getElementById('st-map-viewport');
+  const svg = document.getElementById('st-map-svg');
+  const tooltip = document.getElementById('st-map-tooltip');
+  if (!viewport || !svg) return;
+
+  const prefs = getStoryPrefs();
+  let zoom = prefs.zoom || 1, panX = prefs.panX || 0, panY = prefs.panY || 0;
+  const apply = () => {
+    svg.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    svg.style.transformOrigin = '0 0';
+    const zVal = viewport.parentElement?.querySelector('.map-zoom-val');
+    if (zVal) zVal.textContent = `${Math.round(zoom*100)}%`;
+  };
+  apply();
+
+  let saveTimer = null;
+  const persist = (patch) => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => setStoryPrefs(patch), 400);
+  };
+
+  viewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const nz = Math.max(0.4, Math.min(3, zoom * delta));
+    if (nz === zoom) return;
+    const rect = viewport.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    panX = cx - (cx - panX) * (nz / zoom);
+    panY = cy - (cy - panY) * (nz / zoom);
+    zoom = nz;
+    apply();
+    persist({ zoom, panX, panY });
+  }, { passive: false });
+
+  window._stMapZoom = (factor) => {
+    const rect = viewport.getBoundingClientRect();
+    const cx = rect.width / 2, cy = rect.height / 2;
+    const nz = Math.max(0.4, Math.min(3, zoom * factor));
+    panX = cx - (cx - panX) * (nz / zoom);
+    panY = cy - (cy - panY) * (nz / zoom);
+    zoom = nz;
+    apply();
+    setStoryPrefs({ zoom, panX, panY });
+  };
+  window._stMapReset = () => { zoom = 1; panX = 0; panY = 0; apply(); setStoryPrefs({ zoom, panX, panY }); };
+
+  // Pan + click
+  let panStart = null;
+  viewport.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.map-node')) return;  // clic sur nœud géré au pointerup
+    panStart = { x: e.clientX, y: e.clientY, panX0: panX, panY0: panY, moved: false };
+    viewport.classList.add('is-panning');
+    viewport.setPointerCapture?.(e.pointerId);
+  });
+  viewport.addEventListener('pointermove', (e) => {
+    if (panStart) {
+      const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
+      if (Math.hypot(dx, dy) > 2) panStart.moved = true;
+      panX = panStart.panX0 + dx; panY = panStart.panY0 + dy;
+      apply();
+      return;
+    }
+    const node = e.target.closest?.('.map-node');
+    if (node && tooltip) {
+      const item = _mapItemsCache.find(i => i.id === node.dataset.id);
+      if (item) {
+        const st = stCfg(item);
+        const axeCol = item.axe ? (_axeMap[item.axe] || '#7a8fa8') : '#7a8fa8';
+        tooltip.innerHTML = `
+          <div class="tip-titre" style="color:${st.color}">${st.icon} ${_esc(item.titre || 'Sans titre')}</div>
+          ${item.axe ? `<div class="tip-axe" style="color:${axeCol}">● ${_esc(item.axe)}</div>` : ''}
+          ${item.date ? `<div class="tip-meta">📅 ${_esc(item.date)}</div>` : ''}
+          ${item.lieu ? `<div class="tip-meta">📍 ${_esc(item.lieu)}</div>` : ''}
+          ${(item.participants||[]).length ? `<div class="tip-meta">👥 ${item.participants.length} participant${item.participants.length>1?'s':''}</div>` : ''}
+        `;
+        const rect = viewport.getBoundingClientRect();
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+        tooltip.style.top  = (e.clientY - rect.top + 14) + 'px';
+      }
+    } else if (tooltip) {
+      tooltip.style.display = 'none';
+    }
+  });
+  viewport.addEventListener('pointerup', (e) => {
+    if (panStart) {
+      const moved = panStart.moved;
+      panStart = null;
+      viewport.classList.remove('is-panning');
+      persist({ panX, panY });
+      if (moved) return;
+    }
+    const node = e.target.closest?.('.map-node');
+    if (node) openStoryDetail(node.dataset.id);
+  });
+  viewport.addEventListener('pointerleave', () => { if (tooltip) tooltip.style.display = 'none'; });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VUE SAGA — Étagères horizontales par axe (handoff §7)
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderSagaView(missions) {
+  const byAxe = new Map();
+  missions.forEach(m => {
+    const k = m.axe || '__none__';
+    if (!byAxe.has(k)) byAxe.set(k, []);
+    byAxe.get(k).push(m);
+  });
+  byAxe.forEach(list => list.sort((a,b) => (a.ordre||0) - (b.ordre||0)));
+
+  return `<div class="saga">
+    ${[...byAxe.entries()].map(([axe, list]) => {
+      const color = axe === '__none__' ? '#7a8fa8' : (_axeMap[axe] || '#7a8fa8');
+      const label = axe === '__none__' ? 'Hors axe' : axe;
+      const term = list.filter(m => m.statut === 'Terminée').length;
+      const pct = list.length ? Math.round((term / list.length) * 100) : 0;
+      return `<section class="shelf" style="--axe-color:${color}">
+        <header class="shelf-head">
+          <span class="shelf-marker"></span>
+          <h2 class="shelf-title">${_esc(label)}</h2>
+          <span class="shelf-count">${list.length} CH.</span>
+          <span class="shelf-rule"></span>
+          <div class="shelf-prog">
+            <div class="shelf-bar"><div class="shelf-fill" style="width:${pct}%"></div></div>
+            <span class="shelf-pct">${pct}%</span>
+          </div>
+        </header>
+        <div class="rail">
+          ${list.map((m, i) => _renderPoster(m, i)).join('')}
+        </div>
+      </section>`;
+    }).join('')}
+  </div>`;
+}
+
+function _renderPoster(m, idx) {
+  const st = stCfg(m);
+  const prog = itemProgress(m);
+  const parts = m.participants || [];
+  return `<article class="poster" style="--st-color:${st.color}" onclick="openStoryDetail('${m.id}')">
+    <div class="poster-art">
+      ${m.imageUrl
+        ? `<img src="${_esc(m.imageUrl)}" alt="" loading="lazy">`
+        : `<div class="poster-fallback">${m.type === 'mission' ? '🎯' : '📖'}</div>`}
+      <div class="poster-num">CH.${String(idx + 1).padStart(2,'0')}</div>
+      <div class="poster-statut">${st.icon} ${_esc(m.statut || 'En attente')}</div>
+      <div class="poster-prog"><div class="poster-prog-fill" style="width:${prog}%"></div></div>
+    </div>
+    <div class="poster-body">
+      <h3 class="poster-title">${_esc(m.titre || 'Sans titre')}</h3>
+      ${m.date ? `<div class="poster-date">${_esc(m.date)}</div>` : ''}
+      ${parts.length ? `<div class="poster-parts">
+        ${parts.slice(0, 4).map(p => {
+          const pp = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
+          return p.photo
+            ? `<span class="poster-part" title="${_esc(p.nom||'')}"><img src="${_esc(p.photo)}" style="object-position:${pp}"></span>`
+            : `<span class="poster-part">${(p.nom||'?')[0]?.toUpperCase()}</span>`;
+        }).join('')}
+        ${parts.length > 4 ? `<span class="poster-part-more">+${parts.length-4}</span>` : ''}
+      </div>` : ''}
+    </div>
+  </article>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VUE CHRONIQUE — Chapitres livre (handoff §8)
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderChroniqueView(missions) {
+  const sorted = [...missions].sort((a,b) => (a.ordre||0)-(b.ordre||0) || (a.date||'').localeCompare(b.date||''));
+  return `<div class="chronique">
+    ${sorted.map((m, i) => {
+      const st = stCfg(m);
+      const prog = itemProgress(m);
+      const axeCol = m.axe ? (_axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
+      const parts = m.participants || [];
+      return `<article class="chap" style="--axe-color:${axeCol};--st-color:${st.color}">
+        <div class="chap-side">
+          <div class="chap-num">${String(i+1).padStart(2,'0')}</div>
+          ${i < sorted.length-1 ? '<div class="chap-thread"></div>' : ''}
+        </div>
+        <div class="chap-body" onclick="openStoryDetail('${m.id}')">
+          ${m.imageUrl ? `<div class="chap-banner"><img src="${_esc(m.imageUrl)}" alt=""></div>` : ''}
+          <div class="chap-meta-top">
+            ${m.axe ? `<span class="chap-axe">${_esc(m.axe)}</span>` : ''}
+            <span class="chap-statut">${st.icon} ${_esc(m.statut || 'En attente')}</span>
+            ${m.date ? `<span class="chap-date">📅 ${_esc(m.date)}</span>` : ''}
+            ${m.lieu ? `<span class="chap-date">📍 ${_esc(m.lieu)}</span>` : ''}
+          </div>
+          <h2 class="chap-title">${_esc(m.titre || 'Sans titre')}</h2>
+          ${m.description
+            ? `<p class="chap-desc">${_nl2br(_esc(m.description))}</p>`
+            : `<p class="chap-desc-empty">— La chronique ne dit rien de cette mission —</p>`}
+          <div class="chap-foot">
+            ${parts.length ? `<div class="chap-parts">
+              ${parts.slice(0, 10).map(p => {
+                const pp = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
+                return p.photo
+                  ? `<span class="chap-part" title="${_esc(p.nom||'')}"><img src="${_esc(p.photo)}" style="object-position:${pp}"></span>`
+                  : `<span class="chap-part">${(p.nom||'?')[0]?.toUpperCase()}</span>`;
+              }).join('')}
+            </div>` : '<div></div>'}
+            <div class="chap-prog">
+              <span class="chap-prog-val">${prog}%</span>
+              <div class="chap-prog-bar"><div style="width:${prog}%;background:${st.color}"></div></div>
+            </div>
+          </div>
+        </div>
+      </article>`;
+    }).join('')}
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VUE LISTE — Tableau compact (handoff §9)
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderListView(missions) {
+  return `<div class="list"><div class="list-table">
+    <div class="list-head">
+      <div>#</div>
+      <div>Mission</div>
+      <div>Axe</div>
+      <div>Statut</div>
+      <div>Progression</div>
+      <div>Date</div>
+    </div>
+    ${missions.map((m, i) => {
+      const st = stCfg(m);
+      const prog = itemProgress(m);
+      const axeCol = m.axe ? (_axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
+      return `<div class="list-row" style="--axe-color:${axeCol};--st-color:${st.color}"
+        onclick="openStoryDetail('${m.id}')">
+        <div class="list-num">${String(i+1).padStart(2,'0')}</div>
+        <div class="list-titre">${_esc(m.titre || 'Sans titre')}${m.lieu ? `<span class="list-lieu"> · ${_esc(m.lieu)}</span>` : ''}</div>
+        <div class="list-axe">${m.axe ? `<span class="list-axe-dot"></span><span>${_esc(m.axe)}</span>` : '<span style="color:var(--text-dim)">—</span>'}</div>
+        <div class="list-statut">${st.icon} ${_esc(m.statut || 'En attente')}</div>
+        <div class="list-prog">
+          <div class="list-prog-bar"><div class="list-prog-fill" style="width:${prog}%"></div></div>
+          <span class="list-prog-val">${prog}%</span>
+        </div>
+        <div class="list-date">${m.date ? _esc(m.date) : '—'}</div>
+      </div>`;
+    }).join('')}
+  </div></div>`;
 }
 
 // ── RENDU TIMELINE ────────────────────────────────────────────────────────────
@@ -504,131 +1350,177 @@ function _renderTimeline(items) {
 
 // ── MODAL DÉTAIL ──────────────────────────────────────────────────────────────
 async function openStoryDetail(id) {
-  const items=await loadCollection('story');
-  const item=items.find(i=>i.id===id); if(!item) return;
-  const st=stCfg(item);
-  const participants=item.participants||[];
-  const liensItems=(item.liens||[]).map(lid=>items.find(i=>i.id===lid)).filter(Boolean);
+  const items = await loadCollection('story');
+  const item = items.find(i => i.id === id); if (!item) return;
+  const st = stCfg(item);
+  const groupes = item.groupes || [];
+  const liensItems = (item.liens || []).map(lid => items.find(i => i.id === lid)).filter(Boolean);
+  const totalMembers = (() => {
+    const s = new Set();
+    groupes.forEach(g => (g.membres || []).forEach(m => s.add(m)));
+    return s.size;
+  })();
+  const prog = itemProgress(item);
+  const axeCol = item.axe ? (_axeMap[item.axe] || 'var(--text-muted)') : 'var(--text-muted)';
+  const bgUrl = (item.imageUrl || '').replace(/'/g, "%27");
 
-  openModal('',`
-  <div style="margin:-1.2rem -1.2rem 0;position:relative;overflow:hidden;border-radius:12px 12px 0 0">
-    ${item.imageUrl
-      ?`<img src="${item.imageUrl}" style="width:100%;height:180px;object-fit:cover;display:block">`
-      :`<div style="width:100%;height:130px;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel));
-          display:flex;align-items:center;justify-content:center;font-size:4rem">
-          ${item.type==='mission'?'🎯':'📖'}</div>`}
-    <div style="position:absolute;top:12px;right:12px;background:rgba(11,17,24,.85);
-      border:1px solid ${st.border};border-radius:999px;padding:3px 10px;font-size:.72rem;color:${st.color}">
-      ${item.type==='mission'?'Mission':'Événement'}
-    </div>
-  </div>
-  <div style="padding:1.2rem 0 0">
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;margin-bottom:.25rem">
-      <h2 style="font-family:'Cinzel',serif;font-size:1.2rem;color:var(--text);margin:0;line-height:1.2">${item.titre||'Mission'}</h2>
-      ${item.axe?`<span style="font-size:.7rem;color:${_axeMap[item.axe]||'var(--text-dim)'};
-        background:var(--bg-elevated);border:1px solid var(--border);border-radius:999px;
-        padding:3px 10px;flex-shrink:0;white-space:nowrap">${item.axe}</span>`:''}
-    </div>
-    ${item.date?`<div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.6rem">📅 ${item.date}${item.acte?` · ${item.acte}`:''}</div>`:''}
-    ${item.lieu?`<div style="font-size:.83rem;color:var(--text-muted);margin-bottom:.7rem"><strong style="color:var(--text)">Lieu</strong> : ${item.lieu}</div>`:''}
-    ${item.description?`<div style="font-size:.85rem;color:var(--text-muted);line-height:1.7;margin-bottom:1rem">${item.description.replace(/\n/g,'<br>')}</div>`:''}
+  // Helper avatar
+  const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  const chars = STATE.characters || [];
+  const avatar = (c, size = 36) => {
+    if (!c) return '';
+    const col = PCOLS[c.nom?.charCodeAt(0) % 6 || 0];
+    const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+    return `<div class="mv-avatar" style="--col:${col};width:${size}px;height:${size}px" title="${_esc(c.nom||'')}">
+      ${c.photo
+        ? `<img src="${_esc(c.photo)}" style="object-position:${pp}">`
+        : `<span>${_esc((c.nom||'?')[0]?.toUpperCase() || '?')}</span>`}
+    </div>`;
+  };
 
-    <div style="border-top:1px solid var(--border);padding-top:1rem;display:flex;gap:1.5rem;flex-wrap:wrap">
-      ${participants.length?`
-      <div style="flex:1;min-width:130px">
-        <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.6rem">Participants</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          ${participants.map(p=>{
-            const col = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'][(p.nom||'').charCodeAt(0)%6||0];
-            const photoPos = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
-            return `<div title="${p.nom||''}" style="display:flex;flex-direction:column;align-items:center;gap:4px">
-              <div style="width:42px;height:42px;border-radius:50%;overflow:hidden;
-                border:2px solid ${col};background:${col}18;
-                display:flex;align-items:center;justify-content:center">
-                ${p.photo
-                  ? `<img src="${p.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-                  : p.imageUrl
-                    ? `<img src="${p.imageUrl}" style="width:100%;height:100%;object-fit:cover">`
-                    : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:${col}">${(p.nom||p.emoji||'?')[0]?.toUpperCase()}</span>`}
-              </div>
-              <span style="font-size:.6rem;color:var(--text-dim);max-width:44px;
-                text-align:center;overflow:hidden;text-overflow:ellipsis;
-                white-space:nowrap">${p.nom||''}</span>
-            </div>`;
+  openModal('', `
+  <div class="mv-shell">
+
+    <!-- ── Hero ───────────────────────────────────────────────── -->
+    <div class="mv-hero">
+      <div class="mv-hero-bg" ${item.imageUrl ? `style="background-image:url('${_esc(bgUrl)}')"` : ''}></div>
+      <div class="mv-hero-fade"></div>
+      <div class="mv-hero-content">
+        <div class="mv-hero-eyebrow">
+          <span>${_esc(item.acte || 'Acte I')}</span>
+          <span class="mv-hero-eyebrow-sep">·</span>
+          <span>${item.type === 'event' ? 'Événement' : 'Mission'}</span>
+        </div>
+        <h1 class="mv-hero-title">${_esc(item.titre || 'Sans titre')}</h1>
+        <div class="mv-hero-meta">
+          <span class="mv-hero-statut" style="color:${st.color};border-color:${st.border}">
+            ${st.icon} <span>${_esc(item.statut || 'En attente')}</span>
+          </span>
+          ${item.axe ? `<span class="mv-hero-axe" style="color:${axeCol}">● ${_esc(item.axe)}</span>` : ''}
+          ${item.date ? `<span class="mv-hero-meta-item">📅 ${_esc(item.date)}</span>` : ''}
+          ${item.lieu ? `<span class="mv-hero-meta-item">📍 ${_esc(item.lieu)}</span>` : ''}
+        </div>
+      </div>
+      ${prog > 0 ? `<div class="mv-hero-prog">
+        <div class="mv-hero-prog-fill" style="width:${prog}%;background:${st.color}"></div>
+      </div>` : ''}
+    </div>
+
+    <!-- ── Stats bar ──────────────────────────────────────────── -->
+    <div class="mv-stats">
+      <div class="mv-stat">
+        <div class="mv-stat-num" style="color:${st.color}">${prog}<small>%</small></div>
+        <div class="mv-stat-lbl">Avancement</div>
+      </div>
+      <div class="mv-stat">
+        <div class="mv-stat-num">${groupes.length}</div>
+        <div class="mv-stat-lbl">Groupe${groupes.length > 1 ? 's' : ''}</div>
+      </div>
+      <div class="mv-stat">
+        <div class="mv-stat-num">${totalMembers}</div>
+        <div class="mv-stat-lbl">Personnage${totalMembers > 1 ? 's' : ''}</div>
+      </div>
+      ${liensItems.length ? `<div class="mv-stat">
+        <div class="mv-stat-num">${liensItems.length}</div>
+        <div class="mv-stat-lbl">Suite${liensItems.length > 1 ? 's' : ''}</div>
+      </div>` : ''}
+    </div>
+
+    <!-- ── Body : sections ────────────────────────────────────── -->
+    <div class="mv-body">
+
+      <!-- Récit -->
+      ${item.description ? `
+      <section class="mv-section">
+        <h3 class="mv-section-title">📜 Récit</h3>
+        <div class="mv-recit">${_nl2br(_esc(item.description))}</div>
+      </section>` : `
+      <section class="mv-section">
+        <div class="mv-empty">
+          <span>📜</span>
+          <span>Aucun récit n'a encore été écrit pour cette mission.</span>
+        </div>
+      </section>`}
+
+      <!-- Groupes & Réussites -->
+      ${groupes.length ? `
+      <section class="mv-section">
+        <h3 class="mv-section-title">
+          👥 Groupes & Réussites
+          <span class="mv-section-count">${groupes.length}</span>
+        </h3>
+        <div class="mv-groups">
+          ${groupes.map(g => {
+            const membres = (g.membres || []).map(mid => chars.find(c => c.id === mid)).filter(Boolean);
+            const gr = parseInt(g.reussite) || 0;
+            const grColor = gr >= 80 ? '#22c38e' : gr >= 40 ? '#e8b84b' : gr > 0 ? '#ff8a4c' : 'var(--text-dim)';
+            const notes = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
+            return `<article class="mv-group" style="--gr-color:${grColor}">
+              <header class="mv-group-head">
+                <h4 class="mv-group-name">${_esc(g.nom)}</h4>
+                ${gr > 0 ? `<div class="mv-group-pct">${gr}<small>%</small></div>` : ''}
+              </header>
+              ${membres.length ? `<div class="mv-group-members">
+                ${membres.map(c => `<div class="mv-group-member">
+                  ${avatar(c, 38)}
+                  <span class="mv-group-member-name">${_esc(c.nom || '')}</span>
+                </div>`).join('')}
+              </div>` : `<div class="mv-empty-small">Aucun membre rattaché.</div>`}
+              ${gr > 0 ? `<div class="mv-group-bar">
+                <div class="mv-group-bar-fill" style="width:${gr}%"></div>
+              </div>` : ''}
+              ${notes.length ? `<ul class="mv-group-notes">
+                ${notes.map(n => `<li>${_esc(n)}</li>`).join('')}
+              </ul>` : ''}
+              ${g.recompense ? `<div class="mv-group-reward">
+                <span class="mv-group-reward-icon">🏆</span>
+                <span>${_esc(g.recompense)}</span>
+              </div>` : ''}
+            </article>`;
           }).join('')}
         </div>
-      </div>`:''}
+      </section>` : ''}
 
+      <!-- Suites ouvertes -->
+      ${liensItems.length ? `
+      <section class="mv-section">
+        <h3 class="mv-section-title">
+          ↝ Suites ouvertes
+          <span class="mv-section-count">${liensItems.length}</span>
+        </h3>
+        <div class="mv-liens">
+          ${liensItems.map(l => {
+            const lst = stCfg(l);
+            const lAxeCol = l.axe ? (_axeMap[l.axe] || 'var(--text-muted)') : 'var(--text-muted)';
+            return `<button class="mv-lien" onclick="closeModalDirect();openStoryDetail('${l.id}')">
+              <div class="mv-lien-art">
+                ${l.imageUrl
+                  ? `<img src="${_esc(l.imageUrl)}" alt="" loading="lazy">`
+                  : `<div class="mv-lien-fallback">${l.type === 'mission' ? '🎯' : '📖'}</div>`}
+                <div class="mv-lien-statut" style="color:${lst.color};border-color:${lst.border}">${lst.icon}</div>
+              </div>
+              <div class="mv-lien-body">
+                <div class="mv-lien-title">${_esc(l.titre || 'Sans titre')}</div>
+                ${l.axe ? `<div class="mv-lien-axe" style="color:${lAxeCol}">● ${_esc(l.axe)}</div>` : ''}
+              </div>
+            </button>`;
+          }).join('')}
+        </div>
+      </section>` : ''}
+
+    </div><!-- /mv-body -->
+
+    <!-- ── Footer ─────────────────────────────────────────────── -->
+    <div class="mv-footer">
+      <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Fermer</button>
+      ${STATE.isAdmin ? `
+        <button class="btn btn-outline btn-sm mv-footer-danger" onclick="closeModalDirect();deleteStory('${item.id}')">🗑️ Supprimer</button>
+        <button class="btn btn-gold" onclick="closeModalDirect();editStory('${item.id}')">✏️ Modifier</button>
+      ` : ''}
     </div>
 
-    ${(item.groupes||[]).length?`
-    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
-      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.7rem">Groupes</div>
-      <div style="display:flex;flex-direction:column;gap:.75rem">
-        ${(item.groupes||[]).map(g => {
-          const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-          const chars = STATE.characters || [];
-          const membres = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
-          const gr = parseInt(g.reussite)||0;
-          const gBar = gr>=80?'#22c38e':gr>=40?'#e8b84b':'#ff6b6b';
-          return `<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:.6rem .75rem">
-            <div style="font-family:'Cinzel',serif;font-size:.72rem;color:var(--gold);
-              margin-bottom:.45rem;letter-spacing:.5px">${g.nom}</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px${gr>0||g.recompense||g.notesReussite?';margin-bottom:.6rem':''}">
-              ${membres.length ? membres.map(c => {
-                const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-                const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-                return `<div title="${c.nom||''}" style="display:flex;flex-direction:column;align-items:center;gap:3px">
-                  <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;
-                    border:2px solid ${col};background:${col}18;
-                    display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                    ${c.photo
-                      ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-                      : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.78rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
-                  </div>
-                  <span style="font-size:.56rem;color:var(--text-dim);max-width:38px;
-                    text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nom||''}</span>
-                </div>`;
-              }).join('') : `<span style="font-size:.73rem;color:var(--text-dim);font-style:italic">Aucun membre trouvé.</span>`}
-            </div>
-            ${gr>0?`<div style="margin-bottom:.35rem">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.2rem">
-                <span style="font-size:.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Réussite</span>
-                <span style="font-family:'Cinzel',serif;font-size:.78rem;color:${gBar}">${gr} %</span>
-              </div>
-              <div style="background:var(--bg-panel);border-radius:999px;height:6px;overflow:hidden">
-                <div style="width:${gr}%;height:100%;background:${gBar};border-radius:999px"></div>
-              </div>
-              ${g.notesReussite?`<div style="font-size:.7rem;color:var(--text-muted);margin-top:.35rem;line-height:1.5">
-                ${g.notesReussite.split('\n').filter(Boolean).map(l=>`<div>• ${l}</div>`).join('')}</div>`:''}
-            </div>`:''}
-            ${g.recompense?`<div style="font-size:.76rem;color:var(--gold)">🏆 ${g.recompense}</div>`:''}
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`:''}
-
-    ${liensItems.length?`
-    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
-      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:.6rem">↝ Mène vers</div>
-      <div style="display:flex;flex-wrap:wrap;gap:.4rem">
-        ${liensItems.map(l=>`
-          <button onclick="closeModal();openStoryDetail('${l.id}')" style="
-            background:var(--bg-elevated);border:1px solid rgba(232,184,75,.3);
-            border-radius:8px;padding:.35rem .7rem;cursor:pointer;
-            font-family:'Cinzel',serif;font-size:.75rem;color:var(--gold);transition:all .15s">
-            ↝ ${l.titre||'Mission'}
-          </button>`).join('')}
-      </div>
-    </div>`:''}
-
-    ${STATE.isAdmin?`
-    <div style="margin-top:1rem;display:flex;gap:.5rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModal();editStory('${item.id}')">✏️ Modifier</button>
-      <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:rgba(255,107,107,.3)"
-        onclick="closeModal();deleteStory('${item.id}')">🗑️</button>
-    </div>`:''}
-  </div>`);
+  </div><!-- /mv-shell -->
+  `);
 }
 
 // ── MODAL AJOUT / ÉDITION ─────────────────────────────────────────────────────
@@ -640,183 +1532,216 @@ async function openStoryModal(item = null) {
   _modalGroupes = [...(item?.groupes || [])];
   _modalStoryId = item?.id || '';
 
-  openModal(item?`✏️ Modifier — ${item.titre||'Mission'}`:'📜 Nouvelle mission',`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-      <div class="form-group">
-        <label>Type</label>
-        <select class="input-field" id="st-type">
-          <option value="mission" ${(item?.type||'mission')==='mission'?'selected':''}>🎯 Mission</option>
-          <option value="event"   ${item?.type==='event'  ?'selected':''}>📖 Événement</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Acte</label>
-        <input class="input-field" id="st-acte" value="${item?.acte||acteActif}" placeholder="Acte I">
-      </div>
-    </div>
+  // Statuts disponibles + config visuelle pour les pills
+  const STATUTS = [
+    { v: 'En cours',   c: 'var(--st-cours)',    i: '▶' },
+    { v: 'Terminée',   c: 'var(--st-terminee)', i: '✓' },
+    { v: 'En attente', c: 'var(--st-attente)',  i: '◷' },
+    { v: 'Échouée',    c: 'var(--st-echec)',    i: '✗' },
+  ];
+  const curStatut = item?.statut || 'En cours';
 
-    <div class="form-group">
-      <label>Titre</label>
-      <input class="input-field" id="st-titre" value="${item?.titre||''}" placeholder="Sauver les poules !">
-    </div>
+  // Liste des axes existants (autocomplete)
+  const knownAxes = [...new Set(allItems.map(i => i.axe).filter(Boolean))].sort();
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-      <div class="form-group">
-        <label>Axe narratif</label>
-        <input class="input-field" id="st-axe" value="${item?.axe||''}" placeholder="ex: Mystères de Granlac">
-      </div>
-      <div class="form-group">
-        <label>Date / Session</label>
-        <input class="input-field" id="st-date" value="${item?.date||''}" placeholder="Session 1">
-      </div>
-    </div>
+  openModal('', `
+  <div class="mn-shell">
 
-    <div class="form-group">
-      <label>Lieu</label>
-      <input class="input-field" id="st-lieu" value="${item?.lieu||''}" placeholder="Forêt du Cap d'Espérance">
-    </div>
+    <!-- ════ HERO BANNER — preview live + image drop integré ═══════ -->
+    <div class="mn-hero" id="mn-hero">
+      <div class="mn-hero-bg" id="mn-hero-bg"
+        style="${item?.imageUrl ? `background-image:url('${_esc(item.imageUrl).replace(/'/g,"%27")}')` : ''}"></div>
+      <div class="mn-hero-fade"></div>
 
-    <div class="form-group">
-      <label>Description</label>
-      <textarea class="input-field" id="st-desc" rows="3">${item?.description||''}</textarea>
-    </div>
-
-    <div class="form-group">
-      <label>Image (bannière)</label>
-      <div id="st-drop-zone" style="border:2px dashed var(--border-strong);border-radius:12px;
-        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated);transition:border-color .15s">
+      <!-- Drop zone overlay (cropper rattaché) -->
+      <div id="st-drop-zone" class="mn-hero-drop" title="Cliquer ou déposer une image">
         <div id="st-drop-preview"></div>
-      </div>
-      <div id="st-crop-wrap" style="display:none;margin-top:.75rem">
-        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez — ratio 4:3 verrouillé</div>
-        <canvas id="st-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" id="st-crop-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
-        <div id="st-crop-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label>Groupes de participants <span style="font-size:.73rem;color:var(--text-dim);font-weight:400">(sélection rapide)</span></label>
-      <div id="st-groups-row" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;min-height:28px">
-        ${_renderGroupPills(_modalGroupes)}
-        <button type="button" onclick="window._stSaveGroupDialog()"
-          style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
-            background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;transition:all .15s"
-          onmouseover="this.style.opacity='1';this.style.background='rgba(232,184,75,.06)'"
-          onmouseout="this.style.opacity='.8';this.style.background='transparent'">
-          + Nouveau groupe</button>
-      </div>
-      <div id="st-save-group-form" style="display:none;margin-top:.5rem;padding:.7rem;
-        background:var(--bg-panel);border:1px solid var(--border);border-radius:10px">
-        <div id="st-group-form-title" style="font-size:.7rem;color:var(--text-dim);font-weight:600;
-          text-transform:uppercase;letter-spacing:.5px;margin-bottom:.45rem">Nouveau groupe — Membres</div>
-        <div id="st-group-picker" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:.35rem;margin-bottom:.55rem">
-          ${(() => {
-            const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-            return (STATE.characters||[]).map(c => {
-              const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-              const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-              return `<div onclick="window._stGroupPickToggle('${c.id}','${col}')"
-                id="st-gpick-${c.id}" data-gm-id="${c.id}" data-picked="0"
-                style="display:flex;flex-direction:column;align-items:center;gap:.25rem;
-                  padding:.35rem .2rem;border-radius:8px;cursor:pointer;transition:all .15s;
-                  border:2px solid var(--border);background:var(--bg-elevated)">
-                <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;
-                  border:2px solid rgba(255,255,255,.1);background:${col}18;flex-shrink:0;
-                  display:flex;align-items:center;justify-content:center">
-                  ${c.photo
-                    ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pp}">`
-                    : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.78rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
-                </div>
-                <span style="font-size:.58rem;text-align:center;color:var(--text-dim);
-                  max-width:66px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.nom||'?'}</span>
-              </div>`;
-            }).join('') || '<span style="font-size:.75rem;color:var(--text-dim)">Aucun personnage.</span>';
-          })()}
+        <div class="mn-hero-drop-hint">
+          <span class="mn-hero-drop-icon">🖼️</span>
+          <span>Glisser une image ou cliquer pour ouvrir</span>
         </div>
-        <div style="display:flex;gap:.4rem;align-items:center">
-          <input id="st-save-group-name" class="input-field"
-            style="flex:1;padding:.3rem .65rem;font-size:.82rem" placeholder="Nom du groupe…" maxlength="40"
-            onkeydown="if(event.key==='Enter')window._stConfirmSaveGroup();if(event.key==='Escape')document.getElementById('st-save-group-form').style.display='none'">
-          <button type="button" class="btn btn-gold btn-sm" onclick="window._stConfirmSaveGroup()">OK</button>
-          <button type="button" class="btn btn-outline btn-sm"
-            onclick="document.getElementById('st-save-group-form').style.display='none'">✕</button>
+      </div>
+
+      <!-- Contenu hero : eyebrow + titre + meta -->
+      <div class="mn-hero-content">
+        <div class="mn-hero-eyebrow">
+          <span id="mn-acte-preview">${_esc(item?.acte || acteActif)}</span>
+          <span class="mn-hero-eyebrow-sep">·</span>
+          <span id="mn-type-preview">${(item?.type || 'mission') === 'event' ? 'Événement' : 'Mission'}</span>
+        </div>
+        <input type="text" class="mn-hero-title" id="st-titre"
+          value="${_esc(item?.titre||'')}"
+          placeholder="${item ? _esc(item.titre || '') : 'Donne un nom à ta mission…'}"
+          autocomplete="off" autofocus>
+        <div class="mn-hero-meta">
+          <span class="mn-hero-statut" id="mn-statut-preview"
+            style="color:${stCfg({statut:curStatut}).color};border-color:${stCfg({statut:curStatut}).border}">
+            ${stCfg({statut:curStatut}).icon} <span>${_esc(curStatut)}</span>
+          </span>
+          <span class="mn-hero-axe" id="mn-axe-preview"
+            style="${item?.axe ? `color:${_axeMap[item.axe] || 'var(--text-muted)'}` : ''}">
+            ${item?.axe ? `● ${_esc(item.axe)}` : ''}
+          </span>
+        </div>
+      </div>
+
+      <!-- Cropper inline (apparaît quand on upload une image) -->
+      <div id="st-crop-wrap" class="mn-crop-wrap" style="display:none">
+        <canvas id="st-crop-canvas"></canvas>
+        <div class="mn-crop-bar">
+          <span class="mn-crop-hint">Recadre · ratio 4:3</span>
+          <button type="button" class="btn btn-gold btn-sm" id="st-crop-confirm">✂️ Confirmer</button>
+          <div id="st-crop-ok" style="display:none;font-size:.75rem"></div>
         </div>
       </div>
     </div>
 
-    <div class="form-group">
-      <label>Participants</label>
-      <div id="st-participants-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:.5rem;margin-top:.3rem">
-        ${(() => {
-          const chars = STATE.characters || [];
-          if (!chars.length) return `<div style="font-size:.78rem;color:var(--text-dim);
-            font-style:italic;grid-column:1/-1">Aucun personnage disponible.</div>`;
-          const selected = new Set((item?.participants||[]).map(p=>p.id).filter(Boolean));
-          return chars.map(c => {
-            const isOn = selected.has(c.id);
-            const col  = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'][c.nom?.charCodeAt(0)%6||0];
-            const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-            return `<div onclick="window._toggleStParticipant('${c.id}')"
-              id="st-part-${c.id}"
-              data-part-id="${c.id}"
-              data-part-nom="${(c.nom||'?').replace(/"/g,'&quot;')}"
-              data-part-photo="${c.photo||''}"
-              data-part-photox="${c.photoX||0}"
-              data-part-photoy="${c.photoY||0}"
-              data-part-photozoom="${c.photoZoom||1}"
-              style="display:flex;flex-direction:column;align-items:center;gap:.3rem;
-              padding:.5rem .3rem;border-radius:10px;cursor:pointer;transition:all .15s;
-              border:2px solid ${isOn?col:'var(--border)'};
-              background:${isOn?col+'18':'var(--bg-elevated)'}">
-              <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;
-                border:2px solid ${isOn?col:'rgba(255,255,255,.1)'};
-                background:${col}18;display:flex;align-items:center;justify-content:center;
-                flex-shrink:0">
-                ${c.photo
-                  ? `<img src="${c.photo}" style="width:100%;height:100%;
-                      object-fit:cover;object-position:${photoPos}">`
-                  : `<span style="font-family:'Cinzel',serif;font-weight:700;
-                      font-size:.95rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
-              </div>
-              <span style="font-size:.65rem;text-align:center;
-                color:${isOn?col:'var(--text-dim)'};font-weight:${isOn?'700':'400'};
-                line-height:1.2;max-width:72px;overflow:hidden;
-                text-overflow:ellipsis;white-space:nowrap">${c.nom||'?'}</span>
-              ${isOn?`<div style="width:8px;height:8px;border-radius:50%;
-                background:${col};flex-shrink:0"></div>`:''}
-            </div>`;
-          }).join('');
-        })()}
-      </div>
+    <!-- ════ TABS ════════════════════════════════════════════════ -->
+    <div class="mn-tabs" role="tablist">
+      <button type="button" class="mn-tab is-active" data-tab="histoire">📜 Histoire</button>
+      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${_modalGroupes.length || ''}</span></button>
+      ${autresItems.length ? `<button type="button" class="mn-tab" data-tab="liens">↝ Liens <span class="mn-tab-count" id="mn-tab-count-liens">${(item?.liens||[]).length || ''}</span></button>` : ''}
+      <button type="button" class="mn-tab" data-tab="reglages">⚙️ Réglages</button>
     </div>
 
-    <div id="st-mission-extra" style="">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-        <div class="form-group">
-          <label>Statut</label>
-          <select class="input-field" id="st-statut">
-            ${['En cours','Terminée','Échouée','En attente'].map(s=>
-              `<option ${s===(item?.statut||'En cours')?'selected':''}>${s}</option>`).join('')}
-          </select>
+    <!-- ════ TAB CONTENT ═════════════════════════════════════════ -->
+    <div class="mn-body">
+
+      <!-- ── ONGLET HISTOIRE ────────────────────────────────────── -->
+      <section class="mn-panel is-active" data-panel="histoire">
+
+        <!-- Type segmented control -->
+        <div class="mn-row">
+          <label class="mn-label">Type</label>
+          <div class="mn-segmented" id="mn-type-seg">
+            <button type="button" class="mn-seg ${(item?.type||'mission')==='mission'?'is-active':''}" data-type="mission">🎯 Mission</button>
+            <button type="button" class="mn-seg ${item?.type==='event'?'is-active':''}" data-type="event">📖 Événement</button>
+          </div>
+          <input type="hidden" id="st-type" value="${item?.type || 'mission'}">
         </div>
-        <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
-          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.35rem;font-weight:400">
-            <input type="checkbox" id="st-visible" ${item?.visibleJoueurs===false?'':'checked'}
-              style="accent-color:var(--gold);width:14px;height:14px;cursor:pointer">
-            Visible aux joueurs
-          </label>
+
+        <!-- Statut en pills cliquables -->
+        <div class="mn-row">
+          <label class="mn-label">Statut</label>
+          <div class="mn-statut-pills" id="mn-statut-pills">
+            ${STATUTS.map(s => `<button type="button"
+              class="mn-statut-pill ${s.v===curStatut?'is-active':''}"
+              data-statut="${s.v}"
+              style="--c:${s.c}">
+              <span class="mn-statut-pill-icon">${s.i}</span>${s.v}
+            </button>`).join('')}
+          </div>
+          <input type="hidden" id="st-statut" value="${curStatut}">
         </div>
-      </div>
-    </div>
+
+        <!-- Grille axe + date + lieu -->
+        <div class="mn-grid-2">
+          <div class="mn-field">
+            <label class="mn-label">Axe narratif</label>
+            <div class="mn-axe-wrap">
+              <input type="text" class="mn-input" id="st-axe"
+                value="${_esc(item?.axe||'')}" placeholder="ex: Mystères de Granlac"
+                list="st-axe-list" autocomplete="off">
+              <datalist id="st-axe-list">
+                ${knownAxes.map(a => `<option value="${_esc(a)}">`).join('')}
+              </datalist>
+            </div>
+            ${knownAxes.length ? `<div class="mn-axe-chips">
+              ${knownAxes.slice(0, 5).map(a => `<button type="button" class="mn-axe-chip"
+                style="color:${_axeMap[a] || 'var(--text-muted)'};border-color:${_axeMap[a] ? _axeMap[a] + '55' : 'var(--border)'}"
+                onclick="document.getElementById('st-axe').value='${a.replace(/'/g,"\\'")}';document.getElementById('st-axe').dispatchEvent(new Event('input'))">
+                ● ${_esc(a)}
+              </button>`).join('')}
+            </div>` : ''}
+          </div>
+          <div class="mn-field">
+            <label class="mn-label">Date / Session</label>
+            <input type="text" class="mn-input" id="st-date"
+              value="${_esc(item?.date||'')}" placeholder="Session 1, 27 Mars 1247…">
+          </div>
+        </div>
+
+        <div class="mn-field">
+          <label class="mn-label">Lieu</label>
+          <input type="text" class="mn-input" id="st-lieu"
+            value="${_esc(item?.lieu||'')}" placeholder="Forêt du Cap d'Espérance">
+        </div>
+
+        <!-- Description : large -->
+        <div class="mn-field">
+          <label class="mn-label">Description <span class="mn-label-hint">— ce que le récit raconte</span></label>
+          <textarea class="mn-input mn-textarea" id="st-desc" rows="5"
+            placeholder="Quelques lignes pour camper la mission, ses enjeux, ses lieux clés…">${_esc(item?.description||'')}</textarea>
+        </div>
+      </section>
+
+      <!-- ── ONGLET GROUPES ─────────────────────────────────────── -->
+      <section class="mn-panel" data-panel="groupes">
+        <div class="mn-panel-intro">
+          Les personnages sont rattachés à un <strong>groupe</strong>. Plusieurs groupes peuvent
+          mener la même mission en parallèle, chacun avec sa propre réussite et récompense.
+        </div>
+        <div id="st-groups-list" class="st-groups-list">
+          ${_renderGroupCards(_modalGroupes)}
+        </div>
+        <button type="button" class="st-group-add" onclick="window._stSaveGroupDialog()">+ Nouveau groupe</button>
+
+        <div id="st-save-group-form" class="st-group-form" style="display:none">
+          <div id="st-group-form-title" class="st-form-section-sub">Nouveau groupe</div>
+          <div class="mn-field">
+            <label class="mn-label">Nom du groupe</label>
+            <input id="st-save-group-name" class="mn-input"
+              placeholder="Avant-garde, Trio des cendres…" maxlength="40"
+              onkeydown="if(event.key==='Enter')window._stConfirmSaveGroup();if(event.key==='Escape')window._stCancelGroupForm()">
+          </div>
+          <div class="mn-field">
+            <label class="mn-label">
+              Membres <span class="mn-label-hint">— clique pour cocher</span>
+            </label>
+            <div class="mn-picker-search-wrap">
+              <span>🔍</span>
+              <input type="text" id="mn-picker-search" placeholder="Filtrer un personnage…">
+            </div>
+            <div id="st-group-picker" class="st-group-picker">
+              ${(() => {
+                const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+                return (STATE.characters||[]).map(c => {
+                  const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
+                  const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
+                  return `<div onclick="window._stGroupPickToggle('${c.id}','${col}')"
+                    id="st-gpick-${c.id}" data-gm-id="${c.id}" data-picked="0"
+                    data-char-name="${_esc((c.nom||'').toLowerCase())}"
+                    class="st-group-pick">
+                    <div class="st-group-pick-avatar" style="--col:${col}">
+                      ${c.photo
+                        ? `<img src="${_esc(c.photo)}" style="object-position:${pp}">`
+                        : `<span>${(c.nom||'?')[0].toUpperCase()}</span>`}
+                    </div>
+                    <span class="st-group-pick-name">${_esc(c.nom||'?')}</span>
+                  </div>`;
+                }).join('') || '<span style="font-size:.75rem;color:var(--text-dim)">Aucun personnage.</span>';
+              })()}
+            </div>
+          </div>
+          <div class="st-group-form-actions">
+            <button type="button" class="btn btn-gold" onclick="window._stConfirmSaveGroup()">✓ Enregistrer le groupe</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="window._stCancelGroupForm()">Annuler</button>
+          </div>
+        </div>
+      </section>
 
     ${autresItems.length?`
-    <div class="form-group">
-      <label style="display:flex;align-items:center;gap:.5rem">
-        ↝ Mène vers
-        <span style="font-size:.72rem;color:var(--text-dim);font-weight:400">— missions débloquées après celle-ci</span>
-      </label>
-      <div id="st-liens-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:.5rem;margin-top:.4rem">
+      <!-- ── ONGLET LIENS ───────────────────────────────────────── -->
+      <section class="mn-panel" data-panel="liens">
+        <div class="mn-panel-intro">
+          Sélectionne les missions qui se déclenchent <strong>après</strong> celle-ci.
+          Si elles sont sur un axe différent, un trait pointillé doré les reliera sur la carte.
+        </div>
+        <div class="mn-liens-search-wrap">
+          <span>🔍</span>
+          <input type="text" id="mn-liens-search" placeholder="Filtrer les missions…">
+        </div>
+      <div id="st-liens-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.55rem;margin-top:.4rem">
         ${autresItems.map(other => {
           const checked=(item?.liens||[]).includes(other.id);
           const axeCol=other.axe?(_axeMap[other.axe]||'var(--text-dim)'):'var(--text-dim)';
@@ -853,19 +1778,59 @@ async function openStoryModal(item = null) {
             <input type="checkbox" id="lien-${other.id}" ${checked?'checked':''} style="display:none">
           </div>`;
         }).join('')}
-      </div>
-    </div>`:``}
+        </div>
+      </section>`:``}
 
-    <div class="form-group">
-      <label>Ordre d'affichage</label>
-      <input type="number" class="input-field" id="st-ordre" value="${item?.ordre||0}">
+      <!-- ── ONGLET RÉGLAGES ────────────────────────────────────── -->
+      <section class="mn-panel" data-panel="reglages">
+        <div class="mn-grid-2">
+          <div class="mn-field">
+            <label class="mn-label">Acte <span class="mn-label-hint">— quel chapitre de la trame</span></label>
+            <input type="text" class="mn-input" id="st-acte"
+              value="${_esc(item?.acte||acteActif)}" placeholder="Acte I">
+          </div>
+          <div class="mn-field">
+            <label class="mn-label">Ordre <span class="mn-label-hint">— position dans la frise temporelle</span></label>
+            <input type="number" class="mn-input" id="st-ordre" value="${item?.ordre||0}" min="0">
+          </div>
+        </div>
+
+        <label class="mn-toggle">
+          <input type="checkbox" id="st-visible" ${item?.visibleJoueurs===false?'':'checked'}>
+          <span class="mn-toggle-track"><span class="mn-toggle-thumb"></span></span>
+          <span class="mn-toggle-text">
+            <strong>Visible aux joueurs</strong>
+            <span class="mn-label-hint">décoche pour préparer en secret</span>
+          </span>
+        </label>
+
+        ${item?.id ? `
+        <div class="mn-danger-zone">
+          <div class="mn-danger-title">⚠️ Zone dangereuse</div>
+          <button type="button" class="mn-btn-danger"
+            onclick="closeModal();deleteStory('${item.id}')">🗑️ Supprimer cette mission</button>
+        </div>` : ''}
+      </section>
+    </div><!-- /mn-body -->
+
+    <!-- ════ FOOTER STICKY ═══════════════════════════════════════ -->
+    <div class="mn-footer">
+      <div class="mn-footer-hint">
+        <kbd>Ctrl</kbd>+<kbd>S</kbd> pour enregistrer · <kbd>Esc</kbd> pour fermer
+      </div>
+      <div class="mn-footer-actions">
+        <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
+        <button class="btn btn-gold" id="mn-save-btn" onclick="saveStory('${item?.id||''}')">
+          ${item?'💾 Enregistrer':'＋ Créer la mission'}
+        </button>
+      </div>
     </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
-      onclick="saveStory('${item?.id||''}')">
-      ${item?'Enregistrer':'Créer'}
-    </button>
+  </div><!-- /mn-shell -->
   `);
+
+  // ── Bindings UI : tabs, segmented, statut pills, live preview, raccourcis ──
+  _initMissionModalUI(item);
 
   // Mise à jour d'un champ de résultat sur un groupe en mémoire
   window._stGroupField = (groupId, field, value) => {
@@ -873,39 +1838,7 @@ async function openStoryModal(item = null) {
     if (g) g[field] = value;
   };
 
-  // Toggle participant dans la grille
-  window._toggleStParticipant = (charId) => {
-    const el  = document.getElementById(`st-part-${charId}`);
-    if (!el) return;
-    const col = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'][
-      (el.dataset.partNom||'').charCodeAt(0) % 6];
-    const isOn = el.dataset.selected === '1';
-    el.dataset.selected = isOn ? '0' : '1';
-    el.style.borderColor  = !isOn ? col : 'var(--border)';
-    el.style.background   = !isOn ? col+'18' : 'var(--bg-elevated)';
-    // Mettre à jour le point indicateur et la couleur du nom
-    const nameEl = el.querySelector('span');
-    const dotEl  = el.querySelector('[style*="border-radius:50%;background"]');
-    if (nameEl) { nameEl.style.color = !isOn ? col : 'var(--text-dim)'; nameEl.style.fontWeight = !isOn ? '700' : '400'; }
-    if (!isOn && !dotEl) {
-      const dot = document.createElement('div');
-      dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0`;
-      el.appendChild(dot);
-    } else if (isOn && dotEl) dotEl.remove();
-  };
-
-  // ── Groupes ────────────────────────────────────────────────────────────────
-  window._stApplyGroup = (membres) => {
-    // Désélectionner tous les participants actifs
-    document.querySelectorAll('[id^="st-part-"]').forEach(el => {
-      if (el.dataset.selected === '1') window._toggleStParticipant(el.dataset.partId);
-    });
-    // Sélectionner les membres du groupe
-    membres.forEach(id => {
-      const el = document.getElementById(`st-part-${id}`);
-      if (el && el.dataset.selected !== '1') window._toggleStParticipant(id);
-    });
-  };
+  // (Anciens handlers participants individuels supprimés — modèle "groupes only")
 
   window._stGroupPickToggle = (charId, col) => {
     const el = document.getElementById(`st-gpick-${charId}`);
@@ -938,10 +1871,17 @@ async function openStoryModal(item = null) {
     _editingGroupId = null;
     _resetGroupPicker();
     const titleEl = document.getElementById('st-group-form-title');
-    if (titleEl) titleEl.textContent = 'Nouveau groupe — Membres';
+    if (titleEl) titleEl.textContent = 'Nouveau groupe';
     form.style.display = 'block';
+    form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
     const inp = document.getElementById('st-save-group-name');
     if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+  };
+  window._stCancelGroupForm = () => {
+    const form = document.getElementById('st-save-group-form');
+    if (form) form.style.display = 'none';
+    _editingGroupId = null;
+    _resetGroupPicker();
   };
 
   window._stEditGroup = (groupId) => {
@@ -961,8 +1901,9 @@ async function openStoryModal(item = null) {
       window._stGroupPickToggle(charId, col);
     });
     const titleEl = document.getElementById('st-group-form-title');
-    if (titleEl) titleEl.textContent = `Modifier « ${g.nom} » — Membres`;
+    if (titleEl) titleEl.textContent = `Modifier « ${g.nom} »`;
     form.style.display = 'block';
+    form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
     const inp = document.getElementById('st-save-group-name');
     if (inp) { inp.value = g.nom || ''; setTimeout(() => inp.focus(), 50); }
   };
@@ -997,13 +1938,6 @@ async function openStoryModal(item = null) {
     _refreshStGroupsRow(_modalGroupes);
   };
 
-  // Initialiser data-selected depuis les participants existants
-  (item?.participants||[]).forEach(p => {
-    if (!p.id) return;
-    const el = document.getElementById(`st-part-${p.id}`);
-    if (el) el.dataset.selected = '1';
-  });
-
   // ── Upload + crop image (4:3 verrouillé) ──────────────────────────────────
   _stCropper?.destroy();
   _stCropper = attachDropAndCrop({
@@ -1017,6 +1951,13 @@ async function openStoryModal(item = null) {
     ratio:         { w: 4, h: 3 },
     previewMaxH:   70,
     output:        { maxW: 800, target: 700_000 },
+    onResult: (b64) => {
+      // Sync live le fond du hero avec l'image confirmée
+      const hero = document.getElementById('mn-hero-bg');
+      if (!hero) return;
+      if (b64) hero.style.backgroundImage = `url("${String(b64).replace(/"/g,'%22')}")`;
+      else hero.style.backgroundImage = '';
+    },
   });
 
   // Toggle visuel d'une card lien
@@ -1051,17 +1992,22 @@ async function saveStory(id = '') {
       imageUrl = existing?.imageUrl || '';
     }
 
-    // Participants depuis la grille de sélection
-    const participants = [...document.querySelectorAll('[id^="st-part-"]')]
-      .filter(el => el.dataset.selected === '1')
-      .map(el => ({
-        id:        el.dataset.partId       || '',
-        nom:       el.dataset.partNom      || '',
-        photo:     el.dataset.partPhoto    || '',
-        photoX:    parseFloat(el.dataset.partPhotox)    || 0,
-        photoY:    parseFloat(el.dataset.partPhotoy)    || 0,
-        photoZoom: parseFloat(el.dataset.partPhotozoom) || 1,
-      }));
+    // Participants = union des membres de TOUS les groupes (déduplication par id).
+    // On les matérialise depuis STATE.characters pour conserver photo / photoX,Y.
+    // C'est le seul moyen de rattacher des personnages à une mission désormais :
+    // pas de participants individuels possibles.
+    const chars = STATE.characters || [];
+    const seenPartIds = new Set();
+    const participants = [];
+    _modalGroupes.forEach(g => (g.membres || []).forEach(id => {
+      if (seenPartIds.has(id)) return;
+      seenPartIds.add(id);
+      const c = chars.find(x => x.id === id);
+      if (c) participants.push({
+        id: c.id, nom: c.nom || '', photo: c.photo || '',
+        photoX: c.photoX || 0, photoY: c.photoY || 0, photoZoom: c.photoZoom || 1,
+      });
+    }));
 
     const allCb=document.querySelectorAll('[id^="lien-"]');
     const liens=[...allCb].filter(cb=>cb.checked).map(cb=>cb.id.replace('lien-',''));

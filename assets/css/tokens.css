@@ -31,6 +31,17 @@
   --emerald-dim: rgba(34,195,142,0.18);
   --amber:       #f4c430;
   --amber-dim:   rgba(244,196,48,0.18);
+
+  /* Trame — statuts de mission (handoff STORY.md) */
+  --st-cours:    #7eb0ff;  --st-cours-glow:    rgba(126,176,255,0.20);
+  --st-terminee: #22c38e;  --st-terminee-glow: rgba(34,195,142,0.20);
+  --st-attente:  #7a8fa8;  --st-attente-glow:  rgba(122,143,168,0.16);
+  --st-echec:    #ff5a7e;  --st-echec-glow:    rgba(255,90,126,0.20);
+  --trame-accent:  var(--amber);
+  --trame-accent2: var(--ember);
+
+  /* Police monospace pour chiffres & chronologie */
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   --border:         rgba(255,255,255,0.06);
   --border-md:      rgba(255,255,255,0.10);
   --border-strong:  rgba(255,255,255,0.16);
