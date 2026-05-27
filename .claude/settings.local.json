@@ -146,7 +146,10 @@
       "Bash(node --check assets/js/shared/realtime.js)",
       "Bash(node --check assets/js/core/adventure.js)",
       "Bash(node --check assets/js/core/init.js)",
-      "Bash(grep -n '_vttResolveArg\\\\|case '\\\\''$value'\\\\''\\\\|case \"$value\"' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/vtt.js)"
+      "Bash(grep -n '_vttResolveArg\\\\|case '\\\\''$value'\\\\''\\\\|case \"$value\"' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/vtt.js)",
+      "Bash(node -e \"const f=require\\('fs'\\).readFileSync\\('assets/css/histoire.css','utf8'\\); const o=\\(f.match\\(/\\\\{/g\\)||[]\\).length; const c=\\(f.match\\(/\\\\}/g\\)||[]\\).length; console.log\\('css braces:',o,c,o===c?'OK':'NOK'\\);\")",
+      "Bash(awk 'NR==69' assets/js/features/story.js)",
+      "Bash(awk 'NR==68' assets/js/features/story.js)"
     ]
   }
 }
