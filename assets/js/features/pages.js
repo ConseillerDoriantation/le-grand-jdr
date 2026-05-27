@@ -1029,32 +1029,34 @@ const PAGES = {
     const chars = await loadChars(uid);
     STATE.characters = chars;
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div><div class="page-subtitle">Gérez vos fiches de personnage</div></div>`;
+    // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
+    let html = `<div class="page-header">
+      <div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div>
+      <div class="page-subtitle">Gérez vos fiches de personnage</div>
+    </div>`;
     if (STATE.isAdmin && chars.length > 0) {
       const byUser = {};
       chars.forEach(c => { if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = []; byUser[c.ownerPseudo].push(c); });
-      html += `<div class="admin-section"><div class="admin-label">Vue Admin — Tous les joueurs</div><div class="char-select-bar" id="admin-player-filter"><div class="char-pill active" onclick="filterAdminChars(null,this)">Tous</div>${Object.keys(byUser).map(p => `<div class="char-pill" onclick="filterAdminChars('${p}',this)">${p}</div>`).join('')}</div></div>`;
+      html += `<div class="admin-section" style="margin-bottom:.6rem">
+        <div class="admin-label" style="font-size:.7rem;color:var(--text-dim);letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:.4rem">Filtre admin :</div>
+        <div class="char-select-bar" id="admin-player-filter" style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="cs-admin-filter active" data-pseudo="" onclick="filterAdminChars(null,this)">Tous</button>
+          ${Object.keys(byUser).map(p => `<button type="button" class="cs-admin-filter" data-pseudo="${_esc(p)}" onclick="filterAdminChars('${_esc(p)}',this)">${_esc(p)} <span style="opacity:.5">·${byUser[p].length}</span></button>`).join('')}
+        </div>
+      </div>`;
     }
     if (chars.length === 0) {
       html += `<div class="empty-state"><div class="icon">📜</div><p>Aucun personnage. Crée ton premier héros !</p></div>
         <div style="margin-bottom:1.5rem"><button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button></div>`;
     } else {
-      html += `<div class="char-select-bar" id="char-pills">
-        ${chars.map((c, i) => window.charNavCardHtml ? window.charNavCardHtml(c, i === 0) : `<button type="button" class="char-pill ${i === 0 ? 'active' : ''}" data-charid="${_esc(c.id)}" onclick="selectChar('${c.id}',this)">${_esc(c.nom || '?')}</button>`).join('')}
-        <button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button>
-      </div><div id="char-sheet-area"></div>`;
+      html += `<div id="char-sheet-area"></div>`;
     }
     content.innerHTML = html;
     if (chars.length > 0) {
-      // Si on vient du dashboard avec un personnage ciblé, le sélectionner directement
       const targetId  = window._targetCharId;
       window._targetCharId = null;
       const charToShow = (targetId ? chars.find(c => c.id === targetId) : null) || chars[0];
       STATE.activeChar = charToShow;
-      // Mettre à jour la pill active
-      document.querySelectorAll('#char-pills .char-pill').forEach(p => {
-        p.classList.toggle('active', p.dataset.charid === charToShow.id);
-      });
       renderCharSheet(charToShow);
     }
   },

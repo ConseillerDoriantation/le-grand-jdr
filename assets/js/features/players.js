@@ -126,7 +126,6 @@ function _buildRecord(char = null, pres = null) {
     // Séparé de char?.photoX/Y pour que le PJ puisse avoir un cadrage différent
     // dans sa fiche perso vs sa card de présentation.
     initials:       _initials(nom),
-    bio:            pres?.bio?.trim() || '',     // legacy plain text
     content:        pres?.content || '',         // rich text HTML
     tags:           pres?.tags || [],
     stats:          char ? STAT_META.map(m => ({ ...m, value: _getStat(char, m.key) })) : [],
@@ -149,14 +148,22 @@ function _buildRecord(char = null, pres = null) {
       return imgUrl ? [{ url: imgUrl, isPortrait: true }] : [];
     })(),
     // Affichage public — flags configurables par presentation
-    visible:        show('visible', true),
-    afficherPV:     show('afficherPV', true),
-    afficherPM:     show('afficherPM', true),
-    afficherCA:     show('afficherCA', true),
-    afficherOr:     show('afficherOr', false),     // Or masqué par défaut
-    afficherStats:  show('afficherStats', true),
-    afficherNiveau: show('afficherNiveau', true),
-    afficherEquip:  show('afficherEquip', true),   // NOUVEAU : équipement
+    visible:           show('visible', true),
+    afficherPV:        show('afficherPV', true),
+    afficherPM:        show('afficherPM', true),
+    afficherCA:        show('afficherCA', true),
+    afficherOr:        show('afficherOr', false),     // Or masqué par défaut
+    afficherStats:     show('afficherStats', true),
+    afficherNiveau:    show('afficherNiveau', true),
+    afficherEquip:     show('afficherEquip', true),   // équipement
+    afficherIdentite:  show('afficherIdentite', true), // Âge / Taille / Yeux…
+    afficherCitation:  show('afficherCitation', true), // « citation »
+    afficherBio:       show('afficherBio', true),      // biographie rich-text
+    afficherTags:      show('afficherTags', true),     // traits de caractère
+    // Champs nouveaux propagés depuis le character doc
+    quote:    char?.quote || '',
+    identity: Array.isArray(char?.identity) ? char.identity : [],
+    bio:            pres?.bio?.trim() || char?.bio || '',
     // Vitaux calculés
     pvActuel:       char?.pvActuel ?? null,
     pvMax:          char ? calcPVMax(char) : null,
@@ -757,24 +764,48 @@ function _renderFiche(item, items) {
 
   // ── Tags purement informatifs ────────────────────────────────────────
   const tagsHtml = (item.tags || []).length
-    ? `<div class="pp-fiche-tags">
+    ? (item.afficherTags ? `<div class="pp-fiche-tags">
         ${item.tags.map(t => {
           const [bg, bc, c] = _tagColor(t);
           return `<span class="pp-tag-chip pp-tag-chip--view"
             style="background:${bg};border-color:${bc};color:${c}">${_esc(t)}</span>`;
         }).join('')}
-      </div>` : '';
+      </div>` : '') : '';
+
+  // Citation (item.afficherCitation)
+  const citationHtml = item.afficherCitation && item.quote
+    ? `<div class="pp-fiche-quote">« ${_esc(item.quote)} »</div>`
+    : '';
+
+  // Identité (Âge / Taille / Yeux / etc.) — accepte legacy [[k,v]] et [{k,v}]
+  const identityNorm = (item.identity || []).map(e => {
+    if (Array.isArray(e)) return { k: String(e[0] || ''), v: String(e[1] || '') };
+    if (e && typeof e === 'object' && e.k) return { k: String(e.k), v: String(e.v || '') };
+    return null;
+  }).filter(e => e && e.v);
+  const identityHtml = item.afficherIdentite && identityNorm.length
+    ? `<section class="pp-fiche-card">
+        <h3 class="pp-fiche-card-title">📜 Identité</h3>
+        <div class="pp-fiche-identity-list">
+          ${identityNorm.map(({ k, v }) => `<div class="pp-fiche-identity-row">
+            <span class="pp-fiche-identity-k">${_esc(k)}</span>
+            <span class="pp-fiche-identity-v">${_esc(v)}</span>
+          </div>`).join('')}
+        </div>
+      </section>` : '';
 
   const titlesHtml = item.titles.length
     ? `<div class="pp-fiche-titles">
         ${item.titles.slice(0, 6).map(t => `<span class="pp-fiche-title">${_esc(t)}</span>`).join('')}
       </div>` : '';
 
-  const narrative = item.content
-    ? richTextContentHtml({ html: item.content, className: 'pp-rich-content' })
-    : item.bio
-      ? `<div class="pp-bio-legacy">${_nl2br(item.bio)}</div>`
-      : `<div class="pp-narrative-empty">Aucune présentation pour ce personnage pour l'instant.</div>`;
+  const narrative = item.afficherBio
+    ? (item.content
+        ? richTextContentHtml({ html: item.content, className: 'pp-rich-content' })
+        : item.bio
+          ? `<div class="pp-bio-legacy">${_nl2br(item.bio)}</div>`
+          : `<div class="pp-narrative-empty">Aucune présentation pour ce personnage pour l'instant.</div>`)
+    : `<div class="pp-narrative-empty">Biographie masquée par le PJ.</div>`;
 
   // ── Sections sidebar (stats / équipement / hauts-faits / partenaires) ─
   const statsHtml = item.afficherStats && item.stats.length
@@ -840,11 +871,12 @@ function _renderFiche(item, items) {
       <div class="pp-fiche-narrative-col">
         ${titlesHtml}
         ${tagsHtml}
+        ${citationHtml}
 
-        <section class="pp-fiche-card pp-fiche-narrative">
+        ${item.afficherBio ? `<section class="pp-fiche-card pp-fiche-narrative">
           <h3 class="pp-fiche-card-title">Présentation</h3>
           ${narrative}
-        </section>
+        </section>` : ''}
 
         ${galleryHtml}
         ${chroniqueHtml}
@@ -854,6 +886,7 @@ function _renderFiche(item, items) {
       <!-- Colonne droite (ou en dessous sur petit écran) : sidebar stats -->
       <aside class="pp-fiche-sidebar-col">
         ${statsHtml}
+        ${identityHtml}
         ${equipHtml}
         ${achievementsHtml}
       </aside>
@@ -1382,13 +1415,17 @@ async function openPlayerPresentModal(player = null) {
       <div class="pp-form-section-title">🔒 Informations visibles par les joueurs</div>
       <div class="pp-form-checks">
         ${[
-          { id:'pp-show-pv',     label:'Points de Vie (PV)',     key:'afficherPV',     def:true  },
-          { id:'pp-show-pm',     label:'Points de Magie (PM)',   key:'afficherPM',     def:true  },
-          { id:'pp-show-ca',     label:'Classe d\'Armure (CA)',  key:'afficherCA',     def:true  },
-          { id:'pp-show-or',     label:'Or',                     key:'afficherOr',     def:false },
-          { id:'pp-show-stats',  label:'Statistiques',           key:'afficherStats',  def:true  },
-          { id:'pp-show-lvl',    label:'Niveau',                 key:'afficherNiveau', def:true  },
-          { id:'pp-show-equip',  label:'Équipement',             key:'afficherEquip',  def:true  },
+          { id:'pp-show-pv',         label:'Points de Vie (PV)',     key:'afficherPV',        def:true  },
+          { id:'pp-show-pm',         label:'Points de Magie (PM)',   key:'afficherPM',        def:true  },
+          { id:'pp-show-ca',         label:'Classe d\'Armure (CA)',  key:'afficherCA',        def:true  },
+          { id:'pp-show-or',         label:'Or',                     key:'afficherOr',        def:false },
+          { id:'pp-show-stats',      label:'Statistiques',           key:'afficherStats',     def:true  },
+          { id:'pp-show-lvl',        label:'Niveau',                 key:'afficherNiveau',    def:true  },
+          { id:'pp-show-equip',      label:'Équipement',             key:'afficherEquip',     def:true  },
+          { id:'pp-show-identite',   label:'Identité (Âge, Taille…)',key:'afficherIdentite',  def:true  },
+          { id:'pp-show-citation',   label:'Citation',               key:'afficherCitation',  def:true  },
+          { id:'pp-show-bio',        label:'Biographie',             key:'afficherBio',       def:true  },
+          { id:'pp-show-tags',       label:'Traits de caractère',    key:'afficherTags',      def:true  },
         ].map(f => {
           const checked = player?.[f.key] !== undefined ? player[f.key] : f.def;
           return `<label class="pp-form-check">
@@ -1654,7 +1691,11 @@ async function _savePlayerPresent(id = '') {
       afficherOr:     document.getElementById('pp-show-or')?.checked    ?? false,
       afficherStats:  document.getElementById('pp-show-stats')?.checked ?? true,
       afficherNiveau: document.getElementById('pp-show-lvl')?.checked   ?? true,
-      afficherEquip:  document.getElementById('pp-show-equip')?.checked ?? true,
+      afficherEquip:     document.getElementById('pp-show-equip')?.checked     ?? true,
+      afficherIdentite:  document.getElementById('pp-show-identite')?.checked  ?? true,
+      afficherCitation:  document.getElementById('pp-show-citation')?.checked  ?? true,
+      afficherBio:       document.getElementById('pp-show-bio')?.checked       ?? true,
+      afficherTags:      document.getElementById('pp-show-tags')?.checked      ?? true,
       gallery:        _ppGallery.slice(0, PP_GALLERY_MAX),
     };
     _ppGallery = [];

@@ -149,7 +149,19 @@
       "Bash(grep -n '_vttResolveArg\\\\|case '\\\\''$value'\\\\''\\\\|case \"$value\"' /home/ubuntu/DEV/le-grand-jdr/assets/js/features/vtt.js)",
       "Bash(node -e \"const f=require\\('fs'\\).readFileSync\\('assets/css/histoire.css','utf8'\\); const o=\\(f.match\\(/\\\\{/g\\)||[]\\).length; const c=\\(f.match\\(/\\\\}/g\\)||[]\\).length; console.log\\('css braces:',o,c,o===c?'OK':'NOK'\\);\")",
       "Bash(awk 'NR==69' assets/js/features/story.js)",
-      "Bash(awk 'NR==68' assets/js/features/story.js)"
+      "Bash(awk 'NR==68' assets/js/features/story.js)",
+      "Bash(awk 'NR>=521 && NR<=760 && /\\\\*\\\\//' assets/js/features/characters.js)",
+      "Bash(awk '/\\\\/\\\\*$/{n=NR} END{print n}' assets/js/features/characters.js)",
+      "Bash(awk '/^  \\\\*\\\\/$/{print NR\" : */\"; exit}' assets/js/features/characters.js)",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"import\\('./assets/js/features/characters.js'\\).then\\(m=>console.log\\('OK',Object.keys\\(m\\).length\\)\\).catch\\(e=>console.error\\('ERR:',e.message\\)\\);\")",
+      "Bash(awk '/^function renderCharSheet/{inf=1;braces=0} inf{ for\\(i=1;i<=length\\($0\\);i++\\){c=substr\\($0,i,1\\); if\\(c==\"{\"\\)braces++; else if\\(c==\"}\"\\)braces--}; if\\(/^\\\\s+const \\\\w/\\) print NR\": \"$0; if\\(inf && braces==0 && NR>200\\){exit}}' assets/js/features/characters.js)",
+      "Bash(node -e \"import\\('./assets/js/features/characters/tabs.js'\\).then\\(m=>console.log\\('tabs OK',Object.keys\\(m\\).length\\)\\).catch\\(e=>console.error\\('tabs ERR:',e.message\\)\\);\")",
+      "Bash(node -e \"const f=require\\('fs'\\).readFileSync\\('assets/css/characters.css','utf8'\\);const o=\\(f.match\\(/\\\\{/g\\)||[]\\).length;const c=\\(f.match\\(/\\\\}/g\\)||[]\\).length;console.log\\('css',o,c,o===c?'OK':'NOK'\\);\")",
+      "Bash(node test-load.mjs)",
+      "Bash(grep -n \"\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'\" assets/js/features/characters.js)",
+      "Bash(node -e \"const f=require\\('fs'\\).readFileSync\\('assets/css/characters.css','utf8'\\);const o=\\(f.match\\(/\\\\{/g\\)||[]\\).length;const c=\\(f.match\\(/\\\\}/g\\)||[]\\).length;console.log\\('chars.css',o,c,o===c?'OK':'NOK'\\);\")",
+      "Bash(node -e \"const f=require\\('fs'\\).readFileSync\\('assets/css/features.css','utf8'\\);const o=\\(f.match\\(/\\\\{/g\\)||[]\\).length;const c=\\(f.match\\(/\\\\}/g\\)||[]\\).length;console.log\\('features.css',o,c,o===c?'OK':'NOK'\\);\")"
     ]
   }
 }

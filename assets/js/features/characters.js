@@ -17,6 +17,8 @@ import {
   _getTraits, getEquippedInventoryIndexMap, syncEquipmentAfterInventoryMutation,
   normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData,
   applyFlatBonusToRollText, getToucherDisplay, getDegatsDisplay,
+  // V3 — combat helpers
+  getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts,
 } from './characters/data.js';
 
 import {
@@ -55,7 +57,7 @@ import {
   renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
   addProfilTag, removeProfilTag, initProfilTagUi,
 } from './characters/tabs.js';
-import { bindRichTextEditors } from '../shared/rich-text.js';
+import { bindRichTextEditors, richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 
 import {
   inlineEditText, inlineEditNum, inlineEditChip,
@@ -75,6 +77,11 @@ import {
 } from './characters/export.js';
 
 import { quickViewChar } from './characters/quick-view.js';
+import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
+import Sortable from '../vendor/sortable.esm.js';
+
+// Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
+let _combatTabCache = { styles: null, dmgTypes: null };
 
 // ══════════════════════════════════════════════
 // SÉLECTION
@@ -108,13 +115,14 @@ function selectChar(id, el) {
 }
 
 function filterAdminChars(pseudo, el) {
-  document.querySelectorAll('#admin-player-filter .char-pill').forEach(p=>p.classList.remove('active'));
+  // Met à jour la pill active du filtre admin
+  document.querySelectorAll('#admin-player-filter .cs-admin-filter').forEach(p=>p.classList.remove('active'));
   if (el) el.classList.add('active');
-  const pills = document.querySelector('#char-pills');
-  if (!pills) return;
+  // Mémorise le filtre actif pour que renderCharSheet le réutilise au prochain rendu
+  window._charAdminFilter = pseudo || null;
+  // Sélectionne le 1er perso du filtre et rerendre
   const chars = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
-  pills.innerHTML = `${chars.map((c,i)=>charNavCardHtml(c, i===0)).join('')}<button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button>`;
-  if (chars.length > 0) { STATE.activeChar=chars[0]; renderCharSheet(chars[0]); }
+  if (chars.length > 0) { STATE.activeChar = chars[0]; renderCharSheet(chars[0]); }
 }
 
 // ══════════════════════════════════════════════
@@ -141,17 +149,40 @@ function _resolveTab(raw) {
 // ══════════════════════════════════════════════
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// V3 — Tabs simplifiés (6 onglets) selon HANDOFF_Claude_Code.md
+//   combat · sorts · inv · compte · journal · profil
+// On garde le legacy resolveTab pour la rétro-compat des liens entrants.
+// ══════════════════════════════════════════════════════════════════════════════
+const V3_TABS = ['combat', 'sorts', 'inv', 'compte', 'journal', 'profil'];
+const V3_TAB_REMAP = {
+  // anciens → nouveaux
+  equipement: 'combat',
+  maitrises:  'combat',
+  carac:      'combat',
+  inventaire: 'inv',
+  notes:      'journal',
+  quetes:     'journal',
+};
+
+function _resolveV3Tab(raw) {
+  if (V3_TABS.includes(raw)) return raw;
+  return V3_TAB_REMAP[raw] || 'combat';
+}
+
 function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
   const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
 
-  const { top: topTab, leaf: leafTab } = _resolveTab(keepTab || window._currentCharTab || 'equipement');
+  const v3Tab = _resolveV3Tab(keepTab || window._currentCharTab || 'combat');
+  // Conserver le sub-tab du Journal s'il existe (notes / quetes / relations)
+  const journalSub = window._currentJournalSub || 'notes';
 
   window._currentChar    = c;
   window._canEditChar    = canEdit;
-  window._currentCharTab = leafTab;
-  window._currentTopTab  = topTab;
+  window._currentCharTab = v3Tab;
+  window._currentTopTab  = v3Tab;
 
   // ── Valeurs dérivées ─────────────────────────
   const pvMax      = calcPVMax(c);
@@ -213,18 +244,291 @@ function renderCharSheet(c, keepTab) {
     </div>`;
   }).join('');
 
-  // ── Sélecteur multi-personnages ───────────────
+  // ── Sélecteur multi-personnages (pastilles V3) ───────────────
   const allChars    = STATE.characters || [];
-  const switchable  = STATE.isAdmin ? allChars : allChars.filter(x => x.uid === STATE.user?.uid);
-  const switcher    = switchable.length > 1
-    ? `<div class="cs-switcher">${
-        switchable.map(ch => `<button class="cs-switch-pill${ch.id===c.id?' active':''}"
-          data-charid="${ch.id}" onclick="selectChar('${ch.id}',this)"
-          ${ch.id===c.id?'disabled':''}>${ch.nom||'?'}</button>`).join('')
-      }</div>`
+  let switchable    = STATE.isAdmin ? allChars : allChars.filter(x => x.uid === STATE.user?.uid);
+  // Si admin a un filtre actif (par pseudo), on l'applique
+  if (STATE.isAdmin && window._charAdminFilter) {
+    switchable = switchable.filter(x => x.ownerPseudo === window._charAdminFilter);
+  }
+  const AURA_PALETTE = {
+    blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
+    gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
+  };
+  const auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
+
+  const charPillsHtml = switchable.map(ch => {
+    const col = auraColor(ch.aura);
+    const init = (ch.nom || '?')[0].toUpperCase();
+    const photoPos = `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%`;
+    return `<button class="char-pill${ch.id===c.id?' active':''}"
+      data-charid="${ch.id}" onclick="selectChar('${ch.id}',this)"
+      style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}">
+      <span class="char-pill-av">${ch.photo
+        ? `<img src="${ch.photo}" style="object-position:${photoPos}">`
+        : init}</span>
+      <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
+    </button>`;
+  }).join('');
+  const charSwitchHtml = `<div class="char-switch">
+    ${charPillsHtml}
+    ${canEdit ? `<button class="char-pill char-pill-new" onclick="createNewChar()">➕ Nouveau</button>` : ''}
+  </div>`;
+
+  // ── Données du hero & sidebar ─────────────────────────
+  const auraCol = auraColor(c.aura);
+  const auraGlow = `rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.14)`;
+  const auraBd   = `rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.55)`;
+  const auraSh   = `0 0 38px rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.28)`;
+
+  const hpBarCls = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
+
+  // Mini-stats : CA, Vitesse, Maîtrise, DD Sorts
+  const profMod   = Math.max(2, Math.floor(((c.niveau || 1) - 1) / 4) + 2);   // bonus de maîtrise
+  const ddSorts   = 8 + profMod + getMod(c, 'intelligence');
+
+  // Stats banner — 6 tuiles avec badge alloc si points dispo
+  // (réutilise `s` et `sb` déclarés plus haut pour la grille stats legacy)
+  const STATS_TILES = [
+    {key:'force',       abbr:'FOR'},
+    {key:'dexterite',   abbr:'DEX'},
+    {key:'intelligence',abbr:'INT'},
+    {key:'constitution',abbr:'CON'},
+    {key:'sagesse',     abbr:'SAG'},
+    {key:'charisme',    abbr:'CHA'},
+  ];
+  const tilesHtml = STATS_TILES.map(st => {
+    // c.stats[key] contient TOTAL (base initiale + level-ups). On reconstitue les 3 valeurs.
+    const totalBase = s[st.key]  || 8;          // base + level-ups
+    const lvlUp     = parseInt((c.statsLevelUps || {})[st.key]) || 0;
+    const pureBase  = totalBase - lvlUp;        // base initiale (niveau 1)
+    const bonus     = sb[st.key] || 0;          // équipement
+    const total     = totalBase + bonus;
+    const m         = getMod(c, st.key);
+    const mStr      = m >= 0 ? `+${m}` : String(m);
+    const mCls      = m > 0 ? 'pos' : m < 0 ? 'neg' : '';
+    const eqStr     = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '+0';
+    const lvlStr    = lvlUp > 0 ? `+${lvlUp}` : '+0';
+
+    // Boutons ± de level-up : + actif si points dispos, − actif si déjà alloués
+    const canPlus  = canEdit && lvlPointsRemaining > 0;
+    const canMinus = canEdit && lvlUp > 0;
+    const lvlCtrls = canEdit
+      ? `<span class="stat-lvl-ctrls" onclick="event.stopPropagation()">
+          <button class="stat-lvl-btn" ${canMinus?'':'disabled'}
+            onclick="event.stopPropagation();allocateStat('${c.id}','${st.key}',-1)" title="Retirer 1 point">−</button>
+          <button class="stat-lvl-btn plus" ${canPlus?'':'disabled'}
+            onclick="event.stopPropagation();allocateStat('${c.id}','${st.key}',1)" title="Ajouter 1 point">+</button>
+        </span>`
+      : '';
+
+    return `<div class="stat-tile" data-stat="${st.key}"
+      ${canEdit ? `onclick="inlineEditStatFromCard(event,'${c.id}','${st.key}',this)"` : ''}>
+      <span class="stat-tile-abbr">${st.abbr}</span>
+      <span class="stat-tile-total">${total}</span>
+      <span class="stat-tile-mod ${mCls}">${mStr}</span>
+      <span class="stat-tile-detail">
+        <span title="Base initiale">base <b>${pureBase}</b></span>
+        <span title="Équipement">eq <b>${eqStr}</b></span>
+        <span title="Points de niveau gagnés">niv <b>${lvlStr}</b></span>
+      </span>
+      ${lvlCtrls}
+    </div>`;
+  }).join('');
+
+  // Titres
+  const titresChips = titres.length
+    ? `<div class="id-titres">${titres.map(t => `<span class="id-titre">${_esc(t)}</span>`).join('')}</div>`
     : '';
 
-  area.innerHTML = `
+  // Tabs nav (6 onglets v3)
+  const tabsHtml = [
+    { k: 'combat',  ico: '⚔️', lbl: 'Combat' },
+    { k: 'sorts',   ico: '✨', lbl: 'Sorts',     badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
+    { k: 'inv',     ico: '🎒', lbl: 'Inventaire',badge: `${(c.inventaire||[]).length||''}` },
+    { k: 'compte',  ico: '💰', lbl: 'Compte' },
+    { k: 'journal', ico: '📖', lbl: 'Journal' },
+    { k: 'profil',  ico: '👤', lbl: 'Profil' },
+  ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}"
+    data-tab-v3="${t.k}" onclick="showCharTab('${t.k}',this)">
+    <span class="tab-ico">${t.ico}</span> ${t.lbl}
+    ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
+  </button>`).join('');
+
+  const playerLbl = c.ownerPseudo ? `<span class="hero-tag-sep">·</span><span style="color:var(--text-dim)">Joueur :</span> ${_esc(c.ownerPseudo)}` : '';
+  const advLbl    = STATE.adventure?.nom ? `<span style="color:var(--text-dim)">Aventure :</span> ${_esc(STATE.adventure.nom)}` : '';
+
+  area.innerHTML = `<div class="cs-v3">
+  <div class="app-shell">
+
+    <!-- ══════════ CHAR-SWITCH (au-dessus du sheet, pleine largeur) ══════════ -->
+    <div class="char-switch-row">
+      ${charSwitchHtml}
+    </div>
+
+    <!-- ══════════ SHEET ══════════ -->
+    <div class="sheet">
+
+      <!-- ─── SIDEBAR ─── -->
+      <aside class="id-side" id="cs-sidebar" data-aura="${c.aura||'blue'}"
+        style="--aura-glow:${auraGlow};--aura-border:${auraBd};--aura-shadow:${auraSh}">
+
+        <div class="id-portrait-wrap">
+          <div class="id-portrait"
+               ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
+            ${c.photo
+              ? `<img src="${c.photo}" style="transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center">`
+              : `${(c.nom||'?')[0].toUpperCase()}`}
+          </div>
+          <div class="id-lvl-badge">Niv. <strong>${c.niveau||1}</strong></div>
+        </div>
+
+        <div class="id-name-row">
+          ${canEdit
+            ? `<span class="id-name" onclick="inlineEditText('${c.id}','nom',this)" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
+            : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
+          <span class="id-actions-mini">
+            ${canEdit?`<button title="Renommer" onclick="inlineEditText('${c.id}','nom',this.parentElement.previousElementSibling)">✎</button>`:''}
+            ${canEdit?`<button title="Exporter" onclick="openCharExportMenu('${c.id}',this)">📤</button>`:''}
+          </span>
+        </div>
+
+        ${titresChips}
+
+        <div class="id-chips">
+          ${canEdit
+            ? `<span class="id-chip classe" onclick="inlineEditChip('${c.id}','classe',this,'Classe')">${_esc(c.classe||'Classe')}</span>`
+            : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
+          ${canEdit
+            ? `<span class="id-chip race" onclick="inlineEditChip('${c.id}','race',this,'Race')">${_esc(c.race||'Race')}</span>`
+            : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
+        </div>
+
+        <!-- XP -->
+        <div class="xp-block">
+          <div class="xp-row"><span>Expérience</span><span class="xp-pct">${xpPct}%</span></div>
+          <div class="xp-track"><div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div></div>
+          <div class="xp-meta">
+            <span>${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
+            <span>→ Niv. ${(c.niveau||1)+1}</span>
+          </div>
+          ${canEdit?`<div class="xp-add">
+            <label>＋ XP</label>
+            <input type="number" id="xp-add-input-${c.id}" placeholder="0"
+              onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}">
+            <button onclick="addXpDelta('${c.id}')">Ajouter</button>
+          </div>`:''}
+        </div>
+
+        <!-- PV -->
+        <div class="vital hp ${pvPct<25?'danger':''}" id="vital-hp">
+          <div class="vital-icon">❤</div>
+          <div class="vital-body">
+            <div class="vital-head">
+              <span class="vital-label">Points de Vie</span>
+              <span class="vital-num"><span id="pv-val">${pvCur}</span><small>/ ${pvMax}</small></span>
+            </div>
+            <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
+            <div class="vital-ctrls">
+              ${canEdit?`<button class="vital-btn" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
+              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" onclick="inlineEditNum('${c.id}','pvBase',this,1,999)" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
+              ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
+            </div>
+          </div>
+        </div>
+
+        <!-- PM -->
+        <div class="vital mp">
+          <div class="vital-icon">✦</div>
+          <div class="vital-body">
+            <div class="vital-head">
+              <span class="vital-label">Points de Magie</span>
+              <span class="vital-num"><span id="pm-val">${pmCur}</span><small>/ ${pmMax}</small></span>
+            </div>
+            <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
+            <div class="vital-ctrls">
+              ${canEdit?`<button class="vital-btn" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
+              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" onclick="inlineEditNum('${c.id}','pmBase',this,1,999)" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
+              ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
+            </div>
+          </div>
+        </div>
+
+        <!-- Mini stats 2×2 : CA · Vit. · Maît. · DD sorts -->
+        <div class="cs-mini-grid">
+          <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
+          <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
+          <div class="cs-mini"><span class="cs-mini-icon">🎯</span><div class="cs-mini-body"><span class="cs-mini-lbl">Maît.</span><span class="cs-mini-val">+${profMod}</span></div></div>
+          <div class="cs-mini"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">DD sorts</span><span class="cs-mini-val">${ddSorts}</span></div></div>
+        </div>
+
+        <!-- Or -->
+        <div class="or-card">
+          <div class="or-card-left">
+            <div class="or-card-icon">💰</div>
+            <div>
+              <div class="or-card-lbl">Bourse</div>
+              <div class="or-card-val">${calcOr(c)} <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
+            </div>
+          </div>
+          ${canEdit?`<button class="or-card-btn" onclick="openSendGoldModal('${c.id}')">↗ Envoyer</button>`:''}
+        </div>
+
+        ${canEdit?`<div class="aura-row">
+          <span class="aura-lbl">Aura</span>
+          <div class="aura-dots">
+            ${Object.entries(AURA_PALETTE).map(([k,col]) => `
+              <button class="aura-dot${(c.aura||'blue')===k?' active':''}"
+                style="--dot-c:${col}" data-aura="${k}"
+                onclick="setCharAura('${c.id}','${k}')"
+                title="${k}"></button>`).join('')}
+          </div>
+        </div>`:''}
+
+      </aside>
+
+      <!-- ─── MAIN ─── -->
+      <section class="main-col">
+
+        <!-- Hero strip -->
+        <div class="hero-strip">
+          <div class="hero-id">
+            <div class="hero-id-name">${_esc(c.nom || 'Sans nom')}
+              <span class="hero-id-tag">${[c.classe, c.race, titres[0]].filter(Boolean).map(_esc).join(' · ')}</span>
+            </div>
+            ${advLbl || playerLbl ? `<div class="hero-id-tag" style="font-size:.7rem">
+              ${advLbl}${playerLbl}
+            </div>` : ''}
+          </div>
+        </div>
+
+        <!-- Stats banner 6 tuiles -->
+        <div class="stats-banner" id="cs-stats-banner">
+          ${tilesHtml}
+        </div>
+
+        ${lvlPointsRemaining > 0 && canEdit ? `
+        <div class="alloc-banner">
+          <span>🎯 <b>${lvlPointsRemaining}</b> point${lvlPointsRemaining>1?'s':''} de niveau à dépenser — cliquez sur le badge <b>+1</b> d'une caractéristique</span>
+          <span class="alloc-banner-hint">Modificateur recalculé instantanément</span>
+        </div>` : ''}
+
+        <!-- Tabs v3 -->
+        <nav class="tabs-v3" id="char-tabs-v3">
+          ${tabsHtml}
+        </nav>
+
+        <div id="char-tab-content" class="tab-body-v3"></div>
+
+      </section>
+    </div>
+  </div>
+</div>`;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Ancien template (legacy) commenté ci-dessous — gardé pour référence court terme.
+  // Le rendu actif est celui ci-dessus.
+  /*
 <div class="cs-layout">
 
   <!-- ══════════ SIDEBAR ══════════ -->
@@ -459,32 +763,1298 @@ function renderCharSheet(c, keepTab) {
   </div><!-- /cs-main-col -->
 
 </div><!-- /cs-layout -->`;
+  */
+  // ↑ Fin du bloc legacy commenté.
 
-  _renderTab(leafTab, c, canEdit);
+  _renderTabV3(v3Tab, c, canEdit);
 }
 
 function _renderTab(leafTab, c, canEdit) {
+  // Legacy router — devient un proxy vers V3.
+  _renderTabV3(_resolveV3Tab(leafTab), c, canEdit);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V3 — Tab router (6 onglets)
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderTabV3(tab, c, canEdit) {
   const area = document.getElementById('char-tab-content');
   if (!area) return;
+  const sub = window._currentJournalSub || 'notes';
   const renders = {
-    carac:       () => renderCharCarac(c, canEdit),
-    equipement:  () => renderCharEquip(c, canEdit),
-    sorts:       () => renderCharDeck(c, canEdit),
-    maitrises:   () => renderCharMaitrises(c, canEdit),
-    inventaire:  () => renderCharInventaire(c, canEdit),
-    notes:       () => renderCharNotes(c, canEdit),
-    quetes:      () => renderCharQuetes(c, canEdit),
-    compte:      () => renderCharCompte(c, canEdit),
-    profil:      () => renderCharProfil(c, canEdit),
-    // rétro-compat
-    combat:      () => renderCharEquip(c, canEdit),
+    combat:  () => renderCharCombatV3(c, canEdit),
+    sorts:   () => renderCharDeck(c, canEdit),
+    inv:     () => renderCharInventaireV3(c, canEdit),
+    compte:  () => renderCharLedger(c, canEdit),
+    journal: () => renderCharJournal(c, canEdit, sub),
+    profil:  () => renderCharProfilV3(c, canEdit),
   };
-  area.innerHTML = renders[leafTab]?.() || '';
+  area.innerHTML = renders[tab]?.() || '';
   area.classList.remove('cs-tab-fadein');
-  void area.offsetWidth; // force reflow
+  void area.offsetWidth;
   area.classList.add('cs-tab-fadein');
-  if (leafTab === 'profil') { bindRichTextEditors(); initProfilTagUi(); }
-  if (leafTab === 'notes') bindRichTextEditors(area);
+  if (tab === 'profil') {
+    bindRichTextEditors(area);
+    initProfilTagUi();
+  }
+  if (tab === 'journal' && sub === 'notes') bindRichTextEditors(area);
+  if (tab === 'sorts') _bindSortsCatDrag(c, canEdit);
+}
+
+// ── Drag & drop des catégories de sorts (Sortable.esm.js) ──────────────────
+let _sortsCatSortable = null;
+function _bindSortsCatDrag(c, canEdit) {
+  // Détruit le précédent Sortable s'il existe (évite les leaks au re-render)
+  try { _sortsCatSortable?.destroy(); } catch {}
+  _sortsCatSortable = null;
+  if (!canEdit) return;
+  const wrap = document.getElementById('cs-sort-cats-wrap');
+  if (!wrap) return;
+
+  _sortsCatSortable = new Sortable(wrap, {
+    animation: 150,
+    handle: '.cs-sort-cat-drag',
+    draggable: '.cs-sort-cat-block:not(.is-default)',
+    ghostClass: 'cs-sortable-ghost',
+    chosenClass: 'cs-sortable-chosen',
+    forceFallback: true,
+    fallbackOnBody: true,
+    delay: 80,
+    delayOnTouchOnly: true,
+    onEnd: async () => {
+      // Reconstitue l'ordre des cat IDs depuis le DOM (en excluant le bloc __none)
+      const newOrderIds = [...wrap.querySelectorAll('.cs-sort-cat-block:not(.is-default)')]
+        .map(el => el.dataset.catId)
+        .filter(Boolean);
+      const currentCats = c.sort_cats || [];
+      // Reconstruit le tableau cats dans le nouvel ordre
+      const reordered = newOrderIds
+        .map(id => currentCats.find(cat => cat.id === id))
+        .filter(Boolean);
+      // Concatène les éventuelles catégories non présentes dans le DOM (sécurité)
+      currentCats.forEach(cat => {
+        if (!reordered.find(x => x.id === cat.id)) reordered.push(cat);
+      });
+      if (JSON.stringify(reordered) === JSON.stringify(currentCats)) return;
+      c.sort_cats = reordered;
+      try { await updateInCol('characters', c.id, { sort_cats: reordered }); }
+      catch (e) { console.warn('[sort cats reorder]', e); }
+    },
+  });
+}
+
+// ── Compte → Ledger chronologique unique ─────────────────────────────────────
+// Lit le schéma existant c.compte = { recettes:[], depenses:[] } et fusionne
+// les deux flux en une timeline triée chronologiquement décroissante.
+function renderCharLedger(c, canEdit) {
+  const compte = c.compte || { recettes: [], depenses: [] };
+  const recettes = (compte.recettes || []).map((r, i) => ({ ...r, sign: 1, kind: 'recettes', idx: i }));
+  const depenses = (compte.depenses || []).map((d, i) => ({ ...d, sign: -1, kind: 'depenses', idx: i }));
+  const tR = recettes.reduce((s, r) => s + (parseFloat(r.montant) || 0), 0);
+  const tD = depenses.reduce((s, d) => s + (parseFloat(d.montant) || 0), 0);
+  const solde = tR - tD;
+  // Tri chronologique décroissant
+  const all = [...recettes, ...depenses].sort((a, b) => {
+    const da = (a.date || ''), db = (b.date || '');
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return db.localeCompare(da, 'fr', { numeric: true });
+  });
+
+  // Filtres (état persistant sur window pour ne pas être perdu au re-render)
+  const filter = window._csV3LedgerFilter || { kind: 'all', search: '', limit: 25 };
+  const q = (filter.search || '').toLowerCase();
+  const filtered = all.filter(e => {
+    if (filter.kind === 'rcpt' && e.sign < 0) return false;
+    if (filter.kind === 'dep'  && e.sign > 0) return false;
+    if (!q) return true;
+    return (e.libelle || '').toLowerCase().includes(q)
+        || (e.date || '').toLowerCase().includes(q);
+  });
+  const limit = filter.limit || 25;
+  const visible = filtered.slice(0, limit);
+  const hasMore = filtered.length > visible.length;
+
+  // Groupement par "mois" déduit du premier segment de date (ex: "Mois 3 / J12" → "Mois 3")
+  const groups = [];
+  let curMonth = null;
+  visible.forEach(e => {
+    const month = (e.date || '').split('/')[0]?.trim() || 'Sans date';
+    if (month !== curMonth) {
+      curMonth = month;
+      groups.push({ month, items: [] });
+    }
+    groups[groups.length - 1].items.push(e);
+  });
+
+  return `
+  <div class="compte-summary">
+    <div class="compte-tile"><span class="compte-lbl">Recettes</span><span class="compte-val pos">+${tR} or</span><span class="compte-sub">${recettes.length} entrée${recettes.length>1?'s':''}</span></div>
+    <div class="compte-tile"><span class="compte-lbl">Dépenses</span><span class="compte-val neg">−${tD} or</span><span class="compte-sub">${depenses.length} entrée${depenses.length>1?'s':''}</span></div>
+    <div class="compte-tile main"><span class="compte-lbl">Solde — Bourse</span><span class="compte-val gold">${solde} or</span><span class="compte-sub">Disponible en jeu</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <div class="section-title"><span class="ico">📜</span> Journal du trésor</div>
+      <span class="section-hint">${filtered.length} / ${all.length} écriture${all.length>1?'s':''}</span>
+    </div>
+
+    <!-- Filtres -->
+    <div class="ledger-filters">
+      <div class="ledger-filter-segs">
+        <button class="${filter.kind==='all'?'on':''}" onclick="window._csV3LedgerSetKind('${c.id}','all')">Tout</button>
+        <button class="${filter.kind==='rcpt'?'on':''}" onclick="window._csV3LedgerSetKind('${c.id}','rcpt')" style="color:var(--emerald)">+ Recettes</button>
+        <button class="${filter.kind==='dep'?'on':''}" onclick="window._csV3LedgerSetKind('${c.id}','dep')" style="color:var(--crimson-light, #ff8ca7)">− Dépenses</button>
+      </div>
+      <input type="text" class="ledger-search" placeholder="🔍 Rechercher…"
+        value="${_esc(filter.search)}"
+        oninput="window._csV3LedgerSetSearch('${c.id}',this.value)">
+    </div>
+
+    ${canEdit ? `
+    <div class="ledger-add">
+      <div class="ledger-add-seg">
+        <button type="button" class="${(window._csV3LedgerAddKind||'recettes')==='recettes'?'on rcpt':''}"
+          onclick="window._csV3LedgerSetAddKind('recettes')">+ Recette</button>
+        <button type="button" class="${window._csV3LedgerAddKind==='depenses'?'on dep':''}"
+          onclick="window._csV3LedgerSetAddKind('depenses')">− Dépense</button>
+      </div>
+      <input type="text" id="ledger-date" placeholder="Date (Mois 3 / J12…)" class="ledger-add-date">
+      <input type="text" id="ledger-lib" placeholder="Libellé" class="lib">
+      <input type="number" id="ledger-amount" placeholder="0" step="any" class="ledger-add-amount">
+      <button class="ledger-add-btn" onclick="window._csV3AddLedger('${c.id}')">＋ Ajouter</button>
+    </div>` : ''}
+
+    ${filtered.length === 0 ? `<div class="q-empty">${all.length===0?"Aucune écriture pour l'instant.":"Aucun résultat avec ce filtre."}</div>` : `
+    <div class="ledger-scroll">
+      <ol class="ledger">
+        ${groups.map(g => `
+          <li class="ledger-month">${_esc(g.month)}</li>
+          ${g.items.map(e => `
+            <li class="ledger-row ${e.sign>0?'rcpt':'dep'}">
+              <span class="ledger-dot"></span>
+              <span class="ledger-date">${_esc(e.date || '—')}</span>
+              <span class="ledger-lib">${_esc(e.libelle || '—')}</span>
+              <span class="ledger-amount">${e.sign>0?'+':'−'}${Math.abs(parseFloat(e.montant)||0)} <small>or</small></span>
+              ${canEdit?`<button class="ledger-del" title="Supprimer" onclick="deleteCompteRow('${e.kind}',${e.idx})">🗑️</button>`:'<span></span>'}
+            </li>`).join('')}
+        `).join('')}
+      </ol>
+    </div>
+    ${hasMore ? `<button class="ledger-more" onclick="window._csV3LedgerMore('${c.id}')">↓ Charger ${Math.min(25, filtered.length - visible.length)} de plus (${filtered.length - visible.length} restantes)</button>` : ''}
+    `}
+  </div>`;
+}
+
+window._csV3LedgerSetAddKind = (kind) => {
+  window._csV3LedgerAddKind = (kind === 'depenses') ? 'depenses' : 'recettes';
+  // Update visuel sans re-render complet
+  document.querySelectorAll('.ledger-add-seg button').forEach(b => {
+    b.classList.toggle('on', b.textContent.includes(window._csV3LedgerAddKind === 'depenses' ? 'Dépense' : 'Recette'));
+    b.classList.toggle('rcpt', b.textContent.includes('Recette') && window._csV3LedgerAddKind === 'recettes');
+    b.classList.toggle('dep', b.textContent.includes('Dépense') && window._csV3LedgerAddKind === 'depenses');
+  });
+};
+
+window._csV3LedgerSetKind = (charId, kind) => {
+  window._csV3LedgerFilter = { ...(window._csV3LedgerFilter || {}), kind, limit: 25 };
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+};
+window._csV3LedgerSetSearch = (charId, search) => {
+  const prev = window._csV3LedgerFilter || {};
+  window._csV3LedgerFilter = { ...prev, search, limit: 25 };
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (!c) return;
+  // Re-render mais on restaure le focus + caret dans la search box
+  const caret = document.querySelector('.ledger-search')?.selectionStart;
+  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  requestAnimationFrame(() => {
+    const inp = document.querySelector('.ledger-search');
+    if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
+  });
+};
+window._csV3LedgerMore = (charId) => {
+  const prev = window._csV3LedgerFilter || {};
+  window._csV3LedgerFilter = { ...prev, limit: (prev.limit || 25) + 25 };
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+};
+
+// Ajoute une écriture au compte via le schéma existant `c.compte.{recettes,depenses}`.
+window._csV3AddLedger = async function (charId) {
+  const dateEl = document.getElementById('ledger-date');
+  const libEl  = document.getElementById('ledger-lib');
+  const amtEl  = document.getElementById('ledger-amount');
+  if (!libEl || !amtEl) return;
+  const kind = window._csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
+  const date = (dateEl?.value || '').trim() || new Date().toLocaleDateString('fr-FR');
+  const lib  = (libEl.value || '').trim();
+  const amt  = parseFloat(amtEl.value) || 0;
+  if (!lib || !amt) { if (window.showNotif) window.showNotif('Libellé et montant requis.', 'error'); return; }
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (!c) return;
+  c.compte = c.compte || { recettes: [], depenses: [] };
+  c.compte[kind] = c.compte[kind] || [];
+  c.compte[kind].push({ date, libelle: lib, montant: amt });
+  try { await updateInCol('characters', charId, { compte: c.compte }); }
+  catch (e) { if (window.showNotif) window.showNotif('Erreur de sauvegarde.', 'error'); return; }
+  if (typeof window.refreshOrDisplay === 'function') window.refreshOrDisplay(c);
+  // Reset les inputs sans rerender complet
+  if (libEl) libEl.value = '';
+  if (amtEl) amtEl.value = '';
+  _renderTabV3('compte', c, window._canEditChar);
+};
+
+// ── Journal → sub-tabs Notes / Quêtes / Relations ────────────────────────────
+function renderCharJournal(c, canEdit, sub = 'notes') {
+  const subTab = ['notes','quetes','relations'].includes(sub) ? sub : 'notes';
+  const counts = {
+    notes:     (c.notesList || []).length,
+    quetes:    (c.quetes || []).length,
+    relations: (c.relations || []).length,
+  };
+  const bodyHtml = subTab === 'notes'     ? renderCharNotesV3(c, canEdit)
+                : subTab === 'quetes'    ? renderJournalQuetes(c, canEdit)
+                : renderCharRelations(c, canEdit);
+
+  return `<div class="journal-tabs">
+    <span class="journal-tab ${subTab==='notes'?'on':''}" onclick="window._csV3JournalSub('notes')">📝 Notes (${counts.notes})</span>
+    <span class="journal-tab ${subTab==='quetes'?'on':''}" onclick="window._csV3JournalSub('quetes')">📜 Quêtes (${counts.quetes})</span>
+    <span class="journal-tab ${subTab==='relations'?'on':''}" onclick="window._csV3JournalSub('relations')">👥 Relations (${counts.relations})</span>
+    ${canEdit && subTab==='notes' ? `<button class="section-action" style="margin-left:auto" onclick="addNote()">＋ Note</button>` : ''}
+    ${canEdit && subTab==='quetes' ? `<button class="section-action" style="margin-left:auto" onclick="addQuete()">＋ Quête</button>` : ''}
+    ${canEdit && subTab==='relations' ? `<button class="section-action" style="margin-left:auto" onclick="window._csV3AddRelation('${c.id}')">＋ Relation</button>` : ''}
+  </div>
+  <div id="journal-body">${bodyHtml}</div>`;
+}
+
+window._csV3JournalSub = function (sub) {
+  window._currentJournalSub = sub;
+  const c = window._currentChar; const canEdit = window._canEditChar;
+  if (!c) return;
+  // Rebuild juste l'onglet Journal sans recharger toute la fiche
+  const area = document.getElementById('char-tab-content');
+  if (area) {
+    area.innerHTML = renderCharJournal(c, canEdit, sub);
+    if (sub === 'notes') bindRichTextEditors(area);
+  }
+};
+
+// Quêtes — schéma réel : { nom, type, description, valide }
+function renderJournalQuetes(c, canEdit) {
+  const quetes = c.quetes || [];
+  if (!quetes.length) {
+    return `<div class="q-empty">Aucune quête. ${canEdit?'Clique sur "＋ Quête" pour en ajouter.':''}</div>`;
+  }
+  const enCours  = quetes.filter(q => !q.valide);
+  const validees = quetes.filter(q => q.valide);
+  const card = (q) => {
+    const idx = quetes.indexOf(q);
+    const validee = !!q.valide;
+    const typeLbl = q.type ? `<span class="quest-type">${_esc(q.type)}</span>` : '';
+    return `<article class="quest ${validee?'done':''}">
+      <header class="quest-head">
+        <div class="quest-name-wrap">
+          ${validee
+            ? `<span class="quest-state-ico" title="Validée">✓</span>`
+            : `<span class="quest-state-ico open" title="En cours">⚔</span>`}
+          <h4 class="quest-name">${_esc(q.nom || 'Quête sans nom')}</h4>
+          ${typeLbl}
+        </div>
+        ${canEdit ? `<div class="quest-actions">
+          <button class="btn-icon" onclick="toggleQuete(${idx})" title="${validee?'Rouvrir':'Marquer comme validée'}">${validee?'↺':'✔️'}</button>
+          <button class="btn-icon" onclick="deleteQuete(${idx})" title="Supprimer" style="color:#ff8ca7">🗑️</button>
+        </div>` : ''}
+      </header>
+      ${q.description ? `<p class="quest-desc">${_esc(q.description)}</p>` : ''}
+    </article>`;
+  };
+  return `
+    <section class="quest-block">
+      <div class="quest-section-head">
+        <span class="q-lbl">En cours</span>
+        <span class="q-count">${enCours.length}</span>
+      </div>
+      <div class="quest-list">
+        ${enCours.length ? enCours.map(card).join('') : '<div class="q-empty">Aucune quête en cours.</div>'}
+      </div>
+    </section>
+    <section class="quest-block" style="margin-top:18px">
+      <div class="quest-section-head">
+        <span class="q-lbl done">Validées</span>
+        <span class="q-count">${validees.length}</span>
+      </div>
+      <div class="quest-list">
+        ${validees.length ? validees.map(card).join('') : '<div class="q-empty">Aucune quête validée.</div>'}
+      </div>
+    </section>`;
+}
+
+// Relations — liste éditable
+// Notes V3 — édition inline du titre + cards repliables + rich-text body
+function renderCharNotesV3(c, canEdit) {
+  const notes = c.notesList || [];
+  if (!notes.length) {
+    return `<div class="q-empty">Aucune note. ${canEdit?'Clique sur "＋ Note" en haut pour en créer une.':''}</div>`;
+  }
+  return `<div class="notes-stack">${notes.map((n, i) => {
+    const isOpen = window._openNote === i;
+    const titre = n.titre || 'Note sans titre';
+    const date  = n.date  || '';
+    return `<article class="note-v3 ${isOpen?'is-open':''}">
+      <header class="note-v3-head">
+        <button class="note-v3-toggle" onclick="window._csV3ToggleNote(${i})" title="${isOpen?'Replier':'Déplier'}">
+          ${isOpen ? '▾' : '▸'}
+        </button>
+        ${canEdit
+          ? `<input class="note-v3-titre" type="text" value="${_esc(titre)}" data-idx="${i}"
+              onblur="window._csV3SaveNoteTitle(${i},this.value)"
+              onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}"
+              placeholder="Titre de la note">`
+          : `<span class="note-v3-titre note-v3-titre-ro">${_esc(titre)}</span>`}
+        ${date ? `<span class="note-v3-date">${_esc(date)}</span>` : ''}
+        ${canEdit ? `<button class="note-v3-del" onclick="event.stopPropagation();deleteNote(${i})" title="Supprimer">🗑️</button>` : ''}
+      </header>
+      ${isOpen ? `<div class="note-v3-body">
+        ${canEdit
+          ? `${richTextEditorHtml({ id: `note-area-${i}`, html: n.contenu || '', placeholder: 'Contenu de la note…', minHeight: 180 })}
+             <div style="display:flex;gap:8px;margin-top:8px">
+               <button class="btn btn-gold btn-sm" onclick="saveNote(${i})">💾 Enregistrer</button>
+             </div>`
+          : richTextContentHtml({ html: n.contenu, className: 'note-v3-content', fallback: '<em style="opacity:.5">Aucun contenu.</em>' })}
+      </div>` : ''}
+    </article>`;
+  }).join('')}</div>`;
+}
+
+window._csV3ToggleNote = function (idx) {
+  window._openNote = window._openNote === idx ? null : idx;
+  const c = window._currentChar; if (!c) return;
+  // Re-render journal en gardant le sub-tab notes
+  window._currentJournalSub = 'notes';
+  _renderTabV3('journal', c, window._canEditChar);
+};
+window._csV3SaveNoteTitle = async function (idx, value) {
+  const c = STATE.activeChar; if (!c) return;
+  const note = (c.notesList || [])[idx]; if (!note) return;
+  const trimmed = (value || '').trim() || 'Note sans titre';
+  if (note.titre === trimmed) return;
+  note.titre = trimmed;
+  c.notesList[idx] = note;
+  try { await updateInCol('characters', c.id, { notesList: c.notesList }); }
+  catch (e) { console.warn('[note title]', e); }
+};
+
+const _RELATION_PALETTE = {
+  lien:     ['rgba(157,111,255,.14)','rgba(157,111,255,.4)','#c8aaff'],
+  allie:    ['rgba(34,195,142,.14)','rgba(34,195,142,.4)','#5dd5a8'],
+  neutre:   ['rgba(244,196,48,.14)','rgba(244,196,48,.4)','#f4c430'],
+  ennemi:   ['rgba(255,90,126,.14)','rgba(255,90,126,.4)','#ff8ca7'],
+  mefiance: ['rgba(255,149,68,.14)','rgba(255,149,68,.4)','#ffb070'],
+};
+function renderCharRelations(c, canEdit) {
+  const rels = c.relations || [];
+  if (!rels.length) {
+    return `<div class="q-empty">
+      Aucune relation enregistrée. ${canEdit?'Clique sur "＋ Relation" pour décrire qui ${_esc(c.nom||"ce personnage")} a croisé sur la route.':''}
+    </div>`;
+  }
+  return `<div class="rel-grid">
+    ${rels.map((r, i) => {
+      const sent = _RELATION_PALETTE[r.sent] || _RELATION_PALETTE.neutre;
+      const ini = (r.ini || r.nom || '?')[0]?.toUpperCase() || '?';
+      return `<div class="rel-card" style="--rel-c:${sent[2]};--rel-bg:${sent[0]};--rel-bd:${sent[1]}">
+        <div class="rel-avatar">${_esc(ini)}</div>
+        <div class="rel-body">
+          <div class="rel-name-row">
+            <span class="rel-name">${_esc(r.nom || 'Sans nom')}</span>
+            <span class="rel-sentiment">${_esc(r.sentiment || r.sent || 'neutre')}</span>
+          </div>
+          ${r.role ? `<span class="rel-role">${_esc(r.role)}</span>` : ''}
+          ${r.note ? `<div class="rel-note">${_esc(r.note)}</div>` : ''}
+          ${canEdit ? `<div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end">
+            <button class="ledger-del" style="opacity:.6" onclick="window._csV3EditRelation('${c.id}',${i})" title="Modifier">✎</button>
+            <button class="ledger-del" style="opacity:.6" onclick="window._csV3DeleteRelation('${c.id}',${i})" title="Supprimer">🗑️</button>
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+window._csV3AddRelation = async function (charId) {
+  const nom = prompt('Nom de la relation :'); if (!nom?.trim()) return;
+  const role = prompt('Rôle (ex: Mentor, Frère, PNJ rencontré) :') || '';
+  const sent = prompt('Sentiment (lien · allie · neutre · ennemi · mefiance) :', 'neutre') || 'neutre';
+  const sentiment = prompt('Libellé visible (ex: Ami, Pacte) :', sent) || sent;
+  const note = prompt('Note libre :') || '';
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (!c) return;
+  const rels = Array.isArray(c.relations) ? c.relations.slice() : [];
+  rels.push({ nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() });
+  c.relations = rels;
+  await updateInCol('characters', charId, { relations: rels });
+  window._csV3JournalSub('relations');
+};
+window._csV3EditRelation = async function (charId, idx) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (!c?.relations?.[idx]) return;
+  const r = c.relations[idx];
+  const nom  = prompt('Nom :', r.nom||''); if (nom===null) return;
+  const role = prompt('Rôle :', r.role||''); if (role===null) return;
+  const sent = prompt('Sentiment-clé (lien/allie/neutre/ennemi/mefiance) :', r.sent||'neutre'); if (sent===null) return;
+  const sentiment = prompt('Libellé visible :', r.sentiment||sent); if (sentiment===null) return;
+  const note = prompt('Note :', r.note||''); if (note===null) return;
+  const next = { ...r, nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() };
+  const rels = c.relations.slice(); rels[idx] = next; c.relations = rels;
+  await updateInCol('characters', charId, { relations: rels });
+  window._csV3JournalSub('relations');
+};
+window._csV3DeleteRelation = async function (charId, idx) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (!c?.relations?.[idx]) return;
+  if (!confirm(`Supprimer la relation "${c.relations[idx].nom||'?'}" ?`)) return;
+  const rels = c.relations.slice(); rels.splice(idx, 1); c.relations = rels;
+  await updateInCol('characters', charId, { relations: rels });
+  window._csV3JournalSub('relations');
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V3 — PROFIL (lecture éditoriale + radar + identité + visibilité)
+// ══════════════════════════════════════════════════════════════════════════════
+const _TAG_PALETTE = [
+  ['rgba(79,140,255,.14)','rgba(79,140,255,.35)','#7fb0ff'],
+  ['rgba(34,195,142,.14)','rgba(34,195,142,.35)','#22c38e'],
+  ['rgba(232,184,75,.14)','rgba(232,184,75,.35)','#e8b84b'],
+  ['rgba(180,127,255,.14)','rgba(180,127,255,.35)','#b47fff'],
+  ['rgba(255,107,107,.14)','rgba(255,107,107,.35)','#ff8080'],
+];
+function _v3TagColor(text) {
+  let h = 0; for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) & 0xffff;
+  return _TAG_PALETTE[h % _TAG_PALETTE.length];
+}
+
+function _renderRadarV3(c) {
+  const STATS_K = [
+    { k: 'FOR', v: c.stats?.force        || 8 },
+    { k: 'DEX', v: c.stats?.dexterite    || 8 },
+    { k: 'INT', v: c.stats?.intelligence || 8 },
+    { k: 'CON', v: c.stats?.constitution || 8 },
+    { k: 'SAG', v: c.stats?.sagesse      || 8 },
+    { k: 'CHA', v: c.stats?.charisme     || 8 },
+  ];
+  const cx = 120, cy = 120, R = 80, n = STATS_K.length;
+  const angle = (i) => -Math.PI / 2 + (i * 2 * Math.PI / n);
+  const point = (i, v) => {
+    const r = (Math.max(0, Math.min(20, v)) / 20) * R;
+    const a = angle(i);
+    return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+  };
+  const rings = [1, .75, .5, .25].map(k => {
+    const pts = STATS_K.map((_, i) => {
+      const a = angle(i);
+      return [cx + Math.cos(a) * R * k, cy + Math.sin(a) * R * k];
+    });
+    return `<polygon class="radar-grid" points="${pts.map(p => p.join(',')).join(' ')}"/>`;
+  }).join('');
+  const axes = STATS_K.map((_, i) => {
+    const a = angle(i);
+    return `<line class="radar-axis" x1="${cx}" y1="${cy}" x2="${cx + Math.cos(a) * R}" y2="${cy + Math.sin(a) * R}"/>`;
+  }).join('');
+  const poly = STATS_K.map((s, i) => point(i, s.v).join(',')).join(' ');
+  const pts = STATS_K.map((s, i) => {
+    const [x, y] = point(i, s.v);
+    return `<circle class="radar-pt" cx="${x}" cy="${y}" r="2.5"/>`;
+  }).join('');
+  const lbls = STATS_K.map((s, i) => {
+    const a = angle(i);
+    const lx = cx + Math.cos(a) * (R + 14);
+    const ly = cy + Math.sin(a) * (R + 14);
+    return `<text class="radar-lbl" x="${lx}" y="${ly}" text-anchor="middle" dy="3">${s.k}</text>
+            <text class="radar-val" x="${lx}" y="${ly + 10}" text-anchor="middle" dy="3">${s.v}</text>`;
+  }).join('');
+  return `<div class="radar-wrap"><svg class="radar-svg" viewBox="0 0 240 240">
+    ${rings}${axes}<polygon class="radar-poly" points="${poly}"/>${pts}${lbls}
+  </svg></div>`;
+}
+
+// La drop-cap est gérée 100% en CSS (.profil-text > p:first-of-type::first-letter)
+// → rendu fidèle, on ne touche jamais à l'HTML du contenu.
+
+// Champs d'identité par défaut (insérés si absents de c.identity)
+const IDENTITY_DEFAULTS = ['Âge', 'Taille', 'Yeux', 'Cheveux', 'Origine', 'Idéal', 'Lien'];
+
+// Normalise un tableau d'identité depuis le schéma legacy [[k,v]] OU le nouveau
+// schéma [{k,v}]. Firestore n'accepte PAS les arrays d'arrays — on migre.
+function _normalizeIdentity(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(x => {
+    if (Array.isArray(x) && x[0]) return { k: String(x[0]), v: String(x[1] || '') };
+    if (x && typeof x === 'object' && x.k) return { k: String(x.k), v: String(x.v || '') };
+    return null;
+  }).filter(Boolean);
+}
+
+function _mergeIdentityDefaults(arr) {
+  // Renvoie [{k,v}] avec les 7 défauts toujours présents + les éventuels customs.
+  const current = _normalizeIdentity(arr);
+  const byKey = new Map(current.map(e => [e.k, e.v]));
+  const out = [];
+  IDENTITY_DEFAULTS.forEach(k => out.push({ k, v: byKey.get(k) || '' }));
+  current.forEach(e => {
+    if (!IDENTITY_DEFAULTS.includes(e.k)) out.push(e);
+  });
+  return out;
+}
+
+function renderCharProfilV3(c, canEdit) {
+  // Bootstrap pres cache pour récupérer la bio rich-text
+  if (!(c.id in (window._profilCache || {}))) {
+    try { renderCharProfil(c, canEdit); } catch {}
+  }
+
+  const quote = c.quote || '';
+  const identity = _mergeIdentityDefaults(c.identity);
+  const presCache = window._profilCache?.[c.id] || null;
+  const bioHtml = presCache?.content || c.bio || '';
+  const tags = presCache?.tags || c.tags || [];
+
+  const visEntries = [
+    { k: 'afficherNiveau',    lbl: 'Niveau',           def: true  },
+    { k: 'afficherPV',        lbl: 'PV',               def: true  },
+    { k: 'afficherPM',        lbl: 'PM',               def: true  },
+    { k: 'afficherCA',        lbl: "Classe d'armure",  def: true  },
+    { k: 'afficherOr',        lbl: 'Or',               def: false },
+    { k: 'afficherStats',     lbl: 'Statistiques',     def: true  },
+    { k: 'afficherEquip',     lbl: 'Équipement',       def: true  },
+    { k: 'afficherIdentite',  lbl: 'Identité',         def: true  },
+    { k: 'afficherCitation',  lbl: 'Citation',         def: true  },
+    { k: 'afficherBio',       lbl: 'Biographie',       def: true  },
+    { k: 'afficherTags',      lbl: 'Traits perso.',    def: true  },
+  ];
+
+  const tagChips = tags.map(t => {
+    const [bg, bd, col] = _v3TagColor(t);
+    return `<span class="profil-tag" style="--tag-bg:${bg};--tag-bd:${bd};--tag-c:${col}">${_esc(t)}</span>`;
+  }).join('');
+  const tagAdd = canEdit
+    ? `<span class="profil-tag" style="--tag-bg:transparent;--tag-bd:rgba(255,255,255,.10);--tag-c:var(--text-dim);border-style:dashed;cursor:pointer"
+        onclick="window._csV3AddProfilTag('${c.id}')">＋ Ajouter</span>`
+    : '';
+
+  // Identité : 7 champs par défaut + éventuels custom. Valeur DIRECTEMENT éditable inline.
+  const identityHtml = identity.map(({ k, v }) => {
+    const isCustom = !IDENTITY_DEFAULTS.includes(k);
+    const safeKey = k.replace(/'/g, "\\'");
+    const valHtml = canEdit
+      ? `<input type="text" class="profil-fact-input" value="${_esc(v)}" placeholder="—"
+          data-id-key="${_esc(k)}"
+          onblur="window._csV3SaveIdentityValue('${c.id}','${safeKey}',this.value)"
+          onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">`
+      : `<span class="profil-fact-v">${v ? _esc(v) : '<span style="color:var(--text-dim)">—</span>'}</span>`;
+    const keyClickable = isCustom && canEdit
+      ? `onclick="window._csV3RenameIdentity('${c.id}','${safeKey}')" style="cursor:pointer" title="Renommer / supprimer"`
+      : '';
+    return `<div class="profil-fact">
+      <span class="profil-fact-k" ${keyClickable}>${_esc(k)}${isCustom && canEdit?' <small style="opacity:.5">✎</small>':''}</span>
+      ${valHtml}
+    </div>`;
+  }).join('');
+
+  // Bio : édition rich-text quand active, sinon rendu fidèle via richTextContentHtml
+  const editingBio = window._csV3EditingBio === c.id;
+  const bioBlockHtml = editingBio && canEdit
+    ? `<div class="profil-bio-edit">
+        ${richTextEditorHtml({ id: 'profil-bio-rt', html: bioHtml, minHeight: 220, placeholder: 'Décris ton personnage…' })}
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-gold btn-sm" onclick="window._csV3SaveBioRt('${c.id}')">💾 Enregistrer</button>
+          <button class="btn btn-outline btn-sm" onclick="window._csV3CancelBio('${c.id}')">Annuler</button>
+        </div>
+      </div>`
+    : `${bioHtml
+        ? richTextContentHtml({ html: bioHtml, className: 'profil-text' })
+        : `<div class="profil-text"><p style="color:var(--text-dim);font-style:italic">${canEdit?'Clique sur ✎ pour rédiger une bio.':'Aucune biographie publique.'}</p></div>`}
+      ${canEdit ? `<button class="section-action" style="align-self:flex-start;margin-top:6px"
+        onclick="window._csV3EnterBioEdit('${c.id}')">✎ Modifier la bio</button>` : ''}`;
+
+  return `
+  ${canEdit
+    ? `<input class="profil-quote profil-quote-edit" type="text"
+        value="${_esc(quote)}"
+        placeholder="Ajoute une citation pour ton personnage…"
+        onblur="window._csV3SaveQuote('${c.id}',this.value)"
+        onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">`
+    : `<div class="profil-quote">${quote ? _esc(quote) : 'Aucune citation.'}</div>`}
+  <div class="profil-tags" style="margin:14px 0">${tagChips}${tagAdd}</div>
+
+  <div class="profil-layout">
+    <div class="profil-main">
+      ${bioBlockHtml}
+    </div>
+    <div class="profil-side">
+      <div class="profil-side-card">
+        <h4>🎯 Profil de stats</h4>
+        ${_renderRadarV3(c)}
+      </div>
+      <div class="profil-side-card">
+        <h4>📜 Identité</h4>
+        ${identityHtml}
+        ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" onclick="window._csV3AddFact('${c.id}')">＋ Champ personnalisé</button>` : ''}
+      </div>
+      ${canEdit ? `
+      <div class="profil-side-card">
+        <h4>👁️ Visible par les joueurs</h4>
+        <div class="vis-toggles">
+        ${visEntries.map(v => {
+          const cur = presCache?.[v.k];
+          const checked = cur === undefined ? v.def : !!cur;
+          return `<label class="vis-toggle">
+            <span class="vis-toggle-lbl">${_esc(v.lbl)}</span>
+            <input type="checkbox" ${checked?'checked':''}
+              onchange="window._csV3SaveVisibility('${c.id}','${v.k}',this.checked)">
+            <span class="vis-toggle-track"><span class="vis-toggle-thumb"></span></span>
+          </label>`;
+        }).join('')}
+        </div>
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+
+// Handler édition citation — sauvegarde inline sans modal
+window._csV3SaveQuote = async function (charId, value) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const trimmed = (value || '').trim();
+  if ((c.quote || '') === trimmed) return;
+  c.quote = trimmed;
+  try { await updateInCol('characters', charId, { quote: trimmed }); }
+  catch (e) { console.warn('[quote save]', e); }
+};
+window._csV3AddProfilTag = async function (charId) {
+  const t = prompt('Trait de caractère (ex: Curieuse, Méfiante…) :'); if (!t?.trim()) return;
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const cur = (window._profilCache?.[charId]?.tags || c.tags || []).slice();
+  if (!cur.includes(t.trim())) cur.push(t.trim());
+  c.tags = cur;
+  // Sync sur la pres si elle existe
+  if (window._profilCache?.[charId]) window._profilCache[charId].tags = cur;
+  await updateInCol('characters', charId, { tags: cur });
+  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+};
+// Sauvegarde la VALEUR d'un champ identité (defaults ou custom) directement depuis l'input.
+// Ne re-render PAS la fiche pour éviter de perdre le focus pendant la saisie.
+window._csV3SaveIdentityValue = async function (charId, key, value) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const merged = _mergeIdentityDefaults(c.identity);
+  const trimmed = (value || '').trim();
+  const old = (merged.find(e => e.k === key)?.v) || '';
+  if (old === trimmed) return;
+  // Schéma Firestore-friendly : array d'objets {k,v}. On ne stocke que les
+  // defaults qui ont une valeur + tous les customs.
+  const next = merged
+    .map(e => e.k === key ? { k: e.k, v: trimmed } : e)
+    .filter(e => IDENTITY_DEFAULTS.includes(e.k) ? !!e.v : true);
+  c.identity = next;
+  try { await updateInCol('characters', charId, { identity: next }); }
+  catch (e) {
+    console.warn('[identity save]', e);
+    if (window.showNotif) window.showNotif?.('Erreur de sauvegarde.', 'error');
+  }
+};
+// Renomme / supprime un champ CUSTOM (les defaults ne sont pas renommables)
+window._csV3RenameIdentity = async function (charId, key) {
+  if (IDENTITY_DEFAULTS.includes(key)) return;
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const newK = prompt(`Renommer "${key}" (laisser vide pour supprimer) :`, key);
+  if (newK === null) return;
+  const trimmed = newK.trim();
+  let next = _normalizeIdentity(c.identity);
+  if (!trimmed) {
+    next = next.filter(e => e.k !== key);
+  } else {
+    next = next.map(e => e.k === key ? { k: trimmed, v: e.v } : e);
+  }
+  c.identity = next;
+  try { await updateInCol('characters', charId, { identity: next }); }
+  catch (e) { console.warn('[identity rename]', e); }
+  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+};
+// Ajoute un champ identité custom
+window._csV3AddFact = async function (charId) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const k = prompt('Nom du champ (ex: Bras-droit, Phobie…) :'); if (!k?.trim()) return;
+  const v = prompt('Valeur :') || '';
+  const next = _normalizeIdentity(c.identity);
+  next.push({ k: k.trim(), v: v.trim() });
+  c.identity = next;
+  try { await updateInCol('characters', charId, { identity: next }); }
+  catch (e) { console.warn('[identity add]', e); }
+  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+};
+// Édition bio avec l'éditeur rich-text — mode "édition" toggle
+window._csV3EnterBioEdit = function (charId) {
+  window._csV3EditingBio = charId;
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  _renderTabV3('profil', c, true);
+};
+window._csV3CancelBio = function (charId) {
+  window._csV3EditingBio = null;
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  _renderTabV3('profil', c, true);
+};
+window._csV3SaveBioRt = async function (charId) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const html = getRichTextHtml('profil-bio-rt') || '';
+  // Sauvegarde : on écrit sur c.bio (string HTML) ET sur pres.content si présence
+  c.bio = html;
+  await updateInCol('characters', charId, { bio: html });
+  const presCache = window._profilCache?.[charId];
+  if (presCache?.id) {
+    try {
+      await updateInCol('players', presCache.id, { content: html });
+      presCache.content = html;
+    } catch (e) { console.warn('[bio→pres sync]', e); }
+  }
+  window._csV3EditingBio = null;
+  _renderTabV3('profil', c, true);
+};
+window._csV3SetCombatStyle = async function (charId, styleId) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  // Toggle : reclic sur le style actif → on revient à la détection auto (null)
+  const next = c.combatStyle === styleId ? null : styleId;
+  c.combatStyle = next;
+  await updateInCol('characters', charId, { combatStyle: next });
+  if (window._currentCharTab === 'combat') _renderTabV3('combat', c, true);
+};
+
+window._csV3SaveVisibility = async function (charId, key, value) {
+  // Sauvegarde directement sur le document pres (collection 'players'). Si pas en cache, on fallback char doc.
+  const presCache = window._profilCache?.[charId];
+  if (presCache?.id) {
+    try {
+      await updateInCol('players', presCache.id, { [key]: value });
+      presCache[key] = value;
+    } catch (e) { console.error('[visibility]', e); }
+  } else {
+    // Fallback : stocker sur le char
+    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    if (c) { c[key] = value; await updateInCol('characters', charId, { [key]: value }); }
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V3 — COMBAT (.weap-card / .armor-card / .cstyle / .elem-chip / .mait-card)
+// Renderer compact qui réutilise les helpers data.js (getMainWeapon, traits,
+// détection de style, etc.) et préserve les actions existantes (editEquipSlot).
+// ══════════════════════════════════════════════════════════════════════════════
+function renderCharCombatV3(c, canEdit) {
+  const equip = c.equipement || {};
+  const weaponSlots = ['Main principale', 'Main secondaire'];
+  const armorSlotsRow1 = ['Tête', 'Torse', 'Bottes'];
+  const armorSlotsRow2 = ['Anneau', 'Amulette', 'Objet magique'];
+
+  // ── ARMES
+  const weapsHtml = weaponSlots.map(slot => {
+    const raw = equip[slot] || {};
+    let item = raw;
+    let isDefault = false;
+    try {
+      if (slot === 'Main principale' && !raw.nom && typeof getMainWeapon === 'function') {
+        item = getMainWeapon(c) || {};
+        isDefault = !!item.isDefault;
+      }
+    } catch {}
+    const statKey = item.statAttaque === 'dexterite' ? 'dexterite'
+                  : item.statAttaque === 'intelligence' ? 'intelligence' : 'force';
+    let tp = null, dp = null;
+    try { tp = getWeaponToucherParts?.(c, item, statKey); } catch {}
+    try { dp = getWeaponDegatsParts?.(c, item, statKey); } catch {}
+    const traits = item.nom ? (_getTraits?.(item) || []) : [];
+
+    if (!item.nom) {
+      return `<div class="weap-card" style="opacity:.65;border-style:dashed">
+        <div class="weap-head">
+          <div>
+            <div class="weap-slot">${slot}</div>
+            <div class="weap-name" style="color:var(--text-dim);font-style:italic">— Vide —</div>
+          </div>
+          ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')" title="Équiper">✏️</button>`:''}
+        </div>
+      </div>`;
+    }
+    return `<div class="weap-card ${slot==='Main principale'?'main':''}">
+      <div class="weap-head">
+        <div>
+          <div class="weap-slot">${slot}</div>
+          <div class="weap-name">${_esc(item.nom)}${isDefault?' <span class="def">par défaut</span>':''}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${item.format?`<span class="weap-format">${_esc(item.format)}</span>`:''}
+          ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
+        </div>
+      </div>
+      <div class="weap-rolls">
+        <div class="weap-roll">
+          <span class="weap-roll-lbl">Toucher</span>
+          <span class="weap-roll-val touch">${_esc(tp?.roll || '—')}</span>
+          ${tp?.statLabel?`<span class="weap-roll-sub">${_esc(tp.statLabel)}${tp.setBonus>0?` · Set +${tp.setBonus}`:''}</span>`:''}
+        </div>
+        <div class="weap-rolls-sep"></div>
+        <div class="weap-roll">
+          <span class="weap-roll-lbl">Dégâts</span>
+          <span class="weap-roll-val dmg">${_esc(dp?.roll || '—')}</span>
+          ${dp?.statLabel?`<span class="weap-roll-sub">${_esc(dp.statLabel)}${dp.maitriseBonus>0?` · Maît. +${dp.maitriseBonus}`:''}</span>`:''}
+        </div>
+      </div>
+      ${(item.portee || traits.length) ? `<div class="weap-meta">
+        ${item.portee?`<span>↗ ${_esc(item.portee)}</span>`:''}
+        ${traits.length?`<div class="weap-traits">${traits.map(t=>`<span class="trait">${_esc(t)}</span>`).join('')}</div>`:''}
+      </div>`:''}
+    </div>`;
+  }).join('');
+
+  // ── ARMURES (2 rangées fixes de 3 : Tête/Torse/Bottes + Anneau/Amulette/Obj magique)
+  // Affiche les traits + tous les bonus offerts (stats / CA / dérivés)
+  const STAT_LABELS = {
+    force: 'FOR', dexterite: 'DEX', intelligence: 'INT',
+    constitution: 'CON', sagesse: 'SAG', charisme: 'CHA',
+  };
+  const renderArmor = slot => {
+    const it = equip[slot] || {};
+    const has = !!it.nom;
+    if (!has) {
+      return `<div class="armor-card empty">
+        <div class="armor-slot">
+          <span>${_esc(slot)}</span>
+          ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')" title="Équiper">✎</button>`:''}
+        </div>
+        <div class="armor-name muted">— Vide —</div>
+      </div>`;
+    }
+    // Bonus : stats + CA + caBonus + dérivés
+    const badges = [];
+    if (it.typeArmure) badges.push({ lbl: _esc(it.typeArmure), cls: 'green' });
+    const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
+    if (caTotal) badges.push({ lbl: `CA +${caTotal}`, cls: 'gold' });
+    Object.entries(STAT_LABELS).forEach(([k, lbl]) => {
+      const b = parseInt(it[k]) || parseInt(it.statBonuses?.[k]) || 0;
+      if (b) badges.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: '' });
+    });
+    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
+      const v = parseInt(it[k]) || 0;
+      if (!v) return;
+      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.' }[k];
+      badges.push({ lbl: `${shortLbl} ${v>0?'+':''}${v}`, cls: 'gold' });
+    });
+    // Traits via _getTraits (importé de data.js)
+    const traits = (_getTraits?.(it) || []);
+    return `<div class="armor-card equipped">
+      <div class="armor-slot">
+        <span>${_esc(slot)}</span>
+        ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')" title="Changer">✎</button>`:''}
+      </div>
+      <div class="armor-name">${_esc(it.nom)}</div>
+      ${badges.length?`<div class="armor-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>`:''}
+      ${traits.length?`<div class="armor-traits">${traits.map(t=>`<span class="trait">${_esc(t)}</span>`).join('')}</div>`:''}
+    </div>`;
+  };
+  // Rangée 1 (3 cols) + rangée 2 (3 cols)
+  const armorRows = `
+    <div class="armor-grid">${armorSlotsRow1.map(renderArmor).join('')}</div>
+    <div class="armor-grid" style="margin-top:8px">${armorSlotsRow2.map(renderArmor).join('')}</div>`;
+
+  // Set bonus
+  let setHtml = '';
+  try {
+    const setData = getArmorSetData?.(c);
+    if (setData?.name && setData.completion >= 2) {
+      const effects = (setData.effects || []).slice(0, 4);
+      setHtml = `<div class="set-row">
+        <span style="font-size:.85rem">✨</span>
+        <b>Set actif : ${_esc(setData.name)} (${setData.completion}/${setData.totalPieces||'?'})</b>
+        ${effects.map(e=>`<span class="fx">${_esc(e)}</span>`).join('')}
+      </div>`;
+    }
+  } catch {}
+
+  // ── Bootstrap async des caches DB (styles de combat + types de dégâts magiques)
+  // Au 1er rendu, les caches sont vides → on déclenche les chargements et on re-render
+  // quand chacun est prêt. Style/Éléments affichent un placeholder dim entre temps.
+  if (!_combatTabCache.styles) {
+    loadCombatStyles().then(s => {
+      _combatTabCache.styles = s || [];
+      if (window._currentCharTab === 'combat') _renderTabV3('combat', c, canEdit);
+    }).catch(() => { _combatTabCache.styles = []; });
+  }
+  if (!_combatTabCache.dmgTypes) {
+    loadDamageTypes().then(t => {
+      _combatTabCache.dmgTypes = t || [];
+      if (window._currentCharTab === 'combat') _renderTabV3('combat', c, canEdit);
+    }).catch(() => { _combatTabCache.dmgTypes = []; });
+  }
+
+  // ── STYLE de combat : auto-détecté depuis les armes équipées (comme avant)
+  let styleHtml = '';
+  let detected = null;
+  try { detected = detectCombatStyle?.(c, _combatTabCache.styles || []); } catch (e) { console.warn('[style detect]', e); }
+  if (!_combatTabCache.styles) {
+    styleHtml = `<div class="cstyle" style="--style-c:var(--text-dim)">
+      <span class="cstyle-ico">🧙</span>
+      <div class="cstyle-body">
+        <div class="cstyle-tag">Style de combat</div>
+        <div class="cstyle-name" style="color:var(--text-dim);font-style:italic">Chargement…</div>
+      </div>
+    </div>`;
+  } else if (detected) {
+    const col = detected.couleur || detected.color || '#9d6fff';
+    styleHtml = `<div class="cstyle" style="--style-c:${col}">
+      <span class="cstyle-ico">${_esc(detected.icon || detected.icone || '🧙')}</span>
+      <div class="cstyle-body">
+        <div class="cstyle-tag">
+          Style de combat
+          ${canEdit ? `<button class="section-action" style="float:right;font-size:.62rem;padding:2px 8px" onclick="window.openCombatStylesAdmin?.()" title="Gérer les styles (admin)">⚙️</button>` : ''}
+        </div>
+        <div class="cstyle-name" style="color:${col}">${_esc(detected.label || detected.name || 'Sans nom')}</div>
+        <div class="cstyle-desc">${_esc(detected.description || '')}</div>
+        <div class="cstyle-detect">Détecté depuis les armes équipées</div>
+      </div>
+    </div>`;
+  } else {
+    styleHtml = `<div class="cstyle" style="--style-c:var(--text-dim)">
+      <span class="cstyle-ico">🧙</span>
+      <div class="cstyle-body">
+        <div class="cstyle-tag">Style de combat</div>
+        <div class="cstyle-name" style="color:var(--text-dim);font-style:italic">Aucun style détecté</div>
+        <div class="cstyle-desc">Équipe une arme pour révéler ton style.</div>
+      </div>
+    </div>`;
+  }
+
+  // ── ÉLÉMENTS : depuis les types de dégâts magiques définis en BDD
+  const dmgTypes = _combatTabCache.dmgTypes || [];
+  const magicTypes = dmgTypes.length ? getMagicTypes(dmgTypes) : [];
+  const charElems = c.elements || [];
+  let elemsHtml = '';
+  if (!dmgTypes.length) {
+    elemsHtml = `<div class="elem-card">
+      <div class="elem-card-head">Éléments maîtrisés</div>
+      <div style="font-size:.74rem;color:var(--text-dim);font-style:italic">Chargement…</div>
+    </div>`;
+  } else {
+    const elemChips = magicTypes.map(t => {
+      const on = charElems.includes(t.id);
+      const col = t.color || '#9ca3af';
+      const cls = on ? 'elem-chip on' : 'elem-chip';
+      const style = `--elem-bg:${col}22;--elem-bd:${col}66;--elem-c:${col}`;
+      const handler = canEdit ? `onclick="window._toggleCharElement?.('${c.id}','${t.id}')"` : '';
+      return `<span class="${cls}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}</span>`;
+    }).join('');
+    elemsHtml = `<div class="elem-card">
+      <div class="elem-card-head">
+        Éléments maîtrisés
+        ${canEdit ? `<button class="section-action" style="float:right" onclick="window.openDamageTypesAdmin?.()" title="Gérer les types (admin)">⚙️</button>` : ''}
+      </div>
+      <div class="elem-row">${elemChips || '<span style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun type magique défini.</span>'}</div>
+    </div>`;
+  }
+
+  // ── MAÎTRISES (champ canonique: m.typeArme + m.niveau + m.note)
+  const maits = c.maitrises || [];
+  const maitsHtml = maits.length ? `<div class="mait-grid">
+    ${maits.map((m, i) => {
+      const niv = parseInt(m.niveau) || 0;
+      const pips = Array.from({ length: 5 }, (_, k) => `<span class="mait-pip ${k < niv ? 'on' : ''}"></span>`).join('');
+      const bonus = niv > 0 ? `+${niv} dégât${niv>1?'s':''}` : 'Initié';
+      const name = m.typeArme || m.nom || m.name || 'Sans type';
+      return `<div class="mait-card" ${canEdit?`onclick="editMaitrise(${i})" style="cursor:pointer"`:''}>
+        <div class="mait-head">
+          <span class="mait-name">${_esc(name)}</span>
+          <span class="mait-bonus">${_esc(bonus)}</span>
+        </div>
+        <div class="mait-pips">${pips}</div>
+        ${m.note ? `<div class="mait-note">${_esc(m.note)}</div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>` : `<div class="q-empty">Aucune maîtrise enregistrée.</div>`;
+
+  return `
+  <div class="section">
+    <div class="section-head">
+      <div class="section-title"><span class="ico">⚔️</span> Armes équipées</div>
+      ${canEdit?`<button class="section-action" onclick="editEquipSlot('Main principale')">＋ Équiper</button>`:''}
+    </div>
+    <div class="weap-grid">${weapsHtml}</div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <div class="section-title"><span class="ico">🪖</span> Armures & Accessoires</div>
+    </div>
+    ${armorRows}
+    ${setHtml}
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <div class="section-title"><span class="ico">🧙</span> Style & Éléments</div>
+    </div>
+    <div class="combat-footer">
+      ${styleHtml || '<div class="q-empty">Aucun style détecté.</div>'}
+      ${elemsHtml}
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <div class="section-title"><span class="ico">🎯</span> Maîtrises d'armes</div>
+      ${canEdit?`<button class="section-action" onclick="addMaitrise()">＋ Ajouter</button>`:''}
+    </div>
+    ${maitsHtml}
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V3 — INVENTAIRE (header avec summary + filter chips, puis renderer existant)
+// ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// V3 — INVENTAIRE (.inv-card grid + summary + filter chips + search)
+// ══════════════════════════════════════════════════════════════════════════════
+const _RARE_NAMES = ['Commun','Inhabituel','Rare','Épique','Légendaire'];
+const _RARE_COLS  = ['#7a8fa8','#22c38e','#6aa7ff','#c084fc','#f4c430'];
+
+const _INV_FILTERS = [
+  { id: 'all',  lbl: 'Tout',          icon: '' },
+  { id: 'arme', lbl: 'Armes',         icon: '⚔️' },
+  { id: 'armure', lbl: 'Armures',     icon: '🛡️' },
+  { id: 'conso', lbl: 'Consommables', icon: '🧪' },
+  { id: 'parchemin', lbl: 'Parchemins', icon: '📜' },
+  { id: 'bijou', lbl: 'Précieux',     icon: '💎' },
+];
+
+function _detectInvCategory(it) {
+  const tpl = (it.template || it.categorie || it.type || '').toLowerCase();
+  const nom = (it.nom || '').toLowerCase();
+  if (tpl.includes('arme') || it.degats || it.toucher) return 'arme';
+  if (tpl.includes('armure') || it.typeArmure || it.slotArmure) return 'armure';
+  if (tpl.includes('bijou') || it.slotBijou) return 'bijou';
+  if (tpl.includes('parchemin') || nom.includes('parchemin')) return 'parchemin';
+  if (tpl.includes('conso') || tpl.includes('potion') || nom.includes('potion')) return 'conso';
+  return 'autre';
+}
+
+function renderCharInventaireV3(c, canEdit) {
+  const inv = c.inventaire || [];
+  const totalItems = inv.length;
+  let equipped = 0;
+  try {
+    const equipMap = getEquippedInventoryIndexMap?.(c) || new Map();
+    equipped = equipMap.size;
+  } catch {}
+  const valeur = inv.reduce((s, it) => {
+    const p = parseInt(it.prix || it.price || 0);
+    const q = parseInt(it.quantite || it.qte || 1) || 1;
+    return s + (Number.isFinite(p) ? p * q : 0);
+  }, 0);
+
+  // État du filtre / search (persisté sur window)
+  const filter = window._csV3InvFilter || { cat: 'all', search: '' };
+  const q = (filter.search || '').toLowerCase();
+
+  // Stack : regroupe les items identiques (même itemId ou même nom+rareté+template+prix)
+  // Garde la liste d'indices originaux pour les actions (vente/envoi/suppression bulk).
+  const stackMap = new Map();
+  inv.forEach((it, idx) => {
+    const key = it.itemId || `${it.nom||''}|${it.template||it.type||''}|${parseInt(it.rarete||it.rare||0)}|${parseInt(it.prix||0)}`;
+    if (!stackMap.has(key)) {
+      stackMap.set(key, { it: { ...it }, indices: [idx], qte: parseInt(it.quantite || it.qte || 1) || 1 });
+    } else {
+      const cur = stackMap.get(key);
+      cur.indices.push(idx);
+      cur.qte += parseInt(it.quantite || it.qte || 1) || 1;
+    }
+  });
+
+  // Filtrage sur les stacks
+  const filteredInv = [...stackMap.values()].filter(({ it }) => {
+    if (filter.cat !== 'all' && _detectInvCategory(it) !== filter.cat) return false;
+    if (!q) return true;
+    const hay = `${it.nom||''} ${it.type||''} ${it.template||''} ${it.description||''}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  const summaryHtml = `<div class="inv-summary">
+    <div class="inv-sum-item"><span class="inv-sum-lbl">Objets</span><span class="inv-sum-val">${totalItems}</span></div>
+    <div class="inv-sum-item"><span class="inv-sum-lbl">Équipés</span><span class="inv-sum-val">${equipped}</span></div>
+    <div class="inv-sum-item"><span class="inv-sum-lbl">Valeur totale</span><span class="inv-sum-val gold">${valeur} or</span></div>
+    ${canEdit?`<button class="section-action" style="margin-left:auto;align-self:center" onclick="addInvItem('${c.id}')">＋ Ajouter un objet</button>`:''}
+  </div>`;
+
+  const filterBarHtml = `<div class="inv-search">
+    <input placeholder="🔍 Rechercher dans l'inventaire…" value="${_esc(filter.search)}"
+      oninput="window._csV3InvSetSearch(this.value)">
+    <div class="filter-chips">
+      ${_INV_FILTERS.map(f => `<button class="filter-chip ${filter.cat===f.id?'on':''}" onclick="window._csV3InvSetCat('${f.id}')">
+        ${f.icon} ${f.lbl}
+      </button>`).join('')}
+    </div>
+  </div>`;
+
+  if (filteredInv.length === 0) {
+    return summaryHtml + filterBarHtml + `<div class="q-empty">${inv.length===0?"Inventaire vide.":"Aucun objet ne correspond aux filtres."}</div>`;
+  }
+
+  const cardsHtml = filteredInv.map(({ it, indices, qte }) => {
+    const idx = indices[0];               // index principal pour Modifier
+    const allIdx = indices;               // tous les indices pour bulk actions
+    const rare = parseInt(it.rarete || it.rare || 0) || 0;
+    const rareIdx = Math.min(4, Math.max(0, rare));
+    const col = _RARE_COLS[rareIdx];
+    const stars = '★'.repeat(rareIdx) + '☆'.repeat(4 - rareIdx);
+    const allIdxB64 = btoa(JSON.stringify(allIdx));
+
+    // Propriétés : on génère des kv selon ce qui existe
+    const props = [];
+    if (it.degats) props.push({ k: 'Dégâts', v: it.degats, c: 'dmg' });
+    if (it.toucher) props.push({ k: 'Toucher', v: it.toucher });
+    if (it.portee) props.push({ k: 'Portée', v: it.portee });
+    if (it.typeArmure) props.push({ k: 'Type', v: it.typeArmure });
+    if (it.ca || it.caBonus) {
+      const total = (parseInt(it.ca)||0) + (parseInt(it.caBonus)||0);
+      if (total) props.push({ k: 'CA', v: '+'+total });
+    }
+    if (it.format) props.push({ k: 'Format', v: it.format });
+    if (it.effet) props.push({ k: 'Effet', v: it.effet });
+    if (it.prix) props.push({ k: 'Prix', v: it.prix + ' or', c: 'gold' });
+
+    const equipMap = (() => { try { return getEquippedInventoryIndexMap?.(c) || new Map(); } catch { return new Map(); } })();
+    const isEquipped = allIdx.some(i => equipMap.has(i));
+    const safeName = String(it.nom || '').replace(/`/g, '\\`').replace(/"/g, '&quot;');
+
+    return `<div class="inv-card ${isEquipped?'is-equipped':''}" style="--rare-c:${col}">
+      <div class="inv-card-head">
+        <div style="min-width:0;flex:1">
+          <div class="inv-card-name">${_esc(it.nom || 'Sans nom')}</div>
+          <div class="inv-card-rare">${stars} ${_RARE_NAMES[rareIdx]}</div>
+        </div>
+        ${qte > 1
+          ? `<span class="inv-qte" title="${qte} items empilés">×${qte}</span>`
+          : `<span class="inv-qte">×1</span>`}
+      </div>
+      ${props.length?`<div class="inv-card-props">
+        ${props.map(p => `<span class="kv">
+          <span class="k">${_esc(p.k)}</span>
+          <span class="v ${p.c||''}">${_esc(p.v)}</span>
+        </span>`).join('')}
+      </div>`:''}
+      ${it.description?`<div class="inv-card-desc">${_esc(it.description)}</div>`:''}
+      ${canEdit?`<div class="inv-card-actions">
+        <button class="inv-act sell" onclick='openSellInvModal("${c.id}","${allIdxB64}",${parseInt(it.prix||0)},"${safeName}")' title="Vendre">💰 Vendre</button>
+        <button class="inv-act send" onclick='openSendInvModal("${c.id}","${allIdxB64}","${safeName}")' title="Envoyer">↗ Envoyer</button>
+        <button class="inv-act del" onclick='openDeleteInvModal("${c.id}","${allIdxB64}","${safeName}")' title="Supprimer">🗑️</button>
+      </div>`:''}
+    </div>`;
+  }).join('');
+
+  return summaryHtml + filterBarHtml + `<div class="inv-grid">${cardsHtml}</div>`;
+}
+
+window._csV3InvSetCat = (cat) => {
+  window._csV3InvFilter = { ...(window._csV3InvFilter || {}), cat };
+  if (window._currentChar && window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
+};
+window._csV3InvSetSearch = (search) => {
+  const prev = window._csV3InvFilter || {};
+  window._csV3InvFilter = { ...prev, search };
+  if (!window._currentChar) return;
+  const caret = document.querySelector('.inv-search input')?.selectionStart;
+  if (window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
+  requestAnimationFrame(() => {
+    const inp = document.querySelector('.inv-search input');
+    if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
+  });
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V3 — SORTS (.spell list avec toggle + body + cost)
+// ══════════════════════════════════════════════════════════════════════════════
+function renderCharSortsV3(c, canEdit) {
+  const deck = c.deck_sorts || [];
+  const actives = deck.filter(s => s.actif).length;
+  const max = (typeof calcDeckMax === 'function') ? calcDeckMax(c) : 6;
+
+  if (!deck.length) {
+    return `<div class="q-empty">Aucun sort. ${canEdit?'Crée un sort via la console de forge.':''}</div>`;
+  }
+
+  // Tri : actifs d'abord, puis par catégorie/nom
+  const sorted = [...deck].map((s, idx) => ({ s, idx })).sort((a, b) => {
+    if (!!a.s.actif !== !!b.s.actif) return a.s.actif ? -1 : 1;
+    return (a.s.nom || '').localeCompare(b.s.nom || '', 'fr');
+  });
+
+  const headerHtml = `<div class="deck-meta">
+    <span>Deck équipé : <b>${actives}</b> sort${actives>1?'s':''} actif${actives>1?'s':''} sur <b>${max}</b> emplacement${max>1?'s':''}</span>
+    <span style="margin-left:auto;color:var(--text-dim);font-size:.7rem">Clique sur un sort pour l'activer / désactiver</span>
+    ${canEdit?`<button class="section-action" style="margin-left:8px" onclick="addSort()">＋ Sort</button>`:''}
+  </div>`;
+
+  const listHtml = `<div class="spell-list">${sorted.map(({ s, idx }) => {
+    const cat = s.categorie || s.cat || s.element || '';
+    const pm = parseInt(s.cout || s.pm || 0) || 0;
+    const effect = s.effet || s.description || s.contenu || '';
+    const dmg = s.degats || s.dmg || '';
+    const portee = s.portee || s.range || '';
+    const cls = s.actif ? 'spell active' : 'spell';
+    const isFull = !s.actif && actives >= max;
+    return `<div class="${cls} ${isFull?'is-locked':''}"
+      ${canEdit && !isFull ? `onclick="toggleSort(${idx})"` : (isFull?`title="Deck plein — désactive un sort d'abord"`:'')}>
+      <span class="spell-toggle">${s.actif?'✓':''}</span>
+      <div class="spell-body">
+        <div class="spell-head">
+          <span class="spell-name">${_esc(s.nom || 'Sans nom')}</span>
+          ${cat?`<span class="spell-cat">${_esc(cat)}</span>`:''}
+        </div>
+        ${effect?`<div class="spell-effect">${_esc(String(effect).slice(0, 140))}${String(effect).length>140?'…':''}</div>`:''}
+        ${dmg || portee ? `<div class="spell-stats">
+          ${dmg?`<span>Dégâts : <b>${_esc(dmg)}</b></span>`:''}
+          ${portee?`<span>Portée : <b>${_esc(portee)}</b></span>`:''}
+        </div>`:''}
+      </div>
+      <div class="spell-pm">${pm}<small>PM</small></div>
+      ${canEdit?`<button class="spell-edit-v3" onclick="event.stopPropagation();editSort(${idx})" title="Modifier">✎</button>`:''}
+    </div>`;
+  }).join('')}</div>`;
+
+  return headerHtml + listHtml;
+}
+
+// ── Allocation ±1 point de niveau sur une stat depuis le stats banner ───────
+async function allocateStat(charId, key, delta = 1) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  if (!c) return;
+  const STATS_KEYS = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
+  if (!STATS_KEYS.includes(key)) return;
+
+  const earned = Math.max(0, (c.niveau||1) - 1);
+  const spent  = STATS_KEYS.reduce((s,k) => s + (parseInt((c.statsLevelUps||{})[k])||0), 0);
+  const remaining = earned - spent;
+  const lvlNow = parseInt((c.statsLevelUps||{})[key]) || 0;
+
+  // Garde-fous : ne pas dépasser les points dispos / ne pas descendre sous 0
+  if (delta > 0 && remaining <= 0) return;
+  if (delta < 0 && lvlNow <= 0)    return;
+
+  const stats = { ...(c.stats || {}) };
+  stats[key] = Math.max(1, (stats[key] || 8) + delta);
+  const levelUps = { ...(c.statsLevelUps || {}) };
+  levelUps[key] = Math.max(0, lvlNow + delta);
+
+  c.stats = stats; c.statsLevelUps = levelUps;
+  await updateInCol('characters', charId, { stats, statsLevelUps: levelUps });
+  renderCharSheet(c, window._currentCharTab || 'combat');
 }
 
 async function setCharAura(charId, aura) {
@@ -492,8 +2062,20 @@ async function setCharAura(charId, aura) {
   if (!c) return;
   c.aura = aura;
   await updateInCol('characters', charId, {aura});
-  document.getElementById('cs-sidebar')?.setAttribute('data-aura', aura);
-  document.querySelectorAll('.cs-aura-dot').forEach(d =>
+  const side = document.getElementById('cs-sidebar');
+  if (side) {
+    side.setAttribute('data-aura', aura);
+    const AURA_PALETTE = {
+      blue:'#4f8cff', arcane:'#9d6fff', crimson:'#ff5a7e',
+      gold:'#e8b84b', emerald:'#22c38e', ember:'#ff9544',
+    };
+    const col = AURA_PALETTE[aura] || AURA_PALETTE.blue;
+    const r = parseInt(col.slice(1,3),16), g = parseInt(col.slice(3,5),16), b = parseInt(col.slice(5,7),16);
+    side.style.setProperty('--aura-glow',   `rgba(${r},${g},${b},.14)`);
+    side.style.setProperty('--aura-border', `rgba(${r},${g},${b},.55)`);
+    side.style.setProperty('--aura-shadow', `0 0 38px rgba(${r},${g},${b},.28)`);
+  }
+  document.querySelectorAll('.cs-aura-dot, .aura-dot').forEach(d =>
     d.classList.toggle('active', d.dataset.aura === aura)
   );
 }
@@ -503,9 +2085,8 @@ const _scrollByTab = new Map();
 function _scrollKey(charId, tab) { return `${charId || '?'}::${tab}`; }
 
 function showCharTab(tab, el) {
-  const isTopTab = ['combat','inventaire','journal','compte','profil'].includes(tab);
-  const newTop  = isTopTab ? tab : (_LEAF_TO_TOP[tab] || 'combat');
-  const newLeaf = isTopTab ? (_TOP_DEFAULTS[tab] || tab) : tab;
+  // V3 : 6 onglets uniquement. Toute valeur legacy est remappée.
+  const v3 = _resolveV3Tab(tab);
 
   // Mémorise la position de scroll de l'onglet quitté (pour le restituer plus tard)
   const prevLeaf = window._currentCharTab;
@@ -516,30 +2097,23 @@ function showCharTab(tab, el) {
     if (scrollTop > 0) _scrollByTab.set(_scrollKey(prevChar, prevLeaf), scrollTop);
   }
 
-  window._currentTopTab  = newTop;
-  window._currentCharTab = newLeaf;
+  window._currentTopTab  = v3;
+  window._currentCharTab = v3;
 
-  // Onglets principaux
+  // Onglets v3 (nouveau template)
+  document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t =>
+    t.classList.toggle('active', t.dataset.tabV3 === v3)
+  );
+  // Rétro-compat : les anciennes barres .cs-tab / .cs-subtab si une vieille page tarde à se rafraîchir
   document.querySelectorAll('#char-tabs .cs-tab').forEach(t =>
-    t.classList.toggle('active', t.dataset.tab === newTop)
+    t.classList.toggle('active', t.dataset.tab === v3)
   );
 
-  // Barres de sous-onglets
-  ['combat','journal'].forEach(group => {
-    const bar = document.getElementById(`cs-subtabs-${group}`);
-    if (bar) bar.style.display = newTop === group ? 'flex' : 'none';
-  });
-
-  // Sous-onglets actifs
-  document.querySelectorAll('.cs-subtab').forEach(t =>
-    t.classList.toggle('active', t.dataset.subtab === newLeaf)
-  );
-
-  _renderTab(newLeaf, window._currentChar, window._canEditChar);
+  _renderTabV3(v3, window._currentChar, window._canEditChar);
 
   // Restitue le scroll de l'onglet rejoint (si on y était déjà passé)
   const charId = window._currentChar?.id;
-  const saved  = charId ? _scrollByTab.get(_scrollKey(charId, newLeaf)) : null;
+  const saved  = charId ? _scrollByTab.get(_scrollKey(charId, v3)) : null;
   if (saved != null) {
     requestAnimationFrame(() => {
       const area = document.getElementById('char-tab-content');
@@ -557,6 +2131,10 @@ Object.assign(window, {
   charNavCardHtml, selectChar, filterAdminChars,
   renderCharSheet, showCharTab,
   _renderTab, refreshOrDisplay,
+
+  // V3 (refonte personnage)
+  renderCharLedger, renderCharJournal, renderCharRelations,
+  allocateStat,
 
   // Stats & affichage
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier,
