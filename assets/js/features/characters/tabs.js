@@ -829,6 +829,11 @@ export async function addXpDelta(charId) {
 // TAB : PRÉSENTATION PUBLIQUE (players page)
 // ══════════════════════════════════════════════
 const _profilCache = {}; // charId → doc | null
+// Expose le cache pour permettre au profil V3 (dans characters.js) de lire
+// la même source que renderCharProfil. Le chargement asynchrone reste géré
+// par renderCharProfil ci-dessous.
+if (typeof window !== 'undefined') window._profilCache = _profilCache;
+export { _profilCache as getProfilCacheRef };
 
 const TAG_MAX = 6;
 const TAG_SUGGESTIONS = [

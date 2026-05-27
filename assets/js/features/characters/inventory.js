@@ -360,50 +360,73 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
   // Expose le tableau cumulatif au handler inline pour live-update.
   window.__sellRefundsCum = refundsCum;
 
-  openModal(`🔄 Vendre — ${nom}`, `
-    ${hasEquipped ? `
-    <div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);
-      border-radius:10px;padding:.65rem .9rem;margin-bottom:.85rem;
-      display:flex;align-items:flex-start;gap:.5rem;font-size:.82rem">
-      <span style="font-size:1rem;flex-shrink:0">⚠️</span>
-      <div>
-        <strong style="color:#ff6b6b;display:block;margin-bottom:.2rem">Objet actuellement équipé !</strong>
-        <span style="color:var(--text-muted)">Slot${equippedSlots.length>1?'s':''} : ${equippedSlots.join(', ')}.
-        Il sera automatiquement déséquipé si tu le vends.</span>
+  const refundHintHtml = upgradedCount && refundRatio > 0
+    ? ` <span id="sell-refund-hint" class="invm-hint">(dont +${refundForQty(1)} reprise)</span>`
+    : '';
+
+  openModal(`💰 Vendre`, `
+    <div class="invm">
+      <header class="invm-header">
+        <div class="invm-icon">💰</div>
+        <div class="invm-title">
+          <h3>${nom}</h3>
+          <span class="invm-subtitle">${prixVente} or par unité · ${maxQte} en stock</span>
+        </div>
+      </header>
+
+      ${hasEquipped ? `
+      <div class="invm-warn">
+        <span class="invm-warn-ico">⚠️</span>
+        <div>
+          <b>Objet actuellement équipé</b>
+          <span>Slot${equippedSlots.length>1?'s':''} : ${equippedSlots.join(', ')}. Il sera automatiquement déséquipé.</span>
+        </div>
+      </div>` : ''}
+
+      ${upgradedCount > 0 ? `
+      <div class="invm-info">
+        <span class="invm-info-ico">✨</span>
+        <div>
+          <b>Item${upgradedCount>1?'s':''} amélioré${upgradedCount>1?'s':''}</b>
+          <span>${refundRatio > 0
+            ? `Reprise ${Math.round(refundRatio * 100)}% des PO investies — jusqu'à <b style="color:var(--gold)">+${totalRefundAll} or</b>.`
+            : `Les améliorations seront perdues sans remboursement (${lostInvestmentAll} PO investies).`}</span>
+        </div>
+      </div>` : ''}
+
+      <div class="invm-qty">
+        <label>Quantité</label>
+        <div class="invm-stepper">
+          <button type="button" class="invm-step" onclick="window._invmStep('sell-qty',-1,${maxQte},'sell')">−</button>
+          <input type="number" id="sell-qty" min="1" max="${maxQte}" value="1"
+            oninput="window._sellRefreshTotal(this,${prixVente},${maxQte})">
+          <button type="button" class="invm-step" onclick="window._invmStep('sell-qty',1,${maxQte},'sell')">+</button>
+        </div>
+        <div class="invm-total">
+          <span class="invm-total-lbl">Total</span>
+          <span class="invm-total-val" id="sell-total">${prixVente + refundForQty(1)} <small>or</small></span>
+          ${refundHintHtml}
+        </div>
       </div>
-    </div>` : ''}
-    <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
-      <strong style="color:var(--gold)">${prixVente} or</strong> par unité · ${maxQte} en stock
-    </div>
-    ${upgradedCount > 0 ? `
-    <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);
-      border-radius:10px;padding:.6rem .85rem;margin-bottom:.85rem;font-size:.8rem;color:var(--text-muted)">
-      <strong style="color:var(--gold)">⚠️ Item${upgradedCount>1?'s':''} amélioré${upgradedCount>1?'s':''}</strong>
-      ${refundRatio > 0
-        ? `· Reprise ${Math.round(refundRatio * 100)}% des PO investies — <strong style="color:var(--gold)">+${totalRefundAll} or</strong> max si tu vends les ${upgradedCount}.`
-        : `· Les améliorations seront perdues sans remboursement (${lostInvestmentAll} PO investies).`}
-    </div>` : ''}
-    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
-      <label style="flex-shrink:0">Quantité</label>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <button type="button" onclick="this.nextElementSibling.stepDown();this.nextElementSibling.dispatchEvent(new Event('input'))"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
-        <input type="number" id="sell-qty" min="1" max="${maxQte}" value="1"
-          style="width:60px;text-align:center" class="input-field"
-          oninput="window._sellRefreshTotal(this,${prixVente},${maxQte})">
-        <button type="button" onclick="this.previousElementSibling.stepUp();this.previousElementSibling.dispatchEvent(new Event('input'))"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
-      </div>
-      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="sell-total" style="color:var(--gold)">${prixVente + refundForQty(1)} or</strong>${upgradedCount && refundRatio > 0 ? ` <span id="sell-refund-hint" style="font-size:.7rem;color:var(--text-dim)">(dont +${refundForQty(1)} reprise)</span>` : ''}</span>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:1rem">
-      <button class="btn btn-gold" style="flex:1" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
-        🔄 Vendre${hasEquipped?' (déséquiper et vendre)':''}
-      </button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+
+      <footer class="invm-actions">
+        <button class="invm-btn invm-btn-primary invm-btn-gold" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
+          💰 Vendre${hasEquipped?' (déséquiper)':''}
+        </button>
+        <button class="invm-btn invm-btn-outline" onclick="closeModal()">Annuler</button>
+      </footer>
     </div>
   `);
 }
+
+// Bouton stepper réutilisable
+window._invmStep = (id, delta, max, kind) => {
+  const inp = document.getElementById(id);
+  if (!inp) return;
+  const next = Math.max(1, Math.min(max, (parseInt(inp.value) || 1) + delta));
+  inp.value = next;
+  inp.dispatchEvent(new Event('input'));
+};
 
 // Live-update du total dans la modale de vente (qty × prix + reprise upgrades).
 window._sellRefreshTotal = (input, prixVente, maxQte) => {
@@ -492,24 +515,38 @@ export async function sellInvItem(charId, invIndex) {
 export function openDeleteInvModal(charId, indicesB64, nom) {
   const indices = _decodeIndices(indicesB64);
   const maxQte  = indices.length;
-  openModal(`🗑️ Supprimer — ${nom}`, `
-    <div style="margin-bottom:1rem;font-size:.85rem;color:var(--text-muted)">
-      ${maxQte} exemplaire${maxQte>1?'s':''} dans l'inventaire
-    </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
-      <label style="flex-shrink:0">Quantité</label>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <button type="button" onclick="this.nextElementSibling.stepDown()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">−</button>
-        <input type="number" id="del-qty" min="1" max="${maxQte}" value="1" style="width:60px;text-align:center" class="input-field">
-        <button type="button" onclick="this.previousElementSibling.stepUp()"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem">+</button>
+  openModal(`🗑️ Supprimer`, `
+    <div class="invm">
+      <header class="invm-header invm-header-danger">
+        <div class="invm-icon">🗑️</div>
+        <div class="invm-title">
+          <h3>${nom}</h3>
+          <span class="invm-subtitle">${maxQte} exemplaire${maxQte>1?'s':''} dans l'inventaire</span>
+        </div>
+      </header>
+
+      <div class="invm-warn invm-warn-danger">
+        <span class="invm-warn-ico">⚠️</span>
+        <div>
+          <b>Suppression définitive</b>
+          <span>L'objet sera retiré de l'inventaire. Action irréversible.</span>
+        </div>
       </div>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:1rem">
-      <button class="btn btn-outline btn-sm" style="flex:1;color:#ff6b6b;border-color:rgba(255,107,107,.35)"
-        onclick="deleteInvItemBulk('${charId}','${indicesB64}')">🗑️ Supprimer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+
+      <div class="invm-qty">
+        <label>Quantité</label>
+        <div class="invm-stepper">
+          <button type="button" class="invm-step" onclick="window._invmStep('del-qty',-1,${maxQte})">−</button>
+          <input type="number" id="del-qty" min="1" max="${maxQte}" value="1">
+          <button type="button" class="invm-step" onclick="window._invmStep('del-qty',1,${maxQte})">+</button>
+        </div>
+      </div>
+
+      <footer class="invm-actions">
+        <button class="invm-btn invm-btn-primary invm-btn-danger"
+          onclick="deleteInvItemBulk('${charId}','${indicesB64}')">🗑️ Supprimer</button>
+        <button class="invm-btn invm-btn-outline" onclick="closeModal()">Annuler</button>
+      </footer>
     </div>
   `);
 }
@@ -579,71 +616,53 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const rareteN   = parseInt(item.rarete) || 0;
   const itemColor = _rareteColor(RARETE_NAMES[rareteN]) || 'var(--border)';
 
-  const itemPreview = `
-    <div style="display:flex;align-items:center;gap:.75rem;padding:.65rem .85rem;
-      background:var(--bg-elevated);border-radius:10px;border-left:3px solid ${itemColor};
-      border:1px solid var(--border);margin-bottom:.85rem">
-      <div style="flex:1;min-width:0">
-        <div style="font-family:'Cinzel',serif;font-size:.88rem;font-weight:700;color:var(--text)">${nom}</div>
-        <div style="font-size:.72rem;color:var(--text-dim);margin-top:2px">
-          ${item.format||item.slotArmure||item.type||''}${maxQte>1?` · ${maxQte} disponible${maxQte>1?'s':''}`:' · 1 exemplaire'}
-        </div>
-      </div>
-      ${maxQte > 1 ? `
-      <div style="display:flex;align-items:center;gap:.3rem;flex-shrink:0">
-        <button type="button" id="send-dec"
-          style="width:26px;height:26px;border-radius:6px;border:1px solid var(--border);
-          background:var(--bg-card);cursor:pointer;font-size:1rem;color:var(--text);
-          display:flex;align-items:center;justify-content:center;line-height:1"
-          onclick="const i=document.getElementById('send-qty');i.value=Math.max(1,parseInt(i.value||1)-1)">−</button>
-        <input type="number" id="send-qty" min="1" max="${maxQte}" value="1"
-          style="width:44px;text-align:center;font-size:.85rem;font-weight:700;
-          background:var(--bg-card);border:1px solid var(--border);border-radius:6px;
-          color:var(--text);padding:3px 0">
-        <button type="button" id="send-inc"
-          style="width:26px;height:26px;border-radius:6px;border:1px solid var(--border);
-          background:var(--bg-card);cursor:pointer;font-size:1rem;color:var(--text);
-          display:flex;align-items:center;justify-content:center;line-height:1"
-          onclick="const i=document.getElementById('send-qty');i.value=Math.min(${maxQte},parseInt(i.value||1)+1)">+</button>
-      </div>` : ''}
-    </div>`;
-
   const targetCards = otherChars.map(target => {
     const initiale  = (target.nom||'?')[0].toUpperCase();
     const colors    = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
     const couleur   = colors[(target.nom||'').charCodeAt(0) % colors.length];
     const photoPos  = `${50+(target.photoX||0)*50}% ${50+(target.photoY||0)*50}%`;
-    return `<label style="display:flex;align-items:center;gap:.6rem;padding:.5rem .7rem;
-      border-radius:10px;border:2px solid var(--border);background:var(--bg-elevated);
-      cursor:pointer;transition:all .12s"
-      onmouseover="this.style.borderColor='${couleur}';this.style.background='${couleur}0f'"
-      onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
-      <input type="radio" name="send-target" value="${target.id}"
-        style="accent-color:${couleur};flex-shrink:0;width:14px;height:14px">
-      <div style="width:36px;height:36px;border-radius:50%;flex-shrink:0;overflow:hidden;
-        border:2px solid ${couleur};background:${couleur}18;
-        display:flex;align-items:center;justify-content:center">
+    return `<label class="invm-target" style="--tc:${couleur}">
+      <input type="radio" name="send-target" value="${target.id}">
+      <div class="invm-target-av">
         ${target.photo
-          ? `<img src="${target.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-          : `<span style="font-family:'Cinzel',serif;font-size:.95rem;font-weight:700;color:${couleur}">${initiale}</span>`}
+          ? `<img src="${target.photo}" style="object-position:${photoPos}">`
+          : `<span>${initiale}</span>`}
       </div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.84rem;font-weight:600;color:var(--text);
-          white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${target.nom||'?'}</div>
-        ${target.ownerPseudo ? `<div style="font-size:.68rem;color:var(--text-dim)">${target.ownerPseudo}</div>` : ''}
+      <div class="invm-target-body">
+        <div class="invm-target-name">${target.nom||'?'}</div>
+        ${target.ownerPseudo ? `<div class="invm-target-sub">${target.ownerPseudo}</div>` : ''}
       </div>
+      <span class="invm-target-check">✓</span>
     </label>`;
   }).join('');
 
   openModal(`📤 Envoyer`, `
-    ${itemPreview}
-    <div style="font-size:.72rem;color:var(--text-dim);font-weight:600;
-      text-transform:uppercase;letter-spacing:.8px;margin-bottom:.4rem">Destinataire</div>
-    <div style="display:flex;flex-direction:column;gap:.35rem;
-      max-height:260px;overflow-y:auto">${targetCards}</div>
-    <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" onclick="sendInvItem('${charId}','${b64}')">📤 Envoyer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+    <div class="invm">
+      <header class="invm-header invm-header-arcane">
+        <div class="invm-icon">📤</div>
+        <div class="invm-title">
+          <h3>${nom}</h3>
+          <span class="invm-subtitle">${item.format||item.slotArmure||item.type||'Objet'} · ${maxQte} disponible${maxQte>1?'s':''}</span>
+        </div>
+      </header>
+
+      ${maxQte > 1 ? `
+      <div class="invm-qty">
+        <label>Quantité à envoyer</label>
+        <div class="invm-stepper">
+          <button type="button" class="invm-step" onclick="window._invmStep('send-qty',-1,${maxQte})">−</button>
+          <input type="number" id="send-qty" min="1" max="${maxQte}" value="1">
+          <button type="button" class="invm-step" onclick="window._invmStep('send-qty',1,${maxQte})">+</button>
+        </div>
+      </div>` : ''}
+
+      <div class="invm-section-lbl">Destinataire</div>
+      <div class="invm-targets">${targetCards}</div>
+
+      <footer class="invm-actions">
+        <button class="invm-btn invm-btn-primary invm-btn-arcane" onclick="sendInvItem('${charId}','${b64}')">📤 Envoyer</button>
+        <button class="invm-btn invm-btn-outline" onclick="closeModal()">Annuler</button>
+      </footer>
     </div>
   `);
 }

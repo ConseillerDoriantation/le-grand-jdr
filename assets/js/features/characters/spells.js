@@ -1050,11 +1050,18 @@ export function renderCharDeck(c, canEdit) {
   if (allSorts.length === 0) {
     html += `<div class="cs-empty">🔮 Aucun sort créé</div>`;
   } else {
+    // Wrapper sortable : chaque catégorie est un bloc déplaçable
+    // (data-cat-id sert d'ancrage pour reconstruire l'ordre après drop)
+    html += `<div class="cs-sort-cats-wrap" id="cs-sort-cats-wrap">`;
     allCats.forEach(cat => {
       const entries = sortsByCat[cat.id] || [];
       if (!entries.length) return;
+      const isDefault = cat.id === '__none';
+      // Le bloc "__none" (Sans catégorie) reste en place — non draggable
+      html += `<div class="cs-sort-cat-block ${isDefault?'is-default':''}" data-cat-id="${cat.id}">`;
       if (cats.length > 0) {
         html += `<div class="cs-sort-cat-hdr" style="--cat-col:${cat.couleur}">
+          ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner">⠿</span>` : ''}
           <span class="cs-sort-cat-name">${cat.nom}</span>
           <span class="cs-sort-cat-count">${entries.length} sort${entries.length>1?'s':''}</span>
         </div>`;
@@ -1063,8 +1070,9 @@ export function renderCharDeck(c, canEdit) {
       entries.forEach(({ s, globalIdx: i }) => {
         html += _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
       });
-      html += `</div>`;
+      html += `</div></div>`;  // /cat-block
     });
+    html += `</div>`;  // /cats-wrap
   }
 
   html += `</div>`;
