@@ -1541,7 +1541,12 @@ async function saveNpc(id) {
       showNotif('PNJ mis à jour !', 'success');
     } else {
       const newId = await addToCol('npcs', data);
-      _npcs.push({ id: newId || `npc_${Date.now()}`, ...data });
+      // Dédupe : le watch onSnapshot peut avoir déjà inséré le PNJ via
+      // latency-compensation pendant l'await — sinon on duplique l'id.
+      const entry = { id: newId || `npc_${Date.now()}`, ...data };
+      const idx = _npcs.findIndex(n => n.id === entry.id);
+      if (idx >= 0) _npcs[idx] = entry;
+      else _npcs.push(entry);
       _activeId = newId || _activeId;
       showNotif('PNJ créé !', 'success');
     }
@@ -2205,7 +2210,12 @@ window.saveAffinitePerso = async (npcId, existingId) => {
     if (idx >= 0) _affiPerso[idx] = { ..._affiPerso[idx], ...data };
   } else {
     const newId = await addToCol('npc_affinites', data);
-    _affiPerso.push({ id: newId || `afp_${Date.now()}`, ...data });
+    // Dédupe : le watch onSnapshot peut avoir déjà inséré l'entrée via
+    // latency-compensation pendant l'await — sinon on duplique l'id.
+    const entry = { id: newId || `afp_${Date.now()}`, ...data };
+    const idx = _affiPerso.findIndex(a => a.id === entry.id);
+    if (idx >= 0) _affiPerso[idx] = entry;
+    else _affiPerso.push(entry);
   }
 
   closeModal();
