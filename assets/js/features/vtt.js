@@ -603,6 +603,37 @@ function _live(t) {
   return result;
 }
 
+/**
+ * Peut-on contrôler ce token ?
+ *   - admin (MJ) → toujours
+ *   - propriétaire du token (ownerId) → toujours
+ *   - délégué de contrôle (controlDelegates: [uid…]) → permission accordée par le propriétaire
+ *
+ * Sert à toutes les actions « contrôler le token » : drag, lancement d'attaque/sort,
+ * déclenchement de buff en attente, ouverture du menu d'actions, etc.
+ */
+function _canControlToken(t, uid = STATE.user?.uid) {
+  if (!t || !uid) return false;
+  if (STATE.isAdmin) return true;
+  if (t.ownerId === uid) return true;
+  const delegates = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
+  return delegates.includes(uid);
+}
+
+/**
+ * Résout un UID en nom affichable : ownerPseudo / nom du perso lié → fallback UID court.
+ * Centralise la logique pour afficher les délégués, log-author, etc.
+ */
+function _resolveUidName(uid) {
+  if (!uid) return '?';
+  // Cherche le perso lié à cet UID
+  const ch = Object.values(_characters || {}).find(c => c?.uid === uid);
+  if (ch?.ownerPseudo) return ch.ownerPseudo;
+  if (ch?.nom)         return ch.nom;
+  // Fallback : UID court
+  return uid.slice(0, 6) + '…';
+}
+
 // HP écrit sur la fiche source (bidirectionnel)
 async function _setHp(t, newHp) {
   const v = Math.max(0, newHp);
@@ -1312,7 +1343,7 @@ function _buildShape(t) {
     g.add(clipGrp); clipGrp.zIndex(2);
   }
 
-  const canDrag = STATE.isAdmin || t.ownerId===STATE.user?.uid;
+  const canDrag = _canControlToken(t);
   let rightDown = null;
   if (canDrag) {
     g.draggable(true);
@@ -1452,7 +1483,7 @@ function _buildShape(t) {
         return;
       }
     }
-    if (e.evt.shiftKey && (STATE.isAdmin||t.ownerId===STATE.user?.uid)) {
+    if (e.evt.shiftKey && _canControlToken(t)) {
       // Shift+clic : ajouter / retirer du groupe multi-sélection
       _toggleMultiSelect(t.id); return;
     }
@@ -1579,7 +1610,7 @@ function _select(id) {
   const data=_tokens[id]?.data;
   _renderInspector(data??null);
   // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
-  if (data&&(STATE.isAdmin||data.ownerId===STATE.user?.uid)) {
+  if (data && _canControlToken(data)) {
     _attackSrc=id;
     _tokens[id]?.shape?.findOne('.atk')?.visible(true);
     _layers.token.batchDraw();
@@ -1645,7 +1676,7 @@ function _refreshRanges(id, overrideData) {
   if (!id || id !== _selected) { _clearHL(); return; }
   const data = overrideData ?? _tokens[id]?.data;
   if (!data) { _clearHL(); return; }
-  if (!STATE.isAdmin && data.ownerId !== STATE.user?.uid) { _clearHL(); return; }
+  if (!_canControlToken(data)) { _clearHL(); return; }
   _showMoveRange(data);   // _clearHL() est appelé en tête de _showMoveRange
   _showAttackRange(data);
   _renderInspector(data); // actualise les compteurs (mouvement restant, etc.)
@@ -3545,7 +3576,7 @@ async function _execAttack(srcId, tgtId) {
   // ── Section Courir (si combat actif et pas encore utilisé) ──────────
   const inCombat = !!_session?.combat?.active;
   const couru    = (src.bonusMvt || 0) > 0;
-  const canEditSrc = STATE.isAdmin || src.ownerId === STATE.user?.uid;
+  const canEditSrc = _canControlToken(src);
   let courirHtml = '';
   if (inCombat && !couru && canEditSrc) {
     const body = `
@@ -5598,7 +5629,7 @@ function _renderInspector(t) {
     const atkLabel = t.npcId
       ? (npcWeapon.nom || npcCombat.weaponName ? (npcWeapon.nom || npcCombat.weaponName) + ' · ' : '') + (ld.displayAttackDice || '1d6') + _signed(ld.displayAttack ?? 0)
       : (ld.displayAttackDice || (ld.displayAttack??5));
-    const _canEditToken = STATE.isAdmin || t.ownerId === STATE.user?.uid;
+    const _canEditToken = _canControlToken(t);
     const _inCombat = !!_session?.combat?.active;
     const pvEditHtml = _canEditToken
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" data-vtt-fn="_vttSetHp" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
@@ -5850,7 +5881,7 @@ function _renderInspector(t) {
       const rmBtn = STATE.isAdmin
         ? `<button class="vtt-buff-rm" data-vtt-fn="_vttRemoveBuff" data-vtt-args="${t.id}|${i}" title="Retirer">✕</button>` : '';
       // Sort suspendu : bouton ▶ pour le déclencher (porteur ou MJ)
-      const canTrigger = bf.type === 'suspended_spell' && (STATE.isAdmin || t.ownerId === STATE.user?.uid);
+      const canTrigger = bf.type === 'suspended_spell' && _canControlToken(t);
       const trigBtn = canTrigger
         ? `<button class="vtt-buff-trigger" data-vtt-fn="_vttTriggerSuspendedSpell" data-vtt-args="${t.id}|${i}" title="Déclencher le sort suspendu">▶</button>` : '';
       return `<div class="vtt-buff-item" title="${_esc(lbl)}${detail?' · '+_esc(detail):''}">
@@ -5931,7 +5962,7 @@ function _renderInspector(t) {
     ${_buffsHtml}
     ${(() => {
       const inCombat = !!_session?.combat?.active;
-      const canEdit  = STATE.isAdmin || t.ownerId === STATE.user?.uid;
+      const canEdit  = _canControlToken(t);
       if (!inCombat || !canEdit || (t.type !== 'player' && t.type !== 'npc')) return '';
       const ld2  = _live(t);
       const base = ld2.displayMovement ?? 6;
@@ -5951,7 +5982,7 @@ function _renderInspector(t) {
         </div>
       </div>`;
     })()}
-    ${(t.type==='player'||t.type==='npc') && _diceSkills.length && (STATE.isAdmin||t.ownerId===STATE.user?.uid) ? (() => {
+    ${(t.type==='player'||t.type==='npc') && _diceSkills.length && _canControlToken(t) ? (() => {
       const cForBonus = t?.characterId ? _characters[t.characterId] : null;
       const btns = _diceSkills.map(s => {
         const statKey = _STAT_KEY[s.stat] || '';
@@ -5983,6 +6014,28 @@ function _renderInspector(t) {
         <div class="vtt-ins-skills">${btns}</div>
       </div>`;
     })() : ''}
+    ${(() => {
+      // Délégation de contrôle — visible pour propriétaire OU MJ
+      const uid = STATE.user?.uid;
+      const isOwner = uid && t.ownerId === uid;
+      if (!isOwner && !STATE.isAdmin) return '';
+      const dels = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
+      const lookupName = _resolveUidName;
+      const chips = dels.length
+        ? dels.map(u => `<span class="vtt-delegate-chip">
+            <span>${_esc(lookupName(u))}</span>
+            <button class="vtt-delegate-x" data-vtt-fn="_vttRemoveTokenDelegate"
+              data-vtt-args="${t.id}|${u}" title="Retirer">×</button>
+          </span>`).join('')
+        : '<span class="vtt-delegate-empty">Personne — vous seul contrôlez ce token.</span>';
+      return `<div class="vtt-ins-section">
+        <div class="vtt-ins-section-title">🤝 Contrôle délégué</div>
+        <div class="vtt-delegate-list">${chips}</div>
+        <button class="vtt-btn-sm vtt-delegate-add"
+          data-vtt-fn="_vttOpenTokenDelegatesModal" data-vtt-args="${t.id}"
+          title="Autoriser un autre joueur à contrôler ce token">＋ Ajouter un joueur</button>
+      </div>`;
+    })()}
     ${STATE.isAdmin&&pageOpts?`
       <div class="vtt-ins-section">
         <div class="vtt-ins-section-title">Envoyer le joueur vers</div>
@@ -7266,7 +7319,7 @@ window._vttAdjBonus = (delta, reset = false) => {
 window._vttRollSkill = async (skillName, stat) => {
   const t = _tokens[_selected]?.data;
   if (!t) return;
-  if (!STATE.isAdmin && t.ownerId !== STATE.user?.uid) return; // joueur ne peut lancer que son propre token
+  if (!_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
   const c = t?.characterId ? _characters[t.characterId] : null;
   const n = t?.npcId ? _npcs[t.npcId] : null;
   const statKey = _STAT_KEY[stat] || '';
@@ -9844,7 +9897,7 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
 /** Déclenche un sort suspendu : marque le sort gratuit puis ouvre le modal d'attaque. */
 window._vttTriggerSuspendedSpell = async (tokenId, buffIdx) => {
   const t = _tokens[tokenId]?.data; if (!t?.buffs?.length) return;
-  if (!STATE.isAdmin && t.ownerId !== STATE.user?.uid) return;
+  if (!_canControlToken(t)) return;
   // Index visible (parmi les buffs actifs) → index réel dans t.buffs
   const r = _session?.combat?.round ?? 0;
   const activeIdxs = t.buffs.map((bf, i) => ({ bf, i }))
@@ -10017,6 +10070,214 @@ window._vttMsSetNiveau = async (charId, uid, niveau) => {
   _renderMiniSheet(uid);
 };
 window._vttEditToken = id => _openStatsModal(_tokens[id]?.data??null);
+
+// ═══════════════════════════════════════════════════════════════════
+// DÉLÉGATION DE CONTRÔLE — autoriser d'autres joueurs sur son token
+// ═══════════════════════════════════════════════════════════════════
+// Construit un descripteur enrichi d'un membre {uid, pseudo, charName, photo, aura, isAdmin, isGhost}
+// isGhost = compte présent dans adventure.players mais sans aucun personnage rattaché
+//           ET qui n'est pas admin → résidu de base de données, à ne pas proposer.
+function _vttMemberInfo(uid) {
+  const adv = STATE.adventure || {};
+  const ch = Object.values(_characters || {}).find(c => c?.uid === uid);
+  const isAdmin = (adv.admins || []).includes(uid);
+  return {
+    uid,
+    pseudo:   ch?.ownerPseudo || (uid ? uid.slice(0, 6) + '…' : '?'),
+    charName: ch?.nom || '',
+    photo:    ch?.photo || '',
+    aura:     ch?.aura  || 'blue',
+    isAdmin,
+    // Ghost = pas de perso rattaché ET pas admin → résidu de BDD
+    isGhost: !ch && !isAdmin,
+  };
+}
+
+function _vttRenderDelegateModalBody(tokenId, search = '') {
+  const t = _tokens[tokenId]?.data; if (!t) return '';
+  const uid = STATE.user?.uid;
+  const adv = STATE.adventure || {};
+  const dels = new Set(Array.isArray(t.controlDelegates) ? t.controlDelegates : []);
+  // Liste membres = players + admins, sauf soi-même + propriétaire
+  const memberUidsRaw = [...new Set([...(adv.players || []), ...(adv.admins || [])])]
+    .filter(u => u && u !== uid && u !== t.ownerId);
+  const allMembers = memberUidsRaw.map(_vttMemberInfo);
+  // ── Filtrage des comptes fantômes (résidus de BDD) ──
+  // Les ghosts ne s'affichent jamais dans la liste : ils sont remplacés par
+  // un bandeau de nettoyage visible uniquement pour le MJ.
+  const ghosts = allMembers.filter(m => m.isGhost);
+  const members = allMembers.filter(m => !m.isGhost);
+
+  // Filtre par recherche (pseudo OU nom personnage)
+  const q = (search || '').toLowerCase().trim();
+  const filtered = q
+    ? members.filter(m => (m.pseudo||'').toLowerCase().includes(q)
+                       || (m.charName||'').toLowerCase().includes(q))
+    : members;
+
+  // Trie : délégués actifs en premier, puis alphabétique
+  filtered.sort((a, b) => {
+    const ad = dels.has(a.uid) ? 0 : 1;
+    const bd = dels.has(b.uid) ? 0 : 1;
+    if (ad !== bd) return ad - bd;
+    return (a.pseudo || '').localeCompare(b.pseudo || '', 'fr');
+  });
+
+  const activeCount = dels.size;
+
+  if (members.length === 0) {
+    return `<div class="vtt-deleg-empty-state">
+      <div class="vtt-deleg-empty-ico">👥</div>
+      <div><b>Aucun autre joueur dans l'aventure</b></div>
+      <div class="vtt-deleg-empty-hint">Invite d'autres joueurs depuis le menu d'aventure pour pouvoir leur déléguer un token.</div>
+    </div>`;
+  }
+
+  const rows = filtered.length ? filtered.map(m => {
+    const active = dels.has(m.uid);
+    const initials = (m.pseudo || '?')[0].toUpperCase();
+    const portraitHtml = m.photo
+      ? `<img src="${_esc(m.photo)}" alt="">`
+      : `<span class="vtt-deleg-portrait-initial">${_esc(initials)}</span>`;
+    return `<div class="vtt-deleg-row ${active?'is-on':''}" data-uid="${m.uid}"
+        onclick="window._vttToggleTokenDelegate('${tokenId}','${m.uid}')">
+      <div class="vtt-deleg-portrait" data-aura="${_esc(m.aura)}">${portraitHtml}</div>
+      <div class="vtt-deleg-body">
+        <div class="vtt-deleg-pseudo">
+          ${_esc(m.pseudo)}
+          ${m.isAdmin ? '<span class="vtt-deleg-badge admin" title="Maître du jeu">MJ</span>' : ''}
+        </div>
+        ${m.charName ? `<div class="vtt-deleg-char">Joue&nbsp;: ${_esc(m.charName)}</div>` : '<div class="vtt-deleg-char vtt-deleg-char-empty">Aucun perso lié</div>'}
+      </div>
+      <div class="vtt-deleg-switch ${active?'on':''}" aria-label="${active?'Autorisé':'Bloqué'}">
+        <span class="vtt-deleg-switch-thumb"></span>
+      </div>
+    </div>`;
+  }).join('') : `<div class="vtt-deleg-noresult">
+    <span>🔎</span><div>Aucun joueur ne correspond à « ${_esc(search)} »</div>
+  </div>`;
+
+  return `<div class="vtt-deleg-intro">
+      Toggle chaque joueur pour autoriser / retirer le contrôle. <b>Tu restes propriétaire</b> et peux révoquer à tout moment.
+    </div>
+    <div class="vtt-deleg-summary">
+      <span class="vtt-deleg-summary-ico">🤝</span>
+      <span><b>${activeCount}</b> joueur${activeCount>1?'s':''} autorisé${activeCount>1?'s':''}
+        ${activeCount === 0 ? '· vous seul contrôlez ce token' : ''}</span>
+    </div>
+    <div class="vtt-deleg-search-wrap">
+      <span class="vtt-deleg-search-ico">🔍</span>
+      <input type="text" id="vtt-deleg-search" class="vtt-deleg-search"
+        placeholder="Rechercher un joueur ou un personnage…"
+        value="${_esc(search)}"
+        oninput="window._vttFilterDelegates('${tokenId}', this.value)">
+    </div>
+    <div class="vtt-deleg-list">${rows}</div>
+    ${(STATE.isAdmin && ghosts.length) ? `
+      <div class="vtt-deleg-ghosts">
+        <span class="vtt-deleg-ghosts-ico">🧹</span>
+        <div class="vtt-deleg-ghosts-body">
+          <b>${ghosts.length} compte${ghosts.length>1?'s':''} orphelin${ghosts.length>1?'s':''}</b>
+          <span>résidus de base de données — masqués de la liste.</span>
+        </div>
+        <button class="btn btn-outline btn-sm"
+          onclick="window._vttCleanGhostMembers()" title="Retirer ces UIDs de l'aventure">Nettoyer</button>
+      </div>` : ''}
+    <button class="btn btn-outline btn-sm vtt-deleg-close" onclick="closeModalDirect()">Fermer</button>`;
+}
+
+window._vttOpenTokenDelegatesModal = (tokenId) => {
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  const uid = STATE.user?.uid;
+  const isOwner = uid && t.ownerId === uid;
+  if (!isOwner && !STATE.isAdmin) {
+    showNotif('Seul le propriétaire du token peut gérer les délégations.', 'error');
+    return;
+  }
+  const tgtName = (typeof _live === 'function' ? _live(t).displayName : t.name) || t.name || 'Token';
+  window._vttDelegSearch = '';
+  openModal(`🤝 Déléguer le contrôle — ${_esc(tgtName)}`,
+    `<div id="vtt-deleg-modal" class="vtt-deleg-modal">${_vttRenderDelegateModalBody(tokenId, '')}</div>`);
+};
+
+window._vttFilterDelegates = (tokenId, value) => {
+  window._vttDelegSearch = value || '';
+  const host = document.getElementById('vtt-deleg-modal');
+  if (!host) return;
+  host.innerHTML = _vttRenderDelegateModalBody(tokenId, window._vttDelegSearch);
+  // Restaure focus + caret dans la search box
+  requestAnimationFrame(() => {
+    const el = document.getElementById('vtt-deleg-search');
+    if (el) {
+      el.focus();
+      try { el.setSelectionRange(el.value.length, el.value.length); } catch {}
+    }
+  });
+};
+
+window._vttToggleTokenDelegate = async (tokenId, targetUid) => {
+  const t = _tokens[tokenId]?.data; if (!t || !targetUid) return;
+  const uid = STATE.user?.uid;
+  const isOwner = uid && t.ownerId === uid;
+  if (!isOwner && !STATE.isAdmin) return;
+  const cur = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
+  const wasOn = cur.includes(targetUid);
+  const next = wasOn ? cur.filter(u => u !== targetUid) : [...cur, targetUid];
+  try {
+    await updateDoc(_tokRef(tokenId), { controlDelegates: next });
+    // Mise à jour optimiste du cache local pour rafraîchir immédiatement la modal
+    if (_tokens[tokenId]?.data) _tokens[tokenId].data.controlDelegates = next;
+    const host = document.getElementById('vtt-deleg-modal');
+    if (host) host.innerHTML = _vttRenderDelegateModalBody(tokenId, window._vttDelegSearch || '');
+    const name = _resolveUidName(targetUid);
+    showNotif(wasOn ? `Contrôle retiré à ${name}` : `${name} peut maintenant contrôler ce token`,
+      wasOn ? 'info' : 'success');
+  } catch (err) {
+    console.error('[VTT] toggle delegate', err);
+    showNotif(`Erreur : ${err?.message || err}`, 'error');
+  }
+};
+
+// Suppression rapide depuis le chip de l'inspector — alias vers le toggle
+window._vttRemoveTokenDelegate = async (tokenId, uid) => {
+  await window._vttToggleTokenDelegate(tokenId, uid);
+};
+
+// Nettoie les UIDs orphelins (sans perso lié + non admin) du doc d'aventure.
+// Réservé MJ — agit sur adventure.players + accessList.
+window._vttCleanGhostMembers = async () => {
+  if (!STATE.isAdmin) return;
+  const adv = STATE.adventure; if (!adv?.id) return;
+  // Recalcule la liste des ghosts à l'instant T
+  const ghosts = [...new Set([...(adv.players || []), ...(adv.admins || [])])]
+    .filter(u => u && u !== STATE.user?.uid)
+    .map(_vttMemberInfo)
+    .filter(m => m.isGhost)
+    .map(m => m.uid);
+  if (!ghosts.length) { showNotif('Aucun compte orphelin à nettoyer', 'info'); return; }
+
+  const players    = (adv.players    || []).filter(u => !ghosts.includes(u));
+  const accessList = (adv.accessList || []).filter(u => !ghosts.includes(u));
+  const admins     = (adv.admins     || []).filter(u => !ghosts.includes(u));
+
+  try {
+    await updateDoc(doc(db, 'adventures', adv.id), { players, accessList, admins });
+    // Synchro de l'état local pour rafraîchir la modal
+    STATE.adventure = { ...adv, players, accessList, admins };
+    showNotif(`🧹 ${ghosts.length} compte${ghosts.length>1?'s':''} orphelin${ghosts.length>1?'s':''} retiré${ghosts.length>1?'s':''} de l'aventure`, 'success');
+    // Re-render la modal (le body si elle est encore ouverte)
+    const host = document.getElementById('vtt-deleg-modal');
+    if (host) {
+      // Récupère le tokenId courant depuis le data-attribute de l'inspector ou ré-extrait
+      const sel = document.querySelector('[data-vtt-fn="_vttOpenTokenDelegatesModal"]');
+      const tokenId = sel?.dataset?.vttArgs;
+      if (tokenId) host.innerHTML = _vttRenderDelegateModalBody(tokenId, window._vttDelegSearch || '');
+    }
+  } catch (err) {
+    console.error('[VTT] clean ghosts', err);
+    showNotif(`Erreur : ${err?.message || err}`, 'error');
+  }
+};
 
 /** Réinitialise le déplacement et les actions d'un token (MJ, tour individuel). */
 window._vttResetTurn = async id => {
