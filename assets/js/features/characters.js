@@ -7,7 +7,7 @@ import { updateInCol } from '../data/firestore.js';
 import { _esc, modStr } from '../shared/html.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
-  calcOr, calcPalier, pct,
+  calcOr, calcPalier, pct, getItemStatBonus,
 } from '../shared/char-stats.js';
 
 // ── Sous-modules ─────────────────────────────────────────────────────────────
@@ -283,9 +283,8 @@ function renderCharSheet(c, keepTab) {
 
   const hpBarCls = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
 
-  // Mini-stats : CA, Vitesse, Maîtrise, DD Sorts
-  const profMod   = Math.max(2, Math.floor(((c.niveau || 1) - 1) / 4) + 2);   // bonus de maîtrise
-  const ddSorts   = 8 + profMod + getMod(c, 'intelligence');
+  // Mini-stats : CA, Vitesse, Maîtrise, Deck (deckActifs / deckMax déjà calculés plus haut)
+  const profMod    = Math.max(2, Math.floor(((c.niveau || 1) - 1) / 4) + 2);   // bonus de maîtrise
 
   // Stats banner — 6 tuiles avec badge alloc si points dispo
   // (réutilise `s` et `sb` déclarés plus haut pour la grille stats legacy)
@@ -297,6 +296,11 @@ function renderCharSheet(c, keepTab) {
     {key:'sagesse',     abbr:'SAG'},
     {key:'charisme',    abbr:'CHA'},
   ];
+  const isAdmin = !!STATE.isAdmin;
+  const STAT_FULL = {
+    force: 'Force', dexterite: 'Dextérité', intelligence: 'Intelligence',
+    constitution: 'Constitution', sagesse: 'Sagesse', charisme: 'Charisme',
+  };
   const tilesHtml = STATS_TILES.map(st => {
     // c.stats[key] contient TOTAL (base initiale + level-ups). On reconstitue les 3 valeurs.
     const totalBase = s[st.key]  || 8;          // base + level-ups
@@ -306,33 +310,59 @@ function renderCharSheet(c, keepTab) {
     const total     = totalBase + bonus;
     const m         = getMod(c, st.key);
     const mStr      = m >= 0 ? `+${m}` : String(m);
-    const mCls      = m > 0 ? 'pos' : m < 0 ? 'neg' : '';
-    const eqStr     = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '+0';
-    const lvlStr    = lvlUp > 0 ? `+${lvlUp}` : '+0';
+    const mCls      = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
+    const eqCls     = bonus > 0 ? 'pos' : bonus < 0 ? 'neg' : 'zero';
+    const eqDisp    = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '0';
 
-    // Boutons ± de level-up : + actif si points dispos, − actif si déjà alloués
     const canPlus  = canEdit && lvlPointsRemaining > 0;
     const canMinus = canEdit && lvlUp > 0;
-    const lvlCtrls = canEdit
-      ? `<span class="stat-lvl-ctrls" onclick="event.stopPropagation()">
+
+    // ── Base : MJ peut cliquer pour éditer (visuel doré + ✎)
+    const baseSegment = (canEdit && isAdmin)
+      ? `<button class="stat-seg stat-seg-base editable" title="MJ — Modifier la base"
+            onclick="event.stopPropagation();inlineEditStat('${c.id}','${st.key}',this)">
+          <span class="stat-seg-val js-stat-base">${pureBase}</span>
+          <span class="stat-seg-lbl">Base <small>✎</small></span>
+        </button>`
+      : `<div class="stat-seg stat-seg-base">
+          <span class="stat-seg-val js-stat-base">${pureBase}</span>
+          <span class="stat-seg-lbl">Base</span>
+        </div>`;
+
+    // ── Niveau : ± boutons à côté de la valeur
+    const nivSegment = `<div class="stat-seg stat-seg-niv ${lvlUp>0?'has':'zero'}">
+        <span class="stat-seg-val">+${lvlUp}</span>
+        <span class="stat-seg-lbl">Niveau</span>
+        ${canEdit ? `<span class="stat-seg-ctrls">
           <button class="stat-lvl-btn" ${canMinus?'':'disabled'}
             onclick="event.stopPropagation();allocateStat('${c.id}','${st.key}',-1)" title="Retirer 1 point">−</button>
           <button class="stat-lvl-btn plus" ${canPlus?'':'disabled'}
             onclick="event.stopPropagation();allocateStat('${c.id}','${st.key}',1)" title="Ajouter 1 point">+</button>
-        </span>`
-      : '';
+        </span>` : ''}
+      </div>`;
+
+    const eqSegment = `<div class="stat-seg stat-seg-eq ${eqCls}">
+        <span class="stat-seg-val">${eqDisp}</span>
+        <span class="stat-seg-lbl">Équip.</span>
+      </div>`;
 
     return `<div class="stat-tile" data-stat="${st.key}"
-      ${canEdit ? `onclick="inlineEditStatFromCard(event,'${c.id}','${st.key}',this)"` : ''}>
-      <span class="stat-tile-abbr">${st.abbr}</span>
-      <span class="stat-tile-total">${total}</span>
-      <span class="stat-tile-mod ${mCls}">${mStr}</span>
-      <span class="stat-tile-detail">
-        <span title="Base initiale">base <b>${pureBase}</b></span>
-        <span title="Équipement">eq <b>${eqStr}</b></span>
-        <span title="Points de niveau gagnés">niv <b>${lvlStr}</b></span>
-      </span>
-      ${lvlCtrls}
+      title="${_esc(STAT_FULL[st.key]||st.key)} — Base ${pureBase} + Niveau +${lvlUp} + Équip. ${eqDisp} = ${total}">
+      <header class="stat-tile-head">
+        <span class="stat-tile-name">${_esc(STAT_FULL[st.key]||st.abbr)}</span>
+        <span class="stat-tile-mod ${mCls}">${mStr}</span>
+      </header>
+      <div class="stat-tile-total-row">
+        <span class="stat-tile-total">${total}</span>
+        <span class="stat-tile-total-lbl">Total</span>
+      </div>
+      <div class="stat-tile-formula">
+        ${baseSegment}
+        <span class="stat-formula-op">+</span>
+        ${nivSegment}
+        <span class="stat-formula-op">+</span>
+        ${eqSegment}
+      </div>
     </div>`;
   }).join('');
 
@@ -454,12 +484,12 @@ function renderCharSheet(c, keepTab) {
           </div>
         </div>
 
-        <!-- Mini stats 2×2 : CA · Vit. · Maît. · DD sorts -->
+        <!-- Mini stats 2×2 : CA · Vit. · Maît. · Deck -->
         <div class="cs-mini-grid">
           <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
           <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
           <div class="cs-mini"><span class="cs-mini-icon">🎯</span><div class="cs-mini-body"><span class="cs-mini-lbl">Maît.</span><span class="cs-mini-val">+${profMod}</span></div></div>
-          <div class="cs-mini"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">DD sorts</span><span class="cs-mini-val">${ddSorts}</span></div></div>
+          <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" onclick="showCharTab('sorts')" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
         </div>
 
         <!-- Or -->
@@ -468,7 +498,7 @@ function renderCharSheet(c, keepTab) {
             <div class="or-card-icon">💰</div>
             <div>
               <div class="or-card-lbl">Bourse</div>
-              <div class="or-card-val">${calcOr(c)} <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
+              <div class="or-card-val"><span class="or-card-amount">${calcOr(c)}</span> <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
             </div>
           </div>
           ${canEdit?`<button class="or-card-btn" onclick="openSendGoldModal('${c.id}')">↗ Envoyer</button>`:''}
@@ -847,19 +877,30 @@ function _bindSortsCatDrag(c, canEdit) {
 // Lit le schéma existant c.compte = { recettes:[], depenses:[] } et fusionne
 // les deux flux en une timeline triée chronologiquement décroissante.
 function renderCharLedger(c, canEdit) {
+  // ⚠️ Toujours re-fetch la référence FRAÎCHE en cas de re-render asynchrone
+  const fresh = STATE.characters.find(x => x.id === c.id) || c;
+  c = fresh;
   const compte = c.compte || { recettes: [], depenses: [] };
   const recettes = (compte.recettes || []).map((r, i) => ({ ...r, sign: 1, kind: 'recettes', idx: i }));
   const depenses = (compte.depenses || []).map((d, i) => ({ ...d, sign: -1, kind: 'depenses', idx: i }));
   const tR = recettes.reduce((s, r) => s + (parseFloat(r.montant) || 0), 0);
   const tD = depenses.reduce((s, d) => s + (parseFloat(d.montant) || 0), 0);
   const solde = tR - tD;
-  // Tri chronologique décroissant
+  const fmt = (n) => {
+    const v = Math.round((parseFloat(n) || 0) * 100) / 100;
+    return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
+  };
+  // Tri chronologique décroissant. À date égale → dernière insertion en haut
+  // (idx élevé = ajouté plus récemment dans son tableau).
   const all = [...recettes, ...depenses].sort((a, b) => {
     const da = (a.date || ''), db = (b.date || '');
-    if (!da && !db) return 0;
-    if (!da) return 1;
-    if (!db) return -1;
-    return db.localeCompare(da, 'fr', { numeric: true });
+    if (da !== db) {
+      if (!da) return 1;
+      if (!db) return -1;
+      return db.localeCompare(da, 'fr', { numeric: true });
+    }
+    // Tiebreaker : idx DESC pour que la nouvelle ligne apparaisse tout en haut
+    return (b.idx || 0) - (a.idx || 0);
   });
 
   // Filtres (état persistant sur window pour ne pas être perdu au re-render)
@@ -876,11 +917,19 @@ function renderCharLedger(c, canEdit) {
   const visible = filtered.slice(0, limit);
   const hasMore = filtered.length > visible.length;
 
-  // Groupement par "mois" déduit du premier segment de date (ex: "Mois 3 / J12" → "Mois 3")
+  // Groupement par "mois" : ISO YYYY-MM-DD → "YYYY-MM" formaté en "Mois AAAA",
+  // sinon legacy split par "/"
+  const MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  const monthKeyOf = (date) => {
+    if (!date) return 'Sans date';
+    const iso = /^(\d{4})-(\d{2})-\d{2}$/.exec(date);
+    if (iso) return `${MOIS_FR[parseInt(iso[2],10)-1]} ${iso[1]}`;
+    return date.split('/')[0]?.trim() || 'Sans date';
+  };
   const groups = [];
   let curMonth = null;
   visible.forEach(e => {
-    const month = (e.date || '').split('/')[0]?.trim() || 'Sans date';
+    const month = monthKeyOf(e.date);
     if (month !== curMonth) {
       curMonth = month;
       groups.push({ month, items: [] });
@@ -888,11 +937,33 @@ function renderCharLedger(c, canEdit) {
     groups[groups.length - 1].items.push(e);
   });
 
+  const addKind = window._csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
   return `
   <div class="compte-summary">
-    <div class="compte-tile"><span class="compte-lbl">Recettes</span><span class="compte-val pos">+${tR} or</span><span class="compte-sub">${recettes.length} entrée${recettes.length>1?'s':''}</span></div>
-    <div class="compte-tile"><span class="compte-lbl">Dépenses</span><span class="compte-val neg">−${tD} or</span><span class="compte-sub">${depenses.length} entrée${depenses.length>1?'s':''}</span></div>
-    <div class="compte-tile main"><span class="compte-lbl">Solde — Bourse</span><span class="compte-val gold">${solde} or</span><span class="compte-sub">Disponible en jeu</span></div>
+    <div class="compte-tile">
+      <span class="compte-tile-ico" style="color:var(--emerald)">↗</span>
+      <div class="compte-tile-body">
+        <span class="compte-lbl">Recettes</span>
+        <span class="compte-val pos">+${fmt(tR)} <small>or</small></span>
+        <span class="compte-sub">${recettes.length} entrée${recettes.length>1?'s':''}</span>
+      </div>
+    </div>
+    <div class="compte-tile">
+      <span class="compte-tile-ico" style="color:var(--crimson-light,#ff8ca7)">↘</span>
+      <div class="compte-tile-body">
+        <span class="compte-lbl">Dépenses</span>
+        <span class="compte-val neg">−${fmt(tD)} <small>or</small></span>
+        <span class="compte-sub">${depenses.length} entrée${depenses.length>1?'s':''}</span>
+      </div>
+    </div>
+    <div class="compte-tile main">
+      <span class="compte-tile-ico" style="color:var(--amber,#f4c430)">💰</span>
+      <div class="compte-tile-body">
+        <span class="compte-lbl">Solde — Bourse</span>
+        <span class="compte-val gold">${fmt(solde)} <small>or</small></span>
+        <span class="compte-sub">Disponible en jeu</span>
+      </div>
+    </div>
   </div>
 
   <div class="section">
@@ -914,17 +985,34 @@ function renderCharLedger(c, canEdit) {
     </div>
 
     ${canEdit ? `
-    <div class="ledger-add">
+    <div class="ledger-add ${addKind==='depenses'?'is-dep':'is-rcpt'}">
       <div class="ledger-add-seg">
-        <button type="button" class="${(window._csV3LedgerAddKind||'recettes')==='recettes'?'on rcpt':''}"
-          onclick="window._csV3LedgerSetAddKind('recettes')">+ Recette</button>
-        <button type="button" class="${window._csV3LedgerAddKind==='depenses'?'on dep':''}"
-          onclick="window._csV3LedgerSetAddKind('depenses')">− Dépense</button>
+        <button type="button" class="${addKind==='recettes'?'on rcpt':''}"
+          onclick="window._csV3LedgerSetAddKind('recettes','${c.id}')">↗ Recette</button>
+        <button type="button" class="${addKind==='depenses'?'on dep':''}"
+          onclick="window._csV3LedgerSetAddKind('depenses','${c.id}')">↘ Dépense</button>
       </div>
-      <input type="text" id="ledger-date" placeholder="Date (Mois 3 / J12…)" class="ledger-add-date">
-      <input type="text" id="ledger-lib" placeholder="Libellé" class="lib">
-      <input type="number" id="ledger-amount" placeholder="0" step="any" class="ledger-add-amount">
-      <button class="ledger-add-btn" onclick="window._csV3AddLedger('${c.id}')">＋ Ajouter</button>
+      <div class="ledger-add-fields">
+        <label class="ledger-add-field">
+          <span>Date</span>
+          <input type="date" id="ledger-date"
+            value="${_csV3TodayISO()}" class="ledger-add-date"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+        </label>
+        <label class="ledger-add-field ledger-add-field-lib">
+          <span>Libellé</span>
+          <input type="text" id="ledger-lib" placeholder="${addKind==='recettes'?'Pillage du gobelin…':'Auberge du nain…'}" class="lib"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+        </label>
+        <label class="ledger-add-field ledger-add-field-amt">
+          <span>Montant (or)</span>
+          <input type="number" id="ledger-amount" placeholder="0" step="any" min="0" class="ledger-add-amount"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+        </label>
+      </div>
+      <button class="ledger-add-btn ${addKind}" onclick="window._csV3AddLedger('${c.id}')">
+        ${addKind==='recettes'?'＋ Encaisser':'− Décaisser'}
+      </button>
     </div>` : ''}
 
     ${filtered.length === 0 ? `<div class="q-empty">${all.length===0?"Aucune écriture pour l'instant.":"Aucun résultat avec ce filtre."}</div>` : `
@@ -932,14 +1020,28 @@ function renderCharLedger(c, canEdit) {
       <ol class="ledger">
         ${groups.map(g => `
           <li class="ledger-month">${_esc(g.month)}</li>
-          ${g.items.map(e => `
-            <li class="ledger-row ${e.sign>0?'rcpt':'dep'}">
-              <span class="ledger-dot"></span>
-              <span class="ledger-date">${_esc(e.date || '—')}</span>
-              <span class="ledger-lib">${_esc(e.libelle || '—')}</span>
-              <span class="ledger-amount">${e.sign>0?'+':'−'}${Math.abs(parseFloat(e.montant)||0)} <small>or</small></span>
-              ${canEdit?`<button class="ledger-del" title="Supprimer" onclick="deleteCompteRow('${e.kind}',${e.idx})">🗑️</button>`:'<span></span>'}
-            </li>`).join('')}
+          ${g.items.map(e => {
+            const editAttr = canEdit
+              ? `contenteditable="true" spellcheck="false" data-kind="${e.kind}" data-idx="${e.idx}"
+                  onblur="window._csV3LedgerSaveField(this,'${e.kind}',${e.idx},'$FIELD$')"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
+                  onfocus="this.dataset.original=this.textContent"`
+              : '';
+            return `<li class="ledger-row ${e.sign>0?'rcpt':'dep'}">
+              <span class="ledger-sign" title="${e.sign>0?'Recette':'Dépense'}">${e.sign>0?'↗':'↘'}</span>
+              <span class="ledger-lib" ${editAttr.replace('$FIELD$', 'libelle')}>${_esc(e.libelle || (canEdit?'Sans libellé':''))}</span>
+              <span class="ledger-date" ${editAttr.replace('$FIELD$', 'date')}>${_esc(e.date || '—')}</span>
+              <span class="ledger-amount-wrap">
+                <span class="ledger-sgn">${e.sign>0?'+':'−'}</span><span class="ledger-amount" ${canEdit
+                  ? `contenteditable="true" spellcheck="false"
+                      onblur="window._csV3LedgerSaveAmount(this,'${e.kind}',${e.idx},${e.sign})"
+                      onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
+                      onfocus="this.dataset.original=this.textContent"`
+                  : ''}>${fmt(Math.abs(parseFloat(e.montant)||0))}</span><small class="ledger-or-suffix">or</small>
+              </span>
+              ${canEdit?`<button class="ledger-del" title="Supprimer" onclick="window._csV3DeleteLedger('${c.id}','${e.kind}',${e.idx})">🗑</button>`:'<span></span>'}
+            </li>`;
+          }).join('')}
         `).join('')}
       </ol>
     </div>
@@ -948,14 +1050,118 @@ function renderCharLedger(c, canEdit) {
   </div>`;
 }
 
-window._csV3LedgerSetAddKind = (kind) => {
-  window._csV3LedgerAddKind = (kind === 'depenses') ? 'depenses' : 'recettes';
-  // Update visuel sans re-render complet
-  document.querySelectorAll('.ledger-add-seg button').forEach(b => {
-    b.classList.toggle('on', b.textContent.includes(window._csV3LedgerAddKind === 'depenses' ? 'Dépense' : 'Recette'));
-    b.classList.toggle('rcpt', b.textContent.includes('Recette') && window._csV3LedgerAddKind === 'recettes');
-    b.classList.toggle('dep', b.textContent.includes('Dépense') && window._csV3LedgerAddKind === 'depenses');
+// Helper : récupère la référence FRAÎCHE du char depuis STATE (jamais une copie stale)
+function _csV3GetFreshChar(charId) {
+  return STATE.characters.find(x => x.id === charId)
+      || (window._currentChar?.id === charId ? window._currentChar : null)
+      || STATE.activeChar;
+}
+function _csV3SyncCharRefs(c) {
+  if (!c) return;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+  if (window._currentChar?.id === c.id) window._currentChar = c;
+}
+// Met à jour le solde de la bourse partout (sans tout re-render)
+function _csV3RefreshBourse(c) {
+  const value = String(calcOr(c));
+  // 1) Tous les spans dédiés (hero badge + side card si markup à jour)
+  document.querySelectorAll('.cs-or-amount, .or-card-amount').forEach(el => { el.textContent = value; });
+  // 2) Fallback robuste : tout .or-card-val (peu importe le markup interne),
+  //    on reconstruit "VAL or" en préservant le <small> existant.
+  document.querySelectorAll('.or-card-val').forEach(el => {
+    // Si on a déjà un span .or-card-amount à l'intérieur, il est déjà à jour.
+    if (el.querySelector('.or-card-amount')) return;
+    const small = el.querySelector('small');
+    const smallHtml = small ? small.outerHTML : '<small style="font-size:.65rem;color:var(--text-dim)">or</small>';
+    el.innerHTML = `<span class="or-card-amount">${value}</span> ${smallHtml}`;
   });
+  // 3) Helper legacy (anciennes sidebars éventuelles)
+  try { window.refreshOrDisplay?.(c); } catch {}
+}
+// Date du jour au format ISO court YYYY-MM-DD (compatible artisan + tri propre)
+function _csV3TodayISO() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+// Sauvegarde inline d'un champ texte (date / libelle) d'une écriture
+window._csV3LedgerSaveField = async (el, kind, idx, field) => {
+  const charId = window._currentChar?.id; if (!charId) return;
+  const c = _csV3GetFreshChar(charId); if (!c) return;
+  c.compte = c.compte || { recettes: [], depenses: [] };
+  const row = (c.compte[kind] || [])[idx]; if (!row) return;
+  const newVal = (el.textContent || '').trim();
+  if ((row[field] || '') === newVal) return;
+  row[field] = newVal;
+  _csV3SyncCharRefs(c);
+  try {
+    await updateInCol('characters', c.id, { compte: c.compte });
+    // Si on a modifié la date, re-render pour refléter le nouveau tri/groupement
+    if (field === 'date' && window._currentCharTab === 'compte') {
+      _renderTabV3('compte', c, window._canEditChar);
+    }
+  } catch (e) {
+    console.warn('[ledger field save]', e);
+    el.textContent = el.dataset.original || '';
+  }
+};
+// Sauvegarde inline du montant (gère le signe + ou −)
+window._csV3LedgerSaveAmount = async (el, kind, idx, sign) => {
+  const charId = window._currentChar?.id; if (!charId) return;
+  const c = _csV3GetFreshChar(charId); if (!c) return;
+  c.compte = c.compte || { recettes: [], depenses: [] };
+  const row = (c.compte[kind] || [])[idx]; if (!row) return;
+  const txt = (el.textContent || '').replace(/[^\d.,\-]/g, '').replace(',', '.');
+  const newVal = Math.abs(parseFloat(txt) || 0);
+  if ((parseFloat(row.montant) || 0) === newVal) return;
+  row.montant = newVal;
+  _csV3SyncCharRefs(c);
+  try {
+    await updateInCol('characters', c.id, { compte: c.compte });
+    _csV3RefreshBourse(c);
+    // Re-render systématique pour actualiser les totaux/solde
+    if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  } catch (e) {
+    console.warn('[ledger amount save]', e);
+    el.textContent = el.dataset.original || '';
+  }
+};
+
+window._csV3LedgerSetAddKind = (kind, charId) => {
+  window._csV3LedgerAddKind = (kind === 'depenses') ? 'depenses' : 'recettes';
+  // Préserve les valeurs déjà saisies avant le re-render
+  const prevDate = document.getElementById('ledger-date')?.value || '';
+  const prevLib  = document.getElementById('ledger-lib')?.value  || '';
+  const prevAmt  = document.getElementById('ledger-amount')?.value || '';
+  if (charId && window._currentCharTab === 'compte') {
+    const c = _csV3GetFreshChar(charId);
+    if (c) _renderTabV3('compte', c, window._canEditChar);
+  }
+  // Restaure les valeurs sur les nouveaux inputs
+  requestAnimationFrame(() => {
+    const dEl = document.getElementById('ledger-date');
+    const lEl = document.getElementById('ledger-lib');
+    const aEl = document.getElementById('ledger-amount');
+    if (dEl && prevDate) dEl.value = prevDate;
+    if (lEl) lEl.value = prevLib;
+    if (aEl) aEl.value = prevAmt;
+    lEl?.focus();
+  });
+};
+
+// Suppression d'une ligne (re-fetch + re-render explicite, SANS confirmation)
+window._csV3DeleteLedger = async (charId, kind, idx) => {
+  const c = _csV3GetFreshChar(charId); if (!c) return;
+  c.compte = c.compte || { recettes: [], depenses: [] };
+  if (!(c.compte[kind] || [])[idx]) return;
+  c.compte[kind].splice(idx, 1);
+  _csV3SyncCharRefs(c);
+  try {
+    await updateInCol('characters', c.id, { compte: c.compte });
+    _csV3RefreshBourse(c);
+  } catch (e) { console.warn('[ledger del]', e); }
+  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
 };
 
 window._csV3LedgerSetKind = (charId, kind) => {
@@ -990,22 +1196,24 @@ window._csV3AddLedger = async function (charId) {
   const amtEl  = document.getElementById('ledger-amount');
   if (!libEl || !amtEl) return;
   const kind = window._csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
-  const date = (dateEl?.value || '').trim() || new Date().toLocaleDateString('fr-FR');
+  const date = (dateEl?.value || '').trim() || _csV3TodayISO();
   const lib  = (libEl.value || '').trim();
-  const amt  = parseFloat(amtEl.value) || 0;
-  if (!lib || !amt) { if (window.showNotif) window.showNotif('Libellé et montant requis.', 'error'); return; }
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  const amt  = Math.abs(parseFloat((amtEl.value || '').replace(',', '.')) || 0);
+  if (!lib) { if (window.showNotif) window.showNotif('Libellé requis.', 'error'); libEl.focus(); return; }
+  if (!amt) { if (window.showNotif) window.showNotif('Montant requis.', 'error'); amtEl.focus(); return; }
+  const c = _csV3GetFreshChar(charId);
   if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
   c.compte[kind] = c.compte[kind] || [];
   c.compte[kind].push({ date, libelle: lib, montant: amt });
+  _csV3SyncCharRefs(c);
   try { await updateInCol('characters', charId, { compte: c.compte }); }
   catch (e) { if (window.showNotif) window.showNotif('Erreur de sauvegarde.', 'error'); return; }
-  if (typeof window.refreshOrDisplay === 'function') window.refreshOrDisplay(c);
-  // Reset les inputs sans rerender complet
-  if (libEl) libEl.value = '';
-  if (amtEl) amtEl.value = '';
-  _renderTabV3('compte', c, window._canEditChar);
+  _csV3RefreshBourse(c);
+  // Re-render complet → totaux + tri + nouvelle ligne visibles
+  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  // Focus l'input libellé pour la saisie en chaîne
+  requestAnimationFrame(() => { document.getElementById('ledger-lib')?.focus(); });
 };
 
 // ── Journal → sub-tabs Notes / Quêtes / Relations ────────────────────────────
@@ -1336,13 +1544,42 @@ function renderCharProfilV3(c, canEdit) {
     { k: 'afficherTags',      lbl: 'Traits perso.',    def: true  },
   ];
 
+  const TAG_MAX_V3 = 8;
+  const V3_TAG_SUGGESTIONS = [
+    'Bienveillant','Vengeur','Courageux','Méfiant','Loyal','Obsessionnel',
+    'Impulsif','Protecteur','Solitaire','Curieux','Ambitieux','Charismatique',
+    'Prudent','Rusé','Empathique','Froid','Fervent','Téméraire',
+  ];
+  const tagsLow = tags.map(t => t.toLowerCase());
   const tagChips = tags.map(t => {
     const [bg, bd, col] = _v3TagColor(t);
-    return `<span class="profil-tag" style="--tag-bg:${bg};--tag-bd:${bd};--tag-c:${col}">${_esc(t)}</span>`;
+    const removeBtn = canEdit
+      ? `<button class="profil-tag-x" title="Retirer" onclick="window._csV3RemoveProfilTag('${c.id}','${t.replace(/'/g,"\\'")}')">×</button>`
+      : '';
+    return `<span class="profil-tag" style="--tag-bg:${bg};--tag-bd:${bd};--tag-c:${col}">${_esc(t)}${removeBtn}</span>`;
   }).join('');
-  const tagAdd = canEdit
-    ? `<span class="profil-tag" style="--tag-bg:transparent;--tag-bd:rgba(255,255,255,.10);--tag-c:var(--text-dim);border-style:dashed;cursor:pointer"
-        onclick="window._csV3AddProfilTag('${c.id}')">＋ Ajouter</span>`
+
+  const tagsFull = tags.length >= TAG_MAX_V3;
+  const tagEditor = canEdit
+    ? `<div class="profil-tags-editor">
+        <div class="profil-tags-input-row">
+          <input type="text" id="csv3-tag-input-${c.id}" class="profil-tag-input"
+            placeholder="${tagsFull ? `Maximum ${TAG_MAX_V3} traits atteint` : 'Ajouter un trait personnalisé…'}"
+            maxlength="24" ${tagsFull?'disabled':''}
+            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddProfilTagFromInput('${c.id}');}else if(event.key==='Escape'){this.value='';this.blur();}">
+          <button class="profil-tag-add-btn" ${tagsFull?'disabled':''}
+            onclick="window._csV3AddProfilTagFromInput('${c.id}')">Ajouter</button>
+        </div>
+        <div class="profil-tag-suggest-label">Suggestions :</div>
+        <div class="profil-tag-suggest-row">
+          ${V3_TAG_SUGGESTIONS.map(s => {
+            const used = tagsLow.includes(s.toLowerCase());
+            return `<button class="profil-tag-suggest ${used?'is-used':''}" ${used||tagsFull?'disabled':''}
+              onclick="window._csV3AddProfilTag('${c.id}','${s}')">${_esc(s)}</button>`;
+          }).join('')}
+        </div>
+        <div class="profil-tag-counter">${tags.length} / ${TAG_MAX_V3} traits</div>
+      </div>`
     : '';
 
   // Identité : 7 champs par défaut + éventuels custom. Valeur DIRECTEMENT éditable inline.
@@ -1382,13 +1619,20 @@ function renderCharProfilV3(c, canEdit) {
 
   return `
   ${canEdit
-    ? `<input class="profil-quote profil-quote-edit" type="text"
+    ? `<input class="profil-quote profil-quote-edit ${!quote ? 'is-empty' : ''}" type="text"
         value="${_esc(quote)}"
         placeholder="Ajoute une citation pour ton personnage…"
-        onblur="window._csV3SaveQuote('${c.id}',this.value)"
-        onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">`
-    : `<div class="profil-quote">${quote ? _esc(quote) : 'Aucune citation.'}</div>`}
-  <div class="profil-tags" style="margin:14px 0">${tagChips}${tagAdd}</div>
+        oninput="this.classList.toggle('is-empty', !this.value)"
+        onblur="this.classList.toggle('is-empty', !this.value);window._csV3SaveQuote('${c.id}',this.value)"
+        onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.classList.toggle('is-empty',!this.value);this.blur();}">`
+    : (quote
+        ? `<div class="profil-quote">${_esc(quote)}</div>`
+        : '')}
+  <div class="profil-tags-block">
+    ${canEdit ? `<div class="profil-tags-title">🎭 Traits de caractère</div>` : ''}
+    <div class="profil-tags">${tagChips || (canEdit ? '<span class="profil-tags-empty">Aucun trait pour l\'instant</span>' : '')}</div>
+    ${tagEditor}
+  </div>
 
   <div class="profil-layout">
     <div class="profil-main">
@@ -1404,6 +1648,22 @@ function renderCharProfilV3(c, canEdit) {
         ${identityHtml}
         ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" onclick="window._csV3AddFact('${c.id}')">＋ Champ personnalisé</button>` : ''}
       </div>
+      ${canEdit ? `
+      <div class="profil-side-card">
+        <h4>🖼️ Illustration page Joueurs</h4>
+        <div class="profil-img-wrap">
+          ${presCache?.imageUrl
+            ? `<img class="profil-img" src="${_esc(presCache.imageUrl)}" alt="">`
+            : `<div class="profil-img profil-img-empty">Aucune image</div>`}
+        </div>
+        <div class="profil-img-actions">
+          <button class="section-action" style="flex:1" onclick="openProfilImageUpload('${c.id}')">
+            ${presCache?.imageUrl ? '🔄 Changer' : '📷 Upload sur ImgBB'}
+          </button>
+          ${presCache?.imageUrl ? `<button class="section-action" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" onclick="removeProfilImage('${c.id}')" title="Retirer">✕</button>` : ''}
+        </div>
+        <div class="profil-img-hint">L'image apparaît sur la page Joueurs comme illustration grand format du personnage.</div>
+      </div>` : ''}
       ${canEdit ? `
       <div class="profil-side-card">
         <h4>👁️ Visible par les joueurs</h4>
@@ -1433,16 +1693,37 @@ window._csV3SaveQuote = async function (charId, value) {
   try { await updateInCol('characters', charId, { quote: trimmed }); }
   catch (e) { console.warn('[quote save]', e); }
 };
-window._csV3AddProfilTag = async function (charId) {
-  const t = prompt('Trait de caractère (ex: Curieuse, Méfiante…) :'); if (!t?.trim()) return;
+async function _csV3CommitTags(charId, nextTags) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  c.tags = nextTags;
+  if (window._profilCache?.[charId]) window._profilCache[charId].tags = nextTags;
+  try { await updateInCol('characters', charId, { tags: nextTags }); }
+  catch (e) { console.warn('[tags save]', e); }
+  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+}
+window._csV3AddProfilTag = async function (charId, value) {
+  const t = (value || '').trim(); if (!t) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const cur = (window._profilCache?.[charId]?.tags || c.tags || []).slice();
-  if (!cur.includes(t.trim())) cur.push(t.trim());
-  c.tags = cur;
-  // Sync sur la pres si elle existe
-  if (window._profilCache?.[charId]) window._profilCache[charId].tags = cur;
-  await updateInCol('characters', charId, { tags: cur });
-  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+  if (cur.length >= 8) return;
+  if (cur.some(x => x.toLowerCase() === t.toLowerCase())) return;
+  cur.push(t);
+  await _csV3CommitTags(charId, cur);
+};
+window._csV3AddProfilTagFromInput = async function (charId) {
+  const input = document.getElementById(`csv3-tag-input-${charId}`);
+  if (!input) return;
+  const val = input.value.trim();
+  if (!val) { input.focus(); return; }
+  await window._csV3AddProfilTag(charId, val);
+};
+window._csV3RemoveProfilTag = async function (charId, value) {
+  const t = (value || '').trim(); if (!t) return;
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const cur = (window._profilCache?.[charId]?.tags || c.tags || []).slice();
+  const next = cur.filter(x => x.toLowerCase() !== t.toLowerCase());
+  if (next.length === cur.length) return;
+  await _csV3CommitTags(charId, next);
 };
 // Sauvegarde la VALEUR d'un champ identité (defaults ou custom) directement depuis l'input.
 // Ne re-render PAS la fiche pour éviter de perdre le focus pendant la saisie.
@@ -1550,6 +1831,34 @@ window._csV3SaveVisibility = async function (charId, key, value) {
 // Renderer compact qui réutilise les helpers data.js (getMainWeapon, traits,
 // détection de style, etc.) et préserve les actions existantes (editEquipSlot).
 // ══════════════════════════════════════════════════════════════════════════════
+// Helper partagé : retourne la liste de badges des bonus offerts par un item
+// (stats principales + dérivés PV/PM/Vit./Init.). Utilisé par les armes
+// équipées, les armures et l'inventaire pour une présentation cohérente.
+const _ITEM_STAT_LABELS = {
+  force: 'FOR', dexterite: 'DEX', intelligence: 'INT',
+  constitution: 'CON', sagesse: 'SAG', charisme: 'CHA',
+};
+const _ITEM_DERIVED_LABELS = {
+  pvMaxBonus: 'PV', pmMaxBonus: 'PM',
+  vitesseBonus: 'Vit.', initiativeBonus: 'Init.',
+};
+function _itemBonusBadges(it = {}) {
+  const out = [];
+  // Stats : items utilisent les codes courts (fo/dex/in/sa/co/ch + alias 'for').
+  // On passe par getItemStatBonus qui gère tous les alias et les upgrades.
+  Object.entries(_ITEM_STAT_LABELS).forEach(([fullKey, lbl]) => {
+    let b = 0;
+    try { b = getItemStatBonus(it, fullKey); } catch {}
+    if (b) out.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
+  });
+  Object.entries(_ITEM_DERIVED_LABELS).forEach(([k, lbl]) => {
+    const v = parseInt(it[k]) || 0;
+    if (!v) return;
+    out.push({ lbl: `${lbl} ${v>0?'+':''}${v}`, cls: 'gold' });
+  });
+  return out;
+}
+
 function renderCharCombatV3(c, canEdit) {
   const equip = c.equipement || {};
   const weaponSlots = ['Main principale', 'Main secondaire'];
@@ -1609,6 +1918,10 @@ function renderCharCombatV3(c, canEdit) {
           ${dp?.statLabel?`<span class="weap-roll-sub">${_esc(dp.statLabel)}${dp.maitriseBonus>0?` · Maît. +${dp.maitriseBonus}`:''}</span>`:''}
         </div>
       </div>
+      ${(() => {
+        const badges = _itemBonusBadges(item);
+        return badges.length ? `<div class="weap-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>` : '';
+      })()}
       ${(item.portee || traits.length) ? `<div class="weap-meta">
         ${item.portee?`<span>↗ ${_esc(item.portee)}</span>`:''}
         ${traits.length?`<div class="weap-traits">${traits.map(t=>`<span class="trait">${_esc(t)}</span>`).join('')}</div>`:''}
@@ -1666,19 +1979,77 @@ function renderCharCombatV3(c, canEdit) {
     <div class="armor-grid">${armorSlotsRow1.map(renderArmor).join('')}</div>
     <div class="armor-grid" style="margin-top:8px">${armorSlotsRow2.map(renderArmor).join('')}</div>`;
 
-  // Set bonus
+  // Set bonus — actif UNIQUEMENT si Tête + Torse + Bottes du même type (Légère / Intermédiaire / Lourde)
   let setHtml = '';
   try {
-    const setData = getArmorSetData?.(c);
-    if (setData?.name && setData.completion >= 2) {
-      const effects = (setData.effects || []).slice(0, 4);
-      setHtml = `<div class="set-row">
-        <span style="font-size:.85rem">✨</span>
-        <b>Set actif : ${_esc(setData.name)} (${setData.completion}/${setData.totalPieces||'?'})</b>
-        ${effects.map(e=>`<span class="fx">${_esc(e)}</span>`).join('')}
+    const setData = getArmorSetData?.(c) || {};
+    const trackedSlots = setData.trackedSlots || ['Tête', 'Torse', 'Bottes'];
+    const slots = setData.slots || trackedSlots.map(s => ({ slot: s, type: '', equipped: false }));
+    const counts = setData.counts || {};
+    const fullType = setData.fullType || ''; // 'Légère' / 'Intermédiaire' / 'Lourde'
+    const isActive = setData.isActive || Boolean(fullType);
+    const equippedCount = setData.equippedCount || 0;
+
+    const TYPE_ICONS = { 'Légère': '🪶', 'Intermédiaire': '🛡️', 'Lourde': '⛨' };
+    const EFFECT_BY_TYPE = {
+      'Légère':        { tag: 'Léger',         fx: 'Coût des sorts −2 PM' },
+      'Intermédiaire': { tag: 'Intermédiaire', fx: 'Toucher +2' },
+      'Lourde':        { tag: 'Lourd',         fx: 'Réduction de 2 dégâts (toute source)' },
+    };
+
+    // Tableau slot-par-slot : Tête / Torse / Bottes avec leur type
+    const slotsRow = slots.map(s => {
+      const ico = TYPE_ICONS[s.type] || '·';
+      const cls = !s.equipped ? 'empty' : (fullType && s.type === fullType ? 'match' : 'mismatch');
+      const typeLbl = s.equipped ? (s.type || 'Sans type') : 'Vide';
+      return `<div class="set-slot ${cls}">
+        <span class="set-slot-name">${_esc(s.slot)}</span>
+        <span class="set-slot-type"><span class="set-slot-ico">${ico}</span>${_esc(typeLbl)}</span>
+      </div>`;
+    }).join('');
+
+    let headHtml, effectHtml, hintHtml = '';
+    if (isActive) {
+      const fx = EFFECT_BY_TYPE[fullType] || { tag: fullType, fx: setData.activeEffect?.chipText || '' };
+      headHtml = `<span class="set-card-badge active">✨ Set ${_esc(fx.tag)} actif</span>
+        <span class="set-card-title-name">${_esc(fullType)} · 3/3</span>`;
+      effectHtml = `<div class="set-card-effect">
+        <span class="set-card-fx-dot"></span>
+        <div><b>Bonus actif :</b> ${_esc(fx.fx)}</div>
+      </div>`;
+    } else {
+      // Diagnose pourquoi ce n'est pas actif
+      const types = Object.keys(counts);
+      headHtml = `<span class="set-card-badge">🌱 Set en cours</span>
+        <span class="set-card-title-name">${equippedCount}/3 pièces équipées</span>`;
+      let reason = '';
+      if (equippedCount < 3) {
+        reason = `Équipe les 3 emplacements (Tête, Torse, Bottes) du même type pour activer un bonus.`;
+      } else if (types.length > 1) {
+        const list = types.map(t => `${counts[t]}× ${t}`).join(', ');
+        reason = `Types mélangés : ${list}. Il faut 3× le même type.`;
+      } else {
+        reason = `Continue à équiper les 3 pièces d'un même type.`;
+      }
+      hintHtml = `<div class="set-card-hint-block">${_esc(reason)}</div>`;
+      // On liste tout de même les bonus disponibles selon le choix
+      effectHtml = `<div class="set-card-rules">
+        <div class="set-card-rules-title">Bonus possibles selon le type :</div>
+        <ul>
+          <li><span class="set-card-fx-dot light"></span><b>Léger</b> : Coût des sorts −2 PM</li>
+          <li><span class="set-card-fx-dot medium"></span><b>Intermédiaire</b> : Toucher +2</li>
+          <li><span class="set-card-fx-dot heavy"></span><b>Lourd</b> : Réduction de 2 dégâts</li>
+        </ul>
       </div>`;
     }
-  } catch {}
+
+    setHtml = `<div class="set-card ${isActive?'is-active':'is-progress'}" data-set-type="${_esc(fullType)}">
+      <div class="set-card-head">${headHtml}</div>
+      <div class="set-slots-row">${slotsRow}</div>
+      ${effectHtml}
+      ${hintHtml}
+    </div>`;
+  } catch (e) { console.warn('[set bonus]', e); }
 
   // ── Bootstrap async des caches DB (styles de combat + types de dégâts magiques)
   // Au 1er rendu, les caches sont vides → on déclenche les chargements et on re-render
@@ -1949,6 +2320,10 @@ function renderCharInventaireV3(c, canEdit) {
           <span class="v ${p.c||''}">${_esc(p.v)}</span>
         </span>`).join('')}
       </div>`:''}
+      ${(() => {
+        const badges = _itemBonusBadges(it);
+        return badges.length ? `<div class="inv-card-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>` : '';
+      })()}
       ${it.description?`<div class="inv-card-desc">${_esc(it.description)}</div>`:''}
       ${canEdit?`<div class="inv-card-actions">
         <button class="inv-act sell" onclick='openSellInvModal("${c.id}","${allIdxB64}",${parseInt(it.prix||0)},"${safeName}")' title="Vendre">💰 Vendre</button>
