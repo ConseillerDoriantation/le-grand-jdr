@@ -20,7 +20,7 @@ import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
-import { calcOr } from '../shared/char-stats.js';
+import { calcOr, sortCharactersForDisplay, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import PAGES from './pages.js';
 
@@ -501,14 +501,16 @@ window._bastionSaveIdentite = async () => {
 // ACTIONS — Inventaire (déposer / retirer un objet)
 // ══════════════════════════════════════════════════════════════════════════════
 window._bastionOpenDeposit = () => {
-  const chars = _eligibleChars().filter(c => (c.inventaire || []).length > 0);
+  let chars = _eligibleChars().filter(c => (c.inventaire || []).length > 0);
   if (!chars.length) { showNotif('Aucun personnage avec inventaire.', 'error'); return; }
 
   const capacity = _bastionCapacity(_bastion);
   const used = _bastionInvCount(_bastion);
   if (used >= capacity) { showNotif(`Coffre plein (${used}/${capacity}). Améliore l'Entrepôt.`, 'error'); return; }
 
-  const defaultChar = chars.find(c => c.uid === STATE.user?.uid) || chars[0];
+  // Liste déjà triée par _eligibleChars (joueur alpha → ★ par défaut → nom).
+  // Default = le perso ★ de l'utilisateur, sinon son premier, sinon le premier de la liste.
+  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
 
   openModal('📥 Déposer un objet au coffre', `
     <div class="form-group">
@@ -647,9 +649,11 @@ window._bastionDoDeposit = async () => {
 window._bastionOpenWithdrawItem = (coffreId) => {
   const item = (_bastion?.coffre || []).find(c => c.id === coffreId);
   if (!item) return;
-  const chars = _eligibleChars();
+  let chars = _eligibleChars();
   if (!chars.length) { showNotif('Aucun personnage destinataire.', 'error'); return; }
-  const defaultChar = chars.find(c => c.uid === STATE.user?.uid) || chars[0];
+  // Liste déjà triée par _eligibleChars (joueur alpha → ★ par défaut → nom).
+  // Default = le perso ★ de l'utilisateur, sinon son premier, sinon le premier de la liste.
+  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
 
   openModal(`📤 Retirer : ${_esc(item.nom)} ×${item.quantite}`, `
     <div class="form-group">
@@ -1511,18 +1515,21 @@ window._bastionAdjustRessource = async (key, delta) => {
 // (MJ : tous · joueur : ses persos uniquement). Default = perso du joueur connecté.
 function _eligibleChars() {
   const all = STATE.characters || [];
-  if (STATE.isAdmin) return all;
-  return all.filter(c => c.uid === STATE.user?.uid);
+  const filtered = STATE.isAdmin ? all : all.filter(c => c.uid === STATE.user?.uid);
+  // Tri logique unifié : joueur alpha → ★ par défaut → nom alpha
+  return sortCharactersForDisplay(filtered);
 }
 
 window._bastionOpenTransfer = (direction) => {
   // direction = 'deposit' | 'withdraw'
   const isDeposit = direction === 'deposit';
-  const chars = _eligibleChars();
+  let chars = _eligibleChars();
   if (!chars.length) { showNotif('Aucun personnage disponible.', 'error'); return; }
 
   // Sélection par défaut : perso du user, sinon premier
-  const defaultChar = chars.find(c => c.uid === STATE.user?.uid) || chars[0];
+  // Liste déjà triée par _eligibleChars (joueur alpha → ★ par défaut → nom).
+  // Default = le perso ★ de l'utilisateur, sinon son premier, sinon le premier de la liste.
+  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
   const bastionOr = _bastion?.or || 0;
   const titre = isDeposit ? '💰 Verser au Bastion' : '💸 Retirer du Trésor commun';
   const cta   = isDeposit ? 'Verser' : 'Retirer';

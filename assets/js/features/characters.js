@@ -8,6 +8,7 @@ import { _esc, modStr } from '../shared/html.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
+  sortCharactersForDisplay,
 } from '../shared/char-stats.js';
 
 // ── Sous-modules ─────────────────────────────────────────────────────────────
@@ -121,7 +122,9 @@ function filterAdminChars(pseudo, el) {
   // Mémorise le filtre actif pour que renderCharSheet le réutilise au prochain rendu
   window._charAdminFilter = pseudo || null;
   // Sélectionne le 1er perso du filtre et rerendre
-  const chars = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
+  const filtered = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
+  // Sélectionne le ★ par défaut du joueur filtré si possible, sinon le premier (alpha)
+  const chars = sortCharactersForDisplay(filtered);
   if (chars.length > 0) { STATE.activeChar = chars[0]; renderCharSheet(chars[0]); }
 }
 
@@ -251,6 +254,8 @@ function renderCharSheet(c, keepTab) {
   if (STATE.isAdmin && window._charAdminFilter) {
     switchable = switchable.filter(x => x.ownerPseudo === window._charAdminFilter);
   }
+  // Ordre logique : groupé par joueur (alpha), perso "default" en tête de chaque groupe
+  switchable = sortCharactersForDisplay(switchable);
   const AURA_PALETTE = {
     blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
     gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
@@ -261,12 +266,13 @@ function renderCharSheet(c, keepTab) {
     const col = auraColor(ch.aura);
     const init = (ch.nom || '?')[0].toUpperCase();
     const photoPos = `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%`;
-    return `<button class="char-pill${ch.id===c.id?' active':''}"
+    const titleSuffix = ch.isDefault ? ' · ★ Par défaut' : '';
+    return `<button class="char-pill${ch.id===c.id?' active':''}${ch.isDefault?' is-default':''}"
       data-charid="${ch.id}" onclick="selectChar('${ch.id}',this)"
-      style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}">
+      style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
       <span class="char-pill-av">${ch.photo
         ? `<img src="${ch.photo}" style="object-position:${photoPos}">`
-        : init}</span>
+        : init}${ch.isDefault?'<span class="char-pill-star" title="Personnage par défaut">★</span>':''}</span>
       <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
     </button>`;
   }).join('');
@@ -423,6 +429,9 @@ function renderCharSheet(c, keepTab) {
             ? `<span class="id-name" onclick="inlineEditText('${c.id}','nom',this)" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
             : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
           <span class="id-actions-mini">
+            ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
+              title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
+              onclick="window._setDefaultCharacter('${c.id}')">${c.isDefault?'★':'☆'}</button>`:''}
             ${canEdit?`<button title="Renommer" onclick="inlineEditText('${c.id}','nom',this.parentElement.previousElementSibling)">✎</button>`:''}
             ${canEdit?`<button title="Exporter" onclick="openCharExportMenu('${c.id}',this)">📤</button>`:''}
           </span>
@@ -2461,6 +2470,46 @@ async function allocateStat(charId, key, delta = 1) {
   await updateInCol('characters', charId, { stats, statsLevelUps: levelUps });
   renderCharSheet(c, window._currentCharTab || 'combat');
 }
+
+/**
+ * Définit le personnage par défaut du joueur courant (ou du joueur propriétaire
+ * du perso ciblé si admin). Désactive automatiquement isDefault sur les autres
+ * personnages du même uid pour garantir l'unicité.
+ */
+window._setDefaultCharacter = async function (charId) {
+  const all = STATE.characters || [];
+  const c = all.find(x => x.id === charId);
+  if (!c) return;
+  const ownerUid = c.uid;
+  if (!ownerUid) { window.showNotif?.('Personnage sans propriétaire.', 'error'); return; }
+  const wasOn = !!c.isDefault;
+  try {
+    // Désactive isDefault sur tous les autres persos du même propriétaire en parallèle
+    const updates = all
+      .filter(x => x.uid === ownerUid && x.id !== charId && x.isDefault)
+      .map(x => {
+        x.isDefault = false;
+        return updateInCol('characters', x.id, { isDefault: false });
+      });
+    // Toggle sur le perso ciblé
+    c.isDefault = !wasOn;
+    updates.push(updateInCol('characters', charId, { isDefault: c.isDefault }));
+    await Promise.all(updates);
+    window.showNotif?.(c.isDefault
+      ? `★ ${c.nom || 'Personnage'} défini comme personnage par défaut`
+      : 'Personnage par défaut retiré', 'success');
+    // Re-render la sheet pour mettre à jour les pills et l'étoile
+    if (window._currentChar?.id === charId) {
+      renderCharSheet(c, window._currentCharTab || 'combat');
+    } else if (typeof renderCharSheet === 'function') {
+      const cur = window._currentChar || STATE.activeChar;
+      if (cur) renderCharSheet(cur, window._currentCharTab || 'combat');
+    }
+  } catch (e) {
+    console.error('[set default char]', e);
+    if (window.notifySaveError) window.notifySaveError(e);
+  }
+};
 
 async function setCharAura(charId, aura) {
   const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;

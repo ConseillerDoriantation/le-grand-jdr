@@ -353,5 +353,49 @@ export function computeEquipAllSkillBonuses(equip = {}) {
   return out;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// TRI & PERSONNAGE PAR DÉFAUT
+// Source unique de vérité pour ordonner les personnages partout
+// dans l'app (char-switch, groupes, players, VTT, etc.).
+//
+// Règles :
+//   1. Joueurs regroupés par pseudo (ordre alpha FR).
+//   2. À l'intérieur d'un joueur : personnage `isDefault=true` en tête,
+//      puis ordre alpha sur le nom.
+//   3. Tiebreak final : id (stable).
+//
+// Le champ `isDefault` est stocké directement sur le doc personnage
+// (boolean). Un seul personnage par joueur peut l'avoir à true ;
+// setDefaultCharacter() s'occupe de désactiver les autres.
+// ══════════════════════════════════════════════════════════════════
+export function sortCharactersForDisplay(chars = []) {
+  return [...(chars || [])].sort((a, b) => {
+    const pa = (a?.ownerPseudo || '').toLowerCase();
+    const pb = (b?.ownerPseudo || '').toLowerCase();
+    if (pa !== pb) {
+      if (!pa) return 1;
+      if (!pb) return -1;
+      return pa.localeCompare(pb, 'fr');
+    }
+    // Même joueur : default en premier
+    const da = a?.isDefault ? 0 : 1;
+    const db = b?.isDefault ? 0 : 1;
+    if (da !== db) return da - db;
+    // Puis nom alpha
+    const na = (a?.nom || '').toLowerCase();
+    const nb = (b?.nom || '').toLowerCase();
+    if (na !== nb) return na.localeCompare(nb, 'fr');
+    return (a?.id || '').localeCompare(b?.id || '');
+  });
+}
+
+/** Retourne le personnage par défaut d'un joueur, ou son premier sinon. */
+export function getDefaultCharForUser(chars = [], uid = '') {
+  if (!uid) return null;
+  const mine = (chars || []).filter(c => c?.uid === uid);
+  if (!mine.length) return null;
+  return mine.find(c => c?.isDefault) || sortCharactersForDisplay(mine)[0];
+}
+
 // ── Exposition globale (pour les appels depuis HTML inline) ───────────────────
-Object.assign(window, { getMod, calcCA, calcVitesse, calcInitiative, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct, computeEquipDerivedBonus, computeEquipSkillBonus, computeEquipAllSkillBonuses });
+Object.assign(window, { getMod, calcCA, calcVitesse, calcInitiative, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct, computeEquipDerivedBonus, computeEquipSkillBonus, computeEquipAllSkillBonuses, sortCharactersForDisplay, getDefaultCharForUser });

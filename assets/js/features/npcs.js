@@ -18,7 +18,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
-import { getItemStatBonus } from '../shared/char-stats.js';
+import { getItemStatBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
@@ -663,7 +663,7 @@ function _renderRelationChipPublic(a) {
 // Panneau des relations (colonne droite)
 function _renderRelationsPanel(n) {
   const persoList = _affiPerso.filter(a => a.npcId === n.id);
-  const myChars   = (STATE.characters || []).filter(c => c.uid === STATE.user?.uid);
+  const myChars   = sortCharactersForDisplay((STATE.characters || []).filter(c => c.uid === STATE.user?.uid));
   const myAffi    = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
@@ -2079,7 +2079,7 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
   const n       = _npcs.find(x => x.id === npcId);
   if (!n) return null;
   const existing       = existingId ? _affiPerso.find(a => a.id === existingId) : null;
-  const chars          = STATE.characters || [];
+  const chars          = sortCharactersForDisplay(STATE.characters || []);
   const existingTypeId = existing?.typeId || '';
 
   window._selectedAfpTypeId = existingTypeId;

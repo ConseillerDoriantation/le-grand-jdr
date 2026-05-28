@@ -203,7 +203,14 @@ function _buildDataset(presentations = [], characters = []) {
     .sort((a, b) => {
       const ao = (a.ordre ?? 999) !== 999 ? a.ordre : (lsOrdre ? (lsOrdre.indexOf(a.id) + 1 || 999) : 999);
       const bo = (b.ordre ?? 999) !== 999 ? b.ordre : (lsOrdre ? (lsOrdre.indexOf(b.id) + 1 || 999) : 999);
-      return ao - bo || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
+      if (ao !== bo) return ao - bo;
+      // À ordre égal : joueur alpha → personnage par défaut → nom alpha
+      const ja = (a.joueur || '').toLowerCase(), jb = (b.joueur || '').toLowerCase();
+      if (ja !== jb) return ja.localeCompare(jb, 'fr');
+      const da = a.char?.isDefault ? 0 : 1;
+      const db = b.char?.isDefault ? 0 : 1;
+      if (da !== db) return da - db;
+      return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
     });
 }
 

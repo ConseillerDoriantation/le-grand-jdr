@@ -7088,6 +7088,41 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-v3 .id-actions-mini { display: flex; gap: 2px; }
 .cs-v3 .id-actions-mini button { background: transparent; border: none; cursor: pointer; color: var(--text-dim); font-size: .85rem; padding: 2px 4px; border-radius: 6px; line-height: 1; }
 .cs-v3 .id-actions-mini button:hover { color: var(--gold); background: rgba(79,140,255,.08); }
+/* Bouton "définir par défaut" (étoile) */
+.cs-v3 .id-default-btn {
+  color: var(--text-dim);
+  font-size: 1rem;
+  transition: color .15s, transform .15s;
+}
+.cs-v3 .id-default-btn:hover {
+  color: var(--amber, #f4c430);
+  transform: scale(1.15);
+}
+.cs-v3 .id-default-btn.is-on {
+  color: var(--amber, #f4c430);
+  text-shadow: 0 0 6px rgba(244,196,48,.6);
+}
+.cs-v3 .id-default-btn.is-on:hover {
+  color: var(--gold-light, #f5d77a);
+}
+
+/* Étoile sur le pill du perso par défaut */
+.cs-v3 .char-pill.is-default { border-color: rgba(244,196,48,.45); }
+.cs-v3 .char-pill.is-default .char-pill-av {
+  box-shadow: 0 0 0 1.5px rgba(244,196,48,.55);
+}
+.cs-v3 .char-pill-star {
+  position: absolute; top: -3px; right: -3px;
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--amber, #f4c430);
+  color: #1a1308;
+  border-radius: 50%;
+  font-size: .58rem; font-weight: 800;
+  border: 1.5px solid var(--bg-card, #1a2438);
+  box-shadow: 0 0 6px rgba(244,196,48,.4);
+}
+.cs-v3 .char-pill-av { position: relative; }
 .cs-v3 .id-titres { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-items: center; }
 .cs-v3 .id-titre { font-size: .62rem; letter-spacing: .04em; text-transform: uppercase; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: rgba(244,196,48,.10); border: 1px solid rgba(244,196,48,.32); color: var(--amber, #f4c430); }
 .cs-v3 .id-titre-add {

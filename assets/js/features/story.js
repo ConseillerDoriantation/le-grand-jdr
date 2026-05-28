@@ -11,6 +11,7 @@ import { STATE } from '../core/state.js';
 import { _esc, _nl2br } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES from './pages.js';
+import { sortCharactersForDisplay } from '../shared/char-stats.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
@@ -93,7 +94,7 @@ async function _saveModalGroupes() {
 function _renderGroupPills(groups) {
   if (!groups.length) return `<span style="font-size:.75rem;color:var(--text-dim);font-style:italic">Aucun groupe. Créez-en un ci-dessous.</span>`;
   const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars  = STATE.characters || [];
+  const chars = sortCharactersForDisplay(STATE.characters || []);
   return groups.map(g => {
     const membres   = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
     const reussite  = g.reussite != null ? g.reussite : '';
@@ -289,7 +290,7 @@ function _renderGroupCards(groups) {
     </div>`;
   }
   const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars = STATE.characters || [];
+  const chars = sortCharactersForDisplay(STATE.characters || []);
   return groups.map(g => {
     const membres = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
     const reussite = g.reussite != null ? g.reussite : '';
@@ -1397,7 +1398,7 @@ async function openStoryDetail(id) {
 
   // Helper avatar
   const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars = STATE.characters || [];
+  const chars = sortCharactersForDisplay(STATE.characters || []);
   const avatar = (c, size = 36) => {
     if (!c) return '';
     const col = PCOLS[c.nom?.charCodeAt(0) % 6 || 0];
@@ -2027,7 +2028,7 @@ async function saveStory(id = '') {
     // On les matérialise depuis STATE.characters pour conserver photo / photoX,Y.
     // C'est le seul moyen de rattacher des personnages à une mission désormais :
     // pas de participants individuels possibles.
-    const chars = STATE.characters || [];
+    const chars = sortCharactersForDisplay(STATE.characters || []);
     const seenPartIds = new Set();
     const participants = [];
     _modalGroupes.forEach(g => (g.membres || []).forEach(id => {

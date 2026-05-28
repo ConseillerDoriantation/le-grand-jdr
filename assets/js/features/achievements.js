@@ -13,6 +13,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { STATE } from '../core/state.js';
 import { attachDropAndResize } from '../shared/image-crop.js';
+import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import PAGES from './pages.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ function openAchievementModal(id = null) {
     </div>` : ''}
 
     ${(() => {
-      const chars = STATE.characters || [];
+      const chars = sortCharactersForDisplay(STATE.characters || []);
       if (!chars.length) return '';
       const contrib = ex?.contributeurs || [];
       const COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
@@ -495,7 +496,7 @@ function _achBuildRows(items, containerW, targetH, gap) {
 // ── HTML d'une carte galerie ──────────────────────────────────────────────────
 function _achCardHTML(item, isAdmin) {
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars     = STATE.characters || [];
+  const chars     = sortCharactersForDisplay(STATE.characters || []);
   const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
   const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
 
@@ -646,7 +647,7 @@ function _formatDateFr(str) {
 // ── Timeline HTML ─────────────────────────────────────────────────────────────
 function _renderTimeline(items) {
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars   = STATE.characters || [];
+  const chars   = sortCharactersForDisplay(STATE.characters || []);
   const isAdmin = STATE.isAdmin;
   // Tri chronologique. Les hauts-faits sans date valide sont relégués à la fin
   // (peu importe le sens du tri). Sens contrôlé par window._achTimelineDesc.
@@ -882,7 +883,7 @@ function _achOpenLightbox(itemId) {
   if (!item) return;
   const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars     = STATE.characters || [];
+  const chars     = sortCharactersForDisplay(STATE.characters || []);
   const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
 
   const existing = document.getElementById('ach-lightbox');
