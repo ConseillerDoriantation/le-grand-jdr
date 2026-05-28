@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grimorium — Réinitialisation</title>
+  <link rel="icon" href="./favicon.ico" sizes="any">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    (function () {
+      var t = localStorage.getItem('jdr-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+
+  <link rel="stylesheet" href="./assets/css/tokens.css">
+  <link rel="stylesheet" href="./assets/css/base.css">
+  <link rel="stylesheet" href="./assets/css/auth.css">
+
+  <style>
+    .aa-state { display: none; }
+    .aa-state.active { display: block; }
+    .aa-msg { color: var(--text-muted); font-size: 0.88rem; text-align: center; margin: 0.4rem 0 1.2rem; line-height: 1.5; }
+    .aa-msg strong { color: var(--text); }
+    .aa-spinner {
+      width: 28px; height: 28px;
+      border: 2px solid rgba(226, 185, 111, .15);
+      border-top-color: var(--gold, #e2b96f);
+      border-radius: 50%;
+      animation: app-splash-spin .8s linear infinite;
+      margin: 0.5rem auto 1.2rem;
+    }
+    .aa-success-icon, .aa-error-icon {
+      display: block;
+      width: 56px; height: 56px;
+      margin: 0 auto 1rem;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2rem;
+    }
+    .aa-success-icon {
+      background: rgba(76, 175, 80, 0.12);
+      color: #6fcf73;
+      border: 1px solid rgba(76, 175, 80, 0.35);
+    }
+    .aa-error-icon {
+      background: rgba(231, 76, 60, 0.12);
+      color: #e74c3c;
+      border: 1px solid rgba(231, 76, 60, 0.35);
+    }
+    .btn-secondary {
+      display: inline-block;
+      width: 100%;
+      padding: 0.8rem;
+      margin-top: 0.6rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(226, 185, 111, 0.25);
+      border-radius: 8px;
+      color: var(--gold);
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+      font-size: 0.82rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-align: center;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover {
+      background: rgba(226, 185, 111, 0.08);
+      border-color: rgba(226, 185, 111, 0.5);
+    }
+    .aa-email {
+      text-align: center;
+      color: var(--gold);
+      font-size: 0.85rem;
+      margin-bottom: 1.2rem;
+      letter-spacing: 0.02em;
+    }
+  </style>
+</head>
+<body>
+
+<div id="auth-screen" style="display:flex">
+  <div class="auth-box">
+    <div class="auth-emblem">
+      <span class="sigil">⚔️</span>
+      <div class="auth-title">Grimorium</div>
+      <div class="auth-subtitle">Réinitialisation du mot de passe</div>
+    </div>
+
+    <!-- ═══ Vérification du lien ═══ -->
+    <div class="aa-state active" id="state-loading">
+      <div class="aa-spinner"></div>
+      <p class="aa-msg">Vérification du lien...</p>
+    </div>
+
+    <!-- ═══ Formulaire nouveau mot de passe ═══ -->
+    <div class="aa-state" id="state-form">
+      <div class="aa-email" id="aa-email"></div>
+
+      <div class="form-group">
+        <label>Nouveau mot de passe</label>
+        <div class="pw-wrap">
+          <input type="password" id="new-password" placeholder="••••••••" autocomplete="new-password">
+          <button type="button" class="pw-toggle" data-target="new-password" aria-label="Afficher le mot de passe" title="Afficher / masquer">
+            <svg class="pw-icon pw-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <svg class="pw-icon pw-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Confirmer</label>
+        <div class="pw-wrap">
+          <input type="password" id="confirm-password" placeholder="••••••••" autocomplete="new-password">
+          <button type="button" class="pw-toggle" data-target="confirm-password" aria-label="Afficher le mot de passe" title="Afficher / masquer">
+            <svg class="pw-icon pw-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <svg class="pw-icon pw-icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button type="button" class="btn-primary" id="btn-confirm">Forger le nouveau mot de passe</button>
+      <div class="auth-error" id="form-error" role="alert"></div>
+    </div>
+
+    <!-- ═══ Succès ═══ -->
+    <div class="aa-state" id="state-success">
+      <div class="aa-success-icon">✓</div>
+      <p class="aa-msg">
+        <strong>Mot de passe mis à jour.</strong><br>
+        Tu peux maintenant te reconnecter au Grimorium.
+      </p>
+      <a href="./" class="btn-primary" style="display:block; text-align:center; text-decoration:none;">Retour à la connexion</a>
+    </div>
+
+    <!-- ═══ Erreur ═══ -->
+    <div class="aa-state" id="state-error">
+      <div class="aa-error-icon">!</div>
+      <p class="aa-msg" id="error-msg">Lien invalide ou expiré.</p>
+      <a href="./" class="btn-secondary">Retour au portail</a>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import {
+    getAuth,
+    verifyPasswordResetCode,
+    confirmPasswordReset,
+  } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+
+  const firebaseConfig = {
+    apiKey:            'AIzaSyAetYIzoPMnXwL9TjKLjzKCGyrjwFgBNxU',
+    authDomain:        'le-grand-jdr.firebaseapp.com',
+    projectId:         'le-grand-jdr',
+    storageBucket:     'le-grand-jdr.firebasestorage.app',
+    messagingSenderId: '641426541133',
+    appId:             '1:641426541133:web:c4c55d900ae6304bcf6a04',
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get('mode');
+  const oobCode = params.get('oobCode');
+
+  const states = {
+    loading: document.getElementById('state-loading'),
+    form: document.getElementById('state-form'),
+    success: document.getElementById('state-success'),
+    error: document.getElementById('state-error'),
+  };
+
+  function showState(name) {
+    Object.values(states).forEach(el => el.classList.remove('active'));
+    states[name].classList.add('active');
+  }
+
+  function showError(msg) {
+    document.getElementById('error-msg').textContent = msg || 'Lien invalide ou expiré.';
+    showState('error');
+  }
+
+  function setFormError(msg) {
+    document.getElementById('form-error').textContent = msg || '';
+  }
+
+  function errorMessage(err) {
+    const code = err?.code || '';
+    const map = {
+      'auth/expired-action-code': 'Ce lien a expiré. Demande un nouveau lien depuis la page de connexion.',
+      'auth/invalid-action-code': 'Lien invalide. Il a peut-être déjà été utilisé.',
+      'auth/user-disabled': 'Ce compte est désactivé.',
+      'auth/user-not-found': 'Compte introuvable.',
+      'auth/weak-password': 'Mot de passe trop faible (6 caractères minimum).',
+      'auth/network-request-failed': 'Erreur réseau. Réessaie.',
+    };
+    return map[code] || err?.message || 'Une erreur est survenue.';
+  }
+
+  // Toggle affichage mot de passe (délégué)
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.pw-toggle');
+    if (!btn) return;
+    const input = document.getElementById(btn.dataset.target);
+    if (!input) return;
+    const shown = input.type === 'text';
+    input.type = shown ? 'password' : 'text';
+    btn.classList.toggle('pw-toggle--on', !shown);
+  });
+
+  async function init() {
+    if (mode !== 'resetPassword' || !oobCode) {
+      showError('Lien invalide. Aucun code de réinitialisation détecté.');
+      return;
+    }
+
+    try {
+      const email = await verifyPasswordResetCode(auth, oobCode);
+      document.getElementById('aa-email').textContent = email;
+      showState('form');
+      document.getElementById('new-password').focus();
+    } catch (err) {
+      console.error('[auth-action] verify error:', err);
+      showError(errorMessage(err));
+    }
+  }
+
+  async function handleConfirm() {
+    setFormError('');
+    const pw1 = document.getElementById('new-password').value;
+    const pw2 = document.getElementById('confirm-password').value;
+
+    if (!pw1 || !pw2) {
+      setFormError('Remplis les deux champs.');
+      return;
+    }
+    if (pw1.length < 6) {
+      setFormError('Mot de passe trop court (6 caractères minimum).');
+      return;
+    }
+    if (pw1 !== pw2) {
+      setFormError('Les deux mots de passe ne correspondent pas.');
+      return;
+    }
+
+    const btn = document.getElementById('btn-confirm');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Forge en cours...';
+
+    try {
+      await confirmPasswordReset(auth, oobCode, pw1);
+      showState('success');
+    } catch (err) {
+      console.error('[auth-action] confirm error:', err);
+      setFormError(errorMessage(err));
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
+  document.getElementById('btn-confirm').addEventListener('click', handleConfirm);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && states.form.classList.contains('active')) {
+      handleConfirm();
+    }
+  });
+
+  init();
+</script>
+
+</body>
+</html>
