@@ -466,8 +466,10 @@ async function renderStory() {
         ${allActes.map(acte => {
           const active = acte === activeActe;
           const n = items.filter(i => (i.acte || 'Acte I') === acte).length;
+          // data-acte + délégation : robuste aux apostrophes / guillemets dans le nom
           return `<button class="act ${active ? 'active' : ''}"
-            onclick="window._storyActe='${_esc(acte)}';navigate('story')">
+            data-acte="${_esc(acte)}"
+            onclick="window._stSwitchActe(this.dataset.acte)">
             ${_esc(acte)}<span class="act-count">${n}</span>
           </button>`;
         }).join('')}
@@ -501,16 +503,38 @@ async function renderStory() {
       ${filteredItems.length === 0 ? `
         <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
           <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
-          <p style="font-style:italic">${q || prefs.statut ? 'Aucune mission ne correspond aux filtres.' : `Aucune mission pour ${_esc(activeActe)}.`}</p>
-          ${q || prefs.statut
+          <p style="font-style:italic">${qNorm || prefs.statut ? 'Aucune mission ne correspond aux filtres.' : `Aucune mission pour ${_esc(activeActe)}.`}</p>
+          ${qNorm || prefs.statut
             ? `<button class="btn btn-outline btn-sm" onclick="window._stResetFilters()">↺ Réinitialiser</button>`
             : (STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="openStoryModal()">+ Ajouter la première</button>` : '')}
         </div>` :
-        prefs.view === 'carte'     ? _renderMapView(filteredItems) :
-        prefs.view === 'saga'      ? _renderSagaView(filteredItems) :
-        prefs.view === 'chronique' ? _renderChroniqueView(filteredItems) :
-        prefs.view === 'list'      ? _renderListView(filteredItems) :
-        _renderMapView(filteredItems)
+        (() => {
+          // Wrap chaque vue : si UNE mission corrompue plante le renderer, on
+          // affiche un message clair plutôt qu'une "Erreur de chargement" globale.
+          const view = prefs.view || 'carte';
+          const fn = view === 'saga'      ? _renderSagaView
+                   : view === 'chronique' ? _renderChroniqueView
+                   : view === 'list'      ? _renderListView
+                   : _renderMapView;
+          try {
+            return fn(filteredItems);
+          } catch (err) {
+            console.error('[story] vue', view, 'a planté :', err, filteredItems);
+            return `<div style="text-align:center;padding:3rem 2rem;color:var(--text-soft, #c8d4e8)">
+              <div style="font-size:2.5rem;margin-bottom:1rem">⚠️</div>
+              <p style="font-weight:700;margin-bottom:.5rem">Impossible d'afficher cette vue</p>
+              <p style="font-size:.82rem;color:var(--text-dim);max-width:380px;margin:0 auto;line-height:1.5">
+                Une mission de <b>${_esc(activeActe)}</b> contient des données invalides.
+                Essaie une autre vue ou contacte le MJ.
+              </p>
+              <p style="font-size:.7rem;color:var(--text-dim);opacity:.6;margin-top:.75rem;font-family:monospace">${_esc(err?.message || String(err))}</p>
+              <div style="display:flex;gap:.4rem;justify-content:center;margin-top:1rem;flex-wrap:wrap">
+                <button class="btn btn-outline btn-sm" onclick="window._stSetView('list')">📋 Vue Liste</button>
+                <button class="btn btn-outline btn-sm" onclick="window._stResetFilters()">↺ Réinitialiser filtres</button>
+              </div>
+            </div>`;
+          }
+        })()
       }
     </div>
   </div>
@@ -523,6 +547,13 @@ async function renderStory() {
 window._stSetFilter = (key, val) => { setStoryPrefs({ [key]: val }); PAGES.story?.(); };
 window._stSetView   = (view)     => { setStoryPrefs({ view });        PAGES.story?.(); };
 window._stResetFilters = () => { setStoryPrefs({ search:'', statut:'' }); PAGES.story?.(); };
+// Bascule entre actes — passe par data-attribute pour être immunisé aux
+// caractères spéciaux (apostrophes, guillemets) dans les noms d'acte.
+window._stSwitchActe = (acte) => {
+  if (!acte) return;
+  window._storyActe = String(acte);
+  PAGES.story?.();
+};
 
 // Recherche : préserve le focus et la position du curseur après le re-render
 // complet de la page (sinon l'input perd le focus à chaque caractère tapé)

@@ -7088,8 +7088,16 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-v3 .id-actions-mini { display: flex; gap: 2px; }
 .cs-v3 .id-actions-mini button { background: transparent; border: none; cursor: pointer; color: var(--text-dim); font-size: .85rem; padding: 2px 4px; border-radius: 6px; line-height: 1; }
 .cs-v3 .id-actions-mini button:hover { color: var(--gold); background: rgba(79,140,255,.08); }
-.cs-v3 .id-titres { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+.cs-v3 .id-titres { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-items: center; }
 .cs-v3 .id-titre { font-size: .62rem; letter-spacing: .04em; text-transform: uppercase; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: rgba(244,196,48,.10); border: 1px solid rgba(244,196,48,.32); color: var(--amber, #f4c430); }
+.cs-v3 .id-titre-add {
+  cursor: pointer; background: transparent;
+  border: 1px dashed rgba(244,196,48,.40);
+  color: var(--amber, #f4c430);
+  transition: background .12s, border-style .12s;
+  font-family: inherit;
+}
+.cs-v3 .id-titre-add:hover { background: rgba(244,196,48,.14); border-style: solid; }
 .cs-v3 .id-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .cs-v3 .id-chip { font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 11px; border-radius: 999px; border: 1px solid; white-space: nowrap; cursor: pointer; }
 .cs-v3 .id-chip.classe { background: rgba(79,140,255,.12); border-color: rgba(79,140,255,.32); color: var(--gold-2, #7eb0ff); }
@@ -7150,6 +7158,8 @@ input[type=number].input-field::-webkit-outer-spin-button {
 
 /* Mini stats 2x2 */
 .cs-v3 .cs-mini-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.cs-v3 .cs-mini-grid-3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 360px) { .cs-v3 .cs-mini-grid-3 { grid-template-columns: repeat(2, 1fr); } }
 .cs-v3 .cs-mini { background: rgba(255,255,255,.02); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
 .cs-v3 .cs-mini-icon { font-size: .92rem; opacity: .9; }
 .cs-v3 .cs-mini-body { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
@@ -9508,4 +9518,203 @@ input[type=number].input-field::-webkit-outer-spin-button {
   font-size: .7rem;
   color: var(--text-dim);
   opacity: .8;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PERSONNAGE V3 — RESPONSIVE MOBILE
+   ════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .cs-v3 .app-shell { padding: 10px 10px 60px; }
+  .cs-v3 .sheet { gap: 10px; }
+  .cs-v3 .id-side { padding: 14px; border-radius: 14px; }
+  .cs-v3 .id-portrait { width: 88px; height: 88px; font-size: 2rem; }
+  .cs-v3 .id-portrait-wrap { margin-bottom: 8px; }
+  .cs-v3 .hero-strip { padding: 10px 14px; }
+  .cs-v3 .hero-id-name { font-size: 1.05rem; }
+  .cs-v3 .hero-id-tag { font-size: .68rem; }
+  .cs-v3 .stats-banner { grid-template-columns: repeat(2, 1fr) !important; padding: 10px 12px; gap: 6px; }
+  .cs-v3 .stat-tile { padding: 8px 8px 6px; gap: 5px; }
+  .cs-v3 .stat-tile-name { font-size: .66rem; }
+  .cs-v3 .stat-tile-total { font-size: 1.55rem; }
+  .cs-v3 .stat-tile-mod { font-size: .78rem; padding: 2px 6px; min-width: 32px; }
+  .cs-v3 .stat-seg-val { font-size: .82rem; }
+  .cs-v3 .stat-seg-lbl { font-size: .5rem; }
+  .cs-v3 .tabs-v3 { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .cs-v3 .tabs-v3::-webkit-scrollbar { display: none; }
+  .cs-v3 .tab-v3 { flex-shrink: 0; padding: 6px 10px; font-size: .76rem; }
+  .cs-v3 .tab-v3 .tab-ico { font-size: .82rem; }
+  .cs-v3 .char-switch-row { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .cs-v3 .char-switch-row::-webkit-scrollbar { display: none; }
+  .cs-v3 .tab-body-v3 { padding: 8px 0; }
+  .cs-v3 .section { padding: 12px 14px; border-radius: 12px; }
+  .cs-v3 .weap-grid { grid-template-columns: 1fr; }
+  .cs-v3 .armor-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .cs-v3 .weap-rolls { flex-direction: column; gap: 8px; }
+  .cs-v3 .weap-rolls-sep { display: none; }
+  .cs-v3 .set-slots-row { grid-template-columns: 1fr; gap: 4px; }
+  .cs-v3 .set-slot { flex-direction: row; align-items: center; justify-content: space-between; }
+  .cs-v3 .inv-grid { grid-template-columns: 1fr !important; }
+  .cs-v3 .inv-card-name { font-size: .92rem; }
+  .cs-v3 .ledger-add { padding: 12px; }
+  .cs-v3 .ledger-add-fields { width: 100%; }
+  .cs-v3 .ledger-add-field-amt { width: 100px; }
+  .cs-v3 .ledger-add-btn { width: 100%; }
+  .cs-v3 .profil-side-card { padding: 12px; }
+  .cs-v3 .profil-quote { font-size: .9rem; }
+  .cs-v3 .cs-sorts-deck { padding: 6px 10px; min-width: 0; }
+  .invm-overlay .invm-modal {
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+}
+@media (max-width: 420px) {
+  .cs-v3 .app-shell { padding: 6px 6px 50px; }
+  .cs-v3 .stats-banner { grid-template-columns: 1fr 1fr !important; }
+  .cs-v3 .armor-grid { grid-template-columns: 1fr !important; }
+  .cs-v3 .hero-id-name { font-size: .95rem; }
+  .cs-v3 .stat-tile-total { font-size: 1.4rem; }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PERSONNAGE V3 — MODE JOUR (data-theme="light")
+   ════════════════════════════════════════════════════════════════════ */
+[data-theme="light"] .cs-v3 { color: var(--text); }
+
+[data-theme="light"] .cs-v3 .id-side,
+[data-theme="light"] .cs-v3 .section,
+[data-theme="light"] .cs-v3 .hero-strip,
+[data-theme="light"] .cs-v3 .tabs-v3 {
+  background: var(--bg-card);
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme="light"] .cs-v3 .stats-banner {
+  background: var(--bg-card2);
+  border-color: var(--border);
+}
+[data-theme="light"] .cs-v3 .stats-banner::before { opacity: .25; }
+
+[data-theme="light"] .cs-v3 .stat-tile,
+[data-theme="light"] .cs-v3 .cs-mini,
+[data-theme="light"] .cs-v3 .vital,
+[data-theme="light"] .cs-v3 .or-card,
+[data-theme="light"] .cs-v3 .compte-tile,
+[data-theme="light"] .cs-v3 .profil-side-card,
+[data-theme="light"] .cs-v3 .weap-card,
+[data-theme="light"] .cs-v3 .armor-card,
+[data-theme="light"] .cs-v3 .inv-card,
+[data-theme="light"] .cs-v3 .mait-card,
+[data-theme="light"] .cs-v3 .elem-card,
+[data-theme="light"] .cs-v3 .cstyle,
+[data-theme="light"] .cs-v3 .note,
+[data-theme="light"] .cs-v3 .quest,
+[data-theme="light"] .cs-v3 .rel-card,
+[data-theme="light"] .cs-v3 .cs-sort-cat-block,
+[data-theme="light"] .cs-v3 .cs-sort-row,
+[data-theme="light"] .cs-v3 .ledger-row,
+[data-theme="light"] .cs-v3 .cs-sorts-toolbar,
+[data-theme="light"] .cs-v3 .ledger-add {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme="light"] .cs-v3 .stat-tile:hover,
+[data-theme="light"] .cs-v3 .inv-card:hover,
+[data-theme="light"] .cs-v3 .weap-card:hover {
+  background: var(--bg-card);
+  border-color: var(--border-md);
+}
+
+[data-theme="light"] .cs-v3 input[type="text"],
+[data-theme="light"] .cs-v3 input[type="number"],
+[data-theme="light"] .cs-v3 input[type="date"],
+[data-theme="light"] .cs-v3 input[type="search"],
+[data-theme="light"] .cs-v3 textarea,
+[data-theme="light"] .cs-v3 select {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--border-md);
+}
+[data-theme="light"] .cs-v3 input:focus,
+[data-theme="light"] .cs-v3 textarea:focus,
+[data-theme="light"] .cs-v3 select:focus {
+  background: #fff;
+  border-color: var(--gold);
+}
+[data-theme="light"] .cs-v3 .profil-fact-input { background: #fff; color: var(--text); }
+
+[data-theme="light"] .cs-v3 .vital-bar,
+[data-theme="light"] .cs-v3 .xp-track,
+[data-theme="light"] .cs-v3 .set-card-bar,
+[data-theme="light"] .cs-v3 .cs-sorts-deck-bar {
+  background: rgba(15,23,42,0.08);
+}
+
+[data-theme="light"] .cs-v3 .ledger-filter-segs,
+[data-theme="light"] .cs-v3 .cs-sorts-filt-grp,
+[data-theme="light"] .cs-v3 .ledger-add-seg {
+  background: var(--bg-card2);
+}
+
+[data-theme="light"] .invm-overlay { background: rgba(15,23,42,0.45); }
+[data-theme="light"] .invm-modal {
+  background: var(--bg-card);
+  color: var(--text);
+  border-color: var(--border);
+}
+[data-theme="light"] .invm-stepper-val,
+[data-theme="light"] .invm-total {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+[data-theme="light"] .cs-v3 .tab-v3 { color: var(--text-muted); background: transparent; }
+[data-theme="light"] .cs-v3 .tab-v3:hover { color: var(--text); background: rgba(0,0,0,0.04); }
+[data-theme="light"] .cs-v3 .tab-v3.active {
+  color: var(--gold);
+  background: var(--blue-dim);
+  border-color: var(--border-bright);
+}
+
+[data-theme="light"] .cs-v3 .vis-toggle-track { background: rgba(15,23,42,0.18); }
+
+[data-theme="light"] .cs-v3 .set-card { background: var(--bg-elevated); }
+[data-theme="light"] .cs-v3 .set-card.is-progress { background: var(--bg-card2); }
+
+[data-theme="light"] .cs-v3 .profil-tags-block {
+  background: var(--bg-card2);
+  border-color: var(--border);
+}
+[data-theme="light"] .cs-v3 .profil-tag-input {
+  background: #fff;
+  border-color: var(--border-md);
+}
+
+[data-theme="light"] .cs-v3 .char-pill,
+[data-theme="light"] .cs-v3 .char-switch {
+  background: var(--bg-card);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+[data-theme="light"] .cs-v3 .or-card {
+  background: linear-gradient(135deg, var(--bg-elevated), var(--bg-card));
+}
+
+[data-theme="light"] .cs-v3 .alloc-banner {
+  background: linear-gradient(90deg, rgba(245,158,11,.14), transparent);
+  border-color: rgba(245,158,11,.30);
+  color: #b45309;
+}
+
+[data-theme="light"] .cs-v3 .ledger-row [contenteditable="true"]:hover {
+  background: rgba(15,23,42,0.04);
+  box-shadow: inset 0 0 0 1px rgba(15,23,42,0.08);
+}
+[data-theme="light"] .cs-v3 .ledger-row [contenteditable="true"]:focus {
+  background: rgba(245,158,11,0.10);
+  box-shadow: inset 0 0 0 1px rgba(245,158,11,0.45);
+  color: #b45309;
 }

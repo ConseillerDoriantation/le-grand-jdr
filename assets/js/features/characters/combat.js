@@ -273,12 +273,26 @@ window._toggleCharElement = async (charId, elemId) => {
   if (idx >= 0) elems.splice(idx, 1);
   else          elems.push(elemId);
   c.elements = elems;
+  // Synchronise les refs pour que le V3 lise la version fraîche
+  if (window._currentChar?.id === c.id) window._currentChar = c;
   await updateInCol('characters', charId, { elements: elems });
+  // ── Mise à jour immédiate de l'UI (sans attendre un re-render complet) ──
+  // 1. Toggle visuel direct des chips V3 (.elem-chip[data-elem-id="..."])
+  document.querySelectorAll(`.elem-chip[data-elem-id="${elemId}"]`).forEach(chip => {
+    chip.classList.toggle('on', idx < 0);   // si on vient d'ajouter (idx était -1) → on
+  });
+  // 2. Re-render full du tab Combat V3 si on est dessus (pour rafraîchir les
+  //    autres affichages dépendants : style de combat, sorts, etc.)
+  if (window._currentCharTab === 'combat' && typeof window._renderTab === 'function') {
+    window._renderTab('combat', c, window._canEditChar);
+  } else {
+    // Fallback legacy : ancien placeholder par id
+    try {
+      const allTypes   = await loadDamageTypes();
+      const magicTypes = getMagicTypes(allTypes);
+      const el = document.getElementById(`cs-elements-${charId}`);
+      if (el) el.innerHTML = _renderElementAccessHtml(c, magicTypes, true);
+    } catch {}
+  }
   showNotif('Éléments mis à jour.', 'success');
-  // Re-render le placeholder in-place
-  const allTypes   = await loadDamageTypes();
-  const magicTypes = getMagicTypes(allTypes);
-  const el = document.getElementById(`cs-elements-${charId}`);
-  if (!el) return;
-  el.innerHTML = _renderElementAccessHtml(c, magicTypes, true);
 };
