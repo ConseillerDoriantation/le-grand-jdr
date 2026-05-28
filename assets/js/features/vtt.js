@@ -17,7 +17,7 @@ import {
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
-import { getArmorSetData } from './characters/data.js';
+import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from './characters/data.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
 import { loadSpellMatrices, getInvokedArm } from '../shared/spell-matrices.js';
@@ -478,8 +478,8 @@ function _live(t) {
                   : n ? (_numOr(n.hp, hpMax))
                   : (t.hp ?? hpMax); // bestiaire + tokens custom
 
-  // Formule de dégâts : arme équipée > première attaque bestiary > override token > fallback
-  const weapon      = c?.equipement?.['Main principale'];
+  // Formule de dégâts : arme équipée (incl. Poings 2d4 par défaut) > bestiary > override token
+  const weapon      = c ? getMainWeapon(c) : null;
   const weapStats   = weapon?.degatsStats?.length ? weapon.degatsStats : [weapon?.degatsStat || 'force'];
   const toucherStat = (weapon?.toucherStats?.[0] || weapon?.toucherStat || weapStats[0]);
   const weapMod     = c ? weapStats.reduce((sum, s) => sum + getMod(c, s), 0) : 0;
@@ -1927,8 +1927,10 @@ function _maxDice(formula) {
  * Inclut : dés de base + runes Puissance/Protection + chaînage + maîtrise arme principale.
  */
 function _vttSortDmgFormula(s, c) {
-  const mainP   = c?.equipement?.['Main principale'];
-  const armeDeg = mainP?.degats || '1d6';
+  // ⚠️ Utiliser getMainWeapon(c) pour récupérer le Poings (2d4) par défaut
+  // si aucune arme principale équipée — aligne avec _calcSortDegats du sheet.
+  const mainP   = c ? getMainWeapon(c) : null;
+  const armeDeg = mainP?.degats || DEFAULT_UNARMED.degats;
   let base = (s.degats || '').trim();
   if (!base || base.toLowerCase() === '= arme') base = armeDeg;
   const runes    = s.runes || [];
@@ -1961,7 +1963,8 @@ function _vttSortDmgFormula(s, c) {
  *  - Noyau physique / pas de noyau → Constitution
  */
 function _vttSortSoinFormula(s, c) {
-  const mainP    = c?.equipement?.['Main principale'];
+  // Aligne sur le sheet : getMainWeapon retourne Poings par défaut si vide.
+  const mainP    = c ? getMainWeapon(c) : null;
   const maitrise = getMaitriseBonus(c, mainP || {});
   const runes    = s.runes || [];
   const nbProt   = runes.filter(r => r === 'Protection').length;
@@ -1981,7 +1984,8 @@ function _vttSortSoinFormula(s, c) {
     statKey = 'constitution';
     if (isMagic) {
       const fmt = _weaponFormats?.find(f => f.label === mainP?.format);
-      const isMagicWeapon = fmt?.isMagic === true && mainP?.nom;
+      // Les Poings par défaut (isDefault) ne sont pas une arme magique
+      const isMagicWeapon = fmt?.isMagic === true && mainP?.nom && !mainP?.isDefault;
       statKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
     }
   }
@@ -2411,7 +2415,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
   if (src.characterId) {
     const c = _characters[src.characterId];
     if (c) {
-      const mainP   = c?.equipement?.['Main principale'];
+      const mainP   = getMainWeapon(c);
       const statKey = mainP?.toucherStat || mainP?.statAttaque || 'force';
       attackBonus = (getMod(c, statKey) || 0) + 5;
     }
@@ -2679,7 +2683,13 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
       const lT = _live(td);
       const curHp = lT.displayHp ?? td.hp ?? 20;
       const newHp = Math.max(0, curHp - det.total);
-      await _setHp(td, newHp).catch(() => {});
+      let hpApplied = true;
+      await _setHp(td, newHp).catch(err => {
+        hpApplied = false;
+        console.error('[VTT] DoT tick immédiat : HP non appliqués', err);
+        showNotif(`⚠️ ${tgtName} : tick de DoT non appliqué (${err?.code || err?.message || 'permissions ?'})`, 'error');
+      });
+      if (!hpApplied) continue;
       // Log du tick immédiat (cohérent avec le tick de round suivant)
       await addDoc(_logCol(), {
         type: 'dot-tick',
@@ -2832,12 +2842,13 @@ function _buildSpellOption(s, ctx) {
     if (s.degatsStat) {
       soinStatKey = s.degatsStat;
     } else {
-      const mainP = c?.equipement?.['Main principale'];
+      const mainP = c ? getMainWeapon(c) : null;
       const isMagic = !!(_damageTypes && s?.noyauTypeId
         && _damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
       if (isMagic) {
         const fmt = _weaponFormats?.find(f => f.label === mainP?.format);
-        const isMagicWeapon = fmt?.isMagic === true && mainP?.nom;
+        // Les Poings (isDefault) ne sont jamais une "arme magique" → Int par défaut
+        const isMagicWeapon = fmt?.isMagic === true && mainP?.nom && !mainP?.isDefault;
         soinStatKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
       } else {
         soinStatKey = 'constitution';
@@ -3158,7 +3169,8 @@ function _buildAttackOptions(t) {
   // génération des options de sort. Les attaques d'arme et actions d'objet restent.
   const _silenced = _hasConditionEffect(t, 'cantCastSpells');
   if (!_silenced && c?.deck_sorts?.length) {
-    const mainP2      = c?.equipement?.['Main principale'];
+    // Aligne sur le sheet : Poings (statAttaque=force) si rien équipé
+    const mainP2      = getMainWeapon(c);
     const sStatKey    = mainP2?.statAttaque || mainP2?.toucherStat || 'force';
     const sStatMod    = getMod(c, sStatKey);
     // Réduction PM du set léger (spellPmDelta est négatif pour le set léger → coût réduit)
@@ -3204,7 +3216,8 @@ function _buildAttackOptions(t) {
   // On réutilise donc tout le pipeline sort (_vttSpellMods, isAfflictionOnly, etc.)
   // en ajoutant juste les méta de consommation et d'identification objet.
   if (c && Array.isArray(c.inventaire) && !_silenced) {
-    const mainP2I    = c?.equipement?.['Main principale'];
+    // Aligne sur le sheet : Poings (statAttaque=force) si rien équipé
+    const mainP2I    = getMainWeapon(c);
     const sStatKeyI  = mainP2I?.statAttaque || mainP2I?.toucherStat || 'force';
     const spellPmDeltaI = getArmorSetData(c).modifiers.spellPmDelta || 0;
 

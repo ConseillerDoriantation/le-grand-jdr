@@ -2904,12 +2904,36 @@ export async function saveSort(idx) {
       degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
       mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
     };
+    const isNew = idx < 0;
     if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
     c.deck_sorts=sorts;
+    // Sync les références pour que les filtres / re-render lisent la version fraîche
+    if (window._currentChar?.id === c.id) window._currentChar = c;
+    if (STATE.activeChar?.id === c.id)    STATE.activeChar    = c;
     await updateInCol('characters',c.id,{deck_sorts:sorts});
     closeModal();
     showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
-    window.renderCharSheet(c,'sorts');
+
+    // ── Sur ajout : s'assure que le nouveau sort soit visible ────────
+    if (isNew) {
+      // Reset les filtres qui pourraient cacher le sort fraîchement créé
+      window._sortsSearch = '';
+      window._sortsTypeFilter = '';
+      window._sortsView = 'all';
+      // Déplie la catégorie où le sort vient d'être ajouté
+      const newCatId = newSort.catId
+        && (c.sort_cats || []).find(cat => cat.id === newSort.catId)
+        ? newSort.catId : '__none';
+      window._sortsCatCollapsed = { ...(window._sortsCatCollapsed || {}) };
+      window._sortsCatCollapsed[newCatId] = false;
+    }
+
+    // Force un re-render du tab Sorts en V3 si dispo, sinon fallback legacy
+    if (window._currentCharTab === 'sorts' && typeof window._renderTab === 'function') {
+      window._renderTab('sorts', c, window._canEditChar);
+    } else {
+      window.renderCharSheet(c, 'sorts');
+    }
   } catch (e) { notifySaveError(e); }
 }
 
