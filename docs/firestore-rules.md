@@ -98,7 +98,15 @@ service cloud.firestore {
       match /organizations/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /place_types/{id}       { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /map_lieux/{id}         { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-      match /npcs/{id}              { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /npcs/{id} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+        // VTT : tout membre de l'aventure peut appliquer dégâts + buffs/états sur
+        // une fiche PNJ (cohérent avec les permissions vttTokens et characters).
+        allow update: if inAdventure(adventureId)
+          && request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions']);
+      }
       match /npc_affinites/{id}     { allow read, write: if inAdventure(adventureId); }
       match /settings/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /achievements/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
@@ -131,7 +139,14 @@ service cloud.firestore {
         allow update: if inAdventure(adventureId) && (
           resource.data.uid == request.auth.uid ||
           isAdvAdmin(adventureId) ||
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte'])
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte']) ||
+          // ── VTT : tout membre de l'aventure peut écrire les champs de combat ──
+          //   nécessaire pour que les sorts (DoT, soins, buffs, états) lancés par
+          //   un joueur appliquent leur effet sur une fiche cible (PJ allié comme
+          //   PJ ennemi). hp et pvCombatHp étaient déjà permis via les tokens ;
+          //   on étend aux conditions/buffs pour les sorts à effet persistant.
+          request.resource.data.diff(resource.data)
+            .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions'])
         );
         allow delete: if inAdventure(adventureId) &&
           (resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
@@ -182,6 +197,10 @@ service cloud.firestore {
       // Un joueur peut déplacer son propre token (col/row/movedThisTurn),
       // l'invoquer / le retirer sur la carte active (pageId/visible),
       // et infliger des dégâts aux ennemis (hp + pvCombatHp pour le suivi de groupe).
+      // Il peut aussi appliquer des effets persistants (buffs/conditions) :
+      // nécessaire pour que les sorts joueurs (DoT, états, enchantements) soient
+      // équivalents aux sorts du MJ. Le coût d'autorisation est minime car ces
+      // champs sont déjà manipulables côté MJ et toute action est traçable via vttLog.
       match /vttTokens/{id} {
         allow read: if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
@@ -191,7 +210,7 @@ service cloud.firestore {
                .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt']);
         allow update: if inAdventure(adventureId)
           && request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly(['hp', 'pvCombatHp']);
+               .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions']);
       }
 
       // Chat & log de dés : tous les membres de l'aventure peuvent lire et écrire.
