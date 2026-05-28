@@ -12,6 +12,7 @@ import {
   signOut,
   GoogleAuthProvider,
   signInWithPopup,
+  sendPasswordResetEmail,
 } from '../config/firebase.js';
 
 import { setProfile } from './state.js';
@@ -41,6 +42,7 @@ export function getAuthError(error) {
     'auth/email-already-in-use': 'Cet email est déjà utilisé.',
     'auth/weak-password': 'Mot de passe trop faible.',
     'auth/missing-password': 'Mot de passe manquant.',
+    'auth/missing-email': 'Email manquant.',
     'auth/network-request-failed': 'Erreur réseau. Réessaie.',
     'auth/too-many-requests': 'Trop de tentatives. Réessaie plus tard.',
     'auth/popup-closed-by-user': 'Fenêtre Google fermée avant la fin.',
@@ -170,6 +172,35 @@ export async function doRegister() {
   }
 }
 
+export async function doPasswordReset() {
+  clearAuthError();
+
+  const email = document.getElementById('login-email')?.value?.trim() || '';
+
+  if (!email) {
+    setAuthError('Saisis ton email pour recevoir le lien de réinitialisation.');
+    document.getElementById('login-email')?.focus();
+    return;
+  }
+
+  const link = document.querySelector('[data-action="forgot-pw"]');
+  const originalText = link?.textContent;
+
+  try {
+    if (link) { link.style.pointerEvents = 'none'; link.textContent = 'Envoi...'; }
+    await sendPasswordResetEmail(auth, email);
+    window.showNotif?.(
+      `Un email de réinitialisation a été envoyé à ${email}.`,
+      'success'
+    );
+  } catch (error) {
+    console.error('[auth] doPasswordReset error:', error);
+    setAuthError(getAuthError(error));
+  } finally {
+    if (link) { link.style.pointerEvents = ''; link.textContent = originalText; }
+  }
+}
+
 export async function doGoogleLogin() {
   clearAuthError();
 
@@ -225,6 +256,7 @@ export function bindAuthUI() {
   const loginTab = getLoginTabButton();
   const registerTab = getRegisterTabButton();
   const logoutBtn = document.querySelector('[data-action="logout"]');
+  const forgotLink = document.querySelector('[data-action="forgot-pw"]');
 
   if (loginBtn) {
     loginBtn.addEventListener('click', (e) => {
@@ -268,6 +300,13 @@ export function bindAuthUI() {
     });
   }
 
+  if (forgotLink) {
+    forgotLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      doPasswordReset();
+    });
+  }
+
   document.addEventListener('keydown', handleAuthKeydown);
 }
 
@@ -280,6 +319,7 @@ export function initAuth() {
     doRegister,
     doGoogleLogin,
     doLogout,
+    doPasswordReset,
   });
 }
 

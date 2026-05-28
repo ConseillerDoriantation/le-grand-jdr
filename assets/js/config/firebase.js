@@ -10,7 +10,8 @@ import { getAuth,
          signOut,
          onAuthStateChanged,
          GoogleAuthProvider,
-         signInWithPopup }        from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+         signInWithPopup,
+         sendPasswordResetEmail } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { initializeFirestore,
          persistentLocalCache,
          persistentMultipleTabManager,
@@ -62,6 +63,7 @@ export {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  sendPasswordResetEmail,
   doc, setDoc, getDoc,
   collection, getDocs,
   addDoc, updateDoc, deleteDoc,
