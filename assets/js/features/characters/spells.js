@@ -208,8 +208,11 @@ const SORT_COMBOS = [
     icon: '🌐',
     defaultName: 'Zone élargie',
     detect: (counts) => counts.Amplification > 0 && counts.Dispersion > 0,
-    describe: (counts) =>
-      `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · la Dispersion élargit la zone Y au lieu d'ajouter des cibles`,
+    describe: (counts) => {
+      const w = _ampLength(counts.Amplification);
+      const h = _ampLength(counts.Dispersion);
+      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${w}×${h}m (la Dispersion bénéficie du chainage comme l'Amplification)`;
+    },
   },
   {
     id: 'arme_invoquee',
@@ -598,7 +601,7 @@ function _autoSourceDuree(s) {
 }
 
 
-/** Longueur de zone produite par N runes Amplification.
+/** Longueur de zone produite par N runes (Amplification OU Dispersion en combo).
  *  Chaque rune ajoute +3m de base, chainage +1m par rune au-delà de la 1ère.
  *  ×1=3, ×2=7, ×3=11, ×4=15… → 3N + (N-1) = 4N-1 pour N≥1
  */
@@ -607,9 +610,10 @@ function _ampLength(nbAmp) { return nbAmp >= 1 ? (4 * nbAmp - 1) : 0; }
 /** Zone calculée :
  *  - Si zoneW/H manuels saisis → ils priment (override MJ)
  *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
- *    Amplification : +3m / rune · chaînage +1m / rune au-delà de la 1ère
- *    Combo Amplification + Dispersion ×M = (longueur Amp) × (1+M)m
- *  - Source: 'manual' | 'runes' | null (pour l'affichage du label)
+ *      Amplification ×N → longueur = 4N-1 m  (chainage)
+ *      Combo avec Dispersion ×M → largeur = 4M-1 m (même formule, symétrique)
+ *      Defaut combo Amp + Disp = 3 × 3
+ *  - Source: 'manual' | 'runes' | null
  */
 function _calcSortZone(s) {
   const runes  = s.runes || [];
@@ -622,7 +626,9 @@ function _calcSortZone(s) {
   if (nbAmp === 0) return null;
 
   const length = _ampLength(nbAmp);
-  const width = 1 + nbDisp;
+  // Dispersion en combo applique le MÊME chainage qu'Amplification (4M-1).
+  // Sans Dispersion → largeur 1 (ligne).
+  const width = nbDisp >= 1 ? _ampLength(nbDisp) : 1;
   return { w: length, h: width, source: 'runes', amp: nbAmp, disp: nbDisp };
 }
 
