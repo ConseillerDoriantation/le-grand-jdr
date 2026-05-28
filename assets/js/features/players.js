@@ -405,7 +405,8 @@ function _renderCard(item, idx) {
            qu'on applique en CSS inline. Aucun stockage de base64 dupliqué. -->
       <div class="pp-card-image-wrap">
         ${cardImg
-          ? `<img class="pp-card-image" src="${_esc(cardImg)}" alt="" style="${cardImgStyle}">`
+          ? `<img class="pp-card-image" src="${_esc(cardImg)}" alt="" style="${cardImgStyle}"
+              loading="lazy" decoding="async" referrerpolicy="no-referrer">`
           : `<div class="pp-card-image-empty">${item.initials}</div>`}
         <!-- Badges flottants -->
         ${item.afficherNiveau ? `<span class="pp-card-level">Niv. ${item.level}</span>` : ''}
@@ -1116,7 +1117,8 @@ function _renderGalleryBlock(item) {
         ${photos.map((g, i) => `
           <button type="button" class="pp-gallery-view-item"
                   data-pp-action="lightbox" data-pres-id="${_esc(item.presentationId)}" data-idx="${i}">
-            <img src="${_esc(g.thumb || g.url)}" alt="Photo ${i+1} de ${_esc(item.nom)}" loading="lazy">
+            <img src="${_esc(g.url || g.thumb)}" alt="Photo ${i+1} de ${_esc(item.nom)}"
+                 loading="lazy" decoding="async" referrerpolicy="no-referrer">
             ${g.isPortrait ? '<span class="pp-gallery-view-portrait-flag">Portrait</span>' : ''}
             <span class="pp-gallery-view-zoom" aria-hidden="true">🔍</span>
           </button>`).join('')}
@@ -1388,103 +1390,216 @@ async function openPlayerPresentModal(player = null) {
   }
   window.__ppEditingPlayer = player;
 
-  openModal(player ? `✏️ ${player.nom || 'Présentation'}` : '⚔️ Nouvelle présentation', `
-    <div class="form-group">
-      <label>Fiche liée <span class="pp-form-hint">(remplit auto classe, race, joueur)</span></label>
-      <select class="input-field" id="pp-char-id">
-        <option value="">— Aucun lien —</option>
-        ${characters.map(c => `<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}${c.classe?' — '+_esc(c.classe):''}${c.ownerPseudo?' ('+_esc(c.ownerPseudo)+')':''}</option>`).join('')}
-      </select>
-    </div>
+  // ── Helpers pour le hero ──
+  const linkedChar = curCharId ? characters.find(c => c.id === curCharId) : null;
+  const heroNom    = player?.nom || linkedChar?.nom || (player ? 'Présentation' : 'Nouvelle présentation');
+  const heroClasse = linkedChar?.classe || '';
+  const heroRace   = linkedChar?.race   || '';
+  const heroJoueur = linkedChar?.ownerPseudo || '';
+  const heroNiveau = linkedChar?.niveau ?? null;
+  const isVisible  = player?.visible !== false;
+  const heroBg     = player?.imageUrl ? `background-image:url('${_esc(player.imageUrl).replace(/'/g, '%27')}')` : '';
 
-    <div class="grid-2" style="gap:.75rem">
-      <div class="form-group" style="margin:0">
-        <label>Ordre d'affichage</label>
-        <input type="number" class="input-field" id="pp-ordre" value="${player?.ordre??''}" placeholder="Auto" min="1">
-      </div>
-      <div class="form-group" style="margin:0">
-        <label style="margin-bottom:.5rem">Visibilité</label>
-        <label class="pp-form-check">
-          <input type="checkbox" id="pp-visible" ${player?.visible!==false?'checked':''}>
-          Visible dans le sommaire
-        </label>
-      </div>
-    </div>
+  const visEntries = [
+    { id:'pp-show-pv',       label:'PV',           key:'afficherPV',       def:true,  ico:'❤' },
+    { id:'pp-show-pm',       label:'PM',           key:'afficherPM',       def:true,  ico:'✦' },
+    { id:'pp-show-ca',       label:'CA',           key:'afficherCA',       def:true,  ico:'🛡' },
+    { id:'pp-show-or',       label:'Or',           key:'afficherOr',       def:false, ico:'🪙' },
+    { id:'pp-show-stats',    label:'Statistiques', key:'afficherStats',    def:true,  ico:'📊' },
+    { id:'pp-show-lvl',      label:'Niveau',       key:'afficherNiveau',   def:true,  ico:'⭐' },
+    { id:'pp-show-equip',    label:'Équipement',   key:'afficherEquip',    def:true,  ico:'⚔' },
+    { id:'pp-show-identite', label:'Identité',     key:'afficherIdentite', def:true,  ico:'📜' },
+    { id:'pp-show-citation', label:'Citation',     key:'afficherCitation', def:true,  ico:'💬' },
+    { id:'pp-show-bio',      label:'Biographie',   key:'afficherBio',      def:true,  ico:'📖' },
+    { id:'pp-show-tags',     label:'Traits',       key:'afficherTags',     def:true,  ico:'🎭' },
+  ];
 
-    <div class="pp-form-section">
-      <div class="pp-form-section-title">🔒 Informations visibles par les joueurs</div>
-      <div class="pp-form-checks">
-        ${[
-          { id:'pp-show-pv',         label:'Points de Vie (PV)',     key:'afficherPV',        def:true  },
-          { id:'pp-show-pm',         label:'Points de Magie (PM)',   key:'afficherPM',        def:true  },
-          { id:'pp-show-ca',         label:'Classe d\'Armure (CA)',  key:'afficherCA',        def:true  },
-          { id:'pp-show-or',         label:'Or',                     key:'afficherOr',        def:false },
-          { id:'pp-show-stats',      label:'Statistiques',           key:'afficherStats',     def:true  },
-          { id:'pp-show-lvl',        label:'Niveau',                 key:'afficherNiveau',    def:true  },
-          { id:'pp-show-equip',      label:'Équipement',             key:'afficherEquip',     def:true  },
-          { id:'pp-show-identite',   label:'Identité (Âge, Taille…)',key:'afficherIdentite',  def:true  },
-          { id:'pp-show-citation',   label:'Citation',               key:'afficherCitation',  def:true  },
-          { id:'pp-show-bio',        label:'Biographie',             key:'afficherBio',       def:true  },
-          { id:'pp-show-tags',       label:'Traits de caractère',    key:'afficherTags',      def:true  },
-        ].map(f => {
-          const checked = player?.[f.key] !== undefined ? player[f.key] : f.def;
-          return `<label class="pp-form-check">
-            <input type="checkbox" id="${f.id}" ${checked?'checked':''}> ${f.label}
-          </label>`;
-        }).join('')}
-      </div>
-    </div>
+  openModal('', `
+  <div class="pp-mn-shell">
 
-    <div class="form-group" style="margin-top:.75rem">
-      <label>Présentation</label>
-      ${richTextEditorHtml({ id: 'pp-content', html: existingContent, minHeight: 220, placeholder: 'Décris librement ce personnage…' })}
-    </div>
+    <!-- ════ HERO BANNER — preview image + drop zone overlay ═══════ -->
+    <div class="pp-mn-hero" id="pp-mn-hero">
+      <div class="pp-mn-hero-bg" id="pp-mn-hero-bg" style="${heroBg}"></div>
+      <div class="pp-mn-hero-fade"></div>
 
-    <div class="form-group">
-      <label>Illustration</label>
-      <div id="pp-img-drop" class="pp-form-drop">
+      <!-- Drop zone overlay (cropper rattaché ci-dessous) -->
+      <div id="pp-img-drop" class="pp-mn-hero-drop" title="Cliquer ou déposer une image">
         <div id="pp-img-preview"></div>
+        <div class="pp-mn-hero-drop-hint">
+          <span class="pp-mn-hero-drop-icon">🖼️</span>
+          <span>${player?.imageUrl ? "Changer l'illustration" : 'Glisser une image ou cliquer pour ouvrir'}</span>
+        </div>
       </div>
-      <div id="pp-crop-wrap" style="display:none;margin-top:.6rem">
-        <div class="pp-form-hint">Recadrez l'illustration</div>
-        <canvas id="pp-crop-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" id="pp-crop-confirm" style="width:100%;margin-top:.4rem">✂️ Confirmer</button>
-        <div id="pp-crop-ok" style="display:none;font-size:.72rem;text-align:center;margin-top:3px"></div>
+
+      <!-- Contenu hero -->
+      <div class="pp-mn-hero-content">
+        <div class="pp-mn-hero-eyebrow">
+          <span id="pp-mn-eyebrow">${heroClasse || heroRace ? _esc([heroClasse, heroRace].filter(Boolean).join(' · ')) : 'Présentation joueurs'}</span>
+          ${heroJoueur ? `<span class="pp-mn-hero-eyebrow-sep">·</span><span>${_esc(heroJoueur)}</span>` : ''}
+        </div>
+        <h2 class="pp-mn-hero-title" id="pp-mn-title">${_esc(heroNom)}</h2>
+        <div class="pp-mn-hero-meta">
+          ${heroNiveau !== null ? `<span class="pp-mn-meta-pill">⭐ Niv. <b>${heroNiveau}</b></span>` : ''}
+          <span class="pp-mn-meta-pill ${isVisible?'is-on':'is-off'}" id="pp-mn-vis-pill">
+            ${isVisible ? '👁 Visible' : '🚫 Masqué'}
+          </span>
+          ${player?.imageUrl ? `<button type="button" class="pp-mn-meta-pill pp-mn-pill-action"
+            id="pp-img-clear" title="Retirer l'illustration">✕ Retirer image</button>` : ''}
+        </div>
       </div>
-      ${player?.imageUrl ? `<button type="button" id="pp-img-clear" class="pp-form-link-danger">✕ Retirer l'image</button>` : ''}
+
+      <!-- Cropper inline -->
+      <div id="pp-crop-wrap" class="pp-mn-crop-wrap" style="display:none">
+        <canvas id="pp-crop-canvas"></canvas>
+        <div class="pp-mn-crop-bar">
+          <span class="pp-mn-crop-hint">Recadre · ratio 3:4</span>
+          <button type="button" class="btn btn-gold btn-sm" id="pp-crop-confirm">✂️ Confirmer</button>
+          <div id="pp-crop-ok" style="display:none;font-size:.75rem"></div>
+        </div>
+      </div>
     </div>
 
-    <!-- Cadrage de l'image dans la card du Roster (pan-zoom interactif) -->
-    <div class="form-group">
-      <label>Cadrage dans la card du Roster <span class="pp-form-hint">(glisse pour repositionner · molette / pinch pour zoomer)</span></label>
-      ${player?.imageUrl
-        ? `<div class="pp-card-crop-wrap">
-            ${panZoomCropHTML({ idPrefix: 'pp-card', viewW: 240, viewH: 320, hint: false })}
-            <div class="pp-card-crop-actions">
-              <button type="button" class="btn btn-outline btn-sm" data-pp-action="resetCardCrop">↺ Réinitialiser</button>
-              <button type="button" class="btn btn-gold btn-sm" data-pp-action="confirmCardCrop">✓ Confirmer le cadrage</button>
+    <!-- ════ TABS ════════════════════════════════════════════════ -->
+    <div class="pp-mn-tabs" role="tablist">
+      <button type="button" class="pp-mn-tab is-active" data-pp-tab="presentation">📝 Présentation</button>
+      <button type="button" class="pp-mn-tab" data-pp-tab="visibilite">👁 Visibilité <span class="pp-mn-tab-count" id="pp-mn-vis-count">${visEntries.filter(f => (player?.[f.key] !== undefined ? player[f.key] : f.def)).length}</span></button>
+      <button type="button" class="pp-mn-tab" data-pp-tab="galerie">🖼 Galerie <span class="pp-mn-tab-count" id="pp-mn-gal-count">${_ppGallery.length || ''}</span></button>
+    </div>
+
+    <!-- ════ TAB CONTENT ═════════════════════════════════════════ -->
+    <div class="pp-mn-body">
+
+      <!-- ── ONGLET PRÉSENTATION ────────────────────────────────── -->
+      <section class="pp-mn-panel is-active" data-pp-panel="presentation">
+        <div class="pp-mn-grid-2">
+          <div class="pp-mn-field">
+            <label class="pp-mn-label">Fiche liée <span class="pp-form-hint">(auto-remplit classe, race, joueur)</span></label>
+            <select class="pp-mn-input" id="pp-char-id">
+              <option value="">— Aucun lien —</option>
+              ${characters.map(c => `<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}${c.classe?' — '+_esc(c.classe):''}${c.ownerPseudo?' ('+_esc(c.ownerPseudo)+')':''}</option>`).join('')}
+            </select>
+          </div>
+          <div class="pp-mn-field">
+            <label class="pp-mn-label">Ordre d'affichage</label>
+            <input type="number" class="pp-mn-input" id="pp-ordre" value="${player?.ordre??''}" placeholder="Auto" min="1">
+          </div>
+        </div>
+
+        <div class="pp-mn-field">
+          <label class="pp-mn-label">Présentation</label>
+          ${richTextEditorHtml({ id: 'pp-content', html: existingContent, minHeight: 240, placeholder: 'Décris librement ce personnage…' })}
+        </div>
+
+        <label class="pp-mn-toggle-row">
+          <input type="checkbox" id="pp-visible" ${isVisible?'checked':''}
+            onchange="window._ppUpdateVisiblePill?.(this.checked)">
+          <span class="pp-mn-toggle-track"><span class="pp-mn-toggle-thumb"></span></span>
+          <span class="pp-mn-toggle-lbl">
+            <b>Visible dans le sommaire</b>
+            <small>Désactive pour masquer ce personnage aux joueurs.</small>
+          </span>
+        </label>
+      </section>
+
+      <!-- ── ONGLET VISIBILITÉ ──────────────────────────────────── -->
+      <section class="pp-mn-panel" data-pp-panel="visibilite">
+        <div class="pp-mn-section-intro">
+          🔒 Coche les informations que les joueurs verront sur la fiche.
+        </div>
+        <div class="pp-mn-vis-grid">
+          ${visEntries.map(f => {
+            const checked = player?.[f.key] !== undefined ? player[f.key] : f.def;
+            return `<label class="pp-mn-vis-card ${checked?'is-on':''}">
+              <input type="checkbox" id="${f.id}" ${checked?'checked':''}
+                onchange="window._ppRefreshVisCount?.()">
+              <span class="pp-mn-vis-ico">${f.ico}</span>
+              <span class="pp-mn-vis-lbl">${f.label}</span>
+              <span class="pp-mn-vis-check">✓</span>
+            </label>`;
+          }).join('')}
+        </div>
+      </section>
+
+      <!-- ── ONGLET GALERIE ────────────────────────────────────── -->
+      <section class="pp-mn-panel" data-pp-panel="galerie">
+        <div class="pp-mn-section-intro">
+          🖼️ Galerie photos — la première image sert d'illustration principale.
+        </div>
+
+        <!-- Cadrage de l'image dans la card du Roster -->
+        ${player?.imageUrl ? `
+          <div class="pp-mn-card-crop">
+            <div class="pp-mn-card-crop-head">
+              <span class="pp-mn-label">Cadrage dans la card</span>
+              <span class="pp-form-hint">glisse · molette/pinch pour zoomer</span>
             </div>
-            <div class="pp-card-crop-status" id="pp-card-crop-status"></div>
-          </div>`
-        : `<div class="pp-card-crop-disabled">Ajoute d'abord une illustration ci-dessus.</div>`}
+            <div class="pp-card-crop-wrap">
+              ${panZoomCropHTML({ idPrefix: 'pp-card', viewW: 240, viewH: 320, hint: false })}
+              <div class="pp-card-crop-actions">
+                <button type="button" class="btn btn-outline btn-sm" data-pp-action="resetCardCrop">↺ Réinitialiser</button>
+                <button type="button" class="btn btn-gold btn-sm" data-pp-action="confirmCardCrop">✓ Confirmer</button>
+              </div>
+              <div class="pp-card-crop-status" id="pp-card-crop-status"></div>
+            </div>
+          </div>` : ''}
+
+        <div class="pp-mn-field">
+          <label class="pp-mn-label">Photos additionnelles <span class="pp-form-hint">(glisse pour réordonner · ImgBB pleine qualité)</span></label>
+          <div id="pp-gallery-list" class="pp-gallery-edit"></div>
+          <div id="pp-gallery-drop" class="pp-form-drop pp-gallery-drop">
+            <div class="pp-gallery-drop-hint">+ Glisser une photo (ou cliquer)</div>
+          </div>
+          <div id="pp-gallery-status" class="pp-form-hint" style="margin-top:.3rem"></div>
+        </div>
+      </section>
     </div>
 
-    <!-- Galerie photos additionnelles -->
-    <div class="form-group">
-      <label>Galerie photos <span class="pp-form-hint">(le portrait est inclus · glisse pour réordonner · ImgBB pleine qualité)</span></label>
-      <div id="pp-gallery-list" class="pp-gallery-edit"></div>
-      <div id="pp-gallery-drop" class="pp-form-drop pp-gallery-drop">
-        <div class="pp-gallery-drop-hint">+ Glisser une photo (ou cliquer)</div>
+    <!-- ════ FOOTER ACTIONS ═══════════════════════════════════════ -->
+    <div class="pp-mn-footer">
+      ${player?.id ? `<button class="btn btn-outline btn-sm pp-btn-danger" data-pp-action="delete" data-id="${_esc(player.id)}">🗑 Supprimer</button>` : '<span></span>'}
+      <div class="pp-mn-footer-right">
+        <button class="btn btn-outline btn-sm" data-pp-action="closeModal">Annuler</button>
+        <button class="btn btn-gold" data-pp-action="save" data-id="${_esc(player?.id||'')}">💾 Enregistrer</button>
       </div>
-      <div id="pp-gallery-status" class="pp-form-hint" style="margin-top:.3rem"></div>
     </div>
-
-    <div class="pp-form-actions">
-      <button class="btn btn-gold" style="flex:1" data-pp-action="save" data-id="${_esc(player?.id||'')}">Enregistrer</button>
-      ${player?.id ? `<button class="btn btn-outline btn-sm pp-btn-danger" data-pp-action="delete" data-id="${_esc(player.id)}">🗑️</button>` : ''}
-      <button class="btn btn-outline btn-sm" data-pp-action="closeModal">Annuler</button>
-    </div>
+  </div>
   `);
+
+  // ── Wiring : tabs + live updates ──
+  document.querySelectorAll('[data-pp-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.ppTab;
+      document.querySelectorAll('[data-pp-tab]').forEach(b => b.classList.toggle('is-active', b.dataset.ppTab === tab));
+      document.querySelectorAll('[data-pp-panel]').forEach(p => p.classList.toggle('is-active', p.dataset.ppPanel === tab));
+    });
+  });
+  window._ppUpdateVisiblePill = (on) => {
+    const pill = document.getElementById('pp-mn-vis-pill');
+    if (!pill) return;
+    pill.classList.toggle('is-on', !!on); pill.classList.toggle('is-off', !on);
+    pill.textContent = on ? '👁 Visible' : '🚫 Masqué';
+  };
+  window._ppRefreshVisCount = () => {
+    const n = visEntries.filter(f => document.getElementById(f.id)?.checked).length;
+    const el = document.getElementById('pp-mn-vis-count');
+    if (el) el.textContent = n;
+    // Toggle visual state on cards
+    document.querySelectorAll('.pp-mn-vis-card').forEach(card => {
+      const cb = card.querySelector('input[type=checkbox]');
+      if (cb) card.classList.toggle('is-on', cb.checked);
+    });
+  };
+  // Met à jour l'eyebrow live quand on change la fiche liée
+  const selCh = document.getElementById('pp-char-id');
+  selCh?.addEventListener('change', () => {
+    const c = characters.find(x => x.id === selCh.value);
+    const eb = document.getElementById('pp-mn-eyebrow');
+    if (eb) eb.textContent = c && (c.classe || c.race)
+      ? [c.classe, c.race].filter(Boolean).join(' · ')
+      : 'Présentation joueurs';
+    const t = document.getElementById('pp-mn-title');
+    if (t && c?.nom) t.textContent = c.nom;
+  });
 
   bindRichTextEditors();
   _ppCropper?.destroy();
