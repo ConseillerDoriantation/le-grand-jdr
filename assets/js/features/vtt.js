@@ -2773,6 +2773,21 @@ function _buildSpellOption(s, ctx) {
   const protMode = s.protectionMode || 'ca';
   let zoneW = mods?.allonge ? 0 : (s.zoneW || 0);
   let zoneH = mods?.allonge ? 0 : (s.zoneH || 0);
+  // Si pas de zone manuelle ni allonge : calcule depuis les runes (Amplification × Dispersion).
+  // Miroir de _calcSortZone (spells.js) → mêmes formules de chainage :
+  //   Amp ×N → longueur 4N-1 m  · Disp ×M en combo → largeur 4M-1 m
+  // Conversion mètres → cases (1 case ≈ 1.5 m).
+  if (!mods?.allonge && zoneW <= 0 && zoneH <= 0) {
+    const _runes = s.runes || [];
+    const _nbAmp  = _runes.filter(r => r === 'Amplification').length;
+    const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
+    if (_nbAmp >= 1) {
+      const _lenM   = 4 * _nbAmp  - 1;
+      const _widthM = _nbDisp >= 1 ? (4 * _nbDisp - 1) : 1;
+      zoneW = Math.ceil(_lenM   / CELL_M);
+      zoneH = Math.ceil(_widthM / CELL_M);
+    }
+  }
   // Sentinelle : force une zone min 1×1 (utile pour le placement)
   if (mods?.sentinelle && (zoneW <= 0 || zoneH <= 0)) {
     zoneW = Math.max(1, zoneW || 1);
