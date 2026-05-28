@@ -201,16 +201,31 @@ service cloud.firestore {
       // nécessaire pour que les sorts joueurs (DoT, états, enchantements) soient
       // équivalents aux sorts du MJ. Le coût d'autorisation est minime car ces
       // champs sont déjà manipulables côté MJ et toute action est traçable via vttLog.
+      //
+      // Délégation de contrôle : un joueur peut autoriser d'autres joueurs à
+      // contrôler son token via le champ `controlDelegates` (array d'UIDs).
+      // Le propriétaire (ownerId) ou un délégué peuvent alors faire les mêmes
+      // updates que le propriétaire direct (déplacement, mvt en combat…).
+      // Seul le propriétaire (ou le MJ) peut modifier la liste `controlDelegates`.
       match /vttTokens/{id} {
         allow read: if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
+        // Déplacement : propriétaire OU délégué de contrôle
         allow update: if inAdventure(adventureId)
-          && request.auth.uid == resource.data.ownerId
+          && (request.auth.uid == resource.data.ownerId
+              || (resource.data.controlDelegates is list
+                  && request.auth.uid in resource.data.controlDelegates))
           && request.resource.data.diff(resource.data)
                .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt']);
+        // Dégâts / effets : tout membre de l'aventure
         allow update: if inAdventure(adventureId)
           && request.resource.data.diff(resource.data)
                .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions']);
+        // Gestion des délégations : SEUL le propriétaire (et le MJ via la règle write ci-dessus)
+        allow update: if inAdventure(adventureId)
+          && request.auth.uid == resource.data.ownerId
+          && request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['controlDelegates']);
       }
 
       // Chat & log de dés : tous les membres de l'aventure peuvent lire et écrire.
