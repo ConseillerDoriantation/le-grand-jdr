@@ -483,6 +483,7 @@ export function bindRichTextToolbar(id) {
   });
 
   bindRichTextListIndentation(editor, controls.signal);
+  bindRichTextBlockquoteEscape(editor, controls.signal);
   controls.syncToolbarState();
   return controls;
 }
@@ -607,6 +608,73 @@ function bindRichTextListIndentation(editor, signal) {
       document.execCommand(e.shiftKey ? 'outdent' : 'indent', false, null);
     }
   }, { signal });
+}
+
+/**
+ * Permet de SORTIR d'un blockquote vide :
+ * - Backspace au début d'un blockquote vide → unwrap
+ * - Enter sur une ligne vide à l'intérieur d'un blockquote → unwrap (comportement standard)
+ */
+function bindRichTextBlockquoteEscape(editor, signal) {
+  editor.addEventListener('keydown', (e) => {
+    if (e.key !== 'Backspace' && e.key !== 'Enter') return;
+    const sel = window.getSelection();
+    if (!sel || !sel.isCollapsed) return;  // ignore les sélections étendues
+    const node = sel.anchorNode;
+    const bq = elementFromNode(node)?.closest?.('blockquote');
+    if (!bq || !editor.contains(bq)) return;
+
+    // Backspace au tout début du blockquote OU sur un blockquote vide → unwrap
+    if (e.key === 'Backspace') {
+      const isAtStart = sel.anchorOffset === 0 && _isFirstTextOfBlock(node, bq);
+      const isEmpty = !bq.textContent.trim() && !bq.querySelector('img');
+      if (isAtStart || isEmpty) {
+        e.preventDefault();
+        _unwrapBlock(bq, 'p');
+        // Repositionne le curseur sur le 1er bloc résultant
+        const newP = editor.querySelector('p') || editor;
+        _placeCaretAtStart(newP);
+      }
+      return;
+    }
+
+    // Enter sur une ligne vide dans un blockquote → sort du blockquote
+    if (e.key === 'Enter' && !e.shiftKey) {
+      const block = elementFromNode(node)?.closest?.('p,div') || node;
+      const text = (block.textContent || '').trim();
+      if (!text) {
+        e.preventDefault();
+        // Retire le bloc vide, puis sort du blockquote en créant un <p> après
+        block.remove?.();
+        const newP = document.createElement('p');
+        newP.appendChild(document.createElement('br'));
+        bq.parentNode?.insertBefore(newP, bq.nextSibling);
+        _placeCaretAtStart(newP);
+        // Si le blockquote est maintenant vide, on le supprime aussi
+        if (!bq.textContent.trim() && !bq.querySelector('img')) bq.remove();
+      }
+    }
+  }, { signal });
+}
+
+function _isFirstTextOfBlock(node, blockEl) {
+  if (!node || !blockEl) return false;
+  let cur = node;
+  while (cur && cur !== blockEl) {
+    if (cur.previousSibling) return false;
+    cur = cur.parentNode;
+  }
+  return true;
+}
+
+function _placeCaretAtStart(el) {
+  const sel = window.getSelection();
+  if (!sel || !el) return;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
 }
 
 function bindRichTextPopupCleanup({
@@ -943,12 +1011,45 @@ function toggleRichTextBlock(editor, tag, fallbackTag = 'p') {
   const activeBlock = elementFromNode(range.startContainer)?.closest?.(tag);
 
   if (activeBlock && editor.contains(activeBlock)) {
+    // Tentative 1 : formatBlock (rapide quand ça marche)
     document.execCommand('formatBlock', false, fallbackTag);
+    // Tentative 2 : si le tag est toujours là (Chrome buggé sur <blockquote>),
+    // on déplace manuellement les enfants du tag vers son parent puis on supprime.
+    const stillThere = elementFromNode(getSelectionRange()?.startContainer)?.closest?.(tag);
+    if (stillThere && editor.contains(stillThere)) {
+      _unwrapBlock(stillThere, fallbackTag);
+    }
     return true;
   }
 
   document.execCommand('formatBlock', false, tag);
   return true;
+}
+
+/** Déballe un bloc : déplace ses enfants au même niveau et supprime le wrapper. */
+function _unwrapBlock(blockEl, fallbackTag = 'p') {
+  if (!blockEl || !blockEl.parentNode) return;
+  const parent = blockEl.parentNode;
+  const frag = document.createDocumentFragment();
+  // Si le block est vide, on insère un paragraphe vide à la place pour
+  // préserver le curseur (sinon le navigateur peut perdre la sélection).
+  if (!blockEl.textContent.trim() && !blockEl.querySelector('br,img')) {
+    const p = document.createElement(fallbackTag);
+    p.appendChild(document.createElement('br'));
+    frag.appendChild(p);
+  } else {
+    // Si le contenu n'est pas déjà dans des blocs, on l'enveloppe dans <p>
+    const hasBlocks = [...blockEl.childNodes].some(n =>
+      n.nodeType === 1 && /^(P|H[1-6]|DIV|UL|OL|BLOCKQUOTE)$/i.test(n.tagName));
+    if (hasBlocks) {
+      while (blockEl.firstChild) frag.appendChild(blockEl.firstChild);
+    } else {
+      const p = document.createElement(fallbackTag);
+      while (blockEl.firstChild) p.appendChild(blockEl.firstChild);
+      frag.appendChild(p);
+    }
+  }
+  parent.replaceChild(frag, blockEl);
 }
 
 function wrapRichTextBlock(editor, tag) {

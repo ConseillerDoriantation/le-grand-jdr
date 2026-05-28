@@ -3,7 +3,7 @@ import { updateInCol, getDocData } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
-import { getMod, calcPMMax } from '../../shared/char-stats.js';
+import { getMod, calcPMMax, calcDeckMax } from '../../shared/char-stats.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions, getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
@@ -1014,70 +1014,210 @@ export function renderCharDeck(c, canEdit) {
   const armorSet = getArmorSetData(c);
   const pmDelta  = armorSet.modifiers?.spellPmDelta || 0;
 
+  // ── État UI persistant (filtres / recherche / pliage) ─────────────
+  const search   = (window._sortsSearch || '').toLowerCase().trim();
+  const view     = window._sortsView || 'all';          // 'all' | 'deck'
+  const typeFlt  = window._sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'soin' | 'enchantement' | 'affliction' | 'utilitaire'
+  const collapsed = window._sortsCatCollapsed || {};     // { catId: true } = replié
+
   const DEFAULT_CAT = { id: '__none', nom: 'Sans catégorie', couleur: '#4f8cff' };
   const allCats = cats.length ? [...cats, DEFAULT_CAT] : [DEFAULT_CAT];
+
+  // Stats globales avant filtre
+  const deckCount = allSorts.filter(s => s.actif).length;
+  const deckMax   = calcDeckMax(c);
+
+  // ── Application des filtres : view + search + type ───────────────
+  const matchSpell = (s) => {
+    if (view === 'deck' && !s.actif) return false;
+    if (search) {
+      const hay = [
+        s.nom || '', s.effet || '', s.noyau || '',
+        ...(s.runes || []),
+      ].join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    if (typeFlt) {
+      const types = _getSortTypes(s);
+      const runes = s.runes || [];
+      if (typeFlt === 'soin' && !runes.includes('Protection')) return false;
+      if (typeFlt === 'enchantement' && !runes.includes('Enchantement')) return false;
+      if (typeFlt === 'affliction' && !runes.includes('Affliction')) return false;
+      if (typeFlt === 'offensif' && !types.includes('offensif')) return false;
+      if (typeFlt === 'defensif' && !types.includes('defensif')) return false;
+      if (typeFlt === 'utilitaire' && !(types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif'))) return false;
+    }
+    return true;
+  };
+
   const sortsByCat = {};
   allCats.forEach(cat => { sortsByCat[cat.id] = []; });
+  let visibleCount = 0;
   allSorts.forEach((s, globalIdx) => {
     const catId = s.catId && cats.find(cat => cat.id === s.catId) ? s.catId : '__none';
-    sortsByCat[catId].push({ s, globalIdx });
+    const ok = matchSpell(s);
+    sortsByCat[catId].push({ s, globalIdx, hidden: !ok });
+    if (ok) visibleCount += 1;
   });
 
-  let html = `<div class="cs-section cs-section--compact">
-    <div class="cs-section-hdr">
-      <span class="cs-section-title">✨ Sorts & Compétences</span>
-      <div style="display:flex;gap:.35rem">
-        ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addSort()">+ Sort</button>` : ''}
-        ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="openSortCatEditor()">📂 Catégories</button>` : ''}
+  // ── Header sticky : recherche + compteur Deck + actions ──────────
+  const deckPct  = deckMax > 0 ? Math.min(100, (deckCount / deckMax) * 100) : 0;
+  const deckOver = deckCount > deckMax;
+  let html = `<div class="cs-section cs-section--compact cs-sorts-v3">
+
+    <!-- Toolbar sticky : recherche + compteur deck + actions -->
+    <div class="cs-sorts-toolbar">
+      <div class="cs-sorts-search-wrap">
+        <span class="cs-sorts-search-ico">🔍</span>
+        <input type="text" class="cs-sorts-search" id="cs-sorts-search"
+          placeholder="Rechercher (nom, effet, rune)…"
+          value="${_esc(window._sortsSearch || '')}"
+          oninput="window._sortsSetSearch(this.value)">
+        ${search ? `<button class="cs-sorts-search-clear" onclick="window._sortsSetSearch('')" title="Effacer">✕</button>` : ''}
+      </div>
+      <div class="cs-sorts-deck ${deckOver?'is-over':''}" title="Sorts actifs / capacité du deck (INT)">
+        <span class="cs-sorts-deck-lbl">Deck</span>
+        <span class="cs-sorts-deck-val">${deckCount}<small>/${deckMax}</small></span>
+        <span class="cs-sorts-deck-bar"><span style="width:${deckPct}%"></span></span>
+      </div>
+      <div class="cs-sorts-actions">
+        ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addSort()" title="Créer un sort">＋ Sort</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="openSortCatEditor()" title="Gérer les catégories">📂</button>` : ''}
+        ${cats.length ? `<button class="btn btn-outline btn-sm" onclick="window._sortsToggleAllCats()" title="Plier/déplier toutes les catégories">⇕</button>` : ''}
       </div>
     </div>
-    <p class="cs-sort-info">
-      <strong>Noyau + Runes.</strong> PM = 2 × (noyau + runes).
-      Sorts offensifs : dégâts d'arme <em>(${armeDeg})</em> + bonus runes.
-      Soin base = 1d4. <em>Enchantement</em> et <em>Affliction</em> n'infligent pas de dégâts d'impact.
-    </p>`;
 
-  if (pmDelta !== 0) {
-    html += `<div class="cs-sort-pm-bar">
+    <!-- Filtres rapides -->
+    <div class="cs-sorts-filters">
+      <div class="cs-sorts-filt-grp">
+        <button class="cs-sorts-chip ${view==='all'?'on':''}"  onclick="window._sortsSetView('all')">Tous (${allSorts.length})</button>
+        <button class="cs-sorts-chip ${view==='deck'?'on':''}" onclick="window._sortsSetView('deck')">⚡ Deck (${deckCount})</button>
+      </div>
+      <div class="cs-sorts-filt-grp">
+        <button class="cs-sorts-chip type ${typeFlt===''?'on':''}"            onclick="window._sortsSetType('')">Toutes</button>
+        <button class="cs-sorts-chip type off  ${typeFlt==='offensif'?'on':''}"     onclick="window._sortsSetType('offensif')">⚔️ Off</button>
+        <button class="cs-sorts-chip type def  ${typeFlt==='defensif'?'on':''}"     onclick="window._sortsSetType('defensif')">🛡️ Def</button>
+        <button class="cs-sorts-chip type soin ${typeFlt==='soin'?'on':''}"         onclick="window._sortsSetType('soin')">💚 Soin</button>
+        <button class="cs-sorts-chip type ench ${typeFlt==='enchantement'?'on':''}" onclick="window._sortsSetType('enchantement')">✨ Ench.</button>
+        <button class="cs-sorts-chip type aff  ${typeFlt==='affliction'?'on':''}"   onclick="window._sortsSetType('affliction')">⛓ Aff.</button>
+        <button class="cs-sorts-chip type util ${typeFlt==='utilitaire'?'on':''}"   onclick="window._sortsSetType('utilitaire')">🔧 Util.</button>
+      </div>
+    </div>
+
+    <!-- Bandeau Set Léger (PM offset) -->
+    ${pmDelta !== 0 ? `<div class="cs-sort-pm-bar">
       <span>🧙</span>
       <span class="cs-sort-pm-bar-label">Set Léger</span>
       <span class="cs-sort-pm-bar-arrow">→ coût des sorts</span>
       <span class="cs-sort-pm-bar-val">${pmDelta > 0 ? '+' : ''}${pmDelta} PM</span>
       <span class="cs-sort-pm-bar-note">(appliqué automatiquement)</span>
-    </div>`;
+    </div>` : ''}`;
+
+  // ── État vide / aucun résultat ───────────────────────────────────
+  if (allSorts.length === 0) {
+    html += `<div class="cs-empty">🔮 Aucun sort créé</div></div>`;
+    return html;
+  }
+  if (visibleCount === 0) {
+    html += `<div class="cs-sorts-noresult">
+      <span style="font-size:1.4rem">🔎</span>
+      <div>
+        <div style="font-weight:700">Aucun sort ne correspond</div>
+        <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">
+          ${search ? `« ${_esc(search)} » ${typeFlt?' · '+typeFlt:''}${view==='deck'?' · Deck uniquement':''}` : 'Essaie un autre filtre'}
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="window._sortsResetFilters()">Réinitialiser</button>
+    </div></div>`;
+    return html;
   }
 
-  if (allSorts.length === 0) {
-    html += `<div class="cs-empty">🔮 Aucun sort créé</div>`;
-  } else {
-    // Wrapper sortable : chaque catégorie est un bloc déplaçable
-    // (data-cat-id sert d'ancrage pour reconstruire l'ordre après drop)
-    html += `<div class="cs-sort-cats-wrap" id="cs-sort-cats-wrap">`;
-    allCats.forEach(cat => {
-      const entries = sortsByCat[cat.id] || [];
-      if (!entries.length) return;
-      const isDefault = cat.id === '__none';
-      // Le bloc "__none" (Sans catégorie) reste en place — non draggable
-      html += `<div class="cs-sort-cat-block ${isDefault?'is-default':''}" data-cat-id="${cat.id}">`;
-      if (cats.length > 0) {
-        html += `<div class="cs-sort-cat-hdr" style="--cat-col:${cat.couleur}">
-          ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner">⠿</span>` : ''}
-          <span class="cs-sort-cat-name">${cat.nom}</span>
-          <span class="cs-sort-cat-count">${entries.length} sort${entries.length>1?'s':''}</span>
-        </div>`;
-      }
+  // ── Liste catégorisée avec catégories repliables ─────────────────
+  html += `<div class="cs-sort-cats-wrap" id="cs-sort-cats-wrap">`;
+  allCats.forEach(cat => {
+    const entries = sortsByCat[cat.id] || [];
+    const visibleEntries = entries.filter(e => !e.hidden);
+    if (!visibleEntries.length) return;
+    const isDefault = cat.id === '__none';
+    const isCollapsed = !!collapsed[cat.id];
+    const activeInCat = visibleEntries.filter(e => e.s.actif).length;
+
+    html += `<div class="cs-sort-cat-block ${isDefault?'is-default':''} ${isCollapsed?'is-collapsed':''}" data-cat-id="${cat.id}">`;
+    if (cats.length > 0) {
+      html += `<div class="cs-sort-cat-hdr" style="--cat-col:${cat.couleur}"
+          onclick="window._sortsToggleCat('${cat.id}')">
+        ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner" onclick="event.stopPropagation()">⠿</span>` : ''}
+        <span class="cs-sort-cat-chev">${isCollapsed?'▸':'▾'}</span>
+        <span class="cs-sort-cat-name">${_esc(cat.nom)}</span>
+        <span class="cs-sort-cat-count">${visibleEntries.length} sort${visibleEntries.length>1?'s':''} · ${activeInCat} actif${activeInCat>1?'s':''}</span>
+      </div>`;
+    }
+    if (!isCollapsed) {
       html += `<div class="cs-sort-list" data-cat="${cat.id}">`;
-      entries.forEach(({ s, globalIdx: i }) => {
+      visibleEntries.forEach(({ s, globalIdx: i }) => {
         html += _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
       });
-      html += `</div></div>`;  // /cat-block
-    });
-    html += `</div>`;  // /cats-wrap
-  }
+      html += `</div>`;
+    }
+    html += `</div>`;  // /cat-block
+  });
+  html += `</div>`;  // /cats-wrap
 
   html += `</div>`;
   return html;
 }
+
+// ── Handlers UI (search / filtres / pliage) ─────────────────────────
+function _sortsRerender() {
+  const c = window._currentChar; if (!c) return;
+  if (window._currentCharTab === 'sorts' && typeof window._renderTab === 'function') {
+    window._renderTab('sorts', c, window._canEditChar);
+  } else if (typeof window.renderCharSheet === 'function') {
+    window.renderCharSheet(c, 'sorts');
+  }
+}
+window._sortsSetSearch = (v) => {
+  window._sortsSearch = v || '';
+  _sortsRerender();
+  // Re-focus + caret restaurés
+  requestAnimationFrame(() => {
+    const el = document.getElementById('cs-sorts-search');
+    if (el) {
+      el.focus();
+      try { el.setSelectionRange(el.value.length, el.value.length); } catch {}
+    }
+  });
+};
+window._sortsSetView = (v) => {
+  window._sortsView = (v === 'deck') ? 'deck' : 'all';
+  _sortsRerender();
+};
+window._sortsSetType = (t) => {
+  window._sortsTypeFilter = t || '';
+  _sortsRerender();
+};
+window._sortsToggleCat = (catId) => {
+  window._sortsCatCollapsed = { ...(window._sortsCatCollapsed || {}) };
+  window._sortsCatCollapsed[catId] = !window._sortsCatCollapsed[catId];
+  _sortsRerender();
+};
+window._sortsToggleAllCats = () => {
+  const c = window._currentChar; if (!c) return;
+  const cats = c.sort_cats || [];
+  const all = [...cats.map(cat => cat.id), '__none'];
+  const cur = window._sortsCatCollapsed || {};
+  const anyOpen = all.some(id => !cur[id]);
+  const next = {};
+  all.forEach(id => { next[id] = anyOpen; });   // si au moins 1 ouvert → tout plier; sinon tout déplier
+  window._sortsCatCollapsed = next;
+  _sortsRerender();
+};
+window._sortsResetFilters = () => {
+  window._sortsSearch = '';
+  window._sortsView = 'all';
+  window._sortsTypeFilter = '';
+  _sortsRerender();
+};
 
 function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isOpen   = openIdx === i;
