@@ -7,7 +7,7 @@ import { updateInCol } from '../data/firestore.js';
 import { _esc, modStr } from '../shared/html.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
-  calcOr, calcPalier, pct, getItemStatBonus,
+  calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
 } from '../shared/char-stats.js';
 
 // ── Sous-modules ─────────────────────────────────────────────────────────────
@@ -366,9 +366,14 @@ function renderCharSheet(c, keepTab) {
     </div>`;
   }).join('');
 
-  // Titres
-  const titresChips = titres.length
-    ? `<div class="id-titres">${titres.map(t => `<span class="id-titre">${_esc(t)}</span>`).join('')}</div>`
+  // Titres (chips existants + bouton d'édition pour MJ/propriétaire)
+  const titresChips = (titres.length || canEdit)
+    ? `<div class="id-titres">
+        ${titres.map(t => `<span class="id-titre">${_esc(t)}</span>`).join('')}
+        ${canEdit ? `<button class="id-titre id-titre-add"
+          onclick="manageTitres('${c.id}')"
+          title="${titres.length ? 'Gérer les titres' : 'Ajouter un titre'}">${titres.length ? '✎ Titres' : '＋ Titre'}</button>` : ''}
+      </div>`
     : '';
 
   // Tabs nav (6 onglets v3)
@@ -484,11 +489,10 @@ function renderCharSheet(c, keepTab) {
           </div>
         </div>
 
-        <!-- Mini stats 2×2 : CA · Vit. · Maît. · Deck -->
-        <div class="cs-mini-grid">
+        <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
+        <div class="cs-mini-grid cs-mini-grid-3">
           <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
           <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
-          <div class="cs-mini"><span class="cs-mini-icon">🎯</span><div class="cs-mini-body"><span class="cs-mini-lbl">Maît.</span><span class="cs-mini-val">+${profMod}</span></div></div>
           <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" onclick="showCharTab('sorts')" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
         </div>
 
@@ -1842,17 +1846,26 @@ const _ITEM_DERIVED_LABELS = {
   pvMaxBonus: 'PV', pmMaxBonus: 'PM',
   vitesseBonus: 'Vit.', initiativeBonus: 'Init.',
 };
+// Bump une valeur de bonus dérivé par le palier d'amélioration Artisan
+// (cohérent avec _bumpBonus de char-stats.js : ne bump que les valeurs positives).
+function _bumpDerived(val, item) {
+  if (!Number.isFinite(val) || val <= 0) return val;
+  const up = parseInt(item?.upgrades?.effectBonus);
+  if (Number.isFinite(up) && up > 0) return val + up;
+  return val;
+}
 function _itemBonusBadges(it = {}) {
   const out = [];
   // Stats : items utilisent les codes courts (fo/dex/in/sa/co/ch + alias 'for').
-  // On passe par getItemStatBonus qui gère tous les alias et les upgrades.
+  // getItemStatBonus gère tous les alias ET les upgrades (upgrades.statBonus).
   Object.entries(_ITEM_STAT_LABELS).forEach(([fullKey, lbl]) => {
     let b = 0;
     try { b = getItemStatBonus(it, fullKey); } catch {}
     if (b) out.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
   });
+  // Dérivés : applique le palier Artisan (upgrades.effectBonus) sur les positifs.
   Object.entries(_ITEM_DERIVED_LABELS).forEach(([k, lbl]) => {
-    const v = parseInt(it[k]) || 0;
+    const v = _bumpDerived(parseInt(it[k]) || 0, it);
     if (!v) return;
     out.push({ lbl: `${lbl} ${v>0?'+':''}${v}`, cls: 'gold' });
   });
@@ -1952,12 +1965,16 @@ function renderCharCombatV3(c, canEdit) {
     if (it.typeArmure) badges.push({ lbl: _esc(it.typeArmure), cls: 'green' });
     const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
     if (caTotal) badges.push({ lbl: `CA +${caTotal}`, cls: 'gold' });
-    Object.entries(STAT_LABELS).forEach(([k, lbl]) => {
-      const b = parseInt(it[k]) || parseInt(it.statBonuses?.[k]) || 0;
-      if (b) badges.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: '' });
+    // Stats : items stockent sous codes courts (fo/dex/in/sa/co/ch + alias 'for').
+    // getItemStatBonus gère tous les alias + les upgrades.
+    Object.entries(STAT_LABELS).forEach(([fullKey, lbl]) => {
+      let b = 0;
+      try { b = getItemStatBonus(it, fullKey); } catch {}
+      if (b) badges.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
     });
     ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
-      const v = parseInt(it[k]) || 0;
+      // Applique le palier Artisan (upgrades.effectBonus) sur les bonus positifs
+      const v = _bumpDerived(parseInt(it[k]) || 0, it);
       if (!v) return;
       const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.' }[k];
       badges.push({ lbl: `${shortLbl} ${v>0?'+':''}${v}`, cls: 'gold' });
@@ -2121,7 +2138,7 @@ function renderCharCombatV3(c, canEdit) {
       const cls = on ? 'elem-chip on' : 'elem-chip';
       const style = `--elem-bg:${col}22;--elem-bd:${col}66;--elem-c:${col}`;
       const handler = canEdit ? `onclick="window._toggleCharElement?.('${c.id}','${t.id}')"` : '';
-      return `<span class="${cls}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}</span>`;
+      return `<span class="${cls}" data-elem-id="${_esc(t.id)}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}</span>`;
     }).join('');
     elemsHtml = `<div class="elem-card">
       <div class="elem-card-head">
@@ -2193,8 +2210,10 @@ function renderCharCombatV3(c, canEdit) {
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — INVENTAIRE (.inv-card grid + summary + filter chips + search)
 // ══════════════════════════════════════════════════════════════════════════════
-const _RARE_NAMES = ['Commun','Inhabituel','Rare','Épique','Légendaire'];
-const _RARE_COLS  = ['#7a8fa8','#22c38e','#6aa7ff','#c084fc','#f4c430'];
+// Aligné sur shared/rarity.js (5 niveaux + niveau 0 sans rareté)
+// 1=Commun · 2=Singulier · 3=Rare · 4=Mythique · 5=Légendaire
+const _RARE_NAMES = ['', 'Commun', 'Singulier', 'Rare', 'Mythique', 'Légendaire'];
+const _RARE_COLS  = ['#7a8fa8', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc', '#f97316'];
 
 const _INV_FILTERS = [
   { id: 'all',  lbl: 'Tout',          icon: '' },
@@ -2280,11 +2299,16 @@ function renderCharInventaireV3(c, canEdit) {
   const cardsHtml = filteredInv.map(({ it, indices, qte }) => {
     const idx = indices[0];               // index principal pour Modifier
     const allIdx = indices;               // tous les indices pour bulk actions
-    const rare = parseInt(it.rarete || it.rare || 0) || 0;
-    const rareIdx = Math.min(4, Math.max(0, rare));
+    // Rareté : 0=aucune, 1=Commun → 5=Légendaire (aligné sur la boutique)
+    const rareRaw = parseInt(it.rarete || it.rare || 0) || 0;
+    const rareIdx = Math.min(5, Math.max(0, rareRaw));
     const col = _RARE_COLS[rareIdx];
-    const stars = '★'.repeat(rareIdx) + '☆'.repeat(4 - rareIdx);
+    const stars = rareIdx > 0 ? ('★'.repeat(rareIdx) + '☆'.repeat(5 - rareIdx)) : '';
     const allIdxB64 = btoa(JSON.stringify(allIdx));
+
+    // Prix d'achat (référence) et prix de vente (au joueur quand il revend)
+    const prixAchat = parseFloat(it.prix || it.prixAchat || 0) || 0;
+    const prixVente = parseFloat(it.prixVente) || Math.round(prixAchat * 0.6);
 
     // Propriétés : on génère des kv selon ce qui existe
     const props = [];
@@ -2292,13 +2316,17 @@ function renderCharInventaireV3(c, canEdit) {
     if (it.toucher) props.push({ k: 'Toucher', v: it.toucher });
     if (it.portee) props.push({ k: 'Portée', v: it.portee });
     if (it.typeArmure) props.push({ k: 'Type', v: it.typeArmure });
+    if (it.slotArmure)  props.push({ k: 'Slot', v: it.slotArmure });
+    else if (it.slotBijou) props.push({ k: 'Slot', v: it.slotBijou });
     if (it.ca || it.caBonus) {
       const total = (parseInt(it.ca)||0) + (parseInt(it.caBonus)||0);
       if (total) props.push({ k: 'CA', v: '+'+total });
     }
     if (it.format) props.push({ k: 'Format', v: it.format });
-    if (it.effet) props.push({ k: 'Effet', v: it.effet });
-    if (it.prix) props.push({ k: 'Prix', v: it.prix + ' or', c: 'gold' });
+    // Effet : applique les upgrades (Artisan) au texte affiché
+    const effetTxt = getItemEffectText(it);
+    if (effetTxt) props.push({ k: 'Effet', v: effetTxt });
+    if (prixAchat) props.push({ k: 'Prix', v: prixAchat + ' or', c: 'gold' });
 
     const equipMap = (() => { try { return getEquippedInventoryIndexMap?.(c) || new Map(); } catch { return new Map(); } })();
     const isEquipped = allIdx.some(i => equipMap.has(i));
@@ -2308,7 +2336,9 @@ function renderCharInventaireV3(c, canEdit) {
       <div class="inv-card-head">
         <div style="min-width:0;flex:1">
           <div class="inv-card-name">${_esc(it.nom || 'Sans nom')}</div>
-          <div class="inv-card-rare">${stars} ${_RARE_NAMES[rareIdx]}</div>
+          ${rareIdx > 0
+            ? `<div class="inv-card-rare" style="color:${col}">${stars} ${_RARE_NAMES[rareIdx]}</div>`
+            : ''}
         </div>
         ${qte > 1
           ? `<span class="inv-qte" title="${qte} items empilés">×${qte}</span>`
@@ -2326,7 +2356,7 @@ function renderCharInventaireV3(c, canEdit) {
       })()}
       ${it.description?`<div class="inv-card-desc">${_esc(it.description)}</div>`:''}
       ${canEdit?`<div class="inv-card-actions">
-        <button class="inv-act sell" onclick='openSellInvModal("${c.id}","${allIdxB64}",${parseInt(it.prix||0)},"${safeName}")' title="Vendre">💰 Vendre</button>
+        <button class="inv-act sell" onclick='openSellInvModal("${c.id}","${allIdxB64}",${prixVente},"${safeName}")' title="Vendre ${prixVente} or/u">💰 Vendre ${prixVente}or</button>
         <button class="inv-act send" onclick='openSendInvModal("${c.id}","${allIdxB64}","${safeName}")' title="Envoyer">↗ Envoyer</button>
         <button class="inv-act del" onclick='openDeleteInvModal("${c.id}","${allIdxB64}","${safeName}")' title="Supprimer">🗑️</button>
       </div>`:''}

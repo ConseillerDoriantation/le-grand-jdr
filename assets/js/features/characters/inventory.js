@@ -7,6 +7,7 @@ import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
 import { useGoldMulti } from '../../shared/economy.js';
+import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import {
   _getTraits,
@@ -1033,8 +1034,12 @@ export async function saveInvItemFromShop() {
     if (!item) { showNotif('Objet introuvable.', 'error'); return; }
     const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+    // Utilise le helper canonique : strip image base64, dispo, recipeMeta, etc.
+    // → évite de dépasser la limite Firestore de 1 MiB par doc personnage.
+    const baseEntry = shopItemToInvEntry(item, { source: 'boutique' });
+    if (!baseEntry) { showNotif('Objet invalide.', 'error'); return; }
     for (let i = 0; i < qte; i++) {
-      inv.push({ ...item, qte: '1', quantite: 1, source: 'boutique', itemId: item.id });
+      inv.push({ ...baseEntry, quantite: 1 });
     }
     c.inventaire = inv;
     if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;

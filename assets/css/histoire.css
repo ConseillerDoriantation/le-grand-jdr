@@ -1220,10 +1220,32 @@
   color: var(--text); font-family: inherit; font-size: 0.8rem; flex: 1;
 }
 .statut-select {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--border);
-  color: var(--text-soft); font-family: inherit; font-size: 0.76rem; font-weight: 600;
-  padding: 7px 12px; border-radius: var(--r-full); cursor: pointer;
+  background: rgba(244,196,48,0.06);
+  border: 1px solid rgba(244,196,48,0.32);
+  color: var(--text); font-family: inherit; font-size: 0.82rem; font-weight: 700;
+  padding: 8px 32px 8px 14px;
+  border-radius: var(--r-full); cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='%23f4c430' d='M1 3l4 4 4-4z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
+  min-width: 180px;
+}
+.statut-select:hover {
+  background-color: rgba(244,196,48,0.12);
+  border-color: rgba(244,196,48,0.50);
+}
+.statut-select:focus {
+  outline: none;
+  background-color: rgba(244,196,48,0.14);
+  border-color: rgba(244,196,48,0.65);
+  box-shadow: 0 0 0 3px rgba(244,196,48,0.18);
+}
+.statut-select option {
+  background: #1a2438;
+  color: var(--text);
+  font-weight: 600;
 }
 .view-toggle {
   display: inline-flex; align-items: center;
