@@ -14,7 +14,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from './characters/data.js';
@@ -10921,7 +10921,7 @@ function _renderLootPanel() {
   const mj = STATE.isAdmin;
 
   const uid = STATE.user?.uid;
-  const myChars = Object.values(_characters).filter(c => c.uid === uid);
+  const myChars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
   const _itemRow = (item, zone) => {
     const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
     return `<div class="vtt-loot-row-wrap" data-id="${item.id}">
@@ -11132,7 +11132,7 @@ window._vttLootToggleTake = (id) => {
   const item = _loot.loot.find(i => i.id === id);
   if (!item) return;
   const uid = STATE.user?.uid;
-  const myChars = Object.values(_characters).filter(c => c.uid === uid);
+  const myChars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
   if (!myChars.length) { showNotif('Aucun personnage trouvé', 'error'); return; }
 
   _lootTakeState[id] = { qty: item.qty, charId: myChars[0].id };
@@ -11146,7 +11146,7 @@ function _renderLootTake(id) {
   const st = _lootTakeState[id];
   if (!el || !item || !st) return;
   const uid = STATE.user?.uid;
-  const myChars = Object.values(_characters).filter(c => c.uid === uid);
+  const myChars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
   const max = item.qty;
   st.qty = Math.max(1, Math.min(max, st.qty || 1));
 
@@ -12433,8 +12433,11 @@ function _renderPresenceCol() {
   }
   const myUid = STATE.user?.uid;
   list.innerHTML = players.map(p => {
-    const chars = Object.values(_characters).filter(c => c.uid === p.uid);
-    const char  = chars.find(c => c.id === _miniCharId) || chars[0];
+    const chars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === p.uid));
+    // Préfère le perso ★ par défaut comme "visage" du joueur
+    const char  = chars.find(c => c.id === _miniCharId)
+               || chars.find(c => c.isDefault)
+               || chars[0];
     const img   = char?.photoURL || char?.photo || char?.avatar || null;
     const init  = (char?.nom || p.pseudo || '?')[0].toUpperCase();
     const isOpen = _miniUid === p.uid;
@@ -12916,7 +12919,7 @@ function _renderMiniSheet(uid) {
   const pres = _presence[uid];
   if (!uid || !pres) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
 
-  const chars = Object.values(_characters).filter(c => c.uid === uid);
+  const chars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
   if (!chars.length) {
     panel.classList.add('open');
     panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${pres.pseudo}.</div>`;

@@ -11,6 +11,7 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
+import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 
@@ -896,12 +897,15 @@ async function renderBestiary() {
     // Portrait du PJ : même ordre de fallback que le VTT pour la cohérence.
     // Tout est déjà en mémoire (STATE.characters), aucune lecture Firestore en plus.
     const seen = new Map();
-    (chars || []).forEach(c => {
+    // Itère sur la liste triée → le perso ★ par défaut est rencontré en premier
+    // pour chaque uid, et devient donc le "visage" du joueur.
+    sortCharactersForDisplay(chars || []).forEach(c => {
       if (!c?.uid || c.uid === STATE.user?.uid) return;
       const pseudo = c.ownerPseudo || c.nom || c.uid;
       const photo  = c.photoURL || c.photo || c.avatar || c.portraitUrl || c.imageUrl || '';
       const existing = seen.get(c.uid);
-      // Préférer un PJ qui a une photo, sinon le premier rencontré.
+      // Le premier rencontré (★ par défaut) gagne, sauf si lui n'a pas de photo
+      // et qu'un autre en a une.
       if (!existing || (!existing.portraitUrl && photo)) {
         seen.set(c.uid, {
           uid:         c.uid,
