@@ -165,7 +165,8 @@
       "Bash(node -e \"const f=require\\('fs'\\).readFileSync\\('assets/css/characters.css','utf8'\\);const o=\\(f.match\\(/\\\\{/g\\)||[]\\).length;const c=\\(f.match\\(/\\\\}/g\\)||[]\\).length;console.log\\(o,c,o===c?'OK':'NOK'\\);\")",
       "Bash(grep -n \"export function bindRichTextEditors\\\\|bindRichTextEditor\\\\b\\\\|addEventListener.*\\\\\\\\\\(input\\\\|keydown\" assets/js/shared/rich-text.js)",
       "Bash(node --check assets/js/shared/rich-text.js)",
-      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\shared\\\\notifications.js\")"
+      "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\shared\\\\notifications.js\")",
+      "Bash(node test-load2.mjs)"
     ]
   }
 }
