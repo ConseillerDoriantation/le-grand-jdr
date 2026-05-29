@@ -182,12 +182,14 @@ export function editEquipSlot(slot) {
       const tpl = item.template || '';
 
       if (isWeapon) {
-        // Strict : on accepte UNIQUEMENT les items de template "arme" (boucliers
-        // inclus, ils sont catégorisés comme armes via sousType=Bouclier).
-        // Fallback rétrocompat : items legacy sans template mais avec un champ
-        // arme explicite (degats / toucher / format reconnu).
+        // 1. Template explicite « arme » → OK
         if (tpl === 'arme') return true;
-        if (!tpl && (item.degats || item.toucher || (item.format && WEAPON_FORMATS.has(item.format)))) return true;
+        // 2. Sinon, marqueurs d'arme présents peu importe le template :
+        //    degats / toucher / sousType / format weapon → c'est une arme.
+        //    (Permet de récupérer un Espadon depuis butin / cadeau MJ même
+        //    si le template enregistré côté boutique n'était pas 'arme'.)
+        if (item.degats || item.toucher || item.sousType ||
+            (item.format && WEAPON_FORMATS.has(item.format))) return true;
         return false;
       }
 

@@ -1,6 +1,6 @@
 import { STATE } from '../../core/state.js';
 import { updateInCol, getDocData } from '../../data/firestore.js';
-import { openModal, closeModal, pushModal, popModal } from '../../shared/modal.js';
+import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import { getMod, calcPMMax, calcDeckMax } from '../../shared/char-stats.js';
@@ -1829,8 +1829,18 @@ export async function openSortModal(idx, s) {
   // Si on édite une action d'item, on EMPILE la modal sur la modal du shop
   // (pushModal) pour pouvoir la restaurer après. Sinon openModal classique.
   const _modalOpen = _itemEditCtx ? pushModal : openModal;
-  _modalOpen(idx>=0?'✏️ Modifier le Sort':'✨ Nouveau Sort', `
-   <div class="cs-spell-forge">
+  _modalOpen('', `
+   <div class="sh-admin-modal is-spell">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">${idx>=0?'✏️':'✨'}</div>
+      <div class="sh-admin-head-title">
+        <h2>${idx>=0?'Modifier le sort':'Nouveau sort'}</h2>
+        <small>Forge les runes, choisis le noyau élémentaire, affine les effets.</small>
+      </div>
+      <button class="sh-admin-close" onclick="closeModalDirect()" title="Fermer">✕</button>
+    </div>
+    <div class="sh-admin-body">
+     <div class="cs-spell-forge">
     <!-- ⓪ Aperçu live STICKY — toujours visible pendant l'édition -->
     <div class="cs-spell-preview cs-spell-preview--sticky">
       <div class="cs-spell-preview-title">📋 Aperçu — effets calculés <span class="cs-spell-preview-pm">Coût : <strong id="s-pm-display">0</strong> PM</span></div>
@@ -2168,10 +2178,14 @@ export async function openSortModal(idx, s) {
     </div><!-- /grid-col--right -->
    </div><!-- /cs-spell-grid -->
 
-    <div class="cs-spell-save-bar">
-      <button class="btn btn-gold cs-spell-save" onclick="saveSort(${idx})">💾 Enregistrer le sort</button>
-    </div>
    </div><!-- /cs-spell-forge -->
+    </div><!-- /sh-admin-body -->
+    <div class="sh-admin-footer">
+      <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
+      <div class="sh-admin-footer-spacer"></div>
+      <button class="btn btn-gold btn-sm" onclick="saveSort(${idx})">💾 Enregistrer le sort</button>
+    </div>
+   </div><!-- /sh-admin-modal -->
   `);
 
   setTimeout(() => {
