@@ -1,6 +1,6 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
-import { openModal, closeModalDirect } from '../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
@@ -94,8 +94,7 @@ const TEMPLATES = {
     label: '🧪 Classique',
     fields: [
       { id:'type',        label:'Type',          type:'text',     placeholder:'Consommable, Matériau, Accessoire...' },
-      { id:'effet',       label:'Effet',         type:'textarea', placeholder:'(Action) Rend 10 PV...' },
-      { id:'description', label:'Description',   type:'textarea', placeholder:'Détails...' },
+      { id:'effet',       label:'Description',   type:'textarea', placeholder:'(Action) Rend 10 PV...' },
       { id:'prix',        label:'Prix 🪙',       type:'number',   placeholder:'0' },
       { id:'dispo',       label:'Dispo',         type:'dispo' },
     ],
@@ -238,6 +237,34 @@ const PAGE_SIZE = 20;
 let _filterSearch = '';
 let _filterTags   = new Set(); // valeurs de tags actifs
 let _filterSort   = localStorage.getItem('shop_sort') || 'ordre'; // ordre | nom | prix_asc | prix_desc | rarete
+// ── Smart filters (refonte boutique — lot 3) ────────────────────────────────
+// Ensemble de chips actives parmi : payable | boost | upgrade | stock | new.
+// Les filtres se cumulent en AND ; les compteurs sont recalculés à chaque render.
+let _smartFilters = new Set();
+const SMART_KINDS = ['payable', 'boost', 'upgrade', 'stock', 'new'];
+
+// ── Tweaks utilisateur (lot 7) : préférences d'affichage persistées en LS ──
+// Layout : 'sidebar' (catégories à gauche) | 'tabs' (catégories en pastilles
+// horizontales sous le header) — utile sur petits écrans ou par préférence.
+// Densité : 'confort' (défaut) | 'compact' (padding réduit, plus d'items vus).
+// Card    : 'horizontal' (défaut) | 'showcase' (vertical, image dominante).
+const _TWEAKS_DEFAULTS = { layout: 'sidebar', density: 'confort', card: 'horizontal' };
+const _TWEAKS_LS_KEY = 'shop_tweaks';
+let _shopTweaks = (() => {
+  try { return { ..._TWEAKS_DEFAULTS, ...(JSON.parse(localStorage.getItem(_TWEAKS_LS_KEY) || '{}')) }; }
+  catch { return { ..._TWEAKS_DEFAULTS }; }
+})();
+function _shopTweaksApply() {
+  const b = document.body;
+  if (!b) return;
+  b.classList.toggle('shop-layout-tabs',     _shopTweaks.layout  === 'tabs');
+  b.classList.toggle('shop-density-compact', _shopTweaks.density === 'compact');
+  b.classList.toggle('shop-card-showcase',   _shopTweaks.card    === 'showcase');
+}
+function _shopTweaksSave() {
+  try { localStorage.setItem(_TWEAKS_LS_KEY, JSON.stringify(_shopTweaks)); } catch {}
+  _shopTweaksApply();
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CHARGEMENT
@@ -323,10 +350,34 @@ async function renderShop() {
   const content = document.getElementById('main-content');
   if (!content) return;
 
-  let html = `<div class="sh-page">`;
+  let html = `<div class="sh-page sh-page--v2">`;
+
+  // ── Char-strip riche (avatar + select + or proéminent) ──
+  const activeChar = _getActiveShopChar();
+  const chars      = _getShopChars();
+  const charStripHtml = chars.length ? (() => {
+    const col = _shopCharAvatarColor(activeChar);
+    const init = (activeChar?.nom || '?')[0].toUpperCase();
+    const or = calcOr(activeChar);
+    const photo = activeChar?.photo
+      ? `<img src="${activeChar.photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
+      : init;
+    return `
+      <div class="sh-char-strip" title="Personnage actif">
+        <span class="sh-char-strip-av" style="--av-c:${col}">${photo}</span>
+        <select class="sh-char-strip-sel" id="sh-char-sel"
+          data-sh-action="setChar" data-sh-on="change" aria-label="Personnage actif">
+          ${chars.map(c => `<option value="${c.id}" ${activeChar?.id===c.id?'selected':''}>${_esc(c.nom||'?')}${c.niveau?` · Niv.${c.niveau}`:''}${c.classe?` ${_esc(c.classe)}`:''}</option>`).join('')}
+        </select>
+        <span class="sh-char-strip-or" title="Solde du personnage">
+          <span class="sh-char-strip-or-val">${or}</span>
+          <small>or</small>
+        </span>
+      </div>`;
+  })() : '';
 
   html += `
-    <div class="sh-topbar">
+    <div class="sh-topbar sh-topbar--v2">
       <div class="sh-topbar-title-wrap">
         <div class="sh-topbar-title-row">
           <span class="sh-topbar-icon">🛒</span>
@@ -338,22 +389,27 @@ async function renderShop() {
       </div>
 
       <div class="sh-topbar-tools">
-        <button class="btn btn-gold btn-sm" data-sh-action="openArtisan" title="Améliorer ton équipement">🔨 Artisan</button>`;
+        ${charStripHtml}
+        <button class="btn btn-arcane btn-sm" data-sh-action="openAtelier" title="Essayer / construire un équipement">🪄 Atelier</button>
+        <button class="btn btn-gold btn-sm" data-sh-action="openArtisan" title="Améliorer ton équipement">🔨 Artisan</button>
+        <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : densité, layout, vitrine">⚙️</button>`;
 
   if (STATE.isAdmin) {
     html += `
-      <div class="sh-topbar-admin">
-        <button class="btn btn-gold btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
+      <span class="sh-topbar-admin">
+        <button class="btn btn-outline btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openItemModal" title="Créer un article">＋ Article</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les formats d'armes">⚙️ Formats</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openUpgradeStg" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openExport" title="Exporter / Importer la boutique">⬆️ Export</button>
-      </div>`;
+      </span>`;
   }
 
   html += `
       </div>
     </div>
+
+    ${_shopTweaks.layout === 'tabs' ? _renderCatTabsBar() : ''}
 
     <div class="sh-layout">
       <div class="sh-sidebar-col">
@@ -369,7 +425,63 @@ async function renderShop() {
   </div>`;
 
   content.innerHTML = html;
+  _shopTweaksApply();
   _mountSortables();
+}
+
+/** Popup Tweaks d'affichage — segmented controls × 3. */
+function openTweaksPopup() {
+  const seg = (key, options) => `<div class="sh-tw-seg" data-tw-key="${key}">
+    ${options.map(o => `<button type="button" class="sh-tw-seg-btn ${_shopTweaks[key]===o.v?'on':''}"
+      data-sh-action="setTweak" data-tw-key="${key}" data-tw-val="${o.v}">${o.lbl}</button>`).join('')}
+  </div>`;
+  openModal('', `
+  <div class="sh-admin-modal is-cat">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">⚙️</div>
+      <div class="sh-admin-head-title">
+        <h2>Affichage de la boutique</h2>
+        <small>Préférences locales (sauvegardées sur ce navigateur).</small>
+      </div>
+      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
+    </div>
+
+    <div class="sh-admin-body">
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">📐 Layout</div>
+        ${seg('layout', [
+          { v:'sidebar', lbl:'Sidebar' },
+          { v:'tabs',    lbl:'Tabs' },
+        ])}
+        <p class="sh-admin-section-hint" style="margin-top:8px">Catégories à gauche (sidebar) ou en pastilles horizontales (tabs).</p>
+      </div>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">📏 Densité</div>
+        ${seg('density', [
+          { v:'confort', lbl:'Confort' },
+          { v:'compact', lbl:'Compact' },
+        ])}
+        <p class="sh-admin-section-hint" style="margin-top:8px">Compact : moins d'espacement, plus d'articles à l'écran.</p>
+      </div>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">🎴 Carte article</div>
+        ${seg('card', [
+          { v:'horizontal', lbl:'Horizontale' },
+          { v:'showcase',   lbl:'Vitrine' },
+        ])}
+        <p class="sh-admin-section-hint" style="margin-top:8px">Horizontale : image à gauche · Vitrine : image en haut, plus immersive.</p>
+      </div>
+    </div>
+
+    <div class="sh-admin-footer">
+      <button class="btn btn-outline btn-sm" data-sh-action="resetTweaks">↺ Réinitialiser</button>
+      <div class="sh-admin-footer-spacer"></div>
+      <button class="btn btn-gold btn-sm" data-sh-action="closeModal">Fermer</button>
+    </div>
+  </div>
+  `);
 }
 
 function _renderNoCharBanner() {
@@ -385,33 +497,67 @@ function _renderNoCharBanner() {
 }
 
 function _renderSidebarTop() {
-  const chars = _getShopChars();
-  if (!chars.length) return '';
+  // Le sélecteur de personnage est désormais dans la topbar (sh-char-strip).
+  // On garde la fonction pour compat mais elle ne rend plus rien.
+  return '';
+}
 
-  const activeChar = _getActiveShopChar();
-  const activeId = activeChar?.id || '';
-  const or = calcOr(activeChar);
+/** Layout `tabs` : barre horizontale des catégories sous le header.
+ *  Remplace visuellement la sidebar (qui sera cachée en CSS). */
+function _renderCatTabsBar() {
+  const cats = _visibleCats();
+  const totalItems = _visibleItems().length;
+  const orphaned = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
+  return `<div class="sh-cat-tabs-bar">
+    <button class="sh-cat-tab ${_view==='home'?'active':''}" data-sh-action="goHome">
+      🏠 <span class="sh-cat-tab-name">Toutes</span>
+      <span class="sh-cat-tab-count">${totalItems}</span>
+    </button>
+    ${cats.map(cat => {
+      const count = _items.filter(i => i.categorieId === cat.id).length;
+      const active = _view === 'items' && _activeCat === cat.id;
+      return `<button class="sh-cat-tab ${active?'active':''}" data-sh-action="goCat" data-id="${cat.id}"
+        ${cat.masquee ? 'style="opacity:.6"' : ''}>
+        ${cat.emoji || _catEmoji(cat.nom)} <span class="sh-cat-tab-name">${_esc(cat.nom)}</span>
+        <span class="sh-cat-tab-count">${count}</span>
+      </button>`;
+    }).join('')}
+    ${orphaned.length ? `<button class="sh-cat-tab ${_view==='items' && _activeCat==='__uncategorized__'?'active':''}"
+      data-sh-action="goCat" data-id="__uncategorized__">
+      📦 <span class="sh-cat-tab-name">Non classé</span>
+      <span class="sh-cat-tab-count">${orphaned.length}</span>
+    </button>` : ''}
+  </div>`;
+}
 
-  return `
-    <div class="sh-sidebar-top">
-      <span class="sh-sidebar-label">Personnage actif</span>
-      <select
-        class="input-field sh-modal-select sh-char-select"
-        id="sh-char-sel"
-        data-sh-action="setChar" data-sh-on="change"
-        aria-label="Personnage actif"
-      >
-        ${chars.map(c => `<option value="${c.id}" ${activeId===c.id?'selected':''}>${c.nom||'?'}</option>`).join('')}
-      </select>
-
-      <div class="sh-sidebar-or" id="sh-char-or-display" title="Solde du personnage sélectionné">
-        <span class="sh-sidebar-or-icon" aria-hidden="true">🪙</span>
-        <span class="sh-sidebar-or-value" id="sh-char-or-value">${or}</span>
-        <span class="sh-sidebar-or-unit">or</span>
-      </div>
-
-    </div>
-  `;
+// ── Hero : Smart filters ───────────────────────────────────────────────────
+// Rangée de chips contextuelles (payable / boost / upgrade / stock / new),
+// avec compteurs live. S'insère au-dessus de la grille d'articles.
+function _renderSmartBar() {
+  const base = _visibleItems();
+  const SMART_META = [
+    { k:'payable', ico:'💰', lbl:'Je peux me payer',         cls:'payable' },
+    { k:'boost',   ico:'⚡', lbl:'Booste ma stat principale', cls:'boost'   },
+    { k:'upgrade', ico:'⬆️', lbl:'Mieux que mon équipement',  cls:'upgrade' },
+    { k:'stock',   ico:'📦', lbl:'En stock',                   cls:'stock'   },
+    { k:'new',     ico:'✨', lbl:'Nouveautés',                 cls:'new'     },
+  ];
+  const chips = SMART_META.map(m => {
+    const on = _smartFilters.has(m.k);
+    const n  = _shopSmartCount(m.k, base);
+    return `<button class="sh-smart-chip ${m.cls} ${on?'on':''}"
+      data-sh-action="toggleSmart" data-smart="${m.k}"
+      title="${_esc(m.lbl)}">
+      <span class="sh-smart-ico">${m.ico}</span>
+      <span class="sh-smart-lbl">${_esc(m.lbl)}</span>
+      <span class="sh-smart-count">${n}</span>
+    </button>`;
+  }).join('');
+  return `<div class="sh-smart-bar">
+    <span class="sh-smart-bar-lbl">Trouver :</span>
+    ${chips}
+    ${_smartFilters.size ? `<button class="sh-smart-reset" data-sh-action="resetSmart" title="Retirer tous les filtres rapides">✕ Reset</button>` : ''}
+  </div>`;
 }
 
 function _renderSidebar() {
@@ -438,10 +584,11 @@ function _renderSidebar() {
             const count = _items.filter(i => i.categorieId === cat.id).length;
             const active = _view === 'items' && _activeCat === cat.id;
             const tpl = TEMPLATES[cat.template || 'classique'];
-
+            // Gradient coloré pour la pastille emoji (style maquette)
+            const catBg = _catGradient(cat.nom).replace(/^background:/, '');
             return `
               <button class="sh-side-link ${active ? 'active' : ''}" onclick="shopGoCat('${cat.id}')"${cat.masquee ? ' style="opacity:.6"' : ''}>
-                <span class="sh-side-link-icon">${cat.emoji || _catEmoji(cat.nom)}</span>
+                <span class="sh-side-link-icon" style="--cat-bg:${catBg}">${cat.emoji || _catEmoji(cat.nom)}</span>
                 <span class="sh-side-link-text">
                   <strong>${cat.nom}${cat.masquee ? ' <span title="Masquée aux joueurs">🙈</span>' : ''}</strong>
                   <small>${tpl?.label || 'Type'} • ${count} article${count > 1 ? 's' : ''}</small>
@@ -469,19 +616,21 @@ function _renderSidebar() {
 // VUE HOME
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderHome() {
+  // Hero search global (full-width) + smart filters chips
   const searchBar = `
-    <div class="sh-home-search-wrap" style="margin-bottom:1rem">
-      <div class="sh-filter-search" style="max-width:520px">
-        <input type="text" id="sh-home-search" class="input-field"
-          placeholder="🔍 Rechercher un article dans toutes les catégories..."
-          value="${_filterSearch||''}"
-          data-sh-action="search" data-sh-on="input"
-          autocomplete="off"
-          style="width:100%;padding-right:2.2rem">
-        ${_filterSearch ? `<button data-sh-action="clearSearch" aria-label="Effacer la recherche"
-          style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
-          background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
+    <div class="sh-hero">
+      <div class="sh-hero-row">
+        <div class="sh-hero-search">
+          <span class="sh-hero-search-ico">🔍</span>
+          <input type="text" id="sh-home-search" class="sh-hero-search-input"
+            placeholder="Rechercher une arme, une potion, un effet…"
+            value="${_filterSearch||''}"
+            data-sh-action="search" data-sh-on="input"
+            autocomplete="off">
+          ${_filterSearch ? `<button class="sh-hero-search-clear" data-sh-action="clearSearch" aria-label="Effacer la recherche">✕</button>` : ''}
+        </div>
       </div>
+      ${_renderSmartBar()}
     </div>
     <div id="sh-home-results">`;
 
@@ -547,9 +696,11 @@ function _renderHomeResults() {
 
 function _renderHomeSearchResults() {
   const search = _norm(_filterSearch);
-  const matched = _visibleItems()
-    .filter(i => _searchIncludes(_itemSearchText(i), search))
-    .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' }));
+  let matched = _visibleItems()
+    .filter(i => _searchIncludes(_itemSearchText(i), search));
+  // Smart filters s'appliquent aussi à la recherche home transverse
+  matched = _shopApplySmart(matched);
+  matched.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' }));
 
   if (matched.length === 0) {
     return `<div class="empty-state"><div class="icon">🔍</div>
@@ -579,13 +730,59 @@ function _renderHomeSearchResults() {
   return html;
 }
 
+/**
+ * Score « Recommandé » pour le tri intelligent.
+ * Plus le score est élevé, plus l'item est pertinent pour le perso actif.
+ *   • +200 si finançable (prix ≤ or du perso), -100 si trop cher
+ *   • -500 si épuisé (rejeté en bas de liste)
+ *   • +120 si améliore le slot équivalent (stat principale OU CA)
+ *   • +stat * 25 pour le bonus sur la stat principale (max 100)
+ *   • +rare * 12 pour valoriser les pièces rares (max 60 = légendaire)
+ *   • +30 en stock > 3, +10 en stock 1-3, 0 sinon
+ *   • Tiebreaker : prix décroissant (équipement plus cher = meilleur dans le band)
+ */
+function _shopItemRecommendScore(item, ctx) {
+  const { char, primary, gold } = ctx;
+  if (!char) return 0;
+  let score = 0;
+  const prix = parseFloat(item.prix) || 0;
+  const dispo = (item.dispo !== undefined && item.dispo !== '' && item.dispo !== null) ? parseInt(item.dispo) : null;
+  const epuise = dispo === 0;
+  if (epuise) score -= 500;
+  // Affordable
+  if (prix <= gold) score += 200;
+  else score -= 100;
+  // Upgrade vs slot équivalent
+  try {
+    if (_shopItemMatchesSmart(item, 'upgrade', ctx)) score += 120;
+  } catch {}
+  // Bonus stat principale
+  try {
+    const b = getItemStatBonus(item, primary);
+    if (b > 0) score += Math.min(100, b * 25);
+  } catch {}
+  // Rareté
+  const rare = _getRareteNum(item.rarete);
+  if (rare > 0) score += Math.min(60, rare * 12);
+  // Stock
+  if (dispo === null || dispo < 0) score += 20;        // illimité = bonus léger
+  else if (dispo >= 3) score += 30;
+  else if (dispo > 0) score += 10;
+  // Tiebreak sur le prix décroissant (item plus cher = mieux)
+  score += Math.min(50, prix / 20);
+  return score;
+}
+
+// Helper : template à utiliser pour rendre un item (priorité item.template,
+// fallback cat.template, fallback 'classique').
+function _resolveItemTemplate(item) {
+  if (item?.template && TEMPLATES[item.template]) return item.template;
+  const cat = _cats.find(c => c.id === item?.categorieId);
+  return cat?.template || 'classique';
+}
 function _renderMixedItemGrid(items) {
   return `<div class="sh-item-grid">` +
-    items.map((item, i) => {
-      const cat = _cats.find(c => c.id === item.categorieId);
-      const tplKey = cat?.template || 'classique';
-      return _renderItemCard(item, tplKey, i);
-    }).join('') +
+    items.map((item, i) => _renderItemCard(item, _resolveItemTemplate(item), i)).join('') +
     `</div>`;
 }
 
@@ -624,6 +821,9 @@ function _getFilteredItems(catId) {
     items = items.filter(i => _searchIncludes(_itemSearchText(i), search));
   }
 
+  // ⚡ Smart filters (cumulables en AND)
+  items = _shopApplySmart(items);
+
   // 🏷️ Tags
   if (_filterTags.size > 0) {
     const tagGroups = _buildTagGroups(_getBaseItems(catId));
@@ -652,6 +852,17 @@ function _getFilteredItems(catId) {
 
   // 🔀 Tri
   if (_filterSort && _filterSort !== 'ordre') {
+    // Pour le tri "Recommandé", on précalcule les scores (évite N appels au getter)
+    let recoScores = null;
+    if (_filterSort === 'recommande') {
+      const ctx = _shopSmartCtx();
+      if (ctx.char) {
+        recoScores = new Map(items.map(it => [it.id, _shopItemRecommendScore(it, ctx)]));
+      } else {
+        // Pas de perso actif → fallback rareté (impossible de scorer)
+        recoScores = null;
+      }
+    }
     items = [...items].sort((a, b) => {
       switch (_filterSort) {
         case 'nom':
@@ -662,6 +873,10 @@ function _getFilteredItems(catId) {
           return (parseFloat(b.prix)||0) - (parseFloat(a.prix)||0);
         case 'rarete':
           return _getRareteNum(b.rarete) - _getRareteNum(a.rarete);
+        case 'recommande': {
+          if (!recoScores) return _getRareteNum(b.rarete) - _getRareteNum(a.rarete);
+          return (recoScores.get(b.id) || 0) - (recoScores.get(a.id) || 0);
+        }
         default:
           return 0;
       }
@@ -692,6 +907,20 @@ function _renderItemsView() {
 
   const totalCat = allItems.length;
   let html = `
+  <div class="sh-hero">
+    <div class="sh-hero-row">
+      <div class="sh-hero-search">
+        <span class="sh-hero-search-ico">🔍</span>
+        <input type="text" id="sh-search" class="sh-hero-search-input"
+          placeholder="Rechercher dans cette catégorie…"
+          value="${_filterSearch||''}"
+          data-sh-action="search" data-sh-on="input"
+          autocomplete="off">
+        ${_filterSearch ? `<button class="sh-hero-search-clear" data-sh-action="clearSearch" aria-label="Effacer la recherche">✕</button>` : ''}
+      </div>
+    </div>
+    ${_renderSmartBar()}
+  </div>
   <div class="sh-main-head sh-main-head--category">
     <div class="sh-main-head-body">
       <div class="sh-main-head-icon">${cat.emoji || _catEmoji(cat.nom)}</div>
@@ -704,23 +933,13 @@ function _renderItemsView() {
   </div>
   <div class="sh-filter-panel">
     <div class="sh-filter-toolbar">
-      <div class="sh-filter-search">
-        <input type="text" id="sh-search" class="input-field"
-          placeholder="🔍 Rechercher..."
-          value="${_filterSearch||''}"
-          data-sh-action="search" data-sh-on="input"
-          autocomplete="off"
-          style="width:100%;padding-right:2.2rem">
-        ${_filterSearch ? `<button data-sh-action="clearSearch"
-          style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
-          background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.9rem">✕</button>` : ''}
-      </div>
       <select class="input-field sh-sort-select" data-sh-action="setSort" data-sh-on="change" aria-label="Trier par" title="Trier les articles">
-        <option value="ordre"     ${_filterSort==='ordre'?'selected':''}>Ordre manuel</option>
-        <option value="nom"       ${_filterSort==='nom'?'selected':''}>Nom (A→Z)</option>
-        <option value="prix_asc"  ${_filterSort==='prix_asc'?'selected':''}>Prix ↑</option>
-        <option value="prix_desc" ${_filterSort==='prix_desc'?'selected':''}>Prix ↓</option>
-        <option value="rarete"    ${_filterSort==='rarete'?'selected':''}>Rareté</option>
+        <option value="ordre"      ${_filterSort==='ordre'?'selected':''}>Ordre manuel</option>
+        <option value="recommande" ${_filterSort==='recommande'?'selected':''}>⭐ Recommandé pour moi</option>
+        <option value="nom"        ${_filterSort==='nom'?'selected':''}>Nom (A→Z)</option>
+        <option value="prix_asc"   ${_filterSort==='prix_asc'?'selected':''}>Prix ↑</option>
+        <option value="prix_desc"  ${_filterSort==='prix_desc'?'selected':''}>Prix ↓</option>
+        <option value="rarete"     ${_filterSort==='rarete'?'selected':''}>Rareté</option>
       </select>
       <div class="sh-filter-actions">
         <span id="sh-count" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
@@ -870,6 +1089,98 @@ function _getShopChars() {
     : all.filter(c => c.uid === STATE.user?.uid);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// SMART FILTERS — payable / boost / upgrade / stock / new
+// Sélectionne automatiquement les articles pertinents pour le personnage actif :
+//   • payable : prix ≤ or du personnage
+//   • boost   : item donne un bonus > 0 sur la stat principale du perso
+//   • upgrade : item ferait progresser le slot équivalent (stat principale OU CA)
+//   • stock   : dispo > 0 ou illimité
+//   • new     : flag créé côté admin (fallback : 14 derniers jours)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Stat "principale" déduite du personnage : la plus haute parmi For/Dex/Int.
+// Si tie, on prend INT pour les casters (présence de deck_sorts).
+function _shopPrimaryStat(c) {
+  if (!c) return 'intelligence';
+  const s = c.stats || {};
+  const candidates = ['force', 'dexterite', 'intelligence', 'sagesse', 'constitution', 'charisme'];
+  let best = candidates[0], bestVal = -Infinity;
+  for (const k of candidates) {
+    const v = parseInt(s[k]) || 0;
+    if (v > bestVal) { bestVal = v; best = k; }
+  }
+  return best;
+}
+
+function _shopItemMatchesSmart(item, kind, ctx) {
+  const { char, primary, gold } = ctx;
+  switch (kind) {
+    case 'payable': {
+      if (!char) return false;
+      return (parseFloat(item.prix) || 0) <= gold;
+    }
+    case 'boost': {
+      if (!char) return false;
+      try { return getItemStatBonus(item, primary) > 0; } catch { return false; }
+    }
+    case 'stock': {
+      const d = (item.dispo === '' || item.dispo == null) ? null : parseInt(item.dispo);
+      return d === null || d > 0;
+    }
+    case 'new': {
+      // Champ explicite admin OU heuristique 14 jours
+      if (item.isNew === true) return true;
+      const ts = item.createdAt?.seconds ? item.createdAt.seconds * 1000 : (parseInt(item.createdAt) || 0);
+      if (!ts) return false;
+      return (Date.now() - ts) < 14 * 24 * 3600 * 1000;
+    }
+    case 'upgrade': {
+      if (!char) return false;
+      const slot = _resolveSlotForItem(item);
+      if (!slot) return false;
+      const cur = (char.equipement || {})[slot] || null;
+      // Bonus stat principale
+      let curBonus = 0;
+      try { curBonus = cur ? getItemStatBonus(cur, primary) : 0; } catch {}
+      let itemBonus = 0;
+      try { itemBonus = getItemStatBonus(item, primary); } catch {}
+      // CA totale
+      const curCa  = (parseInt(cur?.ca) || 0) + (parseInt(cur?.caBonus) || 0);
+      const itemCa = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
+      return (itemBonus > curBonus) || (itemCa > curCa);
+    }
+  }
+  return true;
+}
+
+function _shopSmartCtx() {
+  const char = _getActiveShopChar();
+  return {
+    char,
+    primary: _shopPrimaryStat(char),
+    gold: calcOr(char),
+  };
+}
+
+function _shopApplySmart(items) {
+  if (!_smartFilters.size) return items;
+  const ctx = _shopSmartCtx();
+  const active = [..._smartFilters];
+  return items.filter(it => active.every(k => _shopItemMatchesSmart(it, k, ctx)));
+}
+
+function _shopSmartCount(kind, baseItems) {
+  const ctx = _shopSmartCtx();
+  return baseItems.filter(it => _shopItemMatchesSmart(it, kind, ctx)).length;
+}
+
+// Avatar coloré du personnage actif — pour le char-strip
+function _shopCharAvatarColor(c) {
+  const palette = { blue:'#4f8cff', arcane:'#9d6fff', crimson:'#ff5a7e', gold:'#e8b84b', emerald:'#22c38e', ember:'#ff9544' };
+  return palette[c?.aura] || palette.blue;
+}
+
 function _getActiveShopChar() {
   const chars = _getShopChars();
   if (!chars.length) {
@@ -891,9 +1202,9 @@ function _getActiveShopChar() {
 // CARDS ARTICLES
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderItemGrid(cat, items) {
-  const tplKey = cat?.template || 'classique';
+  // Chaque item utilise SON template (item.template), pas celui de la catégorie.
   return `<div class="sh-item-grid ${STATE.isAdmin?'sh-sortable':''}" id="sh-items-grid">` +
-    items.map((item,i) => _renderItemCard(item, tplKey, i)).join('') +
+    items.map((item,i) => _renderItemCard(item, _resolveItemTemplate(item), i)).join('') +
     `</div>`;
 }
 
@@ -1004,6 +1315,37 @@ function _renderItemCard(item, tplKey, itemIdx) {
   const manque = tropCher ? Math.ceil(prix - solde) : 0;
 
   const statBonuses = _getStatBonusEntries(item);
+  // ── Deltas vs équipement actuel sur le slot équivalent ─────────────────
+  // Affiché uniquement si un perso est actif ET qu'un slot a été résolu.
+  let deltaHtml = '';
+  if (hasChar) {
+    const slot = _resolveSlotForItem(item);
+    if (slot) {
+      const cur = (activeChar.equipement || {})[slot] || null;
+      const diffs = [];
+      ITEM_STAT_META.forEach(m => {
+        let cb = 0, nb = 0;
+        try { cb = cur ? getItemStatBonus(cur, m.full) : 0; } catch {}
+        try { nb = getItemStatBonus(item, m.full); } catch {}
+        const d = nb - cb;
+        if (d !== 0) diffs.push(`<span class="sh-delta ${d>0?'pos':'neg'}">${m.short} ${d>0?'+':''}${d}</span>`);
+      });
+      const curCa  = (parseInt(cur?.ca) || 0) + (parseInt(cur?.caBonus) || 0);
+      const itemCa = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
+      if (itemCa || curCa) {
+        const d = itemCa - curCa;
+        if (d !== 0) diffs.push(`<span class="sh-delta ${d>0?'pos':'neg'}">CA ${d>0?'+':''}${d}</span>`);
+      }
+      if (diffs.length) {
+        // Format compact « INT ↑1 · CA ↓2 » sur une seule ligne
+        const compact = diffs.map(d => d.replace(/sh-delta pos">(\w+) \+(\d+)/, 'sh-delta pos">$1 ↑$2').replace(/sh-delta neg">(\w+) -(\d+)/, 'sh-delta neg">$1 ↓$2')).join('');
+        deltaHtml = `<div class="sh-item-deltas" title="Comparé à ton équipement actuel sur le slot ${_esc(slot)}">
+          <span class="sh-item-deltas-lbl">vs équipé</span>
+          ${compact}
+        </div>`;
+      }
+    }
+  }
   const traits = _getItemTraits(item);
   const traitsPreview = traits.slice(0, 2);
   const hiddenTraitsCount = Math.max(0, traits.length - traitsPreview.length);
@@ -1020,27 +1362,26 @@ function _renderItemCard(item, tplKey, itemIdx) {
       : '';
     const toucherTxt = item.toucherStat ? _statShort(item.toucherStat) : '';
     const toucherColor = item.toucherStat ? _statVisual(item.toucherStat).color : 'var(--text)';
-
-    factRows.push(_renderFactRow('Type', typeLabel));
+    // « Type » d'arme déjà visible dans le sous-titre (format · sousType)
     factRows.push(_renderFactRow('Dégâts', degatsTxt));
     factRows.push(_renderFactRowColored('Toucher', toucherTxt, toucherColor));
     factRows.push(_renderFactRow('Portée', item.portee || ''));
   }
 
   if (tplKey === 'armure') {
-    factRows.push(_renderFactRow('Emplacement', item.slotArmure || ''));
-    factRows.push(_renderFactRow('Type', item.typeArmure || ''));
+    // « Emplacement » et « Type » déjà visibles dans le sous-titre, on ne garde
+    // que la CA (info utile non dupliquée).
     factRows.push(_renderFactRow('CA', item.ca ? `+${parseInt(item.ca) || 0}` : ''));
   }
 
   if (tplKey === 'bijou') {
-    factRows.push(_renderFactRow('Type', item.slotBijou || ''));
+    // « Slot bijou » déjà visible dans le sous-titre — pas de fact row redondante.
   }
 
-  if (tplKey === 'classique' || tplKey === 'libre') {
-    factRows.push(_renderFactRow('Type', item.type || ''));
-    if (item.effet) factRows.push(_renderFactRow('Effet', item.effet));
-  }
+  // Note : pour classique/libre, la description est rendue dans son
+  // propre bloc `.sh-item-desc` plus bas (pas dans factRows) pour avoir
+  // un styling discret (italique léger, pas en gras) qui prend moins
+  // de place visuelle sur la carte.
 
   let buyBtnHtml;
   if (!hasChar) {
@@ -1053,90 +1394,108 @@ function _renderItemCard(item, tplKey, itemIdx) {
     buyBtnHtml = `<button class="btn sh-buy-btn" data-sh-action="buyItem" data-id="${item.id}">🛒 Acheter</button>`;
   }
 
+  // ── Données enrichies style maquette ─────────────────────────────────
+  // Sous-titre type : Format · Type d'arme · Slot armure/bijou
+  const typeChips = [];
+  if (item.format)     typeChips.push(item.format);
+  if (item.sousType)   typeChips.push(item.sousType);
+  if (item.slotArmure) typeChips.push(item.slotArmure);
+  if (item.typeArmure) typeChips.push(item.typeArmure);
+  if (item.slotBijou)  typeChips.push(item.slotBijou);
+  if (item.type && !typeChips.length) typeChips.push(item.type);
+  const typeLine = typeChips.length
+    ? typeChips.map(_esc).join(' <span class="sh-item-type-sep">·</span> ')
+    : _esc(cat?.nom || '');
+
+  // Stock badge sur l'image
+  const stockTxt = dispo == null ? '∞ Illimité' : dispo === 0 ? 'Épuisé' : `${dispo} dispo`;
+  const stockCls = dispo === 0 ? 'empty' : (dispo != null && dispo < 3) ? 'limited' : '';
+
+  // « Déjà possédé » : check si le perso actif a cet article dans son inventaire
+  // (match par itemId quand disponible — précis pour les items boutique).
+  const ownedCount = hasChar && Array.isArray(activeChar.inventaire)
+    ? activeChar.inventaire.filter(inv => inv?.itemId && inv.itemId === item.id).length
+    : 0;
+  const ownedBadge = ownedCount > 0
+    ? `<span class="sh-item-owned-badge" title="Tu possèdes déjà ×${ownedCount} de cet article">✓ ${ownedCount > 1 ? '×'+ownedCount : 'Possédé'}</span>`
+    : '';
+
+  // Image gradient depuis la couleur de la catégorie (sinon fallback hash)
+  const imgBg = item.image
+    ? `background-image:url('${item.image}');background-size:cover;background-position:center`
+    : (cat?.couleur
+        ? `background:linear-gradient(135deg, ${cat.couleur}33, ${cat.couleur}11)`
+        : _catGradient(item.nom || ''));
+
   return `
     <article class="sh-item-card sh-item-card--detailed ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-sortable-item' : ''}"
       data-item-id="${item.id}"
       ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}
     >
-      <div class="sh-item-img" style="${item.image ? `background-image:url('${item.image}')` : _catGradient(item.nom || '')}">
+      <div class="sh-item-img" style="${imgBg}">
         <div class="sh-item-img-overlay"></div>
-
-        <div class="sh-item-overlay-top">
-          ${epuise ? `<span class="sh-epuise-badge">Épuisé</span>` : ''}
-        </div>
-
-        ${rareteNum ? `
-          <span class="sh-item-rarete-badge sh-badge-image-bottom-right">
-            ${rareteStarsHtml}
-            <span class="sh-item-rarete-badge-label">${_esc(rareteName)}</span>
-          </span>
-        ` : ''}
-
-        <div class="sh-item-overlay-bottom">
-          <span class="sh-item-format-badge">${_esc(formatLabel)}</span>
-        </div>
+        ${rareteNum ? `<span class="sh-item-img-rarity" title="${_esc(rareteName)}">${'★'.repeat(rareteNum)}</span>` : ''}
+        <span class="sh-item-img-stock ${stockCls}">${_esc(stockTxt)}</span>
+        ${ownedBadge}
       </div>
 
       <div class="sh-item-body" data-sh-action="openDetail" data-id="${item.id}">
-        <div class="sh-item-header">
-          <div class="sh-item-name">${_esc(item.nom || '?')}</div>
+        <div class="sh-item-row1">
+          <div class="sh-item-name-wrap">
+            <span class="sh-item-name">${_esc(item.nom || '?')}</span>
+            <span class="sh-item-type">${typeLine}</span>
+          </div>
+          ${rareteNum ? `<span class="sh-item-rare-pill" style="color:${rareteColor};border-color:${rareteColor};background:${rareteColor}1a">${_esc(rareteName)}</span>` : ''}
         </div>
 
         ${factRows.filter(Boolean).length ? `
-          <div class="sh-item-section">
-            <div class="sh-item-facts">
-              ${factRows.join('')}
-            </div>
+          <div class="sh-item-facts">
+            ${factRows.join('')}
           </div>
         ` : ''}
 
         ${statBonuses.length ? `
-          <div class="sh-item-section">
-            <div class="sh-item-section-title">Bonus</div>
-            <div class="sh-item-bonus-list">
-              ${statBonuses.map(stat => `
-                <span
-                  class="sh-item-bonus-chip"
-                  style="
-                    border-color:${stat.color}55;
-                    background:${stat.color}18;
-                    color:${stat.color};
-                  "
-                >
-                  ${_esc(`${stat.short} ${stat.val > 0 ? '+' : ''}${stat.val}`)}
-                </span>
-              `).join('')}
-            </div>
+          <div class="sh-item-bonus-row">
+            ${statBonuses.map(stat => `
+              <span class="sh-item-bonus-chip"
+                style="border-color:${stat.color}55;background:${stat.color}18;color:${stat.color}">
+                ${_esc(`${stat.short} ${stat.val > 0 ? '+' : ''}${stat.val}`)}
+              </span>
+            `).join('')}
           </div>
         ` : ''}
 
         ${traitsPreview.length ? `
-          <div class="sh-item-section">
-            <div class="sh-item-section-title">Traits</div>
-            <ul class="sh-item-traits-list sh-item-traits-list--compact">
-              ${traitsPreview.map(t => `<li class="sh-item-trait-line">${_esc(t)}</li>`).join('')}
-            </ul>
-            ${hiddenTraitsCount ? `<div class="sh-item-traits-more">+${hiddenTraitsCount} autre${hiddenTraitsCount > 1 ? 's' : ''}</div>` : ''}
-          </div>
+          <ul class="sh-item-traits-list sh-item-traits-list--compact">
+            ${traitsPreview.map(t => `<li class="sh-item-trait-line">${_esc(t)}</li>`).join('')}
+            ${hiddenTraitsCount ? `<li class="sh-item-traits-more">+${hiddenTraitsCount}</li>` : ''}
+          </ul>
         ` : ''}
+
+        ${(tplKey === 'classique' || tplKey === 'libre') && (item.effet || item.description)
+          ? `<div class="sh-item-desc">${_esc(item.effet || item.description || '')}</div>`
+          : ''}
+
+        ${deltaHtml}
 
         <div class="sh-item-footer">
           <div class="sh-item-pricing">
-            <div class="sh-item-price-main">💰 ${prix} or</div>
+            <div class="sh-item-price-main">🪙 ${prix} or</div>
             <div class="sh-item-price-sub">Revente ${prixVente} or</div>
+            ${tropCher && !epuise ? `<div class="sh-item-missing-line">Il te manque ${manque} or</div>` : ''}
           </div>
 
-          <div class="sh-item-footer-meta">
-            <span class="sh-item-stock-line">Stock : ${_getItemStockText(dispo)}</span>
-            ${tropCher ? `<span class="sh-item-missing-line">Il manque ${manque} or</span>` : ''}
+          <div class="sh-item-actions-inline" onclick="event.stopPropagation()">
+            <button class="sh-try-btn" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier">🪄</button>
+            ${buyBtnHtml}
           </div>
-
-          ${buyBtnHtml}
         </div>
       </div>
 
       ${edit ? `
         <div class="sh-item-actions" data-sh-action="stop">
+          ${epuise ? `<button class="btn-icon sh-restock-btn" title="Restocker +1 (MJ)" aria-label="Restocker"
+            data-sh-action="restockItem" data-id="${item.id}">📦</button>` : ''}
           <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
           <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
         </div>
@@ -1184,6 +1543,18 @@ function _buildSimEquipFromShop(slot, shopItem) {
 function _simulateCharWithItem(c, slot, shopItem) {
   const equip = { ...(c.equipement || {}) };
   equip[slot] = _buildSimEquipFromShop(slot, shopItem);
+  const statsBonus = computeEquipStatsBonus(equip);
+  return { ...c, equipement: equip, statsBonus };
+}
+
+/** Simule un perso avec plusieurs slots overrides (map slot → shopItem|null).
+ *  Si la valeur est null pour un slot → on retire l'équipement actuel. */
+function _simulateCharWithBuild(c, slotMap) {
+  const equip = { ...(c.equipement || {}) };
+  Object.entries(slotMap || {}).forEach(([slot, item]) => {
+    if (item === null) delete equip[slot];
+    else if (item)     equip[slot] = _buildSimEquipFromShop(slot, item);
+  });
   const statsBonus = computeEquipStatsBonus(equip);
   return { ...c, equipement: equip, statsBonus };
 }
@@ -1321,83 +1692,116 @@ function openShopItemDetail(itemId) {
     : 0;
   const canSellCurrent = !!equippedHere && Number.isInteger(equippedHere.sourceInvIndex) && equippedHere.sourceInvIndex >= 0;
 
-  openModal(_esc(item.nom), `
-    ${item.image ? `<div style="margin:-1.5rem -1.5rem .75rem;"><img src="${item.image}" style="width:100%;height:180px;object-fit:cover;border-radius:22px 22px 0 0;display:block"></div>` : ''}
-    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
-      <div>
-        <div style="font-family:'Cinzel',serif;font-size:1.15rem;font-weight:700;color:var(--text)">${_esc(item.nom)}</div>
-        <div style="font-size:.75rem;color:var(--text-dim)">${cat?.nom||''} ${_getRareteNum(item.rarete)?'· '+_rareteStars(_getRareteNum(item.rarete)):''}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:var(--gold)">💰 ${prix} or</div>
-        <div style="font-size:.7rem;color:var(--text-dim)">Revente : ${prixV} or</div>
-      </div>
+  const rareNum = _getRareteNum(item.rarete);
+  const rareCol = rareNum > 0 ? _rareteColor(RARETE_NAMES[rareNum]) : '';
+  const rareName = rareNum > 0 ? (RARETE_NAMES[rareNum] || '') : '';
+  const tplKey = _resolveItemTemplate(item);
+  const tplLabel = TEMPLATES[tplKey]?.label || '';
+
+  // Sous-titre type (format · sousType · slot…)
+  const typeChips = [];
+  if (item.format)     typeChips.push(item.format);
+  if (item.sousType)   typeChips.push(item.sousType);
+  if (item.slotArmure) typeChips.push(item.slotArmure);
+  if (item.typeArmure) typeChips.push(item.typeArmure);
+  if (item.slotBijou)  typeChips.push(item.slotBijou);
+  if (item.type && !typeChips.length) typeChips.push(item.type);
+  const typeLine = typeChips.length ? typeChips.map(_esc).join(' · ') : _esc(cat?.nom || '');
+
+  // Facts (kv)
+  const facts = [];
+  if (item.degats) {
+    const arr = _getDegatsStats(item);
+    facts.push(['Dégâts', `${item.degats}${arr.length ? ' + ' + _formatDegatsStatsText(arr) : ''}`, 'dmg']);
+  }
+  if (item.toucherStat) facts.push(['Toucher', _statShort(item.toucherStat)]);
+  if (item.portee)      facts.push(['Portée', item.portee]);
+  if (item.ca > 0)      facts.push(['CA', `+${item.ca}`, 'ca']);
+
+  // Bonus chips
+  const bonusEntries = _getStatBonusEntries(item);
+  const descTxt = item.effet || item.description || '';
+
+  // Background image
+  const imgBg = item.image
+    ? `background-image:url('${item.image}');background-size:cover;background-position:center`
+    : (cat?.couleur
+        ? `background:linear-gradient(135deg, ${cat.couleur}33, ${cat.couleur}11)`
+        : _catGradient(item.nom || ''));
+
+  // Footer buttons
+  let actionBtn;
+  if (!hasChar) {
+    actionBtn = `<button class="btn btn-outline btn-sm" disabled title="Sélectionne un personnage">Choisis un personnage</button>`;
+  } else if (epuise) {
+    actionBtn = `<button class="btn btn-outline btn-sm" disabled title="Cet article est épuisé">Épuisé</button>`;
+  } else if (tropCher) {
+    actionBtn = `<button class="btn btn-outline btn-sm sh-buy-btn--poor" disabled title="Il te manque ${manque} or">Pas assez d'or</button>`;
+  } else {
+    actionBtn = `<button class="btn btn-gold btn-sm" data-sh-action="buyFromDetail" data-id="${item.id}">🛒 Acheter pour ${prix} or</button>`;
+  }
+
+  openModal('', `
+  <div class="sh-detail">
+    <!-- HERO image avec étoiles + stock -->
+    <div class="sh-detail-hero" style="${imgBg}">
+      <div class="sh-detail-hero-fade"></div>
+      ${rareNum ? `<span class="sh-detail-stars" title="${_esc(rareName)}">${'★'.repeat(rareNum)}</span>` : ''}
+      <span class="sh-detail-stock ${epuise?'is-empty':(dispo!==null && dispo<3?'is-limited':'is-ok')}">${
+        dispo===null||dispo<0 ? '∞ Stock illimité' :
+        epuise ? 'Épuisé' :
+        `${dispo} en stock`}</span>
+      ${rareNum ? `<span class="sh-detail-rare-pill" style="color:${rareCol};border-color:${rareCol};background:${rareCol}1a">${_esc(rareName)}</span>` : ''}
+      <button class="sh-detail-close" data-sh-action="closeModal" title="Fermer">✕</button>
     </div>
 
-    ${rows.length ? `<div style="background:var(--bg-elevated);border-radius:10px;overflow:hidden;margin-bottom:.75rem">
-      ${rows.map(([l,v],i)=>`<div style="display:flex;justify-content:space-between;padding:.45rem .75rem;${i?'border-top:1px solid var(--border)':''}">
-        <span style="font-size:.78rem;color:var(--text-dim)">${l}</span>
-        <span style="font-size:.78rem;color:var(--text);font-weight:600">${v}</span>
-      </div>`).join('')}
-    </div>` : ''}
-
-    ${comparePanel}
-
-    ${traitsArr.length ? `<div style="margin-bottom:.75rem">
-      <div style="font-size:.68rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem">Traits</div>
-      <div style="display:flex;flex-wrap:wrap;gap:.35rem">
-        ${traitsArr.map(t=>`<span class="sh-trait-pill">${t}</span>`).join('')}
+    <!-- BODY -->
+    <div class="sh-detail-body">
+      <div class="sh-detail-head">
+        <div class="sh-detail-name-wrap">
+          <h2 class="sh-detail-name">${_esc(item.nom)}</h2>
+          <div class="sh-detail-sub">${typeLine}${tplLabel?` <span class="sh-detail-tpl">${_esc(tplLabel)}</span>`:''}</div>
+        </div>
+        <div class="sh-detail-price-block">
+          <div class="sh-detail-price-main">🪙 ${prix} or</div>
+          <div class="sh-detail-price-sub">Revente ${prixV} or</div>
+          ${tropCher && !epuise ? `<div class="sh-detail-price-warn">Il te manque ${manque} or</div>` : ''}
+        </div>
       </div>
-    </div>` : ''}
 
-    ${item.description ? `<div style="font-size:.82rem;color:var(--text-muted);line-height:1.7;margin-bottom:.75rem;padding:.6rem .75rem;background:rgba(255,255,255,.02);border-radius:8px;border-left:2px solid var(--border-strong)">${item.description}</div>` : ''}
+      ${facts.length ? `<div class="sh-detail-facts">
+        ${facts.map(([l,v,c])=>`<div class="sh-detail-fact ${c||''}">
+          <span class="sh-detail-fact-lbl">${_esc(l)}</span>
+          <span class="sh-detail-fact-val">${_esc(v)}</span>
+        </div>`).join('')}
+      </div>` : ''}
 
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;padding-top:.5rem;border-top:1px solid var(--border)">
-      <div style="font-size:.75rem;color:${dispo===null?'var(--text-dim)':dispo===0?'#ff6b6b':'#22c38e'}">
-        ${dispo===null?'∞ Stock illimité':dispo===0?'Épuisé':`${dispo} en stock`}
-      </div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end">
-        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-sh-action="editFromDetail" data-id="${item.id}">✏️ Modifier</button>` : ''}
-        ${canSellCurrent ? `
-          <button class="btn btn-outline btn-sm" title="Revendre l'objet actuellement équipé sur ${compareSlot}"
-            data-sh-action="sellEquip" data-slot="${compareSlot}">
-            💰 Revendre l'actuel${sellPrice ? ` (+${sellPrice} or)` : ''}
-          </button>
-        ` : ''}
-        ${!hasChar ? `
-          <button
-            class="btn btn-outline btn-sm"
-            disabled
-            title="Sélectionne un personnage pour acheter"
-            style="opacity:.7;cursor:not-allowed"
-          >
-            Choisis un personnage
-          </button>
-        ` : epuise ? `
-          <button
-            class="btn btn-outline btn-sm"
-            disabled
-            title="Cet article est épuisé"
-            style="opacity:.7;cursor:not-allowed"
-          >
-            Épuisé
-          </button>
-        ` : tropCher ? `
-          <button
-            class="btn btn-danger btn-sm"
-            disabled
-            title="Il te manque ${manque} or"
-            style="opacity:1;cursor:not-allowed"
-          >
-            Pas assez d'or
-          </button>
-        ` : `
-          <button class="btn btn-gold btn-sm" data-sh-action="buyFromDetail" data-id="${item.id}">
-            🛒 Acheter
-          </button>
-        `}
-      </div>
+      ${bonusEntries.length ? `<div class="sh-detail-bonus">
+        ${bonusEntries.map(b=>`<span class="sh-item-bonus-chip" style="border-color:${b.color}55;background:${b.color}18;color:${b.color}">${b.short} ${b.val>0?'+':''}${b.val}</span>`).join('')}
+      </div>` : ''}
+
+      ${traitsArr.length ? `<div class="sh-detail-traits">
+        <span class="sh-detail-traits-lbl">Traits</span>
+        ${traitsArr.map(t=>`<span class="sh-trait-pill">${_esc(t)}</span>`).join('')}
+      </div>` : ''}
+
+      ${descTxt ? `<div class="sh-detail-desc">${_esc(descTxt)}</div>` : ''}
+
+      ${comparePanel ? `<div class="sh-detail-compare">${comparePanel}</div>` : ''}
     </div>
+
+    <!-- FOOTER -->
+    <div class="sh-detail-footer">
+      ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-sh-action="editFromDetail" data-id="${item.id}">✏️ Modifier</button>` : ''}
+      <div class="sh-detail-footer-spacer"></div>
+      ${canSellCurrent ? `
+        <button class="btn btn-outline btn-sm" title="Revendre l'objet actuellement équipé sur ${compareSlot}"
+          data-sh-action="sellEquip" data-slot="${compareSlot}">
+          💰 Revendre l'actuel${sellPrice ? ` (+${sellPrice} or)` : ''}
+        </button>` : ''}
+      ${actionBtn}
+    </div>
+  </div>
   `);
 }
 
@@ -1439,36 +1843,44 @@ async function buyItem(itemId) {
     return confirmBuyItem(itemId, 1);
   }
 
-  openModal(`🛒 Acheter — ${item.nom}`, `
-    <div style="margin-bottom:.75rem">
-      <div style="font-family:'Cinzel',serif;font-size:.95rem;color:var(--text);margin-bottom:.2rem">${item.nom}</div>
-      <div style="font-size:.8rem;color:var(--text-dim)">
-        💰 ${prix} or/u · Solde : <strong style="color:var(--gold)">${solde} or</strong>
-        ${!illimite ? ` · Stock : ${dispo}` : ''}
+  openModal('', `
+  <div class="sh-admin-modal is-cat">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">🛒</div>
+      <div class="sh-admin-head-title">
+        <h2>Acheter — ${_esc(item.nom)}</h2>
+        <small>💰 <b>${prix}</b> or l'unité · Solde : <b style="color:var(--amber, #f4c430)">${solde} or</b>${!illimite ? ` · Stock : <b>${dispo}</b>` : ' · ∞ illimité'}</small>
+      </div>
+      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
+    </div>
+
+    <div class="sh-admin-body">
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">📦 Quantité</div>
+        <div class="sh-buy-stepper">
+          <button type="button" class="sh-buy-step-btn" data-sh-action="qtyDown" title="−1">−</button>
+          <input type="number" id="buy-qty" min="1" max="${maxQte}" value="1"
+            class="sh-buy-step-input"
+            data-sh-action="qtyInput" data-sh-on="input" data-prix="${prix}">
+          <button type="button" class="sh-buy-step-btn" data-sh-action="qtyUp" title="+1">+</button>
+          <span class="sh-buy-step-arrow">→</span>
+          <span class="sh-buy-step-total" id="buy-total">${prix} or</span>
+        </div>
+        <p class="sh-admin-section-hint" style="margin-top:8px">
+          Tu peux acheter jusqu'à <b style="color:var(--text)">${maxQte}</b> unité${maxQte>1?'s':''} (limite : fonds + stock).
+        </p>
       </div>
     </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:.75rem">
-      <label style="flex-shrink:0">Quantité</label>
-      <div style="display:flex;align-items:center;gap:.4rem">
-        <button type="button"
-          data-sh-action="qtyDown"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">−</button>
-        <input type="number" id="buy-qty" min="1" max="${maxQte}" value="1"
-          style="width:60px;text-align:center" class="input-field"
-          data-sh-action="qtyInput" data-sh-on="input" data-prix="${prix}">
-        <button type="button"
-          data-sh-action="qtyUp"
-          style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer;font-size:1rem;color:var(--text)">+</button>
-      </div>
-      <span style="font-size:.8rem;color:var(--text-dim)">→ <strong id="buy-total" style="color:var(--gold)">${prix} or</strong></span>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:1rem">
-      <button id="buy-confirm" class="btn btn-gold" style="flex:1"
+
+    <div class="sh-admin-footer">
+      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
+      <div class="sh-admin-footer-spacer"></div>
+      <button id="buy-confirm" class="btn btn-gold btn-sm"
         data-sh-action="confirmBuy" data-id="${itemId}">
         🛒 Acheter ×1 — ${prix} or
       </button>
-      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
     </div>
+  </div>
   `);
 }
 
@@ -1497,7 +1909,7 @@ async function confirmBuyItem(itemId, directQty) {
 
     const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
     const cat       = _cats.find(cc => cc.id === item.categorieId);
-    const tplKey    = cat?.template || 'classique';
+    const tplKey    = _resolveItemTemplate(item);
     const invItem   = shopItemToInvEntry(item, {
       source:    'boutique',
       template:  tplKey,
@@ -1787,45 +2199,95 @@ function _mountSortables() {
 function openCatModal(catId) {
   const cat        = catId ? _cats.find(c=>c.id===catId) : null;
   const tplOptions = Object.entries(TEMPLATES).map(([k,v])=>`<option value="${k}" ${(cat?.template||'classique')===k?'selected':''}>${v.label}</option>`).join('');
-  openModal(cat?'✏️ Modifier la catégorie':'📁 Nouvelle catégorie',`
-    <div class="form-group"><label>Nom</label>
-      <input class="input-field" id="cat-nom" value="${cat?.nom||''}" placeholder="Armes Physiques, Épicerie...">
-    </div>
-    <div class="form-group"><label>Type de boutique</label>
-      <select class="input-field" id="cat-template">${tplOptions}</select>
-      <div id="cat-tpl-preview" class="sh-tpl-preview"></div>
-    </div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Emoji <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-        <input class="input-field" id="cat-emoji" value="${cat?.emoji||''}" placeholder="⚔️ 🛡️ 🧪" style="max-width:90px">
+  openModal('', `
+  <div class="sh-admin-modal is-cat">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">${cat ? '✏️' : '📁'}</div>
+      <div class="sh-admin-head-title">
+        <h2>${cat ? `Modifier « ${_esc(cat.nom||'?')} »` : 'Nouvelle catégorie'}</h2>
+        <small>${cat ? 'Édite les méta de cette catégorie boutique.' : 'Crée une nouvelle catégorie pour ranger tes articles.'}</small>
       </div>
+      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
     </div>
-    <div class="form-group"><label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-      <div class="sh-upload-simple">
-        <input type="file" id="cat-img-file" accept="image/*"
-          data-sh-action="uploadImg" data-sh-on="change" data-preview="cat-img-preview" data-hidden="cat-img-b64"
-          style="font-size:0.8rem;color:var(--text-muted)">
-        <input type="hidden" id="cat-img-b64" value="${cat?.image||''}">
+
+    <div class="sh-admin-body">
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">📝 Identité</div>
+        <div class="sh-admin-row">
+          <div class="sh-admin-row-line">
+            <span class="sh-admin-row-lbl">Nom de la catégorie</span>
+          </div>
+          <input class="sh-admin-row-input" id="cat-nom" value="${_esc(cat?.nom||'')}"
+            placeholder="Armes physiques, Épicerie…"
+            style="width:100%;text-align:left">
+        </div>
+        <div class="sh-admin-grid-2" style="margin-top:8px">
+          <div class="sh-admin-row">
+            <div class="sh-admin-row-line">
+              <span class="sh-admin-row-lbl">Emoji</span>
+              <input class="sh-admin-row-input small" id="cat-emoji" value="${_esc(cat?.emoji||'')}" placeholder="⚔️">
+            </div>
+          </div>
+          <div class="sh-admin-row">
+            <label class="sh-admin-row-checkbox" style="cursor:pointer">
+              <input type="checkbox" id="cat-masquee" ${cat?.masquee?'checked':''}>
+              <span>👁️ Masquer aux joueurs</span>
+            </label>
+          </div>
+        </div>
       </div>
-      <div id="cat-img-preview">${cat?.image?`<img src="${cat.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">🎯 Type par défaut <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(fallback pour les anciens items)</small></div>
+        <p class="sh-admin-section-hint">Désormais chaque article a son propre type. Cette valeur sert uniquement de défaut pour les articles créés sans type explicite.</p>
+        <select class="sh-admin-row-input" id="cat-template" style="width:100%;text-align:left;font-family:inherit;font-weight:500">${tplOptions}</select>
+        <div id="cat-tpl-preview" class="sh-admin-preview"></div>
+      </div>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">🖼️ Illustration <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(optionnelle)</small></div>
+        <p class="sh-admin-section-hint">Affichée en background de la pastille catégorie sur la page d'accueil.</p>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div id="cat-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
+            ${cat?.image ? `<img src="${cat.image}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
+          </div>
+          <label style="flex:1;min-width:0">
+            <input type="file" id="cat-img-file" accept="image/*"
+              data-sh-action="uploadImg" data-sh-on="change" data-preview="cat-img-preview" data-hidden="cat-img-b64"
+              style="font-size:.78rem;color:var(--text-muted);width:100%">
+            <input type="hidden" id="cat-img-b64" value="${cat?.image||''}">
+          </label>
+        </div>
+      </div>
+
+      <p class="sh-admin-intro" style="font-size:.7rem;font-style:italic">
+        💡 Si tu supprimes cette catégorie, ses articles restent disponibles en butin et revendables — ils basculent juste dans « Non classé ».
+      </p>
     </div>
-    <div class="sh-recipe-row">
-      <label for="cat-masquee">👁️ Masquer cette catégorie aux joueurs</label>
-      <input type="checkbox" id="cat-masquee" ${cat?.masquee?'checked':''}>
+
+    <div class="sh-admin-footer">
+      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
+      <div class="sh-admin-footer-spacer"></div>
+      ${cat ? `<button class="btn btn-outline btn-sm sh-buy-btn--poor" data-sh-action="deleteCat" data-id="${cat.id}">🗑️ Supprimer</button>` : ''}
+      <button class="btn btn-gold btn-sm" onclick="saveCat('${catId||''}')">
+        ${cat ? '💾 Enregistrer' : '➕ Créer'}
+      </button>
     </div>
-    <p class="sh-hint" style="margin:.35rem 0 0">Les articles restent disponibles en butin et restent revendables.</p>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCat('${catId||''}')">
-      ${cat?'Enregistrer':'Créer'}
-    </button>`);
-  setTimeout(()=>{ document.getElementById('cat-nom')?.focus(); _updateTplPreview(); document.getElementById('cat-template')?.addEventListener('change',_updateTplPreview); },60);
+  </div>
+  `);
+  setTimeout(()=>{
+    document.getElementById('cat-nom')?.focus();
+    _updateTplPreview();
+    document.getElementById('cat-template')?.addEventListener('change', _updateTplPreview);
+  }, 60);
 }
 
 function _updateTplPreview() {
-  const sel=document.getElementById('cat-template')?.value;
-  const prev=document.getElementById('cat-tpl-preview');
-  if(!sel||!prev) return;
-  const tpl=TEMPLATES[sel]; if(!tpl) return;
-  prev.innerHTML=`<div class="sh-tpl-fields">${tpl.fields.map(f=>`<span class="sh-tpl-field-tag">${f.label}</span>`).join('')}</div>`;
+  const sel  = document.getElementById('cat-template')?.value;
+  const prev = document.getElementById('cat-tpl-preview');
+  if (!sel || !prev) return;
+  const tpl = TEMPLATES[sel]; if (!tpl) return;
+  prev.innerHTML = tpl.fields.map(f => `<span class="sh-admin-preview-chip">${_esc(f.label)}</span>`).join('');
 }
 
 async function saveCat(catId) {
@@ -1855,30 +2317,63 @@ async function deleteCat(catId) {
 // MODAL SOUS-CATÉGORIE
 // ══════════════════════════════════════════════════════════════════════════════
 function openSubCatModal(catId,scId) {
-  const cat=_cats.find(c=>c.id===catId);
-  const sc=scId?(cat?.sousCats||[]).find(s=>s.id===scId):null;
-  openModal(sc?'✏️ Modifier':'📂 Nouvelle sous-catégorie',`
-    <div class="form-group"><label>Nom</label>
-      <input class="input-field" id="sc-nom" value="${sc?.nom||''}" placeholder="Épée, Bouclier, Lance...">
+  const cat = _cats.find(c=>c.id===catId);
+  const sc  = scId ? (cat?.sousCats||[]).find(s=>s.id===scId) : null;
+  openModal('', `
+  <div class="sh-admin-modal is-cat">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">${sc ? '✏️' : '📂'}</div>
+      <div class="sh-admin-head-title">
+        <h2>${sc ? `Modifier « ${_esc(sc.nom||'?')} »` : 'Nouvelle sous-catégorie'}</h2>
+        <small>${cat ? `Dans ${_esc(cat.nom)}` : 'Sous-catégorie de l\'article'}</small>
+      </div>
+      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
     </div>
-    <div class="grid-2" style="gap:0.8rem">
-      <div class="form-group"><label>Emoji <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-        <input class="input-field" id="sc-emoji" value="${sc?.emoji||''}" placeholder="⚔️ 🛡️" style="max-width:90px">
+
+    <div class="sh-admin-body">
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">📝 Identité</div>
+        <div class="sh-admin-row">
+          <div class="sh-admin-row-line">
+            <span class="sh-admin-row-lbl">Nom</span>
+          </div>
+          <input class="sh-admin-row-input" id="sc-nom" value="${_esc(sc?.nom||'')}"
+            placeholder="Épée, Bouclier, Lance…" style="width:100%;text-align:left">
+        </div>
+        <div class="sh-admin-row" style="margin-top:8px">
+          <div class="sh-admin-row-line">
+            <span class="sh-admin-row-lbl">Emoji <small style="color:var(--text-dim)">(opt.)</small></span>
+            <input class="sh-admin-row-input small" id="sc-emoji" value="${_esc(sc?.emoji||'')}" placeholder="⚔️">
+          </div>
+        </div>
+      </div>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">🖼️ Illustration <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(optionnelle)</small></div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div id="sc-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
+            ${sc?.image ? `<img src="${sc.image}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
+          </div>
+          <label style="flex:1;min-width:0">
+            <input type="file" id="sc-img-file" accept="image/*"
+              data-sh-action="uploadImg" data-sh-on="change" data-preview="sc-img-preview" data-hidden="sc-img-b64"
+              style="font-size:.78rem;color:var(--text-muted);width:100%">
+            <input type="hidden" id="sc-img-b64" value="${sc?.image||''}">
+          </label>
+        </div>
       </div>
     </div>
-    <div class="form-group"><label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-      <div class="sh-upload-simple">
-        <input type="file" id="sc-img-file" accept="image/*"
-          data-sh-action="uploadImg" data-sh-on="change" data-preview="sc-img-preview" data-hidden="sc-img-b64"
-          style="font-size:0.8rem;color:var(--text-muted)">
-        <input type="hidden" id="sc-img-b64" value="${sc?.image||''}">
-      </div>
-      <div id="sc-img-preview">${sc?.image?`<img src="${sc.image}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`:''}</div>
+
+    <div class="sh-admin-footer">
+      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
+      <div class="sh-admin-footer-spacer"></div>
+      <button class="btn btn-gold btn-sm" data-sh-action="saveSubCat" data-cat="${catId}" data-sc="${scId||''}">
+        ${sc ? '💾 Enregistrer' : '➕ Créer'}
+      </button>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-sh-action="saveSubCat" data-cat="${catId}" data-sc="${scId||''}">
-      ${sc?'Enregistrer':'Créer'}
-    </button>`);
-  setTimeout(()=>document.getElementById('sc-nom')?.focus(),50);
+  </div>
+  `);
+  setTimeout(()=>document.getElementById('sc-nom')?.focus(), 50);
 }
 
 async function saveSubCat(catId,scId) {
@@ -2187,9 +2682,15 @@ window._shopEditAction = async (idx) => {
   });
 };
 
-window._shopRemoveAction = (idx) => {
+window._shopRemoveAction = async (idx) => {
   if (!Number.isFinite(idx)) return;
-  if (!confirm('Supprimer cette action ?')) return;
+  const act = _shopActionsCache[idx];
+  const nom = act?.nom || act?.label || 'cette action';
+  if (!await confirmModal(`Supprimer <b>${_esc(nom)}</b> ?`, {
+    title: 'Confirmation de suppression',
+    confirmLabel: 'Supprimer',
+    icon: '🗑️',
+  })) return;
   _shopActionsCache.splice(idx, 1);
   _shopRefreshActionsHost();
 };
@@ -2322,9 +2823,14 @@ function openItemModal(itemId) {
 
   const defCatId   = item?.categorieId || _activeCat || '';
   const cat        = _cats.find(c=>c.id===defCatId);
-  const tplKey     = cat?.template || 'classique';
+  // Le template vient désormais DE L'ITEM en priorité (item.template),
+  // avec fallback sur la catégorie pour rétrocompat sur les vieux items.
+  const tplKey     = item?.template || cat?.template || 'classique';
   const tpl        = TEMPLATES[tplKey] || TEMPLATES.classique;
-  const catOptions = _cats.map(c=>`<option value="${c.id}" ${defCatId===c.id?'selected':''}>${c.nom} (${TEMPLATES[c.template||'classique']?.label||''})</option>`).join('');
+  const catOptions = _cats.map(c=>`<option value="${c.id}" ${defCatId===c.id?'selected':''}>${c.nom}</option>`).join('');
+  const tplOptions = Object.entries(TEMPLATES).map(([k, t]) =>
+    `<option value="${k}" ${tplKey===k?'selected':''}>${t.label || k}</option>`
+  ).join('');
 
   const imgPreviewHtml = item?.image
     ? `<img src="${item.image}" alt="">`
@@ -2346,8 +2852,14 @@ function openItemModal(itemId) {
                data-sh-action="refreshChip" data-sh-on="input">
         <div class="si-header-row2">
           <select class="input-field sh-modal-select si-cat-select" id="si-cat"
-                  data-sh-action="refreshFields" data-sh-on="change">
+                  data-sh-action="setItemCat" data-sh-on="change"
+                  title="Catégorie d'affichage dans la boutique">
             <option value="">— Catégorie —</option>${catOptions}
+          </select>
+          <select class="input-field sh-modal-select si-tpl-select" id="si-template"
+                  data-sh-action="setItemTemplate" data-sh-on="change"
+                  title="Type de boutique (détermine les champs disponibles)">
+            ${tplOptions}
           </select>
           <span class="si-name-chip" id="si-name-chip"></span>
         </div>
@@ -2430,11 +2942,16 @@ function _buildFieldsHtml(tpl,item) {
       const dispoVal=isInfini?'':(val===''?'':parseInt(val)||'');
       html+=`<div class="form-group"><label>${f.label}</label>
         <div class="sh-dispo-wrap">
-          <input type="number" class="input-field" id="si-dispo" value="${dispoVal}" min="0" placeholder="3" ${isInfini?'disabled':''}>
-          <label class="sh-dispo-infini-label" title="Stock illimité">
-            <input type="checkbox" id="si-dispo-infini" ${isInfini?'checked':''} data-sh-action="dispoInfini" data-sh-on="change">
-            <span>∞</span>
-          </label>
+          <input type="number" class="input-field" id="si-dispo" value="${dispoVal}" min="0"
+            placeholder="${isInfini?'∞':'3'}" ${isInfini?'disabled':''}>
+          <input type="checkbox" id="si-dispo-infini" class="sh-dispo-infini-cb" ${isInfini?'checked':''}
+            data-sh-action="dispoInfini" data-sh-on="change" hidden>
+          <button type="button" class="sh-dispo-infini-btn ${isInfini?'is-on':''}"
+            id="si-dispo-infini-btn" title="Activer le stock illimité"
+            data-sh-action="dispoInfiniBtn">
+            <span class="sh-dispo-infini-ico">∞</span>
+            <span class="sh-dispo-infini-txt">Illimité</span>
+          </button>
         </div></div>`;
     } else if(f.type==='select'){
       html+=`<div class="form-group"><label>${f.label}</label>
@@ -2641,23 +3158,43 @@ window._shopDegatsStatRemove = (i) => {
 };
 
 function toggleDispoInfini(cb){
-  const input=document.getElementById('si-dispo'); if(!input) return;
-  if(cb.checked){ input.value=''; input.disabled=true; input.style.opacity='0.4'; input.style.pointerEvents='none'; }
-  else { input.disabled=false; input.style.opacity=''; input.style.pointerEvents=''; input.value='5'; input.focus(); }
+  const input=document.getElementById('si-dispo');
+  const btn=document.getElementById('si-dispo-infini-btn');
+  if(!input) return;
+  if(cb.checked){
+    input.value=''; input.disabled=true; input.placeholder='∞';
+    btn?.classList.add('is-on');
+  } else {
+    input.disabled=false; input.placeholder='3'; input.value='5';
+    btn?.classList.remove('is-on');
+    input.focus();
+  }
+}
+function toggleDispoInfiniBtn(){
+  const cb=document.getElementById('si-dispo-infini'); if(!cb) return;
+  cb.checked=!cb.checked;
+  toggleDispoInfini(cb);
 }
 function updatePrixVente(val){ const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO); const el=document.getElementById('si-pv-val'); if(el) el.textContent=pv; }
 
 function refreshItemFields(catId) {
-  const cat    = _cats.find(c=>c.id===catId);
-  const tplKey = cat?.template || 'classique';
-  const tpl    = TEMPLATES[tplKey] || TEMPLATES.classique;
-  const host   = document.getElementById('si-sections-dynamic');
-  if (host) {
-    // Conserve l'onglet actif si possible (sinon retombe sur "essentiel")
-    const cur = document.querySelector('.si-tab.is-active')?.dataset.tab || 'essentiel';
-    host.innerHTML = _siBuildTabs(tpl, null, tplKey, cur);
-    _bindPrixListener(); _initAutocompletes(); _siRefreshChip();
-  }
+  // La catégorie ne dicte plus le template — c'est le select #si-template.
+  // Cette fonction reste pour rétrocompat mais redirige vers refreshTemplateFields.
+  const tplKey = document.getElementById('si-template')?.value
+              || _cats.find(c=>c.id===catId)?.template
+              || 'classique';
+  refreshTemplateFields(tplKey);
+}
+
+/** Re-render les champs de la modale article selon le type sélectionné. */
+function refreshTemplateFields(tplKey) {
+  const tpl  = TEMPLATES[tplKey] || TEMPLATES.classique;
+  const host = document.getElementById('si-sections-dynamic');
+  if (!host) return;
+  // Conserve l'onglet actif si possible (sinon retombe sur "essentiel")
+  const cur = document.querySelector('.si-tab.is-active')?.dataset.tab || 'essentiel';
+  host.innerHTML = _siBuildTabs(tpl, null, tplKey, cur);
+  _bindPrixListener(); _initAutocompletes(); _siRefreshChip();
 }
 function refreshSubCatSelect(catId){ refreshItemFields(catId); }
 
@@ -2697,12 +3234,18 @@ async function saveShopItem(itemId) {
     const item = itemId ? _items.find(i=>i.id===itemId) : null;
     const catId=document.getElementById('si-cat')?.value||'';
     const cat=_cats.find(c=>c.id===catId);
-    const tplKey=cat?.template||'classique';
+    // Le template vient désormais du select dédié de la modale ; fallback
+    // sur le template de la catégorie (rétrocompat avec les items créés avant
+    // l'unification de la modale).
+    const tplKey = document.getElementById('si-template')?.value
+                || item?.template
+                || cat?.template
+                || 'classique';
     const tpl=TEMPLATES[tplKey]||TEMPLATES.classique;
     const nom=document.getElementById('si-nom')?.value.trim();
     if(!nom){showNotif('Nom requis.','error');return;}
 
-    const data={ nom, categorieId:catId, image:document.getElementById('si-img-b64')?.value||'' };
+    const data={ nom, categorieId:catId, template:tplKey, image:document.getElementById('si-img-b64')?.value||'' };
 
     tpl.fields.forEach(f=>{
       if(f.type==='dispo'){
@@ -2885,7 +3428,18 @@ function openShopExportModal() {
     </label>`;
   }).join('');
 
-  openModal('📦 Export / Import Boutique', `
+  openModal('', `
+  <div class="sh-admin-modal is-upgrades">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">📦</div>
+      <div class="sh-admin-head-title">
+        <h2>Export / Import boutique</h2>
+        <small>Sauvegarde ou restauration des catégories et articles</small>
+      </div>
+      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
+    </div>
+
+    <!-- Onglets style propre -->
     <div class="sh-export-tabs">
       <button class="sh-export-tab sh-export-tab--active" id="sh-etab-export"
         data-sh-action="tabSwitch" data-tab="export">📤 Exporter</button>
@@ -2893,54 +3447,75 @@ function openShopExportModal() {
         data-sh-action="tabSwitch" data-tab="import">📥 Importer</button>
     </div>
 
-    <div id="sh-tab-export">
-      <div class="form-group" style="margin-bottom:.6rem">
-        <label style="margin-bottom:.35rem;display:block">Catégories</label>
-        <div style="display:flex;gap:.4rem;margin-bottom:.4rem">
-          <button class="btn btn-outline btn-sm" type="button"
-            data-sh-action="exportSelectAll" data-all="true">Tout</button>
-          <button class="btn btn-outline btn-sm" type="button"
-            data-sh-action="exportSelectAll" data-all="false">Aucun</button>
+    <div class="sh-admin-body">
+      <!-- ── Tab Export ───────────────────────────────────────── -->
+      <div id="sh-tab-export">
+        <div class="sh-admin-section">
+          <div class="sh-admin-section-title">📚 Catégories à exporter</div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button class="btn btn-outline btn-sm" type="button"
+              data-sh-action="exportSelectAll" data-all="true">✓ Tout cocher</button>
+            <button class="btn btn-outline btn-sm" type="button"
+              data-sh-action="exportSelectAll" data-all="false">✕ Tout décocher</button>
+          </div>
+          <div class="sh-export-cat-list">
+            ${catRows || '<div style="text-align:center;padding:1rem;color:var(--text-dim);font-style:italic">Aucune catégorie.</div>'}
+          </div>
         </div>
-        <div class="sh-export-cat-list">
-          ${catRows || '<em style="color:var(--text-dim)">Aucune catégorie.</em>'}
+
+        <div class="sh-admin-section">
+          <div class="sh-admin-section-title">📄 Format de sortie</div>
+          <div class="sh-export-format-row">
+            <label><input type="radio" name="sh-export-fmt" value="json" checked> <b>JSON</b> <small style="color:var(--text-dim)">(import réversible)</small></label>
+            <label><input type="radio" name="sh-export-fmt" value="csv"> <b>CSV</b> <small style="color:var(--text-dim)">(tableur)</small></label>
+            <label><input type="radio" name="sh-export-fmt" value="md"> <b>Markdown</b> <small style="color:var(--text-dim)">(documentation)</small></label>
+          </div>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:.75rem">
-        <label style="margin-bottom:.35rem;display:block">Format</label>
-        <div class="sh-export-format-row">
-          <label><input type="radio" name="sh-export-fmt" value="json" checked> JSON</label>
-          <label><input type="radio" name="sh-export-fmt" value="csv"> CSV</label>
-          <label><input type="radio" name="sh-export-fmt" value="md"> Markdown</label>
+
+      <!-- ── Tab Import ───────────────────────────────────────── -->
+      <div id="sh-tab-import" style="display:none">
+        <div class="sh-admin-section">
+          <div class="sh-admin-section-title">📥 Importer un export JSON</div>
+          <p class="sh-admin-section-hint">
+            Les catégories et articles seront <b>ajoutés sans écraser</b> l'existant. Tu pourras choisir quelles catégories importer.
+          </p>
+          <label style="display:block;margin-top:8px">
+            <input type="file" id="sh-import-file" accept=".json"
+              style="font-size:.82rem;color:var(--text);width:100%"
+              data-sh-action="previewImport" data-sh-on="change">
+          </label>
         </div>
+        <div id="sh-import-preview"></div>
       </div>
-      <button class="btn btn-gold" data-sh-action="doExport">⬇️ Télécharger</button>
     </div>
 
-    <div id="sh-tab-import" style="display:none">
-      <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.6rem">
-        Importe un fichier JSON exporté depuis cette boutique. Les catégories et articles
-        sont ajoutés sans écraser l'existant.
-      </p>
-      <div class="form-group" style="margin-bottom:.6rem">
-        <label style="margin-bottom:.35rem;display:block">Fichier JSON</label>
-        <input type="file" id="sh-import-file" accept=".json"
-          style="font-size:.82rem;color:var(--text)"
-          data-sh-action="previewImport" data-sh-on="change">
-      </div>
-      <div id="sh-import-preview"></div>
-      <div id="sh-import-actions" style="display:none;margin-top:.6rem">
-        <button class="btn btn-gold" data-sh-action="doImport">📥 Importer</button>
-      </div>
+    <div class="sh-admin-footer">
+      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Fermer</button>
+      <div class="sh-admin-footer-spacer"></div>
+      <span id="sh-tab-export-actions">
+        <button class="btn btn-gold btn-sm" data-sh-action="doExport">⬇️ Télécharger</button>
+      </span>
+      <span id="sh-tab-import-actions" style="display:none">
+        <button class="btn btn-gold btn-sm" id="sh-import-confirm-btn"
+          data-sh-action="doImport" disabled>📥 Importer</button>
+      </span>
     </div>
+  </div>
   `);
 }
 
 window._shopTabSwitch = function(tab) {
-  document.getElementById('sh-tab-export').style.display = tab === 'export' ? '' : 'none';
-  document.getElementById('sh-tab-import').style.display = tab === 'import' ? '' : 'none';
-  document.getElementById('sh-etab-export').classList.toggle('sh-export-tab--active', tab === 'export');
-  document.getElementById('sh-etab-import').classList.toggle('sh-export-tab--active', tab === 'import');
+  const isExp = tab === 'export';
+  document.getElementById('sh-tab-export').style.display = isExp ? '' : 'none';
+  document.getElementById('sh-tab-import').style.display = isExp ? 'none' : '';
+  document.getElementById('sh-etab-export').classList.toggle('sh-export-tab--active', isExp);
+  document.getElementById('sh-etab-import').classList.toggle('sh-export-tab--active', !isExp);
+  // Switch les boutons footer aussi
+  const expActs = document.getElementById('sh-tab-export-actions');
+  const impActs = document.getElementById('sh-tab-import-actions');
+  if (expActs) expActs.style.display = isExp ? '' : 'none';
+  if (impActs) impActs.style.display = isExp ? 'none' : '';
 };
 
 window._shopExportSelectAll = function(checked) {
@@ -3078,9 +3653,9 @@ let _importData = null;
 window._shopPreviewImport = function(input) {
   const file = input.files?.[0];
   const preview  = document.getElementById('sh-import-preview');
-  const actions  = document.getElementById('sh-import-actions');
+  const importBtn = document.getElementById('sh-import-confirm-btn');
   _importData = null;
-  if (actions) actions.style.display = 'none';
+  if (importBtn) importBtn.disabled = true;
   if (!file) { if (preview) preview.innerHTML = ''; return; }
 
   const reader = new FileReader();
@@ -3098,13 +3673,21 @@ window._shopPreviewImport = function(input) {
         </label>`;
       }).join('');
       if (preview) preview.innerHTML = `
-        <p style="font-size:.8rem;color:var(--gold);margin-bottom:.4rem">
-          ${data.categories.length} catégorie(s) trouvée(s) — sélectionne celles à importer :
-        </p>
-        <div class="sh-export-cat-list">${rows}</div>`;
-      if (actions) actions.style.display = '';
+        <div class="sh-admin-section" style="margin-top:10px">
+          <div class="sh-admin-section-title">
+            <span style="color:var(--emerald, #22c38e)">✓ ${data.categories.length} catégorie${data.categories.length>1?'s':''} trouvée${data.categories.length>1?'s':''}</span>
+          </div>
+          <p class="sh-admin-section-hint">Coche celles à importer :</p>
+          <div class="sh-export-cat-list">${rows}</div>
+        </div>`;
+      if (importBtn) importBtn.disabled = false;
     } catch {
-      if (preview) preview.innerHTML = `<p style="color:#ff6b6b;font-size:.82rem">Fichier invalide. Utilise un JSON exporté depuis cette boutique.</p>`;
+      if (preview) preview.innerHTML = `
+        <div class="sh-admin-section" style="margin-top:10px;border-color:rgba(255,90,126,.30);background:rgba(255,90,126,.06)">
+          <p style="color:var(--crimson-light, #ff8ca7);font-size:.82rem;margin:0">
+            ⚠️ Fichier invalide. Utilise un JSON exporté depuis cette boutique.
+          </p>
+        </div>`;
     }
   };
   reader.readAsText(file);
@@ -3146,18 +3729,539 @@ window._shopDoImport = async function() {
   }
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ATELIER D'ESSAYAGE — version simplifiée
+// Modale plein écran à 3 colonnes :
+//   • Doll : silhouette du perso avec 8 slots cliquables (Tête/Amulette/Torse/
+//     Anneau/Main principale/Main secondaire/Bottes/Objet magique).
+//   • Stats : 6 caracs + 4 dérivés (CA, PV max, PM max, Vitesse) avec
+//     cur → next + delta coloré live.
+//   • Items : liste des articles compatibles avec le slot actif, clic = toggle
+//     l'essai. Reset bouton pour vider tous les essais.
+// État local (réinitialisé à chaque ouverture) :
+//   _atelier = { activeSlot, simulated: { slot → shopItem } }
+// ══════════════════════════════════════════════════════════════════════════════
+const _ATELIER_SLOTS = [
+  { name: 'Tête',            ico: '🪖', kind: 'armure' },
+  { name: 'Amulette',        ico: '📿', kind: 'bijou'  },
+  { name: 'Torse',           ico: '🛡️', kind: 'armure' },
+  { name: 'Anneau',          ico: '💍', kind: 'bijou'  },
+  { name: 'Main principale', ico: '⚔️', kind: 'arme'   },
+  { name: 'Main secondaire', ico: '🗡️', kind: 'arme'   },
+  { name: 'Bottes',          ico: '👢', kind: 'armure' },
+  { name: 'Objet magique',   ico: '🔮', kind: 'bijou'  },
+];
+let _atelier = { activeSlot: null, simulated: {}, itemSearch: '' };
+
+/** Filtre les items boutique compatibles avec un slot d'équipement donné. */
+function _atelierItemsForSlot(slotName) {
+  if (!slotName) return [];
+  const slotMeta = _ATELIER_SLOTS.find(s => s.name === slotName);
+  if (!slotMeta) return [];
+  return _visibleItems().filter(it => {
+    if (!it.nom) return false;
+    if (slotMeta.kind === 'arme') {
+      const tpl = it.template || '';
+      if (tpl === 'arme') return true;
+      // Idem que editEquipSlot : marqueurs d'arme suffisants
+      return !!(it.degats || it.toucher || it.sousType ||
+                (it.format && ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
+                              'Arme 2M CaC Mag.','Arme 2M Dist Mag.',
+                              'Arme Secondaire (Bouclier, Torche...)'].includes(it.format)));
+    }
+    if (slotMeta.kind === 'armure') {
+      const wantSlot = slotName === 'Bottes' ? 'Pieds' : slotName;
+      return it.slotArmure === wantSlot;
+    }
+    if (slotMeta.kind === 'bijou') {
+      return it.slotBijou === slotName;
+    }
+    return false;
+  });
+}
+
+/** Construit le perso simulé avec tous les essais en cours. */
+function _atelierBuildSimChar() {
+  const c = _getActiveShopChar();
+  if (!c) return null;
+  return _simulateCharWithBuild(c, _atelier.simulated);
+}
+
+/** Rendu de la silhouette paper-doll */
+function _renderAtelierDoll() {
+  const c = _getActiveShopChar();
+  if (!c) return '';
+  const eq = c.equipement || {};
+  const av = _shopCharAvatarColor(c);
+  const init = (c.nom || '?')[0].toUpperCase();
+
+  const slotsHtml = _ATELIER_SLOTS.map(s => {
+    const cur = eq[s.name];
+    const sim = _atelier.simulated[s.name];
+    const filled = !!cur?.nom;
+    const simulated = !!sim;
+    const active = _atelier.activeSlot === s.name;
+    const itemName = simulated ? sim.nom : (cur?.nom || '');
+    const classes = ['atelier-slot'];
+    if (active)    classes.push('is-active');
+    if (simulated) classes.push('is-simulated');
+    else if (filled) classes.push('is-filled');
+    return `<button class="${classes.join(' ')}" data-slot="${_esc(s.name)}"
+      data-sh-action="atelierSelectSlot"
+      title="${_esc(s.name)}${itemName?` — ${_esc(itemName)}`:''}">
+      <span class="atelier-slot-ico">${s.ico}</span>
+      <span class="atelier-slot-name">${_esc(s.name)}</span>
+      ${itemName ? `<span class="atelier-slot-item">${_esc(itemName)}</span>` : ''}
+      ${simulated ? `<span class="atelier-slot-clear"
+        data-sh-action="atelierClearSlot" data-slot="${_esc(s.name)}"
+        title="Retirer cet essai">✕</span>` : ''}
+    </button>`;
+  }).join('');
+
+  return `
+    <div class="atelier-char">
+      <span class="atelier-char-av" style="--av-c:${av}">${c.photo ? `<img src="${c.photo}" alt="">` : init}</span>
+      <div class="atelier-char-body">
+        <div class="atelier-char-name">${_esc(c.nom || 'Personnage')}</div>
+        <div class="atelier-char-meta">Niv. ${c.niveau||1}${c.classe?' · '+_esc(c.classe):''}</div>
+      </div>
+      <span class="atelier-char-or" title="Solde">${calcOr(c)}<small>or</small></span>
+    </div>
+    <div class="atelier-doll">${slotsHtml}</div>`;
+}
+
+/** Rendu du panneau de stats (cur → next + delta) */
+function _renderAtelierStats() {
+  const c = _getActiveShopChar();
+  if (!c) return '';
+  const sim = _atelierBuildSimChar();
+  if (!sim) return '';
+
+  // ── Dérivés ──
+  const derived = [
+    { lbl:"Classe d'armure", ico:'🛡', cur: calcCA(c),       next: calcCA(sim) },
+    { lbl:'PV max',          ico:'❤', cur: calcPVMax(c),    next: calcPVMax(sim) },
+    { lbl:'PM max',          ico:'✦', cur: calcPMMax(c),    next: calcPMMax(sim) },
+    { lbl:'Vitesse',         ico:'🏃', cur: calcVitesse(c), next: calcVitesse(sim) },
+  ];
+  const derivedHtml = derived.map(d => {
+    const delta = d.next - d.cur;
+    const cls = delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : '';
+    return `<div class="atelier-derived ${cls}">
+      <span class="atelier-derived-ico">${d.ico}</span>
+      <div class="atelier-derived-body">
+        <span class="atelier-derived-lbl">${d.lbl}</span>
+        <div class="atelier-derived-row">
+          <span class="atelier-derived-val">${d.cur}</span>
+          ${delta !== 0 ? `<span class="atelier-derived-arr">→</span><span class="atelier-derived-new">${d.next}</span>` : ''}
+        </div>
+      </div>
+      ${delta !== 0 ? `<span class="atelier-derived-delta">${delta>0?'+':''}${delta}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  // ── 6 caracs ──
+  const statsList = ITEM_STAT_META.map(m => {
+    const cur  = (c?.stats?.[m.full]   || 0) + (c?.statsBonus?.[m.full]   || 0);
+    const next = (sim?.stats?.[m.full] || 0) + (sim?.statsBonus?.[m.full] || 0);
+    const delta = next - cur;
+    const cls = delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : '';
+    const visual = _statVisual(m.full);
+    return `<div class="atelier-stat-row ${cls}">
+      <span class="atelier-stat-key" style="--st-c:${visual.color};--st-bg:${visual.color}1a;--st-bd:${visual.color}55">${m.short}</span>
+      <span class="atelier-stat-name">${m.label || m.full}</span>
+      <span class="atelier-stat-cur">${cur}</span>
+      ${delta !== 0 ? `<span class="atelier-stat-arr">→</span><span class="atelier-stat-new">${next}</span><span class="atelier-stat-delta">${delta>0?'+':''}${delta}</span>` : `<span class="atelier-stat-eq">=</span>`}
+    </div>`;
+  }).join('');
+
+  // ── Build summary ──
+  const tried = Object.values(_atelier.simulated).filter(Boolean);
+  const cost = tried.reduce((s, it) => s + (parseFloat(it?.prix) || 0), 0);
+  const solde = calcOr(c);
+  const finance = cost <= solde;
+  // Détecte les essais épuisés (bloque "Tout acheter")
+  const epuiseList = tried.filter(it => {
+    const d = (it.dispo !== undefined && it.dispo !== '' && it.dispo !== null) ? parseInt(it.dispo) : null;
+    return d === 0;
+  });
+  const hasEpuise = epuiseList.length > 0;
+  const canBuyAll = tried.length > 0 && finance && !hasEpuise;
+
+  return `
+    <div class="atelier-stats-section">
+      <div class="atelier-stats-title">Dérivés</div>
+      <div class="atelier-derived-grid">${derivedHtml}</div>
+    </div>
+    <div class="atelier-stats-section">
+      <div class="atelier-stats-title">Caractéristiques</div>
+      <div class="atelier-stats-list">${statsList}</div>
+    </div>
+    <div class="atelier-build-summary">
+      <div class="atelier-build-head">
+        <span class="atelier-build-lbl">Build en cours</span>
+        <span class="atelier-build-cost ${finance?'':'is-poor'}">${cost} or</span>
+      </div>
+      <div class="atelier-build-meta">
+        ${tried.length === 0
+          ? 'Aucun essai. Clique sur un slot pour commencer.'
+          : `${tried.length} article${tried.length>1?'s':''} essayé${tried.length>1?'s':''}${finance ? '' : ` · Il te manque ${cost-solde} or`}`}
+      </div>
+      ${hasEpuise ? `<div class="atelier-build-warn">
+        ⚠️ <b>${epuiseList.length} article${epuiseList.length>1?'s':''} épuisé${epuiseList.length>1?'s':''}</b> dans le build —
+        ${epuiseList.map(it => _esc(it.nom)).join(', ')}. Tu peux toujours comparer mais pas tout acheter d'un coup.
+      </div>` : ''}
+      <div class="atelier-build-actions">
+        <button class="btn btn-gold btn-sm" data-sh-action="atelierBuyAll"
+          ${canBuyAll ? '' : 'disabled'}
+          title="${canBuyAll ? 'Acheter tous les articles essayés'
+                  : hasEpuise ? 'Au moins un article du build est épuisé'
+                  : !finance ? `Fonds insuffisants (manque ${cost-solde} or)`
+                  : 'Aucun essai'}">
+          🛒 Tout acheter
+        </button>
+        <button class="btn btn-arcane btn-sm" data-sh-action="atelierSaveBuild"
+          ${tried.length === 0 ? 'disabled' : ''}
+          title="Sauvegarder cette configuration comme build nommé">
+          💾 Sauver
+        </button>
+        <button class="btn btn-outline btn-sm" data-sh-action="atelierReset"
+          ${tried.length === 0 ? 'disabled' : ''}>↺ Reset</button>
+      </div>
+      ${_renderAtelierSavedBuilds(c)}
+    </div>`;
+}
+
+/** Liste des builds sauvegardés du perso (charger / supprimer). */
+function _renderAtelierSavedBuilds(c) {
+  const builds = Array.isArray(c?.shopBuilds) ? c.shopBuilds : [];
+  if (!builds.length) return '';
+  return `
+    <div class="atelier-builds-saved">
+      <div class="atelier-builds-saved-lbl">Builds sauvegardés</div>
+      <div class="atelier-builds-list">
+        ${builds.map(b => `
+          <div class="atelier-build-row">
+            <button class="atelier-build-load" data-sh-action="atelierLoadBuild" data-id="${_esc(b.id)}"
+              title="Charger ce build">
+              <span class="atelier-build-load-name">${_esc(b.name || 'Sans nom')}</span>
+              <span class="atelier-build-load-count">${Object.keys(b.slots || {}).length} slot${Object.keys(b.slots||{}).length>1?'s':''}</span>
+            </button>
+            <button class="atelier-build-del" data-sh-action="atelierDeleteBuild" data-id="${_esc(b.id)}"
+              title="Supprimer ce build">✕</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+}
+
+/** Rendu de la colonne droite : items compatibles avec le slot actif. */
+function _renderAtelierItems() {
+  const slot = _atelier.activeSlot;
+  if (!slot) {
+    return `<div class="atelier-items-empty">
+      <div class="atelier-items-empty-ico">👈</div>
+      <div><b>Choisis un slot</b></div>
+      <div class="atelier-items-empty-hint">Clique un emplacement sur la silhouette pour voir les articles compatibles.</div>
+    </div>`;
+  }
+  const q = _norm(_atelier.itemSearch || '');
+  let items = _atelierItemsForSlot(slot);
+  if (q) items = items.filter(it => _searchIncludes(_itemSearchText(it), q));
+  items = items
+    .sort((a, b) => (parseInt(b.rarete||0) - parseInt(a.rarete||0)) || (a.nom||'').localeCompare(b.nom||'', 'fr'))
+    .slice(0, 40);
+
+  if (!items.length) {
+    return `<div class="atelier-items-empty">
+      <div class="atelier-items-empty-ico">🔎</div>
+      <div><b>Aucun article compatible</b></div>
+      <div class="atelier-items-empty-hint">Aucun article boutique ne correspond au slot « ${_esc(slot)} ».</div>
+    </div>`;
+  }
+
+  const c = _getActiveShopChar();
+  const solde = calcOr(c);
+
+  return items.map(it => {
+    const tried = _atelier.simulated[slot]?.id === it.id;
+    const rareNum = _getRareteNum(it.rarete);
+    const rareCol = rareNum > 0 ? _rareteColor(RARETE_NAMES[rareNum]) : 'var(--border)';
+    const bonus = _getStatBonusEntries(it);
+    const prix = parseFloat(it.prix) || 0;
+    const poor = prix > solde;
+    // Stock : dispo === 0 → épuisé ; <3 → limité ; null/-1 → illimité
+    const dispo = (it.dispo !== undefined && it.dispo !== '' && it.dispo !== null)
+      ? parseInt(it.dispo) : null;
+    const epuise = dispo === 0;
+    const limited = dispo !== null && dispo > 0 && dispo < 3;
+    const stockTxt = dispo === null || dispo < 0 ? '∞'
+                   : epuise ? 'Épuisé'
+                   : `${dispo} dispo`;
+    const stockCls = epuise ? 'is-empty' : limited ? 'is-limited' : 'is-ok';
+
+    const classes = ['atelier-item'];
+    if (tried) classes.push('is-tried');
+    if (epuise) classes.push('is-epuise');
+
+    return `<button class="${classes.join(' ')}" data-id="${it.id}"
+      data-sh-action="atelierTryItem"
+      style="--rare-c:${rareCol}"
+      title="${epuise ? "Article épuisé — tu peux l'essayer pour comparer mais pas l'acheter" : ''}">
+      <div class="atelier-item-ico">${_esc(it.image ? '' : (it.icon || '📦'))}${it.image ? `<img src="${_esc(it.image)}" alt="">` : ''}</div>
+      <div class="atelier-item-body">
+        <div class="atelier-item-name">${_esc(it.nom)}</div>
+        <div class="atelier-item-meta">
+          ${it.sousType ? `<span>${_esc(it.sousType)}</span>` : ''}
+          ${it.slotArmure ? `<span>${_esc(it.slotArmure)}${it.typeArmure?' · '+_esc(it.typeArmure):''}</span>` : ''}
+          ${it.slotBijou ? `<span>${_esc(it.slotBijou)}</span>` : ''}
+          <span class="atelier-item-stock ${stockCls}">${stockTxt}</span>
+          <span class="atelier-item-price ${poor?'is-poor':''}">${prix} or</span>
+        </div>
+        ${bonus.length ? `<div class="atelier-item-bonus">
+          ${bonus.slice(0,4).map(b => `<span class="sh-item-bonus-chip" style="border-color:${b.color}55;background:${b.color}18;color:${b.color}">${b.short} ${b.val>0?'+':''}${b.val}</span>`).join('')}
+        </div>` : ''}
+      </div>
+      <span class="atelier-item-toggle">${tried ? '✓' : '+'}</span>
+    </button>`;
+  }).join('');
+}
+
+/** Render complet de l'atelier (silhouette + stats + items). */
+function _renderAtelier() {
+  const doll  = document.getElementById('atelier-doll-col');
+  const stats = document.getElementById('atelier-stats-col');
+  const items = document.getElementById('atelier-items-col');
+  const slotLbl = document.getElementById('atelier-slot-name');
+  const searchInput = document.getElementById('atelier-items-search');
+  const focusedSearch = (document.activeElement === searchInput);
+  const caret = focusedSearch ? searchInput.selectionStart : null;
+
+  if (doll)    doll.innerHTML  = _renderAtelierDoll();
+  if (stats)   stats.innerHTML = _renderAtelierStats();
+  if (items)   items.innerHTML = _renderAtelierItems();
+  if (slotLbl) slotLbl.textContent = _atelier.activeSlot || '—';
+
+  // Restaure focus + caret de la search (n'est pas re-rendue, mais sa value oui
+  // si on perd le focus pendant un re-render distant)
+  if (focusedSearch && searchInput) {
+    requestAnimationFrame(() => {
+      searchInput.focus();
+      try { searchInput.setSelectionRange(caret, caret); } catch {}
+    });
+  }
+}
+
+/** Achète tous les items du build en cours et vide le build. */
+async function _atelierBuyAll() {
+  const c = _getActiveShopChar();
+  if (!c) return;
+  const entries = Object.entries(_atelier.simulated).filter(([, it]) => !!it);
+  if (!entries.length) return;
+  const totalCost = entries.reduce((s, [, it]) => s + (parseFloat(it.prix) || 0), 0);
+  const solde = calcOr(c);
+  if (totalCost > solde) {
+    showNotif(`Fonds insuffisants (${totalCost} or pour ${solde}).`, 'error');
+    return;
+  }
+  // Vérifie stocks
+  for (const [, it] of entries) {
+    const dispo = (it.dispo !== undefined && it.dispo !== '') ? parseInt(it.dispo) : null;
+    if (dispo !== null && dispo >= 0 && dispo < 1) {
+      showNotif(`"${it.nom}" est épuisé.`, 'error');
+      return;
+    }
+  }
+  // Achat séquentiel — réutilise confirmBuyItem qui gère stock + or + log
+  let bought = 0;
+  for (const [, it] of entries) {
+    try { await confirmBuyItem(it.id, 1); bought++; } catch (e) { console.warn('[atelier buyAll]', e); }
+  }
+  showNotif(`✅ ${bought} article${bought>1?'s':''} acheté${bought>1?'s':''} pour ${totalCost} or !`, 'success');
+  _atelier = { activeSlot: null, simulated: {}, itemSearch: '' };
+  _renderAtelier();
+}
+
+/** Sauvegarde le build courant comme entrée nommée sur le perso. */
+async function _atelierSaveBuild() {
+  const c = _getActiveShopChar();
+  if (!c) return;
+  const entries = Object.entries(_atelier.simulated).filter(([, it]) => !!it);
+  if (!entries.length) { showNotif('Aucun essai à sauver.', 'error'); return; }
+  const name = prompt('Nom du build :', `Build ${(c.shopBuilds||[]).length + 1}`);
+  if (!name?.trim()) return;
+  const slots = {};
+  entries.forEach(([slot, it]) => { slots[slot] = it.id; });
+  const newBuild = {
+    id: `bld_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    name: name.trim(),
+    slots,
+    createdAt: Date.now(),
+  };
+  const builds = [...(c.shopBuilds || []), newBuild];
+  try {
+    await updateInCol('characters', c.id, { shopBuilds: builds });
+    c.shopBuilds = builds;
+    showNotif(`💾 Build « ${newBuild.name} » sauvegardé.`, 'success');
+    _renderAtelier();
+  } catch (e) { notifySaveError(e); }
+}
+
+/** Charge un build sauvegardé dans la simulation courante. */
+function _atelierLoadBuild(buildId) {
+  const c = _getActiveShopChar();
+  if (!c) return;
+  const b = (c.shopBuilds || []).find(x => x.id === buildId);
+  if (!b) return;
+  _atelier.simulated = {};
+  _atelier.activeSlot = null;
+  Object.entries(b.slots || {}).forEach(([slot, itemId]) => {
+    const item = _items.find(i => i.id === itemId);
+    if (item) _atelier.simulated[slot] = item;
+  });
+  _renderAtelier();
+  showNotif(`Build « ${b.name} » chargé.`, 'success');
+}
+
+/** Supprime un build sauvegardé. */
+async function _atelierDeleteBuild(buildId) {
+  const c = _getActiveShopChar();
+  if (!c) return;
+  const builds = (c.shopBuilds || []).filter(b => b.id !== buildId);
+  try {
+    await updateInCol('characters', c.id, { shopBuilds: builds });
+    c.shopBuilds = builds;
+    _renderAtelier();
+  } catch (e) { notifySaveError(e); }
+}
+
+/** Ouvre la modale Atelier ; si `prefillItemId` fourni → essai pré-rempli. */
+function openAtelierModal(prefillItemId) {
+  const char = _getActiveShopChar();
+  if (!char) { showNotif('Sélectionne d\'abord un personnage.', 'error'); return; }
+  // Reset état
+  _atelier = { activeSlot: null, simulated: {} };
+  if (prefillItemId) {
+    const item = _items.find(i => i.id === prefillItemId);
+    const slot = item ? _resolveSlotForItem(item) : null;
+    if (item && slot) {
+      _atelier.activeSlot = slot;
+      _atelier.simulated[slot] = item;
+    }
+  }
+  openModal('', `
+    <div class="atelier-shell">
+      <div class="atelier-head">
+        <div class="atelier-head-ico">🪄</div>
+        <div class="atelier-head-title">
+          <h2>Atelier d'essayage</h2>
+          <small>Construis et compare des configurations avant d'acheter</small>
+        </div>
+        <button class="atelier-close" data-sh-action="closeModal" title="Fermer">✕</button>
+      </div>
+      <div class="atelier-body">
+        <div class="atelier-col atelier-col-doll" id="atelier-doll-col"></div>
+        <div class="atelier-col atelier-col-stats" id="atelier-stats-col"></div>
+        <div class="atelier-col atelier-col-items">
+          <div class="atelier-items-head">
+            <span class="atelier-items-title">Compatibles : <b id="atelier-slot-name">—</b></span>
+          </div>
+          <div class="atelier-items-search-wrap">
+            <span class="atelier-items-search-ico">🔍</span>
+            <input type="text" class="atelier-items-search" id="atelier-items-search"
+              placeholder="Filtrer la liste…"
+              data-sh-action="atelierSearch" data-sh-on="input"
+              autocomplete="off">
+          </div>
+          <div class="atelier-items-list" id="atelier-items-col"></div>
+        </div>
+      </div>
+    </div>`);
+  _renderAtelier();
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // HANDLERS DE DÉLÉGATION (data-sh-action="…")
 // ──────────────────────────────────────────────────────────────────────────────
 Object.assign(shHandlers, {
   // Header / navigation principale
   openArtisan:    () => openArtisanModal(),
+  openAtelier:    (el) => openAtelierModal(el?.dataset?.id || ''),
+  // Atelier (slot + items + reset)
+  atelierSelectSlot: (el) => {
+    const s = el.dataset.slot || '';
+    _atelier.activeSlot = (_atelier.activeSlot === s) ? null : s;
+    _renderAtelier();
+  },
+  atelierClearSlot: (el, ev) => {
+    ev?.stopPropagation?.();
+    const s = el.dataset.slot;
+    if (s) { delete _atelier.simulated[s]; _renderAtelier(); }
+  },
+  atelierTryItem: (el) => {
+    const id = el.dataset.id; if (!id) return;
+    const item = _items.find(i => i.id === id); if (!item) return;
+    const slot = _atelier.activeSlot || _resolveSlotForItem(item);
+    if (!slot) { showNotif('Slot inconnu pour cet article.', 'error'); return; }
+    if (_atelier.simulated[slot]?.id === item.id) delete _atelier.simulated[slot];
+    else _atelier.simulated[slot] = item;
+    _atelier.activeSlot = slot;
+    _renderAtelier();
+  },
+  atelierReset: () => {
+    _atelier = { activeSlot: null, simulated: {}, itemSearch: '' };
+    _renderAtelier();
+  },
+  atelierSearch:      (el) => { _atelier.itemSearch = el.value || ''; _renderAtelier(); },
+  atelierBuyAll:      () => _atelierBuyAll(),
+  atelierSaveBuild:   () => _atelierSaveBuild(),
+  atelierLoadBuild:   (el) => _atelierLoadBuild(el.dataset.id),
+  atelierDeleteBuild: (el, ev) => { ev?.stopPropagation?.(); _atelierDeleteBuild(el.dataset.id); },
+  // Restock 1-clic MJ (carte épuisée)
+  restockItem:    async (el, ev) => {
+    ev?.stopPropagation?.();
+    if (!STATE.isAdmin) return;
+    const itemId = el.dataset.id; if (!itemId) return;
+    await window._restockShopItem(itemId);
+    showNotif('📦 Stock +1', 'success');
+    renderShop();
+  },
+  // Tweaks d'affichage (lot 7)
+  openTweaks:     () => openTweaksPopup(),
+  setTweak:       (el) => {
+    const k = el.dataset.twKey, v = el.dataset.twVal;
+    if (!k || _shopTweaks[k] === v) return;
+    _shopTweaks[k] = v;
+    _shopTweaksSave();
+    // Refresh visuel des segmented dans la modale ouverte
+    document.querySelectorAll(`[data-tw-key="${k}"] .sh-tw-seg-btn`).forEach(b => {
+      b.classList.toggle('on', b.dataset.twVal === v);
+    });
+    // Re-render du shop pour appliquer (layout tabs/sidebar nécessite un re-render)
+    if (k === 'layout') renderShop();
+  },
+  resetTweaks:    () => {
+    _shopTweaks = { ..._TWEAKS_DEFAULTS };
+    _shopTweaksSave();
+    closeModalDirect();
+    renderShop();
+    setTimeout(openTweaksPopup, 50);
+  },
   openCatModal:   (el) => openCatModal(el.dataset.id || ''),
   openItemModal:  (el) => openItemModal(el.dataset.id || ''),
   openWeaponFmts: () => openWeaponFormatsAdmin(),
   openUpgradeStg: () => openUpgradeSettingsAdmin(),
   openExport:     () => openShopExportModal(),
   closeModal:     () => closeModalDirect(),
+  // Smart filters (lot 3)
+  toggleSmart:    (el) => {
+    const k = el.dataset.smart;
+    if (!k || !SMART_KINDS.includes(k)) return;
+    if (_smartFilters.has(k)) _smartFilters.delete(k); else _smartFilters.add(k);
+    _page = 1;
+    renderShop();
+  },
+  resetSmart:     () => { _smartFilters.clear(); _page = 1; renderShop(); },
   // Sidebar / catégories
   goHome:         () => shopGoHome(),
   goCat:          (el) => shopGoCat(el.dataset.id),
@@ -3185,8 +4289,11 @@ Object.assign(shHandlers, {
   setTab:         (el) => window._siSetTab(el.dataset.tab),
   refreshChip:    () => window._siRefreshChip(),
   refreshFields:  (el) => refreshItemFields(el.value),
+  setItemTemplate:(el) => refreshTemplateFields(el.value),
+  setItemCat:     () => { /* la catégorie n'affecte plus les champs ; juste un changement de référence */ },
   prixInput:      (el) => updatePrixVente(el.value),
   dispoInfini:    (el) => toggleDispoInfini(el),
+  dispoInfiniBtn: ()   => toggleDispoInfiniBtn(),
   uploadImg:      (el) => previewUpload(el.id, el.dataset.preview, el.dataset.hidden),
   saveItem:       (el) => saveShopItem(el.dataset.id || ''),
   // Modal article : actions/sorts

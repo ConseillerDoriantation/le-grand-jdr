@@ -313,42 +313,59 @@ export async function openDamageTypesAdmin() {
 }
 
 export function _renderWeaponFormatsModal(formats) {
-  const magBadge = (isMagic, i) => {
+  const magPill = (isMagic, i) => {
     const on = !!isMagic;
-    return `<button
+    return `<button class="sh-admin-pill-toggle ${on?'on':''}"
+      style="--pt-bg:rgba(180,127,255,.18);--pt-bd:rgba(180,127,255,.45);--pt-c:#c084fc"
       onclick="window._toggleWeaponFormatMagic(${i})"
-      style="padding:.25rem .55rem;border-radius:7px;font-size:.7rem;font-weight:700;cursor:pointer;
-             border:1px solid ${on ? '#b47fff' : 'var(--border)'};
-             background:${on ? 'rgba(180,127,255,.18)' : 'var(--bg-base)'};
-             color:${on ? '#c084fc' : 'var(--text-dim)'};white-space:nowrap"
-      title="${on ? 'Cliquer pour passer en physique' : 'Cliquer pour passer en magique'}">
+      title="${on ? 'Magique — clic pour passer en physique' : 'Physique — clic pour passer en magique'}">
       ${on ? '🔮 Magique' : '💪 Physique'}
     </button>`;
   };
 
-  openModal('⚔️ Formats d\'armes', `
-    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
-      Ces formats apparaissent dans la boutique et dans les styles de combat.<br>
-      <span style="color:#c084fc">Magique</span> = le joueur choisit son élément à l'attaque.
-      <span style="color:#9ca3af">Physique</span> = toujours dégâts physiques.
+  openModal('', `
+  <div class="sh-admin-modal is-formats">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">⚔️</div>
+      <div class="sh-admin-head-title">
+        <h2>Formats d'armes</h2>
+        <small>${formats.length} format${formats.length>1?'s':''} configuré${formats.length>1?'s':''} · utilisés dans la boutique et les styles de combat</small>
+      </div>
+      <button class="sh-admin-close" onclick="closeModal()" title="Fermer">✕</button>
     </div>
-    <div id="wf-list" style="display:flex;flex-direction:column;gap:.35rem">
-      ${formats.map((f, i) => `
-      <div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
-        border:1px solid var(--border);border-radius:8px;padding:.45rem .7rem">
-        <span style="flex:1;font-size:.84rem;color:var(--text)">${_esc(f.label)}</span>
-        ${magBadge(f.isMagic, i)}
-        <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b" onclick="window._deleteWeaponFormat(${i})">🗑️</button>
-      </div>`).join('')}
+
+    <div class="sh-admin-body">
+      <p class="sh-admin-intro">
+        Bascule chaque format en <em>🔮 Magique</em> (le joueur choisit son élément à l'attaque) ou <em>💪 Physique</em> (dégâts physiques fixes).
+      </p>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">📋 Formats existants</div>
+        <div class="sh-admin-list" id="wf-list">
+          ${formats.length === 0
+            ? '<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun format — ajoute-en un ci-dessous.</div>'
+            : formats.map((f, i) => `
+              <div class="sh-admin-list-item">
+                <span class="sh-admin-list-item-label">${_esc(f.label)}</span>
+                ${magPill(f.isMagic, i)}
+                <button class="sh-admin-del-btn" onclick="window._deleteWeaponFormat(${i})" title="Supprimer">🗑️</button>
+              </div>`).join('')}
+        </div>
+
+        <div class="sh-admin-add-row">
+          <input type="text" id="wf-new-label" placeholder="Nouveau format (ex: Arme 2M CaC Mag.)..."
+            onkeydown="if(event.key==='Enter'){event.preventDefault();window._addWeaponFormat();}">
+          <button class="btn btn-gold btn-sm" onclick="window._addWeaponFormat()">+ Ajouter</button>
+        </div>
+      </div>
     </div>
-    <div style="display:flex;gap:.4rem;margin-top:.75rem">
-      <input class="input-field" id="wf-new-label" placeholder="Nouveau format..." style="flex:1">
-      <button class="btn btn-gold btn-sm" onclick="window._addWeaponFormat()">+ Ajouter</button>
+
+    <div class="sh-admin-footer">
+      <button class="btn btn-arcane btn-sm" onclick="window.openDamageTypesAdmin()">⚡ Types de dégâts…</button>
+      <div class="sh-admin-footer-spacer"></div>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
     </div>
-    <div style="display:flex;gap:.4rem;margin-top:.5rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="window.openDamageTypesAdmin()">⚡ Types de dégâts…</button>
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModal()">Fermer</button>
-    </div>
+  </div>
   `);
   setTimeout(() => document.getElementById('wf-new-label')?.focus(), 60);
 }
@@ -401,69 +418,92 @@ function _renderDamageTypesModal(types) {
     ).join('');
     const isMagic = !!t.isMagic;
     return `
-    <div style="display:flex;flex-wrap:wrap;gap:.4rem .8rem;margin-top:.35rem;padding:.35rem .5rem;
-      background:var(--bg-base);border-radius:6px;font-size:.76rem;color:var(--text-dim)">
-      <label style="display:flex;align-items:center;gap:.3rem">
-        <input type="text" class="input-field" value="${_esc(t.icon||'')}"
-          style="width:38px;font-size:.85rem;text-align:center;padding:2px 4px"
-          placeholder="🔥" title="Icône"
+    <div class="sh-dmg-rules">
+      <label class="sh-dmg-rule">
+        <input type="text" value="${_esc(t.icon||'')}"
+          class="sh-dmg-icon" placeholder="🔥" title="Icône"
           onchange="window._saveDmgTypeProp(${i},'icon',this.value)">
         <input type="color" value="${t.color||'#9ca3af'}" title="Couleur"
-          style="width:26px;height:22px;border:none;border-radius:4px;cursor:pointer;background:none;padding:0"
+          class="sh-dmg-color"
           onchange="window._saveDmgTypeProp(${i},'color',this.value)">
       </label>
-      <label style="display:flex;align-items:center;gap:.3rem">
+      <label class="sh-dmg-rule sh-dmg-rule-check">
         <input type="checkbox" ${isMagic ? 'checked' : ''}
-          onchange="window._saveDmgTypeProp(${i},'isMagic',this.checked)"
-          title="Type magique — armes magiques peuvent utiliser cet élément">
-        Magique
+          onchange="window._saveDmgTypeProp(${i},'isMagic',this.checked)">
+        <span>🔮 Magique</span>
       </label>
-      <label style="display:flex;align-items:center;gap:.3rem">
-        Raté
-        <select class="input-field" style="font-size:.75rem;padding:2px 5px;width:auto"
+      <label class="sh-dmg-rule">
+        <span>Raté</span>
+        <select class="sh-admin-row-input" style="width:80px;text-align:left;font-family:inherit;font-weight:500;font-size:.76rem;padding:3px 6px"
           onchange="window._saveDmgTypeProp(${i},'rules.missEffect',this.value)">
           ${missOpts}
         </select>
       </label>
-      <label style="display:flex;align-items:center;gap:.3rem">
-        Pén. armure
-        <input type="number" class="input-field" min="0" max="100" value="${r.armorPen||0}"
-          style="width:52px;font-size:.75rem;padding:2px 5px"
-          onchange="window._saveDmgTypeProp(${i},'rules.armorPen',+this.value)"> %
+      <label class="sh-dmg-rule">
+        <span>Pén. armure</span>
+        <input type="number" class="sh-admin-row-input small" min="0" max="100" value="${r.armorPen||0}"
+          style="width:50px"
+          onchange="window._saveDmgTypeProp(${i},'rules.armorPen',+this.value)">
+        <span class="sh-admin-row-unit">%</span>
       </label>
-      <label style="display:flex;align-items:center;gap:.3rem">
-        Bonus dégâts
-        <input type="number" class="input-field" value="${r.dmgBonus||0}"
-          style="width:52px;font-size:.75rem;padding:2px 5px"
+      <label class="sh-dmg-rule">
+        <span>Bonus dégâts</span>
+        <input type="number" class="sh-admin-row-input small" value="${r.dmgBonus||0}"
+          style="width:50px"
           onchange="window._saveDmgTypeProp(${i},'rules.dmgBonus',+this.value)">
       </label>
     </div>`;
   };
 
-  openModal('⚡ Types de dégâts', `
-    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
-      Chaque type définit des règles appliquées automatiquement dans le VTT.<br>
-      <span style="color:var(--gold)">Magique</span> = armes magiques et sorts peuvent utiliser cet élément.
+  openModal('', `
+  <div class="sh-admin-modal is-formats">
+    <div class="sh-admin-head">
+      <div class="sh-admin-head-ico">⚡</div>
+      <div class="sh-admin-head-title">
+        <h2>Types de dégâts</h2>
+        <small>${types.length} type${types.length>1?'s':''} configuré${types.length>1?'s':''} · règles appliquées automatiquement dans le VTT</small>
+      </div>
+      <button class="sh-admin-close" onclick="closeModal()" title="Fermer">✕</button>
     </div>
-    <div style="display:flex;flex-direction:column;gap:.5rem">
-      ${types.map((t, i) => `
-      <div style="background:var(--bg-elevated);border:1px solid ${t.color||'var(--border)'};border-radius:8px;padding:.5rem .7rem">
-        <div style="display:flex;align-items:center;gap:.5rem">
-          <span style="font-size:1rem;min-width:1.2rem;text-align:center">${t.icon||'—'}</span>
-          <input class="input-field" value="${_esc(t.label)}" style="flex:1;font-size:.84rem"
-            onchange="window._saveDmgTypeProp(${i},'label',this.value)">
-          <button class="btn-icon" style="font-size:.7rem;color:#ff6b6b"
-            onclick="window._deleteDmgType(${i})">🗑️</button>
+
+    <div class="sh-admin-body">
+      <p class="sh-admin-intro">
+        Marque un type comme <em>magique</em> pour qu'il soit choisissable par les armes magiques et les sorts.
+      </p>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">📋 Types existants</div>
+        <div class="sh-admin-list">
+          ${types.length === 0
+            ? '<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun type — ajoute-en un ci-dessous.</div>'
+            : types.map((t, i) => `
+              <div class="sh-admin-list-item" style="flex-direction:column;align-items:stretch;gap:6px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:1.1rem;min-width:1.5rem;text-align:center">${t.icon||'—'}</span>
+                  <input type="text" class="sh-admin-row-input" value="${_esc(t.label)}"
+                    style="flex:1;text-align:left;font-family:inherit;font-weight:500"
+                    onchange="window._saveDmgTypeProp(${i},'label',this.value)">
+                  <button class="sh-admin-del-btn" onclick="window._deleteDmgType(${i})" title="Supprimer">🗑️</button>
+                </div>
+                ${mkRules(t, i)}
+              </div>`).join('')}
         </div>
-        ${mkRules(t, i)}
-      </div>`).join('')}
+
+        <div class="sh-admin-add-row">
+          <input type="text" id="dt-new-icon" placeholder="🌊"
+            style="width:50px;text-align:center;flex:0 0 auto">
+          <input type="text" id="dt-new-label" placeholder="Nouveau type (ex: Eau, Foudre…)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();window._addDmgType();}">
+          <button class="btn btn-gold btn-sm" onclick="window._addDmgType()">+ Ajouter</button>
+        </div>
+      </div>
     </div>
-    <div style="display:flex;gap:.4rem;margin-top:.75rem">
-      <input class="input-field" id="dt-new-icon" placeholder="🌊" style="width:44px;text-align:center">
-      <input class="input-field" id="dt-new-label" placeholder="Nouveau type..." style="flex:1">
-      <button class="btn btn-gold btn-sm" onclick="window._addDmgType()">+ Ajouter</button>
+
+    <div class="sh-admin-footer">
+      <div class="sh-admin-footer-spacer"></div>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
     </div>
-    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem" onclick="closeModal()">Fermer</button>
+  </div>
   `);
   setTimeout(() => document.getElementById('dt-new-label')?.focus(), 60);
 }
