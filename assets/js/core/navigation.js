@@ -6,7 +6,7 @@ import { STATE, setPage } from './state.js';
 import PAGES from '../features/pages.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { appSplashHtml } from '../shared/html.js';
-import { dispatchAction } from './actions.js';
+import { dispatchAction, dispatchValueAction } from './actions.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -158,6 +158,16 @@ export function initEventDelegation() {
     if (actionBtn && dispatchAction(actionBtn, e)) return;
   });
 
+  // Actions sur change / input (selects, checkboxes, champs texte…)
+  document.addEventListener('change', (e) => {
+    const el = e.target.closest('[data-change]');
+    if (el) dispatchValueAction(el, e, 'change');
+  });
+  document.addEventListener('input', (e) => {
+    const el = e.target.closest('[data-input]');
+    if (el) dispatchValueAction(el, e, 'input');
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       import('../shared/modal.js').then((m) => m.closeModalDirect());
@@ -229,7 +239,7 @@ function _renderPageError(page, err) {
       <div style="font-size:.88rem;color:var(--text-muted);max-width:360px;line-height:1.6">
         ${detail}
       </div>
-      <button onclick="navigate('${page}')"
+      <button data-navigate="${page}"
         style="margin-top:.5rem;padding:.5rem 1.5rem;border-radius:10px;cursor:pointer;
           font-size:.85rem;font-weight:600;border:1px solid var(--border-strong);
           background:var(--bg-elevated);color:var(--text-muted);transition:background .12s"

@@ -1558,7 +1558,7 @@ const PAGES = {
         <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
         <input type="text" placeholder="Rechercher…" id="ach-search-input"
           value="${_esc(window._achSearch || '')}"
-          oninput="window._achSetSearch(this.value)">
+          data-input="_achSetSearch">
       </div>
     </div>
     <div class="hall-content">
@@ -1661,6 +1661,7 @@ const PAGES = {
 };
 
 registerActions({
+  _achSetSearch:         (el)  => window._achSetSearch?.(el.value),
   // Dashboard
   _goToChar:             (btn) => window._goToChar?.(btn.dataset.id),
   _openQuickView:        (btn) => window._openQuickView?.(btn.dataset.id),

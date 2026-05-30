@@ -423,20 +423,20 @@ function _renderDamageTypesModal(types) {
       <label class="sh-dmg-rule">
         <input type="text" value="${_esc(t.icon||'')}"
           class="sh-dmg-icon" placeholder="🔥" title="Icône"
-          onchange="window._saveDmgTypeProp(${i},'icon',this.value)">
+          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="icon">
         <input type="color" value="${t.color||'#9ca3af'}" title="Couleur"
           class="sh-dmg-color"
-          onchange="window._saveDmgTypeProp(${i},'color',this.value)">
+          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="color">
       </label>
       <label class="sh-dmg-rule sh-dmg-rule-check">
         <input type="checkbox" ${isMagic ? 'checked' : ''}
-          onchange="window._saveDmgTypeProp(${i},'isMagic',this.checked)">
+          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="isMagic" data-vtype="bool">
         <span>🔮 Magique</span>
       </label>
       <label class="sh-dmg-rule">
         <span>Raté</span>
         <select class="sh-admin-row-input" style="width:80px;text-align:left;font-family:inherit;font-weight:500;font-size:.76rem;padding:3px 6px"
-          onchange="window._saveDmgTypeProp(${i},'rules.missEffect',this.value)">
+          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missEffect">
           ${missOpts}
         </select>
       </label>
@@ -444,14 +444,14 @@ function _renderDamageTypesModal(types) {
         <span>Pén. armure</span>
         <input type="number" class="sh-admin-row-input small" min="0" max="100" value="${r.armorPen||0}"
           style="width:50px"
-          onchange="window._saveDmgTypeProp(${i},'rules.armorPen',+this.value)">
+          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.armorPen" data-vtype="num">
         <span class="sh-admin-row-unit">%</span>
       </label>
       <label class="sh-dmg-rule">
         <span>Bonus dégâts</span>
         <input type="number" class="sh-admin-row-input small" value="${r.dmgBonus||0}"
           style="width:50px"
-          onchange="window._saveDmgTypeProp(${i},'rules.dmgBonus',+this.value)">
+          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.dmgBonus" data-vtype="num">
       </label>
     </div>`;
   };
@@ -483,7 +483,7 @@ function _renderDamageTypesModal(types) {
                   <span style="font-size:1.1rem;min-width:1.5rem;text-align:center">${t.icon||'—'}</span>
                   <input type="text" class="sh-admin-row-input" value="${_esc(t.label)}"
                     style="flex:1;text-align:left;font-family:inherit;font-weight:500"
-                    onchange="window._saveDmgTypeProp(${i},'label',this.value)">
+                    data-change="_saveDmgTypeProp" data-i="${i}" data-prop="label">
                   <button class="sh-admin-del-btn" data-action="_deleteDmgType" data-idx="${i}" title="Supprimer">🗑️</button>
                 </div>
                 ${mkRules(t, i)}
@@ -622,12 +622,12 @@ function _renderSpellMatricesModal(types) {
             <label style="display:flex;align-items:center;gap:.25rem;font-size:.72rem;color:var(--text-dim)">
               CA /rune
               <input type="number" min="0" max="10" step="1" value="${mod}"
-                onchange="window._setSpellMatrixCAMod('${t.id}', this.value)"
+                data-change="_setSpellMatrixCAMod" data-tid="${t.id}"
                 style="width:48px;padding:.2rem;text-align:center;background:var(--bg-base);
                 border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:.85rem">
             </label>
             <input class="input-field" placeholder="Note (ex: désavantage à distance contre la cible)"
-              value="${_esc(note)}" oninput="window._setSpellMatrixCANote('${t.id}', this.value)"
+              value="${_esc(note)}" data-input="_setSpellMatrixCANote" data-tid="${t.id}"
               style="flex:1;font-size:.74rem;padding:.25rem .45rem">
           </div>`;
         }).join('')}
@@ -658,12 +658,12 @@ function _renderSpellMatricesModal(types) {
             border:1px solid var(--border);border-radius:8px;padding:.5rem .7rem">
             <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.78rem">
               <input type="checkbox" ${enabled?'checked':''}
-                onchange="window._setSpellMatrixComboEnabled('${id}', this.checked)">
+                data-change="_setSpellMatrixComboEnabled" data-id="${id}">
               <span style="color:${enabled?'var(--text)':'var(--text-dim)'};font-weight:${enabled?'700':'400'}">${def.name}</span>
             </label>
             <input class="input-field" placeholder="Nom personnalisé (vide = ${_esc(def.name)})"
               value="${_esc(ov.name||'')}"
-              oninput="window._setSpellMatrixComboName('${id}', this.value)"
+              data-input="_setSpellMatrixComboName" data-id="${id}"
               style="flex:1;font-size:.74rem;padding:.25rem .45rem">
             <span style="font-size:.66rem;color:var(--text-dim);font-style:italic;min-width:50%;text-align:right">${COMBO_DESCS[id] || ''}</span>
           </div>`;
@@ -697,20 +697,20 @@ function _renderSpellMatricesModal(types) {
                 <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Arme</span>
                 <input class="input-field" placeholder="ex : Épée flottante"
                   value="${_esc(a.weapon||'')}"
-                  oninput="window._setSpellMatrixArm('${t.id}','weapon', this.value)"
+                  data-input="_setSpellMatrixArm" data-tid="${t.id}" data-arm="weapon"
                   style="font-size:.76rem;padding:.25rem .4rem">
               </label>
               <label style="display:flex;flex-direction:column;gap:.1rem">
                 <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Dégâts</span>
                 <input class="input-field" placeholder="ex : 1d8 +2"
                   value="${_esc(a.degats||'')}"
-                  oninput="window._setSpellMatrixArm('${t.id}','degats', this.value)"
+                  data-input="_setSpellMatrixArm" data-tid="${t.id}" data-arm="degats"
                   style="font-size:.76rem;padding:.25rem .4rem">
               </label>
               <label style="display:flex;flex-direction:column;gap:.1rem">
                 <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Stat Toucher</span>
                 <select class="input-field"
-                  onchange="window._setSpellMatrixArm('${t.id}','statToucher', this.value)"
+                  data-change="_setSpellMatrixArm" data-tid="${t.id}" data-arm="statToucher"
                   style="font-size:.74rem;padding:.25rem .4rem">
                   ${statOpts.map(o => `<option value="${o.v}" ${(a.statToucher||a.stat||'force')===o.v?'selected':''}>${o.l}</option>`).join('')}
                 </select>
@@ -718,7 +718,7 @@ function _renderSpellMatricesModal(types) {
               <label style="display:flex;flex-direction:column;gap:.1rem">
                 <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Stat Dégâts</span>
                 <select class="input-field"
-                  onchange="window._setSpellMatrixArm('${t.id}','statDegats', this.value)"
+                  data-change="_setSpellMatrixArm" data-tid="${t.id}" data-arm="statDegats"
                   style="font-size:.74rem;padding:.25rem .4rem">
                   ${statOpts.map(o => `<option value="${o.v}" ${(a.statDegats||a.stat||'force')===o.v?'selected':''}>${o.l}</option>`).join('')}
                 </select>
@@ -727,7 +727,7 @@ function _renderSpellMatricesModal(types) {
                 <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Portée (m)</span>
                 <input type="number" min="1" max="30" placeholder="1"
                   value="${a.portee||''}"
-                  oninput="window._setSpellMatrixArm('${t.id}','portee', this.value)"
+                  data-input="_setSpellMatrixArm" data-tid="${t.id}" data-arm="portee"
                   style="font-size:.76rem;padding:.25rem .4rem;background:var(--bg-base);
                   border:1px solid var(--border);border-radius:5px;color:var(--text);text-align:center">
               </label>
@@ -735,7 +735,7 @@ function _renderSpellMatricesModal(types) {
                 <span style="font-size:.66rem;color:var(--text-dim);font-weight:600">Note (propriétés)</span>
                 <input class="input-field" placeholder="ex : Action Bonus chaque tour…"
                   value="${_esc(a.note||'')}"
-                  oninput="window._setSpellMatrixArm('${t.id}','note', this.value)"
+                  data-input="_setSpellMatrixArm" data-tid="${t.id}" data-arm="note"
                   style="font-size:.74rem;padding:.25rem .4rem">
               </label>
             </div>
@@ -774,7 +774,7 @@ function _renderSpellMatricesModal(types) {
                 return `<label style="display:flex;flex-direction:column;gap:.15rem">
                   <span style="font-size:.7rem;color:var(--text-dim);font-weight:600;display:flex;align-items:center;gap:.3rem">${SLOT_LABELS[slot]} ${badge}</span>
                   <textarea class="input-field" rows="3" placeholder="${_esc(placeholderEx)}"
-                    oninput="window._setSpellMatrixEffect('${catKey}','${t.id}','${slot}', this.value)"
+                    data-input="_setSpellMatrixEffect" data-cat-key="${catKey}" data-tid="${t.id}" data-slot="${slot}"
                     style="font-size:.74rem;padding:.3rem .45rem;font-family:inherit;resize:vertical;min-height:60px">${_esc(txt)}</textarea>
                 </label>`;
               }).join('')}
@@ -1157,6 +1157,17 @@ export function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
 }
 
 registerActions({
+  _saveDmgTypeProp: (el) => {
+    const t = el.dataset.vtype;
+    const v = t === 'bool' ? el.checked : t === 'num' ? +el.value : el.value;
+    window._saveDmgTypeProp?.(Number(el.dataset.i), el.dataset.prop, v);
+  },
+  _setSpellMatrixCAMod:        (el) => window._setSpellMatrixCAMod?.(el.dataset.tid, el.value),
+  _setSpellMatrixCANote:       (el) => window._setSpellMatrixCANote?.(el.dataset.tid, el.value),
+  _setSpellMatrixComboEnabled: (el) => window._setSpellMatrixComboEnabled?.(el.dataset.id, el.checked),
+  _setSpellMatrixComboName:    (el) => window._setSpellMatrixComboName?.(el.dataset.id, el.value),
+  _setSpellMatrixArm:          (el) => window._setSpellMatrixArm?.(el.dataset.tid, el.dataset.arm, el.value),
+  _setSpellMatrixEffect:       (el) => window._setSpellMatrixEffect?.(el.dataset.catKey, el.dataset.tid, el.dataset.slot, el.value),
   _removeParent:            (btn) => btn.parentElement?.remove(),
   _editCombatStyle:         (btn) => window._editCombatStyle(Number(btn.dataset.idx)),
   _deleteCombatStyle:       (btn) => window._deleteCombatStyle(Number(btn.dataset.idx)),

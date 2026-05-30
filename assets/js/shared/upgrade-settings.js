@@ -8,6 +8,7 @@
 
 import { getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModalDirect, confirmModal } from './modal.js';
+import { registerActions } from '../core/actions.js';
 import { showNotif } from './notifications.js';
 import { _esc } from './html.js';
 
@@ -144,20 +145,20 @@ function _renderUpgradeSettingsModal() {
   const s = getUpgradeSettings();
 
   // Row "tarif" : label flex + input nombre + unité PO
-  const tierRow = (label, value, onchange, step = 10) => `
+  const tierRow = (label, value, field, step = 10) => `
     <div class="sh-admin-row-line">
       <span class="sh-admin-row-lbl">${label}</span>
       <input type="number" class="sh-admin-row-input" value="${value}" min="0" step="${step}"
-        oninput="${onchange}">
+        data-input="_upgField" data-field="${field}">
       <span class="sh-admin-row-unit">PO</span>
     </div>`;
 
   // Row "plafond" : label + input nombre + (pas d'unité ou unité custom)
-  const capRow = (label, value, onchange, unit = '') => `
+  const capRow = (label, value, field, unit = '') => `
     <div class="sh-admin-row-line">
       <span class="sh-admin-row-lbl">${label}</span>
       <input type="number" class="sh-admin-row-input small" value="${value}" min="0" step="1"
-        oninput="${onchange}">
+        data-input="_upgField" data-field="${field}">
       ${unit ? `<span class="sh-admin-row-unit">${unit}</span>` : '<span class="sh-admin-row-unit"></span>'}
     </div>`;
 
@@ -169,7 +170,7 @@ function _renderUpgradeSettingsModal() {
         <h2>Tarifs et plafonds des améliorations</h2>
         <small>Configuration globale de l'<em>Artisan</em> · s'applique immédiatement</small>
       </div>
-      <button class="sh-admin-close" onclick="closeModal()" title="Fermer">✕</button>
+      <button class="sh-admin-close" data-action="_upgClose" title="Fermer">✕</button>
     </div>
 
     <div class="sh-admin-body">
@@ -179,16 +180,16 @@ function _renderUpgradeSettingsModal() {
         <div class="sh-admin-section-title">🔖 Traits</div>
         ${tierRow('Détruire un objet pour récupérer son trait',
           s.trait.deconstructCost,
-          "window._upgSetField('trait.deconstructCost',+this.value)")}
+          'trait.deconstructCost')}
         ${tierRow('Ajouter un trait (slot libre, fragment requis)',
           s.trait.addTraitFromFragment,
-          "window._upgSetField('trait.addTraitFromFragment',+this.value)")}
+          'trait.addTraitFromFragment')}
         ${tierRow('Écraser un trait existant',
           s.trait.overwriteTrait,
-          "window._upgSetField('trait.overwriteTrait',+this.value)")}
+          'trait.overwriteTrait')}
         <label class="sh-admin-row-checkbox" style="margin-top:8px;padding:6px 0">
           <input type="checkbox" ${s.trait.extractAllTraits ? 'checked' : ''}
-            onchange="window._upgSetField('trait.extractAllTraits',this.checked)">
+            data-change="_upgCheck" data-field="trait.extractAllTraits">
           <span>Récupérer <b>tous</b> les traits à la destruction <small style="color:var(--text-dim)">(sinon seul le 1ᵉʳ)</small></span>
         </label>
       </div>
@@ -197,53 +198,53 @@ function _renderUpgradeSettingsModal() {
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">⚔️ Armes 1M <small style="font-weight:400;color:var(--text-dim);font-family:inherit">— bouclier, baguette, main libre</small></div>
         <p class="sh-admin-section-hint">Plafond : <b style="color:var(--text)">${s.caps.weapon1H}</b> points de stats distribuables.</p>
-        ${tierRow('1ᵉʳ point de stat', s.weapon['1H'][1], "window._upgSetField('weapon.1H.1',+this.value)")}
-        ${tierRow('2ᵉ point de stat',  s.weapon['1H'][2], "window._upgSetField('weapon.1H.2',+this.value)")}
+        ${tierRow('1ᵉʳ point de stat', s.weapon['1H'][1], 'weapon.1H.1')}
+        ${tierRow('2ᵉ point de stat',  s.weapon['1H'][2], 'weapon.1H.2')}
       </div>
 
       <!-- ── Armes 2M ──────────────────────────────────────── -->
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">⚔️ Armes 2M</div>
         <p class="sh-admin-section-hint">Plafond : <b style="color:var(--text)">${s.caps.weapon2H}</b> points de stats distribuables.</p>
-        ${tierRow('1ᵉʳ point de stat', s.weapon['2H'][1], "window._upgSetField('weapon.2H.1',+this.value)")}
-        ${tierRow('2ᵉ point de stat',  s.weapon['2H'][2], "window._upgSetField('weapon.2H.2',+this.value)")}
-        ${tierRow('3ᵉ point de stat',  s.weapon['2H'][3], "window._upgSetField('weapon.2H.3',+this.value)")}
-        ${tierRow('4ᵉ point de stat',  s.weapon['2H'][4], "window._upgSetField('weapon.2H.4',+this.value)")}
+        ${tierRow('1ᵉʳ point de stat', s.weapon['2H'][1], 'weapon.2H.1')}
+        ${tierRow('2ᵉ point de stat',  s.weapon['2H'][2], 'weapon.2H.2')}
+        ${tierRow('3ᵉ point de stat',  s.weapon['2H'][3], 'weapon.2H.3')}
+        ${tierRow('4ᵉ point de stat',  s.weapon['2H'][4], 'weapon.2H.4')}
       </div>
 
       <!-- ── Amulettes ─────────────────────────────────────── -->
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">📿 Amulettes</div>
         <p class="sh-admin-section-hint">3 stats distinctes max, +1 chacune.</p>
-        ${tierRow('1ʳᵉ stat', s.amulet[1], "window._upgSetField('amulet.1',+this.value)")}
-        ${tierRow('2ᵉ stat',  s.amulet[2], "window._upgSetField('amulet.2',+this.value)")}
-        ${tierRow('3ᵉ stat',  s.amulet[3], "window._upgSetField('amulet.3',+this.value)")}
+        ${tierRow('1ʳᵉ stat', s.amulet[1], 'amulet.1')}
+        ${tierRow('2ᵉ stat',  s.amulet[2], 'amulet.2')}
+        ${tierRow('3ᵉ stat',  s.amulet[3], 'amulet.3')}
       </div>
 
       <!-- ── Anneaux ───────────────────────────────────────── -->
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">💍 Anneaux</div>
         <p class="sh-admin-section-hint">Stat et effet améliorables séparément, +1 max chacun.</p>
-        ${tierRow("Coût d'amélioration (+1)", s.ring[1], "window._upgSetField('ring.1',+this.value)")}
+        ${tierRow("Coût d'amélioration (+1)", s.ring[1], 'ring.1')}
       </div>
 
       <!-- ── Plafonds ──────────────────────────────────────── -->
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">📏 Plafonds</div>
-        ${capRow('Points stats max — Arme 1M', s.caps.weapon1H, "window._upgSetField('caps.weapon1H',+this.value)")}
-        ${capRow('Points stats max — Arme 2M', s.caps.weapon2H, "window._upgSetField('caps.weapon2H',+this.value)")}
-        ${capRow('Stats max — Amulette',       s.caps.amulet,   "window._upgSetField('caps.amulet',+this.value)")}
-        ${capRow('Paliers max — Anneau',       s.caps.ring,     "window._upgSetField('caps.ring',+this.value)")}
+        ${capRow('Points stats max — Arme 1M', s.caps.weapon1H, 'caps.weapon1H')}
+        ${capRow('Points stats max — Arme 2M', s.caps.weapon2H, 'caps.weapon2H')}
+        ${capRow('Stats max — Amulette',       s.caps.amulet,   'caps.amulet')}
+        ${capRow('Paliers max — Anneau',       s.caps.ring,     'caps.ring')}
 
         <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border-md)">
           <p class="sh-admin-section-hint" style="margin-bottom:6px">Slots de traits par catégorie d'item :</p>
-          ${capRow('⚔️ Arme (toutes confondues)', s.caps.traitsPerItem.arme,            "window._upgSetField('caps.traitsPerItem.arme',+this.value)")}
-          ${capRow('🪖 Tête',                     s.caps.traitsPerItem['Tête'],          "window._upgSetField('caps.traitsPerItem.Tête',+this.value)")}
-          ${capRow('🛡️ Torse',                    s.caps.traitsPerItem['Torse'],         "window._upgSetField('caps.traitsPerItem.Torse',+this.value)")}
-          ${capRow('🥾 Pieds',                    s.caps.traitsPerItem['Pieds'],         "window._upgSetField('caps.traitsPerItem.Pieds',+this.value)")}
-          ${capRow('📿 Amulette',                 s.caps.traitsPerItem['Amulette'],      "window._upgSetField('caps.traitsPerItem.Amulette',+this.value)")}
-          ${capRow('💍 Anneau',                   s.caps.traitsPerItem['Anneau'],        "window._upgSetField('caps.traitsPerItem.Anneau',+this.value)")}
-          ${capRow('🔮 Objet magique',            s.caps.traitsPerItem['Objet magique'], "window._upgSetField('caps.traitsPerItem.Objet magique',+this.value)")}
+          ${capRow('⚔️ Arme (toutes confondues)', s.caps.traitsPerItem.arme,            'caps.traitsPerItem.arme')}
+          ${capRow('🪖 Tête',                     s.caps.traitsPerItem['Tête'],          'caps.traitsPerItem.Tête')}
+          ${capRow('🛡️ Torse',                    s.caps.traitsPerItem['Torse'],         'caps.traitsPerItem.Torse')}
+          ${capRow('🥾 Pieds',                    s.caps.traitsPerItem['Pieds'],         'caps.traitsPerItem.Pieds')}
+          ${capRow('📿 Amulette',                 s.caps.traitsPerItem['Amulette'],      'caps.traitsPerItem.Amulette')}
+          ${capRow('💍 Anneau',                   s.caps.traitsPerItem['Anneau'],        'caps.traitsPerItem.Anneau')}
+          ${capRow('🔮 Objet magique',            s.caps.traitsPerItem['Objet magique'], 'caps.traitsPerItem.Objet magique')}
         </div>
       </div>
 
@@ -253,7 +254,7 @@ function _renderUpgradeSettingsModal() {
         <div class="sh-admin-row-line">
           <span class="sh-admin-row-lbl">Remboursement à la revente d'un objet amélioré</span>
           <input type="number" class="sh-admin-row-input small" value="${Math.round(s.refundUpgradeRatio * 100)}" min="0" max="100" step="5"
-            oninput="window._upgSetField('refundUpgradeRatio',(+this.value)/100)">
+            data-input="_upgRatio">
           <span class="sh-admin-row-unit">%</span>
         </div>
         <p class="sh-admin-section-hint" style="margin-top:6px">
@@ -264,10 +265,10 @@ function _renderUpgradeSettingsModal() {
     </div>
 
     <div class="sh-admin-footer">
-      <button class="btn btn-outline btn-sm" onclick="window._upgResetDefaults()">↻ Restaurer défauts</button>
+      <button class="btn btn-outline btn-sm" data-action="_upgReset">↻ Restaurer défauts</button>
       <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-gold btn-sm" onclick="window._upgSaveAndClose()">💾 Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="_upgClose">Annuler</button>
+      <button class="btn btn-gold btn-sm" data-action="_upgSave">💾 Enregistrer</button>
     </div>
   </div>
   `);
@@ -306,3 +307,12 @@ window._upgResetDefaults = async () => {
 };
 
 window.openUpgradeSettingsAdmin = openUpgradeSettingsAdmin;
+
+registerActions({
+  _upgClose: () => window.closeModal?.(),
+  _upgReset: () => window._upgResetDefaults?.(),
+  _upgSave: () => window._upgSaveAndClose?.(),
+  _upgField: (el) => window._upgSetField?.(el.dataset.field, +el.value),
+  _upgCheck: (el) => window._upgSetField?.(el.dataset.field, el.checked),
+  _upgRatio: (el) => window._upgSetField?.('refundUpgradeRatio', (+el.value) / 100),
+});

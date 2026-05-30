@@ -10212,7 +10212,7 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
       <input type="text" id="vtt-deleg-search" class="vtt-deleg-search"
         placeholder="Rechercher un joueur ou un personnage…"
         value="${_esc(search)}"
-        oninput="window._vttFilterDelegates('${tokenId}', this.value)">
+        data-input="_vttFilterDelegates" data-token-id="${tokenId}">
     </div>
     <div class="vtt-deleg-list">${rows}</div>
     ${(STATE.isAdmin && ghosts.length) ? `
@@ -13012,6 +13012,7 @@ window._vttSelectMiniChar = (uid, charId) => {
 PAGES.vtt=renderVttPage;
 
 registerActions({
+  _vttFilterDelegates:     (el)  => window._vttFilterDelegates?.(el.dataset.tokenId, el.value),
   _vttToggleTokenDelegate: (btn) => window._vttToggleTokenDelegate?.(btn.dataset.tokenId, btn.dataset.uid2),
   _vttCleanGhostMembers:   ()    => window._vttCleanGhostMembers?.(),
   _vttDelegClose:          ()    => window.closeModalDirect?.(),
