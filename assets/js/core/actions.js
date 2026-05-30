@@ -30,3 +30,17 @@ export function dispatchAction(btn, event) {
   handler(btn, event);
   return true;
 }
+
+/**
+ * Déclenche l'action liée à un événement change/input.
+ * @param {HTMLElement} el élément portant data-change ou data-input
+ * @param {Event} event
+ * @param {'change'|'input'} attr nom du dataset à lire
+ */
+export function dispatchValueAction(el, event, attr) {
+  const action = el.dataset[attr];
+  const handler = ACTIONS[action];
+  if (!handler) return false;
+  handler(el, event);
+  return true;
+}

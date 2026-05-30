@@ -151,7 +151,7 @@ function _renderArtisanModal() {
 
   const charSelect = chars.length > 1 || STATE.isAdmin
     ? `<select class="input-field" style="font-size:.85rem;padding:.4rem .55rem"
-        onchange="window._artisanSelectChar(this.value)">
+        data-change="_artisanSelectChar">
         ${chars.map(ch => `<option value="${ch.id}"${ch.id === c?.id ? ' selected' : ''}>${_esc(ch.nom || '?')}${STATE.isAdmin ? ` (${_esc(ch.ownerPseudo || '')})` : ''}</option>`).join('')}
       </select>`
     : `<div style="font-size:.92rem;font-weight:700;color:var(--text)">${_esc(c?.nom || '?')}</div>`;
@@ -164,7 +164,7 @@ function _renderArtisanModal() {
       padding:.3rem .55rem;border-radius:6px;border:1px solid ${_mjFreeMode ? 'rgba(255,107,107,.4)' : 'var(--border)'};
       background:${_mjFreeMode ? 'rgba(255,107,107,.08)' : 'transparent'};white-space:nowrap">
       <input type="checkbox" ${_mjFreeMode ? 'checked' : ''}
-        onchange="window._artisanToggleMjFree(this.checked)"
+        data-change="_artisanToggleMjFree"
         style="margin:0;cursor:pointer">
       🔧 MJ gratuit
     </label>` : '';
@@ -1190,6 +1190,8 @@ window._artisanWeaponAddPoint = async (invIndex, statFullKey) => {
 window.openArtisanModal = openArtisanModal;
 
 registerActions({
+  _artisanSelectChar: (el) => window._artisanSelectChar?.(el.value),
+  _artisanToggleMjFree: (el) => window._artisanToggleMjFree?.(el.checked),
   _artisanOpenTraitsActions: (btn) => window._artisanOpenTraitsActions?.(Number(btn.dataset.i)),
   _artisanOpenStatsActions: (btn) => window._artisanOpenStatsActions?.(Number(btn.dataset.i)),
   _artisanOpenHistory: (btn) => window._artisanOpenHistory?.(Number(btn.dataset.i)),

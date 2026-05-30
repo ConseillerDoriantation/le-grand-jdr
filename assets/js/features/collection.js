@@ -115,7 +115,7 @@ function openTemplateModal() {
   openModal('🖼️ Image template des cartes', `
     <div class="form-group"><label>Image recto (dos de carte)</label>
       <div class="sh-upload-simple">
-        <input type="file" id="tpl-img-file" accept="image/*" onchange="previewUploadPng('tpl-img-file','tpl-img-preview','tpl-img-b64')">
+        <input type="file" id="tpl-img-file" accept="image/*" data-change="previewUploadPng" data-preview="tpl-img-preview" data-b64="tpl-img-b64">
         <input type="hidden" id="tpl-img-b64">
       </div>
       <div id="tpl-img-preview">${_templateUrl ? `<img src="${_templateUrl}" style="max-height:120px;margin-top:0.4rem;display:block">` : ''}</div>
@@ -147,7 +147,7 @@ function openCollectionModal(card = null) {
     <div class="form-group"><label>Description</label><textarea class="input-field" id="cc-desc" rows="4">${card?.description || ''}</textarea></div>
     <div class="form-group"><label>Image <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
       <div class="sh-upload-simple">
-        <input type="file" id="cat-img-file" accept="image/*" onchange="previewUploadPng('cat-img-file','sc-img-preview','cat-img-b64')">
+        <input type="file" id="cat-img-file" accept="image/*" data-change="previewUploadPng" data-preview="sc-img-preview" data-b64="cat-img-b64">
         <input type="hidden" id="cat-img-b64" value="${card?.imageUrl || ''}">
       </div>
       <div id="sc-img-preview">${card?.imageUrl ? `<img src="${card.imageUrl}" style="max-height:80px;margin-top:0.4rem;display:block">` : ''}</div>
@@ -206,4 +206,5 @@ registerActions({
   editCard:    (btn) => editCard(btn.dataset.id),
   toggleUnlock:(btn) => toggleUnlock(btn.dataset.id),
   deleteCard:  (btn) => deleteCard(btn.dataset.id),
+  previewUploadPng: (el) => window.previewUploadPng?.(el.id, el.dataset.preview, el.dataset.b64),
 });

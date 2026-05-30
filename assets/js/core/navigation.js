@@ -6,7 +6,7 @@ import { STATE, setPage } from './state.js';
 import PAGES from '../features/pages.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { appSplashHtml } from '../shared/html.js';
-import { dispatchAction } from './actions.js';
+import { dispatchAction, dispatchValueAction } from './actions.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -156,6 +156,16 @@ export function initEventDelegation() {
 
     // Dispatch vers le registry central des features
     if (actionBtn && dispatchAction(actionBtn, e)) return;
+  });
+
+  // Actions sur change / input (selects, checkboxes, champs texte…)
+  document.addEventListener('change', (e) => {
+    const el = e.target.closest('[data-change]');
+    if (el) dispatchValueAction(el, e, 'change');
+  });
+  document.addEventListener('input', (e) => {
+    const el = e.target.closest('[data-input]');
+    if (el) dispatchValueAction(el, e, 'input');
   });
 
   document.addEventListener('keydown', (e) => {

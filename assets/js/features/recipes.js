@@ -267,7 +267,7 @@ function _render() {
         </button>`).join('')}
     </div>
     <input type="text" class="input-field" placeholder="🔍 Rechercher..."
-      value="${_filterTxt}" oninput="recSearch(this.value)"
+      value="${_filterTxt}" data-input="recSearch"
       style="max-width:240px;font-size:.82rem">
   </div>
 
@@ -836,6 +836,7 @@ Object.assign(window, {
 
 registerActions({
   recSetTab: (btn) => window.recSetTab?.(btn.dataset.id),
+  recSearch: (el) => window.recSearch?.(el.value),
   _recOpenModal: (btn) => openRecipeModal(btn.dataset.type),
   _recEdit: (btn) => openRecipeModal(btn.dataset.type, btn.dataset.id),
   _recEditShop: (btn) => openShopRecipeModal(btn.dataset.id),
