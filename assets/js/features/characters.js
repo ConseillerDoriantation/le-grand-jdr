@@ -2684,6 +2684,7 @@ registerActions({
   editNoteTitle:            (btn)   => editNoteTitle(Number(btn.dataset.idx)),
   addCompteRow:             (btn)   => addCompteRow(btn.dataset.compteType),
   deleteCompteRow:          (btn)   => deleteCompteRow(btn.dataset.compteType, Number(btn.dataset.idx)),
+  saveCompteField:          (el)    => saveCompteField(el.dataset.compteType, Number(el.dataset.idx), el.dataset.field, el.value),
   _toggleCompteHist:        (btn)   => window._toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
   _csAddXp:                 (btn)   => window._csAddXp(btn.dataset.id),
   _allocStatPoint:          (btn)   => window._allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),

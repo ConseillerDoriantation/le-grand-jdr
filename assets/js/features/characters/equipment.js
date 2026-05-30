@@ -228,7 +228,7 @@ export function editEquipSlot(slot) {
     ${hasCompat
       ? `<div class="form-group">
           <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
-          <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" onchange="equipSlotFromInv(this.value, this.dataset.equipSlot)">
+          <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" data-change="equipSlotFromInv">
             <option value="">— Sélectionner un objet —</option>
             ${invOptions}
           </select>
@@ -412,6 +412,7 @@ export async function clearEquipSlot(slot) {
 }
 
 registerActions({
+  equipSlotFromInv: (el) => equipSlotFromInv(el.value, el.dataset.equipSlot),
   saveEquipSlot:  (btn) => saveEquipSlot(btn.dataset.slot),
   clearEquipSlot: (btn) => clearEquipSlot(btn.dataset.slot),
   _eqClose:       ()    => closeModal(),
