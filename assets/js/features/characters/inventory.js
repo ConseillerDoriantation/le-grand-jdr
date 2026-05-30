@@ -282,7 +282,7 @@ export function renderCharInventaire(c, canEdit) {
       <span class="inv-search-icon">🔍</span>
       <input class="inv-search-input" type="text" placeholder="Rechercher un objet…"
         value="${_esc(window._charInvSearch || '')}"
-        oninput="window._charInvSearch=this.value;filterInvRows(this.value)">
+        data-input="_charInvSearch">
       ${q ? `<button class="inv-search-clear" data-action="filterInvClear">✕</button>` : ''}
     </div>`;
 
@@ -401,7 +401,7 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
         <div class="invm-stepper">
           <button type="button" class="invm-step" data-action="_invmStep" data-input="sell-qty" data-delta="-1" data-max="${maxQte}" data-context="sell">−</button>
           <input type="number" id="sell-qty" min="1" max="${maxQte}" value="1"
-            oninput="window._sellRefreshTotal(this,${prixVente},${maxQte})">
+            data-input="_sellRefreshTotal" data-prix="${prixVente}" data-max="${maxQte}">
           <button type="button" class="invm-step" data-action="_invmStep" data-input="sell-qty" data-delta="1" data-max="${maxQte}" data-context="sell">+</button>
         </div>
         <div class="invm-total">
@@ -942,7 +942,7 @@ export async function addInvItem() {
 
   openModal('🎁 Butin — Ajouter un objet', `
     <input class="input-field" id="loot-search" placeholder="🔍 Rechercher dans tous les objets…"
-      oninput="window._lootFilter()" style="margin-bottom:.45rem">
+      data-input="_lootFilter" style="margin-bottom:.45rem">
     <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:.45rem">
       ${recentPill}${catPills}
     </div>
@@ -1099,6 +1099,9 @@ export async function saveInvItem(idx) {
 }
 
 registerActions({
+  _charInvSearch:      (el)  => { window._charInvSearch = el.value; filterInvRows(el.value); },
+  _sellRefreshTotal:   (el)  => window._sellRefreshTotal?.(el, Number(el.dataset.prix), Number(el.dataset.max)),
+  _lootFilter:         ()    => window._lootFilter?.(),
   sendGold:            (btn) => sendGold(btn.dataset.id),
   saveInvItemFromShop: ()    => saveInvItemFromShop(),
   saveInvItem:         (btn) => saveInvItem(Number(btn.dataset.idx)),

@@ -485,10 +485,10 @@ async function renderStory() {
       <div class="search-wrap">
         <span style="color:var(--text-dim);font-size:.85rem">🔍</span>
         <input type="text" id="st-search" placeholder="Rechercher un titre, un axe, un lieu… (sans accents OK)"
-          value="${_esc(prefs.search)}" oninput="window._stOnSearch(this)">
+          value="${_esc(prefs.search)}" data-input="_stOnSearch">
         ${prefs.search ? `<button data-action="_stSetFilter" data-key="search" data-val="" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:.75rem">✕</button>` : ''}
       </div>
-      <select class="statut-select" onchange="window._stSetFilter('statut', this.value)">
+      <select class="statut-select" data-change="_stSetStatut">
         <option value="">Tous les statuts</option>
         ${Object.keys(STATUT_CFG).map(s => `<option value="${s}" ${prefs.statut===s?'selected':''}>${STATUT_CFG[s].icon} ${s}</option>`).join('')}
       </select>
@@ -2138,6 +2138,8 @@ registerActions({
   _stDeleteAfterCloseModal:(btn) => { closeModal(); deleteStory(btn.dataset.id); },
   _stSetView:              (btn) => window._stSetView?.(btn.dataset.view),
   _stSetFilter:            (btn) => window._stSetFilter?.(btn.dataset.key, btn.dataset.val),
+  _stOnSearch:             (el)  => window._stOnSearch?.(el),
+  _stSetStatut:            (el)  => window._stSetFilter?.('statut', el.value),
   _stResetFilters:         ()    => window._stResetFilters?.(),
   _stSwitchActe:           (btn) => window._stSwitchActe?.(btn.dataset.acte),
   _stMapZoom:              (btn) => window._stMapZoom?.(Number(btn.dataset.factor)),
