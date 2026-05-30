@@ -138,23 +138,34 @@ export async function openManageAdventureModal(adventureId) {
   const access   = adv.accessList || [];
 
   const _userLine = (u, isAdmin) => {
-    const isCreator = u.uid === adv.createdBy;
-    return `<div class="adv-member-row" id="mbr-${u.uid}">
+    const isCreator = u.id === adv.createdBy;
+    return `<div class="adv-member-row" id="mbr-${u.id}">
       <span class="adv-member-pseudo">${_esc(u.pseudo || u.email)}</span>
       ${isAdmin ? '<span class="adv-role adv-role--mj">MJ</span>' : '<span class="adv-role adv-role--joueur">Joueur</span>'}
       <div class="adv-member-actions">
-        ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${u.uid}">⬆️</button>` : ''}
-        ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${u.uid}">✕</button>` : ''}
+        ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${u.id}">⬆️</button>` : ''}
+        ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${u.id}">✕</button>` : ''}
       </div>
     </div>`;
   };
 
   const memberLines = [
-    ...allUsers.filter(u => admins.includes(u.uid)).map(u => _userLine(u, true)),
-    ...allUsers.filter(u => players.includes(u.uid)).map(u => _userLine(u, false)),
+    ...allUsers.filter(u => admins.includes(u.id)).map(u => _userLine(u, true)),
+    ...allUsers.filter(u => players.includes(u.id)).map(u => _userLine(u, false)),
   ];
 
-  const nonMembers = allUsers.filter(u => !access.includes(u.uid));
+  // Ne pas proposer un membre déjà présent. On exclut par uid ET par email :
+  // certains joueurs ont un compte en double (même email, uid différent) ; sans
+  // le filtre email, le doublon orphelin réapparaîtrait dans le select.
+  const memberUids   = new Set([...access, ...players, ...admins]);
+  const memberEmails = new Set(
+    allUsers.filter(u => memberUids.has(u.id) && u.email)
+            .map(u => u.email.toLowerCase())
+  );
+  const nonMembers = allUsers.filter(u =>
+    !memberUids.has(u.id) &&
+    !(u.email && memberEmails.has(u.email.toLowerCase()))
+  );
   const currentEmoji = adv.emoji || '⚔️';
 
   openModal(`⚙️ Gérer — ${currentEmoji} ${adv.nom}`, `
@@ -199,7 +210,7 @@ export async function openManageAdventureModal(adventureId) {
         <div style="display:flex;gap:.4rem;align-items:center">
           <select id="adv-add-user" style="flex:1;padding:.5rem .7rem;border-radius:9px;
             border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.85rem">
-            ${nonMembers.map(u => `<option value="${u.uid}">${_esc(u.pseudo || u.email)}</option>`).join('')}
+            ${nonMembers.map(u => `<option value="${u.id}">${_esc(u.pseudo || u.email)}</option>`).join('')}
           </select>
           <button class="btn btn-gold btn-sm" data-action="_advAdd" data-id="${adventureId}">Ajouter</button>
         </div>
