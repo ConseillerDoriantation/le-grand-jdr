@@ -6,6 +6,7 @@ import { modStr, _esc } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../../shared/rich-text.js';
 import { uploadJpeg } from '../../shared/image-upload.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
 
 // ══════════════════════════════════════════════
 // TAB : CARACTÉRISTIQUES
@@ -1045,9 +1046,9 @@ export function invalidateProfilCache(charId) {
 }
 
 export function openProfilImageUpload(charId) {
-  const key = localStorage.getItem('vtt-imgbb-key') || '';
-  if (!key) {
-    showNotif('Clé ImgBB manquante — configurez-la dans le VTT (Paramètres → Clé ImgBB).', 'error');
+  if (!hasCloudinaryConfig()) {
+    showNotif('Configuration Cloudinary requise — saisis-la puis relance l\'upload.', 'error');
+    openCloudinaryConfigModal();
     return;
   }
   const fi = document.createElement('input');
@@ -1059,16 +1060,12 @@ export function openProfilImageUpload(charId) {
     if (!file?.type.startsWith('image/')) return;
     showNotif('Upload en cours…', 'info');
     try {
-      // Compression JPEG puis upload imgbb (pas de base64 en Firestore)
+      // Compression JPEG puis upload Cloudinary (pas de base64 en Firestore)
       const b64full = await uploadJpeg(file, { max: 1400, quality: 0.88 });
-      const b64 = b64full.replace(/^data:[^;]+;base64,/, '');
-      const fd = new FormData();
-      fd.append('key', key);
-      fd.append('image', b64);
-      const resp = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: fd });
-      const json = await resp.json();
-      if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
-      const imageUrl = json.data.url;
+      const { url: imageUrl } = await uploadCloudinary(b64full, {
+        folder: 'characters',
+        tags: ['profil', charId],
+      });
       const pres = _profilCache[charId];
       const data = pres
         ? { imageUrl }

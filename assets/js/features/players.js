@@ -25,6 +25,7 @@ import {
 } from '../shared/char-stats.js';
 import { attachDropAndCrop, attachPanZoomCrop, panZoomCropHTML, resizeImageDataUrl } from '../shared/image-crop.js';
 import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../shared/upload-cloudinary.js';
 import { lsJson } from '../shared/local-storage.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml, bindRichTextEditors } from '../shared/rich-text.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
@@ -59,10 +60,9 @@ const _accentColor = (nom = '') => _ACCENT_COLORS[(nom.charCodeAt(0) || 0) % _AC
 let _ppCropper = null;             // cropper de l'illustration de la fiche (sélection)
 let _ppCardCropper = null;         // cropper de l'image de la card (pan-zoom 3:4)
 let _ppCardCropParams = null;      // { offX, offY, imgW, imgH } après confirmation
-let _ppGallery = [];               // galerie en cours d'édition (URLs ImgBB uniquement)
+let _ppGallery = [];               // galerie en cours d'édition (URLs externes uniquement)
 const PP_GALLERY_MAX = 12;         // pas de limite stricte de taille : on stocke des URLs
-const PP_GALLERY_UPLOAD = { max: 1600, quality: 0.88 }; // compression avant upload ImgBB
-const PP_IMGBB_KEY_LS = 'vtt-imgbb-key';
+const PP_GALLERY_UPLOAD = { max: 1600, quality: 0.88 }; // compression avant upload Cloudinary
 const STORE = {
   items:         [],     // dataset assemblé (perso + presentation)
   activeId:      '',     // id de l'item ouvert en fiche (vide = sommaire)
@@ -1539,7 +1539,7 @@ async function openPlayerPresentModal(player = null) {
           </div>` : ''}
 
         <div class="pp-mn-field">
-          <label class="pp-mn-label">Photos additionnelles <span class="pp-form-hint">(glisse pour réordonner · ImgBB pleine qualité)</span></label>
+          <label class="pp-mn-label">Photos additionnelles <span class="pp-form-hint">(glisse pour réordonner · Cloudinary pleine qualité)</span></label>
           <div id="pp-gallery-list" class="pp-gallery-edit"></div>
           <div id="pp-gallery-drop" class="pp-form-drop pp-gallery-drop">
             <div class="pp-gallery-drop-hint">+ Glisser une photo (ou cliquer)</div>
@@ -1639,24 +1639,18 @@ async function openPlayerPresentModal(player = null) {
           if (status) { status.textContent = `Maximum ${PP_GALLERY_MAX} photos atteint.`; status.style.color = '#ff6b6b'; }
           return;
         }
-        const key = localStorage.getItem(PP_IMGBB_KEY_LS) || '';
-        if (!key) {
-          if (status) { status.textContent = 'Clé ImgBB manquante — configurez-la dans le VTT (🔑).'; status.style.color = '#ff6b6b'; }
+        if (!hasCloudinaryConfig()) {
+          if (status) { status.textContent = 'Config Cloudinary requise — saisis-la puis relance l\'upload.'; status.style.color = '#ff6b6b'; }
+          openCloudinaryConfigModal();
           return;
         }
         if (status) { status.textContent = '⏳ Upload en cours…'; status.style.color = 'var(--text-muted)'; }
         try {
           const b64full = await uploadJpeg(file, PP_GALLERY_UPLOAD);
-          const b64 = b64full.replace(/^data:[^;]+;base64,/, '');
-          const fd = new FormData();
-          fd.append('key', key);
-          fd.append('image', b64);
-          const resp = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: fd });
-          const json = await resp.json();
-          if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
-          _ppGallery.push({ url: json.data.url, thumb: json.data.thumb?.url || '', deleteUrl: json.data.delete_url || '' });
+          const up = await uploadCloudinary(b64full, { folder: 'gallery', tags: ['gallery'] });
+          _ppGallery.push({ url: up.url, thumb: up.thumbUrl || '', deleteUrl: '' });
           _renderGalleryEditor();
-          if (status) { status.textContent = `✓ Ajoutée (qualité d'origine, hébergée sur ImgBB)`; status.style.color = 'var(--green)'; }
+          if (status) { status.textContent = `✓ Ajoutée (qualité d'origine, hébergée sur Cloudinary)`; status.style.color = 'var(--green)'; }
         } catch (e) {
           console.error('[players gallery]', e);
           if (status) { status.textContent = `Erreur upload : ${e?.message || '?'}`; status.style.color = '#ff6b6b'; }

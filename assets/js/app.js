@@ -30,6 +30,8 @@ import { initTheme, toggleTheme } from './shared/theme.js';
 // character-photo: expose window.openCharacterPhotoPicker (utilisé dès la fiche perso)
 import './features/uploadImage.js';
 import './features/character-photo.js';
+// upload-cloudinary expose window._cloudinaryConfigure (bouton 🖼️ du sidebar)
+import { openCloudinaryConfigModal } from './shared/upload-cloudinary.js';
 
 // Recherche globale (Ctrl+K / Cmd+K) — auto-init à l'import
 import './features/command-palette.js';
@@ -65,6 +67,7 @@ registerActions({
   pickAdventure: (btn) => window.pickAdventure?.(btn.dataset.id),
   _advSwitchPick: (btn) => { window.closeModal?.(); window.pickAdventure?.(btn.dataset.id); },
   _layoutCloseModal: () => window.closeModal?.(),
+  cloudinaryConfig: () => openCloudinaryConfigModal(),
 });
 
 // ── Thème ────────────────────────────────────────────────────────────────────
