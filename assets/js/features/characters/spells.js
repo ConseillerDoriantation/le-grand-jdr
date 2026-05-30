@@ -1079,7 +1079,7 @@ export function renderCharDeck(c, canEdit) {
         <input type="text" class="cs-sorts-search" id="cs-sorts-search"
           placeholder="Rechercher (nom, effet, rune)…"
           value="${_esc(window._sortsSearch || '')}"
-          oninput="window._sortsSetSearch(this.value)">
+          data-input="_sortsSearchInput">
         ${search ? `<button class="cs-sorts-search-clear" data-action="_sortsSetSearch" data-val="" title="Effacer">✕</button>` : ''}
       </div>
       <div class="cs-sorts-deck ${deckOver?'is-over':''}" title="Sorts actifs / capacité du deck (INT)">
@@ -1931,7 +1931,7 @@ export async function openSortModal(idx, s) {
               </div>
               <div>
                 <span class="cs-spell-stats-tag">⚔️ Dégâts</span>
-                <select class="input-field" id="s-degats-stat" onchange="window._refreshAutoValChips?.()">
+                <select class="input-field" id="s-degats-stat" data-change="_refreshAutoValChips">
                   ${_SPELL_STAT_OPTIONS(s?.degatsStat)}
                 </select>
               </div>
@@ -1989,7 +1989,7 @@ export async function openSortModal(idx, s) {
             <div class="cs-spell-stats-grid one">
               <div>
                 <span class="cs-spell-stats-tag">💚 Stat de soin</span>
-                <select class="input-field" id="s-degats-stat-soin" onchange="window._refreshAutoValChips?.()">
+                <select class="input-field" id="s-degats-stat-soin" data-change="_refreshAutoValChips">
                   ${_SPELL_STAT_OPTIONS(s?.degatsStat)}
                 </select>
               </div>
@@ -2139,7 +2139,7 @@ export async function openSortModal(idx, s) {
       <!-- Validation MJ : toggle switch (admins) / badge lecture seule (joueurs) -->
       ${STATE.isAdmin ? `<div class="cs-mj-validation ${s?.mjValidated?'is-on':''}">
         <input type="checkbox" id="s-mj-validated" ${s?.mjValidated?'checked':''}
-          onchange="this.closest('.cs-mj-validation').classList.toggle('is-on', this.checked)">
+          data-change="_csMjValToggle">
         <label for="s-mj-validated" class="cs-mj-validation-label">
           <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
           <span class="cs-mj-validation-info">
@@ -2164,7 +2164,7 @@ export async function openSortModal(idx, s) {
       </div>
       <div class="cs-mj-validation cs-mj-validation--max ${s?.mjAlwaysMax?'is-on':''}">
         <input type="checkbox" id="s-mj-always-max" ${s?.mjAlwaysMax?'checked':''}
-          onchange="this.closest('.cs-mj-validation').classList.toggle('is-on', this.checked)">
+          data-change="_csMjValToggle">
         <label for="s-mj-always-max" class="cs-mj-validation-label">
           <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
           <span class="cs-mj-validation-info">
@@ -3061,6 +3061,9 @@ async function _saveItemSpell() {
 // (le check _itemEditCtx est désormais en tête de saveSort — pas de monkey-patch)
 
 registerActions({
+  _sortsSearchInput:      (el)  => window._sortsSetSearch(el.value),
+  _refreshAutoValChips:   ()    => window._refreshAutoValChips?.(),
+  _csMjValToggle:         (el)  => el.closest('.cs-mj-validation')?.classList.toggle('is-on', el.checked),
   addSort:                ()    => addSort(),
   openSortCatEditor:      ()    => openSortCatEditor(),
   toggleSortDetail:       (btn) => toggleSortDetail(Number(btn.dataset.idx)),
