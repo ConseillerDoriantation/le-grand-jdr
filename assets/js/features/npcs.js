@@ -312,7 +312,7 @@ function _renderPage(content) {
         </div>
 
         <input id="npc-search" class="input-field" placeholder="🔍 Rechercher…"
-          value="${_filterSearch}" oninput="window._npcSearch(this.value)"
+          value="${_filterSearch}" data-input="_npcSearch"
           style="font-size:.8rem;padding:.4rem .6rem">
 
         ${STATE.isAdmin ? `
@@ -1154,7 +1154,7 @@ function _openMjStatsView() {
   openModal('📊 Stats des PNJ', `
     <input id="mj-stats-search" class="input-field"
       placeholder="🔍 Rechercher par nom ou organisation…"
-      oninput="window._mjStatsFilter(this.value)"
+      data-input="_mjStatsFilter"
       style="font-size:.85rem;padding:.45rem .7rem;margin-bottom:.65rem">
     <div style="overflow-x:auto;margin:0 -.5rem">
       <table id="mj-stats-table" style="width:100%;border-collapse:collapse;font-size:.78rem">
@@ -1616,7 +1616,7 @@ window.openAffiniteGroupeModal = (npcId) => {
           ${_deltaPresetsHtml('afg-delta', null, '_selectAfgDelta')}
         </div>
         <input type="number" id="afg-delta-custom" placeholder="±N"
-          oninput="window._setAfgDeltaFromInput(this.value)"
+          data-input="_setAfgDeltaFromInput"
           style="width:60px;text-align:center;font-weight:700;padding:.4rem;
           background:var(--bg-elevated);border:1px solid var(--border);
           border-radius:8px;color:var(--text);font-size:.8rem">
@@ -1923,7 +1923,7 @@ window.editHistoriqueEntry = (npcId, index) => {
         <input type="number" id="hist-edit-delta-custom"
           value="${_DELTA_PRESETS.includes(entry.delta || 0) ? '' : (entry.delta || 0)}"
           placeholder="±N"
-          oninput="window._setHistEditDeltaFromInput(this.value)"
+          data-input="_setHistEditDeltaFromInput"
           style="width:64px;text-align:center;font-weight:700;padding:.4rem;
           background:var(--bg-elevated);border:1px solid var(--border);
           border-radius:8px;color:var(--text);font-size:.8rem">
@@ -2235,6 +2235,10 @@ Object.assign(window, {
 });
 
 registerActions({
+  _npcSearch:                (el) => window._npcSearch?.(el.value),
+  _mjStatsFilter:            (el) => window._mjStatsFilter?.(el.value),
+  _setAfgDeltaFromInput:     (el) => window._setAfgDeltaFromInput?.(el.value),
+  _setHistEditDeltaFromInput:(el) => window._setHistEditDeltaFromInput?.(el.value),
   openNpcModal:            (btn) => openNpcModal(btn.dataset.id || null),
   saveNpc:                 (btn) => saveNpc(btn.dataset.id || ''),
   deleteNpc:               (btn) => deleteNpc(btn.dataset.id),
