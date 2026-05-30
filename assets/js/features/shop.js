@@ -13,6 +13,7 @@ import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
+import { bindScopedActions } from '../shared/scoped-actions.js';
 import Sortable from '../vendor/sortable.esm.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -21,22 +22,7 @@ import Sortable from '../vendor/sortable.esm.js';
 // + shHandlers.open = (el) => openItemModal(el.dataset.id)
 // ══════════════════════════════════════════════════════════════════════════════
 const shHandlers = {};
-function _shBindDispatch() {
-  if (_shBindDispatch._bound) return;
-  _shBindDispatch._bound = true;
-  const dispatch = (e) => {
-    const el = e.target.closest('[data-sh-action]');
-    if (!el) return;
-    const fn = shHandlers[el.dataset.shAction];
-    if (typeof fn !== 'function') return;
-    if (el.dataset.shOn && el.dataset.shOn !== e.type) return;
-    fn(el, e);
-  };
-  document.addEventListener('click',  dispatch, true);
-  document.addEventListener('input',  dispatch, true);
-  document.addEventListener('change', dispatch, true);
-}
-_shBindDispatch();
+bindScopedActions('sh', shHandlers);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE

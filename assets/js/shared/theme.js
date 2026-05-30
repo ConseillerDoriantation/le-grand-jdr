@@ -40,7 +40,3 @@ export function toggleTheme() {
   _store(next);
   _apply(next);
 }
-
-export function getTheme() {
-  return document.documentElement.getAttribute('data-theme') || DARK;
-}

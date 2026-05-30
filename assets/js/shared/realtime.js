@@ -44,12 +44,6 @@ export function watchQuery(name, queryRef, callback) {
   _subs.set(name, unsub);
 }
 
-// Désabonner un listener nommé
-export function unwatch(name) {
-  _subs.get(name)?.();
-  _subs.delete(name);
-}
-
 // Désabonner tous les listeners (appelé à chaque navigate)
 export function unwatchAll() {
   _subs.forEach(fn => fn());

@@ -27,28 +27,14 @@ import { attachDropAndCrop, attachPanZoomCrop, panZoomCropHTML, resizeImageDataU
 import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
 import { lsJson } from '../shared/local-storage.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml, bindRichTextEditors } from '../shared/rich-text.js';
+import { bindScopedActions } from '../shared/scoped-actions.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DÉLÉGATION D'ÉVÉNEMENTS (cohérent bestiary/shop)
+// DÉLÉGATION D'ÉVÉNEMENTS (cohérent bestiary/shop, voir shared/scoped-actions.js)
 // Pattern : <button data-pp-action="open" data-id="…">…</button>
 // ══════════════════════════════════════════════════════════════════════════════
 const ppHandlers = {};
-function _ppBindDispatch() {
-  if (_ppBindDispatch._bound) return;
-  _ppBindDispatch._bound = true;
-  const dispatch = (e) => {
-    const el = e.target.closest('[data-pp-action]');
-    if (!el) return;
-    const fn = ppHandlers[el.dataset.ppAction];
-    if (typeof fn !== 'function') return;
-    if (el.dataset.ppOn && el.dataset.ppOn !== e.type) return;
-    fn(el, e);
-  };
-  document.addEventListener('click',  dispatch, true);
-  document.addEventListener('input',  dispatch, true);
-  document.addEventListener('change', dispatch, true);
-}
-_ppBindDispatch();
+bindScopedActions('pp', ppHandlers);
 
 // ── Palette tags (couleur stable par hash du libellé) ─────────────────────────
 const _TAG_COLORS = [

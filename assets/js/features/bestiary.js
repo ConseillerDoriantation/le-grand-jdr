@@ -14,6 +14,7 @@ import { loadDamageTypes } from '../shared/damage-types.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
+import { bindScopedActions } from '../shared/scoped-actions.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -22,23 +23,7 @@ import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 // Un seul listener par type d'événement, idempotent, scope module.
 // ══════════════════════════════════════════════════════════════════════════════
 const bstHandlers = {};
-function _bstBindDispatch() {
-  if (_bstBindDispatch._bound) return;
-  _bstBindDispatch._bound = true;
-  const dispatch = (e) => {
-    const el = e.target.closest('[data-bst-action]');
-    if (!el) return;
-    const fn = bstHandlers[el.dataset.bstAction];
-    if (typeof fn !== 'function') return;
-    // Filtre par type d'événement si data-bst-on est précisé (ex: "input")
-    if (el.dataset.bstOn && el.dataset.bstOn !== e.type) return;
-    fn(el, e);
-  };
-  document.addEventListener('click',  dispatch, true);
-  document.addEventListener('input',  dispatch, true);
-  document.addEventListener('change', dispatch, true);
-}
-_bstBindDispatch();
+bindScopedActions('bst', bstHandlers);
 
 // ── État local ────────────────────────────────────────────────────────────────
 let _bstCropper = null;

@@ -24,7 +24,7 @@ import {
   collection, getDocs,
   addDoc, updateDoc, deleteDoc,
   onSnapshot,
-  query, where, orderBy,
+  query, where,
 } from '../config/firebase.js';
 
 // ── Scope aventure ─────────────────────────────
@@ -393,35 +393,6 @@ export async function loadCollection(col) {
   return promise;
 }
 
-export async function loadCollectionOrdered(col, field) {
-  const path = _colPath(col);
-  const live = _liveCollections.get(path);
-  if (live && !live.failed) {
-    if (!live.firstReceived) await live.ready;
-    return [...live.data].sort((a, b) => {
-      const av = a[field], bv = b[field];
-      if (av === bv) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      return av < bv ? -1 : 1;
-    });
-  }
-  const key = `${path}:ordered:${field}`;
-  if (_inflight.has(key)) return _inflight.get(key);
-  const promise = (async () => {
-    try {
-      const snap = await getDocs(query(collection(db, path), orderBy(field)));
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch {
-      return loadCollection(col);
-    } finally {
-      _inflight.delete(key);
-    }
-  })();
-  _inflight.set(key, promise);
-  return promise;
-}
-
 export async function loadCollectionWhere(col, field, op, value) {
   const path = _colPath(col);
 
@@ -462,7 +433,11 @@ function _matchOp(v, op, value) {
 }
 
 // ── Documents ──────────────────────────────────
-export async function getDocData(col, id) {
+// Cœur partagé : même cascade live-doc → live-collection → cache TTL →
+// coalescing → fetch. Seule la gestion d'erreur du fetch diffère :
+//   silent=false → notif "Accès refusé" via _handleFirestoreError
+//   silent=true  → log debug only (lecture optionnelle)
+async function _readDoc(col, id, { silent } = {}) {
   const path = _colPath(col);
 
   // 1. Live doc (ex: bastion/main)
@@ -494,7 +469,8 @@ export async function getDocData(col, id) {
       if (data) _cacheSet(liveKey, data);
       return data;
     } catch (e) {
-      _handleFirestoreError(e, `getDocData(${path}/${id})`);
+      if (silent) console.debug(`[firestore] silent read failed: ${path}/${id}`, e?.code || e);
+      else        _handleFirestoreError(e, `getDocData(${path}/${id})`);
       return null;
     } finally {
       _inflight.delete(liveKey);
@@ -504,41 +480,10 @@ export async function getDocData(col, id) {
   return promise;
 }
 
-// Variante silencieuse : pas de notif "Accès refusé" si lecture optionnelle
-export async function getDocDataSilent(col, id) {
-  const path = _colPath(col);
+export const getDocData = (col, id) => _readDoc(col, id, { silent: false });
 
-  const liveKey = `${path}:${id}`;
-  const liveD = _liveDocs.get(liveKey);
-  if (liveD && !liveD.failed) {
-    if (!liveD.firstReceived) await liveD.ready;
-    return liveD.data ? { ...liveD.data } : null;
-  }
-  const liveC = _liveCollections.get(path);
-  if (liveC && !liveC.failed) {
-    if (!liveC.firstReceived) await liveC.ready;
-    const found = liveC.data.find(d => d.id === id);
-    return found ? { ...found } : null;
-  }
-  const cached = _cacheGet(liveKey);
-  if (cached) return cached;
-  if (_inflight.has(liveKey)) return _inflight.get(liveKey);
-  const promise = (async () => {
-    try {
-      const snap = await getDoc(doc(db, path, id));
-      const data = snap.exists() ? snap.data() : null;
-      if (data) _cacheSet(liveKey, data);
-      return data;
-    } catch (e) {
-      console.debug(`[firestore] silent read failed: ${path}/${id}`, e?.code || e);
-      return null;
-    } finally {
-      _inflight.delete(liveKey);
-    }
-  })();
-  _inflight.set(liveKey, promise);
-  return promise;
-}
+// Variante silencieuse : pas de notif "Accès refusé" si lecture optionnelle.
+export const getDocDataSilent = (col, id) => _readDoc(col, id, { silent: true });
 
 // ── Écritures ──────────────────────────────────
 // Avec un listener live actif sur la collection/doc, Firestore propage
@@ -623,9 +568,4 @@ export async function loadChars(uid = null) {
     }
   } catch (e) { console.debug('[inv] norm utility load failed:', e); }
   return chars;
-}
-
-export async function countUserChars(uid = null) {
-  const chars = await loadChars(uid);
-  return chars.length;
 }

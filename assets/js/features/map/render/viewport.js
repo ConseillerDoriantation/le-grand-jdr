@@ -13,6 +13,10 @@ let imgNatural = { w: 1200, h: 800 };
 let detachFns = [];
 
 export function bindViewport(root, transform, image) {
+  // Détache les listeners `window` (mousemove/mouseup) d'une éventuelle
+  // visite précédente : sans ça, chaque retour sur la Carte ré-attache des
+  // handlers globaux qui s'accumulent et retiennent l'ancien DOM (fuite).
+  destroyViewport();
   rootEl = root;
   transformEl = transform;
   imgEl = image;
@@ -48,11 +52,6 @@ export function destroyViewport() {
 
 export function getImageSize() {
   return imgNatural;
-}
-
-// Coord normalisée [0..1] -> pixel dans le repère image
-export function normToImagePx(nx, ny) {
-  return { x: nx * imgNatural.w, y: ny * imgNatural.h };
 }
 
 // Clic écran -> coord normalisée [0..1] dans le repère image
