@@ -1870,8 +1870,11 @@ async function buyItem(itemId) {
   `);
 }
 
+let _buyInProgress = false;
 async function confirmBuyItem(itemId, directQty) {
+  if (_buyInProgress) return;
   try {
+    _buyInProgress = true;
     const charId   = window._shopCharId;
     const item     = _items.find(i => i.id === itemId);
     if (!item || !charId) return;
@@ -1929,6 +1932,7 @@ async function confirmBuyItem(itemId, directQty) {
       }
     });
   } catch (e) { notifySaveError(e); }
+  finally { _buyInProgress = false; }
 }
 
 window._restockShopItem = async (itemId) => {

@@ -1233,8 +1233,11 @@ window._bastionSelectHireCard = (npcId) => {
   }
 };
 
+let _hireInProgress = false;
 window._bastionDoHire = async () => {
+  if (_hireInProgress) return;
   if (!STATE.isAdmin) return;
+  _hireInProgress = true;
   const npcId    = document.getElementById('bs-hire-selected-npc')?.value;
   const roomSlug = document.getElementById('bs-hire-roomSlug')?.value || null;
   if (!npcId) { showNotif('Sélectionne un PNJ.', 'error'); return; }
@@ -1260,9 +1263,13 @@ window._bastionDoHire = async () => {
     hiredAtWeek: b.semaine || 1,
   }];
   _addHistorique(b, 'hire', `🤝 ${_esc(npc.nom)} rejoint ${_esc(def?.nom || 'le bastion')}`);
-  await _save(b);
-  closeModal();
-  showNotif(`✓ ${npc.nom} affecté à ${def?.nom || 'la salle'}.`, 'success');
+  try {
+    await _save(b);
+    closeModal();
+    showNotif(`✓ ${npc.nom} affecté à ${def?.nom || 'la salle'}.`, 'success');
+  } finally {
+    _hireInProgress = false;
+  }
 };
 
 window._bastionFireEmployee = async (empId) => {

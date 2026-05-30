@@ -27,16 +27,18 @@ const PAGES = {
 
     // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
-    const [chars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, allPartyChars, nextSession] = await Promise.all([
-      loadChars(uid).catch(() => []),
+    const [allChars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, nextSession] = await Promise.all([
+      loadChars(null).catch(() => []),
       loadCollection('story').catch(() => []),
       getDocData('bastion', 'main').catch(() => null),
       loadCollection('achievements').catch(() => []),
       loadCollection('quests').catch(() => []),
       loadCollection('collection').catch(() => []),
-      STATE.isAdmin ? Promise.resolve([]) : loadChars(null).catch(() => []),
       getDocDataSilent('agenda_session', 'next'),
     ]);
+    // chars = mes persos ; allPartyChars = les autres (pour le bloc groupe côté joueur)
+    const chars         = uid ? allChars.filter(c => c.uid === uid) : allChars;
+    const allPartyChars = uid ? allChars.filter(c => c.uid !== uid) : [];
     // Les hauts-faits secrets restent invisibles aux joueurs partout dans le dashboard
     const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
     STATE.characters = chars;
