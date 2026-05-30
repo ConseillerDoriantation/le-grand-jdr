@@ -139,17 +139,17 @@ function _renderGroupPills(groups) {
           <input type="number" min="0" max="100" value="${reussite}" placeholder="—"
             style="width:44px;padding:.1rem .25rem;font-size:.7rem;border-radius:4px;
               border:1px solid var(--border);background:var(--bg-panel);color:var(--text)"
-            oninput="window._stGroupField('${g.id}','reussite',+this.value||0)">
+            data-input="_stGroupField" data-id="${g.id}" data-field="reussite">
           <span style="font-size:.65rem;color:var(--text-dim)">%</span>
         </div>
         <input type="text" value="${_esc(recompense)}" placeholder="Récompense…"
           style="width:100%;box-sizing:border-box;padding:.1rem .25rem;font-size:.7rem;border-radius:4px;
             border:1px solid var(--border);background:var(--bg-panel);color:var(--text)"
-          oninput="window._stGroupField('${g.id}','recompense',this.value)">
+          data-input="_stGroupField" data-id="${g.id}" data-field="recompense">
         <textarea placeholder="Notes de réussite…" rows="2"
           style="width:100%;box-sizing:border-box;padding:.15rem .3rem;font-size:.67rem;border-radius:4px;
             border:1px solid var(--border);background:var(--bg-panel);color:var(--text);resize:vertical"
-          oninput="window._stGroupField('${g.id}','notesReussite',this.value)">${notes}</textarea>
+          data-input="_stGroupField" data-id="${g.id}" data-field="notesReussite">${notes}</textarea>
       </div>
     </div>`;
   }).join('');
@@ -325,19 +325,19 @@ function _renderGroupCards(groups) {
           <div class="st-group-field-row">
             <input type="number" min="0" max="100" value="${reussite}" placeholder="0"
               style="border-color:${reusColor};color:${reusColor}"
-              oninput="window._stGroupField('${g.id}','reussite',+this.value||0)">
+              data-input="_stGroupField" data-id="${g.id}" data-field="reussite">
             <span class="st-group-field-suffix" style="color:${reusColor}">%</span>
           </div>
         </label>
         <label class="st-group-field st-group-field--wide">
           <span class="st-group-field-lbl">🏆 Récompense</span>
           <input type="text" value="${_esc(recompense)}" placeholder="XP, butin, faveur…"
-            oninput="window._stGroupField('${g.id}','recompense',this.value)">
+            data-input="_stGroupField" data-id="${g.id}" data-field="recompense">
         </label>
         <label class="st-group-field st-group-field--full">
           <span class="st-group-field-lbl">📝 Notes de réussite</span>
           <textarea rows="2" placeholder="Ce qui s'est passé, conséquences…"
-            oninput="window._stGroupField('${g.id}','notesReussite',this.value)">${_esc(notes)}</textarea>
+            data-input="_stGroupField" data-id="${g.id}" data-field="notesReussite">${_esc(notes)}</textarea>
         </label>
       </div>
     </div>`;
@@ -2123,6 +2123,8 @@ PAGES.story = renderStory;
 Object.assign(window,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
 
 registerActions({
+  _stGroupField: (el) => window._stGroupField?.(el.dataset.id, el.dataset.field,
+    el.dataset.field === 'reussite' ? (+el.value || 0) : el.value),
   openStoryDetail:         (btn) => openStoryDetail(btn.dataset.id),
   openStoryModal:          ()    => openStoryModal(),
   openNewActeModal:        ()    => openNewActeModal(),

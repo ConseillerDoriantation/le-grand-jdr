@@ -1280,6 +1280,8 @@ function _refreshView() {
 // HANDLERS — délégation data-pp-action
 // ══════════════════════════════════════════════════════════════════════════════
 Object.assign(ppHandlers, {
+  updateVisiblePill: (el) => window._ppUpdateVisiblePill?.(el.checked),
+  refreshVisCount:   ()   => window._ppRefreshVisCount?.(),
   openFiche:     (el) => { STORE.activeId = el.dataset.id; _refreshView(); window.scrollTo(0, 0); },
   back:          ()   => { STORE.activeId = ''; _refreshView(); },
   search:        (el) => {
@@ -1499,7 +1501,7 @@ async function openPlayerPresentModal(player = null) {
 
         <label class="pp-mn-toggle-row">
           <input type="checkbox" id="pp-visible" ${isVisible?'checked':''}
-            onchange="window._ppUpdateVisiblePill?.(this.checked)">
+            data-pp-action="updateVisiblePill" data-pp-on="change">
           <span class="pp-mn-toggle-track"><span class="pp-mn-toggle-thumb"></span></span>
           <span class="pp-mn-toggle-lbl">
             <b>Visible dans le sommaire</b>
@@ -1518,7 +1520,7 @@ async function openPlayerPresentModal(player = null) {
             const checked = player?.[f.key] !== undefined ? player[f.key] : f.def;
             return `<label class="pp-mn-vis-card ${checked?'is-on':''}">
               <input type="checkbox" id="${f.id}" ${checked?'checked':''}
-                onchange="window._ppRefreshVisCount?.()">
+                data-pp-action="refreshVisCount" data-pp-on="change">
               <span class="pp-mn-vis-ico">${f.ico}</span>
               <span class="pp-mn-vis-lbl">${f.label}</span>
               <span class="pp-mn-vis-check">✓</span>
