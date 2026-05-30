@@ -655,8 +655,8 @@ function renderCharSheet(c, keepTab) {
             <div class="cs-xp-total-group">
               <input type="number" class="cs-xp-input cs-inline-num" id="xp-direct-input"
                 value="${xpCur}" min="0" max="${xpPalier}"
-                onchange="saveXpDirect('${c.id}',this)"
-                oninput="previewXpBar(this,${xpPalier})" title="Modifier l'XP total">
+                data-change="saveXpDirect" data-id="${c.id}"
+                data-input="previewXpBar" data-palier="${xpPalier}" title="Modifier l'XP total">
               <span class="cs-xp-edit-label">/ ${xpPalier}</span>
             </div>
             <div class="cs-xp-delta-group">
@@ -984,7 +984,7 @@ function renderCharLedger(c, canEdit) {
       </div>
       <input type="text" class="ledger-search" placeholder="🔍 Rechercher…"
         value="${_esc(filter.search)}"
-        oninput="window._csV3LedgerSetSearch('${c.id}',this.value)">
+        data-input="_csV3LedgerSetSearch" data-id="${c.id}">
     </div>
 
     ${canEdit ? `
@@ -1625,7 +1625,7 @@ function renderCharProfilV3(c, canEdit) {
     ? `<input class="profil-quote profil-quote-edit ${!quote ? 'is-empty' : ''}" type="text"
         value="${_esc(quote)}"
         placeholder="Ajoute une citation pour ton personnage…"
-        oninput="this.classList.toggle('is-empty', !this.value)"
+        data-input="_csQuoteToggleEmpty"
         onblur="this.classList.toggle('is-empty', !this.value);window._csV3SaveQuote('${c.id}',this.value)"
         onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.classList.toggle('is-empty',!this.value);this.blur();}">`
     : (quote
@@ -1677,7 +1677,7 @@ function renderCharProfilV3(c, canEdit) {
           return `<label class="vis-toggle">
             <span class="vis-toggle-lbl">${_esc(v.lbl)}</span>
             <input type="checkbox" ${checked?'checked':''}
-              onchange="window._csV3SaveVisibility('${c.id}','${v.k}',this.checked)">
+              data-change="_csV3SaveVisibility" data-id="${c.id}" data-key="${v.k}">
             <span class="vis-toggle-track"><span class="vis-toggle-thumb"></span></span>
           </label>`;
         }).join('')}
@@ -2283,7 +2283,7 @@ function renderCharInventaireV3(c, canEdit) {
 
   const filterBarHtml = `<div class="inv-search">
     <input placeholder="🔍 Rechercher dans l'inventaire…" value="${_esc(filter.search)}"
-      oninput="window._csV3InvSetSearch(this.value)">
+      data-input="_csV3InvSetSearch">
     <div class="filter-chips">
       ${_INV_FILTERS.map(f => `<button class="filter-chip ${filter.cat===f.id?'on':''}" data-action="csV3InvSetCat" data-cat="${f.id}">
         ${f.icon} ${f.lbl}
@@ -2574,6 +2574,13 @@ function showCharTab(tab, el) {
 // REGISTRY data-action — délégation centralisée
 // ══════════════════════════════════════════════
 registerActions({
+  // Champs édités (change / input)
+  saveXpDirect:            (el)     => saveXpDirect(el.dataset.id, el),
+  previewXpBar:            (el)     => previewXpBar(el, Number(el.dataset.palier)),
+  _csV3LedgerSetSearch:    (el)     => window._csV3LedgerSetSearch?.(el.dataset.id, el.value),
+  _csQuoteToggleEmpty:     (el)     => el.classList.toggle('is-empty', !el.value),
+  _csV3SaveVisibility:     (el)     => window._csV3SaveVisibility?.(el.dataset.id, el.dataset.key, el.checked),
+  _csV3InvSetSearch:       (el)     => window._csV3InvSetSearch?.(el.value),
   // Sélection
   selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
   createNewChar:           ()       => createNewChar(),
