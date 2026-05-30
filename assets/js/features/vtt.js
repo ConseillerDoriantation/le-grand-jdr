@@ -23,6 +23,7 @@ import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
 import { loadSpellMatrices, getInvokedArm } from '../shared/spell-matrices.js';
 import { showNotif } from '../shared/notifications.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
@@ -108,8 +109,8 @@ window._vttMoveTokenAndReset = (sel, tid) => {
 };
 window._vttSetEmoteAlbum = (v) => {
   const t = (v || '').trim();
-  if (t) localStorage.setItem('vtt-imgbb-emote-album', t);
-  else localStorage.removeItem('vtt-imgbb-emote-album');
+  if (t) localStorage.setItem('vtt-emote-folder', t);
+  else localStorage.removeItem('vtt-emote-folder');
 };
 window._vttPreviewEmoteFile = (input, previewId) => {
   const f = input.files?.[0]; if (!f) return;
@@ -7541,24 +7542,19 @@ window._ouvrirGestionEmotes = async () => {
   await _loadEmotes();
   const { default: Sortable } = await import('../vendor/sortable.esm.js');
 
-  // ── Helper upload ImgBB ──────────────────────────────────────────
-  const _getEmoteAlbum = () => localStorage.getItem('vtt-imgbb-emote-album') || '';
-  const _setEmoteAlbum = v => v ? localStorage.setItem('vtt-imgbb-emote-album', v) : localStorage.removeItem('vtt-imgbb-emote-album');
+  // ── Helper upload Cloudinary (avec sous-dossier optionnel pour grouper) ──
+  const _getEmoteAlbum = () => localStorage.getItem('vtt-emote-folder') || localStorage.getItem('vtt-imgbb-emote-album') || '';
+  const _setEmoteAlbum = v => v ? localStorage.setItem('vtt-emote-folder', v) : localStorage.removeItem('vtt-emote-folder');
 
-  const _uploadImgbb = async (file) => {
-    const key = _getImgbbKey();
-    if (!key) throw new Error('Clé ImgBB non configurée (bouton 🔑 dans le VTT)');
-    const b64 = await new Promise((res, rej) => {
-      const rd = new FileReader(); rd.onload = () => res(rd.result.split(',')[1]); rd.onerror = rej;
-      rd.readAsDataURL(file);
-    });
-    const fd = new FormData(); fd.append('key', key); fd.append('image', b64);
-    const album = _getEmoteAlbum();
-    if (album) fd.append('album', album);
-    const resp = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body:fd });
-    const json = await resp.json();
-    if (!json.success) throw new Error(json.error?.message || 'ImgBB error');
-    return json.data.url;
+  const _uploadEmote = async (file) => {
+    if (!hasCloudinaryConfig()) {
+      openCloudinaryConfigModal();
+      if (!hasCloudinaryConfig()) throw new Error('Configuration Cloudinary requise (bouton 🔑)');
+    }
+    const sub = _getEmoteAlbum().trim();
+    const folder = sub ? `emotes/${sub}` : 'emotes';
+    const up = await uploadCloudinary(file, { folder, tags: ['emote'] });
+    return up.url;
   };
 
   // ── Rendu de la grille de cartes ─────────────────────────────────
@@ -7586,8 +7582,8 @@ window._ouvrirGestionEmotes = async () => {
       <div id="emote-edit-zone"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
       <div style="display:flex;align-items:center;gap:.6rem">
-        <label style="font-size:.75rem;color:var(--text-muted);white-space:nowrap">📁 Album ImgBB</label>
-        <input type="text" id="emote-album-id" placeholder="ID de l'album (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1"
+        <label style="font-size:.75rem;color:var(--text-muted);white-space:nowrap">📁 Dossier</label>
+        <input type="text" id="emote-album-id" placeholder="nom du sous-dossier Cloudinary (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1"
           data-vtt-fn="_vttSetEmoteAlbum" data-vtt-on="input" data-vtt-args="$value">
       </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
@@ -7603,8 +7599,8 @@ window._ouvrirGestionEmotes = async () => {
         </div>
       </div>
       <div class="form-group" style="margin:0">
-        <label style="font-size:.75rem;color:var(--text-muted)">URL directe <span style="opacity:.6">(si déjà hébergé sur ImgBB)</span></label>
-        <input type="text" id="emote-add-url" placeholder="https://i.ibb.co/…" style="${_inpStyle}">
+        <label style="font-size:.75rem;color:var(--text-muted)">URL directe <span style="opacity:.6">(si déjà hébergée ailleurs)</span></label>
+        <input type="text" id="emote-add-url" placeholder="https://…" style="${_inpStyle}">
       </div>
       <div style="display:flex;align-items:center;gap:.7rem">
         <button class="btn btn-primary" style="flex:1" data-vtt-fn="_vttAddEmote">➕ Ajouter l'émote</button>
@@ -7687,7 +7683,7 @@ window._ouvrirGestionEmotes = async () => {
     const em = { ...list[i], name: newName };
     if (fileEl?.files?.[0]) {
       showNotif('Upload en cours…', 'info');
-      try { em.url = await _uploadImgbb(fileEl.files[0]); }
+      try { em.url = await _uploadEmote(fileEl.files[0]); }
       catch(e) { showNotif('⚠ ' + e.message, 'error'); return; }
     }
     list[i] = em;
@@ -7709,7 +7705,7 @@ window._ouvrirGestionEmotes = async () => {
     let url;
     if (file) {
       if (statusEl) statusEl.textContent = '⏳ Upload…';
-      try { url = await _uploadImgbb(file); }
+      try { url = await _uploadEmote(file); }
       catch(e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; return; }
     } else {
       url = directUrl;
@@ -10670,39 +10666,27 @@ window._vttSaveStats = async id => {
   showNotif('Stats mises à jour','success');
 };
 
-// ── Upload via ImgBB ────────────────────────────────────────────────
-// Clé API stockée en localStorage (jamais dans le code)
-const _IMGBB_KEY_LS = 'vtt-imgbb-key';
-
-function _getImgbbKey() { return localStorage.getItem(_IMGBB_KEY_LS)||''; }
+// ── Upload via Cloudinary ───────────────────────────────────────────
+// Config (cloud name + upload preset) stockée en localStorage par le module
+// shared/upload-cloudinary.js. Helper conservé sous le nom legacy
+// `_vttSetImgbbKey` pour ne pas casser les `data-vtt-fn` existants.
 
 window._vttSetImgbbKey = () => {
-  const current = _getImgbbKey();
-  const key = prompt('Clé API ImgBB (imgbb.com → Get API key) :', current)?.trim();
-  if (key === null) return;
-  if (key) { localStorage.setItem(_IMGBB_KEY_LS, key); showNotif('Clé ImgBB enregistrée ✓','success'); }
-  else      { localStorage.removeItem(_IMGBB_KEY_LS); showNotif('Clé ImgBB supprimée','success'); }
+  openCloudinaryConfigModal();
+  if (hasCloudinaryConfig()) showNotif('Configuration Cloudinary enregistrée ✓','success');
 };
 
 async function _handleUpload(file) {
   if (!file||!_activePage) return;
-  const key = _getImgbbKey();
-  if (!key) {
-    showNotif('Configure ta clé ImgBB d\'abord (bouton 🔑)','error');
-    return;
+  if (!hasCloudinaryConfig()) {
+    showNotif('Configure ta config Cloudinary d\'abord (bouton 🔑)','error');
+    openCloudinaryConfigModal();
+    if (!hasCloudinaryConfig()) return;
   }
   showNotif('Upload en cours…','success');
   try {
-    const b64 = await new Promise((res,rej)=>{
-      const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file);
-    });
-    const form=new FormData();
-    form.append('key', key);
-    form.append('image', b64);
-    const resp = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body:form });
-    const json = await resp.json();
-    if (!json.success) throw new Error(json.error?.message||'ImgBB error');
-    const url = json.data.url;
+    const up = await uploadCloudinary(file, { folder: 'maps', tags: ['map'] });
+    const url = up.url;
     const imgs=[...(_activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:_activePage.cols,h:_activePage.rows}];
     await updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs});
     // Sauver dans la bibliothèque
@@ -12217,8 +12201,8 @@ function _buildHtml() {
     <div class="vtt-tool-group vtt-right">
       ${mj?`
         <button class="vtt-btn-sm" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Verrouille / déverrouille le calque des cartes en arrière-plan">🗺 Carte</button>
-        <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via ImgBB — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
-        <button class="vtt-btn-sm" data-vtt-fn="_vttSetImgbbKey" title="Configurer la clé API ImgBB">🔑</button>`:''}
+        <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via Cloudinary — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
+        <button class="vtt-btn-sm" data-vtt-fn="_vttSetImgbbKey" title="Configurer Cloudinary (cloud name + upload preset)">🔑</button>`:''}
     </div>
   </div>
 

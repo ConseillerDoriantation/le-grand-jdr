@@ -4758,6 +4758,7 @@ body.shop-card-showcase body .sh-page--v2 .sh-item-grid {
 .sh-admin-modal.is-formats   { --admin-tint: rgba(255,107,107,.10); --admin-glow: rgba(255,107,107,.40); --admin-bd: rgba(255,107,107,.32); --admin-accent: #ff8b8b; }
 .sh-admin-modal.is-upgrades  { --admin-tint: rgba(157,111,255,.10); --admin-glow: rgba(157,111,255,.40); --admin-bd: rgba(157,111,255,.32); --admin-accent: #bca0ff; }
 .sh-admin-modal.is-spell     { --admin-tint: rgba(157,111,255,.12); --admin-glow: rgba(157,111,255,.48); --admin-bd: rgba(157,111,255,.38); --admin-accent: #bca0ff; }
+.sh-admin-modal.is-cloudinary{ --admin-tint: rgba(79,140,255,.12);  --admin-glow: rgba(79,140,255,.48);  --admin-bd: rgba(79,140,255,.38);  --admin-accent: #6aa1ff; }
 
 /* ── Modale Sort (forge) : plus large car 2 colonnes desktop ───────────── */
 .modal:has(.sh-admin-modal.is-spell) {

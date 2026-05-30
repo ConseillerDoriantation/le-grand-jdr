@@ -1661,7 +1661,7 @@ function renderCharProfilV3(c, canEdit) {
         </div>
         <div class="profil-img-actions">
           <button class="section-action" style="flex:1" data-action="openProfilImageUpload" data-id="${c.id}">
-            ${presCache?.imageUrl ? '🔄 Changer' : '📷 Upload sur ImgBB'}
+            ${presCache?.imageUrl ? '🔄 Changer' : '📷 Upload image'}
           </button>
           ${presCache?.imageUrl ? `<button class="section-action" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" data-action="removeProfilImage" data-id="${c.id}" title="Retirer">✕</button>` : ''}
         </div>
@@ -2102,7 +2102,7 @@ function renderCharCombatV3(c, canEdit) {
       <div class="cstyle-body">
         <div class="cstyle-tag">
           Style de combat
-          ${canEdit ? `<button class="section-action" style="float:right;font-size:.62rem;padding:2px 8px" data-action="openCombatStylesAdmin" title="Gérer les styles (admin)">⚙️</button>` : ''}
+          ${STATE.isAdmin ? `<button class="section-action" style="float:right;font-size:.62rem;padding:2px 8px" data-action="openCombatStylesAdmin" title="Gérer les styles (admin)">⚙️</button>` : ''}
         </div>
         <div class="cstyle-name" style="color:${col}">${_esc(detected.label || detected.name || 'Sans nom')}</div>
         <div class="cstyle-desc">${_esc(detected.description || '')}</div>
@@ -2142,7 +2142,7 @@ function renderCharCombatV3(c, canEdit) {
     elemsHtml = `<div class="elem-card">
       <div class="elem-card-head">
         Éléments maîtrisés
-        ${canEdit ? `<button class="section-action" style="float:right" data-action="openDamageTypesAdmin" title="Gérer les types (admin)">⚙️</button>` : ''}
+        ${STATE.isAdmin ? `<button class="section-action" style="float:right" data-action="openDamageTypesAdmin" title="Gérer les types (admin)">⚙️</button>` : ''}
       </div>
       <div class="elem-row">${elemChips || '<span style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun type magique défini.</span>'}</div>
     </div>`;
