@@ -4195,8 +4195,10 @@ input[type=number].input-field::-webkit-outer-spin-button {
   gap: 1.2rem;
   grid-template-columns: 1fr;
 }
-/* Sur écran large, 2 colonnes : table à gauche, vitalité à droite */
-@media (min-width: 1280px) {
+/* 2 colonnes seulement à partir de 1500px : table à gauche, vitalité à droite.
+   En dessous (laptops classiques 1366/1440…), on reste empilé pour laisser
+   au tableau toute la largeur — sinon la colonne "Niveau" est trop serrée. */
+@media (min-width: 1500px) {
   .cs-caracs-tab {
     grid-template-columns: minmax(0, 1.55fr) minmax(360px, 1fr);
     align-items: start;
@@ -4246,7 +4248,11 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-carac-detail-head,
 .cs-carac-detail-row {
   display: grid;
-  grid-template-columns: minmax(110px, 1.3fr) repeat(5, minmax(64px, 1fr));
+  /* Stat · Base · Niveau · Équip · Total · Mod
+     "Niveau" porte les contrôles −[chip]+ : min élargi pour éviter le débordement. */
+  grid-template-columns:
+    minmax(96px, 1.4fr) minmax(52px, 0.85fr) minmax(106px, 1.15fr)
+    minmax(52px, 0.85fr) minmax(58px, 0.95fr) minmax(56px, 0.9fr);
   gap: 0.55rem;
   align-items: center;
 }
@@ -7241,13 +7247,17 @@ input[type=number].input-field::-webkit-outer-spin-button {
 
 /* Stats banner */
 .cs-v3 .stats-banner {
-  display: grid; grid-template-columns: repeat(6, 1fr);
+  display: grid; grid-template-columns: repeat(3, 1fr);
   gap: 8px; padding: 12px 18px;
   border-bottom: 1px solid var(--border); background: rgba(0,0,0,.18);
   position: relative;
 }
 .cs-v3 .stats-banner::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(79,140,255,.28), transparent); }
-@media (max-width: 760px) { .cs-v3 .stats-banner { grid-template-columns: repeat(3, 1fr); } }
+/* 6 colonnes réservées aux très grands écrans : en dessous, la colonne
+   principale est trop étroite et la formule Base/Niveau/Équip déborderait.
+   Sur écran classique on garde 3 colonnes larges (2 rangées de 3). */
+@media (min-width: 1700px) { .cs-v3 .stats-banner { grid-template-columns: repeat(6, 1fr); } }
+@media (max-width: 760px)  { .cs-v3 .stats-banner { grid-template-columns: repeat(3, 1fr); } }
 /* ── STAT TILE V2 — Layout : Header (Nom + Mod) / Total / Formule (Base + Niveau + Équip) */
 .cs-v3 .stat-tile {
   position: relative; background: rgba(255,255,255,.025);
