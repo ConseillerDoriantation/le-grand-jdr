@@ -4,6 +4,7 @@
 // Joueur : voir les quêtes actives et y participer avec son personnage
 // ══════════════════════════════════════════════
 import { addToCol, saveDoc, deleteFromCol } from '../data/firestore.js';
+import { registerActions } from '../core/actions.js';
 import { watch } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
@@ -61,13 +62,13 @@ function _questCard(q, myChar) {
 
   const joinBtn = (!STATE.isAdmin && myChar && q.statut === 'active') ? `
     <button class="quest-join-btn${joined ? ' quest-join-btn--joined' : ''}"
-      onclick="window._questToggleJoin('${q.id}')">
+      data-action="_questToggleJoin" data-id="${q.id}">
       ${joined ? '✓ Rejoint' : '+ Rejoindre'}
     </button>` : '';
 
   const adminBtns = STATE.isAdmin ? `
-    <button class="quest-icon-btn" onclick="window._questEdit('${q.id}')" title="Modifier">✏️</button>
-    <button class="quest-icon-btn quest-icon-btn--del" onclick="window._questDelete('${q.id}')" title="Supprimer">🗑️</button>
+    <button class="quest-icon-btn" data-action="_questEdit" data-id="${q.id}" title="Modifier">✏️</button>
+    <button class="quest-icon-btn quest-icon-btn--del" data-action="_questDelete" data-id="${q.id}" title="Supprimer">🗑️</button>
   ` : '';
 
   return `
@@ -124,7 +125,7 @@ function _applyQuestsRender(quests) {
 
   ${STATE.isAdmin ? `
   <div style="margin-bottom:1.2rem">
-    <button class="btn btn-gold" onclick="window._questNew()">+ Nouvelle quête</button>
+    <button class="btn btn-gold" data-action="_questNew">+ Nouvelle quête</button>
   </div>` : ''}
 
   ${sorted.length === 0
@@ -197,7 +198,7 @@ function _questOpenCharPicker(questId, chars) {
     const sub = [c.classe, c.race].filter(Boolean).join(' · ');
     return `<button class="btn btn-outline"
         style="display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;text-align:left;width:100%"
-        onclick="window._questPickChar('${_esc(questId)}','${_esc(c.id)}')">
+        data-action="_questPickChar" data-quest-id="${_esc(questId)}" data-id="${_esc(c.id)}">
         ${avatar}
         <div style="min-width:0">
           <div style="font-weight:700;font-size:.88rem;color:var(--text)">${_esc(c.nom || '?')}</div>
@@ -209,7 +210,7 @@ function _questOpenCharPicker(questId, chars) {
   openModal('Quel personnage rejoint cette quête ?', `
     <div style="display:flex;flex-direction:column;gap:.45rem">${rows}</div>
     <div style="margin-top:.75rem;text-align:right">
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-outline btn-sm" data-action="_questCloseModal">Annuler</button>
     </div>`);
 }
 
@@ -290,10 +291,10 @@ function _openQuestModal(id) {
       </div>
     </div>
     <div style="display:flex;gap:.6rem;margin-top:.5rem">
-      <button class="btn btn-gold" onclick="window._questSave(${id ? `'${id}'` : 'null'})">
+      <button class="btn btn-gold" data-action="_questSave" data-id="${id || ''}">
         ${id ? 'Enregistrer' : 'Créer la quête'}
       </button>
-      <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-secondary" data-action="_questCloseModal">Annuler</button>
     </div>
     `
   );
@@ -340,3 +341,13 @@ window._questDelete = async function (id) {
 
 // ── Enregistrement dans PAGES ─────────────────
 PAGES.quests = renderQuestsPage;
+
+registerActions({
+  _questToggleJoin: (btn) => window._questToggleJoin?.(btn.dataset.id),
+  _questEdit:       (btn) => window._questEdit?.(btn.dataset.id),
+  _questDelete:     (btn) => window._questDelete?.(btn.dataset.id),
+  _questNew:        ()    => window._questNew?.(),
+  _questPickChar:   (btn) => window._questPickChar?.(btn.dataset.questId, btn.dataset.id),
+  _questSave:       (btn) => window._questSave?.(btn.dataset.id || null),
+  _questCloseModal: ()    => closeModal(),
+});

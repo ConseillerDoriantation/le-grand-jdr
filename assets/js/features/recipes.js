@@ -8,6 +8,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
+import { registerActions } from '../core/actions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
@@ -242,7 +243,7 @@ function _render() {
     </div>
     ${_isAdmin() ? `
     <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-      ${CREATE_RECIPES.map(t => `<button class="btn btn-outline btn-sm" onclick="openRecipeModal('${t.id}')">${t.emoji} + ${t.label}</button>`).join('')}
+      ${CREATE_RECIPES.map(t => `<button class="btn btn-outline btn-sm" data-action="_recOpenModal" data-type="${t.id}">${t.emoji} + ${t.label}</button>`).join('')}
     </div>` : ''}
   </div>
 
@@ -260,7 +261,7 @@ function _render() {
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap">
     <div class="rec-tabs" style="flex-shrink:0">
       ${TABS.map(t => `
-        <button class="rec-tab ${_tab===t.id?'active':''}" onclick="recSetTab('${t.id}')">
+        <button class="rec-tab ${_tab===t.id?'active':''}" data-action="recSetTab" data-id="${t.id}">
           <span>${t.emoji}</span><span>${t.label}</span>
           <span style="font-size:.65rem;opacity:.7">(${counts[t.id]})</span>
         </button>`).join('')}
@@ -332,7 +333,7 @@ function _renderCard(r, accent) {
 
   return `<div class="rec-card${isCraftType ? ' rec-card-clickable' : ''}"
     style="border-left:3px solid ${accent}"
-    ${isCraftType ? `onclick="openItemDetailModal('${r.id}')"` : ''}>
+    ${isCraftType ? `data-action="openItemDetailModal" data-id="${r.id}"` : ''}>
     <div class="rec-card-header">
       <div>
         <div class="rec-card-name">${r.nom||'?'}</div>
@@ -345,9 +346,9 @@ function _renderCard(r, accent) {
         </div>
       </div>
       ${isAdmin ? `
-      <div style="display:flex;gap:.25rem;flex-shrink:0" onclick="event.stopPropagation()">
-        <button class="btn-icon" onclick="${r._fromShop ? `openShopRecipeModal('${r.id}')` : `openRecipeModal('${r.type}','${r.id}')`}">✏️</button>
-        <button class="btn-icon" style="color:#ff6b6b" onclick="${r._fromShop ? `deleteShopRecipe('${r.id}')` : `deleteRecipe('${r.id}')`}">🗑️</button>
+      <div style="display:flex;gap:.25rem;flex-shrink:0">
+        <button class="btn-icon" data-action="${r._fromShop ? '_recEditShop' : '_recEdit'}" data-id="${r.id}" data-type="${r.type}" data-stop-propagation>✏️</button>
+        <button class="btn-icon" style="color:#ff6b6b" data-action="${r._fromShop ? '_recDeleteShop' : '_recDelete'}" data-id="${r.id}" data-stop-propagation>🗑️</button>
       </div>` : ''}
     </div>
     <div class="rec-card-body">
@@ -357,13 +358,13 @@ function _renderCard(r, accent) {
       ${!isCraftType && r.description ? `<div style="margin-bottom:.3rem;color:var(--text-dim);font-size:.78rem">${r.description}</div>` : ''}
       ${!isCraftType && r.effet ? `<div class="rec-effet">✨ ${r.effet}</div>` : ''}
     </div>
-    <div class="rec-footer" onclick="event.stopPropagation()">
+    <div class="rec-footer">
       <div style="font-size:.7rem;color:var(--text-dim)">
         ${TABS.find(t=>t.id===r.type)?.emoji||''} ${TABS.find(t=>t.id===r.type)?.label||r.type}
       </div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-        ${isAdmin ? `<button class="rec-btn rec-btn-acces" onclick="openAccesModal('${r.id}')">👥 Accès</button>` : ''}
-        ${canSend ? `<button class="rec-btn rec-btn-send" onclick="openSendRecipeModal('${r.id}')">↗ Transmettre</button>` : ''}
+        ${isAdmin ? `<button class="rec-btn rec-btn-acces" data-action="openAccesModal" data-id="${r.id}">👥 Accès</button>` : ''}
+        ${canSend ? `<button class="rec-btn rec-btn-send" data-action="openSendRecipeModal" data-id="${r.id}">↗ Transmettre</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -477,7 +478,7 @@ function openRecipeModal(type, id = '') {
     <div class="form-group">
       <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
         ${isCraft ? '🔩 Matériaux requis' : '🌿 Ingrédients'}
-        <button type="button" onclick="window._recAddIngr()"
+        <button type="button" data-action="_recAddIngr"
           style="font-size:.72rem;background:rgba(34,195,142,.08);border:1px solid rgba(34,195,142,.3);
           border-radius:6px;padding:2px 10px;cursor:pointer;color:#22c38e;font-weight:500">
           + Ajouter
@@ -501,7 +502,7 @@ function openRecipeModal(type, id = '') {
       >${r?.description||''}</textarea>
     </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" onclick="saveRecipe('${id}','${rType}')">
+    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" data-action="_recSave" data-id="${id}" data-type="${rType}">
       ${r ? 'Enregistrer' : 'Créer la recette'}
     </button>
   `);
@@ -515,7 +516,7 @@ function _ingrRow(ig = {}, i) {
       placeholder="Qté" style="width:70px;flex-shrink:0;font-size:.78rem;padding:4px 6px">
     <input class="input-field" id="rec-ig-nom-${i}" value="${ig.nom||''}"
       placeholder="Nom..." style="flex:1;font-size:.78rem;padding:4px 6px">
-    <button type="button" onclick="window._recRemIngr(${i})"
+    <button type="button" data-action="_recRemIngr" data-idx="${i}"
       style="color:#ff6b6b;background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 4px;flex-shrink:0">✕</button>
   </div>`;
 }
@@ -621,7 +622,7 @@ function openShopRecipeModal(id) {
     <div class="form-group">
       <label style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
         🔩 Matériaux requis
-        <button type="button" onclick="window._recAddIngr()"
+        <button type="button" data-action="_recAddIngr"
           style="font-size:.72rem;background:rgba(34,195,142,.08);border:1px solid rgba(34,195,142,.3);
           border-radius:6px;padding:2px 10px;cursor:pointer;color:#22c38e;font-weight:500">+ Ajouter</button>
       </label>
@@ -641,7 +642,7 @@ function openShopRecipeModal(id) {
         placeholder="Contexte, notes...">${r.description||''}</textarea>
     </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" onclick="saveShopRecipe('${id}')">
+    <button class="btn btn-gold" style="width:100%;margin-top:.25rem" data-action="saveShopRecipe" data-id="${id}">
       Enregistrer
     </button>
   `);
@@ -724,8 +725,8 @@ function openAccesModal(id) {
         </label>`).join('')}
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveAcces('${id}')">✓ Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold" style="flex:1" data-action="saveAcces" data-id="${id}">✓ Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="_recClose">Annuler</button>
     </div>
   `);
 }
@@ -776,8 +777,8 @@ function openSendRecipeModal(id) {
         </label>`).join('')}
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" onclick="sendRecipe('${id}')">↗ Transmettre définitivement</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold" style="flex:1" data-action="sendRecipe" data-id="${id}">↗ Transmettre définitivement</button>
+      <button class="btn btn-outline btn-sm" data-action="_recClose">Annuler</button>
     </div>
   `);
 }
@@ -831,4 +832,23 @@ Object.assign(window, {
   saveAcces,
   openSendRecipeModal,
   sendRecipe,
+});
+
+registerActions({
+  recSetTab: (btn) => window.recSetTab?.(btn.dataset.id),
+  _recOpenModal: (btn) => openRecipeModal(btn.dataset.type),
+  _recEdit: (btn) => openRecipeModal(btn.dataset.type, btn.dataset.id),
+  _recEditShop: (btn) => openShopRecipeModal(btn.dataset.id),
+  _recDelete: (btn) => deleteRecipe(btn.dataset.id),
+  _recDeleteShop: (btn) => deleteShopRecipe(btn.dataset.id),
+  _recSave: (btn) => saveRecipe(btn.dataset.id, btn.dataset.type),
+  _recAddIngr: () => window._recAddIngr?.(),
+  _recRemIngr: (btn) => window._recRemIngr?.(Number(btn.dataset.idx)),
+  saveShopRecipe: (btn) => saveShopRecipe(btn.dataset.id),
+  openItemDetailModal: (btn) => window.openItemDetailModal?.(btn.dataset.id),
+  openAccesModal: (btn) => openAccesModal(btn.dataset.id),
+  saveAcces: (btn) => saveAcces(btn.dataset.id),
+  openSendRecipeModal: (btn) => openSendRecipeModal(btn.dataset.id),
+  sendRecipe: (btn) => sendRecipe(btn.dataset.id),
+  _recClose: () => closeModal(),
 });

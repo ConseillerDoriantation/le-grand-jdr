@@ -21,6 +21,7 @@ import {
   selectRichTextNodeContents,
 } from '../shared/rich-text.js';
 import PAGES from './pages.js';
+import { registerActions } from '../core/actions.js';
 
 // ── Config des types de tags ──────────────────────────────────────────────────
 const TAG_TYPES = {
@@ -138,7 +139,7 @@ async function renderHistoire() {
 
       <!-- Barre de navigation -->
       <div class="hist-topbar">
-        <button class="hist-back" onclick="window.navigate('story')" title="Retour à la Trame">
+        <button class="hist-back" data-navigate="story" title="Retour à la Trame">
           <span>←</span> Trame
         </button>
         <div class="hist-topbar-center">
@@ -146,7 +147,7 @@ async function renderHistoire() {
           <span class="hist-titre">${_missionTitre}</span>
         </div>
         <div class="hist-topbar-actions">
-          <button class="hist-handout-btn-top" onclick="window._ouvrirHandout()" title="Aperçu handout joueur">📜 Handout</button>
+          <button class="hist-handout-btn-top" data-action="_ouvrirHandout" title="Aperçu handout joueur">📜 Handout</button>
           <div class="hist-save-status" id="hist-save-status">
             <span class="hist-save-dot hist-save-dot--saved"></span> Sauvegardé
           </div>
@@ -206,7 +207,7 @@ async function renderHistoire() {
             ${_renderSidebarMissions()}
           </div>
           <button class="hist-sidebar-toggle" id="hist-sidebar-toggle"
-            onclick="window._toggleHistSidebar()" title="${_sidebarOpen ? 'Réduire' : 'Développer'}">
+            data-action="_toggleHistSidebar" title="${_sidebarOpen ? 'Réduire' : 'Développer'}">
             ${_sidebarOpen ? '◀' : '▶'}
           </button>
         </aside>
@@ -610,8 +611,7 @@ function _updateToc() {
 
   const links = Array.from(markers).map((m, i) => {
     const label = m.textContent.trim() || `Scène ${i + 1}`;
-    return `<a href="#" class="hist-toc-link"
-      onclick="event.preventDefault();document.getElementById('hist-scene-${i}')?.scrollIntoView({behavior:'smooth',block:'center'})"
+    return `<a href="#" class="hist-toc-link" data-action="_histScrollToScene" data-scene-id="${i}"
     >${label}</a>`;
   }).join('');
 
@@ -637,7 +637,7 @@ function _renderSidebarMissions() {
     const rows = byActe[acte].map(m => {
       const isCurrent = m.id === _missionId;
       return `<button class="hist-sb-item${isCurrent ? ' hist-sb-item--active' : ''}"
-        onclick="window._switchHistMission('${m.id}','${(m.titre||'').replace(/'/g,"\\'")}','${acte.replace(/'/g,"\\'")}')">
+        data-action="_switchHistMission" data-id="${m.id}" data-titre="${_esc(m.titre||'')}" data-acte="${_esc(acte)}">
         <span class="hist-sb-item-title">${m.titre || '(sans titre)'}</span>
       </button>`;
     }).join('');
@@ -711,7 +711,7 @@ function _renderDesRow(s, i) {
     return `<button class="hist-des-stat-btn${active ? ' active' : ''}"
       ${active ? `style="background:${col}20;color:${col};border-color:${col}60"` : ''}
       onmousedown="event.preventDefault()"
-      onclick="window._gestionDesEditStat(${i},'${st}')"
+      data-action="_gestionDesEditStat" data-i="${i}" data-st="${_esc(st)}"
     >${st || '—'}</button>`;
   }).join('');
 
@@ -724,7 +724,7 @@ function _renderDesRow(s, i) {
     <span class="hist-des-drag-handle" title="Glisser pour réordonner">⠿</span>
     <span class="hist-des-name">${s.name}</span>
     <div class="hist-des-stats">${statBtns}</div>
-    <button class="hist-des-del" onclick="window._gestionDesDel(${i})" title="Supprimer">✕</button>
+    <button class="hist-des-del" data-action="_gestionDesDel" data-i="${i}" title="Supprimer">✕</button>
   </div>`;
 }
 
@@ -736,13 +736,13 @@ function _renderGestionDes() {
   const modal = document.createElement('div');
   modal.id = 'hist-des-modal';
   modal.innerHTML = `
-    <div class="hist-des-backdrop" onclick="document.getElementById('hist-des-modal')?.remove()"></div>
+    <div class="hist-des-backdrop" data-action="_histDesDismiss"></div>
     <div class="hist-des-panel">
       <div class="hist-des-header">
         <span>🎲 Compétences &amp; caractéristiques</span>
         <div style="display:flex;gap:6px">
-          <button class="hist-des-btn" onclick="window._resetDiceSkills()" title="Rétablir les compétences par défaut">↺ Réinitialiser</button>
-          <button class="hist-des-btn hist-des-btn--close" onclick="document.getElementById('hist-des-modal')?.remove()">✕</button>
+          <button class="hist-des-btn" data-action="_resetDiceSkills" title="Rétablir les compétences par défaut">↺ Réinitialiser</button>
+          <button class="hist-des-btn hist-des-btn--close" data-action="_histDesDismiss">✕</button>
         </div>
       </div>
       <div class="hist-des-body">
@@ -750,7 +750,7 @@ function _renderGestionDes() {
         <div class="hist-des-add">
           <input id="hist-des-new-name" class="hist-des-input" placeholder="Nouvelle compétence…" />
           <select id="hist-des-new-stat" class="hist-des-new-stat-sel">${statOpts}</select>
-          <button class="hist-des-btn hist-des-btn--add" onclick="window._gestionDesAdd()">+ Ajouter</button>
+          <button class="hist-des-btn hist-des-btn--add" data-action="_gestionDesAdd">+ Ajouter</button>
         </div>
       </div>
     </div>`;
@@ -849,7 +849,7 @@ window._ouvrirHandout = function () {
   const modal = document.createElement('div');
   modal.id = 'hist-handout-modal';
   modal.innerHTML = `
-    <div class="hist-handout-backdrop" onclick="document.getElementById('hist-handout-modal')?.remove()"></div>
+    <div class="hist-handout-backdrop" data-action="_histHandoutDismiss"></div>
     <div class="hist-handout-panel">
       <div class="hist-handout-header">
         <div>
@@ -858,8 +858,8 @@ window._ouvrirHandout = function () {
           <div class="hist-handout-meta">${wordCount} mot${wordCount !== 1 ? 's' : ''}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:flex-start;flex-shrink:0">
-          <button class="hist-handout-action" onclick="window._histHandoutCopy()">📋 Copier le texte</button>
-          <button class="hist-handout-action hist-handout-close" onclick="document.getElementById('hist-handout-modal')?.remove()">✕</button>
+          <button class="hist-handout-action" data-action="_histHandoutCopy">📋 Copier le texte</button>
+          <button class="hist-handout-action hist-handout-close" data-action="_histHandoutDismiss">✕</button>
         </div>
       </div>
       <div class="hist-handout-body">${content}</div>
@@ -928,6 +928,20 @@ function _updateWordCount() {
 
 // ── Enregistrement de la page ─────────────────────────────────────────────────
 PAGES.histoire = renderHistoire;
+
+registerActions({
+  _ouvrirHandout:       () => window._ouvrirHandout?.(),
+  _toggleHistSidebar:   () => window._toggleHistSidebar?.(),
+  _histScrollToScene:   (btn, e) => { e.preventDefault(); document.getElementById(`hist-scene-${btn.dataset.sceneId}`)?.scrollIntoView({behavior:'smooth',block:'center'}); },
+  _switchHistMission:   (btn) => window._switchHistMission?.(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
+  _gestionDesEditStat:  (btn) => window._gestionDesEditStat?.(Number(btn.dataset.i), btn.dataset.st),
+  _gestionDesDel:       (btn) => window._gestionDesDel?.(Number(btn.dataset.i)),
+  _histDesDismiss:      ()    => document.getElementById('hist-des-modal')?.remove(),
+  _resetDiceSkills:     ()    => window._resetDiceSkills?.(),
+  _gestionDesAdd:       ()    => window._gestionDesAdd?.(),
+  _histHandoutDismiss:  ()    => document.getElementById('hist-handout-modal')?.remove(),
+  _histHandoutCopy:     ()    => window._histHandoutCopy?.(),
+});
 
 // Préchauffage du cache des compétences dès le chargement du module
 _loadDiceSkills();

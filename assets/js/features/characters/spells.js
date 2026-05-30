@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { registerActions } from '../../core/actions.js';
 import { updateInCol, getDocData } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
@@ -427,12 +428,12 @@ function _autoValHtml({ fieldId, label, autoValue, autoSource, currentValue, pla
       <div class="cs-spell-autoval-display" id="${fieldId}-display" style="${hasOverride?'display:none':''}">
         <span class="cs-spell-autoval-val"    id="${fieldId}-autoval">${autoValue || '—'}</span>
         <span class="cs-spell-autoval-source" id="${fieldId}-source">${autoSource || ''}</span>
-        <button type="button" class="cs-spell-autoval-btn" onclick="window._enableSortCustom('${fieldId}')">✏️ Custom</button>
+        <button type="button" class="cs-spell-autoval-btn" data-action="_enableSortCustom" data-field="${fieldId}">✏️ Custom</button>
       </div>
       <div class="cs-spell-autoval-edit" id="${fieldId}-edit" style="${hasOverride?'':'display:none'}">
         <div class="cs-spell-autoval-edit-row">
           <input class="input-field" id="${fieldId}" value="${currentValue||''}" placeholder="${placeholder||''}">
-          <button type="button" class="cs-spell-autoval-btn" onclick="window._disableSortCustom('${fieldId}')">↺ Auto</button>
+          <button type="button" class="cs-spell-autoval-btn" data-action="_disableSortCustom" data-field="${fieldId}">↺ Auto</button>
         </div>
       </div>
       ${extraHtml}
@@ -1079,7 +1080,7 @@ export function renderCharDeck(c, canEdit) {
           placeholder="Rechercher (nom, effet, rune)…"
           value="${_esc(window._sortsSearch || '')}"
           oninput="window._sortsSetSearch(this.value)">
-        ${search ? `<button class="cs-sorts-search-clear" onclick="window._sortsSetSearch('')" title="Effacer">✕</button>` : ''}
+        ${search ? `<button class="cs-sorts-search-clear" data-action="_sortsSetSearch" data-val="" title="Effacer">✕</button>` : ''}
       </div>
       <div class="cs-sorts-deck ${deckOver?'is-over':''}" title="Sorts actifs / capacité du deck (INT)">
         <span class="cs-sorts-deck-lbl">Deck</span>
@@ -1087,26 +1088,26 @@ export function renderCharDeck(c, canEdit) {
         <span class="cs-sorts-deck-bar"><span style="width:${deckPct}%"></span></span>
       </div>
       <div class="cs-sorts-actions">
-        ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addSort()" title="Créer un sort">＋ Sort</button>` : ''}
-        ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="openSortCatEditor()" title="Gérer les catégories">📂</button>` : ''}
-        ${cats.length ? `<button class="btn btn-outline btn-sm" onclick="window._sortsToggleAllCats()" title="Plier/déplier toutes les catégories">⇕</button>` : ''}
+        ${canEdit ? `<button class="btn btn-gold btn-sm" data-action="addSort" title="Créer un sort">＋ Sort</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openSortCatEditor" title="Gérer les catégories">📂</button>` : ''}
+        ${cats.length ? `<button class="btn btn-outline btn-sm" data-action="_sortsToggleAllCats" title="Plier/déplier toutes les catégories">⇕</button>` : ''}
       </div>
     </div>
 
     <!-- Filtres rapides -->
     <div class="cs-sorts-filters">
       <div class="cs-sorts-filt-grp">
-        <button class="cs-sorts-chip ${view==='all'?'on':''}"  onclick="window._sortsSetView('all')">Tous (${allSorts.length})</button>
-        <button class="cs-sorts-chip ${view==='deck'?'on':''}" onclick="window._sortsSetView('deck')">⚡ Deck (${deckCount})</button>
+        <button class="cs-sorts-chip ${view==='all'?'on':''}"  data-action="_sortsSetView" data-view="all">Tous (${allSorts.length})</button>
+        <button class="cs-sorts-chip ${view==='deck'?'on':''}" data-action="_sortsSetView" data-view="deck">⚡ Deck (${deckCount})</button>
       </div>
       <div class="cs-sorts-filt-grp">
-        <button class="cs-sorts-chip type ${typeFlt===''?'on':''}"            onclick="window._sortsSetType('')">Toutes</button>
-        <button class="cs-sorts-chip type off  ${typeFlt==='offensif'?'on':''}"     onclick="window._sortsSetType('offensif')">⚔️ Off</button>
-        <button class="cs-sorts-chip type def  ${typeFlt==='defensif'?'on':''}"     onclick="window._sortsSetType('defensif')">🛡️ Def</button>
-        <button class="cs-sorts-chip type soin ${typeFlt==='soin'?'on':''}"         onclick="window._sortsSetType('soin')">💚 Soin</button>
-        <button class="cs-sorts-chip type ench ${typeFlt==='enchantement'?'on':''}" onclick="window._sortsSetType('enchantement')">✨ Ench.</button>
-        <button class="cs-sorts-chip type aff  ${typeFlt==='affliction'?'on':''}"   onclick="window._sortsSetType('affliction')">⛓ Aff.</button>
-        <button class="cs-sorts-chip type util ${typeFlt==='utilitaire'?'on':''}"   onclick="window._sortsSetType('utilitaire')">🔧 Util.</button>
+        <button class="cs-sorts-chip type ${typeFlt===''?'on':''}"            data-action="_sortsSetType" data-type="">Toutes</button>
+        <button class="cs-sorts-chip type off  ${typeFlt==='offensif'?'on':''}"     data-action="_sortsSetType" data-type="offensif">⚔️ Off</button>
+        <button class="cs-sorts-chip type def  ${typeFlt==='defensif'?'on':''}"     data-action="_sortsSetType" data-type="defensif">🛡️ Def</button>
+        <button class="cs-sorts-chip type soin ${typeFlt==='soin'?'on':''}"         data-action="_sortsSetType" data-type="soin">💚 Soin</button>
+        <button class="cs-sorts-chip type ench ${typeFlt==='enchantement'?'on':''}" data-action="_sortsSetType" data-type="enchantement">✨ Ench.</button>
+        <button class="cs-sorts-chip type aff  ${typeFlt==='affliction'?'on':''}"   data-action="_sortsSetType" data-type="affliction">⛓ Aff.</button>
+        <button class="cs-sorts-chip type util ${typeFlt==='utilitaire'?'on':''}"   data-action="_sortsSetType" data-type="utilitaire">🔧 Util.</button>
       </div>
     </div>
 
@@ -1133,7 +1134,7 @@ export function renderCharDeck(c, canEdit) {
           ${search ? `« ${_esc(search)} » ${typeFlt?' · '+typeFlt:''}${view==='deck'?' · Deck uniquement':''}` : 'Essaie un autre filtre'}
         </div>
       </div>
-      <button class="btn btn-outline btn-sm" onclick="window._sortsResetFilters()">Réinitialiser</button>
+      <button class="btn btn-outline btn-sm" data-action="_sortsResetFilters">Réinitialiser</button>
     </div></div>`;
     return html;
   }
@@ -1151,8 +1152,8 @@ export function renderCharDeck(c, canEdit) {
     html += `<div class="cs-sort-cat-block ${isDefault?'is-default':''} ${isCollapsed?'is-collapsed':''}" data-cat-id="${cat.id}">`;
     if (cats.length > 0) {
       html += `<div class="cs-sort-cat-hdr" style="--cat-col:${cat.couleur}"
-          onclick="window._sortsToggleCat('${cat.id}')">
-        ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner" onclick="event.stopPropagation()">⠿</span>` : ''}
+          data-action="_sortsToggleCat" data-id="${cat.id}">
+        ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner" data-stop-propagation>⠿</span>` : ''}
         <span class="cs-sort-cat-chev">${isCollapsed?'▸':'▾'}</span>
         <span class="cs-sort-cat-name">${_esc(cat.nom)}</span>
         <span class="cs-sort-cat-count">${visibleEntries.length} sort${visibleEntries.length>1?'s':''} · ${activeInCat} actif${activeInCat>1?'s':''}</span>
@@ -1363,9 +1364,9 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     ondragend="sortDragEnd(event)">
 
     <!-- Ligne unique compacte -->
-    <div class="cs-sort-compact" onclick="toggleSortDetail(${i})">
+    <div class="cs-sort-compact" data-action="toggleSortDetail" data-idx="${i}">
       <div class="toggle ${s.actif?'on':''}"
-        onclick="event.stopPropagation();${canEdit?`toggleSort(${i})`:''}"
+        ${canEdit ? `data-action="toggleSort" data-idx="${i}" data-stop-propagation` : ''}
         title="${s.actif?'Désactiver':'Activer'}"></div>
       <span class="cs-sort-compact-nom">${s.icon ? `<span class="cs-sort-icon" title="Icône du sort">${_esc(s.icon)}</span> ` : ''}${_esc(s.nom||'Sans nom')}${s.mjValidated ? ' <span class="cs-sort-validated" title="Sort validé par le MJ">✅</span>' : ''}</span>
       <div class="cs-sort-compact-chips">
@@ -1374,15 +1375,15 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         ${concentration ? `<span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:#60a5fa">🧠</span>` : ''}
       </div>
       <span class="cs-sort-compact-pm">${pmVal} PM</span>
-      ${canEdit ? `<div class="cs-sort-compact-acts" onclick="event.stopPropagation()">
-        <button class="btn-icon" onclick="editSort(${i})">✏️</button>
-        <button class="btn-icon" onclick="deleteSort(${i})">🗑️</button>
+      ${canEdit ? `<div class="cs-sort-compact-acts" data-stop-propagation>
+        <button class="btn-icon" data-action="editSort" data-idx="${i}">✏️</button>
+        <button class="btn-icon" data-action="deleteSort" data-idx="${i}">🗑️</button>
       </div>` : ''}
       <span class="cs-sort-compact-chev">${isOpen?'▲':'▼'}</span>
     </div>
 
     <!-- Description toujours visible (clamped 2 lignes) -->
-    ${s.effet ? `<div class="cs-sort-desc-preview" onclick="toggleSortDetail(${i})">${_esc(s.effet)}</div>` : ''}
+    ${s.effet ? `<div class="cs-sort-desc-preview" data-action="toggleSortDetail" data-idx="${i}">${_esc(s.effet)}</div>` : ''}
 
     <!-- Panneau déroulant : détails techniques complets -->
     ${isOpen ? `<div class="cs-sort-expand">
@@ -1420,19 +1421,19 @@ export function openSortCatEditor() {
         border-radius:8px;padding:.5rem .7rem;border:1px solid var(--border)">
         <div style="width:12px;height:12px;border-radius:50%;background:${cat.couleur};flex-shrink:0"></div>
         <span style="flex:1;font-size:.84rem;color:var(--text)">${cat.nom}</span>
-        <button class="btn-icon" style="font-size:.72rem" onclick="window._editSortCat(${i})">✏️</button>
-        <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" onclick="window._delSortCat(${i})">🗑️</button>
+        <button class="btn-icon" style="font-size:.72rem" data-action="_editSortCat" data-idx="${i}">✏️</button>
+        <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" data-action="_delSortCat" data-idx="${i}">🗑️</button>
       </div>`).join('')}
       ${cats.length === 0 ? `<div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:.8rem;font-style:italic">Aucune catégorie</div>` : ''}
     </div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.75rem">
-      ${COLORS.map(col => `<button onclick="window._addSortCat('${col}')"
+      ${COLORS.map(col => `<button data-action="_addSortCat" data-col="${col}"
         style="width:28px;height:28px;border-radius:50%;background:${col};border:2px solid transparent;
         cursor:pointer;transition:transform .1s" onmouseover="this.style.transform='scale(1.2)'"
         onmouseout="this.style.transform=''" title="Créer une catégorie ${col}"></button>`).join('')}
       <span style="font-size:.75rem;color:var(--text-dim);align-self:center;margin-left:.25rem">← clique pour créer</span>
     </div>
-    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.75rem" onclick="closeModal()">Fermer</button>
+    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.75rem" data-action="close-modal">Fermer</button>
   `);
 }
 
@@ -1679,8 +1680,8 @@ function _renderRunesSection() {
         ${contrib?.chain ? `<div class="cs-rune-active-chain">${contrib.chain}</div>` : ''}
       </div>
       <div class="cs-rune-active-ctrl">
-        <button type="button" class="cs-rune-btn minus" onclick="runeDecrement('${r.nom}')">−</button>
-        <button type="button" class="cs-rune-btn plus"  onclick="runeIncrement('${r.nom}')">+</button>
+        <button type="button" class="cs-rune-btn minus" data-action="runeDecrement" data-nom="${r.nom}">−</button>
+        <button type="button" class="cs-rune-btn plus"  data-action="runeIncrement" data-nom="${r.nom}">+</button>
       </div>
     </div>`;
   }).join('') : `<div class="cs-rune-active-empty">
@@ -1698,7 +1699,7 @@ function _renderRunesSection() {
       <div class="cs-rune-pick-list">
         ${runesInGroup.map(r => `
           <button type="button" class="cs-rune-pick-item"
-            style="--rune-c:${r.color}" onclick="runeIncrement('${r.nom}')"
+            style="--rune-c:${r.color}" data-action="runeIncrement" data-nom="${r.nom}"
             data-tip="${r.effet}" aria-label="Ajouter ${r.nom} — ${r.effet}">
             <span class="cs-rune-pick-icon">${r.icon}</span>
             <span class="cs-rune-pick-nom">${r.nom}</span>
@@ -1786,7 +1787,7 @@ export async function openSortModal(idx, s) {
   const typeBtnsHtml = TYPE_CFG.map(t => {
     const isSel = typesInit.includes(t.v);
     return `<button type="button" id="s-type-${t.v}"
-      onclick="window._toggleSortType('${t.v}')"
+      data-action="_toggleSortType" data-type="${t.v}"
       style="flex:1;padding:.4rem .3rem;border-radius:8px;font-size:.75rem;cursor:pointer;
       border:2px solid ${isSel?t.color:'var(--border)'};
       background:${isSel?t.color+'20':'var(--bg-elevated)'};
@@ -1802,7 +1803,7 @@ export async function openSortModal(idx, s) {
   const actionBtnsHtml = ACTION_CFG.map(a => {
     const isSel = (window._sortActionEdit === a.v);
     return `<button type="button" id="s-action-${a.v??'auto'}"
-      onclick="window._selectSortAction(${a.v===null?'null':`'${a.v}'`})"
+      data-action="_selectSortAction" data-val="${a.v??''}"
       style="flex:1;padding:.35rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;
       border:2px solid ${isSel?a.color:'var(--border)'};
       background:${isSel?a.color+'20':'var(--bg-elevated)'};
@@ -1818,7 +1819,7 @@ export async function openSortModal(idx, s) {
   ].map(opt => {
     const sel = deplCur === opt.v;
     return `<button type="button" id="s-depl-${opt.v??'none'}"
-      onclick="window._selectDeplMode(${opt.v===null?'null':`'${opt.v}'`})"
+      data-action="_selectDeplMode" data-val="${opt.v??''}"
       style="flex:1;padding:.3rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;transition:all .15s;
         border:2px solid ${sel?opt.col:'var(--border)'};
         background:${sel?opt.col+'20':'var(--bg-elevated)'};
@@ -1837,7 +1838,7 @@ export async function openSortModal(idx, s) {
         <h2>${idx>=0?'Modifier le sort':'Nouveau sort'}</h2>
         <small>Forge les runes, choisis le noyau élémentaire, affine les effets.</small>
       </div>
-      <button class="sh-admin-close" onclick="closeModalDirect()" title="Fermer">✕</button>
+      <button class="sh-admin-close" data-action="closeModalDirect" title="Fermer">✕</button>
     </div>
     <div class="sh-admin-body">
      <div class="cs-spell-forge">
@@ -1852,7 +1853,7 @@ export async function openSortModal(idx, s) {
     <div class="cs-spell-identity">
       <div class="cs-spell-identity-field"><label>Icône</label>
         <button type="button" id="s-icon-btn" class="cs-spell-icon-btn"
-          onclick="window._toggleSortIconPicker()"
+          data-action="_toggleSortIconPicker"
           title="Cliquer pour choisir une icône">${s?.icon || '🔮'}</button>
         <input type="hidden" id="s-icon" value="${s?.icon||''}">
         <div id="s-icon-picker" class="cs-spell-icon-picker" style="display:none"></div>
@@ -1889,7 +1890,7 @@ export async function openSortModal(idx, s) {
           const selectedStyle = selected ? `border-color:${n.color};background:${n.color}20;color:${n.color}` : '';
           const attrs = locked
             ? `title="Ce noyau n'est plus accessible à ce personnage" aria-disabled="true"`
-            : `onclick="selectNoyau(this,'${n.id}','${n.label} ${n.icon}','${n.color}')" title="Choisir ${n.label}"`;
+            : `data-action="selectNoyau" data-noyau-label="${_esc(n.label+' '+n.icon)}" data-noyau-color="${n.color}" title="Choisir ${n.label}"`;
           const lockedBadge = locked ? '<span class="cs-noyau-lock">non accessible</span>' : '';
           return `<div class="cs-noyau-btn ${selected?'selected':''}${locked?' cs-noyau-btn--locked':''}" style="${selectedStyle}" ${attrs} data-noyau-id="${n.id}">${n.icon} ${n.label}${lockedBadge}</div>`;
         }).join('') : '<div class="cs-noyau-empty">Aucun noyau accessible. Demande au MJ de débloquer un élément sur ta fiche.</div>'}
@@ -1949,7 +1950,7 @@ export async function openSortModal(idx, s) {
             { v:'soin', label:'💚 Soigne',           color:'#4f8cff', detail:'+1d4 par rune'  },
           ].map(opt => {
             const sel = (s?.protectionMode || 'ca') === opt.v;
-            return `<button type="button" id="s-prot-${opt.v}" onclick="window._selectProtMode('${opt.v}')"
+            return `<button type="button" id="s-prot-${opt.v}" data-action="_selectProtMode" data-val="${opt.v}"
               style="flex:1;padding:.45rem .4rem;border-radius:8px;cursor:pointer;transition:all .15s;
               border:2px solid ${sel?opt.color:'var(--border)'};
               background:${sel?opt.color+'18':'var(--bg-elevated)'};text-align:center">
@@ -2006,10 +2007,10 @@ export async function openSortModal(idx, s) {
         <label>Mode</label>
         <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr">
           <button type="button" id="s-enchant-mode-dmg"
-            onclick="window._selectEnchantMode('dmg')"
+            data-action="_selectEnchantMode" data-val="dmg"
             class="cs-slot-btn ${(s?.enchantMode||'dmg')==='dmg'?'selected':''}">⚔️ Bonus dégâts arme</button>
           <button type="button" id="s-enchant-mode-etat"
-            onclick="window._selectEnchantMode('etat')"
+            data-action="_selectEnchantMode" data-val="etat"
             class="cs-slot-btn ${s?.enchantMode==='etat'?'selected':''}">✨ État sur allié</button>
         </div>
         <input type="hidden" id="s-enchant-mode" value="${s?.enchantMode||'dmg'}">
@@ -2046,10 +2047,10 @@ export async function openSortModal(idx, s) {
         <label>Mode</label>
         <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr">
           <button type="button" id="s-affliction-mode-dot"
-            onclick="window._selectAfflictionMode('dot')"
+            data-action="_selectAfflictionMode" data-val="dot"
             class="cs-slot-btn ${(s?.afflictionMode||'dot')==='dot'?'selected':''}">🩸 DoT (dégâts/tour)</button>
           <button type="button" id="s-affliction-mode-etat"
-            onclick="window._selectAfflictionMode('etat')"
+            data-action="_selectAfflictionMode" data-val="etat"
             class="cs-slot-btn ${s?.afflictionMode==='etat'?'selected':''}">⛓ État</button>
         </div>
         <input type="hidden" id="s-affliction-mode" value="${s?.afflictionMode||'dot'}">
@@ -2181,9 +2182,9 @@ export async function openSortModal(idx, s) {
    </div><!-- /cs-spell-forge -->
     </div><!-- /sh-admin-body -->
     <div class="sh-admin-footer">
-      <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
+      <button class="btn btn-outline btn-sm" data-action="closeModalDirect">Annuler</button>
       <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-gold btn-sm" onclick="saveSort(${idx})">💾 Enregistrer le sort</button>
+      <button class="btn btn-gold btn-sm" data-action="saveSort" data-idx="${idx}">💾 Enregistrer le sort</button>
     </div>
    </div><!-- /sh-admin-modal -->
   `);
@@ -2509,7 +2510,7 @@ function _refreshSpellSuggestions() {
     list.innerHTML = suggestions.map(s => {
       const encoded = btoa(unescape(encodeURIComponent(s)));
       return `<button type="button" class="cs-spell-suggest-btn"
-        onclick="window._pickSpellSuggestion('${cat}','${encoded}')"
+        data-action="_pickSpellSuggestion" data-cat="${cat}" data-encoded="${encoded}"
         title="Cliquer pour appliquer cette suggestion">↓ ${_esc(s)}</button>`;
     }).join('');
     // Pré-remplissage agressif : si la textarea est vide et jamais touchée,
@@ -2564,9 +2565,9 @@ window._toggleSortIconPicker = () => {
   picker.innerHTML = SPELL_ICONS.map(ic => {
     const sel = ic === current ? ' is-selected' : '';
     return `<button type="button" class="cs-spell-icon-opt${sel}"
-      onclick="window._pickSortIcon('${ic.replace(/'/g, "\\'")}')">${ic}</button>`;
+      data-action="_pickSortIcon" data-icon="${_esc(ic)}">${ic}</button>`;
   }).join('') + `<button type="button" class="cs-spell-icon-opt cs-spell-icon-opt--clear"
-      onclick="window._pickSortIcon('')" title="Aucune icône — utilise celle du noyau">✕</button>`;
+      data-action="_pickSortIcon" data-icon="" title="Aucune icône — utilise celle du noyau">✕</button>`;
   picker.style.display = 'grid';
 };
 
@@ -3058,3 +3059,35 @@ async function _saveItemSpell() {
 }
 
 // (le check _itemEditCtx est désormais en tête de saveSort — pas de monkey-patch)
+
+registerActions({
+  addSort:                ()    => addSort(),
+  openSortCatEditor:      ()    => openSortCatEditor(),
+  toggleSortDetail:       (btn) => toggleSortDetail(Number(btn.dataset.idx)),
+  editSort:               (btn) => editSort(Number(btn.dataset.idx)),
+  saveSort:               (btn) => saveSort(Number(btn.dataset.idx)),
+  selectNoyau:            (btn) => selectNoyau(btn, btn.dataset.noyauId, btn.dataset.noyauLabel, btn.dataset.noyauColor),
+  runeIncrement:          (btn) => runeIncrement(btn.dataset.nom),
+  runeDecrement:          (btn) => runeDecrement(btn.dataset.nom),
+  closeModalDirect:       ()    => closeModalDirect(),
+  _enableSortCustom:      (btn) => window._enableSortCustom(btn.dataset.field),
+  _disableSortCustom:     (btn) => window._disableSortCustom(btn.dataset.field),
+  _sortsSetSearch:        (btn) => window._sortsSetSearch(btn.dataset.val),
+  _sortsSetView:          (btn) => window._sortsSetView(btn.dataset.view),
+  _sortsSetType:          (btn) => window._sortsSetType(btn.dataset.type),
+  _sortsToggleCat:        (btn) => window._sortsToggleCat(btn.dataset.id),
+  _sortsToggleAllCats:    ()    => window._sortsToggleAllCats(),
+  _sortsResetFilters:     ()    => window._sortsResetFilters(),
+  _editSortCat:           (btn) => window._editSortCat(Number(btn.dataset.idx)),
+  _delSortCat:            (btn) => window._delSortCat(Number(btn.dataset.idx)),
+  _addSortCat:            (btn) => window._addSortCat(btn.dataset.col),
+  _toggleSortType:        (btn) => window._toggleSortType(btn.dataset.type),
+  _selectSortAction:      (btn) => window._selectSortAction(btn.dataset.val === '' ? null : btn.dataset.val),
+  _selectDeplMode:        (btn) => window._selectDeplMode(btn.dataset.val === '' ? null : btn.dataset.val),
+  _selectProtMode:        (btn) => window._selectProtMode(btn.dataset.val),
+  _selectEnchantMode:     (btn) => window._selectEnchantMode(btn.dataset.val),
+  _selectAfflictionMode:  (btn) => window._selectAfflictionMode(btn.dataset.val),
+  _toggleSortIconPicker:  ()    => window._toggleSortIconPicker(),
+  _pickSortIcon:          (btn) => window._pickSortIcon(btn.dataset.icon),
+  _pickSpellSuggestion:   (btn) => window._pickSpellSuggestion(btn.dataset.cat, btn.dataset.encoded),
+});

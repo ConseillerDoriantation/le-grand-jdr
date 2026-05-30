@@ -23,6 +23,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
+import { registerActions }        from '../core/actions.js';
 import { _esc, _norm }           from '../shared/html.js';
 import { calcOr }                from '../shared/char-stats.js';
 
@@ -175,7 +176,7 @@ async function renderAccount() {
             <div class="acc-label">Pseudo</div>
             <div class="acc-value">${profile.pseudo||'—'}</div>
           </div>
-          <button class="acc-edit-btn" onclick="openEditPseudo()">✏️ Modifier</button>
+          <button class="acc-edit-btn" data-action="openEditPseudo">✏️ Modifier</button>
         </div>
       </div>
 
@@ -187,7 +188,7 @@ async function renderAccount() {
             <div class="acc-label">Adresse email</div>
             <div class="acc-value">${user.email}</div>
           </div>
-          <button class="acc-edit-btn" onclick="openEditEmail()">✏️ Modifier</button>
+          <button class="acc-edit-btn" data-action="openEditEmail">✏️ Modifier</button>
         </div>
       </div>
 
@@ -199,7 +200,7 @@ async function renderAccount() {
             <div class="acc-label">Mot de passe</div>
             <div class="acc-value">••••••••</div>
           </div>
-          <button class="acc-edit-btn" onclick="openEditPassword()">✏️ Modifier</button>
+          <button class="acc-edit-btn" data-action="openEditPassword">✏️ Modifier</button>
         </div>
       </div>
 
@@ -223,7 +224,7 @@ async function renderAccount() {
         ⚠️ ${nbChars} personnage${nbChars!==1?'s':''} seront supprimés.
         Leurs objets boutique seront remis en vente automatiquement.
       </div>` : ''}
-      <button class="acc-danger-btn" onclick="openDeleteAccount()">
+      <button class="acc-danger-btn" data-action="openDeleteAccount">
         🗑️ Supprimer mon compte
       </button>
     </div>
@@ -243,8 +244,8 @@ function openEditPseudo() {
         placeholder="Ton pseudo d'aventurier...">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="savePseudo()">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold" style="flex:1" data-action="savePseudo">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
   `);
   setTimeout(() => {
@@ -297,8 +298,8 @@ function openEditEmail() {
       <input class="input-field" id="acc-reauth-pw-email" type="password" placeholder="••••••••">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveEmail()">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold" style="flex:1" data-action="saveEmail">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
   `);
 }
@@ -343,8 +344,8 @@ function openEditPassword() {
       <input class="input-field" id="acc-new-pw2" type="password" placeholder="••••••••">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="savePassword()">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold" style="flex:1" data-action="savePassword">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
   `);
 }
@@ -399,10 +400,10 @@ function openDeleteAccount() {
         border-radius:10px;padding:.65rem;cursor:pointer;color:#ff6b6b;font-size:.85rem;font-weight:600;
         transition:all .15s" onmouseover="this.style.background='rgba(255,107,107,.2)'"
         onmouseout="this.style.background='rgba(255,107,107,.1)'"
-        onclick="confirmDeleteAccount()">
+        data-action="confirmDeleteAccount">
         🗑️ Supprimer définitivement
       </button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
   `);
 }
@@ -418,7 +419,7 @@ async function confirmDeleteAccount() {
   if (!user) return;
 
   // Désactiver le bouton pendant l'opération
-  const btn = document.querySelector('[onclick="confirmDeleteAccount()"]');
+  const btn = document.querySelector('[data-action="confirmDeleteAccount"]');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Suppression en cours...'; }
 
   try {
@@ -497,4 +498,16 @@ Object.assign(window, {
   openDeleteAccount, confirmDeleteAccount,
   deleteCharWithRefund,
   _liquidateInventory,
+});
+
+registerActions({
+  openEditPseudo:      () => openEditPseudo(),
+  openEditEmail:       () => openEditEmail(),
+  openEditPassword:    () => openEditPassword(),
+  openDeleteAccount:   () => openDeleteAccount(),
+  savePseudo:          () => savePseudo(),
+  saveEmail:           () => saveEmail(),
+  savePassword:        () => savePassword(),
+  confirmDeleteAccount:() => confirmDeleteAccount(),
+  _accClose:           () => closeModal(),
 });

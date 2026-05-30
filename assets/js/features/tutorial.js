@@ -2,6 +2,7 @@ import { getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import PAGES from './pages.js';
+import { registerActions } from '../core/actions.js';
 
 function getDefaultTutorial() {
   return [
@@ -26,7 +27,7 @@ async function editTutorial() {
     <div class="form-group"><label>Sections (une par bloc : titre | contenu)</label>
       <textarea class="input-field" id="tutorial-edit" rows="16">${sections.map((section) => `${section.title} | ${section.content}`).join('\n\n')}</textarea>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveTutorial()">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveTutorial">Enregistrer</button>
   `);
 }
 
@@ -50,3 +51,5 @@ async function saveTutorial() {
 }
 
 Object.assign(window, { getDefaultTutorial, showTutSection, editTutorial, saveTutorial });
+
+registerActions({ saveTutorial: () => saveTutorial() });

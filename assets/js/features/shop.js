@@ -587,7 +587,7 @@ function _renderSidebar() {
             // Gradient coloré pour la pastille emoji (style maquette)
             const catBg = _catGradient(cat.nom).replace(/^background:/, '');
             return `
-              <button class="sh-side-link ${active ? 'active' : ''}" onclick="shopGoCat('${cat.id}')"${cat.masquee ? ' style="opacity:.6"' : ''}>
+              <button class="sh-side-link ${active ? 'active' : ''}" data-sh-action="goCat" data-id="${cat.id}"${cat.masquee ? ' style="opacity:.6"' : ''}>
                 <span class="sh-side-link-icon" style="--cat-bg:${catBg}">${cat.emoji || _catEmoji(cat.nom)}</span>
                 <span class="sh-side-link-text">
                   <strong>${cat.nom}${cat.masquee ? ' <span title="Masquée aux joueurs">🙈</span>' : ''}</strong>
@@ -653,7 +653,7 @@ function _renderHomeResults() {
   cats.forEach(cat => {
     const count = _items.filter(i => i.categorieId === cat.id).length;
     const tpl   = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" onclick="shopGoCat('${cat.id}')"${cat.masquee?' style="opacity:.6"':''}>
+    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" data-sh-action="goCat" data-id="${cat.id}"${cat.masquee?' style="opacity:.6"':''}>
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
         ${!cat.image?`<div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>`:''}
@@ -662,9 +662,9 @@ function _renderHomeResults() {
       <div class="sh-cat-body">
         <div class="sh-cat-name-row">
           <div class="sh-cat-name">${cat.nom}${cat.masquee?' <span title="Masquée aux joueurs" style="font-size:.85em">🙈</span>':''}</div>
-          ${edit?`<div class="sh-card-admin-inline" onclick="event.stopPropagation()">
-            <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" onclick="openCatModal('${cat.id}')">✏️</button>
-            <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" onclick="deleteCat('${cat.id}')">🗑️</button>
+          ${edit?`<div class="sh-card-admin-inline" data-sh-action="stop">
+            <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" data-sh-action="openCatModal" data-id="${cat.id}">✏️</button>
+            <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" data-sh-action="deleteCat" data-id="${cat.id}">🗑️</button>
           </div>`:''}
         </div>
         <div class="sh-cat-meta">${count} article${count!==1?'s':''}</div>
@@ -1485,7 +1485,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
             ${tropCher && !epuise ? `<div class="sh-item-missing-line">Il te manque ${manque} or</div>` : ''}
           </div>
 
-          <div class="sh-item-actions-inline" onclick="event.stopPropagation()">
+          <div class="sh-item-actions-inline" data-sh-action="stop">
             <button class="sh-try-btn" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier">🪄</button>
             ${buyBtnHtml}
           </div>
@@ -2269,7 +2269,7 @@ function openCatModal(catId) {
       <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
       <div class="sh-admin-footer-spacer"></div>
       ${cat ? `<button class="btn btn-outline btn-sm sh-buy-btn--poor" data-sh-action="deleteCat" data-id="${cat.id}">🗑️ Supprimer</button>` : ''}
-      <button class="btn btn-gold btn-sm" onclick="saveCat('${catId||''}')">
+      <button class="btn btn-gold btn-sm" data-sh-action="saveCat" data-id="${catId||''}">
         ${cat ? '💾 Enregistrer' : '➕ Créer'}
       </button>
     </div>

@@ -59,6 +59,7 @@ import {
   addProfilTag, removeProfilTag, initProfilTagUi,
 } from './characters/tabs.js';
 import { bindRichTextEditors, richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
+import { registerActions } from '../core/actions.js';
 
 import {
   inlineEditText, inlineEditNum, inlineEditChip,
@@ -98,7 +99,7 @@ function charNavCardHtml(c, active = false) {
     ? `<img class="char-pill-img" src="${_esc(c.photo)}" alt="" style="object-position:${photoPos}">`
     : `<span class="char-pill-img char-pill-img--empty" aria-hidden="true">${_esc(initial)}</span>`;
 
-  return `<button type="button" class="char-pill ${active ? 'active' : ''}" data-charid="${_esc(id)}" onclick="selectChar('${id}',this)">
+  return `<button type="button" class="char-pill ${active ? 'active' : ''}" data-charid="${_esc(id)}" data-action="selectChar" data-id="${id}">
     <span class="char-pill-img-wrap">${portrait}</span>
     <span class="char-pill-niv" aria-label="Niveau ${_esc(level)}">${_esc(level)}</span>
     <span class="char-pill-body">
@@ -230,7 +231,7 @@ function renderCharSheet(c, keepTab) {
     const equipStr = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '+0';
     return `<div class="cs-stat-card${canEdit?' cs-stat-card--edit':''}"
       title="${st.label} — base ${base}, équip. ${equipStr}"
-      ${canEdit?`onclick="inlineEditStatFromCard(event,'${c.id}','${st.key}',this)"`:''}
+      ${canEdit?`data-action="inlineEditStatFromCard" data-id="${c.id}" data-key="${st.key}"`:''}
     >
       <div class="cs-stat-card-top">
         <span class="cs-stat-abbr">${st.abbr}</span>
@@ -268,7 +269,7 @@ function renderCharSheet(c, keepTab) {
     const photoPos = `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%`;
     const titleSuffix = ch.isDefault ? ' · ★ Par défaut' : '';
     return `<button class="char-pill${ch.id===c.id?' active':''}${ch.isDefault?' is-default':''}"
-      data-charid="${ch.id}" onclick="selectChar('${ch.id}',this)"
+      data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
       style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
       <span class="char-pill-av">${ch.photo
         ? `<img src="${ch.photo}" style="object-position:${photoPos}">`
@@ -278,7 +279,7 @@ function renderCharSheet(c, keepTab) {
   }).join('');
   const charSwitchHtml = `<div class="char-switch">
     ${charPillsHtml}
-    ${canEdit ? `<button class="char-pill char-pill-new" onclick="createNewChar()">➕ Nouveau</button>` : ''}
+    ${canEdit ? `<button class="char-pill char-pill-new" data-action="createNewChar">➕ Nouveau</button>` : ''}
   </div>`;
 
   // ── Données du hero & sidebar ─────────────────────────
@@ -326,7 +327,7 @@ function renderCharSheet(c, keepTab) {
     // ── Base : MJ peut cliquer pour éditer (visuel doré + ✎)
     const baseSegment = (canEdit && isAdmin)
       ? `<button class="stat-seg stat-seg-base editable" title="MJ — Modifier la base"
-            onclick="event.stopPropagation();inlineEditStat('${c.id}','${st.key}',this)">
+            data-action="inlineEditStat" data-id="${c.id}" data-key="${st.key}" data-stop-propagation>
           <span class="stat-seg-val js-stat-base">${pureBase}</span>
           <span class="stat-seg-lbl">Base <small>✎</small></span>
         </button>`
@@ -341,9 +342,9 @@ function renderCharSheet(c, keepTab) {
         <span class="stat-seg-lbl">Niveau</span>
         ${canEdit ? `<span class="stat-seg-ctrls">
           <button class="stat-lvl-btn" ${canMinus?'':'disabled'}
-            onclick="event.stopPropagation();allocateStat('${c.id}','${st.key}',-1)" title="Retirer 1 point">−</button>
+            data-action="allocateStat" data-id="${c.id}" data-key="${st.key}" data-delta="-1" data-stop-propagation title="Retirer 1 point">−</button>
           <button class="stat-lvl-btn plus" ${canPlus?'':'disabled'}
-            onclick="event.stopPropagation();allocateStat('${c.id}','${st.key}',1)" title="Ajouter 1 point">+</button>
+            data-action="allocateStat" data-id="${c.id}" data-key="${st.key}" data-delta="1" data-stop-propagation title="Ajouter 1 point">+</button>
         </span>` : ''}
       </div>`;
 
@@ -377,7 +378,7 @@ function renderCharSheet(c, keepTab) {
     ? `<div class="id-titres">
         ${titres.map(t => `<span class="id-titre">${_esc(t)}</span>`).join('')}
         ${canEdit ? `<button class="id-titre id-titre-add"
-          onclick="manageTitres('${c.id}')"
+          data-action="manageTitres" data-id="${c.id}"
           title="${titres.length ? 'Gérer les titres' : 'Ajouter un titre'}">${titres.length ? '✎ Titres' : '＋ Titre'}</button>` : ''}
       </div>`
     : '';
@@ -391,7 +392,7 @@ function renderCharSheet(c, keepTab) {
     { k: 'journal', ico: '📖', lbl: 'Journal' },
     { k: 'profil',  ico: '👤', lbl: 'Profil' },
   ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}"
-    data-tab-v3="${t.k}" onclick="showCharTab('${t.k}',this)">
+    data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
     <span class="tab-ico">${t.ico}</span> ${t.lbl}
     ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
   </button>`).join('');
@@ -426,14 +427,14 @@ function renderCharSheet(c, keepTab) {
 
         <div class="id-name-row">
           ${canEdit
-            ? `<span class="id-name" onclick="inlineEditText('${c.id}','nom',this)" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
+            ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
             : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
           <span class="id-actions-mini">
             ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
               title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
-              onclick="window._setDefaultCharacter('${c.id}')">${c.isDefault?'★':'☆'}</button>`:''}
-            ${canEdit?`<button title="Renommer" onclick="inlineEditText('${c.id}','nom',this.parentElement.previousElementSibling)">✎</button>`:''}
-            ${canEdit?`<button title="Exporter" onclick="openCharExportMenu('${c.id}',this)">📤</button>`:''}
+              data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
+            ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
+            ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
           </span>
         </div>
 
@@ -441,10 +442,10 @@ function renderCharSheet(c, keepTab) {
 
         <div class="id-chips">
           ${canEdit
-            ? `<span class="id-chip classe" onclick="inlineEditChip('${c.id}','classe',this,'Classe')">${_esc(c.classe||'Classe')}</span>`
+            ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
             : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
           ${canEdit
-            ? `<span class="id-chip race" onclick="inlineEditChip('${c.id}','race',this,'Race')">${_esc(c.race||'Race')}</span>`
+            ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
             : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
         </div>
 
@@ -460,7 +461,7 @@ function renderCharSheet(c, keepTab) {
             <label>＋ XP</label>
             <input type="number" id="xp-add-input-${c.id}" placeholder="0"
               onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}">
-            <button onclick="addXpDelta('${c.id}')">Ajouter</button>
+            <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
           </div>`:''}
         </div>
 
@@ -474,9 +475,9 @@ function renderCharSheet(c, keepTab) {
             </div>
             <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
             <div class="vital-ctrls">
-              ${canEdit?`<button class="vital-btn" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
-              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" onclick="inlineEditNum('${c.id}','pvBase',this,1,999)" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
-              ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
+              ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
+              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
+              ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
             </div>
           </div>
         </div>
@@ -491,9 +492,9 @@ function renderCharSheet(c, keepTab) {
             </div>
             <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
             <div class="vital-ctrls">
-              ${canEdit?`<button class="vital-btn" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
-              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" onclick="inlineEditNum('${c.id}','pmBase',this,1,999)" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
-              ${canEdit?`<button class="vital-btn plus" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
+              ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
+              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
+              ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
             </div>
           </div>
         </div>
@@ -502,7 +503,7 @@ function renderCharSheet(c, keepTab) {
         <div class="cs-mini-grid cs-mini-grid-3">
           <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
           <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
-          <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" onclick="showCharTab('sorts')" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
+          <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" data-action="showCharTab" data-tab="sorts" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
         </div>
 
         <!-- Or -->
@@ -514,7 +515,7 @@ function renderCharSheet(c, keepTab) {
               <div class="or-card-val"><span class="or-card-amount">${calcOr(c)}</span> <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
             </div>
           </div>
-          ${canEdit?`<button class="or-card-btn" onclick="openSendGoldModal('${c.id}')">↗ Envoyer</button>`:''}
+          ${canEdit?`<button class="or-card-btn" data-action="openSendGoldModal" data-id="${c.id}">↗ Envoyer</button>`:''}
         </div>
 
         ${canEdit?`<div class="aura-row">
@@ -523,7 +524,7 @@ function renderCharSheet(c, keepTab) {
             ${Object.entries(AURA_PALETTE).map(([k,col]) => `
               <button class="aura-dot${(c.aura||'blue')===k?' active':''}"
                 style="--dot-c:${col}" data-aura="${k}"
-                onclick="setCharAura('${c.id}','${k}')"
+                data-action="setCharAura" data-id="${c.id}" data-aura-key="${k}"
                 title="${k}"></button>`).join('')}
           </div>
         </div>`:''}
@@ -594,31 +595,31 @@ function renderCharSheet(c, keepTab) {
         </div>
         ${canEdit&&c.photo?`<button class="cs-photo-del" data-action="delete-character-photo" data-charid="${c.id}" title="Supprimer la photo">✕</button>`:''}
         <div class="cs-lv-badge">${canEdit
-          ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
+          ? `<span class="cs-editable-num" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
           : `Niv.&nbsp;${c.niveau||1}`}</div>
       </div>
       <div class="cs-id-body">
         <div class="cs-name-row">
           ${canEdit
-            ? `<span class="cs-name cs-editable" onclick="inlineEditText('${c.id}','nom',this)" title="Modifier">${c.nom||'Nouveau personnage'}</span>`
+            ? `<span class="cs-name cs-editable" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Modifier">${c.nom||'Nouveau personnage'}</span>`
             : `<span class="cs-name">${c.nom||'Nouveau personnage'}</span>`}
-          ${canEdit?`<button class="cs-export-btn" onclick="openCharExportMenu('${c.id}',this)" title="Exporter la fiche (JSON ou PDF)">📤</button>`:''}
-          ${canEdit?`<button class="cs-delete-btn" onclick="deleteChar('${c.id}')" title="Supprimer ce personnage">🗑️</button>`:''}
+          ${canEdit?`<button class="cs-export-btn" data-action="openCharExportMenu" data-id="${c.id}" title="Exporter la fiche (JSON ou PDF)">📤</button>`:''}
+          ${canEdit?`<button class="cs-delete-btn" data-action="deleteChar" data-id="${c.id}" title="Supprimer ce personnage">🗑️</button>`:''}
         </div>
         ${titres.length||canEdit?`<div class="cs-titres">
           ${titres.map(t=>`<span class="badge badge-gold" style="font-size:.62rem">${t}</span>`).join('')}
-          ${canEdit?`<button class="cs-add-titre" onclick="manageTitres('${c.id}')">＋ titre</button>`:''}
+          ${canEdit?`<button class="cs-add-titre" data-action="manageTitres" data-id="${c.id}">＋ titre</button>`:''}
         </div>`:''}
         ${(c.classe||c.race||canEdit)?`<div class="cs-id-chips">
           ${canEdit
             ? `<span class="cs-id-chip cs-id-chip--classe${c.classe?'':' cs-id-chip--empty'} cs-editable"
                 title="Modifier la classe" data-fieldval="${c.classe||''}"
-                onclick="inlineEditChip('${c.id}','classe',this,'Classe')">${c.classe||'Classe'}</span>`
+                data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${c.classe||'Classe'}</span>`
             : (c.classe?`<span class="cs-id-chip cs-id-chip--classe">${c.classe}</span>`:'')}
           ${canEdit
             ? `<span class="cs-id-chip cs-id-chip--race${c.race?'':' cs-id-chip--empty'} cs-editable"
                 title="Modifier la race" data-fieldval="${c.race||''}"
-                onclick="inlineEditChip('${c.id}','race',this,'Race')">${c.race||'Race'}</span>`
+                data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${c.race||'Race'}</span>`
             : (c.race?`<span class="cs-id-chip cs-id-chip--race">${c.race}</span>`:'')}
         </div>`:''}
       </div>
@@ -628,7 +629,7 @@ function renderCharSheet(c, keepTab) {
     <div class="cs-meta-strip">
       <span class="cs-level-badge">
         ${canEdit
-          ? `<span class="cs-editable-num" onclick="inlineEditNum('${c.id}','niveau',this,1,20)" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
+          ? `<span class="cs-editable-num" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
           : `Niv.&nbsp;${c.niveau||1}`}
       </span>
       <div class="cs-or" title="Solde du Livret de Compte">
@@ -676,9 +677,9 @@ function renderCharSheet(c, keepTab) {
       <div class="cs-vital-block">
         <div class="cs-vital-label">❤️ PV</div>
         <div class="cs-vital-controls">
-          ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pvActuel',-1,'${c.id}')">−</button>`:''}
+          ${canEdit?`<button class="cs-vbtn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
           <span class="cs-vital-val" id="pv-val" style="color:${pvColor}">${pvCur}</span>
-          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pvActuel',1,'${c.id}')">+</button>`:''}
+          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
         </div>
         <div class="cs-bar-bg cs-bar-hp">
           <div class="cs-bar-fill cs-bar-hp-fill ${pvPct>50?'high':pvPct>25?'mid':''}" id="pv-bar" style="width:${pvPct}%"></div>
@@ -686,16 +687,16 @@ function renderCharSheet(c, keepTab) {
         <div class="cs-vital-sub">
           <span>max <strong id="pv-max">${pvMax}</strong></span>
           ${canEdit
-            ? `<button class="cs-vital-base-btn" onclick="inlineEditNum('${c.id}','pvBase',this,1,999)" title="Modifier PV de base">✎ ${c.pvBase||10}</button>`
+            ? `<button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="Modifier PV de base">✎ ${c.pvBase||10}</button>`
             : `<span class="cs-vital-base-ro">base ${c.pvBase||10}</span>`}
         </div>
       </div>
       <div class="cs-vital-block">
         <div class="cs-vital-label">🔵 PM</div>
         <div class="cs-vital-controls">
-          ${canEdit?`<button class="cs-vbtn" onclick="adjustStat('pmActuel',-1,'${c.id}')">−</button>`:''}
+          ${canEdit?`<button class="cs-vbtn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
           <span class="cs-vital-val" id="pm-val" style="color:var(--blue)">${pmCur}</span>
-          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" onclick="adjustStat('pmActuel',1,'${c.id}')">+</button>`:''}
+          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
         </div>
         <div class="cs-bar-bg cs-bar-pm">
           <div class="cs-bar-fill cs-bar-pm-fill" id="pm-bar" style="width:${pmPct}%"></div>
@@ -703,7 +704,7 @@ function renderCharSheet(c, keepTab) {
         <div class="cs-vital-sub">
           <span>max <strong id="pm-max">${pmMax}</strong></span>
           ${canEdit
-            ? `<button class="cs-vital-base-btn" onclick="inlineEditNum('${c.id}','pmBase',this,1,999)" title="Modifier PM de base">✎ ${c.pmBase||10}</button>`
+            ? `<button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="Modifier PM de base">✎ ${c.pmBase||10}</button>`
             : `<span class="cs-vital-base-ro">base ${c.pmBase||10}</span>`}
         </div>
       </div>
@@ -732,11 +733,11 @@ function renderCharSheet(c, keepTab) {
       <div class="cs-stats-header">
         <span>Caractéristiques</span>
         ${lvlPointsRemaining > 0 && canEdit
-          ? `<button onclick="showCharTab('carac')"
+          ? `<button data-action="showCharTab" data-tab="carac"
               style="background:rgba(232,184,75,.15);border:1px solid rgba(232,184,75,.4);color:var(--gold);font-size:.65rem;padding:2px 9px;border-radius:999px;cursor:pointer;font-weight:700;letter-spacing:.04em"
               title="Allouer vos points dans l'onglet Caracs">🎯 ${lvlPointsRemaining} pt${lvlPointsRemaining>1?'s':''}</button>`
           : canEdit
-            ? `<button onclick="showCharTab('carac')" class="cs-hint" style="background:none;border:none;color:var(--text-dim);font-size:.7rem;cursor:pointer;padding:2px 6px;border-radius:6px" title="Voir le détail des caractéristiques">📊 détails</button>`
+            ? `<button data-action="showCharTab" data-tab="carac" class="cs-hint" style="background:none;border:none;color:var(--text-dim);font-size:.7rem;cursor:pointer;padding:2px 6px;border-radius:6px" title="Voir le détail des caractéristiques">📊 détails</button>`
             : ''}
       </div>
       <div class="cs-stats-grid">${statsHtml}</div>
@@ -755,7 +756,7 @@ function renderCharSheet(c, keepTab) {
           {key:'ember',   color:'#ff9544'},
         ].map(a=>`<button class="cs-aura-dot${(c.aura||'blue')===a.key?' active':''}"
           data-aura="${a.key}" style="--dot-color:${a.color}"
-          onclick="setCharAura('${c.id}','${a.key}')"
+          data-action="setCharAura" data-id="${c.id}" data-aura-key="${a.key}"
           title="Aura ${a.key}"></button>`).join('')}
       </div>
     </div>` : ''}
@@ -767,38 +768,27 @@ function renderCharSheet(c, keepTab) {
 
     <!-- Onglets principaux -->
     <nav class="cs-tabs" id="char-tabs">
-      <button class="cs-tab${topTab==='combat'?' active':''}"     data-tab="combat"
-        onclick="showCharTab('combat',this)">⚔️ Combat</button>
-      <button class="cs-tab${topTab==='inventaire'?' active':''}" data-tab="inventaire"
-        onclick="showCharTab('inventaire',this)">🎒 Inventaire</button>
-      <button class="cs-tab${topTab==='journal'?' active':''}"    data-tab="journal"
-        onclick="showCharTab('journal',this)">📖 Journal</button>
-      <button class="cs-tab${topTab==='compte'?' active':''}"     data-tab="compte"
-        onclick="showCharTab('compte',this)">💰 Compte</button>
-      <button class="cs-tab${topTab==='profil'?' active':''}"    data-tab="profil"
-        onclick="showCharTab('profil',this)">👤 Présentation</button>
+      <button class="cs-tab${topTab==='combat'?' active':''}"     data-tab="combat"     data-action="showCharTab">⚔️ Combat</button>
+      <button class="cs-tab${topTab==='inventaire'?' active':''}" data-tab="inventaire" data-action="showCharTab">🎒 Inventaire</button>
+      <button class="cs-tab${topTab==='journal'?' active':''}"    data-tab="journal"    data-action="showCharTab">📖 Journal</button>
+      <button class="cs-tab${topTab==='compte'?' active':''}"     data-tab="compte"     data-action="showCharTab">💰 Compte</button>
+      <button class="cs-tab${topTab==='profil'?' active':''}"     data-tab="profil"     data-action="showCharTab">👤 Présentation</button>
     </nav>
 
     <!-- Sous-onglets Combat : Équipement · Sorts · Maîtrises · Caracs -->
     <div class="cs-subtab-bar" id="cs-subtabs-combat"
          style="display:${topTab==='combat'?'flex':'none'}">
-      <button class="cs-subtab${leafTab==='equipement'?' active':''}" data-subtab="equipement"
-        onclick="showCharTab('equipement',this)">🛡️ Équipement</button>
-      <button class="cs-subtab${leafTab==='sorts'?' active':''}"      data-subtab="sorts"
-        onclick="showCharTab('sorts',this)">✨ Sorts</button>
-      <button class="cs-subtab${leafTab==='maitrises'?' active':''}"  data-subtab="maitrises"
-        onclick="showCharTab('maitrises',this)">🎯 Maîtrises</button>
-      <button class="cs-subtab${leafTab==='carac'?' active':''}" data-subtab="carac"
-        onclick="showCharTab('carac',this)">📊 Caracs${lvlPointsRemaining>0?` <span class="cs-subtab-badge">${lvlPointsRemaining}</span>`:''}</button>
+      <button class="cs-subtab${leafTab==='equipement'?' active':''}" data-subtab="equipement" data-tab="equipement" data-action="showCharTab">🛡️ Équipement</button>
+      <button class="cs-subtab${leafTab==='sorts'?' active':''}"      data-subtab="sorts"      data-tab="sorts"      data-action="showCharTab">✨ Sorts</button>
+      <button class="cs-subtab${leafTab==='maitrises'?' active':''}"  data-subtab="maitrises"  data-tab="maitrises"  data-action="showCharTab">🎯 Maîtrises</button>
+      <button class="cs-subtab${leafTab==='carac'?' active':''}"      data-subtab="carac"      data-tab="carac"      data-action="showCharTab">📊 Caracs${lvlPointsRemaining>0?` <span class="cs-subtab-badge">${lvlPointsRemaining}</span>`:''}</button>
     </div>
 
     <!-- Sous-onglets Journal : Notes · Quêtes -->
     <div class="cs-subtab-bar" id="cs-subtabs-journal"
          style="display:${topTab==='journal'?'flex':'none'}">
-      <button class="cs-subtab${leafTab==='notes'?' active':''}"  data-subtab="notes"
-        onclick="showCharTab('notes',this)">📝 Notes</button>
-      <button class="cs-subtab${leafTab==='quetes'?' active':''}" data-subtab="quetes"
-        onclick="showCharTab('quetes',this)">📜 Quêtes</button>
+      <button class="cs-subtab${leafTab==='notes'?' active':''}"  data-subtab="notes"  data-tab="notes"  data-action="showCharTab">📝 Notes</button>
+      <button class="cs-subtab${leafTab==='quetes'?' active':''}" data-subtab="quetes" data-tab="quetes" data-action="showCharTab">📜 Quêtes</button>
     </div>
 
     <div id="char-tab-content" class="cs-tab-body"></div>
@@ -988,9 +978,9 @@ function renderCharLedger(c, canEdit) {
     <!-- Filtres -->
     <div class="ledger-filters">
       <div class="ledger-filter-segs">
-        <button class="${filter.kind==='all'?'on':''}" onclick="window._csV3LedgerSetKind('${c.id}','all')">Tout</button>
-        <button class="${filter.kind==='rcpt'?'on':''}" onclick="window._csV3LedgerSetKind('${c.id}','rcpt')" style="color:var(--emerald)">+ Recettes</button>
-        <button class="${filter.kind==='dep'?'on':''}" onclick="window._csV3LedgerSetKind('${c.id}','dep')" style="color:var(--crimson-light, #ff8ca7)">− Dépenses</button>
+        <button class="${filter.kind==='all'?'on':''}" data-action="csV3LedgerSetKind" data-id="${c.id}" data-kind="all">Tout</button>
+        <button class="${filter.kind==='rcpt'?'on':''}" data-action="csV3LedgerSetKind" data-id="${c.id}" data-kind="rcpt" style="color:var(--emerald)">+ Recettes</button>
+        <button class="${filter.kind==='dep'?'on':''}" data-action="csV3LedgerSetKind" data-id="${c.id}" data-kind="dep" style="color:var(--crimson-light, #ff8ca7)">− Dépenses</button>
       </div>
       <input type="text" class="ledger-search" placeholder="🔍 Rechercher…"
         value="${_esc(filter.search)}"
@@ -1001,9 +991,9 @@ function renderCharLedger(c, canEdit) {
     <div class="ledger-add ${addKind==='depenses'?'is-dep':'is-rcpt'}">
       <div class="ledger-add-seg">
         <button type="button" class="${addKind==='recettes'?'on rcpt':''}"
-          onclick="window._csV3LedgerSetAddKind('recettes','${c.id}')">↗ Recette</button>
+          data-action="csV3LedgerSetAddKind" data-id="${c.id}" data-kind="recettes">↗ Recette</button>
         <button type="button" class="${addKind==='depenses'?'on dep':''}"
-          onclick="window._csV3LedgerSetAddKind('depenses','${c.id}')">↘ Dépense</button>
+          data-action="csV3LedgerSetAddKind" data-id="${c.id}" data-kind="depenses">↘ Dépense</button>
       </div>
       <div class="ledger-add-fields">
         <label class="ledger-add-field">
@@ -1023,7 +1013,7 @@ function renderCharLedger(c, canEdit) {
             onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
         </label>
       </div>
-      <button class="ledger-add-btn ${addKind}" onclick="window._csV3AddLedger('${c.id}')">
+      <button class="ledger-add-btn ${addKind}" data-action="csV3AddLedger" data-id="${c.id}">
         ${addKind==='recettes'?'＋ Encaisser':'− Décaisser'}
       </button>
     </div>` : ''}
@@ -1052,13 +1042,13 @@ function renderCharLedger(c, canEdit) {
                       onfocus="this.dataset.original=this.textContent"`
                   : ''}>${fmt(Math.abs(parseFloat(e.montant)||0))}</span><small class="ledger-or-suffix">or</small>
               </span>
-              ${canEdit?`<button class="ledger-del" title="Supprimer" onclick="window._csV3DeleteLedger('${c.id}','${e.kind}',${e.idx})">🗑</button>`:'<span></span>'}
+              ${canEdit?`<button class="ledger-del" title="Supprimer" data-action="csV3DeleteLedger" data-id="${c.id}" data-kind="${e.kind}" data-idx="${e.idx}">🗑</button>`:'<span></span>'}
             </li>`;
           }).join('')}
         `).join('')}
       </ol>
     </div>
-    ${hasMore ? `<button class="ledger-more" onclick="window._csV3LedgerMore('${c.id}')">↓ Charger ${Math.min(25, filtered.length - visible.length)} de plus (${filtered.length - visible.length} restantes)</button>` : ''}
+    ${hasMore ? `<button class="ledger-more" data-action="csV3LedgerMore" data-id="${c.id}">↓ Charger ${Math.min(25, filtered.length - visible.length)} de plus (${filtered.length - visible.length} restantes)</button>` : ''}
     `}
   </div>`;
 }
@@ -1242,12 +1232,12 @@ function renderCharJournal(c, canEdit, sub = 'notes') {
                 : renderCharRelations(c, canEdit);
 
   return `<div class="journal-tabs">
-    <span class="journal-tab ${subTab==='notes'?'on':''}" onclick="window._csV3JournalSub('notes')">📝 Notes (${counts.notes})</span>
-    <span class="journal-tab ${subTab==='quetes'?'on':''}" onclick="window._csV3JournalSub('quetes')">📜 Quêtes (${counts.quetes})</span>
-    <span class="journal-tab ${subTab==='relations'?'on':''}" onclick="window._csV3JournalSub('relations')">👥 Relations (${counts.relations})</span>
-    ${canEdit && subTab==='notes' ? `<button class="section-action" style="margin-left:auto" onclick="addNote()">＋ Note</button>` : ''}
-    ${canEdit && subTab==='quetes' ? `<button class="section-action" style="margin-left:auto" onclick="addQuete()">＋ Quête</button>` : ''}
-    ${canEdit && subTab==='relations' ? `<button class="section-action" style="margin-left:auto" onclick="window._csV3AddRelation('${c.id}')">＋ Relation</button>` : ''}
+    <span class="journal-tab ${subTab==='notes'?'on':''}" data-action="csV3JournalSub" data-sub="notes">📝 Notes (${counts.notes})</span>
+    <span class="journal-tab ${subTab==='quetes'?'on':''}" data-action="csV3JournalSub" data-sub="quetes">📜 Quêtes (${counts.quetes})</span>
+    <span class="journal-tab ${subTab==='relations'?'on':''}" data-action="csV3JournalSub" data-sub="relations">👥 Relations (${counts.relations})</span>
+    ${canEdit && subTab==='notes' ? `<button class="section-action" style="margin-left:auto" data-action="addNote">＋ Note</button>` : ''}
+    ${canEdit && subTab==='quetes' ? `<button class="section-action" style="margin-left:auto" data-action="addQuete">＋ Quête</button>` : ''}
+    ${canEdit && subTab==='relations' ? `<button class="section-action" style="margin-left:auto" data-action="csV3AddRelation" data-id="${c.id}">＋ Relation</button>` : ''}
   </div>
   <div id="journal-body">${bodyHtml}</div>`;
 }
@@ -1286,8 +1276,8 @@ function renderJournalQuetes(c, canEdit) {
           ${typeLbl}
         </div>
         ${canEdit ? `<div class="quest-actions">
-          <button class="btn-icon" onclick="toggleQuete(${idx})" title="${validee?'Rouvrir':'Marquer comme validée'}">${validee?'↺':'✔️'}</button>
-          <button class="btn-icon" onclick="deleteQuete(${idx})" title="Supprimer" style="color:#ff8ca7">🗑️</button>
+          <button class="btn-icon" data-action="toggleQuete" data-idx="${idx}" title="${validee?'Rouvrir':'Marquer comme validée'}">${validee?'↺':'✔️'}</button>
+          <button class="btn-icon" data-action="deleteQuete" data-idx="${idx}" title="Supprimer" style="color:#ff8ca7">🗑️</button>
         </div>` : ''}
       </header>
       ${q.description ? `<p class="quest-desc">${_esc(q.description)}</p>` : ''}
@@ -1327,7 +1317,7 @@ function renderCharNotesV3(c, canEdit) {
     const date  = n.date  || '';
     return `<article class="note-v3 ${isOpen?'is-open':''}">
       <header class="note-v3-head">
-        <button class="note-v3-toggle" onclick="window._csV3ToggleNote(${i})" title="${isOpen?'Replier':'Déplier'}">
+        <button class="note-v3-toggle" data-action="csV3ToggleNote" data-idx="${i}" title="${isOpen?'Replier':'Déplier'}">
           ${isOpen ? '▾' : '▸'}
         </button>
         ${canEdit
@@ -1337,13 +1327,13 @@ function renderCharNotesV3(c, canEdit) {
               placeholder="Titre de la note">`
           : `<span class="note-v3-titre note-v3-titre-ro">${_esc(titre)}</span>`}
         ${date ? `<span class="note-v3-date">${_esc(date)}</span>` : ''}
-        ${canEdit ? `<button class="note-v3-del" onclick="event.stopPropagation();deleteNote(${i})" title="Supprimer">🗑️</button>` : ''}
+        ${canEdit ? `<button class="note-v3-del" data-action="deleteNote" data-idx="${i}" data-stop-propagation title="Supprimer">🗑️</button>` : ''}
       </header>
       ${isOpen ? `<div class="note-v3-body">
         ${canEdit
           ? `${richTextEditorHtml({ id: `note-area-${i}`, html: n.contenu || '', placeholder: 'Contenu de la note…', minHeight: 180 })}
              <div style="display:flex;gap:8px;margin-top:8px">
-               <button class="btn btn-gold btn-sm" onclick="saveNote(${i})">💾 Enregistrer</button>
+               <button class="btn btn-gold btn-sm" data-action="saveNote" data-idx="${i}">💾 Enregistrer</button>
              </div>`
           : richTextContentHtml({ html: n.contenu, className: 'note-v3-content', fallback: '<em style="opacity:.5">Aucun contenu.</em>' })}
       </div>` : ''}
@@ -1397,8 +1387,8 @@ function renderCharRelations(c, canEdit) {
           ${r.role ? `<span class="rel-role">${_esc(r.role)}</span>` : ''}
           ${r.note ? `<div class="rel-note">${_esc(r.note)}</div>` : ''}
           ${canEdit ? `<div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end">
-            <button class="ledger-del" style="opacity:.6" onclick="window._csV3EditRelation('${c.id}',${i})" title="Modifier">✎</button>
-            <button class="ledger-del" style="opacity:.6" onclick="window._csV3DeleteRelation('${c.id}',${i})" title="Supprimer">🗑️</button>
+            <button class="ledger-del" style="opacity:.6" data-action="csV3EditRelation" data-id="${c.id}" data-idx="${i}" title="Modifier">✎</button>
+            <button class="ledger-del" style="opacity:.6" data-action="csV3DeleteRelation" data-id="${c.id}" data-idx="${i}" title="Supprimer">🗑️</button>
           </div>` : ''}
         </div>
       </div>`;
@@ -1567,7 +1557,7 @@ function renderCharProfilV3(c, canEdit) {
   const tagChips = tags.map(t => {
     const [bg, bd, col] = _v3TagColor(t);
     const removeBtn = canEdit
-      ? `<button class="profil-tag-x" title="Retirer" onclick="window._csV3RemoveProfilTag('${c.id}','${t.replace(/'/g,"\\'")}')">×</button>`
+      ? `<button class="profil-tag-x" title="Retirer" data-action="csV3RemoveProfilTag" data-id="${c.id}" data-tag="${_esc(t)}">×</button>`
       : '';
     return `<span class="profil-tag" style="--tag-bg:${bg};--tag-bd:${bd};--tag-c:${col}">${_esc(t)}${removeBtn}</span>`;
   }).join('');
@@ -1581,14 +1571,14 @@ function renderCharProfilV3(c, canEdit) {
             maxlength="24" ${tagsFull?'disabled':''}
             onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddProfilTagFromInput('${c.id}');}else if(event.key==='Escape'){this.value='';this.blur();}">
           <button class="profil-tag-add-btn" ${tagsFull?'disabled':''}
-            onclick="window._csV3AddProfilTagFromInput('${c.id}')">Ajouter</button>
+            data-action="csV3AddProfilTagFromInput" data-id="${c.id}">Ajouter</button>
         </div>
         <div class="profil-tag-suggest-label">Suggestions :</div>
         <div class="profil-tag-suggest-row">
           ${V3_TAG_SUGGESTIONS.map(s => {
             const used = tagsLow.includes(s.toLowerCase());
             return `<button class="profil-tag-suggest ${used?'is-used':''}" ${used||tagsFull?'disabled':''}
-              onclick="window._csV3AddProfilTag('${c.id}','${s}')">${_esc(s)}</button>`;
+              data-action="csV3AddProfilTag" data-id="${c.id}" data-tag="${_esc(s)}">${_esc(s)}</button>`;
           }).join('')}
         </div>
         <div class="profil-tag-counter">${tags.length} / ${TAG_MAX_V3} traits</div>
@@ -1606,7 +1596,7 @@ function renderCharProfilV3(c, canEdit) {
           onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">`
       : `<span class="profil-fact-v">${v ? _esc(v) : '<span style="color:var(--text-dim)">—</span>'}</span>`;
     const keyClickable = isCustom && canEdit
-      ? `onclick="window._csV3RenameIdentity('${c.id}','${safeKey}')" style="cursor:pointer" title="Renommer / supprimer"`
+      ? `data-action="csV3RenameIdentity" data-id="${c.id}" data-key="${safeKey}" style="cursor:pointer" title="Renommer / supprimer"`
       : '';
     return `<div class="profil-fact">
       <span class="profil-fact-k" ${keyClickable}>${_esc(k)}${isCustom && canEdit?' <small style="opacity:.5">✎</small>':''}</span>
@@ -1620,15 +1610,15 @@ function renderCharProfilV3(c, canEdit) {
     ? `<div class="profil-bio-edit">
         ${richTextEditorHtml({ id: 'profil-bio-rt', html: bioHtml, minHeight: 220, placeholder: 'Décris ton personnage…' })}
         <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn btn-gold btn-sm" onclick="window._csV3SaveBioRt('${c.id}')">💾 Enregistrer</button>
-          <button class="btn btn-outline btn-sm" onclick="window._csV3CancelBio('${c.id}')">Annuler</button>
+          <button class="btn btn-gold btn-sm" data-action="csV3SaveBioRt" data-id="${c.id}">💾 Enregistrer</button>
+          <button class="btn btn-outline btn-sm" data-action="csV3CancelBio" data-id="${c.id}">Annuler</button>
         </div>
       </div>`
     : `${bioHtml
         ? richTextContentHtml({ html: bioHtml, className: 'profil-text' })
         : `<div class="profil-text"><p style="color:var(--text-dim);font-style:italic">${canEdit?'Clique sur ✎ pour rédiger une bio.':'Aucune biographie publique.'}</p></div>`}
       ${canEdit ? `<button class="section-action" style="align-self:flex-start;margin-top:6px"
-        onclick="window._csV3EnterBioEdit('${c.id}')">✎ Modifier la bio</button>` : ''}`;
+        data-action="csV3EnterBioEdit" data-id="${c.id}">✎ Modifier la bio</button>` : ''}`;
 
   return `
   ${canEdit
@@ -1659,7 +1649,7 @@ function renderCharProfilV3(c, canEdit) {
       <div class="profil-side-card">
         <h4>📜 Identité</h4>
         ${identityHtml}
-        ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" onclick="window._csV3AddFact('${c.id}')">＋ Champ personnalisé</button>` : ''}
+        ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" data-action="csV3AddFact" data-id="${c.id}">＋ Champ personnalisé</button>` : ''}
       </div>
       ${canEdit ? `
       <div class="profil-side-card">
@@ -1670,10 +1660,10 @@ function renderCharProfilV3(c, canEdit) {
             : `<div class="profil-img profil-img-empty">Aucune image</div>`}
         </div>
         <div class="profil-img-actions">
-          <button class="section-action" style="flex:1" onclick="openProfilImageUpload('${c.id}')">
+          <button class="section-action" style="flex:1" data-action="openProfilImageUpload" data-id="${c.id}">
             ${presCache?.imageUrl ? '🔄 Changer' : '📷 Upload sur ImgBB'}
           </button>
-          ${presCache?.imageUrl ? `<button class="section-action" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" onclick="removeProfilImage('${c.id}')" title="Retirer">✕</button>` : ''}
+          ${presCache?.imageUrl ? `<button class="section-action" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" data-action="removeProfilImage" data-id="${c.id}" title="Retirer">✕</button>` : ''}
         </div>
         <div class="profil-img-hint">L'image apparaît sur la page Joueurs comme illustration grand format du personnage.</div>
       </div>` : ''}
@@ -1912,7 +1902,7 @@ function renderCharCombatV3(c, canEdit) {
             <div class="weap-slot">${slot}</div>
             <div class="weap-name" style="color:var(--text-dim);font-style:italic">— Vide —</div>
           </div>
-          ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')" title="Équiper">✏️</button>`:''}
+          ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Équiper">✏️</button>`:''}
         </div>
       </div>`;
     }
@@ -1924,7 +1914,7 @@ function renderCharCombatV3(c, canEdit) {
         </div>
         <div style="display:flex;gap:6px;align-items:center">
           ${item.format?`<span class="weap-format">${_esc(item.format)}</span>`:''}
-          ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
+          ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}">✏️</button>`:''}
         </div>
       </div>
       <div class="weap-rolls">
@@ -1964,7 +1954,7 @@ function renderCharCombatV3(c, canEdit) {
       return `<div class="armor-card empty">
         <div class="armor-slot">
           <span>${_esc(slot)}</span>
-          ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')" title="Équiper">✎</button>`:''}
+          ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Équiper">✎</button>`:''}
         </div>
         <div class="armor-name muted">— Vide —</div>
       </div>`;
@@ -1993,7 +1983,7 @@ function renderCharCombatV3(c, canEdit) {
     return `<div class="armor-card equipped">
       <div class="armor-slot">
         <span>${_esc(slot)}</span>
-        ${canEdit?`<button class="weap-edit" onclick="editEquipSlot('${slot}')" title="Changer">✎</button>`:''}
+        ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Changer">✎</button>`:''}
       </div>
       <div class="armor-name">${_esc(it.nom)}</div>
       ${badges.length?`<div class="armor-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>`:''}
@@ -2112,7 +2102,7 @@ function renderCharCombatV3(c, canEdit) {
       <div class="cstyle-body">
         <div class="cstyle-tag">
           Style de combat
-          ${canEdit ? `<button class="section-action" style="float:right;font-size:.62rem;padding:2px 8px" onclick="window.openCombatStylesAdmin?.()" title="Gérer les styles (admin)">⚙️</button>` : ''}
+          ${canEdit ? `<button class="section-action" style="float:right;font-size:.62rem;padding:2px 8px" data-action="openCombatStylesAdmin" title="Gérer les styles (admin)">⚙️</button>` : ''}
         </div>
         <div class="cstyle-name" style="color:${col}">${_esc(detected.label || detected.name || 'Sans nom')}</div>
         <div class="cstyle-desc">${_esc(detected.description || '')}</div>
@@ -2146,13 +2136,13 @@ function renderCharCombatV3(c, canEdit) {
       const col = t.color || '#9ca3af';
       const cls = on ? 'elem-chip on' : 'elem-chip';
       const style = `--elem-bg:${col}22;--elem-bd:${col}66;--elem-c:${col}`;
-      const handler = canEdit ? `onclick="window._toggleCharElement?.('${c.id}','${t.id}')"` : '';
+      const handler = canEdit ? `data-action="toggleCharElement" data-id="${c.id}" data-elem="${t.id}"` : '';
       return `<span class="${cls}" data-elem-id="${_esc(t.id)}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}</span>`;
     }).join('');
     elemsHtml = `<div class="elem-card">
       <div class="elem-card-head">
         Éléments maîtrisés
-        ${canEdit ? `<button class="section-action" style="float:right" onclick="window.openDamageTypesAdmin?.()" title="Gérer les types (admin)">⚙️</button>` : ''}
+        ${canEdit ? `<button class="section-action" style="float:right" data-action="openDamageTypesAdmin" title="Gérer les types (admin)">⚙️</button>` : ''}
       </div>
       <div class="elem-row">${elemChips || '<span style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun type magique défini.</span>'}</div>
     </div>`;
@@ -2166,7 +2156,7 @@ function renderCharCombatV3(c, canEdit) {
       const pips = Array.from({ length: 5 }, (_, k) => `<span class="mait-pip ${k < niv ? 'on' : ''}"></span>`).join('');
       const bonus = niv > 0 ? `+${niv} dégât${niv>1?'s':''}` : 'Initié';
       const name = m.typeArme || m.nom || m.name || 'Sans type';
-      return `<div class="mait-card" ${canEdit?`onclick="editMaitrise(${i})" style="cursor:pointer"`:''}>
+      return `<div class="mait-card" ${canEdit?`data-action="editMaitrise" data-idx="${i}" style="cursor:pointer"`:''}>
         <div class="mait-head">
           <span class="mait-name">${_esc(name)}</span>
           <span class="mait-bonus">${_esc(bonus)}</span>
@@ -2181,7 +2171,7 @@ function renderCharCombatV3(c, canEdit) {
   <div class="section">
     <div class="section-head">
       <div class="section-title"><span class="ico">⚔️</span> Armes équipées</div>
-      ${canEdit?`<button class="section-action" onclick="editEquipSlot('Main principale')">＋ Équiper</button>`:''}
+      ${canEdit?`<button class="section-action" data-action="editEquipSlot" data-slot="Main principale">＋ Équiper</button>`:''}
     </div>
     <div class="weap-grid">${weapsHtml}</div>
   </div>
@@ -2207,7 +2197,7 @@ function renderCharCombatV3(c, canEdit) {
   <div class="section">
     <div class="section-head">
       <div class="section-title"><span class="ico">🎯</span> Maîtrises d'armes</div>
-      ${canEdit?`<button class="section-action" onclick="addMaitrise()">＋ Ajouter</button>`:''}
+      ${canEdit?`<button class="section-action" data-action="addMaitrise">＋ Ajouter</button>`:''}
     </div>
     ${maitsHtml}
   </div>`;
@@ -2288,14 +2278,14 @@ function renderCharInventaireV3(c, canEdit) {
     <div class="inv-sum-item"><span class="inv-sum-lbl">Objets</span><span class="inv-sum-val">${totalItems}</span></div>
     <div class="inv-sum-item"><span class="inv-sum-lbl">Équipés</span><span class="inv-sum-val">${equipped}</span></div>
     <div class="inv-sum-item"><span class="inv-sum-lbl">Valeur totale</span><span class="inv-sum-val gold">${valeur} or</span></div>
-    ${canEdit?`<button class="section-action" style="margin-left:auto;align-self:center" onclick="addInvItem('${c.id}')">＋ Ajouter un objet</button>`:''}
+    ${canEdit?`<button class="section-action" style="margin-left:auto;align-self:center" data-action="addInvItem" data-id="${c.id}">＋ Ajouter un objet</button>`:''}
   </div>`;
 
   const filterBarHtml = `<div class="inv-search">
     <input placeholder="🔍 Rechercher dans l'inventaire…" value="${_esc(filter.search)}"
       oninput="window._csV3InvSetSearch(this.value)">
     <div class="filter-chips">
-      ${_INV_FILTERS.map(f => `<button class="filter-chip ${filter.cat===f.id?'on':''}" onclick="window._csV3InvSetCat('${f.id}')">
+      ${_INV_FILTERS.map(f => `<button class="filter-chip ${filter.cat===f.id?'on':''}" data-action="csV3InvSetCat" data-cat="${f.id}">
         ${f.icon} ${f.lbl}
       </button>`).join('')}
     </div>
@@ -2365,9 +2355,9 @@ function renderCharInventaireV3(c, canEdit) {
       })()}
       ${it.description?`<div class="inv-card-desc">${_esc(it.description)}</div>`:''}
       ${canEdit?`<div class="inv-card-actions">
-        <button class="inv-act sell" onclick='openSellInvModal("${c.id}","${allIdxB64}",${prixVente},"${safeName}")' title="Vendre ${prixVente} or/u">💰 Vendre ${prixVente}or</button>
-        <button class="inv-act send" onclick='openSendInvModal("${c.id}","${allIdxB64}","${safeName}")' title="Envoyer">↗ Envoyer</button>
-        <button class="inv-act del" onclick='openDeleteInvModal("${c.id}","${allIdxB64}","${safeName}")' title="Supprimer">🗑️</button>
+        <button class="inv-act sell" data-action="openSellInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-prix="${prixVente}" data-name="${_esc(it.nom||'')}" title="Vendre ${prixVente} or/u">💰 Vendre ${prixVente}or</button>
+        <button class="inv-act send" data-action="openSendInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Envoyer">↗ Envoyer</button>
+        <button class="inv-act del" data-action="openDeleteInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Supprimer">🗑️</button>
       </div>`:''}
     </div>`;
   }).join('');
@@ -2412,7 +2402,7 @@ function renderCharSortsV3(c, canEdit) {
   const headerHtml = `<div class="deck-meta">
     <span>Deck équipé : <b>${actives}</b> sort${actives>1?'s':''} actif${actives>1?'s':''} sur <b>${max}</b> emplacement${max>1?'s':''}</span>
     <span style="margin-left:auto;color:var(--text-dim);font-size:.7rem">Clique sur un sort pour l'activer / désactiver</span>
-    ${canEdit?`<button class="section-action" style="margin-left:8px" onclick="addSort()">＋ Sort</button>`:''}
+    ${canEdit?`<button class="section-action" style="margin-left:8px" data-action="addSort">＋ Sort</button>`:''}
   </div>`;
 
   const listHtml = `<div class="spell-list">${sorted.map(({ s, idx }) => {
@@ -2424,7 +2414,7 @@ function renderCharSortsV3(c, canEdit) {
     const cls = s.actif ? 'spell active' : 'spell';
     const isFull = !s.actif && actives >= max;
     return `<div class="${cls} ${isFull?'is-locked':''}"
-      ${canEdit && !isFull ? `onclick="toggleSort(${idx})"` : (isFull?`title="Deck plein — désactive un sort d'abord"`:'')}>
+      ${canEdit && !isFull ? `data-action="toggleSort" data-idx="${idx}"` : (isFull?`title="Deck plein — désactive un sort d'abord"`:'')}>
       <span class="spell-toggle">${s.actif?'✓':''}</span>
       <div class="spell-body">
         <div class="spell-head">
@@ -2438,7 +2428,7 @@ function renderCharSortsV3(c, canEdit) {
         </div>`:''}
       </div>
       <div class="spell-pm">${pm}<small>PM</small></div>
-      ${canEdit?`<button class="spell-edit-v3" onclick="event.stopPropagation();editSort(${idx})" title="Modifier">✎</button>`:''}
+      ${canEdit?`<button class="spell-edit-v3" data-action="editSort" data-idx="${idx}" data-stop-propagation title="Modifier">✎</button>`:''}
     </div>`;
   }).join('')}</div>`;
 
@@ -2580,6 +2570,123 @@ function showCharTab(tab, el) {
 // ══════════════════════════════════════════════
 // EXPORT — expose tout sur window pour les onclick HTML
 // ══════════════════════════════════════════════
+// ══════════════════════════════════════════════
+// REGISTRY data-action — délégation centralisée
+// ══════════════════════════════════════════════
+registerActions({
+  // Sélection
+  selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
+  createNewChar:           ()       => createNewChar(),
+  filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.pseudo, btn),
+  _setDefaultCharacter:    (btn)    => window._setDefaultCharacter(btn.dataset.id),
+
+  // Tabs
+  showCharTab:             (btn)    => showCharTab(btn.dataset.tab, btn),
+
+  // Identité inline
+  inlineEditText: (btn) => {
+    const sel = btn.dataset.targetSel;
+    const el = sel ? (btn.closest('.id-name-row')?.querySelector(sel) ?? btn) : btn;
+    inlineEditText(btn.dataset.id, btn.dataset.field, el);
+  },
+  inlineEditChip:          (btn)    => inlineEditChip(btn.dataset.id, btn.dataset.field, btn, btn.dataset.label),
+  inlineEditNum:           (btn)    => inlineEditNum(btn.dataset.id, btn.dataset.field, btn, Number(btn.dataset.min || 1), Number(btn.dataset.max || 999)),
+  inlineEditStat:          (btn)    => inlineEditStat(btn.dataset.id, btn.dataset.key, btn),
+  inlineEditStatFromCard:  (btn, e) => inlineEditStatFromCard(e, btn.dataset.id, btn.dataset.key, btn),
+  allocateStat:            (btn)    => allocateStat(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
+
+  // Stats vitales
+  adjustStat:              (btn)    => adjustStat(btn.dataset.field, Number(btn.dataset.delta), btn.dataset.id),
+  addXpDelta:              (btn)    => addXpDelta(btn.dataset.id),
+
+  // Actions identité
+  manageTitres:            (btn)    => manageTitres(btn.dataset.id),
+  openCharExportMenu:      (btn)    => openCharExportMenu(btn.dataset.id, btn),
+  deleteChar:              (btn)    => deleteChar(btn.dataset.id),
+  setCharAura:             (btn)    => setCharAura(btn.dataset.id, btn.dataset.auraKey),
+  openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
+
+  // Ledger
+  csV3LedgerSetKind:       (btn)    => window._csV3LedgerSetKind(btn.dataset.id, btn.dataset.kind),
+  csV3LedgerSetAddKind:    (btn)    => window._csV3LedgerSetAddKind(btn.dataset.kind, btn.dataset.id),
+  csV3AddLedger:           (btn)    => window._csV3AddLedger(btn.dataset.id),
+  csV3DeleteLedger:        (btn)    => window._csV3DeleteLedger(btn.dataset.id, btn.dataset.kind, Number(btn.dataset.idx)),
+  csV3LedgerMore:          (btn)    => window._csV3LedgerMore(btn.dataset.id),
+
+  // Journal
+  csV3JournalSub:          (btn)    => window._csV3JournalSub(btn.dataset.sub),
+  addNote:                 ()       => addNote(),
+  addQuete:                ()       => addQuete(),
+  csV3AddRelation:         (btn)    => window._csV3AddRelation(btn.dataset.id),
+  toggleQuete:             (btn)    => toggleQuete(Number(btn.dataset.idx)),
+  deleteQuete:             (btn)    => deleteQuete(Number(btn.dataset.idx)),
+  csV3ToggleNote:          (btn)    => window._csV3ToggleNote(Number(btn.dataset.idx)),
+  deleteNote:              (btn)    => deleteNote(Number(btn.dataset.idx)),
+  saveNote:                (btn)    => saveNote(Number(btn.dataset.idx)),
+  csV3EditRelation:        (btn)    => window._csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
+  csV3DeleteRelation:      (btn)    => window._csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
+
+  // Profil
+  csV3RemoveProfilTag:      (btn)   => window._csV3RemoveProfilTag(btn.dataset.id, btn.dataset.tag),
+  csV3AddProfilTagFromInput:(btn)   => window._csV3AddProfilTagFromInput(btn.dataset.id),
+  csV3AddProfilTag:         (btn)   => window._csV3AddProfilTag(btn.dataset.id, btn.dataset.tag),
+  csV3RenameIdentity:       (btn)   => window._csV3RenameIdentity(btn.dataset.id, btn.dataset.key),
+  csV3SaveBioRt:            (btn)   => window._csV3SaveBioRt(btn.dataset.id),
+  csV3CancelBio:            (btn)   => window._csV3CancelBio(btn.dataset.id),
+  csV3EnterBioEdit:         (btn)   => window._csV3EnterBioEdit(btn.dataset.id),
+  csV3AddFact:              (btn)   => window._csV3AddFact(btn.dataset.id),
+  openProfilImageUpload:    (btn)   => openProfilImageUpload(btn.dataset.id),
+  removeProfilImage:        (btn)   => removeProfilImage(btn.dataset.id),
+
+  // Équipement & combat
+  editEquipSlot:            (btn)   => editEquipSlot(btn.dataset.slot),
+  openCombatStylesAdmin:    ()      => window.openCombatStylesAdmin?.(),
+  openDamageTypesAdmin:     ()      => window.openDamageTypesAdmin?.(),
+  toggleCharElement:        (btn)   => window._toggleCharElement?.(btn.dataset.id, btn.dataset.elem),
+
+  // Maîtrises
+  addMaitrise:              ()      => addMaitrise(),
+  editMaitrise:             (btn)   => editMaitrise(Number(btn.dataset.idx)),
+
+  // Inventaire
+  addInvItem:               ()      => addInvItem(),
+  csV3InvSetCat:            (btn)   => window._csV3InvSetCat(btn.dataset.cat),
+  openSellInvModal:         (btn)   => openSellInvModal(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix), btn.dataset.name),
+  openSendInvModal:         (btn)   => openSendInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
+  openDeleteInvModal:       (btn)   => openDeleteInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
+  sellInvItemBulk:          (btn)   => sellInvItemBulk(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix)),
+  deleteInvItemBulk:        (btn)   => deleteInvItemBulk(btn.dataset.id, btn.dataset.indices),
+  sendInvItem:              (btn)   => sendInvItem(btn.dataset.id, btn.dataset.indices),
+  sendGold:                 (btn)   => sendGold(btn.dataset.id),
+  saveInvItemFromShop:      ()      => saveInvItemFromShop(),
+  saveInvItem:              (btn)   => saveInvItem(Number(btn.dataset.idx)),
+  editInvItem:              (btn)   => editInvItem(Number(btn.dataset.idx)),
+  filterInvClear:           (btn)   => { window._charInvSearch = ''; filterInvRows(''); const w = btn.closest('.inv-search-wrap'); if (w) w.querySelector('input').value = ''; },
+  _invmStep:                (btn)   => window._invmStep(btn.dataset.input, Number(btn.dataset.delta), Number(btn.dataset.max), btn.dataset.context),
+  _lootQte:                 (btn)   => { const i = document.getElementById('loot-qte'); if (i) i.value = Math.max(1, parseInt(i.value || 1) + Number(btn.dataset.delta)); },
+  _lootSelect:              (btn)   => window._lootSelect(btn.dataset.id),
+  _lootSetCat:              (btn)   => window._lootSetCat(btn.dataset.cat),
+
+  // Sorts
+  addSort:                  ()      => addSort(),
+  toggleSort:               (btn)   => toggleSort(Number(btn.dataset.idx)),
+  editSort:                 (btn)   => editSort(Number(btn.dataset.idx)),
+
+  // Tabs legacy (renderCharCarac, renderCharNotes, renderCharCompte, renderCharMaitrises, renderCharProfil)
+  toggleNote:               (btn)   => toggleNote(Number(btn.dataset.idx)),
+  editNoteTitle:            (btn)   => editNoteTitle(Number(btn.dataset.idx)),
+  addCompteRow:             (btn)   => addCompteRow(btn.dataset.compteType),
+  deleteCompteRow:          (btn)   => deleteCompteRow(btn.dataset.compteType, Number(btn.dataset.idx)),
+  _toggleCompteHist:        (btn)   => window._toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
+  _csAddXp:                 (btn)   => window._csAddXp(btn.dataset.id),
+  _allocStatPoint:          (btn)   => window._allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
+  saveMaitrise:             (btn)   => saveMaitrise(Number(btn.dataset.idx)),
+  deleteMaitrise:           (btn)   => deleteMaitrise(Number(btn.dataset.idx)),
+  removeProfilTag:          (btn)   => removeProfilTag(btn),
+  addProfilTag:             (btn)   => addProfilTag(btn.dataset.tag),
+  saveCharProfil:           (btn)   => saveCharProfil(btn.dataset.id),
+});
+
 Object.assign(window, {
   // Noyau
   charNavCardHtml, selectChar, filterAdminChars,

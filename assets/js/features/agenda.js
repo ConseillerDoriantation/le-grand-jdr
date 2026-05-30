@@ -19,6 +19,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import PAGES from './pages.js';
+import { registerActions } from '../core/actions.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────
 const SLOTS = [
@@ -234,7 +235,7 @@ function _renderSuggestions() {
           const cls = (isValidated ? 'ag-sug--validated ' : '') + (isFull ? 'ag-sug--full' : 'ag-sug--partial');
           const dateStr = _formatDateFr(s.date);
           return `<div class="ag-sug ${cls}" data-sug-idx="${idx}" data-quest-id="${q.id}"
-            onclick="window._agShowSugDetail('${q.id}',${idx})">
+            data-action="_agShowSugDetail" data-id="${q.id}" data-idx="${idx}">
             <div class="ag-sug-rank">${isValidated ? '✓' : (idx + 1)}</div>
             <div class="ag-sug-body">
               <div class="ag-sug-date">${_esc(dateStr)} <span class="ag-sug-slot">${s.slot.emoji} ${s.slot.label}</span>${isValidated ? ' <span class="ag-sug-badge">Validée</span>' : ''}</div>
@@ -266,8 +267,8 @@ window._agShowSugDetail = (questId, idx) => {
   const mjActions = STATE.isAdmin ? `
     <div class="ag-detail-actions">
       ${isValidated
-        ? `<button class="btn btn-outline" onclick="window._agUnvalidateSession()">✕ Annuler la validation</button>`
-        : `<button class="btn btn-gold" onclick="window._agValidateSlot('${questId}','${sug.iso}','${sug.slot.id}')">✓ Valider ce créneau</button>`}
+        ? `<button class="btn btn-outline" data-action="_agUnvalidateSession">✕ Annuler la validation</button>`
+        : `<button class="btn btn-gold" data-action="_agValidateSlot" data-quest-id="${questId}" data-iso="${sug.iso}" data-slot-id="${sug.slot.id}">✓ Valider ce créneau</button>`}
     </div>` : '';
 
   openModal(`🗓 ${_esc(quest.titre || 'Quête')}${isValidated ? ' — ✓ Validée' : ''}`, `
@@ -365,7 +366,7 @@ function _renderSessionBanner() {
         <div class="ag-banner-title">${_esc(fmt.dateFr)} — ${fmt.slotLabel} <span class="ag-banner-hours">${fmt.slotHours}</span></div>
         ${fmt.questTitle ? `<div class="ag-banner-quest">Quête : ${_esc(fmt.questTitle)}</div>` : ''}
       </div>
-      ${STATE.isAdmin ? `<button class="ag-banner-btn" onclick="window._agUnvalidateSession()" title="Annuler la validation">✕</button>` : ''}
+      ${STATE.isAdmin ? `<button class="ag-banner-btn" data-action="_agUnvalidateSession" title="Annuler la validation">✕</button>` : ''}
     </div>`;
 }
 
@@ -403,7 +404,7 @@ function _renderCalendar() {
                 const isExplicit = !!_ag.myAvail?.slots?.[iso]?.[s.id];
                 return `<button class="ag-cal-slot ag-slot--${state||'none'}${isExplicit ? ' ag-slot--explicit' : ''}"
                   data-iso="${iso}" data-slot="${s.id}"
-                  onclick="window._agCycle('${iso}','${s.id}')"
+                  data-action="_agCycle" data-iso="${iso}" data-slot="${s.id}"
                   title="${s.emoji} ${s.label} (${s.hours}) — ${STATE_LABELS[state]||'Non renseigné'}${isExplicit?'':' (récurrent)'}">
                   <span class="ag-cal-slot-ico">${s.emoji}</span>
                 </button>`;
@@ -441,17 +442,17 @@ window._agOpenRecurringEditor = () => {
             const state = rec[d.id]?.[s.id] || '';
             return `<button class="ag-rec-cell ag-slot--${state||'none'}"
               data-day="${d.id}" data-slot="${s.id}"
-              onclick="window._agRecCycle('${d.id}','${s.id}',this)"
+              data-action="_agRecCycle" data-day="${d.id}" data-slot="${s.id}"
               title="${STATE_LABELS[state]||'Non renseigné'}">${STATE_EMOJI[state]||'⚪'}</button>`;
           }).join('')}
         </div>`).join('')}
     </div>
     <div class="ag-rec-presets">
       <div class="ag-rec-presets-lbl">Raccourcis :</div>
-      <button class="btn btn-outline btn-sm" onclick="window._agSetRecurringPattern('evenings')">🌙 Toutes mes soirées</button>
-      <button class="btn btn-outline btn-sm" onclick="window._agSetRecurringPattern('weekends')">📅 Tous mes weekends</button>
-      <button class="btn btn-outline btn-sm" onclick="window._agSetRecurringPattern('fri-eve')">🎲 Vendredi soir</button>
-      <button class="btn btn-outline btn-sm" onclick="window._agSetRecurringPattern('reset')">🚫 Reset</button>
+      <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="evenings">🌙 Toutes mes soirées</button>
+      <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="weekends">📅 Tous mes weekends</button>
+      <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="fri-eve">🎲 Vendredi soir</button>
+      <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="reset">🚫 Reset</button>
     </div>
   `);
 };
@@ -551,8 +552,8 @@ async function renderAgendaPage() {
           <p class="ag-hero-sub">Marque tes dispos, on calcule les meilleurs créneaux pour vos prochaines sessions.</p>
         </div>
         <div class="ag-hero-actions">
-          <button class="btn btn-gold" onclick="window._agOpenRecurringEditor()">📆 Mon planning récurrent</button>
-          <button class="btn btn-outline" id="ag-group-toggle" onclick="window._agToggleGroupView()">👥 Voir les dispos du groupe</button>
+          <button class="btn btn-gold" data-action="_agOpenRecurringEditor">📆 Mon planning récurrent</button>
+          <button class="btn btn-outline" id="ag-group-toggle" data-action="_agToggleGroupView">👥 Voir les dispos du groupe</button>
         </div>
       </div>
 
@@ -568,7 +569,7 @@ async function renderAgendaPage() {
         <div class="ag-section-hd">
           <h2 class="ag-section-title">🗓 Mon calendrier</h2>
           <div class="ag-section-actions">
-            <button class="btn btn-outline btn-sm" onclick="window._agClearOverrides()" title="Efface les dispos ponctuelles (les patterns récurrents restent)">🧹 Effacer ponctuelles</button>
+            <button class="btn btn-outline btn-sm" data-action="_agClearOverrides" title="Efface les dispos ponctuelles (les patterns récurrents restent)">🧹 Effacer ponctuelles</button>
           </div>
         </div>
         <p class="ag-section-sub">Clic sur un créneau pour cycler : <span class="ag-legend">⚪</span> rien → <span class="ag-legend ag-slot--ok">✅</span> ok → <span class="ag-legend ag-slot--maybe">❓</span> peut-être → <span class="ag-legend ag-slot--no">❌</span> non. Les créneaux <em>récurrents</em> sont automatiquement appliqués.</p>
@@ -626,4 +627,16 @@ async function renderAgendaPage() {
 }
 
 PAGES.agenda = renderAgendaPage;
+
+registerActions({
+  _agShowSugDetail:         (btn) => window._agShowSugDetail?.(btn.dataset.id, Number(btn.dataset.idx)),
+  _agUnvalidateSession:     ()    => window._agUnvalidateSession?.(),
+  _agValidateSlot:          (btn) => window._agValidateSlot?.(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
+  _agCycle:                 (btn) => window._agCycle?.(btn.dataset.iso, btn.dataset.slot),
+  _agRecCycle:              (btn) => window._agRecCycle?.(btn.dataset.day, btn.dataset.slot, btn),
+  _agSetRecurringPattern:   (btn) => window._agSetRecurringPattern?.(btn.dataset.pattern),
+  _agOpenRecurringEditor:   ()    => window._agOpenRecurringEditor?.(),
+  _agToggleGroupView:       ()    => window._agToggleGroupView?.(),
+  _agClearOverrides:        ()    => window._agClearOverrides?.(),
+});
 export default renderAgendaPage;

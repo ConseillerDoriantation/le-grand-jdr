@@ -5,6 +5,7 @@
 // Peut envoyer un message dans le chat (lecture + écriture textuelle uniquement).
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import {
   db, doc, collection, addDoc, serverTimestamp,
   query, orderBy, limit,
@@ -134,7 +135,7 @@ function _renderChat() {
       <div class="vsp-chat-input-row">
         <input type="text" id="vsp-chat-input" class="vsp-chat-input" placeholder="Message…"
           autocomplete="off" onkeydown="if(event.key==='Enter')window._vspSendChat()">
-        <button onclick="window._vspSendChat()" class="vsp-chat-send" title="Envoyer">↵</button>
+        <button data-action="_vspSendChat" class="vsp-chat-send" title="Envoyer">↵</button>
       </div>
     </div>`;
 }
@@ -241,5 +242,7 @@ export async function renderVttSpectator() {
     }
   }, 1000);
 }
+
+registerActions({ _vspSendChat: () => window._vspSendChat?.() });
 
 export default renderVttSpectator;

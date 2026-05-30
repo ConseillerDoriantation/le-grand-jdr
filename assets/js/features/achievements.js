@@ -15,6 +15,7 @@ import { STATE } from '../core/state.js';
 import { attachDropAndResize } from '../shared/image-crop.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import PAGES from './pages.js';
+import { registerActions } from '../core/actions.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 const CATS = [
@@ -48,7 +49,7 @@ function openAchievementModal(id = null) {
       <label>Catégorie</label>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
         ${CATS.map(c => `
-          <button type="button" id="ach-cat-${c.id}" onclick="window._achSelectCat('${c.id}')"
+          <button type="button" id="ach-cat-${c.id}" data-action="_achSelectCat" data-id="${c.id}"
             style="padding:0.4rem 0.9rem;border-radius:999px;font-size:0.8rem;cursor:pointer;
                    border:1px solid var(--border);background:transparent;
                    color:var(--text-muted);transition:all 0.15s;">
@@ -121,7 +122,7 @@ function openAchievementModal(id = null) {
             const isOn = contrib.includes(c.id);
             const col  = COLS[c.nom?.charCodeAt(0)%6||0];
             const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-            return `<div onclick="window._achToggleContrib('${c.id}')"
+            return `<div data-action="_achToggleContrib" data-id="${c.id}"
               id="ach-contrib-${c.id}"
               data-contrib-nom="${(c.nom||'?').replace(/"/g,'&quot;')}"
               style="display:flex;flex-direction:column;align-items:center;gap:.3rem;
@@ -147,7 +148,7 @@ function openAchievementModal(id = null) {
     })()}
 
     <button class="btn btn-gold" style="width:100%;margin-top:0.5rem"
-      onclick="window.saveAchievement('${id || ''}')">
+      data-action="saveAchievement" data-id="${id || ''}">
       ${id ? 'Enregistrer les modifications' : 'Créer le Haut-Fait'}
     </button>
     `
@@ -519,9 +520,9 @@ function _achCardHTML(item, isAdmin) {
   const adminHtml = isAdmin ? `
     <div class="ach-admin-btns">
       <button class="btn btn-outline btn-sm" style="flex:1;font-size:.7rem"
-        onclick="event.stopPropagation();editAchievement('${item.id}')">✏️ Modifier</button>
+        data-action="editAchievement" data-id="${item.id}" data-stop-propagation>✏️ Modifier</button>
       <button class="btn-icon" style="color:#ff6b6b"
-        onclick="event.stopPropagation();deleteAchievement('${item.id}')">🗑️</button>
+        data-action="deleteAchievement" data-id="${item.id}" data-stop-propagation>🗑️</button>
     </div>` : '';
 
   const imageHtml = item.imageUrl
@@ -568,7 +569,7 @@ async function _achRenderJustified(catId, items, container) {
         const delay   = (rowIdx * 4 + colIdx) * 30;
         return `<div class="ach-item${isAdmin ? ' ach-sortable-item' : ''}${noDesc}" data-ach-id="${item.id}"
           style="width:${item.w}px;height:${row.h}px;--c:${icat.color};--c-glow:${icat.glow};--c-line:${icat.line};animation-delay:${delay}ms;${isAdmin ? 'cursor:grab' : ''}"
-          onclick="window._achOpenLightbox('${item.id}')">
+          data-action="_achOpenLightbox" data-id="${item.id}">
           ${_achCardHTML(item, isAdmin)}
         </div>`;
       }).join('')}
@@ -684,15 +685,15 @@ function _renderTimeline(items) {
     const adminEl = isAdmin ? `
       <div class="tl-card-admin">
         <button class="btn btn-outline btn-sm" style="flex:1;font-size:.7rem"
-          onclick="event.stopPropagation();editAchievement('${item.id}')">✏️ Modifier</button>
+          data-action="editAchievement" data-id="${item.id}" data-stop-propagation>✏️ Modifier</button>
         <button class="btn-icon" style="color:#ff6b6b"
-          onclick="event.stopPropagation();deleteAchievement('${item.id}')">🗑️</button>
+          data-action="deleteAchievement" data-id="${item.id}" data-stop-propagation>🗑️</button>
       </div>` : '';
 
     const secretBadge = (isAdmin && item.secret)
       ? `<div class="ach-secret-badge" style="position:absolute;top:8px;right:8px;z-index:3">🔒 Secret</div>` : '';
     return `<div class="tl-card" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line};position:relative"
-      onclick="${item.imageUrl ? `window._achOpenLightbox('${item.id}')` : 'void 0'}">
+      ${item.imageUrl ? `data-action="_achOpenLightbox" data-id="${item.id}"` : ''}>
       ${imgEl}
       ${secretBadge}
       <div class="tl-card-body">
@@ -751,13 +752,13 @@ function _achRenderControlsExtras() {
   const charChips = chars.length ? `
     <div class="ach-char-filter">
       <button class="ach-char-chip${active==='all'?' active':''}" data-charid="all"
-        onclick="window._achSetCharFilter('all')" title="Tous les personnages">👥 Tous</button>
+        data-action="_achSetCharFilter" title="Tous les personnages">👥 Tous</button>
       ${chars.map(c => {
         const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
         const pos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
         const isOn = active === c.id;
         return `<button class="ach-char-chip${isOn?' active':''}" data-charid="${c.id}"
-          onclick="window._achSetCharFilter('${c.id}')"
+          data-action="_achSetCharFilter"
           style="--c:${col}" title="${_esc(c.nom||'?')} — ${counts.get(c.id)} haut${counts.get(c.id)>1?'s':''}-fait${counts.get(c.id)>1?'s':''}">
           <span class="ach-char-chip-av">
             ${c.photo ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
@@ -770,7 +771,7 @@ function _achRenderControlsExtras() {
     </div>` : '';
 
   const sortBtn = isTimeline ? `
-    <button class="ach-sort-toggle" onclick="window._achToggleTimelineDir()"
+    <button class="ach-sort-toggle" data-action="_achToggleTimelineDir"
       title="Inverser le sens de la chronologie">
       ${desc ? '↓ Plus récent en haut' : '↑ Plus ancien en haut'}
     </button>` : '';
@@ -993,4 +994,15 @@ Object.assign(window, {
   setupAchievementsDnd,
   _achOpenLightbox,
   _achRenderContent,
+});
+
+registerActions({
+  _achSelectCat:         (btn) => window._achSelectCat?.(btn.dataset.id),
+  _achToggleContrib:     (btn) => window._achToggleContrib?.(btn.dataset.id),
+  saveAchievement:       (btn) => saveAchievement(btn.dataset.id || ''),
+  editAchievement:       (btn) => editAchievement(btn.dataset.id),
+  deleteAchievement:     (btn) => deleteAchievement(btn.dataset.id),
+  _achOpenLightbox:      (btn) => _achOpenLightbox(btn.dataset.id),
+  _achSetCharFilter:     (btn) => window._achSetCharFilter?.(btn.dataset.charid),
+  _achToggleTimelineDir: ()    => window._achToggleTimelineDir?.(),
 });

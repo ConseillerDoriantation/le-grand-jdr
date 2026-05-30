@@ -12,6 +12,7 @@ import { _esc, _nl2br, _norm } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
+import { registerActions } from '../core/actions.js';
 
 // ── État local ────────────────────────────────────────────────────────────────
 let _sections     = [];
@@ -80,7 +81,7 @@ async function renderWorld() {
             </div>
           </div>
           ${STATE.isAdmin ? `
-          <button onclick="openWorldSectionModal()"
+          <button data-action="openWorldSectionModal"
             style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(232,184,75,.3);
             background:rgba(232,184,75,.08);color:var(--gold);cursor:pointer;font-size:1rem;
             display:flex;align-items:center;justify-content:center;transition:all .15s"
@@ -99,7 +100,7 @@ async function renderWorld() {
       <!-- Actions admin en bas de la sidebar -->
       ${STATE.isAdmin ? `
       <div style="margin-top:.6rem;display:flex;flex-direction:column;gap:.35rem">
-        <button onclick="openWorldSectionModal()"
+        <button data-action="openWorldSectionModal"
           class="btn btn-gold btn-sm" style="width:100%;font-size:.75rem">
           + Ajouter une section
         </button>
@@ -124,7 +125,7 @@ function _renderNavItem(s, i) {
   return `<div
     data-nav-id="${s.id}" data-nav-idx="${i}"
     ${STATE.isAdmin ? 'draggable="true"' : ''}
-    onclick="selectWorldSection('${s.id}')"
+    data-action="selectWorldSection" data-id="${s.id}"
     style="display:flex;align-items:center;gap:.55rem;padding:.55rem 1rem;
       cursor:pointer;transition:all .12s;position:relative;
       background:${isActive ? 'rgba(232,184,75,.07)' : 'transparent'};
@@ -139,10 +140,10 @@ function _renderNavItem(s, i) {
     ${isHidden ? `<span style="font-size:.6rem;color:#ff6b6b;flex-shrink:0">●</span>` : ''}
     ${STATE.isAdmin ? `
     <div class="world-nav-actions" style="display:none;gap:.2rem;flex-shrink:0">
-      <button onclick="event.stopPropagation();openWorldSectionModal('${s.id}')"
+      <button data-action="openWorldSectionModal" data-id="${s.id}" data-stop-propagation
         style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.78rem;
         padding:1px 3px" title="Modifier">✏️</button>
-      <button onclick="event.stopPropagation();deleteWorldSection('${s.id}')"
+      <button data-action="deleteWorldSection" data-id="${s.id}" data-stop-propagation
         style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.78rem;
         padding:1px 3px" title="Supprimer">🗑️</button>
     </div>` : ''}
@@ -179,9 +180,9 @@ function _renderSection(s) {
         </div>
         ${STATE.isAdmin ? `
         <div style="display:flex;gap:.4rem;flex-shrink:0">
-          <button onclick="openWorldSectionModal('${s.id}')"
+          <button data-action="openWorldSectionModal" data-id="${s.id}"
             class="btn btn-outline btn-sm" style="font-size:.72rem">✏️ Modifier</button>
-          <button onclick="deleteWorldSection('${s.id}')"
+          <button data-action="deleteWorldSection" data-id="${s.id}"
             class="btn btn-outline btn-sm" style="font-size:.72rem;color:#ff6b6b;
             border-color:rgba(255,107,107,.3)">🗑️</button>
         </div>` : ''}
@@ -209,7 +210,7 @@ function _renderEmpty() {
     <p style="color:var(--text-dim);font-style:italic;font-size:.85rem">
       ${STATE.isAdmin ? 'Aucune section. Ajoutez du lore depuis le bouton +.' : 'Aucun contenu disponible pour l\'instant.'}
     </p>
-    ${STATE.isAdmin ? `<button onclick="openWorldSectionModal()" class="btn btn-gold btn-sm" style="margin-top:1rem">
+    ${STATE.isAdmin ? `<button data-action="openWorldSectionModal" class="btn btn-gold btn-sm" style="margin-top:1rem">
       + Créer la première section</button>` : ''}
   </div>`;
 }
@@ -287,7 +288,7 @@ window.openWorldSectionModal = (id = null) => {
   const s = id ? _sections.find(sec => sec.id === id) : null;
 
   const iconGrid = ICONES.map(ic => `
-    <button type="button" id="wi-icon-${ic}" onclick="window._selectWorldIcon('${ic}')"
+    <button type="button" id="wi-icon-${ic}" data-action="_selectWorldIcon" data-id="${ic}"
       style="width:34px;height:34px;border-radius:8px;font-size:1.1rem;cursor:pointer;
       border:2px solid ${(s?.icone||'📖')===ic?'var(--gold)':'var(--border)'};
       background:${(s?.icone||'📖')===ic?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
@@ -342,10 +343,10 @@ window.openWorldSectionModal = (id = null) => {
     </label>
 
     <div style="display:flex;gap:.5rem">
-      <button class="btn btn-gold" style="flex:1" onclick="window.saveWorldSection()">
+      <button class="btn btn-gold" style="flex:1" data-action="saveWorldSection">
         ${s ? 'Enregistrer' : 'Créer la section'}
       </button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-outline btn-sm" data-action="_worldClose">Annuler</button>
     </div>
   `);
 
@@ -433,4 +434,13 @@ Object.assign(window, {
   saveWorldSection,
   deleteWorldSection,
   selectWorldSection,
+});
+
+registerActions({
+  openWorldSectionModal: (btn) => openWorldSectionModal(btn.dataset.id || undefined),
+  selectWorldSection:    (btn) => selectWorldSection(btn.dataset.id),
+  deleteWorldSection:    (btn) => deleteWorldSection(btn.dataset.id),
+  saveWorldSection:      ()    => saveWorldSection(),
+  _selectWorldIcon:      (btn) => window._selectWorldIcon?.(btn.dataset.id),
+  _worldClose:           ()    => closeModal(),
 });
