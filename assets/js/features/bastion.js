@@ -516,13 +516,13 @@ window._bastionOpenDeposit = () => {
   openModal('📥 Déposer un objet au coffre', `
     <div class="form-group">
       <label>Depuis le personnage</label>
-      <select class="input-field" id="bas-dep-char" onchange="window._bastionRefreshDepositItems()">
+      <select class="input-field" id="bas-dep-char" data-change="_bastionRefreshDepositItems">
         ${chars.map(c => `<option value="${c.id}"${c.id === defaultChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
       <label>Objet à déposer <span style="font-size:.74rem;color:var(--text-dim);font-weight:400">(coffre : ${used}/${capacity})</span></label>
-      <select class="input-field" id="bas-dep-item" onchange="window._bastionRefreshDepositMax()"></select>
+      <select class="input-field" id="bas-dep-item" data-change="_bastionRefreshDepositMax"></select>
     </div>
     <div class="form-group">
       <label>Quantité <span id="bas-dep-info" style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:.4rem"></span></label>
@@ -864,7 +864,7 @@ function _renderItemPicker(i) {
       <span class="bs-item-emoji">${_esc(it.emoji || '📦')}</span>
       <span class="bs-item-nom">${_esc(it.nom || '?')}${cat ? ` <span class="bs-item-cat">${_esc(cat.nom)}</span>` : ''}${it.shopItemId ? '' : ' <span class="bs-item-free">libre</span>'}</span>
       <input type="number" class="input-field bs-item-qty" value="${it.q || 1}" min="1"
-        onchange="window._bastionEditItemQty(${i}, ${idx}, this.value)">
+        data-change="_bastionEditItemQty" data-i="${i}" data-idx="${idx}">
       <button class="bs-item-rm" data-action="_bastionRemoveItem" data-i="${i}" data-idx="${idx}" title="Retirer">✕</button>
     </div>`;
   }).join('') || `<div class="bs-items-empty">Aucun item produit à ce niveau.</div>`;
@@ -898,14 +898,14 @@ function _renderItemPicker(i) {
   picker.innerHTML = `
     <div class="bs-pick-filters">
       <select class="input-field bs-pick-cat" id="ed-items-cat-${i}"
-        onchange="window._bastionSetPickerCat(${i}, this.value)">
+        data-change="_bastionSetPickerCat" data-i="${i}">
         <option value="all">Toutes les catégories (${catCounts.all})</option>
         ${cats.filter(c => catCounts[c.id] > 0).map(c => `<option value="${c.id}"${c.id === filterCat ? ' selected' : ''}>${_esc((c.emoji || '📂') + ' ' + (c.nom || '?'))} (${catCounts[c.id]})</option>`).join('')}
         ${orphanCount > 0 ? `<option value="none"${filterCat === 'none' ? ' selected' : ''}>📦 Sans catégorie (${orphanCount})</option>` : ''}
       </select>
       <input type="search" class="input-field bs-pick-search" id="ed-items-search-${i}"
         placeholder="🔍 Rechercher…" value="${_esc(search)}"
-        oninput="window._bastionSetPickerSearch(${i}, this.value)">
+        data-input="_bastionSetPickerSearch" data-i="${i}">
     </div>
     <div class="bs-pick-row">
       <select class="input-field" id="ed-items-shop-${i}" style="flex:2;min-width:0">
@@ -1369,7 +1369,7 @@ window._bastionOpenPreview = () => {
     <div class="form-group">
       <label>Nombre de périodes à projeter</label>
       <input type="number" class="input-field" id="bs-preview-n" value="4" min="1" max="52"
-        oninput="window._bastionRunPreview()">
+        data-input="_bastionRunPreview">
     </div>
     <div id="bs-preview-result"></div>
   `);
@@ -1539,7 +1539,7 @@ window._bastionOpenTransfer = (direction) => {
   openModal(titre, `
     <div class="form-group">
       <label>Personnage</label>
-      <select class="input-field" id="bas-tx-char" onchange="window._bastionRefreshTransfer('${direction}')">
+      <select class="input-field" id="bas-tx-char" data-change="_bastionRefreshTransfer" data-direction="${direction}">
         ${chars.map(c => `<option value="${c.id}"${c.id === defaultChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}${c.uid === STATE.user?.uid ? ' (vous)' : ''}</option>`).join('')}
       </select>
     </div>
@@ -1890,7 +1890,7 @@ function _renderCoffre(b) {
     <div class="bs-coffre-filters">
       <input type="search" class="bs-coffre-search" placeholder="🔍 Rechercher…"
         value="${_esc(_coffreSearch)}"
-        oninput="window._bastionSetCoffreSearch(this.value)">
+        data-input="_bastionSetCoffreSearch">
       <div class="bs-coffre-pills">
         ${CATS.filter(([k]) => counts[k] > 0).map(([k, label]) => `
           <button class="bs-coffre-pill${_coffreFilter === k ? ' active' : ''}"
@@ -2119,6 +2119,14 @@ async function renderBastionPage() {
 PAGES.bastion = renderBastionPage;
 
 registerActions({
+  _bastionRefreshDepositItems: () => window._bastionRefreshDepositItems?.(),
+  _bastionRefreshDepositMax:   () => window._bastionRefreshDepositMax?.(),
+  _bastionEditItemQty: (el) => window._bastionEditItemQty?.(Number(el.dataset.i), Number(el.dataset.idx), el.value),
+  _bastionSetPickerCat:    (el) => window._bastionSetPickerCat?.(Number(el.dataset.i), el.value),
+  _bastionSetPickerSearch: (el) => window._bastionSetPickerSearch?.(Number(el.dataset.i), el.value),
+  _bastionRunPreview:      () => window._bastionRunPreview?.(),
+  _bastionRefreshTransfer: (el) => window._bastionRefreshTransfer?.(el.dataset.direction),
+  _bastionSetCoffreSearch: (el) => window._bastionSetCoffreSearch?.(el.value),
   _bastionSaveIdentite:     () => window._bastionSaveIdentite?.(),
   _bastionResetAll:         () => window._bastionResetAll?.(),
   _bastionFillDepositMax:   () => window._bastionFillDepositMax?.(),
