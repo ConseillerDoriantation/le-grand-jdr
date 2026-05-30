@@ -16,6 +16,7 @@ import { watch } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, updateModalContent, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { getItemStatBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
@@ -204,11 +205,12 @@ const _deltaBorderColor = (v) => v < 0 ? 'rgba(255,107,107,.3)' : v > 0 ? 'rgba(
 const _deltaTextColor = (v) => v < 0 ? '#ff6b6b' : v > 0 ? '#22c38e' : 'var(--text-dim)';
 
 // Rend les boutons -2/-1/0/+1/+2. `current` = preset déjà actif (ou null).
-function _deltaPresetsHtml(idPrefix, current, onClickFor, { size = 32 } = {}) {
+// `actionName` = nom de l'action data-action à déclencher avec data-val="${v}".
+function _deltaPresetsHtml(idPrefix, current, actionName, { size = 32 } = {}) {
   return _DELTA_PRESETS.map(v => {
     const active = v === current;
     return `<button type="button" id="${idPrefix}-${v}"
-      onclick="${onClickFor(v)}"
+      data-action="${actionName}" data-val="${v}"
       style="width:${size}px;height:${size}px;border-radius:8px;cursor:pointer;font-size:.8rem;
       font-weight:700;transition:all .12s;
       border:${active ? '2px' : '1px'} solid ${_deltaBorderColor(v)};
@@ -303,7 +305,7 @@ function _renderPage(content) {
               ${_npcs.length} personnage${_npcs.length > 1 ? 's' : ''}</div>
           </div>
           ${STATE.isAdmin ? `
-          <button onclick="openNpcModal()"
+          <button data-action="openNpcModal"
             style="width:30px;height:30px;border-radius:8px;border:1px solid rgba(79,140,255,.3);
             background:rgba(79,140,255,.08);color:var(--gold);cursor:pointer;font-size:1.1rem;
             display:flex;align-items:center;justify-content:center">+</button>` : ''}
@@ -314,7 +316,7 @@ function _renderPage(content) {
           style="font-size:.8rem;padding:.4rem .6rem">
 
         ${STATE.isAdmin ? `
-        <button onclick="window._openMjStatsView()"
+        <button data-action="_openMjStatsView"
           style="margin-top:.5rem;width:100%;padding:.5rem .65rem;
           background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
           border-radius:8px;color:#e8b84b;cursor:pointer;font-size:.78rem;
@@ -348,7 +350,7 @@ function _renderNavItem(n) {
   const niv      = _affiniteNiveau(n);
   const af       = afx(niv);
   return `
-  <div onclick="window.selectNpc('${n.id}')" data-npc-id="${n.id}"
+  <div data-action="selectNpc" data-id="${n.id}" data-npc-id="${n.id}"
     style="display:flex;align-items:center;gap:.6rem;padding:.55rem .85rem;cursor:pointer;
     transition:all .1s;background:${isActive ? 'rgba(79,140,255,.07)' : 'transparent'};
     border-left:3px solid ${isActive ? 'var(--gold)' : 'transparent'}"
@@ -378,7 +380,7 @@ function _renderNavItem(n) {
     </div>
 
     ${STATE.isAdmin ? `
-    <button onclick="event.stopPropagation();openNpcModal('${n.id}')" title="Modifier ce PNJ"
+    <button data-action="openNpcModal" data-id="${n.id}" data-stop-propagation title="Modifier ce PNJ"
       style="background:transparent;border:none;color:var(--text-dim);cursor:pointer;
       padding:.3rem .4rem;border-radius:6px;font-size:.85rem;flex-shrink:0;line-height:1;
       transition:all .12s"
@@ -418,13 +420,13 @@ function _renderFicheHeader(n) {
     </div>
     ${STATE.isAdmin ? `
     <div style="display:flex;gap:.3rem;flex-shrink:0">
-      <button onclick="openNpcModal('${n.id}')"
+      <button data-action="openNpcModal" data-id="${n.id}"
         style="background:rgba(255,255,255,.06);border:1px solid var(--border);
         border-radius:8px;padding:3px 10px;cursor:pointer;font-size:.72rem;
         color:var(--text-dim);transition:all .12s"
         onmouseover="this.style.background='rgba(255,255,255,.1)'"
         onmouseout="this.style.background='rgba(255,255,255,.06)'">✏️ Modifier</button>
-      <button onclick="deleteNpc('${n.id}')"
+      <button data-action="deleteNpc" data-id="${n.id}"
         style="background:transparent;border:1px solid rgba(255,107,107,.25);
         border-radius:8px;padding:3px 8px;cursor:pointer;font-size:.75rem;
         color:#ff6b6b">🗑️</button>
@@ -517,7 +519,7 @@ function _renderAffiniteGroupe(n) {
       <div style="font-size:.67rem;font-weight:700;color:var(--text-dim);
         letter-spacing:1.5px;text-transform:uppercase">Affinité du groupe</div>
       ${STATE.isAdmin ? `
-      <button onclick="openAffiniteGroupeModal('${n.id}')"
+      <button data-action="openAffiniteGroupeModal" data-id="${n.id}"
         style="font-size:.67rem;background:rgba(79,140,255,.08);
         border:1px solid rgba(79,140,255,.25);border-radius:6px;
         padding:2px 8px;cursor:pointer;color:var(--gold);flex-shrink:0">📝 Événement</button>` : ''}
@@ -581,12 +583,12 @@ function _renderHistorique(n) {
 
           ${STATE.isAdmin ? `
           <div style="display:flex;gap:.2rem;flex-shrink:0;margin-left:.2rem">
-            <button onclick="editHistoriqueEntry('${n.id}', ${realIndex})"
+            <button data-action="editHistoriqueEntry" data-npc-id="${n.id}" data-idx="${realIndex}"
               style="background:none;border:none;cursor:pointer;color:var(--text-dim);
               font-size:.72rem;padding:2px 4px;border-radius:5px;transition:background .1s"
               onmouseover="this.style.background='rgba(255,255,255,.08)'"
               onmouseout="this.style.background='none'">✏️</button>
-            <button onclick="deleteHistoriqueEntry('${n.id}', ${realIndex})"
+            <button data-action="deleteHistoriqueEntry" data-npc-id="${n.id}" data-idx="${realIndex}"
               style="background:none;border:none;cursor:pointer;color:#ff6b6b;
               font-size:.72rem;padding:2px 4px;border-radius:5px;transition:background .1s"
               onmouseover="this.style.background='rgba(255,107,107,.1)'"
@@ -613,12 +615,12 @@ function _renderRelationChip(a, npcId) {
       ${a.note ? `<div style="${noteStyle}">🔒 ${_esc(a.note)}</div>` : ''}
     </div>
     <div style="display:flex;gap:.2rem;flex-shrink:0">
-      <button onclick="openAffinitePersoModal('${npcId}','${a.id}')"
+      <button data-action="openAffinitePersoModal" data-npc-id="${npcId}" data-aff-id="${a.id}"
         style="background:none;border:none;cursor:pointer;color:var(--text-dim);
         font-size:.72rem;padding:2px 4px;border-radius:5px;transition:background .1s"
         onmouseover="this.style.background='rgba(255,255,255,.08)'"
         onmouseout="this.style.background='none'">✏️</button>
-      <button onclick="deleteAffinitePerso('${a.id}')"
+      <button data-action="deleteAffinitePerso" data-id="${a.id}"
         style="background:none;border:none;cursor:pointer;color:#ff6b6b;
         font-size:.72rem;padding:2px 4px;border-radius:5px;transition:background .1s"
         onmouseover="this.style.background='rgba(255,107,107,.1)'"
@@ -675,7 +677,7 @@ function _renderRelationsPanel(n) {
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="font-size:.67rem;font-weight:700;color:var(--text-dim);
           letter-spacing:1.5px;text-transform:uppercase">Affinités spécifiques</div>
-        <button onclick="openAffiniteTypesManager()"
+        <button data-action="openAffiniteTypesManager"
           style="font-size:.63rem;background:none;border:none;cursor:pointer;
           color:var(--text-dim);padding:2px 4px">⚙️ Types</button>
       </div>
@@ -689,7 +691,7 @@ function _renderRelationsPanel(n) {
       </div>
 
       <div style="padding-top:.2rem;border-top:1px solid rgba(255,255,255,.05)">
-        <button onclick="openAffinitePersoModal('${n.id}')"
+        <button data-action="openAffinitePersoModal" data-npc-id="${n.id}"
           style="width:100%;padding:.55rem;background:rgba(79,140,255,.06);
           border:1px dashed rgba(79,140,255,.3);border-radius:9px;cursor:pointer;
           font-size:.74rem;color:var(--gold);transition:background .15s;text-align:center"
@@ -775,7 +777,7 @@ function _renderEmpty() {
     <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">👥</div>
     <p style="color:var(--text-dim);font-style:italic">
       ${STATE.isAdmin ? 'Aucun PNJ. Cliquez sur + pour en créer un.' : 'Aucun PNJ disponible.'}</p>
-    ${STATE.isAdmin ? `<button onclick="openNpcModal()" class="btn btn-gold btn-sm"
+    ${STATE.isAdmin ? `<button data-action="openNpcModal" class="btn btn-gold btn-sm"
       style="margin-top:1rem">+ Créer le premier PNJ</button>` : ''}
   </div>`;
 }
@@ -889,7 +891,7 @@ function _renderOrgIndexItem(orgName, npcs) {
 
   return `<button type="button" data-org-key="${safeKey}" title="${_esc(label)}"
     class="npc-org-card ${hasActiveNpc ? 'is-active' : ''}"
-    onclick="window._npcSelectOrg(this)">
+    data-action="_npcSelectOrg">
     <span class="npc-org-card-main">
       <span class="npc-org-icon">${isNoOrg ? '👤' : '🏛️'}</span>
       <span class="npc-org-card-text">
@@ -905,7 +907,7 @@ function _renderOrgDrilldown(orgName, npcs) {
   const count = npcs.length;
   return `
     <div class="npc-drill-head">
-      <button type="button" class="npc-drill-back" onclick="window._npcBackToOrgs()">‹</button>
+      <button type="button" class="npc-drill-back" data-action="_npcBackToOrgs">‹</button>
       <span class="npc-drill-title">
         <strong>${_orgIcon(orgName)} ${_esc(label)}</strong>
         <small>${count} PNJ</small>
@@ -1093,7 +1095,7 @@ function _renderMjStatsRow(n) {
 
   const vitalCells = NPC_VITALS.map(v => `
     <td data-mj-cell="${n.id}-${v.key}"
-      onclick="window._mjEditField('${n.id}','${v.key}')"
+      data-action="_mjEditField" data-npc-id="${n.id}" data-field="${v.key}"
       title="Cliquer pour modifier ${v.label}"
       style="cursor:pointer;text-align:center;padding:.4rem .25rem;font-weight:700;
       color:${n[v.key] == null ? 'var(--text-dim)' : 'var(--text)'};
@@ -1101,7 +1103,7 @@ function _renderMjStatsRow(n) {
 
   const statCells = NPC_STATS.map(s => `
     <td data-mj-cell="${n.id}-stats.${s.key}"
-      onclick="window._mjEditField('${n.id}','stats.${s.key}')"
+      data-action="_mjEditField" data-npc-id="${n.id}" data-field="stats.${s.key}"
       title="Cliquer pour modifier ${s.short}"
       style="cursor:pointer;text-align:center;padding:.4rem .2rem;line-height:1.1;
       color:${stats[s.key] == null ? 'var(--text-dim)' : 'var(--text)'};
@@ -1113,7 +1115,7 @@ function _renderMjStatsRow(n) {
       onmouseout="this.style.background='transparent'">
       <td style="padding:.35rem;text-align:left;cursor:pointer;color:var(--text);
         max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
-        onclick="window._mjOpenNpc('${n.id}')" title="Ouvrir la fiche">
+        data-action="_mjOpenNpc" data-id="${n.id}" title="Ouvrir la fiche">
         <span style="display:inline-block;width:6px;height:6px;border-radius:50%;
           background:${af.couleur};margin-right:.4rem;vertical-align:middle"></span>
         <strong>${_esc(n.nom || '?')}</strong>
@@ -1348,11 +1350,11 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     </div>
     <div style="display:flex;gap:.5rem;margin-top:1rem">
       <button class="btn btn-gold" style="flex:1"
-        onclick="saveNpc('${npc?.id || ''}')">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+        data-action="saveNpc" data-id="${npc?.id || ''}">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
       ${npc?.id ? `<button class="btn btn-sm" title="Supprimer ce PNJ"
         style="background:transparent;border:1px solid rgba(255,107,107,.3);color:#ff6b6b"
-        onclick="deleteNpc('${npc.id}').then(ok => { if (ok) closeModal(); })">🗑️ Supprimer</button>` : ''}
+        data-action="_deleteNpcThenClose" data-id="${npc.id}">🗑️ Supprimer</button>` : ''}
     </div>
   `, stackedFromMjStats ? _restoreMjStatsModal : null);
 
@@ -1584,7 +1586,7 @@ window.openAffiniteGroupeModal = (npcId) => {
     <div class="form-group">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
         <label style="margin:0">Valeur cumulée</label>
-        ${STATE.isAdmin ? `<button type="button" onclick="window.openAffiniteSeuilsModal()"
+        ${STATE.isAdmin ? `<button type="button" data-action="openAffiniteSeuilsModal"
           style="font-size:.66rem;background:rgba(232,184,75,.08);
           border:1px solid rgba(232,184,75,.25);border-radius:6px;
           padding:2px 8px;cursor:pointer;color:var(--gold)">⚙️ Seuils</button>` : ''}
@@ -1611,7 +1613,7 @@ window.openAffiniteGroupeModal = (npcId) => {
       <label>Événement</label>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         <div style="display:flex;gap:.25rem;flex-shrink:0">
-          ${_deltaPresetsHtml('afg-delta', null, v => `window._selectAfgDelta(${v})`)}
+          ${_deltaPresetsHtml('afg-delta', null, '_selectAfgDelta')}
         </div>
         <input type="number" id="afg-delta-custom" placeholder="±N"
           oninput="window._setAfgDeltaFromInput(this.value)"
@@ -1625,8 +1627,8 @@ window.openAffiniteGroupeModal = (npcId) => {
 
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
       <button class="btn btn-gold" style="flex:1"
-        onclick="window.saveAffiniteGroupe('${npcId}')">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+        data-action="saveAffiniteGroupe" data-id="${npcId}">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
   `);
   window._afgDelta = 0;
@@ -1729,9 +1731,9 @@ window.openAffiniteSeuilsModal = () => {
     </div>
     ${rows}
     <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" onclick="window.saveAffiniteSeuils()">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="window.resetAffiniteSeuils()">Valeurs par défaut</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold" style="flex:1" data-action="saveAffiniteSeuils">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="resetAffiniteSeuils">Valeurs par défaut</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
   `);
 };
@@ -1771,7 +1773,7 @@ window.saveAffiniteSeuils = async () => {
 
 function _aftEmojiGrid(selectedEmoji) {
   return EMOJI_PRESET.map(e => `
-    <button type="button" data-emoji="${e}" onclick="window._aftSelectEmoji('${e}')"
+    <button type="button" data-emoji="${e}" data-action="_aftSelectEmoji" data-val="${e}"
       style="width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:1.15rem;
       transition:all .12s;background:${e === selectedEmoji ? 'rgba(255,255,255,.15)' : 'transparent'};
       border:1px solid ${e === selectedEmoji ? 'var(--gold)' : 'transparent'};
@@ -1781,7 +1783,7 @@ function _aftEmojiGrid(selectedEmoji) {
 
 function _aftColorGrid(selectedColor) {
   return TYPE_COLORS.map(hex => `
-    <button type="button" data-color="${hex}" onclick="window._aftSelectColor('${hex}')"
+    <button type="button" data-color="${hex}" data-action="_aftSelectColor" data-val="${hex}"
       style="width:26px;height:26px;border-radius:7px;cursor:pointer;background:${hex};
       transition:all .12s;
       border:3px solid ${hex === selectedColor ? 'white' : 'transparent'};
@@ -1805,11 +1807,11 @@ function _getAffiniteTypesManagerHtml() {
           <span style="font-size:1.2rem;flex-shrink:0">${t.emoji || '✨'}</span>
           <span style="flex:1;font-size:.85rem;font-weight:700;color:${col}">${_esc(t.label)}</span>
           <div style="display:flex;gap:.25rem">
-            <button type="button" onclick="window._aftEditType('${t.id}')"
+            <button type="button" data-action="_aftEditType" data-id="${t.id}"
               style="background:${isEditing ? col + '33' : 'none'};border:1px solid ${isEditing ? col : 'var(--border)'};
               border-radius:7px;padding:.3rem .5rem;cursor:pointer;
               color:${isEditing ? col : 'var(--text-dim)'};font-size:.72rem">✏️</button>
-            <button type="button" onclick="deleteAffiniteType('${t.id}')"
+            <button type="button" data-action="deleteAffiniteType" data-id="${t.id}"
               style="background:none;border:1px solid rgba(255,107,107,.35);border-radius:7px;
               padding:.3rem .5rem;cursor:pointer;color:#ff6b6b;font-size:.72rem">🗑️</button>
           </div>
@@ -1870,11 +1872,11 @@ function _getAffiniteTypesManagerHtml() {
 
       <!-- Boutons -->
       <div style="display:flex;gap:.4rem">
-        <button onclick="window.saveAffiniteType()" class="btn btn-gold"
+        <button data-action="saveAffiniteType" class="btn btn-gold"
           style="flex:1;font-size:.8rem">
           ${isEdit ? '💾 Enregistrer' : '➕ Créer'}</button>
         ${isEdit ? `
-        <button onclick="window._aftCancelEdit()"
+        <button data-action="_aftCancelEdit"
           class="btn btn-outline btn-sm" style="font-size:.78rem">Annuler</button>` : ''}
       </div>
     </div>
@@ -1916,7 +1918,7 @@ window.editHistoriqueEntry = (npcId, index) => {
       <label>Impact</label>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         <div style="display:flex;gap:.35rem">
-          ${_deltaPresetsHtml('hist-edit-delta', entry.delta || 0, v => `window._selectHistEditDelta(${v})`, { size: 36 })}
+          ${_deltaPresetsHtml('hist-edit-delta', entry.delta || 0, '_selectHistEditDelta', { size: 36 })}
         </div>
         <input type="number" id="hist-edit-delta-custom"
           value="${_DELTA_PRESETS.includes(entry.delta || 0) ? '' : (entry.delta || 0)}"
@@ -1930,8 +1932,8 @@ window.editHistoriqueEntry = (npcId, index) => {
 
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
       <button class="btn btn-gold" style="flex:1"
-        onclick="window.saveHistoriqueEntry('${npcId}', ${index})">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+        data-action="saveHistoriqueEntry" data-npc-id="${npcId}" data-idx="${index}">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
   `);
 
@@ -2088,7 +2090,7 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
     const col = t.couleur || TYPE_COLORS[0];
     const sel = existingTypeId === t.id;
     return `<button type="button" id="afp-type-btn-${t.id}"
-      onclick="window._selectAfpType('${t.id}')"
+      data-action="_selectAfpType" data-id="${t.id}"
       style="display:flex;align-items:center;gap:.3rem;padding:4px 10px;border-radius:999px;
       cursor:pointer;font-size:.72rem;font-weight:${sel ? '700' : '500'};transition:all .15s;
       border:1px solid ${sel ? col : col + '55'};background:${sel ? col + '33' : col + '11'};color:${col}">
@@ -2111,7 +2113,7 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
     <div class="form-group">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
         <label style="margin:0">Affinité spécifique</label>
-        <button type="button" onclick="openAffiniteTypesManager()"
+        <button type="button" data-action="openAffiniteTypesManager"
           class="btn btn-outline btn-sm" style="font-size:.7rem">⚙️ Gérer</button>
       </div>
       ${_affiniteTypes.length
@@ -2134,8 +2136,8 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
 
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
       <button class="btn btn-gold" style="flex:1"
-        onclick="window.saveAffinitePerso('${npcId}','${existingId || ''}')">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+        data-action="saveAffinitePerso" data-npc-id="${npcId}" data-aff-id="${existingId || ''}">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>`;
 
   return { title, body, selectedTypeId: existingTypeId };
@@ -2230,4 +2232,38 @@ Object.assign(window, {
   saveAffiniteGroupe, saveAffinitePerso, deleteAffinitePerso,
   openAffiniteSeuilsModal, saveAffiniteSeuils, resetAffiniteSeuils,
   editHistoriqueEntry, deleteHistoriqueEntry, saveHistoriqueEntry,
+});
+
+registerActions({
+  openNpcModal:            (btn) => openNpcModal(btn.dataset.id || null),
+  saveNpc:                 (btn) => saveNpc(btn.dataset.id || ''),
+  deleteNpc:               (btn) => deleteNpc(btn.dataset.id),
+  _deleteNpcThenClose:     (btn) => deleteNpc(btn.dataset.id).then(ok => { if (ok) closeModal(); }),
+  selectNpc:               (btn) => window.selectNpc?.(btn.dataset.id),
+  openAffiniteGroupeModal: (btn) => openAffiniteGroupeModal(btn.dataset.id),
+  openAffinitePersoModal:  (btn) => openAffinitePersoModal(btn.dataset.npcId, btn.dataset.affId || undefined),
+  deleteAffinitePerso:     (btn) => deleteAffinitePerso(btn.dataset.id),
+  openAffiniteTypesManager:()   => window.openAffiniteTypesManager?.(),
+  saveAffiniteGroupe:      (btn) => window.saveAffiniteGroupe?.(btn.dataset.id),
+  saveAffiniteSeuils:      ()   => saveAffiniteSeuils(),
+  resetAffiniteSeuils:     ()   => resetAffiniteSeuils(),
+  openAffiniteSeuilsModal: ()   => openAffiniteSeuilsModal(),
+  saveAffinitePerso:       (btn) => window.saveAffinitePerso?.(btn.dataset.npcId, btn.dataset.affId || ''),
+  editHistoriqueEntry:     (btn) => editHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
+  deleteHistoriqueEntry:   (btn) => deleteHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
+  saveHistoriqueEntry:     (btn) => saveHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
+  deleteAffiniteType:      (btn) => window.deleteAffiniteType?.(btn.dataset.id),
+  saveAffiniteType:        ()   => window.saveAffiniteType?.(),
+  _aftCancelEdit:          ()   => window._aftCancelEdit?.(),
+  _aftEditType:            (btn) => window._aftEditType?.(btn.dataset.id),
+  _aftSelectEmoji:         (btn) => window._aftSelectEmoji?.(btn.dataset.val),
+  _aftSelectColor:         (btn) => window._aftSelectColor?.(btn.dataset.val),
+  _selectAfgDelta:         (btn) => window._selectAfgDelta?.(Number(btn.dataset.val)),
+  _selectHistEditDelta:    (btn) => window._selectHistEditDelta?.(Number(btn.dataset.val)),
+  _selectAfpType:          (btn) => window._selectAfpType?.(btn.dataset.id),
+  _openMjStatsView:        ()   => window._openMjStatsView?.(),
+  _npcSelectOrg:           (btn) => window._npcSelectOrg?.(btn),
+  _npcBackToOrgs:          ()   => window._npcBackToOrgs?.(),
+  _mjEditField:            (btn) => window._mjEditField?.(btn.dataset.npcId, btn.dataset.field),
+  _mjOpenNpc:              (btn) => window._mjOpenNpc?.(btn.dataset.id),
 });

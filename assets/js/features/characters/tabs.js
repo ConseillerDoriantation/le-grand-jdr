@@ -91,16 +91,16 @@ export function renderCharCarac(c, canEdit) {
       </div>
       <div class="cs-carac-cell">
         <span class="cs-carac-chip cs-carac-chip--base ${isMJ?'cs-editable':''}"
-              ${isMJ?`onclick="inlineEditStat('${c.id}','${st.key}',this)" title="Modifier la base (MJ)"`:''}>
+              ${isMJ?`data-action="inlineEditStat" data-id="${c.id}" data-key="${st.key}" title="Modifier la base (MJ)"`:''}>
           ${base}
         </span>
       </div>
       <div class="cs-carac-cell cs-lvl-controls">
         ${canEdit ? `<button class="cs-lvl-btn cs-lvl-btn--minus" ${minusDis?'disabled':''}
-          onclick="window._allocStatPoint('${c.id}','${st.key}',-1)" title="Retirer un point">−</button>` : ''}
+          data-action="_allocStatPoint" data-id="${c.id}" data-key="${st.key}" data-delta="-1" title="Retirer un point">−</button>` : ''}
         <span class="cs-carac-chip cs-carac-chip--lvl${lvlUp>0?' cs-carac-chip--lvl-pos':''}">${lvlStr}</span>
         ${canEdit ? `<button class="cs-lvl-btn cs-lvl-btn--plus" ${plusDis?'disabled':''}
-          onclick="window._allocStatPoint('${c.id}','${st.key}',1)" title="${plusDis?'Aucun point disponible':'Ajouter un point'}">+</button>` : ''}
+          data-action="_allocStatPoint" data-id="${c.id}" data-key="${st.key}" data-delta="1" title="${plusDis?'Aucun point disponible':'Ajouter un point'}">+</button>` : ''}
       </div>
       <div class="cs-carac-cell">
         <span class="cs-carac-chip${equip?' cs-carac-chip--equip-pos':''}">${equipStr}</span>
@@ -142,7 +142,7 @@ export function renderCharCarac(c, canEdit) {
       </div>
       <div class="cs-vital-formula">
         <span class="cs-vital-part ${canEdit?'cs-vital-part--edit':''}"
-              ${canEdit?`onclick="inlineEditNum('${c.id}','${baseField}',this,1,999)" title="Modifier la base (niv. 1)"`:''}>
+              ${canEdit?`data-action="inlineEditNum" data-id="${c.id}" data-field="${baseField}" data-min="1" data-max="999" title="Modifier la base (niv. 1)"`:''}>
           <span class="cs-vital-part-lbl">Base</span>
           <span class="cs-vital-part-val">${base}</span>
         </span>
@@ -217,7 +217,7 @@ export function renderCharCarac(c, canEdit) {
           <label>+ Gagner de l'XP</label>
           <div class="cs-xp-card-add-row">
             <input id="cs-xp-delta-${c.id}" class="cs-xp-delta-input" type="number" min="0" placeholder="XP" title="XP à ajouter">
-            <button class="cs-xp-add-btn" onclick="window._csAddXp('${c.id}')">Ajouter</button>
+            <button class="cs-xp-add-btn" data-action="_csAddXp" data-id="${c.id}">Ajouter</button>
           </div>
         </div>` : ''}
       </div>`;
@@ -240,7 +240,7 @@ export function renderCharQuetes(c, canEdit) {
   const quetes = c.quetes||[];
   let html = `<div class="cs-section">
     <div class="cs-section-title">📜 Journal de Quête
-      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addQuete()">+ Ajouter</button>`:''}
+      ${canEdit?`<button class="btn btn-gold btn-sm" data-action="addQuete">+ Ajouter</button>`:''}
     </div>`;
 
   if (quetes.length===0) {
@@ -254,8 +254,8 @@ export function renderCharQuetes(c, canEdit) {
         </div>
         <div class="cs-quest-right">
           <span class="badge badge-${q.valide?'green':'blue'}">${q.valide?'Validée':'En cours'}</span>
-          ${canEdit?`<button class="btn-icon" onclick="toggleQuete(${i})" title="${q.valide?'Rouvrir':'Valider'}">✔️</button>
-                     <button class="btn-icon" onclick="deleteQuete(${i})">🗑️</button>`:''}
+          ${canEdit?`<button class="btn-icon" data-action="toggleQuete" data-idx="${i}" title="${q.valide?'Rouvrir':'Valider'}">✔️</button>
+                     <button class="btn-icon" data-action="deleteQuete" data-idx="${i}">🗑️</button>`:''}
         </div>
       </div>`;
     });
@@ -271,7 +271,7 @@ export function renderCharNotes(c, canEdit) {
   const notes = c.notesList||[];
   let html = `<div class="cs-section">
     <div class="cs-section-title">📝 Notes
-      ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addNote()">+ Nouvelle note</button>`:''}
+      ${canEdit?`<button class="btn btn-gold btn-sm" data-action="addNote">+ Nouvelle note</button>`:''}
     </div>`;
 
   if (notes.length===0) {
@@ -280,22 +280,22 @@ export function renderCharNotes(c, canEdit) {
     notes.forEach((note, i) => {
       const isOpen = window._openNote === i;
       html += `<div class="cs-note-card">
-        <div class="cs-note-header" onclick="toggleNote(${i})">
+        <div class="cs-note-header" data-action="toggleNote" data-idx="${i}">
           <div class="cs-note-meta">
             <span class="cs-note-icon">📄</span>
             <span class="cs-note-title">${note.titre||'Note sans titre'}</span>
             ${note.date?`<span class="cs-note-date">${note.date}</span>`:''}
           </div>
           <div style="display:flex;gap:0.4rem;align-items:center">
-            ${canEdit?`<button class="btn-icon" onclick="event.stopPropagation();editNoteTitle(${i})" title="Renommer">✏️</button>
-                       <button class="btn-icon" onclick="event.stopPropagation();deleteNote(${i})" title="Supprimer">🗑️</button>`:''}
+            ${canEdit?`<button class="btn-icon" data-action="editNoteTitle" data-idx="${i}" data-stop-propagation title="Renommer">✏️</button>
+                       <button class="btn-icon" data-action="deleteNote" data-idx="${i}" data-stop-propagation title="Supprimer">🗑️</button>`:''}
             <span class="cs-note-chevron">${isOpen?'▲':'▼'}</span>
           </div>
         </div>
         ${isOpen?`<div class="cs-note-body">
           ${canEdit
             ? `${richTextEditorHtml({ id: `note-area-${i}`, html: note.contenu || '', placeholder: 'Contenu de la note...', minHeight: 180 })}
-               <button class="btn btn-gold btn-sm" style="margin-top:0.6rem" onclick="saveNote(${i})">💾 Enregistrer</button>`
+               <button class="btn btn-gold btn-sm" style="margin-top:0.6rem" data-action="saveNote" data-idx="${i}">💾 Enregistrer</button>`
             : richTextContentHtml({ html: note.contenu, className: 'cs-note-content', fallback: '<em style="opacity:.5">Aucun contenu.</em>' })
           }
         </div>`:''}
@@ -399,7 +399,7 @@ export function renderCharCompte(c, canEdit) {
           onchange="saveCompteField('${type}',${i},'montant',this.value)"
           onkeydown="if(event.key==='Enter')this.blur()"><span class="cs-compte-or-lbl">or</span>
       </td>
-      <td><button class="btn-icon" onclick="deleteCompteRow('${type}',${i})">🗑️</button></td>
+      <td><button class="btn-icon" data-action="deleteCompteRow" data-compte-type="${type}" data-idx="${i}">🗑️</button></td>
     </tr>`;
   };
 
@@ -415,7 +415,7 @@ export function renderCharCompte(c, canEdit) {
       <tr class="cs-hist-expand-row">
         <td colspan="${cols}">
           <button class="cs-hist-expand-btn" id="cs-hist-btn-${type}"
-            onclick="window._toggleCompteHist('${type}',${hidden.length})">
+            data-action="_toggleCompteHist" data-compte-type="${type}" data-count="${hidden.length}">
             ↑ Voir les ${hidden.length} entrées précédentes
           </button>
         </td>
@@ -427,7 +427,7 @@ export function renderCharCompte(c, canEdit) {
 
   return `<div class="cs-section">
     <div class="cs-section-title">💰 Livret de Compte
-      <button class="cs-send-gold-btn" onclick="openSendGoldModal('${c.id}')" title="Envoyer de l'or à un autre personnage">↗ Envoyer de l'or</button>
+      <button class="cs-send-gold-btn" data-action="openSendGoldModal" data-id="${c.id}" title="Envoyer de l'or à un autre personnage">↗ Envoyer de l'or</button>
     </div>
 
     <div class="cs-solde-bar">
@@ -451,7 +451,7 @@ export function renderCharCompte(c, canEdit) {
       <div class="cs-compte-col">
         <div class="cs-compte-col-header">
           <span class="cs-compte-col-title pos">📈 Recettes</span>
-          ${canEdit?`<button class="btn btn-gold btn-sm" onclick="addCompteRow('recettes')">+ Ajouter</button>`:''}
+          ${canEdit?`<button class="btn btn-gold btn-sm" data-action="addCompteRow" data-compte-type="recettes">+ Ajouter</button>`:''}
         </div>
         <table class="cs-compte-table">
           <thead><tr>
@@ -470,7 +470,7 @@ export function renderCharCompte(c, canEdit) {
       <div class="cs-compte-col">
         <div class="cs-compte-col-header">
           <span class="cs-compte-col-title neg">📉 Dépenses</span>
-          ${canEdit?`<button class="btn btn-danger btn-sm" style="font-size:0.72rem" onclick="addCompteRow('depenses')">+ Ajouter</button>`:''}
+          ${canEdit?`<button class="btn btn-danger btn-sm" style="font-size:0.72rem" data-action="addCompteRow" data-compte-type="depenses">+ Ajouter</button>`:''}
         </div>
         <table class="cs-compte-table">
           <thead><tr>
@@ -595,7 +595,7 @@ export function renderCharMaitrises(c, canEdit) {
   let html = `<div class="cs-section cs-section--compact">
     <div class="cs-section-hdr">
       <span class="cs-section-title">⚔️ Maîtrises d'armes</span>
-      ${canEdit ? `<button class="btn btn-gold btn-sm" onclick="addMaitrise()">+ Ajouter</button>` : ''}
+      ${canEdit ? `<button class="btn btn-gold btn-sm" data-action="addMaitrise">+ Ajouter</button>` : ''}
     </div>`;
 
   if (maitrises.length === 0) {
@@ -619,8 +619,8 @@ export function renderCharMaitrises(c, canEdit) {
           ${m.note ? `<div class="cs-mait-card-note">${m.note}</div>` : ''}
         </div>
         ${canEdit ? `<div class="cs-mait-card-actions">
-          <button class="btn-icon" onclick="editMaitrise(${i})" title="Modifier">✏️</button>
-          <button class="btn-icon cs-mait-del" onclick="deleteMaitrise(${i})" title="Supprimer">🗑️</button>
+          <button class="btn-icon" data-action="editMaitrise" data-idx="${i}" title="Modifier">✏️</button>
+          <button class="btn-icon cs-mait-del" data-action="deleteMaitrise" data-idx="${i}" title="Supprimer">🗑️</button>
         </div>` : ''}
       </div>`;
     });
@@ -659,7 +659,7 @@ export async function addMaitrise() {
     <div class="form-group"><label>Note (optionnel)</label>
       <input class="input-field" id="mait-note" placeholder="Obtenu lors de la mission X...">
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveMaitrise(-1)">Ajouter</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" data-action="saveMaitrise" data-idx="-1">Ajouter</button>
   `);
 }
 
@@ -678,7 +678,7 @@ export async function editMaitrise(idx) {
     <div class="form-group"><label>Note (optionnel)</label>
       <input class="input-field" id="mait-note" value="${m.note||''}">
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" onclick="saveMaitrise(${idx})">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:.5rem" data-action="saveMaitrise" data-idx="${idx}">Enregistrer</button>
   `);
 }
 
@@ -859,7 +859,7 @@ function _tagColor(text) {
 function _tagChip(text, viewOnly = false) {
   const [bg, border, color] = _tagColor(text);
   const cls = viewOnly ? 'pp-tag-chip pp-tag-chip--view' : 'pp-tag-chip';
-  const btn = viewOnly ? '' : `<button type="button" class="pp-tag-remove" onclick="removeProfilTag(this)" aria-label="Supprimer" style="color:${color}">×</button>`;
+  const btn = viewOnly ? '' : `<button type="button" class="pp-tag-remove" data-action="removeProfilTag" aria-label="Supprimer" style="color:${color}">×</button>`;
   return `<span class="${cls}" data-tag="${_esc(text)}" style="background:${bg};border-color:${border};color:${color}">${_esc(text)}${btn}</span>`;
 }
 
@@ -964,10 +964,10 @@ function _buildProfilHtml(c, canEdit, pres) {
           style="flex:1" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}
           onkeydown="if(event.key==='Enter'){event.preventDefault();addProfilTag();}">
         <button class="btn btn-outline btn-sm" id="profil-tag-add" type="button"
-          onclick="addProfilTag()" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}>＋</button>
+          data-action="addProfilTag" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}>＋</button>
       </div>
       <div class="pp-tag-suggestions">
-        ${TAG_SUGGESTIONS.map(s => `<button type="button" class="pp-tag-suggest" onclick="addProfilTag('${_esc(s)}')">${_esc(s)}</button>`).join('')}
+        ${TAG_SUGGESTIONS.map(s => `<button type="button" class="pp-tag-suggest" data-action="addProfilTag" data-tag="${_esc(s)}">${_esc(s)}</button>`).join('')}
       </div>
     </div>
 
@@ -984,10 +984,10 @@ function _buildProfilHtml(c, canEdit, pres) {
           ? `<img src="${_esc(imageUrl)}" style="width:56px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">`
           : `<div style="width:56px;height:72px;border-radius:8px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:1.4rem;color:var(--text-dim)">🖼️</div>`}
         <div>
-          <button class="btn btn-outline btn-sm" type="button" onclick="openProfilImageUpload('${_esc(c.id)}')">
+          <button class="btn btn-outline btn-sm" type="button" data-action="openProfilImageUpload" data-id="${_esc(c.id)}">
             ${imageUrl ? '🔄 Changer' : '📷 Ajouter une illustration'}
           </button>
-          ${imageUrl ? `<button class="btn btn-outline btn-sm" style="color:#ff6b6b;margin-left:.35rem" type="button" onclick="removeProfilImage('${_esc(c.id)}')">✕ Retirer</button>` : ''}
+          ${imageUrl ? `<button class="btn btn-outline btn-sm" style="color:#ff6b6b;margin-left:.35rem" type="button" data-action="removeProfilImage" data-id="${_esc(c.id)}">✕ Retirer</button>` : ''}
         </div>
       </div>
     </div>` : ''}
@@ -1004,7 +1004,7 @@ function _buildProfilHtml(c, canEdit, pres) {
       </div>
     </div>
 
-    <button class="btn btn-gold btn-sm" onclick="saveCharProfil('${_esc(c.id)}')">💾 Sauvegarder</button>
+    <button class="btn btn-gold btn-sm" data-action="saveCharProfil" data-id="${_esc(c.id)}">💾 Sauvegarder</button>
   </div>`;
 }
 

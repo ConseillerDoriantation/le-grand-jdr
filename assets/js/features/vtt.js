@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { getCurrentAdventureId, getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import {
@@ -10155,7 +10156,7 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
       ? `<img src="${_esc(m.photo)}" alt="">`
       : `<span class="vtt-deleg-portrait-initial">${_esc(initials)}</span>`;
     return `<div class="vtt-deleg-row ${active?'is-on':''}" data-uid="${m.uid}"
-        onclick="window._vttToggleTokenDelegate('${tokenId}','${m.uid}')">
+        data-action="_vttToggleTokenDelegate" data-token-id="${tokenId}" data-uid2="${m.uid}">
       <div class="vtt-deleg-portrait" data-aura="${_esc(m.aura)}">${portraitHtml}</div>
       <div class="vtt-deleg-body">
         <div class="vtt-deleg-pseudo">
@@ -10196,9 +10197,9 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
           <span>résidus de base de données — masqués de la liste.</span>
         </div>
         <button class="btn btn-outline btn-sm"
-          onclick="window._vttCleanGhostMembers()" title="Retirer ces UIDs de l'aventure">Nettoyer</button>
+          data-action="_vttCleanGhostMembers" title="Retirer ces UIDs de l'aventure">Nettoyer</button>
       </div>` : ''}
-    <button class="btn btn-outline btn-sm vtt-deleg-close" onclick="closeModalDirect()">Fermer</button>`;
+    <button class="btn btn-outline btn-sm vtt-deleg-close" data-action="_vttDelegClose">Fermer</button>`;
 }
 
 window._vttOpenTokenDelegatesModal = (tokenId) => {
@@ -12983,3 +12984,9 @@ window._vttSelectMiniChar = (uid, charId) => {
 };
 
 PAGES.vtt=renderVttPage;
+
+registerActions({
+  _vttToggleTokenDelegate: (btn) => window._vttToggleTokenDelegate?.(btn.dataset.tokenId, btn.dataset.uid2),
+  _vttCleanGhostMembers:   ()    => window._vttCleanGhostMembers?.(),
+  _vttDelegClose:          ()    => window.closeModalDirect?.(),
+});

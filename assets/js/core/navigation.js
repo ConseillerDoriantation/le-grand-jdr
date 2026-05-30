@@ -6,6 +6,7 @@ import { STATE, setPage } from './state.js';
 import PAGES from '../features/pages.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { appSplashHtml } from '../shared/html.js';
+import { dispatchAction } from './actions.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -133,8 +134,9 @@ export function initEventDelegation() {
       return;
     }
 
-    // Actions auth déléguées
-    const action = e.target.closest('[data-action]')?.dataset.action;
+    // Actions auth déléguées + registry central
+    const actionBtn = e.target.closest('[data-action]');
+    const action = actionBtn?.dataset.action;
     if (action === 'logout')            { window.doLogout?.();                       return; }
     if (action === 'login')             { e.preventDefault(); window.doLogin?.();    return; }
     if (action === 'register')          { e.preventDefault(); window.doRegister?.(); return; }
@@ -151,6 +153,9 @@ export function initEventDelegation() {
       }
       return;
     }
+
+    // Dispatch vers le registry central des features
+    if (actionBtn && dispatchAction(actionBtn, e)) return;
   });
 
   document.addEventListener('keydown', (e) => {

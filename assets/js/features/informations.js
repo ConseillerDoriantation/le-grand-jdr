@@ -6,6 +6,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, sanitizeRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import PAGES from './pages.js';
+import { registerActions } from '../core/actions.js';
 
 async function renderInformations(liveData = null) {
   const doc = liveData ?? await getDocData('informations', 'main');
@@ -20,13 +21,13 @@ async function renderInformations(liveData = null) {
   window._infoSection = activeSection;
   const activeContent = sections.find(s => s.id === activeSection)?.content || '';
   const hasSections = sections.length > 0;
-  const navHtml = sections.map(s => `<div class="tutorial-nav-item ${s.id === activeSection ? 'active' : ''}" onclick="showInfoSection(${jsAttrString(s.id)},this)">${_esc(s.title)}</div>`).join('');
+  const navHtml = sections.map(s => `<div class="tutorial-nav-item ${s.id === activeSection ? 'active' : ''}" data-action="showInfoSection" data-id="${_esc(s.id)}">${_esc(s.title)}</div>`).join('');
   const emptyHtml = `<div style="text-align:center;padding:3rem 2rem;color:var(--text-dim);border:1px dashed var(--border);border-radius:var(--radius-lg);background:var(--bg-card)">
     <div style="font-size:2rem;margin-bottom:.7rem;opacity:.45">📋</div>
     <p style="font-size:.9rem;margin:0">${STATE.isAdmin ? 'Aucune section en base. Ajoute la première section pour publier les informations.' : 'Aucune information publiée pour le moment.'}</p>
   </div>`;
   content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📋 Informations du JDR</span></div><div class="page-subtitle">Règles, mécaniques et lore du monde</div></div>
-    ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Admin — Modification du contenu</div><div style="display:flex;gap:0.5rem;flex-wrap:wrap">${hasSections ? `<button class="btn btn-gold btn-sm" onclick="editInfoSection(window._infoSection)">✏️ Modifier cette section</button>` : ''}<button class="btn btn-gold btn-sm" onclick="addInfoSection()">➕ Ajouter une section</button></div></div>` : ''}
+    ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Admin — Modification du contenu</div><div style="display:flex;gap:0.5rem;flex-wrap:wrap">${hasSections ? `<button class="btn btn-gold btn-sm" data-action="_editInfoCurrentSection">✏️ Modifier cette section</button>` : ''}<button class="btn btn-gold btn-sm" data-action="addInfoSection">➕ Ajouter une section</button></div></div>` : ''}
     ${hasSections ? `<div class="grid-2 tutorial-layout-grid" style="gap:1.5rem;align-items:start">
       <div><div class="tutorial-nav" id="info-nav">${navHtml}</div></div>
       <div>${richTextContentHtml({ html: activeContent, className: 'tutorial-content', attrs: { id: 'info-content', style: 'white-space:pre-wrap' } })}</div>
@@ -75,8 +76,8 @@ function editInfoSection(id) {
     initialTitle: section.title,
     initialContent: section.content || '',
     actions: `<div style="display:flex;gap:0.5rem;margin-top:1rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveInfoSection('${id}')">Enregistrer</button>
-      <button class="btn btn-danger" onclick="deleteInfoSection('${id}')">🗑️ Supprimer</button>
+      <button class="btn btn-gold" style="flex:1" data-action="saveInfoSection" data-id="${id}">Enregistrer</button>
+      <button class="btn btn-danger" data-action="deleteInfoSection" data-id="${id}">🗑️ Supprimer</button>
     </div>`,
   });
 }
@@ -104,7 +105,7 @@ function addInfoSection() {
     titleId: 'info-new-title',
     titleLabel: 'Titre (avec emoji optionnel)',
     titlePlaceholder: 'Ex: ⚡ Magie élémentaire',
-    actions: `<button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="createInfoSection()">Créer</button>`,
+    actions: `<button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="createInfoSection">Créer</button>`,
   });
 }
 
@@ -189,3 +190,12 @@ Object.assign(window, {
 });
 
 PAGES.informations = renderInformations;
+
+registerActions({
+  showInfoSection:          (btn) => showInfoSection(btn.dataset.id, btn),
+  _editInfoCurrentSection:  ()    => editInfoSection(window._infoSection),
+  addInfoSection:           ()    => addInfoSection(),
+  saveInfoSection:          (btn) => saveInfoSection(btn.dataset.id),
+  deleteInfoSection:        (btn) => deleteInfoSection(btn.dataset.id),
+  createInfoSection:        ()    => createInfoSection(),
+});

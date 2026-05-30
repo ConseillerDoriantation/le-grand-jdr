@@ -4,6 +4,7 @@
 //   - PDF  : feuille dédiée print + window.print()
 // ══════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
+import { registerActions } from '../../core/actions.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import {
@@ -537,14 +538,14 @@ export function openCharExportMenu(charId, btn) {
   const menu = document.createElement('div');
   menu.className = 'cs-export-menu';
   menu.innerHTML = `
-    <button class="cs-export-opt" onclick="exportCharJSON('${charId}'); this.closest('.cs-export-menu').remove();">
+    <button class="cs-export-opt" data-action="_exportMenuJSON" data-id="${charId}">
       <span class="cs-export-opt-ico">💾</span>
       <span class="cs-export-opt-txt">
         <strong>Sauvegarde JSON</strong>
         <small>fichier restaurable (backup)</small>
       </span>
     </button>
-    <button class="cs-export-opt" onclick="exportCharPDF('${charId}'); this.closest('.cs-export-menu').remove();">
+    <button class="cs-export-opt" data-action="_exportMenuPDF" data-id="${charId}">
       <span class="cs-export-opt-ico">🖨️</span>
       <span class="cs-export-opt-txt">
         <strong>Imprimer / PDF</strong>
@@ -569,3 +570,8 @@ export function openCharExportMenu(charId, btn) {
     document.addEventListener('click', off);
   }, 0);
 }
+
+registerActions({
+  _exportMenuJSON: (btn) => { exportCharJSON(btn.dataset.id); btn.closest('.cs-export-menu')?.remove(); },
+  _exportMenuPDF:  (btn) => { exportCharPDF(btn.dataset.id);  btn.closest('.cs-export-menu')?.remove(); },
+});

@@ -18,7 +18,7 @@ function _renderElementAccessHtml(c, magicTypes, canManageElements) {
     const active = charElems.includes(t.id);
     const cls = `cs-elem-chip ${active ? 'cs-elem-chip--on' : ''} ${canManageElements ? '' : 'cs-elem-chip--readonly'}`;
     const attrs = canManageElements
-      ? `onclick="window._toggleCharElement('${c.id}','${t.id}')" title="${active ? 'Retirer' : 'Ajouter'} ${t.label}"`
+      ? `data-action="toggleCharElement" data-id="${c.id}" data-elem="${t.id}" title="${active ? 'Retirer' : 'Ajouter'} ${t.label}"`
       : `title="${active ? 'Accessible' : 'Non accessible'}"`;
     return '<span class="' + cls + '" style="--elem-col:' + (t.color || '#9ca3af') + '" ' + attrs + '>' + (t.icon || '') + ' ' + t.label + '</span>';
   }).join('');
@@ -68,7 +68,7 @@ export function renderCharEquip(c, canEdit) {
     html += `<div class="cs-weap-card${item.isDefault ? ' cs-weap-card--default' : ''}">
       <div class="cs-weap-card-hdr">
         <span class="cs-weap-slot-lbl">${slot}</span>
-        ${canEdit ? `<button class="cs-weap-edit" onclick="editEquipSlot('${slot}')">✏️</button>` : ''}
+        ${canEdit ? `<button class="cs-weap-edit" data-action="editEquipSlot" data-slot="${slot}">✏️</button>` : ''}
       </div>`;
 
     if (item.nom) {
@@ -142,8 +142,8 @@ export function renderCharEquip(c, canEdit) {
     const style  = detectCombatStyle(c, styles);
     if (!style) {
       el.innerHTML = STATE.isAdmin ? `<div class="cs-admin-row" style="margin:.3rem 0 0">
-        <button onclick="openCombatStylesAdmin()" class="btn btn-outline btn-sm">⚙️ Styles</button>
-        <button onclick="openWeaponFormatsAdmin()" class="btn btn-outline btn-sm">⚙️ Formats</button>
+        <button data-action="openCombatStylesAdmin" class="btn btn-outline btn-sm">⚙️ Styles</button>
+        <button data-action="openWeaponFormatsAdmin" class="btn btn-outline btn-sm">⚙️ Formats</button>
       </div>` : '';
       return;
     }
@@ -155,8 +155,8 @@ export function renderCharEquip(c, canEdit) {
             <span class="cs-style-label">${style.label}</span>
           </div>
           ${STATE.isAdmin ? `<div class="cs-admin-row">
-            <button onclick="openCombatStylesAdmin()" class="btn btn-outline btn-sm">⚙️ Styles</button>
-            <button onclick="openWeaponFormatsAdmin()" class="btn btn-outline btn-sm">⚙️ Formats</button>
+            <button data-action="openCombatStylesAdmin" class="btn btn-outline btn-sm">⚙️ Styles</button>
+            <button data-action="openWeaponFormatsAdmin" class="btn btn-outline btn-sm">⚙️ Formats</button>
           </div>` : ''}
         </div>
         <p class="cs-style-desc">${style.description}</p>
@@ -186,7 +186,7 @@ export function renderCharEquip(c, canEdit) {
     return `<div class="cs-armor-card${item.nom?' cs-armor-card--on':''}">
       <div class="cs-armor-card-hdr">
         <span class="cs-armor-card-slot">${slot}</span>
-        ${canEdit?`<button class="cs-weap-edit" onclick="editEquipSlot('${slot}')">✏️</button>`:''}
+        ${canEdit?`<button class="cs-weap-edit" data-action="editEquipSlot" data-slot="${slot}">✏️</button>`:''}
       </div>
       <span class="cs-armor-card-nom">${item.nom||'—'}</span>
       ${armorTypeMeta.label||statBonuses.length||caBonus?`<div class="cs-armor-card-badges">

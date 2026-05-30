@@ -10,6 +10,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import { updateInCol } from '../data/firestore.js';
 import { openModal, pushModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -274,10 +275,10 @@ function _renderUpgradeableItemRow(item, invIndex, category) {
         ${upBonusText ? `<span class="art-up-bonus-wrap">${upBonusText}</span>` : ''}
       </div>
       <div class="art-item-actions">
-        <button class="btn btn-outline btn-sm" onclick="window._artisanOpenTraitsActions(${invIndex})">🔖 Traits</button>
-        <button class="btn btn-outline btn-sm" onclick="window._artisanOpenStatsActions(${invIndex})">📈 Stats</button>
+        <button class="btn btn-outline btn-sm" data-action="_artisanOpenTraitsActions" data-i="${invIndex}">🔖 Traits</button>
+        <button class="btn btn-outline btn-sm" data-action="_artisanOpenStatsActions" data-i="${invIndex}">📈 Stats</button>
         ${Array.isArray(item?.upgrades?.history) && item.upgrades.history.length
-          ? `<button class="btn btn-outline btn-sm" onclick="window._artisanOpenHistory(${invIndex})" title="Historique des améliorations">📜 ${item.upgrades.history.length}</button>`
+          ? `<button class="btn btn-outline btn-sm" data-action="_artisanOpenHistory" data-i="${invIndex}" title="Historique des améliorations">📜 ${item.upgrades.history.length}</button>`
           : ''}
       </div>
     </div>`;
@@ -336,7 +337,7 @@ window._artisanOpenHistory = (invIndex) => {
 
   pushModal(`📜 Historique — ${_esc(item.nom || 'objet')}`, `${body}
     <div style="margin-top:.85rem;text-align:right">
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+      <button class="btn btn-outline btn-sm" data-action="_artisanCloseModal">Fermer</button>
     </div>`);
 };
 
@@ -447,7 +448,7 @@ window._artisanOpenTraitsActions = (invIndex) => {
 
   const destroyBtn = allTraits.length === 0
     ? `<button class="btn btn-outline btn-sm" disabled style="opacity:.5;cursor:not-allowed">Aucun trait à extraire</button>`
-    : `<button class="btn btn-danger btn-sm" onclick="window._artisanDestroyStart(${invIndex})">
+    : `<button class="btn btn-danger btn-sm" data-action="_artisanDestroyStart" data-i="${invIndex}">
          🗑️ Détruire — ${s.trait.deconstructCost} PO
        </button>`;
 
@@ -465,7 +466,7 @@ window._artisanOpenTraitsActions = (invIndex) => {
             <span class="art-trait-chip">${_esc(f.name)}</span>
             <span class="art-frag-row-n">×${f.n}</span>
             <button class="btn btn-gold btn-sm" style="margin-left:auto"
-              onclick="window._artisanAddTrait(${invIndex}, ${JSON.stringify(f.name).replace(/"/g,'&quot;')})">
+              data-action="_artisanAddTrait" data-i="${invIndex}" data-frag="${_esc(f.name)}">
               + Poser — ${s.trait.addTraitFromFragment} PO
             </button>
           </div>
@@ -488,7 +489,7 @@ window._artisanOpenTraitsActions = (invIndex) => {
           return `<div class="art-frag-row">
             <span class="art-trait-chip${isAdded ? ' art-trait-chip--added' : ''}">${_esc(t)}${isAdded ? ' ★' : ''}</span>
             <button class="btn btn-outline btn-sm" style="margin-left:auto"
-              onclick="window._artisanOverwriteStart(${invIndex}, ${JSON.stringify(t).replace(/"/g,'&quot;')})">
+              data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}">
               Écraser…
             </button>
           </div>`;
@@ -528,7 +529,7 @@ window._artisanOpenTraitsActions = (invIndex) => {
     </div>
 
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModalDirect()">← Retour</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
     </div>
   `);
 };
@@ -557,13 +558,13 @@ window._artisanDestroyStart = async (invIndex) => {
     <div style="display:flex;flex-direction:column;gap:.35rem">
       ${allTraits.map(t => `
         <button class="btn btn-outline btn-sm" style="text-align:left"
-          onclick="window._artisanDestroyConfirm(${invIndex}, ${JSON.stringify(t).replace(/"/g,'&quot;')})">
+          data-action="_artisanDestroyConfirm" data-i="${invIndex}" data-trait="${_esc(t)}">
           <span class="art-trait-chip">${_esc(t)}</span>
         </button>
       `).join('')}
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModalDirect()">Annuler</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">Annuler</button>
     </div>
   `);
 };
@@ -681,14 +682,14 @@ window._artisanOverwriteStart = (invIndex, oldTraitName) => {
           <span class="art-trait-chip">${_esc(f.name)}</span>
           <span class="art-frag-row-n">×${f.n}</span>
           <button class="btn btn-gold btn-sm" style="margin-left:auto"
-            onclick="window._artisanOverwriteConfirm(${invIndex}, ${JSON.stringify(oldTraitName).replace(/"/g,'&quot;')}, ${JSON.stringify(f.name).replace(/"/g,'&quot;')})">
+            data-action="_artisanOverwriteConfirm" data-i="${invIndex}" data-old="${_esc(oldTraitName)}" data-frag="${_esc(f.name)}">
             Confirmer
           </button>
         </div>
       `).join('')}
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModalDirect()">Annuler</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">Annuler</button>
     </div>
   `);
 };
@@ -826,7 +827,7 @@ function _openRingStatsModal(invIndex) {
       </div>
       ${_renderRingEffectSection(item, invIndex, s, cap)}
       <div style="display:flex;gap:.4rem;margin-top:.7rem">
-        <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModalDirect()">← Retour</button>
+        <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
       </div>`);
     return;
   }
@@ -864,7 +865,7 @@ function _openRingStatsModal(invIndex) {
             Palier suivant : <strong>+${nextStatLvl} ${primary.short}</strong> (cumulé sur la stat de base).
           </div>
           <button class="btn btn-gold btn-sm" style="width:100%"
-            onclick="window._artisanRingUpgradeStat(${invIndex})">
+            data-action="_artisanRingUpgradeStat" data-i="${invIndex}">
             Améliorer la stat — ${statCost} PO
           </button>
         ` : `<div class="art-muted">Stat au palier maximum (${cap}/${cap}).</div>`}
@@ -874,7 +875,7 @@ function _openRingStatsModal(invIndex) {
     ${_renderRingEffectSection(item, invIndex, s, cap)}
 
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModalDirect()">← Retour</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
     </div>
   `);
 }
@@ -901,7 +902,7 @@ function _renderRingEffectSection(item, invIndex, s, cap) {
             Palier suivant : <strong>+${nextEffectLvl} à l'effet</strong> (renforce le bonus flat de l'anneau).
           </div>
           <button class="btn btn-gold btn-sm" style="width:100%"
-            onclick="window._artisanRingUpgradeEffect(${invIndex})">
+            data-action="_artisanRingUpgradeEffect" data-i="${invIndex}">
             Améliorer l'effet — ${effCost} PO
           </button>
         ` : `<div class="art-muted">Effet au palier maximum (${cap}/${cap}).</div>`}
@@ -1011,7 +1012,7 @@ function _openAmuletStatsModal(invIndex) {
       <div style="display:flex;flex-wrap:wrap;gap:.35rem">
         ${remainingStats.map(m => `
           <button class="btn btn-outline btn-sm"
-            onclick="window._artisanAmuletAddStat(${invIndex}, ${JSON.stringify(m.full).replace(/"/g,'&quot;')})">
+            data-action="_artisanAmuletAddStat" data-i="${invIndex}" data-stat="${_esc(m.full)}">
             +1 ${m.short}
           </button>
         `).join('')}
@@ -1035,7 +1036,7 @@ function _openAmuletStatsModal(invIndex) {
     </div>
 
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModalDirect()">← Retour</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
     </div>
   `);
 }
@@ -1116,7 +1117,7 @@ function _openWeaponStatsModal(invIndex) {
       <div style="display:flex;flex-wrap:wrap;gap:.35rem">
         ${ITEM_STAT_META.map(m => `
           <button class="btn btn-outline btn-sm"
-            onclick="window._artisanWeaponAddPoint(${invIndex}, ${JSON.stringify(m.full).replace(/"/g,'&quot;')})">
+            data-action="_artisanWeaponAddPoint" data-i="${invIndex}" data-stat="${_esc(m.full)}">
             +1 ${m.short}
           </button>
         `).join('')}
@@ -1140,7 +1141,7 @@ function _openWeaponStatsModal(invIndex) {
     </div>
 
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModalDirect()">← Retour</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
     </div>
   `);
 }
@@ -1187,3 +1188,20 @@ window._artisanWeaponAddPoint = async (invIndex, statFullKey) => {
 };
 
 window.openArtisanModal = openArtisanModal;
+
+registerActions({
+  _artisanOpenTraitsActions: (btn) => window._artisanOpenTraitsActions?.(Number(btn.dataset.i)),
+  _artisanOpenStatsActions: (btn) => window._artisanOpenStatsActions?.(Number(btn.dataset.i)),
+  _artisanOpenHistory: (btn) => window._artisanOpenHistory?.(Number(btn.dataset.i)),
+  _artisanDestroyStart: (btn) => window._artisanDestroyStart?.(Number(btn.dataset.i)),
+  _artisanDestroyConfirm: (btn) => window._artisanDestroyConfirm?.(Number(btn.dataset.i), btn.dataset.trait),
+  _artisanAddTrait: (btn) => window._artisanAddTrait?.(Number(btn.dataset.i), btn.dataset.frag),
+  _artisanOverwriteStart: (btn) => window._artisanOverwriteStart?.(Number(btn.dataset.i), btn.dataset.trait),
+  _artisanOverwriteConfirm: (btn) => window._artisanOverwriteConfirm?.(Number(btn.dataset.i), btn.dataset.old, btn.dataset.frag),
+  _artisanRingUpgradeStat: (btn) => window._artisanRingUpgradeStat?.(Number(btn.dataset.i)),
+  _artisanRingUpgradeEffect: (btn) => window._artisanRingUpgradeEffect?.(Number(btn.dataset.i)),
+  _artisanAmuletAddStat: (btn) => window._artisanAmuletAddStat?.(Number(btn.dataset.i), btn.dataset.stat),
+  _artisanWeaponAddPoint: (btn) => window._artisanWeaponAddPoint?.(Number(btn.dataset.i), btn.dataset.stat),
+  _artisanCloseModal: () => window.closeModal?.(),
+  _artisanBack: () => closeModalDirect(),
+});

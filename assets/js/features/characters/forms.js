@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { registerActions } from '../../core/actions.js';
 import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
@@ -91,7 +92,7 @@ export function addQuete() {
     <div class="form-group"><label>Nom</label><input class="input-field" id="q-nom" placeholder="La Crypte Maudite..."></div>
     <div class="form-group"><label>Type</label><input class="input-field" id="q-type" placeholder="Principale, Secondaire..."></div>
     <div class="form-group"><label>Description</label><textarea class="input-field" id="q-desc" rows="3" placeholder="Objectif..."></textarea></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveQuete()">Ajouter</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveQuete">Ajouter</button>
   `);
 }
 
@@ -234,15 +235,15 @@ export function manageTitres(charId) {
   if (!c) return;
   window._editTitres = [...(c.titres||[])];
   const render = () => window._editTitres.map((t,i)=>
-    `<span class="cs-titre-chip">${t}<button onclick="removeTitre(${i})">✕</button></span>`
+    `<span class="cs-titre-chip">${t}<button data-action="removeTitre" data-idx="${i}">✕</button></span>`
   ).join('');
   openModal('🏅 Titres', `
     <div id="titres-list" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.8rem;min-height:2rem">${render()}</div>
     <div style="display:flex;gap:0.5rem">
       <input class="input-field" id="ei-titre-new" placeholder="Nouveau titre..." style="flex:1" onkeydown="if(event.key==='Enter')addTitre()">
-      <button class="btn btn-outline btn-sm" onclick="addTitre()">+ Ajouter</button>
+      <button class="btn btn-outline btn-sm" data-action="addTitre">+ Ajouter</button>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveTitres('${charId}')">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveTitres" data-id="${charId}">Enregistrer</button>
   `);
 }
 
@@ -264,7 +265,7 @@ export function removeTitre(idx) {
 function _refreshTitresList() {
   const list = document.getElementById('titres-list');
   if (list) list.innerHTML = window._editTitres.map((t,i)=>
-    `<span class="cs-titre-chip">${t}<button onclick="removeTitre(${i})">✕</button></span>`
+    `<span class="cs-titre-chip">${t}<button data-action="removeTitre" data-idx="${i}">✕</button></span>`
   ).join('');
 }
 
@@ -290,3 +291,10 @@ export function deleteCharPhoto(id) {
   updateInCol('characters',id,{photo:null,photoZoom:1,photoX:0,photoY:0});
   window.renderCharSheet(c, window._currentCharTab);
 }
+
+registerActions({
+  saveQuete:   ()    => saveQuete(),
+  addTitre:    ()    => addTitre(),
+  removeTitre: (btn) => removeTitre(Number(btn.dataset.idx)),
+  saveTitres:  (btn) => saveTitres(btn.dataset.id),
+});

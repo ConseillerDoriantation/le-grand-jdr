@@ -2,6 +2,7 @@
 // PAGES
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { calcPalier } from '../shared/char-stats.js';
@@ -98,7 +99,7 @@ const PAGES = {
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
         : `<span style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
       return `
-      <div class="dash-char-mini" onclick="window._goToChar('${c.id}')">
+      <div class="dash-char-mini" data-action="_goToChar" data-id="${c.id}">
         <div class="dash-char-mini-portrait">
           ${portrait}
           <div class="dash-char-mini-portrait-fade"></div>
@@ -146,7 +147,7 @@ const PAGES = {
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
         : `<span style="font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
       return `
-      <div class="dash-hero" onclick="window._goToChar('${c.id}')">
+      <div class="dash-hero" data-action="_goToChar" data-id="${c.id}">
         <div class="dash-hero-glow"></div>
         <div class="dash-hero-portrait">
           <div class="dash-hero-portrait-inner">${portrait}</div>
@@ -203,7 +204,7 @@ const PAGES = {
       const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#22d3ee'];
       const pcol  = PCOLS[(c.ownerPseudo||'?').split('').reduce((a,x)=>a+x.charCodeAt(0),0) % PCOLS.length];
       return `
-      <div onclick="window._goToChar('${c.id}')" style="
+      <div data-action="_goToChar" data-id="${c.id}" style="
         display:flex;align-items:center;gap:.65rem;
         background:var(--bg-card);border:1px solid var(--border);
         border-left:3px solid ${pcol};
@@ -284,7 +285,7 @@ const PAGES = {
     } else {
       if (chars.length === 0) {
         charsHtml = `
-        <div class="dash-hero" onclick="navigate('characters')" style="cursor:pointer">
+        <div class="dash-hero" data-navigate="characters" style="cursor:pointer">
           <div class="dash-hero-body" style="flex-direction:row;align-items:center;gap:1rem;padding:1.3rem 1.5rem">
             <div style="width:48px;height:48px;border-radius:50%;background:rgba(232,184,75,.08);
               border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;justify-content:center;
@@ -359,7 +360,7 @@ const PAGES = {
       const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');
       const joinBtn = !STATE.isAdmin
         ? `<button class="quest-join-btn${joined?' quest-join-btn--joined':''}"
-             onclick="window._dashQuestJoin('${q.id}',this)">
+             data-action="_dashQuestJoin" data-id="${q.id}">
              ${joined ? '✓ Rejoint' : '+ Rejoindre'}
            </button>`
         : '';
@@ -379,7 +380,7 @@ const PAGES = {
     // Bloc mission compact
     const _missionCard = () => {
       if (!mission) return null;
-      return `<div class="dash-info-card" onclick="navigate('story')" style="cursor:pointer">
+      return `<div class="dash-info-card" data-navigate="story" style="cursor:pointer">
         <div class="dash-mission-compact">
           ${mission.imageUrl
             ? `<img src="${mission.imageUrl}" class="dash-mission-thumb">`
@@ -398,7 +399,7 @@ const PAGES = {
       if (totalMissions === 0) return '';
       const pct = Math.round(doneMissions / totalMissions * 100);
       return `
-      <div class="dv2-panel-card" onclick="navigate('story')" style="cursor:pointer;padding:16px 20px">
+      <div class="dv2-panel-card" data-navigate="story" style="cursor:pointer;padding:16px 20px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)">📖 Progression aventure</span>
           <span style="font-size:.72rem;color:var(--arcane);font-weight:700;font-family:var(--font-display)">${doneMissions}/${totalMissions} missions</span>
@@ -428,7 +429,7 @@ const PAGES = {
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
         : `<span>${(c.nom||'?')[0].toUpperCase()}</span>`;
       return `
-      <div class="dv2-hero-card" onclick="window._goToChar('${c.id}')">
+      <div class="dv2-hero-card" data-action="_goToChar" data-id="${c.id}">
         <div class="dv2-hero-inner">
           <div class="dv2-portrait-wrap">
             <div class="dv2-portrait">${portrait}</div>
@@ -496,14 +497,14 @@ const PAGES = {
             : (c.nom||'?')[0].toUpperCase();
           const isOwn = STATE.isAdmin || c.uid === STATE.user?.uid;
           return `
-          <div class="dv2-party-member" onclick="window._openQuickView('${c.id}')" style="cursor:pointer"
+          <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}" style="cursor:pointer"
             title="Cliquer pour aperçu rapide">
             <div class="dv2-party-avatar">${av}</div>
             <div style="flex:1;min-width:0">
               <div class="dv2-party-name">${_esc(c.nom||'?')}</div>
               <div class="dv2-party-sub">Niv.${c.niveau||1}${c.classe?` · ${_esc(c.classe)}`:''}</div>
             </div>
-            ${isOwn ? `<button class="dv2-party-fullopen" onclick="event.stopPropagation();window._goToChar('${c.id}')"
+            ${isOwn ? `<button class="dv2-party-fullopen" data-action="_goToChar" data-id="${c.id}" data-stop-propagation
               title="Ouvrir la fiche complète">→</button>` : ''}
             <div class="dv2-party-dot"></div>
           </div>`;
@@ -529,7 +530,7 @@ const PAGES = {
       if (!mission) return '';
       const pct = totalMissions > 0 ? Math.round(doneMissions / totalMissions * 100) : 0;
       return `
-      <div class="dv2-mission-card" onclick="navigate('story')" style="cursor:pointer">
+      <div class="dv2-mission-card" data-navigate="story" style="cursor:pointer">
         <div class="dv2-mission-header">
           <div class="dv2-mission-icon">${mission.imageUrl
             ? `<img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
@@ -566,23 +567,23 @@ const PAGES = {
       const or = window.calcOr?.(c) || 0;
       return `
       <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-gold" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
           <span class="dv2-stat-card-icon">💰</span>
           <div class="dv2-stat-card-val" style="color:#f4c430">${or}</div>
           <div class="dv2-stat-card-lbl">Or</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-shield" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
           <span class="dv2-stat-card-icon">🛡️</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${ca}</div>
           <div class="dv2-stat-card-lbl">Classe d'armure</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-hp" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
           <span class="dv2-stat-card-icon">❤️</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${pvCur}<span style="font-size:.65em;opacity:.55">/${pvMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de vie</div>
           <div class="dv2-stat-card-sub">${pvPct}% restants</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" onclick="window._goToChar('${c.id}')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
           <span class="dv2-stat-card-icon">🔮</span>
           <div class="dv2-stat-card-val" style="color:#b99fff">${pmCur}<span style="font-size:.65em;opacity:.55">/${pmMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de magie</div>
@@ -603,7 +604,7 @@ const PAGES = {
         { page:'characters', icon:'⚔️', label:'Personnage', bg:'rgba(232,184,75,.15)',  bc:'rgba(232,184,75,.3)',  col:'#e8b84b' },
       ];
       return `<div class="dv2-shortcuts-grid">${S.map(s => `
-        <button class="dv2-shortcut" onclick="navigate('${s.page}')">
+        <button class="dv2-shortcut" data-navigate="${s.page}">
           <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
           <span class="dv2-shortcut-label">${s.label}</span>
         </button>`).join('')}</div>`;
@@ -618,7 +619,7 @@ const PAGES = {
       <div class="dv2-panel-card">
         <div class="dv2-panel-header">
           <div class="dv2-panel-title">🗡️ Quêtes <span class="dv2-panel-count">${activeQuests.length}</span></div>
-          <button class="dv2-section-action" onclick="navigate('quests')">Voir tout →</button>
+          <button class="dv2-section-action" data-navigate="quests">Voir tout →</button>
         </div>
         ${activeQuests.slice(0, 5).length > 0 ? activeQuests.slice(0, 5).map(q => {
           const icn    = QICON[q.type] || QICON[q.difficulte] || '🗡️';
@@ -626,7 +627,7 @@ const PAGES = {
           const rarity = QDCLS[q.difficulte] || 'dv2-rarity-common';
           const joined = Array.isArray(q.participants) && q.participants.some(p => p.uid === _myUid);
           return `
-          <div class="dv2-quest-item" onclick="navigate('quests')">
+          <div class="dv2-quest-item" data-navigate="quests">
             <div class="dv2-quest-icon ${cls}">${icn}</div>
             <div style="flex:1;min-width:0">
               <div class="dv2-quest-name">${_esc(q.titre||'Quête')}</div>
@@ -643,7 +644,7 @@ const PAGES = {
       <div class="dv2-panel-card">
         <div class="dv2-panel-header">
           <div class="dv2-panel-title">🏆 Hauts-faits <span class="dv2-panel-count">${achievements.length}</span></div>
-          <button class="dv2-section-action" onclick="navigate('achievements')">Voir tout →</button>
+          <button class="dv2-section-action" data-navigate="achievements">Voir tout →</button>
         </div>
         ${achievements.slice(0, 5).length > 0 ? [...achievements].sort((a,b) => { const p = d => { const [j,m,y] = (d||'').split('/'); return y&&m&&j?`${y}${m.padStart(2,'0')}${j.padStart(2,'0')}`:''; }; return p(b.date) > p(a.date) ? 1 : -1; }).slice(0, 5).map(a => `
         <div class="dv2-ach-item">
@@ -674,14 +675,14 @@ const PAGES = {
 
       const ev = bastionDoc?.evenementCourant;
       return `
-      <div class="dv2-bastion-card" onclick="navigate('bastion')" style="cursor:pointer">
+      <div class="dv2-bastion-card" data-navigate="bastion" style="cursor:pointer">
         <div class="dv2-bastion-header">
           <div class="dv2-bastion-icon">${_esc(emoji)}</div>
           <div style="flex:1;min-width:0">
             <div class="dv2-bastion-name">${_esc(bastionNom)}</div>
             <div class="dv2-bastion-level">${semaine ? `Période ${semaine}` : `Niveau ${bastionLevel}`}${bastionDoc?.lieu ? ` · ${_esc(bastionDoc.lieu)}` : ''}</div>
           </div>
-          <button class="dv2-section-action" onclick="event.stopPropagation();navigate('bastion')">Gérer →</button>
+          <button class="dv2-section-action" data-navigate="bastion" data-stop-propagation>Gérer →</button>
         </div>
 
         ${isNewModel ? `
@@ -700,7 +701,7 @@ const PAGES = {
 
     // ── Render ──────────────────────────────────────────────────────────
     const advBanner = STATE.adventure ? `
-    <div class="dash-adv-banner" onclick="window.openAdventureSwitcher?.()" style="cursor:${(STATE.adventures?.length||0)>1?'pointer':'default'}">
+    <div class="dash-adv-banner" data-action="openAdventureSwitcher" style="cursor:${(STATE.adventures?.length||0)>1?'pointer':'default'}">
       <span style="font-size:1.1rem">${STATE.adventure.emoji||'⚔️'}</span>
       <span class="dash-adv-name">${_esc(STATE.adventure.nom)}</span>
       ${(STATE.adventures?.length||0)>1?`<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>`:''}
@@ -725,22 +726,22 @@ const PAGES = {
 
       <!-- Stats 4-col -->
       <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-shield" onclick="navigate('characters')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters" style="cursor:pointer">
           <span class="dv2-stat-card-icon">📜</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${chars.length}</div>
           <div class="dv2-stat-card-lbl">Personnage${chars.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" onclick="navigate('quests')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-mp" data-navigate="quests" style="cursor:pointer">
           <span class="dv2-stat-card-icon">🗡️</span>
           <div class="dv2-stat-card-val" style="color:#b99fff">${activeQuests.length}</div>
           <div class="dv2-stat-card-lbl">Quête${activeQuests.length!==1?'s':''} active${activeQuests.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-hp" onclick="navigate('achievements')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements" style="cursor:pointer">
           <span class="dv2-stat-card-icon">🏆</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${achievements.length}</div>
           <div class="dv2-stat-card-lbl">Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-gold" onclick="navigate('collection')" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-gold" data-navigate="collection" style="cursor:pointer">
           <span class="dv2-stat-card-icon">🃏</span>
           <div class="dv2-stat-card-val" style="color:#f4c430">${collectionUnlocked}</div>
           <div class="dv2-stat-card-lbl">Cartes débloquées</div>
@@ -755,7 +756,7 @@ const PAGES = {
         <div class="dv2-section-label">
           <span class="dv2-section-label-text">Personnages</span>
           <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" onclick="navigate('characters')">Voir tous →</button>
+          <button class="dv2-section-action" data-navigate="characters">Voir tous →</button>
         </div>
         <div class="dv2-panel-card">${charsHtml
           ? `<div style="padding:12px">${charsHtml}</div>`
@@ -782,7 +783,7 @@ const PAGES = {
             { page:'map',       icon:'🗺️', label:'Carte',     bg:'rgba(79,140,255,.15)',  bc:'rgba(79,140,255,.3)',  col:'#4f8cff' },
             { page:'admin',     icon:'⚙️', label:'Admin',     bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
           ].map(s => `
-          <button class="dv2-shortcut" onclick="navigate('${s.page}')">
+          <button class="dv2-shortcut" data-navigate="${s.page}">
             <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
             <span class="dv2-shortcut-label">${s.label}</span>
           </button>`).join('')}
@@ -794,10 +795,10 @@ const PAGES = {
         <div class="dv2-section-label">
           <span class="dv2-section-label-text">Quêtes actives</span>
           <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" onclick="navigate('quests')">Gérer →</button>
+          <button class="dv2-section-action" data-navigate="quests">Gérer →</button>
         </div>
         ${activeQuests.length
-          ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>${activeQuests.length > 4 ? `<button class="dv2-section-action" onclick="navigate('quests')" style="align-self:flex-end;margin-top:6px">+${activeQuests.length-4} de plus →</button>` : ''}`
+          ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>${activeQuests.length > 4 ? `<button class="dv2-section-action" data-navigate="quests" style="align-self:flex-end;margin-top:6px">+${activeQuests.length-4} de plus →</button>` : ''}`
           : `<div class="dv2-panel-card"><div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center"><span style="opacity:.3">🗡️</span> Aucune quête active.</div></div>`}
       </div>
 
@@ -807,13 +808,13 @@ const PAGES = {
         <div class="dv2-section-label">
           <span class="dv2-section-label-text">Progression aventure</span>
           <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" onclick="navigate('story')">Ouvrir →</button>
+          <button class="dv2-section-action" data-navigate="story">Ouvrir →</button>
         </div>
         ${_progBar()}
       </div>` : ''}
 
       <!-- Table Virtuelle -->
-      <div class="dash-vtt-cta" onclick="navigate('vtt')">
+      <div class="dash-vtt-cta" data-navigate="vtt">
         <span class="dash-vtt-icon">🎲</span>
         <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
         <span class="dash-vtt-arrow">→</span>
@@ -889,7 +890,7 @@ const PAGES = {
       let heroBlock = '';
       if (chars.length === 0) {
         heroBlock = `
-        <div class="dv2-hero-card" onclick="navigate('characters')" style="cursor:pointer">
+        <div class="dv2-hero-card" data-navigate="characters" style="cursor:pointer">
           <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
             <div>
               <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>
@@ -958,7 +959,7 @@ const PAGES = {
         ${_bastionCardV2()}
       </div>` : ''}
 
-      <div class="dash-vtt-cta" onclick="navigate('vtt')">
+      <div class="dash-vtt-cta" data-navigate="vtt">
         <span class="dash-vtt-icon">🎲</span>
         <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
         <span class="dash-vtt-arrow">→</span>
@@ -1040,14 +1041,14 @@ const PAGES = {
       html += `<div class="admin-section" style="margin-bottom:.6rem">
         <div class="admin-label" style="font-size:.7rem;color:var(--text-dim);letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:.4rem">Filtre admin :</div>
         <div class="char-select-bar" id="admin-player-filter" style="display:flex;gap:6px;flex-wrap:wrap">
-          <button type="button" class="cs-admin-filter active" data-pseudo="" onclick="filterAdminChars(null,this)">Tous</button>
-          ${Object.keys(byUser).map(p => `<button type="button" class="cs-admin-filter" data-pseudo="${_esc(p)}" onclick="filterAdminChars('${_esc(p)}',this)">${_esc(p)} <span style="opacity:.5">·${byUser[p].length}</span></button>`).join('')}
+          <button type="button" class="cs-admin-filter active" data-pseudo="" data-action="filterAdminChars">Tous</button>
+          ${Object.keys(byUser).map(p => `<button type="button" class="cs-admin-filter" data-pseudo="${_esc(p)}" data-action="filterAdminChars">${_esc(p)} <span style="opacity:.5">·${byUser[p].length}</span></button>`).join('')}
         </div>
       </div>`;
     }
     if (chars.length === 0) {
       html += `<div class="empty-state"><div class="icon">📜</div><p>Aucun personnage. Crée ton premier héros !</p></div>
-        <div style="margin-bottom:1.5rem"><button class="char-pill-new" onclick="createNewChar()">+ Nouveau personnage</button></div>`;
+        <div style="margin-bottom:1.5rem"><button class="char-pill-new" data-action="createNewChar">+ Nouveau personnage</button></div>`;
     } else {
       html += `<div id="char-sheet-area"></div>`;
     }
@@ -1071,7 +1072,7 @@ const PAGES = {
     const doc = await getDocData('world', 'main');
     const content = document.getElementById('main-content');
     let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📖 Le Monde</div><div class="page-subtitle">Lore, histoire et informations générales</div></div>`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Édition Admin</div><button class="btn btn-gold btn-sm" onclick="editWorldContent()">✏️ Modifier le contenu</button></div>`;
+    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Édition Admin</div><button class="btn btn-gold btn-sm" data-action="editWorldContent">✏️ Modifier le contenu</button></div>`;
     const sections = doc?.sections || [{ title: 'Introduction', content: 'Les informations sur le monde seront ajoutées ici par le Maître de Jeu.' }];
     sections.forEach(s => { html += `<div class="world-section"><div class="card-header" style="margin-bottom:0.8rem;padding:0.8rem;background:var(--bg-card2);border-radius:6px;border:1px solid var(--border)">${s.title}</div><div class="world-content">${s.content}</div></div>`; });
     content.innerHTML = html;
@@ -1138,15 +1139,15 @@ const PAGES = {
     const items = await loadCollection('npcs');
     const content = document.getElementById('main-content');
     let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">👥 PNJ Rencontrés</div><div class="page-subtitle">Personnages non-joueurs et factions</div></div>`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" onclick="openNpcModal()">+ Ajouter un PNJ</button></div>`;
+    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" data-action="openNpcModal">+ Ajouter un PNJ</button></div>`;
     if (items.length === 0) {
       html += `<div class="empty-state"><div class="icon">👥</div><p>Aucun PNJ pour l'instant.</p></div>`;
     } else {
       const filters = [...new Set(items.map(n => n.disposition || 'Inconnu'))];
-      html += `<div class="tabs" id="npc-filter" style="margin-bottom:1.5rem"><button class="tab active" onclick="filterNpcs(null,this)">Tous</button>${filters.map(f => `<button class="tab" onclick="filterNpcs('${f}',this)">${f}</button>`).join('')}</div><div class="npc-grid" id="npc-grid">`;
+      html += `<div class="tabs" id="npc-filter" style="margin-bottom:1.5rem"><button class="tab active" data-action="filterNpcs" data-filter="">Tous</button>${filters.map(f => `<button class="tab" data-action="filterNpcs" data-filter="${_esc(f)}">${f}</button>`).join('')}</div><div class="npc-grid" id="npc-grid">`;
       items.forEach(npc => {
         const dispColor = npc.disposition === 'Amical' || npc.disposition === 'Allié' ? 'green' : npc.disposition === 'Hostile' || npc.disposition === 'Ennemi' ? 'red' : 'blue';
-        html += `<div class="npc-card" data-disp="${npc.disposition || 'Inconnu'}"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.5rem"><div><div class="npc-name">${npc.nom || '?'}</div><div class="npc-role">${npc.role || ''}</div></div><div style="display:flex;gap:0.3rem;align-items:center"><span class="badge badge-${dispColor}">${npc.disposition || 'Inconnu'}</span>${STATE.isAdmin ? `<button class="btn-icon" onclick="editNpc('${npc.id}')">✏️</button><button class="btn-icon" onclick="deleteNpc('${npc.id}')">🗑️</button>` : ''}</div></div><div class="npc-desc">${npc.description || ''}</div>${npc.lieu ? `<div style="margin-top:0.5rem;font-size:0.78rem;color:var(--text-dim)">📍 ${npc.lieu}</div>` : ''}</div>`;
+        html += `<div class="npc-card" data-disp="${npc.disposition || 'Inconnu'}"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.5rem"><div><div class="npc-name">${npc.nom || '?'}</div><div class="npc-role">${npc.role || ''}</div></div><div style="display:flex;gap:0.3rem;align-items:center"><span class="badge badge-${dispColor}">${npc.disposition || 'Inconnu'}</span>${STATE.isAdmin ? `<button class="btn-icon" data-action="editNpc" data-id="${npc.id}">✏️</button><button class="btn-icon" data-action="deleteNpc" data-id="${npc.id}">🗑️</button>` : ''}</div></div><div class="npc-desc">${npc.description || ''}</div>${npc.lieu ? `<div style="margin-top:0.5rem;font-size:0.78rem;color:var(--text-dim)">📍 ${npc.lieu}</div>` : ''}</div>`;
       });
       html += '</div>';
     }
@@ -1253,10 +1254,10 @@ const PAGES = {
           <div style="font-size:.65rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;margin-top:1px">Or</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:.35rem">
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="editBastion()">✏️ Modifier</button>` : ''}
-          ${isPlayer ? `<button class="btn btn-outline btn-sm" onclick="investirOrBastion()">💰 Investir</button>` : ''}
-          <button class="btn btn-outline btn-sm" onclick="ouvrirInventaireBastion()">📦 Inventaire (${inventaire.length})</button>
-          <button class="btn btn-outline btn-sm" onclick="ouvrirMissionsBastion()">⚔️ Missions (${missionsActives.length})</button>
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="editBastion">✏️ Modifier</button>` : ''}
+          ${isPlayer ? `<button class="btn btn-outline btn-sm" data-action="investirOrBastion">💰 Investir</button>` : ''}
+          <button class="btn btn-outline btn-sm" data-action="ouvrirInventaireBastion">📦 Inventaire (${inventaire.length})</button>
+          <button class="btn btn-outline btn-sm" data-action="ouvrirMissionsBastion">⚔️ Missions (${missionsActives.length})</button>
         </div>
       </div>
     </div>
@@ -1331,7 +1332,7 @@ const PAGES = {
           </table>
         </div>
         ${STATE.isAdmin
-          ? `<button class="btn btn-gold" style="width:100%" onclick="tirerEvenement()">🎲 Tirer l'événement du cycle</button>`
+          ? `<button class="btn btn-gold" style="width:100%" data-action="tirerEvenement">🎲 Tirer l'événement du cycle</button>`
           : `<p style="font-size:.78rem;color:var(--text-dim);text-align:center;font-style:italic;margin:0">L'événement est tiré par le MJ en début de cycle.</p>`}
       </div>
 
@@ -1339,7 +1340,7 @@ const PAGES = {
       <div class="card">
         <div class="card-header">🏗️ Améliorations permanentes
           <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+1 niveau · +100 or/cycle</span>
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:.5rem;font-size:.7rem" onclick="gererAmeliorations()">⚙️ Gérer</button>` : ''}
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:.5rem;font-size:.7rem" data-action="gererAmeliorations">⚙️ Gérer</button>` : ''}
         </div>
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem">
           ${_getAllAmeliorations(data).map(a => {
@@ -1368,7 +1369,7 @@ const PAGES = {
                 </div>
               </div>
               <button class="btn btn-outline btn-sm" style="font-size:.72rem;margin-top:.1rem"
-                onclick="investirAmelioration('${a.id}','custom')">
+                data-action="investirAmelioration" data-id="${a.id}" data-mode="custom">
                 💰 Contribuer
               </button>` : a.debloquee ? `<div style="height:2px;background:rgba(34,195,142,.25);border-radius:1px;margin-top:auto"></div>` : ''}
             </div>`;
@@ -1406,7 +1407,7 @@ const PAGES = {
                   <span style="margin-left:auto;color:var(--text-dim)">${h.date||''}</span>
                 </div>
               </div>
-              ${STATE.isAdmin&&h.id ? `<button class="btn-icon" style="color:#ff6b6b;flex-shrink:0;font-size:.85rem" onclick="supprimerHistorique('${h.id}')" title="Supprimer ce cycle">🗑️</button>` : ''}
+              ${STATE.isAdmin&&h.id ? `<button class="btn-icon" style="color:#ff6b6b;flex-shrink:0;font-size:.85rem" data-action="supprimerHistorique" data-id="${h.id}" title="Supprimer ce cycle">🗑️</button>` : ''}
             </div>`;
           }).join('')}
           ${historique.length > 10 ? `<p style="font-size:.72rem;color:var(--text-dim);text-align:center;margin:.2rem 0">${historique.length-10} cycle(s) plus anciens</p>` : ''}
@@ -1441,7 +1442,7 @@ const PAGES = {
       <div class="card" style="padding:1rem">
         <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
           📦 Inventaire du Bastion
-          <button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" onclick="ouvrirInventaireBastion()">Voir tout</button>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" data-action="ouvrirInventaireBastion">Voir tout</button>
         </div>
         ${inventaire.length === 0
           ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Inventaire vide.</p>`
@@ -1457,7 +1458,7 @@ const PAGES = {
       <div class="card" style="padding:1rem">
         <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
           ⚔️ Missions spéciales
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" onclick="ouvrirMissionsBastion()">Gérer</button>` : ''}
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" data-action="ouvrirMissionsBastion">Gérer</button>` : ''}
         </div>
         ${missionsActives.length === 0
           ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucune mission active.</p>`
@@ -1466,14 +1467,14 @@ const PAGES = {
               <div style="font-size:.82rem;font-weight:600;color:var(--text)">${m.titre||'?'}</div>
               ${m.recompense?`<div style="font-size:.72rem;color:var(--gold)">🎁 ${m.recompense}</div>`:''}
             </div>`).join('')}
-        ${!STATE.isAdmin && missions.length > 0 ? `<button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem;font-size:.75rem" onclick="ouvrirMissionsBastion()">Voir toutes les missions</button>` : ''}
+        ${!STATE.isAdmin && missions.length > 0 ? `<button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem;font-size:.75rem" data-action="ouvrirMissionsBastion">Voir toutes les missions</button>` : ''}
       </div>
 
       <!-- Journal -->
       <div class="card" style="padding:1rem">
         <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
           📖 Journal
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" onclick="addBastionLog()">+ Entrée</button>` : ''}
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" data-action="addBastionLog">+ Entrée</button>` : ''}
         </div>
         ${(data.journal||[]).length === 0
           ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucune entrée.</p>`
@@ -1534,12 +1535,12 @@ const PAGES = {
       <h1 class="hall-title">✦ Hauts-Faits ✦</h1>
       <p class="hall-sub">Les exploits de la compagnie, consignés pour l'éternité.</p>
       <div class="hall-counters">
-        <div class="hall-counter${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" onclick="window._achSetFilter('all')">
+        <div class="hall-counter${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" data-action="_achSetFilter" data-val="all">
           <div class="hall-counter-icon">🏆</div>
           <div class="hall-counter-info"><div class="hall-counter-num">${total}</div><div class="hall-counter-lbl">Total</div></div>
         </div>
         ${CATS.map(c => `
-        <div class="hall-counter${activeFilter === c.id ? ' active' : ''}" style="--c:${c.color}" data-filter="${c.id}" onclick="window._achSetFilter('${c.id}')">
+        <div class="hall-counter${activeFilter === c.id ? ' active' : ''}" style="--c:${c.color}" data-filter="${c.id}" data-action="_achSetFilter" data-val="${c.id}">
           <div class="hall-counter-icon">${c.emoji}</div>
           <div class="hall-counter-info"><div class="hall-counter-num">${byCat[c.id] || 0}</div><div class="hall-counter-lbl">${c.label}</div></div>
         </div>`).join('')}
@@ -1548,10 +1549,10 @@ const PAGES = {
     <div class="controls-bar">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <div class="view-toggle">
-          <button class="view-tab${activeView !== 'timeline' ? ' active' : ''}" onclick="window._achSetView('galerie')">▦ Galerie</button>
-          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" onclick="window._achSetView('timeline')">⋮ Chronologie</button>
+          <button class="view-tab${activeView !== 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="galerie">▦ Galerie</button>
+          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline">⋮ Chronologie</button>
         </div>
-        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" onclick="openAchievementModal()">+ Ajouter</button>` : ''}
+        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-action="openAchievementModal">+ Ajouter</button>` : ''}
       </div>
       <div class="search-wrap">
         <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
@@ -1577,9 +1578,9 @@ const PAGES = {
     const sections = doc?.sections || getDefaultTutorial();
     const content  = document.getElementById('main-content');
     content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📕 Tutoriel de Jeu</div><div class="page-subtitle">Comment jouer, règles et mécaniques</div></div>
-      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" onclick="editTutorial()">✏️ Modifier le tutoriel</button></div>` : ''}
+      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" data-action="editTutorial">✏️ Modifier le tutoriel</button></div>` : ''}
       <div class="grid-2 tutorial-layout-grid" style="gap:1.5rem;align-items:start">
-        <div><div class="tutorial-nav" id="tut-nav">${sections.map((s, i) => `<div class="tutorial-nav-item ${i === 0 ? 'active' : ''}" onclick="showTutSection(${i},this)">${s.title}</div>`).join('')}</div></div>
+        <div><div class="tutorial-nav" id="tut-nav">${sections.map((s, i) => `<div class="tutorial-nav-item ${i === 0 ? 'active' : ''}" data-action="showTutSection" data-idx="${i}">${s.title}</div>`).join('')}</div></div>
         <div><div class="tutorial-content" id="tut-content">${sections[0]?.content || ''}</div></div>
       </div>`;
     window._tutSections = sections;
@@ -1602,26 +1603,26 @@ const PAGES = {
         <div class="card">
           <div class="card-header">Actions Rapides</div>
           <div style="display:flex;flex-direction:column;gap:0.7rem">
-            <button class="btn btn-outline" onclick="navigate('shop')">🛒 Gérer la Boutique</button>
-            <button class="btn btn-outline" onclick="navigate('achievements')">🏆 Gérer les Hauts-Faits</button>
-            <button class="btn btn-outline" onclick="navigate('collection')">🃏 Gérer la Collection</button>
-            <button class="btn btn-outline" onclick="navigate('story')">📚 Gérer la Trame</button>
-            <button class="btn btn-outline" onclick="navigate('npcs')">👥 Gérer les PNJ</button>
-            <button class="btn btn-outline" onclick="navigate('world')">📖 Modifier le Monde</button>
-            <button class="btn btn-outline" onclick="navigate('tutorial')">📕 Modifier le Tutoriel</button>
+            <button class="btn btn-outline" data-navigate="shop">🛒 Gérer la Boutique</button>
+            <button class="btn btn-outline" data-navigate="achievements">🏆 Gérer les Hauts-Faits</button>
+            <button class="btn btn-outline" data-navigate="collection">🃏 Gérer la Collection</button>
+            <button class="btn btn-outline" data-navigate="story">📚 Gérer la Trame</button>
+            <button class="btn btn-outline" data-navigate="npcs">👥 Gérer les PNJ</button>
+            <button class="btn btn-outline" data-navigate="world">📖 Modifier le Monde</button>
+            <button class="btn btn-outline" data-navigate="tutorial">📕 Modifier le Tutoriel</button>
           </div>
         </div>
       </div>
       <div class="card" style="margin-top:1.2rem">
         <div class="card-header">⚙️ Réglages du jeu</div>
         <div style="display:flex;flex-direction:column;gap:0.7rem">
-          <button class="btn btn-outline" onclick="window.openWeaponFormatsAdmin ? window.openWeaponFormatsAdmin() : import('./assets/js/features/characters.js').then(() => window.openWeaponFormatsAdmin?.())">⚔️ Formats d'arme</button>
-          <button class="btn btn-outline" onclick="window.openDamageTypesAdmin ? window.openDamageTypesAdmin() : import('./assets/js/features/characters.js').then(() => window.openDamageTypesAdmin?.())">⚡ Types de dégâts</button>
-          <button class="btn btn-outline" onclick="window.openCombatStylesAdmin ? window.openCombatStylesAdmin() : import('./assets/js/features/characters.js').then(() => window.openCombatStylesAdmin?.())">🗡️ Styles de combat</button>
-          <button class="btn btn-outline" onclick="window.openSpellMatricesAdmin ? window.openSpellMatricesAdmin() : import('./assets/js/features/characters.js').then(() => window.openSpellMatricesAdmin?.())">🔮 Matrices de sorts</button>
-          <button class="btn btn-outline" onclick="window._ouvrirGestionDes ? window._ouvrirGestionDes() : import('./assets/js/features/histoire.js').then(() => window._ouvrirGestionDes?.())">🎲 Compétences de dés</button>
-          <button class="btn btn-outline" onclick="window._ouvrirGestionEmotes ? window._ouvrirGestionEmotes() : import('./assets/js/features/vtt.js').then(() => window._ouvrirGestionEmotes?.())">😄 Émotes VTT</button>
-          <button class="btn btn-outline" onclick="window._vttConditionConfig ? window._vttConditionConfig() : import('./assets/js/features/vtt.js').then(() => window._vttConditionConfig?.())">🎭 États & conditions</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openWeaponFormatsAdmin" data-module="characters">⚔️ Formats d'arme</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openDamageTypesAdmin" data-module="characters">⚡ Types de dégâts</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openCombatStylesAdmin" data-module="characters">🗡️ Styles de combat</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openSpellMatricesAdmin" data-module="characters">🔮 Matrices de sorts</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_ouvrirGestionDes" data-module="histoire">🎲 Compétences de dés</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_ouvrirGestionEmotes" data-module="vtt">😄 Émotes VTT</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_vttConditionConfig" data-module="vtt">🎭 États & conditions</button>
         </div>
       </div>`;
   },
@@ -1633,7 +1634,7 @@ const PAGES = {
     const recettes = doc?.recettes || [];
     const potions  = doc?.potions  || [];
     let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">🍳 Recettes & Potions</span></div><div class="page-subtitle">Cuisine de groupe et alchimie</div></div>
-      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><div style="display:flex;gap:0.5rem"><button class="btn btn-gold btn-sm" onclick="openRecetteModal('cuisine')">+ Recette cuisine</button><button class="btn btn-gold btn-sm" onclick="openRecetteModal('potion')">+ Potion</button></div></div>` : ''}
+      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><div style="display:flex;gap:0.5rem"><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="cuisine">+ Recette cuisine</button><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="potion">+ Potion</button></div></div>` : ''}
       <div style="background:rgba(226,185,111,0.05);border:1px solid rgba(226,185,111,0.15);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:0.85rem;color:var(--text-muted)">
         <strong style="color:var(--gold)">🍳 Cuisine</strong> — Avant mission ou pendant un repos. Bénéficie à tout le groupe. Max 2 plats actifs simultanément.<br>
         <strong style="color:var(--gold)">🧪 Potions</strong> — Préparées avant une mission. Effets individuels.
@@ -1642,12 +1643,12 @@ const PAGES = {
         <div>
           <div class="card-header" style="margin-bottom:1rem">🍳 Cuisine (${recettes.length})</div>
           ${recettes.length === 0 ? `<div class="empty-state"><span class="icon">🍳</span><p>Aucune recette de cuisine.</p></div>` :
-            recettes.map(r => `<div class="card" style="margin-bottom:0.8rem;padding:1rem"><div style="display:flex;justify-content:space-between"><div style="font-weight:700;font-size:0.92rem;color:var(--text)">${r.nom}</div>${STATE.isAdmin ? `<div style="display:flex;gap:0.3rem"><button class="btn-icon" onclick="editRecette('${r.id}','cuisine')">✏️</button><button class="btn-icon" onclick="deleteRecette('${r.id}')">🗑️</button></div>` : ''}</div>${r.duree ? `<div style="font-size:0.75rem;color:var(--text-dim);margin-top:0.2rem">⏱️ ${r.duree}</div>` : ''}${r.ingredients ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${r.ingredients}</div>` : ''}<div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${r.effet || ''}</div></div>`).join('')}
+            recettes.map(r => `<div class="card" style="margin-bottom:0.8rem;padding:1rem"><div style="display:flex;justify-content:space-between"><div style="font-weight:700;font-size:0.92rem;color:var(--text)">${r.nom}</div>${STATE.isAdmin ? `<div style="display:flex;gap:0.3rem"><button class="btn-icon" data-action="editRecette" data-id="${r.id}" data-type="cuisine">✏️</button><button class="btn-icon" data-action="deleteRecette" data-id="${r.id}">🗑️</button></div>` : ''}</div>${r.duree ? `<div style="font-size:0.75rem;color:var(--text-dim);margin-top:0.2rem">⏱️ ${r.duree}</div>` : ''}${r.ingredients ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${r.ingredients}</div>` : ''}<div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${r.effet || ''}</div></div>`).join('')}
         </div>
         <div>
           <div class="card-header" style="margin-bottom:1rem">🧪 Potions (${potions.length})</div>
           ${potions.length === 0 ? `<div class="empty-state"><span class="icon">🧪</span><p>Aucune potion.</p></div>` :
-            potions.map(p => `<div class="card" style="margin-bottom:0.8rem;padding:1rem"><div style="display:flex;justify-content:space-between"><div><span style="font-weight:700;font-size:0.92rem;color:var(--text)">${p.nom}</span>${p.famille ? `<span class="badge badge-blue" style="margin-left:0.4rem;font-size:0.65rem">${p.famille}</span>` : ''}</div>${STATE.isAdmin ? `<div style="display:flex;gap:0.3rem"><button class="btn-icon" onclick="editRecette('${p.id}','potion')">✏️</button><button class="btn-icon" onclick="deleteRecette('${p.id}')">🗑️</button></div>` : ''}</div>${p.ingredients ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${p.ingredients}</div>` : ''}<div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${p.effet || ''}</div></div>`).join('')}
+            potions.map(p => `<div class="card" style="margin-bottom:0.8rem;padding:1rem"><div style="display:flex;justify-content:space-between"><div><span style="font-weight:700;font-size:0.92rem;color:var(--text)">${p.nom}</span>${p.famille ? `<span class="badge badge-blue" style="margin-left:0.4rem;font-size:0.65rem">${p.famille}</span>` : ''}</div>${STATE.isAdmin ? `<div style="display:flex;gap:0.3rem"><button class="btn-icon" data-action="editRecette" data-id="${p.id}" data-type="potion">✏️</button><button class="btn-icon" data-action="deleteRecette" data-id="${p.id}">🗑️</button></div>` : ''}</div>${p.ingredients ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${p.ingredients}</div>` : ''}<div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${p.effet || ''}</div></div>`).join('')}
         </div>
       </div>`;
     content.innerHTML = html;
@@ -1658,5 +1659,64 @@ const PAGES = {
     await window.renderBestiary?.();
   },
 };
+
+registerActions({
+  // Dashboard
+  _goToChar:             (btn) => window._goToChar?.(btn.dataset.id),
+  _openQuickView:        (btn) => window._openQuickView?.(btn.dataset.id),
+  _dashQuestJoin:        (btn) => window._dashQuestJoin?.(btn.dataset.id, btn),
+  openAdventureSwitcher: ()    => window.openAdventureSwitcher?.(),
+
+  // Characters (admin filter) — appel via window pour supporter le cas où characters.js n'est pas encore chargé
+  filterAdminChars: (btn) => window.filterAdminChars?.(btn.dataset.pseudo || null, btn),
+
+  // World
+  editWorldContent:      ()    => window.editWorldContent?.(),
+
+  // NPCs
+  openNpcModal:          ()    => window.openNpcModal?.(),
+  editNpc:               (btn) => window.editNpc?.(btn.dataset.id),
+  deleteNpc:             (btn) => window.deleteNpc?.(btn.dataset.id),
+  filterNpcs:            (btn) => {
+    const filter = btn.dataset.filter || null;
+    document.querySelectorAll('#npc-filter .tab').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('#npc-grid .npc-card').forEach(card => {
+      card.style.display = (!filter || card.dataset.disp === filter) ? '' : 'none';
+    });
+  },
+
+  // Bastion
+  editBastion:              ()    => window.editBastion?.(),
+  investirOrBastion:        ()    => window.investirOrBastion?.(),
+  ouvrirInventaireBastion:  ()    => window.ouvrirInventaireBastion?.(),
+  ouvrirMissionsBastion:    ()    => window.ouvrirMissionsBastion?.(),
+  tirerEvenement:           ()    => window.tirerEvenement?.(),
+  gererAmeliorations:       ()    => window.gererAmeliorations?.(),
+  investirAmelioration:     (btn) => window.investirAmelioration?.(btn.dataset.id, btn.dataset.mode),
+  supprimerHistorique:      (btn) => window.supprimerHistorique?.(btn.dataset.id),
+  addBastionLog:            ()    => window.addBastionLog?.(),
+
+  // Achievements
+  _achSetFilter:         (btn) => window._achSetFilter?.(btn.dataset.val),
+  _achSetView:           (btn) => window._achSetView?.(btn.dataset.val),
+  openAchievementModal:  ()    => window.openAchievementModal?.(),
+
+  // Tutorial
+  editTutorial:          ()    => window.editTutorial?.(),
+  showTutSection:        (btn) => window.showTutSection?.(Number(btn.dataset.idx), btn),
+
+  // Admin lazy-load tools
+  _adminLazyOpen:        (btn) => {
+    const fn  = btn.dataset.fn;
+    const mod = btn.dataset.module;
+    if (window[fn]) { window[fn](); return; }
+    import(`./${mod}.js`).then(() => window[fn]?.());
+  },
+
+  // Recettes
+  openRecetteModal:  (btn) => window.openRecetteModal?.(btn.dataset.type),
+  editRecette:       (btn) => window.editRecette?.(btn.dataset.id, btn.dataset.type),
+  deleteRecette:     (btn) => window.deleteRecette?.(btn.dataset.id),
+});
 
 export default PAGES;

@@ -1,4 +1,5 @@
 import { getDocData, saveDoc } from '../../data/firestore.js';
+import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats } from '../../shared/weapon-formats.js';
@@ -170,8 +171,8 @@ export function _renderCombatStylesModal(styles) {
         <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
           <div style="font-weight:600;font-size:.85rem;color:var(--text)">${s.label||'Style '+i}</div>
           <div style="display:flex;gap:.3rem">
-            <button class="btn-icon" style="font-size:.72rem" onclick="window._editCombatStyle(${i})">✏️</button>
-            <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" onclick="window._deleteCombatStyle(${i})">🗑️</button>
+            <button class="btn-icon" style="font-size:.72rem" data-action="_editCombatStyle" data-idx="${i}">✏️</button>
+            <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" data-action="_deleteCombatStyle" data-idx="${i}">🗑️</button>
           </div>
         </div>
         <div style="font-size:.72rem;color:var(--text-dim);margin-top:.2rem">
@@ -182,8 +183,8 @@ export function _renderCombatStylesModal(styles) {
       </div>`).join('')}
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" onclick="window._addCombatStyle()">+ Nouveau style</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+      <button class="btn btn-gold" style="flex:1" data-action="_addCombatStyle">+ Nouveau style</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
     </div>
   `);
 }
@@ -221,10 +222,10 @@ export function _openStyleEditor(idx, s) {
           <select class="input-field cs-cond-p-sel" style="flex:1">
             ${_getFormatsOpt().map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
           </select>
-          <button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
+          <button type="button" data-action="_removeParent" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
         </div>`).join('')}
       </div>
-      <button type="button" onclick="window._csAddCond('cs-cond-p','cs-cond-p-sel')"
+      <button type="button" data-action="_csAddCond" data-container="cs-cond-p" data-sel="cs-cond-p-sel"
         style="font-size:.72rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
         border-radius:6px;padding:2px 10px;cursor:pointer;color:#4f8cff;margin-top:.3rem">+ Condition</button>
     </div>
@@ -236,10 +237,10 @@ export function _openStyleEditor(idx, s) {
           <select class="input-field cs-cond-s-sel" style="flex:1">
             ${_getFormatsOpt().map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
           </select>
-          <button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
+          <button type="button" data-action="_removeParent" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
         </div>`).join('')}
       </div>
-      <button type="button" onclick="window._csAddCond('cs-cond-s','cs-cond-s-sel')"
+      <button type="button" data-action="_csAddCond" data-container="cs-cond-s" data-sel="cs-cond-s-sel"
         style="font-size:.72rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
         border-radius:6px;padding:2px 10px;cursor:pointer;color:#4f8cff;margin-top:.3rem">+ Condition</button>
     </div>
@@ -256,8 +257,8 @@ export function _openStyleEditor(idx, s) {
       </div>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" onclick="window._saveCombatStyle(${idx})">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" onclick="window._backToStylesList()">← Retour</button>
+      <button class="btn btn-gold" style="flex:1" data-action="_saveCombatStyle" data-idx="${idx}">Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="_backToStylesList">← Retour</button>
     </div>
   `);
 }
@@ -271,7 +272,7 @@ window._csAddCond = (containerId, selClass) => {
     <select class="input-field ${selClass}" style="flex:1">
       ${_getFormatsOpt().map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}
     </select>
-    <button type="button" onclick="this.parentElement.remove()"
+    <button type="button" data-action="_removeParent"
       style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>`;
   container.appendChild(div);
 };
@@ -317,7 +318,7 @@ export function _renderWeaponFormatsModal(formats) {
     const on = !!isMagic;
     return `<button class="sh-admin-pill-toggle ${on?'on':''}"
       style="--pt-bg:rgba(180,127,255,.18);--pt-bd:rgba(180,127,255,.45);--pt-c:#c084fc"
-      onclick="window._toggleWeaponFormatMagic(${i})"
+      data-action="_toggleWeaponFormatMagic" data-idx="${i}"
       title="${on ? 'Magique — clic pour passer en physique' : 'Physique — clic pour passer en magique'}">
       ${on ? '🔮 Magique' : '💪 Physique'}
     </button>`;
@@ -331,7 +332,7 @@ export function _renderWeaponFormatsModal(formats) {
         <h2>Formats d'armes</h2>
         <small>${formats.length} format${formats.length>1?'s':''} configuré${formats.length>1?'s':''} · utilisés dans la boutique et les styles de combat</small>
       </div>
-      <button class="sh-admin-close" onclick="closeModal()" title="Fermer">✕</button>
+      <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
     </div>
 
     <div class="sh-admin-body">
@@ -348,22 +349,22 @@ export function _renderWeaponFormatsModal(formats) {
               <div class="sh-admin-list-item">
                 <span class="sh-admin-list-item-label">${_esc(f.label)}</span>
                 ${magPill(f.isMagic, i)}
-                <button class="sh-admin-del-btn" onclick="window._deleteWeaponFormat(${i})" title="Supprimer">🗑️</button>
+                <button class="sh-admin-del-btn" data-action="_deleteWeaponFormat" data-idx="${i}" title="Supprimer">🗑️</button>
               </div>`).join('')}
         </div>
 
         <div class="sh-admin-add-row">
           <input type="text" id="wf-new-label" placeholder="Nouveau format (ex: Arme 2M CaC Mag.)..."
             onkeydown="if(event.key==='Enter'){event.preventDefault();window._addWeaponFormat();}">
-          <button class="btn btn-gold btn-sm" onclick="window._addWeaponFormat()">+ Ajouter</button>
+          <button class="btn btn-gold btn-sm" data-action="_addWeaponFormat">+ Ajouter</button>
         </div>
       </div>
     </div>
 
     <div class="sh-admin-footer">
-      <button class="btn btn-arcane btn-sm" onclick="window.openDamageTypesAdmin()">⚡ Types de dégâts…</button>
+      <button class="btn btn-arcane btn-sm" data-action="openDamageTypesAdmin">⚡ Types de dégâts…</button>
       <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
     </div>
   </div>
   `);
@@ -463,7 +464,7 @@ function _renderDamageTypesModal(types) {
         <h2>Types de dégâts</h2>
         <small>${types.length} type${types.length>1?'s':''} configuré${types.length>1?'s':''} · règles appliquées automatiquement dans le VTT</small>
       </div>
-      <button class="sh-admin-close" onclick="closeModal()" title="Fermer">✕</button>
+      <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
     </div>
 
     <div class="sh-admin-body">
@@ -483,7 +484,7 @@ function _renderDamageTypesModal(types) {
                   <input type="text" class="sh-admin-row-input" value="${_esc(t.label)}"
                     style="flex:1;text-align:left;font-family:inherit;font-weight:500"
                     onchange="window._saveDmgTypeProp(${i},'label',this.value)">
-                  <button class="sh-admin-del-btn" onclick="window._deleteDmgType(${i})" title="Supprimer">🗑️</button>
+                  <button class="sh-admin-del-btn" data-action="_deleteDmgType" data-idx="${i}" title="Supprimer">🗑️</button>
                 </div>
                 ${mkRules(t, i)}
               </div>`).join('')}
@@ -494,14 +495,14 @@ function _renderDamageTypesModal(types) {
             style="width:50px;text-align:center;flex:0 0 auto">
           <input type="text" id="dt-new-label" placeholder="Nouveau type (ex: Eau, Foudre…)"
             onkeydown="if(event.key==='Enter'){event.preventDefault();window._addDmgType();}">
-          <button class="btn btn-gold btn-sm" onclick="window._addDmgType()">+ Ajouter</button>
+          <button class="btn btn-gold btn-sm" data-action="_addDmgType">+ Ajouter</button>
         </div>
       </div>
     </div>
 
     <div class="sh-admin-footer">
       <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
     </div>
   </div>
   `);
@@ -592,7 +593,7 @@ function _renderSpellMatricesModal(types) {
 
   const tabBtns = TABS.map(t => {
     const active = _spellMatricesTab === t.id;
-    return `<button type="button" onclick="window._switchSpellMatrixTab('${t.id}')"
+    return `<button type="button" data-action="_switchSpellMatrixTab" data-tab="${t.id}"
       style="flex:1;padding:.5rem .4rem;border-radius:8px 8px 0 0;font-size:.78rem;cursor:pointer;
         border:1px solid var(--border);border-bottom:none;
         background:${active?'var(--bg-elevated)':'var(--bg-base)'};
@@ -794,8 +795,8 @@ function _renderSpellMatricesModal(types) {
       ${tabBodyHtml}
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-gold btn-sm"    style="flex:2" onclick="window._saveSpellMatrices()">💾 Enregistrer les matrices</button>
+      <button class="btn btn-outline btn-sm" style="flex:1" data-action="close-modal">Annuler</button>
+      <button class="btn btn-gold btn-sm"    style="flex:2" data-action="_saveSpellMatrices">💾 Enregistrer les matrices</button>
     </div>
   `);
 }
@@ -1154,3 +1155,21 @@ export function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
   const p = getWeaponDegatsParts(c, item, fallbackKey);
   return p ? p.roll : '—';
 }
+
+registerActions({
+  _removeParent:            (btn) => btn.parentElement?.remove(),
+  _editCombatStyle:         (btn) => window._editCombatStyle(Number(btn.dataset.idx)),
+  _deleteCombatStyle:       (btn) => window._deleteCombatStyle(Number(btn.dataset.idx)),
+  _addCombatStyle:          ()    => window._addCombatStyle(),
+  _saveCombatStyle:         (btn) => window._saveCombatStyle(Number(btn.dataset.idx)),
+  _backToStylesList:        ()    => window._backToStylesList(),
+  _csAddCond:               (btn) => window._csAddCond(btn.dataset.container, btn.dataset.sel),
+  _toggleWeaponFormatMagic: (btn) => window._toggleWeaponFormatMagic(Number(btn.dataset.idx)),
+  _addWeaponFormat:         ()    => window._addWeaponFormat(),
+  _deleteWeaponFormat:      (btn) => window._deleteWeaponFormat(Number(btn.dataset.idx)),
+  openDamageTypesAdmin:     ()    => window.openDamageTypesAdmin(),
+  _addDmgType:              ()    => window._addDmgType(),
+  _deleteDmgType:           (btn) => window._deleteDmgType(Number(btn.dataset.idx)),
+  _switchSpellMatrixTab:    (btn) => window._switchSpellMatrixTab(btn.dataset.tab),
+  _saveSpellMatrices:       ()    => window._saveSpellMatrices(),
+});

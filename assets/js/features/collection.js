@@ -1,4 +1,5 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
@@ -33,8 +34,8 @@ export async function renderCollectionPage() {
     html += `
       <div class="admin-section">
         <div class="admin-label">Gestion Admin</div>
-        <button class="btn btn-gold btn-sm" onclick="openCollectionModal()">+ Ajouter une carte</button>
-        <button class="btn btn-outline btn-sm" onclick="openTemplateModal()">🖼️ Template (Image recto)</button>
+        <button class="btn btn-gold btn-sm" data-action="openCollectionModal">+ Ajouter une carte</button>
+        <button class="btn btn-outline btn-sm" data-action="openTemplateModal">🖼️ Template (Image recto)</button>
       </div>`;
   }
 
@@ -62,18 +63,18 @@ export async function renderCollectionPage() {
 
       const adminBtns = STATE.isAdmin ? `
         <div class="coll-admin-btns">
-          <button class="btn-icon" onclick="event.stopPropagation();editCard('${c.id}')">✏️</button>
-          <button class="btn-icon" onclick="event.stopPropagation();toggleUnlock('${c.id}')">
+          <button class="btn-icon" data-action="editCard" data-id="${c.id}" data-stop-propagation>✏️</button>
+          <button class="btn-icon" data-action="toggleUnlock" data-id="${c.id}" data-stop-propagation>
             ${isUnlocked ? '🔓' : '🔒'}
           </button>
-          <button class="btn-icon" onclick="event.stopPropagation();deleteCard('${c.id}')">🗑️</button>
+          <button class="btn-icon" data-action="deleteCard" data-id="${c.id}" data-stop-propagation>🗑️</button>
         </div>
       ` : '';
 
       html += `
         <div class="coll-card-wrapper">
           
-          <div class="coll-card ${isUnlocked ? 'unlocked' : 'locked'}" onclick="viewCard('${c.id}')">
+          <div class="coll-card ${isUnlocked ? 'unlocked' : 'locked'}" data-action="viewCard" data-id="${c.id}">
             <div class="coll-card-inner">
               <div class="coll-card-front">
                 <div class="coll-img">${frontHtml}</div>
@@ -119,7 +120,7 @@ function openTemplateModal() {
       </div>
       <div id="tpl-img-preview">${_templateUrl ? `<img src="${_templateUrl}" style="max-height:120px;margin-top:0.4rem;display:block">` : ''}</div>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveTemplate()">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveTemplate">Enregistrer</button>
   `);
 
   // setter après rendu, hors du string HTML
@@ -151,7 +152,7 @@ function openCollectionModal(card = null) {
       </div>
       <div id="sc-img-preview">${card?.imageUrl ? `<img src="${card.imageUrl}" style="max-height:80px;margin-top:0.4rem;display:block">` : ''}</div>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveCard('${card?.id || ''}')">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveCard" data-id="${card?.id || ''}">Enregistrer</button>
   `);
 }
 
@@ -194,4 +195,15 @@ async function deleteCard(id) {
 Object.assign(window, {
   openCollectionModal, saveCard, viewCard, editCard, deleteCard, toggleUnlock,
   openTemplateModal, saveTemplate,
+});
+
+registerActions({
+  openCollectionModal: () => openCollectionModal(),
+  openTemplateModal:   () => openTemplateModal(),
+  saveTemplate:        () => saveTemplate(),
+  saveCard:    (btn) => saveCard(btn.dataset.id || ''),
+  viewCard:    (btn) => viewCard(btn.dataset.id),
+  editCard:    (btn) => editCard(btn.dataset.id),
+  toggleUnlock:(btn) => toggleUnlock(btn.dataset.id),
+  deleteCard:  (btn) => deleteCard(btn.dataset.id),
 });

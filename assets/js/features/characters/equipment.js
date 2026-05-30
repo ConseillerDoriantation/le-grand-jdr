@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { registerActions } from '../../core/actions.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
@@ -255,9 +256,9 @@ export function editEquipSlot(slot) {
     }
 
     <div style="display:flex;gap:0.5rem;margin-top:1rem">
-      ${isWeapon ? `<button class="btn btn-gold" style="flex:1" onclick="saveEquipSlot('${slot}')">Équiper</button>` : ''}
-      ${equippedHasItem ? `<button class="btn btn-danger" ${isWeapon?'':'style="flex:1"'} onclick="clearEquipSlot('${slot}')">Retirer</button>` : ''}
-      ${!isWeapon && !equippedHasItem ? `<button class="btn btn-outline" style="flex:1" onclick="closeModal()">Fermer</button>` : ''}
+      ${isWeapon ? `<button class="btn btn-gold" style="flex:1" data-action="saveEquipSlot" data-slot="${slot}">Équiper</button>` : ''}
+      ${equippedHasItem ? `<button class="btn btn-danger" ${isWeapon?'':'style="flex:1"'} data-action="clearEquipSlot" data-slot="${slot}">Retirer</button>` : ''}
+      ${!isWeapon && !equippedHasItem ? `<button class="btn btn-outline" style="flex:1" data-action="_eqClose">Fermer</button>` : ''}
     </div>
   `);
 
@@ -409,3 +410,9 @@ export async function clearEquipSlot(slot) {
     window.renderCharSheet(c,'combat');
   } catch (e) { notifySaveError(e); }
 }
+
+registerActions({
+  saveEquipSlot:  (btn) => saveEquipSlot(btn.dataset.slot),
+  clearEquipSlot: (btn) => clearEquipSlot(btn.dataset.slot),
+  _eqClose:       ()    => closeModal(),
+});

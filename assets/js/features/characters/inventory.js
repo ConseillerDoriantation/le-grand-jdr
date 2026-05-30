@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { registerActions } from '../../core/actions.js';
 import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
@@ -108,7 +109,7 @@ export function _renderInventaireBoutique(char) {
         </div>
         ${canEdit ? `
         <div style="display:flex;gap:.4rem;align-items:center">
-          <button onclick="openSellInvModal('${char.id}','${indicesB64}',${prixVente},'${item.nom||''}')"
+          <button data-action="openSellInvModal" data-id="${char.id}" data-indices="${indicesB64}" data-prix="${prixVente}" data-name="${_esc(item.nom||'')}"
             style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
             color:var(--gold);transition:all .15s"
@@ -116,7 +117,7 @@ export function _renderInventaireBoutique(char) {
             onmouseout="this.style.background='rgba(232,184,75,.08)'">
             🔄 Vendre
           </button>
-          <button onclick="openSendInvModal('${char.id}','${indicesB64}','${item.nom||''}')"
+          <button data-action="openSendInvModal" data-id="${char.id}" data-indices="${indicesB64}" data-name="${_esc(item.nom||'')}"
             style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
             color:#4f8cff;transition:all .15s"
@@ -247,9 +248,9 @@ export function renderCharInventaire(c, canEdit) {
       <div class="inv-row-aside">
         ${g.qte > 1 ? `<span class="inv-row-qte">×${g.qte}</span>` : ''}
         <div class="inv-row-btns">
-          ${canEdit && item.source === 'boutique' ? `<button class="inv-rbtn inv-rbtn--sell" title="Vendre" onclick="openSellInvModal('${c.id}','${indicesB64}',${pv},'${nomSafe}')">🔄</button>` : ''}
-          <button class="inv-rbtn inv-rbtn--send" title="Envoyer" onclick="openSendInvModal('${c.id}','${indicesB64}','${nomSafe}')">↗</button>
-          ${canEdit ? `<button class="inv-rbtn inv-rbtn--del" title="Supprimer" onclick="openDeleteInvModal('${c.id}','${indicesB64}','${nomSafe}')">✕</button>` : ''}
+          ${canEdit && item.source === 'boutique' ? `<button class="inv-rbtn inv-rbtn--sell" title="Vendre" data-action="openSellInvModal" data-id="${c.id}" data-indices="${indicesB64}" data-prix="${pv}" data-name="${_esc(item.nom||'')}">🔄</button>` : ''}
+          <button class="inv-rbtn inv-rbtn--send" title="Envoyer" data-action="openSendInvModal" data-id="${c.id}" data-indices="${indicesB64}" data-name="${_esc(item.nom||'')}">↗</button>
+          ${canEdit ? `<button class="inv-rbtn inv-rbtn--del" title="Supprimer" data-action="openDeleteInvModal" data-id="${c.id}" data-indices="${indicesB64}" data-name="${_esc(item.nom||'')}">✕</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -264,8 +265,8 @@ export function renderCharInventaire(c, canEdit) {
       <span class="cs-section-title">🎒 Inventaire</span>
       <span class="cs-hint">${totalItems} objet${totalItems !== 1 ? 's' : ''}</span>
       <div style="display:flex;gap:.4rem;margin-left:auto;align-items:center">
-        <button class="cs-inv-action-btn cs-inv-action-btn--gold" onclick="openSendGoldModal('${c.id}')" title="Envoyer de l'or à un autre personnage">↗ Or</button>
-        ${canEdit ? `<button class="cs-inv-action-btn" onclick="addInvItem()">🎁 Butin</button>` : ''}
+        <button class="cs-inv-action-btn cs-inv-action-btn--gold" data-action="openSendGoldModal" data-id="${c.id}" title="Envoyer de l'or à un autre personnage">↗ Or</button>
+        ${canEdit ? `<button class="cs-inv-action-btn" data-action="addInvItem">🎁 Butin</button>` : ''}
       </div>
     </div>`;
 
@@ -282,7 +283,7 @@ export function renderCharInventaire(c, canEdit) {
       <input class="inv-search-input" type="text" placeholder="Rechercher un objet…"
         value="${_esc(window._charInvSearch || '')}"
         oninput="window._charInvSearch=this.value;filterInvRows(this.value)">
-      ${q ? `<button class="inv-search-clear" onclick="window._charInvSearch='';filterInvRows('');this.closest('.inv-search-wrap').querySelector('input').value=''">✕</button>` : ''}
+      ${q ? `<button class="inv-search-clear" data-action="filterInvClear">✕</button>` : ''}
     </div>`;
 
     // Groupes par catégorie
@@ -398,10 +399,10 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
       <div class="invm-qty">
         <label>Quantité</label>
         <div class="invm-stepper">
-          <button type="button" class="invm-step" onclick="window._invmStep('sell-qty',-1,${maxQte},'sell')">−</button>
+          <button type="button" class="invm-step" data-action="_invmStep" data-input="sell-qty" data-delta="-1" data-max="${maxQte}" data-context="sell">−</button>
           <input type="number" id="sell-qty" min="1" max="${maxQte}" value="1"
             oninput="window._sellRefreshTotal(this,${prixVente},${maxQte})">
-          <button type="button" class="invm-step" onclick="window._invmStep('sell-qty',1,${maxQte},'sell')">+</button>
+          <button type="button" class="invm-step" data-action="_invmStep" data-input="sell-qty" data-delta="1" data-max="${maxQte}" data-context="sell">+</button>
         </div>
         <div class="invm-total">
           <span class="invm-total-lbl">Total</span>
@@ -411,10 +412,10 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
       </div>
 
       <footer class="invm-actions">
-        <button class="invm-btn invm-btn-primary invm-btn-gold" onclick="sellInvItemBulk('${charId}','${indicesB64}',${prixVente})">
+        <button class="invm-btn invm-btn-primary invm-btn-gold" data-action="sellInvItemBulk" data-id="${charId}" data-indices="${indicesB64}" data-prix="${prixVente}">
           💰 Vendre${hasEquipped?' (déséquiper)':''}
         </button>
-        <button class="invm-btn invm-btn-outline" onclick="closeModal()">Annuler</button>
+        <button class="invm-btn invm-btn-outline" data-action="close-modal">Annuler</button>
       </footer>
     </div>
   `);
@@ -537,16 +538,16 @@ export function openDeleteInvModal(charId, indicesB64, nom) {
       <div class="invm-qty">
         <label>Quantité</label>
         <div class="invm-stepper">
-          <button type="button" class="invm-step" onclick="window._invmStep('del-qty',-1,${maxQte})">−</button>
+          <button type="button" class="invm-step" data-action="_invmStep" data-input="del-qty" data-delta="-1" data-max="${maxQte}">−</button>
           <input type="number" id="del-qty" min="1" max="${maxQte}" value="1">
-          <button type="button" class="invm-step" onclick="window._invmStep('del-qty',1,${maxQte})">+</button>
+          <button type="button" class="invm-step" data-action="_invmStep" data-input="del-qty" data-delta="1" data-max="${maxQte}">+</button>
         </div>
       </div>
 
       <footer class="invm-actions">
         <button class="invm-btn invm-btn-primary invm-btn-danger"
-          onclick="deleteInvItemBulk('${charId}','${indicesB64}')">🗑️ Supprimer</button>
-        <button class="invm-btn invm-btn-outline" onclick="closeModal()">Annuler</button>
+          data-action="deleteInvItemBulk" data-id="${charId}" data-indices="${indicesB64}">🗑️ Supprimer</button>
+        <button class="invm-btn invm-btn-outline" data-action="close-modal">Annuler</button>
       </footer>
     </div>
   `);
@@ -651,9 +652,9 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
       <div class="invm-qty">
         <label>Quantité à envoyer</label>
         <div class="invm-stepper">
-          <button type="button" class="invm-step" onclick="window._invmStep('send-qty',-1,${maxQte})">−</button>
+          <button type="button" class="invm-step" data-action="_invmStep" data-input="send-qty" data-delta="-1" data-max="${maxQte}">−</button>
           <input type="number" id="send-qty" min="1" max="${maxQte}" value="1">
-          <button type="button" class="invm-step" onclick="window._invmStep('send-qty',1,${maxQte})">+</button>
+          <button type="button" class="invm-step" data-action="_invmStep" data-input="send-qty" data-delta="1" data-max="${maxQte}">+</button>
         </div>
       </div>` : ''}
 
@@ -661,8 +662,8 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
       <div class="invm-targets">${targetCards}</div>
 
       <footer class="invm-actions">
-        <button class="invm-btn invm-btn-primary invm-btn-arcane" onclick="sendInvItem('${charId}','${b64}')">📤 Envoyer</button>
-        <button class="invm-btn invm-btn-outline" onclick="closeModal()">Annuler</button>
+        <button class="invm-btn invm-btn-primary invm-btn-arcane" data-action="sendInvItem" data-id="${charId}" data-indices="${b64}">📤 Envoyer</button>
+        <button class="invm-btn invm-btn-outline" data-action="close-modal">Annuler</button>
       </footer>
     </div>
   `);
@@ -787,8 +788,8 @@ export async function openSendGoldModal(charId) {
         placeholder="Montant en or" style="max-width:140px">
     </div>
     <div style="display:flex;gap:.5rem">
-      <button class="btn btn-gold" style="flex:1" onclick="sendGold('${charId}')">💰 Envoyer</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-gold" style="flex:1" data-action="sendGold" data-id="${charId}">💰 Envoyer</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
   `);
 }
@@ -900,7 +901,7 @@ export async function addInvItem() {
     const rc = rc_arr[r] || 'var(--border)';
     const sel = window._lootSelId === item.id;
     const desc = item.description || item.effet || '';
-    return `<button onclick="window._lootSelect('${item.id}')" id="loot-card-${item.id}"
+    return `<button data-action="_lootSelect" data-id="${item.id}" id="loot-card-${item.id}"
       style="display:flex;flex-direction:column;gap:2px;text-align:left;padding:.5rem .65rem;
         border-radius:8px;border:1px solid ${sel ? rc : 'var(--border)'};
         background:${sel ? `${rc}20` : 'var(--bg-elevated)'};cursor:pointer;transition:all .12s;width:100%">
@@ -932,11 +933,11 @@ export async function addInvItem() {
      color:${active ? 'var(--gold)' : 'var(--text-muted)'}`;
 
   const recentPill = hasRecents
-    ? `<button id="loot-pill-__recent__" onclick="window._lootSetCat('__recent__')" style="${pillStyle(false)}">⏱️ Récents</button>`
+    ? `<button id="loot-pill-__recent__" data-action="_lootSetCat" data-cat="__recent__" style="${pillStyle(false)}">⏱️ Récents</button>`
     : '';
   const catPills = shopCats
     .filter(cat => shopItems.some(i => i.categorieId === cat.id))
-    .map(cat => `<button id="loot-pill-${cat.id}" onclick="window._lootSetCat('${cat.id}')" style="${pillStyle(false)}">${_esc(cat.nom)}</button>`)
+    .map(cat => `<button id="loot-pill-${cat.id}" data-action="_lootSetCat" data-cat="${cat.id}" style="${pillStyle(false)}">${_esc(cat.nom)}</button>`)
     .join('');
 
   openModal('🎁 Butin — Ajouter un objet', `
@@ -955,18 +956,18 @@ export async function addInvItem() {
         <div id="loot-sel-nom" style="font-weight:700;font-size:.86rem;color:var(--text);
           min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
         <div style="display:flex;align-items:center;gap:.3rem;flex-shrink:0">
-          <button onclick="const i=document.getElementById('loot-qte');i.value=Math.max(1,parseInt(i.value||1)-1)"
+          <button data-action="_lootQte" data-delta="-1"
             style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">−</button>
           <input type="number" id="loot-qte" value="1" min="1"
             style="width:48px;text-align:center;font-size:.9rem;font-weight:700;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 0">
-          <button onclick="const i=document.getElementById('loot-qte');i.value=parseInt(i.value||1)+1"
+          <button data-action="_lootQte" data-delta="1"
             style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer;font-size:1.1rem;color:var(--text);line-height:1">+</button>
         </div>
       </div>
     </div>
     <div style="display:flex;gap:.4rem">
-      <button class="btn btn-gold" style="flex:1" onclick="saveInvItemFromShop()">✓ Ajouter</button>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+      <button class="btn btn-gold" style="flex:1" data-action="saveInvItemFromShop">✓ Ajouter</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
     </div>
   `);
   setTimeout(() => document.getElementById('loot-search')?.focus(), 60);
@@ -1066,7 +1067,7 @@ export function editInvItem(idx) {
       <div class="form-group"><label>Quantité</label><input class="input-field" id="inv-qte" value="${item.qte||1}"></div>
     </div>
     <div class="form-group"><label>Description</label><textarea class="input-field" id="inv-desc" rows="3">${item.description||''}</textarea></div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" onclick="saveInvItem(${idx})">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveInvItem" data-idx="${idx}">Enregistrer</button>
   `);
 }
 
@@ -1096,3 +1097,12 @@ export async function saveInvItem(idx) {
     window.renderCharSheet(c,'inventaire');
   } catch (e) { notifySaveError(e); }
 }
+
+registerActions({
+  sendGold:            (btn) => sendGold(btn.dataset.id),
+  saveInvItemFromShop: ()    => saveInvItemFromShop(),
+  saveInvItem:         (btn) => saveInvItem(Number(btn.dataset.idx)),
+  _lootSelect:         (btn) => window._lootSelect(btn.dataset.id),
+  _lootSetCat:         (btn) => window._lootSetCat(btn.dataset.cat),
+  _lootQte:            (btn) => { const i = document.getElementById('loot-qte'); if (i) i.value = Math.max(1, parseInt(i.value || 1) + Number(btn.dataset.delta)); },
+});

@@ -3,6 +3,7 @@
 // ══════════════════════════════════════════════
 
 import { STATE, setAdventures, setAdventure } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import { openModal, closeModal }              from '../shared/modal.js';
 import { showNotif }                          from '../shared/notifications.js';
 import { _esc }                               from '../shared/html.js';
@@ -29,7 +30,7 @@ async function renderAventuresPage() {
 
   let html = `<div class="page-header">
     <h1 class="page-title">🗺️ Aventures</h1>
-    ${STATE.isSuperAdmin ? `<button class="btn btn-gold" onclick="openCreateAdventureModal()">+ Nouvelle aventure</button>` : ''}
+    ${STATE.isSuperAdmin ? `<button class="btn btn-gold" data-action="openCreateAdventureModal">+ Nouvelle aventure</button>` : ''}
   </div>`;
 
   if (adventures.length === 0) {
@@ -61,8 +62,8 @@ function _renderAdventureCard(adv, isAdvAdmin, isCurrent) {
       <div class="adv-manage-actions">
         ${isCurrent
           ? `<span class="adv-badge-active">Actuelle</span>`
-          : `<button class="btn btn-outline btn-sm" onclick="window.pickAdventure('${adv.id}')">Rejoindre</button>`}
-        ${isAdvAdmin ? `<button class="btn btn-outline btn-sm" onclick="openManageAdventureModal('${adv.id}')">⚙️ Gérer</button>` : ''}
+          : `<button class="btn btn-outline btn-sm" data-action="pickAdventure" data-id="${adv.id}">Rejoindre</button>`}
+        ${isAdvAdmin ? `<button class="btn btn-outline btn-sm" data-action="openManageAdventureModal" data-id="${adv.id}">⚙️ Gérer</button>` : ''}
       </div>
     </div>
     ${adv.description ? `<p class="adv-manage-desc">${_esc(adv.description)}</p>` : ''}
@@ -84,7 +85,7 @@ export function openCreateAdventureModal() {
         <label>Emoji</label>
         <div style="display:flex;gap:.4rem;flex-wrap:wrap">
           ${EMOJIS.map(e => `<button type="button" class="adv-emoji-btn"
-            onclick="this.closest('.modal').querySelectorAll('.adv-emoji-btn').forEach(b=>b.classList.remove('selected'));this.classList.add('selected');document.getElementById('adv-emoji').value='${e}'"
+            data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-emoji"
             style="font-size:1.4rem;background:var(--bg-elevated);border:1px solid var(--border);
             border-radius:8px;width:2.4rem;height:2.4rem;cursor:pointer">${e}</button>`).join('')}
           <input type="hidden" id="adv-emoji" value="⚔️">
@@ -97,8 +98,8 @@ export function openCreateAdventureModal() {
           background:var(--bg-elevated);color:var(--text);font-size:.88rem;resize:vertical"></textarea>
       </div>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.4rem">
-        <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
-        <button class="btn btn-gold btn-sm" onclick="window._doCreateAdventure()">Créer</button>
+        <button class="btn btn-outline btn-sm" data-action="_advClose">Annuler</button>
+        <button class="btn btn-gold btn-sm" data-action="_doCreateAdventure">Créer</button>
       </div>
     </div>
   `);
@@ -142,8 +143,8 @@ export async function openManageAdventureModal(adventureId) {
       <span class="adv-member-pseudo">${_esc(u.pseudo || u.email)}</span>
       ${isAdmin ? '<span class="adv-role adv-role--mj">MJ</span>' : '<span class="adv-role adv-role--joueur">Joueur</span>'}
       <div class="adv-member-actions">
-        ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" onclick="window._advPromote('${adventureId}','${u.uid}')">⬆️</button>` : ''}
-        ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" onclick="window._advRemove('${adventureId}','${u.uid}')">✕</button>` : ''}
+        ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${u.uid}">⬆️</button>` : ''}
+        ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${u.uid}">✕</button>` : ''}
       </div>
     </div>`;
   };
@@ -165,7 +166,7 @@ export async function openManageAdventureModal(adventureId) {
         <div style="display:flex;flex-direction:column;gap:.6rem">
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             ${_ADV_EMOJIS.map(e => `<button type="button" class="adv-emoji-btn ${e === currentEmoji ? 'selected' : ''}"
-              onclick="this.closest('.modal-body,div').querySelectorAll('.adv-emoji-btn').forEach(b=>b.classList.remove('selected'));this.classList.add('selected');document.getElementById('adv-edit-emoji').value='${e}'"
+              data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-edit-emoji"
               style="font-size:1.4rem;background:var(--bg-elevated);border:2px solid ${e === currentEmoji ? 'var(--gold)' : 'var(--border)'};
               border-radius:8px;width:2.4rem;height:2.4rem;cursor:pointer">${e}</button>`).join('')}
             <input type="hidden" id="adv-edit-emoji" value="${currentEmoji}">
@@ -178,7 +179,7 @@ export async function openManageAdventureModal(adventureId) {
             background:var(--bg-elevated);color:var(--text);font-size:.85rem;resize:vertical"
             placeholder="Description (optionnel)">${_esc(adv.description || '')}</textarea>
           <div style="display:flex;justify-content:flex-end">
-            <button class="btn btn-gold btn-sm" onclick="window._advSaveMeta('${adventureId}')">💾 Enregistrer</button>
+            <button class="btn btn-gold btn-sm" data-action="_advSaveMeta" data-id="${adventureId}">💾 Enregistrer</button>
           </div>
         </div>
       </div>
@@ -200,7 +201,7 @@ export async function openManageAdventureModal(adventureId) {
             border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.85rem">
             ${nonMembers.map(u => `<option value="${u.uid}">${_esc(u.pseudo || u.email)}</option>`).join('')}
           </select>
-          <button class="btn btn-gold btn-sm" onclick="window._advAdd('${adventureId}')">Ajouter</button>
+          <button class="btn btn-gold btn-sm" data-action="_advAdd" data-id="${adventureId}">Ajouter</button>
         </div>
       </div>` : ''}
 
@@ -214,19 +215,19 @@ export async function openManageAdventureModal(adventureId) {
           Cette action est <strong>irréversible</strong>.
           <div style="display:flex;gap:.4rem;margin-top:.6rem">
             <button class="btn btn-sm" style="background:#ff6b6b;color:#fff;border:none"
-              onclick="window._advDelete('${adventureId}')">Oui, supprimer définitivement</button>
+              data-action="_advDelete" data-id="${adventureId}">Oui, supprimer définitivement</button>
             <button class="btn btn-outline btn-sm"
-              onclick="document.getElementById('adv-delete-confirm').style.display='none'">Annuler</button>
+              data-action="_advHideDeleteConfirm">Annuler</button>
           </div>
         </div>
         <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:#ff6b6b44"
-          onclick="document.getElementById('adv-delete-confirm').style.display='block';this.style.display='none'">
+          data-action="_advShowDeleteConfirm">
           🗑️ Supprimer l'aventure
         </button>
       </div>` : ''}
 
       <div style="display:flex;justify-content:flex-end">
-        <button class="btn btn-outline btn-sm" onclick="closeModal()">Fermer</button>
+        <button class="btn btn-outline btn-sm" data-action="_advClose">Fermer</button>
       </div>
     </div>
   `);
@@ -307,3 +308,27 @@ PAGES['aventures'] = renderAventuresPage;
 // Exposer la modal de création pour le lazy-load
 window._openCreateAdventureModalImpl = openCreateAdventureModal;
 Object.assign(window, { openManageAdventureModal });
+
+registerActions({
+  openCreateAdventureModal: () => openCreateAdventureModal(),
+  pickAdventure: (btn) => window.pickAdventure?.(btn.dataset.id),
+  openManageAdventureModal: (btn) => openManageAdventureModal(btn.dataset.id),
+  _advPickEmoji: (btn) => {
+    btn.closest('[class]')?.querySelectorAll('.adv-emoji-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    const target = document.getElementById(btn.dataset.targetId);
+    if (target) target.value = btn.dataset.emoji;
+  },
+  _advClose: () => window.closeModal?.(),
+  _doCreateAdventure: () => window._doCreateAdventure?.(),
+  _advSaveMeta: (btn) => window._advSaveMeta?.(btn.dataset.id),
+  _advAdd: (btn) => window._advAdd?.(btn.dataset.id),
+  _advDelete: (btn) => window._advDelete?.(btn.dataset.id),
+  _advHideDeleteConfirm: () => { document.getElementById('adv-delete-confirm').style.display = 'none'; },
+  _advShowDeleteConfirm: (btn) => {
+    document.getElementById('adv-delete-confirm').style.display = 'block';
+    btn.style.display = 'none';
+  },
+  _advPromote: (btn) => window._advPromote?.(btn.dataset.advId, btn.dataset.uid),
+  _advRemove: (btn) => window._advRemove?.(btn.dataset.advId, btn.dataset.uid),
+});

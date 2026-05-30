@@ -14,6 +14,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import { getDocData, saveDoc, updateInCol, loadCollection, getCurrentAdventureId } from '../data/firestore.js';
 import { db, doc, setDoc } from '../config/firebase.js';
 import { watchDoc } from '../shared/realtime.js';
@@ -454,7 +455,7 @@ window._bastionEditIdentite = async () => {
       <input class="input-field" id="bas-lieu" value="${_esc(b.lieu||'')}" placeholder="ex: Faubourg sud de Belport"></div>
     <div class="form-group"><label>Description</label>
       <textarea class="input-field" id="bas-desc" rows="4" placeholder="Histoire, ambiance, particularités…">${_esc(b.description||'')}</textarea></div>
-    <button class="btn btn-gold" style="width:100%" onclick="window._bastionSaveIdentite()">Enregistrer</button>
+    <button class="btn btn-gold" style="width:100%" data-action="_bastionSaveIdentite">Enregistrer</button>
 
     <div class="bs-danger-zone">
       <div class="bs-danger-zone-title">⚠ Zone dangereuse</div>
@@ -462,7 +463,7 @@ window._bastionEditIdentite = async () => {
         Remet le Bastion à zéro : nom par défaut, aucun or, aucune salle, aucun employé, coffre vide, chronique effacée, quêtes et overrides supprimés.<br>
         <strong>À utiliser pour repartir d'une feuille blanche.</strong>
       </p>
-      <button class="btn btn-outline btn-sm bs-danger-btn" onclick="window._bastionResetAll()">🗑 Réinitialiser tout le Bastion</button>
+      <button class="btn btn-outline btn-sm bs-danger-btn" data-action="_bastionResetAll">🗑 Réinitialiser tout le Bastion</button>
     </div>
   `);
 };
@@ -527,10 +528,10 @@ window._bastionOpenDeposit = () => {
       <label>Quantité <span id="bas-dep-info" style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:.4rem"></span></label>
       <div style="display:flex;gap:6px;align-items:center">
         <input type="number" class="input-field" id="bas-dep-qte" min="1" value="1" style="flex:1">
-        <button type="button" class="btn btn-outline btn-sm" onclick="window._bastionFillDepositMax()">Tout</button>
+        <button type="button" class="btn btn-outline btn-sm" data-action="_bastionFillDepositMax">Tout</button>
       </div>
     </div>
-    <button class="btn btn-gold" style="width:100%" onclick="window._bastionDoDeposit()">📥 Déposer</button>
+    <button class="btn btn-gold" style="width:100%" data-action="_bastionDoDeposit">📥 Déposer</button>
   `);
   window._bastionRefreshDepositItems();
 };
@@ -666,10 +667,10 @@ window._bastionOpenWithdrawItem = (coffreId) => {
       <label>Quantité <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">(stack : ${item.quantite})</span></label>
       <div style="display:flex;gap:6px;align-items:center">
         <input type="number" class="input-field" id="bas-wd-qte" min="1" max="${item.quantite}" value="${item.quantite}" style="flex:1">
-        <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('bas-wd-qte').value='${item.quantite}'">Tout</button>
+        <button type="button" class="btn btn-outline btn-sm" data-action="_bastionSetMax" data-target="bas-wd-qte" data-val="${item.quantite}">Tout</button>
       </div>
     </div>
-    <button class="btn btn-gold" style="width:100%" onclick="window._bastionDoWithdraw('${coffreId}')">📤 Retirer</button>
+    <button class="btn btn-gold" style="width:100%" data-action="_bastionDoWithdraw" data-id="${coffreId}">📤 Retirer</button>
   `);
 };
 
@@ -722,7 +723,7 @@ window._bastionOpenCatalogEditor = () => {
     </p>
     <div class="bs-edit-list">
       ${cat.map(def => `
-        <div class="bs-edit-row" onclick="window._bastionEditRoom('${def.slug}')">
+        <div class="bs-edit-row" data-action="_bastionEditRoom" data-slug="${def.slug}">
           <span class="bs-edit-emoji">${def.emoji}</span>
           <div class="bs-edit-info">
             <div class="bs-edit-name">${_esc(def.nom)}${def.isCustom ? ' <span class="bs-edit-tag">custom</span>' : ''}</div>
@@ -732,7 +733,7 @@ window._bastionOpenCatalogEditor = () => {
         </div>`).join('')}
     </div>
     <div class="bs-edit-actions" style="margin-top:14px;justify-content:center">
-      <button class="btn btn-gold" onclick="window._bastionAddCustomRoom()">＋ Nouvelle salle custom</button>
+      <button class="btn btn-gold" data-action="_bastionAddCustomRoom">＋ Nouvelle salle custom</button>
     </div>
   `);
 };
@@ -830,9 +831,9 @@ window._bastionEditRoom = async (slug) => {
       ${[0, 1, 2].map(niveauForm).join('')}
       <div class="bs-edit-actions">
         ${def.isCustom
-          ? `<button class="btn btn-outline btn-sm" style="color:var(--crimson);border-color:rgba(255,90,126,0.40)" onclick="window._bastionDeleteCustomRoom('${slug}')">🗑 Supprimer</button>`
-          : `<button class="btn btn-outline btn-sm" onclick="window._bastionResetRoom('${slug}')">↻ Restaurer défaut</button>`}
-        <button class="btn btn-gold" onclick="window._bastionSaveRoom('${slug}')">Enregistrer</button>
+          ? `<button class="btn btn-outline btn-sm" style="color:var(--crimson);border-color:rgba(255,90,126,0.40)" data-action="_bastionDeleteCustomRoom" data-slug="${slug}">🗑 Supprimer</button>`
+          : `<button class="btn btn-outline btn-sm" data-action="_bastionResetRoom" data-slug="${slug}">↻ Restaurer défaut</button>`}
+        <button class="btn btn-gold" data-action="_bastionSaveRoom" data-slug="${slug}">Enregistrer</button>
       </div>
     </div>
   `);
@@ -864,7 +865,7 @@ function _renderItemPicker(i) {
       <span class="bs-item-nom">${_esc(it.nom || '?')}${cat ? ` <span class="bs-item-cat">${_esc(cat.nom)}</span>` : ''}${it.shopItemId ? '' : ' <span class="bs-item-free">libre</span>'}</span>
       <input type="number" class="input-field bs-item-qty" value="${it.q || 1}" min="1"
         onchange="window._bastionEditItemQty(${i}, ${idx}, this.value)">
-      <button class="bs-item-rm" onclick="window._bastionRemoveItem(${i}, ${idx})" title="Retirer">✕</button>
+      <button class="bs-item-rm" data-action="_bastionRemoveItem" data-i="${i}" data-idx="${idx}" title="Retirer">✕</button>
     </div>`;
   }).join('') || `<div class="bs-items-empty">Aucun item produit à ce niveau.</div>`;
 
@@ -914,7 +915,7 @@ function _renderItemPicker(i) {
           : `<option value="">— Aucun résultat —</option>`}
       </select>
       <input type="number" class="input-field" id="ed-items-q-${i}" value="1" min="1" style="max-width:64px">
-      <button type="button" class="btn btn-outline btn-sm" onclick="window._bastionAddShopItem(${i})">+ Ajouter</button>
+      <button type="button" class="btn btn-outline btn-sm" data-action="_bastionAddShopItem" data-i="${i}">+ Ajouter</button>
     </div>
   `;
 }
@@ -1089,7 +1090,7 @@ window._bastionOpenPersonnel = () => {
               ${e.bonus ? `<div class="bs-emp-role" style="font-style:italic">🎁 ${_esc(e.bonus)}</div>` : ''}
               <div class="bs-emp-salary">💰 ${e.salaire || 0} or/période · ⏱ ${since} période</div>
             </div>
-            ${STATE.isAdmin ? `<button class="bs-emp-fire" onclick="window._bastionFireEmployee('${e.id}')" title="Renvoyer">✕</button>` : ''}
+            ${STATE.isAdmin ? `<button class="bs-emp-fire" data-action="_bastionFireEmployee" data-id="${e.id}" title="Renvoyer">✕</button>` : ''}
           </div>`;
         }).join('')
       : '';
@@ -1124,7 +1125,7 @@ window._bastionOpenPersonnel = () => {
             <div class="bs-emp-role">${_esc(e.role || '')}</div>
             <div class="bs-emp-salary">💰 ${e.salaire || 0} or/période</div>
           </div>
-          ${STATE.isAdmin ? `<button class="bs-emp-fire" onclick="window._bastionFireEmployee('${e.id}')" title="Renvoyer">✕</button>` : ''}
+          ${STATE.isAdmin ? `<button class="bs-emp-fire" data-action="_bastionFireEmployee" data-id="${e.id}" title="Renvoyer">✕</button>` : ''}
         </div>`).join('')}</div>
     </div>` : '';
 
@@ -1197,7 +1198,7 @@ window._bastionOpenHire = async (roomSlug) => {
     const portrait = n.imageUrl
       ? `<img src="${_esc(n.imageUrl)}" class="bs-hire-card-img">`
       : `<span class="bs-hire-card-init">${(n.nom||'?')[0].toUpperCase()}</span>`;
-    return `<div class="bs-hire-card" data-npc-id="${n.id}" onclick="window._bastionSelectHireCard('${n.id}')">
+    return `<div class="bs-hire-card" data-npc-id="${n.id}" data-action="_bastionSelectHireCard" data-id="${n.id}">
       <div class="bs-hire-card-av">${portrait}</div>
       <div class="bs-hire-card-body">
         <div class="bs-hire-card-name">${_esc(n.nom || '?')}</div>
@@ -1216,7 +1217,7 @@ window._bastionOpenHire = async (roomSlug) => {
     <input type="hidden" id="bs-hire-roomSlug" value="${roomSlug}">
     <input type="hidden" id="bs-hire-selected-npc" value="">
     <button class="btn btn-gold" style="width:100%;margin-top:.6rem" id="bs-hire-submit"
-      onclick="window._bastionDoHire()" disabled>Sélectionne un allié</button>
+      data-action="_bastionDoHire" disabled>Sélectionne un allié</button>
   `);
 };
 
@@ -1546,7 +1547,7 @@ window._bastionOpenTransfer = (direction) => {
       <label>Montant <span id="bas-tx-info" style="font-size:.74rem;color:var(--text-dim);font-weight:400;margin-left:.5rem"></span></label>
       <input type="number" class="input-field" id="bas-tx-montant" min="1" value="50">
     </div>
-    <button class="btn ${cls}" style="width:100%" onclick="window._bastionDoTransfer('${direction}')">${cta}</button>
+    <button class="btn ${cls}" style="width:100%" data-action="_bastionDoTransfer" data-dir="${direction}">${cta}</button>
   `);
   // Init de l'info "Or disponible"
   window._bastionRefreshTransfer(direction);
@@ -1620,12 +1621,12 @@ function _renderHeader(b) {
         ${b.description ? `<p class="bs-hero-desc">${_esc(b.description)}</p>` : ''}
       </div>
       <div class="bs-hero-actions">
-        <button class="btn btn-outline btn-sm" onclick="window._bastionOpenPersonnel()">👥 Personnel${b.personnel?.length ? ` <span style="opacity:.7">(${b.personnel.length})</span>` : ''}</button>
-        ${isMj ? `<button class="btn btn-outline btn-sm" onclick="window._bastionEditIdentite()">✏️ Identité</button>` : ''}
-        ${isMj ? `<button class="btn btn-outline btn-sm" onclick="window._bastionOpenCatalogEditor()">🏛 Éditer salles</button>` : ''}
-        ${isMj ? `<button class="btn btn-outline btn-sm" onclick="window._bastionOpenPreview()">🔮 Prévisualiser</button>` : ''}
-        ${isMj ? `<button class="btn btn-outline btn-sm" onclick="window._bastionExportJSON()" title="Backup JSON du bastion">💾</button>` : ''}
-        ${isMj ? `<button class="btn btn-gold" onclick="window._bastionAdvanceWeek()">▶ Passer la période</button>` : ''}
+        <button class="btn btn-outline btn-sm" data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` <span style="opacity:.7">(${b.personnel.length})</span>` : ''}</button>
+        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionEditIdentite">✏️ Identité</button>` : ''}
+        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenCatalogEditor">🏛 Éditer salles</button>` : ''}
+        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenPreview">🔮 Prévisualiser</button>` : ''}
+        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionExportJSON" title="Backup JSON du bastion">💾</button>` : ''}
+        ${isMj ? `<button class="btn btn-gold" data-action="_bastionAdvanceWeek">▶ Passer la période</button>` : ''}
       </div>
     </div>`;
 }
@@ -1643,8 +1644,8 @@ function _renderGauges(b) {
           <div class="bs-gauge-val">${b.or || 0} <span class="bs-gauge-unit">or</span></div>
         </div>
         <div class="bs-gauge-actions">
-          ${hasEligibleChar ? `<button class="bs-gauge-btn" onclick="window._bastionOpenTransfer('deposit')">＋ Verser</button>` : ''}
-          ${hasEligibleChar && bastionHasOr ? `<button class="bs-gauge-btn bs-gauge-btn--alt" onclick="window._bastionOpenTransfer('withdraw')">− Retirer</button>` : ''}
+          ${hasEligibleChar ? `<button class="bs-gauge-btn" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>` : ''}
+          ${hasEligibleChar && bastionHasOr ? `<button class="bs-gauge-btn bs-gauge-btn--alt" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -1700,11 +1701,11 @@ function _renderRoomCard(def, b) {
           <div class="bs-emp-mini-name">${_esc(e.nom || '?')}</div>
           ${e.bonus ? `<div class="bs-emp-mini-bonus">🎁 ${_esc(e.bonus)}</div>` : `<div class="bs-emp-mini-role">${_esc(e.role || '')}</div>`}
         </div>
-        ${isMj ? `<button class="bs-emp-mini-rm" onclick="window._bastionFireEmployee('${e.id}')" title="Renvoyer">✕</button>` : ''}
+        ${isMj ? `<button class="bs-emp-mini-rm" data-action="_bastionFireEmployee" data-id="${e.id}" title="Renvoyer">✕</button>` : ''}
       </div>`;
     }).join('');
     const free = slots - assigned.length;
-    const addBtn = (isMj && free > 0) ? `<button class="bs-emp-add" onclick="window._bastionOpenHire('${def.slug}')">＋ Embaucher (${free} slot${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''})</button>` : '';
+    const addBtn = (isMj && free > 0) ? `<button class="bs-emp-add" data-action="_bastionOpenHire" data-slug="${def.slug}">＋ Embaucher (${free} slot${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''})</button>` : '';
     personnelHtml = `<div class="bs-room-personnel">
       <div class="bs-room-personnel-hd">👥 Personnel ${assigned.length}/${slots}</div>
       ${cards}
@@ -1732,7 +1733,7 @@ function _renderRoomCard(def, b) {
                   : `Construire niveau ${niveauLabel(targetNiv)} — ${nextDef.semaines} période, ${nextDef.cout} or`;
     actionHtml = `
       <button class="bs-room-action${disabled ? ' bs-room-action--disabled' : ''}"
-        ${disabled ? '' : `onclick="window._bastionBuild('${def.slug}')"`}
+        ${disabled ? '' : `data-action="_bastionBuild" data-slug="${def.slug}"`}
         title="${_esc(tooltip)}">
         ${curNiv === 0 ? '＋ Construire' : `↑ Améliorer Niv. ${niveauLabel(targetNiv)}`}
         <span class="bs-room-cost">${nextDef.cout} or · ${nextDef.semaines} période</span>
@@ -1755,8 +1756,8 @@ function _renderRoomCard(def, b) {
           <div class="bs-room-niv">${nivDisplay}${building ? ` · ${_roomTargetLabel(def.slug, b, isUnlimited)}` : ''}</div>
         </div>
         <div class="bs-room-actions-top">
-          ${isMj && !isUnlimited ? `<button class="bs-room-edit" onclick="window._bastionEditRoom('${def.slug}')" title="Modifier cette salle">✏️</button>` : ''}
-          <button class="bs-room-info" onclick="window._bastionShowDetails('${def.slug}')" title="Voir les niveaux et bonus">ⓘ</button>
+          ${isMj && !isUnlimited ? `<button class="bs-room-edit" data-action="_bastionEditRoom" data-slug="${def.slug}" title="Modifier cette salle">✏️</button>` : ''}
+          <button class="bs-room-info" data-action="_bastionShowDetails" data-slug="${def.slug}" title="Voir les niveaux et bonus">ⓘ</button>
         </div>
       </div>
       <div class="bs-room-desc">${_esc(def.desc)}</div>
@@ -1776,7 +1777,7 @@ function _renderRooms(b) {
       <div class="bs-section-hd">
         <h2 class="bs-section-title">🏛 Salles &amp; activités</h2>
         ${isMj && anyBuilt ? `<button class="btn btn-outline btn-sm bs-reset-btn"
-          onclick="window._bastionResetRooms()" title="Réinitialiser toutes les salles construites">
+          data-action="_bastionResetRooms" title="Réinitialiser toutes les salles construites">
           🔄 Reset salles
         </button>` : ''}
       </div>
@@ -1860,7 +1861,7 @@ function _renderCoffre(b) {
   const header = `
     <div class="bs-section-hd">
       <h2 class="bs-section-title">📦 Coffre commun <span class="bs-section-count">${used}/${capacity}</span></h2>
-      ${hasEligibleChar ? `<button class="btn btn-outline btn-sm${isFull ? ' bs-btn-disabled' : ''}" ${isFull ? '' : 'onclick="window._bastionOpenDeposit()"'} title="${isFull ? 'Coffre plein — améliore l\'Entrepôt' : 'Déposer un objet'}">📥 Déposer</button>` : ''}
+      ${hasEligibleChar ? `<button class="btn btn-outline btn-sm${isFull ? ' bs-btn-disabled' : ''}" ${isFull ? '' : 'data-action="_bastionOpenDeposit"'} title="${isFull ? 'Coffre plein — améliore l\'Entrepôt' : 'Déposer un objet'}">📥 Déposer</button>` : ''}
     </div>
     <div class="bs-capacity">
       <div class="bs-capacity-bar"><div class="bs-capacity-fill" style="width:${pct}%;background:${pct >= 90 ? '#ff5a7e' : pct >= 70 ? '#f4c430' : '#22c38e'}"></div></div>
@@ -1893,7 +1894,7 @@ function _renderCoffre(b) {
       <div class="bs-coffre-pills">
         ${CATS.filter(([k]) => counts[k] > 0).map(([k, label]) => `
           <button class="bs-coffre-pill${_coffreFilter === k ? ' active' : ''}"
-            onclick="window._bastionSetCoffreFilter('${k}')">
+            data-action="_bastionSetCoffreFilter" data-filter="${k}">
             ${label} <span class="bs-coffre-pill-count">${counts[k]}</span>
           </button>`).join('')}
       </div>
@@ -1923,7 +1924,7 @@ function _renderCoffre(b) {
             <div class="bs-coffre-name">${_esc(item.nom)}${item.quantite > 1 ? ` <span class="bs-coffre-qte">×${item.quantite}</span>` : ''}</div>
             <div class="bs-coffre-meta">${_esc(item.source || '')} · période ${item.weekAdded || '?'}</div>
           </div>
-          ${hasEligibleChar ? `<button class="bs-coffre-withdraw" onclick="window._bastionOpenWithdrawItem('${item.id}')" title="Retirer">↩</button>` : ''}
+          ${hasEligibleChar ? `<button class="bs-coffre-withdraw" data-action="_bastionOpenWithdrawItem" data-id="${item.id}" title="Retirer">↩</button>` : ''}
         </div>`).join('')
     : `<div class="bs-coffre-empty">Aucun objet ne correspond aux filtres.</div>`;
 
@@ -1963,8 +1964,8 @@ window._bastionOpenQuestEditor = (questId) => {
       </select>
     </div>
     <div style="display:flex;gap:.5rem">
-      <button class="btn btn-gold" style="flex:1" onclick="window._bastionSaveQuest('${q?.id || ''}')">${q ? 'Enregistrer' : 'Créer'}</button>
-      ${q ? `<button class="btn btn-outline btn-sm" style="color:var(--crimson);border-color:rgba(255,90,126,0.40)" onclick="window._bastionDeleteQuest('${q.id}')">🗑 Supprimer</button>` : ''}
+      <button class="btn btn-gold" style="flex:1" data-action="_bastionSaveQuest" data-id="${q?.id || ''}">${q ? 'Enregistrer' : 'Créer'}</button>
+      ${q ? `<button class="btn btn-outline btn-sm" style="color:var(--crimson);border-color:rgba(255,90,126,0.40)" data-action="_bastionDeleteQuest" data-id="${q.id}">🗑 Supprimer</button>` : ''}
     </div>
   `);
 };
@@ -2026,7 +2027,7 @@ function _renderBastionQuests(b) {
     <section class="bs-section">
       <div class="bs-section-hd">
         <h2 class="bs-section-title">📋 Quêtes du Bastion <span class="bs-section-count">${visible.length}</span></h2>
-        ${isMj ? `<button class="btn btn-gold btn-sm" onclick="window._bastionOpenQuestEditor()">＋ Nouvelle</button>` : ''}
+        ${isMj ? `<button class="btn btn-gold btn-sm" data-action="_bastionOpenQuestEditor">＋ Nouvelle</button>` : ''}
       </div>
       ${visible.length ? `<div class="bs-quests-grid">
         ${sorted.map(q => {
@@ -2038,7 +2039,7 @@ function _renderBastionQuests(b) {
             </div>
             ${q.description ? `<div class="bs-quest-desc">${_esc(q.description)}</div>` : ''}
             ${q.recompense ? `<div class="bs-quest-recompense">🎁 ${_esc(q.recompense)}</div>` : ''}
-            ${isMj ? `<button class="bs-quest-edit" onclick="window._bastionOpenQuestEditor('${q.id}')">✏️ Modifier</button>` : ''}
+            ${isMj ? `<button class="bs-quest-edit" data-action="_bastionOpenQuestEditor" data-id="${q.id}">✏️ Modifier</button>` : ''}
           </div>`;
         }).join('')}
       </div>` : `<div class="bs-coffre-empty">Aucune quête pour l'instant. ${isMj ? 'Crée la première !' : 'Le MJ n\'a rien posté.'}</div>`}
@@ -2059,7 +2060,7 @@ function _renderHistorique(b) {
     <section class="bs-section">
       <div class="bs-section-hd">
         <h2 class="bs-section-title">📜 Chronique <span class="bs-section-count">${all.length}</span></h2>
-        ${all.length > COLLAPSED ? `<button class="btn btn-outline btn-sm" onclick="window._bastionToggleHisto()">
+        ${all.length > COLLAPSED ? `<button class="btn btn-outline btn-sm" data-action="_bastionToggleHisto">
           ${expanded ? '⤴ Replier' : `⤵ Tout afficher (+${hidden})`}
         </button>` : ''}
       </div>
@@ -2116,6 +2117,44 @@ async function renderBastionPage() {
 }
 
 PAGES.bastion = renderBastionPage;
+
+registerActions({
+  _bastionSaveIdentite:     () => window._bastionSaveIdentite?.(),
+  _bastionResetAll:         () => window._bastionResetAll?.(),
+  _bastionFillDepositMax:   () => window._bastionFillDepositMax?.(),
+  _bastionDoDeposit:        () => window._bastionDoDeposit?.(),
+  _bastionSetMax:      (btn) => { const el = document.getElementById(btn.dataset.target); if (el) el.value = btn.dataset.val; },
+  _bastionDoWithdraw:       (btn) => window._bastionDoWithdraw?.(btn.dataset.id),
+  _bastionEditRoom:         (btn) => window._bastionEditRoom?.(btn.dataset.slug),
+  _bastionAddCustomRoom:    () => window._bastionAddCustomRoom?.(),
+  _bastionDeleteCustomRoom: (btn) => window._bastionDeleteCustomRoom?.(btn.dataset.slug),
+  _bastionResetRoom:        (btn) => window._bastionResetRoom?.(btn.dataset.slug),
+  _bastionSaveRoom:         (btn) => window._bastionSaveRoom?.(btn.dataset.slug),
+  _bastionRemoveItem:       (btn) => window._bastionRemoveItem?.(Number(btn.dataset.i), Number(btn.dataset.idx)),
+  _bastionAddShopItem:      (btn) => window._bastionAddShopItem?.(Number(btn.dataset.i)),
+  _bastionFireEmployee:     (btn) => window._bastionFireEmployee?.(btn.dataset.id),
+  _bastionSelectHireCard:   (btn) => window._bastionSelectHireCard?.(btn.dataset.id),
+  _bastionDoHire:           () => window._bastionDoHire?.(),
+  _bastionDoTransfer:       (btn) => window._bastionDoTransfer?.(btn.dataset.dir),
+  _bastionOpenPersonnel:    () => window._bastionOpenPersonnel?.(),
+  _bastionEditIdentite:     () => window._bastionEditIdentite?.(),
+  _bastionOpenCatalogEditor:() => window._bastionOpenCatalogEditor?.(),
+  _bastionOpenPreview:      () => window._bastionOpenPreview?.(),
+  _bastionExportJSON:       () => window._bastionExportJSON?.(),
+  _bastionAdvanceWeek:      () => window._bastionAdvanceWeek?.(),
+  _bastionOpenTransfer:     (btn) => window._bastionOpenTransfer?.(btn.dataset.dir),
+  _bastionOpenHire:         (btn) => window._bastionOpenHire?.(btn.dataset.slug),
+  _bastionBuild:            (btn) => window._bastionBuild?.(btn.dataset.slug),
+  _bastionShowDetails:      (btn) => window._bastionShowDetails?.(btn.dataset.slug),
+  _bastionResetRooms:       () => window._bastionResetRooms?.(),
+  _bastionOpenDeposit:      () => window._bastionOpenDeposit?.(),
+  _bastionSetCoffreFilter:  (btn) => window._bastionSetCoffreFilter?.(btn.dataset.filter),
+  _bastionOpenWithdrawItem: (btn) => window._bastionOpenWithdrawItem?.(btn.dataset.id),
+  _bastionSaveQuest:        (btn) => window._bastionSaveQuest?.(btn.dataset.id || ''),
+  _bastionDeleteQuest:      (btn) => window._bastionDeleteQuest?.(btn.dataset.id),
+  _bastionOpenQuestEditor:  (btn) => window._bastionOpenQuestEditor?.(btn.dataset.id || undefined),
+  _bastionToggleHisto:      () => window._bastionToggleHisto?.(),
+});
 
 // ── Exports legacy (pour ne pas casser pages.js ailleurs) ──────────────────
 export const BASTION_EVENTS = [];

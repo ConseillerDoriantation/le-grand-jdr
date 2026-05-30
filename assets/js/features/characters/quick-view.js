@@ -3,6 +3,7 @@
 // Accessible depuis le dashboard, VTT, etc. — sans naviguer hors page.
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
+import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { _esc } from '../../shared/html.js';
 import {
@@ -188,8 +189,8 @@ export function quickViewChar(id) {
       </div>
 
       <div class="qv-actions">
-        <button class="btn btn-outline btn-sm" onclick="window.closeModalDirect?.() ?? window.closeModal?.()">Fermer</button>
-        ${isOwn ? `<button class="btn btn-gold" onclick="window._quickViewGoFull('${c.id}')">Ouvrir la fiche complète →</button>` : ''}
+        <button class="btn btn-outline btn-sm" data-action="_qvClose">Fermer</button>
+        ${isOwn ? `<button class="btn btn-gold" data-action="_quickViewGoFull" data-id="${c.id}">Ouvrir la fiche complète →</button>` : ''}
       </div>
     </div>
   `);
@@ -202,5 +203,10 @@ window._quickViewGoFull = (id) => {
   if (typeof window._goToChar === 'function') window._goToChar(id);
   else if (typeof window.navigate === 'function') { window._targetCharId = id; window.navigate('characters'); }
 };
+
+registerActions({
+  _qvClose:          () => { (window.closeModalDirect ?? window.closeModal)?.(); },
+  _quickViewGoFull: (btn) => window._quickViewGoFull?.(btn.dataset.id),
+});
 
 export default quickViewChar;

@@ -8,6 +8,7 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveD
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
+import { registerActions } from '../core/actions.js';
 import { _esc, _nl2br } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES from './pages.js';
@@ -104,17 +105,17 @@ function _renderGroupPills(groups) {
       padding:.45rem .55rem;border-radius:10px;vertical-align:top;
       border:1px solid var(--border-strong);background:var(--bg-elevated);min-width:160px">
       <div style="display:flex;align-items:center;gap:.35rem">
-        <button type="button" onclick="window._stApplyGroup(${JSON.stringify(g.membres)})"
+        <button type="button" data-action="_stApplyGroup" data-members="${_esc(JSON.stringify(g.membres))}"
           title="Appliquer ce groupe aux participants"
           style="font-size:.75rem;color:var(--gold);font-family:'Cinzel',serif;
             background:none;border:none;cursor:pointer;padding:0;line-height:1.2;flex:1;text-align:left">
           ${g.nom}</button>
-        <span onclick="window._stEditGroup('${g.id}')"
+        <span data-action="_stEditGroup" data-id="${g.id}"
           title="Modifier ce groupe"
           style="display:flex;align-items:center;justify-content:center;
             width:15px;height:15px;border-radius:50%;background:rgba(79,140,255,.15);
             color:#4f8cff;font-size:.68rem;cursor:pointer;flex-shrink:0">✎</span>
-        <span onclick="window._stDeleteGroup('${g.id}')"
+        <span data-action="_stDeleteGroup" data-id="${g.id}"
           style="display:flex;align-items:center;justify-content:center;
             width:15px;height:15px;border-radius:50%;background:rgba(255,107,107,.15);
             color:#ff6b6b;font-size:.72rem;font-weight:700;cursor:pointer;flex-shrink:0">×</span>
@@ -157,7 +158,7 @@ function _refreshStGroupsRow(groups) {
   const row = document.getElementById('st-groups-row');
   if (row) {
     row.innerHTML = _renderGroupPills(groups) + `
-      <button type="button" onclick="window._stSaveGroupDialog()"
+      <button type="button" data-action="_stSaveGroupDialog"
         style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
           background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;
           align-self:flex-start;margin-top:.1rem;transition:all .15s"
@@ -302,8 +303,8 @@ function _renderGroupCards(groups) {
       <div class="st-group-card-head">
         <div class="st-group-card-title">${_esc(g.nom)}</div>
         <div class="st-group-card-actions">
-          <button type="button" class="st-icon-btn" title="Modifier" onclick="window._stEditGroup('${g.id}')">✎</button>
-          <button type="button" class="st-icon-btn st-icon-btn--danger" title="Supprimer" onclick="window._stDeleteGroup('${g.id}')">🗑️</button>
+          <button type="button" class="st-icon-btn" title="Modifier" data-action="_stEditGroup" data-id="${g.id}">✎</button>
+          <button type="button" class="st-icon-btn st-icon-btn--danger" title="Supprimer" data-action="_stDeleteGroup" data-id="${g.id}">🗑️</button>
         </div>
       </div>
       <div class="st-group-card-members">
@@ -451,7 +452,7 @@ async function renderStory() {
       </div>
 
       ${nextMission ? `
-      <div class="cockpit-next" onclick="openStoryDetail('${nextMission.id}')">
+      <div class="cockpit-next" data-action="openStoryDetail" data-id="${nextMission.id}">
         <div class="cockpit-next-icon">⇒</div>
         <div>
           <div class="cockpit-next-lbl">Prochaine étape</div>
@@ -470,13 +471,13 @@ async function renderStory() {
           // data-acte + délégation : robuste aux apostrophes / guillemets dans le nom
           return `<button class="act ${active ? 'active' : ''}"
             data-acte="${_esc(acte)}"
-            onclick="window._stSwitchActe(this.dataset.acte)">
+            data-action="_stSwitchActe">
             ${_esc(acte)}<span class="act-count">${n}</span>
           </button>`;
         }).join('')}
-        ${STATE.isAdmin ? `<button class="act-new" onclick="openNewActeModal()">+ Nouvel acte</button>` : ''}
+        ${STATE.isAdmin ? `<button class="act-new" data-action="openNewActeModal">+ Nouvel acte</button>` : ''}
       </div>
-      ${STATE.isAdmin ? `<button class="btn-add" onclick="openStoryModal()">+ Nouvelle mission</button>` : ''}
+      ${STATE.isAdmin ? `<button class="btn-add" data-action="openStoryModal">+ Nouvelle mission</button>` : ''}
     </div>
 
     <!-- ── CONTROLS (recherche + statut + view toggle) ─────── -->
@@ -485,17 +486,17 @@ async function renderStory() {
         <span style="color:var(--text-dim);font-size:.85rem">🔍</span>
         <input type="text" id="st-search" placeholder="Rechercher un titre, un axe, un lieu… (sans accents OK)"
           value="${_esc(prefs.search)}" oninput="window._stOnSearch(this)">
-        ${prefs.search ? `<button onclick="window._stSetFilter('search','')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:.75rem">✕</button>` : ''}
+        ${prefs.search ? `<button data-action="_stSetFilter" data-key="search" data-val="" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:.75rem">✕</button>` : ''}
       </div>
       <select class="statut-select" onchange="window._stSetFilter('statut', this.value)">
         <option value="">Tous les statuts</option>
         ${Object.keys(STATUT_CFG).map(s => `<option value="${s}" ${prefs.statut===s?'selected':''}>${STATUT_CFG[s].icon} ${s}</option>`).join('')}
       </select>
       <div class="view-toggle" role="tablist">
-        <button class="view-tab ${prefs.view==='carte'?'active':''}" onclick="window._stSetView('carte')">🗺️ Carte</button>
-        <button class="view-tab ${prefs.view==='saga'?'active':''}" onclick="window._stSetView('saga')">📚 Saga</button>
-        <button class="view-tab ${prefs.view==='chronique'?'active':''}" onclick="window._stSetView('chronique')">📖 Chronique</button>
-        <button class="view-tab ${prefs.view==='list'?'active':''}" onclick="window._stSetView('list')">📋 Liste</button>
+        <button class="view-tab ${prefs.view==='carte'?'active':''}" data-action="_stSetView" data-view="carte">🗺️ Carte</button>
+        <button class="view-tab ${prefs.view==='saga'?'active':''}" data-action="_stSetView" data-view="saga">📚 Saga</button>
+        <button class="view-tab ${prefs.view==='chronique'?'active':''}" data-action="_stSetView" data-view="chronique">📖 Chronique</button>
+        <button class="view-tab ${prefs.view==='list'?'active':''}" data-action="_stSetView" data-view="list">📋 Liste</button>
       </div>
     </div>
 
@@ -506,8 +507,8 @@ async function renderStory() {
           <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
           <p style="font-style:italic">${qNorm || prefs.statut ? 'Aucune mission ne correspond aux filtres.' : `Aucune mission pour ${_esc(activeActe)}.`}</p>
           ${qNorm || prefs.statut
-            ? `<button class="btn btn-outline btn-sm" onclick="window._stResetFilters()">↺ Réinitialiser</button>`
-            : (STATE.isAdmin ? `<button class="btn btn-outline btn-sm" onclick="openStoryModal()">+ Ajouter la première</button>` : '')}
+            ? `<button class="btn btn-outline btn-sm" data-action="_stResetFilters">↺ Réinitialiser</button>`
+            : (STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openStoryModal">+ Ajouter la première</button>` : '')}
         </div>` :
         (() => {
           // Wrap chaque vue : si UNE mission corrompue plante le renderer, on
@@ -530,8 +531,8 @@ async function renderStory() {
               </p>
               <p style="font-size:.7rem;color:var(--text-dim);opacity:.6;margin-top:.75rem;font-family:monospace">${_esc(err?.message || String(err))}</p>
               <div style="display:flex;gap:.4rem;justify-content:center;margin-top:1rem;flex-wrap:wrap">
-                <button class="btn btn-outline btn-sm" onclick="window._stSetView('list')">📋 Vue Liste</button>
-                <button class="btn btn-outline btn-sm" onclick="window._stResetFilters()">↺ Réinitialiser filtres</button>
+                <button class="btn btn-outline btn-sm" data-action="_stSetView" data-view="list">📋 Vue Liste</button>
+                <button class="btn btn-outline btn-sm" data-action="_stResetFilters">↺ Réinitialiser filtres</button>
               </div>
             </div>`;
           }
@@ -585,7 +586,7 @@ function _renderBanner(hero, activeActe) {
     : hero.statut === 'Terminée' ? `${activeActe} · Dernière victoire`
     : `${activeActe} · ${hero.statut || ''}`;
   const bgUrl = (hero.imageUrl || '').replace(/"/g, '%22');
-  return `<div class="trame-banner" onclick="openStoryDetail('${hero.id}')">
+  return `<div class="trame-banner" data-action="openStoryDetail" data-id="${hero.id}">
     ${hero.imageUrl ? `<div class="trame-banner-bg" style='background-image:url("${bgUrl}")'></div>` : ''}
     <div class="trame-banner-fade"></div>
     <div class="trame-banner-content">
@@ -844,10 +845,10 @@ function _renderMapView(missions) {
   return `
     <div class="map-shell">
       <div class="map-toolbar">
-        <button class="map-tool" onclick="window._stMapZoom(0.85)" title="Dézoomer">−</button>
+        <button class="map-tool" data-action="_stMapZoom" data-factor="0.85" title="Dézoomer">−</button>
         <span class="map-zoom-val">${Math.round(prefs.zoom * 100)}%</span>
-        <button class="map-tool" onclick="window._stMapZoom(1.18)" title="Zoomer">+</button>
-        <button class="map-tool" onclick="window._stMapReset()" title="Recentrer">⊙</button>
+        <button class="map-tool" data-action="_stMapZoom" data-factor="1.18" title="Zoomer">+</button>
+        <button class="map-tool" data-action="_stMapReset" title="Recentrer">⊙</button>
         <span class="map-hint">Chaque ligne = un axe narratif · Stations dans l'ordre des chapitres · Pointillés dorés = liens inter-axes</span>
       </div>
       <div class="map-viewport" id="st-map-viewport">
@@ -1006,7 +1007,7 @@ function _renderPoster(m, idx) {
   const st = stCfg(m);
   const prog = itemProgress(m);
   const parts = m.participants || [];
-  return `<article class="poster" style="--st-color:${st.color}" onclick="openStoryDetail('${m.id}')">
+  return `<article class="poster" style="--st-color:${st.color}" data-action="openStoryDetail" data-id="${m.id}">
     <div class="poster-art">
       ${m.imageUrl
         ? `<img src="${_esc(m.imageUrl)}" alt="" loading="lazy">`
@@ -1047,7 +1048,7 @@ function _renderChroniqueView(missions) {
           <div class="chap-num">${String(i+1).padStart(2,'0')}</div>
           ${i < sorted.length-1 ? '<div class="chap-thread"></div>' : ''}
         </div>
-        <div class="chap-body" onclick="openStoryDetail('${m.id}')">
+        <div class="chap-body" data-action="openStoryDetail" data-id="${m.id}">
           ${m.imageUrl ? `<div class="chap-banner"><img src="${_esc(m.imageUrl)}" alt=""></div>` : ''}
           <div class="chap-meta-top">
             ${m.axe ? `<span class="chap-axe">${_esc(m.axe)}</span>` : ''}
@@ -1097,7 +1098,7 @@ function _renderListView(missions) {
       const prog = itemProgress(m);
       const axeCol = m.axe ? (_axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
       return `<div class="list-row" style="--axe-color:${axeCol};--st-color:${st.color}"
-        onclick="openStoryDetail('${m.id}')">
+        data-action="openStoryDetail" data-id="${m.id}">
         <div class="list-num">${String(i+1).padStart(2,'0')}</div>
         <div class="list-titre">${_esc(m.titre || 'Sans titre')}${m.lieu ? `<span class="list-lieu"> · ${_esc(m.lieu)}</span>` : ''}</div>
         <div class="list-axe">${m.axe ? `<span class="list-axe-dot"></span><span>${_esc(m.axe)}</span>` : '<span style="color:var(--text-dim)">—</span>'}</div>
@@ -1335,7 +1336,7 @@ function _renderTimeline(items) {
       html += `
       <div class="sn" data-id="${item.id}"
         style="position:absolute;left:${left}px;top:${cardTop}px;width:${CARD_W}px"
-        onclick="openStoryDetail('${item.id}')">
+        data-action="openStoryDetail" data-id="${item.id}">
         <div class="sn-inner" style="background:var(--bg-card);border:1px solid ${st.border};border-radius:12px;overflow:hidden">
           <div style="width:100%;height:88px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${item.imageUrl
@@ -1365,13 +1366,13 @@ function _renderTimeline(items) {
         ${STATE.isAdmin ? `
         <div style="display:flex;gap:3px;margin-top:4px;justify-content:center;flex-wrap:wrap">
           <button class="sn-histoire-btn"
-            onclick="event.stopPropagation();window._ouvrirHistoire('${item.id}','${(item.titre||'').replace(/'/g,"\\'")}','${(item.acte||'').replace(/'/g,"\\'")}')">
+            data-action="_ouvrirHistoire" data-id="${item.id}" data-titre="${_esc(item.titre||'')}" data-acte="${_esc(item.acte||'')}" data-stop-propagation>
             ✍️ Histoire
           </button>
           <button class="btn-icon" style="font-size:.7rem;padding:2px 6px"
-            onclick="event.stopPropagation();editStory('${item.id}')">✏️</button>
+            data-action="editStory" data-id="${item.id}" data-stop-propagation>✏️</button>
           <button class="btn-icon" style="font-size:.7rem;padding:2px 6px;color:#ff6b6b"
-            onclick="event.stopPropagation();deleteStory('${item.id}')">🗑️</button>
+            data-action="deleteStory" data-id="${item.id}" data-stop-propagation>🗑️</button>
         </div>` : ''}
       </div>`;
     });
@@ -1524,7 +1525,7 @@ async function openStoryDetail(id) {
           ${liensItems.map(l => {
             const lst = stCfg(l);
             const lAxeCol = l.axe ? (_axeMap[l.axe] || 'var(--text-muted)') : 'var(--text-muted)';
-            return `<button class="mv-lien" onclick="closeModalDirect();openStoryDetail('${l.id}')">
+            return `<button class="mv-lien" data-action="_stOpenLien" data-id="${l.id}">
               <div class="mv-lien-art">
                 ${l.imageUrl
                   ? `<img src="${_esc(l.imageUrl)}" alt="" loading="lazy">`
@@ -1544,10 +1545,10 @@ async function openStoryDetail(id) {
 
     <!-- ── Footer ─────────────────────────────────────────────── -->
     <div class="mv-footer">
-      <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Fermer</button>
+      <button class="btn btn-outline btn-sm" data-action="closeModalDirect">Fermer</button>
       ${STATE.isAdmin ? `
-        <button class="btn btn-outline btn-sm mv-footer-danger" onclick="closeModalDirect();deleteStory('${item.id}')">🗑️ Supprimer</button>
-        <button class="btn btn-gold" onclick="closeModalDirect();editStory('${item.id}')">✏️ Modifier</button>
+        <button class="btn btn-outline btn-sm mv-footer-danger" data-action="_stDeleteAfterClose" data-id="${item.id}">🗑️ Supprimer</button>
+        <button class="btn btn-gold" data-action="_stEditAfterClose" data-id="${item.id}">✏️ Modifier</button>
       ` : ''}
     </div>
 
@@ -1681,7 +1682,7 @@ async function openStoryModal(item = null) {
             ${knownAxes.length ? `<div class="mn-axe-chips">
               ${knownAxes.slice(0, 5).map(a => `<button type="button" class="mn-axe-chip"
                 style="color:${_axeMap[a] || 'var(--text-muted)'};border-color:${_axeMap[a] ? _axeMap[a] + '55' : 'var(--border)'}"
-                onclick="document.getElementById('st-axe').value='${a.replace(/'/g,"\\'")}';document.getElementById('st-axe').dispatchEvent(new Event('input'))">
+                data-action="_stPickAxe" data-axe="${_esc(a)}">
                 ● ${_esc(a)}
               </button>`).join('')}
             </div>` : ''}
@@ -1716,7 +1717,7 @@ async function openStoryModal(item = null) {
         <div id="st-groups-list" class="st-groups-list">
           ${_renderGroupCards(_modalGroupes)}
         </div>
-        <button type="button" class="st-group-add" onclick="window._stSaveGroupDialog()">+ Nouveau groupe</button>
+        <button type="button" class="st-group-add" data-action="_stSaveGroupDialog">+ Nouveau groupe</button>
 
         <div id="st-save-group-form" class="st-group-form" style="display:none">
           <div id="st-group-form-title" class="st-form-section-sub">Nouveau groupe</div>
@@ -1740,7 +1741,7 @@ async function openStoryModal(item = null) {
                 return (STATE.characters||[]).map(c => {
                   const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
                   const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-                  return `<div onclick="window._stGroupPickToggle('${c.id}','${col}')"
+                  return `<div data-action="_stGroupPickToggle" data-id="${c.id}" data-col="${col}"
                     id="st-gpick-${c.id}" data-gm-id="${c.id}" data-picked="0"
                     data-char-name="${_esc((c.nom||'').toLowerCase())}"
                     class="st-group-pick">
@@ -1756,8 +1757,8 @@ async function openStoryModal(item = null) {
             </div>
           </div>
           <div class="st-group-form-actions">
-            <button type="button" class="btn btn-gold" onclick="window._stConfirmSaveGroup()">✓ Enregistrer le groupe</button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="window._stCancelGroupForm()">Annuler</button>
+            <button type="button" class="btn btn-gold" data-action="_stConfirmSaveGroup">✓ Enregistrer le groupe</button>
+            <button type="button" class="btn btn-outline btn-sm" data-action="_stCancelGroupForm">Annuler</button>
           </div>
         </div>
       </section>
@@ -1780,7 +1781,7 @@ async function openStoryModal(item = null) {
           const stOther=stCfg(other);
           return `
           <div id="lien-card-${other.id}"
-            onclick="window._toggleLien('${other.id}')"
+            data-action="_toggleLien" data-id="${other.id}"
             style="position:relative;cursor:pointer;border-radius:10px;overflow:hidden;
               border:2px solid ${checked?'var(--gold)':'var(--border)'};
               background:${checked?'rgba(232,184,75,.08)':'var(--bg-elevated)'};
@@ -1840,7 +1841,7 @@ async function openStoryModal(item = null) {
         <div class="mn-danger-zone">
           <div class="mn-danger-title">⚠️ Zone dangereuse</div>
           <button type="button" class="mn-btn-danger"
-            onclick="closeModal();deleteStory('${item.id}')">🗑️ Supprimer cette mission</button>
+            data-action="_stDeleteAfterCloseModal" data-id="${item.id}">🗑️ Supprimer cette mission</button>
         </div>` : ''}
       </section>
     </div><!-- /mn-body -->
@@ -1851,8 +1852,8 @@ async function openStoryModal(item = null) {
         <kbd>Ctrl</kbd>+<kbd>S</kbd> pour enregistrer · <kbd>Esc</kbd> pour fermer
       </div>
       <div class="mn-footer-actions">
-        <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
-        <button class="btn btn-gold" id="mn-save-btn" onclick="saveStory('${item?.id||''}')">
+        <button class="btn btn-outline btn-sm" data-action="closeModalDirect">Annuler</button>
+        <button class="btn btn-gold" id="mn-save-btn" data-action="saveStory" data-id="${item?.id||''}">
           ${item?'💾 Enregistrer':'＋ Créer la mission'}
         </button>
       </div>
@@ -2099,7 +2100,7 @@ function openNewActeModal(){
       <input class="input-field" id="new-acte-name" placeholder="Acte II">
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:.5rem"
-      onclick="window._createNewActe()">Créer</button>
+      data-action="_createNewActe">Créer</button>
   `);
 }
 window._createNewActe = async () => {
@@ -2120,3 +2121,37 @@ window._ouvrirHistoire = function(id, titre, acte) {
 // ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────
 PAGES.story = renderStory;
 Object.assign(window,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
+
+registerActions({
+  openStoryDetail:         (btn) => openStoryDetail(btn.dataset.id),
+  openStoryModal:          ()    => openStoryModal(),
+  openNewActeModal:        ()    => openNewActeModal(),
+  editStory:               (btn) => editStory(btn.dataset.id),
+  deleteStory:             (btn) => deleteStory(btn.dataset.id),
+  saveStory:               (btn) => saveStory(btn.dataset.id || ''),
+  closeModalDirect:        ()    => closeModalDirect(),
+  _stOpenLien:             (btn) => { closeModalDirect(); openStoryDetail(btn.dataset.id); },
+  _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
+  _stEditAfterClose:       (btn) => { closeModalDirect(); editStory(btn.dataset.id); },
+  _stDeleteAfterCloseModal:(btn) => { closeModal(); deleteStory(btn.dataset.id); },
+  _stSetView:              (btn) => window._stSetView?.(btn.dataset.view),
+  _stSetFilter:            (btn) => window._stSetFilter?.(btn.dataset.key, btn.dataset.val),
+  _stResetFilters:         ()    => window._stResetFilters?.(),
+  _stSwitchActe:           (btn) => window._stSwitchActe?.(btn.dataset.acte),
+  _stMapZoom:              (btn) => window._stMapZoom?.(Number(btn.dataset.factor)),
+  _stMapReset:             ()    => window._stMapReset?.(),
+  _stApplyGroup:           (btn) => window._stApplyGroup?.(JSON.parse(btn.dataset.members || '[]')),
+  _stEditGroup:            (btn) => window._stEditGroup?.(btn.dataset.id),
+  _stDeleteGroup:          (btn) => window._stDeleteGroup?.(btn.dataset.id),
+  _stSaveGroupDialog:      ()    => window._stSaveGroupDialog?.(),
+  _stGroupPickToggle:      (btn) => window._stGroupPickToggle?.(btn.dataset.id, btn.dataset.col),
+  _stConfirmSaveGroup:     ()    => window._stConfirmSaveGroup?.(),
+  _stCancelGroupForm:      ()    => window._stCancelGroupForm?.(),
+  _toggleLien:             (btn) => window._toggleLien?.(btn.dataset.id),
+  _ouvrirHistoire:         (btn) => window._ouvrirHistoire?.(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
+  _createNewActe:          ()    => window._createNewActe?.(),
+  _stPickAxe:              (btn) => {
+    const el = document.getElementById('st-axe');
+    if (el) { el.value = btn.dataset.axe; el.dispatchEvent(new Event('input')); }
+  },
+});
