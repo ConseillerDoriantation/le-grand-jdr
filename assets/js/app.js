@@ -14,6 +14,7 @@ import {
   navigate,
   initEventDelegation,
 } from './core/navigation.js';
+import { registerActions } from './core/actions.js';
 
 import {
   openModal,
@@ -43,8 +44,6 @@ window._openQuickView = async (id) => {
 };
 
 // ── Exposition sur window EN PREMIER ─────────────────────────────────────────
-// toggleTheme doit être disponible avant le rendu
-// car index.html utilise onclick="toggleTheme()"
 Object.assign(window, {
   switchAuthTab,
   doLogin,
@@ -56,6 +55,16 @@ Object.assign(window, {
   closeModalDirect,
   showNotif,
   toggleTheme,
+});
+
+// Actions globales déléguées (boutons statiques d'index.html / layout)
+registerActions({
+  'toggle-theme': () => toggleTheme(),
+  openAdventureSwitcher: () => window.openAdventureSwitcher?.(),
+  openCreateAdventureModal: () => window.openCreateAdventureModal?.(),
+  pickAdventure: (btn) => window.pickAdventure?.(btn.dataset.id),
+  _advSwitchPick: (btn) => { window.closeModal?.(); window.pickAdventure?.(btn.dataset.id); },
+  _layoutCloseModal: () => window.closeModal?.(),
 });
 
 // ── Thème ────────────────────────────────────────────────────────────────────

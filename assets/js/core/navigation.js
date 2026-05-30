@@ -229,7 +229,7 @@ function _renderPageError(page, err) {
       <div style="font-size:.88rem;color:var(--text-muted);max-width:360px;line-height:1.6">
         ${detail}
       </div>
-      <button onclick="navigate('${page}')"
+      <button data-navigate="${page}"
         style="margin-top:.5rem;padding:.5rem 1.5rem;border-radius:10px;cursor:pointer;
           font-size:.85rem;font-weight:600;border:1px solid var(--border-strong);
           background:var(--bg-elevated);color:var(--text-muted);transition:background .12s"

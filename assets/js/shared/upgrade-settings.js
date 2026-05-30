@@ -8,6 +8,7 @@
 
 import { getDocData, saveDoc } from '../data/firestore.js';
 import { openModal, closeModalDirect, confirmModal } from './modal.js';
+import { registerActions } from '../core/actions.js';
 import { showNotif } from './notifications.js';
 import { _esc } from './html.js';
 
@@ -169,7 +170,7 @@ function _renderUpgradeSettingsModal() {
         <h2>Tarifs et plafonds des améliorations</h2>
         <small>Configuration globale de l'<em>Artisan</em> · s'applique immédiatement</small>
       </div>
-      <button class="sh-admin-close" onclick="closeModal()" title="Fermer">✕</button>
+      <button class="sh-admin-close" data-action="_upgClose" title="Fermer">✕</button>
     </div>
 
     <div class="sh-admin-body">
@@ -264,10 +265,10 @@ function _renderUpgradeSettingsModal() {
     </div>
 
     <div class="sh-admin-footer">
-      <button class="btn btn-outline btn-sm" onclick="window._upgResetDefaults()">↻ Restaurer défauts</button>
+      <button class="btn btn-outline btn-sm" data-action="_upgReset">↻ Restaurer défauts</button>
       <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-outline btn-sm" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-gold btn-sm" onclick="window._upgSaveAndClose()">💾 Enregistrer</button>
+      <button class="btn btn-outline btn-sm" data-action="_upgClose">Annuler</button>
+      <button class="btn btn-gold btn-sm" data-action="_upgSave">💾 Enregistrer</button>
     </div>
   </div>
   `);
@@ -306,3 +307,9 @@ window._upgResetDefaults = async () => {
 };
 
 window.openUpgradeSettingsAdmin = openUpgradeSettingsAdmin;
+
+registerActions({
+  _upgClose: () => window.closeModal?.(),
+  _upgReset: () => window._upgResetDefaults?.(),
+  _upgSave: () => window._upgSaveAndClose?.(),
+});

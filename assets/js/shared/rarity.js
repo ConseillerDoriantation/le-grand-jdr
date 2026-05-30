@@ -1,3 +1,5 @@
+import { registerActions } from '../core/actions.js';
+
 const rareteColors = {
     'Commun':    '#9ca3af',
     'Singulier': '#4ade80',
@@ -41,7 +43,7 @@ export function buildRaretePicker(idPrefix, currentVal) {
     return `
         <div class="sh-rarete-picker" id="${idPrefix}-rarete-wrap">
             ${[1, 2, 3, 4, 5].map(n => `<button type="button" class="sh-rarete-star-btn" data-val="${n}"
-                onclick="pickRarete('${idPrefix}', ${n})"
+                data-action="pickRarete" data-prefix="${idPrefix}"
                 style="color:${cur >= n ? activeColor : 'var(--text-dim)'}">★</button>`).join('')}
             <input type="hidden" id="${idPrefix}-rarete" value="${currentVal || ''}">
             <span class="sh-rarete-label" id="${idPrefix}-rarete-lbl" style="color:${activeColor || 'var(--text-dim)'}">${_rareteLabel(currentVal)}</span>
@@ -64,3 +66,7 @@ export function pickRarete(idPrefix, n) {
 }
 
 window.pickRarete = pickRarete;
+
+registerActions({
+  pickRarete: (btn) => pickRarete(btn.dataset.prefix, Number(btn.dataset.val)),
+});

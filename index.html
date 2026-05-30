@@ -223,7 +223,7 @@
     <div class="header-user">
       <span id="header-username" aria-label="Pseudo connecté"></span>
       <span class="admin-badge" id="admin-badge" style="display:none" aria-label="Rôle Maître de Jeu">MJ</span>
-      <button class="btn-theme" type="button" onclick="toggleTheme()" aria-label="Changer de thème">☀️</button>
+      <button class="btn-theme" type="button" data-action="toggle-theme" aria-label="Changer de thème">☀️</button>
       <button class="btn-logout" type="button" data-action="logout">Déconnexion</button>
     </div>
   </header>
@@ -239,7 +239,7 @@
           <div class="sidebar-brand-icon" aria-hidden="true">⚔️</div>
           <span class="sidebar-brand-text">Grimorium</span>
         </div>
-        <div class="sidebar-adv-chip" id="sidebar-adv-chip" style="display:none" onclick="window.openAdventureSwitcher?.()" title="Aventure active">
+        <div class="sidebar-adv-chip" id="sidebar-adv-chip" style="display:none" data-action="openAdventureSwitcher" title="Aventure active">
           <span class="sidebar-adv-emoji" id="sidebar-adv-emoji"></span>
           <span class="sidebar-adv-text" id="sidebar-adv-name"></span>
         </div>
@@ -377,7 +377,7 @@
           <button class="sidebar-profile-logout" data-action="logout" title="Déconnexion" aria-label="Déconnexion">
             <svg class="nav-icon" aria-hidden="true"><use href="#icon-power"/></svg>
           </button>
-          <button class="btn-theme sidebar-theme-btn" id="btn-theme" type="button" onclick="toggleTheme()" title="Mode jour / nuit" aria-label="Changer de thème">
+          <button class="btn-theme sidebar-theme-btn" id="btn-theme" type="button" data-action="toggle-theme" title="Mode jour / nuit" aria-label="Changer de thème">
             <svg class="nav-icon" aria-hidden="true"><use href="#icon-sun"/></svg>
           </button>
         </div>

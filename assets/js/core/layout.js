@@ -23,14 +23,14 @@ window.openAdventureSwitcher = function () {
         ${adventures.map(a => {
           const isCurrent = STATE.adventure?.id === a.id;
           return `<div class="adv-switch-row ${isCurrent ? 'adv-switch-row--active' : ''}"
-            onclick="${isCurrent ? '' : `closeModal();window.pickAdventure('${a.id}')`}"
+            ${isCurrent ? '' : `data-action="_advSwitchPick" data-id="${a.id}"`}
             style="cursor:${isCurrent ? 'default' : 'pointer'}">
             <span style="font-size:1.3rem">${a.emoji || '⚔️'}</span>
             <span style="flex:1;font-size:.9rem;color:var(--text)">${a.nom}</span>
             ${isCurrent ? '<span style="font-size:.75rem;color:var(--gold)">● Actuelle</span>' : ''}
           </div>`;
         }).join('')}
-        <button class="btn btn-outline btn-sm" style="margin-top:.4rem" onclick="closeModal()">Fermer</button>
+        <button class="btn btn-outline btn-sm" style="margin-top:.4rem" data-action="_layoutCloseModal">Fermer</button>
       </div>
     `);
   }
@@ -236,7 +236,7 @@ function _renderAdventurePicker(adventures) {
       ${adventures.map(a => _renderAdvCard(a)).join('')}
     </div>
     ${canCreate ? `<div class="adv-picker-footer">
-      <button class="btn btn-outline btn-sm" onclick="openCreateAdventureModal()">+ Nouvelle aventure</button>
+      <button class="btn btn-outline btn-sm" data-action="openCreateAdventureModal">+ Nouvelle aventure</button>
     </div>` : ''}
   `;
 }
@@ -245,7 +245,7 @@ function _renderAdvCard(adv) {
   const isAdmin    = Array.isArray(adv.admins) && adv.admins.includes(STATE.user?.uid);
   const members    = (adv.accessList || []).length;
   const statusCls  = adv.status === 'archived' ? 'adv-card--archived' : '';
-  return `<div class="adv-card ${statusCls}" onclick="window.pickAdventure('${adv.id}')">
+  return `<div class="adv-card ${statusCls}" data-action="pickAdventure" data-id="${adv.id}">
     <div class="adv-card-emoji">${adv.emoji || '⚔️'}</div>
     <div class="adv-card-info">
       <div class="adv-card-nom">${adv.nom}</div>
@@ -266,7 +266,7 @@ function _renderCreateFirst() {
       <div class="adv-empty-icon">🗺️</div>
       <div class="adv-empty-title">Aucune aventure</div>
       <p class="adv-empty-text">Crée ta première aventure pour commencer.</p>
-      <button class="btn btn-gold" onclick="openCreateAdventureModal()">✨ Créer une aventure</button>
+      <button class="btn btn-gold" data-action="openCreateAdventureModal">✨ Créer une aventure</button>
     </div>
   `;
 }
@@ -280,7 +280,7 @@ function _renderWaiting(pseudo) {
         Bonjour ${pseudo} ! Tu n'es encore invité·e dans aucune aventure.<br>
         Demande à ton Maître de Jeu de t'y ajouter.
       </p>
-      <button class="btn btn-outline btn-sm" onclick="window.doLogout?.()">Se déconnecter</button>
+      <button class="btn btn-outline btn-sm" data-action="logout">Se déconnecter</button>
     </div>
   `;
 }
