@@ -12775,7 +12775,7 @@ const VTT_ACTIONS = {
 // Inline handlers conservés sur window (appelés via onkeydown/oncontextmenu)
 Object.assign(window, {
   _vttCreatePlaylistConfirm, _vttDiceRemoveDie, _vttMsAddXp,
-  _vttMsSetXp, _vttSaveEmote, _vttSendChat, _vttSoundCtxMenu,
+  _vttMsSetXp, _vttSendChat, _vttSoundCtxMenu,
 });
 
 registerActions({
