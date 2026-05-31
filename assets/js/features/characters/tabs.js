@@ -1011,8 +1011,12 @@ function _buildProfilHtml(c, canEdit, pres) {
 export async function saveCharProfil(charId) {
   try {
     const content = getRichTextHtml('profil-content');
-    const tags = [...(document.getElementById('profil-tags')?.querySelectorAll('.pp-tag-chip') || [])]
-      .map(el => el.dataset.tag).filter(Boolean);
+    // Les traits de caractère vivent sur le doc characters (c.tags), édités via
+    // l'éditeur V3. Ici on reflète simplement la valeur courante dans la
+    // présentation — surtout PAS lire une UI absente (qui écrivait tags:[] et
+    // écrasait les traits enregistrés).
+    const cForTags = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    const tags = Array.isArray(cForTags?.tags) ? cForTags.tags : (_profilCache[charId]?.tags || []);
     const data = {
       charId,
       uid:           STATE.user?.uid || '',

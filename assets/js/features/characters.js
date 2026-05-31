@@ -1536,7 +1536,10 @@ function renderCharProfilV3(c, canEdit) {
   const identity = _mergeIdentityDefaults(c.identity);
   const presCache = window._profilCache?.[c.id] || null;
   const bioHtml = presCache?.content || c.bio || '';
-  const tags = presCache?.tags || c.tags || [];
+  // Source unique des traits = le doc characters (c.tags). presCache.tags (doc
+  // players) n'est qu'un repli legacy : sans ça, un doc players avec tags:[]
+  // (écrit par saveCharProfil) écrasait les traits enregistrés.
+  const tags = (Array.isArray(c.tags) && c.tags.length) ? c.tags : (presCache?.tags || c.tags || []);
 
   const visEntries = [
     { k: 'afficherNiveau',    lbl: 'Niveau',           def: true  },
@@ -1706,13 +1709,19 @@ async function _csV3CommitTags(charId, nextTags) {
   c.tags = nextTags;
   if (window._profilCache?.[charId]) window._profilCache[charId].tags = nextTags;
   try { await updateInCol('characters', charId, { tags: nextTags }); }
-  catch (e) { console.warn('[tags save]', e); }
+  catch (e) { console.warn('[tags save]', e); window.showNotif?.('Erreur d\'enregistrement des traits.', 'error'); }
+  // Synchronise la présentation publique (page Joueurs) si elle existe.
+  const presId = window._profilCache?.[charId]?.id;
+  if (presId) {
+    try { await updateInCol('players', presId, { tags: nextTags }); }
+    catch (e) { console.warn('[tags sync players]', e); }
+  }
   if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
 }
 window._csV3AddProfilTag = async function (charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
-  const cur = (window._profilCache?.[charId]?.tags || c.tags || []).slice();
+  const cur = ((Array.isArray(c.tags) && c.tags.length) ? c.tags : (window._profilCache?.[charId]?.tags || c.tags || [])).slice();
   if (cur.length >= 8) return;
   if (cur.some(x => x.toLowerCase() === t.toLowerCase())) return;
   cur.push(t);
@@ -1728,7 +1737,7 @@ window._csV3AddProfilTagFromInput = async function (charId) {
 window._csV3RemoveProfilTag = async function (charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
-  const cur = (window._profilCache?.[charId]?.tags || c.tags || []).slice();
+  const cur = ((Array.isArray(c.tags) && c.tags.length) ? c.tags : (window._profilCache?.[charId]?.tags || c.tags || [])).slice();
   const next = cur.filter(x => x.toLowerCase() !== t.toLowerCase());
   if (next.length === cur.length) return;
   await _csV3CommitTags(charId, next);
