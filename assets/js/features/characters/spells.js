@@ -1377,7 +1377,15 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       <div class="toggle ${s.actif?'on':''}"
         ${canEdit ? `data-action="toggleSort" data-idx="${i}" data-stop-propagation` : ''}
         title="${s.actif?'Désactiver':'Activer'}"></div>
-      <span class="cs-sort-compact-nom">${s.icon ? `<span class="cs-sort-icon" title="Icône du sort">${_esc(s.icon)}</span> ` : ''}${_esc(s.nom||'Sans nom')}${s.mjValidated ? ' <span class="cs-sort-validated" title="Sort validé par le MJ">✅</span>' : ''}</span>
+      <span class="cs-sort-compact-nom">${s.icon ? `<span class="cs-sort-icon" title="Icône du sort">${_esc(s.icon)}</span> ` : ''}${_esc(s.nom||'Sans nom')}</span>
+      ${(() => {
+        const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+        return vs === 'ok'
+          ? `<span class="cs-sort-status cs-sort-status--ok" title="Sort validé par le Maître du Jeu">✅ Validé</span>`
+          : vs === 'no'
+            ? `<span class="cs-sort-status cs-sort-status--no" title="Sort refusé par le Maître du Jeu">❌ Refusé</span>`
+            : `<span class="cs-sort-status cs-sort-status--wait" title="Pas encore validé par le Maître du Jeu">⏳ À valider</span>`;
+      })()}
       <div class="cs-sort-compact-chips">
         ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
         <span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:${acfg.color}">${acfg.label}</span>
@@ -2151,19 +2159,26 @@ export async function openSortModal(idx, s) {
     <div class="cs-mj-limits">
       <div class="cs-mj-limits-title">🔒 Limites MJ <span>— équilibrage des combos & overrides</span></div>
 
-      <!-- Validation MJ : toggle switch (admins) / badge lecture seule (joueurs) -->
-      ${STATE.isAdmin ? `<div class="cs-mj-validation ${s?.mjValidated?'is-on':''}">
-        <input type="checkbox" id="s-mj-validated" ${s?.mjValidated?'checked':''}
-          data-change="_csMjValToggle">
-        <label for="s-mj-validated" class="cs-mj-validation-label">
-          <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
-          <span class="cs-mj-validation-info">
-            <span class="cs-mj-validation-title">Validation MJ</span>
-            <span class="cs-mj-validation-sub">Marque ce sort comme officiellement approuvé</span>
-          </span>
-          <span class="cs-mj-validation-state"></span>
-        </label>
-      </div>` : (s?.mjValidated ? '<div class="cs-mj-validation cs-mj-validation--readonly is-on"><span class="cs-mj-validation-state"></span><span class="cs-mj-validation-info"><span class="cs-mj-validation-title">Sort validé par le MJ</span></span></div>' : '')}
+      <!-- Validation MJ : 3 états (admins) / badge lecture seule (joueurs) -->
+      ${(() => {
+        const vs = s?.mjValidation || (s?.mjValidated ? 'ok' : 'pending');
+        if (STATE.isAdmin) {
+          const seg = (val, label) => `<button type="button" class="cs-mjval-btn cs-mjval-btn--${val} ${vs===val?'is-active':''}" data-mjval="${val}" data-action="_csSetMjVal">${label}</button>`;
+          return `<div class="cs-mjval-block">
+            <div class="cs-mjval-block-title">Validation MJ <span>— statut de ce sort</span></div>
+            <input type="hidden" id="s-mj-validation" value="${vs}">
+            <div class="cs-mjval-seg">
+              ${seg('ok', '✅ Validé')}
+              ${seg('pending', '⏳ En attente')}
+              ${seg('no', '❌ Refusé')}
+            </div>
+          </div>`;
+        }
+        const lbl = vs === 'ok' ? '✅ Sort validé par le MJ'
+                  : vs === 'no' ? '❌ Sort refusé par le MJ'
+                  : '⏳ En attente de validation du MJ';
+        return `<div class="cs-mjval-readonly cs-mjval-readonly--${vs}">${lbl}</div>`;
+      })()}
 
       <div class="form-group" style="margin-bottom:.5rem">
         <label style="font-size:.72rem">Notes / restrictions <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(affichées dans la fiche)</span></label>
@@ -2683,10 +2698,10 @@ function _buildSortFromDOM() {
   const deplMode = _deplModeEdit || null;
   const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
   const iconRaw  = document.getElementById('s-icon')?.value || '';
-  const mjValid  = document.getElementById('s-mj-validated')?.checked || false;
+  const mjVal    = document.getElementById('s-mj-validation')?.value || 'pending';
   return {
     icon:        iconRaw.trim() || '',
-    mjValidated: mjValid,
+    mjValidation: mjVal, mjValidated: mjVal === 'ok',
     noyau, noyauTypeId, runes, types,
     degats: document.getElementById('s-degats')?.value || '',
     soin:   document.getElementById('s-soin')?.value || '',
@@ -2852,11 +2867,12 @@ export async function saveSort(idx) {
     const deplMode = _deplModeEdit || null;
     const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
 
-    // Validation MJ : seuls les admins peuvent la modifier ; sinon on garde la valeur existante
-    const prevValidated = idx >= 0 ? !!sorts[idx]?.mjValidated : false;
-    const mjValidated   = STATE.isAdmin
-      ? (document.getElementById('s-mj-validated')?.checked || false)
-      : prevValidated;
+    // Validation MJ (3 états) : seuls les admins peuvent la modifier ; sinon on garde la valeur existante
+    const prevVal = idx >= 0 ? (sorts[idx]?.mjValidation || (sorts[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
+    const mjValidation = STATE.isAdmin
+      ? (document.getElementById('s-mj-validation')?.value || 'pending')
+      : prevVal;
+    const mjValidated  = mjValidation === 'ok'; // rétro-compat booléen
 
     // PM override (MJ uniquement) : si vide → null (utilise autoPm). Si admin n'existe pas ce champ.
     const pmOvrRaw = STATE.isAdmin ? document.getElementById('s-pm-override')?.value : null;
@@ -2866,7 +2882,7 @@ export async function saveSort(idx) {
       : (STATE.isAdmin ? null : (idx >= 0 ? sorts[idx]?.pmOverride ?? null : null));
     const newSort = {
       icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
-      mjValidated,
+      mjValidation, mjValidated,
       mjAlwaysMax: STATE.isAdmin
         ? !!document.getElementById('s-mj-always-max')?.checked
         : (idx >= 0 ? !!sorts[idx]?.mjAlwaysMax : false),
@@ -2964,10 +2980,11 @@ function _buildSortFromForm(idx, prevList = []) {
   const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
   const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
-  const prevValidated = idx >= 0 ? !!prevList[idx]?.mjValidated : false;
-  const mjValidated   = STATE.isAdmin
-    ? (document.getElementById('s-mj-validated')?.checked || false)
-    : prevValidated;
+  const prevVal = idx >= 0 ? (prevList[idx]?.mjValidation || (prevList[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
+  const mjValidation = STATE.isAdmin
+    ? (document.getElementById('s-mj-validation')?.value || 'pending')
+    : prevVal;
+  const mjValidated  = mjValidation === 'ok'; // rétro-compat booléen
   const pmOvrRaw = STATE.isAdmin ? document.getElementById('s-pm-override')?.value : null;
   const pmOvrInt = pmOvrRaw != null && pmOvrRaw !== '' ? parseInt(pmOvrRaw) : null;
   const pmOverride = (pmOvrInt != null && Number.isFinite(pmOvrInt) && pmOvrInt >= 0)
@@ -2975,7 +2992,7 @@ function _buildSortFromForm(idx, prevList = []) {
     : (STATE.isAdmin ? null : (idx >= 0 ? prevList[idx]?.pmOverride ?? null : null));
   return {
     icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
-    mjValidated,
+    mjValidation, mjValidated,
     nom:      document.getElementById('s-nom')?.value||'Sort',
     pm:       autoPm,
     pmOverride,
@@ -3050,6 +3067,13 @@ registerActions({
   _sortsSearchInput:      (el)  => _sortsSetSearch(el.value),
   _refreshAutoValChips:   ()    => _refreshAutoValChips(),
   _csMjValToggle:         (el)  => el.closest('.cs-mj-validation')?.classList.toggle('is-on', el.checked),
+  _csSetMjVal:            (btn) => {
+    const val = btn.dataset.mjval;
+    const inp = document.getElementById('s-mj-validation');
+    if (inp) inp.value = val;
+    document.querySelectorAll('.cs-mjval-btn').forEach(b => b.classList.toggle('is-active', b.dataset.mjval === val));
+    window._updateSortPreview?.();
+  },
   addSort:                ()    => addSort(),
   openSortCatEditor:      ()    => openSortCatEditor(),
   toggleSortDetail:       (btn) => toggleSortDetail(Number(btn.dataset.idx)),

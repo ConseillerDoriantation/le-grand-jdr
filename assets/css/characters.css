@@ -5399,6 +5399,64 @@ input[type=number].input-field::-webkit-outer-spin-button {
   max-width: 160px;
 }
 
+/* Badge de statut de validation MJ — toujours visible (validé / à valider) */
+.cs-sort-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  font-family: 'Outfit', sans-serif;
+  font-size: .6rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  padding: .12rem .42rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.cs-sort-status--ok {
+  color: #22c38e;
+  background: rgba(34,195,142,.12);
+  border-color: rgba(34,195,142,.35);
+}
+.cs-sort-status--wait {
+  color: #e8b84b;
+  background: rgba(232,184,75,.10);
+  border-color: rgba(232,184,75,.30);
+}
+.cs-sort-status--no {
+  color: #ff6b6b;
+  background: rgba(255,107,107,.10);
+  border-color: rgba(255,107,107,.32);
+}
+
+/* Contrôle de validation MJ à 3 états (modale de sort) */
+.cs-mjval-block { margin-bottom: .55rem; }
+.cs-mjval-block-title { font-size: .72rem; font-weight: 700; color: var(--text-soft, #c8d4e8); margin-bottom: .35rem; }
+.cs-mjval-block-title span { color: var(--text-dim); font-weight: 400; }
+.cs-mjval-seg { display: flex; gap: .35rem; }
+.cs-mjval-btn {
+  flex: 1; cursor: pointer;
+  padding: .4rem .3rem; border-radius: 8px;
+  font-family: 'Outfit', sans-serif; font-size: .74rem; font-weight: 700;
+  background: var(--bg-elevated, rgba(255,255,255,.04));
+  border: 2px solid var(--border); color: var(--text-dim);
+  transition: all .12s;
+}
+.cs-mjval-btn:hover { border-color: var(--border-bright, var(--border)); color: var(--text); }
+.cs-mjval-btn--ok.is-active   { border-color: rgba(34,195,142,.55); background: rgba(34,195,142,.14); color: #22c38e; }
+.cs-mjval-btn--pending.is-active { border-color: rgba(232,184,75,.55); background: rgba(232,184,75,.12); color: #e8b84b; }
+.cs-mjval-btn--no.is-active   { border-color: rgba(255,107,107,.55); background: rgba(255,107,107,.14); color: #ff6b6b; }
+
+.cs-mjval-readonly {
+  padding: .45rem .7rem; border-radius: 8px; font-size: .8rem; font-weight: 600;
+  border: 1px solid transparent; margin-bottom: .55rem;
+}
+.cs-mjval-readonly--ok      { color: #22c38e; background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.30); }
+.cs-mjval-readonly--pending { color: #e8b84b; background: rgba(232,184,75,.10); border-color: rgba(232,184,75,.28); }
+.cs-mjval-readonly--no      { color: #ff6b6b; background: rgba(255,107,107,.10); border-color: rgba(255,107,107,.30); }
+
 /* Zone de chips (flex, overflow caché sur petits écrans) */
 .cs-sort-compact-chips {
   display: flex;
