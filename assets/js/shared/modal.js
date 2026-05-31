@@ -146,4 +146,3 @@ export function confirmModal(message, {
 }
 
 // Exposition window pour appels depuis templates inline
-window.confirmModal = confirmModal;

@@ -13,9 +13,13 @@ import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
+import { charSession } from '../shared/char-session.js';
+import { openAdventureSwitcher } from '../core/layout.js';
+import { navigate } from '../core/navigation.js';
+import { BASTION_EVENTS, calculerRevenuBastion, getDefaultBastion } from '../features/bastion.js';
 
-const renderCharSheet   = (...args) => window.renderCharSheet?.(...args);
-const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorationsCustom: [], evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
+const renderCharSheet   = (...args) => charSession.renderSheet(...args);
+
 
 const PAGES = {
 
@@ -964,7 +968,7 @@ const PAGES = {
       tc.className = 'dv2-toast-container';
       document.body.appendChild(tc);
     }
-    window._showRPGToast = (type = 'xp', title = '', sub = '', badge = '') => {
+    let _showRPGToast = (type = 'xp', title = '', sub = '', badge = '') => {
       const tc = document.getElementById('dv2-toast-container');
       if (!tc) return;
       const el = document.createElement('div');
@@ -1144,8 +1148,8 @@ const PAGES = {
     const doc  = await getDocData('bastion', 'main');
     const data = doc || getDefaultBastion();
 
-    const EVENTS        = window.BASTION_EVENTS || [];
-    const calcRevenu    = window.calculerRevenuBastion;
+    const EVENTS        = BASTION_EVENTS || [];
+    const calcRevenu    = calculerRevenuBastion;
 
     // Toutes les améliorations sont créées par le MJ (ameliorationsCustom)
     function _getAllAmeliorations(d) {
@@ -1662,13 +1666,11 @@ registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id),
   _dashQuestJoin:        (btn) => dashQuestJoin(btn.dataset.id, btn),
-  openAdventureSwitcher: ()    => window.openAdventureSwitcher?.(),
+  openAdventureSwitcher: ()    => openAdventureSwitcher(),
 
   // Characters (admin filter) — appel via window pour supporter le cas où characters.js n'est pas encore chargé
-  filterAdminChars: (btn) => window.filterAdminChars?.(btn.dataset.pseudo || null, btn),
 
   // World
-  editWorldContent:      ()    => window.editWorldContent?.(),
 
   // NPCs
   openNpcModal:          async () => {

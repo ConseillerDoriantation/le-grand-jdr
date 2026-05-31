@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
@@ -30,7 +31,7 @@ let _lootFilter = () => {};
 let _lootSelect = () => {};
 
 function _renderInventoryChar(c, tab = 'inventaire') {
-  window.renderCharSheet?.(c, tab || window._currentCharTab || 'inventaire');
+  charSession.renderSheet?.(c, tab || charSession.getCurrentCharTab() || 'inventaire');
 }
 
 function _itemDegatsStatsShorts(item) {
@@ -47,7 +48,7 @@ export function _renderInventaireBoutique(char) {
   const invRaw = (char.inventaire || []).map((item, i) => ({ item, i })).filter(({ item }) => item.source === 'boutique');
   if (!invRaw.length) return '';
 
-  const canEdit = window._canEditChar ?? STATE.isAdmin;
+  const canEdit = charSession.getCanEditChar() ?? STATE.isAdmin;
 
   // ── Regrouper par itemId + nom ──────────────────────────────────────────
   const grouped = [];
@@ -516,8 +517,8 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
       : '';
     const refundMsg = refundTotal > 0 ? ` (+${refundTotal} or de reprise)` : '';
     showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or${refundMsg} !${unequipMsg}`, 'success');
-    window.refreshOrDisplay?.(c);
-    _renderInventoryChar(c, window._currentCharTab || 'inventaire');
+    charSession.refresh?.(c);
+    _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -598,7 +599,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
       ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
       : '';
     showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
-    _renderInventoryChar(c, window._currentCharTab || 'inventaire');
+    _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -740,7 +741,7 @@ export async function sendInvItem(fromCharId, indicesB64) {
     ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
     : '';
   showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !${sendMsg}`, 'success');
-  _renderInventoryChar(fromChar, window._currentCharTab || 'inventaire');
+  _renderInventoryChar(fromChar, charSession.getCurrentCharTab() || 'inventaire');
 }
 
 // ══════════════════════════════════════════════
@@ -857,7 +858,7 @@ export async function sendGold(fromCharId) {
 
   closeModal();
   showNotif(`💰 ${montant} or envoyé à ${toChar.nom || 'joueur'} !`, 'success');
-  _renderInventoryChar(fromChar, window._currentCharTab || 'inventaire');
+  _renderInventoryChar(fromChar, charSession.getCurrentCharTab() || 'inventaire');
 }
 
 // ══════════════════════════════════════════════

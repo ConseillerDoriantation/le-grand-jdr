@@ -5,6 +5,7 @@
 import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
 import { _esc, modStr } from '../shared/html.js';
+import { charSession } from '../shared/char-session.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
@@ -83,9 +84,12 @@ import {
 import { quickViewChar } from './characters/quick-view.js';
 import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
+let _charAdminFilter = null;
+let _currentTopTab   = 'combat';
 let _csV3LedgerFilter = { kind: 'all', search: '', limit: 25 };
 let _csV3LedgerAddKind = 'recettes';
 let _csV3InvFilter = { cat: 'all', search: '' };
@@ -129,7 +133,7 @@ function selectChar(id, el) {
   document.querySelectorAll('#char-pills .char-pill').forEach(p=>p.classList.toggle('active', p.dataset.charid === id));
   if (el) el.classList.add('active');
   const c = STATE.characters.find(x=>x.id===id);
-  if (c) { STATE.activeChar=c; renderCharSheet(c, window._currentCharTab||'carac'); }
+  if (c) { STATE.activeChar=c; renderCharSheet(c, charSession.getCurrentCharTab()||'carac'); }
 }
 
 function filterAdminChars(pseudo, el) {
@@ -137,7 +141,7 @@ function filterAdminChars(pseudo, el) {
   document.querySelectorAll('#admin-player-filter .cs-admin-filter').forEach(p=>p.classList.remove('active'));
   if (el) el.classList.add('active');
   // Mémorise le filtre actif pour que renderCharSheet le réutilise au prochain rendu
-  window._charAdminFilter = pseudo || null;
+  _charAdminFilter = pseudo || null;
   // Sélectionne le 1er perso du filtre et rerendre
   const filtered = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
   // Sélectionne le ★ par défaut du joueur filtré si possible, sinon le premier (alpha)
@@ -195,14 +199,12 @@ function renderCharSheet(c, keepTab) {
   if (!area) return;
   const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
 
-  const v3Tab = _resolveV3Tab(keepTab || window._currentCharTab || 'combat');
+  const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
   // Conserver le sub-tab du Journal s'il existe (notes / quetes / relations)
   const journalSub = _currentJournalSub || 'notes';
 
-  window._currentChar    = c;
-  window._canEditChar    = canEdit;
-  window._currentCharTab = v3Tab;
-  window._currentTopTab  = v3Tab;
+  charSession.set(c, canEdit, v3Tab);
+  _currentTopTab = v3Tab;
 
   // ── Valeurs dérivées ─────────────────────────
   const pvMax      = calcPVMax(c);
@@ -268,8 +270,8 @@ function renderCharSheet(c, keepTab) {
   const allChars    = STATE.characters || [];
   let switchable    = STATE.isAdmin ? allChars : allChars.filter(x => x.uid === STATE.user?.uid);
   // Si admin a un filtre actif (par pseudo), on l'applique
-  if (STATE.isAdmin && window._charAdminFilter) {
-    switchable = switchable.filter(x => x.ownerPseudo === window._charAdminFilter);
+  if (STATE.isAdmin && _charAdminFilter) {
+    switchable = switchable.filter(x => x.ownerPseudo === _charAdminFilter);
   }
   // Ordre logique : groupé par joueur (alpha), perso "default" en tête de chaque groupe
   switchable = sortCharactersForDisplay(switchable);
@@ -1077,13 +1079,13 @@ function renderCharLedger(c, canEdit) {
 // Helper : récupère la référence FRAÎCHE du char depuis STATE (jamais une copie stale)
 function _csV3GetFreshChar(charId) {
   return STATE.characters.find(x => x.id === charId)
-      || (window._currentChar?.id === charId ? window._currentChar : null)
+      || (charSession.getCurrentChar()?.id === charId ? charSession.getCurrentChar() : null)
       || STATE.activeChar;
 }
 function _csV3SyncCharRefs(c) {
   if (!c) return;
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
-  if (window._currentChar?.id === c.id) window._currentChar = c;
+  if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
 }
 // Met à jour le solde de la bourse partout (sans tout re-render)
 function _csV3RefreshBourse(c) {
@@ -1100,7 +1102,7 @@ function _csV3RefreshBourse(c) {
     el.innerHTML = `<span class="or-card-amount">${value}</span> ${smallHtml}`;
   });
   // 3) Helper legacy (anciennes sidebars éventuelles)
-  try { window.refreshOrDisplay?.(c); } catch {}
+  try { charSession.refresh(c); } catch {}
 }
 // Date du jour au format ISO court YYYY-MM-DD (compatible artisan + tri propre)
 function _csV3TodayISO() {
@@ -1111,7 +1113,7 @@ function _csV3TodayISO() {
 }
 // Sauvegarde inline d'un champ texte (date / libelle) d'une écriture
 async function _csV3LedgerSaveField(el, kind, idx, field) {
-  const charId = window._currentChar?.id; if (!charId) return;
+  const charId = charSession.getCurrentChar()?.id; if (!charId) return;
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
   const row = (c.compte[kind] || [])[idx]; if (!row) return;
@@ -1122,8 +1124,8 @@ async function _csV3LedgerSaveField(el, kind, idx, field) {
   try {
     await updateInCol('characters', c.id, { compte: c.compte });
     // Si on a modifié la date, re-render pour refléter le nouveau tri/groupement
-    if (field === 'date' && window._currentCharTab === 'compte') {
-      _renderTabV3('compte', c, window._canEditChar);
+    if (field === 'date' && charSession.getCurrentCharTab() === 'compte') {
+      _renderTabV3('compte', c, charSession.getCanEditChar());
     }
   } catch (e) {
     console.warn('[ledger field save]', e);
@@ -1132,7 +1134,7 @@ async function _csV3LedgerSaveField(el, kind, idx, field) {
 }
 // Sauvegarde inline du montant (gère le signe + ou −)
 async function _csV3LedgerSaveAmount(el, kind, idx, sign) {
-  const charId = window._currentChar?.id; if (!charId) return;
+  const charId = charSession.getCurrentChar()?.id; if (!charId) return;
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
   const row = (c.compte[kind] || [])[idx]; if (!row) return;
@@ -1145,7 +1147,7 @@ async function _csV3LedgerSaveAmount(el, kind, idx, sign) {
     await updateInCol('characters', c.id, { compte: c.compte });
     _csV3RefreshBourse(c);
     // Re-render systématique pour actualiser les totaux/solde
-    if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+    if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
   } catch (e) {
     console.warn('[ledger amount save]', e);
     el.textContent = el.dataset.original || '';
@@ -1158,9 +1160,9 @@ function _csV3LedgerSetAddKind(kind, charId) {
   const prevDate = document.getElementById('ledger-date')?.value || '';
   const prevLib  = document.getElementById('ledger-lib')?.value  || '';
   const prevAmt  = document.getElementById('ledger-amount')?.value || '';
-  if (charId && window._currentCharTab === 'compte') {
+  if (charId && charSession.getCurrentCharTab() === 'compte') {
     const c = _csV3GetFreshChar(charId);
-    if (c) _renderTabV3('compte', c, window._canEditChar);
+    if (c) _renderTabV3('compte', c, charSession.getCanEditChar());
   }
   // Restaure les valeurs sur les nouveaux inputs
   requestAnimationFrame(() => {
@@ -1185,13 +1187,13 @@ async function _csV3DeleteLedger(charId, kind, idx) {
     await updateInCol('characters', c.id, { compte: c.compte });
     _csV3RefreshBourse(c);
   } catch (e) { console.warn('[ledger del]', e); }
-  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
 }
 
 function _csV3LedgerSetKind(charId, kind) {
   _csV3LedgerFilter = { ..._csV3LedgerFilter, kind, limit: 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  if (c && charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
 }
 function _csV3LedgerSetSearch(charId, search) {
   _csV3LedgerFilter = { ..._csV3LedgerFilter, search, limit: 25 };
@@ -1199,7 +1201,7 @@ function _csV3LedgerSetSearch(charId, search) {
   if (!c) return;
   // Re-render mais on restaure le focus + caret dans la search box
   const caret = document.querySelector('.ledger-search')?.selectionStart;
-  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
   requestAnimationFrame(() => {
     const inp = document.querySelector('.ledger-search');
     if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
@@ -1208,7 +1210,7 @@ function _csV3LedgerSetSearch(charId, search) {
 function _csV3LedgerMore(charId) {
   _csV3LedgerFilter = { ..._csV3LedgerFilter, limit: (_csV3LedgerFilter.limit || 25) + 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  if (c && charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
 }
 
 // Ajoute une écriture au compte via le schéma existant `c.compte.{recettes,depenses}`.
@@ -1221,8 +1223,8 @@ async function _csV3AddLedger(charId) {
   const date = (dateEl?.value || '').trim() || _csV3TodayISO();
   const lib  = (libEl.value || '').trim();
   const amt  = Math.abs(parseFloat((amtEl.value || '').replace(',', '.')) || 0);
-  if (!lib) { if (window.showNotif) window.showNotif('Libellé requis.', 'error'); libEl.focus(); return; }
-  if (!amt) { if (window.showNotif) window.showNotif('Montant requis.', 'error'); amtEl.focus(); return; }
+  if (!lib) { showNotif('Libellé requis.', 'error'); libEl.focus(); return; }
+  if (!amt) { showNotif('Montant requis.', 'error'); amtEl.focus(); return; }
   const c = _csV3GetFreshChar(charId);
   if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
@@ -1230,10 +1232,10 @@ async function _csV3AddLedger(charId) {
   c.compte[kind].push({ date, libelle: lib, montant: amt });
   _csV3SyncCharRefs(c);
   try { await updateInCol('characters', charId, { compte: c.compte }); }
-  catch (e) { if (window.showNotif) window.showNotif('Erreur de sauvegarde.', 'error'); return; }
+  catch (e) { showNotif('Erreur de sauvegarde.', 'error'); return; }
   _csV3RefreshBourse(c);
   // Re-render complet → totaux + tri + nouvelle ligne visibles
-  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
   // Focus l'input libellé pour la saisie en chaîne
   requestAnimationFrame(() => { document.getElementById('ledger-lib')?.focus(); });
 }
@@ -1263,7 +1265,7 @@ function renderCharJournal(c, canEdit, sub = 'notes') {
 
 function _csV3JournalSub(sub) {
   _currentJournalSub = sub;
-  const c = window._currentChar; const canEdit = window._canEditChar;
+  const c = charSession.getCurrentChar(); const canEdit = charSession.getCanEditChar();
   if (!c) return;
   // Rebuild juste l'onglet Journal sans recharger toute la fiche
   const area = document.getElementById('char-tab-content');
@@ -1362,10 +1364,10 @@ function renderCharNotesV3(c, canEdit) {
 
 function _csV3ToggleNote(idx) {
   _openNote = _openNote === idx ? null : idx;
-  const c = window._currentChar; if (!c) return;
+  const c = charSession.getCurrentChar(); if (!c) return;
   // Re-render journal en gardant le sub-tab notes
   _currentJournalSub = 'notes';
-  _renderTabV3('journal', c, window._canEditChar);
+  _renderTabV3('journal', c, charSession.getCanEditChar());
 }
 async function _csV3SaveNoteTitle(idx, value) {
   const c = STATE.activeChar; if (!c) return;
@@ -1721,7 +1723,7 @@ async function _csV3CommitTags(charId, nextTags) {
   if (_profilCache?.[charId]) _profilCache[charId].tags = nextTags;
   try { await updateInCol('characters', charId, { tags: nextTags }); }
   catch (e) { console.warn('[tags save]', e); }
-  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+  if (charSession.getCurrentCharTab() === 'profil') _renderTabV3('profil', c, true);
 }
 async function _csV3AddProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
@@ -1764,7 +1766,7 @@ async function _csV3SaveIdentityValue(charId, key, value) {
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) {
     console.warn('[identity save]', e);
-    if (window.showNotif) window.showNotif?.('Erreur de sauvegarde.', 'error');
+    showNotif('Erreur de sauvegarde.', 'error');
   }
 }
 // Renomme / supprime un champ CUSTOM (les defaults ne sont pas renommables)
@@ -1783,7 +1785,7 @@ async function _csV3RenameIdentity(charId, key) {
   c.identity = next;
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) { console.warn('[identity rename]', e); }
-  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+  if (charSession.getCurrentCharTab() === 'profil') _renderTabV3('profil', c, true);
 }
 // Ajoute un champ identité custom
 async function _csV3AddFact(charId) {
@@ -1795,7 +1797,7 @@ async function _csV3AddFact(charId) {
   c.identity = next;
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) { console.warn('[identity add]', e); }
-  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+  if (charSession.getCurrentCharTab() === 'profil') _renderTabV3('profil', c, true);
 }
 // Édition bio avec l'éditeur rich-text — mode "édition" toggle
 function _csV3EnterBioEdit(charId) {
@@ -1830,7 +1832,7 @@ async function _csV3SetCombatStyle(charId, styleId) {
   const next = c.combatStyle === styleId ? null : styleId;
   c.combatStyle = next;
   await updateInCol('characters', charId, { combatStyle: next });
-  if (window._currentCharTab === 'combat') _renderTabV3('combat', c, true);
+  if (charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, true);
 }
 
 async function _csV3SaveVisibility(charId, key, value) {
@@ -2092,13 +2094,13 @@ function renderCharCombatV3(c, canEdit) {
   if (!_combatTabCache.styles) {
     loadCombatStyles().then(s => {
       _combatTabCache.styles = s || [];
-      if (window._currentCharTab === 'combat') _renderTabV3('combat', c, canEdit);
+      if (charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit);
     }).catch(() => { _combatTabCache.styles = []; });
   }
   if (!_combatTabCache.dmgTypes) {
     loadDamageTypes().then(t => {
       _combatTabCache.dmgTypes = t || [];
-      if (window._currentCharTab === 'combat') _renderTabV3('combat', c, canEdit);
+      if (charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit);
     }).catch(() => { _combatTabCache.dmgTypes = []; });
   }
 
@@ -2386,13 +2388,13 @@ function renderCharInventaireV3(c, canEdit) {
 
 function _csV3InvSetCat(cat) {
   _csV3InvFilter = { ..._csV3InvFilter, cat };
-  if (window._currentChar && window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
+  if (charSession.getCurrentChar() && charSession.getCurrentCharTab() === 'inv') _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
 }
 function _csV3InvSetSearch(search) {
   _csV3InvFilter = { ..._csV3InvFilter, search };
-  if (!window._currentChar) return;
+  if (!charSession.getCurrentChar()) return;
   const caret = document.querySelector('.inv-search input')?.selectionStart;
-  if (window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'inv') _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
   requestAnimationFrame(() => {
     const inp = document.querySelector('.inv-search input');
     if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
@@ -2476,7 +2478,7 @@ async function allocateStat(charId, key, delta = 1) {
 
   c.stats = stats; c.statsLevelUps = levelUps;
   await updateInCol('characters', charId, { stats, statsLevelUps: levelUps });
-  renderCharSheet(c, window._currentCharTab || 'combat');
+  renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
 }
 
 /**
@@ -2489,7 +2491,7 @@ async function _setDefaultCharacter(charId) {
   const c = all.find(x => x.id === charId);
   if (!c) return;
   const ownerUid = c.uid;
-  if (!ownerUid) { window.showNotif?.('Personnage sans propriétaire.', 'error'); return; }
+  if (!ownerUid) { showNotif('Personnage sans propriétaire.', 'error'); return; }
   const wasOn = !!c.isDefault;
   try {
     // Désactive isDefault sur tous les autres persos du même propriétaire en parallèle
@@ -2503,19 +2505,19 @@ async function _setDefaultCharacter(charId) {
     c.isDefault = !wasOn;
     updates.push(updateInCol('characters', charId, { isDefault: c.isDefault }));
     await Promise.all(updates);
-    window.showNotif?.(c.isDefault
+    showNotif(c.isDefault
       ? `★ ${c.nom || 'Personnage'} défini comme personnage par défaut`
       : 'Personnage par défaut retiré', 'success');
     // Re-render la sheet pour mettre à jour les pills et l'étoile
-    if (window._currentChar?.id === charId) {
-      renderCharSheet(c, window._currentCharTab || 'combat');
+    if (charSession.getCurrentChar()?.id === charId) {
+      renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
     } else if (typeof renderCharSheet === 'function') {
-      const cur = window._currentChar || STATE.activeChar;
-      if (cur) renderCharSheet(cur, window._currentCharTab || 'combat');
+      const cur = charSession.getCurrentChar() || STATE.activeChar;
+      if (cur) renderCharSheet(cur, charSession.getCurrentCharTab() || 'combat');
     }
   } catch (e) {
     console.error('[set default char]', e);
-    if (window.notifySaveError) window.notifySaveError(e);
+    notifySaveError(e);
   }
 };
 
@@ -2551,16 +2553,16 @@ function showCharTab(tab, el) {
   const v3 = _resolveV3Tab(tab);
 
   // Mémorise la position de scroll de l'onglet quitté (pour le restituer plus tard)
-  const prevLeaf = window._currentCharTab;
-  const prevChar = window._currentChar?.id;
+  const prevLeaf = charSession.getCurrentCharTab();
+  const prevChar = charSession.getCurrentChar()?.id;
   if (prevLeaf && prevChar) {
     const area = document.getElementById('char-tab-content');
     const scrollTop = area?.scrollTop ?? window.scrollY ?? 0;
     if (scrollTop > 0) _scrollByTab.set(_scrollKey(prevChar, prevLeaf), scrollTop);
   }
 
-  window._currentTopTab  = v3;
-  window._currentCharTab = v3;
+  _currentTopTab  = v3;
+  charSession.getCurrentCharTab() = v3;
 
   // Onglets v3 (nouveau template)
   document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t =>
@@ -2571,10 +2573,10 @@ function showCharTab(tab, el) {
     t.classList.toggle('active', t.dataset.tab === v3)
   );
 
-  _renderTabV3(v3, window._currentChar, window._canEditChar);
+  _renderTabV3(v3, charSession.getCurrentChar(), charSession.getCanEditChar());
 
   // Restitue le scroll de l'onglet rejoint (si on y était déjà passé)
-  const charId = window._currentChar?.id;
+  const charId = charSession.getCurrentChar()?.id;
   const saved  = charId ? _scrollByTab.get(_scrollKey(charId, v3)) : null;
   if (saved != null) {
     requestAnimationFrame(() => {
@@ -2718,75 +2720,9 @@ registerActions({
   saveCharProfil:           (btn)   => saveCharProfil(btn.dataset.id),
 });
 
-Object.assign(window, {
-  // Noyau
-  charNavCardHtml, selectChar, filterAdminChars,
-  renderCharSheet, showCharTab,
-  _renderTab, refreshOrDisplay,
+charSession.bindRender(_renderTab, renderCharSheet, refreshOrDisplay);
 
-  // V3 (refonte personnage)
-  renderCharLedger, renderCharJournal, renderCharRelations,
-  allocateStat,
-
-  // Stats & affichage
-  getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier,
-
-  // Render tabs
-  renderCharCarac, renderCharEquip, renderCharDeck,
-  _renderInventaireBoutique, renderCharInventaire,
-  renderCharQuetes, renderCharNotes, renderCharCompte, renderCharMaitrises,
-  renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
-  addProfilTag, removeProfilTag,
-
-  // Inventaire
-  openSellInvModal, sellInvItemBulk, sellInvItem,
-  openDeleteInvModal, deleteInvItemBulk,
-  openSendInvModal, sendInvItem,
-  openSendGoldModal, sendGold,
-  addInvItem, _lootPillStyle, saveInvItemFromShop,
-  editInvItem, saveInvItem,
-  filterInvRows,
-
-  // Équipement
-  editEquipSlot, saveEquipSlot, clearEquipSlot,
-  equipSlotFromInv, previewEquipFromInv,
-
-  // Sorts
-  sortDragStart, sortDragOver, sortDragEnd, sortDrop,
-  toggleSortDetail, selectNoyau,
-  runeIncrement, runeDecrement, updateSortPM,
-  addSort, editSort, openSortModal, saveSort,
-  openSortCatEditor,
-
-  // Combat styles
-  openCombatStylesAdmin, openWeaponFormatsAdmin, openDamageTypesAdmin, openSpellMatricesAdmin,
-
-  // Compte
-  addCompteRow, deleteCompteRow, saveCompteField,
-
-  // Notes
-  addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
-
-  // XP
-  previewXpBar, saveXpDirect, addXpDelta,
-
-  // Maîtrises
-  addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
-
-  // Inline-edit
-  inlineEditText, inlineEditNum, inlineEditChip, inlineEditStatFromCard, inlineEditStat,
-
-  // Forms
-  setCharAura,
-  adjustStat, saveNotes,
-  toggleSort, toggleQuete, deleteQuete, deleteSort, deleteInvItem,
-  deleteChar, createNewChar,
-  manageTitres, addTitre, removeTitre, saveTitres,
-  addQuete, saveQuete, deleteCharPhoto,
-
-  // Export fiche
-  exportCharJSON, exportCharPDF, openCharExportMenu,
-
-  // Quick-view
-  quickViewChar,
-});
+// Exports legacy minimaux — uniquement ce qui est encore consommé via window.* par des modules lazy
+// filterAdminChars : pages.js registerActions (bridge lazy)
+// charNavCardHtml, selectChar : compatibilité externe résiduelle
+Object.assign(window, { charNavCardHtml, selectChar, filterAdminChars, showCharTab });

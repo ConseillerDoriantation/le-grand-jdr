@@ -21,6 +21,7 @@ import {
   selectRichTextNodeContents,
 } from '../shared/rich-text.js';
 import PAGES from './pages.js';
+import { getHistoireCtx, setHistoireCtx } from '../shared/histoire-ctx.js';
 import { registerActions } from '../core/actions.js';
 
 // ── Config des types de tags ──────────────────────────────────────────────────
@@ -99,7 +100,7 @@ let _desDragOverEl = null;
 
 // ── Entrée principale ─────────────────────────────────────────────────────────
 async function renderHistoire() {
-  const ctx = window._histoireCtx || {};
+  const ctx = getHistoireCtx();
   _missionId    = ctx.id    || null;
   _missionTitre = ctx.titre || 'Mission';
   _missionActe  = ctx.acte  || '';
@@ -669,7 +670,7 @@ async function _switchHistMission(id, titre, acte) {
   _missionId    = id;
   _missionTitre = titre;
   _missionActe  = acte;
-  window._histoireCtx = { id, titre, acte };
+  setHistoireCtx(id, titre, acte);
 
   // Mettre à jour la topbar
   const pill  = document.querySelector('.hist-acte-pill');

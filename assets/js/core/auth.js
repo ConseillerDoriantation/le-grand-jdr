@@ -25,6 +25,8 @@ function clearAuthError() {
   if (errorBox) errorBox.textContent = '';
 }
 
+let _authUiBound = false;
+
 export function setAuthError(message) {
   const errorBox = document.getElementById('auth-error');
   if (errorBox) errorBox.textContent = message || '';
@@ -163,7 +165,7 @@ export async function doRegister() {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     await saveProfile(credential.user, pseudo);
     clearAuthError();
-    window.showNotif?.('Compte créé avec succès.', 'success');
+    showNotif('Compte créé avec succès.', 'success');
   } catch (error) {
     console.error('[auth] doRegister error:', error);
     setAuthError(getAuthError(error));
@@ -189,7 +191,7 @@ export async function doPasswordReset() {
   try {
     if (link) { link.style.pointerEvents = 'none'; link.textContent = 'Envoi...'; }
     await sendPasswordResetEmail(auth, email);
-    window.showNotif?.(
+    showNotif(
       `Un email de réinitialisation a été envoyé à ${email}.`,
       'success'
     );
@@ -247,8 +249,8 @@ function handleAuthKeydown(event) {
 }
 
 export function bindAuthUI() {
-  if (window.__authUiBound) return;
-  window.__authUiBound = true;
+  if (_authUiBound) return;
+  _authUiBound = true;
 
   const loginBtn = getLoginButton();
   const registerBtn = getRegisterButton();

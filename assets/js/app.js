@@ -23,6 +23,7 @@ import {
 } from './shared/modal.js';
 
 import { showNotif }              from './shared/notifications.js';
+import { openAdventureSwitcher }  from './core/layout.js';
 import { initTheme, toggleTheme } from './shared/theme.js';
 
 // ── Modules chargés au boot (nécessaires immédiatement) ──────────────────────
@@ -63,7 +64,7 @@ Object.assign(window, {
 // Actions globales déléguées (boutons statiques d'index.html / layout)
 registerActions({
   'toggle-theme': () => toggleTheme(),
-  openAdventureSwitcher: () => window.openAdventureSwitcher?.(),
+  openAdventureSwitcher: () => openAdventureSwitcher(),
   openCreateAdventureModal: () => openCreateAdventureModal(),
   pickAdventure: (btn) => pickAdventure(btn.dataset.id),
   _advSwitchPick: (btn) => { closeModal(); pickAdventure(btn.dataset.id); },

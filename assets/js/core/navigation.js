@@ -3,6 +3,7 @@
 // ══════════════════════════════════════════════
 
 import { STATE, setPage } from './state.js';
+import { showNotif } from '../shared/notifications.js';
 import PAGES from '../features/pages.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { appSplashHtml } from '../shared/html.js';
@@ -123,11 +124,11 @@ export function initEventDelegation() {
     // Actions auth déléguées + registry central
     const actionBtn = e.target.closest('[data-action]');
     const action = actionBtn?.dataset.action;
-    if (action === 'logout')            { window.doLogout?.();                       return; }
-    if (action === 'login')             { e.preventDefault(); window.doLogin?.();    return; }
-    if (action === 'register')          { e.preventDefault(); window.doRegister?.(); return; }
-    if (action === 'auth-tab-login')    { window.switchAuthTab?.('login');           return; }
-    if (action === 'auth-tab-register') { window.switchAuthTab?.('register');        return; }
+    if (action === 'logout')            { doLogout();                       return; }
+    if (action === 'login')             { e.preventDefault(); doLogin();    return; }
+    if (action === 'register')          { e.preventDefault(); doRegister(); return; }
+    if (action === 'auth-tab-login')    { switchAuthTab('login');           return; }
+    if (action === 'auth-tab-register') { switchAuthTab('register');        return; }
     if (action === 'toggle-pw') {
       const btn = e.target.closest('[data-action="toggle-pw"]');
       const input = btn && document.getElementById(btn.dataset.target);

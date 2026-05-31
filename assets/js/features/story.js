@@ -5,6 +5,7 @@
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { navigate } from '../core/navigation.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -13,6 +14,7 @@ import { _esc, _nl2br } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES from './pages.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { setHistoireCtx } from '../shared/histoire-ctx.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
@@ -2127,8 +2129,8 @@ async function _createNewActe() {
 
 // ── OUVRIR L'ÉDITEUR D'HISTOIRE ───────────────────────────────────────────────
 function _ouvrirHistoire(id, titre, acte) {
-  window._histoireCtx = { id, titre, acte };
-  window.navigate('histoire');
+  setHistoireCtx(id, titre, acte);
+  navigate('histoire');
 }
 
 // ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────

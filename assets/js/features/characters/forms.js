@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
@@ -11,7 +12,7 @@ import PAGES from '../pages.js';
 let _newCharOwners = [];
 let _editTitres = [];
 function _renderFormsChar(c, tab) {
-  window.renderCharSheet?.(c, tab || window._currentCharTab || 'combat');
+  charSession.renderSheet(c, tab || charSession.getCurrentCharTab() || 'combat');
 }
 
 // ══════════════════════════════════════════════
@@ -167,7 +168,7 @@ export async function deleteChar(id) {
   // ── Reset de l'état actif si on vient de supprimer le perso affiché ────────
   // Évite un « ghost » : la fiche supprimée pointée par STATE.activeChar.
   if (STATE.activeChar?.id === id)   STATE.activeChar = null;
-  if (window._currentChar?.id === id) window._currentChar = null;
+  if (charSession.getCurrentChar()?.id === id) charSession.set(null, false, charSession.getCurrentCharTab());
   if (Array.isArray(STATE.characters)) {
     STATE.characters = STATE.characters.filter(c => c.id !== id);
   }

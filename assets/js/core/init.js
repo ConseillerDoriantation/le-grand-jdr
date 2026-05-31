@@ -66,7 +66,6 @@ setFirebase(auth, db, {
   signOut, onAuthStateChanged, ADMIN_EMAIL,
 });
 
-window.STATE = STATE;
 
 // ── Auth state ─────────────────────────────────
 onAuthStateChanged(auth, async (user) => {
@@ -243,5 +242,4 @@ async function _runMigrationFromPicker(uid) {
 }
 
 // Exposer pour le bouton HTML du picker
-window._runMigrationFromPicker = () => _runMigrationFromPicker(STATE.user?.uid);
 

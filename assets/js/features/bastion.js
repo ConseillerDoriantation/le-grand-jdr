@@ -322,7 +322,7 @@ function _attachListener() {
 // ══════════════════════════════════════════════════════════════════════════════
 // ACTIONS — MJ
 // ══════════════════════════════════════════════════════════════════════════════
-window._bastionBuild = async (slug) => {
+async function _bastionBuild(slug) {
   if (!STATE.isAdmin) return;
   const b = { ..._bastion } || _defaultBastion();
   const def = _getRoomDef(slug);
@@ -355,9 +355,9 @@ window._bastionBuild = async (slug) => {
 
   await _save(b);
   showNotif(`Construction de ${def.nom} ${NIVEAU_LABEL[target]} lancée.`, 'success');
-};
+}
 
-window._bastionAdvanceWeek = async () => {
+async function _bastionAdvanceWeek() {
   if (!STATE.isAdmin) return;
   if (!_bastion) return;
   const ok = await confirmModal('▶ Passer à la période suivante ?\n\nProductions appliquées, constructions avancées, salaires payés.', {
@@ -441,9 +441,9 @@ window._bastionAdvanceWeek = async () => {
     totalSalaires > 0 ? `−${totalSalaires} salaires` : null,
   ].filter(Boolean).join(' · ') || 'aucune production';
   showNotif(`▶ Période ${b.semaine} — ${summary}`, 'success');
-};
+}
 
-window._bastionEditIdentite = async () => {
+async function _bastionEditIdentite() {
   if (!STATE.isAdmin) return;
   const b = _bastion || _defaultBastion();
   openModal('🏰 Identité du Bastion', `
@@ -466,9 +466,9 @@ window._bastionEditIdentite = async () => {
       <button class="btn btn-outline btn-sm bs-danger-btn" data-action="_bastionResetAll">🗑 Réinitialiser tout le Bastion</button>
     </div>
   `);
-};
+}
 
-window._bastionResetAll = async () => {
+async function _bastionResetAll() {
   if (!STATE.isAdmin) return;
   const ok = await confirmModal(
     'Cette action est IRRÉVERSIBLE.\n\nElle efface : salles, employés, coffre, or, chronique, quêtes, overrides et salles custom.\n\nElle conserve uniquement la sauvegarde JSON si tu l\'as téléchargée.\n\nContinuer ?',
@@ -485,8 +485,8 @@ window._bastionResetAll = async () => {
     closeModal();
     showNotif('Bastion réinitialisé. Bonne campagne !', 'success');
   } catch (e) { notifySaveError(e); }
-};
-window._bastionSaveIdentite = async () => {
+}
+async function _bastionSaveIdentite() {
   if (!STATE.isAdmin) return;
   const b = { ..._bastion };
   b.nom         = document.getElementById('bas-nom')?.value?.trim() || 'Le Bastion';
@@ -496,12 +496,12 @@ window._bastionSaveIdentite = async () => {
   await _save(b);
   closeModal();
   showNotif('Identité mise à jour.', 'success');
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ACTIONS — Inventaire (déposer / retirer un objet)
 // ══════════════════════════════════════════════════════════════════════════════
-window._bastionOpenDeposit = () => {
+function _bastionOpenDeposit() {
   let chars = _eligibleChars().filter(c => (c.inventaire || []).length > 0);
   if (!chars.length) { showNotif('Aucun personnage avec inventaire.', 'error'); return; }
 
@@ -533,12 +533,12 @@ window._bastionOpenDeposit = () => {
     </div>
     <button class="btn btn-gold" style="width:100%" data-action="_bastionDoDeposit">📥 Déposer</button>
   `);
-  window._bastionRefreshDepositItems();
-};
-window._bastionFillDepositMax = () => {
+  _bastionRefreshDepositItems();
+}
+function _bastionFillDepositMax() {
   const qte = document.getElementById('bas-dep-qte');
   if (qte && qte.max) qte.value = qte.max;
-};
+}
 
 // Regroupe l'inventaire par (itemId + nom) — même algo que la fiche perso.
 // Renvoie [{ key, item: template, totalQte, indices: [realIdx,...] }]
@@ -560,7 +560,7 @@ function _groupInventaire(inv) {
 // Buffer module-level : regroupements actifs dans la modal de dépôt
 let _depositGroups = [];
 
-window._bastionRefreshDepositItems = () => {
+function _bastionRefreshDepositItems() {
   const charId = document.getElementById('bas-dep-char')?.value;
   const char = (STATE.characters || []).find(c => c.id === charId);
   const sel = document.getElementById('bas-dep-item');
@@ -569,9 +569,9 @@ window._bastionRefreshDepositItems = () => {
   sel.innerHTML = _depositGroups.length
     ? _depositGroups.map((g, i) => `<option value="${i}">${_esc(g.item.nom || '?')} ×${g.totalQte}${g.item.rarete ? ` (${g.item.rarete})` : ''}</option>`).join('')
     : `<option value="">-- Inventaire vide --</option>`;
-  window._bastionRefreshDepositMax();
-};
-window._bastionRefreshDepositMax = () => {
+  _bastionRefreshDepositMax();
+}
+function _bastionRefreshDepositMax() {
   const gi = parseInt(document.getElementById('bas-dep-item')?.value);
   const qte = document.getElementById('bas-dep-qte');
   const info = document.getElementById('bas-dep-info');
@@ -582,9 +582,9 @@ window._bastionRefreshDepositMax = () => {
   qte.max = maxQte;
   qte.value = maxQte;
   if (info) info.textContent = `(stack disponible : ${maxQte})`;
-};
+}
 
-window._bastionDoDeposit = async () => {
+async function _bastionDoDeposit() {
   const charId = document.getElementById('bas-dep-char')?.value;
   const char = (STATE.characters || []).find(c => c.id === charId);
   const gi = parseInt(document.getElementById('bas-dep-item')?.value);
@@ -645,9 +645,9 @@ window._bastionDoDeposit = async () => {
     closeModal();
     showNotif(`✓ ${qte}× ${item.nom} déposé au coffre.`, 'success');
   } catch (e) { notifySaveError(e); }
-};
+}
 
-window._bastionOpenWithdrawItem = (coffreId) => {
+function _bastionOpenWithdrawItem(coffreId) {
   const item = (_bastion?.coffre || []).find(c => c.id === coffreId);
   if (!item) return;
   let chars = _eligibleChars();
@@ -672,9 +672,9 @@ window._bastionOpenWithdrawItem = (coffreId) => {
     </div>
     <button class="btn btn-gold" style="width:100%" data-action="_bastionDoWithdraw" data-id="${coffreId}">📤 Retirer</button>
   `);
-};
+}
 
-window._bastionDoWithdraw = async (coffreId) => {
+async function _bastionDoWithdraw(coffreId) {
   const charId = document.getElementById('bas-wd-char')?.value;
   const qte = parseInt(document.getElementById('bas-wd-qte')?.value) || 0;
   const char = (STATE.characters || []).find(c => c.id === charId);
@@ -708,12 +708,12 @@ window._bastionDoWithdraw = async (coffreId) => {
     closeModal();
     showNotif(`✓ ${qte}× ${coffreItem.nom} récupéré.`, 'success');
   } catch (e) { notifySaveError(e); }
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ACTIONS — Éditeur de salles (MJ uniquement)
 // ══════════════════════════════════════════════════════════════════════════════
-window._bastionOpenCatalogEditor = () => {
+function _bastionOpenCatalogEditor() {
   if (!STATE.isAdmin) return;
   const cat = _getRoomCatalog(_bastion);
   openModal('✏️ Éditer les salles & activités', `
@@ -736,9 +736,9 @@ window._bastionOpenCatalogEditor = () => {
       <button class="btn btn-gold" data-action="_bastionAddCustomRoom">＋ Nouvelle salle custom</button>
     </div>
   `);
-};
+}
 
-window._bastionAddCustomRoom = async () => {
+async function _bastionAddCustomRoom() {
   if (!STATE.isAdmin) return;
   const slug = `custom_${Date.now().toString(36)}`;
   const newRoom = {
@@ -758,10 +758,10 @@ window._bastionAddCustomRoom = async () => {
   await _save(b);
   closeModal();
   // Ouvre directement l'éditeur de la nouvelle salle pour personnalisation immédiate
-  setTimeout(() => window._bastionEditRoom(slug), 200);
-};
+  setTimeout(() => _bastionEditRoom(slug), 200);
+}
 
-window._bastionDeleteCustomRoom = async (slug) => {
+async function _bastionDeleteCustomRoom(slug) {
   if (!STATE.isAdmin) return;
   if (!slug.startsWith('custom_')) { showNotif('Seules les salles custom peuvent être supprimées.', 'error'); return; }
   const ok = await confirmModal('Supprimer définitivement cette salle custom ?\n\nSi elle est construite, l\'entrée dans b.salles persistera (sans effet).', {
@@ -773,9 +773,9 @@ window._bastionDeleteCustomRoom = async (slug) => {
   await _save(b);
   closeModal();
   showNotif('Salle supprimée.', 'success');
-};
+}
 
-window._bastionEditRoom = async (slug) => {
+async function _bastionEditRoom(slug) {
   if (!STATE.isAdmin) return;
   const def = _getRoomDef(slug);
   if (!def) return;
@@ -841,7 +841,7 @@ window._bastionEditRoom = async (slug) => {
   // Une fois le shop chargé, on rend les pickers (3 niveaux)
   await shopPromise;
   [0, 1, 2].forEach(_renderItemPicker);
-};
+}
 
 // State temporaire de l'éditeur (cleared sur chaque ouverture)
 let _editingItems = [[], [], []];
@@ -920,11 +920,11 @@ function _renderItemPicker(i) {
   `;
 }
 
-window._bastionSetPickerCat = (i, val) => {
+function _bastionSetPickerCat(i, val) {
   _pickerFilters[i] = { ...(_pickerFilters[i] || {}), cat: val };
   _renderItemPicker(i);
-};
-window._bastionSetPickerSearch = (i, val) => {
+}
+function _bastionSetPickerSearch(i, val) {
   // On garde le focus dans le champ : on ne re-render que le <select> des items
   _pickerFilters[i] = { ...(_pickerFilters[i] || {}), search: val };
   // Re-render limité au select pour ne pas perdre le focus du champ recherche
@@ -944,9 +944,9 @@ window._bastionSetPickerSearch = (i, val) => {
          ${filtered.map(s => `<option value="${s.id}">${_esc((s.icone||s.emoji||'📦') + ' ' + (s.nom||'?'))}${s.prix ? ` (${s.prix}o)` : ''}</option>`).join('')}`
       : `<option value="">— Aucun résultat —</option>`;
   }
-};
+}
 
-window._bastionAddShopItem = (i) => {
+function _bastionAddShopItem(i) {
   const id = document.getElementById(`ed-items-shop-${i}`)?.value;
   const q = parseInt(document.getElementById(`ed-items-q-${i}`)?.value) || 1;
   if (!id) { showNotif('Sélectionne un article.', 'error'); return; }
@@ -965,18 +965,18 @@ window._bastionAddShopItem = (i) => {
     });
   }
   _renderItemPicker(i);
-};
+}
 
-window._bastionRemoveItem = (i, idx) => {
+function _bastionRemoveItem(i, idx) {
   _editingItems[i].splice(idx, 1);
   _renderItemPicker(i);
-};
-window._bastionEditItemQty = (i, idx, val) => {
+}
+function _bastionEditItemQty(i, idx, val) {
   const q = parseInt(val) || 1;
   if (_editingItems[i][idx]) _editingItems[i][idx].q = Math.max(1, q);
-};
+}
 
-window._bastionSaveRoom = async (slug) => {
+async function _bastionSaveRoom(slug) {
   if (!STATE.isAdmin) return;
 
   const override = {
@@ -1018,9 +1018,9 @@ window._bastionSaveRoom = async (slug) => {
   await _save(b);
   closeModal();
   showNotif('Salle mise à jour.', 'success');
-};
+}
 
-window._bastionResetRoom = async (slug) => {
+async function _bastionResetRoom(slug) {
   if (!STATE.isAdmin) return;
   const ok = await confirmModal(`Restaurer « ${slug} » à ses valeurs par défaut ?`, {
     title: '↻ Restaurer défaut', okLabel: 'Restaurer', cancelLabel: 'Annuler',
@@ -1037,14 +1037,14 @@ window._bastionResetRoom = async (slug) => {
   await _save(b);
   closeModal();
   showNotif('Restauré.', 'success');
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ACTIONS — Personnel (employés du bastion)
 // b.personnel = [{ id, nom, role, salaire, bonus, hiredAtWeek }]
 // Les salaires sont débités du trésor à chaque "Passer la semaine".
 // ══════════════════════════════════════════════════════════════════════════════
-window._bastionOpenPersonnel = () => {
+function _bastionOpenPersonnel() {
   const b = _bastion || _defaultBastion();
   const emp = b.personnel || [];
   const totalSalaires = emp.reduce((s, e) => s + (parseInt(e.salaire) || 0), 0);
@@ -1147,7 +1147,7 @@ window._bastionOpenPersonnel = () => {
       Pour embaucher, va sur la carte de la salle dans "Salles & activités".
     </p>
   `);
-};
+}
 
 // Cache partagé : PNJ chargés pour l'embauche ET pour l'affichage des portraits dans les salles
 let _hireNpcsCache = null;
@@ -1159,7 +1159,7 @@ async function _loadNpcs() {
   return _npcsCache;
 }
 
-window._bastionOpenHire = async (roomSlug) => {
+async function _bastionOpenHire(roomSlug) {
   if (!STATE.isAdmin) return;
   if (!roomSlug) { showNotif('Aucune salle ciblée.', 'error'); return; }
   const def = _getRoomDef(roomSlug);
@@ -1219,9 +1219,9 @@ window._bastionOpenHire = async (roomSlug) => {
     <button class="btn btn-gold" style="width:100%;margin-top:.6rem" id="bs-hire-submit"
       data-action="_bastionDoHire" disabled>Sélectionne un allié</button>
   `);
-};
+}
 
-window._bastionSelectHireCard = (npcId) => {
+function _bastionSelectHireCard(npcId) {
   document.querySelectorAll('.bs-hire-card').forEach(c => c.classList.toggle('selected', c.dataset.npcId === npcId));
   const hidden = document.getElementById('bs-hire-selected-npc');
   if (hidden) hidden.value = npcId;
@@ -1231,10 +1231,10 @@ window._bastionSelectHireCard = (npcId) => {
     const npc = (_hireNpcsCache || []).find(n => n.id === npcId);
     btn.textContent = npc ? `✓ Embaucher ${npc.nom}` : 'Embaucher';
   }
-};
+}
 
 let _hireInProgress = false;
-window._bastionDoHire = async () => {
+async function _bastionDoHire() {
   if (_hireInProgress) return;
   if (!STATE.isAdmin) return;
   _hireInProgress = true;
@@ -1270,9 +1270,9 @@ window._bastionDoHire = async () => {
   } finally {
     _hireInProgress = false;
   }
-};
+}
 
-window._bastionFireEmployee = async (empId) => {
+async function _bastionFireEmployee(empId) {
   if (!STATE.isAdmin) return;
   const emp = (_bastion?.personnel || []).find(e => e.id === empId);
   if (!emp) return;
@@ -1286,9 +1286,9 @@ window._bastionFireEmployee = async (empId) => {
   await _save(b);
   closeModal();
   showNotif(`${emp.nom} a quitté le bastion.`, 'success');
-};
+}
 
-window._bastionShowDetails = (slug) => {
+function _bastionShowDetails(slug) {
   const def = _getRoomDef(slug);
   if (!def) return;
   const b = _bastion || _defaultBastion();
@@ -1359,7 +1359,7 @@ window._bastionShowDetails = (slug) => {
       <div class="bs-det-levels">${niveauxHtml}</div>
     </div>
   `);
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // EXPORT JSON — backup du bastion
@@ -1367,7 +1367,7 @@ window._bastionShowDetails = (slug) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // PRÉVISUALISATION MJ — projette l'état dans N semaines sans rien modifier
 // ══════════════════════════════════════════════════════════════════════════════
-window._bastionOpenPreview = () => {
+function _bastionOpenPreview() {
   if (!STATE.isAdmin) return;
   openModal('🔮 Prévisualisation', `
     <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:.7rem">
@@ -1380,10 +1380,10 @@ window._bastionOpenPreview = () => {
     </div>
     <div id="bs-preview-result"></div>
   `);
-  window._bastionRunPreview();
-};
+  _bastionRunPreview();
+}
 
-window._bastionRunPreview = () => {
+function _bastionRunPreview() {
   const n = parseInt(document.getElementById('bs-preview-n')?.value) || 0;
   const out = document.getElementById('bs-preview-result');
   if (!out || !_bastion) return;
@@ -1483,9 +1483,9 @@ window._bastionRunPreview = () => {
       </p>
     </div>
   `;
-};
+}
 
-window._bastionExportJSON = () => {
+function _bastionExportJSON() {
   if (!_bastion) { showNotif('Aucune donnée à exporter.', 'error'); return; }
   const payload = {
     type: 'le-grand-jdr.bastion',
@@ -1505,16 +1505,16 @@ window._bastionExportJSON = () => {
   document.body.appendChild(a); a.click();
   setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 100);
   showNotif(`💾 ${filename} téléchargé`, 'success');
-};
+}
 
-window._bastionAdjustRessource = async (key, delta) => {
+async function _bastionAdjustRessource(key, delta) {
   if (!STATE.isAdmin) return;
   const b = { ..._bastion };
   b[key] = Math.max(0, (b[key] || 0) + delta);
   if (key === 'renommee' || key === 'influence') b[key] = Math.min(100, b[key]);
   // Pas de log : ajustements MJ silencieux
   await _save(b);
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ACTIONS — Transfert d'or (verser / retirer) — joueurs & MJ
@@ -1528,7 +1528,7 @@ function _eligibleChars() {
   return sortCharactersForDisplay(filtered);
 }
 
-window._bastionOpenTransfer = (direction) => {
+function _bastionOpenTransfer(direction) {
   // direction = 'deposit' | 'withdraw'
   const isDeposit = direction === 'deposit';
   let chars = _eligibleChars();
@@ -1557,10 +1557,10 @@ window._bastionOpenTransfer = (direction) => {
     <button class="btn ${cls}" style="width:100%" data-action="_bastionDoTransfer" data-dir="${direction}">${cta}</button>
   `);
   // Init de l'info "Or disponible"
-  window._bastionRefreshTransfer(direction);
-};
+  _bastionRefreshTransfer(direction);
+}
 
-window._bastionRefreshTransfer = (direction) => {
+function _bastionRefreshTransfer(direction) {
   const isDeposit = direction === 'deposit';
   const charId = document.getElementById('bas-tx-char')?.value;
   const char   = (STATE.characters || []).find(c => c.id === charId);
@@ -1579,9 +1579,9 @@ window._bastionRefreshTransfer = (direction) => {
     input.max = bastionOr;
     if (parseInt(input.value) > bastionOr) input.value = bastionOr;
   }
-};
+}
 
-window._bastionDoTransfer = async (direction) => {
+async function _bastionDoTransfer(direction) {
   const isDeposit = direction === 'deposit';
   const charId = document.getElementById('bas-tx-char')?.value;
   const amount = parseInt(document.getElementById('bas-tx-montant')?.value) || 0;
@@ -1612,7 +1612,7 @@ window._bastionDoTransfer = async (direction) => {
     closeModal();
     showNotif(`✓ ${amount} or ${isDeposit ? 'versés' : 'retirés'}.`, 'success');
   } catch (e) { notifySaveError(e); }
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU
@@ -1795,7 +1795,7 @@ function _renderRooms(b) {
     </section>`;
 }
 
-window._bastionResetRooms = async () => {
+async function _bastionResetRooms() {
   if (!STATE.isAdmin) return;
   const built = Object.entries(_bastion?.salles || {})
     .filter(([_, s]) => (s?.niveau || 0) > 0 || s?.weeksLeftToBuild > 0)
@@ -1817,7 +1817,7 @@ window._bastionResetRooms = async () => {
   b.salles = {};
   await _save(b);
   showNotif('Salles réinitialisées.', 'success');
-};
+}
 
 // Catégorise un item du coffre pour le filtrage. Heuristique :
 //   1. item.originalItem.type / .categorie  → cohérent avec la boutique
@@ -1845,8 +1845,8 @@ function _coffreItemCategory(item) {
 let _coffreFilter = 'all';   // 'all'|'armes'|'armures'|'potions'|'scrolls'|'bijoux'|'ressources'|'autre'|'mine'
 let _coffreSearch = '';
 
-window._bastionSetCoffreFilter = (cat) => { _coffreFilter = cat; _renderPage(); };
-window._bastionSetCoffreSearch = (val) => { _coffreSearch = (val || '').toLowerCase().trim(); _renderPage(); };
+function _bastionSetCoffreFilter(cat) { _coffreFilter = cat; _renderPage(); }
+function _bastionSetCoffreSearch(val) { _coffreSearch = (val || '').toLowerCase().trim(); _renderPage(); }
 
 function _renderCoffre(b) {
   const coffre = (b.coffre || []);
@@ -1953,9 +1953,9 @@ const BQ_STATUTS = {
   en_cours:  { lbl: 'En cours',    color: '#e8b84b', emoji: '⚙️' },
   terminee:  { lbl: 'Terminée',    color: '#22c38e', emoji: '✅' },
   echouee:   { lbl: 'Échouée',     color: '#ff5a7e', emoji: '❌' },
-};
+}
 
-window._bastionOpenQuestEditor = (questId) => {
+function _bastionOpenQuestEditor(questId) {
   if (!STATE.isAdmin) return;
   const q = questId ? (_bastion?.bastionQuests || []).find(x => x.id === questId) : null;
   openModal(q ? '✏️ Modifier la quête' : '＋ Nouvelle quête du Bastion', `
@@ -1975,9 +1975,9 @@ window._bastionOpenQuestEditor = (questId) => {
       ${q ? `<button class="btn btn-outline btn-sm" style="color:var(--crimson);border-color:rgba(255,90,126,0.40)" data-action="_bastionDeleteQuest" data-id="${q.id}">🗑 Supprimer</button>` : ''}
     </div>
   `);
-};
+}
 
-window._bastionSaveQuest = async (id) => {
+async function _bastionSaveQuest(id) {
   if (!STATE.isAdmin) return;
   const titre = document.getElementById('bq-titre')?.value?.trim();
   if (!titre) { showNotif('Le titre est requis.', 'error'); return; }
@@ -2001,9 +2001,9 @@ window._bastionSaveQuest = async (id) => {
   await _save(b);
   closeModal();
   showNotif(id ? 'Quête mise à jour.' : 'Quête créée.', 'success');
-};
+}
 
-window._bastionDeleteQuest = async (id) => {
+async function _bastionDeleteQuest(id) {
   if (!STATE.isAdmin) return;
   const ok = await confirmModal('Supprimer cette quête définitivement ?', {
     title: '🗑 Supprimer la quête', okLabel: 'Supprimer', cancelLabel: 'Annuler',
@@ -2014,7 +2014,7 @@ window._bastionDeleteQuest = async (id) => {
   await _save(b);
   closeModal();
   showNotif('Quête supprimée.', 'success');
-};
+}
 
 function _renderBastionQuests(b) {
   const quests = (b.bastionQuests || []);
@@ -2081,10 +2081,10 @@ function _renderHistorique(b) {
     </section>`;
 }
 
-window._bastionToggleHisto = () => {
+function _bastionToggleHisto() {
   _histoExpanded = !_histoExpanded;
   _renderPage();
-};
+}
 
 function _renderPage() {
   const content = document.getElementById('main-content');
@@ -2126,49 +2126,49 @@ async function renderBastionPage() {
 PAGES.bastion = renderBastionPage;
 
 registerActions({
-  _bastionRefreshDepositItems: () => window._bastionRefreshDepositItems?.(),
-  _bastionRefreshDepositMax:   () => window._bastionRefreshDepositMax?.(),
-  _bastionEditItemQty: (el) => window._bastionEditItemQty?.(Number(el.dataset.i), Number(el.dataset.idx), el.value),
-  _bastionSetPickerCat:    (el) => window._bastionSetPickerCat?.(Number(el.dataset.i), el.value),
-  _bastionSetPickerSearch: (el) => window._bastionSetPickerSearch?.(Number(el.dataset.i), el.value),
-  _bastionRunPreview:      () => window._bastionRunPreview?.(),
-  _bastionRefreshTransfer: (el) => window._bastionRefreshTransfer?.(el.dataset.direction),
-  _bastionSetCoffreSearch: (el) => window._bastionSetCoffreSearch?.(el.value),
-  _bastionSaveIdentite:     () => window._bastionSaveIdentite?.(),
-  _bastionResetAll:         () => window._bastionResetAll?.(),
-  _bastionFillDepositMax:   () => window._bastionFillDepositMax?.(),
-  _bastionDoDeposit:        () => window._bastionDoDeposit?.(),
+  _bastionRefreshDepositItems: () => _bastionRefreshDepositItems(),
+  _bastionRefreshDepositMax:   () => _bastionRefreshDepositMax(),
+  _bastionEditItemQty: (el) => _bastionEditItemQty(Number(el.dataset.i), Number(el.dataset.idx), el.value),
+  _bastionSetPickerCat:    (el) => _bastionSetPickerCat(Number(el.dataset.i), el.value),
+  _bastionSetPickerSearch: (el) => _bastionSetPickerSearch(Number(el.dataset.i), el.value),
+  _bastionRunPreview:      () => _bastionRunPreview(),
+  _bastionRefreshTransfer: (el) => _bastionRefreshTransfer(el.dataset.direction),
+  _bastionSetCoffreSearch: (el) => _bastionSetCoffreSearch(el.value),
+  _bastionSaveIdentite:     () => _bastionSaveIdentite(),
+  _bastionResetAll:         () => _bastionResetAll(),
+  _bastionFillDepositMax:   () => _bastionFillDepositMax(),
+  _bastionDoDeposit:        () => _bastionDoDeposit(),
   _bastionSetMax:      (btn) => { const el = document.getElementById(btn.dataset.target); if (el) el.value = btn.dataset.val; },
-  _bastionDoWithdraw:       (btn) => window._bastionDoWithdraw?.(btn.dataset.id),
-  _bastionEditRoom:         (btn) => window._bastionEditRoom?.(btn.dataset.slug),
-  _bastionAddCustomRoom:    () => window._bastionAddCustomRoom?.(),
-  _bastionDeleteCustomRoom: (btn) => window._bastionDeleteCustomRoom?.(btn.dataset.slug),
-  _bastionResetRoom:        (btn) => window._bastionResetRoom?.(btn.dataset.slug),
-  _bastionSaveRoom:         (btn) => window._bastionSaveRoom?.(btn.dataset.slug),
-  _bastionRemoveItem:       (btn) => window._bastionRemoveItem?.(Number(btn.dataset.i), Number(btn.dataset.idx)),
-  _bastionAddShopItem:      (btn) => window._bastionAddShopItem?.(Number(btn.dataset.i)),
-  _bastionFireEmployee:     (btn) => window._bastionFireEmployee?.(btn.dataset.id),
-  _bastionSelectHireCard:   (btn) => window._bastionSelectHireCard?.(btn.dataset.id),
-  _bastionDoHire:           () => window._bastionDoHire?.(),
-  _bastionDoTransfer:       (btn) => window._bastionDoTransfer?.(btn.dataset.dir),
-  _bastionOpenPersonnel:    () => window._bastionOpenPersonnel?.(),
-  _bastionEditIdentite:     () => window._bastionEditIdentite?.(),
-  _bastionOpenCatalogEditor:() => window._bastionOpenCatalogEditor?.(),
-  _bastionOpenPreview:      () => window._bastionOpenPreview?.(),
-  _bastionExportJSON:       () => window._bastionExportJSON?.(),
-  _bastionAdvanceWeek:      () => window._bastionAdvanceWeek?.(),
-  _bastionOpenTransfer:     (btn) => window._bastionOpenTransfer?.(btn.dataset.dir),
-  _bastionOpenHire:         (btn) => window._bastionOpenHire?.(btn.dataset.slug),
-  _bastionBuild:            (btn) => window._bastionBuild?.(btn.dataset.slug),
-  _bastionShowDetails:      (btn) => window._bastionShowDetails?.(btn.dataset.slug),
-  _bastionResetRooms:       () => window._bastionResetRooms?.(),
-  _bastionOpenDeposit:      () => window._bastionOpenDeposit?.(),
-  _bastionSetCoffreFilter:  (btn) => window._bastionSetCoffreFilter?.(btn.dataset.filter),
-  _bastionOpenWithdrawItem: (btn) => window._bastionOpenWithdrawItem?.(btn.dataset.id),
-  _bastionSaveQuest:        (btn) => window._bastionSaveQuest?.(btn.dataset.id || ''),
-  _bastionDeleteQuest:      (btn) => window._bastionDeleteQuest?.(btn.dataset.id),
-  _bastionOpenQuestEditor:  (btn) => window._bastionOpenQuestEditor?.(btn.dataset.id || undefined),
-  _bastionToggleHisto:      () => window._bastionToggleHisto?.(),
+  _bastionDoWithdraw:       (btn) => _bastionDoWithdraw(btn.dataset.id),
+  _bastionEditRoom:         (btn) => _bastionEditRoom(btn.dataset.slug),
+  _bastionAddCustomRoom:    () => _bastionAddCustomRoom(),
+  _bastionDeleteCustomRoom: (btn) => _bastionDeleteCustomRoom(btn.dataset.slug),
+  _bastionResetRoom:        (btn) => _bastionResetRoom(btn.dataset.slug),
+  _bastionSaveRoom:         (btn) => _bastionSaveRoom(btn.dataset.slug),
+  _bastionRemoveItem:       (btn) => _bastionRemoveItem(Number(btn.dataset.i), Number(btn.dataset.idx)),
+  _bastionAddShopItem:      (btn) => _bastionAddShopItem(Number(btn.dataset.i)),
+  _bastionFireEmployee:     (btn) => _bastionFireEmployee(btn.dataset.id),
+  _bastionSelectHireCard:   (btn) => _bastionSelectHireCard(btn.dataset.id),
+  _bastionDoHire:           () => _bastionDoHire(),
+  _bastionDoTransfer:       (btn) => _bastionDoTransfer(btn.dataset.dir),
+  _bastionOpenPersonnel:    () => _bastionOpenPersonnel(),
+  _bastionEditIdentite:     () => _bastionEditIdentite(),
+  _bastionOpenCatalogEditor:() => _bastionOpenCatalogEditor(),
+  _bastionOpenPreview:      () => _bastionOpenPreview(),
+  _bastionExportJSON:       () => _bastionExportJSON(),
+  _bastionAdvanceWeek:      () => _bastionAdvanceWeek(),
+  _bastionOpenTransfer:     (btn) => _bastionOpenTransfer(btn.dataset.dir),
+  _bastionOpenHire:         (btn) => _bastionOpenHire(btn.dataset.slug),
+  _bastionBuild:            (btn) => _bastionBuild(btn.dataset.slug),
+  _bastionShowDetails:      (btn) => _bastionShowDetails(btn.dataset.slug),
+  _bastionResetRooms:       () => _bastionResetRooms(),
+  _bastionOpenDeposit:      () => _bastionOpenDeposit(),
+  _bastionSetCoffreFilter:  (btn) => _bastionSetCoffreFilter(btn.dataset.filter),
+  _bastionOpenWithdrawItem: (btn) => _bastionOpenWithdrawItem(btn.dataset.id),
+  _bastionSaveQuest:        (btn) => _bastionSaveQuest(btn.dataset.id || ''),
+  _bastionDeleteQuest:      (btn) => _bastionDeleteQuest(btn.dataset.id),
+  _bastionOpenQuestEditor:  (btn) => _bastionOpenQuestEditor(btn.dataset.id || undefined),
+  _bastionToggleHisto:      () => _bastionToggleHisto(),
 });
 
 // ── Exports legacy (pour ne pas casser pages.js ailleurs) ──────────────────

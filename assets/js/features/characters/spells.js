@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
@@ -1019,15 +1020,15 @@ function _getMaitriseBonus(c, item) {
 }
 
 function _getCurrentSpellChar() {
-  return STATE.activeChar || window._currentChar || null;
+  return STATE.activeChar || charSession.getCurrentChar() || null;
 }
 
 function _renderSpellsTab(c = _getCurrentSpellChar()) {
   if (!c) return;
-  if (window._currentCharTab === 'sorts' && typeof window._renderTab === 'function') {
-    window._renderTab('sorts', c, window._canEditChar);
-  } else if (typeof window.renderCharSheet === 'function') {
-    window.renderCharSheet(c, 'sorts');
+  if (charSession.getCurrentCharTab() === 'sorts') {
+    charSession.renderTab('sorts', c, charSession.getCanEditChar());
+  } else {
+    charSession.renderSheet(c, 'sorts');
   }
 }
 
@@ -2940,7 +2941,7 @@ export async function saveSort(idx) {
     if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
     c.deck_sorts=sorts;
     // Sync les références pour que les filtres / re-render lisent la version fraîche
-    if (window._currentChar?.id === c.id) window._currentChar = c;
+    if (charSession.getCurrentChar()?.id === c.id) charSession.getCurrentChar() = c;
     if (STATE.activeChar?.id === c.id)    STATE.activeChar    = c;
     await updateInCol('characters',c.id,{deck_sorts:sorts});
     closeModal();

@@ -7,6 +7,8 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, loadChars } from '../data/firestore.js';
 import { _esc, _norm, _searchIncludes, _trunc } from '../shared/html.js';
+import { charSession } from '../shared/char-session.js';
+import { navigate } from '../core/navigation.js';
 
 const MAX_RESULTS = 30;
 
@@ -251,7 +253,7 @@ function _highlight(selector) {
 
 async function _executeEntry(entry) {
   closePalette();
-  const go = (page) => window.navigate?.(page);
+  const go = (page) => navigate(page);
 
   try {
     switch (entry.type) {
@@ -271,7 +273,7 @@ async function _executeEntry(entry) {
         await go('characters');
         await _nextTick();
         const c = (STATE.characters || []).find(x => x.id === entry.id) || entry.payload;
-        if (c) window.renderCharSheet?.(c);
+        if (c) charSession.renderSheet(c);
         return;
       }
 
@@ -495,8 +497,6 @@ export function initCommandPalette() {
     }
   });
 
-  window.openCommandPalette  = openPalette;
-  window.closeCommandPalette = closePalette;
 }
 
 // Auto-init à l'import

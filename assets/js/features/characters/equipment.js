@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
@@ -10,7 +11,7 @@ import { _getTraits, _getBaseTraits, _getAddedTraits } from './data.js';
 let _equipCompatibles = [];
 let _equipSelectedMeta = {};
 function _renderEquipmentChar(c) {
-  window.renderCharSheet?.(c, 'combat');
+  charSession.renderSheet(c, 'combat');
 }
 
 // ══════════════════════════════════════════════
