@@ -23,25 +23,16 @@
        via shared/shop-picker.js)
      ════════════════════════════════════════════════════════════════════════ */
 
-@import url('./tokens.css');
-@import url('./base.css');
-@import url('./auth.css');
-@import url('./adventure.css');
-@import url('./layout.css');
-@import url('./responsive.css');
-@import url('./features.css');
-@import url('./shop.css');
-@import url('./characters.css');
-@import url('./histoire.css');
-@import url('./bestiary.css');
-@import url('./npcs.css');
-@import url('./vtt.css');
-@import url('./quests.css');
-@import url('./rich-text.css');
-@import url('./dashboard.css');
-@import url('./agenda.css');
-@import url('./bastion.css');
-@import url('./quick-view.css');
-@import url('./vtt-spectator.css');
-@import url('./command-palette.css');
-@import url('./print.css');
+/* ────────────────────────────────────────────────────────────────────────────
+   CHARGEMENT DES FEUILLES
+   Les 22 feuilles ne sont PLUS chargées via @import (waterfall séquentiel,
+   bloquant). Elles sont déclarées en <link> dans index.html, ce qui permet
+   au navigateur de les télécharger EN PARALLÈLE dès le premier scan du HTML.
+   → L'ORDRE des <link> dans index.html = l'ordre de cascade ci-dessous.
+     Si tu ajoutes une feuille, ajoute-la AUSSI dans index.html (même position).
+
+   Ordre de cascade :
+     tokens, base, auth, adventure, layout, responsive, features, shop,
+     characters, histoire, bestiary, npcs, vtt, quests, rich-text, dashboard,
+     agenda, bastion, quick-view, vtt-spectator, command-palette, print
+   ──────────────────────────────────────────────────────────────────────────── */
