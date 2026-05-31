@@ -130,8 +130,8 @@
 
 .quest-join-btn--joined {
   background: rgba(34, 195, 142, .12);
-  border-color: #22c38e;
-  color: #22c38e;
+  border-color: var(--emerald);
+  color: var(--emerald);
 }
 
 .quest-join-btn--joined:hover {

@@ -382,7 +382,7 @@ body::after {
    HP / PM BARS
 ════════════════════════════════════════════════════════════════════ */
 .hp-bar-fill      { background: #ef4444 !important; }
-.hp-bar-fill.high { background: #22c38e !important; }
+.hp-bar-fill.high { background: var(--emerald) !important; }
 .hp-bar-fill.mid  { background: #f59e0b !important; }
 .pm-bar-fill      { background: #4f8cff !important; }
 
@@ -392,7 +392,7 @@ body::after {
 .notif.success {
   background: rgba(34,195,142,0.12) !important;
   border-color: rgba(34,195,142,0.28) !important;
-  color: #22c38e !important;
+  color: var(--emerald) !important;
 }
 .notif.error {
   background: rgba(239,68,68,0.12) !important;

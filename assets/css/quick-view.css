@@ -44,7 +44,7 @@
   position: absolute;
   bottom: -6px; left: 50%;
   transform: translateX(-50%);
-  background: linear-gradient(135deg, #4f8cff, #9d6fff);
+  background: linear-gradient(135deg, #4f8cff, var(--arcane));
   color: #fff;
   font-size: 0.62rem;
   font-weight: 700;
@@ -169,7 +169,7 @@
   line-height: 1;
   margin: 3px 0 1px;
 }
-.qv-stat-mod--pos { color: var(--emerald, #22c38e); }
+.qv-stat-mod--pos { color: var(--emerald, var(--emerald)); }
 .qv-stat-mod--neg { color: var(--crimson, #ff5a7e); }
 .qv-stat-mod--zero { color: var(--text-muted); }
 .qv-stat-total {

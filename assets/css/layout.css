@@ -1132,7 +1132,7 @@ html, body { min-height:100%; }
 
 .dash-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #4f8cff, #22c38e);
+  background: linear-gradient(90deg, #4f8cff, var(--emerald));
   border-radius: 999px;
   transition: width .5s;
 }
@@ -1154,7 +1154,7 @@ html, body { min-height:100%; }
   width: 12px;
   text-align: center;
 }
-.dash-quest-dot--on { color: #22c38e; }
+.dash-quest-dot--on { color: var(--emerald); }
 
 .dash-quest-name {
   flex: 1;
