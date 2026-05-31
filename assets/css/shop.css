@@ -5095,13 +5095,27 @@ body.shop-card-showcase body .sh-page--v2 .sh-item-grid {
 
 /* FOOTER */
 .sh-detail-footer {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 12px 20px;
   background: var(--bg-card2, rgba(17,27,42,.96));
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
-.sh-detail-footer-spacer { flex: 1; }
+.sh-detail-footer-spacer { flex: 1 1 auto; }
+.sh-detail-sell-current {
+  flex: 0 0 auto;
+  min-width: 168px;
+  max-width: 100%;
+  justify-content: center;
+  overflow: visible;
+  white-space: nowrap;
+}
+@media (max-width: 680px) {
+  .sh-detail-footer .sh-detail-sell-current {
+    order: 3;
+    flex: 1 1 100%;
+  }
+}
 .sh-detail-footer .sh-buy-btn--poor {
   background: rgba(255,90,126,.08);
   color: var(--crimson-light, #ff8ca7);
