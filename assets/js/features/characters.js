@@ -2692,6 +2692,7 @@ registerActions({
   addSort:                  ()      => addSort(),
   toggleSort:               (btn)   => toggleSort(Number(btn.dataset.idx)),
   editSort:                 (btn)   => editSort(Number(btn.dataset.idx)),
+  deleteSort:               (btn)   => deleteSort(Number(btn.dataset.idx)),
 
   // Tabs legacy (renderCharCarac, renderCharNotes, renderCharCompte, renderCharMaitrises, renderCharProfil)
   toggleNote:               (btn)   => toggleNote(Number(btn.dataset.idx)),

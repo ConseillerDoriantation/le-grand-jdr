@@ -122,6 +122,10 @@ export async function saveQuete() {
 export async function deleteSort(idx) {
   try {
     const c=STATE.activeChar; if(!c) return;
+    const nom = (c.deck_sorts||[])[idx]?.nom || 'ce sort';
+    if (!await confirmModal(`Supprimer <b>${_esc(nom)}</b> ?`, {
+      title: 'Confirmation', confirmLabel: 'Supprimer', icon: '🗑️',
+    })) return;
     c.deck_sorts.splice(idx,1);
     await updateInCol('characters',c.id,{deck_sorts:c.deck_sorts});
     window.renderCharSheet(c,'sorts');
