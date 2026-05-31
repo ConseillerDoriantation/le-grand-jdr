@@ -139,15 +139,47 @@ export async function deleteInvItem(idx) {
 // LIFECYCLE — création / suppression
 // ══════════════════════════════════════════════
 export async function deleteChar(id) {
-  try {
-    if (!await confirmModal('Supprimer ce personnage ? Toutes ses références (trame, hauts-faits, PNJ, bastion) seront également nettoyées.')) return;
-    await deleteFromCol('characters', id);
+  if (!await confirmModal('Supprimer ce personnage ? Toutes ses références (trame, hauts-faits, PNJ, quêtes, bastion) seront également nettoyées.')) return;
 
+  // ── Suppression principale du document personnage ─────────────────────────
+  // Isolée dans son propre try : si elle échoue (règles Firestore, réseau…),
+  // on le signale CLAIREMENT et on stoppe — pas de fausse impression de succès.
+  try {
+    await deleteFromCol('characters', id);
+  } catch (e) {
+    notifySaveError(e);
+    showNotif("Suppression refusée — vérifie les règles Firestore (suppression autorisée au propriétaire et au MJ).", 'error');
+    return;
+  }
+
+  // ── Reset de l'état actif si on vient de supprimer le perso affiché ────────
+  // Évite un « ghost » : la fiche supprimée pointée par STATE.activeChar.
+  if (STATE.activeChar?.id === id)   STATE.activeChar = null;
+  if (window._currentChar?.id === id) window._currentChar = null;
+  if (Array.isArray(STATE.characters)) {
+    STATE.characters = STATE.characters.filter(c => c.id !== id);
+  }
+
+  // ── Cascades de nettoyage (best-effort, non bloquantes) ───────────────────
+  // Chaque bloc est isolé : un refus de règle (ex: joueur sans droit sur une
+  // collection MJ) ne doit pas empêcher les autres nettoyages ni la réussite
+  // globale, le document personnage étant déjà supprimé.
+  try {
     // ── players ──────────────────────────────────────────────────────────────
     try {
       const linked = await loadCollectionWhere('players', 'charId', '==', id);
       await Promise.all(linked.map(p => deleteFromCol('players', p.id)));
     } catch (e2) { console.warn('[deleteChar] cascade players :', e2); }
+
+    // ── quests — retirer des participants ─────────────────────────────────────
+    try {
+      const quests = await loadCollection('quests');
+      await Promise.all(quests.map(q => {
+        const parts = q.participants || [];
+        if (!parts.includes(id)) return;
+        return updateInCol('quests', q.id, { participants: parts.filter(x => x !== id) });
+      }));
+    } catch (e2) { console.warn('[deleteChar] cascade quests :', e2); }
 
     // ── story — retirer des groupes de missions ───────────────────────────────
     try {
@@ -202,10 +234,14 @@ export async function deleteChar(id) {
         return updateInCol('bastion', b.id, updates);
       }));
     } catch (e2) { console.warn('[deleteChar] cascade bastion :', e2); }
+  } catch (cascadeErr) {
+    // Le document personnage est déjà supprimé : une cascade interrompue ne
+    // doit pas masquer le succès ni bloquer le rafraîchissement de la page.
+    console.warn('[deleteChar] cascade interrompue :', cascadeErr);
+  }
 
-    showNotif('Personnage supprimé.', 'success');
-    PAGES.characters();
-  } catch (e) { notifySaveError(e); }
+  showNotif('Personnage supprimé.', 'success');
+  PAGES.characters();
 }
 
 export async function createNewChar() {

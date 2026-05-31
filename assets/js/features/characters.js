@@ -435,6 +435,7 @@ function renderCharSheet(c, keepTab) {
               data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
             ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
             ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
+            ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
           </span>
         </div>
 
