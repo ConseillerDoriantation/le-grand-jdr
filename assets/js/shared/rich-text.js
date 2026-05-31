@@ -1314,16 +1314,22 @@ export function getRichTextHtml(id) {
   return sanitizeRichTextHtml(el.innerHTML).trim();
 }
 
-// Sanitisation minimale : strip <script>/<style>, attributs on*, et URLs javascript:
+// Sanitisation : strip des tags d'exécution / rendu arbitraire, des handlers
+// inline (on*), de l'attribut srcdoc, et des URLs dangereuses (javascript:,
+// data:text/html, vbscript:). Les data: images restent autorisées.
 export function sanitizeRichTextHtml(html) {
   if (!html) return '';
   const tpl = document.createElement('template');
   tpl.innerHTML = String(html);
-  tpl.content.querySelectorAll('script, style').forEach((n) => n.remove());
+  tpl.content
+    .querySelectorAll('script, style, iframe, object, embed, form, link, meta, base')
+    .forEach((n) => n.remove());
   tpl.content.querySelectorAll('*').forEach((n) => {
     [...n.attributes].forEach((a) => {
-      if (/^on/i.test(a.name)) n.removeAttribute(a.name);
-      if ((a.name === 'href' || a.name === 'src') && /^\s*javascript:/i.test(a.value)) {
+      const name = a.name.toLowerCase();
+      if (/^on/i.test(name) || name === 'srcdoc') { n.removeAttribute(a.name); return; }
+      if ((name === 'href' || name === 'src' || name === 'xlink:href') &&
+          /^\s*(javascript:|data:text\/html|vbscript:)/i.test(a.value)) {
         n.removeAttribute(a.name);
       }
     });
