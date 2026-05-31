@@ -11657,6 +11657,15 @@ export async function renderVttPage() {
     content.style.overflow=''; return;
   }
   content.innerHTML=_buildHtml();
+  // Overlay "tourne ton téléphone" — visible uniquement en portrait sur petit
+  // écran (piloté par media-query CSS). En paysage il disparaît et la table
+  // s'utilise nativement (tactile correct, pas de rotation CSS du canvas).
+  content.insertAdjacentHTML('beforeend', `
+    <div class="vtt-rotate-prompt" aria-hidden="true">
+      <div class="vtt-rotate-phone">📱</div>
+      <div class="vtt-rotate-title">Tourne ton téléphone</div>
+      <div class="vtt-rotate-text">La Table Virtuelle s'utilise en mode paysage.</div>
+    </div>`);
   const wrap=document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
   _initCanvas(wrap);
