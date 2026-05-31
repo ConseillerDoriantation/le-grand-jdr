@@ -1,3 +1,4 @@
+import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { confirmDelete } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
@@ -25,8 +26,7 @@ export async function renderCollectionPage() {
 
   const content = document.getElementById('main-content');
 
-  let html = `
-    pageHeaderHtml('🃏 Collection', 'Cartes à collectionner')`;
+  let html = pageHeaderHtml("🃏 Collection", "Cartes à collectionner");
 
   if (STATE.isAdmin) {
     html += `
@@ -172,7 +172,7 @@ async function saveCard(id = '') {
 }
 
 function viewCard(id) {
-  const el = document.querySelector(`.coll-card[onclick*="${id}"]`);
+  const el = document.querySelector(`.coll-card[data-id="${id}"]`);
   if (el) el.classList.toggle('flipped');
 }
 
