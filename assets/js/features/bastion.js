@@ -23,7 +23,6 @@ import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { calcOr, sortCharactersForDisplay, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
-import PAGES from './pages.js';
 
 // Cache items boutique (rechargé à l'ouverture de l'éditeur)
 let _shopItemsCache = null;
@@ -2122,8 +2121,6 @@ async function renderBastionPage() {
   // Abonnement temps réel (idempotent)
   _attachListener();
 }
-
-PAGES.bastion = renderBastionPage;
 
 registerActions({
   _bastionRefreshDepositItems: () => _bastionRefreshDepositItems(),
