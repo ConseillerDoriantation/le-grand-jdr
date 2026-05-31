@@ -6,6 +6,7 @@
 // ✓ Ordre partagé pour tous les utilisateurs
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
+import { confirmDelete } from '../shared/crud.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
@@ -272,8 +273,7 @@ async function editAchievement(id) {
 // ── SUPPRIMER ─────────────────────────────────────────────────────────────────
 async function deleteAchievement(id) {
   try {
-    if (!await confirmModal('Supprimer ce haut-fait définitivement ?')) return;
-    await deleteFromCol('achievements', id);
+    if (!await confirmDelete('achievements', id, 'Supprimer ce haut-fait définitivement ?')) return;
     if (_achItems) _achItems = _achItems.filter(a => a.id !== id);
     const order = (await _loadOrder()).filter(oid => oid !== id);
     await _saveOrder(order);

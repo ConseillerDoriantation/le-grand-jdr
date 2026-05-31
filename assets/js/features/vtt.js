@@ -192,7 +192,7 @@ function _vttBindDispatch() {
     if (!el) return;
     const expectedOn = el.dataset.vttOn || 'click';
     if (expectedOn !== e.type) return;
-    const fn = window[el.dataset.vttFn];
+    const fn = VTT_ACTIONS[el.dataset.vttFn];
     if (typeof fn !== 'function') return;
     const argsStr = el.dataset.vttArgs;
     const args = (argsStr === undefined || argsStr === '')
@@ -7752,7 +7752,7 @@ async function _ouvrirGestionEmotes() {
   };
 
   // ── Supprimer ────────────────────────────────────────────────────
-  window._vttDeleteEmote = async (i) => {
+  VTT_ACTIONS._vttDeleteEmote = async (i) => {
     if (!await confirmModal(`Supprimer :${_emotes[i]?.name}: ?`)) return;
     const list = [..._emotes]; list.splice(i, 1);
     await _saveEmotes(list); _refresh();
@@ -7760,7 +7760,7 @@ async function _ouvrirGestionEmotes() {
   };
 
   // ── Ouvrir le panneau d'édition (horizontal, sous la grille) ─────
-  window._vttEditEmote = (i) => {
+  VTT_ACTIONS._vttEditEmote = (i) => {
     const em = _emotes[i]; if (!em) return;
     // Mettre en évidence la carte sélectionnée
     document.querySelectorAll('.vtt-emote-card').forEach(c => c.classList.remove('is-editing'));
@@ -7792,7 +7792,7 @@ async function _ouvrirGestionEmotes() {
   };
 
   // ── Sauvegarder l'édition ────────────────────────────────────────
-  window._vttSaveEmote = async (i) => {
+  VTT_ACTIONS._vttSaveEmote = window._vttSaveEmote = async (i) => {
     const nameEl = document.getElementById(`ec-name-${i}`);
     const fileEl = document.getElementById(`ec-file-${i}`);
     const newName = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
@@ -7810,7 +7810,7 @@ async function _ouvrirGestionEmotes() {
   };
 
   // ── Ajouter ──────────────────────────────────────────────────────
-  window._vttAddEmote = async () => {
+  VTT_ACTIONS._vttAddEmote = async () => {
     const nameEl   = document.getElementById('emote-add-name');
     const fileEl   = document.getElementById('emote-add-file');
     const urlEl    = document.getElementById('emote-add-url');
@@ -12566,8 +12566,8 @@ function _vttSelectMiniChar(uid, charId) {
 PAGES.vtt=renderVttPage;
 
 
-// Re-bind pour le dispatcher data-vtt-fn (lit depuis window)
-Object.assign(window, {
+// Registre des actions pour le dispatcher data-vtt-fn
+const VTT_ACTIONS = {
   _vttAiderClose,
   _vttAider,
   _vttSelfActionClose,
@@ -12775,6 +12775,12 @@ Object.assign(window, {
   _zoneRotate,
   _zoneUpdatePreview,
   _zoneValidate
+};
+
+// Inline handlers conservés sur window (appelés via onkeydown/oncontextmenu)
+Object.assign(window, {
+  _vttCreatePlaylistConfirm, _vttDiceRemoveDie, _vttMsAddXp,
+  _vttMsSetXp, _vttSaveEmote, _vttSendChat, _vttSoundCtxMenu,
 });
 
 registerActions({

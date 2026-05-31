@@ -4,7 +4,7 @@
 import { STATE, FS } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
-import { _esc, appSplashHtml } from '../shared/html.js';
+import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { watch } from '../shared/realtime.js';
@@ -1020,10 +1020,7 @@ const PAGES = {
     STATE.characters = chars;
     const content = document.getElementById('main-content');
     // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
-    let html = `<div class="page-header">
-      <div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div>
-      <div class="page-subtitle">Gérez vos fiches de personnage</div>
-    </div>`;
+    let html = `${pageHeaderHtml(STATE.isAdmin ? '📜 Tous les Personnages' : '📜 Mes Personnages', 'Gérez vos fiches de personnage')}`;
     if (STATE.isAdmin && chars.length > 0) {
       const byUser = {};
       chars.forEach(c => { if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = []; byUser[c.ownerPseudo].push(c); });
@@ -1060,7 +1057,7 @@ const PAGES = {
   async world() {
     const doc = await getDocData('world', 'main');
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📖 Le Monde</div><div class="page-subtitle">Lore, histoire et informations générales</div></div>`;
+    let html = `pageHeaderHtml('📖 Le Monde', 'Lore, histoire et informations générales')`;
     if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Édition Admin</div><button class="btn btn-gold btn-sm" data-action="editWorldContent">✏️ Modifier le contenu</button></div>`;
     const sections = doc?.sections || [{ title: 'Introduction', content: 'Les informations sur le monde seront ajoutées ici par le Maître de Jeu.' }];
     sections.forEach(s => { html += `<div class="world-section"><div class="card-header" style="margin-bottom:0.8rem;padding:0.8rem;background:var(--bg-card2);border-radius:6px;border:1px solid var(--border)">${s.title}</div><div class="world-content">${s.content}</div></div>`; });
@@ -1127,7 +1124,7 @@ const PAGES = {
   async npcs() {
     const items = await loadCollection('npcs');
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">👥 PNJ Rencontrés</div><div class="page-subtitle">Personnages non-joueurs et factions</div></div>`;
+    let html = `pageHeaderHtml('👥 PNJ Rencontrés', 'Personnages non-joueurs et factions')`;
     if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" data-action="openNpcModal">+ Ajouter un PNJ</button></div>`;
     if (items.length === 0) {
       html += `<div class="empty-state"><div class="icon">👥</div><p>Aucun PNJ pour l'instant.</p></div>`;
@@ -1566,7 +1563,7 @@ const PAGES = {
     if (!STATE.isAdmin) { const { navigate } = await import('../core/navigation.js'); navigate('dashboard'); return; }
     const users   = await loadCollection('users');
     const content = document.getElementById('main-content');
-    content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">⚙️ Panneau Admin</div><div class="page-subtitle">Gestion complète du jeu</div></div>
+    content.innerHTML = `pageHeaderHtml('⚙️ Panneau Admin', 'Gestion complète du jeu')
       <div class="grid-2">
         <div class="card">
           <div class="card-header">Joueurs inscrits (${users.length})</div>
@@ -1607,7 +1604,7 @@ const PAGES = {
     const content  = document.getElementById('main-content');
     const recettes = doc?.recettes || [];
     const potions  = doc?.potions  || [];
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">🍳 Recettes & Potions</span></div><div class="page-subtitle">Cuisine de groupe et alchimie</div></div>
+    let html = `pageHeaderHtml('🍳 Recettes & Potions', 'Cuisine de groupe et alchimie')
       ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><div style="display:flex;gap:0.5rem"><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="cuisine">+ Recette cuisine</button><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="potion">+ Potion</button></div></div>` : ''}
       <div style="background:rgba(226,185,111,0.05);border:1px solid rgba(226,185,111,0.15);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:0.85rem;color:var(--text-muted)">
         <strong style="color:var(--gold)">🍳 Cuisine</strong> — Avant mission ou pendant un repos. Bénéficie à tout le groupe. Max 2 plats actifs simultanément.<br>

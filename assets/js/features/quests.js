@@ -8,7 +8,7 @@ import { registerActions } from '../core/actions.js';
 import { watch } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc, appSplashHtml } from '../shared/html.js';
+import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { listPlaces } from './map/data/places.repo.js';
@@ -128,10 +128,7 @@ function _applyQuestsRender(quests) {
   const activeCount = quests.filter(q => q.statut === 'active').length;
 
   content.innerHTML = `
-  <div class="page-header">
-    <div class="page-title"><span class="page-title-accent">📋 Quêtes</span></div>
-    <div class="page-subtitle">${activeCount} quête${activeCount !== 1 ? 's' : ''} active${activeCount !== 1 ? 's' : ''}</div>
-  </div>
+  ${pageHeaderHtml('📋 Quêtes', `${activeCount} quête${activeCount !== 1 ? 's' : ''} active${activeCount !== 1 ? 's' : ''}`)}
 
   ${STATE.isAdmin ? `
   <div style="margin-bottom:1.2rem">

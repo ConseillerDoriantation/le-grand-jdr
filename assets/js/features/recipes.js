@@ -7,6 +7,7 @@
 //   type : 'cuisine' | 'potion' | 'arme' | 'armure' | 'bijou'
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { confirmDelete } from '../shared/crud.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -689,8 +690,7 @@ async function deleteShopRecipe(id) {
 async function deleteRecipe(id) {
   try {
     const r = _all.find(x => x.id === id);
-    if (!await confirmModal(`Supprimer "${r?.nom||'cette recette'}" ?`)) return;
-    await deleteFromCol('recipes', id);
+    if (!await confirmDelete('recipes', id, `Supprimer "${r?.nom||'cette recette'}" ?`)) return;
     _all = _all.filter(x => x.id !== id);
     showNotif('Recette supprimée.', 'success');
     _render();

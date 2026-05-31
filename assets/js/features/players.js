@@ -14,6 +14,7 @@
 // (cohérent avec bestiary/shop).
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
+import { confirmDelete } from '../shared/crud.js';
 
 let _ppEditingPlayer = null;
 import { STATE } from '../core/state.js';
@@ -1819,8 +1820,7 @@ async function _savePlayerPresent(id = '') {
 
 async function _deletePlayerPresent(id) {
   try {
-    if (!await (confirmModal('Supprimer cette présentation ?'))) return;
-    await deleteFromCol('players', id);
+    if (!await confirmDelete('players', id, 'Supprimer cette présentation ?')) return;
     showNotif('Présentation supprimée.', 'success');
     STORE.activeId = '';
     await PAGES.players();

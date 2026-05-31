@@ -1,8 +1,9 @@
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { confirmDelete } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { _esc } from '../shared/html.js';
+import { _esc, pageHeaderHtml} from '../shared/html.js';
 
 let _cards = [];
 let _templateUrl = '';
@@ -25,10 +26,7 @@ export async function renderCollectionPage() {
   const content = document.getElementById('main-content');
 
   let html = `
-    <div class="page-header">
-      <div class="page-title"><span class="page-title-accent">🃏 Collection</span></div>
-      <div class="page-subtitle">Cartes à collectionner</div>
-    </div>`;
+    pageHeaderHtml('🃏 Collection', 'Cartes à collectionner')`;
 
   if (STATE.isAdmin) {
     html += `
@@ -185,8 +183,7 @@ function editCard(id) {
 
 async function deleteCard(id) {
   try {
-    if (!await confirmModal('Supprimer cette carte ?')) return;
-    await deleteFromCol('collection', id);
+    if (!await confirmDelete('collection', id, 'Supprimer cette carte ?')) return;
     showNotif('Carte supprimée.', 'success');
     await renderCollectionPage();
   } catch (e) { notifySaveError(e); }
