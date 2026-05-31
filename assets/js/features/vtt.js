@@ -3265,9 +3265,21 @@ function _buildAttackOptions(t) {
     const sStatKeyI  = mainP2I?.statAttaque || mainP2I?.toucherStat || 'force';
     const spellPmDeltaI = getArmorSetData(c).modifiers.spellPmDelta || 0;
 
+    // Indices d'inventaire actuellement équipés (un slot pointe vers l'objet
+    // via sourceInvIndex). Les actions d'armes/armures ne sont accessibles que
+    // si l'objet est équipé ; les consommables restent utilisables depuis l'inventaire.
+    const equippedInvIdx = new Set(
+      Object.values(c.equipement || {})
+        .filter(e => e && Number.isInteger(e.sourceInvIndex))
+        .map(e => e.sourceInvIndex)
+    );
+
     c.inventaire.forEach((item, invIdx) => {
       const acts = Array.isArray(item?.actions) ? item.actions : [];
       if (!acts.length) return;
+      // Arme / armure / bijou : utilisable seulement si équipé.
+      // Consommable : utilisable depuis l'inventaire.
+      if (!item.consommable && !equippedInvIdx.has(invIdx)) return;
       acts.forEach((s, actIdx) => {
         // Portée du sort : préserve EXPLICITEMENT 0 (sur soi uniquement).
         const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
