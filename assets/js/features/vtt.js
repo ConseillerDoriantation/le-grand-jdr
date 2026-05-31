@@ -9,7 +9,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import Sortable from '../vendor/sortable.esm.js';
-import { getCurrentAdventureId, getDocData, saveDoc, loadCollection } from '../data/firestore.js';
+import { getCurrentAdventureId, getDocData, saveDoc, loadCollection, subscribeCollection } from '../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
@@ -470,8 +470,6 @@ const _aid     = ()   => getCurrentAdventureId();
 const _sesRef  = ()   => doc(db,  `adventures/${_aid()}/vtt/session`);
 const _pgsCol  = ()   => collection(db, `adventures/${_aid()}/vttPages`);
 const _toksCol = ()   => collection(db, `adventures/${_aid()}/vttTokens`);
-const _chrsCol = ()   => collection(db, `adventures/${_aid()}/characters`);
-const _npcsCol = ()   => collection(db, `adventures/${_aid()}/npcs`);
 const _pgRef   = (id) => doc(db, `adventures/${_aid()}/vttPages/${id}`);
 const _tokRef  = (id) => doc(db, `adventures/${_aid()}/vttTokens/${id}`);
 const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
@@ -7084,44 +7082,45 @@ function _initListeners() {
   },()=>{}));
 
   // 3. Personnages — source de vérité des HP joueurs
-  _unsubs.push(onSnapshot(_chrsCol(), snap => {
-    snap.docChanges().forEach(ch => {
-      if (ch.type==='removed') {
-        delete _characters[ch.doc.id];
-        // Supprimer le token lié si la session VTT est ouverte
-        const tok = Object.values(_tokens).find(e => e.data.characterId === ch.doc.id);
-        if (tok) deleteDoc(_tokRef(tok.data.id)).catch(() => {});
-      } else {
-        _characters[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
-      }
-    });
-    // Refresh des shapes liés
-    const changed=new Set(snap.docChanges().map(c=>c.doc.id));
-    for (const [id,e] of Object.entries(_tokens)) {
-      if (e.data.characterId&&changed.has(e.data.characterId)) {
-        _patchShape(id); if (_selected===id) _renderInspectorSoon();
+  _unsubs.push(subscribeCollection("characters", data => {
+    const prev = _characters;
+    const next = {};
+    for (const c of data || []) next[c.id] = c;
+
+    const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const id of Object.keys(prev)) {
+      if (next[id]) continue;
+      const tok = Object.values(_tokens).find(e => e.data.characterId === id);
+      if (tok) deleteDoc(_tokRef(tok.data.id)).catch(() => {});
+    }
+
+    _characters = next;
+    for (const [id, e] of Object.entries(_tokens)) {
+      if (e.data.characterId && changed.has(e.data.characterId)) {
+        _patchShape(id); if (_selected === id) _renderInspectorSoon();
       }
     }
     _renderTraySoon();
-    _charsReady=true; _maybeSyncAutoTokens();
-    if (_miniUid) _renderMiniSheet(_miniUid); // refresh mini-fiche en temps réel
-  },()=>{}));
+    _charsReady = true; _maybeSyncAutoTokens();
+    if (_miniUid) _renderMiniSheet(_miniUid);
+  }));
 
   // 4. PNJ — source de vérité des HP PNJ
-  _unsubs.push(onSnapshot(_npcsCol(), snap => {
-    snap.docChanges().forEach(ch => {
-      if (ch.type==='removed') delete _npcs[ch.doc.id];
-      else _npcs[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
-    });
-    const changed=new Set(snap.docChanges().map(c=>c.doc.id));
-    for (const [id,e] of Object.entries(_tokens)) {
-      if (e.data.npcId&&changed.has(e.data.npcId)) {
-        _patchShape(id); if (_selected===id) _renderInspectorSoon();
+  _unsubs.push(subscribeCollection("npcs", data => {
+    const prev = _npcs;
+    const next = {};
+    for (const n of data || []) next[n.id] = n;
+
+    const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    _npcs = next;
+    for (const [id, e] of Object.entries(_tokens)) {
+      if (e.data.npcId && changed.has(e.data.npcId)) {
+        _patchShape(id); if (_selected === id) _renderInspectorSoon();
       }
     }
     _renderTraySoon();
-    _npcsReady=true; _maybeSyncAutoTokens();
-  },()=>{}));
+    _npcsReady = true; _maybeSyncAutoTokens();
+  }));
 
   // 5. Bestiaire — source de vérité des créatures ennemies
   _unsubs.push(onSnapshot(_bstCol(), snap => {

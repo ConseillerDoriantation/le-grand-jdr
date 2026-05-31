@@ -68,6 +68,9 @@ const _CACHE_TTL = {
   places:             5 * 60_000,
   organizations:      5 * 60_000,
   players:            5 * 60_000,
+  collectionSettings: 5 * 60_000,
+  achievements_meta:  5 * 60_000,
+  bestiary_tracker:   5 * 60_000,
   // Aventures — TTL moyen (structure change rarement en session)
   adventures:         60_000,
 };
@@ -93,7 +96,15 @@ function _cacheSet(key, data) {
 
 // Patch chirurgical du cache TTL après une écriture — évite l'invalidation
 // totale (qui force un re-fetch complet de la collection).
+function _cacheInvalidateWhere(path) {
+  const prefix = `${path}:where:`;
+  for (const key of _cache.keys()) {
+    if (key.startsWith(prefix)) _cache.delete(key);
+  }
+}
+
 function _cachePatchAdd(path, docData) {
+  _cacheInvalidateWhere(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -110,6 +121,7 @@ function _cachePatchAdd(path, docData) {
 }
 
 function _cachePatchUpdate(path, id, partial) {
+  _cacheInvalidateWhere(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -123,6 +135,7 @@ function _cachePatchUpdate(path, id, partial) {
 }
 
 function _cachePatchSave(path, id, partial) {
+  _cacheInvalidateWhere(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -140,6 +153,7 @@ function _cachePatchSave(path, id, partial) {
 }
 
 function _cachePatchDelete(path, id) {
+  _cacheInvalidateWhere(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) _cache.set(allKey, { data: all.data.filter(d => d.id !== id), ts: all.ts });
@@ -197,6 +211,9 @@ function _primeCol(col) {
           _handleFirestoreError(err, `primeSession(${path})`);
         }
         entry.firstReceived = true; // débloquer les awaits sur ready
+        entry.observers.forEach(o => {
+          try { o.cb([]); } catch (e) { console.error('[firestore] observer error', e); }
+        });
         if (!resolved) { resolved = true; resolve([]); }
       }
     );
@@ -238,6 +255,9 @@ function _primeDoc(col, id) {
           _handleFirestoreError(err, `primeSessionDoc(${path}/${id})`);
         }
         entry.firstReceived = true;
+        entry.observers.forEach(o => {
+          try { o.cb(null); } catch (e) { console.error('[firestore] observer error', e); }
+        });
         if (!resolved) { resolved = true; resolve(null); }
       }
     );
@@ -249,13 +269,16 @@ function _primeDoc(col, id) {
 // sont lues par 3+ pages et que la donnée ne grossit pas démesurément.
 // `bestiary` est volontairement exclu (volume potentiellement énorme).
 const _SESSION_COLLECTIONS = [
-  'shop', 'shopCategories',
-  'npcs', 'story',
+  'story',
   'achievements',
   'quests',
   'characters',
   'collection',
 ];
+const _LAZY_SESSION_COLLECTIONS = new Set([
+  'shop', 'shopCategories',
+  'npcs',
+]);
 const _SESSION_DOCS = [
   ['bastion',         'main'],
   ['world',           'main'],
@@ -296,7 +319,11 @@ const _inflight = new Map();
 
 export function subscribeCollection(col, callback) {
   const path = _colPath(col);
-  const live = _liveCollections.get(path);
+  let live = _liveCollections.get(path);
+  if (!live && _adventureId && _LAZY_SESSION_COLLECTIONS.has(col)) {
+    _primeCol(col);
+    live = _liveCollections.get(path);
+  }
   if (live && !live.failed) {
     const observer = { cb: callback };
     live.observers.add(observer);
@@ -361,7 +388,11 @@ export async function loadCollection(col) {
   const path = _colPath(col);
 
   // 1. Live session — 0 lecture facturée
-  const live = _liveCollections.get(path);
+  let live = _liveCollections.get(path);
+  if (!live && _adventureId && _LAZY_SESSION_COLLECTIONS.has(col)) {
+    await _primeCol(col);
+    live = _liveCollections.get(path);
+  }
   if (live && !live.failed) {
     if (!live.firstReceived) await live.ready;
     return live.data;
@@ -397,18 +428,28 @@ export async function loadCollectionWhere(col, field, op, value) {
   const path = _colPath(col);
 
   // Filtre client-side sur le live cache si la collection y est
-  const live = _liveCollections.get(path);
+  let live = _liveCollections.get(path);
+  if (!live && _adventureId && _LAZY_SESSION_COLLECTIONS.has(col)) {
+    await _primeCol(col);
+    live = _liveCollections.get(path);
+  }
   if (live && !live.failed) {
     if (!live.firstReceived) await live.ready;
     return live.data.filter(d => _matchOp(d[field], op, value));
   }
 
   const key = `${path}:where:${field}:${op}:${JSON.stringify(value)}`;
+  const allCached = _cacheGet(`${path}:all`);
+  if (allCached) return allCached.filter(d => _matchOp(d[field], op, value));
+  const cached = _cacheGet(key);
+  if (cached) return cached;
   if (_inflight.has(key)) return _inflight.get(key);
   const promise = (async () => {
     try {
       const snap = await getDocs(query(collection(db, path), where(field, op, value)));
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _cacheSet(key, data);
+      return data;
     } catch (e) {
       _handleFirestoreError(e, `loadCollectionWhere(${path})`);
       return [];
