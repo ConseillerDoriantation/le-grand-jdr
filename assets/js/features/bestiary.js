@@ -15,6 +15,7 @@ import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
+import Sortable from '../vendor/sortable.esm.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -37,6 +38,10 @@ let _activeId   = null; // créature ouverte dans le panneau
 let _bestiaireId = 'main'; // id du bestiaire actif (admin peut switcher)
 let _viewAsUid   = null; // admin : voir le bestiaire d'un joueur (null = vue MJ)
 let _playersList = []; // [{ uid, pseudo }] — peuplé côté admin
+let _bstSortable = null;
+let _bstDragBlockClick = false;
+let _bstClickGuardInstalled = false;
+let _bstReordering = false;
 
 // Vue "MJ" effective : admin ET pas en train de consulter un joueur.
 // Quand l'admin bascule sur un joueur, on rend exactement comme côté joueur
@@ -46,6 +51,25 @@ function _isViewingPlayer() {
 }
 function _isAdminView() {
   return STATE.isAdmin && !_isViewingPlayer();
+}
+
+function _bstOrderValue(c) {
+  const n = Number(c?.ordre);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
+
+function _bstCompareCreatures(a, b) {
+  const oa = _bstOrderValue(a);
+  const ob = _bstOrderValue(b);
+  if (oa !== ob) return oa - ob;
+  return (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' });
+}
+
+function _bstNextOrderIndex() {
+  const orders = _creatures
+    .map(c => Number(c?.ordre))
+    .filter(Number.isFinite);
+  return orders.length ? Math.max(...orders) + 1 : _creatures.length;
 }
 
 const RANG_STYLE = {
@@ -942,12 +966,12 @@ async function renderBestiary() {
 }
 
 // Applique une liste fraîche à _creatures : filtre les `hidden` pour les
-// joueurs et trie par nom. Source unique utilisée par le watch et l'hydratation
+// joueurs et trie par ordre manuel puis par nom. Source unique utilisée par le watch et l'hydratation
 // — toute logique de mise à jour de la liste doit passer par ici.
 function _bstApplyData(all) {
   const arr = all || [];
   _creatures = (STATE.isAdmin ? [...arr] : arr.filter(c => !c.hidden))
-    .sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+    .sort(_bstCompareCreatures);
 }
 
 // Re-charge _creatures depuis loadCollection (cache TTL en mémoire patché par
@@ -957,6 +981,112 @@ function _bstApplyData(all) {
 async function _bstHydrate() {
   const col = window._bstCurrentCol || 'bestiary';
   _bstApplyData(await loadCollection(col));
+}
+
+// ── Drag & drop : ordre manuel partagé ───────────────────────────────────────
+function _installBestiaryClickGuard() {
+  if (_bstClickGuardInstalled) return;
+  _bstClickGuardInstalled = true;
+  document.addEventListener('click', (e) => {
+    if (!_bstDragBlockClick) return;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+}
+
+function _finishBestiaryDrag() {
+  document.body.classList.remove('bst-dragging');
+  setTimeout(() => { _bstDragBlockClick = false; }, 350);
+}
+
+function _destroyBestiarySortable() {
+  _bstSortable?.destroy();
+  _bstSortable = null;
+}
+
+function _visibleBestiaryCardIds(grid) {
+  return [...(grid || document).querySelectorAll('.bst-card[data-beast-id]')]
+    .filter(el => el.offsetParent !== null && el.style.display !== 'none')
+    .map(el => el.dataset.beastId)
+    .filter(Boolean);
+}
+
+function _mergeBestiaryVisibleOrder(visibleOrder) {
+  const next = _creatures.map(c => c.id);
+  const visibleSet = new Set(visibleOrder);
+  let i = 0;
+  return next.map(id => visibleSet.has(id) ? visibleOrder[i++] : id);
+}
+
+async function _persistBestiaryManualOrder(visibleOrder) {
+  if (!_isAdminView() || !visibleOrder.length) return false;
+  const col = window._bstCurrentCol || 'bestiary';
+  const fullOrder = _mergeBestiaryVisibleOrder(visibleOrder);
+  const orderById = new Map(fullOrder.map((id, idx) => [id, idx]));
+  const saves = [];
+
+  _creatures = _creatures.map(c => {
+    const ordre = orderById.get(c.id);
+    if (ordre === undefined) return c;
+    if (Number(c.ordre) !== ordre) saves.push(updateInCol(col, c.id, { ordre }));
+    return { ...c, ordre };
+  }).sort(_bstCompareCreatures);
+
+  if (!saves.length) return false;
+  await Promise.all(saves);
+  return true;
+}
+
+function _mountBestiarySortable() {
+  _destroyBestiarySortable();
+  if (!_isAdminView()) return;
+
+  const grid = document.querySelector('.bst-grid.bst-sortable');
+  if (!grid) return;
+
+  _installBestiaryClickGuard();
+  _bstSortable = new Sortable(grid, {
+    animation: 120,
+    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+    draggable: '.bst-sortable-item',
+    filter: 'button, a, input, select, textarea, .btn, .btn-icon',
+    preventOnFilter: false,
+    ghostClass: 'bst-sortable-ghost',
+    chosenClass: 'bst-sortable-chosen',
+    dragClass: 'bst-sortable-drag',
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 5,
+    delay: 150,
+    delayOnTouchOnly: true,
+    touchStartThreshold: 5,
+    onStart: () => {
+      document.body.classList.add('bst-dragging');
+      _bstDragBlockClick = true;
+    },
+    onEnd: async (evt) => {
+      if (evt.oldIndex === evt.newIndex && evt.from === evt.to) {
+        _finishBestiaryDrag();
+        return;
+      }
+
+      const visibleOrder = _visibleBestiaryCardIds(grid);
+      _bstReordering = true;
+      _finishBestiaryDrag();
+
+      try {
+        const changed = await _persistBestiaryManualOrder(visibleOrder);
+        if (changed) showNotif('Ordre du bestiaire sauvegardé.', 'success');
+        _render();
+      } catch (err) {
+        notifySaveError(err);
+        await _bstHydrate();
+        _render();
+      } finally {
+        _bstReordering = false;
+      }
+    },
+  });
 }
 
 // Signature des données qui pilotent le rendu de la page (cartes + panneau
@@ -972,6 +1102,7 @@ function _bstSig() { return JSON.stringify({ c: _creatures, t: _tracker }); }
 // re-render alors qu'un champ est focus, le curseur saute. On préfère
 // attendre le prochain snapshot (qui arrivera après la sauvegarde).
 function _bstShouldSkipLiveRender() {
+  if (_bstReordering || document.body.classList.contains('bst-dragging')) return true;
   const ae = document.activeElement;
   if (!ae) return false;
   const tag = ae.tagName;
@@ -992,6 +1123,7 @@ window._bstCreateDraft = async function () {
     tokenW: 1, tokenH: 1, imageUrl: '', description: '',
     resistances: [], immunites: [], absorptions: [], faiblesses: [],
     armesNaturelles: [], actions: [], traits: [], butins: [],
+    ordre: _bstNextOrderIndex(),
   };
   try {
     const newId = await addToCol(col, data);
@@ -1106,7 +1238,7 @@ function _render() {
           <div class="bst-empty-sub">${_creatures.length===0 ? 'Ajoutez la première créature pour commencer.' : 'Essayez un filtre différent.'}</div>
           ${STATE.isAdmin && _creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" data-bst-action="createDraft">+ Ajouter la première créature</button>` : ''}
         </div>` : `
-        <div class="bst-grid">
+        <div class="bst-grid${_isAdminView() ? ' bst-sortable' : ''}">
           ${filtered.map(c => _renderCard(c)).join('')}
         </div>`}
     </div>
@@ -1117,6 +1249,7 @@ function _render() {
   </div>
   </div>`;
 
+  _mountBestiarySortable();
   _bstRenderSig = _bstSig();
 }
 
@@ -1131,7 +1264,7 @@ function _renderCard(c) {
   const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
   const pvPct    = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel/pvMax*100))) : 0;
 
-  return `<div class="bst-card${isActive?' active':''}"
+  return `<div class="bst-card${isActive?' active':''}${_isAdminView()?' bst-sortable-item':''}"
     style="--rang-c:${rs.color};--rang-glow:${rs.glow}"
     data-beast-id="${_esc(c.id)}"
     data-bst-action="open" data-id="${c.id}">
@@ -1621,6 +1754,7 @@ function _syncActivePanel() {
 }
 
 window._bstOpen = (id) => {
+  if (_bstDragBlockClick) return;
   _activeId = _activeId === id ? null : id;
   _syncActivePanel();
 };
