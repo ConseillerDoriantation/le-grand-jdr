@@ -98,6 +98,48 @@ window._vttCourirAndClose = (srcId) => {
   window._vttCourir?.(srcId);
   window._closeActionModal?.();
 };
+
+// ── Actions de base : Esquiver / Se cacher / Se désengager (état sur soi) ──
+// Pose l'état correspondant sur le token source. Le moteur de combat applique
+// automatiquement l'avantage/désavantage via les `effects` de l'état.
+window._vttSelfAction = async (srcId, condId) => {
+  const t = _tokens[srcId]?.data; if (!t) return;
+  if (!_canControlToken(t)) return;
+  const lib = CONDITION_BY_ID[condId]; if (!lib) return;
+  const round = _session?.combat?.round ?? 0;
+  const dur = (Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0) ? lib.defaultDuration : 1;
+  // En combat : actif pendant `dur` round(s) (expire à la fin du round courant).
+  // Hors combat (round 0) : on cale sur le 1er round de combat → l'état est gardé
+  // au tour 1 puis disparaît au tour 2.
+  const expiresAtRound = round > 0 ? (round + dur - 1) : dur;
+  const existing = (t.conditions || []).filter(c => c.id !== condId); // remplace si déjà posé
+  const newCond = {
+    id: condId, appliedAt: Date.now(), appliedBy: srcId,
+    source: lib.label, saveDC: null, saveStat: null, expiresAtRound,
+  };
+  await updateDoc(_tokRef(srcId), { conditions: [...existing, newCond] }).catch(() => {});
+  const name = _live(t).displayName ?? t.name;
+  showNotif(`${lib.icon} ${name} : ${lib.label}`, 'success');
+};
+window._vttSelfActionClose = (srcId, condId) => {
+  window._vttSelfAction?.(srcId, condId);
+  window._closeActionModal?.();
+};
+
+// ── Aider : relève un allié à 0 PV à 1 PV et retire tous ses états ──
+window._vttAider = async (srcId, tgtId) => {
+  const s = _tokens[srcId]?.data; if (!s) return;
+  if (!_canControlToken(s)) return;
+  const t = _tokens[tgtId]?.data; if (!t) return;
+  await _setHp(t, 1).catch(() => {});
+  await updateDoc(_tokRef(tgtId), { conditions: [] }).catch(() => {});
+  const name = _live(t).displayName ?? t.name;
+  showNotif(`🤝 ${name} relevé à 1 PV — états retirés`, 'success');
+};
+window._vttAiderClose = (srcId, tgtId) => {
+  window._vttAider?.(srcId, tgtId);
+  window._closeActionModal?.();
+};
 window._vttClearAoptSearch = (btn) => {
   const inp = btn.previousElementSibling;
   if (inp) { inp.value = ''; window._vttAoptSearch?.(''); inp.focus(); }
@@ -326,6 +368,19 @@ const CONDITION_DEFAULT_LIBRARY = [
     desc:'Avantage aux attaques contre la cible et +1d6 dégâts subis. L\'effet se consomme dès qu\'un coup touche.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:null,
     effects:{ attackAgainst:'adv', dmgTakenBonus:'1d6', consumedByAttackAgainst:true } },
+  // ── Actions de base (posées par les actions Esquiver / Se cacher / Se désengager) ──
+  { id:'dodge',         label:'Esquive',     icon:'🤸', color:'#38bdf8',
+    desc:'Jusqu\'au début de ton prochain tour : désavantage aux attaques contre toi (si tu vois l\'attaquant).',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
+    effects:{ attackAgainst:'dis' } },
+  { id:'hidden',        label:'Caché',       icon:'🫥', color:'#94a3b8',
+    desc:'Caché / discrétion : avantage à tes attaques, désavantage aux attaques contre toi (1 tour).',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
+    effects:{ attackBy:'adv', attackAgainst:'dis' } },
+  { id:'disengaged',    label:'Désengagé',   icon:'💨', color:'#a3e635',
+    desc:'Se désengage : aucune attaque d\'opportunité provoquée par ton déplacement ce tour.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
+    effects:{} },
 ];
 
 // Librairie en mémoire — peut être surchargée par les overrides MJ chargés depuis Firestore
@@ -3385,9 +3440,15 @@ async function _execAttack(srcId, tgtId) {
   const options = _buildAttackOptions(src);
   // Les actions "sur soi" sont toujours disponibles (la portée et la distance n'ont pas de sens).
   const inRange = options.filter(o => o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee);
-  if (!inRange.length) {
+  // Aucune attaque à portée : on bloque SAUF si on contrôle le token source —
+  // dans ce cas la modale s'ouvre quand même pour les Actions de base
+  // (Esquiver, Se cacher, Se désengager, Aider).
+  if (!inRange.length && !_canControlToken(src)) {
     showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...options.map(o=>o.portee))})`, 'error');
     return;
+  }
+  if (!inRange.length) {
+    showNotif(`Aucune attaque à portée (${dist} case${dist>1?'s':''}) — actions de base disponibles.`, 'info');
   }
 
   // Stocke les options dans un cache indexé — pas de JSON dans les onclick
@@ -3598,24 +3659,52 @@ async function _execAttack(srcId, tgtId) {
     }
   }
 
-  // ── Section Courir (si combat actif et pas encore utilisé) ──────────
+  // ── Section Actions de base (Courir / Esquiver / Se cacher / Se désengager / Aider) ──
+  // Disponibles dès que tu contrôles le token source (pas seulement en combat
+  // formel : un allié peut tomber à 0 PV hors tracker d'initiative).
   const inCombat = !!_session?.combat?.active;
   const couru    = (src.bonusMvt || 0) > 0;
   const canEditSrc = _canControlToken(src);
-  let courirHtml = '';
-  if (inCombat && !couru && canEditSrc) {
-    const body = `
+  let basicHtml = '';
+  if (canEditSrc) {
+    const selfBtn = (cond, icon, name, desc, col) => `
+        <button class="vtt-aopt" data-name="${name.toLowerCase()}" data-vtt-fn="_vttSelfActionClose" data-vtt-args="${srcId}|${cond}">
+          <div class="vtt-aopt-icon">${icon}</div>
+          <div class="vtt-aopt-body">
+            <div class="vtt-aopt-head"><span class="vtt-aopt-name">${name}</span></div>
+            <div class="vtt-aopt-pills"><span class="vtt-aopt-pill" style="color:${col};border-color:${col}66">${desc}</span></div>
+          </div>
+        </button>`;
+    let bBody = '', bCount = 0;
+    // Courir : combat actif et pas encore utilisé ce tour.
+    if (inCombat && !couru) {
+      bBody += `
         <button class="vtt-aopt" data-name="courir" data-vtt-fn="_vttCourirAndClose" data-vtt-args="${srcId}">
           <div class="vtt-aopt-icon">🏃</div>
           <div class="vtt-aopt-body">
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">Courir</span></div>
-            <div class="vtt-aopt-pills">
-              <span class="vtt-aopt-pill" style="color:#4ade80;border-color:rgba(74,222,128,.4)">+${lS.displayMovement??6} cases ce tour</span>
-            </div>
+            <div class="vtt-aopt-pills"><span class="vtt-aopt-pill" style="color:#4ade80;border-color:rgba(74,222,128,.4)">+${lS.displayMovement??6} cases ce tour</span></div>
           </div>
         </button>`;
-    courirHtml = _section('move', '🏃', 'Déplacement', '#4ade80', 1, body);
-    tabs.push({ id:'move', icon:'🏃', title:'Déplacement', color:'#4ade80', count:1 });
+      bCount++;
+    }
+    bBody += selfBtn('dodge', '🤸', 'Esquiver', 'Désavantage aux attaques contre toi', '#38bdf8'); bCount++;
+    bBody += selfBtn('hidden', '🫥', 'Se cacher', 'Avantage à tes attaques · désav. contre toi', '#94a3b8'); bCount++;
+    bBody += selfBtn('disengaged', '💨', 'Se désengager', 'Pas d\'attaque d\'opportunité ce tour', '#a3e635'); bCount++;
+    // Aider : visible seulement si la cible est un allié à 0 PV.
+    if (tgt && tgt.id !== srcId && (lT?.displayHp ?? null) === 0) {
+      bBody += `
+        <button class="vtt-aopt" data-name="aider" data-vtt-fn="_vttAiderClose" data-vtt-args="${srcId}|${tgt.id}">
+          <div class="vtt-aopt-icon">🤝</div>
+          <div class="vtt-aopt-body">
+            <div class="vtt-aopt-head"><span class="vtt-aopt-name">Aider — relever ${_esc(lT.displayName??tgt.name)}</span></div>
+            <div class="vtt-aopt-pills"><span class="vtt-aopt-pill" style="color:#fbbf24;border-color:#fbbf2466">Relève à 1 PV · retire ses états</span></div>
+          </div>
+        </button>`;
+      bCount++;
+    }
+    basicHtml = _section('basic', '🎭', 'Actions de base', '#fbbf24', bCount, bBody);
+    tabs.push({ id:'basic', icon:'🎭', title:'Actions', color:'#fbbf24', count:bCount });
   }
 
   // Tabs HTML : "Tous" en premier, puis une tab par catégorie (si plus d'une catégorie)
@@ -3661,7 +3750,7 @@ async function _execAttack(srcId, tgtId) {
       ${pmBar}
       ${tabsHtml}
       ${searchHtml}
-      <div class="vtt-aopt-list">${optsHtml}${courirHtml}</div>
+      <div class="vtt-aopt-list">${optsHtml}${basicHtml}</div>
       <div class="vtt-aopt-empty" style="display:none">
         <span style="opacity:.5">Aucune action ne correspond.</span>
       </div>
@@ -7900,11 +7989,16 @@ function _renderChatLog(msgs) {
           })()
         : '';
       const dmgVal = m.dmgTotal < 0 ? `+${-m.dmgTotal}` : m.dmgTotal;
-      // Ligne 1 : jet de toucher (CA estimée pour les joueurs sur les ennemis)
+      // Ligne 1 : jet de toucher — on affiche le TOTAL calculé ET le dé naturel.
+      // (CA estimée pour les joueurs sur les ennemis)
       const _shownCA = _viewCA(m, m.targetCA);
+      const natDie = (m.hitD20 != null)
+        ? `<span class="vtt-log-nat" title="Jet naturel du dé (avant modificateurs)">${_d20(m.hitD20, m.hitD20rolls)}</span>`
+        : '';
       const hitRow = `<div class="vtt-log-body">
         <span class="vtt-log-icon">🎯</span>
         <strong class="vtt-log-result" style="font-size:1.15rem;color:${isHit?'#22c38e':'#ef4444'}">${m.hitTotal ?? '?'}</strong>
+        ${natDie}
         <span class="vtt-log-vs">vs CA ${_shownCA}</span>
         <span class="vtt-log-result-sub" style="color:${isHit?'#22c38e':'#ef4444'};font-weight:700">${isHit ? '✓ TOUCHE' : '✗ RATÉ'}</span>
         ${_toggle(`d${i}`)}
