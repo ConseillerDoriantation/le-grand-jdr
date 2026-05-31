@@ -3,7 +3,7 @@
 // ✓ Admin : CRUD créatures, image+crop, attaques/traits/butins dynamiques
 // ✓ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, popModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -936,7 +936,8 @@ export async function renderBestiary() {
 
   if (!_damageTypes) _damageTypes = await loadDamageTypes();
 
-  await _bstHydrate();
+  const cachedCreatures = getCachedCollection(col);
+  _bstApplyData(cachedCreatures || []);
   _render();
 
   const trackerUid = _viewAsUid || STATE.user?.uid;

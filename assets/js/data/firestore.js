@@ -75,21 +75,45 @@ const _CACHE_TTL = {
   adventures:         60_000,
 };
 
+const _DOC_CACHE_TTL = {
+  world: {
+    weapon_formats: 5 * 60_000,
+    damage_types: 5 * 60_000,
+    spell_matrices: 5 * 60_000,
+    conditions: 5 * 60_000,
+    dice_skills: 5 * 60_000,
+    upgrade_settings: 5 * 60_000,
+    combat_styles: 5 * 60_000,
+    vtt_emotes: 5 * 60_000,
+    map: 5 * 60_000,
+    map_fog: 5 * 60_000,
+  },
+};
+
 const _cache = new Map(); // key → { data, ts }
+
+function _cacheTtlForKey(key) {
+  const path = key.split(':')[0];
+  const colName = path.split('/').pop();
+  const colTtl = _CACHE_TTL[colName];
+  if (colTtl) return colTtl;
+
+  const suffix = key.slice(path.length + 1);
+  if (!suffix || suffix.includes(':')) return null;
+  return _DOC_CACHE_TTL[colName]?.[suffix] || null;
+}
 
 function _cacheGet(key) {
   const entry = _cache.get(key);
   if (!entry) return null;
-  const colName = key.split(':')[0].split('/').pop();
-  const ttl = _CACHE_TTL[colName];
+  const ttl = _cacheTtlForKey(key);
   if (!ttl) return null;
   if (Date.now() - entry.ts > ttl) { _cache.delete(key); return null; }
   return entry.data;
 }
 
 function _cacheSet(key, data) {
-  const colName = key.split(':')[0].split('/').pop();
-  const ttl = _CACHE_TTL[colName];
+  const ttl = _cacheTtlForKey(key);
   if (!ttl) return;
   _cache.set(key, { data, ts: Date.now() });
 }
@@ -422,6 +446,13 @@ export async function loadCollection(col) {
   })();
   _inflight.set(key, promise);
   return promise;
+}
+
+export function getCachedCollection(col) {
+  const path = _colPath(col);
+  const live = _liveCollections.get(path);
+  if (live && !live.failed && live.firstReceived) return live.data;
+  return _cacheGet(`${path}:all`);
 }
 
 export async function loadCollectionWhere(col, field, op, value) {

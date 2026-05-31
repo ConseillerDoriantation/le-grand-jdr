@@ -22,6 +22,8 @@ let _entries     = [];
 let _results     = [];
 let _query       = '';
 let _initialized = false;
+let _bestiaryEntries = null;
+let _bestiaryEntriesPromise = null;
 
 // ── PAGES (raccourcis directs) ────────────────────────────────────────────────
 const PAGE_SHORTCUTS = [
@@ -58,14 +60,13 @@ function _firstStr(obj, keys) {
 }
 
 async function _loadEntries() {
-  const [npcs, chars, quests, shop, shopCats, bestiary, achievements, collection, story, recipes] =
+  const [npcs, chars, quests, shop, shopCats, achievements, collection, story, recipes] =
     await Promise.all([
       loadCollection('npcs').catch(() => []),
       loadChars(STATE.isAdmin ? null : STATE.user?.uid).catch(() => []),
       loadCollection('quests').catch(() => []),
       loadCollection('shop').catch(() => []),
       loadCollection('shopCategories').catch(() => []),
-      loadCollection('bestiary').catch(() => []),
       loadCollection('achievements').catch(() => []),
       loadCollection('collection').catch(() => []),
       loadCollection('story').catch(() => []),
@@ -145,18 +146,6 @@ async function _loadEntries() {
     });
   }
 
-  // Bestiaire
-  for (const b of bestiary) {
-    const title = _firstStr(b, ['nom', 'name']);
-    if (!title) continue;
-    entries.push({
-      type: 'beast', typeLabel: 'Bestiaire', id: b.id, title,
-      subtitle: _firstStr(b, ['type', 'description', 'famille']),
-      icon: '🐉',
-      search: _norm([title, b.type, b.famille, b.description].filter(Boolean).join(' ')),
-    });
-  }
-
   // Hauts-faits
   for (const a of achFiltered) {
     const title = _firstStr(a, ['titre', 'nom', 'name']);
@@ -206,6 +195,41 @@ async function _loadEntries() {
   }
 
   return entries;
+}
+
+function _buildBestiaryEntries(bestiary) {
+  const entries = [];
+  for (const b of bestiary || []) {
+    const title = _firstStr(b, ['nom', 'name']);
+    if (!title) continue;
+    entries.push({
+      type: 'beast', typeLabel: 'Bestiaire', id: b.id, title,
+      subtitle: _firstStr(b, ['type', 'description', 'famille']),
+      icon: '🐉',
+      search: _norm([title, b.type, b.famille, b.description].filter(Boolean).join(' ')),
+    });
+  }
+  return entries;
+}
+
+async function _ensureBestiaryEntriesForQuery(query) {
+  if (_norm(query).length < 2) return false;
+  if (_entries.some(e => e.type === 'beast')) return false;
+
+  if (!_bestiaryEntriesPromise) {
+    _bestiaryEntriesPromise = loadCollection('bestiary')
+      .catch(() => [])
+      .then(all => {
+        const visible = STATE.isAdmin ? all : all.filter(b => !b.hidden);
+        _bestiaryEntries = _buildBestiaryEntries(visible);
+        return _bestiaryEntries;
+      });
+  }
+
+  const entries = await _bestiaryEntriesPromise;
+  if (_entries.some(e => e.type === 'beast')) return false;
+  _entries = [..._entries, ...entries];
+  return entries.length > 0;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -427,6 +451,13 @@ function _mountModal() {
     _activeIndex = 0;
     _results = _filterAndSort(_entries, _query);
     _renderList();
+
+    const requestedQuery = _query;
+    _ensureBestiaryEntriesForQuery(requestedQuery).then(changed => {
+      if (!_open || !changed) return;
+      _results = _filterAndSort(_entries, _query);
+      _renderList();
+    });
   });
 
   input.addEventListener('keydown', (e) => {
@@ -458,6 +489,8 @@ async function openPalette() {
   _activeIndex = 0;
   _entries = [];
   _results = [];
+  _bestiaryEntries = null;
+  _bestiaryEntriesPromise = null;
 
   const input = _mountModal();
   const list = document.getElementById('cmd-palette-list');
@@ -467,6 +500,9 @@ async function openPalette() {
 
   try {
     _entries = await _loadEntries();
+    if (_bestiaryEntries && _norm(_query).length >= 2 && !_entries.some(e => e.type === 'beast')) {
+      _entries = [..._entries, ..._bestiaryEntries];
+    }
     if (!_open) return; // l'utilisateur a fermé entre-temps
     _results = _filterAndSort(_entries, _query);
     _renderList();
