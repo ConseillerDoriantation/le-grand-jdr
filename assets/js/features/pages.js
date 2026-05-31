@@ -13,7 +13,6 @@ import { renderCollectionPage } from '../features/collection.js';
 
 const renderCharSheet   = (...args) => window.renderCharSheet?.(...args);
 const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorationsCustom: [], evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
-const getDefaultTutorial = () => window.getDefaultTutorial?.() || [{ title: 'Introduction', content: 'Le tutoriel sera ajouté ici.' }];
 
 const PAGES = {
 
@@ -1580,20 +1579,6 @@ const PAGES = {
     await renderCollectionPage();
   },
 
-  // ─── TUTORIAL ───────────────────────────────────────────────────────────────
-  async tutorial() {
-    const doc      = await getDocData('tutorial', 'main');
-    const sections = doc?.sections || getDefaultTutorial();
-    const content  = document.getElementById('main-content');
-    content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📕 Tutoriel de Jeu</div><div class="page-subtitle">Comment jouer, règles et mécaniques</div></div>
-      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" data-action="editTutorial">✏️ Modifier le tutoriel</button></div>` : ''}
-      <div class="grid-2 tutorial-layout-grid" style="gap:1.5rem;align-items:start">
-        <div><div class="tutorial-nav" id="tut-nav">${sections.map((s, i) => `<div class="tutorial-nav-item ${i === 0 ? 'active' : ''}" data-action="showTutSection" data-idx="${i}">${s.title}</div>`).join('')}</div></div>
-        <div><div class="tutorial-content" id="tut-content">${sections[0]?.content || ''}</div></div>
-      </div>`;
-    window._tutSections = sections;
-  },
-
   // ─── ADMIN ──────────────────────────────────────────────────────────────────
   async admin() {
     if (!STATE.isAdmin) { window.navigate?.('dashboard'); return; }
@@ -1617,7 +1602,6 @@ const PAGES = {
             <button class="btn btn-outline" data-navigate="story">📚 Gérer la Trame</button>
             <button class="btn btn-outline" data-navigate="npcs">👥 Gérer les PNJ</button>
             <button class="btn btn-outline" data-navigate="world">📖 Modifier le Monde</button>
-            <button class="btn btn-outline" data-navigate="tutorial">📕 Modifier le Tutoriel</button>
           </div>
         </div>
       </div>
@@ -1709,10 +1693,6 @@ registerActions({
   _achSetFilter:         (btn) => window._achSetFilter?.(btn.dataset.val),
   _achSetView:           (btn) => window._achSetView?.(btn.dataset.val),
   openAchievementModal:  ()    => window.openAchievementModal?.(),
-
-  // Tutorial
-  editTutorial:          ()    => window.editTutorial?.(),
-  showTutSection:        (btn) => window.showTutSection?.(Number(btn.dataset.idx), btn),
 
   // Admin lazy-load tools
   _adminLazyOpen:        (btn) => {

@@ -3,7 +3,7 @@
 //
 // Usage :
 //   watch('quests', 'quests', data => renderQuests(data));
-//   watchDoc('info', 'informations', 'main', data => renderInfo(data));
+//   watchDoc('world', 'world', 'main', data => renderWorld(data));
 //   unwatchAll(); // appelé automatiquement à chaque navigation
 //
 // Si la collection / doc est déjà couvert par un listener "session-live"

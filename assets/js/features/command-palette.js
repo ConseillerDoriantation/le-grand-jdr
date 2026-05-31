@@ -30,7 +30,6 @@ const PAGE_SHORTCUTS = [
   { id: 'bestiaire',    label: 'Bestiaire',       icon: '🐉' },
   { id: 'recettes',     label: 'Recettes',        icon: '🧪' },
   { id: 'bastion',      label: 'Bastion',         icon: '🏰' },
-  { id: 'informations', label: 'Informations',    icon: 'ℹ️' },
   { id: 'quests',       label: 'Quêtes',          icon: '📜' },
   { id: 'agenda',       label: 'Agenda',          icon: '🗓️' },
   { id: 'map',          label: 'Carte',           icon: '🗺️' },
@@ -43,7 +42,6 @@ const PAGE_SHORTCUTS = [
   { id: 'aventures',    label: 'Aventures',       icon: '🗡️' },
   { id: 'admin',        label: 'Console MJ',      icon: '⚙️', adminOnly: true },
   { id: 'account',      label: 'Mon compte',      icon: '👤' },
-  { id: 'tutorial',     label: 'Tutoriel',        icon: '📕' },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════

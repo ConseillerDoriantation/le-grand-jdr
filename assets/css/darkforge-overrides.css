@@ -320,20 +320,6 @@ body::after {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   TUTORIAL NAV
-════════════════════════════════════════════════════════════════════ */
-.tutorial-nav-item.active {
-  color: #e8b84b !important;
-  border-left-color: #e8b84b !important;
-  background: rgba(232,184,75,0.08) !important;
-  box-shadow: none !important;
-}
-.tutorial-nav-item.active::before {
-  background: #e8b84b !important;
-  box-shadow: 0 0 0 5px rgba(232,184,75,0.12) !important;
-}
-
-/* ════════════════════════════════════════════════════════════════════
    SHOP
 ════════════════════════════════════════════════════════════════════ */
 .sh-side-link.active {
