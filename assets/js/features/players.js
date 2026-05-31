@@ -100,7 +100,6 @@ function _buildRecord(char = null, pres = null) {
     id:             pres?.id || `c:${char?.id || Math.random().toString(36).slice(2)}`,
     presentationId: pres?.id || '',
     charId:         pres?.charId || char?.id || '',
-    ownerUid:       char?.uid || pres?.uid || '',
     nom, classe, race, joueur,
     level:          char?.niveau || 1,
     subtitle:       [classe, race].filter(Boolean).join(' · '),
@@ -185,11 +184,8 @@ function _buildDataset(presentations = [], characters = []) {
   presentations.filter(p => !usedPresIds.has(p.id)).forEach(p => items.push(_buildRecord(null, p)));
 
   const lsOrdre = _getLocalOrdre();
-  const myUid = STATE.user?.uid;
   return items
-    // Public : on masque les fiches non-visibles. Exceptions : le MJ voit tout,
-    // et un joueur voit TOUJOURS son ou ses propres personnages (même masqués).
-    .filter(item => STATE.isAdmin || item.visible !== false || (myUid && item.ownerUid === myUid))
+    .filter(item => STATE.isAdmin || item.visible !== false)
     .sort((a, b) => {
       const ao = (a.ordre ?? 999) !== 999 ? a.ordre : (lsOrdre ? (lsOrdre.indexOf(a.id) + 1 || 999) : 999);
       const bo = (b.ordre ?? 999) !== 999 ? b.ordre : (lsOrdre ? (lsOrdre.indexOf(b.id) + 1 || 999) : 999);
@@ -839,11 +835,9 @@ function _renderFiche(item, items) {
         : ''}
     </nav>
 
-    <!-- Badge masqué : visible par le MJ et par le propriétaire de la fiche -->
-    ${!item.visible && (STATE.isAdmin || (item.ownerUid && item.ownerUid === STATE.user?.uid))
-      ? `<div class="pp-fiche-hidden-banner">🔒 ${STATE.isAdmin
-          ? 'Cette présentation est masquée aux joueurs'
-          : 'Ta présentation est masquée — seuls toi et le MJ la voyez'}</div>`
+    <!-- Badge masqué (admin) -->
+    ${STATE.isAdmin && !item.visible
+      ? `<div class="pp-fiche-hidden-banner">🔒 Cette présentation est masquée aux joueurs</div>`
       : ''}
 
     <!-- Layout principal 2 colonnes -->
@@ -1199,7 +1193,7 @@ function _renderTopAdventurersBlock(item, items) {
 // ══════════════════════════════════════════════════════════════════════════════
 // PAGE PRINCIPALE — entrée + dispatch sommaire/fiche
 // ══════════════════════════════════════════════════════════════════════════════
-async function renderPlayersPage() {
+export async function renderPlayersPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
 
@@ -1910,7 +1904,6 @@ async function openCharacterSheetFromShowcase(charId) {
 PAGES.players = renderPlayersPage;
 
 Object.assign(window, {
-  renderPlayersPage,
   openPlayerPresentModal,
   openCharacterSheetFromShowcase,
 });

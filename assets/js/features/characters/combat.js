@@ -264,7 +264,7 @@ export function renderCharEquip(c, canEdit) {
 }
 
 /** Active ou désactive un élément sur un personnage. */
-window._toggleCharElement = async (charId, elemId) => {
+export async function toggleCharElement(charId, elemId) {
   if (!STATE.isAdmin) { showNotif('Seul le MJ peut modifier les noyaux accessibles.', 'error'); return; }
   const c = STATE.activeChar;
   if (!c || c.id !== charId) return;
@@ -295,4 +295,4 @@ window._toggleCharElement = async (charId, elemId) => {
     } catch {}
   }
   showNotif('Éléments mis à jour.', 'success');
-};
+}

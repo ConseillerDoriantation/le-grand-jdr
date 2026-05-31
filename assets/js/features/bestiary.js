@@ -36,6 +36,8 @@ let _filterType = ''; // filtre par type de créature
 let _filterRang  = ''; // filtre par rang (classique, elite, boss)
 let _activeId   = null; // créature ouverte dans le panneau
 let _bestiaireId = 'main'; // id du bestiaire actif (admin peut switcher)
+let _bstCurrentCol = 'bestiary';
+let _bstBestiaireList = [{ id:'main', label:'Bestiaire principal' }];
 let _viewAsUid   = null; // admin : voir le bestiaire d'un joueur (null = vue MJ)
 let _playersList = []; // [{ uid, pseudo }] — peuplé côté admin
 let _bstSortable = null;
@@ -191,9 +193,6 @@ async function _bstEnsureSpellsModule() {
     'openSortCatEditor',
     'sortDragStart','sortDragOver','sortDrop','sortDragEnd',
   ];
-  keys.forEach(k => {
-    if (typeof mod[k] === 'function' && typeof window[k] !== 'function') window[k] = mod[k];
-  });
   return mod;
 }
 
@@ -247,7 +246,7 @@ function _bstRenderActionsList() {
   return _bstActionsCache.map((a,i) => _bstRenderActionCard(a,i)).join('');
 }
 
-window._bstAddAction = async () => {
+async function _bstAddAction() {
   const mod = await _bstEnsureSpellsModule();
   if (typeof mod.addItemSpell !== 'function') { showNotif('Module sorts indisponible', 'error'); return; }
   const c = _creatures.find(x => x.id === _bstActionsCreatureId);
@@ -259,9 +258,9 @@ window._bstAddAction = async () => {
     _bstActionsPersist();
     _bstRefreshActionsHost();
   }, charForCalc);
-};
+}
 
-window._bstEditAction = async (idx) => {
+async function _bstEditAction(idx) {
   const mod = await _bstEnsureSpellsModule();
   if (typeof mod.editItemSpell !== 'function') { showNotif('Module sorts indisponible', 'error'); return; }
   const c = _creatures.find(x => x.id === _bstActionsCreatureId);
@@ -273,15 +272,15 @@ window._bstEditAction = async (idx) => {
     _bstActionsPersist();
     _bstRefreshActionsHost();
   }, charForCalc);
-};
+}
 
-window._bstRemoveAction = (idx) => {
+function _bstRemoveAction(idx) {
   if (!Number.isFinite(idx) || !_bstActionsCache[idx]) return;
   if (!confirm('Supprimer cette action ?')) return;
   _bstActionsCache.splice(idx, 1);
   _bstActionsPersist();
   _bstRefreshActionsHost();
-};
+}
 
 // ── Armes naturelles : édition inline ─────────────────────────────────────────
 function _bstRenderArmeRow(a = {}, cid, idx) {
@@ -326,7 +325,7 @@ function _bstRenderArmeRow(a = {}, cid, idx) {
   </div>`;
 }
 
-window._bstAddArme = (cid) => {
+function _bstAddArme(cid) {
   const host = document.getElementById(`bst-p-armes-${cid}`);
   if (!host) return;
   const c = _creatures.find(x => x.id === cid);
@@ -335,15 +334,15 @@ window._bstAddArme = (cid) => {
   if (c) c.armesNaturelles = armes;
   host.innerHTML = armes.map((a,i) => _bstRenderArmeRow(a, cid, i)).join('');
   _bstQueueSave(cid, { armesNaturelles: armes });
-};
+}
 
-window._bstRemoveArme = (cid, btn) => {
+function _bstRemoveArme(cid, btn) {
   const row = btn?.closest?.('.bst-p-row'); if (!row) return;
   row.remove();
-  window._bstSaveArmes(cid);
-};
+  _bstSaveArmes(cid);
+}
 
-window._bstSaveArmes = (cid) => {
+function _bstSaveArmes(cid) {
   const host = document.getElementById(`bst-p-armes-${cid}`);
   if (!host) return;
   const rows = [...host.querySelectorAll('.bst-p-row')];
@@ -368,7 +367,7 @@ window._bstSaveArmes = (cid) => {
   if (cid === _bstActionsCreatureId && !armes.find(a => a.id === _bstActionsArmeIdCtx)) {
     _bstActionsArmeIdCtx = armes[0]?.id || null;
   }
-};
+}
 
 function _beastSearchText(c = {}) {
   const armes = Array.isArray(c.armesNaturelles)
@@ -488,7 +487,7 @@ const _bstPending = {};
 let _bstSaveTimer = null;
 
 function _bstFlushSaves() {
-  const col = window._bstCurrentCol || 'bestiary';
+  const col = _bstCurrentCol || 'bestiary';
   const ids = Object.keys(_bstPending);
   if (!ids.length) return;
   ids.forEach(id => {
@@ -510,9 +509,9 @@ function _bstQueueSave(id, patch) {
 }
 
 // Auto-save générique (texte / select)
-window._bstUpdate = (id, field, val) => _bstQueueSave(id, { [field]: val });
-window._bstUpdateNum = (id, field, val) => _bstQueueSave(id, { [field]: parseInt(val) || 0 });
-window._bstToggleHidden = (id) => {
+function _bstUpdate(id, field, val) { _bstQueueSave(id, { [field]: val }); }
+function _bstUpdateNum(id, field, val) { _bstQueueSave(id, { [field]: parseInt(val) || 0 }); }
+function _bstToggleHidden(id) {
   const c = _creatures.find(x => x.id === id);
   if (!c) return;
   const next = !c.hidden;
@@ -521,17 +520,17 @@ window._bstToggleHidden = (id) => {
   // Re-render panel + cartes pour refléter le badge
   if (typeof _syncActivePanel === 'function') _syncActivePanel();
   if (typeof _render === 'function') _render();
-};
+}
 
 // Nom : sync visuel des cartes et du hero
-window._bstUpdateNom = (id, val) => {
+function _bstUpdateNom(id, val) {
   _bstQueueSave(id, { nom: val });
   document.querySelectorAll(`.bst-card[data-beast-id="${id}"] .bst-card-name`)
     .forEach(el => el.textContent = val || '?');
-};
+}
 
 // Caracs : sauve + recalcule le modificateur affiché
-window._bstUpdateCarac = (id, key, val) => {
+function _bstUpdateCarac(id, key, val) {
   _bstQueueSave(id, { [key]: parseInt(val) || 0 });
   const n = parseInt(val);
   let txt = '', cls = 'zero';
@@ -542,10 +541,10 @@ window._bstUpdateCarac = (id, key, val) => {
   }
   const modEl = document.querySelector(`[data-bst-mod="${id}-${key}"]`);
   if (modEl) { modEl.textContent = txt; modEl.className = `bst-carac-mod ${cls}`; }
-};
+}
 
 // Changement de rang : sauve + met à jour cartes + panneau (couleurs + label)
-window._bstSelectRangPanel = (id, rang) => {
+function _bstSelectRangPanel(id, rang) {
   _bstQueueSave(id, { rang });
   const rs = RANG_STYLE[rang] || RANG_STYLE.classique;
   document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
@@ -568,10 +567,10 @@ window._bstSelectRangPanel = (id, rang) => {
     btn.style.borderColor = active ? rst.color : '';
     btn.style.background  = active ? `${rst.color}1a` : '';
   });
-};
+}
 
 // Toggle relation aux dégâts
-window._bstToggleDmg = (id, rel, typeId) => {
+function _bstToggleDmg(id, rel, typeId) {
   const c = _creatures.find(x => x.id === id);
   if (!c) return;
   const set = new Set(Array.isArray(c[rel]) ? c[rel] : []);
@@ -587,11 +586,11 @@ window._bstToggleDmg = (id, rel, typeId) => {
     chip.style.borderColor = active ? meta.color : '';
     chip.style.background  = active ? `${meta.color}1a` : '';
   }
-};
+}
 
 // Lecture + save d'un tableau dynamique (traits / butins) depuis le panneau.
 // Les attaques sont gérées via `actions` + `armesNaturelles` ailleurs.
-window._bstSaveArr = (id, type) => {
+function _bstSaveArr(id, type) {
   const container = document.getElementById(`bst-p-${type}-${id}`);
   if (!container) return;
   const rows = [...container.querySelectorAll('.bst-p-row')];
@@ -626,9 +625,9 @@ window._bstSaveArr = (id, type) => {
   // Met à jour le compteur en titre
   const countEl = document.querySelector(`[data-bst-count="${id}-${type}"]`);
   if (countEl) countEl.textContent = arr.length;
-};
+}
 
-window._bstAddPanelRow = (id, type) => {
+function _bstAddPanelRow(id, type) {
   const container = document.getElementById(`bst-p-${type}-${id}`);
   if (!container) return;
   // Seules les sections "traits" passent ici. Les butins ont leur propre picker,
@@ -638,14 +637,14 @@ window._bstAddPanelRow = (id, type) => {
   const tpl = document.createElement('div');
   tpl.innerHTML = _panelTraitRow({}, id, i).trim();
   container.appendChild(tpl.firstElementChild);
-};
+}
 
-window._bstRemovePanelRow = (id, type, btn) => {
+function _bstRemovePanelRow(id, type, btn) {
   const row = btn?.closest?.('.bst-p-row');
   if (!row) return;
   row.remove();
-  window._bstSaveArr(id, type);
-};
+  _bstSaveArr(id, type);
+}
 
 // Row renderers (panneau)
 function _panelTraitRow(t = {}, id, i) {
@@ -692,7 +691,7 @@ const _bstRarColor = getRareteColor;
 // ─────────────────────────────────────────────────────────────────────────────
 // PICKER OBJET BOUTIQUE — utilise le composant partagé shared/shop-picker.js
 // ─────────────────────────────────────────────────────────────────────────────
-window._bstButinPickerOpen = async (creatureId) => {
+async function _bstButinPickerOpen(creatureId) {
   if (!creatureId) return;
   const c = _creatures.find(x => x.id === creatureId);
   if (!c) return;
@@ -722,7 +721,7 @@ window._bstButinPickerOpen = async (creatureId) => {
       if (countEl) countEl.textContent = butins.length;
     },
   });
-};
+}
 
 // Matrice de relations aux dégâts (panneau, version chips compacte)
 function _renderDamageMatrixPanel(c, types) {
@@ -804,7 +803,7 @@ function _renderDamageTypeMatrix(beast, types) {
 }
 
 /** Met en évidence les types de dégâts cochés dans plusieurs catégories (matrice). */
-window._bstSyncDmgConflicts = () => {
+function _bstSyncDmgConflicts() {
   const matrix = document.querySelector('[data-bst-matrix]');
   if (!matrix) return;
   const counts = new Map();
@@ -825,7 +824,7 @@ window._bstSyncDmgConflicts = () => {
     const tid = warn.dataset.bstRowWarn;
     warn.style.display = (counts.get(tid) || 0) > 1 ? 'inline' : 'none';
   });
-};
+}
 
 function _readDamageTypeSelections(name) {
   return [...document.querySelectorAll(`input[name=bst-${name}]:checked`)].map(el => el.value).filter(Boolean);
@@ -885,7 +884,7 @@ function _renderPlayerAvatars() {
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
-async function renderBestiary() {
+export async function renderBestiary() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
 
@@ -894,7 +893,7 @@ async function renderBestiary() {
     const meta = await getDocData('bestiary_meta', 'list');
     const list = meta?.list || [];
     if (!list.find(b => b.id === 'main')) list.unshift({ id:'main', label:'Bestiaire principal' });
-    window._bstBestiaireList = list;
+    _bstBestiaireList = list;
 
     // Liste des joueurs (uid + pseudo) pour la vue "bestiaire d'un joueur".
     // Source primaire : STATE.characters (déjà chargé via la page d'accueil).
@@ -933,7 +932,7 @@ async function renderBestiary() {
   // tenu à jour par le watch ci-dessous.
   const col = _bestiaireId === 'main' ? 'bestiary' : `bestiary_${_bestiaireId}`;
   _tracker = {};
-  window._bstCurrentCol = col;
+  _bstCurrentCol = col;
 
   if (!_damageTypes) _damageTypes = await loadDamageTypes();
 
@@ -979,7 +978,7 @@ function _bstApplyData(all) {
 // rester cohérent juste après une opération CRUD, sans dépendre du timing du
 // watch (qui peut être skippé si un input du panneau précédent a le focus).
 async function _bstHydrate() {
-  const col = window._bstCurrentCol || 'bestiary';
+  const col = _bstCurrentCol || 'bestiary';
   _bstApplyData(await loadCollection(col));
 }
 
@@ -1020,7 +1019,7 @@ function _mergeBestiaryVisibleOrder(visibleOrder) {
 
 async function _persistBestiaryManualOrder(visibleOrder) {
   if (!_isAdminView() || !visibleOrder.length) return false;
-  const col = window._bstCurrentCol || 'bestiary';
+  const col = _bstCurrentCol || 'bestiary';
   const fullOrder = _mergeBestiaryVisibleOrder(visibleOrder);
   const orderById = new Map(fullOrder.map((id, idx) => [id, idx]));
   const saves = [];
@@ -1112,9 +1111,9 @@ function _bstShouldSkipLiveRender() {
 }
 
 // ── Création rapide d'une créature sans modal ──────────────────────────────────
-window._bstCreateDraft = async function () {
+async function _bstCreateDraft() {
   if (!STATE.isAdmin) return;
-  const col = window._bstCurrentCol || 'bestiary';
+  const col = _bstCurrentCol || 'bestiary';
   const data = {
     nom: 'Nouvelle créature', emoji: '🐲', rang: 'classique',
     type: '', environnement: '', niveau: 0, dangerositeXp: 0,
@@ -1155,7 +1154,7 @@ function _render() {
     { label:'Boss',     icon:'☠',  count:byRang.boss,       c:RANG_STYLE.boss.color,      filter:'boss'      },
   ];
 
-  const bstList = window._bstBestiaireList || [{ id:'main', label:'Bestiaire principal' }];
+  const bstList = _bstBestiaireList || [{ id:'main', label:'Bestiaire principal' }];
   const tabsHtml = STATE.isAdmin ? `
     <div class="bst-tabs">
       ${bstList.map(b => `
@@ -1478,7 +1477,7 @@ function _renderPanel(c) {
 // PANNEAU MJ — entièrement éditable, auto-save
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderPanelAdmin(c, rs) {
-  const types     = _damageTypes || window._bstDamageTypes || [];
+  const types     = _damageTypes || [];
   const traits    = Array.isArray(c.traits) ? c.traits : [];
   const butins    = Array.isArray(c.butins) ? c.butins : [];
 
@@ -1698,9 +1697,9 @@ function _renderPanelAdmin(c, rs) {
   </div>`;
 }
 
-async function deleteBeast(id) {
+export async function deleteBeast(id) {
   try {
-    const col = window._bstCurrentCol || 'bestiary';
+    const col = _bstCurrentCol || 'bestiary';
     const c = _creatures.find(x=>x.id===id);
     if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`, {title: 'Supprimer la créature'})) return;
     await deleteFromCol(col, id);
@@ -1753,17 +1752,21 @@ function _syncActivePanel() {
   }
 }
 
-window._bstOpen = (id) => {
+export function openBestiaryEntry(id) {
+  _bstOpen(id);
+}
+
+function _bstOpen(id) {
   if (_bstDragBlockClick) return;
   _activeId = _activeId === id ? null : id;
   _syncActivePanel();
-};
-window._bstClose = () => {
+}
+function _bstClose() {
   _activeId = null;
   _syncActivePanel();
-};
-window._bstSetRang = (rang) => { _filterRang = rang; _render(); };
-window._bstSelectRang = (rang) => {
+}
+function _bstSetRang(rang) { _filterRang = rang; _render(); }
+function _bstSelectRang(rang) {
   const sel = document.getElementById('bst-rang-selector');
   if (!sel) return;
   sel.dataset.rang = rang;
@@ -1776,9 +1779,9 @@ window._bstSelectRang = (rang) => {
     btn.style.background = active ? rst.bg  : 'var(--bg-elevated)';
     btn.style.color      = active ? rst.color : 'var(--text-dim)';
   });
-};
+}
 // Recherche : met à jour la valeur et filtre la grille SANS rerender complet
-window._bstSearchInput = (val) => {
+function _bstSearchInput(val) {
   _searchVal = val;
   // Filtrer en live sans reconstruire toute la page
   document.querySelectorAll('.bst-card').forEach(card => {
@@ -1787,46 +1790,46 @@ window._bstSearchInput = (val) => {
     if (!c) return;
     card.style.display = _beastMatchesFilters(c, { search: val }) ? '' : 'none';
   });
-};
+}
 
-window._bstSearch = (val) => { _searchVal = val; _render(); }; // legacy
-window._bstSetType = (type) => { _filterType = type; _render(); };
+function _bstSearch(val) { _searchVal = val; _render(); } // legacy
+function _bstSetType(type) { _filterType = type; _render(); }
 
 // Switch de bestiaire (admin uniquement)
-window._bstSwitchBestiaire = async (id) => {
+async function _bstSwitchBestiaire(id) {
   _bestiaireId = id;
   _activeId    = null;
   _searchVal   = '';
   _filterType  = '';
   _filterRang  = '';
   await renderBestiary();
-};
+}
 
 // Vue admin → joueur : voir/modifier les estimations d'un joueur.
 // uid vide ou égal à l'UID admin → retour à la vue MJ.
-window._bstViewAs = async (uid) => {
+async function _bstViewAs(uid) {
   if (!STATE.isAdmin) return;
   _viewAsUid = (uid && uid !== STATE.user?.uid) ? uid : null;
   _activeId  = null;
   await renderBestiary();
-};
+}
 
-window._bstCreateBestiaire = async () => {
+async function _bstCreateBestiaire() {
   const label = prompt('Nom du nouveau bestiaire :');
   if (!label?.trim()) return;
   const id    = 'bst_' + Date.now();
-  const list  = window._bstBestiaireList || [{ id:'main', label:'Bestiaire principal' }];
+  const list  = _bstBestiaireList || [{ id:'main', label:'Bestiaire principal' }];
   list.push({ id, label: label.trim() });
   await saveDoc('bestiary_meta', 'list', { list });
-  window._bstBestiaireList = list;
+  _bstBestiaireList = list;
   _bestiaireId = id;
   _activeId    = null;
   _filterRang  = '';
   await renderBestiary();
-};
+}
 
 // Déductions joueur
-window._bstSetDeduction = (id, key, val) => {
+function _bstSetDeduction(id, key, val) {
   if (!_tracker[id]) _tracker[id] = {};
   if (!_tracker[id].deductions) _tracker[id].deductions = {};
   if (val === '' || val === null || val === undefined) {
@@ -1835,9 +1838,9 @@ window._bstSetDeduction = (id, key, val) => {
     _tracker[id].deductions[key] = val;
   }
   _saveTracker();
-};
+}
 
-window._bstAdjust = (id, type, delta) => {
+function _bstAdjust(id, type, delta) {
   const c = _creatures.find(x=>x.id===id); if (!c) return;
   if (!_tracker[id]) _tracker[id] = {};
   const curKey = type==='pv'?'pvActuel':'pmActuel';
@@ -1861,21 +1864,21 @@ window._bstAdjust = (id, type, delta) => {
     if (cardBar) { cardBar.style.width = Math.round(newVal/max*100)+'%'; }
   }
   _saveTracker();
-};
+}
 
-window._bstSetStat = (id, key, val) => {
+function _bstSetStat(id, key, val) {
   if (!_tracker[id]) _tracker[id] = {};
   _tracker[id][key] = parseInt(val)||0;
   _saveTracker();
-};
+}
 
-window._bstSetNotes = (id, val) => {
+function _bstSetNotes(id, val) {
   if (!_tracker[id]) _tracker[id] = {};
   _tracker[id].notes = val;
   _saveTracker();
-};
+}
 
-window._bstReset = (id) => {
+function _bstReset(id) {
   const c = _creatures.find(x=>x.id===id); if (!c) return;
   // Vue MJ : remet les vraies valeurs. Vue joueur (ou MJ consultant un joueur) : remet les estimations à zéro.
   _tracker[id] = _isAdminView()
@@ -1883,7 +1886,7 @@ window._bstReset = (id) => {
     : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
   _saveTracker();
   _render();
-};
+}
 
 // ── Override PAGES.bestiaire + exports ───────────────────────────────────────
 PAGES.bestiaire = renderBestiary;
@@ -1891,7 +1894,7 @@ PAGES.bestiaire = renderBestiary;
 // ──────────────────────────────────────────────────────────────────────────────
 // MODAL IMAGE — éditeur d'image dédié de la créature (depuis le panneau)
 // ──────────────────────────────────────────────────────────────────────────────
-async function openBeastImageModal(id) {
+export async function openBeastImageModal(id) {
   const c = _creatures.find(x => x.id === id);
   if (!c) return;
   _bstCropper?.destroy(); _bstCropper = null;
@@ -1929,7 +1932,7 @@ async function openBeastImageModal(id) {
   });
 }
 
-window._bstSaveImage = async (id) => {
+async function _bstSaveImage(id) {
   try {
     const cropResult = _bstCropper?.getResult();
     const current = _creatures.find(c => c.id === id)?.imageUrl || '';
@@ -1938,7 +1941,7 @@ window._bstSaveImage = async (id) => {
       showNotif('Image trop grande, recadrez plus petit.', 'error');
       return;
     }
-    const col = window._bstCurrentCol || 'bestiary';
+    const col = _bstCurrentCol || 'bestiary';
     await updateInCol(col, id, { imageUrl });
     const idx = _creatures.findIndex(c => c.id === id);
     if (idx >= 0) _creatures[idx].imageUrl = imageUrl;
@@ -1961,11 +1964,11 @@ window._bstSaveImage = async (id) => {
     }
     showNotif('Image mise à jour.', 'success');
   } catch (e) { notifySaveError(e); }
-};
+}
 
-window._bstRemoveImage = async (id) => {
+async function _bstRemoveImage(id) {
   try {
-    const col = window._bstCurrentCol || 'bestiary';
+    const col = _bstCurrentCol || 'bestiary';
     await updateInCol(col, id, { imageUrl: '' });
     const idx = _creatures.findIndex(c => c.id === id);
     if (idx >= 0) _creatures[idx].imageUrl = '';
@@ -1974,7 +1977,7 @@ window._bstRemoveImage = async (id) => {
     _syncActivePanel();
     showNotif('Image retirée.', 'success');
   } catch (e) { notifySaveError(e); }
-};
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // HANDLERS DE DÉLÉGATION — chaque entrée lit ses paramètres dans `el.dataset`
@@ -1983,56 +1986,50 @@ window._bstRemoveImage = async (id) => {
 // ──────────────────────────────────────────────────────────────────────────────
 Object.assign(bstHandlers, {
   // Galerie / navigation
-  open:           (el) => window._bstOpen(el.dataset.id),
-  close:          ()   => window._bstClose(),
-  createDraft:    ()   => window._bstCreateDraft(),
-  switchBest:     (el) => window._bstSwitchBestiaire(el.dataset.id),
-  createBest:     ()   => window._bstCreateBestiaire(),
-  setRang:        (el) => window._bstSetRang(el.dataset.rang),
-  setType:        (el) => window._bstSetType(el.dataset.type),
-  search:         (el) => window._bstSearchInput(el.value),
-  viewAs:         (el) => window._bstViewAs(el.dataset.uid || ''),
+  open:           (el) => _bstOpen(el.dataset.id),
+  close:          ()   => _bstClose(),
+  createDraft:    ()   => _bstCreateDraft(),
+  switchBest:     (el) => _bstSwitchBestiaire(el.dataset.id),
+  createBest:     ()   => _bstCreateBestiaire(),
+  setRang:        (el) => _bstSetRang(el.dataset.rang),
+  setType:        (el) => _bstSetType(el.dataset.type),
+  search:         (el) => _bstSearchInput(el.value),
+  viewAs:         (el) => _bstViewAs(el.dataset.uid || ''),
 
   // Panneau admin : édition inline
-  updateNom:      (el) => window._bstUpdateNom(el.dataset.id, el.value),
-  update:         (el) => window._bstUpdate(el.dataset.id, el.dataset.field, el.value),
-  updateNum:      (el) => window._bstUpdateNum(el.dataset.id, el.dataset.field, el.value),
-  updateCarac:    (el) => window._bstUpdateCarac(el.dataset.id, el.dataset.key, el.value),
-  selectRang:     (el) => window._bstSelectRangPanel(el.dataset.id, el.dataset.rang),
-  toggleHidden:   (el) => window._bstToggleHidden(el.dataset.id),
-  toggleDmg:      (el) => window._bstToggleDmg(el.dataset.id, el.dataset.key, el.dataset.tid),
-  syncDmgConfl:   ()   => window._bstSyncDmgConflicts(),
+  updateNom:      (el) => _bstUpdateNom(el.dataset.id, el.value),
+  update:         (el) => _bstUpdate(el.dataset.id, el.dataset.field, el.value),
+  updateNum:      (el) => _bstUpdateNum(el.dataset.id, el.dataset.field, el.value),
+  updateCarac:    (el) => _bstUpdateCarac(el.dataset.id, el.dataset.key, el.value),
+  selectRang:     (el) => _bstSelectRangPanel(el.dataset.id, el.dataset.rang),
+  toggleHidden:   (el) => _bstToggleHidden(el.dataset.id),
+  toggleDmg:      (el) => _bstToggleDmg(el.dataset.id, el.dataset.key, el.dataset.tid),
+  syncDmgConfl:   ()   => _bstSyncDmgConflicts(),
   focusInput:     (el) => el.querySelector('input')?.focus(),
 
   // Vue joueur : estimations / déductions
-  setStat:        (el) => window._bstSetStat(el.dataset.id, el.dataset.key, el.value),
-  setDeduction:   (el) => window._bstSetDeduction(el.dataset.id, el.dataset.key, el.value),
+  setStat:        (el) => _bstSetStat(el.dataset.id, el.dataset.key, el.value),
+  setDeduction:   (el) => _bstSetDeduction(el.dataset.id, el.dataset.key, el.value),
 
   // Sections dynamiques (armes / actions / traits / butins)
-  addArme:        (el) => window._bstAddArme(el.dataset.id),
-  saveArmes:      (el) => window._bstSaveArmes(el.dataset.id),
-  removeArme:     (el) => window._bstRemoveArme(el.dataset.id, el),
-  addAction:      ()   => window._bstAddAction(),
-  editAction:     (el) => window._bstEditAction(parseInt(el.dataset.idx)),
-  removeAction:   (el) => window._bstRemoveAction(parseInt(el.dataset.idx)),
-  addRow:         (el) => window._bstAddPanelRow(el.dataset.id, el.dataset.type),
-  saveArr:        (el) => window._bstSaveArr(el.dataset.id, el.dataset.type),
-  removeRow:      (el) => window._bstRemovePanelRow(el.dataset.id, el.dataset.type, el),
+  addArme:        (el) => _bstAddArme(el.dataset.id),
+  saveArmes:      (el) => _bstSaveArmes(el.dataset.id),
+  removeArme:     (el) => _bstRemoveArme(el.dataset.id, el),
+  addAction:      ()   => _bstAddAction(),
+  editAction:     (el) => _bstEditAction(parseInt(el.dataset.idx)),
+  removeAction:   (el) => _bstRemoveAction(parseInt(el.dataset.idx)),
+  addRow:         (el) => _bstAddPanelRow(el.dataset.id, el.dataset.type),
+  saveArr:        (el) => _bstSaveArr(el.dataset.id, el.dataset.type),
+  removeRow:      (el) => _bstRemovePanelRow(el.dataset.id, el.dataset.type, el),
 
   // Picker de butin (délégation au composant partagé shop-picker.js — pas de handlers locaux)
-  pickerOpen:     (el) => window._bstButinPickerOpen(el.dataset.id),
+  pickerOpen:     (el) => _bstButinPickerOpen(el.dataset.id),
 
   // Image
-  openImage:      (el) => window.openBeastImageModal(el.dataset.id),
-  saveImage:      (el) => window._bstSaveImage(el.dataset.id),
-  removeImage:    (el) => window._bstRemoveImage(el.dataset.id),
+  openImage:      (el) => openBeastImageModal(el.dataset.id),
+  saveImage:      (el) => _bstSaveImage(el.dataset.id),
+  removeImage:    (el) => _bstRemoveImage(el.dataset.id),
 
   // Suppression créature
   deleteBeast:    (el, ev) => { ev?.stopPropagation?.(); deleteBeast(el.dataset.id); },
-});
-
-Object.assign(window, {
-  renderBestiary,
-  openBeastImageModal,
-  deleteBeast,
 });

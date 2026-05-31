@@ -48,7 +48,6 @@ let _ag = {
   quests:     [],               // toutes les quêtes
   users:      [],               // tous les utilisateurs (pour pseudos)
   groupView:  false,            // toggle vue groupe
-  groupFilter:null,             // null = tous · sinon id de quête (groupe de joueurs)
   saveTimer:  null,             // debounce sauvegarde
   nextSession:null,             // séance validée par le MJ (doc agenda_session/next)
 };
@@ -133,7 +132,7 @@ function _cycleRecurring(dayId, slotId) {
 }
 
 // ── Actions rapides ───────────────────────────────────────────────────────
-window._agSetRecurringPattern = (preset) => {
+function setRecurringPattern(preset) {
   if (!_ag.myAvail) _ag.myAvail = { slots: {}, recurring: {} };
   _ag.myAvail.recurring = {};
   const apply = (days, slots) => days.forEach(d => {
@@ -147,15 +146,15 @@ window._agSetRecurringPattern = (preset) => {
   _scheduleSave();
   _renderCalendar();
   showNotif('Pattern récurrent appliqué', 'success');
-};
-window._agClearOverrides = async () => {
+}
+async function clearOverrides() {
   if (!_ag.myAvail) return;
   if (!confirm('Effacer toutes tes dispos ponctuelles (les patterns récurrents sont conservés) ?')) return;
   _ag.myAvail.slots = {};
   _scheduleSave();
   _renderCalendar();
   showNotif('Dispos ponctuelles effacées', 'success');
-};
+}
 
 // ── Calcul des suggestions par quête ──────────────────────────────────────
 function _computeQuestSuggestions(quest, daysAhead = 28) {
@@ -258,7 +257,7 @@ function _renderSuggestions() {
   _ag._lastSugs = Object.fromEntries(myQuests.map(q => [q.id, _computeQuestSuggestions(q)]));
 }
 
-window._agShowSugDetail = (questId, idx) => {
+function showSuggestionDetail(questId, idx) {
   const sug = _ag._lastSugs?.[questId]?.[idx];
   const quest = _ag.quests.find(q => q.id === questId);
   if (!sug || !quest) return;
@@ -290,7 +289,7 @@ window._agShowSugDetail = (questId, idx) => {
       ${mjActions}
     </div>
   `);
-};
+}
 
 // ── Helpers session validée ──────────────────────────────────────────────
 function _isSessionMatch(session, questId, iso, slotId) {
@@ -309,7 +308,7 @@ function _formatSession(s) {
   };
 }
 
-window._agValidateSlot = async (questId, iso, slotId) => {
+async function validateSlot(questId, iso, slotId) {
   if (!STATE.isAdmin) return;
   const quest = _ag.quests.find(q => q.id === questId);
   try {
@@ -334,8 +333,8 @@ window._agValidateSlot = async (questId, iso, slotId) => {
       notifySaveError(e);
     }
   }
-};
-window._agUnvalidateSession = async () => {
+}
+async function unvalidateSession() {
   if (!STATE.isAdmin) return;
   try {
     await deleteFromCol('agenda_session', 'next');
@@ -349,7 +348,7 @@ window._agUnvalidateSession = async () => {
       showNotif('⚠ Règle Firestore manquante pour agenda_session.', 'error');
     } else { notifySaveError(e); }
   }
-};
+}
 
 function _renderSessionBanner() {
   const el = document.getElementById('ag-session-banner');
@@ -418,13 +417,13 @@ function _renderCalendar() {
   `;
 }
 
-window._agCycle = (iso, slotId) => {
+function cycleAgendaSlot(iso, slotId) {
   _cycleSlot(iso, slotId);
   _renderCalendar();
-};
+}
 
 // ── Modal pattern récurrent ───────────────────────────────────────────────
-window._agOpenRecurringEditor = () => {
+function openRecurringEditor() {
   const rec = _ag.myAvail?.recurring || {};
   openModal('📆 Mon planning récurrent', `
     <div class="ag-rec-intro">
@@ -456,8 +455,8 @@ window._agOpenRecurringEditor = () => {
       <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="reset">🚫 Reset</button>
     </div>
   `);
-};
-window._agRecCycle = (dayId, slotId, btn) => {
+}
+function cycleRecurringSlot(dayId, slotId, btn) {
   _cycleRecurring(dayId, slotId);
   const state = _ag.myAvail?.recurring?.[dayId]?.[slotId] || '';
   btn.className = `ag-rec-cell ag-slot--${state||'none'}`;
@@ -465,7 +464,7 @@ window._agRecCycle = (dayId, slotId, btn) => {
   btn.title = STATE_LABELS[state] || 'Non renseigné';
   _renderCalendar();
   _renderSuggestions();
-};
+}
 
 // ── Vue groupe (qui est dispo quand) ──────────────────────────────────────
 function _renderGroupView() {
@@ -482,35 +481,13 @@ function _renderGroupView() {
   const playerUids = new Set(_ag.allAvails.map(a => a.uid || a.id));
   // Ajouter aussi les joueurs de l'aventure qui n'ont pas (encore) de doc
   (_ag.users || []).forEach(u => playerUids.add(u.id || u.uid));
-  let players = [..._ag.users || [], ..._ag.allAvails.filter(a => !(_ag.users||[]).some(u => (u.id||u.uid) === (a.uid||a.id))).map(a => ({ id: a.uid||a.id, pseudo: a.pseudo }))]
+  const players = [..._ag.users || [], ..._ag.allAvails.filter(a => !(_ag.users||[]).some(u => (u.id||u.uid) === (a.uid||a.id))).map(a => ({ id: a.uid||a.id, pseudo: a.pseudo }))]
     .filter((p, i, arr) => arr.findIndex(x => (x.id||x.uid) === (p.id||p.uid)) === i)
     .filter(p => (p.id||p.uid) !== STATE.user?.uid); // hors moi (j'ai déjà mon calendrier)
 
-  // ── Groupes = quêtes (chaque quête a ses participants). Filtre optionnel. ──
-  const quests = (_ag.quests || []).filter(q => Array.isArray(q.participants) && q.participants.length);
-  // Si le groupe filtré n'existe plus, revenir à « Tous »
-  if (_ag.groupFilter && !quests.some(q => q.id === _ag.groupFilter)) _ag.groupFilter = null;
-  if (_ag.groupFilter) {
-    const q = quests.find(x => x.id === _ag.groupFilter);
-    const memberUids = new Set((q?.participants || []).map(p => p.uid).filter(Boolean));
-    players = players.filter(p => memberUids.has(p.id || p.uid));
-  }
+  if (!players.length) { el.innerHTML = ''; return; }
 
-  const filtersHtml = quests.length ? `
-    <div class="ag-grp-filters">
-      <button type="button" class="ag-grp-filter ${!_ag.groupFilter ? 'is-active' : ''}"
-        data-action="_agSetGroupFilter" data-group="">👥 Tous</button>
-      ${quests.map(q => `<button type="button" class="ag-grp-filter ${_ag.groupFilter===q.id ? 'is-active' : ''}"
-        data-action="_agSetGroupFilter" data-group="${_esc(q.id)}">${_esc(q.titre||q.nom||'Quête')}
-        <span class="ag-grp-filter-count">${(q.participants||[]).length}</span></button>`).join('')}
-    </div>` : '';
-
-  if (!players.length) {
-    el.innerHTML = filtersHtml + `<div class="ag-quest-empty" style="margin-top:.6rem">Aucun joueur dans ce groupe (hors toi).</div>`;
-    return;
-  }
-
-  el.innerHTML = filtersHtml + `
+  el.innerHTML = `
     <div class="ag-grp-scroll">
       <table class="ag-grp-table">
         <thead>
@@ -542,16 +519,12 @@ function _renderGroupView() {
     </div>
   `;
 }
-window._agToggleGroupView = () => {
+function toggleGroupView() {
   _ag.groupView = !_ag.groupView;
   const btn = document.getElementById('ag-group-toggle');
   if (btn) btn.textContent = _ag.groupView ? '👁 Masquer la vue groupe' : '👥 Voir les dispos du groupe';
   _renderGroupView();
-};
-window._agSetGroupFilter = (groupId) => {
-  _ag.groupFilter = groupId || null;
-  _renderGroupView();
-};
+}
 
 // ── Page principale ───────────────────────────────────────────────────────
 async function renderAgendaPage() {
@@ -656,15 +629,14 @@ async function renderAgendaPage() {
 PAGES.agenda = renderAgendaPage;
 
 registerActions({
-  _agShowSugDetail:         (btn) => window._agShowSugDetail?.(btn.dataset.id, Number(btn.dataset.idx)),
-  _agUnvalidateSession:     ()    => window._agUnvalidateSession?.(),
-  _agValidateSlot:          (btn) => window._agValidateSlot?.(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
-  _agCycle:                 (btn) => window._agCycle?.(btn.dataset.iso, btn.dataset.slot),
-  _agRecCycle:              (btn) => window._agRecCycle?.(btn.dataset.day, btn.dataset.slot, btn),
-  _agSetRecurringPattern:   (btn) => window._agSetRecurringPattern?.(btn.dataset.pattern),
-  _agOpenRecurringEditor:   ()    => window._agOpenRecurringEditor?.(),
-  _agToggleGroupView:       ()    => window._agToggleGroupView?.(),
-  _agSetGroupFilter:        (btn) => window._agSetGroupFilter?.(btn.dataset.group),
-  _agClearOverrides:        ()    => window._agClearOverrides?.(),
+  _agShowSugDetail:         (btn) => showSuggestionDetail(btn.dataset.id, Number(btn.dataset.idx)),
+  _agUnvalidateSession:     ()    => unvalidateSession(),
+  _agValidateSlot:          (btn) => validateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
+  _agCycle:                 (btn) => cycleAgendaSlot(btn.dataset.iso, btn.dataset.slot),
+  _agRecCycle:              (btn) => cycleRecurringSlot(btn.dataset.day, btn.dataset.slot, btn),
+  _agSetRecurringPattern:   (btn) => setRecurringPattern(btn.dataset.pattern),
+  _agOpenRecurringEditor:   ()    => openRecurringEditor(),
+  _agToggleGroupView:       ()    => toggleGroupView(),
+  _agClearOverrides:        ()    => clearOverrides(),
 });
 export default renderAgendaPage;

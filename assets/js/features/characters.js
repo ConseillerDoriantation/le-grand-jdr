@@ -29,7 +29,7 @@ import {
   runeIncrement, runeDecrement, selectNoyau, updateSortPM,
 } from './characters/spells.js';
 
-import { renderCharEquip } from './characters/combat.js';
+import { renderCharEquip, toggleCharElement } from './characters/combat.js';
 
 import {
   _renderInventaireBoutique, renderCharInventaire,
@@ -55,8 +55,10 @@ import {
   renderCharMaitrises,
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   previewXpBar, saveXpDirect, addXpDelta,
+  allocStatPoint, addXpFromInput, toggleCompteHist,
   renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
   addProfilTag, removeProfilTag, initProfilTagUi,
+  getProfilCacheRef as _profilCache,
 } from './characters/tabs.js';
 import { bindRichTextEditors, richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import { registerActions } from '../core/actions.js';
@@ -84,6 +86,20 @@ import Sortable from '../vendor/sortable.esm.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
+let _csV3LedgerFilter = { kind: 'all', search: '', limit: 25 };
+let _csV3LedgerAddKind = 'recettes';
+let _csV3InvFilter = { cat: 'all', search: '' };
+let _currentJournalSub = 'notes';
+let _openNote = null;
+let _csV3EditingBio = null;
+const _charBlurActions = {};
+function registerCharBlurActions(map) { Object.assign(_charBlurActions, map); }
+document.addEventListener('focusout', (event) => {
+  const el = event.target?.closest?.('[data-blur]');
+  if (!el) return;
+  const handler = _charBlurActions[el.dataset.blur];
+  if (handler) handler(el, event);
+}, true);
 
 // ══════════════════════════════════════════════
 // SÉLECTION
@@ -181,7 +197,7 @@ function renderCharSheet(c, keepTab) {
 
   const v3Tab = _resolveV3Tab(keepTab || window._currentCharTab || 'combat');
   // Conserver le sub-tab du Journal s'il existe (notes / quetes / relations)
-  const journalSub = window._currentJournalSub || 'notes';
+  const journalSub = _currentJournalSub || 'notes';
 
   window._currentChar    = c;
   window._canEditChar    = canEdit;
@@ -818,7 +834,7 @@ function _renderTab(leafTab, c, canEdit) {
 function _renderTabV3(tab, c, canEdit) {
   const area = document.getElementById('char-tab-content');
   if (!area) return;
-  const sub = window._currentJournalSub || 'notes';
+  const sub = _currentJournalSub || 'notes';
   const renders = {
     combat:  () => renderCharCombatV3(c, canEdit),
     sorts:   () => renderCharDeck(c, canEdit),
@@ -911,8 +927,8 @@ function renderCharLedger(c, canEdit) {
     return (b.idx || 0) - (a.idx || 0);
   });
 
-  // Filtres (état persistant sur window pour ne pas être perdu au re-render)
-  const filter = window._csV3LedgerFilter || { kind: 'all', search: '', limit: 25 };
+  // Filtres (état module-local pour ne pas être perdu au re-render)
+  const filter = _csV3LedgerFilter;
   const q = (filter.search || '').toLowerCase();
   const filtered = all.filter(e => {
     if (filter.kind === 'rcpt' && e.sign < 0) return false;
@@ -945,7 +961,7 @@ function renderCharLedger(c, canEdit) {
     groups[groups.length - 1].items.push(e);
   });
 
-  const addKind = window._csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
+  const addKind = _csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
   return `
   <div class="compte-summary">
     <div class="compte-tile">
@@ -1005,17 +1021,17 @@ function renderCharLedger(c, canEdit) {
           <span>Date</span>
           <input type="date" id="ledger-date"
             value="${_csV3TodayISO()}" class="ledger-add-date"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
         </label>
         <label class="ledger-add-field ledger-add-field-lib">
           <span>Libellé</span>
           <input type="text" id="ledger-lib" placeholder="${addKind==='recettes'?'Pillage du gobelin…':'Auberge du nain…'}" class="lib"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
         </label>
         <label class="ledger-add-field ledger-add-field-amt">
           <span>Montant (or)</span>
           <input type="number" id="ledger-amount" placeholder="0" step="any" min="0" class="ledger-add-amount"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
         </label>
       </div>
       <button class="ledger-add-btn ${addKind}" data-action="csV3AddLedger" data-id="${c.id}">
@@ -1030,8 +1046,8 @@ function renderCharLedger(c, canEdit) {
           <li class="ledger-month">${_esc(g.month)}</li>
           ${g.items.map(e => {
             const editAttr = canEdit
-              ? `contenteditable="true" spellcheck="false" data-kind="${e.kind}" data-idx="${e.idx}"
-                  onblur="window._csV3LedgerSaveField(this,'${e.kind}',${e.idx},'$FIELD$')"
+              ? `contenteditable="true" spellcheck="false"
+                  data-blur="csV3LedgerSaveField" data-kind="${e.kind}" data-idx="${e.idx}" data-field="$FIELD$"
                   onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
                   onfocus="this.dataset.original=this.textContent"`
               : '';
@@ -1042,7 +1058,7 @@ function renderCharLedger(c, canEdit) {
               <span class="ledger-amount-wrap">
                 <span class="ledger-sgn">${e.sign>0?'+':'−'}</span><span class="ledger-amount" ${canEdit
                   ? `contenteditable="true" spellcheck="false"
-                      onblur="window._csV3LedgerSaveAmount(this,'${e.kind}',${e.idx},${e.sign})"
+                      data-blur="csV3LedgerSaveAmount" data-kind="${e.kind}" data-idx="${e.idx}" data-sign="${e.sign}"
                       onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
                       onfocus="this.dataset.original=this.textContent"`
                   : ''}>${fmt(Math.abs(parseFloat(e.montant)||0))}</span><small class="ledger-or-suffix">or</small>
@@ -1094,7 +1110,7 @@ function _csV3TodayISO() {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 // Sauvegarde inline d'un champ texte (date / libelle) d'une écriture
-window._csV3LedgerSaveField = async (el, kind, idx, field) => {
+async function _csV3LedgerSaveField(el, kind, idx, field) {
   const charId = window._currentChar?.id; if (!charId) return;
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
@@ -1113,9 +1129,9 @@ window._csV3LedgerSaveField = async (el, kind, idx, field) => {
     console.warn('[ledger field save]', e);
     el.textContent = el.dataset.original || '';
   }
-};
+}
 // Sauvegarde inline du montant (gère le signe + ou −)
-window._csV3LedgerSaveAmount = async (el, kind, idx, sign) => {
+async function _csV3LedgerSaveAmount(el, kind, idx, sign) {
   const charId = window._currentChar?.id; if (!charId) return;
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
@@ -1134,10 +1150,10 @@ window._csV3LedgerSaveAmount = async (el, kind, idx, sign) => {
     console.warn('[ledger amount save]', e);
     el.textContent = el.dataset.original || '';
   }
-};
+}
 
-window._csV3LedgerSetAddKind = (kind, charId) => {
-  window._csV3LedgerAddKind = (kind === 'depenses') ? 'depenses' : 'recettes';
+function _csV3LedgerSetAddKind(kind, charId) {
+  _csV3LedgerAddKind = (kind === 'depenses') ? 'depenses' : 'recettes';
   // Préserve les valeurs déjà saisies avant le re-render
   const prevDate = document.getElementById('ledger-date')?.value || '';
   const prevLib  = document.getElementById('ledger-lib')?.value  || '';
@@ -1156,10 +1172,10 @@ window._csV3LedgerSetAddKind = (kind, charId) => {
     if (aEl) aEl.value = prevAmt;
     lEl?.focus();
   });
-};
+}
 
 // Suppression d'une ligne (re-fetch + re-render explicite, SANS confirmation)
-window._csV3DeleteLedger = async (charId, kind, idx) => {
+async function _csV3DeleteLedger(charId, kind, idx) {
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
   if (!(c.compte[kind] || [])[idx]) return;
@@ -1170,16 +1186,15 @@ window._csV3DeleteLedger = async (charId, kind, idx) => {
     _csV3RefreshBourse(c);
   } catch (e) { console.warn('[ledger del]', e); }
   if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
-};
+}
 
-window._csV3LedgerSetKind = (charId, kind) => {
-  window._csV3LedgerFilter = { ...(window._csV3LedgerFilter || {}), kind, limit: 25 };
+function _csV3LedgerSetKind(charId, kind) {
+  _csV3LedgerFilter = { ..._csV3LedgerFilter, kind, limit: 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
-};
-window._csV3LedgerSetSearch = (charId, search) => {
-  const prev = window._csV3LedgerFilter || {};
-  window._csV3LedgerFilter = { ...prev, search, limit: 25 };
+}
+function _csV3LedgerSetSearch(charId, search) {
+  _csV3LedgerFilter = { ..._csV3LedgerFilter, search, limit: 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
   // Re-render mais on restaure le focus + caret dans la search box
@@ -1189,21 +1204,20 @@ window._csV3LedgerSetSearch = (charId, search) => {
     const inp = document.querySelector('.ledger-search');
     if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
   });
-};
-window._csV3LedgerMore = (charId) => {
-  const prev = window._csV3LedgerFilter || {};
-  window._csV3LedgerFilter = { ...prev, limit: (prev.limit || 25) + 25 };
+}
+function _csV3LedgerMore(charId) {
+  _csV3LedgerFilter = { ..._csV3LedgerFilter, limit: (_csV3LedgerFilter.limit || 25) + 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
-};
+}
 
 // Ajoute une écriture au compte via le schéma existant `c.compte.{recettes,depenses}`.
-window._csV3AddLedger = async function (charId) {
+async function _csV3AddLedger(charId) {
   const dateEl = document.getElementById('ledger-date');
   const libEl  = document.getElementById('ledger-lib');
   const amtEl  = document.getElementById('ledger-amount');
   if (!libEl || !amtEl) return;
-  const kind = window._csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
+  const kind = _csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
   const date = (dateEl?.value || '').trim() || _csV3TodayISO();
   const lib  = (libEl.value || '').trim();
   const amt  = Math.abs(parseFloat((amtEl.value || '').replace(',', '.')) || 0);
@@ -1222,7 +1236,7 @@ window._csV3AddLedger = async function (charId) {
   if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
   // Focus l'input libellé pour la saisie en chaîne
   requestAnimationFrame(() => { document.getElementById('ledger-lib')?.focus(); });
-};
+}
 
 // ── Journal → sub-tabs Notes / Quêtes / Relations ────────────────────────────
 function renderCharJournal(c, canEdit, sub = 'notes') {
@@ -1247,8 +1261,8 @@ function renderCharJournal(c, canEdit, sub = 'notes') {
   <div id="journal-body">${bodyHtml}</div>`;
 }
 
-window._csV3JournalSub = function (sub) {
-  window._currentJournalSub = sub;
+function _csV3JournalSub(sub) {
+  _currentJournalSub = sub;
   const c = window._currentChar; const canEdit = window._canEditChar;
   if (!c) return;
   // Rebuild juste l'onglet Journal sans recharger toute la fiche
@@ -1257,7 +1271,7 @@ window._csV3JournalSub = function (sub) {
     area.innerHTML = renderCharJournal(c, canEdit, sub);
     if (sub === 'notes') bindRichTextEditors(area);
   }
-};
+}
 
 // Quêtes — schéma réel : { nom, type, description, valide }
 function renderJournalQuetes(c, canEdit) {
@@ -1317,7 +1331,7 @@ function renderCharNotesV3(c, canEdit) {
     return `<div class="q-empty">Aucune note. ${canEdit?'Clique sur "＋ Note" en haut pour en créer une.':''}</div>`;
   }
   return `<div class="notes-stack">${notes.map((n, i) => {
-    const isOpen = window._openNote === i;
+    const isOpen = _openNote === i;
     const titre = n.titre || 'Note sans titre';
     const date  = n.date  || '';
     return `<article class="note-v3 ${isOpen?'is-open':''}">
@@ -1326,8 +1340,8 @@ function renderCharNotesV3(c, canEdit) {
           ${isOpen ? '▾' : '▸'}
         </button>
         ${canEdit
-          ? `<input class="note-v3-titre" type="text" value="${_esc(titre)}" data-idx="${i}"
-              onblur="window._csV3SaveNoteTitle(${i},this.value)"
+          ? `<input class="note-v3-titre" type="text" value="${_esc(titre)}"
+              data-blur="csV3SaveNoteTitle" data-idx="${i}"
               onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}"
               placeholder="Titre de la note">`
           : `<span class="note-v3-titre note-v3-titre-ro">${_esc(titre)}</span>`}
@@ -1346,14 +1360,14 @@ function renderCharNotesV3(c, canEdit) {
   }).join('')}</div>`;
 }
 
-window._csV3ToggleNote = function (idx) {
-  window._openNote = window._openNote === idx ? null : idx;
+function _csV3ToggleNote(idx) {
+  _openNote = _openNote === idx ? null : idx;
   const c = window._currentChar; if (!c) return;
   // Re-render journal en gardant le sub-tab notes
-  window._currentJournalSub = 'notes';
+  _currentJournalSub = 'notes';
   _renderTabV3('journal', c, window._canEditChar);
-};
-window._csV3SaveNoteTitle = async function (idx, value) {
+}
+async function _csV3SaveNoteTitle(idx, value) {
   const c = STATE.activeChar; if (!c) return;
   const note = (c.notesList || [])[idx]; if (!note) return;
   const trimmed = (value || '').trim() || 'Note sans titre';
@@ -1362,7 +1376,7 @@ window._csV3SaveNoteTitle = async function (idx, value) {
   c.notesList[idx] = note;
   try { await updateInCol('characters', c.id, { notesList: c.notesList }); }
   catch (e) { console.warn('[note title]', e); }
-};
+}
 
 const _RELATION_PALETTE = {
   lien:     ['rgba(157,111,255,.14)','rgba(157,111,255,.4)','#c8aaff'],
@@ -1401,7 +1415,7 @@ function renderCharRelations(c, canEdit) {
   </div>`;
 }
 
-window._csV3AddRelation = async function (charId) {
+async function _csV3AddRelation(charId) {
   const nom = prompt('Nom de la relation :'); if (!nom?.trim()) return;
   const role = prompt('Rôle (ex: Mentor, Frère, PNJ rencontré) :') || '';
   const sent = prompt('Sentiment (lien · allie · neutre · ennemi · mefiance) :', 'neutre') || 'neutre';
@@ -1413,9 +1427,9 @@ window._csV3AddRelation = async function (charId) {
   rels.push({ nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() });
   c.relations = rels;
   await updateInCol('characters', charId, { relations: rels });
-  window._csV3JournalSub('relations');
-};
-window._csV3EditRelation = async function (charId, idx) {
+  _csV3JournalSub('relations');
+}
+async function _csV3EditRelation(charId, idx) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c?.relations?.[idx]) return;
   const r = c.relations[idx];
@@ -1427,16 +1441,16 @@ window._csV3EditRelation = async function (charId, idx) {
   const next = { ...r, nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() };
   const rels = c.relations.slice(); rels[idx] = next; c.relations = rels;
   await updateInCol('characters', charId, { relations: rels });
-  window._csV3JournalSub('relations');
-};
-window._csV3DeleteRelation = async function (charId, idx) {
+  _csV3JournalSub('relations');
+}
+async function _csV3DeleteRelation(charId, idx) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c?.relations?.[idx]) return;
   if (!confirm(`Supprimer la relation "${c.relations[idx].nom||'?'}" ?`)) return;
   const rels = c.relations.slice(); rels.splice(idx, 1); c.relations = rels;
   await updateInCol('characters', charId, { relations: rels });
-  window._csV3JournalSub('relations');
-};
+  _csV3JournalSub('relations');
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — PROFIL (lecture éditoriale + radar + identité + visibilité)
@@ -1528,18 +1542,15 @@ function _mergeIdentityDefaults(arr) {
 
 function renderCharProfilV3(c, canEdit) {
   // Bootstrap pres cache pour récupérer la bio rich-text
-  if (!(c.id in (window._profilCache || {}))) {
+  if (!(c.id in _profilCache)) {
     try { renderCharProfil(c, canEdit); } catch {}
   }
 
   const quote = c.quote || '';
   const identity = _mergeIdentityDefaults(c.identity);
-  const presCache = window._profilCache?.[c.id] || null;
+  const presCache = _profilCache?.[c.id] || null;
   const bioHtml = presCache?.content || c.bio || '';
-  // Source unique des traits = le doc characters (c.tags). presCache.tags (doc
-  // players) n'est qu'un repli legacy : sans ça, un doc players avec tags:[]
-  // (écrit par saveCharProfil) écrasait les traits enregistrés.
-  const tags = (Array.isArray(c.tags) && c.tags.length) ? c.tags : (presCache?.tags || c.tags || []);
+  const tags = presCache?.tags || c.tags || [];
 
   const visEntries = [
     { k: 'afficherNiveau',    lbl: 'Niveau',           def: true  },
@@ -1577,7 +1588,7 @@ function renderCharProfilV3(c, canEdit) {
           <input type="text" id="csv3-tag-input-${c.id}" class="profil-tag-input"
             placeholder="${tagsFull ? `Maximum ${TAG_MAX_V3} traits atteint` : 'Ajouter un trait personnalisé…'}"
             maxlength="24" ${tagsFull?'disabled':''}
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddProfilTagFromInput('${c.id}');}else if(event.key==='Escape'){this.value='';this.blur();}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.profil-tags-input-row')?.querySelector('[data-action=csV3AddProfilTagFromInput]')?.click();}else if(event.key==='Escape'){this.value='';this.blur();}">
           <button class="profil-tag-add-btn" ${tagsFull?'disabled':''}
             data-action="csV3AddProfilTagFromInput" data-id="${c.id}">Ajouter</button>
         </div>
@@ -1600,7 +1611,7 @@ function renderCharProfilV3(c, canEdit) {
     const valHtml = canEdit
       ? `<input type="text" class="profil-fact-input" value="${_esc(v)}" placeholder="—"
           data-id-key="${_esc(k)}"
-          onblur="window._csV3SaveIdentityValue('${c.id}','${safeKey}',this.value)"
+          data-blur="csV3SaveIdentityValue" data-id="${c.id}" data-key="${safeKey}"
           onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">`
       : `<span class="profil-fact-v">${v ? _esc(v) : '<span style="color:var(--text-dim)">—</span>'}</span>`;
     const keyClickable = isCustom && canEdit
@@ -1613,7 +1624,7 @@ function renderCharProfilV3(c, canEdit) {
   }).join('');
 
   // Bio : édition rich-text quand active, sinon rendu fidèle via richTextContentHtml
-  const editingBio = window._csV3EditingBio === c.id;
+  const editingBio = _csV3EditingBio === c.id;
   const bioBlockHtml = editingBio && canEdit
     ? `<div class="profil-bio-edit">
         ${richTextEditorHtml({ id: 'profil-bio-rt', html: bioHtml, minHeight: 220, placeholder: 'Décris ton personnage…' })}
@@ -1634,7 +1645,7 @@ function renderCharProfilV3(c, canEdit) {
         value="${_esc(quote)}"
         placeholder="Ajoute une citation pour ton personnage…"
         data-input="_csQuoteToggleEmpty"
-        onblur="this.classList.toggle('is-empty', !this.value);window._csV3SaveQuote('${c.id}',this.value)"
+        data-blur="csV3SaveQuote" data-id="${c.id}"
         onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.classList.toggle('is-empty',!this.value);this.blur();}">`
     : (quote
         ? `<div class="profil-quote">${_esc(quote)}</div>`
@@ -1696,55 +1707,49 @@ function renderCharProfilV3(c, canEdit) {
 }
 
 // Handler édition citation — sauvegarde inline sans modal
-window._csV3SaveQuote = async function (charId, value) {
+async function _csV3SaveQuote(charId, value) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const trimmed = (value || '').trim();
   if ((c.quote || '') === trimmed) return;
   c.quote = trimmed;
   try { await updateInCol('characters', charId, { quote: trimmed }); }
   catch (e) { console.warn('[quote save]', e); }
-};
+}
 async function _csV3CommitTags(charId, nextTags) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   c.tags = nextTags;
-  if (window._profilCache?.[charId]) window._profilCache[charId].tags = nextTags;
+  if (_profilCache?.[charId]) _profilCache[charId].tags = nextTags;
   try { await updateInCol('characters', charId, { tags: nextTags }); }
-  catch (e) { console.warn('[tags save]', e); window.showNotif?.('Erreur d\'enregistrement des traits.', 'error'); }
-  // Synchronise la présentation publique (page Joueurs) si elle existe.
-  const presId = window._profilCache?.[charId]?.id;
-  if (presId) {
-    try { await updateInCol('players', presId, { tags: nextTags }); }
-    catch (e) { console.warn('[tags sync players]', e); }
-  }
+  catch (e) { console.warn('[tags save]', e); }
   if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
 }
-window._csV3AddProfilTag = async function (charId, value) {
+async function _csV3AddProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
-  const cur = ((Array.isArray(c.tags) && c.tags.length) ? c.tags : (window._profilCache?.[charId]?.tags || c.tags || [])).slice();
+  const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
   if (cur.length >= 8) return;
   if (cur.some(x => x.toLowerCase() === t.toLowerCase())) return;
   cur.push(t);
   await _csV3CommitTags(charId, cur);
-};
-window._csV3AddProfilTagFromInput = async function (charId) {
+}
+async function _csV3AddProfilTagFromInput(charId) {
   const input = document.getElementById(`csv3-tag-input-${charId}`);
   if (!input) return;
   const val = input.value.trim();
   if (!val) { input.focus(); return; }
-  await window._csV3AddProfilTag(charId, val);
-};
-window._csV3RemoveProfilTag = async function (charId, value) {
+  await _csV3AddProfilTag(charId, val);
+}
+async function _csV3RemoveProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
-  const cur = ((Array.isArray(c.tags) && c.tags.length) ? c.tags : (window._profilCache?.[charId]?.tags || c.tags || [])).slice();
+  const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
   const next = cur.filter(x => x.toLowerCase() !== t.toLowerCase());
   if (next.length === cur.length) return;
   await _csV3CommitTags(charId, next);
-};
+}
 // Sauvegarde la VALEUR d'un champ identité (defaults ou custom) directement depuis l'input.
 // Ne re-render PAS la fiche pour éviter de perdre le focus pendant la saisie.
-window._csV3SaveIdentityValue = async function (charId, key, value) {
+async function _csV3SaveIdentityValue(charId, key, value) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const merged = _mergeIdentityDefaults(c.identity);
   const trimmed = (value || '').trim();
@@ -1761,9 +1766,9 @@ window._csV3SaveIdentityValue = async function (charId, key, value) {
     console.warn('[identity save]', e);
     if (window.showNotif) window.showNotif?.('Erreur de sauvegarde.', 'error');
   }
-};
+}
 // Renomme / supprime un champ CUSTOM (les defaults ne sont pas renommables)
-window._csV3RenameIdentity = async function (charId, key) {
+async function _csV3RenameIdentity(charId, key) {
   if (IDENTITY_DEFAULTS.includes(key)) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const newK = prompt(`Renommer "${key}" (laisser vide pour supprimer) :`, key);
@@ -1779,9 +1784,9 @@ window._csV3RenameIdentity = async function (charId, key) {
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) { console.warn('[identity rename]', e); }
   if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
-};
+}
 // Ajoute un champ identité custom
-window._csV3AddFact = async function (charId) {
+async function _csV3AddFact(charId) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const k = prompt('Nom du champ (ex: Bras-droit, Phobie…) :'); if (!k?.trim()) return;
   const v = prompt('Valeur :') || '';
@@ -1791,46 +1796,46 @@ window._csV3AddFact = async function (charId) {
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) { console.warn('[identity add]', e); }
   if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
-};
+}
 // Édition bio avec l'éditeur rich-text — mode "édition" toggle
-window._csV3EnterBioEdit = function (charId) {
-  window._csV3EditingBio = charId;
+function _csV3EnterBioEdit(charId) {
+  _csV3EditingBio = charId;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   _renderTabV3('profil', c, true);
-};
-window._csV3CancelBio = function (charId) {
-  window._csV3EditingBio = null;
+}
+function _csV3CancelBio(charId) {
+  _csV3EditingBio = null;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   _renderTabV3('profil', c, true);
-};
-window._csV3SaveBioRt = async function (charId) {
+}
+async function _csV3SaveBioRt(charId) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const html = getRichTextHtml('profil-bio-rt') || '';
   // Sauvegarde : on écrit sur c.bio (string HTML) ET sur pres.content si présence
   c.bio = html;
   await updateInCol('characters', charId, { bio: html });
-  const presCache = window._profilCache?.[charId];
+  const presCache = _profilCache?.[charId];
   if (presCache?.id) {
     try {
       await updateInCol('players', presCache.id, { content: html });
       presCache.content = html;
     } catch (e) { console.warn('[bio→pres sync]', e); }
   }
-  window._csV3EditingBio = null;
+  _csV3EditingBio = null;
   _renderTabV3('profil', c, true);
-};
-window._csV3SetCombatStyle = async function (charId, styleId) {
+}
+async function _csV3SetCombatStyle(charId, styleId) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   // Toggle : reclic sur le style actif → on revient à la détection auto (null)
   const next = c.combatStyle === styleId ? null : styleId;
   c.combatStyle = next;
   await updateInCol('characters', charId, { combatStyle: next });
   if (window._currentCharTab === 'combat') _renderTabV3('combat', c, true);
-};
+}
 
-window._csV3SaveVisibility = async function (charId, key, value) {
+async function _csV3SaveVisibility(charId, key, value) {
   // Sauvegarde directement sur le document pres (collection 'players'). Si pas en cache, on fallback char doc.
-  const presCache = window._profilCache?.[charId];
+  const presCache = _profilCache?.[charId];
   if (presCache?.id) {
     try {
       await updateInCol('players', presCache.id, { [key]: value });
@@ -1857,7 +1862,7 @@ const _ITEM_STAT_LABELS = {
 };
 const _ITEM_DERIVED_LABELS = {
   pvMaxBonus: 'PV', pmMaxBonus: 'PM',
-  vitesseBonus: 'Vit.', initiativeBonus: 'Init.', deckBonus: 'Deck',
+  vitesseBonus: 'Vit.', initiativeBonus: 'Init.',
 };
 // Bump une valeur de bonus dérivé par le palier d'amélioration Artisan
 // (cohérent avec _bumpBonus de char-stats.js : ne bump que les valeurs positives).
@@ -1985,11 +1990,11 @@ function renderCharCombatV3(c, canEdit) {
       try { b = getItemStatBonus(it, fullKey); } catch {}
       if (b) badges.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
     });
-    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','deckBonus'].forEach(k => {
+    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
       // Applique le palier Artisan (upgrades.effectBonus) sur les bonus positifs
       const v = _bumpDerived(parseInt(it[k]) || 0, it);
       if (!v) return;
-      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.', deckBonus:'Deck' }[k];
+      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.' }[k];
       badges.push({ lbl: `${shortLbl} ${v>0?'+':''}${v}`, cls: 'gold' });
     });
     // Traits via _getTraits (importé de data.js)
@@ -2262,8 +2267,8 @@ function renderCharInventaireV3(c, canEdit) {
     return s + (Number.isFinite(p) ? p * q : 0);
   }, 0);
 
-  // État du filtre / search (persisté sur window)
-  const filter = window._csV3InvFilter || { cat: 'all', search: '' };
+  // État du filtre / search module-local
+  const filter = _csV3InvFilter;
   const q = (filter.search || '').toLowerCase();
 
   // Stack : regroupe les items identiques (même itemId ou même nom+rareté+template+prix)
@@ -2379,13 +2384,12 @@ function renderCharInventaireV3(c, canEdit) {
   return summaryHtml + filterBarHtml + `<div class="inv-grid">${cardsHtml}</div>`;
 }
 
-window._csV3InvSetCat = (cat) => {
-  window._csV3InvFilter = { ...(window._csV3InvFilter || {}), cat };
+function _csV3InvSetCat(cat) {
+  _csV3InvFilter = { ..._csV3InvFilter, cat };
   if (window._currentChar && window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
-};
-window._csV3InvSetSearch = (search) => {
-  const prev = window._csV3InvFilter || {};
-  window._csV3InvFilter = { ...prev, search };
+}
+function _csV3InvSetSearch(search) {
+  _csV3InvFilter = { ..._csV3InvFilter, search };
   if (!window._currentChar) return;
   const caret = document.querySelector('.inv-search input')?.selectionStart;
   if (window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
@@ -2393,7 +2397,7 @@ window._csV3InvSetSearch = (search) => {
     const inp = document.querySelector('.inv-search input');
     if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
   });
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — SORTS (.spell list avec toggle + body + cost)
@@ -2480,7 +2484,7 @@ async function allocateStat(charId, key, delta = 1) {
  * du perso ciblé si admin). Désactive automatiquement isDefault sur les autres
  * personnages du même uid pour garantir l'unicité.
  */
-window._setDefaultCharacter = async function (charId) {
+async function _setDefaultCharacter(charId) {
   const all = STATE.characters || [];
   const c = all.find(x => x.id === charId);
   if (!c) return;
@@ -2587,19 +2591,27 @@ function showCharTab(tab, el) {
 // ══════════════════════════════════════════════
 // REGISTRY data-action — délégation centralisée
 // ══════════════════════════════════════════════
+registerCharBlurActions({
+  csV3LedgerSaveField: (el) => _csV3LedgerSaveField(el, el.dataset.kind, Number(el.dataset.idx), el.dataset.field),
+  csV3LedgerSaveAmount: (el) => _csV3LedgerSaveAmount(el, el.dataset.kind, Number(el.dataset.idx), Number(el.dataset.sign)),
+  csV3SaveNoteTitle: (el) => _csV3SaveNoteTitle(Number(el.dataset.idx), el.value),
+  csV3SaveIdentityValue: (el) => _csV3SaveIdentityValue(el.dataset.id, el.dataset.key, el.value),
+  csV3SaveQuote: (el) => { el.classList.toggle('is-empty', !el.value); _csV3SaveQuote(el.dataset.id, el.value); },
+});
+
 registerActions({
   // Champs édités (change / input)
   saveXpDirect:            (el)     => saveXpDirect(el.dataset.id, el),
   previewXpBar:            (el)     => previewXpBar(el, Number(el.dataset.palier)),
-  _csV3LedgerSetSearch:    (el)     => window._csV3LedgerSetSearch?.(el.dataset.id, el.value),
+  _csV3LedgerSetSearch:    (el)     => _csV3LedgerSetSearch(el.dataset.id, el.value),
   _csQuoteToggleEmpty:     (el)     => el.classList.toggle('is-empty', !el.value),
-  _csV3SaveVisibility:     (el)     => window._csV3SaveVisibility?.(el.dataset.id, el.dataset.key, el.checked),
-  _csV3InvSetSearch:       (el)     => window._csV3InvSetSearch?.(el.value),
+  _csV3SaveVisibility:     (el)     => _csV3SaveVisibility(el.dataset.id, el.dataset.key, el.checked),
+  _csV3InvSetSearch:       (el)     => _csV3InvSetSearch(el.value),
   // Sélection
   selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
   createNewChar:           ()       => createNewChar(),
   filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.pseudo, btn),
-  _setDefaultCharacter:    (btn)    => window._setDefaultCharacter(btn.dataset.id),
+  _setDefaultCharacter:    (btn)    => _setDefaultCharacter(btn.dataset.id),
 
   // Tabs
   showCharTab:             (btn)    => showCharTab(btn.dataset.tab, btn),
@@ -2628,42 +2640,42 @@ registerActions({
   openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
 
   // Ledger
-  csV3LedgerSetKind:       (btn)    => window._csV3LedgerSetKind(btn.dataset.id, btn.dataset.kind),
-  csV3LedgerSetAddKind:    (btn)    => window._csV3LedgerSetAddKind(btn.dataset.kind, btn.dataset.id),
-  csV3AddLedger:           (btn)    => window._csV3AddLedger(btn.dataset.id),
-  csV3DeleteLedger:        (btn)    => window._csV3DeleteLedger(btn.dataset.id, btn.dataset.kind, Number(btn.dataset.idx)),
-  csV3LedgerMore:          (btn)    => window._csV3LedgerMore(btn.dataset.id),
+  csV3LedgerSetKind:       (btn)    => _csV3LedgerSetKind(btn.dataset.id, btn.dataset.kind),
+  csV3LedgerSetAddKind:    (btn)    => _csV3LedgerSetAddKind(btn.dataset.kind, btn.dataset.id),
+  csV3AddLedger:           (btn)    => _csV3AddLedger(btn.dataset.id),
+  csV3DeleteLedger:        (btn)    => _csV3DeleteLedger(btn.dataset.id, btn.dataset.kind, Number(btn.dataset.idx)),
+  csV3LedgerMore:          (btn)    => _csV3LedgerMore(btn.dataset.id),
 
   // Journal
-  csV3JournalSub:          (btn)    => window._csV3JournalSub(btn.dataset.sub),
+  csV3JournalSub:          (btn)    => _csV3JournalSub(btn.dataset.sub),
   addNote:                 ()       => addNote(),
   addQuete:                ()       => addQuete(),
-  csV3AddRelation:         (btn)    => window._csV3AddRelation(btn.dataset.id),
+  csV3AddRelation:         (btn)    => _csV3AddRelation(btn.dataset.id),
   toggleQuete:             (btn)    => toggleQuete(Number(btn.dataset.idx)),
   deleteQuete:             (btn)    => deleteQuete(Number(btn.dataset.idx)),
-  csV3ToggleNote:          (btn)    => window._csV3ToggleNote(Number(btn.dataset.idx)),
+  csV3ToggleNote:          (btn)    => _csV3ToggleNote(Number(btn.dataset.idx)),
   deleteNote:              (btn)    => deleteNote(Number(btn.dataset.idx)),
   saveNote:                (btn)    => saveNote(Number(btn.dataset.idx)),
-  csV3EditRelation:        (btn)    => window._csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
-  csV3DeleteRelation:      (btn)    => window._csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
+  csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
+  csV3DeleteRelation:      (btn)    => _csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
 
   // Profil
-  csV3RemoveProfilTag:      (btn)   => window._csV3RemoveProfilTag(btn.dataset.id, btn.dataset.tag),
-  csV3AddProfilTagFromInput:(btn)   => window._csV3AddProfilTagFromInput(btn.dataset.id),
-  csV3AddProfilTag:         (btn)   => window._csV3AddProfilTag(btn.dataset.id, btn.dataset.tag),
-  csV3RenameIdentity:       (btn)   => window._csV3RenameIdentity(btn.dataset.id, btn.dataset.key),
-  csV3SaveBioRt:            (btn)   => window._csV3SaveBioRt(btn.dataset.id),
-  csV3CancelBio:            (btn)   => window._csV3CancelBio(btn.dataset.id),
-  csV3EnterBioEdit:         (btn)   => window._csV3EnterBioEdit(btn.dataset.id),
-  csV3AddFact:              (btn)   => window._csV3AddFact(btn.dataset.id),
+  csV3RemoveProfilTag:      (btn)   => _csV3RemoveProfilTag(btn.dataset.id, btn.dataset.tag),
+  csV3AddProfilTagFromInput:(btn)   => _csV3AddProfilTagFromInput(btn.dataset.id),
+  csV3AddProfilTag:         (btn)   => _csV3AddProfilTag(btn.dataset.id, btn.dataset.tag),
+  csV3RenameIdentity:       (btn)   => _csV3RenameIdentity(btn.dataset.id, btn.dataset.key),
+  csV3SaveBioRt:            (btn)   => _csV3SaveBioRt(btn.dataset.id),
+  csV3CancelBio:            (btn)   => _csV3CancelBio(btn.dataset.id),
+  csV3EnterBioEdit:         (btn)   => _csV3EnterBioEdit(btn.dataset.id),
+  csV3AddFact:              (btn)   => _csV3AddFact(btn.dataset.id),
   openProfilImageUpload:    (btn)   => openProfilImageUpload(btn.dataset.id),
   removeProfilImage:        (btn)   => removeProfilImage(btn.dataset.id),
 
   // Équipement & combat
   editEquipSlot:            (btn)   => editEquipSlot(btn.dataset.slot),
-  openCombatStylesAdmin:    ()      => window.openCombatStylesAdmin?.(),
-  openDamageTypesAdmin:     ()      => window.openDamageTypesAdmin?.(),
-  toggleCharElement:        (btn)   => window._toggleCharElement?.(btn.dataset.id, btn.dataset.elem),
+  openCombatStylesAdmin:    ()      => openCombatStylesAdmin(),
+  openDamageTypesAdmin:     ()      => openDamageTypesAdmin(),
+  toggleCharElement:        (btn)   => toggleCharElement(btn.dataset.id, btn.dataset.elem),
 
   // Maîtrises
   addMaitrise:              ()      => addMaitrise(),
@@ -2671,7 +2683,7 @@ registerActions({
 
   // Inventaire
   addInvItem:               ()      => addInvItem(),
-  csV3InvSetCat:            (btn)   => window._csV3InvSetCat(btn.dataset.cat),
+  csV3InvSetCat:            (btn)   => _csV3InvSetCat(btn.dataset.cat),
   openSellInvModal:         (btn)   => openSellInvModal(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix), btn.dataset.name),
   openSendInvModal:         (btn)   => openSendInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
   openDeleteInvModal:       (btn)   => openDeleteInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
@@ -2682,11 +2694,7 @@ registerActions({
   saveInvItemFromShop:      ()      => saveInvItemFromShop(),
   saveInvItem:              (btn)   => saveInvItem(Number(btn.dataset.idx)),
   editInvItem:              (btn)   => editInvItem(Number(btn.dataset.idx)),
-  filterInvClear:           (btn)   => { window._charInvSearch = ''; filterInvRows(''); const w = btn.closest('.inv-search-wrap'); if (w) w.querySelector('input').value = ''; },
-  _invmStep:                (btn)   => window._invmStep(btn.dataset.input, Number(btn.dataset.delta), Number(btn.dataset.max), btn.dataset.context),
-  _lootQte:                 (btn)   => { const i = document.getElementById('loot-qte'); if (i) i.value = Math.max(1, parseInt(i.value || 1) + Number(btn.dataset.delta)); },
-  _lootSelect:              (btn)   => window._lootSelect(btn.dataset.id),
-  _lootSetCat:              (btn)   => window._lootSetCat(btn.dataset.cat),
+  filterInvClear:           (btn)   => { filterInvRows(''); const w = btn.closest('.inv-search-wrap'); if (w) w.querySelector('input').value = ''; },
 
   // Sorts
   addSort:                  ()      => addSort(),
@@ -2699,9 +2707,9 @@ registerActions({
   addCompteRow:             (btn)   => addCompteRow(btn.dataset.compteType),
   deleteCompteRow:          (btn)   => deleteCompteRow(btn.dataset.compteType, Number(btn.dataset.idx)),
   saveCompteField:          (el)    => saveCompteField(el.dataset.compteType, Number(el.dataset.idx), el.dataset.field, el.value),
-  _toggleCompteHist:        (btn)   => window._toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
-  _csAddXp:                 (btn)   => window._csAddXp(btn.dataset.id),
-  _allocStatPoint:          (btn)   => window._allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
+  _toggleCompteHist:        (btn)   => toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
+  _csAddXp:                 (btn)   => addXpFromInput(btn.dataset.id),
+  _allocStatPoint:          (btn)   => allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
   saveMaitrise:             (btn)   => saveMaitrise(Number(btn.dataset.idx)),
   deleteMaitrise:           (btn)   => deleteMaitrise(Number(btn.dataset.idx)),
   removeProfilTag:          (btn)   => removeProfilTag(btn),

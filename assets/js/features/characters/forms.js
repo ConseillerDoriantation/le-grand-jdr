@@ -8,6 +8,12 @@ import { loadAllUsers } from '../../core/adventure.js';
 import { _esc } from '../../shared/html.js';
 import PAGES from '../pages.js';
 
+let _newCharOwners = [];
+let _editTitres = [];
+function _renderFormsChar(c, tab) {
+  window.renderCharSheet?.(c, tab || window._currentCharTab || 'combat');
+}
+
 // ══════════════════════════════════════════════
 // STAT ADJUST (PV/PM actuel)
 // ══════════════════════════════════════════════
@@ -64,7 +70,7 @@ export async function toggleSort(idx) {
     sorts[idx].actif=!sorts[idx].actif;
     c.deck_sorts=sorts;
     await updateInCol('characters',c.id,{deck_sorts:sorts});
-    window.renderCharSheet(c,'sorts');
+    _renderFormsChar(c, 'sorts');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -76,7 +82,7 @@ export async function toggleQuete(idx) {
     const c=STATE.activeChar; if(!c) return;
     c.quetes[idx].valide=!c.quetes[idx].valide;
     await updateInCol('characters',c.id,{quetes:c.quetes});
-    window.renderCharSheet(c,'quetes');
+    _renderFormsChar(c, 'quetes');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -85,7 +91,7 @@ export async function deleteQuete(idx) {
     const c=STATE.activeChar; if(!c) return;
     c.quetes.splice(idx,1);
     await updateInCol('characters',c.id,{quetes:c.quetes});
-    window.renderCharSheet(c,'quetes');
+    _renderFormsChar(c, 'quetes');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -112,7 +118,7 @@ export async function saveQuete() {
     await updateInCol('characters',c.id,{quetes});
     closeModal();
     showNotif('Quête ajoutée !','success');
-    window.renderCharSheet(c,'quetes');
+    _renderFormsChar(c, 'quetes');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -124,7 +130,7 @@ export async function deleteSort(idx) {
     const c=STATE.activeChar; if(!c) return;
     c.deck_sorts.splice(idx,1);
     await updateInCol('characters',c.id,{deck_sorts:c.deck_sorts});
-    window.renderCharSheet(c,'sorts');
+    _renderFormsChar(c, 'sorts');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -133,7 +139,7 @@ export async function deleteInvItem(idx) {
     const c=STATE.activeChar; if(!c) return;
     c.inventaire.splice(idx,1);
     await updateInCol('characters',c.id,{inventaire:c.inventaire});
-    window.renderCharSheet(c,'inventaire');
+    _renderFormsChar(c, 'inventaire');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -294,7 +300,7 @@ async function _openCharOwnerPicker() {
   members.sort((a, b) =>
     (a.id === selfId ? -1 : b.id === selfId ? 1 : 0) ||
     (a.pseudo || a.email || '').localeCompare(b.pseudo || b.email || ''));
-  window._newCharOwners = members;
+  _newCharOwners = members;
 
   const admins = adv?.admins || [];
   const options = members.map(u => {
@@ -320,14 +326,14 @@ async function _openCharOwnerPicker() {
   `);
 }
 
-window.confirmNewChar = async () => {
+async function confirmNewChar() {
   const uid = document.getElementById('new-char-owner')?.value || STATE.user.uid;
-  const owner = (window._newCharOwners || []).find(u => u.id === uid);
+  const owner = (_newCharOwners || []).find(u => u.id === uid);
   const pseudo = owner?.pseudo || owner?.email
     || (uid === STATE.user.uid ? (STATE.profile?.pseudo || '?') : '?');
   closeModal();
   await _createCharForOwner(uid, pseudo);
-};
+}
 
 // ══════════════════════════════════════════════
 // TITRES
@@ -335,7 +341,7 @@ window.confirmNewChar = async () => {
 export function manageTitres(charId) {
   const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
   if (!c) return;
-  window._editTitres = [...(c.titres||[])];
+  _editTitres = [...(c.titres||[])];
   openModal('', `
     <div class="cs-titres-modal">
       <div class="cs-titres-head">
@@ -370,7 +376,7 @@ export function manageTitres(charId) {
 }
 
 function _titresListHtml() {
-  const titres = window._editTitres || [];
+  const titres = _editTitres || [];
   if (!titres.length) {
     return `<div class="cs-titres-empty">Aucun titre pour l'instant.</div>`;
   }
@@ -385,15 +391,15 @@ export function addTitre() {
   const input = document.getElementById('ei-titre-new');
   const val = input?.value.trim();
   if (!val) return;
-  window._editTitres = window._editTitres||[];
-  window._editTitres.push(val);
+  _editTitres = _editTitres || [];
+  _editTitres.push(val);
   input.value='';
   _refreshTitresList();
   input.focus();
 }
 
 export function removeTitre(idx) {
-  window._editTitres.splice(idx,1);
+  _editTitres.splice(idx, 1);
   _refreshTitresList();
 }
 
@@ -406,10 +412,10 @@ export async function saveTitres(charId) {
   try {
     const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
     if (!c) return;
-    c.titres = window._editTitres||[];
+    c.titres = _editTitres || [];
     await updateInCol('characters', charId, {titres: c.titres});
     closeModal();
-    window.renderCharSheet(c, window._currentCharTab);
+    _renderFormsChar(c);
     showNotif('Titres mis à jour !','success');
   } catch (e) { notifySaveError(e); }
 }
@@ -422,7 +428,7 @@ export function deleteCharPhoto(id) {
   if (!c) return;
   c.photo=null; c.photoZoom=1; c.photoX=0; c.photoY=0;
   updateInCol('characters',id,{photo:null,photoZoom:1,photoX:0,photoY:0});
-  window.renderCharSheet(c, window._currentCharTab);
+  _renderFormsChar(c);
 }
 
 registerActions({
@@ -430,7 +436,7 @@ registerActions({
   addTitre:       ()    => addTitre(),
   removeTitre:    (btn) => removeTitre(Number(btn.dataset.idx)),
   saveTitres:     (btn) => saveTitres(btn.dataset.id),
-  confirmNewChar: ()    => window.confirmNewChar?.(),
+  confirmNewChar: ()    => confirmNewChar(),
   cancelNewChar:  ()    => closeModal(),
   closeTitres:    ()    => closeModal(),
 });

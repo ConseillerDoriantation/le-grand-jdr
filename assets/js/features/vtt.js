@@ -15,7 +15,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from './characters/data.js';
@@ -106,6 +106,11 @@ window._vttMoveTokenAndReset = (sel, tid) => {
   if (!sel.value) return;
   window._vttMoveTokenToPage?.(tid, sel.value);
   sel.value = '';
+};
+window._vttSetEmoteAlbum = (v) => {
+  const t = (v || '').trim();
+  if (t) localStorage.setItem('vtt-emote-folder', t);
+  else localStorage.removeItem('vtt-emote-folder');
 };
 window._vttPreviewEmoteFile = (input, previewId) => {
   const f = input.files?.[0]; if (!f) return;
@@ -7566,14 +7571,18 @@ window._ouvrirGestionEmotes = async () => {
   await _loadEmotes();
   const { default: Sortable } = await import('../vendor/sortable.esm.js');
 
-  // ── Helper upload Cloudinary — toutes les émotes vont dans le dossier
-  //    `emotes` (pas de sous-dossier : un seul endroit, plus de dispersion). ──
+  // ── Helper upload Cloudinary (avec sous-dossier optionnel pour grouper) ──
+  const _getEmoteAlbum = () => localStorage.getItem('vtt-emote-folder') || localStorage.getItem('vtt-imgbb-emote-album') || '';
+  const _setEmoteAlbum = v => v ? localStorage.setItem('vtt-emote-folder', v) : localStorage.removeItem('vtt-emote-folder');
+
   const _uploadEmote = async (file) => {
     if (!hasCloudinaryConfig()) {
       openCloudinaryConfigModal();
       if (!hasCloudinaryConfig()) throw new Error('Configuration Cloudinary requise (bouton 🔑)');
     }
-    const up = await uploadCloudinary(file, { folder: 'emotes', tags: ['emote'] });
+    const sub = _getEmoteAlbum().trim();
+    const folder = sub ? `emotes/${sub}` : 'emotes';
+    const up = await uploadCloudinary(file, { folder, tags: ['emote'] });
     return up.url;
   };
 
@@ -7593,40 +7602,38 @@ window._ouvrirGestionEmotes = async () => {
       }</div>`
     : '<div style="color:var(--text-dim);font-size:.8rem;padding:.5rem 0">Aucune émote pour l\'instant.</div>';
 
-  const _count = _emotes.length;
-  openModal('', `
-    <div class="vtt-emote-modal">
-      <div class="vtt-emote-head">
-        <div class="vtt-emote-head-ico">😄</div>
-        <div class="vtt-emote-head-txt">
-          <h2>Gestion des émotes</h2>
-          <small><b id="emote-count">${_count}</b> émote${_count>1?'s':''} · glisser ⠿ pour réordonner · ✏ pour modifier</small>
+  const _inpStyle = 'width:100%;box-sizing:border-box;background:var(--bg-elevated);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:.8rem;padding:.3rem .5rem';
+
+  openModal('😄 Gestion des Émotes', `
+    <div style="display:flex;flex-direction:column;gap:.85rem;padding:.3rem 0">
+      <div style="font-size:.72rem;color:var(--text-muted)">Maintenez ⠿ pour réordonner par glisser-déposer. Cliquez ✏ pour modifier.</div>
+      <div id="emote-manage-list">${_cardsHtml(_emotes)}</div>
+      <div id="emote-edit-zone"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <label style="font-size:.75rem;color:var(--text-muted);white-space:nowrap">📁 Dossier</label>
+        <input type="text" id="emote-album-id" placeholder="nom du sous-dossier Cloudinary (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1"
+          data-vtt-fn="_vttSetEmoteAlbum" data-vtt-on="input" data-vtt-args="$value">
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
+      <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
+        <div class="form-group" style="margin:0">
+          <label style="font-size:.75rem;color:var(--text-muted)">Nom (ex: <code>rire</code>)</label>
+          <input type="text" id="emote-add-name" placeholder="nomemote" style="${_inpStyle}">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label style="font-size:.75rem;color:var(--text-muted)">Fichier <span style="opacity:.6">(ou URL ci-dessous)</span></label>
+          <input type="file" id="emote-add-file" accept="image/*" style="font-size:.78rem;margin-top:.25rem">
         </div>
       </div>
-
-      <div id="emote-manage-list" class="vtt-emote-scroll">${_cardsHtml(_emotes)}</div>
-      <div id="emote-edit-zone"></div>
-
-      <div class="vtt-emote-add">
-        <div class="vtt-emote-add-title">➕ Ajouter une émote</div>
-        <div class="vtt-emote-add-grid">
-          <div class="vtt-emote-add-field">
-            <label>Nom <span>tapé en jeu via <code>:nom:</code></span></label>
-            <input type="text" class="input-field" id="emote-add-name" placeholder="rire" autocomplete="off">
-          </div>
-          <div class="vtt-emote-add-field">
-            <label>Image <span>(envoyée sur Cloudinary)</span></label>
-            <input type="file" class="input-field" id="emote-add-file" accept="image/*">
-          </div>
-        </div>
-        <div class="vtt-emote-add-field">
-          <label>… ou URL directe <span>(si déjà hébergée ailleurs)</span></label>
-          <input type="text" class="input-field" id="emote-add-url" placeholder="https://…">
-        </div>
-        <div class="vtt-emote-add-foot">
-          <button class="btn btn-gold btn-sm" data-vtt-fn="_vttAddEmote">➕ Ajouter</button>
-          <span id="emote-add-status"></span>
-        </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.75rem;color:var(--text-muted)">URL directe <span style="opacity:.6">(si déjà hébergée ailleurs)</span></label>
+        <input type="text" id="emote-add-url" placeholder="https://…" style="${_inpStyle}">
+      </div>
+      <div style="display:flex;align-items:center;gap:.7rem">
+        <button class="btn btn-primary" style="flex:1" data-vtt-fn="_vttAddEmote">➕ Ajouter l'émote</button>
+        <span id="emote-add-status" style="font-size:.78rem;color:var(--text-dim);flex:1;min-height:1rem"></span>
       </div>
     </div>`);
 
@@ -7652,7 +7659,6 @@ window._ouvrirGestionEmotes = async () => {
   const _refresh = (clearEdit = true) => {
     const el = document.getElementById('emote-manage-list'); if (!el) return;
     el.innerHTML = _cardsHtml(_emotes); _initSort();
-    const cnt = document.getElementById('emote-count'); if (cnt) cnt.textContent = _emotes.length;
     if (clearEdit) { const ez = document.getElementById('emote-edit-zone'); if (ez) ez.innerHTML = ''; }
   };
 
@@ -8715,15 +8721,16 @@ window._vttClearBuffs = async id => {
 // HANDLERS — Conditions (états) sur les tokens
 // ══════════════════════════════════════════════════════════════════════════════
 /** Ouvre la modal de sélection d'un état à appliquer. */
-// Expose la librairie des états aux autres modules (spells.js → dropdown affliction)
-window._vttGetConditionLibrary = () => CONDITION_LIBRARY.map(c => ({
-  id: c.id, label: c.label, icon: c.icon, color: c.color,
-}));
+function getVttConditionLibrary() {
+  return CONDITION_LIBRARY.map(c => ({
+    id: c.id, label: c.label, icon: c.icon, color: c.color,
+  }));
+}
 window._vttEnsureConditionsLoaded = async () => {
   if (CONDITION_LIBRARY.length <= CONDITION_DEFAULT_LIBRARY.length) {
     await _loadConditionsOverrides().catch(() => {});
   }
-  return window._vttGetConditionLibrary();
+  return getVttConditionLibrary();
 };
 
 window._vttConditionAdd = (tokenId) => {
@@ -12212,7 +12219,6 @@ function _msTabCombat(c, uid, canEdit) {
       <div class="vtt-ms-def-item"><span>🛡 CA</span><strong>${calcCA(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>⚡ Vit.</span><strong>${calcVitesse(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>🎯 Maît.</span><strong>+${getMaitriseBonus(c)}</strong></div>
-      <div class="vtt-ms-def-item" title="Sorts actifs / capacité du deck"><span>🃏 Deck</span><strong>${(c.deck_sorts||[]).filter(s=>s.actif).length}/${calcDeckMax(c)}</strong></div>
     </div>
     ${weaponHtml}${setHtml}
     ${_msXpSection(c, uid, canEdit)}`;

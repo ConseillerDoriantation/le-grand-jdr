@@ -162,20 +162,6 @@ service cloud.firestore {
              .affectedKeys().hasOnly(['participants']));
       }
 
-      // ── Agenda ───────────────────────────────────────────────────
-      // Séance validée (agenda_session/next) : lecture tous, écriture MJ.
-      match /agenda_session/{id} {
-        allow read:  if inAdventure(adventureId);
-        allow write: if isAdvAdmin(adventureId);
-      }
-      // Disponibilités : lecture tous ; chaque joueur écrit SA dispo (doc id = uid),
-      // le MJ peut tout écrire.
-      match /availabilities/{id} {
-        allow read:  if inAdventure(adventureId);
-        allow write: if inAdventure(adventureId)
-          && (id == request.auth.uid || isAdvAdmin(adventureId));
-      }
-
       // ── VTT ──────────────────────────────────────────────────────
       // Session (page active, état combat) : lecture tous, écriture MJ
       match /vtt/{docId} {
@@ -206,12 +192,6 @@ service cloud.firestore {
         allow delete: if isAdvAdmin(adventureId) ||
                          (inAdventure(adventureId) && resource.data.createdBy == request.auth.uid);
       }
-
-      // Soundboard : sons et playlists (catégories). Lecture tous (les joueurs
-      // entendent la musique synchronisée), gestion réservée au MJ.
-      // L'état de lecture courant vit dans vtt/music → déjà couvert par /vtt/{docId}.
-      match /vttSons/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-      match /vttPlaylists/{id} { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
 
       // Tokens : MJ écrit tout.
       // Un joueur peut déplacer son propre token (col/row/movedThisTurn),

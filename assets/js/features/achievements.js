@@ -30,16 +30,23 @@ let _achClickGuardInstalled = false;
 let _achUploader = null;
 let _currentOrder = [];     // miroir de l'ordre Firestore, sert aux re-renders live
 
-// ── State global vue / filtre / recherche ─────────────────────────────────
-window._achFilter     ??= 'all';     // 'all' | 'epique' | 'comique' | 'histoire'
-window._achCharFilter ??= 'all';     // 'all' | charId
-window._achView       ??= 'galerie'; // 'galerie' | 'timeline'
-window._achSearch     ??= '';
-window._achTimelineDesc ??= false;   // true = plus récent en haut
+let _achItems = [];
+let _achLightboxItems = {};
+let _achFilter = 'all';     // 'all' | 'epique' | 'comique' | 'histoire'
+let _achCharFilter = 'all'; // 'all' | charId
+let _achView = 'galerie';   // 'galerie' | 'timeline'
+let _achSearch = '';
+let _achTimelineDesc = false; // true = plus récent en haut
+let _achSelectCat = () => {};
+let _achToggleContrib = () => {};
+
+export function getAchievementsShellState() {
+  return { items: _achItems, filter: _achFilter, view: _achView, search: _achSearch };
+}
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
-function openAchievementModal(id = null) {
-  const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
+export function openAchievementModal(id = null) {
+  const ex = id ? (_achItems || []).find(a => a.id === id) : null;
   _achUploader?.destroy(); _achUploader = null;
 
   openModal(
@@ -155,7 +162,7 @@ function openAchievementModal(id = null) {
   );
 
   // Sélecteur catégorie
-  window._achSelectCat = (catId) => {
+  _achSelectCat = (catId) => {
     document.getElementById('ach-categorie').value = catId;
     CATS.forEach(c => {
       const btn    = document.getElementById(`ach-cat-${c.id}`);
@@ -166,9 +173,9 @@ function openAchievementModal(id = null) {
       btn.style.color       = active ? c.color  : 'var(--text-muted)';
     });
   };
-  window._achSelectCat(ex?.categorie || 'epique');
+  _achSelectCat(ex?.categorie || 'epique');
 
-  window._achToggleContrib = (charId) => {
+  _achToggleContrib = (charId) => {
     const hidden = document.getElementById('ach-contributeurs');
     if (!hidden) return;
     const current = hidden.value ? hidden.value.split(',') : [];
@@ -218,7 +225,7 @@ async function saveAchievement(id = '') {
     if (!titre) { showNotif('Le titre est requis.', 'error'); return; }
 
     const uploaded = _achUploader?.getResult();
-    const ex = id ? (window._achItems || []).find(a => a.id === id) : null;
+    const ex = id ? (_achItems || []).find(a => a.id === id) : null;
     const imageUrl = typeof uploaded === 'string' ? uploaded : (ex?.imageUrl || '');
 
     const contribRaw = document.getElementById('ach-contributeurs')?.value || '';
@@ -241,11 +248,11 @@ async function saveAchievement(id = '') {
       const order = await _loadOrder();
       order.push(docId);
       await _saveOrder(order);
-      if (window._achItems) window._achItems.push({ id: docId, ...payload });
+      if (_achItems) _achItems.push({ id: docId, ...payload });
     } else {
       await saveDoc('achievements', docId, payload);
-      if (window._achItems) {
-        window._achItems = window._achItems.map(a => a.id === id ? { id, ...payload } : a);
+      if (_achItems) {
+        _achItems = _achItems.map(a => a.id === id ? { id, ...payload } : a);
       }
     }
 
@@ -258,7 +265,7 @@ async function saveAchievement(id = '') {
 
 // ── ÉDITER ────────────────────────────────────────────────────────────────────
 async function editAchievement(id) {
-  if (!window._achItems) window._achItems = await loadCollection('achievements');
+  if (!_achItems) _achItems = await loadCollection('achievements');
   openAchievementModal(id);
 }
 
@@ -267,7 +274,7 @@ async function deleteAchievement(id) {
   try {
     if (!await confirmModal('Supprimer ce haut-fait définitivement ?')) return;
     await deleteFromCol('achievements', id);
-    if (window._achItems) window._achItems = window._achItems.filter(a => a.id !== id);
+    if (_achItems) _achItems = _achItems.filter(a => a.id !== id);
     const order = (await _loadOrder()).filter(oid => oid !== id);
     await _saveOrder(order);
     showNotif('Haut-Fait supprimé.', 'success');
@@ -294,7 +301,7 @@ function _applyOrder(items, order) {
 }
 
 function _refreshAchievementCounters() {
-  const all = window._achItems || [];
+  const all = _achItems || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
   const counts = { all: visible.length };
   CATS.forEach(c => {
@@ -307,11 +314,11 @@ function _refreshAchievementCounters() {
 }
 
 function _mergeCategoryOrder(catId, catOrder, globalOrder) {
-  const allIds      = (window._achItems || []).map(a => a.id);
+  const allIds      = (_achItems || []).map(a => a.id);
   const globalIds   = globalOrder.filter(id => allIds.includes(id));
   const missingIds  = allIds.filter(id => !globalIds.includes(id));
   const fullOrder   = [...globalIds, ...missingIds];
-  const catIds     = new Set((window._achItems || [])
+  const catIds     = new Set((_achItems || [])
     .filter(a => (a.categorie || 'epique') === catId)
     .map(a => a.id));
   const cleanOrder = catOrder.filter(id => catIds.has(id));
@@ -328,7 +335,7 @@ function _mergeCategoryOrder(catId, catOrder, globalOrder) {
 async function _persistCategoryOrder(catId, orderedIds) {
   const merged = _mergeCategoryOrder(catId, orderedIds, await _loadOrder());
   await _saveOrder(merged);
-  window._achItems = _applyOrder(window._achItems || [], merged);
+  _achItems = _applyOrder(_achItems || [], merged);
   return merged;
 }
 
@@ -550,8 +557,8 @@ function _achCardHTML(item, isAdmin) {
 async function _achRenderJustified(catId, items, container) {
   const withRatios = await _achMeasureRatios(items);
   withRatios.forEach(item => {
-    const idx = (window._achItems || []).findIndex(a => a.id === item.id);
-    if (idx >= 0) window._achItems[idx] = { ...window._achItems[idx], aspectRatio: item.aspectRatio };
+    const idx = (_achItems || []).findIndex(a => a.id === item.id);
+    if (idx >= 0) _achItems[idx] = { ..._achItems[idx], aspectRatio: item.aspectRatio };
   });
 
   const containerW = container.clientWidth || 900;
@@ -580,14 +587,12 @@ async function _achRenderJustified(catId, items, container) {
 async function _achRebuildGallery(catId) {
   const grid = document.getElementById('ach-gallery');
   if (!grid) return;
-  const itemsById  = Object.fromEntries((window._achItems || []).map(a => [a.id, a]));
+  const itemsById  = Object.fromEntries((_achItems || []).map(a => [a.id, a]));
   const orderedIds = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
   const ordered    = orderedIds.map(id => itemsById[id]).filter(Boolean);
   await _achRenderJustified(catId, ordered, grid);
   setupAchievementsDnd(catId);
 }
-window._achRebuildJustified = _achRebuildGallery; // compat
-window._achRebuildGallery   = _achRebuildGallery;
 
 // ── parseDate helper ──────────────────────────────────────────────────────────
 // Accepte plusieurs formats : "15 mars 2024", "15/03/2024", "15-03-2024",
@@ -651,8 +656,8 @@ function _renderTimeline(items) {
   const chars   = sortCharactersForDisplay(STATE.characters || []);
   const isAdmin = STATE.isAdmin;
   // Tri chronologique. Les hauts-faits sans date valide sont relégués à la fin
-  // (peu importe le sens du tri). Sens contrôlé par window._achTimelineDesc.
-  const desc = !!window._achTimelineDesc;
+  // (peu importe le sens du tri). Sens contrôlé par _achTimelineDesc.
+  const desc = !!_achTimelineDesc;
   const sorted = [...items].sort((a, b) => {
     const da = parseDate(a.date), db = parseDate(b.date);
     if (!da && !db) return 0;
@@ -739,15 +744,15 @@ function _achRenderControlsExtras() {
   }
 
   // Chips perso : seulement ceux qui ont au moins 1 HF visible pour l'utilisateur
-  const all = window._achItems || [];
+  const all = _achItems || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
   const counts = new Map();
   visible.forEach(a => (a.contributeurs || []).forEach(cid => counts.set(cid, (counts.get(cid)||0)+1)));
   const chars = (STATE.characters || []).filter(c => counts.has(c.id));
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const active = window._achCharFilter || 'all';
-  const isTimeline = (window._achView || 'galerie') === 'timeline';
-  const desc = !!window._achTimelineDesc;
+  const active = _achCharFilter || 'all';
+  const isTimeline = (_achView || 'galerie') === 'timeline';
+  const desc = !!_achTimelineDesc;
 
   const charChips = chars.length ? `
     <div class="ach-char-filter">
@@ -787,10 +792,10 @@ async function _achRenderContent() {
   _refreshAchievementCounters();
   _achRenderControlsExtras();
 
-  const all        = window._achItems || [];
-  const filter     = window._achFilter || 'all';
-  const charFilter = window._achCharFilter || 'all';
-  const search     = (window._achSearch || '').trim().toLowerCase();
+  const all        = _achItems || [];
+  const filter     = _achFilter || 'all';
+  const charFilter = _achCharFilter || 'all';
+  const search     = (_achSearch || '').trim().toLowerCase();
   const isAdmin    = STATE.isAdmin;
 
   // 1. Filtre secret (joueurs ne voient pas les HF secrets)
@@ -809,7 +814,7 @@ async function _achRenderContent() {
 
   // Map lightbox (limitée aussi pour les joueurs : pas d'ouverture d'un HF secret)
   const visibleForLightbox = isAdmin ? all : all.filter(a => !a.secret);
-  window._achLightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
+  _achLightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
 
   if (!filtered.length) {
     const catDef = ACH_CATS.find(c => c.id === filter);
@@ -829,7 +834,7 @@ async function _achRenderContent() {
     return;
   }
 
-  if ((window._achView || 'galerie') === 'timeline') {
+  if ((_achView || 'galerie') === 'timeline') {
     contentEl.innerHTML = _renderTimeline(filtered);
     return;
   }
@@ -846,41 +851,41 @@ async function _achRenderContent() {
 }
 
 // ── Actions état (appelées depuis les boutons HTML) ───────────────────────────
-window._achSetFilter = (filter) => {
-  window._achFilter = filter;
+function _achSetFilter(filter) {
+  _achFilter = filter;
   document.querySelectorAll('.hall-counter').forEach(el => {
     el.classList.toggle('active', el.dataset.filter === filter);
   });
   _achRenderContent();
 };
-window._achSetView = (view) => {
-  window._achView = view;
+function _achSetView(view) {
+  _achView = view;
   document.querySelectorAll('.view-tab').forEach((btn, i) => {
     btn.classList.toggle('active', i === (view === 'timeline' ? 1 : 0));
   });
   _achRenderContent();
 };
 let _achSearchTimer = null;
-window._achSetSearch = (val) => {
-  window._achSearch = val;
+function _achSetSearch(val) {
+  _achSearch = val;
   clearTimeout(_achSearchTimer);
   _achSearchTimer = setTimeout(_achRenderContent, 240);
 };
-window._achSetCharFilter = (charId) => {
-  window._achCharFilter = charId || 'all';
+function _achSetCharFilter(charId) {
+  _achCharFilter = charId || 'all';
   document.querySelectorAll('.ach-char-chip').forEach(el => {
-    el.classList.toggle('active', el.dataset.charid === window._achCharFilter);
+    el.classList.toggle('active', el.dataset.charid === _achCharFilter);
   });
   _achRenderContent();
 };
-window._achToggleTimelineDir = () => {
-  window._achTimelineDesc = !window._achTimelineDesc;
+function _achToggleTimelineDir() {
+  _achTimelineDesc = !_achTimelineDesc;
   _achRenderContent();
 };
 
 // ── LIGHTBOX ENRICHIE ─────────────────────────────────────────────────────────
 function _achOpenLightbox(itemId) {
-  const item = (window._achLightboxItems || {})[itemId] || (window._achItems || []).find(a => a.id === itemId);
+  const item = (_achLightboxItems || {})[itemId] || (_achItems || []).find(a => a.id === itemId);
   if (!item) return;
   const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
@@ -933,22 +938,6 @@ function _achOpenLightbox(itemId) {
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
 }
-// Alias backward-compat (ouverture directe par URL)
-window._achOpenImage = (url) => {
-  const item = (window._achItems || []).find(a => a.imageUrl === url);
-  if (item) { _achOpenLightbox(item.id); return; }
-  // Fallback : afficher juste l'image sans meta
-  const existing = document.getElementById('ach-lightbox');
-  if (existing) existing.remove();
-  const overlay = document.createElement('div');
-  overlay.id = 'ach-lightbox';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center;cursor:zoom-out';
-  overlay.innerHTML = `<img style="max-width:90vw;max-height:90vh;border-radius:12px" src="${url}">`;
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', close);
-  document.body.appendChild(overlay);
-};
-
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
 PAGES.achievements = async function() {
@@ -957,10 +946,11 @@ PAGES.achievements = async function() {
     _loadOrder(),
   ]);
   _currentOrder    = order;
-  window._achItems = _applyOrder(items || [], order);
-  window._achFilter ??= 'all';
-  window._achView   ??= 'galerie';
-  window._achSearch ??= '';
+  _achItems = _applyOrder(items || [], order);
+  _achFilter ??= 'all';
+  _achView   ??= 'galerie';
+  _achSearch ??= '';
+  PAGES._achievementsShellState = getAchievementsShellState();
 
   await _origPage();    // génère le shell (hero + controls + #ach-content)
   await _achRenderContent();
@@ -972,7 +962,7 @@ PAGES.achievements = async function() {
   watch('ach-items', 'achievements', items => {
     if (STATE.currentPage !== 'achievements') return;
     if (document.body.classList.contains('ach-dragging')) return;
-    window._achItems = _applyOrder(items || [], _currentOrder);
+    _achItems = _applyOrder(items || [], _currentOrder);
     _achRenderContent();
   });
 
@@ -980,29 +970,22 @@ PAGES.achievements = async function() {
     if (STATE.currentPage !== 'achievements') return;
     if (document.body.classList.contains('ach-dragging')) return;
     _currentOrder    = Array.isArray(doc?.order) ? doc.order : [];
-    window._achItems = _applyOrder(window._achItems || [], _currentOrder);
+    _achItems = _applyOrder(_achItems || [], _currentOrder);
     _achRenderContent();
   });
 };
 
-// ── EXPORTS ───────────────────────────────────────────────────────────────────
-Object.assign(window, {
-  openAchievementModal,
-  saveAchievement,
-  editAchievement,
-  deleteAchievement,
-  setupAchievementsDnd,
-  _achOpenLightbox,
-  _achRenderContent,
-});
-
 registerActions({
-  _achSelectCat:         (btn) => window._achSelectCat?.(btn.dataset.id),
-  _achToggleContrib:     (btn) => window._achToggleContrib?.(btn.dataset.id),
+  _achSetSearch:         (el)  => _achSetSearch(el.value),
+  _achSetFilter:         (btn) => _achSetFilter(btn.dataset.val),
+  _achSetView:           (btn) => _achSetView(btn.dataset.val),
+  openAchievementModal:  ()    => openAchievementModal(),
+  _achSelectCat:         (btn) => _achSelectCat(btn.dataset.id),
+  _achToggleContrib:     (btn) => _achToggleContrib(btn.dataset.id),
   saveAchievement:       (btn) => saveAchievement(btn.dataset.id || ''),
   editAchievement:       (btn) => editAchievement(btn.dataset.id),
   deleteAchievement:     (btn) => deleteAchievement(btn.dataset.id),
   _achOpenLightbox:      (btn) => _achOpenLightbox(btn.dataset.id),
-  _achSetCharFilter:     (btn) => window._achSetCharFilter?.(btn.dataset.charid),
-  _achToggleTimelineDir: ()    => window._achToggleTimelineDir?.(),
+  _achSetCharFilter:     (btn) => _achSetCharFilter(btn.dataset.charid),
+  _achToggleTimelineDir: ()    => _achToggleTimelineDir(),
 });

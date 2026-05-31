@@ -1,16 +1,29 @@
 import { STATE } from '../../core/state.js';
 import { registerActions } from '../../core/actions.js';
-import { updateInCol, getDocData } from '../../data/firestore.js';
+import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
-import { getMod, calcPMMax, calcDeckMax } from '../../shared/char-stats.js';
+import { getMod, calcPMMax, calcDeckMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
+import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions, getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
+let _spellMatricesCache = null;
+let _damageTypesCache = [];
+let _sortsSearch = '';
+let _sortsView = 'all';
+let _sortsTypeFilter = '';
+let _sortsCatCollapsed = {};
+let _runeCountsEdit = {};
+let _sortAllowedNoyauIds = null;
+let _sortTypesEdit = new Set(['utilitaire']);
+let _sortActionEdit = null;
+let _deplModeEdit = null;
+let _sortIconPickerOutsideBound = false;
 
 export function sortDragStart(e, idx) {
   _dragSortIdx = idx;
@@ -58,7 +71,7 @@ export async function sortDrop(e, toIdx) {
     sorts.splice(insertAt, 0, moved);
     c.deck_sorts = sorts;
     await updateInCol('characters', c.id, {deck_sorts: sorts});
-    window.renderCharSheet(c, 'sorts');
+    _renderSpellsTab(c);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -221,7 +234,7 @@ const SORT_COMBOS = [
     defaultName: 'Arme invoquée',
     detect: (counts) => counts.Enchantement > 0 && counts.Invocation > 0,
     describe: (counts, s) => {
-      const arm = getInvokedArm(window._spellMatricesCache, s?.noyauTypeId);
+      const arm = getInvokedArm(_spellMatricesCache, s?.noyauTypeId);
       const nbP = counts.Puissance || 0;
       const STAT_LBL = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' };
       if (arm) {
@@ -321,7 +334,7 @@ function _runeCounts(s) {
 /** Renvoie les combos actifs pour un sort (filtre selon config MJ enabled/disabled). */
 function _activeCombos(s) {
   const counts = _runeCounts(s);
-  const matrices = window._spellMatricesCache;
+  const matrices = _spellMatricesCache;
   return SORT_COMBOS.filter(combo => {
     const cfg = getComboConfig(matrices, combo.id);
     if (!cfg.enabled) return false;
@@ -361,12 +374,12 @@ function _autoSourceSoin(s) {
 }
 function _autoSourceCA(s) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
-  const ov = getProtectionCAOverride(window._spellMatricesCache, s?.noyauTypeId);
+  const ov = getProtectionCAOverride(_spellMatricesCache, s?.noyauTypeId);
   if (nbProt === 0) return 'auto · CA +2 (2 tours)';
   // Combo Bouclier réactif : pas de bonus CA — source informe
   const hasReaction = (s.runes || []).includes('Réaction');
   if (hasReaction && (s.protectionMode || 'ca') === 'ca') {
-    const cfg = getComboConfig(window._spellMatricesCache, 'bouclier_reactif');
+    const cfg = getComboConfig(_spellMatricesCache, 'bouclier_reactif');
     if (cfg.enabled) return `combo Bouclier réactif · annule 1 attaque en réaction · Protection ×${nbProt}`;
   }
   const modStr = ov ? `mod ×${ov.mod}` : 'mod ×2';
@@ -496,7 +509,7 @@ function _calcEnchantDegats(s) {
 /** Valeur CA (rune Protection mode CA) :
  *  - Saisie manuelle si fournie
  *  - Sinon auto : (mod par rune selon élément ou 2 par défaut) + chaînage +1 / rune au-delà de la 1ère
- *  - Le mod par élément vient de la matrice MJ : window._spellMatricesCache (Protection×CA)
+ *  - Le mod par élément vient de la matrice MJ : _spellMatricesCache (Protection×CA)
  */
 function _getSortCA(s) {
   const manual = (s?.ca || '').trim();
@@ -506,13 +519,13 @@ function _getSortCA(s) {
   // Combo Bouclier réactif : pas de bonus CA, juste un blocage en réaction
   const hasReaction = (s.runes || []).includes('Réaction');
   if (hasReaction && (s.protectionMode || 'ca') === 'ca') {
-    const cfg = getComboConfig(window._spellMatricesCache, 'bouclier_reactif');
+    const cfg = getComboConfig(_spellMatricesCache, 'bouclier_reactif');
     if (cfg.enabled) {
       const tier = nbProt >= 3 ? 'Boss-' : nbProt === 2 ? 'Élite-' : 'Mob';
       return `Bloque 1 attaque (${tier})`;
     }
   }
-  const ov  = getProtectionCAOverride(window._spellMatricesCache, s?.noyauTypeId);
+  const ov  = getProtectionCAOverride(_spellMatricesCache, s?.noyauTypeId);
   const mod = ov?.mod ?? 2;
   const base  = nbProt * mod;
   const chain = nbProt > 1 ? (nbProt - 1) : 0;
@@ -545,7 +558,7 @@ function _calcSortCibles(s) {
  *  Détermine la stat utilisée pour le soin (magique → arme · physique → Constitution).
  */
 function _isNoyauMagic(s) {
-  const types = window._damageTypesCache;
+  const types = _damageTypesCache;
   if (!types || !s?.noyauTypeId) return false;
   const t = types.find(x => x.id === s.noyauTypeId);
   return !!t?.isMagic;
@@ -710,7 +723,7 @@ function _calcSentinelStats(s) {
 function _calcInvokedArmStats(s) {
   const runes = s?.runes || [];
   const nbP = runes.filter(r => r === 'Puissance').length;
-  const arm = getInvokedArm(window._spellMatricesCache, s?.noyauTypeId);
+  const arm = getInvokedArm(_spellMatricesCache, s?.noyauTypeId);
   const baseDmg = arm?.degats || '1d8';
   let dmg = baseDmg;
   if (nbP > 0) {
@@ -927,9 +940,7 @@ function _buildSortResume(s, c) {
     const detailParts = ['2 tours', 'Action Bonus', cibleStr];
     // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
     if (mode === 'etat') {
-      const lib = (_conditionsLibCache
-                || (typeof window._vttGetConditionLibrary === 'function'
-                    ? window._vttGetConditionLibrary() : []));
+      const lib = _conditionsLibCache || [];
       const etat = s.enchantEtatId ? lib.find(c2 => c2.id === s.enchantEtatId) : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       lines.push({ icon:'✨', label:`Enchantement · État sur allié : ${lbl}`,
@@ -948,9 +959,7 @@ function _buildSortResume(s, c) {
     const dd   = 11 + 3 * (nbAff - 1);
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
-    const lib = (_conditionsLibCache
-              || (typeof window._vttGetConditionLibrary === 'function'
-                  ? window._vttGetConditionLibrary() : []));
+    const lib = _conditionsLibCache || [];
     if (mode === 'etat' && s.afflictionEtatId) {
       const etat = lib.find(c2 => c2.id === s.afflictionEtatId);
       if (etat?.defaultSaveStat) saveStat = etat.defaultSaveStat;
@@ -1006,9 +1015,20 @@ function _buildSortResume(s, c) {
 
 // Placeholder — resolved at runtime via characters.js import chain
 function _getMaitriseBonus(c, item) {
-  if (typeof window._getMaitriseBonus === 'function') return window._getMaitriseBonus(c, item);
-  // Fallback inline (never called if characters.js sets window._getMaitriseBonus)
-  return 0;
+  return getSharedMaitriseBonus(c, item);
+}
+
+function _getCurrentSpellChar() {
+  return STATE.activeChar || window._currentChar || null;
+}
+
+function _renderSpellsTab(c = _getCurrentSpellChar()) {
+  if (!c) return;
+  if (window._currentCharTab === 'sorts' && typeof window._renderTab === 'function') {
+    window._renderTab('sorts', c, window._canEditChar);
+  } else if (typeof window.renderCharSheet === 'function') {
+    window.renderCharSheet(c, 'sorts');
+  }
 }
 
 export function renderCharDeck(c, canEdit) {
@@ -1016,16 +1036,16 @@ export function renderCharDeck(c, canEdit) {
   const cats     = c.sort_cats  || [];
   const mainP    = getMainWeapon(c);
   const armeDeg  = mainP.degats;
-  const openIdx  = window._openSortIdx ?? null;
+  const openIdx  = _openSortIdx ?? null;
 
   const armorSet = getArmorSetData(c);
   const pmDelta  = armorSet.modifiers?.spellPmDelta || 0;
 
   // ── État UI persistant (filtres / recherche / pliage) ─────────────
-  const search   = (window._sortsSearch || '').toLowerCase().trim();
-  const view     = window._sortsView || 'all';          // 'all' | 'deck'
-  const typeFlt  = window._sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'soin' | 'enchantement' | 'affliction' | 'utilitaire'
-  const collapsed = window._sortsCatCollapsed || {};     // { catId: true } = replié
+  const search   = (_sortsSearch || '').toLowerCase().trim();
+  const view     = _sortsView || 'all';          // 'all' | 'deck'
+  const typeFlt  = _sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'soin' | 'enchantement' | 'affliction' | 'utilitaire'
+  const collapsed = _sortsCatCollapsed || {};     // { catId: true } = replié
 
   const DEFAULT_CAT = { id: '__none', nom: 'Sans catégorie', couleur: '#4f8cff' };
   const allCats = cats.length ? [...cats, DEFAULT_CAT] : [DEFAULT_CAT];
@@ -1078,7 +1098,7 @@ export function renderCharDeck(c, canEdit) {
         <span class="cs-sorts-search-ico">🔍</span>
         <input type="text" class="cs-sorts-search" id="cs-sorts-search"
           placeholder="Rechercher (nom, effet, rune)…"
-          value="${_esc(window._sortsSearch || '')}"
+          value="${_esc(_sortsSearch || '')}"
           data-input="_sortsSearchInput">
         ${search ? `<button class="cs-sorts-search-clear" data-action="_sortsSetSearch" data-val="" title="Effacer">✕</button>` : ''}
       </div>
@@ -1176,15 +1196,10 @@ export function renderCharDeck(c, canEdit) {
 
 // ── Handlers UI (search / filtres / pliage) ─────────────────────────
 function _sortsRerender() {
-  const c = window._currentChar; if (!c) return;
-  if (window._currentCharTab === 'sorts' && typeof window._renderTab === 'function') {
-    window._renderTab('sorts', c, window._canEditChar);
-  } else if (typeof window.renderCharSheet === 'function') {
-    window.renderCharSheet(c, 'sorts');
-  }
+  _renderSpellsTab();
 }
-window._sortsSetSearch = (v) => {
-  window._sortsSearch = v || '';
+function _sortsSetSearch(v) {
+  _sortsSearch = v || '';
   _sortsRerender();
   // Re-focus + caret restaurés
   requestAnimationFrame(() => {
@@ -1194,37 +1209,37 @@ window._sortsSetSearch = (v) => {
       try { el.setSelectionRange(el.value.length, el.value.length); } catch {}
     }
   });
-};
-window._sortsSetView = (v) => {
-  window._sortsView = (v === 'deck') ? 'deck' : 'all';
+}
+function _sortsSetView(v) {
+  _sortsView = (v === 'deck') ? 'deck' : 'all';
   _sortsRerender();
-};
-window._sortsSetType = (t) => {
-  window._sortsTypeFilter = t || '';
+}
+function _sortsSetType(t) {
+  _sortsTypeFilter = t || '';
   _sortsRerender();
-};
-window._sortsToggleCat = (catId) => {
-  window._sortsCatCollapsed = { ...(window._sortsCatCollapsed || {}) };
-  window._sortsCatCollapsed[catId] = !window._sortsCatCollapsed[catId];
+}
+function _sortsToggleCat(catId) {
+  _sortsCatCollapsed = { ...(_sortsCatCollapsed || {}) };
+  _sortsCatCollapsed[catId] = !_sortsCatCollapsed[catId];
   _sortsRerender();
-};
-window._sortsToggleAllCats = () => {
-  const c = window._currentChar; if (!c) return;
+}
+function _sortsToggleAllCats() {
+  const c = _getCurrentSpellChar(); if (!c) return;
   const cats = c.sort_cats || [];
   const all = [...cats.map(cat => cat.id), '__none'];
-  const cur = window._sortsCatCollapsed || {};
+  const cur = _sortsCatCollapsed || {};
   const anyOpen = all.some(id => !cur[id]);
   const next = {};
   all.forEach(id => { next[id] = anyOpen; });   // si au moins 1 ouvert → tout plier; sinon tout déplier
-  window._sortsCatCollapsed = next;
+  _sortsCatCollapsed = next;
   _sortsRerender();
-};
-window._sortsResetFilters = () => {
-  window._sortsSearch = '';
-  window._sortsView = 'all';
-  window._sortsTypeFilter = '';
+}
+function _sortsResetFilters() {
+  _sortsSearch = '';
+  _sortsView = 'all';
+  _sortsTypeFilter = '';
   _sortsRerender();
-};
+}
 
 function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isOpen   = openIdx === i;
@@ -1276,10 +1291,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
       const etat = s.afflictionEtatId
-        ? (_conditionsLibCache?.find(c2 => c2.id === s.afflictionEtatId)
-           || (typeof window._vttGetConditionLibrary === 'function'
-               ? window._vttGetConditionLibrary().find(c2 => c2.id === s.afflictionEtatId)
-               : null))
+        ? _conditionsLibCache?.find(c2 => c2.id === s.afflictionEtatId)
         : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
       chips.push({ icon:'⛓', val: lbl, color:'#8b5cf6' });
@@ -1294,10 +1306,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (hasEnchant) {
     if (enchantMode === 'etat') {
       const etat = s.enchantEtatId
-        ? (_conditionsLibCache?.find(c2 => c2.id === s.enchantEtatId)
-           || (typeof window._vttGetConditionLibrary === 'function'
-               ? window._vttGetConditionLibrary().find(c2 => c2.id === s.enchantEtatId)
-               : null))
+        ? _conditionsLibCache?.find(c2 => c2.id === s.enchantEtatId)
         : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
       chips.push({ icon:'✨', val: lbl, color:'#e8b84b' });
@@ -1437,7 +1446,7 @@ export function openSortCatEditor() {
   `);
 }
 
-window._addSortCat = async (couleur) => {
+async function _addSortCat(couleur) {
   const nom = prompt('Nom de la catégorie :');
   if (!nom?.trim()) return;
   const c = STATE.activeChar; if (!c) return;
@@ -1447,10 +1456,10 @@ window._addSortCat = async (couleur) => {
   await updateInCol('characters', c.id, { sort_cats: cats });
   showNotif('Catégorie créée !', 'success');
   openSortCatEditor();
-  window.renderCharSheet(c, 'sorts');
-};
+  _renderSpellsTab(c);
+}
 
-window._editSortCat = async (idx) => {
+async function _editSortCat(idx) {
   const c = STATE.activeChar; if (!c) return;
   const cats = [...(c.sort_cats || [])];
   const nom = prompt('Renommer :', cats[idx].nom);
@@ -1459,10 +1468,10 @@ window._editSortCat = async (idx) => {
   c.sort_cats = cats;
   await updateInCol('characters', c.id, { sort_cats: cats });
   openSortCatEditor();
-  window.renderCharSheet(c, 'sorts');
-};
+  _renderSpellsTab(c);
+}
 
-window._delSortCat = async (idx) => {
+async function _delSortCat(idx) {
   const c = STATE.activeChar; if (!c) return;
   const cats  = [...(c.sort_cats || [])];
   const catId = cats[idx].id;
@@ -1474,13 +1483,13 @@ window._delSortCat = async (idx) => {
   await updateInCol('characters', c.id, { sort_cats: cats, deck_sorts: sorts });
   showNotif('Catégorie supprimée.', 'success');
   openSortCatEditor();
-  window.renderCharSheet(c, 'sorts');
-};
+  _renderSpellsTab(c);
+}
 
 
 export function toggleSortDetail(idx) {
-  window._openSortIdx = window._openSortIdx === idx ? null : idx;
-  window._renderTab('sorts', window._currentChar, window._canEditChar);
+  _openSortIdx = _openSortIdx === idx ? null : idx;
+  _renderSpellsTab();
 }
 
 
@@ -1518,8 +1527,6 @@ function _modalChar() {
 export function addItemSpell(item, onSave, charForCalc = null) {
   return editItemSpell(item, -1, onSave, charForCalc);
 }
-window.editItemSpell = editItemSpell;
-window.addItemSpell  = addItemSpell;
 
 let _openSortIdx = -1;
 
@@ -1670,7 +1677,7 @@ function _runeLiveContribution(nom, counts) {
  * Re-appelée après chaque incrément/décrément pour rester synchro.
  */
 function _renderRunesSection() {
-  const counts = window._runeCountsEdit || {};
+  const counts = _runeCountsEdit || {};
   const activeMetas = RUNE_META.filter(r => (counts[r.nom] || 0) > 0);
 
   // ① Grosses cartes des runes actives
@@ -1735,8 +1742,8 @@ function _renderRunesSection() {
 export async function openSortModal(idx, s) {
   const [allTypes, matrices] = await Promise.all([loadDamageTypes(), loadSpellMatrices()]);
   // Caches globaux utilisés par _getSortCA, _calcSortSoin, suggestions...
-  window._spellMatricesCache = matrices;
-  window._damageTypesCache   = allTypes;
+  _spellMatricesCache = matrices;
+  _damageTypesCache   = allTypes;
   // Tous les types de dégâts restent la source globale des noyaux.
   // L'accès joueur aux noyaux magiques est ensuite filtré par personnage (c.elements).
   const RUNES = RUNE_META; // alias local pour compat ascendante
@@ -1744,7 +1751,7 @@ export async function openSortModal(idx, s) {
   const runesSrc = s?.runes||[];
   const runeCounts = {};
   runesSrc.forEach(r => { runeCounts[r] = (runeCounts[r]||0) + 1; });
-  window._runeCountsEdit = { ...runeCounts };
+  _runeCountsEdit = { ...runeCounts };
 
   // Noyau : id de type (nouveau) ou migration depuis label (ancien)
   let noyauTypeIdSel = s?.noyauTypeId || '';
@@ -1767,7 +1774,7 @@ export async function openSortModal(idx, s) {
   const NOYAUX = selectedLocked
     ? [...allowedNoyaux, { ...selectedNoyau, locked: true }]
     : allowedNoyaux;
-  window._sortAllowedNoyauIds = new Set(allowedNoyaux.map(n => n.id));
+  _sortAllowedNoyauIds = new Set(allowedNoyaux.map(n => n.id));
 
   const noyauSel      = noyauTypeIdSel
     ? (selectedNoyau?.label || s?.noyau || '')
@@ -1776,9 +1783,9 @@ export async function openSortModal(idx, s) {
   const typesInit = Array.isArray(s?.types) ? s.types
     : (s?.typeSoin ? ['defensif'] : (s?.noyau ? ['offensif'] : []));
 
-  window._sortTypesEdit  = new Set(typesInit);
-  window._sortActionEdit = s?.actionOverride || null;
-  window._deplModeEdit   = s?.deplacement?.mode || null;
+  _sortTypesEdit  = new Set(typesInit);
+  _sortActionEdit = s?.actionOverride || null;
+  _deplModeEdit   = s?.deplacement?.mode || null;
 
   const hasEnchant  = runesSrc.includes('Enchantement');
   const hasProt     = runesSrc.includes('Protection');
@@ -1809,7 +1816,7 @@ export async function openSortModal(idx, s) {
     { v:'action_bonus', label:'✴️ Action Bonus',  color:'#f97316' },
   ];
   const actionBtnsHtml = ACTION_CFG.map(a => {
-    const isSel = (window._sortActionEdit === a.v);
+    const isSel = (_sortActionEdit === a.v);
     return `<button type="button" id="s-action-${a.v??'auto'}"
       data-action="_selectSortAction" data-val="${a.v??''}"
       style="flex:1;padding:.35rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;
@@ -2199,7 +2206,7 @@ export async function openSortModal(idx, s) {
 
   setTimeout(() => {
     updateSortPM();
-    window._updateSortActionDisplay();
+    _updateSortActionDisplay();
     _updateSortPreview();
     // Listeners génériques pour rafraîchir la preview à chaque saisie
     const modal = document.querySelector('.modal');
@@ -2216,7 +2223,7 @@ export async function openSortModal(idx, s) {
       _populateAfflictionEtatSelect(),
       _populateEnchantEtatSelect(),
     ]).then(() => {
-      window._updateSortPreview?.();
+      _updateSortPreview();
     });
   }, 50);
 }
@@ -2224,28 +2231,11 @@ export async function openSortModal(idx, s) {
 // Cache des états en mémoire pour éviter de retaper Firestore à chaque dropdown
 let _conditionsLibCache = null;
 
-/** Source unique : lit world/conditions dans Firestore.
- *  Plus aucun fallback codé en dur — la BDD est seedée par vtt.js au premier load.
- *  Préfère la lib VTT en mémoire (live, à jour avec les éditions de session). */
+/** Source unique : lit world/conditions dans Firestore via le module partagé. */
 async function _loadAllConditions() {
-  // 1) Lib VTT en mémoire : live, prioritaire (la plus à jour si VTT chargé)
-  if (typeof window._vttGetConditionLibrary === 'function') {
-    const fromVtt = window._vttGetConditionLibrary();
-    if (Array.isArray(fromVtt) && fromVtt.length) return fromVtt;
-  }
-  // 2) Cache Firestore (déjà lu une fois cette session)
   if (_conditionsLibCache) return _conditionsLibCache;
-  // 3) Lecture Firestore directe
-  try {
-    const d = await getDocData('world', 'conditions');
-    if (d?.library?.length) {
-      _conditionsLibCache = d.library.map(c => ({
-        id: c.id, label: c.label || c.id, icon: c.icon || '✨',
-      }));
-      return _conditionsLibCache;
-    }
-  } catch {}
-  return [];
+  _conditionsLibCache = await loadConditionLibrary();
+  return _conditionsLibCache;
 }
 
 /** Remplit un <select> d'état (Enchantement OU Affliction) depuis la BDD. */
@@ -2275,14 +2265,14 @@ function _applyTypeChange() {
   Object.entries(TYPE_CFG).forEach(([t, color]) => {
     const btn = document.getElementById(`s-type-${t}`);
     if (!btn) return;
-    const active = window._sortTypesEdit.has(t);
+    const active = _sortTypesEdit.has(t);
     btn.style.borderColor  = active ? color : 'var(--border)';
     btn.style.background   = active ? color+'20' : 'var(--bg-elevated)';
     btn.style.color        = active ? color : 'var(--text-dim)';
     btn.style.fontWeight   = active ? '700' : '400';
   });
   _refreshConditionalSections();
-  window._updateSortPreview?.();
+  _updateSortPreview();
 }
 
 /** Met à jour la visibilité des sections Dégâts/Soin selon types + runes + mode protection.
@@ -2290,8 +2280,8 @@ function _applyTypeChange() {
  *  en mode CA pour éviter la confusion avec le Bouclier réactif).
  */
 function _refreshConditionalSections() {
-  const isOffensive = window._sortTypesEdit.has('offensif');
-  const counts      = window._runeCountsEdit || {};
+  const isOffensive = _sortTypesEdit.has('offensif');
+  const counts      = _runeCountsEdit || {};
   const hasProt     = (counts.Protection || 0) > 0;
   const hasAffliction = (counts.Affliction || 0) > 0;
   const protMode    = document.getElementById('s-prot-mode')?.value || 'ca';
@@ -2304,26 +2294,26 @@ function _refreshConditionalSections() {
   if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
 }
 
-window._toggleSortType = (type) => {
-  if (window._sortTypesEdit.has(type)) window._sortTypesEdit.delete(type);
-  else window._sortTypesEdit.add(type);
+function _toggleSortType(type) {
+  if (_sortTypesEdit.has(type)) _sortTypesEdit.delete(type);
+  else _sortTypesEdit.add(type);
   _applyTypeChange();
-};
+}
 
-window._selectSortAction = (val) => {
-  window._sortActionEdit = val === 'auto' ? null : val;
-  window._updateSortActionDisplay();
-  window._updateSortPreview?.();
-};
+function _selectSortAction(val) {
+  _sortActionEdit = val === 'auto' ? null : val;
+  _updateSortActionDisplay();
+  _updateSortPreview();
+}
 
-window._updateSortActionDisplay = () => {
+function _updateSortActionDisplay() {
   const ACTION_CFG = {
     null:         { label:'Auto',            color:'#9ca3af' },
     action:       { label:'⚡ Action',        color:'#e8b84b' },
     action_bonus: { label:'✴️ Action Bonus',  color:'#f97316' },
     reaction:     { label:'🔄 Réaction',      color:'#a78bfa' },
   };
-  const cur = window._sortActionEdit;
+  const cur = _sortActionEdit;
   Object.entries(ACTION_CFG).forEach(([v, cfg]) => {
     const btn = document.getElementById(`s-action-${v === 'null' ? 'auto' : v}`);
     if (!btn) return;
@@ -2333,10 +2323,10 @@ window._updateSortActionDisplay = () => {
     btn.style.color        = active ? cfg.color : 'var(--text-dim)';
     btn.style.fontWeight   = active ? '700' : '400';
   });
-};
+}
 
-window._selectDeplMode = (mode) => {
-  window._deplModeEdit = mode;
+function _selectDeplMode(mode) {
+  _deplModeEdit = mode;
   const DEPL_CFG = { null:'#9ca3af', push:'#e8b84b', pull:'#4f8cff' };
   [null, 'push', 'pull'].forEach(v => {
     const btn = document.getElementById(`s-depl-${v??'none'}`);
@@ -2350,10 +2340,10 @@ window._selectDeplMode = (mode) => {
   });
   const distRow = document.getElementById('s-depl-dist-row');
   if (distRow) distRow.style.display = mode ? 'flex' : 'none';
-  window._updateSortPreview?.();
-};
+  _updateSortPreview();
+}
 
-window._selectProtMode = (mode) => {
+function _selectProtMode(mode) {
   const hidden  = document.getElementById('s-prot-mode');
   const caSec   = document.getElementById('s-ca-section');
   if (hidden)  hidden.value = mode;
@@ -2379,22 +2369,22 @@ window._selectProtMode = (mode) => {
   // Re-render des runes actives pour que la carte Protection reflète le mode courant
   // (CA → "+2 CA · sur 1 cible (2 tours)" / Soin → "+1d4 soin · sur 1 cible")
   _refreshRunesSection?.('Protection');
-  window._updateSortPreview?.();
-};
+  _updateSortPreview();
+}
 
 export function runeIncrement(nom) {
-  window._runeCountsEdit = window._runeCountsEdit||{};
-  const prevCnt = window._runeCountsEdit[nom] || 0;
-  window._runeCountsEdit[nom] = prevCnt + 1;
+  _runeCountsEdit = _runeCountsEdit||{};
+  const prevCnt = _runeCountsEdit[nom] || 0;
+  _runeCountsEdit[nom] = prevCnt + 1;
   // Intelligence : la 1ère Puissance ajoute Offensif · la 1ère Protection ajoute Défensif
   // (l'utilisateur peut décocher ensuite, on ne force pas)
-  if (prevCnt === 0 && window._sortTypesEdit) {
-    if (nom === 'Puissance'  && !window._sortTypesEdit.has('offensif')) {
-      window._sortTypesEdit.add('offensif');
+  if (prevCnt === 0 && _sortTypesEdit) {
+    if (nom === 'Puissance'  && !_sortTypesEdit.has('offensif')) {
+      _sortTypesEdit.add('offensif');
       _applyTypeChange();
     }
-    if (nom === 'Protection' && !window._sortTypesEdit.has('defensif')) {
-      window._sortTypesEdit.add('defensif');
+    if (nom === 'Protection' && !_sortTypesEdit.has('defensif')) {
+      _sortTypesEdit.add('defensif');
       _applyTypeChange();
     }
   }
@@ -2402,10 +2392,10 @@ export function runeIncrement(nom) {
 }
 
 export function runeDecrement(nom) {
-  window._runeCountsEdit = window._runeCountsEdit||{};
-  if ((window._runeCountsEdit[nom]||0) <= 0) return;
-  window._runeCountsEdit[nom]--;
-  if (window._runeCountsEdit[nom] === 0) delete window._runeCountsEdit[nom];
+  _runeCountsEdit = _runeCountsEdit||{};
+  if ((_runeCountsEdit[nom]||0) <= 0) return;
+  _runeCountsEdit[nom]--;
+  if (_runeCountsEdit[nom] === 0) delete _runeCountsEdit[nom];
   _refreshRunesSection(nom);
 }
 
@@ -2417,7 +2407,7 @@ function _refreshRunesSection(changedNom) {
   const section = document.getElementById('cs-runes-section');
   if (section) section.innerHTML = _renderRunesSection();
   // Sections conditionnelles (rune X > 0 → section X visible)
-  const cnt = window._runeCountsEdit[changedNom] || 0;
+  const cnt = _runeCountsEdit[changedNom] || 0;
   const sectionMap = {
     Protection:   's-prot-section',
     Enchantement: 's-enchant-section',
@@ -2443,7 +2433,7 @@ function _refreshRunesSection(changedNom) {
  * Active le mode "Custom" sur un champ auto-calculé.
  * fieldId : 's-degats' | 's-soin' | 's-ca' | 's-enchant-degats'
  */
-window._enableSortCustom = (fieldId) => {
+function _enableSortCustom(fieldId) {
   const display = document.getElementById(`${fieldId}-display`);
   const edit    = document.getElementById(`${fieldId}-edit`);
   const input   = document.getElementById(fieldId);
@@ -2452,13 +2442,13 @@ window._enableSortCustom = (fieldId) => {
   if (edit)    edit.style.display = '';
   if (wrap)    wrap.classList.add('is-custom');   // CSS gère aussi via la classe
   if (input) { input.focus(); input.select?.(); }
-};
+}
 
 /** Repasse en mode "Auto" — vide UNIQUEMENT la formule override.
  *  Les overrides de stat sont indépendants : pour les remettre en Auto,
  *  l'utilisateur sélectionne "Auto (arme)" dans le menu déroulant.
  */
-window._disableSortCustom = (fieldId) => {
+function _disableSortCustom(fieldId) {
   const display = document.getElementById(`${fieldId}-display`);
   const edit    = document.getElementById(`${fieldId}-edit`);
   const input   = document.getElementById(fieldId);
@@ -2468,8 +2458,8 @@ window._disableSortCustom = (fieldId) => {
   if (display) display.style.display = '';
   if (wrap)    wrap.classList.remove('is-custom');  // sinon la chip reste cachée par CSS
   _refreshAutoValChips();
-  window._updateSortPreview?.();
-};
+  _updateSortPreview();
+}
 
 /** Recalcule les valeurs affichées dans les chips auto (dégâts, soin, CA, enchant). */
 function _refreshAutoValChips() {
@@ -2489,7 +2479,6 @@ function _refreshAutoValChips() {
   apply('s-affliction-dot-formula', _calcAfflictionDot(s), _autoSourceAfflictionDot(s));
   apply('s-duree-base', String(_calcSortDuree(s)), _autoSourceDuree(s));
 }
-window._refreshAutoValChips = _refreshAutoValChips;
 
 /**
  * Met à jour les chips "💡 Suggéré : …" d'Enchantement et Affliction.
@@ -2501,7 +2490,7 @@ window._refreshAutoValChips = _refreshAutoValChips;
  * on respecte sa saisie et on n'écrase pas (juste le chip reste visible pour qu'il puisse l'appliquer manuellement).
  */
 function _refreshSpellSuggestions() {
-  const matrices = window._spellMatricesCache;
+  const matrices = _spellMatricesCache;
   if (!matrices) return;
   const noyauId  = document.getElementById('s-noyau-id')?.value || '';
   const enchSlot = document.getElementById('s-enchant-slot')?.value || 'arme';
@@ -2552,8 +2541,8 @@ const SPELL_ICONS = [
 
 // Ferme le picker quand on clique en dehors
 function _bindSortIconPickerOutsideClose() {
-  if (window._sortIconPickerOutsideBound) return;
-  window._sortIconPickerOutsideBound = true;
+  if (_sortIconPickerOutsideBound) return;
+  _sortIconPickerOutsideBound = true;
   document.addEventListener('click', (e) => {
     const picker = document.getElementById('s-icon-picker');
     const btn    = document.getElementById('s-icon-btn');
@@ -2563,7 +2552,7 @@ function _bindSortIconPickerOutsideClose() {
   }, true);
 }
 
-window._toggleSortIconPicker = () => {
+function _toggleSortIconPicker() {
   _bindSortIconPickerOutsideClose();
   const picker = document.getElementById('s-icon-picker');
   if (!picker) return;
@@ -2577,9 +2566,9 @@ window._toggleSortIconPicker = () => {
   }).join('') + `<button type="button" class="cs-spell-icon-opt cs-spell-icon-opt--clear"
       data-action="_pickSortIcon" data-icon="" title="Aucune icône — utilise celle du noyau">✕</button>`;
   picker.style.display = 'grid';
-};
+}
 
-window._pickSortIcon = (icon) => {
+function _pickSortIcon(icon) {
   const hidden = document.getElementById('s-icon');
   const btn    = document.getElementById('s-icon-btn');
   const picker = document.getElementById('s-icon-picker');
@@ -2587,23 +2576,22 @@ window._pickSortIcon = (icon) => {
   if (btn)    btn.textContent = icon || '🔮';
   if (picker) picker.style.display = 'none';
   // Met à jour la preview live
-  window._updateSortPreview?.();
-};
+  _updateSortPreview();
+}
 
 // Marque la textarea comme "touchée par l'utilisateur" dès qu'il y tape :
 // empêche le pré-remplissage agressif d'écraser ses changements ultérieurs.
-window._markSpellEffectTouched = (cat) => {
+function _markSpellEffectTouched(cat) {
   const txtEl = document.getElementById(`s-${cat}-effect`);
   if (txtEl) txtEl.dataset.userTouched = '1';
-};
-window._refreshSpellSuggestions = _refreshSpellSuggestions;
+}
 
 /**
  * Applique une suggestion spécifique (base64 encodé) dans la textarea d'effet.
  * Appelé depuis les boutons générés par _refreshSpellSuggestions.
  * cat = 'enchant' | 'affliction'
  */
-window._pickSpellSuggestion = (cat, encoded) => {
+function _pickSpellSuggestion(cat, encoded) {
   const txtEl = document.getElementById(`s-${cat}-effect`);
   if (!txtEl) return;
   let suggestion = '';
@@ -2613,22 +2601,22 @@ window._pickSpellSuggestion = (cat, encoded) => {
   txtEl.dataset.userTouched = '1';                 // évite l'écrasement auto au prochain refresh
   txtEl.dispatchEvent(new Event('input', { bubbles: true })); // trigger preview update
   txtEl.focus();
-};
+}
 
 // Compat ascendante : si du code legacy appelle encore _applySpellSuggest,
 // on tente de prendre la 1ère suggestion disponible.
-window._applySpellSuggest = (cat) => {
+function _applySpellSuggest(cat) {
   const list = document.getElementById(`s-${cat}-suggest-list`);
   const firstBtn = list?.querySelector('.cs-spell-suggest-btn');
   if (firstBtn) firstBtn.click();
-};
+}
 
 /**
  * Sélectionne un slot pour Enchantement ou Affliction.
  * groupId : 'enchant' ou 'affliction'
  */
 /** Toggle Dégâts/État pour l'enchantement. */
-window._selectEnchantMode = (mode) => {
+function _selectEnchantMode(mode) {
   const hidden = document.getElementById('s-enchant-mode');
   if (hidden) hidden.value = mode;
   document.getElementById('s-enchant-mode-dmg')?.classList.toggle('selected', mode === 'dmg');
@@ -2637,11 +2625,11 @@ window._selectEnchantMode = (mode) => {
   const etatBlock = document.getElementById('s-enchant-etat-block');
   if (dmgBlock) dmgBlock.style.display = mode === 'dmg' ? '' : 'none';
   if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
-  window._updateSortPreview?.();
-};
+  _updateSortPreview();
+}
 
 /** Toggle DoT/État pour l'affliction (analogie ProtMode CA/Soin). */
-window._selectAfflictionMode = (mode) => {
+function _selectAfflictionMode(mode) {
   const hidden = document.getElementById('s-affliction-mode');
   if (hidden) hidden.value = mode;
   document.getElementById('s-affliction-mode-dot')?.classList.toggle('selected', mode === 'dot');
@@ -2650,10 +2638,10 @@ window._selectAfflictionMode = (mode) => {
   const etatBlock = document.getElementById('s-affliction-etat-block');
   if (dotBlock) dotBlock.style.display = mode === 'dot' ? '' : 'none';
   if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
-  window._updateSortPreview?.();
-};
+  _updateSortPreview();
+}
 
-window._selectSpellSlot = (groupId, slotV) => {
+function _selectSpellSlot(groupId, slotV) {
   const hidden = document.getElementById(`s-${groupId}-slot`);
   if (hidden) hidden.value = slotV;
   // Style des boutons
@@ -2667,13 +2655,13 @@ window._selectSpellSlot = (groupId, slotV) => {
     const row = document.getElementById('s-enchant-degats-row');
     if (row) row.style.display = slotV === 'arme' ? '' : 'none';
   }
-  window._updateSortPreview?.();
-};
+  _updateSortPreview();
+}
 
 export function updateSortPM() {
   const noyau = document.getElementById('s-noyau')?.value||'';
   const total = (noyau ? 1 : 0) +
-    Object.values(window._runeCountsEdit||{}).reduce((s,v)=>s+v, 0);
+    Object.values(_runeCountsEdit||{}).reduce((s,v)=>s+v, 0);
   const pm = total * 2 || 2;
   const pmEl = document.getElementById('s-pm');
   const dispEl = document.getElementById('s-pm-display');
@@ -2687,12 +2675,12 @@ function _buildSortFromDOM() {
   const noyau       = document.getElementById('s-noyau')?.value || '';
   const noyauTypeId = document.getElementById('s-noyau-id')?.value || '';
   const runes = [];
-  Object.entries(window._runeCountsEdit||{}).forEach(([nom, cnt]) => {
+  Object.entries(_runeCountsEdit||{}).forEach(([nom, cnt]) => {
     for (let i=0; i<cnt; i++) runes.push(nom);
   });
-  const types = [...(window._sortTypesEdit || new Set(['utilitaire']))];
+  const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
   const dureeBase = parseInt(document.getElementById('s-duree-base')?.value) || 0;
-  const deplMode = window._deplModeEdit || null;
+  const deplMode = _deplModeEdit || null;
   const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
   const iconRaw  = document.getElementById('s-icon')?.value || '';
   const mjValid  = document.getElementById('s-mj-validated')?.checked || false;
@@ -2705,7 +2693,7 @@ function _buildSortFromDOM() {
     ca:     document.getElementById('s-ca')?.value || '',
     effet:  document.getElementById('s-effet')?.value || '',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
-    actionOverride: window._sortActionEdit || null,
+    actionOverride: _sortActionEdit || null,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
@@ -2778,7 +2766,6 @@ function _updateSortPreview() {
     </div>
   `).join('');
 }
-window._updateSortPreview = _updateSortPreview;
 
 function _setNoyauRequiredError(show, message = 'Sélectionne une rune noyau pour enregistrer ce sort.') {
   const section = document.querySelector('.cs-spell-section--noyau');
@@ -2796,7 +2783,7 @@ function _setNoyauRequiredError(show, message = 'Sélectionne une rune noyau pou
 function _requireNoyauSelection() {
   const noyauTypeId = (document.getElementById('s-noyau-id')?.value || '').trim();
   const noyauLabel  = (document.getElementById('s-noyau')?.value || '').trim();
-  const allowedIds = window._sortAllowedNoyauIds;
+  const allowedIds = _sortAllowedNoyauIds;
   const hasNoyau = !!(noyauTypeId && noyauLabel);
   const hasAccess = !allowedIds || allowedIds.has(noyauTypeId);
   const valid = hasNoyau && hasAccess;
@@ -2848,7 +2835,7 @@ export async function saveSort(idx) {
 
     // Runes depuis _runeCountsEdit
     const runes = [];
-    Object.entries(window._runeCountsEdit||{}).forEach(([nom, cnt]) => {
+    Object.entries(_runeCountsEdit||{}).forEach(([nom, cnt]) => {
       for (let i=0; i<cnt; i++) runes.push(nom);
     });
 
@@ -2856,13 +2843,13 @@ export async function saveSort(idx) {
     const autoPm     = totalRunes * 2 || 2;
 
     // Types (multi)
-    const types = [...(window._sortTypesEdit || new Set(['utilitaire']))];
+    const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
 
     // Action override (null = auto)
-    const actionOverride = window._sortActionEdit || null;
+    const actionOverride = _sortActionEdit || null;
 
     const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
-    const deplMode = window._deplModeEdit || null;
+    const deplMode = _deplModeEdit || null;
     const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
 
     // Validation MJ : seuls les admins peuvent la modifier ; sinon on garde la valeur existante
@@ -2946,23 +2933,19 @@ export async function saveSort(idx) {
     // ── Sur ajout : s'assure que le nouveau sort soit visible ────────
     if (isNew) {
       // Reset les filtres qui pourraient cacher le sort fraîchement créé
-      window._sortsSearch = '';
-      window._sortsTypeFilter = '';
-      window._sortsView = 'all';
+      _sortsSearch = '';
+      _sortsTypeFilter = '';
+      _sortsView = 'all';
       // Déplie la catégorie où le sort vient d'être ajouté
       const newCatId = newSort.catId
         && (c.sort_cats || []).find(cat => cat.id === newSort.catId)
         ? newSort.catId : '__none';
-      window._sortsCatCollapsed = { ...(window._sortsCatCollapsed || {}) };
-      window._sortsCatCollapsed[newCatId] = false;
+      _sortsCatCollapsed = { ...(_sortsCatCollapsed || {}) };
+      _sortsCatCollapsed[newCatId] = false;
     }
 
     // Force un re-render du tab Sorts en V3 si dispo, sinon fallback legacy
-    if (window._currentCharTab === 'sorts' && typeof window._renderTab === 'function') {
-      window._renderTab('sorts', c, window._canEditChar);
-    } else {
-      window.renderCharSheet(c, 'sorts');
-    }
+    _renderSpellsTab(c);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -2971,15 +2954,15 @@ function _buildSortFromForm(idx, prevList = []) {
   const noyau       = document.getElementById('s-noyau')?.value||'';
   const noyauTypeId = document.getElementById('s-noyau-id')?.value||'';
   const runes = [];
-  Object.entries(window._runeCountsEdit||{}).forEach(([nom, cnt]) => {
+  Object.entries(_runeCountsEdit||{}).forEach(([nom, cnt]) => {
     for (let i=0; i<cnt; i++) runes.push(nom);
   });
   const totalRunes = (noyau ? 1 : 0) + runes.length;
   const autoPm     = totalRunes * 2 || 2;
-  const types = [...(window._sortTypesEdit || new Set(['utilitaire']))];
-  const actionOverride = window._sortActionEdit || null;
+  const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
+  const actionOverride = _sortActionEdit || null;
   const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
-  const deplMode = window._deplModeEdit || null;
+  const deplMode = _deplModeEdit || null;
   const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
   const prevValidated = idx >= 0 ? !!prevList[idx]?.mjValidated : false;
   const mjValidated   = STATE.isAdmin
@@ -3064,8 +3047,8 @@ async function _saveItemSpell() {
 // (le check _itemEditCtx est désormais en tête de saveSort — pas de monkey-patch)
 
 registerActions({
-  _sortsSearchInput:      (el)  => window._sortsSetSearch(el.value),
-  _refreshAutoValChips:   ()    => window._refreshAutoValChips?.(),
+  _sortsSearchInput:      (el)  => _sortsSetSearch(el.value),
+  _refreshAutoValChips:   ()    => _refreshAutoValChips(),
   _csMjValToggle:         (el)  => el.closest('.cs-mj-validation')?.classList.toggle('is-on', el.checked),
   addSort:                ()    => addSort(),
   openSortCatEditor:      ()    => openSortCatEditor(),
@@ -3076,24 +3059,24 @@ registerActions({
   runeIncrement:          (btn) => runeIncrement(btn.dataset.nom),
   runeDecrement:          (btn) => runeDecrement(btn.dataset.nom),
   closeModalDirect:       ()    => closeModalDirect(),
-  _enableSortCustom:      (btn) => window._enableSortCustom(btn.dataset.field),
-  _disableSortCustom:     (btn) => window._disableSortCustom(btn.dataset.field),
-  _sortsSetSearch:        (btn) => window._sortsSetSearch(btn.dataset.val),
-  _sortsSetView:          (btn) => window._sortsSetView(btn.dataset.view),
-  _sortsSetType:          (btn) => window._sortsSetType(btn.dataset.type),
-  _sortsToggleCat:        (btn) => window._sortsToggleCat(btn.dataset.id),
-  _sortsToggleAllCats:    ()    => window._sortsToggleAllCats(),
-  _sortsResetFilters:     ()    => window._sortsResetFilters(),
-  _editSortCat:           (btn) => window._editSortCat(Number(btn.dataset.idx)),
-  _delSortCat:            (btn) => window._delSortCat(Number(btn.dataset.idx)),
-  _addSortCat:            (btn) => window._addSortCat(btn.dataset.col),
-  _toggleSortType:        (btn) => window._toggleSortType(btn.dataset.type),
-  _selectSortAction:      (btn) => window._selectSortAction(btn.dataset.val === '' ? null : btn.dataset.val),
-  _selectDeplMode:        (btn) => window._selectDeplMode(btn.dataset.val === '' ? null : btn.dataset.val),
-  _selectProtMode:        (btn) => window._selectProtMode(btn.dataset.val),
-  _selectEnchantMode:     (btn) => window._selectEnchantMode(btn.dataset.val),
-  _selectAfflictionMode:  (btn) => window._selectAfflictionMode(btn.dataset.val),
-  _toggleSortIconPicker:  ()    => window._toggleSortIconPicker(),
-  _pickSortIcon:          (btn) => window._pickSortIcon(btn.dataset.icon),
-  _pickSpellSuggestion:   (btn) => window._pickSpellSuggestion(btn.dataset.cat, btn.dataset.encoded),
+  _enableSortCustom:      (btn) => _enableSortCustom(btn.dataset.field),
+  _disableSortCustom:     (btn) => _disableSortCustom(btn.dataset.field),
+  _sortsSetSearch:        (btn) => _sortsSetSearch(btn.dataset.val),
+  _sortsSetView:          (btn) => _sortsSetView(btn.dataset.view),
+  _sortsSetType:          (btn) => _sortsSetType(btn.dataset.type),
+  _sortsToggleCat:        (btn) => _sortsToggleCat(btn.dataset.id),
+  _sortsToggleAllCats:    ()    => _sortsToggleAllCats(),
+  _sortsResetFilters:     ()    => _sortsResetFilters(),
+  _editSortCat:           (btn) => _editSortCat(Number(btn.dataset.idx)),
+  _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),
+  _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
+  _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
+  _selectSortAction:      (btn) => _selectSortAction(btn.dataset.val === '' ? null : btn.dataset.val),
+  _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val === '' ? null : btn.dataset.val),
+  _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
+  _selectEnchantMode:     (btn) => _selectEnchantMode(btn.dataset.val),
+  _selectAfflictionMode:  (btn) => _selectAfflictionMode(btn.dataset.val),
+  _toggleSortIconPicker:  ()    => _toggleSortIconPicker(),
+  _pickSortIcon:          (btn) => _pickSortIcon(btn.dataset.icon),
+  _pickSpellSuggestion:   (btn) => _pickSpellSuggestion(btn.dataset.cat, btn.dataset.encoded),
 });

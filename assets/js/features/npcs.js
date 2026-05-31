@@ -151,6 +151,11 @@ let _filterSearch  = '';
 let _activeOrgFilter = null;
 let _pendingNpcImg = null;
 let _npcImgCleared = false;
+let _afgDelta = 0;
+let _histEditDelta = 0;
+let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+let _selectedAfpTypeId = '';
+let _currentAffinitePersoContext = {};
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 // `npcs` et `shop` sont session-live → 0 lecture facturée. `npc_affinites` est
@@ -250,7 +255,7 @@ function _withValeurDelta(n, baseAffinite, deltaChange) {
 }
 
 // ── Rendu principal ───────────────────────────────────────────────────────────
-async function renderNpcs() {
+export async function renderNpcs() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)">
     <div style="font-size:1.5rem">⏳</div><p>Chargement…</p></div>`;
@@ -330,7 +335,7 @@ function _renderPage(content) {
       </div>
 
       <div id="npc-list-shell" class="npc-list-shell">
-        <div id="npc-list-items" class="npc-list-items" onscroll="window._npcListScrolled(this)">
+        <div id="npc-list-items" class="npc-list-items" >
           ${_buildListHtml(filtered)}
         </div>
       </div>
@@ -341,6 +346,7 @@ function _renderPage(content) {
       ${active ? _renderFiche(active) : _renderEmpty()}
     </div>
   </div>`;
+  _bindNpcListScroll();
   _scheduleNpcListScrollHint();
 }
 
@@ -789,17 +795,17 @@ function _getFiltered() {
 }
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────
-window.selectNpc = (id) => {
+export function selectNpc(id) {
   _activeId = id;
 
   _refreshList();
   _refreshActivePanel();
-};
+}
 
-window._npcSearch = (val) => {
+function _npcSearch(val) {
   _filterSearch = val;
   _refreshList({ keepScroll: false });
-};
+}
 
 function _refreshList({ keepScroll = true } = {}) {
   const list = document.getElementById('npc-list-items');
@@ -808,6 +814,11 @@ function _refreshList({ keepScroll = true } = {}) {
   list.innerHTML = _buildListHtml();
   list.scrollTop = scrollTop;
   _scheduleNpcListScrollHint();
+}
+
+function _bindNpcListScroll() {
+  const list = document.getElementById('npc-list-items');
+  if (list) list.onscroll = () => _updateNpcListScrollHint(list);
 }
 
 function _scheduleNpcListScrollHint() {
@@ -832,7 +843,6 @@ function _updateNpcListScrollHint(list = document.getElementById('npc-list-items
   shell.classList.toggle('can-scroll-down', canScroll && !atBottom);
 }
 
-window._npcListScrolled = (list) => _updateNpcListScrollHint(list);
 
 // ── Groupement par organisation (navigation par catégories) ──────────────────
 const NO_ORG_KEY = '__no_org__';
@@ -953,17 +963,17 @@ function _buildListHtml(filtered = _getFiltered()) {
   return _renderOrgIndex(entries);
 }
 
-window._npcSelectOrg = (btn) => {
+function _npcSelectOrg(btn) {
   const key = btn?.dataset?.orgKey;
   if (key == null) return;
   _activeOrgFilter = key;
   _refreshList({ keepScroll: false });
-};
+}
 
-window._npcBackToOrgs = () => {
+function _npcBackToOrgs() {
   _activeOrgFilter = null;
   _refreshList({ keepScroll: false });
-};
+}
 
 // ── Stats : rendu (modale + fiche) ───────────────────────────────────────────
 function _renderStatsForm(npc) {
@@ -1141,11 +1151,11 @@ function _renderMjStatsTbody() {
   return list.map(_renderMjStatsRow).join('');
 }
 
-window._mjStatsFilter = (val) => {
+function _mjStatsFilter(val) {
   _mjFilter = val || '';
   const tbody = document.querySelector('#mj-stats-table tbody');
   if (tbody) tbody.innerHTML = _renderMjStatsTbody();
-};
+}
 
 function _openMjStatsView() {
   if (!STATE.isAdmin) return;
@@ -1185,13 +1195,12 @@ function _restoreMjStatsModal() {
   if (tbody) tbody.innerHTML = _renderMjStatsTbody();
 }
 
-window._openMjStatsView = _openMjStatsView;
 
-window._mjOpenNpc = (id) => {
+function _mjOpenNpc(id) {
   openNpcModal(id, { stackedFromMjStats: true });
-};
+}
 
-window._mjEditField = (id, field) => {
+function _mjEditField(id, field) {
   const cell = document.querySelector(`[data-mj-cell="${id}-${field}"]`);
   if (!cell) return;
 
@@ -1252,10 +1261,10 @@ window._mjEditField = (id, field) => {
     if (e.key === 'Enter') input.blur();
     if (e.key === 'Escape') { cancelled = true; cell.innerHTML = prevHtml; input.blur(); }
   });
-};
+}
 
 // ── Modal création / édition PNJ ──────────────────────────────────────────────
-function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
+export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
   const npc = id ? _npcs.find(n => n.id === id) : null;
   const open = stackedFromMjStats ? pushModal : openModal;
 
@@ -1484,7 +1493,7 @@ function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
 }
 
 // ── Sauvegarde / suppression PNJ ─────────────────────────────────────────────
-async function saveNpc(id) {
+export async function saveNpc(id) {
   try {
     let imageUrl = '';
     if (_pendingNpcImg !== null && _pendingNpcImg !== undefined) {
@@ -1559,7 +1568,7 @@ async function saveNpc(id) {
   } catch (e) { notifySaveError(e); }
 }
 
-async function deleteNpc(id) {
+export async function deleteNpc(id) {
   try {
     if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?', { title: 'Confirmation de suppression' })) return false;
     await deleteFromCol('npcs', id);
@@ -1577,7 +1586,7 @@ async function deleteNpc(id) {
 // ── Modal affinité groupe (événement & note) ──────────────────────────────────
 // Le niveau est dérivé de la valeur cumulée. Appliquer un delta non nul ajuste
 // la valeur ; sans delta, on n'enregistre que la note et/ou l'événement.
-window.openAffiniteGroupeModal = (npcId) => {
+export function openAffiniteGroupeModal(npcId) {
   const n = _npcs.find(x => x.id === npcId);
   if (!n) return;
   const valeur  = Number(n.affinite?.valeur) || 0;
@@ -1636,24 +1645,24 @@ window.openAffiniteGroupeModal = (npcId) => {
       <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
   `);
-  window._afgDelta = 0;
-};
+  _afgDelta = 0;
+}
 
-window._selectAfgDelta = (v) => {
-  window._afgDelta = v;
+function _selectAfgDelta(v) {
+  _afgDelta = v;
   _highlightDeltaPreset('afg-delta', v);
   const inp = document.getElementById('afg-delta-custom');
   if (inp) inp.value = v === 0 ? '' : String(v);
   _refreshAfgValeurPreview();
-};
+}
 
 // Saisie d'une valeur custom dans l'input numérique (delta arbitraire).
-window._setAfgDeltaFromInput = (raw) => {
+function _setAfgDeltaFromInput(raw) {
   const v = parseInt(raw, 10);
-  window._afgDelta = Number.isFinite(v) ? v : 0;
-  _highlightDeltaPreset('afg-delta', window._afgDelta); // surligne le preset si match, sinon aucun
+  _afgDelta = Number.isFinite(v) ? v : 0;
+  _highlightDeltaPreset('afg-delta', _afgDelta); // surligne le preset si match, sinon aucun
   _refreshAfgValeurPreview();
-};
+}
 
 // Affiche la nouvelle valeur + niveau dérivé après application du delta sélectionné.
 function _refreshAfgValeurPreview() {
@@ -1661,19 +1670,19 @@ function _refreshAfgValeurPreview() {
   const display = document.getElementById('afg-valeur-display');
   if (!preview || !display) return;
   const cur   = parseInt(display.dataset.cur, 10) || 0;
-  const delta = window._afgDelta || 0;
+  const delta = _afgDelta || 0;
   if (!delta) { preview.innerHTML = ''; return; }
   const newVal = cur + delta;
   const af     = afx(_niveauFromValeur(newVal));
   preview.innerHTML = `→ <span style="color:${af.couleur};font-weight:600">${newVal > 0 ? '+' + newVal : newVal} ${af.icon} ${af.label}</span>`;
 }
 
-window.saveAffiniteGroupe = async (npcId) => {
+export async function saveAffiniteGroupe(npcId) {
   const n = _npcs.find(x => x.id === npcId);
   if (!n) return;
   const note     = document.getElementById('afg-note')?.value?.trim()  || '';
   const event    = document.getElementById('afg-event')?.value?.trim() || '';
-  const delta    = window._afgDelta || 0;
+  const delta    = _afgDelta || 0;
   const curMode  = _affiniteMode(n);
   const curHisto = n.affinite?.historique || [];
   // Garde-fou : un delta non nul sans titre serait perdu (impossible à
@@ -1710,10 +1719,10 @@ window.saveAffiniteGroupe = async (npcId) => {
   }
 
   await _persistAffinite(npcId, affinite, 'Affinité mise à jour !');
-};
+}
 
 // ── Modal de configuration des seuils (mode valeur) ──────────────────────────
-window.openAffiniteSeuilsModal = () => {
+export function openAffiniteSeuilsModal() {
   if (!STATE.isAdmin) return;
   const s = _affiniteSeuils;
   const rows = SEUILS_KEYS.map((key, i) => {
@@ -1741,16 +1750,16 @@ window.openAffiniteSeuilsModal = () => {
       <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
   `);
-};
+}
 
-window.resetAffiniteSeuils = () => {
+export function resetAffiniteSeuils() {
   SEUILS_KEYS.forEach(k => {
     const el = document.getElementById(`afs-${k}`);
     if (el) el.value = SEUILS_DEFAULT[k];
   });
-};
+}
 
-window.saveAffiniteSeuils = async () => {
+export async function saveAffiniteSeuils() {
   if (!STATE.isAdmin) return;
   const next = {};
   for (const k of SEUILS_KEYS) {
@@ -1771,7 +1780,7 @@ window.saveAffiniteSeuils = async () => {
   showNotif('Seuils enregistrés !', 'success');
   _refreshActivePanel();
   _refreshList();
-};
+}
 
 // ══ Gestionnaire des affinités spécifiques ════════════════════════════════════
 // Formulaire inline — pas de push modal enfant
@@ -1797,7 +1806,7 @@ function _aftColorGrid(selectedColor) {
 }
 
 function _getAffiniteTypesManagerHtml() {
-  const s     = window._aftFormState || { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  const s     = _aftFormState || { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   const isEdit = !!s.editingId;
 
   const typesList = _affiniteTypes.length
@@ -1888,7 +1897,7 @@ function _getAffiniteTypesManagerHtml() {
   </div>`;
 }
 
-window.deleteHistoriqueEntry = async (npcId, index) => {
+export async function deleteHistoriqueEntry(npcId, index) {
   const n = _npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
 
@@ -1901,10 +1910,10 @@ window.deleteHistoriqueEntry = async (npcId, index) => {
   // En mode valeur, on annule l'impact du delta supprimé sur la valeur cumulée.
   const affinite = _withValeurDelta(n, { ...(n.affinite || {}), historique }, -(removed?.delta || 0));
   await _persistAffinite(npcId, affinite, 'Événement supprimé.', { close: false });
-};
+}
 
 // Modifier / Supprimer les entrées des historiques des NPCS
-window.editHistoriqueEntry = (npcId, index) => {
+export function editHistoriqueEntry(npcId, index) {
   const n = _npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
 
@@ -1942,23 +1951,23 @@ window.editHistoriqueEntry = (npcId, index) => {
     </div>
   `);
 
-  window._histEditDelta = entry.delta || 0;
-};
+  _histEditDelta = entry.delta || 0;
+}
 
-window._selectHistEditDelta = (v) => {
-  window._histEditDelta = v;
+function _selectHistEditDelta(v) {
+  _histEditDelta = v;
   _highlightDeltaPreset('hist-edit-delta', v);
   const inp = document.getElementById('hist-edit-delta-custom');
   if (inp) inp.value = '';
-};
+}
 
-window._setHistEditDeltaFromInput = (raw) => {
+function _setHistEditDeltaFromInput(raw) {
   const v = parseInt(raw, 10);
-  window._histEditDelta = Number.isFinite(v) ? v : 0;
-  _highlightDeltaPreset('hist-edit-delta', window._histEditDelta);
-};
+  _histEditDelta = Number.isFinite(v) ? v : 0;
+  _highlightDeltaPreset('hist-edit-delta', _histEditDelta);
+}
 
-window.saveHistoriqueEntry = async (npcId, index) => {
+export async function saveHistoriqueEntry(npcId, index) {
   const n = _npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
 
@@ -1972,7 +1981,7 @@ window.saveHistoriqueEntry = async (npcId, index) => {
   if (!historique[index]) return;
 
   const oldDelta = historique[index].delta || 0;
-  const newDelta = window._histEditDelta || 0;
+  const newDelta = _histEditDelta || 0;
 
   historique[index] = {
     ...historique[index],
@@ -1983,13 +1992,13 @@ window.saveHistoriqueEntry = async (npcId, index) => {
   // En mode valeur, on rejoue la différence de delta sur la valeur cumulée.
   const affinite = _withValeurDelta(n, { ...(n.affinite || {}), historique }, newDelta - oldDelta);
   await _persistAffinite(npcId, affinite, 'Événement modifié.');
-};
+}
 
 // Affinités spéciales
-window.openAffiniteTypesManager = () => {
+export function openAffiniteTypesManager() {
   // Initialise le formulaire à l'état "ajout"
-  window._aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
-  const ctx = window._currentAffinitePersoContext || {};
+  _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  const ctx = _currentAffinitePersoContext || {};
   pushModal('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml(), () => {
     // Toujours rafraîchir la fiche principale (le contexte perso peut être périmé)
     if (_activeId) {
@@ -2000,53 +2009,53 @@ window.openAffiniteTypesManager = () => {
       _refreshAffinitePersoModal(ctx.npcId, ctx.existingId);
     }
   });
-};
+}
 
 function _refreshAffiniteTypesManager() {
   updateModalContent('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml());
 }
 
-window._aftSelectEmoji = (emoji) => {
+function _aftSelectEmoji(emoji) {
   const inp = document.getElementById('aft-emoji-val');
   if (inp) inp.value = emoji;
-  if (window._aftFormState) window._aftFormState.emoji = emoji;
+  if (_aftFormState) _aftFormState.emoji = emoji;
   document.querySelectorAll('#aft-emoji-grid button').forEach(btn => {
     const sel = btn.dataset.emoji === emoji;
     btn.style.background  = sel ? 'rgba(255,255,255,.15)' : 'transparent';
     btn.style.borderColor = sel ? 'var(--gold)' : 'transparent';
     btn.style.transform   = sel ? 'scale(1.15)' : 'scale(1)';
   });
-};
+}
 
-window._aftSelectColor = (hex) => {
+function _aftSelectColor(hex) {
   const inp = document.getElementById('aft-color');
   if (inp) inp.value = hex;
-  if (window._aftFormState) window._aftFormState.couleur = hex;
+  if (_aftFormState) _aftFormState.couleur = hex;
   document.querySelectorAll('#aft-color-grid button').forEach(btn => {
     const sel = btn.dataset.color === hex;
     btn.style.borderColor = sel ? 'white' : 'transparent';
     btn.style.boxShadow   = sel ? `0 0 0 2px ${hex}` : 'none';
   });
-};
+}
 
-window._aftEditType = (typeId) => {
+function _aftEditType(typeId) {
   const t = _affiniteTypes.find(x => x.id === typeId);
   if (!t) return;
-  window._aftFormState = {
+  _aftFormState = {
     editingId: typeId,
     emoji:     t.emoji   || EMOJI_PRESET[0],
     couleur:   t.couleur || TYPE_COLORS[0],
     label:     t.label   || '',
   };
   _refreshAffiniteTypesManager();
-};
+}
 
-window._aftCancelEdit = () => {
-  window._aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+function _aftCancelEdit() {
+  _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   _refreshAffiniteTypesManager();
-};
+}
 
-window.saveAffiniteType = async () => {
+export async function saveAffiniteType() {
   const label     = document.getElementById('aft-label')?.value?.trim();
   const emoji     = document.getElementById('aft-emoji-val')?.value || EMOJI_PRESET[0];
   const couleur   = document.getElementById('aft-color')?.value     || TYPE_COLORS[0];
@@ -2064,21 +2073,21 @@ window.saveAffiniteType = async () => {
   }
 
   await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: _affiniteTypes });
-  window._aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   showNotif(editingId ? 'Type modifié !' : 'Type créé !', 'success');
   _refreshAffiniteTypesManager();
-};
+}
 
-window.deleteAffiniteType = async (typeId) => {
+export async function deleteAffiniteType(typeId) {
   if (!await confirmModal('Supprimer ce type d\'affinité ?', {title: 'Confirmation de suppression'})) return;
   _affiniteTypes = _affiniteTypes.filter(t => t.id !== typeId);
   await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: _affiniteTypes });
-  if (window._aftFormState?.editingId === typeId) {
-    window._aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  if (_aftFormState?.editingId === typeId) {
+    _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   }
   showNotif('Type supprimé.', 'success');
   _refreshAffiniteTypesManager();
-};
+}
 
 // ══ Modal affinité individuelle (édition) ════════════════════════════════════
 
@@ -2089,7 +2098,7 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
   const chars          = sortCharactersForDisplay(STATE.characters || []);
   const existingTypeId = existing?.typeId || '';
 
-  window._selectedAfpTypeId = existingTypeId;
+  _selectedAfpTypeId = existingTypeId;
 
   const typeBtns = _affiniteTypes.map(t => {
     const col = t.couleur || TYPE_COLORS[0];
@@ -2151,18 +2160,18 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
 function _refreshAffinitePersoModal(npcId, existingId = null) {
   const args = _getAffinitePersoModalArgs(npcId, existingId);
   if (!args) return;
-  window._currentAffinitePersoContext = { npcId, existingId };
+  _currentAffinitePersoContext = { npcId, existingId };
   updateModalContent(args.title, args.body);
-  window._selectedAfpTypeId = args.selectedTypeId;
+  _selectedAfpTypeId = args.selectedTypeId;
 }
 
-window.openAffinitePersoModal = (npcId, existingId = null) => {
-  window._currentAffinitePersoContext = { npcId, existingId };
+export function openAffinitePersoModal(npcId, existingId = null) {
+  _currentAffinitePersoContext = { npcId, existingId };
   const args = _getAffinitePersoModalArgs(npcId, existingId);
   if (!args) return;
   openModal(args.title, args.body);
-  window._selectedAfpTypeId = args.selectedTypeId;
-};
+  _selectedAfpTypeId = args.selectedTypeId;
+}
 
 function _refreshActivePanel() {
   const panel = document.getElementById('npc-detail-panel');
@@ -2178,8 +2187,8 @@ function _refreshActivePanel() {
   panel.innerHTML = active ? _renderFiche(active) : _renderEmpty();
 }
 
-window._selectAfpType = (typeId) => {
-  window._selectedAfpTypeId = typeId;
+function _selectAfpType(typeId) {
+  _selectedAfpTypeId = typeId;
   const inp = document.getElementById('afp-type');
   if (inp) inp.value = typeId;
   _affiniteTypes.forEach(t => {
@@ -2191,10 +2200,10 @@ window._selectAfpType = (typeId) => {
     btn.style.background  = sel ? col + '33' : col + '11';
     btn.style.borderColor = sel ? col : col + '55';
   });
-};
+}
 
 // ── Sauvegarde / suppression affinité individuelle ────────────────────────────
-window.saveAffinitePerso = async (npcId, existingId) => {
+export async function saveAffinitePerso(npcId, existingId) {
   const charSel = document.getElementById('afp-char')?.value;
   if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
   const typeId = document.getElementById('afp-type')?.value || '';
@@ -2223,61 +2232,54 @@ window.saveAffinitePerso = async (npcId, existingId) => {
   closeModal();
   showNotif('Affinité enregistrée !', 'success');
   _refreshActivePanel();
-};
+}
 
-window.deleteAffinitePerso = async (id) => {
+export async function deleteAffinitePerso(id) {
   if (!await confirmModal('Supprimer cette affinité ?', {title: 'Confirmation de suppression'})) return;
   await deleteFromCol('npc_affinites', id);
   _affiPerso = _affiPerso.filter(a => a.id !== id);
   showNotif('Affinité supprimée.', 'success');
   _refreshActivePanel();
-};
+}
 
 // ── Override PAGES.npcs ───────────────────────────────────────────────────────
 PAGES.npcs = renderNpcs;
 
-Object.assign(window, {
-  renderNpcs, openNpcModal, saveNpc, deleteNpc,
-  openAffiniteGroupeModal, openAffinitePersoModal,
-  saveAffiniteGroupe, saveAffinitePerso, deleteAffinitePerso,
-  openAffiniteSeuilsModal, saveAffiniteSeuils, resetAffiniteSeuils,
-  editHistoriqueEntry, deleteHistoriqueEntry, saveHistoriqueEntry,
-});
 
 registerActions({
-  _npcSearch:                (el) => window._npcSearch?.(el.value),
-  _mjStatsFilter:            (el) => window._mjStatsFilter?.(el.value),
-  _setAfgDeltaFromInput:     (el) => window._setAfgDeltaFromInput?.(el.value),
-  _setHistEditDeltaFromInput:(el) => window._setHistEditDeltaFromInput?.(el.value),
+  _npcSearch:                (el) => _npcSearch(el.value),
+  _mjStatsFilter:            (el) => _mjStatsFilter(el.value),
+  _setAfgDeltaFromInput:     (el) => _setAfgDeltaFromInput(el.value),
+  _setHistEditDeltaFromInput:(el) => _setHistEditDeltaFromInput(el.value),
   openNpcModal:            (btn) => openNpcModal(btn.dataset.id || null),
   saveNpc:                 (btn) => saveNpc(btn.dataset.id || ''),
   deleteNpc:               (btn) => deleteNpc(btn.dataset.id),
   _deleteNpcThenClose:     (btn) => deleteNpc(btn.dataset.id).then(ok => { if (ok) closeModal(); }),
-  selectNpc:               (btn) => window.selectNpc?.(btn.dataset.id),
+  selectNpc:               (btn) => selectNpc(btn.dataset.id),
   openAffiniteGroupeModal: (btn) => openAffiniteGroupeModal(btn.dataset.id),
   openAffinitePersoModal:  (btn) => openAffinitePersoModal(btn.dataset.npcId, btn.dataset.affId || undefined),
   deleteAffinitePerso:     (btn) => deleteAffinitePerso(btn.dataset.id),
-  openAffiniteTypesManager:()   => window.openAffiniteTypesManager?.(),
-  saveAffiniteGroupe:      (btn) => window.saveAffiniteGroupe?.(btn.dataset.id),
+  openAffiniteTypesManager:()   => openAffiniteTypesManager(),
+  saveAffiniteGroupe:      (btn) => saveAffiniteGroupe(btn.dataset.id),
   saveAffiniteSeuils:      ()   => saveAffiniteSeuils(),
   resetAffiniteSeuils:     ()   => resetAffiniteSeuils(),
   openAffiniteSeuilsModal: ()   => openAffiniteSeuilsModal(),
-  saveAffinitePerso:       (btn) => window.saveAffinitePerso?.(btn.dataset.npcId, btn.dataset.affId || ''),
+  saveAffinitePerso:       (btn) => saveAffinitePerso(btn.dataset.npcId, btn.dataset.affId || ''),
   editHistoriqueEntry:     (btn) => editHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
   deleteHistoriqueEntry:   (btn) => deleteHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
   saveHistoriqueEntry:     (btn) => saveHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
-  deleteAffiniteType:      (btn) => window.deleteAffiniteType?.(btn.dataset.id),
-  saveAffiniteType:        ()   => window.saveAffiniteType?.(),
-  _aftCancelEdit:          ()   => window._aftCancelEdit?.(),
-  _aftEditType:            (btn) => window._aftEditType?.(btn.dataset.id),
-  _aftSelectEmoji:         (btn) => window._aftSelectEmoji?.(btn.dataset.val),
-  _aftSelectColor:         (btn) => window._aftSelectColor?.(btn.dataset.val),
-  _selectAfgDelta:         (btn) => window._selectAfgDelta?.(Number(btn.dataset.val)),
-  _selectHistEditDelta:    (btn) => window._selectHistEditDelta?.(Number(btn.dataset.val)),
-  _selectAfpType:          (btn) => window._selectAfpType?.(btn.dataset.id),
-  _openMjStatsView:        ()   => window._openMjStatsView?.(),
-  _npcSelectOrg:           (btn) => window._npcSelectOrg?.(btn),
-  _npcBackToOrgs:          ()   => window._npcBackToOrgs?.(),
-  _mjEditField:            (btn) => window._mjEditField?.(btn.dataset.npcId, btn.dataset.field),
-  _mjOpenNpc:              (btn) => window._mjOpenNpc?.(btn.dataset.id),
+  deleteAffiniteType:      (btn) => deleteAffiniteType(btn.dataset.id),
+  saveAffiniteType:        ()   => saveAffiniteType(),
+  _aftCancelEdit:          ()   => _aftCancelEdit(),
+  _aftEditType:            (btn) => _aftEditType(btn.dataset.id),
+  _aftSelectEmoji:         (btn) => _aftSelectEmoji(btn.dataset.val),
+  _aftSelectColor:         (btn) => _aftSelectColor(btn.dataset.val),
+  _selectAfgDelta:         (btn) => _selectAfgDelta(Number(btn.dataset.val)),
+  _selectHistEditDelta:    (btn) => _selectHistEditDelta(Number(btn.dataset.val)),
+  _selectAfpType:          (btn) => _selectAfpType(btn.dataset.id),
+  _openMjStatsView:        ()   => _openMjStatsView(),
+  _npcSelectOrg:           (btn) => _npcSelectOrg(btn),
+  _npcBackToOrgs:          ()   => _npcBackToOrgs(),
+  _mjEditField:            (btn) => _mjEditField(btn.dataset.npcId, btn.dataset.field),
+  _mjOpenNpc:              (btn) => _mjOpenNpc(btn.dataset.id),
 });

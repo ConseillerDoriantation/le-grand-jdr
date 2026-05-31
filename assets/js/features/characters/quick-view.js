@@ -4,13 +4,15 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
 import { registerActions } from '../../core/actions.js';
-import { openModal, closeModal } from '../../shared/modal.js';
+import { openModal, closeModal, closeModalDirect } from '../../shared/modal.js';
 import { _esc } from '../../shared/html.js';
 import {
   getMod, calcCA, calcVitesse, calcPVMax, calcPMMax, calcPalier, pct,
   STAT_META,
 } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData, getWeaponToucherParts, getWeaponDegatsParts } from './data.js';
+import { getDashboardPartyChars } from '../../shared/dashboard-session.js';
+import { setTargetCharacter } from '../../shared/character-navigation.js';
 
 // Cherche le perso dans plusieurs sources : ses propres persos, le cache du
 // groupe (rempli par le dashboard) — permet de quick-view les autres joueurs
@@ -18,8 +20,7 @@ import { getMainWeapon, getArmorSetData, getWeaponToucherParts, getWeaponDegatsP
 function _findChar(id) {
   const own = (STATE.characters || []).find(c => c.id === id);
   if (own) return own;
-  const partyCache = window._partyCharsCache || [];
-  return partyCache.find(c => c.id === id) || null;
+  return getDashboardPartyChars().find(c => c.id === id) || null;
 }
 
 function _statRow(c) {
@@ -196,17 +197,16 @@ export function quickViewChar(id) {
   `);
 }
 
-window._quickViewChar = quickViewChar;
-window._quickViewGoFull = (id) => {
-  if (typeof window.closeModalDirect === 'function') window.closeModalDirect();
-  else if (typeof closeModal === 'function') closeModal();
-  if (typeof window._goToChar === 'function') window._goToChar(id);
-  else if (typeof window.navigate === 'function') { window._targetCharId = id; window.navigate('characters'); }
-};
+async function quickViewGoFull(id) {
+  closeModalDirect();
+  setTargetCharacter(id);
+  const { navigate } = await import('../../core/navigation.js');
+  navigate('characters');
+}
 
 registerActions({
-  _qvClose:          () => { (window.closeModalDirect ?? window.closeModal)?.(); },
-  _quickViewGoFull: (btn) => window._quickViewGoFull?.(btn.dataset.id),
+  _qvClose:          () => closeModalDirect(),
+  _quickViewGoFull: (btn) => quickViewGoFull(btn.dataset.id),
 });
 
 export default quickViewChar;

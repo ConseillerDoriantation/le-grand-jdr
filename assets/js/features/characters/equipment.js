@@ -7,6 +7,12 @@ import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../
 import { _esc } from '../../shared/html.js';
 import { _getTraits, _getBaseTraits, _getAddedTraits } from './data.js';
 
+let _equipCompatibles = [];
+let _equipSelectedMeta = {};
+function _renderEquipmentChar(c) {
+  window.renderCharSheet?.(c, 'combat');
+}
+
 // ══════════════════════════════════════════════
 // HELPERS D'INFÉRENCE
 // ══════════════════════════════════════════════
@@ -65,13 +71,12 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
       sa: getItemStatBonus(item, 'sagesse'),
       co: getItemStatBonus(item, 'constitution'),
       ch: getItemStatBonus(item, 'charisme'),
-      // Bonus dérivés (PV/PM/Vitesse/Initiative/CA/Deck) et compétences — propagés à l'équipement
+      // Bonus dérivés (PV/PM/Vitesse/Initiative) et compétences — propagés à l'équipement
       pvMaxBonus:     parseInt(item.pvMaxBonus)     || 0,
       pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
       vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
       initiativeBonus:parseInt(item.initiativeBonus)|| 0,
       caBonus:        parseInt(item.caBonus)        || 0,
-      deckBonus:      parseInt(item.deckBonus)      || 0,
       skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
                       ? { ...item.skillBonuses } : {},
       sourceInvIndex: invIndex,
@@ -93,13 +98,12 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
     typeArmure: item.typeArmure || '',
     slotArmure: item.slotArmure ? inferArmorSlotValue(slot, item) : '',
     slotBijou: item.slotBijou ? inferAccessorySlotValue(slot, item) : '',
-    // Bonus dérivés (PV/PM/Vitesse/Initiative/CA/Deck) et compétences — propagés à l'équipement
+    // Bonus dérivés (PV/PM/Vitesse/Initiative) et compétences — propagés à l'équipement
     pvMaxBonus:     parseInt(item.pvMaxBonus)     || 0,
     pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
     vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
     initiativeBonus:parseInt(item.initiativeBonus)|| 0,
     caBonus:        parseInt(item.caBonus)        || 0,
-    deckBonus:      parseInt(item.deckBonus)      || 0,
     skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
                     ? { ...item.skillBonuses } : {},
     sourceInvIndex: invIndex,
@@ -141,7 +145,7 @@ export async function equipSlotFromInv(val, slot) {
     await updateInCol('characters', c.id, { equipement: equip, statsBonus: bonus });
     closeModal();
     showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
-    window.renderCharSheet(c, 'combat');
+    _renderEquipmentChar(c);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -269,8 +273,8 @@ export function editEquipSlot(slot) {
     </div>
   `);
 
-  window._equipCompatibles  = compatibles;
-  window._equipSelectedMeta = {
+  _equipCompatibles = compatibles;
+  _equipSelectedMeta = {
     format: equipped.format || '',
     toucher: equipped.toucher || '',
     toucherStat: equipped.toucherStat || inferAttackStatFromItem(equipped),
@@ -299,7 +303,7 @@ export function editEquipSlot(slot) {
 export function previewEquipFromInv(val, slot) {
   if (!val || !val.startsWith('inv:')) return;
   const idx  = parseInt(val.split(':')[1], 10);
-  const compat = (window._equipCompatibles||[]).find(entry => entry?.invIndex === idx) || (window._equipCompatibles||[])[idx];
+  const compat = (_equipCompatibles || []).find(entry => entry?.invIndex === idx) || (_equipCompatibles || [])[idx];
   const item = compat?.item || compat;
   if (!item) return;
 
@@ -309,24 +313,24 @@ export function previewEquipFromInv(val, slot) {
       (item.format?.includes('Mag.')  ? 'intelligence' :
        item.format?.includes('Dist.') ? 'dexterite'    : 'force');
 
-    if (window._equipSelectedMeta) {
-      window._equipSelectedMeta.nom           = item.nom           || '';
-      window._equipSelectedMeta.degats        = item.degats        || '';
-      window._equipSelectedMeta.statAttaque   = inferredStat;
-      window._equipSelectedMeta.toucherStat   = item.toucherStat   || inferredStat;
-      window._equipSelectedMeta.degatsStat    = item.degatsStat    || inferredStat;
-      window._equipSelectedMeta.degatsStats   = Array.isArray(item.degatsStats) && item.degatsStats.length
+    if (_equipSelectedMeta) {
+      _equipSelectedMeta.nom           = item.nom           || '';
+      _equipSelectedMeta.degats        = item.degats        || '';
+      _equipSelectedMeta.statAttaque   = inferredStat;
+      _equipSelectedMeta.toucherStat   = item.toucherStat   || inferredStat;
+      _equipSelectedMeta.degatsStat    = item.degatsStat    || inferredStat;
+      _equipSelectedMeta.degatsStats   = Array.isArray(item.degatsStats) && item.degatsStats.length
         ? [...item.degatsStats]
         : (item.degatsStat ? [item.degatsStat] : [inferredStat]);
-      window._equipSelectedMeta.typeArme      = item.typeArme      || item.sousType || '';
-      window._equipSelectedMeta.portee        = item.portee        || '';
-      window._equipSelectedMeta.particularite = item.particularite || getItemEffectText(item) || '';
-      window._equipSelectedMeta.format        = item.format        || '';
-      window._equipSelectedMeta.toucher       = item.toucher       || '';
-      window._equipSelectedMeta.stats         = item.stats         || '';
-      window._equipSelectedMeta.traits        = Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []);
-      window._equipSelectedMeta.sousType      = item.sousType      || '';
-      window._equipSelectedMeta.sourceInvIndex = Number.isInteger(compat?.invIndex) ? compat.invIndex : -1;
+      _equipSelectedMeta.typeArme      = item.typeArme      || item.sousType || '';
+      _equipSelectedMeta.portee        = item.portee        || '';
+      _equipSelectedMeta.particularite = item.particularite || getItemEffectText(item) || '';
+      _equipSelectedMeta.format        = item.format        || '';
+      _equipSelectedMeta.toucher       = item.toucher       || '';
+      _equipSelectedMeta.stats         = item.stats         || '';
+      _equipSelectedMeta.traits        = Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []);
+      _equipSelectedMeta.sousType      = item.sousType      || '';
+      _equipSelectedMeta.sourceInvIndex = Number.isInteger(compat?.invIndex) ? compat.invIndex : -1;
     }
   }
   // Armures & bijoux : pas de pré-remplissage manuel — l'équipement passe directement
@@ -358,7 +362,7 @@ export async function saveEquipSlot(slot) {
   try {
     const c = STATE.activeChar; if(!c) return;
     const equip = c.equipement||{};
-    const meta = window._equipSelectedMeta || {};
+    const meta = _equipSelectedMeta || {};
     const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
 
     if (slot.startsWith('Main')) {
@@ -396,7 +400,7 @@ export async function saveEquipSlot(slot) {
     await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
     closeModal();
     showNotif('Équipement mis à jour !','success');
-    window.renderCharSheet(c,'combat');
+    _renderEquipmentChar(c);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -414,7 +418,7 @@ export async function clearEquipSlot(slot) {
     await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
     closeModal();
     showNotif('Emplacement libéré.','success');
-    window.renderCharSheet(c,'combat');
+    _renderEquipmentChar(c);
   } catch (e) { notifySaveError(e); }
 }
 

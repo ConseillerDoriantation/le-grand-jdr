@@ -5,8 +5,11 @@ import { STATE, FS } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
-import { calcPalier } from '../shared/char-stats.js';
+import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr } from '../shared/char-stats.js';
+import { showNotif } from '../shared/notifications.js';
 import { watch } from '../shared/realtime.js';
+import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
+import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -86,15 +89,15 @@ const PAGES = {
 
     // ── Carte mini personnage ─────────────────────────────────────────
     function _charMini(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const portrait = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
@@ -134,15 +137,15 @@ const PAGES = {
 
     // ── Carte héros principale (1 seul perso joueur) ──────────────────
     function _charFeatured(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const portrait = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
@@ -188,15 +191,15 @@ const PAGES = {
 
     // ── Carte admin ultra-compacte (ligne de tableau) ────────────────
     function _charRow(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const avatar = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
@@ -318,27 +321,7 @@ const PAGES = {
       .filter(q => q.statut === 'active')
       .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
 
-    // Stocker pour la fonction join
-    window._dashQuestData = quests;
-
-    // Join inline depuis le dashboard (sans charger quests.js)
-    window._dashQuestJoin = async function (id, el) {
-      const quest  = (window._dashQuestData||[]).find(q => q.id === id);
-      if (!quest) return;
-      const myUid  = STATE.user?.uid;
-      const myChar = (STATE.characters||[]).find(c => c.uid === myUid);
-      if (!myChar) { window.showNotif?.('Aucun personnage trouvé.', 'error'); return; }
-      if (el) { el.disabled = true; el.textContent = '…'; }
-      const parts = Array.isArray(quest.participants) ? [...quest.participants] : [];
-      const idx   = parts.findIndex(p => p.uid === myUid);
-      if (idx >= 0) { parts.splice(idx, 1); }
-      else { parts.push({ uid: myUid, charId: myChar.id, nom: myChar.nom||'?', photo: myChar.photo||null, photoX: myChar.photoX||0, photoY: myChar.photoY||0 }); }
-      try {
-        await saveDoc('quests', id, { participants: parts });
-        window.showNotif?.(idx >= 0 ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', idx >= 0 ? 'info' : 'success');
-        await PAGES.dashboard();
-      } catch { window.showNotif?.('Erreur.', 'error'); if (el) { el.disabled = false; } }
-    };
+    setDashboardQuests(quests);
 
     // ── Helpers ────────────────────────────────────────────────────────
 
@@ -420,8 +403,8 @@ const PAGES = {
     // ── Helpers joueur v2 ─────────────────────────────────────────────
 
     function _heroCardV2(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
@@ -429,8 +412,8 @@ const PAGES = {
       const xpCur   = c.exp || 0;
       const xpNext  = calcPalier(c.niveau || 1);
       const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const portrait = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
@@ -490,8 +473,7 @@ const PAGES = {
         if (!byPlayer[key] || (c.niveau||1) > (byPlayer[key].niveau||1)) byPlayer[key] = c;
       });
       const members = Object.values(byPlayer).slice(0, 5);
-      // Cache global pour que le quick-view trouve les persos d'autres joueurs
-      window._partyCharsCache = partyChars;
+      setDashboardPartyChars(partyChars);
       return `
       <div class="dv2-party-card">
         <div class="dv2-panel-header">
@@ -564,14 +546,14 @@ const PAGES = {
     }
 
     function _statsGridV2(c) {
-      const pvMax = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax = calcPVMax(c) || c.pvBase || 10;
+      const pmMax = calcPMMax(c) || c.pmBase || 10;
       const pvCur = c.pvActuel ?? pvMax;
       const pmCur = c.pmActuel ?? pmMax;
       const pvPct = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const ca = window.calcCA?.(c) || 10;
-      const or = window.calcOr?.(c) || 0;
+      const ca = calcCA(c) || 10;
+      const or = calcOr(c) || 0;
       return `
       <div class="dv2-stats-grid">
         <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
@@ -974,10 +956,6 @@ const PAGES = {
     }
 
     // ── Navigation personnage ──────────────────────────────────────────
-    window._goToChar = (id) => {
-      window._targetCharId = id;
-      navigate('characters');
-    };
 
     // ── Toast RPG (injecter une seule fois) ───────────────────────────
     if (!document.getElementById('dv2-toast-container')) {
@@ -1061,8 +1039,7 @@ const PAGES = {
     }
     content.innerHTML = html;
     if (chars.length > 0) {
-      const targetId  = window._targetCharId;
-      window._targetCharId = null;
+      const targetId  = consumeTargetCharacter();
       const charToShow = (targetId ? chars.find(c => c.id === targetId) : null) || chars[0];
       STATE.activeChar = charToShow;
       renderCharSheet(charToShow);
@@ -1071,7 +1048,8 @@ const PAGES = {
 
   // ─── SHOP ───────────────────────────────────────────────────────────────────
   async shop() {
-    await window.renderShop?.();
+    const { renderShop } = await import('./shop.js');
+    await renderShop();
   },
 
   // ─── WORLD ──────────────────────────────────────────────────────────────────
@@ -1512,15 +1490,15 @@ const PAGES = {
   // ─── PLAYERS ────────────────────────────────────────────────────────────────
   async players() {
     // Implémentation effective dans features/players.js (override PAGES.players)
-    if (typeof window.renderPlayersPage === 'function') {
-      await window.renderPlayersPage();
-    }
+    const { renderPlayersPage } = await import('./players.js');
+    await renderPlayersPage();
   },
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
   async achievements() {
     // Shell uniquement — le contenu est délégué à achievements.js (_achRenderContent)
-    const allItems = window._achItems || await loadCollection('achievements');
+    const achState = PAGES._achievementsShellState || { items: [], filter: 'all', view: 'galerie', search: '' };
+    const allItems = achState.items.length ? achState.items : await loadCollection('achievements');
     // Les joueurs ne doivent rien voir des HF secrets, y compris dans les compteurs
     const items = STATE.isAdmin ? allItems : allItems.filter(a => !a.secret);
     const content = document.getElementById('main-content');
@@ -1533,8 +1511,8 @@ const PAGES = {
     const byCat = { epique: 0, comique: 0, histoire: 0 };
     items.forEach(a => { const c = a.categorie || 'epique'; if (c in byCat) byCat[c]++; });
     const total        = items.length;
-    const activeFilter = window._achFilter ?? 'all';
-    const activeView   = window._achView   ?? 'galerie';
+    const activeFilter = achState.filter ?? 'all';
+    const activeView   = achState.view   ?? 'galerie';
 
     content.innerHTML = `<div class="hall-root">
     <div class="hall-hero">
@@ -1564,7 +1542,7 @@ const PAGES = {
       <div class="search-wrap">
         <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
         <input type="text" placeholder="Rechercher…" id="ach-search-input"
-          value="${_esc(window._achSearch || '')}"
+          value="${_esc(achState.search || '')}"
           data-input="_achSetSearch">
       </div>
     </div>
@@ -1581,7 +1559,7 @@ const PAGES = {
 
   // ─── ADMIN ──────────────────────────────────────────────────────────────────
   async admin() {
-    if (!STATE.isAdmin) { window.navigate?.('dashboard'); return; }
+    if (!STATE.isAdmin) { const { navigate } = await import('../core/navigation.js'); navigate('dashboard'); return; }
     const users   = await loadCollection('users');
     const content = document.getElementById('main-content');
     content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">⚙️ Panneau Admin</div><div class="page-subtitle">Gestion complète du jeu</div></div>
@@ -1648,16 +1626,42 @@ const PAGES = {
 
   // ─── BESTIAIRE ──────────────────────────────────────────────────────────────
   async bestiaire() {
-    await window.renderBestiary?.();
+    const { renderBestiary } = await import('./bestiary.js');
+    await renderBestiary();
   },
 };
 
+async function goToChar(id) {
+  setTargetCharacter(id);
+  const { navigate } = await import('../core/navigation.js');
+  navigate('characters');
+}
+
+async function dashQuestJoin(id, el) {
+  const quest = findDashboardQuest(id);
+  if (!quest) return;
+  const myUid = STATE.user?.uid;
+  const myChar = (STATE.characters || []).find(c => c.uid === myUid);
+  if (!myChar) { showNotif('Aucun personnage trouvé.', 'error'); return; }
+  if (el) { el.disabled = true; el.textContent = '…'; }
+  const parts = Array.isArray(quest.participants) ? [...quest.participants] : [];
+  const idx = parts.findIndex(p => p.uid === myUid);
+  if (idx >= 0) parts.splice(idx, 1);
+  else parts.push({ uid: myUid, charId: myChar.id, nom: myChar.nom || '?', photo: myChar.photo || null, photoX: myChar.photoX || 0, photoY: myChar.photoY || 0 });
+  try {
+    await saveDoc('quests', id, { participants: parts });
+    showNotif(idx >= 0 ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', idx >= 0 ? 'info' : 'success');
+    await PAGES.dashboard();
+  } catch {
+    showNotif('Erreur.', 'error');
+    if (el) el.disabled = false;
+  }
+}
+
 registerActions({
-  _achSetSearch:         (el)  => window._achSetSearch?.(el.value),
   // Dashboard
-  _goToChar:             (btn) => window._goToChar?.(btn.dataset.id),
-  _openQuickView:        (btn) => window._openQuickView?.(btn.dataset.id),
-  _dashQuestJoin:        (btn) => window._dashQuestJoin?.(btn.dataset.id, btn),
+  _goToChar:             (btn) => goToChar(btn.dataset.id),
+  _dashQuestJoin:        (btn) => dashQuestJoin(btn.dataset.id, btn),
   openAdventureSwitcher: ()    => window.openAdventureSwitcher?.(),
 
   // Characters (admin filter) — appel via window pour supporter le cas où characters.js n'est pas encore chargé
@@ -1667,9 +1671,18 @@ registerActions({
   editWorldContent:      ()    => window.editWorldContent?.(),
 
   // NPCs
-  openNpcModal:          ()    => window.openNpcModal?.(),
-  editNpc:               (btn) => window.editNpc?.(btn.dataset.id),
-  deleteNpc:             (btn) => window.deleteNpc?.(btn.dataset.id),
+  openNpcModal:          async () => {
+    const { openNpcModal } = await import('./npcs.js');
+    openNpcModal();
+  },
+  editNpc:               async (btn) => {
+    const { openNpcModal } = await import('./npcs.js');
+    openNpcModal(btn.dataset.id);
+  },
+  deleteNpc:             async (btn) => {
+    const { deleteNpc } = await import('./npcs.js');
+    deleteNpc(btn.dataset.id);
+  },
   filterNpcs:            (btn) => {
     const filter = btn.dataset.filter || null;
     document.querySelectorAll('#npc-filter .tab').forEach(b => b.classList.toggle('active', b === btn));
@@ -1690,9 +1703,6 @@ registerActions({
   addBastionLog:            ()    => window.addBastionLog?.(),
 
   // Achievements
-  _achSetFilter:         (btn) => window._achSetFilter?.(btn.dataset.val),
-  _achSetView:           (btn) => window._achSetView?.(btn.dataset.val),
-  openAchievementModal:  ()    => window.openAchievementModal?.(),
 
   // Admin lazy-load tools
   _adminLazyOpen:        (btn) => {

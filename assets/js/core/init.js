@@ -36,11 +36,10 @@ import { unwatchAll } from "../shared/realtime.js";
 import { stopPresence } from "../shared/presence.js";
 import { releaseSessionData } from "../data/firestore.js";
 
-// Exposer pickAdventure tôt (avant lazy-load de aventures.js)
-// pour que le picker HTML puisse l'appeler
+// Fonction disponible tot pour le picker, avant le lazy-load de aventures.js
 const LAST_ADV_KEY = 'jdr-last-adventure';
 
-window.pickAdventure = async (adventureId) => {
+export async function pickAdventure(adventureId) {
   const adv = STATE.adventures.find(a => a.id === adventureId);
   if (!adv) return;
   localStorage.setItem(LAST_ADV_KEY, adventureId);
@@ -49,17 +48,15 @@ window.pickAdventure = async (adventureId) => {
   hideAdventurePicker();
   showAppLoading();
   await navigate('dashboard');
-};
+}
 
 // openCreateAdventureModal est fourni par aventures.js (lazy).
 // Pour le cas "zéro aventure" où aventures.js n'est pas encore chargé,
 // on charge le module à la demande.
-window.openCreateAdventureModal = async () => {
-  if (!window._openCreateAdventureModalImpl) {
-    await import('../features/aventures.js');
-  }
-  window._openCreateAdventureModalImpl?.();
-};
+export async function openCreateAdventureModal() {
+  const { openCreateAdventureModal: openModalLazy } = await import('../features/aventures.js');
+  openModalLazy();
+}
 
 setFirebase(auth, db, {
   doc, setDoc, getDoc,

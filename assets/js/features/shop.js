@@ -14,6 +14,8 @@ import { openArtisanModal } from './artisan.js';
 import { openWeaponFormatsAdmin, syncEquipmentAfterInventoryMutation } from './characters/data.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
+import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
+import { loadConditionLibrary } from '../shared/conditions.js';
 import Sortable from '../vendor/sortable.esm.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -213,6 +215,10 @@ function _getItemStatFilterKeys(item = {}) {
 // ══════════════════════════════════════════════════════════════════════════════
 let _cats  = [];
 let _items = [];
+let _shopSousTypes = [];
+function _setShopCharId(id = '') {
+  setShopCharId(id);
+}
 let _weaponFormats = [];
 let _view  = 'home';   // 'home' | 'items'
 let _activeCat = null;
@@ -263,7 +269,7 @@ async function loadShopData() {
   ]);
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort((a,b) => (a.ordre??999)-(b.ordre??999));
-  window._shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
+  _shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -327,7 +333,7 @@ function _animateCount(el, from, to, duration = 400) {
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
-async function renderShop() {
+export async function renderShop() {
   await loadShopData();
   // Un joueur ne peut pas rester sur une catégorie devenue masquée.
   if (_view === 'items' && !STATE.isAdmin && _cats.find(c => c.id === _activeCat)?.masquee) {
@@ -1170,15 +1176,15 @@ function _shopCharAvatarColor(c) {
 function _getActiveShopChar() {
   const chars = _getShopChars();
   if (!chars.length) {
-    window._shopCharId = '';
+    _setShopCharId('');
     return null;
   }
 
-  let active = chars.find(c => c.id === window._shopCharId);
+  let active = chars.find(c => c.id === getShopCharId());
 
   if (!active) {
     active = chars[0];
-    window._shopCharId = active?.id || '';
+    _setShopCharId(active?.id || '');
   }
 
   return active || null;
@@ -1651,8 +1657,6 @@ async function _sellCurrentEquipForShop(slot) {
   closeModalDirect();
   await sellInvItemFromShop(c.id, invIndex, { skipConfirm: true });
 }
-window._sellCurrentEquipForShop = _sellCurrentEquipForShop;
-
 function openShopItemDetail(itemId) {
   const item = _items.find(i => i.id === itemId);
   if (!item) return;
@@ -1814,7 +1818,7 @@ function openShopItemDetail(itemId) {
 // SÉLECTEUR PERSONNAGE
 // ══════════════════════════════════════════════════════════════════════════════
 function shopSetChar(charId) {
-  window._shopCharId = charId;
+  _setShopCharId(charId);
   const c  = STATE.characters?.find(x => x.id === charId);
   const or = calcOr(c);
   const valEl = document.getElementById('sh-char-or-value');
@@ -1894,7 +1898,7 @@ async function confirmBuyItem(itemId, directQty) {
   if (_buyInProgress) return;
   try {
     _buyInProgress = true;
-    const charId   = window._shopCharId;
+    const charId   = getShopCharId();
     const item     = _items.find(i => i.id === itemId);
     if (!item || !charId) return;
     const qty      = directQty != null
@@ -1954,7 +1958,7 @@ async function confirmBuyItem(itemId, directQty) {
   finally { _buyInProgress = false; }
 }
 
-window._restockShopItem = async (itemId) => {
+export async function restockShopItem(itemId) {
   const shopItem = _items.find(i => i.id === itemId);
   if (!shopItem) return;
   const cur = shopItem.dispo !== undefined && shopItem.dispo !== '' ? parseInt(shopItem.dispo) : null;
@@ -1962,12 +1966,12 @@ window._restockShopItem = async (itemId) => {
     await updateInCol('shop', itemId, { dispo: cur + 1 });
     shopItem.dispo = cur + 1;
   }
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // VENDRE un item de l'inventaire (appelé depuis characters.js)
 // ══════════════════════════════════════════════════════════════════════════════
-async function sellInvItemFromShop(charId, invIndex, opts = {}) {
+export async function sellInvItemFromShop(charId, invIndex, opts = {}) {
   try {
     const c = STATE.characters?.find(x => x.id === charId);
     if (!c) return;
@@ -2014,13 +2018,12 @@ async function sellInvItemFromShop(charId, invIndex, opts = {}) {
   } catch (e) { notifySaveError(e); }
 }
 
-window.sellInvItemFromShop = sellInvItemFromShop;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
 function shopGoHome()     { _view='home';  _activeCat=null; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
-function shopGoCat(catId) { _view='items'; _activeCat=catId; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
+export function shopGoCat(catId) { _view='items'; _activeCat=catId; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
 function shopPage(p)      { _page=p; renderShop(); }
 
 // ── Fonctions de filtre ───────────────────────────────────────────────────────
@@ -2032,7 +2035,7 @@ function shopSetSort(val) {
   else renderShop();
 }
 
-function shopFilterSearch(val) {
+export function shopFilterSearch(val) {
   _filterSearch = val;
   _page = 1;
   if (_view === 'items') _updateItemsOnly();
@@ -2126,10 +2129,6 @@ function _updateHomeOnly() {
 // Compat
 function shopGoSubCat() {}
 function shopFilterBy()  {}
-window._shopSearch = '';
-window._shopFilterRarete = '';
-window._shopFilterDispo  = '';
-
 // ══════════════════════════════════════════════════════════════════════════════
 // DRAG & DROP (SortableJS) — Catégories & Articles
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2491,7 +2490,7 @@ async function _shopPopulateSkillPicker(savedBonuses = {}) {
 }
 
 /** Ajoute un bonus de compétence (chip) depuis le picker. */
-window._shopAddSkillBonus = () => {
+function addSkillBonus() {
   const picker = document.getElementById('si-skill-picker');
   const valInp = document.getElementById('si-skill-val');
   const skillName = picker?.value;
@@ -2507,10 +2506,10 @@ window._shopAddSkillBonus = () => {
   picker.querySelector(`option[value="${skillName}"]`)?.remove();
   picker.value = '';
   if (valInp) valInp.value = '';
-};
+}
 
 /** Retire un bonus de compétence. */
-window._shopRemoveSkillBonus = (skillName) => {
+function removeSkillBonus(skillName) {
   const chips = document.getElementById('si-skill-chips');
   const chip = chips?.querySelector(`.sh-skill-chip[data-skill="${CSS.escape(skillName)}"]`);
   chip?.remove();
@@ -2529,34 +2528,11 @@ window._shopRemoveSkillBonus = (skillName) => {
   if (chips && !chips.querySelector('.sh-skill-chip')) {
     chips.innerHTML = '<span class="sh-skill-empty" style="font-size:.75rem;color:var(--text-dim);font-style:italic">Aucun bonus — clique sur ＋ pour en ajouter</span>';
   }
-};
+}
 
-// Lib des états (chargée depuis world/conditions ou exposée par vtt.js)
-let _shopConditionsLib = null;
+// Lib des états (chargée depuis world/conditions).
 async function _shopEnsureConditions() {
-  if (_shopConditionsLib) return _shopConditionsLib;
-  // Priorité : lib VTT en mémoire (déjà mergée avec customs)
-  if (typeof window._vttGetConditionLibrary === 'function') {
-    const fromVtt = window._vttGetConditionLibrary();
-    if (Array.isArray(fromVtt) && fromVtt.length) {
-      _shopConditionsLib = fromVtt;
-      return fromVtt;
-    }
-  }
-  try {
-    const { getDocData } = await import('../data/firestore.js');
-    const d = await getDocData('world', 'conditions');
-    if (d?.library?.length) {
-      _shopConditionsLib = d.library.map(c => ({
-        id: c.id, label: c.label || c.id, icon: c.icon || '✨',
-        defaultSaveStat: c.defaultSaveStat || null,
-        defaultDC: c.defaultDC || null,
-        defaultDuration: c.defaultDuration || null,
-      }));
-      return _shopConditionsLib;
-    }
-  } catch {}
-  return [];
+  return loadConditionLibrary();
 }
 
 const _ACT_TYPE_LABEL = { action: '🎯 Action', bonus: '💫 Action bonus', reaction: '⚡ Réaction' };
@@ -2657,28 +2633,12 @@ async function _shopActionsOnSave(itemSnapshot) {
   _shopRefreshActionsHost();
 }
 
-/** Charge spells.js et expose tous les handlers nécessaires sur window
- *  (au cas où characters.js n'aurait pas été chargé — ex: shop ouvert d'abord). */
+/** Charge spells.js pour enregistrer ses actions et utiliser l'éditeur de sorts embarqués. */
 async function _shopEnsureSpellsModule() {
-  const mod = await import('./characters/spells.js');
-  // Liste des handlers utilisés par les onclick du modal sort
-  const exposeKeys = [
-    'addSort', 'editSort', 'openSortModal', 'saveSort',
-    'addItemSpell', 'editItemSpell',
-    'runeIncrement', 'runeDecrement', 'selectNoyau',
-    'updateSortPM', 'toggleSortDetail',
-    'openSortCatEditor',
-    'sortDragStart', 'sortDragOver', 'sortDrop', 'sortDragEnd',
-  ];
-  exposeKeys.forEach(k => {
-    if (typeof mod[k] === 'function' && typeof window[k] !== 'function') {
-      window[k] = mod[k];
-    }
-  });
-  return mod;
+  return import('./characters/spells.js');
 }
 
-window._shopAddAction = async () => {
+async function addShopAction() {
   const mod = await _shopEnsureSpellsModule();
   if (typeof mod.addItemSpell !== 'function') {
     showNotif('Module sorts indisponible', 'error'); return;
@@ -2687,9 +2647,9 @@ window._shopAddAction = async () => {
   mod.addItemSpell(fakeItem, async (updatedItem) => {
     await _shopActionsOnSave(updatedItem);
   });
-};
+}
 
-window._shopEditAction = async (idx) => {
+async function editShopAction(idx) {
   const mod = await _shopEnsureSpellsModule();
   if (typeof mod.editItemSpell !== 'function') {
     showNotif('Module sorts indisponible', 'error'); return;
@@ -2698,9 +2658,9 @@ window._shopEditAction = async (idx) => {
   mod.editItemSpell(fakeItem, idx, async (updatedItem) => {
     await _shopActionsOnSave(updatedItem);
   });
-};
+}
 
-window._shopRemoveAction = async (idx) => {
+async function removeShopAction(idx) {
   if (!Number.isFinite(idx)) return;
   const act = _shopActionsCache[idx];
   const nom = act?.nom || act?.label || 'cette action';
@@ -2711,7 +2671,7 @@ window._shopRemoveAction = async (idx) => {
   })) return;
   _shopActionsCache.splice(idx, 1);
   _shopRefreshActionsHost();
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL ARTICLE — refonte (v2) : header compact + onglets sticky + footer fixe.
@@ -2817,10 +2777,10 @@ function _siBuildTabs(tpl, item, tplKey, activeTab = 'essentiel') {
 }
 
 /** Switch d'onglet — pure manipulation DOM, ne reconstruit rien. */
-window._siSetTab = (name) => {
+function setItemTab(name) {
   document.querySelectorAll('.si-tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === name));
   document.querySelectorAll('.si-panel').forEach(p => p.classList.toggle('is-active', p.dataset.panel === name));
-};
+}
 
 /** Mini "carte" live qui montre comment l'objet apparaîtra dans la boutique. */
 function _siRefreshChip() {
@@ -2832,8 +2792,6 @@ function _siRefreshChip() {
   const col = rar ? (_rareteColor(rar) || 'var(--text)') : 'var(--text)';
   chip.innerHTML = `<span style="color:${col}">${_esc(nom)}</span>${rar?` <em style="color:${col};opacity:.7;font-size:.72rem;font-style:normal">· ${_esc(rar)}</em>`:''}`;
 }
-window._siRefreshChip = _siRefreshChip;
-
 function openItemModal(itemId) {
   const item   = itemId ? _items.find(i=>i.id===itemId) : null;
   _shopActionsCacheLoad(item?.actions || []);
@@ -3022,7 +2980,6 @@ function _buildFieldsHtml(tpl,item) {
         { id:'vitesseBonus',   short:'Vit',  label:'Vitesse',    icon:'👢' },
         { id:'initiativeBonus',short:'Init', label:'Initiative', icon:'⚡' },
         { id:'caBonus',        short:'CA',   label:'Classe d\'Armure', icon:'🛡️' },
-        { id:'deckBonus',      short:'Deck', label:'Deck de sorts', icon:'🃏' },
       ];
       html+=`<div class="form-group sh-field-full"><label>${f.label} <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— ajoutés au calcul de base quand l'objet est équipé</span></label>
         <div class="sh-bonus-row">
@@ -3128,18 +3085,18 @@ function _shopTraitsRender(arr) {
         style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:2px 6px">✕</button>
     </div>`).join('');
 }
-window._shopTraitAdd = () => {
+function addShopTrait() {
   const arr = _shopTraitsGet(); arr.push(''); _shopTraitsSet(arr); _shopTraitsRender(arr);
   const list = document.getElementById('si-traits-list');
   const inputs = list?.querySelectorAll('input');
   inputs?.[inputs.length-1]?.focus();
-};
-window._shopTraitUpdate = (i, val) => {
+}
+function updateShopTrait(i, val) {
   const arr = _shopTraitsGet(); arr[i] = val; _shopTraitsSet(arr);
-};
-window._shopTraitRemove = (i) => {
+}
+function removeShopTrait(i) {
   const arr = _shopTraitsGet(); arr.splice(i,1); _shopTraitsSet(arr); _shopTraitsRender(arr);
-};
+}
 
 // ── Gestion dynamique des modificateurs de dégâts ─────────────────────────────
 function _renderDegatsStatChip(key, i) {
@@ -3163,18 +3120,18 @@ function _shopDegatsStatsRender(arr) {
   if (!list) return;
   list.innerHTML = arr.map((key,i)=>_renderDegatsStatChip(key,i)).join('');
 }
-window._shopDegatsStatAdd = () => {
+function addShopDegatsStat() {
   const arr = _shopDegatsStatsGet();
   arr.push(ITEM_STATS[0].key);
   _shopDegatsStatsSet(arr);
   _shopDegatsStatsRender(arr);
-};
-window._shopDegatsStatUpdate = (i, val) => {
+}
+function updateShopDegatsStat(i, val) {
   const arr = _shopDegatsStatsGet(); arr[i] = val; _shopDegatsStatsSet(arr);
-};
-window._shopDegatsStatRemove = (i) => {
+}
+function removeShopDegatsStat(i) {
   const arr = _shopDegatsStatsGet(); arr.splice(i,1); _shopDegatsStatsSet(arr); _shopDegatsStatsRender(arr);
-};
+}
 
 function toggleDispoInfini(cb){
   const input=document.getElementById('si-dispo');
@@ -3284,8 +3241,8 @@ async function saveShopItem(itemId) {
           data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
         });
       } else if (f.type === 'derived_bonus_grid') {
-        // Bonus dérivés : PV/PM max, Vitesse, Initiative, CA, Deck
-        ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus','deckBonus'].forEach(k => {
+        // Bonus dérivés : PV/PM max, Vitesse, Initiative, CA
+        ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus'].forEach(k => {
           const v = parseInt(document.getElementById(`si-${k}`)?.value);
           data[k] = Number.isFinite(v) ? v : 0;
         });
@@ -3524,7 +3481,7 @@ function openShopExportModal() {
   `);
 }
 
-window._shopTabSwitch = function(tab) {
+function switchShopExportTab(tab) {
   const isExp = tab === 'export';
   document.getElementById('sh-tab-export').style.display = isExp ? '' : 'none';
   document.getElementById('sh-tab-import').style.display = isExp ? 'none' : '';
@@ -3535,11 +3492,11 @@ window._shopTabSwitch = function(tab) {
   const impActs = document.getElementById('sh-tab-import-actions');
   if (expActs) expActs.style.display = isExp ? '' : 'none';
   if (impActs) impActs.style.display = isExp ? 'none' : '';
-};
+}
 
-window._shopExportSelectAll = function(checked) {
+function selectAllShopExport(checked) {
   document.querySelectorAll('.sh-export-cat-cb').forEach(cb => { cb.checked = checked; });
-};
+}
 
 // ── Construction des données d'export ─────────────────────────────────────────
 function _shopBuildExportData(catIds) {
@@ -3650,7 +3607,7 @@ function _shopDownload(filename, content, mime) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
 }
 
-window._shopDoExport = function() {
+function doShopExport() {
   const catIds = [...document.querySelectorAll('.sh-export-cat-cb:checked')].map(cb => cb.value);
   if (!catIds.length) { showNotif('Sélectionne au moins une catégorie.', 'error'); return; }
   const fmt  = document.querySelector('input[name="sh-export-fmt"]:checked')?.value || 'json';
@@ -3664,12 +3621,12 @@ window._shopDoExport = function() {
     _shopDownload(`boutique-${date}.md`, _shopExportToMd(data), 'text/markdown;charset=utf-8');
   }
   showNotif('Fichier exporté !', 'success');
-};
+}
 
 // ── Import ─────────────────────────────────────────────────────────────────────
 let _importData = null;
 
-window._shopPreviewImport = function(input) {
+function previewShopImport(input) {
   const file = input.files?.[0];
   const preview  = document.getElementById('sh-import-preview');
   const importBtn = document.getElementById('sh-import-confirm-btn');
@@ -3710,9 +3667,9 @@ window._shopPreviewImport = function(input) {
     }
   };
   reader.readAsText(file);
-};
+}
 
-window._shopDoImport = async function() {
+async function doShopImport() {
   if (!_importData) return;
   const selected = new Set(
     [...document.querySelectorAll('.sh-import-cat-cb:checked')].map(cb => cb.value)
@@ -3746,7 +3703,7 @@ window._shopDoImport = async function() {
     console.error('[import]', e);
     showNotif('Erreur lors de l\'import.', 'error');
   }
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ATELIER D'ESSAYAGE — version simplifiée
@@ -3862,7 +3819,6 @@ function _renderAtelierStats() {
     { lbl:'PV max',          ico:'❤', cur: calcPVMax(c),    next: calcPVMax(sim) },
     { lbl:'PM max',          ico:'✦', cur: calcPMMax(c),    next: calcPMMax(sim) },
     { lbl:'Vitesse',         ico:'🏃', cur: calcVitesse(c), next: calcVitesse(sim) },
-    { lbl:'Deck de sorts',   ico:'🃏', cur: calcDeckMax(c), next: calcDeckMax(sim) },
   ];
   const derivedHtml = derived.map(d => {
     const delta = d.next - d.cur;
@@ -4242,7 +4198,7 @@ Object.assign(shHandlers, {
     ev?.stopPropagation?.();
     if (!STATE.isAdmin) return;
     const itemId = el.dataset.id; if (!itemId) return;
-    await window._restockShopItem(itemId);
+    await restockShopItem(itemId);
     showNotif('📦 Stock +1', 'success');
     renderShop();
   },
@@ -4300,14 +4256,14 @@ Object.assign(shHandlers, {
   deleteItem:     (el) => deleteShopItem(el.dataset.id),
   editFromDetail: (el) => { closeModalDirect(); openItemModal(el.dataset.id); },
   buyFromDetail:  (el) => { closeModalDirect(); buyItem(el.dataset.id); },
-  sellEquip:      (el) => window._sellCurrentEquipForShop(el.dataset.slot),
+  sellEquip:      (el) => _sellCurrentEquipForShop(el.dataset.slot),
   // Stepper quantité achat
   qtyDown:        (el) => { const inp = el.nextElementSibling; inp?.stepDown(); inp?.dispatchEvent(new Event('input')); },
   qtyUp:          (el) => { const inp = el.previousElementSibling; inp?.stepUp(); inp?.dispatchEvent(new Event('input')); },
   qtyInput:       (el) => _shBuyQtyInput(el),
   // Modal article : tabs, prix, dispo, image, nom
-  setTab:         (el) => window._siSetTab(el.dataset.tab),
-  refreshChip:    () => window._siRefreshChip(),
+  setTab:         (el) => setItemTab(el.dataset.tab),
+  refreshChip:    () => _siRefreshChip(),
   refreshFields:  (el) => refreshItemFields(el.value),
   setItemTemplate:(el) => refreshTemplateFields(el.value),
   setItemCat:     () => { /* la catégorie n'affecte plus les champs ; juste un changement de référence */ },
@@ -4317,27 +4273,27 @@ Object.assign(shHandlers, {
   uploadImg:      (el) => previewUpload(el.id, el.dataset.preview, el.dataset.hidden),
   saveItem:       (el) => saveShopItem(el.dataset.id || ''),
   // Modal article : actions/sorts
-  addAction:      () => window._shopAddAction(),
-  editAction:     (el) => window._shopEditAction(parseInt(el.dataset.idx)),
-  removeAction:   (el) => window._shopRemoveAction(parseInt(el.dataset.idx)),
+  addAction:      () => addShopAction(),
+  editAction:     (el) => editShopAction(parseInt(el.dataset.idx)),
+  removeAction:   (el) => removeShopAction(parseInt(el.dataset.idx)),
   // Modal article : traits + degats stats + skills
-  traitAdd:       () => window._shopTraitAdd(),
-  traitUpdate:    (el) => window._shopTraitUpdate(parseInt(el.dataset.idx), el.value),
-  traitRemove:    (el) => window._shopTraitRemove(parseInt(el.dataset.idx)),
-  degatsAdd:      () => window._shopDegatsStatAdd(),
-  degatsUpdate:   (el) => window._shopDegatsStatUpdate(parseInt(el.dataset.idx), el.value),
-  degatsRemove:   (el) => window._shopDegatsStatRemove(parseInt(el.dataset.idx)),
-  skillAdd:       () => window._shopAddSkillBonus(),
-  skillRemove:    (el) => window._shopRemoveSkillBonus(el.dataset.skill),
+  traitAdd:       () => addShopTrait(),
+  traitUpdate:    (el) => updateShopTrait(parseInt(el.dataset.idx), el.value),
+  traitRemove:    (el) => removeShopTrait(parseInt(el.dataset.idx)),
+  degatsAdd:      () => addShopDegatsStat(),
+  degatsUpdate:   (el) => updateShopDegatsStat(parseInt(el.dataset.idx), el.value),
+  degatsRemove:   (el) => removeShopDegatsStat(parseInt(el.dataset.idx)),
+  skillAdd:       () => addSkillBonus(),
+  skillRemove:    (el) => removeSkillBonus(el.dataset.skill),
   // Modal catégorie/sous-cat
   saveCat:        (el) => saveCat(el.dataset.id || ''),
   saveSubCat:     (el) => saveSubCat(el.dataset.cat, el.dataset.sc || ''),
   // Export / import
-  tabSwitch:      (el) => window._shopTabSwitch(el.dataset.tab),
-  exportSelectAll:(el) => window._shopExportSelectAll(el.dataset.all === 'true'),
-  doExport:       () => window._shopDoExport(),
-  previewImport:  (el) => window._shopPreviewImport(el),
-  doImport:       () => window._shopDoImport(),
+  tabSwitch:      (el) => switchShopExportTab(el.dataset.tab),
+  exportSelectAll:(el) => selectAllShopExport(el.dataset.all === 'true'),
+  doExport:       () => doShopExport(),
+  previewImport:  (el) => previewShopImport(el),
+  doImport:       () => doShopImport(),
   // No-op : juste pour empêcher la propagation au parent (équivalent stopPropagation)
   stop:           (el, ev) => ev?.stopPropagation?.(),
 });
@@ -4353,18 +4309,3 @@ function _shBuyQtyInput(el) {
   if (total) total.textContent = (v * prix) + ' or';
   if (confirmBtn) confirmBtn.textContent = `🛒 Acheter ×${v} — ${v * prix} or`;
 }
-
-Object.assign(window,{
-  renderShop, shopGoHome, shopGoCat, shopGoSubCat, shopPage,
-  openCatModal, saveCat, deleteCat,
-  openSubCatModal, saveSubCat, deleteSubCat,
-  openItemModal, refreshItemFields, refreshSubCatSelect,
-  previewUpload, updatePrixVente, pickRarete,
-  shopSetChar, buyItem, confirmBuyItem, sellInvItemFromShop,
-  toggleDispoInfini, saveShopItem, deleteShopItem,
-  openShopItemModal, openShopItemDetail, editShopItem, filterShop,
-  shopFilterSearch, shopFilterBy, shopFilterReset, shopToggleTag,
-  shopSetSort,
-  openWeaponFormatsAdmin,
-  openShopExportModal,
-});

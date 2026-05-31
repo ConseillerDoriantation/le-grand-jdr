@@ -259,11 +259,13 @@ async function _executeEntry(entry) {
         await go(entry.id);
         return;
 
-      case 'npc':
+      case 'npc': {
         await go('npcs');
         await _nextTick();
-        window.selectNpc?.(entry.id);
+        const { selectNpc } = await import('./npcs.js');
+        selectNpc(entry.id);
         return;
+      }
 
       case 'character': {
         await go('characters');
@@ -273,33 +275,43 @@ async function _executeEntry(entry) {
         return;
       }
 
-      case 'beast':
+      case 'beast': {
         await go('bestiaire');
         await _nextTick();
-        window._bstOpen?.(entry.id);
+        const { openBestiaryEntry } = await import('./bestiary.js');
+        openBestiaryEntry(entry.id);
         return;
+      }
 
       case 'recipe':
         await go('recettes');
         await _nextTick();
-        window.openItemDetailModal?.(entry.id);
+        {
+          const { openItemDetailModal } = await import("./recipes.js");
+          openItemDetailModal(entry.id);
+        }
         return;
 
       case 'shop': {
         await go('shop');
         await _nextTick();
         const it = entry.payload;
-        if (it?.categorieId) window.shopGoCat?.(it.categorieId);
+        const { shopGoCat, shopFilterSearch } = await import('./shop.js');
+        if (it?.categorieId) shopGoCat(it.categorieId);
         await _nextTick();
-        if (it?.nom) window.shopFilterSearch?.(it.nom);
+        if (it?.nom) shopFilterSearch(it.nom);
         return;
       }
 
       case 'quest':
         await go('quests');
         await _nextTick();
-        if (STATE.isAdmin && window._questEdit) window._questEdit(entry.id);
-        else _highlight(`[data-quest-id="${entry.id}"]`);
+        if (STATE.isAdmin) {
+          const { editQuest } = await import("./quests.js");
+          editQuest(entry.id);
+        } else {
+          _highlight(`[data-quest-id="${entry.id}"]`);
+        }
         return;
 
       case 'achievement':
@@ -317,8 +329,12 @@ async function _executeEntry(entry) {
       case 'story':
         await go('story');
         await _nextTick();
-        if (STATE.isAdmin && window._stEditGroup) window._stEditGroup(entry.id);
-        else _highlight(`[data-story-id="${entry.id}"]`);
+        if (STATE.isAdmin) {
+          const { editStory } = await import('./story.js');
+          editStory(entry.id);
+        } else {
+          _highlight(`[data-story-id="${entry.id}"]`);
+        }
         return;
     }
   } catch (e) {
