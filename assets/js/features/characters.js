@@ -2292,7 +2292,7 @@ function showCharTab(tab, el) {
   }
 
   _currentTopTab  = v3;
-  charSession.getCurrentCharTab() = v3;
+  charSession.set(charSession.getCurrentChar(), charSession.getCanEditChar(), v3);
 
   // Onglets v3 (nouveau template)
   document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t =>

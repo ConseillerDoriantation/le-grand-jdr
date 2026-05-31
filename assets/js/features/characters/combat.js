@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { charSession } from '../../../shared/char-session.js';
+import { charSession } from '../../shared/char-session.js';
 import { updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
 import { formatItemBonusText, getItemStatBonus } from '../../shared/char-stats.js';
@@ -275,7 +275,7 @@ export async function toggleCharElement(charId, elemId) {
   else          elems.push(elemId);
   c.elements = elems;
   // Synchronise les refs pour que le V3 lise la version fraîche
-  if (charSession.getCurrentChar()?.id === c.id) charSession.getCurrentChar() = c;
+  if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
   await updateInCol('characters', charId, { elements: elems });
   // ── Mise à jour immédiate de l'UI (sans attendre un re-render complet) ──
   // 1. Toggle visuel direct des chips V3 (.elem-chip[data-elem-id="..."])

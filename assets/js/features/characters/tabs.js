@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { charSession } from '../../../shared/char-session.js';
+import { charSession } from '../../shared/char-session.js';
 import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';

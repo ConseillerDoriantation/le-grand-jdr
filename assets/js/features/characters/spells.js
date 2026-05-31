@@ -1,5 +1,5 @@
 import { STATE } from '../../core/state.js';
-import { charSession } from '../../../shared/char-session.js';
+import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
@@ -2941,7 +2941,7 @@ export async function saveSort(idx) {
     if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
     c.deck_sorts=sorts;
     // Sync les références pour que les filtres / re-render lisent la version fraîche
-    if (charSession.getCurrentChar()?.id === c.id) charSession.getCurrentChar() = c;
+    if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
     if (STATE.activeChar?.id === c.id)    STATE.activeChar    = c;
     await updateInCol('characters',c.id,{deck_sorts:sorts});
     closeModal();
