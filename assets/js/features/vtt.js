@@ -15,7 +15,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from './characters/data.js';
@@ -12131,6 +12131,7 @@ function _msTabCombat(c, uid, canEdit) {
       <div class="vtt-ms-def-item"><span>🛡 CA</span><strong>${calcCA(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>⚡ Vit.</span><strong>${calcVitesse(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>🎯 Maît.</span><strong>+${getMaitriseBonus(c)}</strong></div>
+      <div class="vtt-ms-def-item" title="Sorts actifs / capacité du deck"><span>🃏 Deck</span><strong>${(c.deck_sorts||[]).filter(s=>s.actif).length}/${calcDeckMax(c)}</strong></div>
     </div>
     ${weaponHtml}${setHtml}
     ${_msXpSection(c, uid, canEdit)}`;
