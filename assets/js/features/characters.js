@@ -602,26 +602,26 @@ function renderCharSheet(c, keepTab) {
       <div class="cs-id-body">
         <div class="cs-name-row">
           ${canEdit
-            ? `<span class="cs-name cs-editable" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Modifier">${c.nom||'Nouveau personnage'}</span>`
-            : `<span class="cs-name">${c.nom||'Nouveau personnage'}</span>`}
+            ? `<span class="cs-name cs-editable" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Modifier">${_esc(c.nom||'Nouveau personnage')}</span>`
+            : `<span class="cs-name">${_esc(c.nom||'Nouveau personnage')}</span>`}
           ${canEdit?`<button class="cs-export-btn" data-action="openCharExportMenu" data-id="${c.id}" title="Exporter la fiche (JSON ou PDF)">📤</button>`:''}
           ${canEdit?`<button class="cs-delete-btn" data-action="deleteChar" data-id="${c.id}" title="Supprimer ce personnage">🗑️</button>`:''}
         </div>
         ${titres.length||canEdit?`<div class="cs-titres">
-          ${titres.map(t=>`<span class="badge badge-gold" style="font-size:.62rem">${t}</span>`).join('')}
+          ${titres.map(t=>`<span class="badge badge-gold" style="font-size:.62rem">${_esc(t)}</span>`).join('')}
           ${canEdit?`<button class="cs-add-titre" data-action="manageTitres" data-id="${c.id}">＋ titre</button>`:''}
         </div>`:''}
         ${(c.classe||c.race||canEdit)?`<div class="cs-id-chips">
           ${canEdit
             ? `<span class="cs-id-chip cs-id-chip--classe${c.classe?'':' cs-id-chip--empty'} cs-editable"
-                title="Modifier la classe" data-fieldval="${c.classe||''}"
-                data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${c.classe||'Classe'}</span>`
-            : (c.classe?`<span class="cs-id-chip cs-id-chip--classe">${c.classe}</span>`:'')}
+                title="Modifier la classe" data-fieldval="${_esc(c.classe||'')}"
+                data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
+            : (c.classe?`<span class="cs-id-chip cs-id-chip--classe">${_esc(c.classe)}</span>`:'')}
           ${canEdit
             ? `<span class="cs-id-chip cs-id-chip--race${c.race?'':' cs-id-chip--empty'} cs-editable"
-                title="Modifier la race" data-fieldval="${c.race||''}"
-                data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${c.race||'Race'}</span>`
-            : (c.race?`<span class="cs-id-chip cs-id-chip--race">${c.race}</span>`:'')}
+                title="Modifier la race" data-fieldval="${_esc(c.race||'')}"
+                data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
+            : (c.race?`<span class="cs-id-chip cs-id-chip--race">${_esc(c.race)}</span>`:'')}
         </div>`:''}
       </div>
     </div>

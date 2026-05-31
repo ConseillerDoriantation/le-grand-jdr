@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-header);
   padding: 1.5rem;
   overflow-y: auto;
 }

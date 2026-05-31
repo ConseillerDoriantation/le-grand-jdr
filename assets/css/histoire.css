@@ -102,7 +102,7 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.hist-save-dot--saved   { background: #22c38e; }
+.hist-save-dot--saved   { background: var(--emerald); }
 .hist-save-dot--saving  { background: #f59e0b; animation: hist-pulse .8s ease infinite; }
 .hist-save-dot--unsaved { background: #ff6b6b; }
 
@@ -435,7 +435,7 @@
 /* ── Picker @ mention ──────────────────────────────────────────────────────── */
 .hist-picker {
   position: absolute;
-  z-index: 999;
+  z-index: var(--z-picker);
   width: 280px;
   max-height: 340px;
   overflow-y: auto;
@@ -652,7 +652,7 @@
 #hist-handout-modal {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: var(--z-modal-stacked);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -807,7 +807,7 @@
 #hist-des-modal {
   position: fixed;
   inset: 0;
-  z-index: 2100;
+  z-index: var(--z-modal-stacked2);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -26,16 +26,18 @@ const PAGES = {
 
     // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
-    const [chars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, allPartyChars, nextSession] = await Promise.all([
-      loadChars(uid).catch(() => []),
+    const [allChars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, nextSession] = await Promise.all([
+      loadChars(null).catch(() => []),
       loadCollection('story').catch(() => []),
       getDocData('bastion', 'main').catch(() => null),
       loadCollection('achievements').catch(() => []),
       loadCollection('quests').catch(() => []),
       loadCollection('collection').catch(() => []),
-      STATE.isAdmin ? Promise.resolve([]) : loadChars(null).catch(() => []),
       getDocDataSilent('agenda_session', 'next'),
     ]);
+    // chars = mes persos ; allPartyChars = les autres (pour le bloc groupe côté joueur)
+    const chars         = uid ? allChars.filter(c => c.uid === uid) : allChars;
+    const allPartyChars = uid ? allChars.filter(c => c.uid !== uid) : [];
     // Les hauts-faits secrets restent invisibles aux joueurs partout dans le dashboard
     const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
     STATE.characters = chars;
@@ -349,14 +351,20 @@ const PAGES = {
     };
 
     // Carte quête (joinable en place, pas de navigation sur le conteneur)
+    const _questRequiredCount = q => {
+      const n = parseInt(q.participantsRequis ?? q.participantsRequired ?? q.nbParticipants ?? 0, 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
     const QDIFF = { facile:'#22c38e', moyen:'#4f8cff', difficile:'#e8b84b', extreme:'#ff6b6b' };
     const QDLBL = { facile:'Facile',  moyen:'Moyen',   difficile:'Difficile', extreme:'Extrême' };
     const _dashQuestCard = q => {
       const col    = QDIFF[q.difficulte] || '#4f8cff';
       const dlbl   = QDLBL[q.difficulte] || 'Moyen';
       const parts  = Array.isArray(q.participants) ? q.participants : [];
+      const required = _questRequiredCount(q);
       const joined = parts.some(p => p.uid === _myUid);
       const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');
+      const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
       const joinBtn = !STATE.isAdmin
         ? `<button class="quest-join-btn${joined?' quest-join-btn--joined':''}"
              data-action="_dashQuestJoin" data-id="${q.id}">
@@ -372,7 +380,7 @@ const PAGES = {
         <div class="quest-card-title">${_esc(q.titre||'Quête')}</div>
         ${q.description ? `<div class="quest-card-desc">${_esc(q.description)}</div>` : ''}
         ${q.recompense  ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
-        ${parts.length > 0 ? `<div class="quest-parts">${portHtml}${parts.length>4?`<span class="quest-parts-count">+${parts.length-4}</span>`:''}</div>` : ''}
+        <div class="quest-parts">${portHtml}${parts.length>4?`<span class="quest-parts-count">+${parts.length-4}</span>`:''}<span class="quest-parts-count">${partsLabel}</span></div>
       </div>`;
     };
 
@@ -1236,7 +1244,7 @@ const PAGES = {
     <!-- ═══ HEADER ══════════════════════════════════════════ -->
     <div style="background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.4rem 1.6rem;margin-bottom:1.4rem;display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap">
       <div>
-        <h1 style="font-family:'Cinzel',serif;font-size:1.7rem;color:var(--gold);letter-spacing:2px;line-height:1;margin-bottom:.4rem">${data.nom||'Le Bastion'}</h1>
+        <h1 style="font-family:'Cinzel',serif;font-size:1.7rem;color:var(--gold);letter-spacing:2px;line-height:1;margin-bottom:.4rem">${_esc(data.nom||'Le Bastion')}</h1>
         <p style="font-size:.82rem;color:var(--text-dim);margin:0">
           ${data.activite?`<span style="margin-right:1.2rem">⚙️ ${data.activite}</span>`:''}
           ${data.pnj?`<span>👤 ${data.pnj}</span>`:''}
@@ -1393,8 +1401,8 @@ const PAGES = {
               <div style="flex:1;min-width:0">
                 <div style="font-size:.81rem;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                   ${isInvest
-                    ? `${h.investisseur?.nom||'?'}${h.message?' <span style="color:var(--text-dim);font-weight:400;font-style:italic">— ${h.message}</span>':''}`
-                    : `Cycle ${h.session} <span style="color:${evtColor};font-weight:400;font-size:.75rem">· ${h.evenement||'—'}</span>`}
+                    ? `${_esc(h.investisseur?.nom||'?')}${h.message?' <span style="color:var(--text-dim);font-weight:400;font-style:italic">— ${h.message}</span>':''}`
+                    : `Cycle ${h.session} <span style="color:${evtColor};font-weight:400;font-size:.75rem">· ${_esc(h.evenement||'—')}</span>`}
                 </div>
                 <div style="font-size:.7rem;color:var(--text-dim);display:flex;gap:.5rem;align-items:center;margin-top:1px">
                   ${isInvest
@@ -1431,7 +1439,7 @@ const PAGES = {
           ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucun fondateur enregistré.</p>`
           : fondateursList.map(f => `
             <div style="display:flex;justify-content:space-between;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.83rem">
-              <span style="color:var(--text)">${f.nom||'?'}</span>
+              <span style="color:var(--text)">${_esc(f.nom||'?')}</span>
               <span style="font-family:'Cinzel',serif;color:var(--gold);font-size:.8rem">${partParFondateur} or</span>
             </div>`).join('') +
           `<div style="display:flex;justify-content:space-between;padding-top:.5rem;font-size:.75rem;color:var(--text-dim)"><span>Total</span><span>${partFondateurs} or</span></div>`}
@@ -1447,8 +1455,8 @@ const PAGES = {
           ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Inventaire vide.</p>`
           : inventaire.slice(0,4).map(item => `
             <div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.8rem">
-              <span style="flex:1;color:var(--text)">${item.nom||'?'}${item.quantite>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}</span>
-              <span style="font-size:.68rem;color:var(--text-dim)">${item.deposePar||''}</span>
+              <span style="flex:1;color:var(--text)">${_esc(item.nom||'?')}${item.quantite>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}</span>
+              <span style="font-size:.68rem;color:var(--text-dim)">${_esc(item.deposePar||'')}</span>
             </div>`).join('') +
           (inventaire.length > 4 ? `<p style="font-size:.72rem;color:var(--text-dim);margin:.5rem 0 0;text-align:center">+${inventaire.length-4} objet(s)</p>` : '')}
       </div>
@@ -1582,7 +1590,7 @@ const PAGES = {
           <div class="card-header">Joueurs inscrits (${users.length})</div>
           <table class="data-table">
             <thead><tr><th>Pseudo</th><th>Email</th><th>Inscrit le</th></tr></thead>
-            <tbody>${users.filter(u => u.email !== FS.ADMIN_EMAIL).map(u => `<tr><td>${u.pseudo || '-'}</td><td style="font-size:0.8rem;color:var(--text-muted)">${u.email || '-'}</td><td style="font-size:0.78rem;color:var(--text-dim)">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '?'}</td></tr>`).join('')}</tbody>
+            <tbody>${users.filter(u => u.email !== FS.ADMIN_EMAIL).map(u => `<tr><td>${_esc(u.pseudo || '-')}</td><td style="font-size:0.8rem;color:var(--text-muted)">${_esc(u.email || '-')}</td><td style="font-size:0.78rem;color:var(--text-dim)">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '?'}</td></tr>`).join('')}</tbody>
           </table>
         </div>
         <div class="card">

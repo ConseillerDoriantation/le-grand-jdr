@@ -63,11 +63,9 @@
 .quest-card-desc {
   font-size: .8rem;
   color: var(--text-muted);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ── Récompense ──────────────────────────────── */
@@ -88,7 +86,9 @@
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-  margin-top: .3rem;
+  margin-top: auto;
+  padding-top: .75rem;
+  border-top: 1px solid rgba(255,255,255,.08);
 }
 
 .quest-parts img,
@@ -106,7 +106,9 @@
   font-size: .72rem;
   color: var(--text-dim);
   font-style: italic;
-  margin-top: .25rem;
+  margin-top: auto;
+  padding-top: .75rem;
+  border-top: 1px solid rgba(255,255,255,.08);
 }
 
 /* ── Bouton Rejoindre ────────────────────────── */
@@ -130,8 +132,8 @@
 
 .quest-join-btn--joined {
   background: rgba(34, 195, 142, .12);
-  border-color: #22c38e;
-  color: #22c38e;
+  border-color: var(--emerald);
+  color: var(--emerald);
 }
 
 .quest-join-btn--joined:hover {

@@ -51,7 +51,7 @@
   position: fixed;
   inset: 0;
   background: var(--bg-deep);
-  z-index: 9999;
+  z-index: var(--z-overlay);
 }
 
 /* Variante inline : utilisée par #main-content pendant la navigation. */

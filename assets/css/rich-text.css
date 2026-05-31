@@ -149,7 +149,7 @@
 .rte-color-pop {
   display: none;
   position: fixed;
-  z-index: 9999; /* > .modal-overlay (1000) pour rester visible quand l'éditeur est en modale */
+  z-index: var(--z-overlay); /* > .modal-overlay (1000) pour rester visible quand l'éditeur est en modale */
   padding: .35rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -195,7 +195,7 @@
 .rte-size-pop {
   display: none;
   position: fixed;
-  z-index: 9999;
+  z-index: var(--z-overlay);
   min-width: 160px;
   padding: .25rem;
   background: var(--bg-elevated);

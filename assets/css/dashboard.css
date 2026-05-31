@@ -266,7 +266,7 @@
   filter: blur(3px);
   border-radius: 0 var(--r-full) var(--r-full) 0;
 }
-.dv2-bar-hp { background: linear-gradient(90deg, #18a870, #22c38e); }
+.dv2-bar-hp { background: linear-gradient(90deg, #18a870, var(--emerald)); }
 .dv2-bar-mp { background: linear-gradient(90deg, #3a6ffa, #6aa7ff); }
 .dv2-bar-xp {
   background: linear-gradient(90deg, #8b5cf6, #c084fc);
@@ -767,7 +767,7 @@
 .dv2-toast-container {
   position: fixed;
   top: 20px; right: 20px;
-  z-index: 9999;
+  z-index: var(--z-overlay);
   display: flex; flex-direction: column; gap: 10px;
   pointer-events: none;
 }

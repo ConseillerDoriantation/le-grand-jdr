@@ -328,7 +328,7 @@
 .pp-card-vital small { font-size: .56rem; opacity: .6; font-weight: 600; }
 .pp-card-vital--pv { background: rgba(255,107,107,.14); border: 1px solid rgba(255,107,107,.3); color: #ff8080; }
 .pp-card-vital--pm { background: rgba(79,140,255,.14);  border: 1px solid rgba(79,140,255,.3);  color: #7fb0ff; }
-.pp-card-vital--ca { background: rgba(34,195,142,.14);  border: 1px solid rgba(34,195,142,.3);  color: #22c38e; }
+.pp-card-vital--ca { background: rgba(34,195,142,.14);  border: 1px solid rgba(34,195,142,.3);  color: var(--emerald); }
 .pp-card-vital--or { background: rgba(232,184,75,.14);  border: 1px solid rgba(232,184,75,.3);  color: var(--gold); }
 
 .pp-card-tags {
@@ -589,7 +589,7 @@
 .pp-vital-val small { font-size: .62rem; opacity: .55; font-weight: 600; }
 .pp-vital--pv { background: rgba(255,107,107,.12); border: 1px solid rgba(255,107,107,.3); color: #ff8080; }
 .pp-vital--pm { background: rgba(79,140,255,.12);  border: 1px solid rgba(79,140,255,.3);  color: #7fb0ff; }
-.pp-vital--ca { background: rgba(34,195,142,.12);  border: 1px solid rgba(34,195,142,.3);  color: #22c38e; }
+.pp-vital--ca { background: rgba(34,195,142,.12);  border: 1px solid rgba(34,195,142,.3);  color: var(--emerald); }
 .pp-vital--or { background: rgba(232,184,75,.12);  border: 1px solid rgba(232,184,75,.3);  color: var(--gold); }
 
 /* ── Colonne centrale (narratif) + sidebar (stats/équip/hauts-faits) ─── */
@@ -1245,7 +1245,7 @@
 
 /* ── Lightbox plein écran (style Hauts-Faits) ──────────────────────── */
 .pp-lightbox {
-  position: fixed; inset: 0; z-index: 10000;
+  position: fixed; inset: 0; z-index: var(--z-lightbox);
   background: rgba(0, 0, 0, .92);
   display: flex; align-items: center; justify-content: center;
   cursor: zoom-out;
@@ -1790,7 +1790,7 @@
   font-family:'Cinzel Decorative','Cinzel',serif;
   font-size:clamp(1.6rem,3.5vw,2.4rem); font-weight:900;
   text-align:center; letter-spacing:.05em; line-height:1.05;
-  background:linear-gradient(135deg, var(--text) 10%, #f4c430 50%, #7eb0ff 90%);
+  background:linear-gradient(135deg, var(--text) 10%, var(--amber) 50%, #7eb0ff 90%);
   -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
 }
 .hall-sub {
@@ -1842,7 +1842,7 @@
 .view-tab:hover { color:var(--text-soft); }
 .view-tab.active {
   background:linear-gradient(135deg, rgba(79,140,255,.18), rgba(157,111,255,.10));
-  color:#f4c430; box-shadow:0 0 12px rgba(79,140,255,.18) inset;
+  color:var(--amber); box-shadow:0 0 12px rgba(79,140,255,.18) inset;
 }
 .search-wrap {
   display:flex; align-items:center; gap:8px;
@@ -3440,7 +3440,7 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 }
 .pp-mn-vis-check {
   font-size: .85rem; font-weight: 800;
-  color: var(--emerald, #22c38e);
+  color: var(--emerald, var(--emerald));
   opacity: 0; transition: opacity .15s;
 }
 .pp-mn-vis-card.is-on .pp-mn-vis-check { opacity: 1; }

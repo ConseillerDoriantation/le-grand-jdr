@@ -29,6 +29,11 @@ const STATUT = [
 const _diff   = id => DIFF.find(d => d.id === id)   || DIFF[1];
 const _statut = id => STATUT.find(s => s.id === id) || STATUT[0];
 
+function _questRequiredCount(q = {}) {
+  const n = parseInt(q.participantsRequis ?? q.participantsRequired ?? q.nbParticipants ?? 0, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 // ── Mini portrait d'un participant ────────────
 function _portrait(p, size = 28) {
   const pos = `${50 + (p.photoX || 0) * 50}% ${50 + (p.photoY || 0) * 50}%`;
@@ -50,15 +55,17 @@ function _questCard(q, myChar) {
   const df    = _diff(q.difficulte);
   const st    = _statut(q.statut);
   const parts = Array.isArray(q.participants) ? q.participants : [];
+  const required = _questRequiredCount(q);
   const uid   = STATE.user?.uid;
   const joined = myChar ? parts.some(p => p.uid === uid) : false;
+  const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
 
   const partsHtml = parts.length > 0
     ? `<div class="quest-parts">
         ${parts.map(p => _portrait(p, 28)).join('')}
-        <span class="quest-parts-count">${parts.length} participant${parts.length > 1 ? 's' : ''}</span>
+        <span class="quest-parts-count">${partsLabel}</span>
        </div>`
-    : `<div class="quest-parts-empty">Aucun participant</div>`;
+    : `<div class="quest-parts-empty">${required ? `0 intéressé · ${required} requis` : 'Aucun intéressé'}</div>`;
 
   const joinBtn = (!STATE.isAdmin && myChar && q.statut === 'active') ? `
     <button class="quest-join-btn${joined ? ' quest-join-btn--joined' : ''}"
@@ -265,9 +272,16 @@ function _openQuestModal(id) {
       <label>Description</label>
       <textarea class="input-field" id="q-desc" rows="3" placeholder="Détails de la mission...">${_esc(ex?.description || '')}</textarea>
     </div>
-    <div class="form-group">
-      <label>Récompense</label>
-      <input class="input-field" id="q-recompense" value="${_esc(ex?.recompense || '')}" placeholder="ex: 300 XP + 50 or">
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(112px,140px);gap:.75rem;align-items:end">
+      <div class="form-group">
+        <label>Récompense</label>
+        <input class="input-field" id="q-recompense" value="${_esc(ex?.recompense || '')}" placeholder="ex: 300 XP + 50 or">
+      </div>
+      <div class="form-group">
+        <label>Participants requis <span style="color:var(--text-dim);font-weight:400">(objectif)</span></label>
+        <input class="input-field" id="q-participants-requis" type="number" min="0" step="1"
+          value="${_questRequiredCount(ex)}" placeholder="ex: 4">
+      </div>
     </div>
     <div class="form-group">
       <label>Lieu <span style="color:var(--text-dim);font-weight:400">(optionnel — relie la quête à la carte)</span></label>
@@ -305,12 +319,22 @@ window._questSave = async function (id) {
   const desc       = document.getElementById('q-desc')?.value.trim();
   const recompense = document.getElementById('q-recompense')?.value.trim();
   const lieu       = document.getElementById('q-lieu')?.value.trim();
+  const requisRaw  = parseInt(document.getElementById('q-participants-requis')?.value, 10);
+  const participantsRequis = Number.isFinite(requisRaw) && requisRaw > 0 ? requisRaw : 0;
   const difficulte = document.getElementById('q-difficulte')?.value;
   const statut     = document.getElementById('q-statut')?.value;
 
   if (!titre) { showNotif('Le titre est obligatoire.', 'error'); return; }
 
-  const data = { titre, description: desc || '', recompense: recompense || '', lieu: lieu || '', difficulte, statut };
+  const data = {
+    titre,
+    description: desc || '',
+    recompense: recompense || '',
+    lieu: lieu || '',
+    participantsRequis,
+    difficulte,
+    statut,
+  };
 
   try {
     if (id) {

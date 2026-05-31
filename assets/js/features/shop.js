@@ -11,7 +11,7 @@ import { loadDamageTypes } from '../shared/damage-types.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
-import { openWeaponFormatsAdmin } from './characters/data.js';
+import { openWeaponFormatsAdmin, syncEquipmentAfterInventoryMutation } from './characters/data.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import Sortable from '../vendor/sortable.esm.js';
@@ -1631,8 +1631,25 @@ async function _sellCurrentEquipForShop(slot) {
     showNotif("Cet équipement n'a pas d'objet d'inventaire associé.", 'error');
     return;
   }
+
+  const invItem = c.inventaire?.[invIndex] || {};
+  const itemNom = invItem.nom || eq?.nom || 'cet objet';
+  const prixVente = parseFloat(invItem.prixVente) || 0;
+  const ok = await confirmModal(
+    `Tu vas vendre l'objet équipé sur <strong>${_esc(slot)}</strong> :<br>
+    <strong>${_esc(itemNom)}</strong>${prixVente ? ` pour <strong>${prixVente} or</strong>` : ''}.<br>
+    Aucun achat ne sera effectué.`,
+    {
+      title: 'Vendre l’équipement porté',
+      confirmLabel: 'Vendre cet objet',
+      cancelLabel: 'Garder l’objet',
+      icon: '💰',
+    },
+  );
+  if (!ok) return;
+
   closeModalDirect();
-  await sellInvItemFromShop(c.id, invIndex);
+  await sellInvItemFromShop(c.id, invIndex, { skipConfirm: true });
 }
 window._sellCurrentEquipForShop = _sellCurrentEquipForShop;
 
@@ -1677,6 +1694,7 @@ function openShopItemDetail(itemId) {
     ? (parseFloat(activeChar.inventaire?.[equippedHere.sourceInvIndex]?.prixVente) || 0)
     : 0;
   const canSellCurrent = !!equippedHere && Number.isInteger(equippedHere.sourceInvIndex) && equippedHere.sourceInvIndex >= 0;
+  const equippedItemName = equippedHere?.nom || activeChar.inventaire?.[equippedHere?.sourceInvIndex]?.nom || '';
 
   const rareNum = _getRareteNum(item.rarete);
   const rareCol = rareNum > 0 ? _rareteColor(RARETE_NAMES[rareNum]) : '';
@@ -1781,9 +1799,10 @@ function openShopItemDetail(itemId) {
       ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-sh-action="editFromDetail" data-id="${item.id}">✏️ Modifier</button>` : ''}
       <div class="sh-detail-footer-spacer"></div>
       ${canSellCurrent ? `
-        <button class="btn btn-outline btn-sm" title="Revendre l'objet actuellement équipé sur ${compareSlot}"
-          data-sh-action="sellEquip" data-slot="${compareSlot}">
-          💰 Revendre l'actuel${sellPrice ? ` (+${sellPrice} or)` : ''}
+        <button class="btn btn-outline btn-sm sh-detail-sell-current"
+          title="Vendre l'objet équipé sur ${_esc(compareSlot)}${equippedItemName ? ` : ${_esc(equippedItemName)}` : ''}"
+          data-sh-action="sellEquip" data-slot="${_esc(compareSlot)}">
+          💰 Vendre équipé${sellPrice ? ` (+${sellPrice} or)` : ''}
         </button>` : ''}
       ${actionBtn}
     </div>
@@ -1870,8 +1889,11 @@ async function buyItem(itemId) {
   `);
 }
 
+let _buyInProgress = false;
 async function confirmBuyItem(itemId, directQty) {
+  if (_buyInProgress) return;
   try {
+    _buyInProgress = true;
     const charId   = window._shopCharId;
     const item     = _items.find(i => i.id === itemId);
     if (!item || !charId) return;
@@ -1929,6 +1951,7 @@ async function confirmBuyItem(itemId, directQty) {
       }
     });
   } catch (e) { notifySaveError(e); }
+  finally { _buyInProgress = false; }
 }
 
 window._restockShopItem = async (itemId) => {
@@ -1944,7 +1967,7 @@ window._restockShopItem = async (itemId) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // VENDRE un item de l'inventaire (appelé depuis characters.js)
 // ══════════════════════════════════════════════════════════════════════════════
-async function sellInvItemFromShop(charId, invIndex) {
+async function sellInvItemFromShop(charId, invIndex, opts = {}) {
   try {
     const c = STATE.characters?.find(x => x.id === charId);
     if (!c) return;
@@ -1956,7 +1979,7 @@ async function sellInvItemFromShop(charId, invIndex) {
     const prixVente = parseFloat(item.prixVente) || 0;
     const itemNom   = item.nom || 'cet objet';
 
-    if (!await confirmModal(`Vendre "${itemNom}" pour ${prixVente} or ?`, { title: 'Confirmation de vente' })) return;
+    if (!opts.skipConfirm && !await confirmModal(`Vendre "${_esc(itemNom)}" pour ${prixVente} or ?`, { title: 'Confirmation de vente' })) return;
 
     if (item.itemId) {
       const shopItem = await import('../data/firestore.js').then(m => m.getDocData('shop', item.itemId)).catch(()=>null);
@@ -1971,14 +1994,23 @@ async function sellInvItemFromShop(charId, invIndex) {
     }
 
     inv.splice(invIndex, 1);
+    const equipSync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
+    const extraPayload = { inventaire: inv };
+    if (equipSync.changed) {
+      extraPayload.equipement = equipSync.equipement;
+      extraPayload.statsBonus = equipSync.statsBonus;
+    }
 
     const res = await useGold(charId, +prixVente, `Vente : ${itemNom}`, {
       charObj: c,
-      extraPayload: { inventaire: inv },
+      extraPayload,
     });
     if (!res.ok) { showNotif(res.error || 'Erreur vente', 'error'); return; }
 
-    showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !`, 'success');
+    const unequipMsg = equipSync.removedSlots.length
+      ? ' Objet déséquipé automatiquement.'
+      : '';
+    showNotif(`💰 "${itemNom}" vendu pour ${prixVente} or !${unequipMsg}`, 'success');
   } catch (e) { notifySaveError(e); }
 }
 

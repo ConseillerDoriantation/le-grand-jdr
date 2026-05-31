@@ -124,11 +124,11 @@ function _renderGroupPills(groups) {
         ${membres.map(c => {
           const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
           const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-          return `<div title="${c.nom||''}" style="width:28px;height:28px;border-radius:50%;overflow:hidden;
+          return `<div title="${_esc(c.nom||'')}" style="width:28px;height:28px;border-radius:50%;overflow:hidden;
             border:2px solid ${col};background:${col}18;flex-shrink:0;
             display:flex;align-items:center;justify-content:center">
             ${c.photo
-              ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pp}">`
+              ? `<img src="${_esc(c.photo)}" style="width:100%;height:100%;object-fit:cover;object-position:${pp}">`
               : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.62rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
           </div>`;
         }).join('')}

@@ -62,7 +62,8 @@ async function _loadDiceSkills() {
 async function _saveDiceSkills(skills) {
   _diceSkillsCache = skills;
   lsJson.set(DICE_SKILLS_STORAGE_KEY, skills);
-  try { await saveDoc('world', 'dice_skills', { skills }); } catch {}
+  try { await saveDoc('world', 'dice_skills', { skills }); }
+  catch { showNotif('Erreur — compétences de dés non sauvegardées.', 'error'); }
 }
 
 // ── État du module ────────────────────────────────────────────────────────────
