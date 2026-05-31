@@ -815,14 +815,13 @@ export async function addXpDelta(charId) {
     if (!delta || delta <= 0) return;
     const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
     if (!c) return;
-    const palier = calcPalier(c.niveau||1);
     const newXp = (parseInt(c.exp)||0) + delta;
     c.exp = newXp;
     input.value = '';
     await updateInCol('characters', charId, {exp: newXp});
-    const directInput = document.getElementById('xp-direct-input');
-    if (directInput) { directInput.value = newXp; previewXpBar(directInput, palier); }
     showNotif(`+${delta} XP !`, 'success');
+    // Rafraîchit la fiche pour que la barre/% et le total reflètent le nouvel XP.
+    window.renderCharSheet?.(c, window._currentCharTab);
   } catch (e) { notifySaveError(e); }
 }
 

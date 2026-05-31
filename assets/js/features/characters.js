@@ -422,7 +422,9 @@ function renderCharSheet(c, keepTab) {
               ? `<img src="${c.photo}" style="transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center">`
               : `${(c.nom||'?')[0].toUpperCase()}`}
           </div>
-          <div class="id-lvl-badge">Niv. <strong>${c.niveau||1}</strong></div>
+          <div class="id-lvl-badge">${canEdit
+            ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
+            : `Niv. <strong>${c.niveau||1}</strong>`}</div>
         </div>
 
         <div class="id-name-row">
@@ -455,7 +457,9 @@ function renderCharSheet(c, keepTab) {
           <div class="xp-row"><span>Expérience</span><span class="xp-pct">${xpPct}%</span></div>
           <div class="xp-track"><div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div></div>
           <div class="xp-meta">
-            <span>${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
+            <span>${canEdit
+              ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0;text-decoration:underline dotted">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
+              : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
             <span>→ Niv. ${(c.niveau||1)+1}</span>
           </div>
           ${canEdit?`<div class="xp-add">

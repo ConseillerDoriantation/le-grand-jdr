@@ -97,7 +97,7 @@ export function inlineEditNum(charId, field, el, min=0, max=99999) {
     if (field === 'niveau') await _syncPlayerNiveau(charId, val);
     el.textContent = field==='niveau' ? `Niv. ${val}` : field==='or' ? `💰 ${val} or` : val;
     input.replaceWith(el);
-    if (['niveau','pvBase','pmBase'].includes(field)) window.renderCharSheet(c, window._currentCharTab);
+    if (['niveau','pvBase','pmBase','exp'].includes(field)) window.renderCharSheet(c, window._currentCharTab);
     else showNotif('Mis à jour !','success');
   };
   input.addEventListener('blur', save);

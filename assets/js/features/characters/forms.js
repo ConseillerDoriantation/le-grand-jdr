@@ -4,6 +4,8 @@ import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollecti
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
+import { loadAllUsers } from '../../core/adventure.js';
+import { _esc } from '../../shared/html.js';
 import PAGES from '../pages.js';
 
 // ══════════════════════════════════════════════
@@ -245,10 +247,22 @@ export async function deleteChar(id) {
 }
 
 export async function createNewChar() {
+  // Joueur : crée pour son propre compte (comportement historique).
+  if (!STATE.isAdmin) {
+    return _createCharForOwner(STATE.user.uid, STATE.profile?.pseudo || '?');
+  }
+  // MJ : choisir le compte propriétaire parmi les membres de l'aventure.
+  await _openCharOwnerPicker();
+}
+
+/** Crée un personnage rattaché au compte (uid) donné.
+ *  Les règles Firestore autorisent un MJ à créer un perso pour un autre uid
+ *  (allow create: ... || isAdvAdmin). */
+async function _createCharForOwner(uid, ownerPseudo) {
   try {
     const data = {
-      uid: STATE.user.uid,
-      ownerPseudo: STATE.profile?.pseudo||'?',
+      uid,
+      ownerPseudo: ownerPseudo || '?',
       nom:'Nouveau personnage', titre:'', titres:[],
       niveau:1, or:0,
       pvBase:10, pvActuel:10, pmBase:10, pmActuel:10,
@@ -263,6 +277,58 @@ export async function createNewChar() {
   } catch (e) { notifySaveError(e); }
 }
 
+/** MJ : sélecteur du compte propriétaire (membres de l'aventure courante). */
+async function _openCharOwnerPicker() {
+  const adv = STATE.adventure;
+  const allUsers = await loadAllUsers();
+  const memberUids = new Set([
+    ...(adv?.admins || []),
+    ...(adv?.players || []),
+    ...(adv?.accessList || []),
+    STATE.user.uid, // toujours pouvoir créer pour soi
+  ]);
+  let members = allUsers.filter(u => memberUids.has(u.id));
+  if (!members.length) members = [{ id: STATE.user.uid, pseudo: STATE.profile?.pseudo || 'Moi' }];
+  // Tri : soi d'abord, puis alpha
+  const selfId = STATE.user.uid;
+  members.sort((a, b) =>
+    (a.id === selfId ? -1 : b.id === selfId ? 1 : 0) ||
+    (a.pseudo || a.email || '').localeCompare(b.pseudo || b.email || ''));
+  window._newCharOwners = members;
+
+  const admins = adv?.admins || [];
+  const options = members.map(u => {
+    const isMe = u.id === selfId;
+    const isMj = admins.includes(u.id);
+    const label = `${_esc(u.pseudo || u.email || u.id)}${isMe ? ' (moi)' : ''}${isMj ? ' — MJ' : ''}`;
+    return `<option value="${u.id}" ${isMe ? 'selected' : ''}>${label}</option>`;
+  }).join('');
+
+  openModal('➕ Nouveau personnage', `
+    <div class="form-group">
+      <label>Compte propriétaire</label>
+      <select class="input-field" id="new-char-owner">${options}</select>
+      <div style="font-size:.72rem;color:var(--text-dim);margin-top:.4rem;line-height:1.5">
+        Le personnage sera rattaché à ce compte : le joueur le verra sur sa propre fiche.
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center;margin-top:1.1rem">
+      <button class="btn btn-outline btn-sm" data-action="cancelNewChar">Annuler</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-gold" data-action="confirmNewChar">Créer le personnage</button>
+    </div>
+  `);
+}
+
+window.confirmNewChar = async () => {
+  const uid = document.getElementById('new-char-owner')?.value || STATE.user.uid;
+  const owner = (window._newCharOwners || []).find(u => u.id === uid);
+  const pseudo = owner?.pseudo || owner?.email
+    || (uid === STATE.user.uid ? (STATE.profile?.pseudo || '?') : '?');
+  closeModal();
+  await _createCharForOwner(uid, pseudo);
+};
+
 // ══════════════════════════════════════════════
 // TITRES
 // ══════════════════════════════════════════════
@@ -270,17 +336,49 @@ export function manageTitres(charId) {
   const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
   if (!c) return;
   window._editTitres = [...(c.titres||[])];
-  const render = () => window._editTitres.map((t,i)=>
-    `<span class="cs-titre-chip">${t}<button data-action="removeTitre" data-idx="${i}">✕</button></span>`
-  ).join('');
-  openModal('🏅 Titres', `
-    <div id="titres-list" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.8rem;min-height:2rem">${render()}</div>
-    <div style="display:flex;gap:0.5rem">
-      <input class="input-field" id="ei-titre-new" placeholder="Nouveau titre..." style="flex:1" onkeydown="if(event.key==='Enter')addTitre()">
-      <button class="btn btn-outline btn-sm" data-action="addTitre">+ Ajouter</button>
+  openModal('', `
+    <div class="cs-titres-modal">
+      <div class="cs-titres-head">
+        <div class="cs-titres-head-ico">🏅</div>
+        <div class="cs-titres-head-txt">
+          <h2 class="cs-titres-title">Titres</h2>
+          <p class="cs-titres-sub">Distinctions affichées sous le nom de <b>${_esc(c.nom || 'ce personnage')}</b>.</p>
+        </div>
+      </div>
+
+      <div id="titres-list" class="cs-titres-list">${_titresListHtml()}</div>
+
+      <div class="cs-titres-add">
+        <input class="input-field" id="ei-titre-new" autocomplete="off"
+          placeholder="Ex : Héros de la Vallée, Tueur de dragons…">
+        <button class="btn btn-outline btn-sm" data-action="addTitre">＋ Ajouter</button>
+      </div>
+
+      <div class="cs-titres-footer">
+        <button class="btn btn-outline btn-sm" data-action="closeTitres">Annuler</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-gold" data-action="saveTitres" data-id="${charId}">💾 Enregistrer</button>
+      </div>
     </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveTitres" data-id="${charId}">Enregistrer</button>
   `);
+  // Entrée = ajouter (remplace l'ancien onkeydown inline, migré en JS)
+  setTimeout(() => {
+    const inp = document.getElementById('ei-titre-new');
+    inp?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTitre(); } });
+    inp?.focus();
+  }, 30);
+}
+
+function _titresListHtml() {
+  const titres = window._editTitres || [];
+  if (!titres.length) {
+    return `<div class="cs-titres-empty">Aucun titre pour l'instant.</div>`;
+  }
+  return titres.map((t,i)=>`
+    <div class="cs-titre-row">
+      <span class="cs-titre-tag">🏅 ${_esc(t)}</span>
+      <button class="cs-titre-del" data-action="removeTitre" data-idx="${i}" title="Retirer ce titre">✕</button>
+    </div>`).join('');
 }
 
 export function addTitre() {
@@ -291,6 +389,7 @@ export function addTitre() {
   window._editTitres.push(val);
   input.value='';
   _refreshTitresList();
+  input.focus();
 }
 
 export function removeTitre(idx) {
@@ -300,9 +399,7 @@ export function removeTitre(idx) {
 
 function _refreshTitresList() {
   const list = document.getElementById('titres-list');
-  if (list) list.innerHTML = window._editTitres.map((t,i)=>
-    `<span class="cs-titre-chip">${t}<button data-action="removeTitre" data-idx="${i}">✕</button></span>`
-  ).join('');
+  if (list) list.innerHTML = _titresListHtml();
 }
 
 export async function saveTitres(charId) {
@@ -329,8 +426,11 @@ export function deleteCharPhoto(id) {
 }
 
 registerActions({
-  saveQuete:   ()    => saveQuete(),
-  addTitre:    ()    => addTitre(),
-  removeTitre: (btn) => removeTitre(Number(btn.dataset.idx)),
-  saveTitres:  (btn) => saveTitres(btn.dataset.id),
+  saveQuete:      ()    => saveQuete(),
+  addTitre:       ()    => addTitre(),
+  removeTitre:    (btn) => removeTitre(Number(btn.dataset.idx)),
+  saveTitres:     (btn) => saveTitres(btn.dataset.id),
+  confirmNewChar: ()    => window.confirmNewChar?.(),
+  cancelNewChar:  ()    => closeModal(),
+  closeTitres:    ()    => closeModal(),
 });
