@@ -3,6 +3,48 @@
    Remplace assets/css/vtt.css dans le projet zen-banzai
    ═══════════════════════════════════════════════════════════════════ */
 
+/* ── Invite à passer en paysage (mobile portrait) ───────────────────
+   Masqué par défaut ; affiché uniquement en orientation portrait sur petit
+   écran. Aucune rotation CSS du canvas → le tactile reste correct une fois
+   l'appareil tourné. */
+.vtt-rotate-prompt { display: none; }
+@media (orientation: portrait) and (max-width: 920px) {
+  .vtt-rotate-prompt {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 2rem;
+    text-align: center;
+    background: var(--bg-dark, #0b1118);
+  }
+  .vtt-rotate-phone {
+    font-size: 3.4rem;
+    line-height: 1;
+    animation: vtt-rotate-hint 1.8s ease-in-out infinite;
+  }
+  .vtt-rotate-title {
+    font-family: 'Cinzel', serif;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text, #e8eef7);
+  }
+  .vtt-rotate-text {
+    font-size: .9rem;
+    color: var(--text-muted, #8aa0bd);
+    max-width: 280px;
+    line-height: 1.6;
+  }
+}
+@keyframes vtt-rotate-hint {
+  0%, 100% { transform: rotate(0deg); }
+  55%, 80% { transform: rotate(-90deg); }
+}
+
 /* ── Layout racine ──────────────────────────────────────────────── */
 .vtt-root {
   display: flex;

@@ -426,18 +426,6 @@
   .ach-meta,
   .ach-cat-badge,
   .ach-date-badge { display: none !important; }
-
-  /* ── 6. VTT — message desktop requis ── */
-  .vtt-mobile-only {
-    display: flex !important;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 55vh;
-    gap: 1.2rem;
-    padding: 2rem;
-    text-align: center;
-  }
 }
 
 /* ═══════════════════════════════════════════════════════════
