@@ -96,6 +96,13 @@ let _csV3InvFilter = { cat: 'all', search: '' };
 let _currentJournalSub = 'notes';
 let _openNote = null;
 let _csV3EditingBio = null;
+
+// Palette d'auras — constante partagée par renderCharSheet et setCharAura
+const AURA_PALETTE = {
+  blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
+  gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
+};
+const _auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
 const _charBlurActions = {};
 function registerCharBlurActions(map) { Object.assign(_charBlurActions, map); }
 document.addEventListener('focusout', (event) => {
@@ -194,99 +201,34 @@ function _resolveV3Tab(raw) {
   return V3_TAB_REMAP[raw] || 'combat';
 }
 
-function renderCharSheet(c, keepTab) {
-  const area = document.getElementById('char-sheet-area');
-  if (!area) return;
-  const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
 
-  const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
-  // Conserver le sub-tab du Journal s'il existe (notes / quetes / relations)
-  const journalSub = _currentJournalSub || 'notes';
-
-  charSession.set(c, canEdit, v3Tab);
-  _currentTopTab = v3Tab;
-
-  // ── Valeurs dérivées ─────────────────────────
-  const pvMax      = calcPVMax(c);
-  const pmMax      = calcPMMax(c);
-  const pvCur      = c.pvActuel ?? pvMax;
-  const pmCur      = c.pmActuel ?? pmMax;
-  const pvPct      = pct(pvCur, pvMax);
-  const pmPct      = pct(pmCur, pmMax);
-  const xpCur      = c.exp || 0;
-  const xpPalier   = calcPalier(c.niveau || 1);
-  const xpPct      = pct(xpCur, xpPalier);
-  const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
-  const deckMax    = calcDeckMax(c);
-  const pvColor    = pvPct < 25 ? 'var(--crimson, #ff5a7e)' : pvPct < 50 ? 'var(--ember, #ff9544)' : 'var(--emerald, #22c38e)';
-  const titres     = c.titres || [];
-
-  // ── Points de niveau à dépenser (badge sidebar + sous-onglet Caracs) ─────
-  const _STATS_KEYS_LVL = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
-  const _lvlEarned = Math.max(0, (c.niveau||1) - 1);
-  const _lvlSpent  = _STATS_KEYS_LVL.reduce((s,k) => s + (parseInt((c.statsLevelUps||{})[k])||0), 0);
-  const lvlPointsRemaining = _lvlEarned - _lvlSpent;
-
-  // ── Stats en bloc 2×3 ────────────────────────
-  // Ordre : For Dex Int / Con Sag Cha
-  const STATS = [
-    {key:'force',       abbr:'For', label:'Force'},
-    {key:'dexterite',   abbr:'Dex', label:'Dextérité'},
-    {key:'intelligence',abbr:'Int', label:'Intelligence'},
-    {key:'constitution',abbr:'Con', label:'Constitution'},
-    {key:'sagesse',     abbr:'Sag', label:'Sagesse'},
-    {key:'charisme',    abbr:'Cha', label:'Charisme'},
-  ];
-  const s  = c.stats     || {};
-  const sb = c.statsBonus || {};
-  const statsHtml = STATS.map(st => {
-    const base  = s[st.key]  || 8;
-    const bonus = sb[st.key] || 0;
-    const total = base + bonus;
-    const m     = getMod(c, st.key);
-    const mStr  = m >= 0 ? `+${m}` : String(m);
-    const mCls  = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    const equipStr = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '+0';
-    return `<div class="cs-stat-card${canEdit?' cs-stat-card--edit':''}"
-      title="${st.label} — base ${base}, équip. ${equipStr}"
-      ${canEdit?`data-action="inlineEditStatFromCard" data-id="${c.id}" data-key="${st.key}"`:''}
-    >
-      <div class="cs-stat-card-top">
-        <span class="cs-stat-abbr">${st.abbr}</span>
-        <span class="cs-stat-mod ${mCls}">${mStr}</span>
-      </div>
-      <div class="cs-stat-card-mid">
-        <span class="cs-stat-total-lbl">TOTAL</span>
-        <span class="cs-stat-total">${total}</span>
-      </div>
-      <div class="cs-stat-card-bot">
-        <div class="cs-stat-sub"><span class="cs-stat-sub-lbl">BASE</span><span class="cs-stat-sub-val js-stat-base">${base}</span></div>
-        <div class="cs-stat-sub"><span class="cs-stat-sub-lbl">EQUIP.</span><span class="cs-stat-sub-val">${equipStr}</span></div>
-      </div>
-    </div>`;
-  }).join('');
-
-  // ── Sélecteur multi-personnages (pastilles V3) ───────────────
-  const allChars    = STATE.characters || [];
-  let switchable    = STATE.isAdmin ? allChars : allChars.filter(x => x.uid === STATE.user?.uid);
-  // Si admin a un filtre actif (par pseudo), on l'applique
-  if (STATE.isAdmin && _charAdminFilter) {
-    switchable = switchable.filter(x => x.ownerPseudo === _charAdminFilter);
-  }
-  // Ordre logique : groupé par joueur (alpha), perso "default" en tête de chaque groupe
-  switchable = sortCharactersForDisplay(switchable);
-  const AURA_PALETTE = {
-    blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
-    gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
+// Convertit une couleur hex aura (#rrggbb) en variables CSS rgba
+function _auraVars(hexCol) {
+  const r = parseInt(hexCol.slice(1,3),16);
+  const g = parseInt(hexCol.slice(3,5),16);
+  const b = parseInt(hexCol.slice(5,7),16);
+  return {
+    auraGlow: `rgba(${r},${g},${b},.14)`,
+    auraBd:   `rgba(${r},${g},${b},.55)`,
+    auraSh:   `0 0 38px rgba(${r},${g},${b},.28)`,
   };
-  const auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
+}
 
-  const charPillsHtml = switchable.map(ch => {
-    const col = auraColor(ch.aura);
+// Pastilles de sélection de personnage (char-switch)
+function _buildCharSwitchHtml(activeCharId, canEdit) {
+  let switchable = STATE.isAdmin
+    ? (STATE.characters || [])
+    : (STATE.characters || []).filter(x => x.uid === STATE.user?.uid);
+  if (STATE.isAdmin && _charAdminFilter)
+    switchable = switchable.filter(x => x.ownerPseudo === _charAdminFilter);
+  switchable = sortCharactersForDisplay(switchable);
+
+  const pillsHtml = switchable.map(ch => {
+    const col = _auraColor(ch.aura);
     const init = (ch.nom || '?')[0].toUpperCase();
     const photoPos = `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%`;
     const titleSuffix = ch.isDefault ? ' · ★ Par défaut' : '';
-    return `<button class="char-pill${ch.id===c.id?' active':''}${ch.isDefault?' is-default':''}"
+    return `<button class="char-pill${ch.id===activeCharId?' active':''}${ch.isDefault?' is-default':''}"
       data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
       style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
       <span class="char-pill-av">${ch.photo
@@ -295,54 +237,43 @@ function renderCharSheet(c, keepTab) {
       <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
     </button>`;
   }).join('');
-  const charSwitchHtml = `<div class="char-switch">
-    ${charPillsHtml}
+
+  return `<div class="char-switch">
+    ${pillsHtml}
     ${canEdit ? `<button class="char-pill char-pill-new" data-action="createNewChar">➕ Nouveau</button>` : ''}
   </div>`;
+}
 
-  // ── Données du hero & sidebar ─────────────────────────
-  const auraCol = auraColor(c.aura);
-  const auraGlow = `rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.14)`;
-  const auraBd   = `rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.55)`;
-  const auraSh   = `0 0 38px rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.28)`;
-
-  const hpBarCls = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
-
-  // Mini-stats : CA, Vitesse, Maîtrise, Deck (deckActifs / deckMax déjà calculés plus haut)
-  const profMod    = Math.max(2, Math.floor(((c.niveau || 1) - 1) / 4) + 2);   // bonus de maîtrise
-
-  // Stats banner — 6 tuiles avec badge alloc si points dispo
-  // (réutilise `s` et `sb` déclarés plus haut pour la grille stats legacy)
-  const STATS_TILES = [
-    {key:'force',       abbr:'FOR'},
-    {key:'dexterite',   abbr:'DEX'},
-    {key:'intelligence',abbr:'INT'},
-    {key:'constitution',abbr:'CON'},
-    {key:'sagesse',     abbr:'SAG'},
-    {key:'charisme',    abbr:'CHA'},
-  ];
+// 6 tuiles de statistiques avec segmentation base/niveau/équipement
+function _buildStatTilesHtml(c, canEdit, lvlPointsRemaining) {
+  const s  = c.stats      || {};
+  const sb = c.statsBonus || {};
   const isAdmin = !!STATE.isAdmin;
   const STAT_FULL = {
     force: 'Force', dexterite: 'Dextérité', intelligence: 'Intelligence',
     constitution: 'Constitution', sagesse: 'Sagesse', charisme: 'Charisme',
   };
-  const tilesHtml = STATS_TILES.map(st => {
-    // c.stats[key] contient TOTAL (base initiale + level-ups). On reconstitue les 3 valeurs.
-    const totalBase = s[st.key]  || 8;          // base + level-ups
+  return [
+    {key:'force',        abbr:'FOR'},
+    {key:'dexterite',    abbr:'DEX'},
+    {key:'intelligence', abbr:'INT'},
+    {key:'constitution', abbr:'CON'},
+    {key:'sagesse',      abbr:'SAG'},
+    {key:'charisme',     abbr:'CHA'},
+  ].map(st => {
+    const totalBase = s[st.key]  || 8;
     const lvlUp     = parseInt((c.statsLevelUps || {})[st.key]) || 0;
-    const pureBase  = totalBase - lvlUp;        // base initiale (niveau 1)
-    const bonus     = sb[st.key] || 0;          // équipement
+    const pureBase  = totalBase - lvlUp;
+    const bonus     = sb[st.key] || 0;
     const total     = totalBase + bonus;
     const m         = getMod(c, st.key);
     const mStr      = m >= 0 ? `+${m}` : String(m);
     const mCls      = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
     const eqCls     = bonus > 0 ? 'pos' : bonus < 0 ? 'neg' : 'zero';
     const eqDisp    = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '0';
+    const canPlus   = canEdit && lvlPointsRemaining > 0;
+    const canMinus  = canEdit && lvlUp > 0;
 
-    const canPlus  = canEdit && lvlPointsRemaining > 0;
-    const canMinus = canEdit && lvlUp > 0;
-
-    // ── Base : MJ peut cliquer pour éditer (visuel doré + ✎)
     const baseSegment = (canEdit && isAdmin)
       ? `<button class="stat-seg stat-seg-base editable" title="MJ — Modifier la base"
             data-action="inlineEditStat" data-id="${c.id}" data-key="${st.key}" data-stop-propagation>
@@ -354,7 +285,6 @@ function renderCharSheet(c, keepTab) {
           <span class="stat-seg-lbl">Base</span>
         </div>`;
 
-    // ── Niveau : ± boutons à côté de la valeur
     const nivSegment = `<div class="stat-seg stat-seg-niv ${lvlUp>0?'has':'zero'}">
         <span class="stat-seg-val">+${lvlUp}</span>
         <span class="stat-seg-lbl">Niveau</span>
@@ -390,8 +320,217 @@ function renderCharSheet(c, keepTab) {
       </div>
     </div>`;
   }).join('');
+}
 
-  // Titres (chips existants + bouton d'édition pour MJ/propriétaire)
+// Navigation par onglets v3
+function _buildTabsHtml(c, v3Tab) {
+  return [
+    { k: 'combat',  ico: '⚔️', lbl: 'Combat' },
+    { k: 'sorts',   ico: '✨', lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
+    { k: 'inv',     ico: '🎒', lbl: 'Inventaire', badge: `${(c.inventaire||[]).length||''}` },
+    { k: 'compte',  ico: '💰', lbl: 'Compte' },
+    { k: 'journal', ico: '📖', lbl: 'Journal' },
+    { k: 'profil',  ico: '👤', lbl: 'Profil' },
+  ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}"
+    data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
+    <span class="tab-ico">${t.ico}</span> ${t.lbl}
+    ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
+  </button>`).join('');
+}
+
+function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips }) {
+  return `<aside class="id-side" id="cs-sidebar" data-aura="${c.aura||'blue'}"
+    style="--aura-glow:${auraGlow};--aura-border:${auraBd};--aura-shadow:${auraSh}">
+
+    <div class="id-portrait-wrap">
+      <div class="id-portrait"
+           ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
+        ${c.photo
+          ? `<img src="${c.photo}" style="transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center">`
+          : `${(c.nom||'?')[0].toUpperCase()}`}
+      </div>
+      <div class="id-lvl-badge">${canEdit
+        ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
+        : `Niv. <strong>${c.niveau||1}</strong>`}</div>
+    </div>
+
+    <div class="id-name-row">
+      ${canEdit
+        ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
+        : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
+      <span class="id-actions-mini">
+        ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
+          title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
+          data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
+        ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
+        ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
+        ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
+      </span>
+    </div>
+
+    ${titresChips}
+
+    <div class="id-chips">
+      ${canEdit
+        ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
+        : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
+      ${canEdit
+        ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
+        : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
+    </div>
+
+    <!-- XP -->
+    <div class="xp-block">
+      <div class="xp-row"><span>Expérience</span><span class="xp-pct">${xpPct}%</span></div>
+      <div class="xp-track"><div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div></div>
+      <div class="xp-meta">
+        <span>${canEdit
+          ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0;text-decoration:underline dotted">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
+          : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
+        <span>→ Niv. ${(c.niveau||1)+1}</span>
+      </div>
+      ${canEdit?`<div class="xp-add">
+        <label>＋ XP</label>
+        <input type="number" id="xp-add-input-${c.id}" placeholder="0"
+          onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}">
+        <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
+      </div>`:''}
+    </div>
+
+    <!-- PV -->
+    <div class="vital hp ${pvPct<25?'danger':''}" id="vital-hp">
+      <div class="vital-icon">❤</div>
+      <div class="vital-body">
+        <div class="vital-head">
+          <span class="vital-label">Points de Vie</span>
+          <span class="vital-num"><span id="pv-val">${pvCur}</span><small>/ ${pvMax}</small></span>
+        </div>
+        <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
+        <div class="vital-ctrls">
+          ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
+          <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
+          ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
+        </div>
+      </div>
+    </div>
+
+    <!-- PM -->
+    <div class="vital mp">
+      <div class="vital-icon">✦</div>
+      <div class="vital-body">
+        <div class="vital-head">
+          <span class="vital-label">Points de Magie</span>
+          <span class="vital-num"><span id="pm-val">${pmCur}</span><small>/ ${pmMax}</small></span>
+        </div>
+        <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
+        <div class="vital-ctrls">
+          ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
+          <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
+          ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
+    <div class="cs-mini-grid cs-mini-grid-3">
+      <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
+      <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
+      <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" data-action="showCharTab" data-tab="sorts" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
+    </div>
+
+    <!-- Or -->
+    <div class="or-card">
+      <div class="or-card-left">
+        <div class="or-card-icon">💰</div>
+        <div>
+          <div class="or-card-lbl">Bourse</div>
+          <div class="or-card-val"><span class="or-card-amount">${calcOr(c)}</span> <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
+        </div>
+      </div>
+      ${canEdit?`<button class="or-card-btn" data-action="openSendGoldModal" data-id="${c.id}">↗ Envoyer</button>`:''}
+    </div>
+
+    ${canEdit?`<div class="aura-row">
+      <span class="aura-lbl">Aura</span>
+      <div class="aura-dots">
+        ${Object.entries(AURA_PALETTE).map(([k,col]) => `
+          <button class="aura-dot${(c.aura||'blue')===k?' active':''}"
+            style="--dot-c:${col}" data-aura="${k}"
+            data-action="setCharAura" data-id="${c.id}" data-aura-key="${k}"
+            title="${k}"></button>`).join('')}
+      </div>
+    </div>`:''}
+
+  </aside>`;
+}
+
+function _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl }) {
+  return `<section class="main-col">
+
+    <!-- Hero strip -->
+    <div class="hero-strip">
+      <div class="hero-id">
+        <div class="hero-id-name">${_esc(c.nom || 'Sans nom')}
+          <span class="hero-id-tag">${[c.classe, c.race, titres[0]].filter(Boolean).map(_esc).join(' · ')}</span>
+        </div>
+        ${advLbl || playerLbl ? `<div class="hero-id-tag" style="font-size:.7rem">
+          ${advLbl}${playerLbl}
+        </div>` : ''}
+      </div>
+    </div>
+
+    <!-- Stats banner 6 tuiles -->
+    <div class="stats-banner" id="cs-stats-banner">
+      ${tilesHtml}
+    </div>
+
+    ${lvlPointsRemaining > 0 && canEdit ? `
+    <div class="alloc-banner">
+      <span>🎯 <b>${lvlPointsRemaining}</b> point${lvlPointsRemaining>1?'s':''} de niveau à dépenser — cliquez sur le badge <b>+1</b> d'une caractéristique</span>
+      <span class="alloc-banner-hint">Modificateur recalculé instantanément</span>
+    </div>` : ''}
+
+    <!-- Tabs v3 -->
+    <nav class="tabs-v3" id="char-tabs-v3">
+      ${tabsHtml}
+    </nav>
+
+    <div id="char-tab-content" class="tab-body-v3"></div>
+
+  </section>`;
+}
+
+function renderCharSheet(c, keepTab) {
+  const area = document.getElementById('char-sheet-area');
+  if (!area) return;
+  const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
+
+  const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
+  charSession.set(c, canEdit, v3Tab);
+  _currentTopTab = v3Tab;
+
+  // ── Valeurs dérivées ──────────────────────────
+  const pvMax  = calcPVMax(c), pmMax = calcPMMax(c);
+  const pvCur  = c.pvActuel ?? pvMax, pmCur = c.pmActuel ?? pmMax;
+  const pvPct  = pct(pvCur, pvMax), pmPct = pct(pmCur, pmMax);
+  const xpCur  = c.exp || 0, xpPalier = calcPalier(c.niveau || 1), xpPct = pct(xpCur, xpPalier);
+  const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
+  const deckMax    = calcDeckMax(c);
+  const titres     = c.titres || [];
+  const hpBarCls   = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
+
+  // ── Points de niveau restants ──────────────────
+  const _lvlEarned = Math.max(0, (c.niveau||1) - 1);
+  const _lvlSpent  = ['force','dexterite','intelligence','constitution','sagesse','charisme']
+    .reduce((s,k) => s + (parseInt((c.statsLevelUps||{})[k])||0), 0);
+  const lvlPointsRemaining = _lvlEarned - _lvlSpent;
+
+  // ── Sous-composants HTML ───────────────────────
+  const charSwitchHtml = _buildCharSwitchHtml(c.id, canEdit);
+  const { auraGlow, auraBd, auraSh } = _auraVars(_auraColor(c.aura));
+  const tilesHtml      = _buildStatTilesHtml(c, canEdit, lvlPointsRemaining);
+  const tabsHtml       = _buildTabsHtml(c, v3Tab);
+
   const titresChips = (titres.length || canEdit)
     ? `<div class="id-titres">
         ${titres.map(t => `<span class="id-titre">${_esc(t)}</span>`).join('')}
@@ -401,429 +540,25 @@ function renderCharSheet(c, keepTab) {
       </div>`
     : '';
 
-  // Tabs nav (6 onglets v3)
-  const tabsHtml = [
-    { k: 'combat',  ico: '⚔️', lbl: 'Combat' },
-    { k: 'sorts',   ico: '✨', lbl: 'Sorts',     badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
-    { k: 'inv',     ico: '🎒', lbl: 'Inventaire',badge: `${(c.inventaire||[]).length||''}` },
-    { k: 'compte',  ico: '💰', lbl: 'Compte' },
-    { k: 'journal', ico: '📖', lbl: 'Journal' },
-    { k: 'profil',  ico: '👤', lbl: 'Profil' },
-  ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}"
-    data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
-    <span class="tab-ico">${t.ico}</span> ${t.lbl}
-    ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
-  </button>`).join('');
-
   const playerLbl = c.ownerPseudo ? `<span class="hero-tag-sep">·</span><span style="color:var(--text-dim)">Joueur :</span> ${_esc(c.ownerPseudo)}` : '';
   const advLbl    = STATE.adventure?.nom ? `<span style="color:var(--text-dim)">Aventure :</span> ${_esc(STATE.adventure.nom)}` : '';
 
+  const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips });
+  const mainColHtml = _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl });
+
   area.innerHTML = `<div class="cs-v3">
   <div class="app-shell">
-
-    <!-- ══════════ CHAR-SWITCH (au-dessus du sheet, pleine largeur) ══════════ -->
-    <div class="char-switch-row">
-      ${charSwitchHtml}
-    </div>
-
-    <!-- ══════════ SHEET ══════════ -->
+    <div class="char-switch-row">${charSwitchHtml}</div>
     <div class="sheet">
-
-      <!-- ─── SIDEBAR ─── -->
-      <aside class="id-side" id="cs-sidebar" data-aura="${c.aura||'blue'}"
-        style="--aura-glow:${auraGlow};--aura-border:${auraBd};--aura-shadow:${auraSh}">
-
-        <div class="id-portrait-wrap">
-          <div class="id-portrait"
-               ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
-            ${c.photo
-              ? `<img src="${c.photo}" style="transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center">`
-              : `${(c.nom||'?')[0].toUpperCase()}`}
-          </div>
-          <div class="id-lvl-badge">${canEdit
-            ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
-            : `Niv. <strong>${c.niveau||1}</strong>`}</div>
-        </div>
-
-        <div class="id-name-row">
-          ${canEdit
-            ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
-            : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
-          <span class="id-actions-mini">
-            ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
-              title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
-              data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
-            ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
-            ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
-            ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
-          </span>
-        </div>
-
-        ${titresChips}
-
-        <div class="id-chips">
-          ${canEdit
-            ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
-            : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
-          ${canEdit
-            ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
-            : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
-        </div>
-
-        <!-- XP -->
-        <div class="xp-block">
-          <div class="xp-row"><span>Expérience</span><span class="xp-pct">${xpPct}%</span></div>
-          <div class="xp-track"><div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div></div>
-          <div class="xp-meta">
-            <span>${canEdit
-              ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0;text-decoration:underline dotted">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
-              : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
-            <span>→ Niv. ${(c.niveau||1)+1}</span>
-          </div>
-          ${canEdit?`<div class="xp-add">
-            <label>＋ XP</label>
-            <input type="number" id="xp-add-input-${c.id}" placeholder="0"
-              onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}">
-            <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
-          </div>`:''}
-        </div>
-
-        <!-- PV -->
-        <div class="vital hp ${pvPct<25?'danger':''}" id="vital-hp">
-          <div class="vital-icon">❤</div>
-          <div class="vital-body">
-            <div class="vital-head">
-              <span class="vital-label">Points de Vie</span>
-              <span class="vital-num"><span id="pv-val">${pvCur}</span><small>/ ${pvMax}</small></span>
-            </div>
-            <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
-            <div class="vital-ctrls">
-              ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
-              ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-            </div>
-          </div>
-        </div>
-
-        <!-- PM -->
-        <div class="vital mp">
-          <div class="vital-icon">✦</div>
-          <div class="vital-body">
-            <div class="vital-head">
-              <span class="vital-label">Points de Magie</span>
-              <span class="vital-num"><span id="pm-val">${pmCur}</span><small>/ ${pmMax}</small></span>
-            </div>
-            <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
-            <div class="vital-ctrls">
-              ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
-              ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-            </div>
-          </div>
-        </div>
-
-        <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
-        <div class="cs-mini-grid cs-mini-grid-3">
-          <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
-          <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
-          <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" data-action="showCharTab" data-tab="sorts" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
-        </div>
-
-        <!-- Or -->
-        <div class="or-card">
-          <div class="or-card-left">
-            <div class="or-card-icon">💰</div>
-            <div>
-              <div class="or-card-lbl">Bourse</div>
-              <div class="or-card-val"><span class="or-card-amount">${calcOr(c)}</span> <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
-            </div>
-          </div>
-          ${canEdit?`<button class="or-card-btn" data-action="openSendGoldModal" data-id="${c.id}">↗ Envoyer</button>`:''}
-        </div>
-
-        ${canEdit?`<div class="aura-row">
-          <span class="aura-lbl">Aura</span>
-          <div class="aura-dots">
-            ${Object.entries(AURA_PALETTE).map(([k,col]) => `
-              <button class="aura-dot${(c.aura||'blue')===k?' active':''}"
-                style="--dot-c:${col}" data-aura="${k}"
-                data-action="setCharAura" data-id="${c.id}" data-aura-key="${k}"
-                title="${k}"></button>`).join('')}
-          </div>
-        </div>`:''}
-
-      </aside>
-
-      <!-- ─── MAIN ─── -->
-      <section class="main-col">
-
-        <!-- Hero strip -->
-        <div class="hero-strip">
-          <div class="hero-id">
-            <div class="hero-id-name">${_esc(c.nom || 'Sans nom')}
-              <span class="hero-id-tag">${[c.classe, c.race, titres[0]].filter(Boolean).map(_esc).join(' · ')}</span>
-            </div>
-            ${advLbl || playerLbl ? `<div class="hero-id-tag" style="font-size:.7rem">
-              ${advLbl}${playerLbl}
-            </div>` : ''}
-          </div>
-        </div>
-
-        <!-- Stats banner 6 tuiles -->
-        <div class="stats-banner" id="cs-stats-banner">
-          ${tilesHtml}
-        </div>
-
-        ${lvlPointsRemaining > 0 && canEdit ? `
-        <div class="alloc-banner">
-          <span>🎯 <b>${lvlPointsRemaining}</b> point${lvlPointsRemaining>1?'s':''} de niveau à dépenser — cliquez sur le badge <b>+1</b> d'une caractéristique</span>
-          <span class="alloc-banner-hint">Modificateur recalculé instantanément</span>
-        </div>` : ''}
-
-        <!-- Tabs v3 -->
-        <nav class="tabs-v3" id="char-tabs-v3">
-          ${tabsHtml}
-        </nav>
-
-        <div id="char-tab-content" class="tab-body-v3"></div>
-
-      </section>
+      ${sidebarHtml}
+      ${mainColHtml}
     </div>
   </div>
 </div>`;
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Ancien template (legacy) commenté ci-dessous — gardé pour référence court terme.
-  // Le rendu actif est celui ci-dessus.
-  /*
-<div class="cs-layout">
-
-  <!-- ══════════ SIDEBAR ══════════ -->
-  <aside class="cs-sidebar" id="cs-sidebar" data-aura="${c.aura||'blue'}">
-
-    <!-- Identité -->
-    <div class="cs-id-block">
-      <div class="cs-photo-wrap" id="char-photo-wrap">
-        <div class="cs-photo" id="char-photo"
-             ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}
-             style="cursor:${canEdit?'pointer':'default'}">
-          ${c.photo
-            ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;
-                transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);
-                transform-origin:center">`
-            : `<div class="cs-photo-placeholder">
-                  <span class="cs-photo-initial">${(c.nom||'?')[0].toUpperCase()}</span>
-                  ${canEdit ? '<div class="cs-photo-edit-hint">📷</div>' : ''}
-                </div>`}
-        </div>
-        ${canEdit&&c.photo?`<button class="cs-photo-del" data-action="delete-character-photo" data-charid="${c.id}" title="Supprimer la photo">✕</button>`:''}
-        <div class="cs-lv-badge">${canEdit
-          ? `<span class="cs-editable-num" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
-          : `Niv.&nbsp;${c.niveau||1}`}</div>
-      </div>
-      <div class="cs-id-body">
-        <div class="cs-name-row">
-          ${canEdit
-            ? `<span class="cs-name cs-editable" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Modifier">${_esc(c.nom||'Nouveau personnage')}</span>`
-            : `<span class="cs-name">${_esc(c.nom||'Nouveau personnage')}</span>`}
-          ${canEdit?`<button class="cs-export-btn" data-action="openCharExportMenu" data-id="${c.id}" title="Exporter la fiche (JSON ou PDF)">📤</button>`:''}
-          ${canEdit?`<button class="cs-delete-btn" data-action="deleteChar" data-id="${c.id}" title="Supprimer ce personnage">🗑️</button>`:''}
-        </div>
-        ${titres.length||canEdit?`<div class="cs-titres">
-          ${titres.map(t=>`<span class="badge badge-gold" style="font-size:.62rem">${_esc(t)}</span>`).join('')}
-          ${canEdit?`<button class="cs-add-titre" data-action="manageTitres" data-id="${c.id}">＋ titre</button>`:''}
-        </div>`:''}
-        ${(c.classe||c.race||canEdit)?`<div class="cs-id-chips">
-          ${canEdit
-            ? `<span class="cs-id-chip cs-id-chip--classe${c.classe?'':' cs-id-chip--empty'} cs-editable"
-                title="Modifier la classe" data-fieldval="${_esc(c.classe||'')}"
-                data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
-            : (c.classe?`<span class="cs-id-chip cs-id-chip--classe">${_esc(c.classe)}</span>`:'')}
-          ${canEdit
-            ? `<span class="cs-id-chip cs-id-chip--race${c.race?'':' cs-id-chip--empty'} cs-editable"
-                title="Modifier la race" data-fieldval="${_esc(c.race||'')}"
-                data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
-            : (c.race?`<span class="cs-id-chip cs-id-chip--race">${_esc(c.race)}</span>`:'')}
-        </div>`:''}
-      </div>
-    </div>
-
-    <!-- Niveau · Or -->
-    <div class="cs-meta-strip">
-      <span class="cs-level-badge">
-        ${canEdit
-          ? `<span class="cs-editable-num" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
-          : `Niv.&nbsp;${c.niveau||1}`}
-      </span>
-      <div class="cs-or" title="Solde du Livret de Compte">
-        <span class="cs-or-icon">💰</span>
-        <span class="cs-or-amount">${calcOr(c)}</span>
-        <span class="cs-or-label">pièces d'or</span>
-      </div>
-    </div>
-
-    <!-- XP -->
-    <div class="cs-xp-section">
-      <div class="cs-xp-labels">
-        <span>Expérience</span>
-        <span id="xp-pct" class="cs-xp-pct-label">${xpPct}%</span>
-      </div>
-      <div class="cs-xp-row">
-        <div class="cs-xp-track">
-          <div class="cs-xp-fill" id="xp-bar-fill" style="width:${xpPct}%"><div class="cs-xp-shimmer"></div></div>
-        </div>
-      </div>
-      ${canEdit
-        ? `<div class="cs-xp-bottom-row">
-            <div class="cs-xp-total-group">
-              <input type="number" class="cs-xp-input cs-inline-num" id="xp-direct-input"
-                value="${xpCur}" min="0" max="${xpPalier}"
-                data-change="saveXpDirect" data-id="${c.id}"
-                data-input="previewXpBar" data-palier="${xpPalier}" title="Modifier l'XP total">
-              <span class="cs-xp-edit-label">/ ${xpPalier}</span>
-            </div>
-            <div class="cs-xp-delta-group">
-              <span class="cs-xp-add-icon">+</span>
-              <input type="number" class="cs-xp-input cs-xp-add-input" id="xp-add-input-${c.id}"
-                min="1" placeholder="gagné"
-                onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}"
-                title="XP à ajouter — Entrée pour valider">
-            </div>
-          </div>`
-        : `<div class="cs-xp-sub">${xpCur} / ${xpPalier} XP</div>`}
-    </div>
-
-    <div class="cs-sb-divider"></div>
-
-    <!-- PV / PM -->
-    <div class="cs-vitals-row">
-      <div class="cs-vital-block">
-        <div class="cs-vital-label">❤️ PV</div>
-        <div class="cs-vital-controls">
-          ${canEdit?`<button class="cs-vbtn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-          <span class="cs-vital-val" id="pv-val" style="color:${pvColor}">${pvCur}</span>
-          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-        </div>
-        <div class="cs-bar-bg cs-bar-hp">
-          <div class="cs-bar-fill cs-bar-hp-fill ${pvPct>50?'high':pvPct>25?'mid':''}" id="pv-bar" style="width:${pvPct}%"></div>
-        </div>
-        <div class="cs-vital-sub">
-          <span>max <strong id="pv-max">${pvMax}</strong></span>
-          ${canEdit
-            ? `<button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="Modifier PV de base">✎ ${c.pvBase||10}</button>`
-            : `<span class="cs-vital-base-ro">base ${c.pvBase||10}</span>`}
-        </div>
-      </div>
-      <div class="cs-vital-block">
-        <div class="cs-vital-label">🔵 PM</div>
-        <div class="cs-vital-controls">
-          ${canEdit?`<button class="cs-vbtn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-          <span class="cs-vital-val" id="pm-val" style="color:var(--blue)">${pmCur}</span>
-          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-        </div>
-        <div class="cs-bar-bg cs-bar-pm">
-          <div class="cs-bar-fill cs-bar-pm-fill" id="pm-bar" style="width:${pmPct}%"></div>
-        </div>
-        <div class="cs-vital-sub">
-          <span>max <strong id="pm-max">${pmMax}</strong></span>
-          ${canEdit
-            ? `<button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="Modifier PM de base">✎ ${c.pmBase||10}</button>`
-            : `<span class="cs-vital-base-ro">base ${c.pmBase||10}</span>`}
-        </div>
-      </div>
-    </div>
-
-    <!-- CA · Vitesse · Deck -->
-    <div class="cs-secondary-row">
-      <div class="cs-stat-chip">
-        <span class="cs-chip-label">🛡️ CA</span>
-        <span class="cs-chip-val">${calcCA(c)}</span>
-      </div>
-      <div class="cs-stat-chip">
-        <span class="cs-chip-label">🏃 Vit.</span>
-        <span class="cs-chip-val">${calcVitesse(c)}m</span>
-      </div>
-      <div class="cs-stat-chip">
-        <span class="cs-chip-label">🃏 Deck</span>
-        <span class="cs-chip-val">${deckActifs}/${deckMax}</span>
-      </div>
-    </div>
-
-    <div class="cs-sb-divider"></div>
-
-    <!-- Caractéristiques en bloc 2×3 -->
-    <div class="cs-stats-section" id="cs-stats-section">
-      <div class="cs-stats-header">
-        <span>Caractéristiques</span>
-        ${lvlPointsRemaining > 0 && canEdit
-          ? `<button data-action="showCharTab" data-tab="carac"
-              style="background:rgba(232,184,75,.15);border:1px solid rgba(232,184,75,.4);color:var(--gold);font-size:.65rem;padding:2px 9px;border-radius:999px;cursor:pointer;font-weight:700;letter-spacing:.04em"
-              title="Allouer vos points dans l'onglet Caracs">🎯 ${lvlPointsRemaining} pt${lvlPointsRemaining>1?'s':''}</button>`
-          : canEdit
-            ? `<button data-action="showCharTab" data-tab="carac" class="cs-hint" style="background:none;border:none;color:var(--text-dim);font-size:.7rem;cursor:pointer;padding:2px 6px;border-radius:6px" title="Voir le détail des caractéristiques">📊 détails</button>`
-            : ''}
-      </div>
-      <div class="cs-stats-grid">${statsHtml}</div>
-    </div>
-
-    ${canEdit ? `
-    <div class="cs-aura-picker">
-      <span class="cs-aura-picker-label">Aura</span>
-      <div class="cs-aura-dots">
-        ${[
-          {key:'blue',    color:'#4f8cff'},
-          {key:'arcane',  color:'#9d6fff'},
-          {key:'crimson', color:'#ff5a7e'},
-          {key:'gold',    color:'#e8b84b'},
-          {key:'emerald', color:'#22c38e'},
-          {key:'ember',   color:'#ff9544'},
-        ].map(a=>`<button class="cs-aura-dot${(c.aura||'blue')===a.key?' active':''}"
-          data-aura="${a.key}" style="--dot-color:${a.color}"
-          data-action="setCharAura" data-id="${c.id}" data-aura-key="${a.key}"
-          title="Aura ${a.key}"></button>`).join('')}
-      </div>
-    </div>` : ''}
-
-  </aside>
-
-  <!-- ══════════ CONTENU PRINCIPAL ══════════ -->
-  <div class="cs-main-col">
-
-    <!-- Onglets principaux -->
-    <nav class="cs-tabs" id="char-tabs">
-      <button class="cs-tab${topTab==='combat'?' active':''}"     data-tab="combat"     data-action="showCharTab">⚔️ Combat</button>
-      <button class="cs-tab${topTab==='inventaire'?' active':''}" data-tab="inventaire" data-action="showCharTab">🎒 Inventaire</button>
-      <button class="cs-tab${topTab==='journal'?' active':''}"    data-tab="journal"    data-action="showCharTab">📖 Journal</button>
-      <button class="cs-tab${topTab==='compte'?' active':''}"     data-tab="compte"     data-action="showCharTab">💰 Compte</button>
-      <button class="cs-tab${topTab==='profil'?' active':''}"     data-tab="profil"     data-action="showCharTab">👤 Présentation</button>
-    </nav>
-
-    <!-- Sous-onglets Combat : Équipement · Sorts · Maîtrises · Caracs -->
-    <div class="cs-subtab-bar" id="cs-subtabs-combat"
-         style="display:${topTab==='combat'?'flex':'none'}">
-      <button class="cs-subtab${leafTab==='equipement'?' active':''}" data-subtab="equipement" data-tab="equipement" data-action="showCharTab">🛡️ Équipement</button>
-      <button class="cs-subtab${leafTab==='sorts'?' active':''}"      data-subtab="sorts"      data-tab="sorts"      data-action="showCharTab">✨ Sorts</button>
-      <button class="cs-subtab${leafTab==='maitrises'?' active':''}"  data-subtab="maitrises"  data-tab="maitrises"  data-action="showCharTab">🎯 Maîtrises</button>
-      <button class="cs-subtab${leafTab==='carac'?' active':''}"      data-subtab="carac"      data-tab="carac"      data-action="showCharTab">📊 Caracs${lvlPointsRemaining>0?` <span class="cs-subtab-badge">${lvlPointsRemaining}</span>`:''}</button>
-    </div>
-
-    <!-- Sous-onglets Journal : Notes · Quêtes -->
-    <div class="cs-subtab-bar" id="cs-subtabs-journal"
-         style="display:${topTab==='journal'?'flex':'none'}">
-      <button class="cs-subtab${leafTab==='notes'?' active':''}"  data-subtab="notes"  data-tab="notes"  data-action="showCharTab">📝 Notes</button>
-      <button class="cs-subtab${leafTab==='quetes'?' active':''}" data-subtab="quetes" data-tab="quetes" data-action="showCharTab">📜 Quêtes</button>
-    </div>
-
-    <div id="char-tab-content" class="cs-tab-body"></div>
-
-  </div><!-- /cs-main-col -->
-
-</div><!-- /cs-layout -->`;
-  */
-  // ↑ Fin du bloc legacy commenté.
-
   _renderTabV3(v3Tab, c, canEdit);
 }
+
 
 function _renderTab(leafTab, c, canEdit) {
   // Legacy router — devient un proxy vers V3.
@@ -2529,15 +2264,10 @@ async function setCharAura(charId, aura) {
   const side = document.getElementById('cs-sidebar');
   if (side) {
     side.setAttribute('data-aura', aura);
-    const AURA_PALETTE = {
-      blue:'#4f8cff', arcane:'#9d6fff', crimson:'#ff5a7e',
-      gold:'#e8b84b', emerald:'#22c38e', ember:'#ff9544',
-    };
-    const col = AURA_PALETTE[aura] || AURA_PALETTE.blue;
-    const r = parseInt(col.slice(1,3),16), g = parseInt(col.slice(3,5),16), b = parseInt(col.slice(5,7),16);
-    side.style.setProperty('--aura-glow',   `rgba(${r},${g},${b},.14)`);
-    side.style.setProperty('--aura-border', `rgba(${r},${g},${b},.55)`);
-    side.style.setProperty('--aura-shadow', `0 0 38px rgba(${r},${g},${b},.28)`);
+    const { auraGlow, auraBd, auraSh } = _auraVars(_auraColor(aura));
+    side.style.setProperty('--aura-glow',   auraGlow);
+    side.style.setProperty('--aura-border', auraBd);
+    side.style.setProperty('--aura-shadow', auraSh);
   }
   document.querySelectorAll('.cs-aura-dot, .aura-dot').forEach(d =>
     d.classList.toggle('active', d.dataset.aura === aura)
