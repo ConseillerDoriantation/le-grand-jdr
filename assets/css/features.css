@@ -1245,7 +1245,7 @@
 
 /* ── Lightbox plein écran (style Hauts-Faits) ──────────────────────── */
 .pp-lightbox {
-  position: fixed; inset: 0; z-index: 10000;
+  position: fixed; inset: 0; z-index: var(--z-lightbox);
   background: rgba(0, 0, 0, .92);
   display: flex; align-items: center; justify-content: center;
   cursor: zoom-out;

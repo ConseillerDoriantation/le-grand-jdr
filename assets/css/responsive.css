@@ -13,7 +13,7 @@
   inset: 0;
   background: rgba(4, 8, 20, 0.58);
   backdrop-filter: blur(10px);
-  z-index: 199;
+  z-index: var(--z-mobile-scrim);
 }
 .sidebar-overlay.show { display: block; }
 
@@ -33,7 +33,7 @@
   -webkit-backdrop-filter: blur(28px) saturate(160%);
   border: 1px solid var(--border-md);
   border-radius: 26px;
-  z-index: 150;
+  z-index: var(--z-bottom-nav);
   padding: .35rem .4rem;
   align-items: stretch;
   box-shadow:
@@ -124,7 +124,7 @@
   -webkit-backdrop-filter: blur(28px) saturate(160%);
   border: 1px solid var(--border-md);
   border-radius: 26px;
-  z-index: 149;
+  z-index: var(--z-more-menu);
   padding: .9rem;
   grid-template-columns: repeat(3, 1fr);
   gap: .55rem;

@@ -2970,7 +2970,7 @@ input[type=number].input-field::-webkit-outer-spin-button {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: 1100;
+  z-index: var(--z-modal-popover);
   display: grid;
   grid-template-columns: repeat(10, 1fr);
   gap: 4px;

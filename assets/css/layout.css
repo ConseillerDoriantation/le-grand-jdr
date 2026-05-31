@@ -22,7 +22,7 @@ html, body { min-height:100%; }
   padding:0 1rem 0 1.15rem;
   position:sticky;
   top:14px;
-  z-index:100;
+  z-index:var(--z-header);
   border:1px solid rgba(255,255,255,0.08);
   border-radius:22px;
   background:
@@ -179,7 +179,7 @@ html, body { min-height:100%; }
   border-right: 1px solid var(--border);
   border-radius: 0;
   background: var(--bg-panel);
-  z-index: 50;
+  z-index: var(--z-sidebar);
 }
 /* Compense l'espace de la sidebar fixe sur desktop (mobile : sidebar masquée → pas de padding) */
 .app-layout { padding-left: 260px; }
@@ -1534,7 +1534,7 @@ select.input-field, select.input-sm { cursor:pointer; }
   display:flex;
   align-items:center;
   justify-content:center;
-  z-index:1000;
+  z-index:var(--z-modal);
   opacity:0;
   pointer-events:none;
   transition:opacity 0.25s ease;
@@ -1613,7 +1613,7 @@ select.input-field, select.input-sm { cursor:pointer; }
   border-radius:18px;
   font-size:0.84rem;
   font-family:'Inter',sans-serif;
-  z-index:9999;
+  z-index:var(--z-overlay);
   backdrop-filter:blur(18px);
   transform:translateY(80px) scale(0.95);
   opacity:0;

@@ -75,6 +75,25 @@
   --sidebar-width:  260px;
   --content-max:    1680px;
   --header-height:  64px;
+
+  /* ── Échelle z-index (couches globales) ──────────────────────────────
+     Valeurs ACTUELLES préservées → rendu identique. Centralise la pile
+     d'empilement « page-level » pour éviter la guerre des z-index.
+     Les z-index locaux des composants (0–6, contextes d'empilement internes)
+     restent numériques : ce ne sont pas des couches globales. */
+  --z-sidebar:         50;
+  --z-header:         100;
+  --z-more-menu:      149;
+  --z-bottom-nav:     150;
+  --z-mobile-scrim:   199;   /* voile sous la sidebar mobile */
+  --z-export-menu:    200;
+  --z-picker:         999;   /* pickers en-page (sous les modales) */
+  --z-modal:         1000;
+  --z-modal-popover: 1100;   /* picker AU-DESSUS d'une modale */
+  --z-modal-stacked: 2000;   /* modale empilée sur une modale */
+  --z-modal-stacked2:2100;
+  --z-overlay:       9999;   /* toasts, notif, palette, splash, popups */
+  --z-lightbox:     10000;   /* visionneuse plein écran */
   --font-display: 'Cinzel', 'Palatino Linotype', serif;
   --font-body:    'Inter', system-ui, sans-serif;
   --ease-spring:  cubic-bezier(0.22, 1, 0.36, 1);
