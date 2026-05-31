@@ -352,14 +352,20 @@ const PAGES = {
     };
 
     // Carte quête (joinable en place, pas de navigation sur le conteneur)
+    const _questRequiredCount = q => {
+      const n = parseInt(q.participantsRequis ?? q.participantsRequired ?? q.nbParticipants ?? 0, 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
     const QDIFF = { facile:'#22c38e', moyen:'#4f8cff', difficile:'#e8b84b', extreme:'#ff6b6b' };
     const QDLBL = { facile:'Facile',  moyen:'Moyen',   difficile:'Difficile', extreme:'Extrême' };
     const _dashQuestCard = q => {
       const col    = QDIFF[q.difficulte] || '#4f8cff';
       const dlbl   = QDLBL[q.difficulte] || 'Moyen';
       const parts  = Array.isArray(q.participants) ? q.participants : [];
+      const required = _questRequiredCount(q);
       const joined = parts.some(p => p.uid === _myUid);
       const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');
+      const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
       const joinBtn = !STATE.isAdmin
         ? `<button class="quest-join-btn${joined?' quest-join-btn--joined':''}"
              data-action="_dashQuestJoin" data-id="${q.id}">
@@ -375,7 +381,7 @@ const PAGES = {
         <div class="quest-card-title">${_esc(q.titre||'Quête')}</div>
         ${q.description ? `<div class="quest-card-desc">${_esc(q.description)}</div>` : ''}
         ${q.recompense  ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
-        ${parts.length > 0 ? `<div class="quest-parts">${portHtml}${parts.length>4?`<span class="quest-parts-count">+${parts.length-4}</span>`:''}</div>` : ''}
+        <div class="quest-parts">${portHtml}${parts.length>4?`<span class="quest-parts-count">+${parts.length-4}</span>`:''}<span class="quest-parts-count">${partsLabel}</span></div>
       </div>`;
     };
 
