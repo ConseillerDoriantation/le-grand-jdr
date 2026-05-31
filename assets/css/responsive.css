@@ -278,9 +278,6 @@
     text-align: center;
   }
 
-  /* Tutoriel : nav + contenu empilés */
-  .tutorial-layout-grid { grid-template-columns: 1fr !important; }
-
   /* Bastion : grille 2 colonnes → 1 colonne */
   [style*="grid-template-columns:1fr 290px"],
   [style*="grid-template-columns: 1fr 290px"] {

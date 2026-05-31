@@ -497,43 +497,6 @@
   box-shadow: 0 0 0 6px rgba(37,99,235,0.06) !important;
 }
 
-/* ══════════════════════════════════════════════════
-   TUTORIEL
-══════════════════════════════════════════════════ */
-[data-theme="light"] .tutorial-content {
-  background: var(--bg-elevated) !important;
-  border-color: rgba(0,0,0,0.08) !important;
-  box-shadow: var(--shadow-card) !important;
-  color: var(--text-soft) !important;
-}
-[data-theme="light"] .tutorial-nav-item {
-  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(244,247,252,0.92)) !important;
-  border-color: rgba(15,23,42,0.06) !important;
-  color: var(--text-muted);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
-}
-[data-theme="light"] .tutorial-nav-item:hover {
-  background: linear-gradient(180deg, rgba(255,255,255,1), rgba(239,244,252,1)) !important;
-  border-color: rgba(37,99,235,0.12) !important;
-  color: var(--text) !important;
-}
-[data-theme="light"] .tutorial-nav-item.active {
-  background: linear-gradient(135deg, rgba(37,99,235,0.14), rgba(96,165,250,0.08)) !important;
-  border-color: rgba(37,99,235,0.20) !important;
-  color: #1d4ed8 !important;
-}
-[data-theme="light"] .tutorial-nav-item::before {
-  background: rgba(30,41,59,0.18);
-  box-shadow: 0 0 0 4px rgba(148,163,184,0.14);
-}
-[data-theme="light"] .tutorial-nav-item:hover::before {
-  background: rgba(37,99,235,0.45);
-  box-shadow: 0 0 0 5px rgba(37,99,235,0.10);
-}
-[data-theme="light"] .tutorial-nav-item.active::before {
-  background: #2563eb;
-  box-shadow: 0 0 0 5px rgba(37,99,235,0.14);
-}
 
 /* ══════════════════════════════════════════════════
    INPUTS / FORMULAIRES
@@ -713,9 +676,8 @@ body,
 .char-section, .carac-box, .shop-item,
 .achievement-card, .player-card, .npc-card,
 .char-pill, .input-field, .input-sm,
-.tutorial-content, .tutorial-nav-item,
 .tab, .btn-outline, .btn-gold, .btn-logout,
-.admin-section, .world-content, .tutorial-content,
+.admin-section, .world-content,
 .coll-card, .collection-card {
   transition:
     background-color 0.20s ease,

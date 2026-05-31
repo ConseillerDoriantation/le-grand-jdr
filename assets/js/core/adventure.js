@@ -185,7 +185,7 @@ export async function deleteAdventure(adventureId) {
     'achievements', 'achievements_meta',
     'bestiary', 'bestiary_meta', 'bestiary_tracker', 'bestiaire',
     'collection', 'collectionSettings',
-    'players', 'world', 'informations', 'tutorial',
+    'players', 'world',
     'recettes', 'recipes', 'combat_styles', 'order',
     'bastion', 'characters',
   ];
@@ -263,7 +263,7 @@ export async function runMigration(onProgress) {
     // Collection
     'collection', 'collectionSettings',
     // Autres contenus MJ
-    'players', 'world', 'informations', 'tutorial',
+    'players', 'world',
     'recettes', 'recipes', 'combat_styles', 'order',
     // Bastion
     'bastion',
