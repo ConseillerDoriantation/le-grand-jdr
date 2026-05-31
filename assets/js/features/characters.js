@@ -1848,7 +1848,7 @@ const _ITEM_STAT_LABELS = {
 };
 const _ITEM_DERIVED_LABELS = {
   pvMaxBonus: 'PV', pmMaxBonus: 'PM',
-  vitesseBonus: 'Vit.', initiativeBonus: 'Init.',
+  vitesseBonus: 'Vit.', initiativeBonus: 'Init.', deckBonus: 'Deck',
 };
 // Bump une valeur de bonus dérivé par le palier d'amélioration Artisan
 // (cohérent avec _bumpBonus de char-stats.js : ne bump que les valeurs positives).
@@ -1976,11 +1976,11 @@ function renderCharCombatV3(c, canEdit) {
       try { b = getItemStatBonus(it, fullKey); } catch {}
       if (b) badges.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
     });
-    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
+    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','deckBonus'].forEach(k => {
       // Applique le palier Artisan (upgrades.effectBonus) sur les bonus positifs
       const v = _bumpDerived(parseInt(it[k]) || 0, it);
       if (!v) return;
-      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.' }[k];
+      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.', deckBonus:'Deck' }[k];
       badges.push({ lbl: `${shortLbl} ${v>0?'+':''}${v}`, cls: 'gold' });
     });
     // Traits via _getTraits (importé de data.js)

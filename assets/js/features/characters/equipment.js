@@ -65,12 +65,13 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
       sa: getItemStatBonus(item, 'sagesse'),
       co: getItemStatBonus(item, 'constitution'),
       ch: getItemStatBonus(item, 'charisme'),
-      // Bonus dérivés (PV/PM/Vitesse/Initiative) et compétences — propagés à l'équipement
+      // Bonus dérivés (PV/PM/Vitesse/Initiative/CA/Deck) et compétences — propagés à l'équipement
       pvMaxBonus:     parseInt(item.pvMaxBonus)     || 0,
       pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
       vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
       initiativeBonus:parseInt(item.initiativeBonus)|| 0,
       caBonus:        parseInt(item.caBonus)        || 0,
+      deckBonus:      parseInt(item.deckBonus)      || 0,
       skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
                       ? { ...item.skillBonuses } : {},
       sourceInvIndex: invIndex,
@@ -92,12 +93,13 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
     typeArmure: item.typeArmure || '',
     slotArmure: item.slotArmure ? inferArmorSlotValue(slot, item) : '',
     slotBijou: item.slotBijou ? inferAccessorySlotValue(slot, item) : '',
-    // Bonus dérivés (PV/PM/Vitesse/Initiative) et compétences — propagés à l'équipement
+    // Bonus dérivés (PV/PM/Vitesse/Initiative/CA/Deck) et compétences — propagés à l'équipement
     pvMaxBonus:     parseInt(item.pvMaxBonus)     || 0,
     pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
     vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
     initiativeBonus:parseInt(item.initiativeBonus)|| 0,
     caBonus:        parseInt(item.caBonus)        || 0,
+    deckBonus:      parseInt(item.deckBonus)      || 0,
     skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
                     ? { ...item.skillBonuses } : {},
     sourceInvIndex: invIndex,

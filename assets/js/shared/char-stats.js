@@ -168,7 +168,9 @@ export function calcInitiative(c) {
 export function calcDeckMax(c) {
   const modIn  = getMod(c, 'intelligence');
   const niveau = c?.niveau || 1;
-  return 3 + Math.min(0, modIn) + Math.floor(Math.max(0, modIn) * Math.pow(Math.max(0, niveau - 1), 0.75));
+  const base   = 3 + Math.min(0, modIn) + Math.floor(Math.max(0, modIn) * Math.pow(Math.max(0, niveau - 1), 0.75));
+  const equipBonus = computeEquipDerivedBonus(c?.equipement).deckBonus;
+  return Math.max(0, base + equipBonus);
 }
 
 /**
@@ -297,7 +299,7 @@ export function formatItemBonusText(item = {}) {
 //   - skillBonuses: { "Intimidation": 1, "Perception": 2, ... }
 // Ces bonus s'ajoutent au calcul de base quand l'item est équipé.
 
-const DERIVED_BONUS_KEYS = ['pvMaxBonus', 'pmMaxBonus', 'vitesseBonus', 'initiativeBonus', 'caBonus'];
+const DERIVED_BONUS_KEYS = ['pvMaxBonus', 'pmMaxBonus', 'vitesseBonus', 'initiativeBonus', 'caBonus', 'deckBonus'];
 
 /** Lit le palier d'amélioration "effet" appliqué à l'item (Artisan). */
 function _effectUpgrade(it) {
@@ -313,7 +315,7 @@ function _bumpBonus(val, upgrade) {
 
 /** Agrège les bonus dérivés de tous les items équipés (avec amélioration Artisan). */
 export function computeEquipDerivedBonus(equip = {}) {
-  const out = { pvMaxBonus: 0, pmMaxBonus: 0, vitesseBonus: 0, initiativeBonus: 0, caBonus: 0 };
+  const out = { pvMaxBonus: 0, pmMaxBonus: 0, vitesseBonus: 0, initiativeBonus: 0, caBonus: 0, deckBonus: 0 };
   Object.values(equip || {}).forEach(it => {
     if (!it) return;
     const up = _effectUpgrade(it);

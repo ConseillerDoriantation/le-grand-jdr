@@ -3022,6 +3022,7 @@ function _buildFieldsHtml(tpl,item) {
         { id:'vitesseBonus',   short:'Vit',  label:'Vitesse',    icon:'👢' },
         { id:'initiativeBonus',short:'Init', label:'Initiative', icon:'⚡' },
         { id:'caBonus',        short:'CA',   label:'Classe d\'Armure', icon:'🛡️' },
+        { id:'deckBonus',      short:'Deck', label:'Deck de sorts', icon:'🃏' },
       ];
       html+=`<div class="form-group sh-field-full"><label>${f.label} <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— ajoutés au calcul de base quand l'objet est équipé</span></label>
         <div class="sh-bonus-row">
@@ -3283,8 +3284,8 @@ async function saveShopItem(itemId) {
           data[stat.store] = parseInt(document.getElementById(`si-${stat.store}`)?.value) || 0;
         });
       } else if (f.type === 'derived_bonus_grid') {
-        // Bonus dérivés : PV/PM max, Vitesse, Initiative, CA
-        ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus'].forEach(k => {
+        // Bonus dérivés : PV/PM max, Vitesse, Initiative, CA, Deck
+        ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus','deckBonus'].forEach(k => {
           const v = parseInt(document.getElementById(`si-${k}`)?.value);
           data[k] = Number.isFinite(v) ? v : 0;
         });
@@ -3861,6 +3862,7 @@ function _renderAtelierStats() {
     { lbl:'PV max',          ico:'❤', cur: calcPVMax(c),    next: calcPVMax(sim) },
     { lbl:'PM max',          ico:'✦', cur: calcPMMax(c),    next: calcPMMax(sim) },
     { lbl:'Vitesse',         ico:'🏃', cur: calcVitesse(c), next: calcVitesse(sim) },
+    { lbl:'Deck de sorts',   ico:'🃏', cur: calcDeckMax(c), next: calcDeckMax(sim) },
   ];
   const derivedHtml = derived.map(d => {
     const delta = d.next - d.cur;
