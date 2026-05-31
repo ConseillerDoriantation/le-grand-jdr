@@ -18,7 +18,7 @@ import {
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from './characters/data.js';
+import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../shared/equipment-utils.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
 import { loadSpellMatrices, getInvokedArm } from '../shared/spell-matrices.js';
@@ -553,6 +553,13 @@ function _live(t) {
     || (typeof t.attack==='string' ? t.attack : null)
     || '1d6';
 
+  // Valeurs dérivées calculées une seule fois pour éviter les recalculs dans result
+  const _round   = _session?.combat?.round ?? 0;
+  const _pmMax   = c ? calcPMMax(c) : n ? npcPmMax : null;
+  const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))));
+  const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
+  const _ca      = _caBase + _caBuffs.reduce((sum, bf) => sum + (bf.bonus || 0), 0);
+
   const result = {
     ...t,
     // Ennemis : le nom du token (instance) prime sur le nom générique du bestiaire
@@ -561,36 +568,24 @@ function _live(t) {
     displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
-    displayPm:         c ? (c.pm ?? calcPMMax(c)) : n ? npcPmCur : null,
-    displayPmMax:      c ? calcPMMax(c) : n ? npcPmMax : null,
+    displayPm:         c ? (c.pm ?? _pmMax) : n ? npcPmCur : null,
+    displayPmMax:      _pmMax,
     displayMovement: (() => {
       const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6)))));
-      const r = _session?.combat?.round ?? 0;
       const moveDelta = (t.buffs || [])
         .filter(bf => (bf.type === 'move_bonus' || bf.type === 'move_debuff')
-          && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
+          && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
       return Math.max(0, baseMv + moveDelta);
     })(),
     displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))),
     displayAttackDice: atkDice,
-    displayDefense:    (t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))))) + (() => {
-      const r = _session?.combat?.round ?? 0;
-      return (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
-        .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
-    })(),
+    displayDefense:    _ca,
     // VRAIE CA, JAMAIS écrasée par l'estimation joueur. Sert au calcul authoritatif
     // du hit/miss côté serveur. À ne PAS afficher aux joueurs (utiliser displayDefense
     // ou _viewCA pour le rendu UI).
-    realDefense:    (t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))))) + (() => {
-      const r = _session?.combat?.round ?? 0;
-      return (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
-        .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
-    })(),
-    _activeCaBuff: (() => {
-      const r = _session?.combat?.round ?? 0;
-      return (t.buffs || []).find(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)) || null;
-    })(),
+    realDefense:       _ca,
+    _activeCaBuff:     _caBuffs[0] ?? null,
     // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
     // Pour bestiaire/custom : t.range > 1ère attaque bestiary > défaut 1
     // Bonus de portée temporaire (buff range_bonus = Allonge magique etc.)
@@ -7390,7 +7385,7 @@ function _showCtxMenu(x, y, items) {
   const top  = r.bottom > vh ? Math.max(0, y - r.height) : y;
   el.style.cssText=`left:${left}px;top:${top}px;`;
   _ctxClose=e=>{ if (!el.contains(e.target)) _hideCtxMenu(); };
-  setTimeout(()=>document.addEventListener('mousedown',_ctxClose), 0);
+  requestAnimationFrame(()=>document.addEventListener('mousedown',_ctxClose));
 }
 
 // ── Mode édition carte ───────────────────────────────────────────
@@ -8587,7 +8582,7 @@ function _vttToggleShortRest() {
     document.getElementById('vtt-rest-trigger')?.classList.add('active');
     _renderShortRest();
     // Défère l'ajout du listener pour que le clic d'ouverture ne le ferme pas aussitôt.
-    setTimeout(() => document.addEventListener('mousedown', _shortRestOutsideClick), 0);
+    requestAnimationFrame(() => document.addEventListener('mousedown', _shortRestOutsideClick));
   }
 }
 
@@ -10447,7 +10442,7 @@ function _vttLibMoveMenu(imgId, evt) {
   popup.style.left = rect.left + 'px';
   document.body.appendChild(popup);
   const close = (e) => { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('mousedown', close, true); } };
-  setTimeout(() => document.addEventListener('mousedown', close, true), 10);
+  requestAnimationFrame(() => document.addEventListener('mousedown', close, true));
 }
 
 function _vttLibMoveTo(imgId, folderId) {
