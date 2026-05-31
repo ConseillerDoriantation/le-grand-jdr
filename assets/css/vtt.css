@@ -2711,6 +2711,13 @@
 .vtt-log-vs {
   font-size: .72rem; color: var(--text-dim);
 }
+/* Dé naturel affiché à côté du total calculé dans le chat */
+.vtt-log-nat {
+  font-size: .72rem; color: var(--text-muted);
+  padding: 1px 6px; border-radius: 6px;
+  background: rgba(255,255,255,.05); border: 1px solid var(--border);
+  white-space: nowrap;
+}
 .vtt-log-text { flex: 1; min-width: 0; font-size: .8rem; }
 
 /* Toggle détail */
