@@ -48,6 +48,7 @@ let _ag = {
   quests:     [],               // toutes les quêtes
   users:      [],               // tous les utilisateurs (pour pseudos)
   groupView:  false,            // toggle vue groupe
+  groupFilter:null,             // null = tous · sinon id de quête (groupe de joueurs)
   saveTimer:  null,             // debounce sauvegarde
   nextSession:null,             // séance validée par le MJ (doc agenda_session/next)
 };
@@ -481,13 +482,35 @@ function _renderGroupView() {
   const playerUids = new Set(_ag.allAvails.map(a => a.uid || a.id));
   // Ajouter aussi les joueurs de l'aventure qui n'ont pas (encore) de doc
   (_ag.users || []).forEach(u => playerUids.add(u.id || u.uid));
-  const players = [..._ag.users || [], ..._ag.allAvails.filter(a => !(_ag.users||[]).some(u => (u.id||u.uid) === (a.uid||a.id))).map(a => ({ id: a.uid||a.id, pseudo: a.pseudo }))]
+  let players = [..._ag.users || [], ..._ag.allAvails.filter(a => !(_ag.users||[]).some(u => (u.id||u.uid) === (a.uid||a.id))).map(a => ({ id: a.uid||a.id, pseudo: a.pseudo }))]
     .filter((p, i, arr) => arr.findIndex(x => (x.id||x.uid) === (p.id||p.uid)) === i)
     .filter(p => (p.id||p.uid) !== STATE.user?.uid); // hors moi (j'ai déjà mon calendrier)
 
-  if (!players.length) { el.innerHTML = ''; return; }
+  // ── Groupes = quêtes (chaque quête a ses participants). Filtre optionnel. ──
+  const quests = (_ag.quests || []).filter(q => Array.isArray(q.participants) && q.participants.length);
+  // Si le groupe filtré n'existe plus, revenir à « Tous »
+  if (_ag.groupFilter && !quests.some(q => q.id === _ag.groupFilter)) _ag.groupFilter = null;
+  if (_ag.groupFilter) {
+    const q = quests.find(x => x.id === _ag.groupFilter);
+    const memberUids = new Set((q?.participants || []).map(p => p.uid).filter(Boolean));
+    players = players.filter(p => memberUids.has(p.id || p.uid));
+  }
 
-  el.innerHTML = `
+  const filtersHtml = quests.length ? `
+    <div class="ag-grp-filters">
+      <button type="button" class="ag-grp-filter ${!_ag.groupFilter ? 'is-active' : ''}"
+        data-action="_agSetGroupFilter" data-group="">👥 Tous</button>
+      ${quests.map(q => `<button type="button" class="ag-grp-filter ${_ag.groupFilter===q.id ? 'is-active' : ''}"
+        data-action="_agSetGroupFilter" data-group="${_esc(q.id)}">${_esc(q.titre||q.nom||'Quête')}
+        <span class="ag-grp-filter-count">${(q.participants||[]).length}</span></button>`).join('')}
+    </div>` : '';
+
+  if (!players.length) {
+    el.innerHTML = filtersHtml + `<div class="ag-quest-empty" style="margin-top:.6rem">Aucun joueur dans ce groupe (hors toi).</div>`;
+    return;
+  }
+
+  el.innerHTML = filtersHtml + `
     <div class="ag-grp-scroll">
       <table class="ag-grp-table">
         <thead>
@@ -523,6 +546,10 @@ window._agToggleGroupView = () => {
   _ag.groupView = !_ag.groupView;
   const btn = document.getElementById('ag-group-toggle');
   if (btn) btn.textContent = _ag.groupView ? '👁 Masquer la vue groupe' : '👥 Voir les dispos du groupe';
+  _renderGroupView();
+};
+window._agSetGroupFilter = (groupId) => {
+  _ag.groupFilter = groupId || null;
   _renderGroupView();
 };
 
@@ -637,6 +664,7 @@ registerActions({
   _agSetRecurringPattern:   (btn) => window._agSetRecurringPattern?.(btn.dataset.pattern),
   _agOpenRecurringEditor:   ()    => window._agOpenRecurringEditor?.(),
   _agToggleGroupView:       ()    => window._agToggleGroupView?.(),
+  _agSetGroupFilter:        (btn) => window._agSetGroupFilter?.(btn.dataset.group),
   _agClearOverrides:        ()    => window._agClearOverrides?.(),
 });
 export default renderAgendaPage;
