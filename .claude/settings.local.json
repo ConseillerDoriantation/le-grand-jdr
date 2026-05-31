@@ -179,7 +179,8 @@
       "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\features\\\\shop.js\")",
       "Bash(node test-shop.mjs)",
       "Bash(node --check \"C:\\\\Users\\\\Moi\\\\Documents\\\\GitHub\\\\le-grand-jdr\\\\.claude\\\\worktrees\\\\zen-banzai\\\\assets\\\\js\\\\shared\\\\upgrade-settings.js\")",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(awk 'NR>=400 && NR<=607 && /^\\(function|const|export function|async function\\).*\\\\\\(/ {print NR\": \"$0}' characters.js)"
     ]
   }
 }

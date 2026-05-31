@@ -7094,6 +7094,8 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-v3 .id-actions-mini { display: flex; gap: 2px; }
 .cs-v3 .id-actions-mini button { background: transparent; border: none; cursor: pointer; color: var(--text-dim); font-size: .85rem; padding: 2px 4px; border-radius: 6px; line-height: 1; }
 .cs-v3 .id-actions-mini button:hover { color: var(--gold); background: rgba(79,140,255,.08); }
+/* Suppression du personnage : hover rouge pour signaler l'action destructive */
+.cs-v3 .id-actions-mini .id-del-btn:hover { color: var(--crimson-light, #ff8ca7); background: rgba(220,38,38,.10); }
 /* Bouton "définir par défaut" (étoile) */
 .cs-v3 .id-default-btn {
   color: var(--text-dim);

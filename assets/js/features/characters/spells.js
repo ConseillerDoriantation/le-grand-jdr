@@ -349,7 +349,7 @@ function _autoSourceDegats(s, c) {
 function _autoSourceSoin(s) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
   const isMagic = _isNoyauMagic(s);
-  const statKey = _getSortSoinStatKey(s, STATE.activeChar);
+  const statKey = _getSortSoinStatKey(s, _modalChar());
   const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
   // Le label reflète si la stat vient d'un override de sort ou de l'auto-dérivation arme/noyau
   const natureStr = s?.degatsStat
@@ -1499,13 +1499,21 @@ export function editSort(idx) { _itemEditCtx = null; openSortModal(idx, (STATE.a
  *  onSave : callback async(item) appelé après la sauvegarde — doit persister l'item
  *  charForCalc : perso optionnel pour les calculs d'aperçu (sinon null) */
 export function editItemSpell(item, idx, onSave, charForCalc = null) {
+  // Le perso de calcul est porté par le contexte (_itemEditCtx.charForCalc) et
+  // résolu via _modalChar() : aucune mutation de STATE.activeChar.
   _itemEditCtx = { item, idx, onSave, charForCalc };
   const action = idx >= 0 ? (item.actions || [])[idx] || {} : {};
-  // Fallback : si pas de perso, on utilise un placeholder pour que les
-  // calculs (preview, formules) ne crashent pas. Le rendu sera générique.
-  if (charForCalc && !STATE.activeChar) STATE._wasActiveChar = STATE.activeChar;
-  if (charForCalc) STATE.activeChar = charForCalc;
   openSortModal(idx, action);
+}
+
+/** Perso contextuel de la modale de sort en cours d'édition.
+ *  - Édition d'un sort de perso : le perso actif global.
+ *  - Édition d'une action d'item (boutique) : le perso de calcul passé à
+ *    editItemSpell, sinon le perso actif en repli.
+ *  Source unique pour tous les calculs/preview de la modale — supprime la
+ *  substitution fragile de STATE.activeChar. */
+function _modalChar() {
+  return _itemEditCtx?.charForCalc ?? STATE.activeChar ?? null;
 }
 export function addItemSpell(item, onSave, charForCalc = null) {
   return editItemSpell(item, -1, onSave, charForCalc);
@@ -1748,7 +1756,7 @@ export async function openSortModal(idx, s) {
     );
     noyauTypeIdSel = legacy?.id || '';
   }
-  const charForAccess = STATE.activeChar || _itemEditCtx?.charForCalc || null;
+  const charForAccess = _modalChar();
   const charElements  = new Set(charForAccess?.elements || []);
   const canUseAllNoyaux = STATE.isAdmin || !charForAccess;
   const allowedNoyaux = canUseAllNoyaux
@@ -1864,7 +1872,7 @@ export async function openSortModal(idx, s) {
       <div class="cs-spell-identity-field"><label>Catégorie</label>
         <select class="input-field" id="s-catid">
           <option value="">— Aucune —</option>
-          ${(STATE.activeChar?.sort_cats||[]).map(cat =>
+          ${(_modalChar()?.sort_cats||[]).map(cat =>
             `<option value="${cat.id}" ${s?.catId===cat.id?'selected':''}>${cat.nom}</option>`
           ).join('')}
         </select>
@@ -1914,8 +1922,8 @@ export async function openSortModal(idx, s) {
       ${_autoValHtml({
         fieldId: 's-degats',
         label: '⚔️ Dégâts',
-        autoValue:  _calcSortDegats(s || {}, STATE.activeChar),
-        autoSource: _autoSourceDegats(s || {}, STATE.activeChar),
+        autoValue:  _calcSortDegats(s || {}, _modalChar()),
+        autoSource: _autoSourceDegats(s || {}, _modalChar()),
         currentValue: s?.degats,
         placeholder: 'ex : 3d8 +2, 2d10 Feu… (vide = formule auto)',
         // Mode Custom : la formule ET les stats sont éditables ensemble.
@@ -1979,7 +1987,7 @@ export async function openSortModal(idx, s) {
       ${_autoValHtml({
         fieldId: 's-soin',
         label: '💚 Soin',
-        autoValue:  _calcSortSoin(s || {}, STATE.activeChar),
+        autoValue:  _calcSortSoin(s || {}, _modalChar()),
         autoSource: _autoSourceSoin(s || {}),
         currentValue: s?.soin,
         placeholder: 'ex : 3d6 +2, moitié des dégâts… (vide = formule auto)',
@@ -2466,7 +2474,7 @@ window._disableSortCustom = (fieldId) => {
 /** Recalcule les valeurs affichées dans les chips auto (dégâts, soin, CA, enchant). */
 function _refreshAutoValChips() {
   const s = _buildSortFromDOM();
-  const c = STATE.activeChar;
+  const c = _modalChar();
   if (!c) return;
   const apply = (fieldId, value, source) => {
     const v = document.getElementById(`${fieldId}-autoval`);
@@ -2750,7 +2758,7 @@ function _updateSortPreview() {
   // En contexte item-edit : on utilise un perso virtuel pour avoir un aperçu générique
   //   (formules de base sans modificateurs perso, ce qui correspond au comportement réel
   //   de l'item — les modificateurs viennent du caster au moment de l'utilisation).
-  const c = STATE.activeChar || (_itemEditCtx ? _itemPreviewPlaceholderChar() : null);
+  const c = _modalChar() || (_itemEditCtx ? _itemPreviewPlaceholderChar() : null);
   if (!c) { body.innerHTML = ''; return; }
   if (typeof _refreshAutoValChips === 'function') _refreshAutoValChips();
   if (typeof _refreshSpellSuggestions === 'function') _refreshSpellSuggestions();
@@ -3038,11 +3046,6 @@ async function _saveItemSpell() {
     if (idx >= 0) acts[idx] = { ...acts[idx], ...newSort };
     else acts.push(newSort);
     item.actions = acts;
-    // Restaure le perso précédent si on en avait substitué un
-    if (STATE._wasActiveChar !== undefined) {
-      STATE.activeChar = STATE._wasActiveChar;
-      delete STATE._wasActiveChar;
-    }
     const cb = onSave;
     _itemEditCtx = null;
     // 1) Pop la modal de sort → la modal du shop est restaurée à l'écran
