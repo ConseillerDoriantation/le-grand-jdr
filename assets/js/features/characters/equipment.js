@@ -157,10 +157,13 @@ export function editEquipSlot(slot) {
     'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
   ]);
 
+  // `slot` = clé Firestore du slot, `slotArmure` = valeur stockée sur l'objet,
+  // `keywords` = repli legacy (objets sans `slotArmure`) — SPÉCIFIQUES au slot
+  // pour qu'une tête ne soit jamais proposée dans torse/bottes, etc.
   const SLOT_ARMURE = {
-    'Tête':    { slot: 'Tête',  types: null },
-    'Torse':   { slot: 'Torse', types: null },
-    'Bottes':  { slot: 'Pieds', types: null },
+    'Tête':   { slot: 'Tête',  keywords: ['casque','heaume','chapeau','coiffe','capuche','tête','tete','tiare','couronne'] },
+    'Torse':  { slot: 'Torse', keywords: ['torse','cuirasse','plastron','armure','armor','robe','cotte','harnois','tunique','mailles'] },
+    'Bottes': { slot: 'Pieds', keywords: ['botte','bottes','chausse','soleret','jambière','jambiere','grève','greve','sandale','pied','pieds'] },
     'Amulette':    null,
     'Anneau':      null,
     'Objet magique': null,
@@ -199,11 +202,13 @@ export function editEquipSlot(slot) {
         if (armureRule === null) {
           return item.slotBijou === slot;
         }
-        if (tpl === 'armure' || item.slotArmure) {
+        // Source de vérité : slotArmure (posé à l'achat / template armure).
+        if (item.slotArmure) {
           return item.slotArmure === armureRule.slot;
         }
+        // Repli legacy (objets sans slotArmure) : mots-clés SPÉCIFIQUES au slot.
         const t = (item.type||'').toLowerCase();
-        return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
+        return armureRule.keywords.some(k => t.includes(k));
       }
 
       return false;
