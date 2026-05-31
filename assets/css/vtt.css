@@ -798,6 +798,27 @@
 .vtt-ins-stat-label { color: var(--text-muted); font-size: .63rem; text-transform: uppercase; letter-spacing: .06em; }
 .vtt-ins-stat-val   { color: var(--text); font-weight: 700; font-size: .88rem; font-family: 'Outfit', sans-serif; line-height: 1.2; }
 
+/* Bonus temporaire « du tour » dans l'inspecteur (Mouvement / CA / Portée…) */
+.vtt-ins-bonus { font-size: .62rem; font-weight: 800; margin-left: 2px; }
+.vtt-ins-bonus.pos { color: #22c38e; }
+.vtt-ins-bonus.neg { color: #ef4444; }
+.vtt-ins-stat-steps { display: inline-flex; gap: 4px; margin-top: 4px; }
+.vtt-ins-stat-step {
+  width: 22px; height: 22px; line-height: 1; padding: 0;
+  border-radius: 6px; cursor: pointer;
+  background: var(--bg-card, rgba(0,0,0,.25)); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: .95rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.vtt-ins-stat-step:hover { background: rgba(232,184,75,.16); border-color: rgba(232,184,75,.45); color: #e8b84b; }
+.vtt-ins-bonus-reset {
+  padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  background: rgba(255,90,126,.06); border: 1px solid rgba(255,90,126,.22);
+  color: var(--crimson-light, #ff8ca7); font-size: .66rem; font-weight: 700; white-space: nowrap;
+}
+.vtt-ins-bonus-reset:hover { background: rgba(255,90,126,.16); border-color: rgba(255,90,126,.45); }
+
 /* Garder le vieux sélecteur pour compatibilité */
 .vtt-ins-hp-wrap { display: none; }
 .vtt-ins-hp-bar  { display: none; }
@@ -3062,15 +3083,39 @@
 
 /* Défenses */
 .vtt-ms-defenses {
-  display: flex; justify-content: space-around;
-  padding: .35rem .5rem;
+  display: flex; flex-wrap: wrap; justify-content: space-around; gap: .35rem .25rem;
+  padding: .4rem .5rem;
   border-bottom: 1px solid var(--border);
 }
 .vtt-ms-def-item {
   display: flex; flex-direction: column; align-items: center; gap: .1rem;
 }
+.vtt-ms-def-item.has-bonus { }
 .vtt-ms-def-item span { font-size: .62rem; color: var(--text-muted); }
-.vtt-ms-def-item strong { font-size: .9rem; color: var(--text); }
+.vtt-ms-def-item strong { font-size: .9rem; color: var(--text); display: inline-flex; align-items: baseline; gap: 1px; }
+.vtt-ms-def-dash { font-size: .9rem; color: var(--text-dim); }
+/* Badge bonus du tour */
+.vtt-ms-bonus { font-size: .62rem; font-weight: 800; }
+.vtt-ms-bonus.pos { color: #22c38e; }
+.vtt-ms-bonus.neg { color: #ef4444; }
+/* Steppers − / + sous une défense */
+.vtt-ms-def-steps { display: inline-flex; gap: 3px; margin-top: 2px; }
+.vtt-ms-def-step {
+  width: 18px; height: 18px; line-height: 1; padding: 0;
+  border-radius: 5px; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: .8rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.vtt-ms-def-step:hover { background: rgba(232,184,75,.14); border-color: rgba(232,184,75,.4); color: #e8b84b; }
+.vtt-ms-def-reset {
+  align-self: center; padding: 3px 8px; border-radius: 999px; cursor: pointer;
+  background: rgba(255,90,126,.06); border: 1px solid rgba(255,90,126,.22);
+  color: var(--crimson-light, #ff8ca7); font-size: .64rem; font-weight: 700;
+  white-space: nowrap;
+}
+.vtt-ms-def-reset:hover { background: rgba(255,90,126,.16); border-color: rgba(255,90,126,.45); }
 
 /* Sections repliables */
 .vtt-ms-section { border-bottom: 1px solid var(--border); }

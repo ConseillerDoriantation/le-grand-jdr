@@ -5650,6 +5650,17 @@ function _renderInspector(t) {
     const pmEditHtml = (_canEditToken && pm !== null && pmMax !== null)
       ? '<input class="vtt-ins-input" type="number" value="'+pm+'" min="0" max="'+pmMax+'" data-vtt-fn="_vttSetPm" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
       : null;
+    // Bonus manuels « du tour » via les BUFFS du token. ld.display* les inclut
+    // DÉJÀ (move_bonus / ca / range_bonus) → ne pas re-additionner. Le badge
+    // affiche juste la part manuelle. Éditable par qui contrôle le token.
+    const _badge = (k) => { const b = _manualBuffVal(t, k); return b ? `<sup class="vtt-ins-bonus ${b>0?'pos':'neg'}">${b>0?'+':''}${b}</sup>` : ''; };
+    const _steps = (k) => _canEditToken
+      ? `<span class="vtt-ins-stat-steps">`+
+          `<button class="vtt-ins-stat-step" data-vtt-fn="_vttTokenBonus" data-vtt-args="${t.id}|${k}|-1" title="−1">−</button>`+
+          `<button class="vtt-ins-stat-step" data-vtt-fn="_vttTokenBonus" data-vtt-args="${t.id}|${k}|1" title="+1">+</button>`+
+        `</span>` : '';
+    const _anyBonus = ['vitesse','ca','portee'].some(k => _manualBuffVal(t, k) !== 0);
+
     statsHtml =
       '<div class="vtt-ins-bars">' +
         _bar('PV', hp, hpm, hpColor(rat), pvEditHtml) +
@@ -5657,19 +5668,25 @@ function _renderInspector(t) {
       '</div>' +
       '<div class="vtt-ins-stats">' +
         (() => {
-          const baseMvt = ld.displayMovement ?? 6;
+          const baseMvt = ld.displayMovement ?? 6;   // inclut déjà le buff move_bonus manuel
           const maxMvt  = baseMvt + (t.bonusMvt||0);
           const rem     = _inCombat ? Math.max(0, maxMvt - (t.movedCells||0)) : null;
           const mvLabel = _inCombat ? `${rem} / ${maxMvt} cases` : `${baseMvt} cases`;
           const remColor = _inCombat ? (rem===0?'#f87171':rem<=2?'#f59e0b':'#4ade80') : 'inherit';
           return `<div class="vtt-ins-stat"><span class="vtt-ins-stat-icon">🏃</span>`+
             `<span class="vtt-ins-stat-lbl">Mouvement</span>`+
-            `<span class="vtt-ins-stat-val" style="color:${remColor}">${mvLabel}</span></div>`;
+            `<span class="vtt-ins-stat-val" style="color:${remColor}">${mvLabel}${_badge('vitesse')}</span>${_steps('vitesse')}</div>`;
         })() +
         _stat('⚔️', 'Attaque', atkLabel) +
-        _stat('🛡', 'CA', ld.displayDefense??0) +
-        _stat('🎯', 'Portée', (ld.displayRange??1)+' case(s)') +
+        `<div class="vtt-ins-stat"><span class="vtt-ins-stat-label">🛡 CA</span>`+
+          `<span class="vtt-ins-stat-val">${ld.displayDefense??0}${_badge('ca')}</span>${_steps('ca')}</div>` +
+        `<div class="vtt-ins-stat"><span class="vtt-ins-stat-label">🎯 Portée</span>`+
+          `<span class="vtt-ins-stat-val">${ld.displayRange??1} case(s)${_badge('portee')}</span>${_steps('portee')}</div>` +
         _stat('📍', 'Position', pos, true) +
+        ((_canEditToken && _anyBonus)
+          ? `<div class="vtt-ins-stat full" style="justify-content:flex-end">`+
+              `<button class="vtt-ins-bonus-reset" data-vtt-fn="_vttTokenResetBonus" data-vtt-args="${t.id}" title="Réinitialiser les bonus manuels">↺ Reset bonus</button>`+
+            `</div>` : '') +
         (t.attackedThisTurn
           ? '<div class="vtt-ins-stat full" style="gap:.4rem;flex-wrap:wrap">'+
               '<span class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué</span>'+
@@ -8436,16 +8453,29 @@ function _renderShortRest() {
   `;
 }
 
+// Ferme le panneau et détache le listener de clic extérieur.
+function _closeShortRest() {
+  const panel = document.getElementById('vtt-rest-panel');
+  if (panel) { panel.dataset.open = '0'; panel.style.display = 'none'; }
+  document.getElementById('vtt-rest-trigger')?.classList.remove('active');
+  document.removeEventListener('mousedown', _shortRestOutsideClick);
+}
+// Clic en dehors du float (panneau + déclencheur) → fermer.
+function _shortRestOutsideClick(e) {
+  if (e.target.closest('.vtt-rest-float')) return;
+  _closeShortRest();
+}
 window._vttToggleShortRest = () => {
   const panel = document.getElementById('vtt-rest-panel'); if (!panel) return;
   const open = panel.dataset.open === '1';
   if (open) {
-    panel.dataset.open = '0'; panel.style.display = 'none';
-    document.getElementById('vtt-rest-trigger')?.classList.remove('active');
+    _closeShortRest();
   } else {
     panel.dataset.open = '1'; panel.style.display = 'flex';
     document.getElementById('vtt-rest-trigger')?.classList.add('active');
     _renderShortRest();
+    // Défère l'ajout du listener pour que le clic d'ouverture ne le ferme pas aussitôt.
+    setTimeout(() => document.addEventListener('mousedown', _shortRestOutsideClick), 0);
   }
 };
 
@@ -9450,6 +9480,51 @@ window._vttSetPm = async (tokenId,pm) => {
   const v=Math.max(0,pm);
   if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
+};
+
+// Bonus temporaire manuel (Mouvement / CA / Portée) via le système de BUFFS du
+// token. Avantages : déjà intégré dans displayMovement/Defense/Range ET la
+// logique de jeu (portée d'attaque, déplacement sur le plateau), et les `buffs`
+// sont écrivables par le joueur ET le MJ (règle Firestore vttTokens).
+const _MS_BONUS_BUFF = {
+  vitesse: { type: 'move_bonus',  icon: '👢' },
+  ca:      { type: 'ca',          icon: '🛡' },
+  portee:  { type: 'range_bonus', icon: '🏹' },
+};
+// Lit la valeur du buff manuel d'un type donné sur un token.
+function _manualBuffVal(t, key) {
+  const cfg = _MS_BONUS_BUFF[key]; if (!cfg) return 0;
+  const b = (t?.buffs || []).find(x => x && x.type === cfg.type && x.manual);
+  return b ? (parseInt(b.bonus) || 0) : 0;
+}
+window._vttTokenBonus = async (tokenId, key, delta) => {
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  if (!_canControlToken(t)) return;
+  const cfg = _MS_BONUS_BUFF[key]; if (!cfg) return;
+  const d = parseInt(delta) || 0;
+  const buffs = (t.buffs || []).map(b => ({ ...b }));
+  const idx = buffs.findIndex(b => b && b.type === cfg.type && b.manual);
+  const cur = idx >= 0 ? (parseInt(buffs[idx].bonus) || 0) : 0;
+  const next = Math.max(-50, Math.min(50, cur + d));
+  if (idx >= 0) {
+    if (next === 0) buffs.splice(idx, 1);
+    else buffs[idx].bonus = next;
+  } else if (next !== 0) {
+    buffs.push({ type: cfg.type, bonus: next, manual: true, icon: cfg.icon, label: 'Bonus du tour', expiresAtRound: null });
+  }
+  if (_tokens[tokenId]) _tokens[tokenId].data = { ...t, buffs }; // optimiste
+  await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
+  _renderInspector(_tokens[tokenId]?.data || t);
+  _patchShape(tokenId);
+};
+window._vttTokenResetBonus = async (tokenId) => {
+  const t = _tokens[tokenId]?.data; if (!t) return;
+  if (!_canControlToken(t)) return;
+  const buffs = (t.buffs || []).filter(b => !(b && b.manual));
+  if (_tokens[tokenId]) _tokens[tokenId].data = { ...t, buffs };
+  await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
+  _renderInspector(_tokens[tokenId]?.data || t);
+  _patchShape(tokenId);
 };
 
 window._vttMsSetXp = async (charId, uid, xp) => {
