@@ -130,7 +130,7 @@ export function openCloudinaryConfigModal() {
         <h2>Configuration Cloudinary</h2>
         <small>Hébergement des images de l'app (illustrations, émotes, fonds de carte…)</small>
       </div>
-      <button class="sh-admin-close" onclick="closeModalDirect()" title="Fermer">✕</button>
+      <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
     </div>
 
     <div class="sh-admin-body">
@@ -188,7 +188,7 @@ export function openCloudinaryConfigModal() {
         ? '<button class="btn btn-outline btn-sm" id="cl-reset" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)">↺ Réinitialiser</button>'
         : ''}
       <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-outline btn-sm" onclick="closeModalDirect()">Annuler</button>
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
       <button class="btn btn-gold btn-sm" id="cl-save">💾 Enregistrer</button>
     </div>
    </div>

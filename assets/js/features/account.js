@@ -113,45 +113,6 @@ async function renderAccount() {
   const nbChars = chars.length;
 
   content.innerHTML = `
-  <style>
-    .acc-section {
-      background:var(--bg-card);border:1px solid var(--border);border-radius:14px;
-      overflow:hidden;margin-bottom:1.25rem;
-    }
-    .acc-section-header {
-      padding:.85rem 1.1rem;border-bottom:1px solid var(--border);
-      background:rgba(0,0,0,.1);display:flex;align-items:center;gap:.6rem;
-    }
-    .acc-section-title {
-      font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600;
-      letter-spacing:.5px;
-    }
-    .acc-section-body { padding:1.1rem; }
-    .acc-field { margin-bottom:.85rem; }
-    .acc-field:last-child { margin-bottom:0; }
-    .acc-label { font-size:.72rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.7px;margin-bottom:.3rem; }
-    .acc-value { font-size:.9rem;color:var(--text-muted); }
-    .acc-inline { display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap; }
-    .acc-edit-btn {
-      font-size:.72rem;background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
-      border-radius:8px;padding:4px 12px;cursor:pointer;color:var(--gold);
-      transition:all .15s;flex-shrink:0;
-    }
-    .acc-edit-btn:hover { background:rgba(232,184,75,.18); }
-    .acc-danger-btn {
-      font-size:.82rem;background:rgba(255,107,107,.06);border:1px solid rgba(255,107,107,.25);
-      border-radius:10px;padding:.6rem 1.2rem;cursor:pointer;color:#ff6b6b;
-      transition:all .15s;width:100%;margin-top:.5rem;
-    }
-    .acc-danger-btn:hover { background:rgba(255,107,107,.14);border-color:rgba(255,107,107,.5); }
-    .acc-avatar {
-      width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--gold-dim),var(--gold));
-      display:flex;align-items:center;justify-content:center;
-      font-family:'Cinzel',serif;font-size:1.6rem;color:#0b1118;font-weight:700;
-      flex-shrink:0;
-    }
-  </style>
-
   <!-- ═══ HEADER ═══════════════════════════════════════════════════════════ -->
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
     <div class="acc-avatar">${(profile.pseudo||'?')[0].toUpperCase()}</div>
@@ -396,11 +357,7 @@ function openDeleteAccount() {
       <input class="input-field" id="acc-del-confirm" placeholder="SUPPRIMER">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button style="flex:1;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.35);
-        border-radius:10px;padding:.65rem;cursor:pointer;color:#ff6b6b;font-size:.85rem;font-weight:600;
-        transition:all .15s" onmouseover="this.style.background='rgba(255,107,107,.2)'"
-        onmouseout="this.style.background='rgba(255,107,107,.1)'"
-        data-action="confirmDeleteAccount">
+      <button class="acc-delete-confirm" data-action="confirmDeleteAccount">
         🗑️ Supprimer définitivement
       </button>
       <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
@@ -490,15 +447,6 @@ async function deleteCharWithRefund(charId) {
 // ══════════════════════════════════════════════════════════════════════════════
 PAGES.account = renderAccount;
 
-Object.assign(window, {
-  renderAccount,
-  openEditPseudo,  savePseudo,
-  openEditEmail,   saveEmail,
-  openEditPassword, savePassword,
-  openDeleteAccount, confirmDeleteAccount,
-  deleteCharWithRefund,
-  _liquidateInventory,
-});
 
 registerActions({
   openEditPseudo:      () => openEditPseudo(),

@@ -9558,7 +9558,7 @@ async function _vttAddBuffPrompt(tokenId) {
     <div class="vtt-form" style="display:flex;flex-direction:column;gap:.7rem">
       <div class="form-group">
         <label>Type d'effet</label>
-        <select id="vab-type" class="input-field">${opts}</select>
+        <select id="vab-type" class="input-field" data-vtt-fn="_vttSyncAddBuffRows" data-vtt-on="change" data-vtt-args="$value">${opts}</select>
       </div>
       <div class="form-group">
         <label>Label / nom du sort</label>
@@ -9582,15 +9582,23 @@ async function _vttAddBuffPrompt(tokenId) {
       </div>
       <button class="btn btn-gold" data-vtt-fn="_vttConfirmAddBuff" data-vtt-args="${tokenId}">Ajouter</button>
     </div>
-    <script>
-      document.getElementById('vab-type').onchange = e => {
-        const meta = ${JSON.stringify(TYPES)}.find(x => x.v === e.target.value);
-        document.getElementById('vab-bonus-row').style.display   = meta.needsBonus   ? '' : 'none';
-        document.getElementById('vab-formula-row').style.display = meta.needsFormula ? '' : 'none';
-        document.getElementById('vab-effect-row').style.display  = meta.needsEffect  ? '' : 'none';
-      };
-    </script>
   `);
+}
+
+function _vttSyncAddBuffRows(type) {
+  const meta = {
+    ca: { needsBonus: true },
+    dot: { needsFormula: true },
+    dmg_bonus: { needsFormula: true },
+    move_bonus: { needsBonus: true },
+    move_debuff: { needsBonus: true },
+    range_bonus: { needsBonus: true },
+    enchantment: { needsEffect: true },
+    affliction: { needsEffect: true },
+  }[type] || {};
+  document.getElementById('vab-bonus-row').style.display = meta.needsBonus ? '' : 'none';
+  document.getElementById('vab-formula-row').style.display = meta.needsFormula ? '' : 'none';
+  document.getElementById('vab-effect-row').style.display = meta.needsEffect ? '' : 'none';
 }
 
 async function _vttConfirmAddBuff(tokenId) {
@@ -12675,6 +12683,7 @@ const VTT_ACTIONS = {
   _vttConditionRemove,
   _vttConditionSave,
   _vttConfirmAddBuff,
+  _vttSyncAddBuffRows,
   _vttConfirmAddPage,
   _vttConfirmCreateEnemy,
   _vttConfirmEditPage,

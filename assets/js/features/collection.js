@@ -189,11 +189,6 @@ async function deleteCard(id) {
   } catch (e) { notifySaveError(e); }
 }
 
-Object.assign(window, {
-  openCollectionModal, saveCard, viewCard, editCard, deleteCard, toggleUnlock,
-  openTemplateModal, saveTemplate,
-});
-
 registerActions({
   openCollectionModal: () => openCollectionModal(),
   openTemplateModal:   () => openTemplateModal(),

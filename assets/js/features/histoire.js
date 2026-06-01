@@ -275,7 +275,7 @@ function _bindEditor() {
       if (e.key === 'ArrowUp')   { e.preventDefault(); _pickerMove(-1); return; }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        if (_pickerMode === 'dice') window._histDiceSkillSelect(_pickerIdx);
+        if (_pickerMode === 'dice') _histDiceSkillSelect(_pickerIdx);
         else                        _pickerSelect(_pickerFlat[_pickerIdx]);
         return;
       }
@@ -293,6 +293,22 @@ function _bindEditor() {
       _closePicker();
     }
   }, { signal });
+
+  _bindPicker();
+}
+
+function _bindPicker() {
+  const picker = document.getElementById('hist-picker');
+  if (!picker) return;
+  picker.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const item = e.target.closest('[data-pick-idx]');
+    if (item) { _histPickerSelect(+item.dataset.pickIdx); return; }
+    const diceItem = e.target.closest('[data-pick-dice-idx]');
+    if (diceItem) { _histDiceSkillSelect(+diceItem.dataset.pickDiceIdx); return; }
+    if (e.target.closest('[data-pick-confirm]')) { _histDiceConfirm(); return; }
+    if (e.target.closest('[data-pick-manage]')) { _ouvrirGestionDes(); return; }
+  });
 }
 
 // ── Input : détection @ et [ ──────────────────────────────────────────────────
@@ -375,8 +391,7 @@ function _renderPickerContent() {
       const idx = _pickerFlat.length;
       _pickerFlat.push({ type, ...item });
       html += `<div class="hist-picker-item ${idx === _pickerIdx ? 'active' : ''}"
-        data-idx="${idx}" style="--tag-color:${cfg.color};--tag-bg:${cfg.bg}"
-        onmousedown="event.preventDefault();window._histPickerSelect(${idx})">
+        data-idx="${idx}" data-pick-idx="${idx}" style="--tag-color:${cfg.color};--tag-bg:${cfg.bg}">
         <span class="hist-picker-dot" style="background:${cfg.color}"></span>${item.label}
       </div>`;
     });
@@ -411,15 +426,22 @@ function _renderDicePickerContent() {
           <input id="hist-dd-input" type="number" min="1" max="30" value="12"
             style="width:64px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-strong);
             background:var(--bg-card);color:var(--text);font-size:.9rem;outline:none;text-align:center"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();event.stopPropagation();window._histDiceConfirm();}"
           />
-          <button onmousedown="event.preventDefault();window._histDiceConfirm()"
+          <button data-pick-confirm
             style="padding:4px 12px;border-radius:6px;background:#f59e0b;color:#000;font-size:.82rem;font-weight:600;border:none;cursor:pointer">
             Insérer
           </button>
         </div>
       </div>`;
-    setTimeout(() => { const i = document.getElementById('hist-dd-input'); if (i) { i.focus(); i.select(); } }, 30);
+    setTimeout(() => {
+      const i = document.getElementById('hist-dd-input');
+      if (i) {
+        i.focus(); i.select();
+        i.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); _histDiceConfirm(); }
+        });
+      }
+    }, 30);
     return;
   }
 
@@ -437,7 +459,7 @@ function _renderDicePickerContent() {
       const col = STAT_COLORS[s.stat] || STAT_COLORS[''];
       return `<div class="hist-picker-item ${i === _pickerIdx ? 'active' : ''}" data-idx="${i}"
         style="--tag-color:#f59e0b;--tag-bg:rgba(245,158,11,.15)"
-        onmousedown="event.preventDefault();window._histDiceSkillSelect(${i})">
+        data-pick-dice-idx="${i}">
         <span class="hist-picker-dot" style="background:#f59e0b"></span>
         <span style="flex:1">${s.name}</span>
         ${s.stat ? `<span style="font-size:.68rem;font-weight:700;color:${col};padding:0 4px;border-radius:3px;background:${col}18">${s.stat}</span>` : ''}
@@ -449,7 +471,7 @@ function _renderDicePickerContent() {
     <div class="hist-picker-group">
       <div class="hist-picker-group-label" style="color:#f59e0b;display:flex;align-items:center;justify-content:space-between">
         <span>🎲 Jet de dé</span>
-        <span class="hist-picker-manage-btn" onmousedown="event.preventDefault();window._ouvrirGestionDes()">⚙️ Gérer</span>
+        <span class="hist-picker-manage-btn" data-pick-manage>⚙️ Gérer</span>
       </div>
       ${rows}
     </div>`;
@@ -481,9 +503,8 @@ function _closePicker() {
   _diceSel      = null;
 }
 
-// Globaux picker
-window._histPickerSelect    = (idx) => _pickerSelect(_pickerFlat[idx]);
-window._histDiceSkillSelect = (idx) => {
+const _histPickerSelect    = (idx) => _pickerSelect(_pickerFlat[idx]);
+const _histDiceSkillSelect = (idx) => {
   const item = _pickerFlat[idx];
   if (!item) return;
   _diceSel    = { name: item.label, stat: item.stat ?? '' };
@@ -493,7 +514,7 @@ window._histDiceSkillSelect = (idx) => {
     : 0;
   _renderDicePickerContent();
 };
-window._histDiceConfirm = () => {
+const _histDiceConfirm = () => {
   const dd = parseInt(document.getElementById('hist-dd-input')?.value, 10) || 12;
   if (_diceSel && _bracketStart) _insertDiceTag(_diceSel, dd);
   _closePicker();
@@ -698,11 +719,11 @@ async function _switchHistMission(id, titre, acte) {
 }
 
 // ── Gestion des compétences ───────────────────────────────────────────────────
-window._ouvrirGestionDes = function () {
+function _ouvrirGestionDes() {
   document.getElementById('hist-des-modal')?.remove();
   _closePicker();
   _renderGestionDes();
-};
+}
 
 // Template d'une ligne de compétence (drag + stat buttons + delete)
 function _renderDesRow(s, i) {
@@ -712,17 +733,11 @@ function _renderDesRow(s, i) {
     const active = st === s.stat;
     return `<button class="hist-des-stat-btn${active ? ' active' : ''}"
       ${active ? `style="background:${col}20;color:${col};border-color:${col}60"` : ''}
-      onmousedown="event.preventDefault()"
       data-action="_gestionDesEditStat" data-i="${i}" data-st="${_esc(st)}"
     >${st || '—'}</button>`;
   }).join('');
 
-  return `<div class="hist-des-row" draggable="true"
-    ondragstart="window._desDragStart(${i})"
-    ondragenter="event.preventDefault();window._desDragEnter(this)"
-    ondragover="event.preventDefault()"
-    ondragleave="window._desDragLeave(this,event)"
-    ondrop="event.preventDefault();window._desDrop(${i})">
+  return `<div class="hist-des-row" draggable="true" data-des-idx="${i}">
     <span class="hist-des-drag-handle" title="Glisser pour réordonner">⠿</span>
     <span class="hist-des-name">${s.name}</span>
     <div class="hist-des-stats">${statBtns}</div>
@@ -758,6 +773,8 @@ function _renderGestionDes() {
     </div>`;
 
   document.body.appendChild(modal);
+  const list = document.getElementById('hist-des-list');
+  if (list) _bindDesListDrag(list);
   setTimeout(() => modal.classList.add('hist-des-visible'), 10);
 }
 
@@ -776,28 +793,42 @@ function _gestionDesEditStat(idx, stat) {
 }
 
 // Drag & drop
-window._desDragStart = (idx) => { _desDragIdx = idx; };
-window._desDragEnter = (el) => {
-  if (_desDragOverEl) _desDragOverEl.classList.remove('hist-des-drag-over');
-  _desDragOverEl = el;
-  el.classList.add('hist-des-drag-over');
-};
-window._desDragLeave = (el, e) => {
-  if (!el.contains(e.relatedTarget)) {
-    el.classList.remove('hist-des-drag-over');
-    if (_desDragOverEl === el) _desDragOverEl = null;
-  }
-};
-window._desDrop = (targetIdx) => {
-  if (_desDragOverEl) { _desDragOverEl.classList.remove('hist-des-drag-over'); _desDragOverEl = null; }
-  if (_desDragIdx === null || _desDragIdx === targetIdx) { _desDragIdx = null; return; }
-  const skills = _getDiceSkills();
-  const [item] = skills.splice(_desDragIdx, 1);
-  skills.splice(targetIdx, 0, item);
-  _saveDiceSkills(skills);
-  _desDragIdx = null;
-  _refreshGestionDesList();
-};
+function _bindDesListDrag(list) {
+  list.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('[data-des-idx]');
+    if (row) _desDragIdx = +row.dataset.desIdx;
+  });
+  list.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    const row = e.target.closest('[data-des-idx]');
+    if (!row) return;
+    if (_desDragOverEl) _desDragOverEl.classList.remove('hist-des-drag-over');
+    _desDragOverEl = row;
+    row.classList.add('hist-des-drag-over');
+  });
+  list.addEventListener('dragover', (e) => e.preventDefault());
+  list.addEventListener('dragleave', (e) => {
+    const row = e.target.closest('[data-des-idx]');
+    if (!row) return;
+    if (!row.contains(e.relatedTarget)) {
+      row.classList.remove('hist-des-drag-over');
+      if (_desDragOverEl === row) _desDragOverEl = null;
+    }
+  });
+  list.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const row = e.target.closest('[data-des-idx]');
+    const targetIdx = row ? +row.dataset.desIdx : null;
+    if (_desDragOverEl) { _desDragOverEl.classList.remove('hist-des-drag-over'); _desDragOverEl = null; }
+    if (_desDragIdx === null || targetIdx === null || _desDragIdx === targetIdx) { _desDragIdx = null; return; }
+    const skills = _getDiceSkills();
+    const [item] = skills.splice(_desDragIdx, 1);
+    skills.splice(targetIdx, 0, item);
+    _saveDiceSkills(skills);
+    _desDragIdx = null;
+    _refreshGestionDesList();
+  });
+}
 
 function _gestionDesDel(idx) {
   const skills = _getDiceSkills();

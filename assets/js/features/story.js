@@ -286,11 +286,6 @@ async function _stDeleteGroup(groupId) {
 
 function _stApplyGroup() {}
 
-// Expose closeModalDirect aux onclick inline du footer
-if (typeof window !== 'undefined' && !window.closeModalDirect) {
-  window.closeModalDirect = closeModalDirect;
-}
-
 // ── Bindings de la nouvelle modale mission : tabs, segments, live preview ────
 function _initMissionModalUI(item) {
   const shell = document.querySelector('.mn-shell');

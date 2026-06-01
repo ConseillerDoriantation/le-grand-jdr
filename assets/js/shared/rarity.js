@@ -65,8 +65,6 @@ export function pickRarete(idPrefix, n) {
     });
 }
 
-window.pickRarete = pickRarete;
-
 registerActions({
   pickRarete: (btn) => pickRarete(btn.dataset.prefix, Number(btn.dataset.val)),
 });

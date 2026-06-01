@@ -211,3 +211,10 @@
   font-weight: 800;
   backdrop-filter: blur(10px);
 }
+
+
+/* Affinité groupe */
+@keyframes npc-affinity-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}

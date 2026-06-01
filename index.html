@@ -19,12 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Cinzel+Decorative:wght@400;700;900&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
   <!-- Thème appliqué avant le rendu pour éviter le flash -->
-  <script>
-    (function () {
-      var t = localStorage.getItem('jdr-theme') || 'dark';
-      document.documentElement.setAttribute('data-theme', t);
-    })();
-  </script>
+  <script src="./assets/js/core/theme-boot.js"></script>
 
   <!-- Feuilles de style chargées en parallèle (ordre = cascade).
        Conventions de nommage documentées dans assets/css/main.css -->
@@ -35,6 +30,7 @@
   <link rel="stylesheet" href="./assets/css/layout.css">
   <link rel="stylesheet" href="./assets/css/responsive.css">
   <link rel="stylesheet" href="./assets/css/features.css">
+  <link rel="stylesheet" href="./assets/css/recipes.css">
   <link rel="stylesheet" href="./assets/css/shop.css">
   <link rel="stylesheet" href="./assets/css/characters.css">
   <link rel="stylesheet" href="./assets/css/histoire.css">
@@ -44,6 +40,7 @@
   <link rel="stylesheet" href="./assets/css/quests.css">
   <link rel="stylesheet" href="./assets/css/rich-text.css">
   <link rel="stylesheet" href="./assets/css/dashboard.css">
+  <link rel="stylesheet" href="./assets/css/account.css">
   <link rel="stylesheet" href="./assets/css/agenda.css">
   <link rel="stylesheet" href="./assets/css/bastion.css">
   <link rel="stylesheet" href="./assets/css/quick-view.css">
@@ -53,95 +50,9 @@
 <body>
 
 <!-- ═══ SPRITE D'ICÔNES SVG ════════════════════════════════════════════════════
-     Icônes line-style (Lucide/Feather), 24x24 viewBox, stroke="currentColor".
-     Utilisation : <svg class="nav-icon"><use href="#icon-home"/></svg>
+     Défini dans assets/img/icons.svg
+     Utilisation : <svg class="nav-icon"><use href="./assets/img/icons.svg#icon-home"/></svg>
 ═════════════════════════════════════════════════════════════════════════════ -->
-<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
-  <defs>
-    <symbol id="icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 11l9-8 9 8v9a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2z"/>
-    </symbol>
-    <symbol id="icon-scroll" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h11a2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2H8a2 2 0 0 1-2-2V5a2 2 0 0 0-4 0v3h4"/>
-    </symbol>
-    <symbol id="icon-bag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>
-    </symbol>
-    <symbol id="icon-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-    </symbol>
-    <symbol id="icon-paw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="4" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><circle cx="2" cy="16" r="2"/>
-      <path d="M7 21h10a3 3 0 0 0 3-3 4 4 0 0 0-1.5-3.1L13 11a3 3 0 0 0-2 0L5.5 14.9A4 4 0 0 0 4 18a3 3 0 0 0 3 3z"/>
-    </symbol>
-    <symbol id="icon-flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 17c1.7 0 3-1.3 3-3 0-1.4-1-2.4-2-3.5C10.5 9 8 6.5 8 4c0 0 .5 1 2 2 1 .8 2 2 2 3.5 0 .8-.5 1.5-1 1.5s-1-.5-1-1.5c0-.5.5-1 1-1.5C9.5 9 7.5 11 7 13c-.5 2 .5 3.5 1.5 1.5z"/>
-      <path d="M16 14a4 4 0 0 1-8 0c0-3 4-6 4-9 0 0 8 4 8 9a8 8 0 0 1-16 0c0-3 1.5-5 3-7"/>
-    </symbol>
-    <symbol id="icon-castle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 21V8l3-2v3h3V6l3-2 3 2v3h3V6l3 2v13"/><line x1="3" y1="21" x2="21" y2="21"/><path d="M10 21v-5h4v5"/>
-    </symbol>
-    <symbol id="icon-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-      <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/>
-    </symbol>
-    <symbol id="icon-sword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/>
-    </symbol>
-    <symbol id="icon-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
-      <line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/>
-    </symbol>
-    <symbol id="icon-map" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M9 4l-6 2v15l6-2 6 2 6-2V4l-6 2z"/><line x1="9" y1="4" x2="9" y2="19"/><line x1="15" y1="6" x2="15" y2="21"/>
-    </symbol>
-    <symbol id="icon-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-    </symbol>
-    <symbol id="icon-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
-    </symbol>
-    <symbol id="icon-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/>
-      <path d="M7 5H4a2 2 0 0 0 0 4h3M17 5h3a2 2 0 0 1 0 4h-3"/>
-    </symbol>
-    <symbol id="icon-swords" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/>
-      <polyline points="9.5 17.5 21 6 21 3 18 3 6.5 14.5"/><line x1="11" y1="19" x2="5" y2="13"/><line x1="8" y1="16" x2="4" y2="20"/>
-    </symbol>
-    <symbol id="icon-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>
-    </symbol>
-    <symbol id="icon-dice" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2.5"/>
-      <circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="16" cy="8" r=".9" fill="currentColor"/>
-      <circle cx="12" cy="12" r=".9" fill="currentColor"/>
-      <circle cx="8" cy="16" r=".9" fill="currentColor"/><circle cx="16" cy="16" r=".9" fill="currentColor"/>
-    </symbol>
-    <symbol id="icon-compass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="9"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
-    </symbol>
-    <symbol id="icon-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-    </symbol>
-    <symbol id="icon-user-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.2 18.4a6 6 0 0 1 11.6 0"/>
-    </symbol>
-    <symbol id="icon-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>
-    </symbol>
-    <symbol id="icon-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>
-    </symbol>
-    <symbol id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"/>
-    </symbol>
-    <symbol id="icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="6 9 12 15 18 9"/>
-    </symbol>
-  </defs>
-</svg>
 
 <!-- ═══ SPLASH DE BOOT (évite le flash auth pendant la restauration Firebase) ═ -->
 <div id="boot-splash" class="app-splash" aria-hidden="true">
@@ -283,23 +194,23 @@
         <details class="sidebar-section" data-section="essentiel" open>
           <summary class="sidebar-section-label">
             <span class="sl-text">Essentiel</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
           </summary>
           <div class="sidebar-nav-group">
             <a class="nav-item active" data-navigate="dashboard" title="Accueil">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-home"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>
               <span class="nav-label">Accueil</span>
             </a>
             <a class="nav-item" data-navigate="characters" title="Personnage">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-scroll"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-scroll"/></svg>
               <span class="nav-label">Personnage</span>
             </a>
             <a class="nav-item" data-navigate="shop" title="Boutique">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-bag"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-bag"/></svg>
               <span class="nav-label">Boutique</span>
             </a>
             <a class="nav-item" data-navigate="story" title="Trame">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-book"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-book"/></svg>
               <span class="nav-label">Trame</span>
             </a>
           </div>
@@ -308,27 +219,27 @@
         <details class="sidebar-section" data-section="en-jeu" open>
           <summary class="sidebar-section-label">
             <span class="sl-text">En Jeu</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
           </summary>
           <div class="sidebar-nav-group">
             <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-paw"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-paw"/></svg>
               <span class="nav-label">Bestiaire</span>
             </a>
             <a class="nav-item" data-navigate="recettes" title="Recettes">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-flame"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-flame"/></svg>
               <span class="nav-label">Recettes</span>
             </a>
             <a class="nav-item" data-navigate="bastion" title="Bastion">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-castle"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>
               <span class="nav-label">Bastion</span>
             </a>
             <a class="nav-item" data-navigate="quests" title="Quêtes">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-sword"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sword"/></svg>
               <span class="nav-label">Quêtes</span>
             </a>
             <a class="nav-item" data-navigate="agenda" title="Agenda — Dispos du groupe">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-calendar"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-calendar"/></svg>
               <span class="nav-label">Agenda</span>
             </a>
           </div>
@@ -337,31 +248,31 @@
         <details class="sidebar-section" data-section="univers" open>
           <summary class="sidebar-section-label">
             <span class="sl-text">Univers</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
           </summary>
           <div class="sidebar-nav-group">
             <a class="nav-item" data-navigate="map" title="Carte">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-map"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-map"/></svg>
               <span class="nav-label">Carte</span>
             </a>
             <a class="nav-item" data-navigate="npcs" title="PNJ">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-users"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-users"/></svg>
               <span class="nav-label">PNJ</span>
             </a>
             <a class="nav-item" data-navigate="world" title="Le Monde">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-globe"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-globe"/></svg>
               <span class="nav-label">Monde</span>
             </a>
             <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-trophy"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-trophy"/></svg>
               <span class="nav-label">Hauts-Faits</span>
             </a>
             <a class="nav-item" data-navigate="players" title="Joueurs">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-swords"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>
               <span class="nav-label">Joueurs</span>
             </a>
             <a class="nav-item" data-navigate="collection" title="Collection">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-layers"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-layers"/></svg>
               <span class="nav-label">Collection</span>
             </a>
           </div>
@@ -370,11 +281,11 @@
         <details class="sidebar-section" data-section="table" open>
           <summary class="sidebar-section-label">
             <span class="sl-text">Table de Jeu</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
           </summary>
           <div class="sidebar-nav-group">
             <a class="nav-item" data-navigate="vtt" title="Table virtuelle">
-              <svg class="nav-icon" aria-hidden="true"><use href="#icon-dice"/></svg>
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-dice"/></svg>
               <span class="nav-label">Table Virtuelle</span>
             </a>
           </div>
@@ -382,11 +293,11 @@
 
         <div class="sidebar-nav-group sidebar-nav-group--standalone">
           <a class="nav-item" data-navigate="aventures" title="Aventures">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-compass"/></svg>
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-compass"/></svg>
             <span class="nav-label">Aventures</span>
           </a>
           <a class="nav-item admin-only" data-navigate="admin" title="Console MJ" style="display:none">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-cog"/></svg>
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>
             <span class="nav-label">Console MJ</span>
           </a>
         </div>
@@ -403,12 +314,12 @@
             <span class="sidebar-profile-role admin-only" id="sidebar-role" style="display:none">MJ</span>
           </div>
           <button class="sidebar-profile-logout" data-action="logout" title="Déconnexion" aria-label="Déconnexion">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-power"/></svg>
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-power"/></svg>
           </button>
           <button class="btn-theme sidebar-theme-btn admin-only" type="button" data-action="cloudinaryConfig"
             title="Configurer Cloudinary (hébergement images)" aria-label="Configurer Cloudinary" style="display:none">🖼️</button>
           <button class="btn-theme sidebar-theme-btn" id="btn-theme" type="button" data-action="toggle-theme" title="Mode jour / nuit" aria-label="Changer de thème">
-            <svg class="nav-icon" aria-hidden="true"><use href="#icon-sun"/></svg>
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sun"/></svg>
           </button>
         </div>
       </div>
@@ -431,45 +342,45 @@
   <!-- Bottom nav mobile -->
   <nav class="bottom-nav" id="bottom-nav" aria-label="Navigation mobile">
     <button class="bottom-nav-item active" type="button" data-navigate="dashboard" data-page="dashboard">
-      <svg class="bn-icon" aria-hidden="true"><use href="#icon-home"/></svg>
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>
       <span>Accueil</span>
     </button>
     <button class="bottom-nav-item" type="button" data-navigate="characters" data-page="characters">
-      <svg class="bn-icon" aria-hidden="true"><use href="#icon-scroll"/></svg>
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-scroll"/></svg>
       <span>Perso</span>
     </button>
     <button class="bottom-nav-item" type="button" data-navigate="quests" data-page="quests">
-      <svg class="bn-icon" aria-hidden="true"><use href="#icon-sword"/></svg>
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sword"/></svg>
       <span>Quêtes</span>
     </button>
     <button class="bottom-nav-item" type="button" data-navigate="shop" data-page="shop">
-      <svg class="bn-icon" aria-hidden="true"><use href="#icon-bag"/></svg>
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-bag"/></svg>
       <span>Boutique</span>
     </button>
     <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
-      <svg class="bn-icon" aria-hidden="true"><use href="#icon-more"/></svg>
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-more"/></svg>
       <span>Plus</span>
     </button>
   </nav>
 
   <!-- More-menu mobile -->
   <div class="more-menu" id="more-menu" role="dialog" aria-label="Navigation étendue">
-    <div class="more-menu-item" data-navigate="shop"><svg class="icon" aria-hidden="true"><use href="#icon-bag"/></svg>Boutique</div>
-    <div class="more-menu-item" data-navigate="story"><svg class="icon" aria-hidden="true"><use href="#icon-book"/></svg>Trame</div>
-    <div class="more-menu-item" data-navigate="bestiaire"><svg class="icon" aria-hidden="true"><use href="#icon-paw"/></svg>Bestiaire</div>
-    <div class="more-menu-item" data-navigate="recettes"><svg class="icon" aria-hidden="true"><use href="#icon-flame"/></svg>Recettes</div>
-    <div class="more-menu-item" data-navigate="bastion"><svg class="icon" aria-hidden="true"><use href="#icon-castle"/></svg>Bastion</div>
-    <div class="more-menu-item" data-navigate="agenda"><svg class="icon" aria-hidden="true"><use href="#icon-calendar"/></svg>Agenda</div>
-    <div class="more-menu-item" data-navigate="map"><svg class="icon" aria-hidden="true"><use href="#icon-map"/></svg>Carte</div>
-    <div class="more-menu-item" data-navigate="npcs"><svg class="icon" aria-hidden="true"><use href="#icon-users"/></svg>PNJ</div>
-    <div class="more-menu-item" data-navigate="world"><svg class="icon" aria-hidden="true"><use href="#icon-globe"/></svg>Monde</div>
-    <div class="more-menu-item" data-navigate="achievements"><svg class="icon" aria-hidden="true"><use href="#icon-trophy"/></svg>Hauts-Faits</div>
-    <div class="more-menu-item" data-navigate="players"><svg class="icon" aria-hidden="true"><use href="#icon-swords"/></svg>Joueurs</div>
-    <div class="more-menu-item" data-navigate="collection"><svg class="icon" aria-hidden="true"><use href="#icon-layers"/></svg>Collection</div>
-    <div class="more-menu-item" data-navigate="vtt"><svg class="icon" aria-hidden="true"><use href="#icon-dice"/></svg>Table Virtuelle</div>
-    <div class="more-menu-item" data-navigate="aventures"><svg class="icon" aria-hidden="true"><use href="#icon-compass"/></svg>Aventures</div>
-    <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><svg class="icon" aria-hidden="true"><use href="#icon-cog"/></svg>Console MJ</div>
-    <div class="more-menu-item" data-navigate="account"><svg class="icon" aria-hidden="true"><use href="#icon-user-circle"/></svg>Compte</div>
+    <div class="more-menu-item" data-navigate="shop"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-bag"/></svg>Boutique</div>
+    <div class="more-menu-item" data-navigate="story"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-book"/></svg>Trame</div>
+    <div class="more-menu-item" data-navigate="bestiaire"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-paw"/></svg>Bestiaire</div>
+    <div class="more-menu-item" data-navigate="recettes"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-flame"/></svg>Recettes</div>
+    <div class="more-menu-item" data-navigate="bastion"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>Bastion</div>
+    <div class="more-menu-item" data-navigate="agenda"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-calendar"/></svg>Agenda</div>
+    <div class="more-menu-item" data-navigate="map"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-map"/></svg>Carte</div>
+    <div class="more-menu-item" data-navigate="npcs"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-users"/></svg>PNJ</div>
+    <div class="more-menu-item" data-navigate="world"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-globe"/></svg>Monde</div>
+    <div class="more-menu-item" data-navigate="achievements"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-trophy"/></svg>Hauts-Faits</div>
+    <div class="more-menu-item" data-navigate="players"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>Joueurs</div>
+    <div class="more-menu-item" data-navigate="collection"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-layers"/></svg>Collection</div>
+    <div class="more-menu-item" data-navigate="vtt"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-dice"/></svg>Table Virtuelle</div>
+    <div class="more-menu-item" data-navigate="aventures"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-compass"/></svg>Aventures</div>
+    <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>Console MJ</div>
+    <div class="more-menu-item" data-navigate="account"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-user-circle"/></svg>Compte</div>
   </div>
 
 </div>

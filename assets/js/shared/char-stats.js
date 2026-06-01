@@ -396,6 +396,3 @@ export function getDefaultCharForUser(chars = [], uid = '') {
   if (!mine.length) return null;
   return mine.find(c => c?.isDefault) || sortCharactersForDisplay(mine)[0];
 }
-
-// ── Exposition globale (pour les appels depuis HTML inline) ───────────────────
-Object.assign(window, { getMod, calcCA, calcVitesse, calcInitiative, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier, pct, computeEquipDerivedBonus, computeEquipSkillBonus, computeEquipAllSkillBonuses, sortCharactersForDisplay, getDefaultCharForUser });

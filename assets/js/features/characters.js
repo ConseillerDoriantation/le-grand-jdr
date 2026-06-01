@@ -2621,7 +2621,3 @@ registerActions({
 
 charSession.bindRender(_renderTab, renderCharSheet, refreshOrDisplay);
 
-// Exports legacy minimaux — uniquement ce qui est encore consommé via window.* par des modules lazy
-// filterAdminChars : pages.js registerActions (bridge lazy)
-// charNavCardHtml, selectChar : compatibilité externe résiduelle
-Object.assign(window, { charNavCardHtml, selectChar, filterAdminChars, showCharTab });

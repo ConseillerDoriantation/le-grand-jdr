@@ -507,7 +507,7 @@ function _renderAffiniteGroupe(n) {
         transition:all .2s;position:relative;overflow:hidden">
         ${isCurrent ? `<div style="position:absolute;inset:0;
           background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent);
-          animation:shimmer 2s infinite"></div>` : ''}
+          animation:npc-affinity-shimmer 2s infinite"></div>` : ''}
       </div>
       <div style="text-align:center;font-size:.55rem;
         color:${isCurrent ? a.couleur : 'var(--text-dim)'};
@@ -516,9 +516,6 @@ function _renderAffiniteGroupe(n) {
   }).join('');
 
   return `
-  <style>
-    @keyframes shimmer { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
-  </style>
   <div style="background:var(--bg-elevated);border:1px solid var(--border);
     border-radius:12px;padding:.85rem 1rem">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.7rem;gap:.5rem">

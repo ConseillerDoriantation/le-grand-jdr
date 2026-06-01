@@ -205,11 +205,11 @@ function _updateMobileBottomNav() {
   nav.innerHTML = items.map(i => `
     <button class="bottom-nav-item ${currentPage === i.page ? 'active' : ''}"
       type="button" data-navigate="${i.page}" data-page="${i.page}">
-      <svg class="bn-icon" aria-hidden="true"><use href="#icon-${i.icon}"/></svg>
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-${i.icon}"/></svg>
       <span>${i.label}</span>
     </button>`).join('') + `
     <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
-      <svg class="bn-icon" aria-hidden="true"><use href="#icon-more"/></svg>
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-more"/></svg>
       <span>Plus</span>
     </button>`;
 }

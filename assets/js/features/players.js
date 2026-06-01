@@ -1907,7 +1907,4 @@ async function openCharacterSheetFromShowcase(charId) {
 // ── Override + exports ────────────────────────────────────────────────────────
 PAGES.players = renderPlayersPage;
 
-Object.assign(window, {
-  openPlayerPresentModal,
-  openCharacterSheetFromShowcase,
-});
+window.openCharacterSheetFromShowcase = openCharacterSheetFromShowcase;

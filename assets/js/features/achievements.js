@@ -419,28 +419,11 @@ function _achOpenImage(url) {
 
   const overlay = document.createElement('div');
   overlay.id = 'ach-lightbox';
-  overlay.style.cssText = [
-    'position:fixed;inset:0;z-index:9999',
-    'background:rgba(0,0,0,0.92)',
-    'display:flex;align-items:center;justify-content:center',
-    'cursor:zoom-out',
-    'animation:achLbFade .18s ease',
-  ].join(';');
+  overlay.className = 'ach-lightbox-basic';
 
   overlay.innerHTML = `
-    <style>
-      @keyframes achLbFade { from { opacity:0 } to { opacity:1 } }
-      @keyframes achLbScale { from { transform:scale(.92) } to { transform:scale(1) } }
-    </style>
-    <img src="${url}"
-      style="max-width:92vw;max-height:90vh;object-fit:contain;border-radius:12px;
-             box-shadow:0 24px 80px rgba(0,0,0,.8);
-             animation:achLbScale .18s ease;pointer-events:none;display:block">
-    <button style="position:absolute;top:20px;right:24px;background:rgba(255,255,255,.1);
-      border:1px solid rgba(255,255,255,.2);border-radius:999px;
-      color:#fff;font-size:1.2rem;width:40px;height:40px;cursor:pointer;
-      display:flex;align-items:center;justify-content:center;
-      transition:background .15s">✕</button>
+    <img class="ach-lb-image-basic" src="${url}">
+    <button class="ach-lb-close" type="button">✕</button>
   `;
 
   const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
@@ -909,26 +892,16 @@ function _achOpenLightbox(itemId) {
 
   const overlay = document.createElement('div');
   overlay.id = 'ach-lightbox';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.94);backdrop-filter:blur(14px);display:flex;align-items:center;justify-content:center;padding:40px;cursor:zoom-out;animation:lb-fade .22s ease';
+  overlay.className = 'ach-lightbox-rich';
   overlay.innerHTML = `
-    <style>
-      @keyframes lb-fade  { from { opacity:0 } to { opacity:1 } }
-      @keyframes lb-scale { from { transform:scale(.92);opacity:0 } to { transform:scale(1);opacity:1 } }
-    </style>
-    ${item.imageUrl ? `<img style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:14px;
-      box-shadow:0 30px 90px rgba(0,0,0,.8);animation:lb-scale .28s cubic-bezier(.22,1,.36,1);pointer-events:none;display:block"
-      src="${item.imageUrl}">` : ''}
-    <div class="ach-lb-info" style="${item.imageUrl ? '' : 'position:static;background:transparent;padding:20px 0 0;text-align:center'}">
+    ${item.imageUrl ? `<img class="ach-lb-image-rich" src="${item.imageUrl}">` : ""}
+    <div class="ach-lb-info${item.imageUrl ? "" : " is-empty"}">
       <div class="ach-lb-cat" style="background:${cat.glow};border-color:${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
       <div class="ach-lb-title">${_esc(item.titre || 'Haut-Fait')}</div>
       ${item.description ? `<div class="ach-lb-desc">${_esc(item.description)}</div>` : ''}
       ${contribsHtml}
     </div>
-    <button style="position:absolute;top:22px;right:26px;width:40px;height:40px;border-radius:50%;
-      background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff;
-      font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;
-      transition:background .15s" onmouseover="this.style.background='rgba(255,255,255,.2)'"
-      onmouseout="this.style.background='rgba(255,255,255,.1)'">✕</button>
+    <button class="ach-lb-close" type="button">✕</button>
   `;
 
   const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };

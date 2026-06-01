@@ -314,15 +314,6 @@ export function bindAuthUI() {
 
 export function initAuth() {
   bindAuthUI();
-
-  Object.assign(window, {
-    switchAuthTab,
-    doLogin,
-    doRegister,
-    doGoogleLogin,
-    doLogout,
-    doPasswordReset,
-  });
 }
 
 if (document.readyState === 'loading') {

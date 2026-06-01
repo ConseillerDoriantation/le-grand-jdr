@@ -208,7 +208,7 @@ async function loadProfile(user) {
 // Aussi déclenché automatiquement si super-admin et zéro aventures.
 async function _runMigrationFromPicker(uid) {
   const logEl  = document.getElementById('picker-migrate-log');
-  const btnEl  = document.querySelector('[onclick="window._runMigrationFromPicker?.()"]');
+  const btnEl  = document.querySelector('[data-action="runMigrationFromPicker"]');
 
   if (logEl) { logEl.style.display = 'block'; logEl.innerHTML = ''; }
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Migration en cours…'; }
