@@ -16,6 +16,7 @@ import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStat
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
+import { characterPortraitContent } from '../shared/portraits.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
@@ -3761,7 +3762,7 @@ function _renderAtelierDoll() {
 
   return `
     <div class="atelier-char">
-      <span class="atelier-char-av" style="--av-c:${av}">${c.photo ? `<img src="${c.photo}" alt="">` : init}</span>
+      <span class="atelier-char-av" style="--av-c:${av}">${characterPortraitContent(c, { fallbackText: init })}</span>
       <div class="atelier-char-body">
         <div class="atelier-char-name">${_esc(c.nom || 'Personnage')}</div>
         <div class="atelier-char-meta">Niv. ${c.niveau||1}${c.classe?' · '+_esc(c.classe):''}</div>

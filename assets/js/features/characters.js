@@ -6,6 +6,7 @@ import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
 import { _esc, modStr } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
+import { characterPortraitContent } from '../shared/portraits.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
@@ -75,7 +76,7 @@ import {
   toggleSort, toggleQuete, deleteQuete,
   deleteSort, deleteInvItem, deleteChar, createNewChar,
   manageTitres, addTitre, removeTitre, saveTitres,
-  addQuete, saveQuete, deleteCharPhoto,
+  addQuete, saveQuete,
 } from './characters/forms.js';
 
 import {
@@ -121,13 +122,9 @@ document.addEventListener('focusout', (event) => {
 function charNavCardHtml(c, active = false) {
   const id = c.id || '';
   const name = c.nom || 'Sans nom';
-  const initial = name.trim().charAt(0).toUpperCase() || '?';
   const level = c.niveau || 1;
-  const photoPos = `${50 + (Number(c.photoX) || 0) * 50}% ${50 + (Number(c.photoY) || 0) * 50}%`;
   const details = [c.classe, c.race].filter(Boolean).join(' · ') || c.ownerPseudo || '';
-  const portrait = c.photo
-    ? `<img class="char-pill-img" src="${_esc(c.photo)}" alt="" style="object-position:${photoPos}">`
-    : `<span class="char-pill-img char-pill-img--empty" aria-hidden="true">${_esc(initial)}</span>`;
+  const portrait = characterPortraitContent(c, { imgClass: 'char-pill-img', imgStyle: '', fallbackClass: 'char-pill-img char-pill-img--empty' });
 
   return `<button type="button" class="char-pill ${active ? 'active' : ''}" data-charid="${_esc(id)}" data-action="selectChar" data-id="${id}">
     <span class="char-pill-img-wrap">${portrait}</span>
@@ -228,15 +225,11 @@ function _buildCharSwitchHtml(activeCharId, canEdit) {
 
   const pillsHtml = switchable.map(ch => {
     const col = _auraColor(ch.aura);
-    const init = (ch.nom || '?')[0].toUpperCase();
-    const photoPos = `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%`;
     const titleSuffix = ch.isDefault ? ' · ★ Par défaut' : '';
     return `<button class="char-pill${ch.id===activeCharId?' active':''}${ch.isDefault?' is-default':''}"
       data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
       style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
-      <span class="char-pill-av">${ch.photo
-        ? `<img src="${ch.photo}" style="object-position:${photoPos}">`
-        : init}${ch.isDefault?'<span class="char-pill-star" title="Personnage par défaut">★</span>':''}</span>
+      <span class="char-pill-av">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star" title="Personnage par défaut">★</span>':''}</span>
       <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
     </button>`;
   }).join('');
@@ -348,9 +341,10 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
     <div class="id-portrait-wrap">
       <div class="id-portrait"
            ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
-        ${c.photo
-          ? `<img src="${c.photo}" style="transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center">`
-          : `${(c.nom||'?')[0].toUpperCase()}`}
+        ${characterPortraitContent(c, {
+          imgStyle: `transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center`,
+          fallbackTag: 'span',
+        })}
       </div>
       <div class="id-lvl-badge">${canEdit
         ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`

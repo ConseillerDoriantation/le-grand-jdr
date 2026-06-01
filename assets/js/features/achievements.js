@@ -16,6 +16,7 @@ import { _esc } from '../shared/html.js';
 import { STATE } from '../core/state.js';
 import { attachDropAndResize } from '../shared/image-crop.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
 
@@ -134,7 +135,6 @@ export function openAchievementModal(id = null) {
           ${chars.map(c => {
             const isOn = contrib.includes(c.id);
             const col  = COLS[c.nom?.charCodeAt(0)%6||0];
-            const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
             return `<div data-action="_achToggleContrib" data-id="${c.id}"
               id="ach-contrib-${c.id}"
               data-contrib-nom="${(c.nom||'?').replace(/"/g,'&quot;')}"
@@ -142,13 +142,11 @@ export function openAchievementModal(id = null) {
                 padding:.5rem .3rem;border-radius:10px;cursor:pointer;transition:all .15s;
                 border:2px solid ${isOn?col:'var(--border)'};
                 background:${isOn?col+'18':'var(--bg-elevated)'}">
-              <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;
-                border:2px solid ${isOn?col:'rgba(255,255,255,.1)'};
-                background:${col}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                ${c.photo
-                  ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-                  : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.95rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
-              </div>
+              ${characterAvatarHtml(c, {
+                size: 44,
+                border: `2px solid ${isOn ? col : 'rgba(255,255,255,.1)'}`,
+                color: col,
+              })}
               <span style="font-size:.65rem;text-align:center;
                 color:${isOn?col:'var(--text-dim)'};font-weight:${isOn?'700':'400'};
                 line-height:1.2;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(c.nom||'?')}</span>
@@ -481,13 +479,8 @@ function _achCardHTML(item, isAdmin) {
     <div class="ach-contribs">
       ${contribs.map(c => {
         const col      = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
-        const photoPos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
         return `<div class="ach-contrib" style="border-color:${col}55">
-          <div class="ach-contrib-av" style="background:${col}22;color:${col};border-color:${col}">
-            ${c.photo
-              ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-              : (c.nom || '?')[0].toUpperCase()}
-          </div>
+          ${characterAvatarHtml(c, { className: 'ach-contrib-av', border: `1px solid ${col}`, background: `${col}22`, color: col })}
           <span class="ach-contrib-name" style="color:${col}">${_esc(c.nom || '?')}</span>
         </div>`;
       }).join('')}
@@ -647,11 +640,8 @@ function _renderTimeline(items) {
       <div class="tl-card-contribs">
         ${contribs.map(c => {
           const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
-          const pos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
           return `<div class="tl-card-contrib" style="border-color:${col}55;color:${col}">
-            <div class="tl-card-contrib-av" style="background:${col}22;color:${col}">
-              ${c.photo ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">` : (c.nom||'?')[0]}
-            </div>
+            ${characterAvatarHtml(c, { className: 'tl-card-contrib-av', border: 'none', background: `${col}22`, color: col })}
             ${_esc(c.nom || '?')}
           </div>`;
         }).join('')}
@@ -729,15 +719,18 @@ function _achRenderControlsExtras() {
         data-action="_achSetCharFilter" title="Tous les personnages">👥 Tous</button>
       ${chars.map(c => {
         const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
-        const pos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
         const isOn = active === c.id;
         return `<button class="ach-char-chip${isOn?' active':''}" data-charid="${c.id}"
           data-action="_achSetCharFilter"
           style="--c:${col}" title="${_esc(c.nom||'?')} — ${counts.get(c.id)} haut${counts.get(c.id)>1?'s':''}-fait${counts.get(c.id)>1?'s':''}">
-          <span class="ach-char-chip-av">
-            ${c.photo ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${pos}">`
-                      : `<span style="font-family:'Cinzel',serif;font-weight:700">${(c.nom||'?')[0].toUpperCase()}</span>`}
-          </span>
+          ${characterAvatarHtml(c, {
+            tag: 'span',
+            className: 'ach-char-chip-av',
+            border: 'none',
+            background: 'transparent',
+            color: col,
+            fallbackStyle: "font-family:'Cinzel',serif;font-weight:700",
+          })}
           <span class="ach-char-chip-name">${_esc((c.nom||'?').slice(0,12))}</span>
           <span class="ach-char-chip-count">${counts.get(c.id)}</span>
         </button>`;

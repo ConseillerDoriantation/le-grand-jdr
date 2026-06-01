@@ -35,6 +35,7 @@ import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from
 import { lsJson } from '../shared/local-storage.js';
 import { richTextEditorHtml, getRichTextHtml, richTextContentHtml, bindRichTextEditors } from '../shared/rich-text.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
+import { characterPortraitContent } from '../shared/portraits.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS (cohérent bestiary/shop, voir shared/scoped-actions.js)
@@ -593,15 +594,13 @@ function _renderRelationsView(items) {
             ${allPJ.map(p => {
               const checked = !selected || selected.has(p.charId);
               const c = p.char || {};
-              const photoPos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
               const photo = c.photo || p.imageUrl || '';
+              const portraitChar = { ...c, photo, nom: p.nom };
               return `<label class="pp-rel-picker-item">
                 <input type="checkbox" data-pp-action="relToggleChar" data-pp-on="change"
                   data-char-id="${_esc(p.charId)}" ${checked ? 'checked' : ''}>
                 <span class="pp-rel-picker-portrait">
-                  ${photo
-                    ? `<img src="${_esc(photo)}" style="object-position:${photoPos}" alt="">`
-                    : `<span class="pp-rel-picker-init">${_esc((p.nom||'?')[0].toUpperCase())}</span>`}
+                  ${characterPortraitContent(portraitChar, { fallbackClass: 'pp-rel-picker-init' })}
                 </span>
                 <span class="pp-rel-picker-name">${_esc(p.nom)}</span>
               </label>`;
@@ -734,12 +733,13 @@ function _renderFiche(item, items) {
       ${items.map(it => {
         const active = it.id === item.id;
         const c = it.char || {};
-        const photoPos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
         const photo = c.photo || it.imageUrl || '';
         const accent = _accentColor(it.nom);
-        const portrait = photo
-          ? `<img src="${_esc(photo)}" style="object-position:${photoPos}" alt="">`
-          : `<div class="pp-strip-portrait-empty" style="--accent:${accent}">${_esc((it.nom||'?')[0].toUpperCase())}</div>`;
+        const portrait = characterPortraitContent({ ...c, photo, nom: it.nom }, {
+          fallbackTag: 'div',
+          fallbackClass: 'pp-strip-portrait-empty',
+          fallbackStyle: `--accent:${accent}`,
+        });
         return `<button type="button" class="pp-strip-item ${active ? 'is-active' : ''}"
           data-pp-action="openFiche" data-id="${_esc(it.id)}"
           style="--accent:${accent}" role="tab" aria-selected="${active}"
@@ -1177,12 +1177,9 @@ function _renderTopAdventurersBlock(item, items) {
         <div class="pp-partenaires-grid">
           ${top.map(({ item: o, count }) => {
             const c = _accentColor(o.nom);
-            const pos = `${50 + (o.photoX || 0) * 50}% ${50 + (o.photoY || 0) * 50}%`;
             return `<button class="pp-partenaire" data-pp-action="openFiche" data-id="${_esc(o.id)}" style="--c-accent:${c}">
               <div class="pp-partenaire-portrait">
-                ${o.portraitUrl
-                  ? `<img src="${_esc(o.portraitUrl)}" style="object-position:${pos}">`
-                  : `<span>${o.initials}</span>`}
+                ${characterPortraitContent({ ...o, photo: o.portraitUrl, nom: o.nom }, { fallbackText: o.initials })}
               </div>
               <div class="pp-partenaire-info">
                 <div class="pp-partenaire-name">${_esc(o.nom)}</div>

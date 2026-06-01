@@ -6,6 +6,7 @@ import { STATE } from '../../core/state.js';
 import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, closeModalDirect } from '../../shared/modal.js';
 import { _esc } from '../../shared/html.js';
+import { characterPortraitContent } from '../../shared/portraits.js';
 import {
   getMod, calcCA, calcVitesse, calcPVMax, calcPMMax, calcPalier, pct,
   STAT_META, modStr,
@@ -127,16 +128,13 @@ export function quickViewChar(id) {
   const xp = c.exp || 0;
   const xpMax = calcPalier(c.niveau || 1);
   const xpPct = pct(xp, xpMax);
-  const photoPos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
   const titres = (c.titres || []).slice(0, 3);
 
   openModal('', `
     <div class="qv-root">
       <div class="qv-header">
         <div class="qv-photo-wrap">
-          ${c.photo
-            ? `<img class="qv-photo" src="${_esc(c.photo)}" style="object-position:${photoPos}">`
-            : `<div class="qv-photo qv-photo-empty">${(c.nom||'?')[0].toUpperCase()}</div>`}
+          ${characterPortraitContent(c, { imgClass: 'qv-photo', fallbackTag: 'div', fallbackClass: 'qv-photo qv-photo-empty' })}
           <div class="qv-level">Niv. ${c.niveau || 1}</div>
         </div>
         <div class="qv-id">

@@ -11,6 +11,7 @@ import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../..
 import { useGoldMulti } from '../../shared/economy.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
+import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import {
   _getTraits,
@@ -638,16 +639,12 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const itemColor = _rareteColor(RARETE_NAMES[rareteN]) || 'var(--border)';
 
   const targetCards = otherChars.map(target => {
-    const initiale  = (target.nom||'?')[0].toUpperCase();
     const colors    = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
     const couleur   = colors[(target.nom||'').charCodeAt(0) % colors.length];
-    const photoPos  = `${50+(target.photoX||0)*50}% ${50+(target.photoY||0)*50}%`;
     return `<label class="invm-target" style="--tc:${couleur}">
       <input type="radio" name="send-target" value="${target.id}">
       <div class="invm-target-av">
-        ${target.photo
-          ? `<img src="${target.photo}" style="object-position:${photoPos}">`
-          : `<span>${initiale}</span>`}
+        ${characterPortraitContent(target)}
       </div>
       <div class="invm-target-body">
         <div class="invm-target-name">${target.nom||'?'}</div>
@@ -776,12 +773,13 @@ export async function openSendGoldModal(charId) {
       transition:border-color .15s" onmouseover="this.style.borderColor='var(--gold)'"
       onmouseout="this.style.borderColor='var(--border)'">
       <input type="radio" name="gold-target" value="${t.id}" style="accent-color:var(--gold)">
-      <div style="width:30px;height:30px;border-radius:50%;background:${couleur}22;
-        border:2px solid ${couleur};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        ${t.photo
-          ? `<img src="${t.photo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
-          : `<span style="font-size:.9rem;font-weight:700;color:${couleur}">${initiale}</span>`}
-      </div>
+      ${characterAvatarHtml(t, {
+        size: 30,
+        border: `2px solid ${couleur}`,
+        background: `${couleur}22`,
+        color: couleur,
+        fallbackStyle: `font-size:.9rem;font-weight:700;color:${couleur}`,
+      })}
       <div style="flex:1;min-width:0">
         <div style="font-size:.84rem;font-weight:600;color:var(--text)">${t.nom}</div>
         ${t.ownerPseudo ? `<div style="font-size:.68rem;color:var(--text-dim)">${t.ownerPseudo}</div>` : ''}

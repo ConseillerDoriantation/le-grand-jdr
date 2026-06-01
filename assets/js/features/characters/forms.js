@@ -427,14 +427,6 @@ export async function saveTitres(charId) {
 
 // ══════════════════════════════════════════════
 // PHOTO
-// ══════════════════════════════════════════════
-export function deleteCharPhoto(id) {
-  const c = STATE.characters.find(x=>x.id===id)||STATE.activeChar;
-  if (!c) return;
-  c.photo=null; c.photoZoom=1; c.photoX=0; c.photoY=0;
-  updateInCol('characters',id,{photo:null,photoZoom:1,photoX:0,photoY:0});
-  _renderFormsChar(c);
-}
 
 registerActions({
   saveQuete:      ()    => saveQuete(),

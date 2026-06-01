@@ -10,6 +10,7 @@ import { showNotif } from '../shared/notifications.js';
 import { watch } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
+import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -102,10 +103,7 @@ const PAGES = {
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
       const ca      = calcCA(c) || 10;
       const or      = calcOr(c) || 0;
-      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-      const portrait = c.photo
-        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
-        : `<span style="font-family:'Cinzel',serif;font-size:1.3rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
+      const portrait = characterPortraitContent(c, { imgStyle: 'width:100%;height:100%;object-fit:cover;display:block', fallbackStyle: "font-family:'Cinzel',serif;font-size:1.3rem;font-weight:700;color:var(--gold)" });
       return `
       <div class="dash-char-mini" data-action="_goToChar" data-id="${c.id}">
         <div class="dash-char-mini-portrait">
@@ -150,10 +148,7 @@ const PAGES = {
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
       const ca      = calcCA(c) || 10;
       const or      = calcOr(c) || 0;
-      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-      const portrait = c.photo
-        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-        : `<span style="font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
+      const portrait = characterPortraitContent(c, { fallbackStyle: "font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;color:var(--gold)" });
       return `
       <div class="dash-hero" data-action="_goToChar" data-id="${c.id}">
         <div class="dash-hero-glow"></div>
@@ -204,10 +199,7 @@ const PAGES = {
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
       const ca      = calcCA(c) || 10;
       const or      = calcOr(c) || 0;
-      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-      const avatar = c.photo
-        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
-        : `<span style="font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;color:var(--gold)">${(c.nom||'?')[0].toUpperCase()}</span>`;
+      const avatar = characterPortraitContent(c, { imgStyle: 'width:100%;height:100%;object-fit:cover;display:block', fallbackStyle: "font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;color:var(--gold)" });
       // Couleur par joueur (hash sur le pseudo)
       const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#22d3ee'];
       const pcol  = PCOLS[(c.ownerPseudo||'?').split('').reduce((a,x)=>a+x.charCodeAt(0),0) % PCOLS.length];
@@ -330,12 +322,7 @@ const PAGES = {
     // ── Helpers ────────────────────────────────────────────────────────
 
     // Mini-portrait
-    const _portMini = (p, size = 26) => {
-      const pos = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
-      return p.photo
-        ? `<img src="${p.photo}" title="${_esc(p.nom||'?')}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;object-position:${pos};border:2px solid var(--bg-card);flex-shrink:0">`
-        : `<div style="width:${size}px;height:${size}px;border-radius:50%;background:rgba(79,140,255,.18);border:2px solid var(--bg-card);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:${Math.round(size*.38)}px;font-weight:700;color:var(--gold);flex-shrink:0">${(p.nom||'?')[0].toUpperCase()}</div>`;
-    };
+    const _portMini = (p, size = 26) => characterAvatarHtml(p, { size, border: '2px solid var(--bg-card)', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
 
     // Carte quête (joinable en place, pas de navigation sur le conteneur)
     const _questRequiredCount = q => {
@@ -418,10 +405,7 @@ const PAGES = {
       const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
       const ca      = calcCA(c) || 10;
       const or      = calcOr(c) || 0;
-      const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-      const portrait = c.photo
-        ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-        : `<span>${(c.nom||'?')[0].toUpperCase()}</span>`;
+      const portrait = characterPortraitContent(c);
       return `
       <div class="dv2-hero-card" data-action="_goToChar" data-id="${c.id}">
         <div class="dv2-hero-inner">
@@ -484,10 +468,7 @@ const PAGES = {
           <div class="dv2-panel-title">⚔️ Groupe <span class="dv2-panel-count">${members.length}</span></div>
         </div>
         ${members.length > 0 ? members.map(c => {
-          const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-          const av = c.photo
-            ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
-            : (c.nom||'?')[0].toUpperCase();
+          const av = characterPortraitContent(c, { fallbackTag: 'span' });
           const isOwn = STATE.isAdmin || c.uid === STATE.user?.uid;
           return `
           <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}" style="cursor:pointer"
@@ -840,10 +821,7 @@ const PAGES = {
         }
         const pills = active.map(p => {
           const ch = chars.find(c => c.uid === p.uid) || null;
-          const pos = ch ? `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%` : '50% 50%';
-          const portrait = ch?.photo
-            ? `<img src="${ch.photo}" style="width:30px;height:30px;border-radius:50%;object-fit:cover;object-position:${pos};border:2px solid rgba(34,195,142,.55);flex-shrink:0">`
-            : `<div style="width:30px;height:30px;border-radius:50%;background:rgba(34,195,142,.15);border:2px solid rgba(34,195,142,.55);display:flex;align-items:center;justify-content:center;color:var(--gold);font-family:'Cinzel',serif;font-size:.78rem;font-weight:700;flex-shrink:0">${(p.pseudo||'?')[0].toUpperCase()}</div>`;
+          const portrait = characterAvatarHtml(ch || p, { size: 30, border: '2px solid rgba(34,195,142,.55)', background: 'rgba(34,195,142,.15)', color: 'var(--gold)' });
           return `
           <div style="display:flex;align-items:center;gap:.55rem;background:rgba(34,195,142,.07);border:1px solid rgba(34,195,142,.22);border-radius:999px;padding:3px 12px 3px 3px">
             ${portrait}

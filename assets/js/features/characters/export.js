@@ -7,6 +7,7 @@ import { STATE } from '../../core/state.js';
 import { registerActions } from '../../core/actions.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
+import { characterPortraitContent } from '../../shared/portraits.js';
 import {
   getMod, calcCA, calcVitesse, calcPVMax, calcPMMax, calcOr, calcPalier,
   formatItemBonusText, STAT_META, modStr,
@@ -63,9 +64,7 @@ function _pctBar(cur, max, color = '#222') {
 
 function _buildHeader(c) {
   const titres = (c.titres || []).slice(0, 6);
-  const photoBlock = c.photo
-    ? `<img class="ps-photo" src="${c.photo}" style="object-position:${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%">`
-    : `<div class="ps-photo ps-photo-empty">${(c.nom || '?')[0].toUpperCase()}</div>`;
+  const photoBlock = characterPortraitContent(c, { imgClass: 'ps-photo', fallbackTag: 'div', fallbackClass: 'ps-photo ps-photo-empty' });
   return `
     <header class="ps-header">
       ${photoBlock}

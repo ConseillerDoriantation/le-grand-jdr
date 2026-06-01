@@ -9,6 +9,7 @@ import { watch } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { listPlaces } from './map/data/places.repo.js';
@@ -44,20 +45,7 @@ function _questRequiredCount(q = {}) {
 }
 
 // ── Mini portrait d'un participant ────────────
-function _portrait(p, size = 28) {
-  const pos = `${50 + (p.photoX || 0) * 50}% ${50 + (p.photoY || 0) * 50}%`;
-  if (p.photo) {
-    return `<img src="${p.photo}" title="${_esc(p.nom || '?')}"
-      style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;
-             object-position:${pos};border:2px solid var(--bg-card);flex-shrink:0">`;
-  }
-  return `<div title="${_esc(p.nom || '?')}" style="
-    width:${size}px;height:${size}px;border-radius:50%;
-    background:rgba(79,140,255,.18);border:2px solid var(--bg-card);
-    flex-shrink:0;display:flex;align-items:center;justify-content:center;
-    font-family:'Cinzel',serif;font-size:${Math.round(size * .4)}px;
-    font-weight:700;color:var(--gold)">${(p.nom || '?')[0].toUpperCase()}</div>`;
-}
+const _portrait = (p, size = 28) => characterAvatarHtml(p, { size, border: '2px solid var(--bg-card)', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
 
 // ── Carte quête ───────────────────────────────
 function _questCard(q, myChar) {
@@ -199,13 +187,7 @@ async function toggleQuestJoin(id) {
 
 function _questOpenCharPicker(questId, chars) {
   const rows = chars.map(c => {
-    const pos = `${50 + (c.photoX || 0) * 50}% ${50 + (c.photoY || 0) * 50}%`;
-    const avatar = c.photo
-      ? `<img src="${_esc(c.photo)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;object-position:${pos};flex-shrink:0">`
-      : `<div style="width:38px;height:38px;border-radius:50%;background:rgba(79,140,255,.18);
-           flex-shrink:0;display:flex;align-items:center;justify-content:center;
-           font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:var(--gold)">
-           ${(c.nom || '?')[0].toUpperCase()}</div>`;
+    const avatar = characterAvatarHtml(c, { size: 38, border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)', fallbackStyle: "font-family:'Cinzel',serif;font-weight:700;font-size:.9rem;color:var(--gold)" });
     const sub = [c.classe, c.race].filter(Boolean).join(' · ');
     return `<button class="btn btn-outline"
         style="display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;text-align:left;width:100%"

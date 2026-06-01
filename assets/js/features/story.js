@@ -15,6 +15,7 @@ import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES from './pages.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { setHistoireCtx } from '../shared/histoire-ctx.js';
+import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
@@ -132,14 +133,13 @@ function _renderGroupPills(groups) {
       ${membres.length ? `<div style="display:flex;gap:3px;flex-wrap:wrap">
         ${membres.map(c => {
           const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-          const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-          return `<div title="${_esc(c.nom||'')}" style="width:28px;height:28px;border-radius:50%;overflow:hidden;
-            border:2px solid ${col};background:${col}18;flex-shrink:0;
-            display:flex;align-items:center;justify-content:center">
-            ${c.photo
-              ? `<img src="${_esc(c.photo)}" style="width:100%;height:100%;object-fit:cover;object-position:${pp}">`
-              : `<span style="font-family:'Cinzel',serif;font-weight:700;font-size:.62rem;color:${col}">${(c.nom||'?')[0].toUpperCase()}</span>`}
-          </div>`;
+          return characterAvatarHtml(c, {
+            size: 28,
+            border: `2px solid ${col}`,
+            background: `${col}18`,
+            color: col,
+            fallbackStyle: `font-family:'Cinzel',serif;font-weight:700;font-size:.62rem;color:${col}`,
+          });
         }).join('')}
       </div>` : ''}
       <div style="border-top:1px solid var(--border);padding-top:.3rem;display:flex;flex-direction:column;gap:.25rem">
@@ -430,11 +430,8 @@ function _renderGroupCards(groups) {
       <div class="st-group-card-members">
         ${membres.length ? membres.map(c => {
           const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-          const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
           return `<div class="st-group-member" title="${_esc(c.nom||'')}" style="--col:${col}">
-            ${c.photo
-              ? `<img src="${_esc(c.photo)}" style="object-position:${pp}">`
-              : `<span>${(c.nom||'?')[0].toUpperCase()}</span>`}
+            ${characterPortraitContent(c)}
             <span class="st-group-member-name">${_esc(c.nom||'')}</span>
           </div>`;
         }).join('') : '<span class="st-group-empty-members">Aucun membre — édite le groupe pour en ajouter.</span>'}
@@ -1140,10 +1137,7 @@ function _renderPoster(m, idx) {
       ${m.date ? `<div class="poster-date">${_esc(m.date)}</div>` : ''}
       ${parts.length ? `<div class="poster-parts">
         ${parts.slice(0, 4).map(p => {
-          const pp = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
-          return p.photo
-            ? `<span class="poster-part" title="${_esc(p.nom||'')}"><img src="${_esc(p.photo)}" style="object-position:${pp}"></span>`
-            : `<span class="poster-part">${(p.nom||'?')[0]?.toUpperCase()}</span>`;
+          return characterAvatarHtml(p, { tag: 'span', className: 'poster-part', border: 'none', background: 'transparent' });
         }).join('')}
         ${parts.length > 4 ? `<span class="poster-part-more">+${parts.length-4}</span>` : ''}
       </div>` : ''}
@@ -1182,10 +1176,7 @@ function _renderChroniqueView(missions) {
           <div class="chap-foot">
             ${parts.length ? `<div class="chap-parts">
               ${parts.slice(0, 10).map(p => {
-                const pp = `${50+(p.photoX||0)*50}% ${50+(p.photoY||0)*50}%`;
-                return p.photo
-                  ? `<span class="chap-part" title="${_esc(p.nom||'')}"><img src="${_esc(p.photo)}" style="object-position:${pp}"></span>`
-                  : `<span class="chap-part">${(p.nom||'?')[0]?.toUpperCase()}</span>`;
+                return characterAvatarHtml(p, { tag: 'span', className: 'chap-part', border: 'none', background: 'transparent' });
               }).join('')}
             </div>` : '<div></div>'}
             <div class="chap-prog">
@@ -1522,12 +1513,14 @@ async function openStoryDetail(id) {
   const avatar = (c, size = 36) => {
     if (!c) return '';
     const col = PCOLS[c.nom?.charCodeAt(0) % 6 || 0];
-    const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
-    return `<div class="mv-avatar" style="--col:${col};width:${size}px;height:${size}px" title="${_esc(c.nom||'')}">
-      ${c.photo
-        ? `<img src="${_esc(c.photo)}" style="object-position:${pp}">`
-        : `<span>${_esc((c.nom||'?')[0]?.toUpperCase() || '?')}</span>`}
-    </div>`;
+    return characterAvatarHtml(c, {
+      size,
+      className: 'mv-avatar',
+      border: 'none',
+      background: `${col}18`,
+      color: col,
+      style: `--col:${col}`,
+    });
   };
 
   openModal('', `
@@ -1858,15 +1851,12 @@ async function openStoryModal(item = null) {
                 const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
                 return (STATE.characters||[]).map(c => {
                   const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-                  const pp  = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
                   return `<div data-action="_stGroupPickToggle" data-id="${c.id}" data-col="${col}"
                     id="st-gpick-${c.id}" data-gm-id="${c.id}" data-picked="0"
                     data-char-name="${_esc((c.nom||'').toLowerCase())}"
                     class="st-group-pick">
                     <div class="st-group-pick-avatar" style="--col:${col}">
-                      ${c.photo
-                        ? `<img src="${_esc(c.photo)}" style="object-position:${pp}">`
-                        : `<span>${(c.nom||'?')[0].toUpperCase()}</span>`}
+                      ${characterPortraitContent(c)}
                     </div>
                     <span class="st-group-pick-name">${_esc(c.nom||'?')}</span>
                   </div>`;
