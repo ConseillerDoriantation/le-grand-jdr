@@ -13,6 +13,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { subscribeCollection, subscribeDoc } from '../data/firestore.js';
 import { onSnapshot } from '../config/firebase.js';
+import { STATE } from '../core/state.js';
 
 // Map nom → fonction de désabonnement
 const _subs = new Map();
@@ -42,6 +43,23 @@ export function watchQuery(name, queryRef, callback) {
     err => console.error(`[realtime] watchQuery(${name}):`, err),
   );
   _subs.set(name, unsub);
+}
+
+// Abonner à une collection uniquement si la page courante est active.
+// Remplace le pattern répété : watch(name, col, data => { if (STATE.currentPage !== page) return; ... })
+export function watchPageCollection(name, col, pageId, callback) {
+  watch(name, col, data => {
+    if (STATE.currentPage !== pageId) return;
+    callback(data || []);
+  });
+}
+
+// Identique mais pour un document unique (watchDoc).
+export function watchPageDoc(name, col, id, pageId, callback) {
+  watchDoc(name, col, id, data => {
+    if (STATE.currentPage !== pageId) return;
+    callback(data);
+  });
 }
 
 // Désabonner tous les listeners (appelé à chaque navigate)

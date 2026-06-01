@@ -12,18 +12,17 @@
 //     npc_affinites/npc_affinite_seuils  → seuils valeur→niveau
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, saveDoc } from '../data/firestore.js';
-import { watch } from '../shared/realtime.js';
+import { watchPageCollection } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, updateModalContent, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
-import { getItemStatBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
+import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore } from '../shared/char-stats.js';
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
-import { getModFromScore } from '../shared/char-stats.js';
 import { pickImageFile, uploadJpeg } from '../shared/image-upload.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
@@ -269,21 +268,18 @@ export async function renderNpcs() {
   // Pour `npcs` (session-live) le watch ne refait aucune lecture facturée.
   // Pour `npc_affinites` (page-scoped), le watch sert aussi de fetch initial
   // → pas de double-read.
-  watch('npcs-list', 'npcs', data => {
-    if (STATE.currentPage !== 'npcs') return;
-    _npcs = data || [];
+  watchPageCollection('npcs-list', 'npcs', 'npcs', data => {
+    _npcs = data;
     _refreshList({ keepScroll: true });
     _refreshActivePanel();
   });
 
   // Une seule subscription pour la collection npc_affinites : on y range
   // les relations PNJ↔joueur + les 2 docs spéciaux (types, seuils).
-  watch('npcs-affi', 'npc_affinites', data => {
-    if (STATE.currentPage !== 'npcs') return;
-    const arr = data || [];
-    _affiPerso = arr.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
-    const typesDoc  = arr.find(a => a.id === AFFINITE_TYPES_DOC_ID);
-    const seuilsDoc = arr.find(a => a.id === AFFINITE_SEUILS_DOC_ID);
+  watchPageCollection('npcs-affi', 'npc_affinites', 'npcs', data => {
+    _affiPerso = data.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
+    const typesDoc  = data.find(a => a.id === AFFINITE_TYPES_DOC_ID);
+    const seuilsDoc = data.find(a => a.id === AFFINITE_SEUILS_DOC_ID);
     _affiniteTypes = Array.isArray(typesDoc?.types) ? [...typesDoc.types] : [];
     _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
     _affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
@@ -626,7 +622,7 @@ function _renderRelationChipPublic(a) {
 // Panneau des relations (colonne droite)
 function _renderRelationsPanel(n) {
   const persoList = _affiPerso.filter(a => a.npcId === n.id);
-  const myChars   = sortCharactersForDisplay((STATE.characters || []).filter(c => c.uid === STATE.user?.uid));
+  const myChars   = getMyCharacters(STATE.characters, STATE.user?.uid);
   const myAffi    = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {

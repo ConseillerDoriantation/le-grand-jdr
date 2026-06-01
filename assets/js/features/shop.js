@@ -4,6 +4,7 @@ import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META, statShort as _statShort } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
@@ -674,8 +675,7 @@ function _renderHomeSearchResults() {
   matched.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' }));
 
   if (matched.length === 0) {
-    return `<div class="empty-state"><div class="icon">🔍</div>
-      <p>Aucun résultat pour « ${_esc(_filterSearch)} ».</p></div>`;
+    return emptyStateHtml('🔍', `Aucun résultat pour « ${_esc(_filterSearch)} ».`);
   }
 
   const total = matched.length;

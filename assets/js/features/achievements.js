@@ -9,7 +9,7 @@ import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete } from '../shared/crud.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
-import { watch, watchDoc } from '../shared/realtime.js';
+import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
@@ -911,17 +911,15 @@ PAGES.achievements = async function() {
   // On évite de re-render pendant un drag SortableJS pour ne pas casser
   // l'instance en cours ; les saves admin re-render explicitement après onEnd.
   // unwatchAll() côté navigation s'occupe du cleanup.
-  watch('ach-items', 'achievements', items => {
-    if (STATE.currentPage !== 'achievements') return;
+  watchPageCollection('ach-items', 'achievements', 'achievements', items => {
     if (document.body.classList.contains('ach-dragging')) return;
-    STORE.items = _applyOrder(items || [], STORE.order);
+    STORE.items = _applyOrder(items, STORE.order);
     _achRenderContent();
   });
 
-  watchDoc('ach-order', 'achievements_meta', 'order', doc => {
-    if (STATE.currentPage !== 'achievements') return;
+  watchPageDoc('ach-order', 'achievements_meta', 'order', 'achievements', doc => {
     if (document.body.classList.contains('ach-dragging')) return;
-    STORE.order    = Array.isArray(doc?.order) ? doc.order : [];
+    STORE.order = Array.isArray(doc?.order) ? doc.order : [];
     STORE.items = _applyOrder(STORE.items || [], STORE.order);
     _achRenderContent();
   });

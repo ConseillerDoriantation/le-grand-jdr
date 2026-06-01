@@ -5,6 +5,7 @@ import { STATE, FS } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
+import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { watch } from '../shared/realtime.js';
@@ -1012,8 +1013,8 @@ const PAGES = {
       </div>`;
     }
     if (chars.length === 0) {
-      html += `<div class="empty-state"><div class="icon">📜</div><p>Aucun personnage. Crée ton premier héros !</p></div>
-        <div style="margin-bottom:1.5rem"><button class="char-pill-new" data-action="createNewChar">+ Nouveau personnage</button></div>`;
+      html += emptyStateHtml('📜', 'Aucun personnage. Crée ton premier héros !')
+        + `<div style="margin-bottom:1.5rem"><button class="char-pill-new" data-action="createNewChar">+ Nouveau personnage</button></div>`;
     } else {
       html += `<div id="char-sheet-area"></div>`;
     }
@@ -1106,7 +1107,7 @@ const PAGES = {
     let html = `pageHeaderHtml('👥 PNJ Rencontrés', 'Personnages non-joueurs et factions')`;
     if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" data-action="openNpcModal">+ Ajouter un PNJ</button></div>`;
     if (items.length === 0) {
-      html += `<div class="empty-state"><div class="icon">👥</div><p>Aucun PNJ pour l'instant.</p></div>`;
+      html += emptyStateHtml('👥', 'Aucun PNJ pour l\'instant.');
     } else {
       const filters = [...new Set(items.map(n => n.disposition || 'Inconnu'))];
       html += `<div class="tabs" id="npc-filter" style="margin-bottom:1.5rem"><button class="tab active" data-action="filterNpcs" data-filter="">Tous</button>${filters.map(f => `<button class="tab" data-action="filterNpcs" data-filter="${_esc(f)}">${f}</button>`).join('')}</div><div class="npc-grid" id="npc-grid">`;

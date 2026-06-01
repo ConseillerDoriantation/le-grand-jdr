@@ -4,7 +4,7 @@
 // ✓ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
-import { watch, watchDoc } from '../shared/realtime.js';
+import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, popModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -922,8 +922,7 @@ export async function renderBestiary() {
   // Les noms 'bst-creatures'/'bst-tracker' sont réutilisés : si l'admin
   // switche de bestiaire/viewAs, watch() kill l'ancien listener et crée
   // le nouveau sur la bonne collection / doc.
-  watch('bst-creatures', col, data => {
-    if (STATE.currentPage !== 'bestiaire') return;
+  watchPageCollection('bst-creatures', col, 'bestiaire', data => {
     if (_bstShouldSkipLiveRender()) return;
     _bstApplyData(data);
     if (_bstSig() === _bstRenderSig) return;
@@ -931,8 +930,7 @@ export async function renderBestiary() {
   });
 
   if (trackerUid) {
-    watchDoc('bst-tracker', 'bestiary_tracker', trackerUid, doc => {
-      if (STATE.currentPage !== 'bestiaire') return;
+    watchPageDoc('bst-tracker', 'bestiary_tracker', trackerUid, 'bestiaire', doc => {
       if (_bstShouldSkipLiveRender()) return;
       STORE.tracker = doc?.data || {};
       if (_bstSig() === _bstRenderSig) return;

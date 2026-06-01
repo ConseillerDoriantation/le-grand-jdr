@@ -25,6 +25,7 @@ import { STATE, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
 import { registerActions }        from '../core/actions.js';
 import { _esc, _norm }           from '../shared/html.js';
+import { emptyStateHtml }        from '../shared/list-renderer.js';
 import { calcOr }                from '../shared/char-stats.js';
 
 import { getCharacterById } from '../shared/character-state.js';
@@ -105,7 +106,7 @@ async function renderAccount() {
   const profile = STATE.profile || {};
 
   if (!user) {
-    content.innerHTML = `<div class="empty-state"><div class="icon">🔒</div><p>Non connecté.</p></div>`;
+    content.innerHTML = emptyStateHtml('🔒', 'Non connecté.');
     return;
   }
 

@@ -8,6 +8,7 @@
 import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { _esc } from '../shared/html.js';
+import { emptyStateHtml } from '../shared/list-renderer.js';
 import { showNotif } from '../shared/notifications.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
@@ -108,7 +109,7 @@ async function renderHistoire() {
 
   if (!_missionId) {
     document.getElementById('main-content').innerHTML =
-      `<div class="empty-state"><div class="icon">📖</div><p>Aucune mission sélectionnée.</p></div>`;
+      emptyStateHtml('📖', 'Aucune mission sélectionnée.');
     return;
   }
 

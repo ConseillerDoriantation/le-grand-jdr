@@ -14,7 +14,7 @@
 
 import { STATE } from '../core/state.js';
 import { saveDoc, deleteFromCol } from '../data/firestore.js';
-import { watch, watchDoc } from '../shared/realtime.js';
+import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { openModal, closeModal } from '../shared/modal.js';
@@ -594,9 +594,8 @@ async function renderAgendaPage() {
   // Pour availabilities + users : 1 fetch initial puis deltas seulement.
   // Note: `_ag.myAvail` est piloté par mes propres clics (debounce 600ms),
   // on ne le touche pas dans les watches pour ne pas écraser une édition en cours.
-  watch('agenda-avails', 'availabilities', data => {
-    if (STATE.currentPage !== 'agenda') return;
-    _ag.allAvails = data || [];
+  watchPageCollection('agenda-avails', 'availabilities', 'agenda', data => {
+    _ag.allAvails = data;
     if (_ag.myAvail && (!_ag.myAvail.slots || !Object.keys(_ag.myAvail.slots).length)) {
       const mine = _ag.allAvails.find(a => (a.uid || a.id) === STATE.user?.uid);
       if (mine) _ag.myAvail = mine;
@@ -606,20 +605,17 @@ async function renderAgendaPage() {
     _renderGroupView();
   });
 
-  watch('agenda-quests', 'quests', data => {
-    if (STATE.currentPage !== 'agenda') return;
-    _ag.quests = data || [];
+  watchPageCollection('agenda-quests', 'quests', 'agenda', data => {
+    _ag.quests = data;
     _renderSuggestions();
   });
 
-  watch('agenda-users', 'users', data => {
-    if (STATE.currentPage !== 'agenda') return;
-    _ag.users = data || [];
+  watchPageCollection('agenda-users', 'users', 'agenda', data => {
+    _ag.users = data;
     _renderGroupView();
   });
 
-  watchDoc('agenda-session', 'agenda_session', 'next', data => {
-    if (STATE.currentPage !== 'agenda') return;
+  watchPageDoc('agenda-session', 'agenda_session', 'next', 'agenda', data => {
     _ag.nextSession = data;
     _renderSessionBanner();
     _renderSuggestions();

@@ -401,3 +401,12 @@ export function getDefaultCharForUser(chars = [], uid = '') {
   if (!mine.length) return null;
   return mine.find(c => c?.isDefault) || sortCharactersForDisplay(mine)[0];
 }
+
+/**
+ * Filtre et trie les personnages appartenant à un joueur donné.
+ * Remplace le pattern répété : sortCharactersForDisplay(chars.filter(c => c.uid === uid))
+ */
+export function getMyCharacters(chars = [], uid = '') {
+  if (!uid) return [];
+  return sortCharactersForDisplay((chars || []).filter(c => c?.uid === uid));
+}

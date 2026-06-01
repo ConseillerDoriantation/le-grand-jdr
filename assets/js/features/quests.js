@@ -5,31 +5,22 @@
 // ══════════════════════════════════════════════
 import { addToCol, saveDoc, deleteFromCol } from '../data/firestore.js';
 import { registerActions } from '../core/actions.js';
-import { watch } from '../shared/realtime.js';
+import { watchPageCollection } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
 import { toggleQuestParticipant } from '../shared/participants.js';
+import { getMyCharacters } from '../shared/char-stats.js';
+import { QUEST_DIFF, QUEST_STATUT } from '../shared/enums.js';
+import { emptyStateHtml, renderList } from '../shared/list-renderer.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { listPlaces } from './map/data/places.repo.js';
 
 // ── Constantes ────────────────────────────────
-const DIFF = [
-  { id: 'facile',    label: 'Facile',    color: '#22c38e' },
-  { id: 'moyen',     label: 'Moyen',     color: '#4f8cff' },
-  { id: 'difficile', label: 'Difficile', color: '#e8b84b' },
-  { id: 'extreme',   label: 'Extrême',   color: '#ff6b6b' },
-];
-const STATUT = [
-  { id: 'active',   label: 'Active',   color: '#4f8cff' },
-  { id: 'terminee', label: 'Terminée', color: '#22c38e' },
-  { id: 'echouee',  label: 'Échouée',  color: '#ff6b6b' },
-];
-
-const _diff   = id => DIFF.find(d => d.id === id)   || DIFF[1];
-const _statut = id => STATUT.find(s => s.id === id) || STATUT[0];
+const _diff   = id => QUEST_DIFF.find(d => d.id === id)   || QUEST_DIFF[1];
+const _statut = id => QUEST_STATUT.find(s => s.id === id) || QUEST_STATUT[0];
 
 
 const STORE = {
@@ -103,7 +94,7 @@ function _applyQuestsRender(quests) {
   if (!content) return;
 
   const uid     = STATE.user?.uid;
-  const myChars = STATE.isAdmin ? [] : (STORE.chars || []).filter(c => c.uid === uid);
+  const myChars = STATE.isAdmin ? [] : getMyCharacters(STORE.chars, uid);
   const myChar  = myChars[0] || null;
 
   STORE.questItems = quests;
@@ -128,9 +119,8 @@ function _applyQuestsRender(quests) {
     <button class="btn btn-gold" data-action="_questNew">+ Nouvelle quête</button>
   </div>` : ''}
 
-  ${sorted.length === 0
-    ? `<div class="empty-state"><div class="icon">📋</div><p>Aucune quête pour l'instant.</p></div>`
-    : `<div class="quest-grid">${sorted.map(q => _questCard(q, myChar)).join('')}</div>`}
+  ${renderList(sorted, q => _questCard(q, myChar), 'quest-grid',
+    emptyStateHtml('📋', 'Aucune quête pour l\'instant.'))}
   `;
 }
 
@@ -150,13 +140,11 @@ async function renderQuestsPage() {
   // Abonnements temps réel — le premier fire fait le rendu initial.
   // Avec la persistance IndexedDB, ce premier fire est servi du cache local
   // (instantané, sans lecture facturée) si la collection a déjà été vue.
-  watch('quests', 'quests', data => {
-    if (STATE.currentPage !== 'quests') return;
-    _applyQuestsRender(data || []);
+  watchPageCollection('quests', 'quests', 'quests', data => {
+    _applyQuestsRender(data);
   });
-  watch('quests-chars', 'characters', data => {
-    if (STATE.currentPage !== 'quests') return;
-    STORE.chars = data || [];
+  watchPageCollection('quests-chars', 'characters', 'quests', data => {
+    STORE.chars = data;
     _applyQuestsRender(STORE.questItems || []);
   });
 }
@@ -269,13 +257,13 @@ function _openQuestModal(id) {
       <div class="form-group">
         <label>Difficulté</label>
         <select class="input-field" id="q-difficulte">
-          ${DIFF.map(d => `<option value="${d.id}"${(ex?.difficulte || 'moyen') === d.id ? ' selected' : ''}>${d.label}</option>`).join('')}
+          ${QUEST_DIFF.map(d => `<option value="${d.id}"${(ex?.difficulte || 'moyen') === d.id ? ' selected' : ''}>${d.label}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
         <label>Statut</label>
         <select class="input-field" id="q-statut">
-          ${STATUT.map(s => `<option value="${s.id}"${(ex?.statut || 'active') === s.id ? ' selected' : ''}>${s.label}</option>`).join('')}
+          ${QUEST_STATUT.map(s => `<option value="${s.id}"${(ex?.statut || 'active') === s.id ? ' selected' : ''}>${s.label}</option>`).join('')}
         </select>
       </div>
     </div>
