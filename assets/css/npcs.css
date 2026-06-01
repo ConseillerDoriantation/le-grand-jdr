@@ -219,7 +219,373 @@
   100% { transform: translateX(100%); }
 }
 
-/* ── Helpers texte répétés ──────────────────────────────────────────────── */
-.npc-dim      { color:var(--text-dim);font-weight:400 }
-.npc-label    { font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;font-weight:600 }
-.npc-label-up { font-size:.64rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;margin-bottom:.3rem }
+/* ════════════════════════════════════════════════════════════════════
+   REFONTE FICHE PNJ — présentation en cartes
+   Couleurs dynamiques (affinité, types) passées en variables inline depuis
+   le JS : --af / --af-bg / --af-bd (affinité), --rc / --rc-bg / --rc-bd (chip).
+═══════════════════════════════════════════════════════════════════════ */
+.npc-page { display: grid; grid-template-columns: 290px 1fr; gap: 1rem; align-items: start; margin: 0 auto; }
+.npc-sidebar { position: sticky; top: 0; display: flex; flex-direction: column; gap: .6rem; }
+.npc-side-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: .85rem .95rem;
+}
+.npc-side-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
+.npc-side-title { font-family: 'Cinzel', serif; font-size: .92rem; color: var(--gold); }
+.npc-side-sub { font-size: .67rem; color: var(--text-dim); margin-top: 1px; }
+.npc-btn-icon {
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer; flex-shrink: 0;
+  border: 1px solid rgba(79,140,255,.3); background: rgba(79,140,255,.08); color: var(--gold);
+  font-size: 1.15rem; line-height: 1; display: flex; align-items: center; justify-content: center;
+  transition: background .12s, border-color .12s;
+}
+.npc-btn-icon:hover { background: rgba(79,140,255,.16); }
+.npc-mj-btn {
+  margin-top: .55rem; width: 100%; padding: .5rem .65rem; cursor: pointer;
+  background: rgba(232,184,75,.08); border: 1px solid rgba(232,184,75,.3); border-radius: 8px;
+  color: #e8b84b; font-size: .78rem; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: .4rem; transition: background .12s;
+}
+.npc-mj-btn:hover { background: rgba(232,184,75,.15); }
+
+/* ── Item de liste (nav) ─────────────────────────────────────────────── */
+.npc-nav-item {
+  display: flex; align-items: center; gap: .6rem; padding: .55rem .8rem; cursor: pointer;
+  border-left: 3px solid transparent; transition: background .1s;
+}
+.npc-nav-item:hover { background: rgba(255,255,255,.03); }
+.npc-nav-item.is-active { background: rgba(79,140,255,.08); border-left-color: var(--gold); }
+.npc-nav-avatar {
+  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--af-bg), transparent); border: 2px solid var(--af-bd);
+}
+.npc-nav-item.is-active .npc-nav-avatar { border-color: var(--gold); }
+.npc-nav-avatar img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.npc-nav-avatar span { font-family: 'Cinzel', serif; font-weight: 700; font-size: .95rem; color: var(--af); }
+.npc-nav-body { flex: 1; min-width: 0; }
+.npc-nav-name {
+  font-size: .84rem; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.npc-nav-item.is-active .npc-nav-name { font-weight: 700; color: var(--gold); }
+.npc-nav-affi { display: flex; align-items: center; gap: .4rem; margin-top: 2px; }
+.npc-nav-dots { display: flex; gap: 2px; }
+.npc-nav-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.08); }
+.npc-nav-affi-lbl { font-size: .65rem; color: var(--af); }
+.npc-nav-edit {
+  background: transparent; border: none; color: var(--text-dim); cursor: pointer;
+  padding: .3rem .4rem; border-radius: 6px; font-size: .85rem; flex-shrink: 0; line-height: 1;
+  transition: background .12s, color .12s;
+}
+.npc-nav-edit:hover { background: rgba(232,184,75,.12); color: var(--gold); }
+
+/* ── Fiche ────────────────────────────────────────────────────────────── */
+.npc-fiche {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  /* overflow visible pour laisser déborder le menu déroulant du sélecteur de
+     personnage ; les coins hauts sont arrondis via le héro lui-même. */
+  max-width: 1180px;   /* évite l'étirement sur écrans larges */
+}
+.npc-hero { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+/* Corps en 2 colonnes : principal (affinité, stats) + latéral (relations, bastion) */
+.npc-cols {
+  display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: .9rem; align-items: start;
+}
+.npc-col { display: flex; flex-direction: column; gap: .9rem; min-width: 0; }
+@media (max-width: 1000px) { .npc-cols { grid-template-columns: 1fr; } }
+.npc-hero {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: start;
+  padding: 1rem 1.15rem; border-bottom: 1px solid var(--border);
+  background: linear-gradient(160deg, var(--af-bg), transparent 65%);
+}
+.npc-hero-portrait {
+  width: 84px; height: 84px; border-radius: 14px; flex-shrink: 0;
+  object-fit: cover; object-position: top center; border: 2px solid var(--af-bd);
+}
+.npc-hero-portrait--ph {
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 2rem; color: var(--af);
+  background: var(--af-bg);
+}
+.npc-hero-id { min-width: 0; display: flex; flex-direction: column; gap: .4rem; }
+.npc-hero-name {
+  font-family: 'Cinzel', serif; font-size: 1.3rem; color: var(--text);
+  margin: 0; line-height: 1.2; letter-spacing: .5px;
+}
+.npc-hero-role { font-size: .82rem; color: var(--text-muted); font-style: italic; }
+.npc-hero-meta { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.npc-chip {
+  font-size: .68rem; padding: 2px 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: .25rem;
+  background: rgba(255,255,255,.05); border: 1px solid var(--border); color: var(--text-dim);
+}
+.npc-chip--af { background: var(--af-bg); border-color: var(--af-bd); color: var(--af); font-weight: 600; }
+.npc-hero-actions { display: flex; gap: .35rem; flex-shrink: 0; }
+.npc-mini-btn {
+  background: rgba(255,255,255,.06); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 11px; cursor: pointer; font-size: .72rem; color: var(--text-dim); transition: background .12s;
+}
+.npc-mini-btn:hover { background: rgba(255,255,255,.1); }
+.npc-mini-btn--danger { border-color: rgba(255,107,107,.25); color: #ff6b6b; background: transparent; }
+.npc-mini-btn--danger:hover { background: rgba(255,107,107,.1); }
+
+.npc-body { padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: .9rem; }
+.npc-desc {
+  font-size: .85rem; color: var(--text-soft); line-height: 1.7;
+  padding: .7rem .85rem; background: rgba(255,255,255,.02); border-radius: 10px;
+  border-left: 3px solid var(--af-bd);
+}
+.npc-sections {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: .9rem; align-items: start;
+}
+.npc-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: .85rem 1rem; }
+.npc-card--span { grid-column: 1 / -1; }
+.npc-card-hd { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .7rem; }
+.npc-card-title {
+  font-size: .66rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text-dim); display: flex; align-items: center; gap: .4rem;
+}
+.npc-card-act {
+  font-size: .67rem; background: rgba(79,140,255,.08); border: 1px solid rgba(79,140,255,.25);
+  border-radius: 6px; padding: 2px 8px; cursor: pointer; color: var(--gold); flex-shrink: 0;
+}
+.npc-card-act--ghost { background: none; border: none; color: var(--text-dim); padding: 2px 4px; }
+
+/* Affinité groupe — jauge */
+.npc-af-gauge { display: flex; gap: 3px; margin-bottom: .6rem; }
+.npc-af-seg { flex: 1; }
+.npc-af-seg-bar { height: 14px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.05); }
+.npc-af-seg:first-child .npc-af-seg-bar { border-radius: 999px 0 0 999px; }
+.npc-af-seg:last-child .npc-af-seg-bar { border-radius: 0 999px 999px 0; }
+.npc-af-seg.is-filled .npc-af-seg-bar { background: var(--seg-fill); border-color: var(--seg-bd); }
+.npc-af-seg.is-current .npc-af-seg-bar { background: var(--seg); border-color: var(--seg); position: relative; overflow: hidden; }
+.npc-af-seg.is-current .npc-af-seg-bar::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent);
+  animation: npc-affinity-shimmer 2s infinite;
+}
+.npc-af-seg-lbl { text-align: center; font-size: .54rem; margin-top: 3px; color: var(--text-dim); }
+.npc-af-seg.is-current .npc-af-seg-lbl { color: var(--seg); font-weight: 700; }
+.npc-af-state { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: 9px; background: var(--af-bg); border: 1px solid var(--af-bd); }
+.npc-af-state-ico { font-size: 1.1rem; }
+.npc-af-state-name { font-weight: 700; color: var(--af); font-size: .85rem; }
+.npc-af-state-desc { font-size: .72rem; color: var(--text-dim); }
+.npc-af-note {
+  margin-top: .5rem; font-size: .78rem; color: var(--text-muted); font-style: italic;
+  padding: .4rem .6rem; border-left: 2px solid var(--af-bd); line-height: 1.6;
+}
+.npc-af-val {
+  flex-shrink: 0; font-family: 'Cinzel', serif; font-weight: 700; font-size: .9rem; color: var(--af);
+  background: rgba(255,255,255,.05); border: 1px solid var(--af-bd); border-radius: 7px; padding: 1px 9px;
+}
+/* Formulaire d'ajout d'événement (inline) */
+.npc-event-row { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+.npc-event-delta { width: 48px; flex: 0 0 auto; text-align: center; font-weight: 700; }
+/* Inputs numériques sans flèches (spinners) */
+input.npc-inline[type=number] { -moz-appearance: textfield; appearance: textfield; }
+input.npc-inline[type=number]::-webkit-outer-spin-button,
+input.npc-inline[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.npc-event-text { flex: 1; min-width: 160px; }
+.npc-event-btn {
+  flex: 0 0 auto; cursor: pointer; font-size: .76rem; font-weight: 600; white-space: nowrap;
+  background: rgba(232,184,75,.1); border: 1px solid rgba(232,184,75,.35); color: var(--gold);
+  border-radius: 8px; padding: .42rem .8rem; transition: background .12s;
+}
+.npc-event-btn:hover { background: rgba(232,184,75,.18); }
+
+/* Stats & combat */
+.npc-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; }
+.npc-stat-grid--6 { grid-template-columns: repeat(6, 1fr); margin-top: .5rem; }
+.npc-stat-cell {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+  padding: .42rem .3rem; text-align: center;
+}
+.npc-stat-k { font-size: .6rem; color: var(--text-dim); font-weight: 700; letter-spacing: .04em; }
+.npc-stat-v { font-size: 1rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+.npc-stat-mod { font-size: .62rem; color: var(--text-muted); }
+.npc-combat-row { display: grid; grid-template-columns: 1.35fr 1fr .65fr; gap: .4rem; margin-top: .5rem; }
+.npc-combat-cell { background: rgba(232,184,75,.05); border: 1px solid rgba(232,184,75,.18); border-radius: 8px; padding: .45rem .5rem; }
+.npc-combat-cell--c { text-align: center; }
+.npc-combat-k { font-size: .6rem; color: var(--text-dim); font-weight: 700; letter-spacing: .04em; }
+.npc-combat-v { font-size: .9rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+
+/* Bastion */
+.npc-bastion-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: .35rem; }
+.npc-bastion-pill {
+  font-size: .66rem; padding: 1px 8px; border-radius: 999px; font-weight: 600;
+  background: rgba(232,184,75,.1); border: 1px solid rgba(232,184,75,.32); color: var(--gold);
+}
+.npc-bastion-passif { color: var(--text-soft); font-style: italic; line-height: 1.45; font-size: .77rem; }
+.npc-bastion-sal { margin-top: .25rem; color: var(--text-muted); font-size: .7rem; }
+.npc-bastion-recruit {
+  margin-top: .5rem; font-size: .72rem; line-height: 1.45; padding: .4rem .6rem; border-radius: 8px;
+}
+.npc-bastion-recruit.ok   { color: #5fe5b1; background: rgba(34,195,142,.1);  border: 1px solid rgba(34,195,142,.28); }
+.npc-bastion-recruit.lock { color: var(--text-muted); background: rgba(255,255,255,.03); border: 1px solid var(--border); }
+.npc-badge-mj {
+  font-size: .56rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; letter-spacing: .04em;
+  text-transform: uppercase; margin-left: .4rem;
+  background: rgba(180,127,255,.18); border: 1px solid rgba(180,127,255,.45); color: #cfa8ff;
+}
+
+/* Relations / affinités spécifiques (chips) */
+.npc-rel-list { display: flex; flex-direction: column; gap: .4rem; }
+.npc-rel-scroll { max-height: 320px; overflow-y: auto; overflow-x: hidden; padding-right: .2rem; }
+.npc-rel-chip {
+  display: flex; align-items: center; gap: .6rem; padding: .55rem .7rem; border-radius: 10px;
+  background: var(--rc-bg); border: 1px solid var(--rc-bd);
+}
+.npc-rel-emoji { font-size: 1.25rem; flex-shrink: 0; line-height: 1; }
+.npc-rel-body { flex: 1; min-width: 0; }
+.npc-rel-label { font-size: .82rem; font-weight: 700; color: var(--rc); }
+.npc-rel-target { font-size: .73rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: .35rem; }
+.npc-rel-av { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; object-position: center top; flex-shrink: 0; }
+.npc-rel-av--ph {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.08); font-weight: 700; font-size: .68rem; color: var(--text-muted);
+}
+.npc-rel-note { font-size: .71rem; color: var(--text-muted); font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; }
+.npc-rel-actions { display: flex; gap: .2rem; flex-shrink: 0; }
+.npc-icon-btn { background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: .72rem; padding: 2px 5px; border-radius: 5px; transition: background .1s; }
+.npc-icon-btn:hover { background: rgba(255,255,255,.08); }
+.npc-icon-btn--danger { color: #ff6b6b; }
+.npc-icon-btn--danger:hover { background: rgba(255,107,107,.1); }
+.npc-rel-chip--edit { align-items: stretch; }
+.npc-rel-editrow { display: flex; align-items: center; gap: .4rem; margin-bottom: .3rem; }
+.npc-rel-typesel { flex: 1; min-width: 0; font-size: .74rem; padding: .28rem .45rem; }
+.npc-rel-chip--edit .npc-inline { font-size: .72rem; margin-top: .25rem; }
+.npc-affi-add { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+.npc-affi-add .npc-select { min-width: 120px; flex: 1; }
+
+/* Sélecteur de personnage avec portrait */
+.npc-charpick { position: relative; flex: 1; min-width: 150px; }
+.npc-charpick-trigger {
+  display: flex; align-items: center; gap: .5rem; width: 100%; cursor: pointer; min-height: 34px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px;
+  padding: .28rem .55rem; color: var(--text); font: inherit; font-size: .8rem; text-align: left;
+  transition: border-color .12s;
+}
+.npc-charpick-trigger:hover { border-color: rgba(79,140,255,.4); }
+.npc-charpick-current { flex: 1; min-width: 0; display: flex; align-items: center; gap: .45rem; overflow: hidden; }
+.npc-charpick-ph { color: var(--text-dim); }
+.npc-charpick-selname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.npc-charpick-caret { color: var(--text-dim); flex-shrink: 0; font-size: .75rem; }
+.npc-charpick-av {
+  width: 26px; height: 26px; border-radius: 50%; object-fit: cover; object-position: center top; flex-shrink: 0;
+}
+.npc-charpick-av--ph {
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.08); font-weight: 700; font-size: .8rem; color: var(--text-muted);
+}
+.npc-charpick-opt-txt { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.npc-charpick-opt-txt b { font-size: .8rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.npc-charpick-opt-txt small { font-size: .66rem; color: var(--text-dim); }
+.npc-charpick-panel {
+  display: none; position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0;
+  max-height: 264px; overflow-y: auto; padding: .3rem;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+}
+.npc-charpick.is-open .npc-charpick-panel { display: block; }
+.npc-charpick-opt {
+  display: flex; align-items: center; gap: .5rem; width: 100%; cursor: pointer; text-align: left;
+  background: transparent; border: none; border-radius: 7px; padding: .32rem .45rem; color: var(--text);
+}
+.npc-charpick-opt:hover { background: rgba(79,140,255,.1); }
+.npc-rel-add {
+  width: 100%; padding: .55rem; cursor: pointer; text-align: center; font-size: .74rem; color: var(--gold);
+  background: rgba(79,140,255,.06); border: 1px dashed rgba(79,140,255,.3); border-radius: 9px; transition: background .15s;
+}
+.npc-rel-add:hover { background: rgba(79,140,255,.12); }
+.npc-empty-line { font-size: .74rem; color: var(--text-dim); font-style: italic; text-align: center; padding: .5rem 0; }
+
+/* Historique */
+.npc-histo-list { display: flex; flex-direction: column; gap: .3rem; max-height: 280px; overflow-y: auto; padding-right: .2rem; }
+.npc-histo-row { display: flex; align-items: flex-start; gap: .5rem; padding: .35rem .55rem; border-radius: 7px; background: var(--h-bg); }
+.npc-histo-delta {
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: .67rem; font-weight: 800; color: var(--h-c); background: var(--h-c-bg); border: 1px solid var(--h-c-bd);
+}
+.npc-histo-text { flex: 1; font-size: .75rem; color: var(--text-muted); line-height: 1.5; }
+.npc-histo-date { font-size: .64rem; color: var(--text-dim); flex-shrink: 0; white-space: nowrap; }
+
+/* ── Édition inline (admin) ──────────────────────────────────────────── */
+.npc-inline {
+  background: rgba(255,255,255,.03); border: 1px solid transparent; border-radius: 6px;
+  color: inherit; font: inherit; padding: 3px 7px; width: 100%; box-sizing: border-box;
+  transition: border-color .12s, background .12s;
+}
+.npc-inline:hover { border-color: var(--border); }
+.npc-inline:focus { outline: none; border-color: rgba(79,140,255,.45); background: rgba(79,140,255,.06); }
+.npc-inline::placeholder { color: var(--text-dim); }
+.npc-inline-name { font-family: 'Cinzel', serif; font-size: 1.25rem; font-weight: 600; color: var(--text); }
+.npc-inline-role { font-size: .82rem; color: var(--text-muted); font-style: italic; }
+.npc-inline-lieu { max-width: 200px; font-size: .72rem; padding: 2px 6px; }
+textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; font-size: .84rem; }
+.npc-stat-cell input.npc-inline { text-align: center; padding: 1px 2px; font-size: .95rem; font-weight: 700; margin-top: 2px; }
+.npc-edit-block { display: flex; flex-direction: column; gap: .3rem; }
+.npc-edit-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
+.npc-hint { font-size: .64rem; color: var(--text-dim); font-style: italic; margin-top: .35rem; }
+
+/* Portrait cliquable (upload direct) */
+.npc-portrait-btn {
+  position: relative; display: block; padding: 0; overflow: hidden; cursor: pointer;
+  background: var(--af-bg);
+}
+.npc-portrait-btn img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+.npc-portrait-btn.is-empty {
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 2rem; color: var(--af);
+}
+.npc-portrait-cam {
+  position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: .7rem;
+  padding: 1px 0; background: rgba(0,0,0,.55); opacity: 0; transition: opacity .15s;
+}
+.npc-portrait-btn:hover .npc-portrait-cam { opacity: 1; }
+
+/* Toggles d'activité bastion + visibilité */
+.npc-act-toggle {
+  font-size: .66rem; padding: 2px 9px; border-radius: 999px; cursor: pointer; font-weight: 600;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border); color: var(--text-dim);
+  transition: background .12s, border-color .12s, color .12s;
+}
+.npc-act-toggle:hover { border-color: rgba(232,184,75,.4); }
+.npc-act-toggle.is-on { background: rgba(232,184,75,.12); border-color: rgba(232,184,75,.4); color: var(--gold); }
+.npc-card-act--off { color: var(--text-dim); background: rgba(255,255,255,.04); border-color: var(--border); }
+
+/* Combat & stats compact */
+.npc-weapon { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .55rem; }
+.npc-weapon-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.npc-select {
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: .42rem .6rem; font: inherit; font-size: .82rem; cursor: pointer;
+  min-width: 200px; max-width: 280px;
+}
+.npc-select:focus { outline: none; border-color: rgba(79,140,255,.45); }
+.npc-select option { background: var(--bg-elevated); color: var(--text); }
+.npc-weapon-stat {
+  font-size: .74rem; font-weight: 600; color: var(--text-soft);
+  background: rgba(232,184,75,.08); border: 1px solid rgba(232,184,75,.22);
+  border-radius: 6px; padding: 2px 9px;
+}
+.npc-stats-card .npc-stat-grid { gap: .3rem; }
+.npc-stats-card .npc-stat-grid--6 { margin-top: .35rem; }
+.npc-stats-card .npc-stat-cell { padding: .3rem .2rem; }
+.npc-stats-card .npc-stat-cell input.npc-inline { font-size: .9rem; padding: 0 2px; }
+
+/* Empty fiche */
+.npc-fiche-empty {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 4rem 2rem; text-align: center;
+}
+.npc-fiche-empty-ico { font-size: 3rem; margin-bottom: 1rem; opacity: .3; }
+
+@media (max-width: 720px) {
+  .npc-page { grid-template-columns: 1fr; }
+  .npc-sidebar { position: static; }
+  .npc-hero { grid-template-columns: auto 1fr; }
+  .npc-hero-actions { grid-column: 1 / -1; }
+}
