@@ -17,10 +17,6 @@ import { _rareteTag } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
-let _all        = [];
-let _shopItems  = []; // items de la boutique (arme/armure/bijou)
-let _tab        = 'cuisine'; // 'cuisine' | 'potion' | 'arme' | 'armure' | 'bijou'
-let _filterTxt  = '';
 
 // ── Config des onglets ────────────────────────────────────────────────────────
 const TABS = [
@@ -47,6 +43,14 @@ const MATERIALS = {
 // ══════════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
+
+const STORE = {
+  all: [],
+  shopItems: [], // items boutique (arme/armure/bijou)
+  tab: 'cuisine', // 'cuisine'|'potion'|'arme'|'armure'|'bijou'
+  filterTxt: '',
+};
+
 function _myUid()   { return STATE.user?.uid || ''; }
 function _isAdmin() { return !!STATE.isAdmin; }
 
@@ -61,17 +65,17 @@ function _getJoueurs() {
 
 function _visible() {
   const uid        = _myUid();
-  const regular    = _isAdmin() ? _all : _all.filter(r => (r.acces || []).includes(uid));
-  const converted  = _shopItems.map(_shopToRecipe).filter(Boolean);
+  const regular    = _isAdmin() ? STORE.all : STORE.all.filter(r => (r.acces || []).includes(uid));
+  const converted  = STORE.shopItems.map(_shopToRecipe).filter(Boolean);
   const shopVis    = _isAdmin() ? converted : converted.filter(r => (r.acces || []).includes(uid));
   return [...regular, ...shopVis];
 }
 
 // Retourne l'item brut (recipes ou shop) par id
 function _findRaw(id) {
-  return _all.find(x => x.id === id) || _shopItems.find(i => i.id === id) || null;
+  return STORE.all.find(x => x.id === id) || STORE.shopItems.find(i => i.id === id) || null;
 }
-function _isShopItem(id) { return _shopItems.some(i => i.id === id); }
+function _isShopItem(id) { return STORE.shopItems.some(i => i.id === id); }
 
 function _recipeSearchText(r = {}) {
   const ingredientText = Array.isArray(r.ingredients)
@@ -96,10 +100,10 @@ function _recipeSearchText(r = {}) {
 }
 
 function _filterRecipesBySearch(recipes) {
-  const q = _norm(_filterTxt);
+  const q = _norm(STORE.filterTxt);
   return recipes.filter(r => {
-    if (!q) return r.type === _tab;
-    return _searchIncludes(_recipeSearchText(r), _filterTxt);
+    if (!q) return r.type === STORE.tab;
+    return _searchIncludes(_recipeSearchText(r), STORE.filterTxt);
   });
 }
 
@@ -177,19 +181,19 @@ function _shopToRecipe(item) {
 async function renderRecipes() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
-  [_all, _shopItems] = await Promise.all([
+  [STORE.all, STORE.shopItems] = await Promise.all([
     loadCollection('recipes'),
     loadCollection('shop'),
   ]);
-  _all.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
-  _tab = _tab || 'cuisine';
+  STORE.all.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+  STORE.tab = STORE.tab || 'cuisine';
   _render();
 }
 
 function _render() {
   const content = document.getElementById('main-content');
   const visible  = _visible();
-  const tabInfo  = TABS.find(t => t.id === _tab) || TABS[0];
+  const tabInfo  = TABS.find(t => t.id === STORE.tab) || TABS[0];
 
   const filtered = _filterRecipesBySearch(visible);
 
@@ -229,13 +233,13 @@ function _render() {
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap">
     <div class="rec-tabs" style="flex-shrink:0">
       ${TABS.map(t => `
-        <button class="rec-tab ${_tab===t.id?'active':''}" data-action="recSetTab" data-id="${t.id}">
+        <button class="rec-tab ${STORE.tab===t.id?'active':''}" data-action="recSetTab" data-id="${t.id}">
           <span>${t.emoji}</span><span>${t.label}</span>
           <span style="font-size:.65rem;opacity:.7">(${counts[t.id]})</span>
         </button>`).join('')}
     </div>
     <input type="text" class="input-field" placeholder="🔍 Rechercher..."
-      value="${_filterTxt}" data-input="recSearch"
+      value="${STORE.filterTxt}" data-input="recSearch"
       style="max-width:240px;font-size:.82rem">
   </div>
 
@@ -248,7 +252,7 @@ function _gridHtml(filtered, tabInfo, visible, borderColor) {
     <div class="rec-empty">
       <div style="font-size:2.5rem;margin-bottom:.75rem;opacity:.25">${tabInfo.emoji}</div>
       <p style="font-style:italic">
-        ${visible.filter(r=>r.type===_tab).length === 0
+        ${visible.filter(r=>r.type===STORE.tab).length === 0
           ? (_isAdmin() ? `Aucune recette de type "${tabInfo.label}" — créez-en une !` : `Aucune recette partagée avec vous dans cette catégorie.`)
           : 'Aucun résultat pour cette recherche.'}
       </p>
@@ -262,7 +266,7 @@ function _renderGrid() {
   const wrap = document.getElementById('rec-grid-wrap');
   if (!wrap) { _render(); return; }
   const visible = _visible();
-  const tabInfo = TABS.find(t => t.id === _tab) || TABS[0];
+  const tabInfo = TABS.find(t => t.id === STORE.tab) || TABS[0];
   const borderColor = { cuisine:'#e8b84b', potion:'#22c38e', arme:'#ff6b6b', armure:'#4f8cff', bijou:'#c084fc' };
   const filtered = _filterRecipesBySearch(visible);
   wrap.innerHTML = _gridHtml(filtered, tabInfo, visible, borderColor);
@@ -406,7 +410,7 @@ export function openItemDetailModal(id) {
 // MODAL ADMIN — Créer / Modifier une recette
 // ══════════════════════════════════════════════════════════════════════════════
 function openRecipeModal(type, id = '') {
-  const r      = id ? _all.find(x => x.id === id) : null;
+  const r      = id ? STORE.all.find(x => x.id === id) : null;
   const rType  = r?.type || type;
   const tab    = TABS.find(t => t.id === rType) || TABS[0];
   const ingrs  = Array.isArray(r?.ingredients) && r.ingredients.length
@@ -515,7 +519,7 @@ async function saveRecipe(id, fallbackType) {
     const nom = document.getElementById('rec-nom')?.value?.trim();
     if (!nom) { showNotif('Le nom est requis.', 'error'); return; }
 
-    const existing = id ? _all.find(r => r.id === id) : null;
+    const existing = id ? STORE.all.find(r => r.id === id) : null;
     const type     = existing?.type || fallbackType || 'cuisine';
 
     const data = {
@@ -532,18 +536,18 @@ async function saveRecipe(id, fallbackType) {
 
     if (id) {
       await updateInCol('recipes', id, data);
-      const idx = _all.findIndex(r => r.id === id);
-      if (idx >= 0) _all[idx] = { ...data, id };
+      const idx = STORE.all.findIndex(r => r.id === id);
+      if (idx >= 0) STORE.all[idx] = { ...data, id };
     } else {
       const newId = await addToCol('recipes', data);
-      if (typeof newId === 'string') _all.push({ ...data, id: newId });
-      else _all = await loadCollection('recipes');
-      _all.sort((a, b) => (a.nom||'').localeCompare(b.nom||''));
+      if (typeof newId === 'string') STORE.all.push({ ...data, id: newId });
+      else STORE.all = await loadCollection('recipes');
+      STORE.all.sort((a, b) => (a.nom||'').localeCompare(b.nom||''));
     }
 
     closeModal();
     showNotif(id ? `"${nom}" mis à jour !` : `"${nom}" créé !`, 'success');
-    _tab = data.type;
+    STORE.tab = data.type;
     _render();
   } catch (e) { notifySaveError(e); }
 }
@@ -552,7 +556,7 @@ async function saveRecipe(id, fallbackType) {
 // MODAL SHOP — Modifier / Supprimer une recette issue de la boutique
 // ══════════════════════════════════════════════════════════════════════════════
 function openShopRecipeModal(id) {
-  const item = _shopItems.find(i => i.id === id);
+  const item = STORE.shopItems.find(i => i.id === id);
   if (!item) return;
   const r    = _shopToRecipe(item);
   if (!r)    return;
@@ -627,8 +631,8 @@ async function saveShopRecipe(id) {
     };
 
     await updateInCol('shop', id, { recipeMeta });
-    const idx = _shopItems.findIndex(i => i.id === id);
-    if (idx >= 0) _shopItems[idx].recipeMeta = recipeMeta;
+    const idx = STORE.shopItems.findIndex(i => i.id === id);
+    if (idx >= 0) STORE.shopItems[idx].recipeMeta = recipeMeta;
 
     closeModal();
     showNotif('Recette mise à jour !', 'success');
@@ -638,15 +642,15 @@ async function saveShopRecipe(id) {
 
 async function deleteShopRecipe(id) {
   try {
-    const item = _shopItems.find(i => i.id === id);
+    const item = STORE.shopItems.find(i => i.id === id);
     if (!await confirmModal(`Retirer "${item?.nom||'cet objet'}" des recettes ? L'objet restera dans la boutique.`)) return;
 
     const recipeMeta = { ...(item?.recipeMeta || {}), hidden: true };
     await updateInCol('shop', id, { recipeMeta, acces: [] });
-    const idx = _shopItems.findIndex(i => i.id === id);
+    const idx = STORE.shopItems.findIndex(i => i.id === id);
     if (idx >= 0) {
-      _shopItems[idx].recipeMeta = recipeMeta;
-      _shopItems[idx].acces = [];
+      STORE.shopItems[idx].recipeMeta = recipeMeta;
+      STORE.shopItems[idx].acces = [];
     }
 
     showNotif('Recette retirée.', 'success');
@@ -656,9 +660,9 @@ async function deleteShopRecipe(id) {
 
 async function deleteRecipe(id) {
   try {
-    const r = _all.find(x => x.id === id);
+    const r = STORE.all.find(x => x.id === id);
     if (!await confirmDelete('recipes', id, `Supprimer "${r?.nom||'cette recette'}" ?`)) return;
-    _all = _all.filter(x => x.id !== id);
+    STORE.all = STORE.all.filter(x => x.id !== id);
     showNotif('Recette supprimée.', 'success');
     _render();
   } catch (e) { notifySaveError(e); }
@@ -704,7 +708,7 @@ async function saveAcces(id) {
     const newAcces  = checks.filter(c => c.checked).map(c => c.value);
     const isShop    = _isShopItem(id);
     await updateInCol(isShop ? 'shop' : 'recipes', id, { acces: newAcces });
-    const list      = isShop ? _shopItems : _all;
+    const list      = isShop ? STORE.shopItems : STORE.all;
     const idx       = list.findIndex(x => x.id === id);
     if (idx >= 0) list[idx].acces = newAcces;
     closeModal();
@@ -779,8 +783,8 @@ async function sendRecipe(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
-function setRecipeTab(t) { _tab = t; _filterTxt = ""; _render(); }
-function searchRecipes(v) { _filterTxt = v; _renderGrid(); }
+function setRecipeTab(t) { STORE.tab = t; STORE.filterTxt = ""; _render(); }
+function searchRecipes(v) { STORE.filterTxt = v; _renderGrid(); }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // OVERRIDE + EXPORTS

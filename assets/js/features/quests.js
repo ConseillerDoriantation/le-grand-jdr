@@ -29,6 +29,15 @@ const STATUT = [
 const _diff   = id => DIFF.find(d => d.id === id)   || DIFF[1];
 const _statut = id => STATUT.find(s => s.id === id) || STATUT[0];
 
+
+const STORE = {
+  chars: null,   // personnages chargés
+  places: [],     // [{ id, name }] — autocomplete Lieu
+  questItems: [],
+  questMyChar: null,
+  questMyChars: [],
+};
+
 function _questRequiredCount(q = {}) {
   const n = parseInt(q.participantsRequis ?? q.participantsRequired ?? q.nbParticipants ?? 0, 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
@@ -98,11 +107,6 @@ function _questCard(q, myChar) {
 }
 
 // ── Cache local pour re-renders subscription ──
-let _chars = null;
-let _places = [];   // [{ id, name }] — alimente le datalist Lieu
-let _questItems = [];
-let _questMyChar = null;
-let _questMyChars = [];
 
 // ── Rendu depuis les données (sans rechargement Firestore) ────────────────
 function _applyQuestsRender(quests) {
@@ -110,12 +114,12 @@ function _applyQuestsRender(quests) {
   if (!content) return;
 
   const uid     = STATE.user?.uid;
-  const myChars = STATE.isAdmin ? [] : (_chars || []).filter(c => c.uid === uid);
+  const myChars = STATE.isAdmin ? [] : (STORE.chars || []).filter(c => c.uid === uid);
   const myChar  = myChars[0] || null;
 
-  _questItems = quests;
-  _questMyChar = myChar;
-  _questMyChars = myChars;
+  STORE.questItems = quests;
+  STORE.questMyChar = myChar;
+  STORE.questMyChars = myChars;
 
   const sorted = [...quests].sort((a, b) => {
     const ord = { active: 0, terminee: 1, echouee: 2 };
@@ -150,7 +154,7 @@ async function renderQuestsPage() {
   // fetch initial. `quests` et `characters` sont, eux, gérés intégralement par
   // les abonnements ci-dessous → le snapshot initial fournit déjà les données,
   // pas besoin d'un loadCollection en plus (économie : 2× lectures au montage).
-  _places = ((await listPlaces().catch(() => [])) || [])
+  STORE.places = ((await listPlaces().catch(() => [])) || [])
     .filter(p => p?.name)
     .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
@@ -163,14 +167,14 @@ async function renderQuestsPage() {
   });
   watch('quests-chars', 'characters', data => {
     if (STATE.currentPage !== 'quests') return;
-    _chars = data || [];
-    _applyQuestsRender(_questItems || []);
+    STORE.chars = data || [];
+    _applyQuestsRender(STORE.questItems || []);
   });
 }
 
 // ── Toggle participation ──────────────────────
 async function toggleQuestJoin(id) {
-  const q   = (_questItems || []).find(x => x.id === id);
+  const q   = (STORE.questItems || []).find(x => x.id === id);
   if (!q) return;
 
   const uid   = STATE.user?.uid;
@@ -183,7 +187,7 @@ async function toggleQuestJoin(id) {
     await _questSaveParts(id, parts, true);
   } else {
     // Rejoindre — sélectionner le personnage si plusieurs
-    const myChars = _questMyChars || [];
+    const myChars = STORE.questMyChars || [];
     if (myChars.length > 1) {
       _questOpenCharPicker(id, myChars);
     } else {
@@ -223,13 +227,13 @@ function _questOpenCharPicker(questId, chars) {
 
 async function pickQuestChar(questId, charId) {
   closeModal();
-  const char = (_questMyChars || []).find(c => c.id === charId);
+  const char = (STORE.questMyChars || []).find(c => c.id === charId);
   if (!char) return;
   await _questJoinWithChar(questId, char);
 }
 
 async function _questJoinWithChar(id, char) {
-  const q   = (_questItems || []).find(x => x.id === id);
+  const q   = (STORE.questItems || []).find(x => x.id === id);
   if (!q) return;
   const uid   = STATE.user?.uid;
   const parts = Array.isArray(q.participants) ? [...q.participants] : [];
@@ -259,7 +263,7 @@ function newQuest() { _openQuestModal(null); }
 export function editQuest(id) { _openQuestModal(id); }
 
 function _openQuestModal(id) {
-  const ex = id ? (_questItems || []).find(q => q.id === id) : null;
+  const ex = id ? (STORE.questItems || []).find(q => q.id === id) : null;
 
   openModal(
     id ? `✏️ Modifier — ${_esc(ex?.titre || 'Quête')}` : '📋 Nouvelle Quête',
@@ -287,7 +291,7 @@ function _openQuestModal(id) {
       <label>Lieu <span style="color:var(--text-dim);font-weight:400">(optionnel — relie la quête à la carte)</span></label>
       <input class="input-field" id="q-lieu" list="q-lieu-options" value="${_esc(ex?.lieu || '')}" placeholder="ex: Valdoran" autocomplete="off">
       <datalist id="q-lieu-options">
-        ${_places.map(p => `<option value="${_esc(p.name)}"></option>`).join('')}
+        ${STORE.places.map(p => `<option value="${_esc(p.name)}"></option>`).join('')}
       </datalist>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
@@ -352,7 +356,7 @@ async function saveQuest(id) {
 }
 
 async function deleteQuest(id) {
-  const q = (_questItems || []).find(x => x.id === id);
+  const q = (STORE.questItems || []).find(x => x.id === id);
   if (!confirm(`Supprimer la quête "${q?.titre || id}" ?`)) return;
   try {
     await deleteFromCol('quests', id);

@@ -46,6 +46,12 @@ const FRAGMENT_CAT_BY_ID = Object.fromEntries(FRAGMENT_CATEGORIES.map(c => [c.id
 
 // Détecte la catégorie de fragment d'un item d'inventaire.
 // Renvoie null si l'item n'est pas améliorable (ex : potion, item libre).
+
+const STORE = {
+  activeCharId: null,
+  mjFreeMode: false,
+};
+
 export function getItemFragmentCategory(item = {}) {
   if (!item) return null;
   const tpl = (item.template || '').toLowerCase();
@@ -100,14 +106,12 @@ export function _addFragment(fragments, category, traitName, delta = 1) {
 // MJ : sélecteur de personnage
 // ══════════════════════════════════════════════
 
-let _activeArtisanCharId = null;
 // Mode MJ : si actif, toutes les améliorations sont gratuites mais loggent
 // `mjOverride: true` dans l'historique de l'item. Réservé aux admins.
-let _mjFreeMode = false;
 
 // Le coût est-il finançable (or suffisant OU mode MJ gratuit actif) ?
 function _canAfford(c, cost) {
-  return _mjFreeMode || cost <= calcOr(c);
+  return STORE.mjFreeMode || cost <= calcOr(c);
 }
 
 function _getEligibleChars() {
@@ -118,10 +122,10 @@ function _getEligibleChars() {
 function _getActiveArtisanChar() {
   const chars = _getEligibleChars();
   if (!chars.length) return null;
-  let active = chars.find(c => c.id === _activeArtisanCharId);
+  let active = chars.find(c => c.id === STORE.activeCharId);
   if (!active) {
     active = chars.find(c => c.id === getShopCharId()) || chars[0];
-    _activeArtisanCharId = active?.id || null;
+    STORE.activeCharId = active?.id || null;
   }
   return active;
 }
@@ -132,8 +136,8 @@ function _getActiveArtisanChar() {
 
 export async function openArtisanModal() {
   await loadUpgradeSettings();
-  _activeArtisanCharId = null; // reset à chaque ouverture
-  _mjFreeMode = false;          // sécurité : MJ doit ré-activer le mode gratuit à chaque session
+  STORE.activeCharId = null; // reset à chaque ouverture
+  STORE.mjFreeMode = false;          // sécurité : MJ doit ré-activer le mode gratuit à chaque session
   _renderArtisanModal();
 }
 
@@ -161,10 +165,10 @@ function _renderArtisanModal() {
 
   const mjToggle = STATE.isAdmin ? `
     <label style="display:flex;align-items:center;gap:.4rem;font-size:.74rem;
-      color:${_mjFreeMode ? '#ff6b6b' : 'var(--text-dim)'};cursor:pointer;
-      padding:.3rem .55rem;border-radius:6px;border:1px solid ${_mjFreeMode ? 'rgba(255,107,107,.4)' : 'var(--border)'};
-      background:${_mjFreeMode ? 'rgba(255,107,107,.08)' : 'transparent'};white-space:nowrap">
-      <input type="checkbox" ${_mjFreeMode ? 'checked' : ''}
+      color:${STORE.mjFreeMode ? '#ff6b6b' : 'var(--text-dim)'};cursor:pointer;
+      padding:.3rem .55rem;border-radius:6px;border:1px solid ${STORE.mjFreeMode ? 'rgba(255,107,107,.4)' : 'var(--border)'};
+      background:${STORE.mjFreeMode ? 'rgba(255,107,107,.08)' : 'transparent'};white-space:nowrap">
+      <input type="checkbox" ${STORE.mjFreeMode ? 'checked' : ''}
         data-change="_artisanToggleMjFree"
         style="margin:0;cursor:pointer">
       🔧 MJ gratuit
@@ -287,8 +291,8 @@ function _renderUpgradeableItemRow(item, invIndex, category) {
 
 // ── Toggle MJ gratuit (admins seulement) ────────────────────────────
 function _artisanToggleMjFree(on) {
-  if (!STATE.isAdmin) { _mjFreeMode = false; return; }
-  _mjFreeMode = !!on;
+  if (!STATE.isAdmin) { STORE.mjFreeMode = false; return; }
+  STORE.mjFreeMode = !!on;
   _renderArtisanModal();
 }
 
@@ -370,7 +374,7 @@ function _rebuildAllEquipment(c) {
 // Ajoute une dépense au ledger du personnage.
 // En mode MJ gratuit, on ne débite pas le ledger.
 function _logExpense(c, label, amount) {
-  if (_mjFreeMode || amount <= 0) return;
+  if (STORE.mjFreeMode || amount <= 0) return;
   const compte = c.compte || { recettes: [], depenses: [] };
   const depenses = Array.isArray(compte.depenses) ? [...compte.depenses] : [];
   depenses.push({
@@ -390,8 +394,8 @@ function _logUpgradeHistory(item, entry) {
     at: Date.now(),
     by: STATE.user?.uid || null,
     ...entry,
-    cost: _mjFreeMode ? 0 : (parseInt(entry.cost) || 0),
-    mjOverride: !!_mjFreeMode,
+    cost: STORE.mjFreeMode ? 0 : (parseInt(entry.cost) || 0),
+    mjOverride: !!STORE.mjFreeMode,
   });
   item.upgrades = { ...up, history };
 }
@@ -765,7 +769,7 @@ async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName)
 // ══════════════════════════════════════════════
 
 function _artisanSelectChar(id) {
-  _activeArtisanCharId = id;
+  STORE.activeCharId = id;
   _renderArtisanModal();
 };
 
