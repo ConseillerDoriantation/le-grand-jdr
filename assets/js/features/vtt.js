@@ -191,18 +191,29 @@ function _vttBindDispatch() {
     const el = e.target.closest('[data-vtt-fn]');
     if (!el) return;
     const expectedOn = el.dataset.vttOn || 'click';
-    if (expectedOn !== e.type) return;
+    if (expectedOn === 'keydown-enter') {
+      if (e.type !== 'keydown' || e.key !== 'Enter') return;
+      e.preventDefault();
+    } else if (expectedOn === 'contextmenu') {
+      if (e.type !== 'contextmenu') return;
+      e.preventDefault();
+    } else if (expectedOn !== e.type) {
+      return;
+    }
     const fn = VTT_ACTIONS[el.dataset.vttFn];
     if (typeof fn !== 'function') return;
     const argsStr = el.dataset.vttArgs;
     const args = (argsStr === undefined || argsStr === '')
       ? []
-      : argsStr.split('|').map(a => _vttResolveArg(a, el));
+      : argsStr.split('|').map(a => a === '$event' ? e : _vttResolveArg(a, el));
     fn(...args);
+    if (el.dataset.vttBlur !== undefined) el.blur();
   };
-  document.addEventListener('click',  dispatch, true);
-  document.addEventListener('input',  dispatch, true);
-  document.addEventListener('change', dispatch, true);
+  document.addEventListener('click',       dispatch, true);
+  document.addEventListener('input',       dispatch, true);
+  document.addEventListener('change',      dispatch, true);
+  document.addEventListener('keydown',     dispatch, true);
+  document.addEventListener('contextmenu', dispatch, true);
 }
 _vttBindDispatch();
 
@@ -7771,7 +7782,7 @@ async function _ouvrirGestionEmotes() {
           <div class="vtt-ec-panel-row">
             <label>Nouveau nom</label>
             <input type="text" id="ec-name-${i}" value="${_esc(em.name)}" autocomplete="off"
-              onkeydown="if(event.key==='Enter') _vttSaveEmote(${i})">
+              data-vtt-fn="_vttSaveEmote" data-vtt-on="keydown-enter" data-vtt-args="${i}">
           </div>
           <div class="vtt-ec-panel-row">
             <label>Nouvelle image <span style="opacity:.6">(optionnel)</span></label>
@@ -8363,17 +8374,17 @@ function _chatMsgExcerpt(m) {
   if (m.type === 'save') return `🛡 Jet de sauvegarde`;
   return 'message';
 }
-window._vttChatReply = (msgId) => {
+function _vttChatReply(msgId) {
   const m = _chatMsgs.find(x => x.id === msgId);
   if (!m) return;
   _chatReplyTo = { id: m.id, authorName: m.authorName || '?', text: _chatMsgExcerpt(m) };
   _renderChatReplyBar();
   document.getElementById('vtt-chat-input')?.focus();
-};
-window._vttChatReplyCancel = () => {
+}
+function _vttChatReplyCancel() {
   _chatReplyTo = null;
   _renderChatReplyBar();
-};
+}
 function _renderChatReplyBar() {
   const bar = document.getElementById('vtt-chat-reply-bar');
   if (!bar) return;
@@ -10889,7 +10900,7 @@ function _renderDicePanel() {
         const cnt = _diceFormula[f]||0;
         return `<button class="vtt-dice-die-btn${cnt?' active':''}"
           data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}"
-          oncontextmenu="event.preventDefault();_vttDiceRemoveDie(${f})"
+          data-vtt-fn="_vttDiceRemoveDie" data-vtt-on="contextmenu" data-vtt-args="${f}"
           title="Clic : ajouter · Clic droit : retirer">
           d${f===100?'%':f}${cnt?`<span class="vtt-dice-die-cnt">×${cnt}</span>`:''}
         </button>`;
@@ -11233,7 +11244,7 @@ function _renderSonRow(s, plId, mj) {
   const rowClass = isPool ? 'vtt-music-pool-item' : 'vtt-music-pl-sound';
   const nameClass = isPool ? 'vtt-music-pool-name' : 'vtt-music-pl-sname';
   const ctx = mj
-    ? `oncontextmenu="event.preventDefault();_vttSoundCtxMenu(event,'${s.id}'${isPool?'':`,'${plId}'`})"`
+    ? `data-vtt-fn="_vttSoundCtxMenu" data-vtt-on="contextmenu" data-vtt-args="$event|${s.id}${isPool?'':`|${plId}`}"`
     : '';
   const delBtn = mj
     ? (isPool
@@ -11558,7 +11569,7 @@ function _vttCreatePlaylist() {
         <label class="vtt-pl-modal-lbl">Nom</label>
         <input id="vtt-pl-name-inp" type="text" class="vtt-pl-modal-inp"
           placeholder="Ex : Donjon, Combat, Ambiance…"
-          onkeydown="if(event.key==='Enter')_vttCreatePlaylistConfirm()">
+          data-vtt-fn="_vttCreatePlaylistConfirm" data-vtt-on="keydown-enter">
       </div>
       <div>
         <label class="vtt-pl-modal-lbl">Couleur</label>
@@ -11863,7 +11874,7 @@ function _buildHtml() {
         <div class="vtt-chat-input-row">
           <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-            onkeydown="if(event.key==='Enter')_vttSendChat()">
+            data-vtt-fn="_vttSendChat" data-vtt-on="keydown-enter">
           <button class="vtt-chat-send" data-vtt-fn="_vttSendChat" title="Envoyer">↵</button>
         </div>
       </div>
@@ -12387,7 +12398,7 @@ function _msXpSection(c, uid, canEdit) {
         <span class="vtt-ms-xp-label">⭐ XP</span>
         <input class="vtt-ms-xp-input" type="number" value="${xp}" min="0"
           data-vtt-fn="_vttMsSetXp" data-vtt-on="change" data-vtt-args="${c.id}|${uid}|$value"
-          onkeydown="if(event.key==='Enter'){_vttMsSetXp('${c.id}','${uid}',$value);this.blur();event.preventDefault()}"
+          onkeydown="if(event.key==='Enter'){this.dispatchEvent(new Event('change'));this.blur();}"
           title="XP total — Entrée pour valider">
         <span class="vtt-ms-xp-sep">/ ${palier}</span>
         <span class="vtt-ms-xp-niv">Niv.</span>
@@ -12398,7 +12409,7 @@ function _msXpSection(c, uid, canEdit) {
         <span class="vtt-ms-xp-add-icon">+</span>
         <input class="vtt-ms-xp-input vtt-ms-xp-delta-input" type="number" min="1" placeholder="gagné"
           id="vtt-xp-delta-${c.id}-${uid}"
-          onkeydown="if(event.key==='Enter'){_vttMsAddXp('${c.id}','${uid}',$value);event.preventDefault()}"
+          data-vtt-fn="_vttMsAddXp" data-vtt-on="keydown-enter" data-vtt-args="${c.id}|${uid}|$value"
           title="XP à ajouter — Entrée pour valider">
       </div>
       <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pct}%;background:#f59e0b"></div></div>
@@ -12831,14 +12842,16 @@ const VTT_ACTIONS = {
   _zoneClear,
   _zoneRotate,
   _zoneUpdatePreview,
-  _zoneValidate
+  _zoneValidate,
+  _vttChatReply,
+  _vttChatReplyCancel,
+  _vttCreatePlaylistConfirm,
+  _vttDiceRemoveDie,
+  _vttMsAddXp,
+  _vttMsSetXp,
+  _vttSendChat,
+  _vttSoundCtxMenu,
 };
-
-// Inline handlers conservés sur window (appelés via onkeydown/oncontextmenu)
-Object.assign(window, {
-  _vttCreatePlaylistConfirm, _vttDiceRemoveDie, _vttMsAddXp,
-  _vttMsSetXp, _vttSendChat, _vttSoundCtxMenu,
-});
 
 registerActions({
   _vttFilterDelegates:     (el)  => _vttFilterDelegates(el.dataset.tokenId, el.value),
