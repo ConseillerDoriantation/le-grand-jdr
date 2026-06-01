@@ -1169,45 +1169,6 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
-    </div><!-- /grid-col--left -->
-
-    <div class="cs-spell-grid-col cs-spell-grid-col--right">
-    <!-- ⑥ Action — bande inline compacte -->
-    <div class="cs-spell-inline-row">
-      <span class="cs-spell-inline-label" title="Auto = déduit des runes (Réaction/Enchantement)">⚡ Action</span>
-      <div style="display:flex;gap:.25rem;flex:1">${actionBtnsHtml}</div>
-    </div>
-
-    <!-- ⑦ Description libre -->
-    <div class="form-group cs-spell-desc">
-      <label>📝 Description / Effet libre <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">narration, conditions spéciales, fluff</span></label>
-      <textarea class="input-field" id="s-effet" rows="2" placeholder="Décris brièvement le sort, son apparence, ses conditions particulières…">${s?.effet||''}</textarea>
-    </div>
-
-    <!-- ⑧ Durée — auto-calculée (base 2 tours + Durée scalée), override possible.
-         Visible pour tous les sorts persistants (Enchant, Affliction, Protection CA, rune Durée). -->
-    <div id="s-duree-base-section" class="cs-duree-section" style="${_needsDureeBase(s)?'':'display:none'}">
-      ${_autoValHtml({
-        fieldId: 's-duree-base',
-        label: '⏳ Durée (tours)',
-        autoValue:  String(_calcSortDuree(s || {})),
-        autoSource: _autoSourceDuree(s || {}),
-        currentValue: s?.dureeBase,
-        placeholder: 'ex : 5',
-      })}
-    </div>
-
-    <!-- ⑧b Portée — override de la portée de l'arme (laisser vide = portée d'arme) -->
-    <div class="form-group">
-      <label>🎯 Portée <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">cases — laisser vide pour utiliser la portée de l'arme</span></label>
-      <div style="display:flex;gap:.4rem;align-items:center">
-        <input type="number" class="input-field" id="s-portee" min="0" max="50"
-          value="${s?.portee != null ? s.portee : ''}" placeholder="auto (arme)" style="width:100px;text-align:center;padding:.3rem">
-        <span style="font-size:.8rem;color:var(--text-dim)">cases</span>
-      </div>
-    </div>
-
-
     <!-- ⑨ Rune Amplification — mode Zone ou Déplacement (visible si rune présente) -->
     <div id="s-amp-section" style="${hasAmp?'':'display:none'}">
       <div class="form-group">
@@ -1246,6 +1207,44 @@ export async function openSortModal(idx, s) {
           <span> · selon le nombre de runes Amplification</span>
         </div>
         <div style="font-size:.7rem;color:#e8b84b;padding:0 .1rem .2rem">⚠ Les sorts de déplacement n'infligent pas de dégâts.</div>
+      </div>
+    </div>
+
+    </div><!-- /grid-col--left -->
+
+    <div class="cs-spell-grid-col cs-spell-grid-col--right">
+    <!-- ⑥ Action — bande inline compacte -->
+    <div class="cs-spell-inline-row">
+      <span class="cs-spell-inline-label" title="Auto = déduit des runes (Réaction/Enchantement)">⚡ Action</span>
+      <div style="display:flex;gap:.25rem;flex:1">${actionBtnsHtml}</div>
+    </div>
+
+    <!-- ⑦ Description libre -->
+    <div class="form-group cs-spell-desc">
+      <label>📝 Description / Effet libre <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">narration, conditions spéciales, fluff</span></label>
+      <textarea class="input-field" id="s-effet" rows="2" placeholder="Décris brièvement le sort, son apparence, ses conditions particulières…">${s?.effet||''}</textarea>
+    </div>
+
+    <!-- ⑧ Durée — auto-calculée (base 2 tours + Durée scalée), override possible.
+         Visible pour tous les sorts persistants (Enchant, Affliction, Protection CA, rune Durée). -->
+    <div id="s-duree-base-section" class="cs-duree-section" style="${_needsDureeBase(s)?'':'display:none'}">
+      ${_autoValHtml({
+        fieldId: 's-duree-base',
+        label: '⏳ Durée (tours)',
+        autoValue:  String(_calcSortDuree(s || {})),
+        autoSource: _autoSourceDuree(s || {}),
+        currentValue: s?.dureeBase,
+        placeholder: 'ex : 5',
+      })}
+    </div>
+
+    <!-- ⑧b Portée — override de la portée de l'arme (laisser vide = portée d'arme) -->
+    <div class="form-group">
+      <label>🎯 Portée <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">cases — laisser vide pour utiliser la portée de l'arme</span></label>
+      <div style="display:flex;gap:.4rem;align-items:center">
+        <input type="number" class="input-field" id="s-portee" min="0" max="50"
+          value="${s?.portee != null ? s.portee : ''}" placeholder="auto (arme)" style="width:100px;text-align:center;padding:.3rem">
+        <span style="font-size:.8rem;color:var(--text-dim)">cases</span>
       </div>
     </div>
 
