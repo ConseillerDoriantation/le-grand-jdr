@@ -4,7 +4,7 @@ import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
-import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META } from '../shared/char-stats.js';
+import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META, statShort as _statShort } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
@@ -12,7 +12,7 @@ import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
-import { syncEquipmentAfterInventoryMutation } from '../shared/equipment-utils.js';
+import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStatKey, getWeaponDamageStatKeys as _getDegatsStats, formatWeaponDamageStatsText } from '../shared/equipment-utils.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
@@ -109,26 +109,6 @@ const ITEM_STATS = [
   { key:'constitution',short:'Con', store:'co',  label:'Constitution' },
   { key:'charisme',    short:'Cha', store:'ch',  label:'Charisme' },
 ];
-const ITEM_STAT_BY_KEY = Object.fromEntries(ITEM_STATS.map(s => [s.key, s]));
-
-function _statShort(key) {
-  return ITEM_STAT_BY_KEY[key]?.short || '';
-}
-
-function _normalizeStatKey(val) {
-  const raw = String(val || '').trim().toLowerCase().replace(/^\+/, '');
-  if (!raw) return '';
-  const map = {
-    for:'force', force:'force', str:'force',
-    dex:'dexterite', dextérité:'dexterite', dexterite:'dexterite', agilite:'dexterite', agilité:'dexterite',
-    int:'intelligence', intelligence:'intelligence', in:'intelligence',
-    sag:'sagesse', sagesse:'sagesse', sa:'sagesse', wis:'sagesse',
-    con:'constitution', constitution:'constitution', co:'constitution',
-    cha:'charisme', charisme:'charisme', ch:'charisme',
-  };
-  return map[raw] || '';
-}
-
 function _parseLegacyStats(item = {}) {
   const out = { for:0, dex:0, in:0, sa:0, co:0, ch:0 };
   ['for','dex','in','sa','co','ch'].forEach(k => {
@@ -167,16 +147,10 @@ function _legacyStatsTextFromData(data = {}) {
   return _formatStatBonuses(data).join(' · ');
 }
 
-function _getDegatsStats(item = {}) {
-  if (Array.isArray(item.degatsStats) && item.degatsStats.length) {
-    return item.degatsStats.map(_normalizeStatKey).filter(Boolean);
-  }
-  const single = _normalizeStatKey(item.degatsStat || item.statAttaque || '');
-  return single ? [single] : [];
+function _formatDegatsStatsText(keys) {
+  return formatWeaponDamageStatsText(keys, { statLabel: _statShort });
 }
-function _formatDegatsStatsText(arr) {
-  return arr.map(_statShort).filter(Boolean).join(' + ');
-}
+
 
 function _legacyToucherTextFromData(data = {}) {
   const short = _statShort(data.toucherStat);

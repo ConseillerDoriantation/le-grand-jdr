@@ -19,8 +19,8 @@ import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
-import { getItemStatBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { _getTraits } from './characters/data.js';
+import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { _getTraits, getWeaponDamageStatKeys, isWeaponLikeItem, serializeShopWeaponForCombat } from '../shared/equipment-utils.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
 import {
@@ -58,7 +58,7 @@ const _readNumberOrNull = (id) => {
 };
 const _readText = (id) => document.getElementById(id)?.value?.trim() || '';
 const _npcCombat = (npc) => ({ ...NPC_COMBAT_DEFAULT, ...(npc?.combat || {}) });
-const _isShopWeapon = (item = {}) => item.template === 'arme' || item.degats;
+const _isShopWeapon = isWeaponLikeItem;
 const _weaponLabel = (item = {}) => [item.nom, item.sousType || item.typeArme].filter(Boolean).join(' · ');
 const _weaponByLabel = (label) => STORE.shopWeapons.find(w => _weaponLabel(w) === label) || null;
 const _searchPart = (value) => {
@@ -77,29 +77,6 @@ const _npcSearchText = (n = {}) => _norm([
   n.combat?.damage,
 ].map(_searchPart).join(' '));
 const _npcMatchesSearch = (n, query) => _searchIncludes(_npcSearchText(n), query);
-const _serializeShopWeapon = (item = {}) => ({
-  itemId: item.id || item.itemId || '',
-  nom: item.nom || '',
-  degats: item.degats || '',
-  degatsStat: item.degatsStat || item.statAttaque || '',
-  degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : (item.degatsStat ? [item.degatsStat] : []),
-  toucherStat: item.toucherStat || item.statAttaque || '',
-  statAttaque: item.statAttaque || item.toucherStat || '',
-  typeArme: item.typeArme || item.sousType || '',
-  sousType: item.sousType || '',
-  portee: item.portee || '',
-  traits: _getTraits(item),
-  format: item.format || '',
-  toucher: item.toucher || '',
-  particularite: item.particularite || item.effet || '',
-  stats: item.stats || '',
-  fo: getItemStatBonus(item, 'force'),
-  dex: getItemStatBonus(item, 'dexterite'),
-  in: getItemStatBonus(item, 'intelligence'),
-  sa: getItemStatBonus(item, 'sagesse'),
-  co: getItemStatBonus(item, 'constitution'),
-  ch: getItemStatBonus(item, 'charisme'),
-});
 
 // ── Affinité groupe — 5 niveaux fixes ────────────────────────────────────────
 const AFFINITE = [
@@ -1392,9 +1369,7 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     if (!preview) return;
     if (!item) { preview.innerHTML = ''; return; }
     const traits = _getTraits(item);
-    const degatsStats = Array.isArray(item.degatsStats) && item.degatsStats.length
-      ? item.degatsStats
-      : (item.degatsStat ? [item.degatsStat] : []);
+    const degatsStats = getWeaponDamageStatKeys(item);
     preview.innerHTML = `
       <div style="padding:.45rem .55rem;border-radius:8px;background:rgba(0,0,0,.16);
         border:1px solid rgba(255,255,255,.08)">
@@ -1526,7 +1501,7 @@ export async function saveNpc(id) {
         showNotif('Choisis une arme existante de la boutique pour le PNJ.', 'error');
         return;
       }
-      const weapon = selectedWeapon ? _serializeShopWeapon(selectedWeapon) : null;
+      const weapon = selectedWeapon ? serializeShopWeaponForCombat(selectedWeapon) : null;
       const combat = {
         weapon,
         weaponName: weapon?.nom || '',

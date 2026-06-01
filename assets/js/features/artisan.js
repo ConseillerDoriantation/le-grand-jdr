@@ -22,9 +22,8 @@ import {
 } from '../shared/char-stats.js';
 import {
   _getTraits, _getBaseTraits, _getAddedTraits,
-  syncEquipmentAfterInventoryMutation,
-} from './characters/data.js';
-import { buildEquippedItemFromInventory } from './characters/equipment.js'; // TODO: move to shared/equipment-utils when deps allow
+  syncEquipmentAfterInventoryMutation, buildEquippedItemFromInventory,
+} from '../shared/equipment-utils.js';
 import { loadUpgradeSettings, getUpgradeSettings } from '../shared/upgrade-settings.js';
 
 // ══════════════════════════════════════════════

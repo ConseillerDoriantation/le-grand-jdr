@@ -6,110 +6,12 @@ import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../../shared/char-stats.js';
 import { _esc } from '../../shared/html.js';
-import { _getTraits, _getBaseTraits, _getAddedTraits } from './data.js';
+import { _getTraits, inferAttackStatFromItem, buildEquippedItemFromInventory } from '../../shared/equipment-utils.js';
 
 let _equipCompatibles = [];
 let _equipSelectedMeta = {};
 function _renderEquipmentChar(c) {
   charSession.renderSheet(c, 'combat');
-}
-
-// ══════════════════════════════════════════════
-// HELPERS D'INFÉRENCE
-// ══════════════════════════════════════════════
-function inferAttackStatFromItem(item = {}) {
-  if (item.toucherStat) return item.toucherStat;
-  if (item.statAttaque) return item.statAttaque;
-  const format = String(item.format || '');
-  if (format.includes('Mag.')) return 'intelligence';
-  if (format.includes('Dist.')) return 'dexterite';
-  return 'force';
-}
-
-function inferArmorSlotValue(slot, item = {}) {
-  if (item.slotArmure) return item.slotArmure;
-  if (slot === 'Bottes') return 'Pieds';
-  return slot;
-}
-
-function inferAccessorySlotValue(slot, item = {}) {
-  return item.slotBijou || slot;
-}
-
-export function buildEquippedItemFromInventory(slot, item, invIndex) {
-  if (!item) return null;
-  const isWeapon = slot.startsWith('Main');
-
-  // Traits BRUTS (base + addedTraits) — pas la version transformée par effectBonus.
-  // L'item équipé conserve `upgrades.effectBonus` pour que `_getTraits(equippedItem)`
-  // applique la transformation à l'affichage sans double application.
-  const rawTraits   = [..._getBaseTraits(item), ..._getAddedTraits(item)];
-  const effectBonus = parseInt(item.upgrades?.effectBonus) || 0;
-  const equipUpgrades = effectBonus > 0 ? { effectBonus } : undefined;
-
-  if (isWeapon) {
-    return {
-      nom: item.nom || '',
-      traits: rawTraits,
-      ...(equipUpgrades ? { upgrades: equipUpgrades } : {}),
-      sousType: item.sousType || '',
-      degats: item.degats || '',
-      degatsStat: item.degatsStat || inferAttackStatFromItem(item),
-      degatsStats: Array.isArray(item.degatsStats) && item.degatsStats.length
-        ? [...item.degatsStats]
-        : (item.degatsStat ? [item.degatsStat] : [inferAttackStatFromItem(item)]),
-      toucherStat: item.toucherStat || inferAttackStatFromItem(item),
-      statAttaque: inferAttackStatFromItem(item),
-      typeArme: item.typeArme || item.type || '',
-      portee: item.portee || '',
-      particularite: item.particularite || getItemEffectText(item) || item.description || '',
-      format: item.format || '',
-      toucher: item.toucher || '',
-      stats: item.stats || '',
-      fo: getItemStatBonus(item, 'force'),
-      dex: getItemStatBonus(item, 'dexterite'),
-      in: getItemStatBonus(item, 'intelligence'),
-      sa: getItemStatBonus(item, 'sagesse'),
-      co: getItemStatBonus(item, 'constitution'),
-      ch: getItemStatBonus(item, 'charisme'),
-      // Bonus dérivés (PV/PM/Vitesse/Initiative) et compétences — propagés à l'équipement
-      pvMaxBonus:     parseInt(item.pvMaxBonus)     || 0,
-      pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
-      vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
-      initiativeBonus:parseInt(item.initiativeBonus)|| 0,
-      caBonus:        parseInt(item.caBonus)        || 0,
-      skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
-                      ? { ...item.skillBonuses } : {},
-      sourceInvIndex: invIndex,
-      itemId: item.itemId || '',
-    };
-  }
-
-  return {
-    nom: item.nom || '',
-    traits: rawTraits,
-    ...(equipUpgrades ? { upgrades: equipUpgrades } : {}),
-    fo: getItemStatBonus(item, 'force'),
-    dex: getItemStatBonus(item, 'dexterite'),
-    in: getItemStatBonus(item, 'intelligence'),
-    sa: getItemStatBonus(item, 'sagesse'),
-    co: getItemStatBonus(item, 'constitution'),
-    ch: getItemStatBonus(item, 'charisme'),
-    ca: parseInt(item.ca) || 0,
-    typeArmure: item.typeArmure || '',
-    slotArmure: item.slotArmure ? inferArmorSlotValue(slot, item) : '',
-    slotBijou: item.slotBijou ? inferAccessorySlotValue(slot, item) : '',
-    // Bonus dérivés (PV/PM/Vitesse/Initiative) et compétences — propagés à l'équipement
-    pvMaxBonus:     parseInt(item.pvMaxBonus)     || 0,
-    pmMaxBonus:     parseInt(item.pmMaxBonus)     || 0,
-    vitesseBonus:   parseInt(item.vitesseBonus)   || 0,
-    initiativeBonus:parseInt(item.initiativeBonus)|| 0,
-    caBonus:        parseInt(item.caBonus)        || 0,
-    skillBonuses:   item.skillBonuses && typeof item.skillBonuses === 'object'
-                    ? { ...item.skillBonuses } : {},
-    sourceInvIndex: invIndex,
-    itemId: item.itemId || '',
-  };
 }
 
 // ══════════════════════════════════════════════

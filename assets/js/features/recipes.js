@@ -15,6 +15,7 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _rareteTag } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-utils.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ function _shopItemIngredients(item) {
 
 function _shopToRecipe(item) {
   const itemFormat  = item.format || '';
-  const type = (itemFormat.startsWith('Arme') || item.degats) ? 'arme'
+  const type = isWeaponLikeItem(item) ? 'arme'
              : item.slotArmure ? 'armure'
              : (item.slotBijou && item.slotBijou !== 'Objet magique') ? 'bijou'
              : null;
@@ -158,12 +159,7 @@ function _shopToRecipe(item) {
     rarete:      item.rarete || 0,
     format:      itemFormat,
     typeObjet:   item.sousType || item.slotArmure || item.slotBijou || '',
-    degats:      item.degats ? (() => {
-      const arr = Array.isArray(item.degatsStats) && item.degatsStats.length
-        ? item.degatsStats
-        : (item.degatsStat ? [item.degatsStat] : []);
-      return `${item.degats}${arr.length ? ' +' + arr.join(' +') : ''}`;
-    })() : '',
+    degats:      formatWeaponDamageText(item),
     caBonus:     parseInt(item.ca) || 0,
     typeArmure:  item.typeArmure || '',
     atelierReq:  meta.atelierReq  ?? _shopItemAtelierReq(item, type),

@@ -7,8 +7,8 @@ import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../sh
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
-import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
-export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation };
+import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
+export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
 // ══════════════════════════════════════════════
 // STYLES DE COMBAT
@@ -868,49 +868,6 @@ async function _saveSpellMatrices() {
 // ══════════════════════════════════════════════
 // COMPUTED STATS
 // ══════════════════════════════════════════════
-// Traits de base d'un item — priorité à traits[] (array), fallback sur trait (string legacy)
-// N'inclut PAS les traits ajoutés par amélioration (upgrades.addedTraits).
-// Filtre les traits supprimés à l'écrasement (upgrades.removedBaseTraits).
-export function _getBaseTraits(item = {}) {
-  const removed = new Set(item?.upgrades?.removedBaseTraits || []);
-  const out = [];
-  if (Array.isArray(item.traits) && item.traits.length > 0) {
-    item.traits.forEach(t => { if (t && !removed.has(t)) out.push(t); });
-  } else if (item.trait && !removed.has(item.trait)) {
-    out.push(item.trait);
-  }
-  return out;
-}
-
-// Traits ajoutés par amélioration via l'artisan (upgrades.addedTraits).
-export function _getAddedTraits(item = {}) {
-  return Array.isArray(item?.upgrades?.addedTraits)
-    ? item.upgrades.addedTraits.filter(Boolean)
-    : [];
-}
-
-// Tous les traits effectifs d'un item : base + améliorations.
-// Si l'item a un `upgrades.effectBonus` (anneaux), incrémente le PREMIER nombre
-// trouvé dans la liste des traits (l'effet flat de l'anneau y est typiquement
-// stocké, ex : "+1 vitesse" → "+2 vitesse" au palier 1).
-export function _getTraits(item = {}) {
-  const all = [..._getBaseTraits(item), ..._getAddedTraits(item)];
-  const bonus = parseInt(item?.upgrades?.effectBonus) || 0;
-  if (bonus <= 0) return all;
-
-  let applied = false;
-  return all.map(t => {
-    if (applied) return t;
-    const txt = String(t);
-    const m = txt.match(/(?<![\d.])(\+?)(\d+)(?![\d.])/);
-    if (!m) return t;
-    applied = true;
-    const sign  = m[1] || '';
-    const value = parseInt(m[2]);
-    return txt.replace(m[0], `${sign}${value + bonus}`);
-  });
-}
-
 export function getEquippedInventoryIndexMap(c) {
   const map = new Map();
   Object.entries(c?.equipement || {}).forEach(([slot, item]) => {
