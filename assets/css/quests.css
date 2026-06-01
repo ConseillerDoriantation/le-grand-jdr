@@ -34,8 +34,23 @@
 .quest-card-hd {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: .4rem;
   margin-bottom: .1rem;
+}
+.quest-badges {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+.quest-card-actions {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  flex-shrink: 0;
 }
 
 /* ── Badges difficulté / statut ──────────────── */
@@ -59,13 +74,25 @@
   line-height: 1.35;
 }
 
-/* ── Description ─────────────────────────────── */
+/* ── Description (affichée en entier, jamais tronquée) ── */
 .quest-card-desc {
-  font-size: .8rem;
-  color: var(--text-muted);
-  line-height: 1.55;
+  font-size: .82rem;
+  color: var(--text-soft, var(--text-muted));
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ── Méta (récompense + lieu) ────────────────── */
+.quest-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem .7rem;
+}
+.quest-loc {
+  font-size: .78rem;
+  color: var(--text-dim);
 }
 
 /* ── Récompense ──────────────────────────────── */
@@ -80,35 +107,54 @@
   width: fit-content;
 }
 
-/* ── Participants ────────────────────────────── */
-.quest-parts {
+/* ── Intéressés / requis ─────────────────────── */
+.quest-people {
+  margin-top: auto;
+  padding-top: .7rem;
+  border-top: 1px solid rgba(255,255,255,.08);
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+}
+.quest-people-top {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: .5rem;
   flex-wrap: wrap;
-  margin-top: auto;
-  padding-top: .75rem;
-  border-top: 1px solid rgba(255,255,255,.08);
 }
-
-.quest-parts img,
-.quest-parts div[style] {
+.quest-people-count {
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.quest-req {
+  font-size: .68rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+  cursor: help;
+}
+.quest-req.is-need {
+  color: #ffb070;
+  background: rgba(255,159,67,.1);
+  border-color: rgba(255,159,67,.32);
+}
+.quest-req.is-ok {
+  color: var(--emerald);
+  background: rgba(34,195,142,.12);
+  border-color: rgba(34,195,142,.35);
+}
+.quest-people-avatars {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.quest-people-avatars img,
+.quest-people-avatars > div[style] {
   margin-right: -6px; /* léger chevauchement des portraits */
-}
-
-.quest-parts-count {
-  font-size: .7rem;
-  color: var(--text-dim);
-  margin-left: 10px;
-}
-
-.quest-parts-empty {
-  font-size: .72rem;
-  color: var(--text-dim);
-  font-style: italic;
-  margin-top: auto;
-  padding-top: .75rem;
-  border-top: 1px solid rgba(255,255,255,.08);
 }
 
 /* ── Bouton Rejoindre ────────────────────────── */

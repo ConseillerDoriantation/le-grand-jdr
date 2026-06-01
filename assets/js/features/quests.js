@@ -55,19 +55,30 @@ function _questCard(q, myChar) {
   const required = _questRequiredCount(q);
   const uid   = STATE.user?.uid;
   const joined = myChar ? parts.some(p => p.uid === uid) : false;
-  const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
+  const count  = parts.length;
+  const filled = required > 0 && count >= required;
 
-  const partsHtml = parts.length > 0
-    ? `<div class="quest-parts">
-        ${parts.map(p => _portrait(p, 28)).join('')}
-        <span class="quest-parts-count">${partsLabel}</span>
-       </div>`
-    : `<div class="quest-parts-empty">${required ? `0 intéressé · ${required} requis` : 'Aucun intéressé'}</div>`;
+  // Badge « requis » — les intéressés peuvent dépasser le nombre requis.
+  const reqTip = "Le nombre d'intéressés peut dépasser le nombre requis.";
+  const reqBadge = required
+    ? (filled
+        ? `<span class="quest-req is-ok" title="${reqTip}">✓ ${required} requis${count > required ? ` · +${count - required} au-delà` : ' atteint'}</span>`
+        : `<span class="quest-req is-need" title="${reqTip}">${required} requis · manque ${required - count}</span>`)
+    : '';
+
+  const peopleHtml = `
+    <div class="quest-people">
+      <div class="quest-people-top">
+        <span class="quest-people-count">👥 ${count} intéressé${count > 1 ? 's' : ''}</span>
+        ${reqBadge}
+      </div>
+      ${count ? `<div class="quest-people-avatars">${parts.map(p => _portrait(p, 28)).join('')}</div>` : ''}
+    </div>`;
 
   const joinBtn = (!STATE.isAdmin && myChar && q.statut === 'active') ? `
     <button class="quest-join-btn${joined ? ' quest-join-btn--joined' : ''}"
       data-action="_questToggleJoin" data-id="${q.id}">
-      ${joined ? '✓ Rejoint' : '+ Rejoindre'}
+      ${joined ? '✓ Intéressé' : '+ Je suis intéressé'}
     </button>` : '';
 
   const adminBtns = STATE.isAdmin ? `
@@ -78,19 +89,19 @@ function _questCard(q, myChar) {
   return `
   <div class="quest-card${q.statut === 'active' ? ' quest-card--active' : ''}">
     <div class="quest-card-hd">
-      <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;flex:1;min-width:0">
+      <div class="quest-badges">
         <span class="quest-badge" style="background:${df.color}22;color:${df.color};border-color:${df.color}44">${df.label}</span>
         <span class="quest-badge" style="background:${st.color}22;color:${st.color};border-color:${st.color}44">${st.label}</span>
       </div>
-      <div style="display:flex;gap:.3rem;align-items:center;flex-shrink:0">
-        ${joinBtn}${adminBtns}
-      </div>
+      <div class="quest-card-actions">${joinBtn}${adminBtns}</div>
     </div>
     <div class="quest-card-title">${_esc(q.titre || 'Quête')}</div>
     ${q.description ? `<div class="quest-card-desc">${_esc(q.description)}</div>` : ''}
-    ${q.recompense  ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
-    ${q.lieu ? `<div style="font-size:.78rem;color:var(--text-dim);margin-top:.15rem">📍 ${_esc(q.lieu)}</div>` : ''}
-    ${partsHtml}
+    ${(q.recompense || q.lieu) ? `<div class="quest-meta">
+      ${q.recompense ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
+      ${q.lieu ? `<div class="quest-loc">📍 ${_esc(q.lieu)}</div>` : ''}
+    </div>` : ''}
+    ${peopleHtml}
   </div>`;
 }
 
@@ -233,7 +244,7 @@ async function _questJoinWithChar(id, char) {
 async function _questSaveParts(id, parts, leaving) {
   try {
     await saveDoc('quests', id, { participants: parts });
-    showNotif(leaving ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', leaving ? 'info' : 'success');
+    showNotif(leaving ? 'Tu n\'es plus intéressé par cette quête.' : 'Tu es intéressé par cette quête !', leaving ? 'info' : 'success');
     // La subscription temps réel met à jour l'affichage automatiquement
   } catch {
     showNotif('Erreur lors de la mise à jour.', 'error');
@@ -264,7 +275,7 @@ function _openQuestModal(id) {
         <input class="input-field" id="q-recompense" value="${_esc(ex?.recompense || '')}" placeholder="ex: 300 XP + 50 or">
       </div>
       <div class="form-group">
-        <label>Participants requis <span style="color:var(--text-dim);font-weight:400">(objectif)</span></label>
+        <label>Participants requis <span style="color:var(--text-dim);font-weight:400">(objectif, peut être dépassé)</span></label>
         <input class="input-field" id="q-participants-requis" type="number" min="0" step="1"
           value="${_questRequiredCount(ex)}" placeholder="ex: 4">
       </div>
