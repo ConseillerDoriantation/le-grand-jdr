@@ -60,7 +60,7 @@ const _readText = (id) => document.getElementById(id)?.value?.trim() || '';
 const _npcCombat = (npc) => ({ ...NPC_COMBAT_DEFAULT, ...(npc?.combat || {}) });
 const _isShopWeapon = (item = {}) => item.template === 'arme' || item.degats;
 const _weaponLabel = (item = {}) => [item.nom, item.sousType || item.typeArme].filter(Boolean).join(' · ');
-const _weaponByLabel = (label) => _shopWeapons.find(w => _weaponLabel(w) === label) || null;
+const _weaponByLabel = (label) => STORE.shopWeapons.find(w => _weaponLabel(w) === label) || null;
 const _searchPart = (value) => {
   if (Array.isArray(value)) return value.map(_searchPart).join(' ');
   if (value && typeof value === 'object') return Object.values(value).map(_searchPart).join(' ');
@@ -135,26 +135,30 @@ const AFFINITE_SEUILS_DOC_ID = 'npc_affinite_seuils';
 
 // Seuils par défaut (mode valeur) — chaque seuil = borne basse incluse du palier
 const SEUILS_DEFAULT = { hostile: -50, mefiant: -10, neutre: 0, amical: 30, allie: 100 };
+const STORE = {
+  npcs:                      [],
+  affiPerso:                 [],   // [{id, npcId, charId, charNom, typeId, typeLabel, note, notePublique}]
+  affiniteTypes:             [],   // [{id, label, emoji, couleur}]
+  affiniteSeuils:            { ...SEUILS_DEFAULT },
+  places:                    [],   // [{ id, name }] — autocomplete Lieu
+  organisations:             [],   // [{ id, name }]
+  shopWeapons:               [],   // armes issues de la boutique
+  activeId:                  null,
+  filterSearch:              '',
+  activeOrgFilter:           null,
+  pendingNpcImg:             null,
+  npcImgCleared:             false,
+  afgDelta:                  0,
+  histEditDelta:             0,
+  aftFormState:              { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' },
+  selectedAfpTypeId:         '',
+  currentAffinitePersoContext: {},
+};
+
+
 const SEUILS_KEYS    = ['hostile', 'mefiant', 'neutre', 'amical', 'allie'];
 
 // ── État local ────────────────────────────────────────────────────────────────
-let _npcs           = [];
-let _affiPerso      = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, note, notePublique}]
-let _affiniteTypes  = [];   // [{id, label, emoji, couleur}]
-let _affiniteSeuils = { ...SEUILS_DEFAULT };
-let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
-let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
-let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
-let _activeId      = null;
-let _filterSearch  = '';
-let _activeOrgFilter = null;
-let _pendingNpcImg = null;
-let _npcImgCleared = false;
-let _afgDelta = 0;
-let _histEditDelta = 0;
-let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
-let _selectedAfpTypeId = '';
-let _currentAffinitePersoContext = {};
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 // `npcs` et `shop` sont session-live → 0 lecture facturée. `npc_affinites` est
@@ -168,14 +172,14 @@ async function _load() {
     listOrganizations().catch(() => []),
     loadCollection('shop').catch(() => []),
   ]);
-  _npcs           = npcs || [];
-  _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-  _organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-  _shopWeapons   = (shopItems || []).filter(_isShopWeapon).sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
+  STORE.npcs           = npcs || [];
+  STORE.places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  STORE.organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  STORE.shopWeapons   = (shopItems || []).filter(_isShopWeapon).sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
-const _getAffiniteType      = (id) => _affiniteTypes.find(t => t.id === id) || null;
+const _getAffiniteType      = (id) => STORE.affiniteTypes.find(t => t.id === id) || null;
 const _getAffiniteTypeLabel = (id, fb = '') => _getAffiniteType(id)?.label   || fb || '';
 const _getAffiniteTypeColor = (id) => _getAffiniteType(id)?.couleur || TYPE_COLORS[0];
 const _getAffiniteTypeEmoji = (id) => _getAffiniteType(id)?.emoji   || '✨';
@@ -188,7 +192,7 @@ const _typeView = (a) => ({
 
 // ── Helpers affinité (mode groupe vs valeur) ─────────────────────────────────
 // En mode "valeur", le niveau est dérivé de la valeur cumulée et des seuils.
-const _niveauFromValeur = (v, s = _affiniteSeuils) => {
+const _niveauFromValeur = (v, s = STORE.affiniteSeuils) => {
   const x = Number(v) || 0;
   if (x >= (s.allie   ?? SEUILS_DEFAULT.allie))   return 4;
   if (x >= (s.amical  ?? SEUILS_DEFAULT.amical))  return 3;
@@ -237,8 +241,8 @@ function _highlightDeltaPreset(idPrefix, v) {
 // Persiste { affinite } sur un PNJ + met à jour le cache local + UI.
 async function _persistAffinite(npcId, affinite, msg, { close = true } = {}) {
   await updateInCol('npcs', npcId, { affinite });
-  const idx = _npcs.findIndex(x => x.id === npcId);
-  if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
+  const idx = STORE.npcs.findIndex(x => x.id === npcId);
+  if (idx >= 0) STORE.npcs[idx] = { ...STORE.npcs[idx], affinite };
   if (close) closeModal();
   showNotif(msg, 'success');
   _refreshActivePanel();
@@ -260,7 +264,7 @@ export async function renderNpcs() {
     <div style="font-size:1.5rem">⏳</div><p>Chargement…</p></div>`;
 
   await _load();
-  if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
+  if (!STORE.activeId && STORE.npcs.length) STORE.activeId = STORE.npcs[0].id;
   _renderPage(content);
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
@@ -269,7 +273,7 @@ export async function renderNpcs() {
   // → pas de double-read.
   watch('npcs-list', 'npcs', data => {
     if (STATE.currentPage !== 'npcs') return;
-    _npcs = data || [];
+    STORE.npcs = data || [];
     _refreshList({ keepScroll: true });
     _refreshActivePanel();
   });
@@ -279,12 +283,12 @@ export async function renderNpcs() {
   watch('npcs-affi', 'npc_affinites', data => {
     if (STATE.currentPage !== 'npcs') return;
     const arr = data || [];
-    _affiPerso = arr.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
+    STORE.affiPerso = arr.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
     const typesDoc  = arr.find(a => a.id === AFFINITE_TYPES_DOC_ID);
     const seuilsDoc = arr.find(a => a.id === AFFINITE_SEUILS_DOC_ID);
-    _affiniteTypes = Array.isArray(typesDoc?.types) ? [...typesDoc.types] : [];
-    _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-    _affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
+    STORE.affiniteTypes = Array.isArray(typesDoc?.types) ? [...typesDoc.types] : [];
+    STORE.affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    STORE.affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
     _refreshList({ keepScroll: true });
     _refreshActivePanel();
   });
@@ -292,7 +296,7 @@ export async function renderNpcs() {
 
 function _renderPage(content) {
   const filtered = _getFiltered();
-  const active   = _npcs.find(n => n.id === _activeId) || filtered[0] || null;
+  const active   = STORE.npcs.find(n => n.id === STORE.activeId) || filtered[0] || null;
 
   content.innerHTML = `
   <div class="npc-shell" style="display:grid;grid-template-columns:280px 1fr;gap:1rem;align-items:start;margin:0 auto">
@@ -306,7 +310,7 @@ function _renderPage(content) {
           <div>
             <div style="font-family:'Cinzel',serif;font-size:.9rem;color:var(--gold)">👥 PNJ</div>
             <div style="font-size:.68rem;color:var(--text-dim);margin-top:1px">
-              ${_npcs.length} personnage${_npcs.length > 1 ? 's' : ''}</div>
+              ${STORE.npcs.length} personnage${STORE.npcs.length > 1 ? 's' : ''}</div>
           </div>
           ${STATE.isAdmin ? `
           <button data-action="openNpcModal"
@@ -316,7 +320,7 @@ function _renderPage(content) {
         </div>
 
         <input id="npc-search" class="input-field" placeholder="🔍 Rechercher…"
-          value="${_filterSearch}" data-input="_npcSearch"
+          value="${STORE.filterSearch}" data-input="_npcSearch"
           style="font-size:.8rem;padding:.4rem .6rem">
 
         ${STATE.isAdmin ? `
@@ -351,7 +355,7 @@ function _renderPage(content) {
 
 // ── Nav item ──────────────────────────────────────────────────────────────────
 function _renderNavItem(n) {
-  const isActive = n.id === _activeId;
+  const isActive = n.id === STORE.activeId;
   const niv      = _affiniteNiveau(n);
   const af       = afx(niv);
   return `
@@ -666,7 +670,7 @@ function _renderRelationChipPublic(a) {
 
 // Panneau des relations (colonne droite)
 function _renderRelationsPanel(n) {
-  const persoList = _affiPerso.filter(a => a.npcId === n.id);
+  const persoList = STORE.affiPerso.filter(a => a.npcId === n.id);
   const myChars   = sortCharactersForDisplay((STATE.characters || []).filter(c => c.uid === STATE.user?.uid));
   const myAffi    = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
@@ -787,19 +791,19 @@ function _renderEmpty() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function _getFiltered() {
-  return _npcs.filter(n => _npcMatchesSearch(n, _filterSearch));
+  return STORE.npcs.filter(n => _npcMatchesSearch(n, STORE.filterSearch));
 }
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────
 export function selectNpc(id) {
-  _activeId = id;
+  STORE.activeId = id;
 
   _refreshList();
   _refreshActivePanel();
 }
 
 function _npcSearch(val) {
-  _filterSearch = val;
+  STORE.filterSearch = val;
   _refreshList({ keepScroll: false });
 }
 
@@ -844,11 +848,11 @@ function _updateNpcListScrollHint(list = document.getElementById('npc-list-items
 const NO_ORG_KEY = '__no_org__';
 
 function _groupNpcsByOrg(npcs) {
-  // Map<orgName, npc[]> — préserve l'ordre des _organisations connues, "Sans
+  // Map<orgName, npc[]> — préserve l'ordre des STORE.organisations connues, "Sans
   // organisation" en dernier. Les NPCs avec plusieurs orgs apparaissent dans
   // chaque groupe correspondant.
   const groups = new Map();
-  _organisations.forEach(o => groups.set(o.name, []));
+  STORE.organisations.forEach(o => groups.set(o.name, []));
   npcs.forEach(n => {
     const orgs = (Array.isArray(n.organisations) ? n.organisations : []).filter(Boolean);
     if (!orgs.length) return; // traité ci-dessous
@@ -893,7 +897,7 @@ function _renderOrgIndexItem(orgName, npcs) {
   const isNoOrg   = orgName === NO_ORG_KEY;
   const label     = _orgLabel(orgName);
   const safeKey   = _esc(orgName);
-  const hasActiveNpc = _activeId && npcs.some(n => n.id === _activeId);
+  const hasActiveNpc = STORE.activeId && npcs.some(n => n.id === STORE.activeId);
 
   return `<button type="button" data-org-key="${safeKey}" title="${_esc(label)}"
     class="npc-org-card ${hasActiveNpc ? 'is-active' : ''}"
@@ -948,12 +952,12 @@ function _buildListHtml(filtered = _getFiltered()) {
   }
   const groups = _groupNpcsByOrg(filtered);
   const entries = _visibleOrgEntries(groups);
-  if (_filterSearch.trim()) return _renderSearchResults(entries, filtered.length);
+  if (STORE.filterSearch.trim()) return _renderSearchResults(entries, filtered.length);
 
-  if (_activeOrgFilter) {
-    const selected = groups.get(_activeOrgFilter) || [];
-    if (selected.length) return _renderOrgDrilldown(_activeOrgFilter, selected);
-    _activeOrgFilter = null;
+  if (STORE.activeOrgFilter) {
+    const selected = groups.get(STORE.activeOrgFilter) || [];
+    if (selected.length) return _renderOrgDrilldown(STORE.activeOrgFilter, selected);
+    STORE.activeOrgFilter = null;
   }
 
   return _renderOrgIndex(entries);
@@ -962,12 +966,12 @@ function _buildListHtml(filtered = _getFiltered()) {
 function _npcSelectOrg(btn) {
   const key = btn?.dataset?.orgKey;
   if (key == null) return;
-  _activeOrgFilter = key;
+  STORE.activeOrgFilter = key;
   _refreshList({ keepScroll: false });
 }
 
 function _npcBackToOrgs() {
-  _activeOrgFilter = null;
+  STORE.activeOrgFilter = null;
   _refreshList({ keepScroll: false });
 }
 
@@ -1011,7 +1015,7 @@ function _renderStatsForm(npc) {
             ${autocompleteHTML({
               id: 'npc-combat-weapon',
               value: weaponValue,
-              placeholder: _shopWeapons.length ? 'Choisir une arme de boutique…' : 'Aucune arme en boutique',
+              placeholder: STORE.shopWeapons.length ? 'Choisir une arme de boutique…' : 'Aucune arme en boutique',
               className: 'input-sm',
             })}
             <input type="hidden" id="npc-combat-weapon-id" value="${_esc(weapon?.itemId || '')}">
@@ -1134,7 +1138,7 @@ function _renderMjStatsRow(n) {
 let _mjFilter = '';
 
 function _mjFilteredNpcs() {
-  return _npcs.filter(n => _npcMatchesSearch(n, _mjFilter));
+  return STORE.npcs.filter(n => _npcMatchesSearch(n, _mjFilter));
 }
 
 function _renderMjStatsTbody() {
@@ -1142,7 +1146,7 @@ function _renderMjStatsTbody() {
   if (!list.length) {
     return `<tr><td colspan="${1 + NPC_VITALS.length + NPC_STATS.length}"
       style="text-align:center;padding:2rem;color:var(--text-dim);font-style:italic">
-      ${_npcs.length ? `Aucun PNJ pour « ${_esc(_mjFilter)} »` : 'Aucun PNJ'}</td></tr>`;
+      ${STORE.npcs.length ? `Aucun PNJ pour « ${_esc(_mjFilter)} »` : 'Aucun PNJ'}</td></tr>`;
   }
   return list.map(_renderMjStatsRow).join('');
 }
@@ -1205,7 +1209,7 @@ function _mjEditField(id, field) {
   const renderInner = isStat ? _mjStatCellInner : _mjVitalCellInner;
   const prevHtml = cell.innerHTML;
 
-  const npc  = _npcs.find(n => n.id === id);
+  const npc  = STORE.npcs.find(n => n.id === id);
   const prev = isStat ? (npc?.stats || {})[statKey] : npc?.[field];
 
   const input = document.createElement('input');
@@ -1233,19 +1237,19 @@ function _mjEditField(id, field) {
     const newVal = (raw === '' || !Number.isFinite(v)) ? null : v;
     try {
       await updateInCol('npcs', id, { [field]: newVal });
-      const idx = _npcs.findIndex(n => n.id === id);
+      const idx = STORE.npcs.findIndex(n => n.id === id);
       if (idx >= 0) {
         if (isStat) {
-          _npcs[idx] = {
-            ..._npcs[idx],
-            stats: { ...(_npcs[idx].stats || {}), [statKey]: newVal },
+          STORE.npcs[idx] = {
+            ...STORE.npcs[idx],
+            stats: { ...(STORE.npcs[idx].stats || {}), [statKey]: newVal },
           };
         } else {
-          _npcs[idx] = { ..._npcs[idx], [field]: newVal };
+          STORE.npcs[idx] = { ...STORE.npcs[idx], [field]: newVal };
         }
       }
       setCellContent(newVal);
-      if (_activeId === id) _refreshActivePanel();
+      if (STORE.activeId === id) _refreshActivePanel();
     } catch (e) {
       console.error('[mj edit]', e);
       showNotif('Erreur de sauvegarde.', 'error');
@@ -1261,7 +1265,7 @@ function _mjEditField(id, field) {
 
 // ── Modal création / édition PNJ ──────────────────────────────────────────────
 export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
-  const npc = id ? _npcs.find(n => n.id === id) : null;
+  const npc = id ? STORE.npcs.find(n => n.id === id) : null;
   const open = stackedFromMjStats ? pushModal : openModal;
 
   open(npc ? `✏️ Modifier — ${_esc(npc.nom || 'PNJ')}` : '👥 Nouveau PNJ', `
@@ -1281,7 +1285,7 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     </div>
     <div class="form-group" style="margin-top:.75rem">
       <label>Organisations</label>
-      ${multiAutocompleteHTML({ id: 'npc-orgs', placeholder: _organisations.length ? 'Ajouter une organisation…' : 'Aucune organisation en base — texte libre' })}
+      ${multiAutocompleteHTML({ id: 'npc-orgs', placeholder: STORE.organisations.length ? 'Ajouter une organisation…' : 'Aucune organisation en base — texte libre' })}
     </div>
     <div class="form-group" style="margin-top:.75rem">
       <label>Description</label>
@@ -1375,11 +1379,11 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
   });
 
   // ── Autocomplete Lieu + Organisations ─────────────────────────────────────
-  initAutocomplete('npc-lieu', _places.map(p => p.name));
-  initMultiAutocomplete('npc-orgs', _organisations.map(o => o.name), {
+  initAutocomplete('npc-lieu', STORE.places.map(p => p.name));
+  initMultiAutocomplete('npc-orgs', STORE.organisations.map(o => o.name), {
     initialValues: Array.isArray(npc?.organisations) ? npc.organisations : [],
   });
-  const weaponOptions = _shopWeapons.map(_weaponLabel);
+  const weaponOptions = STORE.shopWeapons.map(_weaponLabel);
   const updateWeaponPreview = (item) => {
     const preview = document.getElementById('npc-combat-weapon-preview');
     const dmg = document.getElementById('npc-combat-damage');
@@ -1414,7 +1418,7 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     onSelect: (label) => updateWeaponPreview(_weaponByLabel(label)),
   });
   const weaponInput = document.getElementById('npc-combat-weapon');
-  const currentWeapon = _shopWeapons.find(w => w.id === (npc?.combat?.weapon?.itemId || ''))
+  const currentWeapon = STORE.shopWeapons.find(w => w.id === (npc?.combat?.weapon?.itemId || ''))
     || _weaponByLabel(weaponInput?.value || '');
   updateWeaponPreview(currentWeapon || npc?.combat?.weapon || null);
   weaponInput?.addEventListener('input', () => {
@@ -1462,12 +1466,12 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     if (cropWrapEl) cropWrapEl.style.display = 'none';
     if (okEl) { okEl.style.display = 'block'; okEl.textContent = `✓ Portrait prêt (${Math.round(b64.length / 1024)} KB)`; }
     if (previewEl) previewEl.innerHTML = `<img src="${b64}" style="max-height:70px;border-radius:50%;aspect-ratio:1;object-fit:cover;border:2px solid var(--gold)">`;
-    _pendingNpcImg = b64;
-    _npcImgCleared = false;
+    STORE.pendingNpcImg = b64;
+    STORE.npcImgCleared = false;
   }
   function clearNpcImg() {
-    _pendingNpcImg = '';
-    _npcImgCleared = true;
+    STORE.pendingNpcImg = '';
+    STORE.npcImgCleared = true;
     destroyNpcCropper();
     if (previewEl) previewEl.innerHTML = `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
       <div style="font-size:.75rem;color:var(--text-muted)"><span style="color:var(--gold)">Cliquer</span> ou glisser</div>`;
@@ -1475,8 +1479,8 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
     if (okEl) okEl.style.display = 'none';
   }
 
-  _pendingNpcImg = null;
-  _npcImgCleared = false;
+  STORE.pendingNpcImg = null;
+  STORE.npcImgCleared = false;
   uploadBinding = bindImageUploadDropZone(dropEl, { onImage: ({ dataUrl }) => showNpcCrop(dataUrl) });
   document.getElementById('npc-img-clear')?.addEventListener('click', clearNpcImg);
 
@@ -1492,13 +1496,13 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
 export async function saveNpc(id) {
   try {
     let imageUrl = '';
-    if (_pendingNpcImg !== null && _pendingNpcImg !== undefined) {
-      imageUrl = _pendingNpcImg;
-    } else if (id && !_npcImgCleared) {
-      imageUrl = _npcs.find(n => n.id === id)?.imageUrl || '';
+    if (STORE.pendingNpcImg !== null && STORE.pendingNpcImg !== undefined) {
+      imageUrl = STORE.pendingNpcImg;
+    } else if (id && !STORE.npcImgCleared) {
+      imageUrl = STORE.npcs.find(n => n.id === id)?.imageUrl || '';
     }
-    _pendingNpcImg = null;
-    _npcImgCleared = false;
+    STORE.pendingNpcImg = null;
+    STORE.npcImgCleared = false;
 
     const data = {
       nom:           document.getElementById('npc-nom')?.value?.trim()  || '?',
@@ -1519,7 +1523,7 @@ export async function saveNpc(id) {
       const weaponLabel = _readText('npc-combat-weapon');
       const weaponId = _readText('npc-combat-weapon-id');
       const selectedWeapon = weaponId
-        ? _shopWeapons.find(w => w.id === weaponId)
+        ? STORE.shopWeapons.find(w => w.id === weaponId)
         : _weaponByLabel(weaponLabel);
       if (weaponLabel && !selectedWeapon) {
         showNotif('Choisis une arme existante de la boutique pour le PNJ.', 'error');
@@ -1543,18 +1547,18 @@ export async function saveNpc(id) {
 
     if (id) {
       await updateInCol('npcs', id, data);
-      const idx = _npcs.findIndex(n => n.id === id);
-      if (idx >= 0) _npcs[idx] = { ..._npcs[idx], ...data };
+      const idx = STORE.npcs.findIndex(n => n.id === id);
+      if (idx >= 0) STORE.npcs[idx] = { ...STORE.npcs[idx], ...data };
       showNotif('PNJ mis à jour !', 'success');
     } else {
       const newId = await addToCol('npcs', data);
       // Dédupe : le watch onSnapshot peut avoir déjà inséré le PNJ via
       // latency-compensation pendant l'await — sinon on duplique l'id.
       const entry = { id: newId || `npc_${Date.now()}`, ...data };
-      const idx = _npcs.findIndex(n => n.id === entry.id);
-      if (idx >= 0) _npcs[idx] = entry;
-      else _npcs.push(entry);
-      _activeId = newId || _activeId;
+      const idx = STORE.npcs.findIndex(n => n.id === entry.id);
+      if (idx >= 0) STORE.npcs[idx] = entry;
+      else STORE.npcs.push(entry);
+      STORE.activeId = newId || STORE.activeId;
       showNotif('PNJ créé !', 'success');
     }
 
@@ -1568,11 +1572,11 @@ export async function deleteNpc(id) {
   try {
     if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?', { title: 'Confirmation de suppression' })) return false;
     await deleteFromCol('npcs', id);
-    const toDelete = _affiPerso.filter(a => a.npcId === id);
+    const toDelete = STORE.affiPerso.filter(a => a.npcId === id);
     await Promise.all(toDelete.map(a => deleteFromCol('npc_affinites', a.id)));
-    _npcs      = _npcs.filter(n => n.id !== id);
-    _affiPerso = _affiPerso.filter(a => a.npcId !== id);
-    if (_activeId === id) _activeId = _npcs[0]?.id || null;
+    STORE.npcs      = STORE.npcs.filter(n => n.id !== id);
+    STORE.affiPerso = STORE.affiPerso.filter(a => a.npcId !== id);
+    if (STORE.activeId === id) STORE.activeId = STORE.npcs[0]?.id || null;
     showNotif('PNJ supprimé.', 'success');
     _renderPage(document.getElementById('main-content'));
     return true;
@@ -1583,7 +1587,7 @@ export async function deleteNpc(id) {
 // Le niveau est dérivé de la valeur cumulée. Appliquer un delta non nul ajuste
 // la valeur ; sans delta, on n'enregistre que la note et/ou l'événement.
 export function openAffiniteGroupeModal(npcId) {
-  const n = _npcs.find(x => x.id === npcId);
+  const n = STORE.npcs.find(x => x.id === npcId);
   if (!n) return;
   const valeur  = Number(n.affinite?.valeur) || 0;
   const curNote = n.affinite?.note || '';
@@ -1641,11 +1645,11 @@ export function openAffiniteGroupeModal(npcId) {
       <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
   `);
-  _afgDelta = 0;
+  STORE.afgDelta = 0;
 }
 
 function _selectAfgDelta(v) {
-  _afgDelta = v;
+  STORE.afgDelta = v;
   _highlightDeltaPreset('afg-delta', v);
   const inp = document.getElementById('afg-delta-custom');
   if (inp) inp.value = v === 0 ? '' : String(v);
@@ -1655,8 +1659,8 @@ function _selectAfgDelta(v) {
 // Saisie d'une valeur custom dans l'input numérique (delta arbitraire).
 function _setAfgDeltaFromInput(raw) {
   const v = parseInt(raw, 10);
-  _afgDelta = Number.isFinite(v) ? v : 0;
-  _highlightDeltaPreset('afg-delta', _afgDelta); // surligne le preset si match, sinon aucun
+  STORE.afgDelta = Number.isFinite(v) ? v : 0;
+  _highlightDeltaPreset('afg-delta', STORE.afgDelta); // surligne le preset si match, sinon aucun
   _refreshAfgValeurPreview();
 }
 
@@ -1666,7 +1670,7 @@ function _refreshAfgValeurPreview() {
   const display = document.getElementById('afg-valeur-display');
   if (!preview || !display) return;
   const cur   = parseInt(display.dataset.cur, 10) || 0;
-  const delta = _afgDelta || 0;
+  const delta = STORE.afgDelta || 0;
   if (!delta) { preview.innerHTML = ''; return; }
   const newVal = cur + delta;
   const af     = afx(_niveauFromValeur(newVal));
@@ -1674,11 +1678,11 @@ function _refreshAfgValeurPreview() {
 }
 
 export async function saveAffiniteGroupe(npcId) {
-  const n = _npcs.find(x => x.id === npcId);
+  const n = STORE.npcs.find(x => x.id === npcId);
   if (!n) return;
   const note     = document.getElementById('afg-note')?.value?.trim()  || '';
   const event    = document.getElementById('afg-event')?.value?.trim() || '';
-  const delta    = _afgDelta || 0;
+  const delta    = STORE.afgDelta || 0;
   const curMode  = _affiniteMode(n);
   const curHisto = n.affinite?.historique || [];
   // Garde-fou : un delta non nul sans titre serait perdu (impossible à
@@ -1720,7 +1724,7 @@ export async function saveAffiniteGroupe(npcId) {
 // ── Modal de configuration des seuils (mode valeur) ──────────────────────────
 export function openAffiniteSeuilsModal() {
   if (!STATE.isAdmin) return;
-  const s = _affiniteSeuils;
+  const s = STORE.affiniteSeuils;
   const rows = SEUILS_KEYS.map((key, i) => {
     const a = AFFINITE[i];
     return `
@@ -1771,7 +1775,7 @@ export async function saveAffiniteSeuils() {
     }
   }
   await saveDoc('npc_affinites', AFFINITE_SEUILS_DOC_ID, next);
-  _affiniteSeuils = next;
+  STORE.affiniteSeuils = next;
   closeModal();
   showNotif('Seuils enregistrés !', 'success');
   _refreshActivePanel();
@@ -1802,11 +1806,11 @@ function _aftColorGrid(selectedColor) {
 }
 
 function _getAffiniteTypesManagerHtml() {
-  const s     = _aftFormState || { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  const s     = STORE.aftFormState || { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   const isEdit = !!s.editingId;
 
-  const typesList = _affiniteTypes.length
-    ? _affiniteTypes.map(t => {
+  const typesList = STORE.affiniteTypes.length
+    ? STORE.affiniteTypes.map(t => {
         const col = t.couleur || TYPE_COLORS[0];
         const isEditing = s.editingId === t.id;
         return `
@@ -1834,7 +1838,7 @@ function _getAffiniteTypesManagerHtml() {
   <div style="display:flex;flex-direction:column;gap:.85rem">
 
     <!-- Liste existants -->
-    ${_affiniteTypes.length ? `
+    ${STORE.affiniteTypes.length ? `
     <div style="display:flex;flex-direction:column;gap:.35rem;
       max-height:200px;overflow-y:auto;overflow-x:hidden;padding-right:.25rem">
       ${typesList}
@@ -1845,7 +1849,7 @@ function _getAffiniteTypesManagerHtml() {
     <div>
       <div style="font-size:.72rem;font-weight:700;color:${isEdit ? 'var(--gold)' : 'var(--text-dim)'};
         text-transform:uppercase;letter-spacing:1px;margin-bottom:.65rem">
-        ${isEdit ? `✏️ Modifier — ${_esc(_affiniteTypes.find(t => t.id === s.editingId)?.label || '')}` : '➕ Ajouter un type'}</div>
+        ${isEdit ? `✏️ Modifier — ${_esc(STORE.affiniteTypes.find(t => t.id === s.editingId)?.label || '')}` : '➕ Ajouter un type'}</div>
 
       <!-- Emoji -->
       <div style="margin-bottom:.55rem">
@@ -1894,7 +1898,7 @@ function _getAffiniteTypesManagerHtml() {
 }
 
 export async function deleteHistoriqueEntry(npcId, index) {
-  const n = _npcs.find(x => x.id === npcId);
+  const n = STORE.npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
 
   if (!await confirmModal('Supprimer cet événement de l\'historique ?', {title: 'Confirmation de suppression' })) return;
@@ -1910,7 +1914,7 @@ export async function deleteHistoriqueEntry(npcId, index) {
 
 // Modifier / Supprimer les entrées des historiques des NPCS
 export function editHistoriqueEntry(npcId, index) {
-  const n = _npcs.find(x => x.id === npcId);
+  const n = STORE.npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
 
   const historique = n.affinite?.historique || [];
@@ -1947,11 +1951,11 @@ export function editHistoriqueEntry(npcId, index) {
     </div>
   `);
 
-  _histEditDelta = entry.delta || 0;
+  STORE.histEditDelta = entry.delta || 0;
 }
 
 function _selectHistEditDelta(v) {
-  _histEditDelta = v;
+  STORE.histEditDelta = v;
   _highlightDeltaPreset('hist-edit-delta', v);
   const inp = document.getElementById('hist-edit-delta-custom');
   if (inp) inp.value = '';
@@ -1959,12 +1963,12 @@ function _selectHistEditDelta(v) {
 
 function _setHistEditDeltaFromInput(raw) {
   const v = parseInt(raw, 10);
-  _histEditDelta = Number.isFinite(v) ? v : 0;
-  _highlightDeltaPreset('hist-edit-delta', _histEditDelta);
+  STORE.histEditDelta = Number.isFinite(v) ? v : 0;
+  _highlightDeltaPreset('hist-edit-delta', STORE.histEditDelta);
 }
 
 export async function saveHistoriqueEntry(npcId, index) {
-  const n = _npcs.find(x => x.id === npcId);
+  const n = STORE.npcs.find(x => x.id === npcId);
   if (!n || !STATE.isAdmin) return;
 
   const texte = document.getElementById('hist-edit-text')?.value?.trim() || '';
@@ -1977,7 +1981,7 @@ export async function saveHistoriqueEntry(npcId, index) {
   if (!historique[index]) return;
 
   const oldDelta = historique[index].delta || 0;
-  const newDelta = _histEditDelta || 0;
+  const newDelta = STORE.histEditDelta || 0;
 
   historique[index] = {
     ...historique[index],
@@ -1993,11 +1997,11 @@ export async function saveHistoriqueEntry(npcId, index) {
 // Affinités spéciales
 export function openAffiniteTypesManager() {
   // Initialise le formulaire à l'état "ajout"
-  _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
-  const ctx = _currentAffinitePersoContext || {};
+  STORE.aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  const ctx = STORE.currentAffinitePersoContext || {};
   pushModal('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml(), () => {
     // Toujours rafraîchir la fiche principale (le contexte perso peut être périmé)
-    if (_activeId) {
+    if (STORE.activeId) {
       _refreshActivePanel();
     }
     // Rafraîchir aussi la modal perso si elle était ouverte au-dessus
@@ -2014,7 +2018,7 @@ function _refreshAffiniteTypesManager() {
 function _aftSelectEmoji(emoji) {
   const inp = document.getElementById('aft-emoji-val');
   if (inp) inp.value = emoji;
-  if (_aftFormState) _aftFormState.emoji = emoji;
+  if (STORE.aftFormState) STORE.aftFormState.emoji = emoji;
   document.querySelectorAll('#aft-emoji-grid button').forEach(btn => {
     const sel = btn.dataset.emoji === emoji;
     btn.style.background  = sel ? 'rgba(255,255,255,.15)' : 'transparent';
@@ -2026,7 +2030,7 @@ function _aftSelectEmoji(emoji) {
 function _aftSelectColor(hex) {
   const inp = document.getElementById('aft-color');
   if (inp) inp.value = hex;
-  if (_aftFormState) _aftFormState.couleur = hex;
+  if (STORE.aftFormState) STORE.aftFormState.couleur = hex;
   document.querySelectorAll('#aft-color-grid button').forEach(btn => {
     const sel = btn.dataset.color === hex;
     btn.style.borderColor = sel ? 'white' : 'transparent';
@@ -2035,9 +2039,9 @@ function _aftSelectColor(hex) {
 }
 
 function _aftEditType(typeId) {
-  const t = _affiniteTypes.find(x => x.id === typeId);
+  const t = STORE.affiniteTypes.find(x => x.id === typeId);
   if (!t) return;
-  _aftFormState = {
+  STORE.aftFormState = {
     editingId: typeId,
     emoji:     t.emoji   || EMOJI_PRESET[0],
     couleur:   t.couleur || TYPE_COLORS[0],
@@ -2047,7 +2051,7 @@ function _aftEditType(typeId) {
 }
 
 function _aftCancelEdit() {
-  _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  STORE.aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   _refreshAffiniteTypesManager();
 }
 
@@ -2060,26 +2064,26 @@ export async function saveAffiniteType() {
   if (!label) { showNotif('Donne un nom au type.', 'error'); return; }
 
   if (editingId) {
-    const idx = _affiniteTypes.findIndex(t => t.id === editingId);
-    if (idx >= 0) _affiniteTypes[idx] = { ..._affiniteTypes[idx], label, emoji, couleur };
+    const idx = STORE.affiniteTypes.findIndex(t => t.id === editingId);
+    if (idx >= 0) STORE.affiniteTypes[idx] = { ...STORE.affiniteTypes[idx], label, emoji, couleur };
   } else {
     const id = `aft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    _affiniteTypes.push({ id, label, emoji, couleur });
-    _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    STORE.affiniteTypes.push({ id, label, emoji, couleur });
+    STORE.affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
   }
 
-  await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: _affiniteTypes });
-  _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: STORE.affiniteTypes });
+  STORE.aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   showNotif(editingId ? 'Type modifié !' : 'Type créé !', 'success');
   _refreshAffiniteTypesManager();
 }
 
 export async function deleteAffiniteType(typeId) {
   if (!await confirmModal('Supprimer ce type d\'affinité ?', {title: 'Confirmation de suppression'})) return;
-  _affiniteTypes = _affiniteTypes.filter(t => t.id !== typeId);
-  await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: _affiniteTypes });
-  if (_aftFormState?.editingId === typeId) {
-    _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+  STORE.affiniteTypes = STORE.affiniteTypes.filter(t => t.id !== typeId);
+  await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: STORE.affiniteTypes });
+  if (STORE.aftFormState?.editingId === typeId) {
+    STORE.aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   }
   showNotif('Type supprimé.', 'success');
   _refreshAffiniteTypesManager();
@@ -2088,15 +2092,15 @@ export async function deleteAffiniteType(typeId) {
 // ══ Modal affinité individuelle (édition) ════════════════════════════════════
 
 function _getAffinitePersoModalArgs(npcId, existingId = null) {
-  const n       = _npcs.find(x => x.id === npcId);
+  const n       = STORE.npcs.find(x => x.id === npcId);
   if (!n) return null;
-  const existing       = existingId ? _affiPerso.find(a => a.id === existingId) : null;
+  const existing       = existingId ? STORE.affiPerso.find(a => a.id === existingId) : null;
   const chars          = sortCharactersForDisplay(STATE.characters || []);
   const existingTypeId = existing?.typeId || '';
 
-  _selectedAfpTypeId = existingTypeId;
+  STORE.selectedAfpTypeId = existingTypeId;
 
-  const typeBtns = _affiniteTypes.map(t => {
+  const typeBtns = STORE.affiniteTypes.map(t => {
     const col = t.couleur || TYPE_COLORS[0];
     const sel = existingTypeId === t.id;
     return `<button type="button" id="afp-type-btn-${t.id}"
@@ -2126,7 +2130,7 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
         <button type="button" data-action="openAffiniteTypesManager"
           class="btn btn-outline btn-sm" style="font-size:.7rem">⚙️ Gérer</button>
       </div>
-      ${_affiniteTypes.length
+      ${STORE.affiniteTypes.length
         ? `<div style="display:flex;flex-wrap:wrap;gap:.35rem">${typeBtns}</div>`
         : `<div style="font-size:.78rem;color:var(--text-dim);font-style:italic">
             Aucun type — ouvre le gestionnaire pour en créer.</div>`}
@@ -2156,17 +2160,17 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
 function _refreshAffinitePersoModal(npcId, existingId = null) {
   const args = _getAffinitePersoModalArgs(npcId, existingId);
   if (!args) return;
-  _currentAffinitePersoContext = { npcId, existingId };
+  STORE.currentAffinitePersoContext = { npcId, existingId };
   updateModalContent(args.title, args.body);
-  _selectedAfpTypeId = args.selectedTypeId;
+  STORE.selectedAfpTypeId = args.selectedTypeId;
 }
 
 export function openAffinitePersoModal(npcId, existingId = null) {
-  _currentAffinitePersoContext = { npcId, existingId };
+  STORE.currentAffinitePersoContext = { npcId, existingId };
   const args = _getAffinitePersoModalArgs(npcId, existingId);
   if (!args) return;
   openModal(args.title, args.body);
-  _selectedAfpTypeId = args.selectedTypeId;
+  STORE.selectedAfpTypeId = args.selectedTypeId;
 }
 
 function _refreshActivePanel() {
@@ -2174,20 +2178,20 @@ function _refreshActivePanel() {
   if (!panel) return;
 
   const filtered = _getFiltered();
-  const active = _npcs.find(x => x.id === _activeId) || filtered[0] || null;
+  const active = STORE.npcs.find(x => x.id === STORE.activeId) || filtered[0] || null;
 
-  if (!_npcs.find(x => x.id === _activeId)) {
-    _activeId = active?.id || null;
+  if (!STORE.npcs.find(x => x.id === STORE.activeId)) {
+    STORE.activeId = active?.id || null;
   }
 
   panel.innerHTML = active ? _renderFiche(active) : _renderEmpty();
 }
 
 function _selectAfpType(typeId) {
-  _selectedAfpTypeId = typeId;
+  STORE.selectedAfpTypeId = typeId;
   const inp = document.getElementById('afp-type');
   if (inp) inp.value = typeId;
-  _affiniteTypes.forEach(t => {
+  STORE.affiniteTypes.forEach(t => {
     const btn = document.getElementById(`afp-type-btn-${t.id}`);
     if (!btn) return;
     const col = t.couleur || TYPE_COLORS[0];
@@ -2213,16 +2217,16 @@ export async function saveAffinitePerso(npcId, existingId) {
 
   if (existingId) {
     await updateInCol('npc_affinites', existingId, data);
-    const idx = _affiPerso.findIndex(a => a.id === existingId);
-    if (idx >= 0) _affiPerso[idx] = { ..._affiPerso[idx], ...data };
+    const idx = STORE.affiPerso.findIndex(a => a.id === existingId);
+    if (idx >= 0) STORE.affiPerso[idx] = { ...STORE.affiPerso[idx], ...data };
   } else {
     const newId = await addToCol('npc_affinites', data);
     // Dédupe : le watch onSnapshot peut avoir déjà inséré l'entrée via
     // latency-compensation pendant l'await — sinon on duplique l'id.
     const entry = { id: newId || `afp_${Date.now()}`, ...data };
-    const idx = _affiPerso.findIndex(a => a.id === entry.id);
-    if (idx >= 0) _affiPerso[idx] = entry;
-    else _affiPerso.push(entry);
+    const idx = STORE.affiPerso.findIndex(a => a.id === entry.id);
+    if (idx >= 0) STORE.affiPerso[idx] = entry;
+    else STORE.affiPerso.push(entry);
   }
 
   closeModal();
@@ -2233,7 +2237,7 @@ export async function saveAffinitePerso(npcId, existingId) {
 export async function deleteAffinitePerso(id) {
   if (!await confirmModal('Supprimer cette affinité ?', {title: 'Confirmation de suppression'})) return;
   await deleteFromCol('npc_affinites', id);
-  _affiPerso = _affiPerso.filter(a => a.id !== id);
+  STORE.affiPerso = STORE.affiPerso.filter(a => a.id !== id);
   showNotif('Affinité supprimée.', 'success');
   _refreshActivePanel();
 }
