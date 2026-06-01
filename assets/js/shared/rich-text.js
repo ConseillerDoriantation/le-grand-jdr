@@ -655,6 +655,29 @@ function bindRichTextBlockquoteEscape(editor, signal) {
       }
     }
   }, { signal });
+
+  // Nettoyage après suppression : une citation vidée (sélection supprimée,
+  // Couper, touche Suppr, etc.) laissait un <blockquote> vide → bordure bleue
+  // orpheline. On ne déclenche que sur les suppressions (inputType "delete…")
+  // pour ne PAS gêner la création d'une citation vide qu'on va remplir.
+  editor.addEventListener('input', (e) => {
+    if (!e.inputType || !e.inputType.startsWith('delete')) return;
+    const empties = [...editor.querySelectorAll('blockquote')]
+      .filter(bq => !bq.textContent.trim() && !bq.querySelector('img'));
+    if (!empties.length) return;
+    const sel = window.getSelection();
+    const caretBq = sel?.anchorNode
+      ? elementFromNode(sel.anchorNode)?.closest?.('blockquote')
+      : null;
+    let caretUnwrapped = false;
+    empties.forEach(bq => {
+      if (bq === caretBq) { _unwrapBlock(bq, 'p'); caretUnwrapped = true; }
+      else bq.remove();
+    });
+    // Curseur dans la citation vidée → on l'a transformée en <p> : on y replace
+    // le curseur pour pouvoir continuer à écrire normalement.
+    if (caretUnwrapped) _placeCaretAtStart(editor.querySelector('p') || editor);
+  }, { signal });
 }
 
 function _isFirstTextOfBlock(node, blockEl) {
