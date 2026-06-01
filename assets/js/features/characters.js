@@ -640,16 +640,39 @@ function _bindSortsCatDrag(c, canEdit) {
 // Lit le schéma existant c.compte = { recettes:[], depenses:[] } et fusionne
 // les deux flux en une timeline triée chronologiquement décroissante.
 
-// Normalise une date de livret en clé numérique AAAAMMJJ pour un tri fiable.
-// Gère les DEUX formats stockés en base : ISO "AAAA-MM-JJ" (ajout manuel via
-// <input type=date>) et FR "JJ/MM/AAAA" (ventes / economy.js). 0 = inconnue.
-function _ledgerDateKey(s) {
+// ── Dates du livret : un seul parseur tolérant pour TOUTES les origines ───────
+// Sources possibles : ISO "AAAA-MM-JJ" (ajout manuel via <input type=date>),
+// FR "JJ/MM/AAAA" (ventes / economy.js), FR court "JJ/MM/AA", sinon texte libre
+// (édition inline). Retourne {y, mo, d} ou null si non reconnue.
+const _LEDGER_MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+function _parseLedgerDate(s) {
   const v = String(s || '').trim();
-  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v);   // ISO AAAA-MM-JJ
-  if (m) return (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]);
-  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);     // FR JJ/MM/AAAA
-  if (m) return (+m[3]) * 10000 + (+m[2]) * 100 + (+m[1]);
-  return 0;
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(v);      // ISO AAAA-MM-JJ
+  if (m) return { y: +m[1], mo: +m[2], d: +m[3] };
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);        // FR JJ/MM/AAAA
+  if (m) return { y: +m[3], mo: +m[2], d: +m[1] };
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/.exec(v);        // FR court JJ/MM/AA
+  if (m) return { y: 2000 + (+m[3]), mo: +m[2], d: +m[1] };
+  return null;
+}
+const _2d = (n) => String(n).padStart(2, '0');
+// Clé numérique AAAAMMJJ pour le tri chronologique (0 = inconnue → en bas).
+function _ledgerDateKey(s) {
+  const p = _parseLedgerDate(s);
+  return p ? p.y * 10000 + p.mo * 100 + p.d : 0;
+}
+// Affichage homogène "JJ/MM/AAAA" quelle que soit l'origine.
+// Date non reconnue → on renvoie le texte brut (édition libre) ou « — ».
+function _ledgerDateDisplay(s) {
+  const p = _parseLedgerDate(s);
+  if (!p) return String(s || '').trim() || '—';
+  return `${_2d(p.d)}/${_2d(p.mo)}/${p.y}`;
+}
+// En-tête de groupe « Mois AAAA ». Non reconnue → « Sans date ».
+function _ledgerMonthLabel(s) {
+  const p = _parseLedgerDate(s);
+  if (!p || p.mo < 1 || p.mo > 12) return 'Sans date';
+  return `${_LEDGER_MOIS_FR[p.mo - 1]} ${p.y}`;
 }
 
 function renderCharLedger(c, canEdit) {
@@ -689,19 +712,11 @@ function renderCharLedger(c, canEdit) {
   const visible = filtered.slice(0, limit);
   const hasMore = filtered.length > visible.length;
 
-  // Groupement par "mois" : ISO YYYY-MM-DD → "YYYY-MM" formaté en "Mois AAAA",
-  // sinon legacy split par "/"
-  const MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-  const monthKeyOf = (date) => {
-    if (!date) return 'Sans date';
-    const iso = /^(\d{4})-(\d{2})-\d{2}$/.exec(date);
-    if (iso) return `${MOIS_FR[parseInt(iso[2],10)-1]} ${iso[1]}`;
-    return date.split('/')[0]?.trim() || 'Sans date';
-  };
+  // Groupement par mois via le parseur tolérant (gère ISO et FR indifféremment).
   const groups = [];
   let curMonth = null;
   visible.forEach(e => {
-    const month = monthKeyOf(e.date);
+    const month = _ledgerMonthLabel(e.date);
     if (month !== curMonth) {
       curMonth = month;
       groups.push({ month, items: [] });
@@ -802,7 +817,7 @@ function renderCharLedger(c, canEdit) {
             return `<li class="ledger-row ${e.sign>0?'rcpt':'dep'}">
               <span class="ledger-sign" title="${e.sign>0?'Recette':'Dépense'}">${e.sign>0?'↗':'↘'}</span>
               <span class="ledger-lib" ${editAttr.replace('$FIELD$', 'libelle')}>${_esc(e.libelle || (canEdit?'Sans libellé':''))}</span>
-              <span class="ledger-date" ${editAttr.replace('$FIELD$', 'date')}>${_esc(e.date || '—')}</span>
+              <span class="ledger-date" ${editAttr.replace('$FIELD$', 'date')}>${_esc(_ledgerDateDisplay(e.date))}</span>
               <span class="ledger-amount-wrap">
                 <span class="ledger-sgn">${e.sign>0?'+':'−'}</span><span class="ledger-amount" ${canEdit
                   ? `contenteditable="true" spellcheck="false"
@@ -864,6 +879,12 @@ async function _csV3LedgerSaveField(el, kind, idx, field) {
   c.compte = c.compte || { recettes: [], depenses: [] };
   const row = (c.compte[kind] || [])[idx]; if (!row) return;
   const newVal = (el.textContent || '').trim();
+  // Date affichée normalisée : ne pas réécrire si elle désigne la même date que
+  // la valeur stockée (format potentiellement différent : ISO vs FR).
+  if (field === 'date') {
+    const pa = _parseLedgerDate(newVal), pb = _parseLedgerDate(row.date);
+    if (pa && pb && pa.y === pb.y && pa.mo === pb.mo && pa.d === pb.d) return;
+  }
   if ((row[field] || '') === newVal) return;
   row[field] = newVal;
   _csV3SyncCharRefs(c);
