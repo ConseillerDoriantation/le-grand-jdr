@@ -304,10 +304,10 @@ export function _autoSourceDegats(s, c) {
   if (nbP > 0) parts.push(`Puissance ×${nbP}`);
   return `auto · ${parts.join(' + ')}`;
 }
-export function _autoSourceSoin(s) {
+export function _autoSourceSoin(s, c) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
   const isMagic = _isNoyauMagic(s);
-  const statKey = _getSortSoinStatKey(s, _modalChar());
+  const statKey = _getSortSoinStatKey(s, c);
   const statLbl = statShort(statKey) || statKey.slice(0,3);
   // Le label reflète si la stat vient d'un override de sort ou de l'auto-dérivation arme/noyau
   const natureStr = s?.degatsStat
