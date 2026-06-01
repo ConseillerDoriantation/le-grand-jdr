@@ -161,30 +161,123 @@ flux encore bases sur `data-action`, les modules lazy et les anciens handlers.
 - Reste volontaire dans `story.js` : pont navigateur `closeModalDirect`, contexte transversal `_histoireCtx` et navigation vers la page histoire.
 - Raison : `story.js` etait le meilleur prochain ratio gain/risque. Ses handlers etaient deja declares via `data-action`; remplacer les exports globaux par des fonctions locales et exports ES rend le module lazy plus explicite et retire les collisions possibles avec les autres pages narratives.
 
+### v15 - Bastion et World sans API globale
+
+- Apres passe : 507 occurrences.
+- Reduction cumulee : 1 124 occurrences.
+- `features/bastion.js` : 90 -> 0 occurrence de `window.`.
+- `features/world.js` : 13 -> 0 occurrence de `window.`.
+- `features/command-palette.js` : 4 -> 1 occurrence (navigate importe directement).
+- `features/story.js` : 4 -> 3 occurrences (navigate importe directement).
+- Bastion : 44 handlers `_bastion*` convertis en fonctions locales par script de migration automatique ; `registerActions` appelle desormais directement sans intermediaire `window.*`.
+- World : meme pattern, `Object.assign(window, {...})` supprime car aucun consommateur externe n appelait ces fonctions par `window.*`.
+- Raison : `bastion.js` et `world.js` etaient deux modules autonomes sans sous-composants. Leur migration est mecanique et sans risque de regression croisee.
+
+### v16 - Module de session personnage partagé
+
+- Apres passe : 435 occurrences.
+- Reduction cumulee : 1 196 occurrences.
+- Ajout de `shared/char-session.js` : stocke le contexte courant de fiche (`currentChar`, `canEditChar`, `currentCharTab`) et les callbacks de rendu (`renderTab`, `renderSheet`, `refresh`).
+- `features/characters.js` : 56 -> 14 occurrences. Appelle `charSession.set()` et `charSession.bindRender()` au rendu de fiche.
+- `features/characters/spells.js` : 6 -> 0.
+- `features/characters/inventory.js` : 7 -> 0.
+- `features/characters/tabs.js` : 14 -> 0.
+- `features/characters/combat.js` : 3 -> 0.
+- `features/characters/inline-edit.js` : 3 -> 0.
+- Raison : les 5 sous-modules etaient tous bloqués sur les memes 4 globals de shell (`_currentChar`, `_currentCharTab`, `_canEditChar`, `_renderTab`). Un module de session partagé evite d'importer le shell lourd `characters.js` depuis les sous-modules et rompt les dependances circulaires implicites.
+
+### v17 - characters.js : notifications et filtres admin locaux
+
+- Apres passe : 416 occurrences.
+- Reduction cumulee : 1 215 occurrences.
+- `features/characters.js` : 14 -> 3 occurrences (window.scrollTo/scrollY browser natif).
+- `showNotif` et `notifySaveError` importes depuis `shared/notifications.js` au lieu de `window.showNotif`.
+- `_charAdminFilter` et `_currentTopTab` convertis en variables module-locales.
+- `Object.assign(window, {...})` reduit de ~70 entrees a 4 (charNavCardHtml, selectChar, filterAdminChars, showCharTab) — ponts lazy encore necessaires.
+
+### v18 - players.js sans globals UI
+
+- Apres passe : 409 occurrences.
+- Reduction cumulee : 1 222 occurrences.
+- `features/players.js` : 14 -> 2 occurrences (window.scrollTo browser natif).
+- `__ppEditingPlayer`, `_ppUpdateVisiblePill`, `_ppRefreshVisCount` convertis en variables/fonctions module-locales.
+- `confirmModal` importe depuis `shared/modal.js`.
+- `navigate` importe depuis `core/navigation.js`.
+- `window.STATE.characters` remplace par import direct de `STATE`.
+- `window.renderCharSheet` remplace par `charSession.renderSheet`.
+
+### v19 - pages.js : imports bastion directs et charSession
+
+- Apres passe : 399 occurrences (apres v20 inclus).
+- Reduction cumulee : 1 232 occurrences.
+- `features/pages.js` : 23 -> 18 occurrences.
+- `window.renderCharSheet` remplace par `charSession.renderSheet`.
+- `window.getDefaultBastion`, `window.BASTION_EVENTS`, `window.calculerRevenuBastion` remplaces par imports ES directs depuis `features/bastion.js`.
+- `window._showRPGToast` devient une variable module-locale.
+- Restent 18 delegations `window.xxx?.()` vers des fonctions de modules lazy non encore exportes (bastion dashboard, recettes, world editing) — a traiter lors du refactor de ces modules.
+
+### v20 - Petits fichiers : forms, equipment, character-photo, economy, command-palette
+
+- `features/characters/forms.js` : 2 -> 0.
+- `features/characters/equipment.js` : 1 -> 0.
+- `features/character-photo.js` : 2 -> 0.
+- `shared/economy.js` : `window.refreshOrDisplay` remplace par `charSession.refresh`.
+- `features/command-palette.js` : `window.renderCharSheet` remplace par `charSession.renderSheet`.
+- Ajout de 2 nouveaux fichiers de tests : `char-session.test.js` (9 tests) et `migrations.test.js` (8 tests).
+- Total tests : 92 (7 fichiers → 9 fichiers).
+
+### v21 - Passe finale hors VTT : core, shared et histoire-ctx
+
+- Apres passe : 366 occurrences.
+- Reduction cumulee : 1 265 occurrences.
+- Ajout de `shared/histoire-ctx.js` : remplace `window._histoireCtx` entre `story.js` et `histoire.js`.
+- `features/histoire.js` : 23 -> 21 (2 occurrences `_histoireCtx` remplacees par le module partage).
+- `features/story.js` : 3 -> 2 (idem, reste `closeModalDirect` bridge pour `vtt.js`).
+- `core/layout.js` : 3 -> 0. `openAdventureSwitcher` converti en export ES ; `navigate` importe depuis `navigation.js`. Fin des globals core/layout.
+- `core/navigation.js` : 5 -> 0. `doLogin`, `doLogout`, `doRegister`, `switchAuthTab` importes depuis `auth.js` ; `showNotif` importe depuis `notifications.js`.
+- `core/auth.js` : 4 -> 0. `showNotif` importe directement ; `_authUiBound` devient variable module-locale.
+- `core/init.js` : 3 -> 1. `window.STATE` supprime (aucun consommateur externe) ; `window._runMigrationFromPicker` supprime (dead code — le bouton HTML correspondant n'existe pas).
+- `shared/upgrade-settings.js` : 10 -> 0. Handlers `_upg*` convertis en fonctions locales appelees par `registerActions` ; `closeModal` importe directement.
+- `shared/modal.js` : `window.confirmModal` supprime (aucun consommateur externe).
+- `shared/upload-cloudinary.js` : `window._cloudinaryConfigure` / `window._cloudinaryHasConfig` supprimes (dead code).
+- `app.js` : `openAdventureSwitcher` importe depuis `layout.js` au lieu de `window.*`.
+- `features/pages.js` : 18 -> 15. `openAdventureSwitcher` importe directement ; entrees `filterAdminChars` et `editWorldContent` retirees du `registerActions` (redondant / dead code).
+- Raison : cette passe cloture la migration de tous les modules accessibles sans Sprint 2 ni refactor VTT. Les restes sont soit browser natif, soit bloques par les inline handlers de `histoire.js`, soit des delegations lazy vers des fonctionnalites pas encore implementees dans leur module cible.
+
+### v22 - VTT : fonctions locales + Object.assign centralisé
+
+- Apres passe : 136 occurrences.
+- Reduction cumulee : 1 495 occurrences.
+- `features/vtt.js` : 262 -> 32 occurrences.
+- 181 fonctions `window._vttXxx = ...` converties en `function _vttXxx(...)` locales.
+- Un seul `Object.assign(window, { _vttXxx, ... })` centralise les 206 exports necessaires au dispatcher `data-vtt-fn` (qui lit via `window[fn]`).
+- Variable etat `window._vttDelegSearch` convertie en variable module-locale.
+- 4 fonctions closures (definies a l interieur d une autre fonction, capturant des variables locales) conservees comme assignments `window.*` : `_vttDeleteEmote`, `_vttEditEmote`, `_vttAddEmote`, `_vttSaveEmote`.
+- `registerActions` passe de delegations `window.*?.()` a appels directs.
+- `closeModalDirect` importe depuis `shared/modal.js` au lieu de `window.closeModalDirect`.
+- Raison : le VTT a son propre dispatcher `data-vtt-fn` qui lit depuis `window`. Convertir les definitions en fonctions locales et centraliser les exports dans un bloc Object.assign rend le contrat public explicite, au lieu de 181 assignments disperses. Le dispatcher lui-meme peut etre migre vers un registre local lors d une prochaine passe.
+
 ## Restes principaux
 
-Top fichiers restants apres v14 :
+Top fichiers restants apres v22 (total : 136) :
 
-- `features/vtt.js` : 262
-- `features/bastion.js` : 90
-- `features/characters.js` : 76
-- `features/characters/tabs.js` : 26
-- `features/histoire.js` : 23
-- `features/pages.js` : 23
-- `features/players.js` : 16
-- `features/world.js` : 13
-- `shared/rich-text.js` : 11
-- `shared/upgrade-settings.js` : 10
-- `features/characters/spells.js` : 9
-- `features/characters/inventory.js` : 8
+- `features/vtt.js` : 32 — Object.assign centralisé (dispatcher) + 4 closures + browser natif
+- `features/histoire.js` : 21 — bloque par inline `onmousedown`/drag handlers (Sprint 2)
+- `features/pages.js` : 15 — delegations lazy vers bastion dashboard, recettes, world editing
+- `shared/rich-text.js` : 11 — tout `window.getSelection()` browser natif
+- `features/vtt-fog.js` : 6 — Konva (`window.Konva`) + browser natif
+- `features/map/render/viewport.js` : 4 — `window.addEventListener` browser natif
+- `features/characters/export.js` : 4 — `window.open/print/close` browser natif
+- `features/story.js` : 2 — `closeModalDirect` bridge pour `vtt.js`
+- `shared/presence.js` : 2 — `window.addEventListener('beforeunload')` browser natif
 
+Occurrences browser natif (ne pas toucher) : `scrollTo`, `scrollY`, `getSelection`, `addEventListener/removeEventListener`, `open`, `print`, `close`, `innerWidth/innerHeight`, `Konva`.
 
 ## Ordre recommande
 
-1. Finir `characters.js` par les ponts de shell restants : `_currentChar`, `_currentCharTab`, `_canEditChar`, filtres admin et compatibilite sous-modules. C est le plus gros bloc hors `vtt`/`bastion`, mais il doit etre fait par sous-domaines pour eviter les regressions de fiche.
-2. Terminer les petits modules personnages restants : `characters/tabs`, `characters/inventory`, `characters/spells`, `characters/forms`, `characters/combat` / `export` / `inline-edit`. Ces ponts sont surtout des appels au shell personnage et peuvent etre remplaces par un module de session personnage.
-3. Traiter `pages.js`, `histoire.js`, `players.js` et `world.js` par imports ES explicites depuis les modules lazy restants.
-4. Garder `vtt.js` et `bastion.js` pour des passes dediees, car ils melangent beaucoup etat module, handlers UI, HTML inline et compatibilite historique.
+1. `vtt.js` (32) : migrer le dispatcher `data-vtt-fn` de `window[fn]` vers un registre local (`VTT_ACTIONS`). Elimine le besoin de l `Object.assign` et des 4 closures. Supprime aussi le `closeModalDirect` bridge dans `story.js`.
+2. `pages.js` (15) : se resorbe au fur et a mesure que les modules cibles (bastion dashboard, recettes) exportent leurs fonctions.
+3. `histoire.js` (21) : necessite Sprint 2 — migration `onmousedown`/`ondragstart` → `data-action`.
 
 
 ## Garde-fous
