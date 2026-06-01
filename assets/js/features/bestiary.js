@@ -16,6 +16,7 @@ import { attachDropAndCrop } from '../shared/image-crop.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -1045,21 +1046,10 @@ function _mountBestiarySortable() {
   if (!grid) return;
 
   _installBestiaryClickGuard();
-  _bstSortable = new Sortable(grid, {
+  _bstSortable = makeSortable(grid, {
+    prefix: 'bst',
     animation: 120,
-    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
     draggable: '.bst-sortable-item',
-    filter: 'button, a, input, select, textarea, .btn, .btn-icon',
-    preventOnFilter: false,
-    ghostClass: 'bst-sortable-ghost',
-    chosenClass: 'bst-sortable-chosen',
-    dragClass: 'bst-sortable-drag',
-    forceFallback: true,
-    fallbackOnBody: true,
-    fallbackTolerance: 5,
-    delay: 150,
-    delayOnTouchOnly: true,
-    touchStartThreshold: 5,
     onStart: () => {
       document.body.classList.add('bst-dragging');
       _bstDragBlockClick = true;

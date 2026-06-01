@@ -14,6 +14,7 @@
 // (cohérent avec bestiary/shop).
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete } from '../shared/crud.js';
 
 let _ppEditingPlayer = null;
@@ -1339,15 +1340,10 @@ function _initSortable() {
   const list = document.getElementById('pp-gallery');
   if (!list) return;
   _ppSortable?.destroy();
-  _ppSortable = new Sortable(list, {
-    animation: 150,
+  _ppSortable = makeSortable(list, {
+    prefix: 'pp',
     handle: '.pp-card-drag',
-    ghostClass: 'pp-sortable-ghost',
-    chosenClass: 'pp-sortable-chosen',
-    forceFallback: true,
-    fallbackOnBody: true,
     delay: 100,
-    delayOnTouchOnly: true,
     onEnd: async () => {
       const ids = [...list.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId);
       ids.forEach((id, idx) => {
@@ -1686,13 +1682,9 @@ function _renderGalleryEditor() {
         : `<button type="button" class="pp-gallery-edit-del" data-pp-action="removeGalleryPhoto" data-idx="${i}" title="Retirer">✕</button>`}
     </div>`;
   }).join('');
-  _ppGallerySortable = new Sortable(list, {
-    animation: 150,
-    ghostClass: 'pp-sortable-ghost',
-    chosenClass: 'pp-sortable-chosen',
+  _ppGallerySortable = makeSortable(list, {
+    prefix: 'pp',
     handle: '.pp-gallery-edit-handle',
-    forceFallback: true,
-    fallbackOnBody: true,
     onEnd: () => {
       const newOrder = [...list.querySelectorAll('[data-gal-idx]')]
         .map(el => parseInt(el.dataset.galIdx, 10))

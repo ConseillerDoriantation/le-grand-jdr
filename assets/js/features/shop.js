@@ -18,6 +18,7 @@ import { bindScopedActions } from '../shared/scoped-actions.js';
 import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -2150,24 +2151,13 @@ function _mountSortables() {
   _sortCats?.destroy(); _sortCats = null;
   _sortItems?.destroy(); _sortItems = null;
 
-  const sharedOpts = {
+  const shOpts = {
+    prefix: 'sh',
     animation: 120,
-    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
     draggable: '.sh-sortable-item',
     filter: 'button, a, input, select, textarea, .btn-icon, .sh-card-admin-inline, .sh-item-actions',
-    preventOnFilter: false,
-    ghostClass:  'sh-sortable-ghost',
-    chosenClass: 'sh-sortable-chosen',
-    dragClass:   'sh-sortable-drag',
-    forceFallback:    true,
-    fallbackOnBody:   true,
-    fallbackTolerance: 5,
-    delay: 150,
-    delayOnTouchOnly: true,
-    touchStartThreshold: 5,
     onStart: () => { document.body.classList.add('sh-dragging'); _dragBlockClick = true; },
   };
-
   const finishDrag = () => {
     document.body.classList.remove('sh-dragging');
     setTimeout(() => { _dragBlockClick = false; }, 350);
@@ -2175,8 +2165,8 @@ function _mountSortables() {
 
   const catGrid = document.querySelector('.sh-cat-grid.sh-sortable');
   if (catGrid) {
-    _sortCats = new Sortable(catGrid, {
-      ...sharedOpts,
+    _sortCats = makeSortable(catGrid, {
+      ...shOpts,
       onEnd: async (evt) => {
         finishDrag();
         if (evt.oldIndex === evt.newIndex) return;
@@ -2192,8 +2182,8 @@ function _mountSortables() {
 
   const itemGrid = document.getElementById('sh-items-grid');
   if (itemGrid && itemGrid.classList.contains('sh-sortable')) {
-    _sortItems = new Sortable(itemGrid, {
-      ...sharedOpts,
+    _sortItems = makeSortable(itemGrid, {
+      ...shOpts,
       onEnd: async (evt) => {
         finishDrag();
         if (evt.oldIndex === evt.newIndex) return;

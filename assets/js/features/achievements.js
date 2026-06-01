@@ -6,6 +6,7 @@
 // ✓ Ordre partagé pour tous les utilisateurs
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete } from '../shared/crud.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
@@ -359,28 +360,6 @@ function _destroyAchievementSortables() {
   _achRowSortables = [];
 }
 
-function _achievementSortableOptions(overrides = {}) {
-  return {
-    animation: 120,
-    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
-    filter: 'button, a, input, select, textarea, .btn, .btn-icon, .ach-admin-btns',
-    preventOnFilter: false,
-    ghostClass: 'ach-sortable-ghost',
-    chosenClass: 'ach-sortable-chosen',
-    dragClass: 'ach-sortable-drag',
-    forceFallback: true,
-    fallbackOnBody: true,
-    fallbackTolerance: 5,
-    delay: 150,
-    delayOnTouchOnly: true,
-    touchStartThreshold: 5,
-    onStart: () => {
-      document.body.classList.add('ach-dragging');
-      _achDragBlockClick = true;
-    },
-    ...overrides,
-  };
-}
 
 // ── DRAG & DROP ───────────────────────────────────────────────────────────────
 function setupAchievementsDnd(catId) {
@@ -395,19 +374,22 @@ function setupAchievementsDnd(catId) {
   _destroyAchievementSortables();
 
   grid.querySelectorAll('.ach-row').forEach(row => {
-    _achRowSortables.push(new Sortable(row, _achievementSortableOptions({
+    _achRowSortables.push(makeSortable(row, {
+      prefix: 'ach',
+      animation: 120,
+      filter: 'button, a, input, select, textarea, .btn, .btn-icon, .ach-admin-btns',
       group: `achievements-${catId}`,
       draggable: '.ach-sortable-item',
+      onStart: () => { document.body.classList.add('ach-dragging'); _achDragBlockClick = true; },
       onEnd: async (evt) => {
         _finishAchievementDrag();
         if (evt.oldIndex === evt.newIndex && evt.from === evt.to) return;
-
         const domOrder = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
         await _persistCategoryOrder(catId, domOrder);
         showNotif('Ordre sauvegardé.', 'success');
         await _achRebuildGallery(catId);
       },
-    })));
+    }));
   });
 }
 

@@ -13,6 +13,7 @@ import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, richTextConte
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { STATE } from '../core/state.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
 
@@ -311,15 +312,13 @@ function _bindNavDrag() {
   _destroySortables();
   if (!STATE.isAdmin) return;
   document.querySelectorAll('.world-cat-sections').forEach(list => {
-    _sortables.push(new Sortable(list, {
+    _sortables.push(makeSortable(list, {
+      ghostClass: 'world-drag-ghost',
+      chosenClass: 'world-drag-chosen',
       group: 'world-sections',
       animation: 160,
       handle: '[data-sec-id]',
       draggable: '[data-sec-id]',
-      ghostClass: 'world-drag-ghost',
-      chosenClass: 'world-drag-chosen',
-      forceFallback: true,
-      fallbackOnBody: true,
       onEnd: _onSectionsReordered,
     }));
   });
