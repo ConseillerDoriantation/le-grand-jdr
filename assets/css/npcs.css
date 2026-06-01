@@ -374,6 +374,20 @@
   margin-top: .5rem; font-size: .78rem; color: var(--text-muted); font-style: italic;
   padding: .4rem .6rem; border-left: 2px solid var(--af-bd); line-height: 1.6;
 }
+.npc-af-val {
+  flex-shrink: 0; font-family: 'Cinzel', serif; font-weight: 700; font-size: .9rem; color: var(--af);
+  background: rgba(255,255,255,.05); border: 1px solid var(--af-bd); border-radius: 7px; padding: 1px 9px;
+}
+/* Formulaire d'ajout d'événement (inline) */
+.npc-event-row { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+.npc-event-delta { width: 64px; flex: 0 0 auto; text-align: center; font-weight: 700; }
+.npc-event-text { flex: 1; min-width: 160px; }
+.npc-event-btn {
+  flex: 0 0 auto; cursor: pointer; font-size: .76rem; font-weight: 600; white-space: nowrap;
+  background: rgba(232,184,75,.1); border: 1px solid rgba(232,184,75,.35); color: var(--gold);
+  border-radius: 8px; padding: .42rem .8rem; transition: background .12s;
+}
+.npc-event-btn:hover { background: rgba(232,184,75,.18); }
 
 /* Stats & combat */
 .npc-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; }
@@ -484,10 +498,20 @@ textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; fon
 .npc-card-act--off { color: var(--text-dim); background: rgba(255,255,255,.04); border-color: var(--border); }
 
 /* Combat & stats compact */
-.npc-weapon-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .5rem; }
-.npc-weapon-select { max-width: 260px; }
-select.npc-inline { cursor: pointer; }
-.npc-weapon-meta { font-size: .72rem; color: var(--text-muted); }
+.npc-weapon { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .55rem; }
+.npc-weapon-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.npc-select {
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: .42rem .6rem; font: inherit; font-size: .82rem; cursor: pointer;
+  min-width: 200px; max-width: 280px;
+}
+.npc-select:focus { outline: none; border-color: rgba(79,140,255,.45); }
+.npc-select option { background: var(--bg-elevated); color: var(--text); }
+.npc-weapon-stat {
+  font-size: .74rem; font-weight: 600; color: var(--text-soft);
+  background: rgba(232,184,75,.08); border: 1px solid rgba(232,184,75,.22);
+  border-radius: 6px; padding: 2px 9px;
+}
 .npc-stats-card .npc-stat-grid { gap: .3rem; }
 .npc-stats-card .npc-stat-grid--6 { margin-top: .35rem; }
 .npc-stats-card .npc-stat-cell { padding: .3rem .2rem; }

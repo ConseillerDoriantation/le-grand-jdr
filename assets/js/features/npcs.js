@@ -161,7 +161,6 @@ let _filterSearch  = '';
 let _activeOrgFilter = null;
 let _pendingNpcImg = null;
 let _npcImgCleared = false;
-let _afgDelta = 0;
 let _histEditDelta = 0;
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
 let _selectedAfpTypeId = '';
@@ -493,12 +492,14 @@ function _renderAffiniteGroupe(n) {
     </div>`;
   }).join('');
 
+  const valeur = Number(n.affinite?.valeur) || 0;
+
   return `
   <div class="npc-card" style="${_afVars(af)}">
     <div class="npc-card-hd">
       <div class="npc-card-title">Affinité du groupe &amp; événements</div>
       ${STATE.isAdmin ? `
-      <button class="npc-card-act" data-action="openAffiniteGroupeModal" data-id="${n.id}">📝 Événement</button>` : ''}
+      <button class="npc-card-act npc-card-act--ghost" data-action="openAffiniteSeuilsModal" title="Configurer les seuils valeur → niveau">⚙️ Seuils</button>` : ''}
     </div>
 
     <div class="npc-af-gauge">${segments}</div>
@@ -509,6 +510,7 @@ function _renderAffiniteGroupe(n) {
         <span class="npc-af-state-name">${af.label}</span>
         <span class="npc-af-state-desc"> — ${af.desc}</span>
       </div>
+      ${STATE.isAdmin ? `<span class="npc-af-val" title="Valeur cumulée">${valeur > 0 ? '+' + valeur : valeur}</span>` : ''}
     </div>
 
     ${STATE.isAdmin
@@ -516,6 +518,14 @@ function _renderAffiniteGroupe(n) {
           <span class="npc-edit-lbl">Note d'affinité</span>
           <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="affinite.note"
             rows="2" placeholder="Contexte de la relation au groupe…">${_esc(n.affinite?.note || '')}</textarea>
+        </div>
+        <div class="npc-edit-block" style="margin-top:.5rem">
+          <span class="npc-edit-lbl">Ajouter un événement</span>
+          <div class="npc-event-row">
+            <input type="number" class="npc-inline npc-event-delta" id="afg-d-${n.id}" placeholder="±N" title="Variation d'affinité (ex : +2, -1)">
+            <input type="text" class="npc-inline npc-event-text" id="afg-e-${n.id}" placeholder="Ex : A aidé lors de la défense de la ville…">
+            <button class="npc-event-btn" data-action="npcAddEvent" data-id="${n.id}">＋ Ajouter</button>
+          </div>
         </div>`
       : (n.affinite?.note ? `<div class="npc-af-note">« ${_esc(n.affinite.note)} »</div>` : '')}
 
@@ -973,20 +983,24 @@ function _renderStatsPanel(n) {
 
   const dmg   = weapon?.degats || combat.damage || '—';
   const range = combat.range ?? weapon?.portee ?? '—';
-  const weaponSelect = `
-    <select class="npc-inline npc-weapon-select" data-change="npcSetWeapon" data-npc-id="${n.id}">
-      <option value="">— Aucune arme —</option>
-      ${_shopWeapons.map(w => `<option value="${w.id}" ${weapon?.itemId === w.id ? 'selected' : ''}>${_esc(_weaponLabel(w))}</option>`).join('')}
-    </select>`;
 
   return `
     <div class="npc-card npc-stats-card">
       <div class="npc-card-hd">
         <div class="npc-card-title">🛡️ Combat &amp; stats <span style="font-weight:400;color:var(--text-dim)">(MJ)</span></div>
       </div>
-      <div class="npc-weapon-row">
-        ${_shopWeapons.length ? weaponSelect : `<span class="npc-hint">Aucune arme en boutique.</span>`}
-        <span class="npc-weapon-meta">🗡️ ${_esc(dmg)} &nbsp;·&nbsp; ⌖ ${_esc(range)}</span>
+      <div class="npc-weapon">
+        <span class="npc-edit-lbl">Arme</span>
+        <div class="npc-weapon-row">
+          ${_shopWeapons.length
+            ? `<select class="npc-select" data-change="npcSetWeapon" data-npc-id="${n.id}">
+                <option value="">— Aucune arme —</option>
+                ${_shopWeapons.map(w => `<option value="${w.id}" ${weapon?.itemId === w.id ? 'selected' : ''}>${_esc(_weaponLabel(w))}</option>`).join('')}
+              </select>`
+            : `<span class="npc-hint">Aucune arme en boutique.</span>`}
+          <span class="npc-weapon-stat">🗡️ ${_esc(dmg)}</span>
+          <span class="npc-weapon-stat">⌖ ${_esc(range)}</span>
+        </div>
       </div>
       <div class="npc-stat-grid">${vitals}</div>
       <div class="npc-stat-grid npc-stat-grid--6">${statCells}</div>
@@ -1483,143 +1497,6 @@ export async function deleteNpc(id) {
   } catch (e) { notifySaveError(e); return false; }
 }
 
-// ── Modal affinité groupe (événement & note) ──────────────────────────────────
-// Le niveau est dérivé de la valeur cumulée. Appliquer un delta non nul ajuste
-// la valeur ; sans delta, on n'enregistre que la note et/ou l'événement.
-export function openAffiniteGroupeModal(npcId) {
-  const n = _npcs.find(x => x.id === npcId);
-  if (!n) return;
-  const valeur  = Number(n.affinite?.valeur) || 0;
-  const curNote = n.affinite?.note || '';
-  const derived = _niveauFromValeur(valeur);
-  const afDer   = afx(derived);
-
-  openModal(`📝 Événement & Note — ${_esc(n.nom)}`, `
-    <input type="hidden" id="afg-valeur" value="${valeur}">
-
-    <div class="form-group">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
-        <label style="margin:0">Valeur cumulée</label>
-        ${STATE.isAdmin ? `<button type="button" data-action="openAffiniteSeuilsModal"
-          style="font-size:.66rem;background:rgba(232,184,75,.08);
-          border:1px solid rgba(232,184,75,.25);border-radius:6px;
-          padding:2px 8px;cursor:pointer;color:var(--gold)">⚙️ Seuils</button>` : ''}
-      </div>
-      <div id="afg-valeur-display" data-cur="${valeur}"
-        style="display:flex;align-items:center;gap:.55rem;padding:.55rem .75rem;flex-wrap:wrap;
-        background:${afDer.bg};border:1px solid ${afDer.border};border-radius:8px">
-        <span id="afg-valeur-num"
-          style="font-family:'Cinzel',serif;font-size:1.25rem;font-weight:700;color:var(--gold)">
-          ${valeur > 0 ? '+' + valeur : valeur}</span>
-        <span id="afg-valeur-icon" style="font-size:.95rem">${afDer.icon}</span>
-        <span id="afg-valeur-label"
-          style="font-size:.82rem;color:${afDer.couleur};font-weight:600">${afDer.label}</span>
-        <span id="afg-valeur-preview" style="margin-left:auto;font-size:.74rem;color:var(--text-dim)"></span>
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label>Note <span style="color:var(--text-dim);font-weight:400">(visible par tous)</span></label>
-      <textarea class="input-field" id="afg-note" rows="3"
-        placeholder="Ex: A aidé lors de la défense de la ville…">${_esc(curNote)}</textarea>
-    </div>
-    <div class="form-group">
-      <label>Événement</label>
-      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <div style="display:flex;gap:.25rem;flex-shrink:0">
-          ${_deltaPresetsHtml('afg-delta', null, '_selectAfgDelta')}
-        </div>
-        <input type="number" id="afg-delta-custom" placeholder="±N"
-          data-input="_setAfgDeltaFromInput"
-          style="width:60px;text-align:center;font-weight:700;padding:.4rem;
-          background:var(--bg-elevated);border:1px solid var(--border);
-          border-radius:8px;color:var(--text);font-size:.8rem">
-        <input class="input-field" id="afg-event"
-          placeholder="Ex: A trahi la compagnie lors de…" style="flex:1;min-width:140px">
-      </div>
-    </div>
-
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1"
-        data-action="saveAffiniteGroupe" data-id="${npcId}">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
-    </div>
-  `);
-  _afgDelta = 0;
-}
-
-function _selectAfgDelta(v) {
-  _afgDelta = v;
-  _highlightDeltaPreset('afg-delta', v);
-  const inp = document.getElementById('afg-delta-custom');
-  if (inp) inp.value = v === 0 ? '' : String(v);
-  _refreshAfgValeurPreview();
-}
-
-// Saisie d'une valeur custom dans l'input numérique (delta arbitraire).
-function _setAfgDeltaFromInput(raw) {
-  const v = parseInt(raw, 10);
-  _afgDelta = Number.isFinite(v) ? v : 0;
-  _highlightDeltaPreset('afg-delta', _afgDelta); // surligne le preset si match, sinon aucun
-  _refreshAfgValeurPreview();
-}
-
-// Affiche la nouvelle valeur + niveau dérivé après application du delta sélectionné.
-function _refreshAfgValeurPreview() {
-  const preview = document.getElementById('afg-valeur-preview');
-  const display = document.getElementById('afg-valeur-display');
-  if (!preview || !display) return;
-  const cur   = parseInt(display.dataset.cur, 10) || 0;
-  const delta = _afgDelta || 0;
-  if (!delta) { preview.innerHTML = ''; return; }
-  const newVal = cur + delta;
-  const af     = afx(_niveauFromValeur(newVal));
-  preview.innerHTML = `→ <span style="color:${af.couleur};font-weight:600">${newVal > 0 ? '+' + newVal : newVal} ${af.icon} ${af.label}</span>`;
-}
-
-export async function saveAffiniteGroupe(npcId) {
-  const n = _npcs.find(x => x.id === npcId);
-  if (!n) return;
-  const note     = document.getElementById('afg-note')?.value?.trim()  || '';
-  const event    = document.getElementById('afg-event')?.value?.trim() || '';
-  const delta    = _afgDelta || 0;
-  const curMode  = _affiniteMode(n);
-  const curHisto = n.affinite?.historique || [];
-  // Garde-fou : un delta non nul sans titre serait perdu (impossible à
-  // réviser/supprimer plus tard). On exige un titre dans ce cas.
-  if (delta !== 0 && !event) {
-    showNotif('Ajoute un titre à l\'événement pour conserver le delta.', 'error');
-    return;
-  }
-  // On crée une entrée si on a un titre OU un delta non nul.
-  const newHisto = (event || delta !== 0)
-    ? [...curHisto, { date: new Date().toLocaleDateString('fr-FR'), texte: event, delta }]
-    : curHisto;
-
-  let affinite;
-  // Un delta non nul (ré)engage le mode 'valeur' et cumule. Sinon, on préserve
-  // le mode courant pour ne pas écraser le niveau d'un PNJ legacy en 'groupe'.
-  if (delta !== 0 || curMode === 'valeur') {
-    const curVal = parseInt(document.getElementById('afg-valeur')?.value, 10) || 0;
-    const valeur = curVal + delta;
-    affinite = {
-      ...(n.affinite || {}),
-      mode: 'valeur',
-      valeur,
-      niveau: _niveauFromValeur(valeur),
-      note,
-      historique: newHisto,
-    };
-  } else {
-    affinite = {
-      ...(n.affinite || {}),
-      note,
-      historique: newHisto,
-    };
-  }
-
-  await _persistAffinite(npcId, affinite, 'Affinité mise à jour !');
-}
 
 // ── Modal de configuration des seuils (mode valeur) ──────────────────────────
 export function openAffiniteSeuilsModal() {
@@ -2173,6 +2050,33 @@ async function _npcSetWeapon(el) {
   catch (e) { notifySaveError(e); }
 }
 
+// Ajout d'un événement d'affinité directement depuis la fiche (sans modal).
+// Réplique la logique de l'ancien saveAffiniteGroupe : cumul en mode 'valeur',
+// niveau dérivé des seuils, entrée datée dans l'historique.
+async function _npcAddEvent(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn.dataset.id;
+  const n = _npcs.find(x => x.id === id); if (!n) return;
+  const dEl = document.getElementById(`afg-d-${id}`);
+  const eEl = document.getElementById(`afg-e-${id}`);
+  const delta = parseInt(dEl?.value, 10) || 0;
+  const texte = (eEl?.value || '').trim();
+  if (delta === 0 && !texte) { showNotif('Indique une variation et/ou un intitulé.', 'error'); return; }
+  if (delta !== 0 && !texte) { showNotif('Ajoute un intitulé pour conserver la variation.', 'error'); return; }
+
+  const curHisto = n.affinite?.historique || [];
+  const newHisto = [...curHisto, { date: new Date().toLocaleDateString('fr-FR'), texte, delta }];
+  let affinite;
+  if (delta !== 0 || _affiniteMode(n) === 'valeur') {
+    const valeur = (Number(n.affinite?.valeur) || 0) + delta;
+    affinite = { ...(n.affinite || {}), mode: 'valeur', valeur, niveau: _niveauFromValeur(valeur), historique: newHisto };
+  } else {
+    affinite = { ...(n.affinite || {}), historique: newHisto };
+  }
+  n.affinite = affinite;
+  await _persistAffinite(id, affinite, 'Événement ajouté !', { close: false });
+}
+
 // Création inline : crée un PNJ vierge et le sélectionne (plus besoin de modal).
 async function _npcCreate() {
   if (!STATE.isAdmin) return;
@@ -2274,20 +2178,18 @@ registerActions({
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
   npcToggleActivite:         (btn) => _npcToggleActivite(btn),
   npcToggleEmbauchable:      (btn) => _npcToggleEmbauchable(btn),
+  npcAddEvent:               (btn) => _npcAddEvent(btn),
   npcCreate:                 () => _npcCreate(),
   _mjStatsFilter:            (el) => _mjStatsFilter(el.value),
-  _setAfgDeltaFromInput:     (el) => _setAfgDeltaFromInput(el.value),
   _setHistEditDeltaFromInput:(el) => _setHistEditDeltaFromInput(el.value),
   openNpcModal:            (btn) => openNpcModal(btn.dataset.id || null),
   saveNpc:                 (btn) => saveNpc(btn.dataset.id || ''),
   deleteNpc:               (btn) => deleteNpc(btn.dataset.id),
   _deleteNpcThenClose:     (btn) => deleteNpc(btn.dataset.id).then(ok => { if (ok) closeModal(); }),
   selectNpc:               (btn) => selectNpc(btn.dataset.id),
-  openAffiniteGroupeModal: (btn) => openAffiniteGroupeModal(btn.dataset.id),
   openAffinitePersoModal:  (btn) => openAffinitePersoModal(btn.dataset.npcId, btn.dataset.affId || undefined),
   deleteAffinitePerso:     (btn) => deleteAffinitePerso(btn.dataset.id),
   openAffiniteTypesManager:()   => openAffiniteTypesManager(),
-  saveAffiniteGroupe:      (btn) => saveAffiniteGroupe(btn.dataset.id),
   saveAffiniteSeuils:      ()   => saveAffiniteSeuils(),
   resetAffiniteSeuils:     ()   => resetAffiniteSeuils(),
   openAffiniteSeuilsModal: ()   => openAffiniteSeuilsModal(),
@@ -2301,7 +2203,6 @@ registerActions({
   _aftEditType:            (btn) => _aftEditType(btn.dataset.id),
   _aftSelectEmoji:         (btn) => _aftSelectEmoji(btn.dataset.val),
   _aftSelectColor:         (btn) => _aftSelectColor(btn.dataset.val),
-  _selectAfgDelta:         (btn) => _selectAfgDelta(Number(btn.dataset.val)),
   _selectHistEditDelta:    (btn) => _selectHistEditDelta(Number(btn.dataset.val)),
   _selectAfpType:          (btn) => _selectAfpType(btn.dataset.id),
   _openMjStatsView:        ()   => _openMjStatsView(),
