@@ -5210,3 +5210,7 @@ body .sh-page--v2 .sh-item-desc {
   padding: 4px 0 2px;
   border-top: 1px dashed rgba(255,255,255,.04);
 }
+
+/* ── Helpers texte répétés ──────────────────────────────────────────────── */
+.sh-dim-pill { padding:0 4px;color:var(--text-dim) }
+.sh-label    { font-weight:400;color:var(--text-dim);font-family:inherit }

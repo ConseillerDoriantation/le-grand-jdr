@@ -660,7 +660,7 @@ function _renderRelationChipPublic(a) {
     <span style="font-size:1.2rem;flex-shrink:0;line-height:1;opacity:.85">${emoji}</span>
     <div style="flex:1;min-width:0">
       <div style="font-size:.78rem;font-weight:600;color:${color}">${label}
-        <span style="color:var(--text-dim);font-weight:400">→ ${_esc(a.charNom || '?')}</span>
+        <span class="npc-dim">→ ${_esc(a.charNom || '?')}</span>
       </div>
       <div style="font-size:.71rem;color:var(--text-muted);font-style:italic;margin-top:1px">
         ${_esc(a.notePublique)}</div>
@@ -1010,8 +1010,7 @@ function _renderStatsForm(npc) {
           letter-spacing:.08em;text-transform:uppercase;margin-bottom:.45rem">Espace combat</div>
         <div style="display:grid;grid-template-columns:1.35fr 1fr .65fr;gap:.45rem">
           <div>
-            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
-              font-weight:600">Arme</label>
+            <label class="npc-label">Arme</label>
             ${autocompleteHTML({
               id: 'npc-combat-weapon',
               value: weaponValue,
@@ -1021,15 +1020,13 @@ function _renderStatsForm(npc) {
             <input type="hidden" id="npc-combat-weapon-id" value="${_esc(weapon?.itemId || '')}">
           </div>
           <div>
-            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
-              font-weight:600">Dégâts</label>
+            <label class="npc-label">Dégâts</label>
             <input type="text" class="input-sm" id="npc-combat-damage"
               value="${_esc(weapon?.degats || combat.damage)}" placeholder="Auto"
               disabled style="padding:.35rem .45rem;width:100%;opacity:.75">
           </div>
           <div>
-            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
-              font-weight:600">Portée</label>
+            <label class="npc-label">Portée</label>
             <input type="text" class="input-sm" id="npc-combat-range"
               value="${_esc(weapon?.portee || combat.range || '')}" placeholder="Auto"
               disabled style="text-align:center;padding:.35rem .25rem;width:100%;opacity:.75">
@@ -1312,7 +1309,7 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
           </select>
         </div>
       </div>
-      <label style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem;display:block">Activités / spécialités <span style="color:var(--text-dim);font-weight:400">(salles où ce PNJ peut travailler)</span></label>
+      <label style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem;display:block">Activités / spécialités <span class="npc-dim">(salles où ce PNJ peut travailler)</span></label>
       <div id="npc-activites-wrap" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:.3rem">
         ${[
           ['forge',              '🔨 Forge'],
@@ -1339,7 +1336,7 @@ export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
 
     ${_renderStatsForm(npc)}
     <div class="form-group" style="margin-top:.75rem">
-      <label>Portrait <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
+      <label>Portrait <span class="npc-dim">(optionnel)</span></label>
       <div id="npc-img-drop" style="border:2px dashed var(--border-strong);border-radius:10px;
         padding:.85rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
         <div id="npc-img-preview">
@@ -1619,7 +1616,7 @@ export function openAffiniteGroupeModal(npcId) {
     </div>
 
     <div class="form-group">
-      <label>Note <span style="color:var(--text-dim);font-weight:400">(visible par tous)</span></label>
+      <label>Note <span class="npc-dim">(visible par tous)</span></label>
       <textarea class="input-field" id="afg-note" rows="3"
         placeholder="Ex: A aidé lors de la défense de la ville…">${_esc(curNote)}</textarea>
     </div>
@@ -1853,8 +1850,7 @@ function _getAffiniteTypesManagerHtml() {
 
       <!-- Emoji -->
       <div style="margin-bottom:.55rem">
-        <div style="font-size:.64rem;color:var(--text-dim);text-transform:uppercase;
-          letter-spacing:.8px;margin-bottom:.3rem">Emoji</div>
+        <div class="npc-label-up">Emoji</div>
           <div id="aft-emoji-grid" style="display:flex;flex-wrap:wrap;gap:.25rem;
             background:var(--bg-card);border:1px solid var(--border);
             border-radius:10px;padding:.5rem;
@@ -1866,8 +1862,7 @@ function _getAffiniteTypesManagerHtml() {
 
       <!-- Nom -->
       <div style="margin-bottom:.55rem">
-        <div style="font-size:.64rem;color:var(--text-dim);text-transform:uppercase;
-          letter-spacing:.8px;margin-bottom:.3rem">Nom</div>
+        <div class="npc-label-up">Nom</div>
         <input class="input-field" id="aft-label" value="${_esc(s.label)}"
           placeholder="Ex: Confident, Rival, Chouchou…"
           style="font-size:.85rem">
@@ -1875,8 +1870,7 @@ function _getAffiniteTypesManagerHtml() {
 
       <!-- Couleur -->
       <div style="margin-bottom:.7rem">
-        <div style="font-size:.64rem;color:var(--text-dim);text-transform:uppercase;
-          letter-spacing:.8px;margin-bottom:.3rem">Couleur</div>
+        <div class="npc-label-up">Couleur</div>
         <div id="aft-color-grid" style="display:flex;gap:.4rem;flex-wrap:wrap">
           ${_aftColorGrid(s.couleur)}
         </div>
@@ -2137,13 +2131,13 @@ function _getAffinitePersoModalArgs(npcId, existingId = null) {
     </div>
 
     <div class="form-group">
-      <label>🌐 Note publique <span style="color:var(--text-dim);font-weight:400">(visible par tous)</span></label>
+      <label>🌐 Note publique <span class="npc-dim">(visible par tous)</span></label>
       <textarea class="input-field" id="afp-note-publique" rows="2"
         placeholder="Ex: Sœur de, Ami d'enfance…">${_esc(existing?.notePublique || '')}</textarea>
     </div>
 
     <div class="form-group">
-      <label>🔒 Note privée <span style="color:var(--text-dim);font-weight:400">(visible par ce joueur seulement)</span></label>
+      <label>🔒 Note privée <span class="npc-dim">(visible par ce joueur seulement)</span></label>
       <textarea class="input-field" id="afp-note" rows="3"
         placeholder="Ex: A rendu un service personnel…">${_esc(existing?.note || '')}</textarea>
     </div>

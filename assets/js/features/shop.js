@@ -715,9 +715,9 @@ function _renderHomeSearchResults() {
     html += `<div class="sh-pagination">`;
     if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span class="sh-dim-pill">…</span>':''}`;
     for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
     if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
@@ -980,9 +980,9 @@ function _renderItemsView() {
     html += `<div class="sh-pagination">`;
     if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const start=Math.max(1,p-2), end=Math.min(pages,p+2);
-    if(start>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${start>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    if(start>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${start>2?'<span class="sh-dim-pill">…</span>':''}`;
     for(let i=start;i<=end;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(end<pages) html+=`${end<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(end<pages) html+=`${end<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
     if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
@@ -2111,9 +2111,9 @@ function _updateItemsOnly() {
     html += `<div class="sh-pagination">`;
     if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span class="sh-dim-pill">…</span>':''}`;
     for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
     if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
@@ -2246,14 +2246,14 @@ function openCatModal(catId) {
       </div>
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🎯 Type par défaut <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(fallback pour les anciens items)</small></div>
+        <div class="sh-admin-section-title">🎯 Type par défaut <small class="sh-label">(fallback pour les anciens items)</small></div>
         <p class="sh-admin-section-hint">Désormais chaque article a son propre type. Cette valeur sert uniquement de défaut pour les articles créés sans type explicite.</p>
         <select class="sh-admin-row-input" id="cat-template" style="width:100%;text-align:left;font-family:inherit;font-weight:500">${tplOptions}</select>
         <div id="cat-tpl-preview" class="sh-admin-preview"></div>
       </div>
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🖼️ Illustration <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(optionnelle)</small></div>
+        <div class="sh-admin-section-title">🖼️ Illustration <small class="sh-label">(optionnelle)</small></div>
         <p class="sh-admin-section-hint">Affichée en background de la pastille catégorie sur la page d'accueil.</p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div id="cat-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
@@ -2357,7 +2357,7 @@ function openSubCatModal(catId,scId) {
       </div>
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🖼️ Illustration <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(optionnelle)</small></div>
+        <div class="sh-admin-section-title">🖼️ Illustration <small class="sh-label">(optionnelle)</small></div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div id="sc-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
             ${sc?.image ? `<img src="${sc.image}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}

@@ -218,3 +218,8 @@
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
+
+/* ── Helpers texte répétés ──────────────────────────────────────────────── */
+.npc-dim      { color:var(--text-dim);font-weight:400 }
+.npc-label    { font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;font-weight:600 }
+.npc-label-up { font-size:.64rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;margin-bottom:.3rem }
