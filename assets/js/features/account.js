@@ -27,6 +27,7 @@ import { registerActions }        from '../core/actions.js';
 import { _esc, _norm }           from '../shared/html.js';
 import { calcOr }                from '../shared/char-stats.js';
 
+import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -416,7 +417,7 @@ async function confirmDeleteAccount() {
 // ══════════════════════════════════════════════════════════════════════════════
 async function deleteCharWithRefund(charId) {
   try {
-    const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return false;
 
     const inv       = c.inventaire || [];

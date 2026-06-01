@@ -11,6 +11,7 @@ import { watch } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
+import { toggleQuestParticipant } from '../shared/participants.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -1289,13 +1290,10 @@ async function dashQuestJoin(id, el) {
   const myChar = (STATE.characters || []).find(c => c.uid === myUid);
   if (!myChar) { showNotif('Aucun personnage trouvé.', 'error'); return; }
   if (el) { el.disabled = true; el.textContent = '…'; }
-  const parts = Array.isArray(quest.participants) ? [...quest.participants] : [];
-  const idx = parts.findIndex(p => p.uid === myUid);
-  if (idx >= 0) parts.splice(idx, 1);
-  else parts.push({ uid: myUid, charId: myChar.id, nom: myChar.nom || '?', photo: myChar.photo || null, photoX: myChar.photoX || 0, photoY: myChar.photoY || 0 });
+  const result = toggleQuestParticipant(quest.participants, { uid: myUid, char: myChar });
   try {
-    await saveDoc('quests', id, { participants: parts });
-    showNotif(idx >= 0 ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', idx >= 0 ? 'info' : 'success');
+    await saveDoc('quests', id, { participants: result.participants });
+    showNotif(result.leaving ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', result.leaving ? 'info' : 'success');
     await PAGES.dashboard();
   } catch {
     showNotif('Erreur.', 'error');

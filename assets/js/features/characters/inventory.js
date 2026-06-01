@@ -19,6 +19,7 @@ import {
   syncEquipmentAfterInventoryMutation,
 } from './data.js';
 
+import { getCharacterById } from '../../shared/character-state.js';
 let _charInvSearch = '';
 let _invCatOpen = {};
 let _sellRefundsCum = [];
@@ -358,7 +359,7 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const maxQte  = indices.length;
   if (maxQte === 0) return;
 
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   const equippedMap = c ? getEquippedInventoryIndexMap(c) : new Map();
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
   const hasEquipped = equippedSlots.length > 0;
@@ -463,7 +464,7 @@ function _sellRefreshTotal(input, prixVente, maxQte) {
 
 export async function sellInvItemBulk(charId, indicesB64, prixVente) {
   try {
-    const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
 
     const allIndices = _decodeIndices(indicesB64);
@@ -525,7 +526,7 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
 
 export async function sellInvItem(charId, invIndex) {
   const b64 = btoa(JSON.stringify([invIndex]));
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   const item = (c?.inventaire||[])[invIndex];
   const pv = parseFloat(item?.prixVente) || Math.round((parseFloat(item?.prixAchat)||0)*0.6);
   openSellInvModal(charId, b64, pv, item?.nom||'objet');
@@ -575,7 +576,7 @@ export function openDeleteInvModal(charId, indicesB64, nom) {
 
 export async function deleteInvItemBulk(charId, indicesB64) {
   try {
-    const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
     const allIndices = _decodeIndices(indicesB64);
     const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
@@ -608,7 +609,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
 // ENVOI
 // ══════════════════════════════════════════════
 export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
-  const c = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (!c) return;
 
   let indices;
@@ -746,7 +747,7 @@ export async function sendInvItem(fromCharId, indicesB64) {
 // ══════════════════════════════════════════════
 
 export async function openSendGoldModal(charId) {
-  const fromChar = STATE.characters?.find(x => x.id === charId) || STATE.activeChar;
+  const fromChar = getCharacterById(charId);
   if (!fromChar) return;
 
   const orDispo = calcOr(fromChar);

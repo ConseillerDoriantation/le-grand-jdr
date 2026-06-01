@@ -3,6 +3,7 @@ import { charSession } from '../../shared/char-session.js';
 import { loadCollectionWhere, updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
 
+import { getCharacterById } from '../../shared/character-state.js';
 // ══════════════════════════════════════════════
 // ÉDITION INLINE — TEXTE
 // ══════════════════════════════════════════════
@@ -16,7 +17,7 @@ export function inlineEditText(charId, field, el) {
 
   const save = async () => {
     const val = input.value.trim() || cur;
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c || val === cur) { el.textContent = cur; input.replaceWith(el); return; }
     c[field] = val;
     await updateInCol('characters', charId, {[field]: val});
@@ -53,7 +54,7 @@ export function inlineEditChip(charId, field, el, placeholder = '') {
   const save = async () => {
     const val = input.value.trim();
     if (val === realVal) { input.replaceWith(el); return; }
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) { input.replaceWith(el); return; }
     c[field] = val;
     await updateInCol('characters', charId, {[field]: val});
@@ -91,7 +92,7 @@ export function inlineEditNum(charId, field, el, min=0, max=99999) {
 
   const save = async () => {
     const val = Math.max(min, Math.min(max, parseInt(input.value)||0));
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) { input.replaceWith(el); return; }
     c[field] = val;
     await updateInCol('characters', charId, {[field]: val});
@@ -128,7 +129,7 @@ export function inlineEditStatFromCard(event, charId, statKey, cardEl) {
 
 // Édite la BASE d'une stat (MJ uniquement). stats[key] est recalculé = base + levelUps[key]
 export function inlineEditStat(charId, statKey, el) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+  const c = getCharacterById(charId);
   const lvlUp = parseInt((c?.statsLevelUps||{})[statKey]) || 0;
   const cur = (c?.statsBase||{})[statKey] ?? Math.max(1, (parseInt((c?.stats||{})[statKey])||8) - lvlUp);
   const input = document.createElement('input');
@@ -140,7 +141,7 @@ export function inlineEditStat(charId, statKey, el) {
 
   const save = async () => {
     const val = Math.max(1, Math.min(30, parseInt(input.value)||cur));
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) { input.replaceWith(el); return; }
     c.stats         = c.stats || {};
     c.statsBase     = c.statsBase || {};

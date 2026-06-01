@@ -10,6 +10,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
+import { toggleQuestParticipant } from '../shared/participants.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { listPlaces } from './map/data/places.repo.js';
@@ -166,13 +167,10 @@ async function toggleQuestJoin(id) {
   if (!q) return;
 
   const uid   = STATE.user?.uid;
-  const parts = Array.isArray(q.participants) ? [...q.participants] : [];
-  const idx   = parts.findIndex(p => p.uid === uid);
+  const current = toggleQuestParticipant(q.participants, { uid });
 
-  if (idx >= 0) {
-    // Quitter — pas besoin de choisir le personnage
-    parts.splice(idx, 1);
-    await _questSaveParts(id, parts, true);
+  if (current.leaving) {
+    await _questSaveParts(id, current.participants, true);
   } else {
     // Rejoindre — sélectionner le personnage si plusieurs
     const myChars = STORE.questMyChars || [];
@@ -217,17 +215,8 @@ async function pickQuestChar(questId, charId) {
 async function _questJoinWithChar(id, char) {
   const q   = (STORE.questItems || []).find(x => x.id === id);
   if (!q) return;
-  const uid   = STATE.user?.uid;
-  const parts = Array.isArray(q.participants) ? [...q.participants] : [];
-  parts.push({
-    uid,
-    charId: char.id,
-    nom:    char.nom    || '?',
-    photo:  char.photo  || null,
-    photoX: char.photoX || 0,
-    photoY: char.photoY || 0,
-  });
-  await _questSaveParts(id, parts, false);
+  const { participants } = toggleQuestParticipant(q.participants, { uid: STATE.user?.uid, char });
+  await _questSaveParts(id, participants, false);
 }
 
 async function _questSaveParts(id, parts, leaving) {

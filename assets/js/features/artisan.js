@@ -25,6 +25,7 @@ import {
   syncEquipmentAfterInventoryMutation, buildEquippedItemFromInventory,
 } from '../shared/equipment-utils.js';
 import { loadUpgradeSettings, getUpgradeSettings } from '../shared/upgrade-settings.js';
+import { getVisibleCharacters } from '../shared/character-state.js';
 
 // ══════════════════════════════════════════════
 // CATÉGORIES DE FRAGMENTS
@@ -114,8 +115,7 @@ function _canAfford(c, cost) {
 }
 
 function _getEligibleChars() {
-  const all = Array.isArray(STATE.characters) ? STATE.characters : [];
-  return STATE.isAdmin ? all : all.filter(c => c.uid === STATE.user?.uid);
+  return getVisibleCharacters();
 }
 
 function _getActiveArtisanChar() {

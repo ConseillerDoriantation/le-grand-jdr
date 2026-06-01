@@ -13,6 +13,7 @@ import {
   sortCharactersForDisplay,
 } from '../shared/char-stats.js';
 
+import { getCharacterById, getVisibleCharacters } from '../shared/character-state.js';
 // ── Sous-modules ─────────────────────────────────────────────────────────────
 import {
   loadCombatStyles, _defaultCombatStyles, detectCombatStyle,
@@ -216,9 +217,7 @@ function _auraVars(hexCol) {
 
 // Pastilles de sélection de personnage (char-switch)
 function _buildCharSwitchHtml(activeCharId, canEdit) {
-  let switchable = STATE.isAdmin
-    ? (STATE.characters || [])
-    : (STATE.characters || []).filter(x => x.uid === STATE.user?.uid);
+  let switchable = getVisibleCharacters();
   if (STATE.isAdmin && _charAdminFilter)
     switchable = switchable.filter(x => x.ownerPseudo === _charAdminFilter);
   switchable = sortCharactersForDisplay(switchable);
@@ -953,12 +952,12 @@ async function _csV3DeleteLedger(charId, kind, idx) {
 
 function _csV3LedgerSetKind(charId, kind) {
   _csV3LedgerFilter = { ..._csV3LedgerFilter, kind, limit: 25 };
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (c && charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
 }
 function _csV3LedgerSetSearch(charId, search) {
   _csV3LedgerFilter = { ..._csV3LedgerFilter, search, limit: 25 };
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (!c) return;
   // Re-render mais on restaure le focus + caret dans la search box
   const caret = document.querySelector('.ledger-search')?.selectionStart;
@@ -970,7 +969,7 @@ function _csV3LedgerSetSearch(charId, search) {
 }
 function _csV3LedgerMore(charId) {
   _csV3LedgerFilter = { ..._csV3LedgerFilter, limit: (_csV3LedgerFilter.limit || 25) + 25 };
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (c && charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
 }
 
@@ -1267,7 +1266,7 @@ const _REL_SENTS = [
 const _REL_DEFAULT_LBL = { lien:'Lien', allie:'Allié', neutre:'Neutre', mefiance:'Méfiance', ennemi:'Ennemi' };
 
 function _openRelationModal(charId, idx) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const isEdit = Number.isInteger(idx) && idx >= 0;
   const r = isEdit ? (c.relations || [])[idx] : null;
   if (isEdit && !r) return;
@@ -1316,7 +1315,7 @@ function _csV3RelSent(sent) {
 }
 
 async function _csV3SaveRelation(charId, idx) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const nom = document.getElementById('rel-nom')?.value.trim();
   if (!nom) { showNotif('Indique au moins un nom.', 'error'); return; }
   const sent = document.getElementById('rel-sent')?.value || 'neutre';
@@ -1339,7 +1338,7 @@ async function _csV3SaveRelation(charId, idx) {
 }
 
 async function _csV3DeleteRelation(charId, idx) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (!c?.relations?.[idx]) return;
   const nom = c.relations[idx].nom || '?';
   if (!await confirmModal(`Supprimer la relation <b>${_esc(nom)}</b> ?`, { title:'Confirmation', confirmLabel:'Supprimer', icon:'🗑️' })) return;
@@ -1604,7 +1603,7 @@ function renderCharProfilV3(c, canEdit) {
 
 // Handler édition citation — sauvegarde inline sans modal
 async function _csV3SaveQuote(charId, value) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const trimmed = (value || '').trim();
   if ((c.quote || '') === trimmed) return;
   c.quote = trimmed;
@@ -1612,7 +1611,7 @@ async function _csV3SaveQuote(charId, value) {
   catch (e) { console.warn('[quote save]', e); }
 }
 async function _csV3CommitTags(charId, nextTags) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   c.tags = nextTags;
   if (_profilCache?.[charId]) _profilCache[charId].tags = nextTags;
   try { await updateInCol('characters', charId, { tags: nextTags }); }
@@ -1621,7 +1620,7 @@ async function _csV3CommitTags(charId, nextTags) {
 }
 async function _csV3AddProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
   if (cur.length >= 8) return;
   if (cur.some(x => x.toLowerCase() === t.toLowerCase())) return;
@@ -1637,7 +1636,7 @@ async function _csV3AddProfilTagFromInput(charId) {
 }
 async function _csV3RemoveProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
   const next = cur.filter(x => x.toLowerCase() !== t.toLowerCase());
   if (next.length === cur.length) return;
@@ -1646,7 +1645,7 @@ async function _csV3RemoveProfilTag(charId, value) {
 // Sauvegarde la VALEUR d'un champ identité (defaults ou custom) directement depuis l'input.
 // Ne re-render PAS la fiche pour éviter de perdre le focus pendant la saisie.
 async function _csV3SaveIdentityValue(charId, key, value) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const merged = _mergeIdentityDefaults(c.identity);
   const trimmed = (value || '').trim();
   const old = (merged.find(e => e.k === key)?.v) || '';
@@ -1666,7 +1665,7 @@ async function _csV3SaveIdentityValue(charId, key, value) {
 // Renomme / supprime un champ CUSTOM (les defaults ne sont pas renommables)
 async function _csV3RenameIdentity(charId, key) {
   if (IDENTITY_DEFAULTS.includes(key)) return;
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const newK = prompt(`Renommer "${key}" (laisser vide pour supprimer) :`, key);
   if (newK === null) return;
   const trimmed = newK.trim();
@@ -1683,7 +1682,7 @@ async function _csV3RenameIdentity(charId, key) {
 }
 // Ajoute un champ identité custom
 async function _csV3AddFact(charId) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const k = prompt('Nom du champ (ex: Bras-droit, Phobie…) :'); if (!k?.trim()) return;
   const v = prompt('Valeur :') || '';
   const next = _normalizeIdentity(c.identity);
@@ -1696,16 +1695,16 @@ async function _csV3AddFact(charId) {
 // Édition bio avec l'éditeur rich-text — mode "édition" toggle
 function _csV3EnterBioEdit(charId) {
   _csV3EditingBio = charId;
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   _renderTabV3('profil', c, true);
 }
 function _csV3CancelBio(charId) {
   _csV3EditingBio = null;
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   _renderTabV3('profil', c, true);
 }
 async function _csV3SaveBioRt(charId) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   const html = getRichTextHtml('profil-bio-rt') || '';
   // Sauvegarde : on écrit sur c.bio (string HTML) ET sur pres.content si présence
   c.bio = html;
@@ -1721,7 +1720,7 @@ async function _csV3SaveBioRt(charId) {
   _renderTabV3('profil', c, true);
 }
 async function _csV3SetCombatStyle(charId, styleId) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const c = getCharacterById(charId); if (!c) return;
   // Toggle : reclic sur le style actif → on revient à la détection auto (null)
   const next = c.combatStyle === styleId ? null : styleId;
   c.combatStyle = next;
@@ -1739,7 +1738,7 @@ async function _csV3SaveVisibility(charId, key, value) {
     } catch (e) { console.error('[visibility]', e); }
   } else {
     // Fallback : stocker sur le char
-    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    const c = getCharacterById(charId);
     if (c) { c[key] = value; await updateInCol('characters', charId, { [key]: value }); }
   }
 };
@@ -2351,7 +2350,7 @@ function renderCharSortsV3(c, canEdit) {
 
 // ── Allocation ±1 point de niveau sur une stat depuis le stats banner ───────
 async function allocateStat(charId, key, delta = 1) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (!c) return;
   if (!STATS_KEYS.includes(key)) return;
 
@@ -2415,7 +2414,7 @@ async function _setDefaultCharacter(charId) {
 };
 
 async function setCharAura(charId, aura) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+  const c = getCharacterById(charId);
   if (!c) return;
   c.aura = aura;
   await updateInCol('characters', charId, {aura});

@@ -16,6 +16,7 @@ import PAGES from './pages.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { setHistoireCtx } from '../shared/histoire-ctx.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
+import { storyParticipantsFromGroups } from '../shared/participants.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
@@ -2033,18 +2034,7 @@ async function saveStory(id = '') {
     // On les matérialise depuis STATE.characters pour conserver photo / photoX,Y.
     // C'est le seul moyen de rattacher des personnages à une mission désormais :
     // pas de participants individuels possibles.
-    const chars = sortCharactersForDisplay(STATE.characters || []);
-    const seenPartIds = new Set();
-    const participants = [];
-    STORE.modalGroupes.forEach(g => (g.membres || []).forEach(id => {
-      if (seenPartIds.has(id)) return;
-      seenPartIds.add(id);
-      const c = chars.find(x => x.id === id);
-      if (c) participants.push({
-        id: c.id, nom: c.nom || '', photo: c.photo || '',
-        photoX: c.photoX || 0, photoY: c.photoY || 0, photoZoom: c.photoZoom || 1,
-      });
-    }));
+    const participants = storyParticipantsFromGroups(STORE.modalGroupes, STATE.characters);
 
     const allCb=document.querySelectorAll('[id^="lien-"]');
     const liens=[...allCb].filter(cb=>cb.checked).map(cb=>cb.id.replace('lien-',''));

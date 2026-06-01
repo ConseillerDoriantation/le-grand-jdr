@@ -21,7 +21,8 @@ import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
-import { calcOr, sortCharactersForDisplay, getDefaultCharForUser } from '../shared/char-stats.js';
+import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
+import { getVisibleCharacters } from '../shared/character-state.js';
 import { useGold } from '../shared/economy.js';
 
 
@@ -1529,10 +1530,7 @@ async function _bastionAdjustRessource(key, delta) {
 // Renvoie la liste des personnages que l'utilisateur peut piloter pour transférer
 // (MJ : tous · joueur : ses persos uniquement). Default = perso du joueur connecté.
 function _eligibleChars() {
-  const all = STATE.characters || [];
-  const filtered = STATE.isAdmin ? all : all.filter(c => c.uid === STATE.user?.uid);
-  // Tri logique unifié : joueur alpha → ★ par défaut → nom alpha
-  return sortCharactersForDisplay(filtered);
+  return getVisibleCharacters({ sorted: true });
 }
 
 function _bastionOpenTransfer(direction) {

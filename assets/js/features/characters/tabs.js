@@ -9,6 +9,7 @@ import { richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../../
 import { uploadJpeg } from '../../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
 
+import { getCharacterById } from '../../shared/character-state.js';
 // ══════════════════════════════════════════════
 // TAB : CARACTÉRISTIQUES
 // ══════════════════════════════════════════════
@@ -729,7 +730,7 @@ export function previewXpBar(input, palier) {
 // ── Allocation d'un point de niveau sur une caractéristique ──────────────────
 export async function allocStatPoint(charId, key, delta) {
   try {
-    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
     c.stats         = c.stats || {};
     c.statsBase     = c.statsBase || {};
@@ -772,7 +773,7 @@ export async function addXpFromInput(charId) {
   if (!input) return;
   const delta = parseInt(input.value);
   if (!delta || delta <= 0) return;
-  const c = (STATE.characters||[]).find(x => x.id === charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (!c) return;
   const newXp = (parseInt(c.exp) || 0) + delta;
   await updateInCol('characters', charId, { exp: newXp });
@@ -795,7 +796,7 @@ export function toggleCompteHist(type, count) {
 
 export async function saveXpDirect(charId, input) {
   try {
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
     const palier = calcPalier(c.niveau||1);
     const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
@@ -813,7 +814,7 @@ export async function addXpDelta(charId) {
     if (!input) return;
     const delta = parseInt(input.value);
     if (!delta || delta <= 0) return;
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
     const newXp = (parseInt(c.exp)||0) + delta;
     c.exp = newXp;
@@ -1078,7 +1079,7 @@ export function openProfilImageUpload(charId) {
         const newId = await addToCol('players', data);
         _profilCache[charId] = { id: newId, ...data };
       }
-      const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+      const c = getCharacterById(charId);
       if (c && charSession.getCurrentCharTab() === 'profil') charSession.renderTab('profil', c, true);
       showNotif('Illustration mise à jour !', 'success');
     } catch (e) {
@@ -1094,6 +1095,6 @@ export async function removeProfilImage(charId) {
   if (!pres?.id) return;
   await updateInCol('players', pres.id, { imageUrl: '' });
   _profilCache[charId] = { ...pres, imageUrl: '' };
-  const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
+  const c = getCharacterById(charId);
   if (c && charSession.getCurrentCharTab() === 'profil') charSession.renderTab('profil', c, true);
 }

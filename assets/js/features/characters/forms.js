@@ -9,6 +9,7 @@ import { loadAllUsers } from '../../core/adventure.js';
 import { _esc } from '../../shared/html.js';
 import PAGES from '../pages.js';
 
+import { getCharacterById } from '../../shared/character-state.js';
 let _newCharOwners = [];
 let _editTitres = [];
 function _renderFormsChar(c, tab) {
@@ -27,7 +28,7 @@ function flashEl(el) {
 
 export async function adjustStat(stat, delta, charId) {
   try {
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
     const maxVal = stat==='pvActuel' ? calcPVMax(c) : calcPMMax(c);
     const cur = c[stat]??maxVal;
@@ -344,7 +345,7 @@ async function confirmNewChar() {
 // TITRES
 // ══════════════════════════════════════════════
 export function manageTitres(charId) {
-  const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+  const c = getCharacterById(charId);
   if (!c) return;
   _editTitres = [...(c.titres||[])];
   openModal('', `
@@ -415,7 +416,7 @@ function _refreshTitresList() {
 
 export async function saveTitres(charId) {
   try {
-    const c = STATE.characters.find(x=>x.id===charId)||STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
     c.titres = _editTitres || [];
     await updateInCol('characters', charId, {titres: c.titres});

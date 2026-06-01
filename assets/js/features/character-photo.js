@@ -6,6 +6,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { pickImageFile } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 
+import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
 // CHARACTER PHOTO — upload → crop pan/zoom → persistance Firestore.
 // La logique de crop est centralisée dans shared/image-crop.js.
@@ -73,7 +74,7 @@ async function saveCroppedCharacterPhoto(charId) {
     const dataUrl = _activePhotoCrop?.getBase64();
     if (!dataUrl) { showNotif('Erreur : cropper non initialisé.', 'error'); return; }
 
-    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
 
     c.photo = dataUrl; c.photoZoom = 1; c.photoX = 0; c.photoY = 0; // legacy reset
@@ -88,7 +89,7 @@ async function saveCroppedCharacterPhoto(charId) {
 
 async function deleteCharPhoto(charId) {
   try {
-    const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
+    const c = getCharacterById(charId);
     if (!c) return;
     c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
     await updateInCol('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });

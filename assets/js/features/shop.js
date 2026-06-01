@@ -20,6 +20,7 @@ import { characterPortraitContent } from '../shared/portraits.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
+import { getVisibleCharacters } from '../shared/character-state.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -1052,10 +1053,7 @@ function _buildTagGroups(items) {
 }
 
 function _getShopChars() {
-  const all = Array.isArray(STATE.characters) ? STATE.characters : [];
-  return STATE.isAdmin
-    ? all
-    : all.filter(c => c.uid === STATE.user?.uid);
+  return getVisibleCharacters();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
