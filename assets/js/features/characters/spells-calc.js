@@ -7,7 +7,7 @@
 
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
-import { getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
+import { getMaitriseBonus as getSharedMaitriseBonus, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 
@@ -69,7 +69,7 @@ export function _calcSortDegats(s, c) {
   const bonusVal = nbPuiss > 1 ? (nbPuiss - 1) * 2 : 0;
 
   // Bonus de maîtrise de l'arme principale (toujours appliqué)
-  const maitrise = _getMaitriseBonus(c, mainP);
+  const maitrise = getSharedMaitriseBonus(c, mainP);
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
@@ -113,7 +113,7 @@ export function _calcSortSoin(s, c) {
 
   // Maîtrise de l'arme : pertinente uniquement pour les sorts magiques (l'arme est le focus)
   const mainP   = getMainWeapon(c);
-  const maitrise = isMagic ? _getMaitriseBonus(c, mainP) : 0;
+  const maitrise = isMagic ? getSharedMaitriseBonus(c, mainP) : 0;
   const maitriseStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
 
   const buildDefault = (diceCount) => {
@@ -181,10 +181,9 @@ export const SORT_COMBOS = [
     describe: (counts, s) => {
       const arm = getInvokedArm(_spellMatricesCache, s?.noyauTypeId);
       const nbP = counts.Puissance || 0;
-      const STAT_LBL = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' };
       if (arm) {
-        const tch = STAT_LBL[arm.statToucher] || arm.statToucher;
-        const dmg = STAT_LBL[arm.statDegats]  || arm.statDegats;
+        const tch = statShort(arm.statToucher) || arm.statToucher;
+        const dmg = statShort(arm.statDegats)  || arm.statDegats;
         const statStr = (arm.statToucher === arm.statDegats) ? tch : `Touche:${tch} / Dégâts:${dmg}`;
         const puissBonus = nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : '';
         return `${arm.weapon} · ${arm.degats}${puissBonus} · ${statStr} · portée ${arm.portee}m · 2 tours par défaut${arm.note ? ` · ${arm.note}` : ''}`;
@@ -297,7 +296,7 @@ export function _autoSourceDegats(s, c) {
   const mainP   = getMainWeapon(c);
   // Override du sort sur la stat de dégâts (override sort > arme principale)
   const statKey = s?.degatsStat || mainP.statAttaque || 'force';
-  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || 'For';
+  const statLbl = statShort(statKey) || 'For';
   const nbP     = (s.runes||[]).filter(r => r === 'Puissance').length;
   const srcLbl  = s?.degatsStat ? `stat sort (${statLbl})` : statLbl;
   const parts   = [mainP.isDefault ? `Poings ${mainP.degats}` : (mainP.nom || 'arme'), srcLbl];
@@ -308,7 +307,7 @@ export function _autoSourceSoin(s) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
   const isMagic = _isNoyauMagic(s);
   const statKey = _getSortSoinStatKey(s, _modalChar());
-  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
+  const statLbl = statShort(statKey) || statKey.slice(0,3);
   // Le label reflète si la stat vient d'un override de sort ou de l'auto-dérivation arme/noyau
   const natureStr = s?.degatsStat
     ? `stat sort (${statLbl})`
@@ -744,8 +743,8 @@ export function _buildSortResume(s, c) {
     const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
     const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
     const modAtk  = Math.floor((Math.min(22, statVal) - 10) / 2);
-    const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
-    const maitrise = _getMaitriseBonus(c, mainP);
+    const statLbl = statShort(statKey) || statKey.slice(0,3);
+    const maitrise = getSharedMaitriseBonus(c, mainP);
     const deg      = _calcSortDegats(s, c);
     // Label détaillé : dés + stat + maîtrise si présente
     const modAtkStr = modAtk >= 0 ? `+${modAtk}` : `${modAtk}`;
@@ -769,7 +768,7 @@ export function _buildSortResume(s, c) {
         lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · pas de soin direct · scale avec Protection` });
       } else {
         const mainPsoin  = getMainWeapon(c);
-        const maitrSoin  = _getMaitriseBonus(c, mainPsoin);
+        const maitrSoin  = getSharedMaitriseBonus(c, mainPsoin);
         const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
         const chainStr   = nbProt > 1 ? ` +${(nbProt-1)*2}` : '';
         lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · +${nbProt}d4 Prot${chainStr}${maitrSoinStr}${monoStr}` });
@@ -910,9 +909,7 @@ export function _buildSortResume(s, c) {
       if (etat?.defaultSaveStat) saveStat = etat.defaultSaveStat;
     }
     if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
-    const STAT_SHORT2 = { force:'For', dexterite:'Dex', constitution:'Con',
-                          intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
-    const statLbl = STAT_SHORT2[saveStat] || saveStat;
+    const statLbl = statShort(saveStat) || saveStat;
     const cibleStr = nbAff === 1 ? 'sur 1 ennemi' : `sur ${nbAff} ennemis (chaîné +${nbAff-1})`;
 
     if (mode === 'etat') {
@@ -956,11 +953,6 @@ export function _buildSortResume(s, c) {
   }
 
   return lines;
-}
-
-// Placeholder — resolved at runtime via characters.js import chain
-export function _getMaitriseBonus(c, item) {
-  return getSharedMaitriseBonus(c, item);
 }
 
 export function _getCurrentSpellChar() {

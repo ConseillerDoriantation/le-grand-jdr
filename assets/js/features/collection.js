@@ -7,13 +7,17 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, pageHeaderHtml} from '../shared/html.js';
 import { uploadPng } from '../shared/image-upload.js';
 
-let _cards = [];
-let _templateUrl = '';
 
 // ── Settings (template) ──────────────────────────────────────────────────────
+
+const STORE = {
+  cards: [],
+  templateUrl: '',
+};
+
 async function loadSettings() {
   const settings = await loadCollection('collectionSettings');
-  _templateUrl = settings[0]?.templateUrl || '';
+  STORE.templateUrl = settings[0]?.templateUrl || '';
 }
 
 // ── Rendu principal ──────────────────────────────────────────────────────────
@@ -23,7 +27,7 @@ export async function renderCollectionPage() {
     loadSettings(),
   ]);
 
-  _cards = cards;
+  STORE.cards = cards;
 
   const content = document.getElementById('main-content');
 
@@ -38,7 +42,7 @@ export async function renderCollectionPage() {
       </div>`;
   }
 
-  if (_cards.length === 0) {
+  if (STORE.cards.length === 0) {
     html += `
       <div class="empty-state">
         <div class="icon">🃏</div>
@@ -47,10 +51,10 @@ export async function renderCollectionPage() {
   } else {
     html += `<div class="collection-grid">`;
 
-    _cards.forEach(c => {
+    STORE.cards.forEach(c => {
       const isUnlocked = !!c.unlocked;
-      const faceImage = isUnlocked ? (c.imageUrl || '') : (_templateUrl || '');
-      const backImage = _templateUrl || '';
+      const faceImage = isUnlocked ? (c.imageUrl || '') : (STORE.templateUrl || '');
+      const backImage = STORE.templateUrl || '';
 
       const frontHtml = faceImage
         ? `<img src="${faceImage}" alt="${c.nom || ''}">`
@@ -97,7 +101,7 @@ export async function renderCollectionPage() {
 
 async function toggleUnlock(id) {
   try {
-    const card = _cards.find(c => c.id === id);
+    const card = STORE.cards.find(c => c.id === id);
     if (!card) return;
 
     await updateInCol('collection', id, {
@@ -117,13 +121,13 @@ function openTemplateModal() {
         <input type="file" id="tpl-img-file" accept="image/*" data-change="previewUploadPng" data-preview="tpl-img-preview" data-b64="tpl-img-b64">
         <input type="hidden" id="tpl-img-b64">
       </div>
-      <div id="tpl-img-preview">${_templateUrl ? `<img src="${_templateUrl}" style="max-height:120px;margin-top:0.4rem;display:block">` : ''}</div>
+      <div id="tpl-img-preview">${STORE.templateUrl ? `<img src="${STORE.templateUrl}" style="max-height:120px;margin-top:0.4rem;display:block">` : ''}</div>
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveTemplate">Enregistrer</button>
   `);
 
   // setter après rendu, hors du string HTML
-  document.getElementById('tpl-img-b64').value = _templateUrl;
+  document.getElementById('tpl-img-b64').value = STORE.templateUrl;
 }
 
 async function saveTemplate() {
@@ -132,7 +136,7 @@ async function saveTemplate() {
     const settings = await loadCollection('collectionSettings');
     if (settings[0]) await updateInCol('collectionSettings', settings[0].id, { templateUrl: url });
     else await addToCol('collectionSettings', { templateUrl: url });
-    _templateUrl = url;
+    STORE.templateUrl = url;
     closeModal();
     showNotif('Template mis à jour.', 'success');
     await renderCollectionPage();
@@ -178,7 +182,7 @@ function viewCard(id) {
 }
 
 function editCard(id) {
-  const card = _cards.find(c => c.id === id);
+  const card = STORE.cards.find(c => c.id === id);
   if (card) openCollectionModal(card);
 }
 

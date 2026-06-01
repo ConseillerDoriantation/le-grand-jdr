@@ -11,11 +11,12 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
-import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { sortCharactersForDisplay, modStr } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -28,18 +29,22 @@ bindScopedActions('bst', bstHandlers);
 
 // ── État local ────────────────────────────────────────────────────────────────
 let _bstCropper = null;
-let _creatures  = [];
-let _tracker    = {}; // { [creatureId]: { pvActuel, pmActuel, notes, deductions:{pv,pm,ca,for,...} } }
-let _damageTypes = null;
-let _searchVal  = '';
-let _filterType = ''; // filtre par type de créature
-let _filterRang  = ''; // filtre par rang (classique, elite, boss)
-let _activeId   = null; // créature ouverte dans le panneau
-let _bestiaireId = 'main'; // id du bestiaire actif (admin peut switcher)
-let _bstCurrentCol = 'bestiary';
-let _bstBestiaireList = [{ id:'main', label:'Bestiaire principal' }];
-let _viewAsUid   = null; // admin : voir le bestiaire d'un joueur (null = vue MJ)
-let _playersList = []; // [{ uid, pseudo }] — peuplé côté admin
+const STORE = {
+  creatures:     [],      // liste des créatures du bestiaire actif
+  tracker:       {},      // { [creatureId]: { pvActuel, pmActuel, notes, deductions } }
+  damageTypes:   null,    // types de dégâts (chargés au premier affichage)
+  searchVal:     '',
+  filterType:    '',      // filtre par type de créature
+  filterRang:    '',      // filtre par rang (classique, elite, boss)
+  activeId:      null,    // créature ouverte dans le panneau
+  bestiaireId:   'main',  // id du bestiaire actif
+  currentCol:    'bestiary',
+  bestiaireList: [{ id: 'main', label: 'Bestiaire principal' }],
+  viewAsUid:     null,    // admin : voir le bestiaire d'un joueur
+  playersList:   [],      // [{ uid, pseudo }] peuplé côté admin
+};
+
+
 let _bstSortable = null;
 let _bstDragBlockClick = false;
 let _bstClickGuardInstalled = false;
@@ -49,7 +54,7 @@ let _bstReordering = false;
 // Quand l'admin bascule sur un joueur, on rend exactement comme côté joueur
 // pour pouvoir voir/modifier ses estimations.
 function _isViewingPlayer() {
-  return STATE.isAdmin && _viewAsUid && _viewAsUid !== STATE.user?.uid;
+  return STATE.isAdmin && STORE.viewAsUid && STORE.viewAsUid !== STATE.user?.uid;
 }
 function _isAdminView() {
   return STATE.isAdmin && !_isViewingPlayer();
@@ -68,10 +73,10 @@ function _bstCompareCreatures(a, b) {
 }
 
 function _bstNextOrderIndex() {
-  const orders = _creatures
+  const orders = STORE.creatures
     .map(c => Number(c?.ordre))
     .filter(Number.isFinite);
-  return orders.length ? Math.max(...orders) + 1 : _creatures.length;
+  return orders.length ? Math.max(...orders) + 1 : STORE.creatures.length;
 }
 
 const RANG_STYLE = {
@@ -119,7 +124,7 @@ async function _bstEnsureShopItems() {
 function _bstRefreshButinSelects(cid) {
   const host = document.getElementById(`bst-p-butins-${cid}`);
   if (!host) return;
-  const c = _creatures.find(x => x.id === cid);
+  const c = STORE.creatures.find(x => x.id === cid);
   const butins = Array.isArray(c?.butins) ? c.butins : [];
   host.innerHTML = butins.map((b,i) => _panelButinRow(b, cid, i)).join('');
 }
@@ -199,7 +204,7 @@ async function _bstEnsureSpellsModule() {
 function _bstActionsPersist() {
   if (!_bstActionsCreatureId) return;
   _bstQueueSave(_bstActionsCreatureId, { actions: _bstActionsCache, attaques: [] });
-  const c = _creatures.find(x => x.id === _bstActionsCreatureId);
+  const c = STORE.creatures.find(x => x.id === _bstActionsCreatureId);
   if (c) { c.actions = _bstActionsCache.map(a => ({...a})); c.attaques = []; }
   const count = document.querySelector(`[data-bst-count="${_bstActionsCreatureId}-actions"]`);
   if (count) count.textContent = _bstActionsCache.length;
@@ -249,7 +254,7 @@ function _bstRenderActionsList() {
 async function _bstAddAction() {
   const mod = await _bstEnsureSpellsModule();
   if (typeof mod.addItemSpell !== 'function') { showNotif('Module sorts indisponible', 'error'); return; }
-  const c = _creatures.find(x => x.id === _bstActionsCreatureId);
+  const c = STORE.creatures.find(x => x.id === _bstActionsCreatureId);
   if (!c) return;
   const charForCalc = _bstCreatureToChar(c, _bstActionsArmeIdCtx);
   const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Créature' };
@@ -263,7 +268,7 @@ async function _bstAddAction() {
 async function _bstEditAction(idx) {
   const mod = await _bstEnsureSpellsModule();
   if (typeof mod.editItemSpell !== 'function') { showNotif('Module sorts indisponible', 'error'); return; }
-  const c = _creatures.find(x => x.id === _bstActionsCreatureId);
+  const c = STORE.creatures.find(x => x.id === _bstActionsCreatureId);
   if (!c) return;
   const charForCalc = _bstCreatureToChar(c, _bstActionsArmeIdCtx);
   const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Créature' };
@@ -328,7 +333,7 @@ function _bstRenderArmeRow(a = {}, cid, idx) {
 function _bstAddArme(cid) {
   const host = document.getElementById(`bst-p-armes-${cid}`);
   if (!host) return;
-  const c = _creatures.find(x => x.id === cid);
+  const c = STORE.creatures.find(x => x.id === cid);
   const armes = Array.isArray(c?.armesNaturelles) ? [...c.armesNaturelles] : [];
   armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', portee:'' });
   if (c) c.armesNaturelles = armes;
@@ -360,7 +365,7 @@ function _bstSaveArmes(cid) {
       portee:      r.querySelector('[data-f=portee]')?.value?.trim() || '',
     };
   }).filter(a => a.nom || a.degats);
-  const c = _creatures.find(x => x.id === cid);
+  const c = STORE.creatures.find(x => x.id === cid);
   if (c) c.armesNaturelles = armes;
   _bstQueueSave(cid, { armesNaturelles: armes });
   // Si l'arme contextuelle a disparu, on prend la première dispo
@@ -399,7 +404,7 @@ function _beastSearchText(c = {}) {
   ].filter(v => v !== undefined && v !== null && v !== '').join(' '));
 }
 
-function _beastMatchesFilters(c, { search = _searchVal, type = _filterType, rang = _filterRang } = {}) {
+function _beastMatchesFilters(c, { search = STORE.searchVal, type = STORE.filterType, rang = STORE.filterRang } = {}) {
   const q = _norm(search);
   const fType = _norm(type);
   const fRang = _norm(rang);
@@ -487,7 +492,7 @@ const _bstPending = {};
 let _bstSaveTimer = null;
 
 function _bstFlushSaves() {
-  const col = _bstCurrentCol || 'bestiary';
+  const col = STORE.currentCol || 'bestiary';
   const ids = Object.keys(_bstPending);
   if (!ids.length) return;
   ids.forEach(id => {
@@ -495,8 +500,8 @@ function _bstFlushSaves() {
     delete _bstPending[id];
     updateInCol(col, id, patch)
       .then(() => {
-        const idx = _creatures.findIndex(c => c.id === id);
-        if (idx >= 0) Object.assign(_creatures[idx], patch);
+        const idx = STORE.creatures.findIndex(c => c.id === id);
+        if (idx >= 0) Object.assign(STORE.creatures[idx], patch);
       })
       .catch(notifySaveError);
   });
@@ -512,7 +517,7 @@ function _bstQueueSave(id, patch) {
 function _bstUpdate(id, field, val) { _bstQueueSave(id, { [field]: val }); }
 function _bstUpdateNum(id, field, val) { _bstQueueSave(id, { [field]: parseInt(val) || 0 }); }
 function _bstToggleHidden(id) {
-  const c = _creatures.find(x => x.id === id);
+  const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
   const next = !c.hidden;
   c.hidden = next;
@@ -536,7 +541,7 @@ function _bstUpdateCarac(id, key, val) {
   let txt = '', cls = 'zero';
   if (!isNaN(n)) {
     const m = Math.floor((n - 10) / 2);
-    txt = m >= 0 ? `+${m}` : `${m}`;
+    txt = modStr(m);
     cls = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
   }
   const modEl = document.querySelector(`[data-bst-mod="${id}-${key}"]`);
@@ -571,7 +576,7 @@ function _bstSelectRangPanel(id, rang) {
 
 // Toggle relation aux dégâts
 function _bstToggleDmg(id, rel, typeId) {
-  const c = _creatures.find(x => x.id === id);
+  const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
   const set = new Set(Array.isArray(c[rel]) ? c[rel] : []);
   if (set.has(typeId)) set.delete(typeId); else set.add(typeId);
@@ -605,7 +610,7 @@ function _bstSaveArr(id, type) {
     // butin pour ne pas la perdre quand l'utilisateur modifie juste qte/chance
     // avant que le cache boutique soit chargé.
     const items   = _bstShopItemsCache || [];
-    const creature = _creatures.find(x => x.id === id);
+    const creature = STORE.creatures.find(x => x.id === id);
     const prev    = Array.isArray(creature?.butins) ? creature.butins : [];
     const prevById = Object.fromEntries(prev.filter(b => b.itemId).map(b => [b.itemId, b]));
     arr = rows.map(row => {
@@ -693,7 +698,7 @@ const _bstRarColor = getRareteColor;
 // ─────────────────────────────────────────────────────────────────────────────
 async function _bstButinPickerOpen(creatureId) {
   if (!creatureId) return;
-  const c = _creatures.find(x => x.id === creatureId);
+  const c = STORE.creatures.find(x => x.id === creatureId);
   if (!c) return;
   await openShopPicker({
     title: '🎒 Ajouter un butin',
@@ -860,7 +865,7 @@ function _renderPlayerAvatars() {
   return `<div style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:flex-start;margin-top:.5rem;
     padding:.4rem .5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
     ${_avatarTile({
-      active:    !_viewAsUid,
+      active:    !STORE.viewAsUid,
       ringColor: 'var(--gold)',
       uid:       '',
       imageUrl:  '',
@@ -869,8 +874,8 @@ function _renderPlayerAvatars() {
       charNom:   '',
     })}
     <div style="width:1px;align-self:stretch;background:var(--border);margin:0 .15rem"></div>
-    ${_playersList.map(p => _avatarTile({
-      active:    _viewAsUid === p.uid,
+    ${STORE.playersList.map(p => _avatarTile({
+      active:    STORE.viewAsUid === p.uid,
       ringColor: '#4f8cff',
       uid:       p.uid,
       imageUrl:  p.portraitUrl,
@@ -893,7 +898,7 @@ export async function renderBestiary() {
     const meta = await getDocData('bestiary_meta', 'list');
     const list = meta?.list || [];
     if (!list.find(b => b.id === 'main')) list.unshift({ id:'main', label:'Bestiaire principal' });
-    _bstBestiaireList = list;
+    STORE.bestiaireList = list;
 
     // Liste des joueurs (uid + pseudo) pour la vue "bestiaire d'un joueur".
     // Source primaire : STATE.characters (déjà chargé via la page d'accueil).
@@ -924,23 +929,23 @@ export async function renderBestiary() {
         });
       }
     });
-    _playersList = [...seen.values()]
+    STORE.playersList = [...seen.values()]
       .sort((a,b) => a.pseudo.localeCompare(b.pseudo, 'fr', { sensitivity:'base' }));
   }
 
   // Bestiaire actif — hydraté depuis le cache TTL (instant si chaud) puis
   // tenu à jour par le watch ci-dessous.
-  const col = _bestiaireId === 'main' ? 'bestiary' : `bestiary_${_bestiaireId}`;
-  _tracker = {};
-  _bstCurrentCol = col;
+  const col = STORE.bestiaireId === 'main' ? 'bestiary' : `bestiary_${STORE.bestiaireId}`;
+  STORE.tracker = {};
+  STORE.currentCol = col;
 
-  if (!_damageTypes) _damageTypes = await loadDamageTypes();
+  if (!STORE.damageTypes) STORE.damageTypes = await loadDamageTypes();
 
   const cachedCreatures = getCachedCollection(col);
   _bstApplyData(cachedCreatures || []);
   _render();
 
-  const trackerUid = _viewAsUid || STATE.user?.uid;
+  const trackerUid = STORE.viewAsUid || STATE.user?.uid;
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
   // Les noms 'bst-creatures'/'bst-tracker' sont réutilisés : si l'admin
@@ -958,28 +963,28 @@ export async function renderBestiary() {
     watchDoc('bst-tracker', 'bestiary_tracker', trackerUid, doc => {
       if (STATE.currentPage !== 'bestiaire') return;
       if (_bstShouldSkipLiveRender()) return;
-      _tracker = doc?.data || {};
+      STORE.tracker = doc?.data || {};
       if (_bstSig() === _bstRenderSig) return;
       _render();
     });
   }
 }
 
-// Applique une liste fraîche à _creatures : filtre les `hidden` pour les
+// Applique une liste fraîche à STORE.creatures : filtre les `hidden` pour les
 // joueurs et trie par ordre manuel puis par nom. Source unique utilisée par le watch et l'hydratation
 // — toute logique de mise à jour de la liste doit passer par ici.
 function _bstApplyData(all) {
   const arr = all || [];
-  _creatures = (STATE.isAdmin ? [...arr] : arr.filter(c => !c.hidden))
+  STORE.creatures = (STATE.isAdmin ? [...arr] : arr.filter(c => !c.hidden))
     .sort(_bstCompareCreatures);
 }
 
-// Re-charge _creatures depuis loadCollection (cache TTL en mémoire patché par
+// Re-charge STORE.creatures depuis loadCollection (cache TTL en mémoire patché par
 // addToCol/updateInCol/deleteFromCol, sinon IndexedDB Firestore). Sert à
 // rester cohérent juste après une opération CRUD, sans dépendre du timing du
 // watch (qui peut être skippé si un input du panneau précédent a le focus).
 async function _bstHydrate() {
-  const col = _bstCurrentCol || 'bestiary';
+  const col = STORE.currentCol || 'bestiary';
   _bstApplyData(await loadCollection(col));
 }
 
@@ -1012,7 +1017,7 @@ function _visibleBestiaryCardIds(grid) {
 }
 
 function _mergeBestiaryVisibleOrder(visibleOrder) {
-  const next = _creatures.map(c => c.id);
+  const next = STORE.creatures.map(c => c.id);
   const visibleSet = new Set(visibleOrder);
   let i = 0;
   return next.map(id => visibleSet.has(id) ? visibleOrder[i++] : id);
@@ -1020,12 +1025,12 @@ function _mergeBestiaryVisibleOrder(visibleOrder) {
 
 async function _persistBestiaryManualOrder(visibleOrder) {
   if (!_isAdminView() || !visibleOrder.length) return false;
-  const col = _bstCurrentCol || 'bestiary';
+  const col = STORE.currentCol || 'bestiary';
   const fullOrder = _mergeBestiaryVisibleOrder(visibleOrder);
   const orderById = new Map(fullOrder.map((id, idx) => [id, idx]));
   const saves = [];
 
-  _creatures = _creatures.map(c => {
+  STORE.creatures = STORE.creatures.map(c => {
     const ordre = orderById.get(c.id);
     if (ordre === undefined) return c;
     if (Number(c.ordre) !== ordre) saves.push(updateInCol(col, c.id, { ordre }));
@@ -1045,21 +1050,10 @@ function _mountBestiarySortable() {
   if (!grid) return;
 
   _installBestiaryClickGuard();
-  _bstSortable = new Sortable(grid, {
+  _bstSortable = makeSortable(grid, {
+    prefix: 'bst',
     animation: 120,
-    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
     draggable: '.bst-sortable-item',
-    filter: 'button, a, input, select, textarea, .btn, .btn-icon',
-    preventOnFilter: false,
-    ghostClass: 'bst-sortable-ghost',
-    chosenClass: 'bst-sortable-chosen',
-    dragClass: 'bst-sortable-drag',
-    forceFallback: true,
-    fallbackOnBody: true,
-    fallbackTolerance: 5,
-    delay: 150,
-    delayOnTouchOnly: true,
-    touchStartThreshold: 5,
     onStart: () => {
       document.body.classList.add('bst-dragging');
       _bstDragBlockClick = true;
@@ -1095,7 +1089,7 @@ function _mountBestiarySortable() {
 // (cache → serveur, hydratation → 1er fire) ne reconstruit pas le DOM et
 // les cartes ne clignotent pas.
 let _bstRenderSig = '';
-function _bstSig() { return JSON.stringify({ c: _creatures, t: _tracker }); }
+function _bstSig() { return JSON.stringify({ c: STORE.creatures, t: STORE.tracker }); }
 
 // Évite d'écraser une édition admin en cours : la fiche du panneau a des
 // inputs/textarea avec auto-save debouncé (_bstQueueSave 400ms). Si on
@@ -1114,7 +1108,7 @@ function _bstShouldSkipLiveRender() {
 // ── Création rapide d'une créature sans modal ──────────────────────────────────
 async function _bstCreateDraft() {
   if (!STATE.isAdmin) return;
-  const col = _bstCurrentCol || 'bestiary';
+  const col = STORE.currentCol || 'bestiary';
   const data = {
     nom: 'Nouvelle créature', emoji: '🐲', rang: 'classique',
     type: '', environnement: '', niveau: 0, dangerositeXp: 0,
@@ -1128,7 +1122,7 @@ async function _bstCreateDraft() {
   try {
     const newId = await addToCol(col, data);
     await _bstHydrate();
-    _activeId = newId;
+    STORE.activeId = newId;
     _render();
     setTimeout(() => {
       const nameInput = document.querySelector('.bst-panel-name-input');
@@ -1141,32 +1135,32 @@ async function _bstCreateDraft() {
 function _render() {
   const content = document.getElementById('main-content');
 
-  const allTypes = [...new Set(_creatures.map(c => c.type||'').filter(Boolean))].sort();
-  const filtered = _creatures.filter(c => _beastMatchesFilters(c));
+  const allTypes = [...new Set(STORE.creatures.map(c => c.type||'').filter(Boolean))].sort();
+  const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
 
   // Comptes par rang (total, sans filtre rang)
   const byRang = { classique:0, elite:0, boss:0 };
-  _creatures.forEach(c => { const r = c.rang||'classique'; if (byRang[r]!==undefined) byRang[r]++; });
+  STORE.creatures.forEach(c => { const r = c.rang||'classique'; if (byRang[r]!==undefined) byRang[r]++; });
 
   const ribbonData = [
-    { label:'Total',    icon:'🐾', count:_creatures.length, c:'#7eb0ff',              filter:'' },
+    { label:'Total',    icon:'🐾', count:STORE.creatures.length, c:'#7eb0ff',              filter:'' },
     { label:'Classique',icon:'◆',  count:byRang.classique,  c:RANG_STYLE.classique.color, filter:'classique' },
     { label:'Élite',    icon:'★',  count:byRang.elite,      c:RANG_STYLE.elite.color,     filter:'elite'     },
     { label:'Boss',     icon:'☠',  count:byRang.boss,       c:RANG_STYLE.boss.color,      filter:'boss'      },
   ];
 
-  const bstList = _bstBestiaireList || [{ id:'main', label:'Bestiaire principal' }];
+  const bstList = STORE.bestiaireList || [{ id:'main', label:'Bestiaire principal' }];
   const tabsHtml = STATE.isAdmin ? `
     <div class="bst-tabs">
       ${bstList.map(b => `
-        <button class="bst-tab${b.id===_bestiaireId?' active':''}" data-bst-action="switchBest" data-id="${b.id}">
+        <button class="bst-tab${b.id===STORE.bestiaireId?' active':''}" data-bst-action="switchBest" data-id="${b.id}">
           📜 ${_esc(b.label)}
         </button>`).join('')}
       <button class="bst-tab add" data-bst-action="createBest">+ Nouveau</button>
     </div>` : '';
 
   content.innerHTML = `
-  <div class="bst-page ${_activeId ? 'has-panel' : 'no-panel'}">
+  <div class="bst-page ${STORE.activeId ? 'has-panel' : 'no-panel'}">
 
   <!-- ═ HERO ═══════════════════════════════════════════════════════════════ -->
   <div class="bst-hero">
@@ -1180,7 +1174,7 @@ function _render() {
 
     <div class="bst-ribbon">
       ${ribbonData.map(r => `
-        <div class="bst-ribbon-item${(!r.filter && !_filterRang)||(r.filter && _filterRang===r.filter)?' active':''}"
+        <div class="bst-ribbon-item${(!r.filter && !STORE.filterRang)||(r.filter && STORE.filterRang===r.filter)?' active':''}"
           style="--c:${r.c}"
           data-bst-action="setRang" data-rang="${r.filter}">
           <div class="bst-ribbon-icon">${r.icon}</div>
@@ -1191,7 +1185,7 @@ function _render() {
         </div>`).join('')}
     </div>
 
-    ${STATE.isAdmin && _playersList.length ? _renderPlayerAvatars() : ''}
+    ${STATE.isAdmin && STORE.playersList.length ? _renderPlayerAvatars() : ''}
   </div>
 
   ${_isViewingPlayer() ? `
@@ -1199,7 +1193,7 @@ function _render() {
     border-bottom:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.06)">
     <span>👁</span>
     <span style="font-size:.78rem;color:var(--text)">
-      Vue du bestiaire de <strong style="color:#4f8cff">${_esc(_playersList.find(p=>p.uid===_viewAsUid)?.pseudo||'?')}</strong>
+      Vue du bestiaire de <strong style="color:#4f8cff">${_esc(STORE.playersList.find(p=>p.uid===STORE.viewAsUid)?.pseudo||'?')}</strong>
       — tes modifications sont enregistrées chez ce joueur.
     </span>
     <button data-bst-action="viewAs" data-uid="" style="margin-left:auto;font-size:.7rem;padding:3px 10px;
@@ -1213,14 +1207,14 @@ function _render() {
     <div class="bst-search-wrap">
       <span style="color:var(--text-dim);font-size:.9rem;flex-shrink:0">🔍</span>
       <input type="text" id="bst-search" placeholder="Rechercher…"
-        value="${_esc(_searchVal)}"
+        value="${_esc(STORE.searchVal)}"
         data-bst-action="search" data-bst-on="input"
         style="background:none;border:none;outline:none;color:var(--text);font-size:.8rem;flex:1;min-width:0">
     </div>
     <div class="chip-row">
-      <button class="chip${!_filterType?' active':''}" data-bst-action="setType" data-type="">Tous</button>
+      <button class="chip${!STORE.filterType?' active':''}" data-bst-action="setType" data-type="">Tous</button>
       ${allTypes.map(t => `
-        <button class="chip${_norm(_filterType)===_norm(t)?' active':''}"
+        <button class="chip${_norm(STORE.filterType)===_norm(t)?' active':''}"
           data-bst-action="setType" data-type="${_esc(t)}">
           ${_esc(t)}
         </button>`).join('')}
@@ -1229,14 +1223,14 @@ function _render() {
   </div>
 
   <!-- ═ LAYOUT ═══════════════════════════════════════════════════════════════ -->
-  <div class="bst-layout ${_activeId ? 'has-panel' : 'no-panel'}">
+  <div class="bst-layout ${STORE.activeId ? 'has-panel' : 'no-panel'}">
     <div class="bst-grid-wrap">
       ${filtered.length === 0 ? `
         <div class="bst-empty">
           <div class="bst-empty-icon">🐉</div>
-          <div class="bst-empty-title">${_creatures.length===0 ? 'Aucune créature dans le bestiaire' : 'Aucun résultat'}</div>
-          <div class="bst-empty-sub">${_creatures.length===0 ? 'Ajoutez la première créature pour commencer.' : 'Essayez un filtre différent.'}</div>
-          ${STATE.isAdmin && _creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" data-bst-action="createDraft">+ Ajouter la première créature</button>` : ''}
+          <div class="bst-empty-title">${STORE.creatures.length===0 ? 'Aucune créature dans le bestiaire' : 'Aucun résultat'}</div>
+          <div class="bst-empty-sub">${STORE.creatures.length===0 ? 'Ajoutez la première créature pour commencer.' : 'Essayez un filtre différent.'}</div>
+          ${STATE.isAdmin && STORE.creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" data-bst-action="createDraft">+ Ajouter la première créature</button>` : ''}
         </div>` : `
         <div class="bst-grid${_isAdminView() ? ' bst-sortable' : ''}">
           ${filtered.map(c => _renderCard(c)).join('')}
@@ -1244,7 +1238,7 @@ function _render() {
     </div>
 
     <div class="bst-panel-slot">
-      ${_activeId ? _renderPanel(_creatures.find(c => c.id === _activeId)) : ''}
+      ${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}
     </div>
   </div>
   </div>`;
@@ -1255,10 +1249,10 @@ function _render() {
 
 // ── Card créature ─────────────────────────────────────────────────────────────
 function _renderCard(c) {
-  const isActive = c.id === _activeId;
+  const isActive = c.id === STORE.activeId;
   const rang     = c.rang || 'classique';
   const rs       = RANG_STYLE[rang] || RANG_STYLE.classique;
-  const track    = _tracker[c.id] || {};
+  const track    = STORE.tracker[c.id] || {};
 
   const pvMax    = _isAdminView() ? (parseInt(c.pvMax)||0) : 0;
   const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
@@ -1313,7 +1307,7 @@ function _renderPanel(c) {
   // MJ : panneau entièrement éditable (auto-save Firestore)
   if (_isAdminView()) return _renderPanelAdmin(c, rs);
 
-  const track = _tracker[c.id] || {};
+  const track = STORE.tracker[c.id] || {};
   const ded   = track.deductions || {};
 
   const pvMax     = parseInt(c.pvMax)    || 0;
@@ -1328,12 +1322,10 @@ function _renderPanel(c) {
   const traits    = Array.isArray(c.traits) ? c.traits : [];
   const description = c.description == null ? '' : String(c.description);
 
-  // Calcul modificateur D&D : floor((stat - 10) / 2)
   const mod = (val) => {
     const n = parseInt(val);
     if (!val || isNaN(n)) return null;
-    const m = Math.floor((n - 10) / 2);
-    return m >= 0 ? `+${m}` : `${m}`;
+    return modStr(Math.floor((n - 10) / 2));
   };
 
   // ── Hero du panneau ──────────────────────────────────────────────────────
@@ -1412,7 +1404,7 @@ function _renderPanel(c) {
     </div>` : '';
 
   // ── Relations aux dégâts : MJ SEULEMENT ─────────────────────────────────
-  const dmgHtml = _isAdminView() ? _renderDamageProfile(c, _damageTypes) : '';
+  const dmgHtml = _isAdminView() ? _renderDamageProfile(c, STORE.damageTypes) : '';
 
 
   // ── Actions Joueur : estimation par action (nom + dégâts + portée) ────────
@@ -1478,15 +1470,15 @@ function _renderPanel(c) {
 // PANNEAU MJ — entièrement éditable, auto-save
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderPanelAdmin(c, rs) {
-  const types     = _damageTypes || [];
+  const types     = STORE.damageTypes || [];
   const traits    = Array.isArray(c.traits) ? c.traits : [];
   const butins    = Array.isArray(c.butins) ? c.butins : [];
 
   const modOf = (val) => {
     const n = parseInt(val);
-    if (!val || isNaN(n)) return { txt:'', cls:'zero' };
+    if (!val || isNaN(n)) return { txt: '', cls: 'zero' };
     const m = Math.floor((n - 10) / 2);
-    return { txt: m >= 0 ? `+${m}` : `${m}`, cls: m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero' };
+    return { txt: modStr(m), cls: m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero' };
   };
 
   // ── Hero éditable : image cliquable, rang selector, nom, type, env ──────
@@ -1700,11 +1692,11 @@ function _renderPanelAdmin(c, rs) {
 
 export async function deleteBeast(id) {
   try {
-    const col = _bstCurrentCol || 'bestiary';
-    const c = _creatures.find(x=>x.id===id);
+    const col = STORE.currentCol || 'bestiary';
+    const c = STORE.creatures.find(x=>x.id===id);
     if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`, {title: 'Supprimer la créature'})) return;
     await deleteFromCol(col, id);
-    if (_activeId === id) _activeId = null;
+    if (STORE.activeId === id) STORE.activeId = null;
     await _bstHydrate();
     _render();
     showNotif('Créature supprimée.','success');
@@ -1716,8 +1708,8 @@ export async function deleteBeast(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function _saveTracker() {
   try {
-    const uid = _viewAsUid || STATE.user?.uid; if (!uid) return;
-    await saveDoc('bestiary_tracker', uid, { data: _tracker });
+    const uid = STORE.viewAsUid || STATE.user?.uid; if (!uid) return;
+    await saveDoc('bestiary_tracker', uid, { data: STORE.tracker });
   } catch (e) { notifySaveError(e); }
 }
 
@@ -1725,7 +1717,7 @@ function _syncActivePanel() {
   const page = document.querySelector('.bst-page');
   const layout = document.querySelector('.bst-layout');
   const panelSlot = document.querySelector('.bst-panel-slot');
-  const activeCreature = _creatures.find(c => c.id === _activeId);
+  const activeCreature = STORE.creatures.find(c => c.id === STORE.activeId);
 
   page?.classList.toggle('has-panel', !!activeCreature);
   page?.classList.toggle('no-panel', !activeCreature);
@@ -1733,7 +1725,7 @@ function _syncActivePanel() {
   layout?.classList.toggle('no-panel', !activeCreature);
 
   document.querySelectorAll('.bst-card').forEach(card => {
-    card.classList.toggle('active', card.dataset.beastId === _activeId);
+    card.classList.toggle('active', card.dataset.beastId === STORE.activeId);
   });
 
   if (panelSlot) {
@@ -1759,14 +1751,14 @@ export function openBestiaryEntry(id) {
 
 function _bstOpen(id) {
   if (_bstDragBlockClick) return;
-  _activeId = _activeId === id ? null : id;
+  STORE.activeId = STORE.activeId === id ? null : id;
   _syncActivePanel();
 }
 function _bstClose() {
-  _activeId = null;
+  STORE.activeId = null;
   _syncActivePanel();
 }
-function _bstSetRang(rang) { _filterRang = rang; _render(); }
+function _bstSetRang(rang) { STORE.filterRang = rang; _render(); }
 function _bstSelectRang(rang) {
   const sel = document.getElementById('bst-rang-selector');
   if (!sel) return;
@@ -1783,26 +1775,26 @@ function _bstSelectRang(rang) {
 }
 // Recherche : met à jour la valeur et filtre la grille SANS rerender complet
 function _bstSearchInput(val) {
-  _searchVal = val;
+  STORE.searchVal = val;
   // Filtrer en live sans reconstruire toute la page
   document.querySelectorAll('.bst-card').forEach(card => {
     const id = card.dataset.beastId;
-    const c  = _creatures.find(x => x.id === id);
+    const c  = STORE.creatures.find(x => x.id === id);
     if (!c) return;
     card.style.display = _beastMatchesFilters(c, { search: val }) ? '' : 'none';
   });
 }
 
-function _bstSearch(val) { _searchVal = val; _render(); } // legacy
-function _bstSetType(type) { _filterType = type; _render(); }
+function _bstSearch(val) { STORE.searchVal = val; _render(); } // legacy
+function _bstSetType(type) { STORE.filterType = type; _render(); }
 
 // Switch de bestiaire (admin uniquement)
 async function _bstSwitchBestiaire(id) {
-  _bestiaireId = id;
-  _activeId    = null;
-  _searchVal   = '';
-  _filterType  = '';
-  _filterRang  = '';
+  STORE.bestiaireId = id;
+  STORE.activeId    = null;
+  STORE.searchVal   = '';
+  STORE.filterType  = '';
+  STORE.filterRang  = '';
   await renderBestiary();
 }
 
@@ -1810,8 +1802,8 @@ async function _bstSwitchBestiaire(id) {
 // uid vide ou égal à l'UID admin → retour à la vue MJ.
 async function _bstViewAs(uid) {
   if (!STATE.isAdmin) return;
-  _viewAsUid = (uid && uid !== STATE.user?.uid) ? uid : null;
-  _activeId  = null;
+  STORE.viewAsUid = (uid && uid !== STATE.user?.uid) ? uid : null;
+  STORE.activeId  = null;
   await renderBestiary();
 }
 
@@ -1819,37 +1811,37 @@ async function _bstCreateBestiaire() {
   const label = prompt('Nom du nouveau bestiaire :');
   if (!label?.trim()) return;
   const id    = 'bst_' + Date.now();
-  const list  = _bstBestiaireList || [{ id:'main', label:'Bestiaire principal' }];
+  const list  = STORE.bestiaireList || [{ id:'main', label:'Bestiaire principal' }];
   list.push({ id, label: label.trim() });
   await saveDoc('bestiary_meta', 'list', { list });
-  _bstBestiaireList = list;
-  _bestiaireId = id;
-  _activeId    = null;
-  _filterRang  = '';
+  STORE.bestiaireList = list;
+  STORE.bestiaireId = id;
+  STORE.activeId    = null;
+  STORE.filterRang  = '';
   await renderBestiary();
 }
 
 // Déductions joueur
 function _bstSetDeduction(id, key, val) {
-  if (!_tracker[id]) _tracker[id] = {};
-  if (!_tracker[id].deductions) _tracker[id].deductions = {};
+  if (!STORE.tracker[id]) STORE.tracker[id] = {};
+  if (!STORE.tracker[id].deductions) STORE.tracker[id].deductions = {};
   if (val === '' || val === null || val === undefined) {
-    delete _tracker[id].deductions[key];
+    delete STORE.tracker[id].deductions[key];
   } else {
-    _tracker[id].deductions[key] = val;
+    STORE.tracker[id].deductions[key] = val;
   }
   _saveTracker();
 }
 
 function _bstAdjust(id, type, delta) {
-  const c = _creatures.find(x=>x.id===id); if (!c) return;
-  if (!_tracker[id]) _tracker[id] = {};
+  const c = STORE.creatures.find(x=>x.id===id); if (!c) return;
+  if (!STORE.tracker[id]) STORE.tracker[id] = {};
   const curKey = type==='pv'?'pvActuel':'pmActuel';
   // Vue MJ : connaît le max et le respecte. Vue joueur (ou MJ consultant un joueur) : pas de borne max.
   const max    = _isAdminView() ? (parseInt(c[type==='pv'?'pvMax':'pmMax'])||0) : null;
-  const cur    = _tracker[id][curKey] !== undefined ? parseInt(_tracker[id][curKey]) : (max ?? 0);
+  const cur    = STORE.tracker[id][curKey] !== undefined ? parseInt(STORE.tracker[id][curKey]) : (max ?? 0);
   const newVal = max !== null ? Math.max(0, Math.min(max, cur + delta)) : Math.max(0, cur + delta);
-  _tracker[id][curKey] = newVal;
+  STORE.tracker[id][curKey] = newVal;
 
   const input = document.getElementById(`bst-${type}-${id}`);
   const bar   = document.getElementById(`bst-${type}bar-${id}`);
@@ -1868,21 +1860,21 @@ function _bstAdjust(id, type, delta) {
 }
 
 function _bstSetStat(id, key, val) {
-  if (!_tracker[id]) _tracker[id] = {};
-  _tracker[id][key] = parseInt(val)||0;
+  if (!STORE.tracker[id]) STORE.tracker[id] = {};
+  STORE.tracker[id][key] = parseInt(val)||0;
   _saveTracker();
 }
 
 function _bstSetNotes(id, val) {
-  if (!_tracker[id]) _tracker[id] = {};
-  _tracker[id].notes = val;
+  if (!STORE.tracker[id]) STORE.tracker[id] = {};
+  STORE.tracker[id].notes = val;
   _saveTracker();
 }
 
 function _bstReset(id) {
-  const c = _creatures.find(x=>x.id===id); if (!c) return;
+  const c = STORE.creatures.find(x=>x.id===id); if (!c) return;
   // Vue MJ : remet les vraies valeurs. Vue joueur (ou MJ consultant un joueur) : remet les estimations à zéro.
-  _tracker[id] = _isAdminView()
+  STORE.tracker[id] = _isAdminView()
     ? { pvActuel: parseInt(c.pvMax)||0, pmActuel: parseInt(c.pmMax)||0, notes:'' }
     : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
   _saveTracker();
@@ -1896,7 +1888,7 @@ PAGES.bestiaire = renderBestiary;
 // MODAL IMAGE — éditeur d'image dédié de la créature (depuis le panneau)
 // ──────────────────────────────────────────────────────────────────────────────
 export async function openBeastImageModal(id) {
-  const c = _creatures.find(x => x.id === id);
+  const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
   _bstCropper?.destroy(); _bstCropper = null;
 
@@ -1936,16 +1928,16 @@ export async function openBeastImageModal(id) {
 async function _bstSaveImage(id) {
   try {
     const cropResult = _bstCropper?.getResult();
-    const current = _creatures.find(c => c.id === id)?.imageUrl || '';
+    const current = STORE.creatures.find(c => c.id === id)?.imageUrl || '';
     const imageUrl = typeof cropResult === 'string' ? cropResult : current;
     if (imageUrl && imageUrl.length > 900_000) {
       showNotif('Image trop grande, recadrez plus petit.', 'error');
       return;
     }
-    const col = _bstCurrentCol || 'bestiary';
+    const col = STORE.currentCol || 'bestiary';
     await updateInCol(col, id, { imageUrl });
-    const idx = _creatures.findIndex(c => c.id === id);
-    if (idx >= 0) _creatures[idx].imageUrl = imageUrl;
+    const idx = STORE.creatures.findIndex(c => c.id === id);
+    if (idx >= 0) STORE.creatures[idx].imageUrl = imageUrl;
     _bstCropper?.destroy(); _bstCropper = null;
     closeModal();
     _syncActivePanel();
@@ -1969,10 +1961,10 @@ async function _bstSaveImage(id) {
 
 async function _bstRemoveImage(id) {
   try {
-    const col = _bstCurrentCol || 'bestiary';
+    const col = STORE.currentCol || 'bestiary';
     await updateInCol(col, id, { imageUrl: '' });
-    const idx = _creatures.findIndex(c => c.id === id);
-    if (idx >= 0) _creatures[idx].imageUrl = '';
+    const idx = STORE.creatures.findIndex(c => c.id === id);
+    if (idx >= 0) STORE.creatures[idx].imageUrl = '';
     _bstCropper?.destroy(); _bstCropper = null;
     closeModal();
     _syncActivePanel();

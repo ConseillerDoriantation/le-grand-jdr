@@ -13,6 +13,7 @@ import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, richTextConte
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { STATE } from '../core/state.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
 
@@ -26,9 +27,13 @@ function _contentToHtml(raw) {
 }
 
 // ── État local ────────────────────────────────────────────────────────────────
-let _categories   = [];     // [{ id, nom, icone, visible }] — conteneurs de sections
-let _sections     = [];     // [{ id, titre, contenu, imageUrl, icone, visible, categoryId }]
-let _activeId     = null;   // id de la section affichée
+
+const STORE = {
+  categories: [],   // [{ id, nom, icone, visible }]
+  sections:   [],   // [{ id, titre, contenu, imageUrl, icone, visible, categoryId }]
+  activeId:   null, // id de la section affichée
+};
+
 let _sortables    = [];     // instances SortableJS (une par liste de catégorie)
 let _wiCropper    = null;
 
@@ -44,38 +49,38 @@ const ICONES = [
 // ── Chargement ────────────────────────────────────────────────────────────────
 async function _load() {
   const doc = await getDocData('world', 'main');
-  _categories = Array.isArray(doc?.categories) ? doc.categories.filter(c => c?.id) : [];
-  _sections   = (doc?.sections || []).filter(s => s?.id);
+  STORE.categories = Array.isArray(doc?.categories) ? doc.categories.filter(c => c?.id) : [];
+  STORE.sections   = (doc?.sections || []).filter(s => s?.id);
 
   // ── Migration en mémoire (persistée au prochain save admin) ────────────────
   // Garantit au moins une catégorie et rattache toute section orpheline
   // (sans categoryId ou pointant vers une catégorie supprimée) à « Général ».
-  const catIds = new Set(_categories.map(c => c.id));
-  const hasOrphans = _sections.some(s => !s.categoryId || !catIds.has(s.categoryId));
-  if (!_categories.length && (_sections.length || STATE.isAdmin)) {
-    _categories = [{ ...DEFAULT_CAT }];
+  const catIds = new Set(STORE.categories.map(c => c.id));
+  const hasOrphans = STORE.sections.some(s => !s.categoryId || !catIds.has(s.categoryId));
+  if (!STORE.categories.length && (STORE.sections.length || STATE.isAdmin)) {
+    STORE.categories = [{ ...DEFAULT_CAT }];
     catIds.add(DEFAULT_CAT.id);
   }
   if (hasOrphans) {
-    if (!catIds.has(DEFAULT_CAT.id)) { _categories.unshift({ ...DEFAULT_CAT }); catIds.add(DEFAULT_CAT.id); }
-    _sections = _sections.map(s =>
+    if (!catIds.has(DEFAULT_CAT.id)) { STORE.categories.unshift({ ...DEFAULT_CAT }); catIds.add(DEFAULT_CAT.id); }
+    STORE.sections = STORE.sections.map(s =>
       (s.categoryId && catIds.has(s.categoryId)) ? s : { ...s, categoryId: DEFAULT_CAT.id });
   }
 
   // Section par défaut si tout est vide (admin only)
-  if (!_sections.length && STATE.isAdmin) {
-    if (!_categories.length) _categories = [{ ...DEFAULT_CAT }];
-    _sections = [{
+  if (!STORE.sections.length && STATE.isAdmin) {
+    if (!STORE.categories.length) STORE.categories = [{ ...DEFAULT_CAT }];
+    STORE.sections = [{
       id: 'intro', titre: 'Introduction', icone: '📖',
       contenu: 'Les informations sur le monde seront ajoutées ici par le Maître de Jeu.',
-      imageUrl: '', visible: true, categoryId: _categories[0].id,
+      imageUrl: '', visible: true, categoryId: STORE.categories[0].id,
     }];
   }
 }
 
 async function _save() {
   try {
-    await saveDoc('world', 'main', { categories: _categories, sections: _sections });
+    await saveDoc('world', 'main', { categories: STORE.categories, sections: STORE.sections });
   } catch (e) { notifySaveError(e); }
 }
 
@@ -89,14 +94,14 @@ async function renderWorld() {
 
   // Catégories + section active visibles. Pour un joueur, une section dans une
   // catégorie masquée est elle aussi masquée (cohérence nav ↔ contenu).
-  const visibleCats   = _categories.filter(c => c.visible !== false || STATE.isAdmin);
+  const visibleCats   = STORE.categories.filter(c => c.visible !== false || STATE.isAdmin);
   const visibleCatIds = new Set(visibleCats.map(c => c.id));
-  const visibleSections = _sections.filter(s =>
+  const visibleSections = STORE.sections.filter(s =>
     (s.visible !== false && visibleCatIds.has(s.categoryId)) || STATE.isAdmin);
-  if (!_activeId || !visibleSections.find(s => s.id === _activeId)) {
-    _activeId = visibleSections[0]?.id || null;
+  if (!STORE.activeId || !visibleSections.find(s => s.id === STORE.activeId)) {
+    STORE.activeId = visibleSections[0]?.id || null;
   }
-  const activeSection = visibleSections.find(s => s.id === _activeId) || null;
+  const activeSection = visibleSections.find(s => s.id === STORE.activeId) || null;
 
   content.innerHTML = `
   <div class="world-shell" style="display:grid;grid-template-columns:250px 1fr;gap:1.2rem;align-items:start;margin:0 auto">
@@ -158,7 +163,7 @@ async function renderWorld() {
 // ── Groupe catégorie : en-tête + ses sections ─────────────────────────────────
 function _renderCategoryGroup(cat) {
   const isHidden = cat.visible === false;
-  const secs = _sections.filter(s => s.categoryId === cat.id && (s.visible !== false || STATE.isAdmin));
+  const secs = STORE.sections.filter(s => s.categoryId === cat.id && (s.visible !== false || STATE.isAdmin));
   return `<div class="world-cat-group" data-cat-id="${cat.id}" style="margin-bottom:.15rem">
     <div class="world-cat-head" style="display:flex;align-items:center;gap:.5rem;
       padding:.5rem 1rem .35rem;${isHidden?'opacity:.5;':''}">
@@ -190,7 +195,7 @@ function _renderCategoryGroup(cat) {
 
 // ── Nav item ─────────────────────────────────────────────────────────────────
 function _renderNavItem(s) {
-  const isActive = s.id === _activeId;
+  const isActive = s.id === STORE.activeId;
   const isHidden = s.visible === false;
   return `<div
     data-nav-id="${s.id}" data-sec-id="${s.id}"
@@ -289,7 +294,7 @@ function _renderEmpty() {
 
 // ── Sélection section ─────────────────────────────────────────────────────────
 function selectWorldSection(id) {
-  _activeId = id;
+  STORE.activeId = id;
   // Mettre à jour la nav
   document.querySelectorAll('[data-nav-id]').forEach(el => {
     const active = el.dataset.navId === id;
@@ -299,7 +304,7 @@ function selectWorldSection(id) {
     if (span) { span.style.color = active ? 'var(--gold)' : 'var(--text)'; span.style.fontWeight = active ? '600' : '400'; }
   });
   // Mettre à jour le contenu
-  const section = _sections.find(s => s.id === id);
+  const section = STORE.sections.find(s => s.id === id);
   const main = document.getElementById('world-main-content');
   if (main && section) main.innerHTML = _renderSection(section);
 }
@@ -311,15 +316,13 @@ function _bindNavDrag() {
   _destroySortables();
   if (!STATE.isAdmin) return;
   document.querySelectorAll('.world-cat-sections').forEach(list => {
-    _sortables.push(new Sortable(list, {
+    _sortables.push(makeSortable(list, {
+      ghostClass: 'world-drag-ghost',
+      chosenClass: 'world-drag-chosen',
       group: 'world-sections',
       animation: 160,
       handle: '[data-sec-id]',
       draggable: '[data-sec-id]',
-      ghostClass: 'world-drag-ghost',
-      chosenClass: 'world-drag-chosen',
-      forceFallback: true,
-      fallbackOnBody: true,
       onEnd: _onSectionsReordered,
     }));
   });
@@ -332,7 +335,7 @@ function _destroySortables() {
 
 // Reconstruit l'ordre + la catégorie de chaque section depuis le DOM après un drop.
 async function _onSectionsReordered() {
-  const byId = new Map(_sections.map(s => [s.id, s]));
+  const byId = new Map(STORE.sections.map(s => [s.id, s]));
   const next = [];
   document.querySelectorAll('.world-cat-group[data-cat-id]').forEach(group => {
     const catId = group.dataset.catId;
@@ -342,18 +345,18 @@ async function _onSectionsReordered() {
     });
   });
   // Sécurité : conserver d'éventuelles sections non rendues (catégorie masquée côté admin = improbable)
-  _sections.forEach(s => { if (!next.find(n => n.id === s.id)) next.push(s); });
-  _sections = next;
+  STORE.sections.forEach(s => { if (!next.find(n => n.id === s.id)) next.push(s); });
+  STORE.sections = next;
   await _save();
   renderWorld();
 }
 
 // ── Modal création / édition section ─────────────────────────────────────────
 function openWorldSectionModal(id = null, presetCatId = null) {
-  const s = id ? _sections.find(sec => sec.id === id) : null;
-  if (!_categories.length) { showNotif('Crée d\'abord une catégorie.', 'error'); return; }
-  const selCatId = s?.categoryId || presetCatId || _categories[0]?.id;
-  const catOptions = _categories.map(c =>
+  const s = id ? STORE.sections.find(sec => sec.id === id) : null;
+  if (!STORE.categories.length) { showNotif('Crée d\'abord une catégorie.', 'error'); return; }
+  const selCatId = s?.categoryId || presetCatId || STORE.categories[0]?.id;
+  const catOptions = STORE.categories.map(c =>
     `<option value="${c.id}" ${c.id===selCatId?'selected':''}>${_esc(c.icone||'📁')} ${_esc(c.nom||'Catégorie')}</option>`
   ).join('');
 
@@ -365,7 +368,7 @@ function openWorldSectionModal(id = null, presetCatId = null) {
       transition:all .1s;display:flex;align-items:center;justify-content:center">${ic}</button>
   `).join('');
 
-  const selCat  = _categories.find(c => c.id === selCatId);
+  const selCat  = STORE.categories.find(c => c.id === selCatId);
   const bgStyle = s?.imageUrl ? `background-image:url('${_esc(s.imageUrl).replace(/'/g,'%27')}')` : '';
 
   openModal('', `
@@ -476,7 +479,7 @@ function _worldSyncEyebrow() {
   const sel = document.getElementById('wi-categorie');
   const eye = document.getElementById('wi-cat-eyebrow');
   if (!sel || !eye) return;
-  const c = _categories.find(cat => cat.id === sel.value);
+  const c = STORE.categories.find(cat => cat.id === sel.value);
   eye.textContent = `${c?.icone || '📁'} ${c?.nom || 'Catégorie'}`;
 }
 
@@ -501,10 +504,10 @@ async function saveWorldSection() {
   const contenu   = getRichTextHtml('wi-contenu');
   const hidden    = document.getElementById('wi-hidden')?.checked || false;
   const categoryId = document.getElementById('wi-categorie')?.value
-    || _categories[0]?.id || DEFAULT_CAT.id;
+    || STORE.categories[0]?.id || DEFAULT_CAT.id;
 
   // Résoudre l'image : nouveau crop > existante > effacée
-  const existing = _sections.find(s => s.id === id);
+  const existing = STORE.sections.find(s => s.id === id);
   const cropResult = _wiCropper?.getResult();
   let imageUrl = existing?.imageUrl || '';
   if (typeof cropResult === 'string') imageUrl = cropResult;
@@ -514,14 +517,14 @@ async function saveWorldSection() {
   const section = { id, titre, icone, contenu, imageUrl, visible: !hidden, categoryId };
 
   if (isNew) {
-    _sections.push(section);
+    STORE.sections.push(section);
   } else {
-    const idx = _sections.findIndex(s => s.id === id);
-    if (idx >= 0) _sections[idx] = section;
+    const idx = STORE.sections.findIndex(s => s.id === id);
+    if (idx >= 0) STORE.sections[idx] = section;
   }
 
   await _save();
-  _activeId = id;
+  STORE.activeId = id;
   closeModal();
   showNotif(isNew ? 'Section créée !' : 'Section mise à jour !', 'success');
   renderWorld();
@@ -529,8 +532,8 @@ async function saveWorldSection() {
 
 async function deleteWorldSection(id) {
   if (!await confirmModal('Supprimer cette section définitivement ?')) return;
-  _sections = _sections.filter(s => s.id !== id);
-  if (_activeId === id) _activeId = _sections[0]?.id || null;
+  STORE.sections = STORE.sections.filter(s => s.id !== id);
+  if (STORE.activeId === id) STORE.activeId = STORE.sections[0]?.id || null;
   await _save();
   showNotif('Section supprimée.', 'success');
   renderWorld();
@@ -538,7 +541,7 @@ async function deleteWorldSection(id) {
 
 // ── Modal création / édition CATÉGORIE ────────────────────────────────────────
 function openWorldCategoryModal(id = null) {
-  const c = id ? _categories.find(cat => cat.id === id) : null;
+  const c = id ? STORE.categories.find(cat => cat.id === id) : null;
 
   const iconGrid = ICONES.map(ic => `
     <button type="button" id="wc-icon-${ic}" data-action="_selectWorldCatIcon" data-id="${ic}"
@@ -601,10 +604,10 @@ async function saveWorldCategory() {
   const category = { id, nom, icone, visible: !hidden };
 
   if (isNew) {
-    _categories.push(category);
+    STORE.categories.push(category);
   } else {
-    const idx = _categories.findIndex(c => c.id === id);
-    if (idx >= 0) _categories[idx] = category;
+    const idx = STORE.categories.findIndex(c => c.id === id);
+    if (idx >= 0) STORE.categories[idx] = category;
   }
   await _save();
   closeModal();
@@ -613,22 +616,22 @@ async function saveWorldCategory() {
 }
 
 async function deleteWorldCategory(id) {
-  const cat = _categories.find(c => c.id === id);
+  const cat = STORE.categories.find(c => c.id === id);
   if (!cat) return;
-  const orphans = _sections.filter(s => s.categoryId === id);
+  const orphans = STORE.sections.filter(s => s.categoryId === id);
   // Catégorie de repli : « Général » si elle existe (et n'est pas celle supprimée),
   // sinon la 1re autre catégorie, sinon « Général » recréée.
-  let fallback = _categories.find(c => c.id !== id && c.id === DEFAULT_CAT.id)
-              || _categories.find(c => c.id !== id);
+  let fallback = STORE.categories.find(c => c.id !== id && c.id === DEFAULT_CAT.id)
+              || STORE.categories.find(c => c.id !== id);
   const msg = orphans.length
     ? `Supprimer « ${cat.nom} » ? Ses ${orphans.length} section${orphans.length>1?'s':''} seront déplacées vers « ${fallback?.nom || DEFAULT_CAT.nom} ».`
     : `Supprimer « ${cat.nom} » ?`;
   if (!await confirmModal(msg)) return;
 
-  _categories = _categories.filter(c => c.id !== id);
+  STORE.categories = STORE.categories.filter(c => c.id !== id);
   if (orphans.length) {
-    if (!fallback) { fallback = { ...DEFAULT_CAT }; _categories.unshift(fallback); }
-    _sections = _sections.map(s => s.categoryId === id ? { ...s, categoryId: fallback.id } : s);
+    if (!fallback) { fallback = { ...DEFAULT_CAT }; STORE.categories.unshift(fallback); }
+    STORE.sections = STORE.sections.map(s => s.categoryId === id ? { ...s, categoryId: fallback.id } : s);
   }
   await _save();
   showNotif('Catégorie supprimée.', 'success');

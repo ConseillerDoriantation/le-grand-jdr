@@ -10,6 +10,7 @@ import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
 import { useGoldMulti } from '../../shared/economy.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import { getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import {
   _getTraits,
@@ -35,10 +36,7 @@ function _renderInventoryChar(c, tab = 'inventaire') {
 }
 
 function _itemDegatsStatsShorts(item) {
-  const arr = Array.isArray(item.degatsStats) && item.degatsStats.length
-    ? item.degatsStats
-    : (item.degatsStat ? [item.degatsStat] : []);
-  return arr.map(statShort).filter(Boolean);
+  return getWeaponDamageStatKeys(item).map(statShort).filter(Boolean);
 }
 
 // ══════════════════════════════════════════════

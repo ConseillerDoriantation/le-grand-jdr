@@ -4,7 +4,7 @@ import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
-import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META } from '../shared/char-stats.js';
+import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META, statShort as _statShort } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
@@ -12,12 +12,13 @@ import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
-import { syncEquipmentAfterInventoryMutation } from '../shared/equipment-utils.js';
+import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStatKey, getWeaponDamageStatKeys as _getDegatsStats, formatWeaponDamageStatsText } from '../shared/equipment-utils.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -108,26 +109,6 @@ const ITEM_STATS = [
   { key:'constitution',short:'Con', store:'co',  label:'Constitution' },
   { key:'charisme',    short:'Cha', store:'ch',  label:'Charisme' },
 ];
-const ITEM_STAT_BY_KEY = Object.fromEntries(ITEM_STATS.map(s => [s.key, s]));
-
-function _statShort(key) {
-  return ITEM_STAT_BY_KEY[key]?.short || '';
-}
-
-function _normalizeStatKey(val) {
-  const raw = String(val || '').trim().toLowerCase().replace(/^\+/, '');
-  if (!raw) return '';
-  const map = {
-    for:'force', force:'force', str:'force',
-    dex:'dexterite', dextérité:'dexterite', dexterite:'dexterite', agilite:'dexterite', agilité:'dexterite',
-    int:'intelligence', intelligence:'intelligence', in:'intelligence',
-    sag:'sagesse', sagesse:'sagesse', sa:'sagesse', wis:'sagesse',
-    con:'constitution', constitution:'constitution', co:'constitution',
-    cha:'charisme', charisme:'charisme', ch:'charisme',
-  };
-  return map[raw] || '';
-}
-
 function _parseLegacyStats(item = {}) {
   const out = { for:0, dex:0, in:0, sa:0, co:0, ch:0 };
   ['for','dex','in','sa','co','ch'].forEach(k => {
@@ -166,16 +147,10 @@ function _legacyStatsTextFromData(data = {}) {
   return _formatStatBonuses(data).join(' · ');
 }
 
-function _getDegatsStats(item = {}) {
-  if (Array.isArray(item.degatsStats) && item.degatsStats.length) {
-    return item.degatsStats.map(_normalizeStatKey).filter(Boolean);
-  }
-  const single = _normalizeStatKey(item.degatsStat || item.statAttaque || '');
-  return single ? [single] : [];
+function _formatDegatsStatsText(keys) {
+  return formatWeaponDamageStatsText(keys, { statLabel: _statShort });
 }
-function _formatDegatsStatsText(arr) {
-  return arr.map(_statShort).filter(Boolean).join(' + ');
-}
+
 
 function _legacyToucherTextFromData(data = {}) {
   const short = _statShort(data.toucherStat);
@@ -714,9 +689,9 @@ function _renderHomeSearchResults() {
     html += `<div class="sh-pagination">`;
     if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span class="sh-dim-pill">…</span>':''}`;
     for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
     if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
@@ -979,9 +954,9 @@ function _renderItemsView() {
     html += `<div class="sh-pagination">`;
     if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const start=Math.max(1,p-2), end=Math.min(pages,p+2);
-    if(start>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${start>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    if(start>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${start>2?'<span class="sh-dim-pill">…</span>':''}`;
     for(let i=start;i<=end;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(end<pages) html+=`${end<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(end<pages) html+=`${end<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
     if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
@@ -2110,9 +2085,9 @@ function _updateItemsOnly() {
     html += `<div class="sh-pagination">`;
     if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
     const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}`;
+    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span class="sh-dim-pill">…</span>':''}`;
     for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span style="padding:0 4px;color:var(--text-dim)">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
+    if(en<pages) html+=`${en<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
     if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
     html += `</div>`;
   }
@@ -2150,24 +2125,13 @@ function _mountSortables() {
   _sortCats?.destroy(); _sortCats = null;
   _sortItems?.destroy(); _sortItems = null;
 
-  const sharedOpts = {
+  const shOpts = {
+    prefix: 'sh',
     animation: 120,
-    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
     draggable: '.sh-sortable-item',
     filter: 'button, a, input, select, textarea, .btn-icon, .sh-card-admin-inline, .sh-item-actions',
-    preventOnFilter: false,
-    ghostClass:  'sh-sortable-ghost',
-    chosenClass: 'sh-sortable-chosen',
-    dragClass:   'sh-sortable-drag',
-    forceFallback:    true,
-    fallbackOnBody:   true,
-    fallbackTolerance: 5,
-    delay: 150,
-    delayOnTouchOnly: true,
-    touchStartThreshold: 5,
     onStart: () => { document.body.classList.add('sh-dragging'); _dragBlockClick = true; },
   };
-
   const finishDrag = () => {
     document.body.classList.remove('sh-dragging');
     setTimeout(() => { _dragBlockClick = false; }, 350);
@@ -2175,8 +2139,8 @@ function _mountSortables() {
 
   const catGrid = document.querySelector('.sh-cat-grid.sh-sortable');
   if (catGrid) {
-    _sortCats = new Sortable(catGrid, {
-      ...sharedOpts,
+    _sortCats = makeSortable(catGrid, {
+      ...shOpts,
       onEnd: async (evt) => {
         finishDrag();
         if (evt.oldIndex === evt.newIndex) return;
@@ -2192,8 +2156,8 @@ function _mountSortables() {
 
   const itemGrid = document.getElementById('sh-items-grid');
   if (itemGrid && itemGrid.classList.contains('sh-sortable')) {
-    _sortItems = new Sortable(itemGrid, {
-      ...sharedOpts,
+    _sortItems = makeSortable(itemGrid, {
+      ...shOpts,
       onEnd: async (evt) => {
         finishDrag();
         if (evt.oldIndex === evt.newIndex) return;
@@ -2256,14 +2220,14 @@ function openCatModal(catId) {
       </div>
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🎯 Type par défaut <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(fallback pour les anciens items)</small></div>
+        <div class="sh-admin-section-title">🎯 Type par défaut <small class="sh-label">(fallback pour les anciens items)</small></div>
         <p class="sh-admin-section-hint">Désormais chaque article a son propre type. Cette valeur sert uniquement de défaut pour les articles créés sans type explicite.</p>
         <select class="sh-admin-row-input" id="cat-template" style="width:100%;text-align:left;font-family:inherit;font-weight:500">${tplOptions}</select>
         <div id="cat-tpl-preview" class="sh-admin-preview"></div>
       </div>
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🖼️ Illustration <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(optionnelle)</small></div>
+        <div class="sh-admin-section-title">🖼️ Illustration <small class="sh-label">(optionnelle)</small></div>
         <p class="sh-admin-section-hint">Affichée en background de la pastille catégorie sur la page d'accueil.</p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div id="cat-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
@@ -2367,7 +2331,7 @@ function openSubCatModal(catId,scId) {
       </div>
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🖼️ Illustration <small style="font-weight:400;color:var(--text-dim);font-family:inherit">(optionnelle)</small></div>
+        <div class="sh-admin-section-title">🖼️ Illustration <small class="sh-label">(optionnelle)</small></div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div id="sc-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
             ${sc?.image ? `<img src="${sc.image}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}

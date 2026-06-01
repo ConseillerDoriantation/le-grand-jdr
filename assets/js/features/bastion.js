@@ -24,24 +24,39 @@ import { _esc, appSplashHtml } from '../shared/html.js';
 import { calcOr, sortCharactersForDisplay, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 
+
+const STORE = {
+  bastion:        null,          // document bastion principal
+  depositGroups:  [],            // groupes de dépôt actifs
+  editingItems:   [[], [], []],  // items en édition dans les 3 niveaux
+  pickerFilters:  {},            // { [niveauIdx]: { cat, search } }
+  shopItemsCache: null,          // cache items boutique (lazy)
+  shopCatsCache:  null,          // cache catégories boutique (lazy)
+  hireNpcsCache:  null,          // cache PNJ embauchables (lazy)
+  npcsCache:      null,          // cache tous les PNJ (lazy)
+  hireInProgress: false,
+  coffreFilter:   'all',         // 'all'|'armes'|'armures'|…
+  coffreSearch:   '',
+  histoExpanded:  false,
+};
+
+
 // Cache items boutique (rechargé à l'ouverture de l'éditeur)
-let _shopItemsCache = null;
-let _shopCatsCache  = null;
 async function _loadShopItems() {
-  if (_shopItemsCache && _shopCatsCache) return _shopItemsCache;
+  if (STORE.shopItemsCache && STORE.shopCatsCache) return STORE.shopItemsCache;
   const [items, cats] = await Promise.all([
     loadCollection('shop').catch(() => []),
     loadCollection('shopCategories').catch(() => []),
   ]);
-  _shopItemsCache = items;
-  _shopCatsCache  = cats;
-  return _shopItemsCache;
+  STORE.shopItemsCache = items;
+  STORE.shopCatsCache  = cats;
+  return STORE.shopItemsCache;
 }
 function _findShopItem(id) {
-  return (_shopItemsCache || []).find(it => it.id === id) || null;
+  return (STORE.shopItemsCache || []).find(it => it.id === id) || null;
 }
 function _findShopCat(id) {
-  return (_shopCatsCache || []).find(c => c.id === id) || null;
+  return (STORE.shopCatsCache || []).find(c => c.id === id) || null;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -161,7 +176,6 @@ const NIVEAU_LABEL = ['', 'I', 'II', 'III'];
 // ══════════════════════════════════════════════════════════════════════════════
 // STATE + HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
-let _bastion = null;
 
 function _defaultBastion() {
   return {
@@ -194,7 +208,7 @@ function _getRoomCatalog(b) {
 }
 
 function _getRoomDef(slug, b) {
-  return _getRoomCatalog(b || _bastion).find(r => r.slug === slug);
+  return _getRoomCatalog(b || STORE.bastion).find(r => r.slug === slug);
 }
 
 // Capacité totale du coffre = base + (niveau Entrepôt × capacitePerLevel)
@@ -307,12 +321,12 @@ async function _save(b) {
 function _attachListener() {
   // watchDoc gère lui-même le re-subscribe (kill listener précédent du même nom).
   watchDoc('bastion', 'bastion', 'main', (data) => {
-    const isFirst = !_bastion;
-    const prevWeek = _bastion?.semaine;
-    _bastion = data || _defaultBastion();
+    const isFirst = !STORE.bastion;
+    const prevWeek = STORE.bastion?.semaine;
+    STORE.bastion = data || _defaultBastion();
     // Notif douce si la semaine a avancé (vu côté joueur après que le MJ a cliqué)
-    if (!isFirst && prevWeek != null && _bastion.semaine > prevWeek && !STATE.isAdmin) {
-      showNotif(`🕰 Période ${_bastion.semaine} : votre bastion a changé !`, 'success');
+    if (!isFirst && prevWeek != null && STORE.bastion.semaine > prevWeek && !STATE.isAdmin) {
+      showNotif(`🕰 Période ${STORE.bastion.semaine} : votre bastion a changé !`, 'success');
     }
     if (STATE.currentPage === 'bastion') _renderPage();
   });
@@ -323,7 +337,7 @@ function _attachListener() {
 // ══════════════════════════════════════════════════════════════════════════════
 async function _bastionBuild(slug) {
   if (!STATE.isAdmin) return;
-  const b = { ..._bastion } || _defaultBastion();
+  const b = { ...STORE.bastion } || _defaultBastion();
   const def = _getRoomDef(slug);
   if (!def) return;
 
@@ -358,7 +372,7 @@ async function _bastionBuild(slug) {
 
 async function _bastionAdvanceWeek() {
   if (!STATE.isAdmin) return;
-  if (!_bastion) return;
+  if (!STORE.bastion) return;
   const ok = await confirmModal('▶ Passer à la période suivante ?\n\nProductions appliquées, constructions avancées, salaires payés.', {
     title: '🕰 Passer une période',
     okLabel: '▶ Avancer',
@@ -366,7 +380,7 @@ async function _bastionAdvanceWeek() {
   }).catch(() => false);
   if (!ok) return;
 
-  const b = JSON.parse(JSON.stringify(_bastion));
+  const b = JSON.parse(JSON.stringify(STORE.bastion));
   b.semaine = (b.semaine || 1) + 1;
 
   let totalOrProduit = 0;
@@ -444,7 +458,7 @@ async function _bastionAdvanceWeek() {
 
 async function _bastionEditIdentite() {
   if (!STATE.isAdmin) return;
-  const b = _bastion || _defaultBastion();
+  const b = STORE.bastion || _defaultBastion();
   openModal('🏰 Identité du Bastion', `
     <div class="form-group"><label>Nom</label>
       <input class="input-field" id="bas-nom" value="${_esc(b.nom||'')}"></div>
@@ -487,7 +501,7 @@ async function _bastionResetAll() {
 }
 async function _bastionSaveIdentite() {
   if (!STATE.isAdmin) return;
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.nom         = document.getElementById('bas-nom')?.value?.trim() || 'Le Bastion';
   b.emoji       = document.getElementById('bas-emoji')?.value?.trim() || '🏰';
   b.lieu        = document.getElementById('bas-lieu')?.value?.trim() || '';
@@ -504,8 +518,8 @@ function _bastionOpenDeposit() {
   let chars = _eligibleChars().filter(c => (c.inventaire || []).length > 0);
   if (!chars.length) { showNotif('Aucun personnage avec inventaire.', 'error'); return; }
 
-  const capacity = _bastionCapacity(_bastion);
-  const used = _bastionInvCount(_bastion);
+  const capacity = _bastionCapacity(STORE.bastion);
+  const used = _bastionInvCount(STORE.bastion);
   if (used >= capacity) { showNotif(`Coffre plein (${used}/${capacity}). Améliore l'Entrepôt.`, 'error'); return; }
 
   // Liste déjà triée par _eligibleChars (joueur alpha → ★ par défaut → nom).
@@ -557,16 +571,15 @@ function _groupInventaire(inv) {
 }
 
 // Buffer module-level : regroupements actifs dans la modal de dépôt
-let _depositGroups = [];
 
 function _bastionRefreshDepositItems() {
   const charId = document.getElementById('bas-dep-char')?.value;
   const char = (STATE.characters || []).find(c => c.id === charId);
   const sel = document.getElementById('bas-dep-item');
   if (!sel || !char) return;
-  _depositGroups = _groupInventaire(char.inventaire);
-  sel.innerHTML = _depositGroups.length
-    ? _depositGroups.map((g, i) => `<option value="${i}">${_esc(g.item.nom || '?')} ×${g.totalQte}${g.item.rarete ? ` (${g.item.rarete})` : ''}</option>`).join('')
+  STORE.depositGroups = _groupInventaire(char.inventaire);
+  sel.innerHTML = STORE.depositGroups.length
+    ? STORE.depositGroups.map((g, i) => `<option value="${i}">${_esc(g.item.nom || '?')} ×${g.totalQte}${g.item.rarete ? ` (${g.item.rarete})` : ''}</option>`).join('')
     : `<option value="">-- Inventaire vide --</option>`;
   _bastionRefreshDepositMax();
 }
@@ -575,7 +588,7 @@ function _bastionRefreshDepositMax() {
   const qte = document.getElementById('bas-dep-qte');
   const info = document.getElementById('bas-dep-info');
   if (!qte || isNaN(gi)) return;
-  const group = _depositGroups[gi];
+  const group = STORE.depositGroups[gi];
   if (!group) return;
   const maxQte = group.totalQte;
   qte.max = maxQte;
@@ -589,12 +602,12 @@ async function _bastionDoDeposit() {
   const gi = parseInt(document.getElementById('bas-dep-item')?.value);
   const qte = parseInt(document.getElementById('bas-dep-qte')?.value) || 0;
   if (!char || isNaN(gi) || qte <= 0) { showNotif('Sélection invalide.', 'error'); return; }
-  const group = _depositGroups[gi];
+  const group = STORE.depositGroups[gi];
   if (!group) { showNotif('Objet introuvable.', 'error'); return; }
   if (qte > group.totalQte) { showNotif('Quantité trop élevée.', 'error'); return; }
 
-  const capacity = _bastionCapacity(_bastion);
-  const used = _bastionInvCount(_bastion);
+  const capacity = _bastionCapacity(STORE.bastion);
+  const used = _bastionInvCount(STORE.bastion);
   if (used + qte > capacity) { showNotif(`Coffre plein (${used + qte}/${capacity}).`, 'error'); return; }
 
   try {
@@ -620,7 +633,7 @@ async function _bastionDoDeposit() {
 
     // 2. Ajoute au coffre du bastion (template du groupe en originalItem)
     const item = group.item;
-    const b = { ..._bastion };
+    const b = { ...STORE.bastion };
     b.coffre = [...(b.coffre || [])];
     const sameKey = (a, c) => (a.nom === c.nom && (a.originalItem?.itemId || null) === (c.itemId || null));
     const existing = b.coffre.find(c => sameKey(c, item));
@@ -647,7 +660,7 @@ async function _bastionDoDeposit() {
 }
 
 function _bastionOpenWithdrawItem(coffreId) {
-  const item = (_bastion?.coffre || []).find(c => c.id === coffreId);
+  const item = (STORE.bastion?.coffre || []).find(c => c.id === coffreId);
   if (!item) return;
   let chars = _eligibleChars();
   if (!chars.length) { showNotif('Aucun personnage destinataire.', 'error'); return; }
@@ -679,7 +692,7 @@ async function _bastionDoWithdraw(coffreId) {
   const char = (STATE.characters || []).find(c => c.id === charId);
   if (!char || qte <= 0) { showNotif('Sélection invalide.', 'error'); return; }
 
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.coffre = [...(b.coffre || [])];
   const itemIdx = b.coffre.findIndex(c => c.id === coffreId);
   if (itemIdx < 0) return;
@@ -714,7 +727,7 @@ async function _bastionDoWithdraw(coffreId) {
 // ══════════════════════════════════════════════════════════════════════════════
 function _bastionOpenCatalogEditor() {
   if (!STATE.isAdmin) return;
-  const cat = _getRoomCatalog(_bastion);
+  const cat = _getRoomCatalog(STORE.bastion);
   openModal('✏️ Éditer les salles & activités', `
     <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:.8rem">
       Personnalise chaque salle : nom, prix, durée, renommée, productions, bonus.
@@ -752,7 +765,7 @@ async function _bastionAddCustomRoom() {
       { cout: 1500, semaines: 3, renommee: 50, gainRenommee: 6, prod: { or: 0, items: [] }, bonus: '' },
     ],
   };
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.customRooms = [...(b.customRooms || []), newRoom];
   await _save(b);
   closeModal();
@@ -767,7 +780,7 @@ async function _bastionDeleteCustomRoom(slug) {
     title: '🗑 Supprimer la salle', okLabel: 'Supprimer', cancelLabel: 'Annuler',
   }).catch(() => false);
   if (!ok) return;
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.customRooms = (b.customRooms || []).filter(r => r.slug !== slug);
   await _save(b);
   closeModal();
@@ -788,12 +801,12 @@ async function _bastionEditRoom(slug) {
 
   // Buffer module-local de production items en cours d'édition (par niveau)
   // Chaque entrée : { shopItemId?, nom, emoji, q }
-  _editingItems = [0, 1, 2].map(i => {
+  STORE.editingItems = [0, 1, 2].map(i => {
     const items = def.niveaux[i]?.prod?.items || [];
     return items.map(it => ({ ...it }));
   });
   // Reset filtres du picker (catégorie + recherche) pour chaque ouverture
-  [0, 1, 2].forEach(i => { _pickerFilters[i] = { cat: 'all', search: '' }; });
+  [0, 1, 2].forEach(i => { STORE.pickerFilters[i] = { cat: 'all', search: '' }; });
 
   const niveauForm = (i) => {
     const n = def.niveaux[i] || {};
@@ -843,10 +856,8 @@ async function _bastionEditRoom(slug) {
 }
 
 // State temporaire de l'éditeur (cleared sur chaque ouverture)
-let _editingItems = [[], [], []];
 
 // État des filtres du picker, par niveau
-const _pickerFilters = {}; // { [niveauIdx]: { cat, search } }
 
 function _renderItemPicker(i) {
   const list = document.getElementById(`ed-items-list-${i}`);
@@ -854,7 +865,7 @@ function _renderItemPicker(i) {
   if (!list || !picker) return;
 
   // Liste des items sélectionnés
-  list.innerHTML = (_editingItems[i] || []).map((it, idx) => {
+  list.innerHTML = (STORE.editingItems[i] || []).map((it, idx) => {
     const cat = it.shopItemId && _findShopItem(it.shopItemId)?.categorieId
       ? _findShopCat(_findShopItem(it.shopItemId).categorieId)
       : null;
@@ -869,16 +880,16 @@ function _renderItemPicker(i) {
   }).join('') || `<div class="bs-items-empty">Aucun item produit à ce niveau.</div>`;
 
   // Picker : items boutique disponibles
-  const shop = _shopItemsCache || [];
-  const cats = _shopCatsCache || [];
+  const shop = STORE.shopItemsCache || [];
+  const cats = STORE.shopCatsCache || [];
   if (!shop.length) {
     picker.innerHTML = `<div class="bs-items-empty">Aucun article dans la boutique. Crée des items dans la page Boutique pour les ajouter ici.</div>`;
     return;
   }
 
   // Init filtres
-  if (!_pickerFilters[i]) _pickerFilters[i] = { cat: 'all', search: '' };
-  const { cat: filterCat, search } = _pickerFilters[i];
+  if (!STORE.pickerFilters[i]) STORE.pickerFilters[i] = { cat: 'all', search: '' };
+  const { cat: filterCat, search } = STORE.pickerFilters[i];
 
   // Filtre les items selon catégorie + recherche
   let filtered = shop;
@@ -920,15 +931,15 @@ function _renderItemPicker(i) {
 }
 
 function _bastionSetPickerCat(i, val) {
-  _pickerFilters[i] = { ...(_pickerFilters[i] || {}), cat: val };
+  STORE.pickerFilters[i] = { ...(STORE.pickerFilters[i] || {}), cat: val };
   _renderItemPicker(i);
 }
 function _bastionSetPickerSearch(i, val) {
   // On garde le focus dans le champ : on ne re-render que le <select> des items
-  _pickerFilters[i] = { ...(_pickerFilters[i] || {}), search: val };
+  STORE.pickerFilters[i] = { ...(STORE.pickerFilters[i] || {}), search: val };
   // Re-render limité au select pour ne pas perdre le focus du champ recherche
-  const shop = _shopItemsCache || [];
-  const { cat, search } = _pickerFilters[i];
+  const shop = STORE.shopItemsCache || [];
+  const { cat, search } = STORE.pickerFilters[i];
   let filtered = shop;
   if (cat && cat !== 'all') {
     if (cat === 'none') filtered = filtered.filter(s => !s.categorieId || !_findShopCat(s.categorieId));
@@ -952,11 +963,11 @@ function _bastionAddShopItem(i) {
   const shopItem = _findShopItem(id);
   if (!shopItem) { showNotif('Article introuvable.', 'error'); return; }
   // Si déjà présent → cumul de la quantité
-  const existing = _editingItems[i].find(it => it.shopItemId === id);
+  const existing = STORE.editingItems[i].find(it => it.shopItemId === id);
   if (existing) {
     existing.q = (parseInt(existing.q) || 1) + q;
   } else {
-    _editingItems[i].push({
+    STORE.editingItems[i].push({
       shopItemId: id,
       nom: shopItem.nom || '?',
       emoji: shopItem.icone || shopItem.emoji || '📦',
@@ -967,12 +978,12 @@ function _bastionAddShopItem(i) {
 }
 
 function _bastionRemoveItem(i, idx) {
-  _editingItems[i].splice(idx, 1);
+  STORE.editingItems[i].splice(idx, 1);
   _renderItemPicker(i);
 }
 function _bastionEditItemQty(i, idx, val) {
   const q = parseInt(val) || 1;
-  if (_editingItems[i][idx]) _editingItems[i][idx].q = Math.max(1, q);
+  if (STORE.editingItems[i][idx]) STORE.editingItems[i][idx].q = Math.max(1, q);
 }
 
 async function _bastionSaveRoom(slug) {
@@ -984,8 +995,8 @@ async function _bastionSaveRoom(slug) {
     color: document.getElementById('ed-color')?.value || undefined,
     desc:  document.getElementById('ed-desc')?.value?.trim() || undefined,
     niveaux: [0, 1, 2].map(i => {
-      // Items proviennent du buffer _editingItems (alimenté par le picker shop)
-      const items = (_editingItems[i] || []).map(it => ({
+      // Items proviennent du buffer STORE.editingItems (alimenté par le picker shop)
+      const items = (STORE.editingItems[i] || []).map(it => ({
         shopItemId: it.shopItemId || null,
         nom: it.nom || '?',
         emoji: it.emoji || '📦',
@@ -1003,7 +1014,7 @@ async function _bastionSaveRoom(slug) {
     }),
   };
 
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   // Salle custom : écrit dans b.customRooms ; salle de base : écrit dans catalogOverrides
   const isCustom = slug.startsWith('custom_');
   if (isCustom) {
@@ -1025,7 +1036,7 @@ async function _bastionResetRoom(slug) {
     title: '↻ Restaurer défaut', okLabel: 'Restaurer', cancelLabel: 'Annuler',
   }).catch(() => false);
   if (!ok) return;
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   if (b.catalogOverrides?.[slug]) {
     delete b.catalogOverrides[slug];
     b.catalogOverrides = { ...b.catalogOverrides };
@@ -1044,10 +1055,10 @@ async function _bastionResetRoom(slug) {
 // Les salaires sont débités du trésor à chaque "Passer la semaine".
 // ══════════════════════════════════════════════════════════════════════════════
 function _bastionOpenPersonnel() {
-  const b = _bastion || _defaultBastion();
+  const b = STORE.bastion || _defaultBastion();
   const emp = b.personnel || [];
   const totalSalaires = emp.reduce((s, e) => s + (parseInt(e.salaire) || 0), 0);
-  const npcs = _npcsCache || [];
+  const npcs = STORE.npcsCache || [];
 
   if (!emp.length) {
     openModal('👥 Personnel', `
@@ -1149,13 +1160,11 @@ function _bastionOpenPersonnel() {
 }
 
 // Cache partagé : PNJ chargés pour l'embauche ET pour l'affichage des portraits dans les salles
-let _hireNpcsCache = null;
-let _npcsCache = null;
 
 async function _loadNpcs() {
-  if (_npcsCache) return _npcsCache;
-  _npcsCache = await loadCollection('npcs').catch(() => []);
-  return _npcsCache;
+  if (STORE.npcsCache) return STORE.npcsCache;
+  STORE.npcsCache = await loadCollection('npcs').catch(() => []);
+  return STORE.npcsCache;
 }
 
 async function _bastionOpenHire(roomSlug) {
@@ -1164,16 +1173,16 @@ async function _bastionOpenHire(roomSlug) {
   const def = _getRoomDef(roomSlug);
   if (!def) return;
   if (def.unlimited) { showNotif('L\'Entrepôt n\'accueille pas de personnel.', 'error'); return; }
-  const curNiv = _roomNiveau(_bastion, roomSlug);
+  const curNiv = _roomNiveau(STORE.bastion, roomSlug);
   if (curNiv <= 0) { showNotif('Construis cette salle d\'abord.', 'error'); return; }
-  const assigned = (_bastion?.personnel || []).filter(e => e.roomSlug === roomSlug).length;
+  const assigned = (STORE.bastion?.personnel || []).filter(e => e.roomSlug === roomSlug).length;
   if (assigned >= curNiv) { showNotif(`${def.nom} est plein (${assigned}/${curNiv}).`, 'error'); return; }
 
   // Charger PNJ
   const allNpcs = await _loadNpcs();
-  _hireNpcsCache = allNpcs;
+  STORE.hireNpcsCache = allNpcs;
   // Filtres : Allié uniquement + activité matchant la salle + pas déjà embauché
-  const hiredIds = new Set((_bastion?.personnel || []).map(e => e.npcId).filter(Boolean));
+  const hiredIds = new Set((STORE.bastion?.personnel || []).map(e => e.npcId).filter(Boolean));
   const eligible = allNpcs.filter(n =>
     n.disposition === 'Allié' &&
     (n.activites || []).includes(roomSlug) &&
@@ -1227,30 +1236,29 @@ function _bastionSelectHireCard(npcId) {
   const btn = document.getElementById('bs-hire-submit');
   if (btn) {
     btn.disabled = false;
-    const npc = (_hireNpcsCache || []).find(n => n.id === npcId);
+    const npc = (STORE.hireNpcsCache || []).find(n => n.id === npcId);
     btn.textContent = npc ? `✓ Embaucher ${npc.nom}` : 'Embaucher';
   }
 }
 
-let _hireInProgress = false;
 async function _bastionDoHire() {
-  if (_hireInProgress) return;
+  if (STORE.hireInProgress) return;
   if (!STATE.isAdmin) return;
-  _hireInProgress = true;
+  STORE.hireInProgress = true;
   const npcId    = document.getElementById('bs-hire-selected-npc')?.value;
   const roomSlug = document.getElementById('bs-hire-roomSlug')?.value || null;
   if (!npcId) { showNotif('Sélectionne un PNJ.', 'error'); return; }
   if (!roomSlug) { showNotif('Aucune salle ciblée.', 'error'); return; }
-  const npc = (_hireNpcsCache || []).find(n => n.id === npcId);
+  const npc = (STORE.hireNpcsCache || []).find(n => n.id === npcId);
   if (!npc) { showNotif('PNJ introuvable.', 'error'); return; }
   // Sécurité : revérifier slot libre + critères (race possible si plusieurs MJs)
   const def = _getRoomDef(roomSlug);
-  const curNiv = _roomNiveau(_bastion, roomSlug);
-  const assigned = (_bastion?.personnel || []).filter(e => e.roomSlug === roomSlug).length;
+  const curNiv = _roomNiveau(STORE.bastion, roomSlug);
+  const assigned = (STORE.bastion?.personnel || []).filter(e => e.roomSlug === roomSlug).length;
   if (assigned >= curNiv) { showNotif(`${def?.nom || 'Salle'} pleine.`, 'error'); return; }
   if (npc.disposition !== 'Allié') { showNotif(`${npc.nom} n'est pas un Allié.`, 'error'); return; }
 
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.personnel = [...(b.personnel || []), {
     id:       `emp_${Date.now().toString(36)}`,
     nom:      npc.nom || '?',
@@ -1267,19 +1275,19 @@ async function _bastionDoHire() {
     closeModal();
     showNotif(`✓ ${npc.nom} affecté à ${def?.nom || 'la salle'}.`, 'success');
   } finally {
-    _hireInProgress = false;
+    STORE.hireInProgress = false;
   }
 }
 
 async function _bastionFireEmployee(empId) {
   if (!STATE.isAdmin) return;
-  const emp = (_bastion?.personnel || []).find(e => e.id === empId);
+  const emp = (STORE.bastion?.personnel || []).find(e => e.id === empId);
   if (!emp) return;
   const ok = await confirmModal(`Renvoyer ${emp.nom} ?`, {
     title: 'Renvoyer un employé', okLabel: 'Renvoyer', cancelLabel: 'Annuler',
   }).catch(() => false);
   if (!ok) return;
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.personnel = (b.personnel || []).filter(e => e.id !== empId);
   _addHistorique(b, 'fire', `👋 ${_esc(emp.nom)} quitte le bastion`);
   await _save(b);
@@ -1290,7 +1298,7 @@ async function _bastionFireEmployee(empId) {
 function _bastionShowDetails(slug) {
   const def = _getRoomDef(slug);
   if (!def) return;
-  const b = _bastion || _defaultBastion();
+  const b = STORE.bastion || _defaultBastion();
   const curNiv = _roomNiveau(b, slug);
   const buildingTarget = b?.salles?.[slug]?.targetNiveau || 0;
 
@@ -1385,11 +1393,11 @@ function _bastionOpenPreview() {
 function _bastionRunPreview() {
   const n = parseInt(document.getElementById('bs-preview-n')?.value) || 0;
   const out = document.getElementById('bs-preview-result');
-  if (!out || !_bastion) return;
+  if (!out || !STORE.bastion) return;
   if (n <= 0) { out.innerHTML = ''; return; }
 
   // Snapshot pur (deep copy) puis simulation sans écriture Firestore
-  const b = JSON.parse(JSON.stringify(_bastion));
+  const b = JSON.parse(JSON.stringify(STORE.bastion));
   const trace = []; // log compact des changements significatifs
 
   for (let w = 1; w <= n; w++) {
@@ -1456,7 +1464,7 @@ function _bastionRunPreview() {
     <div class="bs-preview-result">
       <div class="bs-preview-summary">
         <div><span class="bs-preview-ico">📅</span>Période ${b.semaine}</div>
-        <div><span class="bs-preview-ico">💰</span>${delta(finalOr, _bastion.or || 0, 'or')}</div>
+        <div><span class="bs-preview-ico">💰</span>${delta(finalOr, STORE.bastion.or || 0, 'or')}</div>
         <div><span class="bs-preview-ico">📦</span><strong>${capacity}</strong> capacité</div>
         <div><span class="bs-preview-ico">👥</span><strong>${personnelCount}</strong> employés (${totalSalaires} or/période)</div>
       </div>
@@ -1485,15 +1493,15 @@ function _bastionRunPreview() {
 }
 
 function _bastionExportJSON() {
-  if (!_bastion) { showNotif('Aucune donnée à exporter.', 'error'); return; }
+  if (!STORE.bastion) { showNotif('Aucune donnée à exporter.', 'error'); return; }
   const payload = {
     type: 'le-grand-jdr.bastion',
     version: 1,
     exportedAt: new Date().toISOString(),
-    bastion: _bastion,
+    bastion: STORE.bastion,
   };
   const date = new Date().toISOString().slice(0, 10);
-  const slug = (_bastion.nom || 'bastion')
+  const slug = (STORE.bastion.nom || 'bastion')
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'bastion';
   const filename = `${slug}-${date}.json`;
@@ -1508,7 +1516,7 @@ function _bastionExportJSON() {
 
 async function _bastionAdjustRessource(key, delta) {
   if (!STATE.isAdmin) return;
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b[key] = Math.max(0, (b[key] || 0) + delta);
   if (key === 'renommee' || key === 'influence') b[key] = Math.min(100, b[key]);
   // Pas de log : ajustements MJ silencieux
@@ -1537,7 +1545,7 @@ function _bastionOpenTransfer(direction) {
   // Liste déjà triée par _eligibleChars (joueur alpha → ★ par défaut → nom).
   // Default = le perso ★ de l'utilisateur, sinon son premier, sinon le premier de la liste.
   const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
-  const bastionOr = _bastion?.or || 0;
+  const bastionOr = STORE.bastion?.or || 0;
   const titre = isDeposit ? '💰 Verser au Bastion' : '💸 Retirer du Trésor commun';
   const cta   = isDeposit ? 'Verser' : 'Retirer';
   const cls   = isDeposit ? 'btn-gold' : 'btn-outline';
@@ -1573,7 +1581,7 @@ function _bastionRefreshTransfer(direction) {
     input.max = monOr;
     if (parseInt(input.value) > monOr) input.value = monOr;
   } else {
-    const bastionOr = _bastion?.or || 0;
+    const bastionOr = STORE.bastion?.or || 0;
     info.textContent = `(trésor commun : ${bastionOr})`;
     input.max = bastionOr;
     if (parseInt(input.value) > bastionOr) input.value = bastionOr;
@@ -1589,7 +1597,7 @@ async function _bastionDoTransfer(direction) {
   if (amount <= 0) { showNotif('Montant invalide.', 'error'); return; }
 
   const monOr = calcOr(char);
-  const bastionOr = _bastion?.or || 0;
+  const bastionOr = STORE.bastion?.or || 0;
   if (isDeposit && amount > monOr) { showNotif(`${char.nom||'?'} n'a que ${monOr} or.`, 'error'); return; }
   if (!isDeposit && amount > bastionOr) { showNotif(`Le trésor n'a que ${bastionOr} or.`, 'error'); return; }
 
@@ -1601,7 +1609,7 @@ async function _bastionDoTransfer(direction) {
     if (!res.ok) { showNotif(res.error || 'Erreur transaction', 'error'); return; }
 
     // 2. Mouvement côté bastion + historique
-    const b = { ..._bastion };
+    const b = { ...STORE.bastion };
     b.or = Math.max(0, (b.or || 0) + (isDeposit ? amount : -amount));
     const verb = isDeposit ? 'verse' : 'retire';
     const ico  = isDeposit ? '💰' : '💸';
@@ -1695,7 +1703,7 @@ function _renderRoomCard(def, b) {
   if (supportsPersonnel && curNiv > 0 && !building) {
     const assigned = (b.personnel || []).filter(e => e.roomSlug === def.slug);
     const slots = curNiv; // 1 PNJ par niveau
-    const npcs = _hireNpcsCache || _npcsCache || [];
+    const npcs = STORE.hireNpcsCache || STORE.npcsCache || [];
     const cards = assigned.map(e => {
       const npc = e.npcId ? npcs.find(n => n.id === e.npcId) : null;
       const portrait = npc?.imageUrl
@@ -1796,12 +1804,12 @@ function _renderRooms(b) {
 
 async function _bastionResetRooms() {
   if (!STATE.isAdmin) return;
-  const built = Object.entries(_bastion?.salles || {})
+  const built = Object.entries(STORE.bastion?.salles || {})
     .filter(([_, s]) => (s?.niveau || 0) > 0 || s?.weeksLeftToBuild > 0)
     .length;
   if (!built) { showNotif('Aucune salle à réinitialiser.', 'error'); return; }
 
-  const empCount = (_bastion?.personnel || []).length;
+  const empCount = (STORE.bastion?.personnel || []).length;
   const detail = `Va effacer la construction de ${built} salle${built > 1 ? 's' : ''}.\n` +
     (empCount > 0 ? `\n⚠ Les ${empCount} employé${empCount > 1 ? 's' : ''} resteront en place mais deviendront « Non assignés ».\n` : '') +
     `\nLe coffre, l'or et la chronique sont conservés.`;
@@ -1812,7 +1820,7 @@ async function _bastionResetRooms() {
   }).catch(() => false);
   if (!ok) return;
 
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.salles = {};
   await _save(b);
   showNotif('Salles réinitialisées.', 'success');
@@ -1841,11 +1849,9 @@ function _coffreItemCategory(item) {
   return 'autre';
 }
 
-let _coffreFilter = 'all';   // 'all'|'armes'|'armures'|'potions'|'scrolls'|'bijoux'|'ressources'|'autre'|'mine'
-let _coffreSearch = '';
 
-function _bastionSetCoffreFilter(cat) { _coffreFilter = cat; _renderPage(); }
-function _bastionSetCoffreSearch(val) { _coffreSearch = (val || '').toLowerCase().trim(); _renderPage(); }
+function _bastionSetCoffreFilter(cat) { STORE.coffreFilter = cat; _renderPage(); }
+function _bastionSetCoffreSearch(val) { STORE.coffreSearch = (val || '').toLowerCase().trim(); _renderPage(); }
 
 function _renderCoffre(b) {
   const coffre = (b.coffre || []);
@@ -1895,11 +1901,11 @@ function _renderCoffre(b) {
   const filterBar = `
     <div class="bs-coffre-filters">
       <input type="search" class="bs-coffre-search" placeholder="🔍 Rechercher…"
-        value="${_esc(_coffreSearch)}"
+        value="${_esc(STORE.coffreSearch)}"
         data-input="_bastionSetCoffreSearch">
       <div class="bs-coffre-pills">
         ${CATS.filter(([k]) => counts[k] > 0).map(([k, label]) => `
-          <button class="bs-coffre-pill${_coffreFilter === k ? ' active' : ''}"
+          <button class="bs-coffre-pill${STORE.coffreFilter === k ? ' active' : ''}"
             data-action="_bastionSetCoffreFilter" data-filter="${k}">
             ${label} <span class="bs-coffre-pill-count">${counts[k]}</span>
           </button>`).join('')}
@@ -1908,15 +1914,15 @@ function _renderCoffre(b) {
 
   // Appliquer filtres + recherche
   let filtered = coffre.slice();
-  if (_coffreFilter && _coffreFilter !== 'all') {
-    if (_coffreFilter === 'mine') {
+  if (STORE.coffreFilter && STORE.coffreFilter !== 'all') {
+    if (STORE.coffreFilter === 'mine') {
       filtered = filtered.filter(it => myCharNoms.size && [...myCharNoms].some(n => (it.source || '').includes(n)));
     } else {
-      filtered = filtered.filter(it => _coffreItemCategory(it) === _coffreFilter);
+      filtered = filtered.filter(it => _coffreItemCategory(it) === STORE.coffreFilter);
     }
   }
-  if (_coffreSearch) {
-    filtered = filtered.filter(it => (it.nom || '').toLowerCase().includes(_coffreSearch));
+  if (STORE.coffreSearch) {
+    filtered = filtered.filter(it => (it.nom || '').toLowerCase().includes(STORE.coffreSearch));
   }
 
   // Tri : plus récents d'abord
@@ -1941,7 +1947,6 @@ function _renderCoffre(b) {
     </section>`;
 }
 
-let _histoExpanded = false;
 // ══════════════════════════════════════════════════════════════════════════════
 // QUÊTES DU BASTION
 // Stockées dans `b.bastionQuests = [{ id, titre, description, recompense, statut, createdAt }]`
@@ -1956,7 +1961,7 @@ const BQ_STATUTS = {
 
 function _bastionOpenQuestEditor(questId) {
   if (!STATE.isAdmin) return;
-  const q = questId ? (_bastion?.bastionQuests || []).find(x => x.id === questId) : null;
+  const q = questId ? (STORE.bastion?.bastionQuests || []).find(x => x.id === questId) : null;
   openModal(q ? '✏️ Modifier la quête' : '＋ Nouvelle quête du Bastion', `
     <div class="form-group"><label>Titre</label>
       <input class="input-field" id="bq-titre" value="${_esc(q?.titre || '')}" placeholder="ex: Récupérer le plan de la Forge supérieure"></div>
@@ -1988,7 +1993,7 @@ async function _bastionSaveQuest(id) {
     statut:      document.getElementById('bq-statut')?.value || 'ouverte',
     createdAt:   id ? undefined : Date.now(),
   };
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.bastionQuests = [...(b.bastionQuests || [])];
   if (id) {
     const idx = b.bastionQuests.findIndex(q => q.id === id);
@@ -2008,7 +2013,7 @@ async function _bastionDeleteQuest(id) {
     title: '🗑 Supprimer la quête', okLabel: 'Supprimer', cancelLabel: 'Annuler',
   }).catch(() => false);
   if (!ok) return;
-  const b = { ..._bastion };
+  const b = { ...STORE.bastion };
   b.bastionQuests = (b.bastionQuests || []).filter(q => q.id !== id);
   await _save(b);
   closeModal();
@@ -2058,7 +2063,7 @@ function _renderHistorique(b) {
   const all = (b.historique || []).filter(e => !_ADMIN_HISTO_TYPES.has(e.type));
   if (!all.length) return '';
   const COLLAPSED = 5;
-  const expanded = _histoExpanded;
+  const expanded = STORE.histoExpanded;
   const visible = expanded ? all : all.slice(0, COLLAPSED);
   const hidden = all.length - visible.length;
 
@@ -2081,14 +2086,14 @@ function _renderHistorique(b) {
 }
 
 function _bastionToggleHisto() {
-  _histoExpanded = !_histoExpanded;
+  STORE.histoExpanded = !STORE.histoExpanded;
   _renderPage();
 }
 
 function _renderPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
-  const b = _bastion || _defaultBastion();
+  const b = STORE.bastion || _defaultBastion();
   content.innerHTML = `
     <div class="bs-root">
       ${_renderHeader(b)}
@@ -2109,13 +2114,13 @@ async function renderBastionPage() {
   content.innerHTML = appSplashHtml('Chargement du Bastion…');
 
   // 1ère lecture (bastion + shop + npcs en parallèle — pour snapshots & portraits)
-  _shopItemsCache = null; _npcsCache = null; // reset au cas où on aurait changé d'aventure
+  STORE.shopItemsCache = null; STORE.npcsCache = null; // reset au cas où on aurait changé d'aventure
   const [data] = await Promise.all([
     getDocData('bastion', 'main'),
     _loadShopItems(),
     _loadNpcs(),
   ]);
-  _bastion = data || _defaultBastion();
+  STORE.bastion = data || _defaultBastion();
   _renderPage();
 
   // Abonnement temps réel (idempotent)

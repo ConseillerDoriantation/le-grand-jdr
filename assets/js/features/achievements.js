@@ -6,6 +6,7 @@
 // ✓ Ordre partagé pour tous les utilisateurs
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete } from '../shared/crud.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { watch, watchDoc } from '../shared/realtime.js';
@@ -25,29 +26,33 @@ const CATS = [
   { id: 'histoire', label: '📖 Histoire', color: '#22c38e', glow: 'rgba(34,195,142,0.14)'  },
 ];
 
+
+const STORE = {
+  items:         [],        // hauts-faits chargés
+  lightboxItems: {},        // { [catId]: item[] } cache lightbox
+  filter:        'all',     // 'all' | 'epique' | 'comique' | 'histoire'
+  charFilter:    'all',     // 'all' | charId
+  view:          'galerie', // 'galerie' | 'timeline'
+  search:        '',
+  timelineDesc:  false,     // true = plus récent en haut
+  order:         [],        // miroir de l'ordre Firestore
+};
+
 let _achRowSortables = [];
 let _achDragBlockClick = false;
 let _achClickGuardInstalled = false;
 let _achUploader = null;
-let _currentOrder = [];     // miroir de l'ordre Firestore, sert aux re-renders live
 
-let _achItems = [];
-let _achLightboxItems = {};
-let _achFilter = 'all';     // 'all' | 'epique' | 'comique' | 'histoire'
-let _achCharFilter = 'all'; // 'all' | charId
-let _achView = 'galerie';   // 'galerie' | 'timeline'
-let _achSearch = '';
-let _achTimelineDesc = false; // true = plus récent en haut
 let _achSelectCat = () => {};
 let _achToggleContrib = () => {};
 
 export function getAchievementsShellState() {
-  return { items: _achItems, filter: _achFilter, view: _achView, search: _achSearch };
+  return { items: STORE.items, filter: STORE.filter, view: STORE.view, search: STORE.search };
 }
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 export function openAchievementModal(id = null) {
-  const ex = id ? (_achItems || []).find(a => a.id === id) : null;
+  const ex = id ? (STORE.items || []).find(a => a.id === id) : null;
   _achUploader?.destroy(); _achUploader = null;
 
   openModal(
@@ -226,7 +231,7 @@ async function saveAchievement(id = '') {
     if (!titre) { showNotif('Le titre est requis.', 'error'); return; }
 
     const uploaded = _achUploader?.getResult();
-    const ex = id ? (_achItems || []).find(a => a.id === id) : null;
+    const ex = id ? (STORE.items || []).find(a => a.id === id) : null;
     const imageUrl = typeof uploaded === 'string' ? uploaded : (ex?.imageUrl || '');
 
     const contribRaw = document.getElementById('ach-contributeurs')?.value || '';
@@ -249,11 +254,11 @@ async function saveAchievement(id = '') {
       const order = await _loadOrder();
       order.push(docId);
       await _saveOrder(order);
-      if (_achItems) _achItems.push({ id: docId, ...payload });
+      if (STORE.items) STORE.items.push({ id: docId, ...payload });
     } else {
       await saveDoc('achievements', docId, payload);
-      if (_achItems) {
-        _achItems = _achItems.map(a => a.id === id ? { id, ...payload } : a);
+      if (STORE.items) {
+        STORE.items = STORE.items.map(a => a.id === id ? { id, ...payload } : a);
       }
     }
 
@@ -266,7 +271,7 @@ async function saveAchievement(id = '') {
 
 // ── ÉDITER ────────────────────────────────────────────────────────────────────
 async function editAchievement(id) {
-  if (!_achItems) _achItems = await loadCollection('achievements');
+  if (!STORE.items) STORE.items = await loadCollection('achievements');
   openAchievementModal(id);
 }
 
@@ -274,7 +279,7 @@ async function editAchievement(id) {
 async function deleteAchievement(id) {
   try {
     if (!await confirmDelete('achievements', id, 'Supprimer ce haut-fait définitivement ?')) return;
-    if (_achItems) _achItems = _achItems.filter(a => a.id !== id);
+    if (STORE.items) STORE.items = STORE.items.filter(a => a.id !== id);
     const order = (await _loadOrder()).filter(oid => oid !== id);
     await _saveOrder(order);
     showNotif('Haut-Fait supprimé.', 'success');
@@ -301,7 +306,7 @@ function _applyOrder(items, order) {
 }
 
 function _refreshAchievementCounters() {
-  const all = _achItems || [];
+  const all = STORE.items || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
   const counts = { all: visible.length };
   CATS.forEach(c => {
@@ -314,11 +319,11 @@ function _refreshAchievementCounters() {
 }
 
 function _mergeCategoryOrder(catId, catOrder, globalOrder) {
-  const allIds      = (_achItems || []).map(a => a.id);
+  const allIds      = (STORE.items || []).map(a => a.id);
   const globalIds   = globalOrder.filter(id => allIds.includes(id));
   const missingIds  = allIds.filter(id => !globalIds.includes(id));
   const fullOrder   = [...globalIds, ...missingIds];
-  const catIds     = new Set((_achItems || [])
+  const catIds     = new Set((STORE.items || [])
     .filter(a => (a.categorie || 'epique') === catId)
     .map(a => a.id));
   const cleanOrder = catOrder.filter(id => catIds.has(id));
@@ -335,7 +340,7 @@ function _mergeCategoryOrder(catId, catOrder, globalOrder) {
 async function _persistCategoryOrder(catId, orderedIds) {
   const merged = _mergeCategoryOrder(catId, orderedIds, await _loadOrder());
   await _saveOrder(merged);
-  _achItems = _applyOrder(_achItems || [], merged);
+  STORE.items = _applyOrder(STORE.items || [], merged);
   return merged;
 }
 
@@ -359,28 +364,6 @@ function _destroyAchievementSortables() {
   _achRowSortables = [];
 }
 
-function _achievementSortableOptions(overrides = {}) {
-  return {
-    animation: 120,
-    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
-    filter: 'button, a, input, select, textarea, .btn, .btn-icon, .ach-admin-btns',
-    preventOnFilter: false,
-    ghostClass: 'ach-sortable-ghost',
-    chosenClass: 'ach-sortable-chosen',
-    dragClass: 'ach-sortable-drag',
-    forceFallback: true,
-    fallbackOnBody: true,
-    fallbackTolerance: 5,
-    delay: 150,
-    delayOnTouchOnly: true,
-    touchStartThreshold: 5,
-    onStart: () => {
-      document.body.classList.add('ach-dragging');
-      _achDragBlockClick = true;
-    },
-    ...overrides,
-  };
-}
 
 // ── DRAG & DROP ───────────────────────────────────────────────────────────────
 function setupAchievementsDnd(catId) {
@@ -395,19 +378,22 @@ function setupAchievementsDnd(catId) {
   _destroyAchievementSortables();
 
   grid.querySelectorAll('.ach-row').forEach(row => {
-    _achRowSortables.push(new Sortable(row, _achievementSortableOptions({
+    _achRowSortables.push(makeSortable(row, {
+      prefix: 'ach',
+      animation: 120,
+      filter: 'button, a, input, select, textarea, .btn, .btn-icon, .ach-admin-btns',
       group: `achievements-${catId}`,
       draggable: '.ach-sortable-item',
+      onStart: () => { document.body.classList.add('ach-dragging'); _achDragBlockClick = true; },
       onEnd: async (evt) => {
         _finishAchievementDrag();
         if (evt.oldIndex === evt.newIndex && evt.from === evt.to) return;
-
         const domOrder = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
         await _persistCategoryOrder(catId, domOrder);
         showNotif('Ordre sauvegardé.', 'success');
         await _achRebuildGallery(catId);
       },
-    })));
+    }));
   });
 }
 
@@ -540,8 +526,8 @@ function _achCardHTML(item, isAdmin) {
 async function _achRenderJustified(catId, items, container) {
   const withRatios = await _achMeasureRatios(items);
   withRatios.forEach(item => {
-    const idx = (_achItems || []).findIndex(a => a.id === item.id);
-    if (idx >= 0) _achItems[idx] = { ..._achItems[idx], aspectRatio: item.aspectRatio };
+    const idx = (STORE.items || []).findIndex(a => a.id === item.id);
+    if (idx >= 0) STORE.items[idx] = { ...STORE.items[idx], aspectRatio: item.aspectRatio };
   });
 
   const containerW = container.clientWidth || 900;
@@ -570,7 +556,7 @@ async function _achRenderJustified(catId, items, container) {
 async function _achRebuildGallery(catId) {
   const grid = document.getElementById('ach-gallery');
   if (!grid) return;
-  const itemsById  = Object.fromEntries((_achItems || []).map(a => [a.id, a]));
+  const itemsById  = Object.fromEntries((STORE.items || []).map(a => [a.id, a]));
   const orderedIds = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
   const ordered    = orderedIds.map(id => itemsById[id]).filter(Boolean);
   await _achRenderJustified(catId, ordered, grid);
@@ -639,8 +625,8 @@ function _renderTimeline(items) {
   const chars   = sortCharactersForDisplay(STATE.characters || []);
   const isAdmin = STATE.isAdmin;
   // Tri chronologique. Les hauts-faits sans date valide sont relégués à la fin
-  // (peu importe le sens du tri). Sens contrôlé par _achTimelineDesc.
-  const desc = !!_achTimelineDesc;
+  // (peu importe le sens du tri). Sens contrôlé par STORE.timelineDesc.
+  const desc = !!STORE.timelineDesc;
   const sorted = [...items].sort((a, b) => {
     const da = parseDate(a.date), db = parseDate(b.date);
     if (!da && !db) return 0;
@@ -727,15 +713,15 @@ function _achRenderControlsExtras() {
   }
 
   // Chips perso : seulement ceux qui ont au moins 1 HF visible pour l'utilisateur
-  const all = _achItems || [];
+  const all = STORE.items || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
   const counts = new Map();
   visible.forEach(a => (a.contributeurs || []).forEach(cid => counts.set(cid, (counts.get(cid)||0)+1)));
   const chars = (STATE.characters || []).filter(c => counts.has(c.id));
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const active = _achCharFilter || 'all';
-  const isTimeline = (_achView || 'galerie') === 'timeline';
-  const desc = !!_achTimelineDesc;
+  const active = STORE.charFilter || 'all';
+  const isTimeline = (STORE.view || 'galerie') === 'timeline';
+  const desc = !!STORE.timelineDesc;
 
   const charChips = chars.length ? `
     <div class="ach-char-filter">
@@ -775,10 +761,10 @@ async function _achRenderContent() {
   _refreshAchievementCounters();
   _achRenderControlsExtras();
 
-  const all        = _achItems || [];
-  const filter     = _achFilter || 'all';
-  const charFilter = _achCharFilter || 'all';
-  const search     = (_achSearch || '').trim().toLowerCase();
+  const all        = STORE.items || [];
+  const filter     = STORE.filter || 'all';
+  const charFilter = STORE.charFilter || 'all';
+  const search     = (STORE.search || '').trim().toLowerCase();
   const isAdmin    = STATE.isAdmin;
 
   // 1. Filtre secret (joueurs ne voient pas les HF secrets)
@@ -797,7 +783,7 @@ async function _achRenderContent() {
 
   // Map lightbox (limitée aussi pour les joueurs : pas d'ouverture d'un HF secret)
   const visibleForLightbox = isAdmin ? all : all.filter(a => !a.secret);
-  _achLightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
+  STORE.lightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
 
   if (!filtered.length) {
     const catDef = ACH_CATS.find(c => c.id === filter);
@@ -817,7 +803,7 @@ async function _achRenderContent() {
     return;
   }
 
-  if ((_achView || 'galerie') === 'timeline') {
+  if ((STORE.view || 'galerie') === 'timeline') {
     contentEl.innerHTML = _renderTimeline(filtered);
     return;
   }
@@ -835,14 +821,14 @@ async function _achRenderContent() {
 
 // ── Actions état (appelées depuis les boutons HTML) ───────────────────────────
 function _achSetFilter(filter) {
-  _achFilter = filter;
+  STORE.filter = filter;
   document.querySelectorAll('.hall-counter').forEach(el => {
     el.classList.toggle('active', el.dataset.filter === filter);
   });
   _achRenderContent();
 };
 function _achSetView(view) {
-  _achView = view;
+  STORE.view = view;
   document.querySelectorAll('.view-tab').forEach((btn, i) => {
     btn.classList.toggle('active', i === (view === 'timeline' ? 1 : 0));
   });
@@ -850,25 +836,25 @@ function _achSetView(view) {
 };
 let _achSearchTimer = null;
 function _achSetSearch(val) {
-  _achSearch = val;
+  STORE.search = val;
   clearTimeout(_achSearchTimer);
   _achSearchTimer = setTimeout(_achRenderContent, 240);
 };
 function _achSetCharFilter(charId) {
-  _achCharFilter = charId || 'all';
+  STORE.charFilter = charId || 'all';
   document.querySelectorAll('.ach-char-chip').forEach(el => {
-    el.classList.toggle('active', el.dataset.charid === _achCharFilter);
+    el.classList.toggle('active', el.dataset.charid === STORE.charFilter);
   });
   _achRenderContent();
 };
 function _achToggleTimelineDir() {
-  _achTimelineDesc = !_achTimelineDesc;
+  STORE.timelineDesc = !STORE.timelineDesc;
   _achRenderContent();
 };
 
 // ── LIGHTBOX ENRICHIE ─────────────────────────────────────────────────────────
 function _achOpenLightbox(itemId) {
-  const item = (_achLightboxItems || {})[itemId] || (_achItems || []).find(a => a.id === itemId);
+  const item = (STORE.lightboxItems || {})[itemId] || (STORE.items || []).find(a => a.id === itemId);
   if (!item) return;
   const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
@@ -918,11 +904,11 @@ PAGES.achievements = async function() {
     loadCollection('achievements'),
     _loadOrder(),
   ]);
-  _currentOrder    = order;
-  _achItems = _applyOrder(items || [], order);
-  _achFilter ??= 'all';
-  _achView   ??= 'galerie';
-  _achSearch ??= '';
+  STORE.order    = order;
+  STORE.items = _applyOrder(items || [], order);
+  STORE.filter ??= 'all';
+  STORE.view   ??= 'galerie';
+  STORE.search ??= '';
   PAGES._achievementsShellState = getAchievementsShellState();
 
   await _origPage();    // génère le shell (hero + controls + #ach-content)
@@ -935,15 +921,15 @@ PAGES.achievements = async function() {
   watch('ach-items', 'achievements', items => {
     if (STATE.currentPage !== 'achievements') return;
     if (document.body.classList.contains('ach-dragging')) return;
-    _achItems = _applyOrder(items || [], _currentOrder);
+    STORE.items = _applyOrder(items || [], STORE.order);
     _achRenderContent();
   });
 
   watchDoc('ach-order', 'achievements_meta', 'order', doc => {
     if (STATE.currentPage !== 'achievements') return;
     if (document.body.classList.contains('ach-dragging')) return;
-    _currentOrder    = Array.isArray(doc?.order) ? doc.order : [];
-    _achItems = _applyOrder(_achItems || [], _currentOrder);
+    STORE.order    = Array.isArray(doc?.order) ? doc.order : [];
+    STORE.items = _applyOrder(STORE.items || [], STORE.order);
     _achRenderContent();
   });
 };

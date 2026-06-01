@@ -8,7 +8,7 @@ import { openModal, closeModal, closeModalDirect } from '../../shared/modal.js';
 import { _esc } from '../../shared/html.js';
 import {
   getMod, calcCA, calcVitesse, calcPVMax, calcPMMax, calcPalier, pct,
-  STAT_META,
+  STAT_META, modStr,
 } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData, getWeaponToucherParts, getWeaponDegatsParts } from './data.js';
 import { getDashboardPartyChars } from '../../shared/dashboard-session.js';
@@ -29,12 +29,11 @@ function _statRow(c) {
     const bonus = (c.statsBonus?.[st.key]) || 0;
     const total = base + bonus;
     const mod = getMod(c, st.key);
-    const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
-    const cls = mod > 0 ? 'pos' : mod < 0 ? 'neg' : 'zero';
+        const cls = mod > 0 ? 'pos' : mod < 0 ? 'neg' : 'zero';
     return `
       <div class="qv-stat">
         <div class="qv-stat-name">${st.label.slice(0,3)}</div>
-        <div class="qv-stat-mod qv-stat-mod--${cls}">${modStr}</div>
+        <div class="qv-stat-mod qv-stat-mod--${cls}">${modStr(mod)}</div>
         <div class="qv-stat-total">${total}${bonus?` <span class="qv-stat-bonus">${bonus>0?'+':''}${bonus}</span>`:''}</div>
       </div>`;
   }).join('');

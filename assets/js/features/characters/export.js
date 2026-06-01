@@ -9,7 +9,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import {
   getMod, calcCA, calcVitesse, calcPVMax, calcPMMax, calcOr, calcPalier,
-  formatItemBonusText, STAT_META,
+  formatItemBonusText, STAT_META, modStr,
 } from '../../shared/char-stats.js';
 import { getArmorSetData, getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts } from './data.js';
 
@@ -59,7 +59,7 @@ function _pctBar(cur, max, color = '#222') {
   return `<div class="ps-bar"><div class="ps-bar-fill" style="width:${pct}%;background:${color}"></div></div>`;
 }
 
-function _modStr(m) { return (m >= 0 ? '+' : '') + m; }
+
 
 function _buildHeader(c) {
   const titres = (c.titres || []).slice(0, 6);
@@ -134,7 +134,7 @@ function _buildStats(c) {
           const mod = getMod(c, st.key);
           return `<div class="ps-stat">
             <div class="ps-stat-name">${st.label}</div>
-            <div class="ps-stat-mod">${_modStr(mod)}</div>
+            <div class="ps-stat-mod">${modStr(mod)}</div>
             <div class="ps-stat-total">${total}${bonus ? ` <span class="ps-stat-bonus">(${base}${bonus>0?'+':''}${bonus})</span>` : ''}</div>
           </div>`;
         }).join('')}

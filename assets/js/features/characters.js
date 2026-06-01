@@ -60,6 +60,7 @@ import {
   renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
   addProfilTag, removeProfilTag, initProfilTagUi,
   getProfilCacheRef as _profilCache,
+  STATS_KEYS,
 } from './characters/tabs.js';
 import { bindRichTextEditors, richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import { registerActions } from '../core/actions.js';
@@ -84,6 +85,7 @@ import {
 import { quickViewChar } from './characters/quick-view.js';
 import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 
@@ -607,16 +609,11 @@ function _bindSortsCatDrag(c, canEdit) {
   const wrap = document.getElementById('cs-sort-cats-wrap');
   if (!wrap) return;
 
-  _sortsCatSortable = new Sortable(wrap, {
-    animation: 150,
+  _sortsCatSortable = makeSortable(wrap, {
+    prefix: 'cs',
     handle: '.cs-sort-cat-drag',
     draggable: '.cs-sort-cat-block:not(.is-default)',
-    ghostClass: 'cs-sortable-ghost',
-    chosenClass: 'cs-sortable-chosen',
-    forceFallback: true,
-    fallbackOnBody: true,
     delay: 80,
-    delayOnTouchOnly: true,
     onEnd: async () => {
       // Reconstitue l'ordre des cat IDs depuis le DOM (en excluant le bloc __none)
       const newOrderIds = [...wrap.querySelectorAll('.cs-sort-cat-block:not(.is-default)')]
@@ -1106,14 +1103,13 @@ function _bindQuetesDnd(c, canEdit) {
   if (!canEdit) return;
   const area = document.getElementById('char-tab-content'); if (!area) return;
   area.querySelectorAll('.quest-list').forEach(list => {
-    _questsSortables.push(new Sortable(list, {
+    _questsSortables.push(makeSortable(list, {
+      ghostClass: 'cs-quete-ghost',
+      chosenClass: 'cs-quete-chosen',
       group: 'cs-quetes',
       animation: 160,
       draggable: '.quest',
       filter: '.btn-icon, .q-empty',
-      preventOnFilter: false,
-      ghostClass: 'cs-quete-ghost',
-      chosenClass: 'cs-quete-chosen',
       onEnd: () => _onQuetesReordered(c),
     }));
   });
@@ -1185,12 +1181,12 @@ function _bindNotesDnd(c, canEdit) {
   if (!canEdit) return;
   const area = document.getElementById('char-tab-content'); if (!area) return;
   const stack = area.querySelector('.notes-stack'); if (!stack) return;
-  _notesSortable = new Sortable(stack, {
+  _notesSortable = makeSortable(stack, {
+    ghostClass: 'cs-note-ghost',
+    chosenClass: 'cs-note-chosen',
     handle: '.note-v3-drag',
     draggable: '.note-v3',
     animation: 160,
-    ghostClass: 'cs-note-ghost',
-    chosenClass: 'cs-note-chosen',
     onEnd: () => _onNotesReordered(c),
   });
 }
@@ -2363,7 +2359,6 @@ function renderCharSortsV3(c, canEdit) {
 async function allocateStat(charId, key, delta = 1) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
-  const STATS_KEYS = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
   if (!STATS_KEYS.includes(key)) return;
 
   const earned = Math.max(0, (c.niveau||1) - 1);

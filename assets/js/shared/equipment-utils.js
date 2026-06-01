@@ -3,7 +3,7 @@
 // Helpers d'équipement utilisés hors du domaine characters/ :
 // vtt.js, artisan.js, shop.js peuvent importer ici sans couplage cross-features.
 // ══════════════════════════════════════════════════════════════════════════════
-import { computeEquipStatsBonus } from './char-stats.js';
+import { computeEquipStatsBonus, getItemEffectText, getItemStatBonus } from './char-stats.js';
 
 // ── Arme par défaut (mains nues) ──────────────────────────────────────────────
 export const DEFAULT_UNARMED = Object.freeze({
@@ -21,6 +21,208 @@ export function getMainWeapon(c) {
   const mainP = c?.equipement?.['Main principale'];
   if (mainP && mainP.nom) return mainP;
   return { ...DEFAULT_UNARMED };
+}
+
+// -- Traits d'items -------------------------------------------------------------
+
+export function getBaseTraits(item = {}) {
+  const removed = new Set(item?.upgrades?.removedBaseTraits || []);
+  const out = [];
+  if (Array.isArray(item.traits) && item.traits.length > 0) {
+    item.traits.forEach(t => { if (t && !removed.has(t)) out.push(t); });
+  } else if (item.trait && !removed.has(item.trait)) {
+    out.push(item.trait);
+  }
+  return out;
+}
+
+export function getAddedTraits(item = {}) {
+  return Array.isArray(item?.upgrades?.addedTraits)
+    ? item.upgrades.addedTraits.filter(Boolean)
+    : [];
+}
+
+export function getItemTraits(item = {}) {
+  const all = [...getBaseTraits(item), ...getAddedTraits(item)];
+  const bonus = parseInt(item?.upgrades?.effectBonus) || 0;
+  if (bonus <= 0) return all;
+
+  let applied = false;
+  return all.map(t => {
+    if (applied) return t;
+    const txt = String(t);
+    const m = txt.match(/(?<![\d.])(\+?)(\d+)(?![\d.])/);
+    if (!m) return t;
+    applied = true;
+    const sign  = m[1] || '';
+    const value = parseInt(m[2]);
+    return txt.replace(m[0], sign + (value + bonus));
+  });
+}
+
+export const _getBaseTraits = getBaseTraits;
+export const _getAddedTraits = getAddedTraits;
+export const _getTraits = getItemTraits;
+
+// -- Stats d'arme ---------------------------------------------------------------
+
+export function normalizeStatKey(value = '') {
+  const raw = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/^\+/, '');
+  if (!raw) return '';
+  const map = {
+    for: 'force', force: 'force', str: 'force',
+    dex: 'dexterite', dexterite: 'dexterite', agilite: 'dexterite',
+    int: 'intelligence', intelligence: 'intelligence', in: 'intelligence',
+    sag: 'sagesse', sagesse: 'sagesse', sa: 'sagesse', wis: 'sagesse',
+    con: 'constitution', constitution: 'constitution', co: 'constitution',
+    cha: 'charisme', charisme: 'charisme', ch: 'charisme',
+  };
+  return map[raw] || '';
+}
+
+export function getWeaponDamageStatKeys(item = {}) {
+  if (Array.isArray(item.degatsStats) && item.degatsStats.length) {
+    return item.degatsStats.map(normalizeStatKey).filter(Boolean);
+  }
+  const single = normalizeStatKey(item.degatsStat || item.statAttaque || '');
+  return single ? [single] : [];
+}
+
+export function formatWeaponDamageStatsText(itemOrKeys = [], { statLabel = null } = {}) {
+  const keys = Array.isArray(itemOrKeys) ? itemOrKeys : getWeaponDamageStatKeys(itemOrKeys);
+  const label = statLabel || ((key) => key);
+  return keys.map(label).filter(Boolean).join(' + ');
+}
+
+export function formatWeaponDamageText(item = {}, { statLabel = null } = {}) {
+  if (!item?.degats) return '';
+  const stats = formatWeaponDamageStatsText(item, { statLabel });
+  return stats ? String(item.degats) + ' + ' + stats : String(item.degats);
+}
+
+export function getWeaponToucherStatKey(item = {}) {
+  return normalizeStatKey(item.toucherStat || item.toucher || item.statAttaque || '');
+}
+
+export function isWeaponLikeItem(item = {}) {
+  const template = String(item.template || '').toLowerCase();
+  const format = String(item.format || '');
+  return template === 'arme' || Boolean(item.degats || item.toucher || item.sousType || format.startsWith('Arme'));
+}
+
+// -- Projection item boutique/inventaire -> arme/equipement -------------------
+
+export function inferAttackStatFromItem(item = {}) {
+  if (item.toucherStat) return item.toucherStat;
+  if (item.statAttaque) return item.statAttaque;
+  const format = String(item.format || '');
+  if (format.includes('Mag.')) return 'intelligence';
+  if (format.includes('Dist.')) return 'dexterite';
+  return 'force';
+}
+
+function inferArmorSlotValue(slot, item = {}) {
+  if (item.slotArmure) return item.slotArmure;
+  if (slot === 'Bottes') return 'Pieds';
+  return slot;
+}
+
+function inferAccessorySlotValue(slot, item = {}) {
+  return item.slotBijou || slot;
+}
+
+function copyDerivedEquipmentFields(item = {}) {
+  return {
+    pvMaxBonus:      parseInt(item.pvMaxBonus)      || 0,
+    pmMaxBonus:      parseInt(item.pmMaxBonus)      || 0,
+    vitesseBonus:    parseInt(item.vitesseBonus)    || 0,
+    initiativeBonus: parseInt(item.initiativeBonus) || 0,
+    caBonus:         parseInt(item.caBonus)         || 0,
+    skillBonuses:    item.skillBonuses && typeof item.skillBonuses === 'object'
+                     ? { ...item.skillBonuses } : {},
+  };
+}
+
+function copyStatBonuses(item = {}) {
+  return {
+    fo:  getItemStatBonus(item, 'force'),
+    dex: getItemStatBonus(item, 'dexterite'),
+    in:  getItemStatBonus(item, 'intelligence'),
+    sa:  getItemStatBonus(item, 'sagesse'),
+    co:  getItemStatBonus(item, 'constitution'),
+    ch:  getItemStatBonus(item, 'charisme'),
+  };
+}
+
+export function buildEquippedItemFromInventory(slot, item, invIndex) {
+  if (!item) return null;
+  const isWeapon = slot.startsWith('Main');
+  const rawTraits = [...getBaseTraits(item), ...getAddedTraits(item)];
+  const effectBonus = parseInt(item.upgrades?.effectBonus) || 0;
+  const equipUpgrades = effectBonus > 0 ? { effectBonus } : undefined;
+  const common = {
+    nom: item.nom || '',
+    traits: rawTraits,
+    ...(equipUpgrades ? { upgrades: equipUpgrades } : {}),
+    ...copyStatBonuses(item),
+    ...copyDerivedEquipmentFields(item),
+    sourceInvIndex: invIndex,
+    itemId: item.itemId || '',
+  };
+
+  if (isWeapon) {
+    const inferredStat = inferAttackStatFromItem(item);
+    return {
+      ...common,
+      sousType: item.sousType || '',
+      degats: item.degats || '',
+      degatsStat: item.degatsStat || inferredStat,
+      degatsStats: Array.isArray(item.degatsStats) && item.degatsStats.length
+        ? [...item.degatsStats]
+        : (item.degatsStat ? [item.degatsStat] : [inferredStat]),
+      toucherStat: item.toucherStat || inferredStat,
+      statAttaque: inferredStat,
+      typeArme: item.typeArme || item.type || '',
+      portee: item.portee || '',
+      particularite: item.particularite || getItemEffectText(item) || item.description || '',
+      format: item.format || '',
+      toucher: item.toucher || '',
+      stats: item.stats || '',
+    };
+  }
+
+  return {
+    ...common,
+    ca: parseInt(item.ca) || 0,
+    typeArmure: item.typeArmure || '',
+    slotArmure: item.slotArmure ? inferArmorSlotValue(slot, item) : '',
+    slotBijou: item.slotBijou ? inferAccessorySlotValue(slot, item) : '',
+  };
+}
+
+export function serializeShopWeaponForCombat(item = {}) {
+  return {
+    itemId: item.id || item.itemId || '',
+    nom: item.nom || '',
+    degats: item.degats || '',
+    degatsStat: item.degatsStat || item.statAttaque || '',
+    degatsStats: Array.isArray(item.degatsStats) ? [...item.degatsStats] : (item.degatsStat ? [item.degatsStat] : []),
+    toucherStat: item.toucherStat || item.statAttaque || '',
+    statAttaque: item.statAttaque || item.toucherStat || '',
+    typeArme: item.typeArme || item.sousType || '',
+    sousType: item.sousType || '',
+    portee: item.portee || '',
+    traits: getItemTraits(item),
+    format: item.format || '',
+    toucher: item.toucher || '',
+    particularite: item.particularite || getItemEffectText(item) || '',
+    stats: item.stats || '',
+    ...copyStatBonuses(item),
+  };
 }
 
 // ── Normalisation et méta des types d'armure ─────────────────────────────────

@@ -14,6 +14,7 @@
 // (cohérent avec bestiary/shop).
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete } from '../shared/crud.js';
 
 let _ppEditingPlayer = null;
@@ -26,7 +27,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _initials } from '../shared/html.js';
 import {
-  getMod, calcCA, calcPVMax, calcPMMax, calcOr, calcVitesse, STAT_META,
+  getMod, calcCA, calcPVMax, calcPMMax, calcOr, calcVitesse, STAT_META, getModFromScore, modStr,
 } from '../shared/char-stats.js';
 import { attachDropAndCrop, attachPanZoomCrop, panZoomCropHTML, resizeImageDataUrl } from '../shared/image-crop.js';
 import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
@@ -1008,11 +1009,10 @@ function _bindHexagonTooltips() {
     const tooltip = wrap.querySelector('[data-pp-hex-tooltip]');
     const showTip = (idx, x, y) => {
       const s = stats[idx]; if (!s || !tooltip) return;
-      const mod = Math.floor((Math.min(22, s.value) - 10) / 2);
-      const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+      const mod = getModFromScore(s.value);
       tooltip.innerHTML = `
         <div class="pp-hex-tip-label" style="color:${s.color}">${s.label}</div>
-        <div class="pp-hex-tip-val">${s.value}<span class="pp-hex-tip-mod">${modStr}</span></div>`;
+        <div class="pp-hex-tip-val">${s.value}<span class="pp-hex-tip-mod">${modStr(mod)}</span></div>`;
       tooltip.style.left = x + 'px';
       tooltip.style.top  = (y - 56) + 'px';
       tooltip.style.borderColor = s.color;
@@ -1340,15 +1340,10 @@ function _initSortable() {
   const list = document.getElementById('pp-gallery');
   if (!list) return;
   _ppSortable?.destroy();
-  _ppSortable = new Sortable(list, {
-    animation: 150,
+  _ppSortable = makeSortable(list, {
+    prefix: 'pp',
     handle: '.pp-card-drag',
-    ghostClass: 'pp-sortable-ghost',
-    chosenClass: 'pp-sortable-chosen',
-    forceFallback: true,
-    fallbackOnBody: true,
     delay: 100,
-    delayOnTouchOnly: true,
     onEnd: async () => {
       const ids = [...list.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId);
       ids.forEach((id, idx) => {
@@ -1687,13 +1682,9 @@ function _renderGalleryEditor() {
         : `<button type="button" class="pp-gallery-edit-del" data-pp-action="removeGalleryPhoto" data-idx="${i}" title="Retirer">✕</button>`}
     </div>`;
   }).join('');
-  _ppGallerySortable = new Sortable(list, {
-    animation: 150,
-    ghostClass: 'pp-sortable-ghost',
-    chosenClass: 'pp-sortable-chosen',
+  _ppGallerySortable = makeSortable(list, {
+    prefix: 'pp',
     handle: '.pp-gallery-edit-handle',
-    forceFallback: true,
-    fallbackOnBody: true,
     onEnd: () => {
       const newOrder = [...list.querySelectorAll('[data-gal-idx]')]
         .map(el => parseInt(el.dataset.galIdx, 10))

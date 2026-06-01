@@ -32,12 +32,17 @@ const STATUT_CFG = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function stCfg(item){ return STATUT_CFG[item.statut] || STATUT_CFG['En attente']; }
 
+
+const STORE = {
+  axeMap:         {},   // { [axeId]: { id, label, color } }
+  modalGroupes:   [],   // groupes du modal ouvert (mission courante)
+  modalStoryId:   '',   // id de la mission en édition ('' = nouvelle)
+  editingGroupId: null, // id du groupe en cours de modification (null = création)
+  storyActe:      '',   // acte filtré dans la sidebar
+  mapItemsCache:  [],   // cache items de la carte (PNJ, lieux…)
+};
+
 let _stCropper   = null;
-let _axeMap      = {};
-let _modalGroupes   = [];   // groupes du modal ouvert (mission courante)
-let _modalStoryId   = '';   // id de la mission en édition ('' = nouvelle)
-let _editingGroupId = null; // id du groupe en cours de modification (null = création)
-let _storyActe = '';
 let _stMapZoom = () => {};
 let _stMapReset = () => {};
 
@@ -67,7 +72,6 @@ function itemProgress(item) {
 }
 
 // Cache des items pour les handlers (tooltips, etc.)
-let _mapItemsCache = [];
 
 // Normalisation pour recherche : minuscules + sans accents
 // "Étoile" → "etoile", "Mystères" → "mysteres", "œuf" → "œuf" (non transformé mais OK)
@@ -76,8 +80,8 @@ function _normalize(s) {
 }
 function axeColor(axe){
   if(!axe) return '#555';
-  if(!_axeMap[axe]){ _axeMap[axe] = AXE_COLORS[Object.keys(_axeMap).length % AXE_COLORS.length]; }
-  return _axeMap[axe];
+  if(!STORE.axeMap[axe]){ STORE.axeMap[axe] = AXE_COLORS[Object.keys(STORE.axeMap).length % AXE_COLORS.length]; }
+  return STORE.axeMap[axe];
 }
 
 // ── Gestion des actes (Firestore) ─────────────────────────────────────────────
@@ -93,8 +97,8 @@ async function saveActes(list) {
 
 // ── Groupes de participants (per-mission) ─────────────────────────────────────
 async function _saveModalGroupes() {
-  if (!_modalStoryId) return; // nouvelle mission → sauvé avec le formulaire
-  try { await updateInCol('story', _modalStoryId, { groupes: _modalGroupes }); }
+  if (!STORE.modalStoryId) return; // nouvelle mission → sauvé avec le formulaire
+  try { await updateInCol('story', STORE.modalStoryId, { groupes: STORE.modalGroupes }); }
   catch(e) { console.error('[saveGroupes]', e); showNotif('Erreur de sauvegarde.', 'error'); }
 }
 function _renderGroupPills(groups) {
@@ -177,7 +181,7 @@ function _refreshStGroupsRow(groups) {
 }
 
 function _stGroupField(groupId, field, value) {
-  const g = _modalGroupes.find(g => g.id === groupId);
+  const g = STORE.modalGroupes.find(g => g.id === groupId);
   if (g) g[field] = value;
 }
 
@@ -215,7 +219,7 @@ function _resetGroupPicker() {
 function _stSaveGroupDialog() {
   const form = document.getElementById('st-save-group-form');
   if (!form) return;
-  _editingGroupId = null;
+  STORE.editingGroupId = null;
   _resetGroupPicker();
   const titleEl = document.getElementById('st-group-form-title');
   if (titleEl) titleEl.textContent = 'Nouveau groupe';
@@ -228,16 +232,16 @@ function _stSaveGroupDialog() {
 function _stCancelGroupForm() {
   const form = document.getElementById('st-save-group-form');
   if (form) form.style.display = 'none';
-  _editingGroupId = null;
+  STORE.editingGroupId = null;
   _resetGroupPicker();
 }
 
 function _stEditGroup(groupId) {
-  const g = _modalGroupes.find(x => x.id === groupId);
+  const g = STORE.modalGroupes.find(x => x.id === groupId);
   if (!g) return;
   const form = document.getElementById('st-save-group-form');
   if (!form) return;
-  _editingGroupId = groupId;
+  STORE.editingGroupId = groupId;
   _resetGroupPicker();
   const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   (g.membres || []).forEach(charId => {
@@ -261,27 +265,27 @@ async function _stConfirmSaveGroup() {
   const membres = [...document.querySelectorAll('#st-group-picker [data-picked="1"]')]
     .map(el => el.dataset.gmId).filter(Boolean);
   if (!membres.length) { showNotif('Sélectionne au moins un membre.', 'error'); return; }
-  if (_editingGroupId) {
-    _modalGroupes = _modalGroupes.map(g =>
-      g.id === _editingGroupId ? { ...g, nom, membres } : g
+  if (STORE.editingGroupId) {
+    STORE.modalGroupes = STORE.modalGroupes.map(g =>
+      g.id === STORE.editingGroupId ? { ...g, nom, membres } : g
     );
-    _editingGroupId = null;
+    STORE.editingGroupId = null;
     showNotif(`Groupe « ${nom} » mis à jour.`, 'success');
   } else {
-    _modalGroupes = [..._modalGroupes, { id: 'g' + Date.now(), nom, membres }];
+    STORE.modalGroupes = [...STORE.modalGroupes, { id: 'g' + Date.now(), nom, membres }];
     showNotif(`Groupe « ${nom} » créé.`, 'success');
   }
   await _saveModalGroupes();
-  _refreshStGroupsRow(_modalGroupes);
+  _refreshStGroupsRow(STORE.modalGroupes);
   const form = document.getElementById('st-save-group-form');
   if (form) form.style.display = 'none';
 }
 
 async function _stDeleteGroup(groupId) {
   if (!await confirmModal('Supprimer ce groupe de participants ?')) return;
-  _modalGroupes = _modalGroupes.filter(g => g.id !== groupId);
+  STORE.modalGroupes = STORE.modalGroupes.filter(g => g.id !== groupId);
   await _saveModalGroupes();
-  _refreshStGroupsRow(_modalGroupes);
+  _refreshStGroupsRow(STORE.modalGroupes);
 }
 
 function _stApplyGroup() {}
@@ -345,7 +349,7 @@ function _initMissionModalUI(item) {
     if (axePreview) {
       const v = axeInp.value.trim();
       if (v) {
-        axePreview.style.color = _axeMap[v] || 'var(--text-muted)';
+        axePreview.style.color = STORE.axeMap[v] || 'var(--text-muted)';
         axePreview.textContent = `● ${v}`;
       } else {
         axePreview.textContent = '';
@@ -466,7 +470,7 @@ function _renderGroupCards(groups) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderStory() {
   const content = document.getElementById('main-content');
-  _axeMap = {};
+  STORE.axeMap = {};
 
   const [items, savedActes] = await Promise.all([
     loadCollection('story'),
@@ -479,10 +483,10 @@ async function renderStory() {
   const allActes  = [...new Set([...savedActes, ...fromItems])].sort();
   if (!allActes.length) allActes.push('Acte I');
 
-  const activeActe = _storyActe && allActes.includes(_storyActe)
-    ? _storyActe
+  const activeActe = STORE.storyActe && allActes.includes(STORE.storyActe)
+    ? STORE.storyActe
     : allActes[0];
-  _storyActe = activeActe;
+  STORE.storyActe = activeActe;
 
   // Items de l'acte courant, visibles selon rôle
   const acteItems = items
@@ -500,7 +504,7 @@ async function renderStory() {
 
   // Palette d'axes : à partir de TOUS les items de l'acte (pas seulement filtrés)
   acteItems.forEach(i => { if (i.axe) axeColor(i.axe); });
-  const axes = Object.keys(_axeMap);
+  const axes = Object.keys(STORE.axeMap);
 
   // Statistiques de cockpit
   const counts = { total: acteItems.length, term: 0, cours: 0, attente: 0, echec: 0 };
@@ -573,7 +577,7 @@ async function renderStory() {
         <div>
           <div class="cockpit-next-lbl">Prochaine étape</div>
           <div class="cockpit-next-title">${_esc(nextMission.titre || 'Sans titre')}</div>
-          ${nextMission.axe ? `<div class="cockpit-next-axe" style="color:${_axeMap[nextMission.axe] || 'var(--text-muted)'}">● ${_esc(nextMission.axe)}</div>` : ''}
+          ${nextMission.axe ? `<div class="cockpit-next-axe" style="color:${STORE.axeMap[nextMission.axe] || 'var(--text-muted)'}">● ${_esc(nextMission.axe)}</div>` : ''}
         </div>
       </div>` : ''}
     </div>
@@ -668,7 +672,7 @@ function _stResetFilters() { setStoryPrefs({ search:'', statut:'' }); PAGES.stor
 // caractères spéciaux (apostrophes, guillemets) dans les noms d'acte.
 function _stSwitchActe(acte) {
   if (!acte) return;
-  _storyActe = String(acte);
+  STORE.storyActe = String(acte);
   PAGES.story?.();
 }
 
@@ -733,7 +737,7 @@ const MAP_BOT_PAD  = 40;
 const MAP_NODE_R   = 38;
 
 function _renderMapView(missions) {
-  _mapItemsCache = missions;
+  STORE.mapItemsCache = missions;
 
   // ── 1. Grouper par axe ─────────────────────────────────────────────────
   const byAxe = new Map();
@@ -766,7 +770,7 @@ function _renderMapView(missions) {
     const maxSubs = Math.max(1, ...[...byCol.values()].map(a => a.length));
     return {
       axe, list, byCol, maxSubs,
-      color: axe === '__none__' ? '#7a8fa8' : (_axeMap[axe] || '#7a8fa8'),
+      color: axe === '__none__' ? '#7a8fa8' : (STORE.axeMap[axe] || '#7a8fa8'),
       label: axe === '__none__' ? 'Hors axe' : axe,
       term: list.filter(m => m.statut === 'Terminée').length,
     };
@@ -914,7 +918,7 @@ function _renderMapView(missions) {
   const nodesSvg = missions.map(m => {
     const p = positions[m.id]; if (!p) return '';
     const st = stCfg(m);
-    const axeCol = m.axe ? (_axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
+    const axeCol = m.axe ? (STORE.axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
     const prog = itemProgress(m);
     const init = (m.titre || '?')[0]?.toUpperCase() || '?';
     const progR = MAP_NODE_R + 6;
@@ -1047,10 +1051,10 @@ function _initMapInteractions() {
     }
     const node = e.target.closest?.('.map-node');
     if (node && tooltip) {
-      const item = _mapItemsCache.find(i => i.id === node.dataset.id);
+      const item = STORE.mapItemsCache.find(i => i.id === node.dataset.id);
       if (item) {
         const st = stCfg(item);
-        const axeCol = item.axe ? (_axeMap[item.axe] || '#7a8fa8') : '#7a8fa8';
+        const axeCol = item.axe ? (STORE.axeMap[item.axe] || '#7a8fa8') : '#7a8fa8';
         tooltip.innerHTML = `
           <div class="tip-titre" style="color:${st.color}">${st.icon} ${_esc(item.titre || 'Sans titre')}</div>
           ${item.axe ? `<div class="tip-axe" style="color:${axeCol}">● ${_esc(item.axe)}</div>` : ''}
@@ -1095,7 +1099,7 @@ function _renderSagaView(missions) {
 
   return `<div class="saga">
     ${[...byAxe.entries()].map(([axe, list]) => {
-      const color = axe === '__none__' ? '#7a8fa8' : (_axeMap[axe] || '#7a8fa8');
+      const color = axe === '__none__' ? '#7a8fa8' : (STORE.axeMap[axe] || '#7a8fa8');
       const label = axe === '__none__' ? 'Hors axe' : axe;
       const term = list.filter(m => m.statut === 'Terminée').length;
       const pct = list.length ? Math.round((term / list.length) * 100) : 0;
@@ -1156,7 +1160,7 @@ function _renderChroniqueView(missions) {
     ${sorted.map((m, i) => {
       const st = stCfg(m);
       const prog = itemProgress(m);
-      const axeCol = m.axe ? (_axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
+      const axeCol = m.axe ? (STORE.axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
       const parts = m.participants || [];
       return `<article class="chap" style="--axe-color:${axeCol};--st-color:${st.color}">
         <div class="chap-side">
@@ -1211,7 +1215,7 @@ function _renderListView(missions) {
     ${missions.map((m, i) => {
       const st = stCfg(m);
       const prog = itemProgress(m);
-      const axeCol = m.axe ? (_axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
+      const axeCol = m.axe ? (STORE.axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
       return `<div class="list-row" style="--axe-color:${axeCol};--st-color:${st.color}"
         data-action="openStoryDetail" data-id="${m.id}">
         <div class="list-num">${String(i+1).padStart(2,'0')}</div>
@@ -1322,7 +1326,7 @@ function _renderTimeline(items) {
   const defsHtml = [];
 
   axeOrder.forEach(key => {
-    const color   = key === '__none__' ? '#555' : (_axeMap[key] || '#555');
+    const color   = key === '__none__' ? '#555' : (STORE.axeMap[key] || '#555');
     const layout  = axeLayout[key];
     const top     = axeTop[key];
     const centerY = top + layout.centerY;
@@ -1431,7 +1435,7 @@ function _renderTimeline(items) {
 
   // ── 7. Cards ──────────────────────────────────────────────────────────────
   axeOrder.forEach(key => {
-    const color  = key === '__none__' ? '#555' : (_axeMap[key] || '#555');
+    const color  = key === '__none__' ? '#555' : (STORE.axeMap[key] || '#555');
     const layout = axeLayout[key];
     const top    = axeTop[key];
 
@@ -1509,7 +1513,7 @@ async function openStoryDetail(id) {
     return s.size;
   })();
   const prog = itemProgress(item);
-  const axeCol = item.axe ? (_axeMap[item.axe] || 'var(--text-muted)') : 'var(--text-muted)';
+  const axeCol = item.axe ? (STORE.axeMap[item.axe] || 'var(--text-muted)') : 'var(--text-muted)';
   const bgUrl = (item.imageUrl || '').replace(/'/g, "%27");
 
   // Helper avatar
@@ -1639,7 +1643,7 @@ async function openStoryDetail(id) {
         <div class="mv-liens">
           ${liensItems.map(l => {
             const lst = stCfg(l);
-            const lAxeCol = l.axe ? (_axeMap[l.axe] || 'var(--text-muted)') : 'var(--text-muted)';
+            const lAxeCol = l.axe ? (STORE.axeMap[l.axe] || 'var(--text-muted)') : 'var(--text-muted)';
             return `<button class="mv-lien" data-action="_stOpenLien" data-id="${l.id}">
               <div class="mv-lien-art">
                 ${l.imageUrl
@@ -1674,11 +1678,11 @@ async function openStoryDetail(id) {
 // ── MODAL AJOUT / ÉDITION ─────────────────────────────────────────────────────
 async function openStoryModal(item = null) {
   _stCropper?.destroy(); _stCropper = null;
-  const acteActif   = _storyActe || 'Acte I';
+  const acteActif   = STORE.storyActe || 'Acte I';
   const allItems    = await loadCollection('story');
   const autresItems = allItems.filter(i => i.id !== item?.id);
-  _modalGroupes = [...(item?.groupes || [])];
-  _modalStoryId = item?.id || '';
+  STORE.modalGroupes = [...(item?.groupes || [])];
+  STORE.modalStoryId = item?.id || '';
 
   // Statuts disponibles + config visuelle pour les pills
   const STATUTS = [
@@ -1727,7 +1731,7 @@ async function openStoryModal(item = null) {
             ${stCfg({statut:curStatut}).icon} <span>${_esc(curStatut)}</span>
           </span>
           <span class="mn-hero-axe" id="mn-axe-preview"
-            style="${item?.axe ? `color:${_axeMap[item.axe] || 'var(--text-muted)'}` : ''}">
+            style="${item?.axe ? `color:${STORE.axeMap[item.axe] || 'var(--text-muted)'}` : ''}">
             ${item?.axe ? `● ${_esc(item.axe)}` : ''}
           </span>
         </div>
@@ -1747,7 +1751,7 @@ async function openStoryModal(item = null) {
     <!-- ════ TABS ════════════════════════════════════════════════ -->
     <div class="mn-tabs" role="tablist">
       <button type="button" class="mn-tab is-active" data-tab="histoire">📜 Histoire</button>
-      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${_modalGroupes.length || ''}</span></button>
+      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${STORE.modalGroupes.length || ''}</span></button>
       ${autresItems.length ? `<button type="button" class="mn-tab" data-tab="liens">↝ Liens <span class="mn-tab-count" id="mn-tab-count-liens">${(item?.liens||[]).length || ''}</span></button>` : ''}
       <button type="button" class="mn-tab" data-tab="reglages">⚙️ Réglages</button>
     </div>
@@ -1796,7 +1800,7 @@ async function openStoryModal(item = null) {
             </div>
             ${knownAxes.length ? `<div class="mn-axe-chips">
               ${knownAxes.slice(0, 5).map(a => `<button type="button" class="mn-axe-chip"
-                style="color:${_axeMap[a] || 'var(--text-muted)'};border-color:${_axeMap[a] ? _axeMap[a] + '55' : 'var(--border)'}"
+                style="color:${STORE.axeMap[a] || 'var(--text-muted)'};border-color:${STORE.axeMap[a] ? STORE.axeMap[a] + '55' : 'var(--border)'}"
                 data-action="_stPickAxe" data-axe="${_esc(a)}">
                 ● ${_esc(a)}
               </button>`).join('')}
@@ -1830,7 +1834,7 @@ async function openStoryModal(item = null) {
           mener la même mission en parallèle, chacun avec sa propre réussite et récompense.
         </div>
         <div id="st-groups-list" class="st-groups-list">
-          ${_renderGroupCards(_modalGroupes)}
+          ${_renderGroupCards(STORE.modalGroupes)}
         </div>
         <button type="button" class="st-group-add" data-action="_stSaveGroupDialog">+ Nouveau groupe</button>
 
@@ -1891,7 +1895,7 @@ async function openStoryModal(item = null) {
       <div id="st-liens-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.55rem;margin-top:.4rem">
         ${autresItems.map(other => {
           const checked=(item?.liens||[]).includes(other.id);
-          const axeCol=other.axe?(_axeMap[other.axe]||'var(--text-dim)'):'var(--text-dim)';
+          const axeCol=other.axe?(STORE.axeMap[other.axe]||'var(--text-dim)'):'var(--text-dim)';
           const stOther=stCfg(other);
           return `
           <div id="lien-card-${other.id}"
@@ -2042,7 +2046,7 @@ async function saveStory(id = '') {
     const chars = sortCharactersForDisplay(STATE.characters || []);
     const seenPartIds = new Set();
     const participants = [];
-    _modalGroupes.forEach(g => (g.membres || []).forEach(id => {
+    STORE.modalGroupes.forEach(g => (g.membres || []).forEach(id => {
       if (seenPartIds.has(id)) return;
       seenPartIds.add(id);
       const c = chars.find(x => x.id === id);
@@ -2069,7 +2073,7 @@ async function saveStory(id = '') {
       visibleJoueurs: document.getElementById('st-visible')?.checked !== false,
       liens,
       ordre:         parseInt(document.getElementById('st-ordre')?.value)||0,
-      groupes:       _modalGroupes,
+      groupes:       STORE.modalGroupes,
     };
 
     // Persister l'acte si nouveau
@@ -2079,7 +2083,7 @@ async function saveStory(id = '') {
     if(id) await updateInCol('story',id,data);
     else   await addToCol('story',data);
 
-    _storyActe = data.acte;
+    STORE.storyActe = data.acte;
     _stCropper?.destroy(); _stCropper = null;
     closeModal();
     showNotif(id?'Mission mise à jour.':`"${titre}" ajoutée !`,'success');
@@ -2117,7 +2121,7 @@ async function _createNewActe() {
   const name=document.getElementById('new-acte-name')?.value?.trim();if(!name)return;
   const list=await loadActes();
   if(!list.includes(name)){list.push(name);list.sort();await saveActes(list);}
-  _storyActe = name;
+  STORE.storyActe = name;
   closeModal();
   await PAGES.story();
 }
