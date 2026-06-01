@@ -906,6 +906,10 @@ function _updateTagCounter(container) {
 export function initProfilTagUi() {
   const container = document.getElementById('profil-tags');
   if (container) _updateTagCounter(container);
+  const input = document.getElementById('profil-tag-input');
+  if (input) input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addProfilTag(); }
+  });
 }
 
 
@@ -960,8 +964,7 @@ function _buildProfilHtml(c, canEdit, pres) {
       </div>
       <div style="display:flex;gap:.4rem;margin-top:.4rem">
         <input class="input-field" id="profil-tag-input" placeholder="Ajouter un trait…"
-          style="flex:1" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}
-          onkeydown="if(event.key==='Enter'){event.preventDefault();addProfilTag();}">
+          style="flex:1" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}>
         <button class="btn btn-outline btn-sm" id="profil-tag-add" type="button"
           data-action="addProfilTag" ${(pres?.tags||[]).length >= TAG_MAX ? 'disabled' : ''}>＋</button>
       </div>

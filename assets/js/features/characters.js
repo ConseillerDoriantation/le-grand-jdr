@@ -392,8 +392,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
       </div>
       ${canEdit?`<div class="xp-add">
         <label>＋ XP</label>
-        <input type="number" id="xp-add-input-${c.id}" placeholder="0"
-          onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}">
+        <input type="number" id="xp-add-input-${c.id}" placeholder="0" data-char-id="${c.id}" data-xp-input>
         <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
       </div>`:''}
     </div>
@@ -558,6 +557,10 @@ function renderCharSheet(c, keepTab) {
 </div>`;
 
   _renderTabV3(v3Tab, c, canEdit);
+
+  document.querySelector('[data-xp-input]')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addXpDelta(e.currentTarget.dataset.charId); }
+  });
 }
 
 

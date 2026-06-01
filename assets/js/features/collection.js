@@ -5,6 +5,7 @@ import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, pageHeaderHtml} from '../shared/html.js';
+import { uploadPng } from '../shared/image-upload.js';
 
 let _cards = [];
 let _templateUrl = '';
@@ -198,5 +199,5 @@ registerActions({
   editCard:    (btn) => editCard(btn.dataset.id),
   toggleUnlock:(btn) => toggleUnlock(btn.dataset.id),
   deleteCard:  (btn) => deleteCard(btn.dataset.id),
-  previewUploadPng: (el) => window.previewUploadPng?.(el.id, el.dataset.preview, el.dataset.b64),
+  previewUploadPng: (el) => { const f = document.getElementById(el.id)?.files?.[0]; if (f) uploadPng(f, { previewId: el.dataset.preview, hiddenId: el.dataset.b64 }); },
 });

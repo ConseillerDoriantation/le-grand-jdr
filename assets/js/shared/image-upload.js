@@ -175,6 +175,3 @@ export function uploadPng(file, { previewId = null, hiddenId = null, max = 400 }
   });
 }
 
-// ── Exposition globale (pour compatibilité avec les anciens appels window) ────
-// Chaque feature expose ses propres wrappers window ; ceux-ci sont les fallbacks.
-Object.assign(window, { previewUploadPng: (fi, pi, hi) => { const f = document.getElementById(fi)?.files?.[0]; if (f) uploadPng(f, { previewId: pi, hiddenId: hi }); }, previewUploadJpeg: (fi, pi, hi) => { const f = document.getElementById(fi)?.files?.[0]; if (f) uploadJpeg(f, { previewId: pi, hiddenId: hi }); }, });
