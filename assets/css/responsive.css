@@ -446,7 +446,7 @@
                           propre wrapper).
         --page-max     : utilisée par les wrappers spécifiques
                           (.ag-root, .bs-root, .dv2-root, .pp-page,
-                          .world-shell, .npc-shell). Ces wrappers
+                          .world-shell, .npc-page). Ces wrappers
                           ont `max-width: var(--page-max, <fallback>)`,
                           donc l'override par variable suffit, peu
                           importe l'ordre d'import CSS.
@@ -454,7 +454,7 @@
 
 /* Wrappers de pages qui héritent désormais du cap global --page-max */
 .world-shell { max-width: var(--page-max, 1100px); }
-.npc-shell   { max-width: var(--page-max, 1200px); }
+.npc-page   { max-width: var(--page-max, 1200px); }
 
 @media (min-width: 1600px) {
   :root { --content-max: 1800px; --page-max: 1500px; }
@@ -465,7 +465,7 @@
 @media (min-width: 2200px) {
   :root { --content-max: 2300px; --page-max: 2100px; }
   .ag-root, .bs-root, .dv2-root,
-  .pp-page, .world-shell, .npc-shell {
+  .pp-page, .world-shell, .npc-page {
     padding-left:  clamp(2rem, 4vw, 5rem);
     padding-right: clamp(2rem, 4vw, 5rem);
   }
@@ -476,7 +476,7 @@
 @media (min-width: 3000px) {
   :root { --content-max: 3000px; --page-max: 2800px; }
   .ag-root, .bs-root, .dv2-root,
-  .pp-page, .world-shell, .npc-shell {
+  .pp-page, .world-shell, .npc-page {
     padding-left:  clamp(3rem, 5vw, 7rem);
     padding-right: clamp(3rem, 5vw, 7rem);
   }
