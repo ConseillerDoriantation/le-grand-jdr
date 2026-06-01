@@ -2,7 +2,7 @@
 // PAGES
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
-import { registerActions } from '../core/actions.js';
+import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr } from '../shared/char-stats.js';
@@ -1374,7 +1374,12 @@ registerActions({
     const fn  = btn.dataset.fn;
     const mod = btn.dataset.module;
     if (window[fn]) { window[fn](); return; }
-    import(`./${mod}.js`).then(() => window[fn]?.());
+    import(`./${mod}.js`).then(() => {
+      if (window[fn]) { window[fn](); return; }
+      const proxy = document.createElement('button');
+      proxy.dataset.action = fn;
+      dispatchAction(proxy, new Event('click'));
+    });
   },
 
   // Recettes

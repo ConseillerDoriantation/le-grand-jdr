@@ -12845,4 +12845,6 @@ registerActions({
   _vttToggleTokenDelegate: (btn) => _vttToggleTokenDelegate(btn.dataset.tokenId, btn.dataset.uid2),
   _vttCleanGhostMembers:   ()    => _vttCleanGhostMembers(),
   _vttDelegClose:          ()    => closeModalDirect(),
+  _vttConditionConfig:     ()    => _vttConditionConfig(),
+  _ouvrirGestionEmotes:    ()    => _ouvrirGestionEmotes(),
 });

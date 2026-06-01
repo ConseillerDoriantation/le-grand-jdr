@@ -963,6 +963,7 @@ function _updateWordCount() {
 PAGES.histoire = renderHistoire;
 
 registerActions({
+  _ouvrirGestionDes:    () => _ouvrirGestionDes(),
   _ouvrirHandout:       () => _ouvrirHandout(),
   _toggleHistSidebar:   () => _toggleHistSidebar(),
   _histScrollToScene:   (btn, e) => { e.preventDefault(); document.getElementById(`hist-scene-${btn.dataset.sceneId}`)?.scrollIntoView({behavior:'smooth',block:'center'}); },
