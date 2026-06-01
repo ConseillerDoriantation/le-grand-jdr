@@ -21,7 +21,11 @@ import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../shared/equipment-utils.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
+import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../shared/damage-profile.js';
+import { runeBadges, spellTypeBadges } from '../shared/spell-action-card.js';
+import { calcSpellDuration, calcSpellTargets } from '../shared/spell-runes.js';
 import { loadSpellMatrices, getInvokedArm } from '../shared/spell-matrices.js';
+import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../shared/conditions.js';
 import { showNotif } from '../shared/notifications.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../shared/upload-cloudinary.js';
 import {
@@ -321,91 +325,9 @@ let _rulerHideTimer = null;
 // `effects` est consommé par le moteur de combat pour appliquer
 // automatiquement avantage/désavantage et restrictions de déplacement.
 // ══════════════════════════════════════════════════════════════════════════════
-const CONDITION_DEFAULT_LIBRARY = [
-  { id:'blinded',       label:'Aveuglé',     icon:'🙈', color:'#6b7280',
-    desc:'Ne peut pas voir, échec auto aux tests de Vue. Ses attaques : désavantage. Attaques contre lui : avantage.',
-    defaultSaveStat:'constitution', defaultDC:12,
-    effects:{ attackBy:'dis', attackAgainst:'adv' } },
-  { id:'charmed',       label:'Charmé',      icon:'💖', color:'#ec4899',
-    desc:'Ne peut pas attaquer le charmeur ni le viser par un effet nuisible. Avantage social pour le charmeur.',
-    defaultSaveStat:'sagesse',     defaultDC:13,
-    effects:{} },
-  { id:'deafened',      label:'Assourdi',    icon:'🔇', color:'#94a3b8',
-    desc:'Ne peut pas entendre, échec auto aux tests basés sur l\'Ouïe.',
-    defaultSaveStat:'constitution', defaultDC:10,
-    effects:{} },
-  { id:'frightened',    label:'Effrayé',     icon:'😱', color:'#f59e0b',
-    desc:'Désavantage à ses jets tant que la source est en vue. Ne peut s\'en approcher volontairement.',
-    defaultSaveStat:'sagesse',     defaultDC:13,
-    effects:{ attackBy:'dis' } },
-  { id:'grappled',      label:'Empoigné',    icon:'🤼', color:'#a16207',
-    desc:'Vitesse 0. Prend fin si le saisisseur est neutralisé.',
-    defaultSaveStat:'force',       defaultDC:12,
-    effects:{ movementMod:0 } },
-  { id:'incapacitated', label:'Neutralisé',  icon:'💤', color:'#737373',
-    desc:'Ne peut effectuer aucune action ni réaction.',
-    defaultSaveStat:'constitution', defaultDC:12,
-    effects:{ cantAct:true } },
-  { id:'invisible',     label:'Invisible',   icon:'👻', color:'#9ca3af',
-    desc:'Ne peut être vu sans détection. Avantage à ses attaques, désavantage aux attaques contre lui.',
-    defaultSaveStat:null,           defaultDC:null,
-    effects:{ attackBy:'adv', attackAgainst:'dis' } },
-  { id:'paralyzed',     label:'Paralysé',    icon:'⚡', color:'#fbbf24',
-    desc:'Neutralisé, ne peut bouger ni parler. Échec auto JS Force/Dex. Avantage aux attaques. CaC à ≤1,50m = critique.',
-    defaultSaveStat:'constitution', defaultDC:14,
-    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
-  { id:'petrified',     label:'Pétrifié',    icon:'🗿', color:'#78716c',
-    desc:'Transformé en pierre. Neutralisé, vitesse 0. Résistance à tous les dégâts (50%).',
-    defaultSaveStat:'constitution', defaultDC:15,
-    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, dmgReductionPct:50 } },
-  { id:'poisoned',      label:'Empoisonné',  icon:'☠️', color:'#22c55e',
-    desc:'Désavantage aux jets d\'attaque et aux tests de caractéristique.',
-    defaultSaveStat:'constitution', defaultDC:12,
-    effects:{ attackBy:'dis' } },
-  { id:'prone',         label:'À terre',     icon:'🛌', color:'#a78bfa',
-    desc:'Désavantage à ses attaques. Avantage aux attaques au CaC ≤1,50m, désavantage à distance. Se relever coûte ½ mouvement.',
-    defaultSaveStat:null,           defaultDC:null,
-    effects:{ attackBy:'dis', attackAgainstMelee:'adv', attackAgainstRanged:'dis' } },
-  { id:'restrained',    label:'Entravé',     icon:'⛓️', color:'#dc2626',
-    desc:'Vitesse 0. Désavantage à ses attaques et JS Dextérité. Avantage aux attaques contre lui.',
-    defaultSaveStat:'force',       defaultDC:13,
-    effects:{ movementMod:0, attackBy:'dis', attackAgainst:'adv' } },
-  { id:'stunned',       label:'Étourdi',     icon:'💫', color:'#06b6d4',
-    desc:'Neutralisé, ne peut bouger. Échec auto JS Force/Dex. Avantage aux attaques contre lui.',
-    defaultSaveStat:'constitution', defaultDC:13,
-    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true } },
-  { id:'unconscious',   label:'Inconscient', icon:'😵', color:'#0f172a',
-    desc:'Neutralisé, à terre, lâche ses objets. Échec auto JS Force/Dex. Avantage aux attaques. CaC ≤1,50m = critique.',
-    defaultSaveStat:'constitution', defaultDC:15,
-    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
-  { id:'silenced',      label:'Silencé',     icon:'🤐', color:'#0ea5e9',
-    desc:'Ne peut pas lancer de sort ni utiliser de compétence. Les attaques d\'arme et les actions d\'objets restent disponibles.',
-    defaultSaveStat:'constitution', defaultDC:13, defaultDuration:2,
-    effects:{ cantCastSpells:true } },
-  { id:'marked',        label:'Marqué',      icon:'🎯', color:'#f43f5e',
-    desc:'Avantage aux attaques contre la cible et +1d6 dégâts subis. L\'effet se consomme dès qu\'un coup touche.',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:null,
-    effects:{ attackAgainst:'adv', dmgTakenBonus:'1d6', consumedByAttackAgainst:true } },
-  // ── Actions de base (posées par les actions Esquiver / Se cacher / Se désengager) ──
-  { id:'dodge',         label:'Esquive',     icon:'🤸', color:'#38bdf8',
-    desc:'Jusqu\'au début de ton prochain tour : désavantage aux attaques contre toi (si tu vois l\'attaquant).',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
-    effects:{ attackAgainst:'dis' } },
-  { id:'hidden',        label:'Caché',       icon:'🫥', color:'#94a3b8',
-    desc:'Caché / discrétion : avantage à tes attaques, désavantage aux attaques contre toi (1 tour).',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
-    effects:{ attackBy:'adv', attackAgainst:'dis' } },
-  { id:'disengaged',    label:'Désengagé',   icon:'💨', color:'#a3e635',
-    desc:'Se désengage : aucune attaque d\'opportunité provoquée par ton déplacement ce tour.',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
-    effects:{} },
-];
-
 // Librairie en mémoire — peut être surchargée par les overrides MJ chargés depuis Firestore
 let CONDITION_LIBRARY = CONDITION_DEFAULT_LIBRARY.map(c => ({ ...c, effects: { ...c.effects } }));
 let CONDITION_BY_ID   = Object.fromEntries(CONDITION_LIBRARY.map(c => [c.id, c]));
-const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
-
 function _rebuildConditionIndex() {
   CONDITION_BY_ID = Object.fromEntries(CONDITION_LIBRARY.map(c => [c.id, c]));
 }
@@ -2115,57 +2037,8 @@ function _parseCaBonus(caStr) {
   return m ? (parseInt(m[1]) || 2) : 2;
 }
 
-/** Durée totale du sort en tours = dureeBase + bonus runes Durée. Miroir local.
- *  Fallbacks :
- *   - parse "X tours" dans le champ ca (override manuel)
- *   - 2 tours par défaut si le sort comporte une rune persistante (Ench, Aff,
- *     Protection mode CA, Invocation, ou Amplification seule = sort de terrain)
- */
-function _sortDureeVtt(s) {
-  const runes  = s?.runes || [];
-  const nbDur  = runes.filter(r => r === 'Durée').length;
-  // Base 2 tours pour tout sort persistant ; override manuel via s.dureeBase
-  const base   = (s?.dureeBase >= 2) ? +s.dureeBase : 2;
-  // Bonus Durée : +2 par rune, +1 chaînage par rune au-delà de la 1ère
-  // → 1:+2 · 2:+5 · 3:+8 · 4:+11
-  const bonus  = nbDur > 0 ? (2 * nbDur + (nbDur - 1)) : 0;
-  if (base + bonus > 0) return base + bonus;
-  // Fallback 1 : lire "X tours" dans le champ ca (ex : "CA +2 (2 tours)")
-  const m = String(s?.ca || '').match(/(\d+)\s*tours?/i);
-  if (m) return parseInt(m[1]);
-  // Fallback 2 : 2 tours par défaut si rune persistante détectée
-  const protMode = s?.protectionMode || 'ca';
-  const hasProtCA = runes.includes('Protection') && protMode === 'ca';
-  const hasEnch   = runes.includes('Enchantement');
-  const hasAff    = runes.includes('Affliction');
-  const hasInv    = runes.includes('Invocation');
-  const nbAmp     = runes.filter(r => r === 'Amplification').length;
-  const nbP       = runes.filter(r => r === 'Puissance').length;
-  const nbProt    = runes.filter(r => r === 'Protection').length;
-  const isTerrain = nbAmp > 0 && nbP === 0 && nbProt === 0;
-  if (hasProtCA || hasEnch || hasAff || hasInv || isTerrain) return 2;
-  return null;
-}
-
-/**
- * Nombre de cibles d'un sort (rune Dispersion).
- * Miroir local de _calcSortCibles (spells.js).
- * 0 rune = 1 cible ; N runes = 2N cibles (chaînage).
- */
-function _vttSortCibles(s) {
-  const runes = s?.runes || [];
-  const nbDisp = runes.filter(r => r === 'Dispersion').length;
-  if (nbDisp === 0) return 1;
-  const nbAmp = runes.filter(r => r === 'Amplification').length;
-  const nbAff = runes.filter(r => r === 'Affliction').length;
-  const nbInv = runes.filter(r => r === 'Invocation').length;
-  // Combos qui absorbent la Dispersion :
-  //  - Amp + Disp → zone élargie (pas de cibles supplémentaires)
-  //  - Aff + Inv + Disp → invocations multiples (sentinelles) → pas de cibles supplémentaires
-  if (nbAmp > 0) return 1;
-  if (nbAff > 0 && nbInv > 0) return 1;
-  return 2 * nbDisp; // 1 base + N + (N-1) chaînage = 2N
-}
+const _sortDureeVtt = calcSpellDuration;
+const _vttSortCibles = calcSpellTargets;
 
 /** Sépare "NdM +K +L" en { rawDice:"NdM", fixed:K+L }. */
 function _splitDiceFormula(str) {
@@ -2186,45 +2059,6 @@ function _splitDiceFormula(str) {
 // Palette neutre côté attaquant : aucune couleur ne sous-entend "bon / mauvais"
 // pour ne pas tromper le joueur (la valeur ½ / ×2 / 0 / +N reste la source
 // de lecture).
-const DMG_INTERACTIONS = {
-  'Résistance': { icon: '🛡️', color: '#4f8cff', short: '½'   }, // bleu défensif
-  'Immunité':   { icon: '🚫', color: '#94a3b8', short: 'Imm.' }, // gris ardoise (mur)
-  'Absorption': { icon: '💚', color: '#b47fff', short: 'Abs.' }, // violet (anormal, soigne)
-  'Faiblesse':  { icon: '💢', color: '#f59e0b', short: '×2'  }, // orange chaud
-}
-
-/**
- * Applique l'interaction du profil de dégâts d'une créature (immun./absorp./faib./résist.).
- * - Si dmgTotal vaut 0 (raté sans missEffect), l'interaction n'est PAS appliquée :
- *   on n'invente pas 1 dégât minimum sur une attaque qui n'a rien fait.
- * - Absorption : renvoie un dmgTotal négatif (le call site soustrait ⇒ soin).
- *   Le plafonnement à pvMax est laissé au call site.
- */
-function _applyDamageTypeInteraction(dmgTotal, typeId, beast) {
-  if (!beast) return { dmgTotal, interaction: null };
-  const effectiveTypeId = typeId || 'physique';
-  const has = (arr) => Array.isArray(arr) && arr.includes(effectiveTypeId);
-
-  if (has(beast.immunites))   return { dmgTotal: 0, interaction: 'Immunité' };
-  // Pour les autres interactions : pas d'effet si dmgTotal est nul.
-  if (dmgTotal <= 0) return { dmgTotal, interaction: null };
-  if (has(beast.absorptions)) return { dmgTotal: -dmgTotal,                       interaction: 'Absorption' };
-  if (has(beast.faiblesses))  return { dmgTotal: dmgTotal * 2,                    interaction: 'Faiblesse' };
-  if (has(beast.resistances)) return { dmgTotal: Math.max(1, Math.floor(dmgTotal / 2)), interaction: 'Résistance' };
-  return { dmgTotal, interaction: null };
-}
-
-/** Récupère l'interaction prévue (sans modifier de valeur) pour preview. */
-function _previewDamageInteraction(typeId, beast) {
-  if (!beast) return null;
-  const id = typeId || 'physique';
-  if (Array.isArray(beast.immunites)   && beast.immunites.includes(id))   return 'Immunité';
-  if (Array.isArray(beast.absorptions) && beast.absorptions.includes(id)) return 'Absorption';
-  if (Array.isArray(beast.faiblesses)  && beast.faiblesses.includes(id))  return 'Faiblesse';
-  if (Array.isArray(beast.resistances) && beast.resistances.includes(id)) return 'Résistance';
-  return null;
-}
-
 // Dimensions du token en cases (W × H). Compat : si seul tokenSize est défini, on l'applique aux deux.
 const _tokenDims = t => {
   const b = t?.beastId ? _bestiary[t.beastId] : null;
@@ -3833,6 +3667,31 @@ function _vttAoptCheckEmpty() {
   empty.style.display = anyVisible ? 'none' : '';
 }
 
+function _vttAttackModeControlsHtml(comment = 'Sélecteur de mode') {
+  return `
+    <!-- ${comment} -->
+    <div style="margin-bottom:.85rem">
+      <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
+      <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
+        <button id="atk-mode-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis"
+          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
+          <div style="font-size:.9rem">⬇</div>Désavantage
+        </button>
+        <button id="atk-mode-normal" data-vtt-fn="_vttSetMode" data-vtt-args="normal"
+          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                 font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
+          Normal
+        </button>
+        <button id="atk-mode-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv"
+          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
+                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
+          <div style="font-size:.9rem">⬆</div>Avantage
+        </button>
+      </div>
+    </div>
+  `;
+}
 function _vttPickOpt(srcId, tgtId, idx) {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
   if (!opt) return;
@@ -3922,14 +3781,14 @@ function _vttPickOpt(srcId, tgtId, idx) {
     for (const tid of targetIdsPrev) {
       const td = _tokens[tid]?.data;
       if (!td || td.type !== 'enemy' || !td.beastId) continue;
-      const inter = _previewDamageInteraction(opt.damageTypeId, _bestiary[td.beastId]);
+      const inter = previewDamageInteraction(opt.damageTypeId, _bestiary[td.beastId]);
       if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
     }
     const entries = Object.entries(buckets);
     if (entries.length) {
       const isMulti = targetIdsPrev.length > 1;
       const badges = entries.map(([label, n]) => {
-        const meta = DMG_INTERACTIONS[label] || { icon: 'ℹ️', color: 'var(--text-dim)', short: '' };
+        const meta = DAMAGE_INTERACTIONS[label] || { icon: 'ℹ️', color: 'var(--text-dim)', short: '' };
         return `<span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:700;
                   color:${meta.color};background:${meta.color}1a;border:1px solid ${meta.color}55;
                   padding:.18rem .45rem;border-radius:999px">
@@ -4017,28 +3876,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
         </div>
       </div>
     </div>
-
-    <!-- Sélecteur de mode (Avantage / Normal / Désavantage) — partagé avec les attaques -->
-    <div style="margin-bottom:.85rem">
-      <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
-      <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
-        <button id="atk-mode-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
-          <div style="font-size:.9rem">⬇</div>Désavantage
-        </button>
-        <button id="atk-mode-normal" data-vtt-fn="_vttSetMode" data-vtt-args="normal"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
-          Normal
-        </button>
-        <button id="atk-mode-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
-          <div style="font-size:.9rem">⬆</div>Avantage
-        </button>
-      </div>
-    </div>
+    ${_vttAttackModeControlsHtml('Sélecteur de mode (Avantage / Normal / Désavantage) — partagé avec les attaques')}
   ` : `
     <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem">
       <div style="display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;row-gap:.6rem;column-gap:.5rem">
@@ -4069,28 +3907,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
         ${interactionPreviewHtml}
       </div>
     </div>
-
-    <!-- Sélecteur de mode -->
-    <div style="margin-bottom:.85rem">
-      <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
-      <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
-        <button id="atk-mode-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
-          <div style="font-size:.9rem">⬇</div>Désavantage
-        </button>
-        <button id="atk-mode-normal" data-vtt-fn="_vttSetMode" data-vtt-args="normal"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
-          Normal
-        </button>
-        <button id="atk-mode-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
-          <div style="font-size:.9rem">⬆</div>Avantage
-        </button>
-      </div>
-    </div>
+    ${_vttAttackModeControlsHtml()}
   `;
 
   openModal(`${opt.icon} ${opt.label}`, `
@@ -5364,7 +5181,7 @@ async function _vttRollAttack() {
       if (hit || halfDmg) {
         if (curTgtData.type === 'enemy' && curTgtData.beastId) {
           const bEnt    = _bestiary[curTgtData.beastId];
-          const result  = _applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, bEnt);
+          const result  = applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, bEnt);
           dmgTotal      = result.dmgTotal;
           interaction   = result.interaction;
 
@@ -5622,7 +5439,7 @@ async function _vttRollAttack() {
     // Notif consolidée
     const notifParts = cleanResults.map(r => {
       const nm = r.name;
-      const interMeta = r.interaction ? DMG_INTERACTIONS[r.interaction] : null;
+      const interMeta = r.interaction ? DAMAGE_INTERACTIONS[r.interaction] : null;
       const interTag  = interMeta ? ` ${interMeta.icon}${interMeta.short}` : '';
       const dmgLabel = r.dmgTotal < 0 ? `+${Math.abs(r.dmgTotal)}` : r.dmgTotal;
       return r.shieldBlocked ? `🛡️ Bouclier réactif · ${nm}`
@@ -5880,22 +5697,15 @@ function _renderInspector(t) {
             ${_actions.length ? `
               <div class="vtt-creat-sub-title">⚔️ Actions (${_actions.length})</div>
               ${_actions.map(a => {
-                const runes = a.runes || [];
-                const runeCounts = {};
-                runes.forEach(r => { runeCounts[r] = (runeCounts[r] || 0) + 1; });
-                const runeBadges = Object.entries(runeCounts).map(([r,n]) =>
-                  `<span class="vtt-creat-rune">${r}${n>1?`×${n}`:''}</span>`).join(' ');
-                const typeBadges = (a.types || []).map(t => {
-                  const col = t==='offensif' ? '#ff6b6b' : t==='defensif' ? '#22c38e' : '#b47fff';
-                  return `<span class="vtt-creat-act-type" style="--c:${col}">${t}</span>`;
-                }).join('');
+                const runeBadgesHtml = runeBadges(a.runes || [], { className: 'vtt-creat-rune' });
+                const typeBadges = spellTypeBadges(a.types || [], { className: 'vtt-creat-act-type', stylePrefix: '--c:' });
                 return `<div class="vtt-creat-act">
                   <div class="vtt-creat-act-head">
                     <span class="vtt-creat-act-ico">${_esc(a.icon||'🔮')}</span>
                     <span class="vtt-creat-act-name">${_esc(a.nom||'Action')}</span>
                     <span class="vtt-creat-act-pm">${a.pmOverride ?? a.pm ?? '?'} PM</span>
                   </div>
-                  ${typeBadges || runeBadges ? `<div class="vtt-creat-act-badges">${typeBadges}${runeBadges}</div>` : ''}
+                  ${typeBadges || runeBadgesHtml ? `<div class="vtt-creat-act-badges">${typeBadges}${runeBadgesHtml}</div>` : ''}
                 </div>`;
               }).join('')}` : ''}
             ${_atk.length ? `
@@ -7997,8 +7807,8 @@ function _renderChatLog(msgs) {
                      : m.newHp === 0                  ? 'KO'
                      : isHalf                         ? '½ dégâts'
                      :                                  'dégâts';
-      const interTag = m.interaction && DMG_INTERACTIONS[m.interaction]
-        ? (() => { const im = DMG_INTERACTIONS[m.interaction];
+      const interTag = m.interaction && DAMAGE_INTERACTIONS[m.interaction]
+        ? (() => { const im = DAMAGE_INTERACTIONS[m.interaction];
             return `<span class="vtt-log-badge" style="color:${im.color};background:${im.color}1a">${im.icon} ${_esc(m.interaction)}</span>`;
           })()
         : '';
@@ -8086,7 +7896,7 @@ function _renderChatLog(msgs) {
         rows.push(_row(`Échec ½ (sort/arme magique)`, `<strong>${halfVal}</strong>`, { op: '✦', isFinal: !hasInter && !hasReduction }));
       }
       if (hasInter) {
-        const im = DMG_INTERACTIONS[m.interaction];
+        const im = DAMAGE_INTERACTIONS[m.interaction];
         const fmt = m.dmgTotal < 0 ? `+${-m.dmgTotal}` : m.dmgTotal;
         rows.push(_row(`${im?.icon || '✦'} ${m.interaction}`, `<strong>${fmt}</strong>`, { op: im?.icon || '✦', isFinal: !hasReduction }));
       }
@@ -9059,39 +8869,8 @@ async function _vttConditionEditSave(tokenId, idx) {
 // Surcharge la librairie par défaut au chargement (loadConditions).
 // ══════════════════════════════════════════════════════════════════════════════
 async function _loadConditionsOverrides() {
-  try {
-    const d = await getDocData('world', 'conditions');
-    if (!d?.library?.length) {
-      // ── Première initialisation : seed Firestore avec les défauts D&D ──
-      // À partir de ce moment, TOUS les états vivent en BDD (plus de fallback codé).
-      if (STATE.isAdmin) {
-        const seed = CONDITION_DEFAULT_LIBRARY.map(c => ({ ...c, effects: { ...c.effects } }));
-        try {
-          await saveDoc('world', 'conditions', { library: seed });
-        } catch {}
-      }
-      // CONDITION_LIBRARY reste sur les défauts en mémoire
-      return;
-    }
-    // Données présentes en BDD : merge avec les défauts pour les ids standards,
-    // puis ajout des customs (ids non standards).
-    const byId = Object.fromEntries(d.library.map(c => [c.id, c]));
-    const merged = CONDITION_DEFAULT_LIBRARY.map(def => {
-      const ov = byId[def.id];
-      if (!ov) return { ...def, effects: { ...def.effects } };
-      return {
-        ...def, ...ov,
-        effects: { ...def.effects, ...(ov.effects || {}) },
-      };
-    });
-    for (const c of d.library) {
-      if (!CONDITION_DEFAULT_IDS.has(c.id)) {
-        merged.push({ ...c, effects: { ...(c.effects || {}) } });
-      }
-    }
-    CONDITION_LIBRARY = merged;
-    _rebuildConditionIndex();
-  } catch {}
+  CONDITION_LIBRARY = await loadConditionLibrary({ refresh: true, seedDefaults: STATE.isAdmin });
+  _rebuildConditionIndex();
 }
 
 async function _vttConditionConfig(opts = {}) {
@@ -9291,43 +9070,44 @@ function _vttConditionConfigSelect(idx) {
   document.querySelector('.vtt-cc-details')?.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-async function _vttConditionConfigSave() {
-  if (!STATE.isAdmin) return;
+function _vttReadConditionConfigEntry(c, idx) {
+  const get = (k) => document.getElementById(`cc-${idx}-${k}`);
   const triVal = (id) => document.querySelector(`[data-cc-tri-id="${id}"]`)?.dataset.ccTriValue || '';
   const flagOn = (id) => document.querySelector(`[data-cc-flag-id="${id}"]`)?.classList.contains('is-on');
-  const newLib = CONDITION_LIBRARY.map((c, idx) => {
-    const get = (k) => document.getElementById(`cc-${idx}-${k}`);
-    const eff = {};
-    const atkBy  = triVal(`cc-${idx}-atkBy`);  if (atkBy)  eff.attackBy = atkBy;
-    const atkAg  = triVal(`cc-${idx}-atkAg`);  if (atkAg)  eff.attackAgainst = atkAg;
-    const atkAgM = triVal(`cc-${idx}-atkAgM`); if (atkAgM) eff.attackAgainstMelee  = atkAgM;
-    const atkAgR = triVal(`cc-${idx}-atkAgR`); if (atkAgR) eff.attackAgainstRanged = atkAgR;
-    if (flagOn(`cc-${idx}-movementZero`)) eff.movementMod = 0;
-    if (flagOn(`cc-${idx}-cantAct`))      eff.cantAct = true;
-    if (flagOn(`cc-${idx}-cantCast`))     eff.cantCastSpells = true;
-    if (flagOn(`cc-${idx}-failsStr`))     eff.failsStrSaves = true;
-    if (flagOn(`cc-${idx}-failsDex`))     eff.failsDexSaves = true;
-    if (flagOn(`cc-${idx}-meleeCrit`))    eff.meleeCritOnHit = true;
-    if (flagOn(`cc-${idx}-consumed`))     eff.consumedByAttackAgainst = true;
-    const dmgTaken = get('dmgTaken')?.value?.trim();
-    if (dmgTaken) eff.dmgTakenBonus = dmgTaken;
-    const dmgReduc = parseInt(get('dmgReduc')?.value);
-    if (Number.isFinite(dmgReduc) && dmgReduc > 0) eff.dmgReductionPct = Math.min(100, dmgReduc);
-    const dc = parseInt(get('dc')?.value);
-    const stat = get('stat')?.value || null;
-    const dur = parseInt(get('duration')?.value);
-    return {
-      ...c,
-      label: get('label')?.value?.trim() || c.label,
-      icon:  get('icon')?.value?.trim() || c.icon,
-      color: get('color')?.value?.trim() || c.color,
-      desc:  get('desc')?.value || c.desc,
-      defaultSaveStat: stat,
-      defaultDC: Number.isFinite(dc) && dc > 0 ? dc : null,
-      defaultDuration: Number.isFinite(dur) && dur > 0 ? dur : null,
-      effects: eff,
-    };
-  });
+  const eff = {};
+  const atkBy  = triVal(`cc-${idx}-atkBy`);  if (atkBy)  eff.attackBy = atkBy;
+  const atkAg  = triVal(`cc-${idx}-atkAg`);  if (atkAg)  eff.attackAgainst = atkAg;
+  const atkAgM = triVal(`cc-${idx}-atkAgM`); if (atkAgM) eff.attackAgainstMelee  = atkAgM;
+  const atkAgR = triVal(`cc-${idx}-atkAgR`); if (atkAgR) eff.attackAgainstRanged = atkAgR;
+  if (flagOn(`cc-${idx}-movementZero`)) eff.movementMod = 0;
+  if (flagOn(`cc-${idx}-cantAct`))      eff.cantAct = true;
+  if (flagOn(`cc-${idx}-cantCast`))     eff.cantCastSpells = true;
+  if (flagOn(`cc-${idx}-failsStr`))     eff.failsStrSaves = true;
+  if (flagOn(`cc-${idx}-failsDex`))     eff.failsDexSaves = true;
+  if (flagOn(`cc-${idx}-meleeCrit`))    eff.meleeCritOnHit = true;
+  if (flagOn(`cc-${idx}-consumed`))     eff.consumedByAttackAgainst = true;
+  const dmgTaken = get('dmgTaken')?.value?.trim();
+  if (dmgTaken) eff.dmgTakenBonus = dmgTaken;
+  const dmgReduc = parseInt(get('dmgReduc')?.value);
+  if (Number.isFinite(dmgReduc) && dmgReduc > 0) eff.dmgReductionPct = Math.min(100, dmgReduc);
+  const dc = parseInt(get('dc')?.value);
+  const stat = get('stat')?.value || null;
+  const dur = parseInt(get('duration')?.value);
+  return {
+    ...c,
+    label: get('label')?.value?.trim() || c.label,
+    icon:  get('icon')?.value?.trim() || c.icon,
+    color: get('color')?.value?.trim() || c.color,
+    desc:  get('desc')?.value ?? c.desc,
+    defaultSaveStat: stat,
+    defaultDC: Number.isFinite(dc) && dc > 0 ? dc : null,
+    defaultDuration: Number.isFinite(dur) && dur > 0 ? dur : null,
+    effects: eff,
+  };
+}
+async function _vttConditionConfigSave() {
+  if (!STATE.isAdmin) return;
+  const newLib = CONDITION_LIBRARY.map((c, idx) => _vttReadConditionConfigEntry(c, idx));
   try {
     await saveDoc('world', 'conditions', { library: newLib });
     CONDITION_LIBRARY = newLib;
@@ -9362,42 +9142,9 @@ async function _vttConditionConfigAddNew() {
   if (!STATE.isAdmin) return;
   // Capture les modifs en cours dans la modale avant de la fermer/rouvrir
   const _capture = () => {
-    const triVal = (id) => document.querySelector(`[data-cc-tri-id="${id}"]`)?.dataset.ccTriValue || '';
-    const flagOn = (id) => document.querySelector(`[data-cc-flag-id="${id}"]`)?.classList.contains('is-on');
-    CONDITION_LIBRARY = CONDITION_LIBRARY.map((c, idx) => {
-      const get = (k) => document.getElementById(`cc-${idx}-${k}`);
-      if (!get('label')) return c; // si le DOM n'a pas ce détail, on ne touche pas
-      const eff = {};
-      const atkBy  = triVal(`cc-${idx}-atkBy`);  if (atkBy)  eff.attackBy = atkBy;
-      const atkAg  = triVal(`cc-${idx}-atkAg`);  if (atkAg)  eff.attackAgainst = atkAg;
-      const atkAgM = triVal(`cc-${idx}-atkAgM`); if (atkAgM) eff.attackAgainstMelee  = atkAgM;
-      const atkAgR = triVal(`cc-${idx}-atkAgR`); if (atkAgR) eff.attackAgainstRanged = atkAgR;
-      if (flagOn(`cc-${idx}-movementZero`)) eff.movementMod = 0;
-      if (flagOn(`cc-${idx}-cantAct`))      eff.cantAct = true;
-      if (flagOn(`cc-${idx}-cantCast`))     eff.cantCastSpells = true;
-      if (flagOn(`cc-${idx}-failsStr`))     eff.failsStrSaves = true;
-      if (flagOn(`cc-${idx}-failsDex`))     eff.failsDexSaves = true;
-      if (flagOn(`cc-${idx}-meleeCrit`))    eff.meleeCritOnHit = true;
-      if (flagOn(`cc-${idx}-consumed`))     eff.consumedByAttackAgainst = true;
-      const dmgTaken = get('dmgTaken')?.value?.trim();
-      if (dmgTaken) eff.dmgTakenBonus = dmgTaken;
-      const dmgReduc = parseInt(get('dmgReduc')?.value);
-      if (Number.isFinite(dmgReduc) && dmgReduc > 0) eff.dmgReductionPct = Math.min(100, dmgReduc);
-      const dc = parseInt(get('dc')?.value);
-      const stat = get('stat')?.value || null;
-      const dur = parseInt(get('duration')?.value);
-      return {
-        ...c,
-        label: get('label')?.value?.trim() || c.label,
-        icon:  get('icon')?.value?.trim() || c.icon,
-        color: get('color')?.value?.trim() || c.color,
-        desc:  get('desc')?.value ?? c.desc,
-        defaultSaveStat: stat,
-        defaultDC: Number.isFinite(dc) && dc > 0 ? dc : null,
-        defaultDuration: Number.isFinite(dur) && dur > 0 ? dur : null,
-        effects: eff,
-      };
-    });
+    CONDITION_LIBRARY = CONDITION_LIBRARY.map((c, idx) => (
+      document.getElementById(`cc-${idx}-label`) ? _vttReadConditionConfigEntry(c, idx) : c
+    ));
   };
   try { _capture(); } catch {}
 

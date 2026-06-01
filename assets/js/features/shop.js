@@ -20,6 +20,7 @@ import { characterPortraitContent } from '../shared/portraits.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
+import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2526,32 +2527,11 @@ function _shopActionsCacheLoad(actions) {
 
 /** Carte récap d'une action (lecture seule + boutons Edit/Suppr). */
 function _shopRenderActionCard(act, idx) {
-  const a = act || {};
-  const runes = a.runes || [];
-  const types = a.types || [];
-  const typeBadges = types.map(t => {
-    const col = t==='offensif' ? '#ff6b6b' : t==='defensif' ? '#22c38e' : '#b47fff';
-    return `<span style="font-size:.6rem;font-weight:700;padding:.1rem .4rem;border-radius:999px;color:${col};background:${col}1a;border:1px solid ${col}55">${t}</span>`;
-  }).join(' ');
-  // Compteur de runes : "Aff×2, Puiss×1"
-  const runeCounts = {};
-  runes.forEach(r => { runeCounts[r] = (runeCounts[r] || 0) + 1; });
-  const runeBadges = Object.entries(runeCounts).map(([r, n]) =>
-    `<span style="font-size:.62rem;font-weight:600;padding:.1rem .4rem;border-radius:5px;background:rgba(168,127,255,.12);color:#c4b5fd;border:1px solid rgba(168,127,255,.3)">${r}${n>1?`×${n}`:''}</span>`).join(' ');
-  return `
-    <div class="si-action-card" style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px">
-      <span style="font-size:1.3rem;flex-shrink:0">${_esc(a.icon||'🔮')}</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:.85rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(a.nom || 'Sans nom')}</div>
-        <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.2rem">
-          ${typeBadges}${runeBadges}
-          ${a.noyau ? `<span style="font-size:.62rem;color:var(--text-dim)">⚛ ${_esc(a.noyau)}</span>` : ''}
-          <span style="font-size:.62rem;color:#b47fff">${a.pmOverride ?? a.pm ?? '?'} PM</span>
-        </div>
-      </div>
-      <button type="button" class="btn btn-outline btn-sm" data-sh-action="editAction" data-idx="${idx}" title="Modifier">✏️</button>
-      <button type="button" class="btn-icon" data-sh-action="removeAction" data-idx="${idx}" title="Supprimer" style="color:#ef4444">🗑</button>
-    </div>`;
+  return spellActionCardHtml(act, idx, {
+    className: 'si-action-card',
+    actionAttr: 'data-sh-action',
+    style: 'display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px',
+  });
 }
 
 

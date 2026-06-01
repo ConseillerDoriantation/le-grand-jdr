@@ -1,6 +1,90 @@
-import { getDocData } from '../data/firestore.js';
+import { getDocData, saveDoc } from '../data/firestore.js';
 
-let _conditionLibraryCache = null;
+export const CONDITION_DEFAULT_LIBRARY = [
+  { id:'blinded',       label:'Aveuglé',     icon:'🙈', color:'#6b7280',
+    desc:'Ne peut pas voir, échec auto aux tests de Vue. Ses attaques : désavantage. Attaques contre lui : avantage.',
+    defaultSaveStat:'constitution', defaultDC:12,
+    effects:{ attackBy:'dis', attackAgainst:'adv' } },
+  { id:'charmed',       label:'Charmé',      icon:'💖', color:'#ec4899',
+    desc:'Ne peut pas attaquer le charmeur ni le viser par un effet nuisible. Avantage social pour le charmeur.',
+    defaultSaveStat:'sagesse',     defaultDC:13,
+    effects:{} },
+  { id:'deafened',      label:'Assourdi',    icon:'🔇', color:'#94a3b8',
+    desc:'Ne peut pas entendre, échec auto aux tests basés sur l\'Ouïe.',
+    defaultSaveStat:'constitution', defaultDC:10,
+    effects:{} },
+  { id:'frightened',    label:'Effrayé',     icon:'😱', color:'#f59e0b',
+    desc:'Désavantage à ses jets tant que la source est en vue. Ne peut s\'en approcher volontairement.',
+    defaultSaveStat:'sagesse',     defaultDC:13,
+    effects:{ attackBy:'dis' } },
+  { id:'grappled',      label:'Empoigné',    icon:'🤼', color:'#a16207',
+    desc:'Vitesse 0. Prend fin si le saisisseur est neutralisé.',
+    defaultSaveStat:'force',       defaultDC:12,
+    effects:{ movementMod:0 } },
+  { id:'incapacitated', label:'Neutralisé',  icon:'💤', color:'#737373',
+    desc:'Ne peut effectuer aucune action ni réaction.',
+    defaultSaveStat:'constitution', defaultDC:12,
+    effects:{ cantAct:true } },
+  { id:'invisible',     label:'Invisible',   icon:'👻', color:'#9ca3af',
+    desc:'Ne peut être vu sans détection. Avantage à ses attaques, désavantage aux attaques contre lui.',
+    defaultSaveStat:null,           defaultDC:null,
+    effects:{ attackBy:'adv', attackAgainst:'dis' } },
+  { id:'paralyzed',     label:'Paralysé',    icon:'⚡', color:'#fbbf24',
+    desc:'Neutralisé, ne peut bouger ni parler. Échec auto JS Force/Dex. Avantage aux attaques. CaC à ≤1,50m = critique.',
+    defaultSaveStat:'constitution', defaultDC:14,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
+  { id:'petrified',     label:'Pétrifié',    icon:'🗿', color:'#78716c',
+    desc:'Transformé en pierre. Neutralisé, vitesse 0. Résistance à tous les dégâts (50%).',
+    defaultSaveStat:'constitution', defaultDC:15,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, dmgReductionPct:50 } },
+  { id:'poisoned',      label:'Empoisonné',  icon:'☠️', color:'#22c55e',
+    desc:'Désavantage aux jets d\'attaque et aux tests de caractéristique.',
+    defaultSaveStat:'constitution', defaultDC:12,
+    effects:{ attackBy:'dis' } },
+  { id:'prone',         label:'À terre',     icon:'🛌', color:'#a78bfa',
+    desc:'Désavantage à ses attaques. Avantage aux attaques au CaC ≤1,50m, désavantage à distance. Se relever coûte ½ mouvement.',
+    defaultSaveStat:null,           defaultDC:null,
+    effects:{ attackBy:'dis', attackAgainstMelee:'adv', attackAgainstRanged:'dis' } },
+  { id:'restrained',    label:'Entravé',     icon:'⛓️', color:'#dc2626',
+    desc:'Vitesse 0. Désavantage à ses attaques et JS Dextérité. Avantage aux attaques contre lui.',
+    defaultSaveStat:'force',       defaultDC:13,
+    effects:{ movementMod:0, attackBy:'dis', attackAgainst:'adv' } },
+  { id:'stunned',       label:'Étourdi',     icon:'💫', color:'#06b6d4',
+    desc:'Neutralisé, ne peut bouger. Échec auto JS Force/Dex. Avantage aux attaques contre lui.',
+    defaultSaveStat:'constitution', defaultDC:13,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true } },
+  { id:'unconscious',   label:'Inconscient', icon:'😵', color:'#0f172a',
+    desc:'Neutralisé, à terre, lâche ses objets. Échec auto JS Force/Dex. Avantage aux attaques. CaC ≤1,50m = critique.',
+    defaultSaveStat:'constitution', defaultDC:15,
+    effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
+  { id:'silenced',      label:'Silencé',     icon:'🤐', color:'#0ea5e9',
+    desc:'Ne peut pas lancer de sort ni utiliser de compétence. Les attaques d\'arme et les actions d\'objets restent disponibles.',
+    defaultSaveStat:'constitution', defaultDC:13, defaultDuration:2,
+    effects:{ cantCastSpells:true } },
+  { id:'marked',        label:'Marqué',      icon:'🎯', color:'#f43f5e',
+    desc:'Avantage aux attaques contre la cible et +1d6 dégâts subis. L\'effet se consomme dès qu\'un coup touche.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:null,
+    effects:{ attackAgainst:'adv', dmgTakenBonus:'1d6', consumedByAttackAgainst:true } },
+  // ── Actions de base (posées par les actions Esquiver / Se cacher / Se désengager) ──
+  { id:'dodge',         label:'Esquive',     icon:'🤸', color:'#38bdf8',
+    desc:'Jusqu\'au début de ton prochain tour : désavantage aux attaques contre toi (si tu vois l\'attaquant).',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
+    effects:{ attackAgainst:'dis' } },
+  { id:'hidden',        label:'Caché',       icon:'🫥', color:'#94a3b8',
+    desc:'Caché / discrétion : avantage à tes attaques, désavantage aux attaques contre toi (1 tour).',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
+    effects:{ attackBy:'adv', attackAgainst:'dis' } },
+  { id:'disengaged',    label:'Désengagé',   icon:'💨', color:'#a3e635',
+    desc:'Se désengage : aucune attaque d\'opportunité provoquée par ton déplacement ce tour.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
+    effects:{} },
+];
+
+export const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
+
+function cloneCondition(c = {}) {
+  return { ...c, effects: { ...(c.effects || {}) } };
+}
 
 function normalizeCondition(entry = {}) {
   return {
@@ -8,21 +92,44 @@ function normalizeCondition(entry = {}) {
     label: entry.label || entry.id,
     icon: entry.icon || '✨',
     color: entry.color || '',
+    desc: entry.desc || '',
     defaultSaveStat: entry.defaultSaveStat || null,
     defaultDC: entry.defaultDC || null,
     defaultDuration: entry.defaultDuration || null,
+    effects: { ...(entry.effects || {}) },
   };
 }
 
-export async function loadConditionLibrary({ refresh = false } = {}) {
+export function mergeConditionLibrary(library = []) {
+  const rows = Array.isArray(library) ? library.filter(entry => entry?.id).map(normalizeCondition) : [];
+  if (!rows.length) return CONDITION_DEFAULT_LIBRARY.map(cloneCondition);
+  const byId = Object.fromEntries(rows.map(c => [c.id, c]));
+  const merged = CONDITION_DEFAULT_LIBRARY.map(def => {
+    const ov = byId[def.id];
+    return ov ? { ...def, ...ov, effects: { ...def.effects, ...(ov.effects || {}) } } : cloneCondition(def);
+  });
+  rows.forEach(c => {
+    if (!CONDITION_DEFAULT_IDS.has(c.id)) merged.push(cloneCondition(c));
+  });
+  return merged;
+}
+
+let _conditionLibraryCache = null;
+
+export async function loadConditionLibrary({ refresh = false, seedDefaults = false } = {}) {
   if (_conditionLibraryCache && !refresh) return _conditionLibraryCache;
   try {
     const doc = await getDocData('world', 'conditions');
-    _conditionLibraryCache = Array.isArray(doc?.library)
-      ? doc.library.filter((entry) => entry?.id).map(normalizeCondition)
-      : [];
+    if (Array.isArray(doc?.library) && doc.library.length) {
+      _conditionLibraryCache = mergeConditionLibrary(doc.library);
+    } else {
+      _conditionLibraryCache = CONDITION_DEFAULT_LIBRARY.map(cloneCondition);
+      if (seedDefaults) {
+        await saveDoc('world', 'conditions', { library: _conditionLibraryCache }).catch(() => {});
+      }
+    }
   } catch {
-    _conditionLibraryCache = [];
+    _conditionLibraryCache = CONDITION_DEFAULT_LIBRARY.map(cloneCondition);
   }
   return _conditionLibraryCache;
 }

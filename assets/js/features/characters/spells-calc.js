@@ -10,6 +10,7 @@ import { charSession } from '../../shared/char-session.js';
 import { getMaitriseBonus as getSharedMaitriseBonus, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
+import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
 
 // ── Caches chargés depuis openSortModal ───────────────────────────────────────
 let _spellMatricesCache = null;
@@ -485,17 +486,7 @@ export function _getSortCA(s) {
  * et ne génère PAS de cibles supplémentaires — la zone gère ça.
  */
 export function _calcSortCibles(s) {
-  const runes = s.runes || [];
-  const nbDisp = runes.filter(r => r === 'Dispersion').length;
-  const nbAmp  = runes.filter(r => r === 'Amplification').length;
-  const nbAff  = runes.filter(r => r === 'Affliction').length;
-  const nbInv  = runes.filter(r => r === 'Invocation').length;
-  // Combo Amp + Disp → mode zone, pas de cibles séparées
-  if (nbAmp > 0 && nbDisp > 0) return 1;
-  // Combo Sentinelle (Aff + Inv) + Disp → invocations multiples, pas de cibles séparées
-  if (nbAff > 0 && nbInv > 0 && nbDisp > 0) return 1;
-  if (nbDisp === 0) return 1;
-  return 2 * nbDisp; // 2N cibles différentes
+  return calcSpellTargets(s);
 }
 
 /** Détermine si le noyau du sort est magique (depuis la matrice damage_types).
@@ -543,13 +534,7 @@ export function _needsDureeBase(s) {
  *  Override : s.dureeBase remplace la base 2 si supérieur (saisie manuelle).
  */
 export function _calcSortDuree(s) {
-  const runes  = s?.runes || [];
-  const nbDur  = runes.filter(r => r === 'Durée').length;
-  // Base : 2 tours par défaut, ou override manuel via s.dureeBase
-  const base   = (s?.dureeBase && s.dureeBase >= 2) ? s.dureeBase : 2;
-  // Bonus Durée scalable : 2 par rune + 1 par chaînage
-  const runeBonus = nbDur > 0 ? (2 * nbDur + (nbDur - 1)) : 0;
-  return base + runeBonus;
+  return calcSpellDuration(s);
 }
 export function _autoSourceDuree(s) {
   const nbDur = (s?.runes || []).filter(r => r === 'Durée').length;

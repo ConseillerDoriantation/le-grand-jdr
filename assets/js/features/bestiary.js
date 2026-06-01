@@ -17,6 +17,8 @@ import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
+import { spellActionCardHtml } from '../shared/spell-action-card.js';
+import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -217,31 +219,10 @@ function _bstRefreshActionsHost() {
 }
 
 function _bstRenderActionCard(act, idx) {
-  const a = act || {};
-  const runes = a.runes || [];
-  const types = a.types || [];
-  const typeBadges = types.map(t => {
-    const col = t==='offensif' ? '#ff6b6b' : t==='defensif' ? '#22c38e' : '#b47fff';
-    return `<span style="font-size:.6rem;font-weight:700;padding:.1rem .4rem;border-radius:999px;color:${col};background:${col}1a;border:1px solid ${col}55">${t}</span>`;
-  }).join(' ');
-  const runeCounts = {};
-  runes.forEach(r => { runeCounts[r] = (runeCounts[r] || 0) + 1; });
-  const runeBadges = Object.entries(runeCounts).map(([r,n]) =>
-    `<span style="font-size:.62rem;font-weight:600;padding:.1rem .4rem;border-radius:5px;background:rgba(168,127,255,.12);color:#c4b5fd;border:1px solid rgba(168,127,255,.3)">${r}${n>1?`×${n}`:''}</span>`).join(' ');
-  return `
-    <div class="bst-action-card">
-      <span style="font-size:1.3rem;flex-shrink:0">${_esc(a.icon||'🔮')}</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:.85rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(a.nom || 'Sans nom')}</div>
-        <div style="display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.2rem">
-          ${typeBadges}${runeBadges}
-          ${a.noyau ? `<span style="font-size:.62rem;color:var(--text-dim)">⚛ ${_esc(a.noyau)}</span>` : ''}
-          <span style="font-size:.62rem;color:#b47fff">${a.pmOverride ?? a.pm ?? '?'} PM</span>
-        </div>
-      </div>
-      <button type="button" class="btn btn-outline btn-sm" data-bst-action="editAction" data-idx="${idx}" title="Modifier">✏️</button>
-      <button type="button" class="btn-icon" data-bst-action="removeAction" data-idx="${idx}" title="Supprimer" style="color:#ef4444">🗑</button>
-    </div>`;
+  return spellActionCardHtml(act, idx, {
+    className: 'bst-action-card',
+    actionAttr: 'data-bst-action',
+  });
 }
 
 function _bstRenderActionsList() {
@@ -414,16 +395,6 @@ function _beastMatchesFilters(c, { search = STORE.searchVal, type = STORE.filter
   return matchSearch && matchType && matchRang;
 }
 
-// Métadonnées visuelles communes aux 4 catégories de relation aux dégâts.
-// Palette neutre alignée avec DMG_INTERACTIONS du VTT : aucune teinte ne
-// suggère "bon / mauvais" pour le joueur attaquant.
-const DMG_RELATIONS = [
-  { key: 'absorptions', label: 'Absorptions', short: 'Soin',       icon: '💚', color: '#b47fff' },
-  { key: 'immunites',   label: 'Immunités',   short: 'Aucun dégât', icon: '🚫', color: '#94a3b8' },
-  { key: 'resistances', label: 'Résistances', short: '½ dégâts',  icon: '🛡️', color: '#4f8cff' },
-  { key: 'faiblesses',  label: 'Faiblesses',  short: '×2 dégâts',  icon: '💢', color: '#f59e0b' },
-];
-
 function _damageTypeBadge(typeId, types, color) {
   const type = (types || []).find(t => t.id === typeId);
   const label = type ? `${type.icon||''} ${_esc(type.label)}` : _esc(typeId);
@@ -437,7 +408,7 @@ function _renderRelationCard(rel, ids, types) {
     <div style="display:flex;align-items:center;gap:.4rem">
       <span style="font-size:.9rem">${rel.icon}</span>
       <span style="font-size:.74rem;font-weight:700;color:${rel.color};letter-spacing:.02em">${rel.label}</span>
-      <span style="font-size:.62rem;color:var(--text-dim);margin-left:auto">${rel.short}</span>
+      <span style="font-size:.62rem;color:var(--text-dim);margin-left:auto">${rel.shortLabel}</span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:.3rem">
       ${ids.map(id => _damageTypeBadge(id, types, rel.color)).join('')}
@@ -447,7 +418,7 @@ function _renderRelationCard(rel, ids, types) {
 
 function _renderDamageProfile(beast, types) {
   if (!beast) return '';
-  const cards = DMG_RELATIONS.map(rel => {
+  const cards = DAMAGE_RELATIONS.map(rel => {
     const ids = Array.isArray(beast[rel.key]) ? beast[rel.key] : [];
     if (!ids.length) return null;
     const tags = ids.map(id => {
@@ -459,7 +430,7 @@ function _renderDamageProfile(beast, types) {
       <div class="bst-dmg-head">
         <span class="bst-dmg-icon">${rel.icon}</span>
         <span class="bst-dmg-name" style="color:${rel.color}">${rel.label}</span>
-        <span class="bst-dmg-rule">${rel.short}</span>
+        <span class="bst-dmg-rule">${rel.shortLabel}</span>
       </div>
       <div class="bst-dmg-tags">${tags}</div>
     </div>`;
@@ -474,7 +445,7 @@ function _renderDamageProfile(beast, types) {
 /** Mini-récap pictogrammes pour la card admin (compact). */
 function _renderDamageProfileMini(beast) {
   if (!beast) return '';
-  const parts = DMG_RELATIONS
+  const parts = DAMAGE_RELATIONS
     .map(rel => {
       const n = (beast[rel.key] || []).length;
       if (!n) return null;
@@ -585,7 +556,7 @@ function _bstToggleDmg(id, rel, typeId) {
   const chip = document.querySelector(`[data-dmg-chip="${id}-${rel}-${typeId}"]`);
   if (chip) {
     const active = set.has(typeId);
-    const meta = DMG_RELATIONS.find(r => r.key === rel);
+    const meta = DAMAGE_RELATIONS.find(r => r.key === rel);
     chip.classList.toggle('active', active);
     chip.style.color       = active ? meta.color : '';
     chip.style.borderColor = active ? meta.color : '';
@@ -733,13 +704,13 @@ function _renderDamageMatrixPanel(c, types) {
   return `<div class="bst-section">
     <div class="bst-section-title">🛡️ Relations aux dégâts</div>
     <div class="bst-dmg-edit">
-      ${DMG_RELATIONS.map(rel => {
+      ${DAMAGE_RELATIONS.map(rel => {
         const active = Array.isArray(c[rel.key]) ? c[rel.key] : [];
         return `<div class="bst-dmg-edit-row" style="border-left:3px solid ${rel.color};background:${rel.color}08">
           <div class="bst-dmg-edit-head">
             <span class="bst-dmg-icon">${rel.icon}</span>
             <span class="bst-dmg-name" style="color:${rel.color}">${rel.label}</span>
-            <span class="bst-dmg-rule">${rel.short}</span>
+            <span class="bst-dmg-rule">${rel.shortLabel}</span>
           </div>
           <div class="bst-dmg-edit-chips">
             ${(types || []).map(t => {
@@ -764,14 +735,14 @@ function _renderDamageMatrixPanel(c, types) {
  * immédiatement visibles sur une même ligne.
  */
 function _renderDamageTypeMatrix(beast, types) {
-  const rels = DMG_RELATIONS;
+  const rels = DAMAGE_RELATIONS;
 
   const headerCells = rels.map(rel =>
     `<div style="text-align:center;padding:.5rem .25rem;font-size:.66rem;font-weight:700;color:${rel.color};
       border-left:1px solid var(--border);background:${rel.color}10">
       <div style="font-size:1rem;line-height:1">${rel.icon}</div>
       <div style="margin-top:.2rem;letter-spacing:.02em">${_esc(rel.label.replace(/s$/, '.'))}</div>
-      <div style="font-size:.55rem;font-weight:400;color:var(--text-dim);margin-top:.05rem">${rel.short}</div>
+      <div style="font-size:.55rem;font-weight:400;color:var(--text-dim);margin-top:.05rem">${rel.shortLabel}</div>
     </div>`
   ).join('');
 
@@ -818,7 +789,7 @@ function _bstSyncDmgConflicts() {
   matrix.querySelectorAll('[data-bst-cell]').forEach(cell => {
     const cb = cell.querySelector('input[type=checkbox]');
     const checked = !!cb?.checked;
-    const rel = DMG_RELATIONS.find(r => r.key === cell.dataset.bstRel);
+    const rel = DAMAGE_RELATIONS.find(r => r.key === cell.dataset.bstRel);
     const isConflict = checked && (counts.get(cell.dataset.bstCell) || 0) > 1;
     cell.style.background = isConflict ? 'rgba(245,158,11,.22)'
                           : checked    ? `${rel?.color || 'var(--gold)'}22`
