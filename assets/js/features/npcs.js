@@ -27,7 +27,7 @@ import {
   autocompleteHTML, initAutocomplete,
   multiAutocompleteHTML, initMultiAutocomplete, getMultiAutocompleteValues,
 } from '../shared/autocomplete.js';
-import { getModFromScore } from '../shared/char-stats.js';
+import { getModFromScore, modStr } from '../shared/char-stats.js';
 import { bindImageUploadDropZone } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 
@@ -50,7 +50,6 @@ const NPC_STATS = [
 ];
 const NPC_COMBAT_DEFAULT = { weaponName: '', damage: '', range: null };
 
-const _modStr = (v) => { const m = getModFromScore(Number(v) || 8); return m >= 0 ? `+${m}` : String(m); };
 const _readNumberOrNull = (id) => {
   const raw = document.getElementById(id)?.value?.trim();
   if (!raw) return null;
@@ -1061,7 +1060,7 @@ function _renderStatsPanel(n) {
       border-radius:8px;padding:.4rem .25rem;text-align:center">
       <div style="font-size:.6rem;color:var(--text-dim);font-weight:700;letter-spacing:.04em">${s.short}</div>
       <div style="font-size:.95rem;font-weight:700;color:var(--text)">${score ?? '—'}</div>
-      <div style="font-size:.62rem;color:var(--text-muted)">${score != null ? _modStr(score) : ''}</div>
+      <div style="font-size:.62rem;color:var(--text-muted)">${score != null ? modStr(getModFromScore(Number(score) || 8)) : ''}</div>
     </div>`;
   }).join('');
 
@@ -1094,7 +1093,7 @@ function _renderStatsPanel(n) {
 // ── Vue MJ : tableau condensé de tous les PNJ avec stats ────────────────────
 const _mjVitalCellInner = (v) => v == null ? '—' : String(v);
 const _mjStatCellInner  = (s) => s == null ? '—'
-  : `${s}<br><span style="font-size:.6rem;color:var(--text-muted)">${_modStr(s)}</span>`;
+  : `${s}<br><span style="font-size:.6rem;color:var(--text-muted)">${modStr(getModFromScore(Number(s) || 8))}</span>`;
 
 function _renderMjStatsRow(n) {
   const af    = afx(_affiniteNiveau(n));

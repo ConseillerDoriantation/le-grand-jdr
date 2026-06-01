@@ -11,7 +11,7 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
-import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { sortCharactersForDisplay, modStr } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
@@ -536,7 +536,7 @@ function _bstUpdateCarac(id, key, val) {
   let txt = '', cls = 'zero';
   if (!isNaN(n)) {
     const m = Math.floor((n - 10) / 2);
-    txt = m >= 0 ? `+${m}` : `${m}`;
+    txt = modStr(m);
     cls = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
   }
   const modEl = document.querySelector(`[data-bst-mod="${id}-${key}"]`);
@@ -1328,12 +1328,10 @@ function _renderPanel(c) {
   const traits    = Array.isArray(c.traits) ? c.traits : [];
   const description = c.description == null ? '' : String(c.description);
 
-  // Calcul modificateur D&D : floor((stat - 10) / 2)
   const mod = (val) => {
     const n = parseInt(val);
     if (!val || isNaN(n)) return null;
-    const m = Math.floor((n - 10) / 2);
-    return m >= 0 ? `+${m}` : `${m}`;
+    return modStr(Math.floor((n - 10) / 2));
   };
 
   // ── Hero du panneau ──────────────────────────────────────────────────────
@@ -1484,9 +1482,9 @@ function _renderPanelAdmin(c, rs) {
 
   const modOf = (val) => {
     const n = parseInt(val);
-    if (!val || isNaN(n)) return { txt:'', cls:'zero' };
+    if (!val || isNaN(n)) return { txt: '', cls: 'zero' };
     const m = Math.floor((n - 10) / 2);
-    return { txt: m >= 0 ? `+${m}` : `${m}`, cls: m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero' };
+    return { txt: modStr(m), cls: m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero' };
   };
 
   // ── Hero éditable : image cliquable, rang selector, nom, type, env ──────

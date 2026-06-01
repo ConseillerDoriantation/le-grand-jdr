@@ -444,7 +444,7 @@ const _tokenStatMod = (t, statKey) => {
     let score = b?.[statKey];
     if (!Number.isFinite(score) || score <= 0) score = b?.stats?.[statKey];
     if (!Number.isFinite(score) || score <= 0) score = 10;
-    return Math.floor((Math.min(22, score) - 10) / 2);
+    return getModFromScore(score);
   }
   return 0;
 }
@@ -3037,7 +3037,7 @@ function _buildAttackOptions(t) {
     if (!b || statKey === 'none' || !statKey) return 0;
     const v = parseInt(b[statKey]);
     if (!Number.isFinite(v)) return 0;
-    return Math.floor((Math.min(22, v) - 10) / 2);
+    return getModFromScore(v);
   };
 
   // 1) Armes naturelles : une option par arme, avec stat dégâts/toucher + bonus fixes

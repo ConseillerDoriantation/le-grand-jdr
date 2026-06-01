@@ -125,6 +125,11 @@ export function getModFromScore(score) {
   return Math.floor((Math.min(22, score) - 10) / 2);
 }
 
+/** Formate un modificateur de stat en chaîne signée : +3, -1, +0. */
+export function modStr(m) {
+  return m >= 0 ? `+${m}` : String(m);
+}
+
 /**
  * Classe d'Armure effective du personnage.
  * Base selon type d'armure Torse + Dex + bonus équipements + bouclier.

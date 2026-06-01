@@ -60,6 +60,7 @@ import {
   renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
   addProfilTag, removeProfilTag, initProfilTagUi,
   getProfilCacheRef as _profilCache,
+  STATS_KEYS,
 } from './characters/tabs.js';
 import { bindRichTextEditors, richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import { registerActions } from '../core/actions.js';
@@ -2363,7 +2364,6 @@ function renderCharSortsV3(c, canEdit) {
 async function allocateStat(charId, key, delta = 1) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
-  const STATS_KEYS = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
   if (!STATS_KEYS.includes(key)) return;
 
   const earned = Math.max(0, (c.niveau||1) - 1);

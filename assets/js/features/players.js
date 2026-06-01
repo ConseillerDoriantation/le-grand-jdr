@@ -26,7 +26,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _initials } from '../shared/html.js';
 import {
-  getMod, calcCA, calcPVMax, calcPMMax, calcOr, calcVitesse, STAT_META,
+  getMod, calcCA, calcPVMax, calcPMMax, calcOr, calcVitesse, STAT_META, getModFromScore, modStr,
 } from '../shared/char-stats.js';
 import { attachDropAndCrop, attachPanZoomCrop, panZoomCropHTML, resizeImageDataUrl } from '../shared/image-crop.js';
 import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
@@ -1008,11 +1008,10 @@ function _bindHexagonTooltips() {
     const tooltip = wrap.querySelector('[data-pp-hex-tooltip]');
     const showTip = (idx, x, y) => {
       const s = stats[idx]; if (!s || !tooltip) return;
-      const mod = Math.floor((Math.min(22, s.value) - 10) / 2);
-      const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
+      const mod = getModFromScore(s.value);
       tooltip.innerHTML = `
         <div class="pp-hex-tip-label" style="color:${s.color}">${s.label}</div>
-        <div class="pp-hex-tip-val">${s.value}<span class="pp-hex-tip-mod">${modStr}</span></div>`;
+        <div class="pp-hex-tip-val">${s.value}<span class="pp-hex-tip-mod">${modStr(mod)}</span></div>`;
       tooltip.style.left = x + 'px';
       tooltip.style.top  = (y - 56) + 'px';
       tooltip.style.borderColor = s.color;

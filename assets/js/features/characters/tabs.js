@@ -12,7 +12,7 @@ import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from
 // ══════════════════════════════════════════════
 // TAB : CARACTÉRISTIQUES
 // ══════════════════════════════════════════════
-const STATS_KEYS = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
+export const STATS_KEYS = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
 let _openNote = null;
 
 // Calcule l'état des points de niveau pour un personnage

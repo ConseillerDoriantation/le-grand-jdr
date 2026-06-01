@@ -5,12 +5,12 @@ import { updateInCol } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
-import { getMod, calcPMMax, calcDeckMax } from '../../shared/char-stats.js';
+import { getMod, calcPMMax, calcDeckMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
-import { setSpellCaches, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getMaitriseBonus, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
+import { setSpellCaches, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -318,7 +318,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const statMod = Math.floor((Math.min(22, statVal) - 10) / 2);
   const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
   const statModS = statMod >= 0 ? `+${statMod}` : `${statMod}`;
-  const maitrise = _getMaitriseBonus(c, mainP || {});
+  const maitrise = getSharedMaitriseBonus(c, mainP || {});
 
   // ── Détection des modes "sans dégâts d'impact" ─────────────────────
   const hasEnchant    = runesAll.includes('Enchantement');
