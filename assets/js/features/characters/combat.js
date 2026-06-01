@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../shared/char-session.js';
 import { updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
 import { formatItemBonusText, getItemStatBonus } from '../../shared/char-stats.js';
@@ -264,7 +265,7 @@ export function renderCharEquip(c, canEdit) {
 }
 
 /** Active ou désactive un élément sur un personnage. */
-window._toggleCharElement = async (charId, elemId) => {
+export async function toggleCharElement(charId, elemId) {
   if (!STATE.isAdmin) { showNotif('Seul le MJ peut modifier les noyaux accessibles.', 'error'); return; }
   const c = STATE.activeChar;
   if (!c || c.id !== charId) return;
@@ -274,7 +275,7 @@ window._toggleCharElement = async (charId, elemId) => {
   else          elems.push(elemId);
   c.elements = elems;
   // Synchronise les refs pour que le V3 lise la version fraîche
-  if (window._currentChar?.id === c.id) window._currentChar = c;
+  if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
   await updateInCol('characters', charId, { elements: elems });
   // ── Mise à jour immédiate de l'UI (sans attendre un re-render complet) ──
   // 1. Toggle visuel direct des chips V3 (.elem-chip[data-elem-id="..."])
@@ -283,8 +284,8 @@ window._toggleCharElement = async (charId, elemId) => {
   });
   // 2. Re-render full du tab Combat V3 si on est dessus (pour rafraîchir les
   //    autres affichages dépendants : style de combat, sorts, etc.)
-  if (window._currentCharTab === 'combat' && typeof window._renderTab === 'function') {
-    window._renderTab('combat', c, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'combat') {
+    charSession.renderTab('combat', c, charSession.getCanEditChar());
   } else {
     // Fallback legacy : ancien placeholder par id
     try {
@@ -295,4 +296,4 @@ window._toggleCharElement = async (charId, elemId) => {
     } catch {}
   }
   showNotif('Éléments mis à jour.', 'success');
-};
+}

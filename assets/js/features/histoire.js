@@ -21,6 +21,7 @@ import {
   selectRichTextNodeContents,
 } from '../shared/rich-text.js';
 import PAGES from './pages.js';
+import { getHistoireCtx, setHistoireCtx } from '../shared/histoire-ctx.js';
 import { registerActions } from '../core/actions.js';
 
 // ── Config des types de tags ──────────────────────────────────────────────────
@@ -99,7 +100,7 @@ let _desDragOverEl = null;
 
 // ── Entrée principale ─────────────────────────────────────────────────────────
 async function renderHistoire() {
-  const ctx = window._histoireCtx || {};
+  const ctx = getHistoireCtx();
   _missionId    = ctx.id    || null;
   _missionTitre = ctx.titre || 'Mission';
   _missionActe  = ctx.acte  || '';
@@ -650,7 +651,7 @@ function _renderSidebarMissions() {
   }).join('');
 }
 
-window._toggleHistSidebar = function () {
+function _toggleHistSidebar() {
   _sidebarOpen = !_sidebarOpen;
   const sb  = document.getElementById('hist-sidebar');
   const btn = document.getElementById('hist-sidebar-toggle');
@@ -660,7 +661,7 @@ window._toggleHistSidebar = function () {
   btn.title       = _sidebarOpen ? 'Réduire' : 'Développer';
 };
 
-window._switchHistMission = async function (id, titre, acte) {
+async function _switchHistMission(id, titre, acte) {
   if (id === _missionId) return;
   // Sauvegarder l'histoire courante avant de changer
   clearTimeout(_saveTimer);
@@ -669,7 +670,7 @@ window._switchHistMission = async function (id, titre, acte) {
   _missionId    = id;
   _missionTitre = titre;
   _missionActe  = acte;
-  window._histoireCtx = { id, titre, acte };
+  setHistoireCtx(id, titre, acte);
 
   // Mettre à jour la topbar
   const pill  = document.querySelector('.hist-acte-pill');
@@ -694,7 +695,7 @@ window._switchHistMission = async function (id, titre, acte) {
   // Mettre à jour la sidebar (surlignage)
   const sbInner = document.querySelector('.hist-sidebar-inner');
   if (sbInner) sbInner.innerHTML = _renderSidebarMissions();
-};
+}
 
 // ── Gestion des compétences ───────────────────────────────────────────────────
 window._ouvrirGestionDes = function () {
@@ -766,13 +767,13 @@ function _refreshGestionDesList() {
   list.innerHTML = _getDiceSkills().map(_renderDesRow).join('');
 }
 
-window._gestionDesEditStat = (idx, stat) => {
+function _gestionDesEditStat(idx, stat) {
   const skills = _getDiceSkills();
   if (!skills[idx]) return;
   skills[idx].stat = stat;
   _saveDiceSkills(skills);
   _refreshGestionDesList();
-};
+}
 
 // Drag & drop
 window._desDragStart = (idx) => { _desDragIdx = idx; };
@@ -798,14 +799,14 @@ window._desDrop = (targetIdx) => {
   _refreshGestionDesList();
 };
 
-window._gestionDesDel = (idx) => {
+function _gestionDesDel(idx) {
   const skills = _getDiceSkills();
   skills.splice(idx, 1);
   _saveDiceSkills(skills);
   _refreshGestionDesList();
 };
 
-window._gestionDesAdd = () => {
+function _gestionDesAdd() {
   const nameInput = document.getElementById('hist-des-new-name');
   const statInput = document.getElementById('hist-des-new-stat');
   const name = nameInput?.value.trim();
@@ -819,14 +820,14 @@ window._gestionDesAdd = () => {
   nameInput?.focus();
 };
 
-window._resetDiceSkills = () => {
+function _resetDiceSkills() {
   if (!confirm('Rétablir la liste par défaut ? Les modifications seront perdues.')) return;
   _saveDiceSkills(DICE_SKILLS_DEFAULT);
   _refreshGestionDesList();
-};
+}
 
 // ── Handout joueur ────────────────────────────────────────────────────────────
-window._ouvrirHandout = function () {
+function _ouvrirHandout() {
   const editor = document.getElementById('hist-editor');
   if (!editor) return;
 
@@ -870,13 +871,13 @@ window._ouvrirHandout = function () {
   setTimeout(() => modal.classList.add('hist-handout-visible'), 10);
 };
 
-window._histHandoutCopy = () => {
+function _histHandoutCopy() {
   const body = document.querySelector('.hist-handout-body');
   if (!body) return;
   navigator.clipboard.writeText(body.innerText)
     .then(() => showNotif('Texte copié dans le presse-papiers !', 'success'))
     .catch(()  => showNotif('Copie impossible.', 'error'));
-};
+}
 
 // ── Sauvegarde ────────────────────────────────────────────────────────────────
 function _schedSave() {
@@ -931,17 +932,17 @@ function _updateWordCount() {
 PAGES.histoire = renderHistoire;
 
 registerActions({
-  _ouvrirHandout:       () => window._ouvrirHandout?.(),
-  _toggleHistSidebar:   () => window._toggleHistSidebar?.(),
+  _ouvrirHandout:       () => _ouvrirHandout(),
+  _toggleHistSidebar:   () => _toggleHistSidebar(),
   _histScrollToScene:   (btn, e) => { e.preventDefault(); document.getElementById(`hist-scene-${btn.dataset.sceneId}`)?.scrollIntoView({behavior:'smooth',block:'center'}); },
-  _switchHistMission:   (btn) => window._switchHistMission?.(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
-  _gestionDesEditStat:  (btn) => window._gestionDesEditStat?.(Number(btn.dataset.i), btn.dataset.st),
-  _gestionDesDel:       (btn) => window._gestionDesDel?.(Number(btn.dataset.i)),
+  _switchHistMission:   (btn) => _switchHistMission(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
+  _gestionDesEditStat:  (btn) => _gestionDesEditStat(Number(btn.dataset.i), btn.dataset.st),
+  _gestionDesDel:       (btn) => _gestionDesDel(Number(btn.dataset.i)),
   _histDesDismiss:      ()    => document.getElementById('hist-des-modal')?.remove(),
-  _resetDiceSkills:     ()    => window._resetDiceSkills?.(),
-  _gestionDesAdd:       ()    => window._gestionDesAdd?.(),
+  _resetDiceSkills:     ()    => _resetDiceSkills(),
+  _gestionDesAdd:       ()    => _gestionDesAdd(),
   _histHandoutDismiss:  ()    => document.getElementById('hist-handout-modal')?.remove(),
-  _histHandoutCopy:     ()    => window._histHandoutCopy?.(),
+  _histHandoutCopy:     ()    => _histHandoutCopy(),
 });
 
 // Préchauffage du cache des compétences dès le chargement du module

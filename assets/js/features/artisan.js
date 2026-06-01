@@ -11,6 +11,7 @@
 
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
+import { getShopCharId } from '../shared/shop-session.js';
 import { updateInCol } from '../data/firestore.js';
 import { openModal, pushModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -23,7 +24,7 @@ import {
   _getTraits, _getBaseTraits, _getAddedTraits,
   syncEquipmentAfterInventoryMutation,
 } from './characters/data.js';
-import { buildEquippedItemFromInventory } from './characters/equipment.js';
+import { buildEquippedItemFromInventory } from './characters/equipment.js'; // TODO: move to shared/equipment-utils when deps allow
 import { loadUpgradeSettings, getUpgradeSettings } from '../shared/upgrade-settings.js';
 
 // ══════════════════════════════════════════════
@@ -119,7 +120,7 @@ function _getActiveArtisanChar() {
   if (!chars.length) return null;
   let active = chars.find(c => c.id === _activeArtisanCharId);
   if (!active) {
-    active = chars.find(c => c.id === window._shopCharId) || chars[0];
+    active = chars.find(c => c.id === getShopCharId()) || chars[0];
     _activeArtisanCharId = active?.id || null;
   }
   return active;
@@ -285,14 +286,14 @@ function _renderUpgradeableItemRow(item, invIndex, category) {
 }
 
 // ── Toggle MJ gratuit (admins seulement) ────────────────────────────
-window._artisanToggleMjFree = (on) => {
+function _artisanToggleMjFree(on) {
   if (!STATE.isAdmin) { _mjFreeMode = false; return; }
   _mjFreeMode = !!on;
   _renderArtisanModal();
-};
+}
 
 // ── Historique des améliorations d'un item ─────────────────────────
-window._artisanOpenHistory = (invIndex) => {
+function _artisanOpenHistory(invIndex) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
@@ -420,7 +421,7 @@ async function _persistChar(c) {
 // Sous-modale ouverte depuis le bouton "🔖 Traits" sur un item de la liste.
 // ══════════════════════════════════════════════
 
-window._artisanOpenTraitsActions = (invIndex) => {
+function _artisanOpenTraitsActions(invIndex) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
@@ -532,10 +533,10 @@ window._artisanOpenTraitsActions = (invIndex) => {
       <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
     </div>
   `);
-};
+}
 
 // ── Détruire : si plusieurs traits et !extractAllTraits, demander lequel ──
-window._artisanDestroyStart = async (invIndex) => {
+async function _artisanDestroyStart(invIndex) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
@@ -569,10 +570,10 @@ window._artisanDestroyStart = async (invIndex) => {
   `);
 };
 
-window._artisanDestroyConfirm = (invIndex, traitName) => {
+function _artisanDestroyConfirm(invIndex, traitName) {
   closeModalDirect(); // ferme la sous-modale de choix
   _artisanDoDestroy(invIndex, [traitName]);
-};
+}
 
 async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const c = _getActiveArtisanChar();
@@ -614,7 +615,7 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
 }
 
 // ── Ajouter un trait (slot libre) ──
-window._artisanAddTrait = async (invIndex, fragmentName) => {
+async function _artisanAddTrait(invIndex, fragmentName) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
@@ -654,7 +655,7 @@ window._artisanAddTrait = async (invIndex, fragmentName) => {
 };
 
 // ── Écraser un trait existant ──
-window._artisanOverwriteStart = (invIndex, oldTraitName) => {
+function _artisanOverwriteStart(invIndex, oldTraitName) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
@@ -694,7 +695,7 @@ window._artisanOverwriteStart = (invIndex, oldTraitName) => {
   `);
 };
 
-window._artisanOverwriteConfirm = async (invIndex, oldTraitName, newFragmentName) => {
+async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
@@ -755,7 +756,7 @@ window._artisanOverwriteConfirm = async (invIndex, oldTraitName, newFragmentName
 
   await _persistChar(c);
   showNotif(`Trait « ${oldTraitName} » remplacé par « ${newFragmentName} ».`, 'success');
-};
+}
 
 // ══════════════════════════════════════════════
 // ACTIONS — STATS
@@ -763,12 +764,12 @@ window._artisanOverwriteConfirm = async (invIndex, oldTraitName, newFragmentName
 // (Armures Tête/Torse/Pieds et Objet magique : pas d'amélioration stats.)
 // ══════════════════════════════════════════════
 
-window._artisanSelectChar = (id) => {
+function _artisanSelectChar(id) {
   _activeArtisanCharId = id;
   _renderArtisanModal();
 };
 
-window._artisanOpenStatsActions = (invIndex) => {
+function _artisanOpenStatsActions(invIndex) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
@@ -780,7 +781,7 @@ window._artisanOpenStatsActions = (invIndex) => {
   if (cat === 'arme')     return _openWeaponStatsModal(invIndex);
 
   showNotif(`Cet item ne supporte pas l'amélioration de stats.`, 'info');
-};
+}
 
 // ── Helpers communs ──────────────────────────────────────────────────
 
@@ -911,7 +912,7 @@ function _renderRingEffectSection(item, invIndex, s, cap) {
 }
 
 // — Action : améliorer la stat de l'anneau seule
-window._artisanRingUpgradeStat = async (invIndex) => {
+async function _artisanRingUpgradeStat(invIndex) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = c.inventaire[invIndex];
@@ -944,10 +945,10 @@ window._artisanRingUpgradeStat = async (invIndex) => {
 
   await _persistChar(c);
   showNotif(`Stat ${primary.label} améliorée au palier ${nextLevel}.`, 'success');
-};
+}
 
 // — Action : améliorer l'effet de l'anneau seul
-window._artisanRingUpgradeEffect = async (invIndex) => {
+async function _artisanRingUpgradeEffect(invIndex) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = c.inventaire[invIndex];
@@ -974,7 +975,7 @@ window._artisanRingUpgradeEffect = async (invIndex) => {
 
   await _persistChar(c);
   showNotif(`Effet renforcé au palier ${nextLevel}.`, 'success');
-};
+}
 
 // ══════════════════════════════════════════════
 // AMULETTE — jusqu'à N stats DISTINCTES, +1 chacune
@@ -1041,7 +1042,7 @@ function _openAmuletStatsModal(invIndex) {
   `);
 }
 
-window._artisanAmuletAddStat = async (invIndex, statFullKey) => {
+async function _artisanAmuletAddStat(invIndex, statFullKey) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = c.inventaire[invIndex];
@@ -1078,7 +1079,7 @@ window._artisanAmuletAddStat = async (invIndex, statFullKey) => {
 
   await _persistChar(c);
   showNotif(`+1 ${meta.label} ajouté à l'amulette.`, 'success');
-};
+}
 
 // ══════════════════════════════════════════════
 // ARME — points distribuables (cap 1H ou 2H)
@@ -1146,7 +1147,7 @@ function _openWeaponStatsModal(invIndex) {
   `);
 }
 
-window._artisanWeaponAddPoint = async (invIndex, statFullKey) => {
+async function _artisanWeaponAddPoint(invIndex, statFullKey) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = c.inventaire[invIndex];
@@ -1187,23 +1188,22 @@ window._artisanWeaponAddPoint = async (invIndex, statFullKey) => {
   showNotif(`+1 ${meta.label} ajouté à l'arme.`, 'success');
 };
 
-window.openArtisanModal = openArtisanModal;
 
 registerActions({
-  _artisanSelectChar: (el) => window._artisanSelectChar?.(el.value),
-  _artisanToggleMjFree: (el) => window._artisanToggleMjFree?.(el.checked),
-  _artisanOpenTraitsActions: (btn) => window._artisanOpenTraitsActions?.(Number(btn.dataset.i)),
-  _artisanOpenStatsActions: (btn) => window._artisanOpenStatsActions?.(Number(btn.dataset.i)),
-  _artisanOpenHistory: (btn) => window._artisanOpenHistory?.(Number(btn.dataset.i)),
-  _artisanDestroyStart: (btn) => window._artisanDestroyStart?.(Number(btn.dataset.i)),
-  _artisanDestroyConfirm: (btn) => window._artisanDestroyConfirm?.(Number(btn.dataset.i), btn.dataset.trait),
-  _artisanAddTrait: (btn) => window._artisanAddTrait?.(Number(btn.dataset.i), btn.dataset.frag),
-  _artisanOverwriteStart: (btn) => window._artisanOverwriteStart?.(Number(btn.dataset.i), btn.dataset.trait),
-  _artisanOverwriteConfirm: (btn) => window._artisanOverwriteConfirm?.(Number(btn.dataset.i), btn.dataset.old, btn.dataset.frag),
-  _artisanRingUpgradeStat: (btn) => window._artisanRingUpgradeStat?.(Number(btn.dataset.i)),
-  _artisanRingUpgradeEffect: (btn) => window._artisanRingUpgradeEffect?.(Number(btn.dataset.i)),
-  _artisanAmuletAddStat: (btn) => window._artisanAmuletAddStat?.(Number(btn.dataset.i), btn.dataset.stat),
-  _artisanWeaponAddPoint: (btn) => window._artisanWeaponAddPoint?.(Number(btn.dataset.i), btn.dataset.stat),
-  _artisanCloseModal: () => window.closeModal?.(),
+  _artisanSelectChar: (el) => _artisanSelectChar(el.value),
+  _artisanToggleMjFree: (el) => _artisanToggleMjFree(el.checked),
+  _artisanOpenTraitsActions: (btn) => _artisanOpenTraitsActions(Number(btn.dataset.i)),
+  _artisanOpenStatsActions: (btn) => _artisanOpenStatsActions(Number(btn.dataset.i)),
+  _artisanOpenHistory: (btn) => _artisanOpenHistory(Number(btn.dataset.i)),
+  _artisanDestroyStart: (btn) => _artisanDestroyStart(Number(btn.dataset.i)),
+  _artisanDestroyConfirm: (btn) => _artisanDestroyConfirm(Number(btn.dataset.i), btn.dataset.trait),
+  _artisanAddTrait: (btn) => _artisanAddTrait(Number(btn.dataset.i), btn.dataset.frag),
+  _artisanOverwriteStart: (btn) => _artisanOverwriteStart(Number(btn.dataset.i), btn.dataset.trait),
+  _artisanOverwriteConfirm: (btn) => _artisanOverwriteConfirm(Number(btn.dataset.i), btn.dataset.old, btn.dataset.frag),
+  _artisanRingUpgradeStat: (btn) => _artisanRingUpgradeStat(Number(btn.dataset.i)),
+  _artisanRingUpgradeEffect: (btn) => _artisanRingUpgradeEffect(Number(btn.dataset.i)),
+  _artisanAmuletAddStat: (btn) => _artisanAmuletAddStat(Number(btn.dataset.i), btn.dataset.stat),
+  _artisanWeaponAddPoint: (btn) => _artisanWeaponAddPoint(Number(btn.dataset.i), btn.dataset.stat),
+  _artisanCloseModal: () => closeModalDirect(),
   _artisanBack: () => closeModalDirect(),
 });

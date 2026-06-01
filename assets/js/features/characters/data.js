@@ -7,32 +7,8 @@ import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../sh
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
-
-// ══════════════════════════════════════════════
-// ARME PAR DÉFAUT — Poings (mains nues)
-// Si "Main principale" est vide, le personnage frappe à mains nues :
-//   - 2d4 de dégâts (au lieu de 1d6)
-//   - Force pour le toucher ET les dégâts
-// ══════════════════════════════════════════════
-export const DEFAULT_UNARMED = Object.freeze({
-  nom:         'Poings',
-  degats:      '2d4',
-  statAttaque: 'force',
-  format:      'À une main',
-  portee:      1,
-  icon:        '👊',
-  isDefault:   true, // flag pour distinguer de l'équipement réel
-});
-
-/**
- * Retourne l'arme principale équipée, ou un objet "Poings" virtuel si vide.
- * Toujours un objet utilisable (jamais null/undefined).
- */
-export function getMainWeapon(c) {
-  const mainP = c?.equipement?.['Main principale'];
-  if (mainP && mainP.nom) return mainP;
-  return { ...DEFAULT_UNARMED };
-}
+import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
+export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation };
 
 // ══════════════════════════════════════════════
 // STYLES DE COMBAT
@@ -189,17 +165,19 @@ export function _renderCombatStylesModal(styles) {
   `);
 }
 
-window._addCombatStyle = () => _openStyleEditor(-1, {
-  label:'', condPrincipale:[], condSecondaire:[], description:'', couleur:'#4f8cff'
-});
-window._editCombatStyle = (i) => _openStyleEditor(i, _combatStyles[i] || {});
-window._deleteCombatStyle = async (i) => {
+function _addCombatStyle() {
+  _openStyleEditor(-1, { label:'', condPrincipale:[], condSecondaire:[], description:'', couleur:'#4f8cff' });
+}
+function _editCombatStyle(i) {
+  _openStyleEditor(i, _combatStyles[i] || {});
+}
+async function _deleteCombatStyle(i) {
   if (!await confirmModal('Supprimer ce style ?')) return;
   _combatStyles.splice(i, 1);
   await saveDoc('world', 'combat_styles', { styles: _combatStyles });
   showNotif('Style supprimé.', 'success');
   _renderCombatStylesModal(_combatStyles);
-};
+}
 
 export function _getFormatsOpt() {
   return [
@@ -263,7 +241,7 @@ export function _openStyleEditor(idx, s) {
   `);
 }
 
-window._csAddCond = (containerId, selClass) => {
+function _csAddCond(containerId, selClass) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const div = document.createElement('div');
@@ -275,9 +253,9 @@ window._csAddCond = (containerId, selClass) => {
     <button type="button" data-action="_removeParent"
       style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>`;
   container.appendChild(div);
-};
+}
 
-window._saveCombatStyle = async (idx) => {
+async function _saveCombatStyle(idx) {
   const label = document.getElementById('cs-style-label')?.value?.trim();
   if (!label) { showNotif('Nom requis.', 'error'); return; }
   const condP = [...document.querySelectorAll('.cs-cond-p-sel')].map(s=>s.value);
@@ -296,9 +274,11 @@ window._saveCombatStyle = async (idx) => {
   await saveDoc('world', 'combat_styles', { styles: _combatStyles });
   showNotif('Style enregistré !', 'success');
   _renderCombatStylesModal(_combatStyles);
-};
+}
 
-window._backToStylesList = () => _renderCombatStylesModal(_combatStyles || []);
+function _backToStylesList() {
+  _renderCombatStylesModal(_combatStyles || []);
+}
 
 // ══════════════════════════════════════════════
 // FORMATS D'ARMES — Admin
@@ -355,7 +335,7 @@ export function _renderWeaponFormatsModal(formats) {
 
         <div class="sh-admin-add-row">
           <input type="text" id="wf-new-label" placeholder="Nouveau format (ex: Arme 2M CaC Mag.)..."
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._addWeaponFormat();}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();document.querySelector('[data-action=\"_addWeaponFormat\"]')?.click();}">
           <button class="btn btn-gold btn-sm" data-action="_addWeaponFormat">+ Ajouter</button>
         </div>
       </div>
@@ -371,7 +351,7 @@ export function _renderWeaponFormatsModal(formats) {
   setTimeout(() => document.getElementById('wf-new-label')?.focus(), 60);
 }
 
-window._toggleWeaponFormatMagic = async (i) => {
+async function _toggleWeaponFormatMagic(i) {
   const formats = [...(_weaponFormats || [])];
   if (!formats[i]) return;
   const nowMagic = !formats[i].isMagic;
@@ -379,9 +359,9 @@ window._toggleWeaponFormatMagic = async (i) => {
   await saveWeaponFormats(formats);
   _weaponFormats = formats;
   _renderWeaponFormatsModal(formats);
-};
+}
 
-window._addWeaponFormat = async () => {
+async function _addWeaponFormat() {
   const label = document.getElementById('wf-new-label')?.value?.trim();
   if (!label) { showNotif('Nom requis.', 'error'); return; }
   const formats = _weaponFormats ? [..._weaponFormats] : [];
@@ -393,9 +373,9 @@ window._addWeaponFormat = async () => {
   _weaponFormats = formats;
   showNotif('Format ajouté.', 'success');
   _renderWeaponFormatsModal(formats);
-};
+}
 
-window._deleteWeaponFormat = async (i) => {
+async function _deleteWeaponFormat(i) {
   if (!await confirmModal('Supprimer ce format ?', { title: 'Confirmation de suppression' })) return;
   const formats = [...(_weaponFormats || [])];
   formats.splice(i, 1);
@@ -403,7 +383,7 @@ window._deleteWeaponFormat = async (i) => {
   _weaponFormats = formats;
   showNotif('Format supprimé.', 'success');
   _renderWeaponFormatsModal(formats);
-};
+}
 
 // ══════════════════════════════════════════════
 // TYPES DE DÉGÂTS — Admin
@@ -494,7 +474,7 @@ function _renderDamageTypesModal(types) {
           <input type="text" id="dt-new-icon" placeholder="🌊"
             style="width:50px;text-align:center;flex:0 0 auto">
           <input type="text" id="dt-new-label" placeholder="Nouveau type (ex: Eau, Foudre…)"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._addDmgType();}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();document.querySelector('[data-action=\"_addDmgType\"]')?.click();}">
           <button class="btn btn-gold btn-sm" data-action="_addDmgType">+ Ajouter</button>
         </div>
       </div>
@@ -509,7 +489,7 @@ function _renderDamageTypesModal(types) {
   setTimeout(() => document.getElementById('dt-new-label')?.focus(), 60);
 }
 
-window._saveDmgTypeProp = async (i, path, value) => {
+async function _saveDmgTypeProp(i, path, value) {
   const types = [...(_damageTypes || [])];
   if (!types[i]) return;
   if (path.startsWith('rules.')) {
@@ -520,9 +500,9 @@ window._saveDmgTypeProp = async (i, path, value) => {
   }
   await saveDamageTypes(types);
   _damageTypes = types;
-};
+}
 
-window._addDmgType = async () => {
+async function _addDmgType() {
   const label = document.getElementById('dt-new-label')?.value?.trim();
   const icon  = document.getElementById('dt-new-icon')?.value?.trim() || '';
   if (!label) { showNotif('Nom requis.', 'error'); return; }
@@ -542,9 +522,9 @@ window._addDmgType = async () => {
   _damageTypes = types;
   showNotif('Type ajouté.', 'success');
   _renderDamageTypesModal(types);
-};
+}
 
-window._deleteDmgType = async (i) => {
+async function _deleteDmgType(i) {
   if (!await confirmModal('Supprimer ce type ?', { title: 'Confirmation' })) return;
   const types = [...(_damageTypes || [])];
   types.splice(i, 1);
@@ -552,13 +532,8 @@ window._deleteDmgType = async (i) => {
   _damageTypes = types;
   showNotif('Type supprimé.', 'success');
   _renderDamageTypesModal(types);
-};
+}
 
-// expose pour l'appel depuis le modal formats
-window.openDamageTypesAdmin = async () => {
-  _damageTypes = await loadDamageTypes();
-  _renderDamageTypesModal(_damageTypes);
-};
 
 // ══════════════════════════════════════════════
 // MATRICES DE SORTS — Admin (Enchantement / Affliction / Protection CA)
@@ -801,12 +776,12 @@ function _renderSpellMatricesModal(types) {
   `);
 }
 
-window._switchSpellMatrixTab = (tab) => {
+function _switchSpellMatrixTab(tab) {
   _spellMatricesTab = tab;
   loadDamageTypes().then(types => _renderSpellMatricesModal(types));
-};
+}
 
-window._setSpellMatrixEffect = (catKey, elementId, slot, value) => {
+function _setSpellMatrixEffect(catKey, elementId, slot, value) {
   if (!_spellMatricesDraft[catKey][elementId]) _spellMatricesDraft[catKey][elementId] = {};
   // Multi-ligne : chaque ligne non vide devient une suggestion distincte
   const lines = String(value || '')
@@ -824,16 +799,16 @@ window._setSpellMatrixEffect = (catKey, elementId, slot, value) => {
   if (Object.keys(_spellMatricesDraft[catKey][elementId]).length === 0) {
     delete _spellMatricesDraft[catKey][elementId];
   }
-};
+}
 
-window._setSpellMatrixCAMod = (elementId, val) => {
+function _setSpellMatrixCAMod(elementId, val) {
   const n = parseInt(val);
   if (!Number.isFinite(n)) return;
   if (!_spellMatricesDraft.protectionCA[elementId]) _spellMatricesDraft.protectionCA[elementId] = {};
   _spellMatricesDraft.protectionCA[elementId].mod = Math.max(0, Math.min(10, n));
-};
+}
 
-window._setSpellMatrixCANote = (elementId, val) => {
+function _setSpellMatrixCANote(elementId, val) {
   if (!_spellMatricesDraft.protectionCA[elementId]) _spellMatricesDraft.protectionCA[elementId] = {};
   const v = (val || '').trim();
   if (v) _spellMatricesDraft.protectionCA[elementId].note = v;
@@ -843,9 +818,9 @@ window._setSpellMatrixCANote = (elementId, val) => {
   if (entry && (entry.mod === undefined || entry.mod === 2) && !entry.note) {
     delete _spellMatricesDraft.protectionCA[elementId];
   }
-};
+}
 
-window._setSpellMatrixComboEnabled = (comboId, enabled) => {
+function _setSpellMatrixComboEnabled(comboId, enabled) {
   if (!_spellMatricesDraft.combos[comboId]) _spellMatricesDraft.combos[comboId] = {};
   _spellMatricesDraft.combos[comboId].enabled = !!enabled;
   // Cleanup : retire l'entrée si elle correspond aux défauts et pas de nom custom
@@ -855,9 +830,9 @@ window._setSpellMatrixComboEnabled = (comboId, enabled) => {
     delete _spellMatricesDraft.combos[comboId];
   }
   loadDamageTypes().then(types => _renderSpellMatricesModal(types));
-};
+}
 
-window._setSpellMatrixComboName = (comboId, val) => {
+function _setSpellMatrixComboName(comboId, val) {
   if (!_spellMatricesDraft.combos[comboId]) _spellMatricesDraft.combos[comboId] = {};
   const v = (val || '').trim();
   if (v) _spellMatricesDraft.combos[comboId].name = v;
@@ -868,9 +843,9 @@ window._setSpellMatrixComboName = (comboId, val) => {
   if (def && (e.enabled === undefined || e.enabled === def.enabled) && !(e.name && e.name.trim())) {
     delete _spellMatricesDraft.combos[comboId];
   }
-};
+}
 
-window._setSpellMatrixArm = (elementId, key, val) => {
+function _setSpellMatrixArm(elementId, key, val) {
   if (!_spellMatricesDraft.combo_arms[elementId]) _spellMatricesDraft.combo_arms[elementId] = {};
   const v = (val == null) ? '' : String(val).trim();
   if (v) _spellMatricesDraft.combo_arms[elementId][key] = (key === 'portee') ? (parseInt(v) || 1) : v;
@@ -879,17 +854,16 @@ window._setSpellMatrixArm = (elementId, key, val) => {
   const e = _spellMatricesDraft.combo_arms[elementId];
   const meaningful = ['weapon','degats','statToucher','statDegats','portee','note'].some(k => e[k] !== undefined && e[k] !== '');
   if (!meaningful) delete _spellMatricesDraft.combo_arms[elementId];
-};
+}
 
-window._saveSpellMatrices = async () => {
+async function _saveSpellMatrices() {
   try {
     await saveSpellMatrices(_spellMatricesDraft);
     closeModal();
     showNotif('Matrices de sorts enregistrées.', 'success');
   } catch (e) { notifySaveError(e); }
-};
+}
 
-window.openSpellMatricesAdmin = openSpellMatricesAdmin;
 
 // ══════════════════════════════════════════════
 // COMPUTED STATS
@@ -950,158 +924,6 @@ export function getEquippedInventoryIndexMap(c) {
   return map;
 }
 
-export function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
-  const removed = [...new Set((removedIndices || [])
-    .map(v => Number.isInteger(v) ? v : parseInt(v, 10))
-    .filter(v => Number.isInteger(v) && v >= 0))].sort((a, b) => a - b);
-
-  const currentEquip = c?.equipement || {};
-  if (!removed.length) {
-    return {
-      equipement: currentEquip,
-      statsBonus: c?.statsBonus || computeEquipStatsBonus(currentEquip),
-      changed: false,
-      removedSlots: [],
-    };
-  }
-
-  const removedSet = new Set(removed);
-  const countRemovedBefore = idx => {
-    let count = 0;
-    for (const removedIdx of removed) {
-      if (removedIdx < idx) count++;
-      else break;
-    }
-    return count;
-  };
-
-  const nextEquip = {};
-  const removedSlots = [];
-  let changed = false;
-
-  Object.entries(currentEquip).forEach(([slot, item]) => {
-    const rawIdx = item?.sourceInvIndex;
-    const srcIdx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
-
-    if (!Number.isInteger(srcIdx) || srcIdx < 0) {
-      nextEquip[slot] = item;
-      return;
-    }
-
-    if (removedSet.has(srcIdx)) {
-      changed = true;
-      removedSlots.push(slot);
-      return;
-    }
-
-    const nextIdx = srcIdx - countRemovedBefore(srcIdx);
-    if (nextIdx !== srcIdx) {
-      nextEquip[slot] = { ...item, sourceInvIndex: nextIdx };
-      changed = true;
-      return;
-    }
-
-    nextEquip[slot] = item;
-  });
-
-  const statsBonus = computeEquipStatsBonus(nextEquip);
-  const prevStats = c?.statsBonus || {};
-  if (JSON.stringify(prevStats) !== JSON.stringify(statsBonus)) changed = true;
-
-  return { equipement: nextEquip, statsBonus, changed, removedSlots };
-}
-
-export function normalizeArmorType(type = '') {
-  const raw = String(type || '').trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  if (!raw) return '';
-  if (['leger', 'legere', 'light'].includes(raw)) return 'Légère';
-  if (['intermediaire', 'medium', 'mid'].includes(raw)) return 'Intermédiaire';
-  if (['lourd', 'lourde', 'heavy'].includes(raw)) return 'Lourde';
-  return String(type || '').trim();
-}
-
-export function getArmorTypeMeta(type = '') {
-  const label = normalizeArmorType(type);
-  if (label === 'Légère') {
-    return {
-      label,
-      tone: 'light',
-      chipText: 'Léger : Coût des sorts -2 PM',
-      modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
-    };
-  }
-  if (label === 'Intermédiaire') {
-    return {
-      label,
-      tone: 'medium',
-      chipText: 'Intermédiaire : Toucher +2',
-      modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
-    };
-  }
-  if (label === 'Lourde') {
-    return {
-      label,
-      tone: 'heavy',
-      chipText: 'Lourd : Réduction 2 dégâts',
-      modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
-    };
-  }
-  return {
-    label,
-    tone: 'neutral',
-    chipText: '',
-    modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 },
-  };
-}
-
-export function getArmorSetChipText(setData = {}) {
-  if (!setData?.isActive) return '';
-  return setData.activeEffect?.chipText || getArmorTypeMeta(setData.fullType).chipText || '';
-}
-
-export function getArmorSetData(c = {}) {
-  const equip = c?.equipement || {};
-  const trackedSlots = ['Tête', 'Torse', 'Bottes'];
-  const slots = trackedSlots.map(slot => {
-    const item = equip?.[slot] || {};
-    return {
-      slot,
-      item,
-      type: normalizeArmorType(item?.typeArmure),
-      equipped: Boolean(item?.nom),
-    };
-  });
-
-  const equippedCount = slots.filter(entry => entry.equipped).length;
-  const typedSlots = slots.filter(entry => entry.type);
-  const counts = typedSlots.reduce((acc, entry) => {
-    acc[entry.type] = (acc[entry.type] || 0) + 1;
-    return acc;
-  }, {});
-
-  const fullType = ['Légère', 'Intermédiaire', 'Lourde']
-    .find(type => counts[type] === trackedSlots.length) || '';
-
-  const activeEffect = fullType ? getArmorTypeMeta(fullType) : null;
-  const mixed = !fullType && Object.keys(counts).length > 1;
-  const dominantType = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
-
-  return {
-    trackedSlots,
-    slots,
-    counts,
-    equippedCount,
-    fullType,
-    dominantType,
-    mixed,
-    isComplete: equippedCount === trackedSlots.length,
-    isActive: Boolean(activeEffect),
-    activeEffect,
-    modifiers: activeEffect?.modifiers || { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 },
-  };
-}
-
 export function applyFlatBonusToRollText(text = '', bonus = 0) {
   const raw = String(text || '').trim();
   if (!raw || !bonus) return raw;
@@ -1160,27 +982,27 @@ registerActions({
   _saveDmgTypeProp: (el) => {
     const t = el.dataset.vtype;
     const v = t === 'bool' ? el.checked : t === 'num' ? +el.value : el.value;
-    window._saveDmgTypeProp?.(Number(el.dataset.i), el.dataset.prop, v);
+    _saveDmgTypeProp(Number(el.dataset.i), el.dataset.prop, v);
   },
-  _setSpellMatrixCAMod:        (el) => window._setSpellMatrixCAMod?.(el.dataset.tid, el.value),
-  _setSpellMatrixCANote:       (el) => window._setSpellMatrixCANote?.(el.dataset.tid, el.value),
-  _setSpellMatrixComboEnabled: (el) => window._setSpellMatrixComboEnabled?.(el.dataset.id, el.checked),
-  _setSpellMatrixComboName:    (el) => window._setSpellMatrixComboName?.(el.dataset.id, el.value),
-  _setSpellMatrixArm:          (el) => window._setSpellMatrixArm?.(el.dataset.tid, el.dataset.arm, el.value),
-  _setSpellMatrixEffect:       (el) => window._setSpellMatrixEffect?.(el.dataset.catKey, el.dataset.tid, el.dataset.slot, el.value),
+  _setSpellMatrixCAMod:        (el) => _setSpellMatrixCAMod(el.dataset.tid, el.value),
+  _setSpellMatrixCANote:       (el) => _setSpellMatrixCANote(el.dataset.tid, el.value),
+  _setSpellMatrixComboEnabled: (el) => _setSpellMatrixComboEnabled(el.dataset.id, el.checked),
+  _setSpellMatrixComboName:    (el) => _setSpellMatrixComboName(el.dataset.id, el.value),
+  _setSpellMatrixArm:          (el) => _setSpellMatrixArm(el.dataset.tid, el.dataset.arm, el.value),
+  _setSpellMatrixEffect:       (el) => _setSpellMatrixEffect(el.dataset.catKey, el.dataset.tid, el.dataset.slot, el.value),
   _removeParent:            (btn) => btn.parentElement?.remove(),
-  _editCombatStyle:         (btn) => window._editCombatStyle(Number(btn.dataset.idx)),
-  _deleteCombatStyle:       (btn) => window._deleteCombatStyle(Number(btn.dataset.idx)),
-  _addCombatStyle:          ()    => window._addCombatStyle(),
-  _saveCombatStyle:         (btn) => window._saveCombatStyle(Number(btn.dataset.idx)),
-  _backToStylesList:        ()    => window._backToStylesList(),
-  _csAddCond:               (btn) => window._csAddCond(btn.dataset.container, btn.dataset.sel),
-  _toggleWeaponFormatMagic: (btn) => window._toggleWeaponFormatMagic(Number(btn.dataset.idx)),
-  _addWeaponFormat:         ()    => window._addWeaponFormat(),
-  _deleteWeaponFormat:      (btn) => window._deleteWeaponFormat(Number(btn.dataset.idx)),
-  openDamageTypesAdmin:     ()    => window.openDamageTypesAdmin(),
-  _addDmgType:              ()    => window._addDmgType(),
-  _deleteDmgType:           (btn) => window._deleteDmgType(Number(btn.dataset.idx)),
-  _switchSpellMatrixTab:    (btn) => window._switchSpellMatrixTab(btn.dataset.tab),
-  _saveSpellMatrices:       ()    => window._saveSpellMatrices(),
+  _editCombatStyle:         (btn) => _editCombatStyle(Number(btn.dataset.idx)),
+  _deleteCombatStyle:       (btn) => _deleteCombatStyle(Number(btn.dataset.idx)),
+  _addCombatStyle:          ()    => _addCombatStyle(),
+  _saveCombatStyle:         (btn) => _saveCombatStyle(Number(btn.dataset.idx)),
+  _backToStylesList:        ()    => _backToStylesList(),
+  _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
+  _toggleWeaponFormatMagic: (btn) => _toggleWeaponFormatMagic(Number(btn.dataset.idx)),
+  _addWeaponFormat:         ()    => _addWeaponFormat(),
+  _deleteWeaponFormat:      (btn) => _deleteWeaponFormat(Number(btn.dataset.idx)),
+  openDamageTypesAdmin:     ()    => openDamageTypesAdmin(),
+  _addDmgType:              ()    => _addDmgType(),
+  _deleteDmgType:           (btn) => _deleteDmgType(Number(btn.dataset.idx)),
+  _switchSpellMatrixTab:    (btn) => _switchSpellMatrixTab(btn.dataset.tab),
+  _saveSpellMatrices:       ()    => _saveSpellMatrices(),
 });

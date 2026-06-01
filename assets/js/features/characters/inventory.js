@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal } from '../../shared/modal.js';
@@ -16,6 +17,23 @@ import {
   syncEquipmentAfterInventoryMutation,
 } from './data.js';
 
+let _charInvSearch = '';
+let _invCatOpen = {};
+let _sellRefundsCum = [];
+let _modalCharTargets = [];
+let _shopItemsCache = null;
+let _shopCatsCache = null;
+let _lootItems = [];
+let _lootSelId = null;
+let _lootCurCat = null;
+let _lootSetCat = () => {};
+let _lootFilter = () => {};
+let _lootSelect = () => {};
+
+function _renderInventoryChar(c, tab = 'inventaire') {
+  charSession.renderSheet?.(c, tab || charSession.getCurrentCharTab() || 'inventaire');
+}
+
 function _itemDegatsStatsShorts(item) {
   const arr = Array.isArray(item.degatsStats) && item.degatsStats.length
     ? item.degatsStats
@@ -30,7 +48,7 @@ export function _renderInventaireBoutique(char) {
   const invRaw = (char.inventaire || []).map((item, i) => ({ item, i })).filter(({ item }) => item.source === 'boutique');
   if (!invRaw.length) return '';
 
-  const canEdit = window._canEditChar ?? STATE.isAdmin;
+  const canEdit = charSession.getCanEditChar() ?? STATE.isAdmin;
 
   // ── Regrouper par itemId + nom ──────────────────────────────────────────
   const grouped = [];
@@ -193,7 +211,7 @@ function _invRowChips(item) {
 
 export function renderCharInventaire(c, canEdit) {
   const invRaw = c.inventaire || [];
-  const q = (window._charInvSearch || '').toLowerCase().trim();
+  const q = (_charInvSearch || '').toLowerCase().trim();
 
   // ── Regrouper par itemId + nom ──
   const grouped = [];
@@ -281,7 +299,7 @@ export function renderCharInventaire(c, canEdit) {
     html += `<div class="inv-search-wrap">
       <span class="inv-search-icon">🔍</span>
       <input class="inv-search-input" type="text" placeholder="Rechercher un objet…"
-        value="${_esc(window._charInvSearch || '')}"
+        value="${_esc(_charInvSearch || '')}"
         data-input="_charInvSearch">
       ${q ? `<button class="inv-search-clear" data-action="filterInvClear">✕</button>` : ''}
     </div>`;
@@ -290,10 +308,10 @@ export function renderCharInventaire(c, canEdit) {
     for (const cat of CATS) {
       if (!cat.items.length) continue;
       const allHidden = q && cat.items.every(g => !((g.item.nom || '').toLowerCase().includes(q)));
-      const openState = window[`_invCat_${cat.id}`] !== false;
+      const openState = _invCatOpen[cat.id] !== false;
       html += `<details class="inv-cat${allHidden ? ' inv-cat--hidden' : ''}" id="inv-cat-${cat.id}"
-        ${openState ? 'open' : ''} ontoggle="window['_invCat_${cat.id}']=this.open">
-        <summary class="inv-cat-head">
+        ${openState ? 'open' : ''}>
+        <summary class="inv-cat-head" data-action="_invCatToggle" data-cat="${cat.id}">
           <div class="inv-cat-title-row">
             <span class="inv-cat-icon">${cat.icon}</span>
             <span class="inv-cat-title">${cat.label}</span>
@@ -360,7 +378,7 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const refundsCum = refundPerItem.reduce((acc, v) => { acc.push((acc[acc.length-1]||0) + v); return acc; }, []);
   const refundForQty = (q) => refundsCum[Math.min(q, upgradedCount) - 1] || 0;
   // Expose le tableau cumulatif au handler inline pour live-update.
-  window.__sellRefundsCum = refundsCum;
+  _sellRefundsCum = refundsCum;
 
   const refundHintHtml = upgradedCount && refundRatio > 0
     ? ` <span id="sell-refund-hint" class="invm-hint">(dont +${refundForQty(1)} reprise)</span>`
@@ -422,25 +440,25 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
 }
 
 // Bouton stepper réutilisable
-window._invmStep = (id, delta, max, kind) => {
+function _invmStep(id, delta, max, kind) {
   const inp = document.getElementById(id);
   if (!inp) return;
   const next = Math.max(1, Math.min(max, (parseInt(inp.value) || 1) + delta));
   inp.value = next;
   inp.dispatchEvent(new Event('input'));
-};
+}
 
 // Live-update du total dans la modale de vente (qty × prix + reprise upgrades).
-window._sellRefreshTotal = (input, prixVente, maxQte) => {
+function _sellRefreshTotal(input, prixVente, maxQte) {
   const q = Math.min(Math.max(1, parseInt(input.value) || 1), maxQte);
-  const cum = Array.isArray(window.__sellRefundsCum) ? window.__sellRefundsCum : [];
+  const cum = Array.isArray(_sellRefundsCum) ? _sellRefundsCum : [];
   const refund = cum[Math.min(q, cum.length) - 1] || 0;
   const total = q * prixVente + refund;
   const totalEl = document.getElementById('sell-total');
   if (totalEl) totalEl.textContent = `${total} or`;
   const hintEl = document.getElementById('sell-refund-hint');
   if (hintEl) hintEl.textContent = refund > 0 ? `(dont +${refund} reprise)` : '';
-};
+}
 
 export async function sellInvItemBulk(charId, indicesB64, prixVente) {
   try {
@@ -467,9 +485,10 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     const sorted = [...indicesToSell].sort((a,b)=>b-a);
     sorted.forEach(idx => inv.splice(idx, 1));
 
-    if (item.itemId && window.sellInvItemFromShop) {
+    if (item.itemId) {
+      const { restockShopItem } = await import('../shop.js');
       for (let i = 0; i < qty; i++) {
-        await window._restockShopItem?.(item.itemId);
+        await restockShopItem(item.itemId);
       }
     }
 
@@ -498,8 +517,8 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
       : '';
     const refundMsg = refundTotal > 0 ? ` (+${refundTotal} or de reprise)` : '';
     showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or${refundMsg} !${unequipMsg}`, 'success');
-    window.refreshOrDisplay?.(c);
-    window.renderCharSheet(c, window._currentCharTab || 'inventaire');
+    charSession.refresh?.(c);
+    _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -580,7 +599,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
       ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
       : '';
     showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
-    window.renderCharSheet(c, window._currentCharTab || 'inventaire');
+    _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -610,7 +629,7 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
     try {
       const all = await loadCollection('characters');
       otherChars = all.filter(x => x.id !== charId);
-      window._modalCharTargets = all;
+      _modalCharTargets = all;
     } catch(e) { console.error('[sendInv] load chars:', e); }
   }
   if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
@@ -677,7 +696,7 @@ export async function sendInvItem(fromCharId, indicesB64) {
   if (!targetId) { showNotif('Sélectionne un personnage cible.','error'); return; }
 
   const toChar = STATE.characters?.find(x => x.id === targetId)
-    || (window._modalCharTargets || []).find(x => x.id === targetId);
+    || (_modalCharTargets || []).find(x => x.id === targetId);
   if (!toChar) { showNotif('Personnage introuvable.','error'); return; }
 
   const allIndices = _decodeIndices(indicesB64);
@@ -722,7 +741,7 @@ export async function sendInvItem(fromCharId, indicesB64) {
     ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
     : '';
   showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !${sendMsg}`, 'success');
-  window.renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
+  _renderInventoryChar(fromChar, charSession.getCurrentCharTab() || 'inventaire');
 }
 
 // ══════════════════════════════════════════════
@@ -740,7 +759,7 @@ export async function openSendGoldModal(charId) {
     try {
       const all = await loadCollection('characters');
       targets = all.filter(x => x.id !== charId && x.nom);
-      window._modalCharTargets = all;
+      _modalCharTargets = all;
     } catch(e) { console.error('[sendGold] load chars:', e); }
   }
 
@@ -802,7 +821,7 @@ export async function sendGold(fromCharId) {
   if (!targetId) { showNotif('Sélectionne un destinataire.', 'error'); return; }
 
   const toChar = STATE.characters?.find(x => x.id === targetId)
-    || (window._modalCharTargets || []).find(x => x.id === targetId);
+    || (_modalCharTargets || []).find(x => x.id === targetId);
   if (!toChar) { showNotif('Personnage introuvable.', 'error'); return; }
 
   const montant = parseInt(document.getElementById('gold-amount')?.value) || 0;
@@ -839,7 +858,7 @@ export async function sendGold(fromCharId) {
 
   closeModal();
   showNotif(`💰 ${montant} or envoyé à ${toChar.nom || 'joueur'} !`, 'success');
-  window.renderCharSheet(fromChar, window._currentCharTab || 'inventaire');
+  _renderInventoryChar(fromChar, charSession.getCurrentCharTab() || 'inventaire');
 }
 
 // ══════════════════════════════════════════════
@@ -849,25 +868,25 @@ export async function addInvItem() {
   const c = STATE.activeChar; if (!c) return;
 
   const { loadCollection: _lc } = await import('../../data/firestore.js');
-  let shopItems = window._shopItemsCache;
-  let shopCats  = window._shopCatsCache;
+  let shopItems = _shopItemsCache;
+  let shopCats  = _shopCatsCache;
   try {
     const toLoad = [];
-    if (!shopItems) toLoad.push(_lc('shop').then(r => { shopItems = r; window._shopItemsCache = r; }));
-    if (!shopCats)  toLoad.push(_lc('shopCategories').then(r => { shopCats = r; window._shopCatsCache = r; }));
+    if (!shopItems) toLoad.push(_lc('shop').then(r => { shopItems = r; _shopItemsCache = r; }));
+    if (!shopCats)  toLoad.push(_lc('shopCategories').then(r => { shopCats = r; _shopCatsCache = r; }));
     if (toLoad.length) await Promise.all(toLoad);
   } catch(e) { /* silent */ }
   shopItems = (shopItems || []).filter(i => i.nom);
   shopCats  = [...(shopCats || [])].sort((a,b) => (a.ordre||0)-(b.ordre||0));
 
-  window._lootItems  = shopItems;
-  window._lootSelId  = null;
-  window._lootCurCat = null;
+  _lootItems  = shopItems;
+  _lootSelId  = null;
+  _lootCurCat = null;
 
   const RC = ['','#9ca3af','#4f8cff','#b47fff','#e8b84b'];
 
   const getRecents = () => lsJson.get('jdr_loot_recent', []);
-  window._lootSaveRecent = (id) => {
+  _lootSaveRecent = (id) => {
     const r = getRecents().filter(x => x !== id);
     r.unshift(id);
     lsJson.set('jdr_loot_recent', r.slice(0, 8));
@@ -899,7 +918,7 @@ export async function addInvItem() {
   const _lootItemCard = (item, rc_arr, catLabel) => {
     const r  = parseInt(item.rarete) || 0;
     const rc = rc_arr[r] || 'var(--border)';
-    const sel = window._lootSelId === item.id;
+    const sel = _lootSelId === item.id;
     const desc = item.description || item.effet || '';
     return `<button data-action="_lootSelect" data-id="${item.id}" id="loot-card-${item.id}"
       style="display:flex;flex-direction:column;gap:2px;text-align:left;padding:.5rem .65rem;
@@ -920,7 +939,7 @@ export async function addInvItem() {
     `<div style="font-size:.68rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;padding:.2rem .1rem .35rem">${title}</div>` +
     items.map(item => _lootItemCard(item, rc_arr, null)).join('');
 
-  window._lootRenderGrid = (catId, search) => {
+  _lootRenderGrid = (catId, search) => {
     const grid = document.getElementById('loot-grid');
     if (grid) grid.innerHTML = renderItems(catId, search || '');
   };
@@ -972,37 +991,37 @@ export async function addInvItem() {
   `);
   setTimeout(() => document.getElementById('loot-search')?.focus(), 60);
 
-  window._lootSetCat = (catId) => {
-    const next = window._lootCurCat === catId ? null : catId;
-    window._lootCurCat = next;
-    window._lootSelId  = null;
+  _lootSetCat = function(catId) {
+    const next = _lootCurCat === catId ? null : catId;
+    _lootCurCat = next;
+    _lootSelId  = null;
     if (hasRecents) _lootPillStyle('__recent__', next === '__recent__');
     shopCats.forEach(cat => _lootPillStyle(cat.id, next === cat.id));
     const searchEl = document.getElementById('loot-search');
     if (searchEl) searchEl.value = '';
     const panel = document.getElementById('loot-qty-panel');
     if (panel) panel.style.display = 'none';
-    window._lootRenderGrid(next, '');
-  };
+    _lootRenderGrid(next, '');
+  }
 
-  window._lootFilter = () => {
+  _lootFilter = function() {
     const q = document.getElementById('loot-search')?.value || '';
     if (q) {
       if (hasRecents) _lootPillStyle('__recent__', false);
       shopCats.forEach(cat => _lootPillStyle(cat.id, false));
     } else {
-      if (hasRecents) _lootPillStyle('__recent__', window._lootCurCat === '__recent__');
-      shopCats.forEach(cat => _lootPillStyle(cat.id, window._lootCurCat === cat.id));
+      if (hasRecents) _lootPillStyle('__recent__', _lootCurCat === '__recent__');
+      shopCats.forEach(cat => _lootPillStyle(cat.id, _lootCurCat === cat.id));
     }
-    window._lootRenderGrid(q ? null : window._lootCurCat, q);
-  };
+    _lootRenderGrid(q ? null : _lootCurCat, q);
+  }
 
-  window._lootSelect = (id) => {
-    if (window._lootSelId && window._lootSelId !== id) {
-      const old = document.getElementById(`loot-card-${window._lootSelId}`);
+  _lootSelect = function(id) {
+    if (_lootSelId && _lootSelId !== id) {
+      const old = document.getElementById(`loot-card-${_lootSelId}`);
       if (old) { old.style.background = 'var(--bg-elevated)'; old.style.borderColor = 'var(--border)'; }
     }
-    window._lootSelId = id;
+    _lootSelId = id;
     const item = shopItems.find(i => i.id === id);
     if (!item) return;
     const r  = parseInt(item.rarete) || 0;
@@ -1015,7 +1034,7 @@ export async function addInvItem() {
     if (nomEl) nomEl.textContent = item.nom;
     const qteEl = document.getElementById('loot-qte');
     if (qteEl) { qteEl.value = '1'; qteEl.focus(); }
-  };
+  }
 }
 
 export function _lootPillStyle(id, active) {
@@ -1029,9 +1048,9 @@ export function _lootPillStyle(id, active) {
 export async function saveInvItemFromShop() {
   try {
     const c = STATE.activeChar; if (!c) return;
-    const selId = window._lootSelId;
+    const selId = _lootSelId;
     if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
-    const item = (window._lootItems || []).find(i => i.id === selId);
+    const item = (_lootItems || []).find(i => i.id === selId);
     if (!item) { showNotif('Objet introuvable.', 'error'); return; }
     const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
@@ -1047,13 +1066,13 @@ export async function saveInvItemFromShop() {
     const stChar = (STATE.characters || []).find(x => x.id === c.id);
     if (stChar) stChar.inventaire = inv;
     await updateInCol('characters', c.id, { inventaire: inv });
-    if (window._lootSaveRecent) window._lootSaveRecent(item.id);
-    window._lootSelId = null;
+    if (_lootSaveRecent) _lootSaveRecent(item.id);
+    _lootSelId = null;
     showNotif(`${item.nom} ×${qte} ajouté !`, 'success');
-    window.renderCharSheet(c, 'inventaire');
+    _renderInventoryChar(c, 'inventaire');
     const panel = document.getElementById('loot-qty-panel');
     if (panel) panel.style.display = 'none';
-    window._lootRenderGrid?.(window._lootCurCat, document.getElementById('loot-search')?.value || '');
+    _lootRenderGrid?.(_lootCurCat, document.getElementById('loot-search')?.value || '');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -1094,18 +1113,20 @@ export async function saveInvItem(idx) {
     await updateInCol('characters',c.id,{inventaire:inv});
     closeModal();
     showNotif('Inventaire mis à jour !','success');
-    window.renderCharSheet(c,'inventaire');
+    _renderInventoryChar(c, 'inventaire');
   } catch (e) { notifySaveError(e); }
 }
 
 registerActions({
-  _charInvSearch:      (el)  => { window._charInvSearch = el.value; filterInvRows(el.value); },
-  _sellRefreshTotal:   (el)  => window._sellRefreshTotal?.(el, Number(el.dataset.prix), Number(el.dataset.max)),
-  _lootFilter:         ()    => window._lootFilter?.(),
+  _charInvSearch:      (el)  => { _charInvSearch = el.value; filterInvRows(el.value); },
+  _invCatToggle:       (btn) => { const d = btn.closest('details'); requestAnimationFrame(() => { if (d) _invCatOpen[btn.dataset.cat] = d.open; }); },
+  _sellRefreshTotal:   (el)  => _sellRefreshTotal(el, Number(el.dataset.prix), Number(el.dataset.max)),
+  _invmStep:          (btn) => _invmStep(btn.dataset.input, Number(btn.dataset.delta), Number(btn.dataset.max), btn.dataset.context),
+  _lootFilter:         ()    => _lootFilter(),
   sendGold:            (btn) => sendGold(btn.dataset.id),
   saveInvItemFromShop: ()    => saveInvItemFromShop(),
   saveInvItem:         (btn) => saveInvItem(Number(btn.dataset.idx)),
-  _lootSelect:         (btn) => window._lootSelect(btn.dataset.id),
-  _lootSetCat:         (btn) => window._lootSetCat(btn.dataset.cat),
+  _lootSelect:         (btn) => _lootSelect(btn.dataset.id),
+  _lootSetCat:         (btn) => _lootSetCat(btn.dataset.cat),
   _lootQte:            (btn) => { const i = document.getElementById('loot-qte'); if (i) i.value = Math.max(1, parseInt(i.value || 1) + Number(btn.dataset.delta)); },
 });

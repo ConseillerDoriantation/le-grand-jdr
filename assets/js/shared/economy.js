@@ -18,6 +18,7 @@
 //   ], { extraPayload: { inventaire: newInv } });
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../core/state.js';
+import { charSession } from './char-session.js';
 import { updateInCol } from '../data/firestore.js';
 import { calcOr } from './char-stats.js';
 
@@ -37,7 +38,7 @@ function _findChar(charId, override) {
  * @param {object} [opts]
  * @param {object} [opts.charObj] — pour éviter une recherche dans STATE
  * @param {object} [opts.extraPayload] — fusionné dans updateInCol
- * @param {boolean} [opts.refreshUI=true] — appelle window.refreshOrDisplay
+ * @param {boolean} [opts.refreshUI=true] — appelle charSession.refresh
  * @param {boolean} [opts.allowOverdraft=false] — autorise solde négatif
  * @returns {Promise<{ok:boolean, newBalance?:number, error?:string}>}
  */
@@ -81,7 +82,7 @@ async function _applyGold(charId, entries, opts = {}) {
     // Applique aussi le extra payload localement pour rester en phase
     if (opts.extraPayload) Object.assign(c, opts.extraPayload);
     if (opts.refreshUI !== false) {
-      try { window.refreshOrDisplay?.(c); } catch {}
+      try { charSession.refresh(c); } catch {}
     }
     return { ok: true, newBalance: calcOr(c) };
   } catch (e) {

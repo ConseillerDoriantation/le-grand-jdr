@@ -2512,36 +2512,6 @@
   object-fit: contain; vertical-align: middle; margin: 0 3px;
 }
 
-/* ── Modale de gestion des émotes ───────────────────────────────── */
-.vtt-emote-modal { display: flex; flex-direction: column; gap: .9rem; min-width: min(540px, 86vw); }
-.vtt-emote-head { display: flex; align-items: center; gap: .7rem; }
-.vtt-emote-head-ico {
-  width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px;
-  display: flex; align-items: center; justify-content: center; font-size: 1.4rem;
-  background: radial-gradient(circle at 35% 30%, rgba(232,184,75,.4), rgba(232,184,75,.06));
-  border: 1px solid rgba(232,184,75,.32);
-}
-.vtt-emote-head-txt h2 { margin: 0; font-family: 'Cinzel', serif; font-size: 1.05rem; font-weight: 700; color: var(--text); }
-.vtt-emote-head-txt small { display: block; margin-top: 2px; font-size: .72rem; color: var(--text-muted); }
-.vtt-emote-head-txt small b { color: var(--gold); }
-.vtt-emote-scroll { max-height: 320px; overflow-y: auto; }
-
-.vtt-emote-add {
-  background: rgba(0,0,0,.18); border: 1px solid var(--border);
-  border-radius: 12px; padding: .85rem; display: flex; flex-direction: column; gap: .6rem;
-}
-.vtt-emote-add-title { font-family: 'Cinzel', serif; font-size: .82rem; font-weight: 700; color: var(--gold); }
-.vtt-emote-add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
-@media (max-width: 560px) { .vtt-emote-add-grid { grid-template-columns: 1fr; } }
-.vtt-emote-add-field { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
-.vtt-emote-add-field label { font-size: .72rem; color: var(--text-soft, #c8d4e8); font-weight: 600; }
-.vtt-emote-add-field label span { color: var(--text-dim); font-weight: 400; font-style: italic; }
-.vtt-emote-add-field label code { font-family: monospace; color: var(--gold); font-style: normal; }
-.vtt-emote-add-field input { width: 100%; box-sizing: border-box; font-size: .82rem; }
-.vtt-emote-add-field input[type="file"] { padding: .35rem; font-size: .76rem; }
-.vtt-emote-add-foot { display: flex; align-items: center; gap: .7rem; }
-.vtt-emote-add-foot #emote-add-status { font-size: .76rem; color: var(--text-dim); flex: 1; min-height: 1rem; }
-
 /* ── Console admin — grille de cartes ───────────────────────────── */
 .vtt-emote-cards {
   display: grid;

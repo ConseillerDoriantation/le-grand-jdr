@@ -7,6 +7,7 @@
 //   type : 'cuisine' | 'potion' | 'arme' | 'armure' | 'bijou'
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { confirmDelete } from '../shared/crud.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -373,7 +374,7 @@ function _renderCard(r, accent) {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL DÉTAIL ITEM (arme / armure / bijou)
 // ══════════════════════════════════════════════════════════════════════════════
-window.openItemDetailModal = function(id) {
+export function openItemDetailModal(id) {
   const r = _visible().find(x => x.id === id);
   if (!r) return;
   const tab = TABS.find(t => t.id === r.type) || TABS[0];
@@ -432,7 +433,7 @@ window.openItemDetailModal = function(id) {
     ${desc ? `<div style="font-size:.82rem;color:var(--text-muted);line-height:1.7;margin-bottom:.75rem;padding:.6rem .75rem;background:rgba(255,255,255,.02);border-radius:8px;border-left:2px solid var(--border-strong)">${desc}</div>` : ''}
     ${effet ? `<div class="rec-effet">✨ ${effet}</div>` : ''}
   `);
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL ADMIN — Créer / Modifier une recette
@@ -521,16 +522,16 @@ function _ingrRow(ig = {}, i) {
   </div>`;
 }
 
-window._recAddIngr = () => {
+function addIngredientRow() {
   const list = document.getElementById('rec-ingr-list');
   if (!list) return;
   const i = list.querySelectorAll('.rec-ingr-dyn').length;
   const div = document.createElement('div');
   div.innerHTML = _ingrRow({}, i);
   list.appendChild(div.firstElementChild);
-};
+}
 
-window._recRemIngr = (i) => { document.getElementById(`rec-ig-${i}`)?.remove(); };
+function removeIngredientRow(i) { document.getElementById(`rec-ig-${i}`)?.remove(); }
 
 function _readIngrs() {
   return [...document.querySelectorAll('#rec-ingr-list .rec-ingr-dyn')].map((_, i) => ({
@@ -689,8 +690,7 @@ async function deleteShopRecipe(id) {
 async function deleteRecipe(id) {
   try {
     const r = _all.find(x => x.id === id);
-    if (!await confirmModal(`Supprimer "${r?.nom||'cette recette'}" ?`)) return;
-    await deleteFromCol('recipes', id);
+    if (!await confirmDelete('recipes', id, `Supprimer "${r?.nom||'cette recette'}" ?`)) return;
     _all = _all.filter(x => x.id !== id);
     showNotif('Recette supprimée.', 'success');
     _render();
@@ -812,41 +812,27 @@ async function sendRecipe(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
-window.recSetTab = (t) => { _tab = t; _filterTxt = ''; _render(); };
-window.recSearch = (v) => { _filterTxt = v; _renderGrid(); };
+function setRecipeTab(t) { _tab = t; _filterTxt = ""; _render(); }
+function searchRecipes(v) { _filterTxt = v; _renderGrid(); }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // OVERRIDE + EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
 PAGES.recettes = renderRecipes;
 
-Object.assign(window, {
-  renderRecipes,
-  openRecipeModal,
-  saveRecipe,
-  deleteRecipe,
-  openShopRecipeModal,
-  saveShopRecipe,
-  deleteShopRecipe,
-  openAccesModal,
-  saveAcces,
-  openSendRecipeModal,
-  sendRecipe,
-});
-
 registerActions({
-  recSetTab: (btn) => window.recSetTab?.(btn.dataset.id),
-  recSearch: (el) => window.recSearch?.(el.value),
+  recSetTab: (btn) => setRecipeTab(btn.dataset.id),
+  recSearch: (el) => searchRecipes(el.value),
   _recOpenModal: (btn) => openRecipeModal(btn.dataset.type),
   _recEdit: (btn) => openRecipeModal(btn.dataset.type, btn.dataset.id),
   _recEditShop: (btn) => openShopRecipeModal(btn.dataset.id),
   _recDelete: (btn) => deleteRecipe(btn.dataset.id),
   _recDeleteShop: (btn) => deleteShopRecipe(btn.dataset.id),
   _recSave: (btn) => saveRecipe(btn.dataset.id, btn.dataset.type),
-  _recAddIngr: () => window._recAddIngr?.(),
-  _recRemIngr: (btn) => window._recRemIngr?.(Number(btn.dataset.idx)),
+  _recAddIngr: () => addIngredientRow(),
+  _recRemIngr: (btn) => removeIngredientRow(Number(btn.dataset.idx)),
   saveShopRecipe: (btn) => saveShopRecipe(btn.dataset.id),
-  openItemDetailModal: (btn) => window.openItemDetailModal?.(btn.dataset.id),
+  openItemDetailModal: (btn) => openItemDetailModal(btn.dataset.id),
   openAccesModal: (btn) => openAccesModal(btn.dataset.id),
   saveAcces: (btn) => saveAcces(btn.dataset.id),
   openSendRecipeModal: (btn) => openSendRecipeModal(btn.dataset.id),

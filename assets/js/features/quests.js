@@ -8,7 +8,7 @@ import { registerActions } from '../core/actions.js';
 import { watch } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc, appSplashHtml } from '../shared/html.js';
+import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { listPlaces } from './map/data/places.repo.js';
@@ -100,6 +100,9 @@ function _questCard(q, myChar) {
 // ── Cache local pour re-renders subscription ──
 let _chars = null;
 let _places = [];   // [{ id, name }] — alimente le datalist Lieu
+let _questItems = [];
+let _questMyChar = null;
+let _questMyChars = [];
 
 // ── Rendu depuis les données (sans rechargement Firestore) ────────────────
 function _applyQuestsRender(quests) {
@@ -110,9 +113,9 @@ function _applyQuestsRender(quests) {
   const myChars = STATE.isAdmin ? [] : (_chars || []).filter(c => c.uid === uid);
   const myChar  = myChars[0] || null;
 
-  window._questItems   = quests;
-  window._questMyChar  = myChar;
-  window._questMyChars = myChars;
+  _questItems = quests;
+  _questMyChar = myChar;
+  _questMyChars = myChars;
 
   const sorted = [...quests].sort((a, b) => {
     const ord = { active: 0, terminee: 1, echouee: 2 };
@@ -125,10 +128,7 @@ function _applyQuestsRender(quests) {
   const activeCount = quests.filter(q => q.statut === 'active').length;
 
   content.innerHTML = `
-  <div class="page-header">
-    <div class="page-title"><span class="page-title-accent">📋 Quêtes</span></div>
-    <div class="page-subtitle">${activeCount} quête${activeCount !== 1 ? 's' : ''} active${activeCount !== 1 ? 's' : ''}</div>
-  </div>
+  ${pageHeaderHtml('📋 Quêtes', `${activeCount} quête${activeCount !== 1 ? 's' : ''} active${activeCount !== 1 ? 's' : ''}`)}
 
   ${STATE.isAdmin ? `
   <div style="margin-bottom:1.2rem">
@@ -164,13 +164,13 @@ async function renderQuestsPage() {
   watch('quests-chars', 'characters', data => {
     if (STATE.currentPage !== 'quests') return;
     _chars = data || [];
-    _applyQuestsRender(window._questItems || []);
+    _applyQuestsRender(_questItems || []);
   });
 }
 
 // ── Toggle participation ──────────────────────
-window._questToggleJoin = async function (id) {
-  const q   = (window._questItems || []).find(x => x.id === id);
+async function toggleQuestJoin(id) {
+  const q   = (_questItems || []).find(x => x.id === id);
   if (!q) return;
 
   const uid   = STATE.user?.uid;
@@ -183,7 +183,7 @@ window._questToggleJoin = async function (id) {
     await _questSaveParts(id, parts, true);
   } else {
     // Rejoindre — sélectionner le personnage si plusieurs
-    const myChars = window._questMyChars || [];
+    const myChars = _questMyChars || [];
     if (myChars.length > 1) {
       _questOpenCharPicker(id, myChars);
     } else {
@@ -191,7 +191,7 @@ window._questToggleJoin = async function (id) {
       await _questJoinWithChar(id, myChars[0]);
     }
   }
-};
+}
 
 function _questOpenCharPicker(questId, chars) {
   const rows = chars.map(c => {
@@ -221,15 +221,15 @@ function _questOpenCharPicker(questId, chars) {
     </div>`);
 }
 
-window._questPickChar = async function (questId, charId) {
+async function pickQuestChar(questId, charId) {
   closeModal();
-  const char = (window._questMyChars || []).find(c => c.id === charId);
+  const char = (_questMyChars || []).find(c => c.id === charId);
   if (!char) return;
   await _questJoinWithChar(questId, char);
-};
+}
 
 async function _questJoinWithChar(id, char) {
-  const q   = (window._questItems || []).find(x => x.id === id);
+  const q   = (_questItems || []).find(x => x.id === id);
   if (!q) return;
   const uid   = STATE.user?.uid;
   const parts = Array.isArray(q.participants) ? [...q.participants] : [];
@@ -255,11 +255,11 @@ async function _questSaveParts(id, parts, leaving) {
 }
 
 // ── Modales admin ─────────────────────────────
-window._questNew  = () => _openQuestModal(null);
-window._questEdit = id => _openQuestModal(id);
+function newQuest() { _openQuestModal(null); }
+export function editQuest(id) { _openQuestModal(id); }
 
 function _openQuestModal(id) {
-  const ex = id ? (window._questItems || []).find(q => q.id === id) : null;
+  const ex = id ? (_questItems || []).find(q => q.id === id) : null;
 
   openModal(
     id ? `✏️ Modifier — ${_esc(ex?.titre || 'Quête')}` : '📋 Nouvelle Quête',
@@ -314,7 +314,7 @@ function _openQuestModal(id) {
   );
 }
 
-window._questSave = async function (id) {
+async function saveQuest(id) {
   const titre      = document.getElementById('q-titre')?.value.trim();
   const desc       = document.getElementById('q-desc')?.value.trim();
   const recompense = document.getElementById('q-recompense')?.value.trim();
@@ -349,10 +349,10 @@ window._questSave = async function (id) {
   } catch {
     showNotif('Erreur lors de l\'enregistrement.', 'error');
   }
-};
+}
 
-window._questDelete = async function (id) {
-  const q = (window._questItems || []).find(x => x.id === id);
+async function deleteQuest(id) {
+  const q = (_questItems || []).find(x => x.id === id);
   if (!confirm(`Supprimer la quête "${q?.titre || id}" ?`)) return;
   try {
     await deleteFromCol('quests', id);
@@ -361,17 +361,17 @@ window._questDelete = async function (id) {
   } catch {
     showNotif('Erreur lors de la suppression.', 'error');
   }
-};
+}
 
 // ── Enregistrement dans PAGES ─────────────────
 PAGES.quests = renderQuestsPage;
 
 registerActions({
-  _questToggleJoin: (btn) => window._questToggleJoin?.(btn.dataset.id),
-  _questEdit:       (btn) => window._questEdit?.(btn.dataset.id),
-  _questDelete:     (btn) => window._questDelete?.(btn.dataset.id),
-  _questNew:        ()    => window._questNew?.(),
-  _questPickChar:   (btn) => window._questPickChar?.(btn.dataset.questId, btn.dataset.id),
-  _questSave:       (btn) => window._questSave?.(btn.dataset.id || null),
+  _questToggleJoin: (btn) => toggleQuestJoin(btn.dataset.id),
+  _questEdit:       (btn) => editQuest(btn.dataset.id),
+  _questDelete:     (btn) => deleteQuest(btn.dataset.id),
+  _questNew:        ()    => newQuest(),
+  _questPickChar:   (btn) => pickQuestChar(btn.dataset.questId, btn.dataset.id),
+  _questSave:       (btn) => saveQuest(btn.dataset.id || null),
   _questCloseModal: ()    => closeModal(),
 });

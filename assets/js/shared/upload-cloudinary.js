@@ -224,5 +224,3 @@ function _esc(s) {
 }
 
 // Exposition window pour appels depuis attributs inline / délégation
-window._cloudinaryConfigure  = openCloudinaryConfigModal;
-window._cloudinaryHasConfig  = hasCloudinaryConfig;

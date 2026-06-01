@@ -1,6 +1,6 @@
 // assets/js/app.js
 
-import './core/init.js';
+import { pickAdventure, openCreateAdventureModal } from './core/init.js';
 
 import {
   initAuth,
@@ -23,6 +23,7 @@ import {
 } from './shared/modal.js';
 
 import { showNotif }              from './shared/notifications.js';
+import { openAdventureSwitcher }  from './core/layout.js';
 import { initTheme, toggleTheme } from './shared/theme.js';
 
 // ── Modules chargés au boot (nécessaires immédiatement) ──────────────────────
@@ -37,13 +38,14 @@ import { openCloudinaryConfigModal } from './shared/upload-cloudinary.js';
 import './features/command-palette.js';
 
 // Quick-view perso accessible depuis le dashboard, VTT, etc. — lazy load au 1er clic
-window._openQuickView = async (id) => {
-  if (!window._quickViewChar) {
-    try { await import('./features/characters/quick-view.js'); }
-    catch (e) { console.error('[quick-view] load failed:', e); return; }
+async function openQuickView(id) {
+  try {
+    const { quickViewChar } = await import('./features/characters/quick-view.js');
+    quickViewChar(id);
+  } catch (e) {
+    console.error('[quick-view] load failed:', e);
   }
-  window._quickViewChar?.(id);
-};
+}
 
 // ── Exposition sur window EN PREMIER ─────────────────────────────────────────
 Object.assign(window, {
@@ -62,11 +64,12 @@ Object.assign(window, {
 // Actions globales déléguées (boutons statiques d'index.html / layout)
 registerActions({
   'toggle-theme': () => toggleTheme(),
-  openAdventureSwitcher: () => window.openAdventureSwitcher?.(),
-  openCreateAdventureModal: () => window.openCreateAdventureModal?.(),
-  pickAdventure: (btn) => window.pickAdventure?.(btn.dataset.id),
-  _advSwitchPick: (btn) => { window.closeModal?.(); window.pickAdventure?.(btn.dataset.id); },
-  _layoutCloseModal: () => window.closeModal?.(),
+  openAdventureSwitcher: () => openAdventureSwitcher(),
+  openCreateAdventureModal: () => openCreateAdventureModal(),
+  pickAdventure: (btn) => pickAdventure(btn.dataset.id),
+  _advSwitchPick: (btn) => { closeModal(); pickAdventure(btn.dataset.id); },
+  _layoutCloseModal: () => closeModal(),
+  _openQuickView: (btn) => openQuickView(btn.dataset.id),
   cloudinaryConfig: () => openCloudinaryConfigModal(),
 });
 

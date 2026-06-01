@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../shared/char-session.js';
 import { loadCollectionWhere, updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
 
@@ -97,7 +98,7 @@ export function inlineEditNum(charId, field, el, min=0, max=99999) {
     if (field === 'niveau') await _syncPlayerNiveau(charId, val);
     el.textContent = field==='niveau' ? `Niv. ${val}` : field==='or' ? `💰 ${val} or` : val;
     input.replaceWith(el);
-    if (['niveau','pvBase','pmBase','exp'].includes(field)) window.renderCharSheet(c, window._currentCharTab);
+    if (['niveau','pvBase','pmBase','exp'].includes(field)) charSession.renderSheet(c, charSession.getCurrentCharTab());
     else showNotif('Mis à jour !','success');
   };
   input.addEventListener('blur', save);
@@ -115,7 +116,7 @@ export function inlineEditStatFromCard(event, charId, statKey, cardEl) {
   if (event?.target?.closest('input, button, textarea, select, a')) return;
   // Joueur : redirige vers l'onglet Caracs (allocation explicite)
   if (!STATE.isAdmin) {
-    window.showCharTab?.('carac');
+    charSession.renderSheet?.('carac');
     showNotif('Allouez vos points dans l\'onglet Caracs.', 'info');
     return;
   }
@@ -151,7 +152,7 @@ export function inlineEditStat(charId, statKey, el) {
       statsBase: c.statsBase,
     });
     input.replaceWith(el);
-    window.renderCharSheet(c, window._currentCharTab);
+    charSession.renderSheet(c, charSession.getCurrentCharTab());
     showNotif('Base mise à jour !','success');
   };
   input.addEventListener('blur', save);

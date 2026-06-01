@@ -1,4 +1,5 @@
 import { STATE } from '../../core/state.js';
+import { charSession } from '../../shared/char-session.js';
 import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } from '../../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
@@ -12,6 +13,7 @@ import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from
 // TAB : CARACTÉRISTIQUES
 // ══════════════════════════════════════════════
 const STATS_KEYS = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
+let _openNote = null;
 
 // Calcule l'état des points de niveau pour un personnage
 function _computeLevelPoints(c) {
@@ -279,7 +281,7 @@ export function renderCharNotes(c, canEdit) {
     html += `<div class="cs-empty">Aucune note. Crée ta première note avec le bouton ci-dessus.</div>`;
   } else {
     notes.forEach((note, i) => {
-      const isOpen = window._openNote === i;
+      const isOpen = _openNote === i;
       html += `<div class="cs-note-card">
         <div class="cs-note-header" data-action="toggleNote" data-idx="${i}">
           <div class="cs-note-meta">
@@ -310,8 +312,8 @@ export function renderCharNotes(c, canEdit) {
 // ── Fonctions de gestion des notes ───────────────────────────────────────────
 
 export function toggleNote(idx) {
-  window._openNote = window._openNote === idx ? null : idx;
-  window._renderTab('notes', window._currentChar, window._canEditChar);
+  _openNote = _openNote === idx ? null : idx;
+  charSession.renderTab('notes', charSession.getCurrentChar(), charSession.getCanEditChar());
 }
 
 export function addNote() {
@@ -320,9 +322,9 @@ export function addNote() {
   const now = new Date().toLocaleDateString('fr-FR');
   notes.push({ titre: 'Nouvelle note', contenu: '', date: now });
   c.notesList = notes;
-  window._openNote = notes.length - 1;
+  _openNote = notes.length - 1;
   updateInCol('characters', c.id, {notesList: notes}).then(()=>{
-    window._renderTab('notes', c, window._canEditChar);
+    charSession.renderTab('notes', c, charSession.getCanEditChar());
   });
 }
 
@@ -336,7 +338,7 @@ export function editNoteTitle(idx) {
   note.titre = val.trim()||cur;
   c.notesList[idx] = note;
   updateInCol('characters', c.id, {notesList: c.notesList}).then(()=>{
-    window._renderTab('notes', c, window._canEditChar);
+    charSession.renderTab('notes', c, charSession.getCanEditChar());
     showNotif('Titre mis à jour !','success');
   });
 }
@@ -357,9 +359,9 @@ export async function deleteNote(idx) {
     const c = STATE.activeChar; if(!c) return;
     if (!await confirmModal('Supprimer cette note ?')) return;
     c.notesList.splice(idx, 1);
-    if (window._openNote >= c.notesList.length) window._openNote = null;
+    if (_openNote >= c.notesList.length) _openNote = null;
     await updateInCol('characters', c.id, {notesList: c.notesList});
-    window._renderTab('notes', c, window._canEditChar);
+    charSession.renderTab('notes', c, charSession.getCanEditChar());
     showNotif('Note supprimée.','success');
   } catch (e) { notifySaveError(e); }
 }
@@ -502,7 +504,7 @@ export function addCompteRow(type) {
   compte[type].push({ date: new Date().toLocaleDateString('fr-FR'), libelle: '', montant: 0 });
   c.compte = compte;
   updateInCol('characters', c.id, {compte}).then(()=>{
-    window._renderTab('compte', c, window._canEditChar);
+    charSession.renderTab('compte', c, charSession.getCanEditChar());
     refreshOrDisplay(c);
     // Focus auto sur le montant de la nouvelle ligne (dernier input de sa colonne)
     const tableIdx = type === 'recettes' ? 0 : 1;
@@ -518,7 +520,7 @@ export async function deleteCompteRow(type, idx) {
     const c = STATE.activeChar; if(!c) return;
     (c.compte||{})[type]?.splice(idx,1);
     await updateInCol('characters', c.id, {compte: c.compte});
-    window._renderTab('compte', c, window._canEditChar);
+    charSession.renderTab('compte', c, charSession.getCanEditChar());
     refreshOrDisplay(c);
   } catch (e) { notifySaveError(e); }
 }
@@ -698,7 +700,7 @@ export async function saveMaitrise(idx) {
     await updateInCol('characters', c.id, { maitrises });
     closeModal();
     showNotif(idx < 0 ? `Maîtrise "${typeArme}" ajoutée !` : 'Maîtrise mise à jour.', 'success');
-    window.renderCharSheet(c, 'maitrises');
+    charSession.renderSheet(c, 'maitrises');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -710,7 +712,7 @@ export async function deleteMaitrise(idx) {
     c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
     await updateInCol('characters', c.id, { maitrises: c.maitrises });
     showNotif('Maîtrise supprimée.', 'success');
-    window.renderCharSheet(c, 'maitrises');
+    charSession.renderSheet(c, 'maitrises');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -725,7 +727,7 @@ export function previewXpBar(input, palier) {
 }
 
 // ── Allocation d'un point de niveau sur une caractéristique ──────────────────
-window._allocStatPoint = async (charId, key, delta) => {
+export async function allocStatPoint(charId, key, delta) {
   try {
     const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
     if (!c) return;
@@ -760,14 +762,12 @@ window._allocStatPoint = async (charId, key, delta) => {
       statsLevelUps: c.statsLevelUps,
     });
 
-    window.renderCharSheet(c, window._currentCharTab);
+    charSession.renderSheet(c, charSession.getCurrentCharTab());
   } catch (e) { notifySaveError(e); }
-};
+}
 
-// Expose le helper pour la sidebar
-window._csLevelPoints = _computeLevelPoints;
 
-window._csAddXp = async (charId) => {
+export async function addXpFromInput(charId) {
   const input = document.getElementById(`cs-xp-delta-${charId}`);
   if (!input) return;
   const delta = parseInt(input.value);
@@ -780,9 +780,9 @@ window._csAddXp = async (charId) => {
   input.value = '';
   const lbl = document.getElementById(`cs-xp-val-${charId}`);
   if (lbl) lbl.textContent = newXp;
-};
+}
 
-window._toggleCompteHist = (type, count) => {
+export function toggleCompteHist(type, count) {
   const rows = document.querySelectorAll(`.cs-hist-old-${type}`);
   const btn  = document.getElementById(`cs-hist-btn-${type}`);
   if (!rows.length || !btn) return;
@@ -791,7 +791,7 @@ window._toggleCompteHist = (type, count) => {
   btn.textContent = isOpen
     ? `↑ Voir les ${count} entrées précédentes`
     : `↓ Masquer l'historique`;
-};
+}
 
 export async function saveXpDirect(charId, input) {
   try {
@@ -821,7 +821,7 @@ export async function addXpDelta(charId) {
     await updateInCol('characters', charId, {exp: newXp});
     showNotif(`+${delta} XP !`, 'success');
     // Rafraîchit la fiche pour que la barre/% et le total reflètent le nouvel XP.
-    window.renderCharSheet?.(c, window._currentCharTab);
+    charSession.renderSheet?.(c, charSession.getCurrentCharTab());
   } catch (e) { notifySaveError(e); }
 }
 
@@ -829,10 +829,9 @@ export async function addXpDelta(charId) {
 // TAB : PRÉSENTATION PUBLIQUE (players page)
 // ══════════════════════════════════════════════
 const _profilCache = {}; // charId → doc | null
-// Expose le cache pour permettre au profil V3 (dans characters.js) de lire
+// Exporte le cache pour permettre au profil V3 (dans characters.js) de lire
 // la même source que renderCharProfil. Le chargement asynchrone reste géré
 // par renderCharProfil ci-dessous.
-if (typeof window !== 'undefined') window._profilCache = _profilCache;
 export { _profilCache as getProfilCacheRef };
 
 const TAG_MAX = 6;
@@ -921,8 +920,8 @@ async function _loadAndRenderProfil(c, canEdit) {
     const docs = await loadCollectionWhere('players', 'charId', '==', c.id);
     _profilCache[c.id] = docs[0] || null;
   } catch { _profilCache[c.id] = null; }
-  if (window._currentCharTab === 'profil' && window._currentChar?.id === c.id)
-    window._renderTab('profil', c, canEdit);
+  if (charSession.getCurrentCharTab() === 'profil' && charSession.getCurrentChar()?.id === c.id)
+    charSession.renderTab('profil', c, canEdit);
 }
 
 function _buildProfilHtml(c, canEdit, pres) {
@@ -1011,12 +1010,8 @@ function _buildProfilHtml(c, canEdit, pres) {
 export async function saveCharProfil(charId) {
   try {
     const content = getRichTextHtml('profil-content');
-    // Les traits de caractère vivent sur le doc characters (c.tags), édités via
-    // l'éditeur V3. Ici on reflète simplement la valeur courante dans la
-    // présentation — surtout PAS lire une UI absente (qui écrivait tags:[] et
-    // écrasait les traits enregistrés).
-    const cForTags = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-    const tags = Array.isArray(cForTags?.tags) ? cForTags.tags : (_profilCache[charId]?.tags || []);
+    const tags = [...(document.getElementById('profil-tags')?.querySelectorAll('.pp-tag-chip') || [])]
+      .map(el => el.dataset.tag).filter(Boolean);
     const data = {
       charId,
       uid:           STATE.user?.uid || '',
@@ -1081,7 +1076,7 @@ export function openProfilImageUpload(charId) {
         _profilCache[charId] = { id: newId, ...data };
       }
       const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-      if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
+      if (c && charSession.getCurrentCharTab() === 'profil') charSession.renderTab('profil', c, true);
       showNotif('Illustration mise à jour !', 'success');
     } catch (e) {
       console.error('[profilImage]', e);
@@ -1097,5 +1092,5 @@ export async function removeProfilImage(charId) {
   await updateInCol('players', pres.id, { imageUrl: '' });
   _profilCache[charId] = { ...pres, imageUrl: '' };
   const c = STATE.characters.find(x=>x.id===charId) || STATE.activeChar;
-  if (c && window._currentCharTab === 'profil') window._renderTab('profil', c, true);
+  if (c && charSession.getCurrentCharTab() === 'profil') charSession.renderTab('profil', c, true);
 }

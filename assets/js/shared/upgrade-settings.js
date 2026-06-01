@@ -7,6 +7,7 @@
 // ══════════════════════════════════════════════
 
 import { getDocData, saveDoc } from '../data/firestore.js';
+import { closeModal } from './modal.js';
 import { openModal, closeModalDirect, confirmModal } from './modal.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from './notifications.js';
@@ -48,7 +49,7 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   // Drapeau optionnel : rembourser X% du coût total des upgrades à la revente
   // ex : 0.2 = 20% remboursés. 0 = perte totale.
   refundUpgradeRatio: 0,
-};
+}
 
 // ── Fusion défensive : préserve les défauts pour tout champ manquant ─────
 function _mergeDefaults(stored = {}) {
@@ -275,7 +276,7 @@ function _renderUpgradeSettingsModal() {
 }
 
 // ── Modifications en mémoire (sauvegarde déclenchée à la fermeture) ──
-window._upgSetField = (path, value) => {
+function _upgSetField(path, value) {
   const parts = path.split('.');
   const s = getUpgradeSettings();
   let cur = s;
@@ -285,9 +286,9 @@ window._upgSetField = (path, value) => {
   }
   cur[parts[parts.length - 1]] = value;
   _settings = s;
-};
+}
 
-window._upgSaveAndClose = async () => {
+async function _upgSaveAndClose() {
   try {
     await saveUpgradeSettings(getUpgradeSettings());
     showNotif('Paramètres enregistrés.', 'success');
@@ -296,23 +297,22 @@ window._upgSaveAndClose = async () => {
     console.error(e);
     showNotif('Erreur lors de l\'enregistrement.', 'error');
   }
-};
+}
 
-window._upgResetDefaults = async () => {
+async function _upgResetDefaults() {
   if (!await confirmModal('Restaurer les valeurs par défaut ? Vos tarifs actuels seront écrasés.', {
     title: 'Confirmation',
   })) return;
   _settings = JSON.parse(JSON.stringify(DEFAULT_UPGRADE_SETTINGS));
   _renderUpgradeSettingsModal();
-};
+}
 
-window.openUpgradeSettingsAdmin = openUpgradeSettingsAdmin;
 
 registerActions({
-  _upgClose: () => window.closeModal?.(),
-  _upgReset: () => window._upgResetDefaults?.(),
-  _upgSave: () => window._upgSaveAndClose?.(),
-  _upgField: (el) => window._upgSetField?.(el.dataset.field, +el.value),
-  _upgCheck: (el) => window._upgSetField?.(el.dataset.field, el.checked),
-  _upgRatio: (el) => window._upgSetField?.('refundUpgradeRatio', (+el.value) / 100),
+  _upgClose: () => closeModal(),
+  _upgReset: () => _upgResetDefaults(),
+  _upgSave: () => _upgSaveAndClose(),
+  _upgField: (el) => _upgSetField(el.dataset.field, +el.value),
+  _upgCheck: (el) => _upgSetField(el.dataset.field, el.checked),
+  _upgRatio: (el) => _upgSetField('refundUpgradeRatio', (+el.value) / 100),
 });

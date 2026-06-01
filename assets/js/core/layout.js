@@ -3,6 +3,7 @@
 // ══════════════════════════════════════════════
 
 import { STATE } from './state.js';
+import { navigate } from './navigation.js';
 import { appSplashHtml } from '../shared/html.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
@@ -12,7 +13,7 @@ function _hideBootSplash() {
 }
 
 // ── Switcher d'aventure (disponible dès le chargement) ────────────────────────
-window.openAdventureSwitcher = function () {
+export function openAdventureSwitcher() {
   const adventures = STATE.adventures;
   if (!adventures?.length || adventures.length <= 1) return;
 
@@ -34,7 +35,7 @@ window.openAdventureSwitcher = function () {
       </div>
     `);
   }
-};
+}
 
 export function showAppLoading(label = 'Chargement…') {
   const content = document.getElementById('main-content');
@@ -138,7 +139,7 @@ function _updateAdventureBadge() {
     if (STATE.adventure) {
       badge.textContent = `${STATE.adventure.emoji || '⚔️'} ${STATE.adventure.nom}`;
       badge.style.display = 'inline';
-      badge.onclick = () => window.openAdventureSwitcher?.();
+      badge.onclick = () => openAdventureSwitcher();
     } else {
       badge.style.display = 'none';
     }
@@ -172,7 +173,7 @@ function _updateSidebarProfile() {
     avatarEl.textContent = pseudo[0]?.toUpperCase() || '?';
     // Rendre l'avatar cliquable → page compte
     avatarEl.style.cursor = 'pointer';
-    avatarEl.onclick = () => window.navigate?.('account');
+    avatarEl.onclick = () => navigate('account');
   }
   if (pseudoEl) pseudoEl.textContent = pseudo;
   if (roleEl) {

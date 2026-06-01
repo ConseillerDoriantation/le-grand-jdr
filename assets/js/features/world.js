@@ -288,7 +288,7 @@ function _renderEmpty() {
 }
 
 // ── Sélection section ─────────────────────────────────────────────────────────
-window.selectWorldSection = (id) => {
+function selectWorldSection(id) {
   _activeId = id;
   // Mettre à jour la nav
   document.querySelectorAll('[data-nav-id]').forEach(el => {
@@ -302,7 +302,7 @@ window.selectWorldSection = (id) => {
   const section = _sections.find(s => s.id === id);
   const main = document.getElementById('world-main-content');
   if (main && section) main.innerHTML = _renderSection(section);
-};
+}
 
 // ── Drag & drop des sections (SortableJS, cross-catégorie) ────────────────────
 // Une instance Sortable par liste de catégorie, toutes dans le même `group` →
@@ -349,7 +349,7 @@ async function _onSectionsReordered() {
 }
 
 // ── Modal création / édition section ─────────────────────────────────────────
-window.openWorldSectionModal = (id = null, presetCatId = null) => {
+function openWorldSectionModal(id = null, presetCatId = null) {
   const s = id ? _sections.find(sec => sec.id === id) : null;
   if (!_categories.length) { showNotif('Crée d\'abord une catégorie.', 'error'); return; }
   const selCatId = s?.categoryId || presetCatId || _categories[0]?.id;
@@ -469,18 +469,18 @@ window.openWorldSectionModal = (id = null, presetCatId = null) => {
       hero.style.backgroundImage = b64 ? `url("${String(b64).replace(/"/g,'%22')}")` : '';
     },
   });
-};
+}
 
 // Synchronise l'eyebrow du hero avec la catégorie choisie dans le select
-window._worldSyncEyebrow = () => {
+function _worldSyncEyebrow() {
   const sel = document.getElementById('wi-categorie');
   const eye = document.getElementById('wi-cat-eyebrow');
   if (!sel || !eye) return;
   const c = _categories.find(cat => cat.id === sel.value);
   eye.textContent = `${c?.icone || '📁'} ${c?.nom || 'Catégorie'}`;
-};
+}
 
-window._selectWorldIcon = (ic) => {
+function _selectWorldIcon(ic) {
   ICONES.forEach(i => {
     const btn = document.getElementById(`wi-icon-${i}`);
     if (!btn) return;
@@ -489,9 +489,9 @@ window._selectWorldIcon = (ic) => {
   });
   const inp = document.getElementById('wi-icon');
   if (inp) inp.value = ic;
-};
+}
 
-window.saveWorldSection = async () => {
+async function saveWorldSection() {
   const titre = document.getElementById('wi-titre')?.value?.trim();
   if (!titre) { showNotif('Un titre est requis.', 'error'); return; }
 
@@ -525,19 +525,19 @@ window.saveWorldSection = async () => {
   closeModal();
   showNotif(isNew ? 'Section créée !' : 'Section mise à jour !', 'success');
   renderWorld();
-};
+}
 
-window.deleteWorldSection = async (id) => {
+async function deleteWorldSection(id) {
   if (!await confirmModal('Supprimer cette section définitivement ?')) return;
   _sections = _sections.filter(s => s.id !== id);
   if (_activeId === id) _activeId = _sections[0]?.id || null;
   await _save();
   showNotif('Section supprimée.', 'success');
   renderWorld();
-};
+}
 
 // ── Modal création / édition CATÉGORIE ────────────────────────────────────────
-window.openWorldCategoryModal = (id = null) => {
+function openWorldCategoryModal(id = null) {
   const c = id ? _categories.find(cat => cat.id === id) : null;
 
   const iconGrid = ICONES.map(ic => `
@@ -578,9 +578,9 @@ window.openWorldCategoryModal = (id = null) => {
       <button class="btn btn-outline btn-sm" data-action="_worldClose">Annuler</button>
     </div>
   `);
-};
+}
 
-window._selectWorldCatIcon = (ic) => {
+function _selectWorldCatIcon(ic) {
   ICONES.forEach(i => {
     const btn = document.getElementById(`wc-icon-${i}`);
     if (!btn) return;
@@ -589,9 +589,9 @@ window._selectWorldCatIcon = (ic) => {
   });
   const inp = document.getElementById('wc-icon');
   if (inp) inp.value = ic;
-};
+}
 
-window.saveWorldCategory = async () => {
+async function saveWorldCategory() {
   const nom = document.getElementById('wc-nom')?.value?.trim();
   if (!nom) { showNotif('Un nom est requis.', 'error'); return; }
   const id     = document.getElementById('wc-id')?.value || `wc_${Date.now()}`;
@@ -610,9 +610,9 @@ window.saveWorldCategory = async () => {
   closeModal();
   showNotif(isNew ? 'Catégorie créée !' : 'Catégorie mise à jour !', 'success');
   renderWorld();
-};
+}
 
-window.deleteWorldCategory = async (id) => {
+async function deleteWorldCategory(id) {
   const cat = _categories.find(c => c.id === id);
   if (!cat) return;
   const orphans = _sections.filter(s => s.categoryId === id);
@@ -633,7 +633,7 @@ window.deleteWorldCategory = async (id) => {
   await _save();
   showNotif('Catégorie supprimée.', 'success');
   renderWorld();
-};
+}
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
 // _esc → importé depuis shared/html.js (_escapeHtml supprimé)
@@ -641,27 +641,17 @@ window.deleteWorldCategory = async (id) => {
 // ── Override PAGES.world ──────────────────────────────────────────────────────
 PAGES.world = renderWorld;
 
-Object.assign(window, {
-  renderWorld,
-  openWorldSectionModal,
-  saveWorldSection,
-  deleteWorldSection,
-  selectWorldSection,
-  openWorldCategoryModal,
-  saveWorldCategory,
-  deleteWorldCategory,
-});
 
 registerActions({
   openWorldSectionModal:  (btn) => openWorldSectionModal(btn.dataset.id || undefined, btn.dataset.catId || undefined),
   selectWorldSection:     (btn) => selectWorldSection(btn.dataset.id),
   deleteWorldSection:     (btn) => deleteWorldSection(btn.dataset.id),
   saveWorldSection:       ()    => saveWorldSection(),
-  _selectWorldIcon:       (btn) => window._selectWorldIcon?.(btn.dataset.id),
+  _selectWorldIcon:       (btn) => _selectWorldIcon(btn.dataset.id),
   openWorldCategoryModal: (btn) => openWorldCategoryModal(btn.dataset.id || undefined),
   saveWorldCategory:      ()    => saveWorldCategory(),
   deleteWorldCategory:    (btn) => deleteWorldCategory(btn.dataset.id),
-  _selectWorldCatIcon:    (btn) => window._selectWorldCatIcon?.(btn.dataset.id),
-  _worldSyncEyebrow:      ()    => window._worldSyncEyebrow?.(),
+  _selectWorldCatIcon:    (btn) => _selectWorldCatIcon(btn.dataset.id),
+  _worldSyncEyebrow:      ()    => _worldSyncEyebrow(),
   _worldClose:            ()    => closeModal(),
 });

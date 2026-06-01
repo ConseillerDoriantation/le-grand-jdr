@@ -5,6 +5,7 @@
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { navigate } from '../core/navigation.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -13,6 +14,7 @@ import { _esc, _nl2br } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES from './pages.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { setHistoireCtx } from '../shared/histoire-ctx.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
@@ -35,6 +37,9 @@ let _axeMap      = {};
 let _modalGroupes   = [];   // groupes du modal ouvert (mission courante)
 let _modalStoryId   = '';   // id de la mission en édition ('' = nouvelle)
 let _editingGroupId = null; // id du groupe en cours de modification (null = création)
+let _storyActe = '';
+let _stMapZoom = () => {};
+let _stMapReset = () => {};
 
 // ── Préférences persistées (handoff STORY.md §11) ─────────────────────────────
 const STORY_PREFS_KEY = 'story-prefs-v2';
@@ -171,6 +176,116 @@ function _refreshStGroupsRow(groups) {
   if (list) list.innerHTML = _renderGroupCards(groups);
 }
 
+function _stGroupField(groupId, field, value) {
+  const g = _modalGroupes.find(g => g.id === groupId);
+  if (g) g[field] = value;
+}
+
+function _stGroupPickToggle(charId, col) {
+  const el = document.getElementById(`st-gpick-${charId}`);
+  if (!el) return;
+  const picked = el.dataset.picked !== '1';
+  el.dataset.picked = picked ? '1' : '0';
+  el.style.borderColor = picked ? col : 'var(--border)';
+  el.style.background  = picked ? col + '18' : 'var(--bg-elevated)';
+  const circle = el.querySelector('div');
+  if (circle) circle.style.borderColor = picked ? col : 'rgba(255,255,255,.1)';
+  const nameEl = el.querySelector('span');
+  if (nameEl) {
+    nameEl.style.color = picked ? col : 'var(--text-dim)';
+    nameEl.style.fontWeight = picked ? '700' : '400';
+  }
+}
+
+function _resetGroupPicker() {
+  document.querySelectorAll('#st-group-picker [data-picked="1"]').forEach(el => {
+    el.dataset.picked = '0';
+    el.style.borderColor = 'var(--border)';
+    el.style.background  = 'var(--bg-elevated)';
+    const circle = el.querySelector('div');
+    if (circle) circle.style.borderColor = 'rgba(255,255,255,.1)';
+    const nameEl = el.querySelector('span');
+    if (nameEl) {
+      nameEl.style.color = 'var(--text-dim)';
+      nameEl.style.fontWeight = '400';
+    }
+  });
+}
+
+function _stSaveGroupDialog() {
+  const form = document.getElementById('st-save-group-form');
+  if (!form) return;
+  _editingGroupId = null;
+  _resetGroupPicker();
+  const titleEl = document.getElementById('st-group-form-title');
+  if (titleEl) titleEl.textContent = 'Nouveau groupe';
+  form.style.display = 'block';
+  form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
+  const inp = document.getElementById('st-save-group-name');
+  if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+}
+
+function _stCancelGroupForm() {
+  const form = document.getElementById('st-save-group-form');
+  if (form) form.style.display = 'none';
+  _editingGroupId = null;
+  _resetGroupPicker();
+}
+
+function _stEditGroup(groupId) {
+  const g = _modalGroupes.find(x => x.id === groupId);
+  if (!g) return;
+  const form = document.getElementById('st-save-group-form');
+  if (!form) return;
+  _editingGroupId = groupId;
+  _resetGroupPicker();
+  const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+  (g.membres || []).forEach(charId => {
+    const el = document.getElementById(`st-gpick-${charId}`);
+    if (!el || el.dataset.picked === '1') return;
+    const char = (STATE.characters||[]).find(c => c.id === charId);
+    const col  = char ? PCOLS[char.nom?.charCodeAt(0)%6||0] : '#4f8cff';
+    _stGroupPickToggle(charId, col);
+  });
+  const titleEl = document.getElementById('st-group-form-title');
+  if (titleEl) titleEl.textContent = `Modifier « ${g.nom} »`;
+  form.style.display = 'block';
+  form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
+  const inp = document.getElementById('st-save-group-name');
+  if (inp) { inp.value = g.nom || ''; setTimeout(() => inp.focus(), 50); }
+}
+
+async function _stConfirmSaveGroup() {
+  const nom = document.getElementById('st-save-group-name')?.value?.trim();
+  if (!nom) { showNotif('Donne un nom au groupe.', 'error'); return; }
+  const membres = [...document.querySelectorAll('#st-group-picker [data-picked="1"]')]
+    .map(el => el.dataset.gmId).filter(Boolean);
+  if (!membres.length) { showNotif('Sélectionne au moins un membre.', 'error'); return; }
+  if (_editingGroupId) {
+    _modalGroupes = _modalGroupes.map(g =>
+      g.id === _editingGroupId ? { ...g, nom, membres } : g
+    );
+    _editingGroupId = null;
+    showNotif(`Groupe « ${nom} » mis à jour.`, 'success');
+  } else {
+    _modalGroupes = [..._modalGroupes, { id: 'g' + Date.now(), nom, membres }];
+    showNotif(`Groupe « ${nom} » créé.`, 'success');
+  }
+  await _saveModalGroupes();
+  _refreshStGroupsRow(_modalGroupes);
+  const form = document.getElementById('st-save-group-form');
+  if (form) form.style.display = 'none';
+}
+
+async function _stDeleteGroup(groupId) {
+  if (!await confirmModal('Supprimer ce groupe de participants ?')) return;
+  _modalGroupes = _modalGroupes.filter(g => g.id !== groupId);
+  await _saveModalGroupes();
+  _refreshStGroupsRow(_modalGroupes);
+}
+
+function _stApplyGroup() {}
+
 // Expose closeModalDirect aux onclick inline du footer
 if (typeof window !== 'undefined' && !window.closeModalDirect) {
   window.closeModalDirect = closeModalDirect;
@@ -261,6 +376,12 @@ function _initMissionModalUI(item) {
       const text = _normalize(el.textContent || '');
       el.style.display = !q || text.includes(q) ? '' : 'none';
     });
+  });
+
+  const groupNameInput = shell.querySelector('#st-save-group-name');
+  groupNameInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); _stConfirmSaveGroup(); }
+    if (e.key === 'Escape') { e.preventDefault(); _stCancelGroupForm(); }
   });
 
   // Raccourcis clavier : Ctrl+S = sauver, Escape = fermer (Escape déjà géré globalement)
@@ -363,10 +484,10 @@ async function renderStory() {
   const allActes  = [...new Set([...savedActes, ...fromItems])].sort();
   if (!allActes.length) allActes.push('Acte I');
 
-  const activeActe = window._storyActe && allActes.includes(window._storyActe)
-    ? window._storyActe
+  const activeActe = _storyActe && allActes.includes(_storyActe)
+    ? _storyActe
     : allActes[0];
-  window._storyActe = activeActe;
+  _storyActe = activeActe;
 
   // Items de l'acte courant, visibles selon rôle
   const acteItems = items
@@ -545,21 +666,20 @@ async function renderStory() {
   if (prefs.view === 'carte') requestAnimationFrame(() => _initMapInteractions());
 }
 
-// Handlers de prefs exposés à window pour les inputs inline
-window._stSetFilter = (key, val) => { setStoryPrefs({ [key]: val }); PAGES.story?.(); };
-window._stSetView   = (view)     => { setStoryPrefs({ view });        PAGES.story?.(); };
-window._stResetFilters = () => { setStoryPrefs({ search:'', statut:'' }); PAGES.story?.(); };
+function _stSetFilter(key, val) { setStoryPrefs({ [key]: val }); PAGES.story?.(); }
+function _stSetView(view) { setStoryPrefs({ view }); PAGES.story?.(); }
+function _stResetFilters() { setStoryPrefs({ search:'', statut:'' }); PAGES.story?.(); }
 // Bascule entre actes — passe par data-attribute pour être immunisé aux
 // caractères spéciaux (apostrophes, guillemets) dans les noms d'acte.
-window._stSwitchActe = (acte) => {
+function _stSwitchActe(acte) {
   if (!acte) return;
-  window._storyActe = String(acte);
+  _storyActe = String(acte);
   PAGES.story?.();
-};
+}
 
 // Recherche : préserve le focus et la position du curseur après le re-render
 // complet de la page (sinon l'input perd le focus à chaque caractère tapé)
-window._stOnSearch = (el) => {
+function _stOnSearch(el) {
   const caret = el.selectionStart;
   setStoryPrefs({ search: el.value });
   PAGES.story?.().then(() => {
@@ -569,7 +689,7 @@ window._stOnSearch = (el) => {
       try { next.setSelectionRange(caret, caret); } catch {}
     }
   });
-};
+}
 
 // ── Bannière cinématique ──────────────────────────────────────────────────────
 function _renderBanner(hero, activeActe) {
@@ -902,7 +1022,7 @@ function _initMapInteractions() {
     persist({ zoom, panX, panY });
   }, { passive: false });
 
-  window._stMapZoom = (factor) => {
+  _stMapZoom = (factor) => {
     const rect = viewport.getBoundingClientRect();
     const cx = rect.width / 2, cy = rect.height / 2;
     const nz = Math.max(0.4, Math.min(3, zoom * factor));
@@ -912,7 +1032,7 @@ function _initMapInteractions() {
     apply();
     setStoryPrefs({ zoom, panX, panY });
   };
-  window._stMapReset = () => { zoom = 1; panX = 0; panY = 0; apply(); setStoryPrefs({ zoom, panX, panY }); };
+  _stMapReset = () => { zoom = 1; panX = 0; panY = 0; apply(); setStoryPrefs({ zoom, panX, panY }); };
 
   // Pan + click
   let panStart = null;
@@ -1559,7 +1679,7 @@ async function openStoryDetail(id) {
 // ── MODAL AJOUT / ÉDITION ─────────────────────────────────────────────────────
 async function openStoryModal(item = null) {
   _stCropper?.destroy(); _stCropper = null;
-  const acteActif   = window._storyActe || 'Acte I';
+  const acteActif   = _storyActe || 'Acte I';
   const allItems    = await loadCollection('story');
   const autresItems = allItems.filter(i => i.id !== item?.id);
   _modalGroupes = [...(item?.groupes || [])];
@@ -1724,8 +1844,7 @@ async function openStoryModal(item = null) {
           <div class="mn-field">
             <label class="mn-label">Nom du groupe</label>
             <input id="st-save-group-name" class="mn-input"
-              placeholder="Avant-garde, Trio des cendres…" maxlength="40"
-              onkeydown="if(event.key==='Enter')window._stConfirmSaveGroup();if(event.key==='Escape')window._stCancelGroupForm()">
+              placeholder="Avant-garde, Trio des cendres…" maxlength="40">
           </div>
           <div class="mn-field">
             <label class="mn-label">
@@ -1865,111 +1984,7 @@ async function openStoryModal(item = null) {
   // ── Bindings UI : tabs, segmented, statut pills, live preview, raccourcis ──
   _initMissionModalUI(item);
 
-  // Mise à jour d'un champ de résultat sur un groupe en mémoire
-  window._stGroupField = (groupId, field, value) => {
-    const g = _modalGroupes.find(g => g.id === groupId);
-    if (g) g[field] = value;
-  };
-
   // (Anciens handlers participants individuels supprimés — modèle "groupes only")
-
-  window._stGroupPickToggle = (charId, col) => {
-    const el = document.getElementById(`st-gpick-${charId}`);
-    if (!el) return;
-    const picked = el.dataset.picked !== '1';
-    el.dataset.picked = picked ? '1' : '0';
-    el.style.borderColor = picked ? col : 'var(--border)';
-    el.style.background  = picked ? col + '18' : 'var(--bg-elevated)';
-    const circle = el.querySelector('div');
-    if (circle) circle.style.borderColor = picked ? col : 'rgba(255,255,255,.1)';
-    const nameEl = el.querySelector('span');
-    if (nameEl) { nameEl.style.color = picked ? col : 'var(--text-dim)'; nameEl.style.fontWeight = picked ? '700' : '400'; }
-  };
-
-  const _resetGroupPicker = () => {
-    document.querySelectorAll('#st-group-picker [data-picked="1"]').forEach(el => {
-      el.dataset.picked = '0';
-      el.style.borderColor = 'var(--border)';
-      el.style.background  = 'var(--bg-elevated)';
-      const circle = el.querySelector('div');
-      if (circle) circle.style.borderColor = 'rgba(255,255,255,.1)';
-      const nameEl = el.querySelector('span');
-      if (nameEl) { nameEl.style.color = 'var(--text-dim)'; nameEl.style.fontWeight = '400'; }
-    });
-  };
-
-  window._stSaveGroupDialog = () => {
-    const form = document.getElementById('st-save-group-form');
-    if (!form) return;
-    _editingGroupId = null;
-    _resetGroupPicker();
-    const titleEl = document.getElementById('st-group-form-title');
-    if (titleEl) titleEl.textContent = 'Nouveau groupe';
-    form.style.display = 'block';
-    form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
-    const inp = document.getElementById('st-save-group-name');
-    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
-  };
-  window._stCancelGroupForm = () => {
-    const form = document.getElementById('st-save-group-form');
-    if (form) form.style.display = 'none';
-    _editingGroupId = null;
-    _resetGroupPicker();
-  };
-
-  window._stEditGroup = (groupId) => {
-    const g = _modalGroupes.find(x => x.id === groupId);
-    if (!g) return;
-    const form = document.getElementById('st-save-group-form');
-    if (!form) return;
-    _editingGroupId = groupId;
-    _resetGroupPicker();
-    // Pré-sélectionner les membres existants
-    const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-    (g.membres || []).forEach(charId => {
-      const el = document.getElementById(`st-gpick-${charId}`);
-      if (!el || el.dataset.picked === '1') return;
-      const char = (STATE.characters||[]).find(c => c.id === charId);
-      const col  = char ? PCOLS[char.nom?.charCodeAt(0)%6||0] : '#4f8cff';
-      window._stGroupPickToggle(charId, col);
-    });
-    const titleEl = document.getElementById('st-group-form-title');
-    if (titleEl) titleEl.textContent = `Modifier « ${g.nom} »`;
-    form.style.display = 'block';
-    form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
-    const inp = document.getElementById('st-save-group-name');
-    if (inp) { inp.value = g.nom || ''; setTimeout(() => inp.focus(), 50); }
-  };
-
-  window._stConfirmSaveGroup = async () => {
-    const nom = document.getElementById('st-save-group-name')?.value?.trim();
-    if (!nom) { showNotif('Donne un nom au groupe.', 'error'); return; }
-    const membres = [...document.querySelectorAll('#st-group-picker [data-picked="1"]')]
-      .map(el => el.dataset.gmId).filter(Boolean);
-    if (!membres.length) { showNotif('Sélectionne au moins un membre.', 'error'); return; }
-    if (_editingGroupId) {
-      // Mise à jour d'un groupe existant (conserver les champs reussite/recompense/notes)
-      _modalGroupes = _modalGroupes.map(g =>
-        g.id === _editingGroupId ? { ...g, nom, membres } : g
-      );
-      _editingGroupId = null;
-      showNotif(`Groupe « ${nom} » mis à jour.`, 'success');
-    } else {
-      _modalGroupes = [..._modalGroupes, { id: 'g' + Date.now(), nom, membres }];
-      showNotif(`Groupe « ${nom} » créé.`, 'success');
-    }
-    await _saveModalGroupes();
-    _refreshStGroupsRow(_modalGroupes);
-    const form = document.getElementById('st-save-group-form');
-    if (form) form.style.display = 'none';
-  };
-
-  window._stDeleteGroup = async (groupId) => {
-    if (!await confirmModal('Supprimer ce groupe de participants ?')) return;
-    _modalGroupes = _modalGroupes.filter(g => g.id !== groupId);
-    await _saveModalGroupes();
-    _refreshStGroupsRow(_modalGroupes);
-  };
 
   // ── Upload + crop image (4:3 verrouillé) ──────────────────────────────────
   _stCropper?.destroy();
@@ -1994,7 +2009,7 @@ async function openStoryModal(item = null) {
   });
 
   // Toggle visuel d'une card lien
-  window._toggleLien = (id) => {
+  function _toggleLien(id) {
     const cb   = document.getElementById(`lien-${id}`);
     const card = document.getElementById(`lien-card-${id}`);
     const tick = document.getElementById(`lien-tick-${id}`);
@@ -2006,7 +2021,7 @@ async function openStoryModal(item = null) {
     tick.style.background  = on ? 'var(--gold)' : 'rgba(11,17,24,.75)';
     tick.style.borderColor = on ? 'var(--gold)' : 'rgba(255,255,255,.2)';
     tick.textContent       = on ? '✓' : '';
-  };
+  }
 }
 
 // ── SAUVEGARDER ───────────────────────────────────────────────────────────────
@@ -2069,7 +2084,7 @@ async function saveStory(id = '') {
     if(id) await updateInCol('story',id,data);
     else   await addToCol('story',data);
 
-    window._storyActe=data.acte;
+    _storyActe = data.acte;
     _stCropper?.destroy(); _stCropper = null;
     closeModal();
     showNotif(id?'Mission mise à jour.':`"${titre}" ajoutée !`,'success');
@@ -2103,27 +2118,28 @@ function openNewActeModal(){
       data-action="_createNewActe">Créer</button>
   `);
 }
-window._createNewActe = async () => {
+async function _createNewActe() {
   const name=document.getElementById('new-acte-name')?.value?.trim();if(!name)return;
   const list=await loadActes();
   if(!list.includes(name)){list.push(name);list.sort();await saveActes(list);}
-  window._storyActe=name;
+  _storyActe = name;
   closeModal();
   await PAGES.story();
-};
+}
 
 // ── OUVRIR L'ÉDITEUR D'HISTOIRE ───────────────────────────────────────────────
-window._ouvrirHistoire = function(id, titre, acte) {
-  window._histoireCtx = { id, titre, acte };
-  window.navigate('histoire');
-};
+function _ouvrirHistoire(id, titre, acte) {
+  setHistoireCtx(id, titre, acte);
+  navigate('histoire');
+}
 
 // ── OVERRIDE + EXPORTS ────────────────────────────────────────────────────────
 PAGES.story = renderStory;
-Object.assign(window,{openStoryModal,openStoryDetail,openNewActeModal,saveStory,editStory,deleteStory});
+
+export { renderStory, openStoryModal, openStoryDetail, openNewActeModal, saveStory, editStory, deleteStory };
 
 registerActions({
-  _stGroupField: (el) => window._stGroupField?.(el.dataset.id, el.dataset.field,
+  _stGroupField: (el) => _stGroupField(el.dataset.id, el.dataset.field,
     el.dataset.field === 'reussite' ? (+el.value || 0) : el.value),
   openStoryDetail:         (btn) => openStoryDetail(btn.dataset.id),
   openStoryModal:          ()    => openStoryModal(),
@@ -2136,24 +2152,24 @@ registerActions({
   _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
   _stEditAfterClose:       (btn) => { closeModalDirect(); editStory(btn.dataset.id); },
   _stDeleteAfterCloseModal:(btn) => { closeModal(); deleteStory(btn.dataset.id); },
-  _stSetView:              (btn) => window._stSetView?.(btn.dataset.view),
-  _stSetFilter:            (btn) => window._stSetFilter?.(btn.dataset.key, btn.dataset.val),
-  _stOnSearch:             (el)  => window._stOnSearch?.(el),
-  _stSetStatut:            (el)  => window._stSetFilter?.('statut', el.value),
-  _stResetFilters:         ()    => window._stResetFilters?.(),
-  _stSwitchActe:           (btn) => window._stSwitchActe?.(btn.dataset.acte),
-  _stMapZoom:              (btn) => window._stMapZoom?.(Number(btn.dataset.factor)),
-  _stMapReset:             ()    => window._stMapReset?.(),
-  _stApplyGroup:           (btn) => window._stApplyGroup?.(JSON.parse(btn.dataset.members || '[]')),
-  _stEditGroup:            (btn) => window._stEditGroup?.(btn.dataset.id),
-  _stDeleteGroup:          (btn) => window._stDeleteGroup?.(btn.dataset.id),
-  _stSaveGroupDialog:      ()    => window._stSaveGroupDialog?.(),
-  _stGroupPickToggle:      (btn) => window._stGroupPickToggle?.(btn.dataset.id, btn.dataset.col),
-  _stConfirmSaveGroup:     ()    => window._stConfirmSaveGroup?.(),
-  _stCancelGroupForm:      ()    => window._stCancelGroupForm?.(),
-  _toggleLien:             (btn) => window._toggleLien?.(btn.dataset.id),
-  _ouvrirHistoire:         (btn) => window._ouvrirHistoire?.(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
-  _createNewActe:          ()    => window._createNewActe?.(),
+  _stSetView:              (btn) => _stSetView(btn.dataset.view),
+  _stSetFilter:            (btn) => _stSetFilter(btn.dataset.key, btn.dataset.val),
+  _stOnSearch:             (el)  => _stOnSearch(el),
+  _stSetStatut:            (el)  => _stSetFilter('statut', el.value),
+  _stResetFilters:         ()    => _stResetFilters(),
+  _stSwitchActe:           (btn) => _stSwitchActe(btn.dataset.acte),
+  _stMapZoom:              (btn) => _stMapZoom(Number(btn.dataset.factor)),
+  _stMapReset:             ()    => _stMapReset(),
+  _stApplyGroup:           (btn) => _stApplyGroup(JSON.parse(btn.dataset.members || '[]')),
+  _stEditGroup:            (btn) => _stEditGroup(btn.dataset.id),
+  _stDeleteGroup:          (btn) => _stDeleteGroup(btn.dataset.id),
+  _stSaveGroupDialog:      ()    => _stSaveGroupDialog(),
+  _stGroupPickToggle:      (btn) => _stGroupPickToggle(btn.dataset.id, btn.dataset.col),
+  _stConfirmSaveGroup:     ()    => _stConfirmSaveGroup(),
+  _stCancelGroupForm:      ()    => _stCancelGroupForm(),
+  _toggleLien:             (btn) => _toggleLien(btn.dataset.id),
+  _ouvrirHistoire:         (btn) => _ouvrirHistoire(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
+  _createNewActe:          ()    => _createNewActe(),
   _stPickAxe:              (btn) => {
     const el = document.getElementById('st-axe');
     if (el) { el.value = btn.dataset.axe; el.dispatchEvent(new Event('input')); }

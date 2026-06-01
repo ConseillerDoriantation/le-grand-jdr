@@ -92,6 +92,15 @@ export function _initials(name = '') {
  * Loader inline réutilisable (emblème + spinner + label).
  * Utilise les classes `.app-splash--inline` partagées avec #boot-splash.
  */
+/**
+ * Header standard d'une page (titre + sous-titre optionnel).
+ * @param {string} title   - Texte du titre, emoji inclus (non échappé, supposé sûr).
+ * @param {string} subtitle - Sous-titre optionnel.
+ */
+export function pageHeaderHtml(title, subtitle = '') {
+  return `<div class="page-header"><div class="page-title"><span class="page-title-accent">${title}</span></div>${subtitle ? `<div class="page-subtitle">${subtitle}</div>` : ''}</div>`;
+}
+
 export function appSplashHtml(label = 'Chargement…') {
   return `
     <div class="app-splash app-splash--inline">

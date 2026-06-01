@@ -5,6 +5,7 @@
 import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
 import { _esc, modStr } from '../shared/html.js';
+import { charSession } from '../shared/char-session.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
@@ -29,7 +30,7 @@ import {
   runeIncrement, runeDecrement, selectNoyau, updateSortPM,
 } from './characters/spells.js';
 
-import { renderCharEquip } from './characters/combat.js';
+import { renderCharEquip, toggleCharElement } from './characters/combat.js';
 
 import {
   _renderInventaireBoutique, renderCharInventaire,
@@ -55,8 +56,10 @@ import {
   renderCharMaitrises,
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   previewXpBar, saveXpDirect, addXpDelta,
+  allocStatPoint, addXpFromInput, toggleCompteHist,
   renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
   addProfilTag, removeProfilTag, initProfilTagUi,
+  getProfilCacheRef as _profilCache,
 } from './characters/tabs.js';
 import { bindRichTextEditors, richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import { registerActions } from '../core/actions.js';
@@ -81,9 +84,33 @@ import {
 import { quickViewChar } from './characters/quick-view.js';
 import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
 import Sortable from '../vendor/sortable.esm.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
+let _charAdminFilter = null;
+let _currentTopTab   = 'combat';
+let _csV3LedgerFilter = { kind: 'all', search: '', limit: 25 };
+let _csV3LedgerAddKind = 'recettes';
+let _csV3InvFilter = { cat: 'all', search: '' };
+let _currentJournalSub = 'notes';
+let _openNote = null;
+let _csV3EditingBio = null;
+
+// Palette d'auras — constante partagée par renderCharSheet et setCharAura
+const AURA_PALETTE = {
+  blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
+  gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
+};
+const _auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
+const _charBlurActions = {};
+function registerCharBlurActions(map) { Object.assign(_charBlurActions, map); }
+document.addEventListener('focusout', (event) => {
+  const el = event.target?.closest?.('[data-blur]');
+  if (!el) return;
+  const handler = _charBlurActions[el.dataset.blur];
+  if (handler) handler(el, event);
+}, true);
 
 // ══════════════════════════════════════════════
 // SÉLECTION
@@ -113,7 +140,7 @@ function selectChar(id, el) {
   document.querySelectorAll('#char-pills .char-pill').forEach(p=>p.classList.toggle('active', p.dataset.charid === id));
   if (el) el.classList.add('active');
   const c = STATE.characters.find(x=>x.id===id);
-  if (c) { STATE.activeChar=c; renderCharSheet(c, window._currentCharTab||'carac'); }
+  if (c) { STATE.activeChar=c; renderCharSheet(c, charSession.getCurrentCharTab()||'carac'); }
 }
 
 function filterAdminChars(pseudo, el) {
@@ -121,7 +148,7 @@ function filterAdminChars(pseudo, el) {
   document.querySelectorAll('#admin-player-filter .cs-admin-filter').forEach(p=>p.classList.remove('active'));
   if (el) el.classList.add('active');
   // Mémorise le filtre actif pour que renderCharSheet le réutilise au prochain rendu
-  window._charAdminFilter = pseudo || null;
+  _charAdminFilter = pseudo || null;
   // Sélectionne le 1er perso du filtre et rerendre
   const filtered = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
   // Sélectionne le ★ par défaut du joueur filtré si possible, sinon le premier (alpha)
@@ -174,101 +201,34 @@ function _resolveV3Tab(raw) {
   return V3_TAB_REMAP[raw] || 'combat';
 }
 
-function renderCharSheet(c, keepTab) {
-  const area = document.getElementById('char-sheet-area');
-  if (!area) return;
-  const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
 
-  const v3Tab = _resolveV3Tab(keepTab || window._currentCharTab || 'combat');
-  // Conserver le sub-tab du Journal s'il existe (notes / quetes / relations)
-  const journalSub = window._currentJournalSub || 'notes';
-
-  window._currentChar    = c;
-  window._canEditChar    = canEdit;
-  window._currentCharTab = v3Tab;
-  window._currentTopTab  = v3Tab;
-
-  // ── Valeurs dérivées ─────────────────────────
-  const pvMax      = calcPVMax(c);
-  const pmMax      = calcPMMax(c);
-  const pvCur      = c.pvActuel ?? pvMax;
-  const pmCur      = c.pmActuel ?? pmMax;
-  const pvPct      = pct(pvCur, pvMax);
-  const pmPct      = pct(pmCur, pmMax);
-  const xpCur      = c.exp || 0;
-  const xpPalier   = calcPalier(c.niveau || 1);
-  const xpPct      = pct(xpCur, xpPalier);
-  const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
-  const deckMax    = calcDeckMax(c);
-  const pvColor    = pvPct < 25 ? 'var(--crimson, #ff5a7e)' : pvPct < 50 ? 'var(--ember, #ff9544)' : 'var(--emerald, #22c38e)';
-  const titres     = c.titres || [];
-
-  // ── Points de niveau à dépenser (badge sidebar + sous-onglet Caracs) ─────
-  const _STATS_KEYS_LVL = ['force','dexterite','intelligence','constitution','sagesse','charisme'];
-  const _lvlEarned = Math.max(0, (c.niveau||1) - 1);
-  const _lvlSpent  = _STATS_KEYS_LVL.reduce((s,k) => s + (parseInt((c.statsLevelUps||{})[k])||0), 0);
-  const lvlPointsRemaining = _lvlEarned - _lvlSpent;
-
-  // ── Stats en bloc 2×3 ────────────────────────
-  // Ordre : For Dex Int / Con Sag Cha
-  const STATS = [
-    {key:'force',       abbr:'For', label:'Force'},
-    {key:'dexterite',   abbr:'Dex', label:'Dextérité'},
-    {key:'intelligence',abbr:'Int', label:'Intelligence'},
-    {key:'constitution',abbr:'Con', label:'Constitution'},
-    {key:'sagesse',     abbr:'Sag', label:'Sagesse'},
-    {key:'charisme',    abbr:'Cha', label:'Charisme'},
-  ];
-  const s  = c.stats     || {};
-  const sb = c.statsBonus || {};
-  const statsHtml = STATS.map(st => {
-    const base  = s[st.key]  || 8;
-    const bonus = sb[st.key] || 0;
-    const total = base + bonus;
-    const m     = getMod(c, st.key);
-    const mStr  = m >= 0 ? `+${m}` : String(m);
-    const mCls  = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
-    const equipStr = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '+0';
-    return `<div class="cs-stat-card${canEdit?' cs-stat-card--edit':''}"
-      title="${st.label} — base ${base}, équip. ${equipStr}"
-      ${canEdit?`data-action="inlineEditStatFromCard" data-id="${c.id}" data-key="${st.key}"`:''}
-    >
-      <div class="cs-stat-card-top">
-        <span class="cs-stat-abbr">${st.abbr}</span>
-        <span class="cs-stat-mod ${mCls}">${mStr}</span>
-      </div>
-      <div class="cs-stat-card-mid">
-        <span class="cs-stat-total-lbl">TOTAL</span>
-        <span class="cs-stat-total">${total}</span>
-      </div>
-      <div class="cs-stat-card-bot">
-        <div class="cs-stat-sub"><span class="cs-stat-sub-lbl">BASE</span><span class="cs-stat-sub-val js-stat-base">${base}</span></div>
-        <div class="cs-stat-sub"><span class="cs-stat-sub-lbl">EQUIP.</span><span class="cs-stat-sub-val">${equipStr}</span></div>
-      </div>
-    </div>`;
-  }).join('');
-
-  // ── Sélecteur multi-personnages (pastilles V3) ───────────────
-  const allChars    = STATE.characters || [];
-  let switchable    = STATE.isAdmin ? allChars : allChars.filter(x => x.uid === STATE.user?.uid);
-  // Si admin a un filtre actif (par pseudo), on l'applique
-  if (STATE.isAdmin && window._charAdminFilter) {
-    switchable = switchable.filter(x => x.ownerPseudo === window._charAdminFilter);
-  }
-  // Ordre logique : groupé par joueur (alpha), perso "default" en tête de chaque groupe
-  switchable = sortCharactersForDisplay(switchable);
-  const AURA_PALETTE = {
-    blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
-    gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
+// Convertit une couleur hex aura (#rrggbb) en variables CSS rgba
+function _auraVars(hexCol) {
+  const r = parseInt(hexCol.slice(1,3),16);
+  const g = parseInt(hexCol.slice(3,5),16);
+  const b = parseInt(hexCol.slice(5,7),16);
+  return {
+    auraGlow: `rgba(${r},${g},${b},.14)`,
+    auraBd:   `rgba(${r},${g},${b},.55)`,
+    auraSh:   `0 0 38px rgba(${r},${g},${b},.28)`,
   };
-  const auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
+}
 
-  const charPillsHtml = switchable.map(ch => {
-    const col = auraColor(ch.aura);
+// Pastilles de sélection de personnage (char-switch)
+function _buildCharSwitchHtml(activeCharId, canEdit) {
+  let switchable = STATE.isAdmin
+    ? (STATE.characters || [])
+    : (STATE.characters || []).filter(x => x.uid === STATE.user?.uid);
+  if (STATE.isAdmin && _charAdminFilter)
+    switchable = switchable.filter(x => x.ownerPseudo === _charAdminFilter);
+  switchable = sortCharactersForDisplay(switchable);
+
+  const pillsHtml = switchable.map(ch => {
+    const col = _auraColor(ch.aura);
     const init = (ch.nom || '?')[0].toUpperCase();
     const photoPos = `${50+(ch.photoX||0)*50}% ${50+(ch.photoY||0)*50}%`;
     const titleSuffix = ch.isDefault ? ' · ★ Par défaut' : '';
-    return `<button class="char-pill${ch.id===c.id?' active':''}${ch.isDefault?' is-default':''}"
+    return `<button class="char-pill${ch.id===activeCharId?' active':''}${ch.isDefault?' is-default':''}"
       data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
       style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
       <span class="char-pill-av">${ch.photo
@@ -277,54 +237,43 @@ function renderCharSheet(c, keepTab) {
       <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
     </button>`;
   }).join('');
-  const charSwitchHtml = `<div class="char-switch">
-    ${charPillsHtml}
+
+  return `<div class="char-switch">
+    ${pillsHtml}
     ${canEdit ? `<button class="char-pill char-pill-new" data-action="createNewChar">➕ Nouveau</button>` : ''}
   </div>`;
+}
 
-  // ── Données du hero & sidebar ─────────────────────────
-  const auraCol = auraColor(c.aura);
-  const auraGlow = `rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.14)`;
-  const auraBd   = `rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.55)`;
-  const auraSh   = `0 0 38px rgba(${parseInt(auraCol.slice(1,3),16)},${parseInt(auraCol.slice(3,5),16)},${parseInt(auraCol.slice(5,7),16)},.28)`;
-
-  const hpBarCls = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
-
-  // Mini-stats : CA, Vitesse, Maîtrise, Deck (deckActifs / deckMax déjà calculés plus haut)
-  const profMod    = Math.max(2, Math.floor(((c.niveau || 1) - 1) / 4) + 2);   // bonus de maîtrise
-
-  // Stats banner — 6 tuiles avec badge alloc si points dispo
-  // (réutilise `s` et `sb` déclarés plus haut pour la grille stats legacy)
-  const STATS_TILES = [
-    {key:'force',       abbr:'FOR'},
-    {key:'dexterite',   abbr:'DEX'},
-    {key:'intelligence',abbr:'INT'},
-    {key:'constitution',abbr:'CON'},
-    {key:'sagesse',     abbr:'SAG'},
-    {key:'charisme',    abbr:'CHA'},
-  ];
+// 6 tuiles de statistiques avec segmentation base/niveau/équipement
+function _buildStatTilesHtml(c, canEdit, lvlPointsRemaining) {
+  const s  = c.stats      || {};
+  const sb = c.statsBonus || {};
   const isAdmin = !!STATE.isAdmin;
   const STAT_FULL = {
     force: 'Force', dexterite: 'Dextérité', intelligence: 'Intelligence',
     constitution: 'Constitution', sagesse: 'Sagesse', charisme: 'Charisme',
   };
-  const tilesHtml = STATS_TILES.map(st => {
-    // c.stats[key] contient TOTAL (base initiale + level-ups). On reconstitue les 3 valeurs.
-    const totalBase = s[st.key]  || 8;          // base + level-ups
+  return [
+    {key:'force',        abbr:'FOR'},
+    {key:'dexterite',    abbr:'DEX'},
+    {key:'intelligence', abbr:'INT'},
+    {key:'constitution', abbr:'CON'},
+    {key:'sagesse',      abbr:'SAG'},
+    {key:'charisme',     abbr:'CHA'},
+  ].map(st => {
+    const totalBase = s[st.key]  || 8;
     const lvlUp     = parseInt((c.statsLevelUps || {})[st.key]) || 0;
-    const pureBase  = totalBase - lvlUp;        // base initiale (niveau 1)
-    const bonus     = sb[st.key] || 0;          // équipement
+    const pureBase  = totalBase - lvlUp;
+    const bonus     = sb[st.key] || 0;
     const total     = totalBase + bonus;
     const m         = getMod(c, st.key);
     const mStr      = m >= 0 ? `+${m}` : String(m);
     const mCls      = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
     const eqCls     = bonus > 0 ? 'pos' : bonus < 0 ? 'neg' : 'zero';
     const eqDisp    = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '0';
+    const canPlus   = canEdit && lvlPointsRemaining > 0;
+    const canMinus  = canEdit && lvlUp > 0;
 
-    const canPlus  = canEdit && lvlPointsRemaining > 0;
-    const canMinus = canEdit && lvlUp > 0;
-
-    // ── Base : MJ peut cliquer pour éditer (visuel doré + ✎)
     const baseSegment = (canEdit && isAdmin)
       ? `<button class="stat-seg stat-seg-base editable" title="MJ — Modifier la base"
             data-action="inlineEditStat" data-id="${c.id}" data-key="${st.key}" data-stop-propagation>
@@ -336,7 +285,6 @@ function renderCharSheet(c, keepTab) {
           <span class="stat-seg-lbl">Base</span>
         </div>`;
 
-    // ── Niveau : ± boutons à côté de la valeur
     const nivSegment = `<div class="stat-seg stat-seg-niv ${lvlUp>0?'has':'zero'}">
         <span class="stat-seg-val">+${lvlUp}</span>
         <span class="stat-seg-lbl">Niveau</span>
@@ -372,8 +320,217 @@ function renderCharSheet(c, keepTab) {
       </div>
     </div>`;
   }).join('');
+}
 
-  // Titres (chips existants + bouton d'édition pour MJ/propriétaire)
+// Navigation par onglets v3
+function _buildTabsHtml(c, v3Tab) {
+  return [
+    { k: 'combat',  ico: '⚔️', lbl: 'Combat' },
+    { k: 'sorts',   ico: '✨', lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
+    { k: 'inv',     ico: '🎒', lbl: 'Inventaire', badge: `${(c.inventaire||[]).length||''}` },
+    { k: 'compte',  ico: '💰', lbl: 'Compte' },
+    { k: 'journal', ico: '📖', lbl: 'Journal' },
+    { k: 'profil',  ico: '👤', lbl: 'Profil' },
+  ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}"
+    data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
+    <span class="tab-ico">${t.ico}</span> ${t.lbl}
+    ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
+  </button>`).join('');
+}
+
+function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips }) {
+  return `<aside class="id-side" id="cs-sidebar" data-aura="${c.aura||'blue'}"
+    style="--aura-glow:${auraGlow};--aura-border:${auraBd};--aura-shadow:${auraSh}">
+
+    <div class="id-portrait-wrap">
+      <div class="id-portrait"
+           ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
+        ${c.photo
+          ? `<img src="${c.photo}" style="transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center">`
+          : `${(c.nom||'?')[0].toUpperCase()}`}
+      </div>
+      <div class="id-lvl-badge">${canEdit
+        ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
+        : `Niv. <strong>${c.niveau||1}</strong>`}</div>
+    </div>
+
+    <div class="id-name-row">
+      ${canEdit
+        ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
+        : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
+      <span class="id-actions-mini">
+        ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
+          title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
+          data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
+        ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
+        ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
+        ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
+      </span>
+    </div>
+
+    ${titresChips}
+
+    <div class="id-chips">
+      ${canEdit
+        ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
+        : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
+      ${canEdit
+        ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
+        : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
+    </div>
+
+    <!-- XP -->
+    <div class="xp-block">
+      <div class="xp-row"><span>Expérience</span><span class="xp-pct">${xpPct}%</span></div>
+      <div class="xp-track"><div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div></div>
+      <div class="xp-meta">
+        <span>${canEdit
+          ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0;text-decoration:underline dotted">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
+          : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
+        <span>→ Niv. ${(c.niveau||1)+1}</span>
+      </div>
+      ${canEdit?`<div class="xp-add">
+        <label>＋ XP</label>
+        <input type="number" id="xp-add-input-${c.id}" placeholder="0"
+          onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}">
+        <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
+      </div>`:''}
+    </div>
+
+    <!-- PV -->
+    <div class="vital hp ${pvPct<25?'danger':''}" id="vital-hp">
+      <div class="vital-icon">❤</div>
+      <div class="vital-body">
+        <div class="vital-head">
+          <span class="vital-label">Points de Vie</span>
+          <span class="vital-num"><span id="pv-val">${pvCur}</span><small>/ ${pvMax}</small></span>
+        </div>
+        <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
+        <div class="vital-ctrls">
+          ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
+          <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
+          ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
+        </div>
+      </div>
+    </div>
+
+    <!-- PM -->
+    <div class="vital mp">
+      <div class="vital-icon">✦</div>
+      <div class="vital-body">
+        <div class="vital-head">
+          <span class="vital-label">Points de Magie</span>
+          <span class="vital-num"><span id="pm-val">${pmCur}</span><small>/ ${pmMax}</small></span>
+        </div>
+        <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
+        <div class="vital-ctrls">
+          ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
+          <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
+          ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
+    <div class="cs-mini-grid cs-mini-grid-3">
+      <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
+      <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
+      <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" data-action="showCharTab" data-tab="sorts" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
+    </div>
+
+    <!-- Or -->
+    <div class="or-card">
+      <div class="or-card-left">
+        <div class="or-card-icon">💰</div>
+        <div>
+          <div class="or-card-lbl">Bourse</div>
+          <div class="or-card-val"><span class="or-card-amount">${calcOr(c)}</span> <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
+        </div>
+      </div>
+      ${canEdit?`<button class="or-card-btn" data-action="openSendGoldModal" data-id="${c.id}">↗ Envoyer</button>`:''}
+    </div>
+
+    ${canEdit?`<div class="aura-row">
+      <span class="aura-lbl">Aura</span>
+      <div class="aura-dots">
+        ${Object.entries(AURA_PALETTE).map(([k,col]) => `
+          <button class="aura-dot${(c.aura||'blue')===k?' active':''}"
+            style="--dot-c:${col}" data-aura="${k}"
+            data-action="setCharAura" data-id="${c.id}" data-aura-key="${k}"
+            title="${k}"></button>`).join('')}
+      </div>
+    </div>`:''}
+
+  </aside>`;
+}
+
+function _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl }) {
+  return `<section class="main-col">
+
+    <!-- Hero strip -->
+    <div class="hero-strip">
+      <div class="hero-id">
+        <div class="hero-id-name">${_esc(c.nom || 'Sans nom')}
+          <span class="hero-id-tag">${[c.classe, c.race, titres[0]].filter(Boolean).map(_esc).join(' · ')}</span>
+        </div>
+        ${advLbl || playerLbl ? `<div class="hero-id-tag" style="font-size:.7rem">
+          ${advLbl}${playerLbl}
+        </div>` : ''}
+      </div>
+    </div>
+
+    <!-- Stats banner 6 tuiles -->
+    <div class="stats-banner" id="cs-stats-banner">
+      ${tilesHtml}
+    </div>
+
+    ${lvlPointsRemaining > 0 && canEdit ? `
+    <div class="alloc-banner">
+      <span>🎯 <b>${lvlPointsRemaining}</b> point${lvlPointsRemaining>1?'s':''} de niveau à dépenser — cliquez sur le badge <b>+1</b> d'une caractéristique</span>
+      <span class="alloc-banner-hint">Modificateur recalculé instantanément</span>
+    </div>` : ''}
+
+    <!-- Tabs v3 -->
+    <nav class="tabs-v3" id="char-tabs-v3">
+      ${tabsHtml}
+    </nav>
+
+    <div id="char-tab-content" class="tab-body-v3"></div>
+
+  </section>`;
+}
+
+function renderCharSheet(c, keepTab) {
+  const area = document.getElementById('char-sheet-area');
+  if (!area) return;
+  const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
+
+  const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
+  charSession.set(c, canEdit, v3Tab);
+  _currentTopTab = v3Tab;
+
+  // ── Valeurs dérivées ──────────────────────────
+  const pvMax  = calcPVMax(c), pmMax = calcPMMax(c);
+  const pvCur  = c.pvActuel ?? pvMax, pmCur = c.pmActuel ?? pmMax;
+  const pvPct  = pct(pvCur, pvMax), pmPct = pct(pmCur, pmMax);
+  const xpCur  = c.exp || 0, xpPalier = calcPalier(c.niveau || 1), xpPct = pct(xpCur, xpPalier);
+  const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
+  const deckMax    = calcDeckMax(c);
+  const titres     = c.titres || [];
+  const hpBarCls   = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
+
+  // ── Points de niveau restants ──────────────────
+  const _lvlEarned = Math.max(0, (c.niveau||1) - 1);
+  const _lvlSpent  = ['force','dexterite','intelligence','constitution','sagesse','charisme']
+    .reduce((s,k) => s + (parseInt((c.statsLevelUps||{})[k])||0), 0);
+  const lvlPointsRemaining = _lvlEarned - _lvlSpent;
+
+  // ── Sous-composants HTML ───────────────────────
+  const charSwitchHtml = _buildCharSwitchHtml(c.id, canEdit);
+  const { auraGlow, auraBd, auraSh } = _auraVars(_auraColor(c.aura));
+  const tilesHtml      = _buildStatTilesHtml(c, canEdit, lvlPointsRemaining);
+  const tabsHtml       = _buildTabsHtml(c, v3Tab);
+
   const titresChips = (titres.length || canEdit)
     ? `<div class="id-titres">
         ${titres.map(t => `<span class="id-titre">${_esc(t)}</span>`).join('')}
@@ -383,429 +540,25 @@ function renderCharSheet(c, keepTab) {
       </div>`
     : '';
 
-  // Tabs nav (6 onglets v3)
-  const tabsHtml = [
-    { k: 'combat',  ico: '⚔️', lbl: 'Combat' },
-    { k: 'sorts',   ico: '✨', lbl: 'Sorts',     badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
-    { k: 'inv',     ico: '🎒', lbl: 'Inventaire',badge: `${(c.inventaire||[]).length||''}` },
-    { k: 'compte',  ico: '💰', lbl: 'Compte' },
-    { k: 'journal', ico: '📖', lbl: 'Journal' },
-    { k: 'profil',  ico: '👤', lbl: 'Profil' },
-  ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}"
-    data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
-    <span class="tab-ico">${t.ico}</span> ${t.lbl}
-    ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
-  </button>`).join('');
-
   const playerLbl = c.ownerPseudo ? `<span class="hero-tag-sep">·</span><span style="color:var(--text-dim)">Joueur :</span> ${_esc(c.ownerPseudo)}` : '';
   const advLbl    = STATE.adventure?.nom ? `<span style="color:var(--text-dim)">Aventure :</span> ${_esc(STATE.adventure.nom)}` : '';
 
+  const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips });
+  const mainColHtml = _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl });
+
   area.innerHTML = `<div class="cs-v3">
   <div class="app-shell">
-
-    <!-- ══════════ CHAR-SWITCH (au-dessus du sheet, pleine largeur) ══════════ -->
-    <div class="char-switch-row">
-      ${charSwitchHtml}
-    </div>
-
-    <!-- ══════════ SHEET ══════════ -->
+    <div class="char-switch-row">${charSwitchHtml}</div>
     <div class="sheet">
-
-      <!-- ─── SIDEBAR ─── -->
-      <aside class="id-side" id="cs-sidebar" data-aura="${c.aura||'blue'}"
-        style="--aura-glow:${auraGlow};--aura-border:${auraBd};--aura-shadow:${auraSh}">
-
-        <div class="id-portrait-wrap">
-          <div class="id-portrait"
-               ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
-            ${c.photo
-              ? `<img src="${c.photo}" style="transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center">`
-              : `${(c.nom||'?')[0].toUpperCase()}`}
-          </div>
-          <div class="id-lvl-badge">${canEdit
-            ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
-            : `Niv. <strong>${c.niveau||1}</strong>`}</div>
-        </div>
-
-        <div class="id-name-row">
-          ${canEdit
-            ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
-            : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
-          <span class="id-actions-mini">
-            ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
-              title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
-              data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
-            ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
-            ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
-            ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
-          </span>
-        </div>
-
-        ${titresChips}
-
-        <div class="id-chips">
-          ${canEdit
-            ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
-            : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
-          ${canEdit
-            ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
-            : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
-        </div>
-
-        <!-- XP -->
-        <div class="xp-block">
-          <div class="xp-row"><span>Expérience</span><span class="xp-pct">${xpPct}%</span></div>
-          <div class="xp-track"><div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div></div>
-          <div class="xp-meta">
-            <span>${canEdit
-              ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0;text-decoration:underline dotted">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
-              : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
-            <span>→ Niv. ${(c.niveau||1)+1}</span>
-          </div>
-          ${canEdit?`<div class="xp-add">
-            <label>＋ XP</label>
-            <input type="number" id="xp-add-input-${c.id}" placeholder="0"
-              onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}">
-            <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
-          </div>`:''}
-        </div>
-
-        <!-- PV -->
-        <div class="vital hp ${pvPct<25?'danger':''}" id="vital-hp">
-          <div class="vital-icon">❤</div>
-          <div class="vital-body">
-            <div class="vital-head">
-              <span class="vital-label">Points de Vie</span>
-              <span class="vital-num"><span id="pv-val">${pvCur}</span><small>/ ${pvMax}</small></span>
-            </div>
-            <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
-            <div class="vital-ctrls">
-              ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
-              ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-            </div>
-          </div>
-        </div>
-
-        <!-- PM -->
-        <div class="vital mp">
-          <div class="vital-icon">✦</div>
-          <div class="vital-body">
-            <div class="vital-head">
-              <span class="vital-label">Points de Magie</span>
-              <span class="vital-num"><span id="pm-val">${pmCur}</span><small>/ ${pmMax}</small></span>
-            </div>
-            <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
-            <div class="vital-ctrls">
-              ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-              <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
-              ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-            </div>
-          </div>
-        </div>
-
-        <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
-        <div class="cs-mini-grid cs-mini-grid-3">
-          <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
-          <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
-          <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" data-action="showCharTab" data-tab="sorts" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
-        </div>
-
-        <!-- Or -->
-        <div class="or-card">
-          <div class="or-card-left">
-            <div class="or-card-icon">💰</div>
-            <div>
-              <div class="or-card-lbl">Bourse</div>
-              <div class="or-card-val"><span class="or-card-amount">${calcOr(c)}</span> <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
-            </div>
-          </div>
-          ${canEdit?`<button class="or-card-btn" data-action="openSendGoldModal" data-id="${c.id}">↗ Envoyer</button>`:''}
-        </div>
-
-        ${canEdit?`<div class="aura-row">
-          <span class="aura-lbl">Aura</span>
-          <div class="aura-dots">
-            ${Object.entries(AURA_PALETTE).map(([k,col]) => `
-              <button class="aura-dot${(c.aura||'blue')===k?' active':''}"
-                style="--dot-c:${col}" data-aura="${k}"
-                data-action="setCharAura" data-id="${c.id}" data-aura-key="${k}"
-                title="${k}"></button>`).join('')}
-          </div>
-        </div>`:''}
-
-      </aside>
-
-      <!-- ─── MAIN ─── -->
-      <section class="main-col">
-
-        <!-- Hero strip -->
-        <div class="hero-strip">
-          <div class="hero-id">
-            <div class="hero-id-name">${_esc(c.nom || 'Sans nom')}
-              <span class="hero-id-tag">${[c.classe, c.race, titres[0]].filter(Boolean).map(_esc).join(' · ')}</span>
-            </div>
-            ${advLbl || playerLbl ? `<div class="hero-id-tag" style="font-size:.7rem">
-              ${advLbl}${playerLbl}
-            </div>` : ''}
-          </div>
-        </div>
-
-        <!-- Stats banner 6 tuiles -->
-        <div class="stats-banner" id="cs-stats-banner">
-          ${tilesHtml}
-        </div>
-
-        ${lvlPointsRemaining > 0 && canEdit ? `
-        <div class="alloc-banner">
-          <span>🎯 <b>${lvlPointsRemaining}</b> point${lvlPointsRemaining>1?'s':''} de niveau à dépenser — cliquez sur le badge <b>+1</b> d'une caractéristique</span>
-          <span class="alloc-banner-hint">Modificateur recalculé instantanément</span>
-        </div>` : ''}
-
-        <!-- Tabs v3 -->
-        <nav class="tabs-v3" id="char-tabs-v3">
-          ${tabsHtml}
-        </nav>
-
-        <div id="char-tab-content" class="tab-body-v3"></div>
-
-      </section>
+      ${sidebarHtml}
+      ${mainColHtml}
     </div>
   </div>
 </div>`;
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Ancien template (legacy) commenté ci-dessous — gardé pour référence court terme.
-  // Le rendu actif est celui ci-dessus.
-  /*
-<div class="cs-layout">
-
-  <!-- ══════════ SIDEBAR ══════════ -->
-  <aside class="cs-sidebar" id="cs-sidebar" data-aura="${c.aura||'blue'}">
-
-    <!-- Identité -->
-    <div class="cs-id-block">
-      <div class="cs-photo-wrap" id="char-photo-wrap">
-        <div class="cs-photo" id="char-photo"
-             ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}
-             style="cursor:${canEdit?'pointer':'default'}">
-          ${c.photo
-            ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;
-                transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);
-                transform-origin:center">`
-            : `<div class="cs-photo-placeholder">
-                  <span class="cs-photo-initial">${(c.nom||'?')[0].toUpperCase()}</span>
-                  ${canEdit ? '<div class="cs-photo-edit-hint">📷</div>' : ''}
-                </div>`}
-        </div>
-        ${canEdit&&c.photo?`<button class="cs-photo-del" data-action="delete-character-photo" data-charid="${c.id}" title="Supprimer la photo">✕</button>`:''}
-        <div class="cs-lv-badge">${canEdit
-          ? `<span class="cs-editable-num" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
-          : `Niv.&nbsp;${c.niveau||1}`}</div>
-      </div>
-      <div class="cs-id-body">
-        <div class="cs-name-row">
-          ${canEdit
-            ? `<span class="cs-name cs-editable" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Modifier">${_esc(c.nom||'Nouveau personnage')}</span>`
-            : `<span class="cs-name">${_esc(c.nom||'Nouveau personnage')}</span>`}
-          ${canEdit?`<button class="cs-export-btn" data-action="openCharExportMenu" data-id="${c.id}" title="Exporter la fiche (JSON ou PDF)">📤</button>`:''}
-          ${canEdit?`<button class="cs-delete-btn" data-action="deleteChar" data-id="${c.id}" title="Supprimer ce personnage">🗑️</button>`:''}
-        </div>
-        ${titres.length||canEdit?`<div class="cs-titres">
-          ${titres.map(t=>`<span class="badge badge-gold" style="font-size:.62rem">${_esc(t)}</span>`).join('')}
-          ${canEdit?`<button class="cs-add-titre" data-action="manageTitres" data-id="${c.id}">＋ titre</button>`:''}
-        </div>`:''}
-        ${(c.classe||c.race||canEdit)?`<div class="cs-id-chips">
-          ${canEdit
-            ? `<span class="cs-id-chip cs-id-chip--classe${c.classe?'':' cs-id-chip--empty'} cs-editable"
-                title="Modifier la classe" data-fieldval="${_esc(c.classe||'')}"
-                data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
-            : (c.classe?`<span class="cs-id-chip cs-id-chip--classe">${_esc(c.classe)}</span>`:'')}
-          ${canEdit
-            ? `<span class="cs-id-chip cs-id-chip--race${c.race?'':' cs-id-chip--empty'} cs-editable"
-                title="Modifier la race" data-fieldval="${_esc(c.race||'')}"
-                data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
-            : (c.race?`<span class="cs-id-chip cs-id-chip--race">${_esc(c.race)}</span>`:'')}
-        </div>`:''}
-      </div>
-    </div>
-
-    <!-- Niveau · Or -->
-    <div class="cs-meta-strip">
-      <span class="cs-level-badge">
-        ${canEdit
-          ? `<span class="cs-editable-num" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier">Niv.&nbsp;${c.niveau||1}</span>`
-          : `Niv.&nbsp;${c.niveau||1}`}
-      </span>
-      <div class="cs-or" title="Solde du Livret de Compte">
-        <span class="cs-or-icon">💰</span>
-        <span class="cs-or-amount">${calcOr(c)}</span>
-        <span class="cs-or-label">pièces d'or</span>
-      </div>
-    </div>
-
-    <!-- XP -->
-    <div class="cs-xp-section">
-      <div class="cs-xp-labels">
-        <span>Expérience</span>
-        <span id="xp-pct" class="cs-xp-pct-label">${xpPct}%</span>
-      </div>
-      <div class="cs-xp-row">
-        <div class="cs-xp-track">
-          <div class="cs-xp-fill" id="xp-bar-fill" style="width:${xpPct}%"><div class="cs-xp-shimmer"></div></div>
-        </div>
-      </div>
-      ${canEdit
-        ? `<div class="cs-xp-bottom-row">
-            <div class="cs-xp-total-group">
-              <input type="number" class="cs-xp-input cs-inline-num" id="xp-direct-input"
-                value="${xpCur}" min="0" max="${xpPalier}"
-                data-change="saveXpDirect" data-id="${c.id}"
-                data-input="previewXpBar" data-palier="${xpPalier}" title="Modifier l'XP total">
-              <span class="cs-xp-edit-label">/ ${xpPalier}</span>
-            </div>
-            <div class="cs-xp-delta-group">
-              <span class="cs-xp-add-icon">+</span>
-              <input type="number" class="cs-xp-input cs-xp-add-input" id="xp-add-input-${c.id}"
-                min="1" placeholder="gagné"
-                onkeydown="if(event.key==='Enter'){addXpDelta('${c.id}');event.preventDefault()}"
-                title="XP à ajouter — Entrée pour valider">
-            </div>
-          </div>`
-        : `<div class="cs-xp-sub">${xpCur} / ${xpPalier} XP</div>`}
-    </div>
-
-    <div class="cs-sb-divider"></div>
-
-    <!-- PV / PM -->
-    <div class="cs-vitals-row">
-      <div class="cs-vital-block">
-        <div class="cs-vital-label">❤️ PV</div>
-        <div class="cs-vital-controls">
-          ${canEdit?`<button class="cs-vbtn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-          <span class="cs-vital-val" id="pv-val" style="color:${pvColor}">${pvCur}</span>
-          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-        </div>
-        <div class="cs-bar-bg cs-bar-hp">
-          <div class="cs-bar-fill cs-bar-hp-fill ${pvPct>50?'high':pvPct>25?'mid':''}" id="pv-bar" style="width:${pvPct}%"></div>
-        </div>
-        <div class="cs-vital-sub">
-          <span>max <strong id="pv-max">${pvMax}</strong></span>
-          ${canEdit
-            ? `<button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="Modifier PV de base">✎ ${c.pvBase||10}</button>`
-            : `<span class="cs-vital-base-ro">base ${c.pvBase||10}</span>`}
-        </div>
-      </div>
-      <div class="cs-vital-block">
-        <div class="cs-vital-label">🔵 PM</div>
-        <div class="cs-vital-controls">
-          ${canEdit?`<button class="cs-vbtn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-          <span class="cs-vital-val" id="pm-val" style="color:var(--blue)">${pmCur}</span>
-          ${canEdit?`<button class="cs-vbtn cs-vbtn-plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
-        </div>
-        <div class="cs-bar-bg cs-bar-pm">
-          <div class="cs-bar-fill cs-bar-pm-fill" id="pm-bar" style="width:${pmPct}%"></div>
-        </div>
-        <div class="cs-vital-sub">
-          <span>max <strong id="pm-max">${pmMax}</strong></span>
-          ${canEdit
-            ? `<button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="Modifier PM de base">✎ ${c.pmBase||10}</button>`
-            : `<span class="cs-vital-base-ro">base ${c.pmBase||10}</span>`}
-        </div>
-      </div>
-    </div>
-
-    <!-- CA · Vitesse · Deck -->
-    <div class="cs-secondary-row">
-      <div class="cs-stat-chip">
-        <span class="cs-chip-label">🛡️ CA</span>
-        <span class="cs-chip-val">${calcCA(c)}</span>
-      </div>
-      <div class="cs-stat-chip">
-        <span class="cs-chip-label">🏃 Vit.</span>
-        <span class="cs-chip-val">${calcVitesse(c)}m</span>
-      </div>
-      <div class="cs-stat-chip">
-        <span class="cs-chip-label">🃏 Deck</span>
-        <span class="cs-chip-val">${deckActifs}/${deckMax}</span>
-      </div>
-    </div>
-
-    <div class="cs-sb-divider"></div>
-
-    <!-- Caractéristiques en bloc 2×3 -->
-    <div class="cs-stats-section" id="cs-stats-section">
-      <div class="cs-stats-header">
-        <span>Caractéristiques</span>
-        ${lvlPointsRemaining > 0 && canEdit
-          ? `<button data-action="showCharTab" data-tab="carac"
-              style="background:rgba(232,184,75,.15);border:1px solid rgba(232,184,75,.4);color:var(--gold);font-size:.65rem;padding:2px 9px;border-radius:999px;cursor:pointer;font-weight:700;letter-spacing:.04em"
-              title="Allouer vos points dans l'onglet Caracs">🎯 ${lvlPointsRemaining} pt${lvlPointsRemaining>1?'s':''}</button>`
-          : canEdit
-            ? `<button data-action="showCharTab" data-tab="carac" class="cs-hint" style="background:none;border:none;color:var(--text-dim);font-size:.7rem;cursor:pointer;padding:2px 6px;border-radius:6px" title="Voir le détail des caractéristiques">📊 détails</button>`
-            : ''}
-      </div>
-      <div class="cs-stats-grid">${statsHtml}</div>
-    </div>
-
-    ${canEdit ? `
-    <div class="cs-aura-picker">
-      <span class="cs-aura-picker-label">Aura</span>
-      <div class="cs-aura-dots">
-        ${[
-          {key:'blue',    color:'#4f8cff'},
-          {key:'arcane',  color:'#9d6fff'},
-          {key:'crimson', color:'#ff5a7e'},
-          {key:'gold',    color:'#e8b84b'},
-          {key:'emerald', color:'#22c38e'},
-          {key:'ember',   color:'#ff9544'},
-        ].map(a=>`<button class="cs-aura-dot${(c.aura||'blue')===a.key?' active':''}"
-          data-aura="${a.key}" style="--dot-color:${a.color}"
-          data-action="setCharAura" data-id="${c.id}" data-aura-key="${a.key}"
-          title="Aura ${a.key}"></button>`).join('')}
-      </div>
-    </div>` : ''}
-
-  </aside>
-
-  <!-- ══════════ CONTENU PRINCIPAL ══════════ -->
-  <div class="cs-main-col">
-
-    <!-- Onglets principaux -->
-    <nav class="cs-tabs" id="char-tabs">
-      <button class="cs-tab${topTab==='combat'?' active':''}"     data-tab="combat"     data-action="showCharTab">⚔️ Combat</button>
-      <button class="cs-tab${topTab==='inventaire'?' active':''}" data-tab="inventaire" data-action="showCharTab">🎒 Inventaire</button>
-      <button class="cs-tab${topTab==='journal'?' active':''}"    data-tab="journal"    data-action="showCharTab">📖 Journal</button>
-      <button class="cs-tab${topTab==='compte'?' active':''}"     data-tab="compte"     data-action="showCharTab">💰 Compte</button>
-      <button class="cs-tab${topTab==='profil'?' active':''}"     data-tab="profil"     data-action="showCharTab">👤 Présentation</button>
-    </nav>
-
-    <!-- Sous-onglets Combat : Équipement · Sorts · Maîtrises · Caracs -->
-    <div class="cs-subtab-bar" id="cs-subtabs-combat"
-         style="display:${topTab==='combat'?'flex':'none'}">
-      <button class="cs-subtab${leafTab==='equipement'?' active':''}" data-subtab="equipement" data-tab="equipement" data-action="showCharTab">🛡️ Équipement</button>
-      <button class="cs-subtab${leafTab==='sorts'?' active':''}"      data-subtab="sorts"      data-tab="sorts"      data-action="showCharTab">✨ Sorts</button>
-      <button class="cs-subtab${leafTab==='maitrises'?' active':''}"  data-subtab="maitrises"  data-tab="maitrises"  data-action="showCharTab">🎯 Maîtrises</button>
-      <button class="cs-subtab${leafTab==='carac'?' active':''}"      data-subtab="carac"      data-tab="carac"      data-action="showCharTab">📊 Caracs${lvlPointsRemaining>0?` <span class="cs-subtab-badge">${lvlPointsRemaining}</span>`:''}</button>
-    </div>
-
-    <!-- Sous-onglets Journal : Notes · Quêtes -->
-    <div class="cs-subtab-bar" id="cs-subtabs-journal"
-         style="display:${topTab==='journal'?'flex':'none'}">
-      <button class="cs-subtab${leafTab==='notes'?' active':''}"  data-subtab="notes"  data-tab="notes"  data-action="showCharTab">📝 Notes</button>
-      <button class="cs-subtab${leafTab==='quetes'?' active':''}" data-subtab="quetes" data-tab="quetes" data-action="showCharTab">📜 Quêtes</button>
-    </div>
-
-    <div id="char-tab-content" class="cs-tab-body"></div>
-
-  </div><!-- /cs-main-col -->
-
-</div><!-- /cs-layout -->`;
-  */
-  // ↑ Fin du bloc legacy commenté.
-
   _renderTabV3(v3Tab, c, canEdit);
 }
+
 
 function _renderTab(leafTab, c, canEdit) {
   // Legacy router — devient un proxy vers V3.
@@ -818,7 +571,7 @@ function _renderTab(leafTab, c, canEdit) {
 function _renderTabV3(tab, c, canEdit) {
   const area = document.getElementById('char-tab-content');
   if (!area) return;
-  const sub = window._currentJournalSub || 'notes';
+  const sub = _currentJournalSub || 'notes';
   const renders = {
     combat:  () => renderCharCombatV3(c, canEdit),
     sorts:   () => renderCharDeck(c, canEdit),
@@ -911,8 +664,8 @@ function renderCharLedger(c, canEdit) {
     return (b.idx || 0) - (a.idx || 0);
   });
 
-  // Filtres (état persistant sur window pour ne pas être perdu au re-render)
-  const filter = window._csV3LedgerFilter || { kind: 'all', search: '', limit: 25 };
+  // Filtres (état module-local pour ne pas être perdu au re-render)
+  const filter = _csV3LedgerFilter;
   const q = (filter.search || '').toLowerCase();
   const filtered = all.filter(e => {
     if (filter.kind === 'rcpt' && e.sign < 0) return false;
@@ -945,7 +698,7 @@ function renderCharLedger(c, canEdit) {
     groups[groups.length - 1].items.push(e);
   });
 
-  const addKind = window._csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
+  const addKind = _csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
   return `
   <div class="compte-summary">
     <div class="compte-tile">
@@ -1005,17 +758,17 @@ function renderCharLedger(c, canEdit) {
           <span>Date</span>
           <input type="date" id="ledger-date"
             value="${_csV3TodayISO()}" class="ledger-add-date"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
         </label>
         <label class="ledger-add-field ledger-add-field-lib">
           <span>Libellé</span>
           <input type="text" id="ledger-lib" placeholder="${addKind==='recettes'?'Pillage du gobelin…':'Auberge du nain…'}" class="lib"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
         </label>
         <label class="ledger-add-field ledger-add-field-amt">
           <span>Montant (or)</span>
           <input type="number" id="ledger-amount" placeholder="0" step="any" min="0" class="ledger-add-amount"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddLedger('${c.id}');}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
         </label>
       </div>
       <button class="ledger-add-btn ${addKind}" data-action="csV3AddLedger" data-id="${c.id}">
@@ -1030,8 +783,8 @@ function renderCharLedger(c, canEdit) {
           <li class="ledger-month">${_esc(g.month)}</li>
           ${g.items.map(e => {
             const editAttr = canEdit
-              ? `contenteditable="true" spellcheck="false" data-kind="${e.kind}" data-idx="${e.idx}"
-                  onblur="window._csV3LedgerSaveField(this,'${e.kind}',${e.idx},'$FIELD$')"
+              ? `contenteditable="true" spellcheck="false"
+                  data-blur="csV3LedgerSaveField" data-kind="${e.kind}" data-idx="${e.idx}" data-field="$FIELD$"
                   onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
                   onfocus="this.dataset.original=this.textContent"`
               : '';
@@ -1042,7 +795,7 @@ function renderCharLedger(c, canEdit) {
               <span class="ledger-amount-wrap">
                 <span class="ledger-sgn">${e.sign>0?'+':'−'}</span><span class="ledger-amount" ${canEdit
                   ? `contenteditable="true" spellcheck="false"
-                      onblur="window._csV3LedgerSaveAmount(this,'${e.kind}',${e.idx},${e.sign})"
+                      data-blur="csV3LedgerSaveAmount" data-kind="${e.kind}" data-idx="${e.idx}" data-sign="${e.sign}"
                       onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
                       onfocus="this.dataset.original=this.textContent"`
                   : ''}>${fmt(Math.abs(parseFloat(e.montant)||0))}</span><small class="ledger-or-suffix">or</small>
@@ -1061,13 +814,13 @@ function renderCharLedger(c, canEdit) {
 // Helper : récupère la référence FRAÎCHE du char depuis STATE (jamais une copie stale)
 function _csV3GetFreshChar(charId) {
   return STATE.characters.find(x => x.id === charId)
-      || (window._currentChar?.id === charId ? window._currentChar : null)
+      || (charSession.getCurrentChar()?.id === charId ? charSession.getCurrentChar() : null)
       || STATE.activeChar;
 }
 function _csV3SyncCharRefs(c) {
   if (!c) return;
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
-  if (window._currentChar?.id === c.id) window._currentChar = c;
+  if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
 }
 // Met à jour le solde de la bourse partout (sans tout re-render)
 function _csV3RefreshBourse(c) {
@@ -1084,7 +837,7 @@ function _csV3RefreshBourse(c) {
     el.innerHTML = `<span class="or-card-amount">${value}</span> ${smallHtml}`;
   });
   // 3) Helper legacy (anciennes sidebars éventuelles)
-  try { window.refreshOrDisplay?.(c); } catch {}
+  try { charSession.refresh(c); } catch {}
 }
 // Date du jour au format ISO court YYYY-MM-DD (compatible artisan + tri propre)
 function _csV3TodayISO() {
@@ -1094,8 +847,8 @@ function _csV3TodayISO() {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 // Sauvegarde inline d'un champ texte (date / libelle) d'une écriture
-window._csV3LedgerSaveField = async (el, kind, idx, field) => {
-  const charId = window._currentChar?.id; if (!charId) return;
+async function _csV3LedgerSaveField(el, kind, idx, field) {
+  const charId = charSession.getCurrentChar()?.id; if (!charId) return;
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
   const row = (c.compte[kind] || [])[idx]; if (!row) return;
@@ -1106,17 +859,17 @@ window._csV3LedgerSaveField = async (el, kind, idx, field) => {
   try {
     await updateInCol('characters', c.id, { compte: c.compte });
     // Si on a modifié la date, re-render pour refléter le nouveau tri/groupement
-    if (field === 'date' && window._currentCharTab === 'compte') {
-      _renderTabV3('compte', c, window._canEditChar);
+    if (field === 'date' && charSession.getCurrentCharTab() === 'compte') {
+      _renderTabV3('compte', c, charSession.getCanEditChar());
     }
   } catch (e) {
     console.warn('[ledger field save]', e);
     el.textContent = el.dataset.original || '';
   }
-};
+}
 // Sauvegarde inline du montant (gère le signe + ou −)
-window._csV3LedgerSaveAmount = async (el, kind, idx, sign) => {
-  const charId = window._currentChar?.id; if (!charId) return;
+async function _csV3LedgerSaveAmount(el, kind, idx, sign) {
+  const charId = charSession.getCurrentChar()?.id; if (!charId) return;
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
   const row = (c.compte[kind] || [])[idx]; if (!row) return;
@@ -1129,22 +882,22 @@ window._csV3LedgerSaveAmount = async (el, kind, idx, sign) => {
     await updateInCol('characters', c.id, { compte: c.compte });
     _csV3RefreshBourse(c);
     // Re-render systématique pour actualiser les totaux/solde
-    if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+    if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
   } catch (e) {
     console.warn('[ledger amount save]', e);
     el.textContent = el.dataset.original || '';
   }
-};
+}
 
-window._csV3LedgerSetAddKind = (kind, charId) => {
-  window._csV3LedgerAddKind = (kind === 'depenses') ? 'depenses' : 'recettes';
+function _csV3LedgerSetAddKind(kind, charId) {
+  _csV3LedgerAddKind = (kind === 'depenses') ? 'depenses' : 'recettes';
   // Préserve les valeurs déjà saisies avant le re-render
   const prevDate = document.getElementById('ledger-date')?.value || '';
   const prevLib  = document.getElementById('ledger-lib')?.value  || '';
   const prevAmt  = document.getElementById('ledger-amount')?.value || '';
-  if (charId && window._currentCharTab === 'compte') {
+  if (charId && charSession.getCurrentCharTab() === 'compte') {
     const c = _csV3GetFreshChar(charId);
-    if (c) _renderTabV3('compte', c, window._canEditChar);
+    if (c) _renderTabV3('compte', c, charSession.getCanEditChar());
   }
   // Restaure les valeurs sur les nouveaux inputs
   requestAnimationFrame(() => {
@@ -1156,10 +909,10 @@ window._csV3LedgerSetAddKind = (kind, charId) => {
     if (aEl) aEl.value = prevAmt;
     lEl?.focus();
   });
-};
+}
 
 // Suppression d'une ligne (re-fetch + re-render explicite, SANS confirmation)
-window._csV3DeleteLedger = async (charId, kind, idx) => {
+async function _csV3DeleteLedger(charId, kind, idx) {
   const c = _csV3GetFreshChar(charId); if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
   if (!(c.compte[kind] || [])[idx]) return;
@@ -1169,46 +922,44 @@ window._csV3DeleteLedger = async (charId, kind, idx) => {
     await updateInCol('characters', c.id, { compte: c.compte });
     _csV3RefreshBourse(c);
   } catch (e) { console.warn('[ledger del]', e); }
-  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
-};
+  if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
+}
 
-window._csV3LedgerSetKind = (charId, kind) => {
-  window._csV3LedgerFilter = { ...(window._csV3LedgerFilter || {}), kind, limit: 25 };
+function _csV3LedgerSetKind(charId, kind) {
+  _csV3LedgerFilter = { ..._csV3LedgerFilter, kind, limit: 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
-};
-window._csV3LedgerSetSearch = (charId, search) => {
-  const prev = window._csV3LedgerFilter || {};
-  window._csV3LedgerFilter = { ...prev, search, limit: 25 };
+  if (c && charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
+}
+function _csV3LedgerSetSearch(charId, search) {
+  _csV3LedgerFilter = { ..._csV3LedgerFilter, search, limit: 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c) return;
   // Re-render mais on restaure le focus + caret dans la search box
   const caret = document.querySelector('.ledger-search')?.selectionStart;
-  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
   requestAnimationFrame(() => {
     const inp = document.querySelector('.ledger-search');
     if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
   });
-};
-window._csV3LedgerMore = (charId) => {
-  const prev = window._csV3LedgerFilter || {};
-  window._csV3LedgerFilter = { ...prev, limit: (prev.limit || 25) + 25 };
+}
+function _csV3LedgerMore(charId) {
+  _csV3LedgerFilter = { ..._csV3LedgerFilter, limit: (_csV3LedgerFilter.limit || 25) + 25 };
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (c && window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
-};
+  if (c && charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
+}
 
 // Ajoute une écriture au compte via le schéma existant `c.compte.{recettes,depenses}`.
-window._csV3AddLedger = async function (charId) {
+async function _csV3AddLedger(charId) {
   const dateEl = document.getElementById('ledger-date');
   const libEl  = document.getElementById('ledger-lib');
   const amtEl  = document.getElementById('ledger-amount');
   if (!libEl || !amtEl) return;
-  const kind = window._csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
+  const kind = _csV3LedgerAddKind === 'depenses' ? 'depenses' : 'recettes';
   const date = (dateEl?.value || '').trim() || _csV3TodayISO();
   const lib  = (libEl.value || '').trim();
   const amt  = Math.abs(parseFloat((amtEl.value || '').replace(',', '.')) || 0);
-  if (!lib) { if (window.showNotif) window.showNotif('Libellé requis.', 'error'); libEl.focus(); return; }
-  if (!amt) { if (window.showNotif) window.showNotif('Montant requis.', 'error'); amtEl.focus(); return; }
+  if (!lib) { showNotif('Libellé requis.', 'error'); libEl.focus(); return; }
+  if (!amt) { showNotif('Montant requis.', 'error'); amtEl.focus(); return; }
   const c = _csV3GetFreshChar(charId);
   if (!c) return;
   c.compte = c.compte || { recettes: [], depenses: [] };
@@ -1216,13 +967,13 @@ window._csV3AddLedger = async function (charId) {
   c.compte[kind].push({ date, libelle: lib, montant: amt });
   _csV3SyncCharRefs(c);
   try { await updateInCol('characters', charId, { compte: c.compte }); }
-  catch (e) { if (window.showNotif) window.showNotif('Erreur de sauvegarde.', 'error'); return; }
+  catch (e) { showNotif('Erreur de sauvegarde.', 'error'); return; }
   _csV3RefreshBourse(c);
   // Re-render complet → totaux + tri + nouvelle ligne visibles
-  if (window._currentCharTab === 'compte') _renderTabV3('compte', c, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'compte') _renderTabV3('compte', c, charSession.getCanEditChar());
   // Focus l'input libellé pour la saisie en chaîne
   requestAnimationFrame(() => { document.getElementById('ledger-lib')?.focus(); });
-};
+}
 
 // ── Journal → sub-tabs Notes / Quêtes / Relations ────────────────────────────
 function renderCharJournal(c, canEdit, sub = 'notes') {
@@ -1247,9 +998,9 @@ function renderCharJournal(c, canEdit, sub = 'notes') {
   <div id="journal-body">${bodyHtml}</div>`;
 }
 
-window._csV3JournalSub = function (sub) {
-  window._currentJournalSub = sub;
-  const c = window._currentChar; const canEdit = window._canEditChar;
+function _csV3JournalSub(sub) {
+  _currentJournalSub = sub;
+  const c = charSession.getCurrentChar(); const canEdit = charSession.getCanEditChar();
   if (!c) return;
   // Rebuild juste l'onglet Journal sans recharger toute la fiche
   const area = document.getElementById('char-tab-content');
@@ -1257,7 +1008,7 @@ window._csV3JournalSub = function (sub) {
     area.innerHTML = renderCharJournal(c, canEdit, sub);
     if (sub === 'notes') bindRichTextEditors(area);
   }
-};
+}
 
 // Quêtes — schéma réel : { nom, type, description, valide }
 function renderJournalQuetes(c, canEdit) {
@@ -1317,7 +1068,7 @@ function renderCharNotesV3(c, canEdit) {
     return `<div class="q-empty">Aucune note. ${canEdit?'Clique sur "＋ Note" en haut pour en créer une.':''}</div>`;
   }
   return `<div class="notes-stack">${notes.map((n, i) => {
-    const isOpen = window._openNote === i;
+    const isOpen = _openNote === i;
     const titre = n.titre || 'Note sans titre';
     const date  = n.date  || '';
     return `<article class="note-v3 ${isOpen?'is-open':''}">
@@ -1326,8 +1077,8 @@ function renderCharNotesV3(c, canEdit) {
           ${isOpen ? '▾' : '▸'}
         </button>
         ${canEdit
-          ? `<input class="note-v3-titre" type="text" value="${_esc(titre)}" data-idx="${i}"
-              onblur="window._csV3SaveNoteTitle(${i},this.value)"
+          ? `<input class="note-v3-titre" type="text" value="${_esc(titre)}"
+              data-blur="csV3SaveNoteTitle" data-idx="${i}"
               onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}"
               placeholder="Titre de la note">`
           : `<span class="note-v3-titre note-v3-titre-ro">${_esc(titre)}</span>`}
@@ -1346,14 +1097,14 @@ function renderCharNotesV3(c, canEdit) {
   }).join('')}</div>`;
 }
 
-window._csV3ToggleNote = function (idx) {
-  window._openNote = window._openNote === idx ? null : idx;
-  const c = window._currentChar; if (!c) return;
+function _csV3ToggleNote(idx) {
+  _openNote = _openNote === idx ? null : idx;
+  const c = charSession.getCurrentChar(); if (!c) return;
   // Re-render journal en gardant le sub-tab notes
-  window._currentJournalSub = 'notes';
-  _renderTabV3('journal', c, window._canEditChar);
-};
-window._csV3SaveNoteTitle = async function (idx, value) {
+  _currentJournalSub = 'notes';
+  _renderTabV3('journal', c, charSession.getCanEditChar());
+}
+async function _csV3SaveNoteTitle(idx, value) {
   const c = STATE.activeChar; if (!c) return;
   const note = (c.notesList || [])[idx]; if (!note) return;
   const trimmed = (value || '').trim() || 'Note sans titre';
@@ -1362,7 +1113,7 @@ window._csV3SaveNoteTitle = async function (idx, value) {
   c.notesList[idx] = note;
   try { await updateInCol('characters', c.id, { notesList: c.notesList }); }
   catch (e) { console.warn('[note title]', e); }
-};
+}
 
 const _RELATION_PALETTE = {
   lien:     ['rgba(157,111,255,.14)','rgba(157,111,255,.4)','#c8aaff'],
@@ -1401,7 +1152,7 @@ function renderCharRelations(c, canEdit) {
   </div>`;
 }
 
-window._csV3AddRelation = async function (charId) {
+async function _csV3AddRelation(charId) {
   const nom = prompt('Nom de la relation :'); if (!nom?.trim()) return;
   const role = prompt('Rôle (ex: Mentor, Frère, PNJ rencontré) :') || '';
   const sent = prompt('Sentiment (lien · allie · neutre · ennemi · mefiance) :', 'neutre') || 'neutre';
@@ -1413,9 +1164,9 @@ window._csV3AddRelation = async function (charId) {
   rels.push({ nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() });
   c.relations = rels;
   await updateInCol('characters', charId, { relations: rels });
-  window._csV3JournalSub('relations');
-};
-window._csV3EditRelation = async function (charId, idx) {
+  _csV3JournalSub('relations');
+}
+async function _csV3EditRelation(charId, idx) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c?.relations?.[idx]) return;
   const r = c.relations[idx];
@@ -1427,16 +1178,16 @@ window._csV3EditRelation = async function (charId, idx) {
   const next = { ...r, nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() };
   const rels = c.relations.slice(); rels[idx] = next; c.relations = rels;
   await updateInCol('characters', charId, { relations: rels });
-  window._csV3JournalSub('relations');
-};
-window._csV3DeleteRelation = async function (charId, idx) {
+  _csV3JournalSub('relations');
+}
+async function _csV3DeleteRelation(charId, idx) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c?.relations?.[idx]) return;
   if (!confirm(`Supprimer la relation "${c.relations[idx].nom||'?'}" ?`)) return;
   const rels = c.relations.slice(); rels.splice(idx, 1); c.relations = rels;
   await updateInCol('characters', charId, { relations: rels });
-  window._csV3JournalSub('relations');
-};
+  _csV3JournalSub('relations');
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — PROFIL (lecture éditoriale + radar + identité + visibilité)
@@ -1528,18 +1279,15 @@ function _mergeIdentityDefaults(arr) {
 
 function renderCharProfilV3(c, canEdit) {
   // Bootstrap pres cache pour récupérer la bio rich-text
-  if (!(c.id in (window._profilCache || {}))) {
+  if (!(c.id in _profilCache)) {
     try { renderCharProfil(c, canEdit); } catch {}
   }
 
   const quote = c.quote || '';
   const identity = _mergeIdentityDefaults(c.identity);
-  const presCache = window._profilCache?.[c.id] || null;
+  const presCache = _profilCache?.[c.id] || null;
   const bioHtml = presCache?.content || c.bio || '';
-  // Source unique des traits = le doc characters (c.tags). presCache.tags (doc
-  // players) n'est qu'un repli legacy : sans ça, un doc players avec tags:[]
-  // (écrit par saveCharProfil) écrasait les traits enregistrés.
-  const tags = (Array.isArray(c.tags) && c.tags.length) ? c.tags : (presCache?.tags || c.tags || []);
+  const tags = presCache?.tags || c.tags || [];
 
   const visEntries = [
     { k: 'afficherNiveau',    lbl: 'Niveau',           def: true  },
@@ -1577,7 +1325,7 @@ function renderCharProfilV3(c, canEdit) {
           <input type="text" id="csv3-tag-input-${c.id}" class="profil-tag-input"
             placeholder="${tagsFull ? `Maximum ${TAG_MAX_V3} traits atteint` : 'Ajouter un trait personnalisé…'}"
             maxlength="24" ${tagsFull?'disabled':''}
-            onkeydown="if(event.key==='Enter'){event.preventDefault();window._csV3AddProfilTagFromInput('${c.id}');}else if(event.key==='Escape'){this.value='';this.blur();}">
+            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.profil-tags-input-row')?.querySelector('[data-action=csV3AddProfilTagFromInput]')?.click();}else if(event.key==='Escape'){this.value='';this.blur();}">
           <button class="profil-tag-add-btn" ${tagsFull?'disabled':''}
             data-action="csV3AddProfilTagFromInput" data-id="${c.id}">Ajouter</button>
         </div>
@@ -1600,7 +1348,7 @@ function renderCharProfilV3(c, canEdit) {
     const valHtml = canEdit
       ? `<input type="text" class="profil-fact-input" value="${_esc(v)}" placeholder="—"
           data-id-key="${_esc(k)}"
-          onblur="window._csV3SaveIdentityValue('${c.id}','${safeKey}',this.value)"
+          data-blur="csV3SaveIdentityValue" data-id="${c.id}" data-key="${safeKey}"
           onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">`
       : `<span class="profil-fact-v">${v ? _esc(v) : '<span style="color:var(--text-dim)">—</span>'}</span>`;
     const keyClickable = isCustom && canEdit
@@ -1613,7 +1361,7 @@ function renderCharProfilV3(c, canEdit) {
   }).join('');
 
   // Bio : édition rich-text quand active, sinon rendu fidèle via richTextContentHtml
-  const editingBio = window._csV3EditingBio === c.id;
+  const editingBio = _csV3EditingBio === c.id;
   const bioBlockHtml = editingBio && canEdit
     ? `<div class="profil-bio-edit">
         ${richTextEditorHtml({ id: 'profil-bio-rt', html: bioHtml, minHeight: 220, placeholder: 'Décris ton personnage…' })}
@@ -1634,7 +1382,7 @@ function renderCharProfilV3(c, canEdit) {
         value="${_esc(quote)}"
         placeholder="Ajoute une citation pour ton personnage…"
         data-input="_csQuoteToggleEmpty"
-        onblur="this.classList.toggle('is-empty', !this.value);window._csV3SaveQuote('${c.id}',this.value)"
+        data-blur="csV3SaveQuote" data-id="${c.id}"
         onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.classList.toggle('is-empty',!this.value);this.blur();}">`
     : (quote
         ? `<div class="profil-quote">${_esc(quote)}</div>`
@@ -1696,55 +1444,49 @@ function renderCharProfilV3(c, canEdit) {
 }
 
 // Handler édition citation — sauvegarde inline sans modal
-window._csV3SaveQuote = async function (charId, value) {
+async function _csV3SaveQuote(charId, value) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const trimmed = (value || '').trim();
   if ((c.quote || '') === trimmed) return;
   c.quote = trimmed;
   try { await updateInCol('characters', charId, { quote: trimmed }); }
   catch (e) { console.warn('[quote save]', e); }
-};
+}
 async function _csV3CommitTags(charId, nextTags) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   c.tags = nextTags;
-  if (window._profilCache?.[charId]) window._profilCache[charId].tags = nextTags;
+  if (_profilCache?.[charId]) _profilCache[charId].tags = nextTags;
   try { await updateInCol('characters', charId, { tags: nextTags }); }
-  catch (e) { console.warn('[tags save]', e); window.showNotif?.('Erreur d\'enregistrement des traits.', 'error'); }
-  // Synchronise la présentation publique (page Joueurs) si elle existe.
-  const presId = window._profilCache?.[charId]?.id;
-  if (presId) {
-    try { await updateInCol('players', presId, { tags: nextTags }); }
-    catch (e) { console.warn('[tags sync players]', e); }
-  }
-  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
+  catch (e) { console.warn('[tags save]', e); }
+  if (charSession.getCurrentCharTab() === 'profil') _renderTabV3('profil', c, true);
 }
-window._csV3AddProfilTag = async function (charId, value) {
+async function _csV3AddProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
-  const cur = ((Array.isArray(c.tags) && c.tags.length) ? c.tags : (window._profilCache?.[charId]?.tags || c.tags || [])).slice();
+  const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
   if (cur.length >= 8) return;
   if (cur.some(x => x.toLowerCase() === t.toLowerCase())) return;
   cur.push(t);
   await _csV3CommitTags(charId, cur);
-};
-window._csV3AddProfilTagFromInput = async function (charId) {
+}
+async function _csV3AddProfilTagFromInput(charId) {
   const input = document.getElementById(`csv3-tag-input-${charId}`);
   if (!input) return;
   const val = input.value.trim();
   if (!val) { input.focus(); return; }
-  await window._csV3AddProfilTag(charId, val);
-};
-window._csV3RemoveProfilTag = async function (charId, value) {
+  await _csV3AddProfilTag(charId, val);
+}
+async function _csV3RemoveProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
-  const cur = ((Array.isArray(c.tags) && c.tags.length) ? c.tags : (window._profilCache?.[charId]?.tags || c.tags || [])).slice();
+  const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
   const next = cur.filter(x => x.toLowerCase() !== t.toLowerCase());
   if (next.length === cur.length) return;
   await _csV3CommitTags(charId, next);
-};
+}
 // Sauvegarde la VALEUR d'un champ identité (defaults ou custom) directement depuis l'input.
 // Ne re-render PAS la fiche pour éviter de perdre le focus pendant la saisie.
-window._csV3SaveIdentityValue = async function (charId, key, value) {
+async function _csV3SaveIdentityValue(charId, key, value) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const merged = _mergeIdentityDefaults(c.identity);
   const trimmed = (value || '').trim();
@@ -1759,11 +1501,11 @@ window._csV3SaveIdentityValue = async function (charId, key, value) {
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) {
     console.warn('[identity save]', e);
-    if (window.showNotif) window.showNotif?.('Erreur de sauvegarde.', 'error');
+    showNotif('Erreur de sauvegarde.', 'error');
   }
-};
+}
 // Renomme / supprime un champ CUSTOM (les defaults ne sont pas renommables)
-window._csV3RenameIdentity = async function (charId, key) {
+async function _csV3RenameIdentity(charId, key) {
   if (IDENTITY_DEFAULTS.includes(key)) return;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const newK = prompt(`Renommer "${key}" (laisser vide pour supprimer) :`, key);
@@ -1778,10 +1520,10 @@ window._csV3RenameIdentity = async function (charId, key) {
   c.identity = next;
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) { console.warn('[identity rename]', e); }
-  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
-};
+  if (charSession.getCurrentCharTab() === 'profil') _renderTabV3('profil', c, true);
+}
 // Ajoute un champ identité custom
-window._csV3AddFact = async function (charId) {
+async function _csV3AddFact(charId) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const k = prompt('Nom du champ (ex: Bras-droit, Phobie…) :'); if (!k?.trim()) return;
   const v = prompt('Valeur :') || '';
@@ -1790,47 +1532,47 @@ window._csV3AddFact = async function (charId) {
   c.identity = next;
   try { await updateInCol('characters', charId, { identity: next }); }
   catch (e) { console.warn('[identity add]', e); }
-  if (window._currentCharTab === 'profil') _renderTabV3('profil', c, true);
-};
+  if (charSession.getCurrentCharTab() === 'profil') _renderTabV3('profil', c, true);
+}
 // Édition bio avec l'éditeur rich-text — mode "édition" toggle
-window._csV3EnterBioEdit = function (charId) {
-  window._csV3EditingBio = charId;
+function _csV3EnterBioEdit(charId) {
+  _csV3EditingBio = charId;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   _renderTabV3('profil', c, true);
-};
-window._csV3CancelBio = function (charId) {
-  window._csV3EditingBio = null;
+}
+function _csV3CancelBio(charId) {
+  _csV3EditingBio = null;
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   _renderTabV3('profil', c, true);
-};
-window._csV3SaveBioRt = async function (charId) {
+}
+async function _csV3SaveBioRt(charId) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   const html = getRichTextHtml('profil-bio-rt') || '';
   // Sauvegarde : on écrit sur c.bio (string HTML) ET sur pres.content si présence
   c.bio = html;
   await updateInCol('characters', charId, { bio: html });
-  const presCache = window._profilCache?.[charId];
+  const presCache = _profilCache?.[charId];
   if (presCache?.id) {
     try {
       await updateInCol('players', presCache.id, { content: html });
       presCache.content = html;
     } catch (e) { console.warn('[bio→pres sync]', e); }
   }
-  window._csV3EditingBio = null;
+  _csV3EditingBio = null;
   _renderTabV3('profil', c, true);
-};
-window._csV3SetCombatStyle = async function (charId, styleId) {
+}
+async function _csV3SetCombatStyle(charId, styleId) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
   // Toggle : reclic sur le style actif → on revient à la détection auto (null)
   const next = c.combatStyle === styleId ? null : styleId;
   c.combatStyle = next;
   await updateInCol('characters', charId, { combatStyle: next });
-  if (window._currentCharTab === 'combat') _renderTabV3('combat', c, true);
-};
+  if (charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, true);
+}
 
-window._csV3SaveVisibility = async function (charId, key, value) {
+async function _csV3SaveVisibility(charId, key, value) {
   // Sauvegarde directement sur le document pres (collection 'players'). Si pas en cache, on fallback char doc.
-  const presCache = window._profilCache?.[charId];
+  const presCache = _profilCache?.[charId];
   if (presCache?.id) {
     try {
       await updateInCol('players', presCache.id, { [key]: value });
@@ -1857,7 +1599,7 @@ const _ITEM_STAT_LABELS = {
 };
 const _ITEM_DERIVED_LABELS = {
   pvMaxBonus: 'PV', pmMaxBonus: 'PM',
-  vitesseBonus: 'Vit.', initiativeBonus: 'Init.', deckBonus: 'Deck',
+  vitesseBonus: 'Vit.', initiativeBonus: 'Init.',
 };
 // Bump une valeur de bonus dérivé par le palier d'amélioration Artisan
 // (cohérent avec _bumpBonus de char-stats.js : ne bump que les valeurs positives).
@@ -1985,11 +1727,11 @@ function renderCharCombatV3(c, canEdit) {
       try { b = getItemStatBonus(it, fullKey); } catch {}
       if (b) badges.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
     });
-    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','deckBonus'].forEach(k => {
+    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
       // Applique le palier Artisan (upgrades.effectBonus) sur les bonus positifs
       const v = _bumpDerived(parseInt(it[k]) || 0, it);
       if (!v) return;
-      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.', deckBonus:'Deck' }[k];
+      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.' }[k];
       badges.push({ lbl: `${shortLbl} ${v>0?'+':''}${v}`, cls: 'gold' });
     });
     // Traits via _getTraits (importé de data.js)
@@ -2087,13 +1829,13 @@ function renderCharCombatV3(c, canEdit) {
   if (!_combatTabCache.styles) {
     loadCombatStyles().then(s => {
       _combatTabCache.styles = s || [];
-      if (window._currentCharTab === 'combat') _renderTabV3('combat', c, canEdit);
+      if (charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit);
     }).catch(() => { _combatTabCache.styles = []; });
   }
   if (!_combatTabCache.dmgTypes) {
     loadDamageTypes().then(t => {
       _combatTabCache.dmgTypes = t || [];
-      if (window._currentCharTab === 'combat') _renderTabV3('combat', c, canEdit);
+      if (charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit);
     }).catch(() => { _combatTabCache.dmgTypes = []; });
   }
 
@@ -2262,8 +2004,8 @@ function renderCharInventaireV3(c, canEdit) {
     return s + (Number.isFinite(p) ? p * q : 0);
   }, 0);
 
-  // État du filtre / search (persisté sur window)
-  const filter = window._csV3InvFilter || { cat: 'all', search: '' };
+  // État du filtre / search module-local
+  const filter = _csV3InvFilter;
   const q = (filter.search || '').toLowerCase();
 
   // Stack : regroupe les items identiques (même itemId ou même nom+rareté+template+prix)
@@ -2379,21 +2121,20 @@ function renderCharInventaireV3(c, canEdit) {
   return summaryHtml + filterBarHtml + `<div class="inv-grid">${cardsHtml}</div>`;
 }
 
-window._csV3InvSetCat = (cat) => {
-  window._csV3InvFilter = { ...(window._csV3InvFilter || {}), cat };
-  if (window._currentChar && window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
-};
-window._csV3InvSetSearch = (search) => {
-  const prev = window._csV3InvFilter || {};
-  window._csV3InvFilter = { ...prev, search };
-  if (!window._currentChar) return;
+function _csV3InvSetCat(cat) {
+  _csV3InvFilter = { ..._csV3InvFilter, cat };
+  if (charSession.getCurrentChar() && charSession.getCurrentCharTab() === 'inv') _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
+}
+function _csV3InvSetSearch(search) {
+  _csV3InvFilter = { ..._csV3InvFilter, search };
+  if (!charSession.getCurrentChar()) return;
   const caret = document.querySelector('.inv-search input')?.selectionStart;
-  if (window._currentCharTab === 'inv') _renderTabV3('inv', window._currentChar, window._canEditChar);
+  if (charSession.getCurrentCharTab() === 'inv') _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
   requestAnimationFrame(() => {
     const inp = document.querySelector('.inv-search input');
     if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
   });
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — SORTS (.spell list avec toggle + body + cost)
@@ -2472,7 +2213,7 @@ async function allocateStat(charId, key, delta = 1) {
 
   c.stats = stats; c.statsLevelUps = levelUps;
   await updateInCol('characters', charId, { stats, statsLevelUps: levelUps });
-  renderCharSheet(c, window._currentCharTab || 'combat');
+  renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
 }
 
 /**
@@ -2480,12 +2221,12 @@ async function allocateStat(charId, key, delta = 1) {
  * du perso ciblé si admin). Désactive automatiquement isDefault sur les autres
  * personnages du même uid pour garantir l'unicité.
  */
-window._setDefaultCharacter = async function (charId) {
+async function _setDefaultCharacter(charId) {
   const all = STATE.characters || [];
   const c = all.find(x => x.id === charId);
   if (!c) return;
   const ownerUid = c.uid;
-  if (!ownerUid) { window.showNotif?.('Personnage sans propriétaire.', 'error'); return; }
+  if (!ownerUid) { showNotif('Personnage sans propriétaire.', 'error'); return; }
   const wasOn = !!c.isDefault;
   try {
     // Désactive isDefault sur tous les autres persos du même propriétaire en parallèle
@@ -2499,19 +2240,19 @@ window._setDefaultCharacter = async function (charId) {
     c.isDefault = !wasOn;
     updates.push(updateInCol('characters', charId, { isDefault: c.isDefault }));
     await Promise.all(updates);
-    window.showNotif?.(c.isDefault
+    showNotif(c.isDefault
       ? `★ ${c.nom || 'Personnage'} défini comme personnage par défaut`
       : 'Personnage par défaut retiré', 'success');
     // Re-render la sheet pour mettre à jour les pills et l'étoile
-    if (window._currentChar?.id === charId) {
-      renderCharSheet(c, window._currentCharTab || 'combat');
+    if (charSession.getCurrentChar()?.id === charId) {
+      renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
     } else if (typeof renderCharSheet === 'function') {
-      const cur = window._currentChar || STATE.activeChar;
-      if (cur) renderCharSheet(cur, window._currentCharTab || 'combat');
+      const cur = charSession.getCurrentChar() || STATE.activeChar;
+      if (cur) renderCharSheet(cur, charSession.getCurrentCharTab() || 'combat');
     }
   } catch (e) {
     console.error('[set default char]', e);
-    if (window.notifySaveError) window.notifySaveError(e);
+    notifySaveError(e);
   }
 };
 
@@ -2523,15 +2264,10 @@ async function setCharAura(charId, aura) {
   const side = document.getElementById('cs-sidebar');
   if (side) {
     side.setAttribute('data-aura', aura);
-    const AURA_PALETTE = {
-      blue:'#4f8cff', arcane:'#9d6fff', crimson:'#ff5a7e',
-      gold:'#e8b84b', emerald:'#22c38e', ember:'#ff9544',
-    };
-    const col = AURA_PALETTE[aura] || AURA_PALETTE.blue;
-    const r = parseInt(col.slice(1,3),16), g = parseInt(col.slice(3,5),16), b = parseInt(col.slice(5,7),16);
-    side.style.setProperty('--aura-glow',   `rgba(${r},${g},${b},.14)`);
-    side.style.setProperty('--aura-border', `rgba(${r},${g},${b},.55)`);
-    side.style.setProperty('--aura-shadow', `0 0 38px rgba(${r},${g},${b},.28)`);
+    const { auraGlow, auraBd, auraSh } = _auraVars(_auraColor(aura));
+    side.style.setProperty('--aura-glow',   auraGlow);
+    side.style.setProperty('--aura-border', auraBd);
+    side.style.setProperty('--aura-shadow', auraSh);
   }
   document.querySelectorAll('.cs-aura-dot, .aura-dot').forEach(d =>
     d.classList.toggle('active', d.dataset.aura === aura)
@@ -2547,16 +2283,16 @@ function showCharTab(tab, el) {
   const v3 = _resolveV3Tab(tab);
 
   // Mémorise la position de scroll de l'onglet quitté (pour le restituer plus tard)
-  const prevLeaf = window._currentCharTab;
-  const prevChar = window._currentChar?.id;
+  const prevLeaf = charSession.getCurrentCharTab();
+  const prevChar = charSession.getCurrentChar()?.id;
   if (prevLeaf && prevChar) {
     const area = document.getElementById('char-tab-content');
     const scrollTop = area?.scrollTop ?? window.scrollY ?? 0;
     if (scrollTop > 0) _scrollByTab.set(_scrollKey(prevChar, prevLeaf), scrollTop);
   }
 
-  window._currentTopTab  = v3;
-  window._currentCharTab = v3;
+  _currentTopTab  = v3;
+  charSession.set(charSession.getCurrentChar(), charSession.getCanEditChar(), v3);
 
   // Onglets v3 (nouveau template)
   document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t =>
@@ -2567,10 +2303,10 @@ function showCharTab(tab, el) {
     t.classList.toggle('active', t.dataset.tab === v3)
   );
 
-  _renderTabV3(v3, window._currentChar, window._canEditChar);
+  _renderTabV3(v3, charSession.getCurrentChar(), charSession.getCanEditChar());
 
   // Restitue le scroll de l'onglet rejoint (si on y était déjà passé)
-  const charId = window._currentChar?.id;
+  const charId = charSession.getCurrentChar()?.id;
   const saved  = charId ? _scrollByTab.get(_scrollKey(charId, v3)) : null;
   if (saved != null) {
     requestAnimationFrame(() => {
@@ -2587,19 +2323,27 @@ function showCharTab(tab, el) {
 // ══════════════════════════════════════════════
 // REGISTRY data-action — délégation centralisée
 // ══════════════════════════════════════════════
+registerCharBlurActions({
+  csV3LedgerSaveField: (el) => _csV3LedgerSaveField(el, el.dataset.kind, Number(el.dataset.idx), el.dataset.field),
+  csV3LedgerSaveAmount: (el) => _csV3LedgerSaveAmount(el, el.dataset.kind, Number(el.dataset.idx), Number(el.dataset.sign)),
+  csV3SaveNoteTitle: (el) => _csV3SaveNoteTitle(Number(el.dataset.idx), el.value),
+  csV3SaveIdentityValue: (el) => _csV3SaveIdentityValue(el.dataset.id, el.dataset.key, el.value),
+  csV3SaveQuote: (el) => { el.classList.toggle('is-empty', !el.value); _csV3SaveQuote(el.dataset.id, el.value); },
+});
+
 registerActions({
   // Champs édités (change / input)
   saveXpDirect:            (el)     => saveXpDirect(el.dataset.id, el),
   previewXpBar:            (el)     => previewXpBar(el, Number(el.dataset.palier)),
-  _csV3LedgerSetSearch:    (el)     => window._csV3LedgerSetSearch?.(el.dataset.id, el.value),
+  _csV3LedgerSetSearch:    (el)     => _csV3LedgerSetSearch(el.dataset.id, el.value),
   _csQuoteToggleEmpty:     (el)     => el.classList.toggle('is-empty', !el.value),
-  _csV3SaveVisibility:     (el)     => window._csV3SaveVisibility?.(el.dataset.id, el.dataset.key, el.checked),
-  _csV3InvSetSearch:       (el)     => window._csV3InvSetSearch?.(el.value),
+  _csV3SaveVisibility:     (el)     => _csV3SaveVisibility(el.dataset.id, el.dataset.key, el.checked),
+  _csV3InvSetSearch:       (el)     => _csV3InvSetSearch(el.value),
   // Sélection
   selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
   createNewChar:           ()       => createNewChar(),
   filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.pseudo, btn),
-  _setDefaultCharacter:    (btn)    => window._setDefaultCharacter(btn.dataset.id),
+  _setDefaultCharacter:    (btn)    => _setDefaultCharacter(btn.dataset.id),
 
   // Tabs
   showCharTab:             (btn)    => showCharTab(btn.dataset.tab, btn),
@@ -2628,42 +2372,42 @@ registerActions({
   openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
 
   // Ledger
-  csV3LedgerSetKind:       (btn)    => window._csV3LedgerSetKind(btn.dataset.id, btn.dataset.kind),
-  csV3LedgerSetAddKind:    (btn)    => window._csV3LedgerSetAddKind(btn.dataset.kind, btn.dataset.id),
-  csV3AddLedger:           (btn)    => window._csV3AddLedger(btn.dataset.id),
-  csV3DeleteLedger:        (btn)    => window._csV3DeleteLedger(btn.dataset.id, btn.dataset.kind, Number(btn.dataset.idx)),
-  csV3LedgerMore:          (btn)    => window._csV3LedgerMore(btn.dataset.id),
+  csV3LedgerSetKind:       (btn)    => _csV3LedgerSetKind(btn.dataset.id, btn.dataset.kind),
+  csV3LedgerSetAddKind:    (btn)    => _csV3LedgerSetAddKind(btn.dataset.kind, btn.dataset.id),
+  csV3AddLedger:           (btn)    => _csV3AddLedger(btn.dataset.id),
+  csV3DeleteLedger:        (btn)    => _csV3DeleteLedger(btn.dataset.id, btn.dataset.kind, Number(btn.dataset.idx)),
+  csV3LedgerMore:          (btn)    => _csV3LedgerMore(btn.dataset.id),
 
   // Journal
-  csV3JournalSub:          (btn)    => window._csV3JournalSub(btn.dataset.sub),
+  csV3JournalSub:          (btn)    => _csV3JournalSub(btn.dataset.sub),
   addNote:                 ()       => addNote(),
   addQuete:                ()       => addQuete(),
-  csV3AddRelation:         (btn)    => window._csV3AddRelation(btn.dataset.id),
+  csV3AddRelation:         (btn)    => _csV3AddRelation(btn.dataset.id),
   toggleQuete:             (btn)    => toggleQuete(Number(btn.dataset.idx)),
   deleteQuete:             (btn)    => deleteQuete(Number(btn.dataset.idx)),
-  csV3ToggleNote:          (btn)    => window._csV3ToggleNote(Number(btn.dataset.idx)),
+  csV3ToggleNote:          (btn)    => _csV3ToggleNote(Number(btn.dataset.idx)),
   deleteNote:              (btn)    => deleteNote(Number(btn.dataset.idx)),
   saveNote:                (btn)    => saveNote(Number(btn.dataset.idx)),
-  csV3EditRelation:        (btn)    => window._csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
-  csV3DeleteRelation:      (btn)    => window._csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
+  csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
+  csV3DeleteRelation:      (btn)    => _csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
 
   // Profil
-  csV3RemoveProfilTag:      (btn)   => window._csV3RemoveProfilTag(btn.dataset.id, btn.dataset.tag),
-  csV3AddProfilTagFromInput:(btn)   => window._csV3AddProfilTagFromInput(btn.dataset.id),
-  csV3AddProfilTag:         (btn)   => window._csV3AddProfilTag(btn.dataset.id, btn.dataset.tag),
-  csV3RenameIdentity:       (btn)   => window._csV3RenameIdentity(btn.dataset.id, btn.dataset.key),
-  csV3SaveBioRt:            (btn)   => window._csV3SaveBioRt(btn.dataset.id),
-  csV3CancelBio:            (btn)   => window._csV3CancelBio(btn.dataset.id),
-  csV3EnterBioEdit:         (btn)   => window._csV3EnterBioEdit(btn.dataset.id),
-  csV3AddFact:              (btn)   => window._csV3AddFact(btn.dataset.id),
+  csV3RemoveProfilTag:      (btn)   => _csV3RemoveProfilTag(btn.dataset.id, btn.dataset.tag),
+  csV3AddProfilTagFromInput:(btn)   => _csV3AddProfilTagFromInput(btn.dataset.id),
+  csV3AddProfilTag:         (btn)   => _csV3AddProfilTag(btn.dataset.id, btn.dataset.tag),
+  csV3RenameIdentity:       (btn)   => _csV3RenameIdentity(btn.dataset.id, btn.dataset.key),
+  csV3SaveBioRt:            (btn)   => _csV3SaveBioRt(btn.dataset.id),
+  csV3CancelBio:            (btn)   => _csV3CancelBio(btn.dataset.id),
+  csV3EnterBioEdit:         (btn)   => _csV3EnterBioEdit(btn.dataset.id),
+  csV3AddFact:              (btn)   => _csV3AddFact(btn.dataset.id),
   openProfilImageUpload:    (btn)   => openProfilImageUpload(btn.dataset.id),
   removeProfilImage:        (btn)   => removeProfilImage(btn.dataset.id),
 
   // Équipement & combat
   editEquipSlot:            (btn)   => editEquipSlot(btn.dataset.slot),
-  openCombatStylesAdmin:    ()      => window.openCombatStylesAdmin?.(),
-  openDamageTypesAdmin:     ()      => window.openDamageTypesAdmin?.(),
-  toggleCharElement:        (btn)   => window._toggleCharElement?.(btn.dataset.id, btn.dataset.elem),
+  openCombatStylesAdmin:    ()      => openCombatStylesAdmin(),
+  openDamageTypesAdmin:     ()      => openDamageTypesAdmin(),
+  toggleCharElement:        (btn)   => toggleCharElement(btn.dataset.id, btn.dataset.elem),
 
   // Maîtrises
   addMaitrise:              ()      => addMaitrise(),
@@ -2671,7 +2415,7 @@ registerActions({
 
   // Inventaire
   addInvItem:               ()      => addInvItem(),
-  csV3InvSetCat:            (btn)   => window._csV3InvSetCat(btn.dataset.cat),
+  csV3InvSetCat:            (btn)   => _csV3InvSetCat(btn.dataset.cat),
   openSellInvModal:         (btn)   => openSellInvModal(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix), btn.dataset.name),
   openSendInvModal:         (btn)   => openSendInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
   openDeleteInvModal:       (btn)   => openDeleteInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
@@ -2682,11 +2426,7 @@ registerActions({
   saveInvItemFromShop:      ()      => saveInvItemFromShop(),
   saveInvItem:              (btn)   => saveInvItem(Number(btn.dataset.idx)),
   editInvItem:              (btn)   => editInvItem(Number(btn.dataset.idx)),
-  filterInvClear:           (btn)   => { window._charInvSearch = ''; filterInvRows(''); const w = btn.closest('.inv-search-wrap'); if (w) w.querySelector('input').value = ''; },
-  _invmStep:                (btn)   => window._invmStep(btn.dataset.input, Number(btn.dataset.delta), Number(btn.dataset.max), btn.dataset.context),
-  _lootQte:                 (btn)   => { const i = document.getElementById('loot-qte'); if (i) i.value = Math.max(1, parseInt(i.value || 1) + Number(btn.dataset.delta)); },
-  _lootSelect:              (btn)   => window._lootSelect(btn.dataset.id),
-  _lootSetCat:              (btn)   => window._lootSetCat(btn.dataset.cat),
+  filterInvClear:           (btn)   => { filterInvRows(''); const w = btn.closest('.inv-search-wrap'); if (w) w.querySelector('input').value = ''; },
 
   // Sorts
   addSort:                  ()      => addSort(),
@@ -2700,9 +2440,9 @@ registerActions({
   addCompteRow:             (btn)   => addCompteRow(btn.dataset.compteType),
   deleteCompteRow:          (btn)   => deleteCompteRow(btn.dataset.compteType, Number(btn.dataset.idx)),
   saveCompteField:          (el)    => saveCompteField(el.dataset.compteType, Number(el.dataset.idx), el.dataset.field, el.value),
-  _toggleCompteHist:        (btn)   => window._toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
-  _csAddXp:                 (btn)   => window._csAddXp(btn.dataset.id),
-  _allocStatPoint:          (btn)   => window._allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
+  _toggleCompteHist:        (btn)   => toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
+  _csAddXp:                 (btn)   => addXpFromInput(btn.dataset.id),
+  _allocStatPoint:          (btn)   => allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
   saveMaitrise:             (btn)   => saveMaitrise(Number(btn.dataset.idx)),
   deleteMaitrise:           (btn)   => deleteMaitrise(Number(btn.dataset.idx)),
   removeProfilTag:          (btn)   => removeProfilTag(btn),
@@ -2710,75 +2450,9 @@ registerActions({
   saveCharProfil:           (btn)   => saveCharProfil(btn.dataset.id),
 });
 
-Object.assign(window, {
-  // Noyau
-  charNavCardHtml, selectChar, filterAdminChars,
-  renderCharSheet, showCharTab,
-  _renderTab, refreshOrDisplay,
+charSession.bindRender(_renderTab, renderCharSheet, refreshOrDisplay);
 
-  // V3 (refonte personnage)
-  renderCharLedger, renderCharJournal, renderCharRelations,
-  allocateStat,
-
-  // Stats & affichage
-  getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcOr, calcPalier,
-
-  // Render tabs
-  renderCharCarac, renderCharEquip, renderCharDeck,
-  _renderInventaireBoutique, renderCharInventaire,
-  renderCharQuetes, renderCharNotes, renderCharCompte, renderCharMaitrises,
-  renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
-  addProfilTag, removeProfilTag,
-
-  // Inventaire
-  openSellInvModal, sellInvItemBulk, sellInvItem,
-  openDeleteInvModal, deleteInvItemBulk,
-  openSendInvModal, sendInvItem,
-  openSendGoldModal, sendGold,
-  addInvItem, _lootPillStyle, saveInvItemFromShop,
-  editInvItem, saveInvItem,
-  filterInvRows,
-
-  // Équipement
-  editEquipSlot, saveEquipSlot, clearEquipSlot,
-  equipSlotFromInv, previewEquipFromInv,
-
-  // Sorts
-  sortDragStart, sortDragOver, sortDragEnd, sortDrop,
-  toggleSortDetail, selectNoyau,
-  runeIncrement, runeDecrement, updateSortPM,
-  addSort, editSort, openSortModal, saveSort,
-  openSortCatEditor,
-
-  // Combat styles
-  openCombatStylesAdmin, openWeaponFormatsAdmin, openDamageTypesAdmin, openSpellMatricesAdmin,
-
-  // Compte
-  addCompteRow, deleteCompteRow, saveCompteField,
-
-  // Notes
-  addNote, editNoteTitle, saveNote, deleteNote, toggleNote,
-
-  // XP
-  previewXpBar, saveXpDirect, addXpDelta,
-
-  // Maîtrises
-  addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
-
-  // Inline-edit
-  inlineEditText, inlineEditNum, inlineEditChip, inlineEditStatFromCard, inlineEditStat,
-
-  // Forms
-  setCharAura,
-  adjustStat, saveNotes,
-  toggleSort, toggleQuete, deleteQuete, deleteSort, deleteInvItem,
-  deleteChar, createNewChar,
-  manageTitres, addTitre, removeTitre, saveTitres,
-  addQuete, saveQuete, deleteCharPhoto,
-
-  // Export fiche
-  exportCharJSON, exportCharPDF, openCharExportMenu,
-
-  // Quick-view
-  quickViewChar,
-});
+// Exports legacy minimaux — uniquement ce qui est encore consommé via window.* par des modules lazy
+// filterAdminChars : pages.js registerActions (bridge lazy)
+// charNavCardHtml, selectChar : compatibilité externe résiduelle
+Object.assign(window, { charNavCardHtml, selectChar, filterAdminChars, showCharTab });

@@ -548,30 +548,6 @@
    VUE GROUPE (table aperçu 14 jours)
 ═══════════════════════════════════════════════════════════════════ */
 .ag-group-view { margin-top: 6px; }
-
-/* Filtres par groupe (quêtes) au-dessus de la table */
-.ag-grp-filters {
-  display: flex; flex-wrap: wrap; gap: 6px;
-  margin-bottom: 8px;
-}
-.ag-grp-filter {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 11px; border-radius: 999px;
-  background: rgba(255,255,255,.04); border: 1px solid var(--border-md, var(--border));
-  color: var(--text-muted); font-size: .76rem; font-weight: 600;
-  cursor: pointer; white-space: nowrap; transition: all .12s;
-}
-.ag-grp-filter:hover { border-color: var(--border-bright, var(--border)); color: var(--text); }
-.ag-grp-filter.is-active {
-  background: rgba(232,184,75,.14); border-color: rgba(232,184,75,.45); color: #e8b84b;
-}
-.ag-grp-filter-count {
-  font-size: .66rem; font-weight: 700; line-height: 1;
-  padding: 2px 6px; border-radius: 999px;
-  background: rgba(0,0,0,.25); color: var(--text-dim);
-}
-.ag-grp-filter.is-active .ag-grp-filter-count { background: rgba(232,184,75,.2); color: #e8b84b; }
-
 .ag-grp-scroll {
   overflow-x: auto;
   background: var(--bg-card);

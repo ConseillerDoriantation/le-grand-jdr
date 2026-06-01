@@ -2,7 +2,7 @@
 // AVENTURES — Page de gestion (admin)
 // ══════════════════════════════════════════════
 
-import { STATE, setAdventures, setAdventure } from '../core/state.js';
+import { STATE, setAdventures } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal }              from '../shared/modal.js';
 import { showNotif }                          from '../shared/notifications.js';
@@ -16,9 +16,7 @@ import {
   promoteToAdmin,
   loadAllUsers,
   loadUserAdventures,
-  selectAdventure,
 } from '../core/adventure.js';
-import { navigate } from '../core/navigation.js';
 
 // ── Page principale ────────────────────────────
 async function renderAventuresPage() {
@@ -105,7 +103,7 @@ export function openCreateAdventureModal() {
   `);
 }
 
-window._doCreateAdventure = async () => {
+async function doCreateAdventure() {
   const nom   = document.getElementById('adv-nom')?.value?.trim();
   const emoji = document.getElementById('adv-emoji')?.value || '⚔️';
   const desc  = document.getElementById('adv-desc')?.value?.trim() || '';
@@ -123,7 +121,7 @@ window._doCreateAdventure = async () => {
   } catch (e) {
     showNotif(e.message || 'Erreur lors de la création.', 'error');
   }
-};
+}
 
 const _ADV_EMOJIS = ['⚔️','🏰','🗺️','🐉','🌙','🔮','🌊','🔥','🌿','⚡','🧙','🏴'];
 
@@ -244,7 +242,7 @@ export async function openManageAdventureModal(adventureId) {
   `);
 }
 
-window._advSaveMeta = async (advId) => {
+async function saveAdventureMeta(advId) {
   const nom   = document.getElementById('adv-edit-nom')?.value?.trim();
   const emoji = document.getElementById('adv-edit-emoji')?.value || '⚔️';
   const desc  = document.getElementById('adv-edit-desc')?.value?.trim() || '';
@@ -259,9 +257,9 @@ window._advSaveMeta = async (advId) => {
     closeModal();
     renderAventuresPage();
   } catch (e) { showNotif(e.message, 'error'); }
-};
+}
 
-window._advDelete = async (advId) => {
+async function deleteAdventureAndRefresh(advId) {
   try {
     await deleteAdventure(advId);
     closeModal();
@@ -275,9 +273,9 @@ window._advDelete = async (advId) => {
       renderAventuresPage();
     }
   } catch (e) { showNotif(e.message, 'error'); }
-};
+}
 
-window._advAdd = async (advId) => {
+async function addAdventurePlayer(advId) {
   const uid = document.getElementById('adv-add-user')?.value;
   if (!uid) return;
   try {
@@ -287,9 +285,9 @@ window._advAdd = async (advId) => {
     showNotif('Joueur ajouté.', 'success');
     openManageAdventureModal(advId);
   } catch (e) { showNotif(e.message, 'error'); }
-};
+}
 
-window._advRemove = async (advId, targetUid) => {
+async function removeAdventurePlayer(advId, targetUid) {
   try {
     await removePlayerFromAdventure(advId, targetUid);
     const adventures = await loadUserAdventures(STATE.user.uid);
@@ -297,9 +295,9 @@ window._advRemove = async (advId, targetUid) => {
     showNotif('Joueur retiré.', 'success');
     openManageAdventureModal(advId);
   } catch (e) { showNotif(e.message, 'error'); }
-};
+}
 
-window._advPromote = async (advId, targetUid) => {
+async function promoteAdventurePlayer(advId, targetUid) {
   try {
     await promoteToAdmin(advId, targetUid);
     const adventures = await loadUserAdventures(STATE.user.uid);
@@ -307,7 +305,7 @@ window._advPromote = async (advId, targetUid) => {
     showNotif('Joueur promu MJ.', 'success');
     openManageAdventureModal(advId);
   } catch (e) { showNotif(e.message, 'error'); }
-};
+}
 
 
 
@@ -315,14 +313,8 @@ window._advPromote = async (advId, targetUid) => {
 import PAGES from './pages.js';
 PAGES['aventures'] = renderAventuresPage;
 
-// Supprimer le pickAdventure de aventures.js (défini dans init.js pour être disponible tôt)
-// Exposer la modal de création pour le lazy-load
-window._openCreateAdventureModalImpl = openCreateAdventureModal;
-Object.assign(window, { openManageAdventureModal });
-
 registerActions({
   openCreateAdventureModal: () => openCreateAdventureModal(),
-  pickAdventure: (btn) => window.pickAdventure?.(btn.dataset.id),
   openManageAdventureModal: (btn) => openManageAdventureModal(btn.dataset.id),
   _advPickEmoji: (btn) => {
     btn.closest('[class]')?.querySelectorAll('.adv-emoji-btn').forEach(b => b.classList.remove('selected'));
@@ -330,16 +322,16 @@ registerActions({
     const target = document.getElementById(btn.dataset.targetId);
     if (target) target.value = btn.dataset.emoji;
   },
-  _advClose: () => window.closeModal?.(),
-  _doCreateAdventure: () => window._doCreateAdventure?.(),
-  _advSaveMeta: (btn) => window._advSaveMeta?.(btn.dataset.id),
-  _advAdd: (btn) => window._advAdd?.(btn.dataset.id),
-  _advDelete: (btn) => window._advDelete?.(btn.dataset.id),
+  _advClose: () => closeModal(),
+  _doCreateAdventure: () => doCreateAdventure(),
+  _advSaveMeta: (btn) => saveAdventureMeta(btn.dataset.id),
+  _advAdd: (btn) => addAdventurePlayer(btn.dataset.id),
+  _advDelete: (btn) => deleteAdventureAndRefresh(btn.dataset.id),
   _advHideDeleteConfirm: () => { document.getElementById('adv-delete-confirm').style.display = 'none'; },
   _advShowDeleteConfirm: (btn) => {
     document.getElementById('adv-delete-confirm').style.display = 'block';
     btn.style.display = 'none';
   },
-  _advPromote: (btn) => window._advPromote?.(btn.dataset.advId, btn.dataset.uid),
-  _advRemove: (btn) => window._advRemove?.(btn.dataset.advId, btn.dataset.uid),
+  _advPromote: (btn) => promoteAdventurePlayer(btn.dataset.advId, btn.dataset.uid),
+  _advRemove: (btn) => removeAdventurePlayer(btn.dataset.advId, btn.dataset.uid),
 });

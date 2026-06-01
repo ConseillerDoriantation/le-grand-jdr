@@ -1,4 +1,5 @@
 import { STATE } from '../core/state.js';
+import { charSession } from '../shared/char-session.js';
 import { updateInCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -81,7 +82,7 @@ async function saveCroppedCharacterPhoto(charId) {
     _destroyCharacterPhotoCrop();
     closeModal();
     showNotif('Photo enregistrée !', 'success');
-    window.renderCharSheet?.(c, window._currentCharTab || 'combat');
+    charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -92,7 +93,7 @@ async function deleteCharPhoto(charId) {
     c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
     await updateInCol('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });
     showNotif('Photo supprimée.', 'success');
-    window.renderCharSheet?.(c, window._currentCharTab || 'combat');
+    charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
   } catch (e) { notifySaveError(e); }
 }
 

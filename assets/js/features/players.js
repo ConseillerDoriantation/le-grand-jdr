@@ -14,9 +14,14 @@
 // (cohérent avec bestiary/shop).
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
+import { confirmDelete } from '../shared/crud.js';
+
+let _ppEditingPlayer = null;
 import { STATE } from '../core/state.js';
+import { navigate } from '../core/navigation.js';
+import { charSession } from '../shared/char-session.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _initials } from '../shared/html.js';
@@ -100,7 +105,6 @@ function _buildRecord(char = null, pres = null) {
     id:             pres?.id || `c:${char?.id || Math.random().toString(36).slice(2)}`,
     presentationId: pres?.id || '',
     charId:         pres?.charId || char?.id || '',
-    ownerUid:       char?.uid || pres?.uid || '',
     nom, classe, race, joueur,
     level:          char?.niveau || 1,
     subtitle:       [classe, race].filter(Boolean).join(' · '),
@@ -185,11 +189,8 @@ function _buildDataset(presentations = [], characters = []) {
   presentations.filter(p => !usedPresIds.has(p.id)).forEach(p => items.push(_buildRecord(null, p)));
 
   const lsOrdre = _getLocalOrdre();
-  const myUid = STATE.user?.uid;
   return items
-    // Public : on masque les fiches non-visibles. Exceptions : le MJ voit tout,
-    // et un joueur voit TOUJOURS son ou ses propres personnages (même masqués).
-    .filter(item => STATE.isAdmin || item.visible !== false || (myUid && item.ownerUid === myUid))
+    .filter(item => STATE.isAdmin || item.visible !== false)
     .sort((a, b) => {
       const ao = (a.ordre ?? 999) !== 999 ? a.ordre : (lsOrdre ? (lsOrdre.indexOf(a.id) + 1 || 999) : 999);
       const bo = (b.ordre ?? 999) !== 999 ? b.ordre : (lsOrdre ? (lsOrdre.indexOf(b.id) + 1 || 999) : 999);
@@ -839,11 +840,9 @@ function _renderFiche(item, items) {
         : ''}
     </nav>
 
-    <!-- Badge masqué : visible par le MJ et par le propriétaire de la fiche -->
-    ${!item.visible && (STATE.isAdmin || (item.ownerUid && item.ownerUid === STATE.user?.uid))
-      ? `<div class="pp-fiche-hidden-banner">🔒 ${STATE.isAdmin
-          ? 'Cette présentation est masquée aux joueurs'
-          : 'Ta présentation est masquée — seuls toi et le MJ la voyez'}</div>`
+    <!-- Badge masqué (admin) -->
+    ${STATE.isAdmin && !item.visible
+      ? `<div class="pp-fiche-hidden-banner">🔒 Cette présentation est masquée aux joueurs</div>`
       : ''}
 
     <!-- Layout principal 2 colonnes -->
@@ -1199,7 +1198,7 @@ function _renderTopAdventurersBlock(item, items) {
 // ══════════════════════════════════════════════════════════════════════════════
 // PAGE PRINCIPALE — entrée + dispatch sommaire/fiche
 // ══════════════════════════════════════════════════════════════════════════════
-async function renderPlayersPage() {
+export async function renderPlayersPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
 
@@ -1272,8 +1271,8 @@ function _refreshView() {
 // HANDLERS — délégation data-pp-action
 // ══════════════════════════════════════════════════════════════════════════════
 Object.assign(ppHandlers, {
-  updateVisiblePill: (el) => window._ppUpdateVisiblePill?.(el.checked),
-  refreshVisCount:   ()   => window._ppRefreshVisCount?.(),
+  updateVisiblePill: (el) => _ppUpdateVisiblePill(el.checked),
+  refreshVisCount:   ()   => _ppRefreshVisCount(),
   openFiche:     (el) => { STORE.activeId = el.dataset.id; _refreshView(); window.scrollTo(0, 0); },
   back:          ()   => { STORE.activeId = ''; _refreshView(); },
   search:        (el) => {
@@ -1389,7 +1388,7 @@ async function openPlayerPresentModal(player = null) {
   } else {
     _ppGallery = hasImg ? [{ portrait: true }] : [];
   }
-  window.__ppEditingPlayer = player;
+  _ppEditingPlayer = player;
 
   // ── Helpers pour le hero ──
   const linkedChar = curCharId ? characters.find(c => c.id === curCharId) : null;
@@ -1574,13 +1573,13 @@ async function openPlayerPresentModal(player = null) {
       document.querySelectorAll('[data-pp-panel]').forEach(p => p.classList.toggle('is-active', p.dataset.ppPanel === tab));
     });
   });
-  window._ppUpdateVisiblePill = (on) => {
+  function _ppUpdateVisiblePill(on) {
     const pill = document.getElementById('pp-mn-vis-pill');
     if (!pill) return;
     pill.classList.toggle('is-on', !!on); pill.classList.toggle('is-off', !on);
     pill.textContent = on ? '👁 Visible' : '🚫 Masqué';
   };
-  window._ppRefreshVisCount = () => {
+  function _ppRefreshVisCount() {
     const n = visEntries.filter(f => document.getElementById(f.id)?.checked).length;
     const el = document.getElementById('pp-mn-vis-count');
     if (el) el.textContent = n;
@@ -1674,7 +1673,7 @@ function _renderGalleryEditor() {
     list.innerHTML = '<div class="pp-gallery-empty">Aucune photo additionnelle.</div>';
     return;
   }
-  const player = window.__ppEditingPlayer;
+  const player = _ppEditingPlayer;
   const portraitUrl = player?.imageUrl || '';
   list.innerHTML = _ppGallery.map((g, i) => {
     const isPortrait = !!g.portrait;
@@ -1743,7 +1742,7 @@ Object.assign(ppHandlers, {
     _ppCardCropParams = null;
     // Re-init du cropper depuis l'image source pour repartir du centre
     _ppCardCropper?.destroy();
-    const player = window.__ppEditingPlayer || null;
+    const player = _ppEditingPlayer || null;
     const src = player?.imageUrl || document.getElementById('pp-img-b64')?.value || '';
     if (!src) return;
     _ppCardCropper = attachPanZoomCrop({
@@ -1786,7 +1785,7 @@ async function _savePlayerPresent(id = '') {
     if (!imageUrl) cardCrop = null;
     _ppCardCropper?.destroy(); _ppCardCropper = null;
     _ppCardCropParams = null;
-    window.__ppEditingPlayer = null;
+    _ppEditingPlayer = null;
 
     const data = {
       charId:         document.getElementById('pp-char-id')?.value         || '',
@@ -1821,8 +1820,7 @@ async function _savePlayerPresent(id = '') {
 
 async function _deletePlayerPresent(id) {
   try {
-    if (!await (window.confirmModal?.('Supprimer cette présentation ?'))) return;
-    await deleteFromCol('players', id);
+    if (!await confirmDelete('players', id, 'Supprimer cette présentation ?')) return;
     showNotif('Présentation supprimée.', 'success');
     STORE.activeId = '';
     await PAGES.players();
@@ -1896,13 +1894,13 @@ function _openLightbox(presId, startIdx = 0) {
 // ── Compat publique (anciens points d'entrée référencés ailleurs) ─────────────
 async function openCharacterSheetFromShowcase(charId) {
   if (!charId) return;
-  await window.navigate?.('characters');
+  await navigate('characters');
   setTimeout(() => {
     const pill = Array.from(document.querySelectorAll('#char-pills .char-pill'))
       .find(e => e.dataset.charid === charId || e.getAttribute('onclick')?.includes(`'${charId}'`));
     if (pill) { pill.click(); return; }
-    const c = window.STATE?.characters?.find(e => e.id === charId);
-    if (c && window.renderCharSheet) { window.STATE.activeChar = c; window.renderCharSheet(c); }
+    const c = STATE.characters?.find(e => e.id === charId);
+    if (c) { STATE.activeChar = c; charSession.renderSheet(c); }
   }, 50);
 }
 
@@ -1910,7 +1908,6 @@ async function openCharacterSheetFromShowcase(charId) {
 PAGES.players = renderPlayersPage;
 
 Object.assign(window, {
-  renderPlayersPage,
   openPlayerPresentModal,
   openCharacterSheetFromShowcase,
 });

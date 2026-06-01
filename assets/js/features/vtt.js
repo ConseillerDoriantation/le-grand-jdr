@@ -9,16 +9,16 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import Sortable from '../vendor/sortable.esm.js';
-import { getCurrentAdventureId, getDocData, saveDoc, loadCollection } from '../data/firestore.js';
+import { getCurrentAdventureId, getDocData, saveDoc, loadCollection, subscribeCollection } from '../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from './characters/data.js';
+import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../shared/equipment-utils.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
 import { loadSpellMatrices, getInvokedArm } from '../shared/spell-matrices.js';
@@ -33,6 +33,8 @@ import { _esc, _searchIncludes, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import PAGES from './pages.js';
+
+let _vttDelegSearch = '';
 
 // ── Constantes ──────────────────────────────────────────────────────
 const CELL        = 70;
@@ -72,15 +74,15 @@ function _vttResolveArg(token, el) {
   return token;
 }
 // Helper : ferme la modal avant d'appeler fn(...args). Utilisable via data-vtt-fn.
-window._vttCloseAnd = (fnName, ...args) => {
+function _vttCloseAnd(fnName, ...args) {
   if (typeof closeModal === 'function') closeModal();
   const fn = window[fnName];
   if (typeof fn === 'function') fn(...args);
-};
+}
 
 // Helper : toggle d'un bloc "détail" dans le chat log (data-vtt-fn="_vttToggleLogDetail" data-vtt-args="ID_DU_DETAIL")
 // Le bouton lui-même reçoit la classe `.open` quand le détail est visible.
-window._vttToggleLogDetail = function(detailId) {
+function _vttToggleLogDetail(detailId) {
   // `this` est le bouton via data-vtt-fn — le dispatcher l'a comme `$this` si demandé,
   // sinon on retrouve le bouton via querySelector du detail puis previousElementSibling.
   const d = document.getElementById(detailId);
@@ -91,18 +93,16 @@ window._vttToggleLogDetail = function(detailId) {
   // Approche pragmatique : on cherche le bouton qui matche cette action+args dans le DOM.
   const btn = document.querySelector(`[data-vtt-fn="_vttToggleLogDetail"][data-vtt-args="${detailId}"]`);
   btn?.classList.toggle('open', !open);
-};
+}
 
 // Helpers ciblés pour les cas inline restants (chaînage / manipulation DOM directe)
-window._vttCourirAndClose = (srcId) => {
-  window._vttCourir?.(srcId);
-  window._closeActionModal?.();
-};
+function _vttCourirAndClose(srcId) {
+  _vttCourir(srcId);
+  _closeActionModal();
+}
 
 // ── Actions de base : Esquiver / Se cacher / Se désengager (état sur soi) ──
-// Pose l'état correspondant sur le token source. Le moteur de combat applique
-// automatiquement l'avantage/désavantage via les `effects` de l'état.
-window._vttSelfAction = async (srcId, condId) => {
+async function _vttSelfAction(srcId, condId) {
   const t = _tokens[srcId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
   const lib = CONDITION_BY_ID[condId]; if (!lib) return;
@@ -120,14 +120,14 @@ window._vttSelfAction = async (srcId, condId) => {
   await updateDoc(_tokRef(srcId), { conditions: [...existing, newCond] }).catch(() => {});
   const name = _live(t).displayName ?? t.name;
   showNotif(`${lib.icon} ${name} : ${lib.label}`, 'success');
-};
-window._vttSelfActionClose = (srcId, condId) => {
-  window._vttSelfAction?.(srcId, condId);
-  window._closeActionModal?.();
-};
+}
+function _vttSelfActionClose(srcId, condId) {
+  _vttSelfAction(srcId, condId);
+  _closeActionModal();
+}
 
 // ── Aider : relève un allié à 0 PV à 1 PV et retire tous ses états ──
-window._vttAider = async (srcId, tgtId) => {
+async function _vttAider(srcId, tgtId) {
   const s = _tokens[srcId]?.data; if (!s) return;
   if (!_canControlToken(s)) return;
   const t = _tokens[tgtId]?.data; if (!t) return;
@@ -135,49 +135,54 @@ window._vttAider = async (srcId, tgtId) => {
   await updateDoc(_tokRef(tgtId), { conditions: [] }).catch(() => {});
   const name = _live(t).displayName ?? t.name;
   showNotif(`🤝 ${name} relevé à 1 PV — états retirés`, 'success');
-};
-window._vttAiderClose = (srcId, tgtId) => {
-  window._vttAider?.(srcId, tgtId);
-  window._closeActionModal?.();
-};
-window._vttClearAoptSearch = (btn) => {
+}
+function _vttAiderClose(srcId, tgtId) {
+  _vttAider(srcId, tgtId);
+  _closeActionModal();
+}
+function _vttClearAoptSearch(btn) {
   const inp = btn.previousElementSibling;
-  if (inp) { inp.value = ''; window._vttAoptSearch?.(''); inp.focus(); }
-};
-window._vttMoveTokenAndReset = (sel, tid) => {
+  if (inp) { inp.value = ''; _vttAoptSearch(''); inp.focus(); }
+}
+function _vttMoveTokenAndReset(sel, tid) {
   if (!sel.value) return;
-  window._vttMoveTokenToPage?.(tid, sel.value);
+  _vttMoveTokenToPage(tid, sel.value);
   sel.value = '';
-};
-window._vttPreviewEmoteFile = (input, previewId) => {
+}
+function _vttSetEmoteAlbum(v) {
+  const t = (v || '').trim();
+  if (t) localStorage.setItem('vtt-emote-folder', t);
+  else localStorage.removeItem('vtt-emote-folder');
+}
+function _vttPreviewEmoteFile(input, previewId) {
   const f = input.files?.[0]; if (!f) return;
   const u = URL.createObjectURL(f);
   const p = document.getElementById(previewId); if (p) p.src = u;
-};
-window._vttCancelEmoteEdit = () => {
+}
+function _vttCancelEmoteEdit() {
   document.getElementById('emote-edit-zone').innerHTML = '';
   document.querySelectorAll('.vtt-emote-card').forEach(c => c.classList.remove('is-editing'));
-};
-window._vttCcTriSet = (btn, value) => {
+}
+function _vttCcTriSet(btn, value) {
   const w = btn.parentElement;
   w.dataset.ccTriValue = value;
   w.querySelectorAll('.vtt-cc-tri-opt').forEach(b => b.classList.remove('is-on'));
   btn.classList.add('is-on');
-};
-window._vttCcFlagToggle = (btn) => {
+}
+function _vttCcFlagToggle(btn) {
   btn.classList.toggle('is-on');
   btn.dataset.ccFlagOn = btn.classList.contains('is-on') ? '1' : '';
-};
-window._vttLibMoveToAndClose = (imgId, folderId) => {
-  window._vttLibMoveTo?.(imgId, folderId);
+}
+function _vttLibMoveToAndClose(imgId, folderId) {
+  _vttLibMoveTo(imgId, folderId);
   document.getElementById('vtt-lib-move-popup')?.remove();
-};
-window._vttPlColorSelect = (btn) => {
+}
+function _vttPlColorSelect(btn) {
   document.querySelectorAll('.vtt-pl-color-btn').forEach(b => b.classList.remove('sel'));
   btn.classList.add('sel');
-};
+}
 // No-op pour les wrappers qui servaient juste à event.stopPropagation() (closest() suffit)
-window._vttNoop = () => {};
+function _vttNoop() {}
 
 function _vttBindDispatch() {
   if (_vttBindDispatch._bound) return;
@@ -187,7 +192,7 @@ function _vttBindDispatch() {
     if (!el) return;
     const expectedOn = el.dataset.vttOn || 'click';
     if (expectedOn !== e.type) return;
-    const fn = window[el.dataset.vttFn];
+    const fn = VTT_ACTIONS[el.dataset.vttFn];
     if (typeof fn !== 'function') return;
     const argsStr = el.dataset.vttArgs;
     const args = (argsStr === undefined || argsStr === '')
@@ -408,7 +413,7 @@ const _MS_STATS   = [
 const _numOr = (value, fallback = null) => {
   const n = parseInt(value, 10);
   return Number.isFinite(n) ? n : fallback;
-};
+}
 const _signed = n => n > 0 ? `+${n}` : `${n}`;
 const _npcStatScore = (npc, key) => _numOr(npc?.stats?.[key], 8);
 const _npcStatMod = (npc, key) => getModFromScore(_npcStatScore(npc, key));
@@ -431,7 +436,7 @@ const _tokenStatMod = (t, statKey) => {
     return Math.floor((Math.min(22, score) - 10) / 2);
   }
   return 0;
-};
+}
 
 // ── État présence & mini-fiche ──────────────────────────────────────
 let _presence     = {};   // uid → { uid, pseudo }
@@ -446,7 +451,7 @@ let _traySearch       = '';    // filtre texte appliqué à la réserve
 const _loadTrayPref = (k, dflt = false) => {
   try { const v = localStorage.getItem('vtt-tray-' + k); return v == null ? dflt : v === '1'; }
   catch { return dflt; }
-};
+}
 const _saveTrayPref = (k, v) => { try { localStorage.setItem('vtt-tray-' + k, v ? '1' : '0'); } catch {} };
 let _trayOnOpen  = _loadTrayPref('on');
 let _trayOffOpen = _loadTrayPref('off');
@@ -467,8 +472,6 @@ const _aid     = ()   => getCurrentAdventureId();
 const _sesRef  = ()   => doc(db,  `adventures/${_aid()}/vtt/session`);
 const _pgsCol  = ()   => collection(db, `adventures/${_aid()}/vttPages`);
 const _toksCol = ()   => collection(db, `adventures/${_aid()}/vttTokens`);
-const _chrsCol = ()   => collection(db, `adventures/${_aid()}/characters`);
-const _npcsCol = ()   => collection(db, `adventures/${_aid()}/npcs`);
 const _pgRef   = (id) => doc(db, `adventures/${_aid()}/vttPages/${id}`);
 const _tokRef  = (id) => doc(db, `adventures/${_aid()}/vttTokens/${id}`);
 const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
@@ -550,6 +553,13 @@ function _live(t) {
     || (typeof t.attack==='string' ? t.attack : null)
     || '1d6';
 
+  // Valeurs dérivées calculées une seule fois pour éviter les recalculs dans result
+  const _round   = _session?.combat?.round ?? 0;
+  const _pmMax   = c ? calcPMMax(c) : n ? npcPmMax : null;
+  const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))));
+  const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
+  const _ca      = _caBase + _caBuffs.reduce((sum, bf) => sum + (bf.bonus || 0), 0);
+
   const result = {
     ...t,
     // Ennemis : le nom du token (instance) prime sur le nom générique du bestiaire
@@ -558,36 +568,24 @@ function _live(t) {
     displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
-    displayPm:         c ? (c.pm ?? calcPMMax(c)) : n ? npcPmCur : null,
-    displayPmMax:      c ? calcPMMax(c) : n ? npcPmMax : null,
+    displayPm:         c ? (c.pm ?? _pmMax) : n ? npcPmCur : null,
+    displayPmMax:      _pmMax,
     displayMovement: (() => {
       const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6)))));
-      const r = _session?.combat?.round ?? 0;
       const moveDelta = (t.buffs || [])
         .filter(bf => (bf.type === 'move_bonus' || bf.type === 'move_debuff')
-          && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
+          && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
       return Math.max(0, baseMv + moveDelta);
     })(),
     displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))),
     displayAttackDice: atkDice,
-    displayDefense:    (t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))))) + (() => {
-      const r = _session?.combat?.round ?? 0;
-      return (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
-        .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
-    })(),
+    displayDefense:    _ca,
     // VRAIE CA, JAMAIS écrasée par l'estimation joueur. Sert au calcul authoritatif
     // du hit/miss côté serveur. À ne PAS afficher aux joueurs (utiliser displayDefense
     // ou _viewCA pour le rendu UI).
-    realDefense:    (t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))))) + (() => {
-      const r = _session?.combat?.round ?? 0;
-      return (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
-        .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
-    })(),
-    _activeCaBuff: (() => {
-      const r = _session?.combat?.round ?? 0;
-      return (t.buffs || []).find(bf => bf.type === 'ca' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)) || null;
-    })(),
+    realDefense:       _ca,
+    _activeCaBuff:     _caBuffs[0] ?? null,
     // Pour un perso : arme équipée > override admin (t.range > 1) > défaut 1
     // Pour bestiaire/custom : t.range > 1ère attaque bestiary > défaut 1
     // Bonus de portée temporaire (buff range_bonus = Allonge magique etc.)
@@ -2182,7 +2180,7 @@ const DMG_INTERACTIONS = {
   'Immunité':   { icon: '🚫', color: '#94a3b8', short: 'Imm.' }, // gris ardoise (mur)
   'Absorption': { icon: '💚', color: '#b47fff', short: 'Abs.' }, // violet (anormal, soigne)
   'Faiblesse':  { icon: '💢', color: '#f59e0b', short: '×2'  }, // orange chaud
-};
+}
 
 /**
  * Applique l'interaction du profil de dégâts d'une créature (immun./absorp./faib./résist.).
@@ -2222,7 +2220,7 @@ const _tokenDims = t => {
   const w = t?.tokenW ?? t?.tokenSize ?? b?.tokenW ?? b?.tokenSize ?? 1;
   const h = t?.tokenH ?? t?.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1;
   return { w: Math.max(1, Math.min(5, w)), h: Math.max(1, Math.min(5, h)) };
-};
+}
 
 // Cherche un token possédé par le joueur courant couvrant la position du pointeur.
 // Sert à débloquer la sélection quand le token du joueur est masqué sous un autre.
@@ -2246,7 +2244,7 @@ const _tokenAttackDistance = (src, tgt, portee = null) => {
   const dx = Math.max(0, Math.max(src.col, tgt.col) - Math.min(src.col + s.w - 1, tgt.col + g.w - 1));
   const dy = Math.max(0, Math.max(src.row, tgt.row) - Math.min(src.row + s.h - 1, tgt.row + g.h - 1));
   return portee === 1 ? Math.max(dx, dy) : dx + dy;
-};
+}
 
 /**
  * Détecte les modificateurs spéciaux d'un sort (combos, lacération, chance, déplacement…).
@@ -3779,7 +3777,7 @@ async function _execAttack(srcId, tgtId) {
 }
 
 /** Filtre les sections du picker d'actions par tab. '__all' = tout afficher. */
-window._vttAoptFilter = (tabId, btn) => {
+function _vttAoptFilter(tabId, btn) {
   document.querySelectorAll('.vtt-aopt-tab').forEach(b => b.classList.remove('is-active'));
   btn?.classList.add('is-active');
   document.querySelectorAll('.vtt-aopt-section').forEach(s => {
@@ -3787,12 +3785,12 @@ window._vttAoptFilter = (tabId, btn) => {
   });
   // Re-applique le filtre de recherche (au cas où)
   const q = document.querySelector('.vtt-aopt-search-input')?.value || '';
-  if (q) window._vttAoptSearch(q);
+  if (q) _vttAoptSearch(q);
   else _vttAoptCheckEmpty();
-};
+}
 
 /** Filtre les options du picker par texte (cherche dans data-name). */
-window._vttAoptSearch = (raw) => {
+function _vttAoptSearch(raw) {
   const q = (raw || '').toLowerCase().trim();
   const activeTab = document.querySelector('.vtt-aopt-tab.is-active')?.dataset.tab || '__all';
   document.querySelectorAll('.vtt-aopt-section').forEach(s => {
@@ -3814,7 +3812,7 @@ window._vttAoptSearch = (raw) => {
     }
   });
   _vttAoptCheckEmpty();
-};
+}
 
 function _vttAoptCheckEmpty() {
   const list = document.querySelector('.vtt-aopt-list');
@@ -3824,7 +3822,7 @@ function _vttAoptCheckEmpty() {
   empty.style.display = anyVisible ? 'none' : '';
 }
 
-window._vttPickOpt = (srcId, tgtId, idx) => {
+function _vttPickOpt(srcId, tgtId, idx) {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
   if (!opt) return;
   closeModalDirect();
@@ -4144,10 +4142,10 @@ window._vttPickOpt = (srcId, tgtId, idx) => {
       </button>
 
     </div>`);
-};
+}
 
-window._vttCancelAtk      = () => { _atkCtx=null; closeModalDirect(); };
-window._closeActionModal  = () => closeModalDirect();
+function _vttCancelAtk() { _atkCtx=null; closeModalDirect(); }
+function _closeActionModal() { closeModalDirect(); }
 
 /** Affiche le sélecteur d'élément pour une arme magique. */
 function _showElementPicker(srcId, tgtId, optIdx) {
@@ -4171,7 +4169,7 @@ function _showElementPicker(srcId, tgtId, optIdx) {
       damageTypeColor: physType?.color || '',
     };
     // Proceed directly — re-call _vttPickOpt now that isMagicWeapon is false
-    window._vttPickOpt(srcId, tgtId, optIdx);
+    _vttPickOpt(srcId, tgtId, optIdx);
     return;
   }
 
@@ -4211,7 +4209,7 @@ function _showElementPicker(srcId, tgtId, optIdx) {
     </div>`);
 }
 
-window._vttPickElement = (srcId, tgtId, optIdx, elementId) => {
+function _vttPickElement(srcId, tgtId, optIdx, elementId) {
   const cacheKey = `${srcId}__${tgtId}`;
   const opt = _atkOptsCache[cacheKey]?.[+optIdx];
   if (!opt) return;
@@ -4226,19 +4224,19 @@ window._vttPickElement = (srcId, tgtId, optIdx, elementId) => {
     damageTypeColor:  elemType?.color || '',
   };
   closeModalDirect();
-  window._vttPickOpt(srcId, tgtId, +optIdx);
-};
+  _vttPickOpt(srcId, tgtId, +optIdx);
+}
 
 /** Retourne à la liste de sélection d'attaque sans annuler le combat. */
-window._vttBackToAtk  = () => {
+function _vttBackToAtk() {
   const ctx = _atkCtx;
   closeModalDirect();
   _atkCtx = null;
   if (ctx) _execAttack(ctx.srcId, ctx.tgtId);
-};
+}
 
 /** Met à jour le toggle Désavantage / Normal / Avantage. */
-window._vttSetMode = (mode) => {
+function _vttSetMode(mode) {
   const cfg = {
     dis:    { bg:'rgba(239,68,68,.18)',  color:'#f87171', weight:'700' },
     normal: { bg:'var(--bg-elevated)',   color:'var(--text)', weight:'700' },
@@ -4255,7 +4253,7 @@ window._vttSetMode = (mode) => {
   });
   const inp = document.getElementById('atk-mode');
   if (inp) inp.value = mode;
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // MULTI-CIBLAGE — sélection visuelle pour les sorts multi-cibles
@@ -4334,7 +4332,7 @@ function _mtRefreshHud() {
   document.body.appendChild(div);
 
   // Entrée = valider
-  const _hudKey = e => { if (e.key === 'Enter') window._mtValidate(); if (e.key === 'Escape') window._mtCancel(); };
+  const _hudKey = e => { if (e.key === 'Enter') _mtValidate(); if (e.key === 'Escape') _mtCancel(); };
   div._hudKey = _hudKey;
   document.addEventListener('keydown', _hudKey, { once: false });
   div._removeKey = () => document.removeEventListener('keydown', _hudKey);
@@ -4421,9 +4419,9 @@ function _mtToggleTarget(tgtId) {
   _mtBroadcast();
 }
 
-window._mtCancel = () => { _mtClear(); showNotif('Ciblage annulé', 'info'); };
+function _mtCancel() { _mtClear(); showNotif('Ciblage annulé', 'info'); }
 
-window._mtValidate = () => {
+function _mtValidate() {
   if (!_mtCtx || _mtCtx.targets.length === 0) return;
   const { srcId, opt, optIdx, targets } = _mtCtx;
 
@@ -4444,8 +4442,8 @@ window._mtValidate = () => {
   _atkOptsCache[cacheKey] = inRange;
 
   // Appeler _vttPickOpt — _mtPending non null empêche la re-entrée en mode ciblage
-  window._vttPickOpt(srcId, firstTgt, optIdx);
-};
+  _vttPickOpt(srcId, firstTgt, optIdx);
+}
 
 // ── Zone AoE ──────────────────────────────────────────────────────────
 
@@ -4525,9 +4523,9 @@ function _showZoneHud() {
       <button class="vtt-mt-btn-validate" data-vtt-fn="_zoneValidate">✓ Valider</button>
     </div>`;
   const onKey = e => {
-    if (e.key === 'Enter')              { e.preventDefault(); window._zoneValidate(); }
-    if (e.key === 'Escape')             window._zoneCancel();
-    if (e.key === 'r' || e.key === 'R') window._zoneRotate();
+    if (e.key === 'Enter')              { e.preventDefault(); _zoneValidate(); }
+    if (e.key === 'Escape')             _zoneCancel();
+    if (e.key === 'r' || e.key === 'R') _zoneRotate();
   };
   document.addEventListener('keydown', onKey);
   hud._removeKey = () => document.removeEventListener('keydown', onKey);
@@ -4551,17 +4549,17 @@ function _startZonePlacement(srcId, tgtId, opt, optIdx) {
   _showZoneHud();
 }
 
-window._zoneCancel = () => { _zoneClear(); showNotif('Zone annulée', 'info'); };
+function _zoneCancel() { _zoneClear(); showNotif('Zone annulée', 'info'); }
 
-window._zoneRotate = () => {
+function _zoneRotate() {
   if (!_zoneCtx) return;
   [_zoneCtx.wPx, _zoneCtx.hPx] = [_zoneCtx.hPx, _zoneCtx.wPx];
   _buildZonePreview();
   _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
   _layers.token?.batchDraw();
-};
+}
 
-window._zoneValidate = async () => {
+async function _zoneValidate() {
   if (!_zoneCtx) return;
   const { srcId, opt, wPx, hPx, x, y } = _zoneCtx;
 
@@ -4636,8 +4634,8 @@ window._zoneValidate = async () => {
   if (!_tokens[firstTgt]?.data) { _mtPending = null; return; }
   // Le sort zone est mis seul dans le cache à l'index 0 (portée déjà vérifiée sur la zone)
   _atkOptsCache[`${srcId}__${firstTgt}`] = [opt];
-  window._vttPickOpt(srcId, firstTgt, 0);
-};
+  _vttPickOpt(srcId, firstTgt, 0);
+}
 
 /** Rendu des lignes de ciblage distantes (broadcast Firestore). */
 function _renderRemoteCastings(docs) {
@@ -4666,7 +4664,7 @@ function _renderRemoteCastings(docs) {
   _layers.token.batchDraw();
 }
 
-window._vttRollAttack = async () => {
+async function _vttRollAttack() {
   const ctx = _atkCtx; if (!ctx) return;
   const mode     = document.getElementById('atk-mode')?.value || 'normal';
   const bonusHit     = parseInt(document.getElementById('atk-bonus-hit')?.value)||0;
@@ -5648,7 +5646,7 @@ window._vttRollAttack = async () => {
     _suspendedTriggerActive = false;
     _cleanup();
   }
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // INSPECTOR
@@ -6199,12 +6197,12 @@ function _renderInspector(t) {
 // ═══════════════════════════════════════════════════════════════════
 // TRAY — panneau latéral MJ
 // ═══════════════════════════════════════════════════════════════════
-window._vttTrayFilter = f => { _trayFilter = f; _renderTraySoon(); };
-window._vttTraySearch = v => { _traySearch = String(v || ''); _renderTraySoon(); };
-window._vttTrayClearSearch = () => { _traySearch = ''; _renderTraySoon(); };
-window._vttToggleOn  = () => { _trayOnOpen  = !_trayOnOpen;  _saveTrayPref('on',  _trayOnOpen);  _renderTraySoon(); };
-window._vttToggleOff = () => { _trayOffOpen = !_trayOffOpen; _saveTrayPref('off', _trayOffOpen); _renderTraySoon(); };
-window._vttToggleNpc = () => { _trayNpcOpen = !_trayNpcOpen; _saveTrayPref('npc', _trayNpcOpen); _renderTraySoon(); };
+function _vttTrayFilter(f) { _trayFilter = f; _renderTraySoon(); }
+function _vttTraySearch(v) { _traySearch = String(v || ''); _renderTraySoon(); }
+function _vttTrayClearSearch() { _traySearch = ''; _renderTraySoon(); }
+function _vttToggleOn() { _trayOnOpen  = !_trayOnOpen;  _saveTrayPref('on',  _trayOnOpen);  _renderTraySoon(); }
+function _vttToggleOff() { _trayOffOpen = !_trayOffOpen; _saveTrayPref('off', _trayOffOpen); _renderTraySoon(); }
+function _vttToggleNpc() { _trayNpcOpen = !_trayNpcOpen; _saveTrayPref('npc', _trayNpcOpen); _renderTraySoon(); }
 
 // Coalesce les rafales de snapshots (chrs/npcs/bsts/toks au mount) → 1 render par tick
 let _trayDirty = false;
@@ -6594,7 +6592,7 @@ const _fmtRulerCells = n => `${n} case${n !== 1 ? 's' : ''} · ${(n * CELL_M).to
 const _snapToCellCenter = wp => {
   const c = Math.floor(wp.x / CELL), r = Math.floor(wp.y / CELL);
   return { c, r, x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 };
-};
+}
 const _rulerLabelPos = (x1, y1, x2, y2) => ({
   x: (x1 + x2) / 2 + RULER_LABEL_OFFSET.x,
   y: (y1 + y2) / 2 + RULER_LABEL_OFFSET.y,
@@ -7086,44 +7084,45 @@ function _initListeners() {
   },()=>{}));
 
   // 3. Personnages — source de vérité des HP joueurs
-  _unsubs.push(onSnapshot(_chrsCol(), snap => {
-    snap.docChanges().forEach(ch => {
-      if (ch.type==='removed') {
-        delete _characters[ch.doc.id];
-        // Supprimer le token lié si la session VTT est ouverte
-        const tok = Object.values(_tokens).find(e => e.data.characterId === ch.doc.id);
-        if (tok) deleteDoc(_tokRef(tok.data.id)).catch(() => {});
-      } else {
-        _characters[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
-      }
-    });
-    // Refresh des shapes liés
-    const changed=new Set(snap.docChanges().map(c=>c.doc.id));
-    for (const [id,e] of Object.entries(_tokens)) {
-      if (e.data.characterId&&changed.has(e.data.characterId)) {
-        _patchShape(id); if (_selected===id) _renderInspectorSoon();
+  _unsubs.push(subscribeCollection("characters", data => {
+    const prev = _characters;
+    const next = {};
+    for (const c of data || []) next[c.id] = c;
+
+    const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const id of Object.keys(prev)) {
+      if (next[id]) continue;
+      const tok = Object.values(_tokens).find(e => e.data.characterId === id);
+      if (tok) deleteDoc(_tokRef(tok.data.id)).catch(() => {});
+    }
+
+    _characters = next;
+    for (const [id, e] of Object.entries(_tokens)) {
+      if (e.data.characterId && changed.has(e.data.characterId)) {
+        _patchShape(id); if (_selected === id) _renderInspectorSoon();
       }
     }
     _renderTraySoon();
-    _charsReady=true; _maybeSyncAutoTokens();
-    if (_miniUid) _renderMiniSheet(_miniUid); // refresh mini-fiche en temps réel
-  },()=>{}));
+    _charsReady = true; _maybeSyncAutoTokens();
+    if (_miniUid) _renderMiniSheet(_miniUid);
+  }));
 
   // 4. PNJ — source de vérité des HP PNJ
-  _unsubs.push(onSnapshot(_npcsCol(), snap => {
-    snap.docChanges().forEach(ch => {
-      if (ch.type==='removed') delete _npcs[ch.doc.id];
-      else _npcs[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
-    });
-    const changed=new Set(snap.docChanges().map(c=>c.doc.id));
-    for (const [id,e] of Object.entries(_tokens)) {
-      if (e.data.npcId&&changed.has(e.data.npcId)) {
-        _patchShape(id); if (_selected===id) _renderInspectorSoon();
+  _unsubs.push(subscribeCollection("npcs", data => {
+    const prev = _npcs;
+    const next = {};
+    for (const n of data || []) next[n.id] = n;
+
+    const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    _npcs = next;
+    for (const [id, e] of Object.entries(_tokens)) {
+      if (e.data.npcId && changed.has(e.data.npcId)) {
+        _patchShape(id); if (_selected === id) _renderInspectorSoon();
       }
     }
     _renderTraySoon();
-    _npcsReady=true; _maybeSyncAutoTokens();
-  },()=>{}));
+    _npcsReady = true; _maybeSyncAutoTokens();
+  }));
 
   // 5. Bestiaire — source de vérité des créatures ennemies
   _unsubs.push(onSnapshot(_bstCol(), snap => {
@@ -7387,7 +7386,7 @@ function _showCtxMenu(x, y, items) {
   const top  = r.bottom > vh ? Math.max(0, y - r.height) : y;
   el.style.cssText=`left:${left}px;top:${top}px;`;
   _ctxClose=e=>{ if (!el.contains(e.target)) _hideCtxMenu(); };
-  setTimeout(()=>document.addEventListener('mousedown',_ctxClose), 0);
+  requestAnimationFrame(()=>document.addEventListener('mousedown',_ctxClose));
 }
 
 // ── Mode édition carte ───────────────────────────────────────────
@@ -7406,7 +7405,7 @@ function _setMapMode(on) {
   const btn=document.getElementById('vtt-map-mode-btn');
   if (btn) { btn.classList.toggle('active',on); btn.textContent=on?'🗺 Carte ✏':'🗺 Carte 🔒'; }
 }
-window._vttToggleMapMode = () => _setMapMode(!_mapMode);
+function _vttToggleMapMode() { return _setMapMode(!_mapMode); }
 
 // ═══════════════════════════════════════════════════════════════════
 // CHAT & LOG DE DÉS
@@ -7442,23 +7441,23 @@ async function _loadDiceSkills() {
   if (_selected) _renderInspector(_tokens[_selected]?.data ?? null);
 }
 
-window._vttSetRollMode = mode => {
+function _vttSetRollMode(mode) {
   _rollMode = mode;
   // Mettre à jour les boutons visuellement sans re-render complet
   document.querySelectorAll('.vtt-roll-mode-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.mode === mode));
-};
+}
 
-window._vttAdjBonus = (delta, reset = false) => {
+function _vttAdjBonus(delta, reset = false) {
   _rollBonus = reset ? 0 : Math.max(-20, Math.min(20, _rollBonus + delta));
   const el = document.getElementById('vtt-bonus-val');
   if (el) {
     el.textContent = _rollBonus > 0 ? `+${_rollBonus}` : `${_rollBonus}`;
     el.classList.toggle('nonzero', _rollBonus !== 0);
   }
-};
+}
 
-window._vttToggleRollHidden = () => {
+function _vttToggleRollHidden() {
   if (!STATE.isAdmin) return;
   _rollHidden = !_rollHidden;
   lsJson.set('vtt-roll-hidden', _rollHidden);
@@ -7467,9 +7466,9 @@ window._vttToggleRollHidden = () => {
     btn.classList.toggle('active', _rollHidden);
     btn.textContent = _rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs';
   }
-};
+}
 
-window._vttRollSkill = async (skillName, stat) => {
+async function _vttRollSkill(skillName, stat) {
   const t = _tokens[_selected]?.data;
   if (!t) return;
   if (!_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
@@ -7509,7 +7508,7 @@ window._vttRollSkill = async (skillName, stat) => {
     });
     if (gmOnly) showNotif('Jet caché — visible uniquement par le MJ', 'success');
   } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
-};
+}
 
 async function _saveEmotes(list) {
   _emotes = list;
@@ -7574,16 +7573,16 @@ function _renderEmotePicker() {
   setTimeout(() => document.getElementById('vtt-emote-search')?.focus(), 40);
 }
 
-window._vttFilterEmotes = (q) => {
+function _vttFilterEmotes(q) {
   const favSet = new Set(_getFavs());
   const grid = document.getElementById('vtt-emote-grid'); if (!grid) return;
   const filtered = q.trim() ? _emotes.filter(e => e.name.includes(q.trim().toLowerCase())) : _emotes;
   grid.innerHTML = _emoteGridHtml(filtered, favSet);
   const favSection = document.getElementById('vtt-emote-fav-section');
   if (favSection) favSection.style.display = q.trim() ? 'none' : '';
-};
+}
 
-window._vttToggleFav = (name) => {
+function _vttToggleFav(name) {
   const favs = _getFavs();
   const idx = favs.indexOf(name);
   if (idx >= 0) favs.splice(idx, 1); else favs.push(name);
@@ -7595,7 +7594,7 @@ window._vttToggleFav = (name) => {
     const input = document.getElementById('vtt-emote-search');
     if (input) { input.value = q; _vttFilterEmotes(q); }
   }
-};
+}
 
 function _closeEmotePicker() {
   const el  = document.getElementById('vtt-emote-picker');
@@ -7608,7 +7607,7 @@ function _closeEmotePicker() {
   }
 }
 
-window._vttToggleEmotePicker = () => {
+function _vttToggleEmotePicker() {
   const el  = document.getElementById('vtt-emote-picker');
   const btn = document.querySelector('.vtt-emote-trigger');
   if (!el) return;
@@ -7624,9 +7623,9 @@ window._vttToggleEmotePicker = () => {
   } else {
     _closeEmotePicker();
   }
-};
+}
 
-window._vttPickEmote = async (name) => {
+async function _vttPickEmote(name) {
   const uid = STATE.user?.uid; if (!uid) return;
   const em = _emotes.find(e => e.name === name); if (!em) return;
   // Le picker reste ouvert — l'utilisateur ferme manuellement
@@ -7651,20 +7650,24 @@ window._vttPickEmote = async (name) => {
   }).catch(err => {
     console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
   });
-};
+}
 
-window._ouvrirGestionEmotes = async () => {
+async function _ouvrirGestionEmotes() {
   await _loadEmotes();
   const { default: Sortable } = await import('../vendor/sortable.esm.js');
 
-  // ── Helper upload Cloudinary — toutes les émotes vont dans le dossier
-  //    `emotes` (pas de sous-dossier : un seul endroit, plus de dispersion). ──
+  // ── Helper upload Cloudinary (avec sous-dossier optionnel pour grouper) ──
+  const _getEmoteAlbum = () => localStorage.getItem('vtt-emote-folder') || localStorage.getItem('vtt-imgbb-emote-album') || '';
+  const _setEmoteAlbum = v => v ? localStorage.setItem('vtt-emote-folder', v) : localStorage.removeItem('vtt-emote-folder');
+
   const _uploadEmote = async (file) => {
     if (!hasCloudinaryConfig()) {
       openCloudinaryConfigModal();
       if (!hasCloudinaryConfig()) throw new Error('Configuration Cloudinary requise (bouton 🔑)');
     }
-    const up = await uploadCloudinary(file, { folder: 'emotes', tags: ['emote'] });
+    const sub = _getEmoteAlbum().trim();
+    const folder = sub ? `emotes/${sub}` : 'emotes';
+    const up = await uploadCloudinary(file, { folder, tags: ['emote'] });
     return up.url;
   };
 
@@ -7684,40 +7687,38 @@ window._ouvrirGestionEmotes = async () => {
       }</div>`
     : '<div style="color:var(--text-dim);font-size:.8rem;padding:.5rem 0">Aucune émote pour l\'instant.</div>';
 
-  const _count = _emotes.length;
-  openModal('', `
-    <div class="vtt-emote-modal">
-      <div class="vtt-emote-head">
-        <div class="vtt-emote-head-ico">😄</div>
-        <div class="vtt-emote-head-txt">
-          <h2>Gestion des émotes</h2>
-          <small><b id="emote-count">${_count}</b> émote${_count>1?'s':''} · glisser ⠿ pour réordonner · ✏ pour modifier</small>
+  const _inpStyle = 'width:100%;box-sizing:border-box;background:var(--bg-elevated);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:.8rem;padding:.3rem .5rem';
+
+  openModal('😄 Gestion des Émotes', `
+    <div style="display:flex;flex-direction:column;gap:.85rem;padding:.3rem 0">
+      <div style="font-size:.72rem;color:var(--text-muted)">Maintenez ⠿ pour réordonner par glisser-déposer. Cliquez ✏ pour modifier.</div>
+      <div id="emote-manage-list">${_cardsHtml(_emotes)}</div>
+      <div id="emote-edit-zone"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <label style="font-size:.75rem;color:var(--text-muted);white-space:nowrap">📁 Dossier</label>
+        <input type="text" id="emote-album-id" placeholder="nom du sous-dossier Cloudinary (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1"
+          data-vtt-fn="_vttSetEmoteAlbum" data-vtt-on="input" data-vtt-args="$value">
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
+      <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
+        <div class="form-group" style="margin:0">
+          <label style="font-size:.75rem;color:var(--text-muted)">Nom (ex: <code>rire</code>)</label>
+          <input type="text" id="emote-add-name" placeholder="nomemote" style="${_inpStyle}">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label style="font-size:.75rem;color:var(--text-muted)">Fichier <span style="opacity:.6">(ou URL ci-dessous)</span></label>
+          <input type="file" id="emote-add-file" accept="image/*" style="font-size:.78rem;margin-top:.25rem">
         </div>
       </div>
-
-      <div id="emote-manage-list" class="vtt-emote-scroll">${_cardsHtml(_emotes)}</div>
-      <div id="emote-edit-zone"></div>
-
-      <div class="vtt-emote-add">
-        <div class="vtt-emote-add-title">➕ Ajouter une émote</div>
-        <div class="vtt-emote-add-grid">
-          <div class="vtt-emote-add-field">
-            <label>Nom <span>tapé en jeu via <code>:nom:</code></span></label>
-            <input type="text" class="input-field" id="emote-add-name" placeholder="rire" autocomplete="off">
-          </div>
-          <div class="vtt-emote-add-field">
-            <label>Image <span>(envoyée sur Cloudinary)</span></label>
-            <input type="file" class="input-field" id="emote-add-file" accept="image/*">
-          </div>
-        </div>
-        <div class="vtt-emote-add-field">
-          <label>… ou URL directe <span>(si déjà hébergée ailleurs)</span></label>
-          <input type="text" class="input-field" id="emote-add-url" placeholder="https://…">
-        </div>
-        <div class="vtt-emote-add-foot">
-          <button class="btn btn-gold btn-sm" data-vtt-fn="_vttAddEmote">➕ Ajouter</button>
-          <span id="emote-add-status"></span>
-        </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.75rem;color:var(--text-muted)">URL directe <span style="opacity:.6">(si déjà hébergée ailleurs)</span></label>
+        <input type="text" id="emote-add-url" placeholder="https://…" style="${_inpStyle}">
+      </div>
+      <div style="display:flex;align-items:center;gap:.7rem">
+        <button class="btn btn-primary" style="flex:1" data-vtt-fn="_vttAddEmote">➕ Ajouter l'émote</button>
+        <span id="emote-add-status" style="font-size:.78rem;color:var(--text-dim);flex:1;min-height:1rem"></span>
       </div>
     </div>`);
 
@@ -7743,12 +7744,11 @@ window._ouvrirGestionEmotes = async () => {
   const _refresh = (clearEdit = true) => {
     const el = document.getElementById('emote-manage-list'); if (!el) return;
     el.innerHTML = _cardsHtml(_emotes); _initSort();
-    const cnt = document.getElementById('emote-count'); if (cnt) cnt.textContent = _emotes.length;
     if (clearEdit) { const ez = document.getElementById('emote-edit-zone'); if (ez) ez.innerHTML = ''; }
   };
 
   // ── Supprimer ────────────────────────────────────────────────────
-  window._vttDeleteEmote = async (i) => {
+  VTT_ACTIONS._vttDeleteEmote = async (i) => {
     if (!await confirmModal(`Supprimer :${_emotes[i]?.name}: ?`)) return;
     const list = [..._emotes]; list.splice(i, 1);
     await _saveEmotes(list); _refresh();
@@ -7756,7 +7756,7 @@ window._ouvrirGestionEmotes = async () => {
   };
 
   // ── Ouvrir le panneau d'édition (horizontal, sous la grille) ─────
-  window._vttEditEmote = (i) => {
+  VTT_ACTIONS._vttEditEmote = (i) => {
     const em = _emotes[i]; if (!em) return;
     // Mettre en évidence la carte sélectionnée
     document.querySelectorAll('.vtt-emote-card').forEach(c => c.classList.remove('is-editing'));
@@ -7771,7 +7771,7 @@ window._ouvrirGestionEmotes = async () => {
           <div class="vtt-ec-panel-row">
             <label>Nouveau nom</label>
             <input type="text" id="ec-name-${i}" value="${_esc(em.name)}" autocomplete="off"
-              onkeydown="if(event.key==='Enter') window._vttSaveEmote(${i})">
+              onkeydown="if(event.key==='Enter') _vttSaveEmote(${i})">
           </div>
           <div class="vtt-ec-panel-row">
             <label>Nouvelle image <span style="opacity:.6">(optionnel)</span></label>
@@ -7788,7 +7788,7 @@ window._ouvrirGestionEmotes = async () => {
   };
 
   // ── Sauvegarder l'édition ────────────────────────────────────────
-  window._vttSaveEmote = async (i) => {
+  VTT_ACTIONS._vttSaveEmote = window._vttSaveEmote = async (i) => {
     const nameEl = document.getElementById(`ec-name-${i}`);
     const fileEl = document.getElementById(`ec-file-${i}`);
     const newName = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
@@ -7806,7 +7806,7 @@ window._ouvrirGestionEmotes = async () => {
   };
 
   // ── Ajouter ──────────────────────────────────────────────────────
-  window._vttAddEmote = async () => {
+  VTT_ACTIONS._vttAddEmote = async () => {
     const nameEl   = document.getElementById('emote-add-name');
     const fileEl   = document.getElementById('emote-add-file');
     const urlEl    = document.getElementById('emote-add-url');
@@ -7831,7 +7831,7 @@ window._ouvrirGestionEmotes = async () => {
     if (urlEl)  urlEl.value  = '';
     _refresh();
   };
-};
+}
 
 function _renderChatLog(msgs) {
   const el = document.getElementById('vtt-chat-log'); if (!el) return;
@@ -8324,7 +8324,7 @@ function _renderChatLog(msgs) {
   el.scrollTop = el.scrollHeight;
 }
 
-window._vttSendChat = async () => {
+async function _vttSendChat() {
   const input=document.getElementById('vtt-chat-input');
   const text=input?.value.trim(); if (!text) return;
   input.value='';
@@ -8350,7 +8350,7 @@ window._vttSendChat = async () => {
       : e.message;
     showNotif(`Erreur chat : ${reason}`,'error');
   }
-};
+}
 
 // ── Répondre à un message (citation type messagerie) ──────────────────────
 // Construit un extrait textuel du message cité (gère aussi les jets/attaques).
@@ -8390,16 +8390,16 @@ function _renderChatReplyBar() {
 // ═══════════════════════════════════════════════════════════════════
 // ACTIONS GLOBALES
 // ═══════════════════════════════════════════════════════════════════
-window._vttTool       = t => _setTool(_tool === t ? 'select' : t);
+function _vttTool(t) { return _setTool(_tool === t ? 'select' : t); }
 // ── Courir : double le mouvement de base pour ce tour ───────────────
-window._vttCourir = async id => {
+async function _vttCourir(id) {
   const tok = _tokens[id]?.data;
   if (!tok || !_session?.combat?.active) return;
   if (tok.bonusMvt > 0) { showNotif('Course déjà utilisée ce tour', 'error'); return; }
   const bonus = _live(tok).displayMovement ?? 6;
   await updateDoc(_tokRef(id), { bonusMvt: bonus }).catch(() => showNotif('Erreur', 'error'));
   showNotif(`🏃 Course ! +${bonus} cases de mouvement`, 'success');
-};
+}
 
 // ── Déplacement clavier (flèches + pavé numérique) ──────────────────
 async function _moveSelectedBy(dc, dr) {
@@ -8415,20 +8415,20 @@ async function _moveSelectedBy(dc, dr) {
   fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
 }
 
-window._vttFogTool    = t => fogSetEditTool(t, _activePage);
-window._vttToggleFog  = async () => {
+function _vttFogTool(t) { return fogSetEditTool(t, _activePage); }
+async function _vttToggleFog() {
   if (!_activePage) return;
   const next = !_activePage.fogEnabled;
   await updateDoc(_pgRef(_activePage.id), { fogEnabled: next }).catch(() => showNotif('Erreur fog','error'));
-};
-window._vttFogClearOps = async () => {
+}
+async function _vttFogClearOps() {
   if (!_activePage) return;
   const n = (_activePage.fogOps || []).length;
   if (!n) { showNotif('Aucune zone de brouillard sur cette page', 'info'); return; }
   if (!confirm(`Supprimer ${n} zone(s) de brouillard manuel de cette page ?`)) return;
   await updateDoc(_pgRef(_activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
-};
-window._vttSwitchPage = id => _switchPage(id);
+}
+function _vttSwitchPage(id) { return _switchPage(id); }
 
 // ══════════════════════════════════════════════════════════════════════════
 // COURT REPOS — Vote du groupe, régénère ½ PV / ½ PM (arrondi sup.)
@@ -8470,7 +8470,7 @@ function _shortRestPresentNames() {
   return out;
 }
 
-window._vttShortRestVote = async () => {
+async function _vttShortRestVote() {
   const uid = STATE.user?.uid; if (!uid) return;
   const sr  = _session?.shortRest || { max: 0, count: 0, vote: null };
   if ((sr.count || 0) >= (sr.max ?? 0)) {
@@ -8479,9 +8479,9 @@ window._vttShortRestVote = async () => {
   const votes = { ...(sr.vote?.votes || {}), [uid]: true };
   await setDoc(_sesRef(), { shortRest: { ...sr, vote: { votes } } }, { merge: true })
     .catch(() => showNotif('Erreur vote', 'error'));
-};
+}
 
-window._vttShortRestUnvote = async () => {
+async function _vttShortRestUnvote() {
   const uid = STATE.user?.uid; if (!uid) return;
   const sr  = _session?.shortRest; if (!sr?.vote) return;
   const votes = { ...sr.vote.votes };
@@ -8489,31 +8489,31 @@ window._vttShortRestUnvote = async () => {
   const newVote = Object.keys(votes).length ? { votes } : null;
   await setDoc(_sesRef(), { shortRest: { ...sr, vote: newVote } }, { merge: true })
     .catch(() => {});
-};
+}
 
-window._vttShortRestCancel = async () => {
+async function _vttShortRestCancel() {
   if (!STATE.isAdmin) return;
   const sr = _session?.shortRest; if (!sr) return;
   await setDoc(_sesRef(), { shortRest: { ...sr, vote: null } }, { merge: true });
-};
+}
 
-window._vttShortRestForce = async () => {
+async function _vttShortRestForce() {
   if (!STATE.isAdmin) return;
   await _applyShortRest({ forced: true });
-};
+}
 
-window._vttShortRestSetMax = async (val) => {
+async function _vttShortRestSetMax(val) {
   if (!STATE.isAdmin) return;
   const max = Math.max(0, Math.min(20, parseInt(val) || 0));
   const sr  = _session?.shortRest || { count: 0, vote: null };
   await setDoc(_sesRef(), { shortRest: { ...sr, max } }, { merge: true });
-};
+}
 
-window._vttShortRestResetCount = async () => {
+async function _vttShortRestResetCount() {
   if (!STATE.isAdmin) return;
   const sr = _session?.shortRest || { max: 0 };
   await setDoc(_sesRef(), { shortRest: { ...sr, count: 0, vote: null } }, { merge: true });
-};
+}
 
 async function _applyShortRest({ forced = false } = {}) {
   const sr = _session?.shortRest || { max: 0, count: 0, vote: null };
@@ -8624,7 +8624,7 @@ function _shortRestOutsideClick(e) {
   if (e.target.closest('.vtt-rest-float')) return;
   _closeShortRest();
 }
-window._vttToggleShortRest = () => {
+function _vttToggleShortRest() {
   const panel = document.getElementById('vtt-rest-panel'); if (!panel) return;
   const open = panel.dataset.open === '1';
   if (open) {
@@ -8634,9 +8634,9 @@ window._vttToggleShortRest = () => {
     document.getElementById('vtt-rest-trigger')?.classList.add('active');
     _renderShortRest();
     // Défère l'ajout du listener pour que le clic d'ouverture ne le ferme pas aussitôt.
-    setTimeout(() => document.addEventListener('mousedown', _shortRestOutsideClick), 0);
+    requestAnimationFrame(() => document.addEventListener('mousedown', _shortRestOutsideClick));
   }
-};
+}
 
 // ── Suivi joueur du bestiaire (déductions, notes) depuis l'inspecteur VTT ──
 // Écrit dans le même document Firestore que la fiche bestiaire → cohérent partout.
@@ -8644,49 +8644,49 @@ const _saveBstTracker = async () => {
   const uid = STATE.user?.uid; if (!uid) return;
   try { await saveDoc('bestiary_tracker', uid, { data: _bstTracker }); }
   catch (e) { console.error('[vtt] tracker save', e); }
-};
-window._vttBstDed = (beastId, key, val) => {
+}
+function _vttBstDed(beastId, key, val) {
   if (!_bstTracker[beastId]) _bstTracker[beastId] = {};
   if (!_bstTracker[beastId].deductions) _bstTracker[beastId].deductions = {};
   const v = (val ?? '').toString();
   if (!v.trim()) delete _bstTracker[beastId].deductions[key];
   else           _bstTracker[beastId].deductions[key] = v;
   _saveBstTracker();
-};
-window._vttBstNotes = (beastId, val) => {
+}
+function _vttBstNotes(beastId, val) {
   if (!_bstTracker[beastId]) _bstTracker[beastId] = {};
   _bstTracker[beastId].notes = (val ?? '').toString();
   _saveBstTracker();
-};
+}
 
 // ── Outils de dessin ────────────────────────────────────────────────
-window._vttDrawShape = shape => {
+function _vttDrawShape(shape) {
   _drawShape = shape;
   ['pencil','line','rect','circle'].forEach(s => {
     document.getElementById(`vtt-ds-${s}`)?.classList.toggle('active', s === shape);
   });
-};
-window._vttDrawColor = color => {
+}
+function _vttDrawColor(color) {
   _drawColor = color;
   document.querySelectorAll('.vtt-draw-color').forEach(b => b.classList.toggle('active', b.dataset.color === color));
-};
-window._vttDrawWidth = w => {
+}
+function _vttDrawWidth(w) {
   _drawWidth = w;
   document.querySelectorAll('.vtt-draw-wbtn').forEach(b => b.classList.toggle('active', +b.dataset.w === w));
-};
-window._vttToggleDrawFill = () => {
+}
+function _vttToggleDrawFill() {
   _drawFill = !_drawFill;
   const btn = document.getElementById('vtt-draw-fill-btn');
   if (btn) { btn.textContent = _drawFill ? '◼' : '◻'; btn.classList.toggle('active', _drawFill); }
-};
-window._vttClearAnnots = async () => {
+}
+async function _vttClearAnnots() {
   if (!_activePage) return;
   if (!await confirmModal('Effacer toutes les annotations de cette page ?')) return;
   const toDelete = Object.values(_annotations).filter(e => e.data.pageId === _activePage.id);
   await Promise.all(toDelete.map(e => deleteDoc(_annotRef(e.data.id)).catch(()=>{})));
-};
+}
 
-window._vttAddPage = () => {
+function _vttAddPage() {
   openModal('➕ Nouvelle page', `
     <div class="vtt-form">
       <div class="form-group"><label>Nom</label>
@@ -8703,8 +8703,8 @@ window._vttAddPage = () => {
         <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer</button>
       </div>
     </div>`);
-};
-window._vttConfirmAddPage = async () => {
+}
+async function _vttConfirmAddPage() {
   const name=(document.getElementById('vpf-name')?.value||'').trim();
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-rows')?.value)||18));
@@ -8712,9 +8712,9 @@ window._vttConfirmAddPage = async () => {
   closeModalDirect();
   await addDoc(_pgsCol(),{name,cols,rows,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
     .catch(()=>showNotif('Erreur création page','error'));
-};
+}
 
-window._vttEditPage = id => {
+function _vttEditPage(id) {
   const p=_pages[id]; if (!p) return;
   openModal('✏️ Modifier la page', `
     <div class="vtt-form">
@@ -8737,8 +8737,8 @@ window._vttEditPage = id => {
         <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
       </div>
     </div>`);
-};
-window._vttConfirmEditPage = async id => {
+}
+async function _vttConfirmEditPage(id) {
   const name=(document.getElementById('vpe-name')?.value||'').trim();
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-rows')?.value)||18));
@@ -8747,35 +8747,35 @@ window._vttConfirmEditPage = async id => {
   closeModalDirect();
   await updateDoc(_pgRef(id),{name,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
   if (_activePage?.id===id) { _activePage={..._activePage,name,cols,rows,fogEnabled}; _drawGrid(); }
-};
+}
 
-window._vttDeletePage = async id => {
+async function _vttDeletePage(id) {
   if (!await confirmModal('Supprimer cette page ?',{title:'Supprimer ?',danger:true})) return;
   await deleteDoc(_pgRef(id)).catch(()=>{});
-};
+}
 
 // Envoyer tous les joueurs vers une page spécifique (depuis la liste)
-window._vttSendToPage = async pageId => {
+async function _vttSendToPage(pageId) {
   const p=_pages[pageId]; if (!p) return;
   await setDoc(_sesRef(),{activePageId:pageId},{merge:true}).catch(()=>{});
   showNotif(`📡 Tous les joueurs → « ${p.name} »`,'success');
-};
+}
 
 // Placer un token sur la page active (depuis le tray)
-window._vttPlace = async tokenId => {
+async function _vttPlace(tokenId) {
   if (!_activePage) { showNotif('Crée d\'abord une page','error'); return; }
   const cC=Math.floor(_activePage.cols/2), cR=Math.floor(_activePage.rows/2);
   await updateDoc(_tokRef(tokenId),{pageId:_activePage.id,col:cC,row:cR,visible:true})
     .catch(()=>showNotif('Erreur placement','error'));
-};
+}
 // Dupliquer un perso/PNJ déjà placé sur une autre page → nouveau token sur la page active.
 // Le HP/PM/stats sont partagés via la fiche perso ; les buffs et état de tour restent par-instance.
-window._vttDuplicateOnPage = async srcTokenId => {
+async function _vttDuplicateOnPage(srcTokenId) {
   if (!STATE.isAdmin) return;
   if (!_activePage) { showNotif('Crée d\'abord une page','error'); return; }
   const src = _tokens[srcTokenId]?.data;
   if (!src) { showNotif('Token introuvable','error'); return; }
-  if (src.type === 'enemy') { window._vttDuplicateToken?.(srcTokenId); return; }
+  if (src.type === 'enemy') { _vttDuplicateToken(srcTokenId); return; }
   const cC = Math.floor(_activePage.cols/2), cR = Math.floor(_activePage.rows/2);
   try {
     await addDoc(_toksCol(), {
@@ -8802,11 +8802,11 @@ window._vttDuplicateOnPage = async srcTokenId => {
     console.error('[vtt] duplicate-on-page:', e);
     showNotif('Erreur duplication','error');
   }
-};
+}
 // Retirer un token de la carte.
 // Si plusieurs tokens partagent la même entité (perso/PNJ dupliqué), on supprime celui-ci ;
 // sinon on le renvoie en réserve.
-window._vttRetireToken = async tokenId => {
+async function _vttRetireToken(tokenId) {
   const t = _tokens[tokenId]?.data; if (!t) return;
   const key = t.characterId || t.npcId; // les ennemis (beastId) sont gérés par _vttDeleteToken
   let isDuplicate = false;
@@ -8825,9 +8825,9 @@ window._vttRetireToken = async tokenId => {
     await updateDoc(_tokRef(tokenId),{pageId:null,visible:false}).catch(()=>{});
   }
   if (_selected===tokenId) _deselect();
-};
+}
 // Le joueur invoque son propre token sur la carte active
-window._vttInvokeMyToken = async () => {
+async function _vttInvokeMyToken() {
   if (!_activePage) { showNotif('Aucune carte active','error'); return; }
   const uid = STATE.user?.uid; if (!uid) return;
   const tok = Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data;
@@ -8835,45 +8835,46 @@ window._vttInvokeMyToken = async () => {
   const cC = Math.floor(_activePage.cols/2), cR = Math.floor(_activePage.rows/2);
   await updateDoc(_tokRef(tok.id),{pageId:_activePage.id,col:cC,row:cR,visible:true})
     .catch(err => { console.error('[vtt] invocation:', err); showNotif('Erreur invocation','error'); });
-};
+}
 // Déplacer le token vers une autre page
-window._vttMoveTokenToPage = async (tokenId,pageId) => {
+async function _vttMoveTokenToPage(tokenId,pageId) {
   if (!pageId) return;
   await updateDoc(_tokRef(tokenId),{pageId}).catch(()=>{});
-};
+}
 // Sélectionner depuis le tray (place si non placé)
-window._vttSelectFromTray = id => {
+function _vttSelectFromTray(id) {
   const t=_tokens[id]?.data; if (!t) return;
-  if (!t.pageId&&STATE.isAdmin) { window._vttPlace(id); return; }
+  if (!t.pageId&&STATE.isAdmin) { _vttPlace(id); return; }
   if (t.pageId===_activePage?.id) _select(id);
-};
-window._vttToggleVisible = async id => {
+}
+async function _vttToggleVisible(id) {
   const t=_tokens[id]?.data; if (!t) return;
   await updateDoc(_tokRef(id),{visible:!t.visible}).catch(()=>{});
-};
-window._vttClearBuffs = async id => {
+}
+async function _vttClearBuffs(id) {
   if (!STATE.isAdmin) return;
   const t=_tokens[id]?.data; if (!t) return;
   await updateDoc(_tokRef(id),{buffs:[]}).catch(()=>{});
   showNotif('Buffs supprimés.','success');
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // HANDLERS — Conditions (états) sur les tokens
 // ══════════════════════════════════════════════════════════════════════════════
 /** Ouvre la modal de sélection d'un état à appliquer. */
-// Expose la librairie des états aux autres modules (spells.js → dropdown affliction)
-window._vttGetConditionLibrary = () => CONDITION_LIBRARY.map(c => ({
-  id: c.id, label: c.label, icon: c.icon, color: c.color,
-}));
-window._vttEnsureConditionsLoaded = async () => {
+function getVttConditionLibrary() {
+  return CONDITION_LIBRARY.map(c => ({
+    id: c.id, label: c.label, icon: c.icon, color: c.color,
+  }));
+}
+async function _vttEnsureConditionsLoaded() {
   if (CONDITION_LIBRARY.length <= CONDITION_DEFAULT_LIBRARY.length) {
     await _loadConditionsOverrides().catch(() => {});
   }
-  return window._vttGetConditionLibrary();
-};
+  return getVttConditionLibrary();
+}
 
-window._vttConditionAdd = (tokenId) => {
+function _vttConditionAdd(tokenId) {
   if (!STATE.isAdmin) return;
   openModal('⚡ Appliquer un état', `
     <div class="vtt-cond-picker">
@@ -8892,11 +8893,11 @@ window._vttConditionAdd = (tokenId) => {
       Durée par défaut : 2 tours en combat (1 coup pour les états « on hit »). Modifiable via ✏️ dans l'inspector.
     </div>
   `);
-};
+}
 
 /** Applique l'état avec les défauts de la librairie (DC + stat préremplis),
  *  puis ouvre la modal d'édition pour ajuster source/durée si besoin. */
-window._vttConditionApply = async (tokenId, condId) => {
+async function _vttConditionApply(tokenId, condId) {
   const lib = CONDITION_BY_ID[condId]; if (!lib) return;
   const t = _tokens[tokenId]?.data; if (!t) return;
   // Évite les doublons (même état déjà appliqué)
@@ -8934,10 +8935,10 @@ window._vttConditionApply = async (tokenId, condId) => {
     : (expiresAtRound != null || pendingDuration != null) ? ` (${dur} tour${dur>1?'s':''})` : '';
   showNotif(`${lib.icon} ${lib.label} appliqué${durLbl}`, 'success');
   _renderInspectorSoon?.();
-};
+}
 
 /** Retire un état du token (par index dans le tableau). */
-window._vttConditionRemove = async (tokenId, idx) => {
+async function _vttConditionRemove(tokenId, idx) {
   if (!STATE.isAdmin) return;
   const t = _tokens[tokenId]?.data; if (!t) return;
   const conds = [...(t.conditions || [])];
@@ -8946,10 +8947,10 @@ window._vttConditionRemove = async (tokenId, idx) => {
   await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
   const lib = CONDITION_BY_ID[removed.id];
   if (lib) showNotif(`${lib.icon} ${lib.label} retiré`, 'info');
-};
+}
 
 /** Lance un jet de sauvegarde pour tenter de finir l'état. */
-window._vttConditionSave = async (tokenId, idx) => {
+async function _vttConditionSave(tokenId, idx) {
   const t = _tokens[tokenId]?.data; if (!t) return;
   const cond = (t.conditions || [])[idx]; if (!cond) return;
   const lib = CONDITION_BY_ID[cond.id];
@@ -8979,10 +8980,10 @@ window._vttConditionSave = async (tokenId, idx) => {
     const conds = [...(t.conditions || [])]; conds.splice(idx, 1);
     await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
   }
-};
+}
 
 /** Modal d'édition d'un état (source / DD / stat / durée). */
-window._vttConditionEdit = (tokenId, idx) => {
+function _vttConditionEdit(tokenId, idx) {
   if (!STATE.isAdmin) return;
   const t = _tokens[tokenId]?.data; if (!t) return;
   const cond = (t.conditions || [])[idx]; if (!cond) return;
@@ -9023,9 +9024,9 @@ window._vttConditionEdit = (tokenId, idx) => {
         data-vtt-fn="_vttConditionEditSave" data-vtt-args="${tokenId}|${idx}">💾 Enregistrer</button>
     </div>
   `);
-};
+}
 
-window._vttConditionEditSave = async (tokenId, idx) => {
+async function _vttConditionEditSave(tokenId, idx) {
   const t = _tokens[tokenId]?.data; if (!t) return;
   const cond = (t.conditions || [])[idx]; if (!cond) return;
   const source = document.getElementById('ce-source')?.value?.trim() || '';
@@ -9039,7 +9040,7 @@ window._vttConditionEditSave = async (tokenId, idx) => {
   await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
   closeModalDirect();
   showNotif('État mis à jour', 'success');
-};
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RÉGLAGES DES ÉTATS — modal accessible via le bouton ⚙ de la section États
@@ -9082,7 +9083,7 @@ async function _loadConditionsOverrides() {
   } catch {}
 }
 
-window._vttConditionConfig = async (opts = {}) => {
+async function _vttConditionConfig(opts = {}) {
   if (!STATE.isAdmin) return;
   // S'assure que les overrides MJ sont chargés (utile quand on l'appelle depuis
   // la Console MJ sans avoir encore ouvert le VTT cette session).
@@ -9265,10 +9266,10 @@ window._vttConditionConfig = async (opts = {}) => {
       </div>
     </div>
   `);
-};
+}
 
 /** Sélectionne un état dans la modal de réglages (left list → swap right detail). */
-window._vttConditionConfigSelect = (idx) => {
+function _vttConditionConfigSelect(idx) {
   document.querySelectorAll('.vtt-cc-list-item').forEach((b, i) => {
     b.classList.toggle('is-active', i === idx);
   });
@@ -9277,9 +9278,9 @@ window._vttConditionConfigSelect = (idx) => {
   });
   // Scroll top du détail
   document.querySelector('.vtt-cc-details')?.scrollTo({ top: 0, behavior: 'smooth' });
-};
+}
 
-window._vttConditionConfigSave = async () => {
+async function _vttConditionConfigSave() {
   if (!STATE.isAdmin) return;
   const triVal = (id) => document.querySelector(`[data-cc-tri-id="${id}"]`)?.dataset.ccTriValue || '';
   const flagOn = (id) => document.querySelector(`[data-cc-flag-id="${id}"]`)?.classList.contains('is-on');
@@ -9325,9 +9326,9 @@ window._vttConditionConfigSave = async () => {
   } catch (e) {
     showNotif('Erreur sauvegarde : ' + (e?.message || e), 'error');
   }
-};
+}
 
-window._vttConditionConfigReset = async () => {
+async function _vttConditionConfigReset() {
   if (!STATE.isAdmin) return;
   if (!await confirmModal(
     'Remettre tous les états aux valeurs par défaut ? Les overrides MJ et les états personnalisés seront effacés.',
@@ -9340,13 +9341,13 @@ window._vttConditionConfigReset = async () => {
     closeModalDirect();
     showNotif('↺ Réglages remis aux défauts', 'success');
     // Réouvrir pour confirmation visuelle
-    setTimeout(() => window._vttConditionConfig(), 100);
+    setTimeout(() => _vttConditionConfig(), 100);
   } catch {}
-};
+}
 
 /** Ajoute un nouvel état personnalisé à la lib en mémoire et réouvre la modale dessus.
  *  La persistance se fait quand le MJ clique sur Enregistrer. */
-window._vttConditionConfigAddNew = async () => {
+async function _vttConditionConfigAddNew() {
   if (!STATE.isAdmin) return;
   // Capture les modifs en cours dans la modale avant de la fermer/rouvrir
   const _capture = () => {
@@ -9405,17 +9406,17 @@ window._vttConditionConfigAddNew = async () => {
   // Réouvre SANS reload Firestore (la nouvelle entrée n'est pas encore persistée,
   // un reload l'écraserait → bug "+ Nouvel état n'ajoute qu'une fois")
   setTimeout(async () => {
-    await window._vttConditionConfig({ skipReload: true });
+    await _vttConditionConfig({ skipReload: true });
     const lastIdx = CONDITION_LIBRARY.length - 1;
-    window._vttConditionConfigSelect?.(lastIdx);
+    _vttConditionConfigSelect(lastIdx);
     // Focus l'input label pour rename direct
     document.getElementById(`cc-${lastIdx}-label`)?.focus();
     document.getElementById(`cc-${lastIdx}-label`)?.select();
   }, 80);
-};
+}
 
 /** Supprime un état personnalisé (non-default). Persistance immédiate. */
-window._vttConditionConfigDelete = async (idx) => {
+async function _vttConditionConfigDelete(idx) {
   if (!STATE.isAdmin) return;
   const c = CONDITION_LIBRARY[idx]; if (!c) return;
   if (!_isCustomCondition(c.id)) {
@@ -9436,11 +9437,11 @@ window._vttConditionConfigDelete = async (idx) => {
     await saveDoc('world', 'conditions', { library: toSave });
     closeModalDirect();
     showNotif('🗑 État supprimé', 'success');
-    setTimeout(() => window._vttConditionConfig(), 80);
+    setTimeout(() => _vttConditionConfig(), 80);
   } catch (e) {
     showNotif('Erreur suppression : ' + (e?.message || e), 'error');
   }
-};
+}
 
 /** Helper : true si le token porte un état actif dont l'effet `effectKey` est truthy. */
 function _hasConditionEffect(token, effectKey) {
@@ -9495,7 +9496,7 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
   return { hasAdv, hasDis, reasons };
 }
 /** Déclenche un sort suspendu : marque le sort gratuit puis ouvre le modal d'attaque. */
-window._vttTriggerSuspendedSpell = async (tokenId, buffIdx) => {
+async function _vttTriggerSuspendedSpell(tokenId, buffIdx) {
   const t = _tokens[tokenId]?.data; if (!t?.buffs?.length) return;
   if (!_canControlToken(t)) return;
   // Index visible (parmi les buffs actifs) → index réel dans t.buffs
@@ -9519,10 +9520,10 @@ window._vttTriggerSuspendedSpell = async (tokenId, buffIdx) => {
     // Le flag reste actif jusqu'à la fin du modal — désactivé par sécurité après 30s
     setTimeout(() => { _suspendedTriggerActive = false; }, 30_000);
   }
-};
+}
 
 /** Retire un buff à l'index donné (MJ uniquement). */
-window._vttRemoveBuff = async (tokenId, idx) => {
+async function _vttRemoveBuff(tokenId, idx) {
   if (!STATE.isAdmin) return;
   const t = _tokens[tokenId]?.data; if (!t || !Array.isArray(t.buffs)) return;
   // Recalcule l'index parmi les buffs actifs (pour matcher l'affichage)
@@ -9536,10 +9537,10 @@ window._vttRemoveBuff = async (tokenId, idx) => {
   const newBuffs = t.buffs.filter((_, i) => i !== realIdx);
   await updateDoc(_tokRef(tokenId), { buffs: newBuffs }).catch(() => {});
   showNotif('Effet retiré', 'info');
-};
+}
 
 /** Ouvre une modale simple pour ajouter manuellement un effet sur le token (MJ). */
-window._vttAddBuffPrompt = async (tokenId) => {
+async function _vttAddBuffPrompt(tokenId) {
   if (!STATE.isAdmin) return;
   const t = _tokens[tokenId]?.data; if (!t) return;
   const TYPES = [
@@ -9590,9 +9591,9 @@ window._vttAddBuffPrompt = async (tokenId) => {
       };
     </script>
   `);
-};
+}
 
-window._vttConfirmAddBuff = async (tokenId) => {
+async function _vttConfirmAddBuff(tokenId) {
   if (!STATE.isAdmin) return;
   const t = _tokens[tokenId]?.data; if (!t) return;
   const type    = document.getElementById('vab-type')?.value || 'ca';
@@ -9619,9 +9620,9 @@ window._vttConfirmAddBuff = async (tokenId) => {
   await updateDoc(_tokRef(tokenId), { buffs: [...existing, newBuff] }).catch(() => {});
   closeModalDirect();
   showNotif(`${newBuff.icon} ${label} appliqué`, 'success');
-};
+}
 
-window._vttSetHp = async (tokenId,hp) => {
+async function _vttSetHp(tokenId,hp) {
   const t=_tokens[tokenId]?.data; if (!t) return;
   // Détecte une perte de PV pour déclencher un JS de concentration auto
   const lT = _live(t);
@@ -9633,13 +9634,13 @@ window._vttSetHp = async (tokenId,hp) => {
     const notes = await _vttTriggerConcentrationSave(t, delta);
     notes.forEach(msg => showNotif(msg, msg.startsWith('💢') ? 'error' : 'info'));
   }
-};
-window._vttSetPm = async (tokenId,pm) => {
+}
+async function _vttSetPm(tokenId,pm) {
   const t=_tokens[tokenId]?.data; if (!t) return;
   const v=Math.max(0,pm);
   if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
-};
+}
 
 // Bonus temporaire manuel (Mouvement / CA / Portée) via le système de BUFFS du
 // token. Avantages : déjà intégré dans displayMovement/Defense/Range ET la
@@ -9649,14 +9650,14 @@ const _MS_BONUS_BUFF = {
   vitesse: { type: 'move_bonus',  icon: '👢' },
   ca:      { type: 'ca',          icon: '🛡' },
   portee:  { type: 'range_bonus', icon: '🏹' },
-};
+}
 // Lit la valeur du buff manuel d'un type donné sur un token.
 function _manualBuffVal(t, key) {
   const cfg = _MS_BONUS_BUFF[key]; if (!cfg) return 0;
   const b = (t?.buffs || []).find(x => x && x.type === cfg.type && x.manual);
   return b ? (parseInt(b.bonus) || 0) : 0;
 }
-window._vttTokenBonus = async (tokenId, key, delta) => {
+async function _vttTokenBonus(tokenId, key, delta) {
   const t = _tokens[tokenId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
   const cfg = _MS_BONUS_BUFF[key]; if (!cfg) return;
@@ -9675,8 +9676,8 @@ window._vttTokenBonus = async (tokenId, key, delta) => {
   await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
   _renderInspector(_tokens[tokenId]?.data || t);
   _patchShape(tokenId);
-};
-window._vttTokenResetBonus = async (tokenId) => {
+}
+async function _vttTokenResetBonus(tokenId) {
   const t = _tokens[tokenId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
   const buffs = (t.buffs || []).filter(b => !(b && b.manual));
@@ -9684,18 +9685,18 @@ window._vttTokenResetBonus = async (tokenId) => {
   await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
   _renderInspector(_tokens[tokenId]?.data || t);
   _patchShape(tokenId);
-};
+}
 
-window._vttMsSetXp = async (charId, uid, xp) => {
+async function _vttMsSetXp(charId, uid, xp) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   const val = Math.max(0, Math.round(xp));
   await updateDoc(_chrRef(charId), { exp: val }).catch(() => {});
   c.exp = val;
   _renderMiniSheet(uid);
-};
+}
 
-window._vttMsAddXp = async (charId, uid, delta) => {
+async function _vttMsAddXp(charId, uid, delta) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   const d = Math.round(delta);
@@ -9704,17 +9705,17 @@ window._vttMsAddXp = async (charId, uid, delta) => {
   await updateDoc(_chrRef(charId), { exp: newXp }).catch(() => {});
   c.exp = newXp;
   _renderMiniSheet(uid);
-};
+}
 
-window._vttMsSetNiveau = async (charId, uid, niveau) => {
+async function _vttMsSetNiveau(charId, uid, niveau) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   const val = Math.max(1, Math.min(20, Math.round(niveau)));
   await updateDoc(_chrRef(charId), { niveau: val }).catch(() => {});
   c.niveau = val;
   _renderMiniSheet(uid);
-};
-window._vttEditToken = id => _openStatsModal(_tokens[id]?.data??null);
+}
+function _vttEditToken(id) { return _openStatsModal(_tokens[id]?.data??null); }
 
 // ═══════════════════════════════════════════════════════════════════
 // DÉLÉGATION DE CONTRÔLE — autoriser d'autres joueurs sur son token
@@ -9831,7 +9832,7 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
     <button class="btn btn-outline btn-sm vtt-deleg-close" data-action="_vttDelegClose">Fermer</button>`;
 }
 
-window._vttOpenTokenDelegatesModal = (tokenId) => {
+function _vttOpenTokenDelegatesModal(tokenId) {
   const t = _tokens[tokenId]?.data; if (!t) return;
   const uid = STATE.user?.uid;
   const isOwner = uid && t.ownerId === uid;
@@ -9840,16 +9841,16 @@ window._vttOpenTokenDelegatesModal = (tokenId) => {
     return;
   }
   const tgtName = (typeof _live === 'function' ? _live(t).displayName : t.name) || t.name || 'Token';
-  window._vttDelegSearch = '';
+  _vttDelegSearch = '';
   openModal(`🤝 Déléguer le contrôle — ${_esc(tgtName)}`,
     `<div id="vtt-deleg-modal" class="vtt-deleg-modal">${_vttRenderDelegateModalBody(tokenId, '')}</div>`);
-};
+}
 
-window._vttFilterDelegates = (tokenId, value) => {
-  window._vttDelegSearch = value || '';
+function _vttFilterDelegates(tokenId, value) {
+  _vttDelegSearch = value || '';
   const host = document.getElementById('vtt-deleg-modal');
   if (!host) return;
-  host.innerHTML = _vttRenderDelegateModalBody(tokenId, window._vttDelegSearch);
+  host.innerHTML = _vttRenderDelegateModalBody(tokenId, _vttDelegSearch);
   // Restaure focus + caret dans la search box
   requestAnimationFrame(() => {
     const el = document.getElementById('vtt-deleg-search');
@@ -9858,9 +9859,9 @@ window._vttFilterDelegates = (tokenId, value) => {
       try { el.setSelectionRange(el.value.length, el.value.length); } catch {}
     }
   });
-};
+}
 
-window._vttToggleTokenDelegate = async (tokenId, targetUid) => {
+async function _vttToggleTokenDelegate(tokenId, targetUid) {
   const t = _tokens[tokenId]?.data; if (!t || !targetUid) return;
   const uid = STATE.user?.uid;
   const isOwner = uid && t.ownerId === uid;
@@ -9873,7 +9874,7 @@ window._vttToggleTokenDelegate = async (tokenId, targetUid) => {
     // Mise à jour optimiste du cache local pour rafraîchir immédiatement la modal
     if (_tokens[tokenId]?.data) _tokens[tokenId].data.controlDelegates = next;
     const host = document.getElementById('vtt-deleg-modal');
-    if (host) host.innerHTML = _vttRenderDelegateModalBody(tokenId, window._vttDelegSearch || '');
+    if (host) host.innerHTML = _vttRenderDelegateModalBody(tokenId, _vttDelegSearch || '');
     const name = _resolveUidName(targetUid);
     showNotif(wasOn ? `Contrôle retiré à ${name}` : `${name} peut maintenant contrôler ce token`,
       wasOn ? 'info' : 'success');
@@ -9881,16 +9882,16 @@ window._vttToggleTokenDelegate = async (tokenId, targetUid) => {
     console.error('[VTT] toggle delegate', err);
     showNotif(`Erreur : ${err?.message || err}`, 'error');
   }
-};
+}
 
 // Suppression rapide depuis le chip de l'inspector — alias vers le toggle
-window._vttRemoveTokenDelegate = async (tokenId, uid) => {
-  await window._vttToggleTokenDelegate(tokenId, uid);
-};
+async function _vttRemoveTokenDelegate(tokenId, uid) {
+  await _vttToggleTokenDelegate(tokenId, uid);
+}
 
 // Nettoie les UIDs orphelins (sans perso lié + non admin) du doc d'aventure.
 // Réservé MJ — agit sur adventure.players + accessList.
-window._vttCleanGhostMembers = async () => {
+async function _vttCleanGhostMembers() {
   if (!STATE.isAdmin) return;
   const adv = STATE.adventure; if (!adv?.id) return;
   // Recalcule la liste des ghosts à l'instant T
@@ -9916,30 +9917,30 @@ window._vttCleanGhostMembers = async () => {
       // Récupère le tokenId courant depuis le data-attribute de l'inspector ou ré-extrait
       const sel = document.querySelector('[data-vtt-fn="_vttOpenTokenDelegatesModal"]');
       const tokenId = sel?.dataset?.vttArgs;
-      if (tokenId) host.innerHTML = _vttRenderDelegateModalBody(tokenId, window._vttDelegSearch || '');
+      if (tokenId) host.innerHTML = _vttRenderDelegateModalBody(tokenId, _vttDelegSearch || '');
     }
   } catch (err) {
     console.error('[VTT] clean ghosts', err);
     showNotif(`Erreur : ${err?.message || err}`, 'error');
   }
-};
+}
 
 /** Réinitialise le déplacement et les actions d'un token (MJ, tour individuel). */
-window._vttResetTurn = async id => {
+async function _vttResetTurn(id) {
   if (!STATE.isAdmin) return;
   await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false })
     .catch(() => showNotif('Erreur reset tour', 'error'));
   showNotif('Tour réinitialisé', 'success');
-};
+}
 
-window._vttAddImageUrl = async () => {
+async function _vttAddImageUrl() {
   const url=prompt('URL de l\'image :')?.trim(); if (!url||!_activePage) return;
   const imgs=[...(_activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:_activePage.cols,h:_activePage.rows}];
   await updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs}).catch(()=>{});
-};
-window._vttUploadClick = () => document.getElementById('vtt-img-input')?.click();
+}
+function _vttUploadClick() { return document.getElementById('vtt-img-input')?.click(); }
 
-window._vttToggleCombat = async () => {
+async function _vttToggleCombat() {
   if (!STATE.isAdmin) return;
   const active=!_session?.combat?.active;
   await setDoc(_sesRef(),{combat:{active,round:active?1:0}},{merge:true});
@@ -9971,8 +9972,8 @@ window._vttToggleCombat = async () => {
     await b.commit().catch(()=>{});
     showNotif('⚔️ Combat démarré !','success');
   } else showNotif('Combat terminé.','success');
-};
-window._vttNextRound = async () => {
+}
+async function _vttNextRound() {
   if (!STATE.isAdmin||!_session?.combat?.active) return;
   const round=(_session.combat.round??1)+1;
   await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
@@ -10070,7 +10071,7 @@ window._vttNextRound = async () => {
   dotNotifs.forEach(msg => showNotif(msg, 'error'));
   expiredNotifs.forEach(msg => showNotif(msg, 'info'));
   showNotif(`Round ${round} !`, 'success');
-};
+}
 
 // ── Modal stats combat (override des stats auto) ────────────────────
 function _openStatsModal(t) {
@@ -10113,7 +10114,7 @@ function _openStatsModal(t) {
     </div>`);
 }
 // ── Création d'ennemis personnalisés ────────────────────────────────
-window._vttCreateEnemy = () => {
+function _vttCreateEnemy() {
   openModal('👹 Créer un ennemi', `
     <div class="vtt-form">
       <div class="form-group"><label>Nom</label>
@@ -10141,8 +10142,8 @@ window._vttCreateEnemy = () => {
         <button class="btn-primary" data-vtt-fn="_vttConfirmCreateEnemy">Créer</button>
       </div>
     </div>`);
-};
-window._vttConfirmCreateEnemy = async () => {
+}
+async function _vttConfirmCreateEnemy() {
   const name  = (document.getElementById('ve-name')?.value||'').trim() || 'Ennemi';
   const hp    = Math.max(1, parseInt(document.getElementById('ve-hp')?.value)||20);
   const ca    = parseInt(document.getElementById('ve-ca')?.value)||10;
@@ -10168,10 +10169,10 @@ window._vttConfirmCreateEnemy = async () => {
   }
   await batch.commit().catch(()=>showNotif('Erreur création','error'));
   showNotif(`👹 ${count>1?`${count} ennemis créés`:'Ennemi créé'} !`,'success');
-};
+}
 
 // Créer une nouvelle instance indépendante d'un ennemi (PV séparés)
-window._vttDuplicateToken = async tokenId => {
+async function _vttDuplicateToken(tokenId) {
   const t=_tokens[tokenId]?.data; if (!t) return;
   const baseName=t.name.replace(/ \d+$/, '');
   const sameGroup=Object.values(_tokens).filter(e=>
@@ -10194,10 +10195,10 @@ window._vttDuplicateToken = async tokenId => {
     createdAt: serverTimestamp(),
   }).catch(()=>showNotif('Erreur duplication','error'));
   showNotif(`👹 ${baseName} ${num} créé !`,'success');
-};
+}
 
 // Placer une instance depuis le bestiaire (crée + place sur la page active)
-window._vttPlaceFromBestiary = async beastId => {
+async function _vttPlaceFromBestiary(beastId) {
   if (!_activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
   const b=_bestiary[beastId]; if (!b) return;
   // Purger les tokens fantômes (anciens auto-créés, non placés, non modifiés)
@@ -10230,17 +10231,17 @@ window._vttPlaceFromBestiary = async beastId => {
     createdAt:serverTimestamp(),
   }).catch(()=>showNotif('Erreur placement','error'));
   showNotif(`👹 ${name} placé !`,'success');
-};
+}
 
 // Supprimer définitivement un token ennemi
-window._vttDeleteToken = async tokenId => {
+async function _vttDeleteToken(tokenId) {
   const t=_tokens[tokenId]?.data; if (!t||t.type!=='enemy') return;
   if (!confirm(`Supprimer définitivement "${t.name}" ?`)) return;
   await deleteDoc(_tokRef(tokenId)).catch(()=>showNotif('Erreur suppression','error'));
   showNotif(`🗑 ${t.name} supprimé`,'success');
-};
+}
 
-window._vttSaveStats = async id => {
+async function _vttSaveStats(id) {
   const mv  = document.getElementById('vsf-mv')?.value;
   const rng = document.getElementById('vsf-range')?.value;
   const atk = document.getElementById('vsf-atk')?.value;
@@ -10271,17 +10272,17 @@ window._vttSaveStats = async id => {
   await updateDoc(_tokRef(id),patch).catch(()=>showNotif('Erreur','error'));
   closeModalDirect();
   showNotif('Stats mises à jour','success');
-};
+}
 
 // ── Upload via Cloudinary ───────────────────────────────────────────
 // Config (cloud name + upload preset) stockée en localStorage par le module
 // shared/upload-cloudinary.js. Helper conservé sous le nom legacy
 // `_vttSetImgbbKey` pour ne pas casser les `data-vtt-fn` existants.
 
-window._vttSetImgbbKey = () => {
+function _vttSetImgbbKey() {
   openCloudinaryConfigModal();
   if (hasCloudinaryConfig()) showNotif('Configuration Cloudinary enregistrée ✓','success');
-};
+}
 
 async function _handleUpload(file) {
   if (!file||!_activePage) return;
@@ -10332,13 +10333,13 @@ function _setTool(tool) {
 const _MOVE_KEYS = {
   'ArrowLeft':  {dc:-1,dr: 0}, 'ArrowRight': {dc: 1,dr: 0},
   'ArrowUp':    {dc: 0,dr:-1}, 'ArrowDown':  {dc: 0,dr: 1},
-};
+}
 const _NUMPAD_KEYS = {
   'Numpad4':{dc:-1,dr: 0}, 'Numpad6':{dc: 1,dr: 0},
   'Numpad8':{dc: 0,dr:-1}, 'Numpad2':{dc: 0,dr: 1},
   'Numpad7':{dc:-1,dr:-1}, 'Numpad9':{dc: 1,dr:-1},
   'Numpad1':{dc:-1,dr: 1}, 'Numpad3':{dc: 1,dr: 1},
-};
+}
 
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
@@ -10347,7 +10348,7 @@ function _keyHandler(e) {
   // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie)
   if ((e.key==='r' || e.key==='R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
-    window._vttTool('ruler');
+    _vttTool('ruler');
   }
   if ((e.key==='Delete'||e.key==='Backspace') && _tool==='select') {
     // 1) Annotations sélectionnées
@@ -10448,36 +10449,36 @@ function _renderLibSection() {
     ${imgGrid}`;
 }
 
-window._vttLibOpenFolder  = (id) => { _libFolder = id; _renderLibSection(); };
-window._vttLibToggle      = ()  => { _libOpen = !_libOpen; _renderLibSection();
-  document.getElementById('vtt-lib-toggle')?.classList.toggle('open', _libOpen); };
+function _vttLibOpenFolder(id) { _libFolder = id; _renderLibSection(); }
+function _vttLibToggle() { _libOpen = !_libOpen; _renderLibSection();
+  document.getElementById('vtt-lib-toggle')?.classList.toggle('open', _libOpen); }
 
-window._vttLibNewFolder   = () => {
+function _vttLibNewFolder() {
   const name = prompt('Nom du dossier :')?.trim();
   if (!name) return;
   _mapLib.folders.push({ id: crypto.randomUUID(), name });
   _saveMapLib();
-};
+}
 
-window._vttLibDelFolder   = (id) => {
+function _vttLibDelFolder(id) {
   // Retirer les images du dossier (les remettre en racine)
   _mapLib.images  = _mapLib.images.map(i => i.folderId === id ? { ...i, folderId: null } : i);
   _mapLib.folders = _mapLib.folders.filter(f => f.id !== id);
   if (_libFolder === id) _libFolder = null;
   _saveMapLib();
-};
+}
 
-window._vttLibDelImg      = (id) => {
+function _vttLibDelImg(id) {
   _mapLib.images = _mapLib.images.filter(i => i.id !== id);
   _saveMapLib();
-};
+}
 
-window._vttLibMoveRoot    = (id) => {
+function _vttLibMoveRoot(id) {
   _mapLib.images = _mapLib.images.map(i => i.id === id ? { ...i, folderId: null } : i);
   _saveMapLib();
-};
+}
 
-window._vttLibMoveMenu    = (imgId, evt) => {
+function _vttLibMoveMenu(imgId, evt) {
   evt.stopPropagation();
   // Mini popup de sélection de dossier
   const existing = document.getElementById('vtt-lib-move-popup');
@@ -10493,15 +10494,15 @@ window._vttLibMoveMenu    = (imgId, evt) => {
   popup.style.left = rect.left + 'px';
   document.body.appendChild(popup);
   const close = (e) => { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('mousedown', close, true); } };
-  setTimeout(() => document.addEventListener('mousedown', close, true), 10);
-};
+  requestAnimationFrame(() => document.addEventListener('mousedown', close, true));
+}
 
-window._vttLibMoveTo      = (imgId, folderId) => {
+function _vttLibMoveTo(imgId, folderId) {
   _mapLib.images = _mapLib.images.map(i => i.id === imgId ? { ...i, folderId } : i);
   _saveMapLib();
-};
+}
 
-window._vttLibPlace       = (imgId) => {
+function _vttLibPlace(imgId) {
   if (!_activePage) { showNotif('Aucune page active', 'error'); return; }
   const img = _mapLib.images.find(i => i.id === imgId);
   if (!img) return;
@@ -10512,7 +10513,7 @@ window._vttLibPlace       = (imgId) => {
   updateDoc(_pgRef(_activePage.id), { backgroundImages: imgs })
     .then(() => showNotif('Image placée sur la carte', 'success'))
     .catch(() => showNotif('Erreur lors du placement', 'error'));
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // BUTIN D'AVENTURE
@@ -10628,7 +10629,7 @@ function _closeLootPanel() {
   }
 }
 
-window._vttToggleLoot = () => {
+function _vttToggleLoot() {
   const panel = document.getElementById('vtt-loot-panel');
   if (!panel) return;
   const open = panel.dataset.open === '1';
@@ -10642,22 +10643,22 @@ window._vttToggleLoot = () => {
     if (float && !float.contains(e.target)) _closeLootPanel();
   };
   document.addEventListener('mousedown', _lootCloseOutside, true);
-};
+}
 
-window._vttLootRemoveStash = (id) => {
+function _vttLootRemoveStash(id) {
   _loot.stash = _loot.stash.filter(i => i.id !== id);
   _saveLoot();
-};
+}
 
-window._vttLootRemoveLoot = (id) => {
+function _vttLootRemoveLoot(id) {
   _loot.loot = _loot.loot.filter(i => i.id !== id);
   _saveLoot();
-};
+}
 
-window._vttLootClear = () => {
+function _vttLootClear() {
   _loot.loot = [];
   _saveLoot();
-};
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PICKER OBJET BOUTIQUE — utilise le composant partagé shared/shop-picker.js
@@ -10676,7 +10677,7 @@ async function _vttLootAddItemToStash(item, qty, catTemplate) {
   await _saveLoot();
 }
 
-window._vttLootOpenShop = () => openShopPicker({
+function _vttLootOpenShop() { openShopPicker({
   title: '🎒 Ajouter à la réserve MJ',
   hint: 'Tu peux enchaîner les ajouts sans fermer cette fenêtre.',
   showQtyInput: true,
@@ -10694,10 +10695,10 @@ window._vttLootOpenShop = () => openShopPicker({
     await _vttLootAddItemToStash(item, qty, template);
     showNotif(`+${qty} "${item.nom}"`, 'success');
   },
-});
+}); }
 
 /** MJ : envoie un butin de créature (depuis le panneau token) vers la réserve. */
-window._vttCreatSendLootToStash = async (beastId, idx, btn) => {
+async function _vttCreatSendLootToStash(beastId, idx, btn) {
   if (!STATE.isAdmin) return;
   const beast = _bestiary[beastId];
   const b = beast?.butins?.[idx];
@@ -10722,13 +10723,13 @@ window._vttCreatSendLootToStash = async (beastId, idx, btn) => {
     }, 800);
   }
   showNotif(`+${qty} "${item.nom}" → réserve MJ`, 'success');
-};
+}
 
 // Joueur : expand inline sur la ligne pour choisir perso + quantité (pas de 2e modal)
 // État courant par item : qty choisie + perso sélectionné (chip)
 const _lootTakeState = {}; // { [itemId]: { qty, charId } }
 
-window._vttLootToggleTake = (id) => {
+function _vttLootToggleTake(id) {
   const el = document.getElementById(`vtt-take-inline-${id}`);
   if (!el) return;
   document.querySelectorAll('.vtt-loot-take-inline').forEach(o => {
@@ -10745,7 +10746,7 @@ window._vttLootToggleTake = (id) => {
   _lootTakeState[id] = { qty: item.qty, charId: myChars[0].id };
   _renderLootTake(id);
   el.style.display = 'block';
-};
+}
 
 function _renderLootTake(id) {
   const el = document.getElementById(`vtt-take-inline-${id}`);
@@ -10782,21 +10783,21 @@ function _renderLootTake(id) {
   `;
 }
 
-window._vttLootTakeSetChar = (id, charId) => {
+function _vttLootTakeSetChar(id, charId) {
   if (!_lootTakeState[id]) return;
   _lootTakeState[id].charId = charId;
   _renderLootTake(id);
-};
-window._vttLootTakeStep = (id, delta) => {
+}
+function _vttLootTakeStep(id, delta) {
   const item = _loot.loot.find(i => i.id === id);
   const st = _lootTakeState[id];
   if (!item || !st) return;
   if (delta === 'max') st.qty = item.qty;
   else st.qty = Math.max(1, Math.min(item.qty, (st.qty || 1) + delta));
   _renderLootTake(id);
-};
+}
 
-window._vttLootConfirmTake = async (id) => {
+async function _vttLootConfirmTake(id) {
   const item    = _loot.loot.find(i => i.id === id);
   if (!item) return;
   const st      = _lootTakeState[id] || {};
@@ -10826,7 +10827,7 @@ window._vttLootConfirmTake = async (id) => {
     delete _lootTakeState[id];
     showNotif(`×${qty} "${item.nom}" → ${_esc(char.nom || char.pseudo || '?')}`, 'success');
   } catch { showNotif('Erreur lors de la prise du butin', 'error'); }
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // LANCEUR DE DÉS LIBRE
@@ -10841,7 +10842,7 @@ function _closeDicePanel() {
   if (_diceCloseOut) { document.removeEventListener('mousedown', _diceCloseOut, true); _diceCloseOut=null; }
 }
 
-window._vttToggleDice = () => {
+function _vttToggleDice() {
   const panel = document.getElementById('vtt-dice-panel'); if (!panel) return;
   if (panel.dataset.open==='1') { _closeDicePanel(); return; }
   panel.dataset.open='1'; panel.style.display='flex';
@@ -10849,14 +10850,14 @@ window._vttToggleDice = () => {
   _renderDicePanel();
   _diceCloseOut = e => { const f=document.querySelector('.vtt-dice-float'); if(f&&!f.contains(e.target)) _closeDicePanel(); };
   document.addEventListener('mousedown', _diceCloseOut, true);
-};
+}
 
-window._vttDiceAddDie    = f => { _diceFormula[f]=(_diceFormula[f]||0)+1; _renderDicePanel(); };
-window._vttDiceRemoveDie = f => { if(_diceFormula[f]>1) _diceFormula[f]--; else delete _diceFormula[f]; _renderDicePanel(); };
-window._vttDiceClear     = () => { _diceFormula={}; _diceFreeBonus=0; _renderDicePanel(); };
-window._vttDiceBonusStep = d => { _diceFreeBonus=(_diceFreeBonus||0)+d; _renderDicePanel(); };
-window._vttDiceBonusSet  = v => { _diceFreeBonus=isNaN(v)?0:+v; };
-window._vttDiceMode      = m => { _diceFreeMode=m; _renderDicePanel(); };
+function _vttDiceAddDie(f) { _diceFormula[f]=(_diceFormula[f]||0)+1; _renderDicePanel(); }
+function _vttDiceRemoveDie(f) { if(_diceFormula[f]>1) _diceFormula[f]--; else delete _diceFormula[f]; _renderDicePanel(); }
+function _vttDiceClear() { _diceFormula={}; _diceFreeBonus=0; _renderDicePanel(); }
+function _vttDiceBonusStep(d) { _diceFreeBonus=(_diceFreeBonus||0)+d; _renderDicePanel(); }
+function _vttDiceBonusSet(v) { _diceFreeBonus=isNaN(v)?0:+v; }
+function _vttDiceMode(m) { _diceFreeMode=m; _renderDicePanel(); }
 
 function _renderDicePanel() {
   const el = document.getElementById('vtt-dice-panel'); if (!el) return;
@@ -10880,7 +10881,7 @@ function _renderDicePanel() {
         const cnt = _diceFormula[f]||0;
         return `<button class="vtt-dice-die-btn${cnt?' active':''}"
           data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}"
-          oncontextmenu="event.preventDefault();window._vttDiceRemoveDie(${f})"
+          oncontextmenu="event.preventDefault();_vttDiceRemoveDie(${f})"
           title="Clic : ajouter · Clic droit : retirer">
           d${f===100?'%':f}${cnt?`<span class="vtt-dice-die-cnt">×${cnt}</span>`:''}
         </button>`;
@@ -10908,7 +10909,7 @@ function _renderDicePanel() {
     </button>`;
 }
 
-window._vttDiceRoll = () => {
+function _vttDiceRoll() {
   const faces = Object.keys(_diceFormula).map(Number).sort((a,b)=>b-a);
   if (!faces.length && !_diceFreeBonus) return;
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'Joueur';
@@ -10945,7 +10946,7 @@ window._vttDiceRoll = () => {
   }).catch(()=>{});
   showNotif(`🎲 ${formula} = ${total}`, 'success');
   _closeDicePanel();
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // MUSIQUE / SONS
@@ -10991,14 +10992,14 @@ function _setCatCollapsed(catId, collapsed) {
   if (collapsed) map[catId] = true; else delete map[catId];
   try { localStorage.setItem(_CAT_COLLAPSE_KEY, JSON.stringify(map)); } catch {}
 }
-window._vttToggleMusicCat = (catId) => {
+function _vttToggleMusicCat(catId) {
   const cat = document.querySelector(`.vtt-music-cat[data-cat-id="${CSS.escape(catId)}"]`);
   if (!cat) return;
   const collapsed = cat.dataset.collapsed === '1';
   cat.dataset.collapsed = collapsed ? '0' : '1';
   _setCatCollapsed(catId, !collapsed);
-};
-window._vttToggleAllMusicCats = () => {
+}
+function _vttToggleAllMusicCats() {
   const cats = document.querySelectorAll('.vtt-music-body .vtt-music-cat');
   if (!cats.length) return;
   const collapseAll = [...cats].some(c => c.dataset.collapsed !== '1');
@@ -11006,9 +11007,9 @@ window._vttToggleAllMusicCats = () => {
     c.dataset.collapsed = collapseAll ? '1' : '0';
     _setCatCollapsed(c.dataset.catId, collapseAll);
   });
-};
+}
 
-window._vttPreview = (soundId, btn) => {
+function _vttPreview(soundId, btn) {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
   // Même son → stop
   if (_previewEl && _previewEl.dataset.soundId===soundId) { _stopPreview(); return; }
@@ -11020,9 +11021,9 @@ window._vttPreview = (soundId, btn) => {
   el.play().catch(() => showNotif('Impossible de lire ce son', 'error'));
   _previewEl = el;
   btn?.classList.add('on');
-};
+}
 
-window._vttToggleMusic = () => {
+function _vttToggleMusic() {
   const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
   if (panel.dataset.open==='1') { _closeMusicPanel(); return; }
   panel.dataset.open='1'; panel.style.display='flex';
@@ -11034,7 +11035,7 @@ window._vttToggleMusic = () => {
     if (f && !f.contains(e.target) && !ctx?.contains(e.target)) _closeMusicPanel();
   };
   document.addEventListener('mousedown', _musicCloseOut, true);
-};
+}
 
 // ── Rendu du panel ──────────────────────────────────────────────────
 function _renderMusicPanel() {
@@ -11224,7 +11225,7 @@ function _renderSonRow(s, plId, mj) {
   const rowClass = isPool ? 'vtt-music-pool-item' : 'vtt-music-pl-sound';
   const nameClass = isPool ? 'vtt-music-pool-name' : 'vtt-music-pl-sname';
   const ctx = mj
-    ? `oncontextmenu="event.preventDefault();window._vttSoundCtxMenu(event,'${s.id}'${isPool?'':`,'${plId}'`})"`
+    ? `oncontextmenu="event.preventDefault();_vttSoundCtxMenu(event,'${s.id}'${isPool?'':`,'${plId}'`})"`
     : '';
   const delBtn = mj
     ? (isPool
@@ -11308,32 +11309,32 @@ function _renderNowPlaying(curSound, ms) {
 }
 
 // ── Seek sur clic barre de progression ─────────────────────────────
-window._vttSeek = (e, bar) => {
+function _vttSeek(e, bar) {
   if (!_audioEl || !_audioEl.duration) return;
   const rect = bar.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   _audioEl.currentTime = ratio * _audioEl.duration;
   _updateMusicProg();
-};
+}
 
 // ── Lecture / contrôles ─────────────────────────────────────────────
-window._vttPlaySound = async (soundId, loop) => {
+async function _vttPlaySound(soundId, loop) {
   const ms = _musicState;
   // Toggle si même son sans playlist
   if (ms.playing && ms.currentSoundId===soundId && !ms.currentPlaylistId && !!ms.loop===!!loop)
-    return window._vttStopMusic();
+    return _vttStopMusic();
   await _setMusicState({ playing:true, paused:false, currentSoundId:soundId,
     currentPlaylistId:null, loop:!!loop, shuffle:false,
     startedAt:serverTimestamp() });
-};
+}
 
-window._vttPlayPlaylist = async (playlistId, shuffle) => {
+async function _vttPlayPlaylist(playlistId, shuffle) {
   const pl = _playlists.find(p=>p.id===playlistId);
   if (!pl || !pl.soundIds?.length) return;
   const ms = _musicState;
   // Toggle si même playlist + même mode
   if (ms.playing && ms.currentPlaylistId===playlistId && !!ms.shuffle===!!shuffle)
-    return window._vttStopMusic();
+    return _vttStopMusic();
   // Ordre (Fisher-Yates si shuffle)
   const order = pl.soundIds.map((_,i)=>i);
   if (shuffle) {
@@ -11346,9 +11347,9 @@ window._vttPlayPlaylist = async (playlistId, shuffle) => {
     currentSoundId:pl.soundIds[order[0]], currentPlaylistId:playlistId,
     loop:false, shuffle:!!shuffle, shuffleOrder:order, playlistIndex:0,
     startedAt:serverTimestamp() });
-};
+}
 
-window._vttMusicNext = async () => {
+async function _vttMusicNext() {
   const ms = _musicState;
   if (!ms.currentPlaylistId) return;
   const pl = _playlists.find(p=>p.id===ms.currentPlaylistId); if (!pl) return;
@@ -11356,18 +11357,18 @@ window._vttMusicNext = async () => {
   const nextIdx = ((ms.playlistIndex||0) + 1) % order.length;
   await _setMusicState({ ...ms, playlistIndex:nextIdx,
     currentSoundId:pl.soundIds[order[nextIdx]], startedAt:serverTimestamp() });
-};
+}
 
-window._vttToggleMusicPause = async () => {
+async function _vttToggleMusicPause() {
   const paused = !_musicState.paused;
   if (_audioEl) { paused ? _audioEl.pause() : _audioEl.play().catch(()=>{}); }
   await _setMusicState({ ..._musicState, paused });
-};
+}
 
-window._vttStopMusic = async () => {
+async function _vttStopMusic() {
   _killAudio();
   await _setMusicState({ playing:false, paused:false, currentSoundId:null, currentPlaylistId:null });
-};
+}
 
 function _killAudio() {
   if (_audioEl) {
@@ -11428,7 +11429,7 @@ function _syncMusicPlayback(ms) {
 
   // Auto-avance playlist (MJ uniquement pour éviter les doublons)
   if (ms.currentPlaylistId && STATE.isAdmin) {
-    el._endedHandler = () => window._vttMusicNext();
+    el._endedHandler = () => _vttMusicNext();
     el.addEventListener('ended', el._endedHandler);
   }
 
@@ -11461,7 +11462,7 @@ function _syncMusicPlayback(ms) {
 
 // ── Menu contextuel son ──────────────────────────────────────────────
 // currentPlId : playlist d'où vient le clic (undefined = pool)
-window._vttSoundCtxMenu = (e, soundId, currentPlId) => {
+function _vttSoundCtxMenu(e, soundId, currentPlId) {
   if (!_playlists.length) return;
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
 
@@ -11475,21 +11476,21 @@ window._vttSoundCtxMenu = (e, soundId, currentPlId) => {
     items.push({ label: `<span style="color:var(--text-dim);font-size:.65rem">Ajouter à…</span>`, fn: null });
     targets.forEach(pl => items.push({
       label: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pl.color||'#6366f1'};margin-right:.4rem"></span>${_esc(pl.name)}`,
-      fn: () => window._vttAddSoundToPlaylist(pl.id, soundId),
+      fn: () => _vttAddSoundToPlaylist(pl.id, soundId),
     }));
   }
 
   // Retirer de la playlist courante
   if (currentPlId) {
     if (items.length) items.push('---');
-    items.push({ label: '✕ Retirer de cette playlist', fn: () => window._vttRemoveSoundFromPlaylist(currentPlId, soundId) });
+    items.push({ label: '✕ Retirer de cette playlist', fn: () => _vttRemoveSoundFromPlaylist(currentPlId, soundId) });
   }
 
   if (items.length) _showCtxMenu(e.clientX, e.clientY, items);
-};
+}
 
 // ── Import GitHub Release ────────────────────────────────────────────
-window._vttImportGithubRelease = async () => {
+async function _vttImportGithubRelease() {
   const LS_REPO = 'vtt-music-gh-repo', LS_TAG = 'vtt-music-gh-tag';
   const defRepo = localStorage.getItem(LS_REPO) || 'ConseillerDoriantation/le-grand-jdr';
   const defTag  = localStorage.getItem(LS_TAG)  || 'sounds-v1';
@@ -11518,29 +11519,29 @@ window._vttImportGithubRelease = async () => {
     console.error('[vtt music] github import:', e);
     showNotif('Erreur lors de l\'import GitHub', 'error');
   }
-};
+}
 
 // ── Ajout d'un son par URL ───────────────────────────────────────────
-window._vttAddSonUrl = async () => {
+async function _vttAddSonUrl() {
   const url  = prompt('URL directe du fichier audio (mp3, ogg, wav…) :')?.trim();
   if (!url) return;
   const name = prompt('Nom du son :', url.split('/').pop()?.replace(/\.[^.]+$/,'') || 'Son')?.trim();
   if (!name) return;
   await addDoc(_sonsCol(), { name, url, createdAt:serverTimestamp(), addedBy:STATE.user?.uid||null });
   showNotif(`✅ "${name}" ajouté`, 'success');
-};
+}
 
-window._vttDeleteSound = async soundId => {
+async function _vttDeleteSound(soundId) {
   const s = _sounds.find(x=>x.id===soundId); if (!s) return;
   if (!await confirmModal(`Supprimer "${s.name}" ?`)) return;
-  if (_musicState.currentSoundId===soundId) await window._vttStopMusic();
+  if (_musicState.currentSoundId===soundId) await _vttStopMusic();
   for (const pl of _playlists.filter(p=>(p.soundIds||[]).includes(soundId)))
     await updateDoc(_playlistRef(pl.id), { soundIds:(pl.soundIds||[]).filter(id=>id!==soundId) }).catch(()=>{});
   await deleteDoc(_sonRef(soundId)).catch(()=>{});
-};
+}
 
 // ── Playlists ───────────────────────────────────────────────────────
-window._vttCreatePlaylist = () => {
+function _vttCreatePlaylist() {
   const colors = ['#6366f1','#22c38e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
   const defColor = colors[_playlists.length % colors.length];
   openModal('Nouvelle playlist', `
@@ -11549,7 +11550,7 @@ window._vttCreatePlaylist = () => {
         <label class="vtt-pl-modal-lbl">Nom</label>
         <input id="vtt-pl-name-inp" type="text" class="vtt-pl-modal-inp"
           placeholder="Ex : Donjon, Combat, Ambiance…"
-          onkeydown="if(event.key==='Enter')window._vttCreatePlaylistConfirm()">
+          onkeydown="if(event.key==='Enter')_vttCreatePlaylistConfirm()">
       </div>
       <div>
         <label class="vtt-pl-modal-lbl">Couleur</label>
@@ -11563,33 +11564,33 @@ window._vttCreatePlaylist = () => {
       <button class="vtt-pl-modal-submit" data-vtt-fn="_vttCreatePlaylistConfirm">Créer la playlist</button>
     </div>`);
   setTimeout(() => { document.getElementById('vtt-pl-name-inp')?.focus(); }, 60);
-};
+}
 
-window._vttCreatePlaylistConfirm = async () => {
+async function _vttCreatePlaylistConfirm() {
   const name  = document.getElementById('vtt-pl-name-inp')?.value?.trim(); if (!name) return;
   const color = document.querySelector('.vtt-pl-color-btn.sel')?.dataset.color || '#6366f1';
   closeModalDirect();
   await addDoc(_playlistsCol(), { name, color, soundIds:[], createdAt:serverTimestamp() });
-};
+}
 
-window._vttDeletePlaylist = async plId => {
+async function _vttDeletePlaylist(plId) {
   const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
   if (!await confirmModal(`Supprimer la playlist "${pl.name}" ?`)) return;
-  if (_musicState.currentPlaylistId===plId) await window._vttStopMusic();
+  if (_musicState.currentPlaylistId===plId) await _vttStopMusic();
   await deleteDoc(_playlistRef(plId)).catch(()=>{});
-};
+}
 
-window._vttAddSoundToPlaylist = async (plId, soundId) => {
+async function _vttAddSoundToPlaylist(plId, soundId) {
   if (!soundId) return;
   const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
   if ((pl.soundIds||[]).includes(soundId)) return;
   await updateDoc(_playlistRef(plId), { soundIds:[...(pl.soundIds||[]), soundId] }).catch(()=>{});
-};
+}
 
-window._vttRemoveSoundFromPlaylist = async (plId, soundId) => {
+async function _vttRemoveSoundFromPlaylist(plId, soundId) {
   const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
   await updateDoc(_playlistRef(plId), { soundIds:(pl.soundIds||[]).filter(id=>id!==soundId) }).catch(()=>{});
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // TIMER DE SESSION — partagé via _session.timer, visible par tous
@@ -11646,7 +11647,7 @@ function _timerStopTick() {
   if (_timerTick) { clearInterval(_timerTick); _timerTick = null; }
 }
 
-window._vttTimerToggle = async () => {
+async function _vttTimerToggle() {
   if (!STATE.isAdmin) return;
   const t = _session?.timer || {};
   const now = Date.now();
@@ -11656,22 +11657,22 @@ window._vttTimerToggle = async () => {
   } else {
     await setDoc(_sesRef(), { timer: { accumulated: +t.accumulated || 0, label: t.label || '', running: true, startedAt: now } }, { merge: true }).catch(()=>{});
   }
-};
-window._vttTimerReset = async () => {
+}
+async function _vttTimerReset() {
   if (!STATE.isAdmin) return;
   const ok = await confirmModal('Réinitialiser le minuteur à 00:00 ?', { title: '↺ Reset minuteur', okLabel: 'Réinitialiser', cancelLabel: 'Annuler' }).catch(()=>false);
   if (!ok) return;
   const t = _session?.timer || {};
   await setDoc(_sesRef(), { timer: { running: false, accumulated: 0, startedAt: null, label: t.label || '' } }, { merge: true }).catch(()=>{});
-};
-window._vttTimerLabel = async () => {
+}
+async function _vttTimerLabel() {
   if (!STATE.isAdmin) return;
   const cur = _session?.timer?.label || '';
   const next = prompt('Libellé du minuteur (laisser vide pour effacer) :', cur);
   if (next === null) return;
   const t = _session?.timer || {};
   await setDoc(_sesRef(), { timer: { ...t, label: next.trim().slice(0, 40) } }, { merge: true }).catch(()=>{});
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // COMBAT TRACKER — overlay haut-gauche, visible quand combat actif
@@ -11781,20 +11782,20 @@ function _renderCombatTrackerSoon() {
   queueMicrotask(() => { _trackerDirty = false; _renderCombatTracker(); });
 }
 
-window._vttCombatTab = (tab) => {
+function _vttCombatTab(tab) {
   if (tab !== 'allies' && tab !== 'enemies') return;
   if (tab === 'enemies' && !STATE.isAdmin) return;
   _combatTab = tab;
   _renderCombatTracker();
-};
-window._vttTrackerFocus = (tokId) => {
+}
+function _vttTrackerFocus(tokId) {
   // Centrer/sélectionner le token cliqué
   const t = _tokens[tokId]?.data;
   if (!t) return;
   if (STATE.isAdmin || t.type !== 'enemy') {
     try { _select(tokId); } catch {}
   }
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // HTML
@@ -11854,7 +11855,7 @@ function _buildHtml() {
         <div class="vtt-chat-input-row">
           <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-            onkeydown="if(event.key==='Enter')window._vttSendChat();else if(event.key==='Escape')window._vttChatReplyCancel()">
+            onkeydown="if(event.key==='Enter')_vttSendChat()">
           <button class="vtt-chat-send" data-vtt-fn="_vttSendChat" title="Envoyer">↵</button>
         </div>
       </div>
@@ -12168,9 +12169,9 @@ function _msItemFitsSlot(item, slot, equip, idx) {
 
 // ─── Handlers exposés ────────────────────────────────────────────
 
-window._vttMsTab = (tab) => { _miniTab = tab; if (_miniUid) _renderMiniSheet(_miniUid); };
+function _vttMsTab(tab) { _miniTab = tab; if (_miniUid) _renderMiniSheet(_miniUid); }
 
-window._vttMsEquip = async (charId, uid, slot, invIndex) => {
+async function _vttMsEquip(charId, uid, slot, invIndex) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   invIndex = parseInt(invIndex);
@@ -12185,9 +12186,9 @@ window._vttMsEquip = async (charId, uid, slot, invIndex) => {
     await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
     showNotif(`${item.nom} → ${slot}`, 'success');
   } catch(e) { showNotif('Erreur sauvegarde', 'error'); }
-};
+}
 
-window._vttMsUnequip = async (charId, uid, slot) => {
+async function _vttMsUnequip(charId, uid, slot) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   const equip = { ...(c.equipement||{}) };
@@ -12198,18 +12199,18 @@ window._vttMsUnequip = async (charId, uid, slot) => {
     await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
     showNotif(`${nom} retiré`, 'success');
   } catch(e) { showNotif('Erreur sauvegarde', 'error'); }
-};
+}
 
 // Appelé par le <select> de l'onglet Équipement
-window._vttMsSlotChange = (sel, charId, uid, slotIdx) => {
+function _vttMsSlotChange(sel, charId, uid, slotIdx) {
   const slot = _MS_SLOTS[parseInt(slotIdx)]; if (!slot) return;
   const val = sel.value;
-  if (val === '') window._vttMsUnequip(charId, uid, slot);
-  else            window._vttMsEquip(charId, uid, slot, parseInt(val));
-};
+  if (val === '') _vttMsUnequip(charId, uid, slot);
+  else            _vttMsEquip(charId, uid, slot, parseInt(val));
+}
 
 // Ouvre une modale pour choisir le slot cible depuis l'inventaire
-window._vttMsEquipPicker = (charId, uid, invIndex) => {
+function _vttMsEquipPicker(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   invIndex = parseInt(invIndex);
@@ -12218,17 +12219,17 @@ window._vttMsEquipPicker = (charId, uid, invIndex) => {
   // Seuls les slots compatibles avec cet item (sans check "usedElsewhere" pour qu'on puisse déplacer)
   const slots = _MS_SLOTS.filter(s => _msItemFitsSlot(item, s, {}, invIndex));
   if (!slots.length) { showNotif('Aucun slot compatible pour cet objet', 'info'); return; }
-  if (slots.length === 1) { window._vttMsEquip(charId, uid, slots[0], invIndex); return; }
+  if (slots.length === 1) { _vttMsEquip(charId, uid, slots[0], invIndex); return; }
   openModal(`⚔️ Équiper "${item.nom}"`, `
     <div style="display:flex;flex-direction:column;gap:.4rem">
       ${slots.map(s => `<button class="btn btn-outline"
         data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsEquip|${charId}|${uid}|${s}|${invIndex}">${s}</button>`).join('')}
       <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
     </div>`);
-};
+}
 
 // Déséquipe un item depuis l'inventaire (tous les slots où il est équipé)
-window._vttMsUnequipAll = async (charId, uid, invIndex) => {
+async function _vttMsUnequipAll(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   invIndex = parseInt(invIndex);
   const c = _characters[charId]; if (!c) return;
@@ -12239,10 +12240,10 @@ window._vttMsUnequipAll = async (charId, uid, invIndex) => {
     await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
     showNotif('Déséquipé', 'success');
   } catch(e) { showNotif('Erreur sauvegarde', 'error'); }
-};
+}
 
 // Active / désactive un sort
-window._vttToggleMsSort = async (charId, uid, idx) => {
+async function _vttToggleMsSort(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   const sorts = [...(c.deck_sorts||[])];
@@ -12250,10 +12251,10 @@ window._vttToggleMsSort = async (charId, uid, idx) => {
   sorts[idx] = { ...sorts[idx], actif: !sorts[idx].actif };
   try { await updateDoc(_chrRef(charId), { deck_sorts: sorts }); }
   catch(e) { showNotif('Erreur sauvegarde', 'error'); }
-};
+}
 
 // Modale pour choisir le destinataire d'un objet
-window._vttMsSendPicker = (charId, uid, invIndex) => {
+function _vttMsSendPicker(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   invIndex = parseInt(invIndex);
   const c = _characters[charId]; if (!c) return;
@@ -12274,10 +12275,10 @@ window._vttMsSendPicker = (charId, uid, invIndex) => {
         ${t.pseudo} → ${t.charNom}</button>`).join('')}
       <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
     </div>`);
-};
+}
 
 // Effectue le transfert d'objet entre deux personnages
-window._vttMsConfirmSend = async (senderCharId, senderUid, invIndex, recipCharId) => {
+async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId) {
   invIndex = parseInt(invIndex);
   const sender = _characters[senderCharId]; if (!sender) return;
   const recip  = _characters[recipCharId];  if (!recip)  return;
@@ -12298,7 +12299,7 @@ window._vttMsConfirmSend = async (senderCharId, senderUid, invIndex, recipCharId
     await updateDoc(_chrRef(recipCharId),  { inventaire: recipInv });
     showNotif(`${item.nom||'Objet'} envoyé à ${recip.nom||'joueur'}`, 'success');
   } catch(e) { console.error('[vtt] send item', e); showNotif('Erreur envoi', 'error'); }
-};
+}
 
 // ─── Rendus par onglet ────────────────────────────────────────────
 
@@ -12360,7 +12361,6 @@ function _msTabCombat(c, uid, canEdit) {
       <div class="vtt-ms-def-item"><span>🛡 CA</span><strong>${calcCA(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>⚡ Vit.</span><strong>${calcVitesse(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>🎯 Maît.</span><strong>+${getMaitriseBonus(c)}</strong></div>
-      <div class="vtt-ms-def-item" title="Sorts actifs / capacité du deck"><span>🃏 Deck</span><strong>${(c.deck_sorts||[]).filter(s=>s.actif).length}/${calcDeckMax(c)}</strong></div>
     </div>
     ${weaponHtml}${setHtml}
     ${_msXpSection(c, uid, canEdit)}`;
@@ -12379,7 +12379,7 @@ function _msXpSection(c, uid, canEdit) {
         <span class="vtt-ms-xp-label">⭐ XP</span>
         <input class="vtt-ms-xp-input" type="number" value="${xp}" min="0"
           data-vtt-fn="_vttMsSetXp" data-vtt-on="change" data-vtt-args="${c.id}|${uid}|$value"
-          onkeydown="if(event.key==='Enter'){window._vttMsSetXp('${c.id}','${uid}',$value);this.blur();event.preventDefault()}"
+          onkeydown="if(event.key==='Enter'){_vttMsSetXp('${c.id}','${uid}',$value);this.blur();event.preventDefault()}"
           title="XP total — Entrée pour valider">
         <span class="vtt-ms-xp-sep">/ ${palier}</span>
         <span class="vtt-ms-xp-niv">Niv.</span>
@@ -12390,7 +12390,7 @@ function _msXpSection(c, uid, canEdit) {
         <span class="vtt-ms-xp-add-icon">+</span>
         <input class="vtt-ms-xp-input vtt-ms-xp-delta-input" type="number" min="1" placeholder="gagné"
           id="vtt-xp-delta-${c.id}-${uid}"
-          onkeydown="if(event.key==='Enter'){window._vttMsAddXp('${c.id}','${uid}',$value);event.preventDefault()}"
+          onkeydown="if(event.key==='Enter'){_vttMsAddXp('${c.id}','${uid}',$value);event.preventDefault()}"
           title="XP à ajouter — Entrée pour valider">
       </div>
       <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pct}%;background:#f59e0b"></div></div>
@@ -12594,7 +12594,7 @@ function _renderMiniSheet(uid) {
     <div class="vtt-ms-tab-content">${tabHtml}</div>`;
 }
 
-window._vttToggleMiniSheet = (uid) => {
+function _vttToggleMiniSheet(uid) {
   if (_miniUid === uid) {
     _miniUid = null; _miniCharId = null;
     const panel = document.getElementById('vtt-mini-panel');
@@ -12604,18 +12604,236 @@ window._vttToggleMiniSheet = (uid) => {
     _renderMiniSheet(uid);
   }
   _renderPresenceCol();
-};
+}
 
-window._vttSelectMiniChar = (uid, charId) => {
+function _vttSelectMiniChar(uid, charId) {
   _miniCharId = charId;
   _renderMiniSheet(uid);
-};
+}
 
 PAGES.vtt=renderVttPage;
 
+
+// Registre des actions pour le dispatcher data-vtt-fn
+const VTT_ACTIONS = {
+  _vttAiderClose,
+  _vttAider,
+  _vttSelfActionClose,
+  _vttSelfAction,
+  _vttLootOpenShop,
+  _vttLibToggle,
+  _closeActionModal,
+  _closeDicePanel,
+  _closeEmotePicker,
+  _closeLootPanel,
+  _closeMusicPanel,
+  _closeShortRest,
+  _mtBroadcast,
+  _mtCancel,
+  _mtClear,
+  _mtClearLines,
+  _mtDrawLine,
+  _mtRefreshHud,
+  _mtToggleTarget,
+  _mtValidate,
+  _vttAddBuffPrompt,
+  _vttAddImageUrl,
+  _vttAddPage,
+  _vttAddSonUrl,
+  _vttAddSoundToPlaylist,
+  _vttAdjBonus,
+  _vttAoptCheckEmpty,
+  _vttAoptFilter,
+  _vttAoptSearch,
+  _vttApplyAfflictions,
+  _vttApplyDeplacement,
+  _vttApplyEnchantBuffs,
+  _vttBackToAtk,
+  _vttBindDispatch,
+  _vttBstDed,
+  _vttBstNotes,
+  _vttCancelAtk,
+  _vttCancelEmoteEdit,
+  _vttCcFlagToggle,
+  _vttCcTriSet,
+  _vttCleanGhostMembers,
+  _vttClearAnnots,
+  _vttClearAoptSearch,
+  _vttClearBuffs,
+  _vttCloseAnd,
+  _vttCombatTab,
+  _vttConditionAdd,
+  _vttConditionApply,
+  _vttConditionConfig,
+  _vttConditionConfigAddNew,
+  _vttConditionConfigDelete,
+  _vttConditionConfigReset,
+  _vttConditionConfigSave,
+  _vttConditionConfigSelect,
+  _vttConditionEdit,
+  _vttConditionEditSave,
+  _vttConditionRemove,
+  _vttConditionSave,
+  _vttConfirmAddBuff,
+  _vttConfirmAddPage,
+  _vttConfirmCreateEnemy,
+  _vttConfirmEditPage,
+  _vttCourir,
+  _vttCourirAndClose,
+  _vttCreatSendLootToStash,
+  _vttCreateEnemy,
+  _vttCreatePlaylist,
+  _vttDeletePage,
+  _vttDeletePlaylist,
+  _vttDeleteSound,
+  _vttDeleteToken,
+  _vttDiceAddDie,
+  _vttDiceBonusSet,
+  _vttDiceBonusStep,
+  _vttDiceClear,
+  _vttDiceMode,
+  _vttDiceRoll,
+  _vttDrawColor,
+  _vttDrawShape,
+  _vttDrawWidth,
+  _vttDuplicateOnPage,
+  _vttDuplicateToken,
+  _vttEditPage,
+  _vttEditToken,
+  _vttEnsureConditionsLoaded,
+  _vttFilterDelegates,
+  _vttFilterEmotes,
+  _vttFogClearOps,
+  _vttFogTool,
+  _vttImportGithubRelease,
+  _vttInvokeMyToken,
+  _vttLibDelFolder,
+  _vttLibDelImg,
+  _vttLibMoveMenu,
+  _vttLibMoveRoot,
+  _vttLibMoveTo,
+  _vttLibMoveToAndClose,
+  _vttLibNewFolder,
+  _vttLibOpenFolder,
+  _vttLibPlace,
+  _vttLootAddItemToStash,
+  _vttLootClear,
+  _vttLootConfirmTake,
+  _vttLootRemoveLoot,
+  _vttLootRemoveStash,
+  _vttLootTakeSetChar,
+  _vttLootTakeStep,
+  _vttLootToggleTake,
+  _vttMemberInfo,
+  _vttMoveTokenAndReset,
+  _vttMoveTokenToPage,
+  _vttMsConfirmSend,
+  _vttMsEquip,
+  _vttMsEquipPicker,
+  _vttMsSendPicker,
+  _vttMsSetNiveau,
+  _vttMsSlotChange,
+  _vttMsTab,
+  _vttMsUnequip,
+  _vttMsUnequipAll,
+  _vttMusicNext,
+  _vttNextRound,
+  _vttNoop,
+  _vttOpenTokenDelegatesModal,
+  _vttPickElement,
+  _vttPickEmote,
+  _vttPickOpt,
+  _vttPlColorSelect,
+  _vttPlace,
+  _vttPlaceFromBestiary,
+  _vttPlayPlaylist,
+  _vttPlaySound,
+  _vttPreview,
+  _vttPreviewEmoteFile,
+  _vttRemoveBuff,
+  _vttRemoveSoundFromPlaylist,
+  _vttRemoveTokenDelegate,
+  _vttRenderDelegateModalBody,
+  _vttResetTurn,
+  _vttResolveArg,
+  _vttRetireToken,
+  _vttRollAttack,
+  _vttRollSkill,
+  _vttSaveStats,
+  _vttSeek,
+  _vttSelectFromTray,
+  _vttSelectMiniChar,
+  _vttSendToPage,
+  _vttSetEmoteAlbum,
+  _vttSetHp,
+  _vttSetImgbbKey,
+  _vttSetMode,
+  _vttSetPm,
+  _vttSetRollMode,
+  _vttShortRestCancel,
+  _vttShortRestForce,
+  _vttShortRestResetCount,
+  _vttShortRestSetMax,
+  _vttShortRestUnvote,
+  _vttShortRestVote,
+  _vttSortCibles,
+  _vttSortDmgFormula,
+  _vttSortSoinFormula,
+  _vttSpawnSummon,
+  _vttSpellMods,
+  _vttStopMusic,
+  _vttSwitchPage,
+  _vttTimerLabel,
+  _vttTimerReset,
+  _vttTimerToggle,
+  _vttToggleAllMusicCats,
+  _vttToggleCombat,
+  _vttToggleDice,
+  _vttToggleDrawFill,
+  _vttToggleEmotePicker,
+  _vttToggleFav,
+  _vttToggleFog,
+  _vttToggleLogDetail,
+  _vttToggleLoot,
+  _vttToggleMapMode,
+  _vttToggleMiniSheet,
+  _vttToggleMsSort,
+  _vttToggleMusic,
+  _vttToggleMusicCat,
+  _vttToggleMusicPause,
+  _vttToggleNpc,
+  _vttToggleOff,
+  _vttToggleOn,
+  _vttToggleRollHidden,
+  _vttToggleShortRest,
+  _vttToggleTokenDelegate,
+  _vttToggleVisible,
+  _vttTokenBonus,
+  _vttTokenResetBonus,
+  _vttTool,
+  _vttTrackerFocus,
+  _vttTrayClearSearch,
+  _vttTrayFilter,
+  _vttTraySearch,
+  _vttTriggerConcentrationSave,
+  _vttTriggerSuspendedSpell,
+  _vttUploadClick,
+  _zoneCancel,
+  _zoneClear,
+  _zoneRotate,
+  _zoneUpdatePreview,
+  _zoneValidate
+};
+
+// Inline handlers conservés sur window (appelés via onkeydown/oncontextmenu)
+Object.assign(window, {
+  _vttCreatePlaylistConfirm, _vttDiceRemoveDie, _vttMsAddXp,
+  _vttMsSetXp, _vttSendChat, _vttSoundCtxMenu,
+});
+
 registerActions({
-  _vttFilterDelegates:     (el)  => window._vttFilterDelegates?.(el.dataset.tokenId, el.value),
-  _vttToggleTokenDelegate: (btn) => window._vttToggleTokenDelegate?.(btn.dataset.tokenId, btn.dataset.uid2),
-  _vttCleanGhostMembers:   ()    => window._vttCleanGhostMembers?.(),
-  _vttDelegClose:          ()    => window.closeModalDirect?.(),
+  _vttFilterDelegates:     (el)  => _vttFilterDelegates(el.dataset.tokenId, el.value),
+  _vttToggleTokenDelegate: (btn) => _vttToggleTokenDelegate(btn.dataset.tokenId, btn.dataset.uid2),
+  _vttCleanGhostMembers:   ()    => _vttCleanGhostMembers(),
+  _vttDelegClose:          ()    => closeModalDirect(),
 });

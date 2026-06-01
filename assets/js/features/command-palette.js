@@ -7,6 +7,8 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, loadChars } from '../data/firestore.js';
 import { _esc, _norm, _searchIncludes, _trunc } from '../shared/html.js';
+import { charSession } from '../shared/char-session.js';
+import { navigate } from '../core/navigation.js';
 
 const MAX_RESULTS = 30;
 
@@ -20,6 +22,8 @@ let _entries     = [];
 let _results     = [];
 let _query       = '';
 let _initialized = false;
+let _bestiaryEntries = null;
+let _bestiaryEntriesPromise = null;
 
 // ── PAGES (raccourcis directs) ────────────────────────────────────────────────
 const PAGE_SHORTCUTS = [
@@ -56,14 +60,13 @@ function _firstStr(obj, keys) {
 }
 
 async function _loadEntries() {
-  const [npcs, chars, quests, shop, shopCats, bestiary, achievements, collection, story, recipes] =
+  const [npcs, chars, quests, shop, shopCats, achievements, collection, story, recipes] =
     await Promise.all([
       loadCollection('npcs').catch(() => []),
       loadChars(STATE.isAdmin ? null : STATE.user?.uid).catch(() => []),
       loadCollection('quests').catch(() => []),
       loadCollection('shop').catch(() => []),
       loadCollection('shopCategories').catch(() => []),
-      loadCollection('bestiary').catch(() => []),
       loadCollection('achievements').catch(() => []),
       loadCollection('collection').catch(() => []),
       loadCollection('story').catch(() => []),
@@ -143,18 +146,6 @@ async function _loadEntries() {
     });
   }
 
-  // Bestiaire
-  for (const b of bestiary) {
-    const title = _firstStr(b, ['nom', 'name']);
-    if (!title) continue;
-    entries.push({
-      type: 'beast', typeLabel: 'Bestiaire', id: b.id, title,
-      subtitle: _firstStr(b, ['type', 'description', 'famille']),
-      icon: '🐉',
-      search: _norm([title, b.type, b.famille, b.description].filter(Boolean).join(' ')),
-    });
-  }
-
   // Hauts-faits
   for (const a of achFiltered) {
     const title = _firstStr(a, ['titre', 'nom', 'name']);
@@ -206,6 +197,41 @@ async function _loadEntries() {
   return entries;
 }
 
+function _buildBestiaryEntries(bestiary) {
+  const entries = [];
+  for (const b of bestiary || []) {
+    const title = _firstStr(b, ['nom', 'name']);
+    if (!title) continue;
+    entries.push({
+      type: 'beast', typeLabel: 'Bestiaire', id: b.id, title,
+      subtitle: _firstStr(b, ['type', 'description', 'famille']),
+      icon: '🐉',
+      search: _norm([title, b.type, b.famille, b.description].filter(Boolean).join(' ')),
+    });
+  }
+  return entries;
+}
+
+async function _ensureBestiaryEntriesForQuery(query) {
+  if (_norm(query).length < 2) return false;
+  if (_entries.some(e => e.type === 'beast')) return false;
+
+  if (!_bestiaryEntriesPromise) {
+    _bestiaryEntriesPromise = loadCollection('bestiary')
+      .catch(() => [])
+      .then(all => {
+        const visible = STATE.isAdmin ? all : all.filter(b => !b.hidden);
+        _bestiaryEntries = _buildBestiaryEntries(visible);
+        return _bestiaryEntries;
+      });
+  }
+
+  const entries = await _bestiaryEntriesPromise;
+  if (_entries.some(e => e.type === 'beast')) return false;
+  _entries = [..._entries, ...entries];
+  return entries.length > 0;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // RECHERCHE
 // ══════════════════════════════════════════════════════════════════════════════
@@ -251,7 +277,7 @@ function _highlight(selector) {
 
 async function _executeEntry(entry) {
   closePalette();
-  const go = (page) => window.navigate?.(page);
+  const go = (page) => navigate(page);
 
   try {
     switch (entry.type) {
@@ -259,47 +285,59 @@ async function _executeEntry(entry) {
         await go(entry.id);
         return;
 
-      case 'npc':
+      case 'npc': {
         await go('npcs');
         await _nextTick();
-        window.selectNpc?.(entry.id);
+        const { selectNpc } = await import('./npcs.js');
+        selectNpc(entry.id);
         return;
+      }
 
       case 'character': {
         await go('characters');
         await _nextTick();
         const c = (STATE.characters || []).find(x => x.id === entry.id) || entry.payload;
-        if (c) window.renderCharSheet?.(c);
+        if (c) charSession.renderSheet(c);
         return;
       }
 
-      case 'beast':
+      case 'beast': {
         await go('bestiaire');
         await _nextTick();
-        window._bstOpen?.(entry.id);
+        const { openBestiaryEntry } = await import('./bestiary.js');
+        openBestiaryEntry(entry.id);
         return;
+      }
 
       case 'recipe':
         await go('recettes');
         await _nextTick();
-        window.openItemDetailModal?.(entry.id);
+        {
+          const { openItemDetailModal } = await import("./recipes.js");
+          openItemDetailModal(entry.id);
+        }
         return;
 
       case 'shop': {
         await go('shop');
         await _nextTick();
         const it = entry.payload;
-        if (it?.categorieId) window.shopGoCat?.(it.categorieId);
+        const { shopGoCat, shopFilterSearch } = await import('./shop.js');
+        if (it?.categorieId) shopGoCat(it.categorieId);
         await _nextTick();
-        if (it?.nom) window.shopFilterSearch?.(it.nom);
+        if (it?.nom) shopFilterSearch(it.nom);
         return;
       }
 
       case 'quest':
         await go('quests');
         await _nextTick();
-        if (STATE.isAdmin && window._questEdit) window._questEdit(entry.id);
-        else _highlight(`[data-quest-id="${entry.id}"]`);
+        if (STATE.isAdmin) {
+          const { editQuest } = await import("./quests.js");
+          editQuest(entry.id);
+        } else {
+          _highlight(`[data-quest-id="${entry.id}"]`);
+        }
         return;
 
       case 'achievement':
@@ -317,8 +355,12 @@ async function _executeEntry(entry) {
       case 'story':
         await go('story');
         await _nextTick();
-        if (STATE.isAdmin && window._stEditGroup) window._stEditGroup(entry.id);
-        else _highlight(`[data-story-id="${entry.id}"]`);
+        if (STATE.isAdmin) {
+          const { editStory } = await import('./story.js');
+          editStory(entry.id);
+        } else {
+          _highlight(`[data-story-id="${entry.id}"]`);
+        }
         return;
     }
   } catch (e) {
@@ -409,6 +451,13 @@ function _mountModal() {
     _activeIndex = 0;
     _results = _filterAndSort(_entries, _query);
     _renderList();
+
+    const requestedQuery = _query;
+    _ensureBestiaryEntriesForQuery(requestedQuery).then(changed => {
+      if (!_open || !changed) return;
+      _results = _filterAndSort(_entries, _query);
+      _renderList();
+    });
   });
 
   input.addEventListener('keydown', (e) => {
@@ -440,6 +489,8 @@ async function openPalette() {
   _activeIndex = 0;
   _entries = [];
   _results = [];
+  _bestiaryEntries = null;
+  _bestiaryEntriesPromise = null;
 
   const input = _mountModal();
   const list = document.getElementById('cmd-palette-list');
@@ -449,6 +500,9 @@ async function openPalette() {
 
   try {
     _entries = await _loadEntries();
+    if (_bestiaryEntries && _norm(_query).length >= 2 && !_entries.some(e => e.type === 'beast')) {
+      _entries = [..._entries, ..._bestiaryEntries];
+    }
     if (!_open) return; // l'utilisateur a fermé entre-temps
     _results = _filterAndSort(_entries, _query);
     _renderList();
@@ -479,8 +533,6 @@ export function initCommandPalette() {
     }
   });
 
-  window.openCommandPalette  = openPalette;
-  window.closeCommandPalette = closePalette;
 }
 
 // Auto-init à l'import

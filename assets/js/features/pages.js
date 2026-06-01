@@ -4,15 +4,22 @@
 import { STATE, FS } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
-import { _esc, appSplashHtml } from '../shared/html.js';
-import { calcPalier } from '../shared/char-stats.js';
+import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
+import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr } from '../shared/char-stats.js';
+import { showNotif } from '../shared/notifications.js';
 import { watch } from '../shared/realtime.js';
+import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
+import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
+import renderBastionPage from '../features/bastion.js';
+import { charSession } from '../shared/char-session.js';
+import { openAdventureSwitcher } from '../core/layout.js';
+import { navigate } from '../core/navigation.js';
 
-const renderCharSheet   = (...args) => window.renderCharSheet?.(...args);
-const getDefaultBastion = () => window.getDefaultBastion?.() || { nom: 'Sans nom', niveau: 1, tresor: 0, defense: 0, description: '', ameliorationsCustom: [], evenementCourant: 'calme', fondateurs: [], historique: [], salles: [], journal: [] };
+const renderCharSheet   = (...args) => charSession.renderSheet(...args);
+
 
 const PAGES = {
 
@@ -86,15 +93,15 @@ const PAGES = {
 
     // ── Carte mini personnage ─────────────────────────────────────────
     function _charMini(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const portrait = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
@@ -134,15 +141,15 @@ const PAGES = {
 
     // ── Carte héros principale (1 seul perso joueur) ──────────────────
     function _charFeatured(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const portrait = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
@@ -188,15 +195,15 @@ const PAGES = {
 
     // ── Carte admin ultra-compacte (ligne de tableau) ────────────────
     function _charRow(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
       const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const avatar = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos};display:block">`
@@ -318,27 +325,7 @@ const PAGES = {
       .filter(q => q.statut === 'active')
       .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
 
-    // Stocker pour la fonction join
-    window._dashQuestData = quests;
-
-    // Join inline depuis le dashboard (sans charger quests.js)
-    window._dashQuestJoin = async function (id, el) {
-      const quest  = (window._dashQuestData||[]).find(q => q.id === id);
-      if (!quest) return;
-      const myUid  = STATE.user?.uid;
-      const myChar = (STATE.characters||[]).find(c => c.uid === myUid);
-      if (!myChar) { window.showNotif?.('Aucun personnage trouvé.', 'error'); return; }
-      if (el) { el.disabled = true; el.textContent = '…'; }
-      const parts = Array.isArray(quest.participants) ? [...quest.participants] : [];
-      const idx   = parts.findIndex(p => p.uid === myUid);
-      if (idx >= 0) { parts.splice(idx, 1); }
-      else { parts.push({ uid: myUid, charId: myChar.id, nom: myChar.nom||'?', photo: myChar.photo||null, photoX: myChar.photoX||0, photoY: myChar.photoY||0 }); }
-      try {
-        await saveDoc('quests', id, { participants: parts });
-        window.showNotif?.(idx >= 0 ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', idx >= 0 ? 'info' : 'success');
-        await PAGES.dashboard();
-      } catch { window.showNotif?.('Erreur.', 'error'); if (el) { el.disabled = false; } }
-    };
+    setDashboardQuests(quests);
 
     // ── Helpers ────────────────────────────────────────────────────────
 
@@ -420,8 +407,8 @@ const PAGES = {
     // ── Helpers joueur v2 ─────────────────────────────────────────────
 
     function _heroCardV2(c) {
-      const pvMax   = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax   = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax   = calcPVMax(c) || c.pvBase || 10;
+      const pmMax   = calcPMMax(c) || c.pmBase || 10;
       const pvCur   = c.pvActuel ?? pvMax;
       const pmCur   = c.pmActuel ?? pmMax;
       const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
@@ -429,8 +416,8 @@ const PAGES = {
       const xpCur   = c.exp || 0;
       const xpNext  = calcPalier(c.niveau || 1);
       const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
-      const ca      = window.calcCA?.(c) || 10;
-      const or      = window.calcOr?.(c) || 0;
+      const ca      = calcCA(c) || 10;
+      const or      = calcOr(c) || 0;
       const photoPos = `${50+(c.photoX||0)*50}% ${50+(c.photoY||0)*50}%`;
       const portrait = c.photo
         ? `<img src="${c.photo}" style="width:100%;height:100%;object-fit:cover;object-position:${photoPos}">`
@@ -490,8 +477,7 @@ const PAGES = {
         if (!byPlayer[key] || (c.niveau||1) > (byPlayer[key].niveau||1)) byPlayer[key] = c;
       });
       const members = Object.values(byPlayer).slice(0, 5);
-      // Cache global pour que le quick-view trouve les persos d'autres joueurs
-      window._partyCharsCache = partyChars;
+      setDashboardPartyChars(partyChars);
       return `
       <div class="dv2-party-card">
         <div class="dv2-panel-header">
@@ -564,14 +550,14 @@ const PAGES = {
     }
 
     function _statsGridV2(c) {
-      const pvMax = window.calcPVMax?.(c) || c.pvBase || 10;
-      const pmMax = window.calcPMMax?.(c) || c.pmBase || 10;
+      const pvMax = calcPVMax(c) || c.pvBase || 10;
+      const pmMax = calcPMMax(c) || c.pmBase || 10;
       const pvCur = c.pvActuel ?? pvMax;
       const pmCur = c.pmActuel ?? pmMax;
       const pvPct = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
       const pmPct = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const ca = window.calcCA?.(c) || 10;
-      const or = window.calcOr?.(c) || 0;
+      const ca = calcCA(c) || 10;
+      const or = calcOr(c) || 0;
       return `
       <div class="dv2-stats-grid">
         <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
@@ -974,10 +960,6 @@ const PAGES = {
     }
 
     // ── Navigation personnage ──────────────────────────────────────────
-    window._goToChar = (id) => {
-      window._targetCharId = id;
-      navigate('characters');
-    };
 
     // ── Toast RPG (injecter une seule fois) ───────────────────────────
     if (!document.getElementById('dv2-toast-container')) {
@@ -986,7 +968,7 @@ const PAGES = {
       tc.className = 'dv2-toast-container';
       document.body.appendChild(tc);
     }
-    window._showRPGToast = (type = 'xp', title = '', sub = '', badge = '') => {
+    let _showRPGToast = (type = 'xp', title = '', sub = '', badge = '') => {
       const tc = document.getElementById('dv2-toast-container');
       if (!tc) return;
       const el = document.createElement('div');
@@ -1038,10 +1020,7 @@ const PAGES = {
     STATE.characters = chars;
     const content = document.getElementById('main-content');
     // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
-    let html = `<div class="page-header">
-      <div class="page-title"><span class="page-title-accent">📜 ${STATE.isAdmin ? 'Tous les Personnages' : 'Mes Personnages'}</span></div>
-      <div class="page-subtitle">Gérez vos fiches de personnage</div>
-    </div>`;
+    let html = `${pageHeaderHtml(STATE.isAdmin ? '📜 Tous les Personnages' : '📜 Mes Personnages', 'Gérez vos fiches de personnage')}`;
     if (STATE.isAdmin && chars.length > 0) {
       const byUser = {};
       chars.forEach(c => { if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = []; byUser[c.ownerPseudo].push(c); });
@@ -1061,8 +1040,7 @@ const PAGES = {
     }
     content.innerHTML = html;
     if (chars.length > 0) {
-      const targetId  = window._targetCharId;
-      window._targetCharId = null;
+      const targetId  = consumeTargetCharacter();
       const charToShow = (targetId ? chars.find(c => c.id === targetId) : null) || chars[0];
       STATE.activeChar = charToShow;
       renderCharSheet(charToShow);
@@ -1071,14 +1049,15 @@ const PAGES = {
 
   // ─── SHOP ───────────────────────────────────────────────────────────────────
   async shop() {
-    await window.renderShop?.();
+    const { renderShop } = await import('./shop.js');
+    await renderShop();
   },
 
   // ─── WORLD ──────────────────────────────────────────────────────────────────
   async world() {
     const doc = await getDocData('world', 'main');
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">📖 Le Monde</div><div class="page-subtitle">Lore, histoire et informations générales</div></div>`;
+    let html = `pageHeaderHtml('📖 Le Monde', 'Lore, histoire et informations générales')`;
     if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Édition Admin</div><button class="btn btn-gold btn-sm" data-action="editWorldContent">✏️ Modifier le contenu</button></div>`;
     const sections = doc?.sections || [{ title: 'Introduction', content: 'Les informations sur le monde seront ajoutées ici par le Maître de Jeu.' }];
     sections.forEach(s => { html += `<div class="world-section"><div class="card-header" style="margin-bottom:0.8rem;padding:0.8rem;background:var(--bg-card2);border-radius:6px;border:1px solid var(--border)">${s.title}</div><div class="world-content">${s.content}</div></div>`; });
@@ -1145,7 +1124,7 @@ const PAGES = {
   async npcs() {
     const items = await loadCollection('npcs');
     const content = document.getElementById('main-content');
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">👥 PNJ Rencontrés</div><div class="page-subtitle">Personnages non-joueurs et factions</div></div>`;
+    let html = `pageHeaderHtml('👥 PNJ Rencontrés', 'Personnages non-joueurs et factions')`;
     if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" data-action="openNpcModal">+ Ajouter un PNJ</button></div>`;
     if (items.length === 0) {
       html += `<div class="empty-state"><div class="icon">👥</div><p>Aucun PNJ pour l'instant.</p></div>`;
@@ -1162,341 +1141,7 @@ const PAGES = {
   },
 
 // ─── BASTION ────────────────────────────────────────────────────────────────
-  async bastion() {
-    const doc  = await getDocData('bastion', 'main');
-    const data = doc || getDefaultBastion();
-
-    const EVENTS        = window.BASTION_EVENTS || [];
-    const calcRevenu    = window.calculerRevenuBastion;
-
-    // Toutes les améliorations sont créées par le MJ (ameliorationsCustom)
-    function _getAllAmeliorations(d) {
-      return (d.ameliorationsCustom||[]).map(a => ({
-        ...a, type:'custom',
-        debloquee: (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0,
-      }));
-    }
-
-    const { brut, fondateurs: partFondateurs, base, nbAmelios, evt } =
-      calcRevenu ? calcRevenu(data)
-        : { brut:100, fondateurs:10, base:100, nbAmelios:0, evt:{ id:'calme', nom:'Calme', emoji:'☁️', description:'', badgeClass:'badge-blue', badgeText:'±0', couleur:'neutral', modificateur:1, bonus:0 } };
-
-    const niveau           = 1 + (data.ameliorationsCustom||[]).filter(a => (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0).length;
-    const fondateursList   = (data.fondateurs||[]).map(f => typeof f==='object'&&f!==null ? f : { charId:null, nom:String(f) });
-    const partParFondateur = fondateursList.length > 0 ? Math.round(partFondateurs / fondateursList.length) : 0;
-    const historique       = data.historique || [];
-    const inventaire       = data.inventaire || [];
-    const missions         = data.missions || [];
-    const missionsActives  = missions.filter(m => m.statut === 'active');
-
-    const evtColors = {
-      vol:        { bg:'rgba(201,50,50,0.08)',   border:'rgba(201,50,50,0.28)',   val:'#ff6b6b' },
-      inspection: { bg:'rgba(255,255,255,0.03)', border:'var(--border)',           val:'var(--text-muted)' },
-      calme:      { bg:'rgba(255,255,255,0.03)', border:'var(--border)',           val:'var(--text-muted)' },
-      riche:      { bg:'rgba(79,140,255,0.07)',  border:'rgba(79,140,255,0.22)',  val:'var(--gold)' },
-      rumeur:     { bg:'rgba(34,195,142,0.07)',  border:'rgba(34,195,142,0.22)', val:'#22c38e' },
-      succes:     { bg:'rgba(34,195,142,0.11)',  border:'rgba(34,195,142,0.32)', val:'#22c38e' },
-    };
-    const ec = evtColors[evt?.id] || evtColors.calme;
-
-    // Sparkline SVG — courbe des revenus
-    function sparkline(hist) {
-      const cycles = hist.filter(h => !h.type || h.type !== 'investissement');
-      if (!cycles.length) return `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;text-align:center;padding:.5rem 0">Aucune donnée pour l'instant.</p>`;
-      const vals = cycles.map(h => h.brut || 0);
-      const invs = hist.filter(h => h.type === 'investissement').map(h => ({ session: h.session, montant: h.montant||0 }));
-      const max  = Math.max(...vals, 1);
-      const W = 280, H = 60;
-      const pts = vals.map((v,i) => {
-        const x = vals.length < 2 ? W/2 : (i/(vals.length-1))*W;
-        const y = H - (v/max)*(H-8);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      }).join(' ');
-      const lx = vals.length < 2 ? W/2 : W;
-      const ly = H - (vals[vals.length-1]/max)*(H-8);
-      // Points d'investissement
-      const invPts = invs.map(inv => {
-        const idx = cycles.findIndex((_,i) => i === inv.session - 1);
-        if (idx < 0) return '';
-        const x = cycles.length < 2 ? W/2 : (idx/(cycles.length-1))*W;
-        return `<circle cx="${x.toFixed(1)}" cy="${H}" r="3" fill="rgba(79,140,255,.7)" title="+${inv.montant} or investis"/>`;
-      }).join('');
-      return `<svg viewBox="0 0 ${W} ${H+10}" style="width:100%;height:70px" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="spk-g" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--gold)" stop-opacity=".25"/>
-            <stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-        <polygon points="${pts} ${lx.toFixed(1)},${H} 0,${H}" fill="url(#spk-g)"/>
-        <polyline points="${pts}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-        <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3" fill="var(--gold)"/>
-        ${invPts}
-      </svg>`;
-    }
-
-    const uid     = STATE.user?.uid;
-    const isPlayer = !STATE.isAdmin && !!uid;
-
-    const content = document.getElementById('main-content');
-    content.innerHTML = `
-
-    <!-- ═══ HEADER ══════════════════════════════════════════ -->
-    <div style="background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.4rem 1.6rem;margin-bottom:1.4rem;display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-      <div>
-        <h1 style="font-family:'Cinzel',serif;font-size:1.7rem;color:var(--gold);letter-spacing:2px;line-height:1;margin-bottom:.4rem">${_esc(data.nom||'Le Bastion')}</h1>
-        <p style="font-size:.82rem;color:var(--text-dim);margin:0">
-          ${data.activite?`<span style="margin-right:1.2rem">⚙️ ${data.activite}</span>`:''}
-          ${data.pnj?`<span>👤 ${data.pnj}</span>`:''}
-          ${!data.activite&&!data.pnj?'<span style="font-style:italic">Forteresse de la compagnie</span>':''}
-        </p>
-      </div>
-      <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
-        <div style="background:var(--bg-elevated);border:1px solid var(--border-bright);border-radius:12px;padding:.5rem 1rem;text-align:center">
-          <div style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--gold);line-height:1">${niveau}</div>
-          <div style="font-size:.65rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;margin-top:1px">Niveau</div>
-        </div>
-        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:.5rem 1rem;text-align:center">
-          <div style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--text);line-height:1">${data.tresor||0}</div>
-          <div style="font-size:.65rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;margin-top:1px">Or</div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:.35rem">
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="editBastion">✏️ Modifier</button>` : ''}
-          ${isPlayer ? `<button class="btn btn-outline btn-sm" data-action="investirOrBastion">💰 Investir</button>` : ''}
-          <button class="btn btn-outline btn-sm" data-action="ouvrirInventaireBastion">📦 Inventaire (${inventaire.length})</button>
-          <button class="btn btn-outline btn-sm" data-action="ouvrirMissionsBastion">⚔️ Missions (${missionsActives.length})</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ GRILLE 2 COLONNES ════════════════════════════════ -->
-    <div style="display:grid;grid-template-columns:1fr 290px;gap:1.2rem;align-items:start">
-
-    <!-- ── COLONNE PRINCIPALE ────────────────────────────────── -->
-    <div style="display:flex;flex-direction:column;gap:1.2rem;min-width:0">
-
-      <!-- REVENUS -->
-      <div class="card">
-        <div class="card-header">💰 Cycle de revenus
-          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+100 or de base · +100 or / amélioration</span>
-        </div>
-
-        <!-- 2 stats principales -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.85rem">
-          <div class="stat-box" style="text-align:center;border-color:rgba(232,184,75,.2)">
-            <div class="stat-label">Revenu du cycle</div>
-            <div class="stat-value" style="color:var(--gold);font-size:2rem;line-height:1.1">${brut}</div>
-            <div style="font-size:.68rem;color:var(--text-dim);margin-top:2px">or généré</div>
-          </div>
-          <div class="stat-box" style="text-align:center;border-color:rgba(232,184,75,.12)">
-            <div class="stat-label">👑 Fondateurs (10%)</div>
-            <div class="stat-value" style="color:var(--gold);font-size:2rem;line-height:1.1">${partFondateurs}</div>
-            <div style="font-size:.68rem;color:var(--text-dim);margin-top:2px">
-              ${partParFondateur > 0 && fondateursList.length > 1
-                ? `${partParFondateur} or / personne`
-                : fondateursList.length === 1 ? 'or pour le fondateur' : 'aucun fondateur'}</div>
-          </div>
-        </div>
-
-        <!-- Formule de calcul -->
-        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:.65rem 1rem;display:flex;flex-wrap:wrap;gap:.4rem .8rem;font-size:.78rem;color:var(--text-muted);align-items:center">
-          <span>Base <strong style="color:var(--text)">100</strong></span>
-          <span style="color:var(--border-strong)">+</span>
-          <span>${nbAmelios} amélio${nbAmelios !== 1 ? 's' : ''} <strong style="color:var(--text)">×100</strong></span>
-          <span style="color:var(--border-strong)">=</span>
-          <span>Sous-total <strong style="color:var(--gold)">${base} or</strong></span>
-          ${evt?.id === 'vol'  ? `<span style="color:var(--border-strong)">×</span><span style="color:#ff6b6b">Malus −20%</span>` : ''}
-          ${(evt?.bonus||0) > 0 ? `<span style="color:var(--border-strong)">+</span><span style="color:var(--green)">Bonus +${evt.bonus}</span>` : ''}
-          ${evt?.id !== 'calme' ? `<span style="color:var(--border-strong)">=</span><span style="color:var(--gold);font-weight:600">${brut} or</span>` : ''}
-        </div>
-      </div>
-
-      <!-- ÉVÉNEMENT -->
-      <div class="card">
-        <div class="card-header">🎲 Événement du cycle</div>
-        <div style="background:${ec.bg};border:1px solid ${ec.border};border-radius:12px;padding:.9rem 1.1rem;display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
-          <span style="font-size:1.8rem;flex-shrink:0">${evt?.emoji||'☁️'}</span>
-          <div style="flex:1;min-width:0">
-            <div style="font-family:'Cinzel',serif;font-size:.9rem;color:var(--text);margin-bottom:2px">${evt?.nom||'Calme'}</div>
-            <div style="font-size:.8rem;color:var(--text-muted)">${evt?.description||''}</div>
-          </div>
-          <span class="badge ${evt?.badgeClass||'badge-blue'}" style="flex-shrink:0">${evt?.badgeText||'±0'}</span>
-        </div>
-        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:1rem">
-          <table style="width:100%;border-collapse:collapse;font-size:.8rem">
-            <thead><tr style="border-bottom:1px solid var(--border)">
-              <th style="padding:.4rem .7rem;color:var(--text-dim);font-weight:400;text-align:center;width:36px">D6</th>
-              <th style="padding:.4rem .7rem;color:var(--text-dim);font-weight:400;text-align:left">Événement</th>
-              <th style="padding:.4rem .7rem;color:var(--text-dim);font-weight:400;text-align:right">Effet</th>
-            </tr></thead>
-            <tbody>
-              ${EVENTS.map((e,i) => `<tr style="border-bottom:${i<EVENTS.length-1?'1px solid var(--border)':'none'};${e.id===evt?.id?'background:rgba(79,140,255,0.05)':''}">
-                <td style="padding:.45rem .7rem;color:var(--text-dim);font-family:'Cinzel',serif;text-align:center">${i+1}</td>
-                <td style="padding:.45rem .7rem">${e.emoji}&nbsp;<span style="color:${e.id===evt?.id?'var(--gold)':'var(--text)'}">${e.nom}</span>${e.id===evt?.id?'<span style="font-size:.68rem;color:var(--gold);margin-left:.4rem">← actuel</span>':''}</td>
-                <td style="padding:.45rem .7rem;text-align:right;color:${e.couleur==='green'?'var(--green)':e.couleur==='gold'?'var(--gold)':e.couleur==='crimson'?'#ff6b6b':'var(--text-muted)'}">${e.effet}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-        ${STATE.isAdmin
-          ? `<button class="btn btn-gold" style="width:100%" data-action="tirerEvenement">🎲 Tirer l'événement du cycle</button>`
-          : `<p style="font-size:.78rem;color:var(--text-dim);text-align:center;font-style:italic;margin:0">L'événement est tiré par le MJ en début de cycle.</p>`}
-      </div>
-
-      <!-- AMÉLIORATIONS -->
-      <div class="card">
-        <div class="card-header">🏗️ Améliorations permanentes
-          <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:auto">+1 niveau · +100 or/cycle</span>
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:.5rem;font-size:.7rem" data-action="gererAmeliorations">⚙️ Gérer</button>` : ''}
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem">
-          ${_getAllAmeliorations(data).map(a => {
-            const pct      = a.cout > 0 ? Math.min(100, Math.round((a.fondsActuels||0) / a.cout * 100)) : 100;
-            const pctColor = pct >= 100 ? '#22c38e' : pct > 50 ? 'var(--gold)' : '#4f8cff';
-            return `<div style="background:${a.debloquee?'rgba(34,195,142,0.05)':'var(--bg-elevated)'};border:1px solid ${a.debloquee?'rgba(34,195,142,0.22)':'var(--border)'};border-radius:12px;padding:.85rem;display:flex;flex-direction:column;gap:.4rem">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.4rem">
-                <div style="display:flex;align-items:center;gap:.4rem">
-                  <span style="font-size:1rem">${a.emoji||'🔧'}</span>
-                  <span style="font-family:'Cinzel',serif;font-size:.8rem;color:${a.debloquee?'#22c38e':'var(--text)'};line-height:1.25">${a.nom}</span>
-
-                </div>
-                ${a.debloquee
-                  ? `<span style="font-size:.68rem;background:rgba(34,195,142,0.12);color:#22c38e;border:1px solid rgba(34,195,142,.22);border-radius:6px;padding:1px 6px;flex-shrink:0">✓ Active</span>`
-                  : `<span style="font-family:'Cinzel',serif;font-size:.75rem;color:var(--gold);flex-shrink:0">${a.cout} or</span>`}
-              </div>
-              <p style="font-size:.73rem;color:var(--text-muted);line-height:1.45;margin:0">${a.description||''}</p>
-              ${!a.debloquee && a.cout > 0 ? `
-              <div style="margin-top:.1rem">
-                <div style="display:flex;justify-content:space-between;font-size:.67rem;color:var(--text-dim);margin-bottom:.2rem">
-                  <span>Financement</span>
-                  <span style="color:${pctColor};font-weight:600">${a.fondsActuels||0}/${a.cout} or (${pct}%)</span>
-                </div>
-                <div style="background:var(--bg-card);border-radius:999px;height:6px;overflow:hidden;border:1px solid var(--border)">
-                  <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:999px;transition:width .4s"></div>
-                </div>
-              </div>
-              <button class="btn btn-outline btn-sm" style="font-size:.72rem;margin-top:.1rem"
-                data-action="investirAmelioration" data-id="${a.id}" data-mode="custom">
-                💰 Contribuer
-              </button>` : a.debloquee ? `<div style="height:2px;background:rgba(34,195,142,.25);border-radius:1px;margin-top:auto"></div>` : ''}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-
-      <!-- HISTORIQUE -->
-      ${historique.length > 0 ? `
-      <div class="card">
-        <div class="card-header">📈 Historique des cycles
-          <span style="font-size:.7rem;color:var(--text-dim);font-weight:400;margin-left:auto">${historique.length} entrée${historique.length>1?'s':''}</span>
-        </div>
-        <div style="margin-bottom:.75rem">${sparkline(historique)}</div>
-        <div style="display:flex;flex-direction:column;gap:.35rem">
-          ${[...historique].reverse().slice(0,10).map(h => {
-            const isInvest = h.type === 'investissement';
-            const evtInfo  = isInvest ? null : EVENTS.find(e => e.id === h.evtId);
-            const evtColor = evtInfo?.couleur==='crimson'?'#ff6b6b':evtInfo?.couleur==='gold'?'var(--gold)':evtInfo?.couleur==='green'?'var(--green)':'var(--text-muted)';
-            return `<div style="display:flex;align-items:center;gap:.65rem;padding:.5rem .65rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:9px">
-              <span style="font-size:1rem;flex-shrink:0">${isInvest?'💰':evtInfo?.emoji||'🎲'}</span>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:.81rem;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                  ${isInvest
-                    ? `${_esc(h.investisseur?.nom||'?')}${h.message?' <span style="color:var(--text-dim);font-weight:400;font-style:italic">— ${h.message}</span>':''}`
-                    : `Cycle ${h.session} <span style="color:${evtColor};font-weight:400;font-size:.75rem">· ${_esc(h.evenement||'—')}</span>`}
-                </div>
-                <div style="font-size:.7rem;color:var(--text-dim);display:flex;gap:.5rem;align-items:center;margin-top:1px">
-                  ${isInvest
-                    ? `<span style="color:var(--gold);font-weight:600">+${h.montant} or</span> <span>versés au trésor</span>`
-                    : `<span style="color:var(--gold);font-weight:600">${h.brut} or</span>
-                       <span>→ fondateurs</span>
-                       <span style="color:var(--gold)">${h.partFondateurs} or</span>
-                       ${h.distributions?.length>0?`<span style="color:var(--text-dim)">(${h.distributions.map(d=>d.nom).join(', ')})</span>`:''}`}
-                  <span style="margin-left:auto;color:var(--text-dim)">${h.date||''}</span>
-                </div>
-              </div>
-              ${STATE.isAdmin&&h.id ? `<button class="btn-icon" style="color:#ff6b6b;flex-shrink:0;font-size:.85rem" data-action="supprimerHistorique" data-id="${h.id}" title="Supprimer ce cycle">🗑️</button>` : ''}
-            </div>`;
-          }).join('')}
-          ${historique.length > 10 ? `<p style="font-size:.72rem;color:var(--text-dim);text-align:center;margin:.2rem 0">${historique.length-10} cycle(s) plus anciens</p>` : ''}
-        </div>
-      </div>` : ''}
-
-    </div><!-- /colonne principale -->
-
-    <!-- ── SIDEBAR ────────────────────────────────────────────── -->
-    <div style="display:flex;flex-direction:column;gap:1rem;min-width:0">
-
-      <!-- Description -->
-      ${data.description ? `<div class="card" style="padding:1rem"><p style="font-size:.82rem;color:var(--text-muted);font-style:italic;line-height:1.7;margin:0">${data.description}</p></div>` : ''}
-
-      <!-- Fondateurs -->
-      <div class="card" style="padding:1rem">
-        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
-          👑 Fondateurs
-          <span style="font-size:.7rem;color:var(--text-dim);font-weight:400;margin-left:auto">10% du brut</span>
-        </div>
-        ${fondateursList.length === 0
-          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucun fondateur enregistré.</p>`
-          : fondateursList.map(f => `
-            <div style="display:flex;justify-content:space-between;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.83rem">
-              <span style="color:var(--text)">${_esc(f.nom||'?')}</span>
-              <span style="font-family:'Cinzel',serif;color:var(--gold);font-size:.8rem">${partParFondateur} or</span>
-            </div>`).join('') +
-          `<div style="display:flex;justify-content:space-between;padding-top:.5rem;font-size:.75rem;color:var(--text-dim)"><span>Total</span><span>${partFondateurs} or</span></div>`}
-      </div>
-
-      <!-- Inventaire résumé -->
-      <div class="card" style="padding:1rem">
-        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
-          📦 Inventaire du Bastion
-          <button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" data-action="ouvrirInventaireBastion">Voir tout</button>
-        </div>
-        ${inventaire.length === 0
-          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Inventaire vide.</p>`
-          : inventaire.slice(0,4).map(item => `
-            <div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.8rem">
-              <span style="flex:1;color:var(--text)">${_esc(item.nom||'?')}${item.quantite>1?`<span style="font-size:.7rem;color:var(--gold)"> ×${item.quantite}</span>`:''}</span>
-              <span style="font-size:.68rem;color:var(--text-dim)">${_esc(item.deposePar||'')}</span>
-            </div>`).join('') +
-          (inventaire.length > 4 ? `<p style="font-size:.72rem;color:var(--text-dim);margin:.5rem 0 0;text-align:center">+${inventaire.length-4} objet(s)</p>` : '')}
-      </div>
-
-      <!-- Missions actives résumé -->
-      <div class="card" style="padding:1rem">
-        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
-          ⚔️ Missions spéciales
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" data-action="ouvrirMissionsBastion">Gérer</button>` : ''}
-        </div>
-        ${missionsActives.length === 0
-          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucune mission active.</p>`
-          : missionsActives.map(m => `
-            <div style="padding:.5rem 0;border-bottom:1px solid var(--border)">
-              <div style="font-size:.82rem;font-weight:600;color:var(--text)">${m.titre||'?'}</div>
-              ${m.recompense?`<div style="font-size:.72rem;color:var(--gold)">🎁 ${m.recompense}</div>`:''}
-            </div>`).join('')}
-        ${!STATE.isAdmin && missions.length > 0 ? `<button class="btn btn-outline btn-sm" style="width:100%;margin-top:.5rem;font-size:.75rem" data-action="ouvrirMissionsBastion">Voir toutes les missions</button>` : ''}
-      </div>
-
-      <!-- Journal -->
-      <div class="card" style="padding:1rem">
-        <div class="card-header" style="font-size:.8rem;margin-bottom:.8rem">
-          📖 Journal
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:.7rem" data-action="addBastionLog">+ Entrée</button>` : ''}
-        </div>
-        ${(data.journal||[]).length === 0
-          ? `<p style="font-size:.78rem;color:var(--text-dim);font-style:italic;margin:0">Aucune entrée.</p>`
-          : (data.journal||[]).slice(0,4).map(j => `
-            <div style="padding:.5rem 0;border-bottom:1px solid var(--border)">
-              <div style="font-size:.68rem;color:var(--text-dim);margin-bottom:2px">${j.date||''}</div>
-              <div style="font-size:.8rem;color:var(--text-muted);line-height:1.5">${j.texte||''}</div>
-            </div>`).join('')}
-        ${(data.journal||[]).length > 4 ? `<p style="font-size:.72rem;color:var(--text-dim);margin:.5rem 0 0;text-align:center">${(data.journal||[]).length-4} entrée(s) plus anciennes</p>` : ''}
-      </div>
-
-    </div><!-- /sidebar -->
-    </div><!-- /grille -->
-    `;
-  },
+  bastion: renderBastionPage,
 
   // ─── STORY ──────────────────────────────────────────────────────────────────
   async story() {
@@ -1512,15 +1157,15 @@ const PAGES = {
   // ─── PLAYERS ────────────────────────────────────────────────────────────────
   async players() {
     // Implémentation effective dans features/players.js (override PAGES.players)
-    if (typeof window.renderPlayersPage === 'function') {
-      await window.renderPlayersPage();
-    }
+    const { renderPlayersPage } = await import('./players.js');
+    await renderPlayersPage();
   },
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
   async achievements() {
     // Shell uniquement — le contenu est délégué à achievements.js (_achRenderContent)
-    const allItems = window._achItems || await loadCollection('achievements');
+    const achState = PAGES._achievementsShellState || { items: [], filter: 'all', view: 'galerie', search: '' };
+    const allItems = achState.items.length ? achState.items : await loadCollection('achievements');
     // Les joueurs ne doivent rien voir des HF secrets, y compris dans les compteurs
     const items = STATE.isAdmin ? allItems : allItems.filter(a => !a.secret);
     const content = document.getElementById('main-content');
@@ -1533,8 +1178,8 @@ const PAGES = {
     const byCat = { epique: 0, comique: 0, histoire: 0 };
     items.forEach(a => { const c = a.categorie || 'epique'; if (c in byCat) byCat[c]++; });
     const total        = items.length;
-    const activeFilter = window._achFilter ?? 'all';
-    const activeView   = window._achView   ?? 'galerie';
+    const activeFilter = achState.filter ?? 'all';
+    const activeView   = achState.view   ?? 'galerie';
 
     content.innerHTML = `<div class="hall-root">
     <div class="hall-hero">
@@ -1564,7 +1209,7 @@ const PAGES = {
       <div class="search-wrap">
         <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
         <input type="text" placeholder="Rechercher…" id="ach-search-input"
-          value="${_esc(window._achSearch || '')}"
+          value="${_esc(achState.search || '')}"
           data-input="_achSetSearch">
       </div>
     </div>
@@ -1581,10 +1226,10 @@ const PAGES = {
 
   // ─── ADMIN ──────────────────────────────────────────────────────────────────
   async admin() {
-    if (!STATE.isAdmin) { window.navigate?.('dashboard'); return; }
+    if (!STATE.isAdmin) { const { navigate } = await import('../core/navigation.js'); navigate('dashboard'); return; }
     const users   = await loadCollection('users');
     const content = document.getElementById('main-content');
-    content.innerHTML = `<div class="page-header"><div class="page-title"><span class="page-title-accent">⚙️ Panneau Admin</div><div class="page-subtitle">Gestion complète du jeu</div></div>
+    content.innerHTML = `pageHeaderHtml('⚙️ Panneau Admin', 'Gestion complète du jeu')
       <div class="grid-2">
         <div class="card">
           <div class="card-header">Joueurs inscrits (${users.length})</div>
@@ -1625,7 +1270,7 @@ const PAGES = {
     const content  = document.getElementById('main-content');
     const recettes = doc?.recettes || [];
     const potions  = doc?.potions  || [];
-    let html = `<div class="page-header"><div class="page-title"><span class="page-title-accent">🍳 Recettes & Potions</span></div><div class="page-subtitle">Cuisine de groupe et alchimie</div></div>
+    let html = `pageHeaderHtml('🍳 Recettes & Potions', 'Cuisine de groupe et alchimie')
       ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><div style="display:flex;gap:0.5rem"><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="cuisine">+ Recette cuisine</button><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="potion">+ Potion</button></div></div>` : ''}
       <div style="background:rgba(226,185,111,0.05);border:1px solid rgba(226,185,111,0.15);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:0.85rem;color:var(--text-muted)">
         <strong style="color:var(--gold)">🍳 Cuisine</strong> — Avant mission ou pendant un repos. Bénéficie à tout le groupe. Max 2 plats actifs simultanément.<br>
@@ -1648,28 +1293,61 @@ const PAGES = {
 
   // ─── BESTIAIRE ──────────────────────────────────────────────────────────────
   async bestiaire() {
-    await window.renderBestiary?.();
+    const { renderBestiary } = await import('./bestiary.js');
+    await renderBestiary();
   },
 };
 
+async function goToChar(id) {
+  setTargetCharacter(id);
+  const { navigate } = await import('../core/navigation.js');
+  navigate('characters');
+}
+
+async function dashQuestJoin(id, el) {
+  const quest = findDashboardQuest(id);
+  if (!quest) return;
+  const myUid = STATE.user?.uid;
+  const myChar = (STATE.characters || []).find(c => c.uid === myUid);
+  if (!myChar) { showNotif('Aucun personnage trouvé.', 'error'); return; }
+  if (el) { el.disabled = true; el.textContent = '…'; }
+  const parts = Array.isArray(quest.participants) ? [...quest.participants] : [];
+  const idx = parts.findIndex(p => p.uid === myUid);
+  if (idx >= 0) parts.splice(idx, 1);
+  else parts.push({ uid: myUid, charId: myChar.id, nom: myChar.nom || '?', photo: myChar.photo || null, photoX: myChar.photoX || 0, photoY: myChar.photoY || 0 });
+  try {
+    await saveDoc('quests', id, { participants: parts });
+    showNotif(idx >= 0 ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', idx >= 0 ? 'info' : 'success');
+    await PAGES.dashboard();
+  } catch {
+    showNotif('Erreur.', 'error');
+    if (el) el.disabled = false;
+  }
+}
+
 registerActions({
-  _achSetSearch:         (el)  => window._achSetSearch?.(el.value),
   // Dashboard
-  _goToChar:             (btn) => window._goToChar?.(btn.dataset.id),
-  _openQuickView:        (btn) => window._openQuickView?.(btn.dataset.id),
-  _dashQuestJoin:        (btn) => window._dashQuestJoin?.(btn.dataset.id, btn),
-  openAdventureSwitcher: ()    => window.openAdventureSwitcher?.(),
+  _goToChar:             (btn) => goToChar(btn.dataset.id),
+  _dashQuestJoin:        (btn) => dashQuestJoin(btn.dataset.id, btn),
+  openAdventureSwitcher: ()    => openAdventureSwitcher(),
 
   // Characters (admin filter) — appel via window pour supporter le cas où characters.js n'est pas encore chargé
-  filterAdminChars: (btn) => window.filterAdminChars?.(btn.dataset.pseudo || null, btn),
 
   // World
-  editWorldContent:      ()    => window.editWorldContent?.(),
 
   // NPCs
-  openNpcModal:          ()    => window.openNpcModal?.(),
-  editNpc:               (btn) => window.editNpc?.(btn.dataset.id),
-  deleteNpc:             (btn) => window.deleteNpc?.(btn.dataset.id),
+  openNpcModal:          async () => {
+    const { openNpcModal } = await import('./npcs.js');
+    openNpcModal();
+  },
+  editNpc:               async (btn) => {
+    const { openNpcModal } = await import('./npcs.js');
+    openNpcModal(btn.dataset.id);
+  },
+  deleteNpc:             async (btn) => {
+    const { deleteNpc } = await import('./npcs.js');
+    deleteNpc(btn.dataset.id);
+  },
   filterNpcs:            (btn) => {
     const filter = btn.dataset.filter || null;
     document.querySelectorAll('#npc-filter .tab').forEach(b => b.classList.toggle('active', b === btn));
@@ -1690,9 +1368,6 @@ registerActions({
   addBastionLog:            ()    => window.addBastionLog?.(),
 
   // Achievements
-  _achSetFilter:         (btn) => window._achSetFilter?.(btn.dataset.val),
-  _achSetView:           (btn) => window._achSetView?.(btn.dataset.val),
-  openAchievementModal:  ()    => window.openAchievementModal?.(),
 
   // Admin lazy-load tools
   _adminLazyOpen:        (btn) => {
