@@ -107,7 +107,7 @@ async function renderWorld() {
   <div class="world-shell" style="display:grid;grid-template-columns:250px 1fr;gap:1.2rem;align-items:start;margin:0 auto">
 
     <!-- ── SIDEBAR NAVIGATION ───────────────────────────────────────────── -->
-    <div style="position:sticky;top:1rem">
+    <div class="world-sidebar" style="position:sticky;top:1rem">
       <div style="background:var(--bg-card);border:1px solid var(--border);
         border-radius:var(--radius-lg);overflow:hidden">
 
@@ -239,9 +239,9 @@ function _renderSection(s) {
     </div>` : ''}
 
     <!-- Header section -->
-    <div style="padding:1.4rem 1.6rem ${s.imageUrl ? '.75rem' : '1rem'};
+    <div class="world-sec-head" style="padding:1.4rem 1.6rem ${s.imageUrl ? '.75rem' : '1rem'};
       ${s.imageUrl ? 'margin-top:-4rem;position:relative;z-index:1' : ''}">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem">
+      <div class="world-sec-headrow" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem">
         <div>
           <div style="display:flex;align-items:center;gap:.65rem;margin-bottom:.4rem">
             <span style="font-size:1.4rem">${s.icone||'📖'}</span>
@@ -267,7 +267,7 @@ function _renderSection(s) {
     <div style="height:1px;background:var(--border);margin:0 1.6rem"></div>
 
     <!-- Contenu -->
-    <div style="padding:1.2rem 1.6rem 1.6rem">
+    <div class="world-sec-body" style="padding:1.2rem 1.6rem 1.6rem">
       ${s.contenu
         ? richTextContentHtml({
             html: _contentToHtml(s.contenu),
