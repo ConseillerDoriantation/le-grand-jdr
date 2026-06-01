@@ -610,6 +610,15 @@ function bindRichTextListIndentation(editor, signal) {
   }, { signal });
 }
 
+// Vrai si la citation n'a aucun contenu visible : ni image, ni texte une fois
+// retirés les espaces ET les caractères de largeur nulle (U+200B..U+200D, U+FEFF)
+// que d'anciens éditeurs/navigateurs laissaient — invisibles mais non retirés
+// par .trim(), ce qui faisait persister la bordure des anciennes citations.
+function _isEmptyBlockquote(bq) {
+  if (!bq || bq.querySelector('img')) return false;
+  return !(bq.textContent || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '').length;
+}
+
 /**
  * Permet de SORTIR d'un blockquote vide :
  * - Backspace au début d'un blockquote vide → unwrap
@@ -627,8 +636,7 @@ function bindRichTextBlockquoteEscape(editor, signal) {
     // Backspace au tout début du blockquote OU sur un blockquote vide → unwrap
     if (e.key === 'Backspace') {
       const isAtStart = sel.anchorOffset === 0 && _isFirstTextOfBlock(node, bq);
-      const isEmpty = !bq.textContent.trim() && !bq.querySelector('img');
-      if (isAtStart || isEmpty) {
+      if (isAtStart || _isEmptyBlockquote(bq)) {
         e.preventDefault();
         _unwrapBlock(bq, 'p');
         // Repositionne le curseur sur le 1er bloc résultant
@@ -651,9 +659,36 @@ function bindRichTextBlockquoteEscape(editor, signal) {
         bq.parentNode?.insertBefore(newP, bq.nextSibling);
         _placeCaretAtStart(newP);
         // Si le blockquote est maintenant vide, on le supprime aussi
-        if (!bq.textContent.trim() && !bq.querySelector('img')) bq.remove();
+        if (_isEmptyBlockquote(bq)) bq.remove();
       }
     }
+  }, { signal });
+
+  // Nettoyage après édition : une citation vidée (sélection supprimée, Couper,
+  // touche Suppr, ancienne citation au contenu invisible…) laissait un
+  // <blockquote> vide → bordure bleue orpheline. On retire toute citation vide :
+  //  - sans curseur dedans → on l'enlève toujours (nettoie aussi les anciennes
+  //    citances orphelines dès qu'on touche à la note) ;
+  //  - avec le curseur dedans → seulement si ça vient d'une suppression, sinon
+  //    c'est une citation fraîche qu'on s'apprête à remplir (on n'y touche pas).
+  editor.addEventListener('input', (e) => {
+    const isDelete = !!e.inputType && e.inputType.startsWith('delete');
+    const empties = [...editor.querySelectorAll('blockquote')].filter(_isEmptyBlockquote);
+    if (!empties.length) return;
+    const sel = window.getSelection();
+    const caretBq = sel?.anchorNode
+      ? elementFromNode(sel.anchorNode)?.closest?.('blockquote')
+      : null;
+    let caretUnwrapped = false;
+    empties.forEach((bq) => {
+      if (bq === caretBq) {
+        if (isDelete) { _unwrapBlock(bq, 'p'); caretUnwrapped = true; }
+      } else {
+        bq.remove();
+      }
+    });
+    // Curseur dans la citation vidée → transformée en <p> : on y replace le curseur.
+    if (caretUnwrapped) _placeCaretAtStart(editor.querySelector('p') || editor);
   }, { signal });
 }
 
@@ -1333,6 +1368,13 @@ export function sanitizeRichTextHtml(html) {
         n.removeAttribute(a.name);
       }
     });
+  });
+  // Retire les citations vides (héritées d'anciennes suppressions) : un
+  // <blockquote> sans texte ni image laissait sa bordure bleue orpheline.
+  // S'applique au chargement de l'éditeur, à l'affichage lecture seule et à
+  // l'enregistrement → l'ancienne citation vide disparaît pour de bon.
+  tpl.content.querySelectorAll('blockquote').forEach((bq) => {
+    if (_isEmptyBlockquote(bq)) bq.remove();
   });
   return tpl.innerHTML;
 }
