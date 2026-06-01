@@ -5,6 +5,7 @@ import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, pageHeaderHtml} from '../shared/html.js';
+import { emptyStateHtml } from '../shared/list-renderer.js';
 import { uploadPng } from '../shared/image-upload.js';
 
 
@@ -43,11 +44,7 @@ export async function renderCollectionPage() {
   }
 
   if (STORE.cards.length === 0) {
-    html += `
-      <div class="empty-state">
-        <div class="icon">🃏</div>
-        <p>La collection est vide.</p>
-      </div>`;
+    html += emptyStateHtml('🃏', 'La collection est vide.');
   } else {
     html += `<div class="collection-grid">`;
 
