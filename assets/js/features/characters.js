@@ -588,7 +588,8 @@ function _renderTabV3(tab, c, canEdit) {
     bindRichTextEditors(area);
     initProfilTagUi();
   }
-  if (tab === 'journal' && sub === 'notes') bindRichTextEditors(area);
+  if (tab === 'journal' && sub === 'notes') { bindRichTextEditors(area); _bindNotesDnd(c, canEdit); }
+  if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
   if (tab === 'sorts') _bindSortsCatDrag(c, canEdit);
 }
 
@@ -1006,7 +1007,8 @@ function _csV3JournalSub(sub) {
   const area = document.getElementById('char-tab-content');
   if (area) {
     area.innerHTML = renderCharJournal(c, canEdit, sub);
-    if (sub === 'notes') bindRichTextEditors(area);
+    if (sub === 'notes') { bindRichTextEditors(area); _bindNotesDnd(c, canEdit); }
+    if (sub === 'quetes') _bindQuetesDnd(c, canEdit);
   }
 }
 
@@ -1022,7 +1024,7 @@ function renderJournalQuetes(c, canEdit) {
     const idx = quetes.indexOf(q);
     const validee = !!q.valide;
     const typeLbl = q.type ? `<span class="quest-type">${_esc(q.type)}</span>` : '';
-    return `<article class="quest ${validee?'done':''}">
+    return `<article class="quest ${validee?'done':''}${canEdit?' is-draggable':''}" data-quest-idx="${idx}">
       <header class="quest-head">
         <div class="quest-name-wrap">
           ${validee
@@ -1045,7 +1047,7 @@ function renderJournalQuetes(c, canEdit) {
         <span class="q-lbl">En cours</span>
         <span class="q-count">${enCours.length}</span>
       </div>
-      <div class="quest-list">
+      <div class="quest-list" data-quest-list="open">
         ${enCours.length ? enCours.map(card).join('') : '<div class="q-empty">Aucune quête en cours.</div>'}
       </div>
     </section>
@@ -1054,10 +1056,52 @@ function renderJournalQuetes(c, canEdit) {
         <span class="q-lbl done">Validées</span>
         <span class="q-count">${validees.length}</span>
       </div>
-      <div class="quest-list">
+      <div class="quest-list" data-quest-list="done">
         ${validees.length ? validees.map(card).join('') : '<div class="q-empty">Aucune quête validée.</div>'}
       </div>
     </section>`;
+}
+
+// ── Drag & drop des quêtes (SortableJS) ───────────────────────────────────────
+// Deux listes (En cours / Validées) partagent le même `group` → on réordonne ET
+// on bascule l'état validé en glissant une quête d'une liste à l'autre.
+let _questsSortables = [];
+function _bindQuetesDnd(c, canEdit) {
+  _questsSortables.forEach(s => { try { s.destroy(); } catch {} });
+  _questsSortables = [];
+  if (!canEdit) return;
+  const area = document.getElementById('char-tab-content'); if (!area) return;
+  area.querySelectorAll('.quest-list').forEach(list => {
+    _questsSortables.push(new Sortable(list, {
+      group: 'cs-quetes',
+      animation: 160,
+      draggable: '.quest',
+      filter: '.btn-icon, .q-empty',
+      preventOnFilter: false,
+      ghostClass: 'cs-quete-ghost',
+      chosenClass: 'cs-quete-chosen',
+      onEnd: () => _onQuetesReordered(c),
+    }));
+  });
+}
+async function _onQuetesReordered(c) {
+  const area = document.getElementById('char-tab-content'); if (!area) return;
+  const old = Array.isArray(c.quetes) ? c.quetes : [];
+  const next = [];
+  // Première liste = « En cours » (valide=false), seconde = « Validées » (valide=true).
+  area.querySelectorAll('.quest-list').forEach(list => {
+    const valide = list.dataset.questList === 'done';
+    list.querySelectorAll('.quest[data-quest-idx]').forEach(el => {
+      const q = old[parseInt(el.dataset.questIdx)];
+      if (q) next.push({ ...q, valide });
+    });
+  });
+  // Garde-fou : si on n'a pas retrouvé toutes les quêtes, on annule (re-render).
+  if (next.length !== old.length) { _csV3JournalSub('quetes'); return; }
+  c.quetes = next;
+  try { await updateInCol('characters', c.id, { quetes: next }); }
+  catch (e) { console.error('[quetes reorder]', e); window.showNotif?.('Erreur d\'enregistrement.', 'error'); }
+  _csV3JournalSub('quetes');
 }
 
 // Relations — liste éditable
@@ -1071,8 +1115,9 @@ function renderCharNotesV3(c, canEdit) {
     const isOpen = _openNote === i;
     const titre = n.titre || 'Note sans titre';
     const date  = n.date  || '';
-    return `<article class="note-v3 ${isOpen?'is-open':''}">
+    return `<article class="note-v3 ${isOpen?'is-open':''}${canEdit?' is-draggable':''}" data-note-idx="${i}">
       <header class="note-v3-head">
+        ${canEdit ? `<span class="note-v3-drag" title="Glisser pour réordonner">⠿</span>` : ''}
         <button class="note-v3-toggle" data-action="csV3ToggleNote" data-idx="${i}" title="${isOpen?'Replier':'Déplier'}">
           ${isOpen ? '▾' : '▸'}
         </button>
@@ -1095,6 +1140,42 @@ function renderCharNotesV3(c, canEdit) {
       </div>` : ''}
     </article>`;
   }).join('')}</div>`;
+}
+
+// ── Drag & drop des notes (SortableJS) ────────────────────────────────────────
+// Poignée ⠿ dans l'en-tête (n'interfère pas avec l'édition du titre/contenu).
+let _notesSortable = null;
+function _bindNotesDnd(c, canEdit) {
+  try { _notesSortable?.destroy(); } catch {}
+  _notesSortable = null;
+  if (!canEdit) return;
+  const area = document.getElementById('char-tab-content'); if (!area) return;
+  const stack = area.querySelector('.notes-stack'); if (!stack) return;
+  _notesSortable = new Sortable(stack, {
+    handle: '.note-v3-drag',
+    draggable: '.note-v3',
+    animation: 160,
+    ghostClass: 'cs-note-ghost',
+    chosenClass: 'cs-note-chosen',
+    onEnd: () => _onNotesReordered(c),
+  });
+}
+async function _onNotesReordered(c) {
+  const area = document.getElementById('char-tab-content'); if (!area) return;
+  const stack = area.querySelector('.notes-stack'); if (!stack) return;
+  const old = Array.isArray(c.notesList) ? c.notesList : [];
+  const next = [];
+  stack.querySelectorAll('.note-v3[data-note-idx]').forEach(el => {
+    const n = old[parseInt(el.dataset.noteIdx)];
+    if (n) next.push(n);
+  });
+  if (next.length !== old.length) { _currentJournalSub = 'notes'; _renderTabV3('journal', c, charSession.getCanEditChar()); return; }
+  c.notesList = next;
+  _openNote = null; // les index ont changé → on replie tout
+  try { await updateInCol('characters', c.id, { notesList: next }); }
+  catch (e) { console.error('[notes reorder]', e); window.showNotif?.('Erreur d\'enregistrement.', 'error'); }
+  _currentJournalSub = 'notes';
+  _renderTabV3('journal', c, charSession.getCanEditChar());
 }
 
 function _csV3ToggleNote(idx) {
