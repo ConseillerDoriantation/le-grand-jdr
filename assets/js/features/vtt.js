@@ -235,6 +235,8 @@ let _mtCtx      = null; // contexte multi-cibles actif { srcId, opt, optIdx, tar
 let _mtPending  = null; // cibles validées en attente du roll : string[]
 let _zoneCtx    = null; // contexte zone AoE { srcId, tgtId, opt, optIdx, wPx, hPx, x, y, placed }
 let _zonePreview= null; // Konva.Group prévisualisation zone
+let _selfCtx    = null; // contexte déplacement "soi" { srcId, cells, opt, destCol, destRow, valid }
+let _selfPreview= null; // Konva.Group prévisualisation déplacement soi
 let _chatMsgs   = [];   // derniers messages du chat rendus (pour lookup "répondre")
 let _chatReplyTo= null; // message auquel on répond { id, authorName, text }
 let _selectedMulti  = new Set();   // ids des tokens en multi-sélection
@@ -1022,6 +1024,7 @@ function _initCanvas(container) {
     else if (_tool === 'ruler')                 _showRulerHover(wp);
     if (_tool === 'draw'  && _drawing && !_pan) _updateDraw(wp);
     if (_zoneCtx) _zoneUpdatePreview(wp);
+    if (_selfCtx) _selfUpdatePreview(wp);
   });
   _stage.on('mouseup', () => {
     _pan = false;
@@ -1044,6 +1047,7 @@ function _initCanvas(container) {
     if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
     if (e.target===_stage) {
       if (_suppressNextClick) { _suppressNextClick = false; return; }
+      if (_selfCtx) { _selfMoveValidate(); return; }
       if (_zoneCtx) { _zoneCtx.placed = !_zoneCtx.placed; return; }
       _deselect(); _deselectAnnot();
     }
@@ -2138,9 +2142,10 @@ function _vttSpellMods(s) {
     // Concentration : DD du JS Sagesse en cas de dégâts reçus
     concentration: nbConc > 0
       ? { dd: 11 + 2 * (nbConc - 1), runes: nbConc } : null,
-    // Déplacement : push / pull, distance en cases (1 case ≈ 1.5m)
-    deplacement: s.deplacement?.mode
-      ? { mode: s.deplacement.mode, distance: Math.max(1, Math.ceil((parseInt(s.deplacement.distance)||1) / CELL_M)) }
+    // Déplacement (rune Amplification en mode déplacement) : soi / pousse / attire.
+    // Portée = 4N-1 m → cases. Sous-mode dans s.deplacement.mode ('self' par défaut).
+    deplacement: (s.ampMode === 'deplacement' && nbAmp > 0)
+      ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, Math.ceil((4 * nbAmp - 1) / CELL_M)) }
       : null,
     // Allonge magique : Ench + Amp + slot arme → portée étendue (au lieu d'une zone)
     allonge: (nbEnch > 0 && nbAmp > 0 && (s.enchantSlot || 'arme') === 'arme')
@@ -2308,6 +2313,134 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
     await updateDoc(_tokRef(tgtData.id), { col: nc, row: nr }).catch(() => {});
   }
   return moved;
+}
+
+// ══ Sorts de déplacement (rune Amplification mode Déplacement) ════════════════
+// Push/Pull : déplace la cible cliquée le long de l'axe lanceur↔cible (sans dégât).
+async function _vttCastPushPull(srcId, tgtId, opt, d) {
+  const src = _tokens[srcId]?.data, tgt = _tokens[tgtId]?.data;
+  if (!src || !tgt) return;
+  if (src.id === tgt.id) { showNotif('Choisis une cible (pas toi-même)', 'error'); return; }
+  if (_tokenAttackDistance(src, tgt, opt.portee) > (opt.portee || 1) + 0.001) {
+    showNotif(`Cible hors de portée (${opt.portee || 1}c)`, 'error');
+    return;
+  }
+  const moved = await _vttApplyDeplacement(src, tgt, d.mode, d.cells);
+  const verb = d.mode === 'pull' ? '↙ attirée' : '↗ poussée';
+  const tgtName = _live(tgt).displayName ?? tgt.name;
+  showNotif(moved > 0
+    ? `${verb} de ${moved} case${moved > 1 ? 's' : ''} — ${tgtName}`
+    : `${tgtName} n'a pas pu être déplacée (obstacle)`, moved > 0 ? 'success' : 'info');
+}
+
+// Déplacement "Soi" : placement interactif du lanceur sur une case libre dans la portée.
+function _selfClear() {
+  const hud = document.getElementById('vtt-self-hud');
+  if (hud?._removeKey) hud._removeKey();
+  hud?.remove();
+  _selfPreview?.destroy();
+  _selfPreview = null;
+  _selfCtx = null;
+  _layers.token?.batchDraw();
+}
+
+function _startSelfMove(srcId, opt, cells) {
+  _zoneClear();
+  const src = _tokens[srcId]?.data; if (!src) return;
+  _selfCtx = { srcId, cells: Math.max(1, cells || 1), opt, destCol: src.col, destRow: src.row, valid: false };
+  _buildSelfPreview();
+  _showSelfHud();
+  showNotif('Clic sur une case libre dans le cercle de portée', 'info');
+}
+
+function _buildSelfPreview() {
+  if (!_selfCtx || !_layers.token) return;
+  _selfPreview?.destroy();
+  const K = window.Konva;
+  const src = _tokens[_selfCtx.srcId]?.data; if (!src) return;
+  const sc = _tokenCenter(src);
+  const group = new K.Group({ listening: false, name: 'self-preview' });
+  group.add(new K.Circle({
+    x: sc.x, y: sc.y, radius: (_selfCtx.cells + 0.5) * CELL,
+    fill: 'rgba(79,140,255,0.07)', stroke: '#4f8cff', strokeWidth: 2, dash: [10, 6], listening: false,
+  }));
+  const dim = _tokenDims(src);
+  group.add(new K.Rect({
+    name: 'dest', width: dim.w * CELL, height: dim.h * CELL,
+    fill: 'rgba(34,195,142,0.22)', stroke: '#22c38e', strokeWidth: 3, cornerRadius: 4, listening: false,
+  }));
+  _layers.token.add(group);
+  _selfPreview = group;
+  _positionSelfMarker();
+  _layers.token.batchDraw();
+}
+
+function _positionSelfMarker() {
+  const marker = _selfPreview?.findOne('.dest'); if (!marker || !_selfCtx) return;
+  marker.position({ x: _selfCtx.destCol * CELL, y: _selfCtx.destRow * CELL });
+  const ok = _selfCtx.valid;
+  marker.stroke(ok ? '#22c38e' : '#ff6b6b');
+  marker.fill(ok ? 'rgba(34,195,142,0.22)' : 'rgba(255,107,107,0.18)');
+}
+
+function _selfCellOccupied(col, row, dim, src) {
+  return Object.values(_tokens).some(e => {
+    const dd = e?.data;
+    if (!dd || dd.id === src.id || dd.pageId !== src.pageId) return false;
+    const od = _tokenDims(dd);
+    return col < dd.col + od.w && col + dim.w > dd.col && row < dd.row + od.h && row + dim.h > dd.row;
+  });
+}
+
+function _selfUpdatePreview(wp) {
+  if (!_selfCtx) return;
+  const src = _tokens[_selfCtx.srcId]?.data; if (!src) return;
+  const dim = _tokenDims(src);
+  const col = Math.round((wp.x - dim.w * CELL / 2) / CELL);
+  const row = Math.round((wp.y - dim.h * CELL / 2) / CELL);
+  _selfCtx.destCol = col; _selfCtx.destRow = row;
+  const dist = Math.max(Math.abs(col - src.col), Math.abs(row - src.row)); // Chebyshev
+  const inRange  = dist >= 1 && dist <= _selfCtx.cells;
+  const inBounds = col >= 0 && row >= 0
+    && col + dim.w <= (_activePage?.cols || 9999) && row + dim.h <= (_activePage?.rows || 9999);
+  _selfCtx.valid = inRange && inBounds && !_selfCellOccupied(col, row, dim, src);
+  _positionSelfMarker();
+  _layers.token.batchDraw();
+}
+
+async function _selfMoveValidate() {
+  if (!_selfCtx) return;
+  const { srcId, destCol, destRow, valid, opt } = _selfCtx;
+  if (!valid) { showNotif('Destination invalide (hors portée ou occupée)', 'error'); return; }
+  const src = _tokens[srcId]?.data; if (!src) { _selfClear(); return; }
+  const dist = Math.max(Math.abs(destCol - src.col), Math.abs(destRow - src.row));
+  const name = _live(src).displayName ?? src.name;
+  _selfClear();
+  await updateDoc(_tokRef(srcId), { col: destCol, row: destRow }).catch(() => {});
+  showNotif(`🏃 ${name} se déplace de ${dist} case${dist > 1 ? 's' : ''} (${opt.label})`, 'success');
+}
+
+function _selfMoveCancel() { _selfClear(); showNotif('Déplacement annulé', 'info'); }
+
+function _showSelfHud() {
+  document.getElementById('vtt-self-hud')?.remove();
+  const opt = _selfCtx.opt;
+  const hud = document.createElement('div');
+  hud.id = 'vtt-self-hud';
+  hud.className = 'vtt-mt-hud';
+  hud.innerHTML = `
+    <div class="vtt-mt-hud-header">
+      <span>🏃 ${_esc(opt.label || 'Déplacement')}</span>
+      <span class="vtt-mt-hud-count" style="color:#4f8cff;background:rgba(79,140,255,.12);border-color:rgba(79,140,255,.35)">↔ ${_selfCtx.cells} case${_selfCtx.cells > 1 ? 's' : ''} max</span>
+    </div>
+    <div class="vtt-zone-hint">Clic sur une case libre dans le cercle · <kbd>Échap</kbd> = annuler</div>
+    <div class="vtt-mt-hud-actions">
+      <button class="vtt-mt-btn-cancel" data-vtt-fn="_selfMoveCancel">✕ Annuler</button>
+    </div>`;
+  const onKey = e => { if (e.key === 'Escape') _selfMoveCancel(); };
+  document.addEventListener('keydown', onKey);
+  hud._removeKey = () => document.removeEventListener('keydown', onKey);
+  document.body.appendChild(hud);
 }
 
 /**
@@ -2669,13 +2802,15 @@ function _buildSpellOption(s, ctx) {
   const types = Array.isArray(s.types) && s.types.length ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
   const protMode = s.protectionMode || 'ca';
-  let zoneW = mods?.allonge ? 0 : (s.zoneW || 0);
-  let zoneH = mods?.allonge ? 0 : (s.zoneH || 0);
+  // En mode Déplacement, l'Amplification produit un déplacement, pas une zone.
+  const _isDepl = s.ampMode === 'deplacement';
+  let zoneW = (mods?.allonge || _isDepl) ? 0 : (s.zoneW || 0);
+  let zoneH = (mods?.allonge || _isDepl) ? 0 : (s.zoneH || 0);
   // Si pas de zone manuelle ni allonge : calcule depuis les runes (Amplification × Dispersion).
   // Miroir de _calcSortZone (spells.js) → mêmes formules de chainage :
   //   Amp ×N → longueur 4N-1 m  · Disp ×M en combo → largeur 4M-1 m
   // Conversion mètres → cases (1 case ≈ 1.5 m).
-  if (!mods?.allonge && zoneW <= 0 && zoneH <= 0) {
+  if (!mods?.allonge && !_isDepl && zoneW <= 0 && zoneH <= 0) {
     const _runes = s.runes || [];
     const _nbAmp  = _runes.filter(r => r === 'Amplification').length;
     const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
@@ -3705,6 +3840,14 @@ function _vttPickOpt(srcId, tgtId, idx) {
   if (opt.isMagicWeapon) {
     _mtPending = null; // sécurité
     _showElementPicker(srcId, tgtId, +idx);
+    return;
+  }
+
+  // Sort de déplacement (rune Amplification mode Déplacement) : soi / pousse / attire.
+  if (opt.mods?.deplacement && opt.sortIdx !== undefined && !_mtPending) {
+    const d = opt.mods.deplacement;
+    if (d.mode === 'self') _startSelfMove(srcId, opt, d.cells);
+    else                   _vttCastPushPull(srcId, tgtId, opt, d);
     return;
   }
 
@@ -5324,14 +5467,8 @@ async function _vttRollAttack() {
           modNotes.push(`🩸 CA −${reduction} → ${r.name}`);
         }
 
-        // ── Déplacement (push/pull) ────────────────────────────────────
-        if (_mods.deplacement && r.newHp > 0) {
-          const moved = await _vttApplyDeplacement(src, curTgtData, _mods.deplacement.mode, _mods.deplacement.distance);
-          if (moved > 0) {
-            const verb = _mods.deplacement.mode === 'pull' ? '↙ tiré' : '↗ poussé';
-            modNotes.push(`${verb} ${moved}c → ${r.name}`);
-          }
-        }
+        // (Le déplacement n'est plus géré ici : c'est un sort dédié sans dégâts,
+        //  exécuté via la branche de cast déplacement, pas via l'attaque.)
       }
 
       // ── Drain : soigne le lanceur d'un % des dégâts infligés ──
@@ -12590,6 +12727,7 @@ const VTT_ACTIONS = {
   _zoneRotate,
   _zoneUpdatePreview,
   _zoneValidate,
+  _selfMoveCancel,
   _vttChatReply,
   _vttChatReplyCancel,
   _vttCreatePlaylistConfirm,
