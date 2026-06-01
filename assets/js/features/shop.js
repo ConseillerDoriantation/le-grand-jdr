@@ -1,5 +1,6 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { trySave } from '../shared/crud.js';
 import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
@@ -2359,28 +2360,24 @@ function openSubCatModal(catId,scId) {
 }
 
 async function saveSubCat(catId,scId) {
-  try {
-    const nom=document.getElementById('sc-nom')?.value.trim();
-    const emoji=document.getElementById('sc-emoji')?.value.trim();
-    const image=document.getElementById('sc-img-b64')?.value||'';
-    if(!nom){showNotif('Nom requis.','error');return;}
-    const cat=_cats.find(c=>c.id===catId); if(!cat) return;
-    const sousCats=[...(cat.sousCats||[])];
-    if(scId){ const idx=sousCats.findIndex(s=>s.id===scId); if(idx>=0) sousCats[idx]={...sousCats[idx],nom,emoji,image}; }
-    else sousCats.push({id:'sc_'+Date.now(),nom,emoji,image});
-    await updateInCol('shopCategories',catId,{sousCats});
-    closeModalDirect(); showNotif(scId?'Sous-catégorie mise à jour.':'Sous-catégorie créée !','success'); renderShop();
-  } catch (e) { notifySaveError(e); }
+  const nom=document.getElementById('sc-nom')?.value.trim();
+  const emoji=document.getElementById('sc-emoji')?.value.trim();
+  const image=document.getElementById('sc-img-b64')?.value||'';
+  if(!nom){showNotif('Nom requis.','error');return;}
+  const cat=_cats.find(c=>c.id===catId); if(!cat) return;
+  const sousCats=[...(cat.sousCats||[])];
+  if(scId){ const idx=sousCats.findIndex(s=>s.id===scId); if(idx>=0) sousCats[idx]={...sousCats[idx],nom,emoji,image}; }
+  else sousCats.push({id:'sc_'+Date.now(),nom,emoji,image});
+  if (await trySave('shopCategories',catId,{sousCats})) { closeModalDirect(); showNotif(scId?'Sous-catégorie mise à jour.':'Sous-catégorie créée !','success'); }
+  renderShop();
 }
 
 async function deleteSubCat(catId,scId) {
-  try {
-    if (!await confirmModal('Supprimer cette sous-catégorie ?', { title: 'Confirmation de suppression' })) return;
-    const cat=_cats.find(c=>c.id===catId); if(!cat) return;
-    const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
-    await updateInCol('shopCategories',catId,{sousCats});
-    showNotif('Sous-catégorie supprimée.','success'); renderShop();
-  } catch (e) { notifySaveError(e); }
+  if (!await confirmModal('Supprimer cette sous-catégorie ?', { title: 'Confirmation de suppression' })) return;
+  const cat=_cats.find(c=>c.id===catId); if(!cat) return;
+  const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
+  if (await trySave('shopCategories',catId,{sousCats})) showNotif('Sous-catégorie supprimée.','success');
+  renderShop();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -4019,12 +4016,11 @@ async function _atelierSaveBuild() {
     createdAt: Date.now(),
   };
   const builds = [...(c.shopBuilds || []), newBuild];
-  try {
-    await updateInCol('characters', c.id, { shopBuilds: builds });
+  if (await trySave('characters', c.id, { shopBuilds: builds })) {
     c.shopBuilds = builds;
     showNotif(`💾 Build « ${newBuild.name} » sauvegardé.`, 'success');
-    _renderAtelier();
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderAtelier();
 }
 
 /** Charge un build sauvegardé dans la simulation courante. */
@@ -4048,11 +4044,9 @@ async function _atelierDeleteBuild(buildId) {
   const c = _getActiveShopChar();
   if (!c) return;
   const builds = (c.shopBuilds || []).filter(b => b.id !== buildId);
-  try {
-    await updateInCol('characters', c.id, { shopBuilds: builds });
-    c.shopBuilds = builds;
-    _renderAtelier();
-  } catch (e) { notifySaveError(e); }
+  await trySave('characters', c.id, { shopBuilds: builds });
+  c.shopBuilds = builds;
+  _renderAtelier();
 }
 
 /** Ouvre la modale Atelier ; si `prefillItemId` fourni → essai pré-rempli. */

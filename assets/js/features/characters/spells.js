@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
-import { updateInCol } from '../../data/firestore.js';
+import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
@@ -51,28 +51,26 @@ export function sortDragEnd(e) {
   });
 }
 export async function sortDrop(e, toIdx) {
-  try {
-    e.preventDefault();
-    const card = e.currentTarget;
-    const rect = card.getBoundingClientRect();
-    const insertAfter = e.clientY >= rect.top + rect.height / 2;
-    const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
-    card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-    document.querySelectorAll('.cs-sort-row').forEach(el =>
-      el.classList.remove('cs-drop-before', 'cs-drop-after'));
-    const fromIdx = _dragSortIdx;
-    _dragSortIdx = null;
-    if (fromIdx === null) return;
-    const c = STATE.activeChar; if (!c) return;
-    const sorts = [...(c.deck_sorts||[])];
-    if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return;
-    const [moved] = sorts.splice(fromIdx, 1);
-    const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
-    sorts.splice(insertAt, 0, moved);
-    c.deck_sorts = sorts;
-    await updateInCol('characters', c.id, {deck_sorts: sorts});
-    _renderSpellsTab(c);
-  } catch (e) { notifySaveError(e); }
+  e.preventDefault();
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const insertAfter = e.clientY >= rect.top + rect.height / 2;
+  const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
+  card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
+  document.querySelectorAll('.cs-sort-row').forEach(el =>
+    el.classList.remove('cs-drop-before', 'cs-drop-after'));
+  const fromIdx = _dragSortIdx;
+  _dragSortIdx = null;
+  if (fromIdx === null) return;
+  const c = STATE.activeChar; if (!c) return;
+  const sorts = [...(c.deck_sorts||[])];
+  if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return;
+  const [moved] = sorts.splice(fromIdx, 1);
+  const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
+  sorts.splice(insertAt, 0, moved);
+  c.deck_sorts = sorts;
+  await trySave('characters', c.id, {deck_sorts: sorts});
+  _renderSpellsTab(c);
 }
 
 
@@ -1965,8 +1963,7 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
 export async function saveSort(idx) {
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
-  try {
-    if (!_requireNoyauSelection()) return;
+  if (!_requireNoyauSelection()) return;
     const c = STATE.activeChar; if(!c) return;
     const sorts = c.deck_sorts||[];
     const noyau       = document.getElementById('s-noyau')?.value||'';
@@ -2066,9 +2063,10 @@ export async function saveSort(idx) {
     // Sync les références pour que les filtres / re-render lisent la version fraîche
     if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
     if (STATE.activeChar?.id === c.id)    STATE.activeChar    = c;
-    await updateInCol('characters',c.id,{deck_sorts:sorts});
-    closeModal();
-    showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
+    if (await trySave('characters',c.id,{deck_sorts:sorts})) {
+      closeModal();
+      showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
+    }
 
     // ── Sur ajout : s'assure que le nouveau sort soit visible ────────
     if (isNew) {
@@ -2086,7 +2084,6 @@ export async function saveSort(idx) {
 
     // Force un re-render du tab Sorts en V3 si dispo, sinon fallback legacy
     _renderSpellsTab(c);
-  } catch (e) { notifySaveError(e); }
 }
 
 /** Build d'un objet "sort" depuis le formulaire courant — réutilisable pour items. */

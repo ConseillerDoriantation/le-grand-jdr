@@ -15,15 +15,15 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
-import { confirmDelete } from '../shared/crud.js';
+import { confirmDelete, tryUpsert } from '../shared/crud.js';
 
 let _ppEditingPlayer = null;
 import { STATE } from '../core/state.js';
 import { navigate } from '../core/navigation.js';
 import { charSession } from '../shared/char-session.js';
-import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, updateInCol } from '../data/firestore.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
-import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _initials } from '../shared/html.js';
 import {
@@ -1744,8 +1744,7 @@ Object.assign(ppHandlers, {
 });
 
 async function _savePlayerPresent(id = '') {
-  try {
-    const cropResult = _ppCropper?.getResult();
+  const cropResult = _ppCropper?.getResult();
     let imageUrl = '';
     if (typeof cropResult === 'string')      imageUrl = cropResult;
     else if (cropResult === null)            imageUrl = '';
@@ -1797,22 +1796,17 @@ async function _savePlayerPresent(id = '') {
     };
     _ppGallery = [];
 
-    if (id) await updateInCol('players', id, data);
-    else    await addToCol('players', data);
-
+    if (!await tryUpsert('players', id || null, data)) return;
     closeModal();
     showNotif('Présentation enregistrée.', 'success');
     await PAGES.players();
-  } catch (e) { notifySaveError(e); }
 }
 
 async function _deletePlayerPresent(id) {
-  try {
-    if (!await confirmDelete('players', id, 'Supprimer cette présentation ?')) return;
-    showNotif('Présentation supprimée.', 'success');
-    STORE.activeId = '';
-    await PAGES.players();
-  } catch (e) { notifySaveError(e); }
+  if (!await confirmDelete('players', id, 'Supprimer cette présentation ?')) return;
+  showNotif('Présentation supprimée.', 'success');
+  STORE.activeId = '';
+  await PAGES.players();
 }
 
 async function _editPlayerPresent(id) {

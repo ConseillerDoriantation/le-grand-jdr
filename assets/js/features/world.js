@@ -5,9 +5,10 @@
 // ✓ Joueur : lecture seule, navigation par ancres
 // ✓ Firestore : world/main → { sections:[{id,titre,contenu,imageUrl,icone,visible}] }
 // ══════════════════════════════════════════════════════════════════════════════
-import { getDocData, saveDoc } from '../data/firestore.js';
+import { getDocData } from '../data/firestore.js';
+import { tryDoc } from '../shared/crud.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../shared/html.js';
 import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
@@ -78,11 +79,7 @@ async function _load() {
   }
 }
 
-async function _save() {
-  try {
-    await saveDoc('world', 'main', { categories: STORE.categories, sections: STORE.sections });
-  } catch (e) { notifySaveError(e); }
-}
+const _save = () => tryDoc('world', 'main', { categories: STORE.categories, sections: STORE.sections });
 
 // ── Rendu principal ───────────────────────────────────────────────────────────
 async function renderWorld() {

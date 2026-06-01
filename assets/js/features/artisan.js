@@ -12,9 +12,9 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { getShopCharId } from '../shared/shop-session.js';
-import { updateInCol } from '../data/firestore.js';
+import { trySave } from '../shared/crud.js';
 import { openModal, pushModal, closeModalDirect, confirmModal } from '../shared/modal.js';
-import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import {
   calcOr, getItemStatBonus, getItemBaseStatBonus, getItemUpgradeStatBonus,
@@ -402,21 +402,17 @@ function _logUpgradeHistory(item, entry) {
 // Persiste le perso (inventaire + traitFragments + compte + equipement + statsBonus)
 // puis re-render la modale principale.
 async function _persistChar(c) {
-  try {
-    c.equipement = _rebuildAllEquipment(c);
-    c.statsBonus = computeEquipStatsBonus(c.equipement);
-    await updateInCol('characters', c.id, {
-      inventaire:     c.inventaire     || [],
-      traitFragments: c.traitFragments || {},
-      compte:         c.compte         || { recettes: [], depenses: [] },
-      equipement:     c.equipement,
-      statsBonus:     c.statsBonus,
-    });
-    closeModalDirect();
-    _renderArtisanModal();
-  } catch (e) {
-    notifySaveError(e);
-  }
+  c.equipement = _rebuildAllEquipment(c);
+  c.statsBonus = computeEquipStatsBonus(c.equipement);
+  await trySave('characters', c.id, {
+    inventaire:     c.inventaire     || [],
+    traitFragments: c.traitFragments || {},
+    compte:         c.compte         || { recettes: [], depenses: [] },
+    equipement:     c.equipement,
+    statsBonus:     c.statsBonus,
+  });
+  closeModalDirect();
+  _renderArtisanModal();
 }
 
 // ══════════════════════════════════════════════

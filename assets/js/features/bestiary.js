@@ -3,7 +3,8 @@
 // ✓ Admin : CRUD créatures, image+crop, attaques/traits/butins dynamiques
 // ✓ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc } from '../data/firestore.js';
+import { trySave, confirmDelete, tryDoc } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, popModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -1660,26 +1661,21 @@ function _renderPanelAdmin(c, rs) {
 }
 
 export async function deleteBeast(id) {
-  try {
-    const col = STORE.currentCol || 'bestiary';
-    const c = STORE.creatures.find(x=>x.id===id);
-    if (!await confirmModal(`Supprimer "${c?.nom||'cette créature'}" ?`, {title: 'Supprimer la créature'})) return;
-    await deleteFromCol(col, id);
-    if (STORE.activeId === id) STORE.activeId = null;
-    await _bstHydrate();
-    _render();
-    showNotif('Créature supprimée.','success');
-  } catch (e) { notifySaveError(e); }
+  const col = STORE.currentCol || 'bestiary';
+  const c = STORE.creatures.find(x=>x.id===id);
+  if (!await confirmDelete(col, id, `Supprimer "${c?.nom||'cette créature'}" ?`, {title: 'Supprimer la créature'})) return;
+  if (STORE.activeId === id) STORE.activeId = null;
+  await _bstHydrate();
+  _render();
+  showNotif('Créature supprimée.','success');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SUIVI JOUEUR
 // ══════════════════════════════════════════════════════════════════════════════
 async function _saveTracker() {
-  try {
-    const uid = STORE.viewAsUid || STATE.user?.uid; if (!uid) return;
-    await saveDoc('bestiary_tracker', uid, { data: STORE.tracker });
-  } catch (e) { notifySaveError(e); }
+  const uid = STORE.viewAsUid || STATE.user?.uid; if (!uid) return;
+  await tryDoc('bestiary_tracker', uid, { data: STORE.tracker });
 }
 
 function _syncActivePanel() {
@@ -1895,16 +1891,15 @@ export async function openBeastImageModal(id) {
 }
 
 async function _bstSaveImage(id) {
-  try {
-    const cropResult = _bstCropper?.getResult();
-    const current = STORE.creatures.find(c => c.id === id)?.imageUrl || '';
-    const imageUrl = typeof cropResult === 'string' ? cropResult : current;
-    if (imageUrl && imageUrl.length > 900_000) {
-      showNotif('Image trop grande, recadrez plus petit.', 'error');
-      return;
-    }
-    const col = STORE.currentCol || 'bestiary';
-    await updateInCol(col, id, { imageUrl });
+  const cropResult = _bstCropper?.getResult();
+  const current = STORE.creatures.find(c => c.id === id)?.imageUrl || '';
+  const imageUrl = typeof cropResult === 'string' ? cropResult : current;
+  if (imageUrl && imageUrl.length > 900_000) {
+    showNotif('Image trop grande, recadrez plus petit.', 'error');
+    return;
+  }
+  const col = STORE.currentCol || 'bestiary';
+  if (await trySave(col, id, { imageUrl })) {
     const idx = STORE.creatures.findIndex(c => c.id === id);
     if (idx >= 0) STORE.creatures[idx].imageUrl = imageUrl;
     _bstCropper?.destroy(); _bstCropper = null;
@@ -1925,20 +1920,19 @@ async function _bstSaveImage(id) {
       if (img) img.src = imageUrl;
     }
     showNotif('Image mise à jour.', 'success');
-  } catch (e) { notifySaveError(e); }
+  }
 }
 
 async function _bstRemoveImage(id) {
-  try {
-    const col = STORE.currentCol || 'bestiary';
-    await updateInCol(col, id, { imageUrl: '' });
+  const col = STORE.currentCol || 'bestiary';
+  if (await trySave(col, id, { imageUrl: '' })) {
     const idx = STORE.creatures.findIndex(c => c.id === id);
     if (idx >= 0) STORE.creatures[idx].imageUrl = '';
     _bstCropper?.destroy(); _bstCropper = null;
     closeModal();
     _syncActivePanel();
     showNotif('Image retirée.', 'success');
-  } catch (e) { notifySaveError(e); }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

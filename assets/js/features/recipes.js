@@ -7,7 +7,7 @@
 //   type : 'cuisine' | 'potion' | 'arme' | 'armure' | 'bijou'
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
-import { confirmDelete } from '../shared/crud.js';
+import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -617,41 +617,37 @@ function openShopRecipeModal(id) {
 }
 
 async function saveShopRecipe(id) {
-  try {
-    const recipeMeta = {
-      atelierReq:  document.getElementById('srec-atelierReq')?.value?.trim() || '',
-      tempsCraft:  document.getElementById('srec-tempsCraft')?.value?.trim() || '',
-      ingredients: _readIngrs(),
-      effet:       document.getElementById('srec-effet')?.value?.trim()      || '',
-      description: document.getElementById('srec-desc')?.value?.trim()       || '',
-    };
+  const recipeMeta = {
+    atelierReq:  document.getElementById('srec-atelierReq')?.value?.trim() || '',
+    tempsCraft:  document.getElementById('srec-tempsCraft')?.value?.trim() || '',
+    ingredients: _readIngrs(),
+    effet:       document.getElementById('srec-effet')?.value?.trim()      || '',
+    description: document.getElementById('srec-desc')?.value?.trim()       || '',
+  };
 
-    await updateInCol('shop', id, { recipeMeta });
+  if (await trySave('shop', id, { recipeMeta })) {
     const idx = STORE.shopItems.findIndex(i => i.id === id);
     if (idx >= 0) STORE.shopItems[idx].recipeMeta = recipeMeta;
-
     closeModal();
     showNotif('Recette mise à jour !', 'success');
-    _render();
-  } catch (e) { notifySaveError(e); }
+  }
+  _render();
 }
 
 async function deleteShopRecipe(id) {
-  try {
-    const item = STORE.shopItems.find(i => i.id === id);
-    if (!await confirmModal(`Retirer "${item?.nom||'cet objet'}" des recettes ? L'objet restera dans la boutique.`)) return;
+  const item = STORE.shopItems.find(i => i.id === id);
+  if (!await confirmModal(`Retirer "${item?.nom||'cet objet'}" des recettes ? L'objet restera dans la boutique.`)) return;
 
-    const recipeMeta = { ...(item?.recipeMeta || {}), hidden: true };
-    await updateInCol('shop', id, { recipeMeta, acces: [] });
+  const recipeMeta = { ...(item?.recipeMeta || {}), hidden: true };
+  if (await trySave('shop', id, { recipeMeta, acces: [] })) {
     const idx = STORE.shopItems.findIndex(i => i.id === id);
     if (idx >= 0) {
       STORE.shopItems[idx].recipeMeta = recipeMeta;
       STORE.shopItems[idx].acces = [];
     }
-
     showNotif('Recette retirée.', 'success');
-    _render();
-  } catch (e) { notifySaveError(e); }
+  }
+  _render();
 }
 
 async function deleteRecipe(id) {
@@ -699,18 +695,17 @@ function openAccesModal(id) {
 }
 
 async function saveAcces(id) {
-  try {
-    const checks    = [...document.querySelectorAll('#acces-list input[type="checkbox"]')];
-    const newAcces  = checks.filter(c => c.checked).map(c => c.value);
-    const isShop    = _isShopItem(id);
-    await updateInCol(isShop ? 'shop' : 'recipes', id, { acces: newAcces });
+  const checks    = [...document.querySelectorAll('#acces-list input[type="checkbox"]')];
+  const newAcces  = checks.filter(c => c.checked).map(c => c.value);
+  const isShop    = _isShopItem(id);
+  if (await trySave(isShop ? 'shop' : 'recipes', id, { acces: newAcces })) {
     const list      = isShop ? STORE.shopItems : STORE.all;
     const idx       = list.findIndex(x => x.id === id);
     if (idx >= 0) list[idx].acces = newAcces;
     closeModal();
     showNotif(`Accès mis à jour — ${newAcces.length} joueur${newAcces.length>1?'s':''}.`, 'success');
-    _render();
-  } catch (e) { notifySaveError(e); }
+  }
+  _render();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -751,29 +746,27 @@ function openSendRecipeModal(id) {
 }
 
 async function sendRecipe(id) {
-  try {
-    const targetUid = document.querySelector('input[name="send-rec-target"]:checked')?.value;
-    if (!targetUid) { showNotif('Sélectionne un joueur.', 'error'); return; }
+  const targetUid = document.querySelector('input[name="send-rec-target"]:checked')?.value;
+  if (!targetUid) { showNotif('Sélectionne un joueur.', 'error'); return; }
 
-    const r = _findRaw(id);
-    if (!r) return;
+  const r = _findRaw(id);
+  if (!r) return;
 
-    const uid = _myUid();
+  const uid = _myUid();
 
-    // Retirer l'envoyeur, ajouter le destinataire
-    const newAcces = [...new Set([
-      ...(r.acces || []).filter(u => u !== uid),
-      targetUid,
-    ])];
+  // Retirer l'envoyeur, ajouter le destinataire
+  const newAcces = [...new Set([
+    ...(r.acces || []).filter(u => u !== uid),
+    targetUid,
+  ])];
 
-    await updateInCol(_isShopItem(id) ? 'shop' : 'recipes', id, { acces: newAcces });
+  if (await trySave(_isShopItem(id) ? 'shop' : 'recipes', id, { acces: newAcces })) {
     r.acces = newAcces;
-
     const targetName = _getJoueurs().find(j => j.uid === targetUid)?.pseudo || 'ce joueur';
     closeModal();
     showNotif(`"${r.nom}" transmise à ${targetName}. Tu n'y as plus accès.`, 'success');
-    _render();
-  } catch (e) { notifySaveError(e); }
+  }
+  _render();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

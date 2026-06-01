@@ -14,6 +14,7 @@
 
 import { STATE } from '../core/state.js';
 import { saveDoc, deleteFromCol } from '../data/firestore.js';
+import { tryDoc } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
@@ -88,22 +89,20 @@ function _scheduleSave() {
 }
 async function _saveAvail() {
   if (!_ag.myAvail || !STATE.user) return;
-  try {
-    const payload = {
-      uid:        STATE.user.uid,
-      pseudo:     STATE.profile?.pseudo || STATE.user.email || '?',
-      recurring:  _ag.myAvail.recurring || {},
-      slots:      _ag.myAvail.slots     || {},
-      updatedAt:  Date.now(),
-    };
-    await saveDoc('availabilities', STATE.user.uid, payload);
-    // Reflète localement dans allAvails pour le matching live
-    const idx = _ag.allAvails.findIndex(a => a.uid === STATE.user.uid);
-    if (idx >= 0) _ag.allAvails[idx] = { id: STATE.user.uid, ...payload };
-    else _ag.allAvails.push({ id: STATE.user.uid, ...payload });
-    _renderSuggestions();
-    _renderGroupView();
-  } catch (e) { notifySaveError(e); }
+  const payload = {
+    uid:        STATE.user.uid,
+    pseudo:     STATE.profile?.pseudo || STATE.user.email || '?',
+    recurring:  _ag.myAvail.recurring || {},
+    slots:      _ag.myAvail.slots     || {},
+    updatedAt:  Date.now(),
+  };
+  await tryDoc('availabilities', STATE.user.uid, payload);
+  // Reflète localement dans allAvails pour le matching live
+  const idx = _ag.allAvails.findIndex(a => a.uid === STATE.user.uid);
+  if (idx >= 0) _ag.allAvails[idx] = { id: STATE.user.uid, ...payload };
+  else _ag.allAvails.push({ id: STATE.user.uid, ...payload });
+  _renderSuggestions();
+  _renderGroupView();
 }
 
 // ── Mutation : change l'état d'un slot pour une date donnée ───────────────

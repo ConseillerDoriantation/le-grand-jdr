@@ -1,6 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } from '../../data/firestore.js';
+import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { modStr, _esc } from '../../shared/html.js';
@@ -345,26 +346,20 @@ export function editNoteTitle(idx) {
 }
 
 export async function saveNote(idx) {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    const html = getRichTextHtml(`note-area-${idx}`);
-    if (!c.notesList?.[idx]) return;
-    c.notesList[idx].contenu = html;
-    await updateInCol('characters', c.id, {notesList: c.notesList});
-    showNotif('Note enregistrée !','success');
-  } catch (e) { notifySaveError(e); }
+  const c = STATE.activeChar; if(!c) return;
+  const html = getRichTextHtml(`note-area-${idx}`);
+  if (!c.notesList?.[idx]) return;
+  c.notesList[idx].contenu = html;
+  if (await trySave('characters', c.id, {notesList: c.notesList})) showNotif('Note enregistrée !','success');
 }
 
 export async function deleteNote(idx) {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    if (!await confirmModal('Supprimer cette note ?')) return;
-    c.notesList.splice(idx, 1);
-    if (_openNote >= c.notesList.length) _openNote = null;
-    await updateInCol('characters', c.id, {notesList: c.notesList});
-    charSession.renderTab('notes', c, charSession.getCanEditChar());
-    showNotif('Note supprimée.','success');
-  } catch (e) { notifySaveError(e); }
+  const c = STATE.activeChar; if(!c) return;
+  if (!await confirmModal('Supprimer cette note ?')) return;
+  c.notesList.splice(idx, 1);
+  if (_openNote >= c.notesList.length) _openNote = null;
+  if (await trySave('characters', c.id, {notesList: c.notesList})) showNotif('Note supprimée.','success');
+  charSession.renderTab('notes', c, charSession.getCanEditChar());
 }
 
 // ══════════════════════════════════════════════
@@ -517,30 +512,26 @@ export function addCompteRow(type) {
 }
 
 export async function deleteCompteRow(type, idx) {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    (c.compte||{})[type]?.splice(idx,1);
-    await updateInCol('characters', c.id, {compte: c.compte});
-    charSession.renderTab('compte', c, charSession.getCanEditChar());
-    refreshOrDisplay(c);
-  } catch (e) { notifySaveError(e); }
+  const c = STATE.activeChar; if(!c) return;
+  (c.compte||{})[type]?.splice(idx,1);
+  await trySave('characters', c.id, {compte: c.compte});
+  charSession.renderTab('compte', c, charSession.getCanEditChar());
+  refreshOrDisplay(c);
 }
 
 export async function saveCompteField(type, idx, field, value) {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    c.compte = c.compte || {recettes:[], depenses:[]};
-    const list = c.compte[type] = c.compte[type] || [];
-    if (!list[idx]) return;
-    const newVal = field === 'montant' ? (parseFloat(value)||0) : ((value||'').trim());
-    if (list[idx][field] === newVal) return;
-    list[idx][field] = newVal;
-    await updateInCol('characters', c.id, {compte: c.compte});
-    if (field === 'montant') {
-      _refreshCompteTotals(c);
-      refreshOrDisplay(c);
-    }
-  } catch (e) { notifySaveError(e); }
+  const c = STATE.activeChar; if(!c) return;
+  c.compte = c.compte || {recettes:[], depenses:[]};
+  const list = c.compte[type] = c.compte[type] || [];
+  if (!list[idx]) return;
+  const newVal = field === 'montant' ? (parseFloat(value)||0) : ((value||'').trim());
+  if (list[idx][field] === newVal) return;
+  list[idx][field] = newVal;
+  await trySave('characters', c.id, {compte: c.compte});
+  if (field === 'montant') {
+    _refreshCompteTotals(c);
+    refreshOrDisplay(c);
+  }
 }
 
 function _refreshCompteTotals(c) {
@@ -687,34 +678,30 @@ export async function editMaitrise(idx) {
 }
 
 export async function saveMaitrise(idx) {
-  try {
-    const typeArme = document.getElementById('mait-type')?.value?.trim();
-    if (!typeArme) { showNotif('Le type d\'arme est requis.', 'error'); return; }
-    const niveau = parseInt(document.getElementById('mait-niveau')?.value) || 0;
-    const note   = document.getElementById('mait-note')?.value?.trim() || '';
-    const c = STATE.activeChar; if (!c) return;
-    const maitrises = [...(c.maitrises || [])];
-    const entry = { typeArme, niveau, note };
-    if (idx < 0) maitrises.push(entry);
-    else maitrises[idx] = entry;
-    c.maitrises = maitrises;
-    await updateInCol('characters', c.id, { maitrises });
+  const typeArme = document.getElementById('mait-type')?.value?.trim();
+  if (!typeArme) { showNotif('Le type d\'arme est requis.', 'error'); return; }
+  const niveau = parseInt(document.getElementById('mait-niveau')?.value) || 0;
+  const note   = document.getElementById('mait-note')?.value?.trim() || '';
+  const c = STATE.activeChar; if (!c) return;
+  const maitrises = [...(c.maitrises || [])];
+  const entry = { typeArme, niveau, note };
+  if (idx < 0) maitrises.push(entry);
+  else maitrises[idx] = entry;
+  c.maitrises = maitrises;
+  if (await trySave('characters', c.id, { maitrises })) {
     closeModal();
     showNotif(idx < 0 ? `Maîtrise "${typeArme}" ajoutée !` : 'Maîtrise mise à jour.', 'success');
-    charSession.renderSheet(c, 'maitrises');
-  } catch (e) { notifySaveError(e); }
+  }
+  charSession.renderSheet(c, 'maitrises');
 }
 
 export async function deleteMaitrise(idx) {
-  try {
-    const c = STATE.activeChar; if (!c) return;
-    const m = (c.maitrises || [])[idx];
-    if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
-    c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
-    await updateInCol('characters', c.id, { maitrises: c.maitrises });
-    showNotif('Maîtrise supprimée.', 'success');
-    charSession.renderSheet(c, 'maitrises');
-  } catch (e) { notifySaveError(e); }
+  const c = STATE.activeChar; if (!c) return;
+  const m = (c.maitrises || [])[idx];
+  if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
+  c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
+  if (await trySave('characters', c.id, { maitrises: c.maitrises })) showNotif('Maîtrise supprimée.', 'success');
+  charSession.renderSheet(c, 'maitrises');
 }
 
 // ── XP helpers (utilisés dans renderCharSheet header) ──────────────────────
@@ -729,42 +716,40 @@ export function previewXpBar(input, palier) {
 
 // ── Allocation d'un point de niveau sur une caractéristique ──────────────────
 export async function allocStatPoint(charId, key, delta) {
-  try {
-    const c = getCharacterById(charId);
-    if (!c) return;
-    c.stats         = c.stats || {};
-    c.statsBase     = c.statsBase || {};
-    c.statsLevelUps = c.statsLevelUps || {};
+  const c = getCharacterById(charId);
+  if (!c) return;
+  c.stats         = c.stats || {};
+  c.statsBase     = c.statsBase || {};
+  c.statsLevelUps = c.statsLevelUps || {};
 
-    // Migration douce : snapshot de la base lors de la 1re interaction
-    if (c.statsBase[key] === undefined) {
-      c.statsBase[key] = Math.max(1, (c.stats[key] || 8) - (c.statsLevelUps[key] || 0));
+  // Migration douce : snapshot de la base lors de la 1re interaction
+  if (c.statsBase[key] === undefined) {
+    c.statsBase[key] = Math.max(1, (c.stats[key] || 8) - (c.statsLevelUps[key] || 0));
+  }
+
+  const curLvl = c.statsLevelUps[key] || 0;
+  const newLvl = curLvl + delta;
+  if (newLvl < 0) return;
+
+  // Garde-fou : ne pas dépasser les points gagnés
+  if (delta > 0) {
+    const { remaining } = _computeLevelPoints(c);
+    if (remaining <= 0) {
+      showNotif('Aucun point de niveau disponible.', 'error');
+      return;
     }
+  }
 
-    const curLvl = c.statsLevelUps[key] || 0;
-    const newLvl = curLvl + delta;
-    if (newLvl < 0) return;
+  c.statsLevelUps[key] = newLvl;
+  c.stats[key] = (c.statsBase[key] || 8) + newLvl;
 
-    // Garde-fou : ne pas dépasser les points gagnés
-    if (delta > 0) {
-      const { remaining } = _computeLevelPoints(c);
-      if (remaining <= 0) {
-        showNotif('Aucun point de niveau disponible.', 'error');
-        return;
-      }
-    }
+  await trySave('characters', charId, {
+    stats:         c.stats,
+    statsBase:     c.statsBase,
+    statsLevelUps: c.statsLevelUps,
+  });
 
-    c.statsLevelUps[key] = newLvl;
-    c.stats[key] = (c.statsBase[key] || 8) + newLvl;
-
-    await updateInCol('characters', charId, {
-      stats:         c.stats,
-      statsBase:     c.statsBase,
-      statsLevelUps: c.statsLevelUps,
-    });
-
-    charSession.renderSheet(c, charSession.getCurrentCharTab());
-  } catch (e) { notifySaveError(e); }
+  charSession.renderSheet(c, charSession.getCurrentCharTab());
 }
 
 
@@ -795,35 +780,29 @@ export function toggleCompteHist(type, count) {
 }
 
 export async function saveXpDirect(charId, input) {
-  try {
-    const c = getCharacterById(charId);
-    if (!c) return;
-    const palier = calcPalier(c.niveau||1);
-    const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
-    c.exp = val;
-    input.value = val;
-    previewXpBar(input, palier);
-    await updateInCol('characters', charId, {exp: val});
-    showNotif('XP mis à jour !', 'success');
-  } catch (e) { notifySaveError(e); }
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const palier = calcPalier(c.niveau||1);
+  const val = Math.max(0, Math.min(palier, parseInt(input.value)||0));
+  c.exp = val;
+  input.value = val;
+  previewXpBar(input, palier);
+  if (await trySave('characters', charId, {exp: val})) showNotif('XP mis à jour !', 'success');
 }
 
 export async function addXpDelta(charId) {
-  try {
-    const input = document.getElementById(`xp-add-input-${charId}`);
-    if (!input) return;
-    const delta = parseInt(input.value);
-    if (!delta || delta <= 0) return;
-    const c = getCharacterById(charId);
-    if (!c) return;
-    const newXp = (parseInt(c.exp)||0) + delta;
-    c.exp = newXp;
-    input.value = '';
-    await updateInCol('characters', charId, {exp: newXp});
-    showNotif(`+${delta} XP !`, 'success');
-    // Rafraîchit la fiche pour que la barre/% et le total reflètent le nouvel XP.
-    charSession.renderSheet?.(c, charSession.getCurrentCharTab());
-  } catch (e) { notifySaveError(e); }
+  const input = document.getElementById(`xp-add-input-${charId}`);
+  if (!input) return;
+  const delta = parseInt(input.value);
+  if (!delta || delta <= 0) return;
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const newXp = (parseInt(c.exp)||0) + delta;
+  c.exp = newXp;
+  input.value = '';
+  if (await trySave('characters', charId, {exp: newXp})) showNotif(`+${delta} XP !`, 'success');
+  // Rafraîchit la fiche pour que la barre/% et le total reflètent le nouvel XP.
+  charSession.renderSheet?.(c, charSession.getCurrentCharTab());
 }
 
 // ══════════════════════════════════════════════

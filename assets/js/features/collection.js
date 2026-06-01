@@ -1,9 +1,9 @@
 import { STATE } from '../core/state.js';
-import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
-import { confirmDelete } from '../shared/crud.js';
+import { loadCollection } from '../data/firestore.js';
+import { confirmDelete, trySave, tryUpsert } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { showNotif } from '../shared/notifications.js';
 import { _esc, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { uploadPng } from '../shared/image-upload.js';
@@ -97,17 +97,12 @@ export async function renderCollectionPage() {
 }
 
 async function toggleUnlock(id) {
-  try {
-    const card = STORE.cards.find(c => c.id === id);
-    if (!card) return;
-
-    await updateInCol('collection', id, {
-      unlocked: !card.unlocked
-    });
-
+  const card = STORE.cards.find(c => c.id === id);
+  if (!card) return;
+  if (await trySave('collection', id, { unlocked: !card.unlocked })) {
     showNotif(card.unlocked ? 'Carte verrouillée.' : 'Carte débloquée.', 'success');
-    await renderCollectionPage();
-  } catch (e) { notifySaveError(e); }
+  }
+  await renderCollectionPage();
 }
 
 // ── Template modal ───────────────────────────────────────────────────────────
@@ -128,16 +123,14 @@ function openTemplateModal() {
 }
 
 async function saveTemplate() {
-  try {
-    const url = document.getElementById('tpl-img-b64')?.value || '';
-    const settings = await loadCollection('collectionSettings');
-    if (settings[0]) await updateInCol('collectionSettings', settings[0].id, { templateUrl: url });
-    else await addToCol('collectionSettings', { templateUrl: url });
+  const url = document.getElementById('tpl-img-b64')?.value || '';
+  const settings = await loadCollection('collectionSettings');
+  if (await tryUpsert('collectionSettings', settings[0]?.id || null, { templateUrl: url })) {
     STORE.templateUrl = url;
     closeModal();
     showNotif('Template mis à jour.', 'success');
     await renderCollectionPage();
-  } catch (e) { notifySaveError(e); }
+  }
 }
 
 // ── Modale ajout / édition ───────────────────────────────────────────────────
@@ -158,19 +151,17 @@ function openCollectionModal(card = null) {
 
 // ── CRUD ─────────────────────────────────────────────────────────────────────
 async function saveCard(id = '') {
-  try {
-    const data = {
-      nom: document.getElementById('cc-nom')?.value?.trim() || 'Carte',
-      imageUrl: document.getElementById('cat-img-b64')?.value || '',
-      description: document.getElementById('cc-desc')?.value || '',
-      unlocked: false
-    };
-    if (id) await updateInCol('collection', id, data);
-    else await addToCol('collection', data);
+  const data = {
+    nom: document.getElementById('cc-nom')?.value?.trim() || 'Carte',
+    imageUrl: document.getElementById('cat-img-b64')?.value || '',
+    description: document.getElementById('cc-desc')?.value || '',
+    unlocked: false
+  };
+  if (await tryUpsert('collection', id || null, data)) {
     closeModal();
     showNotif('Carte enregistrée.', 'success');
     await renderCollectionPage();
-  } catch (e) { notifySaveError(e); }
+  }
 }
 
 function viewCard(id) {
@@ -184,11 +175,9 @@ function editCard(id) {
 }
 
 async function deleteCard(id) {
-  try {
-    if (!await confirmDelete('collection', id, 'Supprimer cette carte ?')) return;
-    showNotif('Carte supprimée.', 'success');
-    await renderCollectionPage();
-  } catch (e) { notifySaveError(e); }
+  if (!await confirmDelete('collection', id, 'Supprimer cette carte ?')) return;
+  showNotif('Carte supprimée.', 'success');
+  await renderCollectionPage();
 }
 
 registerActions({

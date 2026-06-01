@@ -2,6 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollection } from '../../data/firestore.js';
+import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
@@ -27,74 +28,60 @@ function flashEl(el) {
 }
 
 export async function adjustStat(stat, delta, charId) {
-  try {
-    const c = getCharacterById(charId);
-    if (!c) return;
-    const maxVal = stat==='pvActuel' ? calcPVMax(c) : calcPMMax(c);
-    const cur = c[stat]??maxVal;
-    const newVal = Math.max(0, Math.min(maxVal, cur+delta));
-    c[stat] = newVal;
-    await updateInCol('characters', c.id, {[stat]: newVal});
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const maxVal = stat==='pvActuel' ? calcPVMax(c) : calcPMMax(c);
+  const cur = c[stat]??maxVal;
+  const newVal = Math.max(0, Math.min(maxVal, cur+delta));
+  c[stat] = newVal;
+  await trySave('characters', c.id, {[stat]: newVal});
 
-    const p = pct(newVal, maxVal);
-    if (stat==='pvActuel') {
-      const valEl=document.getElementById('pv-val'), barEl=document.getElementById('pv-bar');
-      if(valEl){valEl.textContent=newVal;valEl.style.color=p<25?'var(--crimson-light)':p<50?'#f59e0b':'var(--green)';flashEl(valEl);}
-      if(barEl){barEl.style.width=p+'%';barEl.className='cs-bar-fill cs-bar-hp-fill '+(p>50?'high':p>25?'mid':'');}
-    } else {
-      const valEl=document.getElementById('pm-val'), barEl=document.getElementById('pm-bar');
-      if(valEl){valEl.textContent=newVal;flashEl(valEl);}
-      if(barEl) barEl.style.width=p+'%';
-    }
-  } catch (e) { notifySaveError(e); }
+  const p = pct(newVal, maxVal);
+  if (stat==='pvActuel') {
+    const valEl=document.getElementById('pv-val'), barEl=document.getElementById('pv-bar');
+    if(valEl){valEl.textContent=newVal;valEl.style.color=p<25?'var(--crimson-light)':p<50?'#f59e0b':'var(--green)';flashEl(valEl);}
+    if(barEl){barEl.style.width=p+'%';barEl.className='cs-bar-fill cs-bar-hp-fill '+(p>50?'high':p>25?'mid':'');}
+  } else {
+    const valEl=document.getElementById('pm-val'), barEl=document.getElementById('pm-bar');
+    if(valEl){valEl.textContent=newVal;flashEl(valEl);}
+    if(barEl) barEl.style.width=p+'%';
+  }
 }
 
 // ══════════════════════════════════════════════
 // NOTES LIBRES
 // ══════════════════════════════════════════════
 export async function saveNotes() {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    const notes = document.getElementById('char-notes-area')?.value||'';
-    c.notes = notes;
-    await updateInCol('characters', c.id, {notes});
-    showNotif('Notes sauvegardées !','success');
-  } catch (e) { notifySaveError(e); }
+  const c = STATE.activeChar; if(!c) return;
+  const notes = document.getElementById('char-notes-area')?.value||'';
+  c.notes = notes;
+  if (await trySave('characters', c.id, {notes})) showNotif('Notes sauvegardées !','success');
 }
 
 // ══════════════════════════════════════════════
 // SORTS (toggle / delete)
 // ══════════════════════════════════════════════
 export async function toggleSort(idx) {
-  try {
-    const c=STATE.activeChar; if(!c) return;
-    const sorts=c.deck_sorts||[];
-    sorts[idx].actif=!sorts[idx].actif;
-    c.deck_sorts=sorts;
-    await updateInCol('characters',c.id,{deck_sorts:sorts});
-    _renderFormsChar(c, 'sorts');
-  } catch (e) { notifySaveError(e); }
+  const c=STATE.activeChar; if(!c) return;
+  const sorts=c.deck_sorts||[];
+  sorts[idx].actif=!sorts[idx].actif;
+  c.deck_sorts=sorts;
+  if (await trySave('characters',c.id,{deck_sorts:sorts})) _renderFormsChar(c, 'sorts');
 }
 
 // ══════════════════════════════════════════════
 // QUÊTES
 // ══════════════════════════════════════════════
 export async function toggleQuete(idx) {
-  try {
-    const c=STATE.activeChar; if(!c) return;
-    c.quetes[idx].valide=!c.quetes[idx].valide;
-    await updateInCol('characters',c.id,{quetes:c.quetes});
-    _renderFormsChar(c, 'quetes');
-  } catch (e) { notifySaveError(e); }
+  const c=STATE.activeChar; if(!c) return;
+  c.quetes[idx].valide=!c.quetes[idx].valide;
+  if (await trySave('characters',c.id,{quetes:c.quetes})) _renderFormsChar(c, 'quetes');
 }
 
 export async function deleteQuete(idx) {
-  try {
-    const c=STATE.activeChar; if(!c) return;
-    c.quetes.splice(idx,1);
-    await updateInCol('characters',c.id,{quetes:c.quetes});
-    _renderFormsChar(c, 'quetes');
-  } catch (e) { notifySaveError(e); }
+  const c=STATE.activeChar; if(!c) return;
+  c.quetes.splice(idx,1);
+  if (await trySave('characters',c.id,{quetes:c.quetes})) _renderFormsChar(c, 'quetes');
 }
 
 export function addQuete() {
@@ -107,46 +94,39 @@ export function addQuete() {
 }
 
 export async function saveQuete() {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    const quetes = c.quetes||[];
-    quetes.push({
-      nom: document.getElementById('q-nom')?.value||'?',
-      type: document.getElementById('q-type')?.value||'',
-      description: document.getElementById('q-desc')?.value||'',
-      valide: false,
-    });
-    c.quetes=quetes;
-    await updateInCol('characters',c.id,{quetes});
+  const c = STATE.activeChar; if(!c) return;
+  const quetes = c.quetes||[];
+  quetes.push({
+    nom: document.getElementById('q-nom')?.value||'?',
+    type: document.getElementById('q-type')?.value||'',
+    description: document.getElementById('q-desc')?.value||'',
+    valide: false,
+  });
+  c.quetes=quetes;
+  if (await trySave('characters',c.id,{quetes})) {
     closeModal();
     showNotif('Quête ajoutée !','success');
     _renderFormsChar(c, 'quetes');
-  } catch (e) { notifySaveError(e); }
+  }
 }
 
 // ══════════════════════════════════════════════
 // INVENTAIRE — suppression legacy
 // ══════════════════════════════════════════════
 export async function deleteSort(idx) {
-  try {
-    const c=STATE.activeChar; if(!c) return;
-    const nom = (c.deck_sorts||[])[idx]?.nom || 'ce sort';
-    if (!await confirmModal(`Supprimer <b>${_esc(nom)}</b> ?`, {
-      title: 'Confirmation', confirmLabel: 'Supprimer', icon: '🗑️',
-    })) return;
-    c.deck_sorts.splice(idx,1);
-    await updateInCol('characters',c.id,{deck_sorts:c.deck_sorts});
-    _renderFormsChar(c, 'sorts');
-  } catch (e) { notifySaveError(e); }
+  const c=STATE.activeChar; if(!c) return;
+  const nom = (c.deck_sorts||[])[idx]?.nom || 'ce sort';
+  if (!await confirmModal(`Supprimer <b>${_esc(nom)}</b> ?`, {
+    title: 'Confirmation', confirmLabel: 'Supprimer', icon: '🗑️',
+  })) return;
+  c.deck_sorts.splice(idx,1);
+  if (await trySave('characters',c.id,{deck_sorts:c.deck_sorts})) _renderFormsChar(c, 'sorts');
 }
 
 export async function deleteInvItem(idx) {
-  try {
-    const c=STATE.activeChar; if(!c) return;
-    c.inventaire.splice(idx,1);
-    await updateInCol('characters',c.id,{inventaire:c.inventaire});
-    _renderFormsChar(c, 'inventaire');
-  } catch (e) { notifySaveError(e); }
+  const c=STATE.activeChar; if(!c) return;
+  c.inventaire.splice(idx,1);
+  if (await trySave('characters',c.id,{inventaire:c.inventaire})) _renderFormsChar(c, 'inventaire');
 }
 
 // ══════════════════════════════════════════════
@@ -415,15 +395,14 @@ function _refreshTitresList() {
 }
 
 export async function saveTitres(charId) {
-  try {
-    const c = getCharacterById(charId);
-    if (!c) return;
-    c.titres = _editTitres || [];
-    await updateInCol('characters', charId, {titres: c.titres});
+  const c = getCharacterById(charId);
+  if (!c) return;
+  c.titres = _editTitres || [];
+  if (await trySave('characters', charId, {titres: c.titres})) {
     closeModal();
-    _renderFormsChar(c);
     showNotif('Titres mis à jour !','success');
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderFormsChar(c);
 }
 
 // ══════════════════════════════════════════════

@@ -24,6 +24,7 @@ import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
 import { pickImageFile, uploadJpeg } from '../shared/image-upload.js';
+import { confirmDelete, trySave } from '../shared/crud.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
 // Schéma volontairement simple pour les PNJ : pas de formule équipement comme
@@ -236,7 +237,7 @@ function _highlightDeltaPreset(idPrefix, v) {
 
 // Persiste { affinite } sur un PNJ + met à jour le cache local + UI.
 async function _persistAffinite(npcId, affinite, msg, { close = true } = {}) {
-  await updateInCol('npcs', npcId, { affinite });
+  if (!await trySave('npcs', npcId, { affinite })) return;
   const idx = _npcs.findIndex(x => x.id === npcId);
   if (idx >= 0) _npcs[idx] = { ..._npcs[idx], affinite };
   if (close) closeModal();
@@ -1554,8 +1555,7 @@ async function _npcInlineSave(el) {
     n[field] = v; patch = { [field]: v };
   }
 
-  try { await updateInCol('npcs', id, patch); }
-  catch (e) { notifySaveError(e); }
+  await trySave('npcs', id, patch);
 }
 
 // Clic sur le portrait → choisir une image, compresser, enregistrer (base64).
@@ -1578,8 +1578,7 @@ async function _npcSaveOrgs(el) {
   const n = _npcs.find(x => x.id === el.dataset.npcId); if (!n) return;
   const orgs = (el.value || '').split(',').map(s => s.trim()).filter(Boolean);
   n.organisations = orgs;
-  try { await updateInCol('npcs', el.dataset.npcId, { organisations: orgs }); }
-  catch (e) { notifySaveError(e); }
+  await trySave('npcs', el.dataset.npcId, { organisations: orgs });
 }
 
 // Toggle d'une activité bastion (pastille cliquable).
@@ -1592,7 +1591,7 @@ async function _npcToggleActivite(btn) {
   const activites = [...set];
   n.activites = activites;
   btn.classList.toggle('is-on');
-  try { await updateInCol('npcs', id, { activites }); } catch (e) { notifySaveError(e); }
+  await trySave('npcs', id, { activites });
 }
 
 // Toggle visibilité joueurs du profil bastion.
@@ -1602,8 +1601,8 @@ async function _npcToggleEmbauchable(btn) {
   const n = _npcs.find(x => x.id === id); if (!n) return;
   const current = n.embauchable !== false;   // défaut = visible (true)
   n.embauchable = !current;
-  try { await updateInCol('npcs', id, { embauchable: n.embauchable }); _refreshActivePanel(); }
-  catch (e) { notifySaveError(e); }
+  await trySave('npcs', id, { embauchable: n.embauchable });
+  _refreshActivePanel();
 }
 
 // Sélection d'arme (boutique) en inline.
@@ -1615,8 +1614,8 @@ async function _npcSetWeapon(el) {
   const weapon = w ? _serializeShopWeapon(w) : null;
   const combat = weapon ? { weapon, weaponName: weapon.nom || '', damage: weapon.degats || '', range: null } : null;
   n.combat = combat;
-  try { await updateInCol('npcs', id, { combat }); _refreshActivePanel(); }
-  catch (e) { notifySaveError(e); }
+  await trySave('npcs', id, { combat });
+  _refreshActivePanel();
 }
 
 // Ajout d'un événement d'affinité directement depuis la fiche (sans modal).
@@ -1659,8 +1658,7 @@ async function _npcAffiField(el) {
     patch[field] = (el.value || '').trim();
   }
   Object.assign(a, patch);
-  try { await updateInCol('npc_affinites', a.id, patch); }
-  catch (e) { notifySaveError(e); }
+  await trySave('npc_affinites', a.id, patch);
 }
 
 // Ajout inline d'une affinité spécifique (personnage + type) — sans modal.
@@ -1763,8 +1761,7 @@ function _refreshActivePanel() {
 
 
 export async function deleteAffinitePerso(id) {
-  if (!await confirmModal('Supprimer cette affinité ?', {title: 'Confirmation de suppression'})) return;
-  await deleteFromCol('npc_affinites', id);
+  if (!await confirmDelete('npc_affinites', id, 'Supprimer cette affinité ?', { title: 'Confirmation de suppression' })) return;
   _affiPerso = _affiPerso.filter(a => a.id !== id);
   showNotif('Affinité supprimée.', 'success');
   _refreshActivePanel();

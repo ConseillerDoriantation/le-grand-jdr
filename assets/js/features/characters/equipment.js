@@ -1,9 +1,9 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
-import { updateInCol } from '../../data/firestore.js';
+import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal } from '../../shared/modal.js';
-import { showNotif, notifySaveError } from '../../shared/notifications.js';
+import { showNotif } from '../../shared/notifications.js';
 import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../../shared/char-stats.js';
 import { _esc } from '../../shared/html.js';
 import { _getTraits, inferAttackStatFromItem, buildEquippedItemFromInventory } from '../../shared/equipment-utils.js';
@@ -18,38 +18,37 @@ function _renderEquipmentChar(c) {
 // ÉQUIPER DEPUIS L'INVENTAIRE (selection directe)
 // ══════════════════════════════════════════════
 export async function equipSlotFromInv(val, slot) {
-  try {
-    if (!val || !val.startsWith('inv:')) return;
-    const c = STATE.activeChar; if (!c) return;
+  if (!val || !val.startsWith('inv:')) return;
+  const c = STATE.activeChar; if (!c) return;
 
-    const invIndex = parseInt(val.split(':')[1], 10);
-    if (Number.isNaN(invIndex)) return;
+  const invIndex = parseInt(val.split(':')[1], 10);
+  if (Number.isNaN(invIndex)) return;
 
-    const item = (c.inventaire || [])[invIndex];
-    if (!item) return;
+  const item = (c.inventaire || [])[invIndex];
+  if (!item) return;
 
-    const equip = { ...(c.equipement || {}) };
+  const equip = { ...(c.equipement || {}) };
 
-    Object.keys(equip).forEach(otherSlot => {
-      if (otherSlot !== slot && equip[otherSlot]?.sourceInvIndex === invIndex) {
-        delete equip[otherSlot];
-      }
-    });
+  Object.keys(equip).forEach(otherSlot => {
+    if (otherSlot !== slot && equip[otherSlot]?.sourceInvIndex === invIndex) {
+      delete equip[otherSlot];
+    }
+  });
 
-    const equippedItem = buildEquippedItemFromInventory(slot, item, invIndex);
-    if (!equippedItem) return;
+  const equippedItem = buildEquippedItemFromInventory(slot, item, invIndex);
+  if (!equippedItem) return;
 
-    equip[slot] = equippedItem;
-    const bonus = computeEquipStatsBonus(equip);
+  equip[slot] = equippedItem;
+  const bonus = computeEquipStatsBonus(equip);
 
-    c.equipement = equip;
-    c.statsBonus = bonus;
+  c.equipement = equip;
+  c.statsBonus = bonus;
 
-    await updateInCol('characters', c.id, { equipement: equip, statsBonus: bonus });
+  if (await trySave('characters', c.id, { equipement: equip, statsBonus: bonus })) {
     closeModal();
     showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
-    _renderEquipmentChar(c);
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderEquipmentChar(c);
 }
 
 // ══════════════════════════════════════════════
@@ -262,67 +261,65 @@ export function previewEquipFromInv(val, slot) {
 // SAUVEGARDER UN SLOT
 // ══════════════════════════════════════════════
 export async function saveEquipSlot(slot) {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    const equip = c.equipement||{};
-    const meta = _equipSelectedMeta || {};
-    const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
+  const c = STATE.activeChar; if(!c) return;
+  const equip = c.equipement||{};
+  const meta = _equipSelectedMeta || {};
+  const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
 
-    if (slot.startsWith('Main')) {
-      equip[slot] = {
-        nom:           meta.nom           || '',
-        degats:        meta.degats        || '',
-        degatsStat:    meta.degatsStat    || meta.statAttaque || 'force',
-        degatsStats:   Array.isArray(meta.degatsStats) && meta.degatsStats.length
-          ? [...meta.degatsStats]
-          : [meta.degatsStat || meta.statAttaque || 'force'],
-        toucherStat:   meta.toucherStat   || meta.statAttaque || 'force',
-        statAttaque:   meta.statAttaque   || 'force',
-        typeArme:      meta.typeArme      || meta.sousType || '',
-        portee:        meta.portee        || '',
-        particularite: meta.particularite || '',
-        traits:        Array.isArray(meta.traits) ? [...meta.traits] : [],
-        format:        meta.format        || '',
-        toucher:       meta.toucher       || '',
-        stats:         meta.stats         || '',
-        sousType:      meta.sousType      || '',
-        sourceInvIndex: Number.isInteger(meta.sourceInvIndex) ? meta.sourceInvIndex : -1,
-        fo: parseInt(meta.fo)||0, dex: parseInt(meta.dex)||0,
-        in: parseInt(meta.in)||0, sa: parseInt(meta.sa)||0,
-        co: parseInt(meta.co)||0, ch: parseInt(meta.ch)||0,
-      };
-    } else {
-      // Armures & bijoux : équipés exclusivement via inventaire (equipSlotFromInv).
-      // Cette branche ne devrait plus être atteinte ; on no-op proprement si appelée.
-      closeModal();
-      return;
-    }
-    c.equipement = equip;
-    const bonus = computeEquipStatsBonus(equip);
-    c.statsBonus = bonus;
-    await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
+  if (slot.startsWith('Main')) {
+    equip[slot] = {
+      nom:           meta.nom           || '',
+      degats:        meta.degats        || '',
+      degatsStat:    meta.degatsStat    || meta.statAttaque || 'force',
+      degatsStats:   Array.isArray(meta.degatsStats) && meta.degatsStats.length
+        ? [...meta.degatsStats]
+        : [meta.degatsStat || meta.statAttaque || 'force'],
+      toucherStat:   meta.toucherStat   || meta.statAttaque || 'force',
+      statAttaque:   meta.statAttaque   || 'force',
+      typeArme:      meta.typeArme      || meta.sousType || '',
+      portee:        meta.portee        || '',
+      particularite: meta.particularite || '',
+      traits:        Array.isArray(meta.traits) ? [...meta.traits] : [],
+      format:        meta.format        || '',
+      toucher:       meta.toucher       || '',
+      stats:         meta.stats         || '',
+      sousType:      meta.sousType      || '',
+      sourceInvIndex: Number.isInteger(meta.sourceInvIndex) ? meta.sourceInvIndex : -1,
+      fo: parseInt(meta.fo)||0, dex: parseInt(meta.dex)||0,
+      in: parseInt(meta.in)||0, sa: parseInt(meta.sa)||0,
+      co: parseInt(meta.co)||0, ch: parseInt(meta.ch)||0,
+    };
+  } else {
+    // Armures & bijoux : équipés exclusivement via inventaire (equipSlotFromInv).
+    // Cette branche ne devrait plus être atteinte ; on no-op proprement si appelée.
+    closeModal();
+    return;
+  }
+  c.equipement = equip;
+  const bonus = computeEquipStatsBonus(equip);
+  c.statsBonus = bonus;
+  if (await trySave('characters', c.id, {equipement:equip, statsBonus:bonus})) {
     closeModal();
     showNotif('Équipement mis à jour !','success');
-    _renderEquipmentChar(c);
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderEquipmentChar(c);
 }
 
 // ══════════════════════════════════════════════
 // VIDER UN SLOT
 // ══════════════════════════════════════════════
 export async function clearEquipSlot(slot) {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    const equip = c.equipement||{};
-    delete equip[slot];
-    c.equipement = equip;
-    const bonus = computeEquipStatsBonus(equip);
-    c.statsBonus = bonus;
-    await updateInCol('characters', c.id, {equipement:equip, statsBonus:bonus});
+  const c = STATE.activeChar; if(!c) return;
+  const equip = c.equipement||{};
+  delete equip[slot];
+  c.equipement = equip;
+  const bonus = computeEquipStatsBonus(equip);
+  c.statsBonus = bonus;
+  if (await trySave('characters', c.id, {equipement:equip, statsBonus:bonus})) {
     closeModal();
     showNotif('Emplacement libéré.','success');
-    _renderEquipmentChar(c);
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderEquipmentChar(c);
 }
 
 registerActions({

@@ -16,6 +16,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { getDocData, saveDoc, updateInCol, loadCollection, getCurrentAdventureId } from '../data/firestore.js';
+import { tryDoc } from '../shared/crud.js';
 import { db, doc, setDoc } from '../config/firebase.js';
 import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -313,11 +314,7 @@ function _addToCoffre(b, item, source) {
 // ══════════════════════════════════════════════════════════════════════════════
 // FIRESTORE — Sauvegarde + listener temps réel
 // ══════════════════════════════════════════════════════════════════════════════
-async function _save(b) {
-  try {
-    await saveDoc('bastion', 'main', b);
-  } catch (e) { notifySaveError(e); }
-}
+const _save = (b) => tryDoc('bastion', 'main', b);
 
 function _attachListener() {
   // watchDoc gère lui-même le re-subscribe (kill listener précédent du même nom).

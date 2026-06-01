@@ -4,7 +4,8 @@
 // ✓ Upload + recadrage d'image canvas 4:3 (identique aux hauts-faits)
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, getDocData, saveDoc } from '../data/firestore.js';
+import { confirmDelete, tryDoc } from '../shared/crud.js';
 import { navigate } from '../core/navigation.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -91,11 +92,7 @@ async function loadActes() {
   const doc = await getDocData('story_meta','actes');
   return Array.isArray(doc?.list) ? doc.list : [];
 }
-async function saveActes(list) {
-  try {
-    await saveDoc('story_meta','actes',{ list });
-  } catch (e) { notifySaveError(e); }
-}
+const saveActes = (list) => tryDoc('story_meta', 'actes', { list });
 
 // ── Groupes de participants (per-mission) ─────────────────────────────────────
 async function _saveModalGroupes() {
@@ -2078,12 +2075,9 @@ async function editStory(id){
   if(item) openStoryModal(item);
 }
 async function deleteStory(id){
-  try {
-    if (!await confirmModal('Supprimer cet élément de la trame ?'))return;
-    await deleteFromCol('story',id);
-    showNotif('Élément supprimé.','success');
-    await PAGES.story();
-  } catch (e) { notifySaveError(e); }
+  if (!await confirmDelete('story', id, 'Supprimer cet élément de la trame ?')) return;
+  showNotif('Élément supprimé.','success');
+  await PAGES.story();
 }
 
 // ── NOUVEL ACTE ───────────────────────────────────────────────────────────────

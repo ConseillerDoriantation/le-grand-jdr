@@ -2,6 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { updateInCol, loadCollection } from '../../data/firestore.js';
+import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
@@ -575,22 +576,21 @@ export function openDeleteInvModal(charId, indicesB64, nom) {
 }
 
 export async function deleteInvItemBulk(charId, indicesB64) {
-  try {
-    const c = getCharacterById(charId);
-    if (!c) return;
-    const allIndices = _decodeIndices(indicesB64);
-    const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
-    const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-    const removedIndices = allIndices.slice(0, qty);
-    const sorted = [...removedIndices].sort((a,b)=>b-a);
-    sorted.forEach(idx => inv.splice(idx, 1));
-    const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
-    const payload = { inventaire: inv };
-    if (equipSync.changed) {
-      payload.equipement = equipSync.equipement;
-      payload.statsBonus = equipSync.statsBonus;
-    }
-    await updateInCol('characters', charId, payload);
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const allIndices = _decodeIndices(indicesB64);
+  const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const removedIndices = allIndices.slice(0, qty);
+  const sorted = [...removedIndices].sort((a,b)=>b-a);
+  sorted.forEach(idx => inv.splice(idx, 1));
+  const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
+  const payload = { inventaire: inv };
+  if (equipSync.changed) {
+    payload.equipement = equipSync.equipement;
+    payload.statsBonus = equipSync.statsBonus;
+  }
+  if (await trySave('characters', charId, payload)) {
     c.inventaire = inv;
     if (equipSync.changed) {
       c.equipement = equipSync.equipement;
@@ -601,8 +601,8 @@ export async function deleteInvItemBulk(charId, indicesB64) {
       ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
       : '';
     showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
-    _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
 }
 
 // ══════════════════════════════════════════════
@@ -1045,34 +1045,33 @@ export function _lootPillStyle(id, active) {
 }
 
 export async function saveInvItemFromShop() {
-  try {
-    const c = STATE.activeChar; if (!c) return;
-    const selId = _lootSelId;
-    if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
-    const item = (_lootItems || []).find(i => i.id === selId);
-    if (!item) { showNotif('Objet introuvable.', 'error'); return; }
-    const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
-    const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-    // Utilise le helper canonique : strip image base64, dispo, recipeMeta, etc.
-    // → évite de dépasser la limite Firestore de 1 MiB par doc personnage.
-    const baseEntry = shopItemToInvEntry(item, { source: 'boutique' });
-    if (!baseEntry) { showNotif('Objet invalide.', 'error'); return; }
-    for (let i = 0; i < qte; i++) {
-      inv.push({ ...baseEntry, quantite: 1 });
-    }
-    c.inventaire = inv;
-    if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
-    const stChar = (STATE.characters || []).find(x => x.id === c.id);
-    if (stChar) stChar.inventaire = inv;
-    await updateInCol('characters', c.id, { inventaire: inv });
+  const c = STATE.activeChar; if (!c) return;
+  const selId = _lootSelId;
+  if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
+  const item = (_lootItems || []).find(i => i.id === selId);
+  if (!item) { showNotif('Objet introuvable.', 'error'); return; }
+  const qte = Math.max(1, parseInt(document.getElementById('loot-qte')?.value) || 1);
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  // Utilise le helper canonique : strip image base64, dispo, recipeMeta, etc.
+  // → évite de dépasser la limite Firestore de 1 MiB par doc personnage.
+  const baseEntry = shopItemToInvEntry(item, { source: 'boutique' });
+  if (!baseEntry) { showNotif('Objet invalide.', 'error'); return; }
+  for (let i = 0; i < qte; i++) {
+    inv.push({ ...baseEntry, quantite: 1 });
+  }
+  c.inventaire = inv;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
+  const stChar = (STATE.characters || []).find(x => x.id === c.id);
+  if (stChar) stChar.inventaire = inv;
+  if (await trySave('characters', c.id, { inventaire: inv })) {
     if (_lootSaveRecent) _lootSaveRecent(item.id);
     _lootSelId = null;
     showNotif(`${item.nom} ×${qte} ajouté !`, 'success');
-    _renderInventoryChar(c, 'inventaire');
-    const panel = document.getElementById('loot-qty-panel');
-    if (panel) panel.style.display = 'none';
-    _lootRenderGrid?.(_lootCurCat, document.getElementById('loot-search')?.value || '');
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderInventoryChar(c, 'inventaire');
+  const panel = document.getElementById('loot-qty-panel');
+  if (panel) panel.style.display = 'none';
+  _lootRenderGrid?.(_lootCurCat, document.getElementById('loot-search')?.value || '');
 }
 
 export function editInvItem(idx) {
@@ -1090,30 +1089,29 @@ export function editInvItem(idx) {
 }
 
 export async function saveInvItem(idx) {
-  try {
-    const c = STATE.activeChar; if(!c) return;
-    const inv = [...(c.inventaire || [])];
-    // Convention "1 entrée = 1 unité" : on respecte la qté saisie en N entrées
-    const qte = Math.max(1, parseInt(document.getElementById('inv-qte')?.value) || 1);
-    const baseItem = {
-      nom: document.getElementById('inv-nom')?.value||'?',
-      type: document.getElementById('inv-type')?.value||'',
-      qte: '1',
-      description: document.getElementById('inv-desc')?.value||'',
-    };
-    if (idx >= 0) {
-      // Édition : remplace l'entrée idx, puis push qte-1 copies supplémentaires
-      inv[idx] = { ...baseItem };
-      for (let i = 1; i < qte; i++) inv.push({ ...baseItem });
-    } else {
-      for (let i = 0; i < qte; i++) inv.push({ ...baseItem });
-    }
-    c.inventaire = inv;
-    await updateInCol('characters',c.id,{inventaire:inv});
+  const c = STATE.activeChar; if(!c) return;
+  const inv = [...(c.inventaire || [])];
+  // Convention "1 entrée = 1 unité" : on respecte la qté saisie en N entrées
+  const qte = Math.max(1, parseInt(document.getElementById('inv-qte')?.value) || 1);
+  const baseItem = {
+    nom: document.getElementById('inv-nom')?.value||'?',
+    type: document.getElementById('inv-type')?.value||'',
+    qte: '1',
+    description: document.getElementById('inv-desc')?.value||'',
+  };
+  if (idx >= 0) {
+    // Édition : remplace l'entrée idx, puis push qte-1 copies supplémentaires
+    inv[idx] = { ...baseItem };
+    for (let i = 1; i < qte; i++) inv.push({ ...baseItem });
+  } else {
+    for (let i = 0; i < qte; i++) inv.push({ ...baseItem });
+  }
+  c.inventaire = inv;
+  if (await trySave('characters',c.id,{inventaire:inv})) {
     closeModal();
     showNotif('Inventaire mis à jour !','success');
-    _renderInventoryChar(c, 'inventaire');
-  } catch (e) { notifySaveError(e); }
+  }
+  _renderInventoryChar(c, 'inventaire');
 }
 
 registerActions({

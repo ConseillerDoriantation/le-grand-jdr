@@ -1,8 +1,8 @@
 import { STATE } from '../core/state.js';
 import { charSession } from '../shared/char-session.js';
-import { updateInCol } from '../data/firestore.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { trySave } from '../shared/crud.js';
+import { showNotif } from '../shared/notifications.js';
 import { pickImageFile } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 
@@ -70,32 +70,29 @@ function cancelCharacterPhotoCrop() {
 }
 
 async function saveCroppedCharacterPhoto(charId) {
-  try {
-    const dataUrl = _activePhotoCrop?.getBase64();
-    if (!dataUrl) { showNotif('Erreur : cropper non initialisé.', 'error'); return; }
+  const dataUrl = _activePhotoCrop?.getBase64();
+  if (!dataUrl) { showNotif('Erreur : cropper non initialisé.', 'error'); return; }
 
-    const c = getCharacterById(charId);
-    if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
+  const c = getCharacterById(charId);
+  if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
 
-    c.photo = dataUrl; c.photoZoom = 1; c.photoX = 0; c.photoY = 0; // legacy reset
-    await updateInCol('characters', charId, { photo: dataUrl, photoZoom: 1, photoX: 0, photoY: 0 });
-
+  c.photo = dataUrl; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
+  if (await trySave('characters', charId, { photo: dataUrl, photoZoom: 1, photoX: 0, photoY: 0 })) {
     _destroyCharacterPhotoCrop();
     closeModal();
     showNotif('Photo enregistrée !', 'success');
     charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
-  } catch (e) { notifySaveError(e); }
+  }
 }
 
 async function deleteCharPhoto(charId) {
-  try {
-    const c = getCharacterById(charId);
-    if (!c) return;
-    c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
-    await updateInCol('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });
+  const c = getCharacterById(charId);
+  if (!c) return;
+  c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
+  if (await trySave('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 })) {
     showNotif('Photo supprimée.', 'success');
     charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
-  } catch (e) { notifySaveError(e); }
+  }
 }
 
 document.addEventListener('click', (e) => {

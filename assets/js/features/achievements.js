@@ -7,7 +7,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
-import { confirmDelete } from '../shared/crud.js';
+import { confirmDelete, tryDoc } from '../shared/crud.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
@@ -290,11 +290,7 @@ async function _loadOrder() {
   const doc = await getDocData('achievements_meta', 'order');
   return Array.isArray(doc?.order) ? doc.order : [];
 }
-async function _saveOrder(order) {
-  try {
-    await saveDoc('achievements_meta', 'order', { order });
-  } catch (e) { notifySaveError(e); }
-}
+const _saveOrder = (order) => tryDoc('achievements_meta', 'order', { order });
 function _applyOrder(items, order) {
   if (!order.length) return items;
   const map     = Object.fromEntries(items.map(a => [a.id, a]));
