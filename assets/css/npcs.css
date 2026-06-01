@@ -413,6 +413,11 @@
 }
 .npc-bastion-passif { color: var(--text-soft); font-style: italic; line-height: 1.45; font-size: .77rem; }
 .npc-bastion-sal { margin-top: .25rem; color: var(--text-muted); font-size: .7rem; }
+.npc-bastion-recruit {
+  margin-top: .5rem; font-size: .72rem; line-height: 1.45; padding: .4rem .6rem; border-radius: 8px;
+}
+.npc-bastion-recruit.ok   { color: #5fe5b1; background: rgba(34,195,142,.1);  border: 1px solid rgba(34,195,142,.28); }
+.npc-bastion-recruit.lock { color: var(--text-muted); background: rgba(255,255,255,.03); border: 1px solid var(--border); }
 .npc-badge-mj {
   font-size: .56rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; letter-spacing: .04em;
   text-transform: uppercase; margin-left: .4rem;

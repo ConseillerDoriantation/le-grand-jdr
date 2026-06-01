@@ -1336,14 +1336,6 @@ registerActions({
   // World
 
   // NPCs
-  openNpcModal:          async () => {
-    const { openNpcModal } = await import('./npcs.js');
-    openNpcModal();
-  },
-  editNpc:               async (btn) => {
-    const { openNpcModal } = await import('./npcs.js');
-    openNpcModal(btn.dataset.id);
-  },
   deleteNpc:             async (btn) => {
     const { deleteNpc } = await import('./npcs.js');
     deleteNpc(btn.dataset.id);

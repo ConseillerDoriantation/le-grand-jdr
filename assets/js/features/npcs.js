@@ -23,13 +23,8 @@ import { getItemStatBonus, sortCharactersForDisplay } from '../shared/char-stats
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
-import {
-  autocompleteHTML, initAutocomplete,
-  multiAutocompleteHTML, initMultiAutocomplete, getMultiAutocompleteValues,
-} from '../shared/autocomplete.js';
 import { getModFromScore } from '../shared/char-stats.js';
-import { bindImageUploadDropZone, pickImageFile, uploadJpeg } from '../shared/image-upload.js';
-import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
+import { pickImageFile, uploadJpeg } from '../shared/image-upload.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
 // Schéma volontairement simple pour les PNJ : pas de formule équipement comme
@@ -159,8 +154,6 @@ let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat P
 let _activeId      = null;
 let _filterSearch  = '';
 let _activeOrgFilter = null;
-let _pendingNpcImg = null;
-let _npcImgCleared = false;
 let _histEditDelta = 0;
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
 let _selectedAfpTypeId = '';
@@ -424,15 +417,17 @@ function _renderFicheHeader(n) {
 // Bloc "Profil bastion" : visible MJ toujours, joueur seulement si disposition = Allié
 function _renderBastionProfil(n) {
   const adm = STATE.isAdmin;
-  // Côté joueur : visible seulement si l'affinité du groupe est suffisante (Allié).
-  const playerCanSee = _affiniteNiveau(n) >= 4;
-  if (!adm && !playerCanSee) return '';
+  // Côté joueur : visible dès Amical (≥3), recrutable seulement une fois Allié (≥4).
+  const niv = _affiniteNiveau(n);
+  const canSee     = niv >= 3;
+  const canRecruit = niv >= 4;
+  if (!adm && !canSee) return '';
 
   const hasInfo = (n.activites && n.activites.length) || n.passif || n.salaireSuggere;
   if (!adm && !hasInfo) return ''; // joueur : rien à montrer
 
   const actSet = new Set(n.activites || []);
-  const mjBadge = !playerCanSee ? `<span class="npc-badge-mj">MJ</span>` : '';
+  const mjBadge = !canSee ? `<span class="npc-badge-mj">MJ</span>` : '';
   const embauchable = n.embauchable !== false;
 
   // ── Vue MJ : tout éditable inline ──
@@ -469,12 +464,17 @@ function _renderBastionProfil(n) {
   const activites = [...actSet].map(_actLabel);
   return `
   <div class="npc-card">
-    <div class="npc-card-hd"><div class="npc-card-title">🏰 Recrutable au Bastion</div></div>
+    <div class="npc-card-hd">
+      <div class="npc-card-title">🏰 ${canRecruit ? 'Recrutable au Bastion' : 'Profil bastion'}</div>
+    </div>
     ${activites.length ? `<div class="npc-bastion-pills">
       ${activites.map(a => `<span class="npc-bastion-pill">${_esc(a)}</span>`).join('')}
     </div>` : ''}
     ${n.passif ? `<div class="npc-bastion-passif">🎁 ${_esc(n.passif)}</div>` : ''}
     ${n.salaireSuggere ? `<div class="npc-bastion-sal">💰 ${n.salaireSuggere} or / sem.</div>` : ''}
+    ${canRecruit
+      ? `<div class="npc-bastion-recruit ok">✅ Recrutable — votre affinité est suffisante (Allié).</div>`
+      : `<div class="npc-bastion-recruit lock">🔒 Recrutable une fois l'affinité du groupe au niveau <b>Allié</b>.</div>`}
   </div>`;
 }
 
@@ -891,72 +891,6 @@ function _npcBackToOrgs() {
   _refreshList({ keepScroll: false });
 }
 
-// ── Stats : rendu (modale + fiche) ───────────────────────────────────────────
-function _renderStatsForm(npc) {
-  if (!STATE.isAdmin) return '';
-  const stats = npc?.stats || {};
-  const combat = _npcCombat(npc);
-  const weapon = combat.weapon || null;
-  const weaponValue = weapon ? _weaponLabel(weapon) : (combat.weaponName || '');
-  const vitalInputs = NPC_VITALS.map(v => `
-    <div>
-      <label style="font-size:.66rem;color:var(--text-dim);display:block;margin-bottom:2px;
-        text-align:center;font-weight:600">${v.icon} ${v.label}</label>
-      <input type="number" class="input-sm" id="npc-${v.key}" value="${npc?.[v.key] ?? ''}"
-        placeholder="—" style="text-align:center;padding:.35rem .25rem;width:100%">
-    </div>`).join('');
-  const statInputs = NPC_STATS.map(s => `
-    <div>
-      <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
-        text-align:center;font-weight:700;letter-spacing:.04em">${s.short}</label>
-      <input type="number" class="input-sm" id="npc-stat-${s.key}" value="${stats[s.key] ?? ''}"
-        placeholder="8" style="text-align:center;padding:.35rem .25rem;width:100%">
-    </div>`).join('');
-  return `
-    <div class="form-group" style="margin-top:.75rem;background:rgba(255,255,255,.02);
-      border:1px dashed var(--border);border-radius:10px;padding:.65rem .75rem">
-      <label style="display:flex;align-items:center;gap:.4rem">
-        🛡️ Combat &amp; stats
-        <span style="color:var(--text-dim);font-weight:400;font-size:.78rem">(admin)</span>
-      </label>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin-top:.4rem">${vitalInputs}</div>
-      <div style="margin-top:.55rem;padding:.55rem .6rem;border-radius:9px;
-        background:rgba(232,184,75,.05);border:1px solid rgba(232,184,75,.18)">
-        <div style="font-size:.66rem;color:var(--gold);font-weight:700;
-          letter-spacing:.08em;text-transform:uppercase;margin-bottom:.45rem">Espace combat</div>
-        <div style="display:grid;grid-template-columns:1.35fr 1fr .65fr;gap:.45rem">
-          <div>
-            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
-              font-weight:600">Arme</label>
-            ${autocompleteHTML({
-              id: 'npc-combat-weapon',
-              value: weaponValue,
-              placeholder: _shopWeapons.length ? 'Choisir une arme de boutique…' : 'Aucune arme en boutique',
-              className: 'input-sm',
-            })}
-            <input type="hidden" id="npc-combat-weapon-id" value="${_esc(weapon?.itemId || '')}">
-          </div>
-          <div>
-            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
-              font-weight:600">Dégâts</label>
-            <input type="text" class="input-sm" id="npc-combat-damage"
-              value="${_esc(weapon?.degats || combat.damage)}" placeholder="Auto"
-              disabled style="padding:.35rem .45rem;width:100%;opacity:.75">
-          </div>
-          <div>
-            <label style="font-size:.62rem;color:var(--text-dim);display:block;margin-bottom:2px;
-              font-weight:600">Portée</label>
-            <input type="text" class="input-sm" id="npc-combat-range"
-              value="${_esc(weapon?.portee || combat.range || '')}" placeholder="Auto"
-              disabled style="text-align:center;padding:.35rem .25rem;width:100%;opacity:.75">
-          </div>
-        </div>
-        <div id="npc-combat-weapon-preview" style="margin-top:.45rem"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:.35rem;margin-top:.5rem">${statInputs}</div>
-    </div>`;
-}
-
 function _renderStatsPanel(n) {
   if (!STATE.isAdmin) return ''; // bloc réservé MJ
   const stats = n?.stats || {};
@@ -1175,311 +1109,6 @@ function _mjEditField(id, field) {
     if (e.key === 'Enter') input.blur();
     if (e.key === 'Escape') { cancelled = true; cell.innerHTML = prevHtml; input.blur(); }
   });
-}
-
-// ── Modal création / édition PNJ ──────────────────────────────────────────────
-export function openNpcModal(id = null, { stackedFromMjStats = false } = {}) {
-  const npc = id ? _npcs.find(n => n.id === id) : null;
-  const open = stackedFromMjStats ? pushModal : openModal;
-
-  open(npc ? `✏️ Modifier — ${_esc(npc.nom || 'PNJ')}` : '👥 Nouveau PNJ', `
-    <div class="grid-2" style="gap:.8rem">
-      <div class="form-group" style="margin:0">
-        <label>Nom</label>
-        <input class="input-field" id="npc-nom" value="${_esc(npc?.nom || '')}" placeholder="Aldric le Forgeron">
-      </div>
-      <div class="form-group" style="margin:0">
-        <label>Rôle</label>
-        <input class="input-field" id="npc-role" value="${_esc(npc?.role || '')}" placeholder="Forgeron, Garde…">
-      </div>
-    </div>
-    <div class="form-group" style="margin-top:.75rem">
-      <label>Lieu</label>
-      ${autocompleteHTML({ id: 'npc-lieu', value: npc?.lieu || '', placeholder: 'Taverne du Dragon…' })}
-    </div>
-    <div class="form-group" style="margin-top:.75rem">
-      <label>Organisations</label>
-      ${multiAutocompleteHTML({ id: 'npc-orgs', placeholder: _organisations.length ? 'Ajouter une organisation…' : 'Aucune organisation en base — texte libre' })}
-    </div>
-    <div class="form-group" style="margin-top:.75rem">
-      <label>Description</label>
-      <textarea class="input-field" id="npc-desc" rows="4"
-        placeholder="Apparence, personnalité, secrets…">${_esc(npc?.description || '')}</textarea>
-    </div>
-
-    <!-- Bastion : embauchage -->
-    <div class="form-group" style="margin-top:.75rem;padding:.7rem .9rem;background:rgba(232,184,75,.06);border:1px solid rgba(232,184,75,.22);border-radius:10px">
-      <label style="display:flex;align-items:center;gap:.4rem;color:var(--gold,#e8b84b);font-weight:700;margin-bottom:.5rem">
-        🏰 Profil bastion <span style="font-size:.7rem;font-weight:400;color:var(--text-dim);text-transform:none;letter-spacing:0">(si embauché comme employé)</span>
-      </label>
-      <div class="grid-2" style="gap:.6rem">
-        <div>
-          <label style="font-size:.72rem;color:var(--text-muted)">Salaire suggéré (or/sem.)</label>
-          <input type="number" class="input-field" id="npc-salaireSuggere" min="0"
-            value="${parseInt(npc?.salaireSuggere) || 0}" placeholder="0">
-        </div>
-        <div>
-          <label style="font-size:.72rem;color:var(--text-muted)">Réservé MJ</label>
-          <select class="input-field" id="npc-embauchable" style="${STATE.isAdmin?'':'pointer-events:none;opacity:.6'}">
-            <option value="oui" ${npc?.embauchable!==false?'selected':''}>Visible côté joueurs</option>
-            <option value="non" ${npc?.embauchable===false?'selected':''}>Caché aux joueurs</option>
-          </select>
-        </div>
-      </div>
-      <label style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem;display:block">Activités / spécialités <span style="color:var(--text-dim);font-weight:400">(salles où ce PNJ peut travailler)</span></label>
-      <div id="npc-activites-wrap" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:.3rem">
-        ${[
-          ['forge',              '🔨 Forge'],
-          ['atelier_confection', '🧵 Atelier de confection'],
-          ['atelier_orfevre',    '💎 Atelier d\'orfèvre'],
-          ['herboristerie',      '🌿 Herboristerie'],
-          ['taverne',            '🍻 Taverne'],
-          ['comptoir',           '💰 Comptoir'],
-          ['bibliotheque',       '📜 Bibliothèque'],
-          ['sanctuaire',         '✨ Sanctuaire'],
-          ['voliere',            '🦅 Volière'],
-        ].map(([slug, label]) => {
-          const checked = (npc?.activites || []).includes(slug);
-          return `<label class="npc-act-pill ${checked?'active':''}">
-            <input type="checkbox" value="${slug}" ${checked?'checked':''} style="display:none">
-            ${label}
-          </label>`;
-        }).join('')}
-      </div>
-      <label style="font-size:.72rem;color:var(--text-muted);margin-top:.5rem;display:block">Passif / bonus en tant qu'employé</label>
-      <textarea class="input-field" id="npc-passif" rows="2"
-        placeholder="ex: +20% à la production de la Forge · Réduction de 10% sur les achats…">${_esc(npc?.passif || '')}</textarea>
-    </div>
-
-    ${_renderStatsForm(npc)}
-    <div class="form-group" style="margin-top:.75rem">
-      <label>Portrait <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
-      <div id="npc-img-drop" style="border:2px dashed var(--border-strong);border-radius:10px;
-        padding:.85rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
-        <div id="npc-img-preview">
-          ${npc?.imageUrl
-            ? `<img src="${npc.imageUrl}" style="max-height:70px;border-radius:50%;
-                aspect-ratio:1;object-fit:cover;border:2px solid var(--border-bright)">`
-            : `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
-               <div style="font-size:.75rem;color:var(--text-muted)">
-                 <span style="color:var(--gold)">Cliquer</span> ou glisser une image</div>`}
-        </div>
-      </div>
-      <div id="npc-crop-wrap" style="display:none;margin-top:.6rem"></div>
-      <div id="npc-crop-ok" style="display:none;font-size:.72rem;text-align:center;margin-top:3px;color:var(--green)"></div>
-      ${npc?.imageUrl ? `<button type="button" id="npc-img-clear"
-        style="margin-top:.3rem;font-size:.72rem;background:none;border:none;
-        cursor:pointer;color:#ff6b6b">✕ Retirer l'image</button>` : ''}
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:1rem">
-      <button class="btn btn-gold" style="flex:1"
-        data-action="saveNpc" data-id="${npc?.id || ''}">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
-      ${npc?.id ? `<button class="btn btn-sm" title="Supprimer ce PNJ"
-        style="background:transparent;border:1px solid rgba(255,107,107,.3);color:#ff6b6b"
-        data-action="_deleteNpcThenClose" data-id="${npc.id}">🗑️ Supprimer</button>` : ''}
-    </div>
-  `, stackedFromMjStats ? _restoreMjStatsModal : null);
-
-  // ── Toggle des pills activités (delegation locale) ────────────────────────
-  document.getElementById('npc-activites-wrap')?.addEventListener('click', (e) => {
-    const pill = e.target.closest('.npc-act-pill');
-    if (!pill) return;
-    const cb = pill.querySelector('input[type=checkbox]');
-    if (!cb) return;
-    e.preventDefault();
-    cb.checked = !cb.checked;
-    pill.classList.toggle('active', cb.checked);
-  });
-
-  // ── Autocomplete Lieu + Organisations ─────────────────────────────────────
-  initAutocomplete('npc-lieu', _places.map(p => p.name));
-  initMultiAutocomplete('npc-orgs', _organisations.map(o => o.name), {
-    initialValues: Array.isArray(npc?.organisations) ? npc.organisations : [],
-  });
-  const weaponOptions = _shopWeapons.map(_weaponLabel);
-  const updateWeaponPreview = (item) => {
-    const preview = document.getElementById('npc-combat-weapon-preview');
-    const dmg = document.getElementById('npc-combat-damage');
-    const range = document.getElementById('npc-combat-range');
-    const hidden = document.getElementById('npc-combat-weapon-id');
-    if (hidden) hidden.value = item?.id || '';
-    if (dmg) dmg.value = item?.degats || '';
-    if (range) range.value = item?.portee || '';
-    if (!preview) return;
-    if (!item) { preview.innerHTML = ''; return; }
-    const traits = _getTraits(item);
-    const degatsStats = Array.isArray(item.degatsStats) && item.degatsStats.length
-      ? item.degatsStats
-      : (item.degatsStat ? [item.degatsStat] : []);
-    preview.innerHTML = `
-      <div style="padding:.45rem .55rem;border-radius:8px;background:rgba(0,0,0,.16);
-        border:1px solid rgba(255,255,255,.08)">
-        <div style="display:flex;gap:.35rem;flex-wrap:wrap;align-items:center">
-          ${item.format ? `<span class="badge badge-gold" style="font-size:.62rem">${_esc(item.format)}</span>` : ''}
-          ${item.sousType || item.typeArme ? `<span style="font-size:.68rem;color:var(--text-dim)">${_esc(item.sousType || item.typeArme)}</span>` : ''}
-          ${item.degats ? `<span style="font-size:.7rem;color:#ff6b6b">⚔️ ${_esc(item.degats)}${degatsStats.length ? ` + ${degatsStats.map(_esc).join(' + ')}` : ''}</span>` : ''}
-          ${item.toucherStat ? `<span style="font-size:.7rem;color:#e8b84b">🎯 ${_esc(item.toucherStat)}</span>` : ''}
-          ${item.portee ? `<span style="font-size:.7rem;color:#4f8cff">↗ ${_esc(item.portee)}</span>` : ''}
-        </div>
-        ${traits.length ? `<div style="display:flex;gap:.25rem;flex-wrap:wrap;margin-top:.35rem">
-          ${traits.map(t => `<span style="font-size:.64rem;color:#b47fff;background:rgba(180,127,255,.1);
-            border:1px solid rgba(180,127,255,.2);border-radius:999px;padding:1px 7px">${_esc(t)}</span>`).join('')}
-        </div>` : ''}
-      </div>`;
-  };
-  initAutocomplete('npc-combat-weapon', weaponOptions, {
-    onSelect: (label) => updateWeaponPreview(_weaponByLabel(label)),
-  });
-  const weaponInput = document.getElementById('npc-combat-weapon');
-  const currentWeapon = _shopWeapons.find(w => w.id === (npc?.combat?.weapon?.itemId || ''))
-    || _weaponByLabel(weaponInput?.value || '');
-  updateWeaponPreview(currentWeapon || npc?.combat?.weapon || null);
-  weaponInput?.addEventListener('input', () => {
-    const exact = _weaponByLabel(weaponInput.value);
-    updateWeaponPreview(exact);
-  });
-
-  // ── Upload → crop pan/zoom → stockage temporaire du portrait PNJ ──────────
-  const dropEl = document.getElementById('npc-img-drop');
-  const previewEl = document.getElementById('npc-img-preview');
-  const cropWrapEl = document.getElementById('npc-crop-wrap');
-  const okEl = document.getElementById('npc-crop-ok');
-  let npcCropper = null;
-  let uploadBinding = null;
-  let modalObs = null;
-
-  const destroyNpcCropper = () => { npcCropper?.destroy(); npcCropper = null; };
-  const cleanupNpcImageUi = () => {
-    destroyNpcCropper();
-    uploadBinding?.destroy();
-    modalObs?.disconnect();
-  };
-  const showNpcCrop = (dataUrl) => {
-    if (!cropWrapEl) return;
-    destroyNpcCropper();
-    if (okEl) okEl.style.display = 'none';
-    cropWrapEl.innerHTML = `${panZoomCropHTML({ idPrefix: 'npc-crop', viewSize: 260 })}
-      <button type="button" class="btn btn-gold btn-sm" id="npc-crop-confirm"
-        style="width:100%;margin-top:.5rem">✂️ Confirmer le recadrage</button>`;
-    cropWrapEl.style.display = 'block';
-    npcCropper = attachPanZoomCrop({
-      idPrefix: 'npc-crop',
-      dataUrl,
-      viewSize: 260,
-      outputSize: 300,
-    });
-    document.getElementById('npc-crop-confirm')?.addEventListener('click', confirmNpcCrop);
-    if (previewEl) previewEl.innerHTML = `<img src="${dataUrl}" style="max-height:50px;border-radius:50%;opacity:.6">
-      <div style="font-size:.68rem;color:var(--text-dim);margin-top:3px">Recadrez ci-dessous</div>`;
-  };
-  function confirmNpcCrop() {
-    const b64 = npcCropper?.getBase64();
-    if (!b64) return;
-    destroyNpcCropper();
-    if (cropWrapEl) cropWrapEl.style.display = 'none';
-    if (okEl) { okEl.style.display = 'block'; okEl.textContent = `✓ Portrait prêt (${Math.round(b64.length / 1024)} KB)`; }
-    if (previewEl) previewEl.innerHTML = `<img src="${b64}" style="max-height:70px;border-radius:50%;aspect-ratio:1;object-fit:cover;border:2px solid var(--gold)">`;
-    _pendingNpcImg = b64;
-    _npcImgCleared = false;
-  }
-  function clearNpcImg() {
-    _pendingNpcImg = '';
-    _npcImgCleared = true;
-    destroyNpcCropper();
-    if (previewEl) previewEl.innerHTML = `<div style="font-size:1.5rem;margin-bottom:3px">🖼️</div>
-      <div style="font-size:.75rem;color:var(--text-muted)"><span style="color:var(--gold)">Cliquer</span> ou glisser</div>`;
-    if (cropWrapEl) cropWrapEl.style.display = 'none';
-    if (okEl) okEl.style.display = 'none';
-  }
-
-  _pendingNpcImg = null;
-  _npcImgCleared = false;
-  uploadBinding = bindImageUploadDropZone(dropEl, { onImage: ({ dataUrl }) => showNpcCrop(dataUrl) });
-  document.getElementById('npc-img-clear')?.addEventListener('click', clearNpcImg);
-
-  const overlay = document.getElementById('modal-overlay');
-  modalObs = new MutationObserver(() => {
-    if (!dropEl || !document.body.contains(dropEl) || !overlay?.classList.contains('show')) cleanupNpcImageUi();
-  });
-  modalObs.observe(document.body, { childList: true, subtree: true });
-  if (overlay) modalObs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
-}
-
-// ── Sauvegarde / suppression PNJ ─────────────────────────────────────────────
-export async function saveNpc(id) {
-  try {
-    let imageUrl = '';
-    if (_pendingNpcImg !== null && _pendingNpcImg !== undefined) {
-      imageUrl = _pendingNpcImg;
-    } else if (id && !_npcImgCleared) {
-      imageUrl = _npcs.find(n => n.id === id)?.imageUrl || '';
-    }
-    _pendingNpcImg = null;
-    _npcImgCleared = false;
-
-    const data = {
-      nom:           document.getElementById('npc-nom')?.value?.trim()  || '?',
-      role:          document.getElementById('npc-role')?.value?.trim() || '',
-      lieu:          document.getElementById('npc-lieu')?.value?.trim() || '',
-      organisations: getMultiAutocompleteValues('npc-orgs'),
-      description:   document.getElementById('npc-desc')?.value?.trim() || '',
-      imageUrl,
-      // Bastion : embauchage
-      passif:         document.getElementById('npc-passif')?.value?.trim() || '',
-      salaireSuggere: parseInt(document.getElementById('npc-salaireSuggere')?.value) || 0,
-      embauchable:    document.getElementById('npc-embauchable')?.value !== 'non',
-      activites:      [...document.querySelectorAll('#npc-activites-wrap input[type=checkbox]:checked')].map(el => el.value),
-    };
-
-    if (STATE.isAdmin) {
-      NPC_VITALS.forEach(v => { data[v.key] = _readNumberOrNull(`npc-${v.key}`); });
-      const weaponLabel = _readText('npc-combat-weapon');
-      const weaponId = _readText('npc-combat-weapon-id');
-      const selectedWeapon = weaponId
-        ? _shopWeapons.find(w => w.id === weaponId)
-        : _weaponByLabel(weaponLabel);
-      if (weaponLabel && !selectedWeapon) {
-        showNotif('Choisis une arme existante de la boutique pour le PNJ.', 'error');
-        return;
-      }
-      const weapon = selectedWeapon ? _serializeShopWeapon(selectedWeapon) : null;
-      const combat = {
-        weapon,
-        weaponName: weapon?.nom || '',
-        damage:     weapon?.degats || '',
-        range:      null,
-      };
-      data.combat = (combat.weapon || combat.range != null) ? combat : null;
-      const stats = {};
-      NPC_STATS.forEach(s => {
-        const v = _readNumberOrNull(`npc-stat-${s.key}`);
-        if (v != null) stats[s.key] = v;
-      });
-      data.stats = Object.keys(stats).length ? stats : null;
-    }
-
-    if (id) {
-      await updateInCol('npcs', id, data);
-      const idx = _npcs.findIndex(n => n.id === id);
-      if (idx >= 0) _npcs[idx] = { ..._npcs[idx], ...data };
-      showNotif('PNJ mis à jour !', 'success');
-    } else {
-      const newId = await addToCol('npcs', data);
-      // Dédupe : le watch onSnapshot peut avoir déjà inséré le PNJ via
-      // latency-compensation pendant l'await — sinon on duplique l'id.
-      const entry = { id: newId || `npc_${Date.now()}`, ...data };
-      const idx = _npcs.findIndex(n => n.id === entry.id);
-      if (idx >= 0) _npcs[idx] = entry;
-      else _npcs.push(entry);
-      _activeId = newId || _activeId;
-      showNotif('PNJ créé !', 'success');
-    }
-
-    closeModal();
-    _refreshActivePanel();
-    _refreshList();
-  } catch (e) { notifySaveError(e); }
 }
 
 export async function deleteNpc(id) {
@@ -2182,8 +1811,6 @@ registerActions({
   npcCreate:                 () => _npcCreate(),
   _mjStatsFilter:            (el) => _mjStatsFilter(el.value),
   _setHistEditDeltaFromInput:(el) => _setHistEditDeltaFromInput(el.value),
-  openNpcModal:            (btn) => openNpcModal(btn.dataset.id || null),
-  saveNpc:                 (btn) => saveNpc(btn.dataset.id || ''),
   deleteNpc:               (btn) => deleteNpc(btn.dataset.id),
   _deleteNpcThenClose:     (btn) => deleteNpc(btn.dataset.id).then(ok => { if (ok) closeModal(); }),
   selectNpc:               (btn) => selectNpc(btn.dataset.id),
