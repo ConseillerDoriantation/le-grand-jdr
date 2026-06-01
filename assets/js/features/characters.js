@@ -85,6 +85,7 @@ import { quickViewChar } from './characters/quick-view.js';
 import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
@@ -1207,7 +1208,7 @@ function renderCharRelations(c, canEdit) {
   const rels = c.relations || [];
   if (!rels.length) {
     return `<div class="q-empty">
-      Aucune relation enregistrée. ${canEdit?'Clique sur "＋ Relation" pour décrire qui ${_esc(c.nom||"ce personnage")} a croisé sur la route.':''}
+      👥 Aucune relation enregistrée.${canEdit?` Clique sur « ＋ Relation » pour noter les alliés, ennemis et PNJ croisés par ${_esc(c.nom||'ce personnage')} — avec leur sentiment et une note.`:''}
     </div>`;
   }
   return `<div class="rel-grid">
@@ -1233,38 +1234,92 @@ function renderCharRelations(c, canEdit) {
   </div>`;
 }
 
-async function _csV3AddRelation(charId) {
-  const nom = prompt('Nom de la relation :'); if (!nom?.trim()) return;
-  const role = prompt('Rôle (ex: Mentor, Frère, PNJ rencontré) :') || '';
-  const sent = prompt('Sentiment (lien · allie · neutre · ennemi · mefiance) :', 'neutre') || 'neutre';
-  const sentiment = prompt('Libellé visible (ex: Ami, Pacte) :', sent) || sent;
-  const note = prompt('Note libre :') || '';
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (!c) return;
+const _REL_SENTS = [
+  { k:'lien',     lbl:'💜 Lien' },
+  { k:'allie',    lbl:'💚 Allié' },
+  { k:'neutre',   lbl:'💛 Neutre' },
+  { k:'mefiance', lbl:'🧡 Méfiance' },
+  { k:'ennemi',   lbl:'❤️ Ennemi' },
+];
+const _REL_DEFAULT_LBL = { lien:'Lien', allie:'Allié', neutre:'Neutre', mefiance:'Méfiance', ennemi:'Ennemi' };
+
+function _openRelationModal(charId, idx) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const isEdit = Number.isInteger(idx) && idx >= 0;
+  const r = isEdit ? (c.relations || [])[idx] : null;
+  if (isEdit && !r) return;
+  const curSent = r?.sent || 'neutre';
+  openModal('', `
+    <div class="rel-modal">
+      <div class="rel-modal-head">
+        <div class="rel-modal-ico">👥</div>
+        <div class="rel-modal-head-txt">
+          <h2>${isEdit ? 'Modifier la relation' : 'Nouvelle relation'}</h2>
+          <small>Allié, ennemi ou PNJ croisé par <b>${_esc(c.nom||'ce personnage')}</b>, et le lien qui les unit.</small>
+        </div>
+      </div>
+      <div class="rel-modal-body">
+        <div class="form-group"><label>Nom</label>
+          <input class="input-field" id="rel-nom" value="${_esc(r?.nom||'')}" placeholder="Maître Aldric, Capitaine Vex…" autocomplete="off"></div>
+        <div class="form-group"><label>Rôle / lien <span class="rel-opt">(optionnel)</span></label>
+          <input class="input-field" id="rel-role" value="${_esc(r?.role||'')}" placeholder="Mentor, Frère, Marchand, Rival…" autocomplete="off"></div>
+        <div class="form-group"><label>Sentiment</label>
+          <div class="rel-sent-seg">
+            ${_REL_SENTS.map(s => `<button type="button" class="rel-sent-btn rel-sent-btn--${s.k} ${s.k===curSent?'is-active':''}" data-sent="${s.k}" data-action="csV3RelSent">${s.lbl}</button>`).join('')}
+          </div>
+          <input type="hidden" id="rel-sent" value="${curSent}">
+          <input type="text" class="input-field" id="rel-sentiment" value="${_esc(r?.sentiment||'')}" placeholder="Libellé affiché (ex : Ami fidèle, Pacte, Dette…)" style="margin-top:.4rem" autocomplete="off"></div>
+        <div class="form-group"><label>Note <span class="rel-opt">(optionnel)</span></label>
+          <textarea class="input-field" id="rel-note" rows="3" placeholder="Histoire, dette, secret, dernière rencontre…">${_esc(r?.note||'')}</textarea></div>
+      </div>
+      <div class="rel-modal-foot">
+        <button class="btn btn-outline btn-sm" data-action="closeRelModal">Annuler</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-gold" data-action="csV3SaveRelation" data-id="${charId}" data-idx="${isEdit?idx:-1}">💾 Enregistrer</button>
+      </div>
+    </div>
+  `);
+  setTimeout(() => document.getElementById('rel-nom')?.focus(), 30);
+}
+
+function _csV3AddRelation(charId)       { _openRelationModal(charId, -1); }
+function _csV3EditRelation(charId, idx) { _openRelationModal(charId, idx); }
+
+function _csV3RelSent(sent) {
+  const inp = document.getElementById('rel-sent'); if (inp) inp.value = sent;
+  document.querySelectorAll('.rel-sent-btn').forEach(b => b.classList.toggle('is-active', b.dataset.sent === sent));
+  const lbl = document.getElementById('rel-sentiment');
+  if (lbl && !lbl.value.trim()) lbl.value = _REL_DEFAULT_LBL[sent] || sent;
+}
+
+async function _csV3SaveRelation(charId, idx) {
+  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar; if (!c) return;
+  const nom = document.getElementById('rel-nom')?.value.trim();
+  if (!nom) { showNotif('Indique au moins un nom.', 'error'); return; }
+  const sent = document.getElementById('rel-sent')?.value || 'neutre';
+  const rel = {
+    nom,
+    role:      document.getElementById('rel-role')?.value.trim() || '',
+    sent,
+    sentiment: document.getElementById('rel-sentiment')?.value.trim() || (_REL_DEFAULT_LBL[sent] || sent),
+    note:      document.getElementById('rel-note')?.value.trim() || '',
+  };
   const rels = Array.isArray(c.relations) ? c.relations.slice() : [];
-  rels.push({ nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() });
+  if (Number.isInteger(idx) && idx >= 0 && rels[idx]) rels[idx] = { ...rels[idx], ...rel };
+  else rels.push(rel);
   c.relations = rels;
-  await updateInCol('characters', charId, { relations: rels });
-  _csV3JournalSub('relations');
+  try {
+    await updateInCol('characters', charId, { relations: rels });
+    closeModalDirect();
+    _csV3JournalSub('relations');
+  } catch (e) { console.error('[relation save]', e); showNotif('Erreur d\'enregistrement.', 'error'); }
 }
-async function _csV3EditRelation(charId, idx) {
-  const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
-  if (!c?.relations?.[idx]) return;
-  const r = c.relations[idx];
-  const nom  = prompt('Nom :', r.nom||''); if (nom===null) return;
-  const role = prompt('Rôle :', r.role||''); if (role===null) return;
-  const sent = prompt('Sentiment-clé (lien/allie/neutre/ennemi/mefiance) :', r.sent||'neutre'); if (sent===null) return;
-  const sentiment = prompt('Libellé visible :', r.sentiment||sent); if (sentiment===null) return;
-  const note = prompt('Note :', r.note||''); if (note===null) return;
-  const next = { ...r, nom: nom.trim(), role: role.trim(), sent: sent.trim(), sentiment: sentiment.trim(), note: note.trim() };
-  const rels = c.relations.slice(); rels[idx] = next; c.relations = rels;
-  await updateInCol('characters', charId, { relations: rels });
-  _csV3JournalSub('relations');
-}
+
 async function _csV3DeleteRelation(charId, idx) {
   const c = STATE.characters.find(x => x.id === charId) || STATE.activeChar;
   if (!c?.relations?.[idx]) return;
-  if (!confirm(`Supprimer la relation "${c.relations[idx].nom||'?'}" ?`)) return;
+  const nom = c.relations[idx].nom || '?';
+  if (!await confirmModal(`Supprimer la relation <b>${_esc(nom)}</b> ?`, { title:'Confirmation', confirmLabel:'Supprimer', icon:'🗑️' })) return;
   const rels = c.relations.slice(); rels.splice(idx, 1); c.relations = rels;
   await updateInCol('characters', charId, { relations: rels });
   _csV3JournalSub('relations');
@@ -2471,6 +2526,9 @@ registerActions({
   saveNote:                (btn)    => saveNote(Number(btn.dataset.idx)),
   csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
   csV3DeleteRelation:      (btn)    => _csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
+  csV3RelSent:             (btn)    => _csV3RelSent(btn.dataset.sent),
+  csV3SaveRelation:        (btn)    => _csV3SaveRelation(btn.dataset.id, Number(btn.dataset.idx)),
+  closeRelModal:           ()       => closeModalDirect(),
 
   // Profil
   csV3RemoveProfilTag:      (btn)   => _csV3RemoveProfilTag(btn.dataset.id, btn.dataset.tag),
