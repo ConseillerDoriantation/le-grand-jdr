@@ -265,6 +265,7 @@ export async function renderNpcs() {
   await _load();
   if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
   _renderPage(content);
+  _bindCharPickOutside();
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
   // Pour `npcs` (session-live) le watch ne refait aucune lecture facturée.
@@ -644,10 +645,22 @@ function _renderRelationsPanel(n) {
       <div class="npc-edit-block" style="margin-top:.55rem">
         <span class="npc-edit-lbl">Ajouter une affinité</span>
         <div class="npc-affi-add">
-          <select class="npc-select" id="afp-char-${n.id}">
-            <option value="">— Personnage —</option>
-            ${chars.map(c => `<option value="${c.id}|${_esc(c.nom || '?')}">${_esc(c.nom || '?')} (${_esc(c.ownerPseudo || '?')})</option>`).join('')}
-          </select>
+          <div class="npc-charpick">
+            <input type="hidden" id="afp-char-${n.id}" value="">
+            <button type="button" class="npc-charpick-trigger" data-action="npcCharPickToggle" data-npc-id="${n.id}">
+              <span class="npc-charpick-current">— Personnage —</span>
+              <span class="npc-charpick-caret">▾</span>
+            </button>
+            <div class="npc-charpick-panel">
+              ${chars.length ? chars.map(c => `
+                <button type="button" class="npc-charpick-opt" data-action="npcCharPickSelect"
+                  data-npc-id="${n.id}" data-char-id="${c.id}" data-char-nom="${_esc(c.nom || '?')}">
+                  ${_charAvatar(c)}
+                  <span class="npc-charpick-opt-txt"><b>${_esc(c.nom || '?')}</b><small>${_esc(c.ownerPseudo || '?')}</small></span>
+                </button>`).join('')
+                : `<div class="npc-empty-line">Aucun personnage</div>`}
+            </div>
+          </div>
           <select class="npc-select" id="afp-type-${n.id}">
             <option value="">— Type —</option>
             ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(t.label)}</option>`).join('')}
@@ -1759,6 +1772,39 @@ async function _npcAddAffiPerso(btn) {
   } catch (e) { notifySaveError(e); }
 }
 
+// ── Sélecteur de personnage avec portraits (pour l'ajout d'affinité) ─────────
+const _charAvatar = (c) => c.photo
+  ? `<img class="npc-charpick-av" src="${_esc(c.photo)}" alt="">`
+  : `<span class="npc-charpick-av npc-charpick-av--ph">${_esc((c.nom || '?')[0].toUpperCase())}</span>`;
+
+function _npcCharPickToggle(btn) {
+  const pick = btn.closest('.npc-charpick'); if (!pick) return;
+  const willOpen = !pick.classList.contains('is-open');
+  document.querySelectorAll('.npc-charpick.is-open').forEach(p => p.classList.remove('is-open'));
+  if (willOpen) pick.classList.add('is-open');
+}
+
+function _npcCharPickSelect(btn) {
+  const npcId = btn.dataset.npcId;
+  const pick = btn.closest('.npc-charpick'); if (!pick) return;
+  const hidden = document.getElementById(`afp-char-${npcId}`);
+  if (hidden) hidden.value = `${btn.dataset.charId}|${btn.dataset.charNom}`;
+  const cur = pick.querySelector('.npc-charpick-current');
+  if (cur) cur.innerHTML = btn.innerHTML;   // recopie portrait + nom dans le déclencheur
+  pick.classList.remove('is-open');
+}
+
+// Ferme les sélecteurs ouverts sur clic extérieur (lié une seule fois).
+let _charPickBound = false;
+function _bindCharPickOutside() {
+  if (_charPickBound) return;
+  _charPickBound = true;
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.npc-charpick')) return;
+    document.querySelectorAll('.npc-charpick.is-open').forEach(p => p.classList.remove('is-open'));
+  });
+}
+
 // Création inline : crée un PNJ vierge et le sélectionne (plus besoin de modal).
 async function _npcCreate() {
   if (!STATE.isAdmin) return;
@@ -1863,6 +1909,8 @@ registerActions({
   npcAddEvent:               (btn) => _npcAddEvent(btn),
   npcAffiField:              (el) => _npcAffiField(el),
   npcAddAffiPerso:           (btn) => _npcAddAffiPerso(btn),
+  npcCharPickToggle:         (btn) => _npcCharPickToggle(btn),
+  npcCharPickSelect:         (btn) => _npcCharPickSelect(btn),
   npcCreate:                 () => _npcCreate(),
   _mjStatsFilter:            (el) => _mjStatsFilter(el.value),
   _setHistEditDeltaFromInput:(el) => _setHistEditDeltaFromInput(el.value),

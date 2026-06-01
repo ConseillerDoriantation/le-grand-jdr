@@ -283,9 +283,12 @@
 /* ── Fiche ────────────────────────────────────────────────────────────── */
 .npc-fiche {
   background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); overflow: hidden;
+  border-radius: var(--radius-lg);
+  /* overflow visible pour laisser déborder le menu déroulant du sélecteur de
+     personnage ; les coins hauts sont arrondis via le héro lui-même. */
   max-width: 1180px;   /* évite l'étirement sur écrans larges */
 }
+.npc-hero { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 /* Corps en 2 colonnes : principal (affinité, stats) + latéral (relations, bastion) */
 .npc-cols {
   display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
@@ -447,6 +450,41 @@
 .npc-rel-chip--edit .npc-inline { font-size: .72rem; margin-top: .25rem; }
 .npc-affi-add { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
 .npc-affi-add .npc-select { min-width: 120px; flex: 1; }
+
+/* Sélecteur de personnage avec portrait */
+.npc-charpick { position: relative; flex: 1; min-width: 150px; }
+.npc-charpick-trigger {
+  display: flex; align-items: center; gap: .5rem; width: 100%; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px;
+  padding: .32rem .5rem; color: var(--text); font: inherit; font-size: .8rem; text-align: left;
+  transition: border-color .12s;
+}
+.npc-charpick-trigger:hover { border-color: rgba(79,140,255,.4); }
+.npc-charpick-current { flex: 1; min-width: 0; display: flex; align-items: center; gap: .45rem; overflow: hidden; }
+.npc-charpick-current .npc-charpick-opt-txt { overflow: hidden; }
+.npc-charpick-caret { color: var(--text-dim); flex-shrink: 0; font-size: .75rem; }
+.npc-charpick-av {
+  width: 26px; height: 26px; border-radius: 50%; object-fit: cover; object-position: center top; flex-shrink: 0;
+}
+.npc-charpick-av--ph {
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.08); font-weight: 700; font-size: .8rem; color: var(--text-muted);
+}
+.npc-charpick-opt-txt { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.npc-charpick-opt-txt b { font-size: .8rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.npc-charpick-opt-txt small { font-size: .66rem; color: var(--text-dim); }
+.npc-charpick-panel {
+  display: none; position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0;
+  max-height: 264px; overflow-y: auto; padding: .3rem;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+}
+.npc-charpick.is-open .npc-charpick-panel { display: block; }
+.npc-charpick-opt {
+  display: flex; align-items: center; gap: .5rem; width: 100%; cursor: pointer; text-align: left;
+  background: transparent; border: none; border-radius: 7px; padding: .32rem .45rem; color: var(--text);
+}
+.npc-charpick-opt:hover { background: rgba(79,140,255,.1); }
 .npc-rel-add {
   width: 100%; padding: .55rem; cursor: pointer; text-align: center; font-size: .74rem; color: var(--gold);
   background: rgba(79,140,255,.06); border: 1px dashed rgba(79,140,255,.3); border-radius: 9px; transition: background .15s;
