@@ -1357,5 +1357,12 @@ export function sanitizeRichTextHtml(html) {
       }
     });
   });
+  // Retire les citations vides (héritées d'anciennes suppressions) : un
+  // <blockquote> sans texte ni image laissait sa bordure bleue orpheline.
+  // S'applique au chargement de l'éditeur, à l'affichage lecture seule et à
+  // l'enregistrement → l'ancienne citation vide disparaît pour de bon.
+  tpl.content.querySelectorAll('blockquote').forEach((bq) => {
+    if (!bq.textContent.trim() && !bq.querySelector('img')) bq.remove();
+  });
   return tpl.innerHTML;
 }
