@@ -156,8 +156,6 @@ let _filterSearch  = '';
 let _activeOrgFilter = null;
 let _histEditDelta = 0;
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
-let _selectedAfpTypeId = '';
-let _currentAffinitePersoContext = {};
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 // `npcs` et `shop` sont session-live → 0 lecture facturée. `npc_affinites` est
@@ -581,7 +579,7 @@ function _renderRelationChip(a, npcId) {
     <div class="npc-rel-body">
       <div class="npc-rel-editrow">
         <select class="npc-select npc-rel-typesel" data-change="npcAffiField" data-aff-id="${a.id}" data-field="typeId">${typeOpts}</select>
-        <span class="npc-rel-target">→ ${_esc(a.charNom || '?')}</span>
+        <span class="npc-rel-target">${_affiTargetAvatar(a)}${_esc(a.charNom || '?')}</span>
       </div>
       <input class="npc-inline" data-change="npcAffiField" data-aff-id="${a.id}" data-field="notePublique"
         value="${_esc(a.notePublique || '')}" placeholder="🌐 Note publique…">
@@ -603,6 +601,7 @@ function _renderRelationChipPlayer(a) {
     <span class="npc-rel-emoji">${emoji}</span>
     <div class="npc-rel-body">
       <div class="npc-rel-label">${label}</div>
+      <div class="npc-rel-target">${_affiTargetAvatar(a)}${_esc(a.charNom || '?')}</div>
       ${a.notePublique ? `<div class="npc-rel-note">🌐 ${_esc(a.notePublique)}</div>` : ''}
       ${a.note ? `<div class="npc-rel-note">🔒 ${_esc(a.note)}</div>` : ''}
     </div>
@@ -617,7 +616,8 @@ function _renderRelationChipPublic(a) {
   <div class="npc-rel-chip" style="${vars}">
     <span class="npc-rel-emoji" style="opacity:.85">${emoji}</span>
     <div class="npc-rel-body">
-      <div class="npc-rel-label">${label} <span style="color:var(--text-dim);font-weight:400">→ ${_esc(a.charNom || '?')}</span></div>
+      <div class="npc-rel-label">${label}</div>
+      <div class="npc-rel-target">${_affiTargetAvatar(a)}${_esc(a.charNom || '?')}</div>
       ${(a.notePublique || '').trim() ? `<div class="npc-rel-note">🌐 ${_esc(a.notePublique)}</div>` : ''}
     </div>
   </div>`;
@@ -648,7 +648,7 @@ function _renderRelationsPanel(n) {
           <div class="npc-charpick">
             <input type="hidden" id="afp-char-${n.id}" value="">
             <button type="button" class="npc-charpick-trigger" data-action="npcCharPickToggle" data-npc-id="${n.id}">
-              <span class="npc-charpick-current">— Personnage —</span>
+              <span class="npc-charpick-current"><span class="npc-charpick-ph">Choisir un personnage…</span></span>
               <span class="npc-charpick-caret">▾</span>
             </button>
             <div class="npc-charpick-panel">
@@ -1434,16 +1434,9 @@ export async function saveHistoriqueEntry(npcId, index) {
 export function openAffiniteTypesManager() {
   // Initialise le formulaire à l'état "ajout"
   _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
-  const ctx = _currentAffinitePersoContext || {};
   pushModal('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml(), () => {
-    // Toujours rafraîchir la fiche principale (le contexte perso peut être périmé)
-    if (_activeId) {
-      _refreshActivePanel();
-    }
-    // Rafraîchir aussi la modal perso si elle était ouverte au-dessus
-    if (ctx.npcId) {
-      _refreshAffinitePersoModal(ctx.npcId, ctx.existingId);
-    }
+    // À la fermeture, rafraîchir la fiche (les types/affinités ont pu changer).
+    if (_activeId) _refreshActivePanel();
   });
 }
 
@@ -1527,87 +1520,8 @@ export async function deleteAffiniteType(typeId) {
 
 // ══ Modal affinité individuelle (édition) ════════════════════════════════════
 
-function _getAffinitePersoModalArgs(npcId, existingId = null) {
-  const n       = _npcs.find(x => x.id === npcId);
-  if (!n) return null;
-  const existing       = existingId ? _affiPerso.find(a => a.id === existingId) : null;
-  const chars          = sortCharactersForDisplay(STATE.characters || []);
-  const existingTypeId = existing?.typeId || '';
 
-  _selectedAfpTypeId = existingTypeId;
 
-  const typeBtns = _affiniteTypes.map(t => {
-    const col = t.couleur || TYPE_COLORS[0];
-    const sel = existingTypeId === t.id;
-    return `<button type="button" id="afp-type-btn-${t.id}"
-      data-action="_selectAfpType" data-id="${t.id}"
-      style="display:flex;align-items:center;gap:.3rem;padding:4px 10px;border-radius:999px;
-      cursor:pointer;font-size:.72rem;font-weight:${sel ? '700' : '500'};transition:all .15s;
-      border:1px solid ${sel ? col : col + '55'};background:${sel ? col + '33' : col + '11'};color:${col}">
-      <span>${t.emoji || '✨'}</span><span>${_esc(t.label)}</span></button>`;
-  }).join('');
-
-  const title = `${existing ? '✏️ Modifier' : '➕ Ajouter'} une affinité — ${_esc(n.nom)}`;
-  const body  = `
-    <input type="hidden" id="afp-type" value="${existingTypeId}">
-
-    <div class="form-group">
-      <label>Personnage concerné</label>
-      <select class="input-field" id="afp-char">
-        <option value="">— Choisir —</option>
-        ${chars.map(c => `<option value="${c.id}|${_esc(c.nom || '?')}"
-          ${existing?.charId === c.id ? 'selected' : ''}>${_esc(c.nom || '?')} (${_esc(c.ownerPseudo || '?')})</option>`).join('')}
-      </select>
-    </div>
-
-    <div class="form-group">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
-        <label style="margin:0">Affinité spécifique</label>
-        <button type="button" data-action="openAffiniteTypesManager"
-          class="btn btn-outline btn-sm" style="font-size:.7rem">⚙️ Gérer</button>
-      </div>
-      ${_affiniteTypes.length
-        ? `<div style="display:flex;flex-wrap:wrap;gap:.35rem">${typeBtns}</div>`
-        : `<div style="font-size:.78rem;color:var(--text-dim);font-style:italic">
-            Aucun type — ouvre le gestionnaire pour en créer.</div>`}
-    </div>
-
-    <div class="form-group">
-      <label>🌐 Note publique <span style="color:var(--text-dim);font-weight:400">(visible par tous)</span></label>
-      <textarea class="input-field" id="afp-note-publique" rows="2"
-        placeholder="Ex: Sœur de, Ami d'enfance…">${_esc(existing?.notePublique || '')}</textarea>
-    </div>
-
-    <div class="form-group">
-      <label>🔒 Note privée <span style="color:var(--text-dim);font-weight:400">(visible par ce joueur seulement)</span></label>
-      <textarea class="input-field" id="afp-note" rows="3"
-        placeholder="Ex: A rendu un service personnel…">${_esc(existing?.note || '')}</textarea>
-    </div>
-
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1"
-        data-action="saveAffinitePerso" data-npc-id="${npcId}" data-aff-id="${existingId || ''}">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
-    </div>`;
-
-  return { title, body, selectedTypeId: existingTypeId };
-}
-
-function _refreshAffinitePersoModal(npcId, existingId = null) {
-  const args = _getAffinitePersoModalArgs(npcId, existingId);
-  if (!args) return;
-  _currentAffinitePersoContext = { npcId, existingId };
-  updateModalContent(args.title, args.body);
-  _selectedAfpTypeId = args.selectedTypeId;
-}
-
-export function openAffinitePersoModal(npcId, existingId = null) {
-  _currentAffinitePersoContext = { npcId, existingId };
-  const args = _getAffinitePersoModalArgs(npcId, existingId);
-  if (!args) return;
-  openModal(args.title, args.body);
-  _selectedAfpTypeId = args.selectedTypeId;
-}
 
 // ── Édition inline depuis la fiche (admin) ───────────────────────────────────
 // Sauvegarde directe Firestore champ par champ (déclenchée par l'event `change`,
@@ -1777,6 +1691,14 @@ const _charAvatar = (c) => c.photo
   ? `<img class="npc-charpick-av" src="${_esc(c.photo)}" alt="">`
   : `<span class="npc-charpick-av npc-charpick-av--ph">${_esc((c.nom || '?')[0].toUpperCase())}</span>`;
 
+// Avatar du personnage cible d'une affinité spécifique (retrouvé via charId).
+const _affiTargetAvatar = (a) => {
+  const c = (STATE.characters || []).find(x => x.id === a.charId);
+  return c?.photo
+    ? `<img class="npc-rel-av" src="${_esc(c.photo)}" alt="">`
+    : `<span class="npc-rel-av npc-rel-av--ph">${_esc((a.charNom || '?')[0].toUpperCase())}</span>`;
+};
+
 function _npcCharPickToggle(btn) {
   const pick = btn.closest('.npc-charpick'); if (!pick) return;
   const willOpen = !pick.classList.contains('is-open');
@@ -1790,7 +1712,10 @@ function _npcCharPickSelect(btn) {
   const hidden = document.getElementById(`afp-char-${npcId}`);
   if (hidden) hidden.value = `${btn.dataset.charId}|${btn.dataset.charNom}`;
   const cur = pick.querySelector('.npc-charpick-current');
-  if (cur) cur.innerHTML = btn.innerHTML;   // recopie portrait + nom dans le déclencheur
+  if (cur) {
+    const av = btn.querySelector('.npc-charpick-av')?.outerHTML || '';
+    cur.innerHTML = `${av}<span class="npc-charpick-selname">${_esc(btn.dataset.charNom || '?')}</span>`;
+  }
   pick.classList.remove('is-open');
 }
 
@@ -1839,52 +1764,7 @@ function _refreshActivePanel() {
   panel.innerHTML = active ? _renderFiche(active) : _renderEmpty();
 }
 
-function _selectAfpType(typeId) {
-  _selectedAfpTypeId = typeId;
-  const inp = document.getElementById('afp-type');
-  if (inp) inp.value = typeId;
-  _affiniteTypes.forEach(t => {
-    const btn = document.getElementById(`afp-type-btn-${t.id}`);
-    if (!btn) return;
-    const col = t.couleur || TYPE_COLORS[0];
-    const sel = t.id === typeId;
-    btn.style.fontWeight  = sel ? '700' : '500';
-    btn.style.background  = sel ? col + '33' : col + '11';
-    btn.style.borderColor = sel ? col : col + '55';
-  });
-}
 
-// ── Sauvegarde / suppression affinité individuelle ────────────────────────────
-export async function saveAffinitePerso(npcId, existingId) {
-  const charSel = document.getElementById('afp-char')?.value;
-  if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
-  const typeId = document.getElementById('afp-type')?.value || '';
-  if (!typeId) { showNotif('Choisis une affinité spécifique.', 'error'); return; }
-
-  const [charId, charNom] = charSel.split('|');
-  const type  = _getAffiniteType(typeId);
-  const note          = document.getElementById('afp-note')?.value?.trim() || '';
-  const notePublique  = document.getElementById('afp-note-publique')?.value?.trim() || '';
-  const data  = { npcId, charId, charNom, typeId, typeLabel: type?.label || '', note, notePublique };
-
-  if (existingId) {
-    await updateInCol('npc_affinites', existingId, data);
-    const idx = _affiPerso.findIndex(a => a.id === existingId);
-    if (idx >= 0) _affiPerso[idx] = { ..._affiPerso[idx], ...data };
-  } else {
-    const newId = await addToCol('npc_affinites', data);
-    // Dédupe : le watch onSnapshot peut avoir déjà inséré l'entrée via
-    // latency-compensation pendant l'await — sinon on duplique l'id.
-    const entry = { id: newId || `afp_${Date.now()}`, ...data };
-    const idx = _affiPerso.findIndex(a => a.id === entry.id);
-    if (idx >= 0) _affiPerso[idx] = entry;
-    else _affiPerso.push(entry);
-  }
-
-  closeModal();
-  showNotif('Affinité enregistrée !', 'success');
-  _refreshActivePanel();
-}
 
 export async function deleteAffinitePerso(id) {
   if (!await confirmModal('Supprimer cette affinité ?', {title: 'Confirmation de suppression'})) return;
@@ -1917,13 +1797,11 @@ registerActions({
   deleteNpc:               (btn) => deleteNpc(btn.dataset.id),
   _deleteNpcThenClose:     (btn) => deleteNpc(btn.dataset.id).then(ok => { if (ok) closeModal(); }),
   selectNpc:               (btn) => selectNpc(btn.dataset.id),
-  openAffinitePersoModal:  (btn) => openAffinitePersoModal(btn.dataset.npcId, btn.dataset.affId || undefined),
   deleteAffinitePerso:     (btn) => deleteAffinitePerso(btn.dataset.id),
   openAffiniteTypesManager:()   => openAffiniteTypesManager(),
   saveAffiniteSeuils:      ()   => saveAffiniteSeuils(),
   resetAffiniteSeuils:     ()   => resetAffiniteSeuils(),
   openAffiniteSeuilsModal: ()   => openAffiniteSeuilsModal(),
-  saveAffinitePerso:       (btn) => saveAffinitePerso(btn.dataset.npcId, btn.dataset.affId || ''),
   editHistoriqueEntry:     (btn) => editHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
   deleteHistoriqueEntry:   (btn) => deleteHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
   saveHistoriqueEntry:     (btn) => saveHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
@@ -1934,7 +1812,6 @@ registerActions({
   _aftSelectEmoji:         (btn) => _aftSelectEmoji(btn.dataset.val),
   _aftSelectColor:         (btn) => _aftSelectColor(btn.dataset.val),
   _selectHistEditDelta:    (btn) => _selectHistEditDelta(Number(btn.dataset.val)),
-  _selectAfpType:          (btn) => _selectAfpType(btn.dataset.id),
   _openMjStatsView:        ()   => _openMjStatsView(),
   _npcSelectOrg:           (btn) => _npcSelectOrg(btn),
   _npcBackToOrgs:          ()   => _npcBackToOrgs(),

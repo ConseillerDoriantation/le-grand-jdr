@@ -383,7 +383,11 @@
 }
 /* Formulaire d'ajout d'événement (inline) */
 .npc-event-row { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
-.npc-event-delta { width: 64px; flex: 0 0 auto; text-align: center; font-weight: 700; }
+.npc-event-delta { width: 48px; flex: 0 0 auto; text-align: center; font-weight: 700; }
+/* Inputs numériques sans flèches (spinners) */
+input.npc-inline[type=number] { -moz-appearance: textfield; appearance: textfield; }
+input.npc-inline[type=number]::-webkit-outer-spin-button,
+input.npc-inline[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .npc-event-text { flex: 1; min-width: 160px; }
 .npc-event-btn {
   flex: 0 0 auto; cursor: pointer; font-size: .76rem; font-weight: 600; white-space: nowrap;
@@ -437,7 +441,12 @@
 .npc-rel-emoji { font-size: 1.25rem; flex-shrink: 0; line-height: 1; }
 .npc-rel-body { flex: 1; min-width: 0; }
 .npc-rel-label { font-size: .82rem; font-weight: 700; color: var(--rc); }
-.npc-rel-target { font-size: .73rem; color: var(--text-dim); }
+.npc-rel-target { font-size: .73rem; color: var(--text-dim); display: inline-flex; align-items: center; gap: .35rem; }
+.npc-rel-av { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; object-position: center top; flex-shrink: 0; }
+.npc-rel-av--ph {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.08); font-weight: 700; font-size: .68rem; color: var(--text-muted);
+}
 .npc-rel-note { font-size: .71rem; color: var(--text-muted); font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; }
 .npc-rel-actions { display: flex; gap: .2rem; flex-shrink: 0; }
 .npc-icon-btn { background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: .72rem; padding: 2px 5px; border-radius: 5px; transition: background .1s; }
@@ -454,14 +463,15 @@
 /* Sélecteur de personnage avec portrait */
 .npc-charpick { position: relative; flex: 1; min-width: 150px; }
 .npc-charpick-trigger {
-  display: flex; align-items: center; gap: .5rem; width: 100%; cursor: pointer;
+  display: flex; align-items: center; gap: .5rem; width: 100%; cursor: pointer; min-height: 34px;
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px;
-  padding: .32rem .5rem; color: var(--text); font: inherit; font-size: .8rem; text-align: left;
+  padding: .28rem .55rem; color: var(--text); font: inherit; font-size: .8rem; text-align: left;
   transition: border-color .12s;
 }
 .npc-charpick-trigger:hover { border-color: rgba(79,140,255,.4); }
 .npc-charpick-current { flex: 1; min-width: 0; display: flex; align-items: center; gap: .45rem; overflow: hidden; }
-.npc-charpick-current .npc-charpick-opt-txt { overflow: hidden; }
+.npc-charpick-ph { color: var(--text-dim); }
+.npc-charpick-selname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .npc-charpick-caret { color: var(--text-dim); flex-shrink: 0; font-size: .75rem; }
 .npc-charpick-av {
   width: 26px; height: 26px; border-radius: 50%; object-fit: cover; object-position: center top; flex-shrink: 0;
