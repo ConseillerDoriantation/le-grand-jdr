@@ -1,0 +1,968 @@
+// ════════════════════════════════════════════════════════════════════════════
+// spells-calc.js — Fonctions de calcul pures pour les sorts
+// Utilisé par spells.js (deck + modale) et potentiellement shop/bestiary.
+// Pas de DOM, pas d'état d'UI. Seul état : caches Firestore chargés par la
+// modale via setSpellCaches().
+// ════════════════════════════════════════════════════════════════════════════
+
+import { STATE } from '../../core/state.js';
+import { charSession } from '../../shared/char-session.js';
+import { getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
+import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
+import { getMainWeapon } from './data.js';
+
+// ── Caches chargés depuis openSortModal ───────────────────────────────────────
+let _spellMatricesCache = null;
+let _damageTypesCache   = [];
+
+export function setSpellCaches(matrices, damageTypes) {
+  _spellMatricesCache = matrices;
+  _damageTypesCache   = damageTypes;
+}
+export function getSpellMatricesCache() { return _spellMatricesCache; }
+
+// ── Helpers calcul sorts ─────────────────────────────────────────────────────
+
+/**
+ * TYPES d'un sort : tableau ['offensif','defensif','utilitaire']
+ * Stocké explicitement dans s.types[]
+ * Fallback legacy : typeSoin → defensif, noyau → offensif, sinon utilitaire
+ */
+export function _getSortTypes(s) {
+  if (Array.isArray(s.types) && s.types.length) return s.types;
+  // Legacy
+  if (s.typeSoin) return ['defensif'];
+  if (s.noyau)   return ['offensif'];
+  return ['utilitaire'];
+}
+
+/** Type d'action : 'action' | 'action_bonus' | 'reaction'
+ *  + concentration : boolean
+ *  Réaction et Concentration = 100% déterminées par les runes.
+ *  Action Bonus = rune Enchantement. Override manuel possible pour Action/Action Bonus uniquement.
+ */
+export function _getSortAction(s) {
+  const runes = s.runes || [];
+  const action        = runes.includes('Réaction')     ? 'reaction'
+                      : runes.includes('Enchantement') ? 'action_bonus'
+                      : s.actionOverride               || 'action';
+  const concentration = runes.includes('Concentration');
+  return { action, concentration };
+}
+
+/**
+ * Dégâts effectifs d'un sort offensif.
+ * - Base = dégâts de l'arme principale si degats vide
+ * - Chaque rune Puissance : +1 dé
+ * - Chaînage Puissance : nbPuiss > 1 → +(nbPuiss-1)*2 bonus fixe
+ *   (Protection n'entre PAS dans le chaînage des dégâts — chaînage par rune.)
+ */
+export function _calcSortDegats(s, c) {
+  const mainP   = getMainWeapon(c);
+  const armeDeg = mainP.degats;
+
+  let base = (s.degats || '').trim();
+  if (!base || base.toLowerCase() === '= arme') base = armeDeg;
+
+  const runes   = s.runes || [];
+  const nbPuiss = runes.filter(r => r === 'Puissance').length;
+  const bonusVal = nbPuiss > 1 ? (nbPuiss - 1) * 2 : 0;
+
+  // Bonus de maîtrise de l'arme principale (toujours appliqué)
+  const maitrise = _getMaitriseBonus(c, mainP);
+
+  const match = base.match(/^(\d+)(d\d+)(.*)$/i);
+  if (match) {
+    let result = `${parseInt(match[1]) + nbPuiss}${match[2]}${match[3]}`;
+    const totalBonus = bonusVal + maitrise;
+    if (totalBonus > 0) result += ` +${totalBonus}`;
+    else if (totalBonus < 0) result += ` ${totalBonus}`;
+    return result;
+  }
+  let result = base;
+  if (nbPuiss > 0) result += ` +${nbPuiss}d6`;
+  const totalBonus = bonusVal + maitrise;
+  if (totalBonus > 0) result += ` +${totalBonus}`;
+  else if (totalBonus < 0) result += ` ${totalBonus}`;
+  return result;
+}
+
+/**
+ * Soin effectif.
+ * - Base 1d4 (visible dès que le sort est de type "défensif")
+ * - Chaque rune Protection : +1d4, chaînage +2 soin fixe par paire
+ * - Modificateur de stat selon nature du noyau :
+ *    - Noyau MAGIQUE → modificateur de la stat de l'arme principale (Int/Sag/Cha…)
+ *    - Noyau PHYSIQUE / sans noyau → modificateur de Constitution
+ * - Maîtrise de l'arme principale ajoutée (uniquement si noyau magique)
+ * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
+ */
+export function _calcSortSoin(s, c) {
+  const runes  = s.runes || [];
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
+  const base   = (s.soin || '').trim();
+
+  // Stat de soin : 'none' = aucun modificateur (potion flat, etc.)
+  const isMagic = _isNoyauMagic(s);
+  const statKey = _getSortSoinStatKey(s, c);
+  const noMod   = statKey === 'none';
+  const statVal = noMod ? 10 : ((c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0));
+  const statMod = noMod ? 0 : Math.floor((Math.min(22, statVal) - 10) / 2);
+  const statStr = statMod > 0 ? ` +${statMod}` : statMod < 0 ? ` ${statMod}` : '';
+
+  // Maîtrise de l'arme : pertinente uniquement pour les sorts magiques (l'arme est le focus)
+  const mainP   = getMainWeapon(c);
+  const maitrise = isMagic ? _getMaitriseBonus(c, mainP) : 0;
+  const maitriseStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
+
+  const buildDefault = (diceCount) => {
+    let r = `${diceCount}d4${statStr}`;
+    if (chainSoin > 0) r += ` +${chainSoin * 2}`;
+    return r + maitriseStr;
+  };
+
+  if (!base || base.toLowerCase() === '= base') {
+    return buildDefault(1 + nbProt);
+  }
+  if (nbProt > 0) {
+    const match = base.match(/^(\d+)(d\d+)(.*)$/i);
+    if (match) {
+      // Format XdY reconnu → on ajoute les dés Protection + stat + chaînage + maîtrise
+      let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}${statStr}`;
+      if (chainSoin > 0) r += ` +${chainSoin * 2}`;
+      return r + maitriseStr;
+    }
+    // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
+    return base;
+  }
+  if (maitriseStr || statStr) return `${base}${statStr}${maitriseStr}`;
+  return base;
+}
+
+/** Mode de la rune Protection : 'soin' | 'ca' — stocké dans s.protectionMode */
+export function _getSortProtectionMode(s) {
+  return s?.protectionMode || 'ca'; // défaut CA si non précisé
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMBOS DE RUNES — Transformations spéciales
+// Un combo détecté change l'EFFET PRODUIT par les runes (pas juste un libellé).
+// La logique de détection + transformation est ici. Le MJ peut activer/désactiver
+// et renommer chaque combo via la console (matrice `combos`).
+// ══════════════════════════════════════════════════════════════════════════════
+export const SORT_COMBOS = [
+  {
+    id: 'drain',
+    icon: '🩸',
+    defaultName: 'Drain personnel',
+    detect: (counts) => counts.Puissance > 0 && counts.Protection > 0,
+    describe: (counts) => {
+      const pct = Math.round((0.25 + 0.25 * counts.Protection) * 100);
+      return `Puissance ×${counts.Puissance} + Protection ×${counts.Protection} · dégâts de l'arme · ${pct}% des dégâts soigne le lanceur`;
+    },
+  },
+  {
+    id: 'zone_elargie',
+    icon: '🌐',
+    defaultName: 'Zone élargie',
+    detect: (counts) => counts.Amplification > 0 && counts.Dispersion > 0,
+    describe: (counts) => {
+      const w = _ampLength(counts.Amplification);
+      const h = _ampLength(counts.Dispersion);
+      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${w}×${h}m (la Dispersion bénéficie du chainage comme l'Amplification)`;
+    },
+  },
+  {
+    id: 'arme_invoquee',
+    icon: '⚔️',
+    defaultName: 'Arme invoquée',
+    detect: (counts) => counts.Enchantement > 0 && counts.Invocation > 0,
+    describe: (counts, s) => {
+      const arm = getInvokedArm(_spellMatricesCache, s?.noyauTypeId);
+      const nbP = counts.Puissance || 0;
+      const STAT_LBL = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' };
+      if (arm) {
+        const tch = STAT_LBL[arm.statToucher] || arm.statToucher;
+        const dmg = STAT_LBL[arm.statDegats]  || arm.statDegats;
+        const statStr = (arm.statToucher === arm.statDegats) ? tch : `Touche:${tch} / Dégâts:${dmg}`;
+        const puissBonus = nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : '';
+        return `${arm.weapon} · ${arm.degats}${puissBonus} · ${statStr} · portée ${arm.portee}m · 2 tours par défaut${arm.note ? ` · ${arm.note}` : ''}`;
+      }
+      return `Arme générique 1d8${nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : ''} · 2 tours par défaut · ⚠️ matrice Armes invoquées vide pour cet élément`;
+    },
+  },
+  {
+    id: 'allonge_magique',
+    icon: '🏹',
+    defaultName: 'Allonge magique',
+    detect: (counts, s) => counts.Enchantement > 0 && counts.Amplification > 0 && (s?.enchantSlot || 'arme') === 'arme',
+    describe: (counts) => {
+      const len = _ampLength(counts.Amplification);
+      return `Enchantement (Arme) + Amplification ×${counts.Amplification} · portée d'attaque de l'arme enchantée +${len}m (au lieu d'une zone)`;
+    },
+  },
+  {
+    id: 'sentinelle',
+    icon: '🪤',
+    defaultName: 'Sentinelle / Piège',
+    detect: (counts) => counts.Affliction > 0 && counts.Invocation > 0,
+    describe: (counts, s) => {
+      const st = _calcSentinelStats(s || {});
+      const nbDisp = counts.Dispersion || 0;
+      const nbSent = nbDisp > 0 ? 2 * nbDisp : 1;
+      const sentStr = nbSent > 1 ? `${nbSent} sentinelles stationnaires (placement libre dans la portée)` : 'sentinelle stationnaire';
+      return `Affliction + Invocation · ${sentStr} · ${st.hp} PV · CA ${st.ca} · attaque ${st.dmg} · portée ${st.portee}m · 2 tours par défaut`;
+    },
+  },
+  {
+    id: 'canalise_persistant',
+    icon: '🧠',
+    defaultName: 'Sort canalisé persistant',
+    detect: (counts) => (counts.Durée || 0) > 0 && counts.Concentration > 0,
+    describe: (counts) =>
+      `Durée + Concentration · le sort tient tant que la concentration est maintenue · les ${(counts.Durée||0) + 1} tours de Durée s'appliquent en grâce après rupture`,
+  },
+  {
+    id: 'bouclier_reactif',
+    icon: '🛡️',
+    defaultName: 'Bouclier réactif',
+    detect: (counts, s) => counts.Réaction > 0 && counts.Protection > 0 && (s?.protectionMode || 'ca') === 'ca',
+    describe: (counts) => {
+      const nbP = counts.Protection;
+      const tier = nbP >= 3 ? 'Boss ou inférieur' : nbP === 2 ? 'Élite ou inférieur' : 'Mob classique';
+      return `Réaction + Protection ×${nbP} · annule 1 attaque entrante en réaction (pas de bonus CA) · plafond cible : ${tier}`;
+    },
+  },
+  {
+    id: 'aura_punitive',
+    icon: '🌀',
+    defaultName: 'Aura punitive',
+    // Protection + Affliction (sans Puissance, sinon c'est Drain qui prime)
+    detect: (counts) => counts.Protection > 0 && counts.Affliction > 0 && (counts.Puissance || 0) === 0,
+    describe: (counts) => {
+      const radius = counts.Protection;
+      return `Protection ×${counts.Protection} + Affliction ×${counts.Affliction} · zone ${radius}c (Manhattan) autour du lanceur · tout ennemi présent au cast subit l'affliction (JS Con DD 11) · pas de bonus CA`;
+    },
+  },
+  {
+    id: 'sort_suspendu',
+    icon: '🔮',
+    defaultName: 'Sort suspendu',
+    // Réaction + Durée : stocke le sort, déclenchement manuel hors-tour
+    detect: (counts) => counts.Réaction > 0 && (counts.Durée || 0) > 0,
+    describe: (counts) => {
+      const turns = (counts.Durée || 0) + 1;
+      return `Réaction + Durée ×${counts.Durée || 0} · le sort est stocké au cast (PM payé) · déclenchable hors de votre tour pendant ${turns} tour${turns > 1 ? 's' : ''}`;
+    },
+  },
+  {
+    id: 'coup_chance',
+    icon: '🍀',
+    defaultName: 'Coup de chance',
+    // Chance + Réaction : relance d'attaque sur rate
+    detect: (counts) => (counts.Chance || 0) > 0 && counts.Réaction > 0,
+    describe: (counts) => {
+      const charges = counts.Chance || 0;
+      return `Chance ×${charges} + Réaction · ${charges} relance${charges > 1 ? 's' : ''} automatique${charges > 1 ? 's' : ''} d'attaque ratée pendant 2 tours`;
+    },
+  },
+];
+
+/** Construit le compteur des runes depuis un sort. */
+export function _runeCounts(s) {
+  const counts = {};
+  (s?.runes || []).forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  return counts;
+}
+
+/** Renvoie les combos actifs pour un sort (filtre selon config MJ enabled/disabled). */
+export function _activeCombos(s) {
+  const counts = _runeCounts(s);
+  const matrices = _spellMatricesCache;
+  return SORT_COMBOS.filter(combo => {
+    const cfg = getComboConfig(matrices, combo.id);
+    if (!cfg.enabled) return false;
+    try { return !!combo.detect(counts, s); } catch { return false; }
+  }).map(combo => {
+    const cfg = getComboConfig(matrices, combo.id);
+    return { ...combo, name: cfg.name, detail: combo.describe(counts, s) };
+  });
+}
+
+// ── Auto-value : chip lecture seule + bouton "✏️ Custom" / "↺ Auto" ──────────
+// Évite l'effet "input vide qui invite à taper". Le joueur voit la valeur
+// calculée par défaut, et ne saisit que s'il veut explicitement override.
+export function _autoSourceDegats(s, c) {
+  const mainP   = getMainWeapon(c);
+  // Override du sort sur la stat de dégâts (override sort > arme principale)
+  const statKey = s?.degatsStat || mainP.statAttaque || 'force';
+  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || 'For';
+  const nbP     = (s.runes||[]).filter(r => r === 'Puissance').length;
+  const srcLbl  = s?.degatsStat ? `stat sort (${statLbl})` : statLbl;
+  const parts   = [mainP.isDefault ? `Poings ${mainP.degats}` : (mainP.nom || 'arme'), srcLbl];
+  if (nbP > 0) parts.push(`Puissance ×${nbP}`);
+  return `auto · ${parts.join(' + ')}`;
+}
+export function _autoSourceSoin(s) {
+  const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
+  const isMagic = _isNoyauMagic(s);
+  const statKey = _getSortSoinStatKey(s, _modalChar());
+  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
+  // Le label reflète si la stat vient d'un override de sort ou de l'auto-dérivation arme/noyau
+  const natureStr = s?.degatsStat
+    ? `stat sort (${statLbl})`
+    : (isMagic ? `magique · stat arme (${statLbl})` : `physique · Constitution (${statLbl})`);
+  return nbProt > 0
+    ? `auto · base 1d4 +${nbProt}d4 (Protection) · ${natureStr}`
+    : `auto · base 1d4 · ${natureStr}`;
+}
+export function _autoSourceCA(s) {
+  const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
+  const ov = getProtectionCAOverride(_spellMatricesCache, s?.noyauTypeId);
+  if (nbProt === 0) return 'auto · CA +2 (2 tours)';
+  // Combo Bouclier réactif : pas de bonus CA — source informe
+  const hasReaction = (s.runes || []).includes('Réaction');
+  if (hasReaction && (s.protectionMode || 'ca') === 'ca') {
+    const cfg = getComboConfig(_spellMatricesCache, 'bouclier_reactif');
+    if (cfg.enabled) return `combo Bouclier réactif · annule 1 attaque en réaction · Protection ×${nbProt}`;
+  }
+  const modStr = ov ? `mod ×${ov.mod}` : 'mod ×2';
+  const noteStr = ov?.note ? ` · ${ov.note}` : '';
+  return `auto · Protection ×${nbProt} · ${modStr} (2 tours)${noteStr}`;
+}
+export function _autoSourceEnchantDeg(s) {
+  const nbP = (s.runes||[]).filter(r => r === 'Puissance').length;
+  return nbP > 0 ? `auto · (1+${nbP} Puissance)d4 +2` : 'auto · 1d4 +2';
+}
+
+// Lit la valeur d'un <select> seulement s'il est RÉELLEMENT visible (aucun
+// ancêtre en display:none). Évite de lire la valeur d'un sélecteur de stat
+// caché qui aurait conservé sa valeur initiale et qui écraserait la sélection
+// utilisateur sur la section visible.
+export function _readVisibleStatOverride(...ids) {
+  for (const id of ids) {
+    const el = document.getElementById(id); if (!el) continue;
+    let n = el, visible = true;
+    while (n && n !== document.body) {
+      if (n.style?.display === 'none') { visible = false; break; }
+      n = n.parentElement;
+    }
+    if (visible && el.value) return el.value;
+  }
+  return '';
+}
+
+// Helper : options HTML pour les select de stat de sort.
+// Utilisé à plusieurs endroits (Toucher, Dégâts, Soin) — single source of truth.
+export function _SPELL_STAT_OPTIONS(selected = '') {
+  return [
+    ['',           'Auto (arme)'],
+    ['none',       'Aucune (pas de modificateur)'],
+    ['force',       'Force'],
+    ['dexterite',   'Dextérité'],
+    ['intelligence','Intelligence'],
+    ['sagesse',     'Sagesse'],
+    ['constitution','Constitution'],
+    ['charisme',    'Charisme'],
+  ].map(([v, lbl]) => `<option value="${v}" ${selected===v?'selected':''}>${lbl}</option>`).join('');
+}
+
+/**
+ * Génère le HTML d'un champ auto-calculé avec toggle Custom / Auto.
+ * fieldId = id de l'input override (ex: 's-degats')
+ * Le wrapper contient deux modes : display (chip lecture seule) et edit (input).
+ */
+export function _autoValHtml({ fieldId, label, autoValue, autoSource, currentValue, placeholder, extraEdit }) {
+  // Mode Custom = toggle pour overrider la FORMULE.
+  // Les sélecteurs de STAT (extraEdit) sont TOUJOURS visibles : changer la stat
+  // ne nécessite pas de passer en mode Custom de la formule (ce sont des overrides
+  // indépendants). Cela évite que l'override de stat ne soit jamais saisi.
+  const hasOverride = !!(currentValue && String(currentValue).trim());
+  const extraHtml   = extraEdit?.html || '';
+  return `
+    <div class="cs-spell-autoval ${hasOverride ? 'is-custom' : ''}">
+      <div class="cs-spell-autoval-label">${label}</div>
+      <div class="cs-spell-autoval-display" id="${fieldId}-display" style="${hasOverride?'display:none':''}">
+        <span class="cs-spell-autoval-val"    id="${fieldId}-autoval">${autoValue || '—'}</span>
+        <span class="cs-spell-autoval-source" id="${fieldId}-source">${autoSource || ''}</span>
+        <button type="button" class="cs-spell-autoval-btn" data-action="_enableSortCustom" data-field="${fieldId}">✏️ Custom</button>
+      </div>
+      <div class="cs-spell-autoval-edit" id="${fieldId}-edit" style="${hasOverride?'':'display:none'}">
+        <div class="cs-spell-autoval-edit-row">
+          <input class="input-field" id="${fieldId}" value="${currentValue||''}" placeholder="${placeholder||''}">
+          <button type="button" class="cs-spell-autoval-btn" data-action="_disableSortCustom" data-field="${fieldId}">↺ Auto</button>
+        </div>
+      </div>
+      ${extraHtml}
+    </div>
+  `;
+}
+
+// Slots possibles pour Enchantement / Affliction (élément × slot = effet thématique)
+export const SPELL_SLOTS = [
+  { v:'arme',  label:'⚔️ Arme',   short:'Arme',  icon:'⚔️' },
+  { v:'tete',  label:'👁️ Tête',   short:'Tête',  icon:'👁️' },
+  { v:'torse', label:'👕 Torse',  short:'Torse', icon:'👕' },
+  { v:'pieds', label:'👢 Pieds',  short:'Pieds', icon:'👢' },
+];
+export const SLOT_LABEL = { arme:'⚔️ Arme', tete:'👁️ Tête', torse:'👕 Torse', pieds:'👢 Pieds' };
+
+/**
+ * Dégâts du DoT d'affliction (mode 'dot') effectifs (auto si vide).
+ * Formule : (1 + nbPuissance)d4 + (2 + 2 × max(0, nbPuissance - 1))
+ * → 0 Puiss : 1d4 +2 · 1 Puiss : 2d4 +2 · 2 Puiss : 3d4 +4 · 3 Puiss : 4d4 +6
+ */
+/** Mapping legacy slot → stat de sauvegarde (rétro-compat sorts existants). */
+function _legacySlotToStat(slot) {
+  if (slot === 'torse') return 'constitution';
+  if (slot === 'pieds') return 'force';
+  if (slot === 'tete')  return 'sagesse';
+  if (slot === 'arme')  return 'dexterite';
+  return 'constitution';
+}
+
+export function _calcAfflictionDot(s) {
+  const manual = (s?.afflictionDotFormula || '').trim();
+  if (manual) return manual;
+  const nbPuiss = (s?.runes || []).filter(r => r === 'Puissance').length;
+  const dice = 1 + nbPuiss;
+  const mod  = 2 + 2 * Math.max(0, nbPuiss - 1);
+  return `${dice}d4 +${mod}`;
+}
+export function _autoSourceAfflictionDot(s) {
+  const nbP = (s?.runes || []).filter(r => r === 'Puissance').length;
+  if (nbP === 0) return '1 Affliction · base';
+  if (nbP === 1) return '+1 Puiss · 1 dé bonus';
+  return `+${nbP} Puiss · ${nbP} dés + chaînage`;
+}
+
+/**
+ * Dégâts d'enchantement effectifs (mode Dégâts uniquement, auto si vide).
+ * Formule : (1 + nbPuissance)d4 + 2 dans l'élément.
+ * Le slot legacy est ignoré — seul le mode importe.
+ */
+export function _calcEnchantDegats(s) {
+  // Mode État → pas de dégâts bonus
+  if ((s.enchantMode || 'dmg') === 'etat') return '';
+  const manual = (s.enchantDegats || '').trim();
+  if (manual) return manual;
+  const nbPuiss = (s.runes || []).filter(r => r === 'Puissance').length;
+  return `${1 + nbPuiss}d4 +2`;
+}
+
+/** Valeur CA (rune Protection mode CA) :
+ *  - Saisie manuelle si fournie
+ *  - Sinon auto : (mod par rune selon élément ou 2 par défaut) + chaînage +1 / rune au-delà de la 1ère
+ *  - Le mod par élément vient de la matrice MJ : _spellMatricesCache (Protection×CA)
+ */
+export function _getSortCA(s) {
+  const manual = (s?.ca || '').trim();
+  if (manual) return manual;
+  const nbProt = (s.runes || []).filter(r => r === 'Protection').length;
+  if (nbProt === 0) return 'CA +2 (2 tours)';
+  // Combo Bouclier réactif : pas de bonus CA, juste un blocage en réaction
+  const hasReaction = (s.runes || []).includes('Réaction');
+  if (hasReaction && (s.protectionMode || 'ca') === 'ca') {
+    const cfg = getComboConfig(_spellMatricesCache, 'bouclier_reactif');
+    if (cfg.enabled) {
+      const tier = nbProt >= 3 ? 'Boss-' : nbProt === 2 ? 'Élite-' : 'Mob';
+      return `Bloque 1 attaque (${tier})`;
+    }
+  }
+  const ov  = getProtectionCAOverride(_spellMatricesCache, s?.noyauTypeId);
+  const mod = ov?.mod ?? 2;
+  const base  = nbProt * mod;
+  const chain = nbProt > 1 ? (nbProt - 1) : 0;
+  return `CA +${base + chain} (2 tours)`;
+}
+
+/**
+ * Nombre de cibles — règle Dispersion solo :
+ * 0 rune  → 1 cible
+ * N runes → 2N cibles différentes (1 base + N runes + (N-1) chaînage)
+ *
+ * En combo avec Amplification, Dispersion bascule en "élargissement de zone"
+ * et ne génère PAS de cibles supplémentaires — la zone gère ça.
+ */
+export function _calcSortCibles(s) {
+  const runes = s.runes || [];
+  const nbDisp = runes.filter(r => r === 'Dispersion').length;
+  const nbAmp  = runes.filter(r => r === 'Amplification').length;
+  const nbAff  = runes.filter(r => r === 'Affliction').length;
+  const nbInv  = runes.filter(r => r === 'Invocation').length;
+  // Combo Amp + Disp → mode zone, pas de cibles séparées
+  if (nbAmp > 0 && nbDisp > 0) return 1;
+  // Combo Sentinelle (Aff + Inv) + Disp → invocations multiples, pas de cibles séparées
+  if (nbAff > 0 && nbInv > 0 && nbDisp > 0) return 1;
+  if (nbDisp === 0) return 1;
+  return 2 * nbDisp; // 2N cibles différentes
+}
+
+/** Détermine si le noyau du sort est magique (depuis la matrice damage_types).
+ *  Détermine la stat utilisée pour le soin (magique → arme · physique → Constitution).
+ */
+export function _isNoyauMagic(s) {
+  const types = _damageTypesCache;
+  if (!types || !s?.noyauTypeId) return false;
+  const t = types.find(x => x.id === s.noyauTypeId);
+  return !!t?.isMagic;
+}
+
+/** Stat utilisée pour calculer le bonus de soin :
+ *   - Noyau magique avec arme magique équipée → stat de l'arme
+ *   - Noyau magique sans arme (Poings) → Intelligence (fallback raisonnable)
+ *   - Noyau physique / pas de noyau → Constitution
+ */
+function _getSortSoinStatKey(s, c) {
+  // Override explicite du sort > déduction auto selon noyau
+  if (s?.degatsStat) return s.degatsStat;
+  if (_isNoyauMagic(s)) {
+    const mainP = getMainWeapon(c);
+    if (mainP.isDefault) return 'intelligence';
+    return mainP.statAttaque || 'intelligence';
+  }
+  return 'constitution';
+}
+
+/** Vrai si le sort peut avoir une "durée de base" pertinente.
+ *  Affiché conditionnellement dans le modal — Protection CA, Enchant, Affliction, ou rune Durée.
+ */
+export function _needsDureeBase(s) {
+  const runes = s?.runes || [];
+  if (!runes.length) return false;
+  if (runes.includes('Durée')) return true;
+  if (runes.includes('Enchantement') || runes.includes('Affliction')) return true;
+  if (runes.includes('Protection') && (s?.protectionMode || 'ca') === 'ca') return true;
+  return false;
+}
+
+/** Durée totale en tours d'un sort.
+ *  Base 2 tours (sort persistant) + bonus rune Durée.
+ *  Bonus Durée : chaque rune ajoute +2, chaînage ajoute +1 supplémentaire par rune au-delà de la 1ère.
+ *  → 0 Durée : 2 · 1 Durée : 4 (=2+2) · 2 Durée : 7 (=2+4+1) · 3 Durée : 10 (=2+6+2) · 4 Durée : 13
+ *  Override : s.dureeBase remplace la base 2 si supérieur (saisie manuelle).
+ */
+export function _calcSortDuree(s) {
+  const runes  = s?.runes || [];
+  const nbDur  = runes.filter(r => r === 'Durée').length;
+  // Base : 2 tours par défaut, ou override manuel via s.dureeBase
+  const base   = (s?.dureeBase && s.dureeBase >= 2) ? s.dureeBase : 2;
+  // Bonus Durée scalable : 2 par rune + 1 par chaînage
+  const runeBonus = nbDur > 0 ? (2 * nbDur + (nbDur - 1)) : 0;
+  return base + runeBonus;
+}
+export function _autoSourceDuree(s) {
+  const nbDur = (s?.runes || []).filter(r => r === 'Durée').length;
+  if (nbDur === 0) return 'base persistante';
+  if (nbDur === 1) return '+1 Durée · +2 tours';
+  return `+${nbDur} Durée · +${2*nbDur + (nbDur-1)} tours (chaînage)`;
+}
+
+
+/** Longueur de zone produite par N runes (Amplification OU Dispersion en combo).
+ *  Chaque rune ajoute +3m de base, chainage +1m par rune au-delà de la 1ère.
+ *  ×1=3, ×2=7, ×3=11, ×4=15… → 3N + (N-1) = 4N-1 pour N≥1
+ */
+export function _ampLength(nbAmp) { return nbAmp >= 1 ? (4 * nbAmp - 1) : 0; }
+
+/** Zone calculée :
+ *  - Si zoneW/H manuels saisis → ils priment (override MJ)
+ *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
+ *      Amplification ×N → longueur = 4N-1 m  (chainage)
+ *      Combo avec Dispersion ×M → largeur = 4M-1 m (même formule, symétrique)
+ *      Defaut combo Amp + Disp = 3 × 3
+ *  - Source: 'manual' | 'runes' | null
+ */
+export function _calcSortZone(s) {
+  const runes  = s.runes || [];
+  const wMan = s.zoneW ? parseInt(s.zoneW) : 0;
+  const hMan = s.zoneH ? parseInt(s.zoneH) : 0;
+  if (wMan > 0 || hMan > 0) return { w: wMan, h: hMan, source: 'manual' };
+
+  const nbAmp  = runes.filter(r => r === 'Amplification').length;
+  const nbDisp = runes.filter(r => r === 'Dispersion').length;
+  if (nbAmp === 0) return null;
+
+  const length = _ampLength(nbAmp);
+  // Dispersion en combo applique le MÊME chainage qu'Amplification (4M-1).
+  // Sans Dispersion → largeur 1 (ligne).
+  const width = nbDisp >= 1 ? _ampLength(nbDisp) : 1;
+  return { w: length, h: width, source: 'runes', amp: nbAmp, disp: nbDisp };
+}
+
+/** Déplacement : { mode:'push'|'pull', distance }, ou null */
+export function _calcSortDeplacement(s) {
+  if (!s.deplacement?.mode) return null;
+  return { mode: s.deplacement.mode, distance: Math.max(1, parseInt(s.deplacement.distance) || 1) };
+}
+
+/** Lacération : réduction CA cible
+ *  ×1 → -1 CA · ×N → -(2N-1) CA brut (plafonné -2 joueur / -4 Élite-Boss en jeu)
+ */
+function _calcLaceration(s) {
+  const nb = (s.runes||[]).filter(r => r === 'Lacération').length;
+  if (!nb) return null;
+  return { runes: nb, reduction: 2*nb - 1, max: 2, maxElite: 4 };
+}
+
+/** Chance : réduction RC critique
+ *  ×1 → RC 19-20 (-1) · ×N → RC (21-2N)-20 (-(2N-1))
+ *  Bonus : le dé de critique ajouté est aussi max
+ */
+function _calcChance(s) {
+  const nb = (s.runes||[]).filter(r => r === 'Chance').length;
+  if (!nb) return null;
+  const reduction = 2*nb - 1;
+  return { runes: nb, rc: 20 - reduction, reduction };
+}
+
+/** Drain : pourcentage des dégâts soigné au lanceur.
+ *  Formule : 25% + 25% × nbProtection → Prot×1=50, ×2=75, ×3=100, ×4=125…
+ *  Le drain est piloté entièrement par les runes ; plus de soinFraction.
+ */
+export function _calcDrainPct(s) {
+  const runes = s?.runes || [];
+  const nbP    = runes.filter(r => r === 'Puissance').length;
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  if (!nbP || !nbProt) return 0;
+  return 0.25 + 0.25 * nbProt;
+}
+
+/** DD du jet de Sagesse de concentration : 11 + 2×(n-1).
+ *  1 rune Concentration = DD 11 · 2 = 13 · 3 = 15 · etc.
+ */
+function _calcConcentrationDD(s) {
+  const nb = (s?.runes || []).filter(r => r === 'Concentration').length;
+  if (!nb) return null;
+  return 11 + 2 * (nb - 1);
+}
+
+/** Stats propres de la Sentinelle (combo Affliction + Invocation).
+ *  - Dégâts : 1d4 base + Puissance avec chaînage standard (+2/rune au-delà de la 1ère)
+ *  - PV     : 10 + 5×nbProt + chaînage (+1/rune au-delà de la 1ère)
+ *  - CA     : 10 + 2×nbProt + chaînage (+1/rune au-delà de la 1ère)
+ *  - Portée : 1m (Manhattan) sans Amp · sinon 4N-1 mètres (3, 7, 11, 15…)
+ */
+function _calcSentinelStats(s) {
+  const runes = s?.runes || [];
+  const nbP    = runes.filter(r => r === 'Puissance').length;
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  const nbAmp  = runes.filter(r => r === 'Amplification').length;
+  // Dégâts d4 : base 1d4 + 1d4 par Puissance, chaînage +2 par paire au-delà de la 1ère
+  const nbDice = 1 + nbP;
+  const chainDmg = nbP > 1 ? (nbP - 1) * 2 : 0;
+  const dmg = chainDmg > 0 ? `${nbDice}d4 +${chainDmg}` : `${nbDice}d4`;
+  // PV : chainage +1 par rune au-delà de la 1ère
+  const chainProt = nbProt > 1 ? (nbProt - 1) : 0;
+  const hp = 10 + 5 * nbProt + chainProt;
+  const ca = 10 + 2 * nbProt + chainProt;
+  // Portée : 1m sans Amp, sinon longueur Amp (réutilise _ampLength)
+  const portee = nbAmp === 0 ? 1 : _ampLength(nbAmp);
+  return { dmg, hp, ca, portee, nbP, nbProt, nbAmp };
+}
+
+/** Stats propres de l'Arme invoquée (combo Enchantement + Invocation).
+ *  Lit la matrice MJ pour l'arme de base de l'élément, puis ajoute Puissance.
+ */
+function _calcInvokedArmStats(s) {
+  const runes = s?.runes || [];
+  const nbP = runes.filter(r => r === 'Puissance').length;
+  const arm = getInvokedArm(_spellMatricesCache, s?.noyauTypeId);
+  const baseDmg = arm?.degats || '1d8';
+  let dmg = baseDmg;
+  if (nbP > 0) {
+    const m = baseDmg.match(/^(\d+)(d\d+)(.*)$/i);
+    dmg = m ? `${parseInt(m[1]) + nbP}${m[2]}${m[3]}` : `${baseDmg} +${nbP}d6`;
+  }
+  return {
+    weapon: arm?.weapon || 'Arme magique',
+    dmg,
+    statToucher: arm?.statToucher || 'force',
+    statDegats:  arm?.statDegats || 'force',
+    portee: arm?.portee || 1,
+    note: arm?.note || '',
+    hp: 10, ca: 10, // par défaut, peuvent être enrichis ensuite
+    nbP,
+  };
+}
+
+/**
+ * Génère le résumé textuel complet des effets d'un sort
+ * sous forme de tableau de lignes {icon, label, detail}
+ */
+export function _buildSortResume(s, c) {
+  const lines = [];
+  const runes  = s.runes || [];
+  const types  = _getSortTypes(s);
+  const { action, concentration } = _getSortAction(s);
+
+  // Action + Nature (instantané/persistant) + Portée (de l'arme principale, fallback Poings)
+  const actionLabels = { action:'⚡ Action', action_bonus:'✴️ Action Bonus', reaction:'🔄 Réaction' };
+  let actionStr = actionLabels[action] || '⚡ Action';
+  if (concentration) actionStr += ' + 🧠 Concentration';
+  // Nature : instantané sauf si une durée explicite est définie ou si Enchant/Affliction/Protection CA actifs
+  const isPersistent = runes.includes('Durée') || runes.includes('Enchantement') || runes.includes('Affliction')
+                    || (runes.includes('Protection') && (s.protectionMode || 'ca') === 'ca' && !runes.includes('Réaction'))
+                    || !!(s.dureeBase && s.dureeBase >= 2);
+  const natureStr = isPersistent ? '⏳ Persistant' : '⏱️ Instantané';
+  const concDD = _calcConcentrationDD(s);
+  lines.push({ icon: '', label: `${actionStr} · ${natureStr}`, detail: concDD ? `JS Sagesse DD ${concDD} si dégâts reçus · jusqu'à 10 tours` : '' });
+
+  // Portée du sort = portée de l'arme principale équipée (ou Poings = 1m)
+  // Sauf si combo Allonge magique : portée étendue (voir ligne dédiée plus bas)
+  const mainWp = getMainWeapon(c);
+  const wpPortee = parseInt(mainWp.portee) || 1;
+  lines.push({ icon:'📏', label:`Portée ${wpPortee}m`, detail: mainWp.isDefault ? 'Poings (mains nues)' : `Arme : ${mainWp.nom}` });
+
+  // Combos détectés (centralisés dans SORT_COMBOS, MJ peut activer/désactiver)
+  const nbPuiss   = runes.filter(r => r === 'Puissance').length;
+  const nbProt    = runes.filter(r => r === 'Protection').length;
+  const activeCombos = _activeCombos(s);
+  const comboIds = new Set(activeCombos.map(c => c.id));
+  activeCombos.forEach(combo => {
+    lines.push({ icon: combo.icon, label: `Combo ${combo.name}`, detail: combo.detail, isCombo: true });
+  });
+
+  // Cibles & zone — calcul commun pour décorer les lignes mono-cible
+  const nbCibles   = _calcSortCibles(s);
+  const zoneCalc   = _calcSortZone(s);
+  const isZone     = !!zoneCalc;
+  const isMonoCib  = !isZone && nbCibles === 1;
+  const monoStr    = isMonoCib ? ' · sur 1 cible' : '';
+
+  // Dégâts (si offensif) — masque la ligne pour les sorts Soutien/Contrôle/Méta
+  // qui ne font pas de dégâts d'impact (Enchantement et Affliction sont auto-suppressés).
+  // Sinon, sans formule explicite, on affichait le "1d6" de l'arme par défaut, ce qui
+  // donnait une impression trompeuse de dégâts directs.
+  const isEnchantOnly  = runes.includes('Enchantement') && !((s.degats || '').trim());
+  const isAfflictionSpell = runes.includes('Affliction'); // affliction = jamais d'impact
+  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell;
+  if (types.includes('offensif') && !_suppressImpactDmg) {
+    const mainP   = getMainWeapon(c);
+    // Override du sort sur la stat de dégâts > stat de l'arme principale
+    const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
+    const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
+    const modAtk  = Math.floor((Math.min(22, statVal) - 10) / 2);
+    const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
+    const maitrise = _getMaitriseBonus(c, mainP);
+    const deg      = _calcSortDegats(s, c);
+    // Label détaillé : dés + stat + maîtrise si présente
+    const modAtkStr = modAtk >= 0 ? `+${modAtk}` : `${modAtk}`;
+    const maitriseStr = maitrise !== 0 ? ` + Maî(${maitrise > 0 ? '+'+maitrise : maitrise})` : '';
+    const detail = `Dégâts · ${statLbl}(${modAtkStr})${maitriseStr}${monoStr}`;
+    lines.push({ icon:'⚔️', label:deg, detail });
+  }
+
+  // (Affliction / Enchantement : rendu dans le bloc unifié plus bas,
+  //  qui respecte les modes et ne fait pas de fallback DoT incorrect.)
+
+  // Protection : Soin ou CA selon protectionMode
+  const hasDefensif = types.includes('defensif');
+  if (nbProt > 0) {
+    const mode = _getSortProtectionMode(s);
+    if (mode === 'soin') {
+      // Combo Drain (Puissance + Protection mode soin) : pas de soin direct,
+      // le lanceur récupère un pourcentage des dégâts infligés (formule des runes).
+      if (comboIds.has('drain')) {
+        const pct = Math.round(_calcDrainPct(s) * 100);
+        lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · pas de soin direct · scale avec Protection` });
+      } else {
+        const mainPsoin  = getMainWeapon(c);
+        const maitrSoin  = _getMaitriseBonus(c, mainPsoin);
+        const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
+        const chainStr   = nbProt > 1 ? ` +${(nbProt-1)*2}` : '';
+        lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · +${nbProt}d4 Prot${chainStr}${maitrSoinStr}${monoStr}` });
+      }
+    } else {
+      // Mode CA — sauf si combo Bouclier réactif : la réaction instantanée ne donne pas de CA
+      if (comboIds.has('bouclier_reactif')) {
+        const tier = nbProt >= 3 ? 'Boss ou inférieur' : nbProt === 2 ? 'Élite ou inférieur' : 'Mob classique';
+        lines.push({
+          icon:'🛡️',
+          label: `Bloque 1 attaque entrante`,
+          detail: `Protection ×${nbProt} · plafond cible : ${tier} · pas de bonus CA, l'attaque est annulée en réaction`,
+        });
+      } else {
+        const caLbl = _getSortCA(s);
+        lines.push({ icon:'🛡️', label: caLbl, detail: `Bonus de CA (2 tours)${monoStr}` });
+      }
+    }
+  } else if (hasDefensif) {
+    lines.push({ icon:'🛡️', label:'Effet défensif', detail:'Décris l\'effet ci-dessous' });
+  }
+
+  // Cibles (uniquement si Dispersion solo, sans combo Amp+Disp)
+  const nbDisp = runes.filter(r => r === 'Dispersion').length;
+  const nbAmp  = runes.filter(r => r === 'Amplification').length;
+  if (nbCibles > 1 && !(nbAmp > 0 && nbDisp > 0)) {
+    const dispDetail = nbDisp === 1
+      ? '1 rune Dispersion · cibles différentes uniquement'
+      : `${nbDisp} runes Dispersion · chaînage +${nbDisp - 1} cible/rune · cibles différentes`;
+    lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
+  }
+
+  // Zone (Amplification ou manuelle) — sauf combo Allonge magique : devient portée d'arme
+  if (zoneCalc && !comboIds.has('allonge_magique')) {
+    let zoneDetail = '';
+    if (zoneCalc.source === 'runes') {
+      const baseMeters = 3 * zoneCalc.amp;
+      const chainMeters = zoneCalc.amp > 1 ? (zoneCalc.amp - 1) : 0;
+      if (zoneCalc.amp > 0 && zoneCalc.disp > 0) {
+        zoneDetail = `Combo Amp ×${zoneCalc.amp} + Disp ×${zoneCalc.disp} · zone élargie`;
+      } else if (zoneCalc.amp > 1) {
+        zoneDetail = `Amplification ×${zoneCalc.amp} · ${baseMeters}m base + ${chainMeters}m chaînage`;
+      } else {
+        zoneDetail = `Amplification ×1 · 3m base`;
+      }
+    } else {
+      zoneDetail = 'Zone manuelle (override MJ)';
+    }
+    // Sort de terrain : Amplification seule (sans Puissance ni Protection) → 2 tours par défaut
+    const isTerrain = zoneCalc.source === 'runes' && nbPuiss === 0 && nbProt === 0;
+    if (isTerrain) zoneDetail += ' · 2 tours par défaut (sort de terrain)';
+    lines.push({ icon:'📐', label:`Zone ${zoneCalc.w}×${zoneCalc.h}m`, detail: zoneDetail });
+  } else if (zoneCalc && comboIds.has('allonge_magique')) {
+    // Allonge magique : la longueur Amp devient la portée de l'arme enchantée
+    lines.push({ icon:'🏹', label:`Portée d'arme +${zoneCalc.w}m`, detail:`Allonge magique active · l'arme enchantée porte à ${zoneCalc.w}m supplémentaires` });
+  }
+
+  // Déplacement (pousse / attire)
+  const depl = _calcSortDeplacement(s);
+  if (depl) {
+    const dIcon = depl.mode === 'push' ? '↗' : '↙';
+    lines.push({ icon: dIcon, label: depl.mode === 'push' ? `Pousse ${depl.distance}m` : `Attire ${depl.distance}m`, detail:'' });
+  }
+
+  // Durée (base + rune Durée) — combo Sort canalisé persistant : tant que la concentration tient
+  // Affichée uniquement pour les sorts persistants (Enchant, Affliction, Protection CA, rune Durée)
+  if (_needsDureeBase(s)) {
+    const duree = _calcSortDuree(s);
+    const nbDur = runes.filter(r => r === 'Durée').length;
+    const hasOverride = s.dureeBase && s.dureeBase >= 2;
+    const baseVal = hasOverride ? s.dureeBase : 2;
+    const runeBonus = duree - baseVal;
+    if (comboIds.has('canalise_persistant')) {
+      lines.push({
+        icon:'⏱️',
+        label: `Tant que concentration · +${runeBonus} tours de grâce`,
+        detail: `Sort canalisé persistant · pas de plafond 10t · les ${runeBonus} tours s'appliquent après rupture de concentration`,
+      });
+    } else {
+      const baseLbl = hasOverride ? `${baseVal} base (override)` : '2 base';
+      const detail = [
+        baseLbl,
+        nbDur > 0 ? `+${runeBonus} (Durée ×${nbDur}${nbDur>1?' avec chaînage':''})` : '',
+      ].filter(Boolean).join(' · ');
+      lines.push({ icon:'⏱️', label:`${duree} tour${duree > 1 ? 's' : ''}`, detail });
+    }
+  }
+
+  // Lacération
+  const lac = _calcLaceration(s);
+  if (lac) {
+    const chainNote = lac.runes > 1 ? ` · chaîné +${lac.runes - 1}` : '';
+    lines.push({ icon:'🩸', label:`CA cible −${lac.reduction}${monoStr}`, detail:`Brut · plafond −${lac.max} (−${lac.maxElite} Élites/Boss)${chainNote}` });
+  }
+
+  // Chance
+  const chc = _calcChance(s);
+  if (chc) {
+    const chainNote = chc.runes > 1 ? ` · chaîné +${chc.runes - 1} sur la plage` : '';
+    lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:`Critique aussi max${chainNote}` });
+  }
+
+  // ── Enchantement (mode Dégâts ou État) ──────────────────────────────
+  // Plus de slots — uniquement le mode et l'effet associé.
+  // Combos absorbants (Arme invoquée) → ligne classique cachée.
+  const nbEnch = runes.filter(r => r === 'Enchantement').length;
+  const nbAff  = runes.filter(r => r === 'Affliction').length;
+  const hideEnch = comboIds.has('arme_invoquee');
+  const hideAff  = comboIds.has('sentinelle');
+  if (nbEnch > 0 && !hideEnch) {
+    const mode    = s.enchantMode || 'dmg';
+    const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés (chaîné +${nbEnch-1})`;
+    const detailParts = ['2 tours', 'Action Bonus', cibleStr];
+    // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
+    if (mode === 'etat') {
+      const lib = _conditionsLibCache || [];
+      const etat = s.enchantEtatId ? lib.find(c2 => c2.id === s.enchantEtatId) : null;
+      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
+      lines.push({ icon:'✨', label:`Enchantement · État sur allié : ${lbl}`,
+                   detail: detailParts.join(' · ') });
+    } else {
+      const degAuto = _calcEnchantDegats(s);
+      const note = s.enchantDegats?.trim() ? '' : ' · auto (1+Puiss)d4+2';
+      lines.push({ icon:'✨', label:`Enchantement · Bonus arme alliée +${degAuto}`,
+                   detail: detailParts.join(' · ') + note });
+    }
+  }
+
+  // ── Affliction (mode DoT ou État) ──────────────────────────────────
+  if (nbAff > 0 && !hideAff) {
+    const mode = s.afflictionMode || 'dot';
+    const dd   = 11 + 3 * (nbAff - 1);
+    // Stat de JS dérivée (comme dans le VTT)
+    let saveStat = 'constitution';
+    const lib = _conditionsLibCache || [];
+    if (mode === 'etat' && s.afflictionEtatId) {
+      const etat = lib.find(c2 => c2.id === s.afflictionEtatId);
+      if (etat?.defaultSaveStat) saveStat = etat.defaultSaveStat;
+    }
+    if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
+    const STAT_SHORT2 = { force:'For', dexterite:'Dex', constitution:'Con',
+                          intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
+    const statLbl = STAT_SHORT2[saveStat] || saveStat;
+    const cibleStr = nbAff === 1 ? 'sur 1 ennemi' : `sur ${nbAff} ennemis (chaîné +${nbAff-1})`;
+
+    if (mode === 'etat') {
+      // Mode État : on affiche l'état appliqué, PAS la formule DoT
+      const etat = s.afflictionEtatId ? lib.find(c2 => c2.id === s.afflictionEtatId) : null;
+      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
+      lines.push({ icon:'⛓', label:`Affliction · État : ${lbl}`,
+                   detail: `${cibleStr} · JS ${statLbl} DD ${dd} pour résister` });
+    } else {
+      // Mode DoT : on affiche la formule de dégâts par tour
+      const formula = _calcAfflictionDot(s);
+      lines.push({ icon:'🩸', label:`Affliction · DoT ${formula} / tour`,
+                   detail: `${cibleStr} · JS ${statLbl} DD ${dd} de la cible` });
+    }
+  }
+
+  // Invocation — masquée si absorbée par un combo (Arme invoquée, Sentinelle)
+  const hideInvoc = comboIds.has('arme_invoquee') || comboIds.has('sentinelle');
+  if (runes.includes('Invocation') && !hideInvoc) {
+    lines.push({ icon:'🐾', label:'Invocation', detail:'Créature liée · 10 PV · CA 10 · 2 tours par défaut' });
+  }
+
+  // Détails Sentinelle — affichés à la place de la ligne classique Invocation/Affliction
+  if (comboIds.has('sentinelle')) {
+    const st = _calcSentinelStats(s);
+    const nbDisp = runes.filter(r => r === 'Dispersion').length;
+    const nbSent = nbDisp > 0 ? 2 * nbDisp : 1;
+    const countStr = nbSent > 1 ? ` · ×${nbSent} sentinelles` : '';
+    lines.push({ icon:'🪤', label:`Sentinelle · ${st.hp} PV · CA ${st.ca}${countStr}`, detail:`Attaque ${st.dmg} · portée ${st.portee}m · stationnaire · 2 tours par défaut` });
+  }
+
+  // Concentration (rappel JS si pas déjà mentionné)
+  if (concentration && action !== 'action') {
+    const dd = _calcConcentrationDD(s) ?? 11;
+    lines.push({ icon:'🧠', label:'Concentration', detail:`JS Sagesse DD ${dd} si dégâts reçus · jusqu'à 10 tours` });
+  }
+
+  // Limite MJ (texte libre)
+  if (s.mjNotes && s.mjNotes.trim()) {
+    lines.push({ icon:'🔒', label:'Limite MJ', detail: s.mjNotes.trim() });
+  }
+
+  return lines;
+}
+
+// Placeholder — resolved at runtime via characters.js import chain
+export function _getMaitriseBonus(c, item) {
+  return getSharedMaitriseBonus(c, item);
+}
+
+export function _getCurrentSpellChar() {
+  return STATE.activeChar || charSession.getCurrentChar() || null;
+}
