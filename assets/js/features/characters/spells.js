@@ -1057,7 +1057,7 @@ export async function openSortModal(idx, s) {
         fieldId: 's-soin',
         label: '💚 Soin',
         autoValue:  _calcSortSoin(s || {}, _modalChar()),
-        autoSource: _autoSourceSoin(s || {}),
+        autoSource: _autoSourceSoin(s || {}, _modalChar()),
         currentValue: s?.soin,
         placeholder: 'ex : 3d6 +2, moitié des dégâts… (vide = formule auto)',
         extraEdit: typesInit.includes('offensif') ? null : {
@@ -1542,7 +1542,7 @@ function _refreshAutoValChips() {
     if (r && source !== undefined) r.textContent = source || '';
   };
   apply('s-degats',         _calcSortDegats(s, c),  _autoSourceDegats(s, c));
-  apply('s-soin',           _calcSortSoin(s, c),    _autoSourceSoin(s));
+  apply('s-soin',           _calcSortSoin(s, c),    _autoSourceSoin(s, c));
   apply('s-ca',             _getSortCA(s),          _autoSourceCA(s));
   apply('s-enchant-degats', _calcEnchantDegats(s),  _autoSourceEnchantDeg(s));
   apply('s-affliction-dot-formula', _calcAfflictionDot(s), _autoSourceAfflictionDot(s));
