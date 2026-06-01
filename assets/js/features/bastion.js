@@ -15,7 +15,7 @@
 
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
-import { getDocData, saveDoc, updateInCol, loadCollection, getCurrentAdventureId } from '../data/firestore.js';
+import { getDocData, updateInCol, loadCollection, getCurrentAdventureId } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
 import { db, doc, setDoc } from '../config/firebase.js';
 import { watchDoc } from '../shared/realtime.js';

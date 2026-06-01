@@ -96,7 +96,7 @@ async function _saveAvail() {
     slots:      _ag.myAvail.slots     || {},
     updatedAt:  Date.now(),
   };
-  await tryDoc('availabilities', STATE.user.uid, payload);
+  if (!await tryDoc('availabilities', STATE.user.uid, payload)) return;
   // Reflète localement dans allAvails pour le matching live
   const idx = _ag.allAvails.findIndex(a => a.uid === STATE.user.uid);
   if (idx >= 0) _ag.allAvails[idx] = { id: STATE.user.uid, ...payload };

@@ -4,7 +4,7 @@
 // ✓ Upload + recadrage d'image canvas 4:3 (identique aux hauts-faits)
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, getDocData } from '../data/firestore.js';
 import { confirmDelete, tryDoc } from '../shared/crud.js';
 import { navigate } from '../core/navigation.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';

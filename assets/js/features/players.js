@@ -22,7 +22,7 @@ import { STATE } from '../core/state.js';
 import { navigate } from '../core/navigation.js';
 import { charSession } from '../shared/char-session.js';
 import { loadCollection, updateInCol } from '../data/firestore.js';
-import { openModal, closeModal, confirmModal } from '../shared/modal.js';
+import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _initials } from '../shared/html.js';
