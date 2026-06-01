@@ -494,7 +494,7 @@ function _renderAffiniteGroupe(n) {
   }).join('');
 
   return `
-  <div class="npc-card npc-card--span" style="${_afVars(af)}">
+  <div class="npc-card" style="${_afVars(af)}">
     <div class="npc-card-hd">
       <div class="npc-card-title">Affinité du groupe &amp; événements</div>
       ${STATE.isAdmin ? `
@@ -661,21 +661,24 @@ function _renderFiche(n) {
           rows="3" placeholder="Apparence, personnalité, secrets…">${_esc(n.description || '')}</textarea>
       </div>`
     : (n.description ? `<div class="npc-desc">${_esc(n.description)}</div>` : '');
-  // Sections en cartes auto-responsives — chacune renvoie une .npc-card ou ''.
-  // (l'historique est intégré à la carte Affinité, à laquelle il est lié.)
-  const sections = [
-    _renderRelationsPanel(n),
-    _renderStatsPanel(n),
-    _renderBastionProfil(n),
-  ].filter(Boolean).join('');
+  // Colonne principale (affinité + événements, puis stats) et colonne latérale
+  // (affinités spécifiques, bastion). L'historique est intégré à la carte affinité.
+  const main = [_renderAffiniteGroupe(n), _renderStatsPanel(n)].filter(Boolean).join('');
+  const side = [_renderRelationsPanel(n), _renderBastionProfil(n)].filter(Boolean).join('');
+
+  const body = side
+    ? `<div class="npc-cols">
+         <div class="npc-col">${main}</div>
+         <div class="npc-col">${side}</div>
+       </div>`
+    : main;
 
   return `
   <div class="npc-fiche">
     ${_renderFicheHeader(n)}
     <div class="npc-body">
       ${desc}
-      ${_renderAffiniteGroupe(n)}
-      ${sections ? `<div class="npc-sections">${sections}</div>` : ''}
+      ${body}
     </div>
   </div>`;
 }
@@ -977,7 +980,7 @@ function _renderStatsPanel(n) {
     </select>`;
 
   return `
-    <div class="npc-card npc-card--span npc-stats-card">
+    <div class="npc-card npc-stats-card">
       <div class="npc-card-hd">
         <div class="npc-card-title">🛡️ Combat &amp; stats <span style="font-weight:400;color:var(--text-dim)">(MJ)</span></div>
       </div>

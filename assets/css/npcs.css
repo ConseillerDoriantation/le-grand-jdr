@@ -284,7 +284,15 @@
 .npc-fiche {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-lg); overflow: hidden;
+  max-width: 1180px;   /* évite l'étirement sur écrans larges */
 }
+/* Corps en 2 colonnes : principal (affinité, stats) + latéral (relations, bastion) */
+.npc-cols {
+  display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: .9rem; align-items: start;
+}
+.npc-col { display: flex; flex-direction: column; gap: .9rem; min-width: 0; }
+@media (max-width: 1000px) { .npc-cols { grid-template-columns: 1fr; } }
 .npc-hero {
   display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: start;
   padding: 1rem 1.15rem; border-bottom: 1px solid var(--border);
