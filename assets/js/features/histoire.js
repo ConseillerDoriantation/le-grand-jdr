@@ -7,6 +7,7 @@
 
 import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
+import { _esc } from '../shared/html.js';
 import { showNotif } from '../shared/notifications.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
