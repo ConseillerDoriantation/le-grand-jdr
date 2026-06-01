@@ -328,7 +328,8 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // Enchantement-only : pas de dégâts d'impact si pas de degats explicite
   const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
   // Affliction = jamais d'impact (comme défini côté VTT)
-  const suppressImpactDmg = isEnchantOnly || hasAffliction;
+  // Déplacement (Amplification mode déplacement) = jamais de dégâts.
+  const suppressImpactDmg = isEnchantOnly || hasAffliction || s.ampMode === 'deplacement';
 
   // Chips clés pour la ligne compacte
   const chips = [];
@@ -398,7 +399,11 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const zone  = _calcSortZone(s);
   if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}m`, color:'#b47fff' });
   const depl  = _calcSortDeplacement(s);
-  if (depl)  chips.push({ icon: depl.mode==='push' ? '↗' : '↙', val:`${depl.distance}m`, color:'#e8b84b' });
+  if (depl) {
+    const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
+    const dVal  = depl.max != null ? `1–${depl.max}m` : `${depl.distance}m`;
+    chips.push({ icon: dIcon, val: dVal, color:'#e8b84b' });
+  }
   // Durée : affichée uniquement pour les sorts persistants
   if (_needsDureeBase(s)) {
     const duree = _calcSortDuree(s);
@@ -847,7 +852,7 @@ export async function openSortModal(idx, s) {
 
   _sortTypesEdit  = new Set(typesInit);
   _sortActionEdit = s?.actionOverride || null;
-  _deplModeEdit   = s?.deplacement?.mode || null;
+  _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
 
   const hasEnchant  = runesSrc.includes('Enchantement');
   const hasProt     = runesSrc.includes('Protection');
@@ -888,16 +893,21 @@ export async function openSortModal(idx, s) {
       font-weight:${isSel?'700':'400'};transition:all .15s">${a.label}</button>`;
   }).join('');
 
-  const deplCur = s?.deplacement?.mode || null;
+  // Amplification : mode Zone | Déplacement (calqué sur Protection soin/CA)
+  const hasAmp   = runesSrc.includes('Amplification');
+  const nbAmp    = runesSrc.filter(r => r === 'Amplification').length;
+  const ampMode  = s?.ampMode || 'zone';
+  // Sous-modes de déplacement (Soi / Pousser / Attirer)
+  const deplCur = s?.deplacement?.mode || 'self';
   const deplBtnsHtml = [
-    { v:null,   label:'Aucun',    col:'#9ca3af' },
-    { v:'push', label:'↗ Pousse', col:'#e8b84b' },
-    { v:'pull', label:'↙ Attire', col:'#4f8cff' },
+    { v:'self', label:'🏃 Soi',     col:'#22c38e' },
+    { v:'push', label:'↗ Pousser',  col:'#e8b84b' },
+    { v:'pull', label:'↙ Attirer',  col:'#4f8cff' },
   ].map(opt => {
     const sel = deplCur === opt.v;
-    return `<button type="button" id="s-depl-${opt.v??'none'}"
-      data-action="_selectDeplMode" data-val="${opt.v??''}"
-      style="flex:1;padding:.3rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;transition:all .15s;
+    return `<button type="button" id="s-depl-${opt.v}"
+      data-action="_selectDeplMode" data-val="${opt.v}"
+      style="flex:1;padding:.3rem .2rem;border-radius:7px;font-size:.72rem;cursor:pointer;transition:all .15s;
         border:2px solid ${sel?opt.col:'var(--border)'};
         background:${sel?opt.col+'20':'var(--bg-elevated)'};
         color:${sel?opt.col:'var(--text-dim)'};
@@ -987,7 +997,7 @@ export async function openSortModal(idx, s) {
 
     <!-- Dégâts — visible si type offensif (auto-val avec toggle Custom) ;
          masqué quand Affliction est présente (la Puissance scale le DoT à la place) -->
-    <div id="s-degats-section" style="${(typesInit.includes('offensif') && !runesSrc.includes('Affliction'))?'':'display:none'}">
+    <div id="s-degats-section" style="${(typesInit.includes('offensif') && !runesSrc.includes('Affliction') && ampMode !== 'deplacement')?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-degats',
         label: '⚔️ Dégâts',
@@ -1198,14 +1208,44 @@ export async function openSortModal(idx, s) {
     </div>
 
 
-    <!-- ⑨ Déplacement — bande inline compacte -->
-    <div class="cs-spell-inline-row">
-      <span class="cs-spell-inline-label">↔️ Déplacement</span>
-      <div style="display:flex;gap:.25rem;flex:1">${deplBtnsHtml}</div>
-      <div id="s-depl-dist-row" style="${deplCur?'':'display:none'};display:${deplCur?'flex':'none'};gap:.3rem;align-items:center">
-        <input type="number" class="input-field" id="s-depl-dist" min="1" max="30"
-          value="${s?.deplacement?.distance||1}" placeholder="1" style="width:52px;text-align:center;padding:.25rem">
-        <span style="font-size:.72rem;color:var(--text-dim)">m</span>
+    <!-- ⑨ Rune Amplification — mode Zone ou Déplacement (visible si rune présente) -->
+    <div id="s-amp-section" style="${hasAmp?'':'display:none'}">
+      <div class="form-group">
+        <label>🌐 Rune Amplification — effet</label>
+        <div style="display:flex;gap:.4rem">
+          ${[
+            { v:'zone',        label:'📐 Zone',        color:'#b47fff', detail:'Zone alignée · 4N−1 m' },
+            { v:'deplacement', label:'↔ Déplacement', color:'#e8b84b', detail:'Soi/cible · sans dégâts' },
+          ].map(opt => {
+            const sel = ampMode === opt.v;
+            return `<button type="button" id="s-amp-${opt.v}" data-action="_selectAmpMode" data-val="${opt.v}"
+              style="flex:1;padding:.45rem .4rem;border-radius:8px;cursor:pointer;transition:all .15s;
+              border:2px solid ${sel?opt.color:'var(--border)'};
+              background:${sel?opt.color+'18':'var(--bg-elevated)'};text-align:center">
+              <div style="font-size:.78rem;font-weight:700;color:${sel?opt.color:'var(--text-dim)'}">${opt.label}</div>
+              <div style="font-size:.65rem;color:var(--text-dim);margin-top:.08rem">${opt.detail}</div>
+            </button>`;
+          }).join('')}
+        </div>
+        <input type="hidden" id="s-amp-mode" value="${ampMode}">
+      </div>
+
+      <div id="s-amp-zone-section" style="${ampMode==='zone'?'':'display:none'}">
+        <div style="font-size:.74rem;color:var(--text-dim);padding:.1rem .1rem .3rem">
+          📐 Zone calculée depuis les runes (longueur 4N−1 m, largeur via Dispersion).
+        </div>
+      </div>
+
+      <div id="s-amp-depl-section" style="${ampMode==='deplacement'?'':'display:none'}">
+        <div class="cs-spell-inline-row">
+          <span class="cs-spell-inline-label">↔️ Type</span>
+          <div style="display:flex;gap:.25rem;flex:1">${deplBtnsHtml}</div>
+        </div>
+        <div style="font-size:.74rem;color:var(--text-dim);padding:.25rem .1rem">
+          Portée : <b id="s-amp-depl-range" style="color:var(--text)">1 à ${_ampLength(nbAmp) || 0} m</b>
+          <span> · selon le nombre de runes Amplification</span>
+        </div>
+        <div style="font-size:.7rem;color:#e8b84b;padding:0 .1rem .2rem">⚠ Les sorts de déplacement n'infligent pas de dégâts.</div>
       </div>
     </div>
 
@@ -1354,12 +1394,13 @@ function _refreshConditionalSections() {
   const hasProt     = (counts.Protection || 0) > 0;
   const hasAffliction = (counts.Affliction || 0) > 0;
   const protMode    = document.getElementById('s-prot-mode')?.value || 'ca';
+  const ampMode     = document.getElementById('s-amp-mode')?.value || 'zone';
+  const isDepl      = ampMode === 'deplacement';
   const dSec = document.getElementById('s-degats-section');
   const sSec = document.getElementById('s-soin-section');
   // Affliction supprime les dégâts d'impact : la rune Puissance scale le DoT
-  // de l'affliction, pas un dégât direct. On cache donc la section Dégâts pour
-  // éviter le piège visuel "1d6 / Puissance ajoute 1d4" sans effet réel.
-  if (dSec) dSec.style.display = (isOffensive && !hasAffliction) ? '' : 'none';
+  // de l'affliction, pas un dégât direct. Le mode Déplacement les supprime aussi.
+  if (dSec) dSec.style.display = (isOffensive && !hasAffliction && !isDepl) ? '' : 'none';
   if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
 }
 
@@ -1396,9 +1437,9 @@ function _updateSortActionDisplay() {
 
 function _selectDeplMode(mode) {
   _deplModeEdit = mode;
-  const DEPL_CFG = { null:'#9ca3af', push:'#e8b84b', pull:'#4f8cff' };
-  [null, 'push', 'pull'].forEach(v => {
-    const btn = document.getElementById(`s-depl-${v??'none'}`);
+  const DEPL_CFG = { self:'#22c38e', push:'#e8b84b', pull:'#4f8cff' };
+  ['self', 'push', 'pull'].forEach(v => {
+    const btn = document.getElementById(`s-depl-${v}`);
     if (!btn) return;
     const col = DEPL_CFG[v] || '#9ca3af';
     const active = v === mode;
@@ -1407,8 +1448,28 @@ function _selectDeplMode(mode) {
     btn.style.color       = active ? col : 'var(--text-dim)';
     btn.style.fontWeight  = active ? '700' : '400';
   });
-  const distRow = document.getElementById('s-depl-dist-row');
-  if (distRow) distRow.style.display = mode ? 'flex' : 'none';
+  _updateSortPreview();
+}
+
+// Mode de la rune Amplification : 'zone' | 'deplacement' (calqué sur _selectProtMode).
+function _selectAmpMode(mode) {
+  const hidden = document.getElementById('s-amp-mode');
+  if (hidden) hidden.value = mode;
+  if (mode === 'deplacement' && !_deplModeEdit) _deplModeEdit = 'self';
+  const zSec = document.getElementById('s-amp-zone-section');
+  const dSec = document.getElementById('s-amp-depl-section');
+  if (zSec) zSec.style.display = mode === 'zone' ? '' : 'none';
+  if (dSec) dSec.style.display = mode === 'deplacement' ? '' : 'none';
+  [['zone','#b47fff'], ['deplacement','#e8b84b']].forEach(([v, col]) => {
+    const btn = document.getElementById(`s-amp-${v}`);
+    if (!btn) return;
+    const active = v === mode;
+    btn.style.borderColor = active ? col : 'var(--border)';
+    btn.style.background  = active ? col+'18' : 'var(--bg-elevated)';
+    const t = btn.querySelector('div'); if (t) t.style.color = active ? col : 'var(--text-dim)';
+  });
+  if (mode === 'deplacement') _selectDeplMode(_deplModeEdit || 'self');
+  _refreshConditionalSections();   // masque/affiche Dégâts selon le mode
   _updateSortPreview();
 }
 
@@ -1478,15 +1539,25 @@ function _refreshRunesSection(changedNom) {
   // Sections conditionnelles (rune X > 0 → section X visible)
   const cnt = _runeCountsEdit[changedNom] || 0;
   const sectionMap = {
-    Protection:   's-prot-section',
-    Enchantement: 's-enchant-section',
-    Affliction:   's-affliction-section',
+    Protection:    's-prot-section',
+    Enchantement:  's-enchant-section',
+    Affliction:    's-affliction-section',
+    Amplification: 's-amp-section',
   };
   const sectionId = sectionMap[changedNom];
   if (sectionId) {
     const el = document.getElementById(sectionId);
     if (el) el.style.display = cnt > 0 ? '' : 'none';
   }
+  // Plus aucune rune Amplification → on repasse en mode Zone (évite un état
+  // « déplacement » fantôme sans rune, qui supprimerait zone/dégâts à tort).
+  if (changedNom === 'Amplification' && cnt === 0) {
+    const ampHidden = document.getElementById('s-amp-mode');
+    if (ampHidden && ampHidden.value !== 'zone') _selectAmpMode('zone');
+  }
+  // Portée de déplacement : dépend du nombre de runes Amplification.
+  const rangeEl = document.getElementById('s-amp-depl-range');
+  if (rangeEl) rangeEl.textContent = `1 à ${_ampLength(_runeCountsEdit['Amplification'] || 0) || 0} m`;
   // Section Durée de base : visible selon le contexte
   const dureeSec = document.getElementById('s-duree-base-section');
   if (dureeSec) {
@@ -1750,7 +1821,6 @@ function _buildSortFromDOM() {
   const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
   const dureeBase = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
-  const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
   const iconRaw  = document.getElementById('s-icon')?.value || '';
   const mjVal    = document.getElementById('s-mj-validation')?.value || 'pending';
   return {
@@ -1777,7 +1847,8 @@ function _buildSortFromDOM() {
     zoneW: null,
     zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
-    deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
+    deplacement: deplMode ? { mode: deplMode } : null,
+    ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     // Portée + stats overrides : doivent être lus du DOM pour que la preview live
     // et les chips auto reflètent la sélection courante (sinon auto-dérivation kick in).
     portee:      (() => {
@@ -1919,7 +1990,6 @@ export async function saveSort(idx) {
 
     const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
     const deplMode = _deplModeEdit || null;
-    const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
 
     // Validation MJ (3 états) : seuls les admins peuvent la modifier ; sinon on garde la valeur existante
     const prevVal = idx >= 0 ? (sorts[idx]?.mjValidation || (sorts[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
@@ -1975,7 +2045,8 @@ export async function saveSort(idx) {
       zoneW: null,
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
-      deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
+      deplacement: deplMode ? { mode: deplMode } : null,
+    ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
       // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
       portee:     (() => {
         const raw = document.getElementById('s-portee')?.value;
@@ -2033,7 +2104,6 @@ function _buildSortFromForm(idx, prevList = []) {
   const actionOverride = _sortActionEdit || null;
   const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
-  const deplDist = deplMode ? (parseInt(document.getElementById('s-depl-dist')?.value) || 1) : 0;
   const prevVal = idx >= 0 ? (prevList[idx]?.mjValidation || (prevList[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
   const mjValidation = STATE.isAdmin
     ? (document.getElementById('s-mj-validation')?.value || 'pending')
@@ -2074,7 +2144,8 @@ function _buildSortFromForm(idx, prevList = []) {
     afflictionEtatId: document.getElementById('s-affliction-etat')?.value || null,
     zoneW: null, zoneH: null,
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
-    deplacement: deplMode ? { mode: deplMode, distance: deplDist } : null,
+    deplacement: deplMode ? { mode: deplMode } : null,
+    ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     portee:     (() => {
       const raw = document.getElementById('s-portee')?.value;
       if (raw === '' || raw == null) return null;
@@ -2150,8 +2221,9 @@ registerActions({
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
   _selectSortAction:      (btn) => _selectSortAction(btn.dataset.val === '' ? null : btn.dataset.val),
-  _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val === '' ? null : btn.dataset.val),
+  _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
+  _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),
   _selectEnchantMode:     (btn) => _selectEnchantMode(btn.dataset.val),
   _selectAfflictionMode:  (btn) => _selectAfflictionMode(btn.dataset.val),
   _toggleSortIconPicker:  ()    => _toggleSortIconPicker(),

@@ -59,6 +59,8 @@ export function _getSortAction(s) {
  *   (Protection n'entre PAS dans le chaînage des dégâts — chaînage par rune.)
  */
 export function _calcSortDegats(s, c) {
+  // Un sort en mode déplacement (rune Amplification → Déplacement) n'inflige jamais de dégâts.
+  if (s.ampMode === 'deplacement') return '';
   const mainP   = getMainWeapon(c);
   const armeDeg = mainP.degats;
 
@@ -559,6 +561,8 @@ export function _ampLength(nbAmp) { return nbAmp >= 1 ? (4 * nbAmp - 1) : 0; }
  *  - Source: 'manual' | 'runes' | null
  */
 export function _calcSortZone(s) {
+  // En mode déplacement, l'Amplification produit un déplacement, pas une zone.
+  if (s.ampMode === 'deplacement') return null;
   const runes  = s.runes || [];
   const wMan = s.zoneW ? parseInt(s.zoneW) : 0;
   const hMan = s.zoneH ? parseInt(s.zoneH) : 0;
@@ -575,10 +579,23 @@ export function _calcSortZone(s) {
   return { w: length, h: width, source: 'runes', amp: nbAmp, disp: nbDisp };
 }
 
-/** Déplacement : { mode:'push'|'pull', distance }, ou null */
+/** Déplacement (rune Amplification en mode 'deplacement').
+ *  Portée dérivée du nombre de runes Amplification : 1 à _ampLength(N) m
+ *  (1 rune → 1-3m, 2 runes → 1-7m…). Sous-modes : 'self' | 'push' | 'pull'.
+ *  Retourne { mode, min:1, max } ou null.
+ *  Fallback legacy : ancien déplacement autonome { mode, distance } sans ampMode.
+ */
 export function _calcSortDeplacement(s) {
-  if (!s.deplacement?.mode) return null;
-  return { mode: s.deplacement.mode, distance: Math.max(1, parseInt(s.deplacement.distance) || 1) };
+  if (s.ampMode === 'deplacement') {
+    const nbAmp = (s.runes || []).filter(r => r === 'Amplification').length;
+    if (nbAmp < 1) return null;
+    return { mode: s.deplacement?.mode || 'self', min: 1, max: _ampLength(nbAmp) };
+  }
+  // Compat anciennes données (déplacement saisi à la main, hors Amplification).
+  if (s.deplacement?.mode) {
+    return { mode: s.deplacement.mode, distance: Math.max(1, parseInt(s.deplacement.distance) || 1) };
+  }
+  return null;
 }
 
 /** Lacération : réduction CA cible
@@ -811,11 +828,16 @@ export function _buildSortResume(s, c) {
     lines.push({ icon:'🏹', label:`Portée d'arme +${zoneCalc.w}m`, detail:`Allonge magique active · l'arme enchantée porte à ${zoneCalc.w}m supplémentaires` });
   }
 
-  // Déplacement (pousse / attire)
+  // Déplacement (soi / pousse / attire) — portée 1 à max (legacy : distance fixe)
   const depl = _calcSortDeplacement(s);
   if (depl) {
-    const dIcon = depl.mode === 'push' ? '↗' : '↙';
-    lines.push({ icon: dIcon, label: depl.mode === 'push' ? `Pousse ${depl.distance}m` : `Attire ${depl.distance}m`, detail:'' });
+    const range = depl.max != null ? `1 à ${depl.max}m` : `${depl.distance}m`;
+    const D = {
+      self: { icon:'🏃', label:`Déplacement — soi-même · ${range}` },
+      push: { icon:'↗',  label:`Déplacement — pousse la cible · ${range}` },
+      pull: { icon:'↙',  label:`Déplacement — attire la cible · ${range}` },
+    }[depl.mode] || { icon:'↔', label:`Déplacement · ${range}` };
+    lines.push({ icon: D.icon, label: D.label, detail: 'Aucun dégât (sort de déplacement)' });
   }
 
   // Durée (base + rune Durée) — combo Sort canalisé persistant : tant que la concentration tient
