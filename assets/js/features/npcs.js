@@ -377,22 +377,33 @@ function _renderFicheHeader(n) {
     ? `<img class="npc-hero-portrait" src="${n.imageUrl}" alt="">`
     : `<div class="npc-hero-portrait npc-hero-portrait--ph">${(n.nom || '?')[0].toUpperCase()}</div>`;
 
+  const adm = STATE.isAdmin;
+  const nameEl = adm
+    ? `<input class="npc-inline npc-inline-name" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="nom" value="${_esc(n.nom || '')}" placeholder="Nom du PNJ">`
+    : `<h2 class="npc-hero-name">${_esc(n.nom || '?')}</h2>`;
+  const roleEl = adm
+    ? `<input class="npc-inline npc-inline-role" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="role" value="${_esc(n.role || '')}" placeholder="Rôle (Forgeron, Garde…)">`
+    : (n.role ? `<div class="npc-hero-role">${_esc(n.role)}</div>` : '');
+  const lieuEl = adm
+    ? `<input class="npc-inline npc-inline-lieu" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="lieu" value="${_esc(n.lieu || '')}" placeholder="📍 Lieu…">`
+    : (n.lieu ? `<span class="npc-chip">📍 ${_esc(n.lieu)}</span>` : '');
+
   return `
   <div class="npc-hero" style="${_afVars(af)}">
     ${portrait}
     <div class="npc-hero-id">
-      <h2 class="npc-hero-name">${_esc(n.nom || '?')}</h2>
-      ${n.role ? `<div class="npc-hero-role">${_esc(n.role)}</div>` : ''}
+      ${nameEl}
+      ${roleEl}
       <div class="npc-hero-meta">
         <span class="npc-chip npc-chip--af">${af.icon} ${af.label}</span>
-        ${n.lieu ? `<span class="npc-chip">📍 ${_esc(n.lieu)}</span>` : ''}
+        ${lieuEl}
         ${Array.isArray(n.organisations) && n.organisations.length
           ? `<span class="npc-chip">🏛️ ${n.organisations.map(_esc).join(', ')}</span>` : ''}
       </div>
     </div>
-    ${STATE.isAdmin ? `
+    ${adm ? `
     <div class="npc-hero-actions">
-      <button class="npc-mini-btn" data-action="openNpcModal" data-id="${n.id}">✏️ Modifier</button>
+      <button class="npc-mini-btn" data-action="openNpcModal" data-id="${n.id}" title="Portrait, organisations, arme, activités…">⚙️ Plus</button>
       <button class="npc-mini-btn npc-mini-btn--danger" data-action="deleteNpc" data-id="${n.id}" title="Supprimer">🗑️</button>
     </div>` : ''}
   </div>`;
@@ -400,11 +411,13 @@ function _renderFicheHeader(n) {
 
 // Bloc "Profil bastion" : visible MJ toujours, joueur seulement si disposition = Allié
 function _renderBastionProfil(n) {
-  const isAllie = n.disposition === 'Allié';
-  // Si pas allié et qu'on n'est pas MJ → masqué
-  if (!isAllie && !STATE.isAdmin) return '';
+  const adm = STATE.isAdmin;
+  // Côté joueur : visible seulement si l'affinité du groupe est suffisante (Allié).
+  const playerCanSee = _affiniteNiveau(n) >= 4;
+  if (!adm && !playerCanSee) return '';
+
   const hasInfo = (n.activites && n.activites.length) || n.passif || n.salaireSuggere;
-  if (!hasInfo) return '';
+  if (!adm && !hasInfo) return ''; // joueur : rien à montrer
 
   const ACT_LABELS = {
     forge: '🔨 Forge', atelier_confection: '🧵 Atelier de confection',
@@ -415,7 +428,7 @@ function _renderBastionProfil(n) {
   };
 
   const activites = (n.activites || []).map(a => ACT_LABELS[a] || a);
-  const mjBadge = !isAllie ? `<span class="npc-badge-mj">MJ only</span>` : '';
+  const mjBadge = !playerCanSee ? `<span class="npc-badge-mj">MJ</span>` : '';
 
   return `
   <div class="npc-card">
@@ -425,8 +438,21 @@ function _renderBastionProfil(n) {
     ${activites.length ? `<div class="npc-bastion-pills">
       ${activites.map(a => `<span class="npc-bastion-pill">${_esc(a)}</span>`).join('')}
     </div>` : ''}
-    ${n.passif ? `<div class="npc-bastion-passif">🎁 ${_esc(n.passif)}</div>` : ''}
-    ${n.salaireSuggere ? `<div class="npc-bastion-sal">💰 ${n.salaireSuggere} or / sem.</div>` : ''}
+    ${adm ? `
+      <div class="npc-edit-block" style="margin-bottom:.4rem">
+        <span class="npc-edit-lbl">Passif / bonus employé</span>
+        <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="passif"
+          rows="2" placeholder="+20% production Forge · −10% achats…">${_esc(n.passif || '')}</textarea>
+      </div>
+      <div class="npc-edit-block" style="max-width:200px">
+        <span class="npc-edit-lbl">Salaire (or/sem.)</span>
+        <input type="number" min="0" class="npc-inline" data-change="npcInlineSave"
+          data-npc-id="${n.id}" data-field="salaireSuggere" value="${parseInt(n.salaireSuggere) || ''}" placeholder="0">
+      </div>
+      <div class="npc-hint">🛠️ Activités & visibilité joueurs via « ⚙️ Plus ».</div>`
+    : `
+      ${n.passif ? `<div class="npc-bastion-passif">🎁 ${_esc(n.passif)}</div>` : ''}
+      ${n.salaireSuggere ? `<div class="npc-bastion-sal">💰 ${n.salaireSuggere} or / sem.</div>` : ''}`}
   </div>`;
 }
 
@@ -462,7 +488,13 @@ function _renderAffiniteGroupe(n) {
       </div>
     </div>
 
-    ${n.affinite?.note ? `<div class="npc-af-note">« ${_esc(n.affinite.note)} »</div>` : ''}
+    ${STATE.isAdmin
+      ? `<div class="npc-edit-block" style="margin-top:.5rem">
+          <span class="npc-edit-lbl">Note d'affinité</span>
+          <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="affinite.note"
+            rows="2" placeholder="Contexte de la relation au groupe…">${_esc(n.affinite?.note || '')}</textarea>
+        </div>`
+      : (n.affinite?.note ? `<div class="npc-af-note">« ${_esc(n.affinite.note)} »</div>` : '')}
   </div>`;
 }
 
@@ -598,7 +630,13 @@ function _renderRelationsPanel(n) {
 
 // Fiche principale assemblée
 function _renderFiche(n) {
-  const desc = n.description ? `<div class="npc-desc">${_esc(n.description)}</div>` : '';
+  const desc = STATE.isAdmin
+    ? `<div class="npc-edit-block">
+        <span class="npc-edit-lbl">Description</span>
+        <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="description"
+          rows="3" placeholder="Apparence, personnalité, secrets…">${_esc(n.description || '')}</textarea>
+      </div>`
+    : (n.description ? `<div class="npc-desc">${_esc(n.description)}</div>` : '');
   // Sections en cartes auto-responsives — chacune renvoie une .npc-card ou ''.
   const sections = [
     _renderRelationsPanel(n),
@@ -883,37 +921,36 @@ function _renderStatsForm(npc) {
 }
 
 function _renderStatsPanel(n) {
-  if (!STATE.isAdmin) return '';
+  if (!STATE.isAdmin) return ''; // bloc réservé MJ
   const stats = n?.stats || {};
   const combat = _npcCombat(n);
   const weapon = combat.weapon || null;
-  const hasVitals = NPC_VITALS.some(v => n?.[v.key] != null);
-  const hasStats  = NPC_STATS.some(s => stats[s.key] != null);
   const hasCombat = !!(weapon || combat.weaponName || combat.damage || combat.range != null);
-  if (!hasVitals && !hasStats && !hasCombat) return '';
 
+  // Cellules éditables inline (admin) — vitaux + caractéristiques.
   const vitals = NPC_VITALS.map(v => `
     <div class="npc-stat-cell">
       <div class="npc-stat-k">${v.icon} ${v.label}</div>
-      <div class="npc-stat-v">${n?.[v.key] ?? '—'}</div>
+      <input type="number" class="npc-inline" data-change="npcInlineSave"
+        data-npc-id="${n.id}" data-field="${v.key}" value="${n?.[v.key] ?? ''}" placeholder="—">
     </div>`).join('');
   const statCells = NPC_STATS.map(s => {
     const score = stats[s.key];
     return `
     <div class="npc-stat-cell">
       <div class="npc-stat-k">${s.short}</div>
-      <div class="npc-stat-v" style="font-size:.95rem">${score ?? '—'}</div>
-      <div class="npc-stat-mod">${score != null ? _modStr(score) : ''}</div>
+      <input type="number" class="npc-inline" data-change="npcInlineSave"
+        data-npc-id="${n.id}" data-field="stat:${s.key}" value="${score ?? ''}" placeholder="—">
+      <div class="npc-stat-mod">${score != null ? _modStr(score) : '&nbsp;'}</div>
     </div>`;
   }).join('');
 
   return `
-    <div class="npc-card">
+    <div class="npc-card npc-card--span">
       <div class="npc-card-hd">
-        <div class="npc-card-title">🛡️ Combat &amp; stats <span style="font-weight:400;color:var(--text-dim)">(admin)</span></div>
+        <div class="npc-card-title">🛡️ Combat &amp; stats <span style="font-weight:400;color:var(--text-dim)">(MJ)</span></div>
       </div>
       <div class="npc-stat-grid">${vitals}</div>
-      ${hasCombat ? `
       <div class="npc-combat-row">
         ${[
           ['ARME',   weapon?.nom || combat.weaponName || 'Attaque', false],
@@ -924,7 +961,8 @@ function _renderStatsPanel(n) {
           <div class="npc-combat-k">${label}</div>
           <div class="npc-combat-v">${_esc(val)}</div>
         </div>`).join('')}
-      </div>` : ''}
+      </div>
+      <div class="npc-hint">🗡️ Arme via « ⚙️ Plus » (boutique).${hasCombat ? '' : ' Aucune arme définie.'}</div>
       <div class="npc-stat-grid npc-stat-grid--6">${statCells}</div>
     </div>`;
 }
@@ -2008,9 +2046,54 @@ export function openAffinitePersoModal(npcId, existingId = null) {
   _selectedAfpTypeId = args.selectedTypeId;
 }
 
+// ── Édition inline depuis la fiche (admin) ───────────────────────────────────
+// Sauvegarde directe Firestore champ par champ (déclenchée par l'event `change`,
+// càd au blur / Entrée). Gère les champs simples, numériques, stats imbriquées.
+async function _npcInlineSave(el) {
+  if (!STATE.isAdmin || !el) return;
+  const id = el.dataset.npcId, field = el.dataset.field;
+  const n = _npcs.find(x => x.id === id);
+  if (!n || !field) return;
+
+  const NUM_FIELDS = ['pv', 'pm', 'ca', 'vitesse', 'salaireSuggere'];
+  const toNum = (raw) => {
+    const t = (raw ?? '').toString().trim();
+    if (t === '') return null;
+    const v = parseInt(t, 10);
+    return Number.isFinite(v) ? v : null;
+  };
+
+  let patch;
+  if (field.startsWith('stat:')) {
+    const key = field.slice(5);
+    const stats = { ...(n.stats || {}) };
+    const v = toNum(el.value);
+    if (v == null) delete stats[key]; else stats[key] = v;
+    n.stats = stats; patch = { stats };
+  } else if (field === 'affinite.note') {
+    const affinite = { ...(n.affinite || {}), note: (el.value || '').trim() };
+    n.affinite = affinite; patch = { affinite };
+  } else if (NUM_FIELDS.includes(field)) {
+    const v = toNum(el.value);
+    n[field] = v; patch = { [field]: v };
+  } else {
+    const v = (el.value || '').trim();
+    n[field] = v; patch = { [field]: v };
+  }
+
+  try { await updateInCol('npcs', id, patch); }
+  catch (e) { notifySaveError(e); }
+}
+
 function _refreshActivePanel() {
   const panel = document.getElementById('npc-detail-panel');
   if (!panel) return;
+
+  // Ne pas casser une édition inline en cours : le watch temps réel se déclenche
+  // sur nos propres écritures. Si un champ inline du panneau a le focus, on diffère
+  // le re-render (il se fera au prochain refresh une fois l'édition terminée).
+  const ae = document.activeElement;
+  if (ae && panel.contains(ae) && ae.classList?.contains('npc-inline')) return;
 
   const filtered = _getFiltered();
   const active = _npcs.find(x => x.id === _activeId) || filtered[0] || null;
@@ -2083,6 +2166,7 @@ PAGES.npcs = renderNpcs;
 
 registerActions({
   _npcSearch:                (el) => _npcSearch(el.value),
+  npcInlineSave:             (el) => _npcInlineSave(el),
   _mjStatsFilter:            (el) => _mjStatsFilter(el.value),
   _setAfgDeltaFromInput:     (el) => _setAfgDeltaFromInput(el.value),
   _setHistEditDeltaFromInput:(el) => _setHistEditDeltaFromInput(el.value),

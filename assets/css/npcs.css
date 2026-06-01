@@ -431,6 +431,24 @@
 .npc-histo-text { flex: 1; font-size: .75rem; color: var(--text-muted); line-height: 1.5; }
 .npc-histo-date { font-size: .64rem; color: var(--text-dim); flex-shrink: 0; white-space: nowrap; }
 
+/* ── Édition inline (admin) ──────────────────────────────────────────── */
+.npc-inline {
+  background: rgba(255,255,255,.03); border: 1px solid transparent; border-radius: 6px;
+  color: inherit; font: inherit; padding: 3px 7px; width: 100%; box-sizing: border-box;
+  transition: border-color .12s, background .12s;
+}
+.npc-inline:hover { border-color: var(--border); }
+.npc-inline:focus { outline: none; border-color: rgba(79,140,255,.45); background: rgba(79,140,255,.06); }
+.npc-inline::placeholder { color: var(--text-dim); }
+.npc-inline-name { font-family: 'Cinzel', serif; font-size: 1.25rem; font-weight: 600; color: var(--text); }
+.npc-inline-role { font-size: .82rem; color: var(--text-muted); font-style: italic; }
+.npc-inline-lieu { max-width: 200px; font-size: .72rem; padding: 2px 6px; }
+textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; font-size: .84rem; }
+.npc-stat-cell input.npc-inline { text-align: center; padding: 1px 2px; font-size: .95rem; font-weight: 700; margin-top: 2px; }
+.npc-edit-block { display: flex; flex-direction: column; gap: .3rem; }
+.npc-edit-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
+.npc-hint { font-size: .64rem; color: var(--text-dim); font-style: italic; margin-top: .35rem; }
+
 /* Empty fiche */
 .npc-fiche-empty {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
