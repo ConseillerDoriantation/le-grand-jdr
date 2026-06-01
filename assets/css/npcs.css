@@ -441,6 +441,12 @@
 .npc-icon-btn:hover { background: rgba(255,255,255,.08); }
 .npc-icon-btn--danger { color: #ff6b6b; }
 .npc-icon-btn--danger:hover { background: rgba(255,107,107,.1); }
+.npc-rel-chip--edit { align-items: stretch; }
+.npc-rel-editrow { display: flex; align-items: center; gap: .4rem; margin-bottom: .3rem; }
+.npc-rel-typesel { flex: 1; min-width: 0; font-size: .74rem; padding: .28rem .45rem; }
+.npc-rel-chip--edit .npc-inline { font-size: .72rem; margin-top: .25rem; }
+.npc-affi-add { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+.npc-affi-add .npc-select { min-width: 120px; flex: 1; }
 .npc-rel-add {
   width: 100%; padding: .55rem; cursor: pointer; text-align: center; font-size: .74rem; color: var(--gold);
   background: rgba(79,140,255,.06); border: 1px dashed rgba(79,140,255,.3); border-radius: 9px; transition: background .15s;

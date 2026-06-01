@@ -570,19 +570,24 @@ function _renderHistorique(n) {
 
 // Chip affinité spécifique — vue admin
 function _renderRelationChip(a, npcId) {
-  const { emoji, color, label } = _typeView(a);
+  const { emoji, color } = _typeView(a);
   const vars = `--rc:${color};--rc-bg:${color}12;--rc-bd:${color}30`;
+  const typeOpts = _affiniteTypes.map(t =>
+    `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '✨'} ${_esc(t.label)}</option>`).join('');
   return `
-  <div class="npc-rel-chip" style="${vars}">
+  <div class="npc-rel-chip npc-rel-chip--edit" style="${vars}">
     <span class="npc-rel-emoji">${emoji}</span>
     <div class="npc-rel-body">
-      <div class="npc-rel-label">${label}</div>
-      <div class="npc-rel-target">→ ${_esc(a.charNom || '?')}</div>
-      ${a.notePublique ? `<div class="npc-rel-note">🌐 ${_esc(a.notePublique)}</div>` : ''}
-      ${a.note ? `<div class="npc-rel-note">🔒 ${_esc(a.note)}</div>` : ''}
+      <div class="npc-rel-editrow">
+        <select class="npc-select npc-rel-typesel" data-change="npcAffiField" data-aff-id="${a.id}" data-field="typeId">${typeOpts}</select>
+        <span class="npc-rel-target">→ ${_esc(a.charNom || '?')}</span>
+      </div>
+      <input class="npc-inline" data-change="npcAffiField" data-aff-id="${a.id}" data-field="notePublique"
+        value="${_esc(a.notePublique || '')}" placeholder="🌐 Note publique…">
+      <input class="npc-inline" data-change="npcAffiField" data-aff-id="${a.id}" data-field="note"
+        value="${_esc(a.note || '')}" placeholder="🔒 Note privée…">
     </div>
     <div class="npc-rel-actions">
-      <button class="npc-icon-btn" data-action="openAffinitePersoModal" data-npc-id="${npcId}" data-aff-id="${a.id}">✏️</button>
       <button class="npc-icon-btn npc-icon-btn--danger" data-action="deleteAffinitePerso" data-id="${a.id}">🗑️</button>
     </div>
   </div>`;
@@ -624,6 +629,7 @@ function _renderRelationsPanel(n) {
   const myAffi    = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
+    const chars = sortCharactersForDisplay(STATE.characters || []);
     return `
     <div class="npc-card">
       <div class="npc-card-hd">
@@ -635,9 +641,20 @@ function _renderRelationsPanel(n) {
           ? persoList.map(a => _renderRelationChip(a, n.id)).join('')
           : `<div class="npc-empty-line">Aucune affinité spécifique</div>`}
       </div>
-      <button class="npc-rel-add" style="margin-top:.5rem" data-action="openAffinitePersoModal" data-npc-id="${n.id}">
-        ➕ Ajouter une affinité
-      </button>
+      <div class="npc-edit-block" style="margin-top:.55rem">
+        <span class="npc-edit-lbl">Ajouter une affinité</span>
+        <div class="npc-affi-add">
+          <select class="npc-select" id="afp-char-${n.id}">
+            <option value="">— Personnage —</option>
+            ${chars.map(c => `<option value="${c.id}|${_esc(c.nom || '?')}">${_esc(c.nom || '?')} (${_esc(c.ownerPseudo || '?')})</option>`).join('')}
+          </select>
+          <select class="npc-select" id="afp-type-${n.id}">
+            <option value="">— Type —</option>
+            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(t.label)}</option>`).join('')}
+          </select>
+          <button class="npc-event-btn" data-action="npcAddAffiPerso" data-npc-id="${n.id}">＋ Ajouter</button>
+        </div>
+      </div>
     </div>`;
   }
 
@@ -1706,6 +1723,42 @@ async function _npcAddEvent(btn) {
   await _persistAffinite(id, affinite, 'Événement ajouté !', { close: false });
 }
 
+// Édition inline d'une affinité spécifique existante (type / notes).
+async function _npcAffiField(el) {
+  if (!STATE.isAdmin) return;
+  const a = _affiPerso.find(x => x.id === el.dataset.affId); if (!a) return;
+  const field = el.dataset.field;
+  const patch = {};
+  if (field === 'typeId') {
+    const type = _getAffiniteType(el.value);
+    patch.typeId = el.value; patch.typeLabel = type?.label || '';
+  } else {
+    patch[field] = (el.value || '').trim();
+  }
+  Object.assign(a, patch);
+  try { await updateInCol('npc_affinites', a.id, patch); }
+  catch (e) { notifySaveError(e); }
+}
+
+// Ajout inline d'une affinité spécifique (personnage + type) — sans modal.
+async function _npcAddAffiPerso(btn) {
+  if (!STATE.isAdmin) return;
+  const npcId = btn.dataset.npcId;
+  const charSel = document.getElementById(`afp-char-${npcId}`)?.value;
+  const typeId  = document.getElementById(`afp-type-${npcId}`)?.value;
+  if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
+  if (!typeId)  { showNotif('Choisis un type d\'affinité.', 'error'); return; }
+  const [charId, charNom] = charSel.split('|');
+  const type = _getAffiniteType(typeId);
+  const data = { npcId, charId, charNom, typeId, typeLabel: type?.label || '', note: '', notePublique: '' };
+  try {
+    const newId = await addToCol('npc_affinites', data);
+    const entry = { id: newId || `afp_${Date.now()}`, ...data };
+    if (!_affiPerso.find(x => x.id === entry.id)) _affiPerso.push(entry);
+    _refreshActivePanel();
+  } catch (e) { notifySaveError(e); }
+}
+
 // Création inline : crée un PNJ vierge et le sélectionne (plus besoin de modal).
 async function _npcCreate() {
   if (!STATE.isAdmin) return;
@@ -1808,6 +1861,8 @@ registerActions({
   npcToggleActivite:         (btn) => _npcToggleActivite(btn),
   npcToggleEmbauchable:      (btn) => _npcToggleEmbauchable(btn),
   npcAddEvent:               (btn) => _npcAddEvent(btn),
+  npcAffiField:              (el) => _npcAffiField(el),
+  npcAddAffiPerso:           (btn) => _npcAddAffiPerso(btn),
   npcCreate:                 () => _npcCreate(),
   _mjStatsFilter:            (el) => _mjStatsFilter(el.value),
   _setHistEditDeltaFromInput:(el) => _setHistEditDeltaFromInput(el.value),
