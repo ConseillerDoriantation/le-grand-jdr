@@ -215,6 +215,8 @@ let _mtCtx      = null; // contexte multi-cibles actif { srcId, opt, optIdx, tar
 let _mtPending  = null; // cibles validées en attente du roll : string[]
 let _zoneCtx    = null; // contexte zone AoE { srcId, tgtId, opt, optIdx, wPx, hPx, x, y, placed }
 let _zonePreview= null; // Konva.Group prévisualisation zone
+let _chatMsgs   = [];   // derniers messages du chat rendus (pour lookup "répondre")
+let _chatReplyTo= null; // message auquel on répond { id, authorName, text }
 let _selectedMulti  = new Set();   // ids des tokens en multi-sélection
 let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
@@ -7835,6 +7837,7 @@ function _renderChatLog(msgs) {
   const el = document.getElementById('vtt-chat-log'); if (!el) return;
   const myUid = STATE.user?.uid;
   if (!STATE.isAdmin) msgs = msgs.filter(m => !m.gmOnly);
+  _chatMsgs = msgs;   // pour le lookup "Répondre"
 
   // ═══════════════════════════════════════════════════════════════════
   // HELPERS — composants réutilisables pour tous les types de log
@@ -8275,11 +8278,17 @@ function _renderChatLog(msgs) {
   /** Message chat normal */
   const renderChat = (m) => {
     const isMe = m.authorId === myUid;
+    const quote = m.replyTo ? `<div class="vtt-chat-quote">
+        <span class="vtt-chat-quote-who">↩ ${_esc(m.replyTo.authorName||'?')}</span>
+        <span class="vtt-chat-quote-text">${_esc(m.replyTo.text||'')}</span>
+      </div>` : '';
     return `<div class="vtt-log vtt-log--chat">
       <div class="vtt-log-chat-msg">
+        ${quote}
         <span class="vtt-log-chat-who${isMe?' me':''}">${_esc(m.authorName||'?')}</span>
         <span class="vtt-log-chat-text">${_applyEmotes(_esc(m.text||''))}</span>
         <span class="vtt-log-meta">${_ts(m)}</span>
+        <button class="vtt-chat-reply-btn" data-vtt-fn="_vttChatReply" data-vtt-args="${m.id}" title="Répondre">↩</button>
       </div>
     </div>`;
   };
@@ -8319,11 +8328,20 @@ window._vttSendChat = async () => {
   const input=document.getElementById('vtt-chat-input');
   const text=input?.value.trim(); if (!text) return;
   input.value='';
+  const replyTo = _chatReplyTo;   // capture avant reset
+  _vttChatReplyCancel();          // ferme la barre de réponse
   const authorName=STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'Joueur';
+  const payload = { type:'chat', authorId:STATE.user?.uid||null, authorName, text, createdAt:serverTimestamp() };
+  if (replyTo) {
+    // Extrait court du message cité (évite de stocker un pavé)
+    payload.replyTo = {
+      id: replyTo.id || '',
+      authorName: replyTo.authorName || '?',
+      text: (replyTo.text || '').slice(0, 140),
+    };
+  }
   try {
-    await addDoc(_logCol(),{
-      type:'chat', authorId:STATE.user?.uid||null, authorName, text, createdAt:serverTimestamp(),
-    });
+    await addDoc(_logCol(), payload);
   } catch(e) {
     if (input) input.value=text; // restaurer le texte si échec
     console.error('[vtt] chat send:', e);
@@ -8333,6 +8351,41 @@ window._vttSendChat = async () => {
     showNotif(`Erreur chat : ${reason}`,'error');
   }
 };
+
+// ── Répondre à un message (citation type messagerie) ──────────────────────
+// Construit un extrait textuel du message cité (gère aussi les jets/attaques).
+function _chatMsgExcerpt(m) {
+  if (!m) return '';
+  if (m.text) return m.text;
+  if (m.type === 'attack' || m.type === 'attack-multi') return `⚔️ ${m.optLabel || 'Attaque'}`;
+  if (m.type === 'cast' || m.type === 'affliction-cast') return `✨ ${m.optLabel || 'Sort'}`;
+  if (m.type === 'roll' || m.type === 'dice-free') return `🎲 Jet${m.total != null ? ' : '+m.total : ''}`;
+  if (m.type === 'save') return `🛡 Jet de sauvegarde`;
+  return 'message';
+}
+window._vttChatReply = (msgId) => {
+  const m = _chatMsgs.find(x => x.id === msgId);
+  if (!m) return;
+  _chatReplyTo = { id: m.id, authorName: m.authorName || '?', text: _chatMsgExcerpt(m) };
+  _renderChatReplyBar();
+  document.getElementById('vtt-chat-input')?.focus();
+};
+window._vttChatReplyCancel = () => {
+  _chatReplyTo = null;
+  _renderChatReplyBar();
+};
+function _renderChatReplyBar() {
+  const bar = document.getElementById('vtt-chat-reply-bar');
+  if (!bar) return;
+  if (!_chatReplyTo) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `
+    <div class="vtt-chat-reply-bar-body">
+      <span class="vtt-chat-reply-bar-who">↩ Réponse à ${_esc(_chatReplyTo.authorName)}</span>
+      <span class="vtt-chat-reply-bar-text">${_esc((_chatReplyTo.text||'').slice(0,80))}</span>
+    </div>
+    <button class="vtt-chat-reply-bar-x" data-vtt-fn="_vttChatReplyCancel" title="Annuler">✕</button>`;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // ACTIONS GLOBALES
@@ -11797,10 +11850,11 @@ function _buildHtml() {
       <div class="vtt-chat">
         <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
         <div class="vtt-chat-log" id="vtt-chat-log"></div>
+        <div class="vtt-chat-reply-bar" id="vtt-chat-reply-bar" style="display:none"></div>
         <div class="vtt-chat-input-row">
           <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-            onkeydown="if(event.key==='Enter')window._vttSendChat()">
+            onkeydown="if(event.key==='Enter')window._vttSendChat();else if(event.key==='Escape')window._vttChatReplyCancel()">
           <button class="vtt-chat-send" data-vtt-fn="_vttSendChat" title="Envoyer">↵</button>
         </div>
       </div>
