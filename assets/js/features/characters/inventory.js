@@ -445,7 +445,9 @@ function _invmStep(id, delta, max, kind) {
   if (!inp) return;
   const next = Math.max(1, Math.min(max, (parseInt(inp.value) || 1) + delta));
   inp.value = next;
-  inp.dispatchEvent(new Event('input'));
+  // bubbles:true → le listener délégué sur document (data-input) capte bien
+  // l'événement, sinon le total ne se met pas à jour via les boutons +/−.
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 // Live-update du total dans la modale de vente (qty × prix + reprise upgrades).

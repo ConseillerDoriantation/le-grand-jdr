@@ -639,6 +639,19 @@ function _bindSortsCatDrag(c, canEdit) {
 // ── Compte → Ledger chronologique unique ─────────────────────────────────────
 // Lit le schéma existant c.compte = { recettes:[], depenses:[] } et fusionne
 // les deux flux en une timeline triée chronologiquement décroissante.
+
+// Normalise une date de livret en clé numérique AAAAMMJJ pour un tri fiable.
+// Gère les DEUX formats stockés en base : ISO "AAAA-MM-JJ" (ajout manuel via
+// <input type=date>) et FR "JJ/MM/AAAA" (ventes / economy.js). 0 = inconnue.
+function _ledgerDateKey(s) {
+  const v = String(s || '').trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v);   // ISO AAAA-MM-JJ
+  if (m) return (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]);
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);     // FR JJ/MM/AAAA
+  if (m) return (+m[3]) * 10000 + (+m[2]) * 100 + (+m[1]);
+  return 0;
+}
+
 function renderCharLedger(c, canEdit) {
   // ⚠️ Toujours re-fetch la référence FRAÎCHE en cas de re-render asynchrone
   const fresh = STATE.characters.find(x => x.id === c.id) || c;
@@ -653,16 +666,12 @@ function renderCharLedger(c, canEdit) {
     const v = Math.round((parseFloat(n) || 0) * 100) / 100;
     return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
   };
-  // Tri chronologique décroissant. À date égale → dernière insertion en haut
+  // Tri chronologique décroissant via une clé numérique AAAAMMJJ qui gère les
+  // deux formats stockés (ISO et FR). À date égale → dernière insertion en haut
   // (idx élevé = ajouté plus récemment dans son tableau).
   const all = [...recettes, ...depenses].sort((a, b) => {
-    const da = (a.date || ''), db = (b.date || '');
-    if (da !== db) {
-      if (!da) return 1;
-      if (!db) return -1;
-      return db.localeCompare(da, 'fr', { numeric: true });
-    }
-    // Tiebreaker : idx DESC pour que la nouvelle ligne apparaisse tout en haut
+    const ka = _ledgerDateKey(a.date), kb = _ledgerDateKey(b.date);
+    if (ka !== kb) return kb - ka; // plus récent en haut ; date inconnue (0) en bas
     return (b.idx || 0) - (a.idx || 0);
   });
 
