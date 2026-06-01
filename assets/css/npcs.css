@@ -449,6 +449,42 @@ textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; fon
 .npc-edit-lbl { font-size: .62rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
 .npc-hint { font-size: .64rem; color: var(--text-dim); font-style: italic; margin-top: .35rem; }
 
+/* Portrait cliquable (upload direct) */
+.npc-portrait-btn {
+  position: relative; display: block; padding: 0; overflow: hidden; cursor: pointer;
+  background: var(--af-bg);
+}
+.npc-portrait-btn img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+.npc-portrait-btn.is-empty {
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 2rem; color: var(--af);
+}
+.npc-portrait-cam {
+  position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: .7rem;
+  padding: 1px 0; background: rgba(0,0,0,.55); opacity: 0; transition: opacity .15s;
+}
+.npc-portrait-btn:hover .npc-portrait-cam { opacity: 1; }
+
+/* Toggles d'activité bastion + visibilité */
+.npc-act-toggle {
+  font-size: .66rem; padding: 2px 9px; border-radius: 999px; cursor: pointer; font-weight: 600;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border); color: var(--text-dim);
+  transition: background .12s, border-color .12s, color .12s;
+}
+.npc-act-toggle:hover { border-color: rgba(232,184,75,.4); }
+.npc-act-toggle.is-on { background: rgba(232,184,75,.12); border-color: rgba(232,184,75,.4); color: var(--gold); }
+.npc-card-act--off { color: var(--text-dim); background: rgba(255,255,255,.04); border-color: var(--border); }
+
+/* Combat & stats compact */
+.npc-weapon-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.npc-weapon-select { max-width: 260px; }
+select.npc-inline { cursor: pointer; }
+.npc-weapon-meta { font-size: .72rem; color: var(--text-muted); }
+.npc-stats-card .npc-stat-grid { gap: .3rem; }
+.npc-stats-card .npc-stat-grid--6 { margin-top: .35rem; }
+.npc-stats-card .npc-stat-cell { padding: .3rem .2rem; }
+.npc-stats-card .npc-stat-cell input.npc-inline { font-size: .9rem; padding: 0 2px; }
+
 /* Empty fiche */
 .npc-fiche-empty {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
