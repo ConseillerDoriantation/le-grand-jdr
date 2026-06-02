@@ -23,7 +23,8 @@ import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFrom
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
-import { pickImageFile, uploadJpeg } from '../shared/image-upload.js';
+import { pickImageFile } from '../shared/image-upload.js';
+import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
@@ -808,6 +809,10 @@ function _groupNpcsByOrg(npcs) {
   groups.set(NO_ORG_KEY, npcs.filter(n =>
     !Array.isArray(n.organisations) || !n.organisations.filter(Boolean).length
   ));
+  // Tri alphabétique des PNJ à l'intérieur de chaque groupe (nom, insensible à la casse/accents)
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  }
   return groups;
 }
 
@@ -1559,17 +1564,42 @@ async function _npcInlineSave(el) {
 }
 
 // Clic sur le portrait → choisir une image, compresser, enregistrer (base64).
+// Portrait PNJ : on passe par le cropper pan/zoom (comme les persos) pour
+// pouvoir cadrer l'image au lieu de la stocker brute.
+let _npcPhotoCrop = null;
 function _npcSetPhoto(btn) {
   if (!STATE.isAdmin) return;
   const id = btn.dataset.id;
-  pickImageFile({ onImage: async ({ file }) => {
-    try {
-      const b64 = await uploadJpeg(file, { max: 420, quality: 0.78 });
-      const n = _npcs.find(x => x.id === id); if (n) n.imageUrl = b64;
-      await updateInCol('npcs', id, { imageUrl: b64 });
-      _refreshActivePanel(); _refreshList();
-    } catch (e) { notifySaveError(e); }
-  }});
+  pickImageFile({ onImage: ({ dataUrl }) => _npcShowCropModal(dataUrl, id) });
+}
+
+function _npcShowCropModal(dataUrl, id) {
+  openModal('📷 Cadrer le portrait', `
+    ${panZoomCropHTML({ idPrefix: 'npc-crop', viewSize: 300 })}
+    <div style="display:flex;gap:.6rem;justify-content:flex-end;width:300px;margin:.8rem auto 0">
+      <button class="btn btn-outline" id="npc-photo-cancel">Annuler</button>
+      <button class="btn btn-gold" id="npc-photo-save">✅ Enregistrer</button>
+    </div>`);
+  requestAnimationFrame(() => {
+    _npcPhotoCrop?.destroy?.();
+    _npcPhotoCrop = attachPanZoomCrop({ idPrefix: 'npc-crop', dataUrl, viewSize: 300, outputSize: 300 });
+    document.getElementById('npc-photo-cancel')?.addEventListener('click', () => {
+      _npcPhotoCrop?.destroy?.(); _npcPhotoCrop = null; closeModal();
+    }, { once: true });
+    document.getElementById('npc-photo-save')?.addEventListener('click', () => _npcSaveCroppedPhoto(id));
+  });
+}
+
+async function _npcSaveCroppedPhoto(id) {
+  const dataUrl = _npcPhotoCrop?.getBase64();
+  if (!dataUrl) { showNotif('Erreur : cadrage non initialisé.', 'error'); return; }
+  const n = _npcs.find(x => x.id === id); if (n) n.imageUrl = dataUrl;
+  if (await trySave('npcs', id, { imageUrl: dataUrl })) {
+    _npcPhotoCrop?.destroy?.(); _npcPhotoCrop = null;
+    closeModal();
+    showNotif('Portrait enregistré !', 'success');
+    _refreshActivePanel(); _refreshList();
+  }
 }
 
 // Organisations en texte libre séparé par des virgules → tableau.

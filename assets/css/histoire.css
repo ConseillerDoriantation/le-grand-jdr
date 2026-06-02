@@ -1808,15 +1808,8 @@
   border-radius: var(--r-full);
   font-size: 0.72rem; color: var(--text);
 }
-.st-group-member img, .st-group-member > span:first-child {
-  width: 22px; height: 22px; border-radius: 50%;
-  border: 1px solid var(--col, var(--amber));
-  object-fit: cover; flex-shrink: 0;
-  background: var(--bg-elevated);
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-display); font-weight: 700; font-size: 0.66rem;
-  color: var(--col, var(--amber));
-}
+/* La vignette est rendue par characterAvatarHtml (taille/bordure/cercle gérés
+   en inline) — pas de dimensionnement CSS ici, sinon double bordure. */
 .st-group-member-name { font-weight: 600; }
 .st-group-empty-members { font-size: 0.74rem; color: var(--text-dim); font-style: italic; }
 
