@@ -689,7 +689,7 @@
   flex: 0 1 auto;
   max-height: 62%;
   min-height: 80px;
-  overflow-y: auto;
+  overflow: hidden;            /* le défilement vit dans .vtt-ins-tabbody */
   padding: .75rem;
   display: flex;
   flex-direction: column;
@@ -697,6 +697,10 @@
   font-size: .82rem;
   border-bottom: 1px solid var(--border);
 }
+/* Header + barres + onglets épinglés ; seul le corps de l'onglet défile */
+.vtt-inspector > .vtt-ins-header,
+.vtt-inspector > .vtt-ins-bars,
+.vtt-inspector > .vtt-ins-tabbar { flex-shrink: 0; }
 
 .vtt-ins-empty {
   flex: 1;
@@ -784,7 +788,13 @@
   background: var(--gold-glow, color-mix(in srgb, var(--gold) 12%, transparent));
 }
 .vtt-ins-tab.active .vtt-ins-tab-ic { filter: none; }
-.vtt-ins-tabbody { display: flex; flex-direction: column; gap: .5rem; }
+.vtt-ins-tabbody {
+  display: flex; flex-direction: column; gap: .5rem;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.vtt-ins-tabbody::-webkit-scrollbar { width: 4px; }
+.vtt-ins-tabbody::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .vtt-ins-tabbody:empty { display: none; }
 
 /* Barres PV / PM */

@@ -5925,10 +5925,10 @@ function _renderInspector(t) {
                   ${typeBadges || runeBadgesHtml ? `<div class="vtt-creat-act-badges">${typeBadges}${runeBadgesHtml}</div>` : ''}
                 </div>`;
               }).join('')}` : ''}
-            ${_atk.length ? `
-              <div class="vtt-creat-sub-title" style="color:#f87171">⚠ Attaques legacy (${_atk.length}) — à migrer en actions</div>
+            ${(_atk.length && !_armesN.length && !_actions.length) ? `
+              <div class="vtt-creat-sub-title">🗡 Attaques (${_atk.length})</div>
               ${_atk.map(a => `
-                <div class="vtt-creat-atk" style="opacity:.7">
+                <div class="vtt-creat-atk">
                   <div class="vtt-creat-atk-name">${_esc(a.nom || 'Attaque')}</div>
                   <div class="vtt-creat-atk-stats">
                     ${a.toucher ? `<span class="vtt-creat-atk-stat touch">🎯 ${_esc(a.toucher)}</span>` : ''}
@@ -6228,7 +6228,7 @@ function _renderInspector(t) {
   // ── Répartition en onglets ─────────────────────────────────────────────
   const _tabs = [
     { k:'stats',    ic:'📊', lb:'Stats',     html: coreStatsHtml },
-    { k:'combat',   ic:'⚔️', lb:'Combat',    html: _combatActionsHtml + _skillsHtml },
+    { k:'combat',   ic:'🎲', lb:'Jets',      html: _combatActionsHtml + _skillsHtml },
     { k:'effets',   ic:'✨', lb:'Effets',    html: _condsHtml + _buffsHtml },
     { k:'creature', ic:'📜', lb:'Bestiaire', html: _creatureHtml },
     { k:'gerer',    ic:'⚙️', lb:'Gérer',     html: _delegateHtml + _sendPageHtml + _footerHtml },
