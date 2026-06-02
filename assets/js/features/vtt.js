@@ -12267,6 +12267,25 @@ export async function renderVttPage() {
 // PRÉSENCE — joueurs actifs sur le VTT
 // ═══════════════════════════════════════════════════════════════════
 
+// MJ : retire un joueur de la présence du VTT en supprimant son doc ping/présence.
+// Effet : il disparaît de la colonne pour tout le monde, et son doc cesse d'être
+// relu à chaque ouverture du VTT (utile pour les entrées fantômes). Un joueur
+// encore actif se ré-annonce à son prochain heartbeat (≤45 s) — c'est voulu.
+async function _vttKickPresence(uid) {
+  if (!STATE.isAdmin || !uid) return;
+  const pseudo = _presence[uid]?.pseudo || 'ce joueur';
+  if (!confirm(`Retirer ${pseudo} de la présence du VTT ?\n(Réapparaîtra automatiquement s'il est toujours actif sur la table.)`)) return;
+  try {
+    await deleteDoc(_pingRef(uid));
+    // Optimiste : retire localement sans attendre le snapshot.
+    delete _presence[uid];
+    if (_miniUid === uid) { _miniUid = null; _renderMiniSheet(null); }
+    _renderPresenceCol();
+    if (STATE.isAdmin) _renderTraySoon();
+    showNotif(`${pseudo} retiré de la présence`, 'info');
+  } catch (e) { console.error('[vtt] kick presence', e); showNotif('Erreur', 'error'); }
+}
+
 function _renderPresenceCol() {
   const list = document.getElementById('vtt-pres-list');
   if (!list) return;
@@ -12293,6 +12312,7 @@ function _renderPresenceCol() {
       <div class="vtt-pres-avatar"${img?` style="background-image:url('${img}')"`:''}>
         ${img ? '' : `<span>${init}</span>`}
         ${isSelf ? '<div class="vtt-pres-self-dot"></div>' : ''}
+        ${(STATE.isAdmin && !isSelf) ? `<button class="vtt-pres-kick" data-vtt-fn="_vttKickPresence" data-vtt-args="${p.uid}" title="Retirer ${_esc(p.pseudo)} de la présence" aria-label="Retirer de la présence">✕</button>` : ''}
       </div>
       <div class="vtt-pres-name">${p.pseudo}</div>
     </div>`;
@@ -12528,6 +12548,29 @@ async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId)
   } catch(e) { console.error('[vtt] send item', e); showNotif('Erreur envoi', 'error'); }
 }
 
+// Supprime définitivement un exemplaire de l'inventaire (sans destinataire).
+// Même logique de réindexation de l'équipement que _vttMsConfirmSend.
+async function _vttMsDeleteItem(charId, uid, invIndex) {
+  if (!_msCanEdit(uid)) return;
+  invIndex = parseInt(invIndex);
+  const c = _characters[charId]; if (!c) return;
+  const inv = [...(c.inventaire||[])];
+  const item = inv[invIndex]; if (!item) return;
+  if (!confirm(`Supprimer "${item.nom||'cet objet'}" de l'inventaire ?`)) return;
+  inv.splice(invIndex, 1);
+  const equip = { ...(c.equipement||{}) };
+  Object.keys(equip).forEach(s => {
+    const e = equip[s]; if (!e) return;
+    if (e.sourceInvIndex === invIndex)    delete equip[s];
+    else if (e.sourceInvIndex > invIndex) equip[s] = { ...e, sourceInvIndex: e.sourceInvIndex - 1 };
+  });
+  const bonus = computeEquipStatsBonus(equip);
+  try {
+    await updateDoc(_chrRef(charId), { inventaire: inv, equipement: equip, statsBonus: bonus });
+    showNotif(`${item.nom||'Objet'} supprimé`, 'info');
+  } catch(e) { console.error('[vtt] delete item', e); showNotif('Erreur suppression', 'error'); }
+}
+
 // ─── Rendus par onglet ────────────────────────────────────────────
 
 function _msTabCombat(c, uid, canEdit) {
@@ -12747,6 +12790,7 @@ function _msTabInventaire(c, uid, canEdit) {
             ?`<button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsUnequipAll" data-vtt-args="${c.id}|${uid}|${idxToUnequip}" title="Déséquiper">🔓</button>`
             :''}
           <button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsSendPicker" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Envoyer">📤</button>
+          <button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsDeleteItem" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Supprimer">🗑️</button>
         </div>`:''}
       </div>`;
     }
@@ -13042,6 +13086,7 @@ const VTT_ACTIONS = {
   _vttImportGithubRelease,
   _vttInsTab,
   _vttInvokeMyToken,
+  _vttKickPresence,
   _vttLibDelFolder,
   _vttLibDelImg,
   _vttLibMoveMenu,
@@ -13064,6 +13109,7 @@ const VTT_ACTIONS = {
   _vttMoveTokenToPage,
   _vttMsAddNote,
   _vttMsConfirmSend,
+  _vttMsDeleteItem,
   _vttMsDeleteNote,
   _vttMsEquip,
   _vttMsEquipPicker,

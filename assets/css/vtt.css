@@ -3160,6 +3160,25 @@
   border: 1.5px solid var(--bg-panel);
 }
 
+/* MJ : retirer un joueur de la présence — badge ✕ au survol de l'entrée */
+.vtt-pres-kick {
+  position: absolute;
+  top: -4px; right: -4px;
+  width: 16px; height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg-panel);
+  background: var(--ember, #ef4444);
+  color: #fff;
+  font-size: .62rem; line-height: 1;
+  cursor: pointer;
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 2;
+}
+.vtt-pres-entry:hover .vtt-pres-kick { display: flex; }
+.vtt-pres-kick:hover { filter: brightness(1.15); }
+
 .vtt-pres-name {
   font-size: .6rem;
   color: var(--text-muted);
