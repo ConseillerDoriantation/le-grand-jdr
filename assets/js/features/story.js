@@ -429,7 +429,7 @@ function _renderGroupCards(groups) {
         ${membres.length ? membres.map(c => {
           const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
           return `<div class="st-group-member" title="${_esc(c.nom||'')}" style="--col:${col}">
-            ${characterPortraitContent(c)}
+            ${characterAvatarHtml(c, { size: 22, border: `1px solid ${col}`, background: `${col}22`, color: col, title: false })}
             <span class="st-group-member-name">${_esc(c.nom||'')}</span>
           </div>`;
         }).join('') : '<span class="st-group-empty-members">Aucun membre — édite le groupe pour en ajouter.</span>'}
