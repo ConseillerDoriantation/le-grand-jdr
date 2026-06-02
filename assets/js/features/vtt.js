@@ -15,7 +15,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../shared/equipment-utils.js';
@@ -394,6 +394,7 @@ let _trayNpcOpen = _loadTrayPref('npc');
 let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
+let _msOpenNote   = null; // index de la note dépliée (onglet Notes)
 
 // ── Timer de session ────────────────────────────────────────────────
 // Stocké dans _session.timer = { startedAt:ms, accumulated:ms, running:bool, label:string }
@@ -1525,6 +1526,11 @@ function _buildShape(t) {
 
 function _patchShape(id) {
   const e=_tokens[id]; if (!e?.shape) return;
+  // Garde-fou : un token d'une autre page (ou en réserve) n'a rien à dessiner
+  // sur le calque courant. Sans ça, un patch (ex. édition PV/PM d'un perso ayant
+  // un token sur une autre page) ré-ajoute son shape — détruit mais encore
+  // référencé — au calque actif → des tokens d'une autre page « apparaissent ».
+  if (e.data.pageId !== _activePage?.id) return;
   const ld=_live(e.data); const g=e.shape;
   const hasPmBar   = !!g.findOne('.pm-val');
   const hasCaBuff  = !!g.findOne('.ca-buff-turns');
@@ -1731,11 +1737,81 @@ function _renderPings(pings) {
 }
 
 // ── Réaction émote style stream — toujours bas-droite, indépendant du zoom ──
+// Dispatcher : émote ancrée au-dessus du token émetteur si présent sur la page
+// active (rendu Konva en coords monde → suit pan/zoom), sinon bulle de repli
+// dans le coin du canvas.
 function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
   if (_renderedReactions.has(key)) return;
   _renderedReactions.add(key);
+  // purge mémoire douce (évite la croissance infinie du Set sur longue session)
+  if (_renderedReactions.size > 400) _renderedReactions.clear();
 
-  // Injecter le CSS une seule fois
+  const e = tokenId ? _tokens[tokenId] : null;
+  if (e?.data && e.shape && e.data.pageId === _activePage?.id && _layers.ping && window.Konva) {
+    _spawnTokenEmote(e.data, emoteUrl, emoteName);
+  } else {
+    _spawnCornerEmote(emoteUrl, emoteName);
+  }
+}
+
+// Émote ancrée : pop-in élastique au-dessus du token, légère montée puis fondu.
+function _spawnTokenEmote(t, emoteUrl, emoteName) {
+  const K = window.Konva;
+  const dim = _tokenDims(t);
+  const cx = t.col * CELL + dim.w * CELL / 2;
+  const topY = t.row * CELL;
+  const D = CELL * 1.5, R = D / 2;
+  const cy = topY - R * 0.95;              // centre de la bulle, au-dessus du token
+
+  const group = new K.Group({ x: cx, y: cy, opacity: 0, scaleX: 0.2, scaleY: 0.2, listening: false });
+  // Pointeur vers le token (triangle vers le bas)
+  group.add(new K.Line({
+    points: [-R * 0.26, R * 0.82, R * 0.26, R * 0.82, 0, R * 1.32],
+    closed: true, fill: '#fff',
+    shadowColor: '#000', shadowBlur: R * 0.25, shadowOpacity: 0.4, shadowOffsetY: 2,
+  }));
+  // Cercle blanc + ombre
+  group.add(new K.Circle({
+    radius: R, fill: '#fff',
+    stroke: 'rgba(0,0,0,0.18)', strokeWidth: Math.max(1.5, R * 0.05),
+    shadowColor: '#000', shadowBlur: R * 0.35, shadowOpacity: 0.45, shadowOffsetY: 3,
+  }));
+  // Image rognée en cercle
+  const clip = new K.Group({ clipFunc: ctx => { ctx.arc(0, 0, R * 0.86, 0, Math.PI * 2, false); } });
+  group.add(clip);
+  _layers.ping.add(group);
+  _layers.ping.batchDraw();
+
+  const imgEl = new Image();
+  imgEl.onload = () => {
+    if (group.getStage() === null) return; // déjà détruit
+    const side = R * 1.78;
+    clip.add(new K.Image({ image: imgEl, width: side, height: side, x: -side / 2, y: -side / 2 }));
+    _layers.ping.batchDraw();
+  };
+  imgEl.onerror = () => {};
+  imgEl.src = emoteUrl;
+
+  // Animation : pop élastique → settle → maintien → montée + fondu
+  group.to({
+    scaleX: 1.12, scaleY: 1.12, opacity: 1, duration: 0.26, easing: K.Easings.BackEaseOut,
+    onFinish: () => group.to({
+      scaleX: 1, scaleY: 1, duration: 0.12,
+      onFinish: () => {
+        group._holdTimer = setTimeout(() => {
+          if (group.getStage() === null) return; // stage détruit (changement de page / sortie)
+          group.to({
+            y: cy - CELL * 0.9, opacity: 0, duration: 0.85, easing: K.Easings.EaseIn,
+            onFinish: () => { group.destroy(); _layers.ping?.batchDraw(); },
+          });
+        }, 1700);
+      },
+    }),
+  });
+}
+
+// Émote de repli (token absent de la page) : bulle qui monte dans le coin du canvas.
+function _spawnCornerEmote(emoteUrl, emoteName) {
   if (!document.getElementById('vtt-emote-anim-css')) {
     const s = document.createElement('style');
     s.id = 'vtt-emote-anim-css';
@@ -1749,7 +1825,7 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
       }
       .vtt-emote-bubble {
         position: absolute; bottom: 0; right: 0;
-        width: 104px; height: 104px; border-radius: 50%;
+        width: 96px; height: 96px; border-radius: 50%;
         background: #fff;
         box-shadow: 0 6px 22px rgba(0,0,0,0.5);
         overflow: hidden;
@@ -1757,15 +1833,13 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
         pointer-events: none;
       }
       .vtt-emote-bubble img {
-        width: 96px; height: 96px;
+        width: 88px; height: 88px;
         object-fit: cover; border-radius: 50%;
         position: absolute; top: 4px; left: 4px;
       }
     `;
     document.head.appendChild(s);
   }
-
-  // Créer ou réutiliser l'overlay (coin bas-droit du canvas, z-index au-dessus de la vignette)
   const wrap = document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
   let overlay = document.getElementById('vtt-emote-overlay');
@@ -1775,7 +1849,6 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
     overlay.style.cssText = 'position:absolute;bottom:18px;right:18px;width:0;height:0;pointer-events:none;z-index:20;overflow:visible';
     wrap.appendChild(overlay);
   }
-
   const bubble = document.createElement('div');
   bubble.className = 'vtt-emote-bubble';
   const img = document.createElement('img');
@@ -6520,8 +6593,12 @@ function _renderAllTokens() {
   _layers.token?.destroyChildren();
   for (const e of Object.values(_tokens)) {
     const t=e.data;
-    if (t.pageId!==_activePage.id) continue;
-    if (!t.visible&&!STATE.isAdmin) continue;
+    // destroyChildren() a détruit tous les shapes : on remet la référence à null
+    // pour les tokens non rendus ici (autre page / réserve / invisibles).
+    if (t.pageId!==_activePage.id || (!t.visible&&!STATE.isAdmin)) {
+      if (e.shape) _tokens[t.id]={...e,shape:null};
+      continue;
+    }
     const shape=_buildShape(t);
     _tokens[t.id]={...e,shape}; _layers.token.add(shape);
   }
@@ -7060,7 +7137,12 @@ function _initListeners() {
     }
     _renderTraySoon();
     _charsReady = true; _maybeSyncAutoTokens();
-    if (_miniUid) _renderMiniSheet(_miniUid);
+    // Ne re-rend la mini-fiche que si le perso AFFICHÉ a changé : évite d'écraser
+    // une saisie en cours (note, XP) quand un autre personnage est mis à jour.
+    if (_miniUid && _miniCharId &&
+        JSON.stringify(prev[_miniCharId]) !== JSON.stringify(next[_miniCharId])) {
+      _renderMiniSheet(_miniUid);
+    }
   }));
 
   // 4. PNJ — source de vérité des HP PNJ
@@ -7485,6 +7567,12 @@ function _applyEmotes(escaped) {
 // Favoris émotes — stockés en localStorage
 const _getFavs = () => lsJson.get('vtt-emote-favs', []);
 const _setFavs = v => lsJson.set('vtt-emote-favs', v);
+const _getRecents = () => lsJson.get('vtt-emote-recents', []);
+function _pushRecent(name) {
+  const r = _getRecents().filter(n => n !== name);
+  r.unshift(name);
+  lsJson.set('vtt-emote-recents', r.slice(0, 8));
+}
 
 function _emoteGridHtml(list, favSet=new Set()) {
   if (!list.length) return '<div class="vtt-emote-empty-grid">Aucune émote trouvée</div>';
@@ -7509,21 +7597,33 @@ function _renderEmotePicker() {
     return;
   }
   const favSet = new Set(_getFavs());
+  const byName = new Map(_emotes.map(e => [e.name, e]));
+  const recentEmotes = _getRecents().map(n => byName.get(n)).filter(Boolean);
   const favEmotes = _emotes.filter(e => favSet.has(e.name));
+
+  const recentBlock = recentEmotes.length
+    ? `<div id="vtt-emote-recent-section">
+        <div class="vtt-emote-section-lbl">🕘 Récents</div>
+        <div class="vtt-emote-grid">${_emoteGridHtml(recentEmotes, favSet)}</div>
+      </div>`
+    : `<div id="vtt-emote-recent-section" data-empty="1" style="display:none"></div>`;
   const favBlock = favEmotes.length
     ? `<div id="vtt-emote-fav-section">
         <div class="vtt-emote-section-lbl gold">⭐ Favoris</div>
         <div class="vtt-emote-grid" id="vtt-emote-fav-grid">${_emoteGridHtml(favEmotes, favSet)}</div>
-      </div>
-      <div class="vtt-emote-section-lbl">Toutes</div>`
-    : `<div id="vtt-emote-fav-section" style="display:none"></div>`;
+      </div>`
+    : `<div id="vtt-emote-fav-section" data-empty="1" style="display:none"></div>`;
+  const allLbl = (recentEmotes.length || favEmotes.length)
+    ? `<div class="vtt-emote-section-lbl" id="vtt-emote-all-lbl">Toutes</div>` : '';
   el.innerHTML = `
     <div class="vtt-emote-picker-search">
       <input type="text" id="vtt-emote-search" placeholder="🔍 Rechercher…" autocomplete="off"
         data-vtt-fn="_vttFilterEmotes" data-vtt-on="input" data-vtt-args="$value">
     </div>
     <div class="vtt-emote-picker-body">
+      ${recentBlock}
       ${favBlock}
+      ${allLbl}
       <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes, favSet)}</div>
     </div>`;
   setTimeout(() => document.getElementById('vtt-emote-search')?.focus(), 40);
@@ -7534,8 +7634,13 @@ function _vttFilterEmotes(q) {
   const grid = document.getElementById('vtt-emote-grid'); if (!grid) return;
   const filtered = q.trim() ? _emotes.filter(e => e.name.includes(q.trim().toLowerCase())) : _emotes;
   grid.innerHTML = _emoteGridHtml(filtered, favSet);
+  const hide = !!q.trim();
+  const recentSection = document.getElementById('vtt-emote-recent-section');
   const favSection = document.getElementById('vtt-emote-fav-section');
-  if (favSection) favSection.style.display = q.trim() ? 'none' : '';
+  const allLbl = document.getElementById('vtt-emote-all-lbl');
+  if (recentSection && recentSection.dataset.empty !== '1') recentSection.style.display = hide ? 'none' : '';
+  if (favSection && favSection.dataset.empty !== '1') favSection.style.display = hide ? 'none' : '';
+  if (allLbl) allLbl.style.display = hide ? 'none' : '';
 }
 
 function _vttToggleFav(name) {
@@ -7586,19 +7691,23 @@ async function _vttPickEmote(name) {
   const em = _emotes.find(e => e.name === name); if (!em) return;
   // Le picker reste ouvert — l'utilisateur ferme manuellement
 
-  // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
-  const ts = Date.now();
-  const key = `${uid}_${ts}`;
+  _pushRecent(name);
 
-  // Affichage local immédiat
-  _showEmoteBubble(null, em.url, name, key);
-
-  // Propagation aux autres joueurs via Firestore
+  // Token émetteur : sélection courante, sinon le token possédé par le joueur
   let tokenId = _selected;
   if (!tokenId) {
     const own = Object.values(_tokens).find(e => e.data.ownerId === uid);
     tokenId = own?.data?.id ?? null;
   }
+
+  // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
+  const ts = Date.now();
+  const key = `${uid}_${ts}`;
+
+  // Affichage local immédiat (ancré au token émetteur si présent)
+  _showEmoteBubble(tokenId, em.url, name, key);
+
+  // Propagation aux autres joueurs via Firestore
   setDoc(_reactionRef(uid), {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: _activePage?.id ?? null,
@@ -12429,6 +12538,108 @@ function _msTabInventaire(c, uid, canEdit) {
   return html;
 }
 
+// ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
+function _msTabNotes(c, uid, canEdit) {
+  const notes = c?.notesList || [];
+  let html = `<div class="vtt-ms-notes">`;
+  if (canEdit) {
+    html += `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">+ Nouvelle note</button>`;
+  }
+  if (!notes.length) {
+    html += `<div class="vtt-ms-empty">${canEdit ? 'Aucune note. Crée-en une.' : 'Aucune note.'}</div></div>`;
+    return html;
+  }
+  notes.forEach((note, i) => {
+    const open = _msOpenNote === i;
+    const body = open ? (canEdit
+      ? `<div class="vtt-ms-note-body">
+          <textarea class="vtt-ms-note-area" id="vtt-ms-note-${c.id}-${i}" rows="6"
+            placeholder="Contenu de la note…">${_esc(_msNoteText(note.contenu))}</textarea>
+          <button class="vtt-ms-note-save" data-vtt-fn="_vttMsSaveNote" data-vtt-args="${c.id}|${uid}|${i}">💾 Enregistrer</button>
+        </div>`
+      : `<div class="vtt-ms-note-body"><div class="vtt-ms-note-content">${note.contenu || '<em style="opacity:.5">Vide</em>'}</div></div>`)
+      : '';
+    html += `<div class="vtt-ms-note-card${open ? ' open' : ''}">
+      <div class="vtt-ms-note-hd" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}">
+        <span class="vtt-ms-note-title">${_esc(note.titre || 'Note sans titre')}</span>
+        <div class="vtt-ms-note-hd-r">
+          ${canEdit ? `<button class="vtt-ms-note-ic" data-vtt-fn="_vttMsRenameNote" data-vtt-args="${c.id}|${uid}|${i}" title="Renommer">✏️</button>
+                       <button class="vtt-ms-note-ic" data-vtt-fn="_vttMsDeleteNote" data-vtt-args="${c.id}|${uid}|${i}" title="Supprimer">🗑️</button>` : ''}
+          <span class="vtt-ms-note-chev">${open ? '▲' : '▼'}</span>
+        </div>
+      </div>
+      ${note.date ? `<div class="vtt-ms-note-date">${_esc(note.date)}</div>` : ''}
+      ${body}
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// Texte affiché dans le textarea : si la note vient de l'éditeur riche de la vraie
+// fiche (HTML), on la convertit en texte lisible pour ne pas montrer de balises.
+function _msNoteText(contenu) {
+  if (!contenu) return '';
+  if (!/<[a-z][\s\S]*>/i.test(contenu)) return contenu; // déjà du texte brut
+  const tmp = document.createElement('div');
+  tmp.innerHTML = contenu.replace(/<\/(p|div|li)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n');
+  return (tmp.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function _vttMsAddNote(charId, uid) {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  const notes = [...(c.notesList || [])];
+  notes.push({ titre: 'Nouvelle note', contenu: '', date: new Date().toLocaleDateString('fr-FR') });
+  _msOpenNote = notes.length - 1;
+  await updateDoc(_chrRef(charId), { notesList: notes }).catch(() => showNotif('Erreur sauvegarde', 'error'));
+}
+
+function _vttMsToggleNote(idx) {
+  idx = parseInt(idx);
+  _msOpenNote = _msOpenNote === idx ? null : idx;
+  if (_miniUid) _renderMiniSheet(_miniUid);
+}
+
+async function _vttMsRenameNote(charId, uid, idx) {
+  if (!_msCanEdit(uid)) return;
+  idx = parseInt(idx);
+  const c = _characters[charId]; if (!c) return;
+  const notes = [...(c.notesList || [])];
+  if (!notes[idx]) return;
+  const val = prompt('Titre de la note :', notes[idx].titre || 'Note sans titre');
+  if (val === null) return;
+  notes[idx] = { ...notes[idx], titre: val.trim() || notes[idx].titre || 'Note sans titre' };
+  await updateDoc(_chrRef(charId), { notesList: notes }).catch(() => showNotif('Erreur sauvegarde', 'error'));
+}
+
+async function _vttMsSaveNote(charId, uid, idx) {
+  if (!_msCanEdit(uid)) return;
+  idx = parseInt(idx);
+  const c = _characters[charId]; if (!c) return;
+  const ta = document.getElementById(`vtt-ms-note-${charId}-${idx}`);
+  const notes = [...(c.notesList || [])];
+  if (!notes[idx] || !ta) return;
+  notes[idx] = { ...notes[idx], contenu: ta.value };
+  if (await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false))
+    showNotif('Note enregistrée', 'success');
+  else showNotif('Erreur sauvegarde', 'error');
+}
+
+async function _vttMsDeleteNote(charId, uid, idx) {
+  if (!_msCanEdit(uid)) return;
+  idx = parseInt(idx);
+  const c = _characters[charId]; if (!c) return;
+  const notes = [...(c.notesList || [])];
+  if (!notes[idx]) return;
+  if (!confirm('Supprimer cette note ?')) return;
+  notes.splice(idx, 1);
+  if (_msOpenNote === idx) _msOpenNote = null;
+  else if (_msOpenNote > idx) _msOpenNote--;
+  if (await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false))
+    showNotif('Note supprimée', 'info');
+}
+
 // ─── Rendu principal ─────────────────────────────────────────────
 
 function _renderMiniSheet(uid) {
@@ -12462,19 +12673,23 @@ function _renderMiniSheet(uid) {
     : '';
 
   const TABS = [
-    { key:'combat', icon:'⚔️', label:'Combat'  },
-    { key:'equip',  icon:'🛡',  label:'Équip.'  },
-    { key:'sorts',  icon:'✨',  label:'Sorts'   },
-    { key:'inv',    icon:'🎒',  label:'Invent.' },
+    { key:'combat', icon:'⚔️', label:'Combat' },
+    { key:'equip',  icon:'🛡',  label:'Équip.' },
+    { key:'sorts',  icon:'✨',  label:'Sorts'  },
+    { key:'inv',    icon:'🎒',  label:'Sac'    },
+    { key:'notes',  icon:'📝', label:'Notes'  },
   ];
   const tabBarHtml = `<div class="vtt-ms-tabbar">${TABS.map(t =>
-    `<button class="vtt-ms-tab${_miniTab===t.key?' active':''}" data-vtt-fn="_vttMsTab" data-vtt-args="${t.key}">${t.icon} ${t.label}</button>`
+    `<button class="vtt-ms-tab${_miniTab===t.key?' active':''}" data-vtt-fn="_vttMsTab" data-vtt-args="${t.key}" title="${t.label}">
+      <span class="vtt-ms-tab-ic">${t.icon}</span><span class="vtt-ms-tab-lbl">${t.label}</span>
+    </button>`
   ).join('')}</div>`;
 
   const tabHtml =
       _miniTab === 'combat' ? _msTabCombat(c, uid, canEdit)
     : _miniTab === 'equip'  ? _msTabEquipement(c, uid, canEdit)
     : _miniTab === 'sorts'  ? _msTabSorts(c, uid, canEdit)
+    : _miniTab === 'notes'  ? _msTabNotes(c, uid, canEdit)
     :                         _msTabInventaire(c, uid, canEdit);
 
   panel.classList.add('open');
@@ -12629,13 +12844,18 @@ const VTT_ACTIONS = {
   _vttMemberInfo,
   _vttMoveTokenAndReset,
   _vttMoveTokenToPage,
+  _vttMsAddNote,
   _vttMsConfirmSend,
+  _vttMsDeleteNote,
   _vttMsEquip,
   _vttMsEquipPicker,
+  _vttMsRenameNote,
+  _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSetNiveau,
   _vttMsSlotChange,
   _vttMsTab,
+  _vttMsToggleNote,
   _vttMsUnequip,
   _vttMsUnequipAll,
   _vttMusicNext,
