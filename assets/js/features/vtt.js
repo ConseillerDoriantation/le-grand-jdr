@@ -282,6 +282,7 @@ let _musicSortables = [];   // instances Sortable actives
 let _previewEl     = null;  // aperçu local MJ (non diffusé)
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
+let _insTab     = 'stats';   // onglet actif de l'inspecteur token
 let _rollHidden = lsJson.get('vtt-roll-hidden', false); // MJ only — jet caché des joueurs
 const _renderedPings     = new Set();
 const _renderedReactions = new Set();
@@ -380,6 +381,11 @@ let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
+let _pageSearch       = '';    // filtre texte appliqué à la liste des pages
+const _pageFoldClosed = (() => { // dossiers de pages repliés (persistés)
+  try { return new Set(JSON.parse(localStorage.getItem('vtt-page-folds') || '[]')); } catch { return new Set(); }
+})();
+const _savePageFolds = () => { try { localStorage.setItem('vtt-page-folds', JSON.stringify([..._pageFoldClosed])); } catch {} };
 // Sous-sections togglables (en ligne reste toujours visible) — persistées
 // par navigateur via localStorage, défaut : repliées (le MJ regarde d'abord
 // les joueurs présents).
@@ -5748,7 +5754,8 @@ function _renderInspector(t) {
     '</div>';
 
   // Précalcul du bloc stats (évite l'imbrication de backticks dans le template)
-  let statsHtml;
+  // vitalsHtml = barres PV/PM (épinglées sous le header) · coreStatsHtml = onglet Stats
+  let vitalsHtml = '', coreStatsHtml = '';
   if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
     const track    = _bstTracker[t.beastId] || {};
     const pvMax    = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
@@ -5758,12 +5765,13 @@ function _renderInspector(t) {
     const caLabel  = track.caEstimee  !== undefined && track.caEstimee  !== '' ? String(track.caEstimee)  : '?';
     const vitLabel = track.vitEstimee !== undefined && track.vitEstimee !== '' ? String(track.vitEstimee)+' cases' : '?';
     const pos      = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
-    statsHtml =
+    vitalsHtml =
       '<div class="vtt-ins-bars">' +
         (pvMax !== null
           ? _bar('PV', pvCur??pvMax, pvMax, pvBarCol)
           : '<div class="vtt-ins-bar-row"><span class="vtt-ins-bar-lbl">PV</span><span style="color:var(--text-muted);font-size:.75rem;grid-column:2/-1">inconnus</span></div>') +
-      '</div>' +
+      '</div>';
+    coreStatsHtml =
       '<div class="vtt-ins-stats">' +
         _stat('🛡', 'CA est.', caLabel) +
         _stat('🏃', 'Vitesse', vitLabel) +
@@ -5798,11 +5806,12 @@ function _renderInspector(t) {
         `</span>` : '';
     const _anyBonus = ['vitesse','ca','portee'].some(k => _manualBuffVal(t, k) !== 0);
 
-    statsHtml =
+    vitalsHtml =
       '<div class="vtt-ins-bars">' +
         _bar('PV', hp, hpm, hpColor(rat), pvEditHtml) +
         (pm !== null && pmMax !== null ? _bar('PM', pm, pmMax, '#b47fff', pmEditHtml) : '') +
-      '</div>' +
+      '</div>';
+    coreStatsHtml =
       '<div class="vtt-ins-stats">' +
         (() => {
           const baseMvt = ld.displayMovement ?? 6;   // inclut déjà le buff move_bonus manuel
@@ -5916,10 +5925,10 @@ function _renderInspector(t) {
                   ${typeBadges || runeBadgesHtml ? `<div class="vtt-creat-act-badges">${typeBadges}${runeBadgesHtml}</div>` : ''}
                 </div>`;
               }).join('')}` : ''}
-            ${_atk.length ? `
-              <div class="vtt-creat-sub-title" style="color:#f87171">⚠ Attaques legacy (${_atk.length}) — à migrer en actions</div>
+            ${(_atk.length && !_armesN.length && !_actions.length) ? `
+              <div class="vtt-creat-sub-title">🗡 Attaques (${_atk.length})</div>
               ${_atk.map(a => `
-                <div class="vtt-creat-atk" style="opacity:.7">
+                <div class="vtt-creat-atk">
                   <div class="vtt-creat-atk-name">${_esc(a.nom || 'Attaque')}</div>
                   <div class="vtt-creat-atk-stats">
                     ${a.toucher ? `<span class="vtt-creat-atk-stat touch">🎯 ${_esc(a.toucher)}</span>` : ''}
@@ -6107,27 +6116,15 @@ function _renderInspector(t) {
     </div>`;
   })();
 
-  el.innerHTML=`
-    <div class="vtt-ins-header">
-      ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
-           :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
-      <div style="min-width:0">
-        <div class="vtt-ins-name">${ld.displayName??t.name}</div>
-        <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
-      </div>
-    </div>
-    ${statsHtml}
-    ${_creatureHtml}
-    ${_condsHtml}
-    ${_buffsHtml}
-    ${(() => {
-      const inCombat = !!_session?.combat?.active;
-      const canEdit  = _canControlToken(t);
-      if (!inCombat || !canEdit || (t.type !== 'player' && t.type !== 'npc')) return '';
-      const ld2  = _live(t);
-      const base = ld2.displayMovement ?? 6;
-      const couru = (t.bonusMvt||0) > 0;
-      return `<div class="vtt-ins-section">
+  // ── Fragments par onglet (calculés puis répartis) ──────────────────────
+  const _combatActionsHtml = (() => {
+    const inCombat = !!_session?.combat?.active;
+    const canEdit  = _canControlToken(t);
+    if (!inCombat || !canEdit || (t.type !== 'player' && t.type !== 'npc')) return '';
+    const ld2  = _live(t);
+    const base = ld2.displayMovement ?? 6;
+    const couru = (t.bonusMvt||0) > 0;
+    return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">⚔️ Actions de combat</div>
         <div class="vtt-combat-actions">
           <button class="vtt-combat-action-btn${couru?' used':''}"
@@ -6141,23 +6138,24 @@ function _renderInspector(t) {
           </button>
         </div>
       </div>`;
-    })()}
-    ${(t.type==='player'||t.type==='npc') && _diceSkills.length && _canControlToken(t) ? (() => {
-      const cForBonus = t?.characterId ? _characters[t.characterId] : null;
-      const btns = _diceSkills.map(s => {
-        const statKey = _STAT_KEY[s.stat] || '';
-        const statMod = _tokenStatMod(t, statKey);
-        const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
-        const mod = statMod + eqBonus;
-        const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
-        const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
-        const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
-        return `<button class="vtt-skill-btn" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}>
+  })();
+
+  const _skillsHtml = ((t.type==='player'||t.type==='npc') && _diceSkills.length && _canControlToken(t)) ? (() => {
+    const cForBonus = t?.characterId ? _characters[t.characterId] : null;
+    const btns = _diceSkills.map(s => {
+      const statKey = _STAT_KEY[s.stat] || '';
+      const statMod = _tokenStatMod(t, statKey);
+      const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
+      const mod = statMod + eqBonus;
+      const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
+      const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
+      const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
+      return `<button class="vtt-skill-btn" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}>
           <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em">●</span>':''}</span>
           <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
         </button>`;
-      }).join('');
-      return `<div class="vtt-ins-section">
+    }).join('');
+    return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
         <div class="vtt-roll-mode-row">
           <button class="vtt-roll-mode-btn${_rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
@@ -6182,45 +6180,87 @@ function _renderInspector(t) {
         </div>` : ''}
         <div class="vtt-ins-skills">${btns}</div>
       </div>`;
-    })() : ''}
-    ${(() => {
-      // Délégation de contrôle — visible pour propriétaire OU MJ
-      const uid = STATE.user?.uid;
-      const isOwner = uid && t.ownerId === uid;
-      if (!isOwner && !STATE.isAdmin) return '';
-      const dels = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
-      const lookupName = _resolveUidName;
-      const chips = dels.length
-        ? dels.map(u => `<span class="vtt-delegate-chip">
+  })() : '';
+
+  const _delegateHtml = (() => {
+    // Délégation de contrôle — visible pour propriétaire OU MJ
+    const uid = STATE.user?.uid;
+    const isOwner = uid && t.ownerId === uid;
+    if (!isOwner && !STATE.isAdmin) return '';
+    const dels = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
+    const lookupName = _resolveUidName;
+    const chips = dels.length
+      ? dels.map(u => `<span class="vtt-delegate-chip">
             <span>${_esc(lookupName(u))}</span>
             <button class="vtt-delegate-x" data-vtt-fn="_vttRemoveTokenDelegate"
               data-vtt-args="${t.id}|${u}" title="Retirer">×</button>
           </span>`).join('')
-        : '<span class="vtt-delegate-empty">Personne — vous seul contrôlez ce token.</span>';
-      return `<div class="vtt-ins-section">
+      : '<span class="vtt-delegate-empty">Personne — vous seul contrôlez ce token.</span>';
+    return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🤝 Contrôle délégué</div>
         <div class="vtt-delegate-list">${chips}</div>
         <button class="vtt-btn-sm vtt-delegate-add"
           data-vtt-fn="_vttOpenTokenDelegatesModal" data-vtt-args="${t.id}"
           title="Autoriser un autre joueur à contrôler ce token">＋ Ajouter un joueur</button>
       </div>`;
-    })()}
-    ${STATE.isAdmin&&pageOpts?`
+  })();
+
+  const _sendPageHtml = (STATE.isAdmin && pageOpts) ? `
       <div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">Envoyer le joueur vers</div>
+        <div class="vtt-ins-section-title">📡 Envoyer le joueur vers</div>
         <select class="vtt-ins-select" data-vtt-fn="_vttMoveTokenAndReset" data-vtt-on="change" data-vtt-args="$this|${t.id}">
           <option value="">— choisir une page —</option>${pageOpts}
         </select>
-      </div>` :''}
-    ${STATE.isAdmin?`
-      <div class="vtt-ins-actions">
-        <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
-        <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible?'👁':'🙈'}</button>
-        ${_session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
+      </div>` : '';
 
-        ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩</button>`:''}
-        ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
-      </div>` :''}`;
+  const _footerHtml = STATE.isAdmin ? `
+      <div class="vtt-ins-section">
+        <div class="vtt-ins-section-title">🛠 Outils MJ</div>
+        <div class="vtt-ins-actions">
+          <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
+          <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible?'👁 Visible':'🙈 Caché'}</button>
+          ${_session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
+          ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩ Retirer</button>`:''}
+          ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
+        </div>
+      </div>` : '';
+
+  // ── Répartition en onglets ─────────────────────────────────────────────
+  const _tabs = [
+    { k:'stats',    ic:'📊', lb:'Stats',     html: coreStatsHtml },
+    { k:'combat',   ic:'🎲', lb:'Jets',      html: _combatActionsHtml + _skillsHtml },
+    { k:'effets',   ic:'✨', lb:'Effets',    html: _condsHtml + _buffsHtml },
+    { k:'creature', ic:'📜', lb:'Bestiaire', html: _creatureHtml },
+    { k:'gerer',    ic:'⚙️', lb:'Gérer',     html: _delegateHtml + _sendPageHtml + _footerHtml },
+  ].filter(s => s.html && s.html.trim());
+
+  const _active = _tabs.some(s => s.k === _insTab) ? _insTab : (_tabs[0]?.k || 'stats');
+  const _tabBar = _tabs.length > 1
+    ? `<div class="vtt-ins-tabbar">${_tabs.map(s =>
+        `<button class="vtt-ins-tab${s.k===_active?' active':''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}">
+          <span class="vtt-ins-tab-ic">${s.ic}</span><span class="vtt-ins-tab-lbl">${s.lb}</span>
+        </button>`).join('')}</div>`
+    : '';
+  const _tabBody = _tabs.find(s => s.k === _active)?.html || '';
+
+  el.innerHTML=`
+    <div class="vtt-ins-header">
+      ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
+           :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
+      <div style="min-width:0">
+        <div class="vtt-ins-name">${ld.displayName??t.name}</div>
+        <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
+      </div>
+    </div>
+    ${vitalsHtml}
+    ${_tabBar}
+    <div class="vtt-ins-tabbody">${_tabBody}</div>`;
+}
+
+function _vttInsTab(tab) {
+  _insTab = tab;
+  const t = _selected ? (_tokens[_selected]?.data ?? null) : null;
+  if (t) _renderInspector(t);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6533,29 +6573,160 @@ function _renderTray() {
 function _renderPageList() {
   const el=document.getElementById('vtt-tray-pages'); if (!el) return;
   const broadcastId=_session.activePageId;
-  const sorted=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
+  const all=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
 
-  if (!sorted.length) {
+  // Préserve le focus/caret de la barre de recherche au rerender
+  const ae = document.activeElement;
+  const searchFocused = ae?.id === 'vtt-page-search' && el.contains(ae);
+  const caretPos = searchFocused ? ae.selectionStart : null;
+
+  if (!all.length) {
     el.innerHTML=`<div class="vtt-tray-empty">Aucune page<br><small>Clique ＋ pour créer</small></div>`;
     return;
   }
-  el.innerHTML=sorted.map(p=>{
+
+  const q = _pageSearch.trim().toLowerCase();
+  const matches = p => !q || (p.name||'').toLowerCase().includes(q);
+
+  // Regroupe par dossier ('' = sans dossier, affiché en dernier)
+  const groups = new Map();
+  for (const p of all) {
+    if (!matches(p)) continue;
+    const f = (p.folder||'').trim();
+    if (!groups.has(f)) groups.set(f, []);
+    groups.get(f).push(p);
+  }
+  // Ordre des dossiers : ordre MJ persisté (session.pageFolderOrder) puis alpha
+  // pour les nouveaux ; '' (sans dossier) toujours en dernier.
+  const fOrder = Array.isArray(_session.pageFolderOrder) ? _session.pageFolderOrder : [];
+  const fIdx = f => { const i = fOrder.indexOf(f); return i < 0 ? 1e9 : i; };
+  const folders = [...groups.keys()].sort((a,b)=>{
+    if (a==='') return 1; if (b==='') return -1;          // sans dossier en dernier
+    const d = fIdx(a) - fIdx(b); if (d) return d;
+    return a.localeCompare(b,'fr',{sensitivity:'base'});
+  });
+
+  const _pageRow = p => {
     const isPlayers=p.id===broadcastId, isMj=p.id===_activePage?.id;
     const cls=isMj&&isPlayers?'mj-and-players':isMj?'mj':isPlayers?'players':'';
-    return `
-    <div class="vtt-page-item ${cls}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${p.cols||24}×${p.rows||18} cases">
+    return `<div class="vtt-page-item ${cls}" data-page-id="${p.id}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${_esc(p.name)} · ${p.cols||24}×${p.rows||18} cases">
+      <span class="vtt-page-item-grip" title="Glisser pour déplacer">⠿</span>
       <div class="vtt-page-item-badges">
         ${isMj     ?'<span title="Votre vue">📍</span>':''}
         ${isPlayers?'<span title="Joueurs ici">👥</span>':''}
       </div>
-      <div class="vtt-page-item-name">${p.name}</div>
+      <div class="vtt-page-item-name">${_esc(p.name)}</div>
       <div class="vtt-page-item-acts">
         <button class="vtt-page-item-btn" data-vtt-fn="_vttSendToPage" data-vtt-args="${p.id}" title="Envoyer tous les joueurs ici">📡</button>
-        <button class="vtt-page-item-btn" data-vtt-fn="_vttEditPage" data-vtt-args="${p.id}" title="Renommer / redimensionner">✏</button>
+        <button class="vtt-page-item-btn" data-vtt-fn="_vttEditPage" data-vtt-args="${p.id}" title="Renommer / dossier / taille">✏</button>
         <button class="vtt-page-item-btn vtt-page-item-del" data-vtt-fn="_vttDeletePage" data-vtt-args="${p.id}" title="Supprimer">×</button>
       </div>
     </div>`;
-  }).join('');
+  };
+
+  // Une seule "section" implicite (sans dossier) et pas de recherche → pas de header de groupe
+  const onlyUngrouped = folders.length === 1 && folders[0] === '';
+  let listHtml;
+  if (!groups.size) {
+    listHtml = `<div class="vtt-tray-empty">Aucune page ne correspond</div>`;
+  } else if (onlyUngrouped) {
+    listHtml = `<div class="vtt-page-folder-body" data-folder="">${groups.get('').map(_pageRow).join('')}</div>`;
+  } else {
+    listHtml = folders.map(f => {
+      const rows = groups.get(f);
+      const label = f || '— Sans dossier —';
+      // En recherche, tout est déplié ; sinon respecte l'état persistant
+      const closed = !q && _pageFoldClosed.has(f);
+      return `<div class="vtt-page-folder${closed?' closed':''}" data-folder="${encodeURIComponent(f)}">
+        <div class="vtt-page-folder-hd" data-vtt-fn="_vttPageFolderToggle" data-vtt-args="${encodeURIComponent(f)}">
+          <span class="vtt-page-folder-grip" title="Glisser pour réordonner">⠿</span>
+          <span class="vtt-page-folder-chev">▸</span>
+          <span class="vtt-page-folder-name">${_esc(label)}</span>
+          <span class="vtt-page-folder-count">${rows.length}</span>
+        </div>
+        <div class="vtt-page-folder-body" data-folder="${encodeURIComponent(f)}">${rows.map(_pageRow).join('')}</div>
+      </div>`;
+    }).join('');
+  }
+
+  el.innerHTML = `
+    <div class="vtt-page-search-row">
+      <input type="text" id="vtt-page-search" class="vtt-page-search" placeholder="🔍 Rechercher une page…"
+        autocomplete="off" value="${_esc(_pageSearch)}"
+        data-vtt-fn="_vttPageSearch" data-vtt-on="input" data-vtt-args="$value">
+      ${_pageSearch?`<button class="vtt-page-search-x" data-vtt-fn="_vttPageSearchClear" title="Effacer">✕</button>`:''}
+    </div>
+    <div class="vtt-page-list">${listHtml}</div>`;
+
+  if (searchFocused) {
+    const inp = document.getElementById('vtt-page-search');
+    if (inp) { inp.focus(); if (caretPos != null) { try { inp.setSelectionRange(caretPos, caretPos); } catch {} } }
+  }
+  // Drag & drop désactivé pendant une recherche (la liste filtrée n'est pas l'ordre réel)
+  _initPageSortables(el, { pages: !q, folders: !q && !onlyUngrouped });
+}
+
+let _pageSortables = [];
+function _destroyPageSortables() {
+  _pageSortables.forEach(s => { try { s.destroy(); } catch {} });
+  _pageSortables = [];
+}
+// Initialise le drag & drop : pages (entre dossiers) + dossiers (réordonner).
+function _initPageSortables(el, { pages = true, folders = true } = {}) {
+  _destroyPageSortables();
+  // Pages : chaque corps de dossier est une zone de dépôt partagée
+  if (pages) el.querySelectorAll('.vtt-page-folder-body').forEach(body => {
+    _pageSortables.push(new Sortable(body, {
+      group: 'vtt-pages', animation: 150, handle: '.vtt-page-item-grip',
+      draggable: '.vtt-page-item', ghostClass: 'vtt-page-ghost', fallbackOnBody: true,
+      onEnd: () => _onPageDrop(el),
+    }));
+  });
+  // Dossiers : réordonner via la poignée de l'en-tête (hors recherche / mono-dossier)
+  if (folders) {
+    const list = el.querySelector('.vtt-page-list');
+    if (list) _pageSortables.push(new Sortable(list, {
+      group: 'vtt-folders', animation: 150, handle: '.vtt-page-folder-grip',
+      draggable: '.vtt-page-folder', ghostClass: 'vtt-page-ghost',
+      onEnd: () => _onFolderDrop(el),
+    }));
+  }
+}
+
+// Persiste folder + order de toutes les pages d'après l'ordre DOM après un drop.
+async function _onPageDrop(el) {
+  const batch = writeBatch(db);
+  let order = 0, changed = 0;
+  el.querySelectorAll('.vtt-page-folder-body').forEach(body => {
+    const folder = decodeURIComponent(body.dataset.folder || '');
+    body.querySelectorAll('.vtt-page-item').forEach(item => {
+      const id = item.dataset.pageId; const p = _pages[id]; if (!p) { order++; return; }
+      if ((p.folder||'') !== folder || (p.order??0) !== order) {
+        batch.update(_pgRef(id), { folder, order });
+        changed++;
+      }
+      order++;
+    });
+  });
+  if (changed) await batch.commit().catch(() => showNotif('Erreur déplacement', 'error'));
+}
+
+// Persiste l'ordre des dossiers (session.pageFolderOrder) d'après l'ordre DOM.
+async function _onFolderDrop(el) {
+  const order = [...el.querySelectorAll('.vtt-page-folder')]
+    .map(f => decodeURIComponent(f.dataset.folder || ''))
+    .filter(f => f !== '');
+  await setDoc(_sesRef(), { pageFolderOrder: order }, { merge: true }).catch(() => {});
+}
+
+function _vttPageSearch(v) { _pageSearch = String(v || ''); _renderPageList(); }
+function _vttPageSearchClear() { _pageSearch = ''; _renderPageList(); }
+function _vttPageFolderToggle(f) {
+  // Dossier vide ('') : le dispatcher ne passe aucun arg (data-vtt-args="") → f undefined.
+  const key = f ? decodeURIComponent(f) : '';
+  if (_pageFoldClosed.has(key)) _pageFoldClosed.delete(key); else _pageFoldClosed.add(key);
+  _savePageFolds();
+  _renderPageList();
 }
 
 // ─ Indicateur de page courant pour les joueurs (lecture seule) ──────
@@ -8751,67 +8922,100 @@ async function _vttClearAnnots() {
   await Promise.all(toDelete.map(e => deleteDoc(_annotRef(e.data.id)).catch(()=>{})));
 }
 
+// Presets de taille communs aux modales création / édition (préfixe vpf-/vpe-)
+const _PG_PRESETS = [
+  { lb:'Petite',  c:16, r:12 },
+  { lb:'Moyenne', c:24, r:18 },
+  { lb:'Grande',  c:32, r:24 },
+  { lb:'Vaste',   c:48, r:36 },
+];
+function _pgModalBody(pfx, { name='', folder='', cols=24, rows=18, fog=null } = {}) {
+  const presets = _PG_PRESETS.map(p =>
+    `<button type="button" class="vtt-pgm-preset" data-vtt-fn="_vttPgPreset" data-vtt-args="${pfx}|${p.c}|${p.r}">${p.lb}<small>${p.c}×${p.r}</small></button>`
+  ).join('');
+  return `
+    <div class="vtt-pgm">
+      <label class="vtt-pgm-field">
+        <span class="vtt-pgm-lbl">Nom de la page</span>
+        <input id="${pfx}name" type="text" value="${_esc(name)}" placeholder="ex : Forêt Sombre" autofocus>
+      </label>
+      <label class="vtt-pgm-field">
+        <span class="vtt-pgm-lbl">📁 Dossier <em>(optionnel)</em></span>
+        <input id="${pfx}folder" type="text" value="${_esc(folder)}" placeholder="ex : Chapitre 1, Donjons…" list="${pfx}folders" autocomplete="off">
+        ${_pageFolderDatalist(pfx+'folders')}
+        <span class="vtt-pgm-hint">Tape un nom existant ou nouveau — ou range la page par glisser-déposer.</span>
+      </label>
+      <div class="vtt-pgm-field">
+        <span class="vtt-pgm-lbl">Dimensions de la grille</span>
+        <div class="vtt-pgm-presets">${presets}</div>
+        <div class="vtt-pgm-dims">
+          <div><input id="${pfx}cols" type="number" value="${cols}" min="8" max="200"><span>colonnes</span></div>
+          <span class="vtt-pgm-x">×</span>
+          <div><input id="${pfx}rows" type="number" value="${rows}" min="8" max="200"><span>lignes</span></div>
+        </div>
+      </div>
+      ${fog !== null ? `
+      <label class="vtt-pgm-check">
+        <input type="checkbox" id="${pfx}fog" ${fog?'checked':''}>
+        <span>👁 Éclairage dynamique (brouillard de guerre)</span>
+      </label>` : ''}
+    </div>`;
+}
+function _vttPgPreset(pfx, c, r) {
+  const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
+  if (cEl) cEl.value = c;
+  if (rEl) rEl.value = r;
+  document.querySelectorAll('.vtt-pgm-preset').forEach(b => {
+    const [bp, bc, br] = (b.dataset.vttArgs||'').split('|');
+    b.classList.toggle('active', bp===pfx && +bc===+c && +br===+r);
+  });
+}
+
 function _vttAddPage() {
-  openModal('➕ Nouvelle page', `
-    <div class="vtt-form">
-      <div class="form-group"><label>Nom</label>
-        <input id="vpf-name" type="text" placeholder="ex : Forêt Sombre" autofocus></div>
-      <div class="vtt-form-row">
-        <div class="form-group"><label>Colonnes (largeur)</label>
-          <input id="vpf-cols" type="number" value="24" min="8" max="200"></div>
-        <div class="form-group"><label>Lignes (hauteur)</label>
-          <input id="vpf-rows" type="number" value="18" min="8" max="200"></div>
-      </div>
-      <small style="color:var(--text-dim);font-size:.72rem">1 case = ${CELL}px · ex : 30×22 pour une grande carte</small>
-      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-        <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer</button>
-      </div>
+  openModal('🗺️ Nouvelle page', `
+    ${_pgModalBody('vpf-')}
+    <div class="vtt-pgm-actions">
+      <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer la page</button>
     </div>`);
 }
+// Datalist des dossiers de pages existants (suggestions de saisie)
+function _pageFolderDatalist(id) {
+  const folders = [...new Set(Object.values(_pages).map(p => (p.folder||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'}));
+  return `<datalist id="${id}">${folders.map(f=>`<option value="${_esc(f)}">`).join('')}</datalist>`;
+}
+
 async function _vttConfirmAddPage() {
   const name=(document.getElementById('vpf-name')?.value||'').trim();
+  const folder=(document.getElementById('vpf-folder')?.value||'').trim();
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-rows')?.value)||18));
   if (!name) { showNotif('Nom requis','error'); return; }
   closeModalDirect();
-  await addDoc(_pgsCol(),{name,cols,rows,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
+  await addDoc(_pgsCol(),{name,folder,cols,rows,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
     .catch(()=>showNotif('Erreur création page','error'));
 }
 
 function _vttEditPage(id) {
   const p=_pages[id]; if (!p) return;
   openModal('✏️ Modifier la page', `
-    <div class="vtt-form">
-      <div class="form-group"><label>Nom</label>
-        <input id="vpe-name" type="text" value="${p.name}" autofocus></div>
-      <div class="vtt-form-row">
-        <div class="form-group"><label>Colonnes</label>
-          <input id="vpe-cols" type="number" value="${p.cols||24}" min="8" max="200"></div>
-        <div class="form-group"><label>Lignes</label>
-          <input id="vpe-rows" type="number" value="${p.rows||18}" min="8" max="200"></div>
-      </div>
-      <div class="form-group" style="margin-top:.5rem">
-        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-          <input type="checkbox" id="vpe-fog" ${p.fogEnabled?'checked':''}>
-          <span>👁 Éclairage dynamique (brouillard de guerre)</span>
-        </label>
-      </div>
-      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-        <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
-      </div>
+    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled })}
+    <div class="vtt-pgm-actions">
+      <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
     </div>`);
 }
 async function _vttConfirmEditPage(id) {
   const name=(document.getElementById('vpe-name')?.value||'').trim();
+  const folder=(document.getElementById('vpe-folder')?.value||'').trim();
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-rows')?.value)||18));
   if (!name) { showNotif('Nom requis','error'); return; }
   const fogEnabled = document.getElementById('vpe-fog')?.checked ?? false;
   closeModalDirect();
-  await updateDoc(_pgRef(id),{name,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
-  if (_activePage?.id===id) { _activePage={..._activePage,name,cols,rows,fogEnabled}; _drawGrid(); }
+  await updateDoc(_pgRef(id),{name,folder,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
+  if (_activePage?.id===id) { _activePage={..._activePage,name,folder,cols,rows,fogEnabled}; _drawGrid(); }
 }
 
 async function _vttDeletePage(id) {
@@ -12823,6 +13027,7 @@ const VTT_ACTIONS = {
   _vttFogClearOps,
   _vttFogTool,
   _vttImportGithubRelease,
+  _vttInsTab,
   _vttInvokeMyToken,
   _vttLibDelFolder,
   _vttLibDelImg,
@@ -12864,6 +13069,10 @@ const VTT_ACTIONS = {
   _vttOpenTokenDelegatesModal,
   _vttPickElement,
   _vttPickEmote,
+  _vttPageFolderToggle,
+  _vttPageSearch,
+  _vttPageSearchClear,
+  _vttPgPreset,
   _vttPickOpt,
   _vttPlColorSelect,
   _vttPlace,
