@@ -282,6 +282,7 @@ let _musicSortables = [];   // instances Sortable actives
 let _previewEl     = null;  // aperçu local MJ (non diffusé)
 let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
 let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
+let _insTab     = 'stats';   // onglet actif de l'inspecteur token
 let _rollHidden = lsJson.get('vtt-roll-hidden', false); // MJ only — jet caché des joueurs
 const _renderedPings     = new Set();
 const _renderedReactions = new Set();
@@ -5748,7 +5749,8 @@ function _renderInspector(t) {
     '</div>';
 
   // Précalcul du bloc stats (évite l'imbrication de backticks dans le template)
-  let statsHtml;
+  // vitalsHtml = barres PV/PM (épinglées sous le header) · coreStatsHtml = onglet Stats
+  let vitalsHtml = '', coreStatsHtml = '';
   if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
     const track    = _bstTracker[t.beastId] || {};
     const pvMax    = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
@@ -5758,12 +5760,13 @@ function _renderInspector(t) {
     const caLabel  = track.caEstimee  !== undefined && track.caEstimee  !== '' ? String(track.caEstimee)  : '?';
     const vitLabel = track.vitEstimee !== undefined && track.vitEstimee !== '' ? String(track.vitEstimee)+' cases' : '?';
     const pos      = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
-    statsHtml =
+    vitalsHtml =
       '<div class="vtt-ins-bars">' +
         (pvMax !== null
           ? _bar('PV', pvCur??pvMax, pvMax, pvBarCol)
           : '<div class="vtt-ins-bar-row"><span class="vtt-ins-bar-lbl">PV</span><span style="color:var(--text-muted);font-size:.75rem;grid-column:2/-1">inconnus</span></div>') +
-      '</div>' +
+      '</div>';
+    coreStatsHtml =
       '<div class="vtt-ins-stats">' +
         _stat('🛡', 'CA est.', caLabel) +
         _stat('🏃', 'Vitesse', vitLabel) +
@@ -5798,11 +5801,12 @@ function _renderInspector(t) {
         `</span>` : '';
     const _anyBonus = ['vitesse','ca','portee'].some(k => _manualBuffVal(t, k) !== 0);
 
-    statsHtml =
+    vitalsHtml =
       '<div class="vtt-ins-bars">' +
         _bar('PV', hp, hpm, hpColor(rat), pvEditHtml) +
         (pm !== null && pmMax !== null ? _bar('PM', pm, pmMax, '#b47fff', pmEditHtml) : '') +
-      '</div>' +
+      '</div>';
+    coreStatsHtml =
       '<div class="vtt-ins-stats">' +
         (() => {
           const baseMvt = ld.displayMovement ?? 6;   // inclut déjà le buff move_bonus manuel
@@ -6107,27 +6111,15 @@ function _renderInspector(t) {
     </div>`;
   })();
 
-  el.innerHTML=`
-    <div class="vtt-ins-header">
-      ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
-           :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
-      <div style="min-width:0">
-        <div class="vtt-ins-name">${ld.displayName??t.name}</div>
-        <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
-      </div>
-    </div>
-    ${statsHtml}
-    ${_creatureHtml}
-    ${_condsHtml}
-    ${_buffsHtml}
-    ${(() => {
-      const inCombat = !!_session?.combat?.active;
-      const canEdit  = _canControlToken(t);
-      if (!inCombat || !canEdit || (t.type !== 'player' && t.type !== 'npc')) return '';
-      const ld2  = _live(t);
-      const base = ld2.displayMovement ?? 6;
-      const couru = (t.bonusMvt||0) > 0;
-      return `<div class="vtt-ins-section">
+  // ── Fragments par onglet (calculés puis répartis) ──────────────────────
+  const _combatActionsHtml = (() => {
+    const inCombat = !!_session?.combat?.active;
+    const canEdit  = _canControlToken(t);
+    if (!inCombat || !canEdit || (t.type !== 'player' && t.type !== 'npc')) return '';
+    const ld2  = _live(t);
+    const base = ld2.displayMovement ?? 6;
+    const couru = (t.bonusMvt||0) > 0;
+    return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">⚔️ Actions de combat</div>
         <div class="vtt-combat-actions">
           <button class="vtt-combat-action-btn${couru?' used':''}"
@@ -6141,23 +6133,24 @@ function _renderInspector(t) {
           </button>
         </div>
       </div>`;
-    })()}
-    ${(t.type==='player'||t.type==='npc') && _diceSkills.length && _canControlToken(t) ? (() => {
-      const cForBonus = t?.characterId ? _characters[t.characterId] : null;
-      const btns = _diceSkills.map(s => {
-        const statKey = _STAT_KEY[s.stat] || '';
-        const statMod = _tokenStatMod(t, statKey);
-        const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
-        const mod = statMod + eqBonus;
-        const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
-        const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
-        const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
-        return `<button class="vtt-skill-btn" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}>
+  })();
+
+  const _skillsHtml = ((t.type==='player'||t.type==='npc') && _diceSkills.length && _canControlToken(t)) ? (() => {
+    const cForBonus = t?.characterId ? _characters[t.characterId] : null;
+    const btns = _diceSkills.map(s => {
+      const statKey = _STAT_KEY[s.stat] || '';
+      const statMod = _tokenStatMod(t, statKey);
+      const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
+      const mod = statMod + eqBonus;
+      const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
+      const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
+      const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
+      return `<button class="vtt-skill-btn" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}>
           <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em">●</span>':''}</span>
           <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
         </button>`;
-      }).join('');
-      return `<div class="vtt-ins-section">
+    }).join('');
+    return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
         <div class="vtt-roll-mode-row">
           <button class="vtt-roll-mode-btn${_rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
@@ -6182,45 +6175,87 @@ function _renderInspector(t) {
         </div>` : ''}
         <div class="vtt-ins-skills">${btns}</div>
       </div>`;
-    })() : ''}
-    ${(() => {
-      // Délégation de contrôle — visible pour propriétaire OU MJ
-      const uid = STATE.user?.uid;
-      const isOwner = uid && t.ownerId === uid;
-      if (!isOwner && !STATE.isAdmin) return '';
-      const dels = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
-      const lookupName = _resolveUidName;
-      const chips = dels.length
-        ? dels.map(u => `<span class="vtt-delegate-chip">
+  })() : '';
+
+  const _delegateHtml = (() => {
+    // Délégation de contrôle — visible pour propriétaire OU MJ
+    const uid = STATE.user?.uid;
+    const isOwner = uid && t.ownerId === uid;
+    if (!isOwner && !STATE.isAdmin) return '';
+    const dels = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
+    const lookupName = _resolveUidName;
+    const chips = dels.length
+      ? dels.map(u => `<span class="vtt-delegate-chip">
             <span>${_esc(lookupName(u))}</span>
             <button class="vtt-delegate-x" data-vtt-fn="_vttRemoveTokenDelegate"
               data-vtt-args="${t.id}|${u}" title="Retirer">×</button>
           </span>`).join('')
-        : '<span class="vtt-delegate-empty">Personne — vous seul contrôlez ce token.</span>';
-      return `<div class="vtt-ins-section">
+      : '<span class="vtt-delegate-empty">Personne — vous seul contrôlez ce token.</span>';
+    return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🤝 Contrôle délégué</div>
         <div class="vtt-delegate-list">${chips}</div>
         <button class="vtt-btn-sm vtt-delegate-add"
           data-vtt-fn="_vttOpenTokenDelegatesModal" data-vtt-args="${t.id}"
           title="Autoriser un autre joueur à contrôler ce token">＋ Ajouter un joueur</button>
       </div>`;
-    })()}
-    ${STATE.isAdmin&&pageOpts?`
+  })();
+
+  const _sendPageHtml = (STATE.isAdmin && pageOpts) ? `
       <div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">Envoyer le joueur vers</div>
+        <div class="vtt-ins-section-title">📡 Envoyer le joueur vers</div>
         <select class="vtt-ins-select" data-vtt-fn="_vttMoveTokenAndReset" data-vtt-on="change" data-vtt-args="$this|${t.id}">
           <option value="">— choisir une page —</option>${pageOpts}
         </select>
-      </div>` :''}
-    ${STATE.isAdmin?`
-      <div class="vtt-ins-actions">
-        <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
-        <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible?'👁':'🙈'}</button>
-        ${_session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
+      </div>` : '';
 
-        ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩</button>`:''}
-        ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
-      </div>` :''}`;
+  const _footerHtml = STATE.isAdmin ? `
+      <div class="vtt-ins-section">
+        <div class="vtt-ins-section-title">🛠 Outils MJ</div>
+        <div class="vtt-ins-actions">
+          <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
+          <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible?'👁 Visible':'🙈 Caché'}</button>
+          ${_session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
+          ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩ Retirer</button>`:''}
+          ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
+        </div>
+      </div>` : '';
+
+  // ── Répartition en onglets ─────────────────────────────────────────────
+  const _tabs = [
+    { k:'stats',    ic:'📊', lb:'Stats',     html: coreStatsHtml },
+    { k:'combat',   ic:'⚔️', lb:'Combat',    html: _combatActionsHtml + _skillsHtml },
+    { k:'effets',   ic:'✨', lb:'Effets',    html: _condsHtml + _buffsHtml },
+    { k:'creature', ic:'📜', lb:'Bestiaire', html: _creatureHtml },
+    { k:'gerer',    ic:'⚙️', lb:'Gérer',     html: _delegateHtml + _sendPageHtml + _footerHtml },
+  ].filter(s => s.html && s.html.trim());
+
+  const _active = _tabs.some(s => s.k === _insTab) ? _insTab : (_tabs[0]?.k || 'stats');
+  const _tabBar = _tabs.length > 1
+    ? `<div class="vtt-ins-tabbar">${_tabs.map(s =>
+        `<button class="vtt-ins-tab${s.k===_active?' active':''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}">
+          <span class="vtt-ins-tab-ic">${s.ic}</span><span class="vtt-ins-tab-lbl">${s.lb}</span>
+        </button>`).join('')}</div>`
+    : '';
+  const _tabBody = _tabs.find(s => s.k === _active)?.html || '';
+
+  el.innerHTML=`
+    <div class="vtt-ins-header">
+      ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
+           :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
+      <div style="min-width:0">
+        <div class="vtt-ins-name">${ld.displayName??t.name}</div>
+        <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
+      </div>
+    </div>
+    ${vitalsHtml}
+    ${_tabBar}
+    <div class="vtt-ins-tabbody">${_tabBody}</div>`;
+}
+
+function _vttInsTab(tab) {
+  _insTab = tab;
+  const t = _selected ? (_tokens[_selected]?.data ?? null) : null;
+  if (t) _renderInspector(t);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -12823,6 +12858,7 @@ const VTT_ACTIONS = {
   _vttFogClearOps,
   _vttFogTool,
   _vttImportGithubRelease,
+  _vttInsTab,
   _vttInvokeMyToken,
   _vttLibDelFolder,
   _vttLibDelImg,

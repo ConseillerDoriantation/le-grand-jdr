@@ -755,6 +755,38 @@
   letter-spacing: .08em;
 }
 
+/* ── Inspecteur : onglets (cohérent avec la mini-fiche) ─────────────── */
+.vtt-ins-tabbar {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  margin-top: .1rem;
+}
+.vtt-ins-tab {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: .05rem;
+  padding: .32rem .05rem .26rem;
+  background: none; border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim); cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.vtt-ins-tab + .vtt-ins-tab { border-left: 1px solid var(--border); }
+.vtt-ins-tab-ic  { font-size: .92rem; line-height: 1; filter: grayscale(.4) opacity(.7); transition: filter .15s; }
+.vtt-ins-tab-lbl { font-size: .54rem; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.vtt-ins-tab:hover { color: var(--text); background: color-mix(in srgb, var(--gold) 7%, transparent); }
+.vtt-ins-tab:hover .vtt-ins-tab-ic { filter: none; }
+.vtt-ins-tab.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+  background: var(--gold-glow, color-mix(in srgb, var(--gold) 12%, transparent));
+}
+.vtt-ins-tab.active .vtt-ins-tab-ic { filter: none; }
+.vtt-ins-tabbody { display: flex; flex-direction: column; gap: .5rem; }
+.vtt-ins-tabbody:empty { display: none; }
+
 /* Barres PV / PM */
 .vtt-ins-bars { display: flex; flex-direction: column; gap: .3rem; }
 .vtt-ins-bar-row {
