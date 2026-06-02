@@ -394,6 +394,7 @@ let _trayNpcOpen = _loadTrayPref('npc');
 let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
+let _msOpenNote   = null; // index de la note dépliée (onglet Notes)
 
 // ── Timer de session ────────────────────────────────────────────────
 // Stocké dans _session.timer = { startedAt:ms, accumulated:ms, running:bool, label:string }
@@ -7069,7 +7070,12 @@ function _initListeners() {
     }
     _renderTraySoon();
     _charsReady = true; _maybeSyncAutoTokens();
-    if (_miniUid) _renderMiniSheet(_miniUid);
+    // Ne re-rend la mini-fiche que si le perso AFFICHÉ a changé : évite d'écraser
+    // une saisie en cours (note, XP) quand un autre personnage est mis à jour.
+    if (_miniUid && _miniCharId &&
+        JSON.stringify(prev[_miniCharId]) !== JSON.stringify(next[_miniCharId])) {
+      _renderMiniSheet(_miniUid);
+    }
   }));
 
   // 4. PNJ — source de vérité des HP PNJ
@@ -12438,6 +12444,108 @@ function _msTabInventaire(c, uid, canEdit) {
   return html;
 }
 
+// ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
+function _msTabNotes(c, uid, canEdit) {
+  const notes = c?.notesList || [];
+  let html = `<div class="vtt-ms-notes">`;
+  if (canEdit) {
+    html += `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">+ Nouvelle note</button>`;
+  }
+  if (!notes.length) {
+    html += `<div class="vtt-ms-empty">${canEdit ? 'Aucune note. Crée-en une.' : 'Aucune note.'}</div></div>`;
+    return html;
+  }
+  notes.forEach((note, i) => {
+    const open = _msOpenNote === i;
+    const body = open ? (canEdit
+      ? `<div class="vtt-ms-note-body">
+          <textarea class="vtt-ms-note-area" id="vtt-ms-note-${c.id}-${i}" rows="6"
+            placeholder="Contenu de la note…">${_esc(_msNoteText(note.contenu))}</textarea>
+          <button class="vtt-ms-note-save" data-vtt-fn="_vttMsSaveNote" data-vtt-args="${c.id}|${uid}|${i}">💾 Enregistrer</button>
+        </div>`
+      : `<div class="vtt-ms-note-body"><div class="vtt-ms-note-content">${note.contenu || '<em style="opacity:.5">Vide</em>'}</div></div>`)
+      : '';
+    html += `<div class="vtt-ms-note-card${open ? ' open' : ''}">
+      <div class="vtt-ms-note-hd" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}">
+        <span class="vtt-ms-note-title">${_esc(note.titre || 'Note sans titre')}</span>
+        <div class="vtt-ms-note-hd-r">
+          ${canEdit ? `<button class="vtt-ms-note-ic" data-vtt-fn="_vttMsRenameNote" data-vtt-args="${c.id}|${uid}|${i}" title="Renommer">✏️</button>
+                       <button class="vtt-ms-note-ic" data-vtt-fn="_vttMsDeleteNote" data-vtt-args="${c.id}|${uid}|${i}" title="Supprimer">🗑️</button>` : ''}
+          <span class="vtt-ms-note-chev">${open ? '▲' : '▼'}</span>
+        </div>
+      </div>
+      ${note.date ? `<div class="vtt-ms-note-date">${_esc(note.date)}</div>` : ''}
+      ${body}
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// Texte affiché dans le textarea : si la note vient de l'éditeur riche de la vraie
+// fiche (HTML), on la convertit en texte lisible pour ne pas montrer de balises.
+function _msNoteText(contenu) {
+  if (!contenu) return '';
+  if (!/<[a-z][\s\S]*>/i.test(contenu)) return contenu; // déjà du texte brut
+  const tmp = document.createElement('div');
+  tmp.innerHTML = contenu.replace(/<\/(p|div|li)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n');
+  return (tmp.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function _vttMsAddNote(charId, uid) {
+  if (!_msCanEdit(uid)) return;
+  const c = _characters[charId]; if (!c) return;
+  const notes = [...(c.notesList || [])];
+  notes.push({ titre: 'Nouvelle note', contenu: '', date: new Date().toLocaleDateString('fr-FR') });
+  _msOpenNote = notes.length - 1;
+  await updateDoc(_chrRef(charId), { notesList: notes }).catch(() => showNotif('Erreur sauvegarde', 'error'));
+}
+
+function _vttMsToggleNote(idx) {
+  idx = parseInt(idx);
+  _msOpenNote = _msOpenNote === idx ? null : idx;
+  if (_miniUid) _renderMiniSheet(_miniUid);
+}
+
+async function _vttMsRenameNote(charId, uid, idx) {
+  if (!_msCanEdit(uid)) return;
+  idx = parseInt(idx);
+  const c = _characters[charId]; if (!c) return;
+  const notes = [...(c.notesList || [])];
+  if (!notes[idx]) return;
+  const val = prompt('Titre de la note :', notes[idx].titre || 'Note sans titre');
+  if (val === null) return;
+  notes[idx] = { ...notes[idx], titre: val.trim() || notes[idx].titre || 'Note sans titre' };
+  await updateDoc(_chrRef(charId), { notesList: notes }).catch(() => showNotif('Erreur sauvegarde', 'error'));
+}
+
+async function _vttMsSaveNote(charId, uid, idx) {
+  if (!_msCanEdit(uid)) return;
+  idx = parseInt(idx);
+  const c = _characters[charId]; if (!c) return;
+  const ta = document.getElementById(`vtt-ms-note-${charId}-${idx}`);
+  const notes = [...(c.notesList || [])];
+  if (!notes[idx] || !ta) return;
+  notes[idx] = { ...notes[idx], contenu: ta.value };
+  if (await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false))
+    showNotif('Note enregistrée', 'success');
+  else showNotif('Erreur sauvegarde', 'error');
+}
+
+async function _vttMsDeleteNote(charId, uid, idx) {
+  if (!_msCanEdit(uid)) return;
+  idx = parseInt(idx);
+  const c = _characters[charId]; if (!c) return;
+  const notes = [...(c.notesList || [])];
+  if (!notes[idx]) return;
+  if (!confirm('Supprimer cette note ?')) return;
+  notes.splice(idx, 1);
+  if (_msOpenNote === idx) _msOpenNote = null;
+  else if (_msOpenNote > idx) _msOpenNote--;
+  if (await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false))
+    showNotif('Note supprimée', 'info');
+}
+
 // ─── Rendu principal ─────────────────────────────────────────────
 
 function _renderMiniSheet(uid) {
@@ -12471,19 +12579,23 @@ function _renderMiniSheet(uid) {
     : '';
 
   const TABS = [
-    { key:'combat', icon:'⚔️', label:'Combat'  },
-    { key:'equip',  icon:'🛡',  label:'Équip.'  },
-    { key:'sorts',  icon:'✨',  label:'Sorts'   },
-    { key:'inv',    icon:'🎒',  label:'Invent.' },
+    { key:'combat', icon:'⚔️', label:'Combat' },
+    { key:'equip',  icon:'🛡',  label:'Équip.' },
+    { key:'sorts',  icon:'✨',  label:'Sorts'  },
+    { key:'inv',    icon:'🎒',  label:'Sac'    },
+    { key:'notes',  icon:'📝', label:'Notes'  },
   ];
   const tabBarHtml = `<div class="vtt-ms-tabbar">${TABS.map(t =>
-    `<button class="vtt-ms-tab${_miniTab===t.key?' active':''}" data-vtt-fn="_vttMsTab" data-vtt-args="${t.key}">${t.icon} ${t.label}</button>`
+    `<button class="vtt-ms-tab${_miniTab===t.key?' active':''}" data-vtt-fn="_vttMsTab" data-vtt-args="${t.key}" title="${t.label}">
+      <span class="vtt-ms-tab-ic">${t.icon}</span><span class="vtt-ms-tab-lbl">${t.label}</span>
+    </button>`
   ).join('')}</div>`;
 
   const tabHtml =
       _miniTab === 'combat' ? _msTabCombat(c, uid, canEdit)
     : _miniTab === 'equip'  ? _msTabEquipement(c, uid, canEdit)
     : _miniTab === 'sorts'  ? _msTabSorts(c, uid, canEdit)
+    : _miniTab === 'notes'  ? _msTabNotes(c, uid, canEdit)
     :                         _msTabInventaire(c, uid, canEdit);
 
   panel.classList.add('open');
@@ -12638,13 +12750,18 @@ const VTT_ACTIONS = {
   _vttMemberInfo,
   _vttMoveTokenAndReset,
   _vttMoveTokenToPage,
+  _vttMsAddNote,
   _vttMsConfirmSend,
+  _vttMsDeleteNote,
   _vttMsEquip,
   _vttMsEquipPicker,
+  _vttMsRenameNote,
+  _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSetNiveau,
   _vttMsSlotChange,
   _vttMsTab,
+  _vttMsToggleNote,
   _vttMsUnequip,
   _vttMsUnequipAll,
   _vttMusicNext,
