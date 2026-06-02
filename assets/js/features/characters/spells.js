@@ -2,7 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { trySave } from '../../shared/crud.js';
-import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
+import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateModalContent, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import { getMod, calcPMMax, calcDeckMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
@@ -28,6 +28,7 @@ let _deplModeEdit = null;
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
+let _invCfgIdx = -1;         // index (deck) du sort dont on configure l'invocation
 let _sortIconPickerOutsideBound = false;
 
 export function sortDragStart(e, idx) {
@@ -457,6 +458,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       </div>
       <span class="cs-sort-compact-pm">${pmVal} PM</span>
       ${canEdit ? `<div class="cs-sort-compact-acts" data-stop-propagation>
+        ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (actions de la créature)">🐾</button>` : ''}
         <button class="btn-icon" data-action="editSort" data-idx="${i}">✏️</button>
         <button class="btn-icon" data-action="deleteSort" data-idx="${i}">🗑️</button>
       </div>` : ''}
@@ -1462,34 +1464,97 @@ function _toggleSortType(type) {
   _applyTypeChange();
 }
 
-// ── Invocation : helpers d'édition (étape B) ──────────────────────────────────
+// ── Invocation : section éditeur (les ACTIONS se gèrent depuis la carte du sort,
+//    via la vraie modale de sort — cf. _openInvocationConfig) ──────────────────
 function _renderInvActionsList() {
-  const acts = _invActionsEdit || [];
-  const items = acts.map((a, i) => `
-    <div class="cs-inv-act">
-      <span class="cs-inv-act-name">🎬 ${_esc(a.nom || 'Action')}</span>
-      ${Array.isArray(a.runes) && a.runes.length ? `<span class="cs-inv-act-runes">${a.runes.length} rune${a.runes.length>1?'s':''}</span>` : '<span class="cs-inv-act-runes cs-inv-act-runes--empty">runes à venir</span>'}
-      <button type="button" class="cs-inv-act-del" data-action="_invDeleteAction" data-idx="${i}" title="Supprimer">✕</button>
-    </div>`).join('');
-  return `${items || '<div class="cs-inv-act-empty">Aucune action — l\'invocation pourra en recevoir.</div>'}
-    <button type="button" class="btn btn-outline btn-sm" data-action="_invAddAction" style="margin-top:.4rem">＋ Ajouter une action</button>`;
+  const n = (_invActionsEdit || []).length;
+  return `<div class="cs-inv-actions-note">
+    ${n ? `<b>${n}</b> action${n>1?'s':''} définie${n>1?'s':''}.` : 'Aucune action pour l\'instant.'}
+    Conçois-les depuis la carte du sort (bouton <b>🐾</b>, après enregistrement) — chaque action est un vrai sort à runes.
+  </div>`;
 }
-function _refreshInvActionsList() {
-  const el = document.getElementById('s-inv-actions-list');
-  if (el) el.innerHTML = _renderInvActionsList();
+
+// ── Configuration de l'invocation (modale depuis la carte du sort) ─────────────
+//    Les actions = vrais sorts, édités via la modale de sort complète
+//    (editItemSpell). La modale de config N'EST PAS un éditeur de sort → ouvrir
+//    l'éditeur d'action par-dessus ne crée aucun conflit d'état (pattern boutique).
+function _invCfgSort() {
+  const c = STATE.activeChar;
+  return c ? (c.deck_sorts || [])[_invCfgIdx] : null;
 }
-function _invAddAction() {
-  const nom = (prompt('Nom de l\'action :', 'Attaque') || '').trim();
-  if (!nom) return;
-  _invActionsEdit.push({ id: 'ia' + Date.now(), nom, runes: [] });
-  _refreshInvActionsList();
-  _updateSortPreview();
+export function openInvocationConfig(idx) {
+  const c = STATE.activeChar; if (!c) return;
+  const s = (c.deck_sorts || [])[idx]; if (!s) return;
+  _invCfgIdx = idx;
+  _itemEditCtx = null; // on n'est pas (encore) dans un éditeur de sort
+  openModal(`🐾 Invocation — ${_esc(s.nom || 'Sort')}`, _renderInvocationConfigBody());
 }
-function _invDeleteAction(idx) {
-  idx = parseInt(idx);
-  if (idx >= 0) _invActionsEdit.splice(idx, 1);
-  _refreshInvActionsList();
-  _updateSortPreview();
+function _refreshInvocationConfig() {
+  const s = _invCfgSort(); if (!s) return;
+  updateModalContent(`🐾 Invocation — ${_esc(s.nom || 'Sort')}`, _renderInvocationConfigBody());
+}
+function _renderInvocationConfigBody() {
+  const s = _invCfgSort(); if (!s) return '<div style="padding:1rem">Sort introuvable.</div>';
+  const iv  = _calcInvocationStats(s);
+  const img = s.invocation?.image;
+  const acts = Array.isArray(s.invocation?.actions) ? s.invocation.actions : [];
+  const dureeStr = iv.concentration ? 'Concentration' : `${iv.duree} tour${iv.duree>1?'s':''}`;
+  return `
+    <div class="inv-cfg">
+      <div class="inv-cfg-head">
+        <div class="inv-cfg-portrait">${img ? `<img src="${img}" alt="">` : '<span>🐾</span>'}</div>
+        <div class="inv-cfg-vitals">
+          <span class="inv-cfg-vital">❤️ <b>${iv.pv}</b> PV</span>
+          <span class="inv-cfg-vital">🛡️ CA <b>${iv.ca}</b></span>
+          <span class="inv-cfg-vital">⚔️ <b>${_esc(iv.attaque)}</b> · +${iv.toucher}</span>
+          <span class="inv-cfg-vital">👢 <b>${iv.deplacement}</b></span>
+          <span class="inv-cfg-vital">⏱️ <b>${dureeStr}</b></span>
+        </div>
+      </div>
+      <div class="inv-cfg-hint">Les stats et l'image se règlent dans l'éditeur du sort. Ici, conçois les <b>actions</b> de la créature — chacune s'édite avec la modale de sort complète (runes, dégâts, effets…).</div>
+      <div class="inv-cfg-actions-hd">
+        <span>🎬 Actions de la créature</span>
+        <button class="btn btn-gold btn-sm" data-action="_invCfgAddAction">＋ Nouvelle action</button>
+      </div>
+      <div class="inv-cfg-list">
+        ${acts.length ? acts.map((a, ai) => `
+          <div class="inv-cfg-act">
+            <div class="inv-cfg-act-main" data-action="_invCfgEditAction" data-aidx="${ai}">
+              <span class="inv-cfg-act-name">🎬 ${_esc(a.nom || 'Action')}</span>
+              <span class="inv-cfg-act-meta">${Array.isArray(a.runes) && a.runes.length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune'}${a.pm ? ` · ${a.pm} PM` : ''}</span>
+            </div>
+            <button class="btn-icon" data-action="_invCfgEditAction" data-aidx="${ai}" title="Modifier">✏️</button>
+            <button class="btn-icon" data-action="_invCfgDeleteAction" data-aidx="${ai}" title="Supprimer">🗑️</button>
+          </div>`).join('') : '<div class="inv-cfg-empty">Aucune action. Crée la première attaque ou capacité de la créature.</div>'}
+      </div>
+      <div class="inv-cfg-foot">
+        <button class="btn btn-outline" data-action="closeModalDirect">Fermer</button>
+      </div>
+    </div>`;
+}
+function _invCfgAddAction() {
+  const s = _invCfgSort(); if (!s) return;
+  if (!s.invocation) s.invocation = {};
+  if (!Array.isArray(s.invocation.actions)) s.invocation.actions = [];
+  editItemSpell({ actions: s.invocation.actions }, -1, _invCfgOnActionSave, STATE.activeChar);
+}
+function _invCfgEditAction(aidx) {
+  const s = _invCfgSort(); if (!s?.invocation?.actions) return;
+  editItemSpell({ actions: s.invocation.actions }, parseInt(aidx), _invCfgOnActionSave, STATE.activeChar);
+}
+async function _invCfgOnActionSave(holder) {
+  const c = STATE.activeChar, s = _invCfgSort(); if (!c || !s) return;
+  if (!s.invocation) s.invocation = {};
+  s.invocation.actions = holder.actions;
+  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  _refreshInvocationConfig();       // la modale de config est déjà restaurée (popModal)
+}
+async function _invCfgDeleteAction(aidx) {
+  const c = STATE.activeChar, s = _invCfgSort(); if (!c || !s?.invocation?.actions) return;
+  if (!await confirmModal('Supprimer cette action ?')) return;
+  s.invocation.actions.splice(parseInt(aidx), 1);
+  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  _refreshInvocationConfig();
 }
 // Bloc image : aperçu + boutons (mode normal). Le cropper inline remplace ce
 // contenu pendant le cadrage (cf. _invStartCrop).
@@ -2395,6 +2460,8 @@ registerActions({
   _invClearImage:         ()    => _invClearImage(),
   _invCropSave:           ()    => _invCropSave(),
   _invCropCancel:         ()    => _invCropCancel(),
-  _invAddAction:          ()    => _invAddAction(),
-  _invDeleteAction:       (btn) => _invDeleteAction(btn.dataset.idx),
+  _openInvocationConfig:  (btn) => openInvocationConfig(Number(btn.dataset.idx)),
+  _invCfgAddAction:       ()    => _invCfgAddAction(),
+  _invCfgEditAction:      (btn) => _invCfgEditAction(btn.dataset.aidx),
+  _invCfgDeleteAction:    (btn) => _invCfgDeleteAction(btn.dataset.aidx),
 });
