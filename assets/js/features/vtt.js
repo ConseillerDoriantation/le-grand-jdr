@@ -7412,6 +7412,13 @@ function _initListeners() {
     _renderTraySoon();
     _renderCombatTrackerSoon();
     _toksReady=true; _maybeSyncAutoTokens();
+    // Joueur : le bouton « Invoquer mon token » dépend de l'état de SON token
+    // (créé / assigné / déplacé par le MJ). Sans ce refresh, le bouton n'apparaît
+    // pas tant qu'un autre événement (changement de page) ne relance pas le rendu.
+    if (!STATE.isAdmin) {
+      const _myUid = STATE.user?.uid;
+      if (snap.docChanges().some(ch => ch.doc.data()?.ownerId === _myUid)) _renderPageTabs();
+    }
     // Recalcul fog si un token joueur a bougé
     if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player'))
       fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);

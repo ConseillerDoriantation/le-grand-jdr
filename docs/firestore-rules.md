@@ -210,13 +210,15 @@ service cloud.firestore {
       match /vttTokens/{id} {
         allow read: if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
-        // Déplacement : propriétaire OU délégué de contrôle
+        // Déplacement + invocation/retrait : propriétaire OU délégué de contrôle.
+        // `pageId`/`visible` permettent au joueur d'« Invoquer mon token » (le poser
+        // sur la carte active) et de le retirer — cf. _vttInvokeMyToken dans vtt.js.
         allow update: if inAdventure(adventureId)
           && (request.auth.uid == resource.data.ownerId
               || (resource.data.controlDelegates is list
                   && request.auth.uid in resource.data.controlDelegates))
           && request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt']);
+               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'pageId', 'visible']);
         // Dégâts / effets : tout membre de l'aventure
         allow update: if inAdventure(adventureId)
           && request.resource.data.diff(resource.data)
