@@ -10,7 +10,8 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
-import { pickImageFile, uploadJpeg } from '../../shared/image-upload.js';
+import { pickImageFile } from '../../shared/image-upload.js';
+import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { setSpellCaches, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
@@ -26,6 +27,7 @@ let _sortActionEdit = null;
 let _deplModeEdit = null;
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
+let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
 let _sortIconPickerOutsideBound = false;
 
 export function sortDragStart(e, idx) {
@@ -1217,44 +1219,37 @@ export async function openSortModal(idx, s) {
     </div>
 
     <!-- Invocation (rune Invocation seule) — stats éditables + image + actions -->
-    <div id="s-invocation-section" style="${hasInvoc?'':'display:none'}">
-      <div class="form-group">
-        <label>🐾 Invocation — créature</label>
-        <div style="font-size:.72rem;color:var(--text-dim);padding:0 .1rem .4rem">
-          Stats par défaut dérivées des runes (laisse vide = auto). Puissance→+dé · Chance→toucher · Protection→PV · Amplification→déplacement · Durée→durée.
+    <div id="s-invocation-section" class="cs-inv-section" style="${hasInvoc?'':'display:none'}">
+      <div class="cs-inv-head">
+        <span class="cs-inv-head-icon">🐾</span>
+        <div class="cs-inv-head-text">
+          <div class="cs-inv-head-title">Créature invoquée</div>
+          <div class="cs-inv-head-sub">Stats dérivées des runes — laisse un champ vide pour l'auto</div>
+        </div>
+      </div>
+
+      <div class="cs-inv-body">
+        <div class="cs-inv-imgcol">
+          <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
+          <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
         </div>
         <div class="cs-inv-grid">
-          <label class="cs-inv-field"><span>⚔️ Attaque</span>
-            <input class="input-field" id="s-inv-attaque" value="${_esc(ivStats.attaque||'')}" placeholder="${_esc(ivDerived.attaque)}"></label>
-          <label class="cs-inv-field"><span>🎯 Toucher</span>
-            <input class="input-field" type="number" id="s-inv-toucher" value="${ivStats.toucher??''}" placeholder="${ivDerived.toucher}"></label>
-          <label class="cs-inv-field"><span>❤️ PV</span>
-            <input class="input-field" type="number" id="s-inv-pv" value="${ivStats.pv??''}" placeholder="${ivDerived.pv}"></label>
-          <label class="cs-inv-field"><span>🛡️ CA</span>
-            <input class="input-field" type="number" id="s-inv-ca" value="${ivStats.ca??''}" placeholder="${ivDerived.ca}"></label>
-          <label class="cs-inv-field"><span>👢 Déplacement</span>
-            <input class="input-field" type="number" id="s-inv-deplacement" value="${ivStats.deplacement??''}" placeholder="${ivDerived.deplacement}"></label>
-          <label class="cs-inv-field"><span>⏱️ Durée</span>
-            <input class="input-field" type="number" id="s-inv-duree" value="${ivStats.duree??''}" placeholder="${ivDerived.duree}"></label>
+          ${[
+            { id:'attaque',     ic:'⚔️', lbl:'Attaque',     type:'text',   val:_esc(ivStats.attaque||''),     ph:_esc(ivDerived.attaque) },
+            { id:'toucher',     ic:'🎯', lbl:'Toucher',     type:'number', val:(ivStats.toucher??''),         ph:ivDerived.toucher },
+            { id:'pv',          ic:'❤️', lbl:'PV',          type:'number', val:(ivStats.pv??''),              ph:ivDerived.pv },
+            { id:'ca',          ic:'🛡️', lbl:'CA',          type:'number', val:(ivStats.ca??''),              ph:ivDerived.ca },
+            { id:'deplacement', ic:'👢', lbl:'Déplacement', type:'number', val:(ivStats.deplacement??''),     ph:ivDerived.deplacement },
+            { id:'duree',       ic:'⏱️', lbl:'Durée',       type:'number', val:(ivStats.duree??''),           ph:ivDerived.duree },
+          ].map(f => `<label class="cs-inv-stat">
+            <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
+            <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
+          </label>`).join('')}
         </div>
       </div>
 
-      <div class="form-group">
-        <label>🖼️ Image (token VTT)</label>
-        <div class="cs-inv-img-row">
-          <div id="s-inv-img-preview" class="cs-inv-img-preview">
-            ${_invImageEdit ? `<img src="${_invImageEdit}" alt="">` : '<span>🐾</span>'}
-          </div>
-          <div class="cs-inv-img-actions">
-            <button type="button" class="btn btn-outline btn-sm" data-action="_invPickImage">⬆ Choisir une image</button>
-            ${_invImageEdit ? `<button type="button" class="btn btn-outline btn-sm" data-action="_invClearImage">✕ Retirer</button>` : ''}
-          </div>
-        </div>
-        <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
-      </div>
-
-      <div class="form-group">
-        <label>🎬 Actions de l'invocation</label>
+      <div class="cs-inv-actions-wrap">
+        <div class="cs-inv-actions-hd">🎬 Actions de l'invocation</div>
         <div id="s-inv-actions-list" class="cs-inv-actions">${_renderInvActionsList()}</div>
       </div>
     </div>
@@ -1492,27 +1487,55 @@ function _invDeleteAction(idx) {
   _refreshInvActionsList();
   _updateSortPreview();
 }
-function _refreshInvImagePreview() {
-  const pv = document.getElementById('s-inv-img-preview');
-  if (pv) pv.innerHTML = _invImageEdit ? `<img src="${_invImageEdit}" alt="">` : '<span>🐾</span>';
-  const act = document.querySelector('.cs-inv-img-actions');
-  if (act) act.innerHTML = `<button type="button" class="btn btn-outline btn-sm" data-action="_invPickImage">⬆ Choisir une image</button>${_invImageEdit ? `<button type="button" class="btn btn-outline btn-sm" data-action="_invClearImage">✕ Retirer</button>` : ''}`;
+// Bloc image : aperçu + boutons (mode normal). Le cropper inline remplace ce
+// contenu pendant le cadrage (cf. _invStartCrop).
+function _renderInvImageBlock() {
+  return `
+    <div class="cs-inv-img-preview">${_invImageEdit ? `<img src="${_invImageEdit}" alt="">` : '<span>🐾</span>'}</div>
+    <div class="cs-inv-img-actions">
+      <button type="button" class="btn btn-outline btn-sm" data-action="_invPickImage">${_invImageEdit ? '🔄 Changer' : '⬆ Image'}</button>
+      ${_invImageEdit ? `<button type="button" class="btn btn-outline btn-sm" data-action="_invClearImage">✕</button>` : ''}
+    </div>`;
+}
+function _refreshInvImageBlock() {
+  const el = document.getElementById('s-inv-img-block');
+  if (el) el.innerHTML = _renderInvImageBlock();
 }
 function _invPickImage() {
-  pickImageFile({ onImage: async ({ file }) => {
-    try {
-      const b64 = await uploadJpeg(file, { max: 420, quality: 0.8 });
-      _invImageEdit = b64;
-      const hid = document.getElementById('s-inv-image'); if (hid) hid.value = b64;
-      _refreshInvImagePreview();
-      _updateSortPreview();
-    } catch (e) { notifySaveError(e); }
-  }});
+  pickImageFile({ onImage: ({ dataUrl }) => _invStartCrop(dataUrl) });
+}
+// Cadrage INLINE (pas de modale imbriquée → aucune perte de saisie de l'éditeur)
+function _invStartCrop(dataUrl) {
+  const host = document.getElementById('s-inv-img-block'); if (!host) return;
+  host.innerHTML = `
+    ${panZoomCropHTML({ idPrefix: 'inv-crop', viewSize: 200 })}
+    <div class="cs-inv-crop-actions">
+      <button type="button" class="btn btn-outline btn-sm" data-action="_invCropCancel">Annuler</button>
+      <button type="button" class="btn btn-gold btn-sm" data-action="_invCropSave">✅ Valider</button>
+    </div>`;
+  requestAnimationFrame(() => {
+    _invCrop?.destroy?.();
+    _invCrop = attachPanZoomCrop({ idPrefix: 'inv-crop', dataUrl, viewSize: 200, outputSize: 256 });
+  });
+}
+function _invCropSave() {
+  const b64 = _invCrop?.getBase64();
+  _invCrop?.destroy?.(); _invCrop = null;
+  if (b64) {
+    _invImageEdit = b64;
+    const hid = document.getElementById('s-inv-image'); if (hid) hid.value = b64;
+  }
+  _refreshInvImageBlock();
+  _updateSortPreview();
+}
+function _invCropCancel() {
+  _invCrop?.destroy?.(); _invCrop = null;
+  _refreshInvImageBlock();
 }
 function _invClearImage() {
   _invImageEdit = '';
   const hid = document.getElementById('s-inv-image'); if (hid) hid.value = '';
-  _refreshInvImagePreview();
+  _refreshInvImageBlock();
   _updateSortPreview();
 }
 // Met à jour les placeholders (valeurs dérivées) selon les runes courantes.
@@ -2366,6 +2389,8 @@ registerActions({
   _pickSpellSuggestion:   (btn) => _pickSpellSuggestion(btn.dataset.cat, btn.dataset.encoded),
   _invPickImage:          ()    => _invPickImage(),
   _invClearImage:         ()    => _invClearImage(),
+  _invCropSave:           ()    => _invCropSave(),
+  _invCropCancel:         ()    => _invCropCancel(),
   _invAddAction:          ()    => _invAddAction(),
   _invDeleteAction:       (btn) => _invDeleteAction(btn.dataset.idx),
 });

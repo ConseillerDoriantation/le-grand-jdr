@@ -2895,31 +2895,68 @@ input[type=number].input-field::-webkit-outer-spin-button {
 }
 
 /* ── Section Invocation (éditeur de sort) ───────────────────────────── */
-.cs-inv-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: .4rem .5rem;
+.cs-inv-section {
+  border: 1px solid color-mix(in srgb, #a16207 35%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, #a16207 6%, var(--bg-elevated));
+  padding: .7rem .75rem; margin-top: .2rem;
+  display: flex; flex-direction: column; gap: .65rem;
 }
-.cs-inv-field { display: flex; flex-direction: column; gap: .15rem; }
-.cs-inv-field > span { font-size: .68rem; color: var(--text-muted); font-weight: 600; }
-.cs-inv-field > input { width: 100%; box-sizing: border-box; }
-.cs-inv-img-row { display: flex; align-items: center; gap: .7rem; }
+.cs-inv-head { display: flex; align-items: center; gap: .55rem; }
+.cs-inv-head-icon {
+  width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; font-size: 1.05rem;
+  background: color-mix(in srgb, #a16207 18%, transparent);
+  border: 1px solid color-mix(in srgb, #a16207 40%, var(--border));
+}
+.cs-inv-head-title { font-size: .85rem; font-weight: 800; color: #d99a2b; font-family: 'Cinzel', serif; }
+.cs-inv-head-sub { font-size: .66rem; color: var(--text-dim); margin-top: .05rem; }
+
+.cs-inv-body { display: flex; gap: .7rem; align-items: flex-start; }
+.cs-inv-imgcol { flex-shrink: 0; display: flex; flex-direction: column; gap: .3rem; width: 92px; }
+.cs-inv-img-block { display: flex; flex-direction: column; gap: .3rem; }
 .cs-inv-img-preview {
-  width: 52px; height: 52px; flex-shrink: 0;
-  border-radius: 10px; overflow: hidden;
-  border: 1px solid var(--border); background: var(--bg-elevated);
-  display: flex; align-items: center; justify-content: center; font-size: 1.4rem;
+  width: 92px; height: 92px;
+  border-radius: 12px; overflow: hidden;
+  border: 1px solid color-mix(in srgb, #a16207 35%, var(--border));
+  background: var(--bg-panel);
+  display: flex; align-items: center; justify-content: center; font-size: 2rem;
 }
 .cs-inv-img-preview img { width: 100%; height: 100%; object-fit: cover; }
-.cs-inv-img-actions { display: flex; flex-direction: column; gap: .35rem; }
+.cs-inv-img-actions { display: flex; gap: .3rem; }
+.cs-inv-img-actions .btn { flex: 1; padding: .25rem .3rem; }
+.cs-inv-crop-actions { display: flex; gap: .35rem; margin-top: .4rem; }
+.cs-inv-crop-actions .btn { flex: 1; }
+
+.cs-inv-grid {
+  flex: 1; min-width: 0;
+  display: grid; grid-template-columns: 1fr 1fr; gap: .35rem .45rem; align-content: start;
+}
+.cs-inv-stat { display: flex; flex-direction: column; gap: .12rem; min-width: 0; }
+.cs-inv-stat-lbl { font-size: .64rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
+.cs-inv-stat-in {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: .8rem; font-weight: 600;
+  padding: .28rem .4rem; outline: none; transition: border-color .12s;
+}
+.cs-inv-stat-in:focus { border-color: #d99a2b; }
+.cs-inv-stat-in::placeholder { color: var(--text-dim); font-weight: 400; }
+
+.cs-inv-actions-wrap { display: flex; flex-direction: column; gap: .35rem; }
+.cs-inv-actions-hd { font-size: .72rem; font-weight: 700; color: var(--text-muted); }
 .cs-inv-actions { display: flex; flex-direction: column; gap: .3rem; }
 .cs-inv-act {
   display: flex; align-items: center; gap: .5rem;
-  padding: .3rem .5rem; border-radius: 7px;
-  background: var(--bg-elevated); border: 1px solid var(--border);
+  padding: .35rem .5rem; border-radius: 8px; cursor: pointer;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  transition: border-color .12s;
 }
+.cs-inv-act:hover { border-color: color-mix(in srgb, #a16207 45%, var(--border)); }
 .cs-inv-act-name { flex: 1; min-width: 0; font-size: .76rem; font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cs-inv-act-runes { font-size: .62rem; color: var(--text-dim);
-  background: rgba(255,255,255,.05); border-radius: 999px; padding: .08rem .4rem; }
+  background: rgba(255,255,255,.05); border-radius: 999px; padding: .08rem .4rem; white-space: nowrap; }
 .cs-inv-act-runes--empty { font-style: italic; }
 .cs-inv-act-del { background: none; border: none; cursor: pointer; color: var(--text-dim);
   font-size: .8rem; padding: .1rem .25rem; border-radius: 4px; }
