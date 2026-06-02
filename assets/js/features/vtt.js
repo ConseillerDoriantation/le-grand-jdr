@@ -2294,9 +2294,14 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
   const stepR = Math.sign(Math.round((dRow / len) * sign));
   if (stepC === 0 && stepR === 0) return 0;
 
+  // En diagonale, chaque case coûte 2 de déplacement : portée arrondie au pair
+  // supérieur puis ÷2 (ex. 3 → 2 cases, 7 → 4 cases). Orthogonal = portée brute.
+  const isDiagonal = stepC !== 0 && stepR !== 0;
+  const maxCells = isDiagonal ? Math.ceil(distance / 2) : distance;
+
   let nc = tgtData.col, nr = tgtData.row;
   let moved = 0;
-  for (let i = 0; i < distance; i++) {
+  for (let i = 0; i < maxCells; i++) {
     const tryC = nc + stepC, tryR = nr + stepR;
     // Collision avec un autre token sur la même page
     const collide = Object.values(_tokens).some(e => {
@@ -2366,6 +2371,7 @@ function _selfClear() {
 
 function _startSelfMove(srcId, opt, cells) {
   _zoneClear(); _selfClear();
+  _clearHL(); // retire les cases de déplacement classique pour éviter la confusion
   const src = _tokens[srcId]?.data; if (!src || !_layers.grid || !_activePage) return;
   const mv  = Math.max(1, cells || 1);
   _selfCtx = { srcId, cells: mv, opt };
@@ -2379,7 +2385,7 @@ function _startSelfMove(srcId, opt, cells) {
     if (_selfCellOccupied(c, r, dim, src)) continue;
     const rect = new K.Rect({
       x: c * CELL, y: r * CELL, width: dim.w * CELL, height: dim.h * CELL,
-      fill: 'rgba(79,140,255,0.28)', stroke: 'rgba(79,140,255,0.75)', strokeWidth: 1.5, listening: true,
+      fill: 'rgba(180,127,255,0.30)', stroke: 'rgba(180,127,255,0.8)', strokeWidth: 1.5, listening: true,
     });
     const tc = c, tr = r;
     rect.on('click', async e => { if (e.evt.button !== 0) return; e.cancelBubble = true; await _selfMoveTo(tc, tr); });
