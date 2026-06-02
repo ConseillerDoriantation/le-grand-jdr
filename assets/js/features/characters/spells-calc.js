@@ -689,6 +689,36 @@ function _calcInvokedArmStats(s) {
 }
 
 /**
+ * Stats d'une invocation générique (rune Invocation seule, hors combos
+ * Arme invoquée / Sentinelle). Dérivées des runes, surchargeables via
+ * s.invocation.stats (un override non vide remplace la valeur calculée).
+ *   - Attaque     : 1d4 +2 · +1 dé par Puissance
+ *   - Toucher     : +2 · +2 par Chance
+ *   - PV          : 10 · +5 par Protection
+ *   - Déplacement : 3 · +3 par Amplification
+ *   - Durée       : 2 tours · +2 par Durée (Concentration = maintien)
+ *   - CA          : 10 par défaut
+ */
+export function _calcInvocationStats(s) {
+  const ov    = s?.invocation?.stats || {};
+  const runes = s?.runes || [];
+  const n = name => runes.filter(r => r === name).length;
+  const nbP = n('Puissance'), nbCh = n('Chance'), nbProt = n('Protection'),
+        nbAmp = n('Amplification'), nbDur = n('Durée');
+  const concentration = n('Concentration') > 0;
+
+  const _has = v => v !== undefined && v !== null && v !== '';
+  const nbDice  = 1 + nbP;
+  const attaque = _has(ov.attaque) ? String(ov.attaque) : `${nbDice}d4 +2`;
+  const toucher = _has(ov.toucher) ? parseInt(ov.toucher) : (2 + 2 * nbCh);
+  const pv      = _has(ov.pv)      ? parseInt(ov.pv)      : (10 + 5 * nbProt);
+  const deplacement = _has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp);
+  const duree   = _has(ov.duree)   ? parseInt(ov.duree)   : (2 + 2 * nbDur);
+  const ca      = _has(ov.ca)      ? parseInt(ov.ca)      : 10;
+  return { attaque, toucher, pv, deplacement, duree, ca, concentration };
+}
+
+/**
  * Génère le résumé textuel complet des effets d'un sort
  * sous forme de tableau de lignes {icon, label, detail}
  */
@@ -936,7 +966,14 @@ export function _buildSortResume(s, c) {
   // Invocation — masquée si absorbée par un combo (Arme invoquée, Sentinelle)
   const hideInvoc = comboIds.has('arme_invoquee') || comboIds.has('sentinelle');
   if (runes.includes('Invocation') && !hideInvoc) {
-    lines.push({ icon:'🐾', label:'Invocation', detail:'Créature liée · 10 PV · CA 10 · 2 tours par défaut' });
+    const iv = _calcInvocationStats(s);
+    const nbAct = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.length : 0;
+    const dureeStr = iv.concentration ? 'maintenue (Concentration)' : `${iv.duree} tour${iv.duree>1?'s':''}`;
+    lines.push({
+      icon:'🐾',
+      label:`Invocation · ${iv.pv} PV · CA ${iv.ca}`,
+      detail:`Attaque ${iv.attaque} (toucher +${iv.toucher}) · déplacement ${iv.deplacement} · ${dureeStr}${nbAct?` · ${nbAct} action${nbAct>1?'s':''}`:''}`,
+    });
   }
 
   // Détails Sentinelle — affichés à la place de la ligne classique Invocation/Affliction
