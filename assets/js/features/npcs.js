@@ -808,6 +808,10 @@ function _groupNpcsByOrg(npcs) {
   groups.set(NO_ORG_KEY, npcs.filter(n =>
     !Array.isArray(n.organisations) || !n.organisations.filter(Boolean).length
   ));
+  // Tri alphabétique des PNJ à l'intérieur de chaque groupe (nom, insensible à la casse/accents)
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  }
   return groups;
 }
 
