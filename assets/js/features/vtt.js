@@ -2327,6 +2327,27 @@ function _vttSpellMods(s) {
     // Canalisé persistant : Durée + Concentration → durée liée à la concentration
     canalisePersistant: (nbDur > 0 && nbConc > 0)
       ? { graceTurns: nbDur + 1, dd: 11 + 2 * (nbConc - 1) } : null,
+    // Invocation générique : créature liée (hors combos Sentinelle/Arme invoquée).
+    // Stats dérivées des runes, surchargeables via s.invocation.stats.
+    // (Barème = miroir de _calcInvocationStats côté fiche perso.)
+    invocation: (nbInv > 0 && nbAff === 0 && nbEnch === 0)
+      ? (() => {
+          const ov  = s.invocation?.stats || {};
+          const has = v => v !== undefined && v !== null && v !== '';
+          return {
+            attaque:      has(ov.attaque)     ? String(ov.attaque)     : `${1 + nbP}d4 +2`,
+            toucher:      has(ov.toucher)     ? parseInt(ov.toucher)     : (2 + 2 * nbCh),
+            pv:           has(ov.pv)          ? parseInt(ov.pv)          : (10 + 5 * nbProt),
+            ca:           has(ov.ca)          ? parseInt(ov.ca)          : 10,
+            deplacement:  has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp),
+            duree:        has(ov.duree)       ? parseInt(ov.duree)       : (2 + 2 * nbDur),
+            concentration: nbConc > 0,
+            image:        s.invocation?.image || null,
+            actions:      Array.isArray(s.invocation?.actions) ? s.invocation.actions : [],
+            name:         s.nom || 'Invocation',
+            nbInvocations: nbDisp > 0 ? 2 * nbDisp : 1,
+          };
+        })() : null,
   };
 
   // Renvoie null si aucun mod actif (évite de polluer opt.mods inutilement)
@@ -2524,13 +2545,48 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
   const src = _tokens[srcId]?.data; if (!src) return null;
   const round = _session?.combat?.round ?? 0;
   const baseRound = Math.max(1, round);
-  if (kind !== 'sentinelle') return null; // seul kind supporté désormais
+  const ownerName = _live(src).displayName ?? src.name;
 
-  // Sentinelle : snap dans les bornes de la page
+  // Snap dans les bornes de la page (commun à tous les kinds)
   const targetCol = Math.max(0, Math.min(_activePage.cols - 1, col));
   const targetRow = Math.max(0, Math.min(_activePage.rows - 1, row));
 
-  const ownerName = _live(src).displayName ?? src.name;
+  // ── Invocation générique : créature avec image + stats propres ──────
+  if (kind === 'invocation') {
+    const iv = opt?.mods?.invocation || {};
+    const hp = parseInt(iv.pv) || 10;
+    const tokenData = {
+      name: `🐾 ${iv.name || 'Invocation'} de ${ownerName}`,
+      type: 'npc',
+      characterId: null, npcId: null, beastId: null,
+      ownerId: src.characterId ? STATE.user?.uid || null : null,
+      summonOwnerId: srcId,
+      summonKind: 'invocation',
+      summonExpiresAtRound: iv.concentration ? null : baseRound + durationTurns - 1,
+      summonCanalise: !!iv.concentration,
+      summonConcentrationDD: opt?.mods?.concentration?.dd || null,
+      summonChanceRc: opt?.mods?.chance?.rc ?? 20,
+      summonActions: Array.isArray(iv.actions) ? iv.actions : [],
+      pageId: _activePage.id,
+      col: targetCol, row: targetRow,
+      visible: true,
+      hp, hpMax: hp,
+      defense: parseInt(iv.ca) || 10,
+      movement: parseInt(iv.deplacement) || 0,
+      range: 1,
+      attackDice: iv.attaque || '1d4',
+      attack: parseInt(iv.toucher) || 0,
+      imageUrl: iv.image || null,
+      movedThisTurn: false, attackedThisTurn: false,
+      createdAt: serverTimestamp(),
+    };
+    const ref = doc(_toksCol());
+    await setDoc(ref, tokenData).catch(() => {});
+    return { id: ref.id, ...tokenData };
+  }
+
+  if (kind !== 'sentinelle') return null; // autres kinds non supportés
+
   const baseName  = `🪤 Sentinelle de ${ownerName}`;
 
   // Stats propres de la sentinelle (calculées en amont dans _vttSpellMods)
@@ -2890,8 +2946,8 @@ function _buildSpellOption(s, ctx) {
       zoneH = Math.ceil(_widthM / CELL_M);
     }
   }
-  // Sentinelle : force une zone min 1×1 (utile pour le placement)
-  if (mods?.sentinelle && (zoneW <= 0 || zoneH <= 0)) {
+  // Sentinelle / Invocation : force une zone min 1×1 (utile pour le placement)
+  if ((mods?.sentinelle || mods?.invocation) && (zoneW <= 0 || zoneH <= 0)) {
     zoneW = Math.max(1, zoneW || 1);
     zoneH = Math.max(1, zoneH || 1);
   }
@@ -2919,6 +2975,12 @@ function _buildSpellOption(s, ctx) {
     return { ...common, label, dice: '',
       icon: dm === 'self' ? '🏃' : dm === 'pull' ? '↙' : '↗',
       isUtil: true, isDeplacement: true, halfOnMiss: false };
+  }
+
+  // Invocation générique : place une créature (aucun dégât du lanceur — la créature frappe).
+  if (mods?.invocation) {
+    return { ...common, label, dice: '', icon: '🐾',
+      isUtil: true, isInvocation: true, halfOnMiss: false };
   }
 
   const isEnchantOnly = enchantOnlyAlsoEtat
@@ -4587,7 +4649,7 @@ function _startZonePlacement(srcId, tgtId, opt, optIdx) {
   const wPx = opt.zoneW * CELL;  // zoneW/H = nombre de cases
   const hPx = opt.zoneH * CELL;
   // Sort d'invocation avec Dispersion : N placements successifs
-  const nbInvoc = opt?.mods?.sentinelle?.nbInvocations || 1;
+  const nbInvoc = opt?.mods?.sentinelle?.nbInvocations || opt?.mods?.invocation?.nbInvocations || 1;
   _zoneCtx = {
     srcId, tgtId, opt, optIdx, wPx, hPx, x: 0, y: 0, placed: false,
     invocationsTotal: nbInvoc,
@@ -4635,6 +4697,31 @@ async function _zoneValidate() {
       return tc.x >= x1 && tc.x <= x2 && tc.y >= y1 && tc.y <= y2;
     })
     .map(e => e.data.id);
+
+  // ── Invocation générique : place la créature à l'emplacement choisi ──
+  // (pas d'attaque du lanceur — la créature a ses propres stats/actions)
+  if (opt?.mods?.invocation) {
+    const col = Math.round((x - wPx / 2) / CELL);
+    const row = Math.round((y - hPx / 2) / CELL);
+    await _vttSpawnSummon({ kind: 'invocation', srcId, col, row, opt, durationTurns: opt.mods.invocation.duree || 2 });
+    _zoneCtx.invocationsDone = (_zoneCtx.invocationsDone || 0) + 1;
+    const total = _zoneCtx.invocationsTotal || 1;
+    const done  = _zoneCtx.invocationsDone;
+    if (done < total) {
+      showNotif(`🐾 Invocation ${done}/${total} placée — place la suivante`, 'info');
+      _zoneCtx.placed = false;
+      _zoneCtx.opt = { ..._zoneCtx.opt, label: `${opt.label} (${done + 1}/${total})` };
+      _showZoneHud();
+      _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
+      _layers.token?.batchDraw();
+      return; // reste en mode placement
+    }
+    const srcD = _tokens[srcId]?.data;
+    if (srcD) await _vttSpendSpellPm(srcD, opt);
+    showNotif(`🐾 ${total} invocation${total > 1 ? 's' : ''} placée${total > 1 ? 's' : ''}`, 'success');
+    _zoneClear();
+    return;
+  }
 
   // ── Combo Sentinelle : spawn d'un token au centre de la zone ────────
   // Le token apparaît même sans cible présente (le piège attend les ennemis)
@@ -6226,9 +6313,25 @@ function _renderInspector(t) {
       </div>` : '';
 
   // ── Répartition en onglets ─────────────────────────────────────────────
+  // Actions d'une créature invoquée (token summonKind='invocation')
+  const _summonActionsHtml = (Array.isArray(t.summonActions) && t.summonActions.length)
+    ? `<div class="vtt-ins-section">
+        <div class="vtt-ins-section-title">🎬 Actions de la créature</div>
+        ${t.summonActions.map(a => {
+          const det = [a.degats && `🎲 ${_esc(a.degats)}`, a.portee && `📏 ${_esc(a.portee)}`, a.pm ? `${a.pm} PM` : ''].filter(Boolean).join(' · ');
+          return `<div class="vtt-creat-act">
+            <div class="vtt-creat-act-name">🎬 ${_esc(a.nom || 'Action')}</div>
+            ${det ? `<div style="font-size:.7rem;color:var(--text-muted);margin-top:.12rem">${det}</div>` : ''}
+            ${a.effet ? `<div class="vtt-creat-atk-desc">${_esc(a.effet)}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`
+    : '';
+
   const _tabs = [
     { k:'stats',    ic:'📊', lb:'Stats',     html: coreStatsHtml },
     { k:'combat',   ic:'🎲', lb:'Jets',      html: _combatActionsHtml + _skillsHtml },
+    { k:'invoc',    ic:'🐾', lb:'Actions',   html: _summonActionsHtml },
     { k:'effets',   ic:'✨', lb:'Effets',    html: _condsHtml + _buffsHtml },
     { k:'creature', ic:'📜', lb:'Bestiaire', html: _creatureHtml },
     { k:'gerer',    ic:'⚙️', lb:'Gérer',     html: _delegateHtml + _sendPageHtml + _footerHtml },
