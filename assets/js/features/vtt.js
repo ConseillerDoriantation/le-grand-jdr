@@ -458,6 +458,10 @@ function _live(t) {
     displayAttack:   t.attack   ?? 5,
     displayAttackDice: t.attackDice || '1d6',
     displayDefense:  t.defense  ?? 0,
+    realDefense:     t.defense  ?? 0,
+    // Ennemi custom (posé sur la carte, sans fiche) : pas d'estimation possible
+    // → "?" pour les joueurs, jamais la CA réelle saisie par le MJ.
+    caBadge:         (!STATE.isAdmin && t.type === 'enemy') ? '?' : String(t.defense ?? 0),
     displayRange:    t.range    ?? 1,
     displayTokenW:   Math.max(1, Math.min(5, t.tokenW ?? t.tokenSize ?? 1)),
     displayTokenH:   Math.max(1, Math.min(5, t.tokenH ?? t.tokenSize ?? 1)),
@@ -585,11 +589,12 @@ function _live(t) {
 
   // ── Badge CA affiché sur le token ────────────────────────────────────────
   // • MJ : vraie CA (avec buffs) — toujours.
-  // • Joueur sur ennemi avec fiche bestiaire : son estimation, ou "?" si vide.
-  // • Reste (joueur/PNJ) : vraie CA.
-  if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
-    const track = _bstTracker[t.beastId] || {};
-    result.caBadge = track.caEstimee !== undefined && track.caEstimee !== ''
+  // • Joueur sur N'IMPORTE quel ennemi : son estimation (tracker bestiaire) ou "?".
+  //   Jamais la vraie CA du MJ — y compris pour un ennemi custom (sans beastId).
+  // • Reste (son perso, allié, PNJ) : vraie CA (displayDefense).
+  if (!STATE.isAdmin && t.type === 'enemy') {
+    const track = t.beastId ? (_bstTracker[t.beastId] || {}) : null;
+    result.caBadge = (track && track.caEstimee !== undefined && track.caEstimee !== '')
       ? String(parseInt(track.caEstimee) || 0)
       : '?';
   } else {
@@ -1587,7 +1592,7 @@ function _patchShape(id) {
   const _buff   = ld._activeCaBuff;
   const _buffed = !!_buff;
   const _round  = _session?.combat?.round ?? 0;
-  g.findOne('.ca-lbl')?.text(`🛡${ld.displayDefense??0}`);
+  g.findOne('.ca-lbl')?.text(`🛡${ld.caBadge ?? (ld.displayDefense??0)}`);
   g.findOne('.ca-lbl')?.fill(_buffed ? '#c4b5fd' : '#e2e8f0');
   g.findOne('.ca-bg')?.stroke(_buffed ? '#818cf8' : '#64748b');
   g.findOne('.ca-bg')?.strokeWidth(_buffed ? 2.5 : 1.5);
@@ -5827,7 +5832,7 @@ function _renderInspector(t) {
         })() +
         _stat('⚔️', 'Attaque', atkLabel) +
         `<div class="vtt-ins-stat"><span class="vtt-ins-stat-label">🛡 CA</span>`+
-          `<span class="vtt-ins-stat-val">${ld.displayDefense??0}${_badge('ca')}</span>${_steps('ca')}</div>` +
+          `<span class="vtt-ins-stat-val">${ld.caBadge ?? (ld.displayDefense??0)}${ld.caBadge === '?' ? '' : _badge('ca')}</span>${_steps('ca')}</div>` +
         `<div class="vtt-ins-stat"><span class="vtt-ins-stat-label">🎯 Portée</span>`+
           `<span class="vtt-ins-stat-val">${ld.displayRange??1} case(s)${_badge('portee')}</span>${_steps('portee')}</div>` +
         _stat('📍', 'Position', pos, true) +
