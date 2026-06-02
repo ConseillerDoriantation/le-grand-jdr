@@ -1737,11 +1737,81 @@ function _renderPings(pings) {
 }
 
 // ── Réaction émote style stream — toujours bas-droite, indépendant du zoom ──
+// Dispatcher : émote ancrée au-dessus du token émetteur si présent sur la page
+// active (rendu Konva en coords monde → suit pan/zoom), sinon bulle de repli
+// dans le coin du canvas.
 function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
   if (_renderedReactions.has(key)) return;
   _renderedReactions.add(key);
+  // purge mémoire douce (évite la croissance infinie du Set sur longue session)
+  if (_renderedReactions.size > 400) _renderedReactions.clear();
 
-  // Injecter le CSS une seule fois
+  const e = tokenId ? _tokens[tokenId] : null;
+  if (e?.data && e.shape && e.data.pageId === _activePage?.id && _layers.ping && window.Konva) {
+    _spawnTokenEmote(e.data, emoteUrl, emoteName);
+  } else {
+    _spawnCornerEmote(emoteUrl, emoteName);
+  }
+}
+
+// Émote ancrée : pop-in élastique au-dessus du token, légère montée puis fondu.
+function _spawnTokenEmote(t, emoteUrl, emoteName) {
+  const K = window.Konva;
+  const dim = _tokenDims(t);
+  const cx = t.col * CELL + dim.w * CELL / 2;
+  const topY = t.row * CELL;
+  const D = CELL * 1.5, R = D / 2;
+  const cy = topY - R * 0.95;              // centre de la bulle, au-dessus du token
+
+  const group = new K.Group({ x: cx, y: cy, opacity: 0, scaleX: 0.2, scaleY: 0.2, listening: false });
+  // Pointeur vers le token (triangle vers le bas)
+  group.add(new K.Line({
+    points: [-R * 0.26, R * 0.82, R * 0.26, R * 0.82, 0, R * 1.32],
+    closed: true, fill: '#fff',
+    shadowColor: '#000', shadowBlur: R * 0.25, shadowOpacity: 0.4, shadowOffsetY: 2,
+  }));
+  // Cercle blanc + ombre
+  group.add(new K.Circle({
+    radius: R, fill: '#fff',
+    stroke: 'rgba(0,0,0,0.18)', strokeWidth: Math.max(1.5, R * 0.05),
+    shadowColor: '#000', shadowBlur: R * 0.35, shadowOpacity: 0.45, shadowOffsetY: 3,
+  }));
+  // Image rognée en cercle
+  const clip = new K.Group({ clipFunc: ctx => { ctx.arc(0, 0, R * 0.86, 0, Math.PI * 2, false); } });
+  group.add(clip);
+  _layers.ping.add(group);
+  _layers.ping.batchDraw();
+
+  const imgEl = new Image();
+  imgEl.onload = () => {
+    if (group.getStage() === null) return; // déjà détruit
+    const side = R * 1.78;
+    clip.add(new K.Image({ image: imgEl, width: side, height: side, x: -side / 2, y: -side / 2 }));
+    _layers.ping.batchDraw();
+  };
+  imgEl.onerror = () => {};
+  imgEl.src = emoteUrl;
+
+  // Animation : pop élastique → settle → maintien → montée + fondu
+  group.to({
+    scaleX: 1.12, scaleY: 1.12, opacity: 1, duration: 0.26, easing: K.Easings.BackEaseOut,
+    onFinish: () => group.to({
+      scaleX: 1, scaleY: 1, duration: 0.12,
+      onFinish: () => {
+        group._holdTimer = setTimeout(() => {
+          if (group.getStage() === null) return; // stage détruit (changement de page / sortie)
+          group.to({
+            y: cy - CELL * 0.9, opacity: 0, duration: 0.85, easing: K.Easings.EaseIn,
+            onFinish: () => { group.destroy(); _layers.ping?.batchDraw(); },
+          });
+        }, 1700);
+      },
+    }),
+  });
+}
+
+// Émote de repli (token absent de la page) : bulle qui monte dans le coin du canvas.
+function _spawnCornerEmote(emoteUrl, emoteName) {
   if (!document.getElementById('vtt-emote-anim-css')) {
     const s = document.createElement('style');
     s.id = 'vtt-emote-anim-css';
@@ -1755,7 +1825,7 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
       }
       .vtt-emote-bubble {
         position: absolute; bottom: 0; right: 0;
-        width: 104px; height: 104px; border-radius: 50%;
+        width: 96px; height: 96px; border-radius: 50%;
         background: #fff;
         box-shadow: 0 6px 22px rgba(0,0,0,0.5);
         overflow: hidden;
@@ -1763,15 +1833,13 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
         pointer-events: none;
       }
       .vtt-emote-bubble img {
-        width: 96px; height: 96px;
+        width: 88px; height: 88px;
         object-fit: cover; border-radius: 50%;
         position: absolute; top: 4px; left: 4px;
       }
     `;
     document.head.appendChild(s);
   }
-
-  // Créer ou réutiliser l'overlay (coin bas-droit du canvas, z-index au-dessus de la vignette)
   const wrap = document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
   let overlay = document.getElementById('vtt-emote-overlay');
@@ -1781,7 +1849,6 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
     overlay.style.cssText = 'position:absolute;bottom:18px;right:18px;width:0;height:0;pointer-events:none;z-index:20;overflow:visible';
     wrap.appendChild(overlay);
   }
-
   const bubble = document.createElement('div');
   bubble.className = 'vtt-emote-bubble';
   const img = document.createElement('img');
@@ -7500,6 +7567,12 @@ function _applyEmotes(escaped) {
 // Favoris émotes — stockés en localStorage
 const _getFavs = () => lsJson.get('vtt-emote-favs', []);
 const _setFavs = v => lsJson.set('vtt-emote-favs', v);
+const _getRecents = () => lsJson.get('vtt-emote-recents', []);
+function _pushRecent(name) {
+  const r = _getRecents().filter(n => n !== name);
+  r.unshift(name);
+  lsJson.set('vtt-emote-recents', r.slice(0, 8));
+}
 
 function _emoteGridHtml(list, favSet=new Set()) {
   if (!list.length) return '<div class="vtt-emote-empty-grid">Aucune émote trouvée</div>';
@@ -7524,21 +7597,33 @@ function _renderEmotePicker() {
     return;
   }
   const favSet = new Set(_getFavs());
+  const byName = new Map(_emotes.map(e => [e.name, e]));
+  const recentEmotes = _getRecents().map(n => byName.get(n)).filter(Boolean);
   const favEmotes = _emotes.filter(e => favSet.has(e.name));
+
+  const recentBlock = recentEmotes.length
+    ? `<div id="vtt-emote-recent-section">
+        <div class="vtt-emote-section-lbl">🕘 Récents</div>
+        <div class="vtt-emote-grid">${_emoteGridHtml(recentEmotes, favSet)}</div>
+      </div>`
+    : `<div id="vtt-emote-recent-section" data-empty="1" style="display:none"></div>`;
   const favBlock = favEmotes.length
     ? `<div id="vtt-emote-fav-section">
         <div class="vtt-emote-section-lbl gold">⭐ Favoris</div>
         <div class="vtt-emote-grid" id="vtt-emote-fav-grid">${_emoteGridHtml(favEmotes, favSet)}</div>
-      </div>
-      <div class="vtt-emote-section-lbl">Toutes</div>`
-    : `<div id="vtt-emote-fav-section" style="display:none"></div>`;
+      </div>`
+    : `<div id="vtt-emote-fav-section" data-empty="1" style="display:none"></div>`;
+  const allLbl = (recentEmotes.length || favEmotes.length)
+    ? `<div class="vtt-emote-section-lbl" id="vtt-emote-all-lbl">Toutes</div>` : '';
   el.innerHTML = `
     <div class="vtt-emote-picker-search">
       <input type="text" id="vtt-emote-search" placeholder="🔍 Rechercher…" autocomplete="off"
         data-vtt-fn="_vttFilterEmotes" data-vtt-on="input" data-vtt-args="$value">
     </div>
     <div class="vtt-emote-picker-body">
+      ${recentBlock}
       ${favBlock}
+      ${allLbl}
       <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes, favSet)}</div>
     </div>`;
   setTimeout(() => document.getElementById('vtt-emote-search')?.focus(), 40);
@@ -7549,8 +7634,13 @@ function _vttFilterEmotes(q) {
   const grid = document.getElementById('vtt-emote-grid'); if (!grid) return;
   const filtered = q.trim() ? _emotes.filter(e => e.name.includes(q.trim().toLowerCase())) : _emotes;
   grid.innerHTML = _emoteGridHtml(filtered, favSet);
+  const hide = !!q.trim();
+  const recentSection = document.getElementById('vtt-emote-recent-section');
   const favSection = document.getElementById('vtt-emote-fav-section');
-  if (favSection) favSection.style.display = q.trim() ? 'none' : '';
+  const allLbl = document.getElementById('vtt-emote-all-lbl');
+  if (recentSection && recentSection.dataset.empty !== '1') recentSection.style.display = hide ? 'none' : '';
+  if (favSection && favSection.dataset.empty !== '1') favSection.style.display = hide ? 'none' : '';
+  if (allLbl) allLbl.style.display = hide ? 'none' : '';
 }
 
 function _vttToggleFav(name) {
@@ -7601,19 +7691,23 @@ async function _vttPickEmote(name) {
   const em = _emotes.find(e => e.name === name); if (!em) return;
   // Le picker reste ouvert — l'utilisateur ferme manuellement
 
-  // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
-  const ts = Date.now();
-  const key = `${uid}_${ts}`;
+  _pushRecent(name);
 
-  // Affichage local immédiat
-  _showEmoteBubble(null, em.url, name, key);
-
-  // Propagation aux autres joueurs via Firestore
+  // Token émetteur : sélection courante, sinon le token possédé par le joueur
   let tokenId = _selected;
   if (!tokenId) {
     const own = Object.values(_tokens).find(e => e.data.ownerId === uid);
     tokenId = own?.data?.id ?? null;
   }
+
+  // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
+  const ts = Date.now();
+  const key = `${uid}_${ts}`;
+
+  // Affichage local immédiat (ancré au token émetteur si présent)
+  _showEmoteBubble(tokenId, em.url, name, key);
+
+  // Propagation aux autres joueurs via Firestore
   setDoc(_reactionRef(uid), {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: _activePage?.id ?? null,
