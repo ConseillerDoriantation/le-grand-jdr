@@ -114,6 +114,9 @@ const ITEM_STATS = [
   { key:'constitution',short:'Con', store:'co',  label:'Constitution' },
   { key:'charisme',    short:'Cha', store:'ch',  label:'Charisme' },
 ];
+// Map clé → entrée ITEM_STATS (restauré : utilisé par _buildTagGroups pour les
+// filtres « Stats ». Sa suppression cassait l'accès aux catégories arme/armure/bijou.)
+const ITEM_STAT_BY_KEY = Object.fromEntries(ITEM_STATS.map(s => [s.key, s]));
 function _parseLegacyStats(item = {}) {
   const out = { for:0, dex:0, in:0, sa:0, co:0, ch:0 };
   ['for','dex','in','sa','co','ch'].forEach(k => {
@@ -1266,7 +1269,8 @@ function _renderFactRowColored(label, value, color) {
 function _renderItemCard(item, tplKey, itemIdx) {
   const prix = parseFloat(item.prix) || 0;
   const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
-  const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+  const _dispoRaw = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+  const dispo = (_dispoRaw != null && _dispoRaw < 0) ? null : _dispoRaw; // <0 = illimité → null
   const epuise = dispo !== null && dispo === 0;
 
   const cat = _cats.find(c => c.id === item.categorieId);
@@ -2981,6 +2985,22 @@ function _buildFieldsHtml(tpl,item) {
           onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">
           + Ajouter un trait
         </button>
+      </div>`;
+    } else if(f.type==='dispo'){
+      // Quantité en stock + case « Illimité » (dispo = -1). Restauré : le
+      // renderer avait sauté lors du refactor, cassant l'option illimité.
+      const cur = item?.dispo;
+      const isInf = cur === undefined || cur === null || cur === '' || parseInt(cur) < 0;
+      const num = isInf ? '' : (parseInt(cur) || 0);
+      html+=`<div class="form-group"><label>${f.label}</label>
+        <div style="display:flex;align-items:center;gap:.6rem">
+          <input type="number" class="input-field" id="si-dispo" min="0" value="${num}" placeholder="Quantité en stock" style="flex:1" ${isInf?'disabled':''}>
+          <label style="display:flex;align-items:center;gap:.35rem;white-space:nowrap;cursor:pointer;font-size:.85rem">
+            <input type="checkbox" id="si-dispo-infini" ${isInf?'checked':''}
+              onchange="var d=document.getElementById('si-dispo');d.disabled=this.checked;if(!this.checked)d.focus()">
+            ♾️ Illimité
+          </label>
+        </div>
       </div>`;
     } else {
       if (f.type === 'autocomplete') {
