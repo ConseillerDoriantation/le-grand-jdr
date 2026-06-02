@@ -3110,17 +3110,19 @@ function _buildAttackOptions(t) {
   const b  = ld._beast || null;
   const options = [];
 
-  // ── Token convoqué (sentinelle) : utilise ses stats propres stockées au spawn ─
-  // Les combos Chance/Puissance hérités du sort sont propagés via les champs summon*
-  if (t.summonKind === 'sentinelle') {
+  // ── Token convoqué (sentinelle / invocation) : utilise ses stats propres
+  //    stockées au spawn (attackDice/toucher), pas le fallback "poings" (2d4).
+  //    Les combos Chance/Puissance hérités du sort sont propagés via summon*.
+  if (t.summonKind === 'sentinelle' || t.summonKind === 'invocation') {
+    const _isInvoc = t.summonKind === 'invocation';
     const sentinelMods = {
       // Réinjecte le combo Chance hérité pour que _vttRollAttack utilise le bon RC
       chance: (t.summonChanceRc && t.summonChanceRc < 20) ? { rc: t.summonChanceRc } : null,
     };
     options.push({
       id: 'summon_attack',
-      icon: '🪤',
-      label: 'Attaque sentinelle',
+      icon: _isInvoc ? '🐾' : '🪤',
+      label: _isInvoc ? "Attaque de l'invocation" : 'Attaque sentinelle',
       rawDice: t.attackDice || '1d4',
       dice:    t.attackDice || '1d4',
       portee:  t.range ?? 1,
