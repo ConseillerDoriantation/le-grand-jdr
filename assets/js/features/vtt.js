@@ -8729,9 +8729,13 @@ async function _vttShortRestUnvote() {
   const sr  = _session?.shortRest; if (!sr?.vote) return;
   const votes = { ...sr.vote.votes };
   delete votes[uid];
-  const newVote = Object.keys(votes).length ? { votes } : null;
-  await setDoc(_sesRef(), { shortRest: { ...sr, vote: newVote } }, { merge: true })
-    .catch(() => {});
+  // ⚠️ setDoc(..., {merge:true}) FUSIONNE les maps → il ne supprimerait jamais la
+  // clé retirée (le vote resterait collé). updateDoc avec un field-path REMPLACE
+  // la valeur à ce chemin → le retrait fonctionne réellement.
+  const patch = Object.keys(votes).length
+    ? { 'shortRest.vote': { votes } }
+    : { 'shortRest.vote': null };
+  await updateDoc(_sesRef(), patch).catch(() => {});
 }
 
 async function _vttShortRestCancel() {
