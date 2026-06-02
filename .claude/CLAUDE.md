@@ -1,242 +1,83 @@
-# CLAUDE.md - Guide projet optimise
+# CLAUDE.md — Le Grand JDR
 
-## Mission
-Tu travailles sur **Le Grand JDR**, une application web de gestion de campagne JDR pour plusieurs joueurs.
-Ton objectif est de produire des reponses **directement exploitables**, avec un maximum de signal et un minimum de bruit.
+App web de gestion de campagne JDR multi-joueurs. Réponses **directement exploitables**, signal max, bruit min.
 
-Tu dois privilegier :
-- la correction rapide et fiable
-- les modifications locales plutot que les refontes
-- la lisibilite pour des utilisateurs non techniques
-- la coherence avec l'existant
+## Stack & déploiement
+- Web statique **sans build**, HTML/CSS/JS en ES modules, données **Firebase Firestore**, hébergé sur **GitHub Pages**.
+- Doit rester déployable tel quel : pas de build, framework ou dépendance lourde sans demande explicite.
+- Issu d'un refactor monolithe → modulaire. Reste du legacy (`onclick` inline ; cible = `data-action` + délégation). Le fonctionnement prime sur la pureté archi.
+- Droits admin côté client (`STATE.isAdmin`) = **confort UI, jamais une sécurité**. La vraie protection = règles Firestore.
 
-## Contexte projet
-- Type : application web statique sans build obligatoire
-- Stack : HTML, CSS, JavaScript en ES modules
-- Donnees : Firebase Firestore
-- Hebergement : GitHub Pages
-- Philosophie : base artisanale, modulaire, simple a deployer
+## Carte du repo
+- `index.html` — entrée · `assets/js/app.js` — entrée JS · `assets/css/` — styles globaux + par domaine
+- `assets/js/config/` — Firebase · `assets/js/data/firestore.js` — **toute** la couche d'accès Firestore
+- `assets/js/core/` — état global + câblage · `assets/js/shared/` — helpers · `assets/js/features/` — métier (découplés)
+- `docs/` — `architecture.md`, `migration-plan.md`, `firestore-rules.md`, `security.md`, `window-globals-inventory.md`
 
-## Structure repo a connaitre
-- `index.html` : point d'entree principal
-- `assets/css/` : styles globaux et styles par domaine
-- `assets/js/app.js` : point d'entree JavaScript
-- `assets/js/config/` : configuration Firebase
-- `assets/js/core/` : auth, init, navigation, layout, state
-- `assets/js/data/` : acces Firestore
-- `assets/js/shared/` : helpers reutilisables
-- `assets/js/features/` : modules metier par domaine
-- `docs/architecture.md` : architecture cible
-- `docs/migration-plan.md` : priorites de migration
-- `docs/firestore-rules.md` : contraintes de securite Firestore
+## Index — où chercher directement (ne pas re-explorer)
 
-## Realite technique du projet
-- Le projet vient d'un refactor d'une page monolithique vers une structure modulaire.
-- Le fonctionnement actuel est prioritaire sur la purete architecturale.
-- Il reste encore du legacy, notamment des `onclick` inline dans certaines features.
-- La prochaine evolution saine est la migration vers `data-action` + delegation d'evenements.
-- Les droits admin cote client ne sont pas une securite suffisante : ne jamais presenter une logique client comme une vraie protection.
+### core/ (câblage)
+`state.js` source unique de vérité (`STATE`, `setPage`) · `navigation.js` router + `FEATURE_MAP` (page→import lazy) + délégation d'événements · `actions.js` registry `data-action` · `auth.js` connexion · `adventure.js` sélection d'aventure (démarre présence/session) · `init.js` bootstrap · `layout.js` rendu app/auth/aventure.
 
-## Regles absolues
-- Lire l'existant avant de proposer une modification.
-- Modifier le minimum necessaire pour repondre a la demande.
-- Reutiliser les helpers, patterns et conventions deja presents.
-- Ne pas inventer une architecture "enterprise" pour un besoin simple.
-- Ne pas rewriter un fichier entier si un patch local suffit.
-- Ne pas casser le mode de deploiement statique.
-- Ne pas introduire de build, framework ou dependance lourde sans demande explicite.
-- Ne pas deplacer le projet vers un paradigme completement different sans validation claire.
-- Les refactors de reduction de code sont souhaites, mais seulement s'ils sont prudents, locaux et sans risque de regression inutile.
+### Page → module feature (lazy via `FEATURE_MAP` dans navigation.js)
+La plupart : id = fichier. Exceptions : `recettes`→`recipes.js`, `bestiaire`→`bestiary.js`, `map`→`map.js` (shim vers `features/map/`). Importé une fois puis caché par le navigateur.
 
-## Priorites produit
-1. Clarifier l'usage pour les joueurs et admins
-2. Preserver la rapidite et la simplicite d'execution
-3. Maintenir une interface dense mais lisible
-4. Garder le code maintenable sans sur-abstraction
-5. Preserver desktop en priorite sans casser mobile
+### Feature → fichier (`assets/js/features/`)
+Personnages `characters.js` (+ sous-dossier `characters/`) · Boutique `shop.js` · PNJ & affinités `npcs.js` · Trame/narration `story.js` (écriture) + `histoire.js` (éditeur mission, lecture via `shared/histoire-ctx.js`) · Bastion `bastion.js` · Monde/règles `world.js` · Hauts-faits `achievements.js` · Collection `collection.js` · Roster `players.js` · Recettes/craft `recipes.js` · Bestiaire `bestiary.js` · Compte `account.js` · Carte `map/` · Aventures (admin) `aventures.js` · VTT `vtt.js` + éclairage/murs/fog `vtt-fog.js` · Quêtes `quests.js` · Agenda/dispos `agenda.js` · Artisanat `artisan.js` · Dashboard/accueil `pages.js` · Recherche Ctrl+K `command-palette.js`.
 
-## Philosophie de code
-- Preferer des fonctions courtes et explicites.
-- Eviter la duplication si un module existant couvre deja le besoin.
-- Garder des noms concrets, metier et faciles a suivre.
-- Respecter le style du fichier modifie.
-- Conserver des imports minimaux.
-- Introduire une nouvelle abstraction seulement si elle supprime une vraie complexite recurrente.
-- Quand un refactor est demande, chercher a reduire la taille et la repetition du code sans modifier le comportement observable.
-- Preferer l'extraction de helpers simples, la mutualisation locale et la suppression de duplication plutot qu'une reorganisation lourde.
+### Sous-modules
+`features/characters/` : `combat.js`, `equipment.js`, `inventory.js`, `spells.js` + `spells-calc.js` (calcul pur), `forms.js`, `tabs.js`, `inline-edit.js`, `quick-view.js`, `data.js`, `export.js`.
+`features/map/` : `index.js` (expose `initMap`), `map.controller.js` (orchestrateur), `map.state.js` (pub/sub), `render/` (markers, fog, viewport), `ui/` (formulaires, sidepanel, settings), `data/*.repo.js` (accès Firestore par entité).
 
-## Regles UI / UX
-- L'interface doit rester lisible immediatement.
-- La densite visuelle est acceptable si la hierarchie reste nette.
-- Les actions principales doivent etre evidentes.
-- Les cartes, panneaux, modales et fiches doivent garder une structure stable.
-- Les couleurs servent d'abord a hierarchiser l'information.
-- Ne pas ajouter des effets visuels gratuits qui degradent la clarte.
-- Sur un ecran charge, simplifier la lecture avant d'ajouter des elements.
+### Helpers partagés (`assets/js/shared/`) — réutiliser avant de recoder
+HTML/chaînes `html.js` · Toast `notifications.js` (`showNotif`) · Modale `modal.js` · CRUD récurrent `crud.js` · Rendu de liste `list-renderer.js` · Abonnements `realtime.js` · Constantes métier `enums.js` · Or des persos `economy.js` · Stats perso `char-stats.js` · Contexte fiche courante `char-session.js` · Inventaire (normalisation "1 entrée=1 unité") `inventory-utils.js` · Équipement `equipment-utils.js` · Éditeurs contenteditable `rich-text.js` · Image `image-upload.js`/`image-crop.js`/`upload-cloudinary.js` · Sorts `spell-matrices.js`/`spell-runes.js`/`spell-action-card.js` · Règles `conditions.js`/`damage-types.js`/`weapon-formats.js` · Présence `presence.js` · Thème `theme.js` · localStorage `local-storage.js` · Sortable `sortable-helper.js` · Délégation scopée `scoped-actions.js`.
 
-## Workflow attendu
-Quand on te demande une modification :
-1. Identifier la zone du repo concernee
-2. Lire les fichiers lies avant de conclure
-3. Verifier s'il existe deja un helper, module ou pattern reutilisable
-4. Choisir l'option la plus simple compatible avec l'existant
-5. Produire une reponse courte, orientee action
-6. Signaler les risques reels et les tests utiles
+## Câblage UI → code (4 systèmes coexistants — savoir lequel s'applique)
+1. **Global (cible propre)** : HTML `data-action="x"` / `data-change` / `data-input` → la feature fait `registerActions({ x: (btn, event) => … })` ; dispatch dans `navigation.js`.
+2. **Scopé par préfixe** (shop, bestiary, players) : `bindScopedActions('sh', handlers)` + HTML `data-sh-action="open"` (option `data-sh-on="input"`). Voir `shared/scoped-actions.js`.
+3. **VTT** : dispatcher propre `data-vtt-fn` + résolution `window[...]` + parsing d'args, **non mutualisé** (volontaire, dans `vtt.js`).
+4. **Legacy** : `onclick` inline + `window.*` (~1460 occurrences, en réduction — suivi `docs/window-globals-inventory.md`). À migrer vers (1) ou (2) au fil de l'eau, jamais en masse.
 
-## Quand la demande concerne un refactor
-Priorite absolue : reduire le code sans rien casser.
+## Méthode de travail
+1. Lire l'existant et les fichiers liés avant de conclure.
+2. Réutiliser helpers / patterns / conventions déjà présents (ne pas re-créer).
+3. Choisir l'option **la plus simple compatible avec l'existant** : patch local, pas refonte ; pas d'archi "enterprise" ni de sur-abstraction pour un besoin simple.
+4. Respecter le style du fichier modifié, imports minimaux.
+5. Signaler les **vrais** risques et les tests manuels utiles.
 
-Tu dois :
-1. Identifier ce qui est duplique, verbeux ou evitable
-2. Preserver strictement le comportement fonctionnel et visuel
-3. Refactorer par petites unites faciles a relire
-4. Eviter les changements melanges avec des evolutions de comportement
-5. Donner les points de verification les plus exposes a la regression
+En cas d'hésitation : robuste > élégant, patch net > grande réorganisation, une seule recommandation > trois pistes.
 
-Tu dois privilegier :
-- les extractions de helpers locaux
-- la factorisation de logique repetitive
-- la clarification des conditions et flux trop verbeux
-- la suppression de branches mortes evidentes si elle est sure
+## Refactor (quand demandé)
+But : réduire taille/duplication/verbosité **sans changer le comportement observable**.
+- Privilégier : extraction de helpers locaux, factorisation de logique répétée, clarification des flux verbeux, suppression de branches mortes sûres.
+- Éviter : refactors transverses durs à vérifier, renommages massifs sans gain, mélange structure+style+comportement, optimisation "maligne" fragile.
+- Ne jamais sacrifier la fiabilité pour alléger.
 
-Tu dois eviter :
-- les refactors transverses difficiles a verifier
-- les renommages massifs sans gain net
-- les changements simultanes de structure, style et comportement
-- toute optimisation "maligne" qui rend le code plus fragile
+## QUOTA Firestore — priorité absolue (lectures/écritures facturées)
 
-## Pour les grosses features
-Tu dois raisonner ainsi :
-1. Quelle structure existe deja ?
-2. Qu'est-ce qui bloque vraiment aujourd'hui ?
-3. Quelle evolution est compatible avec l'architecture actuelle ?
-4. Quel decoupage en petites etapes limite le risque ?
-5. Quels tests manuels valident le resultat ?
+**Toujours passer par `assets/js/data/firestore.js`.** Ne jamais importer `config/firebase.js` dans une feature pour lire/écrire. API : `loadCollection`, `getDocData`, `subscribeCollection`, `saveDoc`, `addToCol`, `updateInCol`, `deleteFromCol`, ou `shared/realtime.js` (`watch`/`watchDoc`/`watchPageCollection`/`watchPageDoc`). Seules exceptions assumées : `vtt.js` / `vtt-fog.js` (temps réel tactique).
 
-## Pour les demandes UI / UX
-Tu dois optimiser :
-- la hierarchie visuelle
-- la lisibilite immediate
-- le regroupement logique des informations
-- la reduction du fouillis
-- la clarte des actions primaires
+Cache déjà en place (ne pas réinventer) :
+1. **Session-live** : un `onSnapshot` unique par collection/doc vivant toute la session → page qui le consomme = **0 lecture en plus**. Couvre `story`, `achievements`, `quests`, `characters`, `collection` + lazy (`shop`, `shopCategories`, `npcs`, `organizations`, `players`) + docs (`bastion/main`, `world/main`, `agenda_session/next`…).
+2. **Cache TTL mémoire** (`_CACHE_TTL`/`_DOC_CACHE_TTL`) pour le page-scoped.
+3. **Cache IndexedDB Firestore** à froid. + coalescing in-flight + patch chirurgical du cache après écriture.
 
-Tu ne dois pas :
-- tout redesign sans necessite
-- casser l'identite actuelle du projet
-- sacrifier la rapidite pour une mise en scene purement decorative
+Réflexes avant tout accès :
+- S'abonner via `watchPageCollection`/`watchPageDoc` : si session-live, zéro nouveau listener.
+- Écriture pendant drag/slider/saisie → commit au `dragend`/`change`/blur ou debounce, **jamais par frame/keystroke** (réf. tokens VTT).
+- Timer/heartbeat/autosave → **suspendre quand `document.hidden`** (réf. `shared/presence.js`). La présence expire à 120 s côté lecture.
+- Collection abonnée = bornée ; éphémères (pings, reactions) keyées par uid (1 doc/joueur).
+- Filtrer côté client sur le cache live (`loadCollectionWhere`) plutôt que multiplier les `where` serveur.
+- Une modif de données/permissions peut nécessiter une MAJ des règles Firestore → le rappeler.
 
-## Pour les demandes de debug
-Priorise :
-1. reproduction probable
-2. lecture du flux de donnees
-3. verification des listeners / imports / exports
-4. verification des effets de bord DOM
-5. verification des acces Firestore et permissions
+## UI / UX
+- Lisible immédiatement ; densité OK si la hiérarchie reste nette ; actions principales évidentes.
+- Cartes/panneaux/modales/fiches : structure stable. Couleurs = hiérarchiser l'info, pas décorer.
+- Sur écran chargé : simplifier la lecture avant d'ajouter. Pas de redesign ni d'effets gratuits qui nuisent à la clarté ou à la rapidité ; ne pas casser l'identité du projet.
+- Desktop prioritaire sans casser mobile.
 
-## Pour les demandes Firestore
-- Distinguer clairement ce qui releve du client et ce qui releve des regles serveur.
-- Si une "securite" depend de `STATE.isAdmin` ou d'un flag cote client, la presenter comme du confort UI, pas comme une protection.
-- Quand tu proposes une modification de donnees ou de permissions, rappeler si une mise a jour des regles Firestore est necessaire.
+## Debug
+Repro probable → flux de données → listeners/imports/exports → effets de bord DOM → accès Firestore & permissions.
 
-## QUOTA Firestore — priorite absolue (lectures/ecritures facturees)
-
-### Architecture d'acces deja en place (ne pas reinventer)
-Toute la couche est dans `assets/js/data/firestore.js`. Avant d'ajouter un acces Firestore,
-TOUJOURS passer par cette couche. Elle fournit trois niveaux de cache :
-1. **Session-live** (`onSnapshot` unique par collection/doc, vivant toute la session) :
-   collections lues par 3+ pages (`story`, `achievements`, `quests`, `characters`,
-   `collection`) + lazy (`shop`, `shopCategories`, `npcs`, `organizations`, `players`)
-   + docs (`bastion/main`, `world/main`, `agenda_session/next`, etc.).
-   Une page qui consomme un listener session = **0 lecture supplementaire**.
-2. **Cache TTL memoire** (`_CACHE_TTL` / `_DOC_CACHE_TTL`) pour les collections page-scoped.
-3. **Cache IndexedDB de Firestore** (servi a getDocs/onSnapshot a froid).
-Plus : **coalescing in-flight** (2 loads simultanes = 1 fetch) et **patch chirurgical
-du cache** apres ecriture (pas d'invalidation totale).
-
-### Regles d'or quota
-- Ne JAMAIS importer `config/firebase.js` directement dans une feature pour lire/ecrire.
-  Utiliser `loadCollection`, `getDocData`, `subscribeCollection`, `saveDoc`, `addToCol`,
-  `updateInCol`, `deleteFromCol`, ou `shared/realtime.js` (`watch`/`watchDoc`).
-  Exceptions historiques assumees : `vtt.js` et `vtt-fog.js` (temps reel tactique).
-- Pour s'abonner, preferer `watchPageCollection` / `watchPageDoc` (`shared/realtime.js`) :
-  si la collection est deja session-live, ZERO nouveau listener.
-- Une ecriture pendant un drag/slider/saisie = la commit au `dragend`/`change`/blur ou
-  via debounce, JAMAIS a chaque frame/keystroke (cf. tokens VTT : commit au `dragend`).
-- Les ecritures periodiques (heartbeats, autosave) doivent se SUSPENDRE quand
-  `document.hidden` (onglet en arriere-plan). Pattern de reference : `shared/presence.js`
-  et le heartbeat present de `vtt.js`. La presence expire deja a 120 s cote lecture.
-- Une collection lue entierement par un listener doit rester bornee. Les collections
-  ephemeres (pings, reactions) sont keyees par uid (1 doc/joueur) pour ne pas accumuler.
-- Filtrer cote client sur le cache live (`loadCollectionWhere` le fait) plutot que de
-  multiplier les `where` serveur si la collection est deja chargee.
-
-### Reflexe avant tout patch Firestore
-1. Cette donnee est-elle deja servie par un listener session-live ou un cache TTL ?
-2. Mon acces passe-t-il par `data/firestore.js` / `shared/realtime.js` ?
-3. Mon ecriture peut-elle se declencher en boucle (drag, timer, frappe) ? Si oui, throttler.
-4. Un timer/heartbeat continue-t-il a ecrire onglet masque ? Si oui, le suspendre.
-5. La collection abonnee peut-elle grossir sans limite ? Si oui, borner ou keyer par uid.
-
-## Sortie attendue
-Sauf demande contraire, repondre dans cet ordre :
-
-```text
-Resume
-- objectif en une ou deux lignes
-
-Plan
-- approche retenue
-
-Fichiers
-- fichiers a lire / modifier
-
-Patch
-- changements precis et localises
-
-Tests
-- verifications utiles
-
-Risques
-- seulement les vrais points de vigilance
-```
-
-## Style de reponse
-- Aller droit au but
-- Eviter le blabla
-- Donner une recommandation principale, pas trois directions equivalentes
-- Mentionner les hypotheses seulement si elles ont un impact
-- Si plusieurs options existent, choisir celle qui se maintient le mieux
-
-## Ce qu'il faut eviter
-- les refactors massifs non demandes
-- les longues dissertations sans patch concret
-- les solutions lourdes pour un petit probleme
-- les pseudo-bonnes pratiques deconnectees du repo
-- la duplication de logique deja presente
-- l'oubli des impacts visuels ou des cas limites evidents
-
-## Points de vigilance propres au repo
-- `app.js` est le point d'entree central
-- la navigation et l'etat global passent par `assets/js/core/`
-- les features doivent rester decouplees autant que possible
-- la migration hors `onclick` inline n'est pas terminee
-- le projet doit rester deployable tel quel sur GitHub Pages
-
-## Prompt de travail recommande
-Tu peux suivre mentalement ce canevas :
-
-```text
-Lis les fichiers lies a la demande.
-Explique tres brievement le probleme reel.
-Propose la solution la plus simple compatible avec l'existant.
-Fais des patchs localises.
-Liste les tests manuels utiles.
-Mentionne uniquement les risques concrets.
-```
-
-## Memo final
-Si tu hesites entre une solution elegante et une solution robuste, choisis la solution robuste.
-Si tu hesites entre une grosse reorganisation et un patch net, choisis le patch net.
-Si tu hesites entre plusieurs pistes, recommande-en une seule.
-Si la demande est un refactor pour alleger le code, reduis d'abord la duplication et la verbosite, jamais la fiabilite.
+## Format de réponse (sauf demande contraire)
+Aller droit au but, pas de blabla. Structure : **Résumé** (objectif 1-2 lignes) · **Plan** · **Fichiers** (lus/modifiés) · **Patch** (localisé) · **Tests** (manuels utiles) · **Risques** (réels uniquement).
