@@ -1343,15 +1343,19 @@ function _initSortable() {
     delay: 100,
     onEnd: async () => {
       const ids = [...list.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId);
+      // Diff avant mutation : n'écrire que les fiches dont l'ordre change.
+      const writes = [];
       ids.forEach((id, idx) => {
         const item = STORE.items.find(i => i.id === id);
-        if (item) item.ordre = idx + 1;
+        if (!item) return;
+        const ordre = idx + 1;
+        if (Number(item.ordre) !== ordre && item.presentationId) {
+          writes.push(updateInCol('players', item.presentationId, { ordre }));
+        }
+        item.ordre = ordre;
       });
       _setLocalOrdre(ids);
-      await Promise.all(ids.map((id, idx) => {
-        const item = STORE.items.find(i => i.id === id);
-        if (item?.presentationId) return updateInCol('players', item.presentationId, { ordre: idx + 1 });
-      }).filter(Boolean));
+      await Promise.all(writes);
     },
   });
 }

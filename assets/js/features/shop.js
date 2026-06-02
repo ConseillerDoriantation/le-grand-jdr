@@ -2152,7 +2152,11 @@ function _mountSortables() {
         const [moved] = _cats.splice(evt.oldIndex, 1);
         _cats.splice(evt.newIndex, 0, moved);
         try {
-          await Promise.all(_cats.map((cat, i) => updateInCol('shopCategories', cat.id, { ordre: i })));
+          // N'écrire que les catégories dont l'ordre change réellement
+          // (déplacer 1 item ≈ 2 writes au lieu de N).
+          const writes = [];
+          _cats.forEach((cat, i) => { if (Number(cat.ordre) !== i) writes.push(updateInCol('shopCategories', cat.id, { ordre: i })); });
+          await Promise.all(writes);
           _cats.forEach((cat, i) => { cat.ordre = i; });
         } catch (err) { notifySaveError(err); renderShop(); }
       },
@@ -2172,7 +2176,10 @@ function _mountSortables() {
         const [moved] = visible.splice(evt.oldIndex, 1);
         visible.splice(evt.newIndex, 0, moved);
         try {
-          await Promise.all(visible.map((item, i) => updateInCol('shop', item.id, { ordre: i })));
+          // Idem : seuls les items réellement décalés sont réécrits.
+          const writes = [];
+          visible.forEach((item, i) => { if (Number(item.ordre) !== i) writes.push(updateInCol('shop', item.id, { ordre: i })); });
+          await Promise.all(writes);
           visible.forEach((item, i) => { item.ordre = i; });
         } catch (err) { notifySaveError(err); renderShop(); }
       },
