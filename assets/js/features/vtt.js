@@ -15,7 +15,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../shared/equipment-utils.js';
