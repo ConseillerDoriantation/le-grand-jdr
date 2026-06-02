@@ -6745,10 +6745,13 @@ function _renderPageTabs() {
   const uid  = STATE.user?.uid;
   const myTok = uid ? Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data : null;
   const canInvoke = !!(myTok && _activePage && myTok.pageId !== _activePage.id);
-  const invokeBtn = canInvoke
+  const onActivePage = !!(myTok && _activePage && myTok.pageId === _activePage.id);
+  const actionBtn = canInvoke
     ? `<button class="vtt-btn-sm" data-vtt-fn="_vttInvokeMyToken" title="Placer ton token sur cette carte">🧑 Invoquer mon token</button>`
+    : onActivePage
+    ? `<button class="vtt-btn-sm" data-vtt-fn="_vttRetireMyToken" title="Retirer ton token de la carte">📦 Ranger mon token</button>`
     : '';
-  el.innerHTML = `<span class="vtt-page-current-label">📍 ${_esc(name)}</span>${invokeBtn}`;
+  el.innerHTML = `<span class="vtt-page-current-label">📍 ${_esc(name)}</span>${actionBtn}`;
 }
 
 async function _switchPage(pageId) {
@@ -9122,6 +9125,16 @@ async function _vttInvokeMyToken() {
   const cC = Math.floor(_activePage.cols/2), cR = Math.floor(_activePage.rows/2);
   await updateDoc(_tokRef(tok.id),{pageId:_activePage.id,col:cC,row:cR,visible:true})
     .catch(err => { console.error('[vtt] invocation:', err); showNotif('Erreur invocation','error'); });
+}
+// Le joueur range son propre token (le renvoie en réserve, sans le supprimer)
+async function _vttRetireMyToken() {
+  const uid = STATE.user?.uid; if (!uid) return;
+  const tok = Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data;
+  if (!tok) { showNotif('Aucun token associé à ton personnage','error'); return; }
+  if (!tok.pageId) return; // déjà rangé
+  await updateDoc(_tokRef(tok.id),{pageId:null,visible:false})
+    .catch(err => { console.error('[vtt] rangement:', err); showNotif('Erreur rangement','error'); });
+  if (_selected===tok.id) _deselect();
 }
 // Déplacer le token vers une autre page
 async function _vttMoveTokenToPage(tokenId,pageId) {
@@ -13157,6 +13170,7 @@ const VTT_ACTIONS = {
   _vttRenderDelegateModalBody,
   _vttResetTurn,
   _vttResolveArg,
+  _vttRetireMyToken,
   _vttRetireToken,
   _vttRollAttack,
   _vttRollSkill,
