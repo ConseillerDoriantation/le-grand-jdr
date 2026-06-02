@@ -2893,6 +2893,38 @@ input[type=number].input-field::-webkit-outer-spin-button {
   flex-direction: column;
   min-width: 0;
 }
+
+/* ── Section Invocation (éditeur de sort) ───────────────────────────── */
+.cs-inv-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .4rem .5rem;
+}
+.cs-inv-field { display: flex; flex-direction: column; gap: .15rem; }
+.cs-inv-field > span { font-size: .68rem; color: var(--text-muted); font-weight: 600; }
+.cs-inv-field > input { width: 100%; box-sizing: border-box; }
+.cs-inv-img-row { display: flex; align-items: center; gap: .7rem; }
+.cs-inv-img-preview {
+  width: 52px; height: 52px; flex-shrink: 0;
+  border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  display: flex; align-items: center; justify-content: center; font-size: 1.4rem;
+}
+.cs-inv-img-preview img { width: 100%; height: 100%; object-fit: cover; }
+.cs-inv-img-actions { display: flex; flex-direction: column; gap: .35rem; }
+.cs-inv-actions { display: flex; flex-direction: column; gap: .3rem; }
+.cs-inv-act {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .3rem .5rem; border-radius: 7px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+}
+.cs-inv-act-name { flex: 1; min-width: 0; font-size: .76rem; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-inv-act-runes { font-size: .62rem; color: var(--text-dim);
+  background: rgba(255,255,255,.05); border-radius: 999px; padding: .08rem .4rem; }
+.cs-inv-act-runes--empty { font-style: italic; }
+.cs-inv-act-del { background: none; border: none; cursor: pointer; color: var(--text-dim);
+  font-size: .8rem; padding: .1rem .25rem; border-radius: 4px; }
+.cs-inv-act-del:hover { color: #ff6b6b; background: rgba(255,107,107,.12); }
+.cs-inv-act-empty { font-size: .74rem; color: var(--text-dim); font-style: italic; padding: .2rem 0; }
 .cs-spell-grid-col--right > * { /* densité un peu plus serrée à droite */
   margin-bottom: 0.5rem;
 }

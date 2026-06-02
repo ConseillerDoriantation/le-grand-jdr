@@ -10,7 +10,8 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
-import { setSpellCaches, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
+import { pickImageFile, uploadJpeg } from '../../shared/image-upload.js';
+import { setSpellCaches, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -23,6 +24,8 @@ let _sortAllowedNoyauIds = null;
 let _sortTypesEdit = new Set(['utilitaire']);
 let _sortActionEdit = null;
 let _deplModeEdit = null;
+let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
+let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
 let _sortIconPickerOutsideBound = false;
 
 export function sortDragStart(e, idx) {
@@ -851,9 +854,14 @@ export async function openSortModal(idx, s) {
   _sortTypesEdit  = new Set(typesInit);
   _sortActionEdit = s?.actionOverride || null;
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
+  _invImageEdit   = s?.invocation?.image || '';
+  _invActionsEdit = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.map(a => ({ ...a })) : [];
 
   const hasEnchant  = runesSrc.includes('Enchantement');
   const hasProt     = runesSrc.includes('Protection');
+  const hasInvoc    = runesSrc.includes('Invocation') && !runesSrc.includes('Affliction') && !hasEnchant;
+  const ivStats     = s?.invocation?.stats || {};                  // overrides sauvegardés
+  const ivDerived   = _calcInvocationStats({ runes: runesSrc });   // valeurs dérivées (placeholders)
 
   // Le rendu réel des runes est fait par _renderRunesSection (module-level),
   // appelé au mount et après chaque incrément/décrément pour rester synchro.
@@ -1208,6 +1216,49 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
+    <!-- Invocation (rune Invocation seule) — stats éditables + image + actions -->
+    <div id="s-invocation-section" style="${hasInvoc?'':'display:none'}">
+      <div class="form-group">
+        <label>🐾 Invocation — créature</label>
+        <div style="font-size:.72rem;color:var(--text-dim);padding:0 .1rem .4rem">
+          Stats par défaut dérivées des runes (laisse vide = auto). Puissance→+dé · Chance→toucher · Protection→PV · Amplification→déplacement · Durée→durée.
+        </div>
+        <div class="cs-inv-grid">
+          <label class="cs-inv-field"><span>⚔️ Attaque</span>
+            <input class="input-field" id="s-inv-attaque" value="${_esc(ivStats.attaque||'')}" placeholder="${_esc(ivDerived.attaque)}"></label>
+          <label class="cs-inv-field"><span>🎯 Toucher</span>
+            <input class="input-field" type="number" id="s-inv-toucher" value="${ivStats.toucher??''}" placeholder="${ivDerived.toucher}"></label>
+          <label class="cs-inv-field"><span>❤️ PV</span>
+            <input class="input-field" type="number" id="s-inv-pv" value="${ivStats.pv??''}" placeholder="${ivDerived.pv}"></label>
+          <label class="cs-inv-field"><span>🛡️ CA</span>
+            <input class="input-field" type="number" id="s-inv-ca" value="${ivStats.ca??''}" placeholder="${ivDerived.ca}"></label>
+          <label class="cs-inv-field"><span>👢 Déplacement</span>
+            <input class="input-field" type="number" id="s-inv-deplacement" value="${ivStats.deplacement??''}" placeholder="${ivDerived.deplacement}"></label>
+          <label class="cs-inv-field"><span>⏱️ Durée</span>
+            <input class="input-field" type="number" id="s-inv-duree" value="${ivStats.duree??''}" placeholder="${ivDerived.duree}"></label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>🖼️ Image (token VTT)</label>
+        <div class="cs-inv-img-row">
+          <div id="s-inv-img-preview" class="cs-inv-img-preview">
+            ${_invImageEdit ? `<img src="${_invImageEdit}" alt="">` : '<span>🐾</span>'}
+          </div>
+          <div class="cs-inv-img-actions">
+            <button type="button" class="btn btn-outline btn-sm" data-action="_invPickImage">⬆ Choisir une image</button>
+            ${_invImageEdit ? `<button type="button" class="btn btn-outline btn-sm" data-action="_invClearImage">✕ Retirer</button>` : ''}
+          </div>
+        </div>
+        <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
+      </div>
+
+      <div class="form-group">
+        <label>🎬 Actions de l'invocation</label>
+        <div id="s-inv-actions-list" class="cs-inv-actions">${_renderInvActionsList()}</div>
+      </div>
+    </div>
+
     </div><!-- /grid-col--left -->
 
     <div class="cs-spell-grid-col cs-spell-grid-col--right">
@@ -1399,12 +1450,93 @@ function _refreshConditionalSections() {
   // de l'affliction, pas un dégât direct. Le mode Déplacement les supprime aussi.
   if (dSec) dSec.style.display = (isOffensive && !hasAffliction && !isDepl) ? '' : 'none';
   if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
+  // Invocation générique : rune Invocation seule (hors combos Sentinelle/Arme invoquée)
+  const hasInvoc = (counts.Invocation || 0) > 0 && !(counts.Affliction > 0) && !(counts.Enchantement > 0);
+  const iSec = document.getElementById('s-invocation-section');
+  if (iSec) iSec.style.display = hasInvoc ? '' : 'none';
+  if (hasInvoc) _refreshInvocationDerived();
 }
 
 function _toggleSortType(type) {
   if (_sortTypesEdit.has(type)) _sortTypesEdit.delete(type);
   else _sortTypesEdit.add(type);
   _applyTypeChange();
+}
+
+// ── Invocation : helpers d'édition (étape B) ──────────────────────────────────
+function _renderInvActionsList() {
+  const acts = _invActionsEdit || [];
+  const items = acts.map((a, i) => `
+    <div class="cs-inv-act">
+      <span class="cs-inv-act-name">🎬 ${_esc(a.nom || 'Action')}</span>
+      ${Array.isArray(a.runes) && a.runes.length ? `<span class="cs-inv-act-runes">${a.runes.length} rune${a.runes.length>1?'s':''}</span>` : '<span class="cs-inv-act-runes cs-inv-act-runes--empty">runes à venir</span>'}
+      <button type="button" class="cs-inv-act-del" data-action="_invDeleteAction" data-idx="${i}" title="Supprimer">✕</button>
+    </div>`).join('');
+  return `${items || '<div class="cs-inv-act-empty">Aucune action — l\'invocation pourra en recevoir.</div>'}
+    <button type="button" class="btn btn-outline btn-sm" data-action="_invAddAction" style="margin-top:.4rem">＋ Ajouter une action</button>`;
+}
+function _refreshInvActionsList() {
+  const el = document.getElementById('s-inv-actions-list');
+  if (el) el.innerHTML = _renderInvActionsList();
+}
+function _invAddAction() {
+  const nom = (prompt('Nom de l\'action :', 'Attaque') || '').trim();
+  if (!nom) return;
+  _invActionsEdit.push({ id: 'ia' + Date.now(), nom, runes: [] });
+  _refreshInvActionsList();
+  _updateSortPreview();
+}
+function _invDeleteAction(idx) {
+  idx = parseInt(idx);
+  if (idx >= 0) _invActionsEdit.splice(idx, 1);
+  _refreshInvActionsList();
+  _updateSortPreview();
+}
+function _refreshInvImagePreview() {
+  const pv = document.getElementById('s-inv-img-preview');
+  if (pv) pv.innerHTML = _invImageEdit ? `<img src="${_invImageEdit}" alt="">` : '<span>🐾</span>';
+  const act = document.querySelector('.cs-inv-img-actions');
+  if (act) act.innerHTML = `<button type="button" class="btn btn-outline btn-sm" data-action="_invPickImage">⬆ Choisir une image</button>${_invImageEdit ? `<button type="button" class="btn btn-outline btn-sm" data-action="_invClearImage">✕ Retirer</button>` : ''}`;
+}
+function _invPickImage() {
+  pickImageFile({ onImage: async ({ file }) => {
+    try {
+      const b64 = await uploadJpeg(file, { max: 420, quality: 0.8 });
+      _invImageEdit = b64;
+      const hid = document.getElementById('s-inv-image'); if (hid) hid.value = b64;
+      _refreshInvImagePreview();
+      _updateSortPreview();
+    } catch (e) { notifySaveError(e); }
+  }});
+}
+function _invClearImage() {
+  _invImageEdit = '';
+  const hid = document.getElementById('s-inv-image'); if (hid) hid.value = '';
+  _refreshInvImagePreview();
+  _updateSortPreview();
+}
+// Met à jour les placeholders (valeurs dérivées) selon les runes courantes.
+function _refreshInvocationDerived() {
+  const runes = [];
+  Object.entries(_runeCountsEdit || {}).forEach(([nom, cnt]) => { for (let i = 0; i < cnt; i++) runes.push(nom); });
+  const d = _calcInvocationStats({ runes });
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.placeholder = String(val); };
+  set('s-inv-attaque', d.attaque); set('s-inv-toucher', d.toucher); set('s-inv-pv', d.pv);
+  set('s-inv-ca', d.ca); set('s-inv-deplacement', d.deplacement); set('s-inv-duree', d.duree);
+}
+// Reconstruit l'objet invocation depuis le DOM (null si pas de rune Invocation).
+function _buildInvocationFromDOM() {
+  if (!((_runeCountsEdit?.Invocation || 0) > 0)) return null;
+  const v   = id => { const x = (document.getElementById(id)?.value ?? '').trim(); return x === '' ? null : x; };
+  const num = id => { const x = v(id); if (x == null) return null; const n = parseInt(x); return Number.isFinite(n) ? n : null; };
+  return {
+    stats: {
+      attaque: v('s-inv-attaque'), toucher: num('s-inv-toucher'), pv: num('s-inv-pv'),
+      ca: num('s-inv-ca'), deplacement: num('s-inv-deplacement'), duree: num('s-inv-duree'),
+    },
+    image: document.getElementById('s-inv-image')?.value || _invImageEdit || '',
+    actions: Array.isArray(_invActionsEdit) ? _invActionsEdit : [],
+  };
 }
 
 function _selectSortAction(val) {
@@ -1862,6 +1994,7 @@ function _buildSortFromDOM() {
     })(),
     toucherStat: _readVisibleStatOverride('s-toucher-stat'),
     degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+    invocation:  _buildInvocationFromDOM(),
     mjNotes: document.getElementById('s-mj-notes')?.value || '',
   };
 }
@@ -2060,6 +2193,7 @@ export async function saveSort(idx) {
       // → évite que le sélecteur d'une section cachée n'écrase la sélection utilisateur.
       toucherStat: _readVisibleStatOverride('s-toucher-stat'),
       degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+      invocation:   _buildInvocationFromDOM(),
       mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
     };
     const isNew = idx < 0;
@@ -2230,4 +2364,8 @@ registerActions({
   _toggleSortIconPicker:  ()    => _toggleSortIconPicker(),
   _pickSortIcon:          (btn) => _pickSortIcon(btn.dataset.icon),
   _pickSpellSuggestion:   (btn) => _pickSpellSuggestion(btn.dataset.cat, btn.dataset.encoded),
+  _invPickImage:          ()    => _invPickImage(),
+  _invClearImage:         ()    => _invClearImage(),
+  _invAddAction:          ()    => _invAddAction(),
+  _invDeleteAction:       (btn) => _invDeleteAction(btn.dataset.idx),
 });
