@@ -1525,6 +1525,11 @@ function _buildShape(t) {
 
 function _patchShape(id) {
   const e=_tokens[id]; if (!e?.shape) return;
+  // Garde-fou : un token d'une autre page (ou en réserve) n'a rien à dessiner
+  // sur le calque courant. Sans ça, un patch (ex. édition PV/PM d'un perso ayant
+  // un token sur une autre page) ré-ajoute son shape — détruit mais encore
+  // référencé — au calque actif → des tokens d'une autre page « apparaissent ».
+  if (e.data.pageId !== _activePage?.id) return;
   const ld=_live(e.data); const g=e.shape;
   const hasPmBar   = !!g.findOne('.pm-val');
   const hasCaBuff  = !!g.findOne('.ca-buff-turns');
@@ -6520,8 +6525,12 @@ function _renderAllTokens() {
   _layers.token?.destroyChildren();
   for (const e of Object.values(_tokens)) {
     const t=e.data;
-    if (t.pageId!==_activePage.id) continue;
-    if (!t.visible&&!STATE.isAdmin) continue;
+    // destroyChildren() a détruit tous les shapes : on remet la référence à null
+    // pour les tokens non rendus ici (autre page / réserve / invisibles).
+    if (t.pageId!==_activePage.id || (!t.visible&&!STATE.isAdmin)) {
+      if (e.shape) _tokens[t.id]={...e,shape:null};
+      continue;
+    }
     const shape=_buildShape(t);
     _tokens[t.id]={...e,shape}; _layers.token.add(shape);
   }
