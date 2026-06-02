@@ -1510,6 +1510,11 @@ export function runeIncrement(nom) {
       _sortTypesEdit.add('offensif');
       _applyTypeChange();
     }
+    // Lacération inflige toujours l'attaque de base + sa réduction de CA → Offensif
+    if (nom === 'Lacération' && !_sortTypesEdit.has('offensif')) {
+      _sortTypesEdit.add('offensif');
+      _applyTypeChange();
+    }
     if (nom === 'Protection' && !_sortTypesEdit.has('defensif')) {
       _sortTypesEdit.add('defensif');
       _applyTypeChange();
