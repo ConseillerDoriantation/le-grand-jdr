@@ -377,6 +377,7 @@ const _tokenStatMod = (t, statKey) => {
 // ── État présence & mini-fiche ──────────────────────────────────────
 let _presence     = {};   // uid → { uid, pseudo }
 let _presHeartbeat= null; // intervalId du heartbeat
+let _presVisibility = null; // listener visibilitychange (pause heartbeat onglet masqué)
 let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
@@ -784,6 +785,7 @@ function _cleanup() {
     const _uid = STATE.user?.uid;
     if (_uid) { try { deleteDoc(_pingRef(_uid)).catch(()=>{}); } catch(e){} }
   }
+  if (_presVisibility)   { document.removeEventListener('visibilitychange', _presVisibility); _presVisibility = null; }
   if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
   _timerStopTick();
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
@@ -12237,11 +12239,17 @@ export async function renderVttPage() {
   const _presUid = STATE.user?.uid;
   if (_presUid) {
     const _presWrite = () => {
+      // Onglet en arrière-plan : on ne dépense pas de write (la présence expire
+      // à 120 s côté lecture, le joueur réapparaît dès qu'il revient sur l'onglet).
+      if (document.hidden) return;
       const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
       setDoc(_pingRef(_presUid), { pres: { pseudo, lastSeen: serverTimestamp() } }, { merge: true }).catch(() => {});
     };
     _presWrite();
     _presHeartbeat = setInterval(_presWrite, 45_000);
+    // Retour au premier plan : ré-annoncer immédiatement sans attendre le prochain tick.
+    _presVisibility = () => { if (!document.hidden) _presWrite(); };
+    document.addEventListener('visibilitychange', _presVisibility);
     // Fermeture navigateur : tentative de suppression (best-effort)
     const _onUnload = () => { deleteDoc(_pingRef(_presUid)).catch(()=>{}); };
     window.addEventListener('beforeunload', _onUnload, { once: true });

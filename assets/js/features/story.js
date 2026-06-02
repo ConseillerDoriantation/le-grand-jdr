@@ -4,7 +4,7 @@
 // ✓ Upload + recadrage d'image canvas 4:3 (identique aux hauts-faits)
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, getDocData } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, getDocData, getCachedCollection } from '../data/firestore.js';
 import { confirmDelete, tryDoc } from '../shared/crud.js';
 import { navigate } from '../core/navigation.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
@@ -1491,7 +1491,7 @@ function _renderTimeline(items) {
 
 // ── MODAL DÉTAIL ──────────────────────────────────────────────────────────────
 async function openStoryDetail(id) {
-  const items = await loadCollection('story');
+  const items = getCachedCollection('story') || await loadCollection('story');
   const item = items.find(i => i.id === id); if (!item) return;
   const st = stCfg(item);
   const groupes = item.groupes || [];
@@ -2069,9 +2069,9 @@ async function saveStory(id = '') {
 }
 
 // ── ÉDITER / SUPPRIMER ────────────────────────────────────────────────────────
-async function editStory(id){
-  const items=await loadCollection('story');
-  const item=items.find(i=>i.id===id);
+function editStory(id){
+  const items = getCachedCollection('story') || [];
+  const item = items.find(i=>i.id===id);
   if(item) openStoryModal(item);
 }
 async function deleteStory(id){

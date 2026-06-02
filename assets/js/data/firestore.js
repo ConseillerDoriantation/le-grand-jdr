@@ -55,38 +55,42 @@ function _colPath(col) {
 // Sert principalement aux pages dont la collection n'a pas été promue
 // "session-live" (ex: bestiary, npc_affinites, recipes…).
 const _CACHE_TTL = {
+  // Contenu actif — peut changer en cours de session
   bestiary:           5 * 60_000,
   bestiary_meta:      5 * 60_000,
   npc_affinites:      5 * 60_000,
-  recipes:            5 * 60_000,
-  recettes:           5 * 60_000,
-  tutorial:           5 * 60_000,
-  story_meta:         5 * 60_000,
-  story_histories:    5 * 60_000,
-  map_lieux:          5 * 60_000,
-  place_types:        5 * 60_000,
+  story_meta:         5 * 60_000,  // liste des actes, change si admin crée un acte
+  bestiary_tracker:   5 * 60_000,  // suivi joueur live pendant VTT
+  map_lieux:          5 * 60_000,  // legacy, conserve TTL court
   places:             5 * 60_000,
-  organizations:      5 * 60_000,
-  players:            5 * 60_000,
-  collectionSettings: 5 * 60_000,
-  achievements_meta:  5 * 60_000,
-  bestiary_tracker:   5 * 60_000,
+  // Contenu stable — rarement modifié en session
+  recipes:            30 * 60_000,
+  recettes:           30 * 60_000,
+  tutorial:           30 * 60_000,
+  story_histories:    30 * 60_000,
+  place_types:        30 * 60_000,
+  organizations:      30 * 60_000,
+  players:            30 * 60_000,
+  collectionSettings: 30 * 60_000,
+  achievements_meta:  30 * 60_000,
   // Aventures — TTL moyen (structure change rarement en session)
   adventures:         60_000,
 };
 
 const _DOC_CACHE_TTL = {
   world: {
-    weapon_formats: 5 * 60_000,
-    damage_types: 5 * 60_000,
-    spell_matrices: 5 * 60_000,
-    conditions: 5 * 60_000,
-    dice_skills: 5 * 60_000,
-    upgrade_settings: 5 * 60_000,
-    combat_styles: 5 * 60_000,
-    vtt_emotes: 5 * 60_000,
-    map: 5 * 60_000,
-    map_fog: 5 * 60_000,
+    // Config de règles — modifiée par l'admin hors session, caches module-level internes
+    weapon_formats:  30 * 60_000,
+    damage_types:    30 * 60_000,
+    spell_matrices:  30 * 60_000,
+    conditions:      30 * 60_000,
+    dice_skills:     30 * 60_000,  // maintenant aussi en _SESSION_DOCS
+    upgrade_settings:30 * 60_000,
+    combat_styles:   30 * 60_000,
+    vtt_emotes:      30 * 60_000,  // admin définit une fois par campagne
+    map:             30 * 60_000,  // config image/fond, ne change pas pendant le jeu
+    // map_fog court : l'admin peut révéler des zones pendant une session
+    map_fog:          5 * 60_000,
   },
 };
 
@@ -302,11 +306,16 @@ const _SESSION_COLLECTIONS = [
 const _LAZY_SESSION_COLLECTIONS = new Set([
   'shop', 'shopCategories',
   'npcs',
+  'organizations', // utilisé par npcs.js + histoire.js, TTL 5 min insuffisant
+  'players',       // utilisé par character-sheet tabs + inline-edit, sans cache TTL
 ]);
 const _SESSION_DOCS = [
-  ['bastion',         'main'],
-  ['world',           'main'],
-  ['agenda_session',  'next'],
+  ['bastion',          'main'],
+  ['world',            'main'],
+  ['agenda_session',   'next'],
+  ['achievements_meta','order'],      // lu à chaque render achievements
+  ['world',            'dice_skills'], // partagé entre histoire.js, shop.js, vtt.js
+  ['world',            'map'],         // config fond de carte, stable pendant le jeu
 ];
 
 // Démarre tous les listeners session pour l'aventure courante.

@@ -12,7 +12,6 @@
 // aucune lecture facturée. Le callback reçoit les données du cache live.
 // ══════════════════════════════════════════════════════════════════════════════
 import { subscribeCollection, subscribeDoc } from '../data/firestore.js';
-import { onSnapshot } from '../config/firebase.js';
 import { STATE } from '../core/state.js';
 
 // Map nom → fonction de désabonnement
@@ -29,19 +28,6 @@ export function watch(name, col, callback) {
 export function watchDoc(name, col, id, callback) {
   _subs.get(name)?.();
   const unsub = subscribeDoc(col, id, callback);
-  _subs.set(name, unsub);
-}
-
-// Abonner à une query Firestore (limit, orderBy, where…)
-// `queryRef` est une référence de Query déjà construite avec query(col, ...).
-// Utile quand on veut limiter côté serveur (ex: chat avec limit(80)).
-export function watchQuery(name, queryRef, callback) {
-  _subs.get(name)?.();
-  const unsub = onSnapshot(
-    queryRef,
-    snap => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-    err => console.error(`[realtime] watchQuery(${name}):`, err),
-  );
   _subs.set(name, unsub);
 }
 

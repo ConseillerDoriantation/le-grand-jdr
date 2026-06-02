@@ -139,6 +139,45 @@ Priorise :
 - Si une "securite" depend de `STATE.isAdmin` ou d'un flag cote client, la presenter comme du confort UI, pas comme une protection.
 - Quand tu proposes une modification de donnees ou de permissions, rappeler si une mise a jour des regles Firestore est necessaire.
 
+## QUOTA Firestore — priorite absolue (lectures/ecritures facturees)
+
+### Architecture d'acces deja en place (ne pas reinventer)
+Toute la couche est dans `assets/js/data/firestore.js`. Avant d'ajouter un acces Firestore,
+TOUJOURS passer par cette couche. Elle fournit trois niveaux de cache :
+1. **Session-live** (`onSnapshot` unique par collection/doc, vivant toute la session) :
+   collections lues par 3+ pages (`story`, `achievements`, `quests`, `characters`,
+   `collection`) + lazy (`shop`, `shopCategories`, `npcs`, `organizations`, `players`)
+   + docs (`bastion/main`, `world/main`, `agenda_session/next`, etc.).
+   Une page qui consomme un listener session = **0 lecture supplementaire**.
+2. **Cache TTL memoire** (`_CACHE_TTL` / `_DOC_CACHE_TTL`) pour les collections page-scoped.
+3. **Cache IndexedDB de Firestore** (servi a getDocs/onSnapshot a froid).
+Plus : **coalescing in-flight** (2 loads simultanes = 1 fetch) et **patch chirurgical
+du cache** apres ecriture (pas d'invalidation totale).
+
+### Regles d'or quota
+- Ne JAMAIS importer `config/firebase.js` directement dans une feature pour lire/ecrire.
+  Utiliser `loadCollection`, `getDocData`, `subscribeCollection`, `saveDoc`, `addToCol`,
+  `updateInCol`, `deleteFromCol`, ou `shared/realtime.js` (`watch`/`watchDoc`).
+  Exceptions historiques assumees : `vtt.js` et `vtt-fog.js` (temps reel tactique).
+- Pour s'abonner, preferer `watchPageCollection` / `watchPageDoc` (`shared/realtime.js`) :
+  si la collection est deja session-live, ZERO nouveau listener.
+- Une ecriture pendant un drag/slider/saisie = la commit au `dragend`/`change`/blur ou
+  via debounce, JAMAIS a chaque frame/keystroke (cf. tokens VTT : commit au `dragend`).
+- Les ecritures periodiques (heartbeats, autosave) doivent se SUSPENDRE quand
+  `document.hidden` (onglet en arriere-plan). Pattern de reference : `shared/presence.js`
+  et le heartbeat present de `vtt.js`. La presence expire deja a 120 s cote lecture.
+- Une collection lue entierement par un listener doit rester bornee. Les collections
+  ephemeres (pings, reactions) sont keyees par uid (1 doc/joueur) pour ne pas accumuler.
+- Filtrer cote client sur le cache live (`loadCollectionWhere` le fait) plutot que de
+  multiplier les `where` serveur si la collection est deja chargee.
+
+### Reflexe avant tout patch Firestore
+1. Cette donnee est-elle deja servie par un listener session-live ou un cache TTL ?
+2. Mon acces passe-t-il par `data/firestore.js` / `shared/realtime.js` ?
+3. Mon ecriture peut-elle se declencher en boucle (drag, timer, frappe) ? Si oui, throttler.
+4. Un timer/heartbeat continue-t-il a ecrire onglet masque ? Si oui, le suspendre.
+5. La collection abonnee peut-elle grossir sans limite ? Si oui, borner ou keyer par uid.
+
 ## Sortie attendue
 Sauf demande contraire, repondre dans cet ordre :
 
