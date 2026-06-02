@@ -768,7 +768,12 @@ export function _buildSortResume(s, c) {
   // donnait une impression trompeuse de dégâts directs.
   const isEnchantOnly  = runes.includes('Enchantement') && !((s.degats || '').trim());
   const isAfflictionSpell = runes.includes('Affliction'); // affliction = jamais d'impact
-  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell;
+  // Invocation : le sort n'inflige pas de dégâts lui-même — c'est la créature
+  // invoquée qui frappe (ses dégâts propres via _calcInvocationStats). On masque
+  // donc l'attaque de base du lanceur, même si Puissance a coché « offensif »
+  // (Puissance scale l'attaque de l'invocation, pas un impact direct).
+  const isInvocationSpell = runes.includes('Invocation');
+  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell || isInvocationSpell;
   if (types.includes('offensif') && !_suppressImpactDmg) {
     const mainP   = getMainWeapon(c);
     // Override du sort sur la stat de dégâts > stat de l'arme principale

@@ -332,7 +332,8 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
-  const suppressImpactDmg = isEnchantOnly || hasAffliction || s.ampMode === 'deplacement';
+  // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
+  const suppressImpactDmg = isEnchantOnly || hasAffliction || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];
@@ -1443,10 +1444,13 @@ function _refreshConditionalSections() {
   const sSec = document.getElementById('s-soin-section');
   // Affliction supprime les dégâts d'impact : la rune Puissance scale le DoT
   // de l'affliction, pas un dégât direct. Le mode Déplacement les supprime aussi.
-  if (dSec) dSec.style.display = (isOffensive && !hasAffliction && !isDepl) ? '' : 'none';
+  // Invocation : le sort n'a pas de dégâts propres (la créature frappe) → masque
+  // la section Dégâts même en offensif (Puissance scale l'attaque de l'invocation).
+  const anyInvoc = (counts.Invocation || 0) > 0;
+  if (dSec) dSec.style.display = (isOffensive && !hasAffliction && !isDepl && !anyInvoc) ? '' : 'none';
   if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
-  // Invocation générique : rune Invocation seule (hors combos Sentinelle/Arme invoquée)
-  const hasInvoc = (counts.Invocation || 0) > 0 && !(counts.Affliction > 0) && !(counts.Enchantement > 0);
+  // Section Invocation générique : rune Invocation seule (hors combos Sentinelle/Arme invoquée)
+  const hasInvoc = anyInvoc && !(counts.Affliction > 0) && !(counts.Enchantement > 0);
   const iSec = document.getElementById('s-invocation-section');
   if (iSec) iSec.style.display = hasInvoc ? '' : 'none';
   if (hasInvoc) _refreshInvocationDerived();
