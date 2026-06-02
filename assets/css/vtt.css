@@ -1316,6 +1316,55 @@
 .vtt-page-item-btn:hover { background: var(--bg-elevated); color: var(--text); }
 .vtt-page-item-del:hover { color: var(--crimson); }
 
+/* ── Pages : recherche + dossiers (scalable 100+) ───────────────────── */
+.vtt-page-search-row {
+  display: flex; align-items: center; gap: .25rem;
+  padding: .2rem .4rem .35rem; position: relative;
+}
+.vtt-page-search {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: .74rem;
+  padding: .26rem .5rem; outline: none; transition: border-color .12s;
+}
+.vtt-page-search:focus { border-color: var(--gold); }
+.vtt-page-search-x {
+  position: absolute; right: .65rem; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: .7rem; padding: .1rem .2rem; border-radius: 3px;
+}
+.vtt-page-search-x:hover { color: var(--text); background: var(--bg-panel); }
+
+.vtt-page-list {
+  max-height: 32vh; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.vtt-page-list::-webkit-scrollbar { width: 4px; }
+.vtt-page-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.vtt-page-folder-hd {
+  display: flex; align-items: center; gap: .3rem;
+  padding: .25rem .5rem; margin: .1rem .25rem 0;
+  cursor: pointer; user-select: none; border-radius: 6px;
+  color: var(--text-muted); transition: background .1s, color .1s;
+}
+.vtt-page-folder-hd:hover { background: var(--bg-elevated); color: var(--text); }
+.vtt-page-folder-chev {
+  font-size: .62rem; transition: transform .15s; display: inline-block; color: var(--text-dim);
+}
+.vtt-page-folder:not(.closed) > .vtt-page-folder-hd .vtt-page-folder-chev { transform: rotate(90deg); }
+.vtt-page-folder-name {
+  flex: 1; font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: 'Cinzel', serif;
+}
+.vtt-page-folder-count {
+  font-size: .58rem; color: var(--text-dim);
+  background: var(--bg-elevated); border-radius: 8px; padding: .04rem .35rem;
+}
+.vtt-page-folder.closed > .vtt-page-folder-body { display: none; }
+.vtt-page-folder-body { padding-left: .35rem; }
+
 /* ── Sections du tray ───────────────────────────────────────────── */
 .vtt-tray-sect {
   border-top: 1px solid var(--border);

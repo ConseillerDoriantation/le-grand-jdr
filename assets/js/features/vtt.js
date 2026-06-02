@@ -381,6 +381,11 @@ let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
+let _pageSearch       = '';    // filtre texte appliqué à la liste des pages
+const _pageFoldClosed = (() => { // dossiers de pages repliés (persistés)
+  try { return new Set(JSON.parse(localStorage.getItem('vtt-page-folds') || '[]')); } catch { return new Set(); }
+})();
+const _savePageFolds = () => { try { localStorage.setItem('vtt-page-folds', JSON.stringify([..._pageFoldClosed])); } catch {} };
 // Sous-sections togglables (en ligne reste toujours visible) — persistées
 // par navigateur via localStorage, défaut : repliées (le MJ regarde d'abord
 // les joueurs présents).
@@ -6568,29 +6573,98 @@ function _renderTray() {
 function _renderPageList() {
   const el=document.getElementById('vtt-tray-pages'); if (!el) return;
   const broadcastId=_session.activePageId;
-  const sorted=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
+  const all=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
 
-  if (!sorted.length) {
+  // Préserve le focus/caret de la barre de recherche au rerender
+  const ae = document.activeElement;
+  const searchFocused = ae?.id === 'vtt-page-search' && el.contains(ae);
+  const caretPos = searchFocused ? ae.selectionStart : null;
+
+  if (!all.length) {
     el.innerHTML=`<div class="vtt-tray-empty">Aucune page<br><small>Clique ＋ pour créer</small></div>`;
     return;
   }
-  el.innerHTML=sorted.map(p=>{
+
+  const q = _pageSearch.trim().toLowerCase();
+  const matches = p => !q || (p.name||'').toLowerCase().includes(q);
+
+  // Regroupe par dossier ('' = sans dossier, affiché en dernier)
+  const groups = new Map();
+  for (const p of all) {
+    if (!matches(p)) continue;
+    const f = (p.folder||'').trim();
+    if (!groups.has(f)) groups.set(f, []);
+    groups.get(f).push(p);
+  }
+  const folders = [...groups.keys()].sort((a,b)=>{
+    if (a==='') return 1; if (b==='') return -1;          // sans dossier en dernier
+    return a.localeCompare(b,'fr',{sensitivity:'base'});
+  });
+
+  const _pageRow = p => {
     const isPlayers=p.id===broadcastId, isMj=p.id===_activePage?.id;
     const cls=isMj&&isPlayers?'mj-and-players':isMj?'mj':isPlayers?'players':'';
-    return `
-    <div class="vtt-page-item ${cls}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${p.cols||24}×${p.rows||18} cases">
+    return `<div class="vtt-page-item ${cls}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${_esc(p.name)} · ${p.cols||24}×${p.rows||18} cases">
       <div class="vtt-page-item-badges">
         ${isMj     ?'<span title="Votre vue">📍</span>':''}
         ${isPlayers?'<span title="Joueurs ici">👥</span>':''}
       </div>
-      <div class="vtt-page-item-name">${p.name}</div>
+      <div class="vtt-page-item-name">${_esc(p.name)}</div>
       <div class="vtt-page-item-acts">
         <button class="vtt-page-item-btn" data-vtt-fn="_vttSendToPage" data-vtt-args="${p.id}" title="Envoyer tous les joueurs ici">📡</button>
-        <button class="vtt-page-item-btn" data-vtt-fn="_vttEditPage" data-vtt-args="${p.id}" title="Renommer / redimensionner">✏</button>
+        <button class="vtt-page-item-btn" data-vtt-fn="_vttEditPage" data-vtt-args="${p.id}" title="Renommer / dossier / taille">✏</button>
         <button class="vtt-page-item-btn vtt-page-item-del" data-vtt-fn="_vttDeletePage" data-vtt-args="${p.id}" title="Supprimer">×</button>
       </div>
     </div>`;
-  }).join('');
+  };
+
+  // Une seule "section" implicite (sans dossier) et pas de recherche → pas de header de groupe
+  const onlyUngrouped = folders.length === 1 && folders[0] === '';
+  let listHtml;
+  if (!groups.size) {
+    listHtml = `<div class="vtt-tray-empty">Aucune page ne correspond</div>`;
+  } else if (onlyUngrouped) {
+    listHtml = groups.get('').map(_pageRow).join('');
+  } else {
+    listHtml = folders.map(f => {
+      const rows = groups.get(f);
+      const label = f || '— Sans dossier —';
+      // En recherche, tout est déplié ; sinon respecte l'état persistant
+      const closed = !q && _pageFoldClosed.has(f);
+      return `<div class="vtt-page-folder${closed?' closed':''}">
+        <div class="vtt-page-folder-hd" data-vtt-fn="_vttPageFolderToggle" data-vtt-args="${encodeURIComponent(f)}">
+          <span class="vtt-page-folder-chev">▸</span>
+          <span class="vtt-page-folder-name">${_esc(label)}</span>
+          <span class="vtt-page-folder-count">${rows.length}</span>
+        </div>
+        <div class="vtt-page-folder-body">${rows.map(_pageRow).join('')}</div>
+      </div>`;
+    }).join('');
+  }
+
+  el.innerHTML = `
+    <div class="vtt-page-search-row">
+      <input type="text" id="vtt-page-search" class="vtt-page-search" placeholder="🔍 Rechercher une page…"
+        autocomplete="off" value="${_esc(_pageSearch)}"
+        data-vtt-fn="_vttPageSearch" data-vtt-on="input" data-vtt-args="$value">
+      ${_pageSearch?`<button class="vtt-page-search-x" data-vtt-fn="_vttPageSearchClear" title="Effacer">✕</button>`:''}
+    </div>
+    <div class="vtt-page-list">${listHtml}</div>`;
+
+  if (searchFocused) {
+    const inp = document.getElementById('vtt-page-search');
+    if (inp) { inp.focus(); if (caretPos != null) { try { inp.setSelectionRange(caretPos, caretPos); } catch {} } }
+  }
+}
+
+function _vttPageSearch(v) { _pageSearch = String(v || ''); _renderPageList(); }
+function _vttPageSearchClear() { _pageSearch = ''; _renderPageList(); }
+function _vttPageFolderToggle(f) {
+  // Dossier vide ('') : le dispatcher ne passe aucun arg (data-vtt-args="") → f undefined.
+  const key = f ? decodeURIComponent(f) : '';
+  if (_pageFoldClosed.has(key)) _pageFoldClosed.delete(key); else _pageFoldClosed.add(key);
+  _savePageFolds();
+  _renderPageList();
 }
 
 // ─ Indicateur de page courant pour les joueurs (lecture seule) ──────
@@ -8791,6 +8865,9 @@ function _vttAddPage() {
     <div class="vtt-form">
       <div class="form-group"><label>Nom</label>
         <input id="vpf-name" type="text" placeholder="ex : Forêt Sombre" autofocus></div>
+      <div class="form-group"><label>Dossier (optionnel)</label>
+        <input id="vpf-folder" type="text" placeholder="ex : Chapitre 1, Donjons…" list="vpf-folders" autocomplete="off">
+        ${_pageFolderDatalist('vpf-folders')}</div>
       <div class="vtt-form-row">
         <div class="form-group"><label>Colonnes (largeur)</label>
           <input id="vpf-cols" type="number" value="24" min="8" max="200"></div>
@@ -8804,13 +8881,21 @@ function _vttAddPage() {
       </div>
     </div>`);
 }
+// Datalist des dossiers de pages existants (suggestions de saisie)
+function _pageFolderDatalist(id) {
+  const folders = [...new Set(Object.values(_pages).map(p => (p.folder||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'}));
+  return `<datalist id="${id}">${folders.map(f=>`<option value="${_esc(f)}">`).join('')}</datalist>`;
+}
+
 async function _vttConfirmAddPage() {
   const name=(document.getElementById('vpf-name')?.value||'').trim();
+  const folder=(document.getElementById('vpf-folder')?.value||'').trim();
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-rows')?.value)||18));
   if (!name) { showNotif('Nom requis','error'); return; }
   closeModalDirect();
-  await addDoc(_pgsCol(),{name,cols,rows,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
+  await addDoc(_pgsCol(),{name,folder,cols,rows,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
     .catch(()=>showNotif('Erreur création page','error'));
 }
 
@@ -8820,6 +8905,9 @@ function _vttEditPage(id) {
     <div class="vtt-form">
       <div class="form-group"><label>Nom</label>
         <input id="vpe-name" type="text" value="${p.name}" autofocus></div>
+      <div class="form-group"><label>Dossier (optionnel)</label>
+        <input id="vpe-folder" type="text" value="${_esc(p.folder||'')}" placeholder="ex : Chapitre 1, Donjons…" list="vpe-folders" autocomplete="off">
+        ${_pageFolderDatalist('vpe-folders')}</div>
       <div class="vtt-form-row">
         <div class="form-group"><label>Colonnes</label>
           <input id="vpe-cols" type="number" value="${p.cols||24}" min="8" max="200"></div>
@@ -8840,13 +8928,14 @@ function _vttEditPage(id) {
 }
 async function _vttConfirmEditPage(id) {
   const name=(document.getElementById('vpe-name')?.value||'').trim();
+  const folder=(document.getElementById('vpe-folder')?.value||'').trim();
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-rows')?.value)||18));
   if (!name) { showNotif('Nom requis','error'); return; }
   const fogEnabled = document.getElementById('vpe-fog')?.checked ?? false;
   closeModalDirect();
-  await updateDoc(_pgRef(id),{name,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
-  if (_activePage?.id===id) { _activePage={..._activePage,name,cols,rows,fogEnabled}; _drawGrid(); }
+  await updateDoc(_pgRef(id),{name,folder,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
+  if (_activePage?.id===id) { _activePage={..._activePage,name,folder,cols,rows,fogEnabled}; _drawGrid(); }
 }
 
 async function _vttDeletePage(id) {
@@ -12900,6 +12989,9 @@ const VTT_ACTIONS = {
   _vttOpenTokenDelegatesModal,
   _vttPickElement,
   _vttPickEmote,
+  _vttPageFolderToggle,
+  _vttPageSearch,
+  _vttPageSearchClear,
   _vttPickOpt,
   _vttPlColorSelect,
   _vttPlace,
