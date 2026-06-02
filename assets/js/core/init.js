@@ -29,7 +29,7 @@ import {
   setAdventures,
 } from "./state.js";
 
-import { showAppLoading, showAuth, showAdventurePicker } from "./layout.js";
+import { showAppLoading, showAuth, showAdventurePicker, showAdventureLoadError } from "./layout.js";
 import { navigate } from "./navigation.js";
 import { loadUserAdventures, selectAdventure, runMigration } from "./adventure.js";
 import { unwatchAll } from "../shared/realtime.js";
@@ -118,42 +118,70 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   // ── Charger les aventures accessibles ──────────
-  try {
-    const adventures = await loadUserAdventures(user.uid);
-    setAdventures(adventures);
-
-    if (adventures.length === 0) {
-      // Affiche le sélecteur vide :
-      // – super-admin → bouton "Récupérer mes données" + "Créer une aventure"
-      // – joueur      → message "En attente d'invitation"
-      showAdventurePicker([]);
-      return;
-    }
-
-    if (adventures.length === 1) {
-      selectAdventure(adventures[0]);
-      showAppLoading();
-      await navigate('dashboard');
-      return;
-    }
-
-    // Plusieurs aventures → essayer de restaurer la dernière utilisée
-    const lastId  = localStorage.getItem(LAST_ADV_KEY);
-    const lastAdv = lastId && adventures.find(a => a.id === lastId);
-    if (lastAdv) {
-      selectAdventure(lastAdv);
-      showAppLoading();
-      await navigate('dashboard');
-      return;
-    }
-
-    // Pas de mémorisation → sélecteur
-    showAdventurePicker(adventures);
-  } catch (error) {
-    console.error("[init] loadUserAdventures failed:", error);
-    showAdventurePicker([]);
-  }
+  await loadAndRouteAdventures(user);
 });
+
+// Charge les aventures du joueur et route vers le dashboard / le sélecteur.
+// Robuste contre les faux "pas invité" au login :
+//   – attend que le token Firestore soit prêt (sinon 1re requête sans token → refus) ;
+//   – lit côté SERVEUR en priorité (ignore un cache IndexedDB périmé) ;
+//   – retente quelques fois sur erreur transitoire ;
+//   – sur échec persistant : écran "Réessayer", JAMAIS "En attente d'invitation".
+// Exposée pour pouvoir être rappelée par le bouton "Réessayer".
+async function loadAndRouteAdventures(user) {
+  showAppLoading('Chargement de tes aventures…');
+
+  // Le token peut ne pas encore être attaché à la 1re requête juste après login.
+  try { await user.getIdToken(); } catch (_) { /* non bloquant */ }
+
+  let adventures = null;
+  for (let attempt = 0; attempt < 3 && adventures === null; attempt++) {
+    try {
+      adventures = await loadUserAdventures(user.uid, { preferServer: true });
+    } catch (error) {
+      console.warn(`[init] loadUserAdventures tentative ${attempt + 1} échouée:`, error?.code || error);
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+        try { await user.getIdToken(true); } catch (_) { /* force refresh token */ }
+      }
+    }
+  }
+
+  // Erreur réseau/permission persistante : le joueur est peut-être bien membre.
+  // On ne l'envoie PAS vers "pas invité" — on propose un vrai retry.
+  if (adventures === null) {
+    showAdventureLoadError(() => loadAndRouteAdventures(user));
+    return;
+  }
+
+  setAdventures(adventures);
+
+  if (adventures.length === 0) {
+    // Sélecteur vide : super-admin → migration/création ; joueur → "En attente".
+    showAdventurePicker([]);
+    return;
+  }
+
+  if (adventures.length === 1) {
+    selectAdventure(adventures[0]);
+    showAppLoading();
+    await navigate('dashboard');
+    return;
+  }
+
+  // Plusieurs aventures → essayer de restaurer la dernière utilisée
+  const lastId  = localStorage.getItem(LAST_ADV_KEY);
+  const lastAdv = lastId && adventures.find(a => a.id === lastId);
+  if (lastAdv) {
+    selectAdventure(lastAdv);
+    showAppLoading();
+    await navigate('dashboard');
+    return;
+  }
+
+  // Pas de mémorisation → sélecteur
+  showAdventurePicker(adventures);
+}
 
 // ── Charger le profil utilisateur ──────────────
 async function loadProfile(user) {

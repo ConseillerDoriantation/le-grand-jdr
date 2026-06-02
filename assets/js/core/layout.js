@@ -131,6 +131,38 @@ export function hideAdventurePicker() {
   if (advScreen) advScreen.style.display = 'none';
 }
 
+// ── Échec de chargement des aventures (réseau / token) ──────
+// Affiché à la place du faux "En attente d'invitation" quand la lecture a
+// échoué : le joueur est peut-être bien membre. `onRetry` relance la tentative.
+export function showAdventureLoadError(onRetry) {
+  _hideBootSplash();
+  const authScreen = document.getElementById('auth-screen');
+  const advScreen  = document.getElementById('adventure-screen');
+  const app        = document.getElementById('app');
+  if (authScreen) authScreen.style.display = 'none';
+  if (app)        app.style.display        = 'none';
+  if (!advScreen) return;
+
+  advScreen.style.display = 'flex';
+  const body = document.getElementById('adventure-picker-body');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="adv-empty">
+      <div class="adv-empty-icon">📡</div>
+      <div class="adv-empty-title">Connexion impossible</div>
+      <p class="adv-empty-text">
+        Impossible de charger tes aventures pour le moment.<br>
+        Vérifie ta connexion — tes aventures sont sûrement toujours là.
+      </p>
+      <button class="btn btn-gold" id="adv-retry-btn">🔄 Réessayer</button>
+      <button class="btn btn-outline btn-sm" data-action="logout" style="margin-top:8px">Se déconnecter</button>
+    </div>`;
+  const btn = document.getElementById('adv-retry-btn');
+  if (btn && onRetry) {
+    btn.addEventListener('click', () => { btn.disabled = true; btn.textContent = '⏳ …'; onRetry(); }, { once: true });
+  }
+}
+
 // ── Badge aventure dans le header ──────────────
 function _updateAdventureBadge() {
   // Header badge (mobile)

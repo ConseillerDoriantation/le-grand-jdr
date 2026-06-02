@@ -6,7 +6,7 @@
 import {
   db,
   doc, setDoc, getDoc, updateDoc, deleteDoc,
-  collection, getDocs,
+  collection, getDocs, getDocsFromServer,
   writeBatch,
   query, where,
 } from '../config/firebase.js';
@@ -23,9 +23,24 @@ import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
 
 // ── Charger les aventures accessibles ──────────
-export async function loadUserAdventures(uid) {
+// `preferServer` (gate de login) : lecture serveur prioritaire pour ne JAMAIS
+// bloquer un joueur sur un cache IndexedDB périmé (il vient d'être ajouté à
+// `accessList` côté MJ). En cas d'erreur réseau/permission EN LIGNE, on relaie
+// l'erreur (le caller peut retry au lieu d'afficher un faux "pas invité").
+// Hors-ligne, on se rabat sur le cache (le joueur déjà venu garde l'accès).
+// Sans option : comportement historique (cache OK, erreur avalée en []).
+export async function loadUserAdventures(uid, { preferServer = false } = {}) {
+  const q = query(collection(db, 'adventures'), where('accessList', 'array-contains', uid));
+  if (preferServer) {
+    try {
+      const snap = await getDocsFromServer(q);
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      if (navigator.onLine !== false) throw e; // en ligne → laisser le caller retry
+      console.warn('[adventure] hors-ligne, lecture depuis le cache', e?.code || e);
+    }
+  }
   try {
-    const q    = query(collection(db, 'adventures'), where('accessList', 'array-contains', uid));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
