@@ -11100,11 +11100,11 @@ function _renderDicePanel() {
     <div class="vtt-dice-grid">
       ${_ALL_DICE.map(f => {
         const cnt = _diceFormula[f]||0;
+        const lbl = f===100?'%':f;
         return `<button class="vtt-dice-die-btn${cnt?' active':''}"
           data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}"
-          data-vtt-fn="_vttDiceRemoveDie" data-vtt-on="contextmenu" data-vtt-args="${f}"
-          title="Clic : ajouter · Clic droit : retirer">
-          d${f===100?'%':f}${cnt?`<span class="vtt-dice-die-cnt">×${cnt}</span>`:''}
+          title="Clic : +1 d${lbl}${cnt?` · clic sur ×${cnt} : −1`:''}">
+          d${lbl}${cnt?`<span class="vtt-dice-die-cnt" data-vtt-fn="_vttDiceRemoveDie" data-vtt-args="${f}" title="Retirer un d${lbl}">×${cnt}</span>`:''}
         </button>`;
       }).join('')}
     </div>

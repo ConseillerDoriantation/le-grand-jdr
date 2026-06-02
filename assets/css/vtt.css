@@ -3896,9 +3896,12 @@
 .vtt-dice-die-btn:hover { border-color: var(--gold); background: rgba(255,210,0,.08); color: var(--gold); }
 .vtt-dice-die-btn.active { border-color: var(--gold); background: rgba(255,210,0,.14); color: var(--gold); }
 .vtt-dice-die-cnt {
-  position: absolute; top: 1px; right: 2px;
-  font-size: .48rem; font-weight: 800; color: var(--gold); line-height: 1;
+  position: absolute; top: 0; right: 0;
+  font-size: .5rem; font-weight: 800; color: var(--gold); line-height: 1;
+  padding: 2px 3px; border-radius: 0 6px 0 6px;
+  cursor: pointer;
 }
+.vtt-dice-die-cnt:hover { background: var(--ember, #ef4444); color: #fff; }
 .vtt-dice-formula-row {
   display: flex; align-items: center; justify-content: space-between; gap: .4rem;
   background: rgba(255,255,255,.04); border-radius: 6px;
