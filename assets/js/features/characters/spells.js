@@ -1501,6 +1501,7 @@ function _renderInvocationConfigBody() {
   const iv  = _calcInvocationStats(s);
   const img = s.invocation?.image;
   const acts = Array.isArray(s.invocation?.actions) ? s.invocation.actions : [];
+  const _invCalcChar = _invocationCalcChar(s); // base de calcul = attaque de la créature
   const dureeStr = iv.concentration ? 'Concentration' : `${iv.duree} tour${iv.duree>1?'s':''}`;
   return `
     <div class="inv-cfg">
@@ -1520,30 +1521,58 @@ function _renderInvocationConfigBody() {
         <button class="btn btn-gold btn-sm" data-action="_invCfgAddAction">＋ Nouvelle action</button>
       </div>
       <div class="inv-cfg-list">
-        ${acts.length ? acts.map((a, ai) => `
+        ${acts.length ? acts.map((a, ai) => {
+          // Dégâts calculés sur la base de l'ATTAQUE de la créature (pas l'arme du perso)
+          const _off = _getSortTypes(a).includes('offensif') || (a.runes||[]).includes('Lacération');
+          const _dmg = _off ? _calcSortDegats(a, _invCalcChar) : '';
+          const _meta = [
+            _dmg ? `🎲 ${_esc(_dmg)}` : '',
+            Array.isArray(a.runes) && a.runes.length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune',
+            a.pm ? `${a.pm} PM` : '',
+          ].filter(Boolean).join(' · ');
+          return `
           <div class="inv-cfg-act">
             <div class="inv-cfg-act-main" data-action="_invCfgEditAction" data-aidx="${ai}">
               <span class="inv-cfg-act-name">🎬 ${_esc(a.nom || 'Action')}</span>
-              <span class="inv-cfg-act-meta">${Array.isArray(a.runes) && a.runes.length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune'}${a.pm ? ` · ${a.pm} PM` : ''}</span>
+              <span class="inv-cfg-act-meta">${_meta}</span>
             </div>
             <button class="btn-icon" data-action="_invCfgEditAction" data-aidx="${ai}" title="Modifier">✏️</button>
             <button class="btn-icon" data-action="_invCfgDeleteAction" data-aidx="${ai}" title="Supprimer">🗑️</button>
-          </div>`).join('') : '<div class="inv-cfg-empty">Aucune action. Crée la première attaque ou capacité de la créature.</div>'}
+          </div>`;
+        }).join('') : '<div class="inv-cfg-empty">Aucune action. Crée la première attaque ou capacité de la créature.</div>'}
       </div>
       <div class="inv-cfg-foot">
         <button class="btn btn-outline" data-action="closeModalDirect">Fermer</button>
       </div>
     </div>`;
 }
+// Contexte de calcul "créature" : ses actions se basent sur l'ATTAQUE de
+// l'invocation (ex. 1d4 +2), pas sur l'arme du personnage. On fabrique un perso
+// virtuel neutre (stats 10 → mod 0) dont l'arme principale = l'attaque de la créature.
+function _invocationCalcChar(invSort) {
+  const iv = _calcInvocationStats(invSort || {});
+  return {
+    id: '__invocationCalc',
+    nom: invSort?.nom ? `Créature (${invSort.nom})` : 'Créature invoquée',
+    stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
+    statsBonus: {},
+    equipement: { 'Main principale': {
+      nom: 'Attaque de la créature', degats: iv.attaque,
+      statAttaque: 'force', toucherStat: 'force', degatsStat: 'force',
+      portee: 1, isDefault: true,
+    } },
+    maitrises: {}, sort_cats: [], deck_sorts: [], inventaire: [], elements: [],
+  };
+}
 function _invCfgAddAction() {
   const s = _invCfgSort(); if (!s) return;
   if (!s.invocation) s.invocation = {};
   if (!Array.isArray(s.invocation.actions)) s.invocation.actions = [];
-  editItemSpell({ actions: s.invocation.actions }, -1, _invCfgOnActionSave, STATE.activeChar);
+  editItemSpell({ actions: s.invocation.actions }, -1, _invCfgOnActionSave, _invocationCalcChar(s));
 }
 function _invCfgEditAction(aidx) {
   const s = _invCfgSort(); if (!s?.invocation?.actions) return;
-  editItemSpell({ actions: s.invocation.actions }, parseInt(aidx), _invCfgOnActionSave, STATE.activeChar);
+  editItemSpell({ actions: s.invocation.actions }, parseInt(aidx), _invCfgOnActionSave, _invocationCalcChar(s));
 }
 async function _invCfgOnActionSave(holder) {
   const c = STATE.activeChar, s = _invCfgSort(); if (!c || !s) return;
