@@ -6596,15 +6596,21 @@ function _renderPageList() {
     if (!groups.has(f)) groups.set(f, []);
     groups.get(f).push(p);
   }
+  // Ordre des dossiers : ordre MJ persisté (session.pageFolderOrder) puis alpha
+  // pour les nouveaux ; '' (sans dossier) toujours en dernier.
+  const fOrder = Array.isArray(_session.pageFolderOrder) ? _session.pageFolderOrder : [];
+  const fIdx = f => { const i = fOrder.indexOf(f); return i < 0 ? 1e9 : i; };
   const folders = [...groups.keys()].sort((a,b)=>{
     if (a==='') return 1; if (b==='') return -1;          // sans dossier en dernier
+    const d = fIdx(a) - fIdx(b); if (d) return d;
     return a.localeCompare(b,'fr',{sensitivity:'base'});
   });
 
   const _pageRow = p => {
     const isPlayers=p.id===broadcastId, isMj=p.id===_activePage?.id;
     const cls=isMj&&isPlayers?'mj-and-players':isMj?'mj':isPlayers?'players':'';
-    return `<div class="vtt-page-item ${cls}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${_esc(p.name)} · ${p.cols||24}×${p.rows||18} cases">
+    return `<div class="vtt-page-item ${cls}" data-page-id="${p.id}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${_esc(p.name)} · ${p.cols||24}×${p.rows||18} cases">
+      <span class="vtt-page-item-grip" title="Glisser pour déplacer">⠿</span>
       <div class="vtt-page-item-badges">
         ${isMj     ?'<span title="Votre vue">📍</span>':''}
         ${isPlayers?'<span title="Joueurs ici">👥</span>':''}
@@ -6624,20 +6630,21 @@ function _renderPageList() {
   if (!groups.size) {
     listHtml = `<div class="vtt-tray-empty">Aucune page ne correspond</div>`;
   } else if (onlyUngrouped) {
-    listHtml = groups.get('').map(_pageRow).join('');
+    listHtml = `<div class="vtt-page-folder-body" data-folder="">${groups.get('').map(_pageRow).join('')}</div>`;
   } else {
     listHtml = folders.map(f => {
       const rows = groups.get(f);
       const label = f || '— Sans dossier —';
       // En recherche, tout est déplié ; sinon respecte l'état persistant
       const closed = !q && _pageFoldClosed.has(f);
-      return `<div class="vtt-page-folder${closed?' closed':''}">
+      return `<div class="vtt-page-folder${closed?' closed':''}" data-folder="${encodeURIComponent(f)}">
         <div class="vtt-page-folder-hd" data-vtt-fn="_vttPageFolderToggle" data-vtt-args="${encodeURIComponent(f)}">
+          <span class="vtt-page-folder-grip" title="Glisser pour réordonner">⠿</span>
           <span class="vtt-page-folder-chev">▸</span>
           <span class="vtt-page-folder-name">${_esc(label)}</span>
           <span class="vtt-page-folder-count">${rows.length}</span>
         </div>
-        <div class="vtt-page-folder-body">${rows.map(_pageRow).join('')}</div>
+        <div class="vtt-page-folder-body" data-folder="${encodeURIComponent(f)}">${rows.map(_pageRow).join('')}</div>
       </div>`;
     }).join('');
   }
@@ -6655,6 +6662,61 @@ function _renderPageList() {
     const inp = document.getElementById('vtt-page-search');
     if (inp) { inp.focus(); if (caretPos != null) { try { inp.setSelectionRange(caretPos, caretPos); } catch {} } }
   }
+  // Drag & drop désactivé pendant une recherche (la liste filtrée n'est pas l'ordre réel)
+  _initPageSortables(el, { pages: !q, folders: !q && !onlyUngrouped });
+}
+
+let _pageSortables = [];
+function _destroyPageSortables() {
+  _pageSortables.forEach(s => { try { s.destroy(); } catch {} });
+  _pageSortables = [];
+}
+// Initialise le drag & drop : pages (entre dossiers) + dossiers (réordonner).
+function _initPageSortables(el, { pages = true, folders = true } = {}) {
+  _destroyPageSortables();
+  // Pages : chaque corps de dossier est une zone de dépôt partagée
+  if (pages) el.querySelectorAll('.vtt-page-folder-body').forEach(body => {
+    _pageSortables.push(new Sortable(body, {
+      group: 'vtt-pages', animation: 150, handle: '.vtt-page-item-grip',
+      draggable: '.vtt-page-item', ghostClass: 'vtt-page-ghost', fallbackOnBody: true,
+      onEnd: () => _onPageDrop(el),
+    }));
+  });
+  // Dossiers : réordonner via la poignée de l'en-tête (hors recherche / mono-dossier)
+  if (folders) {
+    const list = el.querySelector('.vtt-page-list');
+    if (list) _pageSortables.push(new Sortable(list, {
+      group: 'vtt-folders', animation: 150, handle: '.vtt-page-folder-grip',
+      draggable: '.vtt-page-folder', ghostClass: 'vtt-page-ghost',
+      onEnd: () => _onFolderDrop(el),
+    }));
+  }
+}
+
+// Persiste folder + order de toutes les pages d'après l'ordre DOM après un drop.
+async function _onPageDrop(el) {
+  const batch = writeBatch(db);
+  let order = 0, changed = 0;
+  el.querySelectorAll('.vtt-page-folder-body').forEach(body => {
+    const folder = decodeURIComponent(body.dataset.folder || '');
+    body.querySelectorAll('.vtt-page-item').forEach(item => {
+      const id = item.dataset.pageId; const p = _pages[id]; if (!p) { order++; return; }
+      if ((p.folder||'') !== folder || (p.order??0) !== order) {
+        batch.update(_pgRef(id), { folder, order });
+        changed++;
+      }
+      order++;
+    });
+  });
+  if (changed) await batch.commit().catch(() => showNotif('Erreur déplacement', 'error'));
+}
+
+// Persiste l'ordre des dossiers (session.pageFolderOrder) d'après l'ordre DOM.
+async function _onFolderDrop(el) {
+  const order = [...el.querySelectorAll('.vtt-page-folder')]
+    .map(f => decodeURIComponent(f.dataset.folder || ''))
+    .filter(f => f !== '');
+  await setDoc(_sesRef(), { pageFolderOrder: order }, { merge: true }).catch(() => {});
 }
 
 function _vttPageSearch(v) { _pageSearch = String(v || ''); _renderPageList(); }
@@ -8860,25 +8922,61 @@ async function _vttClearAnnots() {
   await Promise.all(toDelete.map(e => deleteDoc(_annotRef(e.data.id)).catch(()=>{})));
 }
 
+// Presets de taille communs aux modales création / édition (préfixe vpf-/vpe-)
+const _PG_PRESETS = [
+  { lb:'Petite',  c:16, r:12 },
+  { lb:'Moyenne', c:24, r:18 },
+  { lb:'Grande',  c:32, r:24 },
+  { lb:'Vaste',   c:48, r:36 },
+];
+function _pgModalBody(pfx, { name='', folder='', cols=24, rows=18, fog=null } = {}) {
+  const presets = _PG_PRESETS.map(p =>
+    `<button type="button" class="vtt-pgm-preset" data-vtt-fn="_vttPgPreset" data-vtt-args="${pfx}|${p.c}|${p.r}">${p.lb}<small>${p.c}×${p.r}</small></button>`
+  ).join('');
+  return `
+    <div class="vtt-pgm">
+      <label class="vtt-pgm-field">
+        <span class="vtt-pgm-lbl">Nom de la page</span>
+        <input id="${pfx}name" type="text" value="${_esc(name)}" placeholder="ex : Forêt Sombre" autofocus>
+      </label>
+      <label class="vtt-pgm-field">
+        <span class="vtt-pgm-lbl">📁 Dossier <em>(optionnel)</em></span>
+        <input id="${pfx}folder" type="text" value="${_esc(folder)}" placeholder="ex : Chapitre 1, Donjons…" list="${pfx}folders" autocomplete="off">
+        ${_pageFolderDatalist(pfx+'folders')}
+        <span class="vtt-pgm-hint">Tape un nom existant ou nouveau — ou range la page par glisser-déposer.</span>
+      </label>
+      <div class="vtt-pgm-field">
+        <span class="vtt-pgm-lbl">Dimensions de la grille</span>
+        <div class="vtt-pgm-presets">${presets}</div>
+        <div class="vtt-pgm-dims">
+          <div><input id="${pfx}cols" type="number" value="${cols}" min="8" max="200"><span>colonnes</span></div>
+          <span class="vtt-pgm-x">×</span>
+          <div><input id="${pfx}rows" type="number" value="${rows}" min="8" max="200"><span>lignes</span></div>
+        </div>
+      </div>
+      ${fog !== null ? `
+      <label class="vtt-pgm-check">
+        <input type="checkbox" id="${pfx}fog" ${fog?'checked':''}>
+        <span>👁 Éclairage dynamique (brouillard de guerre)</span>
+      </label>` : ''}
+    </div>`;
+}
+function _vttPgPreset(pfx, c, r) {
+  const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
+  if (cEl) cEl.value = c;
+  if (rEl) rEl.value = r;
+  document.querySelectorAll('.vtt-pgm-preset').forEach(b => {
+    const [bp, bc, br] = (b.dataset.vttArgs||'').split('|');
+    b.classList.toggle('active', bp===pfx && +bc===+c && +br===+r);
+  });
+}
+
 function _vttAddPage() {
-  openModal('➕ Nouvelle page', `
-    <div class="vtt-form">
-      <div class="form-group"><label>Nom</label>
-        <input id="vpf-name" type="text" placeholder="ex : Forêt Sombre" autofocus></div>
-      <div class="form-group"><label>Dossier (optionnel)</label>
-        <input id="vpf-folder" type="text" placeholder="ex : Chapitre 1, Donjons…" list="vpf-folders" autocomplete="off">
-        ${_pageFolderDatalist('vpf-folders')}</div>
-      <div class="vtt-form-row">
-        <div class="form-group"><label>Colonnes (largeur)</label>
-          <input id="vpf-cols" type="number" value="24" min="8" max="200"></div>
-        <div class="form-group"><label>Lignes (hauteur)</label>
-          <input id="vpf-rows" type="number" value="18" min="8" max="200"></div>
-      </div>
-      <small style="color:var(--text-dim);font-size:.72rem">1 case = ${CELL}px · ex : 30×22 pour une grande carte</small>
-      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-        <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer</button>
-      </div>
+  openModal('🗺️ Nouvelle page', `
+    ${_pgModalBody('vpf-')}
+    <div class="vtt-pgm-actions">
+      <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer la page</button>
     </div>`);
 }
 // Datalist des dossiers de pages existants (suggestions de saisie)
@@ -8902,28 +9000,10 @@ async function _vttConfirmAddPage() {
 function _vttEditPage(id) {
   const p=_pages[id]; if (!p) return;
   openModal('✏️ Modifier la page', `
-    <div class="vtt-form">
-      <div class="form-group"><label>Nom</label>
-        <input id="vpe-name" type="text" value="${p.name}" autofocus></div>
-      <div class="form-group"><label>Dossier (optionnel)</label>
-        <input id="vpe-folder" type="text" value="${_esc(p.folder||'')}" placeholder="ex : Chapitre 1, Donjons…" list="vpe-folders" autocomplete="off">
-        ${_pageFolderDatalist('vpe-folders')}</div>
-      <div class="vtt-form-row">
-        <div class="form-group"><label>Colonnes</label>
-          <input id="vpe-cols" type="number" value="${p.cols||24}" min="8" max="200"></div>
-        <div class="form-group"><label>Lignes</label>
-          <input id="vpe-rows" type="number" value="${p.rows||18}" min="8" max="200"></div>
-      </div>
-      <div class="form-group" style="margin-top:.5rem">
-        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-          <input type="checkbox" id="vpe-fog" ${p.fogEnabled?'checked':''}>
-          <span>👁 Éclairage dynamique (brouillard de guerre)</span>
-        </label>
-      </div>
-      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
-        <button class="btn-secondary" data-action="close-modal">Annuler</button>
-        <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
-      </div>
+    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled })}
+    <div class="vtt-pgm-actions">
+      <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
     </div>`);
 }
 async function _vttConfirmEditPage(id) {
@@ -12992,6 +13072,7 @@ const VTT_ACTIONS = {
   _vttPageFolderToggle,
   _vttPageSearch,
   _vttPageSearchClear,
+  _vttPgPreset,
   _vttPickOpt,
   _vttPlColorSelect,
   _vttPlace,
