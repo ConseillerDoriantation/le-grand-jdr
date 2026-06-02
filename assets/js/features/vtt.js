@@ -3023,7 +3023,8 @@ function _buildSpellOption(s, ctx) {
       isUtil: true, halfOnMiss: false,
     };
   }
-  if (types.includes('offensif')) {
+  // Lacération frappe toujours l'attaque de base, même si « offensif » n'est pas coché.
+  if (types.includes('offensif') || _sRunes.includes('Lacération')) {
     const fullFormula    = _vttSortDmgFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
     const spellTypeId    = s.noyauTypeId || null;

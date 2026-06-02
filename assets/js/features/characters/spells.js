@@ -339,8 +339,8 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // Chips clés pour la ligne compacte
   const chips = [];
 
-  // ── 1. Dégâts d'impact (offensif standard) ──
-  if (types.includes('offensif') && !suppressImpactDmg) {
+  // ── 1. Dégâts d'impact (offensif, OU Lacération qui frappe toujours) ──
+  if ((types.includes('offensif') || runesAll.includes('Lacération')) && !suppressImpactDmg) {
     const degBase = _calcSortDegats(s, c);
     let val = degBase;
     if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
@@ -1449,7 +1449,10 @@ function _refreshConditionalSections() {
   // Invocation : le sort n'a pas de dégâts propres (la créature frappe) → masque
   // la section Dégâts même en offensif (Puissance scale l'attaque de l'invocation).
   const anyInvoc = (counts.Invocation || 0) > 0;
-  if (dSec) dSec.style.display = (isOffensive && !hasAffliction && !isDepl && !anyInvoc) ? '' : 'none';
+  // Lacération frappe toujours (attaque de base) → section Dégâts visible même
+  // si l'utilisateur n'a pas coché « offensif ».
+  const hasLaceration = (counts.Lacération || 0) > 0;
+  if (dSec) dSec.style.display = ((isOffensive || hasLaceration) && !hasAffliction && !isDepl && !anyInvoc) ? '' : 'none';
   if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
   // Section Invocation générique : rune Invocation seule (hors combos Sentinelle/Arme invoquée)
   const hasInvoc = anyInvoc && !(counts.Affliction > 0) && !(counts.Enchantement > 0);

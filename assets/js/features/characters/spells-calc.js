@@ -774,7 +774,10 @@ export function _buildSortResume(s, c) {
   // (Puissance scale l'attaque de l'invocation, pas un impact direct).
   const isInvocationSpell = runes.includes('Invocation');
   const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell || isInvocationSpell;
-  if (types.includes('offensif') && !_suppressImpactDmg) {
+  // Lacération inflige TOUJOURS l'attaque de base (+ sa réduction de CA), même si
+  // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
+  const _dealsImpact = types.includes('offensif') || runes.includes('Lacération');
+  if (_dealsImpact && !_suppressImpactDmg) {
     const mainP   = getMainWeapon(c);
     // Override du sort sur la stat de dégâts > stat de l'arme principale
     const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
