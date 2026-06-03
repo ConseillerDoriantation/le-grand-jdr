@@ -1368,6 +1368,10 @@ export async function openSortModal(idx, s) {
   setTimeout(() => {
     updateSortPM();
     _updateSortActionDisplay();
+    // Applique l'état initial des sections conditionnelles (Dégâts/Soin/CA, Drain,
+    // Invocation…) dès l'ouverture — sinon un sort déjà Drain affichait les onglets
+    // CA/Soin tant qu'on n'avait pas interagi.
+    _refreshConditionalSections();
     _updateSortPreview();
     // Listeners génériques pour rafraîchir la preview à chaque saisie
     const modal = document.querySelector('.modal');
