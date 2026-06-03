@@ -8536,8 +8536,13 @@ function _renderChatLog(msgs) {
       const dmgVal = (r.hit || r.halfDmg) ? (r.dmgTotal < 0 ? `+${-r.dmgTotal}` : r.dmgTotal) : '—';
       const dmgSuffix = r.newHp === 0 ? ' 💀' : '';
       const shownCA = _viewCA(r, r.targetCA);
+      // Portrait de la cible : son image si disponible (ex. invocation), sinon
+      // l'icône de résolution. La pastille de couleur reste le statut hit/miss.
+      const portraitInner = r.targetImage
+        ? `<img src="${_esc(r.targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="this.replaceWith(document.createTextNode('${icon}'))">`
+        : icon;
       return `<div class="vtt-log-target" style="--row-c:${baseCol}">
-        <div class="vtt-log-target-portrait" style="background:${baseCol}">${icon}</div>
+        <div class="vtt-log-target-portrait" style="background:${baseCol}">${portraitInner}</div>
         <span class="vtt-log-target-name">${_esc(r.name)}</span>
         <span class="vtt-log-target-ca">CA ${shownCA}</span>
         <span class="vtt-log-target-dmg">${dmgVal}${dmgSuffix}</span>
