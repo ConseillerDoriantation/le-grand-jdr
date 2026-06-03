@@ -3149,6 +3149,14 @@ function _buildAttackOptions(t) {
         statsBonus: {}, maitrises: {},
         equipement: { 'Main principale': { nom: 'Attaque', degats: t.attackDice || '1d4', statAttaque: 'force', isDefault: true } },
       };
+      // L'invocation profite du SET du lanceur : le set léger (spellPmDelta -2)
+      // réduit le coût en mana de ses sorts (payés par le lanceur).
+      let _ownerSetPmDelta = 0;
+      if (t.summonOwnerId) {
+        const _ownerData = _tokens[t.summonOwnerId]?.data;
+        const _ownerChar = _ownerData?.characterId ? _characters[_ownerData.characterId] : null;
+        if (_ownerChar) _ownerSetPmDelta = getArmorSetData(_ownerChar).modifiers?.spellPmDelta || 0;
+      }
       t.summonActions.forEach((a, ai) => {
         // Seules les actions offensives sont jouables ici (effets complexes : à venir)
         const isOff = (Array.isArray(a.types) && a.types.includes('offensif'))
@@ -3165,8 +3173,10 @@ function _buildAttackOptions(t) {
           label: a.nom || 'Action',
           rawDice: dmg, dice: dmg,
           portee: parseInt(a.portee) || t.range || 1,
-          pmCost: parseInt(a.pm) || 0,   // payé sur le perso du lanceur (cf. _vttRollAttack)
+          // Coût payé sur le perso du lanceur (cf. _vttRollAttack), réduit par son set léger
+          pmCost: Math.max(0, (parseInt(a.pm) || 0) + _ownerSetPmDelta),
           basePm: parseInt(a.pm) || 0,
+          pmSetDelta: _ownerSetPmDelta,
           toucher: t.attack ?? 0,
           dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
           halfOnMiss: false,
