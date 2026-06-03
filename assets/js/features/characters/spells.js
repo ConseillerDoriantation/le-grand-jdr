@@ -371,10 +371,10 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
       chips.push({ icon:'✨', val: lbl, color:'#e8b84b' });
-    } else if (enchantMode === 'toucher' || enchantMode === 'deplacement' || enchantMode === 'ca') {
+    } else if (enchantMode === 'toucher' || enchantMode === 'deplacement') {
       const nbP   = runesAll.filter(r => r === 'Puissance').length;
       const bonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
-      const ic    = enchantMode === 'toucher' ? '🎯' : enchantMode === 'deplacement' ? '👢' : '🛡️';
+      const ic    = enchantMode === 'toucher' ? '🎯' : '👢';
       chips.push({ icon: ic, val: `+${bonus}`, color:'#e8b84b' });
     } else {
       // Mode Dégâts : formule bonus sur arme alliée
@@ -1119,7 +1119,6 @@ export async function openSortModal(idx, s) {
             { v:'dmg',         lbl:'⚔️ Dégâts' },
             { v:'toucher',     lbl:'🎯 Toucher' },
             { v:'deplacement', lbl:'👢 Déplacement' },
-            { v:'ca',          lbl:'🛡️ CA' },
             { v:'etat',        lbl:'✨ État' },
           ].map(o => `<button type="button" id="s-enchant-mode-${o.v}"
             data-action="_selectEnchantMode" data-val="${o.v}"
@@ -1140,8 +1139,8 @@ export async function openSortModal(idx, s) {
         })}
       </div>
 
-      <!-- Modes Toucher / Déplacement / CA : un bonus chiffré sur l'allié -->
-      <div id="s-enchant-bonus-block" class="form-group" style="${['toucher','deplacement','ca'].includes(s?.enchantMode)?'':'display:none'}">
+      <!-- Modes Toucher / Déplacement : un bonus chiffré sur l'allié -->
+      <div id="s-enchant-bonus-block" class="form-group" style="${['toucher','deplacement'].includes(s?.enchantMode)?'':'display:none'}">
         <label id="s-enchant-bonus-label">Bonus</label>
         <input class="input-field" type="number" id="s-enchant-bonus" value="${s?.enchantBonus??''}" placeholder="auto (2 + Puissance)">
         <div id="s-enchant-bonus-hint" style="font-size:.7rem;color:var(--text-dim);margin-top:.25rem">Laisse vide = auto. Chaque rune Puissance augmente le bonus de 1.</div>
@@ -2058,9 +2057,9 @@ function _applySpellSuggest(cat) {
 function _selectEnchantMode(mode) {
   const hidden = document.getElementById('s-enchant-mode');
   if (hidden) hidden.value = mode;
-  ['dmg','toucher','deplacement','ca','etat'].forEach(m =>
+  ['dmg','toucher','deplacement','etat'].forEach(m =>
     document.getElementById(`s-enchant-mode-${m}`)?.classList.toggle('selected', mode === m));
-  const isBonus = ['toucher','deplacement','ca'].includes(mode);
+  const isBonus = ['toucher','deplacement'].includes(mode);
   const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
   show('s-enchant-dmg-block',   mode === 'dmg');
   show('s-enchant-bonus-block', isBonus);
@@ -2068,8 +2067,7 @@ function _selectEnchantMode(mode) {
   // Adapte le libellé du champ bonus selon la cible boostée
   const lbl = document.getElementById('s-enchant-bonus-label');
   if (lbl) lbl.textContent = mode === 'toucher' ? '🎯 Bonus au toucher'
-                           : mode === 'deplacement' ? '👢 Cases de déplacement en plus'
-                           : mode === 'ca' ? '🛡️ Bonus de CA' : 'Bonus';
+                           : mode === 'deplacement' ? '👢 Cases de déplacement en plus' : 'Bonus';
   _updateSortPreview();
 }
 

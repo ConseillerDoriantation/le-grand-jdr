@@ -2264,9 +2264,6 @@ function _vttSpellMods(s) {
     // Enchantement mode Déplacement : cases de mouvement en plus (auto = 2 + Puissance)
     enchantMove: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'deplacement')
       ? { bonusCells: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
-    // Enchantement mode CA : bonus de CA sur l'allié (auto = 2 + Puissance)
-    enchantCA: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'ca')
-      ? { bonus: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
     // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
     // Auto : +2 cases / rune Puissance, ou +1 par défaut
     enchantPieds: (nbEnch > 0 && nbInv === 0 && s.enchantSlot === 'pieds')
@@ -2747,9 +2744,6 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   if (opt.mods?.enchantMove) {
     buffs.push({ ...shared, type: 'move_bonus', slot: 'pieds', icon: '👢', bonus: opt.mods.enchantMove.bonusCells });
   }
-  if (opt.mods?.enchantCA) {
-    buffs.push({ ...shared, type: 'ca', icon: '🛡️', bonus: opt.mods.enchantCA.bonus });
-  }
   if (!buffs.length) return;
   // ── Anti-stack global : un buff dmg_bonus arme remplace TOUS les anciens dmg_bonus arme.
   // Les autres types (move_bonus, range_bonus, enchantment) se filtrent par sort label
@@ -3020,7 +3014,7 @@ function _buildSpellOption(s, ctx) {
 
   const isEnchantOnly = enchantOnlyAlsoEtat
     ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId
-       || !!mods?.enchantToucher || !!mods?.enchantMove || !!mods?.enchantCA) && !((s.degats || '').trim())
+       || !!mods?.enchantToucher || !!mods?.enchantMove) && !((s.degats || '').trim())
     : ( !!mods?.enchantArmeDmg && !((s.degats || '').trim()));
   const isAfflictionOnly = !!mods?.affliction;
 
@@ -5082,9 +5076,9 @@ async function _vttRollAttack() {
       }
     }
 
-    // ── Enchantements (mode Dégâts ou mode État) : buffs / états sur alliés ──
+    // ── Enchantements (Dégâts, État, Toucher, Déplacement, slots) : buffs / états sur alliés ──
     if (opt.mods?.enchantArmeDmg || opt.mods?.enchantPieds || opt.mods?.enchantGeneric
-        || opt.mods?.enchantEtatId) {
+        || opt.mods?.enchantEtatId || opt.mods?.enchantToucher || opt.mods?.enchantMove) {
       await _vttApplyEnchantBuffs(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
     }
 
