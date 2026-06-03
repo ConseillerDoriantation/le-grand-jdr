@@ -256,13 +256,13 @@ export function renderCharInventaire(c, canEdit) {
     const isEquipped = equippedSlots.length > 0;
     const chips = _invRowChips(item);
     const nomEsc = _esc(item.nom || '?');
-    const nomSafe = (item.nom || '').replace(/'/g, "\\'");
 
     return `<div class="inv-row${hidden ? ' inv-row--hidden' : ''}" data-nom="${_esc(nomLower)}" style="--rc:${rareteC}">
       <div class="inv-row-body">
         <span class="inv-row-nom">${nomEsc}</span>
         ${isEquipped ? `<span class="inv-row-eq" title="${equippedSlots.join(', ')}">✓ Équipé</span>` : ''}
         ${chips.length ? `<div class="inv-row-chips">${chips.map(ch => `<span class="inv-row-chip" style="color:${ch.color}">${_esc(ch.val)}</span>`).join('')}</div>` : ''}
+        ${renderInvPersonalLine(c, g.indices, indicesB64, 'row', canEdit)}
       </div>
       <div class="inv-row-aside">
         ${g.qte > 1 ? `<span class="inv-row-qte">×${g.qte}</span>` : ''}
@@ -352,6 +352,72 @@ function _decodeIndices(b64) {
   try { return JSON.parse(atob(b64)); } catch { return []; }
 }
 
+function getInvPersonalLineForIndices(inv, indices) {
+  const notes = [...new Set(indices
+    .map(idx => String(inv?.[idx]?.notePerso || '').trim())
+    .filter(Boolean))];
+  if (notes.length === 0) return { text: '', multiple: false };
+  if (notes.length === 1) return { text: notes[0], multiple: false };
+  return { text: 'Notes différentes selon les exemplaires.', multiple: true };
+}
+
+export function renderInvPersonalLine(c, indices, indicesB64, variant = 'row', canEdit = false) {
+  const { text, multiple } = getInvPersonalLineForIndices(c.inventaire || [], indices);
+  const noteCls = variant === 'card' ? 'inv-card-note' : 'inv-row-note';
+
+  if (!canEdit) {
+    return text ? '<div class="' + noteCls + (multiple ? ' ' + noteCls + '--mixed' : '') + '">✎ ' + _esc(text) + '</div>' : '';
+  }
+
+  const placeholder = multiple ? 'Notes différentes : écrire ici remplacera tout le groupe.' : 'Ligne personnelle...';
+  return [
+    '<div class="' + noteCls + ' inv-note-editable' + (multiple ? ' ' + noteCls + '--mixed inv-note-editable--mixed' : '') + '">',
+    '<span class="inv-note-prefix">✎</span>',
+    '<textarea class="inv-note-field" data-change="saveInvPersonalLine"',
+    ' data-id="' + c.id + '" data-indices="' + indicesB64 + '"',
+    ' data-original-note="' + _esc(multiple ? '' : text) + '" rows="1" maxlength="180"',
+    ' placeholder="' + _esc(placeholder) + '">',
+    multiple ? '' : _esc(text),
+    '</textarea>',
+    '</div>',
+  ].join('');
+}
+
+export async function saveInvPersonalLine(charId, indicesB64, sourceEl = null) {
+  const c = getCharacterById(charId);
+  if (!c || !sourceEl) return;
+  const indices = _decodeIndices(indicesB64);
+  if (!indices.length) return;
+
+  const note = String(sourceEl.value || '').trim().slice(0, 180);
+  const original = String(sourceEl.dataset.originalNote || '').trim();
+  if (note === original) return;
+
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  indices.forEach(idx => {
+    if (!inv[idx]) return;
+    const next = { ...inv[idx] };
+    if (note) next.notePerso = note;
+    else delete next.notePerso;
+    inv[idx] = next;
+  });
+
+  c.inventaire = inv;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
+  const stChar = (STATE.characters || []).find(x => x.id === c.id);
+  if (stChar) stChar.inventaire = inv;
+  const feedbackEl = sourceEl.closest?.('.inv-note-editable') || sourceEl;
+  feedbackEl.classList.add('is-saving');
+  if (await trySave('characters', charId, { inventaire: inv })) {
+    sourceEl.dataset.originalNote = note;
+    feedbackEl.classList.remove('is-saving');
+    feedbackEl.classList.add('is-saved');
+    setTimeout(() => feedbackEl.classList.remove('is-saved'), 900);
+    showNotif(note ? 'Ligne personnelle enregistrée.' : 'Ligne personnelle supprimée.', 'success');
+  } else {
+    feedbackEl.classList.remove('is-saving');
+  }
+}
 // ══════════════════════════════════════════════
 // VENTE
 // ══════════════════════════════════════════════
@@ -1122,6 +1188,7 @@ registerActions({
   _lootFilter:         ()    => _lootFilter(),
   sendGold:            (btn) => sendGold(btn.dataset.id),
   saveInvItemFromShop: ()    => saveInvItemFromShop(),
+  saveInvPersonalLine: (el) => saveInvPersonalLine(el.dataset.id, el.dataset.indices, el),
   saveInvItem:         (btn) => saveInvItem(Number(btn.dataset.idx)),
   _lootSelect:         (btn) => _lootSelect(btn.dataset.id),
   _lootSetCat:         (btn) => _lootSetCat(btn.dataset.cat),

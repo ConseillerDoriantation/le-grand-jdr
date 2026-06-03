@@ -42,6 +42,7 @@ import {
   openSendGoldModal, sendGold,
   addInvItem, _lootPillStyle, saveInvItemFromShop,
   editInvItem, saveInvItem,
+  renderInvPersonalLine, saveInvPersonalLine,
   filterInvRows,
 } from './characters/inventory.js';
 
@@ -2243,7 +2244,6 @@ function renderCharInventaireV3(c, canEdit) {
 
     const equipMap = (() => { try { return getEquippedInventoryIndexMap?.(c) || new Map(); } catch { return new Map(); } })();
     const isEquipped = allIdx.some(i => equipMap.has(i));
-    const safeName = String(it.nom || '').replace(/`/g, '\\`').replace(/"/g, '&quot;');
 
     return `<div class="inv-card ${isEquipped?'is-equipped':''}" style="--rare-c:${col}">
       <div class="inv-card-head">
@@ -2268,6 +2268,7 @@ function renderCharInventaireV3(c, canEdit) {
         return badges.length ? `<div class="inv-card-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>` : '';
       })()}
       ${it.description?`<div class="inv-card-desc">${_esc(it.description)}</div>`:''}
+      ${renderInvPersonalLine(c, allIdx, allIdxB64, 'card', canEdit)}
       ${canEdit?`<div class="inv-card-actions">
         <button class="inv-act sell" data-action="openSellInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-prix="${prixVente}" data-name="${_esc(it.nom||'')}" title="Vendre ${prixVente} or/u">💰 Vendre ${prixVente}or</button>
         <button class="inv-act send" data-action="openSendInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Envoyer">↗ Envoyer</button>
@@ -2579,6 +2580,7 @@ registerActions({
   openSellInvModal:         (btn)   => openSellInvModal(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix), btn.dataset.name),
   openSendInvModal:         (btn)   => openSendInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
   openDeleteInvModal:       (btn)   => openDeleteInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
+  saveInvPersonalLine:      (el)    => saveInvPersonalLine(el.dataset.id, el.dataset.indices, el),
   sellInvItemBulk:          (btn)   => sellInvItemBulk(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix)),
   deleteInvItemBulk:        (btn)   => deleteInvItemBulk(btn.dataset.id, btn.dataset.indices),
   sendInvItem:              (btn)   => sendInvItem(btn.dataset.id, btn.dataset.indices),

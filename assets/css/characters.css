@@ -6020,6 +6020,54 @@ input[type=number].input-field::-webkit-outer-spin-button {
   padding: 1px 5px;
   white-space: nowrap;
 }
+.inv-row-note {
+  flex-basis: 100%;
+  font-size: .71rem;
+  line-height: 1.35;
+  color: var(--gold-2, #7eb0ff);
+  background: rgba(79,140,255,.055);
+  border: 1px solid rgba(79,140,255,.16);
+  border-radius: 6px;
+  padding: 3px 7px;
+  margin-top: 1px;
+}
+.inv-row-note--mixed {
+  color: var(--text-dim);
+  background: rgba(255,255,255,.035);
+  border-color: var(--border);
+  font-style: italic;
+}
+.inv-note-editable {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  cursor: text;
+}
+.inv-note-prefix {
+  flex-shrink: 0;
+  line-height: inherit;
+}
+.inv-note-field {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 1.35em;
+  field-sizing: content;
+  resize: none;
+  overflow: hidden;
+  border: 0;
+  outline: 0;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+}
+.inv-note-field::placeholder { color: var(--text-dim); font-style: italic; }
+.inv-note-editable--mixed .inv-note-field::placeholder { color: var(--text-muted); }
+.inv-note-editable.is-saving { opacity: .68; }
+.inv-note-editable.is-saved { border-color: rgba(74,222,128,.45); }
 
 .inv-row-aside {
   display: flex;
@@ -9238,6 +9286,21 @@ input[type=number].input-field::-webkit-outer-spin-button {
   font-style: italic;
   line-height: 1.5;
   margin: 0;
+}
+.cs-v3 .inv-card-note {
+  font-size: .74rem;
+  line-height: 1.45;
+  color: var(--gold-2, #7eb0ff);
+  background: rgba(79,140,255,.055);
+  border: 1px solid rgba(79,140,255,.16);
+  border-radius: 7px;
+  padding: 6px 8px;
+}
+.cs-v3 .inv-card-note--mixed {
+  color: var(--text-soft, #c8d4e8);
+  background: rgba(255,255,255,.035);
+  border-color: var(--border);
+  font-style: italic;
 }
 .cs-v3 .inv-card-actions {
   display: flex; gap: 5px; flex-wrap: wrap;
