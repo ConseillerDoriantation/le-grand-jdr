@@ -46,14 +46,13 @@ export function _getSortTypes(s) {
 
 /** Type d'action : 'action' | 'action_bonus' | 'reaction'
  *  + concentration : boolean
- *  Réaction et Concentration = 100% déterminées par les runes.
- *  Action Bonus = rune Action Bonus. Override manuel possible pour Action/Action Bonus uniquement.
+ *  Type d'action 100% déterminé par les runes : Réaction > Action Bonus > Action.
  */
 export function _getSortAction(s) {
   const runes = s.runes || [];
   const action        = runes.includes('Réaction')      ? 'reaction'
                       : runes.includes('Action Bonus')  ? 'action_bonus'
-                      : s.actionOverride                || 'action';
+                      : 'action';
   const concentration = runes.includes('Concentration');
   return { action, concentration };
 }

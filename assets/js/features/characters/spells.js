@@ -23,7 +23,6 @@ let _sortsCatCollapsed = {};
 let _runeCountsEdit = {};
 let _sortAllowedNoyauIds = null;
 let _sortTypesEdit = new Set(['utilitaire']);
-let _sortActionEdit = null;
 let _deplModeEdit = null;
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
@@ -868,7 +867,6 @@ export async function openSortModal(idx, s) {
     : (s?.typeSoin ? ['defensif'] : (s?.noyau ? ['offensif'] : []));
 
   _sortTypesEdit  = new Set(typesInit);
-  _sortActionEdit = s?.actionOverride || null;
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _invImageEdit   = s?.invocation?.image || '';
   _invActionsEdit = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.map(a => ({ ...a })) : [];
@@ -897,22 +895,6 @@ export async function openSortModal(idx, s) {
       background:${isSel?t.color+'20':'var(--bg-elevated)'};
       color:${isSel?t.color:'var(--text-dim)'};
       font-weight:${isSel?'700':'400'};transition:all .15s">${t.label}</button>`;
-  }).join('');
-
-  const ACTION_CFG = [
-    { v:null,           label:'Auto',            color:'#9ca3af' },
-    { v:'action',       label:'⚡ Action',        color:'#e8b84b' },
-    { v:'action_bonus', label:'✴️ Action Bonus',  color:'#f97316' },
-  ];
-  const actionBtnsHtml = ACTION_CFG.map(a => {
-    const isSel = (_sortActionEdit === a.v);
-    return `<button type="button" id="s-action-${a.v??'auto'}"
-      data-action="_selectSortAction" data-val="${a.v??''}"
-      style="flex:1;padding:.35rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;
-      border:2px solid ${isSel?a.color:'var(--border)'};
-      background:${isSel?a.color+'20':'var(--bg-elevated)'};
-      color:${isSel?a.color:'var(--text-dim)'};
-      font-weight:${isSel?'700':'400'};transition:all .15s">${a.label}</button>`;
   }).join('');
 
   // Amplification : mode Zone | Déplacement (calqué sur Protection soin/CA)
@@ -1286,12 +1268,6 @@ export async function openSortModal(idx, s) {
     </div><!-- /grid-col--left -->
 
     <div class="cs-spell-grid-col cs-spell-grid-col--right">
-    <!-- ⑥ Action — bande inline compacte -->
-    <div class="cs-spell-inline-row">
-      <span class="cs-spell-inline-label" title="Auto = déduit des runes (Réaction/Enchantement)">⚡ Action</span>
-      <div style="display:flex;gap:.25rem;flex:1">${actionBtnsHtml}</div>
-    </div>
-
     <!-- ⑦ Description libre -->
     <div class="form-group cs-spell-desc">
       <label>📝 Description / Effet libre <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">narration, conditions spéciales, fluff</span></label>
@@ -1387,7 +1363,6 @@ export async function openSortModal(idx, s) {
 
   setTimeout(() => {
     updateSortPM();
-    _updateSortActionDisplay();
     // Applique l'état initial des sections conditionnelles (Dégâts/Soin/CA, Drain,
     // Invocation…) dès l'ouverture — sinon un sort déjà Drain affichait les onglets
     // CA/Soin tant qu'on n'avait pas interagi.
@@ -1707,31 +1682,6 @@ function _buildInvocationFromDOM() {
     image: document.getElementById('s-inv-image')?.value || _invImageEdit || '',
     actions: Array.isArray(_invActionsEdit) ? _invActionsEdit : [],
   };
-}
-
-function _selectSortAction(val) {
-  _sortActionEdit = val === 'auto' ? null : val;
-  _updateSortActionDisplay();
-  _updateSortPreview();
-}
-
-function _updateSortActionDisplay() {
-  const ACTION_CFG = {
-    null:         { label:'Auto',            color:'#9ca3af' },
-    action:       { label:'⚡ Action',        color:'#e8b84b' },
-    action_bonus: { label:'✴️ Action Bonus',  color:'#f97316' },
-    reaction:     { label:'🔄 Réaction',      color:'#a78bfa' },
-  };
-  const cur = _sortActionEdit;
-  Object.entries(ACTION_CFG).forEach(([v, cfg]) => {
-    const btn = document.getElementById(`s-action-${v === 'null' ? 'auto' : v}`);
-    if (!btn) return;
-    const active = (cur === null && v === 'null') || cur === v;
-    btn.style.borderColor  = active ? cfg.color : 'var(--border)';
-    btn.style.background   = active ? cfg.color+'20' : 'var(--bg-elevated)';
-    btn.style.color        = active ? cfg.color : 'var(--text-dim)';
-    btn.style.fontWeight   = active ? '700' : '400';
-  });
 }
 
 function _selectDeplMode(mode) {
@@ -2141,7 +2091,6 @@ function _buildSortFromDOM() {
     ca:     document.getElementById('s-ca')?.value || '',
     effet:  document.getElementById('s-effet')?.value || '',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
-    actionOverride: _sortActionEdit || null,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
@@ -2296,7 +2245,6 @@ export async function saveSort(idx) {
     const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
 
     // Action override (null = auto)
-    const actionOverride = _sortActionEdit || null;
 
     const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
     const deplMode = _deplModeEdit || null;
@@ -2336,7 +2284,6 @@ export async function saveSort(idx) {
       typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
       catId:         document.getElementById('s-catid')?.value || '',
       actif:         idx>=0 ? sorts[idx].actif : false,
-      actionOverride,
       enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
       enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
@@ -2413,7 +2360,6 @@ function _buildSortFromForm(idx, prevList = []) {
   const totalRunes = (noyau ? 1 : 0) + runes.length;
   const autoPm     = totalRunes * 2 || 2;
   const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
-  const actionOverride = _sortActionEdit || null;
   const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
   const prevVal = idx >= 0 ? (prevList[idx]?.mjValidation || (prevList[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
@@ -2442,7 +2388,6 @@ function _buildSortFromForm(idx, prevList = []) {
     effet:    document.getElementById('s-effet')?.value||'',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
     typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
-    actionOverride,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
@@ -2533,7 +2478,6 @@ registerActions({
   _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
-  _selectSortAction:      (btn) => _selectSortAction(btn.dataset.val === '' ? null : btn.dataset.val),
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),

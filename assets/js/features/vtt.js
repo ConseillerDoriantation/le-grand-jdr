@@ -3001,7 +3001,7 @@ function _buildSpellOption(s, ctx) {
     ? 'reaction'
     : _sRunes.includes('Action Bonus')
       ? 'bonus'
-      : (s.actionOverride === 'action_bonus' ? 'bonus' : s.actionOverride === 'reaction' ? 'reaction' : 'action');
+      : 'action';
   const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';
 
   // Bloc de champs communs réutilisé dans chaque variante d'option
