@@ -3165,7 +3165,8 @@ function _buildAttackOptions(t) {
           label: a.nom || 'Action',
           rawDice: dmg, dice: dmg,
           portee: parseInt(a.portee) || t.range || 1,
-          pmCost: 0,
+          pmCost: parseInt(a.pm) || 0,   // payé sur le perso du lanceur (cf. _vttRollAttack)
+          basePm: parseInt(a.pm) || 0,
           toucher: t.attack ?? 0,
           dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
           halfOnMiss: false,
@@ -4857,10 +4858,14 @@ async function _vttRollAttack() {
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
 
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
+  // Payeur du mana : un token convoqué (invocation) n'a pas de PM propre — ses
+  // sorts/actions sont payés sur le personnage du LANCEUR (summonOwnerId).
+  const _pmPayerCharId = src.characterId
+    || (src.summonOwnerId ? (_tokens[src.summonOwnerId]?.data?.characterId || null) : null);
   const _deductPm  = async () => {
-    if (opt.pmCost > 0 && src.characterId) {
-      const c = _characters[src.characterId];
-      if (c) await updateDoc(_chrRef(src.characterId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
+    if (opt.pmCost > 0 && _pmPayerCharId) {
+      const c = _characters[_pmPayerCharId];
+      if (c) await updateDoc(_chrRef(_pmPayerCharId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
     }
   };
   // Consomme 1 exemplaire de l'objet si l'option vient d'un item-action marqué `consommable`.
@@ -4909,13 +4914,14 @@ async function _vttRollAttack() {
 
   try {
 
-    // ── Vérification PM ──────────────────────────────────────────────
-    if (opt.pmCost > 0 && src.characterId) {
-      const cPm = _characters[src.characterId];
+    // ── Vérification PM (payés par le lanceur si c'est une invocation) ──
+    if (opt.pmCost > 0 && _pmPayerCharId) {
+      const cPm = _characters[_pmPayerCharId];
       if (cPm) {
         const actualPm = cPm.pm ?? calcPMMax(cPm);
         if (actualPm < opt.pmCost) {
-          showNotif(`⚠ PM insuffisants (${actualPm}/${opt.pmCost} requis)`, 'error');
+          const _who = src.summonOwnerId ? ' du lanceur' : '';
+          showNotif(`⚠ PM insuffisants${_who} (${actualPm}/${opt.pmCost} requis)`, 'error');
           return;
         }
       }
