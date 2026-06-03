@@ -62,10 +62,13 @@ export function _calcSortDegats(s, c) {
   // Un sort en mode déplacement (rune Amplification → Déplacement) n'inflige jamais de dégâts.
   if (s.ampMode === 'deplacement') return '';
   const mainP   = getMainWeapon(c);
-  const armeDeg = mainP.degats;
+  // Garde-fou : une arme sans champ `degats` (objet incomplet) ne doit pas faire
+  // planter le calcul → repli sur les Poings (2d4). base est toujours une string.
+  const armeDeg = (mainP && mainP.degats) ? String(mainP.degats) : '2d4';
 
   let base = (s.degats || '').trim();
   if (!base || base.toLowerCase() === '= arme') base = armeDeg;
+  base = String(base || '2d4');
 
   const runes   = s.runes || [];
   const nbPuiss = runes.filter(r => r === 'Puissance').length;

@@ -2154,8 +2154,8 @@ function _updateSortPreview() {
   try {
     lines = _buildSortResume(s, c);
   } catch (e) {
-    console.warn('[Preview item] _buildSortResume a échoué :', e);
-    lines = [{ icon:'⚠️', label:'Aperçu non disponible (calcul indisponible sans perso)' }];
+    console.warn('[Preview] _buildSortResume a échoué :', e);
+    lines = [{ icon:'⚠️', label:'Aperçu indisponible', detail: String(e?.message || e) }];
   }
   body.innerHTML = lines.map(l => `
     <div class="cs-spell-preview-row ${l.isCombo ? 'cs-spell-preview-row--combo' : ''}">
