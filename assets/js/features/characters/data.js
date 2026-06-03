@@ -559,7 +559,7 @@ export async function openSpellMatricesAdmin() {
 
 function _renderSpellMatricesModal(types) {
   const TABS = [
-    { id:'enchant',      label:'✨ Enchantement',     desc:'Effets sur les alliés (Action Bonus · 2 tours)' },
+    { id:'enchant',      label:'✨ Enchantement',     desc:'Effets sur les alliés (Action · 2 tours)' },
     { id:'affliction',   label:'💀 Affliction',       desc:'Effets sur les ennemis (Action · 2 tours)'      },
     { id:'protectionCA', label:'🛡️ Protection CA',    desc:'Variantes du bonus CA par élément'              },
     { id:'combos',       label:'🔗 Combos',           desc:'Activer / renommer les combos de runes'         },

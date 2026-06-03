@@ -46,14 +46,13 @@ export function _getSortTypes(s) {
 
 /** Type d'action : 'action' | 'action_bonus' | 'reaction'
  *  + concentration : boolean
- *  Réaction et Concentration = 100% déterminées par les runes.
- *  Action Bonus = rune Enchantement. Override manuel possible pour Action/Action Bonus uniquement.
+ *  Type d'action 100% déterminé par les runes : Réaction > Action Bonus > Action.
  */
 export function _getSortAction(s) {
   const runes = s.runes || [];
-  const action        = runes.includes('Réaction')     ? 'reaction'
-                      : runes.includes('Enchantement') ? 'action_bonus'
-                      : s.actionOverride               || 'action';
+  const action        = runes.includes('Réaction')      ? 'reaction'
+                      : runes.includes('Action Bonus')  ? 'action_bonus'
+                      : 'action';
   const concentration = runes.includes('Concentration');
   return { action, concentration };
 }
@@ -780,13 +779,17 @@ export function _buildSortResume(s, c) {
   // Sinon, sans formule explicite, on affichait le "1d6" de l'arme par défaut, ce qui
   // donnait une impression trompeuse de dégâts directs.
   const isEnchantOnly  = runes.includes('Enchantement') && !((s.degats || '').trim());
+  // Enchantement Toucher / Déplacement : buff pur, jamais de dégâts d'impact (même
+  // avec un degats résiduel d'un ancien mode Dégâts).
+  const isEnchantBuffOnly = runes.includes('Enchantement')
+    && (s.enchantMode === 'toucher' || s.enchantMode === 'deplacement');
   const isAfflictionSpell = runes.includes('Affliction'); // affliction = jamais d'impact
   // Invocation : le sort n'inflige pas de dégâts lui-même — c'est la créature
   // invoquée qui frappe (ses dégâts propres via _calcInvocationStats). On masque
   // donc l'attaque de base du lanceur, même si Puissance a coché « offensif »
   // (Puissance scale l'attaque de l'invocation, pas un impact direct).
   const isInvocationSpell = runes.includes('Invocation');
-  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell || isInvocationSpell;
+  const _suppressImpactDmg = isEnchantOnly || isEnchantBuffOnly || isAfflictionSpell || isInvocationSpell;
   // Lacération inflige TOUJOURS l'attaque de base (+ sa réduction de CA), même si
   // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
   const _dealsImpact = types.includes('offensif') || runes.includes('Lacération');
@@ -939,7 +942,7 @@ export function _buildSortResume(s, c) {
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';
     const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés (chaîné +${nbEnch-1})`;
-    const detailParts = ['2 tours', 'Action Bonus', cibleStr];
+    const detailParts = ['2 tours', cibleStr];
     // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
     if (mode === 'etat') {
       const lib = _conditionsLibCache || [];
@@ -947,6 +950,14 @@ export function _buildSortResume(s, c) {
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       lines.push({ icon:'✨', label:`Enchantement · État sur allié : ${lbl}`,
                    detail: detailParts.join(' · ') });
+    } else if (mode === 'toucher' || mode === 'deplacement') {
+      const nbP   = runes.filter(r => r === 'Puissance').length;
+      const bonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
+      const what  = mode === 'toucher'     ? { ic:'🎯', txt:`+${bonus} au toucher` }
+                  :                          { ic:'👢', txt:`+${bonus} case${bonus>1?'s':''} de déplacement` };
+      const note  = (s.enchantBonus == null || s.enchantBonus === '') ? ' · auto (2 + Puissance)' : '';
+      lines.push({ icon: what.ic, label:`Enchantement · ${what.txt} sur allié`,
+                   detail: detailParts.join(' · ') + note });
     } else {
       const degAuto = _calcEnchantDegats(s);
       const note = s.enchantDegats?.trim() ? '' : ' · auto (1+Puiss)d4+2';

@@ -23,7 +23,6 @@ let _sortsCatCollapsed = {};
 let _runeCountsEdit = {};
 let _sortAllowedNoyauIds = null;
 let _sortTypesEdit = new Set(['utilitaire']);
-let _sortActionEdit = null;
 let _deplModeEdit = null;
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
@@ -331,10 +330,13 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const afflictionMode = s.afflictionMode || 'dot';
   // Enchantement-only : pas de dégâts d'impact si pas de degats explicite
   const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
+  // Modes Toucher / Déplacement : buff pur sur allié, JAMAIS de dégâts d'impact
+  // (même si un degats résiduel traîne d'un ancien mode Dégâts).
+  const enchantBuffOnly = hasEnchant && (enchantMode === 'toucher' || enchantMode === 'deplacement');
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
   // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
-  const suppressImpactDmg = isEnchantOnly || hasAffliction || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
+  const suppressImpactDmg = isEnchantOnly || enchantBuffOnly || hasAffliction || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];
@@ -371,6 +373,11 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
       chips.push({ icon:'✨', val: lbl, color:'#e8b84b' });
+    } else if (enchantMode === 'toucher' || enchantMode === 'deplacement') {
+      const nbP   = runesAll.filter(r => r === 'Puissance').length;
+      const bonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
+      const ic    = enchantMode === 'toucher' ? '🎯' : '👢';
+      chips.push({ icon: ic, val: `+${bonus}`, color:'#e8b84b' });
     } else {
       // Mode Dégâts : formule bonus sur arme alliée
       const degAuto = _calcEnchantDegats(s);
@@ -611,14 +618,15 @@ const RUNE_META = [
   { nom:'Protection',    icon:'💚', color:'#22c38e', family:'puissance', effet:'+1d4 soin OU +2 CA (2 tours)' },
   { nom:'Amplification', icon:'🌐', color:'#4f8cff', family:'portee',    effet:'Zone +3 mètres' },
   { nom:'Dispersion',    icon:'🎯', color:'#a855f7', family:'portee',    effet:'Touche plusieurs cibles (1 → 2 → 4 → 6…)' },
-  { nom:'Enchantement',  icon:'✨', color:'#e8b84b', family:'soutien',   effet:'Élément sur arme alliée · 2 tours · Action Bonus' },
-  { nom:'Affliction',    icon:'💀', color:'#8b5cf6', family:'soutien',   effet:'Élément + état sur arme ennemie · 2 tours · Action Bonus' },
+  { nom:'Enchantement',  icon:'✨', color:'#e8b84b', family:'soutien',   effet:'Booste un allié · 2 tours' },
+  { nom:'Affliction',    icon:'💀', color:'#8b5cf6', family:'soutien',   effet:'Élément + état sur arme ennemie · 2 tours' },
   { nom:'Invocation',    icon:'🐾', color:'#a16207', family:'soutien',   effet:'Créature liée · 10 PV, CA 10' },
   { nom:'Lacération',    icon:'🩸', color:'#dc2626', family:'soutien',   effet:'CA cible −1 (max −2 / −4 Élite-Boss)' },
   { nom:'Chance',        icon:'🍀', color:'#facc15', family:'soutien',   effet:'RC 19–20 (critique max)' },
   { nom:'Durée',         icon:'⏱️', color:'#06b6d4', family:'meta',      effet:'+2 tours' },
   { nom:'Concentration', icon:'🧠', color:'#6366f1', family:'meta',      effet:'Maintien hors tour · JS Sa DD 11 si touché' },
   { nom:'Réaction',      icon:'🔄', color:'#ec4899', family:'meta',      effet:'Lance hors de son tour' },
+  { nom:'Action Bonus',  icon:'✴️', color:'#f97316', family:'meta',      effet:'Lancé en Action Bonus' },
 ];
 
 const RUNE_GROUPS = [
@@ -722,7 +730,7 @@ function _runeLiveContribution(nom, counts) {
     }
     case 'Enchantement':
       return {
-        main:  cnt === 1 ? 'Buff sur allié · 2 tours · Action Bonus' : `${cnt} cibles alliées · 2 tours`,
+        main:  cnt === 1 ? 'Buff sur allié · 2 tours' : `${cnt} cibles alliées · 2 tours`,
         chain: cnt > 1 ? `🔗 Chaîné +1 cible/rune (Enchantement ×${cnt})` : null,
       };
     case 'Affliction':
@@ -739,6 +747,8 @@ function _runeLiveContribution(nom, counts) {
       return { main: 'Maintenu hors tour · JS Sa DD 11 si dégâts reçus', chain: null };
     case 'Réaction':
       return { main: 'Lancé hors de son tour', chain: null };
+    case 'Action Bonus':
+      return { main: 'Lancé en Action Bonus', chain: null };
     default:
       return { main: `×${cnt}`, chain: null };
   }
@@ -883,7 +893,6 @@ export async function openSortModal(idx, s) {
     : (s?.typeSoin ? ['defensif'] : (s?.noyau ? ['offensif'] : []));
 
   _sortTypesEdit  = new Set(typesInit);
-  _sortActionEdit = s?.actionOverride || null;
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _invImageEdit   = s?.invocation?.image || '';
   _invActionsEdit = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.map(a => ({ ...a })) : [];
@@ -912,22 +921,6 @@ export async function openSortModal(idx, s) {
       background:${isSel?t.color+'20':'var(--bg-elevated)'};
       color:${isSel?t.color:'var(--text-dim)'};
       font-weight:${isSel?'700':'400'};transition:all .15s">${t.label}</button>`;
-  }).join('');
-
-  const ACTION_CFG = [
-    { v:null,           label:'Auto',            color:'#9ca3af' },
-    { v:'action',       label:'⚡ Action',        color:'#e8b84b' },
-    { v:'action_bonus', label:'✴️ Action Bonus',  color:'#f97316' },
-  ];
-  const actionBtnsHtml = ACTION_CFG.map(a => {
-    const isSel = (_sortActionEdit === a.v);
-    return `<button type="button" id="s-action-${a.v??'auto'}"
-      data-action="_selectSortAction" data-val="${a.v??''}"
-      style="flex:1;padding:.35rem .2rem;border-radius:7px;font-size:.7rem;cursor:pointer;
-      border:2px solid ${isSel?a.color:'var(--border)'};
-      background:${isSel?a.color+'20':'var(--bg-elevated)'};
-      color:${isSel?a.color:'var(--text-dim)'};
-      font-weight:${isSel?'700':'400'};transition:all .15s">${a.label}</button>`;
   }).join('');
 
   // Amplification : mode Zone | Déplacement (calqué sur Protection soin/CA)
@@ -1130,18 +1123,20 @@ export async function openSortModal(idx, s) {
 
     <!-- Enchantement — visible si rune Enchantement > 0 -->
     <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
-      <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours · Action Bonus</span></div>
+      <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours</span></div>
 
-      <!-- Mode toggle : Dégâts (bonus arme) vs État (buff sur allié) -->
+      <!-- Ce que l'enchantement booste sur l'allié -->
       <div class="form-group">
-        <label>Mode</label>
-        <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr">
-          <button type="button" id="s-enchant-mode-dmg"
-            data-action="_selectEnchantMode" data-val="dmg"
-            class="cs-slot-btn ${(s?.enchantMode||'dmg')==='dmg'?'selected':''}">⚔️ Bonus dégâts arme</button>
-          <button type="button" id="s-enchant-mode-etat"
-            data-action="_selectEnchantMode" data-val="etat"
-            class="cs-slot-btn ${s?.enchantMode==='etat'?'selected':''}">✨ État sur allié</button>
+        <label>L'enchantement booste</label>
+        <div class="cs-slot-grid" style="grid-template-columns:repeat(3,1fr)">
+          ${[
+            { v:'dmg',         lbl:'⚔️ Dégâts' },
+            { v:'toucher',     lbl:'🎯 Toucher' },
+            { v:'deplacement', lbl:'👢 Déplacement' },
+            { v:'etat',        lbl:'✨ État' },
+          ].map(o => `<button type="button" id="s-enchant-mode-${o.v}"
+            data-action="_selectEnchantMode" data-val="${o.v}"
+            class="cs-slot-btn ${(s?.enchantMode||'dmg')===o.v?'selected':''}">${o.lbl}</button>`).join('')}
         </div>
         <input type="hidden" id="s-enchant-mode" value="${s?.enchantMode||'dmg'}">
       </div>
@@ -1156,6 +1151,13 @@ export async function openSortModal(idx, s) {
           currentValue: s?.enchantDegats,
           placeholder: 'ex : +1d6 Feu, +2 Foudre, 1d8…',
         })}
+      </div>
+
+      <!-- Modes Toucher / Déplacement : un bonus chiffré sur l'allié -->
+      <div id="s-enchant-bonus-block" class="form-group" style="${['toucher','deplacement'].includes(s?.enchantMode)?'':'display:none'}">
+        <label id="s-enchant-bonus-label">Bonus</label>
+        <input class="input-field" type="number" id="s-enchant-bonus" value="${s?.enchantBonus??''}" placeholder="auto (2 + Puissance)">
+        <div id="s-enchant-bonus-hint" style="font-size:.7rem;color:var(--text-dim);margin-top:.25rem">Laisse vide = auto. Chaque rune Puissance augmente le bonus de 1.</div>
       </div>
 
       <!-- Mode État : applique un état choisi à l'allié ciblé -->
@@ -1292,12 +1294,6 @@ export async function openSortModal(idx, s) {
     </div><!-- /grid-col--left -->
 
     <div class="cs-spell-grid-col cs-spell-grid-col--right">
-    <!-- ⑥ Action — bande inline compacte -->
-    <div class="cs-spell-inline-row">
-      <span class="cs-spell-inline-label" title="Auto = déduit des runes (Réaction/Enchantement)">⚡ Action</span>
-      <div style="display:flex;gap:.25rem;flex:1">${actionBtnsHtml}</div>
-    </div>
-
     <!-- ⑦ Description libre -->
     <div class="form-group cs-spell-desc">
       <label>📝 Description / Effet libre <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">narration, conditions spéciales, fluff</span></label>
@@ -1393,7 +1389,6 @@ export async function openSortModal(idx, s) {
 
   setTimeout(() => {
     updateSortPM();
-    _updateSortActionDisplay();
     // Applique l'état initial des sections conditionnelles (Dégâts/Soin/CA, Drain,
     // Invocation…) dès l'ouverture — sinon un sort déjà Drain affichait les onglets
     // CA/Soin tant qu'on n'avait pas interagi.
@@ -1713,31 +1708,6 @@ function _buildInvocationFromDOM() {
     image: document.getElementById('s-inv-image')?.value || _invImageEdit || '',
     actions: Array.isArray(_invActionsEdit) ? _invActionsEdit : [],
   };
-}
-
-function _selectSortAction(val) {
-  _sortActionEdit = val === 'auto' ? null : val;
-  _updateSortActionDisplay();
-  _updateSortPreview();
-}
-
-function _updateSortActionDisplay() {
-  const ACTION_CFG = {
-    null:         { label:'Auto',            color:'#9ca3af' },
-    action:       { label:'⚡ Action',        color:'#e8b84b' },
-    action_bonus: { label:'✴️ Action Bonus',  color:'#f97316' },
-    reaction:     { label:'🔄 Réaction',      color:'#a78bfa' },
-  };
-  const cur = _sortActionEdit;
-  Object.entries(ACTION_CFG).forEach(([v, cfg]) => {
-    const btn = document.getElementById(`s-action-${v === 'null' ? 'auto' : v}`);
-    if (!btn) return;
-    const active = (cur === null && v === 'null') || cur === v;
-    btn.style.borderColor  = active ? cfg.color : 'var(--border)';
-    btn.style.background   = active ? cfg.color+'20' : 'var(--bg-elevated)';
-    btn.style.color        = active ? cfg.color : 'var(--text-dim)';
-    btn.style.fontWeight   = active ? '700' : '400';
-  });
 }
 
 function _selectDeplMode(mode) {
@@ -2093,12 +2063,17 @@ function _applySpellSuggest(cat) {
 function _selectEnchantMode(mode) {
   const hidden = document.getElementById('s-enchant-mode');
   if (hidden) hidden.value = mode;
-  document.getElementById('s-enchant-mode-dmg')?.classList.toggle('selected', mode === 'dmg');
-  document.getElementById('s-enchant-mode-etat')?.classList.toggle('selected', mode === 'etat');
-  const dmgBlock = document.getElementById('s-enchant-dmg-block');
-  const etatBlock = document.getElementById('s-enchant-etat-block');
-  if (dmgBlock) dmgBlock.style.display = mode === 'dmg' ? '' : 'none';
-  if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
+  ['dmg','toucher','deplacement','etat'].forEach(m =>
+    document.getElementById(`s-enchant-mode-${m}`)?.classList.toggle('selected', mode === m));
+  const isBonus = ['toucher','deplacement'].includes(mode);
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('s-enchant-dmg-block',   mode === 'dmg');
+  show('s-enchant-bonus-block', isBonus);
+  show('s-enchant-etat-block',  mode === 'etat');
+  // Adapte le libellé du champ bonus selon la cible boostée
+  const lbl = document.getElementById('s-enchant-bonus-label');
+  if (lbl) lbl.textContent = mode === 'toucher' ? '🎯 Bonus au toucher'
+                           : mode === 'deplacement' ? '👢 Cases de déplacement en plus' : 'Bonus';
   _updateSortPreview();
 }
 
@@ -2166,9 +2141,9 @@ function _buildSortFromDOM() {
     ca:     document.getElementById('s-ca')?.value || '',
     effet:  document.getElementById('s-effet')?.value || '',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
-    actionOverride: _sortActionEdit || null,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+    enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
     enchantSlot:      'arme', // legacy compat (preview live, sera écrasé à la save par la valeur en BDD)
     enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
@@ -2320,7 +2295,6 @@ export async function saveSort(idx) {
     const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
 
     // Action override (null = auto)
-    const actionOverride = _sortActionEdit || null;
 
     const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
     const deplMode = _deplModeEdit || null;
@@ -2360,9 +2334,9 @@ export async function saveSort(idx) {
       typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
       catId:         document.getElementById('s-catid')?.value || '',
       actif:         idx>=0 ? sorts[idx].actif : false,
-      actionOverride,
       enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
       enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+    enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
       enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
       // enchantSlot legacy : conservé en BDD pour rétro-compat des combos, mais
       // l'UI n'expose plus de slot. Défaut 'arme' aligné sur le bonus dégâts.
@@ -2436,7 +2410,6 @@ function _buildSortFromForm(idx, prevList = []) {
   const totalRunes = (noyau ? 1 : 0) + runes.length;
   const autoPm     = totalRunes * 2 || 2;
   const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
-  const actionOverride = _sortActionEdit || null;
   const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
   const prevVal = idx >= 0 ? (prevList[idx]?.mjValidation || (prevList[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
@@ -2465,9 +2438,9 @@ function _buildSortFromForm(idx, prevList = []) {
     effet:    document.getElementById('s-effet')?.value||'',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
     typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
-    actionOverride,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+    enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
     enchantSlot:      idx >= 0 ? (prevList[idx]?.enchantSlot || 'arme') : 'arme',
     enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
@@ -2556,7 +2529,6 @@ registerActions({
   _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
-  _selectSortAction:      (btn) => _selectSortAction(btn.dataset.val === '' ? null : btn.dataset.val),
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),
