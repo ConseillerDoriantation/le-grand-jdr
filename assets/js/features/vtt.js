@@ -2991,7 +2991,7 @@ function _buildSpellOption(s, ctx) {
   const _sRunes = s.runes || [];
   const actionType = _sRunes.includes('Réaction')
     ? 'reaction'
-    : _sRunes.includes('Enchantement')
+    : _sRunes.includes('Action Bonus')
       ? 'bonus'
       : (s.actionOverride === 'action_bonus' ? 'bonus' : s.actionOverride === 'reaction' ? 'reaction' : 'action');
   const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';

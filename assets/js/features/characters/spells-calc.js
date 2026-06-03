@@ -47,13 +47,13 @@ export function _getSortTypes(s) {
 /** Type d'action : 'action' | 'action_bonus' | 'reaction'
  *  + concentration : boolean
  *  Réaction et Concentration = 100% déterminées par les runes.
- *  Action Bonus = rune Enchantement. Override manuel possible pour Action/Action Bonus uniquement.
+ *  Action Bonus = rune Action Bonus. Override manuel possible pour Action/Action Bonus uniquement.
  */
 export function _getSortAction(s) {
   const runes = s.runes || [];
-  const action        = runes.includes('Réaction')     ? 'reaction'
-                      : runes.includes('Enchantement') ? 'action_bonus'
-                      : s.actionOverride               || 'action';
+  const action        = runes.includes('Réaction')      ? 'reaction'
+                      : runes.includes('Action Bonus')  ? 'action_bonus'
+                      : s.actionOverride                || 'action';
   const concentration = runes.includes('Concentration');
   return { action, concentration };
 }
@@ -943,7 +943,7 @@ export function _buildSortResume(s, c) {
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';
     const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés (chaîné +${nbEnch-1})`;
-    const detailParts = ['2 tours', 'Action Bonus', cibleStr];
+    const detailParts = ['2 tours', cibleStr];
     // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
     if (mode === 'etat') {
       const lib = _conditionsLibCache || [];

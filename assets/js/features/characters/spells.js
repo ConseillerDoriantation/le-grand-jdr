@@ -619,7 +619,7 @@ const RUNE_META = [
   { nom:'Protection',    icon:'💚', color:'#22c38e', family:'puissance', effet:'+1d4 soin OU +2 CA (2 tours)' },
   { nom:'Amplification', icon:'🌐', color:'#4f8cff', family:'portee',    effet:'Zone +3 mètres' },
   { nom:'Dispersion',    icon:'🎯', color:'#a855f7', family:'portee',    effet:'Touche plusieurs cibles (1 → 2 → 4 → 6…)' },
-  { nom:'Enchantement',  icon:'✨', color:'#e8b84b', family:'soutien',   effet:'Élément sur arme alliée · 2 tours · Action Bonus' },
+  { nom:'Enchantement',  icon:'✨', color:'#e8b84b', family:'soutien',   effet:'Booste un allié · 2 tours' },
   { nom:'Affliction',    icon:'💀', color:'#8b5cf6', family:'soutien',   effet:'Élément + état sur arme ennemie · 2 tours · Action Bonus' },
   { nom:'Invocation',    icon:'🐾', color:'#a16207', family:'soutien',   effet:'Créature liée · 10 PV, CA 10' },
   { nom:'Lacération',    icon:'🩸', color:'#dc2626', family:'soutien',   effet:'CA cible −1 (max −2 / −4 Élite-Boss)' },
@@ -627,6 +627,7 @@ const RUNE_META = [
   { nom:'Durée',         icon:'⏱️', color:'#06b6d4', family:'meta',      effet:'+2 tours' },
   { nom:'Concentration', icon:'🧠', color:'#6366f1', family:'meta',      effet:'Maintien hors tour · JS Sa DD 11 si touché' },
   { nom:'Réaction',      icon:'🔄', color:'#ec4899', family:'meta',      effet:'Lance hors de son tour' },
+  { nom:'Action Bonus',  icon:'✴️', color:'#f97316', family:'meta',      effet:'Lancé en Action Bonus' },
 ];
 
 const RUNE_GROUPS = [
@@ -747,6 +748,8 @@ function _runeLiveContribution(nom, counts) {
       return { main: 'Maintenu hors tour · JS Sa DD 11 si dégâts reçus', chain: null };
     case 'Réaction':
       return { main: 'Lancé hors de son tour', chain: null };
+    case 'Action Bonus':
+      return { main: 'Lancé en Action Bonus', chain: null };
     default:
       return { main: `×${cnt}`, chain: null };
   }
@@ -1112,7 +1115,7 @@ export async function openSortModal(idx, s) {
 
     <!-- Enchantement — visible si rune Enchantement > 0 -->
     <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
-      <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours · Action Bonus</span></div>
+      <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours</span></div>
 
       <!-- Ce que l'enchantement booste sur l'allié -->
       <div class="form-group">
