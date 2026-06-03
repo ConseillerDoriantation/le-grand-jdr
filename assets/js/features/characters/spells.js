@@ -1040,7 +1040,13 @@ export async function openSortModal(idx, s) {
 
     <!-- Protection — visible si rune Protection > 0 -->
     <div id="s-prot-section" style="${hasProt?'':'display:none'}">
-      <div class="form-group">
+      <!-- Combo Drain (sort offensif + Protection) : la Protection devient un vol
+           de vie %, le choix CA/Soin et le montant n'ont plus de sens → masqués. -->
+      <div id="s-prot-drain" style="display:none" class="cs-prot-drain">
+        🩸 <b>Vol de vie</b> — soigne le lanceur de <b><span id="s-prot-drain-pct">50</span>%</b> des dégâts infligés
+        <span class="cs-prot-drain-sub">% fixé par le nombre de runes Protection · pas de CA/soin direct</span>
+      </div>
+      <div class="form-group" id="s-prot-mode-group">
         <label>Rune Protection — effet</label>
         <div style="display:flex;gap:.4rem">
           ${[
@@ -1454,7 +1460,22 @@ function _refreshConditionalSections() {
   // si l'utilisateur n'a pas coché « offensif ».
   const hasLaceration = (counts.Lacération || 0) > 0;
   if (dSec) dSec.style.display = ((isOffensive || hasLaceration) && !hasAffliction && !isDepl && !anyInvoc) ? '' : 'none';
-  if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
+  // Combo Drain : sort offensif + Protection → la Protection devient un vol de vie %.
+  // On masque alors le choix CA/Soin et leurs montants, et on affiche l'indicateur.
+  const isDrain   = isOffensive && hasProt;
+  const protGroup = document.getElementById('s-prot-mode-group');
+  const caSec     = document.getElementById('s-ca-section');
+  const drainEl   = document.getElementById('s-prot-drain');
+  if (protGroup) protGroup.style.display = isDrain ? 'none' : '';
+  if (caSec)     caSec.style.display     = (!isDrain && protMode === 'ca') ? '' : 'none';
+  if (sSec)      sSec.style.display      = (!isDrain && hasProt && protMode === 'soin') ? '' : 'none';
+  if (drainEl) {
+    drainEl.style.display = isDrain ? '' : 'none';
+    if (isDrain) {
+      const pctEl = document.getElementById('s-prot-drain-pct');
+      if (pctEl) pctEl.textContent = Math.round((0.25 + 0.25 * (counts.Protection || 0)) * 100);
+    }
+  }
   // Section Invocation générique : rune Invocation seule (hors combos Sentinelle/Arme invoquée)
   const hasInvoc = anyInvoc && !(counts.Affliction > 0) && !(counts.Enchantement > 0);
   const iSec = document.getElementById('s-invocation-section');

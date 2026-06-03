@@ -2894,6 +2894,17 @@ input[type=number].input-field::-webkit-outer-spin-button {
   min-width: 0;
 }
 
+/* ── Combo Drain (vol de vie) dans la section Protection ────────────── */
+.cs-prot-drain {
+  display: flex; flex-direction: column; gap: .15rem;
+  padding: .55rem .65rem; border-radius: 9px;
+  background: color-mix(in srgb, #ef4444 10%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, #ef4444 35%, var(--border));
+  font-size: .82rem; color: var(--text);
+}
+.cs-prot-drain b { color: #ff8a8a; }
+.cs-prot-drain-sub { font-size: .68rem; color: var(--text-dim); }
+
 /* ── Section Invocation (éditeur de sort) ───────────────────────────── */
 .cs-inv-section {
   border: 1px solid color-mix(in srgb, #a16207 35%, var(--border));

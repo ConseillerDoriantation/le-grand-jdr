@@ -2210,9 +2210,10 @@ function _vttSpellMods(s) {
   const sentinelRangeM = nbAmp === 0 ? 1 : (4 * nbAmp - 1);
 
   const mods = {
-    // Drain : Puissance + Protection → soigne le lanceur d'un % des dégâts
-    // Formule : 25% + 25% × nbProt → Prot×1=50% · ×2=75% · ×3=100% · ×4=125%
-    drain: (nbP > 0 && nbProt > 0)
+    // Drain : sort OFFENSIF (attaque de base) + Protection → soigne le lanceur
+    // d'un % des dégâts. Puissance non requise ; mode CA/Soin hors-sujet.
+    // Formule : 25% + 25% × nbProt → Prot×1=50% · ×2=75% · ×3=100%
+    drain: (nbProt > 0 && (s.types || []).includes('offensif'))
       ? { pct: 0.25 + 0.25 * nbProt, nbProt } : null,
     // Lacération : -CA brut sur la cible (plafonné en jeu : 2 joueur · 4 élite/boss)
     laceration: nbLac > 0
