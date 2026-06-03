@@ -2044,19 +2044,20 @@ function _vttSortDmgFormula(s, c) {
   if (!base || base.toLowerCase() === '= arme') base = armeDeg;
   const runes    = s.runes || [];
   const nbPuiss  = runes.filter(r => r === 'Puissance').length;
-  const nbProt   = runes.filter(r => r === 'Protection').length;
-  const totalPP  = nbPuiss + nbProt;
-  const bonusVal = totalPP > 1 ? (totalPP - 1) * 2 : 0;
+  // Seule la Puissance ajoute des dés. La Protection ne sert qu'au drain % — elle
+  // NE double PAS les dégâts (bug : le combo Drain affichait 2d10 au lieu de 1d10).
+  // Aligne strictement avec _calcSortDegats du sheet.
+  const bonusVal = nbPuiss > 1 ? (nbPuiss - 1) * 2 : 0;
   const maitrise = getMaitriseBonus(c, mainP || {});
   const m = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (m) {
-    let r = `${parseInt(m[1]) + totalPP}${m[2]}${m[3]}`;
+    let r = `${parseInt(m[1]) + nbPuiss}${m[2]}${m[3]}`;
     const tot = bonusVal + maitrise;
     if (tot > 0) r += ` +${tot}`; else if (tot < 0) r += ` ${tot}`;
     return r;
   }
   let r = base;
-  if (totalPP > 0) r += ` +${totalPP}d6`;
+  if (nbPuiss > 0) r += ` +${nbPuiss}d6`;
   const tot = bonusVal + maitrise;
   if (tot > 0) r += ` +${tot}`; else if (tot < 0) r += ` ${tot}`;
   return r;
