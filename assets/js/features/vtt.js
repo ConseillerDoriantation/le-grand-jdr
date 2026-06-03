@@ -3766,6 +3766,12 @@ async function _execAttack(srcId, tgtId) {
         const lib = CONDITION_BY_ID[o.enchantEtatId];
         const lbl = lib ? `${lib.icon} ${lib.label} sur allié` : '✨ État sur allié';
         pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
+      } else if (o.enchantMode === 'toucher') {
+        const b = o.mods?.enchantToucher?.bonus;
+        pills.push(`<span class="vtt-aopt-pill enchant" style="color:#e8b84b;border-color:#e8b84b66;background:#e8b84b1a">🎯 +${b ?? '?'} au toucher / allié</span>`);
+      } else if (o.enchantMode === 'deplacement') {
+        const b = o.mods?.enchantMove?.bonusCells;
+        pills.push(`<span class="vtt-aopt-pill enchant" style="color:#22c55e;border-color:#22c55e66;background:#22c55e1a">👢 +${b ?? '?'} case${b > 1 ? 's' : ''} de déplacement / allié</span>`);
       } else {
         pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(o.enchantFormula || '1d4+2')} / arme alliée</span>`);
       }
@@ -4212,6 +4218,8 @@ function _vttPickOpt(srcId, tgtId, idx) {
   } else if (isEnchCast) {
     const effectLbl = opt.enchantMode === 'etat' && opt.enchantEtatId
       ? (() => { const l = CONDITION_BY_ID[opt.enchantEtatId]; return l ? `${l.icon} ${l.label}` : 'État'; })()
+      : opt.enchantMode === 'toucher'     ? `🎯 +${opt.mods?.enchantToucher?.bonus ?? '?'} au toucher`
+      : opt.enchantMode === 'deplacement' ? `👢 +${opt.mods?.enchantMove?.bonusCells ?? '?'} déplacement`
       : `⚔️ +${opt.enchantFormula || '1d4+2'} / arme alliée`;
     utilBlock = `
       <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem;
@@ -5168,6 +5176,10 @@ async function _vttRollAttack() {
         if (opt.enchantMode === 'etat' && opt.enchantEtatId) {
           const lib = CONDITION_BY_ID[opt.enchantEtatId];
           castEffect = `${lib ? `${lib.icon} ${lib.label}` : 'État'} (sans JS)`;
+        } else if (opt.enchantMode === 'toucher') {
+          castEffect = `🎯 +${opt.mods?.enchantToucher?.bonus ?? '?'} au toucher sur allié`;
+        } else if (opt.enchantMode === 'deplacement') {
+          castEffect = `👢 +${opt.mods?.enchantMove?.bonusCells ?? '?'} déplacement sur allié`;
         } else if (opt.enchantFormula) {
           castEffect = `⚔️ +${opt.enchantFormula} / arme alliée`;
         }
