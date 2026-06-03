@@ -3,12 +3,12 @@
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
+import { loadChars, loadCollection, getCachedCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
-import { watch } from '../shared/realtime.js';
+import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
@@ -34,23 +34,36 @@ const PAGES = {
     // Le wrapper #dash-root est conservé : le rendu final l'utilise pour s'y injecter.
     content.innerHTML = `<div class="dash-root" id="dash-root">${appSplashHtml()}</div>`;
 
-    // Charger les données en parallèle
     const uid = STATE.isAdmin ? null : STATE.user.uid;
-    const [allChars, storyItems, bastionDoc, achievementsRaw, quests, collectionItems, nextSession] = await Promise.all([
-      loadChars(null).catch(() => []),
-      loadCollection('story').catch(() => []),
-      getDocData('bastion', 'main').catch(() => null),
-      loadCollection('achievements').catch(() => []),
-      loadCollection('quests').catch(() => []),
-      loadCollection('collection').catch(() => []),
-      getDocDataSilent('agenda_session', 'next'),
-    ]);
-    // chars = mes persos ; allPartyChars = les autres (pour le bloc groupe côté joueur)
-    const chars         = uid ? allChars.filter(c => c.uid === uid) : allChars;
-    const allPartyChars = uid ? allChars.filter(c => c.uid !== uid) : [];
-    // Les hauts-faits secrets restent invisibles aux joueurs partout dans le dashboard
-    const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
-    STATE.characters = chars;
+
+    // ── Données RÉACTIVES (rendu NON-bloquant) ─────────────────────────
+    // Le dashboard ne bloque plus sur le réseau : 1er rendu immédiat depuis le
+    // cache (instantané sur cache chaud, squelette vide sinon), puis re-rendu à
+    // l'arrivée de chaque source via les abonnements en bas de fonction. Ces
+    // watch() se branchent sur les listeners session-live (0 lecture en plus)
+    // et sont nettoyés par unwatchAll() à la navigation.
+    let allChars        = getCachedCollection('characters')   || [];
+    let storyItems      = getCachedCollection('story')        || [];
+    let achievementsRaw = getCachedCollection('achievements') || [];
+    let quests          = getCachedCollection('quests')       || [];
+    let collectionItems = getCachedCollection('collection')   || [];
+    let bastionDoc      = null;
+    let nextSession     = null;
+
+    let _dashDecorated   = false;  // animations d'entrée + particules : 1 seule fois
+    let _presenceWatched = false;  // abonnement présence MJ : 1 seule fois
+    let _paintQueued     = false;
+
+    const paint = () => {
+      _paintQueued = false;
+      if (STATE.currentPage !== 'dashboard' || !document.getElementById('dash-root')) return;
+
+      // chars = mes persos ; allPartyChars = les autres (bloc groupe côté joueur)
+      const chars         = uid ? allChars.filter(c => c.uid === uid) : allChars;
+      const allPartyChars = uid ? allChars.filter(c => c.uid !== uid) : [];
+      // Les hauts-faits secrets restent invisibles aux joueurs partout
+      const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
+      STATE.characters = chars;
 
     // Formate la prochaine séance pour affichage (date FR + créneau)
     const _SLOT_LABELS = { m: '🌞 Matin', a: '☀️ Aprem', s: '🌙 Soir' };
@@ -822,7 +835,7 @@ const PAGES = {
           return;
         }
         const pills = active.map(p => {
-          const ch = chars.find(c => c.uid === p.uid) || null;
+          const ch = (STATE.characters || []).find(c => c.uid === p.uid) || null;
           const portrait = characterAvatarHtml(ch || p, { size: 30, border: '2px solid rgba(34,195,142,.55)', background: 'rgba(34,195,142,.15)', color: 'var(--gold)' });
           return `
           <div style="display:flex;align-items:center;gap:.55rem;background:rgba(34,195,142,.07);border:1px solid rgba(34,195,142,.22);border-radius:999px;padding:3px 12px 3px 3px">
@@ -842,7 +855,9 @@ const PAGES = {
             <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">${pills}</div>
           </div>`;
       };
-      watch('presence', 'presence', _renderPresence);
+      // Abonnement présence une seule fois (sinon chaque paint recrée un listener
+      // éphémère → lectures inutiles). _renderPresence lit STATE.characters (à jour).
+      if (!_presenceWatched) { _presenceWatched = true; watch('presence', 'presence', _renderPresence); }
 
     } else {
 
@@ -960,37 +975,57 @@ const PAGES = {
       setTimeout(() => { el.classList.add('dv2-leaving'); setTimeout(() => el.remove(), 350); }, 3500);
     };
 
-    // ── Animations d'entrée en cascade ────────────────────────────────
-    const _sections = document.querySelectorAll('.dv2-root > *');
-    _sections.forEach((el, i) => {
-      el.style.opacity = '0';
-      el.style.transform = 'translateY(16px)';
-      setTimeout(() => {
-        el.style.transition = 'opacity 0.4s ease, transform 0.4s cubic-bezier(0.22,1,0.36,1)';
-        el.style.opacity = '1';
-        el.style.transform = 'translateY(0)';
-      }, i * 60);
-    });
-
-    // ── Animations barres (après le délai d'entrée) ────────────────────
-    requestAnimationFrame(() => {
-      setTimeout(() => {
+      // ── Largeurs de barres — à CHAQUE paint (le DOM est reconstruit) ──
+      requestAnimationFrame(() => {
         document.querySelectorAll('.dv2-bar-fill[data-w], .dv2-mission-prog-fill[data-w]').forEach(el => {
           el.style.width = el.dataset.w;
         });
-      }, 200);
-    });
+      });
 
-    // ── Particules flottantes ──────────────────────────────────────────
-    document.querySelectorAll('.dv2-particle').forEach(p => p.remove());
-    const _pcols = ['rgba(79,140,255,0.6)', 'rgba(157,111,255,0.5)', 'rgba(34,195,142,0.4)'];
-    for (let i = 0; i < 12; i++) {
-      const p = document.createElement('div');
-      p.className = 'dv2-particle';
-      const sz = 1 + Math.random() * 2;
-      p.style.cssText = `left:${Math.random()*100}%;background:${_pcols[i%3]};width:${sz}px;height:${sz}px;animation-duration:${8+Math.random()*12}s;animation-delay:${Math.random()*10}s;--drift:${(Math.random()-.5)*80}px`;
-      document.body.appendChild(p);
-    }
+      // ── Décor (animations d'entrée + particules) : UNE SEULE FOIS ──────
+      // (sinon re-flash à chaque re-rendu réactif)
+      if (!_dashDecorated) {
+        _dashDecorated = true;
+        document.querySelectorAll('.dv2-root > *').forEach((el, i) => {
+          el.style.opacity = '0';
+          el.style.transform = 'translateY(16px)';
+          setTimeout(() => {
+            el.style.transition = 'opacity 0.4s ease, transform 0.4s cubic-bezier(0.22,1,0.36,1)';
+            el.style.opacity = '1';
+            el.style.transform = 'translateY(0)';
+          }, i * 60);
+        });
+        const _pcols = ['rgba(79,140,255,0.6)', 'rgba(157,111,255,0.5)', 'rgba(34,195,142,0.4)'];
+        for (let i = 0; i < 12; i++) {
+          const p = document.createElement('div');
+          p.className = 'dv2-particle';
+          const sz = 1 + Math.random() * 2;
+          p.style.cssText = `left:${Math.random()*100}%;background:${_pcols[i%3]};width:${sz}px;height:${sz}px;animation-duration:${8+Math.random()*12}s;animation-delay:${Math.random()*10}s;--drift:${(Math.random()-.5)*80}px`;
+          document.body.appendChild(p);
+        }
+      }
+    }; // ── fin paint() ────────────────────────────────────────────────────
+
+    // Coalescing : plusieurs sources qui arrivent dans la même frame → 1 paint.
+    const schedulePaint = () => {
+      if (_paintQueued) return;
+      _paintQueued = true;
+      requestAnimationFrame(paint);
+    };
+
+    // ── Rendu initial (cache / squelette) puis abonnements réactifs ────────
+    // Les watch()/watchDoc() se branchent sur les listeners session-live
+    // (0 lecture facturée en plus) ou lazy-priment à la demande ; tous nettoyés
+    // par unwatchAll() à la navigation. Le 1er snapshot cache vide est ignoré
+    // côté firestore (gate trustworthy) → pas de flash "0" figé.
+    paint();
+    watch('dash-characters',   'characters',   d => { allChars        = d || []; schedulePaint(); });
+    watch('dash-quests',       'quests',       d => { quests          = d || []; schedulePaint(); });
+    watch('dash-story',        'story',        d => { storyItems      = d || []; schedulePaint(); });
+    watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
+    watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
+    watchDoc('dash-bastion',   'bastion',        'main', d => { bastionDoc  = d; schedulePaint(); });
+    watchDoc('dash-agenda',    'agenda_session', 'next', d => { nextSession = d; schedulePaint(); });
   },
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────

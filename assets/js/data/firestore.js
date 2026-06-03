@@ -224,6 +224,14 @@ function _primeCol(col) {
       collection(db, path),
       snap => {
         entry.data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Donnée fiable = snapshot SERVEUR (!fromCache), OU cache non vide, OU
+        // hors-ligne réel (le serveur ne répondra pas → on prend ce qu'on a).
+        // Un 1er snapshot cache VIDE en ligne (fréquent après un vidage de cache)
+        // ne débloque PAS les awaits : sinon les pages one-shot rendent "0 /
+        // aucune donnée" avant l'arrivée du serveur. Pas de timeout : un
+        // chargement à froid lourd peut dépasser la minute.
+        const trustworthy = !snap.metadata.fromCache || entry.data.length > 0 || !navigator.onLine;
+        if (!trustworthy) return;
         entry.firstReceived = true;
         // Notifier tous les observers de page
         entry.observers.forEach(o => {
@@ -271,6 +279,10 @@ function _primeDoc(col, id) {
       doc(db, path, id),
       snap => {
         entry.data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+        // Fiable = serveur (!fromCache), OU doc présent en cache, OU hors-ligne.
+        // Un 1er snapshot cache "absent" en ligne attend la confirmation serveur.
+        const trustworthy = !snap.metadata.fromCache || snap.exists() || !navigator.onLine;
+        if (!trustworthy) return;
         entry.firstReceived = true;
         entry.observers.forEach(o => {
           try { o.cb(entry.data); } catch (e) { console.error('[firestore] observer error', e); }
@@ -296,8 +308,11 @@ function _primeDoc(col, id) {
 // Liste des collections promues "session-live" : choisies parce qu'elles
 // sont lues par 3+ pages et que la donnée ne grossit pas démesurément.
 // `bestiary` est volontairement exclu (volume potentiellement énorme).
+// Amorçage EAGER minimal à l'entrée d'aventure : seules les collections dont
+// le dashboard a besoin tout de suite ET légères. Le reste est lazy (amorcé au
+// 1er accès — page, Ctrl+K, ou abonnement réactif du dashboard), ce qui réduit
+// la rafale de lectures/transfert au démarrage à froid.
 const _SESSION_COLLECTIONS = [
-  'story',
   'quests',
   'characters',
 ];
@@ -306,9 +321,10 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   'npcs',
   'organizations', // utilisé par npcs.js + histoire.js, TTL 5 min insuffisant
   'players',       // utilisé par character-sheet tabs + inline-edit, sans cache TTL
-  // Hauts-faits & collection : images base64 lourdes (jusqu'à 1400px), non
-  // affichées au 1er rendu du dashboard (compteur + panneau texte seulement).
-  // → lazy : amorcées à l'ouverture de leur page / Ctrl+K, pas au démarrage.
+  // Lourdes en base64 (bannières / 1400px / cartes) et non bloquantes pour le
+  // 1er rendu du dashboard (réactif : il s'y abonne et se remplit à l'arrivée).
+  // Restent session-live (partagées, 0 lecture en plus) mais amorcées à la demande.
+  'story',
   'achievements',
   'collection',
 ]);
