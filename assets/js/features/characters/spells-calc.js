@@ -15,10 +15,17 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 // ── Caches chargés depuis openSortModal ───────────────────────────────────────
 let _spellMatricesCache = null;
 let _damageTypesCache   = [];
+// Bibliothèque d'états (conditions) — injectée depuis spells.js. Sans ça,
+// _buildSortResume référençait un _conditionsLibCache inexistant ici (ReferenceError
+// au split spells.js → spells-calc.js) dès qu'un sort affichait un état.
+let _conditionsLibCache = [];
 
 export function setSpellCaches(matrices, damageTypes) {
   _spellMatricesCache = matrices;
   _damageTypesCache   = damageTypes;
+}
+export function setConditionsLibCache(lib) {
+  _conditionsLibCache = Array.isArray(lib) ? lib : [];
 }
 export function getSpellMatricesCache() { return _spellMatricesCache; }
 
@@ -62,10 +69,13 @@ export function _calcSortDegats(s, c) {
   // Un sort en mode déplacement (rune Amplification → Déplacement) n'inflige jamais de dégâts.
   if (s.ampMode === 'deplacement') return '';
   const mainP   = getMainWeapon(c);
-  const armeDeg = mainP.degats;
+  // Garde-fou : une arme sans champ `degats` (objet incomplet) ne doit pas faire
+  // planter le calcul → repli sur les Poings (2d4). base est toujours une string.
+  const armeDeg = (mainP && mainP.degats) ? String(mainP.degats) : '2d4';
 
   let base = (s.degats || '').trim();
   if (!base || base.toLowerCase() === '= arme') base = armeDeg;
+  base = String(base || '2d4');
 
   const runes   = s.runes || [];
   const nbPuiss = runes.filter(r => r === 'Puissance').length;
@@ -159,10 +169,14 @@ export const SORT_COMBOS = [
     id: 'drain',
     icon: '🩸',
     defaultName: 'Drain personnel',
-    detect: (counts) => counts.Puissance > 0 && counts.Protection > 0,
+    // Drain = sort OFFENSIF (qui inflige l'attaque de base) + Protection. La
+    // Puissance n'est PAS requise (elle ajoute juste des dés) et le mode CA/Soin
+    // devient hors-sujet : la Protection se convertit en % de vol de vie.
+    detect: (counts, s) => counts.Protection > 0 && _getSortTypes(s).includes('offensif'),
     describe: (counts) => {
       const pct = Math.round((0.25 + 0.25 * counts.Protection) * 100);
-      return `Puissance ×${counts.Puissance} + Protection ×${counts.Protection} · dégâts de l'arme · ${pct}% des dégâts soigne le lanceur`;
+      const pPart = counts.Puissance > 0 ? `Puissance ×${counts.Puissance} + ` : '';
+      return `${pPart}Protection ×${counts.Protection} (soin) · attaque de base · ${pct}% des dégâts soigne le lanceur`;
     },
   },
   {
@@ -624,9 +638,8 @@ function _calcChance(s) {
  */
 export function _calcDrainPct(s) {
   const runes = s?.runes || [];
-  const nbP    = runes.filter(r => r === 'Puissance').length;
   const nbProt = runes.filter(r => r === 'Protection').length;
-  if (!nbP || !nbProt) return 0;
+  if (!nbProt) return 0;        // la Puissance n'est plus requise (Prot ×1 → 50%)
   return 0.25 + 0.25 * nbProt;
 }
 
@@ -689,6 +702,36 @@ function _calcInvokedArmStats(s) {
 }
 
 /**
+ * Stats d'une invocation générique (rune Invocation seule, hors combos
+ * Arme invoquée / Sentinelle). Dérivées des runes, surchargeables via
+ * s.invocation.stats (un override non vide remplace la valeur calculée).
+ *   - Attaque     : 1d4 +2 · +1 dé par Puissance
+ *   - Toucher     : +2 · +2 par Chance
+ *   - PV          : 10 · +5 par Protection
+ *   - Déplacement : 3 · +3 par Amplification
+ *   - Durée       : 2 tours · +2 par Durée (Concentration = maintien)
+ *   - CA          : 10 par défaut
+ */
+export function _calcInvocationStats(s) {
+  const ov    = s?.invocation?.stats || {};
+  const runes = s?.runes || [];
+  const n = name => runes.filter(r => r === name).length;
+  const nbP = n('Puissance'), nbCh = n('Chance'), nbProt = n('Protection'),
+        nbAmp = n('Amplification'), nbDur = n('Durée');
+  const concentration = n('Concentration') > 0;
+
+  const _has = v => v !== undefined && v !== null && v !== '';
+  const nbDice  = 1 + nbP;
+  const attaque = _has(ov.attaque) ? String(ov.attaque) : `${nbDice}d4 +2`;
+  const toucher = _has(ov.toucher) ? parseInt(ov.toucher) : (2 + 2 * nbCh);
+  const pv      = _has(ov.pv)      ? parseInt(ov.pv)      : (10 + 5 * nbProt);
+  const deplacement = _has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp);
+  const duree   = _has(ov.duree)   ? parseInt(ov.duree)   : (2 + 2 * nbDur);
+  const ca      = _has(ov.ca)      ? parseInt(ov.ca)      : 10;
+  return { attaque, toucher, pv, deplacement, duree, ca, concentration };
+}
+
+/**
  * Génère le résumé textuel complet des effets d'un sort
  * sous forme de tableau de lignes {icon, label, detail}
  */
@@ -738,8 +781,16 @@ export function _buildSortResume(s, c) {
   // donnait une impression trompeuse de dégâts directs.
   const isEnchantOnly  = runes.includes('Enchantement') && !((s.degats || '').trim());
   const isAfflictionSpell = runes.includes('Affliction'); // affliction = jamais d'impact
-  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell;
-  if (types.includes('offensif') && !_suppressImpactDmg) {
+  // Invocation : le sort n'inflige pas de dégâts lui-même — c'est la créature
+  // invoquée qui frappe (ses dégâts propres via _calcInvocationStats). On masque
+  // donc l'attaque de base du lanceur, même si Puissance a coché « offensif »
+  // (Puissance scale l'attaque de l'invocation, pas un impact direct).
+  const isInvocationSpell = runes.includes('Invocation');
+  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell || isInvocationSpell;
+  // Lacération inflige TOUJOURS l'attaque de base (+ sa réduction de CA), même si
+  // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
+  const _dealsImpact = types.includes('offensif') || runes.includes('Lacération');
+  if (_dealsImpact && !_suppressImpactDmg) {
     const mainP   = getMainWeapon(c);
     // Override du sort sur la stat de dégâts > stat de l'arme principale
     const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
@@ -758,17 +809,17 @@ export function _buildSortResume(s, c) {
   // (Affliction / Enchantement : rendu dans le bloc unifié plus bas,
   //  qui respecte les modes et ne fait pas de fallback DoT incorrect.)
 
-  // Protection : Soin ou CA selon protectionMode
+  // Protection : Drain (si sort offensif) → sinon Soin ou CA selon protectionMode
   const hasDefensif = types.includes('defensif');
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
-    if (mode === 'soin') {
-      // Combo Drain (Puissance + Protection mode soin) : pas de soin direct,
-      // le lanceur récupère un pourcentage des dégâts infligés (formule des runes).
-      if (comboIds.has('drain')) {
-        const pct = Math.round(_calcDrainPct(s) * 100);
-        lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · pas de soin direct · scale avec Protection` });
-      } else {
+    // Combo Drain (sort offensif + Protection) : pas de CA ni de soin direct — le
+    // lanceur récupère un % des dégâts infligés, fixé par le nombre de Protection.
+    if (comboIds.has('drain')) {
+      const pct = Math.round(_calcDrainPct(s) * 100);
+      lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · pas de CA/soin direct · ${nbProt} Protection` });
+    } else if (mode === 'soin') {
+      {
         const mainPsoin  = getMainWeapon(c);
         const maitrSoin  = getSharedMaitriseBonus(c, mainPsoin);
         const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
@@ -936,7 +987,14 @@ export function _buildSortResume(s, c) {
   // Invocation — masquée si absorbée par un combo (Arme invoquée, Sentinelle)
   const hideInvoc = comboIds.has('arme_invoquee') || comboIds.has('sentinelle');
   if (runes.includes('Invocation') && !hideInvoc) {
-    lines.push({ icon:'🐾', label:'Invocation', detail:'Créature liée · 10 PV · CA 10 · 2 tours par défaut' });
+    const iv = _calcInvocationStats(s);
+    const nbAct = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.length : 0;
+    const dureeStr = iv.concentration ? 'maintenue (Concentration)' : `${iv.duree} tour${iv.duree>1?'s':''}`;
+    lines.push({
+      icon:'🐾',
+      label:`Invocation · ${iv.pv} PV · CA ${iv.ca}`,
+      detail:`Attaque ${iv.attaque} (toucher +${iv.toucher}) · déplacement ${iv.deplacement} · ${dureeStr}${nbAct?` · ${nbAct} action${nbAct>1?'s':''}`:''}`,
+    });
   }
 
   // Détails Sentinelle — affichés à la place de la ligne classique Invocation/Affliction

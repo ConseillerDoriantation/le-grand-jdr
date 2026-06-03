@@ -2,7 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { trySave } from '../../shared/crud.js';
-import { openModal, closeModal, pushModal, popModal, closeModalDirect } from '../../shared/modal.js';
+import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateModalContent, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br } from '../../shared/html.js';
 import { getMod, calcPMMax, calcDeckMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
@@ -10,7 +10,9 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
-import { setSpellCaches, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
+import { pickImageFile } from '../../shared/image-upload.js';
+import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -23,6 +25,10 @@ let _sortAllowedNoyauIds = null;
 let _sortTypesEdit = new Set(['utilitaire']);
 let _sortActionEdit = null;
 let _deplModeEdit = null;
+let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
+let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
+let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
+let _invCfgIdx = -1;         // index (deck) du sort dont on configure l'invocation
 let _sortIconPickerOutsideBound = false;
 
 export function sortDragStart(e, idx) {
@@ -327,13 +333,14 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
-  const suppressImpactDmg = isEnchantOnly || hasAffliction || s.ampMode === 'deplacement';
+  // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
+  const suppressImpactDmg = isEnchantOnly || hasAffliction || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];
 
-  // ── 1. Dégâts d'impact (offensif standard) ──
-  if (types.includes('offensif') && !suppressImpactDmg) {
+  // ── 1. Dégâts d'impact (offensif, OU Lacération qui frappe toujours) ──
+  if ((types.includes('offensif') || runesAll.includes('Lacération')) && !suppressImpactDmg) {
     const degBase = _calcSortDegats(s, c);
     let val = degBase;
     if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
@@ -451,6 +458,7 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       </div>
       <span class="cs-sort-compact-pm">${pmVal} PM</span>
       ${canEdit ? `<div class="cs-sort-compact-acts" data-stop-propagation>
+        ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (actions de la créature)">🐾</button>` : ''}
         <button class="btn-icon" data-action="editSort" data-idx="${i}">✏️</button>
         <button class="btn-icon" data-action="deleteSort" data-idx="${i}">🗑️</button>
       </div>` : ''}
@@ -851,9 +859,14 @@ export async function openSortModal(idx, s) {
   _sortTypesEdit  = new Set(typesInit);
   _sortActionEdit = s?.actionOverride || null;
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
+  _invImageEdit   = s?.invocation?.image || '';
+  _invActionsEdit = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.map(a => ({ ...a })) : [];
 
   const hasEnchant  = runesSrc.includes('Enchantement');
   const hasProt     = runesSrc.includes('Protection');
+  const hasInvoc    = runesSrc.includes('Invocation') && !runesSrc.includes('Affliction') && !hasEnchant;
+  const ivStats     = s?.invocation?.stats || {};                  // overrides sauvegardés
+  const ivDerived   = _calcInvocationStats({ runes: runesSrc });   // valeurs dérivées (placeholders)
 
   // Le rendu réel des runes est fait par _renderRunesSection (module-level),
   // appelé au mount et après chaque incrément/décrément pour rester synchro.
@@ -1027,7 +1040,13 @@ export async function openSortModal(idx, s) {
 
     <!-- Protection — visible si rune Protection > 0 -->
     <div id="s-prot-section" style="${hasProt?'':'display:none'}">
-      <div class="form-group">
+      <!-- Combo Drain (sort offensif + Protection) : la Protection devient un vol
+           de vie %, le choix CA/Soin et le montant n'ont plus de sens → masqués. -->
+      <div id="s-prot-drain" style="display:none" class="cs-prot-drain">
+        🩸 <b>Vol de vie</b> — soigne le lanceur de <b><span id="s-prot-drain-pct">50</span>%</b> des dégâts infligés
+        <span class="cs-prot-drain-sub">% fixé par le nombre de runes Protection · pas de CA/soin direct</span>
+      </div>
+      <div class="form-group" id="s-prot-mode-group">
         <label>Rune Protection — effet</label>
         <div style="display:flex;gap:.4rem">
           ${[
@@ -1208,6 +1227,42 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
+    <!-- Invocation (rune Invocation seule) — stats éditables + image + actions -->
+    <div id="s-invocation-section" class="cs-inv-section" style="${hasInvoc?'':'display:none'}">
+      <div class="cs-inv-head">
+        <span class="cs-inv-head-icon">🐾</span>
+        <div class="cs-inv-head-text">
+          <div class="cs-inv-head-title">Créature invoquée</div>
+          <div class="cs-inv-head-sub">Stats dérivées des runes — laisse un champ vide pour l'auto</div>
+        </div>
+      </div>
+
+      <div class="cs-inv-body">
+        <div class="cs-inv-imgcol">
+          <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
+          <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
+        </div>
+        <div class="cs-inv-grid">
+          ${[
+            { id:'attaque',     ic:'⚔️', lbl:'Attaque',     type:'text',   val:_esc(ivStats.attaque||''),     ph:_esc(ivDerived.attaque) },
+            { id:'toucher',     ic:'🎯', lbl:'Toucher',     type:'number', val:(ivStats.toucher??''),         ph:ivDerived.toucher },
+            { id:'pv',          ic:'❤️', lbl:'PV',          type:'number', val:(ivStats.pv??''),              ph:ivDerived.pv },
+            { id:'ca',          ic:'🛡️', lbl:'CA',          type:'number', val:(ivStats.ca??''),              ph:ivDerived.ca },
+            { id:'deplacement', ic:'👢', lbl:'Déplacement', type:'number', val:(ivStats.deplacement??''),     ph:ivDerived.deplacement },
+            { id:'duree',       ic:'⏱️', lbl:'Durée',       type:'number', val:(ivStats.duree??''),           ph:ivDerived.duree },
+          ].map(f => `<label class="cs-inv-stat">
+            <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
+            <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
+          </label>`).join('')}
+        </div>
+      </div>
+
+      <div class="cs-inv-actions-wrap">
+        <div class="cs-inv-actions-hd">🎬 Actions de l'invocation</div>
+        <div id="s-inv-actions-list" class="cs-inv-actions">${_renderInvActionsList()}</div>
+      </div>
+    </div>
+
     </div><!-- /grid-col--left -->
 
     <div class="cs-spell-grid-col cs-spell-grid-col--right">
@@ -1313,6 +1368,10 @@ export async function openSortModal(idx, s) {
   setTimeout(() => {
     updateSortPM();
     _updateSortActionDisplay();
+    // Applique l'état initial des sections conditionnelles (Dégâts/Soin/CA, Drain,
+    // Invocation…) dès l'ouverture — sinon un sort déjà Drain affichait les onglets
+    // CA/Soin tant qu'on n'avait pas interagi.
+    _refreshConditionalSections();
     _updateSortPreview();
     // Listeners génériques pour rafraîchir la preview à chaque saisie
     const modal = document.querySelector('.modal');
@@ -1341,6 +1400,7 @@ let _conditionsLibCache = null;
 async function _loadAllConditions() {
   if (_conditionsLibCache) return _conditionsLibCache;
   _conditionsLibCache = await loadConditionLibrary();
+  setConditionsLibCache(_conditionsLibCache); // alimente aussi le cache de spells-calc.js
   return _conditionsLibCache;
 }
 
@@ -1397,14 +1457,236 @@ function _refreshConditionalSections() {
   const sSec = document.getElementById('s-soin-section');
   // Affliction supprime les dégâts d'impact : la rune Puissance scale le DoT
   // de l'affliction, pas un dégât direct. Le mode Déplacement les supprime aussi.
-  if (dSec) dSec.style.display = (isOffensive && !hasAffliction && !isDepl) ? '' : 'none';
-  if (sSec) sSec.style.display = (hasProt && protMode === 'soin') ? '' : 'none';
+  // Invocation : le sort n'a pas de dégâts propres (la créature frappe) → masque
+  // la section Dégâts même en offensif (Puissance scale l'attaque de l'invocation).
+  const anyInvoc = (counts.Invocation || 0) > 0;
+  // Lacération frappe toujours (attaque de base) → section Dégâts visible même
+  // si l'utilisateur n'a pas coché « offensif ».
+  const hasLaceration = (counts.Lacération || 0) > 0;
+  if (dSec) dSec.style.display = ((isOffensive || hasLaceration) && !hasAffliction && !isDepl && !anyInvoc) ? '' : 'none';
+  // Combo Drain : sort offensif + Protection → la Protection devient un vol de vie %.
+  // On masque alors le choix CA/Soin et leurs montants, et on affiche l'indicateur.
+  const isDrain   = isOffensive && hasProt;
+  const protGroup = document.getElementById('s-prot-mode-group');
+  const caSec     = document.getElementById('s-ca-section');
+  const drainEl   = document.getElementById('s-prot-drain');
+  if (protGroup) protGroup.style.display = isDrain ? 'none' : '';
+  if (caSec)     caSec.style.display     = (!isDrain && protMode === 'ca') ? '' : 'none';
+  if (sSec)      sSec.style.display      = (!isDrain && hasProt && protMode === 'soin') ? '' : 'none';
+  if (drainEl) {
+    drainEl.style.display = isDrain ? '' : 'none';
+    if (isDrain) {
+      const pctEl = document.getElementById('s-prot-drain-pct');
+      if (pctEl) pctEl.textContent = Math.round((0.25 + 0.25 * (counts.Protection || 0)) * 100);
+    }
+  }
+  // Section Invocation générique : rune Invocation seule (hors combos Sentinelle/Arme invoquée)
+  const hasInvoc = anyInvoc && !(counts.Affliction > 0) && !(counts.Enchantement > 0);
+  const iSec = document.getElementById('s-invocation-section');
+  if (iSec) iSec.style.display = hasInvoc ? '' : 'none';
+  if (hasInvoc) _refreshInvocationDerived();
 }
 
 function _toggleSortType(type) {
   if (_sortTypesEdit.has(type)) _sortTypesEdit.delete(type);
   else _sortTypesEdit.add(type);
   _applyTypeChange();
+}
+
+// ── Invocation : section éditeur (les ACTIONS se gèrent depuis la carte du sort,
+//    via la vraie modale de sort — cf. _openInvocationConfig) ──────────────────
+function _renderInvActionsList() {
+  const n = (_invActionsEdit || []).length;
+  return `<div class="cs-inv-actions-note">
+    ${n ? `<b>${n}</b> action${n>1?'s':''} définie${n>1?'s':''}.` : 'Aucune action pour l\'instant.'}
+    Conçois-les depuis la carte du sort (bouton <b>🐾</b>, après enregistrement) — chaque action est un vrai sort à runes.
+  </div>`;
+}
+
+// ── Configuration de l'invocation (modale depuis la carte du sort) ─────────────
+//    Les actions = vrais sorts, édités via la modale de sort complète
+//    (editItemSpell). La modale de config N'EST PAS un éditeur de sort → ouvrir
+//    l'éditeur d'action par-dessus ne crée aucun conflit d'état (pattern boutique).
+function _invCfgSort() {
+  const c = STATE.activeChar;
+  return c ? (c.deck_sorts || [])[_invCfgIdx] : null;
+}
+export function openInvocationConfig(idx) {
+  const c = STATE.activeChar; if (!c) return;
+  const s = (c.deck_sorts || [])[idx]; if (!s) return;
+  _invCfgIdx = idx;
+  _itemEditCtx = null; // on n'est pas (encore) dans un éditeur de sort
+  openModal(`🐾 Invocation — ${_esc(s.nom || 'Sort')}`, _renderInvocationConfigBody());
+}
+function _refreshInvocationConfig() {
+  const s = _invCfgSort(); if (!s) return;
+  updateModalContent(`🐾 Invocation — ${_esc(s.nom || 'Sort')}`, _renderInvocationConfigBody());
+}
+function _renderInvocationConfigBody() {
+  const s = _invCfgSort(); if (!s) return '<div style="padding:1rem">Sort introuvable.</div>';
+  const iv  = _calcInvocationStats(s);
+  const img = s.invocation?.image;
+  const acts = Array.isArray(s.invocation?.actions) ? s.invocation.actions : [];
+  const _invCalcChar = _invocationCalcChar(s); // base de calcul = attaque de la créature
+  const dureeStr = iv.concentration ? 'Concentration' : `${iv.duree} tour${iv.duree>1?'s':''}`;
+  return `
+    <div class="inv-cfg">
+      <div class="inv-cfg-head">
+        <div class="inv-cfg-portrait">${img ? `<img src="${img}" alt="">` : '<span>🐾</span>'}</div>
+        <div class="inv-cfg-vitals">
+          <span class="inv-cfg-vital">❤️ <b>${iv.pv}</b> PV</span>
+          <span class="inv-cfg-vital">🛡️ CA <b>${iv.ca}</b></span>
+          <span class="inv-cfg-vital">⚔️ <b>${_esc(iv.attaque)}</b> · +${iv.toucher}</span>
+          <span class="inv-cfg-vital">👢 <b>${iv.deplacement}</b></span>
+          <span class="inv-cfg-vital">⏱️ <b>${dureeStr}</b></span>
+        </div>
+      </div>
+      <div class="inv-cfg-hint">Les stats et l'image se règlent dans l'éditeur du sort. Ici, conçois les <b>actions</b> de la créature — chacune s'édite avec la modale de sort complète (runes, dégâts, effets…).</div>
+      <div class="inv-cfg-actions-hd">
+        <span>🎬 Actions de la créature</span>
+        <button class="btn btn-gold btn-sm" data-action="_invCfgAddAction">＋ Nouvelle action</button>
+      </div>
+      <div class="inv-cfg-list">
+        ${acts.length ? acts.map((a, ai) => {
+          // Dégâts calculés sur la base de l'ATTAQUE de la créature (pas l'arme du perso)
+          const _off = _getSortTypes(a).includes('offensif') || (a.runes||[]).includes('Lacération');
+          const _dmg = _off ? _calcSortDegats(a, _invCalcChar) : '';
+          const _meta = [
+            _dmg ? `🎲 ${_esc(_dmg)}` : '',
+            Array.isArray(a.runes) && a.runes.length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune',
+            a.pm ? `${a.pm} PM` : '',
+          ].filter(Boolean).join(' · ');
+          return `
+          <div class="inv-cfg-act">
+            <div class="inv-cfg-act-main" data-action="_invCfgEditAction" data-aidx="${ai}">
+              <span class="inv-cfg-act-name">🎬 ${_esc(a.nom || 'Action')}</span>
+              <span class="inv-cfg-act-meta">${_meta}</span>
+            </div>
+            <button class="btn-icon" data-action="_invCfgEditAction" data-aidx="${ai}" title="Modifier">✏️</button>
+            <button class="btn-icon" data-action="_invCfgDeleteAction" data-aidx="${ai}" title="Supprimer">🗑️</button>
+          </div>`;
+        }).join('') : '<div class="inv-cfg-empty">Aucune action. Crée la première attaque ou capacité de la créature.</div>'}
+      </div>
+      <div class="inv-cfg-foot">
+        <button class="btn btn-outline" data-action="closeModalDirect">Fermer</button>
+      </div>
+    </div>`;
+}
+// Contexte de calcul "créature" : ses actions se basent sur l'ATTAQUE de
+// l'invocation (ex. 1d4 +2), pas sur l'arme du personnage. On fabrique un perso
+// virtuel neutre (stats 10 → mod 0) dont l'arme principale = l'attaque de la créature.
+function _invocationCalcChar(invSort) {
+  const iv = _calcInvocationStats(invSort || {});
+  return {
+    id: '__invocationCalc',
+    nom: invSort?.nom ? `Créature (${invSort.nom})` : 'Créature invoquée',
+    stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
+    statsBonus: {},
+    equipement: { 'Main principale': {
+      nom: 'Attaque de la créature', degats: iv.attaque,
+      statAttaque: 'force', toucherStat: 'force', degatsStat: 'force',
+      portee: 1, isDefault: true,
+    } },
+    maitrises: {}, sort_cats: [], deck_sorts: [], inventaire: [], elements: [],
+  };
+}
+function _invCfgAddAction() {
+  const s = _invCfgSort(); if (!s) return;
+  if (!s.invocation) s.invocation = {};
+  if (!Array.isArray(s.invocation.actions)) s.invocation.actions = [];
+  editItemSpell({ actions: s.invocation.actions }, -1, _invCfgOnActionSave, _invocationCalcChar(s));
+}
+function _invCfgEditAction(aidx) {
+  const s = _invCfgSort(); if (!s?.invocation?.actions) return;
+  editItemSpell({ actions: s.invocation.actions }, parseInt(aidx), _invCfgOnActionSave, _invocationCalcChar(s));
+}
+async function _invCfgOnActionSave(holder) {
+  const c = STATE.activeChar, s = _invCfgSort(); if (!c || !s) return;
+  if (!s.invocation) s.invocation = {};
+  s.invocation.actions = holder.actions;
+  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  _refreshInvocationConfig();       // la modale de config est déjà restaurée (popModal)
+}
+async function _invCfgDeleteAction(aidx) {
+  const c = STATE.activeChar, s = _invCfgSort(); if (!c || !s?.invocation?.actions) return;
+  if (!await confirmModal('Supprimer cette action ?')) return;
+  s.invocation.actions.splice(parseInt(aidx), 1);
+  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  _refreshInvocationConfig();
+}
+// Bloc image : aperçu + boutons (mode normal). Le cropper inline remplace ce
+// contenu pendant le cadrage (cf. _invStartCrop).
+function _renderInvImageBlock() {
+  return `
+    <div class="cs-inv-img-preview">${_invImageEdit ? `<img src="${_invImageEdit}" alt="">` : '<span>🐾</span>'}</div>
+    <div class="cs-inv-img-actions">
+      <button type="button" class="btn btn-outline btn-sm" data-action="_invPickImage">${_invImageEdit ? '🔄 Changer' : '⬆ Image'}</button>
+      ${_invImageEdit ? `<button type="button" class="btn btn-outline btn-sm" data-action="_invClearImage">✕</button>` : ''}
+    </div>`;
+}
+function _refreshInvImageBlock() {
+  const el = document.getElementById('s-inv-img-block');
+  if (el) el.innerHTML = _renderInvImageBlock();
+}
+function _invPickImage() {
+  pickImageFile({ onImage: ({ dataUrl }) => _invStartCrop(dataUrl) });
+}
+// Cadrage INLINE (pas de modale imbriquée → aucune perte de saisie de l'éditeur)
+function _invStartCrop(dataUrl) {
+  const host = document.getElementById('s-inv-img-block'); if (!host) return;
+  host.innerHTML = `
+    ${panZoomCropHTML({ idPrefix: 'inv-crop', viewSize: 200 })}
+    <div class="cs-inv-crop-actions">
+      <button type="button" class="btn btn-outline btn-sm" data-action="_invCropCancel">Annuler</button>
+      <button type="button" class="btn btn-gold btn-sm" data-action="_invCropSave">✅ Valider</button>
+    </div>`;
+  requestAnimationFrame(() => {
+    _invCrop?.destroy?.();
+    _invCrop = attachPanZoomCrop({ idPrefix: 'inv-crop', dataUrl, viewSize: 200, outputSize: 256 });
+  });
+}
+function _invCropSave() {
+  const b64 = _invCrop?.getBase64();
+  _invCrop?.destroy?.(); _invCrop = null;
+  if (b64) {
+    _invImageEdit = b64;
+    const hid = document.getElementById('s-inv-image'); if (hid) hid.value = b64;
+  }
+  _refreshInvImageBlock();
+  _updateSortPreview();
+}
+function _invCropCancel() {
+  _invCrop?.destroy?.(); _invCrop = null;
+  _refreshInvImageBlock();
+}
+function _invClearImage() {
+  _invImageEdit = '';
+  const hid = document.getElementById('s-inv-image'); if (hid) hid.value = '';
+  _refreshInvImageBlock();
+  _updateSortPreview();
+}
+// Met à jour les placeholders (valeurs dérivées) selon les runes courantes.
+function _refreshInvocationDerived() {
+  const runes = [];
+  Object.entries(_runeCountsEdit || {}).forEach(([nom, cnt]) => { for (let i = 0; i < cnt; i++) runes.push(nom); });
+  const d = _calcInvocationStats({ runes });
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.placeholder = String(val); };
+  set('s-inv-attaque', d.attaque); set('s-inv-toucher', d.toucher); set('s-inv-pv', d.pv);
+  set('s-inv-ca', d.ca); set('s-inv-deplacement', d.deplacement); set('s-inv-duree', d.duree);
+}
+// Reconstruit l'objet invocation depuis le DOM (null si pas de rune Invocation).
+function _buildInvocationFromDOM() {
+  if (!((_runeCountsEdit?.Invocation || 0) > 0)) return null;
+  const v   = id => { const x = (document.getElementById(id)?.value ?? '').trim(); return x === '' ? null : x; };
+  const num = id => { const x = v(id); if (x == null) return null; const n = parseInt(x); return Number.isFinite(n) ? n : null; };
+  return {
+    stats: {
+      attaque: v('s-inv-attaque'), toucher: num('s-inv-toucher'), pv: num('s-inv-pv'),
+      ca: num('s-inv-ca'), deplacement: num('s-inv-deplacement'), duree: num('s-inv-duree'),
+    },
+    image: document.getElementById('s-inv-image')?.value || _invImageEdit || '',
+    actions: Array.isArray(_invActionsEdit) ? _invActionsEdit : [],
+  };
 }
 
 function _selectSortAction(val) {
@@ -1507,6 +1789,11 @@ export function runeIncrement(nom) {
   // (l'utilisateur peut décocher ensuite, on ne force pas)
   if (prevCnt === 0 && _sortTypesEdit) {
     if (nom === 'Puissance'  && !_sortTypesEdit.has('offensif')) {
+      _sortTypesEdit.add('offensif');
+      _applyTypeChange();
+    }
+    // Lacération inflige toujours l'attaque de base + sa réduction de CA → Offensif
+    if (nom === 'Lacération' && !_sortTypesEdit.has('offensif')) {
       _sortTypesEdit.add('offensif');
       _applyTypeChange();
     }
@@ -1857,6 +2144,7 @@ function _buildSortFromDOM() {
     })(),
     toucherStat: _readVisibleStatOverride('s-toucher-stat'),
     degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+    invocation:  _buildInvocationFromDOM(),
     mjNotes: document.getElementById('s-mj-notes')?.value || '',
   };
 }
@@ -1892,8 +2180,8 @@ function _updateSortPreview() {
   try {
     lines = _buildSortResume(s, c);
   } catch (e) {
-    console.warn('[Preview item] _buildSortResume a échoué :', e);
-    lines = [{ icon:'⚠️', label:'Aperçu non disponible (calcul indisponible sans perso)' }];
+    console.warn('[Preview] _buildSortResume a échoué :', e);
+    lines = [{ icon:'⚠️', label:'Aperçu indisponible', detail: String(e?.message || e) }];
   }
   body.innerHTML = lines.map(l => `
     <div class="cs-spell-preview-row ${l.isCombo ? 'cs-spell-preview-row--combo' : ''}">
@@ -2055,6 +2343,7 @@ export async function saveSort(idx) {
       // → évite que le sélecteur d'une section cachée n'écrase la sélection utilisateur.
       toucherStat: _readVisibleStatOverride('s-toucher-stat'),
       degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+      invocation:   _buildInvocationFromDOM(),
       mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
     };
     const isNew = idx < 0;
@@ -2225,4 +2514,12 @@ registerActions({
   _toggleSortIconPicker:  ()    => _toggleSortIconPicker(),
   _pickSortIcon:          (btn) => _pickSortIcon(btn.dataset.icon),
   _pickSpellSuggestion:   (btn) => _pickSpellSuggestion(btn.dataset.cat, btn.dataset.encoded),
+  _invPickImage:          ()    => _invPickImage(),
+  _invClearImage:         ()    => _invClearImage(),
+  _invCropSave:           ()    => _invCropSave(),
+  _invCropCancel:         ()    => _invCropCancel(),
+  _openInvocationConfig:  (btn) => openInvocationConfig(Number(btn.dataset.idx)),
+  _invCfgAddAction:       ()    => _invCfgAddAction(),
+  _invCfgEditAction:      (btn) => _invCfgEditAction(btn.dataset.aidx),
+  _invCfgDeleteAction:    (btn) => _invCfgDeleteAction(btn.dataset.aidx),
 });
