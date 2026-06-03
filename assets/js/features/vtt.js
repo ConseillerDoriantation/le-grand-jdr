@@ -506,6 +506,12 @@ function _live(t) {
   const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))));
   const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
   const _ca      = _caBase + _caBuffs.reduce((sum, bf) => sum + (bf.bonus || 0), 0);
+  // Attaque de base (stat) — expression d'origine, équilibrée.
+  const _baseAtk = t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5))))));
+  // Enchantement mode Toucher : bonus au jet d'attaque (le vrai jet lit displayAttack)
+  const _touchDelta = (t.buffs || [])
+    .filter(bf => bf.type === 'toucher_bonus' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
+    .reduce((sum, bf) => sum + (parseInt(bf.bonus) || 0), 0);
 
   const result = {
     ...t,
@@ -525,14 +531,7 @@ function _live(t) {
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
       return Math.max(0, baseMv + moveDelta);
     })(),
-    displayAttack: (() => {
-      const baseAtk = t.attack ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))));
-      // Enchantement mode Toucher : bonus au jet d'attaque (consommé ici, le vrai jet lit displayAttack)
-      const touchDelta = (t.buffs || [])
-        .filter(bf => bf.type === 'toucher_bonus' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
-        .reduce((sum, bf) => sum + (parseInt(bf.bonus) || 0), 0);
-      return baseAtk + touchDelta;
-    })(),
+    displayAttack: _baseAtk + _touchDelta,
     displayAttackDice: atkDice,
     displayDefense:    _ca,
     // VRAIE CA, JAMAIS écrasée par l'estimation joueur. Sert au calcul authoritatif
