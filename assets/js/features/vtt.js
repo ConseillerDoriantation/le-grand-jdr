@@ -1321,9 +1321,12 @@ function _buildShape(t) {
     }
   }
   // ── Nom ───────────────────────────────────────────────────────────
+  // listening:false → le label ne capte pas les clics : ils traversent vers le
+  // token situé en dessous (évite de se cibler soi-même quand le nom déborde
+  // au-dessus du token d'une cible).
   g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2, y:_lblY,
     width:bW, align:'center', fontSize:11, fontStyle:'bold', fill:'#fff',
-    fontFamily:'Inter,sans-serif', name:'lbl',
+    fontFamily:'Inter,sans-serif', name:'lbl', listening:false,
     shadowColor:'#000', shadowBlur:4, shadowOpacity:1 }));
 
   // ── Image clippée à l'ellipse (équivalent cercle quand W===H) ─────
