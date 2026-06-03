@@ -2,12 +2,10 @@
 // FIRESTORE — Couche d'accès aux données
 //
 // Trois niveaux de cache (du plus prioritaire au moins) :
-//   1. Live session — un onSnapshot couvre toute la session pour les
-//      collections lues par plusieurs pages (shop, npcs, story, quests,
-//      characters, achievements, collection, shopCategories) + 3 docs
-//      (bastion/main, world/main, agenda_session/next). Coût initial :
-//      1 lecture par doc à l'entrée d'aventure (servie par IndexedDB sur
-//      cache chaud → ~0 lecture facturée). Coût ensuite : uniquement les
+//   1. Live session — les données critiques du dashboard sont amorcées à
+//      l'entrée d'aventure (quests, characters, bastion/main, agenda_session/next).
+//      Les autres collections/docs partagés restent session-live mais démarrent
+//      au 1er accès (page, palette, abonnement). Coût ensuite : uniquement les
 //      deltas réels (latency-compensation auto sur nos propres writes).
 //   2. Cache TTL en mémoire — pour les collections page-scoped (bestiary,
 //      npc_affinites, etc.). Évite de re-fetch entre nav.
@@ -78,13 +76,29 @@ const _CACHE_TTL = {
 };
 
 const _DOC_CACHE_TTL = {
+  bestiary: {
+    // Chargé au détail dans le VTT joueur : éviter de relire tout le bestiaire.
+    '*':               5 * 60_000,
+  },
+  bestiary_meta: {
+    list:              5 * 60_000,
+  },
+  story_meta: {
+    actes:             5 * 60_000,
+  },
+  story_histories: {
+    '*':              30 * 60_000,
+  },
+  recettes: {
+    main:             30 * 60_000,
+  },
   world: {
     // Config de règles — modifiée par l'admin hors session, caches module-level internes
     weapon_formats:  30 * 60_000,
     damage_types:    30 * 60_000,
     spell_matrices:  30 * 60_000,
     conditions:      30 * 60_000,
-    dice_skills:     30 * 60_000,  // maintenant aussi en _SESSION_DOCS
+    dice_skills:     30 * 60_000,  // aussi couvert en lazy session-doc
     upgrade_settings:30 * 60_000,
     combat_styles:   30 * 60_000,
     vtt_emotes:      30 * 60_000,  // admin définit une fois par campagne
@@ -104,7 +118,8 @@ function _cacheTtlForKey(key) {
 
   const suffix = key.slice(path.length + 1);
   if (!suffix || suffix.includes(':')) return null;
-  return _DOC_CACHE_TTL[colName]?.[suffix] || null;
+  const docTtls = _DOC_CACHE_TTL[colName];
+  return docTtls?.[suffix] || docTtls?.['*'] || null;
 }
 
 function _cacheGet(key) {
@@ -176,6 +191,24 @@ function _cachePatchSave(path, id, partial) {
   const singleKey = `${path}:${id}`;
   const single = _cache.get(singleKey);
   const data = { ...(single?.data || {}), ...partial };
+  if (single) _cache.set(singleKey, { data, ts: single.ts });
+  else _cacheSet(singleKey, data);
+}
+
+function _cachePatchReplace(path, id, data) {
+  _cacheInvalidateWhere(path);
+  const allKey = `${path}:all`;
+  const all = _cache.get(allKey);
+  const docData = { id, ...data };
+  if (all) {
+    const found = all.data.some(d => d.id === id);
+    const next = found
+      ? all.data.map(d => d.id === id ? docData : d)
+      : [...all.data, docData];
+    _cache.set(allKey, { data: next, ts: all.ts });
+  }
+  const singleKey = `${path}:${id}`;
+  const single = _cache.get(singleKey);
   if (single) _cache.set(singleKey, { data, ts: single.ts });
   else _cacheSet(singleKey, data);
 }
@@ -329,13 +362,16 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   'collection',
 ]);
 const _SESSION_DOCS = [
-  ['bastion',          'main'],
-  ['world',            'main'],
-  ['agenda_session',   'next'],
-  ['achievements_meta','order'],      // lu à chaque render achievements
-  ['world',            'dice_skills'], // partagé entre histoire.js, shop.js, vtt.js
-  ['world',            'map'],         // config fond de carte, stable pendant le jeu
+  ['bastion',          'main'], // dashboard
+  ['agenda_session',   'next'], // dashboard + agenda
 ];
+const _LAZY_SESSION_DOCS = new Set([
+  'world/main',             // page Monde, parfois volumineux
+  'achievements_meta/order',// page Hauts-faits
+  'world/dice_skills',      // histoire.js, shop.js, vtt.js
+  'world/map',              // config fond de carte, stable mais image potentiellement lourde
+]);
+const _sessionDocKey = (col, id) => `${col}/${id}`;
 
 // Démarre tous les listeners session pour l'aventure courante.
 // Fire-and-forget côté caller — chaque page individuelle await la `ready`
@@ -397,7 +433,11 @@ export function subscribeCollection(col, callback) {
 export function subscribeDoc(col, id, callback) {
   const path = _colPath(col);
   const liveKey = `${path}:${id}`;
-  const live = _liveDocs.get(liveKey);
+  let live = _liveDocs.get(liveKey);
+  if (!live && _adventureId && _LAZY_SESSION_DOCS.has(_sessionDocKey(col, id))) {
+    _primeDoc(col, id);
+    live = _liveDocs.get(liveKey);
+  }
   if (live && !live.failed) {
     const observer = { cb: callback };
     live.observers.add(observer);
@@ -542,7 +582,11 @@ async function _readDoc(col, id, { silent } = {}) {
 
   // 1. Live doc (ex: bastion/main)
   const liveKey = `${path}:${id}`;
-  const liveD = _liveDocs.get(liveKey);
+  let liveD = _liveDocs.get(liveKey);
+  if (!liveD && _adventureId && _LAZY_SESSION_DOCS.has(_sessionDocKey(col, id))) {
+    await _primeDoc(col, id);
+    liveD = _liveDocs.get(liveKey);
+  }
   if (liveD && !liveD.failed) {
     if (!liveD.firstReceived) await liveD.ready;
     return liveD.data ? { ...liveD.data } : null;
@@ -601,6 +645,17 @@ export async function saveDoc(col, id, data) {
   }
 }
 
+export async function replaceDoc(col, id, data) {
+  const path = _colPath(col);
+  try {
+    await setDoc(doc(db, path, id), data);
+    _cachePatchReplace(path, id, data);
+  } catch (e) {
+    _handleFirestoreError(e, `replaceDoc(${path}/${id})`);
+    throw e;
+  }
+}
+
 export async function addToCol(col, data) {
   const path = _colPath(col);
   try {
@@ -637,6 +692,8 @@ export async function deleteFromCol(col, id) {
 }
 
 // ── Spécifique personnages ─────────────────────
+const _inventoryNormAttempted = new Set();
+
 export async function loadChars(uid = null) {
   const path = _colPath('characters');
 
@@ -659,11 +716,17 @@ export async function loadChars(uid = null) {
     const { normalizeInventaire, inventaireNeedsNorm } = await import('../shared/inventory-utils.js');
     for (const c of chars) {
       if (!inventaireNeedsNorm(c.inventaire)) continue;
+      const normKey = `${path}:${c.id}`;
+      if (_inventoryNormAttempted.has(normKey)) continue;
+      _inventoryNormAttempted.add(normKey);
       const normalized = normalizeInventaire(c.inventaire);
       c.inventaire = normalized;
       // Fire-and-forget : si l'écriture échoue (droits), retentée au prochain pass.
       updateDoc(doc(db, path, c.id), { inventaire: normalized })
-        .then(() => console.debug(`[inv] normalized ${c.nom || c.id} (${normalized.length} entries)`))
+        .then(() => {
+          _cachePatchUpdate(path, c.id, { inventaire: normalized });
+          console.debug(`[inv] normalized ${c.nom || c.id} (${normalized.length} entries)`);
+        })
         .catch(e => console.debug(`[inv] silent normalize failed for ${c.id}:`, e?.code));
     }
   } catch (e) { console.debug('[inv] norm utility load failed:', e); }

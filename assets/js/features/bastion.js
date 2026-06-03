@@ -15,9 +15,8 @@
 
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
-import { getDocData, updateInCol, loadCollection, getCurrentAdventureId } from '../data/firestore.js';
+import { getDocData, updateInCol, loadCollection, replaceDoc } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
-import { db, doc, setDoc } from '../config/firebase.js';
 import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
@@ -491,8 +490,7 @@ async function _bastionResetAll() {
   try {
     // Écriture COMPLÈTE (pas de merge) : remplace le doc entier.
     // _save() utilise merge:true → les anciens objets imbriqués persisteraient.
-    const aid = getCurrentAdventureId();
-    await setDoc(doc(db, `adventures/${aid}/bastion/main`), fresh);
+    await replaceDoc('bastion', 'main', fresh);
     closeModal();
     showNotif('Bastion réinitialisé. Bonne campagne !', 'success');
   } catch (e) { notifySaveError(e); }

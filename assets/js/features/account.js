@@ -4,11 +4,7 @@
 // ✓ Supprimer le compte : vend tous les items boutique → restitue le stock,
 //   supprime tous les personnages, puis supprime le compte Firebase
 // ══════════════════════════════════════════════════════════════════════════════
-import {
-  auth, db, doc, setDoc, getDoc, updateDoc,
-  signInWithEmailAndPassword,
-  signOut,
-} from '../config/firebase.js';
+import { auth } from '../config/firebase.js';
 
 import {
   updateEmail, updatePassword, deleteUser,
@@ -57,19 +53,21 @@ async function _liquidateInventory(inventaire = []) {
     shopDocs.forEach(d => { shopMap[d.id] = d; });
 
     let totalOr = 0;
+    const restockByItem = new Map();
 
-    await Promise.all(shopItems.map(async (item) => {
+    shopItems.forEach((item) => {
       const pv = parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat)||0) * 0.6);
       totalOr += pv;
 
-      // Réincrémenter le stock
       const shopDoc = shopMap[item.itemId];
-      if (shopDoc) {
-        const cur = shopDoc.dispo !== undefined && shopDoc.dispo !== '' ? parseInt(shopDoc.dispo) : null;
-        if (cur !== null && cur >= 0) {
-          await updateInCol('shop', item.itemId, { dispo: cur + 1 });
-        }
-      }
+      if (!shopDoc) return;
+      const cur = shopDoc.dispo !== undefined && shopDoc.dispo !== '' ? parseInt(shopDoc.dispo) : null;
+      if (cur !== null && cur >= 0) restockByItem.set(item.itemId, (restockByItem.get(item.itemId) || 0) + 1);
+    });
+
+    await Promise.all([...restockByItem.entries()].map(([itemId, count]) => {
+      const cur = parseInt(shopMap[itemId]?.dispo);
+      return updateInCol('shop', itemId, { dispo: cur + count });
     }));
 
     return totalOr;
@@ -226,7 +224,7 @@ async function savePseudo() {
   if (!user) return;
 
   try {
-    await updateDoc(doc(db, 'users', user.uid), { pseudo: newPseudo });
+    await updateInCol('users', user.uid, { pseudo: newPseudo });
     const newProfile = { ...(STATE.profile||{}), pseudo: newPseudo };
     setProfile(newProfile);
 
@@ -275,7 +273,7 @@ async function saveEmail() {
   try {
     await _reauth(password);
     await updateEmail(auth.currentUser, newEmail);
-    await updateDoc(doc(db, 'users', auth.currentUser.uid), { email: newEmail });
+    await updateInCol('users', auth.currentUser.uid, { email: newEmail });
     const newProfile = { ...(STATE.profile||{}), email: newEmail };
     setProfile(newProfile);
     closeModal();

@@ -2,7 +2,7 @@
 // PRESENCE.JS — Présence app-wide (qui est connecté sur cette aventure)
 //
 // Écrit un doc adventures/{advId}/presence/{uid} avec { uid, pseudo, lastSeen }
-// toutes les 45 s tant qu'une aventure est sélectionnée ET que l'onglet est visible.
+// toutes les 75 s tant qu'une aventure est sélectionnée ET que l'onglet est visible.
 // L'admin lit cette collection sur son dashboard pour voir les joueurs connectés.
 //
 // Économie de quota : on suspend le heartbeat quand l'onglet passe en arrière-plan
@@ -13,17 +13,21 @@
 import { db, doc, setDoc, deleteDoc, serverTimestamp } from '../config/firebase.js';
 import { STATE } from '../core/state.js';
 
-const HEARTBEAT_MS = 45_000;
+const HEARTBEAT_MS = 75_000;
 let _timer        = null;
 let _ref          = null;
 let _onUnload     = null;
 let _onVisibility = null;
+let _lastWriteAt  = 0;
 
 export function startPresence(advId, uid) {
   stopPresence();
   if (!advId || !uid) return;
   _ref = doc(db, `adventures/${advId}/presence/${uid}`);
   const write = () => {
+    const now = Date.now();
+    if (now - _lastWriteAt < 10_000) return;
+    _lastWriteAt = now;
     const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
     setDoc(_ref, { uid, pseudo, lastSeen: serverTimestamp() }, { merge: true }).catch(() => {});
   };
@@ -43,4 +47,5 @@ export function stopPresence() {
   if (_onVisibility) { document.removeEventListener('visibilitychange', _onVisibility); _onVisibility = null; }
   if (_onUnload)     { window.removeEventListener('beforeunload', _onUnload); _onUnload = null; }
   if (_ref)          { deleteDoc(_ref).catch(() => {}); _ref = null; }
+  _lastWriteAt = 0;
 }

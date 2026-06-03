@@ -9,7 +9,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import Sortable from '../vendor/sortable.esm.js';
-import { getCurrentAdventureId, getDocData, saveDoc, loadCollection, subscribeCollection } from '../data/firestore.js';
+import { getCurrentAdventureId, getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
@@ -227,11 +227,13 @@ let _session = {}, _pages = {}, _tokens = {};
 let _characters = {};   // characterId → character doc
 let _npcs       = {};   // npcId → npc doc
 let _bestiary   = {};   // beastId → creature doc (bestiaire)
+let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
 let _activePage = null;
 let _tool       = 'select';
 let _selected   = null, _attackSrc = null, _moveHL = [];
 let _mtCtx      = null; // contexte multi-cibles actif { srcId, opt, optIdx, targets[], maxTargets, lines Map }
+let _mtBroadcasting = false; // évite un write active:false si rien n'a été diffusé
 let _mtPending  = null; // cibles validées en attente du roll : string[]
 let _zoneCtx    = null; // contexte zone AoE { srcId, tgtId, opt, optIdx, wPx, hPx, x, y, placed }
 let _zonePreview= null; // Konva.Group prévisualisation zone
@@ -262,6 +264,8 @@ const _mapLibRef = () => doc(db, `adventures/${_aid()}/vtt/mapLibrary`);
 // ── Butin ─────────────────────────────────────────────────────────
 let _loot            = { stash: [], loot: [] };
 let _lootUnsub       = null;
+let _lootLoading     = false;
+let _lootReady       = null;
 let _lootCloseOutside = null;
 const _lootRef  = () => doc(db, `adventures/${_aid()}/vtt/loot`);
 // ── Lanceur de dés libre ───────────────────────────────────────────
@@ -274,6 +278,10 @@ let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skill
 let _sounds        = [];     // [{id, name, url, createdAt}]
 let _playlists     = [];     // [{id, name, color, soundIds[]}]
 let _musicState    = {};     // état Firestore courant
+let _musicCatalogStarted = false;
+let _musicCatalogLoading = false;
+let _musicCatalogReady   = null;
+let _musicSoundLoads     = new Map(); // soundId → Promise lecture doc ciblée
 let _audioEl       = null;   // HTMLAudioElement actif
 let _musicSearch   = ''; // filtre texte unique (vue unifiée), persisté en session
 let _musicCloseOut = null;
@@ -376,8 +384,11 @@ const _tokenStatMod = (t, statKey) => {
 
 // ── État présence & mini-fiche ──────────────────────────────────────
 let _presence     = {};   // uid → { uid, pseudo }
+const VTT_PRESENCE_HEARTBEAT_MS = 75_000;
 let _presHeartbeat= null; // intervalId du heartbeat
+let _presLastWriteAt = 0;
 let _presVisibility = null; // listener visibilitychange (pause heartbeat onglet masqué)
+let _presUnload = null; // listener beforeunload VTT
 let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
@@ -419,7 +430,6 @@ const _pgRef   = (id) => doc(db, `adventures/${_aid()}/vttPages/${id}`);
 const _tokRef  = (id) => doc(db, `adventures/${_aid()}/vttTokens/${id}`);
 const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
 const _npcRef  = (id) => doc(db, `adventures/${_aid()}/npcs/${id}`);
-const _bstCol        = ()    => collection(db, `adventures/${_aid()}/bestiary`);
 const _bstTrackerRef = (uid) => doc(db, `adventures/${_aid()}/bestiary_tracker/${uid}`);
 const _logCol      = ()  => collection(db, `adventures/${_aid()}/vttLog`);
 const _castingCol  = ()  => collection(db, `adventures/${_aid()}/vttCasting`);
@@ -685,11 +695,11 @@ async function _vttTriggerConcentrationSave(td, damageAmount) {
 // ═══════════════════════════════════════════════════════════════════
 // AUTO-SYNC TOKENS — crée les tokens manquants pour persos et PNJ
 // ═══════════════════════════════════════════════════════════════════
-let _charsReady = false, _npcsReady = false, _toksReady = false, _bstsReady = false;
+let _charsReady = false, _npcsReady = false, _toksReady = false;
 
 function _maybeSyncAutoTokens() {
   if (!STATE.isAdmin || _autoSyncDone) return;
-  if (!_charsReady || !_npcsReady || !_toksReady || !_bstsReady) return;
+  if (!_charsReady || !_npcsReady || !_toksReady) return;
   _autoSyncDone = true;
   _syncAutoTokens();
 }
@@ -791,17 +801,26 @@ function _cleanup() {
     if (_uid) { try { deleteDoc(_pingRef(_uid)).catch(()=>{}); } catch(e){} }
   }
   if (_presVisibility)   { document.removeEventListener('visibilitychange', _presVisibility); _presVisibility = null; }
+  if (_presUnload)       { window.removeEventListener('beforeunload', _presUnload); _presUnload = null; }
   if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
+  _presLastWriteAt = 0;
   _timerStopTick();
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
   if (_mapLibUnsub) { _mapLibUnsub(); _mapLibUnsub = null; }
   _mapLib = { folders: [], images: [] }; _libFolder = null;
   if (_lootUnsub) { _lootUnsub(); _lootUnsub = null; }
+  _lootLoading = false; _lootReady = null;
   if (_lootCloseOutside) { document.removeEventListener('mousedown', _lootCloseOutside, true); _lootCloseOutside = null; }
   _loot = { stash: [], loot: [] };
+  _killAudio();
+  _sounds = []; _playlists = []; _musicState = {};
+  _musicCatalogStarted = false; _musicCatalogLoading = false; _musicCatalogReady = null;
+  _musicSoundLoads.clear();
   _mtClear(true);
+  _mtBroadcasting = false;
   _presence = {}; _miniUid = null; _miniCharId = null;
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
+  _bestiaryLoads.clear();
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
@@ -815,7 +834,7 @@ function _cleanup() {
   if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
   if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
   _mjRulerLastWrite = 0; _mjRulerBroadcasting = false; _mjRulerRemote = null;
-  _charsReady = false; _npcsReady = false; _toksReady = false; _bstsReady = false;
+  _charsReady = false; _npcsReady = false; _toksReady = false;
   _traySearch = '';
   _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
   _hideCtxMenu();
@@ -1702,7 +1721,7 @@ async function _emitPing(wx, wy) {
     await setDoc(_pingRef(uid), {
       x: wx, y: wy, pageId: _activePage.id,
       authorName, color, createdAt: serverTimestamp(),
-    });
+    }, { merge: true });
   } catch(e) { console.warn('[vtt] ping:', e); }
 }
 
@@ -4516,10 +4535,14 @@ function _mtRefreshHud() {
 async function _mtBroadcast() {
   const uid = STATE.user?.uid || 'anon';
   if (!_mtCtx) {
-    await setDoc(_castingRef(uid), { active: false }, { merge: true }).catch(() => {});
+    if (_mtBroadcasting) {
+      _mtBroadcasting = false;
+      await setDoc(_castingRef(uid), { active: false }, { merge: true }).catch(() => {});
+    }
     return;
   }
   const { srcId, targets, opt } = _mtCtx;
+  _mtBroadcasting = true;
   await setDoc(_castingRef(uid), {
     active: true, srcId, targets,
     spellName: opt.label, spellIcon: opt.icon,
@@ -4536,8 +4559,9 @@ function _mtClear(broadcast = true) {
   hud?.remove();
   _mtClearLines();
   _mtCtx = null;
-  if (broadcast) {
+  if (broadcast && _mtBroadcasting) {
     const uid = STATE.user?.uid || 'anon';
+    _mtBroadcasting = false;
     setDoc(_castingRef(uid), { active: false }, { merge: true }).catch(() => {});
   }
 }
@@ -7418,7 +7442,71 @@ async function _endDraw() {
   _layers.draw.batchDraw();
 }
 
-// SYNC FIRESTORE — onSnapshot sur 5 collections
+// ── Bestiaire VTT : catalogue MJ, lecture ciblée joueurs ─────────────────────
+function _patchBestiaryTokenShapes(changedIds) {
+  if (!changedIds?.size) return;
+  for (const [id, e] of Object.entries(_tokens)) {
+    if (e.data?.beastId && changedIds.has(e.data.beastId)) {
+      _patchShape(id);
+      if (_selected === id) _renderInspectorSoon();
+    }
+  }
+  _renderCombatTrackerSoon();
+}
+
+function _applyBestiaryCatalog(list) {
+  const before = new Set(Object.keys(_bestiary));
+  const next = {};
+  for (const b of list || []) {
+    if (!b?.id) continue;
+    next[b.id] = b;
+  }
+  _bestiary = next;
+  const changed = new Set([...before, ...Object.keys(next)]);
+  _patchBestiaryTokenShapes(changed);
+  _renderTraySoon();
+}
+
+async function _loadBestiaryCatalog() {
+  try {
+    _applyBestiaryCatalog(await loadCollection('bestiary'));
+  } catch (e) {
+    console.warn('[vtt] bestiaire catalogue:', e?.code || e);
+    _applyBestiaryCatalog([]);
+  }
+}
+
+function _ensureBestiaryDoc(beastId) {
+  if (!beastId) return Promise.resolve(null);
+  if (_bestiary[beastId]) return Promise.resolve(_bestiary[beastId]);
+  if (_bestiaryLoads.has(beastId)) return _bestiaryLoads.get(beastId);
+  const promise = getDocDataSilent('bestiary', beastId)
+    .then(data => {
+      if (!data) return null;
+      const docData = { ...data, id: data.id || beastId };
+      _bestiary[beastId] = docData;
+      _patchBestiaryTokenShapes(new Set([beastId]));
+      return docData;
+    })
+    .catch(e => {
+      console.debug('[vtt] bestiaire doc:', beastId, e?.code || e);
+      return null;
+    })
+    .finally(() => _bestiaryLoads.delete(beastId));
+  _bestiaryLoads.set(beastId, promise);
+  return promise;
+}
+
+function _ensureBestiaryForTokens() {
+  if (STATE.isAdmin) return;
+  const ids = new Set();
+  for (const { data } of Object.values(_tokens)) {
+    if (data?.beastId) ids.add(data.beastId);
+  }
+  ids.forEach(id => { void _ensureBestiaryDoc(id); });
+}
+
+// SYNC FIRESTORE — listeners temps réel
 // ═══════════════════════════════════════════════════════════════════
 function _initListeners() {
   if (!_aid()) return;
@@ -7508,21 +7596,10 @@ function _initListeners() {
     _npcsReady = true; _maybeSyncAutoTokens();
   }));
 
-  // 5. Bestiaire — source de vérité des créatures ennemies
-  _unsubs.push(onSnapshot(_bstCol(), snap => {
-    snap.docChanges().forEach(ch => {
-      if (ch.type==='removed') delete _bestiary[ch.doc.id];
-      else _bestiary[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
-    });
-    const changed=new Set(snap.docChanges().map(c=>c.doc.id));
-    for (const [id,e] of Object.entries(_tokens)) {
-      if (e.data.beastId&&changed.has(e.data.beastId)) {
-        _patchShape(id); if (_selected===id) _renderInspectorSoon();
-      }
-    }
-    _renderTraySoon();
-    _bstsReady=true; _maybeSyncAutoTokens();
-  },()=>{}));
+  // 5. Bestiaire
+  // MJ : catalogue complet pour le tray, mais sans listener permanent.
+  // Joueurs : chargement doc par doc des créatures réellement présentes en tokens.
+  if (STATE.isAdmin) void _loadBestiaryCatalog();
 
   // 5b. Tracker bestiaire joueur (estimations personnelles)
   if (!STATE.isAdmin) {
@@ -7580,6 +7657,7 @@ function _initListeners() {
     _renderTraySoon();
     _renderCombatTrackerSoon();
     _toksReady=true; _maybeSyncAutoTokens();
+    _ensureBestiaryForTokens();
     // Joueur : le bouton « Invoquer mon token » dépend de l'état de SON token
     // (créé / assigné / déplacé par le MJ). Sans ce refresh, le bouton n'apparaît
     // pas tant qu'un autre événement (changement de page) ne relance pas le rendu.
@@ -7713,31 +7791,13 @@ function _initListeners() {
     }, () => {});
   }
 
-  // Butin d'aventure
-  _lootUnsub = onSnapshot(_lootRef(), snap => {
-    _loot = snap.exists() ? snap.data() : {};
-    if (!Array.isArray(_loot.stash)) _loot.stash = [];
-    if (!Array.isArray(_loot.loot))  _loot.loot  = [];
-    _renderLootPanel();
-  }, () => {});
+  // Butin d'aventure : listener lazy, démarré seulement à l'ouverture du panneau
+  // ou quand le MJ ajoute du butin depuis une créature.
 
-  // 12. Sons VTT
-  _unsubs.push(onSnapshot(_sonsCol(), snap => {
-    _sounds = snap.docs
-      .map(d=>({id:d.id,...d.data()}))
-      .sort((a,b)=>(a.createdAt?.toMillis?.()??0)-(b.createdAt?.toMillis?.()??0));
-    if (document.getElementById('vtt-music-panel')?.dataset.open==='1') _renderMusicPanel();
-  }, ()=>{}));
+  // 12. Sons/playlists VTT : listeners lazy, démarrés seulement par le panneau MJ
+  // ou par une lecture musicale qui a besoin de résoudre l'URL du son courant.
 
-  // 13. Playlists VTT
-  _unsubs.push(onSnapshot(_playlistsCol(), snap => {
-    _playlists = snap.docs
-      .map(d=>({id:d.id,...d.data()}))
-      .sort((a,b)=>(a.createdAt?.toMillis?.()??0)-(b.createdAt?.toMillis?.()??0));
-    if (document.getElementById('vtt-music-panel')?.dataset.open==='1') _renderMusicPanel();
-  }, ()=>{}));
-
-  // 14. État musique — sync pour tous les clients
+  // 13. État musique — sync pour tous les clients
   _unsubs.push(onSnapshot(_musicStateRef(), snap => {
     _syncMusicPlayback(snap.exists() ? snap.data() : {});
   }, ()=>{}));
@@ -7806,7 +7866,7 @@ async function _loadEmotes() {
   // 1. Tenter le path scopé à l'aventure (path normal)
   try {
     const data = await getDocData('world', 'vtt_emotes');
-    if (data?.emotes?.length) { _emotes = data.emotes; return; }
+    if (Array.isArray(data?.emotes)) { _emotes = data.emotes; return; }
   } catch(e) { console.warn('[vtt] emotes (adventure path) :', e.message); }
 
   // 2. Fallback : path global world/vtt_emotes (migration ancien stockage)
@@ -10935,13 +10995,46 @@ function _vttLibPlace(imgId) {
 // ═══════════════════════════════════════════════════════════════════
 
 async function _saveLoot() {
+  await _ensureLootListener();
   await setDoc(_lootRef(), { stash: _loot.stash, loot: _loot.loot });
+}
+
+function _normalizeLoot(data) {
+  _loot = data || {};
+  if (!Array.isArray(_loot.stash)) _loot.stash = [];
+  if (!Array.isArray(_loot.loot))  _loot.loot  = [];
+}
+
+function _ensureLootListener() {
+  if (_lootUnsub) return _lootReady || Promise.resolve(_loot);
+  _lootLoading = true;
+  _lootReady = new Promise(resolve => {
+    let resolved = false;
+    const finish = () => {
+      _lootLoading = false;
+      _renderLootPanel();
+      if (!resolved) { resolved = true; resolve(_loot); }
+    };
+    _lootUnsub = onSnapshot(_lootRef(), snap => {
+      _normalizeLoot(snap.exists() ? snap.data() : {});
+      finish();
+    }, () => {
+      _normalizeLoot(_loot);
+      finish();
+    });
+  });
+  return _lootReady;
 }
 
 function _renderLootPanel() {
   const panel = document.getElementById('vtt-loot-panel');
   if (!panel || panel.dataset.open !== '1') return;
   const mj = STATE.isAdmin;
+
+  if (_lootLoading) {
+    panel.innerHTML = '<div class="vtt-loot-empty">Chargement du butin…</div>';
+    return;
+  }
 
   const uid = STATE.user?.uid;
   const myChars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
@@ -11052,6 +11145,7 @@ function _vttToggleLoot() {
   panel.dataset.open = '1';
   panel.style.display = 'flex';
   document.getElementById('vtt-loot-trigger')?.classList.add('active');
+  void _ensureLootListener();
   _renderLootPanel();
   _lootCloseOutside = (e) => {
     const float = document.querySelector('.vtt-loot-float');
@@ -11081,6 +11175,7 @@ function _vttLootClear() {
 
 /** Helper interne : ajoute un objet boutique au stash (avec fusion). */
 async function _vttLootAddItemToStash(item, qty, catTemplate) {
+  await _ensureLootListener();
   const template = catTemplate || 'classique';
   const prixVente = Math.round((item.prix || 0) * 0.5);
   const base = shopItemToInvEntry(item, { source: 'butin', template, prixVente });
@@ -11367,6 +11462,68 @@ function _vttDiceRoll() {
 // MUSIQUE / SONS
 // ═══════════════════════════════════════════════════════════════════
 
+function _sortSoundsByCreatedAt(list) {
+  return [...(list || [])].sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
+}
+
+function _startMusicCatalogListeners() {
+  if (_musicCatalogStarted) return _musicCatalogReady || Promise.resolve();
+  _musicCatalogStarted = true;
+  _musicCatalogLoading = true;
+
+  _musicCatalogReady = new Promise(resolve => {
+    let soundsReady = false;
+    let playlistsReady = false;
+    const done = () => {
+      if (!soundsReady || !playlistsReady) return;
+      _musicCatalogLoading = false;
+      if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
+      if (_musicState?.currentSoundId) _syncMusicPlayback(_musicState);
+      resolve();
+    };
+
+    _unsubs.push(onSnapshot(_sonsCol(), snap => {
+      _sounds = _sortSoundsByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      soundsReady = true;
+      if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
+      done();
+    }, () => { soundsReady = true; done(); }));
+
+    _unsubs.push(onSnapshot(_playlistsCol(), snap => {
+      _playlists = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
+      playlistsReady = true;
+      if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
+      done();
+    }, () => { playlistsReady = true; done(); }));
+  });
+
+  return _musicCatalogReady;
+}
+
+function _loadMusicSoundById(soundId) {
+  if (!soundId) return Promise.resolve(null);
+  const existing = _sounds.find(s => s.id === soundId);
+  if (existing) return Promise.resolve(existing);
+  if (_musicSoundLoads.has(soundId)) return _musicSoundLoads.get(soundId);
+
+  const promise = getDoc(_sonRef(soundId))
+    .then(snap => {
+      if (!snap.exists()) return null;
+      const sound = { id: snap.id, ...snap.data() };
+      _sounds = _sortSoundsByCreatedAt([..._sounds.filter(s => s.id !== sound.id), sound]);
+      return sound;
+    })
+    .catch(e => {
+      console.debug('[vtt music] son introuvable:', soundId, e?.code || e);
+      return null;
+    })
+    .finally(() => _musicSoundLoads.delete(soundId));
+  _musicSoundLoads.set(soundId, promise);
+  return promise;
+}
+
 function _closeMusicPanel() {
   const panel = document.getElementById('vtt-music-panel');
   if (panel) { panel.dataset.open='0'; panel.style.display='none'; }
@@ -11443,6 +11600,7 @@ function _vttToggleMusic() {
   if (panel.dataset.open==='1') { _closeMusicPanel(); return; }
   panel.dataset.open='1'; panel.style.display='flex';
   document.getElementById('vtt-music-trigger')?.classList.add('active');
+  if (STATE.isAdmin) void _startMusicCatalogListeners();
   _renderMusicPanel();
   _musicCloseOut = e => {
     const f = document.querySelector('.vtt-music-float');
@@ -11574,7 +11732,8 @@ function _renderMusicList(mj) {
   }
 
   if (!_sounds.length && !_playlists.length) {
-    return h + `<div class="vtt-music-empty">Aucun son — ajoutez une URL ou importez depuis GitHub</div>`;
+    const msg = _musicCatalogLoading ? 'Chargement des sons…' : 'Aucun son — ajoutez une URL ou importez depuis GitHub';
+    return h + `<div class="vtt-music-empty">${msg}</div>`;
   }
 
   // "Non classés" : sons absents de toute playlist
@@ -11818,7 +11977,17 @@ function _syncMusicPlayback(ms) {
   }
 
   const sound = _sounds.find(s=>s.id===ms.currentSoundId);
-  if (!sound) { if (panel?.dataset.open==='1') _renderMusicPanel(); return; }
+  if (!sound) {
+    const loader = STATE.isAdmin
+      ? _startMusicCatalogListeners().then(() => _sounds.find(s => s.id === ms.currentSoundId) || null)
+      : _loadMusicSoundById(ms.currentSoundId);
+    loader.then(found => {
+      if (found && _musicState?.currentSoundId === ms.currentSoundId) _syncMusicPlayback(_musicState);
+      else if (panel?.dataset.open==='1') _renderMusicPanel();
+    });
+    if (panel?.dataset.open==='1') _renderMusicPanel();
+    return;
+  }
 
   // Même son déjà en lecture → pas de restart
   if (_audioEl && _audioEl.dataset.soundId===ms.currentSoundId && !_audioEl.paused && !_audioEl.ended) {
@@ -12434,7 +12603,7 @@ export async function renderVttPage() {
   // _skillsP : _loadDiceSkills met à jour _diceSkills et rerend l'inspector si besoin
   void _skillsP;
   _initListeners();
-  // Présence : heartbeat toutes les 45 s
+  // Présence : heartbeat espacé, suspendu en arrière-plan
   const _presUid = STATE.user?.uid;
   if (_presUid) {
     const _presWrite = () => {
@@ -12442,16 +12611,19 @@ export async function renderVttPage() {
       // à 120 s côté lecture, le joueur réapparaît dès qu'il revient sur l'onglet).
       if (document.hidden) return;
       const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
+      const now = Date.now();
+      if (now - _presLastWriteAt < 10_000) return;
+      _presLastWriteAt = now;
       setDoc(_pingRef(_presUid), { pres: { pseudo, lastSeen: serverTimestamp() } }, { merge: true }).catch(() => {});
     };
     _presWrite();
-    _presHeartbeat = setInterval(_presWrite, 45_000);
+    _presHeartbeat = setInterval(_presWrite, VTT_PRESENCE_HEARTBEAT_MS);
     // Retour au premier plan : ré-annoncer immédiatement sans attendre le prochain tick.
     _presVisibility = () => { if (!document.hidden) _presWrite(); };
     document.addEventListener('visibilitychange', _presVisibility);
     // Fermeture navigateur : tentative de suppression (best-effort)
-    const _onUnload = () => { deleteDoc(_pingRef(_presUid)).catch(()=>{}); };
-    window.addEventListener('beforeunload', _onUnload, { once: true });
+    _presUnload = () => { deleteDoc(_pingRef(_presUid)).catch(()=>{}); };
+    window.addEventListener('beforeunload', _presUnload);
   }
   // Filet de sécurité : re-rendre la présence toutes les 30s pour expirer les entrants inactifs
   _presRefresh = setInterval(_renderPresenceCol, 30_000);
@@ -12464,7 +12636,7 @@ export async function renderVttPage() {
 // MJ : retire un joueur de la présence du VTT en supprimant son doc ping/présence.
 // Effet : il disparaît de la colonne pour tout le monde, et son doc cesse d'être
 // relu à chaque ouverture du VTT (utile pour les entrées fantômes). Un joueur
-// encore actif se ré-annonce à son prochain heartbeat (≤45 s) — c'est voulu.
+// encore actif se ré-annonce à son prochain heartbeat (≤75 s) — c'est voulu.
 async function _vttKickPresence(uid) {
   if (!STATE.isAdmin || !uid) return;
   const pseudo = _presence[uid]?.pseudo || 'ce joueur';

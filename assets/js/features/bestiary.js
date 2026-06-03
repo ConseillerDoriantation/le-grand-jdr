@@ -482,7 +482,7 @@ function _bstFlushSaves() {
 function _bstQueueSave(id, patch) {
   _bstPending[id] = { ...(_bstPending[id] || {}), ...patch };
   clearTimeout(_bstSaveTimer);
-  _bstSaveTimer = setTimeout(_bstFlushSaves, 400);
+  _bstSaveTimer = setTimeout(_bstFlushSaves, 1200);
 }
 
 // Auto-save générique (texte / select)

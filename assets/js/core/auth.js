@@ -4,9 +4,6 @@
 
 import {
   auth,
-  db,
-  doc,
-  setDoc,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -17,7 +14,7 @@ import {
 
 import { setProfile } from './state.js';
 import { unwatchAll } from '../shared/realtime.js';
-import { releaseSessionData } from '../data/firestore.js';
+import { releaseSessionData, saveDoc } from '../data/firestore.js';
 export { showApp, showAuth } from './layout.js';
 
 function clearAuthError() {
@@ -112,7 +109,7 @@ async function saveProfile(user, pseudo) {
     createdAt: new Date().toISOString(),
   };
 
-  await setDoc(doc(db, 'users', user.uid), profile, { merge: true });
+  await saveDoc('users', user.uid, profile);
   setProfile(profile);
 }
 
