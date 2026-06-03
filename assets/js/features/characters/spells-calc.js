@@ -15,10 +15,17 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 // ── Caches chargés depuis openSortModal ───────────────────────────────────────
 let _spellMatricesCache = null;
 let _damageTypesCache   = [];
+// Bibliothèque d'états (conditions) — injectée depuis spells.js. Sans ça,
+// _buildSortResume référençait un _conditionsLibCache inexistant ici (ReferenceError
+// au split spells.js → spells-calc.js) dès qu'un sort affichait un état.
+let _conditionsLibCache = [];
 
 export function setSpellCaches(matrices, damageTypes) {
   _spellMatricesCache = matrices;
   _damageTypesCache   = damageTypes;
+}
+export function setConditionsLibCache(lib) {
+  _conditionsLibCache = Array.isArray(lib) ? lib : [];
 }
 export function getSpellMatricesCache() { return _spellMatricesCache; }
 

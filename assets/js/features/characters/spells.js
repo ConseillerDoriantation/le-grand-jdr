@@ -12,7 +12,7 @@ import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions } from '../
 import { getArmorSetData, getMainWeapon } from './data.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -1390,6 +1390,7 @@ let _conditionsLibCache = null;
 async function _loadAllConditions() {
   if (_conditionsLibCache) return _conditionsLibCache;
   _conditionsLibCache = await loadConditionLibrary();
+  setConditionsLibCache(_conditionsLibCache); // alimente aussi le cache de spells-calc.js
   return _conditionsLibCache;
 }
 
