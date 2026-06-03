@@ -3139,6 +3139,44 @@ function _buildAttackOptions(t) {
       damageTypeColor: getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.color || '',
       mods: sentinelMods,
     });
+
+    // ── Invocation : ses actions (sorts connus) deviennent des attaques ──
+    if (_isInvoc && Array.isArray(t.summonActions) && t.summonActions.length) {
+      // Perso "créature" virtuel : arme principale = l'attaque de l'invocation
+      // (base des dégâts), stats neutres → aucun modificateur parasite.
+      const _cChar = {
+        stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
+        statsBonus: {}, maitrises: {},
+        equipement: { 'Main principale': { nom: 'Attaque', degats: t.attackDice || '1d4', statAttaque: 'force', isDefault: true } },
+      };
+      t.summonActions.forEach((a, ai) => {
+        // Seules les actions offensives sont jouables ici (effets complexes : à venir)
+        const isOff = (Array.isArray(a.types) && a.types.includes('offensif'))
+                   || (Array.isArray(a.runes) && a.runes.includes('Lacération'));
+        if (!isOff) return;
+        const dmg  = _vttSortDmgFormula(a, _cChar);
+        const elId = a.noyauTypeId || t.summonElementId || 'physique';
+        const elObj = getDamageTypeById(_damageTypes, elId);
+        const nbCh = Array.isArray(a.runes) ? a.runes.filter(r => r === 'Chance').length : 0;
+        const rc   = nbCh > 0 ? 20 - (2 * nbCh - 1) : (t.summonChanceRc ?? 20);
+        options.push({
+          id: `summon_action_${ai}`,
+          icon: a.icon || '✨',
+          label: a.nom || 'Action',
+          rawDice: dmg, dice: dmg,
+          portee: parseInt(a.portee) || t.range || 1,
+          pmCost: 0,
+          toucher: t.attack ?? 0,
+          dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
+          halfOnMiss: false,
+          typeRules: getDamageTypeRules(_damageTypes, elId),
+          damageTypeId: elId,
+          damageTypeIcon: elObj?.icon || '',
+          damageTypeColor: elObj?.color || '',
+          mods: { chance: (rc < 20) ? { rc } : null },
+        });
+      });
+    }
     return options;
   }
 
