@@ -1293,6 +1293,7 @@ function _buildShape(t) {
     move_bonus:      { icon:'👢', color:'#22c55e' }, // mouvement +
     move_debuff:     { icon:'👢', color:'#7c2d12' }, // mouvement −
     range_bonus:     { icon:'🏹', color:'#0ea5e9' }, // portée +
+    toucher_bonus:   { icon:'🎯', color:'#e8b84b' }, // toucher + (enchant)
     ca:              { icon:'🛡', color:'#06b6d4' }, // bonus CA
     shield_reactive: { icon:'🛡', color:'#a78bfa' }, // bouclier réactif
     enchantment:     { icon:'✨', color:'#e8b84b' }, // enchant générique
@@ -2207,6 +2208,9 @@ function _vttSpellMods(s) {
   const nbConc = counts.Concentration || 0;
   const nbDisp = counts.Dispersion    || 0;
   const protMode = s.protectionMode || 'ca';
+  // Bonus chiffré d'un enchantement non-dégâts (toucher/déplacement/CA) :
+  // valeur saisie sinon auto = 2 + Puissance.
+  const _enchBonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
 
   // Stats propres de la Sentinelle (combo Affliction + Invocation)
   const _chainProt = nbProt > 1 ? (nbProt - 1) : 0;
@@ -2254,6 +2258,15 @@ function _vttSpellMods(s) {
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? (s.enchantEtatId || null) : null,
+    // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
+    enchantToucher: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'toucher')
+      ? { bonus: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+    // Enchantement mode Déplacement : cases de mouvement en plus (auto = 2 + Puissance)
+    enchantMove: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'deplacement')
+      ? { bonusCells: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+    // Enchantement mode CA : bonus de CA sur l'allié (auto = 2 + Puissance)
+    enchantCA: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'ca')
+      ? { bonus: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
     // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
     // Auto : +2 cases / rune Puissance, ou +1 par défaut
     enchantPieds: (nbEnch > 0 && nbInv === 0 && s.enchantSlot === 'pieds')
@@ -2727,6 +2740,16 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
       slot: opt.mods.enchantGeneric.slot, effect: opt.mods.enchantGeneric.effect,
       icon: opt.mods.enchantGeneric.slot === 'tete' ? '👁️' : '👕' });
   }
+  // Nouveaux enchantements chiffrés (mode-based) sur l'allié
+  if (opt.mods?.enchantToucher) {
+    buffs.push({ ...shared, type: 'toucher_bonus', icon: '🎯', bonus: opt.mods.enchantToucher.bonus });
+  }
+  if (opt.mods?.enchantMove) {
+    buffs.push({ ...shared, type: 'move_bonus', slot: 'pieds', icon: '👢', bonus: opt.mods.enchantMove.bonusCells });
+  }
+  if (opt.mods?.enchantCA) {
+    buffs.push({ ...shared, type: 'ca', icon: '🛡️', bonus: opt.mods.enchantCA.bonus });
+  }
   if (!buffs.length) return;
   // ── Anti-stack global : un buff dmg_bonus arme remplace TOUS les anciens dmg_bonus arme.
   // Les autres types (move_bonus, range_bonus, enchantment) se filtrent par sort label
@@ -2996,7 +3019,8 @@ function _buildSpellOption(s, ctx) {
   }
 
   const isEnchantOnly = enchantOnlyAlsoEtat
-    ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim())
+    ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId
+       || !!mods?.enchantToucher || !!mods?.enchantMove || !!mods?.enchantCA) && !((s.degats || '').trim())
     : ( !!mods?.enchantArmeDmg && !((s.degats || '').trim()));
   const isAfflictionOnly = !!mods?.affliction;
 
@@ -3419,6 +3443,10 @@ function _buildAttackOptions(t) {
     b.type === 'dmg_bonus' && b.slot === 'arme'
     && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound)
   );
+  // Buff de toucher (enchantement mode Toucher) : s'ajoute au jet d'attaque.
+  const _toucherBuff = (t.buffs || [])
+    .filter(b => b.type === 'toucher_bonus' && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound))
+    .reduce((sum, b) => sum + (parseInt(b.bonus) || 0), 0);
   const _wDefaultTypeId = wReplace ? wReplaceTypeId : (isMagicW ? null : (fmt?.damageType || 'physique'));
   const _wFinalTypeObj  = _wDefaultTypeId ? getDamageTypeById(_damageTypes, _wDefaultTypeId) : null;
 
@@ -3430,7 +3458,7 @@ function _buildAttackOptions(t) {
     dice:             wDmgDiceFinal,
     portee:           wPortee,
     pmCost:           0,
-    toucherMod:       wTchMod,
+    toucherMod:       wTchMod + _toucherBuff,
     toucherSetBonus:  wSetBonus,
     toucherStatLabel: statShort(wTchStat) || wTchStat,
     dmgStatMod:       wDmgMod,

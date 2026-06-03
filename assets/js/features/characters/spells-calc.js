@@ -947,6 +947,15 @@ export function _buildSortResume(s, c) {
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       lines.push({ icon:'✨', label:`Enchantement · État sur allié : ${lbl}`,
                    detail: detailParts.join(' · ') });
+    } else if (mode === 'toucher' || mode === 'deplacement' || mode === 'ca') {
+      const nbP   = runes.filter(r => r === 'Puissance').length;
+      const bonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
+      const what  = mode === 'toucher'     ? { ic:'🎯', txt:`+${bonus} au toucher` }
+                  : mode === 'deplacement' ? { ic:'👢', txt:`+${bonus} case${bonus>1?'s':''} de déplacement` }
+                  :                          { ic:'🛡️', txt:`+${bonus} CA` };
+      const note  = (s.enchantBonus == null || s.enchantBonus === '') ? ' · auto (2 + Puissance)' : '';
+      lines.push({ icon: what.ic, label:`Enchantement · ${what.txt} sur allié`,
+                   detail: detailParts.join(' · ') + note });
     } else {
       const degAuto = _calcEnchantDegats(s);
       const note = s.enchantDegats?.trim() ? '' : ' · auto (1+Puiss)d4+2';

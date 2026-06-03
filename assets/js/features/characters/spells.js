@@ -371,6 +371,11 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
       chips.push({ icon:'✨', val: lbl, color:'#e8b84b' });
+    } else if (enchantMode === 'toucher' || enchantMode === 'deplacement' || enchantMode === 'ca') {
+      const nbP   = runesAll.filter(r => r === 'Puissance').length;
+      const bonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
+      const ic    = enchantMode === 'toucher' ? '🎯' : enchantMode === 'deplacement' ? '👢' : '🛡️';
+      chips.push({ icon: ic, val: `+${bonus}`, color:'#e8b84b' });
     } else {
       // Mode Dégâts : formule bonus sur arme alliée
       const degAuto = _calcEnchantDegats(s);
@@ -1106,16 +1111,19 @@ export async function openSortModal(idx, s) {
     <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
       <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours · Action Bonus</span></div>
 
-      <!-- Mode toggle : Dégâts (bonus arme) vs État (buff sur allié) -->
+      <!-- Ce que l'enchantement booste sur l'allié -->
       <div class="form-group">
-        <label>Mode</label>
-        <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr">
-          <button type="button" id="s-enchant-mode-dmg"
-            data-action="_selectEnchantMode" data-val="dmg"
-            class="cs-slot-btn ${(s?.enchantMode||'dmg')==='dmg'?'selected':''}">⚔️ Bonus dégâts arme</button>
-          <button type="button" id="s-enchant-mode-etat"
-            data-action="_selectEnchantMode" data-val="etat"
-            class="cs-slot-btn ${s?.enchantMode==='etat'?'selected':''}">✨ État sur allié</button>
+        <label>L'enchantement booste</label>
+        <div class="cs-slot-grid" style="grid-template-columns:repeat(3,1fr)">
+          ${[
+            { v:'dmg',         lbl:'⚔️ Dégâts' },
+            { v:'toucher',     lbl:'🎯 Toucher' },
+            { v:'deplacement', lbl:'👢 Déplacement' },
+            { v:'ca',          lbl:'🛡️ CA' },
+            { v:'etat',        lbl:'✨ État' },
+          ].map(o => `<button type="button" id="s-enchant-mode-${o.v}"
+            data-action="_selectEnchantMode" data-val="${o.v}"
+            class="cs-slot-btn ${(s?.enchantMode||'dmg')===o.v?'selected':''}">${o.lbl}</button>`).join('')}
         </div>
         <input type="hidden" id="s-enchant-mode" value="${s?.enchantMode||'dmg'}">
       </div>
@@ -1130,6 +1138,13 @@ export async function openSortModal(idx, s) {
           currentValue: s?.enchantDegats,
           placeholder: 'ex : +1d6 Feu, +2 Foudre, 1d8…',
         })}
+      </div>
+
+      <!-- Modes Toucher / Déplacement / CA : un bonus chiffré sur l'allié -->
+      <div id="s-enchant-bonus-block" class="form-group" style="${['toucher','deplacement','ca'].includes(s?.enchantMode)?'':'display:none'}">
+        <label id="s-enchant-bonus-label">Bonus</label>
+        <input class="input-field" type="number" id="s-enchant-bonus" value="${s?.enchantBonus??''}" placeholder="auto (2 + Puissance)">
+        <div id="s-enchant-bonus-hint" style="font-size:.7rem;color:var(--text-dim);margin-top:.25rem">Laisse vide = auto. Chaque rune Puissance augmente le bonus de 1.</div>
       </div>
 
       <!-- Mode État : applique un état choisi à l'allié ciblé -->
@@ -2043,12 +2058,18 @@ function _applySpellSuggest(cat) {
 function _selectEnchantMode(mode) {
   const hidden = document.getElementById('s-enchant-mode');
   if (hidden) hidden.value = mode;
-  document.getElementById('s-enchant-mode-dmg')?.classList.toggle('selected', mode === 'dmg');
-  document.getElementById('s-enchant-mode-etat')?.classList.toggle('selected', mode === 'etat');
-  const dmgBlock = document.getElementById('s-enchant-dmg-block');
-  const etatBlock = document.getElementById('s-enchant-etat-block');
-  if (dmgBlock) dmgBlock.style.display = mode === 'dmg' ? '' : 'none';
-  if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
+  ['dmg','toucher','deplacement','ca','etat'].forEach(m =>
+    document.getElementById(`s-enchant-mode-${m}`)?.classList.toggle('selected', mode === m));
+  const isBonus = ['toucher','deplacement','ca'].includes(mode);
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('s-enchant-dmg-block',   mode === 'dmg');
+  show('s-enchant-bonus-block', isBonus);
+  show('s-enchant-etat-block',  mode === 'etat');
+  // Adapte le libellé du champ bonus selon la cible boostée
+  const lbl = document.getElementById('s-enchant-bonus-label');
+  if (lbl) lbl.textContent = mode === 'toucher' ? '🎯 Bonus au toucher'
+                           : mode === 'deplacement' ? '👢 Cases de déplacement en plus'
+                           : mode === 'ca' ? '🛡️ Bonus de CA' : 'Bonus';
   _updateSortPreview();
 }
 
@@ -2119,6 +2140,7 @@ function _buildSortFromDOM() {
     actionOverride: _sortActionEdit || null,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+    enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
     enchantSlot:      'arme', // legacy compat (preview live, sera écrasé à la save par la valeur en BDD)
     enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
@@ -2313,6 +2335,7 @@ export async function saveSort(idx) {
       actionOverride,
       enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
       enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+    enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
       enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
       // enchantSlot legacy : conservé en BDD pour rétro-compat des combos, mais
       // l'UI n'expose plus de slot. Défaut 'arme' aligné sur le bonus dégâts.
@@ -2418,6 +2441,7 @@ function _buildSortFromForm(idx, prevList = []) {
     actionOverride,
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
+    enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
     enchantSlot:      idx >= 0 ? (prevList[idx]?.enchantSlot || 'arme') : 'arme',
     enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
