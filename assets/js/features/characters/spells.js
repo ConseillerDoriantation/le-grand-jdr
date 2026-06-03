@@ -331,10 +331,13 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const afflictionMode = s.afflictionMode || 'dot';
   // Enchantement-only : pas de dégâts d'impact si pas de degats explicite
   const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
+  // Modes Toucher / Déplacement : buff pur sur allié, JAMAIS de dégâts d'impact
+  // (même si un degats résiduel traîne d'un ancien mode Dégâts).
+  const enchantBuffOnly = hasEnchant && (enchantMode === 'toucher' || enchantMode === 'deplacement');
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
   // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
-  const suppressImpactDmg = isEnchantOnly || hasAffliction || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
+  const suppressImpactDmg = isEnchantOnly || enchantBuffOnly || hasAffliction || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];

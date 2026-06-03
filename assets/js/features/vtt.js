@@ -525,7 +525,14 @@ function _live(t) {
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
       return Math.max(0, baseMv + moveDelta);
     })(),
-    displayAttack:     t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))),
+    displayAttack: (() => {
+      const baseAtk = t.attack ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5)))))));
+      // Enchantement mode Toucher : bonus au jet d'attaque (consommé ici, le vrai jet lit displayAttack)
+      const touchDelta = (t.buffs || [])
+        .filter(bf => bf.type === 'toucher_bonus' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
+        .reduce((sum, bf) => sum + (parseInt(bf.bonus) || 0), 0);
+      return baseAtk + touchDelta;
+    })(),
     displayAttackDice: atkDice,
     displayDefense:    _ca,
     // VRAIE CA, JAMAIS écrasée par l'estimation joueur. Sert au calcul authoritatif
@@ -3012,10 +3019,12 @@ function _buildSpellOption(s, ctx) {
       isUtil: true, isInvocation: true, halfOnMiss: false };
   }
 
-  const isEnchantOnly = enchantOnlyAlsoEtat
-    ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId
-       || !!mods?.enchantToucher || !!mods?.enchantMove) && !((s.degats || '').trim())
-    : ( !!mods?.enchantArmeDmg && !((s.degats || '').trim()));
+  // Toucher / Déplacement : buff pur sur allié → toujours buff-only, même si un
+  // degats résiduel traîne (sinon le sort attaquerait ET poserait le buff).
+  const _enchBuffNoImpact = !!mods?.enchantToucher || !!mods?.enchantMove;
+  const isEnchantOnly = _enchBuffNoImpact || (enchantOnlyAlsoEtat
+    ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim())
+    : ( !!mods?.enchantArmeDmg && !((s.degats || '').trim())));
   const isAfflictionOnly = !!mods?.affliction;
 
   if (isEnchantOnly) {

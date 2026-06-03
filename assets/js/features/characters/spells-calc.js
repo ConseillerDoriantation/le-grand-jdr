@@ -780,13 +780,17 @@ export function _buildSortResume(s, c) {
   // Sinon, sans formule explicite, on affichait le "1d6" de l'arme par défaut, ce qui
   // donnait une impression trompeuse de dégâts directs.
   const isEnchantOnly  = runes.includes('Enchantement') && !((s.degats || '').trim());
+  // Enchantement Toucher / Déplacement : buff pur, jamais de dégâts d'impact (même
+  // avec un degats résiduel d'un ancien mode Dégâts).
+  const isEnchantBuffOnly = runes.includes('Enchantement')
+    && (s.enchantMode === 'toucher' || s.enchantMode === 'deplacement');
   const isAfflictionSpell = runes.includes('Affliction'); // affliction = jamais d'impact
   // Invocation : le sort n'inflige pas de dégâts lui-même — c'est la créature
   // invoquée qui frappe (ses dégâts propres via _calcInvocationStats). On masque
   // donc l'attaque de base du lanceur, même si Puissance a coché « offensif »
   // (Puissance scale l'attaque de l'invocation, pas un impact direct).
   const isInvocationSpell = runes.includes('Invocation');
-  const _suppressImpactDmg = isEnchantOnly || isAfflictionSpell || isInvocationSpell;
+  const _suppressImpactDmg = isEnchantOnly || isEnchantBuffOnly || isAfflictionSpell || isInvocationSpell;
   // Lacération inflige TOUJOURS l'attaque de base (+ sa réduction de CA), même si
   // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
   const _dealsImpact = types.includes('offensif') || runes.includes('Lacération');
