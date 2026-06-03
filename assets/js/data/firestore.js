@@ -298,16 +298,19 @@ function _primeDoc(col, id) {
 // `bestiary` est volontairement exclu (volume potentiellement énorme).
 const _SESSION_COLLECTIONS = [
   'story',
-  'achievements',
   'quests',
   'characters',
-  'collection',
 ];
 const _LAZY_SESSION_COLLECTIONS = new Set([
   'shop', 'shopCategories',
   'npcs',
   'organizations', // utilisé par npcs.js + histoire.js, TTL 5 min insuffisant
   'players',       // utilisé par character-sheet tabs + inline-edit, sans cache TTL
+  // Hauts-faits & collection : images base64 lourdes (jusqu'à 1400px), non
+  // affichées au 1er rendu du dashboard (compteur + panneau texte seulement).
+  // → lazy : amorcées à l'ouverture de leur page / Ctrl+K, pas au démarrage.
+  'achievements',
+  'collection',
 ]);
 const _SESSION_DOCS = [
   ['bastion',          'main'],
