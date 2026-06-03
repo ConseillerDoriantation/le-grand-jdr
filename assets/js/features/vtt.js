@@ -512,6 +512,7 @@ function _live(t) {
   const _touchDelta = (t.buffs || [])
     .filter(bf => bf.type === 'toucher_bonus' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
     .reduce((sum, bf) => sum + (parseInt(bf.bonus) || 0), 0);
+  if ((t.buffs || []).some(b => b.type === 'toucher_bonus' || /touch/i.test(b.sortLabel || ''))) console.log('[DIAG live]', t.name || t.characterId || t.id, '| round=', _round, '| touchDelta=', _touchDelta, '| buffs=', JSON.stringify((t.buffs || []).map(b => ({ t: b.type, b: b.bonus, exp: b.expiresAtRound, l: b.sortLabel }))));
 
   const result = {
     ...t,
@@ -2750,6 +2751,7 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   if (opt.mods?.enchantMove) {
     buffs.push({ ...shared, type: 'move_bonus', slot: 'pieds', icon: '👢', bonus: opt.mods.enchantMove.bonusCells });
   }
+  console.log('[DIAG ench-apply]', opt.label, '| enchantToucher=', JSON.stringify(opt.mods?.enchantToucher), '| buffs=', JSON.stringify(buffs.map(b => ({ t: b.type, b: b.bonus, exp: b.expiresAtRound }))), '| targets=', JSON.stringify(targetIds), '| src=', srcId);
   if (!buffs.length) return;
   // ── Anti-stack global : un buff dmg_bonus arme remplace TOUS les anciens dmg_bonus arme.
   // Les autres types (move_bonus, range_bonus, enchantment) se filtrent par sort label
