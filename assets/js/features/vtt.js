@@ -441,6 +441,16 @@ const _musicStateRef = ()  => doc(db, `adventures/${_aid()}/vtt/music`);
 // C'est ici que la sync temps réel prend tout son sens :
 // HP/nom/image viennent toujours de la fiche source.
 // ═══════════════════════════════════════════════════════════════════
+
+/** Somme des bonus de toucher actifs (enchantement mode Toucher) sur un token.
+ *  Lu FRAIS au moment du jet / de l'affichage HUD (jamais figé dans l'option). */
+function _touchBuffOf(tok) {
+  const round = _session?.combat?.round ?? 0;
+  return (tok?.buffs || [])
+    .filter(b => b.type === 'toucher_bonus' && (b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound))
+    .reduce((s, b) => s + (parseInt(b.bonus) || 0), 0);
+}
+
 function _live(t) {
   if (!t) return null;
   const c = t.characterId ? _characters[t.characterId] : null;
@@ -506,13 +516,10 @@ function _live(t) {
   const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))));
   const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
   const _ca      = _caBase + _caBuffs.reduce((sum, bf) => sum + (bf.bonus || 0), 0);
-  // Attaque de base (stat) — expression d'origine, équilibrée.
+  // Attaque de base (stat). Le bonus toucher d'enchantement N'est PAS inclus ici :
+  // il est appliqué frais au moment du jet (_vttRollAttack) pour ne pas dépendre
+  // d'une option figée à l'ouverture du panneau (le buff peut être posé après).
   const _baseAtk = t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5))))));
-  // Enchantement mode Toucher : bonus au jet d'attaque (le vrai jet lit displayAttack)
-  const _touchDelta = (t.buffs || [])
-    .filter(bf => bf.type === 'toucher_bonus' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
-    .reduce((sum, bf) => sum + (parseInt(bf.bonus) || 0), 0);
-  if ((t.buffs || []).some(b => b.type === 'toucher_bonus' || /touch/i.test(b.sortLabel || ''))) console.log('[DIAG live]', t.name || t.characterId || t.id, '| round=', _round, '| touchDelta=', _touchDelta, '| buffs=', JSON.stringify((t.buffs || []).map(b => ({ t: b.type, b: b.bonus, exp: b.expiresAtRound, l: b.sortLabel }))));
 
   const result = {
     ...t,
@@ -532,7 +539,7 @@ function _live(t) {
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
       return Math.max(0, baseMv + moveDelta);
     })(),
-    displayAttack: _baseAtk + _touchDelta,
+    displayAttack: _baseAtk,
     displayAttackDice: atkDice,
     displayDefense:    _ca,
     // VRAIE CA, JAMAIS écrasée par l'estimation joueur. Sert au calcul authoritatif
@@ -2751,7 +2758,6 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   if (opt.mods?.enchantMove) {
     buffs.push({ ...shared, type: 'move_bonus', slot: 'pieds', icon: '👢', bonus: opt.mods.enchantMove.bonusCells });
   }
-  console.log('[DIAG ench-apply]', opt.label, '| enchantToucher=', JSON.stringify(opt.mods?.enchantToucher), '| buffs=', JSON.stringify(buffs.map(b => ({ t: b.type, b: b.bonus, exp: b.expiresAtRound }))), '| targets=', JSON.stringify(targetIds), '| src=', srcId);
   if (!buffs.length) return;
   // ── Anti-stack global : un buff dmg_bonus arme remplace TOUS les anciens dmg_bonus arme.
   // Les autres types (move_bonus, range_bonus, enchantment) se filtrent par sort label
@@ -3447,10 +3453,9 @@ function _buildAttackOptions(t) {
     b.type === 'dmg_bonus' && b.slot === 'arme'
     && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound)
   );
-  // Buff de toucher (enchantement mode Toucher) : s'ajoute au jet d'attaque.
-  const _toucherBuff = (t.buffs || [])
-    .filter(b => b.type === 'toucher_bonus' && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound))
-    .reduce((sum, b) => sum + (parseInt(b.bonus) || 0), 0);
+  // NB : le bonus toucher d'enchantement (toucher_bonus) n'est PAS baked ici —
+  // il est ajouté frais au jet (_vttRollAttack) et au HUD pour rester à jour si
+  // le buff est posé après la construction du panneau.
   const _wDefaultTypeId = wReplace ? wReplaceTypeId : (isMagicW ? null : (fmt?.damageType || 'physique'));
   const _wFinalTypeObj  = _wDefaultTypeId ? getDamageTypeById(_damageTypes, _wDefaultTypeId) : null;
 
@@ -3462,7 +3467,7 @@ function _buildAttackOptions(t) {
     dice:             wDmgDiceFinal,
     portee:           wPortee,
     pmCost:           0,
-    toucherMod:       wTchMod + _toucherBuff,
+    toucherMod:       wTchMod,
     toucherSetBonus:  wSetBonus,
     toucherStatLabel: statShort(wTchStat) || wTchStat,
     dmgStatMod:       wDmgMod,
@@ -4113,7 +4118,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
   _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets };
 
   const dist    = _tokenAttackDistance(src, tgt);
-  const atkBase = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
+  // Bonus toucher d'enchantement — lu frais sur le lanceur (jamais figé dans l'option)
+  const _touchBuff = _touchBuffOf(src);
+  const atkBase = (opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5)) + _touchBuff;
   const sn      = n => n>0?`+${n}`:n<0?`${n}`:'';
   const tag     = (txt, col='var(--text-dim)') =>
     `<span style="font-size:.6rem;color:${col};margin-left:.05rem">(${txt})</span>`;
@@ -4126,6 +4133,8 @@ function _vttPickOpt(srcId, tgtId, idx) {
       p.push(`<span style="font-size:.85rem;color:var(--gold)">${sn(opt.toucherMod)}</span>${tag(opt.toucherStatLabel)}`);
     if (opt.toucherSetBonus > 0)
       p.push(`<span style="font-size:.85rem;color:#22c38e">+${opt.toucherSetBonus}</span>${tag('Set','#22c38e')}`);
+    if (_touchBuff > 0)
+      p.push(`<span style="font-size:.85rem;color:#e8b84b">+${_touchBuff}</span>${tag('🎯 Ench','#e8b84b')}`);
     toucherFormula = p.join(' ');
   } else {
     toucherFormula = `<code style="font-size:.88rem;color:var(--gold)">1d20</code>`
@@ -5440,6 +5449,9 @@ async function _vttRollAttack() {
       await updateDoc(_tokRef(srcId), { buffs: newBuffs }).catch(() => {});
     }
     const atkBase  = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
+    // Bonus de toucher d'enchantement (mode Toucher) — lu FRAIS sur le lanceur,
+    // pas figé dans l'option (le buff peut avoir été posé après l'ouverture du panneau).
+    const _touchBuff = _touchBuffOf(src);
     // Dés supplémentaires au toucher (sommés au total)
     const extraHitRolls = [];
     let extraHitSum = 0;
@@ -5451,7 +5463,7 @@ async function _vttRollAttack() {
         extraHitSum += bonusHitDice > 0 ? r : -r;
       }
     }
-    const hitTotal = d20 + atkBase + bonusHit + extraHitSum;
+    const hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff;
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
@@ -5787,7 +5799,7 @@ async function _vttRollAttack() {
         hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
-        hitToucherStatLabel: opt.toucherStatLabel??null,
+        hitToucherStatLabel: opt.toucherStatLabel??null, hitTouchBuff: _touchBuff || 0,
         dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
         dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
@@ -5827,7 +5839,7 @@ async function _vttRollAttack() {
         hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
-        hitToucherStatLabel: opt.toucherStatLabel??null,
+        hitToucherStatLabel: opt.toucherStatLabel??null, hitTouchBuff: _touchBuff || 0,
         targetCA: r.targetCA, hit: r.hit,
         dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
         dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
@@ -8497,6 +8509,7 @@ function _renderChatLog(msgs) {
     const touchParts = [d20];
     if (m.hitToucherMod != null && m.hitToucherStatLabel) touchParts.push(`${sn(m.hitToucherMod)}${sub(m.hitToucherStatLabel)}`);
     if (m.hitToucherSetBonus > 0) touchParts.push(`+${m.hitToucherSetBonus}${sub('Set')}`);
+    if (m.hitTouchBuff > 0) touchParts.push(`+${m.hitTouchBuff}${sub('🎯 Ench')}`);
     if (m.hitBonus) touchParts.push(`${sn(m.hitBonus)}${sub('bonus')}`);
     if (m.extraHitRolls?.length) m.extraHitRolls.forEach(r => touchParts.push(`+d20[${r}]`));
     const _caShown = isHeal ? null : _viewCA(m, m.targetCA);
