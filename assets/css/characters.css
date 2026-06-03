@@ -2359,6 +2359,24 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .cs-rune-btn { background: #f0f2f6; border-color: rgba(0,0,0,0.10); }
 [data-theme="light"] .cs-sort-pm-display { background: rgba(37,99,235,0.06); border-color: rgba(37,99,235,0.18); }
 
+/* ── Limite de runes d'effet (par personnage, déblocable MJ) ───────────── */
+.cs-rune-limit {
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+  flex-wrap: wrap;
+  padding: .4rem .6rem; margin-bottom: .5rem; border-radius: 9px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  font-size: .8rem; color: var(--text-muted);
+}
+.cs-rune-limit-count b { color: var(--text); font-size: .92rem; }
+.cs-rune-limit.full  { border-color: color-mix(in srgb, var(--gold) 45%, var(--border)); }
+.cs-rune-limit.full  .cs-rune-limit-count b { color: var(--gold); }
+.cs-rune-limit.over  { border-color: color-mix(in srgb, #ff6b6b 45%, var(--border)); }
+.cs-rune-limit-hint { font-size: .68rem; color: var(--text-dim); font-style: italic; }
+.cs-rune-limit-mj { display: inline-flex; align-items: center; gap: .35rem; font-size: .72rem; color: var(--text-dim); }
+.cs-rune-limit-mj .cs-rune-btn { width: 22px; height: 22px; }
+.cs-runes-locked .cs-runes-picker,
+.cs-runes-locked .cs-rune-btn.plus { opacity: .45; pointer-events: none; filter: grayscale(.4); }
+
 /* ─────────────────────────────────────────────────
    FORGE DE SORTS — Mes runes (cartes actives)
 ───────────────────────────────────────────────── */

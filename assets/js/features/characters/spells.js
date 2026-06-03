@@ -750,9 +750,30 @@ function _runeLiveContribution(nom, counts) {
  *   ② "Ajouter une rune" — picker compact par famille
  * Re-appelée après chaque incrément/décrément pour rester synchro.
  */
+// Nombre max de runes d'effet débloquées pour le perso courant (défaut 1).
+// Le MJ peut le débloquer par personnage (champ characters.maxRunes).
+function _spellRuneLimit() {
+  const n = parseInt(STATE.activeChar?.maxRunes);
+  return Number.isFinite(n) && n >= 0 ? n : 1;
+}
+
 function _renderRunesSection() {
   const counts = _runeCountsEdit || {};
   const activeMetas = RUNE_META.filter(r => (counts[r.nom] || 0) > 0);
+  // ── En-tête : compteur de runes d'effet vs limite du perso ──────────────
+  const limit  = _spellRuneLimit();
+  const total  = Object.values(counts).reduce((a, b) => a + b, 0);
+  const atLimit = total >= limit;
+  const limitHeader = `<div class="cs-rune-limit${total > limit ? ' over' : atLimit ? ' full' : ''}">
+    <span class="cs-rune-limit-count">🔮 Runes d'effet <b>${total}</b> / ${limit}</span>
+    ${STATE.isAdmin
+      ? `<span class="cs-rune-limit-mj">
+          <span>Débloquées (MJ)</span>
+          <button type="button" class="cs-rune-btn minus" data-action="_mjAdjRuneLimit" data-delta="-1" title="Retirer une rune débloquée">−</button>
+          <button type="button" class="cs-rune-btn plus"  data-action="_mjAdjRuneLimit" data-delta="1" title="Débloquer une rune">+</button>
+        </span>`
+      : (atLimit ? `<span class="cs-rune-limit-hint">Limite atteinte — le MJ peut en débloquer</span>` : '')}
+  </div>`;
 
   // ① Grosses cartes des runes actives
   const activeHtml = activeMetas.length ? activeMetas.map(r => {
@@ -804,11 +825,16 @@ function _renderRunesSection() {
     ? `<div class="cs-runes-picker-empty">✓ Toutes les runes sont actives — utilise les boutons + sur les cartes ci-dessus pour empiler une même rune.</div>`
     : pickerGroups;
 
+  // Joueur ayant atteint sa limite → on verrouille l'ajout (le MJ n'est jamais bloqué)
+  const locked = atLimit && !STATE.isAdmin;
   return `
-    <div class="cs-runes-active-list">${activeHtml}</div>
-    <div class="cs-runes-picker">
-      <div class="cs-runes-picker-hdr">+ Ajouter une rune <span>(les runes actives sont gérées via les cartes au-dessus)</span></div>
-      ${pickerHtml}
+    ${limitHeader}
+    <div class="cs-runes-block${locked ? ' cs-runes-locked' : ''}">
+      <div class="cs-runes-active-list">${activeHtml}</div>
+      <div class="cs-runes-picker">
+        <div class="cs-runes-picker-hdr">+ Ajouter une rune <span>(les runes actives sont gérées via les cartes au-dessus)</span></div>
+        ${pickerHtml}
+      </div>
     </div>
   `;
 }
@@ -1783,6 +1809,16 @@ function _selectProtMode(mode) {
 
 export function runeIncrement(nom) {
   _runeCountsEdit = _runeCountsEdit||{};
+  // Limite de runes d'effet par personnage (le MJ et les contextes spéciaux
+  // — actions d'objet/invocation — ne sont pas limités).
+  if (!STATE.isAdmin && !_itemEditCtx) {
+    const total = Object.values(_runeCountsEdit).reduce((a, b) => a + b, 0);
+    const limit = _spellRuneLimit();
+    if (total >= limit) {
+      showNotif(`Limite de runes d'effet atteinte (${limit}). Le MJ peut en débloquer.`, 'error');
+      return;
+    }
+  }
   const prevCnt = _runeCountsEdit[nom] || 0;
   _runeCountsEdit[nom] = prevCnt + 1;
   // Intelligence : la 1ère Puissance ajoute Offensif · la 1ère Protection ajoute Défensif
@@ -1811,6 +1847,20 @@ export function runeDecrement(nom) {
   _runeCountsEdit[nom]--;
   if (_runeCountsEdit[nom] === 0) delete _runeCountsEdit[nom];
   _refreshRunesSection(nom);
+}
+
+// MJ : débloque / retire des runes d'effet pour le perso courant (characters.maxRunes).
+async function _mjAdjRuneLimit(delta) {
+  if (!STATE.isAdmin) return;
+  const c = STATE.activeChar; if (!c) return;
+  const cur  = parseInt(c.maxRunes);
+  const base = Number.isFinite(cur) ? cur : 1;
+  const next = Math.max(0, Math.min(20, base + (parseInt(delta) || 0)));
+  if (next === base) return;
+  c.maxRunes = next;
+  await trySave('characters', c.id, { maxRunes: next }).catch(() => {});
+  _refreshRunesSection();
+  showNotif(`🔮 Runes d'effet débloquées : ${next} pour ${_esc(c.nom || 'ce perso')}`, 'success');
 }
 
 /**
@@ -2492,6 +2542,7 @@ registerActions({
   selectNoyau:            (btn) => selectNoyau(btn, btn.dataset.noyauId, btn.dataset.noyauLabel, btn.dataset.noyauColor),
   runeIncrement:          (btn) => runeIncrement(btn.dataset.nom),
   runeDecrement:          (btn) => runeDecrement(btn.dataset.nom),
+  _mjAdjRuneLimit:        (btn) => _mjAdjRuneLimit(btn.dataset.delta),
   closeModalDirect:       ()    => closeModalDirect(),
   _enableSortCustom:      (btn) => _enableSortCustom(btn.dataset.field),
   _disableSortCustom:     (btn) => _disableSortCustom(btn.dataset.field),
