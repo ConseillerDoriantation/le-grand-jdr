@@ -731,6 +731,39 @@ export function _calcInvocationStats(s) {
 }
 
 /**
+ * Stats d'une invocation de la BIBLIOTHÈQUE au lancement = stats de BASE (invDef.stats)
+ * + BONUS des runes du sort (modèle "base + bonus", validé) :
+ *   - Puissance : +1 dé sur l'attaque de base
+ *   - Protection : +5 PV · Chance : +2 toucher · Amplification : +3 déplacement
+ *   - Durée : +2 tours · Concentration : maintien
+ * CA reste la valeur de base (pas de bonus de rune).
+ */
+export function _calcSummonStats(invDef, runes = []) {
+  const base = invDef?.stats || {};
+  const n = nom => (runes || []).filter(r => r === nom).length;
+  const nbP = n('Puissance'), nbCh = n('Chance'), nbProt = n('Protection'),
+        nbAmp = n('Amplification'), nbDur = n('Durée');
+  const concentration = n('Concentration') > 0;
+
+  const baseAtk = String(base.attaque || '1d4 +2');
+  let attaque = baseAtk;
+  if (nbP > 0) {
+    const m = baseAtk.match(/^(\d+)(d\d+)(.*)$/i);
+    attaque = m ? `${parseInt(m[1]) + nbP}${m[2]}${m[3]}` : `${baseAtk} +${nbP}d6`;
+  }
+  return {
+    attaque,
+    toucher:     (parseInt(base.toucher) || 0) + 2 * nbCh,
+    pv:          (parseInt(base.pv) || 10) + 5 * nbProt,
+    ca:          parseInt(base.ca) || 10,
+    deplacement: (parseInt(base.deplacement) || 0) + 3 * nbAmp,
+    pmMax:       parseInt(base.pmMax) || 0,
+    duree:       2 + 2 * nbDur,
+    concentration,
+  };
+}
+
+/**
  * Génère le résumé textuel complet des effets d'un sort
  * sous forme de tableau de lignes {icon, label, detail}
  */

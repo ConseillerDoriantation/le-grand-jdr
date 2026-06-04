@@ -3040,6 +3040,50 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .inv-cfg-act-meta { font-size: .68rem; color: var(--text-dim); }
 .inv-cfg-empty { font-size: .8rem; color: var(--text-dim); font-style: italic; text-align: center; padding: 1rem 0; }
 .inv-cfg-foot { display: flex; justify-content: flex-end; margin-top: .3rem; }
+
+/* ── Bibliothèque d'invocations (manager) ── */
+.cs-invlib { display: flex; flex-direction: column; gap: .8rem; }
+.cs-invlib-hint { font-size: .78rem; color: var(--text-dim); line-height: 1.45; }
+.cs-invlib-list { display: flex; flex-direction: column; gap: .4rem; max-height: 50vh; overflow-y: auto; }
+.cs-invlib-empty { font-size: .8rem; color: var(--text-dim); font-style: italic; text-align: center; padding: 1.2rem 0; }
+.cs-invlib-card {
+  display: flex; align-items: center; gap: .6rem; padding: .45rem .55rem;
+  border-radius: 10px; background: var(--bg-elevated); border: 1px solid var(--border);
+}
+.cs-invlib-portrait, .cs-invsel-portrait {
+  width: 42px; height: 42px; flex-shrink: 0; border-radius: 8px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+  background: rgba(161,98,7,.12); border: 1px solid rgba(161,98,7,.3);
+}
+.cs-invlib-portrait img, .cs-invsel-portrait img { width: 100%; height: 100%; object-fit: cover; }
+.cs-invlib-info { flex: 1; min-width: 0; }
+.cs-invlib-name { font-size: .86rem; font-weight: 700; color: var(--text); }
+.cs-invlib-stats { font-size: .7rem; color: var(--text-dim); }
+.cs-invlib-actions { display: flex; gap: .15rem; flex-shrink: 0; }
+.cs-invlib-foot { display: flex; justify-content: space-between; gap: .5rem; }
+
+/* Section "Invocations" de l'éditeur de sort */
+.cs-inv-pick-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.cs-inv-pick-note { font-size: .74rem; color: var(--text-dim); }
+
+/* ── Sélecteur d'invocations (depuis la carte de sort) ── */
+.cs-invsel { display: flex; flex-direction: column; gap: .7rem; }
+.cs-invsel-hd { font-size: .8rem; color: var(--text-muted); }
+.cs-invsel-list { display: flex; flex-direction: column; gap: .4rem; max-height: 50vh; overflow-y: auto; }
+.cs-invsel-empty { font-size: .82rem; color: var(--text-dim); text-align: center; padding: 1.2rem 0; }
+.cs-invsel-card {
+  display: flex; align-items: center; gap: .6rem; padding: .45rem .55rem; width: 100%;
+  border-radius: 10px; background: var(--bg-elevated); border: 2px solid var(--border);
+  cursor: pointer; text-align: left; transition: border-color .12s, background .12s;
+}
+.cs-invsel-card:hover:not([disabled]) { border-color: rgba(161,98,7,.55); }
+.cs-invsel-card.is-on { border-color: #a16207; background: rgba(161,98,7,.12); }
+.cs-invsel-card[disabled] { opacity: .4; cursor: not-allowed; }
+.cs-invsel-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cs-invsel-name { font-size: .84rem; font-weight: 700; color: var(--text); }
+.cs-invsel-stats { font-size: .68rem; color: var(--text-dim); }
+.cs-invsel-check { flex-shrink: 0; font-weight: 800; color: #a16207; font-size: 1rem; width: 1.2rem; text-align: center; }
+.cs-invsel-foot { display: flex; justify-content: space-between; gap: .5rem; }
 .cs-spell-grid-col--right > * { /* densité un peu plus serrée à droite */
   margin-bottom: 0.5rem;
 }
