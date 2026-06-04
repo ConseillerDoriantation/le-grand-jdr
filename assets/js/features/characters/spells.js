@@ -40,7 +40,7 @@ export function sortDragStart(e, idx) {
 export function sortDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  document.querySelectorAll('.cs-sort-row').forEach(el => {
+  document.querySelectorAll('.cs-spellcard').forEach(el => {
     el.classList.remove('cs-drop-before', 'cs-drop-after');
   });
   const rect = e.currentTarget.getBoundingClientRect();
@@ -53,7 +53,7 @@ export function sortDragOver(e) {
 }
 export function sortDragEnd(e) {
   e.currentTarget.style.opacity = '';
-  document.querySelectorAll('.cs-sort-row').forEach(el => {
+  document.querySelectorAll('.cs-spellcard').forEach(el => {
     el.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
   });
 }
@@ -64,7 +64,7 @@ export async function sortDrop(e, toIdx) {
   const insertAfter = e.clientY >= rect.top + rect.height / 2;
   const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
   card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-  document.querySelectorAll('.cs-sort-row').forEach(el =>
+  document.querySelectorAll('.cs-spellcard').forEach(el =>
     el.classList.remove('cs-drop-before', 'cs-drop-after'));
   const fromIdx = _dragSortIdx;
   _dragSortIdx = null;
@@ -241,9 +241,9 @@ export function renderCharDeck(c, canEdit) {
       </div>`;
     }
     if (!isCollapsed) {
-      html += `<div class="cs-sort-list" data-cat="${cat.id}">`;
+      html += `<div class="cs-spellcard-grid" data-cat="${cat.id}">`;
       visibleEntries.forEach(({ s, globalIdx: i }) => {
-        html += _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
+        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
       });
       html += `</div>`;
     }
@@ -302,7 +302,7 @@ function _sortsResetFilters() {
   _sortsRerender();
 }
 
-function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
+function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isOpen   = openIdx === i;
   const runesAll = s.runes || [];
   const types    = _getSortTypes(s);
@@ -440,55 +440,75 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
                 : types.includes('defensif')  ? '#22c38e'
                 : '#b47fff';
 
-  return `<div class="cs-sort-row ${s.actif?'actif':''}" style="--sort-type-col:${typeCol}"
+  // ── Validation MJ ──
+  const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+  const valBadge = vs === 'ok'
+    ? `<span class="cs-spellcard-val ok" title="Sort validé par le Maître du Jeu">✅ Validé</span>`
+    : vs === 'no'
+      ? `<span class="cs-spellcard-val no" title="Sort refusé par le Maître du Jeu">❌ Refusé</span>`
+      : `<span class="cs-spellcard-val wait" title="Pas encore validé par le Maître du Jeu">⏳ À valider</span>`;
+
+  // ── Noyaux (éléments) en petites pastilles ──
+  const nts = noyauTypesFor(s);
+  const noyauPills = nts.map(t =>
+    `<span class="cs-spellcard-noyau" style="--c:${t.color||'#888'}" title="Noyau ${_esc(t.label)}">${t.icon || ''}</span>`
+  ).join('');
+
+  // ── Runes présentes (comptées) ──
+  const counts = {};
+  runesAll.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  const runeMetas = RUNE_META.filter(rm => (counts[rm.nom] || 0) > 0);
+
+  // Gestionnaire de runes inline (édition directe sans ouvrir l'éditeur)
+  const runeManager = `<div class="cs-spellcard-runes" data-stop-propagation>
+    ${runeMetas.map(rm => `
+      <div class="cs-runestep" style="--c:${rm.color}" title="${_esc(rm.nom)} — ${_esc(rm.effet)}">
+        ${canEdit ? `<button class="cs-runestep-btn" data-action="_deckRuneDec" data-idx="${i}" data-rune="${_esc(rm.nom)}" title="Retirer une ${_esc(rm.nom)}">−</button>` : ''}
+        <span class="cs-runestep-mid"><span class="cs-runestep-ic">${rm.icon}</span><span class="cs-runestep-n">${_esc(rm.nom)}${(counts[rm.nom]>1)?` ×${counts[rm.nom]}`:''}</span></span>
+        ${canEdit ? `<button class="cs-runestep-btn" data-action="_deckRuneInc" data-idx="${i}" data-rune="${_esc(rm.nom)}" title="Ajouter une ${_esc(rm.nom)}">＋</button>` : ''}
+      </div>`).join('')}
+    ${canEdit ? `<button class="cs-runestep-add" data-action="_deckRuneAdd" data-idx="${i}" title="Ajouter une rune">＋ Rune</button>` : ''}
+    ${(!runeMetas.length && !canEdit) ? `<span class="cs-spellcard-runes-empty">Aucune rune</span>` : ''}
+  </div>`;
+
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''}" style="--type-col:${typeCol}"
     draggable="true" data-sort-idx="${i}"
     ondragstart="sortDragStart(event,${i})"
     ondragover="sortDragOver(event)"
     ondrop="sortDrop(event,${i})"
     ondragend="sortDragEnd(event)">
 
-    <!-- Ligne unique compacte -->
-    <div class="cs-sort-compact" data-action="toggleSortDetail" data-idx="${i}">
+    <header class="cs-spellcard-head">
       <div class="toggle ${s.actif?'on':''}"
         ${canEdit ? `data-action="toggleSort" data-idx="${i}" data-stop-propagation` : ''}
-        title="${s.actif?'Désactiver':'Activer'}"></div>
-      <span class="cs-sort-compact-nom">${s.icon ? `<span class="cs-sort-icon" title="Icône du sort">${_esc(s.icon)}</span> ` : ''}${_esc(s.nom||'Sans nom')}</span>
-      ${(() => {
-        const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
-        return vs === 'ok'
-          ? `<span class="cs-sort-status cs-sort-status--ok" title="Sort validé par le Maître du Jeu">✅ Validé</span>`
-          : vs === 'no'
-            ? `<span class="cs-sort-status cs-sort-status--no" title="Sort refusé par le Maître du Jeu">❌ Refusé</span>`
-            : `<span class="cs-sort-status cs-sort-status--wait" title="Pas encore validé par le Maître du Jeu">⏳ À valider</span>`;
-      })()}
-      <div class="cs-sort-compact-chips">
-        ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
-        <span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:${acfg.color}">${acfg.label}</span>
-        ${concentration ? `<span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:#60a5fa">🧠</span>` : ''}
+        title="${s.actif?'Retirer du deck':'Ajouter au deck'}"></div>
+      <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
+      <div class="cs-spellcard-id">
+        <div class="cs-spellcard-name" title="${_esc(s.nom||'Sans nom')}">${_esc(s.nom||'Sans nom')}</div>
+        <div class="cs-spellcard-sub">
+          <span class="cs-spellcard-act" style="--c:${acfg.color}">${acfg.label}</span>
+          ${concentration ? `<span class="cs-spellcard-conc" title="Concentration">🧠</span>` : ''}
+          ${noyauPills}
+        </div>
       </div>
-      <span class="cs-sort-compact-pm">${pmVal} PM</span>
-      ${canEdit ? `<div class="cs-sort-compact-acts" data-stop-propagation>
-        ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (actions de la créature)">🐾</button>` : ''}
-        <button class="btn-icon" data-action="editSort" data-idx="${i}">✏️</button>
-        <button class="btn-icon" data-action="deleteSort" data-idx="${i}">🗑️</button>
-      </div>` : ''}
-      <span class="cs-sort-compact-chev">${isOpen?'▲':'▼'}</span>
+      <span class="cs-spellcard-pm" title="Coût en points de magie">${pmVal}<small>PM</small></span>
+    </header>
+
+    <div class="cs-spellcard-tags">
+      ${valBadge}
+      ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
     </div>
 
-    <!-- Description toujours visible (clamped 2 lignes) -->
-    ${s.effet ? `<div class="cs-sort-desc-preview" data-action="toggleSortDetail" data-idx="${i}">${_esc(s.effet)}</div>` : ''}
+    ${s.effet ? `<p class="cs-spellcard-desc ${isOpen?'is-full':''}" data-action="toggleSortDetail" data-idx="${i}" title="Cliquer pour ${isOpen?'replier':'voir le détail'}">${isOpen ? _nl2br(_esc(s.effet)) : _esc(s.effet)}</p>` : ''}
 
-    <!-- Panneau déroulant : détails techniques complets -->
-    ${isOpen ? `<div class="cs-sort-expand">
-      ${s.effet ? `<div class="cs-sort-expand-desc">${_nl2br(_esc(s.effet))}</div>` : ''}
-      ${s.noyau || runesAll.length ? `<div class="cs-sort-expand-meta">
-        ${(() => {
-          const nts = noyauTypesFor(s);
-          if (nts.length > 1) return `<span class="cs-sort-dl-label">Noyaux</span><span>${nts.map(t => `${t.icon||''} ${_esc(t.label)}`).join(' · ')}</span>`;
-          return s.noyau ? `<span class="cs-sort-dl-label">Noyau</span><span>${_esc(s.noyau)}</span>` : '';
-        })()}
-        ${runesAll.length ? `<span class="cs-sort-dl-label" style="margin-left:.65rem">Runes (${runesAll.length})</span><span>${runesAll.join(' · ')}</span>` : ''}
-      </div>` : ''}
+    ${s.mjNotes ? `<div class="cs-spellcard-mjnote" title="Note / restriction du Maître du Jeu">
+      <span class="cs-spellcard-mjnote-ic">📌</span>
+      <span class="cs-spellcard-mjnote-tx">${isOpen ? _nl2br(_esc(s.mjNotes)) : _esc(s.mjNotes)}</span>
+    </div>` : ''}
+
+    ${runeManager}
+
+    ${isOpen ? `<div class="cs-spellcard-detail">
       <div class="cs-sort-detail-effects">
         <div class="cs-sort-detail-effects-title">📋 Effets calculés</div>
         ${_buildSortResume(s, c).map(line => `
@@ -499,7 +519,91 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
           </div>`).join('')}
       </div>
     </div>` : ''}
-  </div>`;
+
+    <footer class="cs-spellcard-foot">
+      <button class="cs-spellcard-detailbtn" data-action="toggleSortDetail" data-idx="${i}">${isOpen?'▲ Replier':'▼ Détails'}</button>
+      ${canEdit ? `<div class="cs-spellcard-acts" data-stop-propagation>
+        ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (créatures à invoquer)">🐾</button>` : ''}
+        <button class="btn-icon" data-action="editSort" data-idx="${i}" title="Éditer le sort">✏️</button>
+        <button class="btn-icon" data-action="deleteSort" data-idx="${i}" title="Supprimer">🗑️</button>
+      </div>` : ''}
+    </footer>
+  </article>`;
+}
+
+// ── Gestion des runes directement depuis l'onglet (sans ouvrir l'éditeur) ─────
+// Recalcule le PM auto du sort : (noyau ? 1 : 0) + nb runes d'effet, ×2, min 2.
+// Miroir exact de la formule de saveSort(). Le pmOverride (MJ) est conservé tel quel.
+function _deckRecalcSortPm(s) {
+  const hasNoyau = !!(s.noyau || s.noyauTypeId || (Array.isArray(s.noyauTypeIds) && s.noyauTypeIds.length));
+  const total = (hasNoyau ? 1 : 0) + (s.runes || []).length;
+  s.pm = total * 2 || 2;
+}
+
+async function _deckRuneInc(idx, nom) {
+  const c = STATE.activeChar; if (!c) return;
+  const s = (c.deck_sorts || [])[idx]; if (!s) return;
+  // Limite de runes d'effet par perso (le MJ n'est pas limité). Miroir de runeIncrement().
+  if (!STATE.isAdmin) {
+    const total = (s.runes || []).length;
+    const limit = _spellRuneLimit();
+    if (total >= limit) {
+      showNotif(`Limite de runes d'effet atteinte (${limit}). Le MJ peut en débloquer.`, 'error');
+      return;
+    }
+  }
+  // 1ʳᵉ Puissance/Lacération → type Offensif · 1ʳᵉ Protection → type Défensif
+  // (miroir de l'intelligence de l'éditeur, pour garder un état cohérent).
+  const wasAbsent = !(s.runes || []).includes(nom);
+  s.runes = [...(s.runes || []), nom];
+  if (wasAbsent) {
+    s.types = Array.isArray(s.types) ? [...s.types] : [];
+    if ((nom === 'Puissance' || nom === 'Lacération') && !s.types.includes('offensif')) s.types.push('offensif');
+    if (nom === 'Protection' && !s.types.includes('defensif')) s.types.push('defensif');
+  }
+  _deckRecalcSortPm(s);
+  c.deck_sorts = [...c.deck_sorts];
+  if (await trySave('characters', c.id, { deck_sorts: c.deck_sorts })) _renderSpellsTab(c);
+}
+
+async function _deckRuneDec(idx, nom) {
+  const c = STATE.activeChar; if (!c) return;
+  const s = (c.deck_sorts || [])[idx]; if (!s) return;
+  const runes = [...(s.runes || [])];
+  const at = runes.lastIndexOf(nom);
+  if (at < 0) return;
+  runes.splice(at, 1);
+  s.runes = runes;
+  _deckRecalcSortPm(s);
+  c.deck_sorts = [...c.deck_sorts];
+  if (await trySave('characters', c.id, { deck_sorts: c.deck_sorts })) _renderSpellsTab(c);
+}
+
+function _deckRuneAdd(idx) {
+  const c = STATE.activeChar; if (!c) return;
+  const s = (c.deck_sorts || [])[idx]; if (!s) return;
+  openModal('🔮 Ajouter une rune', `
+    <div class="cs-deckrune-pick">
+      ${RUNE_GROUPS.map(g => `
+        <div class="cs-deckrune-grp">
+          <div class="cs-deckrune-grp-t">${g.title}</div>
+          <div class="cs-deckrune-grp-list">
+            ${RUNE_META.filter(r => r.family === g.id).map(r => `
+              <button class="cs-deckrune-opt" style="--c:${r.color}" data-action="_deckRuneAddPick" data-idx="${idx}" data-rune="${_esc(r.nom)}">
+                <span class="cs-deckrune-opt-ic">${r.icon}</span>
+                <span class="cs-deckrune-opt-n">${_esc(r.nom)}</span>
+                <span class="cs-deckrune-opt-e">${_esc(r.effet)}</span>
+              </button>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.7rem" data-action="close-modal">Fermer</button>
+  `);
+}
+
+async function _deckRuneAddPick(idx, nom) {
+  closeModalDirect();
+  await _deckRuneInc(idx, nom);
 }
 
 // ── Catégories de sorts ───────────────────────────────────────────────────────
@@ -2783,4 +2887,9 @@ registerActions({
   _libInvEditAction:      (btn) => _libInvEditAction(btn.dataset.aidx),
   _libInvDeleteAction:    (btn) => _libInvDeleteAction(btn.dataset.aidx),
   _toggleInvSelect:       (btn) => _toggleInvSelect(btn.dataset.id),
+  // Gestion des runes inline (onglet Sorts, sans éditeur)
+  _deckRuneInc:           (btn) => _deckRuneInc(Number(btn.dataset.idx), btn.dataset.rune),
+  _deckRuneDec:           (btn) => _deckRuneDec(Number(btn.dataset.idx), btn.dataset.rune),
+  _deckRuneAdd:           (btn) => _deckRuneAdd(Number(btn.dataset.idx)),
+  _deckRuneAddPick:       (btn) => _deckRuneAddPick(Number(btn.dataset.idx), btn.dataset.rune),
 });
