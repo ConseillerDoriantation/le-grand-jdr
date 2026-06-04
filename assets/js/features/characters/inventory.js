@@ -34,6 +34,7 @@ let _lootSetCat = () => {};
 let _lootFilter = () => {};
 let _lootSelect = () => {};
 let _lootSaveRecent = null;
+let _lootRenderGrid = null;
 
 function _renderInventoryChar(c, tab = 'inventaire') {
   charSession.renderSheet?.(c, tab || charSession.getCurrentCharTab() || 'inventaire');
