@@ -10316,3 +10316,45 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .cs-v3 .cs-spellcard-mjnote { color: #92651b; }
 [data-theme="light"] .cs-v3 .cs-spellcard-desc { color: #475569; }
 [data-theme="light"] .cs-v3 .cs-spellcard-desc:hover { color: #1e293b; }
+
+/* ── Gestionnaire INLINE des catégories de sorts (remplace la modale) ── */
+.cs-v3 .cs-catmgr {
+  background: var(--bg-elevated, rgba(255,255,255,.03)); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.cs-v3 .cs-catmgr-head { display: flex; flex-direction: column; gap: 2px; }
+.cs-v3 .cs-catmgr-title { font-weight: 800; font-size: .9rem; color: var(--text); }
+.cs-v3 .cs-catmgr-sub { font-size: .7rem; color: var(--text-dim); }
+.cs-v3 .cs-catmgr-list { display: flex; flex-direction: column; gap: 6px; }
+.cs-v3 .cs-catmgr-row, .cs-v3 .cs-catmgr-new {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(0,0,0,.14); border: 1px solid var(--border);
+  border-left: 3px solid var(--cat-col, var(--border)); border-radius: 9px; padding: 6px 8px;
+}
+.cs-v3 .cs-catmgr-new { border-left: 3px dashed var(--border); }
+.cs-v3 .cs-catmgr-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+.cs-v3 .cs-catmgr-name {
+  flex: 1; min-width: 0; background: transparent; border: 1px solid transparent;
+  border-radius: 6px; color: var(--text); font-family: inherit; font-size: .82rem;
+  font-weight: 600; padding: 4px 6px; transition: border-color .12s, background .12s;
+}
+.cs-v3 .cs-catmgr-name:hover { border-color: var(--border); }
+.cs-v3 .cs-catmgr-name:focus { border-color: var(--gold); background: rgba(255,255,255,.04); outline: none; }
+.cs-v3 .cs-catmgr-colors { display: inline-flex; gap: 3px; flex-shrink: 0; }
+.cs-v3 .cs-catmgr-col {
+  width: 17px; height: 17px; border-radius: 50%; border: 2px solid transparent;
+  cursor: pointer; padding: 0; transition: transform .1s;
+}
+.cs-v3 .cs-catmgr-col:hover { transform: scale(1.18); }
+.cs-v3 .cs-catmgr-col.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg-elevated); }
+.cs-v3 .cs-catmgr-empty { font-size: .76rem; color: var(--text-dim); font-style: italic; padding: 4px 2px; }
+.cs-v3 .cs-catmgr-hint { font-size: .66rem; color: var(--text-dim); white-space: nowrap; }
+.cs-v3 .cs-sorts-actions .btn.is-active { border-color: var(--gold); color: var(--gold); background: rgba(79,140,255,.12); }
+@media (max-width: 560px) { .cs-v3 .cs-catmgr-colors { flex-wrap: wrap; } }
+[data-theme="light"] .cs-v3 .cs-catmgr-row, [data-theme="light"] .cs-v3 .cs-catmgr-new { background: rgba(0,0,0,.02); }
+
+/* ── Éditeur d'invocation : sections titrées (style éditeur de sort) ── */
+.cs-invedit { display: flex; flex-direction: column; }
+.cs-invedit .cs-spell-section { margin-bottom: .6rem; }
+.cs-invedit-foot { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .1rem; }
+.cs-invedit-foot .btn { min-width: 130px; }

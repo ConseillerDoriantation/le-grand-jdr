@@ -21,6 +21,7 @@ let _sortsSearch = '';
 let _sortsView = 'all';
 let _sortsTypeFilter = '';
 let _sortsCatCollapsed = {};
+let _sortsCatPanelOpen = false;   // panneau inline de gestion des catégories (remplace la modale)
 let _runeCountsEdit = {};
 let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
@@ -223,7 +224,7 @@ export function renderCharDeck(c, canEdit) {
       <div class="cs-sorts-actions">
         ${canEdit ? `<button class="btn btn-gold btn-sm" data-action="addSort" title="Créer un sort">＋ Sort</button>` : ''}
         ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openInvocationLibrary" title="Gérer mes invocations (créatures à invoquer)">🐾</button>` : ''}
-        ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openSortCatEditor" title="Gérer les catégories">📂</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm ${_sortsCatPanelOpen?'is-active':''}" data-action="openSortCatEditor" title="Gérer les catégories">📂</button>` : ''}
         ${cats.length ? `<button class="btn btn-outline btn-sm" data-action="_sortsToggleAllCats" title="Plier/déplier toutes les catégories">⇕</button>` : ''}
       </div>
     </div>
@@ -253,6 +254,9 @@ export function renderCharDeck(c, canEdit) {
       <span class="cs-sort-pm-bar-val">${pmDelta > 0 ? '+' : ''}${pmDelta} PM</span>
       <span class="cs-sort-pm-bar-note">(appliqué automatiquement)</span>
     </div>` : ''}`;
+
+  // ── Panneau inline de gestion des catégories (remplace la modale) ──
+  if (canEdit && _sortsCatPanelOpen) html += _renderCatManager(cats);
 
   // ── État vide / aucun résultat ───────────────────────────────────
   if (allSorts.length === 0) {
@@ -575,75 +579,91 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
 }
 
 // ── Catégories de sorts ───────────────────────────────────────────────────────
-export function openSortCatEditor() {
-  const c    = STATE.activeChar; if (!c) return;
-  const cats = c.sort_cats || [];
-  const COLORS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b','#9ca3af'];
+const _CAT_COLORS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b','#9ca3af'];
 
-  openModal('📂 Catégories de sorts', `
-    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
-      Crée des catégories pour organiser tes sorts. Glisse les sorts d'une catégorie à l'autre depuis la liste.
+// Panneau INLINE de gestion des catégories (plus de modale). Crée / renomme /
+// recolorie / supprime — la suppression NE supprime PAS les sorts (catId remis à '').
+function _renderCatManager(cats = []) {
+  const swatch = (col, action, idx, sel) =>
+    `<button class="cs-catmgr-col ${sel?'on':''}" style="background:${col}" data-action="${action}"${idx!=null?` data-idx="${idx}"`:''} data-col="${col}" title="${sel?'Couleur actuelle':'Choisir cette couleur'}"></button>`;
+  return `<div class="cs-catmgr">
+    <div class="cs-catmgr-head">
+      <span class="cs-catmgr-title">📂 Catégories</span>
+      <span class="cs-catmgr-sub">Glisse un sort d'une catégorie à l'autre. Supprimer une catégorie ne supprime pas ses sorts.</span>
     </div>
-    <div id="sort-cats-list" style="display:flex;flex-direction:column;gap:.4rem">
+    ${cats.length ? `<div class="cs-catmgr-list">
       ${cats.map((cat, i) => `
-      <div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
-        border-radius:8px;padding:.5rem .7rem;border:1px solid var(--border)">
-        <div style="width:12px;height:12px;border-radius:50%;background:${cat.couleur};flex-shrink:0"></div>
-        <span style="flex:1;font-size:.84rem;color:var(--text)">${cat.nom}</span>
-        <button class="btn-icon" style="font-size:.72rem" data-action="_editSortCat" data-idx="${i}">✏️</button>
-        <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" data-action="_delSortCat" data-idx="${i}">🗑️</button>
-      </div>`).join('')}
-      ${cats.length === 0 ? `<div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:.8rem;font-style:italic">Aucune catégorie</div>` : ''}
+        <div class="cs-catmgr-row" style="--cat-col:${cat.couleur}">
+          <span class="cs-catmgr-dot" style="background:${cat.couleur}"></span>
+          <input class="cs-catmgr-name" value="${_esc(cat.nom)}" maxlength="40"
+            data-change="_renameSortCat" data-idx="${i}" placeholder="Nom de la catégorie">
+          <div class="cs-catmgr-colors">${_CAT_COLORS.map(col => swatch(col, '_recolorSortCat', i, cat.couleur === col)).join('')}</div>
+          <button class="btn-icon cs-catmgr-del" data-action="_delSortCat" data-idx="${i}" title="Supprimer (les sorts sont conservés)">🗑️</button>
+        </div>`).join('')}
+    </div>` : `<div class="cs-catmgr-empty">Aucune catégorie pour l'instant.</div>`}
+    <div class="cs-catmgr-new">
+      <input class="cs-catmgr-name" id="cs-newcat-name" maxlength="40" placeholder="Nouvelle catégorie…">
+      <div class="cs-catmgr-colors">${_CAT_COLORS.map(col => swatch(col, '_addSortCat', null, false)).join('')}</div>
+      <span class="cs-catmgr-hint">← clique une couleur pour créer</span>
     </div>
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.75rem">
-      ${COLORS.map(col => `<button data-action="_addSortCat" data-col="${col}"
-        style="width:28px;height:28px;border-radius:50%;background:${col};border:2px solid transparent;
-        cursor:pointer;transition:transform .1s" onmouseover="this.style.transform='scale(1.2)'"
-        onmouseout="this.style.transform=''" title="Créer une catégorie ${col}"></button>`).join('')}
-      <span style="font-size:.75rem;color:var(--text-dim);align-self:center;margin-left:.25rem">← clique pour créer</span>
-    </div>
-    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.75rem" data-action="close-modal">Fermer</button>
-  `);
+  </div>`;
+}
+
+// Toggle du panneau inline (remplace l'ancienne modale).
+export function openSortCatEditor() {
+  _sortsCatPanelOpen = !_sortsCatPanelOpen;
+  _renderSpellsTab();
 }
 
 async function _addSortCat(couleur) {
-  const nom = prompt('Nom de la catégorie :');
-  if (!nom?.trim()) return;
   const c = STATE.activeChar; if (!c) return;
+  const inp = document.getElementById('cs-newcat-name');
+  const nom = (inp?.value || '').trim() || 'Nouvelle catégorie';
   const cats = [...(c.sort_cats || [])];
-  cats.push({ id: `cat_${Date.now()}`, nom: nom.trim(), couleur });
+  cats.push({ id: `cat_${Date.now()}`, nom, couleur });
   c.sort_cats = cats;
-  await updateInCol('characters', c.id, { sort_cats: cats });
-  showNotif('Catégorie créée !', 'success');
-  openSortCatEditor();
-  _renderSpellsTab(c);
+  if (await trySave('characters', c.id, { sort_cats: cats })) {
+    showNotif('Catégorie créée !', 'success');
+    _renderSpellsTab(c);   // _sortsCatPanelOpen reste vrai → le panneau reste ouvert
+  }
 }
 
-async function _editSortCat(idx) {
+async function _renameSortCat(idx, value) {
   const c = STATE.activeChar; if (!c) return;
   const cats = [...(c.sort_cats || [])];
-  const nom = prompt('Renommer :', cats[idx].nom);
-  if (!nom?.trim()) return;
-  cats[idx].nom = nom.trim();
+  if (!cats[idx]) return;
+  const nom = (value || '').trim();
+  if (!nom || nom === cats[idx].nom) return;
+  cats[idx] = { ...cats[idx], nom };
   c.sort_cats = cats;
-  await updateInCol('characters', c.id, { sort_cats: cats });
-  openSortCatEditor();
-  _renderSpellsTab(c);
+  if (await trySave('characters', c.id, { sort_cats: cats })) _renderSpellsTab(c);
+}
+
+async function _recolorSortCat(idx, couleur) {
+  const c = STATE.activeChar; if (!c) return;
+  const cats = [...(c.sort_cats || [])];
+  if (!cats[idx] || cats[idx].couleur === couleur) return;
+  cats[idx] = { ...cats[idx], couleur };
+  c.sort_cats = cats;
+  if (await trySave('characters', c.id, { sort_cats: cats })) _renderSpellsTab(c);
 }
 
 async function _delSortCat(idx) {
   const c = STATE.activeChar; if (!c) return;
   const cats  = [...(c.sort_cats || [])];
-  const catId = cats[idx].id;
-  // Retirer la catégorie des sorts qui l'avaient
-  const sorts = (c.deck_sorts || []).map(s => s.catId === catId ? { ...s, catId: '' } : s);
+  const cat   = cats[idx]; if (!cat) return;
+  if (!await confirmModal(`Supprimer la catégorie <b>${_esc(cat.nom)}</b> ?<br><span style="color:var(--text-dim);font-size:.85em">Ses sorts sont conservés (ils repassent « Sans catégorie »).</span>`, {
+    title: 'Supprimer la catégorie', confirmLabel: 'Supprimer', icon: '🗑️',
+  })) return;
+  // Les sorts de la catégorie sont CONSERVÉS : on remet juste leur catId à ''.
+  const sorts = (c.deck_sorts || []).map(s => s.catId === cat.id ? { ...s, catId: '' } : s);
   cats.splice(idx, 1);
   c.sort_cats  = cats;
   c.deck_sorts = sorts;
-  await updateInCol('characters', c.id, { sort_cats: cats, deck_sorts: sorts });
-  showNotif('Catégorie supprimée.', 'success');
-  openSortCatEditor();
-  _renderSpellsTab(c);
+  if (await trySave('characters', c.id, { sort_cats: cats, deck_sorts: sorts })) {
+    showNotif('Catégorie supprimée (sorts conservés).', 'success');
+    _renderSpellsTab(c);
+  }
 }
 
 
@@ -1891,27 +1911,29 @@ function _renderLibInvEditorBody() {
   ];
   const acts = Array.isArray(iv.actions) ? iv.actions : [];
   const calcChar = _libInvCalcChar(iv);
-  return `<div class="cs-inv-section" style="display:block">
-    <div class="cs-inv-body">
-      <div class="cs-inv-imgcol">
-        <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
-        <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
-      </div>
-      <div class="cs-inv-grid">
-        <label class="cs-inv-stat" style="grid-column:1/-1">
-          <span class="cs-inv-stat-lbl">🐾 Nom</span>
-          <input class="cs-inv-stat-in" id="s-inv-nom" type="text" value="${_esc(iv.nom||'')}" placeholder="Nom de la créature">
-        </label>
-        ${fields.map(f => `<label class="cs-inv-stat">
-          <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
-          <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
-        </label>`).join('')}
+  return `<div class="cs-invedit">
+    <div class="cs-spell-section">
+      <div class="cs-spell-section-title">🐾 Identité &amp; statistiques <span class="cs-spell-section-hint">stats de base de la créature</span></div>
+      <div class="cs-inv-body">
+        <div class="cs-inv-imgcol">
+          <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
+          <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
+        </div>
+        <div class="cs-inv-grid">
+          <label class="cs-inv-stat" style="grid-column:1/-1">
+            <span class="cs-inv-stat-lbl">🐾 Nom</span>
+            <input class="cs-inv-stat-in" id="s-inv-nom" type="text" value="${_esc(iv.nom||'')}" placeholder="Nom de la créature">
+          </label>
+          ${fields.map(f => `<label class="cs-inv-stat">
+            <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
+            <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
+          </label>`).join('')}
+        </div>
       </div>
     </div>
-    <div class="cs-inv-actions-wrap">
-      <div class="inv-cfg-actions-hd">
-        <span>🎬 Actions de la créature</span>
-        <button class="btn btn-gold btn-sm" data-action="_libInvAddAction">＋ Nouvelle action</button>
+    <div class="cs-spell-section">
+      <div class="cs-spell-section-title">🎬 Actions de la créature <span class="cs-spell-section-hint">mini-sorts joués par l'invocation</span>
+        <button class="btn btn-gold btn-sm" style="margin-left:auto" data-action="_libInvAddAction">＋ Action</button>
       </div>
       <div class="inv-cfg-list">
         ${acts.length ? acts.map((a, ai) => {
@@ -1926,10 +1948,10 @@ function _renderLibInvEditorBody() {
             <button class="btn-icon" data-action="_libInvEditAction" data-aidx="${ai}" title="Modifier">✏️</button>
             <button class="btn-icon" data-action="_libInvDeleteAction" data-aidx="${ai}" title="Supprimer">🗑️</button>
           </div>`;
-        }).join('') : '<div class="inv-cfg-empty">Aucune action.</div>'}
+        }).join('') : '<div class="inv-cfg-empty">Aucune action — la créature attaquera avec son attaque de base.</div>'}
       </div>
     </div>
-    <div class="inv-cfg-foot" style="display:flex;gap:.5rem;justify-content:flex-end">
+    <div class="cs-invedit-foot">
       <button class="btn btn-outline" data-action="_libInvBack">← Bibliothèque</button>
       <button class="btn btn-gold" data-action="_saveLibInv">💾 Enregistrer</button>
     </div>
@@ -2846,7 +2868,8 @@ registerActions({
   _sortsToggleCat:        (btn) => _sortsToggleCat(btn.dataset.id),
   _sortsToggleAllCats:    ()    => _sortsToggleAllCats(),
   _sortsResetFilters:     ()    => _sortsResetFilters(),
-  _editSortCat:           (btn) => _editSortCat(Number(btn.dataset.idx)),
+  _renameSortCat:         (el)  => _renameSortCat(Number(el.dataset.idx), el.value),
+  _recolorSortCat:        (btn) => _recolorSortCat(Number(btn.dataset.idx), btn.dataset.col),
   _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
