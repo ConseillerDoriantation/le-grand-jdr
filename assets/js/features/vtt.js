@@ -3125,18 +3125,17 @@ function _buildSpellOption(s, ctx) {
   let zoneW = (mods?.allonge || _isDepl) ? 0 : (s.zoneW || 0);
   let zoneH = (mods?.allonge || _isDepl) ? 0 : (s.zoneH || 0);
   // Si pas de zone manuelle ni allonge : calcule depuis les runes (Amplification × Dispersion).
-  // Miroir de _calcSortZone (spells.js) → mêmes formules de chainage :
-  //   Amp ×N → longueur 4N-1 m  · Disp ×M en combo → largeur 4M-1 m
-  // Conversion mètres → cases (1 case ≈ 1.5 m).
+  // Miroir EXACT de _calcSortZone (spells.js) : Amp ×N → 4N-1 · Disp ×M en combo → 4M-1.
+  // L'éditeur affiche ces nombres comme la taille de zone (ex. 1 Amp + 1 Disp = 3×3) ;
+  // le VTT doit poser la MÊME grille → 1 case par unité (pas de reconversion mètres→cases,
+  // qui rétrécissait le sort, ex. 3×3 affiché → 2×2 posé).
   if (!mods?.allonge && !_isDepl && zoneW <= 0 && zoneH <= 0) {
     const _runes = s.runes || [];
     const _nbAmp  = _runes.filter(r => r === 'Amplification').length;
     const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
     if (_nbAmp >= 1) {
-      const _lenM   = 4 * _nbAmp  - 1;
-      const _widthM = _nbDisp >= 1 ? (4 * _nbDisp - 1) : 1;
-      zoneW = Math.ceil(_lenM   / CELL_M);
-      zoneH = Math.ceil(_widthM / CELL_M);
+      zoneW = 4 * _nbAmp  - 1;
+      zoneH = _nbDisp >= 1 ? (4 * _nbDisp - 1) : 1;
     }
   }
   // Sentinelle / Invocation : force une zone min 1×1 (utile pour le placement)
@@ -4251,9 +4250,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
     return;
   }
 
-  // Sort multi-noyau : choisir l'élément à utiliser avant de continuer
-  if (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1) {
-    _mtPending = null;
+  // Sort multi-noyau : choisir l'élément à utiliser avant de continuer (sauf si on
+  // revient d'une validation zone/multi-cibles : l'élément est déjà fixé).
+  if (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1 && !_mtPending) {
     _showSpellElementPicker(srcId, tgtId, +idx);
     return;
   }
@@ -4887,6 +4886,10 @@ function _mtValidate() {
   const options = _buildAttackOptions(src);
   const inRange = options.filter(o => _tokenAttackDistance(src, tgtData, o.portee) <= o.portee);
   _atkOptsCache[cacheKey] = inRange;
+  // Réutilise l'option DÉJÀ résolue (élément multi-noyau choisi, spellElementChoices
+  // effacé) au lieu de l'option fraîchement reconstruite : sinon le picker d'élément
+  // se redéclencherait → boucle élément/cibles, et l'élément choisi serait perdu.
+  _atkOptsCache[cacheKey][optIdx] = opt;
 
   // Appeler _vttPickOpt — _mtPending non null empêche la re-entrée en mode ciblage
   _vttPickOpt(srcId, firstTgt, optIdx);
