@@ -1507,7 +1507,11 @@ async function openStoryDetail(id) {
 
   // Helper avatar
   const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars = sortCharactersForDisplay(STATE.characters || []);
+  // NB : STATE.characters est filtré sur les persos du joueur côté joueur.
+  // Pour afficher TOUS les membres des groupes, on prend la collection complète
+  // (session-live → 0 lecture supplémentaire).
+  const allChars = getCachedCollection('characters') || await loadCollection('characters');
+  const chars = sortCharactersForDisplay(allChars || []);
   const avatar = (c, size = 36) => {
     if (!c) return '';
     const col = PCOLS[c.nom?.charCodeAt(0) % 6 || 0];
