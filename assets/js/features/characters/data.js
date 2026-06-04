@@ -7,7 +7,7 @@ import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../sh
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
-import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
+import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
 // ══════════════════════════════════════════════
@@ -869,11 +869,10 @@ async function _saveSpellMatrices() {
 // COMPUTED STATS
 // ══════════════════════════════════════════════
 export function getEquippedInventoryIndexMap(c) {
+  // Index → [slots]. Résolu par IDENTITÉ (cf. resolveEquippedInventoryIndices) :
+  // un sourceInvIndex périmé ne décale plus la surbrillance sur le mauvais objet.
   const map = new Map();
-  Object.entries(c?.equipement || {}).forEach(([slot, item]) => {
-    const rawIdx = item?.sourceInvIndex;
-    const idx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
-    if (!Number.isInteger(idx) || idx < 0) return;
+  resolveEquippedInventoryIndices(c).forEach((idx, slot) => {
     const slots = map.get(idx) || [];
     slots.push(slot);
     map.set(idx, slots);

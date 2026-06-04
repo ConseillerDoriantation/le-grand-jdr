@@ -293,6 +293,37 @@ export function getArmorSetData(c = {}) {
   };
 }
 
+// ── Résolution de l'index inventaire COURANT de chaque slot équipé ───────────
+// Le slot d'équipement mémorise un `sourceInvIndex` (index de l'entrée d'origine),
+// mais cet index devient PÉRIMÉ dès que l'inventaire est réordonné par une mutation
+// qui ne passe pas par syncEquipmentAfterInventoryMutation (ajout, normalisation
+// "1 entrée = 1 unité", etc.). On le revalide par IDENTITÉ (itemId si dispo, sinon
+// nom) et on le retrouve si besoin → la surbrillance "équipé" et le déséquipement
+// à la vente ciblent toujours la BONNE entrée (bug : un matériau marqué équipé à la
+// place des bottes). Retourne Map<slot, index>.
+export function resolveEquippedInventoryIndices(c) {
+  const inv = Array.isArray(c?.inventaire) ? c.inventaire : [];
+  const result  = new Map();
+  const claimed = new Set();
+  const sameItem = (entry, eq) => {
+    if (!entry || !eq) return false;
+    if (eq.itemId && entry.itemId) return entry.itemId === eq.itemId;
+    return (entry.nom || '') === (eq.nom || '');
+  };
+  Object.entries(c?.equipement || {}).forEach(([slot, eq]) => {
+    if (!eq?.nom) return;
+    const raw = eq?.sourceInvIndex;
+    let idx = Number.isInteger(raw) ? raw : parseInt(raw, 10);
+    // 1) indice mémorisé valide ET pointant bien sur le bon objet, pas déjà pris
+    if (!(Number.isInteger(idx) && idx >= 0 && !claimed.has(idx) && sameItem(inv[idx], eq))) {
+      // 2) sinon : 1re entrée correspondante non encore réclamée
+      idx = inv.findIndex((entry, i) => !claimed.has(i) && sameItem(entry, eq));
+    }
+    if (Number.isInteger(idx) && idx >= 0) { claimed.add(idx); result.set(slot, idx); }
+  });
+  return result;
+}
+
 // ── Synchronisation équipement après mutation inventaire ─────────────────────
 
 export function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
@@ -321,15 +352,20 @@ export function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
   const removedSlots = [];
   let changed       = false;
 
+  // Index COURANT réel de chaque slot (par identité) — ignore un sourceInvIndex périmé.
+  const resolved = resolveEquippedInventoryIndices(c);
+
   Object.entries(currentEquip).forEach(([slot, item]) => {
-    const rawIdx = item?.sourceInvIndex;
-    const srcIdx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
+    const srcIdx = resolved.has(slot) ? resolved.get(slot) : -1;
 
     if (!Number.isInteger(srcIdx) || srcIdx < 0) { nextEquip[slot] = item; return; }
     if (removedSet.has(srcIdx)) { changed = true; removedSlots.push(slot); return; }
 
-    const nextIdx = srcIdx - countRemovedBefore(srcIdx);
-    if (nextIdx !== srcIdx) { nextEquip[slot] = { ...item, sourceInvIndex: nextIdx }; changed = true; return; }
+    const nextIdx  = srcIdx - countRemovedBefore(srcIdx);
+    const rawStored = item?.sourceInvIndex;
+    const storedIdx = Number.isInteger(rawStored) ? rawStored : parseInt(rawStored, 10);
+    // Réécrit sourceInvIndex à l'index correct post-mutation (répare aussi un index périmé).
+    if (nextIdx !== storedIdx) { nextEquip[slot] = { ...item, sourceInvIndex: nextIdx }; changed = true; return; }
     nextEquip[slot] = item;
   });
 
