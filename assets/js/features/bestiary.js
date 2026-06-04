@@ -1438,6 +1438,45 @@ function _renderPanel(c) {
       }).join('')}
     </div>` : '';
 
+  // ── Butin estimé (Joueur) : objets supposés + nombre ──────────────────────
+  // Le joueur ne voit pas les butins réels (MJ uniquement). Il note ce qu'il
+  // pense pouvoir récupérer. Lignes dynamiques : autant que de lignes remplies + 1.
+  const _lootRows = (() => {
+    let n = 0;
+    for (let i = 0; i < 40; i++) if (ded[`but_nom_${i}`] || ded[`but_qte_${i}`]) n = i + 1;
+    return n + 1;
+  })();
+  const butinJoueurHtml = !_isAdminView() ? `
+    <div class="bst-section">
+      <div class="bst-section-title">🎒 Butin estimé
+        <span class="bst-section-count">supposé</span>
+      </div>
+      ${Array.from({ length: _lootRows }, (_, i) => {
+        const a = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="but_${suffix}_${i}"`;
+        return `<div class="bst-loot-est">
+          <input class="bst-deduct-input" placeholder="Objet supposé…" value="${_esc(ded[`but_nom_${i}`]||'')}" ${a('nom')}>
+          <input class="bst-deduct-input bst-loot-qte" placeholder="Nb" value="${_esc(ded[`but_qte_${i}`]||'')}" ${a('qte')}>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
+  // ── Relations aux dégâts supposées (Joueur) ───────────────────────────────
+  // Le joueur estime faiblesses / résistances / immunités / absorptions à partir
+  // de ce qu'il observe en combat. Profil réel = MJ uniquement (dmgHtml plus haut).
+  const relJoueurHtml = !_isAdminView() ? `
+    <div class="bst-section">
+      <div class="bst-section-title">🩸 Relations aux dégâts
+        <span class="bst-section-count">supposées</span>
+      </div>
+      ${DAMAGE_RELATIONS.map(r => {
+        const a = `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="rel_${r.key}"`;
+        return `<div class="bst-rel-est" style="--rel-c:${r.color}">
+          <span class="bst-rel-est-lbl">${r.icon} ${r.label}</span>
+          <input class="bst-deduct-input" placeholder="Types de dégâts supposés…" value="${_esc(ded[`rel_${r.key}`]||'')}" ${a}>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
   return `
   <div class="bst-panel" style="--rang-c:${rs.color};--rang-glow:${rs.glow}">
     ${heroHtml}
@@ -1447,6 +1486,8 @@ function _renderPanel(c) {
       ${armesJoueurHtml}
       ${attaquesJoueurHtml}
       ${traitsJoueurHtml}
+      ${butinJoueurHtml}
+      ${relJoueurHtml}
     </div>
   </div>`;
 }
