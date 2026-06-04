@@ -504,6 +504,17 @@ export function _calcSortCibles(s) {
   return calcSpellTargets(s);
 }
 
+/** Éléments (noyaux) d'un sort, résolus en {id,label,icon,color} depuis la matrice.
+ *  Supporte le multi-noyau (s.noyauTypeIds) avec repli sur le noyau unique legacy.
+ */
+export function noyauTypesFor(s) {
+  const types = _damageTypesCache || [];
+  const ids = (Array.isArray(s?.noyauTypeIds) && s.noyauTypeIds.length)
+    ? s.noyauTypeIds
+    : (s?.noyauTypeId ? [s.noyauTypeId] : []);
+  return ids.map(id => types.find(t => t.id === id)).filter(Boolean);
+}
+
 /** Détermine si le noyau du sort est magique (depuis la matrice damage_types).
  *  Détermine la stat utilisée pour le soin (magique → arme · physique → Constitution).
  */

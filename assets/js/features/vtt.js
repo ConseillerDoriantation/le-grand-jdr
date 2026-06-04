@@ -3234,6 +3234,12 @@ function _buildSpellOption(s, ctx) {
     const ovrDmgNoMod    = ovrDmgStat   === 'none';
     const ovrTouchMod    = ovrTouchNoMod ? 0 : (c ? getMod(c, ovrTouchStat) : fallbackTouchMod);
     const ovrDmgMod      = ovrDmgNoMod   ? 0 : (c ? getMod(c, ovrDmgStat)   : fallbackDmgMod);
+    // Multi-noyau : si le sort a plusieurs éléments, on laisse le joueur choisir
+    // au lancement (cf. _vttPickOpt → _showSpellElementPicker). L'élément primaire
+    // (spellTypeId) sert d'affichage par défaut.
+    const spellElementChoices = (Array.isArray(s.noyauTypeIds) && s.noyauTypeIds.length > 1)
+      ? s.noyauTypeIds.filter(Boolean)
+      : null;
     return { ...common,
       icon: sortIcon, label,
       rawDice: sRawDice, dice: fullFormula,
@@ -3241,6 +3247,7 @@ function _buildSpellOption(s, ctx) {
       damageTypeId: spellTypeId,
       damageTypeIcon: spellTypeObj?.icon || '',
       damageTypeColor: spellTypeObj?.color || '',
+      spellElementChoices,
       toucherMod: ovrTouchMod, toucherSetBonus: touchSetBonus,
       toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
       dmgStatMod: ovrDmgMod,
@@ -4244,6 +4251,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
     return;
   }
 
+  // Sort multi-noyau : choisir l'élément à utiliser avant de continuer
+  if (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1) {
+    _mtPending = null;
+    _showSpellElementPicker(srcId, tgtId, +idx);
+    return;
+  }
+
   // Sort de déplacement (rune Amplification mode Déplacement) : soi / pousse / attire.
   if (opt.mods?.deplacement && opt.sortIdx !== undefined && !_mtPending) {
     const d = opt.mods.deplacement;
@@ -4596,6 +4610,7 @@ function _vttPickElement(srcId, tgtId, optIdx, elementId) {
   _atkOptsCache[cacheKey][+optIdx] = {
     ...opt,
     isMagicWeapon:    false,
+    spellElementChoices: null,   // élément choisi → ne plus redemander
     typeRules,
     damageTypeId:     elementId,
     damageTypeIcon:   elemType?.icon  || '',
@@ -4603,6 +4618,55 @@ function _vttPickElement(srcId, tgtId, optIdx, elementId) {
   };
   closeModalDirect();
   _vttPickOpt(srcId, tgtId, +optIdx);
+}
+
+/** Sélecteur d'élément pour un sort multi-noyau (réutilise _vttPickElement). */
+function _showSpellElementPicker(srcId, tgtId, optIdx) {
+  const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[optIdx];
+  if (!opt) return;
+  const src = _tokens[srcId]?.data, tgt = _tokens[tgtId]?.data;
+  if (!src || !tgt) return;
+  const lS = _live(src), lT = _live(tgt);
+  const ids = opt.spellElementChoices || [];
+  const types = ids.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+  if (types.length <= 1) {   // sécurité : un seul → pas de choix
+    if (types[0]) { _vttPickElement(srcId, tgtId, optIdx, types[0].id); return; }
+    _vttPickOpt(srcId, tgtId, optIdx); return;
+  }
+  openModal(`${opt.icon} ${opt.label} — Élément`, `
+    <div class="vtt-form" style="min-width:260px;max-width:340px">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
+        <button data-vtt-fn="_vttBackToAtk"
+          style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
+                 border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
+                 cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
+                 white-space:nowrap">← Retour</button>
+        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;
+                    white-space:nowrap;font-size:.82rem">
+          <strong>${_esc(lS.displayName??src.name)}</strong>
+          <span style="color:var(--text-dim);margin:0 .3rem">→</span>
+          <strong style="color:#ef4444">${_esc(lT.displayName??tgt.name)}</strong>
+        </div>
+      </div>
+      <div style="font-size:.72rem;color:var(--text-dim);margin-bottom:.6rem;text-align:center">
+        🔮 Ce sort a plusieurs noyaux — choisis l'élément
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:.45rem">
+        ${types.map(t => `
+          <button data-vtt-fn="_vttPickElement" data-vtt-args="${srcId}|${tgtId}|${optIdx}|${t.id}"
+            style="padding:.55rem .4rem;border-radius:10px;cursor:pointer;font-family:inherit;
+                   border:2px solid ${t.color||'var(--border)'};
+                   background:${t.color||'var(--border)'}18;
+                   color:${t.color||'var(--text)'};font-weight:700;font-size:.82rem;
+                   display:flex;align-items:center;justify-content:center;gap:.25rem;
+                   transition:background .12s">
+            <span>${t.icon||''}</span><span>${_esc(t.label)}</span>
+          </button>`).join('')}
+      </div>
+      <div style="text-align:right;margin-top:.75rem">
+        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+      </div>
+    </div>`);
 }
 
 /** Retourne à la liste de sélection d'attaque sans annuler le combat. */

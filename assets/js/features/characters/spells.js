@@ -12,7 +12,7 @@ import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions } from '../
 import { getArmorSetData, getMainWeapon } from './data.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -22,6 +22,7 @@ let _sortsTypeFilter = '';
 let _sortsCatCollapsed = {};
 let _runeCountsEdit = {};
 let _sortAllowedNoyauIds = null;
+let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
@@ -481,7 +482,11 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     ${isOpen ? `<div class="cs-sort-expand">
       ${s.effet ? `<div class="cs-sort-expand-desc">${_nl2br(_esc(s.effet))}</div>` : ''}
       ${s.noyau || runesAll.length ? `<div class="cs-sort-expand-meta">
-        ${s.noyau ? `<span class="cs-sort-dl-label">Noyau</span><span>${_esc(s.noyau)}</span>` : ''}
+        ${(() => {
+          const nts = noyauTypesFor(s);
+          if (nts.length > 1) return `<span class="cs-sort-dl-label">Noyaux</span><span>${nts.map(t => `${t.icon||''} ${_esc(t.label)}`).join(' · ')}</span>`;
+          return s.noyau ? `<span class="cs-sort-dl-label">Noyau</span><span>${_esc(s.noyau)}</span>` : '';
+        })()}
         ${runesAll.length ? `<span class="cs-sort-dl-label" style="margin-left:.65rem">Runes (${runesAll.length})</span><span>${runesAll.join(' · ')}</span>` : ''}
       </div>` : ''}
       <div class="cs-sort-detail-effects">
@@ -886,6 +891,11 @@ export async function openSortModal(idx, s) {
     ? [...allowedNoyaux, { ...selectedNoyau, locked: true }]
     : allowedNoyaux;
   _sortAllowedNoyauIds = new Set(allowedNoyaux.map(n => n.id));
+  // Multi-noyau : liste ordonnée des éléments sélectionnés ([0] = primaire).
+  // Migration : noyauTypeIds (nouveau) → sinon le noyau unique migré ci-dessus.
+  _noyauIdsEdit = Array.isArray(s?.noyauTypeIds) && s.noyauTypeIds.length
+    ? s.noyauTypeIds.filter(Boolean)
+    : (noyauTypeIdSel ? [noyauTypeIdSel] : []);
 
   const noyauSel      = noyauTypeIdSel
     ? (selectedNoyau?.label || s?.noyau || '')
@@ -1002,10 +1012,10 @@ export async function openSortModal(idx, s) {
 
     <!-- ③ Noyau — section visuelle dédiée -->
     <div class="cs-spell-section cs-spell-section--noyau">
-      <div class="cs-spell-section-title">🌀 Rune noyau élémentaire <span class="cs-spell-section-hint">cœur du sort · 2 PM · obligatoire</span></div>
+      <div class="cs-spell-section-title">🌀 Rune noyau élémentaire <span class="cs-spell-section-hint">cœur du sort · 2 PM · obligatoire · 1 ou plusieurs éléments (coût identique, choix au lancement)</span></div>
       <div class="cs-noyau-grid" id="noyau-grid">
         ${NOYAUX.length ? NOYAUX.map(n => {
-          const selected = noyauTypeIdSel === n.id;
+          const selected = _noyauIdsEdit.includes(n.id);
           const locked = !!n.locked;
           const selectedStyle = selected ? `border-color:${n.color};background:${n.color}20;color:${n.color}` : '';
           const attrs = locked
@@ -2344,7 +2354,7 @@ function _buildSortFromDOM() {
   return {
     icon:        iconRaw.trim() || '',
     mjValidation: mjVal, mjValidated: mjVal === 'ok',
-    noyau, noyauTypeId, runes, types,
+    noyau, noyauTypeId, noyauTypeIds: [..._noyauIdsEdit], runes, types,
     degats: document.getElementById('s-degats')?.value || '',
     soin:   document.getElementById('s-soin')?.value || '',
     ca:     document.getElementById('s-ca')?.value || '',
@@ -2440,11 +2450,10 @@ function _setNoyauRequiredError(show, message = 'Sélectionne une rune noyau pou
 }
 
 function _requireNoyauSelection() {
-  const noyauTypeId = (document.getElementById('s-noyau-id')?.value || '').trim();
-  const noyauLabel  = (document.getElementById('s-noyau')?.value || '').trim();
   const allowedIds = _sortAllowedNoyauIds;
-  const hasNoyau = !!(noyauTypeId && noyauLabel);
-  const hasAccess = !allowedIds || allowedIds.has(noyauTypeId);
+  const ids = _noyauIdsEdit.filter(Boolean);
+  const hasNoyau = ids.length > 0;
+  const hasAccess = !allowedIds || ids.every(id => allowedIds.has(id));
   const valid = hasNoyau && hasAccess;
   const message = hasNoyau && !hasAccess
     ? "Ce noyau n'est pas accessible à ce personnage. Le MJ doit lui débloquer cet élément."
@@ -2458,23 +2467,32 @@ function _requireNoyauSelection() {
 }
 
 export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
-  document.querySelectorAll('.cs-noyau-btn').forEach(b => {
-    b.classList.remove('selected');
-    b.style.borderColor = '';
-    b.style.background  = '';
-    b.style.color       = '';
-  });
-  el.classList.add('selected');
-  if (noyauColor) {
+  // Multi-noyau : toggle de l'élément dans la sélection ([0] = primaire).
+  const i = _noyauIdsEdit.indexOf(noyauId);
+  if (i >= 0) _noyauIdsEdit.splice(i, 1);
+  else        _noyauIdsEdit.push(noyauId);
+  const on = _noyauIdsEdit.includes(noyauId);
+  el.classList.toggle('selected', on);
+  if (on && noyauColor) {
     el.style.borderColor = noyauColor;
     el.style.background  = noyauColor + '20';
     el.style.color       = noyauColor;
+  } else {
+    el.style.borderColor = '';
+    el.style.background  = '';
+    el.style.color       = '';
   }
+  // Primaire = premier sélectionné → conserve s-noyau / s-noyau-id pour la compat
+  // (calcul des soins, suggestions matrice, élément par défaut côté VTT).
+  const primId  = _noyauIdsEdit[0] || '';
+  const primBtn = primId ? document.querySelector(`.cs-noyau-btn[data-noyau-id="${primId}"]`) : null;
   const inputLabel = document.getElementById('s-noyau');
   const inputId    = document.getElementById('s-noyau-id');
-  if (inputLabel) inputLabel.value = noyauLabel || noyauId;
-  if (inputId)    inputId.value    = noyauId;
-  _setNoyauRequiredError(false);
+  if (inputId)    inputId.value    = primId;
+  if (inputLabel) inputLabel.value = primId
+    ? (primBtn?.getAttribute('data-noyau-label') || noyauLabel || primId)
+    : '';
+  _setNoyauRequiredError(_noyauIdsEdit.length === 0);
   // Le changement de noyau affecte le calcul des soins (magique → arme · physique → Con)
   // et les suggestions matrice (Enchant/Affliction · Protection CA)
   updateSortPM();
@@ -2532,6 +2550,7 @@ export async function saveSort(idx) {
       pmOverride,
       noyau,
       noyauTypeId,
+      noyauTypeIds: [..._noyauIdsEdit],
       runes,
       types,
       degats:   document.getElementById('s-degats')?.value||'',
