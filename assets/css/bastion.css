@@ -1541,3 +1541,67 @@
 }
 .bs-histo-row:hover .bs-histo-del { opacity: 0.85; }
 .bs-histo-del:hover { opacity: 1; color: #ff6b6b; background: rgba(239,68,68,0.12); }
+
+/* ─── Mur des annonces ─────────────────────────────────────────────── */
+.bs-annonce-compose {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.bs-annonce-types { display: flex; flex-wrap: wrap; gap: 6px; }
+.bs-annonce-type {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 0.74rem; font-weight: 700; cursor: pointer; font-family: inherit;
+  transition: background .14s, color .14s, border-color .14s;
+}
+.bs-annonce-type:hover { color: var(--text); }
+.bs-annonce-type.active {
+  color: var(--ac, var(--gold));
+  border-color: color-mix(in oklab, var(--ac, #4f8cff) 55%, transparent);
+  background: color-mix(in oklab, var(--ac, #4f8cff) 14%, transparent);
+}
+.bs-annonce-input {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 44px;
+  background: var(--bg-elevated, rgba(255,255,255,.03));
+  border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-family: inherit; font-size: 0.86rem; padding: 8px 10px;
+}
+.bs-annonce-input:focus { outline: none; border-color: rgba(232,184,75,.45); }
+.bs-annonce-compose-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bs-annonce-as { font-size: 0.72rem; color: var(--text-dim); }
+.bs-annonce-as strong { color: var(--text-muted); }
+
+.bs-annonce-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.bs-annonce {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-left: 3px solid var(--ac, var(--border));
+  border-radius: var(--r-lg); padding: 10px 12px;
+}
+.bs-annonce-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.bs-annonce-badge {
+  font-size: 0.66rem; font-weight: 800; padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+  color: var(--ac, var(--text));
+  background: color-mix(in oklab, var(--ac, #4f8cff) 14%, transparent);
+}
+.bs-annonce-author { font-size: 0.78rem; font-weight: 700; color: var(--text); }
+.bs-annonce-time { font-size: 0.68rem; color: var(--text-dim); }
+.bs-annonce-del {
+  margin-left: auto; flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 0.8rem; line-height: 1; padding: 2px 6px; border-radius: 5px;
+  opacity: 0.5; transition: opacity .12s, color .12s, background .12s;
+}
+.bs-annonce:hover .bs-annonce-del { opacity: 0.9; }
+.bs-annonce-del:hover { opacity: 1; color: #ff6b6b; background: rgba(239,68,68,0.12); }
+.bs-annonce-text {
+  font-size: 0.86rem; color: var(--text-soft, var(--text-muted)); line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+}
+.bs-annonce-empty { font-size: 0.82rem; color: var(--text-dim); font-style: italic; padding: 14px 2px; text-align: center; }
+
+[data-theme="light"] .bs-annonce,
+[data-theme="light"] .bs-annonce-compose { background: var(--bg-elevated); }

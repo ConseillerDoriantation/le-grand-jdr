@@ -191,6 +191,7 @@ function _defaultBastion() {
     salles: {},     // { [slug]: { niveau, builtAt, weeksLeftToBuild, targetNiveau } }
     coffre: [],     // [ { id, nom, quantite, emoji, source, weekAdded } ]
     historique: [], // last 30
+    annonces: [],   // mur des annonces : [ { id, uid, author, type, text, ts } ] — newest first
     createdAt: Date.now(),
   };
 }
@@ -2153,6 +2154,113 @@ async function _bastionDeleteHisto(idx) {
   await _save(b);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MUR DES ANNONCES — communication entre joueurs (messages, quêtes, offres, demandes)
+// ══════════════════════════════════════════════════════════════════════════════
+const _ANNONCE_TYPES = {
+  message: { icon: '💬', label: 'Message', color: '#4f8cff' },
+  quete:   { icon: '📜', label: 'Quête',   color: '#e8b84b' },
+  offre:   { icon: '🪙', label: 'Offre',   color: '#22c38e' },
+  demande: { icon: '🙏', label: 'Demande', color: '#b47fff' },
+};
+
+function _annonceAuthor() {
+  return STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || 'Anonyme';
+}
+
+function _annonceTimeAgo(ts) {
+  if (!ts) return '';
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "à l'instant";
+  const m = Math.floor(s / 60); if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60); if (h < 24) return `il y a ${h} h`;
+  const d = Math.floor(h / 24); if (d < 7) return `il y a ${d} j`;
+  return new Date(ts).toLocaleDateString('fr-FR');
+}
+
+function _renderAnnonces(b) {
+  const myUid = STATE.user?.uid;
+  const isMj = STATE.isAdmin;
+  const annonces = b.annonces || [];
+  const typeBtns = Object.entries(_ANNONCE_TYPES).map(([id, t], i) =>
+    `<button class="bs-annonce-type${i === 0 ? ' active' : ''}" style="--ac:${t.color}" data-action="_bastionSetAnnonceType" data-type="${id}">${t.icon} ${t.label}</button>`
+  ).join('');
+
+  const cards = annonces.map(a => {
+    const t = _ANNONCE_TYPES[a.type] || _ANNONCE_TYPES.message;
+    const canDel = (a.uid && a.uid === myUid) || isMj;
+    return `<article class="bs-annonce" style="--ac:${t.color}">
+      <div class="bs-annonce-hd">
+        <span class="bs-annonce-badge">${t.icon} ${t.label}</span>
+        <span class="bs-annonce-author">${_esc(a.author || 'Anonyme')}</span>
+        <span class="bs-annonce-time">${_annonceTimeAgo(a.ts)}</span>
+        ${canDel ? `<button class="bs-annonce-del" data-action="_bastionDeleteAnnonce" data-id="${a.id}" title="Supprimer cette annonce">✕</button>` : ''}
+      </div>
+      <div class="bs-annonce-text">${_esc(a.text || '')}</div>
+    </article>`;
+  }).join('');
+
+  return `
+    <section class="bs-section">
+      <div class="bs-section-hd">
+        <h2 class="bs-section-title">📌 Mur des annonces <span class="bs-section-count">${annonces.length}</span></h2>
+      </div>
+      <p class="bs-section-sub">Laisse un message, une quête, une offre ou une demande aux autres membres du Bastion.</p>
+      <div class="bs-annonce-compose">
+        <div class="bs-annonce-types">${typeBtns}</div>
+        <input type="hidden" id="bs-annonce-type" value="message">
+        <textarea id="bs-annonce-text" class="bs-annonce-input" rows="2" maxlength="500"
+          placeholder="Écris ton annonce…"></textarea>
+        <div class="bs-annonce-compose-foot">
+          <span class="bs-annonce-as">Publié en tant que <strong>${_esc(_annonceAuthor())}</strong></span>
+          <button class="btn btn-gold btn-sm" data-action="_bastionPostAnnonce">📌 Publier</button>
+        </div>
+      </div>
+      <div class="bs-annonce-list">
+        ${cards || '<div class="bs-annonce-empty">Aucune annonce pour l\'instant. Sois le premier à écrire sur le mur !</div>'}
+      </div>
+    </section>`;
+}
+
+// Sélection du type d'annonce dans le compositeur (sans re-render → préserve la saisie).
+function _bastionSetAnnonceType(btn) {
+  const inp = document.getElementById('bs-annonce-type');
+  if (inp) inp.value = btn.dataset.type || 'message';
+  document.querySelectorAll('.bs-annonce-type').forEach(el => el.classList.toggle('active', el === btn));
+}
+
+async function _bastionPostAnnonce() {
+  const ta = document.getElementById('bs-annonce-text');
+  const text = (ta?.value || '').trim();
+  if (!text) { showNotif('Écris quelque chose avant de publier.', 'error'); ta?.focus(); return; }
+  const type = document.getElementById('bs-annonce-type')?.value;
+  const b = JSON.parse(JSON.stringify(STORE.bastion || _defaultBastion()));
+  const entry = {
+    id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    uid: STATE.user?.uid || null,
+    author: _annonceAuthor(),
+    type: _ANNONCE_TYPES[type] ? type : 'message',
+    text: text.slice(0, 500),
+    ts: Date.now(),
+  };
+  b.annonces = [entry, ...(b.annonces || [])].slice(0, 40);   // mur borné : 40 dernières
+  await _save(b);
+  showNotif('📌 Annonce publiée.', 'success');
+}
+
+async function _bastionDeleteAnnonce(id) {
+  const b = JSON.parse(JSON.stringify(STORE.bastion || {}));
+  const a = (b.annonces || []).find(x => x.id === id);
+  if (!a) return;
+  // Seul l'auteur (ou le MJ) peut supprimer son annonce.
+  if (!(a.uid && a.uid === STATE.user?.uid) && !STATE.isAdmin) {
+    showNotif('Tu ne peux supprimer que tes propres annonces.', 'error');
+    return;
+  }
+  b.annonces = (b.annonces || []).filter(x => x.id !== id);
+  await _save(b);
+}
+
 function _renderPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
@@ -2162,6 +2270,7 @@ function _renderPage() {
       ${_renderHeader(b)}
       ${_renderGauges(b)}
       ${_renderBastionQuests(b)}
+      ${_renderAnnonces(b)}
       ${_renderRooms(b)}
       ${_renderCoffre(b)}
       ${_renderHistorique(b)}
@@ -2266,6 +2375,9 @@ registerActions({
   _bastionOpenQuestEditor:  (btn) => _bastionOpenQuestEditor(btn.dataset.id || undefined),
   _bastionToggleHisto:      () => _bastionToggleHisto(),
   _bastionDeleteHisto:      (btn) => _bastionDeleteHisto(Number(btn.dataset.idx)),
+  _bastionSetAnnonceType:   (btn) => _bastionSetAnnonceType(btn),
+  _bastionPostAnnonce:      () => _bastionPostAnnonce(),
+  _bastionDeleteAnnonce:    (btn) => _bastionDeleteAnnonce(btn.dataset.id),
 });
 
 // ── Exports legacy (pour ne pas casser pages.js ailleurs) ──────────────────
