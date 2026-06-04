@@ -28,6 +28,7 @@ let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édit
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
 let _invCfgIdx = -1;         // index (deck) du sort dont on configure l'invocation
+let _invOriginal = null;     // s.invocation du sort en cours d'édition (préserve sélection/legacy)
 let _sortIconPickerOutsideBound = false;
 
 export function sortDragStart(e, idx) {
@@ -167,6 +168,7 @@ export function renderCharDeck(c, canEdit) {
       </div>
       <div class="cs-sorts-actions">
         ${canEdit ? `<button class="btn btn-gold btn-sm" data-action="addSort" title="Créer un sort">＋ Sort</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openInvocationLibrary" title="Gérer mes invocations (créatures à invoquer)">🐾</button>` : ''}
         ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openSortCatEditor" title="Gérer les catégories">📂</button>` : ''}
         ${cats.length ? `<button class="btn btn-outline btn-sm" data-action="_sortsToggleAllCats" title="Plier/déplier toutes les catégories">⇕</button>` : ''}
       </div>
@@ -740,8 +742,8 @@ function _runeLiveContribution(nom, counts) {
       };
     case 'Invocation':
       return {
-        main:  `${cnt} créature${cnt>1?'s':''} liée${cnt>1?'s':''} · 10 PV · CA 10`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 invocation/rune (Invocation ×${cnt})` : null,
+        main:  `Invoque ${cnt} créature${cnt>1?'s':''} (1 par rune) — choix au lancement`,
+        chain: null,   // 1 rune = 1 invocation : pas de chaînage
       };
     case 'Concentration':
       return { main: 'Maintenu hors tour · JS Sa DD 11 si dégâts reçus', chain: null };
@@ -896,6 +898,7 @@ export async function openSortModal(idx, s) {
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _invImageEdit   = s?.invocation?.image || '';
   _invActionsEdit = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.map(a => ({ ...a })) : [];
+  _invOriginal    = (s?.invocation && typeof s.invocation === 'object') ? s.invocation : null;
 
   const hasEnchant  = runesSrc.includes('Enchantement');
   const hasProt     = runesSrc.includes('Protection');
@@ -1255,39 +1258,18 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
-    <!-- Invocation (rune Invocation seule) — stats éditables + image + actions -->
+    <!-- Invocation : choix d'invocations de la BIBLIOTHÈQUE (stats/actions créées à l'avance) -->
     <div id="s-invocation-section" class="cs-inv-section" style="${hasInvoc?'':'display:none'}">
       <div class="cs-inv-head">
         <span class="cs-inv-head-icon">🐾</span>
         <div class="cs-inv-head-text">
-          <div class="cs-inv-head-title">Créature invoquée</div>
-          <div class="cs-inv-head-sub">Stats dérivées des runes — laisse un champ vide pour l'auto</div>
+          <div class="cs-inv-head-title">Invocations</div>
+          <div class="cs-inv-head-sub">Crée tes créatures dans la bibliothèque, puis choisis lesquelles ce sort invoque (1 par rune Invocation) via le bouton 🐾 sur la carte du sort.</div>
         </div>
       </div>
-
-      <div class="cs-inv-body">
-        <div class="cs-inv-imgcol">
-          <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
-          <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
-        </div>
-        <div class="cs-inv-grid">
-          ${[
-            { id:'attaque',     ic:'⚔️', lbl:'Attaque',     type:'text',   val:_esc(ivStats.attaque||''),     ph:_esc(ivDerived.attaque) },
-            { id:'toucher',     ic:'🎯', lbl:'Toucher',     type:'number', val:(ivStats.toucher??''),         ph:ivDerived.toucher },
-            { id:'pv',          ic:'❤️', lbl:'PV',          type:'number', val:(ivStats.pv??''),              ph:ivDerived.pv },
-            { id:'ca',          ic:'🛡️', lbl:'CA',          type:'number', val:(ivStats.ca??''),              ph:ivDerived.ca },
-            { id:'deplacement', ic:'👢', lbl:'Déplacement', type:'number', val:(ivStats.deplacement??''),     ph:ivDerived.deplacement },
-            { id:'duree',       ic:'⏱️', lbl:'Durée',       type:'number', val:(ivStats.duree??''),           ph:ivDerived.duree },
-          ].map(f => `<label class="cs-inv-stat">
-            <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
-            <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
-          </label>`).join('')}
-        </div>
-      </div>
-
-      <div class="cs-inv-actions-wrap">
-        <div class="cs-inv-actions-hd">🎬 Actions de l'invocation</div>
-        <div id="s-inv-actions-list" class="cs-inv-actions">${_renderInvActionsList()}</div>
+      <div class="cs-inv-pick-row">
+        <button type="button" class="btn btn-outline btn-sm" data-action="openInvocationLibrary">🐾 Mes invocations</button>
+        <span class="cs-inv-pick-note">${(_invOriginal?.ids?.length) ? `${_invOriginal.ids.length} sélectionnée(s)` : (_invOriginal?.stats ? 'Invocation héritée (legacy) — re-sélectionne via 🐾' : 'Aucune sélectionnée')}</span>
       </div>
     </div>
 
@@ -1532,12 +1514,54 @@ function _invCfgSort() {
   const c = STATE.activeChar;
   return c ? (c.deck_sorts || [])[_invCfgIdx] : null;
 }
+// Bouton 🐾 de la carte du sort → SÉLECTEUR d'invocations de la bibliothèque.
 export function openInvocationConfig(idx) {
   const c = STATE.activeChar; if (!c) return;
   const s = (c.deck_sorts || [])[idx]; if (!s) return;
   _invCfgIdx = idx;
-  _itemEditCtx = null; // on n'est pas (encore) dans un éditeur de sort
-  openModal(`🐾 Invocation — ${_esc(s.nom || 'Sort')}`, _renderInvocationConfigBody());
+  _itemEditCtx = null;
+  openModal(`🐾 Invocations — ${_esc(s.nom || 'Sort')}`, _renderInvSelectBody());
+}
+function _invSelTitle() { const s = _invCfgSort(); return `🐾 Invocations — ${_esc(s?.nom || 'Sort')}`; }
+function _renderInvSelectBody() {
+  const s = _invCfgSort(); if (!s) return '<div style="padding:1rem">Sort introuvable.</div>';
+  const nbInv = (s.runes || []).filter(r => r === 'Invocation').length || 1;
+  const lib = _libInvs();
+  if (!s.invocation || typeof s.invocation !== 'object' || !Array.isArray(s.invocation.ids)) {
+    s.invocation = { ids: Array.isArray(s.invocation?.ids) ? s.invocation.ids : [] };
+  }
+  const sel = s.invocation.ids;
+  const selCount = sel.filter(id => lib.some(iv => iv.id === id)).length;
+  const cards = lib.map(iv => {
+    const on = sel.includes(iv.id);
+    const full = !on && selCount >= nbInv;
+    return `<button class="cs-invsel-card${on?' is-on':''}" data-action="_toggleInvSelect" data-id="${iv.id}" ${full?'disabled':''}>
+      <span class="cs-invsel-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '🐾'}</span>
+      <span class="cs-invsel-body"><span class="cs-invsel-name">${_esc(iv.nom || 'Invocation')}</span>
+      <span class="cs-invsel-stats">❤️ ${iv.stats?.pv ?? '?'} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque || '1d4 +2')}</span></span>
+      <span class="cs-invsel-check">${on ? '✓' : '+'}</span>
+    </button>`;
+  }).join('');
+  return `<div class="cs-invsel">
+    <div class="cs-invsel-hd">Choisis jusqu'à <b>${nbInv}</b> invocation${nbInv>1?'s':''} (1 par rune Invocation) — <b>${selCount}/${nbInv}</b> sélectionnée(s)</div>
+    ${lib.length ? `<div class="cs-invsel-list">${cards}</div>`
+      : `<div class="cs-invsel-empty">Aucune invocation en bibliothèque.<br><button class="btn btn-gold btn-sm" data-action="openInvocationLibrary" style="margin-top:.5rem">🐾 Créer une invocation</button></div>`}
+    <div class="cs-invsel-foot">
+      <button class="btn btn-outline btn-sm" data-action="openInvocationLibrary">🐾 Gérer la bibliothèque</button>
+      <button class="btn btn-gold" data-action="closeModalDirect">Terminé</button>
+    </div>
+  </div>`;
+}
+async function _toggleInvSelect(id) {
+  const c = STATE.activeChar; const s = _invCfgSort(); if (!s) return;
+  const nbInv = (s.runes || []).filter(r => r === 'Invocation').length || 1;
+  let ids = Array.isArray(s.invocation?.ids) ? [...s.invocation.ids] : [];
+  if (ids.includes(id)) ids = ids.filter(x => x !== id);
+  else { if (ids.length >= nbInv) return; ids.push(id); }
+  s.invocation = { ids };
+  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  updateModalContent(_invSelTitle(), _renderInvSelectBody());
+  _sortsRerender?.();
 }
 function _refreshInvocationConfig() {
   const s = _invCfgSort(); if (!s) return;
@@ -1695,19 +1719,204 @@ function _refreshInvocationDerived() {
   set('s-inv-attaque', d.attaque); set('s-inv-toucher', d.toucher); set('s-inv-pv', d.pv);
   set('s-inv-ca', d.ca); set('s-inv-deplacement', d.deplacement); set('s-inv-duree', d.duree);
 }
-// Reconstruit l'objet invocation depuis le DOM (null si pas de rune Invocation).
+// Invocation du sort = SÉLECTION d'invocations de la bibliothèque (édit via 🐾 sur
+// la carte). L'éditeur de sort ne fait que PRÉSERVER la sélection/legacy existante
+// (null si pas de rune Invocation).
 function _buildInvocationFromDOM() {
   if (!((_runeCountsEdit?.Invocation || 0) > 0)) return null;
-  const v   = id => { const x = (document.getElementById(id)?.value ?? '').trim(); return x === '' ? null : x; };
-  const num = id => { const x = v(id); if (x == null) return null; const n = parseInt(x); return Number.isFinite(n) ? n : null; };
+  if (_invOriginal && Array.isArray(_invOriginal.ids)) return { ids: [..._invOriginal.ids] };
+  // Rétro-compat : ancien sort avec invocation "inline" (stats/actions) → préservée telle quelle.
+  if (_invOriginal && _invOriginal.stats) return _invOriginal;
+  return { ids: [] };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BIBLIOTHÈQUE D'INVOCATIONS (par personnage : c.invocations[])
+// Chaque invocation = instance unique { id, nom, image, stats:{attaque,toucher,pv,
+// ca,deplacement,pmMax}, actions:[], currentHp, currentPm }. La rune Invocation
+// d'un sort en SÉLECTIONNE (≤ nbInv). Stats finales au lancement = base + bonus de
+// runes (_calcSummonStats, côté VTT). Les PV/PM courants persistent entre apparitions.
+// ══════════════════════════════════════════════════════════════════════════════
+let _libInvIdx = -1; // index de l'invocation de la bibliothèque en cours d'édition
+
+function _libInvs() { return Array.isArray(STATE.activeChar?.invocations) ? STATE.activeChar.invocations : []; }
+function _libInvCurrent() { return _libInvs()[_libInvIdx] || null; }
+function _invUuid() { return 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+async function _saveLibInvs() {
+  const c = STATE.activeChar; if (!c) return;
+  await trySave('characters', c.id, { invocations: c.invocations || [] });
+}
+
+// ── Manager : liste des invocations du perso ──────────────────────────────────
+export function openInvocationLibrary() {
+  const c = STATE.activeChar; if (!c) return;
+  if (!Array.isArray(c.invocations)) c.invocations = [];
+  _libInvIdx = -1;
+  openModal('🐾 Mes invocations', _renderInvLibraryBody());
+}
+function _refreshInvLibrary() { updateModalContent('🐾 Mes invocations', _renderInvLibraryBody()); }
+function _renderInvLibraryBody() {
+  const invs = _libInvs();
+  const cards = invs.map((iv, i) => {
+    const hpTxt = (iv.currentHp != null && iv.stats?.pv != null && iv.currentHp < parseInt(iv.stats.pv))
+      ? `${iv.currentHp}/${iv.stats.pv}` : (iv.stats?.pv ?? '?');
+    return `<div class="cs-invlib-card">
+      <div class="cs-invlib-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '<span>🐾</span>'}</div>
+      <div class="cs-invlib-info">
+        <div class="cs-invlib-name">${_esc(iv.nom || 'Invocation')}</div>
+        <div class="cs-invlib-stats">❤️ ${hpTxt} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque || '1d4 +2')}${(iv.actions||[]).length ? ` · 🎬 ${iv.actions.length}` : ''}</div>
+      </div>
+      <div class="cs-invlib-actions">
+        <button class="btn-icon" data-action="_editLibInv" data-idx="${i}" title="Modifier">✏️</button>
+        <button class="btn-icon" data-action="_deleteLibInv" data-idx="${i}" title="Supprimer">🗑️</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="cs-invlib">
+    <div class="cs-invlib-hint">Crée tes créatures à l'avance (stats, image, actions). Un sort à rune <b>Invocation</b> choisira ensuite laquelle/lesquelles invoquer (1 par rune). Chaque invocation garde ses PV/PM entre deux apparitions.</div>
+    <div class="cs-invlib-list">${cards || '<div class="cs-invlib-empty">Aucune invocation. Crée ta première créature.</div>'}</div>
+    <div class="cs-invlib-foot">
+      <button class="btn btn-gold" data-action="_editLibInv" data-idx="-1">＋ Nouvelle invocation</button>
+      <button class="btn btn-outline" data-action="closeModalDirect">Fermer</button>
+    </div>
+  </div>`;
+}
+
+// ── Éditeur d'une invocation de la bibliothèque ───────────────────────────────
+function _editLibInv(idx) {
+  const c = STATE.activeChar; if (!c) return;
+  if (!Array.isArray(c.invocations)) c.invocations = [];
+  if (idx < 0) {
+    c.invocations.push({ id: _invUuid(), nom: '', image: '', stats: { attaque:'1d4 +2', toucher:2, pv:10, ca:10, deplacement:3, pmMax:0 }, actions: [], currentHp: null, currentPm: null });
+    _libInvIdx = c.invocations.length - 1;
+  } else {
+    _libInvIdx = idx;
+  }
+  _invImageEdit = _libInvCurrent()?.image || '';
+  openModal('🐾 Invocation', _renderLibInvEditorBody());
+}
+function _refreshLibInvEditor() { updateModalContent('🐾 Invocation', _renderLibInvEditorBody()); }
+function _renderLibInvEditorBody() {
+  const iv = _libInvCurrent(); if (!iv) return '<div style="padding:1rem">Invocation introuvable.</div>';
+  const st = iv.stats || {};
+  const fields = [
+    { id:'attaque',     ic:'⚔️', lbl:'Attaque',     type:'text',   val:_esc(st.attaque ?? '1d4 +2'), ph:'1d4 +2' },
+    { id:'toucher',     ic:'🎯', lbl:'Toucher',     type:'number', val:(st.toucher ?? 2),  ph:'2' },
+    { id:'pv',          ic:'❤️', lbl:'PV',          type:'number', val:(st.pv ?? 10),      ph:'10' },
+    { id:'ca',          ic:'🛡️', lbl:'CA',          type:'number', val:(st.ca ?? 10),      ph:'10' },
+    { id:'deplacement', ic:'👢', lbl:'Déplacement', type:'number', val:(st.deplacement ?? 3), ph:'3' },
+    { id:'pmMax',       ic:'✦',  lbl:'PM',          type:'number', val:(st.pmMax ?? 0),    ph:'0' },
+  ];
+  const acts = Array.isArray(iv.actions) ? iv.actions : [];
+  const calcChar = _libInvCalcChar(iv);
+  return `<div class="cs-inv-section" style="display:block">
+    <div class="cs-inv-body">
+      <div class="cs-inv-imgcol">
+        <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
+        <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
+      </div>
+      <div class="cs-inv-grid">
+        <label class="cs-inv-stat" style="grid-column:1/-1">
+          <span class="cs-inv-stat-lbl">🐾 Nom</span>
+          <input class="cs-inv-stat-in" id="s-inv-nom" type="text" value="${_esc(iv.nom||'')}" placeholder="Nom de la créature">
+        </label>
+        ${fields.map(f => `<label class="cs-inv-stat">
+          <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
+          <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
+        </label>`).join('')}
+      </div>
+    </div>
+    <div class="cs-inv-actions-wrap">
+      <div class="inv-cfg-actions-hd">
+        <span>🎬 Actions de la créature</span>
+        <button class="btn btn-gold btn-sm" data-action="_libInvAddAction">＋ Nouvelle action</button>
+      </div>
+      <div class="inv-cfg-list">
+        ${acts.length ? acts.map((a, ai) => {
+          const _off = _getSortTypes(a).includes('offensif') || (a.runes||[]).includes('Lacération');
+          const _dmg = _off ? _calcSortDegats(a, calcChar) : '';
+          const _meta = [_dmg ? `🎲 ${_esc(_dmg)}` : '', (a.runes||[]).length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune', a.pm ? `${a.pm} PM` : ''].filter(Boolean).join(' · ');
+          return `<div class="inv-cfg-act">
+            <div class="inv-cfg-act-main" data-action="_libInvEditAction" data-aidx="${ai}">
+              <span class="inv-cfg-act-name">🎬 ${_esc(a.nom || 'Action')}</span>
+              <span class="inv-cfg-act-meta">${_meta}</span>
+            </div>
+            <button class="btn-icon" data-action="_libInvEditAction" data-aidx="${ai}" title="Modifier">✏️</button>
+            <button class="btn-icon" data-action="_libInvDeleteAction" data-aidx="${ai}" title="Supprimer">🗑️</button>
+          </div>`;
+        }).join('') : '<div class="inv-cfg-empty">Aucune action.</div>'}
+      </div>
+    </div>
+    <div class="inv-cfg-foot" style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button class="btn btn-outline" data-action="_libInvBack">← Bibliothèque</button>
+      <button class="btn btn-gold" data-action="_saveLibInv">💾 Enregistrer</button>
+    </div>
+  </div>`;
+}
+function _libInvCalcChar(iv) {
   return {
-    stats: {
-      attaque: v('s-inv-attaque'), toucher: num('s-inv-toucher'), pv: num('s-inv-pv'),
-      ca: num('s-inv-ca'), deplacement: num('s-inv-deplacement'), duree: num('s-inv-duree'),
-    },
-    image: document.getElementById('s-inv-image')?.value || _invImageEdit || '',
-    actions: Array.isArray(_invActionsEdit) ? _invActionsEdit : [],
+    id: '__invocationCalc', nom: iv?.nom ? `Créature (${iv.nom})` : 'Créature invoquée',
+    stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
+    statsBonus: {},
+    equipement: { 'Main principale': { nom: 'Attaque de la créature', degats: iv?.stats?.attaque || '1d4 +2', statAttaque:'force', toucherStat:'force', degatsStat:'force', portee:1, isDefault:true } },
+    maitrises: {}, sort_cats: [], deck_sorts: [], inventaire: [], elements: [],
   };
+}
+// Lit les champs DOM → stats de l'invocation courante (sans toucher aux actions).
+function _readLibInvStatsFromDOM() {
+  const iv = _libInvCurrent(); if (!iv) return;
+  const v = id => (document.getElementById(id)?.value ?? '').trim();
+  const num = id => { const n = parseInt(v(id)); return Number.isFinite(n) ? n : 0; };
+  iv.nom = v('s-inv-nom');
+  iv.image = _invImageEdit || document.getElementById('s-inv-image')?.value || '';
+  iv.stats = {
+    attaque: v('s-inv-attaque') || '1d4 +2', toucher: num('s-inv-toucher'), pv: num('s-inv-pv'),
+    ca: num('s-inv-ca') || 10, deplacement: num('s-inv-deplacement'), pmMax: num('s-inv-pmMax'),
+  };
+}
+async function _saveLibInv() {
+  const iv = _libInvCurrent(); if (!iv) return;
+  _readLibInvStatsFromDOM();
+  if (!iv.nom) { showNotif('Donne un nom à l\'invocation.', 'error'); return; }
+  await _saveLibInvs();
+  showNotif('Invocation enregistrée !', 'success');
+  openModal('🐾 Mes invocations', _renderInvLibraryBody());
+}
+function _libInvBack() {
+  _readLibInvStatsFromDOM();              // ne perd pas la saisie en cours
+  openModal('🐾 Mes invocations', _renderInvLibraryBody());
+}
+async function _deleteLibInv(idx) {
+  const c = STATE.activeChar; if (!c?.invocations) return;
+  if (!await confirmModal('Supprimer cette invocation ?')) return;
+  c.invocations.splice(idx, 1);
+  await _saveLibInvs();
+  _refreshInvLibrary();
+}
+// Actions de l'invocation (mini-sorts) — réutilise editItemSpell.
+function _libInvAddAction() {
+  _readLibInvStatsFromDOM();
+  const iv = _libInvCurrent(); if (!iv) return;
+  if (!Array.isArray(iv.actions)) iv.actions = [];
+  editItemSpell({ actions: iv.actions }, -1, _libInvOnActionSave, _libInvCalcChar(iv));
+}
+function _libInvEditAction(aidx) {
+  _readLibInvStatsFromDOM();
+  const iv = _libInvCurrent(); if (!iv?.actions) return;
+  editItemSpell({ actions: iv.actions }, parseInt(aidx), _libInvOnActionSave, _libInvCalcChar(iv));
+}
+async function _libInvOnActionSave(holder) {
+  const iv = _libInvCurrent(); if (!iv) return;
+  iv.actions = holder.actions;
+  await _saveLibInvs();
+  _refreshLibInvEditor();
+}
+async function _libInvDeleteAction(aidx) {
+  const iv = _libInvCurrent(); if (!iv?.actions) return;
+  if (!await confirmModal('Supprimer cette action ?')) return;
+  iv.actions.splice(parseInt(aidx), 1);
+  await _saveLibInvs();
+  _refreshLibInvEditor();
 }
 
 function _selectDeplMode(mode) {
@@ -2545,4 +2754,14 @@ registerActions({
   _invCfgAddAction:       ()    => _invCfgAddAction(),
   _invCfgEditAction:      (btn) => _invCfgEditAction(btn.dataset.aidx),
   _invCfgDeleteAction:    (btn) => _invCfgDeleteAction(btn.dataset.aidx),
+  // Bibliothèque d'invocations + sélecteur
+  openInvocationLibrary:  ()    => openInvocationLibrary(),
+  _editLibInv:            (btn) => _editLibInv(Number(btn.dataset.idx)),
+  _deleteLibInv:          (btn) => _deleteLibInv(Number(btn.dataset.idx)),
+  _saveLibInv:            ()    => _saveLibInv(),
+  _libInvBack:            ()    => _libInvBack(),
+  _libInvAddAction:       ()    => _libInvAddAction(),
+  _libInvEditAction:      (btn) => _libInvEditAction(btn.dataset.aidx),
+  _libInvDeleteAction:    (btn) => _libInvDeleteAction(btn.dataset.aidx),
+  _toggleInvSelect:       (btn) => _toggleInvSelect(btn.dataset.id),
 });

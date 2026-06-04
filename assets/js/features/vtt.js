@@ -32,7 +32,7 @@ import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
 } from './vtt-fog.js';
-import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal, updateModalContent } from '../shared/modal.js';
 import { _esc, _searchIncludes, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
@@ -696,7 +696,7 @@ async function _vttTriggerConcentrationSave(td, damageAmount) {
       const summonsToKill = Object.values(_tokens).filter(e =>
         e?.data?.summonOwnerId === (cb.casterId || td.id) && e?.data?.summonCanalise
       );
-      for (const s of summonsToKill) await deleteDoc(_tokRef(s.data.id)).catch(() => {});
+      for (const s of summonsToKill) { await _persistInvocationState(s.data); await deleteDoc(_tokRef(s.data.id)).catch(() => {}); }
     }
   }
   if (removed.length) {
@@ -2382,25 +2382,39 @@ function _vttSpellMods(s) {
     // Canalisé persistant : Durée + Concentration → durée liée à la concentration
     canalisePersistant: (nbDur > 0 && nbConc > 0)
       ? { graceTurns: nbDur + 1, dd: 11 + 2 * (nbConc - 1) } : null,
-    // Invocation générique : créature liée (hors combos Sentinelle/Arme invoquée).
-    // Stats dérivées des runes, surchargeables via s.invocation.stats.
-    // (Barème = miroir de _calcInvocationStats côté fiche perso.)
+    // Invocation (hors combos Sentinelle/Arme invoquée). NOUVEAU modèle : la rune
+    // Invocation SÉLECTIONNE des invocations de la bibliothèque du lanceur
+    // (s.invocation.ids), 1 par rune. Stats finales = base (lib) + bonus de runes,
+    // résolues au SPAWN (_vttSpawnSummon, qui a le perso lanceur). Le nombre n'est
+    // plus piloté par Dispersion. Rétro-compat : s.invocation.stats sans ids =
+    // ancienne invocation "inline" (ou défaut dérivé si rien).
     invocation: (nbInv > 0 && nbAff === 0 && nbEnch === 0)
       ? (() => {
+          // Les créatures sont CHOISIES au lancement dans le VTT (versatilité).
+          // defaultIds = pré-sélection éventuelle du sort (carte 🐾), pré-cochée.
+          const defaultIds = Array.isArray(s.invocation?.ids) ? s.invocation.ids.filter(Boolean) : [];
           const ov  = s.invocation?.stats || {};
           const has = v => v !== undefined && v !== null && v !== '';
+          // Legacy : ancien sort sans bibliothèque (stats inline ou défaut dérivé).
+          const legacy = {
+            attaque:     has(ov.attaque)     ? String(ov.attaque)     : `${1 + nbP}d4 +2`,
+            toucher:     has(ov.toucher)     ? parseInt(ov.toucher)     : (2 + 2 * nbCh),
+            pv:          has(ov.pv)          ? parseInt(ov.pv)          : (10 + 5 * nbProt),
+            ca:          has(ov.ca)          ? parseInt(ov.ca)          : 10,
+            deplacement: has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp),
+            image:       s.invocation?.image || null,
+            actions:     Array.isArray(s.invocation?.actions) ? s.invocation.actions : [],
+            name:        s.nom || 'Invocation',
+          };
           return {
-            attaque:      has(ov.attaque)     ? String(ov.attaque)     : `${1 + nbP}d4 +2`,
-            toucher:      has(ov.toucher)     ? parseInt(ov.toucher)     : (2 + 2 * nbCh),
-            pv:           has(ov.pv)          ? parseInt(ov.pv)          : (10 + 5 * nbProt),
-            ca:           has(ov.ca)          ? parseInt(ov.ca)          : 10,
-            deplacement:  has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp),
-            duree:        has(ov.duree)       ? parseInt(ov.duree)       : (2 + 2 * nbDur),
+            maxInvocations: nbInv,                          // 1 par rune Invocation
+            defaultIds,
+            elementId: s.noyauTypeId || null,               // élément du noyau → attaque de base de l'invocation
+            legacy,
+            bonuses:      { nbP, nbCh, nbProt, nbAmp },     // base + bonus appliqué au spawn (stats de base UNIQUEMENT, pas les actions)
             concentration: nbConc > 0,
-            image:        s.invocation?.image || null,
-            actions:      Array.isArray(s.invocation?.actions) ? s.invocation.actions : [],
-            name:         s.nom || 'Invocation',
-            nbInvocations: nbDisp > 0 ? 2 * nbDisp : 1,
+            duree:        2 + 2 * nbDur,
+            nbInvocations: 1,                               // fallback (placement legacy 1×) — écrasé par la sélection au lancement
           };
         })() : null,
   };
@@ -2588,6 +2602,79 @@ function _showSelfHud() {
   document.body.appendChild(hud);
 }
 
+// ── Sélecteur d'invocations AU LANCEMENT (versatilité : on choisit dans le VTT) ──
+let _invPickState = null;  // { srcId, tgtId, opt, optIdx, lib, max, ids:Set }
+function _vttPickInvocations(srcId, tgtId, opt, optIdx) {
+  const src = _tokens[srcId]?.data;
+  const c = src?.characterId ? _characters[src.characterId] : null;
+  const lib = Array.isArray(c?.invocations) ? c.invocations : [];
+  const max = opt?.mods?.invocation?.maxInvocations || 1;
+  if (!lib.length) {
+    // Pas de bibliothèque → invocation générique (legacy) 1×, sans sélecteur.
+    opt._invSelIds = null; opt._invSelDone = true;
+    _startZonePlacement(srcId, tgtId, opt, optIdx);
+    return;
+  }
+  const defaults = (opt?.mods?.invocation?.defaultIds || []).filter(id => lib.some(iv => iv.id === id)).slice(0, max);
+  _invPickState = { srcId, tgtId, opt, optIdx, lib, max, ids: new Set(defaults) };
+  openModal('🐾 Invoquer', _renderInvPickBody());
+}
+function _renderInvPickBody() {
+  const st = _invPickState; if (!st) return '';
+  const sel = st.ids;
+  const cards = st.lib.map(iv => {
+    const on = sel.has(iv.id);
+    const full = !on && sel.size >= st.max;
+    const hp = (iv.currentHp != null && iv.stats?.pv != null && parseInt(iv.currentHp) < parseInt(iv.stats.pv)) ? `${iv.currentHp}/${iv.stats.pv}` : (iv.stats?.pv ?? '?');
+    return `<button class="cs-invsel-card${on?' is-on':''}" data-vtt-fn="_invPickToggle" data-vtt-args="${iv.id}" ${full?'disabled':''}>
+      <span class="cs-invsel-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '🐾'}</span>
+      <span class="cs-invsel-body"><span class="cs-invsel-name">${_esc(iv.nom||'Invocation')}</span>
+      <span class="cs-invsel-stats">❤️ ${hp} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque||'1d4 +2')}</span></span>
+      <span class="cs-invsel-check">${on?'✓':'+'}</span>
+    </button>`;
+  }).join('');
+  return `<div class="cs-invsel">
+    <div class="cs-invsel-hd">Choisis jusqu'à <b>${st.max}</b> invocation(s) — <b>${sel.size}/${st.max}</b></div>
+    <div class="cs-invsel-list">${cards}</div>
+    <div class="cs-invsel-foot">
+      <button class="btn btn-outline btn-sm" data-vtt-fn="_invPickCancel">Annuler</button>
+      <button class="btn btn-gold" data-vtt-fn="_invPickConfirm" ${sel.size?'':'disabled'}>🐾 Invoquer (${sel.size})</button>
+    </div>
+  </div>`;
+}
+function _invPickToggle(id) {
+  const st = _invPickState; if (!st) return;
+  if (st.ids.has(id)) st.ids.delete(id);
+  else if (st.ids.size < st.max) st.ids.add(id);
+  updateModalContent('🐾 Invoquer', _renderInvPickBody());
+}
+function _invPickConfirm() {
+  const st = _invPickState; if (!st || !st.ids.size) return;
+  const { srcId, tgtId, opt, optIdx } = st;
+  opt._invSelIds = [...st.ids];
+  opt._invSelDone = true;
+  _invPickState = null;
+  closeModalDirect();
+  _startZonePlacement(srcId, tgtId, opt, optIdx);
+}
+function _invPickCancel() { _invPickState = null; closeModalDirect(); }
+
+// Avant de désinvoquer un token d'invocation : sauvegarde ses PV/PM courants sur
+// l'entrée de bibliothèque du lanceur (instance unique → réapparaît avec son état).
+// Best-effort (écriture autorisée surtout pour le propriétaire / le MJ).
+async function _persistInvocationState(tokData) {
+  try {
+    const t = (tokData?.id && _tokens[tokData.id]?.data) ? _tokens[tokData.id].data : tokData;
+    if (!t || t.summonKind !== 'invocation' || !t.summonInvId) return;
+    const charId = t.summonOwnerCharId; if (!charId) return;
+    const c = _characters[charId]; if (!c || !Array.isArray(c.invocations)) return;
+    const inv = c.invocations.find(iv => iv.id === t.summonInvId); if (!inv) return;
+    inv.currentHp = Math.max(0, parseInt(t.hp ?? inv.currentHp ?? inv.stats?.pv) || 0);
+    inv.currentPm = Math.max(0, parseInt(t.pm ?? inv.currentPm ?? inv.stats?.pmMax) || 0);
+    await updateDoc(_chrRef(charId), { invocations: c.invocations });
+  } catch (_) { /* non bloquant */ }
+}
+
 /**
  * Crée un token "convoqué" (sentinelle, arme invoquée, etc.) sur la page active.
  * - kind: 'sentinelle' | 'arme_invoquee'
@@ -2606,32 +2693,76 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
   const targetCol = Math.max(0, Math.min(_activePage.cols - 1, col));
   const targetRow = Math.max(0, Math.min(_activePage.rows - 1, row));
 
-  // ── Invocation générique : créature avec image + stats propres ──────
+  // ── Invocation : résout la N-ième invocation choisie sur la bibliothèque du
+  //    lanceur, applique base + bonus de runes, et RESTAURE les PV/PM persistants. ──
   if (kind === 'invocation') {
-    const iv = opt?.mods?.invocation || {};
-    const hp = parseInt(iv.pv) || 10;
+    const mod = opt?.mods?.invocation || {};
+    const idx = _zoneCtx?.invocationsDone || 0;   // quelle invocation on pose (0-based)
+    const selIds = opt._invSelIds || null;        // créatures choisies au lancement
+    let name = 'Invocation', image = null, actions = [], summonInvId = null;
+    let attaque = '1d4', toucher = 0, pvMax = 10, ca = 10, deplacement = 0, pmMax = 0;
+    let baseAttackUnscaled = '1d4';   // attaque de base NON scalée → sert aux ACTIONS (runes du sort n'y touchent pas)
+    let restoreHp = null, restorePm = null;
+
+    if (selIds && selIds.length) {
+      const c = src.characterId ? _characters[src.characterId] : null;
+      const invDef = (c?.invocations || []).find(iv => iv.id === selIds[idx])
+                  || (c?.invocations || []).find(iv => selIds.includes(iv.id));
+      if (!invDef) return null;   // invocation supprimée de la bibliothèque
+      const base = invDef.stats || {};
+      const b = mod.bonuses || {};
+      // Base + bonus (miroir de _calcSummonStats) — UNIQUEMENT sur les stats de base.
+      baseAttackUnscaled = String(base.attaque || '1d4 +2');   // les ACTIONS calculent à partir de ÇA (non scalé)
+      attaque = baseAttackUnscaled;
+      if (b.nbP > 0) { const m = attaque.match(/^(\d+)(d\d+)(.*)$/i); attaque = m ? `${parseInt(m[1]) + b.nbP}${m[2]}${m[3]}` : `${attaque} +${b.nbP}d6`; }
+      toucher     = (parseInt(base.toucher) || 0) + 2 * (b.nbCh || 0);
+      pvMax       = (parseInt(base.pv) || 10) + 5 * (b.nbProt || 0);
+      ca          = parseInt(base.ca) || 10;
+      deplacement = (parseInt(base.deplacement) || 0) + 3 * (b.nbAmp || 0);
+      pmMax       = parseInt(base.pmMax) || 0;
+      name        = invDef.nom || 'Invocation';
+      image       = invDef.image || null;
+      actions     = Array.isArray(invDef.actions) ? invDef.actions : [];
+      summonInvId = invDef.id;
+      restoreHp   = (invDef.currentHp != null) ? parseInt(invDef.currentHp) : null;
+      restorePm   = (invDef.currentPm != null) ? parseInt(invDef.currentPm) : null;
+    } else {
+      const iv = mod.legacy || {};
+      attaque = iv.attaque || '1d4'; baseAttackUnscaled = attaque; toucher = parseInt(iv.toucher) || 0;
+      pvMax = parseInt(iv.pv) || 10; ca = parseInt(iv.ca) || 10;
+      deplacement = parseInt(iv.deplacement) || 0;
+      name = iv.name || 'Invocation'; image = iv.image || null;
+      actions = Array.isArray(iv.actions) ? iv.actions : [];
+    }
+
+    const hp = (restoreHp != null) ? Math.max(0, Math.min(restoreHp, pvMax)) : pvMax;
+    const pm = (restorePm != null) ? Math.max(0, Math.min(restorePm, pmMax)) : pmMax;
     const tokenData = {
-      name: `🐾 ${iv.name || 'Invocation'} de ${ownerName}`,
+      name: `🐾 ${name} de ${ownerName}`,
       type: 'npc',
       characterId: null, npcId: null, beastId: null,
       ownerId: src.characterId ? STATE.user?.uid || null : null,
       summonOwnerId: srcId,
+      summonOwnerCharId: src.characterId || null,
       summonKind: 'invocation',
-      summonExpiresAtRound: iv.concentration ? null : baseRound + durationTurns - 1,
-      summonCanalise: !!iv.concentration,
+      summonInvId,
+      summonExpiresAtRound: mod.concentration ? null : baseRound + durationTurns - 1,
+      summonCanalise: !!mod.concentration,
       summonConcentrationDD: opt?.mods?.concentration?.dd || null,
       summonChanceRc: opt?.mods?.chance?.rc ?? 20,
-      summonActions: Array.isArray(iv.actions) ? iv.actions : [],
+      summonActions: actions,
+      summonElementId: mod.elementId || null,   // attaque de base = élément du sort d'invocation
       pageId: _activePage.id,
       col: targetCol, row: targetRow,
       visible: true,
-      hp, hpMax: hp,
-      defense: parseInt(iv.ca) || 10,
-      movement: parseInt(iv.deplacement) || 0,
+      hp, hpMax: pvMax, pm, pmMax,
+      defense: ca,
+      movement: deplacement,
       range: 1,
-      attackDice: iv.attaque || '1d4',
-      attack: parseInt(iv.toucher) || 0,
-      imageUrl: iv.image || null,
+      attackDice: attaque,
+      summonBaseAttack: baseAttackUnscaled,   // base NON scalée pour le calcul des actions
+      attack: toucher,
+      imageUrl: image,
       movedThisTurn: false, attackedThisTurn: false,
       createdAt: serverTimestamp(),
     };
@@ -3198,7 +3329,12 @@ function _buildAttackOptions(t) {
       dmgStatLabel: '—',
       maitriseBonus: 0,
       halfOnMiss: false,
-      typeRules: getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'),
+      // Invocation : attaque de base de l'élément du sort, mais AUCUN dégât sur un
+      // échec (on neutralise le missEffect 'half'/'full' du type). La sentinelle
+      // garde le comportement du type.
+      typeRules: _isInvoc
+        ? { ...getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'), missEffect: 'none' }
+        : getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'),
       damageTypeId:    t.summonElementId || 'physique',
       damageTypeIcon:  getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.icon || '',
       damageTypeColor: getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.color || '',
@@ -3212,7 +3348,7 @@ function _buildAttackOptions(t) {
       const _cChar = {
         stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
         statsBonus: {}, maitrises: {},
-        equipement: { 'Main principale': { nom: 'Attaque', degats: t.attackDice || '1d4', statAttaque: 'force', isDefault: true } },
+        equipement: { 'Main principale': { nom: 'Attaque', degats: t.summonBaseAttack || t.attackDice || '1d4', statAttaque: 'force', isDefault: true } },
       };
       // L'invocation profite du SET du lanceur : le set léger (spellPmDelta -2)
       // réduit le coût en mana de ses sorts (payés par le lanceur).
@@ -4781,12 +4917,20 @@ function _showZoneHud() {
 
 /** Entre en mode placement de zone pour un sort AoE. */
 function _startZonePlacement(srcId, tgtId, opt, optIdx) {
+  // Invocation : on choisit d'abord les créatures (sélecteur au lancement), puis on
+  // place. La sélection (opt._invSelIds) pilote le nombre de placements.
+  if (opt?.mods?.invocation && !opt._invSelDone) {
+    _vttPickInvocations(srcId, tgtId, opt, optIdx);
+    return;
+  }
   _zoneClear();
   _mtCtx = null; // annuler multi-cibles sans broadcast (zone prend la main)
   const wPx = opt.zoneW * CELL;  // zoneW/H = nombre de cases
   const hPx = opt.zoneH * CELL;
-  // Sort d'invocation avec Dispersion : N placements successifs
-  const nbInvoc = opt?.mods?.sentinelle?.nbInvocations || opt?.mods?.invocation?.nbInvocations || 1;
+  // Nombre de placements : invocations choisies au lancement, sinon sentinelle (Dispersion) / 1.
+  const nbInvoc = (opt._invSelIds && opt._invSelIds.length)
+    ? opt._invSelIds.length
+    : (opt?.mods?.sentinelle?.nbInvocations || opt?.mods?.invocation?.nbInvocations || 1);
   _zoneCtx = {
     srcId, tgtId, opt, optIdx, wPx, hPx, x: 0, y: 0, placed: false,
     invocationsTotal: nbInvoc,
@@ -9396,6 +9540,7 @@ async function _vttRetireToken(tokenId) {
       if (count > 1) { isDuplicate = true; break; }
     }
   }
+  await _persistInvocationState(t);   // sauvegarde PV/PM si c'est une invocation
   if (isDuplicate) {
     await deleteDoc(_tokRef(tokenId)).catch(()=>{});
   } else {
@@ -10560,7 +10705,8 @@ async function _vttNextRound() {
     // Les summons canalisés (summonCanalise: true) persistent tant que la
     // concentration tient — supprimés via le JS Sa raté.
     if (tokData.summonExpiresAtRound != null && !tokData.summonCanalise && round > tokData.summonExpiresAtRound) {
-      expiredNotifs.push(`${tokData.summonKind === 'sentinelle' ? '🪤' : '⚔️'} ${tokData.name} dissipé`);
+      expiredNotifs.push(`${tokData.summonKind === 'invocation' ? '🐾' : tokData.summonKind === 'sentinelle' ? '🪤' : '⚔️'} ${tokData.name} dissipé`);
+      _persistInvocationState(tokData);   // PV/PM persistants avant dissipation (invocations)
       b.delete(_tokRef(id));
       return; // skip buff cleanup pour token supprimé
     }
@@ -13416,6 +13562,9 @@ PAGES.vtt=renderVttPage;
 
 // Registre des actions pour le dispatcher data-vtt-fn
 const VTT_ACTIONS = {
+  _invPickToggle,
+  _invPickConfirm,
+  _invPickCancel,
   _vttAiderClose,
   _vttAider,
   _vttSelfActionClose,
