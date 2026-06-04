@@ -10174,7 +10174,7 @@ input[type=number].input-field::-webkit-outer-spin-button {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 12px;
-  align-items: start;
+  align-items: stretch;   /* cartes d'une même rangée à hauteur égale */
 }
 
 .cs-v3 .cs-spellcard {
@@ -10285,10 +10285,11 @@ input[type=number].input-field::-webkit-outer-spin-button {
 }
 .cs-v3 .cs-spellcard-detail .cs-sort-detail-effects { margin: 0; }
 
-/* Pied de carte */
+/* Pied de carte — pousse en bas pour aligner les pieds (hauteurs egales) */
 .cs-v3 .cs-spellcard-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-top: 1px;
+  margin-top: auto;
+  padding-top: 2px;
 }
 .cs-v3 .cs-spellcard-detailbtn {
   border: none; background: transparent; cursor: pointer;

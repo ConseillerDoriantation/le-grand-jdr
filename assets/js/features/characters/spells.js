@@ -108,6 +108,9 @@ export function bindSortCardsDnd(c, canEdit) {
       group: 'cs-spell-cards',
       draggable: '.cs-spellcard',
       delay: 80,
+      // Le clone de drag doit rester DANS .cs-v3 (sinon le CSS scopé .cs-v3 ne
+      // s'applique pas → rendu brut empilé). Donc pas de clone sur <body>.
+      fallbackOnBody: false,
       onEnd: async () => {
         const wrap = document.getElementById('cs-sort-cats-wrap');
         if (!wrap) return;

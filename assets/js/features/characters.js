@@ -606,6 +606,8 @@ function _bindSortsCatDrag(c, canEdit) {
     handle: '.cs-sort-cat-drag',
     draggable: '.cs-sort-cat-block:not(.is-default)',
     delay: 80,
+    // Garde le clone de drag dans .cs-v3 (CSS scopé) → rendu correct pendant le drag.
+    fallbackOnBody: false,
     onEnd: async () => {
       // Reconstitue l'ordre des cat IDs depuis le DOM (en excluant le bloc __none)
       const newOrderIds = [...wrap.querySelectorAll('.cs-sort-cat-block:not(.is-default)')]
