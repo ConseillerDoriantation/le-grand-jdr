@@ -1609,7 +1609,7 @@ async function openStoryDetail(id) {
               </header>
               ${membres.length ? `<div class="mv-group-members">
                 ${membres.map(c => `<div class="mv-group-member">
-                  ${avatar(c, 38)}
+                  ${avatar(c, 28)}
                   <span class="mv-group-member-name">${_esc(c.nom || '')}</span>
                 </div>`).join('')}
               </div>` : `<div class="mv-empty-small">Aucun membre rattaché.</div>`}
