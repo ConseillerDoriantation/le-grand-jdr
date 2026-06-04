@@ -858,9 +858,10 @@ function _commitProfilTags() {
   pres.tags   = tags;
   // Persistance immédiate (merge : crée le doc au besoin, préserve content/options).
   const docId = pres.id || charId;
+  console.log('[DIAG tags] commit → charId=', charId, '| docId=', docId, '| path=', `players (scope auto)`, '| tags=', JSON.stringify(tags), '| uid=', STATE.user?.uid);
   saveDoc('players', docId, { charId, uid: STATE.user?.uid || '', tags })
-    .then(() => { pres.id = docId; })
-    .catch(e => { console.error('[profil tags] save', e); showNotif('Erreur d\'enregistrement du trait.', 'error'); });
+    .then(() => { pres.id = docId; console.log('[DIAG tags] saveDoc OK → docId=', docId); })
+    .catch(e => { console.error('[DIAG tags] saveDoc FAIL', e?.code || e, e); showNotif('Erreur d\'enregistrement du trait.', 'error'); });
 }
 
 export function addProfilTag(value) {
@@ -925,6 +926,7 @@ export function renderCharProfil(c, canEdit) {
 async function _loadAndRenderProfil(c, canEdit) {
   try {
     const docs = await loadCollectionWhere('players', 'charId', '==', c.id);
+    console.log('[DIAG tags] load charId=', c.id, '| docs=', docs.length, '| tags=', JSON.stringify(docs.map(d => ({ id: d.id, tags: d.tags }))));
     _profilCache[c.id] = docs[0] || null;
   } catch { _profilCache[c.id] = null; }
   if (charSession.getCurrentCharTab() === 'profil' && charSession.getCurrentChar()?.id === c.id)
