@@ -1068,7 +1068,16 @@ function _mountBestiarySortable() {
 // (cache → serveur, hydratation → 1er fire) ne reconstruit pas le DOM et
 // les cartes ne clignotent pas.
 let _bstRenderSig = '';
-function _bstSig() { return JSON.stringify({ c: STORE.creatures, t: STORE.tracker }); }
+// Sérialisation stable (clés triées récursivement) : Firestore renvoie les clés
+// de map triées alphabétiquement alors que l'objet local est en ordre d'insertion.
+// Sans ça, l'écho d'une écriture créant de nouvelles clés (1re estimation saisie)
+// produirait une signature différente → _render() inutile → scroll qui remonte.
+function _stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(_stableStringify).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _stableStringify(v[k])).join(',') + '}';
+}
+function _bstSig() { return JSON.stringify(STORE.creatures) + '|' + _stableStringify(STORE.tracker); }
 
 // Évite d'écraser une édition admin en cours : la fiche du panneau a des
 // inputs/textarea avec auto-save debouncé (_bstQueueSave 400ms). Si on
@@ -1111,8 +1120,20 @@ async function _bstCreateDraft() {
   } catch (e) { notifySaveError(e); }
 };
 
+let _bstRenderedActiveId = null;
+
 function _render() {
   const content = document.getElementById('main-content');
+
+  // Préserve le scroll quand on re-rend le MÊME panneau ouvert (ex. saisie d'une
+  // estimation → write tracker → echo du watch → _render). Sans ça, le rebuild
+  // innerHTML remet le panneau (et la page) tout en haut à chaque blur d'input.
+  // main-content scrolle sur mobile (overflow auto), la fenêtre scrolle sur desktop :
+  // on capture les deux, on restaure les deux (la valeur nulle est sans effet).
+  const sameActive    = STORE.activeId && STORE.activeId === _bstRenderedActiveId;
+  const prevSlotTop   = sameActive ? (content.querySelector('.bst-panel-slot')?.scrollTop || 0) : 0;
+  const prevContentTop= sameActive ? (content.scrollTop || 0) : 0;
+  const prevWinTop    = sameActive ? (window.scrollY || 0) : 0;
 
   const allTypes = [...new Set(STORE.creatures.map(c => c.type||'').filter(Boolean))].sort();
   const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
@@ -1223,6 +1244,15 @@ function _render() {
   </div>`;
 
   _mountBestiarySortable();
+
+  // Restaure le scroll préservé (cf. plus haut).
+  if (sameActive) {
+    const slot = content.querySelector('.bst-panel-slot');
+    if (slot && prevSlotTop) slot.scrollTop = prevSlotTop;
+    if (prevContentTop) content.scrollTop = prevContentTop;
+    if (prevWinTop) window.scrollTo(0, prevWinTop);
+  }
+  _bstRenderedActiveId = STORE.activeId;
   _bstRenderSig = _bstSig();
 }
 
@@ -1441,10 +1471,13 @@ function _renderPanel(c) {
   // ── Butin estimé (Joueur) : objets supposés + nombre ──────────────────────
   // Le joueur ne voit pas les butins réels (MJ uniquement). Il note ce qu'il
   // pense pouvoir récupérer. Lignes dynamiques : autant que de lignes remplies + 1.
+  // Lignes vides d'avance (≥4, et au moins 2 sous la dernière remplie) : l'édition
+  // ne re-rend pas le panneau (cf. _saveTracker), le compte est donc figé jusqu'à
+  // réouverture de la fiche — on prévoit de la marge pour saisir plusieurs butins.
   const _lootRows = (() => {
     let n = 0;
     for (let i = 0; i < 40; i++) if (ded[`but_nom_${i}`] || ded[`but_qte_${i}`]) n = i + 1;
-    return n + 1;
+    return Math.max(n + 2, 4);
   })();
   const butinJoueurHtml = !_isAdminView() ? `
     <div class="bst-section">
@@ -1452,10 +1485,14 @@ function _renderPanel(c) {
         <span class="bst-section-count">supposé</span>
       </div>
       ${Array.from({ length: _lootRows }, (_, i) => {
-        const a = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="but_${suffix}_${i}"`;
-        return `<div class="bst-loot-est">
+        const a = (suffix) => `data-bst-action="setLoot" data-bst-on="change" data-id="${c.id}" data-idx="${i}" data-key="but_${suffix}_${i}"`;
+        const filled = ded[`but_nom_${i}`] || ded[`but_qte_${i}`];
+        return `<div class="bst-loot-est" data-loot-cid="${c.id}" data-loot-idx="${i}">
           <input class="bst-deduct-input" placeholder="Objet supposé…" value="${_esc(ded[`but_nom_${i}`]||'')}" ${a('nom')}>
           <input class="bst-deduct-input bst-loot-qte" placeholder="Nb" value="${_esc(ded[`but_qte_${i}`]||'')}" ${a('qte')}>
+          ${filled
+            ? `<button type="button" class="bst-loot-del" data-bst-action="clearLoot" data-id="${c.id}" data-idx="${i}" title="Effacer cette ligne">✕</button>`
+            : `<span class="bst-loot-del-spacer"></span>`}
         </div>`;
       }).join('')}
     </div>` : '';
@@ -1730,6 +1767,12 @@ export async function deleteBeast(id) {
 // SUIVI JOUEUR
 // ══════════════════════════════════════════════════════════════════════════════
 async function _saveTracker() {
+  // Le tracker vient d'être muté localement et le DOM reflète déjà la saisie
+  // (input.value, barres PV/PM patchées par _bstAdjust). On aligne la signature
+  // de rendu sur cet état AVANT l'écriture : quand l'écho du watch reviendra avec
+  // exactement la même donnée, `_bstSig() === _bstRenderSig` → pas de _render(),
+  // donc pas de rebuild innerHTML qui remettrait le scroll du panneau en haut.
+  _bstRenderSig = _bstSig();
   // viewAsUid n'est respecté QUE pour un admin — sinon un joueur écrirait dans le
   // doc d'un autre joueur (uid périmé d'une session MJ précédente).
   const uid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid; if (!uid) return;
@@ -1842,6 +1885,50 @@ async function _bstCreateBestiaire() {
   STORE.activeId    = null;
   STORE.filterRang  = '';
   await renderBestiary();
+}
+
+// Affiche/retire la croix d'une ligne de butin selon qu'elle est remplie, en DOM
+// pur (pas de _render → pas de saut de scroll). La délégation scopée capte les
+// boutons ajoutés dynamiquement.
+function _bstLootRefreshDel(id, idx) {
+  const row = document.querySelector(`.bst-loot-est[data-loot-cid="${id}"][data-loot-idx="${idx}"]`);
+  if (!row) return;
+  const ded    = STORE.tracker[id]?.deductions || {};
+  const filled = !!(ded[`but_nom_${idx}`] || ded[`but_qte_${idx}`]);
+  if (filled === !!row.querySelector('.bst-loot-del')) return;  // déjà dans le bon état
+  row.querySelector('.bst-loot-del, .bst-loot-del-spacer')?.remove();
+  if (filled) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bst-loot-del';
+    btn.dataset.bstAction = 'clearLoot';
+    btn.dataset.id = id;
+    btn.dataset.idx = idx;
+    btn.title = 'Effacer cette ligne';
+    btn.textContent = '✕';
+    row.appendChild(btn);
+  } else {
+    const sp = document.createElement('span');
+    sp.className = 'bst-loot-del-spacer';
+    row.appendChild(sp);
+  }
+}
+
+// Saisie d'un input de butin : sauvegarde + bascule la croix immédiatement.
+function _bstSetLoot(el) {
+  _bstSetDeduction(el.dataset.id, el.dataset.key, el.value);
+  _bstLootRefreshDel(el.dataset.id, el.dataset.idx);
+}
+
+// Efface une ligne de butin estimé en un clic : retire les clés, vide les inputs
+// et la croix dans le DOM (pas de _render → pas de saut de scroll, cf. _saveTracker).
+function _bstClearLoot(id, idx) {
+  const d = STORE.tracker[id]?.deductions;
+  if (d) { delete d[`but_nom_${idx}`]; delete d[`but_qte_${idx}`]; }
+  const row = document.querySelector(`.bst-loot-est[data-loot-cid="${id}"][data-loot-idx="${idx}"]`);
+  if (row) row.querySelectorAll('.bst-deduct-input').forEach(inp => { inp.value = ''; });
+  _bstLootRefreshDel(id, idx);  // ligne vide → remplace la croix par le spacer
+  _saveTracker();
 }
 
 // Déductions joueur
@@ -2024,6 +2111,8 @@ Object.assign(bstHandlers, {
   // Vue joueur : estimations / déductions
   setStat:        (el) => _bstSetStat(el.dataset.id, el.dataset.key, el.value),
   setDeduction:   (el) => _bstSetDeduction(el.dataset.id, el.dataset.key, el.value),
+  setLoot:        (el) => _bstSetLoot(el),
+  clearLoot:      (el) => _bstClearLoot(el.dataset.id, el.dataset.idx),
 
   // Sections dynamiques (armes / actions / traits / butins)
   addArme:        (el) => _bstAddArme(el.dataset.id),
