@@ -670,6 +670,35 @@ select.bst-p-input option {
 }
 .bst-p-row-remove:hover { background: rgba(255,90,126,0.18); }
 
+/* ── Carte d'arme naturelle (édition MJ) ─────────────────────────────────────── */
+.bst-arme-card { gap: 7px; }
+.bst-arme-head {
+  display: grid; grid-template-columns: 1fr 112px 26px; gap: 6px; align-items: center;
+}
+.bst-arme-nom { font-weight: 600; }
+.bst-arme-dice { text-align: center; }
+
+/* Dégâts / Toucher : deux sous-blocs lisibles, stat + bonus groupés */
+.bst-arme-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.bst-arme-grp {
+  display: grid; gap: 4px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.022);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.bst-arme-grp-hd {
+  font-size: .6rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.bst-arme-grp-fields { display: grid; grid-template-columns: 1fr 52px; gap: 5px; }
+.bst-arme-grp-fields .bst-p-input { font-size: .8rem; }
+
+/* Portée · Format · Type */
+.bst-arme-trio { display: grid; grid-template-columns: 96px 1fr 1fr; gap: 6px; align-items: end; }
+
+.bst-arme-info { font-size: .78rem; }
+
 /* Matrice de dégâts (panneau, chips) */
 .bst-dmg-edit { display: flex; flex-direction: column; gap: 6px; }
 .bst-dmg-edit-row {

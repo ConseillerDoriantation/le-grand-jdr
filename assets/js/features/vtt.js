@@ -3418,6 +3418,10 @@ function _buildAttackOptions(t) {
       const flatD   = parseInt(w.degatsFlat)  || 0;
       const flatT   = parseInt(w.toucherFlat) || 0;
       const toucherTotal = (tStat === 'none' ? 0 : tMod) + flatT;
+      // Type de dégâts défini par le MJ (feu/eau/…) → règles associées (dont
+      // missEffect:'half' des types magiques = ½ dégâts), icône et couleur.
+      const dtypeId = w.damageTypeId || 'physique';
+      const dtype   = (_damageTypes || []).find(t => t.id === dtypeId) || null;
       options.push({
         id:      `beast_arme_${idx}`,
         icon:    '🦷',
@@ -3439,10 +3443,11 @@ function _buildAttackOptions(t) {
           : (statShort(dStat) || dStat) + (flatD ? ` +${flatD}` : ''),
         maitriseBonus: 0,
         halfOnMiss: false,
-        typeRules: getDamageTypeRules(_damageTypes, 'physique'),
-        damageTypeId: 'physique',
-        damageTypeIcon: '',
-        damageTypeColor: '',
+        weaponFormat: w.format || 'physique',   // Physique / Magique (descriptif)
+        typeRules: getDamageTypeRules(_damageTypes, dtypeId),
+        damageTypeId: dtypeId,
+        damageTypeIcon: dtype?.icon || '',
+        damageTypeColor: dtype?.color || '',
       });
     });
   }

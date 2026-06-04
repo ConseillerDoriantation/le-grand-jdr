@@ -278,39 +278,58 @@ function _bstRenderArmeRow(a = {}, cid, idx) {
   // `data-bst-on` filtre l'event (sinon le click de focus déclencherait aussi).
   const inputAttrs  = `data-bst-action="saveArmes" data-bst-on="input"  data-id="${cid}"`;
   const selectAttrs = `data-bst-action="saveArmes" data-bst-on="change" data-id="${cid}"`;
-  return `<div class="bst-p-row" data-arme-id="${a.id || ''}">
-    <div class="bst-p-row-grid" style="grid-template-columns:1fr 130px auto">
-      <input class="bst-p-input" data-f="nom" placeholder="Nom (Griffes, Morsure…)"
+  return `<div class="bst-p-row bst-arme-card" data-arme-id="${a.id || ''}">
+    <!-- Ligne 1 : nom · formule de dés · supprimer -->
+    <div class="bst-arme-head">
+      <input class="bst-p-input bst-arme-nom" data-f="nom" placeholder="Nom (Griffes, Morsure…)"
         value="${_esc(a.nom||'')}" ${inputAttrs}>
-      <input class="bst-p-input" data-f="degats" placeholder="⚔️ 1d8+2"
+      <input class="bst-p-input bst-arme-dice" data-f="degats" placeholder="⚔️ 1d8+2"
         value="${_esc(a.degats||'')}" ${inputAttrs}>
       <button class="bst-p-row-remove" data-bst-action="removeArme" data-id="${cid}" title="Retirer">✕</button>
     </div>
-    <div class="bst-p-row-grid" style="grid-template-columns:1fr 90px 1fr 90px 1fr">
-      <label class="bst-p-mini">Stat dégâts
-        <select class="bst-p-input" data-f="degatsStat" ${selectAttrs}>
-          ${optsHTML(a.degatsStat || 'force')}
-        </select>
-      </label>
-      <label class="bst-p-mini" title="Bonus fixe ajouté aux dégâts (en plus / à la place de la stat)">+ Bonus
-        <input class="bst-p-input" data-f="degatsFlat" type="number"
-          value="${a.degatsFlat ?? ''}" placeholder="0" ${inputAttrs}>
-      </label>
-      <label class="bst-p-mini">Stat toucher
-        <select class="bst-p-input" data-f="toucherStat" ${selectAttrs}>
-          ${optsHTML(a.toucherStat || a.degatsStat || 'force')}
-        </select>
-      </label>
-      <label class="bst-p-mini" title="Bonus fixe ajouté au toucher (en plus / à la place de la stat)">+ Bonus
-        <input class="bst-p-input" data-f="toucherFlat" type="number"
-          value="${a.toucherFlat ?? ''}" placeholder="0" ${inputAttrs}>
-      </label>
+
+    <!-- Ligne 2 : groupes Dégâts / Toucher (stat + bonus côte à côte) -->
+    <div class="bst-arme-duo">
+      <div class="bst-arme-grp">
+        <div class="bst-arme-grp-hd">⚔️ Dégâts</div>
+        <div class="bst-arme-grp-fields">
+          <select class="bst-p-input" data-f="degatsStat" title="Statistique de dégâts" ${selectAttrs}>${optsHTML(a.degatsStat || 'force')}</select>
+          <input class="bst-p-input" data-f="degatsFlat" type="number" placeholder="+0"
+            title="Bonus fixe aux dégâts" value="${a.degatsFlat ?? ''}" ${inputAttrs}>
+        </div>
+      </div>
+      <div class="bst-arme-grp">
+        <div class="bst-arme-grp-hd">🎯 Toucher</div>
+        <div class="bst-arme-grp-fields">
+          <select class="bst-p-input" data-f="toucherStat" title="Statistique de toucher" ${selectAttrs}>${optsHTML(a.toucherStat || a.degatsStat || 'force')}</select>
+          <input class="bst-p-input" data-f="toucherFlat" type="number" placeholder="+0"
+            title="Bonus fixe au toucher" value="${a.toucherFlat ?? ''}" ${inputAttrs}>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ligne 3 : portée · format · type de dégâts -->
+    <div class="bst-arme-trio">
       <label class="bst-p-mini">Portée
         <input class="bst-p-input" data-f="portee" placeholder="Contact, 9m"
           value="${_esc(a.portee||'')}" ${inputAttrs}>
       </label>
+      <label class="bst-p-mini">Format
+        <select class="bst-p-input" data-f="format" ${selectAttrs}>
+          <option value="physique"${(a.format||'physique')==='physique'?' selected':''}>⚔️ Physique</option>
+          <option value="magique"${a.format==='magique'?' selected':''}>✨ Magique</option>
+        </select>
+      </label>
+      <label class="bst-p-mini" title="Type de dégâts (défini dans la console MJ). Un type magique applique ses règles (ex : ½ dégâts) côté VTT.">Type de dégâts
+        <select class="bst-p-input" data-f="damageTypeId" ${selectAttrs}>
+          ${(STORE.damageTypes || []).map(t =>
+            `<option value="${t.id}"${(a.damageTypeId||'physique')===t.id?' selected':''}>${t.icon||''} ${_esc(t.label)}</option>`).join('')}
+        </select>
+      </label>
     </div>
-    <input class="bst-p-input" data-f="info" style="margin-top:6px"
+
+    <!-- Ligne 4 : effet complémentaire -->
+    <input class="bst-p-input bst-arme-info" data-f="info"
       placeholder="ℹ️ Effet complémentaire — ex : « Si touche, applique Poison »"
       value="${_esc(a.info||'')}" ${inputAttrs}>
   </div>`;
@@ -321,7 +340,7 @@ function _bstAddArme(cid) {
   if (!host) return;
   const c = STORE.creatures.find(x => x.id === cid);
   const armes = Array.isArray(c?.armesNaturelles) ? [...c.armesNaturelles] : [];
-  armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', portee:'', info:'' });
+  armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', portee:'', format:'physique', damageTypeId:'physique', info:'' });
   if (c) c.armesNaturelles = armes;
   host.innerHTML = armes.map((a,i) => _bstRenderArmeRow(a, cid, i)).join('');
   _bstQueueSave(cid, { armesNaturelles: armes });
@@ -349,6 +368,8 @@ function _bstSaveArmes(cid) {
       toucherStat: r.querySelector('[data-f=toucherStat]')?.value || 'force',
       toucherFlat: Number.isFinite(flatT) ? flatT : 0,
       portee:      r.querySelector('[data-f=portee]')?.value?.trim() || '',
+      format:      r.querySelector('[data-f=format]')?.value || 'physique',
+      damageTypeId: r.querySelector('[data-f=damageTypeId]')?.value || 'physique',
       info:        r.querySelector('[data-f=info]')?.value?.trim() || '',
     };
   }).filter(a => a.nom || a.degats);
@@ -1474,20 +1495,15 @@ function _renderPanel(c) {
     </div>` : '';
 
   // ── Butin estimé (Joueur) : objets supposés + nombre ──────────────────────
-  // Le joueur ne voit pas les butins réels (MJ uniquement). Il note ce qu'il
-  // pense pouvoir récupérer. Lignes dynamiques : autant que de lignes remplies + 1.
-  // Lignes vides d'avance (≥4, et au moins 2 sous la dernière remplie) : l'édition
-  // ne re-rend pas le panneau (cf. _saveTracker), le compte est donc figé jusqu'à
-  // réouverture de la fiche — on prévoit de la marge pour saisir plusieurs butins.
-  const _lootRows = (() => {
-    let n = 0;
-    for (let i = 0; i < 40; i++) if (ded[`but_nom_${i}`] || ded[`but_qte_${i}`]) n = i + 1;
-    return Math.max(n + 2, 4);
-  })();
-  const butinJoueurHtml = !_isAdminView() ? `
+  // Le joueur ne voit pas le CONTENU des butins réels (MJ uniquement), mais on lui
+  // donne autant de lignes que la créature a de butins → il sait combien d'objets
+  // estimer et remplit son hypothèse pour chacun. Estimations stockées dans SON
+  // tracker perso : aucun effet sur le VTT (qui ne lit que la créature).
+  const _lootRows = Array.isArray(c.butins) ? c.butins.length : 0;
+  const butinJoueurHtml = !_isAdminView() && _lootRows ? `
     <div class="bst-section">
       <div class="bst-section-title">🎒 Butin estimé
-        <span class="bst-section-count">supposé</span>
+        <span class="bst-section-count">${_lootRows} objet${_lootRows>1?'s':''} à deviner</span>
       </div>
       ${Array.from({ length: _lootRows }, (_, i) => {
         const a = (suffix) => `data-bst-action="setLoot" data-bst-on="change" data-id="${c.id}" data-idx="${i}" data-key="but_${suffix}_${i}"`;
