@@ -10,6 +10,7 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, suggestSpellEffect, getMatrixSuggestions } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
+import { makeSortable } from '../../shared/sortable-helper.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
@@ -20,6 +21,7 @@ let _sortsSearch = '';
 let _sortsView = 'all';
 let _sortsTypeFilter = '';
 let _sortsCatCollapsed = {};
+let _sortsCatPanelOpen = false;   // panneau inline de gestion des catégories (remplace la modale)
 let _runeCountsEdit = {};
 let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
@@ -40,7 +42,7 @@ export function sortDragStart(e, idx) {
 export function sortDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  document.querySelectorAll('.cs-sort-row').forEach(el => {
+  document.querySelectorAll('.cs-spellcard').forEach(el => {
     el.classList.remove('cs-drop-before', 'cs-drop-after');
   });
   const rect = e.currentTarget.getBoundingClientRect();
@@ -53,7 +55,7 @@ export function sortDragOver(e) {
 }
 export function sortDragEnd(e) {
   e.currentTarget.style.opacity = '';
-  document.querySelectorAll('.cs-sort-row').forEach(el => {
+  document.querySelectorAll('.cs-spellcard').forEach(el => {
     el.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
   });
 }
@@ -64,7 +66,7 @@ export async function sortDrop(e, toIdx) {
   const insertAfter = e.clientY >= rect.top + rect.height / 2;
   const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
   card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-  document.querySelectorAll('.cs-sort-row').forEach(el =>
+  document.querySelectorAll('.cs-spellcard').forEach(el =>
     el.classList.remove('cs-drop-before', 'cs-drop-after'));
   const fromIdx = _dragSortIdx;
   _dragSortIdx = null;
@@ -89,6 +91,58 @@ function _renderSpellsTab(c = _getCurrentSpellChar()) {
   } else {
     charSession.renderSheet(c, 'sorts');
   }
+}
+
+// ── Drag & drop des CARTES de sorts (Sortable.js), y compris ENTRE catégories ──
+// Chaque grille de catégorie est une zone Sortable du même groupe → on peut
+// déplacer un sort dans une autre catégorie. À la dépose, on reconstruit l'ordre
+// global + la catégorie de chaque sort depuis le DOM, puis on persiste et on
+// re-render (pour rafraîchir les data-sort-idx, sinon une 2ᵉ dépose serait fausse).
+let _sortCardSortables = [];
+export function bindSortCardsDnd(c, canEdit) {
+  _sortCardSortables.forEach(s => { try { s.destroy(); } catch {} });
+  _sortCardSortables = [];
+  if (!canEdit) return;
+  document.querySelectorAll('.cs-spellcard-grid').forEach(grid => {
+    _sortCardSortables.push(makeSortable(grid, {
+      prefix: 'cs',
+      group: 'cs-spell-cards',
+      draggable: '.cs-spellcard',
+      delay: 80,
+      // Le clone de drag doit rester DANS .cs-v3 (sinon le CSS scopé .cs-v3 ne
+      // s'applique pas → rendu brut empilé). Donc pas de clone sur <body>.
+      fallbackOnBody: false,
+      onEnd: async () => {
+        const wrap = document.getElementById('cs-sort-cats-wrap');
+        if (!wrap) return;
+        const old = c.deck_sorts || [];
+        const cats = c.sort_cats || [];
+        const next = [];
+        let changed = false;
+        wrap.querySelectorAll('.cs-spellcard-grid').forEach(g => {
+          const raw = g.dataset.cat;
+          // Catégorie cible : '' si bloc « Sans catégorie » ou catégorie inconnue.
+          const catId = (raw && raw !== '__none' && cats.some(ct => ct.id === raw)) ? raw : '';
+          g.querySelectorAll('.cs-spellcard').forEach(card => {
+            const s = old[Number(card.dataset.sortIdx)];
+            if (!s) return;
+            if ((s.catId || '') !== catId) { next.push({ ...s, catId }); changed = true; }
+            else next.push(s);
+          });
+        });
+        // Sécurité : on ne persiste que si tous les sorts sont bien retrouvés.
+        if (next.length !== old.length) { _renderSpellsTab(c); return; }
+        // Ordre inchangé ET aucune recatégorisation → rien à faire.
+        if (!changed && next.every((s, k) => s === old[k])) return;
+        c.deck_sorts = next;
+        if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+        if (charSession.getCurrentChar()?.id === c.id)
+          charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+        await trySave('characters', c.id, { deck_sorts: next });
+        _renderSpellsTab(c);
+      },
+    }));
+  });
 }
 
 export function renderCharDeck(c, canEdit) {
@@ -170,7 +224,7 @@ export function renderCharDeck(c, canEdit) {
       <div class="cs-sorts-actions">
         ${canEdit ? `<button class="btn btn-gold btn-sm" data-action="addSort" title="Créer un sort">＋ Sort</button>` : ''}
         ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openInvocationLibrary" title="Gérer mes invocations (créatures à invoquer)">🐾</button>` : ''}
-        ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openSortCatEditor" title="Gérer les catégories">📂</button>` : ''}
+        ${canEdit ? `<button class="btn btn-outline btn-sm ${_sortsCatPanelOpen?'is-active':''}" data-action="openSortCatEditor" title="Gérer les catégories">📂</button>` : ''}
         ${cats.length ? `<button class="btn btn-outline btn-sm" data-action="_sortsToggleAllCats" title="Plier/déplier toutes les catégories">⇕</button>` : ''}
       </div>
     </div>
@@ -200,6 +254,9 @@ export function renderCharDeck(c, canEdit) {
       <span class="cs-sort-pm-bar-val">${pmDelta > 0 ? '+' : ''}${pmDelta} PM</span>
       <span class="cs-sort-pm-bar-note">(appliqué automatiquement)</span>
     </div>` : ''}`;
+
+  // ── Panneau inline de gestion des catégories (remplace la modale) ──
+  if (canEdit && _sortsCatPanelOpen) html += _renderCatManager(cats);
 
   // ── État vide / aucun résultat ───────────────────────────────────
   if (allSorts.length === 0) {
@@ -241,9 +298,9 @@ export function renderCharDeck(c, canEdit) {
       </div>`;
     }
     if (!isCollapsed) {
-      html += `<div class="cs-sort-list" data-cat="${cat.id}">`;
+      html += `<div class="cs-spellcard-grid" data-cat="${cat.id}">`;
       visibleEntries.forEach(({ s, globalIdx: i }) => {
-        html += _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
+        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
       });
       html += `</div>`;
     }
@@ -302,7 +359,7 @@ function _sortsResetFilters() {
   _sortsRerender();
 }
 
-function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
+function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const isOpen   = openIdx === i;
   const runesAll = s.runes || [];
   const types    = _getSortTypes(s);
@@ -440,55 +497,65 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
                 : types.includes('defensif')  ? '#22c38e'
                 : '#b47fff';
 
-  return `<div class="cs-sort-row ${s.actif?'actif':''}" style="--sort-type-col:${typeCol}"
-    draggable="true" data-sort-idx="${i}"
-    ondragstart="sortDragStart(event,${i})"
-    ondragover="sortDragOver(event)"
-    ondrop="sortDrop(event,${i})"
-    ondragend="sortDragEnd(event)">
+  // ── Validation MJ ──
+  const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+  const valBadge = vs === 'ok'
+    ? `<span class="cs-spellcard-val ok" title="Sort validé par le Maître du Jeu">✅ Validé</span>`
+    : vs === 'no'
+      ? `<span class="cs-spellcard-val no" title="Sort refusé par le Maître du Jeu">❌ Refusé</span>`
+      : `<span class="cs-spellcard-val wait" title="Pas encore validé par le Maître du Jeu">⏳ À valider</span>`;
 
-    <!-- Ligne unique compacte -->
-    <div class="cs-sort-compact" data-action="toggleSortDetail" data-idx="${i}">
-      <div class="toggle ${s.actif?'on':''}"
-        ${canEdit ? `data-action="toggleSort" data-idx="${i}" data-stop-propagation` : ''}
-        title="${s.actif?'Désactiver':'Activer'}"></div>
-      <span class="cs-sort-compact-nom">${s.icon ? `<span class="cs-sort-icon" title="Icône du sort">${_esc(s.icon)}</span> ` : ''}${_esc(s.nom||'Sans nom')}</span>
-      ${(() => {
-        const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
-        return vs === 'ok'
-          ? `<span class="cs-sort-status cs-sort-status--ok" title="Sort validé par le Maître du Jeu">✅ Validé</span>`
-          : vs === 'no'
-            ? `<span class="cs-sort-status cs-sort-status--no" title="Sort refusé par le Maître du Jeu">❌ Refusé</span>`
-            : `<span class="cs-sort-status cs-sort-status--wait" title="Pas encore validé par le Maître du Jeu">⏳ À valider</span>`;
-      })()}
-      <div class="cs-sort-compact-chips">
-        ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
-        <span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:${acfg.color}">${acfg.label}</span>
-        ${concentration ? `<span class="cs-sort-sstat cs-sort-sstat--dim" style="--c:#60a5fa">🧠</span>` : ''}
+  // ── Noyaux (éléments) en petites pastilles ──
+  const nts = noyauTypesFor(s);
+  const noyauPills = nts.map(t =>
+    `<span class="cs-spellcard-noyau" style="--c:${t.color||'#888'}" title="Noyau ${_esc(t.label)}">${t.icon || ''}</span>`
+  ).join('');
+
+  // ── Runes présentes (comptées) — affichage seul (l'édition se fait dans l'éditeur) ──
+  const counts = {};
+  runesAll.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  const runeMetas = RUNE_META.filter(rm => (counts[rm.nom] || 0) > 0);
+  const runeChips = runeMetas.length ? `<div class="cs-spellcard-runes">
+    ${runeMetas.map(rm => `<span class="cs-runechip" style="--c:${rm.color}" title="${_esc(rm.nom)} — ${_esc(rm.effet)}">${rm.icon} ${_esc(rm.nom)}${(counts[rm.nom]>1)?` ×${counts[rm.nom]}`:''}</span>`).join('')}
+  </div>` : '';
+
+  // Deck : un joueur ne peut activer que les sorts VALIDÉS (le MJ n'est pas limité).
+  const canActivate = STATE.isAdmin || vs === 'ok';
+
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''}" style="--type-col:${typeCol}"
+    data-sort-idx="${i}">
+
+    <header class="cs-spellcard-head">
+      ${canEdit
+        ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${(!canActivate && !s.actif)?'Doit être validé par le MJ pour entrer dans le Deck':(s.actif?'Retirer du deck':'Ajouter au deck')}"></div>`
+        : `<div class="toggle ${s.actif?'on':''}"></div>`}
+      <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
+      <div class="cs-spellcard-id">
+        <div class="cs-spellcard-name" title="${_esc(s.nom||'Sans nom')}">${_esc(s.nom||'Sans nom')}</div>
+        <div class="cs-spellcard-sub">
+          <span class="cs-spellcard-act" style="--c:${acfg.color}">${acfg.label}</span>
+          ${concentration ? `<span class="cs-spellcard-conc" title="Concentration">🧠</span>` : ''}
+          ${noyauPills}
+        </div>
       </div>
-      <span class="cs-sort-compact-pm">${pmVal} PM</span>
-      ${canEdit ? `<div class="cs-sort-compact-acts" data-stop-propagation>
-        ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (actions de la créature)">🐾</button>` : ''}
-        <button class="btn-icon" data-action="editSort" data-idx="${i}">✏️</button>
-        <button class="btn-icon" data-action="deleteSort" data-idx="${i}">🗑️</button>
-      </div>` : ''}
-      <span class="cs-sort-compact-chev">${isOpen?'▲':'▼'}</span>
+      <span class="cs-spellcard-pm" title="Coût en points de magie">${pmVal}<small>PM</small></span>
+    </header>
+
+    <div class="cs-spellcard-tags">
+      ${valBadge}
+      ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
     </div>
 
-    <!-- Description toujours visible (clamped 2 lignes) -->
-    ${s.effet ? `<div class="cs-sort-desc-preview" data-action="toggleSortDetail" data-idx="${i}">${_esc(s.effet)}</div>` : ''}
+    ${s.effet ? `<p class="cs-spellcard-desc ${isOpen?'is-full':''}" data-action="toggleSortDetail" data-idx="${i}" title="Cliquer pour ${isOpen?'replier':'voir le détail'}">${isOpen ? _nl2br(_esc(s.effet)) : _esc(s.effet)}</p>` : ''}
 
-    <!-- Panneau déroulant : détails techniques complets -->
-    ${isOpen ? `<div class="cs-sort-expand">
-      ${s.effet ? `<div class="cs-sort-expand-desc">${_nl2br(_esc(s.effet))}</div>` : ''}
-      ${s.noyau || runesAll.length ? `<div class="cs-sort-expand-meta">
-        ${(() => {
-          const nts = noyauTypesFor(s);
-          if (nts.length > 1) return `<span class="cs-sort-dl-label">Noyaux</span><span>${nts.map(t => `${t.icon||''} ${_esc(t.label)}`).join(' · ')}</span>`;
-          return s.noyau ? `<span class="cs-sort-dl-label">Noyau</span><span>${_esc(s.noyau)}</span>` : '';
-        })()}
-        ${runesAll.length ? `<span class="cs-sort-dl-label" style="margin-left:.65rem">Runes (${runesAll.length})</span><span>${runesAll.join(' · ')}</span>` : ''}
-      </div>` : ''}
+    ${s.mjNotes ? `<div class="cs-spellcard-mjnote" title="Note / restriction du Maître du Jeu">
+      <span class="cs-spellcard-mjnote-ic">📌</span>
+      <span class="cs-spellcard-mjnote-tx">${isOpen ? _nl2br(_esc(s.mjNotes)) : _esc(s.mjNotes)}</span>
+    </div>` : ''}
+
+    ${runeChips}
+
+    ${isOpen ? `<div class="cs-spellcard-detail">
       <div class="cs-sort-detail-effects">
         <div class="cs-sort-detail-effects-title">📋 Effets calculés</div>
         ${_buildSortResume(s, c).map(line => `
@@ -499,79 +566,104 @@ function _renderSortRow(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
           </div>`).join('')}
       </div>
     </div>` : ''}
-  </div>`;
+
+    <footer class="cs-spellcard-foot">
+      <button class="cs-spellcard-detailbtn" data-action="toggleSortDetail" data-idx="${i}">${isOpen?'▲ Replier':'▼ Détails'}</button>
+      ${canEdit ? `<div class="cs-spellcard-acts" data-stop-propagation>
+        ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (créatures à invoquer)">🐾</button>` : ''}
+        <button class="btn-icon" data-action="editSort" data-idx="${i}" title="Éditer le sort">✏️</button>
+        <button class="btn-icon" data-action="deleteSort" data-idx="${i}" title="Supprimer">🗑️</button>
+      </div>` : ''}
+    </footer>
+  </article>`;
 }
 
 // ── Catégories de sorts ───────────────────────────────────────────────────────
-export function openSortCatEditor() {
-  const c    = STATE.activeChar; if (!c) return;
-  const cats = c.sort_cats || [];
-  const COLORS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b','#9ca3af'];
+const _CAT_COLORS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b','#9ca3af'];
 
-  openModal('📂 Catégories de sorts', `
-    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
-      Crée des catégories pour organiser tes sorts. Glisse les sorts d'une catégorie à l'autre depuis la liste.
+// Panneau INLINE de gestion des catégories (plus de modale). Crée / renomme /
+// recolorie / supprime — la suppression NE supprime PAS les sorts (catId remis à '').
+function _renderCatManager(cats = []) {
+  const swatch = (col, action, idx, sel) =>
+    `<button class="cs-catmgr-col ${sel?'on':''}" style="background:${col}" data-action="${action}"${idx!=null?` data-idx="${idx}"`:''} data-col="${col}" title="${sel?'Couleur actuelle':'Choisir cette couleur'}"></button>`;
+  return `<div class="cs-catmgr">
+    <div class="cs-catmgr-head">
+      <span class="cs-catmgr-title">📂 Catégories</span>
+      <span class="cs-catmgr-sub">Glisse un sort d'une catégorie à l'autre. Supprimer une catégorie ne supprime pas ses sorts.</span>
     </div>
-    <div id="sort-cats-list" style="display:flex;flex-direction:column;gap:.4rem">
+    ${cats.length ? `<div class="cs-catmgr-list">
       ${cats.map((cat, i) => `
-      <div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
-        border-radius:8px;padding:.5rem .7rem;border:1px solid var(--border)">
-        <div style="width:12px;height:12px;border-radius:50%;background:${cat.couleur};flex-shrink:0"></div>
-        <span style="flex:1;font-size:.84rem;color:var(--text)">${cat.nom}</span>
-        <button class="btn-icon" style="font-size:.72rem" data-action="_editSortCat" data-idx="${i}">✏️</button>
-        <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" data-action="_delSortCat" data-idx="${i}">🗑️</button>
-      </div>`).join('')}
-      ${cats.length === 0 ? `<div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:.8rem;font-style:italic">Aucune catégorie</div>` : ''}
+        <div class="cs-catmgr-row" style="--cat-col:${cat.couleur}">
+          <span class="cs-catmgr-dot" style="background:${cat.couleur}"></span>
+          <input class="cs-catmgr-name" value="${_esc(cat.nom)}" maxlength="40"
+            data-change="_renameSortCat" data-idx="${i}" placeholder="Nom de la catégorie">
+          <div class="cs-catmgr-colors">${_CAT_COLORS.map(col => swatch(col, '_recolorSortCat', i, cat.couleur === col)).join('')}</div>
+          <button class="btn-icon cs-catmgr-del" data-action="_delSortCat" data-idx="${i}" title="Supprimer (les sorts sont conservés)">🗑️</button>
+        </div>`).join('')}
+    </div>` : `<div class="cs-catmgr-empty">Aucune catégorie pour l'instant.</div>`}
+    <div class="cs-catmgr-new">
+      <input class="cs-catmgr-name" id="cs-newcat-name" maxlength="40" placeholder="Nouvelle catégorie…">
+      <div class="cs-catmgr-colors">${_CAT_COLORS.map(col => swatch(col, '_addSortCat', null, false)).join('')}</div>
+      <span class="cs-catmgr-hint">← clique une couleur pour créer</span>
     </div>
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.75rem">
-      ${COLORS.map(col => `<button data-action="_addSortCat" data-col="${col}"
-        style="width:28px;height:28px;border-radius:50%;background:${col};border:2px solid transparent;
-        cursor:pointer;transition:transform .1s" onmouseover="this.style.transform='scale(1.2)'"
-        onmouseout="this.style.transform=''" title="Créer une catégorie ${col}"></button>`).join('')}
-      <span style="font-size:.75rem;color:var(--text-dim);align-self:center;margin-left:.25rem">← clique pour créer</span>
-    </div>
-    <button class="btn btn-outline btn-sm" style="width:100%;margin-top:.75rem" data-action="close-modal">Fermer</button>
-  `);
+  </div>`;
+}
+
+// Toggle du panneau inline (remplace l'ancienne modale).
+export function openSortCatEditor() {
+  _sortsCatPanelOpen = !_sortsCatPanelOpen;
+  _renderSpellsTab();
 }
 
 async function _addSortCat(couleur) {
-  const nom = prompt('Nom de la catégorie :');
-  if (!nom?.trim()) return;
   const c = STATE.activeChar; if (!c) return;
+  const inp = document.getElementById('cs-newcat-name');
+  const nom = (inp?.value || '').trim() || 'Nouvelle catégorie';
   const cats = [...(c.sort_cats || [])];
-  cats.push({ id: `cat_${Date.now()}`, nom: nom.trim(), couleur });
+  cats.push({ id: `cat_${Date.now()}`, nom, couleur });
   c.sort_cats = cats;
-  await updateInCol('characters', c.id, { sort_cats: cats });
-  showNotif('Catégorie créée !', 'success');
-  openSortCatEditor();
-  _renderSpellsTab(c);
+  if (await trySave('characters', c.id, { sort_cats: cats })) {
+    showNotif('Catégorie créée !', 'success');
+    _renderSpellsTab(c);   // _sortsCatPanelOpen reste vrai → le panneau reste ouvert
+  }
 }
 
-async function _editSortCat(idx) {
+async function _renameSortCat(idx, value) {
   const c = STATE.activeChar; if (!c) return;
   const cats = [...(c.sort_cats || [])];
-  const nom = prompt('Renommer :', cats[idx].nom);
-  if (!nom?.trim()) return;
-  cats[idx].nom = nom.trim();
+  if (!cats[idx]) return;
+  const nom = (value || '').trim();
+  if (!nom || nom === cats[idx].nom) return;
+  cats[idx] = { ...cats[idx], nom };
   c.sort_cats = cats;
-  await updateInCol('characters', c.id, { sort_cats: cats });
-  openSortCatEditor();
-  _renderSpellsTab(c);
+  if (await trySave('characters', c.id, { sort_cats: cats })) _renderSpellsTab(c);
+}
+
+async function _recolorSortCat(idx, couleur) {
+  const c = STATE.activeChar; if (!c) return;
+  const cats = [...(c.sort_cats || [])];
+  if (!cats[idx] || cats[idx].couleur === couleur) return;
+  cats[idx] = { ...cats[idx], couleur };
+  c.sort_cats = cats;
+  if (await trySave('characters', c.id, { sort_cats: cats })) _renderSpellsTab(c);
 }
 
 async function _delSortCat(idx) {
   const c = STATE.activeChar; if (!c) return;
   const cats  = [...(c.sort_cats || [])];
-  const catId = cats[idx].id;
-  // Retirer la catégorie des sorts qui l'avaient
-  const sorts = (c.deck_sorts || []).map(s => s.catId === catId ? { ...s, catId: '' } : s);
+  const cat   = cats[idx]; if (!cat) return;
+  if (!await confirmModal(`Supprimer la catégorie <b>${_esc(cat.nom)}</b> ?<br><span style="color:var(--text-dim);font-size:.85em">Ses sorts sont conservés (ils repassent « Sans catégorie »).</span>`, {
+    title: 'Supprimer la catégorie', confirmLabel: 'Supprimer', icon: '🗑️',
+  })) return;
+  // Les sorts de la catégorie sont CONSERVÉS : on remet juste leur catId à ''.
+  const sorts = (c.deck_sorts || []).map(s => s.catId === cat.id ? { ...s, catId: '' } : s);
   cats.splice(idx, 1);
   c.sort_cats  = cats;
   c.deck_sorts = sorts;
-  await updateInCol('characters', c.id, { sort_cats: cats, deck_sorts: sorts });
-  showNotif('Catégorie supprimée.', 'success');
-  openSortCatEditor();
-  _renderSpellsTab(c);
+  if (await trySave('characters', c.id, { sort_cats: cats, deck_sorts: sorts })) {
+    showNotif('Catégorie supprimée (sorts conservés).', 'success');
+    _renderSpellsTab(c);
+  }
 }
 
 
@@ -1819,27 +1911,29 @@ function _renderLibInvEditorBody() {
   ];
   const acts = Array.isArray(iv.actions) ? iv.actions : [];
   const calcChar = _libInvCalcChar(iv);
-  return `<div class="cs-inv-section" style="display:block">
-    <div class="cs-inv-body">
-      <div class="cs-inv-imgcol">
-        <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
-        <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
-      </div>
-      <div class="cs-inv-grid">
-        <label class="cs-inv-stat" style="grid-column:1/-1">
-          <span class="cs-inv-stat-lbl">🐾 Nom</span>
-          <input class="cs-inv-stat-in" id="s-inv-nom" type="text" value="${_esc(iv.nom||'')}" placeholder="Nom de la créature">
-        </label>
-        ${fields.map(f => `<label class="cs-inv-stat">
-          <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
-          <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
-        </label>`).join('')}
+  return `<div class="cs-invedit">
+    <div class="cs-spell-section">
+      <div class="cs-spell-section-title">🐾 Identité &amp; statistiques <span class="cs-spell-section-hint">stats de base de la créature</span></div>
+      <div class="cs-inv-body">
+        <div class="cs-inv-imgcol">
+          <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
+          <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
+        </div>
+        <div class="cs-inv-grid">
+          <label class="cs-inv-stat" style="grid-column:1/-1">
+            <span class="cs-inv-stat-lbl">🐾 Nom</span>
+            <input class="cs-inv-stat-in" id="s-inv-nom" type="text" value="${_esc(iv.nom||'')}" placeholder="Nom de la créature">
+          </label>
+          ${fields.map(f => `<label class="cs-inv-stat">
+            <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
+            <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
+          </label>`).join('')}
+        </div>
       </div>
     </div>
-    <div class="cs-inv-actions-wrap">
-      <div class="inv-cfg-actions-hd">
-        <span>🎬 Actions de la créature</span>
-        <button class="btn btn-gold btn-sm" data-action="_libInvAddAction">＋ Nouvelle action</button>
+    <div class="cs-spell-section">
+      <div class="cs-spell-section-title">🎬 Actions de la créature <span class="cs-spell-section-hint">mini-sorts joués par l'invocation</span>
+        <button class="btn btn-gold btn-sm" style="margin-left:auto" data-action="_libInvAddAction">＋ Action</button>
       </div>
       <div class="inv-cfg-list">
         ${acts.length ? acts.map((a, ai) => {
@@ -1854,10 +1948,10 @@ function _renderLibInvEditorBody() {
             <button class="btn-icon" data-action="_libInvEditAction" data-aidx="${ai}" title="Modifier">✏️</button>
             <button class="btn-icon" data-action="_libInvDeleteAction" data-aidx="${ai}" title="Supprimer">🗑️</button>
           </div>`;
-        }).join('') : '<div class="inv-cfg-empty">Aucune action.</div>'}
+        }).join('') : '<div class="inv-cfg-empty">Aucune action — la créature attaquera avec son attaque de base.</div>'}
       </div>
     </div>
-    <div class="inv-cfg-foot" style="display:flex;gap:.5rem;justify-content:flex-end">
+    <div class="cs-invedit-foot">
       <button class="btn btn-outline" data-action="_libInvBack">← Bibliothèque</button>
       <button class="btn btn-gold" data-action="_saveLibInv">💾 Enregistrer</button>
     </div>
@@ -2500,6 +2594,16 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
 }
 
 
+// Signature du CONTENU jouable d'un sort (hors champs volatils : actif, validation,
+// catégorie, PM dérivé, notes/flags MJ). Sert à détecter une modification réelle.
+function _sortContentSig(s) {
+  if (!s) return '';
+  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot']);
+  const o = {};
+  Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
+  return JSON.stringify(o);
+}
+
 export async function saveSort(idx) {
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
@@ -2598,6 +2702,17 @@ export async function saveSort(idx) {
       invocation:   _buildInvocationFromDOM(),
       mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
     };
+    // Validation : un sort VALIDÉ modifié par un JOUEUR repasse « À valider » et
+    // sort du Deck (un sort non validé ne peut pas rester actif). Le MJ pilote la
+    // validation explicitement (sélecteur) → on ne touche pas à son choix.
+    if (!STATE.isAdmin && idx >= 0 && prevVal === 'ok'
+        && _sortContentSig(sorts[idx]) !== _sortContentSig(newSort)) {
+      newSort.mjValidation = 'pending';
+      newSort.mjValidated  = false;
+      newSort.actif        = false;
+      showNotif('Sort modifié → repasse « À valider » et sort du Deck.', 'info');
+    }
+
     const isNew = idx < 0;
     if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
     c.deck_sorts=sorts;
@@ -2753,7 +2868,8 @@ registerActions({
   _sortsToggleCat:        (btn) => _sortsToggleCat(btn.dataset.id),
   _sortsToggleAllCats:    ()    => _sortsToggleAllCats(),
   _sortsResetFilters:     ()    => _sortsResetFilters(),
-  _editSortCat:           (btn) => _editSortCat(Number(btn.dataset.idx)),
+  _renameSortCat:         (el)  => _renameSortCat(Number(el.dataset.idx), el.value),
+  _recolorSortCat:        (btn) => _recolorSortCat(Number(btn.dataset.idx), btn.dataset.col),
   _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),

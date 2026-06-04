@@ -27,7 +27,7 @@ import {
 
 import {
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
-  renderCharDeck, openSortCatEditor, toggleSortDetail,
+  renderCharDeck, openSortCatEditor, toggleSortDetail, bindSortCardsDnd,
   addSort, editSort, openSortModal, saveSort,
   runeIncrement, runeDecrement, selectNoyau, updateSortPM,
 } from './characters/spells.js';
@@ -588,7 +588,7 @@ function _renderTabV3(tab, c, canEdit) {
   }
   if (tab === 'journal' && sub === 'notes') { bindRichTextEditors(area); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
-  if (tab === 'sorts') _bindSortsCatDrag(c, canEdit);
+  if (tab === 'sorts') { _bindSortsCatDrag(c, canEdit); bindSortCardsDnd(c, canEdit); }
 }
 
 // ── Drag & drop des catégories de sorts (Sortable.esm.js) ──────────────────
@@ -606,6 +606,8 @@ function _bindSortsCatDrag(c, canEdit) {
     handle: '.cs-sort-cat-drag',
     draggable: '.cs-sort-cat-block:not(.is-default)',
     delay: 80,
+    // Garde le clone de drag dans .cs-v3 (CSS scopé) → rendu correct pendant le drag.
+    fallbackOnBody: false,
     onEnd: async () => {
       // Reconstitue l'ordre des cat IDs depuis le DOM (en excluant le bloc __none)
       const newOrderIds = [...wrap.querySelectorAll('.cs-sort-cat-block:not(.is-default)')]
