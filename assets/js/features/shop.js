@@ -6,7 +6,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, ITEM_STAT_META, statShort as _statShort } from '../shared/char-stats.js';
+import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
@@ -3899,6 +3899,24 @@ function _renderAtelierSavedBuilds(c) {
     </div>`;
 }
 
+/** Barre d'onglets de slots (navigation rapide entre les types d'équipement) :
+ *  clic = sélectionne directement le slot (sans repasser par la silhouette),
+ *  avec le nombre d'articles compatibles et un point vert si un essai est en cours. */
+function _renderAtelierSlotTabs() {
+  return _ATELIER_SLOTS.map(s => {
+    const active = _atelier.activeSlot === s.name;
+    const count  = _atelierItemsForSlot(s.name).length;
+    const sim    = !!_atelier.simulated[s.name];
+    return `<button class="atelier-slot-tab${active?' is-active':''}${sim?' is-simulated':''}${count?'':' is-empty'}"
+      data-sh-action="atelierGoSlot" data-slot="${_esc(s.name)}"
+      title="${_esc(s.name)} — ${count} article${count>1?'s':''} compatible${count>1?'s':''}">
+      <span class="atelier-slot-tab-ico">${s.ico}</span>
+      <span class="atelier-slot-tab-name">${_esc(s.name)}</span>
+      <span class="atelier-slot-tab-count">${count}</span>
+    </button>`;
+  }).join('');
+}
+
 /** Rendu de la colonne droite : items compatibles avec le slot actif. */
 function _renderAtelierItems() {
   const slot = _atelier.activeSlot;
@@ -3976,6 +3994,7 @@ function _renderAtelier() {
   const doll  = document.getElementById('atelier-doll-col');
   const stats = document.getElementById('atelier-stats-col');
   const items = document.getElementById('atelier-items-col');
+  const tabs  = document.getElementById('atelier-slot-tabs');
   const slotLbl = document.getElementById('atelier-slot-name');
   const searchInput = document.getElementById('atelier-items-search');
   const focusedSearch = (document.activeElement === searchInput);
@@ -3984,6 +4003,7 @@ function _renderAtelier() {
   if (doll)    doll.innerHTML  = _renderAtelierDoll();
   if (stats)   stats.innerHTML = _renderAtelierStats();
   if (items)   items.innerHTML = _renderAtelierItems();
+  if (tabs)    tabs.innerHTML  = _renderAtelierSlotTabs();
   if (slotLbl) slotLbl.textContent = _atelier.activeSlot || '—';
 
   // Restaure focus + caret de la search (n'est pas re-rendue, mais sa value oui
@@ -4107,6 +4127,7 @@ function openAtelierModal(prefillItemId) {
           <div class="atelier-items-head">
             <span class="atelier-items-title">Compatibles : <b id="atelier-slot-name">—</b></span>
           </div>
+          <div class="atelier-slot-tabs" id="atelier-slot-tabs"></div>
           <div class="atelier-items-search-wrap">
             <span class="atelier-items-search-ico">🔍</span>
             <input type="text" class="atelier-items-search" id="atelier-items-search"
@@ -4132,6 +4153,11 @@ Object.assign(shHandlers, {
   atelierSelectSlot: (el) => {
     const s = el.dataset.slot || '';
     _atelier.activeSlot = (_atelier.activeSlot === s) ? null : s;
+    _renderAtelier();
+  },
+  // Onglet de slot : sélection directe (pas de toggle off, contrairement à la silhouette).
+  atelierGoSlot: (el) => {
+    _atelier.activeSlot = el.dataset.slot || null;
     _renderAtelier();
   },
   atelierClearSlot: (el, ev) => {
