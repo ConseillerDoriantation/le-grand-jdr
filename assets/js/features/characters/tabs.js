@@ -847,10 +847,12 @@ function _tagChip(text, viewOnly = false) {
 // enregistre directement). Garder le modèle à jour fait aussi survivre les chips
 // à un re-render du profil (qui les reconstruit depuis `pres.tags`).
 function _commitProfilTags() {
-  const charId = charSession.getCurrentChar()?.id;
-  if (!charId) return;
   const container = document.getElementById('profil-tags');
   if (!container) return;
+  // charId ancré sur le conteneur (= le perso rendu) — plus fiable que
+  // getCurrentChar() qui peut être null/différent dans ce contexte.
+  const charId = container.dataset.charId || charSession.getCurrentChar()?.id;
+  if (!charId) return;
   const tags  = [...container.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag).filter(Boolean);
   const pres  = _profilCache[charId] || (_profilCache[charId] = {});
   pres.tags   = tags;
@@ -960,7 +962,7 @@ function _buildProfilHtml(c, canEdit, pres) {
         <span>Traits de caractère <span style="color:var(--text-dim);font-size:.75rem">(affichés sur la page Personnages)</span></span>
         <span id="profil-tag-count" style="font-size:.7rem;color:var(--text-dim);font-weight:400">${(pres?.tags||[]).length}/${TAG_MAX}</span>
       </label>
-      <div id="profil-tags" class="pp-tags-edit">
+      <div id="profil-tags" class="pp-tags-edit" data-char-id="${_esc(c.id)}">
         ${(pres?.tags||[]).map(t => _tagChip(t)).join('')}
       </div>
       <div style="display:flex;gap:.4rem;margin-top:.4rem">
