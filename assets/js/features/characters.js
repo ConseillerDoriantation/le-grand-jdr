@@ -1446,7 +1446,10 @@ function renderCharProfilV3(c, canEdit) {
   const identity = _mergeIdentityDefaults(c.identity);
   const presCache = _profilCache?.[c.id] || null;
   const bioHtml = presCache?.content || c.bio || '';
-  const tags = presCache?.tags || c.tags || [];
+  // Source de vérité des traits = c.tags (le V3 écrit dessus via updateInCol
+  // 'characters'). On ne lit presCache.tags QUE si c.tags est absent : sinon un
+  // `tags:[]` périmé du doc players (truthy !) masquait les traits enregistrés.
+  const tags = Array.isArray(c.tags) ? c.tags : (presCache?.tags || []);
 
   const visEntries = [
     { k: 'afficherNiveau',    lbl: 'Niveau',           def: true  },
@@ -1622,7 +1625,7 @@ async function _csV3CommitTags(charId, nextTags) {
 async function _csV3AddProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = getCharacterById(charId); if (!c) return;
-  const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
+  const cur = (Array.isArray(c.tags) ? c.tags : (_profilCache?.[charId]?.tags || [])).slice();
   if (cur.length >= 8) return;
   if (cur.some(x => x.toLowerCase() === t.toLowerCase())) return;
   cur.push(t);
@@ -1638,7 +1641,7 @@ async function _csV3AddProfilTagFromInput(charId) {
 async function _csV3RemoveProfilTag(charId, value) {
   const t = (value || '').trim(); if (!t) return;
   const c = getCharacterById(charId); if (!c) return;
-  const cur = (_profilCache?.[charId]?.tags || c.tags || []).slice();
+  const cur = (Array.isArray(c.tags) ? c.tags : (_profilCache?.[charId]?.tags || [])).slice();
   const next = cur.filter(x => x.toLowerCase() !== t.toLowerCase());
   if (next.length === cur.length) return;
   await _csV3CommitTags(charId, next);

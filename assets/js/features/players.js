@@ -120,7 +120,9 @@ function _buildRecord(char = null, pres = null) {
     // dans sa fiche perso vs sa card de présentation.
     initials:       _initials(nom),
     content:        pres?.content || '',         // rich text HTML
-    tags:           pres?.tags || [],
+    // Traits = c.tags (source écrite par l'éditeur V3) ; pres.tags (doc players)
+    // n'est qu'un fallback legacy — sinon un tags:[] périmé masquait les traits.
+    tags:           Array.isArray(char?.tags) ? char.tags : (pres?.tags || []),
     stats:          char ? STAT_META.map(m => ({ ...m, value: _getStat(char, m.key) })) : [],
     // Cadrage de la card du Roster — coords du pan-zoom (4 nombres, ~50 octets).
     // Appliqué via CSS au render → précis ET léger (vs base64 qui faisait

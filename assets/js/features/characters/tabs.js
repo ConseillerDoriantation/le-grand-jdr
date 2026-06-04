@@ -842,28 +842,6 @@ function _tagChip(text, viewOnly = false) {
   return `<span class="${cls}" data-tag="${_esc(text)}" style="background:${bg};border-color:${border};color:${color}">${_esc(text)}${btn}</span>`;
 }
 
-// Valide les traits : reflète les chips DOM dans le cache modèle ET persiste
-// IMMÉDIATEMENT (pas de bouton Sauvegarder pour les traits — ajouter/retirer
-// enregistre directement). Garder le modèle à jour fait aussi survivre les chips
-// à un re-render du profil (qui les reconstruit depuis `pres.tags`).
-function _commitProfilTags() {
-  const container = document.getElementById('profil-tags');
-  if (!container) return;
-  // charId ancré sur le conteneur (= le perso rendu) — plus fiable que
-  // getCurrentChar() qui peut être null/différent dans ce contexte.
-  const charId = container.dataset.charId || charSession.getCurrentChar()?.id;
-  if (!charId) return;
-  const tags  = [...container.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag).filter(Boolean);
-  const pres  = _profilCache[charId] || (_profilCache[charId] = {});
-  pres.tags   = tags;
-  // Persistance immédiate (merge : crée le doc au besoin, préserve content/options).
-  const docId = pres.id || charId;
-  console.log('[DIAG tags] commit → charId=', charId, '| docId=', docId, '| path=', `players (scope auto)`, '| tags=', JSON.stringify(tags), '| uid=', STATE.user?.uid);
-  saveDoc('players', docId, { charId, uid: STATE.user?.uid || '', tags })
-    .then(() => { pres.id = docId; console.log('[DIAG tags] saveDoc OK → docId=', docId); })
-    .catch(e => { console.error('[DIAG tags] saveDoc FAIL', e?.code || e, e); showNotif('Erreur d\'enregistrement du trait.', 'error'); });
-}
-
 export function addProfilTag(value) {
   const input = document.getElementById('profil-tag-input');
   const val = (value || input?.value || '').trim();
@@ -878,14 +856,12 @@ export function addProfilTag(value) {
   container.insertAdjacentHTML('beforeend', _tagChip(val));
   if (input) { input.value = ''; input.focus(); }
   _updateTagCounter(container);
-  _commitProfilTags();
 }
 
 export function removeProfilTag(btn) {
   const container = btn.closest('.pp-tags-edit');
   btn.closest('.pp-tag-chip')?.remove();
   if (container) _updateTagCounter(container);
-  _commitProfilTags();
 }
 
 function _updateTagCounter(container) {
@@ -926,7 +902,6 @@ export function renderCharProfil(c, canEdit) {
 async function _loadAndRenderProfil(c, canEdit) {
   try {
     const docs = await loadCollectionWhere('players', 'charId', '==', c.id);
-    console.log('[DIAG tags] load charId=', c.id, '| docs=', docs.length, '| tags=', JSON.stringify(docs.map(d => ({ id: d.id, tags: d.tags }))));
     _profilCache[c.id] = docs[0] || null;
   } catch { _profilCache[c.id] = null; }
   if (charSession.getCurrentCharTab() === 'profil' && charSession.getCurrentChar()?.id === c.id)
@@ -964,7 +939,7 @@ function _buildProfilHtml(c, canEdit, pres) {
         <span>Traits de caractère <span style="color:var(--text-dim);font-size:.75rem">(affichés sur la page Personnages)</span></span>
         <span id="profil-tag-count" style="font-size:.7rem;color:var(--text-dim);font-weight:400">${(pres?.tags||[]).length}/${TAG_MAX}</span>
       </label>
-      <div id="profil-tags" class="pp-tags-edit" data-char-id="${_esc(c.id)}">
+      <div id="profil-tags" class="pp-tags-edit">
         ${(pres?.tags||[]).map(t => _tagChip(t)).join('')}
       </div>
       <div style="display:flex;gap:.4rem;margin-top:.4rem">
@@ -1018,17 +993,8 @@ function _buildProfilHtml(c, canEdit, pres) {
 export async function saveCharProfil(charId) {
   try {
     const content = getRichTextHtml('profil-content');
-    // L'utilisateur a souvent TAPÉ un trait dans le champ sans cliquer ＋ / Entrée
-    // avant de sauvegarder → on valide ce texte en attente en chip (sinon il est
-    // ignoré : le save ne lisait que les chips, pas le champ).
-    const pendingTag = document.getElementById('profil-tag-input')?.value?.trim();
-    if (pendingTag) addProfilTag(pendingTag);
-    // Lit les chips DOM ; si l'UI tags est absente (tab changé, edge), retombe sur
-    // le cache modèle plutôt que d'écrire tags:[] et d'écraser les traits enregistrés.
-    const tagContainer = document.getElementById('profil-tags');
-    const tags = tagContainer
-      ? [...tagContainer.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag).filter(Boolean)
-      : (_profilCache[charId]?.tags || []);
+    const tags = [...(document.getElementById('profil-tags')?.querySelectorAll('.pp-tag-chip') || [])]
+      .map(el => el.dataset.tag).filter(Boolean);
     const data = {
       charId,
       uid:           STATE.user?.uid || '',
