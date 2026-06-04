@@ -14,6 +14,7 @@ import {
   addPlayerToAdventure,
   removePlayerFromAdventure,
   promoteToAdmin,
+  relinkPlayerAccount,
   loadAllUsers,
   loadUserAdventures,
 } from '../core/adventure.js';
@@ -135,12 +136,28 @@ export async function openManageAdventureModal(adventureId) {
   const players  = adv.players  || [];
   const access   = adv.accessList || [];
 
+  const memberUids = new Set([...access, ...players, ...admins]);
+
+  // Détection des comptes en double : un MEMBRE (ancien uid) dont l'email possède
+  // un AUTRE compte non-membre (nouvel uid) → proposer la réassociation. Sert au
+  // cas "mdp oublié → nouvel uid → En attente d'invitation".
+  const _emailToUsers = {};
+  allUsers.forEach(u => { if (u.email) (_emailToUsers[u.email.toLowerCase()] ||= []).push(u); });
+  const _newUidFor = (u) => {
+    if (!u.email) return null;
+    const dupe = (_emailToUsers[u.email.toLowerCase()] || [])
+      .find(d => d.id !== u.id && !memberUids.has(d.id));
+    return dupe ? dupe.id : null;
+  };
+
   const _userLine = (u, isAdmin) => {
     const isCreator = u.id === adv.createdBy;
+    const newUid    = _newUidFor(u);
     return `<div class="adv-member-row" id="mbr-${u.id}">
       <span class="adv-member-pseudo">${_esc(u.pseudo || u.email)}</span>
       ${isAdmin ? '<span class="adv-role adv-role--mj">MJ</span>' : '<span class="adv-role adv-role--joueur">Joueur</span>'}
       <div class="adv-member-actions">
+        ${newUid ? `<button class="btn-icon" title="Réassocier au nouveau compte (changement d'identifiant : transfère accès + personnages)" style="color:#4f8cff" data-action="_advRelink" data-adv-id="${adventureId}" data-old-uid="${u.id}" data-new-uid="${newUid}">🔗</button>` : ''}
         ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${u.id}">⬆️</button>` : ''}
         ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${u.id}">✕</button>` : ''}
       </div>
@@ -155,7 +172,6 @@ export async function openManageAdventureModal(adventureId) {
   // Ne pas proposer un membre déjà présent. On exclut par uid ET par email :
   // certains joueurs ont un compte en double (même email, uid différent) ; sans
   // le filtre email, le doublon orphelin réapparaîtrait dans le select.
-  const memberUids   = new Set([...access, ...players, ...admins]);
   const memberEmails = new Set(
     allUsers.filter(u => memberUids.has(u.id) && u.email)
             .map(u => u.email.toLowerCase())
@@ -307,6 +323,17 @@ async function promoteAdventurePlayer(advId, targetUid) {
   } catch (e) { showNotif(e.message, 'error'); }
 }
 
+async function relinkAdventurePlayer(advId, oldUid, newUid) {
+  if (!confirm('Réassocier ce joueur à son nouveau compte ?\n\nSon accès à l\'aventure et ses personnages seront transférés de l\'ancien identifiant vers le nouveau. À faire après qu\'il se soit reconnecté avec son nouveau compte.')) return;
+  try {
+    const { migrated } = await relinkPlayerAccount(advId, oldUid, newUid);
+    const adventures = await loadUserAdventures(STATE.user.uid);
+    setAdventures(adventures);
+    showNotif(`Compte réassocié — ${migrated} personnage(s) transféré(s).`, 'success');
+    openManageAdventureModal(advId);
+  } catch (e) { showNotif(e.message || 'Échec de la réassociation.', 'error'); }
+}
+
 
 
 // ── Enregistrement de la page ──────────────────
@@ -334,4 +361,5 @@ registerActions({
   },
   _advPromote: (btn) => promoteAdventurePlayer(btn.dataset.advId, btn.dataset.uid),
   _advRemove: (btn) => removeAdventurePlayer(btn.dataset.advId, btn.dataset.uid),
+  _advRelink: (btn) => relinkAdventurePlayer(btn.dataset.advId, btn.dataset.oldUid, btn.dataset.newUid),
 });

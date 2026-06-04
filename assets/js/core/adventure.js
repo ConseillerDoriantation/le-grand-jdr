@@ -161,6 +161,62 @@ export async function removePlayerFromAdventure(adventureId, targetUid) {
   }
 }
 
+// ── Réassociation d'un compte (changement d'identifiant Firebase) ──────────
+// Cas réel : un joueur revient avec un NOUVEL uid pour le même email (compte
+// Google/mot-de-passe dupliqué — cf. "compte en double"). Son ancien uid est
+// encore dans accessList et possède ses personnages, mais son nouvel uid n'y est
+// plus → il tombe sur "En attente d'invitation".
+// Le MJ migre l'ancien uid → le nouveau : accessList/players/admins de l'aventure
+// + re-key des personnages (sous-collection). Réservé MJ — autorisé par les règles
+// (update adventure = isAdvAdmin ; update characters = isAdvAdmin/isAdmin).
+// Retourne { migrated } = nb de personnages transférés.
+export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
+  const uid = STATE.user?.uid;
+  if (!uid) throw new Error('Non connecté');
+  if (!oldUid || !newUid || oldUid === newUid) throw new Error('Identifiants invalides');
+
+  const ref  = doc(db, 'adventures', adventureId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Aventure introuvable');
+  const adv = snap.data();
+  if (!STATE.isSuperAdmin && !adv.admins?.includes(uid)) {
+    throw new Error('Accès refusé — réservé au MJ de cette aventure');
+  }
+
+  // Remplace oldUid par newUid dans une liste (dédoublonne, n'ajoute newUid que
+  // si oldUid y était présent).
+  const repl = (arr) => {
+    const out = (arr || []).filter(u => u !== oldUid && u !== newUid);
+    if ((arr || []).includes(oldUid)) out.push(newUid);
+    return out;
+  };
+  const accessList = repl(adv.accessList);
+  const players    = repl(adv.players);
+  const admins     = repl(adv.admins);
+
+  // Re-key des personnages de CETTE aventure (les persos sont une sous-collection
+  // scoping par aventure et keyés par `uid`).
+  const charsSnap = await getDocs(
+    query(collection(db, 'adventures', adventureId, 'characters'), where('uid', '==', oldUid))
+  );
+  let migrated = 0;
+  if (!charsSnap.empty) {
+    const batch = writeBatch(db);
+    charsSnap.forEach(d => { batch.update(d.ref, { uid: newUid }); migrated++; });
+    await batch.commit();
+  }
+
+  await updateDoc(ref, { accessList, players, admins });
+  if (STATE.adventure?.id === adventureId) {
+    setAdventure({ ...STATE.adventure, accessList, players, admins });
+  }
+
+  // Nettoyage best-effort de l'ancien doc users orphelin (delete = admin only).
+  try { await deleteDoc(doc(db, 'users', oldUid)); } catch (_) { /* non bloquant */ }
+
+  return { migrated };
+}
+
 // ── Mettre à jour nom / emoji / description ────
 export async function updateAdventureMeta(adventureId, { nom, emoji, description }) {
   const uid = STATE.user?.uid;
