@@ -7,7 +7,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getDocData } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../shared/html.js';
 import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
@@ -21,9 +21,24 @@ import { registerActions } from '../core/actions.js';
 // Rétro-compat : le contenu legacy est du texte brut (avec retours ligne) ;
 // le nouveau contenu est du HTML rich-text. On détecte la présence d'une balise
 // pour décider : texte brut → échappé + <br> ; HTML → tel quel (sanitisé en aval).
+// Répare un sur-échappement accumulé : à chaque ancien rendu, un « & » déjà
+// échappé était ré-échappé (&amp; → &amp;amp; → …), faisant apparaître "&#39;",
+// "&amp;#39;"… On retire ces niveaux en boucle. SÛR : on ne touche un « &amp; »
+// QUE s'il précède une autre entité (donc issu d'un sur-échappement) ; un vrai
+// « &amp; » (suivi de texte/espace) est laissé intact.
+function _collapseOverEscape(s) {
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/&amp;(?=(?:amp;)*(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);)/gi, '&');
+  } while (s !== prev);
+  return s;
+}
+
 function _contentToHtml(raw) {
-  const s = String(raw || '');
+  let s = String(raw || '');
   if (!s) return '';
+  s = _collapseOverEscape(s);  // soigne les contenus déjà corrompus (affichage ET éditeur)
   // « Déjà HTML » si présence d'une BALISE *ou* d'une ENTITÉ (&amp; &#39; &eacute;…).
   // Sans le test d'entité, un contenu rich-text sans balise (ex. une seule ligne
   // "Tom &amp; Jerry" / "l&#39;épée" produite par l'éditeur) était re-échappé à
