@@ -742,8 +742,8 @@ function _runeLiveContribution(nom, counts) {
       };
     case 'Invocation':
       return {
-        main:  `${cnt} créature${cnt>1?'s':''} liée${cnt>1?'s':''} · 10 PV · CA 10`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 invocation/rune (Invocation ×${cnt})` : null,
+        main:  `Invoque ${cnt} créature${cnt>1?'s':''} (1 par rune) — choix au lancement`,
+        chain: null,   // 1 rune = 1 invocation : pas de chaînage
       };
     case 'Concentration':
       return { main: 'Maintenu hors tour · JS Sa DD 11 si dégâts reçus', chain: null };
