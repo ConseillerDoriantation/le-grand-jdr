@@ -1506,3 +1506,38 @@
   /* Préview : résumé en colonne */
   .bs-preview-summary { grid-template-columns: 1fr 1fr; }
 }
+
+/* Annuler une construction en cours (MJ) */
+.bs-room-cancel {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: rgba(239,68,68,0.10);
+  border: 1px solid rgba(239,68,68,0.35);
+  border-radius: 7px;
+  color: #ff8b8b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .14s, border-color .14s;
+}
+.bs-room-cancel:hover { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.55); }
+
+/* Suppression d'une ligne de chronique (MJ) */
+.bs-histo-del {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 5px;
+  opacity: 0.4;
+  transition: opacity .12s, color .12s, background .12s;
+}
+.bs-histo-row:hover .bs-histo-del { opacity: 0.85; }
+.bs-histo-del:hover { opacity: 1; color: #ff6b6b; background: rgba(239,68,68,0.12); }

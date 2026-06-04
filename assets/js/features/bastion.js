@@ -367,6 +367,36 @@ async function _bastionBuild(slug) {
   showNotif(`Construction de ${def.nom} ${NIVEAU_LABEL[target]} lancée.`, 'success');
 }
 
+// Annule une construction EN COURS : rembourse l'or et remet la salle dans son
+// état d'avant le lancement (niveau actuel inchangé, plus de chantier).
+async function _bastionCancelBuild(slug) {
+  if (!STATE.isAdmin) return;
+  const b = JSON.parse(JSON.stringify(STORE.bastion || {}));
+  const s = b.salles?.[slug];
+  if (!s || !(s.weeksLeftToBuild > 0)) { showNotif('Aucune construction en cours ici.', 'error'); return; }
+  const def = _getRoomDef(slug, b);
+  const target = s.targetNiveau;
+  const niveauDef = def ? _getNiveauData(def, target) : null;
+  const refund = niveauDef?.cout || 0;
+  const tLabel = def?.unlimited ? `${target}` : (NIVEAU_LABEL[target] || target);
+  const ok = await confirmModal(
+    `Annuler la construction de ${def?.emoji || ''} ${_esc(def?.nom || slug)} (niveau ${tLabel}) ?\n\n${refund} or seront remboursés.`,
+    { title: '✖ Annuler la construction', okLabel: '✖ Annuler la construction', cancelLabel: 'Garder' }
+  ).catch(() => false);
+  if (!ok) return;
+
+  b.or = (b.or || 0) + refund;
+  const prevNiv = s.niveau || 0;
+  // Remet la salle à son niveau d'avant le chantier (0 = non construite). On écrit
+  // des valeurs explicites car la sauvegarde est en merge (un delete serait ignoré).
+  b.salles = { ...(b.salles || {}) };
+  b.salles[slug] = { niveau: prevNiv, targetNiveau: null, weeksLeftToBuild: 0, builtAt: s.builtAt || null };
+  _addHistorique(b, 'construction',
+    `✖ ${def?.emoji || ''} ${def?.nom || slug} — construction annulée (${refund} or remboursés)`);
+  await _save(b);
+  showNotif(`Construction annulée — ${refund} or remboursés.`, 'success');
+}
+
 async function _bastionAdvanceWeek() {
   if (!STATE.isAdmin) return;
   if (!STORE.bastion) return;
@@ -376,6 +406,12 @@ async function _bastionAdvanceWeek() {
     cancelLabel: 'Annuler',
   }).catch(() => false);
   if (!ok) return;
+
+  // Snapshot de l'état AVANT avancée → permet d'annuler la dernière période.
+  // On retire l'éventuel snapshot précédent pour éviter l'imbrication récursive
+  // (un seul niveau d'annulation conservé).
+  const snapshot = JSON.parse(JSON.stringify(STORE.bastion));
+  delete snapshot._undoSnapshot;
 
   const b = JSON.parse(JSON.stringify(STORE.bastion));
   b.semaine = (b.semaine || 1) + 1;
@@ -444,6 +480,7 @@ async function _bastionAdvanceWeek() {
   msg += parts.length ? parts.join(', ') : 'aucune production.';
   _addHistorique(b, 'week', msg);
 
+  b._undoSnapshot = snapshot;   // jeton d'annulation de CETTE avancée
   await _save(b);
   const summary = [
     totalOrProduit > 0 ? `+${totalOrProduit} or` : null,
@@ -451,6 +488,23 @@ async function _bastionAdvanceWeek() {
     totalSalaires > 0 ? `−${totalSalaires} salaires` : null,
   ].filter(Boolean).join(' · ') || 'aucune production';
   showNotif(`▶ Période ${b.semaine} — ${summary}`, 'success');
+}
+
+// Annule la DERNIÈRE avancée de période : restaure le snapshot pris juste avant
+// (or, productions, salaires, constructions). Un seul niveau d'annulation.
+async function _bastionUndoWeek() {
+  if (!STATE.isAdmin) return;
+  const cur = STORE.bastion;
+  if (!cur?._undoSnapshot) { showNotif('Aucune période récente à annuler.', 'error'); return; }
+  const ok = await confirmModal(
+    `↩ Annuler la dernière période ?\n\nLe bastion revient exactement à son état d'avant le dernier passage de période (or, productions, salaires et constructions inclus).`,
+    { title: '↩ Annuler la période', okLabel: '↩ Annuler la période', cancelLabel: 'Garder' }
+  ).catch(() => false);
+  if (!ok) return;
+  const restored = JSON.parse(JSON.stringify(cur._undoSnapshot));
+  restored._undoSnapshot = null;   // pas de double annulation (merge → null, pas delete)
+  await _save(restored);
+  showNotif(`↩ Dernière période annulée — retour à la période ${restored.semaine || 1}.`, 'success');
 }
 
 async function _bastionEditIdentite() {
@@ -1633,6 +1687,7 @@ function _renderHeader(b) {
         ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenCatalogEditor">🏛 Éditer salles</button>` : ''}
         ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenPreview">🔮 Prévisualiser</button>` : ''}
         ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionExportJSON" title="Backup JSON du bastion">💾</button>` : ''}
+        ${isMj && b._undoSnapshot ? `<button class="btn btn-outline btn-sm" data-action="_bastionUndoWeek" title="Annuler le dernier passage de période">↩ Annuler la période</button>` : ''}
         ${isMj ? `<button class="btn btn-gold" data-action="_bastionAdvanceWeek">▶ Passer la période</button>` : ''}
       </div>
     </div>`;
@@ -1729,6 +1784,7 @@ function _renderRoomCard(def, b) {
     buildingHtml = `<div class="bs-room-building">
       <div class="bs-room-building-lbl">🏗 Construction Niv. ${niveauLabel(sallesData.targetNiveau)} — ${sallesData.weeksLeftToBuild} période(s) restante(s)</div>
       <div class="bs-room-bar"><div class="bs-room-bar-fill" style="width:${pct}%;background:${def.color}"></div></div>
+      ${isMj ? `<button class="bs-room-cancel" data-action="_bastionCancelBuild" data-slug="${def.slug}" title="Annuler cette construction et rembourser l'or">✖ Annuler la construction</button>` : ''}
     </div>`;
   }
 
@@ -2053,7 +2109,11 @@ function _renderBastionQuests(b) {
 // Types d'entrées d'historique purement administratives — masqués du rendu
 const _ADMIN_HISTO_TYPES = new Set(['mj_adjust', 'edit_catalog', 'reset']);
 function _renderHistorique(b) {
-  const all = (b.historique || []).filter(e => !_ADMIN_HISTO_TYPES.has(e.type));
+  const isMj = STATE.isAdmin;
+  // On garde l'index ORIGINAL (dans b.historique) pour pouvoir supprimer la bonne ligne.
+  const all = (b.historique || [])
+    .map((e, idx) => ({ e, idx }))
+    .filter(({ e }) => !_ADMIN_HISTO_TYPES.has(e.type));
   if (!all.length) return '';
   const COLLAPSED = 5;
   const expanded = STORE.histoExpanded;
@@ -2069,10 +2129,11 @@ function _renderHistorique(b) {
         </button>` : ''}
       </div>
       <div class="bs-histo${expanded ? ' bs-histo--scroll' : ''}">
-        ${visible.map(e => `
+        ${visible.map(({ e, idx }) => `
           <div class="bs-histo-row bs-histo-row--${e.type}">
             <span class="bs-histo-week">P${e.week}</span>
             <span class="bs-histo-msg">${_esc(e.msg)}</span>
+            ${isMj ? `<button class="bs-histo-del" data-action="_bastionDeleteHisto" data-idx="${idx}" title="Supprimer cette ligne">🗑</button>` : ''}
           </div>`).join('')}
       </div>
     </section>`;
@@ -2081,6 +2142,15 @@ function _renderHistorique(b) {
 function _bastionToggleHisto() {
   STORE.histoExpanded = !STORE.histoExpanded;
   _renderPage();
+}
+
+// Supprime une ligne de la chronique (MJ). idx = index dans b.historique complet.
+async function _bastionDeleteHisto(idx) {
+  if (!STATE.isAdmin) return;
+  const b = JSON.parse(JSON.stringify(STORE.bastion || {}));
+  if (!Array.isArray(b.historique) || idx < 0 || idx >= b.historique.length) return;
+  b.historique.splice(idx, 1);
+  await _save(b);
 }
 
 function _renderPage() {
@@ -2181,9 +2251,11 @@ registerActions({
   _bastionOpenPreview:      () => _bastionOpenPreview(),
   _bastionExportJSON:       () => _bastionExportJSON(),
   _bastionAdvanceWeek:      () => _bastionAdvanceWeek(),
+  _bastionUndoWeek:         () => _bastionUndoWeek(),
   _bastionOpenTransfer:     (btn) => _bastionOpenTransfer(btn.dataset.dir),
   _bastionOpenHire:         (btn) => _bastionOpenHire(btn.dataset.slug),
   _bastionBuild:            (btn) => _bastionBuild(btn.dataset.slug),
+  _bastionCancelBuild:      (btn) => _bastionCancelBuild(btn.dataset.slug),
   _bastionShowDetails:      (btn) => _bastionShowDetails(btn.dataset.slug),
   _bastionResetRooms:       () => _bastionResetRooms(),
   _bastionOpenDeposit:      () => _bastionOpenDeposit(),
@@ -2193,6 +2265,7 @@ registerActions({
   _bastionDeleteQuest:      (btn) => _bastionDeleteQuest(btn.dataset.id),
   _bastionOpenQuestEditor:  (btn) => _bastionOpenQuestEditor(btn.dataset.id || undefined),
   _bastionToggleHisto:      () => _bastionToggleHisto(),
+  _bastionDeleteHisto:      (btn) => _bastionDeleteHisto(Number(btn.dataset.idx)),
 });
 
 // ── Exports legacy (pour ne pas casser pages.js ailleurs) ──────────────────
