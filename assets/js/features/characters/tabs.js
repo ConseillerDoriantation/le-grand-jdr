@@ -842,6 +842,22 @@ function _tagChip(text, viewOnly = false) {
   return `<span class="${cls}" data-tag="${_esc(text)}" style="background:${bg};border-color:${border};color:${color}">${_esc(text)}${btn}</span>`;
 }
 
+// Reflète l'état courant des chips DOM dans le cache modèle (`_profilCache[id].tags`).
+// IMPORTANT : sans ça, un re-render du profil (mise à jour live de la fiche, toggle…)
+// reconstruit les chips depuis `pres.tags` (cache) et EFFACE les tags ajoutés mais
+// non encore sauvegardés → la sauvegarde lisait alors une UI vidée et n'enregistrait
+// rien. En gardant le modèle à jour, les chips survivent au re-render et le save les
+// capture. (Régression introduite en lisant les tags uniquement depuis le DOM.)
+function _syncProfilTagsToCache() {
+  const charId = charSession.getCurrentChar()?.id;
+  if (!charId) return;
+  const container = document.getElementById('profil-tags');
+  if (!container) return;
+  const tags = [...container.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag).filter(Boolean);
+  if (!_profilCache[charId]) _profilCache[charId] = {};
+  _profilCache[charId].tags = tags;
+}
+
 export function addProfilTag(value) {
   const input = document.getElementById('profil-tag-input');
   const val = (value || input?.value || '').trim();
@@ -856,12 +872,14 @@ export function addProfilTag(value) {
   container.insertAdjacentHTML('beforeend', _tagChip(val));
   if (input) { input.value = ''; input.focus(); }
   _updateTagCounter(container);
+  _syncProfilTagsToCache();
 }
 
 export function removeProfilTag(btn) {
   const container = btn.closest('.pp-tags-edit');
   btn.closest('.pp-tag-chip')?.remove();
   if (container) _updateTagCounter(container);
+  _syncProfilTagsToCache();
 }
 
 function _updateTagCounter(container) {
@@ -993,8 +1011,12 @@ function _buildProfilHtml(c, canEdit, pres) {
 export async function saveCharProfil(charId) {
   try {
     const content = getRichTextHtml('profil-content');
-    const tags = [...(document.getElementById('profil-tags')?.querySelectorAll('.pp-tag-chip') || [])]
-      .map(el => el.dataset.tag).filter(Boolean);
+    // Lit les chips DOM ; si l'UI tags est absente (tab changé, edge), retombe sur
+    // le cache modèle plutôt que d'écrire tags:[] et d'écraser les traits enregistrés.
+    const tagContainer = document.getElementById('profil-tags');
+    const tags = tagContainer
+      ? [...tagContainer.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag).filter(Boolean)
+      : (_profilCache[charId]?.tags || []);
     const data = {
       charId,
       uid:           STATE.user?.uid || '',
