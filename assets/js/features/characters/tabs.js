@@ -842,20 +842,23 @@ function _tagChip(text, viewOnly = false) {
   return `<span class="${cls}" data-tag="${_esc(text)}" style="background:${bg};border-color:${border};color:${color}">${_esc(text)}${btn}</span>`;
 }
 
-// Reflète l'état courant des chips DOM dans le cache modèle (`_profilCache[id].tags`).
-// IMPORTANT : sans ça, un re-render du profil (mise à jour live de la fiche, toggle…)
-// reconstruit les chips depuis `pres.tags` (cache) et EFFACE les tags ajoutés mais
-// non encore sauvegardés → la sauvegarde lisait alors une UI vidée et n'enregistrait
-// rien. En gardant le modèle à jour, les chips survivent au re-render et le save les
-// capture. (Régression introduite en lisant les tags uniquement depuis le DOM.)
-function _syncProfilTagsToCache() {
+// Valide les traits : reflète les chips DOM dans le cache modèle ET persiste
+// IMMÉDIATEMENT (pas de bouton Sauvegarder pour les traits — ajouter/retirer
+// enregistre directement). Garder le modèle à jour fait aussi survivre les chips
+// à un re-render du profil (qui les reconstruit depuis `pres.tags`).
+function _commitProfilTags() {
   const charId = charSession.getCurrentChar()?.id;
   if (!charId) return;
   const container = document.getElementById('profil-tags');
   if (!container) return;
-  const tags = [...container.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag).filter(Boolean);
-  if (!_profilCache[charId]) _profilCache[charId] = {};
-  _profilCache[charId].tags = tags;
+  const tags  = [...container.querySelectorAll('.pp-tag-chip')].map(el => el.dataset.tag).filter(Boolean);
+  const pres  = _profilCache[charId] || (_profilCache[charId] = {});
+  pres.tags   = tags;
+  // Persistance immédiate (merge : crée le doc au besoin, préserve content/options).
+  const docId = pres.id || charId;
+  saveDoc('players', docId, { charId, uid: STATE.user?.uid || '', tags })
+    .then(() => { pres.id = docId; })
+    .catch(e => { console.error('[profil tags] save', e); showNotif('Erreur d\'enregistrement du trait.', 'error'); });
 }
 
 export function addProfilTag(value) {
@@ -872,14 +875,14 @@ export function addProfilTag(value) {
   container.insertAdjacentHTML('beforeend', _tagChip(val));
   if (input) { input.value = ''; input.focus(); }
   _updateTagCounter(container);
-  _syncProfilTagsToCache();
+  _commitProfilTags();
 }
 
 export function removeProfilTag(btn) {
   const container = btn.closest('.pp-tags-edit');
   btn.closest('.pp-tag-chip')?.remove();
   if (container) _updateTagCounter(container);
-  _syncProfilTagsToCache();
+  _commitProfilTags();
 }
 
 function _updateTagCounter(container) {
