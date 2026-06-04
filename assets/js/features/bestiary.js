@@ -310,6 +310,9 @@ function _bstRenderArmeRow(a = {}, cid, idx) {
           value="${_esc(a.portee||'')}" ${inputAttrs}>
       </label>
     </div>
+    <input class="bst-p-input" data-f="info" style="margin-top:6px"
+      placeholder="ℹ️ Effet complémentaire — ex : « Si touche, applique Poison »"
+      value="${_esc(a.info||'')}" ${inputAttrs}>
   </div>`;
 }
 
@@ -318,7 +321,7 @@ function _bstAddArme(cid) {
   if (!host) return;
   const c = STORE.creatures.find(x => x.id === cid);
   const armes = Array.isArray(c?.armesNaturelles) ? [...c.armesNaturelles] : [];
-  armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', portee:'' });
+  armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', portee:'', info:'' });
   if (c) c.armesNaturelles = armes;
   host.innerHTML = armes.map((a,i) => _bstRenderArmeRow(a, cid, i)).join('');
   _bstQueueSave(cid, { armesNaturelles: armes });
@@ -346,6 +349,7 @@ function _bstSaveArmes(cid) {
       toucherStat: r.querySelector('[data-f=toucherStat]')?.value || 'force',
       toucherFlat: Number.isFinite(flatT) ? flatT : 0,
       portee:      r.querySelector('[data-f=portee]')?.value?.trim() || '',
+      info:        r.querySelector('[data-f=info]')?.value?.trim() || '',
     };
   }).filter(a => a.nom || a.degats);
   const c = STORE.creatures.find(x => x.id === cid);

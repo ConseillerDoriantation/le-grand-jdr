@@ -3425,6 +3425,7 @@ function _buildAttackOptions(t) {
         rawDice: w.degats || '1d4',
         dice:    w.degats || '1d4',
         portee:  parseInt(w.portee) || 1,
+        actionDescription: w.info || '',   // effet complémentaire (ex : « Si touche, applique Poison »)
         pmCost:  0,
         toucher: toucherTotal,            // total numérique utilisé par les jets
         toucherMod: toucherTotal,         // pour l'affichage détaillé (formule 1d20 +X (stat))
@@ -4506,6 +4507,14 @@ function _vttPickOpt(srcId, tgtId, idx) {
       </div>` : ''}
 
       ${centerBlock}
+
+      <!-- Effet complémentaire de l'attaque (ex : « Si touche, applique Poison ») -->
+      ${opt.actionDescription ? `
+      <div style="display:flex;gap:.4rem;font-size:.72rem;color:var(--text-soft);line-height:1.35;
+                  background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.25);
+                  border-radius:8px;padding:.45rem .6rem;margin-bottom:.7rem">
+        <span>ℹ️</span><span>${_esc(opt.actionDescription)}</span>
+      </div>` : ''}
 
       <!-- Infos zone / multi-cibles + PM -->
       ${(opt.zoneW>0||opt.zoneH>0) || (opt.nbCibles||1) > 1 || opt.pmCost > 0 || (opt.pmCost===0 && opt.basePm>0) ? `
