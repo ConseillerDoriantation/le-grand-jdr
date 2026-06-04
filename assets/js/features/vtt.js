@@ -2409,6 +2409,7 @@ function _vttSpellMods(s) {
           return {
             maxInvocations: nbInv,                          // 1 par rune Invocation
             defaultIds,
+            elementId: s.noyauTypeId || null,               // élément du noyau → attaque de base de l'invocation
             legacy,
             bonuses:      { nbP, nbCh, nbProt, nbAmp },     // base + bonus appliqué au spawn (stats de base UNIQUEMENT, pas les actions)
             concentration: nbConc > 0,
@@ -2750,6 +2751,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       summonConcentrationDD: opt?.mods?.concentration?.dd || null,
       summonChanceRc: opt?.mods?.chance?.rc ?? 20,
       summonActions: actions,
+      summonElementId: mod.elementId || null,   // attaque de base = élément du sort d'invocation
       pageId: _activePage.id,
       col: targetCol, row: targetRow,
       visible: true,
@@ -3327,7 +3329,12 @@ function _buildAttackOptions(t) {
       dmgStatLabel: '—',
       maitriseBonus: 0,
       halfOnMiss: false,
-      typeRules: getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'),
+      // Invocation : attaque de base de l'élément du sort, mais AUCUN dégât sur un
+      // échec (on neutralise le missEffect 'half'/'full' du type). La sentinelle
+      // garde le comportement du type.
+      typeRules: _isInvoc
+        ? { ...getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'), missEffect: 'none' }
+        : getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'),
       damageTypeId:    t.summonElementId || 'physique',
       damageTypeIcon:  getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.icon || '',
       damageTypeColor: getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.color || '',
