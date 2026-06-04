@@ -587,6 +587,21 @@
   color: var(--crimson-light, #ff8ca7); transition: background 0.12s, border-color 0.12s;
 }
 .cs-titre-del:hover { background: rgba(255,90,126,0.18); border-color: rgba(255,90,126,0.5); }
+.cs-titre-drag {
+  flex-shrink: 0; cursor: grab; color: var(--text-dim); font-size: 1rem;
+  line-height: 1; padding: 0 0.1rem; user-select: none;
+}
+.cs-titre-drag:active { cursor: grabbing; }
+.cs-titre-input {
+  flex: 1; min-width: 0;
+  padding: 0.35rem 0.7rem; border-radius: 8px; font-size: 0.86rem; color: var(--gold);
+  background: rgba(226,185,111,0.10); border: 1px solid rgba(226,185,111,0.22);
+}
+.cs-titre-input:focus {
+  outline: none; border-color: rgba(226,185,111,0.55); background: rgba(226,185,111,0.16);
+}
+.titre-sortable-ghost  { opacity: 0.4; }
+.titre-sortable-chosen { background: rgba(226,185,111,0.06); border-radius: 8px; }
 
 .cs-titres-add { display: flex; gap: 0.5rem; align-items: stretch; }
 .cs-titres-add input { flex: 1; min-width: 0; }

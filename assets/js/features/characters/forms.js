@@ -8,11 +8,13 @@ import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
 import { loadAllUsers } from '../../core/adventure.js';
 import { _esc } from '../../shared/html.js';
+import { makeSortable } from '../../shared/sortable-helper.js';
 import PAGES from '../pages.js';
 
 import { getCharacterById } from '../../shared/character-state.js';
 let _newCharOwners = [];
 let _editTitres = [];
+let _titresSortable = null;
 function _renderFormsChar(c, tab) {
   charSession.renderSheet(c, tab || charSession.getCurrentCharTab() || 'combat');
 }
@@ -355,6 +357,7 @@ export function manageTitres(charId) {
   `);
   // Entrée = ajouter (remplace l'ancien onkeydown inline, migré en JS)
   setTimeout(() => {
+    _initTitresSortable();
     const inp = document.getElementById('ei-titre-new');
     inp?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTitre(); } });
     inp?.focus();
@@ -367,37 +370,65 @@ function _titresListHtml() {
     return `<div class="cs-titres-empty">Aucun titre pour l'instant.</div>`;
   }
   return titres.map((t,i)=>`
-    <div class="cs-titre-row">
-      <span class="cs-titre-tag">🏅 ${_esc(t)}</span>
-      <button class="cs-titre-del" data-action="removeTitre" data-idx="${i}" title="Retirer ce titre">✕</button>
+    <div class="cs-titre-row" data-idx="${i}">
+      <span class="cs-titre-drag" title="Glisser pour réordonner">⠿</span>
+      <input class="cs-titre-input" type="text" value="${_esc(t)}" placeholder="Titre…" autocomplete="off"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+      <button class="cs-titre-del" data-action="removeTitre" title="Retirer ce titre">✕</button>
     </div>`).join('');
+}
+
+// Le DOM est la source de vérité pendant l'édition : on reconstruit _editTitres
+// depuis les inputs (dans l'ordre courant, réordonnancement inclus). On ne filtre
+// PAS les vides ici (positions conservées) — le nettoyage se fait à l'enregistrement.
+function _syncTitresFromDom() {
+  const list = document.getElementById('titres-list');
+  if (!list) return;
+  _editTitres = [...list.querySelectorAll('.cs-titre-input')].map(i => i.value);
+}
+
+function _initTitresSortable() {
+  const list = document.getElementById('titres-list');
+  if (!list) return;
+  try { _titresSortable?.destroy(); } catch {}
+  _titresSortable = makeSortable(list, {
+    prefix: 'titre',
+    handle: '.cs-titre-drag',
+    onEnd: () => _syncTitresFromDom(),
+  });
 }
 
 export function addTitre() {
   const input = document.getElementById('ei-titre-new');
   const val = input?.value.trim();
   if (!val) return;
-  _editTitres = _editTitres || [];
+  _syncTitresFromDom();            // capture les éditions des lignes existantes
   _editTitres.push(val);
   input.value='';
   _refreshTitresList();
   input.focus();
 }
 
-export function removeTitre(idx) {
-  _editTitres.splice(idx, 1);
+// Suppression par ÉLÉMENT DOM (pas par index) : après un drag, les data-idx sont
+// périmés — retirer la ligne cliquée puis resynchroniser est robuste.
+export function removeTitre(btn) {
+  btn?.closest?.('.cs-titre-row')?.remove();
+  _syncTitresFromDom();
   _refreshTitresList();
 }
 
 function _refreshTitresList() {
   const list = document.getElementById('titres-list');
-  if (list) list.innerHTML = _titresListHtml();
+  if (!list) return;
+  list.innerHTML = _titresListHtml();
+  _initTitresSortable();
 }
 
 export async function saveTitres(charId) {
   const c = getCharacterById(charId);
   if (!c) return;
-  c.titres = _editTitres || [];
+  _syncTitresFromDom();
+  c.titres = (_editTitres || []).map(t => (t || '').trim()).filter(Boolean);
   if (await trySave('characters', charId, {titres: c.titres})) {
     closeModal();
     showNotif('Titres mis à jour !','success');
@@ -411,7 +442,7 @@ export async function saveTitres(charId) {
 registerActions({
   saveQuete:      ()    => saveQuete(),
   addTitre:       ()    => addTitre(),
-  removeTitre:    (btn) => removeTitre(Number(btn.dataset.idx)),
+  removeTitre:    (btn) => removeTitre(btn),
   saveTitres:     (btn) => saveTitres(btn.dataset.id),
   confirmNewChar: ()    => confirmNewChar(),
   cancelNewChar:  ()    => closeModal(),
