@@ -66,7 +66,14 @@ export async function saveNotes() {
 export async function toggleSort(idx) {
   const c=STATE.activeChar; if(!c) return;
   const sorts=c.deck_sorts||[];
-  sorts[idx].actif=!sorts[idx].actif;
+  const s = sorts[idx]; if (!s) return;
+  // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ.
+  const isValidated = (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok';
+  if (!s.actif && !isValidated && !STATE.isAdmin) {
+    showNotif('Ce sort doit être validé par le MJ avant d\'entrer dans le Deck.', 'error');
+    return;
+  }
+  s.actif=!s.actif;
   c.deck_sorts=sorts;
   if (await trySave('characters',c.id,{deck_sorts:sorts})) _renderFormsChar(c, 'sorts');
 }

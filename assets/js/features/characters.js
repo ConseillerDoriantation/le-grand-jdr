@@ -27,7 +27,7 @@ import {
 
 import {
   sortDragStart, sortDragOver, sortDragEnd, sortDrop,
-  renderCharDeck, openSortCatEditor, toggleSortDetail,
+  renderCharDeck, openSortCatEditor, toggleSortDetail, bindSortCardsDnd,
   addSort, editSort, openSortModal, saveSort,
   runeIncrement, runeDecrement, selectNoyau, updateSortPM,
 } from './characters/spells.js';
@@ -588,7 +588,7 @@ function _renderTabV3(tab, c, canEdit) {
   }
   if (tab === 'journal' && sub === 'notes') { bindRichTextEditors(area); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
-  if (tab === 'sorts') _bindSortsCatDrag(c, canEdit);
+  if (tab === 'sorts') { _bindSortsCatDrag(c, canEdit); bindSortCardsDnd(c, canEdit); }
 }
 
 // ── Drag & drop des catégories de sorts (Sortable.esm.js) ──────────────────
