@@ -2106,18 +2106,47 @@ async function renderBastionPage() {
   if (!content) return;
   content.innerHTML = appSplashHtml('Chargement du Bastion…');
 
-  // 1ère lecture (bastion + shop + npcs en parallèle — pour snapshots & portraits)
   STORE.shopItemsCache = null; STORE.npcsCache = null; // reset au cas où on aurait changé d'aventure
-  const [data] = await Promise.all([
-    getDocData('bastion', 'main'),
-    _loadShopItems(),
-    _loadNpcs(),
-  ]);
-  STORE.bastion = data || _defaultBastion();
-  _renderPage();
 
-  // Abonnement temps réel (idempotent)
+  // Seul le doc `bastion/main` est essentiel au 1er rendu (il est amorcé tôt à
+  // l'entrée d'aventure → résolution rapide). shop + npcs ne servent qu'aux noms
+  // d'objets du coffre et aux portraits du personnel : on les charge EN ARRIÈRE-PLAN.
+  // Leur prime "à froid" attend le snapshot serveur (potentiellement long) — les
+  // attendre ici bloquait le rendu / loader. Garde anti-blocage : timeout 6 s sur
+  // le doc → rendu avec le défaut, le listener temps réel corrigera.
+  const TIMEOUT = Symbol('timeout');
+  try {
+    const data = await Promise.race([
+      getDocData('bastion', 'main').catch(() => null),
+      new Promise(r => setTimeout(() => r(TIMEOUT), 2500)),
+    ]);
+    if (data === TIMEOUT) {
+      console.warn('[bastion] doc lent (>2.5s) — coquille rendue, le listener corrigera');
+      STORE.bastion = STORE.bastion || _defaultBastion();
+    } else {
+      STORE.bastion = data || _defaultBastion();
+    }
+    _renderPage();
+  } catch (e) {
+    console.error('[bastion] échec de chargement/rendu', e);
+    STORE.bastion = STORE.bastion || _defaultBastion();
+    try {
+      _renderPage();
+    } catch (e2) {
+      console.error('[bastion] échec du rendu de secours', e2);
+      content.innerHTML = `<div class="bs-root" style="padding:2rem;text-align:center;color:var(--text-muted)">
+        ⚠️ Le Bastion n'a pas pu se charger.<br><small>Détails dans la console.</small></div>`;
+    }
+  }
+
+  // Abonnement temps réel (idempotent) — corrige/complète les données affichées.
   _attachListener();
+
+  // Secondaire : noms d'objets du coffre + portraits du personnel. Non bloquant —
+  // re-render une fois prêt si on est toujours sur la page.
+  Promise.all([_loadShopItems(), _loadNpcs()])
+    .then(() => { if (STATE.currentPage === 'bastion') _renderPage(); })
+    .catch(e => console.error('[bastion] chargement shop/npcs', e));
 }
 
 registerActions({
