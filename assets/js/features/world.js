@@ -24,7 +24,12 @@ import { registerActions } from '../core/actions.js';
 function _contentToHtml(raw) {
   const s = String(raw || '');
   if (!s) return '';
-  return /<[a-z][\s\S]*?>/i.test(s) ? s : _nl2br(_esc(s));
+  // « Déjà HTML » si présence d'une BALISE *ou* d'une ENTITÉ (&amp; &#39; &eacute;…).
+  // Sans le test d'entité, un contenu rich-text sans balise (ex. une seule ligne
+  // "Tom &amp; Jerry" / "l&#39;épée" produite par l'éditeur) était re-échappé à
+  // chaque rendu → le & devenait &amp; à chaque fois (accumulation "amp;amp;…").
+  const looksHtml = /<[a-z][\s\S]*?>/i.test(s) || /&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i.test(s);
+  return looksHtml ? s : _nl2br(_esc(s));
 }
 
 // ── État local ────────────────────────────────────────────────────────────────
@@ -101,7 +106,7 @@ async function renderWorld() {
   const activeSection = visibleSections.find(s => s.id === STORE.activeId) || null;
 
   content.innerHTML = `
-  <div class="world-shell" style="display:grid;grid-template-columns:250px 1fr;gap:1.2rem;align-items:start;margin:0 auto">
+  <div class="world-shell" style="display:grid;grid-template-columns:300px 1fr;gap:1.2rem;align-items:start;margin:0 auto">
 
     <!-- ── SIDEBAR NAVIGATION ───────────────────────────────────────────── -->
     <div class="world-sidebar" style="position:sticky;top:1rem">
@@ -166,8 +171,8 @@ function _renderCategoryGroup(cat) {
       padding:.5rem 1rem .35rem;${isHidden?'opacity:.5;':''}">
       <span style="font-size:.92rem;flex-shrink:0">${cat.icone||'📁'}</span>
       <span style="flex:1;font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.06em;
-        text-transform:uppercase;color:var(--text-dim);font-weight:700;white-space:nowrap;
-        overflow:hidden;text-overflow:ellipsis">${_esc(cat.nom||'Catégorie')}</span>
+        text-transform:uppercase;color:var(--text-dim);font-weight:700;
+        white-space:normal;overflow-wrap:anywhere;line-height:1.3">${_esc(cat.nom||'Catégorie')}</span>
       ${isHidden ? `<span style="font-size:.58rem;color:#ff6b6b;flex-shrink:0">●</span>` : ''}
       ${STATE.isAdmin ? `
       <div class="world-cat-actions" style="display:flex;gap:.1rem;flex-shrink:0">
@@ -206,8 +211,8 @@ function _renderNavItem(s) {
     onmouseout="if(!this.style.background.includes('184')){this.style.background='transparent'}">
     <span style="font-size:1rem;flex-shrink:0">${s.icone||'📖'}</span>
     <span style="font-size:.83rem;color:${isActive?'var(--gold)':'var(--text)'};
-      font-weight:${isActive?'600':'400'};flex:1;white-space:nowrap;
-      overflow:hidden;text-overflow:ellipsis">${s.titre||'Section'}</span>
+      font-weight:${isActive?'600':'400'};flex:1;white-space:normal;
+      overflow-wrap:anywhere;line-height:1.3">${s.titre||'Section'}</span>
     ${isHidden ? `<span style="font-size:.6rem;color:#ff6b6b;flex-shrink:0">●</span>` : ''}
     ${STATE.isAdmin ? `
     <div class="world-nav-actions" style="display:flex;gap:.2rem;flex-shrink:0">

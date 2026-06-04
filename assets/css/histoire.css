@@ -2048,11 +2048,19 @@
   caret-color: var(--amber);
 }
 .mn-hero-title::placeholder {
-  color: rgba(232,200,140,0.55);
+  color: rgba(232,200,140,0.78);
   font-style: italic; font-weight: 400;
+}
+/* Champ vide (création) : soulignement pointillé pour qu'on voie clairement qu'il
+   s'agit d'un champ titre éditable (sinon le placeholder amber se confondait avec
+   un titre décoratif et donnait l'impression d'un input manquant). */
+.mn-hero-title:placeholder-shown {
+  border-bottom: 2px dashed rgba(232,200,140,0.45) !important;
+  padding-bottom: 3px !important;
 }
 .mn-hero-title:focus {
   color: #fff;
+  border-bottom-color: rgba(244,196,48,0.85) !important;
   text-shadow:
     0 0 1px rgba(0,0,0,0.7),
     0 2px 8px rgba(0,0,0,0.55);
