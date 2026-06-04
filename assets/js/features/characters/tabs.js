@@ -1011,6 +1011,11 @@ function _buildProfilHtml(c, canEdit, pres) {
 export async function saveCharProfil(charId) {
   try {
     const content = getRichTextHtml('profil-content');
+    // L'utilisateur a souvent TAPÉ un trait dans le champ sans cliquer ＋ / Entrée
+    // avant de sauvegarder → on valide ce texte en attente en chip (sinon il est
+    // ignoré : le save ne lisait que les chips, pas le champ).
+    const pendingTag = document.getElementById('profil-tag-input')?.value?.trim();
+    if (pendingTag) addProfilTag(pendingTag);
     // Lit les chips DOM ; si l'UI tags est absente (tab changé, edge), retombe sur
     // le cache modèle plutôt que d'écrire tags:[] et d'écraser les traits enregistrés.
     const tagContainer = document.getElementById('profil-tags');
