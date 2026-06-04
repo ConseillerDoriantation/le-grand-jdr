@@ -1307,6 +1307,13 @@ function _renderCard(c) {
   </div>`;
 }
 
+// Champ texte libre d'estimation joueur : <textarea> auto-dimensionné
+// (field-sizing:content) au lieu d'un <input> — le texte long passe à la ligne et
+// reste entièrement visible. La valeur va entre les balises (échappée).
+function _bstDeductArea(val, placeholder, attrs, style = '') {
+  return `<textarea class="bst-deduct-input" rows="1"${style ? ` style="${style}"` : ''} placeholder="${_esc(placeholder)}" ${attrs}>${_esc(val || '')}</textarea>`;
+}
+
 // ── Panneau détail ────────────────────────────────────────────────────────────
 function _renderPanel(c) {
   if (!c) return '';
@@ -1419,15 +1426,13 @@ function _renderPanel(c) {
   const _obsRow = (prefix, k) => {
     const a = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="${prefix}_${suffix}_${k}"`;
     return `<div class="bst-atk">
-      <input class="bst-deduct-input" style="margin-bottom:6px;font-weight:600"
-        placeholder="Nom de l'attaque…" value="${_esc(ded[`${prefix}_nom_${k}`]||'')}" ${a('nom')}>
+      ${_bstDeductArea(ded[`${prefix}_nom_${k}`], "Nom de l'attaque…", a('nom'), 'margin-bottom:6px;font-weight:600')}
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
         <input class="bst-deduct-input" placeholder="🎯 Toucher" value="${_esc(ded[`${prefix}_toucher_${k}`]||'')}" ${a('toucher')}>
         <input class="bst-deduct-input" placeholder="⚔️ Dégâts"  value="${_esc(ded[`${prefix}_degats_${k}`]||'')}"  ${a('degats')}>
         <input class="bst-deduct-input" placeholder="📏 Portée"  value="${_esc(ded[`${prefix}_portee_${k}`]||'')}"  ${a('portee')}>
       </div>
-      <input class="bst-deduct-input" style="margin-top:5px"
-        placeholder="✨ Effet observé…" value="${_esc(ded[`${prefix}_effet_${k}`]||'')}" ${a('effet')}>
+      ${_bstDeductArea(ded[`${prefix}_effet_${k}`], '✨ Effet observé…', a('effet'), 'margin-top:5px')}
     </div>`;
   };
 
@@ -1458,12 +1463,8 @@ function _renderPanel(c) {
       ${traits.map((_, i) => {
         const dedAttr = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="tr_${suffix}_${i}"`;
         return `<div class="bst-trait">
-          <input class="bst-deduct-input" style="margin-bottom:5px;font-weight:600"
-            placeholder="Nom du trait…"
-            value="${_esc(ded['tr_nom_'+i]||'')}" ${dedAttr('nom')}>
-          <input class="bst-deduct-input"
-            placeholder="Description…"
-            value="${_esc(ded['tr_desc_'+i]||'')}" ${dedAttr('desc')}>
+          ${_bstDeductArea(ded['tr_nom_'+i], 'Nom du trait…', dedAttr('nom'), 'margin-bottom:5px;font-weight:600')}
+          ${_bstDeductArea(ded['tr_desc_'+i], 'Description…', dedAttr('desc'))}
         </div>`;
       }).join('')}
     </div>` : '';
@@ -1488,7 +1489,7 @@ function _renderPanel(c) {
         const a = (suffix) => `data-bst-action="setLoot" data-bst-on="change" data-id="${c.id}" data-idx="${i}" data-key="but_${suffix}_${i}"`;
         const filled = ded[`but_nom_${i}`] || ded[`but_qte_${i}`];
         return `<div class="bst-loot-est" data-loot-cid="${c.id}" data-loot-idx="${i}">
-          <input class="bst-deduct-input" placeholder="Objet supposé…" value="${_esc(ded[`but_nom_${i}`]||'')}" ${a('nom')}>
+          ${_bstDeductArea(ded[`but_nom_${i}`], 'Objet supposé…', a('nom'))}
           <input class="bst-deduct-input bst-loot-qte" placeholder="Nb" value="${_esc(ded[`but_qte_${i}`]||'')}" ${a('qte')}>
           ${filled
             ? `<button type="button" class="bst-loot-del" data-bst-action="clearLoot" data-id="${c.id}" data-idx="${i}" title="Effacer cette ligne">✕</button>`
@@ -1509,7 +1510,7 @@ function _renderPanel(c) {
         const a = `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="rel_${r.key}"`;
         return `<div class="bst-rel-est" style="--rel-c:${r.color}">
           <span class="bst-rel-est-lbl">${r.icon} ${r.label}</span>
-          <input class="bst-deduct-input" placeholder="Types de dégâts supposés…" value="${_esc(ded[`rel_${r.key}`]||'')}" ${a}>
+          ${_bstDeductArea(ded[`rel_${r.key}`], 'Types de dégâts supposés…', a)}
         </div>`;
       }).join('')}
     </div>` : '';

@@ -173,11 +173,10 @@
   background: var(--bg-panel);
   position: sticky;
   top: 0;
-  max-height: 100vh;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(180,127,255,0.14) transparent;
   align-self: start;
+  /* Pas de max-height/overflow : le panneau prend la hauteur de son contenu.
+     Court → reste épinglé en haut (sticky), pas de scroll. Plus haut que l'écran
+     → grandit vers le bas et c'est la page qui scrolle (pas de scroll interne). */
 }
 .bst-panel-slot:empty { display: none; }
 
@@ -707,11 +706,20 @@ select.bst-p-input option {
   border-color: rgba(180,127,255,0.35); border-style: solid;
   background: rgba(180,127,255,0.04);
 }
+/* Variante textarea : s'agrandit pour montrer tout le texte au lieu de le tronquer. */
+textarea.bst-deduct-input {
+  resize: none; overflow: hidden;
+  field-sizing: content;            /* auto-hauteur selon le contenu */
+  min-height: calc(0.78rem * 1.4 + 12px);
+  line-height: 1.4;
+  white-space: pre-wrap; word-break: break-word;
+  display: block;
+}
 
 /* Estimation joueur : butin supposé (objet + nombre + effacer) */
 .bst-loot-est {
   display: grid; grid-template-columns: 1fr 52px 22px; gap: 5px;
-  align-items: center; margin-bottom: 5px;
+  align-items: start; margin-bottom: 5px;
 }
 .bst-loot-qte { text-align: center; }
 .bst-loot-del, .bst-loot-del-spacer {
@@ -727,14 +735,14 @@ select.bst-p-input option {
 
 /* Estimation joueur : relations aux dégâts supposées */
 .bst-rel-est {
-  display: grid; grid-template-columns: 116px 1fr; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 116px 1fr; align-items: start; gap: 8px;
   margin-bottom: 5px;
   border-left: 3px solid var(--rel-c, var(--border-md));
   padding-left: 8px;
 }
 .bst-rel-est-lbl {
   font-size: 0.72rem; font-weight: 600; color: var(--rel-c, var(--text-muted));
-  white-space: nowrap;
+  white-space: nowrap; padding-top: 6px;   /* aligne avec la 1re ligne du textarea */
 }
 
 /* Admin actions */
