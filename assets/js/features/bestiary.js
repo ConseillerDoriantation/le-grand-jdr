@@ -44,6 +44,7 @@ const STORE = {
   currentCol:    'bestiary',
   bestiaireList: [{ id: 'main', label: 'Bestiaire principal' }],
   viewAsUid:     null,    // admin : voir le bestiaire d'un joueur
+  _authUid:      null,    // uid de la session courante — détecte un changement de compte
   playersList:   [],      // [{ uid, pseudo }] peuplé côté admin
 };
 
@@ -865,6 +866,14 @@ export async function renderBestiary() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
 
+  // SÉCURITÉ : la vue "bestiaire d'un joueur" (viewAsUid) ne doit JAMAIS persister
+  // hors d'une session admin ni à travers un changement de compte. L'app est une
+  // SPA (pas de reload au login) → sans ce reset, l'uid d'un joueur précédemment
+  // consulté en MJ resterait collé et ses estimations seraient écrasées par le
+  // compte suivant.
+  if (!STATE.isAdmin || STORE._authUid !== STATE.user?.uid) STORE.viewAsUid = null;
+  STORE._authUid = STATE.user?.uid || null;
+
   // Admin : charger la liste des bestiaires disponibles
   if (STATE.isAdmin) {
     const meta = await getDocData('bestiary_meta', 'list');
@@ -917,7 +926,7 @@ export async function renderBestiary() {
   _bstApplyData(cachedCreatures || []);
   _render();
 
-  const trackerUid = STORE.viewAsUid || STATE.user?.uid;
+  const trackerUid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid;
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
   // Les noms 'bst-creatures'/'bst-tracker' sont réutilisés : si l'admin
@@ -1286,6 +1295,7 @@ function _renderPanel(c) {
   const pmActuel  = track.pmActuel  !== undefined ? parseInt(track.pmActuel)  : null;
   const caEstimee = track.caEstimee !== undefined ? parseInt(track.caEstimee) : null;
   const vitEstimee= track.vitEstimee!== undefined ? parseInt(track.vitEstimee): null;
+  const xpEstimee = track.xpEstimee !== undefined ? parseInt(track.xpEstimee) : null;
   const pvPct     = pvMax > 0 && pvActuel !== null ? Math.round(pvActuel / pvMax * 100) : 0;
   const pmPct     = pmMax > 0 && pmActuel !== null ? Math.round(pmActuel / pmMax * 100) : 0;
 
@@ -1328,12 +1338,6 @@ function _renderPanel(c) {
       <div class="bst-stat-lbl">${lbl}</div>
     </div>`;
 
-  const _staticCell = (cls, lbl, val) => `
-    <div class="bst-stat-cell ${cls}">
-      <div class="bst-stat-val">${val || '—'}</div>
-      <div class="bst-stat-lbl">${lbl}</div>
-    </div>`;
-
   const vitalsHtml = `
     <div class="bst-section">
       <div class="bst-section-title">Statistiques</div>
@@ -1342,7 +1346,7 @@ function _renderPanel(c) {
         ${_estCell('pm',  'PM',   'pmActuel',   pmActuel)}
         ${_estCell('ca',  'CA',   'caEstimee',  caEstimee)}
         ${_estCell('vit', 'Vit.', 'vitEstimee', vitEstimee)}
-        ${_staticCell('init','XP', '')}
+        ${_estCell('init','XP',  'xpEstimee',  xpEstimee)}
       </div>
     </div>`;
 
@@ -1377,32 +1381,42 @@ function _renderPanel(c) {
   const dmgHtml = _isAdminView() ? _renderDamageProfile(c, STORE.damageTypes) : '';
 
 
-  // ── Actions Joueur : estimation par action (nom + dégâts + portée) ────────
-  // Indexée par action.id (stable même si l'ordre change). Fallback sur idx
-  // pour la rétro-compat avec les anciennes clés `att_*`.
+  // ── Attaques observées (Joueur) : armes naturelles + actions ──────────────
+  // Le joueur note juste ce qu'il observe au VTT (nom, toucher, dégâts, portée,
+  // effet) — aucun accès au gestionnaire de runes. Indexé par id stable (fallback
+  // idx). Les clés `act_*` restent rétro-compatibles ; `*_effet_*` et `arme_*` sont
+  // de nouvelles clés (sans impact sur les estimations existantes).
+  const _obsRow = (prefix, k) => {
+    const a = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="${prefix}_${suffix}_${k}"`;
+    return `<div class="bst-atk">
+      <input class="bst-deduct-input" style="margin-bottom:6px;font-weight:600"
+        placeholder="Nom de l'attaque…" value="${_esc(ded[`${prefix}_nom_${k}`]||'')}" ${a('nom')}>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
+        <input class="bst-deduct-input" placeholder="🎯 Toucher" value="${_esc(ded[`${prefix}_toucher_${k}`]||'')}" ${a('toucher')}>
+        <input class="bst-deduct-input" placeholder="⚔️ Dégâts"  value="${_esc(ded[`${prefix}_degats_${k}`]||'')}"  ${a('degats')}>
+        <input class="bst-deduct-input" placeholder="📏 Portée"  value="${_esc(ded[`${prefix}_portee_${k}`]||'')}"  ${a('portee')}>
+      </div>
+      <input class="bst-deduct-input" style="margin-top:5px"
+        placeholder="✨ Effet observé…" value="${_esc(ded[`${prefix}_effet_${k}`]||'')}" ${a('effet')}>
+    </div>`;
+  };
+
+  const armesJ = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
+  const armesJoueurHtml = !_isAdminView() && armesJ.length ? `
+    <div class="bst-section">
+      <div class="bst-section-title">🐾 Armes naturelles
+        <span class="bst-section-count">${armesJ.length} observée${armesJ.length>1?'s':''}</span>
+      </div>
+      ${armesJ.map((arme, i) => _obsRow('arme', arme.id || `idx_${i}`)).join('')}
+    </div>` : '';
+
   const actsJ = Array.isArray(c.actions) ? c.actions : [];
   const attaquesJoueurHtml = !_isAdminView() && actsJ.length ? `
     <div class="bst-section">
       <div class="bst-section-title">⚔️ Actions
         <span class="bst-section-count">${actsJ.length} observée${actsJ.length>1?'s':''}</span>
       </div>
-      ${actsJ.map((act, i) => {
-        const k = act.id || `idx_${i}`;
-        const dedAttr = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="act_${suffix}_${k}"`;
-        return `<div class="bst-atk">
-          <input class="bst-deduct-input" style="margin-bottom:6px;font-weight:600"
-            placeholder="Nom de l'action…"
-            value="${_esc(ded['act_nom_'+k]||'')}" ${dedAttr('nom')}>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
-            <input class="bst-deduct-input" placeholder="🎯 Toucher"
-              value="${_esc(ded['act_toucher_'+k]||'')}" ${dedAttr('toucher')}>
-            <input class="bst-deduct-input" placeholder="⚔️ Dégâts"
-              value="${_esc(ded['act_degats_'+k]||'')}" ${dedAttr('degats')}>
-            <input class="bst-deduct-input" placeholder="📏 Portée"
-              value="${_esc(ded['act_portee_'+k]||'')}" ${dedAttr('portee')}>
-          </div>
-        </div>`;
-      }).join('')}
+      ${actsJ.map((act, i) => _obsRow('act', act.id || `idx_${i}`)).join('')}
     </div>` : '';
 
   // ── Traits Joueur : lignes vides à compléter ──────────────────────────────
@@ -1430,6 +1444,7 @@ function _renderPanel(c) {
     <div class="bst-panel-body">
       ${vitalsHtml}
       ${descHtml}
+      ${armesJoueurHtml}
       ${attaquesJoueurHtml}
       ${traitsJoueurHtml}
     </div>
@@ -1674,7 +1689,9 @@ export async function deleteBeast(id) {
 // SUIVI JOUEUR
 // ══════════════════════════════════════════════════════════════════════════════
 async function _saveTracker() {
-  const uid = STORE.viewAsUid || STATE.user?.uid; if (!uid) return;
+  // viewAsUid n'est respecté QUE pour un admin — sinon un joueur écrirait dans le
+  // doc d'un autre joueur (uid périmé d'une session MJ précédente).
+  const uid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid; if (!uid) return;
   await tryDoc('bestiary_tracker', uid, { data: STORE.tracker });
 }
 
@@ -1841,7 +1858,7 @@ function _bstReset(id) {
   // Vue MJ : remet les vraies valeurs. Vue joueur (ou MJ consultant un joueur) : remet les estimations à zéro.
   STORE.tracker[id] = _isAdminView()
     ? { pvActuel: parseInt(c.pvMax)||0, pmActuel: parseInt(c.pmMax)||0, notes:'' }
-    : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
+    : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, xpEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
   _saveTracker();
   _render();
 }
