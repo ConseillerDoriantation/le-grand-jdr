@@ -3538,6 +3538,23 @@
 .vtt-ms-sort-pm      { font-size: .58rem; background: color-mix(in srgb, #4f8cff 20%, transparent); color: #4f8cff; padding: .04rem .22rem; border-radius: 3px; }
 .vtt-ms-sort-types   { font-size: .58rem; background: color-mix(in srgb, var(--gold) 15%, transparent); color: var(--gold); padding: .04rem .22rem; border-radius: 3px; }
 
+/* ── Sorts (mini-fiche) : barre de deck + grille de cartes (.cs-spellcard) ── */
+.vtt-ms-deckbar {
+  display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+  padding: .4rem .55rem; margin-bottom: .55rem;
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 26%, var(--border));
+  border-radius: 8px;
+}
+.vtt-ms-deckbar.is-over { background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.4); }
+.vtt-ms-deck-lbl { font-size: .66rem; font-weight: 800; letter-spacing: .03em; color: var(--gold); text-transform: uppercase; }
+.vtt-ms-deck-val { font-size: .9rem; font-weight: 800; color: var(--text); }
+.vtt-ms-deck-val small { font-size: .62rem; font-weight: 700; color: var(--text-dim); }
+.vtt-ms-deckbar.is-over .vtt-ms-deck-val { color: #ff8b8b; }
+.vtt-ms-deck-hint { font-size: .58rem; color: var(--text-dim); margin-left: auto; flex: 1; text-align: right; min-width: 110px; }
+/* La mini-fiche est étroite → une seule colonne, cartes un peu plus compactes */
+.cs-v3 .vtt-ms-spellgrid { grid-template-columns: 1fr; gap: 8px; }
+
 /* ── Inventaire (cards compactes avec image + rareté + actions) ───────── */
 .vtt-ms-inv { display: flex; flex-direction: column; gap: .15rem; }
 .vtt-ms-inv-cat {

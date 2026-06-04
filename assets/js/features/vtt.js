@@ -15,7 +15,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../shared/equipment-utils.js';
@@ -13144,8 +13144,14 @@ async function _vttToggleMsSort(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
   const sorts = [...(c.deck_sorts||[])];
-  if (!sorts[idx]) return;
-  sorts[idx] = { ...sorts[idx], actif: !sorts[idx].actif };
+  const s = sorts[idx]; if (!s) return;
+  // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ (le MJ n'est pas limité).
+  const isValidated = (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok';
+  if (!s.actif && !isValidated && !STATE.isAdmin) {
+    showNotif('Ce sort doit être validé par le MJ avant d\'entrer dans le Deck.', 'error');
+    return;
+  }
+  sorts[idx] = { ...s, actif: !s.actif };
   try { await updateDoc(_chrRef(charId), { deck_sorts: sorts }); }
   catch(e) { showNotif('Erreur sauvegarde', 'error'); }
 }
@@ -13347,24 +13353,120 @@ function _msTabEquipement(c, uid, canEdit) {
   }).join('')}</div>`;
 }
 
-function _msTabSorts(c, uid, canEdit) {
-  const sorts = c?.deck_sorts||[];
-  if (!sorts.length) return '<div class="vtt-ms-empty">Aucun sort</div>';
-  return `<div class="vtt-ms-sorts">${sorts.map((s, i) => {
-    const types = Array.isArray(s.types) ? s.types.join(' · ') : (s.types||'');
-    return `<div class="vtt-ms-sort${s.actif?' is-actif':''}">
-      ${canEdit
-        ? `<button class="vtt-ms-sort-toggle" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${s.actif?'Désactiver':'Activer'}">${s.actif?'✅':'⬜'}</button>`
-        : `<span class="vtt-ms-sort-dot${s.actif?' on':''}">${s.actif?'●':'○'}</span>`}
-      <div class="vtt-ms-sort-info">
-        <span class="vtt-ms-sort-nom">${s.nom||'Sort'}</span>
-        <div class="vtt-ms-sort-meta">
-          ${s.pm?`<span class="vtt-ms-sort-pm">${s.pm} PM</span>`:''}
-          ${types?`<span class="vtt-ms-sort-types">${types}</span>`:''}
+// Méta runes (icône/couleur) — miroir de RUNE_META (spells.js) pour un rendu de
+// carte identique côté VTT, sans importer le gros module de la fiche.
+const _VTT_RUNE_META = {
+  'Puissance':{icon:'⚔️',color:'#ef4444'}, 'Protection':{icon:'💚',color:'#22c38e'},
+  'Amplification':{icon:'🌐',color:'#4f8cff'}, 'Dispersion':{icon:'🎯',color:'#a855f7'},
+  'Enchantement':{icon:'✨',color:'#e8b84b'}, 'Affliction':{icon:'💀',color:'#8b5cf6'},
+  'Invocation':{icon:'🐾',color:'#a16207'}, 'Lacération':{icon:'🩸',color:'#dc2626'},
+  'Chance':{icon:'🍀',color:'#facc15'}, 'Durée':{icon:'⏱️',color:'#06b6d4'},
+  'Concentration':{icon:'🧠',color:'#6366f1'}, 'Réaction':{icon:'🔄',color:'#ec4899'},
+  'Action Bonus':{icon:'✴️',color:'#f97316'},
+};
+
+// Chips d'effets clés (dégâts/soin/cibles/zone/durée), calculés avec les helpers
+// natifs du VTT (cache-free → cohérents avec les options d'attaque du VTT).
+function _vttSpellChips(s, c) {
+  const chips = [];
+  const types = (Array.isArray(s.types) && s.types.length) ? s.types
+              : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
+  const runes = s.runes || [];
+  if (types.includes('offensif') || runes.includes('Lacération')) {
+    const dmg = _vttSortDmgFormula(s, c);
+    if (dmg) chips.push({ icon:'⚔️', val: dmg, color:'#ff6b6b' });
+  }
+  if (types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin)) {
+    const soin = _vttSortSoinFormula(s, c);
+    if (soin) chips.push({ icon:'💚', val: soin, color:'#22c38e' });
+  }
+  const nbT = calcSpellTargets(s);
+  if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff' });
+  const nbAmp = runes.filter(r => r === 'Amplification').length;
+  if (nbAmp > 0 && s.ampMode !== 'deplacement') {
+    const nbDisp = runes.filter(r => r === 'Dispersion').length;
+    chips.push({ icon:'📐', val:`${4*nbAmp-1}×${nbDisp>=1?(4*nbDisp-1):1}m`, color:'#b47fff' });
+  }
+  if (runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
+    chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af' });
+  }
+  return chips;
+}
+
+// Carte de sort VTT — même présentation que la fiche perso (classes .cs-spellcard,
+// scope .cs-v3) avec câblage VTT (toggle deck par data-vtt-fn).
+function _vttSpellCardHtml(s, i, c, uid, canEdit) {
+  const runes = s.runes || [];
+  const types = (Array.isArray(s.types) && s.types.length) ? s.types
+              : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
+  const action = runes.includes('Réaction') ? 'reaction'
+              : runes.includes('Action Bonus') ? 'action_bonus' : 'action';
+  const ACTION_CFG = {
+    action:       { label:'⚡ Act.',   color:'#e8b84b' },
+    action_bonus: { label:'✴️ Bonus', color:'#f97316' },
+    reaction:     { label:'🔄 Réac.', color:'#a78bfa' },
+  };
+  const acfg = ACTION_CFG[action];
+  const concentration = runes.includes('Concentration');
+  const ids = (Array.isArray(s.noyauTypeIds) && s.noyauTypeIds.length) ? s.noyauTypeIds
+            : (s.noyauTypeId ? [s.noyauTypeId] : []);
+  const nts = ids.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+  const noyauPills = nts.map(t =>
+    `<span class="cs-spellcard-noyau" style="--c:${t.color||'#888'}" title="Noyau ${_esc(t.label)}">${t.icon||''}</span>`).join('');
+  const typeCol = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';
+  const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+  const valBadge = vs === 'ok'
+    ? `<span class="cs-spellcard-val ok" title="Sort validé par le MJ">✅ Validé</span>`
+    : vs === 'no'
+      ? `<span class="cs-spellcard-val no" title="Sort refusé par le MJ">❌ Refusé</span>`
+      : `<span class="cs-spellcard-val wait" title="Pas encore validé par le MJ">⏳ À valider</span>`;
+  const chips = _vttSpellChips(s, c);
+  const counts = {}; runes.forEach(r => { counts[r] = (counts[r]||0)+1; });
+  const runeChips = Object.keys(counts).length ? `<div class="cs-spellcard-runes">${
+    Object.entries(counts).map(([nom, n]) => {
+      const m = _VTT_RUNE_META[nom] || { icon:'•', color:'#888' };
+      return `<span class="cs-runechip" style="--c:${m.color}" title="${_esc(nom)}">${m.icon} ${_esc(nom)}${n>1?` ×${n}`:''}</span>`;
+    }).join('')}</div>` : '';
+  const canActivate = STATE.isAdmin || vs === 'ok';
+  const toggle = canEdit
+    ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${(!canActivate && !s.actif)?'Doit être validé par le MJ pour entrer dans le Deck':(s.actif?'Retirer du deck':'Ajouter au deck')}"></div>`
+    : `<div class="toggle ${s.actif?'on':''}"></div>`;
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''}" style="--type-col:${typeCol}">
+    <header class="cs-spellcard-head">
+      ${toggle}
+      <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
+      <div class="cs-spellcard-id">
+        <div class="cs-spellcard-name" title="${_esc(s.nom||'Sans nom')}">${_esc(s.nom||'Sans nom')}</div>
+        <div class="cs-spellcard-sub">
+          <span class="cs-spellcard-act" style="--c:${acfg.color}">${acfg.label}</span>
+          ${concentration ? `<span class="cs-spellcard-conc" title="Concentration">🧠</span>` : ''}
+          ${noyauPills}
         </div>
       </div>
-    </div>`;
-  }).join('')}</div>`;
+      <span class="cs-spellcard-pm" title="Coût en PM">${s.pm||0}<small>PM</small></span>
+    </header>
+    <div class="cs-spellcard-tags">${valBadge}${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>
+    ${s.effet ? `<p class="cs-spellcard-desc">${_esc(s.effet)}</p>` : ''}
+    ${s.mjNotes ? `<div class="cs-spellcard-mjnote" title="Note / restriction du MJ"><span class="cs-spellcard-mjnote-ic">📌</span><span class="cs-spellcard-mjnote-tx">${_esc(s.mjNotes)}</span></div>` : ''}
+    ${runeChips}
+  </article>`;
+}
+
+function _msTabSorts(c, uid, canEdit) {
+  const sorts = c?.deck_sorts || [];
+  if (!sorts.length) return '<div class="vtt-ms-empty">Aucun sort</div>';
+  const deckCount = sorts.filter(s => s.actif).length;
+  const deckMax = calcDeckMax(c);
+  const over = deckCount > deckMax;
+  return `
+    <div class="vtt-ms-deckbar${over ? ' is-over' : ''}">
+      <span class="vtt-ms-deck-lbl">⚡ Deck</span>
+      <span class="vtt-ms-deck-val">${deckCount}<small>/${deckMax}</small></span>
+      ${canEdit ? `<span class="vtt-ms-deck-hint">Coche un sort pour l'ajouter / le retirer du deck</span>` : ''}
+    </div>
+    <div class="cs-v3"><div class="cs-spellcard-grid vtt-ms-spellgrid">
+      ${sorts.map((s, i) => _vttSpellCardHtml(s, i, c, uid, canEdit)).join('')}
+    </div></div>`;
 }
 
 function _msTabInventaire(c, uid, canEdit) {
