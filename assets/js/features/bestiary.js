@@ -44,6 +44,7 @@ const STORE = {
   currentCol:    'bestiary',
   bestiaireList: [{ id: 'main', label: 'Bestiaire principal' }],
   viewAsUid:     null,    // admin : voir le bestiaire d'un joueur
+  _authUid:      null,    // uid de la session courante — détecte un changement de compte
   playersList:   [],      // [{ uid, pseudo }] peuplé côté admin
 };
 
@@ -865,6 +866,14 @@ export async function renderBestiary() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
 
+  // SÉCURITÉ : la vue "bestiaire d'un joueur" (viewAsUid) ne doit JAMAIS persister
+  // hors d'une session admin ni à travers un changement de compte. L'app est une
+  // SPA (pas de reload au login) → sans ce reset, l'uid d'un joueur précédemment
+  // consulté en MJ resterait collé et ses estimations seraient écrasées par le
+  // compte suivant.
+  if (!STATE.isAdmin || STORE._authUid !== STATE.user?.uid) STORE.viewAsUid = null;
+  STORE._authUid = STATE.user?.uid || null;
+
   // Admin : charger la liste des bestiaires disponibles
   if (STATE.isAdmin) {
     const meta = await getDocData('bestiary_meta', 'list');
@@ -917,7 +926,7 @@ export async function renderBestiary() {
   _bstApplyData(cachedCreatures || []);
   _render();
 
-  const trackerUid = STORE.viewAsUid || STATE.user?.uid;
+  const trackerUid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid;
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
   // Les noms 'bst-creatures'/'bst-tracker' sont réutilisés : si l'admin
@@ -1680,7 +1689,9 @@ export async function deleteBeast(id) {
 // SUIVI JOUEUR
 // ══════════════════════════════════════════════════════════════════════════════
 async function _saveTracker() {
-  const uid = STORE.viewAsUid || STATE.user?.uid; if (!uid) return;
+  // viewAsUid n'est respecté QUE pour un admin — sinon un joueur écrirait dans le
+  // doc d'un autre joueur (uid périmé d'une session MJ précédente).
+  const uid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid; if (!uid) return;
   await tryDoc('bestiary_tracker', uid, { data: STORE.tracker });
 }
 
