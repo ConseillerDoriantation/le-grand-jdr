@@ -60,8 +60,7 @@ import {
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   previewXpBar, saveXpDirect, addXpDelta,
   allocStatPoint, addXpFromInput, toggleCompteHist,
-  renderCharProfil, saveCharProfil, openProfilImageUpload, removeProfilImage,
-  addProfilTag, removeProfilTag, initProfilTagUi,
+  renderCharProfil, openProfilImageUpload, removeProfilImage,
   getProfilCacheRef as _profilCache,
   STATS_KEYS,
 } from './characters/tabs.js';
@@ -586,7 +585,6 @@ function _renderTabV3(tab, c, canEdit) {
   area.classList.add('cs-tab-fadein');
   if (tab === 'profil') {
     bindRichTextEditors(area);
-    initProfilTagUi();
   }
   if (tab === 'journal' && sub === 'notes') { bindRichTextEditors(area); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
@@ -2610,9 +2608,6 @@ registerActions({
   _allocStatPoint:          (btn)   => allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
   saveMaitrise:             (btn)   => saveMaitrise(Number(btn.dataset.idx)),
   deleteMaitrise:           (btn)   => deleteMaitrise(Number(btn.dataset.idx)),
-  removeProfilTag:          (btn)   => removeProfilTag(btn),
-  addProfilTag:             (btn)   => addProfilTag(btn.dataset.tag),
-  saveCharProfil:           (btn)   => saveCharProfil(btn.dataset.id),
 });
 
 charSession.bindRender(_renderTab, renderCharSheet, refreshOrDisplay);
