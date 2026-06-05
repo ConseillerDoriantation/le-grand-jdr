@@ -1364,18 +1364,19 @@ function _v3TagColor(text) {
 }
 
 function _renderRadarV3(c) {
+  const statValue = (key) => Math.min(22, (c.stats?.[key] || 8) + (c.statsBonus?.[key] || 0));
   const STATS_K = [
-    { k: 'FOR', v: c.stats?.force        || 8 },
-    { k: 'DEX', v: c.stats?.dexterite    || 8 },
-    { k: 'INT', v: c.stats?.intelligence || 8 },
-    { k: 'CON', v: c.stats?.constitution || 8 },
-    { k: 'SAG', v: c.stats?.sagesse      || 8 },
-    { k: 'CHA', v: c.stats?.charisme     || 8 },
+    { k: 'FOR', v: statValue('force') },
+    { k: 'DEX', v: statValue('dexterite') },
+    { k: 'INT', v: statValue('intelligence') },
+    { k: 'CON', v: statValue('constitution') },
+    { k: 'SAG', v: statValue('sagesse') },
+    { k: 'CHA', v: statValue('charisme') },
   ];
-  const cx = 120, cy = 120, R = 80, n = STATS_K.length;
+  const cx = 120, cy = 120, R = 80, maxStat = 22, n = STATS_K.length;
   const angle = (i) => -Math.PI / 2 + (i * 2 * Math.PI / n);
   const point = (i, v) => {
-    const r = (Math.max(0, Math.min(20, v)) / 20) * R;
+    const r = (Math.max(0, Math.min(maxStat, v)) / maxStat) * R;
     const a = angle(i);
     return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
   };
