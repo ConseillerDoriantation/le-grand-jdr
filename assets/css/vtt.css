@@ -1972,63 +1972,9 @@
   flex: 1; min-height: 0;
   overflow: hidden;
 }
-/* Zone principale : liste d'actions (gauche) + panneau d'aperçu JRPG (droite) */
-.modal.modal--aopt .vtt-aopt-main {
-  flex: 1; min-height: 0;
-  display: flex; gap: .7rem; align-items: stretch;
-}
 .modal.modal--aopt .vtt-aopt-list {
   flex: 1; min-height: 0; min-width: 0;
   max-height: none;
-}
-/* ── Panneau d'aperçu de l'action survolée/focalisée ── */
-.vtt-aopt-preview {
-  flex-shrink: 0; width: 246px;
-  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));
-  border: 1px solid var(--border); border-radius: 11px;
-  padding: 0; overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
-}
-.vtt-aoptp-card {
-  display: flex; flex-direction: column; gap: .5rem;
-  padding: .85rem .8rem 1rem;
-  border-top: 3px solid var(--aopt-col, var(--border));
-  border-radius: 11px 11px 0 0;
-  min-height: 100%;
-}
-.vtt-aoptp-icon {
-  width: 52px; height: 52px; align-self: center;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 2rem; border-radius: 13px;
-  background: color-mix(in srgb, var(--aopt-col, #fff) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--aopt-col, #fff) 32%, transparent);
-}
-.vtt-aoptp-name {
-  text-align: center; font-weight: 800; font-size: .95rem; color: var(--text);
-  line-height: 1.25; display: flex; align-items: center; justify-content: center; gap: .35rem; flex-wrap: wrap;
-}
-.vtt-aoptp-tags { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
-.vtt-aoptp-at {
-  font-size: .64rem; font-weight: 800; color: var(--c, var(--text-dim));
-  background: color-mix(in srgb, var(--c, #888) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c, #888) 38%, transparent);
-  padding: 2px 8px; border-radius: 999px;
-}
-.vtt-aoptp-pills { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
-.vtt-aoptp-desc {
-  font-size: .74rem; line-height: 1.45; color: var(--text-muted);
-  padding-top: .35rem; border-top: 1px dashed var(--border);
-}
-.vtt-aoptp-cast {
-  margin-top: auto; text-align: center; font-size: .68rem; font-weight: 700;
-  color: var(--aopt-col, var(--gold));
-  background: color-mix(in srgb, var(--aopt-col, #fff) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--aopt-col, #fff) 26%, transparent);
-  padding: .4rem; border-radius: 8px;
-}
-/* Écrans étroits : l'aperçu prend trop de place → on le masque, les pills suffisent */
-@media (max-width: 680px) {
-  .vtt-aopt-preview { display: none; }
 }
 .vtt-aopt-footer {
   text-align: right;
@@ -2168,9 +2114,24 @@
   background: rgba(255,255,255,.06); padding: 1px .45rem; border-radius: 999px;
 }
 .vtt-aopt-section-body {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 6px;
   padding: 5px;
 }
+
+/* ── Action en carte de sort (réutilise .cs-spellcard de la fiche perso) ── */
+.cs-v3 .vtt-castcard {
+  cursor: pointer; text-align: left; font-family: inherit; width: 100%;
+  appearance: none; -webkit-appearance: none;
+}
+.cs-v3 .vtt-castcard:hover {
+  border-color: color-mix(in srgb, var(--type-col, var(--gold)) 60%, var(--border));
+  box-shadow: 0 3px 16px -8px var(--type-col, transparent);
+  transform: translateX(1px);
+}
+.cs-v3 .vtt-castcard:active { transform: translateX(1px) translateY(1px); }
+.cs-v3 .vtt-castcard.is-oor { opacity: .5; }
+/* Le badge PM (réutilisé) se cale à droite de l'en-tête de carte */
+.cs-v3 .vtt-castcard .vtt-aopt-pm { margin-left: auto; align-self: flex-start; }
 
 /* ── Option / card individuelle ───────────────────────────────────── */
 .vtt-aopt {
@@ -2202,11 +2163,6 @@
   border: 1px solid color-mix(in srgb, var(--aopt-col, #ffffff) 28%, transparent);
   border-radius: 8px;
   flex-shrink: 0;
-}
-/* Pastille d'élément à côté du nom (≈ noyau des cartes de sort) */
-.vtt-aopt-elem {
-  font-size: .92rem; line-height: 1; flex-shrink: 0;
-  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ec, #888) 60%, transparent));
 }
 .vtt-aopt-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .vtt-aopt-head {
