@@ -12758,9 +12758,9 @@ function _vttSessionSince(ts) {
   const h = Math.floor(m / 60);
   return `il y a ${h} h`;
 }
-function _vttGateBack() {
-  if (window.history.length > 1) window.history.back();
-  else location.hash = '';
+async function _vttGateBack() {
+  const { navigate } = await import('../core/navigation.js');
+  navigate('dashboard');
 }
 async function _vttEnterTable() {
   _vttEntered = true;
