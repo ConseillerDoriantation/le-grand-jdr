@@ -3998,6 +3998,21 @@ async function _execAttack(srcId, tgtId) {
       : (o.damageTypeIcon && o.damageTypeId && o.damageTypeId !== 'physique'
           ? `<span class="vtt-aopt-elem" style="--ec:${o.damageTypeColor||'#9ca3af'}" title="Élément">${o.damageTypeIcon}</span>` : '');
 
+    // ── Contenu du panneau d'aperçu (JRPG) pour cette action ──
+    const atChip = o.actionType === 'bonus'
+      ? `<span class="vtt-aoptp-at" style="--c:#f97316">💫 Action Bonus</span>`
+      : o.actionType === 'reaction'
+        ? `<span class="vtt-aoptp-at" style="--c:#a78bfa">⚡ Réaction</span>`
+        : `<span class="vtt-aoptp-at" style="--c:#e8b84b">⚡ Action</span>`;
+    const detailHtml = `<div class="vtt-aoptp-card" style="--aopt-col:${accentCol}">
+        <div class="vtt-aoptp-icon">${o.icon}</div>
+        <div class="vtt-aoptp-name">${_esc(o.label)}${elemPastille}</div>
+        <div class="vtt-aoptp-tags">${atChip}${pmBadge}</div>
+        <div class="vtt-aoptp-pills">${pills.join('')}</div>
+        ${desc ? `<div class="vtt-aoptp-desc">${_esc(desc)}</div>` : ''}
+        <div class="vtt-aoptp-cast">▶ Cliquer pour lancer</div>
+      </div>`;
+
     return `
       <button class="vtt-aopt ${canHit?'':'vtt-aopt--oor'}" style="--aopt-col:${accentCol}" data-vtt-fn="_vttPickOpt" data-vtt-args="${srcId}|${tgtId}|${i}">
         <div class="vtt-aopt-icon">${o.icon}</div>
@@ -4009,6 +4024,7 @@ async function _execAttack(srcId, tgtId) {
           <div class="vtt-aopt-pills">${pills.join('')}</div>
           ${desc ? `<div class="vtt-aopt-desc">${_esc(desc)}</div>` : ''}
         </div>
+        <template class="vtt-aopt-detail">${detailHtml}</template>
       </button>`;
   };
 
@@ -4069,6 +4085,8 @@ async function _execAttack(srcId, tgtId) {
   const canEditSrc = _canControlToken(src);
   let basicHtml = '';
   if (canEditSrc) {
+    const _basicTpl = (icon, name, desc, col) =>
+      `<template class="vtt-aopt-detail"><div class="vtt-aoptp-card" style="--aopt-col:${col}"><div class="vtt-aoptp-icon">${icon}</div><div class="vtt-aoptp-name">${name}</div><div class="vtt-aoptp-tags"><span class="vtt-aoptp-at" style="--c:#fbbf24">🎭 Action de base</span></div><div class="vtt-aoptp-pills"><span class="vtt-aopt-pill" style="color:${col};border-color:${col}66">${desc}</span></div><div class="vtt-aoptp-cast">▶ Cliquer pour activer</div></div></template>`;
     const selfBtn = (cond, icon, name, desc, col) => `
         <button class="vtt-aopt" style="--aopt-col:${col}" data-name="${name.toLowerCase()}" data-vtt-fn="_vttSelfActionClose" data-vtt-args="${srcId}|${cond}">
           <div class="vtt-aopt-icon">${icon}</div>
@@ -4076,6 +4094,7 @@ async function _execAttack(srcId, tgtId) {
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">${name}</span></div>
             <div class="vtt-aopt-pills"><span class="vtt-aopt-pill" style="color:${col};border-color:${col}66">${desc}</span></div>
           </div>
+          ${_basicTpl(icon, name, desc, col)}
         </button>`;
     let bBody = '', bCount = 0;
     // Courir : combat actif et pas encore utilisé ce tour.
@@ -4087,6 +4106,7 @@ async function _execAttack(srcId, tgtId) {
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">Courir</span></div>
             <div class="vtt-aopt-pills"><span class="vtt-aopt-pill" style="color:#4ade80;border-color:rgba(74,222,128,.4)">+${lS.displayMovement??6} cases ce tour</span></div>
           </div>
+          ${_basicTpl('🏃', 'Courir', `+${lS.displayMovement??6} cases ce tour`, '#4ade80')}
         </button>`;
       bCount++;
     }
@@ -4102,6 +4122,7 @@ async function _execAttack(srcId, tgtId) {
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">Aider — relever ${_esc(lT.displayName??tgt.name)}</span></div>
             <div class="vtt-aopt-pills"><span class="vtt-aopt-pill" style="color:#fbbf24;border-color:#fbbf2466">Relève à 1 PV · retire ses états</span></div>
           </div>
+          ${_basicTpl('🤝', `Aider — relever ${_esc(lT.displayName??tgt.name)}`, 'Relève à 1 PV · retire ses états', '#fbbf24')}
         </button>`;
       bCount++;
     }
@@ -4152,14 +4173,33 @@ async function _execAttack(srcId, tgtId) {
       ${pmBar}
       ${tabsHtml}
       ${searchHtml}
-      <div class="vtt-aopt-list">${optsHtml}${basicHtml}</div>
-      <div class="vtt-aopt-empty" style="display:none">
-        <span style="opacity:.5">Aucune action ne correspond.</span>
+      <div class="vtt-aopt-main">
+        <div class="vtt-aopt-list">${optsHtml}${basicHtml}
+          <div class="vtt-aopt-empty" style="display:none"><span style="opacity:.5">Aucune action ne correspond.</span></div>
+        </div>
+        <aside class="vtt-aopt-preview" id="vtt-aopt-preview" aria-live="polite"></aside>
       </div>
       <div class="vtt-aopt-footer">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
       </div>
     </div>`);
+  // ── Panneau d'aperçu (façon menu JRPG) : montre le détail de l'action
+  //    survolée/focalisée. Listener attaché ici car le dispatch VTT n'écoute
+  //    pas le survol. Nettoyé automatiquement quand le contenu de la modale change.
+  const _aMain = document.querySelector('.vtt-aopt-main');
+  const _aPrev = document.getElementById('vtt-aopt-preview');
+  if (_aMain && _aPrev) {
+    const setPreview = (btn) => {
+      const tpl = btn?.querySelector('.vtt-aopt-detail');
+      if (tpl) _aPrev.innerHTML = tpl.innerHTML;
+    };
+    // Aperçu initial = première action visible
+    setPreview(_aMain.querySelector('.vtt-aopt'));
+    const onHover = (e) => { const b = e.target.closest?.('.vtt-aopt'); if (b && _aMain.contains(b)) setPreview(b); };
+    _aMain.addEventListener('mouseover', onHover);
+    _aMain.addEventListener('focusin', onHover);
+  }
+
   // Marque #modal-box pour le styling spécifique (plus fiable que :has() seul).
   // Nettoyé à chaque réouverture (au cas où) et au close via observer.
   const box = document.getElementById('modal-box');
