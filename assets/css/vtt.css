@@ -2132,6 +2132,11 @@
 .cs-v3 .vtt-castcard.is-oor { opacity: .5; }
 /* Le badge PM (réutilisé) se cale à droite de l'en-tête de carte */
 .cs-v3 .vtt-castcard .vtt-aopt-pm { margin-left: auto; align-self: flex-start; }
+/* Chips d'effet « pleins » comme sur la fiche (cs-sort-sstat) plutôt qu'en contour */
+.cs-v3 .vtt-castcard .vtt-aopt-pill {
+  font-weight: 700;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
 
 /* ── Option / card individuelle ───────────────────────────────────── */
 .vtt-aopt {

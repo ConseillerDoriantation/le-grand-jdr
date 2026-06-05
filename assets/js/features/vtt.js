@@ -4004,6 +4004,20 @@ async function _execAttack(srcId, tgtId) {
         ? `<span class="cs-spellcard-act" style="--c:#a78bfa">🔄 Réac.</span>`
         : `<span class="cs-spellcard-act" style="--c:#e8b84b">⚡ Act.</span>`;
 
+    // Runes du sort (chips lecture seule) — comme sur la carte de la fiche perso.
+    let runeChipsHtml = '';
+    if (o.sortIdx !== undefined && srcChar?.deck_sorts) {
+      const _s = srcChar.deck_sorts[o.sortIdx];
+      const _runes = _s?.runes || [];
+      if (_runes.length) {
+        const _counts = {}; _runes.forEach(r => { _counts[r] = (_counts[r]||0)+1; });
+        runeChipsHtml = `<div class="cs-spellcard-runes">${Object.entries(_counts).map(([nom, n]) => {
+          const m = _VTT_RUNE_META[nom] || { icon:'•', color:'#888' };
+          return `<span class="cs-runechip" style="--c:${m.color}" title="${_esc(nom)}">${m.icon} ${_esc(nom)}${n>1?` ×${n}`:''}</span>`;
+        }).join('')}</div>`;
+      }
+    }
+
     // Carte d'action — présentation identique aux cartes de sort de la fiche perso
     // (.cs-spellcard, scope .cs-v3), cliquable pour lancer.
     return `
@@ -4017,6 +4031,7 @@ async function _execAttack(srcId, tgtId) {
           ${pmBadge}
         </header>
         ${pills.length ? `<div class="cs-spellcard-tags">${pills.join('')}</div>` : ''}
+        ${runeChipsHtml}
         ${desc ? `<p class="cs-spellcard-desc">${_esc(desc)}</p>` : ''}
       </button>`;
   };
