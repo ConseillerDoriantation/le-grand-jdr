@@ -4021,7 +4021,7 @@ function _renderAtelierItems() {
           ${it.slotArmure ? `<span>${_esc(it.slotArmure)}${it.typeArmure?' · '+_esc(it.typeArmure):''}</span>` : ''}
           ${it.slotBijou ? `<span>${_esc(it.slotBijou)}</span>` : ''}
           <span class="atelier-item-stock ${stockCls}">${stockTxt}</span>
-          <span class="atelier-item-price ${poor?'is-poor':''}">${prix} or</span>
+          <span class="atelier-item-price ${poor?'is-poor':''}"${poor?` title="Hors budget — il te manque ${prix-solde} or"`:''}>${poor?'🔒 ':''}${prix} or</span>
         </div>
         ${bonus.length ? `<div class="atelier-item-bonus">
           ${bonus.slice(0,4).map(b => `<span class="sh-item-bonus-chip" style="border-color:${b.color}55;background:${b.color}18;color:${b.color}">${b.short} ${b.val>0?'+':''}${b.val}</span>`).join('')}

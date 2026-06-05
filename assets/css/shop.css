@@ -4393,7 +4393,7 @@ body .sh-page--v2 .sh-item-img:not([style*="background-image"]) {
   color: var(--amber, var(--amber));
   font-family: 'Outfit', sans-serif; font-weight: 700;
 }
-.atelier-item-price.is-poor { color: var(--crimson-light, #ff8ca7); text-decoration: line-through; }
+.atelier-item-price.is-poor { color: var(--crimson-light, #ff8ca7); font-weight: 700; }
 
 /* Stock badge dans l'atelier */
 .atelier-item-stock {
