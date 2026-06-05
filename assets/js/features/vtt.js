@@ -224,6 +224,7 @@ _vttBindDispatch();
 // ── État module ─────────────────────────────────────────────────────
 let _stage   = null, _layers = {}, _unsubs = [], _resizeObs = null;
 let _session = {}, _pages = {}, _tokens = {};
+let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
 let _characters = {};   // characterId → character doc
 let _npcs       = {};   // npcId → npc doc
 let _bestiary   = {};   // beastId → creature doc (bestiaire)
@@ -7767,6 +7768,7 @@ function _initListeners() {
   // 1. Session
   _unsubs.push(onSnapshot(_sesRef(), snap => {
     _session=snap.exists()?snap.data():{};
+    _renderSessionBtn();
     _renderPageTabs();
     if (!STATE.isAdmin) {
       const uid=STATE.user?.uid;
@@ -12648,6 +12650,7 @@ function _buildHtml() {
     ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
     <div class="vtt-tool-group vtt-right">
       ${mj?`
+        <button class="vtt-btn-sm vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer / terminer la session — prévient les joueurs qui rejoignent">⚪ Session</button>
         <button class="vtt-btn-sm" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Verrouille / déverrouille le calque des cartes en arrière-plan">🗺 Carte</button>
         <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via Cloudinary — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
         <button class="vtt-btn-sm" data-vtt-fn="_vttSetImgbbKey" title="Configurer Cloudinary (cloud name + upload preset)">🔑</button>`:''}
@@ -12710,12 +12713,63 @@ function _buildHtml() {
 // ═══════════════════════════════════════════════════════════════════
 export async function renderVttPage() {
   _cleanup();
+  _vttEntered = false;                 // nouvelle navigation → re-passage par le sas
   const content=document.getElementById('main-content');
   if (!content) return;
-  content.innerHTML = appSplashHtml('Chargement de la table…');
   content.style.overflow='hidden';
   content.style.height='100vh';
   content.style.paddingBottom='0';
+  // Le MJ pilote la table → il entre directement. Les JOUEURS passent par un SAS :
+  // ils ne s'abonnent à AUCUN listener Firestore tant qu'ils n'ont pas cliqué
+  // « Entrer » → grosse économie de quota pour ceux qui ouvrent sans jouer.
+  if (STATE.isAdmin) { _vttEntered = true; return _vttMountTable(content); }
+  content.innerHTML = appSplashHtml('Connexion à la table…');
+  let _ses = {};
+  try { const _snap = await getDoc(_sesRef()); _ses = _snap.exists() ? _snap.data() : {}; } catch {}
+  // Si on a quitté la page entre-temps, ne rien afficher.
+  if (document.getElementById('main-content') !== content) return;
+  content.innerHTML = _vttGateHtml(!!_ses.live, _ses);
+}
+
+// Sas d'entrée joueur : aucun listener tant qu'on n'a pas cliqué « Entrer ».
+function _vttGateHtml(live, ses = {}) {
+  const since = live && ses.liveSince ? _vttSessionSince(ses.liveSince) : '';
+  return `<div class="vtt-gate">
+    <div class="vtt-gate-card ${live ? 'is-live' : ''}">
+      <div class="vtt-gate-ico">${live ? '🔴' : '🎲'}</div>
+      <h2 class="vtt-gate-title">${live ? 'Session de jeu en cours' : 'Table virtuelle'}</h2>
+      <p class="vtt-gate-text">${live
+        ? `Le MJ a déclaré une <b>session en cours</b>${since ? ` (démarrée ${since})` : ''}.<br>Tu peux rejoindre la table maintenant — ou revenir plus tard.`
+        : `Aucune session déclarée pour le moment.<br>Tu peux entrer pour explorer la table.`}</p>
+      <div class="vtt-gate-actions">
+        <button class="btn btn-gold" data-vtt-fn="_vttEnterTable">➡ Entrer dans la table</button>
+        <button class="btn btn-outline" data-vtt-fn="_vttGateBack">← Plus tard</button>
+      </div>
+      <p class="vtt-gate-note">💡 Tant que tu n'es pas entré, tu ne consommes aucune ressource temps réel.</p>
+    </div>
+  </div>`;
+}
+function _vttSessionSince(ts) {
+  const ms = ts?.seconds ? ts.seconds * 1000 : (typeof ts === 'number' ? ts : 0);
+  if (!ms) return '';
+  const m = Math.floor((Date.now() - ms) / 60000);
+  if (m < 1) return "à l'instant";
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);
+  return `il y a ${h} h`;
+}
+async function _vttGateBack() {
+  const { navigate } = await import('../core/navigation.js');
+  navigate('dashboard');
+}
+async function _vttEnterTable() {
+  _vttEntered = true;
+  const content = document.getElementById('main-content');
+  if (content) await _vttMountTable(content);
+}
+
+async function _vttMountTable(content) {
+  content.innerHTML = appSplashHtml('Chargement de la table…');
   // Lancer en parallèle : téléchargement Konva + reads Firestore non critiques
   const _konvaP   = _loadKonva();
   const _emotesP  = _loadEmotes();
@@ -12893,6 +12947,27 @@ export async function renderVttPage() {
 // Effet : il disparaît de la colonne pour tout le monde, et son doc cesse d'être
 // relu à chaque ouverture du VTT (utile pour les entrées fantômes). Un joueur
 // encore actif se ré-annonce à son prochain heartbeat (≤75 s) — c'est voulu.
+// MJ : déclare / termine une session de jeu en cours (vtt/session.live).
+// Les joueurs qui ouvrent le VTT voient alors un message dans le sas d'entrée.
+function _renderSessionBtn() {
+  const btn = document.getElementById('vtt-session-btn');
+  if (!btn) return;
+  const live = !!_session?.live;
+  btn.classList.toggle('is-live', live);
+  btn.innerHTML = live ? '🔴 Session en cours' : '⚪ Démarrer la session';
+  btn.title = live
+    ? 'Session déclarée en cours — clique pour la terminer'
+    : 'Démarrer la session (prévient les joueurs qui rejoignent)';
+}
+async function _vttToggleSessionLive() {
+  if (!STATE.isAdmin) return;
+  const live = !_session?.live;
+  try {
+    await setDoc(_sesRef(), live ? { live: true, liveSince: serverTimestamp() } : { live: false }, { merge: true });
+    showNotif(live ? '🔴 Session déclarée en cours.' : '⏹ Session terminée.', 'success');
+  } catch { showNotif('Erreur d\'enregistrement de la session.', 'error'); }
+}
+
 async function _vttKickPresence(uid) {
   if (!STATE.isAdmin || !uid) return;
   const pseudo = _presence[uid]?.pseudo || 'ce joueur';
@@ -13717,6 +13792,9 @@ PAGES.vtt=renderVttPage;
 
 // Registre des actions pour le dispatcher data-vtt-fn
 const VTT_ACTIONS = {
+  _vttEnterTable,
+  _vttGateBack,
+  _vttToggleSessionLive,
   _invPickToggle,
   _invPickConfirm,
   _invPickCancel,
