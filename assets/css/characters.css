@@ -8553,6 +8553,37 @@ input[type=number].input-field::-webkit-outer-spin-button {
 .cs-v3 .cs-sorts-chip.type.ench.on { background: rgba(244,196,48,.18); color: var(--amber, var(--amber)); box-shadow: 0 0 8px -2px rgba(244,196,48,.4); }
 .cs-v3 .cs-sorts-chip.type.aff.on  { background: rgba(139,92,246,.18); color: #b08cff; box-shadow: 0 0 8px -2px rgba(139,92,246,.4); }
 .cs-v3 .cs-sorts-chip.type.util.on { background: rgba(180,127,255,.18); color: #c8a8ff; box-shadow: 0 0 8px -2px rgba(180,127,255,.4); }
+/* Chips de filtre RUNE — couleur propre à la rune quand actif */
+.cs-v3 .cs-sorts-chip.rune.on {
+  background: color-mix(in srgb, var(--c, #888) 20%, transparent);
+  color: color-mix(in srgb, var(--c, #ccc) 62%, var(--text));
+  box-shadow: 0 0 8px -2px var(--c, transparent);
+}
+.cs-v3 .cs-sorts-filt-sep { width: 1px; align-self: stretch; margin: 0 3px; background: var(--border); }
+
+/* Stepper MJ : nombre de runes d'effet débloquées (characters.maxRunes) */
+.cs-v3 .cs-sorts-mjrunes {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 7px 3px 11px; border-radius: 10px;
+  background: rgba(180,127,255,.10); border: 1px solid rgba(180,127,255,.32);
+}
+.cs-v3 .cs-sorts-mjrunes-lbl {
+  font-size: .58rem; font-weight: 800; letter-spacing: .08em;
+  text-transform: uppercase; color: #c8a8ff;
+}
+.cs-v3 .cs-sorts-mjrunes-val {
+  font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 1rem;
+  color: #d8c2ff; min-width: 14px; text-align: center; line-height: 1;
+}
+.cs-v3 .cs-sorts-mjrunes-btn {
+  width: 22px; height: 22px; border-radius: 6px; cursor: pointer;
+  border: 1px solid rgba(180,127,255,.35); background: rgba(180,127,255,.12);
+  color: #c8a8ff; font-size: .9rem; font-weight: 700; line-height: 1; font-family: inherit;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background .12s, border-color .12s;
+}
+.cs-v3 .cs-sorts-mjrunes-btn:hover { background: rgba(180,127,255,.24); }
+.cs-v3 .cs-sorts-mjrunes-btn:disabled { opacity: .35; cursor: not-allowed; }
 
 /* Catégorie repliable */
 .cs-v3 .cs-sort-cat-hdr {
