@@ -103,6 +103,22 @@ try {
   console.error('[app] modal overlay:', err);
 }
 
+// ── Molette sur <input type="number"> ────────────────────────────────────────
+// Par défaut, scroller la molette sur un champ numérique focalisé fait varier sa
+// valeur (incrément/décrément) — comportement indésirable dans toute l'app.
+// On retire le focus au moindre scroll : la valeur ne change pas et la page
+// continue de défiler normalement. Couvre aussi les inputs créés dynamiquement.
+try {
+  document.addEventListener('wheel', (e) => {
+    const el = e.target;
+    if (el instanceof HTMLInputElement && el.type === 'number' && el === document.activeElement) {
+      el.blur();
+    }
+  }, { passive: true });
+} catch (err) {
+  console.error('[app] wheel guard:', err);
+}
+
 // ── Les features sont chargées en lazy via navigation.js ─────────────────────
 // Chaque page charge son module uniquement à la première navigation.
 // Voir : core/navigation.js → loadFeature()
