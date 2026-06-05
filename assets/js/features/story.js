@@ -36,6 +36,28 @@ const STATUT_CFG = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function stCfg(item){ return STATUT_CFG[item.statut] || STATUT_CFG['En attente']; }
 
+// Issue d'un groupe, dérivée de sa réussite (%). Permet d'afficher clairement
+// quand des groupes divergent (l'un réussit, l'autre échoue) là où le statut
+// global de la mission ne le montre pas.
+function groupOutcome(g){
+  const raw = g?.reussite;
+  if (raw == null || raw === '' || isNaN(parseInt(raw)))
+    return { key:'attente',   label:'En attente', icon:'◷', color:'#8a93a3' };
+  const v = parseInt(raw);
+  if (v >= 70) return { key:'reussie',   label:'Réussie',   icon:'✓', color:'#22c38e' };
+  if (v >= 30) return { key:'partielle', label:'Partielle', icon:'◑', color:'#e8b84b' };
+  return        { key:'echec',     label:'Échouée',   icon:'✗', color:'#ff6b6b' };
+}
+// Pastilles compactes d'issue par groupe (≥2 groupes). `is-mixed` si divergence.
+function _groupsDotsHtml(item){
+  const gs = item.groupes || [];
+  if (gs.length < 2) return '';
+  const outs = gs.map(groupOutcome);
+  const mixed = new Set(outs.map(o => o.key)).size > 1;
+  const dots = gs.map((g,i) => `<span class="grp-dot" style="--oc:${outs[i].color}" title="${_esc(g.nom||'Groupe')} · ${outs[i].label}"></span>`).join('');
+  return `<span class="grp-dots${mixed?' is-mixed':''}" title="${mixed?'Résultats divergents selon les groupes':'Résultats homogènes'}">${dots}</span>`;
+}
+
 
 const STORE = {
   axeMap:         {},   // { [axeId]: { id, label, color } }
@@ -1225,7 +1247,7 @@ function _renderListView(missions) {
         <div class="list-num">${String(i+1).padStart(2,'0')}</div>
         <div class="list-titre">${_esc(m.titre || 'Sans titre')}${m.lieu ? `<span class="list-lieu"> · ${_esc(m.lieu)}</span>` : ''}</div>
         <div class="list-axe">${m.axe ? `<span class="list-axe-dot"></span><span>${_esc(m.axe)}</span>` : '<span style="color:var(--text-dim)">—</span>'}</div>
-        <div class="list-statut">${st.icon} ${_esc(m.statut || 'En attente')}</div>
+        <div class="list-statut">${st.icon} ${_esc(m.statut || 'En attente')}${_groupsDotsHtml(m)}</div>
         <div class="list-prog">
           <div class="list-prog-bar"><div class="list-prog-fill" style="width:${prog}%"></div></div>
           <span class="list-prog-val">${prog}%</span>
@@ -1558,6 +1580,8 @@ async function openStoryDetail(id) {
           <span class="mv-hero-statut" style="color:${st.color};border-color:${st.border}">
             ${st.icon} <span>${_esc(item.statut || 'En attente')}</span>
           </span>
+          ${(groupes.length >= 2 && new Set(groupes.map(g => groupOutcome(g).key)).size > 1)
+            ? `<span class="mv-hero-diverge">⚠ Résultats divergents ${_groupsDotsHtml(item)}</span>` : ''}
           ${item.axe ? `<span class="mv-hero-axe" style="color:${axeCol}">● ${_esc(item.axe)}</span>` : ''}
           ${item.date ? `<span class="mv-hero-meta-item">📅 ${_esc(item.date)}</span>` : ''}
           ${item.lieu ? `<span class="mv-hero-meta-item">📍 ${_esc(item.lieu)}</span>` : ''}
@@ -1615,11 +1639,13 @@ async function openStoryDetail(id) {
           ${groupes.map(g => {
             const membres = (g.membres || []).map(mid => chars.find(c => c.id === mid)).filter(Boolean);
             const gr = parseInt(g.reussite) || 0;
-            const grColor = gr >= 80 ? '#22c38e' : gr >= 40 ? '#e8b84b' : gr > 0 ? '#ff8a4c' : 'var(--text-dim)';
+            const o = groupOutcome(g);
+            const grColor = o.color;
             const notes = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
             return `<article class="mv-group" style="--gr-color:${grColor}">
               <header class="mv-group-head">
                 <h4 class="mv-group-name">${_esc(g.nom)}</h4>
+                <span class="mv-group-outcome" style="--oc:${o.color}">${o.icon} ${o.label}</span>
                 ${gr > 0 ? `<div class="mv-group-pct">${gr}<small>%</small></div>` : ''}
               </header>
               ${membres.length ? `<div class="mv-group-members">
