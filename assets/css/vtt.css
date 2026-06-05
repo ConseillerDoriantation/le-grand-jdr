@@ -1888,6 +1888,31 @@
   transition: width .2s;
 }
 
+/* ── Sélecteur d'élément intégré (sorts multi-noyau) ── */
+.vtt-atk-elemrow {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  background: rgba(255,255,255,.03); border: 1px solid var(--border);
+  border-radius: 9px; padding: .5rem .6rem; margin-bottom: .7rem;
+}
+.vtt-atk-elemrow-lbl { font-size: .7rem; font-weight: 700; color: var(--text-dim); flex-shrink: 0; }
+.vtt-atk-elems { display: flex; flex-wrap: wrap; gap: 5px; }
+.vtt-atk-elem {
+  display: inline-flex; align-items: center; gap: .25rem;
+  border: 1px solid color-mix(in srgb, var(--ec, #888) 45%, var(--border));
+  background: color-mix(in srgb, var(--ec, #888) 10%, transparent);
+  color: color-mix(in srgb, var(--ec, #ccc) 68%, var(--text));
+  border-radius: 7px; padding: .3rem .55rem; font-size: .74rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+  transition: background .12s, border-color .12s, box-shadow .12s;
+}
+.vtt-atk-elem:hover { background: color-mix(in srgb, var(--ec, #888) 20%, transparent); color: var(--text); }
+.vtt-atk-elem.is-active {
+  color: var(--ec, var(--text));
+  border-color: var(--ec, var(--gold));
+  background: color-mix(in srgb, var(--ec, #888) 24%, transparent);
+  box-shadow: inset 0 0 0 1px var(--ec, transparent);
+}
+
 /* En-têtes de catégorie */
 .vtt-opt-cat-hdr {
   display: flex; align-items: center; justify-content: space-between;
@@ -1948,10 +1973,8 @@
   overflow: hidden;
 }
 .modal.modal--aopt .vtt-aopt-list {
-  flex: 1; min-height: 0;
-  /* Filet de sécurité au cas où la chaîne flex ne se cascade pas :
-     borne haute en hauteur fenêtre pour garantir le scroll quoi qu'il arrive */
-  max-height: 70vh;
+  flex: 1; min-height: 0; min-width: 0;
+  max-height: none;
 }
 .vtt-aopt-footer {
   text-align: right;
@@ -2091,34 +2114,59 @@
   background: rgba(255,255,255,.06); padding: 1px .45rem; border-radius: 999px;
 }
 .vtt-aopt-section-body {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 6px;
   padding: 5px;
+}
+
+/* ── Action en carte de sort (réutilise .cs-spellcard de la fiche perso) ── */
+.cs-v3 .vtt-castcard {
+  cursor: pointer; text-align: left; font-family: inherit; width: 100%;
+  appearance: none; -webkit-appearance: none;
+}
+.cs-v3 .vtt-castcard:hover {
+  border-color: color-mix(in srgb, var(--type-col, var(--gold)) 60%, var(--border));
+  box-shadow: 0 3px 16px -8px var(--type-col, transparent);
+  transform: translateX(1px);
+}
+.cs-v3 .vtt-castcard:active { transform: translateX(1px) translateY(1px); }
+.cs-v3 .vtt-castcard.is-oor { opacity: .5; }
+/* Le badge PM (réutilisé) se cale à droite de l'en-tête de carte */
+.cs-v3 .vtt-castcard .vtt-aopt-pm { margin-left: auto; align-self: flex-start; }
+/* Chips d'effet « pleins » comme sur la fiche (cs-sort-sstat) plutôt qu'en contour */
+.cs-v3 .vtt-castcard .vtt-aopt-pill {
+  font-weight: 700;
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 /* ── Option / card individuelle ───────────────────────────────────── */
 .vtt-aopt {
   display: grid;
-  grid-template-columns: 30px 1fr;
+  grid-template-columns: 34px 1fr;
   gap: .55rem; align-items: start;
   padding: .5rem .6rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-left: 3px solid var(--aopt-col, var(--border));
+  border-radius: 9px;
   cursor: pointer; text-align: left;
-  transition: background .1s, border-color .12s, transform .08s;
+  transition: background .12s, border-color .12s, box-shadow .12s, transform .08s;
   width: 100%;
 }
 .vtt-aopt:hover {
-  background: var(--bg-card2);
-  border-color: var(--gold);
+  background: color-mix(in srgb, var(--aopt-col, #ffffff) 7%, var(--bg-card2));
+  border-color: color-mix(in srgb, var(--aopt-col, var(--gold)) 55%, var(--border));
+  box-shadow: 0 2px 14px -8px var(--aopt-col, transparent);
+  transform: translateX(1px);
 }
-.vtt-aopt:active { transform: translateY(1px); }
+.vtt-aopt:active { transform: translateX(1px) translateY(1px); }
 .vtt-aopt--oor { opacity: .55; }
 .vtt-aopt-icon {
-  font-size: 1.35rem; line-height: 1;
+  font-size: 1.3rem; line-height: 1;
   display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px;
-  background: rgba(255,255,255,.04); border-radius: 7px;
+  width: 34px; height: 34px;
+  background: color-mix(in srgb, var(--aopt-col, #ffffff) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--aopt-col, #ffffff) 28%, transparent);
+  border-radius: 8px;
   flex-shrink: 0;
 }
 .vtt-aopt-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -3537,6 +3585,23 @@
 .vtt-ms-sort-meta    { display: flex; gap: .25rem; flex-wrap: wrap; margin-top: .08rem; }
 .vtt-ms-sort-pm      { font-size: .58rem; background: color-mix(in srgb, #4f8cff 20%, transparent); color: #4f8cff; padding: .04rem .22rem; border-radius: 3px; }
 .vtt-ms-sort-types   { font-size: .58rem; background: color-mix(in srgb, var(--gold) 15%, transparent); color: var(--gold); padding: .04rem .22rem; border-radius: 3px; }
+
+/* ── Sorts (mini-fiche) : barre de deck + grille de cartes (.cs-spellcard) ── */
+.vtt-ms-deckbar {
+  display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+  padding: .4rem .55rem; margin-bottom: .55rem;
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 26%, var(--border));
+  border-radius: 8px;
+}
+.vtt-ms-deckbar.is-over { background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.4); }
+.vtt-ms-deck-lbl { font-size: .66rem; font-weight: 800; letter-spacing: .03em; color: var(--gold); text-transform: uppercase; }
+.vtt-ms-deck-val { font-size: .9rem; font-weight: 800; color: var(--text); }
+.vtt-ms-deck-val small { font-size: .62rem; font-weight: 700; color: var(--text-dim); }
+.vtt-ms-deckbar.is-over .vtt-ms-deck-val { color: #ff8b8b; }
+.vtt-ms-deck-hint { font-size: .58rem; color: var(--text-dim); margin-left: auto; flex: 1; text-align: right; min-width: 110px; }
+/* La mini-fiche est étroite → une seule colonne, cartes un peu plus compactes */
+.cs-v3 .vtt-ms-spellgrid { grid-template-columns: 1fr; gap: 8px; }
 
 /* ── Inventaire (cards compactes avec image + rareté + actions) ───────── */
 .vtt-ms-inv { display: flex; flex-direction: column; gap: .15rem; }
