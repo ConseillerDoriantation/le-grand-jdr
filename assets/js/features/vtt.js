@@ -720,6 +720,42 @@ function _maybeSyncAutoTokens() {
   _syncAutoTokens();
 }
 
+const _tokenEntityKey = t => t?.characterId ? 'c:' + t.characterId : t?.npcId ? 'n:' + t.npcId : null;
+let _reserveCleanupRunning = false;
+
+async function _cleanupReserveDuplicates() {
+  if (!STATE.isAdmin || _reserveCleanupRunning) return;
+  const seen = new Map();
+  const duplicateIds = [];
+  const reserve = Object.values(_tokens)
+    .map(e => e.data)
+    .filter(t => !t.pageId && _tokenEntityKey(t))
+    .sort((a, b) => {
+      const aAuto = a.id?.startsWith('auto_') ? 0 : 1;
+      const bAuto = b.id?.startsWith('auto_') ? 0 : 1;
+      return aAuto - bAuto || String(a.id).localeCompare(String(b.id));
+    });
+  for (const t of reserve) {
+    const key = _tokenEntityKey(t);
+    if (seen.has(key)) duplicateIds.push(t.id);
+    else seen.set(key, t.id);
+  }
+  if (!duplicateIds.length) return;
+
+  _reserveCleanupRunning = true;
+  try {
+    const batch = writeBatch(db);
+    duplicateIds.forEach(id => batch.delete(_tokRef(id)));
+    await batch.commit();
+    duplicateIds.forEach(id => { _tokens[id]?.shape?.destroy(); delete _tokens[id]; });
+    _renderTraySoon();
+  } catch (e) {
+    console.error('[vtt] cleanup reserve duplicates:', e);
+  } finally {
+    _reserveCleanupRunning = false;
+  }
+}
+
 async function _syncAutoTokens() {
   // ─ 1. Scanner les tokens existants : tokens orphelins + doublons réserve ─
   // Règle : un perso/PNJ peut avoir plusieurs tokens *placés* sur des pages
@@ -6750,7 +6786,15 @@ function _renderTray() {
 
   const all      = Object.values(_tokens).map(e => e.data);
   const onPage   = all.filter(t => t.pageId === _activePage?.id);
-  const reserve  = all.filter(t => !t.pageId && t.type !== 'enemy');
+  const reserveSeen = new Set();
+  const reserve  = all.filter(t => {
+    if (t.pageId || t.type === 'enemy') return false;
+    const key = _tokenEntityKey(t);
+    if (!key) return true;
+    if (reserveSeen.has(key)) return false;
+    reserveSeen.add(key);
+    return true;
+  });
   const inCombat = !!_session?.combat?.active;
 
   // Tokens placés sur d'autres pages (perso/PNJ seulement, déduplication par entité,
@@ -7927,6 +7971,7 @@ function _initListeners() {
     });
     _renderTraySoon();
     _renderCombatTrackerSoon();
+    void _cleanupReserveDuplicates();
     _toksReady=true; _maybeSyncAutoTokens();
     _ensureBestiaryForTokens();
     // Joueur : le bouton « Invoquer mon token » dépend de l'état de SON token
@@ -9643,12 +9688,28 @@ async function _vttRetireToken(tokenId) {
     }
   }
   await _persistInvocationState(t);   // sauvegarde PV/PM si c'est une invocation
-  if (isDuplicate) {
-    await deleteDoc(_tokRef(tokenId)).catch(()=>{});
-  } else {
-    await updateDoc(_tokRef(tokenId),{pageId:null,visible:false}).catch(()=>{});
+  try {
+    if (isDuplicate) {
+      await deleteDoc(_tokRef(tokenId));
+      _tokens[tokenId]?.shape?.destroy();
+      delete _tokens[tokenId];
+    } else {
+      await updateDoc(_tokRef(tokenId),{pageId:null,visible:false});
+      const entry = _tokens[tokenId];
+      if (entry) {
+        entry.shape?.destroy();
+        _tokens[tokenId] = { data: { ...entry.data, pageId:null, visible:false }, shape:null };
+      }
+    }
+  } catch (e) {
+    console.error('[vtt] retire token:', e);
+    showNotif('Erreur lors du retrait du token', 'error');
+    return;
   }
   if (_selected===tokenId) _deselect();
+  _layers.token?.batchDraw();
+  _renderTraySoon();
+  void _cleanupReserveDuplicates();
 }
 // Le joueur invoque son propre token sur la carte active
 async function _vttInvokeMyToken() {
