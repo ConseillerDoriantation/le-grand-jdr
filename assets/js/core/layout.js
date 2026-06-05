@@ -307,7 +307,7 @@ function _renderCreateFirst() {
 function _renderWaiting(pseudo) {
   return `
     <div class="adv-empty">
-      <div class="adv-empty-icon">⏳</div>
+      <div class="adv-empty-icon adv-empty-icon--brand"><img class="brand-logo" src="./assets/img/grimorium-logo.png" alt=""></div>
       <div class="adv-empty-title">En attente d'invitation</div>
       <p class="adv-empty-text">
         Bonjour ${pseudo} ! Tu n'es encore invité·e dans aucune aventure.<br>

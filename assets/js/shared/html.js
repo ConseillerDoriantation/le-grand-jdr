@@ -105,7 +105,7 @@ export function appSplashHtml(label = 'Chargement…') {
   return `
     <div class="app-splash app-splash--inline">
       <div class="app-splash-inner">
-        <span class="app-splash-sigil" aria-hidden="true">⚔️</span>
+        <span class="app-splash-sigil" aria-hidden="true"><img class="brand-logo" src="./assets/img/grimorium-logo.png" alt=""></span>
         <div class="app-splash-spinner"></div>
         ${label ? `<div class="app-splash-label">${_esc(label)}</div>` : ''}
       </div>
