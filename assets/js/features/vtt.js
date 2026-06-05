@@ -4387,34 +4387,41 @@ function _vttPickOpt(srcId, tgtId, idx) {
   const tag     = (txt, col='var(--text-dim)') =>
     `<span style="font-size:.6rem;color:${col};margin-left:.05rem">(${txt})</span>`;
 
+  // ── Cellule formule : ligne principale "dés +TOTAL" + petite légende du détail ──
+  // Évite les longues lignes "1d6 +6 (Int) +2 (Maîtrise)" qui cassaient la mise en
+  // forme : le total est regroupé, la provenance passe en sous-ligne discrète.
+  const _mkCell = (leadHtml, total, parts, totalCol) => {
+    const totStr = total ? ` <span style="font-size:.85rem;font-weight:700;color:${totalCol}">${sn(total)}</span>` : '';
+    const bd = parts.filter(Boolean).join(' · ');
+    return `<div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+      <div style="display:flex;align-items:baseline;gap:.25rem;flex-wrap:wrap">${leadHtml}${totStr}</div>
+      ${bd ? `<div style="font-size:.58rem;color:var(--text-dim);line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${bd}</div>` : ''}
+    </div>`;
+  };
+
   // ── Formule toucher ────────────────────────────────────────────────
   let toucherFormula;
   if (opt.toucherMod !== undefined) {
-    const p = [`<code style="font-size:.88rem;color:var(--gold)">1d20</code>`];
-    if (opt.toucherMod !== 0)
-      p.push(`<span style="font-size:.85rem;color:var(--gold)">${sn(opt.toucherMod)}</span>${tag(opt.toucherStatLabel)}`);
-    if (opt.toucherSetBonus > 0)
-      p.push(`<span style="font-size:.85rem;color:#22c38e">+${opt.toucherSetBonus}</span>${tag('Set','#22c38e')}`);
-    if (_touchBuff > 0)
-      p.push(`<span style="font-size:.85rem;color:#e8b84b">+${_touchBuff}</span>${tag('🎯 Ench','#e8b84b')}`);
-    toucherFormula = p.join(' ');
+    const parts = []; let tot = 0;
+    if (opt.toucherMod)        { tot += opt.toucherMod;      parts.push(`${opt.toucherStatLabel} ${sn(opt.toucherMod)}`); }
+    if (opt.toucherSetBonus>0) { tot += opt.toucherSetBonus; parts.push(`Set +${opt.toucherSetBonus}`); }
+    if (_touchBuff>0)          { tot += _touchBuff;          parts.push(`🎯 Ench +${_touchBuff}`); }
+    toucherFormula = _mkCell(`<code style="font-size:.88rem;color:var(--gold)">1d20</code>`, tot, parts, 'var(--gold)');
   } else {
-    toucherFormula = `<code style="font-size:.88rem;color:var(--gold)">1d20</code>`
-      + (atkBase!==0 ? ` <span style="font-size:.82rem;color:var(--text-muted)">${sn(atkBase)}</span>` : '');
+    toucherFormula = _mkCell(`<code style="font-size:.88rem;color:var(--gold)">1d20</code>`, atkBase, [], 'var(--text-muted)');
   }
 
   // ── Formule dégâts / soin ────────────────────────────────────────────
   const dmgAccent = opt.isHeal ? '#22c38e' : '#ef4444';
+  const _dmgIcon = `<span id="atk-dmgtype-ic" style="font-size:.85rem;color:${opt.damageTypeColor||'#9ca3af'}">${opt.damageTypeIcon||''}</span>`;
   let degatsFormula;
   if (opt.rawDice !== undefined) {
-    const p = [`<code style="font-size:.88rem;color:${dmgAccent}">${opt.rawDice}</code>`];
-    if (opt.dmgStatMod)
-      p.push(`<span style="font-size:.85rem;color:${dmgAccent}">${sn(opt.dmgStatMod)}</span>${tag(opt.dmgStatLabel)}`);
-    if (opt.maitriseBonus > 0)
-      p.push(`<span style="font-size:.85rem;color:#f59e0b">+${opt.maitriseBonus}</span>${tag('Maîtrise')}`);
-    degatsFormula = p.join(' ');
+    const parts = []; let tot = 0;
+    if (opt.dmgStatMod)        { tot += opt.dmgStatMod;     parts.push(`${opt.dmgStatLabel} ${sn(opt.dmgStatMod)}`); }
+    if (opt.maitriseBonus>0)   { tot += opt.maitriseBonus;  parts.push(`Maîtrise +${opt.maitriseBonus}`); }
+    degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${opt.rawDice}</code>`, tot, parts, dmgAccent);
   } else {
-    degatsFormula = `<code style="font-size:.88rem;color:${dmgAccent}">${_esc(opt.dice)}</code>`;
+    degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${_esc(opt.dice)}</code>`, 0, [], dmgAccent);
   }
 
   const inpStyle = `width:52px;padding:4px 6px;text-align:center;font-size:.88rem;border-radius:7px;
@@ -4503,7 +4510,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
     <div style="background:var(--bg-elevated);border-radius:10px;padding:.85rem;margin-bottom:.85rem;
                 display:flex;align-items:center;gap:.6rem">
       <span style="font-size:1.2rem">${opt.icon}</span>
-      <span style="font-size:.82rem;color:var(--text);flex:1">${degatsFormula}</span>
+      <div style="flex:1;min-width:0">${degatsFormula}</div>
     </div>
   ` : opt.isHeal ? `
     <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem">
@@ -4512,7 +4519,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
         <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">±mod</span>
         <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">+dés</span>
         <span style="font-size:.68rem;color:#22c38e;white-space:nowrap">💚 Soin</span>
-        <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${degatsFormula}</div>
+        ${degatsFormula}
         <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus / malus flat au soin">
         <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés bonus au soin (même type de dé)">
         <div style="grid-column:1/-1;font-size:.62rem;color:var(--text-dim);font-style:italic;padding-top:.15rem">
@@ -4528,17 +4535,14 @@ function _vttPickOpt(srcId, tgtId, idx) {
         <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">±mod</span>
         <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">+dés</span>
         <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">🎯 Toucher</span>
-        <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">${toucherFormula}</div>
+        ${toucherFormula}
         <input type="number" id="atk-bonus-hit" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat au toucher">
         <input type="number" id="atk-bonus-hit-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="d20 supplémentaires au toucher (sommés)">
 
         <div style="grid-column:1/-1;height:1px;background:var(--border);margin:-.1rem 0"></div>
 
         <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">⚔️ Dégâts</span>
-        <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">
-          <span id="atk-dmgtype-ic" style="font-size:.85rem;color:${opt.damageTypeColor||'#9ca3af'}">${opt.damageTypeIcon||''}</span>
-          ${degatsFormula}
-        </div>
+        ${degatsFormula}
         <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat aux dégâts">
         <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés supplémentaires aux dégâts (même type)">
         <div id="atk-miss-note" style="grid-column:1/-1">${_atkMissNoteHtml(opt)}</div>
