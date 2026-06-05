@@ -18,6 +18,7 @@ import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { setHistoireCtx } from '../shared/histoire-ctx.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { storyParticipantsFromGroups } from '../shared/participants.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
@@ -85,6 +86,13 @@ function axeColor(axe){
   if(!axe) return '#555';
   if(!STORE.axeMap[axe]){ STORE.axeMap[axe] = AXE_COLORS[Object.keys(STORE.axeMap).length % AXE_COLORS.length]; }
   return STORE.axeMap[axe];
+}
+// Rang d'un axe pour l'ordre d'affichage (défini par le MJ via story_meta/axes).
+// Axes non listés → juste avant « Hors axe » (qui est toujours en dernier).
+function _axeRank(axe){
+  if (axe === '__none__') return Number.MAX_SAFE_INTEGER;
+  const i = (STORE.axeOrder || []).indexOf(axe);
+  return i >= 0 ? i : Number.MAX_SAFE_INTEGER - 1;
 }
 
 // ── Gestion des actes (Firestore) ─────────────────────────────────────────────
@@ -467,10 +475,14 @@ async function renderStory() {
   const content = document.getElementById('main-content');
   STORE.axeMap = {};
 
-  const [items, savedActes] = await Promise.all([
+  const [items, savedActes, axesDoc] = await Promise.all([
     loadCollection('story'),
     loadActes(),
+    getDocData('story_meta', 'axes'),
   ]);
+  // Ordre des axes défini par le MJ (story_meta/axes.order). Les axes absents de
+  // la liste sont placés après, dans leur ordre d'apparition.
+  STORE.axeOrder = Array.isArray(axesDoc?.order) ? axesDoc.order : [];
 
   const prefs = getStoryPrefs();
 
@@ -613,6 +625,7 @@ async function renderStory() {
         <button class="view-tab ${prefs.view==='chronique'?'active':''}" data-action="_stSetView" data-view="chronique">📖 Chronique</button>
         <button class="view-tab ${prefs.view==='list'?'active':''}" data-action="_stSetView" data-view="list">📋 Liste</button>
       </div>
+      ${STATE.isAdmin && axes.length >= 2 ? `<button class="btn btn-outline btn-sm" data-action="openAxeOrder" title="Réordonner les axes narratifs (Carte & Saga)">⇅ Axes</button>` : ''}
     </div>
 
     <!-- ── CONTENU ──────────────────────────────────────────── -->
@@ -754,7 +767,9 @@ function _renderMapView(missions) {
 
   // ── 3. Sub-rows : si 2+ missions du même axe ont le même ordre, on les
   //    empile verticalement dans la lane (split de ligne).
-  const lanes = [...byAxe.entries()].map(([axe, list], laneIdx) => {
+  const lanes = [...byAxe.entries()]
+    .sort((A, B) => _axeRank(A[0]) - _axeRank(B[0]))
+    .map(([axe, list], laneIdx) => {
     // Grouper par colonne (= par valeur d'ordre)
     const byCol = new Map();
     list.forEach(m => {
@@ -1093,7 +1108,7 @@ function _renderSagaView(missions) {
   byAxe.forEach(list => list.sort((a,b) => (a.ordre||0) - (b.ordre||0)));
 
   return `<div class="saga">
-    ${[...byAxe.entries()].map(([axe, list]) => {
+    ${[...byAxe.entries()].sort((A, B) => _axeRank(A[0]) - _axeRank(B[0])).map(([axe, list]) => {
       const color = axe === '__none__' ? '#7a8fa8' : (STORE.axeMap[axe] || '#7a8fa8');
       const label = axe === '__none__' ? 'Hors axe' : axe;
       const term = list.filter(m => m.statut === 'Terminée').length;
@@ -1998,20 +2013,64 @@ async function openStoryModal(item = null) {
       else hero.style.backgroundImage = '';
     },
   });
+}
 
-  // Toggle visuel d'une card lien
-  function _toggleLien(id) {
-    const cb   = document.getElementById(`lien-${id}`);
-    const card = document.getElementById(`lien-card-${id}`);
-    const tick = document.getElementById(`lien-tick-${id}`);
-    if (!cb || !card || !tick) return;
-    cb.checked = !cb.checked;
-    const on = cb.checked;
-    card.style.borderColor = on ? 'var(--gold)' : 'var(--border)';
-    card.style.background  = on ? 'rgba(232,184,75,.08)' : 'var(--bg-elevated)';
-    tick.style.background  = on ? 'var(--gold)' : 'rgba(11,17,24,.75)';
-    tick.style.borderColor = on ? 'var(--gold)' : 'rgba(255,255,255,.2)';
-    tick.textContent       = on ? '✓' : '';
+// Toggle visuel d'une card lien (mission → mission). Au niveau module pour être
+// accessible depuis le registre d'actions (sinon ReferenceError au clic).
+function _toggleLien(id) {
+  const cb   = document.getElementById(`lien-${id}`);
+  const card = document.getElementById(`lien-card-${id}`);
+  const tick = document.getElementById(`lien-tick-${id}`);
+  if (!cb || !card || !tick) return;
+  cb.checked = !cb.checked;
+  const on = cb.checked;
+  card.style.borderColor = on ? 'var(--gold)' : 'var(--border)';
+  card.style.background  = on ? 'rgba(232,184,75,.08)' : 'var(--bg-elevated)';
+  tick.style.background  = on ? 'var(--gold)' : 'rgba(11,17,24,.75)';
+  tick.style.borderColor = on ? 'var(--gold)' : 'rgba(255,255,255,.2)';
+  tick.textContent       = on ? '✓' : '';
+}
+
+// ── ORDRE DES AXES (MJ) ───────────────────────────────────────────────────────
+let _axeOrderSortable = null;
+function openAxeOrder() {
+  if (!STATE.isAdmin) return;
+  const axes = Object.keys(STORE.axeMap).sort((a, b) => _axeRank(a) - _axeRank(b));
+  if (!axes.length) { showNotif('Aucun axe à réordonner.', 'info'); return; }
+  openModal('⇅ Ordre des axes', `
+    <p style="font-size:.8rem;color:var(--text-dim);margin:0 0 .8rem">
+      Glisse les axes pour définir leur ordre d'affichage (vues Carte &amp; Saga).
+    </p>
+    <div id="axe-order-list" class="axe-order-list">
+      ${axes.map(a => `
+        <div class="axe-order-row" data-axe="${_esc(a)}">
+          <span class="axe-order-grip" title="Glisser pour réordonner">⠿</span>
+          <span class="axe-order-dot" style="background:${STORE.axeMap[a] || '#7a8fa8'}"></span>
+          <span class="axe-order-name">${_esc(a)}</span>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
+      <button class="btn btn-gold btn-sm" data-action="saveAxeOrder">💾 Enregistrer l'ordre</button>
+    </div>
+  `);
+  const list = document.getElementById('axe-order-list');
+  if (list) {
+    try { _axeOrderSortable?.destroy(); } catch {}
+    _axeOrderSortable = makeSortable(list, {
+      prefix: 'cs', draggable: '.axe-order-row', handle: '.axe-order-grip', delay: 60,
+    });
+  }
+}
+async function saveAxeOrder() {
+  if (!STATE.isAdmin) return;
+  const order = [...document.querySelectorAll('#axe-order-list .axe-order-row')]
+    .map(r => r.dataset.axe).filter(Boolean);
+  STORE.axeOrder = order;
+  if (await tryDoc('story_meta', 'axes', { order })) {
+    closeModalDirect();
+    showNotif('Ordre des axes enregistré.', 'success');
+    renderStory();
   }
 }
 
@@ -2145,6 +2204,8 @@ registerActions({
   _stConfirmSaveGroup:     ()    => _stConfirmSaveGroup(),
   _stCancelGroupForm:      ()    => _stCancelGroupForm(),
   _toggleLien:             (btn) => _toggleLien(btn.dataset.id),
+  openAxeOrder:            () => openAxeOrder(),
+  saveAxeOrder:            () => saveAxeOrder(),
   _ouvrirHistoire:         (btn) => _ouvrirHistoire(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
   _createNewActe:          ()    => _createNewActe(),
   _stPickAxe:              (btn) => {
