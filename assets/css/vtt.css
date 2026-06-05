@@ -664,17 +664,30 @@
 .vtt-tool-float .vtt-draw-bar {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
+  border-radius: 10px;
+  padding: 9px 10px;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 12px rgba(0,0,0,.45);
-  flex-direction: row;
-  flex-wrap: wrap;
-  max-width: 230px;
-  gap: 4px;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  max-width: none;
+  width: 258px;
+  gap: 7px;
   flex: unset;
 }
+/* Une ligne = un libellé + son groupe de boutons */
+.vtt-draw-row { display: flex; align-items: flex-start; gap: 8px; }
+.vtt-draw-glabel {
+  width: 42px; flex-shrink: 0; padding-top: 7px;
+  font-size: .56rem; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-dim); text-align: right;
+}
+.vtt-draw-group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; flex: 1; min-width: 0; }
+.vtt-draw-colors { display: grid; grid-template-columns: repeat(7, 22px); gap: 5px; }
+.vtt-draw-gsep { width: 1px; align-self: stretch; background: var(--border); margin: 0 3px; }
+.vtt-draw-btn--danger { color: #ff8b8b; border-color: rgba(239,68,68,.4); }
+.vtt-draw-btn--danger:hover { background: rgba(239,68,68,.16); color: #ffb4b4; }
 
 /* ── Colonne droite ─────────────────────────────────────────────── */
 .vtt-right-col {

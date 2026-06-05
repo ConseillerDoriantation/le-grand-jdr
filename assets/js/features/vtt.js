@@ -12851,23 +12851,40 @@ async function _vttMountTable(content) {
       ${STATE.isAdmin?`<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique">🧱</button>`:''}
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
-      <button class="vtt-draw-btn active" id="vtt-ds-pencil"  data-vtt-fn="_vttDrawShape" data-vtt-args="pencil"  title="Crayon libre">✏️</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-line"    data-vtt-fn="_vttDrawShape" data-vtt-args="line"    title="Ligne">╱</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-rect"    data-vtt-fn="_vttDrawShape" data-vtt-args="rect"    title="Rectangle">⬜</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-circle"  data-vtt-fn="_vttDrawShape" data-vtt-args="circle"  title="Cercle">⬭</button>
-      <button class="vtt-draw-btn"        id="vtt-ds-eraser"  data-vtt-fn="_vttDrawShape" data-vtt-args="eraser"  title="Gomme — passe sur un tracé pour l'effacer">🧽</button>
-      <div class="vtt-draw-sep"></div>
-      ${['#ef4444','#ff8c42','#f59e0b','#ffe600','#22c38e','#14b8a6','#4f8cff','#8b5cf6','#b47fff','#ec4899','#ffffff','#9ca3af','#1a1a2e'].map((c,i)=>
-        `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" data-vtt-fn="_vttDrawColor" data-vtt-args="${c}" style="background:${c}" title="${c}"></button>`
-      ).join('')}
-      <div class="vtt-draw-sep"></div>
-      ${[2,4,6,10,16].map((w,i)=>
-        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" data-vtt-fn="_vttDrawWidth" data-vtt-args="${w}" title="${w}px"><span class="vtt-draw-wdot" style="width:${Math.min(w,14)}px;height:${Math.min(w,14)}px"></span></button>`
-      ).join('')}
-      <div class="vtt-draw-sep"></div>
-      <button class="vtt-draw-btn" id="vtt-draw-fill-btn" data-vtt-fn="_vttToggleDrawFill" title="Remplissage (rect/cercle)">◻</button>
-      <button class="vtt-draw-btn" id="vtt-draw-undo-btn" data-vtt-fn="_vttUndoDraw" title="Annuler le dernier tracé (Ctrl+Z)">↩</button>
-      ${STATE.isAdmin?`<div class="vtt-draw-sep"></div><button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearAnnots" title="Effacer toutes les annotations">🗑</button>`:''}
+      <div class="vtt-draw-row">
+        <span class="vtt-draw-glabel">Forme</span>
+        <div class="vtt-draw-group">
+          <button class="vtt-draw-btn active" id="vtt-ds-pencil"  data-vtt-fn="_vttDrawShape" data-vtt-args="pencil"  title="Crayon libre">✏️</button>
+          <button class="vtt-draw-btn"        id="vtt-ds-line"    data-vtt-fn="_vttDrawShape" data-vtt-args="line"    title="Ligne">╱</button>
+          <button class="vtt-draw-btn"        id="vtt-ds-rect"    data-vtt-fn="_vttDrawShape" data-vtt-args="rect"    title="Rectangle">⬜</button>
+          <button class="vtt-draw-btn"        id="vtt-ds-circle"  data-vtt-fn="_vttDrawShape" data-vtt-args="circle"  title="Cercle">⬭</button>
+          <button class="vtt-draw-btn"        id="vtt-ds-eraser"  data-vtt-fn="_vttDrawShape" data-vtt-args="eraser"  title="Gomme — passe sur un tracé pour l'effacer">🧽</button>
+        </div>
+      </div>
+      <div class="vtt-draw-row">
+        <span class="vtt-draw-glabel">Couleur</span>
+        <div class="vtt-draw-group vtt-draw-colors">
+          ${['#ef4444','#ff8c42','#f59e0b','#ffe600','#22c38e','#14b8a6','#4f8cff','#8b5cf6','#b47fff','#ec4899','#ffffff','#9ca3af','#1a1a2e'].map((c,i)=>
+            `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" data-vtt-fn="_vttDrawColor" data-vtt-args="${c}" style="background:${c}" title="${c}"></button>`
+          ).join('')}
+        </div>
+      </div>
+      <div class="vtt-draw-row">
+        <span class="vtt-draw-glabel">Trait</span>
+        <div class="vtt-draw-group">
+          ${[2,4,6,10,16].map((w,i)=>
+            `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" data-vtt-fn="_vttDrawWidth" data-vtt-args="${w}" title="${w}px"><span class="vtt-draw-wdot" style="width:${Math.min(w,14)}px;height:${Math.min(w,14)}px"></span></button>`
+          ).join('')}
+        </div>
+      </div>
+      <div class="vtt-draw-row">
+        <span class="vtt-draw-glabel">Actions</span>
+        <div class="vtt-draw-group">
+          <button class="vtt-draw-btn" id="vtt-draw-fill-btn" data-vtt-fn="_vttToggleDrawFill" title="Remplir les rectangles/cercles">◻</button>
+          <button class="vtt-draw-btn" id="vtt-draw-undo-btn" data-vtt-fn="_vttUndoDraw" title="Annuler le dernier tracé (Ctrl+Z)">↩</button>
+          ${STATE.isAdmin?`<button class="vtt-draw-btn vtt-draw-btn--danger" data-vtt-fn="_vttClearAnnots" title="Tout effacer les annotations de la page">🗑</button>`:''}
+        </div>
+      </div>
     </div>
     ${STATE.isAdmin?`
     <div id="vtt-walls-bar" class="vtt-walls-bar" style="display:none">
