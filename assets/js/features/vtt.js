@@ -317,6 +317,7 @@ let _pingTimer  = null;
 let _pingOrigin = null;
 let _drawHistory  = [];      // ids des annotations créées dans la session (pour Ctrl+Z)
 let _drawing      = false;   // tracé en cours
+let _erasing      = false;   // gomme : effacement pressé en cours
 let _drawPts      = [];      // points crayon libre (world coords)
 let _drawOrigin   = null;    // point de départ pour formes
 let _drawLive     = null;    // forme Konva live (avant sauvegarde)
@@ -907,8 +908,10 @@ function _initCanvas(container) {
   // Transformer annotations — disponible pour tous (chaque joueur interagit avec ses propres dessins)
   _annotTransformer = new K.Transformer({
     rotateEnabled: true, keepRatio: false,
-    borderStroke: '#ffe600', borderStrokeWidth: 1,
-    anchorStroke: '#ffe600', anchorFill: '#1a1a2e', anchorSize: 8, anchorCornerRadius: 2,
+    borderStroke: '#ffe600', borderStrokeWidth: 2, borderDash: [4, 3],
+    anchorStroke: '#ffe600', anchorFill: '#1a1a2e', anchorSize: 13, anchorCornerRadius: 3,
+    rotateAnchorOffset: 26, padding: 5,
+    rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315], rotationSnapTolerance: 8,
   });
   _layers.draw.add(_annotTransformer);
 
@@ -1039,9 +1042,10 @@ function _initCanvas(container) {
         else               _endRuler();
         return;
       }
-      // Dessin : cliquer-glisser
+      // Dessin : cliquer-glisser. Gomme : supprime au survol pressé.
       if (_tool === 'draw') {
         if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
+        if (_drawShape === 'eraser') { _erasing = true; _eraseAtPointer(); return; }
         _startDraw(_stageToWorld(np));
         return;
       }
@@ -1070,11 +1074,13 @@ function _initCanvas(container) {
     const wp = _stageToWorld(stagePtr);
     if (_tool === 'ruler' && _rulerActive)      _updateRuler(wp);
     else if (_tool === 'ruler')                 _showRulerHover(wp);
-    if (_tool === 'draw'  && _drawing && !_pan) _updateDraw(wp);
+    if (_tool === 'draw'  && _drawShape === 'eraser' && _erasing && !_pan) _eraseAtPointer();
+    else if (_tool === 'draw' && _drawing && !_pan) _updateDraw(wp);
     if (_zoneCtx) _zoneUpdatePreview(wp);
   });
   _stage.on('mouseup', () => {
     _pan = false;
+    _erasing = false;
     if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
     if (_marqueeActive) { _endMarquee(); _suppressNextClick = true; }
     _marqueeOrigin = null;
@@ -7409,7 +7415,9 @@ function _buildAnnotShape(K, data) {
   const fill = data.fill ? col + '30' : 'transparent';
   // listening sera ajusté par _updateAnnotDraggable selon l'outil et la propriété
   const base = { stroke: col, strokeWidth: data.strokeWidth || 2,
-    lineCap:'round', lineJoin:'round', name:'annot', listening: false };
+    lineCap:'round', lineJoin:'round', name:'annot', listening: false,
+    // Zone de clic/gomme élargie : un trait fin (2px) reste facile à sélectionner/effacer.
+    hitStrokeWidth: Math.max(16, (data.strokeWidth || 2) + 12) };
   let shape;
   if (data.type === 'freehand' || data.type === 'line') {
     shape = new K.Line({ ...base, points: data.points || [],
@@ -7613,13 +7621,15 @@ function _renderAnnotLayer() {
 function _updateAnnotDraggable() {
   if (!_layers.draw) return;
   const inSelect = _tool === 'select';
+  const inErase  = _tool === 'draw' && _drawShape === 'eraser';
   const uid = STATE.user?.uid;
   Object.values(_annotations).forEach(e => {
     if (!e.shape) return;
     const canEdit = STATE.isAdmin || e.data.createdBy === uid;
     const active  = inSelect && canEdit;
     e.shape.draggable(active);
-    e.shape.listening(active);
+    // Écoute en sélection (clic/drag) ET en gomme (hit-test), sinon non listening.
+    e.shape.listening((inSelect || inErase) && canEdit);
   });
   if (inSelect) _applyAnnotTransformer(); // maintenir le transformer sur la sélection courante
   _layers.draw.batchDraw();
@@ -7647,6 +7657,12 @@ function _startDraw(wp) {
 function _updateDraw(wp) {
   if (!_drawLive || !_drawOrigin) return;
   if (_drawShape === 'pencil') {
+    // Amincissement : on n'ajoute un point que s'il s'éloigne assez du précédent.
+    // → trait plus lisse (moins de zigzags du tremblement de souris) et bien moins
+    //   de données stockées. Le lissage Konva (tension) fait le reste.
+    const lx = _drawPts[_drawPts.length - 2], ly = _drawPts[_drawPts.length - 1];
+    const minDist = Math.max(2.5, _drawWidth * 0.8);
+    if (Math.hypot(wp.x - lx, wp.y - ly) < minDist) return;
     _drawPts.push(wp.x, wp.y);
     _drawLive.points([..._drawPts]);
   } else if (_drawShape === 'line') {
@@ -9405,9 +9421,40 @@ function _vttBstNotes(beastId, val) {
 // ── Outils de dessin ────────────────────────────────────────────────
 function _vttDrawShape(shape) {
   _drawShape = shape;
-  ['pencil','line','rect','circle'].forEach(s => {
+  ['pencil','line','rect','circle','eraser'].forEach(s => {
     document.getElementById(`vtt-ds-${s}`)?.classList.toggle('active', s === shape);
   });
+  // La gomme a besoin que les annotations soient « écoutables » pour le hit-test ;
+  // les formes de dessin non. On (dé)sélectionne et on met à jour l'écoute.
+  if (shape === 'eraser') _deselectAnnot?.();
+  _updateAnnotDraggable();
+  const wrap = document.getElementById('vtt-canvas-wrap');
+  if (wrap) wrap.style.cursor = shape === 'eraser' ? 'cell' : 'crosshair';
+}
+
+// Annule le dernier tracé de la session (bouton ↩ et Ctrl+Z).
+function _vttUndoDraw() {
+  const lastId = _drawHistory.pop();
+  if (lastId) deleteDoc(_annotRef(lastId)).catch(() => {});
+}
+
+// Gomme : supprime l'annotation (éditable) sous le curseur. Utilise la détection de
+// hit Konva → gère correctement rotation/échelle/zoom. Optimiste + suppression doc.
+function _eraseAtPointer() {
+  if (!_layers?.draw || !_stage) return;
+  const pos = _stage.getPointerPosition(); if (!pos) return;
+  let node = _layers.draw.getIntersection(pos);
+  let id = null;
+  while (node && !id) { id = node._annotId || null; node = node.getParent?.(); }
+  if (!id || !_annotations[id]) return;
+  const canEdit = STATE.isAdmin || _annotations[id].data.createdBy === STATE.user?.uid;
+  if (!canEdit) return;
+  _annotations[id].shape?.destroy();
+  delete _annotations[id];
+  const hi = _drawHistory.indexOf(id);
+  if (hi >= 0) _drawHistory.splice(hi, 1);
+  _layers.draw.batchDraw();
+  deleteDoc(_annotRef(id)).catch(() => {});
 }
 function _vttDrawColor(color) {
   _drawColor = color;
@@ -11118,8 +11165,7 @@ function _keyHandler(e) {
   // Ctrl+Z : annuler le dernier tracé de la session
   if ((e.ctrlKey||e.metaKey) && e.key==='z' && !e.shiftKey) {
     e.preventDefault();
-    const lastId = _drawHistory.pop();
-    if (lastId) deleteDoc(_annotRef(lastId)).catch(()=>{});
+    _vttUndoDraw();
   }
   // Flèches / pavé numérique : déplacer le token sélectionné
   if (!e.ctrlKey && !e.metaKey && !e.altKey && _selected) {
@@ -12809,16 +12855,18 @@ async function _vttMountTable(content) {
       <button class="vtt-draw-btn"        id="vtt-ds-line"    data-vtt-fn="_vttDrawShape" data-vtt-args="line"    title="Ligne">╱</button>
       <button class="vtt-draw-btn"        id="vtt-ds-rect"    data-vtt-fn="_vttDrawShape" data-vtt-args="rect"    title="Rectangle">⬜</button>
       <button class="vtt-draw-btn"        id="vtt-ds-circle"  data-vtt-fn="_vttDrawShape" data-vtt-args="circle"  title="Cercle">⬭</button>
+      <button class="vtt-draw-btn"        id="vtt-ds-eraser"  data-vtt-fn="_vttDrawShape" data-vtt-args="eraser"  title="Gomme — passe sur un tracé pour l'effacer">🧽</button>
       <div class="vtt-draw-sep"></div>
-      ${['#ef4444','#f59e0b','#22c38e','#4f8cff','#b47fff','#ffffff','#1a1a2e'].map((c,i)=>
+      ${['#ef4444','#ff8c42','#f59e0b','#ffe600','#22c38e','#14b8a6','#4f8cff','#8b5cf6','#b47fff','#ec4899','#ffffff','#9ca3af','#1a1a2e'].map((c,i)=>
         `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" data-vtt-fn="_vttDrawColor" data-vtt-args="${c}" style="background:${c}" title="${c}"></button>`
       ).join('')}
       <div class="vtt-draw-sep"></div>
-      ${[2,4,8].map((w,i)=>
-        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" data-vtt-fn="_vttDrawWidth" data-vtt-args="${w}" title="${w}px">${w}</button>`
+      ${[2,4,6,10,16].map((w,i)=>
+        `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" data-vtt-fn="_vttDrawWidth" data-vtt-args="${w}" title="${w}px"><span class="vtt-draw-wdot" style="width:${Math.min(w,14)}px;height:${Math.min(w,14)}px"></span></button>`
       ).join('')}
       <div class="vtt-draw-sep"></div>
       <button class="vtt-draw-btn" id="vtt-draw-fill-btn" data-vtt-fn="_vttToggleDrawFill" title="Remplissage (rect/cercle)">◻</button>
+      <button class="vtt-draw-btn" id="vtt-draw-undo-btn" data-vtt-fn="_vttUndoDraw" title="Annuler le dernier tracé (Ctrl+Z)">↩</button>
       ${STATE.isAdmin?`<div class="vtt-draw-sep"></div><button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearAnnots" title="Effacer toutes les annotations">🗑</button>`:''}
     </div>
     ${STATE.isAdmin?`
@@ -13795,6 +13843,7 @@ const VTT_ACTIONS = {
   _vttEnterTable,
   _vttGateBack,
   _vttToggleSessionLive,
+  _vttUndoDraw,
   _invPickToggle,
   _invPickConfirm,
   _invPickCancel,
