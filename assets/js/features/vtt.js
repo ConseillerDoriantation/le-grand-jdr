@@ -3978,23 +3978,32 @@ async function _execAttack(srcId, tgtId) {
       const modStr = m > 0 ? `+${m}` : m < 0 ? `${m}` : '±0';
       pills.push(_pill('stat', `📊 ${_esc(o.dmgStatLabel)} ${modStr}`));
     }
-    // Type de dégâts (icône colorée)
-    if (o.isMagicWeapon) {
-      pills.push(`<span class="vtt-aopt-pill type" style="color:#c084fc;border-color:rgba(192,132,252,.4)">🔮 Élément</span>`);
-    } else if (o.damageTypeIcon) {
-      pills.push(`<span class="vtt-aopt-pill type" style="color:${o.damageTypeColor||'#9ca3af'};border-color:${o.damageTypeColor||'#9ca3af'}55">${o.damageTypeIcon}</span>`);
-    }
     // Traits courts
     if (o.traits?.length) {
       pills.push(`<span class="vtt-aopt-pill traits">${o.traits.slice(0,2).map(_esc).join(' · ')}</span>`);
     }
 
+    // ── Couleur d'accent + pastille d'élément (langage visuel des cartes de sort) ──
+    const accentCol = o.isHeal ? '#22c55e'
+      : o.isEnchant ? (o.enchantElementColor || '#a78bfa')
+      : o.isAffliction ? (o.afflictionElementColor || '#ef4444')
+      : (o.isCaSort || o.isUtil) ? '#b47fff'
+      : o.isMagicWeapon ? '#c084fc'
+      : o.damageTypeColor ? o.damageTypeColor
+      : (o.sortIdx !== undefined ? '#818cf8' : '#94a3b8');
+    // Pastille d'élément : seulement pour un VRAI élément (magie), pas le physique
+    // (sinon redondant avec l'icône de l'arme).
+    const elemPastille = o.isMagicWeapon
+      ? `<span class="vtt-aopt-elem" style="--ec:#c084fc" title="Élément choisi au lancement">🔮</span>`
+      : (o.damageTypeIcon && o.damageTypeId && o.damageTypeId !== 'physique'
+          ? `<span class="vtt-aopt-elem" style="--ec:${o.damageTypeColor||'#9ca3af'}" title="Élément">${o.damageTypeIcon}</span>` : '');
+
     return `
-      <button class="vtt-aopt ${canHit?'':'vtt-aopt--oor'}" data-vtt-fn="_vttPickOpt" data-vtt-args="${srcId}|${tgtId}|${i}">
+      <button class="vtt-aopt ${canHit?'':'vtt-aopt--oor'}" style="--aopt-col:${accentCol}" data-vtt-fn="_vttPickOpt" data-vtt-args="${srcId}|${tgtId}|${i}">
         <div class="vtt-aopt-icon">${o.icon}</div>
         <div class="vtt-aopt-body">
           <div class="vtt-aopt-head">
-            <span class="vtt-aopt-name">${_esc(o.label)}</span>${stack}
+            <span class="vtt-aopt-name">${_esc(o.label)}</span>${elemPastille}${stack}
             ${pmBadge}
           </div>
           <div class="vtt-aopt-pills">${pills.join('')}</div>
@@ -4061,7 +4070,7 @@ async function _execAttack(srcId, tgtId) {
   let basicHtml = '';
   if (canEditSrc) {
     const selfBtn = (cond, icon, name, desc, col) => `
-        <button class="vtt-aopt" data-name="${name.toLowerCase()}" data-vtt-fn="_vttSelfActionClose" data-vtt-args="${srcId}|${cond}">
+        <button class="vtt-aopt" style="--aopt-col:${col}" data-name="${name.toLowerCase()}" data-vtt-fn="_vttSelfActionClose" data-vtt-args="${srcId}|${cond}">
           <div class="vtt-aopt-icon">${icon}</div>
           <div class="vtt-aopt-body">
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">${name}</span></div>
@@ -4072,7 +4081,7 @@ async function _execAttack(srcId, tgtId) {
     // Courir : combat actif et pas encore utilisé ce tour.
     if (inCombat && !couru) {
       bBody += `
-        <button class="vtt-aopt" data-name="courir" data-vtt-fn="_vttCourirAndClose" data-vtt-args="${srcId}">
+        <button class="vtt-aopt" style="--aopt-col:#4ade80" data-name="courir" data-vtt-fn="_vttCourirAndClose" data-vtt-args="${srcId}">
           <div class="vtt-aopt-icon">🏃</div>
           <div class="vtt-aopt-body">
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">Courir</span></div>
@@ -4087,7 +4096,7 @@ async function _execAttack(srcId, tgtId) {
     // Aider : visible seulement si la cible est un allié à 0 PV.
     if (tgt && tgt.id !== srcId && (lT?.displayHp ?? null) === 0) {
       bBody += `
-        <button class="vtt-aopt" data-name="aider" data-vtt-fn="_vttAiderClose" data-vtt-args="${srcId}|${tgt.id}">
+        <button class="vtt-aopt" style="--aopt-col:#fbbf24" data-name="aider" data-vtt-fn="_vttAiderClose" data-vtt-args="${srcId}|${tgt.id}">
           <div class="vtt-aopt-icon">🤝</div>
           <div class="vtt-aopt-body">
             <div class="vtt-aopt-head"><span class="vtt-aopt-name">Aider — relever ${_esc(lT.displayName??tgt.name)}</span></div>

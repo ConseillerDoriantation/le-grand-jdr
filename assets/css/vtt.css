@@ -2098,28 +2098,38 @@
 /* ── Option / card individuelle ───────────────────────────────────── */
 .vtt-aopt {
   display: grid;
-  grid-template-columns: 30px 1fr;
+  grid-template-columns: 34px 1fr;
   gap: .55rem; align-items: start;
   padding: .5rem .6rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-left: 3px solid var(--aopt-col, var(--border));
+  border-radius: 9px;
   cursor: pointer; text-align: left;
-  transition: background .1s, border-color .12s, transform .08s;
+  transition: background .12s, border-color .12s, box-shadow .12s, transform .08s;
   width: 100%;
 }
 .vtt-aopt:hover {
-  background: var(--bg-card2);
-  border-color: var(--gold);
+  background: color-mix(in srgb, var(--aopt-col, #ffffff) 7%, var(--bg-card2));
+  border-color: color-mix(in srgb, var(--aopt-col, var(--gold)) 55%, var(--border));
+  box-shadow: 0 2px 14px -8px var(--aopt-col, transparent);
+  transform: translateX(1px);
 }
-.vtt-aopt:active { transform: translateY(1px); }
+.vtt-aopt:active { transform: translateX(1px) translateY(1px); }
 .vtt-aopt--oor { opacity: .55; }
 .vtt-aopt-icon {
-  font-size: 1.35rem; line-height: 1;
+  font-size: 1.3rem; line-height: 1;
   display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px;
-  background: rgba(255,255,255,.04); border-radius: 7px;
+  width: 34px; height: 34px;
+  background: color-mix(in srgb, var(--aopt-col, #ffffff) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--aopt-col, #ffffff) 28%, transparent);
+  border-radius: 8px;
   flex-shrink: 0;
+}
+/* Pastille d'élément à côté du nom (≈ noyau des cartes de sort) */
+.vtt-aopt-elem {
+  font-size: .92rem; line-height: 1; flex-shrink: 0;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ec, #888) 60%, transparent));
 }
 .vtt-aopt-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .vtt-aopt-head {
