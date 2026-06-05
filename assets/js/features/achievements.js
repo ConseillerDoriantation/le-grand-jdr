@@ -30,6 +30,7 @@ const CATS = [
 
 const STORE = {
   items:         [],        // hauts-faits chargés
+  missions:      [],        // missions de la Trame disponibles pour les liaisons
   lightboxItems: {},        // { [catId]: item[] } cache lightbox
   filter:        'all',     // 'all' | 'epique' | 'comique' | 'histoire'
   charFilter:    'all',     // 'all' | charId
@@ -51,9 +52,26 @@ export function getAchievementsShellState() {
   return { items: STORE.items, filter: STORE.filter, view: STORE.view, search: STORE.search };
 }
 
+function _missionFor(item) {
+  return item?.missionId ? (STORE.missions || []).find(m => m.id === item.missionId) : null;
+}
+
+function _missionLinkHtml(item, className = 'ach-mission-link') {
+  const mission = _missionFor(item);
+  if (!mission) return '';
+  return "<button type=\"button\" class=\"" + className + "\" data-action=\"_achOpenMission\" data-id=\"" + mission.id + "\" data-stop-propagation>🎯 " + _esc(mission.titre || 'Mission') + "</button>";
+}
+
+async function _achOpenMission(id) {
+  document.getElementById('ach-lightbox')?.remove();
+  const { openStoryDetail } = await import('./story.js');
+  openStoryDetail(id);
+}
+
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 export function openAchievementModal(id = null) {
   const ex = id ? (STORE.items || []).find(a => a.id === id) : null;
+  const missions = (STORE.missions || []).filter(m => m.type === 'mission').sort((a, b) => (a.ordre || 0) - (b.ordre || 0));
   _achUploader?.destroy(); _achUploader = null;
 
   openModal(
@@ -83,6 +101,14 @@ export function openAchievementModal(id = null) {
       <label>Description <span style="font-size:0.75rem;color:var(--text-dim)">(visible par les joueurs)</span></label>
       <textarea class="input-field" id="ach-desc" rows="3"
         placeholder="Ce qui s'est passé...">${ex?.description || ''}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Mission liée <span style="font-size:0.75rem;color:var(--text-dim)">(optionnel)</span></label>
+      <select class="input-field" id="ach-mission-id">
+        <option value="">Aucune mission liée</option>
+        ${missions.map(m => `<option value="${m.id}" ${ex?.missionId === m.id ? "selected" : ""}>${_esc(m.titre || "Mission sans titre")}</option>`).join("")}
+      </select>
     </div>
 
     <div class="form-group">
@@ -241,6 +267,7 @@ async function saveAchievement(id = '') {
       imageUrl,
       emoji:        document.getElementById('ach-emoji')?.value?.trim() || '🏆',
       date:         document.getElementById('ach-date')?.value?.trim()  || '',
+      missionId:    document.getElementById('ach-mission-id')?.value || '',
       contributeurs,
       secret:       !!document.getElementById('ach-secret')?.checked,
     };
@@ -408,7 +435,7 @@ function _achOpenImage(url) {
 
   const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
   overlay.addEventListener('click', close);
-  overlay.querySelector('button').addEventListener('click', close);
+  overlay.querySelector('.ach-lb-close').addEventListener('click', close);
 
   const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
   document.addEventListener('keydown', onKey);
@@ -506,6 +533,7 @@ function _achCardHTML(item, isAdmin) {
     <div class="ach-meta">
       <div class="ach-title">${_esc(item.titre || 'Haut-Fait')}</div>
       ${item.description ? `<div class="ach-desc">${_esc(item.description)}</div>` : ''}
+      ${_missionLinkHtml(item)}
       ${contribsHtml}
       ${adminHtml}
     </div>`;
@@ -660,6 +688,7 @@ function _renderTimeline(items) {
         <div class="tl-card-cat" style="background:${cat.glow};border:1px solid ${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
         <div class="tl-card-title">${_esc(item.titre || 'Haut-Fait')}</div>
         ${item.description ? `<div class="tl-card-desc">${_esc(item.description)}</div>` : ''}
+        ${_missionLinkHtml(item, 'tl-card-mission')}
         ${contribsEl}
         ${adminEl}
       </div>
@@ -874,6 +903,7 @@ function _achOpenLightbox(itemId) {
       <div class="ach-lb-cat" style="background:${cat.glow};border-color:${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
       <div class="ach-lb-title">${_esc(item.titre || 'Haut-Fait')}</div>
       ${item.description ? `<div class="ach-lb-desc">${_esc(item.description)}</div>` : ''}
+      ${_missionLinkHtml(item, 'ach-lb-mission')}
       ${contribsHtml}
     </div>
     <button class="ach-lb-close" type="button">✕</button>
@@ -881,7 +911,7 @@ function _achOpenLightbox(itemId) {
 
   const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
   overlay.addEventListener('click', close);
-  overlay.querySelector('button').addEventListener('click', e => { e.stopPropagation(); close(); });
+  overlay.querySelector('.ach-lb-close').addEventListener('click', e => { e.stopPropagation(); close(); });
   const onKey = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
@@ -889,12 +919,14 @@ function _achOpenLightbox(itemId) {
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
 PAGES.achievements = async function() {
-  const [items, order] = await Promise.all([
+  const [items, order, story] = await Promise.all([
     loadCollection('achievements'),
     _loadOrder(),
+    loadCollection('story').catch(() => []),
   ]);
   STORE.order    = order;
-  STORE.items = _applyOrder(items || [], order);
+  STORE.items    = _applyOrder(items || [], order);
+  STORE.missions = (story || []).filter(item => item.type === 'mission');
   STORE.filter ??= 'all';
   STORE.view   ??= 'galerie';
   STORE.search ??= '';
@@ -910,6 +942,11 @@ PAGES.achievements = async function() {
   watchPageCollection('ach-items', 'achievements', 'achievements', items => {
     if (document.body.classList.contains('ach-dragging')) return;
     STORE.items = _applyOrder(items, STORE.order);
+    _achRenderContent();
+  });
+
+  watchPageCollection('ach-story', 'story', 'achievements', items => {
+    STORE.missions = (items || []).filter(item => item.type === 'mission');
     _achRenderContent();
   });
 
@@ -934,4 +971,5 @@ registerActions({
   _achOpenLightbox:      (btn) => _achOpenLightbox(btn.dataset.id),
   _achSetCharFilter:     (btn) => _achSetCharFilter(btn.dataset.charid),
   _achToggleTimelineDir: ()    => _achToggleTimelineDir(),
+  _achOpenMission:       (btn) => _achOpenMission(btn.dataset.id),
 });

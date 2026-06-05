@@ -2017,6 +2017,19 @@
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
 }
 
+.ach-mission-link, .tl-card-mission, .ach-lb-mission {
+  align-self:flex-start; display:inline-flex; align-items:center; gap:4px;
+  max-width:100%; padding:3px 9px; border-radius:999px;
+  border:1px solid rgba(34,195,142,.35); background:rgba(34,195,142,.12);
+  color:#55d6aa; font:600 .66rem/1.3 Outfit,sans-serif; cursor:pointer;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:all .15s;
+}
+.ach-mission-link:hover, .tl-card-mission:hover, .ach-lb-mission:hover {
+  border-color:#55d6aa; background:rgba(34,195,142,.2);
+}
+.tl-card-mission { margin-top:8px; }
+.ach-lb-mission { margin:0 auto 12px; pointer-events:auto; }
+
 /* Contributeurs */
 .ach-contribs { display:flex; gap:5px; flex-wrap:wrap; margin-top:5px; }
 .ach-contrib {
