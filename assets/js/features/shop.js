@@ -5,6 +5,7 @@ import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { lsJson } from '../shared/local-storage.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
@@ -217,7 +218,25 @@ let _filterSort   = localStorage.getItem('shop_sort') || 'ordre'; // ordre | nom
 // Ensemble de chips actives parmi : payable | boost | upgrade | stock | new.
 // Les filtres se cumulent en AND ; les compteurs sont recalculés à chaque render.
 let _smartFilters = new Set();
-const SMART_KINDS = ['payable', 'boost', 'upgrade', 'stock', 'new'];
+
+// ── Favoris boutique (par utilisateur, en localStorage → aucun coût Firestore) ──
+let _shopFavs = null;
+function _favKey() { return `shopFavs:${STATE.user?.uid || 'anon'}`; }
+function _getFavs() {
+  if (!_shopFavs) _shopFavs = new Set(lsJson.get(_favKey(), []) || []);
+  return _shopFavs;
+}
+function _isFav(id) { return _getFavs().has(id); }
+function toggleFav(id) {
+  if (!id) return;
+  const f = _getFavs();
+  if (f.has(id)) f.delete(id); else f.add(id);
+  lsJson.set(_favKey(), [...f]);
+  // Si l'Atelier est ouvert (modale), on le rafraîchit ; sinon on re-render la boutique.
+  if (document.getElementById('atelier-items-col')) _renderAtelier();
+  else renderShop();
+}
+const SMART_KINDS = ['fav', 'payable', 'boost', 'upgrade', 'stock', 'new'];
 
 // ── Tweaks utilisateur (lot 7) : préférences d'affichage persistées en LS ──
 // Layout : 'sidebar' (catégories à gauche) | 'tabs' (catégories en pastilles
@@ -512,6 +531,7 @@ function _renderCatTabsBar() {
 function _renderSmartBar() {
   const base = _visibleItems();
   const SMART_META = [
+    { k:'fav',     ico:'⭐', lbl:'Mes favoris',                cls:'fav'     },
     { k:'payable', ico:'💰', lbl:'Je peux me payer',         cls:'payable' },
     { k:'boost',   ico:'⚡', lbl:'Booste ma stat principale', cls:'boost'   },
     { k:'upgrade', ico:'⬆️', lbl:'Mieux que mon équipement',  cls:'upgrade' },
@@ -1088,6 +1108,7 @@ function _shopPrimaryStat(c) {
 function _shopItemMatchesSmart(item, kind, ctx) {
   const { char, primary, gold } = ctx;
   switch (kind) {
+    case 'fav': return _isFav(item.id);
     case 'payable': {
       if (!char) return false;
       return (parseFloat(item.prix) || 0) <= gold;
@@ -1410,6 +1431,8 @@ function _renderItemCard(item, tplKey, itemIdx) {
         ${rareteNum ? `<span class="sh-item-img-rarity" title="${_esc(rareteName)}">${'★'.repeat(rareteNum)}</span>` : ''}
         <span class="sh-item-img-stock ${stockCls}">${_esc(stockTxt)}</span>
         ${ownedBadge}
+        <button class="sh-item-fav ${_isFav(item.id)?'is-fav':''}" data-sh-action="toggleFav" data-id="${item.id}"
+          title="${_isFav(item.id)?'Retirer des favoris':'Ajouter aux favoris'}" aria-label="Favori">${_isFav(item.id)?'★':'☆'}</button>
       </div>
 
       <div class="sh-item-body" data-sh-action="openDetail" data-id="${item.id}">
@@ -3695,7 +3718,7 @@ const _ATELIER_SLOTS = [
   { name: 'Bottes',          ico: '👢', kind: 'armure' },
   { name: 'Objet magique',   ico: '🔮', kind: 'bijou'  },
 ];
-let _atelier = { activeSlot: null, simulated: {}, itemSearch: '' };
+let _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
 
 /** Filtre les items boutique compatibles avec un slot d'équipement donné. */
 function _atelierItemsForSlot(slotName) {
@@ -3917,6 +3940,20 @@ function _renderAtelierSlotTabs() {
   }).join('');
 }
 
+/** Chips de tri de la liste d'articles de l'atelier. */
+function _renderAtelierSort() {
+  const cur = _atelier.sort || 'rarity';
+  const opts = [
+    { k:'rarity', lbl:'✨ Rareté' },
+    { k:'price',  lbl:'🪙 Prix' },
+    { k:'name',   lbl:'🔤 Nom' },
+    { k:'fav',    lbl:'⭐ Favoris' },
+  ];
+  return `<span class="atelier-items-sort-lbl">Trier :</span>` + opts.map(o =>
+    `<button class="atelier-sort-chip${cur===o.k?' is-active':''}" data-sh-action="atelierSetSort" data-sort="${o.k}">${o.lbl}</button>`
+  ).join('');
+}
+
 /** Rendu de la colonne droite : items compatibles avec le slot actif. */
 function _renderAtelierItems() {
   const slot = _atelier.activeSlot;
@@ -3930,9 +3967,15 @@ function _renderAtelierItems() {
   const q = _norm(_atelier.itemSearch || '');
   let items = _atelierItemsForSlot(slot);
   if (q) items = items.filter(it => _searchIncludes(_itemSearchText(it), q));
-  items = items
-    .sort((a, b) => (parseInt(b.rarete||0) - parseInt(a.rarete||0)) || (a.nom||'').localeCompare(b.nom||'', 'fr'))
-    .slice(0, 40);
+  const sortMode = _atelier.sort || 'rarity';
+  const byName = (a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr');
+  const byRare = (a, b) => (_getRareteNum(b.rarete) - _getRareteNum(a.rarete)) || byName(a, b);
+  items = items.sort((a, b) => {
+    if (sortMode === 'fav')   { const d = (_isFav(a.id)?0:1) - (_isFav(b.id)?0:1); if (d) return d; return byRare(a, b); }
+    if (sortMode === 'price') return ((parseFloat(a.prix)||0) - (parseFloat(b.prix)||0)) || byName(a, b);
+    if (sortMode === 'name')  return byName(a, b);
+    return byRare(a, b); // 'rarity' (défaut)
+  }).slice(0, 40);
 
   if (!items.length) {
     return `<div class="atelier-items-empty">
@@ -3984,6 +4027,8 @@ function _renderAtelierItems() {
           ${bonus.slice(0,4).map(b => `<span class="sh-item-bonus-chip" style="border-color:${b.color}55;background:${b.color}18;color:${b.color}">${b.short} ${b.val>0?'+':''}${b.val}</span>`).join('')}
         </div>` : ''}
       </div>
+      <span class="atelier-item-fav ${_isFav(it.id)?'is-fav':''}" data-sh-action="toggleFav" data-id="${it.id}"
+        title="${_isFav(it.id)?'Retirer des favoris':'Ajouter aux favoris'}">${_isFav(it.id)?'★':'☆'}</span>
       <span class="atelier-item-toggle">${tried ? '✓' : '+'}</span>
     </button>`;
   }).join('');
@@ -4004,6 +4049,8 @@ function _renderAtelier() {
   if (stats)   stats.innerHTML = _renderAtelierStats();
   if (items)   items.innerHTML = _renderAtelierItems();
   if (tabs)    tabs.innerHTML  = _renderAtelierSlotTabs();
+  const sortEl = document.getElementById('atelier-items-sort');
+  if (sortEl)  sortEl.innerHTML = _renderAtelierSort();
   if (slotLbl) slotLbl.textContent = _atelier.activeSlot || '—';
 
   // Restaure focus + caret de la search (n'est pas re-rendue, mais sa value oui
@@ -4101,7 +4148,7 @@ function openAtelierModal(prefillItemId) {
   const char = _getActiveShopChar();
   if (!char) { showNotif('Sélectionne d\'abord un personnage.', 'error'); return; }
   // Reset état
-  _atelier = { activeSlot: null, simulated: {} };
+  _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
   if (prefillItemId) {
     const item = _items.find(i => i.id === prefillItemId);
     const slot = item ? _resolveSlotForItem(item) : null;
@@ -4135,6 +4182,7 @@ function openAtelierModal(prefillItemId) {
               data-sh-action="atelierSearch" data-sh-on="input"
               autocomplete="off">
           </div>
+          <div class="atelier-items-sort" id="atelier-items-sort"></div>
           <div class="atelier-items-list" id="atelier-items-col"></div>
         </div>
       </div>
@@ -4180,6 +4228,7 @@ Object.assign(shHandlers, {
     _renderAtelier();
   },
   atelierSearch:      (el) => { _atelier.itemSearch = el.value || ''; _renderAtelier(); },
+  atelierSetSort:     (el) => { _atelier.sort = el.dataset.sort || 'rarity'; _renderAtelier(); },
   atelierBuyAll:      () => _atelierBuyAll(),
   atelierSaveBuild:   () => _atelierSaveBuild(),
   atelierLoadBuild:   (el) => _atelierLoadBuild(el.dataset.id),
@@ -4229,6 +4278,7 @@ Object.assign(shHandlers, {
     renderShop();
   },
   resetSmart:     () => { _smartFilters.clear(); _page = 1; renderShop(); },
+  toggleFav:      (el) => toggleFav(el?.dataset?.id || ''),
   // Sidebar / catégories
   goHome:         () => shopGoHome(),
   goCat:          (el) => shopGoCat(el.dataset.id),

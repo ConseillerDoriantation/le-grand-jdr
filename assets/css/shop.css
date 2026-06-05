@@ -2660,6 +2660,7 @@ body.sh-dragging * { cursor: grabbing !important; }
 .sh-smart-chip.upgrade { --sc-bg: rgba(34,195,142,.16); --sc-bd: rgba(34,195,142,.42); --sc-c: var(--emerald, var(--emerald)); }
 .sh-smart-chip.stock   { --sc-bg: rgba(255,149,68,.16); --sc-bd: rgba(255,149,68,.42); --sc-c: var(--ember); }
 .sh-smart-chip.new     { --sc-bg: rgba(157,111,255,.16); --sc-bd: rgba(157,111,255,.42); --sc-c: #bca0ff; }
+.sh-smart-chip.fav     { --sc-bg: rgba(244,196,48,.16); --sc-bd: rgba(244,196,48,.42); --sc-c: #ffd666; }
 
 .sh-smart-reset {
   margin-left: auto;
@@ -4347,7 +4348,7 @@ body .sh-page--v2 .sh-item-img:not([style*="background-image"]) {
 }
 
 .atelier-item {
-  display: grid; grid-template-columns: 48px 1fr auto;
+  display: grid; grid-template-columns: 48px 1fr auto auto;
   gap: 10px; align-items: center;
   padding: 8px 10px;
   border-radius: 10px;
@@ -5243,3 +5244,47 @@ body .sh-page--v2 .sh-item-desc {
 /* ── Helpers texte répétés ──────────────────────────────────────────────── */
 .sh-dim-pill { padding:0 4px;color:var(--text-dim) }
 .sh-label    { font-weight:400;color:var(--text-dim);font-family:inherit }
+
+/* ── Favoris boutique (étoile sur la carte d'article) ── */
+.sh-item-fav {
+  position: absolute; top: 6px; left: 6px; z-index: 3;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8,12,22,.55); border: 1px solid rgba(255,255,255,.16);
+  color: #cdd5e3; font-size: .95rem; line-height: 1; cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: transform .12s, color .12s, background .12s, border-color .12s;
+}
+.sh-item-fav:hover { transform: scale(1.12); color: #ffd666; }
+.sh-item-fav.is-fav { color: #ffd666; border-color: rgba(244,196,48,.55); background: rgba(244,196,48,.18); }
+
+/* ── Atelier : étoile favori + chips de tri ── */
+.atelier-item-fav {
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.05); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: .82rem; line-height: 1; cursor: pointer;
+  transition: transform .12s, color .12s, background .12s, border-color .12s;
+}
+.atelier-item-fav:hover { transform: scale(1.15); color: #ffd666; }
+.atelier-item-fav.is-fav { color: #ffd666; border-color: rgba(244,196,48,.5); background: rgba(244,196,48,.16); }
+
+.atelier-items-sort {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+  padding: 2px 2px 6px;
+}
+.atelier-items-sort-lbl { font-size: .66rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; margin-right: 2px; }
+.atelier-sort-chip {
+  background: rgba(255,255,255,.03); border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: 999px; padding: 3px 10px;
+  font-family: inherit; font-size: .7rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.atelier-sort-chip:hover { color: var(--text); }
+.atelier-sort-chip.is-active {
+  background: rgba(157,111,255,.16); border-color: rgba(157,111,255,.45); color: #c9b3ff;
+}
+
+/* ── Double croix : l'Atelier a son propre header (.atelier-head) avec un ✕ ;
+   on masque la barre de titre standard du modal (vide) pour n'avoir qu'une croix. */
+.modal:has(.atelier-shell) > .modal-title { display: none; }
