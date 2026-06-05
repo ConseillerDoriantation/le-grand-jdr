@@ -2114,8 +2114,11 @@
   background: rgba(255,255,255,.06); padding: 1px .45rem; border-radius: 999px;
 }
 .vtt-aopt-section-body {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 5px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+  gap: 7px;
+  padding: 6px;
+  align-items: start;
 }
 
 /* ── Action en carte de sort (réutilise .cs-spellcard de la fiche perso) ── */

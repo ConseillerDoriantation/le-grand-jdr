@@ -4330,16 +4330,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // → la cible cliquée à l'origine est ignorée, l'effet s'applique au lanceur.
   if (opt.targetSelf) tgtId = srcId;
 
-  // Arme magique : choisir l'élément avant de continuer
-  if (opt.isMagicWeapon) {
-    _mtPending = null; // sécurité
-    _showElementPicker(srcId, tgtId, +idx);
-    return;
-  }
-
-  // NB : sort multi-noyau → le choix de l'élément est désormais INTÉGRÉ à la modale
-  // d'attaque (sélecteur en haut), plus de modale séparée. On laisse donc tomber
-  // jusqu'à la modale finale (l'élément primaire sert de défaut).
+  // NB : le choix de l'élément (sort multi-noyau OU arme magique) est désormais
+  // INTÉGRÉ à la modale d'attaque (sélecteur en haut), plus de modale séparée.
+  // On laisse donc tomber jusqu'à la modale finale (élément par défaut résolu là).
 
   // Sort de déplacement (rune Amplification mode Déplacement) : soi / pousse / attire.
   if (opt.mods?.deplacement && opt.sortIdx !== undefined && !_mtPending) {
@@ -4367,6 +4360,22 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // Si on arrive d'une validation multi-cibles, stocker les cibles dans le contexte
   const allTargets = _mtPending && _mtPending.length > 0 ? [..._mtPending] : null;
   _mtPending = null;
+
+  // Arme magique : l'élément se choisit maintenant DANS cette modale (sélecteur en
+  // haut), plus de modale séparée. On fixe un défaut tout de suite (1er élément
+  // accessible, sinon physique) pour que les dégâts/aperçus s'affichent.
+  if (opt.isMagicWeapon && !opt._mwElemReady) {
+    const avail = (opt.charElements || []).map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+    const def = avail[0] || getDamageTypeById(_damageTypes, 'physique');
+    if (def) {
+      opt.damageTypeId    = def.id;
+      opt.typeRules       = getDamageTypeRules(_damageTypes, def.id);
+      opt.damageTypeIcon  = def.icon || '';
+      opt.damageTypeColor = def.color || '';
+    }
+    opt._mwElemReady = true;   // évite de réinitialiser à chaque réouverture (Retour)
+  }
+
   _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets };
 
   const dist    = _tokenAttackDistance(src, tgt);
@@ -4420,9 +4429,14 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // Aperçu donné pour l'attaque offensive uniquement, et seulement si la cible
   // est une créature liée au bestiaire (les joueurs n'ont pas de profil).
   // Sélecteur d'élément intégré (sorts multi-noyau) — remplace l'ancienne modale.
-  const _elemChoices = (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1)
-    ? opt.spellElementChoices.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean) : [];
-  const elemSelectorHtml = _elemChoices.length ? `
+  // Choix d'élément intégré : sort multi-noyau OU arme magique (≥ 2 éléments dispo).
+  let _elemChoices = [];
+  if (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1) {
+    _elemChoices = opt.spellElementChoices.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+  } else if (opt.isMagicWeapon) {
+    _elemChoices = (opt.charElements || []).map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+  }
+  const elemSelectorHtml = _elemChoices.length > 1 ? `
     <div class="vtt-atk-elemrow">
       <span class="vtt-atk-elemrow-lbl">🔮 Élément</span>
       <div class="vtt-atk-elems">
@@ -4609,67 +4623,6 @@ function _vttCancelAtk() { _atkCtx=null; closeModalDirect(); }
 function _closeActionModal() { closeModalDirect(); }
 
 /** Affiche le sélecteur d'élément pour une arme magique. */
-function _showElementPicker(srcId, tgtId, optIdx) {
-  const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[optIdx];
-  if (!opt) return;
-  const src = _tokens[srcId]?.data, tgt = _tokens[tgtId]?.data;
-  if (!src || !tgt) return;
-  const lS = _live(src), lT = _live(tgt);
-
-  const charElements  = opt.charElements || [];
-  const availableTypes = (_damageTypes || []).filter(t => charElements.includes(t.id));
-
-  // Si aucun élément disponible → frappe physique par défaut
-  if (availableTypes.length === 0) {
-    const physRules = getDamageTypeRules(_damageTypes, 'physique');
-    const physType  = getDamageTypeById(_damageTypes, 'physique');
-    _atkOptsCache[`${srcId}__${tgtId}`][optIdx] = {
-      ...opt, isMagicWeapon: false,
-      typeRules: physRules,
-      damageTypeIcon: physType?.icon || '',
-      damageTypeColor: physType?.color || '',
-    };
-    // Proceed directly — re-call _vttPickOpt now that isMagicWeapon is false
-    _vttPickOpt(srcId, tgtId, optIdx);
-    return;
-  }
-
-  openModal(`${opt.icon} ${opt.label} — Élément`, `
-    <div class="vtt-form" style="min-width:260px;max-width:340px">
-      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
-        <button data-vtt-fn="_vttBackToAtk"
-          style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
-                 border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
-                 cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
-                 white-space:nowrap">← Retour</button>
-        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;
-                    white-space:nowrap;font-size:.82rem">
-          <strong>${_esc(lS.displayName??src.name)}</strong>
-          <span style="color:var(--text-dim);margin:0 .3rem">→</span>
-          <strong style="color:#ef4444">${_esc(lT.displayName??tgt.name)}</strong>
-        </div>
-      </div>
-      <div style="font-size:.72rem;color:var(--text-dim);margin-bottom:.6rem;text-align:center">
-        🔮 Choisir l'élément de l'attaque
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:.45rem">
-        ${availableTypes.map(t => `
-          <button data-vtt-fn="_vttPickElement" data-vtt-args="${srcId}|${tgtId}|${optIdx}|${t.id}"
-            style="padding:.55rem .4rem;border-radius:10px;cursor:pointer;font-family:inherit;
-                   border:2px solid ${t.color||'var(--border)'};
-                   background:${t.color||'var(--border)'}18;
-                   color:${t.color||'var(--text)'};font-weight:700;font-size:.82rem;
-                   display:flex;align-items:center;justify-content:center;gap:.25rem;
-                   transition:background .12s">
-            <span>${t.icon||''}</span><span>${_esc(t.label)}</span>
-          </button>`).join('')}
-      </div>
-      <div style="text-align:right;margin-top:.75rem">
-        <button class="btn-secondary" data-action="close-modal">Annuler</button>
-      </div>
-    </div>`);
-}
-
 function _vttPickElement(srcId, tgtId, optIdx, elementId) {
   const cacheKey = `${srcId}__${tgtId}`;
   const opt = _atkOptsCache[cacheKey]?.[+optIdx];
