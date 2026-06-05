@@ -4177,11 +4177,12 @@ async function _execAttack(srcId, tgtId) {
   const box = document.getElementById('modal-box');
   if (box) {
     box.classList.add('modal--aopt');
+    box.classList.remove('modal--atk');   // on revient au grand sélecteur (ex: bouton Retour)
     const overlay = document.getElementById('modal-overlay');
     if (overlay && !overlay._aoptObs) {
       const obs = new MutationObserver(() => {
         if (!overlay.classList.contains('show')) {
-          box.classList.remove('modal--aopt');
+          box.classList.remove('modal--aopt', 'modal--atk');
         }
       });
       obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
@@ -4617,6 +4618,12 @@ function _vttPickOpt(srcId, tgtId, idx) {
       </button>
 
     </div>`);
+  // Cette modale (jet) n'est PAS le grand sélecteur d'actions : on bascule sur une
+  // largeur ajustée au formulaire (.modal--atk) et on retire la large .modal--aopt
+  // (héritée car l'overlay n'est pas masqué entre les deux) → plus de boîte 808px
+  // avec un formulaire étroit qui flotte.
+  const _mb = document.getElementById('modal-box');
+  if (_mb) { _mb.classList.remove('modal--aopt'); _mb.classList.add('modal--atk'); }
 }
 
 function _vttCancelAtk() { _atkCtx=null; closeModalDirect(); }

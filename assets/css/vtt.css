@@ -1963,6 +1963,12 @@
   overflow: hidden;
   max-height: min(90vh, 820px);
 }
+/* Modale de jet (toucher/dégâts) : largeur ajustée au formulaire (pas la grande
+   boîte du sélecteur d'actions) → contenu centré, plus de vide latéral. */
+.modal.modal--atk {
+  width: auto;
+  max-width: min(420px, 94vw);
+}
 .modal.modal--aopt > #modal-body {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column;
@@ -2118,7 +2124,7 @@
   grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
   gap: 7px;
   padding: 6px;
-  align-items: start;
+  align-items: stretch;   /* cartes d'une même rangée à hauteur égale */
 }
 
 /* ── Action en carte de sort (réutilise .cs-spellcard de la fiche perso) ── */
