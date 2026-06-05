@@ -3512,3 +3512,19 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   .pp-mn-body { padding: 14px 16px; }
   .pp-mn-footer { padding: 12px 14px; }
 }
+
+/* ── Trame : modale d'ordre des axes (MJ, drag & drop) ── */
+.axe-order-list { display: flex; flex-direction: column; gap: 6px; }
+.axe-order-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: 9px;
+  background: var(--bg-elevated, rgba(255,255,255,.03));
+  border: 1px solid var(--border);
+}
+.axe-order-grip {
+  cursor: grab; color: var(--text-dim); font-size: 1rem; line-height: 1;
+  user-select: none; flex-shrink: 0;
+}
+.axe-order-grip:active { cursor: grabbing; }
+.axe-order-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+.axe-order-name { font-size: .86rem; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
