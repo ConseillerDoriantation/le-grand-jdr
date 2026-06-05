@@ -179,17 +179,36 @@ export function renderCharDeck(c, canEdit) {
       if (!hay.includes(search)) return false;
     }
     if (typeFlt) {
-      const types = _getSortTypes(s);
-      const runes = s.runes || [];
-      if (typeFlt === 'soin' && !runes.includes('Protection')) return false;
-      if (typeFlt === 'enchantement' && !runes.includes('Enchantement')) return false;
-      if (typeFlt === 'affliction' && !runes.includes('Affliction')) return false;
-      if (typeFlt === 'offensif' && !types.includes('offensif')) return false;
-      if (typeFlt === 'defensif' && !types.includes('defensif')) return false;
-      if (typeFlt === 'utilitaire' && !(types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif'))) return false;
+      if (typeFlt.startsWith('rune:')) {
+        // Filtre par rune utilisée
+        if (!(s.runes || []).includes(typeFlt.slice(5))) return false;
+      } else {
+        const types = _getSortTypes(s);
+        if (typeFlt === 'offensif'   && !types.includes('offensif')) return false;
+        if (typeFlt === 'defensif'   && !types.includes('defensif')) return false;
+        if (typeFlt === 'utilitaire' && !(types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif'))) return false;
+      }
     }
     return true;
   };
+
+  // ── Filtre INTELLIGENT : ne proposer que les types et runes RÉELLEMENT utilisés ──
+  const usedTypes = new Set();   // 'offensif' | 'defensif' | 'utilitaire'
+  const usedRunes = new Set();   // noms de runes présents dans au moins un sort
+  allSorts.forEach(s => {
+    const t = _getSortTypes(s);
+    if (t.includes('offensif')) usedTypes.add('offensif');
+    if (t.includes('defensif')) usedTypes.add('defensif');
+    if (t.includes('utilitaire') && !t.includes('offensif') && !t.includes('defensif')) usedTypes.add('utilitaire');
+    (s.runes || []).forEach(r => usedRunes.add(r));
+  });
+  const TYPE_META = {
+    offensif:   { lbl: '⚔️ Off',  cls: 'off' },
+    defensif:   { lbl: '🛡️ Def',  cls: 'def' },
+    utilitaire: { lbl: '🔧 Util.', cls: 'util' },
+  };
+  // Runes ordonnées comme RUNE_META, filtrées sur celles utilisées par le perso.
+  const usedRuneMetas = RUNE_META.filter(rm => usedRunes.has(rm.nom));
 
   const sortsByCat = {};
   allCats.forEach(cat => { sortsByCat[cat.id] = []; });
@@ -221,6 +240,15 @@ export function renderCharDeck(c, canEdit) {
         <span class="cs-sorts-deck-val">${deckCount}<small>/${deckMax}</small></span>
         <span class="cs-sorts-deck-bar"><span style="width:${deckPct}%"></span></span>
       </div>
+      ${STATE.isAdmin ? (() => {
+        const rl = Number.isFinite(parseInt(c.maxRunes)) ? parseInt(c.maxRunes) : 1;
+        return `<div class="cs-sorts-mjrunes" title="MJ : nombre de runes d'effet débloquées pour ce personnage">
+          <span class="cs-sorts-mjrunes-lbl">🔮 Runes MJ</span>
+          <button class="cs-sorts-mjrunes-btn" data-action="_sortsAdjRuneLimit" data-delta="-1" title="Retirer une rune débloquée"${rl<=0?' disabled':''}>−</button>
+          <span class="cs-sorts-mjrunes-val">${rl}</span>
+          <button class="cs-sorts-mjrunes-btn" data-action="_sortsAdjRuneLimit" data-delta="1" title="Débloquer une rune"${rl>=20?' disabled':''}>＋</button>
+        </div>`;
+      })() : ''}
       <div class="cs-sorts-actions">
         ${canEdit ? `<button class="btn btn-gold btn-sm" data-action="addSort" title="Créer un sort">＋ Sort</button>` : ''}
         ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="openInvocationLibrary" title="Gérer mes invocations (créatures à invoquer)">🐾</button>` : ''}
@@ -235,15 +263,18 @@ export function renderCharDeck(c, canEdit) {
         <button class="cs-sorts-chip ${view==='all'?'on':''}"  data-action="_sortsSetView" data-view="all">Tous (${allSorts.length})</button>
         <button class="cs-sorts-chip ${view==='deck'?'on':''}" data-action="_sortsSetView" data-view="deck">⚡ Deck (${deckCount})</button>
       </div>
-      <div class="cs-sorts-filt-grp">
-        <button class="cs-sorts-chip type ${typeFlt===''?'on':''}"            data-action="_sortsSetType" data-type="">Toutes</button>
-        <button class="cs-sorts-chip type off  ${typeFlt==='offensif'?'on':''}"     data-action="_sortsSetType" data-type="offensif">⚔️ Off</button>
-        <button class="cs-sorts-chip type def  ${typeFlt==='defensif'?'on':''}"     data-action="_sortsSetType" data-type="defensif">🛡️ Def</button>
-        <button class="cs-sorts-chip type soin ${typeFlt==='soin'?'on':''}"         data-action="_sortsSetType" data-type="soin">💚 Soin</button>
-        <button class="cs-sorts-chip type ench ${typeFlt==='enchantement'?'on':''}" data-action="_sortsSetType" data-type="enchantement">✨ Ench.</button>
-        <button class="cs-sorts-chip type aff  ${typeFlt==='affliction'?'on':''}"   data-action="_sortsSetType" data-type="affliction">⛓ Aff.</button>
-        <button class="cs-sorts-chip type util ${typeFlt==='utilitaire'?'on':''}"   data-action="_sortsSetType" data-type="utilitaire">🔧 Util.</button>
-      </div>
+      ${(usedTypes.size || usedRuneMetas.length) ? `<div class="cs-sorts-filt-grp">
+        <button class="cs-sorts-chip type ${typeFlt===''?'on':''}" data-action="_sortsSetType" data-type="">Toutes</button>
+        ${['offensif','defensif','utilitaire'].filter(t => usedTypes.has(t)).map(t => {
+          const m = TYPE_META[t];
+          return `<button class="cs-sorts-chip type ${m.cls} ${typeFlt===t?'on':''}" data-action="_sortsSetType" data-type="${t}">${m.lbl}</button>`;
+        }).join('')}
+        ${usedRuneMetas.length ? `<span class="cs-sorts-filt-sep"></span>` : ''}
+        ${usedRuneMetas.map(rm => {
+          const v = `rune:${rm.nom}`;
+          return `<button class="cs-sorts-chip rune ${typeFlt===v?'on':''}" style="--c:${rm.color}" data-action="_sortsSetType" data-type="${v}" title="${_esc(rm.effet || rm.nom)}">${rm.icon} ${_esc(rm.nom)}</button>`;
+        }).join('')}
+      </div>` : ''}
     </div>
 
     <!-- Bandeau Set Léger (PM offset) -->
@@ -335,6 +366,24 @@ function _sortsSetView(v) {
 function _sortsSetType(t) {
   _sortsTypeFilter = t || '';
   _sortsRerender();
+}
+// MJ : règle le nombre de runes d'effet débloquées (characters.maxRunes) directement
+// depuis l'onglet Sorts, sans ouvrir l'éditeur de sort.
+async function _sortsAdjRuneLimit(delta) {
+  if (!STATE.isAdmin) return;
+  const c = _getCurrentSpellChar() || STATE.activeChar; if (!c) return;
+  const cur  = parseInt(c.maxRunes);
+  const base = Number.isFinite(cur) ? cur : 1;
+  const next = Math.max(0, Math.min(20, base + (parseInt(delta) || 0)));
+  if (next === base) return;
+  c.maxRunes = next;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+  if (charSession.getCurrentChar()?.id === c.id)
+    charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+  if (await trySave('characters', c.id, { maxRunes: next })) {
+    _renderSpellsTab(c);
+    showNotif(`🔮 Runes d'effet : ${next} pour ${_esc(c.nom || 'ce perso')}`, 'success');
+  }
 }
 function _sortsToggleCat(catId) {
   _sortsCatCollapsed = { ...(_sortsCatCollapsed || {}) };
@@ -2865,6 +2914,7 @@ registerActions({
   _sortsSetSearch:        (btn) => _sortsSetSearch(btn.dataset.val),
   _sortsSetView:          (btn) => _sortsSetView(btn.dataset.view),
   _sortsSetType:          (btn) => _sortsSetType(btn.dataset.type),
+  _sortsAdjRuneLimit:     (btn) => _sortsAdjRuneLimit(btn.dataset.delta),
   _sortsToggleCat:        (btn) => _sortsToggleCat(btn.dataset.id),
   _sortsToggleAllCats:    ()    => _sortsToggleAllCats(),
   _sortsResetFilters:     ()    => _sortsResetFilters(),
