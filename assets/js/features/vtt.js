@@ -4289,6 +4289,66 @@ function _vttAttackModeControlsHtml(comment = 'Sélecteur de mode') {
     </div>
   `;
 }
+// Aperçu d'interaction élémentaire (immunité/résistance/faiblesse) — recalculable
+// quand on change l'élément directement dans la modale d'attaque.
+function _atkInteractionHtml(opt) {
+  if (!opt || opt.isCaSort || opt.isUtil || opt.isHeal || !opt.damageTypeId) return '';
+  const tids = (_atkCtx?.allTargets?.length ? _atkCtx.allTargets : (_atkCtx?.tgtId ? [_atkCtx.tgtId] : []));
+  const buckets = {};
+  for (const tid of tids) {
+    const td = _tokens[tid]?.data;
+    if (!td || td.type !== 'enemy' || !td.beastId) continue;
+    const inter = previewDamageInteraction(opt.damageTypeId, _bestiary[td.beastId]);
+    if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
+  }
+  const entries = Object.entries(buckets);
+  if (!entries.length) return '';
+  const isMulti = tids.length > 1;
+  const badges = entries.map(([label, n]) => {
+    const meta = DAMAGE_INTERACTIONS[label] || { icon: 'ℹ️', color: 'var(--text-dim)', short: '' };
+    return `<span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:700;
+              color:${meta.color};background:${meta.color}1a;border:1px solid ${meta.color}55;
+              padding:.18rem .45rem;border-radius:999px">
+              ${meta.icon} ${_esc(label)}${isMulti ? ` ×${n}` : ''}
+              <span style="font-size:.6rem;font-weight:400;opacity:.8">${meta.short}</span>
+            </span>`;
+  }).join(' ');
+  return `<div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;font-size:.65rem;color:var(--text-dim);padding:.3rem .1rem 0">
+    <span>🎯 Cible :</span>${badges}
+  </div>`;
+}
+
+// Note "½ / dégâts complets même en cas d'échec" — dépend du type de dégâts (élément).
+function _atkMissNoteHtml(opt) {
+  if (opt?.typeRules?.missEffect === 'full') {
+    return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
+      <span>✦</span><span>Dégâts complets même en cas d'échec</span></div>`;
+  }
+  if (opt?.typeRules?.missEffect === 'half' || opt?.pmCost > 0) {
+    return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
+      <span>✦</span><span>½ dégâts garantis même en cas d'échec${opt?.typeRules?.missEffect !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span></div>`;
+  }
+  return '';
+}
+
+// Change l'élément d'un sort multi-noyau DIRECTEMENT dans la modale d'attaque
+// (plus de modale séparée). Met à jour le contexte du jet + l'affichage en place.
+function _vttAtkSetElement(elemId) {
+  const ctx = _atkCtx; if (!ctx?.opt) return;
+  const t = getDamageTypeById(_damageTypes, elemId);
+  ctx.opt.damageTypeId    = elemId;
+  ctx.opt.typeRules       = getDamageTypeRules(_damageTypes, elemId);
+  ctx.opt.damageTypeIcon  = t?.icon || '';
+  ctx.opt.damageTypeColor = t?.color || '';
+  document.querySelectorAll('.vtt-atk-elem').forEach(b => b.classList.toggle('is-active', b.dataset.elem === elemId));
+  const ic = document.getElementById('atk-dmgtype-ic');
+  if (ic) { ic.textContent = t?.icon || ''; ic.style.color = t?.color || '#9ca3af'; }
+  const inter = document.getElementById('atk-interaction');
+  if (inter) inter.innerHTML = _atkInteractionHtml(ctx.opt);
+  const miss = document.getElementById('atk-miss-note');
+  if (miss) miss.innerHTML = _atkMissNoteHtml(ctx.opt);
+}
+
 function _vttPickOpt(srcId, tgtId, idx) {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
   if (!opt) return;
@@ -4305,12 +4365,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
     return;
   }
 
-  // Sort multi-noyau : choisir l'élément à utiliser avant de continuer (sauf si on
-  // revient d'une validation zone/multi-cibles : l'élément est déjà fixé).
-  if (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1 && !_mtPending) {
-    _showSpellElementPicker(srcId, tgtId, +idx);
-    return;
-  }
+  // NB : sort multi-noyau → le choix de l'élément est désormais INTÉGRÉ à la modale
+  // d'attaque (sélecteur en haut), plus de modale séparée. On laisse donc tomber
+  // jusqu'à la modale finale (l'élément primaire sert de défaut).
 
   // Sort de déplacement (rune Amplification mode Déplacement) : soi / pousse / attire.
   if (opt.mods?.deplacement && opt.sortIdx !== undefined && !_mtPending) {
@@ -4390,34 +4447,16 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // ── Preview d'interaction (immunité / résistance / faiblesse / absorption) ──
   // Aperçu donné pour l'attaque offensive uniquement, et seulement si la cible
   // est une créature liée au bestiaire (les joueurs n'ont pas de profil).
-  let interactionPreviewHtml = '';
-  if (!isCastOnly && !opt.isHeal && opt.damageTypeId) {
-    const targetIdsPrev = (_atkCtx?.allTargets?.length ? _atkCtx.allTargets : [tgtId]);
-    const buckets = {}; // interactionLabel → count
-    for (const tid of targetIdsPrev) {
-      const td = _tokens[tid]?.data;
-      if (!td || td.type !== 'enemy' || !td.beastId) continue;
-      const inter = previewDamageInteraction(opt.damageTypeId, _bestiary[td.beastId]);
-      if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
-    }
-    const entries = Object.entries(buckets);
-    if (entries.length) {
-      const isMulti = targetIdsPrev.length > 1;
-      const badges = entries.map(([label, n]) => {
-        const meta = DAMAGE_INTERACTIONS[label] || { icon: 'ℹ️', color: 'var(--text-dim)', short: '' };
-        return `<span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:700;
-                  color:${meta.color};background:${meta.color}1a;border:1px solid ${meta.color}55;
-                  padding:.18rem .45rem;border-radius:999px">
-                  ${meta.icon} ${_esc(label)}${isMulti ? ` ×${n}` : ''}
-                  <span style="font-size:.6rem;font-weight:400;opacity:.8">${meta.short}</span>
-                </span>`;
-      }).join(' ');
-      interactionPreviewHtml = `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;
-        font-size:.65rem;color:var(--text-dim);padding:.3rem .1rem 0">
-        <span>🎯 Cible :</span>${badges}
-      </div>`;
-    }
-  }
+  // Sélecteur d'élément intégré (sorts multi-noyau) — remplace l'ancienne modale.
+  const _elemChoices = (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1)
+    ? opt.spellElementChoices.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean) : [];
+  const elemSelectorHtml = _elemChoices.length ? `
+    <div class="vtt-atk-elemrow">
+      <span class="vtt-atk-elemrow-lbl">🔮 Élément</span>
+      <div class="vtt-atk-elems">
+        ${_elemChoices.map(t => `<button type="button" class="vtt-atk-elem ${t.id===opt.damageTypeId?'is-active':''}" style="--ec:${t.color||'#9ca3af'}" data-vtt-fn="_vttAtkSetElement" data-vtt-args="${t.id}" title="${_esc(t.label)}">${t.icon||''} ${_esc(t.label)}</button>`).join('')}
+      </div>
+    </div>` : '';
 
   // ── Bloc spécifique Affliction (JS de la cible) ────────────────────
   const _STAT_SH = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
@@ -4510,19 +4549,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
 
         <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">⚔️ Dégâts</span>
         <div style="display:flex;align-items:center;gap:.28rem;flex-wrap:wrap;min-width:0">
-          ${opt.damageTypeIcon ? `<span style="font-size:.85rem;color:${opt.damageTypeColor||'#9ca3af'}">${opt.damageTypeIcon}</span>` : ''}
+          <span id="atk-dmgtype-ic" style="font-size:.85rem;color:${opt.damageTypeColor||'#9ca3af'}">${opt.damageTypeIcon||''}</span>
           ${degatsFormula}
         </div>
         <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat aux dégâts">
         <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés supplémentaires aux dégâts (même type)">
-        ${ (opt.typeRules?.missEffect === 'full') ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
-          font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
-          <span>✦</span><span>Dégâts complets même en cas d'échec</span>
-        </div>` : (opt.typeRules?.missEffect === 'half' || opt.pmCost > 0) ? `<div style="grid-column:1/-1;display:flex;align-items:center;gap:.3rem;
-          font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
-          <span>✦</span><span>½ dégâts garantis même en cas d'échec${opt.typeRules?.missEffect !== 'half' && opt.pmCost > 0 ? ' (mana consommé)' : ''}</span>
-        </div>` : ''}
-        ${interactionPreviewHtml}
+        <div id="atk-miss-note" style="grid-column:1/-1">${_atkMissNoteHtml(opt)}</div>
+        <div id="atk-interaction" style="grid-column:1/-1">${_atkInteractionHtml(opt)}</div>
       </div>
     </div>
     ${_vttAttackModeControlsHtml()}
@@ -4559,6 +4592,8 @@ function _vttPickOpt(srcId, tgtId, idx) {
             background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:#4f8cff">${_esc(nm)}</span>`;
         }).join('')}
       </div>` : ''}
+
+      ${elemSelectorHtml}
 
       ${centerBlock}
 
@@ -4683,54 +4718,6 @@ function _vttPickElement(srcId, tgtId, optIdx, elementId) {
 }
 
 /** Sélecteur d'élément pour un sort multi-noyau (réutilise _vttPickElement). */
-function _showSpellElementPicker(srcId, tgtId, optIdx) {
-  const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[optIdx];
-  if (!opt) return;
-  const src = _tokens[srcId]?.data, tgt = _tokens[tgtId]?.data;
-  if (!src || !tgt) return;
-  const lS = _live(src), lT = _live(tgt);
-  const ids = opt.spellElementChoices || [];
-  const types = ids.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
-  if (types.length <= 1) {   // sécurité : un seul → pas de choix
-    if (types[0]) { _vttPickElement(srcId, tgtId, optIdx, types[0].id); return; }
-    _vttPickOpt(srcId, tgtId, optIdx); return;
-  }
-  openModal(`${opt.icon} ${opt.label} — Élément`, `
-    <div class="vtt-form" style="min-width:260px;max-width:340px">
-      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
-        <button data-vtt-fn="_vttBackToAtk"
-          style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
-                 border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
-                 cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
-                 white-space:nowrap">← Retour</button>
-        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;
-                    white-space:nowrap;font-size:.82rem">
-          <strong>${_esc(lS.displayName??src.name)}</strong>
-          <span style="color:var(--text-dim);margin:0 .3rem">→</span>
-          <strong style="color:#ef4444">${_esc(lT.displayName??tgt.name)}</strong>
-        </div>
-      </div>
-      <div style="font-size:.72rem;color:var(--text-dim);margin-bottom:.6rem;text-align:center">
-        🔮 Ce sort a plusieurs noyaux — choisis l'élément
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:.45rem">
-        ${types.map(t => `
-          <button data-vtt-fn="_vttPickElement" data-vtt-args="${srcId}|${tgtId}|${optIdx}|${t.id}"
-            style="padding:.55rem .4rem;border-radius:10px;cursor:pointer;font-family:inherit;
-                   border:2px solid ${t.color||'var(--border)'};
-                   background:${t.color||'var(--border)'}18;
-                   color:${t.color||'var(--text)'};font-weight:700;font-size:.82rem;
-                   display:flex;align-items:center;justify-content:center;gap:.25rem;
-                   transition:background .12s">
-            <span>${t.icon||''}</span><span>${_esc(t.label)}</span>
-          </button>`).join('')}
-      </div>
-      <div style="text-align:right;margin-top:.75rem">
-        <button class="btn-secondary" data-action="close-modal">Annuler</button>
-      </div>
-    </div>`);
-}
-
 /** Retourne à la liste de sélection d'attaque sans annuler le combat. */
 function _vttBackToAtk() {
   const ctx = _atkCtx;
@@ -13953,6 +13940,7 @@ const VTT_ACTIONS = {
   _vttRetireMyToken,
   _vttRetireToken,
   _vttRollAttack,
+  _vttAtkSetElement,
   _vttRollSkill,
   _vttSaveStats,
   _vttSeek,

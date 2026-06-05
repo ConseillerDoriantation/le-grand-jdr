@@ -1888,6 +1888,31 @@
   transition: width .2s;
 }
 
+/* ── Sélecteur d'élément intégré (sorts multi-noyau) ── */
+.vtt-atk-elemrow {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  background: rgba(255,255,255,.03); border: 1px solid var(--border);
+  border-radius: 9px; padding: .5rem .6rem; margin-bottom: .7rem;
+}
+.vtt-atk-elemrow-lbl { font-size: .7rem; font-weight: 700; color: var(--text-dim); flex-shrink: 0; }
+.vtt-atk-elems { display: flex; flex-wrap: wrap; gap: 5px; }
+.vtt-atk-elem {
+  display: inline-flex; align-items: center; gap: .25rem;
+  border: 1px solid color-mix(in srgb, var(--ec, #888) 45%, var(--border));
+  background: color-mix(in srgb, var(--ec, #888) 10%, transparent);
+  color: color-mix(in srgb, var(--ec, #ccc) 68%, var(--text));
+  border-radius: 7px; padding: .3rem .55rem; font-size: .74rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+  transition: background .12s, border-color .12s, box-shadow .12s;
+}
+.vtt-atk-elem:hover { background: color-mix(in srgb, var(--ec, #888) 20%, transparent); color: var(--text); }
+.vtt-atk-elem.is-active {
+  color: var(--ec, var(--text));
+  border-color: var(--ec, var(--gold));
+  background: color-mix(in srgb, var(--ec, #888) 24%, transparent);
+  box-shadow: inset 0 0 0 1px var(--ec, transparent);
+}
+
 /* En-têtes de catégorie */
 .vtt-opt-cat-hdr {
   display: flex; align-items: center; justify-content: space-between;
