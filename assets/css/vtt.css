@@ -4988,3 +4988,39 @@
 .vtt-deleg-ghosts-body { flex: 1; display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
 .vtt-deleg-ghosts-body b { color: var(--amber, var(--amber)); font-weight: 700; }
 .vtt-deleg-ghosts-body span { font-size: .7rem; color: var(--text-dim, #7a8fa8); }
+
+/* ── Sas d'entrée VTT (session en cours) ─────────────────────────────────── */
+.vtt-gate {
+  height: 100%; min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.vtt-gate-card {
+  width: min(440px, 92vw);
+  background: linear-gradient(180deg, rgba(13,21,36,.96), rgba(8,14,24,.98));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 32px 28px;
+  text-align: center;
+  box-shadow: 0 24px 70px rgba(0,0,0,.55);
+}
+.vtt-gate-card.is-live { border-color: rgba(239,68,68,.45); box-shadow: 0 24px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(239,68,68,.25); }
+.vtt-gate-ico { font-size: 2.6rem; line-height: 1; margin-bottom: 12px; }
+.vtt-gate-card.is-live .vtt-gate-ico { animation: vtt-gate-pulse 1.6s ease-in-out infinite; }
+@keyframes vtt-gate-pulse { 0%,100%{ opacity:1 } 50%{ opacity:.5 } }
+.vtt-gate-title { font-family: var(--font-display, 'Outfit', sans-serif); font-size: 1.4rem; font-weight: 700; color: var(--text); margin: 0 0 8px; }
+.vtt-gate-text { font-size: .9rem; line-height: 1.5; color: var(--text-muted, #9ca3af); margin: 0 0 20px; }
+.vtt-gate-actions { display: flex; flex-direction: column; gap: 8px; }
+.vtt-gate-actions .btn { width: 100%; height: 46px; font-size: .95rem; font-weight: 700; }
+.vtt-gate-note { font-size: .68rem; color: var(--text-dim); margin: 16px 0 0; }
+
+/* Bouton MJ "Session en cours" (barre du haut) */
+.vtt-session-btn.is-live {
+  color: #ff8b8b !important; border-color: rgba(239,68,68,.5) !important;
+  background: rgba(239,68,68,.14) !important;
+  animation: vtt-session-glow 2s ease-in-out infinite;
+}
+@keyframes vtt-session-glow {
+  0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,.0); }
+  50%     { box-shadow: 0 0 10px -2px rgba(239,68,68,.6); }
+}
