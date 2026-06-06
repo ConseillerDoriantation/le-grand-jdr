@@ -279,38 +279,23 @@ function _computeRecentMissions(currentCharId, limit = 5) {
     .slice(0, limit);
 }
 
-// ── Calcul des partenaires d'aventure (basé sur story.groupes) ────────────────
-// Les "groupes" dans la trame sont des sous-équipes qu'on attache à une mission
-// (ex: "Groupe A", "Groupe B" qui ont fait la mission ensemble). Cette fonction
-// compte combien de fois chaque autre PJ a été dans le MÊME groupe que le PJ
-// courant — révélateur des vrais partenaires de mission, pas juste de la
-// liste de participants d'une mission.
-//
-// Fallback : si aucun groupe ne contient le PJ, on retombe sur les participants
-// globaux de la mission (compat avec les vieilles missions sans groupes).
+// ── Calcul des partenaires d aventure (base sur story.groupes) ───────────────
+// Les partenaires sont strictement les personnages qui partagent le MEME groupe
+// de trame que le PJ courant. Les participants globaux de mission ne sont pas
+// utilises ici : deux groupes differents sur une meme mission ne comptent pas.
 function _computeTopAdventurers(currentCharId, items, limit = 4) {
   if (!currentCharId || !STORE.story.length) return [];
   const counter = new Map();
   STORE.story.forEach(ev => {
     const groupes = Array.isArray(ev.groupes) ? ev.groupes : [];
-    const myGroupes = groupes.filter(g => (g.membres || []).includes(currentCharId));
-    if (myGroupes.length) {
-      // Co-occurrences DANS les mêmes groupes
-      myGroupes.forEach(g => {
+    groupes
+      .filter(g => (g.membres || []).includes(currentCharId))
+      .forEach(g => {
         (g.membres || []).forEach(id => {
           if (id === currentCharId) return;
           counter.set(id, (counter.get(id) || 0) + 1);
         });
       });
-    } else {
-      // Fallback : participants globaux (anciennes missions sans groupes)
-      const ids = (ev.participants || []).map(p => p.id).filter(Boolean);
-      if (!ids.includes(currentCharId)) return;
-      ids.forEach(id => {
-        if (id === currentCharId) return;
-        counter.set(id, (counter.get(id) || 0) + 1);
-      });
-    }
   });
   return [...counter.entries()]
     .map(([charId, count]) => ({ count, item: items.find(it => it.charId === charId) }))
@@ -1191,8 +1176,8 @@ function _renderChroniqueBlock(item) {
 }
 
 // ── Bloc Top partenaires d'aventure ──────────────────────────────────────────
-// Calcul depuis `story` (trame/missions) : compte les co-occurrences dans
-// `participants` et affiche les top N PJs.
+// Calcul depuis story.groupes : compte les co-occurrences dans un meme groupe
+// de trame et affiche les top N PJs.
 function _renderTopAdventurersBlock(item, items) {
   const charId = item.char?.id || item.charId;
   const top = _computeTopAdventurers(charId, items, 4);
