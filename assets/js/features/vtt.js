@@ -7882,6 +7882,7 @@ function _initListeners() {
     const prev = _characters;
     const next = {};
     for (const c of data || []) next[c.id] = c;
+    const wasReady = _charsReady;
 
     const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
     for (const id of Object.keys(prev)) {
@@ -7898,6 +7899,19 @@ function _initListeners() {
     }
     _renderTraySoon();
     _charsReady = true; _maybeSyncAutoTokens();
+    // Signale immédiatement au destinataire les objets reçus pendant qu’il est
+    // sur le VTT. Le premier snapshot est ignoré pour ne pas annoncer tout
+    // l’inventaire existant à l’ouverture de la table.
+    if (wasReady) {
+      for (const c of Object.values(next)) {
+        if (c.uid !== STATE.user?.uid) continue;
+        const previousInv = prev[c.id]?.inventaire || [];
+        const currentInv = c.inventaire || [];
+        if (currentInv.length <= previousInv.length) continue;
+        const labels = currentInv.slice(previousInv.length).map(item => item?.nom || "Objet").join(", ");
+        showNotif("📦 Inventaire de " + (c.nom || "votre personnage") + " mis à jour : " + labels, "success");
+      }
+    }
     // Ne re-rend la mini-fiche que si le perso AFFICHÉ a changé : évite d'écraser
     // une saisie en cours (note, XP) quand un autre personnage est mis à jour.
     if (_miniUid && _miniCharId &&
@@ -13398,8 +13412,10 @@ async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId)
   const senderBonus = computeEquipStatsBonus(senderEquip);
   const recipInv = [...(recip.inventaire||[]), { ...item }];
   try {
-    await updateDoc(_chrRef(senderCharId), { inventaire: senderInv, equipement: senderEquip, statsBonus: senderBonus });
-    await updateDoc(_chrRef(recipCharId),  { inventaire: recipInv });
+    const batch = writeBatch(db);
+    batch.update(_chrRef(senderCharId), { inventaire: senderInv, equipement: senderEquip, statsBonus: senderBonus });
+    batch.update(_chrRef(recipCharId), { inventaire: recipInv });
+    await batch.commit();
     showNotif(`${item.nom||'Objet'} envoyé à ${recip.nom||'joueur'}`, 'success');
   } catch(e) { console.error('[vtt] send item', e); showNotif('Erreur envoi', 'error'); }
 }

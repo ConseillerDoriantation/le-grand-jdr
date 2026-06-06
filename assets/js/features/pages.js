@@ -1060,6 +1060,34 @@ const PAGES = {
       STATE.activeChar = charToShow;
       renderCharSheet(charToShow);
     }
+
+    // La collection personnages est déjà session-live : cet abonnement ne
+    // crée pas de lecture supplémentaire. Il permet notamment d’afficher sans
+    // rechargement un objet envoyé depuis le VTT.
+    let previousChars = chars;
+    watch("characters-live", "characters", data => {
+      if (STATE.currentPage !== "characters") return;
+      const nextChars = STATE.isAdmin ? (data || []) : (data || []).filter(c => c.uid === STATE.user.uid);
+      const activeId = charSession.getCurrentChar()?.id || STATE.activeChar?.id;
+      const previousActive = previousChars.find(c => c.id === activeId);
+      const nextActive = nextChars.find(c => c.id === activeId);
+      STATE.characters = nextChars;
+      for (const c of nextChars) {
+        if (c.uid !== STATE.user?.uid) continue;
+        const previousInv = previousChars.find(old => old.id === c.id)?.inventaire || [];
+        const currentInv = c.inventaire || [];
+        if (currentInv.length <= previousInv.length) continue;
+        const labels = currentInv.slice(previousInv.length).map(item => item?.nom || "Objet").join(", ");
+        showNotif("📦 Inventaire de " + (c.nom || "votre personnage") + " mis à jour : " + labels, "success");
+      }
+      previousChars = nextChars;
+      if (!nextActive) return;
+      STATE.activeChar = nextActive;
+      const inventoryChanged = JSON.stringify(previousActive?.inventaire || []) !== JSON.stringify(nextActive.inventaire || []);
+      if (inventoryChanged && charSession.getCurrentCharTab() === "inv") {
+        renderCharSheet(nextActive, "inv");
+      }
+    });
   },
 
   // ─── SHOP ───────────────────────────────────────────────────────────────────
