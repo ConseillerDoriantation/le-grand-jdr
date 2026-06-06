@@ -3711,7 +3711,7 @@ function _buildAttackOptions(t) {
 
   // ── Tous les sorts actifs du deck ──
   // Silence : si le porteur a un état avec cantCastSpells, on saute toute la
-  // génération des options de sort. Les attaques d'arme et actions d'objet restent.
+  // génération des options de sort. Les attaques d'arme restent disponibles.
   const _silenced = _hasConditionEffect(t, 'cantCastSpells');
   if (!_silenced && c?.deck_sorts?.length) {
     // Aligne sur le sheet : Poings (statAttaque=force) si rien équipé
@@ -3760,7 +3760,7 @@ function _buildAttackOptions(t) {
   // noyau, runes, types, modes (Affliction DoT/État, Enchantement Dégâts/État…).
   // On réutilise donc tout le pipeline sort (_vttSpellMods, isAfflictionOnly, etc.)
   // en ajoutant juste les méta de consommation et d'identification objet.
-  if (c && Array.isArray(c.inventaire) && !_silenced) {
+  if (c && Array.isArray(c.inventaire)) {
     // Aligne sur le sheet : Poings (statAttaque=force) si rien équipé
     const mainP2I    = getMainWeapon(c);
     const sStatKeyI  = mainP2I?.statAttaque || mainP2I?.toucherStat || 'force';
@@ -3778,6 +3778,9 @@ function _buildAttackOptions(t) {
     c.inventaire.forEach((item, invIdx) => {
       const acts = Array.isArray(item?.actions) ? item.actions : [];
       if (!acts.length) return;
+      // Silence bloque les actions d'objet non consommables, mais les potions,
+      // parchemins et autres consommables restent utilisables depuis l'inventaire.
+      if (_silenced && !item.consommable) return;
       // Arme / armure / bijou : utilisable seulement si équipé.
       // Consommable : utilisable depuis l'inventaire.
       if (!item.consommable && !equippedInvIdx.has(invIdx)) return;
