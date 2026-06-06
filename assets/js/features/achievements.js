@@ -74,134 +74,164 @@ export function openAchievementModal(id = null) {
   const missions = (STORE.missions || []).filter(m => m.type === 'mission').sort((a, b) => (a.ordre || 0) - (b.ordre || 0));
   _achUploader?.destroy(); _achUploader = null;
 
-  openModal(
-    id ? `✏️ Modifier — ${ex?.titre || 'Haut-Fait'}` : '🏆 Nouveau Haut-Fait',
-    `
-    <div class="form-group">
-      <label>Catégorie</label>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-        ${CATS.map(c => `
-          <button type="button" id="ach-cat-${c.id}" data-action="_achSelectCat" data-id="${c.id}"
-            style="padding:0.4rem 0.9rem;border-radius:999px;font-size:0.8rem;cursor:pointer;
-                   border:1px solid var(--border);background:transparent;
-                   color:var(--text-muted);transition:all 0.15s;">
-            ${c.label}
-          </button>`).join('')}
-      </div>
-      <input type="hidden" id="ach-categorie" value="${ex?.categorie || 'epique'}">
-    </div>
+  const curCat = CATS.find(c => c.id === (ex?.categorie || 'epique')) || CATS[0];
 
-    <div class="form-group">
-      <label>Titre</label>
-      <input class="input-field" id="ach-titre"
-        value="${ex?.titre || ''}" placeholder="ex: L'œuf de Dragon">
-    </div>
+  openModal('', `
+    <div class="achm">
 
-    <div class="form-group">
-      <label>Description <span style="font-size:0.75rem;color:var(--text-dim)">(visible par les joueurs)</span></label>
-      <textarea class="input-field" id="ach-desc" rows="3"
-        placeholder="Ce qui s'est passé...">${ex?.description || ''}</textarea>
-    </div>
-
-    <div class="form-group">
-      <label>Mission liée <span style="font-size:0.75rem;color:var(--text-dim)">(optionnel)</span></label>
-      <select class="input-field" id="ach-mission-id">
-        <option value="">Aucune mission liée</option>
-        ${missions.map(m => `<option value="${m.id}" ${ex?.missionId === m.id ? "selected" : ""}>${_esc(m.titre || "Mission sans titre")}</option>`).join("")}
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>Image</label>
-
-      <!-- Zone de drop -->
-      <div id="ach-drop-zone" style="
-        border:2px dashed var(--border-strong);border-radius:12px;
-        padding:1.2rem;text-align:center;cursor:pointer;
-        transition:border-color 0.15s;background:var(--bg-elevated);
-      ">
-        <div id="ach-drop-preview"></div>
-        <div style="font-size:0.7rem;color:var(--text-dim);margin-top:4px">JPG · PNG · WebP — max 5 Mo</div>
-      </div>
-
-      <div id="ach-img-ready" style="display:none;font-size:0.75rem;text-align:center;margin-top:6px"></div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
-      <div class="form-group">
-        <label>Emoji (si pas d'image)</label>
-        <input class="input-field" id="ach-emoji"
-          value="${ex?.emoji || '🏆'}" style="font-size:1.2rem">
-      </div>
-      <div class="form-group">
-        <label>Date</label>
-        <input type="date" class="input-field" id="ach-date"
-          value="${_toISO(ex?.date) || _todayISO()}">
-      </div>
-    </div>
-
-    ${STATE.isAdmin ? `
-    <div class="form-group" style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:8px;background:rgba(180,127,255,0.08);border:1px solid rgba(180,127,255,0.18)">
-      <input type="checkbox" id="ach-secret" ${ex?.secret ? 'checked' : ''}
-        style="width:18px;height:18px;cursor:pointer;accent-color:#b47fff">
-      <label for="ach-secret" style="margin:0;cursor:pointer;display:flex;flex-direction:column;gap:2px;flex:1">
-        <span style="font-weight:600;font-size:.85rem;color:#b47fff">🔒 Haut-Fait secret (MJ uniquement)</span>
-        <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">Caché aux joueurs jusqu'à la révélation. Utile pour les prophéties, twists, récompenses surprise.</span>
-      </label>
-    </div>` : ''}
-
-    ${(() => {
-      const chars = sortCharactersForDisplay(STATE.characters || []);
-      if (!chars.length) return '';
-      const contrib = ex?.contributeurs || [];
-      const COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-      return `<div class="form-group">
-        <label>Personnages contributeurs <span style="font-size:.73rem;color:var(--text-dim);font-weight:400">(optionnel)</span></label>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:.5rem;margin-top:.3rem">
-          ${chars.map(c => {
-            const isOn = contrib.includes(c.id);
-            const col  = COLS[c.nom?.charCodeAt(0)%6||0];
-            return `<div data-action="_achToggleContrib" data-id="${c.id}"
-              id="ach-contrib-${c.id}"
-              data-contrib-nom="${(c.nom||'?').replace(/"/g,'&quot;')}"
-              style="display:flex;flex-direction:column;align-items:center;gap:.3rem;
-                padding:.5rem .3rem;border-radius:10px;cursor:pointer;transition:all .15s;
-                border:2px solid ${isOn?col:'var(--border)'};
-                background:${isOn?col+'18':'var(--bg-elevated)'}">
-              ${characterAvatarHtml(c, {
-                size: 44,
-                border: `2px solid ${isOn ? col : 'rgba(255,255,255,.1)'}`,
-                color: col,
-              })}
-              <span style="font-size:.65rem;text-align:center;
-                color:${isOn?col:'var(--text-dim)'};font-weight:${isOn?'700':'400'};
-                line-height:1.2;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(c.nom||'?')}</span>
-              ${isOn?`<div class="ach-dot" style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></div>`:''}
-            </div>`;
-          }).join('')}
+      <!-- En-tête — aperçu live (façon Trame) -->
+      <div class="achm-head" style="--cc:${curCat.color}">
+        <div class="achm-head-art" id="ach-head-art">
+          <img id="ach-head-img" alt="" ${ex?.imageUrl ? `src="${_esc(ex.imageUrl)}"` : 'style="display:none"'}>
+          <span class="achm-head-emoji" id="ach-head-emoji" ${ex?.imageUrl ? 'style="display:none"' : ''}>${_esc(ex?.emoji || '🏆')}</span>
         </div>
-        <input type="hidden" id="ach-contributeurs" value="${contrib.join(',')}">
-      </div>`;
-    })()}
+        <div class="achm-head-info">
+          <span class="achm-head-cat" id="ach-head-cat">${curCat.label}</span>
+          <span class="achm-head-title" id="ach-head-title">${_esc(ex?.titre || 'Nouveau Haut-Fait')}</span>
+          <span class="achm-head-sub">${id ? '✏️ Modification' : '🏆 Nouveau Haut-Fait'}</span>
+        </div>
+      </div>
 
-    <button class="btn btn-gold" style="width:100%;margin-top:0.5rem"
-      data-action="saveAchievement" data-id="${id || ''}">
-      ${id ? 'Enregistrer les modifications' : 'Créer le Haut-Fait'}
-    </button>
+      <!-- ── Identité ──────────────────────────────────────────── -->
+      <div class="achm-section">
+        <div class="achm-section-t">Identité</div>
+        <div class="form-group">
+          <label>Titre</label>
+          <input class="input-field" id="ach-titre"
+            value="${_esc(ex?.titre || '')}" placeholder="ex: L'œuf de Dragon">
+        </div>
+        <div class="form-group">
+          <label>Catégorie</label>
+          <div class="achm-cats">
+            ${CATS.map(c => `<button type="button" id="ach-cat-${c.id}" class="achm-cat"
+              data-action="_achSelectCat" data-id="${c.id}" style="--cc:${c.color}">${c.label}</button>`).join('')}
+          </div>
+          <input type="hidden" id="ach-categorie" value="${ex?.categorie || 'epique'}">
+        </div>
+        <div class="achm-grid2">
+          <div class="form-group">
+            <label>Emoji <span class="achm-hint">(si pas d'image)</span></label>
+            <input class="input-field" id="ach-emoji"
+              value="${_esc(ex?.emoji || '🏆')}" style="font-size:1.2rem">
+          </div>
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" class="input-field" id="ach-date"
+              value="${id ? _toISO(ex?.date) : _todayISO()}">
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Récit & lien Trame ───────────────────────────────── -->
+      <div class="achm-section">
+        <div class="achm-section-t">Récit & lien</div>
+        <div class="form-group">
+          <label>Description <span class="achm-hint">(visible par les joueurs)</span></label>
+          <textarea class="input-field" id="ach-desc" rows="3"
+            placeholder="Ce qui s'est passé...">${_esc(ex?.description || '')}</textarea>
+        </div>
+        <div class="form-group">
+          <label>Mission de la Trame <span class="achm-hint">(optionnel)</span></label>
+          <select class="input-field" id="ach-mission-id">
+            <option value="">Aucune mission liée</option>
+            ${missions.map(m => `<option value="${m.id}" ${ex?.missionId === m.id ? "selected" : ""}>${_esc(m.titre || "Mission sans titre")}</option>`).join("")}
+          </select>
+          <div class="achm-hint achm-hint--block">🔗 Lier ce haut-fait à une mission le fait apparaître dans la fiche de la mission (Trame) — et la mission s'affiche ici. C'est ainsi qu'on relie « ce qui s'est passé » à « ce qu'on en retient ».</div>
+        </div>
+      </div>
+
+      <!-- ── Illustration ─────────────────────────────────────── -->
+      <div class="achm-section">
+        <div class="achm-section-t">Illustration</div>
+        <div id="ach-drop-zone" class="achm-drop">
+          <div id="ach-drop-preview"></div>
+          <div class="achm-drop-meta">JPG · PNG · WebP — max 5 Mo</div>
+        </div>
+        <div id="ach-img-ready" class="achm-img-ready" style="display:none"></div>
+      </div>
+
+      ${STATE.isAdmin ? `
+      <div class="achm-section">
+        <div class="achm-secret">
+          <input type="checkbox" id="ach-secret" ${ex?.secret ? 'checked' : ''}>
+          <label for="ach-secret">
+            <span class="achm-secret-t">🔒 Haut-Fait secret (MJ uniquement)</span>
+            <span class="achm-secret-d">Caché aux joueurs jusqu'à la révélation. Utile pour les prophéties, twists, récompenses surprise.</span>
+          </label>
+        </div>
+      </div>` : ''}
+
+      ${(() => {
+        const chars = sortCharactersForDisplay(STATE.characters || []);
+        if (!chars.length) return '';
+        const contrib = ex?.contributeurs || [];
+        const COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
+        return `<div class="achm-section">
+          <div class="achm-section-t">Personnages contributeurs <span class="achm-hint">(optionnel)</span></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:.5rem;margin-top:.3rem">
+            ${chars.map(c => {
+              const isOn = contrib.includes(c.id);
+              const col  = COLS[c.nom?.charCodeAt(0)%6||0];
+              return `<div data-action="_achToggleContrib" data-id="${c.id}"
+                id="ach-contrib-${c.id}"
+                data-contrib-nom="${(c.nom||'?').replace(/"/g,'&quot;')}"
+                style="display:flex;flex-direction:column;align-items:center;gap:.3rem;
+                  padding:.5rem .3rem;border-radius:10px;cursor:pointer;transition:all .15s;
+                  border:2px solid ${isOn?col:'var(--border)'};
+                  background:${isOn?col+'18':'var(--bg-elevated)'}">
+                ${characterAvatarHtml(c, {
+                  size: 44,
+                  border: `2px solid ${isOn ? col : 'rgba(255,255,255,.1)'}`,
+                  color: col,
+                })}
+                <span style="font-size:.65rem;text-align:center;
+                  color:${isOn?col:'var(--text-dim)'};font-weight:${isOn?'700':'400'};
+                  line-height:1.2;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(c.nom||'?')}</span>
+                ${isOn?`<div class="ach-dot" style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></div>`:''}
+              </div>`;
+            }).join('')}
+          </div>
+          <input type="hidden" id="ach-contributeurs" value="${contrib.join(',')}">
+        </div>`;
+      })()}
+
+      <button class="btn btn-gold achm-save"
+        data-action="saveAchievement" data-id="${id || ''}">
+        ${id ? 'Enregistrer les modifications' : 'Créer le Haut-Fait'}
+      </button>
+    </div>
     `
   );
+
+  // Aperçu live de l'en-tête
+  const _headTitle = document.getElementById('ach-head-title');
+  const _headEmoji = document.getElementById('ach-head-emoji');
+  const _headImg   = document.getElementById('ach-head-img');
+  const _headCat   = document.getElementById('ach-head-cat');
+  const _headWrap  = document.querySelector('.achm-head');
+  document.getElementById('ach-titre')?.addEventListener('input', e => {
+    if (_headTitle) _headTitle.textContent = e.target.value.trim() || 'Nouveau Haut-Fait';
+  });
+  document.getElementById('ach-emoji')?.addEventListener('input', e => {
+    if (_headEmoji) _headEmoji.textContent = e.target.value.trim() || '🏆';
+  });
 
   // Sélecteur catégorie
   _achSelectCat = (catId) => {
     document.getElementById('ach-categorie').value = catId;
+    let active = null;
     CATS.forEach(c => {
-      const btn    = document.getElementById(`ach-cat-${c.id}`);
-      const active = c.id === catId;
+      const btn = document.getElementById(`ach-cat-${c.id}`);
+      const on  = c.id === catId;
+      if (on) active = c;
       if (!btn) return;
-      btn.style.borderColor = active ? c.color : 'var(--border)';
-      btn.style.background  = active ? c.glow  : 'transparent';
-      btn.style.color       = active ? c.color  : 'var(--text-muted)';
+      btn.classList.toggle('is-active', on);
     });
+    // Sync en-tête
+    if (active) {
+      if (_headCat) _headCat.textContent = active.label;
+      if (_headWrap) _headWrap.style.setProperty('--cc', active.color);
+    }
   };
   _achSelectCat(ex?.categorie || 'epique');
 
@@ -245,6 +275,11 @@ export function openAchievementModal(id = null) {
     resize:       { maxW: 1400, quality: 0.88 },
     maxFileSize:  5 * 1024 * 1024,
     onError:      (err) => showNotif(err.message || 'Image trop lourde.', 'error'),
+    onResult:     (b64) => {
+      // Reflète l'image (ou son retrait) dans l'aperçu d'en-tête
+      if (_headImg)   { _headImg.src = b64 || ''; _headImg.style.display = b64 ? '' : 'none'; }
+      if (_headEmoji) { _headEmoji.style.display = b64 ? 'none' : ''; }
+    },
   });
 }
 
@@ -266,7 +301,14 @@ async function saveAchievement(id = '') {
       description:  document.getElementById('ach-desc')?.value?.trim()  || '',
       imageUrl,
       emoji:        document.getElementById('ach-emoji')?.value?.trim() || '🏆',
-      date:         document.getElementById('ach-date')?.value?.trim()  || '',
+      // Date : on conserve la valeur du champ. En édition, si le champ est vide
+      // alors que le haut-fait avait une date legacy non affichable (format FR),
+      // on ne l'écrase pas par du vide.
+      date:         (() => {
+        const v = document.getElementById('ach-date')?.value?.trim() || '';
+        if (v) return v;
+        return (id && ex?.date && !_toISO(ex.date)) ? ex.date : '';
+      })(),
       missionId:    document.getElementById('ach-mission-id')?.value || '',
       contributeurs,
       secret:       !!document.getElementById('ach-secret')?.checked,
@@ -916,6 +958,15 @@ function _achOpenLightbox(itemId) {
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
 }
+// Ouverture de la lightbox depuis un autre module (ex. fiche mission de la Trame).
+// Charge les hauts-faits si nécessaire (collection session-live → 0 lecture en plus).
+export async function openAchievementLightbox(id) {
+  if (!STORE.items || !STORE.items.length) {
+    try { STORE.items = await loadCollection('achievements'); } catch {}
+  }
+  _achOpenLightbox(id);
+}
+
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
 PAGES.achievements = async function() {

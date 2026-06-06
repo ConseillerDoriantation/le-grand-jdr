@@ -1533,6 +1533,9 @@ async function openStoryDetail(id) {
   const st = stCfg(item);
   const groupes = item.groupes || [];
   const liensItems = (item.liens || []).map(lid => items.find(i => i.id === lid)).filter(Boolean);
+  // Hauts-Faits rattachés à cette mission (collection session-live → 0 lecture en plus).
+  const achItems = (getCachedCollection('achievements') || await loadCollection('achievements').catch(() => []) || [])
+    .filter(a => a.missionId === item.id);
   const totalMembers = (() => {
     const s = new Set();
     groupes.forEach(g => (g.membres || []).forEach(m => s.add(m)));
@@ -1606,6 +1609,10 @@ async function openStoryDetail(id) {
         <div class="mv-stat-num">${totalMembers}</div>
         <div class="mv-stat-lbl">Personnage${totalMembers > 1 ? 's' : ''}</div>
       </div>
+      ${achItems.length ? `<div class="mv-stat">
+        <div class="mv-stat-num">🏆 ${achItems.length}</div>
+        <div class="mv-stat-lbl">Haut${achItems.length > 1 ? 's' : ''}-Fait${achItems.length > 1 ? 's' : ''}</div>
+      </div>` : ''}
       ${liensItems.length ? `<div class="mv-stat">
         <div class="mv-stat-num">${liensItems.length}</div>
         <div class="mv-stat-lbl">Suite${liensItems.length > 1 ? 's' : ''}</div>
@@ -1666,6 +1673,27 @@ async function openStoryDetail(id) {
               </div>` : ''}
             </article>`;
           }).join('')}
+        </div>
+      </section>` : ''}
+
+      <!-- Hauts-Faits issus de cette mission -->
+      ${achItems.length ? `
+      <section class="mv-section">
+        <h3 class="mv-section-title">
+          🏆 Hauts-Faits
+          <span class="mv-section-count">${achItems.length}</span>
+        </h3>
+        <div class="mv-achs">
+          ${achItems.map(a => `
+            <button type="button" class="mv-ach" data-action="_stOpenAch" data-id="${a.id}">
+              <span class="mv-ach-art">${a.imageUrl
+                ? `<img src="${_esc(a.imageUrl)}" alt="">`
+                : `<span class="mv-ach-emoji">${_esc(a.emoji || '🏆')}</span>`}</span>
+              <span class="mv-ach-body">
+                <span class="mv-ach-title">${_esc(a.titre || 'Haut-Fait')}</span>
+                ${a.description ? `<span class="mv-ach-desc">${_esc(a.description)}</span>` : ''}
+              </span>
+            </button>`).join('')}
         </div>
       </section>` : ''}
 
@@ -2211,6 +2239,7 @@ registerActions({
   saveStory:               (btn) => saveStory(btn.dataset.id || ''),
   closeModalDirect:        ()    => closeModalDirect(),
   _stOpenLien:             (btn) => { closeModalDirect(); openStoryDetail(btn.dataset.id); },
+  _stOpenAch:              async (btn) => { const { openAchievementLightbox } = await import('./achievements.js'); openAchievementLightbox(btn.dataset.id); },
   _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
   _stEditAfterClose:       (btn) => { closeModalDirect(); editStory(btn.dataset.id); },
   _stDeleteAfterCloseModal:(btn) => { closeModal(); deleteStory(btn.dataset.id); },
