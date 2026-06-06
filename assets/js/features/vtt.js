@@ -1279,6 +1279,7 @@ function _buildShape(t) {
   const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
   g.setAttr('tokenW', sw);
   g.setAttr('tokenH', sh);
+  g.setAttr('displayImage', ld.displayImage || null);
   // ── Forme de base (ellipse, équivalente à un cercle quand W===H) ──
   g.add(new K.Ellipse({ radiusX:rx, radiusY:ry, fill:TYPE_COLOR[t.type]??'#888', opacity:.9 }));
   // ── Anneaux sélection / attaque ───────────────────────────────────
@@ -1631,6 +1632,10 @@ function _patchShape(id) {
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   // Si la taille a changé (modif bestiaire ou override), reconstruire
   const sizeMismatch = (g.getAttr('tokenW') || 1) !== sw || (g.getAttr('tokenH') || 1) !== sh;
+  // Un token peut être construit avant le chargement de sa fiche liée (bestiaire,
+  // PNJ, personnage). Quand son image effective arrive ensuite, il faut rebâtir
+  // la forme Konva ; un simple patch des textes/barres laisse le cercle coloré.
+  const imageMismatch = (g.getAttr('displayImage') || null) !== (ld.displayImage || null);
   // Conditions : si le nombre d'états actifs change, reconstruire (badges canvas)
   const _condRoundP = _session?.combat?.round ?? 0;
   const _activeCondCount = (e.data.conditions || []).filter(c =>
@@ -1644,7 +1649,7 @@ function _patchShape(id) {
   ).length;
   const _renderedBuffCount = g.find('.buff-ic').length;
   const buffMismatch = _activeBuffCount !== _renderedBuffCount;
-  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || condMismatch || buffMismatch) {
+  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || imageMismatch || condMismatch || buffMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
     _tokens[id] = { ...e, shape };
