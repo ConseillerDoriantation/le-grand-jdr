@@ -1122,6 +1122,14 @@ function _shopPrimaryStat(c) {
   return best;
 }
 
+// Date d'expiration « nouveauté » en ms (0 si non défini). Gère Timestamp
+// Firestore ({seconds}) ET number (ms) selon la source.
+function _itemNewUntilMs(item) {
+  const v = item?.newUntil;
+  if (v == null) return 0;
+  return v?.seconds ? v.seconds * 1000 : (parseInt(v) || 0);
+}
+
 function _shopItemMatchesSmart(item, kind, ctx) {
   const { char, primary, gold } = ctx;
   switch (kind) {
@@ -1139,7 +1147,11 @@ function _shopItemMatchesSmart(item, kind, ctx) {
       return d === null || d > 0;
     }
     case 'new': {
-      // Champ explicite admin OU heuristique 14 jours
+      // Toggle admin (newUntil) = autoritatif dès qu'il a été défini (0 ou date).
+      if (item.newUntil !== undefined && item.newUntil !== null) {
+        return _itemNewUntilMs(item) > Date.now();
+      }
+      // Legacy : flag permanent OU heuristique createdAt 14 j (items jamais réenregistrés).
       if (item.isNew === true) return true;
       const ts = item.createdAt?.seconds ? item.createdAt.seconds * 1000 : (parseInt(item.createdAt) || 0);
       if (!ts) return false;
@@ -2848,7 +2860,21 @@ function _siBuildTabContent(tab, tpl, item, tplKey) {
   }
   if (tab === 'meta') {
     const recipeChk = item ? !(item?.recipeMeta?.hidden) : ['arme','armure','bijou'].includes(tplKey);
+    // Nouveauté : actif si newUntil dans le futur (ou legacy isNew). Nouveau
+    // article → coché par défaut (il sera flaggé 2 semaines à la création).
+    const newUntilMs = _itemNewUntilMs(item);
+    const newActive  = item ? (newUntilMs > Date.now() || item.isNew === true) : true;
+    const newHint    = newUntilMs > Date.now()
+      ? `Actif dans le filtre « Nouveautés » jusqu'au ${new Date(newUntilMs).toLocaleDateString('fr-FR')}`
+      : 'Place l\'article dans le filtre « Nouveautés » pendant 2 semaines, puis se désactive seul.';
     return `<div class="si-meta-grid">
+      <label class="si-meta-row">
+        <input type="checkbox" id="si-new" ${newActive ? 'checked' : ''}>
+        <span>
+          <strong>✨ Nouveauté (2 semaines)</strong>
+          <em>${newHint}</em>
+        </span>
+      </label>
       <label class="si-meta-row">
         <input type="checkbox" id="si-has-recipe" ${recipeChk ? 'checked' : ''}>
         <span>
@@ -3402,6 +3428,17 @@ async function saveShopItem(itemId) {
     // Flag consommable (item-level) : retire 1 exemplaire à chaque usage d'action
     data.consommable = !!document.getElementById('si-consommable')?.checked;
 
+    // Nouveauté : toggle → fenêtre de 2 semaines (newUntil). On ne ré-arme la
+    // fenêtre que si elle n'est pas déjà active (éditer un item en cours de
+    // période ne remet pas le compteur à zéro). Décoché → 0 (désactivé).
+    {
+      const checked = document.getElementById('si-new')?.checked;
+      const existing = _itemNewUntilMs(item);
+      data.newUntil = checked
+        ? (existing > Date.now() ? existing : Date.now() + 14 * 24 * 3600 * 1000)
+        : 0;
+    }
+
     const hasRecipe = document.getElementById('si-has-recipe')?.checked;
     if (hasRecipe) {
       if (item?.recipeMeta) {
@@ -3436,7 +3473,7 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
   // celui de `shopItemToInvEntry` (assets/js/shared/inventory-utils.js) pour
   // garantir la cohérence des 4 paths (achat / butin take / butin add / sync).
   const SYNC_BLOCKLIST = new Set([
-    'id', 'image', 'dispo', 'recipeMeta', 'prix', 'categorieId',
+    'id', 'image', 'dispo', 'recipeMeta', 'prix', 'categorieId', 'newUntil', 'isNew',
   ]);
   const SYNC_FIELDS = Object.keys(newData).filter(k => !SYNC_BLOCKLIST.has(k));
 
