@@ -931,7 +931,7 @@ function _renderStatsHexagon(stats, opts = {}) {
   const size = opts.size || 260;
   const cx = size / 2, cy = size / 2;
   const R  = size * 0.36;          // rayon des axes
-  const RL = size * 0.46;          // rayon labels
+  const RL = size * 0.40;          // rayon labels (garde la valeur CON dans le SVG)
   const MAX = 22;                   // valeur max d'une stat (cap)
   const n = stats.length || 6;
   const angleAt = (i) => (-Math.PI / 2) + (i * 2 * Math.PI / n);
