@@ -56,10 +56,53 @@ function _missionFor(item) {
   return item?.missionId ? (STORE.missions || []).find(m => m.id === item.missionId) : null;
 }
 
+// Icône selon le type d'élément de Trame
+function _trameIco(m) { return m?.type === 'event' ? '📖' : '🎯'; }
+// Méta discrète (acte · date) d'un élément de Trame
+function _trameMeta(m) {
+  return [m?.acte || 'Acte I', m?.date].filter(Boolean).join(' · ');
+}
+
 function _missionLinkHtml(item, className = 'ach-mission-link') {
   const mission = _missionFor(item);
   if (!mission) return '';
-  return "<button type=\"button\" class=\"" + className + "\" data-action=\"_achOpenMission\" data-id=\"" + mission.id + "\" data-stop-propagation>🎯 " + _esc(mission.titre || 'Mission') + "</button>";
+  return "<button type=\"button\" class=\"" + className + "\" data-action=\"_achOpenMission\" data-id=\"" + mission.id + "\" data-stop-propagation>" + _trameIco(mission) + " " + _esc(mission.titre || 'Mission') + "</button>";
+}
+
+// Normalisation recherche : minuscules sans accents
+function _normalize(s) {
+  return (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// ── Sélecteur custom d'élément de Trame (vignette + titre + méta) ─────────────
+let _achPickItems = [];   // éléments de Trame proposés (missions + événements)
+let _achTogglePick = () => {};
+let _achPickSelect = () => {};
+let _achPickSearch = () => {};
+
+function _achPickArt(m, size = 34) {
+  return m?.imageUrl
+    ? `<span class="achm-pick-art"><img src="${_esc(m.imageUrl)}" alt=""></span>`
+    : `<span class="achm-pick-art achm-pick-art--ph">${_trameIco(m)}</span>`;
+}
+function _achPickTriggerHtml(m) {
+  if (!m) return `<span class="achm-pick-empty">Aucun élément lié — cliquer pour choisir</span>`;
+  return `${_achPickArt(m)}
+    <span class="achm-pick-txt">
+      <span class="achm-pick-title">${_esc(m.titre || 'Sans titre')}</span>
+      <span class="achm-pick-meta">${_trameIco(m)} ${m.type === 'event' ? 'Événement' : 'Mission'} · ${_esc(_trameMeta(m))}</span>
+    </span>
+    <span class="achm-pick-caret">▾</span>`;
+}
+function _achPickOptionHtml(m, selectedId) {
+  return `<button type="button" class="achm-pick-opt ${m.id === selectedId ? 'is-active' : ''}"
+    data-action="_achPickSelect" data-id="${m.id}">
+    ${_achPickArt(m)}
+    <span class="achm-pick-txt">
+      <span class="achm-pick-title">${_esc(m.titre || 'Sans titre')}</span>
+      <span class="achm-pick-meta">${_trameIco(m)} ${m.type === 'event' ? 'Événement' : 'Mission'} · ${_esc(_trameMeta(m))}</span>
+    </span>
+  </button>`;
 }
 
 async function _achOpenMission(id) {
@@ -71,7 +114,15 @@ async function _achOpenMission(id) {
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
 export function openAchievementModal(id = null) {
   const ex = id ? (STORE.items || []).find(a => a.id === id) : null;
-  const missions = (STORE.missions || []).filter(m => m.type === 'mission').sort((a, b) => (a.ordre || 0) - (b.ordre || 0));
+  // Éléments de Trame liables : missions ET événements
+  const trame = (STORE.missions || [])
+    .filter(m => m.type === 'mission' || m.type === 'event')
+    .sort((a, b) =>
+      (a.acte || '').localeCompare(b.acte || '') ||
+      (a.ordre || 0) - (b.ordre || 0) ||
+      (a.date || '').localeCompare(b.date || ''));
+  _achPickItems = trame;
+  const curTrame = ex?.missionId ? trame.find(m => m.id === ex.missionId) : null;
   _achUploader?.destroy(); _achUploader = null;
 
   const curCat = CATS.find(c => c.id === (ex?.categorie || 'epique')) || CATS[0];
@@ -131,12 +182,23 @@ export function openAchievementModal(id = null) {
             placeholder="Ce qui s'est passé...">${_esc(ex?.description || '')}</textarea>
         </div>
         <div class="form-group">
-          <label>Mission de la Trame <span class="achm-hint">(optionnel)</span></label>
-          <select class="input-field" id="ach-mission-id">
-            <option value="">Aucune mission liée</option>
-            ${missions.map(m => `<option value="${m.id}" ${ex?.missionId === m.id ? "selected" : ""}>${_esc(m.titre || "Mission sans titre")}</option>`).join("")}
-          </select>
-          <div class="achm-hint achm-hint--block">🔗 Lier ce haut-fait à une mission le fait apparaître dans la fiche de la mission (Trame) — et la mission s'affiche ici. C'est ainsi qu'on relie « ce qui s'est passé » à « ce qu'on en retient ».</div>
+          <label>Élément de la Trame <span class="achm-hint">(mission ou événement, optionnel)</span></label>
+          <input type="hidden" id="ach-mission-id" value="${ex?.missionId || ''}">
+          <div class="achm-pick" id="ach-pick">
+            <button type="button" class="achm-pick-trigger" id="ach-pick-trigger" data-action="_achTogglePick">
+              ${_achPickTriggerHtml(curTrame)}
+            </button>
+            <div class="achm-pick-menu" id="ach-pick-menu" hidden>
+              <input class="input-field achm-pick-search" id="ach-pick-search"
+                placeholder="Rechercher une mission / un événement…" data-input="_achPickSearch" autocomplete="off">
+              <div class="achm-pick-list" id="ach-pick-list">
+                <button type="button" class="achm-pick-opt achm-pick-opt--none ${!ex?.missionId ? 'is-active' : ''}"
+                  data-action="_achPickSelect" data-id="">✕ Aucun élément lié</button>
+                ${trame.map(m => _achPickOptionHtml(m, ex?.missionId || '')).join('')}
+              </div>
+            </div>
+          </div>
+          <div class="achm-hint achm-hint--block">🔗 Relier ce haut-fait à une mission ou un événement le fait apparaître dans la fiche de cet élément (Trame) — et l'élément s'affiche ici. C'est ainsi qu'on relie « ce qui s'est passé » à « ce qu'on en retient ».</div>
         </div>
       </div>
 
@@ -215,6 +277,39 @@ export function openAchievementModal(id = null) {
   document.getElementById('ach-emoji')?.addEventListener('input', e => {
     if (_headEmoji) _headEmoji.textContent = e.target.value.trim() || '🏆';
   });
+
+  // Sélecteur d'élément de Trame (custom)
+  _achTogglePick = () => {
+    const menu = document.getElementById('ach-pick-menu');
+    if (!menu) return;
+    const willOpen = menu.hidden;
+    menu.hidden = !willOpen;
+    document.getElementById('ach-pick')?.classList.toggle('is-open', willOpen);
+    if (willOpen) {
+      const s = document.getElementById('ach-pick-search');
+      if (s) { s.value = ''; _achPickSearch(''); setTimeout(() => s.focus(), 0); }
+    }
+  };
+  _achPickSelect = (pickId) => {
+    const hidden = document.getElementById('ach-mission-id');
+    if (hidden) hidden.value = pickId || '';
+    const trigger = document.getElementById('ach-pick-trigger');
+    if (trigger) trigger.innerHTML = _achPickTriggerHtml(_achPickItems.find(m => m.id === pickId) || null);
+    document.querySelectorAll('#ach-pick-list .achm-pick-opt').forEach(b =>
+      b.classList.toggle('is-active', (b.dataset.id || '') === (pickId || '')));
+    const menu = document.getElementById('ach-pick-menu');
+    if (menu) menu.hidden = true;
+    document.getElementById('ach-pick')?.classList.remove('is-open');
+  };
+  _achPickSearch = (raw) => {
+    const q = _normalize(raw);
+    document.querySelectorAll('#ach-pick-list .achm-pick-opt').forEach(b => {
+      if (b.classList.contains('achm-pick-opt--none')) return;
+      const m = _achPickItems.find(x => x.id === b.dataset.id);
+      const hay = _normalize([m?.titre, m?.acte, m?.date].filter(Boolean).join(' '));
+      b.style.display = (!q || hay.includes(q)) ? '' : 'none';
+    });
+  };
 
   // Sélecteur catégorie
   _achSelectCat = (catId) => {
@@ -977,7 +1072,7 @@ PAGES.achievements = async function() {
   ]);
   STORE.order    = order;
   STORE.items    = _applyOrder(items || [], order);
-  STORE.missions = (story || []).filter(item => item.type === 'mission');
+  STORE.missions = (story || []).filter(item => item.type === 'mission' || item.type === 'event');
   STORE.filter ??= 'all';
   STORE.view   ??= 'galerie';
   STORE.search ??= '';
@@ -997,7 +1092,7 @@ PAGES.achievements = async function() {
   });
 
   watchPageCollection('ach-story', 'story', 'achievements', items => {
-    STORE.missions = (items || []).filter(item => item.type === 'mission');
+    STORE.missions = (items || []).filter(item => item.type === 'mission' || item.type === 'event');
     _achRenderContent();
   });
 
@@ -1015,6 +1110,9 @@ registerActions({
   _achSetView:           (btn) => _achSetView(btn.dataset.val),
   openAchievementModal:  ()    => openAchievementModal(),
   _achSelectCat:         (btn) => _achSelectCat(btn.dataset.id),
+  _achTogglePick:        ()    => _achTogglePick(),
+  _achPickSelect:        (btn) => _achPickSelect(btn.dataset.id || ''),
+  _achPickSearch:        (el)  => _achPickSearch(el.value),
   _achToggleContrib:     (btn) => _achToggleContrib(btn.dataset.id),
   saveAchievement:       (btn) => saveAchievement(btn.dataset.id || ''),
   editAchievement:       (btn) => editAchievement(btn.dataset.id),
