@@ -90,6 +90,38 @@ const STORE = {
 const _LS_KEY = 'pp-ordre';
 const _getLocalOrdre = () => lsJson.get(_LS_KEY, null);
 const _setLocalOrdre = ids => lsJson.set(_LS_KEY, ids);
+const _chroniqueCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
+
+function _chroniqueDateValue(value) {
+  const s = String(value || '').trim();
+  if (!s) return null;
+
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+
+  m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/);
+  if (!m) return null;
+  const year = Number(m[3].length === 2 ? '20' + m[3] : m[3]);
+  return year * 10000 + Number(m[2]) * 100 + Number(m[1]);
+}
+
+function _compareMissionsChronoDesc(a, b) {
+  const dateA = String(a.date || '').trim();
+  const dateB = String(b.date || '').trim();
+  if (dateA && dateB) {
+    const valueA = _chroniqueDateValue(dateA);
+    const valueB = _chroniqueDateValue(dateB);
+    if (valueA !== null && valueB !== null && valueA !== valueB) return valueB - valueA;
+    const byDateLabel = _chroniqueCollator.compare(dateB, dateA);
+    if (byDateLabel) return byDateLabel;
+  }
+
+  const orderA = Number.isFinite(Number(a.ordre)) ? Number(a.ordre) : 0;
+  const orderB = Number.isFinite(Number(b.ordre)) ? Number(b.ordre) : 0;
+  if (orderA !== orderB) return orderB - orderA;
+
+  return _chroniqueCollator.compare(b.titre || '', a.titre || '');
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DONNÉES — assemblage perso × présentation
@@ -243,12 +275,7 @@ function _computeRecentMissions(currentCharId, limit = 5) {
       if ((ev.participants || []).some(p => p.id === currentCharId)) return true;
       return (ev.groupes || []).some(g => (g.membres || []).includes(currentCharId));
     })
-    .sort((a, b) => {
-      // Trier par date desc si dispo, sinon par ordre
-      const da = a.date || '', db = b.date || '';
-      if (da && db) return db.localeCompare(da);
-      return (b.ordre ?? 0) - (a.ordre ?? 0);
-    })
+    .sort(_compareMissionsChronoDesc)
     .slice(0, limit);
 }
 
