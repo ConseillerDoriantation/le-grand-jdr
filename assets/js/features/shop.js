@@ -1497,7 +1497,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
           </div>
 
           <div class="sh-item-actions-inline" data-sh-action="stop">
-            <button class="sh-try-btn" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier">🪄</button>
+            ${hasChar ? `<button class="sh-try-cta" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier" aria-label="Essayer dans l'Atelier">🪄 Essayer</button>` : ''}
             ${buyBtnHtml}
           </div>
         </div>

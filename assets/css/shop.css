@@ -3854,10 +3854,13 @@ body .sh-page--v2 .sh-item-trait-line {
   opacity: .85;
 }
 
-/* Footer : prix légèrement plus aéré du contenu */
+/* Footer : prix légèrement plus aéré du contenu.
+   margin-top:auto → le footer reste collé en bas de la carte (sinon, sur une
+   carte plus courte étirée à la hauteur de sa voisine, un trou apparaît
+   sous les boutons). NE PAS remettre une valeur fixe ici. */
 body .sh-page--v2 .sh-item-footer {
   padding-top: 10px !important;
-  margin-top: 6px !important;
+  margin-top: auto !important;
 }
 
 /* Bouton « Acheter » : un peu plus de présence */
@@ -4562,6 +4565,144 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   body.shop-cols-5 .sh-page--v2 .sh-item-grid {
     grid-template-columns: 1fr !important;
   }
+}
+
+
+
+/* ── Footer article stable : prix gauche, essayage + achat droite ───────── */
+.sh-page--v2 .sh-item-footer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: end !important;
+  gap: 10px !important;
+  flex-wrap: nowrap !important;
+}
+.sh-page--v2 .sh-item-pricing {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+.sh-page--v2 .sh-item-price-main,
+.sh-page--v2 .sh-item-price-sub,
+.sh-page--v2 .sh-item-missing-line {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.sh-page--v2 .sh-item-actions-inline {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+  min-width: max-content !important;
+  margin-left: 0 !important;
+}
+.sh-page--v2 .sh-item-actions-inline .sh-try-btn {
+  flex: 0 0 34px !important;
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+.sh-page--v2 .sh-item-actions-inline .sh-buy-btn {
+  flex: 0 0 auto !important;
+}
+@media (max-width: 420px) {
+  .sh-page--v2 .sh-item-footer {
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+  }
+  .sh-page--v2 .sh-item-actions-inline {
+    justify-content: flex-start !important;
+  }
+}
+
+/* ── Mode jour : cartes article V2 ───────────────────────────────── */
+[data-theme="light"] .sh-page--v2 .sh-item-card {
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, .10) !important;
+  box-shadow: 0 10px 28px -22px rgba(15, 23, 42, .28) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-card:hover {
+  border-color: color-mix(in srgb, var(--item-accent, #2563eb) 38%, rgba(15, 23, 42, .12)) !important;
+  box-shadow: 0 16px 32px -24px color-mix(in srgb, var(--item-accent, #2563eb) 48%, #0f172a) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-body {
+  background: linear-gradient(180deg, rgba(248, 250, 252, .78), rgba(255,255,255, .96)) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-img {
+  background-color: #e8edf5 !important;
+  color: rgba(71, 85, 105, .55) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-img::before {
+  background: linear-gradient(180deg, rgba(15, 23, 42, .02), rgba(15, 23, 42, .18)) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-name {
+  color: #172033 !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-type,
+[data-theme="light"] .sh-page--v2 .sh-item-price-sub,
+[data-theme="light"] .sh-page--v2 .sh-item-traits-more,
+[data-theme="light"] .sh-page--v2 .sh-item-footer-meta {
+  color: #64748b !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-facts,
+[data-theme="light"] .sh-page--v2 .sh-item-facts .v,
+[data-theme="light"] .sh-page--v2 .sh-item-facts .sh-fact-value {
+  color: #27364a !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-facts .k,
+[data-theme="light"] .sh-page--v2 .sh-item-facts .sh-fact-label,
+[data-theme="light"] .sh-page--v2 .sh-item-section-title {
+  color: #718096 !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-facts .v.dmg { color: #b91c1c !important; }
+[data-theme="light"] .sh-page--v2 .sh-item-facts .v.ca  { color: #1d4ed8 !important; }
+[data-theme="light"] .sh-page--v2 .sh-item-footer {
+  border-top-color: rgba(15, 23, 42, .10) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-rare-pill,
+[data-theme="light"] .sh-page--v2 .sh-item-rare-pill span {
+  color: #172033 !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-rare-pill {
+  background: color-mix(in srgb, var(--item-accent, #2563eb) 12%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--item-accent, #2563eb) 36%, rgba(15, 23, 42, .12)) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-rare-pill .sh-rarete-stars,
+[data-theme="light"] .sh-page--v2 .sh-item-img-rarity {
+  color: var(--item-accent, #2563eb) !important;
+  text-shadow: 0 1px 2px rgba(255,255,255,.85) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-img-stock {
+  background: rgba(255,255,255,.86) !important;
+  color: #334155 !important;
+  border: 1px solid rgba(15, 23, 42, .14) !important;
+  box-shadow: 0 4px 12px -8px rgba(15, 23, 42, .45) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-img-stock.empty {
+  color: #b91c1c !important;
+  border-color: rgba(185, 28, 28, .25) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-img-stock.limited {
+  color: #b45309 !important;
+  border-color: rgba(180, 83, 9, .25) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-trait-line {
+  background: rgba(99, 102, 241, .08) !important;
+  border-color: rgba(99, 102, 241, .18) !important;
+  color: #4338ca !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-item-deltas {
+  background: rgba(5, 150, 105, .08) !important;
+  border-color: rgba(5, 150, 105, .22) !important;
+}
+[data-theme="light"] .sh-page--v2 .sh-delta.pos { color: #047857 !important; }
+[data-theme="light"] .sh-page--v2 .sh-delta.neg { color: #b91c1c !important; }
+[data-theme="light"] .sh-page--v2 .sh-item-missing-line {
+  color: #b91c1c !important;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -5311,3 +5452,64 @@ body .sh-page--v2 .sh-item-desc {
 /* ── Double croix : l'Atelier a son propre header (.atelier-head) avec un ✕ ;
    on masque la barre de titre standard du modal (vide) pour n'avoir qu'une croix. */
 .modal:has(.atelier-shell) > .modal-title { display: none; }
+
+/* ════════════════════════════════════════════════════════════════════
+   FOOTER ARTICLE — 2 lignes : prix au-dessus, boutons pleine largeur en
+   dessous (Essayer ghost + Acheter plein). Donne assez de place à
+   « Acheter » (plus de troncature en 4-5 colonnes) et garde le footer
+   COLLÉ EN BAS (margin-top:auto) → aucune card avec un trou sous les
+   boutons. Placé en fin de fichier pour primer sur les règles plus haut.
+   La zone Essayer n'apparaît que si un perso est sélectionné.
+   ════════════════════════════════════════════════════════════════════ */
+.sh-page--v2 .sh-item-footer {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+  margin-top: auto !important;    /* recolle le footer au bas (annule le 6px parasite) */
+  padding-top: 10px !important;
+}
+/* Ligne boutons : pleine largeur */
+.sh-page--v2 .sh-item-footer .sh-item-actions-inline {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  gap: 6px !important;
+  width: 100% !important;
+}
+/* Essayer : ghost arcane, largeur au contenu (à gauche) */
+.sh-page--v2 .sh-try-cta {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 0 12px; min-height: 32px;
+  border-radius: 999px;
+  font-family: inherit; font-size: .72rem; font-weight: 700;
+  background: rgba(157,111,255,.14);
+  border: 1px solid rgba(157,111,255,.40);
+  color: #c9b3ff;
+  cursor: pointer; white-space: nowrap; line-height: 1;
+  transition: background .15s, transform .15s, border-color .15s;
+}
+.sh-page--v2 .sh-try-cta:hover {
+  background: rgba(157,111,255,.26);
+  border-color: rgba(157,111,255,.60);
+  transform: translateY(-1px);
+}
+/* Acheter prend tout l'espace restant → jamais tronqué */
+.sh-page--v2 .sh-item-actions-inline .sh-buy-btn {
+  flex: 1 1 auto !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  min-height: 32px;
+}
+
+[data-theme="light"] .sh-page--v2 .sh-try-cta {
+  background: rgba(124,77,255,.10);
+  color: #6d3fd6;
+  border-color: rgba(124,77,255,.32);
+}
+[data-theme="light"] .sh-page--v2 .sh-try-cta:hover {
+  background: rgba(124,77,255,.18);
+  border-color: rgba(124,77,255,.48);
+}
