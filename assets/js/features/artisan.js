@@ -18,7 +18,7 @@ import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import {
   calcOr, getItemStatBonus, getItemBaseStatBonus, getItemUpgradeStatBonus,
-  ITEM_STAT_META, ITEM_STAT_BY_FULL, computeEquipStatsBonus,
+  ITEM_STAT_META, ITEM_STAT_BY_FULL, computeEquipStatsBonus, getDefaultCharForUser,
 } from '../shared/char-stats.js';
 import {
   _getTraits, _getBaseTraits, _getAddedTraits,
@@ -123,7 +123,10 @@ function _getActiveArtisanChar() {
   if (!chars.length) return null;
   let active = chars.find(c => c.id === STORE.activeCharId);
   if (!active) {
-    active = chars.find(c => c.id === getShopCharId()) || chars[0];
+    // Réutilise la sélection boutique si valide, sinon le perso favori (★), sinon le premier
+    active = chars.find(c => c.id === getShopCharId())
+      || getDefaultCharForUser(chars, STATE.user?.uid)
+      || chars[0];
     STORE.activeCharId = active?.id || null;
   }
   return active;

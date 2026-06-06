@@ -7,7 +7,7 @@ import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort } from '../shared/char-stats.js';
+import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
@@ -1184,7 +1184,8 @@ function _getActiveShopChar() {
   let active = chars.find(c => c.id === getShopCharId());
 
   if (!active) {
-    active = chars[0];
+    // Pas de sélection en cours → perso favori (★ par défaut) du joueur, sinon premier
+    active = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
     _setShopCharId(active?.id || '');
   }
 
