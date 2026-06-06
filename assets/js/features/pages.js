@@ -6,7 +6,7 @@ import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getCachedCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr } from '../shared/char-stats.js';
+import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
@@ -1056,7 +1056,11 @@ const PAGES = {
     content.innerHTML = html;
     if (chars.length > 0) {
       const targetId  = consumeTargetCharacter();
-      const charToShow = (targetId ? chars.find(c => c.id === targetId) : null) || chars[0];
+      // Sélection par défaut : la cible explicite (VTT…), sinon le perso favori
+      // (★ par défaut) du joueur, sinon le premier.
+      const charToShow = (targetId ? chars.find(c => c.id === targetId) : null)
+        || getDefaultCharForUser(chars, STATE.user?.uid)
+        || chars[0];
       STATE.activeChar = charToShow;
       renderCharSheet(charToShow);
     }
