@@ -903,10 +903,11 @@ function _initCanvas(container) {
   K.dragButtons = [0, 2]; // Drag autorisé au clic gauche et droit (tokens/images/annotations).
   _stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
   // Konva recommande max 3-5 layers. On consolide bg+map dans `backLayer` et
-  // mapFg+ping dans `frontLayer` via des Konva.Group — l'ordre interne préserve
-  // le z-order, et chaque "_layers.X" garde son API (add/find/destroyChildren/listening).
+  // fog+walls+mapFg+ping dans `frontLayer` via des Konva.Group. L'ordre interne
+  // préserve le z-order, et chaque "_layers.X" garde son API usuelle.
   // batchDraw() est forwardé vers le layer parent.
-  // Ordre visuel : bg → map → grid → draw → token → mapFg → ping (5 layers Konva).
+  // Ordre visuel : bg → map → grid → draw → token → fog → walls → mapFg → ping.
+  // Le Stage ne contient ainsi que 5 vrais layers Konva.
   const backLayer  = new K.Layer();
   const frontLayer = new K.Layer();
   const _asLayer = (group, parentLayer) => {
@@ -917,15 +918,15 @@ function _initCanvas(container) {
   _layers.map   = _asLayer(new K.Group({ listening: false }), backLayer);
   _layers.grid  = new K.Layer({ listening: true });
   _layers.draw  = new K.Layer();                     // annotations (entre grille et tokens)
-  _layers.walls = new K.Layer({ listening: true });  // murs/portes/fenêtres/lumières
+  _layers.walls = _asLayer(new K.Group({ listening: true }), frontLayer);  // murs/portes/fenêtres/lumières
   _layers.token = new K.Layer();
-  _layers.fog   = new K.Layer({ listening: false }); // masque de brouillard
+  _layers.fog   = _asLayer(new K.Group({ listening: false }), frontLayer); // masque de brouillard
   _layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
   _layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
   backLayer.add(_layers.bg, _layers.map);
-  frontLayer.add(_layers.mapFg, _layers.ping);
-  // fog AVANT walls : les murs/portes/lumières restent toujours lisibles au-dessus du brouillard
-  _stage.add(backLayer, _layers.grid, _layers.draw, _layers.token, _layers.fog, _layers.walls, frontLayer);
+  // fog AVANT walls : les murs/portes/lumières restent toujours lisibles au-dessus du brouillard.
+  frontLayer.add(_layers.fog, _layers.walls, _layers.mapFg, _layers.ping);
+  _stage.add(backLayer, _layers.grid, _layers.draw, _layers.token, frontLayer);
   fogInit(_stage, _layers, CELL);
   fogSetPgRef(id => _pgRef(id));
 
