@@ -4524,7 +4524,7 @@ body.shop-density-compact .sh-page--v2 .sh-item-card { min-height: 140px !import
 body.shop-density-compact .sh-page--v2 .sh-item-body { padding: 8px 10px !important; gap: 4px !important; }
 body.shop-density-compact .sh-page--v2 .sh-item-name { font-size: .82rem !important; }
 body.shop-density-compact .sh-page--v2 .sh-item-img { font-size: 2rem; }
-body.shop-density-compact body .sh-page--v2 .sh-item-grid { gap: 6px !important; }
+body.shop-density-compact .sh-page--v2 .sh-item-grid { gap: 6px !important; }
 body.shop-density-compact .sh-page--v2 .sh-main-head { padding: 8px 12px !important; }
 body.shop-density-compact .sh-page--v2 .sh-filter-panel { padding: 8px !important; }
 
@@ -4543,8 +4543,25 @@ body.shop-card-showcase .sh-page--v2 .sh-item-img {
   width: 100% !important;
   font-size: 3.2rem;
 }
-body.shop-card-showcase body .sh-page--v2 .sh-item-grid {
+body.shop-card-showcase .sh-page--v2 .sh-item-grid {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+}
+
+/* -- Variante ARTICLES PAR LIGNE : force un nombre de colonnes choisi -- */
+body.shop-cols-1 .sh-page--v2 .sh-item-grid { grid-template-columns: 1fr !important; }
+body.shop-cols-2 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+body.shop-cols-3 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+body.shop-cols-4 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, minmax(0, 1fr)) !important; }
+
+@media (max-width: 640px) {
+  body.shop-cols-1 .sh-page--v2 .sh-item-grid,
+  body.shop-cols-2 .sh-page--v2 .sh-item-grid,
+  body.shop-cols-3 .sh-page--v2 .sh-item-grid,
+  body.shop-cols-4 .sh-page--v2 .sh-item-grid,
+  body.shop-cols-5 .sh-page--v2 .sh-item-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* ════════════════════════════════════════════════════════════════════

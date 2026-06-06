@@ -243,7 +243,7 @@ const SMART_KINDS = ['fav', 'payable', 'boost', 'upgrade', 'stock', 'new'];
 // horizontales sous le header) — utile sur petits écrans ou par préférence.
 // Densité : 'confort' (défaut) | 'compact' (padding réduit, plus d'items vus).
 // Card    : 'horizontal' (défaut) | 'showcase' (vertical, image dominante).
-const _TWEAKS_DEFAULTS = { layout: 'sidebar', density: 'confort', card: 'horizontal' };
+const _TWEAKS_DEFAULTS = { layout: 'sidebar', density: 'confort', card: 'horizontal', columns: 'auto' };
 const _TWEAKS_LS_KEY = 'shop_tweaks';
 let _shopTweaks = (() => {
   try { return { ..._TWEAKS_DEFAULTS, ...(JSON.parse(localStorage.getItem(_TWEAKS_LS_KEY) || '{}')) }; }
@@ -255,6 +255,7 @@ function _shopTweaksApply() {
   b.classList.toggle('shop-layout-tabs',     _shopTweaks.layout  === 'tabs');
   b.classList.toggle('shop-density-compact', _shopTweaks.density === 'compact');
   b.classList.toggle('shop-card-showcase',   _shopTweaks.card    === 'showcase');
+  ['1', '2', '3', '4', '5'].forEach(n => b.classList.toggle(`shop-cols-${n}`, _shopTweaks.columns === n));
 }
 function _shopTweaksSave() {
   try { localStorage.setItem(_TWEAKS_LS_KEY, JSON.stringify(_shopTweaks)); } catch {}
@@ -387,7 +388,7 @@ export async function renderShop() {
         ${charStripHtml}
         <button class="btn btn-arcane btn-sm" data-sh-action="openAtelier" title="Essayer / construire un équipement">🪄 Atelier</button>
         <button class="btn btn-gold btn-sm" data-sh-action="openArtisan" title="Améliorer ton équipement">🔨 Artisan</button>
-        <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : densité, layout, vitrine">⚙️</button>`;
+        <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : layout, densité, colonnes">⚙️</button>`;
 
   if (STATE.isAdmin) {
     html += `
@@ -467,6 +468,19 @@ function openTweaksPopup() {
           { v:'showcase',   lbl:'Vitrine' },
         ])}
         <p class="sh-admin-section-hint" style="margin-top:8px">Horizontale : image à gauche · Vitrine : image en haut, plus immersive.</p>
+      </div>
+
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">▦ Articles par ligne</div>
+        ${seg('columns', [
+          { v:'auto', lbl:'Auto' },
+          { v:'1',    lbl:'1' },
+          { v:'2',    lbl:'2' },
+          { v:'3',    lbl:'3' },
+          { v:'4',    lbl:'4' },
+          { v:'5',    lbl:'5' },
+        ])}
+        <p class="sh-admin-section-hint" style="margin-top:8px">Auto conserve le comportement responsive. Un nombre fixe force la grille sur desktop et tablette.</p>
       </div>
     </div>
 
