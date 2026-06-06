@@ -2343,27 +2343,27 @@ function _vttSpellMods(s) {
       ? {
           formula: (s.enchantDegats || '').trim() || `${1 + nbP}d4 +2`,
           element: s.noyauTypeId || null,
-          nbCibles: nbEnch === 1 ? 1 : nbEnch + 1,
+          nbCibles: _vttSortCibles(s),
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? (s.enchantEtatId || null) : null,
     // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
     enchantToucher: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'toucher')
-      ? { bonus: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+      ? { bonus: _enchBonus, nbCibles: _vttSortCibles(s) } : null,
     // Enchantement mode Déplacement : cases de mouvement en plus (auto = 2 + Puissance)
     enchantMove: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'deplacement')
-      ? { bonusCells: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+      ? { bonusCells: _enchBonus, nbCibles: _vttSortCibles(s) } : null,
     // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
     // Auto : +2 cases / rune Puissance, ou +1 par défaut
     enchantPieds: (nbEnch > 0 && nbInv === 0 && s.enchantSlot === 'pieds')
-      ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+      ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: _vttSortCibles(s) } : null,
     // Enchantement slot=tete / torse : effet libre (matrice), buff générique
     enchantGeneric: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
-      ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+      ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: _vttSortCibles(s) } : null,
     // Affliction : JS Sa DD scalable selon nb runes Affliction
-    // Base 11, +2 par rune supplémentaire, +1 par chainage (= nbAff-1)
-    // → nbAff=1 : DD 11 · nbAff=2 : 11+2+1=14 · nbAff=3 : 11+4+2=17
+    // DD fixe 11 (plus de chaînage Affliction). Le nombre de cibles vient de
+    // Dispersion (nbCibles commun), la puissance scale le DoT — pas la rune Affliction.
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
     // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
     // ⚠️ Absorbé par le combo Aura punitive (Prot + Aff sans Puiss) → l'affliction est gérée par l'aura
@@ -2393,7 +2393,7 @@ function _vttSpellMods(s) {
             mode,
             effect:   s.afflictionEffect || '',
             element:  s.noyauTypeId || null,
-            dd:       11 + 3 * (nbAff - 1),
+            dd:       11,
             nbAff,
             nbP,
             dotFormula,

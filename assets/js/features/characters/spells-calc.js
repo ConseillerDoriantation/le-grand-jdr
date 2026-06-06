@@ -1002,7 +1002,9 @@ export function _buildSortResume(s, c) {
   const hideAff  = comboIds.has('sentinelle');
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';
-    const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés (chaîné +${nbEnch-1})`;
+    // Cibles pilotées par Dispersion uniquement (plus de chaînage Enchantement).
+    const nbCib = _calcSortCibles(s);
+    const cibleStr = nbCib === 1 ? 'sur 1 allié' : `sur ${nbCib} alliés`;
     const detailParts = ['2 tours', cibleStr];
     // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
     if (mode === 'etat') {
@@ -1030,7 +1032,7 @@ export function _buildSortResume(s, c) {
   // ── Affliction (mode DoT ou État) ── (la branche Lacération est rendue plus haut)
   if (nbAff > 0 && !hideAff && s.afflictionMode !== 'laceration') {
     const mode = s.afflictionMode || 'dot';
-    const dd   = 11 + 3 * (nbAff - 1);
+    const dd   = 11; // DD fixe (plus de chaînage Affliction)
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
     const lib = _conditionsLibCache || [];
@@ -1040,7 +1042,9 @@ export function _buildSortResume(s, c) {
     }
     if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
     const statLbl = statShort(saveStat) || saveStat;
-    const cibleStr = nbAff === 1 ? 'sur 1 ennemi' : `sur ${nbAff} ennemis (chaîné +${nbAff-1})`;
+    // Cibles pilotées par Dispersion uniquement (plus de chaînage Affliction).
+    const nbCib = _calcSortCibles(s);
+    const cibleStr = nbCib === 1 ? 'sur 1 ennemi' : `sur ${nbCib} ennemis`;
 
     if (mode === 'etat') {
       // Mode État : on affiche l'état appliqué, PAS la formule DoT

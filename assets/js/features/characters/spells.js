@@ -545,9 +545,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
   // (Pas de JS en branche Lacération : c'est une frappe + réduction de CA.)
   if (hasAfflictionDebuff) {
-    const nbAff = runesAll.filter(r => r === 'Affliction').length;
-    const dd = 11 + 3 * (nbAff - 1);
-    chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444' });
+    chips.push({ icon:'🛡', val:`DD 11`, color:'#ef4444' });
   }
 
   const pmVal = pmDelta !== 0
@@ -889,13 +887,13 @@ function _runeLiveContribution(nom, counts) {
     }
     case 'Enchantement':
       return {
-        main:  cnt === 1 ? 'Buff sur allié · 2 tours' : `${cnt} cibles alliées · 2 tours`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 cible/rune (Enchantement ×${cnt})` : null,
+        main:  'Buff sur allié · 2 tours · cibles selon Dispersion',
+        chain: cnt > 1 ? `Pas de cumul : plusieurs Enchantement n'ajoutent pas de cible (utiliser Dispersion)` : null,
       };
     case 'Affliction':
       return {
-        main:  cnt === 1 ? 'Debuff sur ennemi · 2 tours · Action · JS pour résister' : `${cnt} cibles ennemies · 2 tours`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 cible/rune (Affliction ×${cnt})` : null,
+        main:  'Debuff sur ennemi · 2 tours · Action · JS DD 11 · cibles selon Dispersion',
+        chain: cnt > 1 ? `Pas de cumul : plusieurs Affliction n'ajoutent ni cible ni DD (utiliser Dispersion)` : null,
       };
     case 'Invocation':
       return {
