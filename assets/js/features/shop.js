@@ -3962,6 +3962,8 @@ function _renderAtelierSort() {
     { k:'rarity', lbl:'✨ Rareté' },
     { k:'price',  lbl:'🪙 Prix' },
     { k:'name',   lbl:'🔤 Nom' },
+    { k:'type',   lbl:'🏷️ Type' },
+    { k:'dispo',  lbl:'📦 Dispo' },
     { k:'fav',    lbl:'⭐ Favoris' },
   ];
   return `<span class="atelier-items-sort-lbl">Trier :</span>` + opts.map(o =>
@@ -3985,10 +3987,19 @@ function _renderAtelierItems() {
   const sortMode = _atelier.sort || 'rarity';
   const byName = (a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr');
   const byRare = (a, b) => (_getRareteNum(b.rarete) - _getRareteNum(a.rarete)) || byName(a, b);
+  // Type : sousType (arme) → typeArmure/slotArmure (armure) → slotBijou → type libre
+  const typeOf = (it) => _norm(it.sousType || it.typeArmure || it.slotArmure || it.slotBijou || it.type || '');
+  // Dispo : illimité (∞) en tête, puis stock décroissant, épuisé (0) en bas
+  const stockVal = (it) => {
+    const d = (it.dispo !== undefined && it.dispo !== '' && it.dispo !== null) ? parseInt(it.dispo) : null;
+    return (d === null || d < 0) ? Infinity : d;
+  };
   items = items.sort((a, b) => {
     if (sortMode === 'fav')   { const d = (_isFav(a.id)?0:1) - (_isFav(b.id)?0:1); if (d) return d; return byRare(a, b); }
     if (sortMode === 'price') return ((parseFloat(a.prix)||0) - (parseFloat(b.prix)||0)) || byName(a, b);
     if (sortMode === 'name')  return byName(a, b);
+    if (sortMode === 'type')  return typeOf(a).localeCompare(typeOf(b), 'fr') || byRare(a, b);
+    if (sortMode === 'dispo') return (stockVal(b) - stockVal(a)) || byRare(a, b);
     return byRare(a, b); // 'rarity' (défaut)
   }).slice(0, 40);
 
