@@ -221,7 +221,9 @@ export const SORT_COMBOS = [
     id: 'sentinelle',
     icon: '🪤',
     defaultName: 'Sentinelle / Piège',
-    detect: (counts, s) => counts.Affliction > 0 && counts.Invocation > 0 && s?.afflictionMode !== 'laceration',
+    // Invocation + Affliction (TOUTE branche, y compris Lacération) → Sentinelle.
+    // Les branches d'Affliction ne s'appliquent pas : c'est une invocation de sentinelle.
+    detect: (counts) => counts.Affliction > 0 && counts.Invocation > 0,
     describe: (counts, s) => {
       const st = _calcSentinelStats(s || {});
       const nbDisp = counts.Dispersion || 0;
@@ -977,9 +979,10 @@ export function _buildSortResume(s, c) {
     }
   }
 
-  // Lacération (branche d'Affliction) — réduction de CA + frappe de base
+  // Lacération (branche d'Affliction) — réduction de CA + frappe de base.
+  // Absorbée par la Sentinelle (Affliction + Invocation) → portée par la sentinelle.
   const lac = _calcLaceration(s);
-  if (lac) {
+  if (lac && !comboIds.has('sentinelle')) {
     lines.push({ icon:'🩸', label:`Affliction · Lacération · CA cible −${lac.reduction}${monoStr}`, detail:`Brut · plafond −${lac.max} (−${lac.maxElite} Élites/Boss) · ${lac.runes} Affliction · frappe l'attaque de base` });
   }
 

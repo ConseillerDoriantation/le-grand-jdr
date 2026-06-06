@@ -463,7 +463,11 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   }
 
   // ── 2. Affliction : mode décide (DoT / État / Lacération) ──
-  if (isLaceration) {
+  // Sentinelle (Affliction + Invocation) absorbe la branche → pas de chip ici.
+  const isSentinelle = hasAffliction && runesAll.includes('Invocation');
+  if (isSentinelle) {
+    // rien : l'affliction est portée par la sentinelle (chip Invocation géré ailleurs)
+  } else if (isLaceration) {
     const lac = _calcLaceration(s);
     if (lac) chips.push({ icon:'🩸', val:`CA −${Math.min(lac.reduction, lac.maxElite)}`, color:'#dc2626' });
   } else if (hasAfflictionDebuff) {
@@ -1335,6 +1339,14 @@ export async function openSortModal(idx, s) {
     <div id="s-affliction-section" class="cs-spell-slot-box cs-spell-slot-box--aff" style="${runesSrc.includes('Affliction')?'':'display:none'}">
       <div class="cs-spell-slot-title">💀 Affliction <span>Cible ennemie · 2 tours · Action · effet selon la branche</span></div>
 
+      <!-- Combo Sentinelle (Affliction + Invocation) : les branches ne s'appliquent pas -->
+      <div id="s-affliction-sentinelle-note" style="${runesSrc.includes('Invocation')?'':'display:none'};font-size:.78rem;line-height:1.5;color:var(--text-muted);background:rgba(161,98,7,.1);border:1px solid rgba(161,98,7,.3);border-radius:8px;padding:.55rem .7rem">
+        🪤 <strong style="color:#d9a441">Sentinelle</strong> — Affliction + Invocation : l'affliction est <strong>portée par la sentinelle invoquée</strong>. Les branches (DoT / État / Lacération) ne s'appliquent pas ici.
+      </div>
+
+      <!-- Branches d'Affliction — masquées quand c'est une Sentinelle -->
+      <div id="s-affliction-modes" style="${runesSrc.includes('Invocation')?'display:none':''}">
+
       <!-- Mode toggle : DoT (dégâts/tour) · État · Lacération (CA cible + frappe) -->
       <div class="form-group">
         <label>Branche</label>
@@ -1381,7 +1393,8 @@ export async function openSortModal(idx, s) {
       <div id="s-affliction-laceration-block" style="${s?.afflictionMode==='laceration'?'':'display:none'};font-size:.78rem;line-height:1.5;color:var(--text-muted);background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.22);border-radius:8px;padding:.55rem .7rem;margin-top:.4rem">
         🩸 <strong style="color:#f87171">Lacération</strong> — le sort inflige <strong>l'attaque de base</strong> et réduit la <strong>CA de la cible de −1 par rune Affliction</strong> (sans chaînage), plafonné à <strong>−2</strong> (joueur) / <strong>−4</strong> (Élite-Boss), pendant 2 tours. Pas de DoT ni d'état.
       </div>
-    </div>
+      </div><!-- /s-affliction-modes -->
+    </div><!-- /s-affliction-section -->
 
     <!-- ⑨ Rune Amplification — mode Zone ou Déplacement (visible si rune présente) -->
     <div id="s-amp-section" style="${hasAmp?'':'display:none'}">
@@ -2227,6 +2240,15 @@ function _refreshRunesSection(changedNom) {
   if (sectionId) {
     const el = document.getElementById(sectionId);
     if (el) el.style.display = cnt > 0 ? '' : 'none';
+  }
+  // Combo Sentinelle (Affliction + Invocation) : masque les branches d'affliction
+  // (DoT/État/Lacération) et affiche une note — c'est une invocation de sentinelle.
+  {
+    const isSentinelle = (_runeCountsEdit['Affliction'] || 0) > 0 && (_runeCountsEdit['Invocation'] || 0) > 0;
+    const modesEl = document.getElementById('s-affliction-modes');
+    const noteEl  = document.getElementById('s-affliction-sentinelle-note');
+    if (modesEl) modesEl.style.display = isSentinelle ? 'none' : '';
+    if (noteEl)  noteEl.style.display  = isSentinelle ? '' : 'none';
   }
   // Plus aucune rune Amplification → on repasse en mode Zone (évite un état
   // « déplacement » fantôme sans rune, qui supprimerait zone/dégâts à tort).

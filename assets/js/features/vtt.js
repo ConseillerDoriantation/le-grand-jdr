@@ -2293,6 +2293,9 @@ function _vttSpellMods(s) {
   // Lacération = branche d'Affliction (afflictionMode='laceration') · legacy = ancienne rune
   const isLacMode = s.afflictionMode === 'laceration' && nbAff > 0;
   const lacCount  = nbLac + (isLacMode ? nbAff : 0);
+  // Sentinelle = Affliction (toute branche) + Invocation → la branche est absorbée,
+  // pas de Lacération directe du lanceur (l'affliction est portée par la sentinelle).
+  const isSentinelle = nbAff > 0 && nbInv > 0;
   // Bonus chiffré d'un enchantement non-dégâts (toucher/déplacement/CA) :
   // valeur saisie sinon auto = 2 + Puissance.
   const _enchBonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
@@ -2314,7 +2317,8 @@ function _vttSpellMods(s) {
       ? { pct: 0.25 + 0.25 * nbProt, nbProt } : null,
     // Lacération (branche d'Affliction) : -CA brut sur la cible, -1 par rune
     // Affliction sans chaînage (plafonné en jeu : 2 joueur · 4 élite/boss).
-    laceration: lacCount > 0
+    // Neutralisée si combo Sentinelle (Affliction + Invocation) : portée par la sentinelle.
+    laceration: (lacCount > 0 && !isSentinelle)
       ? { runes: lacCount, reduction: lacCount, max: 2, maxElite: 4 } : null,
     // Chance : étend la plage critique (RC 20 → 21-2N..20)
     chance: nbCh > 0
@@ -2420,7 +2424,7 @@ function _vttSpellMods(s) {
       ? { elementId: s.noyauTypeId || null, nbPuissance: nbP } : null,
     // Sentinelle : Affliction + Invocation → token stationnaire (stats propres, 2 tours)
     // Dispersion permet d'invoquer plusieurs sentinelles : 1 base + 2N pour N runes (chaînage standard)
-    sentinelle: (nbAff > 0 && nbInv > 0 && !isLacMode)
+    sentinelle: (nbAff > 0 && nbInv > 0)
       ? {
           slot: s.afflictionSlot || 'arme',
           elementId: s.noyauTypeId || null,
@@ -2441,7 +2445,7 @@ function _vttSpellMods(s) {
     // résolues au SPAWN (_vttSpawnSummon, qui a le perso lanceur). Le nombre n'est
     // plus piloté par Dispersion. Rétro-compat : s.invocation.stats sans ids =
     // ancienne invocation "inline" (ou défaut dérivé si rien).
-    invocation: (nbInv > 0 && (nbAff === 0 || isLacMode) && nbEnch === 0)
+    invocation: (nbInv > 0 && nbAff === 0 && nbEnch === 0)
       ? (() => {
           // Les créatures sont CHOISIES au lancement dans le VTT (versatilité).
           // defaultIds = pré-sélection éventuelle du sort (carte 🐾), pré-cochée.
