@@ -5513,3 +5513,113 @@ body .sh-page--v2 .sh-item-desc {
   background: rgba(124,77,255,.18);
   border-color: rgba(124,77,255,.48);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   MODE LISTE (tweak card='liste') — tableau dense façon tableur.
+   Header + lignes partagent le MÊME grid-template-columns → colonnes
+   alignées. Scroll horizontal si trop étroit (priorité desktop).
+   ════════════════════════════════════════════════════════════════════ */
+.sh-page--v2 .sh-list-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 14px;
+  background: rgba(13,21,32,.55);
+}
+/* Gabarit de colonnes partagé */
+.sh-page--v2 .sh-list-head,
+.sh-page--v2 .sh-list-row {
+  display: grid;
+  grid-template-columns:
+    26px 40px minmax(150px, 1.9fr) minmax(140px, 1.9fr) 96px 64px 90px auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 760px;            /* force le scroll plutôt que d'écraser */
+  padding: 7px 12px;
+}
+/* En-tête */
+.sh-page--v2 .sh-list-head {
+  position: sticky; top: 0; z-index: 2;
+  background: rgba(16,24,36,.96);
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.10));
+  font-size: .62rem; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.sh-page--v2 .sh-list-head .sh-lh-actions { text-align: right; }
+
+/* Lignes : zébrage + bordure d'accent rareté à gauche */
+.sh-page--v2 .sh-list-row {
+  position: relative;
+  border-left: 3px solid var(--item-accent, transparent);
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  cursor: pointer;
+  transition: background .12s;
+}
+.sh-page--v2 .sh-list-row:nth-child(even) { background: rgba(255,255,255,.018); }
+.sh-page--v2 .sh-list-row:hover { background: rgba(124,150,255,.08); }
+.sh-page--v2 .sh-list-row.sh-item-epuise { opacity: .5; }
+
+/* Cellules */
+.sh-page--v2 .sh-list-fav {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(8,12,22,.5); border: 1px solid rgba(255,255,255,.14);
+  color: #cdd5e3; font-size: .8rem; line-height: 1; cursor: pointer; padding: 0;
+}
+.sh-page--v2 .sh-list-fav.is-fav { color: #ffd666; border-color: rgba(244,196,48,.5); background: rgba(244,196,48,.16); }
+.sh-page--v2 .sh-list-thumb {
+  width: 40px; height: 40px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; background-size: cover; background-position: center;
+  border: 1px solid rgba(255,255,255,.08);
+}
+.sh-page--v2 .sh-list-name { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sh-page--v2 .sh-list-name-txt {
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: .82rem; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sh-page--v2 .sh-list-type {
+  font-size: .64rem; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sh-page--v2 .sh-list-info {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  min-width: 0; overflow: hidden;
+}
+.sh-page--v2 .sh-list-info .sh-lr-key { font-size: .72rem; font-weight: 700; color: var(--text-soft); white-space: nowrap; }
+.sh-page--v2 .sh-list-info .sh-lr-desc {
+  font-size: .68rem; font-style: italic; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.sh-page--v2 .sh-list-info .sh-item-bonus-chip { font-size: .6rem !important; padding: 1px 6px !important; }
+.sh-page--v2 .sh-list-rare .sh-item-rare-pill { font-size: .56rem; padding: 2px 8px; }
+.sh-page--v2 .sh-list-dash { color: var(--text-dim); opacity: .5; }
+.sh-page--v2 .sh-list-stock {
+  font-size: .66rem; font-weight: 700; padding: 2px 7px; border-radius: 6px;
+  background: rgba(255,255,255,.05); color: var(--text-soft); white-space: nowrap;
+}
+.sh-page--v2 .sh-list-stock.empty   { color: var(--crimson-light, #ff8ca7); background: rgba(255,107,107,.10); }
+.sh-page--v2 .sh-list-stock.limited { color: var(--ember, #ffb347); background: rgba(255,179,71,.10); }
+.sh-page--v2 .sh-list-price { display: flex; flex-direction: column; line-height: 1.1; }
+.sh-page--v2 .sh-list-price-main { font-weight: 800; font-size: .82rem; color: var(--gold, var(--amber)); white-space: nowrap; }
+.sh-page--v2 .sh-list-price-sub  { font-size: .6rem; color: var(--text-dim); white-space: nowrap; }
+.sh-page--v2 .sh-list-actions {
+  display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px;
+}
+/* Essayer en icône seule dans la liste (gagne de la largeur) */
+.sh-page--v2 .sh-try-cta--icon { padding: 0 9px; }
+.sh-page--v2 .sh-list-actions .sh-buy-btn { padding: 5px 12px !important; }
+.sh-page--v2 .sh-list-actions .btn-icon {
+  width: 26px; height: 26px; border-radius: 999px;
+  background: rgba(0,0,0,.4); border: 1px solid var(--border-md, rgba(255,255,255,.10));
+  color: var(--text-soft); font-size: .78rem; cursor: pointer;
+}
+
+/* Le mode liste n'utilise pas la grille en colonnes : neutralise shop-cols-* */
+body.shop-card-list .sh-page--v2 .sh-item-grid { grid-template-columns: none !important; }
+
+/* Mode jour */
+[data-theme="light"] .sh-page--v2 .sh-list-wrap { background: #fff; border-color: rgba(15,23,42,.10); }
+[data-theme="light"] .sh-page--v2 .sh-list-head { background: #f1f4f9; color: #475569; border-bottom-color: rgba(15,23,42,.10); }
+[data-theme="light"] .sh-page--v2 .sh-list-row:nth-child(even) { background: rgba(15,23,42,.02); }
+[data-theme="light"] .sh-page--v2 .sh-list-row:hover { background: rgba(37,99,235,.07); }
+[data-theme="light"] .sh-page--v2 .sh-list-row { border-bottom-color: rgba(15,23,42,.06); }

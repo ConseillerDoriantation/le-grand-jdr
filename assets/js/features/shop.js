@@ -255,6 +255,7 @@ function _shopTweaksApply() {
   b.classList.toggle('shop-layout-tabs',     _shopTweaks.layout  === 'tabs');
   b.classList.toggle('shop-density-compact', _shopTweaks.density === 'compact');
   b.classList.toggle('shop-card-showcase',   _shopTweaks.card    === 'showcase');
+  b.classList.toggle('shop-card-list',       _shopTweaks.card    === 'liste');
   ['1', '2', '3', '4', '5'].forEach(n => b.classList.toggle(`shop-cols-${n}`, _shopTweaks.columns === n));
 }
 function _shopTweaksSave() {
@@ -466,8 +467,9 @@ function openTweaksPopup() {
         ${seg('card', [
           { v:'horizontal', lbl:'Horizontale' },
           { v:'showcase',   lbl:'Vitrine' },
+          { v:'liste',      lbl:'Liste' },
         ])}
-        <p class="sh-admin-section-hint" style="margin-top:8px">Horizontale : image à gauche · Vitrine : image en haut, plus immersive.</p>
+        <p class="sh-admin-section-hint" style="margin-top:8px">Horizontale : image à gauche · Vitrine : image en haut · Liste : tableau dense facon tableur (ignore « articles par ligne »).</p>
       </div>
 
       <div class="sh-admin-section">
@@ -790,6 +792,7 @@ function _resolveItemTemplate(item) {
   return cat?.template || 'classique';
 }
 function _renderMixedItemGrid(items) {
+  if (_shopTweaks.card === 'liste') return _renderItemList(items);
   return `<div class="sh-item-grid">` +
     items.map((item, i) => _renderItemCard(item, _resolveItemTemplate(item), i)).join('') +
     `</div>`;
@@ -1210,6 +1213,7 @@ function _getActiveShopChar() {
 // CARDS ARTICLES
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderItemGrid(cat, items) {
+  if (_shopTweaks.card === 'liste') return _renderItemList(items);
   // Chaque item utilise SON template (item.template), pas celui de la catégorie.
   return `<div class="sh-item-grid ${STATE.isAdmin?'sh-sortable':''}" id="sh-items-grid">` +
     items.map((item,i) => _renderItemCard(item, _resolveItemTemplate(item), i)).join('') +
@@ -1302,6 +1306,14 @@ function _renderFactRowColored(label, value, color) {
   `;
 }
 
+// Bouton « Acheter » (et ses états) — partagé carte ↔ liste.
+function _buyBtnHtml(item, hasChar, epuise, tropCher, manque) {
+  if (!hasChar) return `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Sélectionne un personnage">Choisir un personnage</button>`;
+  if (epuise)   return `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Cet article est épuisé">Épuisé</button>`;
+  if (tropCher) return `<button class="btn sh-buy-btn sh-buy-btn--poor" disabled title="Il te manque ${manque} or">Pas assez d'or</button>`;
+  return `<button class="btn sh-buy-btn" data-sh-action="buyItem" data-id="${item.id}">🛒 Acheter</button>`;
+}
+
 function _renderItemCard(item, tplKey, itemIdx) {
   const prix = parseFloat(item.prix) || 0;
   const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
@@ -1392,16 +1404,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
   // un styling discret (italique léger, pas en gras) qui prend moins
   // de place visuelle sur la carte.
 
-  let buyBtnHtml;
-  if (!hasChar) {
-    buyBtnHtml = `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Sélectionne un personnage">Choisir un personnage</button>`;
-  } else if (epuise) {
-    buyBtnHtml = `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Cet article est épuisé">Épuisé</button>`;
-  } else if (tropCher) {
-    buyBtnHtml = `<button class="btn sh-buy-btn sh-buy-btn--poor" disabled title="Il te manque ${manque} or">Pas assez d'or</button>`;
-  } else {
-    buyBtnHtml = `<button class="btn sh-buy-btn" data-sh-action="buyItem" data-id="${item.id}">🛒 Acheter</button>`;
-  }
+  const buyBtnHtml = _buyBtnHtml(item, hasChar, epuise, tropCher, manque);
 
   // ── Données enrichies style maquette ─────────────────────────────────
   // Sous-titre type : Format · Type d'arme · Slot armure/bijou
@@ -1513,6 +1516,116 @@ function _renderItemCard(item, tplKey, itemIdx) {
       ` : ''}
     </article>
   `;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VUE LISTE — affichage « tableur » : 1 ligne par article, colonnes alignées.
+// Activée par le tweak card='liste'. Réutilise les mêmes helpers que la carte.
+// Le header est HORS du conteneur sortable (#sh-items-grid) pour ne pas
+// décaler les index de drag.
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderItemList(items) {
+  const edit = STATE.isAdmin;
+  const head = `<div class="sh-list-head" aria-hidden="true">
+    <span></span><span></span>
+    <span>Article</span>
+    <span>Détails</span>
+    <span>Rareté</span>
+    <span>Dispo</span>
+    <span>Prix</span>
+    <span class="sh-lh-actions">Actions</span>
+  </div>`;
+  return `<div class="sh-list-wrap">
+    ${head}
+    <div class="sh-item-list ${edit ? 'sh-sortable' : ''}" id="sh-items-grid">
+      ${items.map((item, i) => _renderItemRow(item, _resolveItemTemplate(item), i)).join('')}
+    </div>
+  </div>`;
+}
+
+function _renderItemRow(item, tplKey, itemIdx) {
+  const prix = parseFloat(item.prix) || 0;
+  const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
+  const _dispoRaw = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
+  const dispo = (_dispoRaw != null && _dispoRaw < 0) ? null : _dispoRaw;
+  const epuise = dispo !== null && dispo === 0;
+
+  const cat  = _cats.find(c => c.id === item.categorieId);
+  const edit = STATE.isAdmin;
+
+  const rareteNum   = _getRareteNum(item.rarete);
+  const rareteName  = rareteNum ? (RARETE_NAMES[rareteNum] || '') : '';
+  const rareteColor = rareteNum > 0 ? _rareteColor(RARETE_NAMES[rareteNum]) : '';
+
+  const activeChar = _getActiveShopChar();
+  const hasChar    = !!activeChar;
+  const solde      = calcOr(activeChar);
+  const tropCher   = hasChar && prix > solde;
+  const manque     = tropCher ? Math.ceil(prix - solde) : 0;
+  const buyBtnHtml = _buyBtnHtml(item, hasChar, epuise, tropCher, manque);
+
+  // Sous-titre type (format · sousType · slot…)
+  const typeChips = [];
+  if (item.format)     typeChips.push(item.format);
+  if (item.sousType)   typeChips.push(item.sousType);
+  if (item.slotArmure) typeChips.push(item.slotArmure);
+  if (item.typeArmure) typeChips.push(item.typeArmure);
+  if (item.slotBijou)  typeChips.push(item.slotBijou);
+  if (item.type && !typeChips.length) typeChips.push(item.type);
+  const typeLine = typeChips.length
+    ? typeChips.map(_esc).join(' · ')
+    : _esc(cat?.nom || '');
+
+  // Colonne « Détails » : dégâts / CA + bonus de stats + effet (classique/libre)
+  const infoBits = [];
+  if (tplKey === 'arme' && item.degats) {
+    const dStats = _getDegatsStats(item);
+    infoBits.push(`<span class="sh-lr-key">⚔ ${_esc(item.degats)}${dStats.length ? ` +${_esc(_formatDegatsStatsText(dStats))}` : ''}</span>`);
+  }
+  if (tplKey === 'armure' && item.ca) infoBits.push(`<span class="sh-lr-key">🛡 +${parseInt(item.ca) || 0}</span>`);
+  _getStatBonusEntries(item).slice(0, 4).forEach(s =>
+    infoBits.push(`<span class="sh-item-bonus-chip" style="border-color:${s.color}55;background:${s.color}18;color:${s.color}">${s.short} ${s.val > 0 ? '+' : ''}${s.val}</span>`));
+  if ((tplKey === 'classique' || tplKey === 'libre') && (item.effet || item.description))
+    infoBits.push(`<span class="sh-lr-desc">${_esc(item.effet || item.description || '')}</span>`);
+
+  const stockTxt = dispo == null ? '∞' : dispo === 0 ? 'Épuisé' : `${dispo}`;
+  const stockCls = dispo === 0 ? 'empty' : (dispo != null && dispo < 3) ? 'limited' : '';
+
+  const imgBg = item.image
+    ? `background-image:url('${item.image}');background-size:cover;background-position:center`
+    : (cat?.couleur
+        ? `background:linear-gradient(135deg, ${cat.couleur}33, ${cat.couleur}11)`
+        : _catGradient(item.nom || ''));
+
+  return `
+    <div class="sh-list-row ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-sortable-item' : ''}"
+      data-item-id="${item.id}" data-sh-action="openDetail" data-id="${item.id}"
+      ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}>
+      <button class="sh-list-fav ${_isFav(item.id) ? 'is-fav' : ''}" data-sh-action="toggleFav" data-id="${item.id}"
+        title="${_isFav(item.id) ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${_isFav(item.id) ? '★' : '☆'}</button>
+      <span class="sh-list-thumb" style="${imgBg}">${item.image ? '' : (cat?.emoji || _catEmoji(cat?.nom || item.type || ''))}</span>
+      <div class="sh-list-name">
+        <span class="sh-list-name-txt">${_esc(item.nom || '?')}</span>
+        <span class="sh-list-type">${typeLine}</span>
+      </div>
+      <div class="sh-list-info">${infoBits.join('')}</div>
+      <div class="sh-list-rare">${rareteNum
+        ? `<span class="sh-item-rare-pill" style="color:${rareteColor};border-color:${rareteColor};background:${rareteColor}1a">${_esc(rareteName)}</span>`
+        : '<span class="sh-list-dash">—</span>'}</div>
+      <div class="sh-list-dispo"><span class="sh-list-stock ${stockCls}">${_esc(stockTxt)}</span></div>
+      <div class="sh-list-price">
+        <span class="sh-list-price-main">🪙 ${prix}</span>
+        <span class="sh-list-price-sub">rev. ${prixVente}</span>
+      </div>
+      <div class="sh-list-actions" data-sh-action="stop">
+        ${hasChar ? `<button class="sh-try-cta sh-try-cta--icon" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier" aria-label="Essayer dans l'Atelier">🪄</button>` : ''}
+        ${buyBtnHtml}
+        ${edit ? `
+          <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
+          <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
+        ` : ''}
+      </div>
+    </div>`;
 }
 
 // ── Comparaison d'équipement (boutique → fiche perso) ─────────────────────────
@@ -2172,7 +2285,7 @@ function _mountSortables() {
     prefix: 'sh',
     animation: 120,
     draggable: '.sh-sortable-item',
-    filter: 'button, a, input, select, textarea, .btn-icon, .sh-card-admin-inline, .sh-item-actions',
+    filter: 'button, a, input, select, textarea, .btn-icon, .sh-card-admin-inline, .sh-item-actions, .sh-list-actions',
     onStart: () => { document.body.classList.add('sh-dragging'); _dragBlockClick = true; },
   };
   const finishDrag = () => {
@@ -4279,8 +4392,9 @@ Object.assign(shHandlers, {
     document.querySelectorAll(`[data-tw-key="${k}"] .sh-tw-seg-btn`).forEach(b => {
       b.classList.toggle('on', b.dataset.twVal === v);
     });
-    // Re-render du shop pour appliquer (layout tabs/sidebar nécessite un re-render)
-    if (k === 'layout') renderShop();
+    // Re-render du shop pour appliquer : layout (tabs/sidebar) et card=liste
+    // changent le MARKUP (pas juste du CSS) → re-render obligatoire.
+    if (k === 'layout' || k === 'card') renderShop();
   },
   resetTweaks:    () => {
     _shopTweaks = { ..._TWEAKS_DEFAULTS };
