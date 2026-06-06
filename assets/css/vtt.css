@@ -508,7 +508,7 @@
   color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.vct-status { display: inline-flex; gap: 4px; }
+.vct-status { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .vct-pill {
   font-size: .62rem;
   font-weight: 700;
@@ -519,6 +519,13 @@
   border: 1px solid rgba(255,255,255,0.07);
   letter-spacing: 0.04em;
 }
+.vct-pill--toggle {
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+.vct-pill--toggle:hover { border-color: rgba(255,255,255,0.28); }
+
 .vct-pill--on {
   background: rgba(34,195,142,0.18);
   color: #5fe5b1;

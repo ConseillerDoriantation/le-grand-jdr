@@ -818,7 +818,7 @@ async function _syncAutoTokens() {
       visible: false, imageUrl: null,
       movement: null, range: 1, attack: null, defense: null,
       hp: null, hpMax: null,
-      movedThisTurn: false, attackedThisTurn: false,
+      movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
       createdAt: serverTimestamp(),
     });
   }
@@ -2812,7 +2812,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       summonBaseAttack: baseAttackUnscaled,   // base NON scalée pour le calcul des actions
       attack: toucher,
       imageUrl: image,
-      movedThisTurn: false, attackedThisTurn: false,
+      movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
       createdAt: serverTimestamp(),
     };
     const ref = doc(_toksCol());
@@ -2875,7 +2875,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     attackDice,
     attack: attackBonus,
     imageUrl: null,
-    movedThisTurn: false, attackedThisTurn: false,
+    movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
     createdAt: serverTimestamp(),
   };
 
@@ -5225,8 +5225,14 @@ async function _vttRollAttack() {
     await updateDoc(_chrRef(src.characterId), { inventaire: inv }).catch(() => {});
     showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
   };
-  const _markAttacked = async () => {
-    if (_session?.combat?.active) await updateDoc(_tokRef(src.id), {attackedThisTurn:true}).catch(()=>{});
+  const _markActionUsed = async () => {
+    if (!_session?.combat?.active) return;
+    const field = opt.actionType === 'bonus'
+      ? 'bonusActionThisTurn'
+      : opt.actionType === 'reaction'
+        ? 'reactionThisTurn'
+        : 'attackedThisTurn';
+    await updateDoc(_tokRef(src.id), { [field]: true }).catch(()=>{});
   };
   const _cleanup = () => {
     _tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
@@ -5388,7 +5394,7 @@ async function _vttRollAttack() {
     if (opt.isCaSort || opt.isUtil) {
       await _deductPm();
       await _consumeItem();
-      await _markAttacked();
+      await _markActionUsed();
       const rCa = _handleMultiCast();
 
 
@@ -5540,7 +5546,7 @@ async function _vttRollAttack() {
       // PM toujours consommé (même sur échec critique) — le mana brûle quand on tente le sort
       await _deductPm();
       await _consumeItem();
-      await _markAttacked();
+      await _markActionUsed();
 
       // ── Échec critique : sort raté, aucun soin appliqué ─────────────
       if (hIsFumble) {
@@ -5821,7 +5827,7 @@ async function _vttRollAttack() {
 
     await _deductPm();
     await _consumeItem();
-    await _markAttacked();
+    await _markActionUsed();
 
     // ── Appliquer les HP + collecter résultats par cible ──────────────
     const targetResults = [];
@@ -9668,7 +9674,7 @@ async function _vttDuplicateOnPage(srcTokenId) {
       hp: src.hp ?? null, hpMax: src.hpMax ?? null,
       tokenW: src.tokenW ?? null, tokenH: src.tokenH ?? null,
       buffs: [],
-      movedThisTurn: false, attackedThisTurn: false, movedCells: 0, bonusMvt: 0,
+      movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false, movedCells: 0, bonusMvt: 0,
       createdAt: serverTimestamp(),
     });
     showNotif('+ Placé sur cette page','success');
@@ -10774,9 +10780,17 @@ async function _vttCleanGhostMembers() {
 /** Réinitialise le déplacement et les actions d'un token (MJ, tour individuel). */
 async function _vttResetTurn(id) {
   if (!STATE.isAdmin) return;
-  await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false })
+  await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false })
     .catch(() => showNotif('Erreur reset tour', 'error'));
   showNotif('Tour réinitialisé', 'success');
+}
+
+async function _vttToggleTurnFlag(id, field) {
+  if (!STATE.isAdmin || !["bonusActionThisTurn", "reactionThisTurn"].includes(field)) return;
+  const token = _tokens[id]?.data;
+  if (!token) return;
+  await updateDoc(_tokRef(id), { [field]: !token[field] })
+    .catch(() => showNotif("Erreur de suivi du tour", "error"));
 }
 
 async function _vttAddImageUrl() {
@@ -10799,7 +10813,7 @@ async function _vttToggleCombat() {
     Object.keys(_tokens).forEach(id => {
       const tokData = _tokens[id]?.data;
       if (!tokData) return;
-      const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, attackedThisTurn:false };
+      const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false };
       if (Array.isArray(tokData.conditions) && tokData.conditions.length) {
         let changed = false;
         const newConds = tokData.conditions.map(c => {
@@ -10879,7 +10893,7 @@ async function _vttNextRound() {
       b.delete(_tokRef(id));
       return; // skip buff cleanup pour token supprimé
     }
-    const updates = { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false };
+    const updates = { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false };
     if (tokData.buffs?.length) {
       const remaining = tokData.buffs.filter(bf => {
         const isExpired =
@@ -11010,7 +11024,7 @@ async function _vttConfirmCreateEnemy() {
       row: _activePage ? Math.floor(_activePage.rows/2) : 0,
       visible: true,
       hp, hpMax: hp, attackDice: atk, defense: ca, movement: mv, range,
-      imageUrl: null, movedThisTurn: false, attackedThisTurn: false,
+      imageUrl: null, movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
       createdAt: serverTimestamp(),
     });
   }
@@ -11038,7 +11052,7 @@ async function _vttDuplicateToken(tokenId) {
     col: _activePage ? Math.min(_activePage.cols-1,(t.col||0)+sameGroup.length) : 0,
     row: t.row||0,
     visible: true,
-    movedThisTurn: false, attackedThisTurn: false,
+    movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
     createdAt: serverTimestamp(),
   }).catch(()=>showNotif('Erreur duplication','error'));
   showNotif(`👹 ${baseName} ${num} créé !`,'success');
@@ -11074,7 +11088,7 @@ async function _vttPlaceFromBestiary(beastId) {
     visible:true,
     imageUrl:null, movement:null, range:1, attack:null, defense:null,
     hp:null, hpMax:null,
-    movedThisTurn:false, attackedThisTurn:false,
+    movedThisTurn:false, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false,
     createdAt:serverTimestamp(),
   }).catch(()=>showNotif('Erreur placement','error'));
   showNotif(`👹 ${name} placé !`,'success');
@@ -12643,18 +12657,25 @@ function _trackerRow(t) {
   const ld = _live(t);
   const moved = !!t.movedThisTurn || (t.movedCells || 0) > 0;
   const acted = !!t.attackedThisTurn;
+  const bonusActed = !!t.bonusActionThisTurn;
+  const reacted = !!t.reactionThisTurn;
   const done  = moved && acted;
   const partial = moved !== acted;
-  const cls = done ? 'vct-row--done' : (partial ? 'vct-row--partial' : 'vct-row--todo');
-  const name = _esc(ld.displayName || t.name || '—');
+  const cls = done ? "vct-row--done" : (partial ? "vct-row--partial" : "vct-row--todo");
+  const name = _esc(ld.displayName || t.name || "—");
+  const turnPill = (field, active, icon, title) => STATE.isAdmin
+    ? `<button type="button" class="vct-pill vct-pill--toggle ${active ? "vct-pill--on" : ""}" data-vtt-fn="_vttToggleTurnFlag" data-vtt-args="${t.id}|${field}" title="${title} — cliquer pour modifier">${icon} ${active ? "✓" : "·"}</button>`
+    : `<span class="vct-pill ${active ? "vct-pill--on" : ""}" title="${title}">${icon} ${active ? "✓" : "·"}</span>`;
   return `
     <div class="vct-row ${cls}" data-tok="${t.id}" data-vtt-fn="_vttTrackerFocus" data-vtt-args="${t.id}" title="Cliquer pour centrer sur ce token">
       ${_trackerPortrait(ld, t)}
       <div class="vct-info">
         <div class="vct-name">${name}</div>
         <div class="vct-status">
-          <span class="vct-pill ${moved ? 'vct-pill--on' : ''}" title="Déplacement effectué">🏃 ${moved ? '✓' : '·'}</span>
-          <span class="vct-pill ${acted ? 'vct-pill--on' : ''}" title="Action effectuée">⚔ ${acted ? '✓' : '·'}</span>
+          <span class="vct-pill ${moved ? "vct-pill--on" : ""}" title="Déplacement effectué">🏃 ${moved ? "✓" : "·"}</span>
+          <span class="vct-pill ${acted ? "vct-pill--on" : ""}" title="Action effectuée">⚔ ${acted ? "✓" : "·"}</span>
+          ${turnPill("bonusActionThisTurn", bonusActed, "✦", "Action bonus effectuée")}
+          ${turnPill("reactionThisTurn", reacted, "⚡", "Réaction effectuée")}
         </div>
       </div>
     </div>`;
@@ -12677,7 +12698,7 @@ function _renderCombatTracker() {
           <span class="vct-title-ico">⚔️</span>
           <span class="vct-title-txt vct-title-txt--idle">Combat</span>
         </div>
-        <button class="vct-mj-btn vct-mj-btn--start" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement & action de tous les tokens">▶ Démarrer</button>
+        <button class="vct-mj-btn vct-mj-btn--start" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement et actions de tous les tokens">▶ Démarrer</button>
       </div>`;
     return;
   }
@@ -12717,7 +12738,7 @@ function _renderCombatTracker() {
       </div>
       ${mj ? `
         <div class="vct-mj-ctrls">
-          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Tour suivant — reset déplacement & action">▶ Tour</button>
+          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Tour suivant — reset déplacement et actions">▶ Tour</button>
           <button class="vct-mj-btn vct-mj-btn--danger" data-vtt-fn="_vttToggleCombat" title="Terminer le combat">⏹</button>
         </div>` : ''}
     </div>
@@ -14137,6 +14158,7 @@ const VTT_ACTIONS = {
   _vttToggleRollHidden,
   _vttToggleShortRest,
   _vttToggleTokenDelegate,
+  _vttToggleTurnFlag,
   _vttToggleVisible,
   _vttTokenBonus,
   _vttTokenResetBonus,
