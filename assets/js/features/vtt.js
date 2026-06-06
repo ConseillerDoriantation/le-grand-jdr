@@ -2362,8 +2362,9 @@ function _vttSpellMods(s) {
     enchantGeneric: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
       ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: _vttSortCibles(s) } : null,
     // Affliction : JS Sa DD scalable selon nb runes Affliction
-    // DD fixe 11 (plus de chaînage Affliction). Le nombre de cibles vient de
-    // Dispersion (nbCibles commun), la puissance scale le DoT — pas la rune Affliction.
+    // DD du JS : 11 + 3 par rune Affliction au-delà de la 1ère (le nombre de
+    // CIBLES vient de Dispersion, pas de la rune Affliction).
+    // → nbAff=1 : DD 11 · nbAff=2 : 14 · nbAff=3 : 17
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
     // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
     // ⚠️ Absorbé par le combo Aura punitive (Prot + Aff sans Puiss) → l'affliction est gérée par l'aura
@@ -2393,7 +2394,7 @@ function _vttSpellMods(s) {
             mode,
             effect:   s.afflictionEffect || '',
             element:  s.noyauTypeId || null,
-            dd:       11,
+            dd:       11 + 3 * (nbAff - 1),
             nbAff,
             nbP,
             dotFormula,

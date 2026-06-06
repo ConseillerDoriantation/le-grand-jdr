@@ -545,7 +545,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
   // (Pas de JS en branche Lacération : c'est une frappe + réduction de CA.)
   if (hasAfflictionDebuff) {
-    chips.push({ icon:'🛡', val:`DD 11`, color:'#ef4444' });
+    const nbAff = runesAll.filter(r => r === 'Affliction').length;
+    chips.push({ icon:'🛡', val:`DD ${11 + 3 * (nbAff - 1)}`, color:'#ef4444' });
   }
 
   const pmVal = pmDelta !== 0
@@ -892,8 +893,8 @@ function _runeLiveContribution(nom, counts) {
       };
     case 'Affliction':
       return {
-        main:  'Debuff sur ennemi · 2 tours · Action · JS DD 11 · cibles selon Dispersion',
-        chain: cnt > 1 ? `Pas de cumul : plusieurs Affliction n'ajoutent ni cible ni DD (utiliser Dispersion)` : null,
+        main:  `Debuff sur ennemi · 2 tours · Action · JS DD ${11 + 3 * (cnt - 1)} · cibles selon Dispersion`,
+        chain: cnt > 1 ? `🔗 +3 au DD du JS par rune (Affliction ×${cnt}) · cibles via Dispersion` : null,
       };
     case 'Invocation':
       return {

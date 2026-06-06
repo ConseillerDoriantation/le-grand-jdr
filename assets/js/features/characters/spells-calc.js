@@ -1032,7 +1032,7 @@ export function _buildSortResume(s, c) {
   // ── Affliction (mode DoT ou État) ── (la branche Lacération est rendue plus haut)
   if (nbAff > 0 && !hideAff && s.afflictionMode !== 'laceration') {
     const mode = s.afflictionMode || 'dot';
-    const dd   = 11; // DD fixe (plus de chaînage Affliction)
+    const dd   = 11 + 3 * (nbAff - 1); // DD scale avec le nb de runes Affliction
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
     const lib = _conditionsLibCache || [];
