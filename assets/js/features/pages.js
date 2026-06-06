@@ -73,7 +73,13 @@ const PAGES = {
       const dateFr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
       return { dateFr, slotLabel: _SLOT_LABELS[sess.slot] || '', questTitle: sess.questTitle || '' };
     }
-    const nextSessionFmt = _formatNextSession(nextSession);
+    // La séance validée n'est affichée qu'aux membres du groupe concerné (+ MJ).
+    // Fallback : pas de groupe enregistré (séances legacy) → visible par tous.
+    const _sessUids = nextSession?.participantUids;
+    const _sessVisible = STATE.isAdmin
+      || !Array.isArray(_sessUids) || !_sessUids.length
+      || _sessUids.includes(uid);
+    const nextSessionFmt = _sessVisible ? _formatNextSession(nextSession) : null;
 
     const pseudo = STATE.profile?.pseudo || 'Aventurier';
 

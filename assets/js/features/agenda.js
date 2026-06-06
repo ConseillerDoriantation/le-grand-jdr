@@ -317,13 +317,15 @@ async function validateSlot(questId, iso, slotId) {
       questTitle:  quest?.titre || quest?.nom || 'Quête',
       date:        iso,
       slot:        slotId,
+      // Membres du groupe concerné : seuls eux (+ le MJ) verront la séance.
+      participantUids: (quest?.participants || []).map(p => p.uid).filter(Boolean),
       validatedAt: Date.now(),
       validatedBy: STATE.user?.uid || null,
     };
     await saveDoc('agenda_session', 'next', payload);
     _ag.nextSession = payload;
     closeModal();
-    showNotif('✓ Créneau validé. Visible sur le dashboard de tous.', 'success');
+    showNotif('✓ Créneau validé. Visible par le groupe concerné (et le MJ).', 'success');
     _renderSessionBanner();
     _renderSuggestions();
   } catch (e) {
@@ -350,11 +352,21 @@ async function unvalidateSession() {
   }
 }
 
+// Une séance validée n'est visible que par les membres du groupe concerné
+// (participantUids) et le MJ. Fallback : pas de groupe enregistré → visible
+// par tous (compat séances validées avant cette feature).
+function _sessionVisibleToMe(s) {
+  if (STATE.isAdmin) return true;
+  const uids = s?.participantUids;
+  if (!Array.isArray(uids) || !uids.length) return true;
+  return uids.includes(STATE.user?.uid);
+}
+
 function _renderSessionBanner() {
   const el = document.getElementById('ag-session-banner');
   if (!el) return;
   const s = _ag.nextSession;
-  if (!s) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  if (!s || !_sessionVisibleToMe(s)) { el.innerHTML = ''; el.style.display = 'none'; return; }
   const fmt = _formatSession(s);
   if (!fmt) { el.innerHTML = ''; el.style.display = 'none'; return; }
   el.style.display = '';
