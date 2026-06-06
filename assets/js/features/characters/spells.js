@@ -13,7 +13,7 @@ import { getArmorSetData, getMainWeapon } from './data.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -437,6 +437,10 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const hasAffliction = runesAll.includes('Affliction');
   const enchantMode   = s.enchantMode || 'dmg';
   const afflictionMode = s.afflictionMode || 'dot';
+  // Branche Lacération d'Affliction : frappe l'attaque de base + réduit la CA,
+  // donc PAS de suppression d'impact ni de chip DoT/État.
+  const isLaceration  = _hasLaceration(s);
+  const hasAfflictionDebuff = hasAffliction && afflictionMode !== 'laceration';
   // Enchantement-only : pas de dégâts d'impact si pas de degats explicite
   const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
   // Modes Toucher / Déplacement : buff pur sur allié, JAMAIS de dégâts d'impact
@@ -445,21 +449,24 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
   // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
-  const suppressImpactDmg = isEnchantOnly || enchantBuffOnly || hasAffliction || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
+  const suppressImpactDmg = isEnchantOnly || enchantBuffOnly || hasAfflictionDebuff || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];
 
   // ── 1. Dégâts d'impact (offensif, OU Lacération qui frappe toujours) ──
-  if ((types.includes('offensif') || runesAll.includes('Lacération')) && !suppressImpactDmg) {
+  if ((types.includes('offensif') || isLaceration) && !suppressImpactDmg) {
     const degBase = _calcSortDegats(s, c);
     let val = degBase;
     if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
     chips.push({ icon:'⚔️', val, color:'#ff6b6b' });
   }
 
-  // ── 2. Affliction : mode décide, JAMAIS de fallback DoT en mode État ──
-  if (hasAffliction) {
+  // ── 2. Affliction : mode décide (DoT / État / Lacération) ──
+  if (isLaceration) {
+    const lac = _calcLaceration(s);
+    if (lac) chips.push({ icon:'🩸', val:`CA −${Math.min(lac.reduction, lac.maxElite)}`, color:'#dc2626' });
+  } else if (hasAfflictionDebuff) {
     if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
       const etat = s.afflictionEtatId
@@ -532,7 +539,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   }
 
   // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
-  if (hasAffliction) {
+  // (Pas de JS en branche Lacération : c'est une frappe + réduction de CA.)
+  if (hasAfflictionDebuff) {
     const nbAff = runesAll.filter(r => r === 'Affliction').length;
     const dd = 11 + 3 * (nbAff - 1);
     chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444' });
@@ -769,7 +777,6 @@ const RUNE_META = [
   { nom:'Enchantement',  icon:'✨', color:'#e8b84b', family:'soutien',   effet:'Booste un allié · 2 tours' },
   { nom:'Affliction',    icon:'💀', color:'#8b5cf6', family:'soutien',   effet:'Élément + état sur arme ennemie · 2 tours' },
   { nom:'Invocation',    icon:'🐾', color:'#a16207', family:'soutien',   effet:'Créature liée · 10 PV, CA 10' },
-  { nom:'Lacération',    icon:'🩸', color:'#dc2626', family:'soutien',   effet:'CA cible −1 (max −2 / −4 Élite-Boss)' },
   { nom:'Chance',        icon:'🍀', color:'#facc15', family:'soutien',   effet:'RC 19–20 (critique max)' },
   { nom:'Durée',         icon:'⏱️', color:'#06b6d4', family:'meta',      effet:'+2 tours' },
   { nom:'Concentration', icon:'🧠', color:'#6366f1', family:'meta',      effet:'Maintien hors tour · JS Sa DD 11 si touché' },
@@ -1326,18 +1333,21 @@ export async function openSortModal(idx, s) {
 
     <!-- Affliction — visible si rune Affliction > 0 -->
     <div id="s-affliction-section" class="cs-spell-slot-box cs-spell-slot-box--aff" style="${runesSrc.includes('Affliction')?'':'display:none'}">
-      <div class="cs-spell-slot-title">💀 Affliction <span>Cible ennemie · 2 tours · Action · pas de dégâts d'impact</span></div>
+      <div class="cs-spell-slot-title">💀 Affliction <span>Cible ennemie · 2 tours · Action · effet selon la branche</span></div>
 
-      <!-- Mode toggle : DoT (dégâts par tour) vs État (Entravé, Renversé, etc.) -->
+      <!-- Mode toggle : DoT (dégâts/tour) · État · Lacération (CA cible + frappe) -->
       <div class="form-group">
-        <label>Mode</label>
-        <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr">
+        <label>Branche</label>
+        <div class="cs-slot-grid" style="grid-template-columns:1fr 1fr 1fr">
           <button type="button" id="s-affliction-mode-dot"
             data-action="_selectAfflictionMode" data-val="dot"
-            class="cs-slot-btn ${(s?.afflictionMode||'dot')==='dot'?'selected':''}">🩸 DoT (dégâts/tour)</button>
+            class="cs-slot-btn ${(s?.afflictionMode||'dot')==='dot'?'selected':''}">🩸 DoT</button>
           <button type="button" id="s-affliction-mode-etat"
             data-action="_selectAfflictionMode" data-val="etat"
             class="cs-slot-btn ${s?.afflictionMode==='etat'?'selected':''}">⛓ État</button>
+          <button type="button" id="s-affliction-mode-laceration"
+            data-action="_selectAfflictionMode" data-val="laceration"
+            class="cs-slot-btn ${s?.afflictionMode==='laceration'?'selected':''}">🩸 Lacération</button>
         </div>
         <input type="hidden" id="s-affliction-mode" value="${s?.afflictionMode||'dot'}">
       </div>
@@ -1365,6 +1375,11 @@ export async function openSortModal(idx, s) {
           <option value="">— Aucun (effet libre uniquement) —</option>
         </select>
         <input type="hidden" id="s-affliction-etat-saved" value="${s?.afflictionEtatId||''}">
+      </div>
+
+      <!-- Lacération mode : frappe l'attaque de base + réduit la CA de la cible -->
+      <div id="s-affliction-laceration-block" style="${s?.afflictionMode==='laceration'?'':'display:none'};font-size:.78rem;line-height:1.5;color:var(--text-muted);background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.22);border-radius:8px;padding:.55rem .7rem;margin-top:.4rem">
+        🩸 <strong style="color:#f87171">Lacération</strong> — le sort inflige <strong>l'attaque de base</strong> et réduit la <strong>CA de la cible de −1 par rune Affliction</strong> (sans chaînage), plafonné à <strong>−2</strong> (joueur) / <strong>−4</strong> (Élite-Boss), pendant 2 tours. Pas de DoT ni d'état.
       </div>
     </div>
 
@@ -1614,10 +1629,13 @@ function _refreshConditionalSections() {
   // Invocation : le sort n'a pas de dégâts propres (la créature frappe) → masque
   // la section Dégâts même en offensif (Puissance scale l'attaque de l'invocation).
   const anyInvoc = (counts.Invocation || 0) > 0;
-  // Lacération frappe toujours (attaque de base) → section Dégâts visible même
-  // si l'utilisateur n'a pas coché « offensif ».
-  const hasLaceration = (counts.Lacération || 0) > 0;
-  if (dSec) dSec.style.display = ((isOffensive || hasLaceration) && !hasAffliction && !isDepl && !anyInvoc) ? '' : 'none';
+  // Branche Lacération d'Affliction (ou legacy rune) : frappe toujours l'attaque
+  // de base → section Dégâts visible même si « offensif » n'est pas coché, et
+  // l'affliction n'est PAS en suppression d'impact dans ce mode.
+  const _afflMode = document.getElementById('s-affliction-mode')?.value || 'dot';
+  const isLaceration = (counts.Lacération || 0) > 0 || (hasAffliction && _afflMode === 'laceration');
+  const hasAfflictionDebuff = hasAffliction && _afflMode !== 'laceration';
+  if (dSec) dSec.style.display = ((isOffensive || isLaceration) && !hasAfflictionDebuff && !isDepl && !anyInvoc) ? '' : 'none';
   // Combo Drain : sort offensif + Protection → la Protection devient un vol de vie %.
   // On masque alors le choix CA/Soin et leurs montants, et on affiche l'indicateur.
   const isDrain   = isOffensive && hasProt;
@@ -1745,7 +1763,7 @@ function _renderInvocationConfigBody() {
       <div class="inv-cfg-list">
         ${acts.length ? acts.map((a, ai) => {
           // Dégâts calculés sur la base de l'ATTAQUE de la créature (pas l'arme du perso)
-          const _off = _getSortTypes(a).includes('offensif') || (a.runes||[]).includes('Lacération');
+          const _off = _getSortTypes(a).includes('offensif') || _hasLaceration(a);
           const _dmg = _off ? _calcSortDegats(a, _invCalcChar) : '';
           const _meta = [
             _dmg ? `🎲 ${_esc(_dmg)}` : '',
@@ -1986,7 +2004,7 @@ function _renderLibInvEditorBody() {
       </div>
       <div class="inv-cfg-list">
         ${acts.length ? acts.map((a, ai) => {
-          const _off = _getSortTypes(a).includes('offensif') || (a.runes||[]).includes('Lacération');
+          const _off = _getSortTypes(a).includes('offensif') || _hasLaceration(a);
           const _dmg = _off ? _calcSortDegats(a, calcChar) : '';
           const _meta = [_dmg ? `🎲 ${_esc(_dmg)}` : '', (a.runes||[]).length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune', a.pm ? `${a.pm} PM` : ''].filter(Boolean).join(' · ');
           return `<div class="inv-cfg-act">
@@ -2157,11 +2175,6 @@ export function runeIncrement(nom) {
   // (l'utilisateur peut décocher ensuite, on ne force pas)
   if (prevCnt === 0 && _sortTypesEdit) {
     if (nom === 'Puissance'  && !_sortTypesEdit.has('offensif')) {
-      _sortTypesEdit.add('offensif');
-      _applyTypeChange();
-    }
-    // Lacération inflige toujours l'attaque de base + sa réduction de CA → Offensif
-    if (nom === 'Lacération' && !_sortTypesEdit.has('offensif')) {
       _sortTypesEdit.add('offensif');
       _applyTypeChange();
     }
@@ -2439,16 +2452,19 @@ function _selectEnchantMode(mode) {
   _updateSortPreview();
 }
 
-/** Toggle DoT/État pour l'affliction (analogie ProtMode CA/Soin). */
+/** Branche d'Affliction : DoT / État / Lacération. */
 function _selectAfflictionMode(mode) {
   const hidden = document.getElementById('s-affliction-mode');
   if (hidden) hidden.value = mode;
   document.getElementById('s-affliction-mode-dot')?.classList.toggle('selected', mode === 'dot');
   document.getElementById('s-affliction-mode-etat')?.classList.toggle('selected', mode === 'etat');
+  document.getElementById('s-affliction-mode-laceration')?.classList.toggle('selected', mode === 'laceration');
   const dotBlock = document.getElementById('s-affliction-dot-block');
   const etatBlock = document.getElementById('s-affliction-etat-block');
+  const lacBlock = document.getElementById('s-affliction-laceration-block');
   if (dotBlock) dotBlock.style.display = mode === 'dot' ? '' : 'none';
   if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
+  if (lacBlock) lacBlock.style.display = mode === 'laceration' ? '' : 'none';
   _updateSortPreview();
 }
 

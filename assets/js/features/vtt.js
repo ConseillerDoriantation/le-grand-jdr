@@ -2290,6 +2290,9 @@ function _vttSpellMods(s) {
   const nbConc = counts.Concentration || 0;
   const nbDisp = counts.Dispersion    || 0;
   const protMode = s.protectionMode || 'ca';
+  // Lacération = branche d'Affliction (afflictionMode='laceration') · legacy = ancienne rune
+  const isLacMode = s.afflictionMode === 'laceration' && nbAff > 0;
+  const lacCount  = nbLac + (isLacMode ? nbAff : 0);
   // Bonus chiffré d'un enchantement non-dégâts (toucher/déplacement/CA) :
   // valeur saisie sinon auto = 2 + Puissance.
   const _enchBonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
@@ -2309,9 +2312,10 @@ function _vttSpellMods(s) {
     // Formule : 25% + 25% × nbProt → Prot×1=50% · ×2=75% · ×3=100%
     drain: (nbProt > 0 && (s.types || []).includes('offensif'))
       ? { pct: 0.25 + 0.25 * nbProt, nbProt } : null,
-    // Lacération : -CA brut sur la cible (plafonné en jeu : 2 joueur · 4 élite/boss)
-    laceration: nbLac > 0
-      ? { runes: nbLac, reduction: 2*nbLac - 1, max: 2, maxElite: 4 } : null,
+    // Lacération (branche d'Affliction) : -CA brut sur la cible, -1 par rune
+    // Affliction sans chaînage (plafonné en jeu : 2 joueur · 4 élite/boss).
+    laceration: lacCount > 0
+      ? { runes: lacCount, reduction: lacCount, max: 2, maxElite: 4 } : null,
     // Chance : étend la plage critique (RC 20 → 21-2N..20)
     chance: nbCh > 0
       ? { rc: 20 - (2*nbCh - 1) } : null,
@@ -2359,7 +2363,7 @@ function _vttSpellMods(s) {
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
     // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
     // ⚠️ Absorbé par le combo Aura punitive (Prot + Aff sans Puiss) → l'affliction est gérée par l'aura
-    affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0 && nbP === 0))
+    affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0 && nbP === 0) && !isLacMode)
       ? (() => {
           // Mode DoT : formule scalable par défaut, override possible via afflictionDotFormula
           // Base 1d4+2, +1 dé par Puissance, +2 fixe par chaînage Puissance (≥2)
@@ -2395,7 +2399,7 @@ function _vttSpellMods(s) {
         })() : null,
     // Aura punitive : Protection + Affliction sans Puissance (sinon Drain prime)
     // Au cast, applique l'affliction Torse de l'élément à tous les ennemis dans la zone Manhattan
-    auraPunitive: (nbProt > 0 && nbAff > 0 && nbP === 0)
+    auraPunitive: (nbProt > 0 && nbAff > 0 && nbP === 0 && !isLacMode)
       ? {
           radius: nbProt,                    // portée Manhattan = nb runes Protection
           element: s.noyauTypeId || null,
@@ -2416,7 +2420,7 @@ function _vttSpellMods(s) {
       ? { elementId: s.noyauTypeId || null, nbPuissance: nbP } : null,
     // Sentinelle : Affliction + Invocation → token stationnaire (stats propres, 2 tours)
     // Dispersion permet d'invoquer plusieurs sentinelles : 1 base + 2N pour N runes (chaînage standard)
-    sentinelle: (nbAff > 0 && nbInv > 0)
+    sentinelle: (nbAff > 0 && nbInv > 0 && !isLacMode)
       ? {
           slot: s.afflictionSlot || 'arme',
           elementId: s.noyauTypeId || null,
@@ -2437,7 +2441,7 @@ function _vttSpellMods(s) {
     // résolues au SPAWN (_vttSpawnSummon, qui a le perso lanceur). Le nombre n'est
     // plus piloté par Dispersion. Rétro-compat : s.invocation.stats sans ids =
     // ancienne invocation "inline" (ou défaut dérivé si rien).
-    invocation: (nbInv > 0 && nbAff === 0 && nbEnch === 0)
+    invocation: (nbInv > 0 && (nbAff === 0 || isLacMode) && nbEnch === 0)
       ? (() => {
           // Les créatures sont CHOISIES au lancement dans le VTT (versatilité).
           // defaultIds = pré-sélection éventuelle du sort (carte 🐾), pré-cochée.
@@ -3268,7 +3272,8 @@ function _buildSpellOption(s, ctx) {
     };
   }
   // Lacération frappe toujours l'attaque de base, même si « offensif » n'est pas coché.
-  if (types.includes('offensif') || _sRunes.includes('Lacération')) {
+  // (branche Lacération d'Affliction → mods.laceration ; ou ancienne rune legacy)
+  if (types.includes('offensif') || _sRunes.includes('Lacération') || !!mods?.laceration) {
     const fullFormula    = _vttSortDmgFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
     const spellTypeId    = s.noyauTypeId || null;
@@ -3416,7 +3421,8 @@ function _buildAttackOptions(t) {
       t.summonActions.forEach((a, ai) => {
         // Seules les actions offensives sont jouables ici (effets complexes : à venir)
         const isOff = (Array.isArray(a.types) && a.types.includes('offensif'))
-                   || (Array.isArray(a.runes) && a.runes.includes('Lacération'));
+                   || (Array.isArray(a.runes) && (a.runes.includes('Lacération')
+                       || (a.afflictionMode === 'laceration' && a.runes.includes('Affliction'))));
         if (!isOff) return;
         const dmg  = _vttSortDmgFormula(a, _cChar);
         const elId = a.noyauTypeId || t.summonElementId || 'physique';
@@ -13588,7 +13594,8 @@ function _vttSpellChips(s, c) {
   const types = (Array.isArray(s.types) && s.types.length) ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
   const runes = s.runes || [];
-  if (types.includes('offensif') || runes.includes('Lacération')) {
+  const _isLac = runes.includes('Lacération') || (s.afflictionMode === 'laceration' && runes.includes('Affliction'));
+  if (types.includes('offensif') || _isLac) {
     const dmg = _vttSortDmgFormula(s, c);
     if (dmg) chips.push({ icon:'⚔️', val: dmg, color:'#ff6b6b' });
   }

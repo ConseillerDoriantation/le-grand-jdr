@@ -693,6 +693,7 @@ export async function deleteFromCol(col, id) {
 
 // ── Spécifique personnages ─────────────────────
 const _inventoryNormAttempted = new Set();
+const _lacerationMigrAttempted = new Set();
 
 export async function loadChars(uid = null) {
   const path = _colPath('characters');
@@ -730,5 +731,27 @@ export async function loadChars(uid = null) {
         .catch(e => console.debug(`[inv] silent normalize failed for ${c.id}:`, e?.code));
     }
   } catch (e) { console.debug('[inv] norm utility load failed:', e); }
+
+  // Migration silencieuse : rune Lacération → branche Lacération d'Affliction.
+  // Idempotente : ne s'exécute que sur les decks contenant encore la rune.
+  try {
+    const { deckNeedsLacerationMigration, migrateDeckLaceration } = await import('../shared/spell-migrations.js');
+    for (const c of chars) {
+      if (!deckNeedsLacerationMigration(c.deck_sorts)) continue;
+      const lacKey = `lac:${path}:${c.id}`;
+      if (_lacerationMigrAttempted.has(lacKey)) continue;
+      _lacerationMigrAttempted.add(lacKey);
+      const { changed, deck } = migrateDeckLaceration(c.deck_sorts);
+      if (!changed) continue;
+      c.deck_sorts = deck;
+      updateDoc(doc(db, path, c.id), { deck_sorts: deck })
+        .then(() => {
+          _cachePatchUpdate(path, c.id, { deck_sorts: deck });
+          console.debug(`[lac] migrated Lacération→Affliction for ${c.nom || c.id}`);
+        })
+        .catch(e => console.debug(`[lac] silent migrate failed for ${c.id}:`, e?.code));
+    }
+  } catch (e) { console.debug('[lac] migration utility load failed:', e); }
+
   return chars;
 }

@@ -221,7 +221,7 @@ export const SORT_COMBOS = [
     id: 'sentinelle',
     icon: '🪤',
     defaultName: 'Sentinelle / Piège',
-    detect: (counts) => counts.Affliction > 0 && counts.Invocation > 0,
+    detect: (counts, s) => counts.Affliction > 0 && counts.Invocation > 0 && s?.afflictionMode !== 'laceration',
     describe: (counts, s) => {
       const st = _calcSentinelStats(s || {});
       const nbDisp = counts.Dispersion || 0;
@@ -254,7 +254,7 @@ export const SORT_COMBOS = [
     icon: '🌀',
     defaultName: 'Aura punitive',
     // Protection + Affliction (sans Puissance, sinon c'est Drain qui prime)
-    detect: (counts) => counts.Protection > 0 && counts.Affliction > 0 && (counts.Puissance || 0) === 0,
+    detect: (counts, s) => counts.Protection > 0 && counts.Affliction > 0 && (counts.Puissance || 0) === 0 && s?.afflictionMode !== 'laceration',
     describe: (counts) => {
       const radius = counts.Protection;
       return `Protection ×${counts.Protection} + Affliction ×${counts.Affliction} · zone ${radius}c (Manhattan) autour du lanceur · tout ennemi présent au cast subit l'affliction (JS Con DD 11) · pas de bonus CA`;
@@ -622,13 +622,27 @@ export function _calcSortDeplacement(s) {
   return null;
 }
 
-/** Lacération : réduction CA cible
- *  ×1 → -1 CA · ×N → -(2N-1) CA brut (plafonné -2 joueur / -4 Élite-Boss en jeu)
+/** Lacération est désormais une BRANCHE d'Affliction (afflictionMode='laceration').
+ *  Le sort présente cette branche s'il a la rune Affliction en mode Lacération,
+ *  ou (legacy) l'ancienne rune autonome « Lacération ».
  */
-function _calcLaceration(s) {
-  const nb = (s.runes||[]).filter(r => r === 'Lacération').length;
+export function _hasLaceration(s) {
+  const r = s?.runes || [];
+  return r.includes('Lacération')
+      || (s?.afflictionMode === 'laceration' && r.includes('Affliction'));
+}
+
+/** Lacération : réduction CA cible — pilotée par le nombre de runes Affliction
+ *  (sans chaînage) : -1 par rune (plafonné -2 joueur / -4 Élite-Boss en jeu).
+ *  Legacy : ancienne rune « Lacération » → même barème linéaire.
+ */
+export function _calcLaceration(s) {
+  const r = s?.runes || [];
+  const nb = (s?.afflictionMode === 'laceration' && r.includes('Affliction'))
+    ? r.filter(x => x === 'Affliction').length
+    : r.filter(x => x === 'Lacération').length;
   if (!nb) return null;
-  return { runes: nb, reduction: 2*nb - 1, max: 2, maxElite: 4 };
+  return { runes: nb, reduction: nb, max: 2, maxElite: 4 };
 }
 
 /** Chance : réduction RC critique
@@ -827,7 +841,8 @@ export function _buildSortResume(s, c) {
   // avec un degats résiduel d'un ancien mode Dégâts).
   const isEnchantBuffOnly = runes.includes('Enchantement')
     && (s.enchantMode === 'toucher' || s.enchantMode === 'deplacement');
-  const isAfflictionSpell = runes.includes('Affliction'); // affliction = jamais d'impact
+  // Affliction = jamais d'impact… SAUF en branche Lacération (qui frappe toujours).
+  const isAfflictionSpell = runes.includes('Affliction') && s.afflictionMode !== 'laceration';
   // Invocation : le sort n'inflige pas de dégâts lui-même — c'est la créature
   // invoquée qui frappe (ses dégâts propres via _calcInvocationStats). On masque
   // donc l'attaque de base du lanceur, même si Puissance a coché « offensif »
@@ -836,7 +851,7 @@ export function _buildSortResume(s, c) {
   const _suppressImpactDmg = isEnchantOnly || isEnchantBuffOnly || isAfflictionSpell || isInvocationSpell;
   // Lacération inflige TOUJOURS l'attaque de base (+ sa réduction de CA), même si
   // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
-  const _dealsImpact = types.includes('offensif') || runes.includes('Lacération');
+  const _dealsImpact = types.includes('offensif') || _hasLaceration(s);
   if (_dealsImpact && !_suppressImpactDmg) {
     const mainP   = getMainWeapon(c);
     // Override du sort sur la stat de dégâts > stat de l'arme principale
@@ -962,11 +977,10 @@ export function _buildSortResume(s, c) {
     }
   }
 
-  // Lacération
+  // Lacération (branche d'Affliction) — réduction de CA + frappe de base
   const lac = _calcLaceration(s);
   if (lac) {
-    const chainNote = lac.runes > 1 ? ` · chaîné +${lac.runes - 1}` : '';
-    lines.push({ icon:'🩸', label:`CA cible −${lac.reduction}${monoStr}`, detail:`Brut · plafond −${lac.max} (−${lac.maxElite} Élites/Boss)${chainNote}` });
+    lines.push({ icon:'🩸', label:`Affliction · Lacération · CA cible −${lac.reduction}${monoStr}`, detail:`Brut · plafond −${lac.max} (−${lac.maxElite} Élites/Boss) · ${lac.runes} Affliction · frappe l'attaque de base` });
   }
 
   // Chance
@@ -1010,8 +1024,8 @@ export function _buildSortResume(s, c) {
     }
   }
 
-  // ── Affliction (mode DoT ou État) ──────────────────────────────────
-  if (nbAff > 0 && !hideAff) {
+  // ── Affliction (mode DoT ou État) ── (la branche Lacération est rendue plus haut)
+  if (nbAff > 0 && !hideAff && s.afflictionMode !== 'laceration') {
     const mode = s.afflictionMode || 'dot';
     const dd   = 11 + 3 * (nbAff - 1);
     // Stat de JS dérivée (comme dans le VTT)
