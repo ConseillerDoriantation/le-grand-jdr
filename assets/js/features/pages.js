@@ -333,7 +333,9 @@ const PAGES = {
     if (!dash) return;
 
     const _myUid           = STATE.user?.uid;
+    const collectionTotal  = collectionItems.length;
     const collectionUnlocked = collectionItems.filter(c => c.unlocked).length;
+    const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
     const activeQuests     = quests
       .filter(q => q.statut === 'active')
       .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
@@ -736,10 +738,12 @@ const PAGES = {
           <div class="dv2-stat-card-val" style="color:#22c38e">${achievements.length}</div>
           <div class="dv2-stat-card-lbl">Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-gold" data-navigate="collection" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-gold dv2-stat-card--collection${collectionUnlocked === 0 ? ' is-empty' : ''}" data-navigate="collection" style="cursor:pointer;--collection-progress:${collectionPct}%" aria-label="Collection, ${collectionUnlocked} cartes débloquées sur ${collectionTotal}">
           <span class="dv2-stat-card-icon">🃏</span>
-          <div class="dv2-stat-card-val" style="color:#f4c430">${collectionUnlocked}</div>
-          <div class="dv2-stat-card-lbl">Cartes débloquées</div>
+          <div class="dv2-stat-card-val dv2-collection-val" style="color:#f4c430">${collectionUnlocked}<span>/${collectionTotal}</span></div>
+          <div class="dv2-stat-card-lbl">Collection</div>
+          <div class="dv2-collection-meter" aria-hidden="true"><span></span></div>
+          <div class="dv2-stat-card-sub">${collectionTotal ? `${collectionPct}% de progression` : 'Aucune carte'}</div>
         </div>
       </div>
 

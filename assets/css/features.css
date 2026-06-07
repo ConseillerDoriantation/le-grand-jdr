@@ -2391,6 +2391,132 @@ body.ach-dragging * { cursor:grabbing !important; }
 /* ══════════════════════════════════════════════════════════════════════
    COLLECTION — cartes à collectionner (flip recto/verso, drag, présentation)
    ══════════════════════════════════════════════════════════════════════ */
+.coll-page {
+  width:100%;
+  max-width:var(--content-max);
+  box-sizing:border-box;
+  margin:0 auto;
+  padding:0 clamp(1rem, 2vw, 1.6rem) 2.5rem;
+}
+.coll-page-header {
+  margin-bottom:1.35rem;
+  padding:.35rem 0 0;
+}
+.coll-title-line {
+  display:flex;
+  align-items:center;
+  gap:.85rem;
+  min-width:0;
+  flex-wrap:wrap;
+}
+.coll-title-glyph {
+  position:relative;
+  width:38px;
+  height:44px;
+  flex:0 0 38px;
+  border-radius:7px;
+  background:linear-gradient(160deg, rgba(232,238,255,.96), rgba(129,157,211,.82));
+  border:1px solid rgba(255,255,255,.38);
+  box-shadow:0 10px 24px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.65);
+}
+.coll-title-glyph::before,
+.coll-title-glyph::after,
+.coll-title-glyph span {
+  content:"";
+  position:absolute;
+  left:7px;
+  right:7px;
+  height:2px;
+  border-radius:999px;
+  background:rgba(27,48,88,.34);
+}
+.coll-title-glyph::before { top:12px; }
+.coll-title-glyph span { top:20px; }
+.coll-title-glyph::after { top:28px; }
+.coll-title-copy {
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:.34rem;
+}
+.coll-page-header .page-title {
+  line-height:1;
+  letter-spacing:0;
+}
+.coll-page-header .page-title-accent {
+  background:linear-gradient(135deg, #f4f7ff 0%, var(--gold-light) 48%, #8ab6ff 100%);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.coll-page-header .page-subtitle {
+  margin:0;
+  color:var(--text-muted);
+  font-size:.94rem;
+  line-height:1.35;
+}
+.coll-head-counter {
+  display:inline-flex;
+  align-items:baseline;
+  gap:.36rem;
+  flex:0 0 auto;
+  margin-left:.25rem;
+  padding:.42rem .68rem;
+  color:var(--text-muted);
+  background:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:12px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 8px 20px rgba(0,0,0,.16);
+}
+.coll-head-count {
+  display:inline-flex;
+  align-items:baseline;
+  color:var(--text-soft);
+  font-weight:850;
+  line-height:1;
+}
+.coll-head-count strong {
+  color:var(--gold-light);
+  font-family:'Cinzel', serif;
+  font-size:1.12rem;
+  font-weight:900;
+}
+.coll-head-count span {
+  margin-left:.08rem;
+  color:var(--text-muted);
+  font-size:.82rem;
+  font-weight:800;
+}
+.coll-head-label {
+  color:var(--text-muted);
+  font-size:.76rem;
+  font-weight:750;
+  line-height:1;
+}
+
+[data-theme="light"] .coll-title-glyph {
+  background:linear-gradient(160deg, #fff, #dbe6ff);
+  border-color:rgba(15,23,42,.10);
+  box-shadow:0 10px 22px rgba(15,23,42,.10), inset 0 1px 0 rgba(255,255,255,.9);
+}
+[data-theme="light"] .coll-head-counter {
+  background:linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.52));
+  border-color:rgba(15,23,42,.11);
+  box-shadow:0 8px 20px rgba(15,23,42,.07);
+}
+
+@media (max-width:720px) {
+  .coll-page { padding-inline:1rem; }
+  .coll-title-line { align-items:flex-start; gap:.7rem; }
+  .coll-title-glyph { width:34px; height:39px; flex-basis:34px; }
+  .coll-head-counter {
+    margin-left:calc(34px + .7rem);
+    padding:.38rem .6rem;
+  }
+}
+@media (max-width:420px) {
+  .coll-head-counter { margin-left:0; }
+}
+
 .coll-hint { font-size:.72rem; color:var(--text-dim); margin-left:.4rem; }
 .collection-grid {
   display:grid;

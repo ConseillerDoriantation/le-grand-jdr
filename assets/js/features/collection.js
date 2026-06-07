@@ -4,7 +4,7 @@ import { confirmDelete, trySave, tryUpsert } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc, _nl2br, pageHeaderHtml } from '../shared/html.js';
+import { _esc, _nl2br } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { uploadPng } from '../shared/image-upload.js';
 import { makeSortable } from '../shared/sortable-helper.js';
@@ -36,14 +36,10 @@ export async function renderCollectionPage() {
   STORE.cards = [...cards].sort((a, b) => (a.ordre ?? 999) - (b.ordre ?? 999));
 
   const content = document.getElementById('main-content');
+  const total = STORE.cards.length;
   const unlocked = STORE.cards.filter(c => c.unlocked).length;
 
-  let html = pageHeaderHtml(
-    '🃏 Collection',
-    STORE.cards.length
-      ? `${unlocked}/${STORE.cards.length} carte${STORE.cards.length > 1 ? 's' : ''} débloquée${unlocked > 1 ? 's' : ''}`
-      : 'Cartes à collectionner'
-  );
+  let html = `<section class="coll-page">${_collectionHeaderHtml(unlocked, total)}`;
 
   if (STATE.isAdmin) {
     html += `
@@ -57,12 +53,12 @@ export async function renderCollectionPage() {
 
   if (STORE.cards.length === 0) {
     html += emptyStateHtml('🃏', 'La collection est vide.');
-    content.innerHTML = html;
+    content.innerHTML = `${html}</section>`;
     return;
   }
 
   html += `<div class="collection-grid">${STORE.cards.map(_cardHtml).join('')}</div>`;
-  content.innerHTML = html;
+  content.innerHTML = `${html}</section>`;
 
   // Drag & drop (MJ) → réordonne et persiste l'ordre partagé
   const grid = content.querySelector('.collection-grid');
@@ -74,6 +70,26 @@ export async function renderCollectionPage() {
       onEnd: () => _persistOrder(),
     });
   }
+}
+
+function _collectionHeaderHtml(unlocked, total) {
+  const pct = total > 0 ? Math.round((unlocked / total) * 100) : 0;
+  const counter = total > 0 ? `
+    <div class="coll-head-counter" aria-label="Progression de la collection : ${unlocked} carte${unlocked === 1 ? '' : 's'} débloquée${unlocked === 1 ? '' : 's'} sur ${total}, ${pct}%">
+      <span class="coll-head-count"><strong>${unlocked}</strong><span>/${total}</span></span>
+      <span class="coll-head-label">débloquée${unlocked === 1 ? '' : 's'}</span>
+    </div>` : '';
+
+  return `<header class="page-header coll-page-header">
+    <div class="coll-title-line">
+      <span class="coll-title-glyph" aria-hidden="true"><span></span></span>
+      <div class="coll-title-copy">
+        <div class="page-title"><span class="page-title-accent">Collection</span></div>
+        <div class="page-subtitle">Cartes à collectionner</div>
+      </div>
+      ${counter}
+    </div>
+  </header>`;
 }
 
 // ── HTML d'une carte (recto = visuel, verso = nom + défi) ────────────────────
