@@ -415,6 +415,10 @@ let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
 let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
 let _msOpenNote   = null; // index de la note dépliée (onglet Notes)
+// Filtres locaux des onglets Sac / Sorts (recherche texte + catégorie active).
+// Filtrage DOM in-place (pas de re-render) → le focus de la recherche est conservé.
+let _msInvQuery   = '', _msInvCat  = 'all';
+let _msSortQuery  = '', _msSortCat = 'all';
 
 // ── Timer de session ────────────────────────────────────────────────
 // Stocké dans _session.timer = { startedAt:ms, accumulated:ms, running:bool, label:string }
@@ -13325,6 +13329,96 @@ function _msItemFitsSlot(item, slot, equip, idx) {
 
 function _vttMsTab(tab) { _miniTab = tab; if (_miniUid) _renderMiniSheet(_miniUid); }
 
+// ── Filtres des onglets Sac / Sorts ──────────────────────────────
+// Barre commune : puces de catégorie + champ de recherche. `kind` = 'inv'|'sorts'.
+// `chips` = [{ key, label, color? }] ; la puce active vient de l'état module.
+function _msFilterBar(kind, chips, query) {
+  const activeCat = kind === 'inv' ? _msInvCat : _msSortCat;
+  const catFn     = kind === 'inv' ? '_vttMsInvCat' : '_vttMsSortCat';
+  const searchFn  = kind === 'inv' ? '_vttMsInvSearch' : '_vttMsSortSearch';
+  const clrFn     = kind === 'inv' ? '_vttMsInvClear' : '_vttMsSortClear';
+  const chipsHtml = chips.map(ch =>
+    `<button class="vtt-ms-fchip${activeCat===ch.key?' active':''}"${ch.color?` style="--chip-col:${ch.color}"`:''}
+      data-vtt-fn="${catFn}" data-vtt-args="${ch.key}|$this">${ch.label}</button>`
+  ).join('');
+  return `<div class="vtt-ms-filter" data-kind="${kind}">
+    <div class="vtt-ms-fchips">${chipsHtml}</div>
+    <div class="vtt-ms-fsearch">
+      <span class="vtt-ms-fsearch-ic">🔍</span>
+      <input type="text" class="vtt-ms-fsearch-input" placeholder="Rechercher…"
+        value="${_esc(query)}" data-vtt-fn="${searchFn}" data-vtt-on="input" data-vtt-args="$value">
+      ${query ? `<button class="vtt-ms-fsearch-clr" title="Effacer" data-vtt-fn="${clrFn}">✕</button>` : ''}
+    </div>
+  </div>`;
+}
+
+// Applique le filtre Sac (catégorie + recherche) par show/hide, sans re-render.
+function _msApplyInvFilter() {
+  const q = _msInvQuery.toLowerCase().trim();
+  const groups = document.querySelectorAll('#vtt-mini-panel .vtt-ms-inv-group');
+  let anyVisible = false;
+  groups.forEach(g => {
+    if (_msInvCat !== 'all' && g.dataset.cat !== _msInvCat) { g.style.display = 'none'; return; }
+    let n = 0;
+    g.querySelectorAll('.vtt-ms-inv-item').forEach(it => {
+      const m = !q || (it.dataset.name || '').includes(q);
+      it.style.display = m ? '' : 'none';
+      if (m) n++;
+    });
+    g.style.display = n ? '' : 'none';
+    if (n) anyVisible = true;
+  });
+  _msToggleEmpty('inv', anyVisible || !groups.length);
+}
+
+// Applique le filtre Sorts (catégorie / deck actif + recherche) sans re-render.
+function _msApplySortFilter() {
+  const q = _msSortQuery.toLowerCase().trim();
+  const cards = document.querySelectorAll('#vtt-mini-panel .vtt-ms-spellgrid .cs-spellcard');
+  let anyVisible = false;
+  cards.forEach(card => {
+    const catOk = _msSortCat === 'all'
+      || (_msSortCat === '__deck' ? card.dataset.actif === '1' : card.dataset.cat === _msSortCat);
+    const m = catOk && (!q || (card.dataset.name || '').includes(q));
+    card.style.display = m ? '' : 'none';
+    if (m) anyVisible = true;
+  });
+  _msToggleEmpty('sorts', anyVisible || !cards.length);
+}
+
+function _msToggleEmpty(kind, anyVisible) {
+  const el = document.querySelector(`#vtt-mini-panel .vtt-ms-filter-empty[data-kind="${kind}"]`);
+  if (el) el.style.display = anyVisible ? 'none' : '';
+}
+
+function _msSetActiveChip(kind, btn) {
+  const root = document.querySelector(`#vtt-mini-panel .vtt-ms-filter[data-kind="${kind}"]`);
+  root?.querySelectorAll('.vtt-ms-fchip').forEach(b => b.classList.toggle('active', b === btn));
+}
+
+function _vttMsInvSearch(val)  { _msInvQuery = val || ''; _msApplyInvFilter(); _msSyncClearBtn('inv'); }
+function _vttMsInvCat(cat, btn){ _msInvCat = cat; _msSetActiveChip('inv', btn); _msApplyInvFilter(); }
+function _vttMsInvClear()      { _msInvQuery = ''; if (_miniUid) _renderMiniSheet(_miniUid); }
+function _vttMsSortSearch(val) { _msSortQuery = val || ''; _msApplySortFilter(); _msSyncClearBtn('sorts'); }
+function _vttMsSortCat(cat,btn){ _msSortCat = cat; _msSetActiveChip('sorts', btn); _msApplySortFilter(); }
+function _vttMsSortClear()     { _msSortQuery = ''; if (_miniUid) _renderMiniSheet(_miniUid); }
+
+// Affiche/masque le bouton ✕ de la recherche sans re-render complet (préserve le focus).
+function _msSyncClearBtn(kind) {
+  const query = kind === 'inv' ? _msInvQuery : _msSortQuery;
+  const wrap  = document.querySelector(`#vtt-mini-panel .vtt-ms-filter[data-kind="${kind}"] .vtt-ms-fsearch`);
+  if (!wrap) return;
+  let btn = wrap.querySelector('.vtt-ms-fsearch-clr');
+  if (query && !btn) {
+    btn = document.createElement('button');
+    btn.className = 'vtt-ms-fsearch-clr'; btn.title = 'Effacer'; btn.textContent = '✕';
+    btn.dataset.vttFn = kind === 'inv' ? '_vttMsInvClear' : '_vttMsSortClear';
+    wrap.appendChild(btn);
+  } else if (!query && btn) {
+    btn.remove();
+  }
+}
+
 async function _vttMsEquip(charId, uid, slot, invIndex) {
   if (!_msCanEdit(uid)) return;
   const c = _characters[charId]; if (!c) return;
@@ -13691,7 +13785,8 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
   const toggle = canEdit
     ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${(!canActivate && !s.actif)?'Doit être validé par le MJ pour entrer dans le Deck':(s.actif?'Retirer du deck':'Ajouter au deck')}"></div>`
     : `<div class="toggle ${s.actif?'on':''}"></div>`;
-  return `<article class="cs-spellcard ${s.actif?'is-actif':''}" style="--type-col:${typeCol}">
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''}" style="--type-col:${typeCol}"
+      data-name="${_esc((s.nom||'').toLowerCase())}" data-cat="${_esc(s.catId||'__none')}" data-actif="${s.actif?1:0}">
     <header class="cs-spellcard-head">
       ${toggle}
       <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
@@ -13718,15 +13813,35 @@ function _msTabSorts(c, uid, canEdit) {
   const deckCount = sorts.filter(s => s.actif).length;
   const deckMax = calcDeckMax(c);
   const over = deckCount > deckMax;
+
+  // Barre de filtre : Tous · ⚡ Deck actif · catégories du perso (présentes) · Sans cat.
+  let filterBar = '';
+  if (sorts.length >= 4) {
+    const cats = (c?.sort_cats || []).filter(ct => sorts.some(s => s.catId === ct.id));
+    const chips = [
+      { key:'all',    label:'Tous' },
+      { key:'__deck', label:`⚡ Deck (${deckCount})` },
+      ...cats.map(ct => ({ key: ct.id, label: ct.nom || 'Catégorie', color: ct.couleur })),
+    ];
+    if (sorts.some(s => !s.catId)) chips.push({ key:'__none', label:'Sans cat.' });
+    // Garde-fou : si la catégorie active n'existe plus, on retombe sur "Tous".
+    if (!chips.some(ch => ch.key === _msSortCat)) _msSortCat = 'all';
+    filterBar = _msFilterBar('sorts', chips, _msSortQuery);
+  } else {
+    _msSortCat = 'all'; _msSortQuery = '';
+  }
+
   return `
     <div class="vtt-ms-deckbar${over ? ' is-over' : ''}">
       <span class="vtt-ms-deck-lbl">⚡ Deck</span>
       <span class="vtt-ms-deck-val">${deckCount}<small>/${deckMax}</small></span>
       ${canEdit ? `<span class="vtt-ms-deck-hint">Coche un sort pour l'ajouter / le retirer du deck</span>` : ''}
     </div>
+    ${filterBar}
     <div class="cs-v3"><div class="cs-spellcard-grid vtt-ms-spellgrid">
       ${sorts.map((s, i) => _vttSpellCardHtml(s, i, c, uid, canEdit)).join('')}
-    </div></div>`;
+    </div></div>
+    <div class="vtt-ms-filter-empty" data-kind="sorts" style="display:none">Aucun sort ne correspond.</div>`;
 }
 
 function _msTabInventaire(c, uid, canEdit) {
@@ -13760,14 +13875,25 @@ function _msTabInventaire(c, uid, canEdit) {
     tres_rare:'#b47fff', legendaire:'#f59e0b',
   })[rar] || '#9ca3af';
 
-  let html = '<div class="vtt-ms-inv">';
+  // Barre de filtre : Tous + catégories présentes (apparaît dès 4 objets).
+  const presentCats = Object.entries(cats).filter(([, g]) => g.length);
+  let filterBar = '';
+  if (inv.length >= 4 && presentCats.length > 1) {
+    const chips = [{ key:'all', label:'Tous' },
+      ...presentCats.map(([cat]) => ({ key: cat, label: CAT_LABEL[cat] }))];
+    if (!chips.some(ch => ch.key === _msInvCat)) _msInvCat = 'all';
+    filterBar = _msFilterBar('inv', chips, _msInvQuery);
+  } else { _msInvCat = 'all'; _msInvQuery = ''; }
+
+  let html = filterBar + '<div class="vtt-ms-inv">';
   for (const [cat, groups] of Object.entries(cats)) {
     if (!groups.length) continue;
     const totalUnits = groups.reduce((s,g) => s + g.indices.length, 0);
-    html += `<div class="vtt-ms-inv-cat">
-      <span class="vtt-ms-inv-cat-lbl">${CAT_LABEL[cat]}</span>
-      <span class="vtt-ms-inv-cnt">${totalUnits}</span>
-    </div>`;
+    html += `<div class="vtt-ms-inv-group" data-cat="${cat}">
+      <div class="vtt-ms-inv-cat">
+        <span class="vtt-ms-inv-cat-lbl">${CAT_LABEL[cat]}</span>
+        <span class="vtt-ms-inv-cnt">${totalUnits}</span>
+      </div>`;
     for (const g of groups) {
       const item = g.item;
       const firstIdx = g.indices[0];
@@ -13781,7 +13907,7 @@ function _msTabInventaire(c, uid, canEdit) {
         : (item.typeArmure ? `${item.typeArmure}${item.ca?' · CA +'+item.ca:''}` : '');
       const rarDot = item.rarete
         ? `<span class="vtt-ms-inv-rar" style="background:${_rarColor(item.rarete)}"></span>` : '';
-      html += `<div class="vtt-ms-inv-item${isEq?' is-equipped':''}">
+      html += `<div class="vtt-ms-inv-item${isEq?' is-equipped':''}" data-name="${_esc((item.nom||'').toLowerCase())}">
         ${rarDot}
         ${item.image
           ? `<img class="vtt-ms-inv-img" src="${item.image}" alt="">`
@@ -13806,8 +13932,10 @@ function _msTabInventaire(c, uid, canEdit) {
         </div>`:''}
       </div>`;
     }
+    html += `</div>`; // .vtt-ms-inv-group
   }
   html += '</div>';
+  html += `<div class="vtt-ms-filter-empty" data-kind="inv" style="display:none">Aucun objet ne correspond.</div>`;
   return html;
 }
 
@@ -13981,6 +14109,10 @@ function _renderMiniSheet(uid) {
     ${selectorHtml}
     ${tabBarHtml}
     <div class="vtt-ms-tab-content">${tabHtml}</div>`;
+
+  // Applique le filtre de l'onglet actif sur le DOM fraîchement rendu.
+  if (_miniTab === 'inv')        _msApplyInvFilter();
+  else if (_miniTab === 'sorts') _msApplySortFilter();
 }
 
 function _vttToggleMiniSheet(uid) {
@@ -13997,6 +14129,8 @@ function _vttToggleMiniSheet(uid) {
 
 function _vttSelectMiniChar(uid, charId) {
   _miniCharId = charId;
+  // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
+  _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all';
   _renderMiniSheet(uid);
 }
 
@@ -14132,11 +14266,17 @@ const VTT_ACTIONS = {
   _vttMsDeleteNote,
   _vttMsEquip,
   _vttMsEquipPicker,
+  _vttMsInvCat,
+  _vttMsInvClear,
+  _vttMsInvSearch,
   _vttMsRenameNote,
   _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSetNiveau,
   _vttMsSlotChange,
+  _vttMsSortCat,
+  _vttMsSortClear,
+  _vttMsSortSearch,
   _vttMsTab,
   _vttMsToggleNote,
   _vttMsUnequip,

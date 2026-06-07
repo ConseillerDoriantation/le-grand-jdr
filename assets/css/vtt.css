@@ -3635,6 +3635,40 @@
 /* La mini-fiche est étroite → une seule colonne, cartes un peu plus compactes */
 .cs-v3 .vtt-ms-spellgrid { grid-template-columns: 1fr; gap: 8px; }
 
+/* ── Filtres mini-fiche (Sac / Sorts) : puces de catégorie + recherche ── */
+.vtt-ms-filter { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .5rem; }
+.vtt-ms-fchips { display: flex; flex-wrap: wrap; gap: .25rem; }
+.vtt-ms-fchip {
+  display: inline-flex; align-items: center; gap: .2rem;
+  padding: .2rem .45rem; border-radius: 999px; cursor: pointer;
+  font-family: inherit; font-size: .6rem; font-weight: 700; white-space: nowrap;
+  background: var(--bg-elevated); color: var(--text-dim);
+  border: 1px solid var(--border); transition: color .12s, border-color .12s, background .12s;
+}
+.vtt-ms-fchip:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); }
+.vtt-ms-fchip.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--chip-col, var(--gold)) 18%, transparent);
+  border-color: color-mix(in srgb, var(--chip-col, var(--gold)) 55%, var(--border));
+}
+.vtt-ms-fsearch {
+  display: flex; align-items: center; gap: .35rem;
+  padding: .25rem .45rem; border-radius: 7px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+}
+.vtt-ms-fsearch-ic { font-size: .72rem; opacity: .6; }
+.vtt-ms-fsearch-input {
+  flex: 1; min-width: 0; border: none; background: none; outline: none;
+  font-family: inherit; font-size: .72rem; color: var(--text);
+}
+.vtt-ms-fsearch-input::placeholder { color: var(--text-dim); }
+.vtt-ms-fsearch-clr {
+  border: none; background: none; cursor: pointer; padding: 0 .15rem;
+  font-size: .7rem; color: var(--text-dim); line-height: 1;
+}
+.vtt-ms-fsearch-clr:hover { color: var(--text); }
+.vtt-ms-filter-empty { padding: 1.1rem .6rem; text-align: center; font-size: .72rem; color: var(--text-muted); }
+
 /* ── Inventaire (cards compactes avec image + rareté + actions) ───────── */
 .vtt-ms-inv { display: flex; flex-direction: column; gap: .15rem; }
 .vtt-ms-inv-cat {
