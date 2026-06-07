@@ -1032,6 +1032,12 @@ function _getItemTags(item) {
 
 function _buildTagGroups(items) {
   const uniq = arr => [...new Set(arr)].sort();
+  // Ordre forcé pour certains groupes (sinon alpha). Type armure : du plus lourd au plus léger.
+  const TYPE_ARMURE_ORDER = ['Lourde', 'Intermédiaire', 'Légère'];
+  const orderBy = (arr, ref) => [...new Set(arr)].sort((a, b) => {
+    const ia = ref.indexOf(a), ib = ref.indexOf(b);
+    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b, 'fr');
+  });
   const mk = (label, key, values, color) =>
     values.length ? { label, key, tags: values.map(v => ({ value: `${key}:${v}`, label: v, color })) } : null;
 
@@ -1039,7 +1045,7 @@ function _buildTagGroups(items) {
     mk('Format',      'format',     uniq(items.filter(i => i.format).map(i => i.format)), '#e8b84b'),
     mk('Type arme',   'sousType',   uniq(items.filter(i => i.sousType).map(i => i.sousType)), '#e8b84b'),
     mk('Emplacement', 'slotArmure', uniq(items.filter(i => i.slotArmure).map(i => i.slotArmure)), '#4f8cff'),
-    mk('Type armure', 'typeArmure', uniq(items.filter(i => i.typeArmure).map(i => i.typeArmure)), '#4f8cff'),
+    mk('Type armure', 'typeArmure', orderBy(items.filter(i => i.typeArmure).map(i => i.typeArmure), TYPE_ARMURE_ORDER), '#4f8cff'),
     mk('Bijou',       'slotBijou',  uniq(items.filter(i => i.slotBijou).map(i => i.slotBijou)), '#c084fc'),
     mk('Type',        'type',       uniq(items.filter(i => i.type && !i.format && !i.slotArmure && !i.slotBijou).map(i => i.type)), 'var(--text-muted)'),
   ].filter(Boolean);
@@ -4137,8 +4143,21 @@ function _renderAtelierItems() {
   const sortMode = _atelier.sort || 'rarity';
   const byName = (a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr');
   const byRare = (a, b) => (_getRareteNum(b.rarete) - _getRareteNum(a.rarete)) || byName(a, b);
-  // Type : sousType (arme) → typeArmure/slotArmure (armure) → slotBijou → type libre
-  const typeOf = (it) => _norm(it.sousType || it.typeArmure || it.slotArmure || it.slotBijou || it.type || '');
+  // Type : tri selon les types *structurés* existants, dans leur ordre logique —
+  // arme → format (ordre des _weaponFormats : Arme 1M CaC Phy., 2M CaC Phy.…),
+  // armure → typeArmure (Légère/Intermédiaire/Lourde), sinon slotBijou / type libre.
+  // Renvoie [rang, libellé] : rang défini d'abord, puis alpha pour le reste.
+  const ARMURE_ORDER = TEMPLATES.armure.fields.find(f => f.id === 'typeArmure')?.options || [];
+  const typeRank = (it) => {
+    if (it.format)     { const i = _weaponFormats.findIndex(f => f.label === it.format); return [i < 0 ? 999 : i, it.format]; }
+    if (it.sousType)   return [998, it.sousType]; // arme sans format défini → après les formats connus
+    if (it.typeArmure) { const i = ARMURE_ORDER.indexOf(it.typeArmure); return [i < 0 ? 999 : i, it.typeArmure]; }
+    return [999, it.slotArmure || it.slotBijou || it.type || ''];
+  };
+  const byType = (a, b) => {
+    const [ra, la] = typeRank(a), [rb, lb] = typeRank(b);
+    return (ra - rb) || la.localeCompare(lb, 'fr') || byRare(a, b);
+  };
   // Dispo : illimité (∞) en tête, puis stock décroissant, épuisé (0) en bas
   const stockVal = (it) => {
     const d = (it.dispo !== undefined && it.dispo !== '' && it.dispo !== null) ? parseInt(it.dispo) : null;
@@ -4148,7 +4167,7 @@ function _renderAtelierItems() {
     if (sortMode === 'fav')   { const d = (_isFav(a.id)?0:1) - (_isFav(b.id)?0:1); if (d) return d; return byRare(a, b); }
     if (sortMode === 'price') return ((parseFloat(a.prix)||0) - (parseFloat(b.prix)||0)) || byName(a, b);
     if (sortMode === 'name')  return byName(a, b);
-    if (sortMode === 'type')  return typeOf(a).localeCompare(typeOf(b), 'fr') || byRare(a, b);
+    if (sortMode === 'type')  return byType(a, b);
     if (sortMode === 'dispo') return (stockVal(b) - stockVal(a)) || byRare(a, b);
     return byRare(a, b); // 'rarity' (défaut)
   }).slice(0, 40);
