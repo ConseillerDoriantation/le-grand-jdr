@@ -1118,53 +1118,52 @@ export async function openSortModal(idx, s) {
       <div class="sh-admin-head-ico">${idx>=0?'✏️':'✨'}</div>
       <div class="sh-admin-head-title">
         <h2>${idx>=0?'Modifier le sort':'Nouveau sort'}</h2>
-        <small>Forge les runes, choisis le noyau élémentaire, affine les effets.</small>
+        <small>Construis le sort étape par étape : identité, noyau, runes, puis réglages.</small>
       </div>
       <button class="sh-admin-close" data-action="closeModalDirect" title="Fermer">✕</button>
     </div>
     <div class="sh-admin-body">
      <div class="cs-spell-forge">
-    <!-- ⓪ Aperçu live STICKY — toujours visible pendant l'édition -->
-    <div class="cs-spell-preview cs-spell-preview--sticky">
-      <div class="cs-spell-preview-title">📋 Aperçu — effets calculés <span class="cs-spell-preview-pm">Coût : <strong id="s-pm-display">0</strong> PM</span></div>
-      <div id="s-preview-body" class="cs-spell-preview-body"></div>
-      <input type="hidden" id="s-pm" value="${s?.pm||2}">
-    </div>
+    <!-- ① Essentiel : tout ce qui identifie le sort avant la mécanique -->
+    <section class="cs-spell-card cs-spell-card--identity" aria-label="Essentiel du sort">
+      <div class="cs-spell-card-head"><span>1</span><div><b>Essentiel</b><small>Nom, catégorie et intention du sort.</small></div></div>
+      <div class="cs-spell-identity">
+        <div class="cs-spell-identity-field"><label>Icône</label>
+          <button type="button" id="s-icon-btn" class="cs-spell-icon-btn"
+            data-action="_toggleSortIconPicker"
+            title="Cliquer pour choisir une icône">${s?.icon || '🔮'}</button>
+          <input type="hidden" id="s-icon" value="${s?.icon||''}">
+          <div id="s-icon-picker" class="cs-spell-icon-picker" style="display:none"></div>
+        </div>
+        <div class="cs-spell-identity-field cs-spell-identity-field--name"><label>Nom du sort</label>
+          <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu, Vague de soin…">
+        </div>
+        <div class="cs-spell-identity-field"><label>Catégorie</label>
+          <select class="input-field" id="s-catid">
+            <option value="">— Aucune —</option>
+            ${(_modalChar()?.sort_cats||[]).map(cat =>
+              `<option value="${cat.id}" ${s?.catId===cat.id?'selected':''}>${cat.nom}</option>`
+            ).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="cs-spell-inline-row cs-spell-type-row">
+        <span class="cs-spell-inline-label" title="Optionnel · plusieurs possibles · cliquer pour activer/désactiver">Type</span>
+        <div class="cs-spell-type-buttons">${typeBtnsHtml}</div>
+      </div>
+      <div class="form-group cs-spell-desc">
+        <label>Description / effet libre <span>narration, conditions spéciales, fluff</span></label>
+        <textarea class="input-field" id="s-effet" rows="2" placeholder="Décris brièvement le sort, son apparence, ses conditions particulières…">${s?.effet||''}</textarea>
+      </div>
+    </section>
 
-    <!-- ① Identité — bandeau aligné (icône + nom + catégorie) -->
-    <div class="cs-spell-identity">
-      <div class="cs-spell-identity-field"><label>Icône</label>
-        <button type="button" id="s-icon-btn" class="cs-spell-icon-btn"
-          data-action="_toggleSortIconPicker"
-          title="Cliquer pour choisir une icône">${s?.icon || '🔮'}</button>
-        <input type="hidden" id="s-icon" value="${s?.icon||''}">
-        <div id="s-icon-picker" class="cs-spell-icon-picker" style="display:none"></div>
-      </div>
-      <div class="cs-spell-identity-field cs-spell-identity-field--name"><label>Nom du sort</label>
-        <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu, Vague de soin…">
-      </div>
-      <div class="cs-spell-identity-field"><label>Catégorie</label>
-        <select class="input-field" id="s-catid">
-          <option value="">— Aucune —</option>
-          ${(_modalChar()?.sort_cats||[]).map(cat =>
-            `<option value="${cat.id}" ${s?.catId===cat.id?'selected':''}>${cat.nom}</option>`
-          ).join('')}
-        </select>
-      </div>
-    </div>
-
-   <!-- ═══ GRILLE 2 COLONNES (desktop) — gauche: construction · droite: méta/utilitaires ═══ -->
-   <div class="cs-spell-grid">
-    <div class="cs-spell-grid-col cs-spell-grid-col--left">
-    <!-- ② Type — bande inline (déselectable, plusieurs possibles, optionnel) -->
-    <div class="cs-spell-inline-row">
-      <span class="cs-spell-inline-label" title="Optionnel · plusieurs possibles · cliquer pour activer/désactiver">🏷️ Type</span>
-      <div style="display:flex;gap:.25rem;flex:1">${typeBtnsHtml}</div>
-    </div>
+   <!-- Atelier principal : construction à gauche, résumé et réglages à droite -->
+   <div class="cs-spell-layout">
+    <main class="cs-spell-main">
 
     <!-- ③ Noyau — section visuelle dédiée -->
     <div class="cs-spell-section cs-spell-section--noyau">
-      <div class="cs-spell-section-title">🌀 Rune noyau élémentaire <span class="cs-spell-section-hint">cœur du sort · 2 PM · obligatoire · 1 ou plusieurs éléments (coût identique, choix au lancement)</span></div>
+      <div class="cs-spell-section-title"><span class="cs-step-pill">2</span> Rune noyau <span class="cs-spell-section-hint">obligatoire · 2 PM · un ou plusieurs éléments</span></div>
       <div class="cs-noyau-grid" id="noyau-grid">
         ${NOYAUX.length ? NOYAUX.map(n => {
           const selected = _noyauIdsEdit.includes(n.id);
@@ -1184,11 +1183,13 @@ export async function openSortModal(idx, s) {
 
     <!-- ④ Runes — Forge -->
     <div class="cs-spell-section cs-spell-section--runes">
-      <div class="cs-spell-section-title">🔮 Runes <span class="cs-spell-section-hint">+2 PM par rune · cumulables · chaînage par même rune</span></div>
+      <div class="cs-spell-section-title"><span class="cs-step-pill">3</span> Runes d’effet <span class="cs-spell-section-hint">+2 PM par rune · cumulables · chaînage possible</span></div>
       <div id="cs-runes-section">${runesSectionHtml}</div>
     </div>
 
-    <!-- ⑤ Champs conditionnels auto-affichés -->
+    <!-- ④ Effets générés par les choix précédents -->
+    <section class="cs-spell-effects-panel" aria-label="Effets générés par le sort">
+      <div class="cs-spell-effects-title"><span class="cs-step-pill">4</span><div><b>Effets actifs</b><small>Les options apparaissent uniquement quand les runes ou types concernés sont présents.</small></div></div>
 
     <!-- Dégâts — visible si type offensif (auto-val avec toggle Custom) ;
          masqué quand Affliction est présente (la Puissance scale le DoT à la place) -->
@@ -1452,14 +1453,21 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
-    </div><!-- /grid-col--left -->
+    </section><!-- /cs-spell-effects-panel -->
+    </main>
 
-    <div class="cs-spell-grid-col cs-spell-grid-col--right">
-    <!-- ⑦ Description libre -->
-    <div class="form-group cs-spell-desc">
-      <label>📝 Description / Effet libre <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">narration, conditions spéciales, fluff</span></label>
-      <textarea class="input-field" id="s-effet" rows="2" placeholder="Décris brièvement le sort, son apparence, ses conditions particulières…">${s?.effet||''}</textarea>
-    </div>
+    <aside class="cs-spell-side" aria-label="Résumé et réglages du sort">
+      <div class="cs-spell-side-card cs-spell-side-card--preview">
+        <div class="cs-spell-preview cs-spell-preview--sticky">
+          <div class="cs-spell-preview-title">Résumé jouable <span class="cs-spell-preview-pm">Coût : <strong id="s-pm-display">0</strong> PM</span></div>
+          <div id="s-preview-body" class="cs-spell-preview-body"></div>
+          <input type="hidden" id="s-pm" value="${s?.pm||2}">
+        </div>
+      </div>
+
+      <details class="cs-spell-advanced" open>
+        <summary><span>Réglages</span><small>Durée et portée optionnelles</small></summary>
+        <div class="cs-spell-advanced-body">
 
     <!-- ⑧ Durée — auto-calculée (base 2 tours + Durée scalée), override possible.
          Visible pour tous les sorts persistants (Enchant, Affliction, Protection CA, rune Durée). -->
@@ -1475,7 +1483,7 @@ export async function openSortModal(idx, s) {
     </div>
 
     <!-- ⑧b Portée — override de la portée de l'arme (laisser vide = portée d'arme) -->
-    <div class="form-group">
+    <div class="form-group cs-spell-side-setting">
       <label>🎯 Portée <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">cases — laisser vide pour utiliser la portée de l'arme</span></label>
       <div style="display:flex;gap:.4rem;align-items:center">
         <input type="number" class="input-field" id="s-portee" min="0" max="50"
@@ -1483,6 +1491,13 @@ export async function openSortModal(idx, s) {
         <span style="font-size:.8rem;color:var(--text-dim)">cases</span>
       </div>
     </div>
+
+        </div>
+      </details>
+
+      <details class="cs-spell-advanced cs-spell-advanced--mj" ${STATE.isAdmin ? 'open' : ''}>
+        <summary><span>Validation MJ</span><small>Statut, notes et exceptions</small></summary>
+        <div class="cs-spell-advanced-body">
 
     <!-- ⑩ Limites MJ (équilibrage + overrides) -->
     <div class="cs-mj-limits">
@@ -1534,9 +1549,11 @@ export async function openSortModal(idx, s) {
         </label>
       </div>` : ''}
     </div>
+        </div>
+      </details>
 
-    </div><!-- /grid-col--right -->
-   </div><!-- /cs-spell-grid -->
+    </aside>
+   </div><!-- /cs-spell-layout -->
 
    </div><!-- /cs-spell-forge -->
     </div><!-- /sh-admin-body -->
