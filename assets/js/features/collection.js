@@ -4,7 +4,7 @@ import { confirmDelete, trySave, tryUpsert } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc, _nl2br } from '../shared/html.js';
+import { _esc, _nl2br, _trunc } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { uploadPng } from '../shared/image-upload.js';
 import { makeSortable } from '../shared/sortable-helper.js';
@@ -39,17 +39,9 @@ export async function renderCollectionPage() {
   const total = STORE.cards.length;
   const unlocked = STORE.cards.filter(c => c.unlocked).length;
 
-  let html = `<section class="coll-page">${_collectionHeaderHtml(unlocked, total)}`;
+  let html = `<section class="coll-page${STATE.isAdmin ? ' coll-page--admin' : ''}">${_collectionHeaderHtml(unlocked, total)}`;
 
-  if (STATE.isAdmin) {
-    html += `
-      <div class="admin-section">
-        <div class="admin-label">Gestion Admin</div>
-        <button class="btn btn-gold btn-sm" data-action="openCollectionModal">+ Ajouter une carte</button>
-        <button class="btn btn-outline btn-sm" data-action="openTemplateModal">🖼️ Dos de carte</button>
-        <span class="coll-hint">↔ Glisse-dépose une carte pour la réordonner</span>
-      </div>`;
-  }
+  if (STATE.isAdmin) html += _collectionAdminPanelHtml(unlocked, total);
 
   if (STORE.cards.length === 0) {
     html += emptyStateHtml('🃏', 'La collection est vide.');
@@ -57,17 +49,19 @@ export async function renderCollectionPage() {
     return;
   }
 
-  html += `<div class="collection-grid">${STORE.cards.map(_cardHtml).join('')}</div>`;
+  html += STATE.isAdmin
+    ? `<div class="coll-admin-grid" aria-label="Gestion MJ des cartes de collection">${STORE.cards.map(_adminCardHtml).join('')}</div>`
+    : `<div class="collection-grid">${STORE.cards.map(_cardHtml).join('')}</div>`;
   content.innerHTML = `${html}</section>`;
 
-  // Drag & drop (MJ) → réordonne et persiste l'ordre partagé
-  const grid = content.querySelector('.collection-grid');
+  // Drag & drop (MJ) → réordonne et persiste l'ordre partagé.
+  const grid = content.querySelector('.coll-admin-grid');
   if (grid && STATE.isAdmin) {
     _sortable = makeSortable(grid, {
       prefix: 'coll',
-      draggable: '.coll-card-wrapper',
-      handle: '.coll-card',
-      onEnd: () => _persistOrder(),
+      draggable: '.coll-admin-card',
+      handle: '.coll-admin-drag',
+      onEnd: () => _persistOrder('.coll-admin-grid .coll-admin-card'),
     });
   }
 }
@@ -90,6 +84,69 @@ function _collectionHeaderHtml(unlocked, total) {
       ${counter}
     </div>
   </header>`;
+}
+
+function _collectionAdminPanelHtml(unlocked, total) {
+  const locked = Math.max(total - unlocked, 0);
+  const missingArt = STORE.cards.filter(c => !c.imageUrl).length;
+  const pct = total > 0 ? Math.round((unlocked / total) * 100) : 0;
+
+  return `
+    <section class="coll-admin-panel" aria-label="Pilotage MJ de la collection">
+      <div class="coll-admin-panel-copy">
+        <div class="coll-admin-kicker">Mode MJ</div>
+        <h2>Atelier de collection</h2>
+        <p>Visuels, défis et révélations.</p>
+      </div>
+      <div class="coll-admin-stats" aria-label="Résumé de la collection">
+        <span><strong>${unlocked}</strong> débloquée${unlocked === 1 ? '' : 's'}</span>
+        <span><strong>${locked}</strong> verrouillée${locked === 1 ? '' : 's'}</span>
+        <span><strong>${pct}%</strong> progression</span>
+        ${missingArt ? `<span class="is-warn"><strong>${missingArt}</strong> sans image</span>` : ''}
+      </div>
+      <div class="coll-admin-actions" aria-label="Actions de gestion">
+        <button class="btn btn-gold btn-sm" data-action="openCollectionModal">+ Ajouter</button>
+        <button class="btn btn-outline btn-sm" data-action="openTemplateModal">Dos de carte</button>
+      </div>
+    </section>`;
+}
+
+function _adminCardHtml(c, index) {
+  const title = c.nom || 'Carte';
+  const desc = c.description ? _trunc(c.description, 118) : 'Aucun défi renseigné.';
+  const hasFront = !!c.imageUrl;
+  const hasTemplate = !!STORE.templateUrl;
+  const art = hasFront
+    ? `<img src="${_esc(c.imageUrl)}" loading="lazy" decoding="async" alt="${_esc(title)}">`
+    : hasTemplate
+      ? `<img src="${_esc(STORE.templateUrl)}" loading="lazy" decoding="async" alt="Dos de carte"><span class="coll-admin-art-note">Recto manquant</span>`
+      : `<div class="coll-admin-empty-art"><span>${_esc(c.emoji || '🃏')}</span><small>Recto manquant</small></div>`;
+  const artClass = `coll-admin-art${hasFront ? '' : ' coll-admin-art--template'}`;
+  const unlockLabel = c.unlocked ? 'Débloquée' : 'Verrouillée';
+  const unlockAction = c.unlocked ? 'Verrouiller' : 'Débloquer';
+
+  return `
+    <article class="coll-admin-card ${c.unlocked ? 'is-unlocked' : 'is-locked'}${c.imageUrl ? '' : ' is-missing-art'}" data-id="${c.id}" data-collection-id="${c.id}">
+      <span class="coll-admin-drag" title="Réordonner" aria-hidden="true">↕</span>
+      <button class="${artClass}" type="button" data-action="presentCard" data-id="${c.id}" data-stop-propagation aria-label="Présenter ${_esc(title)} en grand">
+        ${art}
+      </button>
+      <div class="coll-admin-body">
+        <div class="coll-admin-row">
+          <span class="coll-admin-order">#${String(index + 1).padStart(2, '0')}</span>
+          <span class="coll-admin-status ${c.unlocked ? 'is-on' : 'is-off'}">${unlockLabel}</span>
+          ${c.descMasquee ? '<span class="coll-admin-status is-secret">Défi secret</span>' : ''}
+        </div>
+        <h3 title="${_esc(title)}">${_esc(title)}</h3>
+        <p class="coll-admin-desc ${c.description ? '' : 'is-empty'}">${_esc(desc)}</p>
+        <div class="coll-admin-card-actions">
+          <button class="btn btn-outline btn-sm" data-action="presentCard" data-id="${c.id}" data-stop-propagation>Présenter</button>
+          <button class="btn btn-outline btn-sm" data-action="editCard" data-id="${c.id}" data-stop-propagation>Modifier</button>
+          <button class="btn btn-outline btn-sm" data-action="toggleUnlock" data-id="${c.id}" data-stop-propagation>${unlockAction}</button>
+          <button class="btn-icon coll-admin-delete" data-action="deleteCard" data-id="${c.id}" data-stop-propagation title="Supprimer" aria-label="Supprimer ${_esc(title)}">×</button>
+        </div>
+      </div>
+    </article>`;
 }
 
 // ── HTML d'une carte (recto = visuel, verso = nom + défi) ────────────────────
@@ -171,7 +228,7 @@ function presentCard(id) {
   if (!c) return;
   const seeFace = _canSeeFace(c);
   const masked  = _challengeMasked(c);
-  const img     = seeFace ? (c.imageUrl || '') : (STORE.templateUrl || '');
+  const img     = seeFace ? (c.imageUrl || (STATE.isAdmin ? (STORE.templateUrl || '') : '')) : (STORE.templateUrl || '');
   const title   = seeFace ? (c.nom || 'Carte') : 'Carte mystère';
 
   const art = img
@@ -211,8 +268,8 @@ function presentCard(id) {
 }
 
 // ── Réordonnancement (persiste l'ordre seulement pour les cartes déplacées) ──
-async function _persistOrder() {
-  const ids = [...document.querySelectorAll('.collection-grid .coll-card-wrapper')].map(el => el.dataset.id);
+async function _persistOrder(selector = '.collection-grid .coll-card-wrapper') {
+  const ids = [...document.querySelectorAll(selector)].map(el => el.dataset.id);
   const writes = [];
   ids.forEach((id, idx) => {
     const card = STORE.cards.find(c => c.id === id);
