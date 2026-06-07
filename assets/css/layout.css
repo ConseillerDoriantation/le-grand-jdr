@@ -181,7 +181,10 @@ html, body { min-height:100%; }
   border-radius: 0;
   background: var(--bg-panel);
   z-index: var(--z-sidebar);
-  transition: width .22s cubic-bezier(.4,0,.2,1), box-shadow .22s ease;
+  transition:
+    width .52s cubic-bezier(.16,1,.3,1),
+    box-shadow .44s ease,
+    border-color .44s ease;
 }
 /* Déploiement : au survol ou quand le focus clavier entre dans la barre.
    La barre est `fixed` → elle se déploie EN SUPERPOSITION, le contenu ne bouge pas. */
@@ -192,7 +195,10 @@ html, body { min-height:100%; }
 }
 /* Réduit les animations si l'utilisateur le demande */
 @media (prefers-reduced-motion: reduce) {
-  .sidebar { transition: none; }
+  .sidebar,
+  .sidebar *,
+  .bottom-nav,
+  .more-menu { animation: none !important; transition: none !important; }
 }
 /* Le contenu ne réserve que la largeur du rail (la barre déployée flotte au-dessus) */
 .app-layout { padding-left: var(--rail-w); }
@@ -1976,7 +1982,10 @@ select.input-field, select.input-sm { cursor:pointer; }
 .sidebar .sidebar-theme-btn,
 .sidebar .sidebar-section-label .sl-text {
   opacity: 0;
-  transition: opacity .13s ease;
+  transform: translateX(-7px);
+  transition:
+    opacity .34s ease .08s,
+    transform .42s cubic-bezier(.16,1,.3,1) .04s;
 }
 .sidebar:hover .nav-label,            .sidebar:focus-within .nav-label,
 .sidebar:hover .sidebar-brand-id,     .sidebar:focus-within .sidebar-brand-id,
@@ -1988,7 +1997,10 @@ select.input-field, select.input-sm { cursor:pointer; }
 .sidebar:hover .sidebar-profile-logout, .sidebar:focus-within .sidebar-profile-logout,
 .sidebar:hover .sidebar-theme-btn,    .sidebar:focus-within .sidebar-theme-btn,
 .sidebar:hover .sidebar-section-label .sl-text,
-.sidebar:focus-within .sidebar-section-label .sl-text { opacity: 1; }
+.sidebar:focus-within .sidebar-section-label .sl-text {
+  opacity: 1;
+  transform: translateX(0);
+}
 
 /* ── Lignes de nav : pastille pleine largeur, icône centrée dans le rail ── */
 .sidebar .nav-item {
@@ -2091,7 +2103,9 @@ select.input-field, select.input-sm { cursor:pointer; }
   margin: 8px 0 0;
   padding: 0 18px;
   overflow: hidden;
-  transition: height .14s ease;
+  transition:
+    height .42s cubic-bezier(.16,1,.3,1),
+    padding .42s cubic-bezier(.16,1,.3,1);
 }
 .sidebar:hover .sidebar-section-label,
 .sidebar:focus-within .sidebar-section-label {
@@ -2099,9 +2113,18 @@ select.input-field, select.input-sm { cursor:pointer; }
   padding: 10px 18px 4px;
 }
 /* Masque le marqueur losange des en-têtes quand la barre est repliée */
-.sidebar .sidebar-section-label::before { opacity: 0; transition: opacity .13s ease; }
+.sidebar .sidebar-section-label::before {
+  opacity: 0;
+  transform: rotate(45deg) scale(.82);
+  transition:
+    opacity .32s ease .08s,
+    transform .40s cubic-bezier(.16,1,.3,1) .04s;
+}
 .sidebar:hover .sidebar-section-label::before,
-.sidebar:focus-within .sidebar-section-label::before { opacity: .85; }
+.sidebar:focus-within .sidebar-section-label::before {
+  opacity: .85;
+  transform: rotate(45deg) scale(1);
+}
 
 /* Après une navigation : on force le repli même si la souris/focus reste sur la
    barre (la classe est retirée au prochain mouseleave → le survol refonctionne).
@@ -2138,6 +2161,8 @@ select.input-field, select.input-sm { cursor:pointer; }
 .sidebar.nav-collapse:hover .sidebar-section-label::before,
 .sidebar.nav-collapse:focus-within .sidebar-section-label::before {
   opacity: 0;
+  transform: translateX(-7px);
+  transition-delay: 0s;
 }
 .sidebar.nav-collapse:hover .sidebar-section-label,
 .sidebar.nav-collapse:focus-within .sidebar-section-label {

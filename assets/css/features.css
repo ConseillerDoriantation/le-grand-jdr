@@ -2388,51 +2388,183 @@ body.ach-dragging * { cursor:grabbing !important; }
   .tl-item .tl-card::before, .tl-item .tl-card::after { display:none; }
 }
 
-/* Collection */
-.collection-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap: 32px; }
-.coll-card { perspective: 600px; cursor: pointer; background: transparent; overflow: hidden; width:100%; aspect-ratio:3/4; position:relative; }
-.coll-card-inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 0.5s ease; }
+/* ══════════════════════════════════════════════════════════════════════
+   COLLECTION — cartes à collectionner (flip recto/verso, drag, présentation)
+   ══════════════════════════════════════════════════════════════════════ */
+.coll-hint { font-size:.72rem; color:var(--text-dim); margin-left:.4rem; }
+.collection-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+  gap: 28px 22px;
+  align-items:start;
+}
+
+.coll-card-wrapper { position: relative; display:flex; flex-direction:column; gap:.5rem; }
+
+/* La carte : perspective + flip 3D */
+.coll-card {
+  position:relative;
+  width:100%;
+  aspect-ratio: 5 / 7;
+  perspective: 1200px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  transition: transform .25s cubic-bezier(.22,.61,.36,1);
+}
+.coll-card:hover { transform: translateY(-6px); }
+.coll-card-inner {
+  position:relative; width:100%; height:100%;
+  transform-style: preserve-3d;
+  transition: transform .6s cubic-bezier(.22,.61,.36,1);
+}
 .coll-card.flipped .coll-card-inner { transform: rotateY(180deg); }
+
 .coll-card-front,
 .coll-card-back {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  border-radius: var(--radius);
-  overflow: hidden;
+  position:absolute; inset:0;
+  border-radius: 16px;
+  overflow:hidden;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+  border:1px solid var(--border-md);
+  box-shadow: 0 10px 26px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05);
 }
-.coll-card-front { transform: rotateY(0deg); z-index: 2; }
-.coll-card-back { transform: rotateY(180deg); z-index: 1; }
-.coll-card:hover { transform:translateY(-3px) scale(1.02) }
-.coll-img {
-  width:100%;
-  height:100%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:3rem;
+.coll-card-front {
+  transform: rotateY(0deg);
+  display:flex; align-items:center; justify-content:center;
+  background: radial-gradient(120% 100% at 50% 0%, rgba(157,111,255,.10), transparent 60%), var(--bg-card2);
 }
-.coll-img img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.coll-card-back {
+  transform: rotateY(180deg);
+  background: linear-gradient(160deg, var(--bg-elevated), var(--bg-card2));
 }
-.coll-name { padding:0.6rem 0.4rem; font-size:0.72rem; color:var(--text-muted); font-weight:500; }
-.coll-card-wrapper { position: relative; }
+/* Carte débloquée : liseré doré/arcane discret pour la mettre en valeur */
+.coll-card.unlocked .coll-card-front { border-color: rgba(212,165,68,.45); box-shadow: 0 10px 26px rgba(0,0,0,.42), 0 0 16px rgba(212,165,68,.14), inset 0 1px 0 rgba(255,255,255,.06); }
+.coll-card.unlocked:hover .coll-card-front { box-shadow: 0 16px 34px rgba(0,0,0,.5), 0 0 26px rgba(212,165,68,.28), inset 0 1px 0 rgba(255,255,255,.08); }
+/* Carte verrouillée : visuel atténué (mystère) */
+.coll-card.locked .coll-card-front img { filter: grayscale(.5) brightness(.62) contrast(.95); }
+
+.coll-card-front img { width:100%; height:100%; object-fit:cover; display:block; }
+.coll-emoji { font-size:3.4rem; line-height:1; filter: drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
+.coll-emoji--locked { opacity:.5; }
+
+/* Brillance qui balaie au survol */
+.coll-shine {
+  position:absolute; inset:0; pointer-events:none; border-radius:inherit;
+  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.16) 47%, rgba(255,255,255,.04) 53%, transparent 70%);
+  background-size: 250% 250%;
+  background-position: 120% 0;
+  opacity:0;
+  transition: opacity .2s ease;
+}
+.coll-card:hover .coll-shine { opacity:1; animation: coll-shine-sweep 1.1s ease; }
+@keyframes coll-shine-sweep { from { background-position:120% 0; } to { background-position:-40% 0; } }
+
+/* Verso : panneau d'infos */
+.coll-back-info {
+  width:100%; height:100%;
+  display:flex; flex-direction:column; gap:.35rem;
+  padding: 1rem .95rem;
+  text-align:left;
+  overflow:hidden;
+}
+.coll-back-title {
+  font-family:'Cinzel', serif; font-size:1rem; font-weight:700; line-height:1.2;
+  color:var(--text);
+}
+.coll-back-label {
+  font-size:.56rem; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--gold); opacity:.85; font-weight:700; margin-top:.15rem;
+}
+.coll-defi {
+  font-size:.82rem; line-height:1.45; color:var(--text-soft);
+  overflow-y:auto; flex:1; padding-right:2px;
+}
+.coll-defi--masked { color:var(--arcane); font-style:italic; }
+.coll-defi--empty  { color:var(--text-dim); font-style:italic; }
+.coll-back-info--mystery { align-items:center; justify-content:center; text-align:center; gap:.5rem; }
+.coll-back-ic { font-size:2.4rem; opacity:.55; }
+.coll-back-info--mystery .coll-back-title { font-size:.95rem; color:var(--text-soft); }
+.coll-back-sub { font-size:.72rem; color:var(--text-dim); }
+
+/* Badges d'état (MJ) en haut à gauche de la carte */
+.coll-badge {
+  position:absolute; top:8px; left:8px; z-index:3;
+  font-size:.74rem; line-height:1;
+  background:rgba(0,0,0,.55); border:1px solid var(--border-md);
+  border-radius:8px; padding:3px 5px; backdrop-filter:blur(4px);
+}
+.coll-badge--masked { left:auto; right:8px; }
+
+/* Pied : nom + bouton présenter */
+.coll-card-foot { display:flex; align-items:center; gap:.4rem; padding:0 2px; }
+.coll-name {
+  flex:1; min-width:0; font-size:.82rem; font-weight:600; color:var(--text-soft);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.coll-present-btn {
+  flex-shrink:0; width:28px; height:28px; border-radius:8px; cursor:pointer;
+  display:grid; place-items:center; font-size:.85rem;
+  background:var(--bg-elevated); border:1px solid var(--border-md); color:var(--text-muted);
+  transition: color .14s, border-color .14s, background .14s;
+}
+.coll-present-btn:hover { color:var(--gold); border-color:rgba(212,165,68,.5); background:var(--bg-card2); }
+
+/* Boutons admin (apparaissent au survol de la carte) */
 .coll-admin-btns {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: flex;
-  gap: 4px;
-  z-index: 100;
+  position:absolute; top:8px; right:8px; z-index:4;
+  display:flex; gap:4px; opacity:0; transform:translateY(-4px);
+  transition: opacity .15s ease, transform .15s ease;
 }
-.coll-admin-btns button { pointer-events: auto; background-color: #111827; transition: background-color 0.2s ease; }
-.coll-admin-btns button:hover { background-color: #1b2432; }
+.coll-card-wrapper:hover .coll-admin-btns,
+.coll-card-wrapper:focus-within .coll-admin-btns { opacity:1; transform:none; }
+.coll-admin-btns .btn-icon {
+  background:rgba(8,13,21,.78); border:1px solid var(--border-md); backdrop-filter:blur(4px);
+}
+.coll-admin-btns .btn-icon:hover { background:var(--bg-elevated); }
+
+/* Drag & drop */
+.coll-sortable-ghost  { opacity:.35; }
+.coll-sortable-chosen .coll-card { box-shadow:0 0 0 2px var(--arcane); border-radius:16px; }
+.coll-sortable-drag   { opacity:.95; }
+
+/* Modale d'édition : check + hint */
+.coll-modal-hint { font-size:.82rem; color:var(--text-muted); margin:0 0 .8rem; line-height:1.5; }
+.coll-check { display:flex; align-items:flex-start; gap:.5rem; margin:-.2rem 0 1rem; font-size:.84rem; color:var(--text-soft); cursor:pointer; }
+.coll-check input { margin-top:.18rem; flex-shrink:0; }
+.coll-check em { color:var(--text-dim); font-style:normal; font-size:.76rem; }
+
+/* ── Présentation plein cadre ── */
+.modal:has(.coll-present) { max-width: 760px; width: min(92vw, 760px); }
+.coll-present { display:grid; grid-template-columns: minmax(0, 280px) 1fr; gap:1.4rem; align-items:start; }
+.coll-present-card {
+  aspect-ratio:5/7; border-radius:18px; overflow:hidden; position:relative;
+  border:1px solid var(--border-md);
+  box-shadow:0 18px 50px rgba(0,0,0,.55);
+  animation: coll-present-in .4s cubic-bezier(.22,.61,.36,1) both;
+}
+.coll-present-card.unlocked { border-color:rgba(212,165,68,.5); box-shadow:0 18px 50px rgba(0,0,0,.55), 0 0 32px rgba(212,165,68,.22); }
+@keyframes coll-present-in { from { opacity:0; transform: translateY(14px) rotateX(8deg) scale(.96); } to { opacity:1; transform:none; } }
+.coll-present-art { width:100%; height:100%; display:flex; align-items:center; justify-content:center; background: radial-gradient(120% 100% at 50% 0%, rgba(157,111,255,.12), transparent 60%), var(--bg-card2); position:relative; }
+.coll-present-art img { width:100%; height:100%; object-fit:cover; }
+.coll-present-card.locked .coll-present-art img { filter:grayscale(.5) brightness(.62); }
+.coll-present-info { display:flex; flex-direction:column; gap:.6rem; min-width:0; }
+.coll-present-head { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
+.coll-present-name { font-family:'Cinzel', serif; font-size:1.4rem; font-weight:700; margin:0; color:var(--text); }
+.coll-present-status { font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:999px; }
+.coll-present-status.is-on  { color:#22c38e; background:rgba(34,195,142,.12); border:1px solid rgba(34,195,142,.3); }
+.coll-present-status.is-off { color:var(--text-dim); background:rgba(255,255,255,.04); border:1px solid var(--border-md); }
+.coll-present-label { font-size:.6rem; letter-spacing:.16em; text-transform:uppercase; color:var(--gold); font-weight:700; }
+.coll-present-defi { font-size:.95rem; line-height:1.6; color:var(--text-soft); margin:0; white-space:pre-wrap; }
+.coll-present-defi--masked  { color:var(--arcane); font-style:italic; }
+.coll-present-defi--mystery { color:var(--text-muted); font-style:italic; }
+.coll-present-defi--empty   { color:var(--text-dim); font-style:italic; }
+.coll-present-admin { margin-top:.4rem; display:flex; gap:.5rem; }
+@media (max-width: 560px) {
+  .coll-present { grid-template-columns: 1fr; }
+  .coll-present-card { max-width:240px; margin:0 auto; }
+}
 
 /* Players */
 .players-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:1.2rem; }

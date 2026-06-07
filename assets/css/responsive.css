@@ -39,6 +39,12 @@
   box-shadow:
     0 10px 30px rgba(0,0,0,0.45),
     0 1px 0 rgba(255,255,255,0.04) inset;
+  animation: bottom-nav-in .48s cubic-bezier(.16,1,.3,1) both;
+  transform-origin: 50% 100%;
+}
+@keyframes bottom-nav-in {
+  from { opacity: 0; transform: translateY(20px) scale(.975); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 .bottom-nav-item {
   flex: 1;
@@ -150,7 +156,7 @@
   box-shadow:
     0 16px 40px rgba(0,0,0,0.55),
     0 1px 0 rgba(255,255,255,0.04) inset;
-  animation: more-menu-in .22s cubic-bezier(.34,1.56,.64,1);
+  animation: more-menu-in .42s cubic-bezier(.16,1,.3,1);
 }
 .more-menu.show { display: flex; flex-direction: column; gap: .5rem; }
 
@@ -216,8 +222,8 @@
 .more-feature.active { border-color: var(--amber); }
 .more-feature:active { transform: scale(.99); }
 @keyframes more-menu-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(18px) scale(.975); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 .more-menu-item {
   display: flex;
@@ -576,4 +582,9 @@
     padding-left:  clamp(3rem, 5vw, 7rem);
     padding-right: clamp(3rem, 5vw, 7rem);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bottom-nav,
+  .more-menu { animation: none !important; transition: none !important; }
 }
