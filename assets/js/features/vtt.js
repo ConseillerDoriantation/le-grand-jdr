@@ -667,6 +667,35 @@ async function _setHp(t, newHp) {
   if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
   else               await updateDoc(_tokRef(t.id),          { hp: v });
+  await _syncDownedCondition(t, v);
+}
+
+/**
+ * Créature du MJ (ennemi / PNJ, pas un perso joueur) tombée à 0 PV → applique
+ * automatiquement l'état « Inconscient ». Retiré dès qu'elle remonte au-dessus
+ * de 0. L'état auto est marqué (`auto0hp`) pour ne jamais effacer un Inconscient
+ * posé manuellement (sort de sommeil, etc.). Écriture séparée et bornée au
+ * franchissement du seuil → coût Firestore négligeable, et n'impacte pas la MAJ
+ * des PV si les règles la refusent (.catch).
+ */
+async function _syncDownedCondition(t, hp) {
+  if (!t || t.type === 'player') return;
+  const conds = t.conditions || [];
+  if (hp <= 0) {
+    if (conds.some(c => c.id === 'unconscious')) return; // déjà inconscient (manuel ou auto)
+    const newConds = [...conds, {
+      id: 'unconscious', appliedAt: Date.now(), appliedBy: 'auto', auto0hp: true,
+      source: 'PV à 0', saveDC: null, saveStat: null, expiresAtRound: null,
+    }];
+    t.conditions = newConds;
+    await updateDoc(_tokRef(t.id), { conditions: newConds }).catch(() => {});
+    const name = _live(t).displayName ?? t.name;
+    showNotif(`😵 ${name} tombe inconscient (0 PV)`, 'info');
+  } else if (conds.some(c => c.id === 'unconscious' && c.auto0hp)) {
+    const newConds = conds.filter(c => !(c.id === 'unconscious' && c.auto0hp));
+    t.conditions = newConds;
+    await updateDoc(_tokRef(t.id), { conditions: newConds }).catch(() => {});
+  }
 }
 
 /**
@@ -5914,6 +5943,7 @@ async function _vttRollAttack() {
           const prevEst = curTgtData.pvCombatHp != null ? Math.max(0, parseInt(curTgtData.pvCombatHp)||0) : (lCurTgt.displayHpMax??realMax);
           const newEst  = Math.max(0, Math.min(realMax, prevEst - dmgTotal));
           await updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst });
+          await _syncDownedCondition(curTgtData, newHp);
         } else {
           // Set Lourd : réduction de 2 dégâts par coup, minimum 1 dégât
           if (dmgTotal > 0 && curTgtData.characterId) {
