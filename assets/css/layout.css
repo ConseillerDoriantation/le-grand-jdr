@@ -167,8 +167,8 @@ html, body { min-height:100%; }
 
 /* SIDEBAR — glassmorphism flush · fixed pour suivre le scroll sans ambiguïté */
 .sidebar {
-  width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
+  width: var(--rail-w);
+  min-width: var(--rail-w);
   position: fixed;
   top: 0;
   left: 0;
@@ -181,9 +181,21 @@ html, body { min-height:100%; }
   border-radius: 0;
   background: var(--bg-panel);
   z-index: var(--z-sidebar);
+  transition: width .22s cubic-bezier(.4,0,.2,1), box-shadow .22s ease;
 }
-/* Compense l'espace de la sidebar fixe sur desktop (mobile : sidebar masquée → pas de padding) */
-.app-layout { padding-left: var(--sidebar-width); }
+/* Déploiement : au survol ou quand le focus clavier entre dans la barre.
+   La barre est `fixed` → elle se déploie EN SUPERPOSITION, le contenu ne bouge pas. */
+.sidebar:hover,
+.sidebar:focus-within {
+  width: var(--sidebar-width);
+  box-shadow: 14px 0 40px -8px rgba(0,0,0,.55);
+}
+/* Réduit les animations si l'utilisateur le demande */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
+}
+/* Le contenu ne réserve que la largeur du rail (la barre déployée flotte au-dessus) */
+.app-layout { padding-left: var(--rail-w); }
 @media (max-width: 768px) {
   .app-layout { padding-left: 0; }
 }
@@ -826,7 +838,7 @@ html, body { min-height:100%; }
   .app-header { display: none !important; }
   .app-layout {
     min-height: 100vh;
-    padding-left: var(--sidebar-width);
+    padding-left: var(--rail-w);
     gap: 0;
   }
   .main-content {
@@ -1938,4 +1950,221 @@ select.input-field, select.input-sm { cursor:pointer; }
 }
 ::-webkit-scrollbar-thumb:hover {
   background:linear-gradient(180deg, rgba(124,92,255,0.6), rgba(34,211,238,0.46));
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SIDEBAR · MODE RAIL — repliée en rail d'icônes, déployée au survol/focus.
+   Déploiement en superposition (sidebar `fixed`) → le contenu ne bouge jamais.
+   Desktop uniquement (sidebar masquée en mobile). Centrage via calc(--rail-w).
+   ════════════════════════════════════════════════════════════════════════ */
+:root { --rail-pad: 8px; }                     /* marge latérale des lignes */
+
+/* Conteneurs : on libère l'espace horizontal pour centrer dans tout le rail */
+.sidebar-top    { padding: 16px 0 0; }
+.sidebar-priority { padding: 4px 0; border:none; margin:0; }
+.sidebar-bottom .sidebar-profile { padding: 10px 0; gap: 0; }
+
+/* Éléments « texte » : masqués (clippés + fade) en rail, révélés au déploiement */
+.sidebar .nav-label,
+.sidebar .sidebar-brand-id,
+.sidebar .sidebar-search-text,
+.sidebar .sidebar-search-kbd,
+.sidebar .sidebar-adv-body,
+.sidebar .sidebar-adv-chevron,
+.sidebar .sidebar-profile-meta,
+.sidebar .sidebar-profile-logout,
+.sidebar .sidebar-theme-btn,
+.sidebar .sidebar-section-label .sl-text {
+  opacity: 0;
+  transition: opacity .13s ease;
+}
+.sidebar:hover .nav-label,            .sidebar:focus-within .nav-label,
+.sidebar:hover .sidebar-brand-id,     .sidebar:focus-within .sidebar-brand-id,
+.sidebar:hover .sidebar-search-text,  .sidebar:focus-within .sidebar-search-text,
+.sidebar:hover .sidebar-search-kbd,   .sidebar:focus-within .sidebar-search-kbd,
+.sidebar:hover .sidebar-adv-body,     .sidebar:focus-within .sidebar-adv-body,
+.sidebar:hover .sidebar-adv-chevron,  .sidebar:focus-within .sidebar-adv-chevron,
+.sidebar:hover .sidebar-profile-meta, .sidebar:focus-within .sidebar-profile-meta,
+.sidebar:hover .sidebar-profile-logout, .sidebar:focus-within .sidebar-profile-logout,
+.sidebar:hover .sidebar-theme-btn,    .sidebar:focus-within .sidebar-theme-btn,
+.sidebar:hover .sidebar-section-label .sl-text,
+.sidebar:focus-within .sidebar-section-label .sl-text { opacity: 1; }
+
+/* ── Lignes de nav : pastille pleine largeur, icône centrée dans le rail ── */
+.sidebar .nav-item {
+  margin: 1px var(--rail-pad);
+  padding: 0;
+  gap: 12px;
+  min-height: 46px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  overflow: hidden;
+}
+/* Icône nue : box élargie par padding (le dessin reste petit) → centrage parfait */
+.sidebar .nav-item > .nav-icon {
+  box-sizing: content-box;
+  width: 19px; height: 22px;
+  flex: 0 0 auto;
+  padding-left:  calc((var(--rail-w) - 2 * var(--rail-pad) - 19px) / 2);
+  padding-right: calc((var(--rail-w) - 2 * var(--rail-pad) - 19px) / 2);
+}
+.sidebar .nav-label { flex: 1 1 auto; white-space: nowrap; }
+
+/* Bloc priorité : « Jouer maintenant » (glyphe) + « Tableau de bord » */
+.sidebar .nav-item--primary { margin: 6px var(--rail-pad); min-height: 54px; }
+.sidebar .nav-item--primary > .nav-glyph {
+  flex: 0 0 auto;
+  margin-left:  calc((var(--rail-w) - 2 * var(--rail-pad) - 38px) / 2);
+  margin-right: calc((var(--rail-w) - 2 * var(--rail-pad) - 38px) / 2);
+}
+
+/* État actif : pastille remplie (lisible en rail ET déployé) + filet interne */
+.sidebar .nav-item.active::before { left: 0; top: 6px; bottom: 6px; border-radius: 3px; }
+.sidebar .nav-item.active::after  { display: none; }
+
+/* ── Recherche : loupe centrée en rail, champ complet au déploiement ── */
+.sidebar .sidebar-search {
+  width: auto;
+  margin: 10px var(--rail-pad) 6px;
+  padding: 0;
+  gap: 12px;
+  min-height: 44px;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  overflow: hidden;
+}
+.sidebar .sidebar-search > .nav-icon {
+  box-sizing: content-box;
+  width: 18px; height: 18px;
+  flex: 0 0 auto;
+  padding-left:  calc((var(--rail-w) - 2 * var(--rail-pad) - 18px) / 2);
+  padding-right: calc((var(--rail-w) - 2 * var(--rail-pad) - 18px) / 2);
+}
+.sidebar:hover .sidebar-search,
+.sidebar:focus-within .sidebar-search {
+  background: var(--bg-elevated);
+  border-color: var(--border-md);
+}
+
+/* ── Chip aventure : emoji centré en rail, contenu au déploiement ── */
+.sidebar .sidebar-adv-chip {
+  margin: 6px var(--rail-pad) 0;
+  padding: 0;
+  gap: 12px;
+  min-height: 46px;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  overflow: hidden;
+}
+.sidebar .sidebar-adv-emoji {
+  flex: 0 0 auto;
+  width: 20px; text-align: center;
+  margin-left:  calc((var(--rail-w) - 2 * var(--rail-pad) - 20px) / 2);
+  margin-right: calc((var(--rail-w) - 2 * var(--rail-pad) - 20px) / 2);
+}
+.sidebar:hover .sidebar-adv-chip,
+.sidebar:focus-within .sidebar-adv-chip {
+  background: linear-gradient(135deg, rgba(79,140,255,0.10), rgba(157,111,255,0.07));
+  border-color: rgba(79,140,255,0.22);
+}
+
+/* ── Marque : médaillon centré en rail, nom au déploiement ── */
+.sidebar .sidebar-brand-row { padding: 4px 0 14px; gap: 0; }
+.sidebar .sidebar-brand-icon {
+  width: 48px; height: 48px;
+  margin-left:  calc((var(--rail-w) - 48px) / 2);
+  margin-right: calc((var(--rail-w) - 48px) / 2);
+}
+
+/* ── Profil : avatar centré en rail, méta + actions au déploiement ── */
+.sidebar .sidebar-profile-avatar {
+  flex: 0 0 auto;
+  margin-left:  calc((var(--rail-w) - 34px) / 2);
+  margin-right: calc((var(--rail-w) - 34px) / 2);
+}
+
+/* ── En-têtes de groupe : repliés = simple respiration ; dépliés = titre ── */
+.sidebar .sidebar-section-label {
+  height: 14px;
+  margin: 8px 0 0;
+  padding: 0 18px;
+  overflow: hidden;
+  transition: height .14s ease;
+}
+.sidebar:hover .sidebar-section-label,
+.sidebar:focus-within .sidebar-section-label {
+  height: 24px;
+  padding: 10px 18px 4px;
+}
+/* Masque le marqueur losange des en-têtes quand la barre est repliée */
+.sidebar .sidebar-section-label::before { opacity: 0; transition: opacity .13s ease; }
+.sidebar:hover .sidebar-section-label::before,
+.sidebar:focus-within .sidebar-section-label::before { opacity: .85; }
+
+/* Après une navigation : on force le repli même si la souris/focus reste sur la
+   barre (la classe est retirée au prochain mouseleave → le survol refonctionne).
+   Spécificité supérieure (.sidebar.nav-collapse:hover) → bat les règles de déploiement. */
+.sidebar.nav-collapse:hover,
+.sidebar.nav-collapse:focus-within {
+  width: var(--rail-w);
+  box-shadow: none;
+}
+.sidebar.nav-collapse:hover .sidebar-search,
+.sidebar.nav-collapse:focus-within .sidebar-search,
+.sidebar.nav-collapse:hover .sidebar-adv-chip,
+.sidebar.nav-collapse:focus-within .sidebar-adv-chip {
+  background: transparent;
+  border-color: transparent;
+}
+/* …et on re-cache les libellés/en-têtes (sinon slivers de texte clippés) */
+.sidebar.nav-collapse:hover .nav-label,
+.sidebar.nav-collapse:focus-within .nav-label,
+.sidebar.nav-collapse:hover .sidebar-brand-id,
+.sidebar.nav-collapse:focus-within .sidebar-brand-id,
+.sidebar.nav-collapse:hover .sidebar-search-text,
+.sidebar.nav-collapse:focus-within .sidebar-search-text,
+.sidebar.nav-collapse:hover .sidebar-search-kbd,
+.sidebar.nav-collapse:focus-within .sidebar-search-kbd,
+.sidebar.nav-collapse:hover .sidebar-adv-body,
+.sidebar.nav-collapse:focus-within .sidebar-adv-body,
+.sidebar.nav-collapse:hover .sidebar-adv-chevron,
+.sidebar.nav-collapse:focus-within .sidebar-adv-chevron,
+.sidebar.nav-collapse:hover .sidebar-profile-meta,
+.sidebar.nav-collapse:focus-within .sidebar-profile-meta,
+.sidebar.nav-collapse:hover .sidebar-section-label .sl-text,
+.sidebar.nav-collapse:focus-within .sidebar-section-label .sl-text,
+.sidebar.nav-collapse:hover .sidebar-section-label::before,
+.sidebar.nav-collapse:focus-within .sidebar-section-label::before {
+  opacity: 0;
+}
+.sidebar.nav-collapse:hover .sidebar-section-label,
+.sidebar.nav-collapse:focus-within .sidebar-section-label {
+  height: 14px;
+  padding: 0 18px;
+}
+
+/* Appareils sans survol (tablettes tactiles) : le rail-au-survol n'a pas de sens.
+   → barre déployée et figée, libellés visibles, contenu décalé en conséquence. */
+@media (hover: none) and (min-width: 769px) {
+  .sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); transition: none; }
+  .app-layout { padding-left: var(--sidebar-width); }
+  .sidebar .nav-label,
+  .sidebar .sidebar-brand-id,
+  .sidebar .sidebar-search-text,
+  .sidebar .sidebar-search-kbd,
+  .sidebar .sidebar-adv-body,
+  .sidebar .sidebar-adv-chevron,
+  .sidebar .sidebar-profile-meta,
+  .sidebar .sidebar-profile-logout,
+  .sidebar .sidebar-theme-btn,
+  .sidebar .sidebar-section-label .sl-text,
+  .sidebar .sidebar-section-label::before { opacity: 1; }
+  .sidebar .sidebar-section-label { height: 24px; padding: 10px 18px 4px; }
+  .sidebar .sidebar-search { background: var(--bg-elevated); border-color: var(--border-md); }
+  .sidebar .sidebar-adv-chip {
+    background: linear-gradient(135deg, rgba(79,140,255,0.10), rgba(157,111,255,0.07));
+    border-color: rgba(79,140,255,0.22);
+  }
 }

@@ -72,7 +72,8 @@
   --r-lg:   24px;
   --r-xl:   32px;
   --r-full: 999px;
-  --sidebar-width:  288px;
+  --sidebar-width:  288px;   /* sidebar déployée (survol / focus) */
+  --rail-w:         84px;    /* sidebar repliée : rail d'icônes */
   --content-max:    1680px;
   --header-height:  64px;
 

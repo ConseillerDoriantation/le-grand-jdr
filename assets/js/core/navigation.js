@@ -39,6 +39,7 @@ const _loaded = new Set();
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
   closeMoreMenu(); // referme le menu mobile quelle que soit la source (clic, clavier, palette)
+  _collapseRailAfterNav(); // referme la sidebar déployée (rail) après navigation
   unwatchAll(); // stopper tous les listeners temps réel de la page précédente
 
   // Reset des inline styles que certaines pages posent sur #main-content
@@ -78,6 +79,26 @@ export async function navigate(page) {
   } catch (err) {
     console.error(`[nav] page "${page}" a planté :`, err);
     _renderPageError(page, err);
+  }
+}
+
+// ── Repli de la sidebar (mode rail) après navigation ──────────
+// La barre se déploie en CSS au survol/focus. Après un clic de navigation, on la
+// force à se replier même si la souris/focus reste dessus ; la suppression est
+// levée au prochain mouseleave → le survol redéploie normalement ensuite.
+// Sur tablette tactile (hover:none) la barre reste figée déployée → on ne touche à rien.
+function _collapseRailAfterNav() {
+  const sb = document.getElementById('sidebar');
+  if (!sb || !window.matchMedia('(hover: hover)').matches) return;
+  // Déployée au clavier → on sort le focus, elle se replie d'elle-même.
+  if (sb.contains(document.activeElement)) document.activeElement.blur();
+  // Déployée au survol → on force le repli tant que la souris reste dessus.
+  // IMPORTANT : ne rien faire si la barre n'est PAS survolée (ex. navigation
+  // programmatique au boot) — sinon `nav-collapse` resterait collée et bloquerait
+  // le 1er survol (il fallait survoler 2 fois).
+  if (sb.matches(':hover') && !sb.classList.contains('nav-collapse')) {
+    sb.classList.add('nav-collapse');
+    sb.addEventListener('mouseleave', () => sb.classList.remove('nav-collapse'), { once: true });
   }
 }
 
