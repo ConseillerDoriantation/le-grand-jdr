@@ -50,7 +50,7 @@
   gap: 4px;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: .68rem;
+  font-size: .62rem;
   font-weight: 600;
   letter-spacing: .01em;
   border-radius: 18px;
@@ -62,6 +62,13 @@
   border: none;
   background: transparent;
   -webkit-tap-highlight-color: transparent;
+  min-width: 0;
+}
+.bottom-nav-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Indicateur (barre dorée au sommet de l'item actif) */
 .bottom-nav-item::before {
@@ -108,6 +115,16 @@
 .bottom-nav-item:active {
   transform: scale(.94);
 }
+/* Jouer — entrée principale mise en avant (icône arcane plus grande + lueur) */
+.bottom-nav-item--primary { color: var(--text-soft); }
+.bottom-nav-item--primary .bn-icon {
+  width: 27px;
+  height: 27px;
+  opacity: 1;
+  stroke: var(--arcane);
+  filter: drop-shadow(0 0 6px rgba(157,111,255,0.50));
+}
+.bottom-nav-item--primary:hover:not(.active) .bn-icon { stroke: var(--arcane); }
 
 /* ═══════════════════════════════════════════════════════════
    MORE-MENU  (défini globalement, affiché < 768px via .show)
@@ -118,6 +135,10 @@
   bottom: calc(68px + max(14px, env(safe-area-inset-bottom, 0px)) + 10px);
   left: 14px;
   right: 14px;
+  max-height: calc(100dvh - 68px - max(14px, env(safe-area-inset-bottom, 0px)) - 28px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background:
     linear-gradient(180deg, var(--bg-card2) 0%, var(--bg-panel) 100%);
   backdrop-filter: blur(28px) saturate(160%);
@@ -126,14 +147,74 @@
   border-radius: 26px;
   z-index: var(--z-more-menu);
   padding: .9rem;
-  grid-template-columns: repeat(3, 1fr);
-  gap: .55rem;
   box-shadow:
     0 16px 40px rgba(0,0,0,0.55),
     0 1px 0 rgba(255,255,255,0.04) inset;
   animation: more-menu-in .22s cubic-bezier(.34,1.56,.64,1);
 }
-.more-menu.show { display: grid; }
+.more-menu.show { display: flex; flex-direction: column; gap: .5rem; }
+
+/* En-tête de catégorie + grille d'items */
+.more-group-label {
+  font-size: .6rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: .4rem .25rem .05rem;
+}
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .55rem;
+}
+
+/* Recherche (ouvre la command palette) */
+.more-search {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .75rem .9rem;
+  border-radius: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: .85rem;
+  text-align: left;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-md);
+}
+.more-search .icon { width: 18px; height: 18px; stroke: currentColor; fill: none; opacity: .8; flex-shrink: 0; }
+.more-search:active { transform: scale(.98); }
+
+/* Jouer maintenant — entrée vedette */
+.more-feature {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  width: 100%;
+  padding: .8rem .9rem;
+  border-radius: 16px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text);
+  background: linear-gradient(135deg, rgba(157,111,255,0.22) 0%, rgba(79,140,255,0.14) 60%, rgba(244,196,48,0.10) 100%);
+  border: 1px solid rgba(157,111,255,0.42);
+  box-shadow: 0 4px 16px rgba(79,140,255,0.16), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.more-feature .icon {
+  width: 26px; height: 26px;
+  stroke: #fff; fill: none; flex-shrink: 0;
+  filter: drop-shadow(0 0 5px rgba(157,111,255,0.55));
+}
+.more-feature-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.more-feature-text strong { font-family: 'Cinzel', serif; font-size: .92rem; font-weight: 700; letter-spacing: .02em; }
+.more-feature.active .icon { stroke: var(--gold); }
+.more-feature-text small { font-size: .62rem; color: var(--text-dim); }
+.more-feature.active { border-color: var(--amber); }
+.more-feature:active { transform: scale(.99); }
 @keyframes more-menu-in {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -144,9 +225,11 @@
   align-items: center;
   justify-content: center;
   gap: .4rem;
+  width: 100%;
   padding: .9rem .35rem;
   cursor: pointer;
   color: var(--text-muted);
+  font-family: inherit;
   font-size: .7rem;
   font-weight: 600;
   border-radius: 16px;
@@ -359,7 +442,9 @@
 ═══════════════════════════════════════════════════════════ */
 @media (max-width: 480px) {
   .page-title   { font-size: 1.15rem; }
-  .more-menu    { grid-template-columns: repeat(3, 1fr); gap: .45rem; }
+  .more-menu    { gap: .45rem; }
+  .bottom-nav-item { font-size: .58rem; }
+  .more-grid { grid-template-columns: repeat(2, 1fr); }
   .players-grid { grid-template-columns: 1fr; }
   .collection-grid { grid-template-columns: repeat(2, 1fr); }
   .char-grid    { grid-template-columns: repeat(2, 1fr); }

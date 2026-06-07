@@ -27,25 +27,25 @@ let _bestiaryEntriesPromise = null;
 
 // ── PAGES (raccourcis directs) ────────────────────────────────────────────────
 const PAGE_SHORTCUTS = [
-  { id: 'dashboard',    label: 'Accueil',         icon: '🏠' },
-  { id: 'characters',   label: 'Personnage',      icon: '⚔️' },
-  { id: 'shop',         label: 'Boutique',        icon: '🛒' },
-  { id: 'story',        label: 'Trame',           icon: '📖' },
-  { id: 'bestiaire',    label: 'Bestiaire',       icon: '🐉' },
-  { id: 'recettes',     label: 'Recettes',        icon: '🧪' },
-  { id: 'bastion',      label: 'Bastion',         icon: '🏰' },
-  { id: 'quests',       label: 'Quêtes',          icon: '📜' },
-  { id: 'agenda',       label: 'Agenda',          icon: '🗓️' },
-  { id: 'map',          label: 'Carte',           icon: '🗺️' },
-  { id: 'npcs',         label: 'PNJ',             icon: '👥' },
-  { id: 'world',        label: 'Le Monde',        icon: '🌍' },
-  { id: 'achievements', label: 'Hauts-Faits',     icon: '🏆' },
-  { id: 'players',      label: 'Joueurs',         icon: '🎭' },
-  { id: 'collection',   label: 'Collection',      icon: '🃏' },
-  { id: 'vtt',          label: 'Table virtuelle', icon: '🎲' },
-  { id: 'aventures',    label: 'Aventures',       icon: '🗡️' },
-  { id: 'admin',        label: 'Console MJ',      icon: '⚙️', adminOnly: true },
-  { id: 'account',      label: 'Mon compte',      icon: '👤' },
+  { id: 'dashboard',    label: 'Tableau de bord', icon: '🏠', aliases: 'accueil home dashboard résumé resume campagne' },
+  { id: 'vtt',          label: 'Jouer',           icon: '🎲', subtitle: 'Table virtuelle', aliases: 'table virtuelle vtt combat partie plateau direct session jouer maintenant' },
+  { id: 'characters',   label: 'Personnage',      icon: '⚔️', aliases: 'perso fiche stats inventaire sorts équipement equipement' },
+  { id: 'quests',       label: 'Quêtes',          icon: '📜', aliases: 'objectifs missions quête quete quest objectifs actifs' },
+  { id: 'map',          label: 'Carte',           icon: '🗺️', aliases: 'lieux exploration map voyager voyage' },
+  { id: 'shop',         label: 'Boutique',        icon: '🛒', aliases: 'acheter objets équipement equipement magasin commerce or' },
+  { id: 'story',        label: 'Trame',           icon: '📖', aliases: 'histoire scénario scenario récit recit campagne intrigue' },
+  { id: 'agenda',       label: 'Agenda',          icon: '🗓️', aliases: 'dispo disponibilités disponibilites calendrier date session' },
+  { id: 'achievements', label: 'Hauts-Faits',     icon: '🏆', aliases: 'succès succes achievements trophées trophees accomplissements' },
+  { id: 'world',        label: 'Monde',           icon: '🌍', aliases: 'lore univers encyclopédie encyclopedie histoire monde' },
+  { id: 'npcs',         label: 'PNJ',             icon: '👥', aliases: 'personnages non joueurs contacts factions npc' },
+  { id: 'bestiaire',    label: 'Bestiaire',       icon: '🐉', aliases: 'monstres créatures creatures ennemis bêtes betes' },
+  { id: 'recettes',     label: 'Recettes',        icon: '🧪', aliases: 'craft artisanat cuisine alchimie fabriquer' },
+  { id: 'collection',   label: 'Collection',      icon: '🃏', aliases: 'cartes objets collectionner' },
+  { id: 'players',      label: 'Joueurs',         icon: '🎭', aliases: 'groupe membres personnages joueurs pj' },
+  { id: 'bastion',      label: 'Bastion',         icon: '🏰', aliases: 'base château chateau forteresse salles' },
+  { id: 'aventures',    label: 'Aventures',       icon: '🗡️', aliases: 'campagne changer aventure switch sélectionner selectionner' },
+  { id: 'account',      label: 'Mon compte',      icon: '👤', aliases: 'compte profil utilisateur préférences preferences' },
+  { id: 'admin',        label: 'Console MJ',      icon: '⚙️', adminOnly: true, aliases: 'mj console gestion admin configuration' },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -91,8 +91,8 @@ async function _loadEntries() {
     if (p.adminOnly && !STATE.isAdmin) continue;
     entries.push({
       type: 'page', typeLabel: 'Page', id: p.id,
-      title: p.label, subtitle: 'Aller à la page', icon: p.icon,
-      search: _norm(`${p.label} ${p.id}`),
+      title: p.label, subtitle: p.subtitle || 'Aller à la page', icon: p.icon,
+      search: _norm(`${p.label} ${p.id} ${p.aliases || ''}`),
     });
   }
 
@@ -431,7 +431,7 @@ function _mountModal() {
       <div class="cmd-palette-input-wrap">
         <span class="cmd-palette-icon">🔍</span>
         <input id="cmd-palette-input" class="cmd-palette-input" type="text"
-          placeholder="Rechercher un PNJ, perso, quête, article…"
+          placeholder="Rechercher une page, un PNJ, une quête, un objet…"
           autocomplete="off" spellcheck="false">
         <kbd class="cmd-palette-kbd">Esc</kbd>
       </div>
@@ -533,6 +533,13 @@ export function initCommandPalette() {
     }
   });
 
+  // Déclencheur visible (boutons « Rechercher » de la nav desktop/mobile)
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-command-palette]')) {
+      e.preventDefault();
+      if (!_open) openPalette();
+    }
+  });
 }
 
 // Auto-init à l'import

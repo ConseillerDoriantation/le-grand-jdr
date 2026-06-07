@@ -84,7 +84,7 @@ function _initCollapsibleSections() {
   let state = {};
   try { state = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
 
-  const sections = document.querySelectorAll('.sidebar-section[data-section]');
+  const sections = document.querySelectorAll('details.sidebar-section[data-section]');
   sections.forEach((sec) => {
     const id = sec.dataset.section;
     if (id in state) sec.open = !!state[id];
@@ -218,29 +218,28 @@ function _updateMobileBottomNav() {
   const nav = document.getElementById('bottom-nav');
   if (!nav) return;
 
-  const playerItems = [
-    { page: 'dashboard',  icon: 'home',   label: 'Accueil'  },
-    { page: 'characters', icon: 'scroll', label: 'Perso'    },
-    { page: 'quests',     icon: 'sword',  label: 'Quêtes'   },
-    { page: 'shop',       icon: 'bag',    label: 'Boutique' },
+  // Même barre pour tous : Jouer est l'action principale, le reste passe par « Plus ».
+  const items = [
+    { page: 'dashboard',  icon: 'home',   label: 'Accueil', aria: 'Ouvrir le tableau de bord' },
+    { page: 'characters', icon: 'scroll', label: 'Personnage', aria: 'Ouvrir ma fiche personnage' },
+    { page: 'vtt',        icon: 'dice',   label: 'Jouer', primary: true, aria: 'Jouer maintenant, ouvrir la table virtuelle' },
+    { page: 'quests',     icon: 'sword',  label: 'Quêtes', aria: 'Ouvrir les quêtes' },
   ];
-  const mjItems = [
-    { page: 'dashboard',  icon: 'home',   label: 'Accueil'  },
-    { page: 'characters', icon: 'scroll', label: 'Perso'    },
-    { page: 'quests',     icon: 'sword',  label: 'Quêtes'   },
-    { page: 'admin',      icon: 'cog',    label: 'Console'  },
-  ];
+  const currentPage = STATE.currentPage || document.querySelector('.nav-item.active')?.dataset?.navigate || 'dashboard';
 
-  const items = STATE.isAdmin ? mjItems : playerItems;
-  const currentPage = document.querySelector('.nav-item.active')?.dataset?.navigate || 'dashboard';
+  const moreActive = !items.some(i => i.page === currentPage);
 
-  nav.innerHTML = items.map(i => `
-    <button class="bottom-nav-item ${currentPage === i.page ? 'active' : ''}"
-      type="button" data-navigate="${i.page}" data-page="${i.page}">
+  nav.innerHTML = items.map(i => {
+    const active = currentPage === i.page;
+    return `
+    <button class="bottom-nav-item${i.primary ? ' bottom-nav-item--primary' : ''}${active ? ' active' : ''}"
+      type="button" data-navigate="${i.page}" data-page="${i.page}" aria-label="${i.aria}"${active ? ' aria-current="page"' : ''}>
       <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-${i.icon}"/></svg>
       <span>${i.label}</span>
-    </button>`).join('') + `
-    <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
+    </button>`;
+  }).join('') + `
+    <button class="bottom-nav-item${moreActive ? ' active' : ''}" type="button" data-toggle-more aria-label="Afficher toutes les pages"
+      aria-expanded="false" aria-controls="more-menu" aria-haspopup="true">
       <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-more"/></svg>
       <span>Plus</span>
     </button>`;

@@ -178,135 +178,179 @@
 
       <!-- Top : brand + aventure -->
       <div class="sidebar-top">
-        <div class="sidebar-brand-row" data-navigate="dashboard" title="Accueil">
+        <div class="sidebar-brand-row" data-navigate="dashboard" title="Tableau de bord — Grimorium">
           <div class="sidebar-brand-icon" aria-hidden="true"><img class="brand-logo" src="./assets/img/grimorium-logo.png" alt=""></div>
-          <span class="sidebar-brand-text">Grimorium</span>
+          <div class="sidebar-brand-id">
+            <span class="sidebar-brand-text">Grimorium</span>
+            <span class="sidebar-brand-sub">Codex de campagne</span>
+          </div>
         </div>
-        <div class="sidebar-adv-chip" id="sidebar-adv-chip" style="display:none" data-action="openAdventureSwitcher" title="Aventure active">
+        <div class="sidebar-adv-chip" id="sidebar-adv-chip" style="display:none" data-action="openAdventureSwitcher"
+          title="Changer d'aventure" aria-label="Changer d'aventure" aria-haspopup="dialog">
           <span class="sidebar-adv-emoji" id="sidebar-adv-emoji"></span>
-          <span class="sidebar-adv-text" id="sidebar-adv-name"></span>
+          <span class="sidebar-adv-body">
+            <span class="sidebar-adv-kicker">Aventure active</span>
+            <span class="sidebar-adv-text" id="sidebar-adv-name"></span>
+          </span>
+          <svg class="sidebar-adv-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
         </div>
       </div>
 
       <!-- Middle : nav scrollable -->
       <div class="sidebar-scroll">
 
-        <details class="sidebar-section" data-section="essentiel" open>
-          <summary class="sidebar-section-label">
-            <span class="sl-text">Essentiel</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
-          </summary>
+        <!-- Accès rapide : ouvre la command palette (Ctrl K) -->
+        <button type="button" class="sidebar-search" data-command-palette
+          aria-label="Rechercher une page, un PNJ, une quête ou un objet — raccourci Ctrl K"
+          title="Rechercher — Ctrl K">
+          <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
+          <span class="sidebar-search-text">Rechercher…</span>
+          <kbd class="sidebar-search-kbd">Ctrl K</kbd>
+        </button>
+
+        <div class="sidebar-priority" aria-label="Accès direct">
+          <button class="nav-item nav-item--primary" type="button" data-navigate="vtt" title="Jouer maintenant — Table virtuelle">
+            <span class="nav-glyph" aria-hidden="true">
+              <svg class="nav-icon"><use href="./assets/img/icons.svg#icon-dice"/></svg>
+            </span>
+            <span class="nav-label">
+              <span class="nav-label-main">Jouer maintenant</span>
+              <span class="nav-label-sub">Table virtuelle</span>
+            </span>
+          </button>
+          <button class="nav-item nav-item--dashboard active" type="button" data-navigate="dashboard" title="Tableau de bord" aria-current="page">
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>
+            <span class="nav-label">
+              <span class="nav-label-main">Tableau de bord</span>
+              <span class="nav-label-sub">Résumé de campagne</span>
+            </span>
+          </button>
+        </div>
+
+        <section class="sidebar-section" data-section="personnage">
+          <h2 class="sidebar-section-label">
+            <span class="sl-text">Mon personnage</span>
+          </h2>
           <div class="sidebar-nav-group">
-            <a class="nav-item active" data-navigate="dashboard" title="Accueil">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>
-              <span class="nav-label">Accueil</span>
-            </a>
-            <a class="nav-item" data-navigate="characters" title="Personnage">
+            <button class="nav-item" type="button" data-navigate="characters" title="Personnage — fiche, stats, inventaire et sorts">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-scroll"/></svg>
-              <span class="nav-label">Personnage</span>
-            </a>
-            <a class="nav-item" data-navigate="shop" title="Boutique">
+              <span class="nav-label">
+                <span class="nav-label-main">Personnage</span>
+                <span class="nav-label-sub">Fiche, inventaire, sorts</span>
+              </span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="shop" title="Boutique — acheter et équiper">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-bag"/></svg>
               <span class="nav-label">Boutique</span>
-            </a>
-            <a class="nav-item" data-navigate="story" title="Trame">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-book"/></svg>
-              <span class="nav-label">Trame</span>
-            </a>
-          </div>
-        </details>
-
-        <details class="sidebar-section" data-section="en-jeu" open>
-          <summary class="sidebar-section-label">
-            <span class="sl-text">En Jeu</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
-          </summary>
-          <div class="sidebar-nav-group">
-            <a class="nav-item" data-navigate="bestiaire" title="Bestiaire">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-paw"/></svg>
-              <span class="nav-label">Bestiaire</span>
-            </a>
-            <a class="nav-item" data-navigate="recettes" title="Recettes">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-flame"/></svg>
-              <span class="nav-label">Recettes</span>
-            </a>
-            <a class="nav-item" data-navigate="bastion" title="Bastion">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>
-              <span class="nav-label">Bastion</span>
-            </a>
-            <a class="nav-item" data-navigate="quests" title="Quêtes">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sword"/></svg>
-              <span class="nav-label">Quêtes</span>
-            </a>
-            <a class="nav-item" data-navigate="agenda" title="Agenda — Dispos du groupe">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-calendar"/></svg>
-              <span class="nav-label">Agenda</span>
-            </a>
-          </div>
-        </details>
-
-        <details class="sidebar-section" data-section="univers" open>
-          <summary class="sidebar-section-label">
-            <span class="sl-text">Univers</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
-          </summary>
-          <div class="sidebar-nav-group">
-            <a class="nav-item" data-navigate="map" title="Carte">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-map"/></svg>
-              <span class="nav-label">Carte</span>
-            </a>
-            <a class="nav-item" data-navigate="npcs" title="PNJ">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-users"/></svg>
-              <span class="nav-label">PNJ</span>
-            </a>
-            <a class="nav-item" data-navigate="world" title="Le Monde">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-globe"/></svg>
-              <span class="nav-label">Monde</span>
-            </a>
-            <a class="nav-item" data-navigate="achievements" title="Hauts-Faits">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-trophy"/></svg>
-              <span class="nav-label">Hauts-Faits</span>
-            </a>
-            <a class="nav-item" data-navigate="players" title="Joueurs">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>
-              <span class="nav-label">Joueurs</span>
-            </a>
-            <a class="nav-item" data-navigate="collection" title="Collection">
+            </button>
+            <button class="nav-item" type="button" data-navigate="collection" title="Collection">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-layers"/></svg>
               <span class="nav-label">Collection</span>
-            </a>
+            </button>
           </div>
-        </details>
+        </section>
 
-        <details class="sidebar-section" data-section="table" open>
-          <summary class="sidebar-section-label">
-            <span class="sl-text">Table de Jeu</span>
-            <svg class="sl-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
-          </summary>
+        <section class="sidebar-section" data-section="campagne">
+          <h2 class="sidebar-section-label">
+            <span class="sl-text">Campagne</span>
+          </h2>
           <div class="sidebar-nav-group">
-            <a class="nav-item" data-navigate="vtt" title="Table virtuelle">
-              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-dice"/></svg>
-              <span class="nav-label">Table Virtuelle</span>
-            </a>
+            <button class="nav-item" type="button" data-navigate="quests" title="Quêtes — objectifs actifs">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sword"/></svg>
+              <span class="nav-label">
+                <span class="nav-label-main">Quêtes</span>
+                <span class="nav-label-sub">Objectifs actifs</span>
+              </span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="story" title="Trame — histoire de campagne">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-book"/></svg>
+              <span class="nav-label">Trame</span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="agenda" title="Agenda — disponibilités du groupe">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-calendar"/></svg>
+              <span class="nav-label">Agenda</span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="achievements" title="Hauts-Faits">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-trophy"/></svg>
+              <span class="nav-label">Hauts-Faits</span>
+            </button>
           </div>
-        </details>
+        </section>
 
-        <div class="sidebar-nav-group sidebar-nav-group--standalone">
-          <a class="nav-item" data-navigate="aventures" title="Aventures">
-            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-compass"/></svg>
-            <span class="nav-label">Aventures</span>
-          </a>
-          <a class="nav-item admin-only" data-navigate="admin" title="Console MJ" style="display:none">
-            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>
-            <span class="nav-label">Console MJ</span>
-          </a>
-        </div>
+        <section class="sidebar-section" data-section="monde">
+          <h2 class="sidebar-section-label">
+            <span class="sl-text">Monde</span>
+          </h2>
+          <div class="sidebar-nav-group">
+            <button class="nav-item" type="button" data-navigate="map" title="Carte — lieux et exploration">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-map"/></svg>
+              <span class="nav-label">
+                <span class="nav-label-main">Carte</span>
+                <span class="nav-label-sub">Lieux et exploration</span>
+              </span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="world" title="Monde — lore et encyclopédie">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-globe"/></svg>
+              <span class="nav-label">Monde</span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="npcs" title="PNJ — contacts et factions">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-users"/></svg>
+              <span class="nav-label">PNJ</span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="bestiaire" title="Bestiaire">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-paw"/></svg>
+              <span class="nav-label">Bestiaire</span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="recettes" title="Recettes">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-flame"/></svg>
+              <span class="nav-label">Recettes</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="sidebar-section" data-section="groupe">
+          <h2 class="sidebar-section-label">
+            <span class="sl-text">Groupe</span>
+          </h2>
+          <div class="sidebar-nav-group">
+            <button class="nav-item" type="button" data-navigate="players" title="Joueurs">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>
+              <span class="nav-label">Joueurs</span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="bastion" title="Bastion">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>
+              <span class="nav-label">Bastion</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="sidebar-section" data-section="gestion">
+          <h2 class="sidebar-section-label">
+            <span class="sl-text">Gestion</span>
+          </h2>
+          <div class="sidebar-nav-group">
+            <button class="nav-item" type="button" data-navigate="aventures" title="Aventures — changer de campagne">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-compass"/></svg>
+              <span class="nav-label">
+                <span class="nav-label-main">Aventures</span>
+                <span class="nav-label-sub">Changer de campagne</span>
+              </span>
+            </button>
+            <button class="nav-item" type="button" data-navigate="account" title="Mon compte">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-user-circle"/></svg>
+              <span class="nav-label">Compte</span>
+            </button>
+            <button class="nav-item admin-only" type="button" data-navigate="admin" title="Console MJ" style="display:none">
+              <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>
+              <span class="nav-label">Console MJ</span>
+            </button>
+          </div>
+        </section>
 
       </div><!-- /sidebar-scroll -->
 
-      <!-- Bottom : profil utilisateur -->
+      <!-- Bottom : profil et actions globales -->
       <div class="sidebar-bottom">
-        <div class="sidebar-sep" role="separator"></div>
         <div class="sidebar-profile" id="sidebar-profile">
           <div class="sidebar-profile-avatar" id="sidebar-avatar" data-navigate="account" title="Mon compte">?</div>
           <div class="sidebar-profile-meta">
@@ -340,47 +384,78 @@
   </div>
 
   <!-- Bottom nav mobile -->
-  <nav class="bottom-nav" id="bottom-nav" aria-label="Navigation mobile">
-    <button class="bottom-nav-item active" type="button" data-navigate="dashboard" data-page="dashboard">
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Navigation mobile principale">
+    <button class="bottom-nav-item active" type="button" data-navigate="dashboard" data-page="dashboard" aria-current="page" aria-label="Ouvrir le tableau de bord">
       <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>
       <span>Accueil</span>
     </button>
-    <button class="bottom-nav-item" type="button" data-navigate="characters" data-page="characters">
+    <button class="bottom-nav-item" type="button" data-navigate="characters" data-page="characters" aria-label="Ouvrir ma fiche personnage">
       <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-scroll"/></svg>
-      <span>Perso</span>
+      <span>Personnage</span>
     </button>
-    <button class="bottom-nav-item" type="button" data-navigate="quests" data-page="quests">
+    <button class="bottom-nav-item bottom-nav-item--primary" type="button" data-navigate="vtt" data-page="vtt" aria-label="Jouer maintenant, ouvrir la table virtuelle">
+      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-dice"/></svg>
+      <span>Jouer</span>
+    </button>
+    <button class="bottom-nav-item" type="button" data-navigate="quests" data-page="quests" aria-label="Ouvrir les quêtes">
       <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sword"/></svg>
       <span>Quêtes</span>
     </button>
-    <button class="bottom-nav-item" type="button" data-navigate="shop" data-page="shop">
-      <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-bag"/></svg>
-      <span>Boutique</span>
-    </button>
-    <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Plus de pages" aria-expanded="false">
+    <button class="bottom-nav-item" type="button" data-toggle-more aria-label="Afficher toutes les pages" aria-expanded="false" aria-controls="more-menu" aria-haspopup="true">
       <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-more"/></svg>
       <span>Plus</span>
     </button>
   </nav>
 
-  <!-- More-menu mobile -->
-  <div class="more-menu" id="more-menu" role="dialog" aria-label="Navigation étendue">
-    <div class="more-menu-item" data-navigate="shop"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-bag"/></svg>Boutique</div>
-    <div class="more-menu-item" data-navigate="story"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-book"/></svg>Trame</div>
-    <div class="more-menu-item" data-navigate="bestiaire"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-paw"/></svg>Bestiaire</div>
-    <div class="more-menu-item" data-navigate="recettes"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-flame"/></svg>Recettes</div>
-    <div class="more-menu-item" data-navigate="bastion"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>Bastion</div>
-    <div class="more-menu-item" data-navigate="agenda"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-calendar"/></svg>Agenda</div>
-    <div class="more-menu-item" data-navigate="map"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-map"/></svg>Carte</div>
-    <div class="more-menu-item" data-navigate="npcs"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-users"/></svg>PNJ</div>
-    <div class="more-menu-item" data-navigate="world"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-globe"/></svg>Monde</div>
-    <div class="more-menu-item" data-navigate="achievements"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-trophy"/></svg>Hauts-Faits</div>
-    <div class="more-menu-item" data-navigate="players"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>Joueurs</div>
-    <div class="more-menu-item" data-navigate="collection"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-layers"/></svg>Collection</div>
-    <div class="more-menu-item" data-navigate="vtt"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-dice"/></svg>Table Virtuelle</div>
-    <div class="more-menu-item" data-navigate="aventures"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-compass"/></svg>Aventures</div>
-    <div class="more-menu-item admin-only" data-navigate="admin" style="display:none"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>Console MJ</div>
-    <div class="more-menu-item" data-navigate="account"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-user-circle"/></svg>Compte</div>
+  <!-- More-menu mobile : catégorisé + recherche -->
+  <div class="more-menu" id="more-menu" role="dialog" aria-label="Toutes les pages de navigation">
+    <button type="button" class="more-search" data-command-palette aria-label="Rechercher une page, un PNJ, une quête ou un objet">
+      <svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
+      <span>Rechercher une page, un PNJ…</span>
+    </button>
+
+    <button type="button" class="more-feature" data-navigate="vtt">
+      <svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-dice"/></svg>
+      <span class="more-feature-text"><strong>Jouer maintenant</strong><small>Table virtuelle</small></span>
+    </button>
+
+    <div class="more-group-label" role="presentation">Mon personnage</div>
+    <div class="more-grid">
+      <button type="button" class="more-menu-item" data-navigate="characters"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-scroll"/></svg>Personnage</button>
+      <button type="button" class="more-menu-item" data-navigate="shop"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-bag"/></svg>Boutique</button>
+      <button type="button" class="more-menu-item" data-navigate="collection"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-layers"/></svg>Collection</button>
+    </div>
+
+    <div class="more-group-label" role="presentation">Campagne</div>
+    <div class="more-grid">
+      <button type="button" class="more-menu-item" data-navigate="story"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-book"/></svg>Trame</button>
+      <button type="button" class="more-menu-item" data-navigate="quests"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sword"/></svg>Quêtes</button>
+      <button type="button" class="more-menu-item" data-navigate="agenda"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-calendar"/></svg>Agenda</button>
+      <button type="button" class="more-menu-item" data-navigate="achievements"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-trophy"/></svg>Hauts-Faits</button>
+    </div>
+
+    <div class="more-group-label" role="presentation">Monde</div>
+    <div class="more-grid">
+      <button type="button" class="more-menu-item" data-navigate="map"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-map"/></svg>Carte</button>
+      <button type="button" class="more-menu-item" data-navigate="world"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-globe"/></svg>Monde</button>
+      <button type="button" class="more-menu-item" data-navigate="npcs"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-users"/></svg>PNJ</button>
+      <button type="button" class="more-menu-item" data-navigate="bestiaire"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-paw"/></svg>Bestiaire</button>
+      <button type="button" class="more-menu-item" data-navigate="recettes"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-flame"/></svg>Recettes</button>
+    </div>
+
+    <div class="more-group-label" role="presentation">Groupe</div>
+    <div class="more-grid">
+      <button type="button" class="more-menu-item" data-navigate="players"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>Joueurs</button>
+      <button type="button" class="more-menu-item" data-navigate="bastion"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>Bastion</button>
+    </div>
+
+    <div class="more-group-label" role="presentation">Gestion</div>
+    <div class="more-grid">
+      <button type="button" class="more-menu-item" data-navigate="aventures"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-compass"/></svg>Aventures</button>
+      <button type="button" class="more-menu-item admin-only" data-navigate="admin" style="display:none"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>Console MJ</button>
+      <button type="button" class="more-menu-item" data-navigate="account"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-user-circle"/></svg>Compte</button>
+      <button type="button" class="more-menu-item" data-navigate="dashboard"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>Accueil</button>
+    </div>
   </div>
 
 </div>

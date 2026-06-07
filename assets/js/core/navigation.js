@@ -38,6 +38,7 @@ const _loaded = new Set();
 
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
+  closeMoreMenu(); // referme le menu mobile quelle que soit la source (clic, clavier, palette)
   unwatchAll(); // stopper tous les listeners temps réel de la page précédente
 
   // Reset des inline styles que certaines pages posent sur #main-content
@@ -81,11 +82,19 @@ export async function navigate(page) {
 }
 
 // ── More-menu mobile ───────────────────────────
+function _setMoreExpanded(open) {
+  document.querySelectorAll('[data-toggle-more]').forEach((b) =>
+    b.setAttribute('aria-expanded', String(open)));
+}
 export function toggleMoreMenu() {
-  document.getElementById('more-menu')?.classList.toggle('show');
+  const menu = document.getElementById('more-menu');
+  if (!menu) return;
+  _setMoreExpanded(menu.classList.toggle('show'));
 }
 export function closeMoreMenu() {
-  document.getElementById('more-menu')?.classList.remove('show');
+  const menu = document.getElementById('more-menu');
+  if (menu) menu.classList.remove('show');
+  _setMoreExpanded(false);
 }
 
 // ── Délégation d'événements globale ───────────
@@ -159,26 +168,61 @@ export function initEventDelegation() {
     if (e.key === 'Escape') {
       import('../shared/modal.js').then((m) => m.closeModalDirect());
       closeMoreMenu();
+      return;
     }
+    // Activation clavier des cibles de navigation non natives (<a> sans href, <div>).
+    // Les <button> gèrent Entrée/Espace nativement (→ event click).
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      const el = e.target.closest('[data-navigate]');
+      if (el && el.tagName !== 'BUTTON') {
+        e.preventDefault();
+        navigate(el.dataset.navigate);
+        closeMoreMenu();
+      }
+    }
+  });
+
+  _initNavA11y();
+}
+
+// Rend focusables/activables au clavier les cibles de nav qui ne sont pas des
+// <button> natifs (sidebar : <a> sans href, ligne de marque <div>).
+function _initNavA11y() {
+  document.querySelectorAll('[data-navigate]').forEach((el) => {
+    if (el.tagName === 'BUTTON') return;
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+    if (!el.hasAttribute('role'))     el.setAttribute('role', 'link');
   });
 }
 
 // ── Synchronisation de l'état actif de la nav ─
+function _setActive(el, isActive) {
+  el.classList.toggle('active', isActive);
+  if (isActive) el.setAttribute('aria-current', 'page');
+  else el.removeAttribute('aria-current');
+}
 function _syncNav(page) {
+  document.querySelectorAll('.sidebar-section.has-active, .sidebar-priority.has-active').forEach((el) => {
+    el.classList.remove('has-active');
+  });
   document.querySelectorAll('.nav-item[data-navigate]').forEach((el) => {
     const isActive = el.dataset.navigate === page;
-    el.classList.toggle('active', isActive);
-    // Ouvre automatiquement la section <details> parente si l'item actif y est replié
+    _setActive(el, isActive);
     if (isActive) {
-      const section = el.closest('.sidebar-section');
-      if (section && !section.open) section.open = true;
+      const section = el.closest('.sidebar-section, .sidebar-priority');
+      section?.classList.add('has-active');
+      if (section?.tagName === 'DETAILS' && !section.open) section.open = true;
     }
   });
+  const bottomPrimaryPages = new Set(['dashboard', 'characters', 'vtt', 'quests']);
   document.querySelectorAll('.bottom-nav-item[data-page]').forEach((el) =>
-    el.classList.toggle('active', el.dataset.page === page)
+    _setActive(el, el.dataset.page === page)
   );
-  document.querySelectorAll('.more-menu-item[data-navigate]').forEach((el) =>
-    el.classList.toggle('active', el.dataset.navigate === page)
+  document.querySelectorAll('[data-toggle-more]').forEach((el) => {
+    el.classList.toggle('active', !bottomPrimaryPages.has(page));
+  });
+  document.querySelectorAll('.more-menu-item[data-navigate], .more-feature[data-navigate]').forEach((el) =>
+    _setActive(el, el.dataset.navigate === page)
   );
 }
 
