@@ -13336,12 +13336,13 @@ function _msFilterBar(kind, chips, query) {
   const catFn     = kind === 'inv' ? '_vttMsInvCat' : '_vttMsSortCat';
   const searchFn  = kind === 'inv' ? '_vttMsInvSearch' : '_vttMsSortSearch';
   const clrFn     = kind === 'inv' ? '_vttMsInvClear' : '_vttMsSortClear';
+  // ch.label / ch.color viennent de noms de catégorie saisis par le joueur → échappés.
   const chipsHtml = chips.map(ch =>
-    `<button class="vtt-ms-fchip${activeCat===ch.key?' active':''}"${ch.color?` style="--chip-col:${ch.color}"`:''}
-      data-vtt-fn="${catFn}" data-vtt-args="${ch.key}|$this">${ch.label}</button>`
+    `<button class="vtt-ms-fchip${activeCat===ch.key?' active':''}"${ch.color?` style="--chip-col:${_esc(ch.color)}"`:''}
+      data-vtt-fn="${catFn}" data-vtt-args="${ch.key}|$this">${_esc(ch.label)}</button>`
   ).join('');
   return `<div class="vtt-ms-filter" data-kind="${kind}">
-    <div class="vtt-ms-fchips">${chipsHtml}</div>
+    ${chipsHtml ? `<div class="vtt-ms-fchips">${chipsHtml}</div>` : ''}
     <div class="vtt-ms-fsearch">
       <span class="vtt-ms-fsearch-ic">🔍</span>
       <input type="text" class="vtt-ms-fsearch-input" placeholder="Rechercher…"
@@ -13874,12 +13875,14 @@ function _msTabInventaire(c, uid, canEdit) {
     tres_rare:'#b47fff', legendaire:'#f59e0b',
   })[rar] || '#9ca3af';
 
-  // Barre de filtre : Tous + catégories présentes (apparaît dès 4 objets).
+  // Barre de filtre dès 4 objets : recherche toujours dispo ; puces de catégorie
+  // seulement s'il y en a plusieurs (inutiles sur une seule catégorie).
   const presentCats = Object.entries(cats).filter(([, g]) => g.length);
   let filterBar = '';
-  if (inv.length >= 4 && presentCats.length > 1) {
-    const chips = [{ key:'all', label:'Tous' },
-      ...presentCats.map(([cat]) => ({ key: cat, label: CAT_LABEL[cat] }))];
+  if (inv.length >= 4) {
+    const chips = presentCats.length > 1
+      ? [{ key:'all', label:'Tous' }, ...presentCats.map(([cat]) => ({ key: cat, label: CAT_LABEL[cat] }))]
+      : [];
     if (!chips.some(ch => ch.key === _msInvCat)) _msInvCat = 'all';
     filterBar = _msFilterBar('inv', chips, _msInvQuery);
   } else { _msInvCat = 'all'; _msInvQuery = ''; }
