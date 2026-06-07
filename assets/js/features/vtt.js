@@ -33,7 +33,7 @@ import {
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent } from '../shared/modal.js';
-import { _esc, _searchIncludes, appSplashHtml } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import PAGES from './pages.js';
@@ -4146,7 +4146,7 @@ async function _execAttack(srcId, tgtId) {
     </div>`;
   const _optBtnWithName = (o, i) => {
     const html = _optBtn(o, i);
-    const name = (o.label || '').toLowerCase().replace(/"/g, '');
+    const name = _norm(o.label || '').replace(/"/g, '');
     return html.replace('<button ', `<button data-name="${name}" `);
   };
 
@@ -4190,7 +4190,7 @@ async function _execAttack(srcId, tgtId) {
   if (canEditSrc) {
     // Carte d'action de base — même présentation (.cs-spellcard) que les sorts.
     const _basicCard = (icon, name, desc, col, fn, args) => `
-        <button class="cs-spellcard vtt-castcard" style="--type-col:${col}" data-name="${name.toLowerCase().replace(/"/g,'')}" data-vtt-fn="${fn}" data-vtt-args="${args}">
+        <button class="cs-spellcard vtt-castcard" style="--type-col:${col}" data-name="${_norm(name).replace(/"/g,'')}" data-vtt-fn="${fn}" data-vtt-args="${args}">
           <header class="cs-spellcard-head">
             <span class="cs-spellcard-icon">${icon}</span>
             <div class="cs-spellcard-id"><div class="cs-spellcard-name" title="${name}">${name}</div></div>
@@ -4301,7 +4301,7 @@ function _vttAoptFilter(tabId, btn) {
 
 /** Filtre les options du picker par texte (cherche dans data-name). */
 function _vttAoptSearch(raw) {
-  const q = (raw || '').toLowerCase().trim();
+  const q = _norm(raw || '');   // minuscules + sans accents (data-name est normalisé)
   const activeTab = document.querySelector('.vtt-aopt-tab.is-active')?.dataset.tab || '__all';
   document.querySelectorAll('.vtt-aopt-section').forEach(s => {
     const inTab = activeTab === '__all' || s.dataset.tabId === activeTab;
@@ -7144,8 +7144,7 @@ function _renderPageList() {
     return;
   }
 
-  const q = _pageSearch.trim().toLowerCase();
-  const matches = p => !q || (p.name||'').toLowerCase().includes(q);
+  const matches = p => _searchIncludes(p.name || '', _pageSearch);
 
   // Regroupe par dossier ('' = sans dossier, affiché en dernier)
   const groups = new Map();
@@ -8434,7 +8433,7 @@ function _renderEmotePicker() {
 function _vttFilterEmotes(q) {
   const favSet = new Set(_getFavs());
   const grid = document.getElementById('vtt-emote-grid'); if (!grid) return;
-  const filtered = q.trim() ? _emotes.filter(e => e.name.includes(q.trim().toLowerCase())) : _emotes;
+  const filtered = q.trim() ? _emotes.filter(e => _searchIncludes(e.name, q)) : _emotes;
   grid.innerHTML = _emoteGridHtml(filtered, favSet);
   const hide = !!q.trim();
   const recentSection = document.getElementById('vtt-emote-recent-section');
@@ -10668,10 +10667,10 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
   const members = allMembers.filter(m => !m.isGhost);
 
   // Filtre par recherche (pseudo OU nom personnage)
-  const q = (search || '').toLowerCase().trim();
+  const q = _norm(search || '');
   const filtered = q
-    ? members.filter(m => (m.pseudo||'').toLowerCase().includes(q)
-                       || (m.charName||'').toLowerCase().includes(q))
+    ? members.filter(m => _searchIncludes(m.pseudo || '', search)
+                       || _searchIncludes(m.charName || '', search))
     : members;
 
   // Trie : délégués actifs en premier, puis alphabétique
@@ -12132,9 +12131,9 @@ function _fmtTime(s) {
 // le champ est vidé. NB: on utilise style.display car les items portent
 // `display: flex` (classe) qui bat la règle UA `[hidden]{display:none}`.
 function _applyMusicFilter(query) {
-  const q = (query || '').trim().toLowerCase();
+  const q = _norm(query || '');
   const root = document.querySelector('.vtt-music-body'); if (!root) return;
-  const text = el => (el?.textContent || '').toLowerCase();
+  const text = el => _norm(el?.textContent || '');
   const show = (el, ok) => { if (el) el.style.display = ok ? '' : 'none'; };
 
   root.querySelectorAll('.vtt-music-cat').forEach(cat => {
@@ -13354,7 +13353,7 @@ function _msFilterBar(kind, chips, query) {
 
 // Applique le filtre Sac (catégorie + recherche) par show/hide, sans re-render.
 function _msApplyInvFilter() {
-  const q = _msInvQuery.toLowerCase().trim();
+  const q = _norm(_msInvQuery);
   const groups = document.querySelectorAll('#vtt-mini-panel .vtt-ms-inv-group');
   let anyVisible = false;
   groups.forEach(g => {
@@ -13373,7 +13372,7 @@ function _msApplyInvFilter() {
 
 // Applique le filtre Sorts (catégorie / deck actif + recherche) sans re-render.
 function _msApplySortFilter() {
-  const q = _msSortQuery.toLowerCase().trim();
+  const q = _norm(_msSortQuery);
   const cards = document.querySelectorAll('#vtt-mini-panel .vtt-ms-spellgrid .cs-spellcard');
   let anyVisible = false;
   cards.forEach(card => {
@@ -13786,7 +13785,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
     ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${(!canActivate && !s.actif)?'Doit être validé par le MJ pour entrer dans le Deck':(s.actif?'Retirer du deck':'Ajouter au deck')}"></div>`
     : `<div class="toggle ${s.actif?'on':''}"></div>`;
   return `<article class="cs-spellcard ${s.actif?'is-actif':''}" style="--type-col:${typeCol}"
-      data-name="${_esc((s.nom||'').toLowerCase())}" data-cat="${_esc(s.catId||'__none')}" data-actif="${s.actif?1:0}">
+      data-name="${_esc(_norm(s.nom||''))}" data-cat="${_esc(s.catId||'__none')}" data-actif="${s.actif?1:0}">
     <header class="cs-spellcard-head">
       ${toggle}
       <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
@@ -13907,7 +13906,7 @@ function _msTabInventaire(c, uid, canEdit) {
         : (item.typeArmure ? `${item.typeArmure}${item.ca?' · CA +'+item.ca:''}` : '');
       const rarDot = item.rarete
         ? `<span class="vtt-ms-inv-rar" style="background:${_rarColor(item.rarete)}"></span>` : '';
-      html += `<div class="vtt-ms-inv-item${isEq?' is-equipped':''}" data-name="${_esc((item.nom||'').toLowerCase())}">
+      html += `<div class="vtt-ms-inv-item${isEq?' is-equipped':''}" data-name="${_esc(_norm(item.nom||''))}">
         ${rarDot}
         ${item.image
           ? `<img class="vtt-ms-inv-img" src="${item.image}" alt="">`

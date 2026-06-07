@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
-import { _esc, modStr } from '../shared/html.js';
+import { _esc, _norm, modStr } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import {
@@ -694,13 +694,13 @@ function renderCharLedger(c, canEdit) {
 
   // Filtres (état module-local pour ne pas être perdu au re-render)
   const filter = _csV3LedgerFilter;
-  const q = (filter.search || '').toLowerCase();
+  const q = _norm(filter.search || '');   // minuscules + sans accents
   const filtered = all.filter(e => {
     if (filter.kind === 'rcpt' && e.sign < 0) return false;
     if (filter.kind === 'dep'  && e.sign > 0) return false;
     if (!q) return true;
-    return (e.libelle || '').toLowerCase().includes(q)
-        || (e.date || '').toLowerCase().includes(q);
+    return _norm(e.libelle || '').includes(q)
+        || _norm(e.date || '').includes(q);
   });
   const limit = filter.limit || 25;
   const visible = filtered.slice(0, limit);
@@ -2169,7 +2169,7 @@ function renderCharInventaireV3(c, canEdit) {
 
   // État du filtre / search module-local
   const filter = _csV3InvFilter;
-  const q = (filter.search || '').toLowerCase();
+  const q = _norm(filter.search || '');   // minuscules + sans accents
 
   // Stack : regroupe les items identiques (même itemId ou même nom+rareté+template+prix)
   // Garde la liste d'indices originaux pour les actions (vente/envoi/suppression bulk).
@@ -2189,7 +2189,7 @@ function renderCharInventaireV3(c, canEdit) {
   const filteredInv = [...stackMap.values()].filter(({ it }) => {
     if (filter.cat !== 'all' && _detectInvCategory(it) !== filter.cat) return false;
     if (!q) return true;
-    const hay = `${it.nom||''} ${it.type||''} ${it.template||''} ${it.description||''}`.toLowerCase();
+    const hay = _norm(`${it.nom||''} ${it.type||''} ${it.template||''} ${it.description||''}`);
     return hay.includes(q);
   });
 

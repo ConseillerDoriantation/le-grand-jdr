@@ -919,7 +919,7 @@ async function _achRenderContent() {
   const all        = STORE.items || [];
   const filter     = STORE.filter || 'all';
   const charFilter = STORE.charFilter || 'all';
-  const search     = (STORE.search || '').trim().toLowerCase();
+  const search     = _normalize(STORE.search || '');   // minuscules + sans accents
   const isAdmin    = STATE.isAdmin;
 
   // 1. Filtre secret (joueurs ne voient pas les HF secrets)
@@ -931,8 +931,8 @@ async function _achRenderContent() {
   // 4. Recherche
   if (search) {
     filtered = filtered.filter(a =>
-      (a.titre || '').toLowerCase().includes(search) ||
-      (a.description || '').toLowerCase().includes(search)
+      _normalize(a.titre || '').includes(search) ||
+      _normalize(a.description || '').includes(search)
     );
   }
 

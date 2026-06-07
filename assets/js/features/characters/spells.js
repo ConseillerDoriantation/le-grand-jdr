@@ -4,7 +4,7 @@ import { registerActions } from '../../core/actions.js';
 import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateModalContent, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { _esc, _nl2br } from '../../shared/html.js';
+import { _esc, _nl2br, _norm } from '../../shared/html.js';
 import { getMod, calcPMMax, calcDeckMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
@@ -156,7 +156,7 @@ export function renderCharDeck(c, canEdit) {
   const pmDelta  = armorSet.modifiers?.spellPmDelta || 0;
 
   // ── État UI persistant (filtres / recherche / pliage) ─────────────
-  const search   = (_sortsSearch || '').toLowerCase().trim();
+  const search   = _norm(_sortsSearch || '');   // minuscules + sans accents
   const view     = _sortsView || 'all';          // 'all' | 'deck'
   const typeFlt  = _sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'soin' | 'enchantement' | 'affliction' | 'utilitaire'
   const collapsed = _sortsCatCollapsed || {};     // { catId: true } = replié
@@ -172,10 +172,10 @@ export function renderCharDeck(c, canEdit) {
   const matchSpell = (s) => {
     if (view === 'deck' && !s.actif) return false;
     if (search) {
-      const hay = [
+      const hay = _norm([
         s.nom || '', s.effet || '', s.noyau || '',
         ...(s.runes || []),
-      ].join(' ').toLowerCase();
+      ].join(' '));
       if (!hay.includes(search)) return false;
     }
     if (typeFlt) {

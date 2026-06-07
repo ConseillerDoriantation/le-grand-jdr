@@ -7,7 +7,7 @@
 
 import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
-import { _esc } from '../shared/html.js';
+import { _esc, _norm } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { showNotif } from '../shared/notifications.js';
 import { lsJson } from '../shared/local-storage.js';
@@ -327,7 +327,7 @@ function _onInput() {
   // @ trigger → tag mention
   const atIdx = text.lastIndexOf('@');
   if (atIdx !== -1 && !text.substring(atIdx + 1).includes(' ')) {
-    _pickerQuery = text.substring(atIdx + 1).toLowerCase();
+    _pickerQuery = _norm(text.substring(atIdx + 1));
     _atStart     = { node, atIndex: atIdx };
     _pickerMode  = 'tag';
     _openPicker();
@@ -339,7 +339,7 @@ function _onInput() {
   if (brIdx !== -1) {
     const after = text.substring(brIdx + 1);
     if (!after.includes(']') && !after.includes(' ')) {
-      _bracketQuery = after.toLowerCase();
+      _bracketQuery = _norm(after);
       _bracketStart = { node, bracketIndex: brIdx };
       _pickerMode   = 'dice';
       _diceSel      = null;
@@ -383,7 +383,7 @@ function _renderPickerContent() {
 
   for (const [type, cfg] of Object.entries(TAG_TYPES)) {
     const filtered = (_pickerData[type] || [])
-      .filter(item => !q || item.label.toLowerCase().includes(q))
+      .filter(item => !q || _norm(item.label).includes(q))
       .slice(0, 6);
     if (!filtered.length) continue;
 
@@ -450,7 +450,7 @@ function _renderDicePickerContent() {
   // Step 1 : liste des compétences
   const q       = _bracketQuery;
   const skills  = _getDiceSkills();
-  const filtered = skills.filter(s => !q || s.name.toLowerCase().includes(q));
+  const filtered = skills.filter(s => !q || _norm(s.name).includes(q));
   _pickerFlat = filtered.map(s => ({ type: 'dice', label: s.name, stat: s.stat }));
 
   let rows = '';

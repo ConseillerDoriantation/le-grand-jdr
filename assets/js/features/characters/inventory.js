@@ -5,7 +5,7 @@ import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { _esc } from '../../shared/html.js';
+import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
@@ -214,7 +214,7 @@ function _invRowChips(item) {
 
 export function renderCharInventaire(c, canEdit) {
   const invRaw = c.inventaire || [];
-  const q = (_charInvSearch || '').toLowerCase().trim();
+  const q = _norm(_charInvSearch || '');   // minuscules + sans accents
 
   // ── Regrouper par itemId + nom ──
   const grouped = [];
@@ -247,8 +247,8 @@ export function renderCharInventaire(c, canEdit) {
   // ── Rendu d'une ligne compacte ──
   const _renderRow = (g) => {
     const item = g.item;
-    const nomLower = (item.nom || '').toLowerCase();
-    const hidden = q && !nomLower.includes(q);
+    const nomNorm = _norm(item.nom || '');   // pour la recherche (sans accents/casse)
+    const hidden = q && !nomNorm.includes(q);
     const rareteN = parseInt(item.rarete) || 0;
     const rareteL = RARETE_NAMES[rareteN] || '';
     const rareteC = _rareteColor(rareteL) || 'var(--border)';
@@ -259,7 +259,7 @@ export function renderCharInventaire(c, canEdit) {
     const chips = _invRowChips(item);
     const nomEsc = _esc(item.nom || '?');
 
-    return `<div class="inv-row${hidden ? ' inv-row--hidden' : ''}" data-nom="${_esc(nomLower)}" style="--rc:${rareteC}">
+    return `<div class="inv-row${hidden ? ' inv-row--hidden' : ''}" data-nom="${_esc(nomNorm)}" style="--rc:${rareteC}">
       <div class="inv-row-body">
         <span class="inv-row-nom">${nomEsc}</span>
         ${isEquipped ? `<span class="inv-row-eq" title="${equippedSlots.join(', ')}">✓ Équipé</span>` : ''}
@@ -310,7 +310,7 @@ export function renderCharInventaire(c, canEdit) {
     // Groupes par catégorie
     for (const cat of CATS) {
       if (!cat.items.length) continue;
-      const allHidden = q && cat.items.every(g => !((g.item.nom || '').toLowerCase().includes(q)));
+      const allHidden = q && cat.items.every(g => !_norm(g.item.nom || '').includes(q));
       const openState = _invCatOpen[cat.id] !== false;
       html += `<details class="inv-cat${allHidden ? ' inv-cat--hidden' : ''}" id="inv-cat-${cat.id}"
         ${openState ? 'open' : ''}>
@@ -337,7 +337,7 @@ export function renderCharInventaire(c, canEdit) {
 
 // ── Filtrage live par recherche ───────────────
 export function filterInvRows(val) {
-  const q = (val || '').toLowerCase().trim();
+  const q = _norm(val || '');   // minuscules + sans accents (data-nom est déjà normalisé)
   document.querySelectorAll('.inv-row').forEach(r => {
     r.classList.toggle('inv-row--hidden', !!(q && !(r.dataset.nom || '').includes(q)));
   });
@@ -960,12 +960,12 @@ export async function addInvItem() {
   };
 
   const renderItems = (catId, search) => {
-    const q = (search || '').toLowerCase().trim();
+    const q = _norm(search || '');   // minuscules + sans accents
     let items;
     if (q) {
       items = shopItems.filter(i =>
-        i.nom.toLowerCase().includes(q) ||
-        (i.description || i.effet || '').toLowerCase().includes(q)
+        _norm(i.nom || '').includes(q) ||
+        _norm(i.description || i.effet || '').includes(q)
       );
     } else if (catId === '__recent__') {
       items = getRecents().map(id => shopItems.find(i => i.id === id)).filter(Boolean);

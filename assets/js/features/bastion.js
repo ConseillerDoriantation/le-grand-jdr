@@ -20,7 +20,7 @@ import { tryDoc } from '../shared/crud.js';
 import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
-import { _esc, appSplashHtml } from '../shared/html.js';
+import { _esc, _norm, appSplashHtml } from '../shared/html.js';
 import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { useGold } from '../shared/economy.js';
@@ -948,8 +948,8 @@ function _renderItemPicker(i) {
     if (filterCat === 'none') filtered = filtered.filter(s => !s.categorieId || !_findShopCat(s.categorieId));
     else filtered = filtered.filter(s => s.categorieId === filterCat);
   }
-  const q = (search || '').toLowerCase().trim();
-  if (q) filtered = filtered.filter(s => (s.nom || '').toLowerCase().includes(q));
+  const q = _norm(search || '');   // minuscules + sans accents
+  if (q) filtered = filtered.filter(s => _norm(s.nom || '').includes(q));
 
   // Compte par catégorie (pour le sélecteur)
   const catCounts = { all: shop.length };
@@ -996,8 +996,8 @@ function _bastionSetPickerSearch(i, val) {
     if (cat === 'none') filtered = filtered.filter(s => !s.categorieId || !_findShopCat(s.categorieId));
     else filtered = filtered.filter(s => s.categorieId === cat);
   }
-  const q = (search || '').toLowerCase().trim();
-  if (q) filtered = filtered.filter(s => (s.nom || '').toLowerCase().includes(q));
+  const q = _norm(search || '');   // minuscules + sans accents
+  if (q) filtered = filtered.filter(s => _norm(s.nom || '').includes(q));
   const sel = document.getElementById(`ed-items-shop-${i}`);
   if (sel) {
     sel.innerHTML = filtered.length
@@ -1901,7 +1901,7 @@ function _coffreItemCategory(item) {
 
 
 function _bastionSetCoffreFilter(cat) { STORE.coffreFilter = cat; _renderPage(); }
-function _bastionSetCoffreSearch(val) { STORE.coffreSearch = (val || '').toLowerCase().trim(); _renderPage(); }
+function _bastionSetCoffreSearch(val) { STORE.coffreSearch = _norm(val || ''); _renderPage(); }
 
 function _renderCoffre(b) {
   const coffre = (b.coffre || []);
@@ -1972,7 +1972,7 @@ function _renderCoffre(b) {
     }
   }
   if (STORE.coffreSearch) {
-    filtered = filtered.filter(it => (it.nom || '').toLowerCase().includes(STORE.coffreSearch));
+    filtered = filtered.filter(it => _norm(it.nom || '').includes(STORE.coffreSearch));
   }
 
   // Tri : plus récents d'abord
