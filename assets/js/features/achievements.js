@@ -791,7 +791,16 @@ function _renderTimeline(items) {
 
   if (!sorted.length) return '';
 
-  const cardHTML = (item, side) => {
+  const groups = [];
+  for (const item of sorted) {
+    const dateKey = _toISO(item.date);
+    const key = dateKey || `__single_${item.id}`;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(item);
+    else groups.push({ key, dateKey, items: [item] });
+  }
+
+  const cardHTML = (item) => {
     const cat     = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
     const contribs = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
     const imgEl   = item.imageUrl
@@ -832,20 +841,38 @@ function _renderTimeline(items) {
     </div>`;
   };
 
+  const nodeHTML = (group) => {
+    const datedItems = group.items.filter(item => parseDate(item.date));
+    const source = datedItems[0] || group.items[0];
+    const cat = ACH_CATS.find(c => c.id === (source.categorie || 'epique')) || ACH_CATS[0];
+    const dateText = group.dateKey ? _formatDateFr(group.dateKey) : _formatDateFr(source.date);
+    const dotText = group.items.length > 1 ? group.items.length : cat.emoji;
+    return `<div class="tl-node-wrap">
+      <div class="tl-node">
+        <div class="tl-node-dot" style="--c:${cat.color};--c-glow:${cat.glow}" title="${group.items.length} haut-fait${group.items.length > 1 ? 's' : ''}">${dotText}</div>
+        ${dateText ? `<div class="tl-node-date" style="color:${cat.color}">${_esc(dateText)}</div>` : ''}
+      </div>
+    </div>`;
+  };
+
   return `<div class="timeline">
-    ${sorted.map((item, idx) => {
-      const side  = idx % 2 === 0 ? 'left' : 'right';
-      const cat   = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+    ${groups.map((group, idx) => {
       const delay = `${idx * 60}ms`;
-      return `<div class="tl-item ${side}" style="animation-delay:${delay}">
-        ${side === 'left'  ? cardHTML(item, side) : '<div class="tl-spacer"></div>'}
-        <div class="tl-node-wrap">
-          <div class="tl-node">
-            <div class="tl-node-dot" style="--c:${cat.color};--c-glow:${cat.glow}">${cat.emoji}</div>
-            ${(() => { const d = _formatDateFr(item.date); return d ? `<div class="tl-node-date" style="color:${cat.color}">${_esc(d)}</div>` : ''; })()}
+      if (group.items.length > 1) {
+        return `<div class="tl-item tl-group--multi" style="animation-delay:${delay}">
+          ${nodeHTML(group)}
+          <div class="tl-group-cards">
+            ${group.items.map(item => cardHTML(item)).join('')}
           </div>
-        </div>
-        ${side === 'right' ? cardHTML(item, side) : '<div class="tl-spacer"></div>'}
+        </div>`;
+      }
+
+      const item = group.items[0];
+      const side  = idx % 2 === 0 ? 'left' : 'right';
+      return `<div class="tl-item ${side}" style="animation-delay:${delay}">
+        ${side === 'left'  ? cardHTML(item) : '<div class="tl-spacer"></div>'}
+        ${nodeHTML(group)}
+        ${side === 'right' ? cardHTML(item) : '<div class="tl-spacer"></div>'}
       </div>`;
     }).join('')}
   </div>`;

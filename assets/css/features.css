@@ -2211,7 +2211,7 @@ body.ach-dragging * { cursor:grabbing !important; }
   margin-bottom:28px;
   animation:tl-in .55s cubic-bezier(.22,1,.36,1) both;
 }
-.tl-node-wrap { grid-column:2; display:flex; justify-content:center; }
+.tl-node-wrap { grid-column:2; display:flex; justify-content:center; position:relative; z-index:3; }
 .tl-node { display:flex; flex-direction:column; align-items:center; padding-top:10px; }
 .tl-node-dot {
   width:34px; height:34px; border-radius:50%;
@@ -2223,8 +2223,14 @@ body.ach-dragging * { cursor:grabbing !important; }
   animation:ach-pulse 2.6s ease-in-out infinite;
 }
 .tl-node-date {
-  font-family:'Cinzel',serif; font-size:.62rem; font-weight:700;
-  letter-spacing:.08em; margin-top:7px; text-align:center; line-height:1.3; white-space:nowrap;
+  position:relative; z-index:4;
+  max-width:76px; box-sizing:border-box;
+  padding:3px 5px; border-radius:7px;
+  background:rgba(8,13,21,.86);
+  border:1px solid color-mix(in srgb, currentColor 28%, transparent);
+  font-family:'Cinzel',serif; font-size:.58rem; font-weight:700;
+  letter-spacing:.04em; margin-top:7px; text-align:center; line-height:1.25;
+  white-space:normal; overflow-wrap:normal;
 }
 .tl-spacer { display:block; }
 .tl-item.left  .tl-card { grid-column:1; }
@@ -2285,6 +2291,38 @@ body.ach-dragging * { cursor:grabbing !important; }
   font-family:'Cinzel',serif; font-weight:700; font-size:.6rem;
 }
 .tl-card-admin { display:flex; gap:5px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+
+.tl-group--multi {
+  display:block;
+  padding-top:2px;
+}
+.tl-group--multi .tl-node-wrap {
+  position:relative;
+  z-index:3;
+  display:flex;
+  justify-content:center;
+  margin-bottom:14px;
+}
+.tl-group--multi .tl-node {
+  padding-top:0;
+}
+.tl-group--multi .tl-node-dot {
+  font-family:'Cinzel',serif;
+  font-size:.82rem;
+  font-weight:800;
+}
+.tl-group-cards {
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+  gap:14px;
+  align-items:start;
+}
+.tl-group--multi .tl-card::before,
+.tl-group--multi .tl-card::after {
+  display:none;
+}
 
 /* ── Lightbox enrichie ─────────────────────────────────────── */
 .ach-lb-info {
