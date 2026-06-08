@@ -6,19 +6,58 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _trunc } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { uploadPng } from '../shared/image-upload.js';
+import { uploadJpeg, uploadPng } from '../shared/image-upload.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 
 // ── État local ───────────────────────────────────────────────────────────────
 const STORE = {
   cards: [],
-  templateUrl: '',   // dos de carte (image template partagée)
+  templateUrl: '',   // dos de carte historique / fallback
+  backImages: [],
 };
 let _sortable = null;
 
+function normalizeBackImages(rawBackImages, templateUrl = '', backImagesById = null, backImageOrder = []) {
+  if (backImagesById && typeof backImagesById === 'object') {
+    const orderedIds = Array.isArray(backImageOrder) ? backImageOrder : [];
+    const ordered = orderedIds
+      .map(id => backImagesById[id] ? { id, url: backImagesById[id] } : null)
+      .filter(Boolean);
+    const missing = Object.entries(backImagesById)
+      .filter(([id, url]) => url && !orderedIds.includes(id))
+      .map(([id, url]) => ({ id, url }));
+    const images = [...ordered, ...missing];
+    return images.length ? images : (templateUrl ? [{ id: 'legacy_template', url: templateUrl }] : []);
+  }
+
+  const images = (Array.isArray(rawBackImages) ? rawBackImages : [])
+    .map((item, index) => {
+      if (typeof item === 'string') return item ? { id: `back_${index}`, url: item } : null;
+      if (item?.url) return { id: item.id || `back_${index}`, url: item.url };
+      return null;
+    })
+    .filter(Boolean);
+  return images.length ? images : (templateUrl ? [{ id: 'legacy_template', url: templateUrl }] : []);
+}
+
 async function loadSettings() {
   const settings = await loadCollection('collectionSettings');
-  STORE.templateUrl = settings[0]?.templateUrl || '';
+  const doc = settings[0] || {};
+  const backImages = normalizeBackImages(
+    doc.backImages,
+    doc.templateUrl || '',
+    doc.backImagesById,
+    doc.backImageOrder
+  );
+  STORE.templateUrl = doc.templateUrl || backImages[0]?.url || '';
+  STORE.backImages = backImages;
+}
+
+function getCardBackImage(card) {
+  return STORE.backImages.find(back => back.id === card?.backImageId)?.url
+    || card?.backImageUrl
+    || STORE.templateUrl
+    || '';
 }
 
 // Un joueur ne voit le visuel + les infos que si la carte est débloquée.
@@ -115,11 +154,12 @@ function _adminCardHtml(c, index) {
   const title = c.nom || 'Carte';
   const desc = c.description ? _trunc(c.description, 118) : 'Aucun défi renseigné.';
   const hasFront = !!c.imageUrl;
-  const hasTemplate = !!STORE.templateUrl;
+  const backImage = getCardBackImage(c);
+  const hasTemplate = !!backImage;
   const art = hasFront
     ? `<img src="${_esc(c.imageUrl)}" loading="lazy" decoding="async" alt="${_esc(title)}">`
     : hasTemplate
-      ? `<img src="${_esc(STORE.templateUrl)}" loading="lazy" decoding="async" alt="Dos de carte"><span class="coll-admin-art-note">Recto manquant</span>`
+      ? `<img src="${_esc(backImage)}" loading="lazy" decoding="async" alt="Dos de carte"><span class="coll-admin-art-note">Recto manquant</span>`
       : `<div class="coll-admin-empty-art"><span>${_esc(c.emoji || '🃏')}</span><small>Recto manquant</small></div>`;
   const artClass = `coll-admin-art${hasFront ? '' : ' coll-admin-art--template'}`;
   const unlockLabel = c.unlocked ? 'Débloquée' : 'Verrouillée';
@@ -153,7 +193,7 @@ function _adminCardHtml(c, index) {
 function _cardHtml(c) {
   const seeFace = _canSeeFace(c);
   const masked  = _challengeMasked(c);
-  const back    = STORE.templateUrl || '';
+  const back    = getCardBackImage(c);
 
   // Recto
   let front;
@@ -228,7 +268,8 @@ function presentCard(id) {
   if (!c) return;
   const seeFace = _canSeeFace(c);
   const masked  = _challengeMasked(c);
-  const img     = seeFace ? (c.imageUrl || (STATE.isAdmin ? (STORE.templateUrl || '') : '')) : (STORE.templateUrl || '');
+  const back    = getCardBackImage(c);
+  const img     = seeFace ? (c.imageUrl || (STATE.isAdmin ? back : '')) : back;
   const title   = seeFace ? (c.nom || 'Carte') : 'Carte mystère';
 
   const art = img
@@ -294,31 +335,85 @@ async function toggleUnlock(id) {
 }
 
 // ── Dos de carte (template) ──────────────────────────────────────────────────
+function getBackImagesInput() {
+  const raw = document.getElementById('tpl-img-b64')?.value || '[]';
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeBackImages(parsed);
+  } catch (_) {
+    return raw ? normalizeBackImages([raw]) : [];
+  }
+}
+
+function setBackImagesInput(images) {
+  const el = document.getElementById('tpl-img-b64');
+  if (el) el.value = JSON.stringify(normalizeBackImages(images));
+}
+
+function renderBackImagesPreview() {
+  const preview = document.getElementById('tpl-img-preview');
+  if (!preview) return;
+  const images = getBackImagesInput();
+  preview.innerHTML = images.length
+    ? images.map((back, index) => `
+      <div class="coll-back-thumb">
+        <img src="${_esc(back.url)}" alt="Dos ${index + 1}">
+        <button class="btn-icon coll-back-remove" data-action="removeBackImage" data-index="${index}" data-stop-propagation title="Retirer">×</button>
+      </div>
+    `).join('')
+    : '<div class="muted">Aucun dos ajouté.</div>';
+}
+
 function openTemplateModal() {
   openModal('🖼️ Dos de carte', `
-    <p class="coll-modal-hint">Image affichée au dos des cartes et sur les cartes non encore débloquées.</p>
-    <div class="form-group"><label>Image du dos</label>
+    <p class="coll-modal-hint">Images affichées au dos des cartes et sur les cartes non encore débloquées.</p>
+    <div class="form-group"><label>Images du dos</label>
       <div class="sh-upload-simple">
-        <input type="file" id="tpl-img-file" accept="image/*" data-change="previewUploadPng" data-preview="tpl-img-preview" data-b64="tpl-img-b64">
+        <input type="file" id="tpl-img-file" accept="image/*" multiple data-change="previewUploadBackImages">
         <input type="hidden" id="tpl-img-b64">
       </div>
-      <div id="tpl-img-preview">${STORE.templateUrl ? `<img src="${_esc(STORE.templateUrl)}" style="max-height:160px;margin-top:.4rem;display:block;border-radius:10px">` : ''}</div>
+      <div id="tpl-img-preview" class="coll-back-list"></div>
     </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveTemplate">Enregistrer</button>
   `);
-  const hidden = document.getElementById('tpl-img-b64');
-  if (hidden) hidden.value = STORE.templateUrl;
+  setBackImagesInput(STORE.backImages);
+  renderBackImagesPreview();
 }
 
 async function saveTemplate() {
-  const url = document.getElementById('tpl-img-b64')?.value || '';
+  const backImages = getBackImagesInput();
+  const backImagesById = Object.fromEntries(backImages.map(back => [back.id, back.url]));
+  const backImageOrder = backImages.map(back => back.id);
+  const payload = { templateUrl: '', backImagesById, backImageOrder };
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
+  if (payloadBytes > 900_000) {
+    showNotif("Trop d'images dos dans un seul enregistrement. Supprime-en ou utilise des images plus legeres.", 'error');
+    return;
+  }
   const settings = await loadCollection('collectionSettings');
-  if (await tryUpsert('collectionSettings', settings[0]?.id || null, { templateUrl: url })) {
-    STORE.templateUrl = url;
+  if (await tryUpsert('collectionSettings', settings[0]?.id || null, payload)) {
+    STORE.templateUrl = backImages[0]?.url || '';
+    STORE.backImages = backImages;
     closeModal();
     showNotif('Dos de carte mis à jour.', 'success');
     await renderCollectionPage();
   }
+}
+
+function renderCardBackPicker(selectedId = '', selectedUrl = '') {
+  if (!STORE.backImages.length) {
+    return '<div class="muted">Ajoute d’abord des images dos dans la gestion admin.</div>';
+  }
+  const selected = selectedId || STORE.backImages.find(back => back.url === selectedUrl)?.id || STORE.backImages[0]?.id || '';
+  return `
+    <div class="coll-back-picker">
+      ${STORE.backImages.map((back, index) => `
+        <label class="coll-back-choice ${back.id === selected ? 'is-selected' : ''}">
+          <input type="radio" name="cc-back-image" value="${_esc(back.id)}" ${back.id === selected ? 'checked' : ''}>
+          <img src="${_esc(back.url)}" alt="Dos ${index + 1}">
+        </label>
+      `).join('')}
+    </div>`;
 }
 
 // ── Ajout / édition d'une carte ──────────────────────────────────────────────
@@ -341,6 +436,9 @@ function openCollectionModal(card = null) {
       </div>
       <div id="sc-img-preview">${card?.imageUrl ? `<img src="${_esc(card.imageUrl)}" style="max-height:120px;margin-top:.4rem;display:block;border-radius:8px">` : ''}</div>
     </div>
+    <div class="form-group"><label>Image dos associée</label>
+      ${renderCardBackPicker(card?.backImageId || '', card?.backImageUrl || '')}
+    </div>
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveCard" data-id="${card?.id || ''}">Enregistrer</button>
   `);
 }
@@ -350,6 +448,7 @@ async function saveCard(id = '') {
   const data = {
     nom:         document.getElementById('cc-nom')?.value?.trim() || 'Carte',
     imageUrl:    document.getElementById('cat-img-b64')?.value || '',
+    backImageId: document.querySelector('input[name="cc-back-image"]:checked')?.value || STORE.backImages[0]?.id || '',
     description: document.getElementById('cc-desc')?.value || '',
     descMasquee: !!document.getElementById('cc-masque')?.checked,
   };
@@ -376,6 +475,26 @@ async function deleteCard(id) {
   await renderCollectionPage();
 }
 
+async function previewUploadBackImages(el) {
+  const files = Array.from(document.getElementById(el.id)?.files || []);
+  if (!files.length) return;
+  const images = getBackImagesInput();
+  for (const file of files) {
+    const b64 = await uploadJpeg(file, { max: 420, quality: 0.72 });
+    if (b64) images.push({ id: `back_${Date.now()}_${images.length}`, url: b64 });
+  }
+  setBackImagesInput(images);
+  renderBackImagesPreview();
+  el.value = '';
+}
+
+function removeBackImage(index) {
+  const images = getBackImagesInput();
+  images.splice(Number(index), 1);
+  setBackImagesInput(images);
+  renderBackImagesPreview();
+}
+
 registerActions({
   openCollectionModal: () => openCollectionModal(),
   openTemplateModal:   () => openTemplateModal(),
@@ -386,5 +505,7 @@ registerActions({
   editCard:     (btn) => editCard(btn.dataset.id),
   toggleUnlock: (btn) => toggleUnlock(btn.dataset.id),
   deleteCard:   (btn) => deleteCard(btn.dataset.id),
+  previewUploadBackImages: (el) => previewUploadBackImages(el),
+  removeBackImage: (btn) => removeBackImage(btn.dataset.index),
   previewUploadPng: (el) => { const f = document.getElementById(el.id)?.files?.[0]; if (f) uploadPng(f, { previewId: el.dataset.preview, hiddenId: el.dataset.b64 }); },
 });
