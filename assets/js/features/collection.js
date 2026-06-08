@@ -6,7 +6,8 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _trunc } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { uploadJpeg, uploadPng } from '../shared/image-upload.js';
+import { uploadJpeg } from '../shared/image-upload.js';
+import { attachDropAndCrop } from '../shared/image-crop.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 
 // ── État local ───────────────────────────────────────────────────────────────
@@ -16,6 +17,7 @@ const STORE = {
   backImages: [],
 };
 let _sortable = null;
+let _cardImageCropper = null;
 
 function normalizeBackImages(rawBackImages, templateUrl = '', backImagesById = null, backImageOrder = []) {
   if (backImagesById && typeof backImagesById === 'object') {
@@ -221,11 +223,18 @@ function _cardHtml(c) {
       : (c.description
           ? `<div class="coll-defi">${_nl2br(_esc(c.description))}</div>`
           : `<div class="coll-defi coll-defi--empty">Aucun défi renseigné.</div>`);
-    back2 = `<div class="coll-back-info">
-      <div class="coll-back-title">${_esc(c.nom || 'Carte')}</div>
-      <div class="coll-back-label">Défi à relever</div>
-      ${defi}
-    </div>`;
+    back2 = STATE.isAdmin
+      ? `<div class="coll-back-info">
+        <div class="coll-back-title">${_esc(c.nom || 'Carte')}</div>
+        <div class="coll-back-label">Défi à relever</div>
+        ${defi}
+      </div>`
+      : (back
+          ? `<img class="coll-back-image" src="${_esc(back)}" loading="lazy" decoding="async" alt="Dos de carte">`
+          : `<div class="coll-back-info coll-back-info--mystery">
+            <div class="coll-back-ic">🃏</div>
+            <div class="coll-back-title">Dos de carte</div>
+          </div>`);
   }
 
   const badges = STATE.isAdmin ? `
@@ -418,45 +427,136 @@ function renderCardBackPicker(selectedId = '', selectedUrl = '') {
 
 // ── Ajout / édition d'une carte ──────────────────────────────────────────────
 function openCollectionModal(card = null) {
-  openModal(card ? '✏️ Modifier la carte' : '🃏 Nouvelle carte', `
-    <div class="form-group"><label>Nom</label>
-      <input class="input-field" id="cc-nom" value="${_esc(card?.nom || '')}" placeholder="Nom de la carte">
-    </div>
-    <div class="form-group"><label>Description / Défi à relever</label>
-      <textarea class="input-field" id="cc-desc" rows="4" placeholder="Ex : Vaincre le dragon de cendres sans tomber au combat…">${_esc(card?.description || '')}</textarea>
-    </div>
-    <label class="coll-check">
-      <input type="checkbox" id="cc-masque" ${card?.descMasquee ? 'checked' : ''}>
-      <span>🙈 Masquer le défi aux joueurs <em>(le nom reste visible, le défi s'affiche « secret »)</em></span>
-    </label>
-    <div class="form-group"><label>Image recto <span style="color:var(--text-dim);font-weight:400">(opt.)</span></label>
-      <div class="sh-upload-simple">
-        <input type="file" id="cat-img-file" accept="image/*" data-change="previewUploadPng" data-preview="sc-img-preview" data-b64="cat-img-b64">
-        <input type="hidden" id="cat-img-b64" value="${_esc(card?.imageUrl || '')}">
+  _cardImageCropper?.destroy();
+  _cardImageCropper = null;
+  const imageStyle = card?.imageUrl ? `background-image:url('${_esc(card.imageUrl).replace(/'/g, "%27")}')` : '';
+
+  openModal('', `
+    <div class="mn-shell coll-card-editor">
+      <div class="mn-hero coll-card-editor-hero">
+        <div class="mn-hero-bg coll-card-editor-bg" id="cc-hero-bg" style="${imageStyle}"></div>
+        <div class="mn-hero-fade"></div>
+
+        <div id="cc-drop-zone" class="mn-hero-drop" title="Cliquer ou déposer une image">
+          <div id="cc-drop-preview" class="coll-card-upload-preview"></div>
+          <div class="mn-hero-drop-hint">
+            <span class="mn-hero-drop-icon">Image</span>
+            <span>Glisser ou choisir un recto</span>
+          </div>
+        </div>
+
+        <div class="mn-hero-content">
+          <div class="mn-hero-eyebrow">
+            <span>${card ? 'Modifier la carte' : 'Nouvelle carte'}</span>
+            <span class="mn-hero-eyebrow-sep">·</span>
+            <span id="cc-mask-preview">${card?.descMasquee ? 'Défi masqué' : 'Défi visible'}</span>
+          </div>
+          <input type="text" class="mn-hero-title" id="cc-nom"
+            value="${_esc(card?.nom || '')}"
+            placeholder="Nom de la carte"
+            autocomplete="off" autofocus>
+          <div class="mn-hero-meta">
+            <span class="mn-hero-statut coll-card-editor-pill">${STORE.backImages.length || 0} dos disponible${STORE.backImages.length > 1 ? 's' : ''}</span>
+            <button type="button" class="mn-hero-statut coll-card-editor-clear" id="cc-img-clear">Retirer l'image</button>
+          </div>
+        </div>
+
+        <div id="cc-crop-wrap" class="mn-crop-wrap coll-card-crop-wrap" style="display:none">
+          <canvas id="cc-crop-canvas"></canvas>
+          <div class="mn-crop-bar">
+            <span class="mn-crop-hint">Recadre le recto · ratio carte</span>
+            <button type="button" class="btn btn-outline btn-sm" id="cc-crop-clear">Retirer</button>
+            <button type="button" class="btn btn-gold btn-sm" id="cc-crop-confirm">Confirmer</button>
+            <div id="cc-crop-ok" style="display:none;font-size:.75rem"></div>
+          </div>
+        </div>
       </div>
-      <div id="sc-img-preview">${card?.imageUrl ? `<img src="${_esc(card.imageUrl)}" style="max-height:120px;margin-top:.4rem;display:block;border-radius:8px">` : ''}</div>
+
+      <div class="mn-body coll-card-editor-body">
+        <section class="mn-panel is-active">
+          <div class="mn-field">
+            <label class="mn-label">Description / défi à relever</label>
+            <textarea class="mn-input mn-textarea" id="cc-desc" rows="5"
+              placeholder="Ex : Vaincre le dragon de cendres sans tomber au combat...">${_esc(card?.description || '')}</textarea>
+          </div>
+
+          <label class="mn-toggle">
+            <input type="checkbox" id="cc-masque" ${card?.descMasquee ? 'checked' : ''}>
+            <span class="mn-toggle-track"><span class="mn-toggle-thumb"></span></span>
+            <span class="mn-toggle-text">
+              <strong>Masquer le défi aux joueurs</strong>
+              <span class="mn-label-hint">le nom reste visible, le défi s'affiche comme secret</span>
+            </span>
+          </label>
+
+          <div class="mn-field">
+            <label class="mn-label">Image dos associée</label>
+            ${renderCardBackPicker(card?.backImageId || '', card?.backImageUrl || '')}
+          </div>
+        </section>
+      </div>
+
+      <div class="mn-footer">
+        <div class="mn-footer-hint">Recto optionnel · dos obligatoire si plusieurs modèles existent</div>
+        <div class="mn-footer-actions">
+          <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
+          <button class="btn btn-gold" data-action="saveCard" data-id="${card?.id || ''}">
+            ${card ? 'Enregistrer' : 'Créer la carte'}
+          </button>
+        </div>
+      </div>
     </div>
-    <div class="form-group"><label>Image dos associée</label>
-      ${renderCardBackPicker(card?.backImageId || '', card?.backImageUrl || '')}
-    </div>
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveCard" data-id="${card?.id || ''}">Enregistrer</button>
   `);
+
+  const maskToggle = document.getElementById('cc-masque');
+  const maskPreview = document.getElementById('cc-mask-preview');
+  maskToggle?.addEventListener('change', () => {
+    if (maskPreview) maskPreview.textContent = maskToggle.checked ? 'Défi masqué' : 'Défi visible';
+  });
+
+  _cardImageCropper = attachDropAndCrop({
+    dropEl: document.getElementById('cc-drop-zone'),
+    previewEl: document.getElementById('cc-drop-preview'),
+    cropWrapEl: document.getElementById('cc-crop-wrap'),
+    canvasId: 'cc-crop-canvas',
+    statusEl: document.getElementById('cc-crop-ok'),
+    confirmBtnEl: document.getElementById('cc-crop-confirm'),
+    clearBtnEl: document.getElementById('cc-crop-clear'),
+    initialUrl: card?.imageUrl || '',
+    ratio: { w: 5, h: 7 },
+    previewMaxH: 76,
+    output: { maxW: 700, target: 700_000 },
+    cropHintText: 'Recadre puis confirme',
+    onResult: (b64) => {
+      const bg = document.getElementById('cc-hero-bg');
+      if (!bg) return;
+      bg.style.backgroundImage = b64 ? `url("${String(b64).replace(/"/g, '%22')}")` : '';
+    },
+  });
+
+  document.getElementById('cc-img-clear')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    _cardImageCropper?.reset();
+  });
 }
 
 async function saveCard(id = '') {
-  // Édition = patch (merge) : on NE touche PAS unlocked/ordre (sinon on reverrouille).
+  const existing = id ? STORE.cards.find(c => c.id === id) : null;
+  const imageResult = _cardImageCropper?.getResult();
   const data = {
     nom:         document.getElementById('cc-nom')?.value?.trim() || 'Carte',
-    imageUrl:    document.getElementById('cat-img-b64')?.value || '',
+    imageUrl:    imageResult === undefined ? (existing?.imageUrl || '') : (imageResult || ''),
     backImageId: document.querySelector('input[name="cc-back-image"]:checked')?.value || STORE.backImages[0]?.id || '',
     description: document.getElementById('cc-desc')?.value || '',
     descMasquee: !!document.getElementById('cc-masque')?.checked,
   };
-  if (!id) {                       // nouvelle carte : verrouillée, ajoutée en fin
+  if (!id) {
     data.unlocked = false;
     data.ordre = STORE.cards.length;
   }
   if (await tryUpsert('collection', id || null, data)) {
+    _cardImageCropper?.destroy();
+    _cardImageCropper = null;
     closeModal();
     showNotif('Carte enregistrée.', 'success');
     await renderCollectionPage();
@@ -507,5 +607,4 @@ registerActions({
   deleteCard:   (btn) => deleteCard(btn.dataset.id),
   previewUploadBackImages: (el) => previewUploadBackImages(el),
   removeBackImage: (btn) => removeBackImage(btn.dataset.index),
-  previewUploadPng: (el) => { const f = document.getElementById(el.id)?.files?.[0]; if (f) uploadPng(f, { previewId: el.dataset.preview, hiddenId: el.dataset.b64 }); },
 });
