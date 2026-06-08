@@ -72,6 +72,130 @@ function _formatDateShort(d) {
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
 
+function _uniq(arr = []) {
+  return [...new Set((arr || []).filter(Boolean))];
+}
+function _emailKey(email = '') {
+  return String(email || '').trim().toLowerCase();
+}
+function _userUid(u = {}) {
+  return u.uid || u.id || '';
+}
+function _userAliases(u = {}) {
+  return _uniq([
+    u.id,
+    u.uid,
+    ...(Array.isArray(u.previousUids) ? u.previousUids : []),
+    ...(Array.isArray(u.uidAliases) ? u.uidAliases : []),
+  ]);
+}
+function _userForUid(uid) {
+  if (!uid) return null;
+  return (_ag.users || []).find(u => _userAliases(u).includes(uid)) || null;
+}
+function _uidIdentityKey(uid) {
+  const user = _userForUid(uid);
+  const email = _emailKey(user?.email);
+  return email ? `email:${email}` : `uid:${uid || ''}`;
+}
+function _aliasesForIdentity(key) {
+  const aliases = new Set();
+  (_ag.users || []).forEach(u => {
+    const uid = _userUid(u);
+    if (!uid || _uidIdentityKey(uid) !== key) return;
+    _userAliases(u).forEach(alias => aliases.add(alias));
+  });
+  (_ag.allAvails || []).forEach(a => {
+    const uid = a.uid || a.id;
+    if (uid && _uidIdentityKey(uid) === key) aliases.add(uid);
+  });
+  return aliases;
+}
+function _availabilityForUid(uid) {
+  const key = _uidIdentityKey(uid);
+  const aliases = _aliasesForIdentity(key);
+  const candidates = (_ag.allAvails || []).filter(a => aliases.has(a.uid || a.id));
+  if (!candidates.length) return null;
+  return candidates.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+}
+function _canonicalUserForIdentity(key) {
+  const users = (_ag.users || []).filter(u => {
+    const uid = _userUid(u);
+    return uid && _uidIdentityKey(uid) === key;
+  });
+  if (!users.length) return null;
+  const current = users.find(u => _userUid(u) === STATE.user?.uid);
+  if (current) return current;
+  return users.sort((a, b) => _userAliases(b).length - _userAliases(a).length)[0];
+}
+function _normalizedParticipant(p = {}) {
+  const key = _uidIdentityKey(p.uid);
+  const av = _availabilityForUid(p.uid);
+  const user = _canonicalUserForIdentity(key);
+  const uid = av?.uid || av?.id || _userUid(user) || p.uid;
+  return {
+    ...p,
+    uid,
+    nom: p.nom || user?.pseudo || av?.pseudo || '?',
+  };
+}
+function _dedupeParticipants(parts = []) {
+  const byKey = new Map();
+  (Array.isArray(parts) ? parts : []).forEach(raw => {
+    if (!raw?.uid) return;
+    const p = _normalizedParticipant(raw);
+    const key = _uidIdentityKey(raw.uid);
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, p);
+      return;
+    }
+    const pHasAvail = !!_availabilityForUid(p.uid);
+    const prevHasAvail = !!_availabilityForUid(prev.uid);
+    if (p.uid === STATE.user?.uid || (pHasAvail && !prevHasAvail)) byKey.set(key, { ...prev, ...p });
+  });
+  return [...byKey.values()];
+}
+function _questParticipants(quest = {}) {
+  return _dedupeParticipants(quest.participants || []);
+}
+function _myUidAliases() {
+  return _uniq([
+    STATE.user?.uid,
+    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
+    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
+  ]);
+}
+function _questHasMe(quest = {}) {
+  const aliases = new Set(_myUidAliases());
+  return (quest.participants || []).some(p => aliases.has(p?.uid));
+}
+let _cleanupTimer = null;
+function _scheduleQuestParticipantCleanup() {
+  if (!_ag.quests?.length || !_ag.users?.length) return;
+  clearTimeout(_cleanupTimer);
+  _cleanupTimer = setTimeout(_cleanupQuestParticipants, 300);
+}
+async function _cleanupQuestParticipants() {
+  let changed = false;
+  for (const q of _ag.quests || []) {
+    const before = Array.isArray(q.participants) ? q.participants : [];
+    const after = _dedupeParticipants(before);
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    try {
+      await saveDoc('quests', q.id, { participants: after });
+      q.participants = after;
+      changed = true;
+    } catch (e) {
+      console.warn('[agenda] nettoyage participants ignoré', q.id, e?.code || e);
+    }
+  }
+  if (changed) {
+    _renderSuggestions();
+    _renderGroupView();
+  }
+}
+
 // ── Lecture : récupère l'état d'un slot (avec fallback récurrent) ─────────
 function _slotState(avail, date, slotId) {
   if (!avail) return '';
@@ -158,10 +282,9 @@ async function clearOverrides() {
 
 // ── Calcul des suggestions par quête ──────────────────────────────────────
 function _computeQuestSuggestions(quest, daysAhead = 28) {
-  const parts = Array.isArray(quest.participants) ? quest.participants : [];
+  const parts = _questParticipants(quest);
   if (parts.length === 0) return [];
 
-  const availByUid = Object.fromEntries(_ag.allAvails.map(a => [a.uid || a.id, a]));
   const today = _today();
   const slots = [];
 
@@ -170,7 +293,7 @@ function _computeQuestSuggestions(quest, daysAhead = 28) {
     const iso = _toISO(date);
     for (const slot of SLOTS) {
       const detail = parts.map(p => {
-        const av = availByUid[p.uid];
+        const av = _availabilityForUid(p.uid);
         return { uid: p.uid, nom: p.nom, state: _slotState(av, date, slot.id) };
       });
       const okCount    = detail.filter(d => d.state === 'ok').length;
@@ -196,11 +319,10 @@ function _computeQuestSuggestions(quest, daysAhead = 28) {
 function _renderSuggestions() {
   const el = document.getElementById('ag-suggestions');
   if (!el) return;
-  const myUid = STATE.user?.uid;
   const myQuests = (_ag.quests || []).filter(q => {
     if (q.statut && q.statut !== 'active') return false;
     if (STATE.isAdmin) return true; // MJ voit tout
-    return Array.isArray(q.participants) && q.participants.some(p => p.uid === myUid);
+    return _questHasMe(q);
   });
 
   if (!myQuests.length) {
@@ -214,11 +336,12 @@ function _renderSuggestions() {
 
   el.innerHTML = myQuests.map(q => {
     const sugs = _computeQuestSuggestions(q);
+    const parts = _questParticipants(q);
     if (!sugs.length) {
       return `<div class="ag-quest-card">
         <div class="ag-quest-hd">
           <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
-          <span class="ag-quest-count">${(q.participants||[]).length} participant${(q.participants||[]).length>1?'s':''}</span>
+          <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
         </div>
         <div class="ag-quest-empty">Pas encore de créneau compatible. Demande aux joueurs de remplir leurs dispos.</div>
       </div>`;
@@ -226,7 +349,7 @@ function _renderSuggestions() {
     return `<div class="ag-quest-card">
       <div class="ag-quest-hd">
         <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
-        <span class="ag-quest-count">${(q.participants||[]).length} participant${(q.participants||[]).length>1?'s':''}</span>
+        <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
       </div>
       <div class="ag-sug-list">
         ${sugs.map((s, idx) => {
@@ -318,7 +441,7 @@ async function validateSlot(questId, iso, slotId) {
       date:        iso,
       slot:        slotId,
       // Membres du groupe concerné : seuls eux (+ le MJ) verront la séance.
-      participantUids: (quest?.participants || []).map(p => p.uid).filter(Boolean),
+      participantUids: _questParticipants(quest).map(p => p.uid).filter(Boolean),
       validatedAt: Date.now(),
       validatedBy: STATE.user?.uid || null,
     };
@@ -359,7 +482,7 @@ function _sessionVisibleToMe(s) {
   if (STATE.isAdmin) return true;
   const uids = s?.participantUids;
   if (!Array.isArray(uids) || !uids.length) return true;
-  return uids.includes(STATE.user?.uid);
+  return _myUidAliases().some(uid => uids.includes(uid));
 }
 
 function _renderSessionBanner() {
@@ -489,22 +612,35 @@ function _renderGroupView() {
   const days = [];
   for (let i = 0; i < 14; i++) days.push(_addDays(firstDay, i));
 
-  // Liste des joueurs avec une dispo (sinon ajouter ceux des users)
-  const playerUids = new Set(_ag.allAvails.map(a => a.uid || a.id));
-  // Ajouter aussi les joueurs de l'aventure qui n'ont pas (encore) de doc
-  (_ag.users || []).forEach(u => playerUids.add(u.id || u.uid));
-  let players = [..._ag.users || [], ..._ag.allAvails.filter(a => !(_ag.users||[]).some(u => (u.id||u.uid) === (a.uid||a.id))).map(a => ({ id: a.uid||a.id, pseudo: a.pseudo }))]
-    .filter((p, i, arr) => arr.findIndex(x => (x.id||x.uid) === (p.id||p.uid)) === i)
-    .filter(p => (p.id||p.uid) !== STATE.user?.uid); // hors moi (j'ai déjà mon calendrier)
+  const playersByIdentity = new Map();
+  [...(_ag.users || []), ...(_ag.allAvails || [])].forEach(raw => {
+    const uid = raw.uid || raw.id;
+    if (!uid) return;
+    const key = _uidIdentityKey(uid);
+    const av = _availabilityForUid(uid);
+    const user = _canonicalUserForIdentity(key);
+    const canonicalUid = av?.uid || av?.id || _userUid(user) || uid;
+    const prev = playersByIdentity.get(key);
+    const player = {
+      id: canonicalUid,
+      uid: canonicalUid,
+      pseudo: user?.pseudo || av?.pseudo || raw.pseudo || '?',
+    };
+    if (!prev || canonicalUid === STATE.user?.uid || (!prev.hasAvail && av)) {
+      playersByIdentity.set(key, { ...player, hasAvail: !!av });
+    }
+  });
+  let players = [...playersByIdentity.values()]
+    .filter(p => !_myUidAliases().includes(p.uid)); // hors moi (j'ai déjà mon calendrier)
 
   // ── Compartimentation : groupes = quêtes (chacune a ses participants). ──
-  const quests = (_ag.quests || []).filter(q => Array.isArray(q.participants) && q.participants.length);
+  const quests = (_ag.quests || []).filter(q => _questParticipants(q).length);
   // Si le groupe filtré n'existe plus, revenir à « Tous »
   if (_ag.groupFilter && !quests.some(q => q.id === _ag.groupFilter)) _ag.groupFilter = null;
   if (_ag.groupFilter) {
     const q = quests.find(x => x.id === _ag.groupFilter);
-    const memberUids = new Set((q?.participants || []).map(p => p.uid).filter(Boolean));
-    players = players.filter(p => memberUids.has(p.id || p.uid));
+    const memberKeys = new Set(_questParticipants(q).map(p => _uidIdentityKey(p.uid)));
+    players = players.filter(p => memberKeys.has(_uidIdentityKey(p.id || p.uid)));
   }
 
   const filtersHtml = quests.length ? `
@@ -513,7 +649,7 @@ function _renderGroupView() {
         data-action="_agSetGroupFilter" data-group="">👥 Tous</button>
       ${quests.map(q => `<button type="button" class="ag-grp-filter ${_ag.groupFilter===q.id ? 'is-active' : ''}"
         data-action="_agSetGroupFilter" data-group="${_esc(q.id)}">${_esc(q.titre||q.nom||'Quête')}
-        <span class="ag-grp-filter-count">${(q.participants||[]).length}</span></button>`).join('')}
+        <span class="ag-grp-filter-count">${_questParticipants(q).length}</span></button>`).join('')}
     </div>` : '';
 
   if (!players.length) {
@@ -536,7 +672,7 @@ function _renderGroupView() {
         <tbody>
           ${players.map(p => {
             const uid = p.id || p.uid;
-            const av = _ag.allAvails.find(a => (a.uid||a.id) === uid);
+            const av = _availabilityForUid(uid);
             return `<tr>
               <td class="ag-grp-namecell">${_esc(p.pseudo || '?')}</td>
               ${days.map(d => {
@@ -635,9 +771,10 @@ async function renderAgendaPage() {
   watchPageCollection('agenda-avails', 'availabilities', 'agenda', data => {
     _ag.allAvails = data;
     if (_ag.myAvail && (!_ag.myAvail.slots || !Object.keys(_ag.myAvail.slots).length)) {
-      const mine = _ag.allAvails.find(a => (a.uid || a.id) === STATE.user?.uid);
+      const mine = _availabilityForUid(STATE.user?.uid);
       if (mine) _ag.myAvail = mine;
     }
+    _scheduleQuestParticipantCleanup();
     _renderCalendar();
     _renderSuggestions();
     _renderGroupView();
@@ -645,11 +782,15 @@ async function renderAgendaPage() {
 
   watchPageCollection('agenda-quests', 'quests', 'agenda', data => {
     _ag.quests = data;
+    _scheduleQuestParticipantCleanup();
     _renderSuggestions();
+    _renderGroupView();
   });
 
   watchPageCollection('agenda-users', 'users', 'agenda', data => {
     _ag.users = data;
+    _scheduleQuestParticipantCleanup();
+    _renderSuggestions();
     _renderGroupView();
   });
 

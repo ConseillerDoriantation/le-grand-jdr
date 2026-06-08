@@ -11,8 +11,19 @@ export function questParticipantFromChar(char = {}, uid = char?.uid || '') {
   };
 }
 
-export function toggleQuestParticipant(participants = [], { uid = '', char = null } = {}) {
-  const parts = Array.isArray(participants) ? [...participants] : [];
+export function toggleQuestParticipant(participants = [], { uid = '', char = null, uidAliases = [] } = {}) {
+  const aliases = new Set([uid, ...(Array.isArray(uidAliases) ? uidAliases : [])].filter(Boolean));
+  const parts = (Array.isArray(participants) ? participants : [])
+    .filter(p => !aliases.has(p?.uid));
+  const hadParticipant = (Array.isArray(participants) ? participants : [])
+    .some(p => aliases.has(p?.uid));
+  if (hadParticipant && !char) {
+    return { participants: parts, joined: false, leaving: true };
+  }
+  if (hadParticipant && char) {
+    parts.push(questParticipantFromChar(char, uid));
+    return { participants: parts, joined: true, leaving: false };
+  }
   const idx = parts.findIndex(p => p?.uid === uid);
   if (idx >= 0) {
     parts.splice(idx, 1);
