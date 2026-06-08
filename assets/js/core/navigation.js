@@ -97,6 +97,7 @@ function _collapseRailAfterNav() {
   // programmatique au boot) — sinon `nav-collapse` resterait collée et bloquerait
   // le 1er survol (il fallait survoler 2 fois).
   if (sb.matches(':hover') && !sb.classList.contains('nav-collapse')) {
+    sb.classList.remove('is-expanded');
     sb.classList.add('nav-collapse');
     sb.addEventListener('mouseleave', () => sb.classList.remove('nav-collapse'), { once: true });
   }
