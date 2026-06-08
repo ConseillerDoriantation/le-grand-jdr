@@ -283,6 +283,11 @@ service cloud.firestore {
                   && request.auth.uid in resource.data.controlDelegates))
           && request.resource.data.diff(resource.data)
                .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'pageId', 'visible']);
+        // Sorts de déplacement : un joueur peut pousser/attirer une cible
+        // sans pouvoir modifier sa page, sa visibilité ou ses compteurs de tour.
+        allow update: if inAdventure(adventureId)
+          && request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['col', 'row']);
         // Dégâts / effets : tout membre de l'aventure
         allow update: if inAdventure(adventureId)
           && request.resource.data.diff(resource.data)
