@@ -333,6 +333,11 @@ const PAGES = {
     if (!dash) return;
 
     const _myUid           = STATE.user?.uid;
+    const _myUidAliases    = [
+      _myUid,
+      ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
+      ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
+    ].filter(Boolean);
     const collectionTotal  = collectionItems.length;
     const collectionUnlocked = collectionItems.filter(c => c.unlocked).length;
     const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
@@ -359,7 +364,7 @@ const PAGES = {
       const dlbl   = QDLBL[q.difficulte] || 'Moyen';
       const parts  = Array.isArray(q.participants) ? q.participants : [];
       const required = _questRequiredCount(q);
-      const joined = parts.some(p => p.uid === _myUid);
+      const joined = parts.some(p => _myUidAliases.includes(p.uid));
       const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');
       const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
       const joinBtn = !STATE.isAdmin
@@ -622,7 +627,7 @@ const PAGES = {
           const icn    = QICON[q.type] || QICON[q.difficulte] || '🗡️';
           const cls    = QICLS[q.type] || 'dv2-qi-default';
           const rarity = QDCLS[q.difficulte] || 'dv2-rarity-common';
-          const joined = Array.isArray(q.participants) && q.participants.some(p => p.uid === _myUid);
+          const joined = Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid));
           return `
           <div class="dv2-quest-item" data-navigate="quests">
             <div class="dv2-quest-icon ${cls}">${icn}</div>
@@ -827,7 +832,7 @@ const PAGES = {
         if (!slot) return;
         const now = Date.now();
         const active = (list || [])
-          .filter(p => p.uid && p.uid !== _myUid)
+          .filter(p => p.uid && !_myUidAliases.includes(p.uid))
           .map(p => ({ ...p, ts: p.lastSeen?.toMillis?.() ?? 0 }))
           .filter(p => p.ts > 0 && (now - p.ts) < 120_000);
         if (!active.length) {
@@ -875,10 +880,10 @@ const PAGES = {
 
       // Groupe : participants des quêtes actives que j'ai rejointes
       const _joinedQuests = activeQuests.filter(q =>
-        Array.isArray(q.participants) && q.participants.some(p => p.uid === _myUid)
+        Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid))
       );
       const _missionUids = new Set(
-        _joinedQuests.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => u !== _myUid)
+        _joinedQuests.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => !_myUidAliases.includes(u))
       );
       const partyMembers = _joinedQuests.length > 0
         ? [...chars, ...allPartyChars.filter(c => _missionUids.has(c.uid))]
@@ -1365,10 +1370,15 @@ async function dashQuestJoin(id, el) {
   const quest = findDashboardQuest(id);
   if (!quest) return;
   const myUid = STATE.user?.uid;
+  const myAliases = [
+    myUid,
+    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
+    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
+  ].filter(Boolean);
   const myChar = (STATE.characters || []).find(c => c.uid === myUid);
   if (!myChar) { showNotif('Aucun personnage trouvé.', 'error'); return; }
   if (el) { el.disabled = true; el.textContent = '…'; }
-  const result = toggleQuestParticipant(quest.participants, { uid: myUid, char: myChar });
+  const result = toggleQuestParticipant(quest.participants, { uid: myUid, char: myChar, uidAliases: myAliases });
   try {
     await saveDoc('quests', id, { participants: result.participants });
     showNotif(result.leaving ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', result.leaving ? 'info' : 'success');
