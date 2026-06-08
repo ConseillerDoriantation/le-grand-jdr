@@ -7145,6 +7145,7 @@ function _renderPageList() {
   }
 
   const matches = p => _searchIncludes(p.name || '', _pageSearch);
+  const q = String(_pageSearch || '').trim();
 
   // Regroupe par dossier ('' = sans dossier, affiché en dernier)
   const groups = new Map();
