@@ -13,10 +13,63 @@ service cloud.firestore {
     }
     function isLoggedIn() { return request.auth != null; }
 
-    function inAdventure(adventureId) {
+    function hasEmailAccess(data) {
+      return request.auth.token.email != null &&
+             data.keys().hasAny(["accessEmails"]) &&
+             request.auth.token.email in data.accessEmails;
+    }
+
+    function currentProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasPreviousUid(uid) {
+      let profile = currentProfile();
+      return profile.keys().hasAny(["previousUids"]) &&
+             profile.previousUids.hasAny([uid]) &&
+             request.auth.token.email != null &&
+             get(/databases/$(database)/documents/users/$(uid)).data.email == request.auth.token.email;
+    }
+
+    function hasPreviousUidAccess(data) {
+      let profile = currentProfile();
+      return profile.keys().hasAny(["previousUids"]) &&
+             (
+               data.accessList.hasAny(profile.previousUids) ||
+               data.players.hasAny(profile.previousUids) ||
+               data.admins.hasAny(profile.previousUids)
+             );
+    }
+
+    function isAccountSelfRepair(before, after) {
       return isLoggedIn() &&
-        get(/databases/$(database)/documents/adventures/$(adventureId))
-          .data.accessList.hasAny([request.auth.uid]);
+             (hasEmailAccess(before) || hasPreviousUidAccess(before)) &&
+             after.diff(before).affectedKeys().hasOnly(["accessList", "players", "admins", "accessEmails"]) &&
+             after.accessList.hasAll(before.accessList) &&
+             after.accessList.hasAny([request.auth.uid]) &&
+             after.players.hasAll(before.players) &&
+             after.admins.hasAll(before.admins) &&
+             (
+               !after.keys().hasAny(["accessEmails"]) ||
+               !before.keys().hasAny(["accessEmails"]) ||
+               after.accessEmails.hasAll(before.accessEmails)
+             );
+    }
+
+    function isCharacterUidSelfRepair(before, after) {
+      return isLoggedIn() &&
+             hasPreviousUid(before.uid) &&
+             after.diff(before).affectedKeys().hasOnly(["uid"]) &&
+             after.uid == request.auth.uid;
+    }
+
+    function inAdventure(adventureId) {
+      let adv = get(/databases/$(database)/documents/adventures/$(adventureId)).data;
+      return isLoggedIn() &&
+        (
+          adv.accessList.hasAny([request.auth.uid]) ||
+          hasEmailAccess(adv)
+        );
     }
 
     function isAdvAdmin(adventureId) {
@@ -78,9 +131,14 @@ service cloud.firestore {
     match /adventures/{adventureId} {
       allow list:   if isLoggedIn();
       allow get:    if isAdmin() ||
-                       (isLoggedIn() && resource.data.accessList.hasAny([request.auth.uid]));
+                       (isLoggedIn() &&
+                         (
+                           resource.data.accessList.hasAny([request.auth.uid]) ||
+                           hasEmailAccess(resource.data)
+                         ));
       allow create: if isAdmin();
-      allow update: if isAdvAdmin(adventureId);
+      allow update: if isAdvAdmin(adventureId) ||
+                       isAccountSelfRepair(resource.data, request.resource.data);
       allow delete: if isAdmin();
 
       // Boutique : MJ écrit tout, les joueurs peuvent uniquement mettre à jour `dispo`
@@ -139,6 +197,7 @@ service cloud.firestore {
         allow update: if inAdventure(adventureId) && (
           resource.data.uid == request.auth.uid ||
           isAdvAdmin(adventureId) ||
+          isCharacterUidSelfRepair(resource.data, request.resource.data) ||
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte']) ||
           // ── VTT : tout membre de l'aventure peut écrire les champs de combat ──
           //   nécessaire pour que les sorts (DoT, soins, buffs, états) lancés par

@@ -31,7 +31,7 @@ import {
 
 import { showAppLoading, showAuth, showAdventurePicker, showAdventureLoadError } from "./layout.js";
 import { navigate } from "./navigation.js";
-import { loadUserAdventures, selectAdventure, runMigration } from "./adventure.js";
+import { loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure, runMigration } from "./adventure.js";
 import { unwatchAll } from "../shared/realtime.js";
 import { stopPresence } from "../shared/presence.js";
 import { releaseSessionData } from "../data/firestore.js";
@@ -137,7 +137,7 @@ async function loadAndRouteAdventures(user) {
   let adventures = null;
   for (let attempt = 0; attempt < 3 && adventures === null; attempt++) {
     try {
-      adventures = await loadUserAdventures(user.uid, { preferServer: true });
+      adventures = await loadUserAdventures(user.uid, { preferServer: true, email: STATE.profile?.email || user.email });
     } catch (error) {
       console.warn(`[init] loadUserAdventures tentative ${attempt + 1} échouée:`, error?.code || error);
       if (attempt < 2) {
@@ -154,6 +154,7 @@ async function loadAndRouteAdventures(user) {
     return;
   }
 
+  adventures = await repairCurrentUserAdventureLinks(adventures);
   setAdventures(adventures);
 
   if (adventures.length === 0) {
@@ -200,13 +201,21 @@ async function loadProfile(user) {
     if (!existing.empty) {
       const existingDoc  = existing.docs[0];
       const existingData = existingDoc.data();
-      const profile = { ...existingData, uid: user.uid };
+      const aliases = [
+        ...(Array.isArray(existingData.uidAliases) ? existingData.uidAliases : []),
+        ...(Array.isArray(existingData.previousUids) ? existingData.previousUids : []),
+        existingData.uid,
+        existingDoc.id,
+      ].filter(uid => uid && uid !== user.uid);
+      const profile = {
+        ...existingData,
+        uid: user.uid,
+        previousUids: [...new Set(aliases)],
+        uidAliases: [...new Set([user.uid, ...aliases])],
+        duplicateOf: existingDoc.id !== user.uid ? existingDoc.id : (existingData.duplicateOf || null),
+      };
       await setDoc(ref, profile, { merge: true });
       setProfile(profile);
-      // Supprimer l'ancien doc orphelin (uid différent, même email)
-      if (existingDoc.id !== user.uid) {
-        try { await deleteDoc(existingDoc.ref); } catch (e) { /* non bloquant */ }
-      }
       return;
     }
   } catch (error) {
@@ -251,7 +260,7 @@ async function _runMigrationFromPicker(uid) {
     await runMigration(log);
 
     log('Chargement de l\'aventure…');
-    const adventures = await loadUserAdventures(uid);
+    const adventures = await loadUserAdventures(uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
 
     if (adventures.length > 0) {
@@ -270,4 +279,3 @@ async function _runMigrationFromPicker(uid) {
 }
 
 // Exposer pour le bouton HTML du picker
-
