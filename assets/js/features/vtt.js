@@ -2578,7 +2578,13 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
     nc = tryC; nr = tryR; moved++;
   }
   if (moved > 0) {
-    await updateDoc(_tokRef(tgtData.id), { col: nc, row: nr }).catch(() => {});
+    try {
+      await updateDoc(_tokRef(tgtData.id), { col: nc, row: nr });
+    } catch (err) {
+      console.error('[VTT] Déplacement de sort refusé', err);
+      showNotif('Déplacement refusé par Firestore', 'error');
+      return 0;
+    }
   }
   return moved;
 }
@@ -2670,7 +2676,13 @@ async function _selfMoveTo(col, row) {
   const name = _live(src).displayName ?? src.name;
   _selfClear();
   await _vttSpendSpellPm(src, opt);
-  await updateDoc(_tokRef(srcId), { col, row }).catch(() => {});
+  try {
+    await updateDoc(_tokRef(srcId), { col, row });
+  } catch (err) {
+    console.error('[VTT] Déplacement personnel refusé', err);
+    showNotif('Déplacement refusé par Firestore', 'error');
+    return;
+  }
   showNotif(`🏃 ${name} se déplace de ${dist} case${dist > 1 ? 's' : ''} (${opt.label})`, 'success');
 }
 
