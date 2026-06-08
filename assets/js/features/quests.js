@@ -31,6 +31,15 @@ const STORE = {
   questMyChars: [],
 };
 
+function _myUidAliases() {
+  const uid = STATE.user?.uid;
+  return [
+    uid,
+    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
+    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
+  ].filter(Boolean);
+}
+
 function _questRequiredCount(q = {}) {
   const n = parseInt(q.participantsRequis ?? q.participantsRequired ?? q.nbParticipants ?? 0, 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
@@ -46,7 +55,7 @@ function _questCard(q, myChar) {
   const parts = Array.isArray(q.participants) ? q.participants : [];
   const required = _questRequiredCount(q);
   const uid   = STATE.user?.uid;
-  const joined = myChar ? parts.some(p => p.uid === uid) : false;
+  const joined = myChar ? parts.some(p => _myUidAliases().includes(p.uid)) : false;
   const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
 
   const partsHtml = parts.length > 0
@@ -155,7 +164,7 @@ async function toggleQuestJoin(id) {
   if (!q) return;
 
   const uid   = STATE.user?.uid;
-  const current = toggleQuestParticipant(q.participants, { uid });
+  const current = toggleQuestParticipant(q.participants, { uid, uidAliases: _myUidAliases() });
 
   if (current.leaving) {
     await _questSaveParts(id, current.participants, true);
@@ -203,7 +212,7 @@ async function pickQuestChar(questId, charId) {
 async function _questJoinWithChar(id, char) {
   const q   = (STORE.questItems || []).find(x => x.id === id);
   if (!q) return;
-  const { participants } = toggleQuestParticipant(q.participants, { uid: STATE.user?.uid, char });
+  const { participants } = toggleQuestParticipant(q.participants, { uid: STATE.user?.uid, char, uidAliases: _myUidAliases() });
   await _questSaveParts(id, participants, false);
 }
 
