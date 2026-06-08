@@ -80,8 +80,13 @@ function _vttResolveArg(token, el) {
 // Helper : ferme la modal avant d'appeler fn(...args). Utilisable via data-vtt-fn.
 function _vttCloseAnd(fnName, ...args) {
   if (typeof closeModal === 'function') closeModal();
-  const fn = window[fnName];
-  if (typeof fn === 'function') fn(...args);
+  const fn = VTT_ACTIONS?.[fnName] || window[fnName];
+  if (typeof fn !== 'function') {
+    console.warn('[vtt] action introuvable apres fermeture modale:', fnName);
+    return;
+  }
+  const result = fn(...args);
+  if (result?.catch) result.catch(e => console.error('[vtt] action modale:', fnName, e));
 }
 
 // Helper : toggle d'un bloc "détail" dans le chat log (data-vtt-fn="_vttToggleLogDetail" data-vtt-args="ID_DU_DETAIL")
