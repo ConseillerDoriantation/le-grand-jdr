@@ -2241,3 +2241,132 @@ select.input-field, select.input-sm { cursor:pointer; }
     border-color: rgba(79,140,255,0.22);
   }
 }
+
+/* Sidebar desktop stabilisÃ©e : l'ouverture est pilotÃ©e par JS avec un court
+   dÃ©lai, pas par le simple :hover. Les en-tÃªtes gardent leur hauteur pour
+   Ã©viter les micro-dÃ©calages verticaux au dÃ©ploiement. */
+@media (hover: hover) and (pointer: fine) and (min-width: 769px) {
+  .sidebar {
+    transition:
+      width .26s cubic-bezier(.22,.61,.36,1),
+      box-shadow .24s ease,
+      border-color .24s ease;
+  }
+
+  .sidebar:hover:not(.is-expanded):not(:focus-within),
+  .sidebar.nav-collapse:hover,
+  .sidebar.nav-collapse:focus-within {
+    width: var(--rail-w);
+    box-shadow: none;
+  }
+
+  .sidebar.is-expanded,
+  .sidebar:focus-within {
+    width: var(--sidebar-width);
+    box-shadow: 14px 0 40px -8px rgba(0,0,0,.55);
+  }
+
+  .sidebar .sidebar-section-label,
+  .sidebar:hover .sidebar-section-label,
+  .sidebar:focus-within .sidebar-section-label,
+  .sidebar.nav-collapse:hover .sidebar-section-label,
+  .sidebar.nav-collapse:focus-within .sidebar-section-label {
+    height: 24px;
+    padding: 10px 18px 4px;
+  }
+
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .nav-label,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-brand-id,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-search-text,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-search-kbd,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-adv-body,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-adv-chevron,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-profile-meta,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-profile-logout,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-theme-btn,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-section-label .sl-text,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-section-label::before {
+    opacity: 0;
+    transform: translateX(-7px);
+    transition-delay: 0s;
+  }
+
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-search,
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-adv-chip {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-search {
+    width: calc(var(--rail-w) - 2 * var(--rail-pad));
+    max-width: calc(var(--rail-w) - 2 * var(--rail-pad));
+    margin: 10px var(--rail-pad) 6px;
+    padding: 0;
+    gap: 12px;
+  }
+
+  .sidebar:hover:not(.is-expanded):not(:focus-within) .sidebar-search > .nav-icon {
+    box-sizing: content-box;
+    width: 18px;
+    height: 18px;
+    padding-left: calc((var(--rail-w) - 2 * var(--rail-pad) - 18px) / 2);
+    padding-right: calc((var(--rail-w) - 2 * var(--rail-pad) - 18px) / 2);
+  }
+
+  .sidebar.is-expanded .nav-label,
+  .sidebar.is-expanded .sidebar-brand-id,
+  .sidebar.is-expanded .sidebar-search-text,
+  .sidebar.is-expanded .sidebar-search-kbd,
+  .sidebar.is-expanded .sidebar-adv-body,
+  .sidebar.is-expanded .sidebar-adv-chevron,
+  .sidebar.is-expanded .sidebar-profile-meta,
+  .sidebar.is-expanded .sidebar-profile-logout,
+  .sidebar.is-expanded .sidebar-theme-btn,
+  .sidebar.is-expanded .sidebar-section-label .sl-text,
+  .sidebar:focus-within .nav-label,
+  .sidebar:focus-within .sidebar-brand-id,
+  .sidebar:focus-within .sidebar-search-text,
+  .sidebar:focus-within .sidebar-search-kbd,
+  .sidebar:focus-within .sidebar-adv-body,
+  .sidebar:focus-within .sidebar-adv-chevron,
+  .sidebar:focus-within .sidebar-profile-meta,
+  .sidebar:focus-within .sidebar-profile-logout,
+  .sidebar:focus-within .sidebar-theme-btn,
+  .sidebar:focus-within .sidebar-section-label .sl-text {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .sidebar.is-expanded .sidebar-section-label::before,
+  .sidebar:focus-within .sidebar-section-label::before {
+    opacity: .85;
+    transform: rotate(45deg) scale(1);
+  }
+
+  .sidebar.is-expanded .sidebar-search,
+  .sidebar:focus-within .sidebar-search {
+    box-sizing: border-box;
+    width: calc(var(--sidebar-width) - 18px);
+    max-width: calc(var(--sidebar-width) - 18px);
+    margin: 10px 9px 8px;
+    padding: 9px 12px;
+    gap: 10px;
+    background: var(--bg-elevated);
+    border-color: var(--border-md);
+  }
+
+  .sidebar.is-expanded .sidebar-search > .nav-icon,
+  .sidebar:focus-within .sidebar-search > .nav-icon {
+    box-sizing: border-box;
+    width: 17px;
+    height: 17px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .sidebar.is-expanded .sidebar-adv-chip,
+  .sidebar:focus-within .sidebar-adv-chip {
+    background: linear-gradient(135deg, rgba(79,140,255,0.10), rgba(157,111,255,0.07));
+    border-color: rgba(79,140,255,0.22);
+  }
+}

@@ -70,10 +70,53 @@ export function showApp() {
 
   // ── Sections sidebar repliables (état persistant) ─
   _initCollapsibleSections();
+  _initSidebarExpansion();
 
   // ── Items admin-only ────────────────────────────
   document.querySelectorAll('.admin-only').forEach((el) => {
     el.style.display = STATE.isAdmin ? 'flex' : 'none';
+  });
+}
+
+function _initSidebarExpansion() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar || sidebar.dataset.expandBound) return;
+  sidebar.dataset.expandBound = '1';
+
+  let openTimer = null;
+  let closeTimer = null;
+  const canHover = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const clearTimers = () => {
+    clearTimeout(openTimer);
+    clearTimeout(closeTimer);
+    openTimer = null;
+    closeTimer = null;
+  };
+
+  sidebar.addEventListener('mouseenter', () => {
+    if (!canHover() || sidebar.classList.contains('nav-collapse')) return;
+    clearTimeout(closeTimer);
+    openTimer = setTimeout(() => {
+      sidebar.classList.add('is-expanded');
+    }, 180);
+  });
+
+  sidebar.addEventListener('mouseleave', () => {
+    clearTimeout(openTimer);
+    closeTimer = setTimeout(() => {
+      sidebar.classList.remove('is-expanded', 'nav-collapse');
+    }, 140);
+  });
+
+  sidebar.addEventListener('focusin', () => {
+    if (!canHover()) return;
+    clearTimers();
+    sidebar.classList.add('is-expanded');
+  });
+
+  sidebar.addEventListener('focusout', () => {
+    if (sidebar.contains(document.activeElement)) return;
+    closeTimer = setTimeout(() => sidebar.classList.remove('is-expanded'), 120);
   });
 }
 
