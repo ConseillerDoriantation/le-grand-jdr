@@ -346,6 +346,17 @@ html, body { min-height:100%; }
   border-color: rgba(79,140,255,0.38);
   transform: translateY(-1px);
 }
+.sidebar-adv-chip--static {
+  cursor: default;
+}
+.sidebar-adv-chip--static:hover {
+  background: linear-gradient(135deg, rgba(79,140,255,0.10), rgba(157,111,255,0.07));
+  border-color: rgba(79,140,255,0.22);
+  transform: none;
+}
+.sidebar-adv-chip--static .sidebar-adv-chevron {
+  display: none;
+}
 .sidebar-adv-emoji {
   font-size: 1rem;
   flex-shrink: 0;

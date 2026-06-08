@@ -208,27 +208,47 @@ export function showAdventureLoadError(onRetry) {
 
 // ── Badge aventure dans le header ──────────────
 function _updateAdventureBadge() {
+  const canSwitchAdventure = (STATE.adventures?.length || 0) > 1;
+
   // Header badge (mobile)
-  const badge = document.getElementById('adventure-badge');
+  const badge = document.getElementById("adventure-badge");
   if (badge) {
     if (STATE.adventure) {
-      badge.textContent = `${STATE.adventure.emoji || '⚔️'} ${STATE.adventure.nom}`;
-      badge.style.display = 'inline';
-      badge.onclick = () => openAdventureSwitcher();
+      badge.textContent = (STATE.adventure.emoji || "⚔️") + " " + (STATE.adventure.nom || "");
+      badge.style.display = "inline";
+      badge.disabled = !canSwitchAdventure;
+      badge.title = canSwitchAdventure ? "Changer d\x27aventure" : "Aventure active";
+      badge.setAttribute("aria-label", badge.title);
+      badge.onclick = canSwitchAdventure ? () => openAdventureSwitcher() : null;
     } else {
-      badge.style.display = 'none';
+      badge.style.display = "none";
+      badge.onclick = null;
     }
   }
 
   // Sidebar chip (desktop)
-  const chip      = document.getElementById('sidebar-adv-chip');
+  const chip      = document.getElementById("sidebar-adv-chip");
   const chipEmoji = document.getElementById('sidebar-adv-emoji');
   const chipName  = document.getElementById('sidebar-adv-name');
   if (chip) {
     if (STATE.adventure) {
-      if (chipEmoji) chipEmoji.textContent = STATE.adventure.emoji || '⚔️';
-      if (chipName)  chipName.textContent  = STATE.adventure.nom || '';
-      chip.style.display = 'flex';
+      if (chipEmoji) chipEmoji.textContent = STATE.adventure.emoji || "⚔️";
+      if (chipName)  chipName.textContent  = STATE.adventure.nom || "";
+      chip.style.display = "flex";
+      chip.classList.toggle("sidebar-adv-chip--static", !canSwitchAdventure);
+      chip.title = canSwitchAdventure ? "Changer d\x27aventure" : "Aventure active";
+      chip.setAttribute("aria-label", chip.title);
+      if (canSwitchAdventure) {
+        chip.dataset.action = "openAdventureSwitcher";
+        chip.setAttribute("aria-haspopup", "dialog");
+        chip.setAttribute("role", "button");
+        chip.tabIndex = 0;
+      } else {
+        delete chip.dataset.action;
+        chip.removeAttribute("aria-haspopup");
+        chip.removeAttribute("role");
+        chip.removeAttribute("tabindex");
+      }
     } else {
       chip.style.display = 'none';
     }

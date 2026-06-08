@@ -189,6 +189,14 @@
   background: var(--bg-card2);
   color: var(--text);
 }
+.adventure-badge:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.adventure-badge:disabled:hover {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
 
 /* ── Emoji picker ─────────────────────────────── */
 .adv-emoji-btn.selected {
