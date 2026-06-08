@@ -33,6 +33,29 @@ export function toggleQuestParticipant(participants = [], { uid = '', char = nul
   return { participants: parts, joined: Boolean(char), leaving: false };
 }
 
+function _participantTextKey(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function dedupeQuestParticipants(participants = [], { uidAliases = [] } = {}) {
+  const aliases = new Set((Array.isArray(uidAliases) ? uidAliases : []).filter(Boolean));
+  const byKey = new Map();
+  (Array.isArray(participants) ? participants : []).forEach(p => {
+    if (!p) return;
+    const key = aliases.has(p.uid)
+      ? 'self'
+      : p.charId
+        ? `char:${p.charId}`
+        : p.nom
+          ? `nom:${_participantTextKey(p.nom)}`
+          : `uid:${p.uid || ''}`;
+    if (!key || key === 'uid:') return;
+    const prev = byKey.get(key);
+    if (!prev || aliases.has(p.uid)) byKey.set(key, p);
+  });
+  return [...byKey.values()];
+}
+
 export function storyParticipantsFromGroups(groups = [], characters = []) {
   const chars = sortCharactersForDisplay(characters || []);
   const byId = new Map(chars.map(c => [c.id, c]));
