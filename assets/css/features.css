@@ -2433,6 +2433,53 @@ body.ach-dragging * { cursor:grabbing !important; }
 }
 .coll-admin-btns button { pointer-events: auto; background-color: #111827; transition: background-color 0.2s ease; }
 .coll-admin-btns button:hover { background-color: #1b2432; }
+.coll-back-list,
+.coll-back-picker {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(74px,1fr));
+  gap:.65rem;
+  margin-top:.6rem;
+}
+.coll-back-thumb,
+.coll-back-choice {
+  position:relative;
+  aspect-ratio:3/4;
+  border:1px solid var(--border);
+  border-radius:8px;
+  overflow:hidden;
+  background:rgba(255,255,255,.04);
+}
+.coll-back-thumb img,
+.coll-back-choice img {
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  display:block;
+}
+.coll-back-remove {
+  position:absolute;
+  top:4px;
+  right:4px;
+  width:24px;
+  height:24px;
+  min-width:24px;
+  background:#111827;
+}
+.coll-back-choice {
+  cursor:pointer;
+  transition:border-color .15s, box-shadow .15s, transform .15s;
+}
+.coll-back-choice input {
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+.coll-back-choice:has(input:checked),
+.coll-back-choice.is-selected {
+  border-color:var(--gold);
+  box-shadow:0 0 0 2px rgba(232,184,75,.22);
+}
+.coll-back-choice:hover { transform:translateY(-2px); }
 
 /* Players */
 .players-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:1.2rem; }
