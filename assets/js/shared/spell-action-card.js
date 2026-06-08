@@ -11,7 +11,17 @@ export function spellTypeBadges(types = [], { className = '', stylePrefix = '' }
 
 export function runeBadges(runes = [], { className = '' } = {}) {
   const counts = {};
-  runes.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  let hasActionRune = false;
+  runes.forEach(r => {
+    const nom = (r === 'Réaction' || r === 'Action Bonus' || r === 'Déclenchement')
+      ? 'Déclenchement'
+      : r;
+    if (nom === 'Déclenchement') {
+      if (hasActionRune) return;
+      hasActionRune = true;
+    }
+    counts[nom] = (counts[nom] || 0) + 1;
+  });
   return Object.entries(counts).map(([r, n]) =>
     className
       ? '<span class="' + className + '">' + _esc(r) + (n > 1 ? `×${n}` : '') + '</span>'

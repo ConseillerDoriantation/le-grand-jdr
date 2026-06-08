@@ -27,6 +27,7 @@ let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
+let _actionModeEdit = 'reaction';
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
@@ -181,7 +182,7 @@ export function renderCharDeck(c, canEdit) {
     if (typeFlt) {
       if (typeFlt.startsWith('rune:')) {
         // Filtre par rune utilisée
-        if (!(s.runes || []).includes(typeFlt.slice(5))) return false;
+        if (!_displayRunes(s.runes || []).includes(typeFlt.slice(5))) return false;
       } else {
         const types = _getSortTypes(s);
         if (typeFlt === 'offensif'   && !types.includes('offensif')) return false;
@@ -200,7 +201,7 @@ export function renderCharDeck(c, canEdit) {
     if (t.includes('offensif')) usedTypes.add('offensif');
     if (t.includes('defensif')) usedTypes.add('defensif');
     if (t.includes('utilitaire') && !t.includes('offensif') && !t.includes('defensif')) usedTypes.add('utilitaire');
-    (s.runes || []).forEach(r => usedRunes.add(r));
+    _displayRunes(s.runes || []).forEach(r => usedRunes.add(r));
   });
   const TYPE_META = {
     offensif:   { lbl: '⚔️ Off',  cls: 'off' },
@@ -574,7 +575,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
 
   // ── Runes présentes (comptées) — affichage seul (l'édition se fait dans l'éditeur) ──
   const counts = {};
-  runesAll.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  _displayRunes(runesAll).forEach(r => { counts[r] = (counts[r] || 0) + 1; });
   const runeMetas = RUNE_META.filter(rm => (counts[rm.nom] || 0) > 0);
   const runeChips = runeMetas.length ? `<div class="cs-spellcard-runes">
     ${runeMetas.map(rm => `<span class="cs-runechip" style="--c:${rm.color}" title="${_esc(rm.nom)} — ${_esc(rm.effet)}">${rm.icon} ${_esc(rm.nom)}${(counts[rm.nom]>1)?` ×${counts[rm.nom]}`:''}</span>`).join('')}
@@ -784,9 +785,44 @@ const RUNE_META = [
   { nom:'Chance',        icon:'🍀', color:'#facc15', family:'soutien',   effet:'RC 19–20 (critique max)' },
   { nom:'Durée',         icon:'⏱️', color:'#06b6d4', family:'meta',      effet:'+2 tours' },
   { nom:'Concentration', icon:'🧠', color:'#6366f1', family:'meta',      effet:'Maintien hors tour · JS Sa DD 11 si touché' },
-  { nom:'Réaction',      icon:'🔄', color:'#ec4899', family:'meta',      effet:'Lance hors de son tour' },
-  { nom:'Action Bonus',  icon:'✴️', color:'#f97316', family:'meta',      effet:'Lancé en Action Bonus' },
+  { nom:'Déclenchement', icon:'⚡', color:'#f97316', family:'meta',      effet:'Transforme le sort en Réaction ou Action Bonus' },
 ];
+
+const ACTION_RUNE = 'Déclenchement';
+const ACTION_MODE_LABELS = {
+  reaction: 'Réaction',
+  action_bonus: 'Action Bonus',
+};
+
+function _spellActionMode(s) {
+  const runes = s?.runes || [];
+  if (runes.includes(ACTION_RUNE) && (s?.actionMode === 'reaction' || s?.actionMode === 'action_bonus')) return s.actionMode;
+  if (runes.includes('Réaction')) return 'reaction';
+  if (runes.includes('Action Bonus')) return 'action_bonus';
+  return 'reaction';
+}
+
+function _buildRunesFromCounts() {
+  const runes = [];
+  Object.entries(_runeCountsEdit || {}).forEach(([nom, cnt]) => {
+    for (let i = 0; i < cnt; i++) runes.push(nom);
+  });
+  return runes;
+}
+
+function _displayRunes(runes = []) {
+  let hasActionRune = false;
+  const out = [];
+  runes.forEach(r => {
+    if (r === 'Réaction' || r === 'Action Bonus' || r === ACTION_RUNE) {
+      if (!hasActionRune) out.push(ACTION_RUNE);
+      hasActionRune = true;
+      return;
+    }
+    out.push(r);
+  });
+  return out;
+}
 
 const RUNE_GROUPS = [
   { id:'puissance', title:'⚔️ Puissance brute',    desc:'Dégâts et défense' },
@@ -820,7 +856,7 @@ function _runeLiveContribution(nom, counts) {
       // Contexte : lit le mode et la présence de Réaction pour adapter le label
       const protMode = (typeof document !== 'undefined'
         ? document.getElementById('s-prot-mode')?.value : null) || 'ca';
-      const hasReac = (counts.Réaction || 0) > 0;
+      const hasReac = (counts.Réaction || 0) > 0 || ((counts[ACTION_RUNE] || 0) > 0 && _actionModeEdit === 'reaction');
       // Combo Bouclier réactif (Réa + Prot mode CA) : pas de soin, blocage 1 attaque
       if (hasReac && protMode === 'ca') {
         const tier = cnt >= 3 ? 'Boss ou inférieur' : cnt === 2 ? 'Élite ou inférieur' : 'Mob classique';
@@ -904,10 +940,8 @@ function _runeLiveContribution(nom, counts) {
       };
     case 'Concentration':
       return { main: 'Maintenu hors tour · JS Sa DD 11 si dégâts reçus', chain: null };
-    case 'Réaction':
-      return { main: 'Lancé hors de son tour', chain: null };
-    case 'Action Bonus':
-      return { main: 'Lancé en Action Bonus', chain: null };
+    case ACTION_RUNE:
+      return { main: `Lancé en ${ACTION_MODE_LABELS[_actionModeEdit] || 'Réaction'}`, chain: null };
     default:
       return { main: `×${cnt}`, chain: null };
   }
@@ -1018,7 +1052,12 @@ export async function openSortModal(idx, s) {
 
   const runesSrc = s?.runes||[];
   const runeCounts = {};
-  runesSrc.forEach(r => { runeCounts[r] = (runeCounts[r]||0) + 1; });
+  _actionModeEdit = _spellActionMode(s);
+  runesSrc.forEach(r => {
+    const nom = (r === 'Réaction' || r === 'Action Bonus') ? ACTION_RUNE : r;
+    runeCounts[nom] = (runeCounts[nom] || 0) + 1;
+  });
+  if (runeCounts[ACTION_RUNE] > 1) runeCounts[ACTION_RUNE] = 1;
   _runeCountsEdit = { ...runeCounts };
 
   // Noyau : id de type (nouveau) ou migration depuis label (ancien)
@@ -1092,6 +1131,22 @@ export async function openSortModal(idx, s) {
   const hasAmp   = runesSrc.includes('Amplification');
   const nbAmp    = runesSrc.filter(r => r === 'Amplification').length;
   const ampMode  = s?.ampMode || 'zone';
+  const hasActionRune = (_runeCountsEdit[ACTION_RUNE] || 0) > 0;
+  const actionMode = _actionModeEdit || 'reaction';
+  const actionModeBtnsHtml = [
+    { v:'reaction', label:'🔄 Réaction', col:'#ec4899', detail:'Hors de son tour' },
+    { v:'action_bonus', label:'✴️ Action Bonus', col:'#f97316', detail:'Action Bonus du tour' },
+  ].map(opt => {
+    const sel = actionMode === opt.v;
+    return `<button type="button" id="s-action-mode-${opt.v}"
+      data-action="_selectActionMode" data-val="${opt.v}"
+      style="flex:1;padding:.42rem .35rem;border-radius:8px;cursor:pointer;transition:all .15s;
+      border:2px solid ${sel?opt.col:'var(--border)'};
+      background:${sel?opt.col+'18':'var(--bg-elevated)'};text-align:center">
+      <div style="font-size:.76rem;font-weight:700;color:${sel?opt.col:'var(--text-dim)'}">${opt.label}</div>
+      <div style="font-size:.64rem;color:var(--text-dim);margin-top:.08rem">${opt.detail}</div>
+    </button>`;
+  }).join('');
   // Sous-modes de déplacement (Soi / Pousser / Attirer)
   const deplCur = s?.deplacement?.mode || 'self';
   const deplBtnsHtml = [
@@ -1396,6 +1451,18 @@ export async function openSortModal(idx, s) {
       </div>
       </div><!-- /s-affliction-modes -->
     </div><!-- /s-affliction-section -->
+
+    <!-- Rune Déclenchement — mode Réaction ou Action Bonus -->
+    <div id="s-action-rune-section" style="${hasActionRune?'':'display:none'}">
+      <div class="form-group">
+        <label>⚡ Rune Déclenchement — timing</label>
+        <div style="display:flex;gap:.4rem">${actionModeBtnsHtml}</div>
+        <input type="hidden" id="s-action-mode" value="${actionMode}">
+        <div style="font-size:.72rem;color:var(--text-dim);padding:.35rem .1rem 0">
+          Les combos de Réaction se déclenchent uniquement avec le mode <b>Réaction</b>.
+        </div>
+      </div>
+    </div>
 
     <!-- ⑨ Rune Amplification — mode Zone ou Déplacement (visible si rune présente) -->
     <div id="s-amp-section" style="${hasAmp?'':'display:none'}">
@@ -1911,8 +1978,7 @@ function _invClearImage() {
 }
 // Met à jour les placeholders (valeurs dérivées) selon les runes courantes.
 function _refreshInvocationDerived() {
-  const runes = [];
-  Object.entries(_runeCountsEdit || {}).forEach(([nom, cnt]) => { for (let i = 0; i < cnt; i++) runes.push(nom); });
+  const runes = _buildRunesFromCounts();
   const d = _calcInvocationStats({ runes });
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.placeholder = String(val); };
   set('s-inv-attaque', d.attaque); set('s-inv-toucher', d.toucher); set('s-inv-pv', d.pv);
@@ -2158,6 +2224,26 @@ function _selectAmpMode(mode) {
   _updateSortPreview();
 }
 
+function _selectActionMode(mode) {
+  _actionModeEdit = mode === 'action_bonus' ? 'action_bonus' : 'reaction';
+  const hidden = document.getElementById('s-action-mode');
+  if (hidden) hidden.value = _actionModeEdit;
+  [
+    ['reaction', '#ec4899'],
+    ['action_bonus', '#f97316'],
+  ].forEach(([v, col]) => {
+    const btn = document.getElementById(`s-action-mode-${v}`);
+    if (!btn) return;
+    const active = v === _actionModeEdit;
+    btn.style.borderColor = active ? col : 'var(--border)';
+    btn.style.background = active ? col + '18' : 'var(--bg-elevated)';
+    const t = btn.querySelector('div');
+    if (t) t.style.color = active ? col : 'var(--text-dim)';
+  });
+  _refreshRunesSection?.(ACTION_RUNE);
+  _updateSortPreview();
+}
+
 function _selectProtMode(mode) {
   const hidden  = document.getElementById('s-prot-mode');
   const caSec   = document.getElementById('s-ca-section');
@@ -2189,6 +2275,10 @@ function _selectProtMode(mode) {
 
 export function runeIncrement(nom) {
   _runeCountsEdit = _runeCountsEdit||{};
+  if (nom === ACTION_RUNE && (_runeCountsEdit[ACTION_RUNE] || 0) > 0) {
+    _refreshRunesSection(nom);
+    return;
+  }
   // Limite de runes d'effet par personnage (le MJ et les contextes spéciaux
   // — actions d'objet/invocation — ne sont pas limités).
   if (!STATE.isAdmin && !_itemEditCtx) {
@@ -2252,6 +2342,7 @@ function _refreshRunesSection(changedNom) {
     Enchantement:  's-enchant-section',
     Affliction:    's-affliction-section',
     Amplification: 's-amp-section',
+    [ACTION_RUNE]: 's-action-rune-section',
   };
   const sectionId = sectionMap[changedNom];
   if (sectionId) {
@@ -2540,10 +2631,7 @@ export function updateSortPM() {
 function _buildSortFromDOM() {
   const noyau       = document.getElementById('s-noyau')?.value || '';
   const noyauTypeId = document.getElementById('s-noyau-id')?.value || '';
-  const runes = [];
-  Object.entries(_runeCountsEdit||{}).forEach(([nom, cnt]) => {
-    for (let i=0; i<cnt; i++) runes.push(nom);
-  });
+  const runes = _buildRunesFromCounts();
   const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
   const dureeBase = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
@@ -2553,6 +2641,9 @@ function _buildSortFromDOM() {
     icon:        iconRaw.trim() || '',
     mjValidation: mjVal, mjValidated: mjVal === 'ok',
     noyau, noyauTypeId, noyauTypeIds: [..._noyauIdsEdit], runes, types,
+    actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
+      ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
+      : null,
     degats: document.getElementById('s-degats')?.value || '',
     soin:   document.getElementById('s-soin')?.value || '',
     ca:     document.getElementById('s-ca')?.value || '',
@@ -2718,10 +2809,7 @@ export async function saveSort(idx) {
     const noyauTypeId = document.getElementById('s-noyau-id')?.value||'';
 
     // Runes depuis _runeCountsEdit
-    const runes = [];
-    Object.entries(_runeCountsEdit||{}).forEach(([nom, cnt]) => {
-      for (let i=0; i<cnt; i++) runes.push(nom);
-    });
+    const runes = _buildRunesFromCounts();
 
     const totalRunes = (noyau ? 1 : 0) + runes.length;
     const autoPm     = totalRunes * 2 || 2;
@@ -2760,6 +2848,9 @@ export async function saveSort(idx) {
       noyauTypeId,
       noyauTypeIds: [..._noyauIdsEdit],
       runes,
+      actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
+        ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
+        : null,
       types,
       degats:   document.getElementById('s-degats')?.value||'',
       soin:     document.getElementById('s-soin')?.value||'',
@@ -2850,10 +2941,7 @@ export async function saveSort(idx) {
 function _buildSortFromForm(idx, prevList = []) {
   const noyau       = document.getElementById('s-noyau')?.value||'';
   const noyauTypeId = document.getElementById('s-noyau-id')?.value||'';
-  const runes = [];
-  Object.entries(_runeCountsEdit||{}).forEach(([nom, cnt]) => {
-    for (let i=0; i<cnt; i++) runes.push(nom);
-  });
+  const runes = _buildRunesFromCounts();
   const totalRunes = (noyau ? 1 : 0) + runes.length;
   const autoPm     = totalRunes * 2 || 2;
   const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
@@ -2878,7 +2966,11 @@ function _buildSortFromForm(idx, prevList = []) {
     mjAlwaysMax: STATE.isAdmin
       ? !!document.getElementById('s-mj-always-max')?.checked
       : (idx >= 0 ? !!prevList[idx]?.mjAlwaysMax : false),
-    noyau, noyauTypeId, runes, types,
+    noyau, noyauTypeId, runes,
+    actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
+      ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
+      : null,
+    types,
     degats:   document.getElementById('s-degats')?.value||'',
     soin:     document.getElementById('s-soin')?.value||'',
     ca:       document.getElementById('s-ca')?.value||'',
@@ -2979,6 +3071,7 @@ registerActions({
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
+  _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),
   _selectEnchantMode:     (btn) => _selectEnchantMode(btn.dataset.val),
