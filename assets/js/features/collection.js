@@ -223,11 +223,18 @@ function _cardHtml(c) {
       : (c.description
           ? `<div class="coll-defi">${_nl2br(_esc(c.description))}</div>`
           : `<div class="coll-defi coll-defi--empty">Aucun défi renseigné.</div>`);
-    back2 = `<div class="coll-back-info">
-      <div class="coll-back-title">${_esc(c.nom || 'Carte')}</div>
-      <div class="coll-back-label">Défi à relever</div>
-      ${defi}
-    </div>`;
+    back2 = STATE.isAdmin
+      ? `<div class="coll-back-info">
+        <div class="coll-back-title">${_esc(c.nom || 'Carte')}</div>
+        <div class="coll-back-label">Défi à relever</div>
+        ${defi}
+      </div>`
+      : (back
+          ? `<img class="coll-back-image" src="${_esc(back)}" loading="lazy" decoding="async" alt="Dos de carte">`
+          : `<div class="coll-back-info coll-back-info--mystery">
+            <div class="coll-back-ic">🃏</div>
+            <div class="coll-back-title">Dos de carte</div>
+          </div>`);
   }
 
   const badges = STATE.isAdmin ? `
