@@ -3583,6 +3583,11 @@ input[type=number].input-field::-webkit-outer-spin-button {
   flex-wrap: wrap;
 }
 .cs-spell-preview-icon { flex-shrink: 0; width: 1.1rem; text-align: center; }
+.cs-spell-preview-label,
+.cs-spell-preview-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .cs-spell-preview-label { color: var(--text); font-weight: 600; }
 .cs-spell-preview-detail { color: var(--text-dim); font-size: 0.7rem; font-style: italic; }
 
@@ -3691,15 +3696,14 @@ body .modal:has(.sh-admin-modal.is-spell) {
 }
 .cs-spell-side {
   min-width: 0;
-  position: sticky;
-  top: 12px;
   align-self: start;
   display: flex;
   flex-direction: column;
   gap: .7rem;
-  max-height: calc(88vh - 150px);
-  overflow-y: auto;
-  padding-right: 2px;
+  position: static;
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
 }
 .cs-spell-side-card,
 .cs-spell-side-setting,
@@ -3730,6 +3734,11 @@ body .modal:has(.sh-admin-modal.is-spell) {
   -webkit-backdrop-filter: none;
 }
 .cs-spell-preview-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .55rem;
+  flex-wrap: wrap;
   text-transform: none;
   letter-spacing: 0;
   font-size: .78rem;
@@ -3865,14 +3874,17 @@ body .modal:has(.sh-admin-modal.is-spell) {
 }
 .cs-spell-advanced[open] summary::after { transform: rotate(180deg); }
 .cs-spell-advanced summary span {
+  min-width: 0;
   font-size: .78rem;
   font-weight: 850;
 }
 .cs-spell-advanced summary small {
+  min-width: 0;
   margin-left: auto;
   color: var(--text-dim);
   font-size: .66rem;
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 .cs-spell-advanced-body {
   display: flex;
