@@ -10,7 +10,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
-import { toggleQuestParticipant } from '../shared/participants.js';
+import { dedupeQuestParticipants, toggleQuestParticipant } from '../shared/participants.js';
 import { getMyCharacters } from '../shared/char-stats.js';
 import { QUEST_DIFF, QUEST_STATUT } from '../shared/enums.js';
 import { emptyStateHtml, renderList } from '../shared/list-renderer.js';
@@ -52,7 +52,7 @@ const _portrait = (p, size = 28) => characterAvatarHtml(p, { size, border: '2px 
 function _questCard(q, myChar) {
   const df    = _diff(q.difficulte);
   const st    = _statut(q.statut);
-  const parts = Array.isArray(q.participants) ? q.participants : [];
+  const parts = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases() });
   const required = _questRequiredCount(q);
   const uid   = STATE.user?.uid;
   const joined = myChar ? parts.some(p => _myUidAliases().includes(p.uid)) : false;
@@ -131,6 +131,26 @@ function _applyQuestsRender(quests) {
   ${renderList(sorted, q => _questCard(q, myChar), 'quest-grid',
     emptyStateHtml('📋', 'Aucune quête pour l\'instant.'))}
   `;
+
+  _cleanupDuplicateParticipants(quests);
+}
+
+const _questCleanupRunning = new Set();
+async function _cleanupDuplicateParticipants(quests = []) {
+  for (const q of quests || []) {
+    const before = Array.isArray(q.participants) ? q.participants : [];
+    const after = dedupeQuestParticipants(before, { uidAliases: _myUidAliases() });
+    if (JSON.stringify(before) === JSON.stringify(after) || _questCleanupRunning.has(q.id)) continue;
+    _questCleanupRunning.add(q.id);
+    try {
+      await saveDoc('quests', q.id, { participants: after });
+      q.participants = after;
+    } catch (e) {
+      console.warn('[quests] nettoyage participants ignoré', q.id, e?.code || e);
+    } finally {
+      _questCleanupRunning.delete(q.id);
+    }
+  }
 }
 
 // ── Page principale ───────────────────────────

@@ -12,7 +12,7 @@ import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
-import { toggleQuestParticipant } from '../shared/participants.js';
+import { dedupeQuestParticipants, toggleQuestParticipant } from '../shared/participants.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -362,7 +362,7 @@ const PAGES = {
     const _dashQuestCard = q => {
       const col    = QDIFF[q.difficulte] || '#4f8cff';
       const dlbl   = QDLBL[q.difficulte] || 'Moyen';
-      const parts  = Array.isArray(q.participants) ? q.participants : [];
+      const parts  = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases });
       const required = _questRequiredCount(q);
       const joined = parts.some(p => _myUidAliases.includes(p.uid));
       const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');

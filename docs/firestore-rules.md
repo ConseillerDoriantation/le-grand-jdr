@@ -190,6 +190,10 @@ service cloud.firestore {
       match /bastion/{id}           { allow read, write: if inAdventure(adventureId); }
       match /story_histories/{id}   { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /agenda_session/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /availabilities/{uid} {
+        allow read: if inAdventure(adventureId);
+        allow write: if inAdventure(adventureId) && uid == request.auth.uid;
+      }
 
       match /characters/{id} {
         allow read: if inAdventure(adventureId);
