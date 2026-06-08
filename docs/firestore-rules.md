@@ -189,6 +189,7 @@ service cloud.firestore {
       match /order/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /bastion/{id}           { allow read, write: if inAdventure(adventureId); }
       match /story_histories/{id}   { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      match /agenda_session/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
 
       match /characters/{id} {
         allow read: if inAdventure(adventureId);
