@@ -22,6 +22,57 @@ import {
 import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
 
+const _emailRaw = (email = '') => String(email || '').trim();
+const _emailKey = (email = '') => _emailRaw(email).toLowerCase();
+const _emailKeys = (email = '') => _uniq([_emailRaw(email), _emailKey(email)]);
+const _uniq = (arr = []) => [...new Set((arr || []).filter(Boolean))];
+
+async function _userEmailByUid(uid) {
+  if (!uid) return '';
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    return snap.exists() ? _emailRaw(snap.data()?.email) : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+async function _getDocsSafe(q, { preferServer = false } = {}) {
+  if (preferServer) {
+    try {
+      return await getDocsFromServer(q);
+    } catch (e) {
+      if (navigator.onLine !== false) throw e;
+      console.warn('[adventure] hors-ligne, lecture depuis le cache', e?.code || e);
+    }
+  }
+  return getDocs(q);
+}
+
+function _mergeAdventureDocs(...snaps) {
+  const map = new Map();
+  snaps.filter(Boolean).forEach(snap => {
+    snap.docs.forEach(d => map.set(d.id, { id: d.id, ...d.data() }));
+  });
+  return [...map.values()];
+}
+
+function _previousUids() {
+  const uid = STATE.user?.uid;
+  return _uniq([
+    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
+    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
+  ]).filter(alias => alias && alias !== uid);
+}
+
+function _adventureMatchesPreviousUid(adv, previousUids) {
+  return previousUids.some(oldUid =>
+    (adv.accessList || []).includes(oldUid) ||
+    (adv.players || []).includes(oldUid) ||
+    (adv.admins || []).includes(oldUid)
+  );
+}
+
 // ── Charger les aventures accessibles ──────────
 // `preferServer` (gate de login) : lecture serveur prioritaire pour ne JAMAIS
 // bloquer un joueur sur un cache IndexedDB périmé (il vient d'être ajouté à
@@ -29,28 +80,100 @@ import { startPresence } from '../shared/presence.js';
 // l'erreur (le caller peut retry au lieu d'afficher un faux "pas invité").
 // Hors-ligne, on se rabat sur le cache (le joueur déjà venu garde l'accès).
 // Sans option : comportement historique (cache OK, erreur avalée en []).
-export async function loadUserAdventures(uid, { preferServer = false } = {}) {
-  const q = query(collection(db, 'adventures'), where('accessList', 'array-contains', uid));
-  if (preferServer) {
-    try {
-      const snap = await getDocsFromServer(q);
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch (e) {
-      if (navigator.onLine !== false) throw e; // en ligne → laisser le caller retry
-      console.warn('[adventure] hors-ligne, lecture depuis le cache', e?.code || e);
-    }
-  }
+export async function loadUserAdventures(uid, { preferServer = false, email = '' } = {}) {
+  const uidQuery = query(collection(db, 'adventures'), where('accessList', 'array-contains', uid));
+  const emailKey = _emailKey(email || STATE.profile?.email || STATE.user?.email);
+  const emailQuery = emailKey
+    ? query(collection(db, 'adventures'), where('accessEmails', 'array-contains', emailKey))
+    : null;
+
   try {
-    const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const snaps = await Promise.all([
+      _getDocsSafe(uidQuery, { preferServer }),
+      emailQuery ? _getDocsSafe(emailQuery, { preferServer }) : null,
+    ]);
+    const direct = _mergeAdventureDocs(...snaps);
+    if (direct.length) return direct;
+
+    const previousUids = _previousUids();
+    if (!previousUids.length && !emailKey) return direct;
+
+    const allSnap = await _getDocsSafe(collection(db, 'adventures'), { preferServer });
+    return allSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(adv =>
+        _adventureMatchesPreviousUid(adv, previousUids) ||
+        (emailKey && (adv.accessEmails || []).includes(emailKey))
+      );
   } catch (e) {
     console.error('[adventure] loadUserAdventures', e);
+    if (preferServer && navigator.onLine !== false) throw e;
     return [];
   }
 }
 
 // ── Sélectionner une aventure ──────────────────
 // Met à jour STATE, active le scope Firestore, retourne true si OK
+export async function repairCurrentUserAdventureLinks(adventures = []) {
+  const uid = STATE.user?.uid;
+  if (!uid || !Array.isArray(adventures) || !adventures.length) return adventures;
+
+  const emailKeys = _emailKeys(STATE.profile?.email || STATE.user?.email);
+  const previousUids = _previousUids();
+
+  if (!emailKeys.length && !previousUids.length) return adventures;
+
+  const repaired = [];
+  for (const adv of adventures) {
+    const accessEmails = adv.accessEmails || [];
+    const hasEmailAccess = emailKeys.some(email => accessEmails.includes(email));
+    const isAlreadyLinked = (adv.accessList || []).includes(uid);
+    const oldUidsInAdventure = previousUids.filter(oldUid =>
+      _adventureMatchesPreviousUid(adv, [oldUid])
+    );
+
+    if (isAlreadyLinked && !oldUidsInAdventure.length) {
+      repaired.push(adv);
+      continue;
+    }
+
+    let nextAdv = adv;
+    const shouldLinkCurrentUid = (hasEmailAccess || oldUidsInAdventure.length > 0) && !isAlreadyLinked;
+    if (shouldLinkCurrentUid) {
+      const accessList = _uniq([...(adv.accessList || []), uid]);
+      const wasAdmin = oldUidsInAdventure.some(oldUid => (adv.admins || []).includes(oldUid));
+      const admins = wasAdmin ? _uniq([...(adv.admins || []), uid]) : (adv.admins || []);
+      const players = wasAdmin ? (adv.players || []) : _uniq([...(adv.players || []), uid]);
+      const nextAccessEmails = _uniq([...accessEmails, ...emailKeys]);
+
+      try {
+        await updateDoc(doc(db, 'adventures', adv.id), { accessList, admins, players, accessEmails: nextAccessEmails });
+        nextAdv = { ...nextAdv, accessList, admins, players, accessEmails: nextAccessEmails };
+      } catch (e) {
+        console.warn('[adventure] auto-rattachement compte ignoré', adv.id, e?.code || e);
+      }
+    }
+
+    for (const oldUid of oldUidsInAdventure) {
+      try {
+        const charsSnap = await getDocs(
+          query(collection(db, 'adventures', adv.id, 'characters'), where('uid', '==', oldUid))
+        );
+        if (charsSnap.empty) continue;
+        const batch = writeBatch(db);
+        charsSnap.forEach(d => batch.update(d.ref, { uid }));
+        await batch.commit();
+      } catch (e) {
+        console.warn('[adventure] migration personnages compte ignorée', adv.id, oldUid, e?.code || e);
+      }
+    }
+
+    repaired.push(nextAdv);
+  }
+
+  return repaired;
+}
+
 export function selectAdventure(adv) {
   setAdventure(adv);
   // `setCurrentAdventure` tear-down les listeners session de l'aventure
@@ -87,6 +210,7 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
     admins:     [uid],
     players:    [],
     accessList: [uid],
+    accessEmails: _emailKeys(STATE.profile?.email || STATE.user?.email),
     status:     'active',
   };
 
@@ -117,19 +241,24 @@ export async function addPlayerToAdventure(adventureId, targetUid, asAdmin = fal
   const players    = adv.players    || [];
   const admins     = adv.admins     || [];
   const accessList = adv.accessList || [];
+  const accessEmails = adv.accessEmails || [];
+  const targetEmail = await _userEmailByUid(targetUid);
 
   if (!accessList.includes(targetUid)) accessList.push(targetUid);
+  _emailKeys(targetEmail).forEach(email => {
+    if (!accessEmails.includes(email)) accessEmails.push(email);
+  });
   if (asAdmin) {
     if (!admins.includes(targetUid)) admins.push(targetUid);
   } else {
     if (!players.includes(targetUid)) players.push(targetUid);
   }
 
-  await updateDoc(ref, { players, admins, accessList });
+  await updateDoc(ref, { players, admins, accessList, accessEmails });
 
   // Mettre à jour l'aventure locale si c'est la courante
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, players, admins, accessList });
+    setAdventure({ ...STATE.adventure, players, admins, accessList, accessEmails });
   }
 }
 
@@ -153,11 +282,16 @@ export async function removePlayerFromAdventure(adventureId, targetUid) {
   const players    = (adv.players    || []).filter(u => u !== targetUid);
   const admins     = (adv.admins     || []).filter(u => u !== targetUid);
   const accessList = (adv.accessList || []).filter(u => u !== targetUid);
+  const targetEmail = await _userEmailByUid(targetUid);
+  const targetEmails = _emailKeys(targetEmail);
+  const accessEmails = targetEmails.length
+    ? (adv.accessEmails || []).filter(e => !targetEmails.includes(e))
+    : (adv.accessEmails || []);
 
-  await updateDoc(ref, { players, admins, accessList });
+  await updateDoc(ref, { players, admins, accessList, accessEmails });
 
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, players, admins, accessList });
+    setAdventure({ ...STATE.adventure, players, admins, accessList, accessEmails });
   }
 }
 
@@ -193,6 +327,8 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
   const accessList = repl(adv.accessList);
   const players    = repl(adv.players);
   const admins     = repl(adv.admins);
+  const newEmail = await _userEmailByUid(newUid);
+  const accessEmails = _uniq([...(adv.accessEmails || []), ..._emailKeys(newEmail)]);
 
   // Re-key des personnages de CETTE aventure (les persos sont une sous-collection
   // scoping par aventure et keyés par `uid`).
@@ -206,13 +342,10 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
     await batch.commit();
   }
 
-  await updateDoc(ref, { accessList, players, admins });
+  await updateDoc(ref, { accessList, players, admins, accessEmails });
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, accessList, players, admins });
+    setAdventure({ ...STATE.adventure, accessList, players, admins, accessEmails });
   }
-
-  // Nettoyage best-effort de l'ancien doc users orphelin (delete = admin only).
-  try { await deleteDoc(doc(db, 'users', oldUid)); } catch (_) { /* non bloquant */ }
 
   return { migrated };
 }
@@ -295,11 +428,16 @@ export async function promoteToAdmin(adventureId, targetUid) {
   const admins     = adv.admins     || [];
   const players    = (adv.players   || []).filter(u => u !== targetUid);
   const accessList = adv.accessList || [];
+  const accessEmails = adv.accessEmails || [];
+  const targetEmail = await _userEmailByUid(targetUid);
   if (!admins.includes(targetUid)) admins.push(targetUid);
   if (!accessList.includes(targetUid)) accessList.push(targetUid);
-  await updateDoc(ref, { admins, players, accessList });
+  _emailKeys(targetEmail).forEach(email => {
+    if (!accessEmails.includes(email)) accessEmails.push(email);
+  });
+  await updateDoc(ref, { admins, players, accessList, accessEmails });
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, admins, players, accessList });
+    setAdventure({ ...STATE.adventure, admins, players, accessList, accessEmails });
   }
 }
 
@@ -353,6 +491,7 @@ export async function runMigration(onProgress) {
   // Charger tous les utilisateurs pour les ajouter à l'aventure
   const allUsers = await loadAllUsers();
   const allUids  = allUsers.map(u => u.uid || u.id).filter(Boolean);
+  const accessEmails = _uniq(allUsers.flatMap(u => _emailKeys(u.email)));
 
   // Repérer les super-admins existants (email hardcodé → migration)
   const LEGACY_ADMIN_EMAIL = 'dorianferrer02@gmail.com';
@@ -375,6 +514,7 @@ export async function runMigration(onProgress) {
       admins:      adminUids,
       players:     playerUids,
       accessList:  allUids,
+      accessEmails,
       status:      'active',
     });
   } else {
@@ -382,6 +522,7 @@ export async function runMigration(onProgress) {
     await updateDoc(advRef, {
       players:    playerUids,
       accessList: allUids,
+      accessEmails,
     });
   }
 

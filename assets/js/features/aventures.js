@@ -116,7 +116,7 @@ async function doCreateAdventure() {
     closeModal();
     showNotif(`Aventure "${nom}" créée !`, 'success');
     // Rafraîchir la liste
-    const adventures = await loadUserAdventures(STATE.user.uid);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
     renderAventuresPage();
   } catch (e) {
@@ -267,7 +267,7 @@ async function saveAdventureMeta(advId) {
 
   try {
     await updateAdventureMeta(advId, { nom, emoji, description: desc });
-    const adventures = await loadUserAdventures(STATE.user.uid);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
     showNotif('Aventure mise à jour.', 'success');
     closeModal();
@@ -296,7 +296,7 @@ async function addAdventurePlayer(advId) {
   if (!uid) return;
   try {
     await addPlayerToAdventure(advId, uid);
-    const adventures = await loadUserAdventures(STATE.user.uid);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
     showNotif('Joueur ajouté.', 'success');
     openManageAdventureModal(advId);
@@ -306,7 +306,7 @@ async function addAdventurePlayer(advId) {
 async function removeAdventurePlayer(advId, targetUid) {
   try {
     await removePlayerFromAdventure(advId, targetUid);
-    const adventures = await loadUserAdventures(STATE.user.uid);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
     showNotif('Joueur retiré.', 'success');
     openManageAdventureModal(advId);
@@ -316,7 +316,7 @@ async function removeAdventurePlayer(advId, targetUid) {
 async function promoteAdventurePlayer(advId, targetUid) {
   try {
     await promoteToAdmin(advId, targetUid);
-    const adventures = await loadUserAdventures(STATE.user.uid);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
     showNotif('Joueur promu MJ.', 'success');
     openManageAdventureModal(advId);
@@ -327,7 +327,7 @@ async function relinkAdventurePlayer(advId, oldUid, newUid) {
   if (!confirm('Réassocier ce joueur à son nouveau compte ?\n\nSon accès à l\'aventure et ses personnages seront transférés de l\'ancien identifiant vers le nouveau. À faire après qu\'il se soit reconnecté avec son nouveau compte.')) return;
   try {
     const { migrated } = await relinkPlayerAccount(advId, oldUid, newUid);
-    const adventures = await loadUserAdventures(STATE.user.uid);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
     showNotif(`Compte réassocié — ${migrated} personnage(s) transféré(s).`, 'success');
     openManageAdventureModal(advId);
