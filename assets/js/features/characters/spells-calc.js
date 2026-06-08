@@ -20,6 +20,21 @@ let _damageTypesCache   = [];
 // au split spells.js → spells-calc.js) dès qu'un sort affichait un état.
 let _conditionsLibCache = [];
 
+const ACTION_RUNE = 'Déclenchement';
+
+function _spellActionMode(s) {
+  const runes = s?.runes || [];
+  if (runes.includes(ACTION_RUNE) && (s?.actionMode === 'reaction' || s?.actionMode === 'action_bonus')) return s.actionMode;
+  if (runes.includes('Réaction')) return 'reaction';
+  if (runes.includes('Action Bonus')) return 'action_bonus';
+  return 'action';
+}
+
+function _isReactionSpell(s) {
+  return _spellActionMode(s) === 'reaction'
+    && ((s?.runes || []).includes(ACTION_RUNE) || (s?.runes || []).includes('Réaction'));
+}
+
 export function setSpellCaches(matrices, damageTypes) {
   _spellMatricesCache = matrices;
   _damageTypesCache   = damageTypes;
@@ -50,8 +65,9 @@ export function _getSortTypes(s) {
  */
 export function _getSortAction(s) {
   const runes = s.runes || [];
-  const action        = runes.includes('Réaction')      ? 'reaction'
-                      : runes.includes('Action Bonus')  ? 'action_bonus'
+  const mode = _spellActionMode(s);
+  const action        = mode === 'reaction'     ? 'reaction'
+                      : mode === 'action_bonus' ? 'action_bonus'
                       : 'action';
   const concentration = runes.includes('Concentration');
   return { action, concentration };
@@ -290,6 +306,10 @@ export const SORT_COMBOS = [
 export function _runeCounts(s) {
   const counts = {};
   (s?.runes || []).forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  if ((counts[ACTION_RUNE] || 0) > 0) {
+    if (_spellActionMode(s) === 'reaction') counts.Réaction = Math.max(counts.Réaction || 0, counts[ACTION_RUNE]);
+    if (_spellActionMode(s) === 'action_bonus') counts['Action Bonus'] = Math.max(counts['Action Bonus'] || 0, counts[ACTION_RUNE]);
+  }
   return counts;
 }
 
@@ -339,7 +359,7 @@ export function _autoSourceCA(s) {
   const ov = getProtectionCAOverride(_spellMatricesCache, s?.noyauTypeId);
   if (nbProt === 0) return 'auto · CA +2 (2 tours)';
   // Combo Bouclier réactif : pas de bonus CA — source informe
-  const hasReaction = (s.runes || []).includes('Réaction');
+  const hasReaction = _isReactionSpell(s);
   if (hasReaction && (s.protectionMode || 'ca') === 'ca') {
     const cfg = getComboConfig(_spellMatricesCache, 'bouclier_reactif');
     if (cfg.enabled) return `combo Bouclier réactif · annule 1 attaque en réaction · Protection ×${nbProt}`;
@@ -479,7 +499,7 @@ export function _getSortCA(s) {
   const nbProt = (s.runes || []).filter(r => r === 'Protection').length;
   if (nbProt === 0) return 'CA +2 (2 tours)';
   // Combo Bouclier réactif : pas de bonus CA, juste un blocage en réaction
-  const hasReaction = (s.runes || []).includes('Réaction');
+  const hasReaction = _isReactionSpell(s);
   if (hasReaction && (s.protectionMode || 'ca') === 'ca') {
     const cfg = getComboConfig(_spellMatricesCache, 'bouclier_reactif');
     if (cfg.enabled) {
@@ -806,7 +826,7 @@ export function _buildSortResume(s, c) {
   if (concentration) actionStr += ' + 🧠 Concentration';
   // Nature : instantané sauf si une durée explicite est définie ou si Enchant/Affliction/Protection CA actifs
   const isPersistent = runes.includes('Durée') || runes.includes('Enchantement') || runes.includes('Affliction')
-                    || (runes.includes('Protection') && (s.protectionMode || 'ca') === 'ca' && !runes.includes('Réaction'))
+                    || (runes.includes('Protection') && (s.protectionMode || 'ca') === 'ca' && !_isReactionSpell(s))
                     || !!(s.dureeBase && s.dureeBase >= 2);
   const natureStr = isPersistent ? '⏳ Persistant' : '⏱️ Instantané';
   const concDD = _calcConcentrationDD(s);

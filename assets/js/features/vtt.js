@@ -2305,6 +2305,30 @@ const _tokenAttackDistance = (src, tgt, portee = null) => {
   return portee === 1 ? Math.max(dx, dy) : dx + dy;
 }
 
+const VTT_ACTION_RUNE = 'Déclenchement';
+
+function _vttSpellActionMode(s) {
+  const runes = s?.runes || [];
+  if (runes.includes(VTT_ACTION_RUNE) && (s?.actionMode === 'reaction' || s?.actionMode === 'action_bonus')) return s.actionMode;
+  if (runes.includes('Réaction')) return 'reaction';
+  if (runes.includes('Action Bonus')) return 'action_bonus';
+  return 'action';
+}
+
+function _vttDisplayRunes(runes = []) {
+  let hasActionRune = false;
+  const out = [];
+  runes.forEach(r => {
+    if (r === 'Réaction' || r === 'Action Bonus' || r === VTT_ACTION_RUNE) {
+      if (!hasActionRune) out.push(VTT_ACTION_RUNE);
+      hasActionRune = true;
+      return;
+    }
+    out.push(r);
+  });
+  return out;
+}
+
 /**
  * Détecte les modificateurs spéciaux d'un sort (combos, lacération, chance, déplacement…).
  * Miroir local des helpers de spells.js — évite cross-import features/characters.
@@ -2315,6 +2339,10 @@ function _vttSpellMods(s) {
   const runes = s.runes || [];
   const counts = {};
   runes.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+  if ((counts[VTT_ACTION_RUNE] || 0) > 0) {
+    if (_vttSpellActionMode(s) === 'reaction') counts.Réaction = Math.max(counts.Réaction || 0, counts[VTT_ACTION_RUNE]);
+    if (_vttSpellActionMode(s) === 'action_bonus') counts['Action Bonus'] = Math.max(counts['Action Bonus'] || 0, counts[VTT_ACTION_RUNE]);
+  }
   const nbP    = counts.Puissance     || 0;
   const nbProt = counts.Protection    || 0;
   const nbLac  = counts.Lacération    || 0;
@@ -3252,10 +3280,10 @@ function _buildSpellOption(s, ctx) {
   }
   const nbCibles = _vttSortCibles(s) || 1;
 
-  const _sRunes = s.runes || [];
-  const actionType = _sRunes.includes('Réaction')
+  const actionMode = _vttSpellActionMode(s);
+  const actionType = actionMode === 'reaction'
     ? 'reaction'
-    : _sRunes.includes('Action Bonus')
+    : actionMode === 'action_bonus'
       ? 'bonus'
       : 'action';
   const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';
@@ -4120,7 +4148,7 @@ async function _execAttack(srcId, tgtId) {
     let runeChipsHtml = '';
     if (o.sortIdx !== undefined && srcChar?.deck_sorts) {
       const _s = srcChar.deck_sorts[o.sortIdx];
-      const _runes = _s?.runes || [];
+      const _runes = _vttDisplayRunes(_s?.runes || []);
       if (_runes.length) {
         const _counts = {}; _runes.forEach(r => { _counts[r] = (_counts[r]||0)+1; });
         runeChipsHtml = `<div class="cs-spellcard-runes">${Object.entries(_counts).map(([nom, n]) => {
@@ -13734,6 +13762,7 @@ const _VTT_RUNE_META = {
   'Chance':{icon:'🍀',color:'#facc15'}, 'Durée':{icon:'⏱️',color:'#06b6d4'},
   'Concentration':{icon:'🧠',color:'#6366f1'}, 'Réaction':{icon:'🔄',color:'#ec4899'},
   'Action Bonus':{icon:'✴️',color:'#f97316'},
+  'Déclenchement':{icon:'⚡',color:'#f97316'},
 };
 
 // Chips d'effets clés (dégâts/soin/cibles/zone/durée), calculés avec les helpers
@@ -13771,8 +13800,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
   const runes = s.runes || [];
   const types = (Array.isArray(s.types) && s.types.length) ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
-  const action = runes.includes('Réaction') ? 'reaction'
-              : runes.includes('Action Bonus') ? 'action_bonus' : 'action';
+  const action = _vttSpellActionMode(s);
   const ACTION_CFG = {
     action:       { label:'⚡ Act.',   color:'#e8b84b' },
     action_bonus: { label:'✴️ Bonus', color:'#f97316' },
@@ -13793,7 +13821,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
       ? `<span class="cs-spellcard-val no" title="Sort refusé par le MJ">❌ Refusé</span>`
       : `<span class="cs-spellcard-val wait" title="Pas encore validé par le MJ">⏳ À valider</span>`;
   const chips = _vttSpellChips(s, c);
-  const counts = {}; runes.forEach(r => { counts[r] = (counts[r]||0)+1; });
+  const counts = {}; _vttDisplayRunes(runes).forEach(r => { counts[r] = (counts[r]||0)+1; });
   const runeChips = Object.keys(counts).length ? `<div class="cs-spellcard-runes">${
     Object.entries(counts).map(([nom, n]) => {
       const m = _VTT_RUNE_META[nom] || { icon:'•', color:'#888' };
