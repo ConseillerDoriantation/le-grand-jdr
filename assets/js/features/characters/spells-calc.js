@@ -386,6 +386,56 @@ export function _activeCombos(s) {
   });
 }
 
+function _comboResumeLines(activeCombos, comboIds, counts, s) {
+  const lines = [];
+  const combo = id => activeCombos.find(c => c.id === id);
+  if (comboIds.has('allonge_magique')) {
+    const len = _ampLength(counts.Amplification || 0);
+    lines.push({
+      icon: '🏹',
+      label: `${combo('allonge_magique')?.name || 'Allonge magique'} · portée +${len} case${len > 1 ? 's' : ''}`,
+      detail: 'Remplace Enchantement classique et Amplification · aucun dégât direct',
+      isCombo: true,
+    });
+  }
+  if (comboIds.has('zone_elargie')) {
+    const size = _ampDispCircleSize(counts.Amplification || 0, counts.Dispersion || 0);
+    lines.push({
+      icon: '📐',
+      label: `${combo('zone_elargie')?.name || 'Zone élargie'} · ${size}×${size} cases`,
+      detail: 'Zone plaçable · remplace les cibles multiples de Dispersion',
+      isCombo: true,
+    });
+  }
+  if (comboIds.has('regeneration')) {
+    const dice = (counts.Protection || 0) + (counts.Affliction || 0);
+    const formula = (s.regenerationFormula || '').trim() || `${dice}d4`;
+    lines.push({
+      icon: '💚',
+      label: `${combo('regeneration')?.name || 'Régénération'} · ${formula}/tour`,
+      detail: 'Soin sur la durée · remplace Protection classique et Affliction classique · aucun dégât direct',
+      isCombo: true,
+    });
+  }
+  if (comboIds.has('arme_invoquee')) {
+    lines.push({
+      icon: '⚔️',
+      label: combo('arme_invoquee')?.name || 'Arme invoquée',
+      detail: combo('arme_invoquee')?.detail || 'Remplace Enchantement classique et Invocation générique',
+      isCombo: true,
+    });
+  }
+  if (comboIds.has('sentinelle')) {
+    lines.push({
+      icon: '🪤',
+      label: combo('sentinelle')?.name || 'Sentinelle',
+      detail: combo('sentinelle')?.detail || 'Remplace Affliction classique et Invocation générique',
+      isCombo: true,
+    });
+  }
+  return lines;
+}
+
 // ── Auto-value : chip lecture seule + bouton "✏️ Custom" / "↺ Auto" ──────────
 // Évite l'effet "input vide qui invite à taper". Le joueur voit la valeur
 // calculée par défaut, et ne saisit que s'il veut explicitement override.
@@ -907,7 +957,10 @@ export function _buildSortResume(s, c) {
   const nbAmp     = runes.filter(r => r === 'Amplification').length;
   const activeCombos = _activeCombos(s);
   const comboIds = new Set(activeCombos.map(c => c.id));
+  const specializedComboIds = new Set(['allonge_magique', 'zone_elargie', 'regeneration', 'arme_invoquee', 'sentinelle']);
+  lines.push(..._comboResumeLines(activeCombos, comboIds, _runeCounts(s), s));
   activeCombos.forEach(combo => {
+    if (specializedComboIds.has(combo.id)) return;
     lines.push({ icon: combo.icon, label: `Combo ${combo.name}`, detail: combo.detail, isCombo: true });
   });
 
@@ -956,9 +1009,7 @@ export function _buildSortResume(s, c) {
     // Combo Drain (sort offensif + Protection) : pas de CA ni de soin direct — le
     // lanceur récupère un % des dégâts infligés, fixé par le nombre de Protection.
     if (comboIds.has('regeneration')) {
-      const nbAff = runes.filter(r => r === 'Affliction').length;
-      const formula = (s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`;
-      lines.push({ icon:'💚', label:`Régénération ${formula}/tour`, detail:`Soin sur la durée · Protection + Affliction · pas de CA/affliction directe` });
+      // Déjà résumé par la ligne de combo spécialisée.
     } else if (comboIds.has('drain')) {
       const pct = Math.round(_calcDrainPct(s) * 100);
       lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · cap frappe de base hors Puissance · ${nbProt} Protection` });
@@ -996,7 +1047,7 @@ export function _buildSortResume(s, c) {
 
   // Cibles (uniquement si Dispersion solo, sans combo Amp+Disp)
   const nbDisp = runes.filter(r => r === 'Dispersion').length;
-  if (nbCibles > 1 && !(nbAmp > 0 && nbDisp > 0)) {
+  if (nbCibles > 1 && !(nbAmp > 0 && nbDisp > 0) && !comboIds.has('zone_elargie')) {
     const dispDetail = nbDisp === 1
       ? '1 rune Dispersion · cibles différentes uniquement'
       : `${nbDisp} runes Dispersion · cibles différentes`;
@@ -1004,7 +1055,7 @@ export function _buildSortResume(s, c) {
   }
 
   // Zone (Amplification ou manuelle) — sauf combo Allonge magique : devient portée d'arme
-  if (zoneCalc && !comboIds.has('allonge_magique')) {
+  if (zoneCalc && !comboIds.has('allonge_magique') && !comboIds.has('zone_elargie')) {
     let zoneDetail = '';
     if (zoneCalc.source === 'runes') {
       if (zoneCalc.amp > 0 && zoneCalc.disp > 0) {
@@ -1019,9 +1070,6 @@ export function _buildSortResume(s, c) {
     const isTerrain = zoneCalc.source === 'runes' && nbPuiss === 0 && nbProt === 0;
     if (isTerrain) zoneDetail += ' · 2 tours par défaut (sort de terrain)';
     lines.push({ icon:'📐', label:`Zone ${zoneCalc.w}×${zoneCalc.h} cases`, detail: zoneDetail });
-  } else if (zoneCalc && comboIds.has('allonge_magique')) {
-    // Allonge magique : la longueur Amp devient la portée de l'arme enchantée
-    lines.push({ icon:'🏹', label:`Portée d'arme +${zoneCalc.w} cases`, detail:`Allonge magique active · l'arme enchantée porte à ${zoneCalc.w} cases supplémentaires` });
   }
 
   // Déplacement (soi / pousse / attire) — portée 1 à max (legacy : distance fixe)
