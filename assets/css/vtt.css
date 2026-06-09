@@ -176,23 +176,8 @@
 .vtt-btn-danger      { border-color: oklch(58% 0.20 22 / 0.30); color: var(--crimson); }
 .vtt-btn-danger:hover{ background: oklch(58% 0.20 22 / 0.10); }
 
-/* Bouton secondaire (Annuler) dans les modals VTT */
-.btn-secondary {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: .42rem .9rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text-muted);
-  font-size: .78rem; font-weight: 600;
-  cursor: pointer;
-  transition: background .12s, color .12s, border-color .12s;
-}
-.btn-secondary:hover {
-  background: var(--bg-card2);
-  color: var(--text);
-  border-color: rgba(255,255,255,.18);
-}
+/* .btn-secondary (bouton Annuler des modals) déplacé vers features.css (eager) :
+   il est rendu hors VTT alors que cette feuille est désormais chargée en lazy. */
 
 .vtt-upload-lbl { cursor: pointer; }
 
