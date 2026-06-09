@@ -1122,6 +1122,7 @@ export async function openSortModal(idx, s) {
   const hasAmp   = runesSrc.includes('Amplification');
   const nbAmp    = runesSrc.filter(r => r === 'Amplification').length;
   const ampMode  = s?.ampMode || 'zone';
+  const isAllongeCombo = hasEnchant && hasAmp;
   const hasActionRune = (_runeCountsEdit[ACTION_RUNE] || 0) > 0;
   const actionMode = _actionModeEdit || 'reaction';
   const actionModeBtnsHtml = [
@@ -1345,8 +1346,16 @@ export async function openSortModal(idx, s) {
       })}
     </div>
 
+    <div id="s-allonge-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${isAllongeCombo?'':'display:none'}">
+      <div class="cs-spell-slot-title">🏹 Allonge magique <span>Amplification + Enchantement · buff de portée</span></div>
+      <div style="font-size:.82rem;line-height:1.5;color:var(--text-muted);background:rgba(79,140,255,.1);border:1px solid rgba(79,140,255,.28);border-radius:8px;padding:.65rem .75rem">
+        L'arme enchantée gagne <strong style="color:#4f8cff">+<span id="s-allonge-range">${_ampLength(nbAmp)}</span> case<span id="s-allonge-range-plural">${_ampLength(nbAmp) > 1 ? 's' : ''}</span> de portée</strong> pendant la durée du sort.
+        <span style="display:block;margin-top:.2rem;color:var(--text-dim)">Les modes Enchantement et Amplification sont absorbés par ce combo.</span>
+      </div>
+    </div>
+
     <!-- Enchantement — visible si rune Enchantement > 0 -->
-    <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
+    <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant && !isAllongeCombo?'':'display:none'}">
       <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours</span></div>
 
       <input type="hidden" id="s-enchant-mode" value="${enchantModeForEdit}">
@@ -1457,7 +1466,7 @@ export async function openSortModal(idx, s) {
     </div>
 
     <!-- ⑨ Rune Amplification — mode Zone ou Déplacement (visible si rune présente) -->
-    <div id="s-amp-section" style="${hasAmp?'':'display:none'}">
+    <div id="s-amp-section" style="${hasAmp && !isAllongeCombo?'':'display:none'}">
       <div class="form-group">
         <label>🌐 Rune Amplification — effet</label>
         <div style="display:flex;gap:.4rem">
@@ -1751,6 +1760,10 @@ function _isRegenerationComboActive(counts = _runeCountsEdit) {
     && (document.getElementById('s-affliction-mode')?.value || 'dot') !== 'laceration';
 }
 
+function _isAllongeComboActive(counts = _runeCountsEdit) {
+  return (counts?.Enchantement || 0) > 0 && (counts?.Amplification || 0) > 0;
+}
+
 function _calcRegenerationAuto(s) {
   const runes = s?.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
@@ -1788,10 +1801,12 @@ function _refreshConditionalSections() {
   const counts      = _runeCountsEdit || {};
   const hasProt     = (counts.Protection || 0) > 0;
   const hasAmp      = (counts.Amplification || 0) > 0;
+  const hasEnchant  = (counts.Enchantement || 0) > 0;
   const hasAffliction = (counts.Affliction || 0) > 0;
   const protMode    = document.getElementById('s-prot-mode')?.value || 'ca';
   const ampMode     = document.getElementById('s-amp-mode')?.value || 'zone';
   const isDepl      = ampMode === 'deplacement';
+  const isAllonge   = _isAllongeComboActive(counts);
   const dSec = document.getElementById('s-degats-section');
   const sSec = document.getElementById('s-soin-section');
   // Affliction supprime les dégâts d'impact : la rune Puissance scale le DoT
@@ -1814,6 +1829,9 @@ function _refreshConditionalSections() {
   const protSec = document.getElementById('s-prot-section');
   const affSec = document.getElementById('s-affliction-section');
   const regenSec = document.getElementById('s-regeneration-section');
+  const allongeSec = document.getElementById('s-allonge-section');
+  const enchantSec = document.getElementById('s-enchant-section');
+  const ampSec = document.getElementById('s-amp-section');
   const affModes = document.getElementById('s-affliction-modes');
   const protGroup = document.getElementById('s-prot-mode-group');
   const caSec     = document.getElementById('s-ca-section');
@@ -1821,6 +1839,14 @@ function _refreshConditionalSections() {
   if (protSec) protSec.style.display = (hasProt && !isRegen) ? '' : 'none';
   if (affSec)  affSec.style.display  = (hasAffliction && !isRegen) ? '' : 'none';
   if (regenSec)  regenSec.style.display  = isRegen ? '' : 'none';
+  if (allongeSec) allongeSec.style.display = isAllonge ? '' : 'none';
+  if (enchantSec) enchantSec.style.display = (hasEnchant && !isAllonge) ? '' : 'none';
+  if (ampSec)     ampSec.style.display     = (hasAmp && !isAllonge) ? '' : 'none';
+  const allongeRange = _ampLength(counts.Amplification || 0);
+  const allongeRangeEl = document.getElementById('s-allonge-range');
+  const allongePluralEl = document.getElementById('s-allonge-range-plural');
+  if (allongeRangeEl) allongeRangeEl.textContent = String(allongeRange);
+  if (allongePluralEl) allongePluralEl.textContent = allongeRange > 1 ? 's' : '';
   if (affModes)  affModes.style.display  = isRegen ? 'none' : '';
   if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
   if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
