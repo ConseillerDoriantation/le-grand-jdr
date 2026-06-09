@@ -2250,6 +2250,26 @@ function _maxDice(formula) {
   return p ? p.n * p.sides + p.mod : Math.max(1, parseInt(formula)||1);
 }
 
+function _maxEffectDisplay(formula, fixed = 0) {
+  const str = String(formula || '').trim();
+  if (!str) return '';
+  const diceMatch = str.match(/(\d+\s*d\s*\d+(?:\s*[+-]\s*\d+)?)/i);
+  const base = diceMatch ? _maxDice(diceMatch[1]) : parseInt(str);
+  if (!Number.isFinite(base)) return str;
+  const suffix = /\/\s*(tour|t)\b/i.test(str) ? '/tour' : '';
+  return `${base + (parseInt(fixed) || 0)}${suffix}`;
+}
+
+function _effectDisplay(opt, formula, fixed = 0) {
+  return opt?.mjAlwaysMax ? _maxEffectDisplay(formula, fixed) : String(formula || '');
+}
+
+function _optionFixedBonus(opt) {
+  return (opt?.rawDice !== undefined)
+    ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0))
+    : 0;
+}
+
 /**
  * Formule de dégâts calculée d'un sort offensif.
  * Miroir local de _calcSortDegats (spells.js) — évite le cross-import.
@@ -3470,6 +3490,7 @@ function _buildSpellOption(s, ctx) {
     id, sortIdx, portee,
     pmCost, basePm, pmRaw, pmSetDelta,
     nbCibles, zoneW, zoneH, mods, actionType,
+    mjAlwaysMax: !!s.mjAlwaysMax,
     ...extras,
   };
 
@@ -4288,10 +4309,11 @@ async function _execAttack(srcId, tgtId) {
         const b = o.mods?.enchantMove?.bonusCells;
         pills.push(`<span class="vtt-aopt-pill enchant" style="color:#22c55e;border-color:#22c55e66;background:#22c55e1a">👢 +${b ?? '?'} case${b > 1 ? 's' : ''} de déplacement / allié</span>`);
       } else {
-        pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(o.enchantFormula || '1d4+2')} / arme alliée</span>`);
+        const enchFormula = _effectDisplay(o, o.enchantFormula || '1d4+2');
+        pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(enchFormula)} / arme alliée</span>`);
       }
     } else if (o.isRegen) {
-      pills.push(`<span class="vtt-aopt-pill heal" style="color:#22c38e;border-color:#22c38e66;background:#22c38e1a">💚 ${_esc(o.dice || '2d4/tour')}</span>`);
+      pills.push(`<span class="vtt-aopt-pill heal" style="color:#22c38e;border-color:#22c38e66;background:#22c38e1a">💚 ${_esc(_effectDisplay(o, o.dice || '2d4/tour'))}</span>`);
     } else if (o.isAffliction) {
       // Sort d'affliction : pas de dégâts d'impact, JS de la cible → DoT ou État
       const elemIcon = o.afflictionElementIcon || '💀';
@@ -4301,18 +4323,19 @@ async function _execAttack(srcId, tgtId) {
         const lbl = lib ? `${lib.icon} ${lib.label}` : '⛓ État';
         pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
       } else {
-        pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} ${_esc(o.afflictionDotFormula || '1d4')} / tour</span>`);
+        pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} ${_esc(_effectDisplay(o, o.afflictionDotFormula || '1d4'))} / tour</span>`);
       }
       // Pill séparé pour le JS de sauvegarde
       const statLbl = (_STAT_SHORT[o.afflictionSaveStat] || o.afflictionSaveStat || '').toUpperCase();
       pills.push(_pill('save', `🛡 JS ${statLbl} DD ${o.afflictionDD}`));
     } else if (isUtil) {
       // Sort utilitaire : pas de damage pill, juste un résumé de l'effet
-      const effetTxt = (o.dice || '').trim();
+      const effetTxt = _effectDisplay(o, o.dice || '').trim();
       pills.push(_pill('util', `🔧 ${effetTxt ? _esc(effetTxt) : 'Utilitaire'}`));
     } else if (o.rawDice || o.dice) {
       const formula = o.rawDice || o.dice;
-      pills.push(_pill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(formula)}${isHeal ? ' PV' : ''}`));
+      const displayFormula = _effectDisplay(o, formula, _optionFixedBonus(o));
+      pills.push(_pill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${isHeal ? ' PV' : ''}`));
     }
 
     // Pill explicite de la stat utilisée (pour comprendre d'où vient le +X)
@@ -4762,9 +4785,16 @@ function _vttPickOpt(srcId, tgtId, idx) {
     const parts = []; let tot = 0;
     if (opt.dmgStatMod)        { tot += opt.dmgStatMod;     parts.push(`${opt.dmgStatLabel} ${sn(opt.dmgStatMod)}`); }
     if (opt.maitriseBonus>0)   { tot += opt.maitriseBonus;  parts.push(`Maîtrise +${opt.maitriseBonus}`); }
-    degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${opt.rawDice}</code>`, tot, parts, dmgAccent);
+    if (opt.mjAlwaysMax) {
+      const maxVal = _maxEffectDisplay(opt.rawDice, tot);
+      degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${_esc(maxVal)}</code>`, 0, [`effet max de ${opt.rawDice}${tot ? ` ${sn(tot)}` : ''}`], dmgAccent);
+    } else {
+      degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${opt.rawDice}</code>`, tot, parts, dmgAccent);
+    }
   } else {
-    degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${_esc(opt.dice)}</code>`, 0, [], dmgAccent);
+    const displayDice = _effectDisplay(opt, opt.dice);
+    const detail = opt.mjAlwaysMax ? [`effet max de ${opt.dice}`] : [];
+    degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${_esc(displayDice)}</code>`, 0, detail, dmgAccent);
   }
 
   const inpStyle = `width:52px;padding:4px 6px;text-align:center;font-size:.88rem;border-radius:7px;
@@ -14024,12 +14054,13 @@ function _vttSpellChips(s, c) {
   const _isLac = runes.includes('Lacération') || (s.afflictionMode === 'laceration' && runes.includes('Affliction'));
   if (types.includes('offensif') || _isLac) {
     const dmg = _vttSortDmgFormula(s, c);
-    if (dmg) chips.push({ icon:'⚔️', val: dmg, color:'#ff6b6b' });
+    if (dmg) chips.push({ icon:'⚔️', val: _effectDisplay(s, dmg), color:'#ff6b6b' });
   }
   if (runes.includes('Protection') && runes.includes('Affliction') && !_isLac) {
     const nbProt = runes.filter(r => r === 'Protection').length;
     const nbAff = runes.filter(r => r === 'Affliction').length;
-    chips.push({ icon:'💚', val:`${(s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`}/t`, color:'#22c38e' });
+    const regenFormula = `${(s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`}/t`;
+    chips.push({ icon:'💚', val:_effectDisplay(s, regenFormula), color:'#22c38e' });
   }
   const isAmpSupportHeal = types.includes('defensif')
     && runes.includes('Amplification')
@@ -14038,7 +14069,7 @@ function _vttSpellChips(s, c) {
   if (!(runes.includes('Protection') && runes.includes('Affliction') && !_isLac)
       && types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
     const soin = _vttSortSoinFormula(s, c);
-    if (soin) chips.push({ icon:'💚', val: soin, color:'#22c38e' });
+    if (soin) chips.push({ icon:'💚', val: _effectDisplay(s, soin), color:'#22c38e' });
   }
   const nbT = calcSpellTargets(s);
   if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff' });
