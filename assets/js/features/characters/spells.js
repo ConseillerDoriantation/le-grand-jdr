@@ -416,6 +416,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const { action, concentration } = _getSortAction(s);
   const nbCibles = _calcSortCibles(s);
   const nbProt   = runesAll.filter(r => r === 'Protection').length;
+  const nbAmp    = runesAll.filter(r => r === 'Amplification').length;
 
   const ACTION_CFG = {
     action:       { label:'⚡ Act.',   color:'#e8b84b' },
@@ -525,6 +526,9 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         chips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
       }
     }
+  } else if (types.includes('defensif') && nbAmp > 0 && s.ampMode !== 'deplacement') {
+    const soinBase = _calcSortSoin(s, c);
+    chips.push({ icon:'💚', val: soinBase, color:'#22c38e' });
   }
 
   // ── 5. Cibles / zone / déplacement / durée ──
@@ -1268,7 +1272,7 @@ export async function openSortModal(idx, s) {
            de vie %, le choix CA/Soin et le montant n'ont plus de sens → masqués. -->
       <div id="s-prot-drain" style="display:none" class="cs-prot-drain">
         🩸 <b>Vol de vie</b> — soigne le lanceur de <b><span id="s-prot-drain-pct">50</span>%</b> des dégâts infligés
-        <span class="cs-prot-drain-sub">% fixé par le nombre de runes Protection · pas de CA/soin direct</span>
+        <span class="cs-prot-drain-sub">% fixé par Protection · capé par la frappe de base hors Puissance</span>
       </div>
       <div class="form-group" id="s-prot-mode-group">
         <label>Rune Protection — effet</label>
@@ -1301,9 +1305,9 @@ export async function openSortModal(idx, s) {
       </div>
     </div>
 
-    <!-- Soin — visible UNIQUEMENT si Protection en mode soin (jamais en mode CA, évite la confusion avec Bouclier réactif).
+    <!-- Soin — visible si Protection en mode soin, ou Soutien + Amplification.
          Si le sort est aussi Offensif, on n'expose PAS le sélecteur de stat ici (déjà dans Dégâts). -->
-    <div id="s-soin-section" style="${(hasProt && (s?.protectionMode||'ca')==='soin')?'':'display:none'}">
+    <div id="s-soin-section" style="${((hasProt && (s?.protectionMode||'ca')==='soin') || (typesInit.includes('defensif') && hasAmp && ampMode !== 'deplacement'))?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-soin',
         label: '💚 Soin',
@@ -1752,8 +1756,10 @@ function _applyTypeChange() {
  */
 function _refreshConditionalSections() {
   const isOffensive = _sortTypesEdit.has('offensif');
+  const isSupport   = _sortTypesEdit.has('defensif');
   const counts      = _runeCountsEdit || {};
   const hasProt     = (counts.Protection || 0) > 0;
+  const hasAmp      = (counts.Amplification || 0) > 0;
   const hasAffliction = (counts.Affliction || 0) > 0;
   const protMode    = document.getElementById('s-prot-mode')?.value || 'ca';
   const ampMode     = document.getElementById('s-amp-mode')?.value || 'zone';
@@ -1775,12 +1781,13 @@ function _refreshConditionalSections() {
   // Combo Drain : sort offensif + Protection → la Protection devient un vol de vie %.
   // On masque alors le choix CA/Soin et leurs montants, et on affiche l'indicateur.
   const isDrain   = isOffensive && hasProt;
+  const isAmpSupportHeal = isSupport && hasAmp && !isDepl && !hasProt;
   const protGroup = document.getElementById('s-prot-mode-group');
   const caSec     = document.getElementById('s-ca-section');
   const drainEl   = document.getElementById('s-prot-drain');
   if (protGroup) protGroup.style.display = isDrain ? 'none' : '';
   if (caSec)     caSec.style.display     = (!isDrain && protMode === 'ca') ? '' : 'none';
-  if (sSec)      sSec.style.display      = (!isDrain && hasProt && protMode === 'soin') ? '' : 'none';
+  if (sSec)      sSec.style.display      = (!isDrain && ((hasProt && protMode === 'soin') || isAmpSupportHeal)) ? '' : 'none';
   if (drainEl) {
     drainEl.style.display = isDrain ? '' : 'none';
     if (isDrain) {

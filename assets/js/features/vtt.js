@@ -2219,7 +2219,7 @@ function _maxDice(formula) {
  * Miroir local de _calcSortDegats (spells.js) — évite le cross-import.
  * Inclut : dés de base + runes Puissance + maîtrise arme principale.
  */
-function _vttSortDmgFormula(s, c) {
+function _vttSortDmgFormula(s, c, opts = {}) {
   // ⚠️ Utiliser getMainWeapon(c) pour récupérer le Poings (2d4) par défaut
   // si aucune arme principale équipée — aligne avec _calcSortDegats du sheet.
   const mainP   = c ? getMainWeapon(c) : null;
@@ -2227,7 +2227,7 @@ function _vttSortDmgFormula(s, c) {
   let base = (s.degats || '').trim();
   if (!base || base.toLowerCase() === '= arme') base = armeDeg;
   const runes    = s.runes || [];
-  const nbPuiss  = runes.filter(r => r === 'Puissance').length;
+  const nbPuiss  = opts.includePower === false ? 0 : runes.filter(r => r === 'Puissance').length;
   // Seule la Puissance ajoute des dés. La Protection ne sert qu'au drain % — elle
   // NE double PAS les dégâts (bug : le combo Drain affichait 2d10 au lieu de 1d10).
   // Aligne strictement avec _calcSortDegats du sheet.
@@ -2435,7 +2435,8 @@ function _vttSpellMods(s) {
 
   const mods = {
     // Drain : sort OFFENSIF (attaque de base) + Protection → soigne le lanceur
-    // d'un % des dégâts. Puissance non requise ; mode CA/Soin hors-sujet.
+    // d'un % des dégâts, plafonné à l'exécution par la frappe de base hors Puissance.
+    // Puissance non requise ; mode CA/Soin hors-sujet.
     // Formule : 25% + 25% × nbProt → Prot×1=50% · ×2=75% · ×3=100%
     drain: (nbProt > 0 && (s.types || []).includes('offensif'))
       ? { pct: 0.25 + 0.25 * nbProt, nbProt } : null,
@@ -3475,10 +3476,15 @@ function _buildSpellOption(s, ctx) {
       dmgStatMod: ovrDmgMod,
       dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
       maitriseBonus: sFixed,
+      drainBaseFormula: mods?.drain ? _vttSortDmgFormula(s, c, { includePower: false }) : null,
       mjAlwaysMax: !!s.mjAlwaysMax,
     };
   }
-  if (types.includes('defensif') && protMode === 'soin') {
+  const isAmpSupportHeal = types.includes('defensif')
+    && (s.runes || []).includes('Amplification')
+    && s.ampMode !== 'deplacement'
+    && !(s.runes || []).includes('Protection');
+  if (types.includes('defensif') && (protMode === 'soin' || isAmpSupportHeal)) {
     const soinFormula = _vttSortSoinFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
     // Stat de soin : override > auto (magique → stat arme magique ou Int ; physique → Con)
@@ -6187,8 +6193,9 @@ async function _vttRollAttack() {
       }
 
       // ── Drain : soigne le lanceur d'un % des dégâts infligés ──
-      // Formule : pct = 25% + 25% × nbProt (50/75/100/125% pour Prot×1/2/3/4)
-      // Peut dépasser 100% des PV manquants (cap à hpMax), mais pas de surcharge
+      // Équilibrage : le soin est plafonné par la frappe de base hors Puissance.
+      // Puissance augmente donc les dégâts, mais Protection reste la rune qui améliore
+      // réellement la régénération.
       if (_mods.drain && targetResults.some(r => r.hit || r.halfDmg)) {
         const totalDealt = targetResults.reduce((acc, r) => {
           if (!(r.hit || r.halfDmg)) return acc;
@@ -6196,7 +6203,9 @@ async function _vttRollAttack() {
           const base = (r.dmgPre != null && r.dmgPre > 0) ? r.dmgPre : Math.max(0, r.dmgTotal);
           return acc + base;
         }, 0);
-        const healAmt = Math.max(1, Math.floor(totalDealt * _mods.drain.pct));
+        const rawHeal = Math.max(1, Math.floor(totalDealt * _mods.drain.pct));
+        const baseCap = opt.drainBaseFormula ? Math.max(1, Math.floor(_maxDice(opt.drainBaseFormula) * _mods.drain.pct)) : rawHeal;
+        const healAmt = Math.min(rawHeal, baseCap);
         const srcLive = _live(src);
         const srcHp = srcLive.displayHp ?? 20;
         const srcHpMax = srcLive.displayHpMax ?? 20;
@@ -6204,7 +6213,8 @@ async function _vttRollAttack() {
         if (newSrcHp > srcHp) {
           await _setHp(src, newSrcHp);
           const pctLabel = Math.round(_mods.drain.pct * 100);
-          modNotes.push(`🩸 Drain ${pctLabel}% → +${healAmt} PV (${srcLive.displayName ?? src.name})`);
+          const capLabel = baseCap < rawHeal ? ` · cap ${baseCap}` : '';
+          modNotes.push(`🩸 Drain ${pctLabel}%${capLabel} → +${healAmt} PV (${srcLive.displayName ?? src.name})`);
         }
       }
     }
@@ -13860,7 +13870,11 @@ function _vttSpellChips(s, c) {
     const dmg = _vttSortDmgFormula(s, c);
     if (dmg) chips.push({ icon:'⚔️', val: dmg, color:'#ff6b6b' });
   }
-  if (types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin)) {
+  const isAmpSupportHeal = types.includes('defensif')
+    && runes.includes('Amplification')
+    && s.ampMode !== 'deplacement'
+    && !runes.includes('Protection');
+  if (types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
     const soin = _vttSortSoinFormula(s, c);
     if (soin) chips.push({ icon:'💚', val: soin, color:'#22c38e' });
   }

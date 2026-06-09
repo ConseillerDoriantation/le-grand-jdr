@@ -174,14 +174,14 @@ export const SORT_COMBOS = [
     id: 'drain',
     icon: '🩸',
     defaultName: 'Drain personnel',
-    // Drain = sort OFFENSIF (qui inflige l'attaque de base) + Protection. La
-    // Puissance n'est PAS requise (elle ajoute juste des dés) et le mode CA/Soin
-    // devient hors-sujet : la Protection se convertit en % de vol de vie.
+    // Drain = sort OFFENSIF (qui inflige l'attaque de base) + Protection.
+    // Le soin est plafonné par la frappe de base hors Puissance : Protection
+    // améliore la régénération, Puissance améliore surtout les dégâts.
     detect: (counts, s) => counts.Protection > 0 && _getSortTypes(s).includes('offensif'),
     describe: (counts) => {
       const pct = Math.round((0.25 + 0.25 * counts.Protection) * 100);
       const pPart = counts.Puissance > 0 ? `Puissance ×${counts.Puissance} + ` : '';
-      return `${pPart}Protection ×${counts.Protection} (soin) · attaque de base · ${pct}% des dégâts soigne le lanceur`;
+      return `${pPart}Protection ×${counts.Protection} (soin) · ${pct}% des dégâts · cap frappe de base hors Puissance`;
     },
   },
   {
@@ -677,7 +677,7 @@ function _calcChance(s) {
 
 /** Drain : pourcentage des dégâts soigné au lanceur.
  *  Formule : 25% + 25% × nbProtection → Prot×1=50, ×2=75, ×3=100, ×4=125…
- *  Le drain est piloté entièrement par les runes ; plus de soinFraction.
+ *  Le soin VTT est ensuite plafonné par la frappe de base hors Puissance.
  */
 export function _calcDrainPct(s) {
   const runes = s?.runes || [];
@@ -834,6 +834,7 @@ export function _buildSortResume(s, c) {
   // Combos détectés (centralisés dans SORT_COMBOS, MJ peut activer/désactiver)
   const nbPuiss   = runes.filter(r => r === 'Puissance').length;
   const nbProt    = runes.filter(r => r === 'Protection').length;
+  const nbAmp     = runes.filter(r => r === 'Amplification').length;
   const activeCombos = _activeCombos(s);
   const comboIds = new Set(activeCombos.map(c => c.id));
   activeCombos.forEach(combo => {
@@ -894,7 +895,7 @@ export function _buildSortResume(s, c) {
     // lanceur récupère un % des dégâts infligés, fixé par le nombre de Protection.
     if (comboIds.has('drain')) {
       const pct = Math.round(_calcDrainPct(s) * 100);
-      lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · pas de CA/soin direct · ${nbProt} Protection` });
+      lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · cap frappe de base hors Puissance · ${nbProt} Protection` });
     } else if (mode === 'soin') {
       {
         const mainPsoin  = getMainWeapon(c);
@@ -916,13 +917,17 @@ export function _buildSortResume(s, c) {
         lines.push({ icon:'🛡️', label: caLbl, detail: `Bonus de CA (2 tours)${monoStr}` });
       }
     }
+  } else if (hasDefensif && nbAmp > 0 && s.ampMode !== 'deplacement') {
+    const mainPsoin  = getMainWeapon(c);
+    const maitrSoin  = getSharedMaitriseBonus(c, mainPsoin);
+    const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
+    lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin de soutien · base 1d4${maitrSoinStr}${monoStr}` });
   } else if (hasDefensif) {
     lines.push({ icon:'🛡️', label:'Effet défensif', detail:'Décris l\'effet ci-dessous' });
   }
 
   // Cibles (uniquement si Dispersion solo, sans combo Amp+Disp)
   const nbDisp = runes.filter(r => r === 'Dispersion').length;
-  const nbAmp  = runes.filter(r => r === 'Amplification').length;
   if (nbCibles > 1 && !(nbAmp > 0 && nbDisp > 0)) {
     const dispDetail = nbDisp === 1
       ? '1 rune Dispersion · cibles différentes uniquement'
