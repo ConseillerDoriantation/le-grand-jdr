@@ -492,13 +492,14 @@ function _conditionDmgBonusOf(tok) {
   return active[0] || null;
 }
 
-function _scaledEnchantConditionFields(lib, power = 0) {
+function _scaledEnchantConditionFields(lib, power = 0, amplification = 0) {
   const eff = lib?.effects || {};
   const fields = { enchantPower: Math.max(0, parseInt(power) || 0) };
+  const amp = Math.max(0, parseInt(amplification) || 0);
 
   if (eff.movementBonus != null) {
     const base = Number.isFinite(parseInt(eff.movementBonus)) ? parseInt(eff.movementBonus) : 0;
-    fields.movementBonus = base + fields.enchantPower;
+    fields.movementBonus = base + amp;
   }
   if (eff.dmgDealtBonus) {
     fields.dmgDealtBonusFormula = `${1 + fields.enchantPower}d4 +2`;
@@ -2471,6 +2472,8 @@ function _vttSpellMods(s) {
       ? (s.enchantEtatId || null) : null,
     enchantStatePower: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? nbP : 0,
+    enchantStateAmplification: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+      ? nbAmp : 0,
     // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
     enchantToucher: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'toucher')
       ? { bonus: _enchBonus, nbCibles: nbEnch } : null,
@@ -3064,7 +3067,11 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
     const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
       ? lib.defaultDuration : 2;
     const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
-    const scaledFields = _scaledEnchantConditionFields(lib, opt.mods?.enchantStatePower || 0);
+    const scaledFields = _scaledEnchantConditionFields(
+      lib,
+      opt.mods?.enchantStatePower || 0,
+      opt.mods?.enchantStateAmplification || 0
+    );
     for (const tid of targetIds) {
       const td = _tokens[tid]?.data; if (!td) continue;
       const existingConds = (td.conditions || []).filter(c => c.source !== opt.label);

@@ -1085,6 +1085,11 @@ export async function openSortModal(idx, s) {
   const hasInvoc    = runesSrc.includes('Invocation') && !runesSrc.includes('Affliction') && !hasEnchant;
   const ivStats     = s?.invocation?.stats || {};                  // overrides sauvegardés
   const ivDerived   = _calcInvocationStats({ runes: runesSrc });   // valeurs dérivées (placeholders)
+  const enchantModeForEdit = 'etat';
+  const enchantEtatForEdit = s?.enchantEtatId
+    || ((s?.enchantMode || 'etat') === 'dmg' ? 'empowered'
+      : (s?.enchantMode === 'deplacement' ? 'swift'
+        : (s?.enchantMode === 'toucher' ? 'guided' : '')));
 
   // Le rendu réel des runes est fait par _renderRunesSection (module-level),
   // appelé au mount et après chaque incrément/décrément pour rester synchro.
@@ -1325,48 +1330,15 @@ export async function openSortModal(idx, s) {
     <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
       <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours</span></div>
 
-      <!-- Ce que l'enchantement booste sur l'allié -->
-      <div class="form-group">
-        <label>L'enchantement booste</label>
-        <div class="cs-slot-grid" style="grid-template-columns:repeat(3,1fr)">
-          ${[
-            { v:'dmg',         lbl:'⚔️ Dégâts' },
-            { v:'toucher',     lbl:'🎯 Toucher' },
-            { v:'deplacement', lbl:'👢 Déplacement' },
-            { v:'etat',        lbl:'✨ État' },
-          ].map(o => `<button type="button" id="s-enchant-mode-${o.v}"
-            data-action="_selectEnchantMode" data-val="${o.v}"
-            class="cs-slot-btn ${(s?.enchantMode||'dmg')===o.v?'selected':''}">${o.lbl}</button>`).join('')}
-        </div>
-        <input type="hidden" id="s-enchant-mode" value="${s?.enchantMode||'dmg'}">
-      </div>
-
-      <!-- Mode Dégâts : formule des dégâts bonus sur l'arme alliée -->
-      <div id="s-enchant-dmg-block" style="${(s?.enchantMode||'dmg')==='dmg'?'':'display:none'}">
-        ${_autoValHtml({
-          fieldId: 's-enchant-degats',
-          label: '⚔️ Dégâts bonus sur l\'arme enchantée',
-          autoValue:  _calcEnchantDegats(s || {}),
-          autoSource: _autoSourceEnchantDeg(s || {}),
-          currentValue: s?.enchantDegats,
-          placeholder: 'ex : +1d6 Feu, +2 Foudre, 1d8…',
-        })}
-      </div>
-
-      <!-- Modes Toucher / Déplacement : un bonus chiffré sur l'allié -->
-      <div id="s-enchant-bonus-block" class="form-group" style="${['toucher','deplacement'].includes(s?.enchantMode)?'':'display:none'}">
-        <label id="s-enchant-bonus-label">Bonus</label>
-        <input class="input-field" type="number" id="s-enchant-bonus" value="${s?.enchantBonus??''}" placeholder="auto (2 + Puissance)">
-        <div id="s-enchant-bonus-hint" style="font-size:.7rem;color:var(--text-dim);margin-top:.25rem">Laisse vide = auto. Chaque rune Puissance augmente le bonus de 1.</div>
-      </div>
+      <input type="hidden" id="s-enchant-mode" value="${enchantModeForEdit}">
 
       <!-- Mode État : applique un état choisi à l'allié ciblé -->
-      <div id="s-enchant-etat-block" class="form-group" style="${s?.enchantMode==='etat'?'':'display:none'}">
+      <div id="s-enchant-etat-block" class="form-group">
         <label>État appliqué à l'allié <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— buff/bénédiction ; durée selon l'état</span></label>
         <select class="input-field" id="s-enchant-etat">
           <option value="">— Aucun (effet libre uniquement) —</option>
         </select>
-        <input type="hidden" id="s-enchant-etat-saved" value="${s?.enchantEtatId||''}">
+        <input type="hidden" id="s-enchant-etat-saved" value="${enchantEtatForEdit}">
       </div>
     </div>
 

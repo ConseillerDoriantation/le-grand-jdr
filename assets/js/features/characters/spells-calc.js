@@ -1017,11 +1017,12 @@ export function _buildSortResume(s, c) {
       const etat = s.enchantEtatId ? lib.find(c2 => c2.id === s.enchantEtatId) : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       const nbP = runes.filter(r => r === 'Puissance').length;
+      const nbAmp = runes.filter(r => r === 'Amplification').length;
       const eff = etat?.effects || {};
       if (eff.dmgDealtBonus) detailParts.push(`bonus dégâts ${(1 + nbP)}d4+2`);
       if (eff.movementBonus != null) {
         const base = Number.isFinite(parseInt(eff.movementBonus)) ? parseInt(eff.movementBonus) : 0;
-        const bonus = base + nbP;
+        const bonus = base + nbAmp;
         detailParts.push(`+${bonus} case${bonus > 1 ? 's' : ''} de déplacement`);
       }
       if (eff.attackBy === 'adv') detailParts.push('avantage aux attaques');
