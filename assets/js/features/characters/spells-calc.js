@@ -192,7 +192,7 @@ export const SORT_COMBOS = [
     describe: (counts) => {
       const w = _ampLength(counts.Amplification);
       const h = _ampLength(counts.Dispersion);
-      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${w}×${h}m`;
+      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${w}×${h} cases`;
     },
   },
   {
@@ -208,7 +208,7 @@ export const SORT_COMBOS = [
         const dmg = statShort(arm.statDegats)  || arm.statDegats;
         const statStr = (arm.statToucher === arm.statDegats) ? tch : `Touche:${tch} / Dégâts:${dmg}`;
         const puissBonus = nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : '';
-        return `${arm.weapon} · ${arm.degats}${puissBonus} · ${statStr} · portée ${arm.portee}m · 2 tours par défaut${arm.note ? ` · ${arm.note}` : ''}`;
+        return `${arm.weapon} · ${arm.degats}${puissBonus} · ${statStr} · portée ${arm.portee} cases · 2 tours par défaut${arm.note ? ` · ${arm.note}` : ''}`;
       }
       return `Arme générique 1d8${nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : ''} · 2 tours par défaut · ⚠️ matrice Armes invoquées vide pour cet élément`;
     },
@@ -220,7 +220,7 @@ export const SORT_COMBOS = [
     detect: (counts, s) => counts.Enchantement > 0 && counts.Amplification > 0 && (s?.enchantSlot || 'arme') === 'arme',
     describe: (counts) => {
       const len = _ampLength(counts.Amplification);
-      return `Enchantement (Arme) + Amplification ×${counts.Amplification} · portée d'attaque de l'arme enchantée +${len}m (au lieu d'une zone)`;
+      return `Enchantement (Arme) + Amplification ×${counts.Amplification} · portée d'attaque de l'arme enchantée +${len} cases (au lieu d'une zone)`;
     },
   },
   {
@@ -235,7 +235,7 @@ export const SORT_COMBOS = [
       const nbDisp = counts.Dispersion || 0;
       const nbSent = nbDisp > 0 ? 1 + nbDisp : 1;
       const sentStr = nbSent > 1 ? `${nbSent} sentinelles stationnaires (placement libre dans la portée)` : 'sentinelle stationnaire';
-      return `Affliction + Invocation · ${sentStr} · ${st.hp} PV · CA ${st.ca} · attaque ${st.dmg} · portée ${st.portee}m · 2 tours par défaut`;
+      return `Affliction + Invocation · ${sentStr} · ${st.hp} PV · CA ${st.ca} · attaque ${st.dmg} · portée ${st.portee} cases · 2 tours par défaut`;
     },
   },
   {
@@ -580,7 +580,7 @@ export function _autoSourceDuree(s) {
 
 
 /** Longueur de zone produite par N runes (Amplification OU Dispersion en combo).
- *  Chaque rune ajoute +3m.
+ *  Chaque rune ajoute +3 cases.
  *  ×1=3, ×2=6, ×3=9, ×4=12…
  */
 export function _ampLength(nbAmp) { return nbAmp >= 1 ? 3 * nbAmp : 0; }
@@ -588,8 +588,8 @@ export function _ampLength(nbAmp) { return nbAmp >= 1 ? 3 * nbAmp : 0; }
 /** Zone calculée :
  *  - Si zoneW/H manuels saisis → ils priment (override MJ)
  *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
- *      Amplification ×N → longueur = 3N m
- *      Combo avec Dispersion ×M → largeur = 3M m
+ *      Amplification ×N → longueur = 3N cases
+ *      Combo avec Dispersion ×M → largeur = 3M cases
  *      Defaut combo Amp + Disp = 3 × 3
  *  - Source: 'manual' | 'runes' | null
  */
@@ -613,8 +613,8 @@ export function _calcSortZone(s) {
 }
 
 /** Déplacement (rune Amplification en mode 'deplacement').
- *  Portée dérivée du nombre de runes Amplification : 1 à _ampLength(N) m
- *  (1 rune → 1-3m, 2 runes → 1-7m…). Sous-modes : 'self' | 'push' | 'pull'.
+ *  Portée dérivée du nombre de runes Amplification : 1 à _ampLength(N) cases
+ *  (1 rune → 1-3 cases, 2 runes → 1-6 cases…). Sous-modes : 'self' | 'push' | 'pull'.
  *  Retourne { mode, min:1, max } ou null.
  *  Fallback legacy : ancien déplacement autonome { mode, distance } sans ampMode.
  */
@@ -654,15 +654,15 @@ export function _calcLaceration(s) {
   return { runes: nb, reduction: nb, max: 2, maxElite: 4 };
 }
 
-/** Chance : réduction RC critique
- *  ×1 → RC 19-20 (-1) · ×N → RC (20-N)-20
+/** Chance : réduction RC critique, plafonnée à 17-20.
+ *  ×1 → RC 19-20 · ×2 → RC 18-20 · ×3+ → RC 17-20
  *  Bonus : le dé de critique ajouté est aussi max
  */
 function _calcChance(s) {
   const nb = (s.runes||[]).filter(r => r === 'Chance').length;
   if (!nb) return null;
-  const reduction = nb;
-  return { runes: nb, rc: 20 - reduction, reduction };
+  const reduction = Math.min(nb, 3);
+  return { runes: nb, rc: 20 - reduction, reduction, capped: nb > 3 };
 }
 
 /** Drain : pourcentage des dégâts soigné au lanceur.
@@ -676,20 +676,20 @@ export function _calcDrainPct(s) {
   return 0.25 + 0.25 * nbProt;
 }
 
-/** DD du jet de Sagesse de concentration : 11 + 2×(n-1).
- *  1 rune Concentration = DD 11 · 2 = 13 · 3 = 15 · etc.
+/** DD du jet de Sagesse de concentration : 11 - 2×(n-1), minimum 5.
+ *  1 rune Concentration = DD 11 · 2 = 9 · 3 = 7 · 4+ = 5.
  */
 function _calcConcentrationDD(s) {
   const nb = (s?.runes || []).filter(r => r === 'Concentration').length;
   if (!nb) return null;
-  return 11 + 2 * (nb - 1);
+  return Math.max(5, 11 - 2 * (nb - 1));
 }
 
 /** Stats propres de la Sentinelle (combo Affliction + Invocation).
  *  - Dégâts : 1d4 base + Puissance
  *  - PV     : 10 + 5×nbProt
  *  - CA     : 10 + 2×nbProt
- *  - Portée : 1m (Manhattan) sans Amp · sinon 3N mètres
+ *  - Portée : 1 case (Manhattan) sans Amp · sinon 3N cases
  */
 function _calcSentinelStats(s) {
   const runes = s?.runes || [];
@@ -700,7 +700,7 @@ function _calcSentinelStats(s) {
   const dmg = `${nbDice}d4`;
   const hp = 10 + 5 * nbProt;
   const ca = 10 + 2 * nbProt;
-  // Portée : 1m sans Amp, sinon longueur Amp (réutilise _ampLength)
+  // Portée : 1 case sans Amp, sinon longueur Amp (réutilise _ampLength)
   const portee = nbAmp === 0 ? 1 : _ampLength(nbAmp);
   return { dmg, hp, ca, portee, nbP, nbProt, nbAmp };
 }
@@ -815,11 +815,11 @@ export function _buildSortResume(s, c) {
   const concDD = _calcConcentrationDD(s);
   lines.push({ icon: '', label: `${actionStr} · ${natureStr}`, detail: concDD ? `JS Sagesse DD ${concDD} si dégâts reçus · jusqu'à 10 tours` : '' });
 
-  // Portée du sort = portée de l'arme principale équipée (ou Poings = 1m)
+  // Portée du sort = portée de l'arme principale équipée (ou Poings = 1 case)
   // Sauf si combo Allonge magique : portée étendue (voir ligne dédiée plus bas)
   const mainWp = getMainWeapon(c);
   const wpPortee = parseInt(mainWp.portee) || 1;
-  lines.push({ icon:'📏', label:`Portée ${wpPortee}m`, detail: mainWp.isDefault ? 'Poings (mains nues)' : `Arme : ${mainWp.nom}` });
+  lines.push({ icon:'📏', label:`Portée ${wpPortee} cases`, detail: mainWp.isDefault ? 'Poings (mains nues)' : `Arme : ${mainWp.nom}` });
 
   // Combos détectés (centralisés dans SORT_COMBOS, MJ peut activer/désactiver)
   const nbPuiss   = runes.filter(r => r === 'Puissance').length;
@@ -927,7 +927,7 @@ export function _buildSortResume(s, c) {
       if (zoneCalc.amp > 0 && zoneCalc.disp > 0) {
         zoneDetail = `Combo Amp ×${zoneCalc.amp} + Disp ×${zoneCalc.disp} · zone élargie`;
       } else {
-        zoneDetail = `Amplification ×${zoneCalc.amp} · ${zoneCalc.w}m`;
+        zoneDetail = `Amplification ×${zoneCalc.amp} · ${zoneCalc.w} cases`;
       }
     } else {
       zoneDetail = 'Zone manuelle (override MJ)';
@@ -935,16 +935,16 @@ export function _buildSortResume(s, c) {
     // Sort de terrain : Amplification seule (sans Puissance ni Protection) → 2 tours par défaut
     const isTerrain = zoneCalc.source === 'runes' && nbPuiss === 0 && nbProt === 0;
     if (isTerrain) zoneDetail += ' · 2 tours par défaut (sort de terrain)';
-    lines.push({ icon:'📐', label:`Zone ${zoneCalc.w}×${zoneCalc.h}m`, detail: zoneDetail });
+    lines.push({ icon:'📐', label:`Zone ${zoneCalc.w}×${zoneCalc.h} cases`, detail: zoneDetail });
   } else if (zoneCalc && comboIds.has('allonge_magique')) {
     // Allonge magique : la longueur Amp devient la portée de l'arme enchantée
-    lines.push({ icon:'🏹', label:`Portée d'arme +${zoneCalc.w}m`, detail:`Allonge magique active · l'arme enchantée porte à ${zoneCalc.w}m supplémentaires` });
+    lines.push({ icon:'🏹', label:`Portée d'arme +${zoneCalc.w} cases`, detail:`Allonge magique active · l'arme enchantée porte à ${zoneCalc.w} cases supplémentaires` });
   }
 
   // Déplacement (soi / pousse / attire) — portée 1 à max (legacy : distance fixe)
   const depl = _calcSortDeplacement(s);
   if (depl) {
-    const range = depl.max != null ? `1 à ${depl.max}m` : `${depl.distance}m`;
+    const range = depl.max != null ? `1 à ${depl.max} cases` : `${depl.distance} cases`;
     const D = {
       self: { icon:'🏃', label:`Déplacement — soi-même · ${range}` },
       push: { icon:'↗',  label:`Déplacement — pousse la cible · ${range}` },
@@ -987,7 +987,7 @@ export function _buildSortResume(s, c) {
   // Chance
   const chc = _calcChance(s);
   if (chc) {
-    lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:'Critique aussi max' });
+    lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:`Critique aussi max${chc.capped ? ' · plafond atteint' : ''}` });
   }
 
   // ── Enchantement (mode Dégâts ou État) ──────────────────────────────
@@ -1072,7 +1072,7 @@ export function _buildSortResume(s, c) {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
     const nbSent = nbDisp > 0 ? 1 + nbDisp : 1;
     const countStr = nbSent > 1 ? ` · ×${nbSent} sentinelles` : '';
-    lines.push({ icon:'🪤', label:`Sentinelle · ${st.hp} PV · CA ${st.ca}${countStr}`, detail:`Attaque ${st.dmg} · portée ${st.portee}m · stationnaire · 2 tours par défaut` });
+    lines.push({ icon:'🪤', label:`Sentinelle · ${st.hp} PV · CA ${st.ca}${countStr}`, detail:`Attaque ${st.dmg} · portée ${st.portee} cases · stationnaire · 2 tours par défaut` });
   }
 
   // Concentration (rappel JS si pas déjà mentionné)

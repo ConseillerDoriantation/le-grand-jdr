@@ -777,15 +777,15 @@ let _openSortIdx = -1;
 const RUNE_META = [
   { nom:'Puissance',     icon:'⚔️', color:'#ef4444', family:'puissance', effet:'+1 dé de dégâts' },
   { nom:'Protection',    icon:'💚', color:'#22c38e', family:'puissance', effet:'+1d4 soin OU +2 CA (2 tours)' },
-  { nom:'Amplification', icon:'🌐', color:'#4f8cff', family:'portee',    effet:'Zone +3 mètres' },
-  { nom:'Dispersion',    icon:'🎯', color:'#a855f7', family:'portee',    effet:'Touche plusieurs cibles (1 → 2 → 4 → 6…)' },
+  { nom:'Amplification', icon:'🌐', color:'#4f8cff', family:'portee',    effet:'Zone +3 cases' },
+  { nom:'Dispersion',    icon:'🎯', color:'#a855f7', family:'portee',    effet:'Touche plusieurs cibles (1 → 2 → 3 → 4…)' },
   { nom:'Enchantement',  icon:'✨', color:'#e8b84b', family:'soutien',   effet:'Booste un allié · 2 tours' },
   { nom:'Affliction',    icon:'💀', color:'#8b5cf6', family:'soutien',   effet:'Élément + état sur arme ennemie · 2 tours' },
   { nom:'Invocation',    icon:'🐾', color:'#a16207', family:'soutien',   effet:'Créature liée · 10 PV, CA 10' },
-  { nom:'Chance',        icon:'🍀', color:'#facc15', family:'soutien',   effet:'RC 19–20 (critique max)' },
+  { nom:'Chance',        icon:'🍀', color:'#facc15', family:'soutien',   effet:'RC 19–20, jusqu’à 17–20 max' },
   { nom:'Durée',         icon:'⏱️', color:'#06b6d4', family:'meta',      effet:'+2 tours' },
   { nom:'Concentration', icon:'🧠', color:'#6366f1', family:'meta',      effet:'Maintien hors tour · JS Sa DD 11 si touché' },
-  { nom:'Déclenchement', icon:'⚡', color:'#f97316', family:'meta',      effet:'Transforme le sort en Réaction ou Action Bonus' },
+  { nom:'Déclenchement', icon:'⚡', color:'#f97316', family:'meta',      effet:'Transforme le sort en Réaction ou Action Bonus · non cumulable' },
 ];
 
 const ACTION_RUNE = 'Déclenchement';
@@ -868,10 +868,10 @@ function _runeLiveContribution(nom, counts) {
     case 'Amplification': {
       const len = _ampLength(cnt);
       const nbDisp = counts['Dispersion'] || 0;
-      const width  = 1 + nbDisp;
-      const combo  = nbDisp > 0 ? ` · combo Dispersion → ${len}×${width}m` : '';
+      const width  = nbDisp > 0 ? _ampLength(nbDisp) : 1;
+      const combo  = nbDisp > 0 ? ` · combo Dispersion → ${len}×${width} cases` : '';
       return {
-        main:  `Zone ${len}×1m${combo}`,
+        main:  `Zone ${len}×1 cases${combo}`,
       };
     }
     case 'Dispersion': {
@@ -894,9 +894,11 @@ function _runeLiveContribution(nom, counts) {
       };
     }
     case 'Chance': {
-      const rcLow = 20 - cnt;
+      const rawRc = 20 - cnt;
+      const rcLow = Math.max(17, rawRc);
+      const cap = rawRc < 17 ? ' · plafond atteint' : '';
       return {
-        main:  `Critique RC ${rcLow}–20 · dé de crit max`,
+        main:  `Critique RC ${rcLow}–20 · dé de crit max${cap}`,
       };
     }
     case 'Durée': {
@@ -1448,7 +1450,7 @@ export async function openSortModal(idx, s) {
         <label>🌐 Rune Amplification — effet</label>
         <div style="display:flex;gap:.4rem">
           ${[
-            { v:'zone',        label:'📐 Zone',        color:'#b47fff', detail:'Zone alignée · 3N m' },
+            { v:'zone',        label:'📐 Zone',        color:'#b47fff', detail:'Zone alignée · 3N cases' },
             { v:'deplacement', label:'↔ Déplacement', color:'#e8b84b', detail:'Soi/cible · sans dégâts' },
           ].map(opt => {
             const sel = ampMode === opt.v;
@@ -1466,7 +1468,7 @@ export async function openSortModal(idx, s) {
 
       <div id="s-amp-zone-section" style="${ampMode==='zone'?'':'display:none'}">
         <div style="font-size:.74rem;color:var(--text-dim);padding:.1rem .1rem .3rem">
-          📐 Zone calculée depuis les runes (longueur 3N m, largeur via Dispersion).
+          📐 Zone calculée depuis les runes (longueur 3N cases, largeur via Dispersion).
         </div>
       </div>
 
@@ -1476,7 +1478,7 @@ export async function openSortModal(idx, s) {
           <div style="display:flex;gap:.25rem;flex:1">${deplBtnsHtml}</div>
         </div>
         <div style="font-size:.74rem;color:var(--text-dim);padding:.25rem .1rem">
-          Portée : <b id="s-amp-depl-range" style="color:var(--text)">1 à ${_ampLength(nbAmp) || 0} m</b>
+          Portée : <b id="s-amp-depl-range" style="color:var(--text)">1 à ${_ampLength(nbAmp) || 0} cases</b>
           <span> · selon le nombre de runes Amplification</span>
         </div>
         <div style="font-size:.7rem;color:#e8b84b;padding:0 .1rem .2rem">⚠ Les sorts de déplacement n'infligent pas de dégâts.</div>
@@ -2344,7 +2346,7 @@ function _refreshRunesSection(changedNom) {
   }
   // Portée de déplacement : dépend du nombre de runes Amplification.
   const rangeEl = document.getElementById('s-amp-depl-range');
-  if (rangeEl) rangeEl.textContent = `1 à ${_ampLength(_runeCountsEdit['Amplification'] || 0) || 0} m`;
+  if (rangeEl) rangeEl.textContent = `1 à ${_ampLength(_runeCountsEdit['Amplification'] || 0) || 0} cases`;
   // Section Durée de base : visible selon le contexte
   const dureeSec = document.getElementById('s-duree-base-section');
   if (dureeSec) {
@@ -2662,7 +2664,7 @@ function _buildSortFromDOM() {
 
 /** Rafraîchit la preview live dans l'éditeur de sort */
 /** Perso placeholder neutre pour la preview en contexte item (pas de perso actif).
- *  Stats 10 partout (mod 0), Poings (1d6 Phys, portée 1m), pas d'équipement.
+ *  Stats 10 partout (mod 0), Poings (1d6 Phys, portée 1 case), pas d'équipement.
  *  Permet à _buildSortResume / _calcSortDegats / etc. de calculer un aperçu générique. */
 function _itemPreviewPlaceholderChar() {
   return {
