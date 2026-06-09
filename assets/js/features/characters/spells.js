@@ -205,7 +205,7 @@ export function renderCharDeck(c, canEdit) {
   });
   const TYPE_META = {
     offensif:   { lbl: '⚔️ Off',  cls: 'off' },
-    defensif:   { lbl: '🛡️ Def',  cls: 'def' },
+    defensif:   { lbl: '🛡️ Soutien',  cls: 'def' },
     utilitaire: { lbl: '🔧 Util.', cls: 'util' },
   };
   // Runes ordonnées comme RUNE_META, filtrées sur celles utilisées par le perso.
@@ -1097,7 +1097,7 @@ export async function openSortModal(idx, s) {
 
   const TYPE_CFG = [
     { v:'offensif',   label:'⚔️ Offensif',   color:'#ff6b6b' },
-    { v:'defensif',   label:'🛡️ Défensif',   color:'#22c38e' },
+    { v:'defensif',   label:'🛡️ Soutien',   color:'#22c38e' },
     { v:'utilitaire', label:'✨ Utilitaire', color:'#b47fff' },
   ];
   const typeBtnsHtml = TYPE_CFG.map(t => {
@@ -2288,7 +2288,7 @@ function _selectProtMode(mode) {
   const caSec   = document.getElementById('s-ca-section');
   if (hidden)  hidden.value = mode;
   if (caSec)   caSec.style.display   = mode === 'ca'   ? '' : 'none';
-  // La section Soin a maintenant sa propre logique (type Défensif OU Protection mode soin)
+  // La section Soin a maintenant sa propre logique (type Soutien OU Protection mode soin)
   _refreshConditionalSections();
   ['ca','soin'].forEach(v => {
     const btn = document.getElementById(`s-prot-${v}`);
@@ -2330,13 +2330,10 @@ export function runeIncrement(nom) {
   }
   const prevCnt = _runeCountsEdit[nom] || 0;
   _runeCountsEdit[nom] = prevCnt + 1;
-  // Intelligence : la 1ère Puissance ajoute Offensif · la 1ère Protection ajoute Défensif
-  // (l'utilisateur peut décocher ensuite, on ne force pas)
+  // Intelligence : la 1ère Protection suggère la branche Soutien.
+  // Puissance ne coche pas Offensif : elle peut renforcer un enchantement, un DoT,
+  // une invocation, etc. sans impliquer des dégâts directs au cast.
   if (prevCnt === 0 && _sortTypesEdit) {
-    if (nom === 'Puissance'  && !_sortTypesEdit.has('offensif')) {
-      _sortTypesEdit.add('offensif');
-      _applyTypeChange();
-    }
     if (nom === 'Protection' && !_sortTypesEdit.has('defensif')) {
       _sortTypesEdit.add('defensif');
       _applyTypeChange();
@@ -2520,7 +2517,7 @@ const SPELL_ICONS = [
   '🔥','💧','🌪','🌍','⚡','❄️','☀️','🌙','⭐','✨',
   // Offensifs
   '⚔️','🗡️','🏹','💥','💣','☄️','🌋','🌊','🌩','🩸',
-  // Défensifs / soin
+  // Soutien / soin
   '🛡️','🛡','💚','💗','❤️‍🩹','✝️','🪽','🕊','🌿','🍀',
   // Contrôle / état
   '💀','☠️','🕸','🪨','🪤','🧊','🔇','😵','🥶','🥵',
