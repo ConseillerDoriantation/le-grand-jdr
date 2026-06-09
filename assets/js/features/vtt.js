@@ -5549,11 +5549,6 @@ async function _vttRollAttack() {
       await updateDoc(_tokRef(srcId), { buffs: [...existing, luckBuff] }).catch(() => {});
     }
 
-    // ── Combo Régénération : Protection + Affliction → soin sur la durée allié ──
-    if (opt.mods?.regeneration) {
-      await _vttApplyRegeneration(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
-    }
-
     // ── Combo Arme invoquée : remplace temporairement l'arme principale ───
     // Le lanceur "manifeste" une arme magique (selon la matrice MJ de l'élément)
     // pour la durée du sort (2 tours par défaut). Pas de token séparé : le PJ utilise
@@ -5709,6 +5704,13 @@ async function _vttRollAttack() {
           createdAt: serverTimestamp(),
         }).catch(()=>{});
       }
+
+      // Le proc immédiat de Régénération doit apparaître après l'annonce du sort
+      // dans le chat, comme le DoT d'affliction.
+      if (opt.mods?.regeneration) {
+        await _vttApplyRegeneration(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+      }
+
       // Notif post-cast : neutre pour les afflictions (les notifs JS et effet
       // arrivent juste après dans _vttApplyAfflictions et indiquent le résultat)
       if (opt.isAffliction) {
